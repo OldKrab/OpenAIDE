@@ -46,6 +46,9 @@ Build:
 npm run build
 ```
 
+Pull requests are validated by GitHub Actions. Version tags publish release
+artifacts and a container image according to the [release policy](docs/release-policy.md).
+
 Launch the extension development host:
 
 ```sh

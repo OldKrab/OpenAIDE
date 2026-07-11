@@ -1997,15 +1997,10 @@ After the top-level module interface is accepted, grill these module interfaces 
 
 ## Current Next Step
 
-The initial A0-A9 architecture slices are complete. The active
-`.workflow/finish-refactor-plan/` workflow is in completion-audit mode, not
-open-ended next-packet selection. Historical "Proposed next slice", "Accepted
-next slice", and "ready for review" notes below are retained as implementation
-history unless a fresh audit names a concrete current gap.
-
-If the completion audit passes, mark the refactor-plan goal complete. If it
-fails, create exactly one concrete follow-up packet for the failing requirement
-and implement only that packet.
+The initial A0-A9 architecture slices and their completion audit are complete.
+Historical "Proposed next slice", "Accepted next slice", and "ready for review"
+notes below are retained as implementation history unless a fresh audit names a
+concrete current gap.
 
 ## Completed Slice Contract: A4 VS Code Reveal File Resolve/Open Path
 

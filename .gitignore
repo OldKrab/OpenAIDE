@@ -10,6 +10,8 @@ target/
 test-results/
 .tmp-*
 tmp-*.spec.ts
+tmp-*.spec.js
+.workflow/
 .openaide-web-dev*/
 **/.openaide-web-dev*/
 .openaide-web-target*/
