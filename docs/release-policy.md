@@ -11,7 +11,7 @@ promoted to production.
 
 ## Merge requirements
 
-- Changes reach `main` through reviewed pull requests.
+- Changes reach `master` through reviewed pull requests.
 - The `TypeScript and protocol checks`, `Rust format, lint, and tests`,
   `JavaScript and TypeScript tests`, and `Production build` checks are required.
 - Generated App Server Protocol bindings must be committed and current.
@@ -19,7 +19,7 @@ promoted to production.
 - Do not put credentials in repository or workflow files. Use GitHub environments
   and repository or organization secrets.
 
-Configure the `main` ruleset in GitHub after the first CI run, when the required
+Configure the `master` ruleset in GitHub after the first CI run, when the required
 check names become selectable.
 
 ## Creating a release
@@ -27,7 +27,7 @@ check names become selectable.
 1. Update every public package version represented by the release and commit the
    change through a pull request. The root `package.json` version is authoritative
    for the release tag.
-2. Create and push an annotated SemVer tag from the merged `main` commit, such as
+2. Create and push an annotated SemVer tag from the merged `master` commit, such as
    `v0.0.1-alpha.1` for a prerelease or `v0.0.1` for a stable release.
 3. The release workflow validates the version, repeats tests, builds release-mode
    artifacts, publishes a versioned container, and creates a GitHub Release.
