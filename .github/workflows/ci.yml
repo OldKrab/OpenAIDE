@@ -51,6 +51,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run test:gate
+      - run: npm run build:typescript-deps
       - run: npm run test --workspaces --if-present
 
   build:

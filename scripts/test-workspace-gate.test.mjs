@@ -17,6 +17,7 @@ const maintainedWorkspaceNames = [
 test("default npm test runs the backend and every maintained workspace exactly once", () => {
   const rootTest = rootPackage.scripts.test;
   assert.equal(occurrences(rootTest, "npm run backend:test"), 1);
+  assert.equal(occurrences(rootTest, "npm run build:typescript-deps"), 1);
   assert.equal(occurrences(rootTest, "npm run test --workspaces --if-present"), 1);
   assert.doesNotMatch(rootTest, /--workspace(?:=|\s)/);
 
@@ -32,6 +33,7 @@ test("default npm test runs the backend and every maintained workspace exactly o
 
 test("default npm check includes every workspace that exposes a check script", () => {
   const rootCheck = rootPackage.scripts.check;
+  assert.equal(occurrences(rootCheck, "npm run build:typescript-deps"), 1);
   assert.equal(occurrences(rootCheck, "npm run check --workspaces --if-present"), 1);
 
   const workspacePackages = rootPackage.workspaces.map((workspace) => packageJson(`${workspace}/package.json`));
@@ -45,6 +47,15 @@ test("default npm check includes every workspace that exposes a check script", (
     "openaide-frontend",
     "openaide-vscode-extension",
   ]);
+});
+
+test("the local CI command runs every required validation class", () => {
+  const ci = rootPackage.scripts.ci;
+  assert.match(ci, /cargo fmt --all --check/);
+  assert.match(ci, /cargo clippy --workspace --all-targets -- -D warnings/);
+  assert.match(ci, /npm run check/);
+  assert.match(ci, /npm run test/);
+  assert.match(ci, /npm run build/);
 });
 
 function packageJson(relativePath) {
