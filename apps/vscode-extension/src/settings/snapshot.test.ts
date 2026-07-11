@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   DEVELOPER_SETTINGS_UNLOCK_KEY,
   developerSettingsVisible,
@@ -6,6 +6,11 @@ import {
 } from "./snapshot";
 
 describe("developer settings visibility", () => {
+  beforeEach(() => {
+    vi.stubEnv("OPENAIDE_DEVELOPER_SETTINGS", "");
+    vi.stubEnv("OPENAIDE_ACP_TRACE", "");
+  });
+
   afterEach(() => {
     vi.unstubAllEnvs();
   });

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Dispatch } from "react";
+import { ArrowDown } from "lucide-react";
 import type { AppPreferencesRecord, ConfigOptionsCatalog, ElicitationResponse, PermissionDecision, TaskSnapshot, TaskSummary } from "@openaide/app-shell-contracts";
 import type { AppAction } from "../state/appReducer";
 import { renderedChat } from "../state/chatPaging";
@@ -99,7 +100,7 @@ export function TaskView({
   onCancel: () => void;
   fileBrowser?: TaskFileBrowserCallbacks;
   onLoadChatPage: (beforeCursor: string) => void;
-  onLoadToolDetail: (artifactId: string) => void;
+  onLoadToolDetail: (artifactId: string, refresh?: boolean) => void;
   onPermissionRespond: (
     requestId: string,
     optionId: string,
@@ -255,11 +256,13 @@ export function TaskView({
           </div>
           {chatScroll.showJumpToLatest ? (
             <button
+              aria-label="Jump to latest message"
               className="jump-to-latest"
               onClick={chatScroll.jumpToLatest}
+              title="Jump to latest"
               type="button"
             >
-              Jump to latest
+              <ArrowDown aria-hidden="true" size={14} />
             </button>
           ) : null}
         </div>
@@ -295,6 +298,8 @@ export function TaskView({
           selection={taskSelection}
           submitShortcut={submitShortcut}
           submitDisabled={!canSend}
+          submitPending={inputPending}
+          submitPendingLabel="Sending message"
           submitRequiresText={!snapshot.send_capability.attachment_only}
           showAgentSelector={false}
           showIsolationSelector={false}

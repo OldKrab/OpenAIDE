@@ -12,7 +12,7 @@ OpenAIDE runs real ACP-compatible agents; it does not silently substitute a mock
 
 ## Install an alpha release
 
-Download files from the repository's [GitHub Releases](https://github.com/OldKrab/OpenAIDE/releases) page. Alpha versions are marked as prereleases.
+Download files from the repository's GitHub Releases page. Alpha versions are marked as prereleases.
 
 ### VS Code extension
 
@@ -34,7 +34,7 @@ Codex and OpenCode must be authenticated separately. OpenAIDE first uses compati
 - `openaide-app-server-linux-x64-VERSION` is the standalone Linux x64 App Server binary for shell and protocol integration testing. It is not a complete graphical application by itself.
 - `openaide-web-assets-VERSION.tar.gz` contains static shared Frontend assets for packaging and integration. It is not a standalone Web App server.
 - `SHA256SUMS` contains checksums for the downloadable files.
-- `ghcr.io/oldkrab/openaide:VERSION` is the Linux container image containing the local Web App, App Server, and Codex ACP adapter. The container path is experimental and requires explicit local state, workspace, authentication, and host configuration.
+- The versioned GitHub Container Registry image contains the local Web App, App Server, and Codex ACP adapter. Its exact image name is shown on the release page. The container path is experimental and requires explicit local state, workspace, authentication, and host configuration.
 
 Verify a downloaded artifact before installing it:
 

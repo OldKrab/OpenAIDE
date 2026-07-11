@@ -47,20 +47,14 @@ export function useNewTaskPreparation({
   const currentPreparationKey = useRef(preparationKey);
   const discardedTaskIds = useRef(new Set<string>());
   const failedPreparationKey = useRef<string | undefined>(undefined);
-  const latestRequest = useRef(backendConnection?.request);
-  const latestSubmitting = useRef(state.newTask.submitting);
   const ownedPreparedTaskId = useRef<TaskId | undefined>(undefined);
   currentPreparationKey.current = preparationKey;
-  latestRequest.current = backendConnection?.request;
-  latestSubmitting.current = state.newTask.submitting;
   const isNewTaskRoute = bootstrap.surface === "task" && !bootstrap.taskId;
+  const previousBootstrap = useRef(bootstrap);
+  const enteredNewTaskRoute = isNewTaskRoute && previousBootstrap.current !== bootstrap;
+  previousBootstrap.current = bootstrap;
   if (!isNewTaskRoute) completedPreparationKey.current = undefined;
-  if (
-    isNewTaskRoute
-    && ownedPreparedTaskId.current
-    && !state.snapshot
-    && !state.newTask.submitting
-  ) {
+  if (enteredNewTaskRoute) {
     ownedPreparedTaskId.current = undefined;
     pendingPreparation.current = undefined;
     completedPreparationKey.current = undefined;
@@ -87,6 +81,7 @@ export function useNewTaskPreparation({
       || !backendReady
       || !backendConnection?.request
       || !preparationKey
+      || state.snapshot?.task.has_messages
       || preparedTaskMatches
       || completedPreparationKey.current === preparationKey
       || failedPreparationKey.current === preparationKey
@@ -173,39 +168,6 @@ export function useNewTaskPreparation({
     startAttempt,
   ]);
 
-  useEffect(() => {
-    if (bootstrap.surface === "task" && !bootstrap.taskId) return;
-    const taskId = ownedPreparedTaskId.current;
-    if (!taskId) return;
-    ownedPreparedTaskId.current = undefined;
-    pendingPreparation.current = undefined;
-    if (state.newTask.submitting || !backendConnection?.request) return;
-
-    void backendConnection.request(TASK_DISCARD, { taskId }).then(() => {
-      discardedTaskIds.current.add(taskId);
-      dispatch({ type: "task:list:remove", taskId });
-    }).catch(() => {
-      // Navigation remains immediate; the App Server owns eventual empty-task cleanup.
-    });
-  }, [
-    backendConnection,
-    bootstrap.surface,
-    bootstrap.taskId,
-    dispatch,
-    state.newTask.submitting,
-  ]);
-
-  useEffect(() => () => {
-    const taskId = ownedPreparedTaskId.current;
-    const request = latestRequest.current;
-    if (!taskId || latestSubmitting.current || !request) return;
-    ownedPreparedTaskId.current = undefined;
-    pendingPreparation.current = undefined;
-    discardedTaskIds.current.add(taskId);
-    void request(TASK_DISCARD, { taskId }).catch(() => {
-      // Disconnect and abandoned-task cleanup remain authoritative if unload wins.
-    });
-  }, [pendingPreparation]);
 }
 
 class SupersededPreparation extends Error {}

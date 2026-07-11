@@ -216,6 +216,9 @@ async fn initialize_shared_process_connection(
     }
 }
 
+// Session startup crosses the shared process, replay, prompt, and trace seams;
+// explicit inputs make those ownership boundaries visible during orchestration.
+#[allow(clippy::too_many_arguments)]
 async fn open_on_shared_process(
     connection: &ConnectionTo<Agent>,
     initialize: InitializeResponse,

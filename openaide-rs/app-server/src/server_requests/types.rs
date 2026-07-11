@@ -20,6 +20,9 @@ pub struct ServerRequestDelivery {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+// The outcome crosses the broker boundary infrequently and preserves a direct
+// snapshot value; boxing would spread allocation concerns into every caller.
+#[allow(clippy::large_enum_variant)]
 pub enum OpenRequestOutcome {
     Opened {
         snapshot: openaide_app_server_protocol::snapshot::PendingRequestSnapshot,

@@ -64,7 +64,7 @@ describe("chatPaging", () => {
     });
   });
 
-  it("coalesces activity runs with step order, status precedence, collapse semantics, and title classification", () => {
+  it("coalesces activity runs without promoting a failed tool to the group status", () => {
     const chat = renderedChat(
       snapshot([
         activityMessage("m1", "exec_command", "completed", false, [
@@ -88,7 +88,7 @@ describe("chatPaging", () => {
       message: {
         kind: "activity",
         title: "Commands",
-        status: "error",
+        status: "completed",
         collapsed: false,
         steps: [
           { kind: "tool", input_summary: "git status" },

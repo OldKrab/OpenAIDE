@@ -82,6 +82,27 @@ fn agent_session_metadata_rejects_updates_from_a_stale_native_session() {
 }
 
 #[test]
+fn repeated_identical_session_catalogs_do_not_churn_task_revision() {
+    let (_dir, store, mutations, _server_requests) = test_runtime();
+    store.write_task(&running_task("task_1")).unwrap();
+    let sink = TaskSessionEventSink::new(
+        mutations,
+        "task_1".to_string(),
+        "session_1".to_string(),
+        ServerRequestRuntime::new(),
+    );
+
+    sink.config_options_changed(crate::protocol::model::ConfigOptionsCatalog::empty("codex"))
+        .unwrap();
+    sink.config_options_changed(crate::protocol::model::ConfigOptionsCatalog::empty("codex"))
+        .unwrap();
+    sink.commands_changed(Default::default()).unwrap();
+    sink.commands_changed(Default::default()).unwrap();
+
+    assert_eq!(store.read_task("task_1").unwrap().revision, 2);
+}
+
+#[test]
 fn question_without_a_capable_responder_is_cancelled_without_blocking_the_task() {
     let (_dir, store, mutations, server_requests) = test_runtime();
     store.write_task(&running_task("task_1")).unwrap();

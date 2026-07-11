@@ -1,6 +1,6 @@
 use openaide_app_server_protocol::errors::ProtocolError;
 use openaide_app_server_protocol::snapshot::TaskSnapshot;
-use openaide_app_server_protocol::task::TaskOpenParams;
+use openaide_app_server_protocol::task::{TaskMarkReadParams, TaskOpenParams};
 use std::time::Instant;
 
 use crate::agent::{
@@ -18,9 +18,34 @@ use super::{internal_error, protocol_error_from_runtime, runtime_error, TaskProd
 
 pub(crate) trait TaskOpenWorkflow: Send + Sync {
     fn open(&self, params: TaskOpenParams) -> Result<TaskSnapshot, ProtocolError>;
+    fn mark_read(&self, params: TaskMarkReadParams) -> Result<TaskSnapshot, ProtocolError>;
 }
 
 impl TaskProductApi {
+    pub(super) fn mark_task_read(
+        &self,
+        params: TaskMarkReadParams,
+    ) -> Result<TaskSnapshot, ProtocolError> {
+        let task_id = params.task_id.as_str().to_string();
+        let result = self
+            .mutations
+            .commit_existing_task(&task_id, super::response_snapshot_options(), |ctx| {
+                if ctx.task().tombstoned {
+                    return Err(RuntimeError::TaskNotFound(task_id.clone()));
+                }
+                if !ctx.task().unread {
+                    return Ok(TaskMutationResult::Unchanged);
+                }
+                ctx.task_mut().unread = false;
+                Ok(TaskMutationResult::Changed)
+            })
+            .map_err(protocol_error_from_runtime)?;
+        let snapshot = result
+            .response_snapshot
+            .ok_or_else(|| internal_error("missing task mark-read snapshot"))?;
+        project_stored_task_snapshot(snapshot)
+    }
+
     pub(super) fn open_task(&self, params: TaskOpenParams) -> Result<TaskSnapshot, ProtocolError> {
         let task_id = params.task_id.as_str().to_string();
         let task = self.store.read_task(&task_id).map_err(runtime_error)?;
@@ -53,7 +78,10 @@ impl TaskProductApi {
         &self,
         task: &TaskRecord,
     ) -> Result<Option<crate::protocol::model::TaskSnapshot>, ProtocolError> {
-        if task.status == LegacyTaskStatus::Active || task.active_turn_id.is_some() {
+        if !task.first_prompt_sent
+            || task.status == LegacyTaskStatus::Active
+            || task.active_turn_id.is_some()
+        {
             return Ok(None);
         }
         let Some(stored_session_id) = task.agent_session_id.clone() else {
@@ -221,6 +249,10 @@ impl TaskOpenWorkflow for TaskProductApi {
     fn open(&self, params: TaskOpenParams) -> Result<TaskSnapshot, ProtocolError> {
         self.open_task(params)
     }
+
+    fn mark_read(&self, params: TaskMarkReadParams) -> Result<TaskSnapshot, ProtocolError> {
+        self.mark_task_read(params)
+    }
 }
 
 fn native_session_is_newer(task: &TaskRecord, session: &AgentListedSession) -> bool {
@@ -263,11 +295,11 @@ fn iso_utc_millis(value: &str) -> Option<i128> {
         return None;
     }
     let year = parse_digits(value, 0, 4)? as i32;
-    let month = parse_digits(value, 5, 7)? as u32;
-    let day = parse_digits(value, 8, 10)? as u32;
-    let hour = parse_digits(value, 11, 13)? as u32;
-    let minute = parse_digits(value, 14, 16)? as u32;
-    let second = parse_digits(value, 17, 19)? as u32;
+    let month = parse_digits(value, 5, 7)?;
+    let day = parse_digits(value, 8, 10)?;
+    let hour = parse_digits(value, 11, 13)?;
+    let minute = parse_digits(value, 14, 16)?;
+    let second = parse_digits(value, 17, 19)?;
     if !(1..=12).contains(&month)
         || !(1..=31).contains(&day)
         || hour > 23

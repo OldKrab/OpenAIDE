@@ -57,6 +57,9 @@ pub enum SubscriptionScope {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+// Subscription snapshots are protocol values whose direct shape is shared with
+// generated clients, so variant size is secondary to a consistent boundary.
+#[allow(clippy::large_enum_variant)]
 #[serde(
     tag = "kind",
     rename_all = "camelCase",

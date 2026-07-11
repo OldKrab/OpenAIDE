@@ -23,6 +23,7 @@
   color: color-mix(in oklch, var(--oa-muted) 76%, var(--oa-text));
   display: inline-grid;
   place-items: center;
+  transform: translateY(0.5px);
 }
 
 .task-row-action {

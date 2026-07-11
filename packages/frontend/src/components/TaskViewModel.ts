@@ -47,7 +47,7 @@ export function taskComposerAvailability({
   if (taskStatus === "blocked") {
     return { editingDisabled, sendDisabled, placeholder: "Draft follow-up while input is pending." };
   }
-  if (turnBusy) return { editingDisabled, sendDisabled, placeholder: "Draft follow-up while the agent works." };
+  if (turnBusy) return { editingDisabled, sendDisabled, placeholder: "Send a follow-up" };
   return { editingDisabled, sendDisabled, placeholder: "Send follow-up" };
 }
 

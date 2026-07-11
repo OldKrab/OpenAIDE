@@ -391,8 +391,8 @@ describe("app reducer composer state", () => {
     });
 
     state = appReducer(state, { type: "taskInput:submit", taskId: "task_1" });
-    expect(state.taskInputs.task_1.prompt).toBe("");
-    expect(state.taskInputs.task_1.context).toHaveLength(0);
+    expect(state.taskInputs.task_1.prompt).toBe("Use context");
+    expect(state.taskInputs.task_1.context).toHaveLength(1);
     expect(state.taskInputs.task_1.pending?.prompt).toBe("Use context");
 
     state = appReducer(state, { type: "taskInput:error", taskId: "task_1", message: "Send failed" });
@@ -540,7 +540,7 @@ describe("app reducer composer state", () => {
 
     state = appReducer(state, { type: "snapshot", intent: "refresh", snapshot: noMessageSnapshot("task_1") });
 
-    expect(state.taskInputs.task_1.prompt).toBe("");
+    expect(state.taskInputs.task_1.prompt).toBe("Pending send");
     expect(state.taskInputs.task_1.context).toHaveLength(0);
     expect(state.taskInputs.task_1.pending?.prompt).toBe("Pending send");
   });
@@ -561,7 +561,7 @@ describe("app reducer composer state", () => {
     };
     state = appReducer(state, { type: "submit:start" });
 
-    expect(state.newTask.prompt).toBe("");
+    expect(state.newTask.prompt).toBe("Build the thing");
     expect(state.newTask.pending?.prompt).toBe("Build the thing");
     expect(state.newTask.pending?.configOptions?.options[0].current_value).toBe("gpt-5.5");
 
@@ -585,6 +585,27 @@ describe("app reducer composer state", () => {
     expect(state.newTask.prompt).toBe("Build the thing");
     expect(state.newTask.pending).toBeUndefined();
     expect(state.newTask.error).toBe("Send failed");
+  });
+
+  it("clears accepted new-task text and attachments only after the authoritative snapshot", () => {
+    let state = createInitialState();
+    state.newTask.prompt = "Explain this";
+    state.newTask.context = [{
+      kind: "file",
+      label: "screenshot.png",
+      local_id: "attachment_1",
+    }];
+    state = appReducer(state, { type: "submit:start" });
+
+    state = appReducer(state, {
+      type: "snapshot",
+      intent: "open",
+      snapshot: snapshot("task_new", [userMessage("user_1", "Explain this", 1)]),
+    });
+
+    expect(state.newTask.prompt).toBe("");
+    expect(state.newTask.context).toEqual([]);
+    expect(state.newTask.pending).toBeUndefined();
   });
 
   it("restores the submitted draft without an error when startup is stopped", () => {
@@ -1217,7 +1238,7 @@ function chatMessage(id: string, text: string): ChatMessage {
   };
 }
 
-function userMessage(id: string, text: string): ChatMessage {
+function userMessage(id: string, text: string, attachmentCount = 0): ChatMessage {
   return {
     cursor: `cursor_${id}`,
     identity: id,
@@ -1228,7 +1249,10 @@ function userMessage(id: string, text: string): ChatMessage {
       id,
       text,
       created_at: "2026-05-17T00:00:00Z",
-      attachments: [],
+      attachments: Array.from({ length: attachmentCount }, (_, index) => ({
+        kind: "file" as const,
+        label: `attachment-${index + 1}`,
+      })),
     },
   };
 }

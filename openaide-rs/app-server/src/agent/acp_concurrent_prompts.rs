@@ -126,9 +126,7 @@ impl ConcurrentPrompts {
         &mut self,
         completion: PromptCompletion,
     ) -> Option<Result<(), RuntimeError>> {
-        let Some(mut waiter) = self.waiters.remove(&completion.token) else {
-            return None;
-        };
+        let mut waiter = self.waiters.remove(&completion.token)?;
         if completion.result.is_ok() {
             // Some Agents coalesce same-session steering requests into the active
             // turn and emit one terminal response for the whole logical turn.

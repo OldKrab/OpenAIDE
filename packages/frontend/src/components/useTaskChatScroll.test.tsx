@@ -32,12 +32,31 @@ describe("useTaskChatScroll", () => {
 
     expect(messageList.scrollTop).toBe(998);
   });
+
+  it("follows final output when the Task becomes inactive in the same update", () => {
+    const messageList = scrollNode({ clientHeight: 400, scrollHeight: 1400 });
+    let tree!: ReactTestRenderer;
+
+    act(() => {
+      tree = create(<Harness generating itemCount={1} />, {
+        createNodeMock: (element) => (
+          (element.props as { className?: string }).className === "message-list" ? messageList : null
+        ),
+      });
+    });
+
+    expect(messageList.scrollTop).toBe(1000);
+    messageList.scrollHeight = 1500;
+    act(() => tree.update(<Harness generating={false} itemCount={2} />));
+
+    expect(messageList.scrollTop).toBe(1100);
+  });
 });
 
-function Harness({ itemCount }: { itemCount: number }) {
+function Harness({ generating = true, itemCount }: { generating?: boolean; itemCount: number }) {
   const [savedScrollTop, setSavedScrollTop] = useState(1000);
   const chatScroll = useTaskChatScroll({
-    generating: true,
+    generating,
     itemCount,
     onScrollTop: setSavedScrollTop,
     pendingPrepend: false,

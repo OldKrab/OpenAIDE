@@ -8,6 +8,7 @@ use crate::tasks::transitions::TaskTransitions;
 
 use super::{storage_error, TaskProductApi, TaskSendAccepted};
 
+#[derive(Clone)]
 pub(super) struct CommittedSend {
     task_id: String,
     turn_id: TurnId,
@@ -32,6 +33,10 @@ impl CommittedSend {
             .finish_turn(&self.task_id, self.turn_id.as_str(), Err(error))
             .map_err(super::super::protocol_error_from_runtime)?;
         self.accepted(api)
+    }
+
+    pub(super) fn turn_id(&self) -> &TurnId {
+        &self.turn_id
     }
 
     pub(super) fn fail_protocol(

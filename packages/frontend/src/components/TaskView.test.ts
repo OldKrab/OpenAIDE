@@ -97,7 +97,7 @@ describe("TaskView permission response state", () => {
     expect(items.map((item) => item.message_id)).toEqual(["activity-1", "message-1"]);
   });
 
-  it("appends a pending submitted user message until the snapshot catches up", async () => {
+  it("does not render pending Shell input as authoritative Chat", async () => {
     const { chatItemsWithPendingInput } = await import("./TaskView");
     const activity = activityMessage("activity-1");
 
@@ -119,16 +119,7 @@ describe("TaskView permission response state", () => {
       "task_1",
     );
 
-    expect(items.map((item) => item.message_id)).toEqual(["activity-1", "pending-user-task_1"]);
-    expect(items[1]?.message).toMatchObject({
-      kind: "user",
-      text: "Ship the fix",
-      attachments: [{
-        id: "attachment_1",
-        label: "screenshot.png",
-        payload: { previewUrl: "data:image/png;base64,c2NyZWVuc2hvdA==" },
-      }],
-    });
+    expect(items.map((item) => item.message_id)).toEqual(["activity-1"]);
   });
 
   it("blocks the task composer until App Server initialize completes", async () => {
@@ -179,7 +170,7 @@ describe("TaskView permission response state", () => {
     ).toEqual({
       editingDisabled: false,
       sendDisabled: false,
-      placeholder: "Draft follow-up while the agent works.",
+      placeholder: "Send a follow-up",
     });
   });
 

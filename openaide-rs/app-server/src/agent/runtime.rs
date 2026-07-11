@@ -250,17 +250,12 @@ pub trait AgentEventSink: Send + Sync {
 
 /// A partial Agent-owned metadata field. ACP distinguishes omission from an
 /// explicit clear, so runtime integrations must preserve all three states.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum AgentMetadataField<T> {
+    #[default]
     Unchanged,
     Clear,
     Value(T),
-}
-
-impl<T> Default for AgentMetadataField<T> {
-    fn default() -> Self {
-        Self::Unchanged
-    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

@@ -16,7 +16,11 @@ vi.mock("node:crypto", () => ({
 }));
 
 describe("AppServerHostClient", () => {
+  let client: AppServerHostClient | undefined;
+
   afterEach(() => {
+    client?.dispose();
+    client = undefined;
     vi.unstubAllGlobals();
     randomMocks.randomUUID.mockReturnValue("host-client-1");
   });
@@ -28,14 +32,15 @@ describe("AppServerHostClient", () => {
     ]);
     vi.stubGlobal("fetch", fetch);
     const provider = providerReturningConnection();
-    const client = new AppServerHostClient(provider);
+    client = new AppServerHostClient(provider);
 
     await expect(client.request(TASK_OPEN, { taskId: "task-1" as never }, {
       clientRequestId: "client-request-1" as never,
     })).resolves.toEqual({ task: { taskId: "task-1" } });
 
+    const rpcCalls = jsonRpcCalls(fetch);
     expect(provider.startAppServerConnection).toHaveBeenCalledTimes(1);
-    expect(JSON.parse(String(fetch.mock.calls[0]?.[1].body))).toEqual({
+    expect(JSON.parse(String(rpcCalls[0]?.[1].body))).toEqual({
       jsonrpc: "2.0",
       id: "local-http-request-1",
       method: CLIENT_INITIALIZE,
@@ -46,14 +51,14 @@ describe("AppServerHostClient", () => {
         capabilities: { shell: ["resolveFileReveal"] },
       },
     });
-    expect(JSON.parse(String(fetch.mock.calls[1]?.[1].body))).toEqual({
+    expect(JSON.parse(String(rpcCalls[1]?.[1].body))).toEqual({
       jsonrpc: "2.0",
       id: "local-http-request-2",
       method: TASK_OPEN,
       params: { taskId: "task-1" },
       meta: { clientRequestId: "client-request-1" },
     });
-    expect(fetch.mock.calls[0]?.[1].headers["X-OpenAIDE-Connection-Id"])
+    expect(rpcCalls[0]?.[1].headers["X-OpenAIDE-Connection-Id"])
       .toBe("vscode-host-host-client-1");
   });
 
@@ -65,13 +70,13 @@ describe("AppServerHostClient", () => {
     ]);
     vi.stubGlobal("fetch", fetch);
     const provider = providerReturningConnection();
-    const client = new AppServerHostClient(provider);
+    client = new AppServerHostClient(provider);
 
     await client.request(TASK_OPEN, { taskId: "task-1" as never });
     await client.request(TASK_OPEN, { taskId: "task-2" as never });
 
     expect(provider.startAppServerConnection).toHaveBeenCalledTimes(1);
-    expect(fetch).toHaveBeenCalledTimes(3);
+    expect(jsonRpcCalls(fetch)).toHaveLength(3);
   });
 
   it("surfaces protocol errors from LocalHttp typed requests", async () => {
@@ -90,7 +95,7 @@ describe("AppServerHostClient", () => {
       }],
     ]);
     vi.stubGlobal("fetch", fetch);
-    const client = new AppServerHostClient(providerReturningConnection());
+    client = new AppServerHostClient(providerReturningConnection());
 
     const error = await client.request(TASK_OPEN, { taskId: "missing-task" as never })
       .catch((caught) => caught);
@@ -116,7 +121,16 @@ function providerReturningConnection() {
 
 function fetchSequence(batches: unknown[][]) {
   let nextBatch = 0;
-  return vi.fn<LocalHttpFetch>(async () => {
+  return vi.fn<LocalHttpFetch>(async (_input, init) => {
+    if (init.headers.Accept === "text/event-stream") {
+      return {
+        ok: true,
+        status: 200,
+        async text() {
+          return "";
+        },
+      };
+    }
     const messages = batches[nextBatch] ?? [];
     nextBatch += 1;
     return {
@@ -127,6 +141,10 @@ function fetchSequence(batches: unknown[][]) {
       },
     };
   });
+}
+
+function jsonRpcCalls(fetch: ReturnType<typeof fetchSequence>) {
+  return fetch.mock.calls.filter(([, init]) => init.headers.Accept !== "text/event-stream");
 }
 
 function response(id: string, payload: unknown) {

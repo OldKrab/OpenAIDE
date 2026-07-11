@@ -37,6 +37,9 @@ pub(super) struct PromptRunContext<'a> {
     pub(super) content_policy: PromptContentPolicy,
 }
 
+// The runner coordinates independent ACP channels owned by its caller. Keep
+// those lifecycle inputs explicit until they have a cohesive shared owner.
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn run_prompt(
     active_session: &mut agent_client_protocol::ActiveSession<'static, Agent>,
     cancel_rx: &mut tokio_mpsc::UnboundedReceiver<()>,

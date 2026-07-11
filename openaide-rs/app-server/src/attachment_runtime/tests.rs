@@ -253,7 +253,7 @@ fn creates_pasted_image_handle_for_prompt_payload() {
         .unwrap();
 
     let resolved = runtime
-        .resolve_for_send(&TaskId::from("task-1"), &[created.attachment.handle_id])
+        .resolve_for_send(TaskId::from("task-1"), &[created.attachment.handle_id])
         .unwrap();
 
     assert_eq!(created.attachment.label, "Screenshot.png");
@@ -292,7 +292,7 @@ fn resolves_file_reference_handle_for_reveal() {
     let (files, handle) = registered_file_reference(&runtime, "task-1");
 
     let target = runtime
-        .resolve_for_reveal(&TaskId::from("task-1"), &handle.handle_id)
+        .resolve_for_reveal(TaskId::from("task-1"), &handle.handle_id)
         .unwrap();
 
     assert_eq!(target.label, "notes.md");
@@ -426,7 +426,7 @@ fn wrong_task_confirm_does_not_consume_embedded_candidate() {
         .candidate;
 
     let wrong_task = runtime.confirm_embedded(
-        &TaskId::from("task-2"),
+        TaskId::from("task-2"),
         std::slice::from_ref(&candidate.candidate_id),
     );
     assert_eq!(wrong_task.errors.len(), 1);
@@ -444,7 +444,7 @@ fn refresh_and_release_presend_handles_are_task_scoped() {
 
     let refreshed = runtime
         .refresh_handles(
-            &TaskId::from("task-1"),
+            TaskId::from("task-1"),
             std::slice::from_ref(&handle.handle_id),
         )
         .unwrap();
@@ -452,7 +452,7 @@ fn refresh_and_release_presend_handles_are_task_scoped() {
     assert_eq!(
         runtime
             .refresh_handles(
-                &TaskId::from("task-2"),
+                TaskId::from("task-2"),
                 std::slice::from_ref(&handle.handle_id)
             )
             .unwrap_err(),
@@ -460,14 +460,14 @@ fn refresh_and_release_presend_handles_are_task_scoped() {
     );
 
     let released = runtime.release_handles(
-        &TaskId::from("task-1"),
+        TaskId::from("task-1"),
         std::slice::from_ref(&handle.handle_id),
     );
     assert_eq!(released.released_handles, vec![handle.handle_id.clone()]);
     assert_eq!(
         runtime
             .refresh_handles(
-                &TaskId::from("task-1"),
+                TaskId::from("task-1"),
                 std::slice::from_ref(&handle.handle_id)
             )
             .unwrap_err(),
@@ -514,7 +514,7 @@ fn explicit_refresh_renews_presend_handle_lease() {
 
     runtime
         .refresh_handles(
-            &TaskId::from("task-1"),
+            TaskId::from("task-1"),
             std::slice::from_ref(&handle.handle_id),
         )
         .unwrap();
@@ -522,7 +522,7 @@ fn explicit_refresh_renews_presend_handle_lease() {
 
     assert_eq!(
         runtime
-            .refresh_handles(&TaskId::from("task-1"), &[handle.handle_id])
+            .refresh_handles(TaskId::from("task-1"), &[handle.handle_id])
             .unwrap()
             .attachments
             .len(),
@@ -538,7 +538,7 @@ fn expired_presend_handles_are_not_refreshable() {
 
     assert_eq!(
         runtime
-            .refresh_handles(&TaskId::from("task-1"), &[handle.handle_id])
+            .refresh_handles(TaskId::from("task-1"), &[handle.handle_id])
             .unwrap_err(),
         AttachmentRuntimeError::UnknownHandle
     );
@@ -551,14 +551,14 @@ fn consumed_presend_handles_cannot_be_reused() {
 
     runtime
         .consume_handles(
-            &TaskId::from("task-1"),
+            TaskId::from("task-1"),
             std::slice::from_ref(&handle.handle_id),
         )
         .unwrap();
 
     assert_eq!(
         runtime
-            .resolve_for_send(&TaskId::from("task-1"), &[handle.handle_id])
+            .resolve_for_send(TaskId::from("task-1"), &[handle.handle_id])
             .unwrap_err(),
         AttachmentRuntimeError::UnknownHandle
     );
@@ -572,14 +572,14 @@ fn consume_validates_all_handles_before_removing_any() {
     assert_eq!(
         runtime
             .consume_handles(
-                &TaskId::from("task-1"),
+                TaskId::from("task-1"),
                 &[handle.handle_id.clone(), "missing".into()],
             )
             .unwrap_err(),
         AttachmentRuntimeError::UnknownHandle
     );
     assert!(runtime
-        .resolve_for_send(&TaskId::from("task-1"), &[handle.handle_id])
+        .resolve_for_send(TaskId::from("task-1"), &[handle.handle_id])
         .is_ok());
 }
 
@@ -709,7 +709,7 @@ fn resolves_file_reference_handles_for_matching_task() {
     let (files, handle) = registered_file_reference(&runtime, "task-1");
 
     let resolved = runtime
-        .resolve_for_send(&TaskId::from("task-1"), &[handle.handle_id])
+        .resolve_for_send(TaskId::from("task-1"), &[handle.handle_id])
         .expect("handle should resolve");
 
     let chat = resolved.chat_attachments();
@@ -730,14 +730,14 @@ fn rejects_unknown_wrong_task_and_duplicate_handles() {
 
     assert_eq!(
         runtime
-            .resolve_for_send(&TaskId::from("task-1"), &["missing".into()])
+            .resolve_for_send(TaskId::from("task-1"), &["missing".into()])
             .unwrap_err(),
         AttachmentRuntimeError::UnknownHandle
     );
     assert_eq!(
         runtime
             .resolve_for_send(
-                &TaskId::from("task-2"),
+                TaskId::from("task-2"),
                 std::slice::from_ref(&handle.handle_id)
             )
             .unwrap_err(),
@@ -746,7 +746,7 @@ fn rejects_unknown_wrong_task_and_duplicate_handles() {
     assert_eq!(
         runtime
             .resolve_for_send(
-                &TaskId::from("task-1"),
+                TaskId::from("task-1"),
                 &[handle.handle_id.clone(), handle.handle_id],
             )
             .unwrap_err(),

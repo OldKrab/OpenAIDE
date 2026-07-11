@@ -26,7 +26,9 @@ export function newTaskStatusLabel({
 }
 
 export function taskWorkingStatusLabel(items: ChatMessage[], status: TaskStatus, inputPending: boolean) {
-  if (inputPending) return "Sending message";
+  // Pending Shell input remains in the frozen composer until App Server acceptance.
+  // Chat activity only describes authoritative task state.
+  if (inputPending) return undefined;
   if (items.some((item) => (
     (item.message.kind === "permission" || item.message.kind === "elicitation")
     && item.message.state === "pending"

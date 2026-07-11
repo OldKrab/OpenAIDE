@@ -4,6 +4,9 @@ use crate::logging;
 use crate::protocol::errors::RpcError;
 use crate::protocol::jsonrpc::RpcResponse;
 
+// Parse failures are returned as the complete JSON-RPC wire response so callers
+// cannot accidentally discard its id, structured error, or response metadata.
+#[allow(clippy::result_large_err)]
 pub(super) fn parse_line_values(line: &str) -> Result<Vec<Value>, RpcResponse> {
     let parsed = serde_json::from_str::<Value>(line);
     let value = match parsed {

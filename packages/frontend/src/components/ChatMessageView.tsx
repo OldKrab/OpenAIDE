@@ -28,7 +28,7 @@ export const ChatRow = memo(function ChatRow({
 }: {
   commandCatalog?: AgentCommandsCatalog;
   message: ChatMessage;
-  onLoadToolDetail?: (artifactId: string) => void;
+  onLoadToolDetail?: (artifactId: string, refresh?: boolean) => void;
   onPermissionRespond: (
     requestId: string,
     optionId: string,

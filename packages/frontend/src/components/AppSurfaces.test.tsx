@@ -385,9 +385,10 @@ describe("AppSurfaces callback wiring", () => {
     );
   });
 
-  it("routes pre-send startup cancellation through the new-task lifecycle", () => {
+  it("keeps the New Task surface visible while authoritative Send is pending", () => {
     const controller = controllerFor("task");
     controller.state.snapshot = snapshot("task_starting", false);
+    controller.state.newTask.submitting = true;
     controller.state.taskInputs.task_starting = {
       prompt: "",
       context: [],
@@ -396,10 +397,11 @@ describe("AppSurfaces callback wiring", () => {
 
     render(controller);
 
-    expect(surfaceMocks.task).toHaveBeenCalledWith(
-      expect.objectContaining({ onCancel: controller.callbacks.newTask.cancel }),
+    expect(surfaceMocks.newTask).toHaveBeenCalledWith(
+      expect.objectContaining({ onCancelTask: controller.callbacks.newTask.cancel }),
       undefined,
     );
+    expect(surfaceMocks.task).not.toHaveBeenCalled();
   });
 
   it("passes archive context and restore action to the task view", () => {

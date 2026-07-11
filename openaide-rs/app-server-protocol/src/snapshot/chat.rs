@@ -157,6 +157,9 @@ pub enum ActivityStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+// Snapshot variants mirror the serialized contract; boxing only the Rust side
+// would add protocol-boundary ownership complexity without changing the wire.
+#[allow(clippy::large_enum_variant)]
 #[serde(
     tag = "kind",
     rename_all = "camelCase",

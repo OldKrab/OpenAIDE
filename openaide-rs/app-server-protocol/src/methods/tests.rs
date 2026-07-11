@@ -73,6 +73,7 @@ fn task_methods_use_task_namespace() {
     assert_eq!(TaskSetConfigOption::METHOD, "task/setConfigOption");
     assert_eq!(TaskCancel::METHOD, "task/cancel");
     assert_eq!(TaskOpen::METHOD, "task/open");
+    assert_eq!(TaskMarkRead::METHOD, "task/markRead");
     assert_eq!(TaskList::METHOD, "task/list");
     assert_eq!(TaskDiscard::METHOD, "task/discard");
     assert_eq!(TaskSetArchived::METHOD, "task/setArchived");

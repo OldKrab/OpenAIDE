@@ -1,6 +1,6 @@
 use openaide_app_server_protocol::errors::{ProtocolError, ProtocolErrorCode};
 
-use crate::agent::{AgentSessionStart, TurnCancellation};
+use crate::agent::{AgentSessionResume, AgentSessionStart, TurnCancellation};
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::TaskStatus as LegacyTaskStatus;
 use crate::storage::records::{TaskPreparationRecord, TaskRecord};
@@ -21,17 +21,40 @@ impl TaskProductApi {
     }
 
     fn prepare_task_native_session(&self, task: &TaskRecord) -> Result<(), RuntimeError> {
-        let session = self.agent_gateway.start_session(AgentSessionStart {
-            agent_id: task.agent_id.clone(),
-            task_id: task.task_id.clone(),
-            cwd: task.workspace_root.clone(),
-            model_id: task.model_id.clone(),
-            config_options: None,
-            context: Vec::new(),
-            cancellation: TurnCancellation::new(),
-            secret_resolver: Some(self.task_secret_resolver(&task.task_id)),
-        })?;
+        let cancellation = TurnCancellation::new();
+        let start = || {
+            self.agent_gateway.start_session(AgentSessionStart {
+                agent_id: task.agent_id.clone(),
+                task_id: task.task_id.clone(),
+                cwd: task.workspace_root.clone(),
+                model_id: task.model_id.clone(),
+                config_options: serde_json::to_value(&task.config_options)
+                    .ok()
+                    .filter(|value| !value.as_object().is_some_and(serde_json::Map::is_empty)),
+                context: Vec::new(),
+                cancellation: cancellation.clone(),
+                secret_resolver: Some(self.task_secret_resolver(&task.task_id)),
+            })
+        };
+        let session = match &task.agent_session_id {
+            Some(session_id) => self
+                .agent_gateway
+                .resume_session(AgentSessionResume {
+                    agent_id: task.agent_id.clone(),
+                    task_id: task.task_id.clone(),
+                    session_id: session_id.clone(),
+                    cwd: task.workspace_root.clone(),
+                    model_id: task.model_id.clone(),
+                    cancellation: cancellation.clone(),
+                })
+                .or_else(|_| start())?,
+            None => start()?,
+        };
         let session_start = TaskSessionStartGuard::new(&self.agent_gateway, session);
+        let _ownership = PreparingSessionOwnership::reserve(
+            self.preparing_session_ids.clone(),
+            session_start.session_id(),
+        )?;
         self.turn_runner
             .attach_session_events(task.task_id.clone(), session_start.session_id())?;
 
@@ -46,7 +69,7 @@ impl TaskProductApi {
             TaskCommitOptions::metadata(),
             |ctx| {
                 if ctx.task().tombstoned
-                    || ctx.task().agent_session_id.is_some()
+                    || ctx.task().agent_session_id != task.agent_session_id
                     || !matches!(ctx.task().preparation, TaskPreparationRecord::Preparing)
                 {
                     return Ok(TaskMutationResult::Rejected);
@@ -124,6 +147,37 @@ impl TaskProductApi {
             )?;
         }
         Ok(())
+    }
+}
+
+struct PreparingSessionOwnership {
+    session_ids: std::sync::Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
+    session_id: String,
+}
+
+impl PreparingSessionOwnership {
+    fn reserve(
+        session_ids: std::sync::Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
+        session_id: &str,
+    ) -> Result<Self, RuntimeError> {
+        session_ids
+            .lock()
+            .map_err(|_| {
+                RuntimeError::Internal("preparing session ownership lock poisoned".to_string())
+            })?
+            .insert(session_id.to_string());
+        Ok(Self {
+            session_ids,
+            session_id: session_id.to_string(),
+        })
+    }
+}
+
+impl Drop for PreparingSessionOwnership {
+    fn drop(&mut self) {
+        if let Ok(mut session_ids) = self.session_ids.lock() {
+            session_ids.remove(&self.session_id);
+        }
     }
 }
 

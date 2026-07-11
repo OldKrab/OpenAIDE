@@ -38,6 +38,7 @@ pub const TASK_SEND: &str = "task/send";
 pub const TASK_SET_CONFIG_OPTION: &str = "task/setConfigOption";
 pub const TASK_CANCEL: &str = "task/cancel";
 pub const TASK_OPEN: &str = "task/open";
+pub const TASK_MARK_READ: &str = "task/markRead";
 pub const TASK_CHAT_PAGE: &str = "task/chatPage";
 pub const TASK_TOOL_DETAIL: &str = "task/toolDetail";
 pub const TASK_LIST: &str = "task/list";
@@ -85,6 +86,7 @@ pub const CLIENT_METHODS: &[&str] = &[
     TASK_SET_CONFIG_OPTION,
     TASK_CANCEL,
     TASK_OPEN,
+    TASK_MARK_READ,
     TASK_CHAT_PAGE,
     TASK_TOOL_DETAIL,
     TASK_LIST,

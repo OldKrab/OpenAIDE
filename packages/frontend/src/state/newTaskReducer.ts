@@ -54,8 +54,8 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
         ...state,
         newTask: {
           ...state.newTask,
-          prompt: "",
-          context: [],
+          prompt: submittedPrompt,
+          context: submittedContext,
           pending: {
             prompt: submittedPrompt,
             context: submittedContext,

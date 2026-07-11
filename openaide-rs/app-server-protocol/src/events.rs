@@ -37,6 +37,9 @@ pub enum EventScope {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+// Protocol payloads stay direct value types so Rust and generated TypeScript
+// contracts retain the same visible ownership model across event variants.
+#[allow(clippy::large_enum_variant)]
 #[serde(
     tag = "kind",
     rename_all = "camelCase",

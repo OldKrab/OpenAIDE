@@ -1,5 +1,5 @@
 import { Brain, ChevronRight, Terminal, Wrench } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { ActivityStep, ActivityToolDetails, NormalizedMessage } from "@openaide/app-shell-contracts";
 import { toolDetailCacheKey } from "../state/store";
 import { AgentMarkdown } from "./AgentMarkdown";
@@ -25,7 +25,7 @@ export function ChatActivityView({
   toolDetails,
 }: {
   activity: Extract<NormalizedMessage, { kind: "activity" }>;
-  onLoadToolDetail?: (artifactId: string) => void;
+  onLoadToolDetail?: (artifactId: string, refresh?: boolean) => void;
   taskId: string;
   toolDetails?: Record<string, { loading: boolean; details?: ActivityToolDetails; error?: string }>;
 }) {
@@ -62,7 +62,7 @@ export function ActivityStepRow({
   taskId,
   toolDetails,
 }: {
-  onLoadToolDetail?: (artifactId: string) => void;
+  onLoadToolDetail?: (artifactId: string, refresh?: boolean) => void;
   step: ActivityStep;
   taskId: string;
   toolDetails?: Record<string, { loading: boolean; details?: ActivityToolDetails; error?: string }>;
@@ -124,45 +124,17 @@ export function ActivityStepRow({
   }
   if (displayStep.kind === "tool" && hasToolDetails(displayStep)) {
     const artifactId = displayStep.detail_artifact_id;
-    const commandTitle =
-      displayStep.name === "execute" ? <CommandStepTitle command={label} status={displayStep.status} /> : label;
     return (
-      <AnimatedDisclosure
+      <LiveToolDetailDisclosure
+        artifactId={artifactId}
+        artifactState={artifactState}
         className={className}
-        onOpenChange={(open) => {
-          if (
-            shouldLoadToolDetail({
-              details,
-              error: artifactState?.error,
-              open,
-              artifactId,
-              loading: artifactState?.loading,
-            }) &&
-            artifactId
-          ) {
-            onLoadToolDetail?.(artifactId);
-          }
-        }}
-        trigger={
-          <>
-            <ActivityStepContent
-              disclosure
-              icon={activityStepIcon(displayStep)}
-              label={commandTitle}
-              titleClassName={displayStep.name === "execute" ? "command" : undefined}
-            />
-            {metadata}
-          </>
-        }
-      >
-        <ChatToolDetails
-          details={details}
-          error={artifactState?.error}
-          fallbackPreview={preview}
-          loading={artifactState?.loading}
-          step={displayStep}
-        />
-      </AnimatedDisclosure>
+        details={details}
+        metadata={metadata}
+        onLoadToolDetail={onLoadToolDetail}
+        preview={preview}
+        step={displayStep}
+      />
     );
   }
   return (
@@ -171,6 +143,82 @@ export function ActivityStepRow({
       {metadata}
       {preview ? <pre>{preview}</pre> : null}
     </div>
+  );
+}
+
+function LiveToolDetailDisclosure({
+  artifactId,
+  artifactState,
+  className,
+  details,
+  metadata,
+  onLoadToolDetail,
+  preview,
+  step,
+}: {
+  artifactId?: string;
+  artifactState?: { loading: boolean; details?: ActivityToolDetails; error?: string };
+  className: string;
+  details?: ActivityToolDetails;
+  metadata: ReactNode;
+  onLoadToolDetail?: (artifactId: string, refresh?: boolean) => void;
+  preview?: string;
+  step: Extract<ActivityStep, { kind: "tool" }>;
+}) {
+  const [open, setOpen] = useState(false);
+  const loadToolDetailRef = useRef(onLoadToolDetail);
+  const previousRunning = useRef(step.status === "running");
+  loadToolDetailRef.current = onLoadToolDetail;
+  useEffect(() => {
+    if (!open || !artifactId || step.status !== "running") return undefined;
+    const interval = globalThis.setInterval(() => loadToolDetailRef.current?.(artifactId, true), 250);
+    return () => globalThis.clearInterval(interval);
+  }, [artifactId, open, step.status]);
+  useEffect(() => {
+    const running = step.status === "running";
+    if (open && artifactId && previousRunning.current && !running) {
+      loadToolDetailRef.current?.(artifactId, true);
+    }
+    previousRunning.current = running;
+  }, [artifactId, open, step.status]);
+  const commandTitle = step.name === "execute"
+    ? <CommandStepTitle command={activityStepLabel(step)} status={step.status} />
+    : activityStepLabel(step);
+  return (
+    <AnimatedDisclosure
+      className={className}
+      onOpenChange={(nextOpen) => {
+        setOpen(nextOpen);
+        if (shouldLoadToolDetail({
+          details,
+          error: artifactState?.error,
+          open: nextOpen,
+          artifactId,
+          loading: artifactState?.loading,
+        }) && artifactId) {
+          onLoadToolDetail?.(artifactId);
+        }
+      }}
+      trigger={(
+        <>
+          <ActivityStepContent
+            disclosure
+            icon={activityStepIcon(step)}
+            label={commandTitle}
+            titleClassName={step.name === "execute" ? "command" : undefined}
+          />
+          {metadata}
+        </>
+      )}
+    >
+      <ChatToolDetails
+        details={details}
+        error={artifactState?.error}
+        fallbackPreview={preview}
+        loading={artifactState?.loading}
+        step={step}
+      />
+    </AnimatedDisclosure>
   );
 }
 

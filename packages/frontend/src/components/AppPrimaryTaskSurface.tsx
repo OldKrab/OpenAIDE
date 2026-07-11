@@ -5,7 +5,8 @@ import type { AppController } from "./appController";
 export function primaryTaskSurfaceModel(controller: AppController) {
   const { activeTask, bootstrap, state } = controller;
   const snapshotTaskInput = state.snapshot ? state.taskInputs[state.snapshot.task.task_id] : undefined;
-  const renderableTaskSnapshot = state.snapshot?.task.has_messages === true || snapshotTaskInput?.pending
+  const renderableTaskSnapshot = state.snapshot?.task.has_messages === true
+    || (bootstrap.surface === "task" && bootstrap.taskId && snapshotTaskInput?.pending)
     ? state.snapshot
     : undefined;
   const startupConfigOptions = renderableTaskSnapshot?.task.has_messages === false && snapshotTaskInput?.pending

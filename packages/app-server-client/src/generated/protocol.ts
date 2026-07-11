@@ -55,6 +55,7 @@ export const TASK_SEND = "task/send" as const;
 export const TASK_SET_CONFIG_OPTION = "task/setConfigOption" as const;
 export const TASK_CANCEL = "task/cancel" as const;
 export const TASK_OPEN = "task/open" as const;
+export const TASK_MARK_READ = "task/markRead" as const;
 export const TASK_CHAT_PAGE = "task/chatPage" as const;
 export const TASK_TOOL_DETAIL = "task/toolDetail" as const;
 export const TASK_LIST = "task/list" as const;
@@ -398,7 +399,7 @@ export type ShellResolveFileRevealParams = { originatingClientInstanceId: Client
 
 export type ShellResolveFileRevealResult = { path: string, label: string, };
 
-export type TaskCreateParams = { projectId: ProjectId, agentId: AgentId, workspaceRoot?: string | null, };
+export type TaskCreateParams = { projectId: ProjectId, agentId: AgentId, workspaceRoot?: string | null, configOptions?: { [key in string]: string }, };
 
 export type TaskCreateResult = { task: TaskSnapshot, };
 
@@ -441,6 +442,10 @@ export type ActivityToolField = { name: string, value: string, };
 export type TaskOpenParams = { taskId: TaskId, };
 
 export type TaskOpenResult = { task: TaskSnapshot, };
+
+export type TaskMarkReadParams = { taskId: TaskId, };
+
+export type TaskMarkReadResult = { task: TaskSnapshot, };
 
 export type TaskListParams = { archived: boolean, projectId?: ProjectId | null, cursor?: TaskListCursor | null, };
 
@@ -580,7 +585,7 @@ export type PendingRequestScope = { "kind": "client", clientInstanceId: ClientIn
 
 export type PendingRequestKind = "permission" | "question" | "secret" | "shellCapability";
 
-export type ProtocolMethod = typeof CLIENT_PROBE | typeof CLIENT_INITIALIZE | typeof CLIENT_HEARTBEAT | typeof STATE_SUBSCRIBE | typeof STATE_UNSUBSCRIBE | typeof DIAGNOSTICS_GET_RUNTIME | typeof SUPPORT_RECOVER_STUCK_SESSIONS | typeof AGENT_PROBE | typeof AGENT_AUTHENTICATE | typeof AGENT_LIST_SESSIONS | typeof AGENT_CREATE_CUSTOM | typeof AGENT_UPDATE_CUSTOM_METADATA | typeof AGENT_REPLACE_CUSTOM | typeof AGENT_DELETE_CUSTOM | typeof AGENT_SET_ENABLED | typeof SETTINGS_GET_AGENT_DETAILS | typeof SETTINGS_GET_MCP_SERVERS | typeof SETTINGS_GET_SKILLS | typeof SETTINGS_GET_PREFERENCES | typeof SETTINGS_UPDATE_PREFERENCES | typeof SETTINGS_GET_RUNTIME | typeof SETTINGS_UPDATE_RUNTIME | typeof ATTACHMENT_LIST_ROOTS | typeof ATTACHMENT_LIST_DIRECTORY | typeof ATTACHMENT_CREATE_FILE_REFERENCE | typeof ATTACHMENT_CREATE_PASTED_IMAGE | typeof ATTACHMENT_CREATE_EMBEDDED_CANDIDATE | typeof ATTACHMENT_CONFIRM_EMBEDDED | typeof ATTACHMENT_REFRESH_HANDLES | typeof ATTACHMENT_RELEASE_HANDLES | typeof ATTACHMENT_REVEAL | typeof SHELL_RESOLVE_FILE_REVEAL | typeof WORKSPACE_LIST_ROOTS | typeof WORKSPACE_LIST_DIRECTORY | typeof TASK_CREATE | typeof TASK_ADOPT_NATIVE_SESSION | typeof TASK_SEND | typeof TASK_SET_CONFIG_OPTION | typeof TASK_CANCEL | typeof TASK_OPEN | typeof TASK_CHAT_PAGE | typeof TASK_TOOL_DETAIL | typeof TASK_LIST | typeof TASK_DISCARD | typeof TASK_SET_ARCHIVED;
+export type ProtocolMethod = typeof CLIENT_PROBE | typeof CLIENT_INITIALIZE | typeof CLIENT_HEARTBEAT | typeof STATE_SUBSCRIBE | typeof STATE_UNSUBSCRIBE | typeof DIAGNOSTICS_GET_RUNTIME | typeof SUPPORT_RECOVER_STUCK_SESSIONS | typeof AGENT_PROBE | typeof AGENT_AUTHENTICATE | typeof AGENT_LIST_SESSIONS | typeof AGENT_CREATE_CUSTOM | typeof AGENT_UPDATE_CUSTOM_METADATA | typeof AGENT_REPLACE_CUSTOM | typeof AGENT_DELETE_CUSTOM | typeof AGENT_SET_ENABLED | typeof SETTINGS_GET_AGENT_DETAILS | typeof SETTINGS_GET_MCP_SERVERS | typeof SETTINGS_GET_SKILLS | typeof SETTINGS_GET_PREFERENCES | typeof SETTINGS_UPDATE_PREFERENCES | typeof SETTINGS_GET_RUNTIME | typeof SETTINGS_UPDATE_RUNTIME | typeof ATTACHMENT_LIST_ROOTS | typeof ATTACHMENT_LIST_DIRECTORY | typeof ATTACHMENT_CREATE_FILE_REFERENCE | typeof ATTACHMENT_CREATE_PASTED_IMAGE | typeof ATTACHMENT_CREATE_EMBEDDED_CANDIDATE | typeof ATTACHMENT_CONFIRM_EMBEDDED | typeof ATTACHMENT_REFRESH_HANDLES | typeof ATTACHMENT_RELEASE_HANDLES | typeof ATTACHMENT_REVEAL | typeof SHELL_RESOLVE_FILE_REVEAL | typeof WORKSPACE_LIST_ROOTS | typeof WORKSPACE_LIST_DIRECTORY | typeof TASK_CREATE | typeof TASK_ADOPT_NATIVE_SESSION | typeof TASK_SEND | typeof TASK_SET_CONFIG_OPTION | typeof TASK_CANCEL | typeof TASK_OPEN | typeof TASK_MARK_READ | typeof TASK_CHAT_PAGE | typeof TASK_TOOL_DETAIL | typeof TASK_LIST | typeof TASK_DISCARD | typeof TASK_SET_ARCHIVED;
 export type RequestParamsByMethod = {
   [CLIENT_PROBE]: ClientProbeParams;
   [CLIENT_INITIALIZE]: InitializeParams;
@@ -622,6 +627,7 @@ export type RequestParamsByMethod = {
   [TASK_SET_CONFIG_OPTION]: TaskSetConfigOptionParams;
   [TASK_CANCEL]: TaskCancelParams;
   [TASK_OPEN]: TaskOpenParams;
+  [TASK_MARK_READ]: TaskMarkReadParams;
   [TASK_CHAT_PAGE]: TaskChatPageParams;
   [TASK_TOOL_DETAIL]: TaskToolDetailParams;
   [TASK_LIST]: TaskListParams;
@@ -670,6 +676,7 @@ export type ResponseResultByMethod = {
   [TASK_SET_CONFIG_OPTION]: TaskSetConfigOptionResult;
   [TASK_CANCEL]: TaskCancelResult;
   [TASK_OPEN]: TaskOpenResult;
+  [TASK_MARK_READ]: TaskMarkReadResult;
   [TASK_CHAT_PAGE]: TaskChatPageResult;
   [TASK_TOOL_DETAIL]: TaskToolDetailResult;
   [TASK_LIST]: TaskListResult;

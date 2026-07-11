@@ -118,9 +118,9 @@ fn start_local_http_listener(listener: LocalHttpProbeListener, handler: LocalHtt
             }
         };
         let peer = stream.peer_addr().ok();
-        let mut handler = handler.clone();
+        let handler = handler.clone();
         thread::spawn(move || {
-            if let Err(error) = handle_app_stream(&mut stream, &mut handler) {
+            if let Err(error) = handle_app_stream(&mut stream, &handler) {
                 if error.is_transient_io() {
                     crate::logging::info(
                         "local_http_connection_closed_transient",

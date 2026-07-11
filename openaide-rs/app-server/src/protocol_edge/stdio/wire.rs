@@ -21,17 +21,12 @@ pub(crate) struct WireRequest {
     pub meta: RequestMeta,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub(crate) enum WireRequestId {
+    #[default]
     Notification,
     Request(Value),
     Invalid,
-}
-
-impl Default for WireRequestId {
-    fn default() -> Self {
-        Self::Notification
-    }
 }
 
 #[derive(Debug, serde::Serialize)]

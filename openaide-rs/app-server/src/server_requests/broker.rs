@@ -75,8 +75,8 @@ impl ServerRequestBroker {
         let available_deliveries = self
             .available_responders
             .values()
-            .filter_map(|responder| {
-                (responder.delivery.supports_method(&draft.method)
+            .filter(|&responder| {
+                responder.delivery.supports_method(&draft.method)
                     && scope_matches_responder(
                         &draft.scope,
                         &draft.method,
@@ -85,9 +85,9 @@ impl ServerRequestBroker {
                     )
                     && !eligible_deliveries.iter().any(|delivery| {
                         delivery.client_instance_id == responder.delivery.client_instance_id
-                    }))
-                .then(|| responder.delivery.clone())
+                    })
             })
+            .map(|responder| responder.delivery.clone())
             .collect::<Vec<_>>();
         eligible_deliveries.extend(available_deliveries);
         let requires_immediate_responder =

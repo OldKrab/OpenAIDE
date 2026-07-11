@@ -69,7 +69,6 @@ impl TaskSnapshotSource for TaskSnapshotStore {
             .map_err(snapshot_read_error)?
             .into_iter()
             .map(project_task_summary)
-            .into_iter()
             .filter(|task| project_id.is_none_or(|project_id| &task.project_id == project_id))
             .collect();
         let revision = self

@@ -27,9 +27,17 @@ pub(super) fn update_task_config_options(
             }
 
             let task = ctx.task_mut();
-            task.config_options = catalog.current_values();
-            task.config_options_catalog = Some(catalog.clone());
-            task.model_id = catalog.model_id();
+            let config_options = catalog.current_values();
+            let model_id = catalog.model_id();
+            if task.config_options == config_options
+                && task.config_options_catalog.as_ref() == Some(&catalog)
+                && task.model_id == model_id
+            {
+                return Ok(TaskMutationResult::Unchanged);
+            }
+            task.config_options = config_options;
+            task.config_options_catalog = Some(catalog);
+            task.model_id = model_id;
             task.updated_at = now.to_string();
             Ok(TaskMutationResult::Changed)
         },

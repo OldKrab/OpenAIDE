@@ -27,6 +27,9 @@ pub(super) fn update_task_commands(
             }
 
             let task = ctx.task_mut();
+            if task.agent_commands_catalog.as_ref() == Some(&catalog) {
+                return Ok(TaskMutationResult::Unchanged);
+            }
             task.agent_commands_catalog = Some(catalog);
             task.updated_at = now.to_string();
             Ok(TaskMutationResult::Changed)

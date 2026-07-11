@@ -11,6 +11,7 @@ import {
   TASK_CREATE,
   TASK_DISCARD,
   TASK_LIST,
+  TASK_MARK_READ,
   TASK_OPEN,
   TASK_SEND,
   TASK_SET_CONFIG_OPTION,
@@ -18,6 +19,7 @@ import {
   type ClientSnapshot,
   type InitializeParams,
   type InitializeResult,
+  type TaskSnapshot as ProtocolTaskSnapshot,
 } from "@openaide/app-server-client";
 import type { HostToWebviewMessage, TaskSnapshot } from "@openaide/app-shell-contracts";
 import { projectIdForWorkspaceRoot } from "../state/projectIdentity";
@@ -122,6 +124,48 @@ describe("app controller mounted lifecycle", () => {
       mounted.unmount();
     });
     expect(close).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a completed open task unread until the user returns attention", async () => {
+    const windowEvents = new EventTarget();
+    const documentEvents = new EventTarget();
+    vi.stubGlobal("window", Object.assign(windowEvents, {
+      clearTimeout: globalThis.clearTimeout,
+      setTimeout: globalThis.setTimeout,
+    }));
+    vi.stubGlobal("document", Object.assign(documentEvents, { visibilityState: "visible" }));
+    const initial = clientSnapshot();
+    if (!initial.activeTask) throw new Error("expected active task fixture");
+    initial.activeTask.task.unread = true;
+    const acknowledged = protocolTaskSnapshot("task_1", "Task");
+    acknowledged.task.unread = false;
+    acknowledged.revision = 2;
+    const request = vi.fn(async (method: string) => {
+      if (method === TASK_MARK_READ) return { task: acknowledged };
+      throw new Error(method);
+    });
+    backendConnection = {
+      initialize: vi.fn(async () => ({ snapshot: initial })),
+      request: request as unknown as BackendConnection["request"],
+      respond: vi.fn(),
+      close: vi.fn(),
+    };
+    bootstrap = taskBootstrap("task_1");
+
+    await act(async () => {
+      create(<ControllerProbe />);
+      await Promise.resolve();
+    });
+
+    expect(request).not.toHaveBeenCalledWith(TASK_MARK_READ, expect.anything());
+
+    await act(async () => {
+      windowEvents.dispatchEvent(new Event("pointerdown"));
+      await Promise.resolve();
+    });
+
+    expect(request).toHaveBeenCalledWith(TASK_MARK_READ, { taskId: "task_1" });
+    expect(latestController?.state.snapshot?.task.unread).toBe(false);
   });
 
   it("uses App Server Agent snapshots for new-task Agent selection", async () => {
@@ -755,7 +799,7 @@ describe("app controller mounted lifecycle", () => {
     expect(latestController?.state.snapshot?.task.task_id).toBe("task_prepared");
   });
 
-  it("discards its prepared empty Task when routing to an existing Task before send", async () => {
+  it("retains its prepared Draft Task when routing to an existing Task", async () => {
     const request = vi.fn(async (method: string, params?: { taskId?: string }) => {
       if (method === AGENT_LIST_SESSIONS) {
         return { agentId: "codex", projectLabel: "OpenAIDE", sessions: [], nextCursor: null };
@@ -797,12 +841,10 @@ describe("app controller mounted lifecycle", () => {
     });
 
     expect(request).toHaveBeenCalledWith(TASK_OPEN, { taskId: "task_existing" });
-    expect(request.mock.calls.filter(([method]) => method === TASK_DISCARD)).toEqual([
-      [TASK_DISCARD, { taskId: "task_prepared" }],
-    ]);
+    expect(request.mock.calls.filter(([method]) => method === TASK_DISCARD)).toEqual([]);
   });
 
-  it("discards its prepared empty Task when the new-task surface unmounts", async () => {
+  it("retains its prepared Draft Task when the new-task surface unmounts", async () => {
     const request = vi.fn(async (method: string, params?: { taskId?: string }) => {
       if (method === AGENT_LIST_SESSIONS) {
         return { agentId: "codex", projectLabel: "OpenAIDE", sessions: [], nextCursor: null };
@@ -837,9 +879,7 @@ describe("app controller mounted lifecycle", () => {
       await Promise.resolve();
     });
 
-    expect(request.mock.calls.filter(([method]) => method === TASK_DISCARD)).toEqual([
-      [TASK_DISCARD, { taskId: "task_prepared" }],
-    ]);
+    expect(request.mock.calls.filter(([method]) => method === TASK_DISCARD)).toEqual([]);
   });
 
   it("replaces the prepared empty Task when the selected Agent changes", async () => {
@@ -1021,7 +1061,7 @@ describe("app controller mounted lifecycle", () => {
       type: "surface.openTask",
       payload: {
         task_id: "task_new",
-        title: "New task",
+        title: "Sent task",
       },
     });
   });
@@ -1137,6 +1177,15 @@ describe("app controller mounted lifecycle", () => {
       await Promise.resolve();
       await Promise.resolve();
     });
+    expect(postHostMessage).not.toHaveBeenCalledWith(expect.objectContaining({
+      type: "surface.openTask",
+    }));
+
+    await act(async () => {
+      sent.resolve({ task: protocolTaskSnapshot("task_new", "Sent task", { hasMessages: true }) });
+      await sent.promise;
+      await submit;
+    });
     expect(postHostMessage).toHaveBeenCalledWith(expect.objectContaining({
       type: "surface.openTask",
       payload: expect.objectContaining({ task_id: "task_new" }),
@@ -1147,12 +1196,6 @@ describe("app controller mounted lifecycle", () => {
       await Promise.resolve();
     });
     expect(request).toHaveBeenCalledWith(TASK_OPEN, { taskId: "task_new" });
-
-    await act(async () => {
-      sent.resolve({ task: protocolTaskSnapshot("task_new", "Sent task", { hasMessages: true }) });
-      await sent.promise;
-      await submit;
-    });
     expect(latestController?.state.snapshot?.task.title).toBe("Sent task");
     expect(latestController?.state.snapshot?.task.has_messages).toBe(true);
 
@@ -1364,6 +1407,89 @@ describe("app controller mounted lifecycle", () => {
     expect(latestController?.state.tasks.find((task) => task.task_id === "task_new")).toMatchObject({
       has_messages: true,
       title: "Sent task",
+    });
+  });
+
+  it("prepares and exposes Agent config for a new draft after the previous task was accepted", async () => {
+    let createCount = 0;
+    const request = vi.fn(async (method: string) => {
+      if (method === AGENT_LIST_SESSIONS) {
+        return { agentId: "codex", projectLabel: "OpenAIDE", sessions: [], nextCursor: null };
+      }
+      if (method === TASK_CREATE) {
+        createCount += 1;
+        const task = protocolTaskSnapshot(`task_${createCount}`, "New task", { hasMessages: false });
+        if (createCount === 2) {
+          task.agentConfig = {
+            state: "ready",
+            options: [{
+              configId: "model" as never,
+              label: "Model",
+              category: "model",
+              kind: "select",
+              currentValue: "gpt-5",
+              values: [{ value: "gpt-5", label: "GPT-5" }],
+            }],
+          };
+        }
+        return {
+          task,
+        };
+      }
+      if (method === TASK_SEND) {
+        return {
+          task: protocolTaskSnapshot("task_1", "First task", {
+            hasMessages: true,
+            userText: "first message",
+          }),
+        };
+      }
+      if (method === TASK_OPEN) {
+        return { task: protocolTaskSnapshot("task_1", "First task", { hasMessages: true }) };
+      }
+      throw new Error(method);
+    });
+    backendConnection = {
+      initialize: vi.fn(async () => ({ snapshot: clientSnapshot({ includeActiveTask: false }) })),
+      request: request as unknown as BackendConnection["request"],
+      respond: vi.fn(),
+      close: vi.fn(),
+    };
+    bootstrap = webTaskBootstrap(undefined, "project_1");
+
+    await act(async () => {
+      create(<ControllerProbe />);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      latestController?.callbacks.newTask.submit({ prompt: "first message", context: [] });
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    act(() => {
+      webRouteListeners.forEach((listener) => listener(webTaskBootstrap("task_1", "project_1")));
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      latestController?.callbacks.navigation.openNewTask();
+      webRouteListeners.forEach((listener) => listener(webTaskBootstrap(undefined, "project_1")));
+      for (let index = 0; index < 8; index += 1) await Promise.resolve();
+    });
+
+    expect(request.mock.calls.filter(([method]) => method === TASK_CREATE)).toHaveLength(2);
+    expect(latestController?.state.taskSnapshots.task_2).toMatchObject({
+      task: { task_id: "task_2", has_messages: false },
+      agent_config: {
+        agent_id: "codex",
+        status: "ready",
+        options: [expect.objectContaining({ id: "model", current_value: "gpt-5" })],
+      },
     });
   });
 
@@ -2050,7 +2176,7 @@ function protocolTaskSnapshot(
     status?: "idle" | "running";
     userText?: string;
   } = "idle",
-) {
+): ProtocolTaskSnapshot {
   const status = typeof options === "string" ? options : options.status ?? "idle";
   const hasMessages = typeof options === "string" ? true : options.hasMessages ?? true;
   const sendReady = typeof options === "string" ? true : options.sendReady ?? true;

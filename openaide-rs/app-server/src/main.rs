@@ -223,7 +223,7 @@ fn default_runtime_root() -> PathBuf {
         .map(PathBuf::from)
         .or_else(|| env::var_os("XDG_CACHE_HOME").map(PathBuf::from))
         .or_else(|| env::var_os("HOME").map(|home| PathBuf::from(home).join(".cache")))
-        .unwrap_or_else(|| env::temp_dir())
+        .unwrap_or_else(env::temp_dir)
         .join("openaide")
         .join("runtime")
 }

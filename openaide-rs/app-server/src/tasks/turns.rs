@@ -6,8 +6,9 @@ use std::time::{Duration, Instant};
 use crate::agent::{
     AgentPrompt, AgentRuntime, AgentSession, AgentSessionEventSink, TurnCancellation,
 };
+use crate::client_lifecycle::{AppServerTime, ConnectionId, Delivery, RequestCapability};
 use crate::protocol::errors::RuntimeError;
-use crate::server_requests::ServerRequestRuntime;
+use crate::server_requests::{ResponderScope, ServerRequestRuntime};
 use crate::tasks::mutation::TaskMutations;
 use crate::tasks::transitions::TaskTransitions;
 use crate::tasks::turn_events::{TaskEventSink, TaskSessionEventSink};
@@ -26,7 +27,22 @@ pub struct TurnRunner {
 
 impl TurnRunner {
     pub(crate) fn new(mutations: TaskMutations, agent: Arc<dyn AgentRuntime>) -> Self {
-        Self::new_with_server_requests(mutations, agent, ServerRequestRuntime::new())
+        let server_requests = ServerRequestRuntime::new();
+        // TaskService is the legacy direct API and answers permissions through
+        // respond_permission instead of an initialized App Shell connection.
+        // Register that public response path as the eligible responder.
+        let client_instance_id =
+            openaide_app_server_protocol::ids::ClientInstanceId::from("legacy-task-service");
+        server_requests.observe_responder_available(
+            Delivery::new(
+                client_instance_id.clone(),
+                ConnectionId::new("legacy-task-service"),
+            )
+            .with_request_capabilities(vec![RequestCapability::Permission]),
+            &[ResponderScope::Client(client_instance_id)],
+            AppServerTime(0),
+        );
+        Self::new_with_server_requests(mutations, agent, server_requests)
     }
 
     pub(crate) fn new_with_server_requests(

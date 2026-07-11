@@ -152,13 +152,13 @@ impl ServerRequestBroker {
         let request_ids: Vec<RequestId> = self
             .records
             .iter()
-            .filter_map(|(request_id, record)| {
-                (record.status == RequestStatus::Pending
+            .filter(|&(_request_id, record)| {
+                record.status == RequestStatus::Pending
                     && can_deliver_to(record, &delivery.client_instance_id)
                     && delivery.supports_method(&record.method)
-                    && record_matches_responder(record, &delivery.client_instance_id, scopes))
-                .then(|| request_id.clone())
+                    && record_matches_responder(record, &delivery.client_instance_id, scopes)
             })
+            .map(|(request_id, _record)| request_id.clone())
             .collect();
 
         let mut deliveries = Vec::new();

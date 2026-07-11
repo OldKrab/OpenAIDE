@@ -41,6 +41,9 @@ enum AgentCatalogSourceKind {
 }
 
 impl AgentCatalogRecord {
+    // Catalog construction keeps every persisted launch field explicit so new
+    // identity-affecting fields cannot be silently defaulted at this boundary.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn custom(
         id: String,
         label: String,
@@ -124,7 +127,7 @@ impl AgentCatalogRecord {
     }
 
     pub(crate) fn normalized_label_key(&self) -> String {
-        normalized_label_key(&trimmed_or_id(&self.label, &self.id))
+        normalized_label_key(trimmed_or_id(&self.label, &self.id))
     }
 
     pub(crate) fn normalized_launch_command_key(&self) -> String {

@@ -72,11 +72,22 @@ impl TaskProductApi {
             .store
             .list_all_task_records()
             .map_err(protocol_error_from_runtime)?;
-        let owned: std::collections::HashSet<String> = records
+        let mut owned: std::collections::HashSet<String> = records
             .into_iter()
             .filter(|record| record.agent_id == agent_id && record.workspace_root == workspace_root)
             .filter_map(|record| record.agent_session_id)
             .collect();
+        owned.extend(
+            self.preparing_session_ids
+                .lock()
+                .map_err(|_| {
+                    protocol_error_from_runtime(crate::protocol::errors::RuntimeError::Internal(
+                        "preparing session ownership lock poisoned".to_string(),
+                    ))
+                })?
+                .iter()
+                .cloned(),
+        );
         Ok(sessions
             .into_iter()
             .filter(|session| !owned.contains(&session.session_id))

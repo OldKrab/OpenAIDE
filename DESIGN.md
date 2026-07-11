@@ -26,6 +26,12 @@ typography:
     fontWeight: 400
     lineHeight: 1.45
     letterSpacing: "normal"
+  chat:
+    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif"
+    fontSize: "15px"
+    fontWeight: 400
+    lineHeight: 1.5
+    letterSpacing: "normal"
   label:
     fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif"
     fontSize: "11px"
@@ -128,7 +134,8 @@ The palette is restrained and host-native: VS Code tokens are canonical in imple
 
 ### Hierarchy
 - **Title** (600, 13px, 1.35): task row titles, panel headings, popover active labels.
-- **Body** (400, 13px, 1.45): chat prose, composer text, settings descriptions.
+- **Body** (400, 13px, 1.45): composer text, settings descriptions, and standard interface copy.
+- **Chat** (400, 15px, 1.5): user, agent, and system message prose across app shells.
 - **Label** (500, 11px, 1.25): section headers, metadata labels, compact counters.
 - **Mono** (400, 12px, 1.45): paths, commands, terminal output, counters, diff-like content.
 

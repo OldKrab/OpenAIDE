@@ -7,17 +7,15 @@ use crate::protocol::model::{
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case", tag = "status")]
+#[derive(Default)]
 pub enum TaskPreparationRecord {
     Needed,
     Preparing,
+    #[default]
     Ready,
-    Failed { message: String },
-}
-
-impl Default for TaskPreparationRecord {
-    fn default() -> Self {
-        Self::Ready
-    }
+    Failed {
+        message: String,
+    },
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

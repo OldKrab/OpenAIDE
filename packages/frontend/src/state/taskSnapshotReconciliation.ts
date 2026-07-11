@@ -38,13 +38,14 @@ export function applyPendingInputReconciliation(
           ...state.taskInputs,
           [taskId]: reconciliation.taskInputRestoredSendCommitted
             ? { prompt: "", context: [] }
-            : { prompt: input.prompt, context: input.context },
+            : { prompt: "", context: [] },
         }
       : state.taskInputs,
     newTask: reconciliation.newTaskCommitted
       ? {
           ...state.newTask,
           prompt: "",
+          context: [],
           pending: undefined,
           submitting: false,
           error: undefined,

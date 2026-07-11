@@ -75,7 +75,7 @@ export type TaskCallbacks = {
   cancel: () => void;
   fileBrowser?: TaskFileBrowserCallbacks;
   loadChatPage: (beforeCursor: string) => void;
-  loadToolDetail: (artifactId: string) => void;
+  loadToolDetail: (artifactId: string, refresh?: boolean) => void;
   revealAttachment: (attachmentId: string) => Promise<void>;
   removeAttachment: (attachmentId: string) => void;
   respondToPermission: (

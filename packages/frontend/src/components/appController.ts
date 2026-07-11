@@ -34,6 +34,7 @@ import { useAppControllerRefs } from "./appControllerRefs";
 import { useSettingsRouteRefresh } from "./appControllerRouting";
 import { useActiveTaskPolling } from "./appControllerTaskPolling";
 import { useNewTaskPreparation, type PendingNewTaskPreparation } from "./useNewTaskPreparation";
+import { useTaskAttentionReadReceipt } from "./useTaskAttentionReadReceipt";
 import { newTaskProjectIdForRequests } from "./newTaskRequestContext";
 export type AppController = {
   activeTask?: TaskSummary;
@@ -236,6 +237,13 @@ export function useAppController({ backendConnection }: AppControllerOptions = {
     dispatch,
     postHostMessage,
     state,
+  });
+  useTaskAttentionReadReceipt({
+    backendConnection: backendConnectionRef,
+    dispatch,
+    revision: state.snapshot?.revision,
+    taskId: bootstrap.surface === "task" ? state.snapshot?.task.task_id : undefined,
+    unread: state.snapshot?.task.unread === true,
   });
   useEffect(() => {
     const projectId = newTaskProjectIdForRequests(state, newTaskBootstrapProjectId);

@@ -234,7 +234,7 @@ needed.
      starts Native Session preparation asynchronously, and never sends the
      first prompt.
    - `task/send` owns prompt submission, idempotency, stale-send guards,
-     readiness validation, and committed Chat/turn state.
+     authoritative acceptance, and committed Chat/turn state.
    - Current progress: `task/list`, `task/open`, `task/create`, and the first
      `task/send` acceptance path are wired through the App Server Protocol edge.
      `task/create` resolves Project and Agent identity, persists a durable idle
@@ -254,12 +254,20 @@ needed.
      accepted turn, and spawns Agent prompt execution after durable acceptance.
      The first responsive preparation path returns a durable preparing Task
      immediately, starts Native Session preparation after durable creation,
-     publishes readiness updates, gates Send/config mutations until ready, and
-     recovers abandoned preparation after restart as a failed preparation state.
+     publishes readiness updates, allows first Send to become authoritative
+     while preparation continues, and recovers abandoned preparation after
+     restart as a failed preparation state.
      Agent config option metadata from session setup and live config updates is
      preserved and projected into Task snapshots. ACP slash-command updates from
      prepared, active, and loaded sessions are preserved as Task command
-     readiness metadata and projected into Task snapshots.
+     readiness metadata and projected into Task snapshots. Repeated
+     `task/create` for the same Project Context and Agent reopens the same empty
+     Draft Task. Leaving or unmounting New Task does not discard it. First Send
+     returns from durable user-message and Turn acceptance without waiting for
+     Native Session acquisition or prompt execution; the background Turn runner
+     waits for the existing preparation and reuses its session. Frontend keeps
+     submitted text and attachments in the disabled composer until Backend
+     acceptance and does not render pending Shell input as Chat.
 
 4. **Wire `server_requests` into permissions and shell capabilities.**
    - Replace direct `HostBridge` waiters and prompt-local permission handling

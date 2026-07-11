@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use ts_rs::TS;
 
 use crate::ids::{
@@ -14,6 +15,8 @@ pub struct TaskCreateParams {
     pub agent_id: AgentId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace_root: Option<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub config_options: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
@@ -102,6 +105,18 @@ pub struct TaskOpenParams {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskOpenResult {
+    pub task: TaskSnapshot,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskMarkReadParams {
+    pub task_id: TaskId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskMarkReadResult {
     pub task: TaskSnapshot,
 }
 

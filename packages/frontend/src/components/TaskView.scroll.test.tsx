@@ -46,30 +46,38 @@ describe("TaskView follow scroll", () => {
     act(() => tree.update(<TaskView {...taskViewProps(snapshot("active", 3))} />));
 
     expect(messageList.scrollTop).toBe(1098);
-    expect(jumpButtons(tree)).toHaveLength(1);
-
-    act(() => {
-      messageList.scrollTop = 1150;
-      messageListView(tree).props.onScroll({ currentTarget: messageList });
-    });
-
     expect(jumpButtons(tree)).toHaveLength(0);
 
-    act(() => {
-      messageList.scrollTop = 1098;
-      messageListView(tree).props.onScroll({ currentTarget: messageList });
-      messageListView(tree).props.onWheel({ deltaY: 8 });
-      messageList.scrollTop = 1150;
-      messageListView(tree).props.onScroll({ currentTarget: messageList });
-    });
-
-    expect(messageList.scrollTop).toBe(1150);
-    expect(jumpButtons(tree)).toHaveLength(0);
-
-    messageList.scrollHeight = 1600;
+    messageList.scrollHeight = 1650;
     act(() => tree.update(<TaskView {...taskViewProps(snapshot("active", 4))} />));
 
-    expect(messageList.scrollTop).toBe(1200);
+    expect(jumpButtons(tree)).toHaveLength(1);
+    expect(jumpButtons(tree)[0].props["aria-label"]).toBe("Jump to latest message");
+    expect(jumpButtons(tree)[0].props.title).toBe("Jump to latest");
+    expect(jumpButtons(tree)[0].findByType("svg").props["aria-hidden"]).toBe("true");
+
+    act(() => {
+      messageList.scrollTop = 1250;
+      messageListView(tree).props.onScroll({ currentTarget: messageList });
+    });
+
+    expect(jumpButtons(tree)).toHaveLength(0);
+
+    act(() => {
+      messageList.scrollTop = 1198;
+      messageListView(tree).props.onScroll({ currentTarget: messageList });
+      messageListView(tree).props.onWheel({ deltaY: 8 });
+      messageList.scrollTop = 1250;
+      messageListView(tree).props.onScroll({ currentTarget: messageList });
+    });
+
+    expect(messageList.scrollTop).toBe(1250);
+    expect(jumpButtons(tree)).toHaveLength(0);
+
+    messageList.scrollHeight = 1700;
+    act(() => tree.update(<TaskView {...taskViewProps(snapshot("active", 5))} />));
+
+    expect(messageList.scrollTop).toBe(1300);
     expect(jumpButtons(tree)).toHaveLength(0);
   });
 
@@ -96,6 +104,67 @@ describe("TaskView follow scroll", () => {
 
     expect(focusCallsAfterFirstTask).toBeGreaterThan(0);
     expect(focus.mock.calls.length).toBeGreaterThan(focusCallsAfterFirstTask);
+  });
+
+  it("smoothly returns to the latest message when the user clicks the jump control", async () => {
+    const { TaskView } = await import("./TaskView");
+    const messageList = scrollNode({ clientHeight: 400, scrollHeight: 1400 });
+    const animationFrames: FrameRequestCallback[] = [];
+    let now = 0;
+    vi.stubGlobal("performance", { now: () => now });
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      animationFrames.push(callback);
+      return animationFrames.length;
+    });
+    let tree!: ReactTestRenderer;
+
+    act(() => {
+      tree = create(<TaskView {...taskViewProps(snapshot("inactive"))} />, {
+        createNodeMock: (element) => (
+          (element.props as { className?: string }).className === "message-list" ? messageList : null
+        ),
+      });
+    });
+    act(() => {
+      messageListView(tree).props.onWheel({ deltaY: -8 });
+      messageList.scrollTop = 800;
+      messageListView(tree).props.onScroll({ currentTarget: messageList });
+    });
+
+    act(() => jumpButtons(tree)[0].props.onClick());
+    expect(messageList.scrollTop).toBe(800);
+
+    now = 90;
+    act(() => animationFrames.shift()?.(now));
+    expect(messageList.scrollTop).toBeGreaterThan(800);
+    expect(messageList.scrollTop).toBeLessThan(1000);
+
+    now = 180;
+    act(() => animationFrames.shift()?.(now));
+    expect(messageList.scrollTop).toBe(1000);
+  });
+
+  it("keeps a pending follow-up in the disabled composer without changing Chat", async () => {
+    const { TaskView } = await import("./TaskView");
+    const props = taskViewProps(snapshot("inactive"));
+    let tree!: ReactTestRenderer;
+
+    act(() => {
+      tree = create(
+        <TaskView
+          {...props}
+          taskInput={{
+            prompt: "",
+            context: [],
+            pending: { prompt: "Ship the follow-up", context: [] },
+          }}
+        />,
+      );
+    });
+
+    expect(tree.root.findByProps({ className: "composer-editor" }).props["aria-disabled"]).toBe(true);
+    expect(tree.root.findByProps({ className: "composer-submit-pending" })).toBeTruthy();
+    expect(tree.root.findAllByProps({ className: "working-status" })).toHaveLength(0);
   });
 });
 

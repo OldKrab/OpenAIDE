@@ -63,7 +63,7 @@ fn agent_settings_details_include_disabled_builtins_and_custom_launch_details() 
         .iter()
         .find(|agent| agent.agent_id.as_str() == CODEX_AGENT_ID)
         .unwrap();
-    assert_eq!(codex.enabled, false);
+    assert!(!codex.enabled);
     assert_eq!(codex.status, AgentSettingsStatus::Disabled);
 
     let custom = result

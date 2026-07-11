@@ -684,10 +684,10 @@ describe("Composer view behavior", () => {
     click(buttonByLabel(renderer.root, "Send message"));
 
     expect(onSubmit).toHaveBeenCalledWith("seed grows");
-    expect(editorDom.innerHTML).toBe("");
+    expect(editorDom.innerHTML).toBe("seed grows");
   });
 
-  it("clears the local draft immediately after submitting from an active task composer", () => {
+  it("clears the local draft after Backend acceptance settles submission", () => {
     const onSubmit = vi.fn();
     const { editorDom, renderer } = renderComposerWithEditorDom({ commandCatalog: commandCatalog(), onCancel: vi.fn(), onSubmit, prompt: "" });
 
@@ -695,7 +695,10 @@ describe("Composer view behavior", () => {
     inputText(textarea(renderer.root), "Try reload target again");
     click(buttonByLabel(renderer.root, "Send message"));
     act(() => {
-      renderer.update(composerElement({ commandCatalog: commandCatalog(), onCancel: vi.fn(), onSubmit, prompt: "" }));
+      renderer.update(composerElement({ commandCatalog: commandCatalog(), onCancel: vi.fn(), onSubmit, prompt: "", submitPending: true }));
+    });
+    act(() => {
+      renderer.update(composerElement({ commandCatalog: commandCatalog(), onCancel: vi.fn(), onSubmit, prompt: "", submitPending: false }));
     });
 
     expect(editorDom.innerHTML).toBe("");
@@ -731,7 +734,7 @@ describe("Composer view behavior", () => {
     expect(nextOnChange).toHaveBeenCalledWith("commit through latest callback");
   });
 
-  it("inserts a newline from the configured newline shortcut when Enter sends", () => {
+  it("inserts a visible newline from the configured newline shortcut when Enter sends", () => {
     const onChange = vi.fn();
     const preventDefault = vi.fn();
     const { editorDom, renderer } = renderComposerWithEditorDom({
@@ -753,7 +756,7 @@ describe("Composer view behavior", () => {
 
     expect(preventDefault).toHaveBeenCalledTimes(1);
     expect(onChange).not.toHaveBeenCalled();
-    expect(editorDom.innerHTML).toBe("line1<br>");
+    expect(editorDom.innerHTML).toBe("line1<br><br>");
   });
 
   it("renders disabled composer inputs and controls as disabled", () => {
@@ -959,6 +962,7 @@ function composerElement(overrides: Partial<ComposerTestProps> = {}) {
       showAgentSelector={overrides.showAgentSelector}
       showIsolationSelector={overrides.showIsolationSelector}
       submitDisabled={overrides.submitDisabled ?? false}
+      submitPending={overrides.submitPending}
       submitShortcut={overrides.submitShortcut ?? "mod_enter"}
     />
   );
@@ -990,6 +994,7 @@ type ComposerTestProps = {
   showAgentSelector: boolean;
   showIsolationSelector: boolean;
   submitDisabled: boolean;
+  submitPending: boolean;
   submitShortcut: ComposerSubmitShortcut;
 };
 

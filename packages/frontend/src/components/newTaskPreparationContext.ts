@@ -12,16 +12,13 @@ export function newTaskPreparationKey(state: Pick<AppState, "newTask">) {
 
 export function taskCreateParams(state: Pick<AppState, "newTask">, projectId: string) {
   const workspaceRoot = taskCreateWorkspaceRoot(state);
-  return workspaceRoot
-    ? {
-        projectId: projectId as ProjectId,
-        agentId: state.newTask.selection.agentId as AgentId,
-        workspaceRoot,
-      }
-    : {
-        projectId: projectId as ProjectId,
-        agentId: state.newTask.selection.agentId as AgentId,
-      };
+  const configOptions = state.newTask.selection.configOptions;
+  return {
+    projectId: projectId as ProjectId,
+    agentId: state.newTask.selection.agentId as AgentId,
+    ...(workspaceRoot ? { workspaceRoot } : {}),
+    ...(Object.keys(configOptions).length > 0 ? { configOptions } : {}),
+  };
 }
 
 function taskCreateWorkspaceRoot(state: Pick<AppState, "newTask">) {

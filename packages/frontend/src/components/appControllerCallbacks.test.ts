@@ -36,6 +36,7 @@ import {
   type BackendConnection,
   type FileBrowserEntryId,
   type FileBrowserRootId,
+  type TaskSnapshot as ProtocolTaskSnapshot,
 } from "@openaide/app-server-client";
 import { createAppCallbacks } from "./appControllerCallbacks";
 import { PENDING_TASK_SEND_RECOVERY_KEY } from "../services/pendingTaskSendRecovery";
@@ -63,7 +64,7 @@ describe("app controller callbacks", () => {
     });
   });
 
-  it("submits a new task through typed create, config, and send requests", async () => {
+  it("submits selected config atomically with Draft Task creation before Send", async () => {
     const dispatch = vi.fn();
     const request = vi.fn(async (method: string) => {
       if (method === TASK_CREATE) return { task: protocolTaskSnapshot("task_1", "New task") };
@@ -94,16 +95,11 @@ describe("app controller callbacks", () => {
     expect(request).toHaveBeenNthCalledWith(1, TASK_CREATE, {
       projectId: "project_1",
       agentId: "codex",
+      configOptions: { model: "gpt" },
     });
-    expect(request).toHaveBeenNthCalledWith(2, TASK_SET_CONFIG_OPTION, {
+    expect(request).toHaveBeenNthCalledWith(2, TASK_SEND, {
       taskId: "task_1",
-      configId: "model",
-      value: "gpt",
-      clientMutationId: expect.stringMatching(/^frontend-new-task-model-/),
-    });
-    expect(request).toHaveBeenNthCalledWith(3, TASK_SEND, {
-      taskId: "task_1",
-      taskRevision: 3,
+      taskRevision: 2,
       idempotencyKey: expect.stringMatching(/^frontend-send-/),
       message: { text: "Build the thing" },
     });
@@ -442,7 +438,7 @@ describe("app controller callbacks", () => {
     });
   });
 
-  it("opens the prepared new Task before the first send finishes", async () => {
+  it("keeps New Task visible until Send returns the authoritative user message", async () => {
     const dispatch = vi.fn();
     const pendingSend = deferred<{ task: ReturnType<typeof protocolTaskSnapshot> }>();
     const request = vi.fn((method: string) => {
@@ -470,16 +466,43 @@ describe("app controller callbacks", () => {
 
     expect(request).toHaveBeenCalledWith(TASK_SEND, expect.objectContaining({ taskId: "task_1" }));
     expect(dispatch).toHaveBeenCalledWith({ type: "taskInput:submit", taskId: "task_1" });
+    expect(postHostMessage).not.toHaveBeenCalledWith(expect.objectContaining({
+      type: "surface.openTask",
+    }));
+
+    pendingSend.resolve({
+      task: {
+        ...protocolTaskSnapshot("task_1", "Accepted task"),
+        revision: 3,
+        chat: {
+          items: [{
+            messageId: "user-message" as never,
+            role: "user" as const,
+            status: "complete" as const,
+            parts: [{ kind: "text" as const, text: "Build the thing" }],
+          }],
+          hasMoreBefore: false,
+          hasMessages: true,
+        },
+      },
+    });
+    await settlePromises();
+
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
+      type: "snapshot",
+      snapshot: expect.objectContaining({
+        chat: expect.objectContaining({
+          items: [expect.objectContaining({ message: expect.objectContaining({ text: "Build the thing" }) })],
+        }),
+      }),
+    }));
     expect(postHostMessage).toHaveBeenCalledWith({
       type: "surface.openTask",
       payload: {
         task_id: "task_1",
-        title: "New task",
+        title: "Accepted task",
       },
     });
-
-    pendingSend.resolve({ task: { ...protocolTaskSnapshot("task_1", "New task"), revision: 3 } });
-    await settlePromises();
   });
 
   it("opens existing tasks through App Server so unread is cleared", async () => {
@@ -590,14 +613,17 @@ describe("app controller callbacks", () => {
         dispatch,
         state,
       }).newTask.submit();
-      await Promise.resolve();
-      await Promise.resolve();
+      for (let index = 0; index < 8; index += 1) await Promise.resolve();
 
       expect(request).toHaveBeenNthCalledWith(1, TASK_CREATE, {
         projectId: "project_1",
         agentId: "codex",
       });
       expect(request).not.toHaveBeenCalledWith(TASK_OPEN, expect.anything());
+      expect(request).toHaveBeenCalledWith(TASK_SEND, expect.objectContaining({
+        taskId: "task_1",
+        message: { text: "Build the thing" },
+      }));
       expect(postHostMessage).toHaveBeenCalledWith({
         type: "surface.openTask",
         payload: {
@@ -696,13 +722,9 @@ describe("app controller callbacks", () => {
     expect(dispatch).toHaveBeenCalledWith({ type: "taskInput:prompt", taskId: "task_1", prompt: "Build the thing" });
     expect(dispatch).toHaveBeenCalledWith({ type: "taskInput:error", taskId: "task_1", message: "send failed" });
     expect(dispatch).toHaveBeenCalledWith({ type: "submit:error", message: "send failed" });
-    expect(postHostMessage).toHaveBeenCalledWith({
+    expect(postHostMessage).not.toHaveBeenCalledWith(expect.objectContaining({
       type: "surface.openTask",
-      payload: {
-        task_id: "task_1",
-        title: "New task",
-      },
-    });
+    }));
   });
 
   it("keeps pending new-task send recovery when navigation aborts the send request", async () => {
@@ -739,7 +761,7 @@ describe("app controller callbacks", () => {
     }
   });
 
-  it("waits for new-task preparation before applying task config options", async () => {
+  it("sends immediately when the prepared Task already owns the selected config options", async () => {
     vi.useFakeTimers();
     try {
       const dispatch = vi.fn();
@@ -781,20 +803,18 @@ describe("app controller callbacks", () => {
       expect(request).toHaveBeenNthCalledWith(1, TASK_CREATE, {
         projectId: "project_1",
         agentId: "codex",
+        configOptions: { mode: "agent" },
       });
-      expect(request).not.toHaveBeenCalledWith(TASK_SET_CONFIG_OPTION, expect.anything());
-
-      await vi.advanceTimersByTimeAsync(1_000);
-      await Promise.resolve();
-      await Promise.resolve();
-
-      expect(request).toHaveBeenNthCalledWith(2, TASK_OPEN, { taskId: "task_1" });
-      expect(request).toHaveBeenNthCalledWith(3, TASK_SET_CONFIG_OPTION, {
+      expect(request).not.toHaveBeenCalledWith(TASK_OPEN, expect.anything());
+      expect(request).not.toHaveBeenCalledWith(TASK_SET_CONFIG_OPTION, {
         taskId: "task_1",
         configId: "mode",
         value: "agent",
         clientMutationId: expect.stringMatching(/^frontend-new-task-mode-/),
       });
+      expect(request).toHaveBeenCalledWith(TASK_SEND, expect.objectContaining({
+        taskId: "task_1",
+      }));
     } finally {
       vi.useRealTimers();
     }
@@ -2682,7 +2702,7 @@ function snapshot(taskId: string): TaskSnapshot {
   };
 }
 
-function protocolTaskSnapshot(taskId: string, title: string) {
+function protocolTaskSnapshot(taskId: string, title: string): ProtocolTaskSnapshot {
   return {
     task: protocolTaskSummary(taskId, title),
     revision: 2,
@@ -2690,7 +2710,7 @@ function protocolTaskSnapshot(taskId: string, title: string) {
     agentConfig: { state: "ready" as const, options: [] },
     agentCommands: { state: "ready" as const, commands: [] },
     sendCapability: { state: "ready" as const },
-    chat: { items: [], hasMoreBefore: false },
+    chat: { items: [], hasMoreBefore: false, hasMessages: true },
   };
 }
 

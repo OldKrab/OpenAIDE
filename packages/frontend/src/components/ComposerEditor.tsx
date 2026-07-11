@@ -2,17 +2,21 @@ import { forwardRef, memo, useImperativeHandle, useLayoutEffect, useRef } from "
 import type { ClipboardEvent, KeyboardEvent, MutableRefObject } from "react";
 import type { AgentCommandsCatalog } from "@openaide/app-shell-contracts";
 import { exactSlashCommandMatches } from "./commandSearch";
+import {
+  captureFocusedEditorSelection,
+  restoreEditorSelection,
+  selectionOffsets,
+  setSelectionOffsets,
+  type EditorSelection,
+} from "./composerEditorSelection";
+
+export { captureFocusedEditorSelection, restoreEditorSelection } from "./composerEditorSelection";
 
 export type ComposerEditorHandle = {
   focus: () => void;
   selectionRange: () => { start: number; end: number };
   selectionStart: () => number;
   setSelectionRange: (start: number, end: number) => void;
-};
-
-type EditorSelection = {
-  start: number;
-  end: number;
 };
 
 type ComposerEditorProps = {
@@ -180,7 +184,9 @@ export function renderEditorHtml(text: string, commandCatalog: AgentCommandsCata
 }
 
 function renderPlainTextHtml(text: string) {
-  return text.split("\n").map(escapeHtml).join("<br>");
+  const html = text.split("\n").map(escapeHtml).join("<br>");
+  // A trailing BR is only a caret marker in contenteditable; a second BR makes the empty line visible.
+  return text.endsWith("\n") ? `${html}<br>` : html;
 }
 
 function escapeHtml(value: string) {
@@ -205,70 +211,4 @@ function escapeHtml(value: string) {
 function editableText(root: HTMLElement) {
   const text = root.innerText ?? root.textContent ?? "";
   return text.replace(/\n$/, "");
-}
-
-function selectionOffsets(root: HTMLElement) {
-  const fallback = editableText(root).length;
-  const selection = root.ownerDocument?.getSelection?.();
-  if (!selection || selection.rangeCount === 0) return { start: fallback, end: fallback };
-  const range = selection.getRangeAt(0);
-  return {
-    start: boundaryOffset(root, range.startContainer, range.startOffset),
-    end: boundaryOffset(root, range.endContainer, range.endOffset),
-  };
-}
-
-function boundaryOffset(root: HTMLElement, container: Node, offset: number) {
-  if (typeof root.contains === "function" && container !== root && !root.contains(container)) {
-    return editableText(root).length;
-  }
-  const range = root.ownerDocument.createRange();
-  range.selectNodeContents(root);
-  try {
-    range.setEnd(container, offset);
-  } catch {
-    return editableText(root).length;
-  }
-  return range.toString().length;
-}
-
-export function captureFocusedEditorSelection(root: HTMLElement | null): EditorSelection | undefined {
-  if (!root || root.ownerDocument.activeElement !== root) return undefined;
-  return selectionOffsets(root);
-}
-
-export function restoreEditorSelection(root: HTMLElement, selection: EditorSelection) {
-  if (root.ownerDocument.activeElement !== root) return;
-  setSelectionOffsets(root, selection.start, selection.end);
-}
-
-function setSelectionOffsets(root: HTMLElement, start: number, end: number) {
-  const doc = root.ownerDocument;
-  const selection = doc.getSelection();
-  if (!selection) return;
-  const startBoundary = textBoundary(root, start);
-  const endBoundary = textBoundary(root, end);
-  if (!startBoundary || !endBoundary) return;
-  const range = doc.createRange();
-  range.setStart(startBoundary.node, startBoundary.offset);
-  range.setEnd(endBoundary.node, endBoundary.offset);
-  selection.removeAllRanges();
-  selection.addRange(range);
-}
-
-function textBoundary(root: HTMLElement, offset: number) {
-  const doc = root.ownerDocument;
-  const showText = doc.defaultView?.NodeFilter.SHOW_TEXT ?? 4;
-  const walker = doc.createTreeWalker(root, showText);
-  let remaining = Math.max(0, offset);
-  let node = walker.nextNode();
-  while (node) {
-    const length = node.textContent?.length ?? 0;
-    if (remaining <= length) {
-      return { node, offset: remaining };
-    }
-    remaining -= length;
-    node = walker.nextNode();
-  }
-  return { node: root, offset: root.childNodes.length };
 }

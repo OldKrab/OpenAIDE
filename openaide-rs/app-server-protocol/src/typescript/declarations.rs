@@ -90,9 +90,10 @@ use crate::task::{
     ActivityToolOutput, ComposerMessage, TaskAdoptNativeSessionParams,
     TaskAdoptNativeSessionResult, TaskCancelParams, TaskCancelResult, TaskChatPageParams,
     TaskChatPageResult, TaskCreateParams, TaskCreateResult, TaskDiscardParams, TaskDiscardResult,
-    TaskListParams, TaskListResult, TaskOpenParams, TaskOpenResult, TaskSendParams, TaskSendResult,
-    TaskSetArchivedParams, TaskSetArchivedResult, TaskSetConfigOptionParams,
-    TaskSetConfigOptionResult, TaskToolDetailParams, TaskToolDetailResult,
+    TaskListParams, TaskListResult, TaskMarkReadParams, TaskMarkReadResult, TaskOpenParams,
+    TaskOpenResult, TaskSendParams, TaskSendResult, TaskSetArchivedParams, TaskSetArchivedResult,
+    TaskSetConfigOptionParams, TaskSetConfigOptionResult, TaskToolDetailParams,
+    TaskToolDetailResult,
 };
 use crate::workspace::{
     WorkspaceBrowserDirectory, WorkspaceBrowserEntry, WorkspaceBrowserRoot,
@@ -296,6 +297,8 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<ActivityToolField>(output, config);
     push_decl::<TaskOpenParams>(output, config);
     push_decl::<TaskOpenResult>(output, config);
+    push_decl::<TaskMarkReadParams>(output, config);
+    push_decl::<TaskMarkReadResult>(output, config);
     push_decl::<TaskListParams>(output, config);
     push_decl::<TaskListResult>(output, config);
     push_decl::<TaskDiscardParams>(output, config);

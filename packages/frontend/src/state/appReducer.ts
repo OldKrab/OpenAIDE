@@ -259,12 +259,13 @@ function reduceGlobalState(state: AppState, action: GlobalAction): AppState {
               ...state.taskInputs,
               [action.snapshot.task.task_id]: pendingReconciliation.taskInputRestoredSendCommitted
                 ? { prompt: "", context: [] }
-                : { prompt: input.prompt, context: input.context },
+                : { prompt: "", context: [] },
             }
           : state.taskInputs,
         newTask: {
           ...state.newTask,
           prompt: newTaskCommitted ? "" : state.newTask.prompt,
+          context: newTaskCommitted ? [] : state.newTask.context,
           pending: newTaskCommitted ? undefined : state.newTask.pending,
           submitting: newTaskCommitted ? false : state.newTask.submitting,
           error: newTaskCommitted ? undefined : state.newTask.error,

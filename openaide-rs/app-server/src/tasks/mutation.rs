@@ -23,6 +23,9 @@ pub(crate) struct TaskMutations {
 }
 
 #[derive(Debug, Clone)]
+// Commit facts are passed directly from the serialized mutation boundary;
+// rejected commits stay allocation-free and do not justify boxing all success.
+#[allow(clippy::large_enum_variant)]
 pub(crate) enum TaskCommitOutcome {
     Committed(TaskCommitFacts),
     Rejected(TaskCommitRejection),

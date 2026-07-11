@@ -56,12 +56,14 @@ export function NewTaskView({
   const composerConfigOptions = preparedConfigOptions?.options.length ? preparedConfigOptions : undefined;
   const composerConfigOptionsError = preparedTaskId ? undefined : state.newTask.configOptionsError;
   const composerAttachments = state.newTask.submitting
-    ? []
+    ? state.newTask.pending?.context ?? preparedTaskInput?.pending?.context ?? []
     : preparedTaskInput?.context ?? state.newTask.context;
   const attachmentOnlySend = preparedTaskId !== undefined
     && state.snapshot?.send_capability.attachment_only === true;
   const showTextRequirementError = state.snapshot?.send_capability.state !== "loading";
-  const externalPrompt = state.newTask.submitting ? "" : preparedTaskInput?.prompt ?? state.newTask.prompt;
+  const externalPrompt = state.newTask.submitting
+    ? state.newTask.pending?.prompt ?? preparedTaskInput?.pending?.prompt ?? ""
+    : preparedTaskInput?.prompt ?? state.newTask.prompt;
   const [localPrompt, setLocalPrompt] = useState(externalPrompt);
   const lastExternalPromptRef = useRef(externalPrompt);
   useEffect(() => {
@@ -144,6 +146,9 @@ export function NewTaskView({
       onCancel={state.newTask.submitting ? onCancelTask : undefined}
       onChange={(prompt) => {
         setLocalPrompt(prompt);
+        dispatch(preparedTaskId
+          ? { type: "taskInput:prompt", taskId: preparedTaskId, prompt }
+          : { type: "prompt", prompt });
       }}
       onUnsupportedImageAttachment={(message) =>
         dispatch({
@@ -172,6 +177,7 @@ export function NewTaskView({
       agents={agentChoices}
       submitShortcut={submitShortcut}
       submitDisabled={!canSend}
+      submitPending={state.newTask.submitting}
       submitRequiresText={!attachmentOnlySend}
       showTextRequirementError={showTextRequirementError}
       showAgentSelector={false}
@@ -179,15 +185,13 @@ export function NewTaskView({
     />
   );
 
-  if (state.newTask.submitting) {
+  if (state.newTask.submitting && openingNativeSession) {
     return (
       <NewTaskStartingView
         agentId={state.newTask.selection.agentId}
         agentName={state.newTask.selection.agentLabel}
         composer={composer}
         openingNativeSession={openingNativeSession}
-        pendingContext={state.newTask.pending?.context ?? []}
-        pendingPrompt={state.newTask.pending?.prompt ?? ""}
         workspaceRoot={state.newTask.selection.workspaceRoot}
       />
     );
@@ -311,7 +315,7 @@ export function NewTaskView({
           </div>
         </div>
         {composer}
-        {waitStatus ? (
+        {waitStatus && !state.newTask.submitting ? (
           <div className="inline-status" role="status" aria-live="polite">
             <span className="working-status-dots" aria-hidden="true">
               <span />

@@ -35,6 +35,7 @@ fn live_acp_message_ids_create_separate_chat_messages() {
             project_id: project_id_for_workspace(&workspace_root),
             agent_id: AgentId::from("codex"),
             workspace_root: None,
+            config_options: Default::default(),
         })
         .expect("create task");
     let task_id = created.task.task_id;
@@ -94,6 +95,7 @@ fn coalesced_steering_response_clears_active_turn_without_cancel() {
             project_id: project_id_for_workspace(&workspace_root),
             agent_id: AgentId::from("codex"),
             workspace_root: None,
+            config_options: Default::default(),
         })
         .expect("create task");
     let task_id = created.task.task_id;
@@ -153,6 +155,7 @@ fn steered_acp_prompt_uses_fresh_chat_identity_across_permission_boundary() {
             project_id,
             agent_id: AgentId::from("codex"),
             workspace_root: None,
+            config_options: Default::default(),
         })
         .expect("create task");
     let task_id = created.task.task_id;

@@ -2,10 +2,10 @@ use openaide_app_server_protocol::envelopes::RequestMeta;
 use openaide_app_server_protocol::task::{
     TaskAdoptNativeSessionParams, TaskAdoptNativeSessionResult, TaskCancelParams, TaskCancelResult,
     TaskChatPageParams, TaskChatPageResult, TaskCreateParams, TaskCreateResult, TaskDiscardParams,
-    TaskDiscardResult, TaskListParams, TaskListResult, TaskOpenParams, TaskOpenResult,
-    TaskSendParams, TaskSendResult, TaskSetArchivedParams, TaskSetArchivedResult,
-    TaskSetConfigOptionParams, TaskSetConfigOptionResult, TaskToolDetailParams,
-    TaskToolDetailResult,
+    TaskDiscardResult, TaskListParams, TaskListResult, TaskMarkReadParams, TaskMarkReadResult,
+    TaskOpenParams, TaskOpenResult, TaskSendParams, TaskSendResult, TaskSetArchivedParams,
+    TaskSetArchivedResult, TaskSetConfigOptionParams, TaskSetConfigOptionResult,
+    TaskToolDetailParams, TaskToolDetailResult,
 };
 use serde_json::Value;
 
@@ -214,6 +214,35 @@ impl RpcGateway {
         };
         let task = self.task_with_pending_requests(task);
         self.result::<TaskOpenResult>(connection_id, id, meta, TaskOpenResult { task })
+    }
+
+    pub(super) fn handle_task_mark_read(
+        &mut self,
+        connection_id: ConnectionId,
+        id: String,
+        params: Value,
+        meta: RequestMeta,
+        now: AppServerTime,
+    ) -> GatewayOutcome {
+        let params = match serde_json::from_value::<TaskMarkReadParams>(params) {
+            Ok(params) => params,
+            Err(error) => {
+                return self.error(connection_id, id, meta, responses::invalid_params(error))
+            }
+        };
+        let task = match self.task_open.mark_read(params) {
+            Ok(task) => task,
+            Err(error) => return self.error(connection_id, id, meta, error),
+        };
+        let task = self.task_with_pending_requests(task);
+        let events = self.publish_task_updates(&task, now);
+        self.result_with_events::<TaskMarkReadResult>(
+            connection_id,
+            id,
+            meta,
+            TaskMarkReadResult { task },
+            events,
+        )
     }
 
     pub(super) fn handle_task_chat_page(

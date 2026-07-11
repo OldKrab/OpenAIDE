@@ -124,10 +124,10 @@ describe("task working status label", () => {
     expect(label).not.toContain("inProgress");
   });
 
-  it("uses explicit labels for sending and blocked states", async () => {
+  it("keeps Shell sending state out of Chat and labels blocked states", async () => {
     const { taskWorkingStatusLabel } = await import("./App");
 
-    expect(taskWorkingStatusLabel([], "inactive", true)).toBe("Sending message");
+    expect(taskWorkingStatusLabel([], "inactive", true)).toBeUndefined();
     expect(taskWorkingStatusLabel([], "blocked", false)).toBe("Permission needed");
     expect(taskWorkingStatusLabel([systemMessage("app-server-preparation")], "blocked", false)).toBe("Preparing task");
     expect(taskWorkingStatusLabel([], "inactive", false)).toBeUndefined();

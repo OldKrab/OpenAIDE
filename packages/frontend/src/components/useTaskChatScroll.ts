@@ -9,6 +9,8 @@ import {
 
 type ScrollOwnership = "following" | "reading";
 const USER_SCROLL_INTENT_WINDOW_MS = 500;
+const SHOW_JUMP_TO_LATEST_DISTANCE_PX = 96;
+const HIDE_JUMP_TO_LATEST_DISTANCE_PX = 48;
 
 // Owns the Chat viewport policy. Geometry can initialize ownership, but only explicit user intent
 // changes it afterward, so streamed layout changes cannot steal control from the reader.
@@ -29,14 +31,23 @@ export function useTaskChatScroll({
 }) {
   const messageListRef = useRef<HTMLDivElement | null>(null);
   const prependAnchorRef = useRef<{ scrollHeight: number; scrollTop: number } | undefined>(undefined);
+  const lastScrollHeightRef = useRef<number | undefined>(undefined);
   const lastScrollTopRef = useRef<number | undefined>(undefined);
   const skipGeneratedFollowOnceRef = useRef(false);
   const scrollOwnershipRef = useRef<ScrollOwnership>("following");
   const touchScrollActiveRef = useRef(false);
   const towardLatestIntentUntilRef = useRef(0);
-  const [atLatest, setAtLatest] = useState(true);
+  const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const setScrollOwnership = useCallback((ownership: ScrollOwnership) => {
     scrollOwnershipRef.current = ownership;
+  }, []);
+  const updateJumpToLatestVisibility = useCallback((messageList: HTMLDivElement) => {
+    const distanceFromBottom = distanceFromLatest(messageList);
+    setShowJumpToLatest((visible) => (
+      visible
+        ? distanceFromBottom > HIDE_JUMP_TO_LATEST_DISTANCE_PX
+        : distanceFromBottom > SHOW_JUMP_TO_LATEST_DISTANCE_PX
+    ));
   }, []);
 
   // Scroll persistence feeds this hook's props. Restore only when task identity changes so user scrolling
@@ -51,8 +62,9 @@ export function useTaskChatScroll({
       scrollHeight: messageList.scrollHeight,
       clientHeight: messageList.clientHeight,
     }) ? "following" : "reading");
-    setAtLatest(isAtLatest(messageList));
+    setShowJumpToLatest(distanceFromLatest(messageList) > SHOW_JUMP_TO_LATEST_DISTANCE_PX);
     lastScrollTopRef.current = scrollTop;
+    lastScrollHeightRef.current = messageList.scrollHeight;
   }, [setScrollOwnership, taskId]);
 
   useLayoutEffect(() => {
@@ -66,10 +78,11 @@ export function useTaskChatScroll({
       nextScrollHeight: messageList.scrollHeight,
     });
     lastScrollTopRef.current = messageList.scrollTop;
-    setAtLatest(isAtLatest(messageList));
+    lastScrollHeightRef.current = messageList.scrollHeight;
+    updateJumpToLatestVisibility(messageList);
     prependAnchorRef.current = undefined;
     skipGeneratedFollowOnceRef.current = true;
-  }, [itemCount, pendingPrepend]);
+  }, [itemCount, pendingPrepend, updateJumpToLatestVisibility]);
 
   useLayoutEffect(() => {
     const messageList = messageListRef.current;
@@ -78,9 +91,13 @@ export function useTaskChatScroll({
       skipGeneratedFollowOnceRef.current = false;
       return;
     }
+    const contentGrew = lastScrollHeightRef.current !== undefined
+      && messageList.scrollHeight > lastScrollHeightRef.current;
+    lastScrollHeightRef.current = messageList.scrollHeight;
     const scrollTop = scrollTopForGeneratedContent({
       followMode: scrollOwnershipRef.current === "following",
-      generating,
+      // Final output can arrive in the same snapshot that marks the Task inactive.
+      generating: generating || contentGrew,
       scrollHeight: messageList.scrollHeight,
     });
     if (scrollTop !== undefined) {
@@ -88,7 +105,7 @@ export function useTaskChatScroll({
       lastScrollTopRef.current = messageList.scrollTop;
     }
     // Button visibility follows geometry, independently of whether streamed content may auto-follow.
-    setAtLatest(isAtLatest(messageList));
+    updateJumpToLatestVisibility(messageList);
   });
 
   const onScroll = useCallback((event: UIEvent<HTMLDivElement>) => {
@@ -115,9 +132,9 @@ export function useTaskChatScroll({
       setScrollOwnership("following");
     }
     lastScrollTopRef.current = scrollTop;
-    setAtLatest(isAtLatest(messageList));
+    updateJumpToLatestVisibility(messageList);
     onScrollTop(scrollTop);
-  }, [onScrollTop, setScrollOwnership]);
+  }, [onScrollTop, setScrollOwnership, updateJumpToLatestVisibility]);
 
   const onWheel = useCallback((event: WheelEvent<HTMLDivElement>) => {
     if (event.deltaY < 0) {
@@ -154,7 +171,7 @@ export function useTaskChatScroll({
     setScrollOwnership("following");
     messageList.scrollTop = messageList.scrollHeight;
     lastScrollTopRef.current = messageList.scrollTop;
-    setAtLatest(true);
+    setShowJumpToLatest(false);
     onScrollTop(messageList.scrollTop);
   }, [onScrollTop, setScrollOwnership]);
 
@@ -167,10 +184,14 @@ export function useTaskChatScroll({
     onPointerUp: finishPointerScroll,
     onScroll,
     onWheel,
-    showJumpToLatest: !atLatest,
+    showJumpToLatest,
   };
 }
 
 function isAtLatest(messageList: HTMLDivElement) {
-  return messageList.scrollHeight - messageList.scrollTop - messageList.clientHeight <= 2;
+  return distanceFromLatest(messageList) <= 2;
+}
+
+function distanceFromLatest(messageList: HTMLDivElement) {
+  return messageList.scrollHeight - messageList.scrollTop - messageList.clientHeight;
 }

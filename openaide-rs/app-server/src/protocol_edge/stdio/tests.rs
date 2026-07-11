@@ -14,8 +14,8 @@ use openaide_app_server_protocol::methods::{
     ATTACHMENT_CREATE_PASTED_IMAGE, ATTACHMENT_LIST_DIRECTORY, ATTACHMENT_LIST_ROOTS,
     ATTACHMENT_REFRESH_HANDLES, ATTACHMENT_RELEASE_HANDLES, ATTACHMENT_REVEAL, CLIENT_HEARTBEAT,
     CLIENT_INITIALIZE, SETTINGS_GET_AGENT_DETAILS, STATE_SUBSCRIBE, TASK_ADOPT_NATIVE_SESSION,
-    TASK_CANCEL, TASK_CREATE, TASK_DISCARD, TASK_LIST, TASK_OPEN, TASK_SEND, TASK_SET_ARCHIVED,
-    TASK_SET_CONFIG_OPTION,
+    TASK_CANCEL, TASK_CREATE, TASK_DISCARD, TASK_LIST, TASK_MARK_READ, TASK_OPEN, TASK_SEND,
+    TASK_SET_ARCHIVED, TASK_SET_CONFIG_OPTION,
 };
 use openaide_app_server_protocol::snapshot::PendingRequestScope;
 use openaide_app_server_protocol::state::{StateSubscribeParams, SubscriptionScope};
@@ -256,7 +256,10 @@ fn attachment_handle_is_scoped_to_its_originating_client_at_protocol_boundary() 
         ),
         AppServerTime(6),
     ));
-    assert_eq!(send_error.error.code, ProtocolErrorCode::ValidationFailed);
+    assert_eq!(
+        send_error.error.code,
+        ProtocolErrorCode::AttachmentHandleInvalid
+    );
 
     let refreshed = gateway_result(gateway.handle_inbound(
         owner_connection,
@@ -1289,6 +1292,39 @@ fn task_open_returns_storage_backed_task_snapshot_after_initialize() {
 }
 
 #[test]
+fn task_mark_read_acknowledges_unread_task_over_stdio() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    {
+        let store = Store::open(temp.path().to_path_buf()).unwrap();
+        let mut task = task_record("task-1");
+        task.unread = true;
+        store.write_task(&task).unwrap();
+    }
+    let state_root = StateRoot::resolve(temp.path()).expect("state root");
+    let mut dispatcher = ProtocolEdgeStdioDispatcher::new_for_test(state_root);
+    dispatcher.handle_line(&init_request("1", "client-1"));
+
+    let responses = dispatcher.handle_line(
+        &json!({
+            "jsonrpc": "2.0",
+            "id": "2",
+            "method": TASK_MARK_READ,
+            "params": { "taskId": "task-1" }
+        })
+        .to_string(),
+    );
+
+    let response = response(&responses[0]);
+    assert_eq!(
+        response["result"]["result"]["task"]["task"]["unread"],
+        false
+    );
+    let task_json = std::fs::read_to_string(temp.path().join("tasks/task-1/task.json")).unwrap();
+    let stored_task: serde_json::Value = serde_json::from_str(&task_json).unwrap();
+    assert_eq!(stored_task["unread"], false);
+}
+
+#[test]
 fn task_subscription_emits_pending_server_request_over_stdio() {
     let temp = tempfile::TempDir::new().expect("temp dir");
     {
@@ -1461,7 +1497,7 @@ fn task_create_persists_idle_task_without_prompt_after_initialize() {
         .as_str()
         .expect("created task id")
         .to_string();
-    assert!(task_id.starts_with("task_"));
+    assert_eq!(task_id, "task-existing");
     assert_eq!(
         response["result"]["result"]["task"]["preparation"]["kind"],
         "preparing"
@@ -1683,7 +1719,7 @@ fn runtime_task_update_notification_emits_app_event_after_agent_completion() {
             .recv_timeout(Duration::from_millis(50))
             .expect("task update notification");
         let messages = dispatcher.handle_task_update(notification);
-        if messages.iter().any(completed_task_event) {
+        if messages.iter().any(|line| completed_task_event(line)) {
             saw_completion_event = true;
             break;
         }
@@ -2283,7 +2319,7 @@ fn task_set_archived_moves_task_between_navigation_lists() {
 }
 
 #[test]
-fn task_discard_emits_project_collection_update_after_last_project_task() {
+fn task_discard_keeps_the_configured_project_after_its_last_task() {
     let temp = tempfile::TempDir::new().expect("temp dir");
     {
         let store = Store::open(temp.path().to_path_buf()).unwrap();
@@ -2316,10 +2352,13 @@ fn task_discard_emits_project_collection_update_after_last_project_task() {
 
     let event = app_event_payload(&responses, "projectCollectionUpdated")
         .expect("project collection update");
-    assert!(event["projects"]["projects"]
-        .as_array()
-        .expect("projects")
-        .is_empty());
+    assert_eq!(
+        event["projects"]["projects"]
+            .as_array()
+            .expect("projects")
+            .len(),
+        1
+    );
 }
 
 #[test]
@@ -2516,7 +2555,7 @@ fn open_store_after_dispatcher_drop(path: &std::path::Path) -> Store {
     }
 }
 
-fn completed_task_event(line: &String) -> bool {
+fn completed_task_event(line: &str) -> bool {
     let value = serde_json::from_str::<Value>(line).expect("event json");
     value["method"] == "app/event"
         && value["params"]["payload"]["task"]["taskId"] == "task-existing"

@@ -1,14 +1,14 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ConfigOptionsStatus {
     Ready,
     Empty,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct ConfigOptionsCatalog {
     pub agent_id: String,
     pub status: ConfigOptionsStatus,
@@ -39,7 +39,7 @@ impl ConfigOptionsCatalog {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ConfigOptionCategory {
     Mode,
@@ -48,7 +48,7 @@ pub enum ConfigOptionCategory {
     Other,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct ConfigOption {
     pub id: String,
     pub label: String,
@@ -60,7 +60,7 @@ pub struct ConfigOption {
     pub values: Vec<ConfigOptionValue>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct ConfigOptionValue {
     pub id: String,
     pub label: String,
@@ -72,12 +72,12 @@ pub struct ConfigOptionValue {
     pub group_label: Option<String>,
 }
 
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
 pub struct AgentCommandsCatalog {
     pub commands: Vec<AgentCommand>,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct AgentCommand {
     pub name: String,
     pub description: String,

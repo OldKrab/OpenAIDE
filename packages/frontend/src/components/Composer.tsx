@@ -108,6 +108,7 @@ export function Composer({
   const lastPromptRef = useRef(prompt);
   const commandCatalogRevision = commandCatalogKey(commandCatalog);
   const lastCommandCatalogKey = useRef(commandCatalogRevision);
+  const lastSubmitPendingRef = useRef(submitPending);
 
   useComposerAutoFocus({ autoFocus, disabled, editorRef, focusRequestKey });
 
@@ -132,15 +133,17 @@ export function Composer({
 
   useEffect(() => {
     const promptChanged = prompt !== lastPromptRef.current;
+    const submissionSettled = lastSubmitPendingRef.current && !submitPending;
     lastPromptRef.current = prompt;
-    if (promptChanged) {
+    lastSubmitPendingRef.current = submitPending;
+    if (promptChanged || submissionSettled) {
       draftRef.current = prompt;
       renderEditorText(prompt);
     }
     const draft = draftRef.current;
     setHasDraftContent(hasComposerContent(draft, attachments.length));
     syncSubmitButton(draft);
-  }, [attachments.length, prompt, submitDisabled, submitRequiresText]);
+  }, [attachments.length, prompt, submitDisabled, submitPending, submitRequiresText]);
 
   useEffect(() => {
     const catalogChanged = commandCatalogRevision !== lastCommandCatalogKey.current;
@@ -208,8 +211,6 @@ export function Composer({
     const draft = draftRef.current;
     if (submitBlocked(draft)) return;
     onSubmit(draft);
-    syncDraft("", { renderEditor: true });
-    onChange("");
   };
 
   const selectSlashCommand = (command: AgentSlashCommand) => {

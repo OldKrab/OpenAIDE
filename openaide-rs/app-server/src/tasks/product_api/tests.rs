@@ -10,8 +10,8 @@ use openaide_app_server_protocol::snapshot::{
 };
 use openaide_app_server_protocol::support::SupportRecoverStuckSessionsParams;
 use openaide_app_server_protocol::task::{
-    ComposerMessage, TaskCancelParams, TaskCreateParams, TaskDiscardParams, TaskOpenParams,
-    TaskSendParams, TaskSetArchivedParams, TaskSetConfigOptionParams,
+    ComposerMessage, TaskCancelParams, TaskCreateParams, TaskDiscardParams, TaskMarkReadParams,
+    TaskOpenParams, TaskSendParams, TaskSetArchivedParams, TaskSetConfigOptionParams,
 };
 use openaide_app_server_protocol::workspace::WorkspaceListDirectoryParams;
 
@@ -61,6 +61,7 @@ fn create_persists_idle_task_without_prompt_or_turn() {
             project_id,
             agent_id: AgentId::from("codex"),
             workspace_root: None,
+            config_options: Default::default(),
         })
         .unwrap();
 
@@ -70,6 +71,131 @@ fn create_persists_idle_task_without_prompt_or_turn() {
     assert_eq!(record.active_turn_id, None);
     assert!(store.read_messages(&record.task_id).unwrap().is_empty());
     assert_eq!(snapshot.chat.items.len(), 0);
+}
+
+#[test]
+fn create_reopens_the_existing_draft_for_the_same_project_and_agent() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let mut project_anchor = task_record("task-project-anchor", "/workspace/app");
+    project_anchor.first_prompt_sent = true;
+    store.write_task(&project_anchor).unwrap();
+    let project_id = project_id_for_workspace("/workspace/app");
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        Arc::new(crate::agent::mock::MockAgent),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+    let params = TaskCreateParams {
+        project_id,
+        agent_id: AgentId::from("codex"),
+        workspace_root: None,
+        config_options: Default::default(),
+    };
+
+    let first = api.create(params.clone()).unwrap();
+    let reopened = api.create(params).unwrap();
+
+    assert_eq!(reopened.task.task_id, first.task.task_id);
+    assert_eq!(store.task_record_count().unwrap(), 2);
+}
+
+#[test]
+fn create_reactivates_the_reused_draft_native_session() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let mut draft = task_record("task-draft", "/workspace/app");
+    draft.first_prompt_sent = false;
+    draft.agent_session_id = Some("session-draft".to_string());
+    draft.preparation = TaskPreparationRecord::Ready;
+    store.write_task(&draft).unwrap();
+    let agent = Arc::new(RecordingAgent {
+        config_catalog: Some(config_catalog("gpt-5")),
+        ..RecordingAgent::default()
+    });
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        agent.clone(),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+
+    api.create(TaskCreateParams {
+        project_id: project_id_for_workspace("/workspace/app"),
+        agent_id: AgentId::from("codex"),
+        workspace_root: None,
+        config_options: Default::default(),
+    })
+    .unwrap();
+
+    wait_until(|| agent.resumes.load(Ordering::SeqCst) == 1);
+    wait_until(|| {
+        matches!(
+            store.read_task("task-draft").unwrap().preparation,
+            TaskPreparationRecord::Ready
+        )
+    });
+    assert_eq!(
+        store
+            .read_task("task-draft")
+            .unwrap()
+            .agent_session_id
+            .as_deref(),
+        Some("session-draft")
+    );
+    let updated = TaskSetConfigOptionWorkflow::set_config_option(
+        &api,
+        TaskSetConfigOptionParams {
+            task_id: "task-draft".into(),
+            config_id: "model".into(),
+            value: "gpt-5.6-terra".to_string(),
+            client_mutation_id: "reactivated-draft-config".into(),
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        updated.agent_config.options[0].current_value,
+        "gpt-5.6-terra"
+    );
+}
+
+#[test]
+fn create_passes_selected_config_into_draft_session_preparation() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    store
+        .write_task(&task_record("task-existing", "/workspace/app"))
+        .unwrap();
+    let agent = Arc::new(RecordingAgent::default());
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store)),
+        AgentRegistry::default_built_ins(),
+        agent.clone(),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+
+    api.create(TaskCreateParams {
+        project_id: project_id_for_workspace("/workspace/app"),
+        agent_id: AgentId::from("codex"),
+        workspace_root: None,
+        config_options: [("model".to_string(), "gpt-5".to_string())]
+            .into_iter()
+            .collect(),
+    })
+    .unwrap();
+
+    wait_until(|| !agent.start_config_options.lock().unwrap().is_empty());
+    assert_eq!(
+        agent.start_config_options.lock().unwrap().as_slice(),
+        &[Some(serde_json::json!({ "model": "gpt-5" }))]
+    );
 }
 
 #[test]
@@ -167,19 +293,20 @@ fn create_persists_preparing_and_starts_one_native_session_asynchronously() {
             project_id: project_id_for_workspace("/workspace/app"),
             agent_id: AgentId::from("codex"),
             workspace_root: None,
+            config_options: Default::default(),
         })
         .unwrap();
 
     wait_until(|| agent.starts.load(Ordering::SeqCst) == 1);
     let preparing_record = store.read_task(snapshot.task.task_id.as_str()).unwrap();
-    let send_error = api
+    let accepted = api
         .send(send_params(
             snapshot.task.task_id.as_str(),
             snapshot.revision,
             "send-before-ready",
             "too soon",
         ))
-        .unwrap_err();
+        .unwrap();
     agent.block_start.store(false, Ordering::SeqCst);
 
     assert!(matches!(
@@ -196,11 +323,12 @@ fn create_persists_preparing_and_starts_one_native_session_asynchronously() {
         TaskPreparationRecord::Preparing
     ));
     assert_eq!(preparing_record.agent_session_id, None);
-    assert_eq!(send_error.code, ProtocolErrorCode::Conflict);
+    assert!(accepted.turn_id.as_str().starts_with("turn_"));
     assert!(store
         .read_messages(snapshot.task.task_id.as_str())
         .unwrap()
-        .is_empty());
+        .iter()
+        .any(|message| matches!(message.chat.message, NormalizedMessage::User { .. })));
 
     wait_until(|| {
         matches!(
@@ -222,9 +350,9 @@ fn create_persists_preparing_and_starts_one_native_session_asynchronously() {
     assert_eq!(ready.agent_config.options[0].current_value, "gpt-5");
     assert_eq!(ready.agent_commands.state, LiveSessionDataState::Ready);
     assert_eq!(ready.agent_commands.commands[0].name, "web");
+    wait_until(|| agent.prompts.load(Ordering::SeqCst) == 1);
     assert_eq!(agent.starts.load(Ordering::SeqCst), 1);
-    assert_eq!(agent.attaches.load(Ordering::SeqCst), 1);
-    assert_eq!(agent.prompts.load(Ordering::SeqCst), 0);
+    assert_eq!(agent.attaches.load(Ordering::SeqCst), 2);
     assert_eq!(
         store
             .read_task(snapshot.task.task_id.as_str())
@@ -235,7 +363,7 @@ fn create_persists_preparing_and_starts_one_native_session_asynchronously() {
 }
 
 #[test]
-fn create_projects_native_session_start_failure_and_keeps_send_blocked() {
+fn create_projects_native_session_start_failure_into_the_accepted_turn() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
@@ -259,6 +387,7 @@ fn create_projects_native_session_start_failure_and_keeps_send_blocked() {
             project_id: project_id_for_workspace("/workspace/app"),
             agent_id: AgentId::from("codex"),
             workspace_root: None,
+            config_options: Default::default(),
         })
         .unwrap();
 
@@ -277,14 +406,21 @@ fn create_projects_native_session_start_failure_and_keeps_send_blocked() {
             task_id: created.task.task_id.clone(),
         })
         .unwrap();
-    let send_error = api
+    let accepted = api
         .send(send_params(
             created.task.task_id.as_str(),
             failed.revision,
             "send-after-failure",
             "do not commit",
         ))
-        .unwrap_err();
+        .unwrap();
+
+    wait_until(|| {
+        store
+            .read_task(created.task.task_id.as_str())
+            .map(|task| task.status == TaskStatus::Failed)
+            .unwrap_or(false)
+    });
 
     assert!(matches!(
         failed.preparation,
@@ -301,13 +437,14 @@ fn create_projects_native_session_start_failure_and_keeps_send_blocked() {
             if message.contains("agent failed to start")
     ));
     assert_eq!(failed_record.agent_session_id, None);
-    assert_eq!(send_error.code, ProtocolErrorCode::Internal);
+    assert!(accepted.turn_id.as_str().starts_with("turn_"));
     assert_eq!(agent.starts.load(Ordering::SeqCst), 1);
     assert_eq!(agent.prompts.load(Ordering::SeqCst), 0);
     assert!(store
         .read_messages(created.task.task_id.as_str())
         .unwrap()
-        .is_empty());
+        .iter()
+        .any(|message| matches!(message.chat.message, NormalizedMessage::User { .. })));
 }
 
 #[test]
@@ -349,6 +486,7 @@ fn task_preparation_resolves_custom_agent_secrets_through_typed_server_requests(
             project_id: project_id_for_workspace("/workspace/app"),
             agent_id: AgentId::from("custom.agent"),
             workspace_root: None,
+            config_options: Default::default(),
         })
         .unwrap();
     let task_id = created.task.task_id.clone();
@@ -416,6 +554,7 @@ fn create_closes_native_session_when_preparation_event_attachment_fails() {
             project_id: project_id_for_workspace("/workspace/app"),
             agent_id: AgentId::from("codex"),
             workspace_root: None,
+            config_options: Default::default(),
         })
         .unwrap();
 
@@ -458,6 +597,7 @@ fn first_send_reuses_the_native_session_prepared_during_create() {
             project_id: project_id_for_workspace("/workspace/app"),
             agent_id: AgentId::from("codex"),
             workspace_root: None,
+            config_options: Default::default(),
         })
         .unwrap();
     wait_until(|| {
@@ -496,6 +636,78 @@ fn first_send_reuses_the_native_session_prepared_during_create() {
 }
 
 #[test]
+fn first_send_returns_authoritative_user_message_while_session_resume_is_blocked() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let mut draft = task_record("task-draft", "/workspace/app");
+    draft.first_prompt_sent = false;
+    draft.agent_session_id = Some("prepared-session".to_string());
+    store.write_task(&draft).unwrap();
+    let agent = Arc::new(RecordingAgent {
+        block_resume: AtomicBool::new(true),
+        ..Default::default()
+    });
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store)),
+        AgentRegistry::default_built_ins(),
+        agent.clone(),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+    let (finished_tx, finished_rx) = std::sync::mpsc::channel();
+
+    std::thread::spawn(move || {
+        let result = api.send(send_params("task-draft", 1, "first-send", "hello"));
+        finished_tx.send(result).unwrap();
+    });
+
+    let accepted = finished_rx
+        .recv_timeout(Duration::from_millis(250))
+        .expect("task/send must not wait for ACP session resume")
+        .unwrap();
+    assert!(accepted.task.chat.items.iter().any(|item| {
+        item.role == openaide_app_server_protocol::snapshot::ChatRole::User
+            && matches!(item.parts.first(), Some(MessagePart::Text { text }) if text == "hello")
+    }));
+    agent.block_resume.store(false, Ordering::SeqCst);
+}
+
+#[test]
+fn first_send_replaces_a_prepared_session_missing_from_the_agent_runtime() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let mut draft = task_record("task-draft", "/workspace/app");
+    draft.first_prompt_sent = false;
+    draft.agent_session_id = Some("missing-session".to_string());
+    store.write_task(&draft).unwrap();
+    let agent = Arc::new(RecordingAgent {
+        resume_session_missing: true,
+        ..Default::default()
+    });
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        agent.clone(),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+
+    api.send(send_params("task-draft", 1, "first-send", "hello"))
+        .unwrap();
+
+    wait_until(|| agent.prompts.load(Ordering::SeqCst) == 1);
+    assert_eq!(agent.resumes.load(Ordering::SeqCst), 1);
+    assert_eq!(agent.loads.load(Ordering::SeqCst), 0);
+    assert_eq!(agent.starts.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        store.read_task("task-draft").unwrap().agent_session_id,
+        Some("recorded-session".to_string())
+    );
+}
+
+#[test]
 fn send_projects_agent_config_catalog_metadata() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
@@ -518,6 +730,14 @@ fn send_projects_agent_config_catalog_metadata() {
     api.send(send_params("task-existing", 1, "send-1", "hello"))
         .unwrap();
     let task_id = "task-existing";
+
+    wait_until(|| {
+        store
+            .read_task(task_id)
+            .ok()
+            .and_then(|task| task.config_options_catalog)
+            .is_some()
+    });
 
     let opened = project_stored_task_snapshot(
         crate::tasks::snapshot::build_snapshot(&store, task_id, 100).unwrap(),
@@ -560,6 +780,14 @@ fn send_projects_agent_command_catalog_metadata() {
         .unwrap();
     let task_id = "task-existing";
 
+    wait_until(|| {
+        store
+            .read_task(task_id)
+            .ok()
+            .and_then(|task| task.agent_commands_catalog)
+            .is_some()
+    });
+
     let opened = project_stored_task_snapshot(
         crate::tasks::snapshot::build_snapshot(&store, task_id, 100).unwrap(),
     )
@@ -598,15 +826,21 @@ fn startup_marks_abandoned_preparation_failed_instead_of_loading_forever() {
         record.preparation,
         TaskPreparationRecord::Failed { .. }
     ));
-    let error = api
+    let accepted = api
         .send(send_params(
             "task-preparing",
             record.revision,
             "send-1",
             "hello",
         ))
-        .unwrap_err();
-    assert_eq!(error.code, ProtocolErrorCode::Internal);
+        .unwrap();
+    wait_until(|| {
+        store
+            .read_task("task-preparing")
+            .map(|task| task.status == TaskStatus::Failed)
+            .unwrap_or(false)
+    });
+    assert!(accepted.turn_id.as_str().starts_with("turn_"));
 }
 
 #[test]
@@ -627,6 +861,7 @@ fn create_rejects_unknown_project() {
             project_id: ProjectId::from("project-missing"),
             agent_id: AgentId::from("codex"),
             workspace_root: None,
+            config_options: Default::default(),
         })
         .unwrap_err();
 
@@ -652,6 +887,7 @@ fn create_accepts_new_workspace_root_for_unknown_project() {
             project_id: project_id_for_workspace(workspace_root),
             agent_id: AgentId::from("codex"),
             workspace_root: Some(workspace_root.to_string()),
+            config_options: Default::default(),
         })
         .unwrap();
 
@@ -681,6 +917,7 @@ fn create_rejects_mismatched_new_workspace_root_project_id() {
             project_id: project_id_for_workspace("/workspace/other"),
             agent_id: AgentId::from("codex"),
             workspace_root: Some("/workspace/new-app".to_string()),
+            config_options: Default::default(),
         })
         .unwrap_err();
 
@@ -737,6 +974,7 @@ fn create_rejects_unknown_agent() {
             project_id: project_id_for_workspace("/workspace/app"),
             agent_id: AgentId::from("missing-agent"),
             workspace_root: None,
+            config_options: Default::default(),
         })
         .unwrap_err();
 
@@ -766,6 +1004,54 @@ fn list_agent_sessions_filters_already_adopted_native_sessions() {
             cursor: None,
         })
         .unwrap();
+
+    assert!(result.sessions.is_empty());
+}
+
+#[test]
+fn list_agent_sessions_hides_a_native_session_while_draft_ownership_is_committing() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    store
+        .write_task(&task_record("task-existing", "/workspace/app"))
+        .unwrap();
+    let agent = Arc::new(RecordingAgent {
+        block_attach: AtomicBool::new(true),
+        listed_sessions: Mutex::new(vec![AgentListedSession {
+            session_id: "recorded-session".to_string(),
+            cwd: "/workspace/app".to_string(),
+            title: Some("New task".to_string()),
+            updated_at: None,
+            last_activity: None,
+        }]),
+        ..RecordingAgent::default()
+    });
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store)),
+        AgentRegistry::default_built_ins(),
+        agent.clone(),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+
+    api.create(TaskCreateParams {
+        project_id: project_id_for_workspace("/workspace/app"),
+        agent_id: AgentId::from("codex"),
+        workspace_root: None,
+        config_options: Default::default(),
+    })
+    .unwrap();
+    wait_until(|| agent.attaches.load(Ordering::SeqCst) == 1);
+
+    let result = api
+        .list_agent_sessions(AgentListSessionsParams {
+            agent_id: AgentId::from("codex"),
+            project_id: project_id_for_workspace("/workspace/app"),
+            cursor: None,
+        })
+        .unwrap();
+    agent.block_attach.store(false, Ordering::SeqCst);
 
     assert!(result.sessions.is_empty());
 }
@@ -888,6 +1174,42 @@ fn open_readopts_adopted_task_when_native_session_is_newer_than_cached_history()
     let record = store.read_task("task-existing").unwrap();
     assert!(!record.unread);
     assert_eq!(record.last_activity, "2026-01-02T00:00:00.000Z");
+}
+
+#[test]
+fn open_does_not_load_native_history_for_an_unsent_draft() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let mut task = task_record("task-draft", "/workspace/app");
+    task.first_prompt_sent = false;
+    task.agent_session_id = Some("prepared-session".to_string());
+    task.updated_at = "2026-01-01T00:00:00.000Z".to_string();
+    store.write_task(&task).unwrap();
+    let agent = Arc::new(RecordingAgent {
+        listed_sessions: Mutex::new(vec![AgentListedSession {
+            session_id: "prepared-session".to_string(),
+            cwd: "/workspace/app".to_string(),
+            title: None,
+            last_activity: Some("2026-01-02T00:00:00.000Z".to_string()),
+            updated_at: Some("2026-01-02T00:00:00.000Z".to_string()),
+        }]),
+        ..Default::default()
+    });
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store)),
+        AgentRegistry::default_built_ins(),
+        agent.clone(),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+
+    api.open(TaskOpenParams {
+        task_id: "task-draft".into(),
+    })
+    .unwrap();
+
+    assert_eq!(agent.loads.load(Ordering::SeqCst), 0);
 }
 
 #[test]
@@ -1035,6 +1357,35 @@ fn open_keeps_adopted_task_cache_when_native_session_is_not_newer() {
 }
 
 #[test]
+fn mark_read_clears_unread_without_refreshing_native_session_history() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let mut task = task_record("task-existing", "/workspace/app");
+    task.unread = true;
+    task.agent_session_id = Some("native-session".to_string());
+    store.write_task(&task).unwrap();
+    let agent = Arc::new(RecordingAgent::default());
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        agent.clone(),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+
+    let snapshot = api
+        .mark_read(TaskMarkReadParams {
+            task_id: "task-existing".into(),
+        })
+        .unwrap();
+
+    assert!(!snapshot.task.unread);
+    assert!(!store.read_task("task-existing").unwrap().unread);
+    assert_eq!(agent.loads.load(Ordering::SeqCst), 0);
+}
+
+#[test]
 fn send_commits_user_message_and_running_turn() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
@@ -1071,6 +1422,82 @@ fn send_commits_user_message_and_running_turn() {
         accepted.task.chat.items[0].message_id,
         accepted.user_message_id
     );
+}
+
+#[test]
+fn send_returns_after_durable_acceptance_without_waiting_for_session_start() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    store
+        .write_task(&task_record("task-existing", "/workspace/app"))
+        .unwrap();
+    let agent = Arc::new(RecordingAgent::default());
+    agent.block_start.store(true, Ordering::SeqCst);
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        agent.clone(),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+    let (accepted_tx, accepted_rx) = std::sync::mpsc::channel();
+
+    std::thread::spawn(move || {
+        accepted_tx
+            .send(api.send(send_params(
+                "task-existing",
+                1,
+                "send-fast-acceptance",
+                "hello",
+            )))
+            .unwrap();
+    });
+
+    wait_until(|| agent.starts.load(Ordering::SeqCst) == 1);
+    let accepted = accepted_rx.recv_timeout(Duration::from_millis(100));
+    agent.block_start.store(false, Ordering::SeqCst);
+
+    assert!(accepted.is_ok(), "Send waited for Native Session startup");
+    assert!(accepted.unwrap().unwrap().task.chat.items.len() >= 2);
+}
+
+#[test]
+fn first_send_is_accepted_while_draft_session_preparation_is_running() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let mut project_anchor = task_record("task-project-anchor", "/workspace/app");
+    project_anchor.first_prompt_sent = true;
+    store.write_task(&project_anchor).unwrap();
+    let agent = Arc::new(RecordingAgent::default());
+    agent.block_start.store(true, Ordering::SeqCst);
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store)),
+        AgentRegistry::default_built_ins(),
+        agent.clone(),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+    let draft = api
+        .create(TaskCreateParams {
+            project_id: project_id_for_workspace("/workspace/app"),
+            agent_id: AgentId::from("codex"),
+            workspace_root: None,
+            config_options: Default::default(),
+        })
+        .unwrap();
+    wait_until(|| agent.starts.load(Ordering::SeqCst) == 1);
+
+    let accepted = api.send(send_params(
+        draft.task.task_id.as_str(),
+        draft.revision,
+        "send-during-preparation",
+        "hello",
+    ));
+    agent.block_start.store(false, Ordering::SeqCst);
+
+    assert!(accepted.is_ok(), "first Send waited for Task preparation");
 }
 
 #[test]
@@ -1360,6 +1787,13 @@ fn send_start_failure_returns_accepted_failed_turn() {
         .expect("a durably committed send must remain accepted");
     let retry = api.send(params).unwrap();
 
+    wait_until(|| {
+        store
+            .read_task("task-existing")
+            .map(|task| task.status == TaskStatus::Failed)
+            .unwrap_or(false)
+    });
+
     assert_eq!(retry.turn_id, accepted.turn_id);
     assert_eq!(retry.user_message_id, accepted.user_message_id);
     let messages = store.read_messages("task-existing").unwrap();
@@ -1413,6 +1847,8 @@ fn send_session_attach_failure_returns_accepted_failed_turn_and_closes_new_sessi
         .send(params.clone())
         .expect("a durably committed send must remain accepted");
     let retry = api.send(params).unwrap();
+
+    wait_until(|| agent.closes.load(Ordering::SeqCst) == 1);
 
     assert_eq!(retry.turn_id, accepted.turn_id);
     assert_eq!(retry.user_message_id, accepted.user_message_id);
@@ -1678,9 +2114,16 @@ fn send_post_commit_start_failure_consumes_attachment_and_returns_accepted_turn(
         })
         .unwrap_err();
 
+    wait_until(|| {
+        store
+            .read_task("task-existing")
+            .map(|task| task.status == TaskStatus::Failed)
+            .unwrap_or(false)
+    });
+
     assert_eq!(retry.turn_id, accepted.turn_id);
     assert_eq!(retry.user_message_id, accepted.user_message_id);
-    assert_eq!(reuse_error.code, ProtocolErrorCode::ValidationFailed);
+    assert_eq!(reuse_error.code, ProtocolErrorCode::AttachmentHandleInvalid);
     assert_eq!(agent.prompts.load(Ordering::SeqCst), 0);
     let messages = store.read_messages("task-existing").unwrap();
     assert!(messages.iter().any(|message| matches!(
@@ -1789,6 +2232,12 @@ fn send_start_failure_does_not_poison_later_task_start() {
         .expect("a durably committed send must remain accepted");
 
     assert!(accepted.turn_id.as_str().starts_with("turn_"));
+    wait_until(|| {
+        store
+            .read_task("task-first")
+            .map(|task| task.status == TaskStatus::Failed)
+            .unwrap_or(false)
+    });
     let first = store.read_task("task-first").unwrap();
     assert_eq!(first.status, TaskStatus::Failed);
     assert_eq!(first.active_turn_id, None);
@@ -2316,15 +2765,19 @@ fn send_keeps_committed_message_when_config_changes_while_agent_session_opens() 
         .send(send_params("task-existing", 1, "send-1", "hello"))
         .unwrap();
 
+    wait_until(|| {
+        store
+            .read_task("task-existing")
+            .map(|task| task.config_options.get("model") == Some(&"new-model".to_string()))
+            .unwrap_or(false)
+    });
+
     let record = store.read_task("task-existing").unwrap();
     assert_eq!(
         record.config_options.get("model"),
         Some(&"new-model".to_string())
     );
-    assert_eq!(
-        record.active_turn_id.as_deref(),
-        Some(accepted.turn_id.as_str())
-    );
+    assert!(accepted.turn_id.as_str().starts_with("turn_"));
     assert!(store
         .read_messages("task-existing")
         .unwrap()
@@ -3330,6 +3783,8 @@ struct RecordingAgent {
     cancels: AtomicUsize,
     closes: AtomicUsize,
     block_start: AtomicBool,
+    block_attach: AtomicBool,
+    block_resume: AtomicBool,
     config_catalog: Option<ConfigOptionsCatalog>,
     commands_catalog: Option<AgentCommandsCatalog>,
     listed_sessions: Mutex<Vec<AgentListedSession>>,
@@ -3339,6 +3794,7 @@ struct RecordingAgent {
     fail_start_once: AtomicBool,
     fail_load_once_with_already_active: AtomicBool,
     resume_after_restart_unavailable: bool,
+    resume_session_missing: bool,
     load_start_timeout: bool,
     loaded_session_id: Option<String>,
     block_prompt: bool,
@@ -3349,6 +3805,7 @@ struct RecordingAgent {
     completed_prompts: AtomicUsize,
     prompt_calls: Mutex<Vec<(String, String)>>,
     session_config_updates: Mutex<Vec<(String, String, String)>>,
+    start_config_options: Mutex<Vec<Option<serde_json::Value>>>,
 }
 
 impl AgentRuntime for RecordingAgent {
@@ -3369,8 +3826,12 @@ impl AgentRuntime for RecordingAgent {
         })
     }
 
-    fn start_session(&self, _request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
+    fn start_session(&self, request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
         self.starts.fetch_add(1, Ordering::SeqCst);
+        self.start_config_options
+            .lock()
+            .unwrap()
+            .push(request.config_options.clone());
         while self.block_start.load(Ordering::SeqCst) {
             std::thread::sleep(Duration::from_millis(10));
         }
@@ -3391,6 +3852,14 @@ impl AgentRuntime for RecordingAgent {
 
     fn resume_session(&self, request: AgentSessionResume) -> Result<AgentSession, RuntimeError> {
         self.resumes.fetch_add(1, Ordering::SeqCst);
+        while self.block_resume.load(Ordering::SeqCst) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        if self.resume_session_missing {
+            return Err(RuntimeError::Internal(
+                "ACP session is missing from the runtime".to_string(),
+            ));
+        }
         if self.resume_after_restart_unavailable {
             return Err(RuntimeError::CapabilityMissing(
                 "acp_session_resume_after_runtime_restart".to_string(),
@@ -3474,6 +3943,9 @@ impl AgentRuntime for RecordingAgent {
         sink: Arc<dyn AgentSessionEventSink>,
     ) -> Result<(), RuntimeError> {
         self.attaches.fetch_add(1, Ordering::SeqCst);
+        while self.block_attach.load(Ordering::SeqCst) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
         if self.fail_attach {
             return Err(RuntimeError::NotReady(
                 "session event attachment failed".to_string(),

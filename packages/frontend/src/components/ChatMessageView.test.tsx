@@ -739,6 +739,7 @@ describe("ChatRow", () => {
   });
 
   it("loads tool details only from the rendered activity step toggle path", async () => {
+    vi.useFakeTimers();
     const { ActivityStepRow, shouldLoadToolDetail } = await import("./ChatActivityView");
     expect(shouldLoadToolDetail({ open: true, artifactId: "artifact_1" })).toBe(true);
     expect(shouldLoadToolDetail({ open: false, artifactId: "artifact_1" })).toBe(false);
@@ -755,19 +756,32 @@ describe("ChatRow", () => {
       input_summary: "Read notes.md",
       detail_artifact_id: "artifact_1",
     };
-    const element = ActivityStepRow({ onLoadToolDetail, step, taskId: "task_1", toolDetails: {} });
-    findElement(element, (candidate) => typeof candidate.props.onOpenChange === "function").props.onOpenChange(true);
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<ActivityStepRow onLoadToolDetail={onLoadToolDetail} step={step} taskId="task_1" toolDetails={{}} />);
+    });
+    act(() => tree.root.findByProps({ className: "activity-disclosure-trigger" }).props.onClick());
     expect(onLoadToolDetail).toHaveBeenCalledWith("artifact_1");
+    act(() => {
+      vi.advanceTimersByTime(250);
+    });
+    expect(onLoadToolDetail).toHaveBeenCalledWith("artifact_1", true);
 
-    const loadingElement = ActivityStepRow({
-      onLoadToolDetail,
-      step,
-      taskId: "task_1",
-      toolDetails: { ["task_1\u0000artifact_1"]: { loading: true } },
+    act(() => tree.unmount());
+    act(() => {
+      tree = create(
+        <ActivityStepRow
+          onLoadToolDetail={onLoadToolDetail}
+          step={step}
+          taskId="task_1"
+          toolDetails={{ ["task_1\u0000artifact_1"]: { loading: true } }}
+        />,
+      );
     });
     onLoadToolDetail.mockClear();
-    findElement(loadingElement, (candidate) => typeof candidate.props.onOpenChange === "function").props.onOpenChange(true);
+    act(() => tree.root.findByProps({ className: "activity-disclosure-trigger" }).props.onClick());
     expect(onLoadToolDetail).not.toHaveBeenCalled();
+    act(() => tree.unmount());
 
     const loadedHtml = renderToStaticMarkup(
       ActivityStepRow({

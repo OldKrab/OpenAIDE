@@ -100,8 +100,8 @@ export function reduceTaskInteractionState(state: AppState, action: AppAction): 
         taskInputs: {
           ...state.taskInputs,
           [action.taskId]: {
-            prompt: "",
-            context: [],
+            prompt: input.prompt,
+            context: input.context,
             error: undefined,
             pending: { prompt: input.prompt, context: input.context },
           },

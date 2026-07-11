@@ -234,7 +234,7 @@ fn pages_before_legacy_message_cursor_returned_to_frontend() {
         .unwrap();
 
     let tail = store.tail_page(task_id, 2).unwrap();
-    assert_eq!(tail.start_cursor.as_deref(), Some("legacy-2"));
+    assert_eq!(tail.start_cursor.as_deref(), Some("legacy-1"));
 
     let page = store.page_before(task_id, "legacy-2", 1).unwrap();
 

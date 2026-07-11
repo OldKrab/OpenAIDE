@@ -1385,6 +1385,46 @@ fn tool_call_update_keeps_partial_fields_from_existing_call() {
 }
 
 #[test]
+fn running_tool_output_bursts_publish_only_presentation_changes() {
+    let capture = Arc::new(CapturingEventSink::default());
+    let sink: Arc<dyn AgentEventSink> = capture.clone();
+    let projection =
+        LivePromptProjection::new("codex", sink, crate::agent::TurnCancellation::new());
+
+    projection
+        .emit(SessionUpdate::ToolCall(
+            ToolCall::new("tool_call_burst", "Run tests")
+                .kind(ToolKind::Execute)
+                .status(ToolCallStatus::InProgress),
+        ))
+        .unwrap();
+    for index in 0..100 {
+        projection
+            .emit(SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+                "tool_call_burst",
+                ToolCallUpdateFields::new()
+                    .status(ToolCallStatus::InProgress)
+                    .raw_output(serde_json::json!({ "formatted_output": format!("line {index}") })),
+            )))
+            .unwrap();
+    }
+    projection
+        .emit(SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+            "tool_call_burst",
+            ToolCallUpdateFields::new().status(ToolCallStatus::Completed),
+        )))
+        .unwrap();
+
+    let events = capture.events();
+    assert_eq!(events.len(), 2);
+    assert!(matches!(
+        events.last(),
+        Some(AgentEvent::ToolCall(tool_call))
+            if tool_call.status == AgentToolCallStatus::Completed
+    ));
+}
+
+#[test]
 fn permission_tool_call_update_seeds_later_partial_tool_updates() {
     let capture = Arc::new(CapturingEventSink::default());
     let sink: Arc<dyn AgentEventSink> = capture.clone();

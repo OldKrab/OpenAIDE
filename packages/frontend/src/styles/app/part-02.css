@@ -79,16 +79,19 @@ body[data-shell="web"] .new-task-center h1 {
 }
 
 .jump-to-latest {
-  min-height: 28px;
+  width: 30px;
+  height: 30px;
   border: 1px solid var(--oa-border);
   border-radius: 999px;
   background: var(--oa-panel);
   color: var(--oa-text);
+  display: grid;
+  place-items: center;
   position: absolute;
   z-index: 2;
   left: 50%;
   bottom: 10px;
-  padding: 3px 10px;
+  padding: 0;
   transform: translateX(-50%);
 }
 

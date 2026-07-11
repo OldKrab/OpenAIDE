@@ -130,7 +130,7 @@ pub(super) async fn load_active_session(
 }
 
 fn latest_command_catalog(updates: &[SessionUpdate]) -> Option<AgentCommandsCatalog> {
-    updates.iter().filter_map(command_catalog).last()
+    updates.iter().filter_map(command_catalog).next_back()
 }
 
 fn command_catalog(update: &SessionUpdate) -> Option<AgentCommandsCatalog> {

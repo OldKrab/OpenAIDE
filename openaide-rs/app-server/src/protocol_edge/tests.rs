@@ -2033,6 +2033,21 @@ impl TaskCancelWorkflow for RejectingTaskCancel {
 struct RejectingTaskOpen;
 
 impl TaskOpenWorkflow for RejectingTaskOpen {
+    fn mark_read(
+        &self,
+        _params: openaide_app_server_protocol::task::TaskMarkReadParams,
+    ) -> Result<
+        openaide_app_server_protocol::snapshot::TaskSnapshot,
+        openaide_app_server_protocol::errors::ProtocolError,
+    > {
+        Err(openaide_app_server_protocol::errors::ProtocolError {
+            code: openaide_app_server_protocol::errors::ProtocolErrorCode::Internal,
+            message: "task mark-read unavailable in test gateway".to_string(),
+            recoverable: true,
+            target: None,
+        })
+    }
+
     fn open(
         &self,
         _params: openaide_app_server_protocol::task::TaskOpenParams,

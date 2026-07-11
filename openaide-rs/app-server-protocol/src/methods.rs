@@ -37,10 +37,10 @@ use crate::support::{SupportRecoverStuckSessionsParams, SupportRecoverStuckSessi
 use crate::task::{
     TaskAdoptNativeSessionParams, TaskAdoptNativeSessionResult, TaskCancelParams, TaskCancelResult,
     TaskChatPageParams, TaskChatPageResult, TaskCreateParams, TaskCreateResult, TaskDiscardParams,
-    TaskDiscardResult, TaskListParams, TaskListResult, TaskOpenParams, TaskOpenResult,
-    TaskSendParams, TaskSendResult, TaskSetArchivedParams, TaskSetArchivedResult,
-    TaskSetConfigOptionParams, TaskSetConfigOptionResult, TaskToolDetailParams,
-    TaskToolDetailResult,
+    TaskDiscardResult, TaskListParams, TaskListResult, TaskMarkReadParams, TaskMarkReadResult,
+    TaskOpenParams, TaskOpenResult, TaskSendParams, TaskSendResult, TaskSetArchivedParams,
+    TaskSetArchivedResult, TaskSetConfigOptionParams, TaskSetConfigOptionResult,
+    TaskToolDetailParams, TaskToolDetailResult,
 };
 use crate::workspace::{
     WorkspaceListDirectoryParams, WorkspaceListDirectoryResult, WorkspaceListRootsParams,
@@ -301,6 +301,12 @@ protocol_method!(
 );
 protocol_method!(TaskCancel, TASK_CANCEL, TaskCancelParams, TaskCancelResult);
 protocol_method!(TaskOpen, TASK_OPEN, TaskOpenParams, TaskOpenResult);
+protocol_method!(
+    TaskMarkRead,
+    TASK_MARK_READ,
+    TaskMarkReadParams,
+    TaskMarkReadResult
+);
 protocol_method!(
     TaskChatPage,
     TASK_CHAT_PAGE,

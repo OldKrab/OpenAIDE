@@ -37,11 +37,10 @@ function coalesceActivityRun(run: ActivityRunMessage[]): ChatMessage {
   const steps = run.flatMap((item) =>
     item.message.kind === "thought" ? [{ kind: "thought" as const, text: item.message.text, streaming: item.message.streaming }] : item.message.steps,
   );
-  const status: ActivityChatMessage["message"]["status"] = activities.some((activity) => activity.status === "error")
-    ? "error"
-    : activities.some((activity) => activity.status === "running")
-      ? "running"
-      : "completed";
+  // The group mark communicates whether the latest activity is still live. Individual
+  // tool rows remain authoritative for failures, so one failed tool does not condemn the group.
+  const status: ActivityChatMessage["message"]["status"] =
+    activities.at(-1)?.status === "running" ? "running" : "completed";
   const firstActivity = activities[0];
 
   return {

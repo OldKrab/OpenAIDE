@@ -9,8 +9,16 @@ The canonical product identity.
 _Avoid_: Alternate product names
 
 **Task**:
-A unit of agent work in OpenAIDE's task list that has status, Project Context, Agent selection, and an Agent-owned Native Session.
-_Avoid_: Chat, conversation, draft task
+A unit of agent work in OpenAIDE's task list that has status, Project Context, Agent selection, and an Agent-owned Native Session. A Task begins in the Draft phase and becomes Established when App Server durably accepts its first message.
+_Avoid_: Chat, conversation
+
+**Draft Task**:
+A Task whose required start context is selected and whose Native Session is being acquired or retained, but whose first user message has not yet been accepted. Leaving its page does not discard it.
+_Avoid_: Temporary Frontend-only task, orphan prepared session
+
+**Established Task**:
+A Task whose first user message has been durably accepted, whether its current Turn is starting, running, completed, interrupted, or failed.
+_Avoid_: Treating Agent startup success as the point where the Task becomes real
 
 **Chat**:
 The user-facing message surface inside a Task where the user and agent exchange messages and folded tool activity.
@@ -121,6 +129,9 @@ _Avoid_: Blocking all existing Tasks as if they were running
 - Web App, Desktop App, and Mobile App share as much **Frontend** composition as their shell constraints allow.
 - VS Code Extension composes the same **Frontend** surfaces into VS Code-specific locations.
 - A **Task** can be moved to the **Archive**.
+- A **Draft Task** is reused for its Project Context until it is established or explicitly discarded.
+- Closing a **Task Page** does not discard its **Draft Task** or close its **Native Session**.
+- A **Draft Task** becomes an **Established Task** when App Server durably accepts the first user message and starting Turn.
 - A **Task** belongs to the OpenAIDE task list and has **Project Context**.
 - **Project Context** is always a **Project**.
 - A **Task** is created only after the user selects the required start context.
@@ -155,6 +166,9 @@ _Avoid_: Blocking all existing Tasks as if they were running
 
 > **Dev:** "When a user opens OpenAIDE, are they starting an agent immediately?"
 > **Domain expert:** "No. A **Task** starts only after the user chooses the required Project Context and Agent. OpenAIDE starts the Agent-owned **Native Session** for that Task, but the first Agent turn starts only when the user sends work."
+
+> **Dev:** "What happens if the user leaves New Task before sending?"
+> **Domain expert:** "The **Draft Task** remains. Returning reopens the same Task and reuses, resumes, loads, or safely replaces its empty **Native Session** behind the App Server seam."
 
 > **Dev:** "Should old chats appear under Recent?"
 > **Domain expert:** "Use **Task**, not chat. Old tasks stay in the default list until the user moves them to the **Archive**."

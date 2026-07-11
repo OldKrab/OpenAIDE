@@ -45,6 +45,9 @@ fn default_app_server_mode_initializes_protocol_edge_over_stdio() {
     let storage = TempDir::new().expect("storage root");
     let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_openaide-app-server"))
         .env("OPENAIDE_STORAGE_ROOT", storage.path())
+        // The default-mode contract must not inherit the parent App Shell's
+        // explicit handoff mode.
+        .env_remove("OPENAIDE_APP_SERVER_PROTOCOL")
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())

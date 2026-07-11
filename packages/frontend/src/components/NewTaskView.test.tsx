@@ -292,7 +292,7 @@ describe("NewTaskView", () => {
     expect(textContent(tree)).toContain("Preparing Codex options");
   });
 
-  it("keeps typed new-task text local until submit", () => {
+  it("preserves typed new-task text in Shell state before the Draft Task is prepared", () => {
     const state = createInitialState();
     const project = { projectId: "project_1", label: "OpenAIDE" };
     const dispatch = vi.fn();
@@ -315,7 +315,7 @@ describe("NewTaskView", () => {
 
     act(() => tree.root.findByType(Composer).props.onChange("Fix the typing lag"));
 
-    expect(dispatch).not.toHaveBeenCalledWith({ type: "prompt", prompt: "Fix the typing lag" });
+    expect(dispatch).toHaveBeenCalledWith({ type: "prompt", prompt: "Fix the typing lag" });
 
     act(() => tree.root.findByProps({ "aria-label": "Send message" }).props.onClick());
 
@@ -555,7 +555,7 @@ describe("NewTaskView", () => {
     expect(tree.root.findByType(Composer).props.focusRequestKey).toBe("0:ready");
   });
 
-  it("moves a submitted new task into the normal chat layout while startup is pending", () => {
+  it("keeps submitted content in the disabled composer until Backend acceptance", () => {
     const state = createInitialState();
     const project = { projectId: "project_1", label: "OpenAIDE" };
     state.projects = [project];
@@ -589,29 +589,20 @@ describe("NewTaskView", () => {
       />,
     );
 
-    expect(editorHtml(tree)).toBe("");
+    expect(editorHtml(tree)).toBe("Do not erase this");
     expect(composerEditor(tree).props["aria-disabled"]).toBe(true);
     expect(composerEditor(tree).props["data-placeholder"]).toBe("");
     expect(tree.root.findAllByProps({ "aria-label": "Send message" })).toHaveLength(0);
-    expect(tree.root.findByProps({ "aria-label": "Task status: Starting" })).toBeTruthy();
-    expect(tree.root.findByProps({ className: "new-task-starting-status" })).toBeTruthy();
+    expect(tree.root.findAllByProps({ "aria-label": "Task status: Starting" })).toHaveLength(0);
+    expect(tree.root.findAllByProps({ className: "new-task-starting-status" })).toHaveLength(0);
     expect(tree.root.findAllByProps({ className: "working-status-dots" })).toHaveLength(0);
-    expect(textContent(tree)).toContain("Do not erase this");
-    expect(tree.root.findByProps({ className: "chat-user" })).toBeTruthy();
-    expect(textContent(tree)).not.toContain("pasted.png");
-    expect(tree.root.findByProps({ className: "chat-image-grid" }).props["data-layout"]).toBe("single");
-    expect(tree.root.findByProps({ className: "chat-image-attachment" })).toBeTruthy();
-    expect(tree.root.findByProps({ className: "chat-image-preview" }).props.src).toBe("data:image/png;base64,AQID");
-    const submittedMessage = tree.root.findByProps({ "aria-label": "Submitted message" });
-    expect(submittedMessage
-      .findAll((node) => node.props.className === "chat-image-grid" || node.props.className === "chat-user")
-      .map((node) => node.props.className))
-      .toEqual(["chat-image-grid", "chat-user"]);
-    expect(tree.root.findByProps({ className: "new-task-starting-status" }).findByType("span").children.join("")).toBe("Starting task…");
-    act(() => tree.root.findByProps({ "aria-label": "Stop task" }).props.onClick());
-    expect(onCancelTask).toHaveBeenCalledOnce();
-    expect(textContent(tree)).not.toContain("What are we working on?");
-    expect(tree.root.findAllByProps({ className: "new-task-context-controls" })).toHaveLength(0);
+    expect(tree.root.findByProps({ className: "composer-image-preview" }).props.src).toBe("data:image/png;base64,AQID");
+    expect(tree.root.findAllByProps({ "aria-label": "Submitted message" })).toHaveLength(0);
+    expect(tree.root.findByProps({ "aria-label": "Task starting" })).toBeTruthy();
+    expect(tree.root.findByProps({ className: "composer-submit-pending" })).toBeTruthy();
+    expect(onCancelTask).not.toHaveBeenCalled();
+    expect(textContent(tree)).toContain("What are we working on?");
+    expect(tree.root.findAllByProps({ className: "new-task-context-controls" })).toHaveLength(1);
   });
 
   it("labels native-session adoption as opening a task", () => {

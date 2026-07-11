@@ -1,6 +1,4 @@
 import type { TaskSnapshot, TaskStatus } from "@openaide/app-shell-contracts";
-import { protocolAttachments } from "../state/composerOptions";
-import type { ComposerAttachment } from "../state/composerOptions";
 import type { AppState, TaskComposerInput } from "../state/store";
 
 export function chatItemsWithPendingInput(
@@ -8,44 +6,9 @@ export function chatItemsWithPendingInput(
   taskInput: TaskComposerInput,
   taskId: string,
 ) {
-  const pending = taskInput.pending;
-  if (!pending || !hasComposerInputContent(pending)) return items;
-  return [
-    ...items,
-    localUserChatItem({
-      attachments: pending.context,
-      id: `pending-user-${taskId}`,
-      prompt: pending.prompt,
-    }),
-  ];
-}
-
-function hasComposerInputContent(input: { prompt: string; context: ComposerAttachment[] }) {
-  return input.prompt.trim().length > 0 || input.context.length > 0;
-}
-
-function localUserChatItem({
-  attachments,
-  id,
-  prompt,
-}: {
-  attachments: ComposerAttachment[];
-  id: string;
-  prompt: string;
-}) {
-  return {
-    cursor: id,
-    identity: id,
-    message_id: id,
-    message_type: "user",
-    message: {
-      kind: "user",
-      id,
-      text: prompt,
-      created_at: new Date(0).toISOString(),
-      attachments: protocolAttachments(attachments),
-    },
-  } satisfies TaskSnapshot["chat"]["items"][number];
+  void taskInput;
+  void taskId;
+  return items;
 }
 
 export function taskChatHasLiveUpdates({

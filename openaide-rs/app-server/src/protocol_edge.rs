@@ -134,6 +134,9 @@ impl AppServerProbeFacts {
 }
 
 impl RpcGateway {
+    // This is the App Server composition root: dependencies remain explicit so
+    // protocol handlers cannot acquire hidden global workflow state.
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         client_hub: ClientHub,
         lifecycle: AppLifecycle,

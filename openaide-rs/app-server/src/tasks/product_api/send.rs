@@ -3,10 +3,14 @@ use openaide_app_server_protocol::ids::{ClientInstanceId, MessageId, TurnId};
 use openaide_app_server_protocol::task::TaskSendParams;
 use uuid::Uuid;
 
-use crate::attachment_runtime::{AttachmentOwner, AttachmentSendReservation};
+use crate::attachment_runtime::{
+    AttachmentOwner, AttachmentSendReservation, ResolvedSendAttachments,
+};
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::TaskStatus as LegacyTaskStatus;
 use crate::snapshots::task_snapshot::project_stored_task_snapshot;
+use crate::storage::records::TaskPreparationRecord;
+use crate::storage::records::TaskRecord;
 use crate::storage::send_receipts::TaskSendReceipt;
 use crate::task_recovery::RESTART_INTERRUPTION_MESSAGE;
 use crate::tasks::mutation::{TaskCommitOutcome, TaskMutationResult};
@@ -94,7 +98,6 @@ impl TaskProductApi {
         if !recovered_stale_turn && existing_task.revision != params.task_revision {
             return Err(conflict_error("Task changed before the message was sent"));
         }
-        super::prepare::reject_if_preparation_not_ready(&existing_task)?;
         self.agent_registry
             .require(&existing_task.agent_id)
             .map_err(super::protocol_error_from_runtime)?;
@@ -111,9 +114,6 @@ impl TaskProductApi {
                         return Ok(TaskMutationResult::Rejected);
                     }
                     if !same_send_target(&existing_task, ctx.task()) {
-                        return Ok(TaskMutationResult::Rejected);
-                    }
-                    if super::prepare::reject_if_preparation_not_ready(ctx.task()).is_err() {
                         return Ok(TaskMutationResult::Rejected);
                     }
                     self.store.write_send_receipt(
@@ -154,11 +154,52 @@ impl TaskProductApi {
         let attachments = attachment_reservation.commit();
         let committed_send =
             CommittedSend::new(task_id.clone(), turn_id.clone(), user_message_id.clone());
+        // Materialize the authoritative acceptance response before ACP work can
+        // contend with session/storage resources. The Turn is already durable,
+        // so the background start is launched regardless of snapshot success.
+        let accepted = committed_send.accepted(self);
+
+        let api = self.clone();
+        let background_send = committed_send.clone();
+        std::thread::spawn(move || {
+            if let Err(error) = api.start_committed_send(
+                existing_task,
+                fingerprint.text,
+                attachments,
+                background_send,
+            ) {
+                crate::logging::error(
+                    "task_committed_send_start_failed",
+                    serde_json::json!({ "error": error.message }),
+                );
+            }
+        });
+        accepted
+    }
+
+    fn start_committed_send(
+        &self,
+        existing_task: TaskRecord,
+        prompt_text: String,
+        attachments: ResolvedSendAttachments,
+        committed_send: CommittedSend,
+    ) -> Result<(), ProtocolError> {
+        let task_id = existing_task.task_id.clone();
+        let turn_id = committed_send.turn_id().clone();
+
+        let existing_task = match self.wait_for_session_preparation(existing_task) {
+            Ok(task) => task,
+            Err(error) => {
+                committed_send.fail(self, error)?;
+                return Ok(());
+            }
+        };
 
         let opened_session = match self.open_agent_session(&existing_task) {
             Ok(opened_session) => opened_session,
             Err(error) => {
-                return committed_send.fail_protocol(self, &error);
+                committed_send.fail_protocol(self, &error)?;
+                return Ok(());
             }
         };
         let session_id = opened_session.session().session_id.clone();
@@ -190,10 +231,12 @@ impl TaskProductApi {
                 let error = RuntimeError::NotReady(
                     "Task changed before session start completed".to_string(),
                 );
-                return committed_send.fail(self, error);
+                committed_send.fail(self, error)?;
+                return Ok(());
             }
             Err(error) => {
-                return committed_send.fail(self, error);
+                committed_send.fail(self, error)?;
+                return Ok(());
             }
         }
         // Bind the Native Session before attaching its metadata sink. Updates
@@ -212,18 +255,40 @@ impl TaskProductApi {
                     Ok(TaskMutationResult::Changed)
                 })
                 .map_err(super::protocol_error_from_runtime)?;
-            return committed_send.fail(self, error);
+            committed_send.fail(self, error)?;
+            return Ok(());
         }
         let session = opened_session.commit();
         self.turn_runner.spawn_agent_turn(
             task_id,
-            fingerprint.text.clone(),
+            prompt_text,
             attachments.agent_attachments(),
             turn_id.as_str().to_string(),
             session,
         );
+        Ok(())
+    }
 
-        committed_send.accepted(self)
+    fn wait_for_session_preparation(
+        &self,
+        initial: TaskRecord,
+    ) -> Result<TaskRecord, RuntimeError> {
+        let task_id = initial.task_id.clone();
+        let mut task = initial;
+        loop {
+            match &task.preparation {
+                TaskPreparationRecord::Ready => return Ok(task),
+                TaskPreparationRecord::Failed { message } => {
+                    return Err(RuntimeError::NotReady(format!(
+                        "Task Agent preparation failed: {message}"
+                    )))
+                }
+                TaskPreparationRecord::Needed | TaskPreparationRecord::Preparing => {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                    task = self.store.read_task(&task_id)?;
+                }
+            }
+        }
     }
 
     fn send_steering_message(

@@ -68,11 +68,11 @@ export function createTaskCallbacks({
         })
         .catch((error) => dispatch({ type: "chatPage:error", taskId: task.task_id, message: safeErrorMessage(error) }));
     },
-    loadToolDetail: (artifactId) => {
+    loadToolDetail: (artifactId, refresh = false) => {
       if (!state.snapshot) return;
       const taskId = state.snapshot.task.task_id;
       const current = state.toolDetails[toolDetailCacheKey(taskId, artifactId)];
-      if (current?.loading || current?.details) return;
+      if (current?.loading || (current?.details && !refresh)) return;
       if (!backendConnection?.request) {
         dispatch({ type: "toolDetail:error", taskId, artifactId, message: appServerRequiredMessage() });
         return;
