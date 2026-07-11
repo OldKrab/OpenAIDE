@@ -14,12 +14,15 @@ impl TaskEventSink {
         request: AgentPermissionRequest,
     ) -> Result<AgentPermissionOutcome, RuntimeError> {
         let request_id = request.request_id.clone();
-        let server_request_id = self.server_requests.open_permission_request(
+        let Some(server_request_id) = self.server_requests.open_permission_request(
             &self.task_id,
             &request,
             Vec::new(),
             crate::client_lifecycle::AppServerTime(0),
-        )?;
+        )?
+        else {
+            return Ok(AgentPermissionOutcome::Cancelled);
+        };
         logging::info(
             "task_permission_request_opened",
             json!({

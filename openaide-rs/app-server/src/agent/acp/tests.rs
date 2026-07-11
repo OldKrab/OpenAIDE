@@ -6,7 +6,9 @@ use crate::agent::acp_host::{
 };
 use crate::agent::acp_probe_auth_runner::AcpProbeAuthRunner;
 use crate::agent::acp_runtime_threading::close_in_parallel;
-use crate::agent::acp_session_capabilities::{validate_auth_method, validate_initialize_protocol};
+use crate::agent::acp_session_capabilities::{
+    validate_auth_method, validate_initialize_protocol, validate_session_list_capability,
+};
 use crate::agent::acp_session_catalogs::{
     attach_session_event_sink_to_slot, deliver_session_commands_catalog,
     deliver_session_config_catalog, deliver_session_metadata_update,
@@ -14,14 +16,12 @@ use crate::agent::acp_session_catalogs::{
 };
 use crate::agent::acp_session_lifecycle::{
     agent_list_sessions_result_from_response, initialize_supports_session_close,
-    initialize_supports_session_delete, list_sessions_from_options_connection, load_active_session,
-    request_session_list, start_active_session, validate_load_session_capability,
-    validate_session_list_capability, LoadActiveSessionRequest, LoadReplayCapture,
+    initialize_supports_session_delete, load_active_session, request_session_list,
+    start_active_session, validate_load_session_capability, LoadActiveSessionRequest,
+    LoadReplayCapture,
 };
 use crate::agent::acp_session_paths::normalized_session_cwd;
-use crate::agent::acp_update_projection::{
-    LivePromptProjection, PreparedOptionsProjection, ReplayProjection,
-};
+use crate::agent::acp_update_projection::{LivePromptProjection, ReplayProjection};
 use crate::agent::events::{
     AgentEvent, AgentPermissionOutcome, AgentPermissionRequest, AgentToolCallStatus,
 };
@@ -37,12 +37,12 @@ use crate::protocol::model::{
 use agent_client_protocol::schema::{
     AgentCapabilities, AuthMethod, AuthMethodAgent, AuthenticateRequest, AuthenticateResponse,
     AvailableCommand, AvailableCommandInput, AvailableCommandsUpdate, ContentBlock, ContentChunk,
-    CreateTerminalRequest, CreateTerminalResponse, CurrentModeUpdate, Diff, Implementation,
-    InitializeRequest, InitializeResponse, ListSessionsRequest, ListSessionsResponse,
-    LoadSessionRequest, LoadSessionResponse, McpCapabilities, NewSessionRequest,
-    NewSessionResponse, PermissionOption, PermissionOptionKind, PromptCapabilities,
-    ProtocolVersion, ReadTextFileRequest, RequestPermissionOutcome, RequestPermissionRequest,
-    SessionCapabilities, SessionCloseCapabilities, SessionConfigOption,
+    CreateTerminalRequest, CreateTerminalResponse, Diff, Implementation, InitializeRequest,
+    InitializeResponse, ListSessionsRequest, ListSessionsResponse, LoadSessionRequest,
+    LoadSessionResponse, McpCapabilities, NewSessionRequest, NewSessionResponse, PermissionOption,
+    PermissionOptionKind, PromptCapabilities, ProtocolVersion, ReadTextFileRequest,
+    RequestPermissionOutcome, RequestPermissionRequest, SessionCapabilities,
+    SessionCloseCapabilities, SessionConfigOption,
     SessionConfigOptionCategory as AcpConfigOptionCategory, SessionConfigSelectOption,
     SessionDeleteCapabilities, SessionInfo, SessionInfoUpdate, SessionListCapabilities,
     SessionNotification, SessionUpdate, TextContent, ToolCall, ToolCallContent, ToolCallLocation,
@@ -94,9 +94,6 @@ struct SessionListAuthTestAgent {
     authenticate_count: Arc<AtomicUsize>,
     list_count: Arc<AtomicUsize>,
 }
-
-#[derive(Clone)]
-struct PreparedSessionListTestAgent;
 
 #[derive(Clone)]
 struct LoadSessionReplayTestAgent;
@@ -198,47 +195,6 @@ impl agent_client_protocol::ConnectTo<Client> for SessionListAuthTestAgent {
                     } else {
                         responder.respond_with_error(agent_client_protocol::Error::auth_required())
                     }
-                },
-                agent_client_protocol::on_receive_request!(),
-            )
-            .connect_to(client)
-    }
-}
-
-impl agent_client_protocol::ConnectTo<Client> for PreparedSessionListTestAgent {
-    fn connect_to(
-        self,
-        client: impl agent_client_protocol::ConnectTo<Agent>,
-    ) -> impl std::future::Future<Output = agent_client_protocol::Result<()>> + Send {
-        Agent
-            .builder()
-            .name("prepared-session-list-test-agent")
-            .on_receive_request(
-                async move |_request: InitializeRequest, responder, _connection| {
-                    responder.respond(
-                        InitializeResponse::new(ProtocolVersion::V1).agent_capabilities(
-                            AgentCapabilities::new().session_capabilities(
-                                SessionCapabilities::new().list(SessionListCapabilities::new()),
-                            ),
-                        ),
-                    )
-                },
-                agent_client_protocol::on_receive_request!(),
-            )
-            .on_receive_request(
-                async move |_request: NewSessionRequest, responder, _connection| {
-                    responder.respond(NewSessionResponse::new("prepared-session"))
-                },
-                agent_client_protocol::on_receive_request!(),
-            )
-            .on_receive_request(
-                async move |request: ListSessionsRequest, responder, _connection| {
-                    let cwd = request.cwd.unwrap_or_else(|| PathBuf::from("/workspace"));
-                    responder.respond(ListSessionsResponse::new(vec![
-                        SessionInfo::new("prepared-session", cwd.clone()),
-                        SessionInfo::new("external-session", cwd),
-                        SessionInfo::new("other-workspace-session", "/other/workspace"),
-                    ]))
                 },
                 agent_client_protocol::on_receive_request!(),
             )
@@ -1205,52 +1161,6 @@ fn session_list_retries_auth_required_on_same_connection() {
 }
 
 #[test]
-fn options_connection_list_excludes_prepared_session() {
-    let requested_cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
-
-    tokio::runtime::Runtime::new().unwrap().block_on(async {
-        Client
-            .builder()
-            .connect_with(
-                PreparedSessionListTestAgent,
-                |connection: ConnectionTo<Agent>| async move {
-                    let initialize = connection
-                        .send_request(InitializeRequest::new(ProtocolVersion::V1))
-                        .block_task()
-                        .await?;
-                    let (active_session, _options) = start_active_session(
-                        &connection,
-                        requested_cwd.clone(),
-                        &initialize,
-                        None,
-                        None,
-                    )
-                    .await?;
-                    let result = list_sessions_from_options_connection(
-                        &connection,
-                        &active_session,
-                        &initialize,
-                        "codex".to_string(),
-                        requested_cwd,
-                        None,
-                        None,
-                    )
-                    .await
-                    .map_err(|error| {
-                        agent_client_protocol::util::internal_error(error.to_string())
-                    })?;
-
-                    assert_eq!(result.sessions.len(), 1);
-                    assert_eq!(result.sessions[0].session_id, "external-session");
-                    Ok(())
-                },
-            )
-            .await
-            .unwrap();
-    });
-}
-
-#[test]
 fn load_active_session_captures_replayed_updates_before_response() {
     let requested_cwd = env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
     let load_replay: Arc<Mutex<HashMap<String, LoadReplayCapture>>> = Arc::default();
@@ -1380,35 +1290,6 @@ fn probe_timeout_cancels_hanging_agent_process() {
     );
 }
 
-#[cfg(unix)]
-#[test]
-fn options_start_failure_reports_agent_error_instead_of_closed_start_channel() {
-    let runtime = AcpAgentRuntime::new(AcpAgentConfig {
-        agent_id: "codex".to_string(),
-        command: "sh".to_string(),
-        args: vec!["-c".to_string(), "exit 7".to_string()],
-        env: Vec::new(),
-        secret_env: Vec::new(),
-    });
-
-    let error = runtime
-        .config_options(AgentConfigOptionsRequest {
-            agent_id: "codex".to_string(),
-            cwd: env::current_dir()
-                .unwrap_or_else(|_| PathBuf::from("/"))
-                .to_string_lossy()
-                .to_string(),
-        })
-        .unwrap_err()
-        .to_string();
-
-    assert!(
-        !error.contains("channel is empty and sending half is closed"),
-        "{error}"
-    );
-    assert!(error.contains("ACP error"), "{error}");
-}
-
 #[test]
 fn normalized_session_cwd_uses_absolute_fallback_for_no_workspace() {
     assert!(normalized_session_cwd("").is_absolute());
@@ -1439,57 +1320,6 @@ fn probe_reports_missing_agent_command_as_setup_error() {
         "{error}"
     );
     assert!(!error.contains("ACP error"), "{error}");
-}
-
-#[test]
-fn options_session_update_accepts_complete_config_catalog() {
-    let projection = PreparedOptionsProjection::new("codex");
-    let catalog = projection.catalog(vec![SessionConfigOption::select(
-        "model",
-        "Model",
-        "gpt-5.5",
-        vec![SessionConfigSelectOption::new("gpt-5.5", "gpt-5.5")],
-    )
-    .category(AcpConfigOptionCategory::Model)]);
-
-    assert!(matches!(catalog.status, ConfigOptionsStatus::Ready));
-    assert_eq!(catalog.options.len(), 1);
-    assert_eq!(catalog.options[0].id, "model");
-    assert_eq!(catalog.options[0].current_value, "gpt-5.5");
-}
-
-#[test]
-fn options_session_update_invalidates_on_work_activity() {
-    let projection = PreparedOptionsProjection::new("codex");
-    let mut catalog = ConfigOptionsCatalog::empty("codex");
-    let runtime = tokio::runtime::Runtime::new().unwrap();
-
-    let result = runtime.block_on(projection.apply_dispatch(
-        session_update_dispatch(SessionUpdate::AgentMessageChunk(ContentChunk::new(
-            ContentBlock::Text(TextContent::new("work started")),
-        ))),
-        &mut catalog,
-    ));
-
-    assert!(matches!(result, Err(RuntimeError::NotReady(_))));
-}
-
-#[test]
-fn options_session_update_ignores_metadata_only_activity() {
-    let projection = PreparedOptionsProjection::new("codex");
-    let mut catalog = ConfigOptionsCatalog::empty("codex");
-    let runtime = tokio::runtime::Runtime::new().unwrap();
-
-    runtime
-        .block_on(projection.apply_dispatch(
-            session_update_dispatch(SessionUpdate::CurrentModeUpdate(CurrentModeUpdate::new(
-                "code",
-            ))),
-            &mut catalog,
-        ))
-        .unwrap();
-
-    assert!(catalog.options.is_empty());
 }
 
 #[test]

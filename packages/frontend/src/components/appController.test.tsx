@@ -1,7 +1,6 @@
 import { act, create } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
-  AGENT_CONFIG_OPTIONS,
   AGENT_LIST_SESSIONS,
   ATTACHMENT_CREATE_PASTED_IMAGE,
   AppServerProtocolError,
@@ -327,7 +326,6 @@ describe("app controller mounted lifecycle", () => {
 
   it("loads new-task Agent options after a project route change even when an old task snapshot remains", async () => {
     const request = vi.fn(async (method: string) => {
-      if (method === AGENT_CONFIG_OPTIONS) return readyConfigOptions();
       return { revision: 1, tasks: [] };
     });
     backendConnection = {
@@ -354,10 +352,6 @@ describe("app controller mounted lifecycle", () => {
 
     expect(latestController?.bootstrap.taskId).toBeUndefined();
     expect(latestController?.state.newTask.selection.projectId).toBe("project_2");
-    expect(request).toHaveBeenCalledWith(AGENT_CONFIG_OPTIONS, {
-      agentId: "codex",
-      projectId: "project_2",
-    });
   });
 
   it("does not overwrite a user-selected Agent when initialize resolves late", async () => {
@@ -557,20 +551,6 @@ describe("app controller mounted lifecycle", () => {
 
   it("prepares a new Task with slash commands before the first send", async () => {
     const request = vi.fn(async (method: string) => {
-      if (method === AGENT_CONFIG_OPTIONS) {
-        return {
-          catalog: {
-            agentId: "codex",
-            status: "ready",
-            options: [{
-              id: "model",
-              label: "Model",
-              currentValue: "gpt",
-              values: [{ id: "gpt", label: "GPT" }],
-            }],
-          },
-        };
-      }
       if (method === AGENT_LIST_SESSIONS) {
         return { agentId: "codex", projectLabel: "OpenAIDE", sessions: [], nextCursor: null };
       }
@@ -634,7 +614,6 @@ describe("app controller mounted lifecycle", () => {
       },
     };
     const request = vi.fn(async (method: string, params?: { scope?: { kind: string; taskId?: string } }) => {
-      if (method === AGENT_CONFIG_OPTIONS) return readyConfigOptions();
       if (method === AGENT_LIST_SESSIONS) {
         return { agentId: "codex", projectLabel: "OpenAIDE", sessions: [], nextCursor: null };
       }
@@ -714,7 +693,6 @@ describe("app controller mounted lifecycle", () => {
   it("keeps the same prepared Task when config options change during preparation", async () => {
     const created = deferredValue<{ task: ReturnType<typeof protocolTaskSnapshot> }>();
     const request = vi.fn(async (method: string, params?: { taskId?: string }) => {
-      if (method === AGENT_CONFIG_OPTIONS) return readyConfigOptions();
       if (method === AGENT_LIST_SESSIONS) {
         return { agentId: "codex", projectLabel: "OpenAIDE", sessions: [], nextCursor: null };
       }
@@ -779,7 +757,6 @@ describe("app controller mounted lifecycle", () => {
 
   it("discards its prepared empty Task when routing to an existing Task before send", async () => {
     const request = vi.fn(async (method: string, params?: { taskId?: string }) => {
-      if (method === AGENT_CONFIG_OPTIONS) return readyConfigOptions();
       if (method === AGENT_LIST_SESSIONS) {
         return { agentId: "codex", projectLabel: "OpenAIDE", sessions: [], nextCursor: null };
       }
@@ -827,7 +804,6 @@ describe("app controller mounted lifecycle", () => {
 
   it("discards its prepared empty Task when the new-task surface unmounts", async () => {
     const request = vi.fn(async (method: string, params?: { taskId?: string }) => {
-      if (method === AGENT_CONFIG_OPTIONS) return readyConfigOptions();
       if (method === AGENT_LIST_SESSIONS) {
         return { agentId: "codex", projectLabel: "OpenAIDE", sessions: [], nextCursor: null };
       }
@@ -869,9 +845,6 @@ describe("app controller mounted lifecycle", () => {
   it("replaces the prepared empty Task when the selected Agent changes", async () => {
     const staleTaskOpen = deferredValue<never>();
     const request = vi.fn(async (method: string, params?: { agentId?: string; taskId?: string }) => {
-      if (method === AGENT_CONFIG_OPTIONS) {
-        return { catalog: { agentId: params?.agentId ?? "codex", status: "ready", options: [] } };
-      }
       if (method === AGENT_LIST_SESSIONS) {
         return { agentId: params?.agentId, projectLabel: "OpenAIDE", sessions: [], nextCursor: null };
       }
@@ -943,50 +916,8 @@ describe("app controller mounted lifecycle", () => {
     });
   });
 
-  it("loads new-task options for a browsed workspace before its first Task exists", async () => {
-    const request = vi.fn(async (method: string) => {
-      if (method === AGENT_CONFIG_OPTIONS) return readyConfigOptions();
-      throw new Error(method);
-    });
-    backendConnection = {
-      initialize: vi.fn(async () => ({ snapshot: clientSnapshot({ includeActiveTask: false }) })),
-      request: request as unknown as BackendConnection["request"],
-      respond: vi.fn(),
-      close: vi.fn(),
-    };
-    bootstrap = webTaskBootstrap(undefined, "project_1");
-
-    await act(async () => {
-      create(<ControllerProbe />);
-      await Promise.resolve();
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-    request.mockClear();
-
-    const workspaceRoot = "/workspace/new-app";
-    const projectId = projectIdForWorkspaceRoot(workspaceRoot);
-    await act(async () => {
-      latestController?.dispatch({
-        type: "newTask:workspace",
-        workspace: { path: workspaceRoot, label: "new-app", projectId },
-      });
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    expect(request).toHaveBeenCalledWith(AGENT_CONFIG_OPTIONS, {
-      agentId: "codex",
-      projectId,
-      workspaceRoot,
-    });
-    expect(latestController?.state.newTask.configOptionsLoading).toBe(false);
-    expect(latestController?.state.newTask.configOptions?.status).toBe("ready");
-  });
-
   it("does not show task-start submitting state while new-task options load", async () => {
     const request = vi.fn(async (method: string) => {
-      if (method === AGENT_CONFIG_OPTIONS) return readyConfigOptions();
       if (method === TASK_CREATE) {
         return { task: protocolTaskSnapshot("task_prepared", "New task", { hasMessages: false }) };
       }
@@ -1017,7 +948,6 @@ describe("app controller mounted lifecycle", () => {
   it("keeps new-task typing when options finish after local draft edits", async () => {
     const options = deferredValue<unknown>();
     const request = vi.fn(async (method: string) => {
-      if (method === AGENT_CONFIG_OPTIONS) return options.promise;
       throw new Error(method);
     });
     backendConnection = {
@@ -1051,48 +981,8 @@ describe("app controller mounted lifecycle", () => {
     expect(latestController?.state.newTask.prompt).toBe("keep this draft");
   });
 
-  it("surfaces slow new-task Agent options as a recoverable error instead of staying stuck", async () => {
-    const options = deferredValue<unknown>();
-    const request = vi.fn(async (method: string) => {
-      if (method === AGENT_CONFIG_OPTIONS) return options.promise;
-      throw new Error(method);
-    });
-    backendConnection = {
-      initialize: vi.fn(async () => ({ snapshot: clientSnapshot({ includeActiveTask: false }) })),
-      request: request as unknown as BackendConnection["request"],
-      respond: vi.fn(),
-      close: vi.fn(),
-    };
-    bootstrap = webTaskBootstrap(undefined, "project_1");
-
-    await act(async () => {
-      create(<ControllerProbe />);
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-    expect(latestController?.state.newTask.configOptionsLoading).toBe(true);
-
-    await act(async () => {
-      vi.advanceTimersByTime(10_000);
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    expect(latestController?.state.newTask.configOptionsLoading).toBe(false);
-    expect(latestController?.state.newTask.configOptionsError).toBe("Unable to load Agent options.");
-
-    await act(async () => {
-      options.resolve(readyConfigOptions());
-      await options.promise;
-      await Promise.resolve();
-    });
-
-    expect(latestController?.state.newTask.configOptionsError).toBe("Unable to load Agent options.");
-  });
-
   it("opens the created Task route after sending from new-task", async () => {
     const request = vi.fn(async (method: string) => {
-      if (method === AGENT_CONFIG_OPTIONS) return readyConfigOptions();
       if (method === TASK_CREATE) return { task: protocolTaskSnapshot("task_new", "New task", { hasMessages: false }) };
       if (method === TASK_OPEN) return { task: protocolTaskSnapshot("task_new", "New task", { hasMessages: false }) };
       if (method === TASK_SEND) return { task: protocolTaskSnapshot("task_new", "Sent task", { hasMessages: true }) };
@@ -1214,7 +1104,6 @@ describe("app controller mounted lifecycle", () => {
     const routeOpen = deferredValue<{ task: ReturnType<typeof protocolTaskSnapshot> }>();
     const sent = deferredValue<{ task: ReturnType<typeof protocolTaskSnapshot> }>();
     const request = vi.fn((method: string) => {
-      if (method === AGENT_CONFIG_OPTIONS) return Promise.resolve(readyConfigOptions());
       if (method === AGENT_LIST_SESSIONS) {
         return Promise.resolve({ agentId: "codex", projectLabel: "OpenAIDE", sessions: [], nextCursor: null });
       }
@@ -1281,7 +1170,6 @@ describe("app controller mounted lifecycle", () => {
   it("reconciles a new task send that commits after switching to another task", async () => {
     const sent = deferredValue<{ task: ReturnType<typeof protocolTaskSnapshot> }>();
     const request = vi.fn((method: string, params?: { taskId?: string }) => {
-      if (method === AGENT_CONFIG_OPTIONS) return Promise.resolve(readyConfigOptions());
       if (method === AGENT_LIST_SESSIONS) {
         return Promise.resolve({ agentId: "codex", projectLabel: "OpenAIDE", sessions: [], nextCursor: null });
       }
@@ -1349,7 +1237,6 @@ describe("app controller mounted lifecycle", () => {
   it("does not reopen a new Task when preparation resolves after switching away", async () => {
     const created = deferredValue<{ task: ReturnType<typeof protocolTaskSnapshot> }>();
     const request = vi.fn((method: string, params?: { taskId?: string }) => {
-      if (method === AGENT_CONFIG_OPTIONS) return Promise.resolve(readyConfigOptions());
       if (method === AGENT_LIST_SESSIONS) {
         return Promise.resolve({ agentId: "codex", projectLabel: "OpenAIDE", sessions: [], nextCursor: null });
       }
@@ -1406,7 +1293,6 @@ describe("app controller mounted lifecycle", () => {
     const sent = deferredValue<{ task: ReturnType<typeof protocolTaskSnapshot> }>();
     let createCount = 0;
     const request = vi.fn((method: string) => {
-      if (method === AGENT_CONFIG_OPTIONS) return Promise.resolve(readyConfigOptions());
       if (method === AGENT_LIST_SESSIONS) {
         return Promise.resolve({ agentId: "codex", projectLabel: "OpenAIDE", sessions: [], nextCursor: null });
       }
@@ -1484,7 +1370,6 @@ describe("app controller mounted lifecycle", () => {
   it("ignores stale Agent option failures after pasted image preparation opens the new Task", async () => {
     const options = deferredValue<unknown>();
     const request = vi.fn(async (method: string) => {
-      if (method === AGENT_CONFIG_OPTIONS) return options.promise;
       if (method === TASK_CREATE) return { task: protocolTaskSnapshot("task_new", "New task") };
       if (method === ATTACHMENT_CREATE_PASTED_IMAGE) {
         return { attachment: { handleId: "attachment-handle-image", label: "pasted.png" } };
@@ -1503,10 +1388,6 @@ describe("app controller mounted lifecycle", () => {
       create(<ControllerProbe />);
       await Promise.resolve();
       await Promise.resolve();
-    });
-    expect(request).toHaveBeenCalledWith(AGENT_CONFIG_OPTIONS, {
-      agentId: "codex",
-      projectId: "project_1",
     });
 
     await act(async () => {
@@ -1530,7 +1411,6 @@ describe("app controller mounted lifecycle", () => {
   it("reuses the in-flight prepared Task when uploading an image", async () => {
     const created = deferredValue<{ task: ReturnType<typeof protocolTaskSnapshot> }>();
     const request = vi.fn(async (method: string) => {
-      if (method === AGENT_CONFIG_OPTIONS) return readyConfigOptions();
       if (method === TASK_CREATE) return created.promise;
       if (method === TASK_OPEN) return { task: protocolTaskSnapshot("task_new", "New task", { hasMessages: false, sendReady: false }) };
       if (method === ATTACHMENT_CREATE_PASTED_IMAGE) {

@@ -24,8 +24,6 @@ fn support_methods_use_support_namespace() {
 fn agent_methods_use_agent_namespace() {
     assert_eq!(AgentProbe::METHOD, "agent/probe");
     assert_eq!(AgentListSessions::METHOD, "agent/listSessions");
-    assert_eq!(AgentConfigOptions::METHOD, "agent/configOptions");
-    assert_eq!(AgentSetConfigOption::METHOD, "agent/setConfigOption");
     assert_eq!(AgentCreateCustom::METHOD, "agent/createCustom");
     assert_eq!(
         AgentUpdateCustomMetadata::METHOD,

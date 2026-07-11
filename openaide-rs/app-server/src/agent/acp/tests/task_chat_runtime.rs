@@ -11,6 +11,7 @@ use openaide_app_server_protocol::task::{
 
 use crate::agent::acp::{AcpAgentConfig, AcpAgentRuntime};
 use crate::agent::registry::AgentRegistry;
+use crate::client_lifecycle::{AppServerTime, ConnectionId, Delivery, RequestCapability};
 use crate::projects::{project_id_for_workspace, ConfiguredProjectRoots, StorageProjectResolver};
 use crate::protocol::model::{NormalizedMessage, TaskStatus};
 use crate::server_requests::ServerRequestRuntime;
@@ -155,6 +156,12 @@ fn steered_acp_prompt_uses_fresh_chat_identity_across_permission_boundary() {
         })
         .expect("create task");
     let task_id = created.task.task_id;
+    server_requests.observe_subscription_added(
+        Delivery::new("client-1".into(), ConnectionId::new("conn-1"))
+            .with_request_capabilities(vec![RequestCapability::Permission]),
+        task_id.clone(),
+        AppServerTime(0),
+    );
     wait_until(|| {
         matches!(
             store

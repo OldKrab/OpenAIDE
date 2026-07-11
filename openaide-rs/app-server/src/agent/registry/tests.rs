@@ -7,17 +7,13 @@ fn catalog_record(value: serde_json::Value) -> AgentCatalogRecord {
 }
 
 #[test]
-fn registry_resolves_codex_launch_and_options_key() {
+fn registry_resolves_codex_as_builtin_agent() {
     let registry = AgentRegistry::default_built_ins();
     let codex = registry.require(CODEX_AGENT_ID).unwrap();
 
     assert_eq!(codex.id, CODEX_AGENT_ID);
     assert_eq!(codex.label(), CODEX_AGENT_LABEL);
     assert_eq!(codex.source_kind, AgentSourceKind::BuiltIn);
-    assert_eq!(
-        codex.options_request_key("/workspace/app"),
-        "codex\0/workspace/app"
-    );
 }
 
 #[test]
@@ -28,10 +24,6 @@ fn registry_resolves_opencode_as_builtin_agent() {
     assert_eq!(opencode.id, OPENCODE_AGENT_ID);
     assert_eq!(opencode.label(), OPENCODE_AGENT_LABEL);
     assert_eq!(opencode.source_kind, AgentSourceKind::BuiltIn);
-    assert_eq!(
-        opencode.options_request_key("/workspace/app"),
-        "opencode\0/workspace/app"
-    );
 }
 
 #[test]

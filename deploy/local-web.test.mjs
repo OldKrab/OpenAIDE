@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
@@ -185,6 +185,30 @@ test("local web role loads its role-specific env file", () => {
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /:5574\b/);
   assert.match(result.stdout, /\.openaide-web-target\/static/);
+});
+
+test("local web role loads an ignored role-local env after tracked role defaults", (t) => {
+  const fixtureRoot = mkdtempSync(join(tmpdir(), "openaide-local-web-role-local-"));
+  const fixtureDeploy = join(fixtureRoot, "deploy");
+  cpSync(new URL(".", import.meta.url), fixtureDeploy, { recursive: true });
+  t.after(() => rmSync(fixtureRoot, { recursive: true, force: true }));
+
+  writeFileSync(join(fixtureDeploy, "local-web.fixture.env"), "OPENAIDE_WEB_PORT=5580\n");
+  writeFileSync(join(fixtureDeploy, "local-web.fixture.local.env"), "OPENAIDE_WEB_PORT=5591\n");
+
+  const result = spawnSync("bash", [join(fixtureDeploy, "local-web.sh"), "status"], {
+    cwd: fixtureRoot,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      OPENAIDE_WEB_ROLE: "fixture",
+      OPENAIDE_WEB_DAEMON: "background",
+    },
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /:5591\b/);
+  assert.doesNotMatch(result.stdout, /:5580\b/);
 });
 
 test("target role uses a durable isolated systemd service", () => {

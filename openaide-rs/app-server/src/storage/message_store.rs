@@ -101,7 +101,7 @@ impl Store {
         let limit = limit.clamp(1, 500);
         let messages = self.read_messages(task_id)?;
         let total = messages.len();
-        let start = total.saturating_sub(limit);
+        let start = chat_page_start(&messages, total.saturating_sub(limit), total);
         self.page_from_slice(task_id, &messages, start, total)
     }
 
@@ -114,7 +114,7 @@ impl Store {
         let limit = limit.clamp(1, 500);
         let messages = self.read_messages(task_id)?;
         let before_index = page_before_index(&messages, before_cursor)?;
-        let start = before_index.saturating_sub(limit);
+        let start = chat_page_start(&messages, before_index.saturating_sub(limit), before_index);
         self.page_from_slice(task_id, &messages, start, before_index)
     }
 
@@ -244,6 +244,60 @@ impl Store {
         serde_json::from_str::<MessageMeta>(&text)
             .map(|meta| meta.version)
             .map_err(RuntimeError::from)
+    }
+}
+
+const TARGET_CHAT_TURNS: usize = 10;
+const MAX_SEMANTIC_WINDOW_RECORDS: usize = 500;
+
+fn chat_page_start(messages: &[StoredMessage], requested_start: usize, end: usize) -> usize {
+    if requested_start == 0 || requested_start >= messages.len() {
+        return requested_start;
+    }
+
+    // A Chat page is sized for useful conversation context. The raw record limit remains the
+    // ordinary payload budget, while this bounded scan includes up to ten recent user turns.
+    let scan_floor = end.saturating_sub(MAX_SEMANTIC_WINDOW_RECORDS);
+    let mut turn_start = None;
+    let mut user_turns = 0;
+    for index in (scan_floor..end).rev() {
+        if matches!(
+            &messages[index].chat.message,
+            NormalizedMessage::User { .. }
+        ) {
+            turn_start = Some(index);
+            user_turns += 1;
+            if user_turns == TARGET_CHAT_TURNS {
+                break;
+            }
+        }
+    }
+    let requested_start = turn_start
+        .map(|turn_start| requested_start.min(turn_start))
+        .unwrap_or(requested_start);
+    if !matches!(
+        &messages[requested_start].chat.message,
+        NormalizedMessage::Activity { .. } | NormalizedMessage::Thought { .. }
+    ) {
+        return requested_start;
+    }
+
+    let mut run_start = requested_start;
+    while run_start > 0
+        && matches!(
+            &messages[run_start].chat.message,
+            NormalizedMessage::Activity { .. } | NormalizedMessage::Thought { .. }
+        )
+    {
+        run_start -= 1;
+    }
+    if matches!(
+        &messages[run_start].chat.message,
+        NormalizedMessage::User { .. }
+    ) {
+        run_start
+    } else {
+        run_start + 1
     }
 }
 

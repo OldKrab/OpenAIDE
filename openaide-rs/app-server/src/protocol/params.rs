@@ -111,12 +111,6 @@ pub struct RuntimeAcpTraceSettingsPatch {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct AgentConfigOptionsParams {
-    pub agent_id: String,
-    pub workspace_root: String,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
 pub struct AgentProbeParams {
     pub agent_id: String,
 }
@@ -133,14 +127,6 @@ pub struct AgentListSessionsParams {
     pub workspace_root: String,
     #[serde(default)]
     pub cursor: Option<String>,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-pub struct SessionSetConfigOptionParams {
-    pub agent_id: String,
-    pub workspace_root: String,
-    pub config_id: String,
-    pub value: String,
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]

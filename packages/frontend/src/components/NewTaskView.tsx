@@ -53,10 +53,7 @@ export function NewTaskView({
   const preparedTaskId = state.snapshot && !state.snapshot.task.has_messages ? state.snapshot.task.task_id : undefined;
   const preparedTaskInput = preparedTaskId ? state.taskInputs[preparedTaskId] : undefined;
   const preparedConfigOptions = preparedTaskId ? state.snapshot?.agent_config : undefined;
-  const composerConfigOptions =
-    state.newTask.pending?.configOptions
-    ?? state.newTask.configOptions
-    ?? (preparedConfigOptions?.options.length ? preparedConfigOptions : undefined);
+  const composerConfigOptions = preparedConfigOptions?.options.length ? preparedConfigOptions : undefined;
   const composerConfigOptionsError = preparedTaskId ? undefined : state.newTask.configOptionsError;
   const composerAttachments = state.newTask.submitting
     ? []

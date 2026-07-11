@@ -1,9 +1,6 @@
 use std::sync::{Arc, Mutex};
 
-use openaide_app_server_protocol::agent::{
-    AgentConfigOptionsParams, AgentConfigOptionsResult, AgentListSessionsParams,
-    AgentListSessionsResult, AgentSetConfigOptionParams,
-};
+use openaide_app_server_protocol::agent::{AgentListSessionsParams, AgentListSessionsResult};
 use openaide_app_server_protocol::errors::{ProtocolError, ProtocolErrorCode};
 use openaide_app_server_protocol::ids::{ClientInstanceId, MessageId, TurnId};
 use openaide_app_server_protocol::snapshot::{TaskNavigationSnapshot, TaskSnapshot};
@@ -37,7 +34,6 @@ mod archive;
 mod attachments;
 mod cancel;
 mod chat_page;
-mod config_options_listing;
 mod create;
 mod discard;
 mod list_sessions;
@@ -78,18 +74,6 @@ pub(crate) trait AgentListSessionsWorkflow: Send + Sync {
         &self,
         params: AgentListSessionsParams,
     ) -> Result<AgentListSessionsResult, ProtocolError>;
-}
-
-pub(crate) trait AgentConfigOptionsWorkflow: Send + Sync {
-    fn config_options(
-        &self,
-        params: AgentConfigOptionsParams,
-    ) -> Result<AgentConfigOptionsResult, ProtocolError>;
-
-    fn set_config_option(
-        &self,
-        params: AgentSetConfigOptionParams,
-    ) -> Result<AgentConfigOptionsResult, ProtocolError>;
 }
 
 #[derive(Debug)]

@@ -1,9 +1,8 @@
 use openaide_app_server_protocol::agent::{
-    AgentAuthenticateParams, AgentAuthenticateResult, AgentConfigOptionsParams,
-    AgentConfigOptionsResult, AgentCreateCustomParams, AgentCreateCustomResult,
-    AgentDeleteCustomParams, AgentDeleteCustomResult, AgentListSessionsParams,
-    AgentListSessionsResult, AgentProbeParams, AgentProbeResult, AgentReplaceCustomParams,
-    AgentReplaceCustomResult, AgentSetConfigOptionParams, AgentSetEnabledParams,
+    AgentAuthenticateParams, AgentAuthenticateResult, AgentCreateCustomParams,
+    AgentCreateCustomResult, AgentDeleteCustomParams, AgentDeleteCustomResult,
+    AgentListSessionsParams, AgentListSessionsResult, AgentProbeParams, AgentProbeResult,
+    AgentReplaceCustomParams, AgentReplaceCustomResult, AgentSetEnabledParams,
     AgentSetEnabledResult, AgentSettingsDetailsParams, AgentSettingsDetailsResult,
     AgentUpdateCustomMetadataParams, AgentUpdateCustomMetadataResult,
 };
@@ -77,46 +76,6 @@ impl RpcGateway {
             Err(error) => return self.error(connection_id, id, meta, error),
         };
         self.result::<AgentAuthenticateResult>(connection_id, id, meta, result)
-    }
-
-    pub(super) fn handle_agent_config_options(
-        &mut self,
-        connection_id: ConnectionId,
-        id: String,
-        params: Value,
-        meta: RequestMeta,
-    ) -> GatewayOutcome {
-        let params = match serde_json::from_value::<AgentConfigOptionsParams>(params) {
-            Ok(params) => params,
-            Err(error) => {
-                return self.error(connection_id, id, meta, responses::invalid_params(error));
-            }
-        };
-        let result = match self.agent_config_options.config_options(params) {
-            Ok(result) => result,
-            Err(error) => return self.error(connection_id, id, meta, error),
-        };
-        self.result::<AgentConfigOptionsResult>(connection_id, id, meta, result)
-    }
-
-    pub(super) fn handle_agent_set_config_option(
-        &mut self,
-        connection_id: ConnectionId,
-        id: String,
-        params: Value,
-        meta: RequestMeta,
-    ) -> GatewayOutcome {
-        let params = match serde_json::from_value::<AgentSetConfigOptionParams>(params) {
-            Ok(params) => params,
-            Err(error) => {
-                return self.error(connection_id, id, meta, responses::invalid_params(error));
-            }
-        };
-        let result = match self.agent_config_options.set_config_option(params) {
-            Ok(result) => result,
-            Err(error) => return self.error(connection_id, id, meta, error),
-        };
-        self.result::<AgentConfigOptionsResult>(connection_id, id, meta, result)
     }
 
     pub(super) fn handle_agent_create_custom(

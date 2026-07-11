@@ -52,12 +52,9 @@ fn invalid_and_unknown_requests_return_protocol_errors() {
 #[test]
 fn blank_task_start_does_not_probe_agent_options() {
     let tmp = TempDir::new().unwrap();
-    let option_calls = Arc::new(AtomicUsize::new(0));
     let service = TaskService::new(
         Store::open(tmp.path().join("store")).unwrap(),
-        Arc::new(OptionsCountingAgent {
-            calls: option_calls.clone(),
-        }),
+        Arc::new(MockAgent),
     );
 
     let error = service
@@ -77,7 +74,6 @@ fn blank_task_start_does_not_probe_agent_options() {
         .unwrap_err();
 
     assert!(matches!(error, RuntimeError::InvalidParams(_)));
-    assert_eq!(option_calls.load(Ordering::SeqCst), 0);
 }
 
 #[test]

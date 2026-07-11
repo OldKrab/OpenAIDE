@@ -1,5 +1,5 @@
-use std::sync::{Arc, Mutex};
 use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex};
 
 use crate::agent::events::{
     AgentEvent, AgentPermissionOption, AgentPermissionOptionKind, AgentPermissionRequest,
@@ -9,14 +9,10 @@ use crate::agent::{
     AgentEventSink, AgentMetadataField, AgentSessionEventSink, AgentSessionMetadataUpdate,
     TurnCancellation,
 };
+use crate::client_lifecycle::AppServerTime;
 use crate::protocol::model::{IsolationKind, NormalizedMessage, TaskStatus};
 use crate::server_requests::ServerRequestRuntime;
 use crate::server_requests::{ResponderScope, ServerRequestAnswer};
-use crate::client_lifecycle::AppServerTime;
-use openaide_app_server_protocol::ids::{ClientInstanceId, TaskId};
-use openaide_app_server_protocol::server_requests::{
-    QuestionField, QuestionRequestParams, QuestionRequestResponse, QuestionValue,
-};
 use crate::storage::records::{TaskPreparationRecord, TaskRecord};
 use crate::storage::Store;
 use crate::task_events::CommittedTaskDelta;
@@ -24,6 +20,10 @@ use crate::task_events::TaskUpdateNotifier;
 use crate::tasks::mutation::TaskMutations;
 use crate::tasks::runtime_state::RuntimeState;
 use crate::tasks::transitions::TaskTransitions;
+use openaide_app_server_protocol::ids::{ClientInstanceId, TaskId};
+use openaide_app_server_protocol::server_requests::{
+    QuestionField, QuestionRequestParams, QuestionRequestResponse, QuestionValue,
+};
 
 use super::{TaskEventSink, TaskSessionEventSink};
 
@@ -82,7 +82,7 @@ fn agent_session_metadata_rejects_updates_from_a_stale_native_session() {
 }
 
 #[test]
-fn session_question_round_trips_and_persists_submitted_history() {
+fn question_without_a_capable_responder_is_cancelled_without_blocking_the_task() {
     let (_dir, store, mutations, server_requests) = test_runtime();
     store.write_task(&running_task("task_1")).unwrap();
     let sink = TaskSessionEventSink::new(
@@ -91,10 +91,38 @@ fn session_question_round_trips_and_persists_submitted_history() {
         "session_1".to_string(),
         server_requests.clone(),
     );
-    let thread = std::thread::spawn(move || {
-        sink.request_question(question_form(), TurnCancellation::new())
-    });
-    while server_requests.pending_for_task(&TaskId::from("task_1")).is_empty() {
+
+    let response = sink
+        .request_question(question_form(), TurnCancellation::new())
+        .unwrap();
+
+    assert_eq!(response, QuestionRequestResponse::Cancel);
+    assert_eq!(
+        store.read_task("task_1").unwrap().status,
+        TaskStatus::Active
+    );
+    assert!(server_requests
+        .pending_for_task(&TaskId::from("task_1"))
+        .is_empty());
+}
+
+#[test]
+fn session_question_round_trips_and_persists_submitted_history() {
+    let (_dir, store, mutations, server_requests) = test_runtime();
+    register_question_responder(&server_requests, "task_1");
+    store.write_task(&running_task("task_1")).unwrap();
+    let sink = TaskSessionEventSink::new(
+        mutations,
+        "task_1".to_string(),
+        "session_1".to_string(),
+        server_requests.clone(),
+    );
+    let thread =
+        std::thread::spawn(move || sink.request_question(question_form(), TurnCancellation::new()));
+    while server_requests
+        .pending_for_task(&TaskId::from("task_1"))
+        .is_empty()
+    {
         std::thread::yield_now();
     }
     let request = server_requests.pending_for_task(&TaskId::from("task_1"))[0].clone();
@@ -115,7 +143,10 @@ fn session_question_round_trips_and_persists_submitted_history() {
         ),
         crate::server_requests::ResponseOutcome::Accepted { .. }
     ));
-    assert!(matches!(thread.join().unwrap().unwrap(), QuestionRequestResponse::Submit { .. }));
+    assert!(matches!(
+        thread.join().unwrap().unwrap(),
+        QuestionRequestResponse::Submit { .. }
+    ));
     let messages = store.read_messages("task_1").unwrap();
     assert!(messages.iter().any(|stored| matches!(&stored.chat.message,
         NormalizedMessage::Question { state: crate::protocol::model::QuestionState::Resolved,
@@ -126,6 +157,7 @@ fn session_question_round_trips_and_persists_submitted_history() {
 #[test]
 fn withdrawing_one_question_closes_only_its_own_waiter() {
     let (_dir, store, mutations, server_requests) = test_runtime();
+    register_question_responder(&server_requests, "task_1");
     store.write_task(&running_task("task_1")).unwrap();
     let cancellation = TurnCancellation::new();
     let sink = TaskSessionEventSink::new(
@@ -135,14 +167,25 @@ fn withdrawing_one_question_closes_only_its_own_waiter() {
         server_requests.clone(),
     );
     let wait_cancellation = cancellation.clone();
-    let thread = std::thread::spawn(move || sink.request_question(question_form(), wait_cancellation));
-    while server_requests.pending_count() == 0 { std::thread::yield_now(); }
+    let thread =
+        std::thread::spawn(move || sink.request_question(question_form(), wait_cancellation));
+    while server_requests.pending_count() == 0 {
+        std::thread::yield_now();
+    }
     cancellation.cancel();
 
-    assert_eq!(thread.join().unwrap().unwrap(), QuestionRequestResponse::Cancel);
+    assert_eq!(
+        thread.join().unwrap().unwrap(),
+        QuestionRequestResponse::Cancel
+    );
     let messages = store.read_messages("task_1").unwrap();
-    assert!(messages.iter().any(|stored| matches!(stored.chat.message,
-        NormalizedMessage::Question { state: crate::protocol::model::QuestionState::Cancelled, .. })));
+    assert!(messages.iter().any(|stored| matches!(
+        stored.chat.message,
+        NormalizedMessage::Question {
+            state: crate::protocol::model::QuestionState::Cancelled,
+            ..
+        }
+    )));
 }
 
 fn question_form() -> QuestionRequestParams {
@@ -154,13 +197,66 @@ fn question_form() -> QuestionRequestParams {
             description: None,
             required: true,
             default: Some("safe".to_string()),
-            options: vec![openaide_app_server_protocol::server_requests::QuestionOption {
-                value: "safe".to_string(),
-                label: "Safe".to_string(),
-                description: Some("Small changes".to_string()),
-            }],
+            options: vec![
+                openaide_app_server_protocol::server_requests::QuestionOption {
+                    value: "safe".to_string(),
+                    label: "Safe".to_string(),
+                    description: Some("Small changes".to_string()),
+                },
+            ],
         }],
     }
+}
+
+fn register_question_responder(server_requests: &ServerRequestRuntime, task_id: &str) {
+    server_requests.observe_subscription_added(
+        crate::client_lifecycle::Delivery::new(
+            ClientInstanceId::from("client-1"),
+            crate::client_lifecycle::ConnectionId::new("conn-1"),
+        )
+        .with_request_capabilities(vec![crate::client_lifecycle::RequestCapability::Question]),
+        TaskId::from(task_id),
+        AppServerTime(0),
+    );
+}
+
+fn register_permission_responder(server_requests: &ServerRequestRuntime, task_id: &str) {
+    server_requests.observe_subscription_added(
+        crate::client_lifecycle::Delivery::new(
+            ClientInstanceId::from("client-1"),
+            crate::client_lifecycle::ConnectionId::new("conn-1"),
+        )
+        .with_request_capabilities(vec![crate::client_lifecycle::RequestCapability::Permission]),
+        TaskId::from(task_id),
+        AppServerTime(0),
+    );
+}
+
+#[test]
+fn permission_without_a_capable_responder_is_cancelled_without_blocking_the_task() {
+    let (_dir, store, mutations, server_requests) = test_runtime();
+    store.write_task(&running_task("task_1")).unwrap();
+    let sink = TaskEventSink::new(
+        mutations,
+        "task_1".to_string(),
+        "turn_1".to_string(),
+        server_requests.clone(),
+        TurnCancellation::new(),
+    );
+
+    let outcome = sink
+        .request_permission(permission_request("permission_1"))
+        .unwrap();
+
+    assert!(matches!(
+        outcome,
+        crate::agent::events::AgentPermissionOutcome::Cancelled
+    ));
+    assert_eq!(
+        store.read_task("task_1").unwrap().status,
+        TaskStatus::Active
+    );
+    assert_eq!(server_requests.pending_count(), 0);
 }
 
 #[test]
@@ -175,6 +271,7 @@ fn permission_request_append_failure_does_not_open_broker_request() {
         notifier,
     );
     let server_requests = ServerRequestRuntime::new();
+    register_permission_responder(&server_requests, "missing_task");
     let sink = TaskEventSink::new(
         mutations,
         "missing_task".to_string(),
@@ -352,6 +449,7 @@ fn prompt_completion_finalizes_the_last_text_run() {
 fn permission_request_splits_active_agent_text_run() {
     let (_dir, store, mutations, server_requests) = test_runtime();
     store.write_task(&running_task("task_1")).unwrap();
+    register_permission_responder(&server_requests, "task_1");
     let sink = Arc::new(TaskEventSink::new(
         mutations,
         "task_1".to_string(),

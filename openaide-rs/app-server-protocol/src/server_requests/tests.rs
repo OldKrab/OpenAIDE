@@ -58,7 +58,10 @@ fn shell_and_secret_requests_use_protocol_safe_shapes() {
 fn question_response_distinguishes_submit_from_cancel() {
     let response = QuestionRequestResponse::Submit {
         content: std::collections::BTreeMap::from([
-            ("name".to_string(), QuestionValue::String("OpenAIDE".to_string())),
+            (
+                "name".to_string(),
+                QuestionValue::String("OpenAIDE".to_string()),
+            ),
             ("enabled".to_string(), QuestionValue::Boolean(true)),
         ]),
     };

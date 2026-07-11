@@ -120,7 +120,6 @@ pub(super) fn gateway(
         task_product_api.clone(),
         task_product_api.clone(),
         task_product_api.clone(),
-        task_product_api.clone(),
         task_product_api,
     );
     Ok(GatewayFactoryOutput {

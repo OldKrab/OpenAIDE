@@ -292,32 +292,6 @@ impl AgentRuntime for DelayedAgent {
     }
 }
 
-struct OptionsCountingAgent {
-    calls: Arc<AtomicUsize>,
-}
-
-impl AgentRuntime for OptionsCountingAgent {
-    fn config_options(
-        &self,
-        _request: AgentConfigOptionsRequest,
-    ) -> Result<ConfigOptionsCatalog, RuntimeError> {
-        self.calls.fetch_add(1, Ordering::SeqCst);
-        Ok(model_catalog("gpt-5.4"))
-    }
-
-    fn start_session(&self, _request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
-        Ok(AgentSession::new("session_options_counting"))
-    }
-
-    fn prompt(
-        &self,
-        _prompt: AgentPrompt,
-        sink: Arc<dyn AgentEventSink>,
-    ) -> Result<(), RuntimeError> {
-        sink.emit(AgentEvent::Text("response".to_string()))
-    }
-}
-
 struct OptionUpdateAgent;
 
 impl AgentRuntime for OptionUpdateAgent {

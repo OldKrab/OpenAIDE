@@ -61,6 +61,7 @@ fn first_event_after_subscribe_chains_from_subscription_cursor() {
             Some(Delivery {
                 client_instance_id: client_id.clone(),
                 connection_id: ConnectionId::new("conn-1"),
+                request_capabilities: Vec::new(),
             })
         },
         AppServerTime(2),
@@ -97,6 +98,7 @@ fn agent_collection_update_delivers_to_agent_subscribers() {
             Some(Delivery {
                 client_instance_id: client_id.clone(),
                 connection_id: ConnectionId::new("conn-1"),
+                request_capabilities: Vec::new(),
             })
         },
         AppServerTime(2),
@@ -132,6 +134,7 @@ fn project_collection_update_delivers_to_project_subscribers() {
             Some(Delivery {
                 client_instance_id: client_id.clone(),
                 connection_id: ConnectionId::new("conn-1"),
+                request_capabilities: Vec::new(),
             })
         },
         AppServerTime(2),
@@ -167,6 +170,7 @@ fn project_collection_update_advances_task_navigation_subscribers() {
             Some(Delivery {
                 client_instance_id: client_id.clone(),
                 connection_id: ConnectionId::new("conn-1"),
+                request_capabilities: Vec::new(),
             })
         },
         AppServerTime(2),
@@ -204,6 +208,7 @@ fn project_collection_update_advances_task_subscribers() {
             Some(Delivery {
                 client_instance_id: client_id.clone(),
                 connection_id: ConnectionId::new("conn-1"),
+                request_capabilities: Vec::new(),
             })
         },
         AppServerTime(2),
@@ -243,6 +248,7 @@ fn task_navigation_publication_reads_snapshot_after_durable_write() {
             Some(Delivery {
                 client_instance_id: client_id.clone(),
                 connection_id: ConnectionId::new("conn-1"),
+                request_capabilities: Vec::new(),
             })
         },
         AppServerTime(2),
@@ -324,6 +330,7 @@ fn task_updated_delivers_to_project_filtered_task_navigation_subscribers() {
             Some(Delivery {
                 client_instance_id: client_id.clone(),
                 connection_id: ConnectionId::new("conn-1"),
+                request_capabilities: Vec::new(),
             })
         },
         AppServerTime(2),
@@ -419,6 +426,7 @@ fn client_scoped_events_only_deliver_to_matching_client() {
             Some(Delivery {
                 client_instance_id: client_id.clone(),
                 connection_id: ConnectionId::new(format!("conn-for-{}", client_id.as_str())),
+                request_capabilities: Vec::new(),
             })
         },
         AppServerTime(2),

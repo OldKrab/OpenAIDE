@@ -1,5 +1,4 @@
 import {
-  AGENT_SET_CONFIG_OPTION,
   ATTACHMENT_CONFIRM_EMBEDDED,
   ATTACHMENT_CREATE_EMBEDDED_CANDIDATE,
   ATTACHMENT_CREATE_FILE_REFERENCE,
@@ -27,13 +26,10 @@ import {
   clearPendingTaskSendRecovery,
   savePendingTaskSendRecovery,
 } from "../services/pendingTaskSendRecovery";
-import { mapProtocolConfigOptions } from "../state/appServerConfigOptions";
 import { appServerAttachment, appServerAttachmentHandles } from "../state/composerOptions";
 import { mapProtocolTaskSnapshot } from "../state/appServerProtocolMapping";
 import type { AppAction } from "../state/appReducer";
 import type { AppState } from "../state/store";
-import { workspaceRootForProjectId } from "../state/projectIdentity";
-import { configOptionsRequestKey } from "../state/surfaceRouting";
 import { isInvalidAttachmentHandleError } from "../state/attachmentValidation";
 import type { AppCallbacksDependencies, NewTaskCallbacks, NewTaskDraftInput, NewTaskStartAttempt } from "./appControllerCallbackTypes";
 import { newTaskPreparationKey, taskCreateParams } from "./newTaskPreparationContext";
@@ -81,39 +77,23 @@ export function createNewTaskCallbacks({
       latestOptionsRequestKey.current = undefined;
     },
     selectConfigOption: (configId, value) => {
-      if (backendConnection?.request) {
-        const projectId = state.newTask.selection.projectId;
-        if (!projectId) {
-          dispatch({ type: "newTask:configOptions:error", message: "Project is not ready yet." });
-          return;
-        }
-        const workspaceRoot = workspaceRootForProjectId(
-          projectId,
-          state.newTask.selection.workspaceRoot,
-        );
-        const key = configOptionsRequestKey(
-          state.newTask.selection.agentId,
-          projectId,
-          workspaceRoot,
-        );
-        latestOptionsRequestKey.current = key;
-        dispatch({ type: "newTask:configOptions:start" });
-        void backendConnection.request(AGENT_SET_CONFIG_OPTION, {
-          agentId: state.newTask.selection.agentId as AgentId,
-          projectId: projectId as ProjectId,
-          ...(workspaceRoot ? { workspaceRoot } : {}),
+      const taskId = state.snapshot && !state.snapshot.task.has_messages
+        ? state.snapshot.task.task_id
+        : undefined;
+      if (backendConnection?.request && taskId) {
+        void backendConnection.request(TASK_SET_CONFIG_OPTION, {
+          taskId: taskId as TaskId,
           configId: configId as AgentConfigOptionId,
           value,
+          clientMutationId: createNewTaskMutationId(configId),
         }).then((result) => {
-          if (latestOptionsRequestKey.current !== key) return;
-          dispatch({ type: "newTask:configOptions:result", catalog: mapProtocolConfigOptions(result) });
+          dispatch({ type: "snapshot", snapshot: mapProtocolTaskSnapshot(result.task).snapshot, intent: "refresh" });
         }).catch(() => {
-          if (latestOptionsRequestKey.current !== key) return;
           dispatch({ type: "newTask:configOptions:error", message: "Unable to update Agent option." });
         });
         return;
       }
-      dispatch({ type: "newTask:configOptions:error", message: "App Server connection unavailable." });
+      dispatch({ type: "newTask:configOptions:error", message: "Task session is not ready yet." });
     },
     submit: (draft) => {
       void submitNewTask({ backendConnection, currentNavigationGeneration, dispatch, draft, newTaskStartAttempt, pendingPreparedNewTask, state });

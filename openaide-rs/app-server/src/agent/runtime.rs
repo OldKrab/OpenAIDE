@@ -101,20 +101,6 @@ pub struct AgentPrompt {
 }
 
 #[derive(Clone)]
-pub struct AgentConfigOptionsRequest {
-    pub agent_id: String,
-    pub cwd: String,
-}
-
-#[derive(Clone)]
-pub struct AgentSetConfigOptionRequest {
-    pub agent_id: String,
-    pub cwd: String,
-    pub config_id: String,
-    pub value: String,
-}
-
-#[derive(Clone)]
 pub struct AgentSessionSetConfigOptionRequest {
     pub agent_id: String,
     pub session_id: String,
@@ -198,23 +184,6 @@ pub trait AgentRuntime: Send + Sync {
         Err(RuntimeError::CapabilityMissing(format!(
             "agent_load_session:{}:{}",
             request.task_id, request.session_id
-        )))
-    }
-
-    fn config_options(
-        &self,
-        request: AgentConfigOptionsRequest,
-    ) -> Result<ConfigOptionsCatalog, RuntimeError> {
-        Ok(ConfigOptionsCatalog::empty(request.agent_id))
-    }
-
-    fn set_config_option(
-        &self,
-        request: AgentSetConfigOptionRequest,
-    ) -> Result<ConfigOptionsCatalog, RuntimeError> {
-        Err(RuntimeError::CapabilityMissing(format!(
-            "agent_config_options:{}:{}:{}",
-            request.agent_id, request.cwd, request.config_id
         )))
     }
 
@@ -314,10 +283,8 @@ pub trait AgentSessionEventSink: Send + Sync {
         &self,
         _form: openaide_app_server_protocol::server_requests::QuestionRequestParams,
         _cancellation: TurnCancellation,
-    ) -> Result<
-        openaide_app_server_protocol::server_requests::QuestionRequestResponse,
-        RuntimeError,
-    > {
+    ) -> Result<openaide_app_server_protocol::server_requests::QuestionRequestResponse, RuntimeError>
+    {
         Ok(openaide_app_server_protocol::server_requests::QuestionRequestResponse::Cancel)
     }
 

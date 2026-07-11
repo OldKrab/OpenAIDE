@@ -69,8 +69,6 @@ fn task_service_delegates_public_agent_requests() {
             "AgentProbeRequest",
             "AgentAuthenticateRequest",
             "AgentListSessionsRequest",
-            "AgentConfigOptionsRequest",
-            "AgentSetConfigOptionRequest",
         ],
     );
     assert!(

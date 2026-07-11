@@ -3,7 +3,6 @@ use openaide_app_server_protocol::task::TaskSetConfigOptionParams;
 
 use crate::agent::AgentSessionSetConfigOptionRequest;
 use crate::protocol::model::ConfigOptionsCatalog;
-use crate::protocol::model::TaskStatus as LegacyTaskStatus;
 use crate::snapshots::task_snapshot::project_stored_task_snapshot;
 use crate::tasks::mutation::{TaskCommitOutcome, TaskMutationResult};
 use crate::tasks::snapshot::build_snapshot;
@@ -35,24 +34,20 @@ impl TaskProductApi {
         let now = now_string();
         let config_id = params.config_id.into_string();
         let value = params.value;
-        let live_catalog =
-            if task.status == LegacyTaskStatus::Active || task.active_turn_id.is_some() {
-                let session_id = task.agent_session_id.clone().ok_or_else(|| {
-                    conflict_error("Task is running without an active Agent session")
-                })?;
-                Some(
-                    self.agent_gateway
-                        .set_session_config_option(AgentSessionSetConfigOptionRequest {
-                            agent_id: task.agent_id.clone(),
-                            session_id,
-                            config_id: config_id.clone(),
-                            value: value.clone(),
-                        })
-                        .map_err(protocol_error_from_runtime)?,
-                )
-            } else {
-                None
-            };
+        let live_catalog = if let Some(session_id) = task.agent_session_id.clone() {
+            Some(
+                self.agent_gateway
+                    .set_session_config_option(AgentSessionSetConfigOptionRequest {
+                        agent_id: task.agent_id.clone(),
+                        session_id,
+                        config_id: config_id.clone(),
+                        value: value.clone(),
+                    })
+                    .map_err(protocol_error_from_runtime)?,
+            )
+        } else {
+            None
+        };
         let result = self
             .mutations
             .commit_existing_task(&task_id, super::response_snapshot_options(), |ctx| {

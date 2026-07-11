@@ -339,6 +339,7 @@ def initialize_result():
             "sessionCapabilities": {
                 "close": {},
                 "delete": {},
+                "list": {},
             },
         },
         "authMethods": [],
@@ -372,6 +373,8 @@ for line in sys.stdin:
                 notify_title("Agent generated title")
     elif method == "session/load":
         respond(message, {"configOptions": []})
+    elif method == "session/list":
+        respond(message, {"sessions": []})
     elif method == "session/prompt":
         if prompt_mode == "host_terminal_wait_for_cancel":
             pending_prompt_ids.append(message.get("id"))
@@ -494,6 +497,27 @@ fn start_prompt_and_close_dispatch_through_active_sessions() {
             "session/prompt",
             "session/close"
         ]
+    );
+}
+
+#[test]
+fn listing_sessions_does_not_create_a_native_session() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((runtime, log_path)) = fixture_runtime(&temp, "unused-list-session") else {
+        return;
+    };
+
+    runtime
+        .list_sessions(AgentListSessionsRequest {
+            agent_id: "codex".to_string(),
+            cwd: cwd_string(),
+            cursor: None,
+        })
+        .expect("list sessions");
+
+    assert_eq!(
+        read_fixture_methods(&log_path),
+        ["initialize", "session/list"]
     );
 }
 

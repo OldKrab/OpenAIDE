@@ -9,9 +9,7 @@ mod tests;
 
 use crate::agent::events::{AgentEvent, AgentPermissionOutcome, AgentPermissionRequest};
 use crate::agent::normalizer::normalize_event;
-use crate::agent::{
-    AgentEventSink, TurnCancellation,
-};
+use crate::agent::{AgentEventSink, TurnCancellation};
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{NormalizedMessage, TaskStatus};
 use crate::server_requests::ServerRequestRuntime;

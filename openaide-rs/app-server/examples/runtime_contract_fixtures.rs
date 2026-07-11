@@ -15,11 +15,11 @@ use openaide_app_server::protocol::model::{
 };
 use openaide_app_server::protocol::notifications::RuntimeNotification;
 use openaide_app_server::protocol::params::{
-    AgentAuthenticateParams, AgentConfigOptionsParams, AgentListSessionsParams, AgentProbeParams,
-    ChatPageParams, ChatTailParams, DeleteMode, PermissionRespondParams,
-    RuntimeAcpTraceSettingsPatch, RuntimeDeveloperSettingsPatch, RuntimeUpdateSettingsParams,
-    SessionPromptParams, SessionSetConfigOptionParams, TaskCreateMode, TaskCreateParams,
-    TaskDeleteParams, TaskIdParams, TaskListParams, TaskSnapshotParams, ToolDetailParams,
+    AgentAuthenticateParams, AgentListSessionsParams, AgentProbeParams, ChatPageParams,
+    ChatTailParams, DeleteMode, PermissionRespondParams, RuntimeAcpTraceSettingsPatch,
+    RuntimeDeveloperSettingsPatch, RuntimeUpdateSettingsParams, SessionPromptParams,
+    TaskCreateMode, TaskCreateParams, TaskDeleteParams, TaskIdParams, TaskListParams,
+    TaskSnapshotParams, ToolDetailParams,
 };
 use openaide_app_server::protocol::results::{HealthResult, TaskListResult};
 use openaide_app_server::storage::records::TaskPreparationRecord;
@@ -165,16 +165,9 @@ fn main() {
                     acp_trace: RuntimeAcpTraceSettingsPatch { enabled: Some(true) },
                 },
             }),
-            "agent_config_options": to_value(AgentConfigOptionsParams { agent_id: "codex".to_string(), workspace_root: "/workspace/app".to_string() }),
             "agent_probe": to_value(AgentProbeParams { agent_id: "codex".to_string() }),
             "agent_authenticate": to_value(AgentAuthenticateParams { agent_id: "codex".to_string(), method_id: "codex-login".to_string() }),
             "agent_list_sessions": to_value(AgentListSessionsParams { agent_id: "codex".to_string(), workspace_root: "/workspace/app".to_string(), cursor: Some("cursor_1".to_string()) }),
-            "session_set_config_option": to_value(SessionSetConfigOptionParams {
-                agent_id: "codex".to_string(),
-                workspace_root: "/workspace/app".to_string(),
-                config_id: "model".to_string(),
-                value: "gpt-5.5".to_string(),
-            }),
         },
         "results": {
             "health": to_value(HealthResult {

@@ -789,6 +789,51 @@ describe("app reducer composer state", () => {
     expect(state.chatPages.task_1.pending).toBe(false);
   });
 
+  it("retains the open Task chat window when a live snapshot contains only a newer tail", () => {
+    let state = createInitialState();
+    const opened = snapshot("task_1", [
+      chatMessage("m1", "user context"),
+      chatMessage("m2", "earlier response"),
+    ]);
+    state = appReducer(state, { type: "snapshot", intent: "open", snapshot: opened });
+
+    const refreshed = snapshot("task_1", [
+      chatMessage("m2", "updated response"),
+      chatMessage("m3", "live update"),
+    ]);
+    state = appReducer(state, { type: "snapshot", intent: "refresh", snapshot: refreshed });
+
+    const chat = renderedChat(state.snapshot!, state.chatPages.task_1);
+    expect(chat.items.map((message) => message.message_id)).toEqual(["m1", "m2", "m3"]);
+    expect(chat.items.map((message) => message.message.kind === "agent_text" ? message.message.text : "")).toEqual([
+      "user context",
+      "updated response",
+      "live update",
+    ]);
+  });
+
+  it("restores the retained Chat window and scroll position after switching Tasks", () => {
+    let state = createInitialState();
+    state = appReducer(state, {
+      type: "snapshot",
+      intent: "open",
+      snapshot: snapshot("task_1", [chatMessage("m1", "Earlier")]),
+    });
+    state = appReducer(state, {
+      type: "snapshot",
+      intent: "refresh",
+      snapshot: snapshot("task_1", [chatMessage("m2", "Latest")]),
+    });
+    state = appReducer(state, { type: "taskScroll:record", taskId: "task_1", scrollTop: 320 });
+    state = appReducer(state, { type: "snapshot", intent: "open", snapshot: snapshot("task_2") });
+
+    state = appReducer(state, { type: "selection:set", taskId: "task_1" });
+
+    const chat = renderedChat(state.snapshot!, state.chatPages.task_1);
+    expect(chat.items.map((message) => message.message_id)).toEqual(["m1", "m2"]);
+    expect(state.taskScrollPositions.task_1).toBe(320);
+  });
+
   it("coalesces adjacent persisted agent text chunks for rendering", () => {
     const taskSnapshot = snapshot("task_1", [
       chatMessage("m1", "Called"),

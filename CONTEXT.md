@@ -148,7 +148,7 @@ _Avoid_: Blocking all existing Tasks as if they were running
 - A **Native Session** can expose **Configuration Options**.
 - A **Running Task** is owned by one **App Server** process and its **Native Session** while its active turn is running.
 - The App Shell client that started a **Running Task** is only the origin for client-scoped capabilities.
-- Subscribed App Shell clients can observe a **Running Task** and answer Task-scoped requests.
+- Subscribed App Shell clients can observe a **Running Task**. Connected App Shell clients that advertised the required response capability can answer Task-scoped requests independently of state subscriptions.
 - Closing the last **App Shell** client lets **App Server** shut down gracefully; closing a **Task Page** or losing a **Frontend** view is not cancellation.
 
 ## Example dialogue

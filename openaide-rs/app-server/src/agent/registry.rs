@@ -62,10 +62,6 @@ impl AgentDefinition {
         }
     }
 
-    pub(crate) fn options_request_key(&self, cwd: &str) -> String {
-        format!("{}\0{cwd}", self.id)
-    }
-
     fn normalized_label_key(&self) -> String {
         registry_catalog::normalized_label_key(&self.label)
     }

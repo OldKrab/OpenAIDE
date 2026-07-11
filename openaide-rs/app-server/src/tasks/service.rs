@@ -8,13 +8,12 @@ use crate::diagnostics::TaskDiagnostics;
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{
     ActivityToolDetails, AgentAuthenticateResult, AgentListSessionsResult, AgentProbeResult,
-    ConfigOptionsCatalog, MessagePage, TaskSnapshot,
+    MessagePage, TaskSnapshot,
 };
 use crate::protocol::params::{
-    AgentAuthenticateParams, AgentConfigOptionsParams, AgentListSessionsParams, AgentProbeParams,
-    ChatPageParams, ChatTailParams, PermissionRespondParams, SessionPromptParams,
-    SessionSetConfigOptionParams, TaskCreateParams, TaskDeleteParams, TaskIdParams, TaskListParams,
-    TaskSnapshotParams, ToolDetailParams,
+    AgentAuthenticateParams, AgentListSessionsParams, AgentProbeParams, ChatPageParams,
+    ChatTailParams, PermissionRespondParams, SessionPromptParams, TaskCreateParams,
+    TaskDeleteParams, TaskIdParams, TaskListParams, TaskSnapshotParams, ToolDetailParams,
 };
 use crate::protocol::results::TaskListResult;
 use crate::storage::Store;
@@ -224,20 +223,6 @@ impl TaskService {
         params: AgentListSessionsParams,
     ) -> Result<AgentListSessionsResult, RuntimeError> {
         self.agent_service.list_sessions(params)
-    }
-
-    pub fn config_options(
-        &self,
-        params: AgentConfigOptionsParams,
-    ) -> Result<ConfigOptionsCatalog, RuntimeError> {
-        self.agent_service.config_options(params)
-    }
-
-    pub fn set_config_option(
-        &self,
-        params: SessionSetConfigOptionParams,
-    ) -> Result<ConfigOptionsCatalog, RuntimeError> {
-        self.agent_service.set_config_option(params)
     }
 
     fn turn_lifecycle(&self) -> TaskTurnLifecycle {

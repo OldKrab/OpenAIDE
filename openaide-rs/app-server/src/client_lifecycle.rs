@@ -87,6 +87,41 @@ pub enum DetachOutcome {
 pub struct Delivery {
     pub client_instance_id: ClientInstanceId,
     pub connection_id: ConnectionId,
+    pub request_capabilities: Vec<RequestCapability>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RequestCapability {
+    Permission,
+    Question,
+}
+
+impl Delivery {
+    pub fn new(client_instance_id: ClientInstanceId, connection_id: ConnectionId) -> Self {
+        Self {
+            client_instance_id,
+            connection_id,
+            request_capabilities: Vec::new(),
+        }
+    }
+
+    pub fn with_request_capabilities(mut self, capabilities: Vec<RequestCapability>) -> Self {
+        self.request_capabilities = capabilities;
+        self
+    }
+
+    pub fn supports_method(&self, method: &str) -> bool {
+        let required = match method {
+            openaide_app_server_protocol::server_requests::PERMISSION_REQUEST => {
+                RequestCapability::Permission
+            }
+            openaide_app_server_protocol::server_requests::QUESTION_REQUEST => {
+                RequestCapability::Question
+            }
+            _ => return true,
+        };
+        self.request_capabilities.contains(&required)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -274,11 +309,39 @@ impl ClientHub {
 
     pub fn delivery_for(&self, client_instance_id: &ClientInstanceId) -> Option<Delivery> {
         let context = &self.clients.get(client_instance_id)?.context;
-        Some(Delivery {
-            client_instance_id: client_instance_id.clone(),
-            connection_id: context.connection_id.clone(),
-        })
+        Some(
+            Delivery::new(client_instance_id.clone(), context.connection_id.clone())
+                .with_request_capabilities(request_capabilities(&context.capabilities)),
+        )
     }
+
+    /// Returns connected clients that declared support for an App Server request method.
+    pub fn deliveries_supporting(&self, method: &str) -> Vec<Delivery> {
+        self.clients
+            .keys()
+            .filter_map(|client_instance_id| self.delivery_for(client_instance_id))
+            .filter(|delivery| delivery.supports_method(method))
+            .collect()
+    }
+}
+
+fn request_capabilities(capabilities: &ClientCapabilities) -> Vec<RequestCapability> {
+    use openaide_app_server_protocol::client::ClientProtocolCapability;
+
+    let mut result = Vec::new();
+    if capabilities
+        .protocol
+        .contains(&ClientProtocolCapability::PermissionResponses)
+    {
+        result.push(RequestCapability::Permission);
+    }
+    if capabilities
+        .protocol
+        .contains(&ClientProtocolCapability::QuestionResponses)
+    {
+        result.push(RequestCapability::Question);
+    }
+    result
 }
 
 #[cfg(test)]

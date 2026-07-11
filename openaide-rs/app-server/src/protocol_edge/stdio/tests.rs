@@ -41,7 +41,9 @@ fn init_request(id: &str, client_id: &str) -> String {
             "clientInstanceId": client_id,
             "shell": { "kind": "web" },
             "requestedSurface": { "kind": "home" },
-            "capabilities": {}
+            "capabilities": {
+                "protocol": ["permissionResponses", "questionResponses"]
+            }
         },
         "meta": { "clientRequestId": "client-request-1" }
     })
@@ -53,7 +55,9 @@ fn initialize_params(client_id: &str) -> Value {
         "clientInstanceId": client_id,
         "shell": { "kind": "web" },
         "requestedSurface": { "kind": "home" },
-        "capabilities": {},
+        "capabilities": {
+            "protocol": ["permissionResponses", "questionResponses"]
+        },
     })
 }
 
@@ -1295,7 +1299,7 @@ fn task_subscription_emits_pending_server_request_over_stdio() {
     let mut dispatcher = ProtocolEdgeStdioDispatcher::new_for_test(state_root);
     dispatcher.handle_line(&init_request("1", "client-1"));
     let opened = dispatcher.gateway.open_server_request(
-        task_server_request("task-1"),
+        task_secret_request("task-1"),
         crate::client_lifecycle::AppServerTime(2),
     );
     assert!(matches!(
@@ -1336,8 +1340,8 @@ fn task_subscription_emits_pending_server_request_over_stdio() {
     let server_request = response(&responses[1]);
     assert_eq!(server_request["jsonrpc"], "2.0");
     assert_eq!(server_request["id"], "server-request-1");
-    assert_eq!(server_request["method"], "permission/request");
-    assert_eq!(server_request["params"]["prompt"], "Allow?");
+    assert_eq!(server_request["method"], "secret/read");
+    assert_eq!(server_request["params"]["key"], "agent.secret");
 
     let updates = dispatcher.handle_line(
         &json!({
@@ -1367,16 +1371,6 @@ fn task_subscription_emits_pending_server_request_over_stdio() {
 fn stdio_error_response_does_not_resolve_pending_server_request() {
     let (temp, mut dispatcher) = dispatcher();
     dispatcher.handle_line(&init_request("1", "client-1"));
-    let opened = dispatcher
-        .gateway
-        .open_server_request(task_server_request("task-1"), AppServerTime(2));
-    assert!(matches!(
-        opened,
-        OpenRequestOutcome::Opened {
-            deliveries,
-            ..
-        } if deliveries.is_empty()
-    ));
     dispatcher.handle_line(
         &json!({
             "jsonrpc": "2.0",
@@ -1391,6 +1385,16 @@ fn stdio_error_response_does_not_resolve_pending_server_request() {
         })
         .to_string(),
     );
+    let opened = dispatcher
+        .gateway
+        .open_server_request(task_server_request("task-1"), AppServerTime(2));
+    assert!(matches!(
+        opened,
+        OpenRequestOutcome::Opened {
+            deliveries,
+            ..
+        } if deliveries.len() == 1
+    ));
 
     let responses = dispatcher.handle_line(
         &json!({
@@ -2487,6 +2491,17 @@ fn task_server_request(task_id: &str) -> ServerRequestDraft {
     }
 }
 
+fn task_secret_request(task_id: &str) -> ServerRequestDraft {
+    ServerRequestDraft {
+        scope: PendingRequestScope::Task {
+            task_id: TaskId::from(task_id),
+        },
+        method: "secret/read".to_string(),
+        title: "Secret needed".to_string(),
+        params: json!({ "key": "agent.secret" }),
+    }
+}
+
 fn open_store_after_dispatcher_drop(path: &std::path::Path) -> Store {
     let deadline = Instant::now() + Duration::from_secs(1);
     loop {
@@ -2528,9 +2543,11 @@ fn wait_for_server_request(
 ) -> Value {
     let deadline = Instant::now() + Duration::from_secs(1);
     while Instant::now() < deadline {
-        let notification = notifications
-            .recv_timeout(Duration::from_millis(50))
-            .expect("task update notification");
+        let notification = match notifications.recv_timeout(Duration::from_millis(50)) {
+            Ok(notification) => notification,
+            Err(mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(error) => panic!("task update channel closed: {error}"),
+        };
         for line in dispatcher.handle_task_update(notification) {
             let value = response(&line);
             if value["method"] == method {

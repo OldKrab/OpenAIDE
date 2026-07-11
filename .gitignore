@@ -24,3 +24,4 @@ packages/frontend/public/
 pnpm-lock.yaml
 deploy/demo/vendor/
 deploy/local-web.env
+deploy/local-web.*.local.env

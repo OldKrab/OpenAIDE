@@ -1,10 +1,9 @@
 use std::sync::Arc;
 
 use crate::agent::{
-    AgentAuthenticateRequest, AgentConfigOptionsRequest, AgentListSessionsRequest,
-    AgentLoadedSession, AgentProbeRequest, AgentRuntime, AgentSession, AgentSessionLoad,
-    AgentSessionResume, AgentSessionSetConfigOptionRequest, AgentSessionStart,
-    AgentSetConfigOptionRequest,
+    AgentAuthenticateRequest, AgentListSessionsRequest, AgentLoadedSession, AgentProbeRequest,
+    AgentRuntime, AgentSession, AgentSessionLoad, AgentSessionResume,
+    AgentSessionSetConfigOptionRequest, AgentSessionStart,
 };
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{
@@ -41,20 +40,6 @@ impl AgentGateway {
         request: AgentListSessionsRequest,
     ) -> Result<AgentListSessionsResult, RuntimeError> {
         self.agent.list_sessions(request)
-    }
-
-    pub(crate) fn config_options(
-        &self,
-        request: AgentConfigOptionsRequest,
-    ) -> Result<ConfigOptionsCatalog, RuntimeError> {
-        self.agent.config_options(request)
-    }
-
-    pub(crate) fn set_config_option(
-        &self,
-        request: AgentSetConfigOptionRequest,
-    ) -> Result<ConfigOptionsCatalog, RuntimeError> {
-        self.agent.set_config_option(request)
     }
 
     pub(crate) fn set_session_config_option(

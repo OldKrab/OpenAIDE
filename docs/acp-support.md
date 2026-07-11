@@ -52,7 +52,7 @@ This document tracks three things:
 | Boolean config option | planned | config option schema | Adds non-select config controls. |
 | Configurable LLM providers | planned | config option/provider metadata | Agent-specific provider settings without hard-coded UI assumptions. |
 | Deleted-file diff representation | planned | diff content | Preserve delete semantics beyond old/new fallback. |
-| Elicitation | planned | client capability | Structured user input distinct from permission approval. |
+| Elicitation | supported | client capability | Form elicitation is normalized into Task Questions and routed to connected clients that advertise question-response support; Task state subscriptions do not grant or revoke this connection capability. When none can answer, App Server returns cancellation without blocking the Task. |
 | Logout method | planned | future auth metadata | Agent logout where advertised. |
 | MCP-over-ACP | planned | RFD/capabilities | ACP channels for MCP transport when supported. |
 | Message ID | planned | update metadata | Deduplication and stable message identity when present. |

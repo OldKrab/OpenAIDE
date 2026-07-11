@@ -19,10 +19,11 @@ fn cancelled_permission_wait_clears_broker_pending_request() {
         .open_permission_request(
             "task-1",
             &permission_request("agent-request-1"),
-            Vec::new(),
+            vec![permission_delivery()],
             AppServerTime(1),
         )
-        .expect("open permission request");
+        .expect("open permission request")
+        .expect("capable permission responder");
     assert_eq!(
         runtime
             .pending_for_task(&openaide_app_server_protocol::ids::TaskId::from("task-1"))
@@ -56,10 +57,12 @@ fn legacy_permission_response_after_protocol_answer_is_rejected_before_commit() 
             vec![Delivery {
                 client_instance_id: ClientInstanceId::from("client-1"),
                 connection_id: ConnectionId::new("conn-1"),
+                request_capabilities: vec![crate::client_lifecycle::RequestCapability::Permission],
             }],
             AppServerTime(1),
         )
-        .expect("open permission request");
+        .expect("open permission request")
+        .expect("capable permission responder");
     runtime.handle_response(
         ClientInstanceId::from("client-1"),
         request_id,
@@ -86,8 +89,14 @@ fn legacy_permission_response_clears_broker_pending_request() {
     let task_id = TaskId::from("task-1");
     let agent_request = permission_request("agent-request-1");
     runtime
-        .open_permission_request("task-1", &agent_request, Vec::new(), AppServerTime(1))
-        .expect("open permission request");
+        .open_permission_request(
+            "task-1",
+            &agent_request,
+            vec![permission_delivery()],
+            AppServerTime(1),
+        )
+        .expect("open permission request")
+        .expect("capable permission responder");
 
     runtime
         .route_agent_permission_response(
@@ -110,6 +119,7 @@ fn waitable_client_request_returns_accepted_response() {
             Delivery {
                 client_instance_id: ClientInstanceId::from("client-1"),
                 connection_id: ConnectionId::new("conn-1"),
+                request_capabilities: Vec::new(),
             },
             "agent.secret".to_string(),
             Some("Agent secret".to_string()),
@@ -142,6 +152,7 @@ fn shell_reveal_file_request_uses_opaque_handle_params() {
             Delivery {
                 client_instance_id: ClientInstanceId::from("client-1"),
                 connection_id: ConnectionId::new("conn-1"),
+                request_capabilities: Vec::new(),
             },
             "file-reveal-1".to_string(),
             Some("main.rs".to_string()),
@@ -167,6 +178,7 @@ fn waitable_client_request_timeout_interrupts_pending_request() {
             Delivery {
                 client_instance_id: ClientInstanceId::from("client-1"),
                 connection_id: ConnectionId::new("conn-1"),
+                request_capabilities: Vec::new(),
             },
             ShellNotificationLevel::Info,
             "Saved".to_string(),
@@ -205,6 +217,7 @@ fn waitable_task_request_delivers_when_task_responder_subscribes() {
         Delivery {
             client_instance_id: ClientInstanceId::from("client-1"),
             connection_id: ConnectionId::new("conn-1"),
+            request_capabilities: Vec::new(),
         },
         task_id,
         AppServerTime(2),
@@ -251,4 +264,12 @@ fn permission_request(request_id: &str) -> AgentPermissionRequest {
             },
         ],
     }
+}
+
+fn permission_delivery() -> Delivery {
+    Delivery::new(
+        ClientInstanceId::from("client-1"),
+        ConnectionId::new("conn-1"),
+    )
+    .with_request_capabilities(vec![crate::client_lifecycle::RequestCapability::Permission])
 }

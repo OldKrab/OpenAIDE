@@ -1,13 +1,7 @@
 import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { Dispatch } from "react";
 import type { AppPreferencesRecord, TaskSummary } from "@openaide/app-shell-contracts";
-import {
-  AGENT_CONFIG_OPTIONS,
-  TASK_SEND,
-  type AgentId,
-  type ProjectId,
-  type TaskId,
-} from "@openaide/app-server-client";
+import { TASK_SEND, type TaskId } from "@openaide/app-server-client";
 import { defaultAgent } from "@openaide/app-shell-contracts";
 import {
   getBackendConnection,
@@ -18,16 +12,13 @@ import {
   clearPendingTaskSendRecovery,
   readPendingTaskSendRecovery,
 } from "../services/pendingTaskSendRecovery";
-import { mapProtocolConfigOptions } from "../state/appServerConfigOptions";
 import { appReducer, type AppAction, type SnapshotIntent } from "../state/appReducer";
 import { mapProtocolTaskSnapshot } from "../state/appServerProtocolMapping";
 import type { AgentOption } from "../state/composerOptions";
 import { sendWebviewTelemetry } from "../state/hostMessageRouter";
 import {
   agentProjectRequestKey,
-  configOptionsRequestKey,
   shouldLoadNativeSessions,
-  shouldLoadNewTaskConfigOptions,
 } from "../state/surfaceRouting";
 import type { WebviewBootstrap } from "../state/surfaceTypes";
 import { createInitialState, type AppState } from "../state/store";
@@ -43,12 +34,7 @@ import { useAppControllerRefs } from "./appControllerRefs";
 import { useSettingsRouteRefresh } from "./appControllerRouting";
 import { useActiveTaskPolling } from "./appControllerTaskPolling";
 import { useNewTaskPreparation, type PendingNewTaskPreparation } from "./useNewTaskPreparation";
-import {
-  newTaskConfigOptionsContextForRequests,
-  newTaskProjectIdForRequests,
-} from "./newTaskRequestContext";
-
-const NEW_TASK_CONFIG_OPTIONS_TIMEOUT_MS = 10_000;
+import { newTaskProjectIdForRequests } from "./newTaskRequestContext";
 export type AppController = {
   activeTask?: TaskSummary;
   activeNavigationTaskId?: string;
@@ -251,60 +237,6 @@ export function useAppController({ backendConnection }: AppControllerOptions = {
     postHostMessage,
     state,
   });
-  useEffect(() => {
-    const projectContext = newTaskConfigOptionsContextForRequests(state, newTaskBootstrapProjectId);
-    const projectId = projectContext?.projectId;
-    if (
-      !backendReady ||
-      !shouldLoadNewTaskConfigOptions(
-        bootstrap,
-        state.snapshot !== undefined,
-        projectId,
-      )
-    ) {
-      return;
-    }
-    if (!projectId) return;
-    const key = configOptionsRequestKey(
-      state.newTask.selection.agentId,
-      projectId,
-      projectContext.workspaceRoot,
-    );
-    if (latestOptionsRequestKey.current === key) return;
-    latestOptionsRequestKey.current = key;
-    dispatch({ type: "newTask:configOptions:start" });
-    if (backendConnectionRef?.request) {
-      void withTimeout(
-        backendConnectionRef.request(AGENT_CONFIG_OPTIONS, {
-          agentId: state.newTask.selection.agentId as AgentId,
-          projectId: projectId as ProjectId,
-          ...(projectContext.workspaceRoot ? { workspaceRoot: projectContext.workspaceRoot } : {}),
-        }),
-        NEW_TASK_CONFIG_OPTIONS_TIMEOUT_MS,
-        "Agent options request timed out.",
-      ).then((result) => {
-        if (latestOptionsRequestKey.current !== key) return;
-        dispatch({ type: "newTask:configOptions:result", catalog: mapProtocolConfigOptions(result) });
-      }).catch(() => {
-        if (latestOptionsRequestKey.current !== key) return;
-        dispatch({ type: "newTask:configOptions:error", message: "Unable to load Agent options." });
-      });
-      return;
-    }
-    dispatch({ type: "newTask:configOptions:error", message: "App Server connection unavailable." });
-  }, [
-    bootstrap.surface,
-    bootstrap.taskId,
-    backendReady,
-    state.snapshot,
-    state.newTask.selection.agentId,
-    state.newTask.selection.projectId,
-    state.newTask.selection.workspaceRoot,
-    state.projects,
-    state.tasks,
-    newTaskBootstrapProjectId,
-  ]);
-
   useEffect(() => {
     const projectId = newTaskProjectIdForRequests(state, newTaskBootstrapProjectId);
     if (

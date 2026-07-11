@@ -124,6 +124,8 @@ pub enum ClientProtocolCapability {
     Resync,
     RequestResponses,
     StableClientRequestIds,
+    PermissionResponses,
+    QuestionResponses,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]

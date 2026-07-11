@@ -147,7 +147,8 @@ impl TaskMutationContext<'_> {
         request_id: &str,
         response: &openaide_app_server_protocol::server_requests::QuestionRequestResponse,
     ) -> Result<bool, RuntimeError> {
-        self.store.resolve_question(&self.task.task_id, request_id, response)
+        self.store
+            .resolve_question(&self.task.task_id, request_id, response)
     }
 
     pub(crate) fn cancel_pending_questions(&self) -> Result<bool, RuntimeError> {

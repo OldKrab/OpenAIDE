@@ -23,9 +23,9 @@ use crate::agent::acp_host::{
 use crate::agent::acp_host_terminal_ownership::AcpHostTerminalRegistry;
 use crate::agent::acp_trace::AcpTraceSession;
 use crate::agent::acp_update_projection::LivePromptProjection;
+use crate::agent::{AgentSessionEventSink, TurnCancellation};
 use crate::logging;
 use crate::protocol::host::HostBridge;
-use crate::agent::{AgentSessionEventSink, TurnCancellation};
 
 pub(super) type AcpSessionEventSinkMap =
     Arc<Mutex<HashMap<String, Arc<dyn AgentSessionEventSink>>>>;
@@ -96,7 +96,8 @@ impl AcpHostCapabilityHandlers {
         let form = match normalize_form(request.message, schema) {
             Ok(form) => form,
             Err(error) => {
-                let _ = sink.record_question_error("The Agent sent an invalid question.".to_string());
+                let _ =
+                    sink.record_question_error("The Agent sent an invalid question.".to_string());
                 return Err(invalid_params(&error.to_string()));
             }
         };
@@ -105,16 +106,19 @@ impl AcpHostCapabilityHandlers {
             .lock()
             .expect("ACP elicitation cancellation lock poisoned")
             .insert(rpc_request_id.clone(), cancellation.clone());
-        let response = tokio::task::spawn_blocking(move || sink.request_question(form.clone(), cancellation))
-            .await
-            .map_err(|error| agent_client_protocol::util::internal_error(error.to_string()))?
-            .map_err(|error| agent_client_protocol::util::internal_error(error.to_string()));
+        let response =
+            tokio::task::spawn_blocking(move || sink.request_question(form.clone(), cancellation))
+                .await
+                .map_err(|error| agent_client_protocol::util::internal_error(error.to_string()))?
+                .map_err(|error| agent_client_protocol::util::internal_error(error.to_string()));
         self.elicitation_cancellations
             .lock()
             .expect("ACP elicitation cancellation lock poisoned")
             .remove(&rpc_request_id);
         match response? {
-            openaide_app_server_protocol::server_requests::QuestionRequestResponse::Submit { content } => {
+            openaide_app_server_protocol::server_requests::QuestionRequestResponse::Submit {
+                content,
+            } => {
                 let content = content.into_iter().map(|(key, value)| (key, match value {
                     openaide_app_server_protocol::server_requests::QuestionValue::String(value) => ElicitationContentValue::String(value),
                     openaide_app_server_protocol::server_requests::QuestionValue::Integer(value) => ElicitationContentValue::Integer(value),
@@ -124,7 +128,9 @@ impl AcpHostCapabilityHandlers {
                 })).collect();
                 Ok(ElicitationCreateResponse::Accept { content })
             }
-            openaide_app_server_protocol::server_requests::QuestionRequestResponse::Cancel => Ok(ElicitationCreateResponse::Cancel),
+            openaide_app_server_protocol::server_requests::QuestionRequestResponse::Cancel => {
+                Ok(ElicitationCreateResponse::Cancel)
+            }
         }
     }
 

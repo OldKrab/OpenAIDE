@@ -5,7 +5,6 @@ import {
   AGENT_CREATE_CUSTOM,
   AGENT_DELETE_CUSTOM,
   AGENT_REPLACE_CUSTOM,
-  AGENT_SET_CONFIG_OPTION,
   AGENT_SET_ENABLED,
   AGENT_UPDATE_CUSTOM_METADATA,
   ATTACHMENT_CONFIRM_EMBEDDED,
@@ -2452,28 +2451,14 @@ describe("app controller callbacks", () => {
     expect(latestOptionsRequestKey.current).toBeUndefined();
     expect(dispatch).toHaveBeenCalledWith({
       type: "newTask:configOptions:error",
-      message: "App Server connection unavailable.",
+      message: "Task session is not ready yet.",
     });
     expect(postHostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "session.setConfigOption" }));
   });
 
-  it("uses typed Agent config option changes when connected to App Server", async () => {
+  it("uses the prepared Task Native Session for config option changes", async () => {
     const dispatch = vi.fn();
-    const request = vi.fn(async () => ({
-      agentId: "codex",
-      projectId: "project-1",
-      projectLabel: "Workspace",
-      catalog: {
-        agentId: "codex",
-        status: "ready",
-        options: [{
-          id: "model",
-          label: "Model",
-          currentValue: "gpt-5",
-          values: [{ id: "gpt-5", label: "GPT-5" }],
-        }],
-      },
-    }));
+    const request = vi.fn(async () => ({ task: protocolTaskSnapshot("task-prepared", "New task") }));
     const latestOptionsRequestKey = { current: undefined as string | undefined };
     const state = createInitialState();
     state.newTask.selection = {
@@ -2482,6 +2467,9 @@ describe("app controller callbacks", () => {
       projectId: "project-1",
       workspaceRoot: "/workspace/app",
     };
+    state.snapshot = snapshot("task-prepared");
+    state.snapshot.task.has_messages = false;
+    state.snapshot.chat.has_messages = false;
 
     callbacks({
       backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
@@ -2491,33 +2479,13 @@ describe("app controller callbacks", () => {
     }).newTask.selectConfigOption("model", "gpt-5");
     await settlePromises();
 
-    expect(request).toHaveBeenCalledWith(AGENT_SET_CONFIG_OPTION, {
-      agentId: "codex",
-      projectId: "project-1",
+    expect(request).toHaveBeenCalledWith(TASK_SET_CONFIG_OPTION, {
+      taskId: "task-prepared",
       configId: "model",
       value: "gpt-5",
+      clientMutationId: expect.any(String),
     });
-    expect(dispatch).toHaveBeenCalledWith({
-      type: "newTask:configOptions:result",
-      catalog: {
-        agent_id: "codex",
-        status: "ready",
-        options: [{
-          id: "model",
-          label: "Model",
-          description: undefined,
-          category: undefined,
-          current_value: "gpt-5",
-          values: [{
-            id: "gpt-5",
-            label: "GPT-5",
-            description: undefined,
-            group_id: undefined,
-            group_label: undefined,
-          }],
-        }],
-      },
-    });
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "snapshot", intent: "refresh" }));
     expect(postHostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "session.setConfigOption" }));
   });
 
@@ -2636,42 +2604,6 @@ describe("app controller callbacks", () => {
 
     expect(dispatch).not.toHaveBeenCalled();
     expect(postHostMessage).not.toHaveBeenCalled();
-  });
-
-  it("updates Agent options for a browsed workspace before its first Task exists", async () => {
-    const dispatch = vi.fn();
-    const request = vi.fn(async () => ({
-      agentId: "codex",
-      projectId: "project-new",
-      projectLabel: "new-app",
-      catalog: { agentId: "codex", status: "ready", options: [] },
-    }));
-    const latestOptionsRequestKey = { current: undefined as string | undefined };
-    const state = createInitialState();
-    const workspaceRoot = "/workspace/new-app";
-    const projectId = projectIdForWorkspaceRoot(workspaceRoot);
-    state.newTask.selection = {
-      ...state.newTask.selection,
-      agentId: "codex",
-      projectId,
-      workspaceRoot,
-    };
-
-    callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
-      dispatch,
-      latestOptionsRequestKey,
-      state,
-    }).newTask.selectConfigOption("model", "gpt-5");
-    await settlePromises();
-
-    expect(request).toHaveBeenCalledWith(AGENT_SET_CONFIG_OPTION, {
-      agentId: "codex",
-      projectId,
-      workspaceRoot,
-      configId: "model",
-      value: "gpt-5",
-    });
   });
 
 });

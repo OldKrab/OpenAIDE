@@ -7,9 +7,9 @@ use openaide_app_server_protocol::snapshot::{PendingRequestScope, TaskSnapshot};
 use openaide_app_server_protocol::state::SubscriptionScope;
 
 use crate::app_lifecycle::{ShutdownCompletion, ShutdownRequestOutcome};
-use crate::client_lifecycle::{
-    AppServerTime, ClientContext, ClientExpiryOutcome, ConnectionId, Delivery,
-};
+#[cfg(test)]
+use crate::client_lifecycle::Delivery;
+use crate::client_lifecycle::{AppServerTime, ClientContext, ClientExpiryOutcome, ConnectionId};
 use crate::protocol::errors::RuntimeError;
 use crate::protocol_edge::{
     event_deliveries, responses, GatewayEventDelivery, GatewayOutcome, GatewayResponse,
@@ -140,10 +140,9 @@ impl RpcGateway {
             return Vec::new();
         };
         self.server_requests.observe_responder_available(
-            Delivery {
-                client_instance_id: context.client_instance_id.clone(),
-                connection_id: context.connection_id.clone(),
-            },
+            self.client_hub
+                .delivery_for(&context.client_instance_id)
+                .expect("connected client must have a delivery"),
             &self.responder_scopes(&context),
             now,
         )
@@ -322,6 +321,15 @@ impl RpcGateway {
                 .delivery_for(client_instance_id)
                 .into_iter()
                 .collect(),
+            PendingRequestScope::Task { .. }
+                if matches!(
+                    draft.method.as_str(),
+                    openaide_app_server_protocol::server_requests::PERMISSION_REQUEST
+                        | openaide_app_server_protocol::server_requests::QUESTION_REQUEST
+                ) =>
+            {
+                self.client_hub.deliveries_supporting(&draft.method)
+            }
             PendingRequestScope::Task { task_id } => self
                 .state_stream
                 .subscribers_for_scope(&SubscriptionScope::Task {

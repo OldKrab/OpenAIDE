@@ -5,10 +5,10 @@ use agent_client_protocol::schema::{
 };
 use agent_client_protocol::{Agent, Client, ConnectTo, ConnectionTo, Handled};
 
-use crate::agent::acp_host_capabilities::AcpHostCapabilityHandlers;
 use crate::agent::acp_elicitation_wire::{
     CancelRequestNotification, ElicitationCreateRequest, WireRequestId,
 };
+use crate::agent::acp_host_capabilities::AcpHostCapabilityHandlers;
 use crate::agent::acp_host_terminal_ownership::AcpHostTerminalRegistry;
 use crate::agent::acp_session_lifecycle::LoadReplayCaptures;
 use crate::agent::acp_trace::AcpTraceSession;
@@ -72,7 +72,9 @@ where
                         let host_capabilities = host_capabilities.clone();
                         async move {
                             responder.respond_with_result(
-                                host_capabilities.create_elicitation(request_id, request).await,
+                                host_capabilities
+                                    .create_elicitation(request_id, request)
+                                    .await,
                             )
                         }
                     })?;

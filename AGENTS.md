@@ -14,6 +14,7 @@ This file is the short operating guide for agents working in this repo. Keep det
 ## Working Rules
 
 - Build production-quality code with clear names, modular structure, no duplication, and tests at the user-visible or protocol boundary.
+- Before committing, inspect the complete staged diff for secrets, credentials, personal domains, email addresses, usernames, home-directory paths, machine-specific configuration, and other sensitive or personal data. Keep local machine configuration in ignored files. Report any findings and unresolved failing checks before committing.
 - Keep Backend and Frontend concerns separate. App Server owns product state and workflow decisions; Frontend owns rendering and ephemeral presentation state.
 - Keep App Server, App Server Protocol, App Shells, storage, transport, Agent runtime, and shared Frontend surfaces in their proper modules.
 - Use the typed App Server Protocol seam. Do not add untyped method strings, `unknown` protocol payload plumbing, or shell-specific product protocols.

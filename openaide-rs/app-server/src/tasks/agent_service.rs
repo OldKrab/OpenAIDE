@@ -1,18 +1,10 @@
 use crate::agent::gateway::AgentGateway;
 use crate::agent::registry::AgentRegistry;
 use crate::agent::status_cache::AgentStatusCache;
-use crate::agent::{
-    AgentAuthenticateRequest, AgentConfigOptionsRequest, AgentListSessionsRequest,
-    AgentProbeRequest, AgentSetConfigOptionRequest,
-};
+use crate::agent::{AgentAuthenticateRequest, AgentListSessionsRequest, AgentProbeRequest};
 use crate::protocol::errors::RuntimeError;
-use crate::protocol::model::{
-    AgentAuthenticateResult, AgentListSessionsResult, AgentProbeResult, ConfigOptionsCatalog,
-};
-use crate::protocol::params::{
-    AgentAuthenticateParams, AgentConfigOptionsParams, AgentListSessionsParams, AgentProbeParams,
-    SessionSetConfigOptionParams,
-};
+use crate::protocol::model::{AgentAuthenticateResult, AgentListSessionsResult, AgentProbeResult};
+use crate::protocol::params::{AgentAuthenticateParams, AgentListSessionsParams, AgentProbeParams};
 
 #[derive(Clone)]
 pub(crate) struct AgentService {
@@ -78,30 +70,6 @@ impl AgentService {
             agent_id: params.agent_id,
             cwd: workspace_root.to_string_lossy().to_string(),
             cursor: params.cursor,
-        })
-    }
-
-    pub(crate) fn config_options(
-        &self,
-        params: AgentConfigOptionsParams,
-    ) -> Result<ConfigOptionsCatalog, RuntimeError> {
-        self.registry.require(&params.agent_id)?;
-        self.gateway.config_options(AgentConfigOptionsRequest {
-            agent_id: params.agent_id,
-            cwd: params.workspace_root,
-        })
-    }
-
-    pub(crate) fn set_config_option(
-        &self,
-        params: SessionSetConfigOptionParams,
-    ) -> Result<ConfigOptionsCatalog, RuntimeError> {
-        self.registry.require(&params.agent_id)?;
-        self.gateway.set_config_option(AgentSetConfigOptionRequest {
-            agent_id: params.agent_id,
-            cwd: params.workspace_root,
-            config_id: params.config_id,
-            value: params.value,
         })
     }
 }

@@ -1,17 +1,17 @@
 use openaide_app_server_protocol::client::{
-    ClientCapabilities, InitializeParams, RequestedSurface, ShellCapability, ShellDescriptor,
-    ShellKind,
+    ClientCapabilities, ClientProtocolCapability, InitializeParams, RequestedSurface,
+    ShellCapability, ShellDescriptor, ShellKind,
 };
 use openaide_app_server_protocol::envelopes::{ErrorEnvelope, RequestMeta};
 use openaide_app_server_protocol::errors::ProtocolErrorCode;
 use openaide_app_server_protocol::events::{AppServerEventPayload, EventScope};
 use openaide_app_server_protocol::ids::{ClientInstanceId, ClientRequestId, StateRootId, TaskId};
 use openaide_app_server_protocol::methods::{
-    AGENT_AUTHENTICATE, AGENT_CONFIG_OPTIONS, AGENT_LIST_SESSIONS, AGENT_SET_CONFIG_OPTION,
-    ATTACHMENT_REVEAL, CLIENT_HEARTBEAT, CLIENT_INITIALIZE, DIAGNOSTICS_GET_RUNTIME,
-    SETTINGS_GET_MCP_SERVERS, SETTINGS_GET_PREFERENCES, SETTINGS_GET_RUNTIME, SETTINGS_GET_SKILLS,
-    SETTINGS_UPDATE_PREFERENCES, SETTINGS_UPDATE_RUNTIME, SHELL_RESOLVE_FILE_REVEAL,
-    STATE_SUBSCRIBE, STATE_UNSUBSCRIBE, TASK_CHAT_PAGE, TASK_TOOL_DETAIL,
+    AGENT_AUTHENTICATE, AGENT_LIST_SESSIONS, ATTACHMENT_REVEAL, CLIENT_HEARTBEAT,
+    CLIENT_INITIALIZE, DIAGNOSTICS_GET_RUNTIME, SETTINGS_GET_MCP_SERVERS, SETTINGS_GET_PREFERENCES,
+    SETTINGS_GET_RUNTIME, SETTINGS_GET_SKILLS, SETTINGS_UPDATE_PREFERENCES,
+    SETTINGS_UPDATE_RUNTIME, SHELL_RESOLVE_FILE_REVEAL, STATE_SUBSCRIBE, STATE_UNSUBSCRIBE,
+    TASK_CHAT_PAGE, TASK_TOOL_DETAIL,
 };
 use openaide_app_server_protocol::settings::{
     AppPreferencesPatch, AppPreferencesUpdateParams, ComposerSubmitShortcut,
@@ -43,9 +43,9 @@ use crate::snapshots::{SnapshotBuilder, TaskListSnapshot, TaskSnapshotSource};
 use crate::state_sync::StateStream;
 use crate::task_events::{CommittedTaskDelta, TaskUpdate};
 use crate::tasks::product_api::{
-    AgentConfigOptionsWorkflow, AgentListSessionsWorkflow, AttachmentFileBrowserWorkflow,
-    TaskAdoptNativeSessionWorkflow, TaskArchiveWorkflow, TaskCancelWorkflow, TaskChatPageWorkflow,
-    TaskCreateWorkflow, TaskDiscardWorkflow, TaskOpenWorkflow, TaskSendAccepted, TaskSendWorkflow,
+    AgentListSessionsWorkflow, AttachmentFileBrowserWorkflow, TaskAdoptNativeSessionWorkflow,
+    TaskArchiveWorkflow, TaskCancelWorkflow, TaskChatPageWorkflow, TaskCreateWorkflow,
+    TaskDiscardWorkflow, TaskOpenWorkflow, TaskSendAccepted, TaskSendWorkflow,
     TaskSetConfigOptionWorkflow, TaskToolDetailWorkflow,
 };
 
@@ -159,53 +159,6 @@ fn agent_authenticate_returns_typed_result() {
     assert_eq!(value["result"]["agentId"], json!("codex"));
     assert_eq!(value["result"]["methodId"], json!("codex-login"));
     assert_eq!(value["result"]["status"], json!("authenticated"));
-}
-
-#[test]
-fn agent_config_options_get_and_set_return_typed_results() {
-    let mut gateway = gateway_with_agent_config_options(Arc::new(FixedAgentConfigOptions));
-    let connection_id = ConnectionId::new("conn-1");
-    initialize(&mut gateway, connection_id.clone());
-
-    let initial = gateway.handle_inbound(
-        connection_id.clone(),
-        request(
-            "2",
-            AGENT_CONFIG_OPTIONS,
-            serde_json::json!({
-                "agentId": "codex",
-                "projectId": "project-1",
-            }),
-        ),
-        AppServerTime(2),
-    );
-    let initial = response_value(initial);
-    assert_eq!(initial["result"]["agentId"], json!("codex"));
-    assert_eq!(initial["result"]["projectId"], json!("project-1"));
-    assert_eq!(
-        initial["result"]["catalog"]["options"][0]["currentValue"],
-        json!("gpt-5")
-    );
-
-    let updated = gateway.handle_inbound(
-        connection_id,
-        request(
-            "3",
-            AGENT_SET_CONFIG_OPTION,
-            serde_json::json!({
-                "agentId": "codex",
-                "projectId": "project-1",
-                "configId": "model",
-                "value": "gpt-5.5",
-            }),
-        ),
-        AppServerTime(3),
-    );
-    let updated = response_value(updated);
-    assert_eq!(
-        updated["result"]["catalog"]["options"][0]["currentValue"],
-        json!("gpt-5.5")
-    );
 }
 
 #[test]
@@ -520,7 +473,7 @@ fn subscribe_after_initialize_returns_snapshot_and_stores_subscription() {
 #[test]
 fn task_subscription_delivers_pending_server_request() {
     let mut gateway = initialized_gateway("client-1", "conn-1");
-    let opened = gateway.open_server_request(task_server_request("task-1"), AppServerTime(2));
+    let opened = gateway.open_server_request(task_secret_request("task-1"), AppServerTime(2));
     assert!(matches!(
         opened,
         OpenRequestOutcome::Opened {
@@ -549,11 +502,43 @@ fn task_subscription_delivers_pending_server_request() {
         "server-request-1"
     );
     assert_eq!(server_requests.len(), 1);
-    assert_eq!(server_requests[0].envelope.method, "permission/request");
+    assert_eq!(server_requests[0].envelope.method, "secret/read");
 }
 
 #[test]
-fn task_update_delivers_server_request_opened_after_subscription() {
+fn task_request_is_unavailable_when_subscribed_client_lacks_response_capability() {
+    let mut gateway = gateway();
+    gateway.handle_inbound(
+        ConnectionId::new("conn-1"),
+        request(
+            "1",
+            CLIENT_INITIALIZE,
+            init_params_without_request_responses("client-1"),
+        ),
+        AppServerTime(1),
+    );
+    gateway.handle_inbound(
+        ConnectionId::new("conn-1"),
+        request(
+            "2",
+            STATE_SUBSCRIBE,
+            StateSubscribeParams {
+                scope: SubscriptionScope::Task {
+                    task_id: TaskId::from("task-1"),
+                },
+            },
+        ),
+        AppServerTime(2),
+    );
+
+    assert!(matches!(
+        gateway.open_server_request(task_server_request("task-1"), AppServerTime(3)),
+        OpenRequestOutcome::Unavailable { .. }
+    ));
+}
+
+#[test]
+fn task_request_opened_after_subscription_is_delivered_immediately() {
     let mut gateway = initialized_gateway("client-1", "conn-1");
     gateway.handle_inbound(
         ConnectionId::new("conn-1"),
@@ -578,7 +563,9 @@ fn task_update_delivers_server_request_opened_after_subscription() {
             AppServerTime(3),
         )
         .expect("open task secret request");
-    assert!(opened.deliveries.is_empty());
+    assert_eq!(opened.deliveries.len(), 1);
+    assert_eq!(opened.deliveries[0].envelope.request_id, opened.request_id);
+    assert_eq!(opened.deliveries[0].envelope.method, "secret/read");
 
     let (_events, server_requests) = gateway.publish_task_update_for_connection(
         &ConnectionId::new("conn-1"),
@@ -586,10 +573,42 @@ fn task_update_delivers_server_request_opened_after_subscription() {
         AppServerTime(4),
     );
 
-    assert_eq!(server_requests.len(), 1);
-    assert_eq!(server_requests[0].envelope.request_id, opened.request_id);
-    assert_eq!(server_requests[0].envelope.method, "secret/read");
-    assert_eq!(server_requests[0].envelope.params["key"], "agent.secret");
+    assert!(server_requests.is_empty());
+}
+
+#[test]
+fn task_permission_routes_to_all_connected_capable_clients_without_subscription_authority() {
+    let mut gateway = initialized_gateway("client-1", "conn-1");
+    gateway.handle_inbound(
+        ConnectionId::new("conn-2"),
+        request("2", CLIENT_INITIALIZE, init_params("client-2")),
+        AppServerTime(2),
+    );
+    gateway.handle_inbound(
+        ConnectionId::new("conn-1"),
+        request(
+            "3",
+            STATE_SUBSCRIBE,
+            StateSubscribeParams {
+                scope: SubscriptionScope::Task {
+                    task_id: TaskId::from("task-1"),
+                },
+            },
+        ),
+        AppServerTime(3),
+    );
+
+    let opened = gateway.open_server_request(task_server_request("task-1"), AppServerTime(4));
+
+    let OpenRequestOutcome::Opened { deliveries, .. } = opened else {
+        panic!("connected capable clients must make the permission answerable");
+    };
+    let mut client_ids = deliveries
+        .iter()
+        .map(|delivery| delivery.delivery.client_instance_id.as_str())
+        .collect::<Vec<_>>();
+    client_ids.sort_unstable();
+    assert_eq!(client_ids, vec!["client-1", "client-2"]);
 }
 
 #[test]
@@ -1262,7 +1281,6 @@ fn gateway_with_attachments_and_shutdown(
         app_preferences(),
         runtime_settings(),
         std::sync::Arc::new(RejectingAgentListSessions),
-        std::sync::Arc::new(RejectingAgentConfigOptions),
         attachments,
         std::sync::Arc::new(RejectingTaskCreate),
         std::sync::Arc::new(RejectingTaskAdoptNativeSession),
@@ -1341,7 +1359,6 @@ fn gateway_with_agent_session_listing(
         app_preferences(),
         runtime_settings(),
         agent_list_sessions,
-        Arc::new(RejectingAgentConfigOptions),
         Arc::new(RejectingAttachments),
         std::sync::Arc::new(RejectingTaskCreate),
         std::sync::Arc::new(RejectingTaskAdoptNativeSession),
@@ -1379,45 +1396,6 @@ fn gateway_with_agent_authenticate(
         app_preferences(),
         runtime_settings(),
         Arc::new(RejectingAgentListSessions),
-        Arc::new(RejectingAgentConfigOptions),
-        Arc::new(RejectingAttachments),
-        std::sync::Arc::new(RejectingTaskCreate),
-        std::sync::Arc::new(RejectingTaskAdoptNativeSession),
-        std::sync::Arc::new(RejectingTaskSend),
-        std::sync::Arc::new(RejectingTaskCancel),
-        std::sync::Arc::new(RejectingTaskOpen),
-        std::sync::Arc::new(RejectingTaskChatPage),
-        std::sync::Arc::new(RejectingTaskToolDetail),
-        std::sync::Arc::new(RejectingTaskSetConfigOption),
-        std::sync::Arc::new(RejectingTaskDiscard),
-        std::sync::Arc::new(RejectingTaskArchive),
-        Arc::new(FixedShutdown),
-    )
-}
-
-fn gateway_with_agent_config_options(
-    agent_config_options: Arc<dyn AgentConfigOptionsWorkflow>,
-) -> RpcGateway {
-    RpcGateway::new(
-        ClientHub::new(10),
-        AppLifecycle::new(),
-        StateStream::new(StateRootId::from("root-1")),
-        ServerRequestRuntime::new(),
-        ShellFileRevealRegistry::new(),
-        SnapshotBuilder::new("server-1".into(), "root-1".into()),
-        std::sync::Arc::new(EmptyTaskSnapshots),
-        AppServerProbeFacts::new("root-1"),
-        runtime_diagnostics(),
-        std::sync::Arc::new(RejectingAgentProbe),
-        std::sync::Arc::new(RejectingAgentAuthenticate),
-        std::sync::Arc::new(RejectingAgentCatalogMutations),
-        std::sync::Arc::new(RejectingAgentSettingsDetails),
-        std::sync::Arc::new(McpServersSettingsService::new()),
-        std::sync::Arc::new(SkillsSettingsService::new()),
-        app_preferences(),
-        runtime_settings(),
-        Arc::new(RejectingAgentListSessions),
-        agent_config_options,
         Arc::new(RejectingAttachments),
         std::sync::Arc::new(RejectingTaskCreate),
         std::sync::Arc::new(RejectingTaskAdoptNativeSession),
@@ -1534,107 +1512,6 @@ impl AgentListSessionsWorkflow for RejectingAgentListSessions {
         Err(test_unavailable(
             "agent session listing unavailable in test gateway",
         ))
-    }
-}
-
-struct RejectingAgentConfigOptions;
-
-impl AgentConfigOptionsWorkflow for RejectingAgentConfigOptions {
-    fn config_options(
-        &self,
-        _params: openaide_app_server_protocol::agent::AgentConfigOptionsParams,
-    ) -> Result<
-        openaide_app_server_protocol::agent::AgentConfigOptionsResult,
-        openaide_app_server_protocol::errors::ProtocolError,
-    > {
-        Err(test_unavailable(
-            "agent config options unavailable in test gateway",
-        ))
-    }
-
-    fn set_config_option(
-        &self,
-        _params: openaide_app_server_protocol::agent::AgentSetConfigOptionParams,
-    ) -> Result<
-        openaide_app_server_protocol::agent::AgentConfigOptionsResult,
-        openaide_app_server_protocol::errors::ProtocolError,
-    > {
-        Err(test_unavailable(
-            "agent config option update unavailable in test gateway",
-        ))
-    }
-}
-
-struct FixedAgentConfigOptions;
-
-impl AgentConfigOptionsWorkflow for FixedAgentConfigOptions {
-    fn config_options(
-        &self,
-        params: openaide_app_server_protocol::agent::AgentConfigOptionsParams,
-    ) -> Result<
-        openaide_app_server_protocol::agent::AgentConfigOptionsResult,
-        openaide_app_server_protocol::errors::ProtocolError,
-    > {
-        Ok(agent_config_options_result(
-            params.agent_id,
-            params.project_id,
-            "gpt-5",
-        ))
-    }
-
-    fn set_config_option(
-        &self,
-        params: openaide_app_server_protocol::agent::AgentSetConfigOptionParams,
-    ) -> Result<
-        openaide_app_server_protocol::agent::AgentConfigOptionsResult,
-        openaide_app_server_protocol::errors::ProtocolError,
-    > {
-        Ok(agent_config_options_result(
-            params.agent_id,
-            params.project_id,
-            &params.value,
-        ))
-    }
-}
-
-fn agent_config_options_result(
-    agent_id: openaide_app_server_protocol::ids::AgentId,
-    project_id: openaide_app_server_protocol::ids::ProjectId,
-    current_value: &str,
-) -> openaide_app_server_protocol::agent::AgentConfigOptionsResult {
-    openaide_app_server_protocol::agent::AgentConfigOptionsResult {
-        agent_id: agent_id.clone(),
-        project_id,
-        project_label: "Workspace".to_string(),
-        catalog: openaide_app_server_protocol::agent::AgentConfigOptionsCatalog {
-            agent_id,
-            status: openaide_app_server_protocol::agent::AgentConfigOptionsStatus::Ready,
-            options: vec![openaide_app_server_protocol::agent::AgentConfigOption {
-                id: "model".into(),
-                label: "Model".to_string(),
-                description: None,
-                category: Some(
-                    openaide_app_server_protocol::agent::AgentConfigOptionCategory::Model,
-                ),
-                current_value: current_value.to_string(),
-                values: vec![
-                    openaide_app_server_protocol::agent::AgentConfigOptionValue {
-                        id: "gpt-5".to_string(),
-                        label: "GPT-5".to_string(),
-                        description: None,
-                        group_id: None,
-                        group_label: None,
-                    },
-                    openaide_app_server_protocol::agent::AgentConfigOptionValue {
-                        id: "gpt-5.5".to_string(),
-                        label: "GPT-5.5".to_string(),
-                        description: None,
-                        group_id: None,
-                        group_label: None,
-                    },
-                ],
-            }],
-        },
     }
 }
 
@@ -2387,7 +2264,20 @@ fn init_params(client_id: &str) -> InitializeParams {
             version: None,
         },
         requested_surface: RequestedSurface::Home,
+        capabilities: ClientCapabilities {
+            protocol: vec![
+                ClientProtocolCapability::PermissionResponses,
+                ClientProtocolCapability::QuestionResponses,
+            ],
+            shell: Vec::new(),
+        },
+    }
+}
+
+fn init_params_without_request_responses(client_id: &str) -> InitializeParams {
+    InitializeParams {
         capabilities: ClientCapabilities::default(),
+        ..init_params(client_id)
     }
 }
 
@@ -2442,6 +2332,17 @@ fn task_server_request(task_id: &str) -> ServerRequestDraft {
         method: "permission/request".to_string(),
         title: "Permission needed".to_string(),
         params: json!({ "prompt": "Allow?" }),
+    }
+}
+
+fn task_secret_request(task_id: &str) -> ServerRequestDraft {
+    ServerRequestDraft {
+        scope: PendingRequestScope::Task {
+            task_id: TaskId::from(task_id),
+        },
+        method: "secret/read".to_string(),
+        title: "Secret needed".to_string(),
+        params: json!({ "key": "agent.secret" }),
     }
 }
 

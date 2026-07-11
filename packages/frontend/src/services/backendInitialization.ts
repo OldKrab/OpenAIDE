@@ -33,7 +33,13 @@ export function initializeParamsForBootstrap(
     shell: { kind: shellKind },
     requestedSurface: requestedSurfaceForBootstrap(bootstrap),
     capabilities: {
-      protocol: ["requestResponses", "stableClientRequestIds", "resync"],
+      protocol: [
+        "requestResponses",
+        "stableClientRequestIds",
+        "resync",
+        "permissionResponses",
+        "questionResponses",
+      ],
       shell: [
         "openExternal",
         "revealFile",

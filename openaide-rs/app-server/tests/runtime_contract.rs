@@ -9,8 +9,8 @@ use openaide_app_server::agent::events::{
 };
 use openaide_app_server::agent::mock::MockAgent;
 use openaide_app_server::agent::{
-    AgentConfigOptionsRequest, AgentEventSink, AgentLoadedSession, AgentMetadataField, AgentPrompt,
-    AgentRuntime, AgentSession, AgentSessionDelete, AgentSessionEventSink, AgentSessionLoad,
+    AgentEventSink, AgentLoadedSession, AgentMetadataField, AgentPrompt, AgentRuntime,
+    AgentSession, AgentSessionDelete, AgentSessionEventSink, AgentSessionLoad,
     AgentSessionMetadataUpdate, AgentSessionResume, AgentSessionStart,
 };
 use openaide_app_server::protocol::errors::RuntimeError;

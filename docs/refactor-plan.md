@@ -574,12 +574,11 @@ Desktop, and VS Code smoke coverage.
      `agent/acp_runtime_kernel.rs` into a focused module. The new module owns
      config-option selection parsing, set-option request dispatch, and draining prior
      session updates while applying selected options. `AcpRuntimeKernel` remains the
-     runtime owner for process/session registries, options session lifetime, and active
+     runtime owner for process/session registries and active
      ACP session lifecycle.
    - Implementation status: ACP config-option application split is implemented and
      reviewed. `agent/acp_config_options_apply.rs` now owns selected option parsing,
-     set-option request dispatch, and prior-update draining for both prepared options
-     sessions and Task session startup; `AcpRuntimeKernel` still owns runtime/session
+     set-option request dispatch and Task session startup; `AcpRuntimeKernel` still owns runtime/session
      registries and lifecycle.
    - Proposed next slice: extract ACP prompt execution helpers from
      `agent/acp_session_worker.rs` into a focused prompt runner module. The new module
@@ -1853,7 +1852,7 @@ Desktop, and VS Code smoke coverage.
      `CapabilityMissing` text when unsupported, request construction, response
      trace recording, error trace recording, ACP error mapping, `AcpSessionRunner`
      public behavior, and existing tests. Do not change active-session startup,
-     load/resume replay, list-sessions filtering, options sessions, prompt
+     load/resume replay, list-sessions filtering, prompt
      running, Agent runtime behavior, storage, protocol shapes, or App Server
      lifecycle in this slice.
    - Verification target: ACP active-session runtime tests, ACP session tests,
@@ -1922,10 +1921,9 @@ Desktop, and VS Code smoke coverage.
      connection is available. Navigation native-session listing now has typed
      App Server coverage through `agent/listSessions`; App Server resolves
      `projectId` to the local Agent cwd internally, while typed responses expose
-     only safe project labels and session metadata. Pre-task Agent option
-     loading and edits now use typed `agent/configOptions` and
-     `agent/setConfigOption` when connected; App Server owns the Project-to-cwd
-     resolution and Frontend maps the typed catalog into composer render state.
+     only safe project labels and session metadata. Configuration Options come
+     exclusively from each Task's real Native Session and changes use
+     `task/setConfigOption`; no pre-Task option session or Agent-level option API exists.
      Settings startup uses typed `settings/getAgentDetails` after App Server
      initialize and skips legacy `settings.snapshot`.
      Manual Settings refresh is typed-only and reports an App Server-required

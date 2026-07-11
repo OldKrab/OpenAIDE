@@ -18,6 +18,14 @@ pub(super) struct AcpProbeAuthRunner {
 }
 
 impl AcpProbeAuthRunner {
+    pub(super) fn preferred_auth_method_id(&self) -> Option<String> {
+        self.auth_method_cache.preferred_method()
+    }
+
+    pub(super) fn host_bridge(&self) -> HostBridge {
+        self.host_bridge.clone()
+    }
+
     pub(super) fn new(
         registry: impl Into<AgentRegistryHandle>,
         host_bridge: HostBridge,

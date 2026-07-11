@@ -3,10 +3,10 @@ use uuid::Uuid;
 use crate::agent::{AgentSessionStart, TurnCancellation};
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{NormalizedMessage, TaskSnapshot, TaskStatus};
-use crate::protocol::params::{AgentConfigOptionsParams, TaskCreateParams};
+use crate::protocol::params::TaskCreateParams;
 use crate::storage::records::TaskPreparationRecord;
 use crate::storage::records::TaskRecord;
-use crate::tasks::config_options::{selected_config_options, validate_config_selection};
+use crate::tasks::config_options::selected_config_options;
 use crate::tasks::lifecycle::running_turn_message;
 use crate::tasks::task_start_transaction::TaskSessionStartGuard;
 use crate::time::now_string;
@@ -22,11 +22,6 @@ impl TaskTurnLifecycle {
         self.agent_registry.validate_task_create(&params)?;
         let prompt_text = required_optional_prompt_text(params.prompt_text.clone(), "prompt_text")?;
         let selected_config_options = selected_config_options(params.config_options.as_ref())?;
-        let prepared_options = self.config_options(AgentConfigOptionsParams {
-            agent_id: params.selected_agent_id.clone(),
-            workspace_root: params.workspace_root.clone(),
-        })?;
-        validate_config_selection(&prepared_options, &selected_config_options)?;
         let now = now_string();
         let task_id = format!("task_{}", Uuid::new_v4());
         let title = if params.title.trim().is_empty() {

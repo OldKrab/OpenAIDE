@@ -37,11 +37,11 @@ impl ServerRequestRuntime {
         client_instance_id: &ClientInstanceId,
         now: AppServerTime,
     ) -> Vec<RequestLifecycleOutcome> {
-        self.inner
-            .lock()
-            .expect("server request runtime poisoned")
-            .broker
-            .observe_transport_unavailable(client_instance_id, now)
+        self.observe_responder_loss(|inner| {
+            inner
+                .broker
+                .observe_transport_unavailable(client_instance_id, now)
+        })
     }
 
     pub fn observe_client_expired(
@@ -49,11 +49,9 @@ impl ServerRequestRuntime {
         client_instance_id: &ClientInstanceId,
         now: AppServerTime,
     ) -> Vec<RequestLifecycleOutcome> {
-        self.inner
-            .lock()
-            .expect("server request runtime poisoned")
-            .broker
-            .observe_client_expired(client_instance_id, now)
+        self.observe_responder_loss(|inner| {
+            inner.broker.observe_client_expired(client_instance_id, now)
+        })
     }
 
     pub fn observe_responder_available(
@@ -88,11 +86,11 @@ impl ServerRequestRuntime {
         task_id: &TaskId,
         now: AppServerTime,
     ) -> Vec<RequestLifecycleOutcome> {
-        self.inner
-            .lock()
-            .expect("server request runtime poisoned")
-            .broker
-            .observe_subscription_removed(client_instance_id, task_id, now)
+        self.observe_responder_loss(|inner| {
+            inner
+                .broker
+                .observe_subscription_removed(client_instance_id, task_id, now)
+        })
     }
 
     pub fn pending_for_client(
@@ -120,5 +118,22 @@ impl ServerRequestRuntime {
             .expect("server request runtime poisoned")
             .broker
             .pending_count()
+    }
+
+    fn observe_responder_loss(
+        &self,
+        observe: impl FnOnce(&mut super::ServerRequestRuntimeInner) -> Vec<RequestLifecycleOutcome>,
+    ) -> Vec<RequestLifecycleOutcome> {
+        let mut inner = self.inner.lock().expect("server request runtime poisoned");
+        let outcomes = observe(&mut inner);
+        for outcome in &outcomes {
+            let RequestLifecycleOutcome::Interrupted { request_id, .. } = outcome;
+            super::remove_permission_waiter(&mut inner, request_id);
+            inner.question_waiters.remove(request_id);
+        }
+        if !outcomes.is_empty() {
+            self.changed.notify_all();
+        }
+        outcomes
     }
 }

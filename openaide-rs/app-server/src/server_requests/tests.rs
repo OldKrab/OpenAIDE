@@ -120,7 +120,7 @@ fn task_scoped_request_survives_one_client_disconnect() {
 }
 
 #[test]
-fn disconnected_task_responder_is_stale_until_redelivered() {
+fn last_task_responder_disconnect_interrupts_interactive_request() {
     let mut broker = ServerRequestBroker::new();
     let opened = broker.open(
         task_request("task-1"),
@@ -129,19 +129,17 @@ fn disconnected_task_responder_is_stale_until_redelivered() {
     );
     let request_id = opened_request_id(opened);
 
-    broker.observe_responder_unavailable(&ClientInstanceId::from("client-1"), AppServerTime(2));
+    let outcomes =
+        broker.observe_responder_unavailable(&ClientInstanceId::from("client-1"), AppServerTime(2));
 
     assert_eq!(
-        broker.handle_response(
-            ClientInstanceId::from("client-1"),
-            request_id.clone(),
-            ServerRequestAnswer::Result(json!({ "decision": "allow" })),
-            AppServerTime(3),
-        ),
-        ResponseOutcome::StaleRequest {
+        outcomes,
+        vec![RequestLifecycleOutcome::Interrupted {
             request_id: request_id.clone(),
-            responder: ClientInstanceId::from("client-1")
-        }
+            scope: PendingRequestScope::Task {
+                task_id: TaskId::from("task-1"),
+            },
+        }]
     );
 
     let deliveries = broker.observe_responder_available(
@@ -149,72 +147,36 @@ fn disconnected_task_responder_is_stale_until_redelivered() {
         &[ResponderScope::Task(TaskId::from("task-1"))],
         AppServerTime(4),
     );
-    assert_eq!(deliveries.len(), 1);
-    assert!(matches!(
-        broker.handle_response(
-            ClientInstanceId::from("client-1"),
-            request_id,
-            ServerRequestAnswer::Result(json!({ "decision": "allow" })),
-            AppServerTime(5),
-        ),
-        ResponseOutcome::Accepted { .. }
-    ));
+    assert!(deliveries.is_empty());
+    assert_eq!(broker.pending_count(), 0);
 }
 
 #[test]
-fn task_scoped_request_remains_pending_without_current_subscribers() {
+fn task_scoped_interactive_request_is_unavailable_without_connected_responders() {
     let mut broker = ServerRequestBroker::new();
-    let opened = broker.open(task_request("task-1"), Vec::new(), AppServerTime(1));
-    let request_id = opened_request_id(opened);
-
-    assert_eq!(broker.pending_for_task(&TaskId::from("task-1")).len(), 1);
-    let deliveries = broker.observe_subscription_added(
-        delivery("client-1", "conn-1"),
-        TaskId::from("task-1"),
-        AppServerTime(2),
-    );
-
-    assert_eq!(deliveries.len(), 1);
-    assert_eq!(deliveries[0].envelope.request_id, request_id);
-}
-
-#[test]
-fn task_scoped_response_from_current_subscriber_is_accepted_before_delivery_drains() {
-    let mut broker = ServerRequestBroker::new();
-    let opened = broker.open(task_request("task-1"), Vec::new(), AppServerTime(1));
-    let request_id = opened_request_id(opened);
-
-    assert!(matches!(
-        broker.handle_response_from_scopes(
-            ClientInstanceId::from("client-1"),
-            request_id,
-            ServerRequestAnswer::Result(json!({ "decision": "allow" })),
-            &[ResponderScope::Task(TaskId::from("task-1"))],
-            AppServerTime(2),
-        ),
-        ResponseOutcome::Accepted { .. }
-    ));
-}
-
-#[test]
-fn task_scoped_response_from_unsubscribed_client_is_rejected_before_delivery_drains() {
-    let mut broker = ServerRequestBroker::new();
-    let opened = broker.open(task_request("task-1"), Vec::new(), AppServerTime(1));
-    let request_id = opened_request_id(opened);
-
     assert_eq!(
-        broker.handle_response_from_scopes(
-            ClientInstanceId::from("client-1"),
-            request_id.clone(),
-            ServerRequestAnswer::Result(json!({ "decision": "allow" })),
-            &[ResponderScope::Task(TaskId::from("task-2"))],
-            AppServerTime(2),
-        ),
-        ResponseOutcome::UnauthorizedResponder {
-            request_id,
-            responder: ClientInstanceId::from("client-1"),
+        broker.open(task_request("task-1"), Vec::new(), AppServerTime(1)),
+        OpenRequestOutcome::Unavailable {
+            reason: RequestUnavailableReason::NoEligibleResponder,
         }
     );
+}
+
+#[test]
+fn connected_capable_client_answers_task_permission_without_task_subscription() {
+    let mut broker = ServerRequestBroker::new();
+    broker.observe_responder_available(
+        delivery("client-1", "conn-1"),
+        &[ResponderScope::Client(ClientInstanceId::from("client-1"))],
+        AppServerTime(1),
+    );
+
+    let opened = broker.open(task_request("task-1"), Vec::new(), AppServerTime(2));
+
+    assert!(matches!(
+        opened,
+        OpenRequestOutcome::Opened { deliveries, .. } if deliveries.len() == 1
+    ));
 }
 
 #[test]
@@ -236,7 +198,7 @@ fn responder_available_does_not_redeliver_existing_pending_request() {
 }
 
 #[test]
-fn subscription_removed_stales_only_matching_task_request() {
+fn subscription_removal_does_not_revoke_connection_level_permission_capability() {
     let mut broker = ServerRequestBroker::new();
     let task_1 = opened_request_id(broker.open(
         task_request("task-1"),
@@ -255,18 +217,15 @@ fn subscription_removed_stales_only_matching_task_request() {
         AppServerTime(2),
     );
 
-    assert_eq!(
+    assert!(matches!(
         broker.handle_response(
             ClientInstanceId::from("client-1"),
-            task_1.clone(),
+            task_1,
             ServerRequestAnswer::Result(json!({ "decision": "allow" })),
             AppServerTime(3),
         ),
-        ResponseOutcome::StaleRequest {
-            request_id: task_1,
-            responder: ClientInstanceId::from("client-1")
-        }
-    );
+        ResponseOutcome::Accepted { .. }
+    ));
     assert!(matches!(
         broker.handle_response(
             ClientInstanceId::from("client-1"),
@@ -279,7 +238,7 @@ fn subscription_removed_stales_only_matching_task_request() {
 }
 
 #[test]
-fn capability_unavailable_stales_matching_responder_until_available() {
+fn losing_the_last_response_capability_interrupts_interactive_request() {
     let mut broker = ServerRequestBroker::new();
     let request_id = opened_request_id(broker.open(
         task_request("task-1"),
@@ -287,36 +246,28 @@ fn capability_unavailable_stales_matching_responder_until_available() {
         AppServerTime(1),
     ));
 
-    broker.observe_capability_unavailable(
+    let outcomes = broker.observe_capability_unavailable(
         &ClientInstanceId::from("client-1"),
         &[ResponderScope::Task(TaskId::from("task-1"))],
         AppServerTime(2),
     );
-    assert!(matches!(
-        broker.handle_response(
-            ClientInstanceId::from("client-1"),
-            request_id.clone(),
-            ServerRequestAnswer::Result(json!({ "decision": "allow" })),
-            AppServerTime(3),
-        ),
-        ResponseOutcome::StaleRequest { .. }
-    ));
+    assert_eq!(
+        outcomes,
+        vec![RequestLifecycleOutcome::Interrupted {
+            request_id: request_id.clone(),
+            scope: PendingRequestScope::Task {
+                task_id: TaskId::from("task-1"),
+            },
+        }]
+    );
 
     let deliveries = broker.observe_capability_available(
         delivery("client-1", "conn-2"),
         &[ResponderScope::Task(TaskId::from("task-1"))],
         AppServerTime(4),
     );
-    assert_eq!(deliveries.len(), 1);
-    assert!(matches!(
-        broker.handle_response(
-            ClientInstanceId::from("client-1"),
-            request_id,
-            ServerRequestAnswer::Result(json!({ "decision": "allow" })),
-            AppServerTime(5),
-        ),
-        ResponseOutcome::Accepted { .. }
-    ));
+    assert!(deliveries.is_empty());
+    assert_eq!(broker.pending_count(), 0);
 }
 
 #[test]
@@ -518,7 +469,7 @@ fn permission_snapshot_projects_answerable_safe_payload() {
                 "rawPath": "/private/path"
             }),
         },
-        Vec::new(),
+        vec![delivery("client-1", "conn-1")],
         AppServerTime(1),
     );
     opened_request_id(opened);
@@ -638,10 +589,14 @@ fn client_request(client_id: &str) -> ServerRequestDraft {
 }
 
 fn delivery(client_id: &str, connection_id: &str) -> Delivery {
-    Delivery {
-        client_instance_id: ClientInstanceId::from(client_id),
-        connection_id: ConnectionId::new(connection_id),
-    }
+    Delivery::new(
+        ClientInstanceId::from(client_id),
+        ConnectionId::new(connection_id),
+    )
+    .with_request_capabilities(vec![
+        crate::client_lifecycle::RequestCapability::Permission,
+        crate::client_lifecycle::RequestCapability::Question,
+    ])
 }
 
 fn opened_request_id(outcome: OpenRequestOutcome) -> RequestId {

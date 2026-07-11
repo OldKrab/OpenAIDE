@@ -15,8 +15,7 @@ use openaide_app_server_protocol::task::{
 use crate::protocol::model::{
     ActivityStatus, ActivityStep, ActivityToolContent, ActivityToolDetails, Attachment,
     ChatMessage, NormalizedMessage, PermissionDecision, PermissionOption, PermissionOptionKind,
-    PermissionState,
-    QuestionAction, QuestionState,
+    PermissionState, QuestionAction, QuestionState,
 };
 
 pub(crate) fn project_chat_item(message: &ChatMessage) -> ChatItem {

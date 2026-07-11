@@ -6,7 +6,7 @@ pub(crate) struct ChatHistoryPolicy {
 impl ChatHistoryPolicy {
     pub(crate) fn product_defaults() -> Self {
         Self {
-            task_snapshot_tail_limit: 200,
+            task_snapshot_tail_limit: 100,
         }
     }
 

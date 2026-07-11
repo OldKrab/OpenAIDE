@@ -12,6 +12,25 @@ export function mergePageState(current: ChatPageState | undefined, page: Message
   };
 }
 
+/** Keeps the already-rendered window while a live snapshot advances its bounded tail. */
+export function retainSnapshotWindow(
+  current: ChatPageState | undefined,
+  previousPage: MessagePage,
+  nextPage: MessagePage,
+): ChatPageState | undefined {
+  if (previousPage.items.length === 0 && !current) return undefined;
+  const nextIds = new Set(nextPage.items.map((item) => item.message_id));
+  const retained = mergeMessageRows(current?.olderItems ?? [], previousPage.items)
+    .filter((item) => !nextIds.has(item.message_id));
+  return {
+    olderItems: retained,
+    hasBefore: current?.hasBefore ?? previousPage.has_before,
+    startCursor: current?.startCursor ?? retained[0]?.cursor ?? previousPage.start_cursor ?? nextPage.start_cursor,
+    pending: current?.pending,
+    error: current?.error,
+  };
+}
+
 export function mergeMessageRows(left: ChatMessage[], right: ChatMessage[]) {
   const seen = new Set<string>();
   const merged: ChatMessage[] = [];

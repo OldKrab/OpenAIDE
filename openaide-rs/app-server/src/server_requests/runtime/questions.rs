@@ -21,7 +21,7 @@ impl ServerRequestRuntime {
         &self,
         task_id: &str,
         form: QuestionRequestParams,
-    ) -> Result<RequestId, RuntimeError> {
+    ) -> Result<Option<RequestId>, RuntimeError> {
         let params = serde_json::to_value(&form)
             .map_err(|error| RuntimeError::Internal(error.to_string()))?;
         let draft = ServerRequestDraft {
@@ -33,18 +33,20 @@ impl ServerRequestRuntime {
             params,
         };
         let mut inner = self.inner.lock().expect("server request runtime poisoned");
-        let OpenRequestOutcome::Opened { snapshot, .. } =
-            inner.broker.open(draft, Vec::new(), AppServerTime(0))
+        let opened = inner.broker.open(draft, Vec::new(), AppServerTime(0));
+        let OpenRequestOutcome::Opened {
+            snapshot,
+            deliveries,
+        } = opened
         else {
-            return Err(RuntimeError::NotReady(
-                "question request is unavailable".to_string(),
-            ));
+            return Ok(None);
         };
+        inner.broker.defer_deliveries(&deliveries);
         inner.question_waiters.insert(
             snapshot.request_id.clone(),
             QuestionWaiter { form, result: None },
         );
-        Ok(snapshot.request_id)
+        Ok(Some(snapshot.request_id))
     }
 
     pub fn wait_question_response(

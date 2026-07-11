@@ -41,6 +41,7 @@ impl ServerRequestBroker {
         client_instance_id: &ClientInstanceId,
         _now: AppServerTime,
     ) -> Vec<RequestLifecycleOutcome> {
+        self.available_responders.remove(client_instance_id);
         let mut outcomes = Vec::new();
         for record in self.records.values_mut() {
             if record.status != RequestStatus::Pending {
@@ -62,6 +63,7 @@ impl ServerRequestBroker {
                 _ => {}
             }
         }
+        outcomes.extend(self.interrupt_orphaned_interactive_requests());
         outcomes
     }
 
@@ -71,7 +73,16 @@ impl ServerRequestBroker {
         task_id: TaskId,
         now: AppServerTime,
     ) -> Vec<ServerRequestDelivery> {
-        self.observe_responder_available(delivery, &[ResponderScope::Task(task_id)], now)
+        let mut scopes = self
+            .available_responders
+            .get(&delivery.client_instance_id)
+            .map(|responder| responder.scopes.clone())
+            .unwrap_or_else(|| vec![ResponderScope::Client(delivery.client_instance_id.clone())]);
+        let task_scope = ResponderScope::Task(task_id);
+        if !scopes.contains(&task_scope) {
+            scopes.push(task_scope);
+        }
+        self.observe_responder_available(delivery, &scopes, now)
     }
 
     pub fn observe_subscription_removed(
@@ -80,10 +91,21 @@ impl ServerRequestBroker {
         task_id: &TaskId,
         _now: AppServerTime,
     ) -> Vec<RequestLifecycleOutcome> {
+        let scopes = if let Some(responder) = self.available_responders.get_mut(client_instance_id)
+        {
+            responder.scopes.retain(
+                |scope| !matches!(scope, ResponderScope::Task(current) if current.as_str() == task_id.as_str()),
+            );
+            responder.scopes.clone()
+        } else {
+            Vec::new()
+        };
         for record in self.pending_task_records_mut(task_id) {
-            mark_responder_stale(record, client_instance_id);
+            if !record_matches_responder(record, client_instance_id, &scopes) {
+                mark_responder_stale(record, client_instance_id);
+            }
         }
-        Vec::new()
+        self.interrupt_orphaned_interactive_requests()
     }
 
     pub fn observe_capability_available(
@@ -101,6 +123,9 @@ impl ServerRequestBroker {
         scopes: &[ResponderScope],
         _now: AppServerTime,
     ) -> Vec<RequestLifecycleOutcome> {
+        if let Some(responder) = self.available_responders.get_mut(client_instance_id) {
+            responder.delivery.request_capabilities.clear();
+        }
         for record in self.records.values_mut() {
             if record.status == RequestStatus::Pending
                 && record_matches_responder(record, client_instance_id, scopes)
@@ -108,7 +133,7 @@ impl ServerRequestBroker {
                 mark_responder_stale(record, client_instance_id);
             }
         }
-        Vec::new()
+        self.interrupt_orphaned_interactive_requests()
     }
 
     pub fn observe_responder_available(
@@ -117,12 +142,20 @@ impl ServerRequestBroker {
         scopes: &[ResponderScope],
         _now: AppServerTime,
     ) -> Vec<ServerRequestDelivery> {
+        self.available_responders.insert(
+            delivery.client_instance_id.clone(),
+            super::broker::AvailableResponder {
+                delivery: delivery.clone(),
+                scopes: scopes.to_vec(),
+            },
+        );
         let request_ids: Vec<RequestId> = self
             .records
             .iter()
             .filter_map(|(request_id, record)| {
                 (record.status == RequestStatus::Pending
                     && can_deliver_to(record, &delivery.client_instance_id)
+                    && delivery.supports_method(&record.method)
                     && record_matches_responder(record, &delivery.client_instance_id, scopes))
                 .then(|| request_id.clone())
             })
@@ -221,6 +254,44 @@ impl ServerRequestBroker {
             .filter(|record| {
                 record.status == RequestStatus::Pending
                     && matches!(&record.snapshot.scope, PendingRequestScope::Task { task_id: target } if target == task_id)
+            })
+            .collect()
+    }
+
+    /// Interactive ACP requests cannot outlive the last client that can answer them.
+    fn interrupt_orphaned_interactive_requests(&mut self) -> Vec<RequestLifecycleOutcome> {
+        let orphaned = self
+            .records
+            .iter()
+            .filter_map(|(request_id, record)| {
+                let interactive = matches!(
+                    record.method.as_str(),
+                    openaide_app_server_protocol::server_requests::PERMISSION_REQUEST
+                        | openaide_app_server_protocol::server_requests::QUESTION_REQUEST
+                );
+                (record.status == RequestStatus::Pending
+                    && interactive
+                    && !self.available_responders.values().any(|responder| {
+                        responder.delivery.supports_method(&record.method)
+                            && record_matches_responder(
+                                record,
+                                &responder.delivery.client_instance_id,
+                                &responder.scopes,
+                            )
+                    }))
+                .then(|| request_id.clone())
+            })
+            .collect::<Vec<_>>();
+
+        orphaned
+            .into_iter()
+            .filter_map(|request_id| {
+                let record = self.records.get_mut(&request_id)?;
+                record.status = RequestStatus::Interrupted;
+                Some(RequestLifecycleOutcome::Interrupted {
+                    request_id,
+                    scope: record.snapshot.scope.clone(),
+                })
             })
             .collect()
     }

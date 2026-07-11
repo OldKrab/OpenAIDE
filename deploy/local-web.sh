@@ -65,6 +65,15 @@ if [[ -n "${OPENAIDE_WEB_ROLE:-}" ]]; then
     source "$role_env_file"
     set +a
   fi
+
+  # Machine-specific role settings stay outside version control and override shared defaults.
+  role_local_env_file="$repo_root/deploy/local-web.$OPENAIDE_WEB_ROLE.local.env"
+  if [[ -f "$role_local_env_file" ]]; then
+    set -a
+    # shellcheck disable=SC1090
+    source "$role_local_env_file"
+    set +a
+  fi
 fi
 
 command="${1:-refresh}"
@@ -95,7 +104,7 @@ usage() {
 Usage: OPENAIDE_WEB_ALLOWED_HOSTS=<host>[,<host>...] $0 [refresh|start|stop|restart|status|logs|smoke]
 
 Optional env:
-  OPENAIDE_WEB_ROLE=<role> loads deploy/local-web.<role>.env after deploy/local-web.env
+  OPENAIDE_WEB_ROLE=<role> loads deploy/local-web.<role>.env and its ignored .local.env override
   OPENAIDE_WEB_PORT=$port
   OPENAIDE_WEB_VITE_PORT=$vite_port
   OPENAIDE_WEB_STATE_ROOT=$state_root

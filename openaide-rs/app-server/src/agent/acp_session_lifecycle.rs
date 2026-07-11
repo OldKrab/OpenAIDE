@@ -12,7 +12,6 @@ use crate::agent::acp_errors::acp_error;
 pub(super) use crate::agent::acp_session_capabilities::{
     auth_method_kind, initialize_supports_session_close, initialize_supports_session_delete,
     validate_initialize_protocol, validate_load_session_capability,
-    validate_session_list_capability,
 };
 pub(super) use crate::agent::acp_session_requests::request_session_list;
 use crate::agent::acp_session_requests::{request_load_session, request_new_session};
@@ -141,33 +140,6 @@ fn command_catalog(update: &SessionUpdate) -> Option<AgentCommandsCatalog> {
         }
         _ => None,
     }
-}
-
-pub(super) async fn list_sessions_from_options_connection(
-    connection: &ConnectionTo<Agent>,
-    active_session: &agent_client_protocol::ActiveSession<'static, Agent>,
-    initialize: &InitializeResponse,
-    agent_id: String,
-    cwd: PathBuf,
-    cursor: Option<String>,
-    preferred_auth_method_id: Option<&str>,
-) -> Result<AgentListSessionsResult, RuntimeError> {
-    validate_session_list_capability(initialize)?;
-    let response = request_session_list(
-        connection,
-        cwd.clone(),
-        cursor,
-        initialize,
-        preferred_auth_method_id,
-    )
-    .await
-    .map_err(acp_error)?;
-    Ok(agent_list_sessions_result_from_response(
-        agent_id,
-        response,
-        &cwd,
-        Some(active_session.session_id().to_string().as_str()),
-    ))
 }
 
 pub(super) fn agent_list_sessions_result_from_response(

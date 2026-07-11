@@ -3,12 +3,8 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use openaide_app_server_protocol::agent::{
-    AgentConfigOptionsParams, AgentListSessionsParams, AgentSetConfigOptionParams,
-};
-use openaide_app_server_protocol::ids::{
-    AgentConfigOptionId, AgentId, ClientInstanceId, ProjectId, TaskId,
-};
+use openaide_app_server_protocol::agent::AgentListSessionsParams;
+use openaide_app_server_protocol::ids::{AgentId, ClientInstanceId, ProjectId, TaskId};
 use openaide_app_server_protocol::snapshot::{
     LiveSessionDataState, MessagePart, TaskPreparationSnapshot, TaskSendCapabilityState,
 };
@@ -22,10 +18,9 @@ use openaide_app_server_protocol::workspace::WorkspaceListDirectoryParams;
 use crate::agent::registry::{AgentCatalogRecord, AgentRegistry};
 use crate::agent::registry_handle::AgentRegistryHandle;
 use crate::agent::{
-    AgentConfigOptionsRequest, AgentEventSink, AgentListSessionsRequest, AgentLoadedSession,
-    AgentPrompt, AgentRuntime, AgentSession, AgentSessionEventSink, AgentSessionLoad,
-    AgentSessionResume, AgentSessionSetConfigOptionRequest, AgentSessionStart,
-    AgentSetConfigOptionRequest,
+    AgentEventSink, AgentListSessionsRequest, AgentLoadedSession, AgentPrompt, AgentRuntime,
+    AgentSession, AgentSessionEventSink, AgentSessionLoad, AgentSessionResume,
+    AgentSessionSetConfigOptionRequest, AgentSessionStart,
 };
 use crate::client_lifecycle::{AppServerTime, ConnectionId, Delivery};
 use crate::projects::{project_id_for_workspace, StorageProjectResolver};
@@ -361,6 +356,7 @@ fn task_preparation_resolves_custom_agent_secrets_through_typed_server_requests(
     let delivery = Delivery {
         client_instance_id: ClientInstanceId::from("client-1"),
         connection_id: ConnectionId::new("connection-1"),
+        request_capabilities: vec![crate::client_lifecycle::RequestCapability::Permission],
     };
     let deliveries = server_requests.observe_subscription_added(
         delivery.clone(),
@@ -689,87 +685,6 @@ fn create_rejects_mismatched_new_workspace_root_project_id() {
         .unwrap_err();
 
     assert_eq!(error.code, ProtocolErrorCode::NotFound);
-}
-
-#[test]
-fn agent_options_use_matching_workspace_context_before_first_task_exists() {
-    let temp = tempfile::tempdir().unwrap();
-    let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let agent = Arc::new(RecordingAgent {
-        config_catalog: Some(config_catalog("gpt-5")),
-        ..RecordingAgent::default()
-    });
-    let api = TaskProductApi::new(
-        store.clone(),
-        Arc::new(StorageProjectResolver::new(store)),
-        AgentRegistry::default_built_ins(),
-        agent.clone(),
-        TaskUpdateNotifier::disabled(),
-    )
-    .unwrap();
-    let workspace_root = "/workspace/new-app";
-    let project_id = project_id_for_workspace(workspace_root);
-
-    let initial = AgentConfigOptionsWorkflow::config_options(
-        &api,
-        AgentConfigOptionsParams {
-            agent_id: AgentId::from("codex"),
-            project_id: project_id.clone(),
-            workspace_root: Some(workspace_root.to_string()),
-        },
-    )
-    .unwrap();
-    let updated = AgentConfigOptionsWorkflow::set_config_option(
-        &api,
-        AgentSetConfigOptionParams {
-            agent_id: AgentId::from("codex"),
-            project_id,
-            workspace_root: Some(workspace_root.to_string()),
-            config_id: AgentConfigOptionId::from("model"),
-            value: "gpt-5.5".to_string(),
-        },
-    )
-    .unwrap();
-
-    assert_eq!(initial.project_label, "new-app");
-    assert_eq!(initial.catalog.options[0].current_value, "gpt-5");
-    assert_eq!(updated.catalog.options[0].current_value, "gpt-5.5");
-    assert_eq!(
-        agent.config_option_cwds.lock().unwrap().as_slice(),
-        [workspace_root]
-    );
-    assert_eq!(
-        agent.set_config_option_cwds.lock().unwrap().as_slice(),
-        [workspace_root]
-    );
-}
-
-#[test]
-fn agent_options_reject_mismatched_new_workspace_context() {
-    let temp = tempfile::tempdir().unwrap();
-    let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let agent = Arc::new(RecordingAgent::default());
-    let api = TaskProductApi::new(
-        store.clone(),
-        Arc::new(StorageProjectResolver::new(store)),
-        AgentRegistry::default_built_ins(),
-        agent.clone(),
-        TaskUpdateNotifier::disabled(),
-    )
-    .unwrap();
-
-    let error = AgentConfigOptionsWorkflow::config_options(
-        &api,
-        AgentConfigOptionsParams {
-            agent_id: AgentId::from("codex"),
-            project_id: project_id_for_workspace("/workspace/other"),
-            workspace_root: Some("/workspace/new-app".to_string()),
-        },
-    )
-    .unwrap_err();
-
-    assert_eq!(error.code, ProtocolErrorCode::NotFound);
-    assert!(agent.config_option_cwds.lock().unwrap().is_empty());
 }
 
 #[test]
@@ -2455,7 +2370,10 @@ fn send_rejects_unknown_attachment_handles_with_reselection_error() {
     );
     assert!(error.recoverable);
     assert!(store.read_messages("task-existing").unwrap().is_empty());
-    assert_eq!(store.read_task("task-existing").unwrap().active_turn_id, None);
+    assert_eq!(
+        store.read_task("task-existing").unwrap().active_turn_id,
+        None
+    );
 }
 
 #[test]
@@ -3055,6 +2973,46 @@ fn set_config_option_applies_to_running_task_live_session() {
 }
 
 #[test]
+fn set_config_option_applies_to_prepared_task_native_session() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let mut record = task_record("task-prepared", "/workspace/app");
+    record.agent_session_id = Some("session-prepared".to_string());
+    record.config_options = config_catalog("gpt-5").current_values();
+    record.config_options_catalog = Some(config_catalog("gpt-5"));
+    store.write_task(&record).unwrap();
+    let agent = Arc::new(RecordingAgent::default());
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store)),
+        AgentRegistry::default_built_ins(),
+        agent.clone(),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+
+    TaskSetConfigOptionWorkflow::set_config_option(
+        &api,
+        TaskSetConfigOptionParams {
+            task_id: "task-prepared".into(),
+            config_id: "model".into(),
+            value: "gpt-5.5".to_string(),
+            client_mutation_id: "mutation-prepared".into(),
+        },
+    )
+    .unwrap();
+
+    assert_eq!(
+        agent.session_config_updates.lock().unwrap().as_slice(),
+        [(
+            "session-prepared".to_string(),
+            "model".to_string(),
+            "gpt-5.5".to_string()
+        )]
+    );
+}
+
+#[test]
 fn discard_tombstones_empty_pre_send_task_and_returns_navigation() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
@@ -3391,33 +3349,9 @@ struct RecordingAgent {
     completed_prompts: AtomicUsize,
     prompt_calls: Mutex<Vec<(String, String)>>,
     session_config_updates: Mutex<Vec<(String, String, String)>>,
-    config_option_cwds: Mutex<Vec<String>>,
-    set_config_option_cwds: Mutex<Vec<String>>,
 }
 
 impl AgentRuntime for RecordingAgent {
-    fn config_options(
-        &self,
-        request: AgentConfigOptionsRequest,
-    ) -> Result<ConfigOptionsCatalog, RuntimeError> {
-        self.config_option_cwds.lock().unwrap().push(request.cwd);
-        Ok(self
-            .config_catalog
-            .clone()
-            .unwrap_or_else(|| ConfigOptionsCatalog::empty(request.agent_id)))
-    }
-
-    fn set_config_option(
-        &self,
-        request: AgentSetConfigOptionRequest,
-    ) -> Result<ConfigOptionsCatalog, RuntimeError> {
-        self.set_config_option_cwds
-            .lock()
-            .unwrap()
-            .push(request.cwd);
-        Ok(config_catalog(&request.value))
-    }
-
     fn list_sessions(
         &self,
         request: AgentListSessionsRequest,

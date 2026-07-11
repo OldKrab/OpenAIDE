@@ -8,8 +8,6 @@ pub const SUPPORT_RECOVER_STUCK_SESSIONS: &str = "support/recoverStuckSessions";
 pub const AGENT_PROBE: &str = "agent/probe";
 pub const AGENT_AUTHENTICATE: &str = "agent/authenticate";
 pub const AGENT_LIST_SESSIONS: &str = "agent/listSessions";
-pub const AGENT_CONFIG_OPTIONS: &str = "agent/configOptions";
-pub const AGENT_SET_CONFIG_OPTION: &str = "agent/setConfigOption";
 pub const AGENT_CREATE_CUSTOM: &str = "agent/createCustom";
 pub const AGENT_UPDATE_CUSTOM_METADATA: &str = "agent/updateCustomMetadata";
 pub const AGENT_REPLACE_CUSTOM: &str = "agent/replaceCustom";
@@ -57,8 +55,6 @@ pub const CLIENT_METHODS: &[&str] = &[
     AGENT_PROBE,
     AGENT_AUTHENTICATE,
     AGENT_LIST_SESSIONS,
-    AGENT_CONFIG_OPTIONS,
-    AGENT_SET_CONFIG_OPTION,
     AGENT_CREATE_CUSTOM,
     AGENT_UPDATE_CUSTOM_METADATA,
     AGENT_REPLACE_CUSTOM,

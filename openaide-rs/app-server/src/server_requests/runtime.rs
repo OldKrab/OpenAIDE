@@ -64,7 +64,7 @@ impl ServerRequestRuntime {
         request: &AgentPermissionRequest,
         deliveries: Vec<Delivery>,
         now: AppServerTime,
-    ) -> Result<RequestId, RuntimeError> {
+    ) -> Result<Option<RequestId>, RuntimeError> {
         let draft = ServerRequestDraft {
             scope: PendingRequestScope::Task {
                 task_id: TaskId::from(task_id.to_string()),
@@ -75,11 +75,14 @@ impl ServerRequestRuntime {
         };
         let mut inner = self.inner.lock().expect("server request runtime poisoned");
         let opened = inner.broker.open(draft, deliveries, now);
-        let OpenRequestOutcome::Opened { snapshot, .. } = opened else {
-            return Err(RuntimeError::NotReady(
-                "permission request is unavailable".to_string(),
-            ));
+        let OpenRequestOutcome::Opened {
+            snapshot,
+            deliveries,
+        } = opened
+        else {
+            return Ok(None);
         };
+        inner.broker.defer_deliveries(&deliveries);
         let request_id = snapshot.request_id;
         logging::info(
             "server_permission_request_opened",
@@ -98,7 +101,7 @@ impl ServerRequestRuntime {
         inner
             .permission_waiters
             .insert(request_id.clone(), PermissionWaiter::new(request));
-        Ok(request_id)
+        Ok(Some(request_id))
     }
 
     pub fn wait_permission_response(

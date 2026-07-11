@@ -1,5 +1,5 @@
 pub(super) fn push_method_maps(output: &mut String) {
-    output.push_str("export type ProtocolMethod = typeof CLIENT_PROBE | typeof CLIENT_INITIALIZE | typeof CLIENT_HEARTBEAT | typeof STATE_SUBSCRIBE | typeof STATE_UNSUBSCRIBE | typeof DIAGNOSTICS_GET_RUNTIME | typeof SUPPORT_RECOVER_STUCK_SESSIONS | typeof AGENT_PROBE | typeof AGENT_AUTHENTICATE | typeof AGENT_LIST_SESSIONS | typeof AGENT_CONFIG_OPTIONS | typeof AGENT_SET_CONFIG_OPTION | typeof AGENT_CREATE_CUSTOM | typeof AGENT_UPDATE_CUSTOM_METADATA | typeof AGENT_REPLACE_CUSTOM | typeof AGENT_DELETE_CUSTOM | typeof AGENT_SET_ENABLED | typeof SETTINGS_GET_AGENT_DETAILS | typeof SETTINGS_GET_MCP_SERVERS | typeof SETTINGS_GET_SKILLS | typeof SETTINGS_GET_PREFERENCES | typeof SETTINGS_UPDATE_PREFERENCES | typeof SETTINGS_GET_RUNTIME | typeof SETTINGS_UPDATE_RUNTIME | typeof ATTACHMENT_LIST_ROOTS | typeof ATTACHMENT_LIST_DIRECTORY | typeof ATTACHMENT_CREATE_FILE_REFERENCE | typeof ATTACHMENT_CREATE_PASTED_IMAGE | typeof ATTACHMENT_CREATE_EMBEDDED_CANDIDATE | typeof ATTACHMENT_CONFIRM_EMBEDDED | typeof ATTACHMENT_REFRESH_HANDLES | typeof ATTACHMENT_RELEASE_HANDLES | typeof ATTACHMENT_REVEAL | typeof SHELL_RESOLVE_FILE_REVEAL | typeof WORKSPACE_LIST_ROOTS | typeof WORKSPACE_LIST_DIRECTORY | typeof TASK_CREATE | typeof TASK_ADOPT_NATIVE_SESSION | typeof TASK_SEND | typeof TASK_SET_CONFIG_OPTION | typeof TASK_CANCEL | typeof TASK_OPEN | typeof TASK_CHAT_PAGE | typeof TASK_TOOL_DETAIL | typeof TASK_LIST | typeof TASK_DISCARD | typeof TASK_SET_ARCHIVED;\n");
+    output.push_str("export type ProtocolMethod = typeof CLIENT_PROBE | typeof CLIENT_INITIALIZE | typeof CLIENT_HEARTBEAT | typeof STATE_SUBSCRIBE | typeof STATE_UNSUBSCRIBE | typeof DIAGNOSTICS_GET_RUNTIME | typeof SUPPORT_RECOVER_STUCK_SESSIONS | typeof AGENT_PROBE | typeof AGENT_AUTHENTICATE | typeof AGENT_LIST_SESSIONS | typeof AGENT_CREATE_CUSTOM | typeof AGENT_UPDATE_CUSTOM_METADATA | typeof AGENT_REPLACE_CUSTOM | typeof AGENT_DELETE_CUSTOM | typeof AGENT_SET_ENABLED | typeof SETTINGS_GET_AGENT_DETAILS | typeof SETTINGS_GET_MCP_SERVERS | typeof SETTINGS_GET_SKILLS | typeof SETTINGS_GET_PREFERENCES | typeof SETTINGS_UPDATE_PREFERENCES | typeof SETTINGS_GET_RUNTIME | typeof SETTINGS_UPDATE_RUNTIME | typeof ATTACHMENT_LIST_ROOTS | typeof ATTACHMENT_LIST_DIRECTORY | typeof ATTACHMENT_CREATE_FILE_REFERENCE | typeof ATTACHMENT_CREATE_PASTED_IMAGE | typeof ATTACHMENT_CREATE_EMBEDDED_CANDIDATE | typeof ATTACHMENT_CONFIRM_EMBEDDED | typeof ATTACHMENT_REFRESH_HANDLES | typeof ATTACHMENT_RELEASE_HANDLES | typeof ATTACHMENT_REVEAL | typeof SHELL_RESOLVE_FILE_REVEAL | typeof WORKSPACE_LIST_ROOTS | typeof WORKSPACE_LIST_DIRECTORY | typeof TASK_CREATE | typeof TASK_ADOPT_NATIVE_SESSION | typeof TASK_SEND | typeof TASK_SET_CONFIG_OPTION | typeof TASK_CANCEL | typeof TASK_OPEN | typeof TASK_CHAT_PAGE | typeof TASK_TOOL_DETAIL | typeof TASK_LIST | typeof TASK_DISCARD | typeof TASK_SET_ARCHIVED;\n");
     output.push_str("export type RequestParamsByMethod = {\n");
     output.push_str("  [CLIENT_PROBE]: ClientProbeParams;\n");
     output.push_str("  [CLIENT_INITIALIZE]: InitializeParams;\n");
@@ -11,8 +11,6 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [AGENT_PROBE]: AgentProbeParams;\n");
     output.push_str("  [AGENT_AUTHENTICATE]: AgentAuthenticateParams;\n");
     output.push_str("  [AGENT_LIST_SESSIONS]: AgentListSessionsParams;\n");
-    output.push_str("  [AGENT_CONFIG_OPTIONS]: AgentConfigOptionsParams;\n");
-    output.push_str("  [AGENT_SET_CONFIG_OPTION]: AgentSetConfigOptionParams;\n");
     output.push_str("  [AGENT_CREATE_CUSTOM]: AgentCreateCustomParams;\n");
     output.push_str("  [AGENT_UPDATE_CUSTOM_METADATA]: AgentUpdateCustomMetadataParams;\n");
     output.push_str("  [AGENT_REPLACE_CUSTOM]: AgentReplaceCustomParams;\n");
@@ -62,8 +60,6 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [AGENT_PROBE]: AgentProbeResult;\n");
     output.push_str("  [AGENT_AUTHENTICATE]: AgentAuthenticateResult;\n");
     output.push_str("  [AGENT_LIST_SESSIONS]: AgentListSessionsResult;\n");
-    output.push_str("  [AGENT_CONFIG_OPTIONS]: AgentConfigOptionsResult;\n");
-    output.push_str("  [AGENT_SET_CONFIG_OPTION]: AgentConfigOptionsResult;\n");
     output.push_str("  [AGENT_CREATE_CUSTOM]: AgentCreateCustomResult;\n");
     output.push_str("  [AGENT_UPDATE_CUSTOM_METADATA]: AgentUpdateCustomMetadataResult;\n");
     output.push_str("  [AGENT_REPLACE_CUSTOM]: AgentReplaceCustomResult;\n");
@@ -135,12 +131,6 @@ pub(super) fn push_method_maps(output: &mut String) {
     );
     output.push_str(
         "export type AgentListSessionsResponse = ResponseEnvelope<AgentListSessionsResult>;\n",
-    );
-    output.push_str(
-        "export type AgentConfigOptionsResponse = ResponseEnvelope<AgentConfigOptionsResult>;\n",
-    );
-    output.push_str(
-        "export type AgentSetConfigOptionResponse = ResponseEnvelope<AgentConfigOptionsResult>;\n",
     );
     output.push_str(
         "export type AgentCreateCustomResponse = ResponseEnvelope<AgentCreateCustomResult>;\n",

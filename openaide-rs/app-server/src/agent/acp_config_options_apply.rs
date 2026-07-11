@@ -1,12 +1,11 @@
 use std::collections::{HashMap, HashSet};
 
 use agent_client_protocol::schema::{SessionConfigOption, SetSessionConfigOptionRequest};
-use agent_client_protocol::{Agent, ConnectionTo, SessionMessage};
+use agent_client_protocol::{Agent, ConnectionTo};
 use serde_json::Value;
-use tokio::sync::mpsc as tokio_mpsc;
 
 use crate::agent::acp_errors::acp_error;
-use crate::agent::acp_update_projection::{normalize_config_options, PreparedOptionsProjection};
+use crate::agent::acp_update_projection::normalize_config_options;
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::ConfigOptionsCatalog;
 
@@ -28,86 +27,22 @@ async fn set_prepared_config_option(
     Ok(response.config_options)
 }
 
-pub(super) async fn set_prepared_config_option_after_prior_updates(
-    connection: &ConnectionTo<Agent>,
-    active_session: &mut agent_client_protocol::ActiveSession<'static, Agent>,
-    config_id: String,
-    value: String,
-    catalog: &mut ConfigOptionsCatalog,
-    context: PreparedOptionsSetContext<'_>,
-) -> Result<ConfigOptionsCatalog, RuntimeError> {
-    let request = set_prepared_config_option(
-        connection,
-        active_session.session_id().to_string(),
-        config_id,
-        value,
-    );
-    tokio::pin!(request);
-    let options_projection = PreparedOptionsProjection::new(context.agent_id);
-    loop {
-        tokio::select! {
-            biased;
-            invalidation = context.invalidation_rx.recv() => {
-                return Err(RuntimeError::NotReady(
-                    invalidation.unwrap_or_else(|| "ACP options session invalidated".to_string()),
-                ));
-            }
-            update = active_session.read_update() => {
-                match update {
-                    Ok(SessionMessage::SessionMessage(dispatch)) => {
-                        options_projection.apply_dispatch(dispatch, catalog).await?;
-                    }
-                    Ok(SessionMessage::StopReason(_)) => {}
-                    Ok(_) => {}
-                    Err(error) => return Err(acp_error(error)),
-                }
-            }
-            response = &mut request => {
-                return response.map(|options| normalize_config_options(context.agent_id, options));
-            }
-        }
-    }
-}
-
-pub(super) struct PreparedOptionsSetContext<'a> {
-    pub(super) invalidation_rx: &'a mut tokio_mpsc::UnboundedReceiver<String>,
-    pub(super) agent_id: &'a str,
-}
-
 pub(super) async fn set_task_config_option_after_prior_updates(
     connection: &ConnectionTo<Agent>,
     active_session: &mut agent_client_protocol::ActiveSession<'static, Agent>,
     config_id: String,
     value: String,
-    catalog: &mut ConfigOptionsCatalog,
+    _catalog: &mut ConfigOptionsCatalog,
     agent_id: &str,
 ) -> Result<ConfigOptionsCatalog, RuntimeError> {
-    let options_projection = PreparedOptionsProjection::new(agent_id);
-    let request = set_prepared_config_option(
+    let options = set_prepared_config_option(
         connection,
         active_session.session_id().to_string(),
         config_id,
         value,
-    );
-    tokio::pin!(request);
-    loop {
-        tokio::select! {
-            biased;
-            update = active_session.read_update() => {
-                match update {
-                    Ok(SessionMessage::SessionMessage(dispatch)) => {
-                        options_projection.apply_dispatch(dispatch, catalog).await?;
-                    }
-                    Ok(SessionMessage::StopReason(_)) => {}
-                    Ok(_) => {}
-                    Err(error) => return Err(acp_error(error)),
-                }
-            }
-            response = &mut request => {
-                return response.map(|options| normalize_config_options(agent_id, options));
-            }
-        }
-    }
+    )
+    .await?;
+    Ok(normalize_config_options(agent_id, options))
 }
 
 pub(super) async fn apply_config_options(

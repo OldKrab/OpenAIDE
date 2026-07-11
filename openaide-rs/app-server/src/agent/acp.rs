@@ -6,10 +6,10 @@ use crate::agent::acp_trace::AcpTraceState;
 use crate::agent::registry::AgentRegistry;
 use crate::agent::registry_handle::AgentRegistryHandle;
 use crate::agent::{
-    AgentAuthenticateRequest, AgentConfigOptionsRequest, AgentEventSink, AgentListSessionsRequest,
-    AgentLoadedSession, AgentProbeRequest, AgentPrompt, AgentRuntime, AgentSession,
-    AgentSessionDelete, AgentSessionEventSink, AgentSessionLoad, AgentSessionResume,
-    AgentSessionSetConfigOptionRequest, AgentSessionStart, AgentSetConfigOptionRequest,
+    AgentAuthenticateRequest, AgentEventSink, AgentListSessionsRequest, AgentLoadedSession,
+    AgentProbeRequest, AgentPrompt, AgentRuntime, AgentSession, AgentSessionDelete,
+    AgentSessionEventSink, AgentSessionLoad, AgentSessionResume,
+    AgentSessionSetConfigOptionRequest, AgentSessionStart,
 };
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::host::HostBridge;
@@ -82,20 +82,6 @@ impl AgentRuntime for AcpAgentRuntime {
         request: AgentListSessionsRequest,
     ) -> Result<AgentListSessionsResult, RuntimeError> {
         self.kernel.list_sessions(request)
-    }
-
-    fn config_options(
-        &self,
-        request: AgentConfigOptionsRequest,
-    ) -> Result<ConfigOptionsCatalog, RuntimeError> {
-        self.kernel.config_options(request)
-    }
-
-    fn set_config_option(
-        &self,
-        request: AgentSetConfigOptionRequest,
-    ) -> Result<ConfigOptionsCatalog, RuntimeError> {
-        self.kernel.set_config_option(request)
     }
 
     fn set_session_config_option(

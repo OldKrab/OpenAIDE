@@ -5,6 +5,7 @@ use openaide_app_server_protocol::snapshot::{PendingRequestScope, PendingRequest
 use serde_json::Value;
 
 use super::ResponderScope;
+use openaide_app_server_protocol::server_requests::{PERMISSION_REQUEST, QUESTION_REQUEST};
 
 #[derive(Debug, Clone)]
 pub(super) struct PendingRecord {
@@ -95,12 +96,22 @@ pub(super) fn record_matches_responder(
             client_instance_id: target,
         } => {
             target == client_instance_id
-                && scopes
-                    .iter()
-                    .any(|scope| matches!(scope, ResponderScope::Client(client) if client == target))
+                && scopes.iter().any(
+                    |scope| matches!(scope, ResponderScope::Client(client) if client == target),
+                )
         }
-        PendingRequestScope::Task { task_id } => scopes
-            .iter()
-            .any(|scope| matches!(scope, ResponderScope::Task(scope_task_id) if scope_task_id == task_id)),
+        PendingRequestScope::Task { task_id } => {
+            if matches!(
+                record.method.as_str(),
+                PERMISSION_REQUEST | QUESTION_REQUEST
+            ) {
+                return scopes.iter().any(
+                    |scope| matches!(scope, ResponderScope::Client(client) if client == client_instance_id),
+                );
+            }
+            scopes.iter().any(
+                |scope| matches!(scope, ResponderScope::Task(scope_task_id) if scope_task_id == task_id),
+            )
+        }
     }
 }

@@ -1,17 +1,15 @@
 use ts_rs::{Config, Dummy, TS};
 
 use crate::agent::{
-    AgentAuthenticateParams, AgentAuthenticateResult, AgentAuthenticateStatus, AgentConfigOption,
-    AgentConfigOptionCategory, AgentConfigOptionValue, AgentConfigOptionsCatalog,
-    AgentConfigOptionsParams, AgentConfigOptionsResult, AgentConfigOptionsStatus,
+    AgentAuthenticateParams, AgentAuthenticateResult, AgentAuthenticateStatus,
     AgentCreateCustomParams, AgentCreateCustomResult, AgentDeleteCustomParams,
     AgentDeleteCustomResult, AgentListSessionsParams, AgentListSessionsResult, AgentListedSession,
     AgentProbeParams, AgentProbeResult, AgentReplaceCustomCleanup, AgentReplaceCustomConfirmation,
     AgentReplaceCustomHistoryPolicy, AgentReplaceCustomParams, AgentReplaceCustomResult,
-    AgentSetConfigOptionParams, AgentSetEnabledParams, AgentSetEnabledResult,
-    AgentSettingsAuthMethod, AgentSettingsDetail, AgentSettingsDetailsParams,
-    AgentSettingsDetailsResult, AgentSettingsEnvRow, AgentSettingsSourceKind, AgentSettingsStatus,
-    AgentSettingsTransport, AgentUpdateCustomMetadataParams, AgentUpdateCustomMetadataResult,
+    AgentSetEnabledParams, AgentSetEnabledResult, AgentSettingsAuthMethod, AgentSettingsDetail,
+    AgentSettingsDetailsParams, AgentSettingsDetailsResult, AgentSettingsEnvRow,
+    AgentSettingsSourceKind, AgentSettingsStatus, AgentSettingsTransport,
+    AgentUpdateCustomMetadataParams, AgentUpdateCustomMetadataResult,
 };
 use crate::attachment::{
     AttachmentCandidateError, AttachmentCandidateErrorCode, AttachmentConfirmEmbeddedParams,
@@ -51,10 +49,9 @@ use crate::server_requests::{
     PermissionRequestOption, PermissionRequestOptionKind, PermissionRequestParams,
     PermissionRequestResponse, PermissionToolCallRef, QuestionField, QuestionOption,
     QuestionRequestParams, QuestionRequestResponse, QuestionStringFormat, QuestionValue,
-    SecretReadParams, SecretReadResponse,
-    ShellNotificationAction, ShellNotificationLevel, ShellResolveFileRevealParams,
-    ShellResolveFileRevealResult, ShellRevealFileParams, ShellRevealFileResponse,
-    ShellShowNotificationParams, ShellShowNotificationResponse,
+    SecretReadParams, SecretReadResponse, ShellNotificationAction, ShellNotificationLevel,
+    ShellResolveFileRevealParams, ShellResolveFileRevealResult, ShellRevealFileParams,
+    ShellRevealFileResponse, ShellShowNotificationParams, ShellShowNotificationResponse,
 };
 use crate::settings::{
     AppPreferences, AppPreferencesParams, AppPreferencesPatch, AppPreferencesResult,
@@ -75,9 +72,9 @@ use crate::snapshot::{
     PendingAgentConfigChange, PendingRequestKind, PendingRequestScope, PendingRequestSnapshot,
     PermissionMessageDecision, PermissionMessageOption, PermissionMessageOptionKind,
     PermissionMessageState, ProjectCollectionSnapshot, ProjectSummary, ProtocolVersion,
-    QuestionMessageAction, QuestionMessageState,
-    RecoveryAction, RecoverySnapshot, ServerCapabilities, ServerSnapshot, SettingsSnapshot,
-    StateRootSnapshot, TaskAgentCommandsSnapshot, TaskAgentConfigSnapshot, TaskNavigationSnapshot,
+    QuestionMessageAction, QuestionMessageState, RecoveryAction, RecoverySnapshot,
+    ServerCapabilities, ServerSnapshot, SettingsSnapshot, StateRootSnapshot,
+    TaskAgentCommandsSnapshot, TaskAgentConfigSnapshot, TaskNavigationSnapshot,
     TaskPreparationAction, TaskPreparationSnapshot, TaskPreparationStep, TaskPreparationStepKind,
     TaskPreparationStepStatus, TaskSendBlocker, TaskSendBlockerKind, TaskSendCapabilitySnapshot,
     TaskSendCapabilityState, TaskSetupBlocker, TaskSetupBlockerKind, TaskSnapshot, TaskStatus,
@@ -172,14 +169,6 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<AgentListSessionsParams>(output, config);
     push_decl::<AgentListSessionsResult>(output, config);
     push_decl::<AgentListedSession>(output, config);
-    push_decl::<AgentConfigOptionsParams>(output, config);
-    push_decl::<AgentSetConfigOptionParams>(output, config);
-    push_decl::<AgentConfigOptionsResult>(output, config);
-    push_decl::<AgentConfigOptionsCatalog>(output, config);
-    push_decl::<AgentConfigOptionsStatus>(output, config);
-    push_decl::<AgentConfigOption>(output, config);
-    push_decl::<AgentConfigOptionCategory>(output, config);
-    push_decl::<AgentConfigOptionValue>(output, config);
     push_decl::<AgentCreateCustomParams>(output, config);
     push_decl::<AgentCreateCustomResult>(output, config);
     push_decl::<AgentUpdateCustomMetadataParams>(output, config);

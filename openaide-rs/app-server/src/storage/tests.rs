@@ -245,6 +245,60 @@ fn pages_before_legacy_message_cursor_returned_to_frontend() {
 }
 
 #[test]
+fn tail_page_keeps_the_user_prompt_before_a_large_activity_run() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().to_path_buf()).unwrap();
+    let task_id = "task_large_activity_run";
+    std::fs::create_dir_all(store.task_dir(task_id).unwrap()).unwrap();
+    let mut messages = vec![StoredMessage {
+        sequence: 1,
+        chat: agent_chat_message("older", "Older response"),
+    }];
+    messages.push(StoredMessage {
+        sequence: 2,
+        chat: chat_message("prompt", "Investigate this"),
+    });
+    for sequence in 3..=102 {
+        messages.push(StoredMessage {
+            sequence,
+            chat: activity_message_with_edit_details(&format!("tool-{sequence}")),
+        });
+    }
+    write_stored_messages(&store, task_id, &messages);
+
+    let page = store.tail_page(task_id, 100).unwrap();
+
+    assert_eq!(page.items.len(), 101);
+    assert!(matches!(
+        page.items[0].message,
+        NormalizedMessage::User { .. }
+    ));
+    assert_eq!(page.items[0].message_id, "prompt");
+    assert!(page.has_before);
+}
+
+#[test]
+fn tail_page_targets_recent_conversation_turns_instead_of_raw_records() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().to_path_buf()).unwrap();
+    let task_id = "task_recent_turns";
+    std::fs::create_dir_all(store.task_dir(task_id).unwrap()).unwrap();
+    let messages: Vec<_> = (1..=12)
+        .map(|sequence| StoredMessage {
+            sequence,
+            chat: chat_message(&format!("prompt-{sequence}"), "Prompt"),
+        })
+        .collect();
+    write_stored_messages(&store, task_id, &messages);
+
+    let page = store.tail_page(task_id, 1).unwrap();
+
+    assert_eq!(page.items.len(), 10);
+    assert_eq!(page.items[0].message_id, "prompt-3");
+    assert!(page.has_before);
+}
+
+#[test]
 fn task_navigation_orders_active_tasks_by_last_activity() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path().to_path_buf()).unwrap();
@@ -338,6 +392,21 @@ fn chat_message(id: &str, text: &str) -> ChatMessage {
             text: text.to_string(),
             created_at: "2026-07-01T00:00:00Z".to_string(),
             attachments: Vec::new(),
+        },
+    }
+}
+
+fn agent_chat_message(id: &str, text: &str) -> ChatMessage {
+    ChatMessage {
+        cursor: id.to_string(),
+        identity: id.to_string(),
+        message_type: "agent_text".to_string(),
+        message_id: id.to_string(),
+        message: NormalizedMessage::AgentText {
+            id: id.to_string(),
+            text: text.to_string(),
+            created_at: "2026-07-01T00:00:00Z".to_string(),
+            streaming: false,
         },
     }
 }

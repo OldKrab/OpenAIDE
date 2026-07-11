@@ -12,7 +12,13 @@ describe("backend initialization", () => {
       shell: { kind: "vscodeExtension" },
       requestedSurface: { kind: "home" },
       capabilities: {
-        protocol: ["requestResponses", "stableClientRequestIds", "resync"],
+        protocol: [
+          "requestResponses",
+          "stableClientRequestIds",
+          "resync",
+          "permissionResponses",
+          "questionResponses",
+        ],
         shell: [
           "openExternal",
           "revealFile",

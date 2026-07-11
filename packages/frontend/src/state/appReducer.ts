@@ -34,6 +34,7 @@ import {
   upsertTaskSummary,
 } from "./taskSnapshotReconciliation";
 import { reduceTaskInteractionState } from "./taskInteractionReducer";
+import { retainSnapshotWindow } from "./chatPageMerge";
 import type { AppState } from "./store";
 
 export type SnapshotIntent = "open" | "refresh";
@@ -225,6 +226,11 @@ function reduceGlobalState(state: AppState, action: GlobalAction): AppState {
       const terminalQuestionIds = terminalAppServerQuestionIds(action.snapshot);
       const appServerQuestionRequests = omitKeys(state.appServerQuestionRequests, terminalQuestionIds);
       const questionResponses = omitKeys(state.questionResponses, terminalQuestionIds);
+      const taskId = action.snapshot.task.task_id;
+      const previousSnapshot = state.taskSnapshots[taskId];
+      const retainedChatPage = previousSnapshot
+        ? retainSnapshotWindow(state.chatPages[taskId], previousSnapshot.chat, action.snapshot.chat)
+        : state.chatPages[taskId];
       return {
         ...state,
         snapshot: action.snapshot,
@@ -232,8 +238,11 @@ function reduceGlobalState(state: AppState, action: GlobalAction): AppState {
         searchQuery: action.intent === "open" ? "" : state.searchQuery,
         taskSnapshots: {
           ...state.taskSnapshots,
-          [action.snapshot.task.task_id]: action.snapshot,
+          [taskId]: action.snapshot,
         },
+        chatPages: retainedChatPage
+          ? { ...state.chatPages, [taskId]: retainedChatPage }
+          : state.chatPages,
         tasks,
         taskListCache: {
           ...state.taskListCache,

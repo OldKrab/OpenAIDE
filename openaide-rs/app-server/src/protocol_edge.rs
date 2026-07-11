@@ -48,8 +48,8 @@ use crate::shell_file_handles::ShellFileRevealRegistry;
 use crate::snapshots::{SnapshotBuilder, TaskSnapshotSource};
 use crate::state_sync::StateStream;
 use crate::tasks::product_api::{
-    AgentConfigOptionsWorkflow, AgentListSessionsWorkflow, AttachmentFileBrowserWorkflow,
-    TaskDiscardWorkflow, TaskOpenWorkflow, TaskSetConfigOptionWorkflow,
+    AgentListSessionsWorkflow, AttachmentFileBrowserWorkflow, TaskDiscardWorkflow,
+    TaskOpenWorkflow, TaskSetConfigOptionWorkflow,
 };
 use crate::tasks::product_api::{
     TaskAdoptNativeSessionWorkflow, TaskArchiveWorkflow, TaskCancelWorkflow, TaskChatPageWorkflow,
@@ -76,7 +76,6 @@ pub struct RpcGateway {
     app_preferences: Arc<dyn AppPreferencesWorkflow>,
     runtime_settings: Arc<dyn RuntimeSettingsWorkflow>,
     agent_list_sessions: Arc<dyn AgentListSessionsWorkflow>,
-    agent_config_options: Arc<dyn AgentConfigOptionsWorkflow>,
     attachments: Arc<dyn AttachmentFileBrowserWorkflow>,
     task_create: Arc<dyn TaskCreateWorkflow>,
     task_adopt_native_session: Arc<dyn TaskAdoptNativeSessionWorkflow>,
@@ -154,7 +153,6 @@ impl RpcGateway {
         app_preferences: Arc<dyn AppPreferencesWorkflow>,
         runtime_settings: Arc<dyn RuntimeSettingsWorkflow>,
         agent_list_sessions: Arc<dyn AgentListSessionsWorkflow>,
-        agent_config_options: Arc<dyn AgentConfigOptionsWorkflow>,
         attachments: Arc<dyn AttachmentFileBrowserWorkflow>,
         task_create: Arc<dyn TaskCreateWorkflow>,
         task_adopt_native_session: Arc<dyn TaskAdoptNativeSessionWorkflow>,
@@ -188,7 +186,6 @@ impl RpcGateway {
             app_preferences,
             runtime_settings,
             agent_list_sessions,
-            agent_config_options,
             attachments,
             task_create,
             task_adopt_native_session,
@@ -269,10 +266,9 @@ impl RpcGateway {
         let server_requests = self
             .server_requests
             .observe_client_initialized_or_reattached(
-                crate::client_lifecycle::Delivery {
-                    client_instance_id: context.client_instance_id.clone(),
-                    connection_id: context.connection_id.clone(),
-                },
+                self.client_hub
+                    .delivery_for(&context.client_instance_id)
+                    .expect("initialized client must have a delivery"),
                 &self.responder_scopes(&context),
                 now,
             );
@@ -330,10 +326,9 @@ impl RpcGateway {
         let server_requests = match &result.scope {
             openaide_app_server_protocol::state::SubscriptionScope::Task { task_id } => {
                 self.server_requests.observe_subscription_added(
-                    crate::client_lifecycle::Delivery {
-                        client_instance_id: ctx.client_instance_id.clone(),
-                        connection_id: ctx.connection_id.clone(),
-                    },
+                    self.client_hub
+                        .delivery_for(&ctx.client_instance_id)
+                        .expect("subscribed client must have a delivery"),
                     task_id.clone(),
                     now,
                 )

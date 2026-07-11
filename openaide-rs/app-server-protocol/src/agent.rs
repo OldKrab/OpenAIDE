@@ -3,7 +3,7 @@ use ts_rs::TS;
 
 use std::collections::BTreeMap;
 
-use crate::ids::{AgentConfigOptionId, AgentId, ProjectId};
+use crate::ids::{AgentId, ProjectId};
 use crate::snapshot::AgentCollectionSnapshot;
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
@@ -69,85 +69,6 @@ pub struct AgentListSessionsResult {
     pub sessions: Vec<AgentListedSession>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct AgentConfigOptionsParams {
-    pub agent_id: AgentId,
-    pub project_id: ProjectId,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub workspace_root: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct AgentSetConfigOptionParams {
-    pub agent_id: AgentId,
-    pub project_id: ProjectId,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub workspace_root: Option<String>,
-    pub config_id: AgentConfigOptionId,
-    pub value: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct AgentConfigOptionsResult {
-    pub agent_id: AgentId,
-    pub project_id: ProjectId,
-    pub project_label: String,
-    pub catalog: AgentConfigOptionsCatalog,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct AgentConfigOptionsCatalog {
-    pub agent_id: AgentId,
-    pub status: AgentConfigOptionsStatus,
-    pub options: Vec<AgentConfigOption>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]
-#[serde(rename_all = "snake_case")]
-pub enum AgentConfigOptionsStatus {
-    Ready,
-    Empty,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct AgentConfigOption {
-    pub id: AgentConfigOptionId,
-    pub label: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub category: Option<AgentConfigOptionCategory>,
-    pub current_value: String,
-    pub values: Vec<AgentConfigOptionValue>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]
-#[serde(rename_all = "snake_case")]
-pub enum AgentConfigOptionCategory {
-    Mode,
-    Model,
-    ThoughtLevel,
-    Other,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct AgentConfigOptionValue {
-    pub id: String,
-    pub label: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub description: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub group_id: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub group_label: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]

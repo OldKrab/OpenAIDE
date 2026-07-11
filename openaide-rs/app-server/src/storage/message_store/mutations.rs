@@ -148,12 +148,23 @@ impl Store {
         let mut messages = self.read_messages(task_id)?;
         let mut found = false;
         for stored in &mut messages {
-            let NormalizedMessage::Question { request_id: stored_id, state, action, content, .. } =
-                &mut stored.chat.message
-            else { continue; };
-            if stored_id != request_id { continue; }
+            let NormalizedMessage::Question {
+                request_id: stored_id,
+                state,
+                action,
+                content,
+                ..
+            } = &mut stored.chat.message
+            else {
+                continue;
+            };
+            if stored_id != request_id {
+                continue;
+            }
             if *state != QuestionState::Pending {
-                return Err(RuntimeError::InvalidParams("question already resolved".to_string()));
+                return Err(RuntimeError::InvalidParams(
+                    "question already resolved".to_string(),
+                ));
             }
             found = true;
             match response {
@@ -170,9 +181,18 @@ impl Store {
             }
             break;
         }
-        if !found { return Err(RuntimeError::InvalidParams("request_id".to_string())); }
-        let has_pending = messages.iter().any(|stored| matches!(stored.chat.message,
-            NormalizedMessage::Question { state: QuestionState::Pending, .. }));
+        if !found {
+            return Err(RuntimeError::InvalidParams("request_id".to_string()));
+        }
+        let has_pending = messages.iter().any(|stored| {
+            matches!(
+                stored.chat.message,
+                NormalizedMessage::Question {
+                    state: QuestionState::Pending,
+                    ..
+                }
+            )
+        });
         self.write_messages(task_id, &messages)?;
         self.write_meta(task_id, &messages)?;
         Ok(has_pending)

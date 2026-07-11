@@ -4,16 +4,16 @@ use std::time::Duration;
 
 use crate::agent::acp_active_session_manager::AcpActiveSessionManager;
 use crate::agent::acp_auth_method_cache::AcpAuthMethodCache;
-use crate::agent::acp_options_session_manager::AcpOptionsSessionManager;
 use crate::agent::acp_probe_auth_runner::AcpProbeAuthRunner;
+use crate::agent::acp_runtime_threading::block_on_new_runtime;
 use crate::agent::acp_runtime_threading::close_in_parallel;
+use crate::agent::acp_session_listing::run_agent_session_list;
 use crate::agent::acp_trace::AcpTraceState;
 use crate::agent::registry_handle::AgentRegistryHandle;
 use crate::agent::{
-    AgentAuthenticateRequest, AgentConfigOptionsRequest, AgentEventSink, AgentListSessionsRequest,
-    AgentLoadedSession, AgentProbeRequest, AgentPrompt, AgentSession, AgentSessionDelete,
-    AgentSessionEventSink, AgentSessionLoad, AgentSessionResume,
-    AgentSessionSetConfigOptionRequest, AgentSessionStart, AgentSetConfigOptionRequest,
+    AgentAuthenticateRequest, AgentEventSink, AgentListSessionsRequest, AgentLoadedSession,
+    AgentProbeRequest, AgentPrompt, AgentSession, AgentSessionDelete, AgentSessionEventSink,
+    AgentSessionLoad, AgentSessionResume, AgentSessionSetConfigOptionRequest, AgentSessionStart,
 };
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::host::HostBridge;
@@ -27,18 +27,12 @@ pub(super) const AUTHENTICATE_TIMEOUT: Duration = Duration::from_secs(120);
 pub(super) struct AcpRuntimeKernel {
     registry: AgentRegistryHandle,
     probe_auth: AcpProbeAuthRunner,
-    options_sessions: AcpOptionsSessionManager,
     active_sessions: AcpActiveSessionManager,
 }
 
 impl AcpRuntimeKernel {
     pub(super) fn new(registry: AgentRegistryHandle, host_bridge: HostBridge) -> Self {
         let auth_method_cache = AcpAuthMethodCache::default();
-        let options_sessions = AcpOptionsSessionManager::new(
-            registry.clone(),
-            host_bridge.clone(),
-            auth_method_cache.clone(),
-        );
         let active_sessions = AcpActiveSessionManager::new(
             registry.clone(),
             host_bridge.clone(),
@@ -52,7 +46,6 @@ impl AcpRuntimeKernel {
         Self {
             registry,
             probe_auth,
-            options_sessions,
             active_sessions,
         }
     }
@@ -86,38 +79,15 @@ impl AcpRuntimeKernel {
             return Err(RuntimeError::InvalidParams("workspace_root".to_string()));
         }
 
-        self.options_sessions
-            .with_options_session(&request.agent_id, &request.cwd, |session| {
-                session.list_sessions(
-                    request.agent_id.clone(),
-                    cwd.clone(),
-                    request.cursor.clone(),
-                )
-            })
-    }
-
-    pub(super) fn config_options(
-        &self,
-        request: AgentConfigOptionsRequest,
-    ) -> Result<ConfigOptionsCatalog, RuntimeError> {
-        self.registry.require(&request.agent_id)?;
-        self.options_sessions
-            .with_options_session(&request.agent_id, &request.cwd, |session| {
-                session.config_options()
-            })
-    }
-
-    pub(super) fn set_config_option(
-        &self,
-        request: AgentSetConfigOptionRequest,
-    ) -> Result<ConfigOptionsCatalog, RuntimeError> {
-        self.registry.require(&request.agent_id)?;
-        let config_id = request.config_id.clone();
-        let value = request.value.clone();
-        self.options_sessions
-            .with_options_session(&request.agent_id, &request.cwd, |session| {
-                session.set_config_option(config_id.clone(), value.clone())
-            })
+        let config = self.registry.require_acp_config(&request.agent_id)?;
+        block_on_new_runtime(run_agent_session_list(
+            config,
+            request.agent_id,
+            cwd,
+            request.cursor,
+            self.probe_auth.preferred_auth_method_id(),
+            self.probe_auth.host_bridge(),
+        ))?
     }
 
     pub(super) fn set_session_config_option(
@@ -180,9 +150,6 @@ impl AcpRuntimeKernel {
 
     pub(super) fn shutdown(&self) -> Result<(), RuntimeError> {
         let mut close_tasks: Vec<Box<dyn FnOnce() + Send + 'static>> = Vec::new();
-        if let Some(task) = self.options_sessions.take_shutdown_close_task() {
-            close_tasks.push(task);
-        }
         close_tasks.extend(self.active_sessions.take_shutdown_close_tasks());
         close_in_parallel(close_tasks);
         Ok(())

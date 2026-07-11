@@ -17,8 +17,6 @@ export const AGENT_PROBE = "agent/probe" as const;
 
 export const AGENT_AUTHENTICATE = "agent/authenticate" as const;
 export const AGENT_LIST_SESSIONS = "agent/listSessions" as const;
-export const AGENT_CONFIG_OPTIONS = "agent/configOptions" as const;
-export const AGENT_SET_CONFIG_OPTION = "agent/setConfigOption" as const;
 export const AGENT_CREATE_CUSTOM = "agent/createCustom" as const;
 export const AGENT_UPDATE_CUSTOM_METADATA = "agent/updateCustomMetadata" as const;
 export const AGENT_REPLACE_CUSTOM = "agent/replaceCustom" as const;
@@ -154,7 +152,7 @@ export type SettingsSection = "agents" | "mcpServers" | "skills" | "commonSettin
 
 export type ClientCapabilities = { protocol?: Array<ClientProtocolCapability>, shell?: Array<ShellCapability>, };
 
-export type ClientProtocolCapability = "resync" | "requestResponses" | "stableClientRequestIds";
+export type ClientProtocolCapability = "resync" | "requestResponses" | "stableClientRequestIds" | "permissionResponses" | "questionResponses";
 
 export type ShellCapability = "openExternal" | "revealFile" | "resolveFileReveal" | "pickLocalFile" | "openTerminal" | "readSecret" | "writeSecret" | "showNotification";
 
@@ -197,22 +195,6 @@ export type AgentListSessionsParams = { agentId: AgentId, projectId: ProjectId, 
 export type AgentListSessionsResult = { agentId: AgentId, projectId: ProjectId, projectLabel: string, sessions: Array<AgentListedSession>, nextCursor?: string | null, };
 
 export type AgentListedSession = { sessionId: string, title?: string | null, lastActivity?: string | null, updatedAt?: string | null, };
-
-export type AgentConfigOptionsParams = { agentId: AgentId, projectId: ProjectId, workspaceRoot?: string | null, };
-
-export type AgentSetConfigOptionParams = { agentId: AgentId, projectId: ProjectId, workspaceRoot?: string | null, configId: AgentConfigOptionId, value: string, };
-
-export type AgentConfigOptionsResult = { agentId: AgentId, projectId: ProjectId, projectLabel: string, catalog: AgentConfigOptionsCatalog, };
-
-export type AgentConfigOptionsCatalog = { agentId: AgentId, status: AgentConfigOptionsStatus, options: Array<AgentConfigOption>, };
-
-export type AgentConfigOptionsStatus = "ready" | "empty";
-
-export type AgentConfigOption = { id: AgentConfigOptionId, label: string, description?: string | null, category?: AgentConfigOptionCategory | null, currentValue: string, values: Array<AgentConfigOptionValue>, };
-
-export type AgentConfigOptionCategory = "mode" | "model" | "thought_level" | "other";
-
-export type AgentConfigOptionValue = { id: string, label: string, description?: string | null, groupId?: string | null, groupLabel?: string | null, };
 
 export type AgentCreateCustomParams = { agentId?: AgentId | null, label: string, icon: string, commandLine: string, command: string, args: Array<string>, env: { [key in string]: string }, secretEnv: Array<string>, enabled: boolean, };
 
@@ -598,7 +580,7 @@ export type PendingRequestScope = { "kind": "client", clientInstanceId: ClientIn
 
 export type PendingRequestKind = "permission" | "question" | "secret" | "shellCapability";
 
-export type ProtocolMethod = typeof CLIENT_PROBE | typeof CLIENT_INITIALIZE | typeof CLIENT_HEARTBEAT | typeof STATE_SUBSCRIBE | typeof STATE_UNSUBSCRIBE | typeof DIAGNOSTICS_GET_RUNTIME | typeof SUPPORT_RECOVER_STUCK_SESSIONS | typeof AGENT_PROBE | typeof AGENT_AUTHENTICATE | typeof AGENT_LIST_SESSIONS | typeof AGENT_CONFIG_OPTIONS | typeof AGENT_SET_CONFIG_OPTION | typeof AGENT_CREATE_CUSTOM | typeof AGENT_UPDATE_CUSTOM_METADATA | typeof AGENT_REPLACE_CUSTOM | typeof AGENT_DELETE_CUSTOM | typeof AGENT_SET_ENABLED | typeof SETTINGS_GET_AGENT_DETAILS | typeof SETTINGS_GET_MCP_SERVERS | typeof SETTINGS_GET_SKILLS | typeof SETTINGS_GET_PREFERENCES | typeof SETTINGS_UPDATE_PREFERENCES | typeof SETTINGS_GET_RUNTIME | typeof SETTINGS_UPDATE_RUNTIME | typeof ATTACHMENT_LIST_ROOTS | typeof ATTACHMENT_LIST_DIRECTORY | typeof ATTACHMENT_CREATE_FILE_REFERENCE | typeof ATTACHMENT_CREATE_PASTED_IMAGE | typeof ATTACHMENT_CREATE_EMBEDDED_CANDIDATE | typeof ATTACHMENT_CONFIRM_EMBEDDED | typeof ATTACHMENT_REFRESH_HANDLES | typeof ATTACHMENT_RELEASE_HANDLES | typeof ATTACHMENT_REVEAL | typeof SHELL_RESOLVE_FILE_REVEAL | typeof WORKSPACE_LIST_ROOTS | typeof WORKSPACE_LIST_DIRECTORY | typeof TASK_CREATE | typeof TASK_ADOPT_NATIVE_SESSION | typeof TASK_SEND | typeof TASK_SET_CONFIG_OPTION | typeof TASK_CANCEL | typeof TASK_OPEN | typeof TASK_CHAT_PAGE | typeof TASK_TOOL_DETAIL | typeof TASK_LIST | typeof TASK_DISCARD | typeof TASK_SET_ARCHIVED;
+export type ProtocolMethod = typeof CLIENT_PROBE | typeof CLIENT_INITIALIZE | typeof CLIENT_HEARTBEAT | typeof STATE_SUBSCRIBE | typeof STATE_UNSUBSCRIBE | typeof DIAGNOSTICS_GET_RUNTIME | typeof SUPPORT_RECOVER_STUCK_SESSIONS | typeof AGENT_PROBE | typeof AGENT_AUTHENTICATE | typeof AGENT_LIST_SESSIONS | typeof AGENT_CREATE_CUSTOM | typeof AGENT_UPDATE_CUSTOM_METADATA | typeof AGENT_REPLACE_CUSTOM | typeof AGENT_DELETE_CUSTOM | typeof AGENT_SET_ENABLED | typeof SETTINGS_GET_AGENT_DETAILS | typeof SETTINGS_GET_MCP_SERVERS | typeof SETTINGS_GET_SKILLS | typeof SETTINGS_GET_PREFERENCES | typeof SETTINGS_UPDATE_PREFERENCES | typeof SETTINGS_GET_RUNTIME | typeof SETTINGS_UPDATE_RUNTIME | typeof ATTACHMENT_LIST_ROOTS | typeof ATTACHMENT_LIST_DIRECTORY | typeof ATTACHMENT_CREATE_FILE_REFERENCE | typeof ATTACHMENT_CREATE_PASTED_IMAGE | typeof ATTACHMENT_CREATE_EMBEDDED_CANDIDATE | typeof ATTACHMENT_CONFIRM_EMBEDDED | typeof ATTACHMENT_REFRESH_HANDLES | typeof ATTACHMENT_RELEASE_HANDLES | typeof ATTACHMENT_REVEAL | typeof SHELL_RESOLVE_FILE_REVEAL | typeof WORKSPACE_LIST_ROOTS | typeof WORKSPACE_LIST_DIRECTORY | typeof TASK_CREATE | typeof TASK_ADOPT_NATIVE_SESSION | typeof TASK_SEND | typeof TASK_SET_CONFIG_OPTION | typeof TASK_CANCEL | typeof TASK_OPEN | typeof TASK_CHAT_PAGE | typeof TASK_TOOL_DETAIL | typeof TASK_LIST | typeof TASK_DISCARD | typeof TASK_SET_ARCHIVED;
 export type RequestParamsByMethod = {
   [CLIENT_PROBE]: ClientProbeParams;
   [CLIENT_INITIALIZE]: InitializeParams;
@@ -610,8 +592,6 @@ export type RequestParamsByMethod = {
   [AGENT_PROBE]: AgentProbeParams;
   [AGENT_AUTHENTICATE]: AgentAuthenticateParams;
   [AGENT_LIST_SESSIONS]: AgentListSessionsParams;
-  [AGENT_CONFIG_OPTIONS]: AgentConfigOptionsParams;
-  [AGENT_SET_CONFIG_OPTION]: AgentSetConfigOptionParams;
   [AGENT_CREATE_CUSTOM]: AgentCreateCustomParams;
   [AGENT_UPDATE_CUSTOM_METADATA]: AgentUpdateCustomMetadataParams;
   [AGENT_REPLACE_CUSTOM]: AgentReplaceCustomParams;
@@ -660,8 +640,6 @@ export type ResponseResultByMethod = {
   [AGENT_PROBE]: AgentProbeResult;
   [AGENT_AUTHENTICATE]: AgentAuthenticateResult;
   [AGENT_LIST_SESSIONS]: AgentListSessionsResult;
-  [AGENT_CONFIG_OPTIONS]: AgentConfigOptionsResult;
-  [AGENT_SET_CONFIG_OPTION]: AgentConfigOptionsResult;
   [AGENT_CREATE_CUSTOM]: AgentCreateCustomResult;
   [AGENT_UPDATE_CUSTOM_METADATA]: AgentUpdateCustomMetadataResult;
   [AGENT_REPLACE_CUSTOM]: AgentReplaceCustomResult;
@@ -718,8 +696,6 @@ export type SupportRecoverStuckSessionsResponse = ResponseEnvelope<SupportRecove
 export type AgentProbeResponse = ResponseEnvelope<AgentProbeResult>;
 export type AgentAuthenticateResponse = ResponseEnvelope<AgentAuthenticateResult>;
 export type AgentListSessionsResponse = ResponseEnvelope<AgentListSessionsResult>;
-export type AgentConfigOptionsResponse = ResponseEnvelope<AgentConfigOptionsResult>;
-export type AgentSetConfigOptionResponse = ResponseEnvelope<AgentConfigOptionsResult>;
 export type AgentCreateCustomResponse = ResponseEnvelope<AgentCreateCustomResult>;
 export type AgentUpdateCustomMetadataResponse = ResponseEnvelope<AgentUpdateCustomMetadataResult>;
 export type AgentReplaceCustomResponse = ResponseEnvelope<AgentReplaceCustomResult>;

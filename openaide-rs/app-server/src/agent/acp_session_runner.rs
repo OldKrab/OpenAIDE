@@ -7,14 +7,13 @@ use agent_client_protocol::schema::{
 use agent_client_protocol::{Agent, ConnectionTo};
 
 use crate::agent::acp_session_lifecycle::{
-    initialize_supports_session_close, initialize_supports_session_delete,
-    list_sessions_from_options_connection, load_active_session, start_active_session,
-    validate_initialize_protocol, LoadActiveSessionRequest, LoadReplayCaptures,
+    initialize_supports_session_close, initialize_supports_session_delete, load_active_session,
+    start_active_session, validate_initialize_protocol, LoadActiveSessionRequest,
+    LoadReplayCaptures,
 };
 use crate::agent::acp_session_termination::close_active_session;
 use crate::agent::acp_trace::AcpTraceSession;
 use crate::protocol::errors::RuntimeError;
-use crate::protocol::model::AgentListSessionsResult;
 
 pub(super) type AcpActiveSession = agent_client_protocol::ActiveSession<'static, Agent>;
 
@@ -122,25 +121,6 @@ impl<'a> AcpSessionRunner<'a> {
                 cwd,
                 preferred_auth_method_id: self.auth_method_id,
             },
-        )
-        .await
-    }
-
-    pub(super) async fn list_sessions(
-        &self,
-        active_session: &AcpActiveSession,
-        agent_id: String,
-        cwd: PathBuf,
-        cursor: Option<String>,
-    ) -> Result<AgentListSessionsResult, RuntimeError> {
-        list_sessions_from_options_connection(
-            self.connection,
-            active_session,
-            &self.initialize,
-            agent_id,
-            cwd,
-            cursor,
-            self.auth_method_id,
         )
         .await
     }

@@ -709,7 +709,7 @@ describe("NewTaskView", () => {
     expect(nodeText(picker)).toContain("/review");
   });
 
-  it("keeps already loaded new-task options visible and ordered while the prepared Task options catch up", () => {
+  it("uses options from the prepared Task session", () => {
     const state = createInitialState();
     const project = { projectId: "project_1", label: "OpenAIDE" };
     state.projects = [project];
@@ -804,13 +804,12 @@ describe("NewTaskView", () => {
     );
 
     expect(composerButtonLabels(tree)).toEqual([
+      "fast-mode: Off",
       "Agent",
-      "GPT-5.5",
       "Medium",
-      "Fast: Off",
+      "GPT-5.5",
       "Options · GPT-5.5",
     ]);
-    expect(() => buttonWithText(tree, "fast-mode: Off")).toThrow();
   });
 
   it("dismisses context selector menus on Escape and before composer menu interactions", () => {
@@ -828,6 +827,10 @@ describe("NewTaskView", () => {
         values: [{ id: "gpt-5.5", label: "GPT-5.5" }],
       }],
       status: "ready",
+    };
+    state.snapshot = {
+      ...taskSnapshot("task_1", false),
+      agent_config: state.newTask.configOptions,
     };
     const tree = render(
       <NewTaskView

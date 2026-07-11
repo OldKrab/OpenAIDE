@@ -39,9 +39,12 @@ impl TaskSessionEventSink {
         form: QuestionRequestParams,
         cancellation: TurnCancellation,
     ) -> Result<QuestionRequestResponse, RuntimeError> {
-        let request_id = self
+        let Some(request_id) = self
             .server_requests
-            .open_question_request(&self.task_id, form.clone())?;
+            .open_question_request(&self.task_id, form.clone())?
+        else {
+            return Ok(QuestionRequestResponse::Cancel);
+        };
         let now = now_string();
         let append_result =
             self.mutations

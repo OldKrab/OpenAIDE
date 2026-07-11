@@ -24,6 +24,13 @@ use super::types::{
 pub struct ServerRequestBroker {
     pub(super) next_request_id: u64,
     pub(super) records: HashMap<RequestId, PendingRecord>,
+    pub(super) available_responders: HashMap<ClientInstanceId, AvailableResponder>,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct AvailableResponder {
+    pub(super) delivery: Delivery,
+    pub(super) scopes: Vec<ResponderScope>,
 }
 
 impl ServerRequestBroker {
@@ -31,6 +38,7 @@ impl ServerRequestBroker {
         Self {
             next_request_id: 1,
             records: HashMap::new(),
+            available_responders: HashMap::new(),
         }
     }
 
@@ -46,9 +54,47 @@ impl ServerRequestBroker {
             };
         };
 
-        let eligible_deliveries = filter_eligible_deliveries(&draft.scope, eligible_deliveries);
-        if matches!(draft.scope, PendingRequestScope::Client { .. })
-            && eligible_deliveries.is_empty()
+        let mut eligible_deliveries =
+            filter_eligible_deliveries(&draft.scope, &draft.method, eligible_deliveries);
+        for delivery in &eligible_deliveries {
+            let responder = self
+                .available_responders
+                .entry(delivery.client_instance_id.clone())
+                .or_insert_with(|| AvailableResponder {
+                    delivery: delivery.clone(),
+                    scopes: vec![ResponderScope::Client(delivery.client_instance_id.clone())],
+                });
+            responder.delivery = delivery.clone();
+            if let PendingRequestScope::Task { task_id } = &draft.scope {
+                let task_scope = ResponderScope::Task(task_id.clone());
+                if !responder.scopes.contains(&task_scope) {
+                    responder.scopes.push(task_scope);
+                }
+            }
+        }
+        let available_deliveries = self
+            .available_responders
+            .values()
+            .filter_map(|responder| {
+                (responder.delivery.supports_method(&draft.method)
+                    && scope_matches_responder(
+                        &draft.scope,
+                        &draft.method,
+                        &responder.delivery.client_instance_id,
+                        &responder.scopes,
+                    )
+                    && !eligible_deliveries.iter().any(|delivery| {
+                        delivery.client_instance_id == responder.delivery.client_instance_id
+                    }))
+                .then(|| responder.delivery.clone())
+            })
+            .collect::<Vec<_>>();
+        eligible_deliveries.extend(available_deliveries);
+        let requires_immediate_responder =
+            matches!(draft.method.as_str(), PERMISSION_REQUEST | QUESTION_REQUEST);
+        if eligible_deliveries.is_empty()
+            && (matches!(draft.scope, PendingRequestScope::Client { .. })
+                || requires_immediate_responder)
         {
             return OpenRequestOutcome::Unavailable {
                 reason: RequestUnavailableReason::NoEligibleResponder,
@@ -212,11 +258,38 @@ impl ServerRequestBroker {
             .collect()
     }
 
+    /// Runtime-originated requests are drained by the transport on its next update tick.
+    pub(super) fn defer_deliveries(&mut self, deliveries: &[ServerRequestDelivery]) {
+        for delivery in deliveries {
+            if let Some(record) = self.records.get_mut(&delivery.envelope.request_id) {
+                mark_responder_eligible(record, delivery.delivery.client_instance_id.clone());
+            }
+        }
+    }
+
     fn allocate_request_id(&mut self) -> RequestId {
         let id = RequestId::from(format!("server-request-{}", self.next_request_id));
         self.next_request_id += 1;
         id
     }
+}
+
+fn scope_matches_responder(
+    scope: &PendingRequestScope,
+    method: &str,
+    client_instance_id: &ClientInstanceId,
+    scopes: &[ResponderScope],
+) -> bool {
+    let snapshot = PendingRequestSnapshot {
+        request_id: RequestId::from("capability-check"),
+        scope: scope.clone(),
+        kind: PendingRequestKind::Permission,
+        title: String::new(),
+        permission: None,
+        question: None,
+    };
+    let record = PendingRecord::new(snapshot, method.to_string(), serde_json::Value::Null, []);
+    record_matches_responder(&record, client_instance_id, scopes)
 }
 
 impl Default for ServerRequestBroker {
@@ -258,13 +331,18 @@ fn permission_snapshot(
 
 fn filter_eligible_deliveries(
     scope: &PendingRequestScope,
+    method: &str,
     deliveries: Vec<Delivery>,
 ) -> Vec<Delivery> {
-    match scope {
+    let deliveries = match scope {
         PendingRequestScope::Client { client_instance_id } => deliveries
             .into_iter()
             .filter(|delivery| &delivery.client_instance_id == client_instance_id)
             .collect(),
         PendingRequestScope::Task { .. } => deliveries,
-    }
+    };
+    deliveries
+        .into_iter()
+        .filter(|delivery| delivery.supports_method(method))
+        .collect()
 }

@@ -199,6 +199,7 @@ fn product_transport_returns_queued_events_with_client_response() {
                 delivery: crate::client_lifecycle::Delivery {
                     client_instance_id: "client-1".into(),
                     connection_id: connection_id.clone(),
+                    request_capabilities: Vec::new(),
                 },
                 event: app_event("cursor-1", "cursor-2"),
             }]
@@ -361,6 +362,7 @@ fn event_delivery(
         delivery: crate::client_lifecycle::Delivery {
             client_instance_id: "client-1".into(),
             connection_id: connection_id.clone(),
+            request_capabilities: Vec::new(),
         },
         event,
     }
