@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OpenAIDE Question Prototype</title>
+    <link rel="stylesheet" href="./elicitation.css" />
+  </head>
+  <body>
+    <!-- PROTOTYPE: Three inline Question variants, switchable via ?variant=, inside a representative Task Page. -->
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="Task navigation">
+        <div class="sidebar-top">
+          <div class="brand-mark" aria-label="OpenAIDE">OA</div>
+          <button class="icon-button" type="button" aria-label="New task">+</button>
+        </div>
+        <label class="search-box">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="m10.5 10.5 3 3"/></svg>
+          <input aria-label="Search tasks" placeholder="Search tasks" />
+        </label>
+        <nav class="task-list" aria-label="Tasks">
+          <p class="project-label">OpenAIDE</p>
+          <button class="task-row waiting selected" type="button">
+            <span class="task-status-icon" aria-hidden="true">Ⅱ</span>
+            <span class="task-copy"><strong>Support ACP elicitation</strong><small>Waiting · Codex</small></span>
+          </button>
+          <button class="task-row" type="button">
+            <span class="task-status-icon ready" aria-hidden="true">○</span>
+            <span class="task-copy"><strong>Polish task navigation</strong><small>Ready · Codex</small></span>
+          </button>
+          <button class="task-row" type="button">
+            <span class="task-status-icon done" aria-hidden="true">✓</span>
+            <span class="task-copy"><strong>Fix attachment preview</strong><small>Completed · Codex</small></span>
+          </button>
+        </nav>
+      </aside>
+
+      <main class="task-surface">
+        <header class="task-header">
+          <div>
+            <strong>Support ACP elicitation</strong>
+            <span class="task-meta"><span class="waiting-dot">Ⅱ</span> Needs attention</span>
+            <span class="task-meta"><span class="agent-dot">C</span> Codex</span>
+          </div>
+          <span class="workspace">OpenAIDE</span>
+        </header>
+
+        <div class="chat-column">
+          <section class="message-list" aria-label="Task chat">
+            <article class="user-message">Let’s support agent ACP elicitation.</article>
+            <article class="agent-message">
+              I can add the protocol and UI path. Before I continue, I need a few product decisions.
+            </article>
+            <div class="activity-line"><span aria-hidden="true">◇</span> Inspected ACP schema and request lifecycle</div>
+            <div id="question-root"></div>
+            <div class="working-row"><span class="working-dots" aria-hidden="true"><i></i><i></i><i></i></span> Waiting for your response</div>
+          </section>
+
+          <section class="composer" aria-label="Message composer">
+            <textarea aria-label="Message" disabled placeholder="Reply to the Question above to continue"></textarea>
+            <footer>
+              <button type="button" disabled>Attach</button>
+              <button class="send-button" type="button" disabled aria-label="Send message">↑</button>
+            </footer>
+          </section>
+        </div>
+      </main>
+    </div>
+
+    <div class="prototype-switcher" role="region" aria-label="Prototype controls">
+      <button id="previous-variant" type="button" aria-label="Previous variant">←</button>
+      <span id="variant-label"></span>
+      <button id="next-variant" type="button" aria-label="Next variant">→</button>
+      <span class="switcher-separator" aria-hidden="true"></span>
+      <label>State
+        <select id="state-select">
+          <option value="pending">Pending</option>
+          <option value="error">Validation error</option>
+          <option value="sending">Responding</option>
+          <option value="resolved">Resolved preview</option>
+          <option value="closed">Closed</option>
+        </select>
+      </label>
+    </div>
+
+    <script src="./elicitation.js"></script>
+  </body>
+</html>

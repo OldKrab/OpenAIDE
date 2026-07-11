@@ -1,0 +1,80 @@
+.chat-image-grid,
+.chat-file-attachments {
+  min-width: 0;
+  max-width: min(520px, 100%);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.chat-image-attachment {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--oa-border);
+  border-radius: var(--oa-radius-md);
+  background: color-mix(in oklch, var(--oa-panel) 72%, var(--oa-bg));
+  cursor: pointer;
+  display: block;
+  padding: 0;
+}
+
+.chat-image-grid[data-layout="single"] .chat-image-attachment {
+  width: min(320px, 100%);
+}
+
+.chat-image-grid[data-layout="pair"] .chat-image-attachment {
+  width: min(156px, calc(50% - 3px));
+  height: 116px;
+}
+
+.chat-image-grid[data-layout="many"] .chat-image-attachment {
+  width: 128px;
+  height: 96px;
+}
+
+.chat-image-preview {
+  width: 100%;
+  height: 100%;
+  max-height: 240px;
+  display: block;
+  object-fit: contain;
+}
+
+.chat-image-grid + .chat-user,
+.chat-file-attachments + .chat-user {
+  margin-top: 6px;
+}
+
+.chat-image-attachment:hover {
+  border-color: color-mix(in oklch, var(--oa-focus) 48%, var(--oa-border));
+}
+
+.chat-image-attachment:focus-visible,
+.chat-attachment-chip:focus-visible {
+  outline: 1px solid var(--oa-focus);
+  outline-offset: 2px;
+}
+
+.chat-attachment-chip {
+  max-width: 220px;
+  min-height: 28px;
+  border: 0;
+  border-radius: var(--oa-radius-sm);
+  background: var(--oa-raised);
+  color: var(--oa-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 430px) {
+  .chat-image-grid[data-layout="many"] .chat-image-attachment {
+    width: min(112px, calc(50% - 3px));
+    height: 84px;
+  }
+}

@@ -1,0 +1,321 @@
+.chat-user-block,
+.chat-user,
+.chat-system {
+  margin: 0;
+  max-width: 70ch;
+  font-family: var(--oa-chat-font);
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.chat-agent {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  font-family: var(--oa-chat-font);
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.chat-agent-block {
+  width: 100%;
+  display: grid;
+  gap: 0;
+}
+
+.chat-streaming-caret {
+  display: inline-block;
+  width: 1px;
+  height: 12px;
+  margin-inline-start: 2px;
+  vertical-align: -1px;
+  background: color-mix(in oklch, var(--oa-text) 72%, transparent);
+  animation: chat-streaming-caret 820ms steps(2, jump-none) infinite;
+}
+
+@keyframes chat-streaming-caret {
+  50% { opacity: 0.25; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-streaming-caret { animation: none; }
+}
+
+.chat-agent > :first-child {
+  margin-top: 0;
+}
+
+.chat-agent > :last-child {
+  margin-bottom: 0;
+}
+
+.chat-agent p,
+.chat-agent ul,
+.chat-agent ol,
+.chat-agent blockquote,
+.chat-agent pre,
+.chat-agent table {
+  margin: 0 0 7px;
+}
+
+.chat-agent ul,
+.chat-agent ol {
+  padding-left: 20px;
+}
+
+.chat-agent li {
+  margin: 2px 0;
+}
+
+.chat-agent a {
+  color: var(--oa-focus);
+  text-decoration: none;
+}
+
+.chat-agent a:hover {
+  text-decoration: underline;
+}
+
+.agent-markdown-image-link {
+  width: min(320px, 100%);
+  border: 1px solid var(--oa-border);
+  border-radius: var(--oa-radius-md);
+  background: color-mix(in oklch, var(--oa-panel) 88%, var(--oa-bg));
+  color: var(--oa-muted);
+  display: inline-grid;
+  gap: 5px;
+  padding: 6px;
+  vertical-align: top;
+}
+
+.agent-markdown-image-link img {
+  width: 100%;
+  max-height: 220px;
+  border-radius: var(--oa-radius-sm);
+  display: block;
+  object-fit: contain;
+}
+
+.agent-markdown-image-link span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-agent strong {
+  color: var(--oa-text);
+  font-weight: 600;
+}
+
+.chat-agent code {
+  border-radius: var(--oa-radius-sm);
+  background: color-mix(in oklch, var(--oa-panel) 82%, var(--oa-bg));
+  color: var(--oa-text);
+  font-family: var(--oa-mono-font);
+  font-size: 0.94em;
+  padding: 1px 4px;
+}
+
+.chat-agent :not(pre) > code {
+  overflow-wrap: anywhere;
+}
+
+.chat-agent pre {
+  max-width: 100%;
+  overflow: auto;
+  border-radius: var(--oa-radius-sm);
+  background: color-mix(in oklch, var(--oa-panel) 82%, var(--oa-bg));
+  padding: 8px 9px;
+}
+
+.chat-agent pre code {
+  background: transparent;
+  padding: 0;
+}
+
+.chat-agent blockquote {
+  border-left: 1px solid var(--oa-border);
+  color: var(--oa-muted);
+  padding-left: 10px;
+}
+
+.chat-agent table {
+  width: 100%;
+  max-width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.chat-agent th,
+.chat-agent td {
+  border: 1px solid var(--oa-border);
+  padding: 4px 7px;
+  text-align: left;
+  overflow-wrap: anywhere;
+}
+
+.chat-agent th {
+  background: color-mix(in oklch, var(--oa-panel) 86%, var(--oa-bg));
+  font-weight: 600;
+}
+
+.chat-user-block {
+  max-width: min(70ch, 82%);
+  align-self: flex-end;
+  margin-block: 4px;
+  display: grid;
+  gap: 0;
+  justify-items: end;
+}
+
+.chat-user {
+  max-width: 100%;
+  border: 0;
+  border-radius: 10px;
+  background: color-mix(in oklch, var(--oa-focus) 14%, var(--oa-bg));
+  box-shadow: none;
+  padding: 8px 11px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.chat-user-rich-text {
+  display: grid;
+  gap: 6px;
+}
+
+.chat-user-rich-text p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.chat-user-rich-text:has(> .chat-user-image-link:only-child) {
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.slash-command-token {
+  border: 1px solid color-mix(in oklch, var(--oa-focus) 24%, var(--oa-border));
+  border-radius: var(--oa-radius-sm);
+  background: color-mix(in oklch, var(--oa-focus) 10%, transparent);
+  color: var(--oa-text);
+  font-family: var(--vscode-editor-font-family, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-size: 0.94em;
+  padding: 0 3px;
+  white-space: nowrap;
+}
+
+.chat-user-image-link {
+  width: min(320px, 100%);
+  border: 1px solid color-mix(in oklch, var(--oa-focus) 28%, var(--oa-border));
+  border-radius: var(--oa-radius-md);
+  background: color-mix(in oklch, var(--oa-panel) 76%, var(--oa-bg));
+  color: var(--oa-muted);
+  cursor: pointer;
+  display: inline-grid;
+  justify-self: end;
+  padding: 4px;
+}
+
+.chat-user-image-link img {
+  width: 100%;
+  max-height: 220px;
+  border-radius: var(--oa-radius-sm);
+  display: block;
+  object-fit: contain;
+}
+
+.chat-user-image-link:hover {
+  border-color: color-mix(in oklch, var(--oa-focus) 52%, var(--oa-border));
+}
+
+.chat-user-image-link:focus-visible {
+  outline: 1px solid var(--oa-focus);
+  outline-offset: 2px;
+}
+
+.chat-message-actions {
+  min-height: 16px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 120ms ease-out;
+}
+
+.chat-message-actions.end {
+  justify-self: end;
+}
+
+.chat-agent-block:hover .chat-message-actions,
+.chat-agent-block:focus-within .chat-message-actions,
+.chat-user-block:hover .chat-message-actions,
+.chat-user-block:focus-within .chat-message-actions {
+  opacity: 1;
+}
+
+.chat-message-action {
+  width: 20px;
+  min-height: 16px;
+  border: 0;
+  border-radius: var(--oa-radius-sm);
+  background: transparent;
+  color: var(--oa-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.chat-message-action:hover {
+  background: var(--oa-raised);
+  color: var(--oa-text);
+}
+
+.chat-message-action:focus-visible {
+  outline: 1px solid var(--oa-focus);
+  outline-offset: 1px;
+}
+
+.chat-system {
+  color: var(--oa-muted);
+}
+
+.recovery-banner {
+  width: fit-content;
+  max-width: min(760px, 100%);
+  border-radius: var(--oa-radius-sm);
+  background: transparent;
+  color: color-mix(in oklch, var(--oa-warning) 64%, var(--oa-text));
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 4px;
+  font-family: var(--oa-chat-font);
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+.recovery-banner::before {
+  content: "Status";
+  color: var(--oa-muted);
+  font-size: 11px;
+}
+
+.recovery-banner span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.chat-thought-block {
+  width: 100%;
+  color: var(--oa-muted);
+  display: grid;
+  gap: 3px;
+}
+
+.message-list > .activity-group {
+  margin-block-end: 4px;
+}

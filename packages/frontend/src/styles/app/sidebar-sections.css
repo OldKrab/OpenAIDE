@@ -1,0 +1,239 @@
+.task-section-head {
+  min-height: 26px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--oa-muted);
+  padding: 2px 4px 0;
+}
+
+.task-section-title {
+  color: var(--oa-text);
+  font-size: 14px;
+  font-weight: 680;
+  line-height: 1.2;
+}
+
+.task-section-tools {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.task-section-refresh {
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: var(--oa-radius-sm);
+  background: transparent;
+  color: var(--oa-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.task-section-refresh:hover:not(:disabled),
+.task-section-refresh:focus-visible {
+  background: var(--oa-raised);
+  color: var(--oa-text);
+}
+
+.task-section-refresh:disabled {
+  opacity: 0.5;
+}
+
+.task-mode-tabs {
+  min-width: 0;
+  border-bottom: 1px solid color-mix(in oklch, var(--oa-border) 48%, transparent);
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin: 2px 4px 8px;
+  padding: 0 0 4px;
+  align-self: start;
+}
+
+.task-mode-tabs button {
+  position: relative;
+  min-width: 0;
+  min-height: 24px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--oa-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 5px;
+  font-size: 12px;
+}
+
+.task-mode-tabs button:hover,
+.task-mode-tabs button:focus-visible {
+  background: var(--oa-raised);
+  color: var(--oa-text);
+}
+
+.task-mode-tabs button.active {
+  background: transparent;
+  color: var(--oa-text);
+  font-weight: 560;
+}
+
+.task-mode-tabs button.active::after {
+  content: "";
+  position: absolute;
+  right: 8px;
+  bottom: -5px;
+  left: 8px;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--oa-focus);
+}
+
+.task-section-head small {
+  margin-left: 2px;
+  color: var(--oa-muted);
+  font-size: 12px;
+  font-weight: 400;
+  white-space: nowrap;
+}
+
+.task-list {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  align-content: start;
+  gap: 1px;
+  overflow: auto;
+  scrollbar-gutter: stable;
+  padding-right: 10px;
+  padding-bottom: 24px;
+  scroll-padding-bottom: 24px;
+}
+
+body[data-shell="web"] .task-list {
+  margin-right: -8px;
+  padding-right: 4px;
+}
+
+.project-task-group {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  padding: 6px 0;
+}
+
+.project-task-group-header {
+  min-width: 0;
+  height: 24px;
+  margin-bottom: 4px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+  gap: 2px;
+}
+
+.project-task-group-toggle {
+  height: 24px;
+  border: 0;
+  border-radius: var(--oa-radius-sm);
+  background: transparent;
+  color: var(--oa-text);
+  display: flex;
+  align-items: center;
+}
+
+.project-task-group-toggle {
+  min-width: 0;
+  gap: 5px;
+  padding: 0 7px;
+  font-size: 12px;
+  font-weight: 560;
+  text-align: left;
+}
+
+.project-task-group-toggle:hover,
+.project-task-group-toggle:focus-visible {
+  background: var(--oa-raised);
+  color: var(--oa-text);
+}
+
+.project-task-group-toggle span {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+
+.project-task-group-toggle strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--oa-text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.project-task-group-counts {
+  min-width: 0;
+  font-size: 11px;
+  color: var(--oa-muted);
+  font-weight: 400;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-task-more {
+  min-height: 30px;
+  border: 0;
+  border-radius: var(--oa-radius-sm);
+  background: transparent;
+  color: var(--oa-muted);
+  justify-self: stretch;
+  margin: 6px 4px 0 26px;
+  padding: 4px 8px;
+  text-align: left;
+}
+
+.project-task-more:hover {
+  background: var(--oa-raised);
+  color: var(--oa-text);
+}
+
+.empty-list {
+  color: var(--oa-muted);
+  margin: 8px;
+}
+
+.search-context-note {
+  border-left: 2px solid color-mix(in oklch, var(--oa-focus) 45%, var(--oa-border));
+  color: color-mix(in oklch, var(--oa-muted) 86%, var(--oa-text));
+  font-size: 12px;
+  line-height: 1.35;
+  margin: 7px 8px 5px;
+  padding: 2px 0 2px 8px;
+}
+
+.task-row {
+  position: relative;
+  min-width: 0;
+  min-height: 32px;
+  border: 0;
+  border-radius: var(--oa-radius-sm);
+  background: transparent;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: stretch;
+  margin-right: 0;
+  overflow: visible;
+}
+
+.task-row.selected {
+  background: color-mix(in oklch, var(--oa-selected) 36%, transparent);
+  box-shadow: none;
+}

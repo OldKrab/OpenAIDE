@@ -1,0 +1,155 @@
+{
+  "name": "openaide-vscode-extension",
+  "displayName": "OpenAIDE",
+  "version": "0.1.0",
+  "license": "AGPL-3.0-only",
+  "private": true,
+  "type": "commonjs",
+  "main": "./dist/extension.js",
+  "engines": {
+    "vscode": "^1.100.0"
+  },
+  "activationEvents": [
+    "onView:openaide.tasks",
+    "onCommand:openaide.newTask",
+    "onCommand:openaide.openSettings",
+    "onCommand:openaide.exportDiagnostics",
+    "onCommand:openaide.recoverStuckSessions"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "openaide.newTask",
+        "title": "OpenAIDE: New Task"
+      },
+      {
+        "command": "openaide.openSettings",
+        "title": "OpenAIDE: Open Settings"
+      },
+      {
+        "command": "openaide.exportDiagnostics",
+        "title": "OpenAIDE: Export Support Diagnostics"
+      },
+      {
+        "command": "openaide.recoverStuckSessions",
+        "title": "OpenAIDE: Recover Stuck Sessions"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "openaide",
+          "title": "OpenAIDE",
+          "icon": "media/openaide.svg"
+        }
+      ]
+    },
+    "views": {
+      "openaide": [
+        {
+          "id": "openaide.tasks",
+          "name": "Tasks",
+          "type": "webview"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "OpenAIDE",
+      "properties": {
+        "openaide.appServer.path": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the OpenAIDE App Server binary."
+        },
+        "openaide.storage.root": {
+          "type": "string",
+          "default": "",
+          "description": "Optional storage root for OpenAIDE task data."
+        },
+        "openaide.agents": {
+          "type": "array",
+          "default": [],
+          "description": "Custom ACP stdio Agents available to OpenAIDE.",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "command"
+            ],
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9_.-]+$",
+                "description": "Stable Agent id."
+              },
+              "source_kind": {
+                "type": "string",
+                "enum": [
+                  "built_in",
+                  "custom"
+                ],
+                "default": "custom"
+              },
+              "label": {
+                "type": "string",
+                "description": "Display name for the Agent."
+              },
+              "description": {
+                "type": "string",
+                "description": "Short Settings description."
+              },
+              "enabled": {
+                "type": "boolean",
+                "default": true
+              },
+              "command": {
+                "type": "string",
+                "description": "ACP stdio command to launch."
+              },
+              "command_line": {
+                "type": "string",
+                "description": "Original command line shown in OpenAIDE Settings."
+              },
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              },
+              "env": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "default": {}
+              },
+              "secret_env": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+                },
+                "default": []
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@openaide/app-server-client": "0.1.0",
+    "@openaide/app-shell-contracts": "0.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.0",
+    "@types/vscode": "^1.100.0",
+    "typescript": "^5.9.3"
+  }
+}

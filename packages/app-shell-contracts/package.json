@@ -1,0 +1,17 @@
+{
+  "name": "@openaide/app-shell-contracts",
+  "version": "0.1.0",
+  "license": "AGPL-3.0-only",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "node -e \"require('node:fs').rmSync('dist', { recursive: true, force: true })\" && tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run check"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
+  }
+}

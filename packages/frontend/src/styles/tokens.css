@@ -1,0 +1,22 @@
+:root {
+  color-scheme: light dark;
+  --oa-bg: var(--vscode-editor-background, #1f1f1f);
+  --oa-panel: var(--vscode-sideBar-background, #252526);
+  --oa-raised: var(--vscode-list-hoverBackground, #2a2d2e);
+  --oa-selected: var(--vscode-list-activeSelectionBackground, #37373d);
+  --oa-text: var(--vscode-foreground, #cccccc);
+  --oa-muted: var(--vscode-descriptionForeground, #9da1a6);
+  --oa-border: var(--vscode-widget-border, #3c3c3c);
+  --oa-focus: var(--vscode-focusBorder, #4d9cff);
+  --oa-warning: var(--vscode-problemsWarningIcon-foreground, #d7ba7d);
+  --oa-danger: var(--vscode-errorForeground, #f48771);
+  --oa-success: var(--vscode-testing-iconPassed, #89d185);
+  --oa-radius-sm: 4px;
+  --oa-radius-md: 6px;
+  --oa-radius-lg: 8px;
+  --oa-ui-font: "Inter Variable", system-ui, sans-serif;
+  --oa-chat-font: var(--oa-ui-font);
+  --oa-mono-font: var(--vscode-editor-font-family, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
+  font-family: var(--oa-ui-font);
+  font-size: calc(var(--vscode-font-size, 13px) + 1px);
+}

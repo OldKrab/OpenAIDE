@@ -1,0 +1,318 @@
+import { useCallback, useEffect, useState } from "react";
+import type { Dispatch } from "react";
+import type { AppPreferencesRecord, ConfigOptionsCatalog, ElicitationResponse, PermissionDecision, TaskSnapshot, TaskSummary } from "@openaide/app-shell-contracts";
+import type { AppAction } from "../state/appReducer";
+import { renderedChat } from "../state/chatPaging";
+import type { AppState, TaskComposerInput } from "../state/store";
+import { ChatRow } from "./ChatMessageView";
+import { Composer } from "./Composer";
+import { TaskHeader } from "./TaskHeader";
+import {
+  chatFollowModeForPosition,
+  chatItemsThroughPresentationBarrier,
+  initialTaskScrollTop,
+  scrollTopAfterPrependedContent,
+  scrollTopForGeneratedContent,
+  presentationNeedsImmediateFlush,
+  taskComposerAvailability,
+} from "./TaskViewModel";
+import { taskWorkingStatusLabel, workspaceLabel } from "./taskSurfaceHelpers";
+import type { TaskFileBrowserCallbacks } from "./appControllerCallbackTypes";
+import {
+  chatItemsWithAppServerPermissions,
+  chatItemsWithAppServerQuestions,
+  chatItemsWithPendingInput,
+  permissionResponseForMessage,
+  questionResponseForMessage,
+  taskChatHasLiveUpdates,
+} from "./taskChatPresentation";
+import { useTaskChatScroll } from "./useTaskChatScroll";
+import { appServerAttachmentHandles } from "../state/composerOptions";
+
+export {
+  chatFollowModeForPosition,
+  chatItemsThroughPresentationBarrier,
+  initialTaskScrollTop,
+  scrollTopAfterPrependedContent,
+  scrollTopForGeneratedContent,
+  taskComposerAvailability,
+} from "./TaskViewModel";
+export {
+  chatItemsWithAppServerPermissions,
+  chatItemsWithAppServerQuestions,
+  chatItemsWithPendingInput,
+  permissionResponseForMessage,
+  questionResponseForMessage,
+} from "./taskChatPresentation";
+
+export function TaskLoadingView({ error }: { error?: string }) {
+  return (
+    <section className="task-surface task-loading" aria-label="Opening task">
+      <div className="task-loading-status" role="status" aria-live="polite">
+        <span className="working-status-dots" aria-hidden="true">
+          <span />
+          <span />
+          <span />
+        </span>
+        <span>Opening task</span>
+      </div>
+      {error ? <p className="inline-error">{error}</p> : null}
+    </section>
+  );
+}
+
+export function TaskView({
+  activeTask,
+  appServerPermissionRequests,
+  appServerQuestionRequests = {},
+  archived = false,
+  backendReady,
+  chatPageState,
+  dispatch,
+  onCancel,
+  fileBrowser,
+  onLoadChatPage,
+  onLoadToolDetail,
+  onPermissionRespond,
+  onQuestionRespond,
+  onRevealAttachment,
+  onRemoveAttachment,
+  onRestoreTask,
+  onSendPrompt,
+  onSelectConfigOption,
+  permissionResponses,
+  questionResponses = {},
+  startupConfigOptions,
+  snapshot,
+  savedScrollTop,
+  taskInput,
+  toolDetails,
+  submitShortcut,
+}: {
+  activeTask?: TaskSummary;
+  appServerPermissionRequests: AppState["appServerPermissionRequests"];
+  appServerQuestionRequests?: AppState["appServerQuestionRequests"];
+  archived?: boolean;
+  backendReady: boolean;
+  chatPageState: AppState["chatPages"][string] | undefined;
+  dispatch: Dispatch<AppAction>;
+  onCancel: () => void;
+  fileBrowser?: TaskFileBrowserCallbacks;
+  onLoadChatPage: (beforeCursor: string) => void;
+  onLoadToolDetail: (artifactId: string) => void;
+  onPermissionRespond: (
+    requestId: string,
+    optionId: string,
+    decision: PermissionDecision,
+    source?: "agent" | "appServer",
+  ) => void;
+  onQuestionRespond?: (requestId: string, response: ElicitationResponse) => void;
+  onRevealAttachment: (attachmentId: string) => Promise<void> | void;
+  onRemoveAttachment: (attachmentId: string) => void;
+  onRestoreTask?: (taskId: string) => void;
+  onSendPrompt: (prompt?: string) => void;
+  onSelectConfigOption: (configId: string, value: string) => void;
+  permissionResponses: AppState["permissionResponses"];
+  questionResponses?: AppState["questionResponses"];
+  startupConfigOptions?: ConfigOptionsCatalog;
+  snapshot: TaskSnapshot;
+  savedScrollTop?: number;
+  taskInput: TaskComposerInput;
+  toolDetails: AppState["toolDetails"];
+  submitShortcut: AppPreferencesRecord["composer_submit_shortcut"];
+}) {
+  const inputPending = taskInput.pending !== undefined;
+  const chat = renderedChat(snapshot, chatPageState);
+  const chatItems = chatItemsWithAppServerQuestions(
+    chatItemsWithAppServerPermissions(
+      chatItemsWithPendingInput(chat.items, taskInput, snapshot.task.task_id),
+      appServerPermissionRequests,
+      snapshot.task.task_id,
+    ),
+    appServerQuestionRequests,
+    snapshot.task.task_id,
+  );
+  const [presentingMessageIds, setPresentingMessageIds] = useState<Set<string>>(() => new Set());
+  const onPresentationStateChange = useCallback((messageId: string, presenting: boolean) => {
+    setPresentingMessageIds((current) => {
+      if (current.has(messageId) === presenting) return current;
+      const next = new Set(current);
+      if (presenting) next.add(messageId);
+      else next.delete(messageId);
+      return next;
+    });
+  }, []);
+  useEffect(() => setPresentingMessageIds(new Set()), [snapshot.task.task_id]);
+  const presentedChatItems = chatItemsThroughPresentationBarrier(chatItems, presentingMessageIds);
+  const forcePresentationImmediate = presentationNeedsImmediateFlush(chatItems, presentingMessageIds);
+  const preparationBlocked = chatItems.some((item) => item.message_id === "app-server-preparation");
+  const turnBusy = snapshot.task.status === "active";
+  const composerAvailability = taskComposerAvailability({
+    archived,
+    backendReady,
+    inputPending,
+    preparationBlocked,
+    taskStatus: snapshot.task.status,
+  });
+  const composerDisabled = composerAvailability.editingDisabled;
+  const attachmentsSendable = taskInput.context.length === 0
+    || appServerAttachmentHandles(taskInput.context) !== undefined;
+  const canSend = !composerAvailability.sendDisabled && attachmentsSendable;
+  const workingLabel = taskWorkingStatusLabel(chatItems, snapshot.task.status, inputPending);
+  const taskSelection = {
+    agentId: snapshot.task.agent_id,
+    agentLabel: activeTask?.agent_name ?? snapshot.task.agent_name,
+    isolation: snapshot.settings_summary.isolation,
+    configOptions: snapshot.settings_summary.config_options ?? {},
+    workspaceRoot: snapshot.task.workspace_root,
+    workspaceLabel: workspaceLabel(snapshot.task.workspace_root),
+  };
+  const recordTaskScroll = useCallback((scrollTop: number) => {
+    dispatch({ type: "taskScroll:record", taskId: snapshot.task.task_id, scrollTop });
+  }, [dispatch, snapshot.task.task_id]);
+  const chatScroll = useTaskChatScroll({
+    generating: taskChatHasLiveUpdates({
+      inputPending,
+      presentationPending: presentingMessageIds.size > 0,
+      taskStatus: snapshot.task.status,
+    }),
+    itemCount: chat.items.length,
+    onScrollTop: recordTaskScroll,
+    pendingPrepend: chat.pending,
+    savedScrollTop,
+    taskId: snapshot.task.task_id,
+  });
+
+  const submit = (prompt: string) => {
+    if (!canSend) return;
+    chatScroll.jumpToLatest();
+    onSendPrompt(prompt);
+  };
+
+  return (
+    <section className="task-surface" aria-label="Task chat">
+      <TaskHeader
+        agentId={snapshot.task.agent_id}
+        agentName={activeTask?.agent_name ?? snapshot.task.agent_name}
+        status={snapshot.task.status}
+        title={activeTask?.title ?? snapshot.task.title}
+        workspaceRoot={snapshot.task.workspace_root}
+      />
+      <div className="chat-column">
+        <div className="message-list-shell">
+          <div
+            className="message-list"
+            onPointerCancel={chatScroll.onPointerCancel}
+            onPointerDown={chatScroll.onPointerDown}
+            onPointerUp={chatScroll.onPointerUp}
+            onScroll={chatScroll.onScroll}
+            onWheel={chatScroll.onWheel}
+            ref={chatScroll.messageListRef}
+          >
+          {archived ? (
+            <div className="archived-task-notice" role="status">
+              <span>Archived task. Restore it to send a follow-up.</span>
+              {onRestoreTask ? (
+                <button type="button" onClick={() => onRestoreTask(snapshot.task.task_id)}>
+                  Restore
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+          {chat.hasBefore ? (
+            <div className="load-earlier-row">
+              <button
+                disabled={chat.pending || !chat.beforeCursor}
+                onClick={() => {
+                  if (!chat.beforeCursor || chat.pending) return;
+                  chatScroll.capturePrependAnchor();
+                  onLoadChatPage(chat.beforeCursor);
+                }}
+                type="button"
+              >
+                {chat.pending ? "Loading earlier" : "Load earlier"}
+              </button>
+            </div>
+          ) : null}
+          {chat.error ? <p className="chat-system">{chat.error}</p> : null}
+          {presentedChatItems.map((message) => (
+            <ChatRow
+              forcePresentationImmediate={forcePresentationImmediate}
+              key={message.message_id}
+              message={message}
+              onPresentationStateChange={onPresentationStateChange}
+              taskId={snapshot.task.task_id}
+              toolDetails={toolDetails}
+              onLoadToolDetail={onLoadToolDetail}
+              permissionResponse={permissionResponseForMessage(message.message, permissionResponses)}
+              onPermissionRespond={onPermissionRespond}
+              onQuestionRespond={onQuestionRespond}
+              questionResponse={questionResponseForMessage(message.message, questionResponses)}
+              commandCatalog={snapshot.agent_commands}
+            />
+          ))}
+            {workingLabel ? <WorkingStatus label={workingLabel} /> : null}
+          </div>
+          {chatScroll.showJumpToLatest ? (
+            <button
+              className="jump-to-latest"
+              onClick={chatScroll.jumpToLatest}
+              type="button"
+            >
+              Jump to latest
+            </button>
+          ) : null}
+        </div>
+        <Composer
+          agentLocked
+          attachments={taskInput.context}
+          autoFocus
+          configOptions={startupConfigOptions ?? snapshot.agent_config}
+          commandCatalog={snapshot.agent_commands}
+          disabled={composerDisabled}
+          error={taskInput.error}
+          fileBrowser={fileBrowser}
+          focusRequestKey={snapshot.task.task_id}
+          onCancel={
+            turnBusy || inputPending
+              ? onCancel
+              : undefined
+          }
+          onChange={(prompt) => dispatch({ type: "taskInput:prompt", taskId: snapshot.task.task_id, prompt })}
+          onUnsupportedImageAttachment={(message) =>
+            dispatch({
+              type: "taskInput:error",
+              taskId: snapshot.task.task_id,
+              message: message ?? "Unable to attach image.",
+            })
+          }
+          onRevealAttachment={onRevealAttachment}
+          onRemoveAttachment={onRemoveAttachment}
+          onSelectConfigOption={onSelectConfigOption}
+          onSubmit={submit}
+          placeholder={composerAvailability.placeholder}
+          prompt={taskInput.prompt}
+          selection={taskSelection}
+          submitShortcut={submitShortcut}
+          submitDisabled={!canSend}
+          submitRequiresText={!snapshot.send_capability.attachment_only}
+          showAgentSelector={false}
+          showIsolationSelector={false}
+        />
+      </div>
+    </section>
+  );
+}
+
+function WorkingStatus({ label }: { label: string }) {
+  return (
+    <div className="working-status" role="status" aria-live="polite">
+      <span className="working-status-dots" aria-hidden="true">
+        <span />
+        <span />
+        <span />
+      </span>
+      <span>{label}</span>
+    </div>
+  );
+}

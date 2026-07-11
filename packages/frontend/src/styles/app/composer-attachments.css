@@ -1,0 +1,210 @@
+.composer-attachments {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.composer-image-grid,
+.composer-file-attachments {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.composer-image-attachment {
+  min-width: 0;
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--oa-border);
+  border-radius: var(--oa-radius-md);
+  background: color-mix(in oklch, var(--oa-panel) 72%, var(--oa-bg));
+}
+
+.composer-image-grid[data-layout="single"] .composer-image-attachment {
+  width: min(144px, 100%);
+  height: 104px;
+}
+
+.composer-image-grid[data-layout="pair"] .composer-image-attachment {
+  width: 104px;
+  height: 80px;
+}
+
+.composer-image-grid[data-layout="many"] .composer-image-attachment {
+  width: 76px;
+  height: 64px;
+}
+
+.composer-image-open {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  display: block;
+  padding: 0;
+}
+
+.composer-image-preview {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
+}
+
+.composer-image-remove {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 26px;
+  height: 26px;
+  border: 1px solid color-mix(in oklch, var(--oa-border) 82%, transparent);
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--oa-panel) 88%, transparent);
+  color: var(--oa-text);
+  display: grid;
+  place-items: center;
+  padding: 0;
+}
+
+.composer-image-remove:hover:not(:disabled) {
+  background: var(--oa-panel);
+}
+
+.composer-image-remove:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.composer-image-open:focus-visible,
+.composer-image-remove:focus-visible {
+  outline: 1px solid var(--oa-focus);
+  outline-offset: -2px;
+}
+
+.composer-file-browser-empty {
+  color: var(--oa-muted);
+  font-size: 12px;
+  padding: 7px 9px;
+}
+
+.context-token {
+  min-width: 0;
+  max-width: 100%;
+  min-height: 22px;
+  border-radius: var(--oa-radius-sm);
+  background: var(--oa-raised);
+  color: var(--oa-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 4px 2px 7px;
+}
+
+.context-token-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-token-status {
+  min-width: 0;
+  max-width: min(22ch, 42vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: color-mix(in oklch, var(--oa-muted) 78%, var(--oa-text));
+  font-size: 11px;
+}
+
+.context-token-status.error {
+  color: var(--oa-danger);
+}
+
+.context-token button {
+  width: 18px;
+  height: 18px;
+  border: 0;
+  border-radius: var(--oa-radius-sm);
+  background: transparent;
+  color: var(--oa-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.context-token button:hover {
+  background: color-mix(in oklch, var(--oa-text) 8%, transparent);
+  color: var(--oa-text);
+}
+
+.context-token button:focus-visible {
+  outline: 1px solid var(--oa-focus);
+  outline-offset: 1px;
+}
+
+.attachment-preview-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  background: color-mix(in oklch, var(--oa-bg) 74%, transparent);
+  padding: 24px;
+}
+
+.attachment-preview-lightbox {
+  position: relative;
+  min-width: 0;
+  max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 48px);
+  outline: none;
+}
+
+.attachment-preview-close {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  width: 40px;
+  height: 40px;
+  z-index: 1;
+  border: 1px solid var(--oa-border);
+  border-radius: var(--oa-radius-sm);
+  background: var(--oa-panel);
+  color: var(--oa-text);
+  display: grid;
+  place-items: center;
+  padding: 0;
+}
+
+.attachment-preview-close:hover {
+  background: var(--oa-raised);
+}
+
+.attachment-preview-close:focus-visible {
+  outline: 1px solid var(--oa-focus);
+  outline-offset: 2px;
+}
+
+.attachment-preview-stage {
+  min-width: 0;
+  min-height: 0;
+  max-width: inherit;
+  max-height: inherit;
+  display: grid;
+  place-items: center;
+}
+
+.attachment-preview-stage img {
+  border: 1px solid var(--oa-border);
+  border-radius: var(--oa-radius-sm);
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 48px);
+  object-fit: contain;
+}

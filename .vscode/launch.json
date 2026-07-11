@@ -1,0 +1,17 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "OpenAIDE: Extension Host",
+      "type": "extensionHost",
+      "request": "launch",
+      "preLaunchTask": "OpenAIDE: build backend and frontend",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}/apps/vscode-extension"
+      ],
+      "outFiles": [
+        "${workspaceFolder}/apps/vscode-extension/dist/**/*.js"
+      ]
+    }
+  ]
+}

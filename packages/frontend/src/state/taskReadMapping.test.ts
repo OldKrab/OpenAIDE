@@ -1,0 +1,19 @@
+import { describe, expect, it } from "vitest";
+import { mapProtocolToolDetail } from "./taskReadMapping";
+
+describe("task read mapping", () => {
+  it("preserves individual web-search queries from lazy tool details", () => {
+    const details = mapProtocolToolDetail({
+      locations: [],
+      content: [],
+      input: {
+        command: [],
+        query: "combined query ...",
+        queries: ["English weather query", "Русский запрос погоды"],
+        fields: [{ name: "type", value: "webSearch" }],
+      },
+    });
+
+    expect(details.input?.queries).toEqual(["English weather query", "Русский запрос погоды"]);
+  });
+});

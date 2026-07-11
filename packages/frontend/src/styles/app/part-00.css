@@ -1,0 +1,214 @@
+* {
+  box-sizing: border-box;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklch, var(--oa-muted) 42%, transparent) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--oa-muted) 42%, transparent);
+  background-clip: content-box;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in oklch, var(--oa-muted) 62%, transparent);
+  background-clip: content-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background: var(--oa-bg);
+  color: var(--oa-text);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+body[data-shell="web"] {
+  --oa-bg: oklch(98.3% 0.004 255);
+  --oa-panel: oklch(95.8% 0.006 255);
+  --oa-raised: oklch(92.8% 0.009 255);
+  --oa-selected: oklch(91.5% 0.026 252);
+  --oa-text: oklch(24% 0.012 255);
+  --oa-muted: oklch(55% 0.015 255);
+  --oa-border: oklch(87% 0.008 255);
+  --oa-focus: oklch(58% 0.13 252);
+  --oa-warning: oklch(70% 0.12 75);
+  --oa-danger: oklch(58% 0.16 28);
+  --oa-success: oklch(58% 0.12 148);
+  background: var(--oa-bg);
+}
+
+button,
+textarea,
+input {
+  font: inherit;
+}
+
+button {
+  color: var(--oa-text);
+}
+
+.app-shell {
+  min-width: 0;
+  height: 100vh;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: 304px minmax(0, 1fr);
+  background: var(--oa-bg);
+}
+
+.app-shell.navigation-shell,
+.app-shell.editor-shell {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.navigation-shell .sidebar {
+  border-right: 0;
+}
+
+.web-workbench-shell {
+  grid-template-columns: 304px minmax(0, 1fr);
+  background:
+    linear-gradient(90deg, transparent 0, transparent 303px, color-mix(in oklch, var(--oa-border) 70%, transparent) 303px, transparent 305px),
+    var(--oa-bg);
+}
+
+.web-workbench-shell .sidebar {
+  grid-column: 1;
+  grid-row: 1;
+}
+
+.web-main-surface {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+  min-height: 0;
+  box-shadow: inset 16px 0 28px -32px color-mix(in oklch, var(--oa-text) 38%, transparent);
+}
+
+.web-main-surface .task-surface {
+  background: transparent;
+}
+
+.sidebar {
+  min-width: 0;
+  min-height: 0;
+  height: 100vh;
+  border-right: 1px solid var(--oa-border);
+  background: var(--oa-panel);
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+  overflow: hidden;
+  padding: 8px 4px;
+}
+
+body[data-shell="web"] .sidebar {
+  border-right: 1px solid color-mix(in oklch, var(--oa-border) 82%, transparent);
+  background:
+    linear-gradient(180deg, color-mix(in oklch, var(--oa-panel) 96%, white), var(--oa-panel));
+  padding: 12px 8px;
+}
+
+.archive-sidebar {
+  background: color-mix(in oklch, var(--oa-warning) 3%, var(--oa-panel));
+}
+
+.archive-sidebar .sidebar-actions button:hover,
+.archive-sidebar .sidebar-search:focus-within,
+.archive-sidebar .settings-button:hover,
+.archive-sidebar .task-row:hover,
+.archive-sidebar .task-row:has(:focus-visible) {
+  background: color-mix(in oklch, var(--oa-warning) 7%, var(--oa-raised));
+}
+
+.sidebar-actions {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.sidebar-actions button,
+.sidebar-search,
+.settings-button {
+  min-height: 28px;
+  border: 0;
+  border-radius: var(--oa-radius-sm);
+  background: transparent;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 4px 6px;
+  text-align: left;
+}
+
+.sidebar-actions > button {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--oa-text);
+  font-weight: 560;
+}
+
+.sidebar-actions button:hover,
+.sidebar-search:focus-within,
+.settings-button:hover,
+.task-row:hover,
+.task-row:has(:focus-visible) {
+  background: var(--oa-raised);
+}
+
+.sidebar-search:focus-within {
+  border-color: color-mix(in oklch, var(--oa-focus) 64%, var(--oa-border));
+  outline: 0;
+}
+
+.sidebar-search {
+  border: 1px solid transparent;
+  background: color-mix(in oklch, var(--oa-raised) 18%, transparent);
+  color: var(--oa-text);
+}
+
+.sidebar-search input {
+  min-width: 0;
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--oa-text);
+  padding: 0;
+}
+
+.sidebar-search input::placeholder {
+  color: var(--oa-muted);
+}
+
+.sidebar-footer {
+  min-width: 0;
+  border-top: 1px solid color-mix(in oklch, var(--oa-border) 64%, transparent);
+  margin-top: 6px;
+  padding-top: 6px;
+}
+
+.settings-button {
+  width: 100%;
+}
+
+.settings-button.selected {
+  background: var(--oa-selected);
+  color: var(--oa-text);
+}

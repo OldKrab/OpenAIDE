@@ -1,0 +1,122 @@
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ActivityStatus {
+    Running,
+    Completed,
+    Error,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ActivityStep {
+    Text {
+        text: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        level: Option<String>,
+    },
+    Tool {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        tool_call_id: Option<String>,
+        name: String,
+        status: ActivityStatus,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        input_summary: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        output_preview: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        detail_artifact_id: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        details: Option<Box<ActivityToolDetails>>,
+    },
+    Command {
+        command_label: String,
+        status: ActivityStatus,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        exit_code: Option<i32>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        output_preview: Option<String>,
+    },
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ActivityToolDetails {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub locations: Vec<ActivityToolLocation>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub content: Vec<ActivityToolContent>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub input: Option<ActivityToolInput>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub output: Option<ActivityToolOutput>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ActivityToolLocation {
+    pub path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line: Option<u32>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ActivityToolContent {
+    Text {
+        text: String,
+    },
+    Diff {
+        path: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        old_text: Option<String>,
+        new_text: String,
+    },
+    Terminal {
+        terminal_id: String,
+    },
+    Other {
+        label: String,
+    },
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ActivityToolInput {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub command: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub query: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub queries: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub path: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fields: Vec<ActivityToolField>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ActivityToolOutput {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stdout: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stderr: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub formatted_output: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub aggregated_output: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exit_code: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub success: Option<bool>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fields: Vec<ActivityToolField>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ActivityToolField {
+    pub name: String,
+    pub value: String,
+}

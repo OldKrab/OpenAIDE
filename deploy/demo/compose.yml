@@ -1,0 +1,46 @@
+services:
+  openaide-demo:
+    build:
+      context: ../..
+      dockerfile: deploy/demo/Dockerfile
+    container_name: openaide-demo
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      OPENAIDE_WEB_HOST: 127.0.0.1
+      OPENAIDE_WEB_PORT: 5484
+      OPENAIDE_WEB_VITE_PORT: 5483
+      OPENAIDE_WEB_ALLOWED_HOSTS: ${OPENAIDE_WEB_ALLOWED_HOSTS:-localhost,127.0.0.1}
+      OPENAIDE_WEB_AUTH_REALM: OpenAIDE demo
+      OPENAIDE_WEB_USERNAME: demo
+      OPENAIDE_WEB_PASSWORD: ${OPENAIDE_WEB_PASSWORD:?set OPENAIDE_WEB_PASSWORD}
+      OPENAIDE_STORAGE_ROOT: /var/lib/openaide/state
+      OPENAIDE_RUNTIME_ROOT: /var/lib/openaide/runtime
+      OPENAIDE_PROJECT_ROOTS: /workspace
+      OPENAIDE_WEB_PROJECT_ROOTS: /workspace
+      CODEX_HOME: /home/node/.codex
+      OPENAIDE_WEB_STATIC_ROOT: /app/packages/frontend/dist
+    volumes:
+      - openaide-demo-state:/var/lib/openaide/state
+      - openaide-demo-runtime:/var/lib/openaide/runtime
+      - openaide-demo-codex:/home/node/.codex
+      - openaide-demo-workspace:/workspace
+    read_only: true
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+      - /home/node/.npm:size=256m,uid=10001,gid=10001
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+volumes:
+  openaide-demo-state:
+    name: openaide-demo-state
+  openaide-demo-runtime:
+    name: openaide-demo-runtime
+  openaide-demo-codex:
+    name: openaide-demo-codex
+    external: true
+  openaide-demo-workspace:
+    name: openaide-demo-workspace

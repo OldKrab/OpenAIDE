@@ -1,0 +1,22 @@
+[workspace]
+members = ["openaide-rs/app-server", "openaide-rs/app-server-protocol"]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "AGPL-3.0-only"
+publish = false
+
+[workspace.dependencies]
+openaide-app-server-protocol = { path = "openaide-rs/app-server-protocol" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+regex = "1.12"
+thiserror = "2.0"
+uuid = { version = "1.18", features = ["v4", "serde"] }
+tempfile = "3.23"
+agent-client-protocol = { version = "0.12.0", features = ["unstable"] }
+agent-client-protocol-schema = { version = "=0.13.2", features = ["unstable_elicitation"] }
+tokio = { version = "1.48", features = ["rt-multi-thread", "sync", "time"] }
+fs2 = "0.4"
+base64 = "0.22"

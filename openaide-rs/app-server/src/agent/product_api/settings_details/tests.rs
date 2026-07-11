@@ -1,0 +1,118 @@
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use openaide_app_server_protocol::agent::{
+    AgentSettingsDetailsParams, AgentSettingsSourceKind, AgentSettingsStatus,
+};
+use openaide_app_server_protocol::snapshot::{AgentCapabilities, AgentStatus};
+
+use crate::agent::catalog_store::AgentCatalogStore;
+use crate::agent::product_api::{AgentProductApi, AgentSettingsDetailsWorkflow};
+use crate::agent::registry::{AgentCatalogRecord, AgentRegistry, CODEX_AGENT_ID};
+use crate::agent::registry_handle::AgentRegistryHandle;
+use crate::agent::runtime::{
+    AgentEventSink, AgentProbeRequest, AgentPrompt, AgentRuntime, AgentSession, AgentSessionStart,
+};
+use crate::agent::status_cache::{AgentStatusCache, AgentStatusSnapshot};
+use crate::protocol::errors::RuntimeError;
+use crate::protocol::model::{AgentProbeCapabilities, AgentProbeResult, AgentProbeStatus};
+use crate::storage::Store;
+
+#[test]
+fn agent_settings_details_include_disabled_builtins_and_custom_launch_details() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().to_path_buf()).unwrap();
+    let catalog_store = AgentCatalogStore::new(store);
+    catalog_store
+        .save_records(&[
+            AgentCatalogRecord::disabled_builtin(CODEX_AGENT_ID.to_string()),
+            AgentCatalogRecord::custom(
+                "custom.local".to_string(),
+                "Local Agent".to_string(),
+                "terminal".to_string(),
+                true,
+                "local-agent".to_string(),
+                "local-agent \"--flag with spaces\"".to_string(),
+                vec!["--flag with spaces".to_string()],
+                HashMap::from([("LOCAL_FLAG".to_string(), "1".to_string())]),
+                vec!["LOCAL_TOKEN".to_string()],
+            ),
+        ])
+        .unwrap();
+    let statuses = AgentStatusCache::default();
+    statuses.record_for_test(
+        "custom.local".to_string(),
+        AgentStatusSnapshot {
+            status: AgentStatus::Connected,
+            capabilities: AgentCapabilities::default(),
+        },
+    );
+    let api = AgentProductApi::new(
+        AgentRegistryHandle::new(AgentRegistry::default_built_ins()),
+        catalog_store,
+        Arc::new(ProbeReadyAgentRuntime),
+        statuses,
+    );
+
+    let result = api
+        .agent_settings_details(AgentSettingsDetailsParams {})
+        .unwrap();
+
+    let codex = result
+        .agents
+        .iter()
+        .find(|agent| agent.agent_id.as_str() == CODEX_AGENT_ID)
+        .unwrap();
+    assert_eq!(codex.enabled, false);
+    assert_eq!(codex.status, AgentSettingsStatus::Disabled);
+
+    let custom = result
+        .agents
+        .iter()
+        .find(|agent| agent.agent_id.as_str() == "custom.local")
+        .unwrap();
+    assert_eq!(custom.source_kind, AgentSettingsSourceKind::Custom);
+    assert_eq!(custom.icon, "terminal");
+    assert_eq!(
+        custom.command_line.as_deref(),
+        Some("local-agent \"--flag with spaces\"")
+    );
+    assert_eq!(custom.status, AgentSettingsStatus::Connected);
+    assert_eq!(custom.env.len(), 2);
+
+    let opencode = result
+        .agents
+        .iter()
+        .find(|agent| agent.agent_id.as_str() == "opencode")
+        .unwrap();
+    assert_eq!(opencode.status, AgentSettingsStatus::Connected);
+}
+
+struct ProbeReadyAgentRuntime;
+
+impl AgentRuntime for ProbeReadyAgentRuntime {
+    fn probe(&self, request: AgentProbeRequest) -> Result<AgentProbeResult, RuntimeError> {
+        Ok(AgentProbeResult {
+            agent_id: request.agent_id,
+            status: AgentProbeStatus::Ready,
+            protocol_version: "1".to_string(),
+            implementation_name: None,
+            implementation_version: None,
+            capabilities: Vec::new(),
+            typed_capabilities: AgentProbeCapabilities::default(),
+            auth_methods: Vec::new(),
+        })
+    }
+
+    fn start_session(&self, _request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
+        unreachable!("settings details must not start agent sessions")
+    }
+
+    fn prompt(
+        &self,
+        _prompt: AgentPrompt,
+        _sink: Arc<dyn AgentEventSink>,
+    ) -> Result<(), RuntimeError> {
+        unreachable!("settings details must not prompt agents")
+    }
+}

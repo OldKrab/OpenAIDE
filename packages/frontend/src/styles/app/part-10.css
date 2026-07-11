@@ -1,0 +1,253 @@
+
+.settings-auth-method {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  gap: 6px;
+  color: var(--oa-muted);
+}
+
+.settings-auth-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-auth-method button {
+  min-height: 22px;
+  border: 0;
+  border-radius: var(--oa-radius-sm);
+  background: var(--oa-raised);
+  color: var(--oa-text);
+  padding: 2px 7px;
+  font-size: 12px;
+}
+
+.settings-auth-method button:hover {
+  background: var(--oa-hover);
+}
+
+.settings-auth-method button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.settings-auth-kind {
+  color: var(--oa-subtle);
+  font-size: 12px;
+}
+
+.settings-status {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 20px;
+  border-radius: var(--oa-radius-sm);
+  background: var(--oa-raised);
+  color: var(--oa-muted);
+  padding: 2px 7px;
+  font-size: 12px;
+}
+
+.settings-status.ready,
+.settings-status.connected,
+.settings-status.valid,
+.settings-status.available {
+  color: var(--oa-success);
+}
+
+.settings-status.failed,
+.settings-status.invalid {
+  color: var(--oa-danger);
+}
+
+.settings-status.warning,
+.settings-status.unknown,
+.settings-status.unprobed,
+.settings-status.auth_required,
+.settings-status.setup_required,
+.settings-status.unsupported {
+  color: var(--oa-warning);
+}
+
+.settings-status.shadowed,
+.settings-status.disabled {
+  color: var(--oa-muted);
+}
+
+.settings-inline-message {
+  min-width: 0;
+  color: var(--oa-danger);
+}
+
+.settings-inline-message.muted {
+  color: var(--oa-warning);
+}
+
+.settings-inline-message summary {
+  cursor: pointer;
+}
+
+.settings-inline-message code {
+  display: block;
+  margin-top: 6px;
+  color: inherit;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--oa-mono-font);
+}
+
+.settings-notice,
+.settings-error,
+.settings-empty {
+  margin: 0;
+  border: 1px solid var(--oa-border);
+  border-radius: var(--oa-radius-md);
+  padding: 10px 12px;
+  color: var(--oa-muted);
+  background: color-mix(in srgb, var(--oa-panel) 38%, transparent);
+}
+
+.settings-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--oa-danger);
+  margin-bottom: 12px;
+}
+
+.settings-empty {
+  display: grid;
+  gap: 3px;
+}
+
+.settings-empty strong {
+  color: var(--oa-text);
+}
+
+.settings-skeleton {
+  height: 54px;
+  border-radius: var(--oa-radius-md);
+  background: var(--oa-raised);
+  opacity: 0.45;
+}
+
+.settings-skeleton.short {
+  width: 72%;
+}
+
+button:focus-visible,
+textarea:focus-visible,
+.task-row:focus-visible {
+  outline: 1px solid var(--oa-focus);
+  outline-offset: 1px;
+}
+
+@media (max-width: 760px) {
+  .app-shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .sidebar {
+    display: none;
+  }
+
+  .navigation-shell .sidebar {
+    display: grid;
+  }
+
+  .chat-column,
+  .new-task-center {
+    padding-inline: 18px;
+  }
+
+  .settings-view {
+    padding-inline: 18px;
+  }
+
+  .settings-body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 12px;
+  }
+
+  .settings-tabs {
+    display: flex;
+    overflow-x: auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--oa-border);
+    padding-right: 0;
+    padding-bottom: 6px;
+  }
+
+  .settings-tabs button {
+    width: auto;
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+
+  .agent-settings-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .agent-master-pane {
+    border-right: 0;
+    padding-right: 0;
+  }
+
+  .agent-detail-pane {
+    border-top: 1px solid var(--oa-border);
+    padding-left: 0;
+    padding-top: 12px;
+  }
+
+  .agent-detail-header,
+  .agent-status-panel {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .agent-detail-header {
+    align-items: flex-start;
+  }
+
+  .agent-detail-identity {
+    grid-template-columns: 48px minmax(0, 1fr);
+  }
+
+  .agent-detail-avatar {
+    width: 48px;
+    height: 48px;
+  }
+
+  .agent-readonly-row {
+    grid-template-columns: 22px minmax(0, 1fr);
+  }
+
+  .agent-readonly-row strong {
+    grid-column: 2;
+  }
+
+  .agent-field,
+  .agent-env-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-height: 520px) {
+  .new-task-center {
+    align-content: start;
+    padding-block: 18px;
+  }
+
+  body[data-shell="web"] .new-task-center {
+    padding-bottom: 18px;
+  }
+}
+
+@media (max-height: 180px) {
+  .new-task-center > .composer {
+    margin-top: 34px;
+  }
+}

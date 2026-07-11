@@ -1,0 +1,15 @@
+{
+  "name": "openaide-web",
+  "version": "0.1.0",
+  "license": "AGPL-3.0-only",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node src/dev-server.mjs",
+    "test": "node src/app-server-manager.test.mjs && node src/dev-server-auth.test.mjs && node src/dev-server-origin.test.mjs && node src/dev-server-routes.test.mjs && node src/dev-server-streams.test.mjs"
+  },
+  "dependencies": {
+    "@openaide/app-server-client": "0.1.0",
+    "vite": "^7.2.6"
+  }
+}

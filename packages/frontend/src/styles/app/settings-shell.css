@@ -1,0 +1,198 @@
+.settings-view {
+  min-width: 0;
+  width: 100%;
+  height: 100vh;
+  overflow: hidden;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  padding: 18px 22px;
+}
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.settings-header-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.settings-header h1 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.settings-title-button {
+  border: 0;
+  border-radius: var(--oa-radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: 0;
+  text-align: left;
+}
+
+.settings-title-button:hover {
+  color: var(--oa-text);
+}
+
+.settings-header p {
+  margin: 0;
+  color: var(--oa-muted);
+}
+
+.settings-header button {
+  min-height: 28px;
+  border: 0;
+  border-radius: var(--oa-radius-sm);
+  background: transparent;
+  color: var(--oa-text);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 9px;
+}
+
+.settings-header button:hover {
+  background: var(--oa-raised);
+}
+
+.settings-header button:disabled {
+  opacity: 0.55;
+}
+
+.settings-header .settings-title-button {
+  min-height: 0;
+  display: inline;
+  gap: 0;
+  padding: 0;
+}
+
+.settings-header .settings-title-button:hover {
+  background: transparent;
+}
+
+.settings-body {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 160px minmax(0, 1fr);
+  gap: 16px;
+  align-items: stretch;
+  overflow: hidden;
+}
+
+.settings-content {
+  min-width: 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding-bottom: 42px;
+}
+
+.settings-tabs {
+  min-width: 0;
+  align-self: start;
+  display: grid;
+  gap: 3px;
+  border-right: 1px solid var(--oa-border);
+  padding-right: 10px;
+}
+
+.settings-tabs button {
+  width: 100%;
+  min-height: 28px;
+  align-self: start;
+  border: 0;
+  border-radius: var(--oa-radius-sm);
+  background: transparent;
+  color: var(--oa-muted);
+  padding: 5px 8px;
+  text-align: left;
+}
+
+.settings-tabs button:hover {
+  background: var(--oa-raised);
+  color: var(--oa-text);
+}
+
+.settings-tabs button.selected {
+  background: var(--oa-selected);
+  color: var(--oa-text);
+}
+
+.settings-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.settings-tab-panel {
+  min-width: 0;
+  min-height: 0;
+}
+
+.settings-tab-panel.narrow {
+  width: min(920px, 100%);
+  margin-inline: auto;
+}
+
+.settings-tab-panel.wide {
+  width: 100%;
+}
+
+.agents-settings-panel {
+  min-height: 0;
+  height: 100%;
+}
+
+.settings-panel-title {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--oa-muted);
+}
+
+.settings-panel-title button,
+.agent-detail-actions button,
+.agent-env-row button,
+.agent-status-panel button {
+  min-height: 24px;
+  border: 0;
+  border-radius: var(--oa-radius-sm);
+  background: var(--oa-raised);
+  color: var(--oa-text);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  font-size: 12px;
+}
+
+.settings-panel-title button:hover,
+.agent-detail-actions button:hover,
+.agent-env-row button:hover,
+.agent-status-panel button:hover {
+  background: var(--oa-hover);
+}
+
+.agent-list-title {
+  align-items: center;
+}
+
+.agent-list-title > span {
+  flex: 1;
+}
+
+.agent-settings-layout {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(260px, 320px) minmax(380px, 1fr);
+  gap: 0;
+}

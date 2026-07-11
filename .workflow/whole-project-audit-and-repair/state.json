@@ -1,0 +1,29 @@
+{
+  "title": "Whole project audit and repair",
+  "slug": "whole-project-audit-and-repair",
+  "created_at": "2026-07-09T17:42:06+00:00",
+  "status": "completed",
+  "approval": {
+    "required": true,
+    "granted": true,
+    "notes": "User explicitly authorized breaking changes and broad rewrites; destructive Git, Driver, credential, and external actions remain excluded."
+  },
+  "packets": [
+    {"id": "backend", "status": "completed", "owner": "subagent"},
+    {"id": "frontend", "status": "completed", "owner": "primary"},
+    {"id": "platform", "status": "completed", "owner": "subagent"},
+    {"id": "browser", "status": "completed", "owner": "primary"},
+    {"id": "integration", "status": "completed", "owner": "primary"}
+  ],
+  "verification": {
+    "status": "full_gate_green",
+    "checks": [
+      {"name": "npm run check", "status": "passed"},
+      {"name": "npm run test", "status": "passed"},
+      {"name": "npm run build", "status": "passed"},
+      {"name": "cargo fmt --all --check", "status": "passed"},
+      {"name": "git diff --check", "status": "passed"},
+      {"name": "Target browser smoke", "status": "passed"}
+    ]
+  }
+}

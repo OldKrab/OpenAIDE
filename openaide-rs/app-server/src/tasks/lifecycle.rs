@@ -1,0 +1,59 @@
+use uuid::Uuid;
+
+use crate::protocol::errors::RuntimeError;
+use crate::protocol::model::{ActivityStatus, ActivityStep, ChatMessage, NormalizedMessage};
+use crate::storage::cursor;
+use crate::storage::records::StoredMessage;
+use crate::storage::Store;
+
+pub(crate) fn running_turn_message(created_at: &str) -> NormalizedMessage {
+    NormalizedMessage::Activity {
+        id: Uuid::new_v4().to_string(),
+        title: "Working".to_string(),
+        status: ActivityStatus::Running,
+        created_at: created_at.to_string(),
+        collapsed: true,
+        steps: vec![ActivityStep::Text {
+            text: "Started".to_string(),
+            level: Some("info".to_string()),
+        }],
+    }
+}
+
+pub(crate) fn append_normalized_to_store(
+    store: &Store,
+    task_id: &str,
+    mut message: NormalizedMessage,
+) -> Result<StoredMessage, RuntimeError> {
+    store.persist_tool_artifacts(task_id, &mut message)?;
+    let next_sequence = store
+        .read_messages(task_id)?
+        .last()
+        .map(|m| m.sequence + 1)
+        .unwrap_or(1);
+    let cursor = cursor::from_sequence(next_sequence);
+    let chat = ChatMessage {
+        cursor,
+        identity: message.identity(),
+        message_type: message.message_type().to_string(),
+        message_id: Uuid::new_v4().to_string(),
+        message,
+    };
+    store.append_message(task_id, chat)
+}
+
+pub(crate) fn upsert_normalized_to_store(
+    store: &Store,
+    task_id: &str,
+    mut message: NormalizedMessage,
+) -> Result<StoredMessage, RuntimeError> {
+    store.persist_tool_artifacts(task_id, &mut message)?;
+    let chat = ChatMessage {
+        cursor: String::new(),
+        identity: message.identity(),
+        message_type: message.message_type().to_string(),
+        message_id: Uuid::new_v4().to_string(),
+        message,
+    };
+    store.upsert_message_by_identity(task_id, chat)
+}

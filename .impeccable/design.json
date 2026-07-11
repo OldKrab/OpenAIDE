@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-05-16T00:00:00Z",
+  "title": "Design System: OpenAIDE",
+  "extensions": {
+    "colorMeta": {
+      "accent": {
+        "role": "primary",
+        "displayName": "Workbench Accent",
+        "canonical": "#4d9cff",
+        "usage": "Selection, focus reinforcement, and primary send-style actions."
+      },
+      "panel-bg": {
+        "role": "neutral",
+        "displayName": "Panel Ground",
+        "canonical": "#252526",
+        "usage": "Sidebar, composer, popover, and settings surfaces."
+      },
+      "warning": {
+        "role": "status",
+        "displayName": "Warning",
+        "canonical": "#d7ba7d",
+        "usage": "Permission requests, blocked states, and caution copy."
+      }
+    },
+    "typographyMeta": {
+      "title": {
+        "displayName": "Title",
+        "purpose": "Compact headings and row titles."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Chat prose, composer text, and settings descriptions."
+      },
+      "mono": {
+        "displayName": "Mono",
+        "purpose": "Paths, commands, terminal output, counters, and diff-like content."
+      }
+    },
+    "rules": [
+      "Prefer VS Code tokens in implementation; fallback colors are for standalone development only.",
+      "Accent is signal, not decoration; keep it under 10% of any screen.",
+      "Use tonal layering and one-pixel borders instead of decorative shadows.",
+      "Chat is the primary surface; it should feel like agent chat with folded tool activity, not logs.",
+      "Minimalism is the main design constraint; every visible section must earn its place.",
+      "Runtime health, diagnostics, and telemetry details live in Settings, not in the sidebar.",
+      "No side-stripe borders, gradient text, glassmorphism, nested cards, or decorative motion."
+    ],
+    "breakpoints": {
+      "narrowPanel": "under 420px",
+      "standardPanel": "420px to 720px",
+      "widePanel": "above 720px"
+    }
+  }
+}

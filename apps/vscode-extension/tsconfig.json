@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "outDir": "dist",
+    "rootDir": "src",
+    "types": ["node", "vscode"],
+    "isolatedModules": false
+  },
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts"]
+}

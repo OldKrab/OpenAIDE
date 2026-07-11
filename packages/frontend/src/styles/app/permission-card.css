@@ -1,0 +1,194 @@
+.permission-card {
+  min-width: 0;
+  max-width: 100%;
+  border: 1px solid color-mix(in oklch, var(--oa-warning) 34%, var(--oa-border));
+  border-radius: var(--oa-radius-md);
+  background: color-mix(in oklch, var(--oa-warning) 5%, var(--oa-panel));
+  color: var(--oa-text);
+  display: grid;
+  gap: 8px;
+  margin: 8px 0;
+  padding: 10px 11px;
+}
+
+.permission-card.resolved {
+  border-color: color-mix(in oklch, var(--oa-border) 72%, transparent);
+  background: color-mix(in oklch, var(--oa-raised) 24%, transparent);
+}
+
+.permission-head {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.permission-icon {
+  width: 18px;
+  height: 18px;
+  border-radius: var(--oa-radius-sm);
+  color: color-mix(in oklch, var(--oa-warning) 82%, var(--oa-text));
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.permission-card.tool-read .permission-icon {
+  color: color-mix(in oklch, var(--oa-focus) 70%, var(--oa-muted));
+}
+
+.permission-card.tool-edit .permission-icon {
+  color: color-mix(in oklch, var(--oa-warning) 88%, var(--oa-text));
+}
+
+.permission-card.tool-search .permission-icon,
+.permission-card.tool-fetch .permission-icon {
+  color: color-mix(in oklch, var(--oa-success) 72%, var(--oa-muted));
+}
+
+.permission-card.tool-execute .permission-icon {
+  color: color-mix(in oklch, var(--oa-warning) 88%, var(--oa-text));
+}
+
+.permission-title {
+  min-width: 0;
+}
+
+.permission-title strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: block;
+  color: var(--oa-text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.permission-state {
+  max-width: min(34ch, 44vw);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: color-mix(in oklch, var(--oa-warning) 78%, var(--oa-text));
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.permission-state.approved {
+  color: var(--oa-success);
+}
+
+.permission-state.cancelled,
+.permission-state.denied {
+  color: var(--oa-danger);
+}
+
+.permission-state svg {
+  flex: 0 0 auto;
+}
+
+.permission-state.responding svg {
+  animation: execute-spin 900ms linear infinite;
+}
+
+.permission-body {
+  min-width: 0;
+  max-width: 100%;
+  display: grid;
+  gap: 9px;
+  overflow-x: hidden;
+  padding-left: 26px;
+}
+
+.permission-body .execute-command-chip {
+  width: 100%;
+  max-width: 100%;
+  border-color: color-mix(in oklch, var(--oa-warning) 22%, var(--oa-border));
+  background: color-mix(in oklch, var(--oa-bg) 72%, transparent);
+  color: var(--oa-text);
+}
+
+.permission-body > p {
+  color: var(--oa-text);
+  font-size: 13px;
+  margin: 0;
+}
+
+.permission-facts {
+  margin: 0;
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 3px 10px;
+  color: var(--oa-muted);
+  font-size: 13px;
+}
+
+.permission-facts dt,
+.permission-facts dd {
+  margin: 0;
+}
+
+.permission-facts dt {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: color-mix(in oklch, var(--oa-muted) 78%, var(--oa-text));
+}
+
+.permission-actions {
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+}
+
+.permission-actions button {
+  max-width: 100%;
+  min-height: 28px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border: 1px solid var(--oa-border);
+  border-radius: var(--oa-radius-sm);
+  background: color-mix(in oklch, var(--oa-bg) 48%, transparent);
+  color: var(--oa-text);
+  font-size: 12px;
+  padding: 4px 8px;
+}
+
+.permission-actions button.allow {
+  border-color: color-mix(in oklch, var(--oa-success) 42%, var(--oa-border));
+  background: color-mix(in oklch, var(--oa-success) 9%, transparent);
+  color: var(--oa-text);
+}
+
+.permission-actions button.remember {
+  color: color-mix(in oklch, var(--oa-text) 82%, var(--oa-muted));
+}
+
+.permission-actions button.deny {
+  border-color: color-mix(in oklch, var(--oa-danger) 48%, var(--oa-border));
+  color: var(--oa-danger);
+}
+
+.permission-actions button:hover:not(:disabled) {
+  background: var(--oa-raised);
+}
+
+.permission-actions button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.permission-error {
+  margin: 0;
+  color: var(--oa-danger);
+  font-size: 13px;
+}

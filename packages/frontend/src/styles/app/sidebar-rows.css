@@ -1,0 +1,275 @@
+.task-open {
+  min-width: 0;
+  border: 0;
+  border-radius: var(--oa-radius-sm);
+  background: transparent;
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr);
+  gap: 7px;
+  align-items: center;
+  padding: 2px 6px;
+  text-align: left;
+}
+
+.task-product-row .task-open,
+.external-session-row .task-open {
+  grid-template-columns: 16px minmax(0, 1fr);
+  gap: 5px;
+}
+
+.task-agent-icon {
+  width: 16px;
+  height: 16px;
+  color: color-mix(in oklch, var(--oa-muted) 76%, var(--oa-text));
+  display: inline-grid;
+  place-items: center;
+}
+
+.task-row-action {
+  width: 28px;
+  min-height: 28px;
+  border: 0;
+  border-radius: var(--oa-radius-sm);
+  background: transparent;
+  color: var(--oa-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  cursor: pointer;
+}
+
+.task-row-action-slot {
+  min-width: 0;
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 32px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 0;
+  pointer-events: none;
+}
+
+.task-row:hover .task-row-action,
+.task-row:has(:focus-visible) .task-row-action {
+  opacity: 1;
+}
+
+.task-row:has(.task-row-action:not(:disabled)):hover .task-trailing-meta,
+.task-row:has(.task-row-action:not(:disabled)):has(:focus-visible) .task-trailing-meta {
+  visibility: hidden;
+}
+
+.task-row:hover .task-row-action-slot,
+.task-row:has(:focus-visible) .task-row-action-slot {
+  pointer-events: auto;
+}
+
+.task-row-action:hover,
+.task-row-action:focus-visible {
+  background: transparent;
+  color: var(--oa-text);
+}
+
+.task-row-menu {
+  position: absolute;
+  z-index: 5;
+  top: 30px;
+  right: 4px;
+  min-width: 132px;
+  border: 1px solid color-mix(in oklch, var(--oa-border) 76%, transparent);
+  border-radius: var(--oa-radius-sm);
+  background: var(--oa-panel);
+  box-shadow: 0 8px 18px color-mix(in oklch, var(--oa-text) 14%, transparent);
+  padding: 3px;
+}
+
+.task-row-menu button {
+  width: 100%;
+  min-height: 28px;
+  border: 0;
+  border-radius: var(--oa-radius-sm);
+  background: transparent;
+  color: var(--oa-text);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 7px;
+  text-align: left;
+}
+
+.task-row-menu button:hover,
+.task-row-menu button:focus-visible {
+  background: var(--oa-raised);
+}
+
+.session-more:hover:not(:disabled) {
+  background: var(--oa-raised);
+}
+
+.external-session-row .task-open:disabled {
+  opacity: 0.55;
+}
+
+.external-session-row .task-row-action:disabled {
+  opacity: 0;
+}
+
+.session-more {
+  min-height: 24px;
+  border: 0;
+  border-top: 1px solid color-mix(in oklch, var(--oa-border) 62%, transparent);
+  border-radius: var(--oa-radius-sm);
+  background: transparent;
+  color: var(--oa-muted);
+  margin-top: 6px;
+  padding: 2px 7px;
+  text-align: left;
+}
+
+.session-row:disabled,
+.session-more:disabled {
+  opacity: 0.55;
+}
+
+.task-row-body {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 6px;
+}
+
+.task-trailing-meta {
+  min-width: 0;
+  color: var(--oa-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+}
+
+.task-trailing-indicator {
+  position: relative;
+  width: 14px;
+  height: 14px;
+  display: inline-grid;
+  flex: 0 0 14px;
+  place-items: center;
+}
+
+.task-state-spinner {
+  width: 11px;
+  height: 11px;
+  border: 1.5px solid color-mix(in oklch, var(--oa-focus) 24%, transparent);
+  border-top-color: var(--oa-focus);
+  border-radius: 999px;
+  animation: task-state-spin 800ms linear infinite;
+}
+
+.task-state-pause {
+  width: 9px;
+  height: 11px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
+
+.task-state-pause::before,
+.task-state-pause::after {
+  content: "";
+  width: 2px;
+  height: 8px;
+  border-radius: 1px;
+  background: var(--oa-warning);
+}
+
+.task-state-error {
+  width: 12px;
+  height: 12px;
+  border: 1.5px solid var(--oa-danger);
+  border-radius: 999px;
+  color: var(--oa-danger);
+  display: inline-grid;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  place-items: center;
+}
+
+.task-state-unread-dot,
+.task-state-unread-badge {
+  border-radius: 999px;
+  background: var(--oa-focus);
+}
+
+.task-state-unread-dot {
+  width: 7px;
+  height: 7px;
+}
+
+.task-state-unread-badge {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 5px;
+  height: 5px;
+  box-shadow: 0 0 0 1px var(--oa-panel);
+}
+
+@keyframes task-state-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .task-state-spinner {
+    animation: none;
+  }
+}
+
+.task-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-meta-age {
+  color: color-mix(in oklch, var(--oa-muted) 82%, var(--oa-text));
+  flex: 0 0 auto;
+}
+
+.agent-brand-icon {
+  width: 11px;
+  height: 11px;
+  flex: 0 0 auto;
+}
+
+.openai-agent-icon {
+  color: color-mix(in oklch, var(--oa-muted) 76%, var(--oa-text));
+}
+
+.opencode-agent-icon {
+  color: color-mix(in oklch, var(--oa-muted) 70%, var(--oa-text));
+}
+
+.agent-list-avatar .agent-brand-icon {
+  width: 15px;
+  height: 15px;
+}
+
+.agent-detail-avatar .agent-brand-icon {
+  width: 24px;
+  height: 24px;
+}
+
+.composer-popover .agent-brand-icon {
+  width: 13px;
+  height: 13px;
+}

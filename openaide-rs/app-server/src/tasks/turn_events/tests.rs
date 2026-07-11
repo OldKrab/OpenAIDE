@@ -1,0 +1,478 @@
+use std::sync::{Arc, Mutex};
+use std::collections::BTreeMap;
+
+use crate::agent::events::{
+    AgentEvent, AgentPermissionOption, AgentPermissionOptionKind, AgentPermissionRequest,
+    AgentToolCallRef,
+};
+use crate::agent::{
+    AgentEventSink, AgentMetadataField, AgentSessionEventSink, AgentSessionMetadataUpdate,
+    TurnCancellation,
+};
+use crate::protocol::model::{IsolationKind, NormalizedMessage, TaskStatus};
+use crate::server_requests::ServerRequestRuntime;
+use crate::server_requests::{ResponderScope, ServerRequestAnswer};
+use crate::client_lifecycle::AppServerTime;
+use openaide_app_server_protocol::ids::{ClientInstanceId, TaskId};
+use openaide_app_server_protocol::server_requests::{
+    QuestionField, QuestionRequestParams, QuestionRequestResponse, QuestionValue,
+};
+use crate::storage::records::{TaskPreparationRecord, TaskRecord};
+use crate::storage::Store;
+use crate::task_events::CommittedTaskDelta;
+use crate::task_events::TaskUpdateNotifier;
+use crate::tasks::mutation::TaskMutations;
+use crate::tasks::runtime_state::RuntimeState;
+use crate::tasks::transitions::TaskTransitions;
+
+use super::{TaskEventSink, TaskSessionEventSink};
+
+#[test]
+fn agent_session_title_updates_override_and_restore_the_local_fallback() {
+    let (_dir, store, mutations, _server_requests) = test_runtime();
+    store.write_task(&running_task("task_1")).unwrap();
+    let sink = TaskSessionEventSink::new(
+        mutations,
+        "task_1".to_string(),
+        "session_1".to_string(),
+        ServerRequestRuntime::new(),
+    );
+
+    sink.metadata_changed(AgentSessionMetadataUpdate {
+        title: AgentMetadataField::Value("Agent title".to_string()),
+        updated_at: AgentMetadataField::Unchanged,
+    })
+    .unwrap();
+    let titled = store.read_task("task_1").unwrap();
+    assert_eq!(titled.agent_title.as_deref(), Some("Agent title"));
+    assert_eq!(titled.summary().title, "Agent title");
+
+    sink.metadata_changed(AgentSessionMetadataUpdate {
+        title: AgentMetadataField::Clear,
+        updated_at: AgentMetadataField::Unchanged,
+    })
+    .unwrap();
+    let cleared = store.read_task("task_1").unwrap();
+    assert_eq!(cleared.agent_title, None);
+    assert_eq!(cleared.summary().title, "Task");
+}
+
+#[test]
+fn agent_session_metadata_rejects_updates_from_a_stale_native_session() {
+    let (_dir, store, mutations, _server_requests) = test_runtime();
+    store.write_task(&running_task("task_1")).unwrap();
+    let stale_sink = TaskSessionEventSink::new(
+        mutations,
+        "task_1".to_string(),
+        "replaced-session".to_string(),
+        ServerRequestRuntime::new(),
+    );
+
+    stale_sink
+        .metadata_changed(AgentSessionMetadataUpdate {
+            title: AgentMetadataField::Value("Stale title".to_string()),
+            updated_at: AgentMetadataField::Value("2026-07-10T10:00:00Z".to_string()),
+        })
+        .unwrap();
+
+    let task = store.read_task("task_1").unwrap();
+    assert_eq!(task.agent_title, None);
+    assert_eq!(task.summary().title, "Task");
+    assert_eq!(task.last_activity, "1");
+}
+
+#[test]
+fn session_question_round_trips_and_persists_submitted_history() {
+    let (_dir, store, mutations, server_requests) = test_runtime();
+    store.write_task(&running_task("task_1")).unwrap();
+    let sink = TaskSessionEventSink::new(
+        mutations,
+        "task_1".to_string(),
+        "session_1".to_string(),
+        server_requests.clone(),
+    );
+    let thread = std::thread::spawn(move || {
+        sink.request_question(question_form(), TurnCancellation::new())
+    });
+    while server_requests.pending_for_task(&TaskId::from("task_1")).is_empty() {
+        std::thread::yield_now();
+    }
+    let request = server_requests.pending_for_task(&TaskId::from("task_1"))[0].clone();
+    let result = serde_json::to_value(QuestionRequestResponse::Submit {
+        content: BTreeMap::from([(
+            "strategy".to_string(),
+            QuestionValue::String("safe".to_string()),
+        )]),
+    })
+    .unwrap();
+    assert!(matches!(
+        server_requests.handle_response_from_scopes(
+            ClientInstanceId::from("client-1"),
+            request.request_id,
+            ServerRequestAnswer::Result(result),
+            &[ResponderScope::Task(TaskId::from("task_1"))],
+            AppServerTime(1),
+        ),
+        crate::server_requests::ResponseOutcome::Accepted { .. }
+    ));
+    assert!(matches!(thread.join().unwrap().unwrap(), QuestionRequestResponse::Submit { .. }));
+    let messages = store.read_messages("task_1").unwrap();
+    assert!(messages.iter().any(|stored| matches!(&stored.chat.message,
+        NormalizedMessage::Question { state: crate::protocol::model::QuestionState::Resolved,
+            content: Some(content), .. }
+            if content.get("strategy") == Some(&QuestionValue::String("safe".to_string())))));
+}
+
+#[test]
+fn withdrawing_one_question_closes_only_its_own_waiter() {
+    let (_dir, store, mutations, server_requests) = test_runtime();
+    store.write_task(&running_task("task_1")).unwrap();
+    let cancellation = TurnCancellation::new();
+    let sink = TaskSessionEventSink::new(
+        mutations,
+        "task_1".to_string(),
+        "session_1".to_string(),
+        server_requests.clone(),
+    );
+    let wait_cancellation = cancellation.clone();
+    let thread = std::thread::spawn(move || sink.request_question(question_form(), wait_cancellation));
+    while server_requests.pending_count() == 0 { std::thread::yield_now(); }
+    cancellation.cancel();
+
+    assert_eq!(thread.join().unwrap().unwrap(), QuestionRequestResponse::Cancel);
+    let messages = store.read_messages("task_1").unwrap();
+    assert!(messages.iter().any(|stored| matches!(stored.chat.message,
+        NormalizedMessage::Question { state: crate::protocol::model::QuestionState::Cancelled, .. })));
+}
+
+fn question_form() -> QuestionRequestParams {
+    QuestionRequestParams {
+        message: "Choose a strategy".to_string(),
+        fields: vec![QuestionField::SingleSelect {
+            key: "strategy".to_string(),
+            title: "Strategy".to_string(),
+            description: None,
+            required: true,
+            default: Some("safe".to_string()),
+            options: vec![openaide_app_server_protocol::server_requests::QuestionOption {
+                value: "safe".to_string(),
+                label: "Safe".to_string(),
+                description: Some("Small changes".to_string()),
+            }],
+        }],
+    }
+}
+
+#[test]
+fn permission_request_append_failure_does_not_open_broker_request() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().to_path_buf()).unwrap();
+    let (notifier, _notifications) = TaskUpdateNotifier::channel();
+    let mutations = TaskMutations::new(
+        store,
+        Arc::new(Mutex::new(())),
+        Arc::new(Mutex::new(RuntimeState::with_revision(0))),
+        notifier,
+    );
+    let server_requests = ServerRequestRuntime::new();
+    let sink = TaskEventSink::new(
+        mutations,
+        "missing_task".to_string(),
+        "turn_1".to_string(),
+        server_requests.clone(),
+        TurnCancellation::new(),
+    );
+
+    let error = sink.request_permission(permission_request("request_append_failure"));
+
+    assert!(error.is_err());
+    assert!(server_requests
+        .pending_for_task(&openaide_app_server_protocol::ids::TaskId::from(
+            "missing_task"
+        ))
+        .is_empty());
+}
+
+#[test]
+fn active_turn_agent_message_does_not_mark_task_unread() {
+    let (_dir, store, mutations, server_requests) = test_runtime();
+    store.write_task(&running_task("task_1")).unwrap();
+    let sink = TaskEventSink::new(
+        mutations,
+        "task_1".to_string(),
+        "turn_1".to_string(),
+        server_requests,
+        TurnCancellation::new(),
+    );
+
+    sink.emit(AgentEvent::Text("working".to_string())).unwrap();
+
+    let stored = store.read_task("task_1").unwrap();
+    assert!(!stored.unread);
+    assert_eq!(stored.active_turn_id.as_deref(), Some("turn_1"));
+    assert_eq!(stored.status, TaskStatus::Active);
+}
+
+#[test]
+fn active_turn_agent_message_does_not_refresh_last_activity() {
+    let (_dir, store, mutations, server_requests) = test_runtime();
+    store.write_task(&running_task("task_1")).unwrap();
+    let sink = TaskEventSink::new(
+        mutations,
+        "task_1".to_string(),
+        "turn_1".to_string(),
+        server_requests,
+        TurnCancellation::new(),
+    );
+
+    sink.emit(AgentEvent::Text("working".to_string())).unwrap();
+
+    let stored = store.read_task("task_1").unwrap();
+    assert_ne!(stored.updated_at, "1");
+    assert_eq!(stored.last_activity, "1");
+}
+
+#[test]
+fn agent_text_notifications_describe_only_durable_ordered_deltas() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().to_path_buf()).unwrap();
+    store.write_task(&running_task("task_1")).unwrap();
+    let (notifier, notifications) = TaskUpdateNotifier::channel();
+    let mutations = TaskMutations::new(
+        store.clone(),
+        Arc::new(Mutex::new(())),
+        Arc::new(Mutex::new(RuntimeState::with_revision(0))),
+        notifier,
+    );
+    let sink = TaskEventSink::new(
+        mutations,
+        "task_1".to_string(),
+        "turn_1".to_string(),
+        ServerRequestRuntime::new(),
+        TurnCancellation::new(),
+    );
+
+    sink.emit(AgentEvent::Text("first".to_string())).unwrap();
+    let appended = notifications.recv().unwrap();
+    let message_id = match appended.delta.unwrap() {
+        CommittedTaskDelta::ChatItemAppended { item } => {
+            assert_eq!(
+                item.status,
+                openaide_app_server_protocol::snapshot::ChatItemStatus::Streaming
+            );
+            item.message_id
+        }
+        other => panic!("expected append, got {other:?}"),
+    };
+    assert_eq!(store.read_messages("task_1").unwrap().len(), 1);
+
+    sink.emit(AgentEvent::Text(" second".to_string())).unwrap();
+    let chunked = notifications.recv().unwrap();
+    assert!(matches!(
+        chunked.delta,
+        Some(CommittedTaskDelta::ChatItemChunk { message_id: id, chunk })
+            if id == message_id && chunk.sequence == 1
+                && chunk.text == " second" && !chunk.final_chunk
+    ));
+    let stored = store.read_messages("task_1").unwrap();
+    assert!(matches!(
+        &stored[0].chat.message,
+        NormalizedMessage::AgentText { text, streaming: true, .. }
+            if text == "first second"
+    ));
+
+    sink.emit(AgentEvent::Activity {
+        title: "Tool".to_string(),
+        tool_name: "fixture".to_string(),
+        output_preview: "done".to_string(),
+    })
+    .unwrap();
+    let finalized = notifications.recv().unwrap();
+    assert!(matches!(
+        finalized.delta,
+        Some(CommittedTaskDelta::ChatItemChunk { message_id: id, chunk })
+            if id == message_id && chunk.sequence == 2
+                && chunk.text.is_empty() && chunk.final_chunk
+    ));
+    let stored = store.read_messages("task_1").unwrap();
+    assert!(matches!(
+        &stored[0].chat.message,
+        NormalizedMessage::AgentText {
+            streaming: false,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn prompt_completion_finalizes_the_last_text_run() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().to_path_buf()).unwrap();
+    store.write_task(&running_task("task_1")).unwrap();
+    let (notifier, notifications) = TaskUpdateNotifier::channel();
+    let mutations = TaskMutations::new(
+        store.clone(),
+        Arc::new(Mutex::new(())),
+        Arc::new(Mutex::new(RuntimeState::with_revision(0))),
+        notifier,
+    );
+    let sink = TaskEventSink::new(
+        mutations,
+        "task_1".to_string(),
+        "turn_1".to_string(),
+        ServerRequestRuntime::new(),
+        TurnCancellation::new(),
+    );
+
+    sink.emit(AgentEvent::Text("complete me".to_string()))
+        .unwrap();
+    let appended = notifications.recv().unwrap();
+    let message_id = match appended.delta.unwrap() {
+        CommittedTaskDelta::ChatItemAppended { item } => item.message_id,
+        other => panic!("expected append, got {other:?}"),
+    };
+    sink.finish().unwrap();
+
+    let finalized = notifications.recv().unwrap();
+    assert!(matches!(
+        finalized.delta,
+        Some(CommittedTaskDelta::ChatItemChunk { message_id: id, chunk })
+            if id == message_id && chunk.sequence == 1 && chunk.final_chunk
+    ));
+    assert!(matches!(
+        &store.read_messages("task_1").unwrap()[0].chat.message,
+        NormalizedMessage::AgentText {
+            streaming: false,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn permission_request_splits_active_agent_text_run() {
+    let (_dir, store, mutations, server_requests) = test_runtime();
+    store.write_task(&running_task("task_1")).unwrap();
+    let sink = Arc::new(TaskEventSink::new(
+        mutations,
+        "task_1".to_string(),
+        "turn_1".to_string(),
+        server_requests.clone(),
+        TurnCancellation::new(),
+    ));
+
+    sink.emit(AgentEvent::Text("before permission".to_string()))
+        .unwrap();
+    let permission_sink = sink.clone();
+    let permission_thread = std::thread::spawn(move || {
+        permission_sink.request_permission(permission_request("permission_1"))
+    });
+    while server_requests.pending_count() == 0 {
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    server_requests
+        .route_agent_permission_response(
+            "permission_1",
+            "allow".to_string(),
+            |_| -> Result<(), crate::protocol::errors::RuntimeError> { Ok(()) },
+        )
+        .unwrap();
+    permission_thread
+        .join()
+        .expect("permission thread joins")
+        .unwrap();
+
+    sink.emit(AgentEvent::Text(" after permission".to_string()))
+        .unwrap();
+
+    let messages = store.read_messages("task_1").unwrap();
+    let agent_text: Vec<_> = messages
+        .iter()
+        .filter_map(|stored| match &stored.chat.message {
+            NormalizedMessage::AgentText { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(agent_text, vec!["before permission", " after permission"]);
+}
+
+#[test]
+fn finishing_active_turn_marks_task_unread_for_user_attention() {
+    let (_dir, store, mutations, _server_requests) = test_runtime();
+    store.write_task(&running_task("task_1")).unwrap();
+    let transitions = TaskTransitions::new(mutations);
+
+    assert!(transitions.finish_turn("task_1", "turn_1", Ok(())).unwrap());
+
+    let stored = store.read_task("task_1").unwrap();
+    assert!(stored.unread);
+    assert_eq!(stored.active_turn_id, None);
+    assert_eq!(stored.status, TaskStatus::Inactive);
+}
+
+fn permission_request(request_id: &str) -> AgentPermissionRequest {
+    AgentPermissionRequest {
+        request_id: request_id.to_string(),
+        title: "Allow action?".to_string(),
+        description: None,
+        scope: None,
+        risk: None,
+        tool_call: AgentToolCallRef {
+            tool_call_id: "tool_1".to_string(),
+            title: "Tool".to_string(),
+            kind: Some("edit".to_string()),
+        },
+        options: vec![AgentPermissionOption {
+            option_id: "allow".to_string(),
+            name: "Allow".to_string(),
+            kind: AgentPermissionOptionKind::AllowOnce,
+        }],
+    }
+}
+
+fn test_runtime() -> (
+    tempfile::TempDir,
+    Store,
+    TaskMutations,
+    ServerRequestRuntime,
+) {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().to_path_buf()).unwrap();
+    let (notifier, _notifications) = TaskUpdateNotifier::channel();
+    let mutations = TaskMutations::new(
+        store.clone(),
+        Arc::new(Mutex::new(())),
+        Arc::new(Mutex::new(RuntimeState::with_revision(0))),
+        notifier,
+    );
+    (dir, store, mutations, ServerRequestRuntime::new())
+}
+
+fn running_task(task_id: &str) -> TaskRecord {
+    TaskRecord {
+        task_id: task_id.to_string(),
+        title: "Task".to_string(),
+        agent_title: None,
+        status: TaskStatus::Active,
+        task_version: 0,
+        message_history_version: 0,
+        unread: false,
+        created_at: "1".to_string(),
+        updated_at: "1".to_string(),
+        last_activity: "1".to_string(),
+        agent_name: "Codex".to_string(),
+        agent_id: "codex".to_string(),
+        isolation: IsolationKind::Local,
+        workspace_root: "/tmp/workspace".to_string(),
+        first_prompt_sent: true,
+        agent_session_id: Some("session_1".to_string()),
+        active_turn_id: Some("turn_1".to_string()),
+        archived: false,
+        tombstoned: false,
+        revision: 0,
+        config_options: Default::default(),
+        config_options_catalog: None,
+        agent_commands_catalog: None,
+        model_id: None,
+        preparation: TaskPreparationRecord::Ready,
+    }
+}

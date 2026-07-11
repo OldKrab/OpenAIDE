@@ -1,0 +1,198 @@
+@media (max-width: 760px) {
+  body[data-shell="web"] .message-list {
+    padding-inline: 0;
+    padding-bottom: 36px;
+    scrollbar-gutter: auto;
+  }
+
+  body[data-shell="web"] .chat-message-actions {
+    min-height: 28px;
+  }
+
+  body[data-shell="web"] .chat-message-action {
+    width: 36px;
+    min-height: 36px;
+  }
+
+  body[data-shell="web"] .activity-group > .activity-disclosure-trigger,
+  body[data-shell="web"] .chat-thought-block > .activity-disclosure-trigger {
+    min-height: 36px;
+  }
+
+  body[data-shell="web"] .chat-user-block {
+    max-width: min(70ch, 90%);
+  }
+
+  body[data-shell="web"] .chat-agent,
+  body[data-shell="web"] .chat-user,
+  body[data-shell="web"] .chat-system {
+    font-size: 15px;
+    line-height: 1.5;
+  }
+
+  body[data-shell="web"] .new-task-center {
+    align-content: start;
+    gap: 6px;
+    padding: clamp(28px, 16dvh, 112px) 12px 12px;
+  }
+
+  body[data-shell="web"] .new-task-center h1 {
+    font-size: 18px;
+    text-align: center;
+    justify-self: center;
+    width: min(760px, 100%);
+  }
+
+  body[data-shell="web"] .composer {
+    width: 100%;
+    max-width: 100%;
+    border-radius: 18px;
+    padding: 10px;
+  }
+
+  body[data-shell="web"] .composer textarea,
+  body[data-shell="web"] .composer-editor {
+    min-height: 36px;
+    max-height: 96px;
+  }
+
+  body[data-shell="web"] .composer-footer {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    justify-items: stretch;
+    align-items: center;
+    gap: 8px;
+  }
+
+  body[data-shell="web"] .composer-footer > .composer-icon-button,
+  body[data-shell="web"] .composer-footer > .composer-submit-pending {
+    grid-column: 2;
+    justify-self: end;
+  }
+
+  body[data-shell="web"] .composer-controls {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    overflow-x: visible;
+    scrollbar-width: none;
+  }
+
+  body[data-shell="web"] .composer-controls:has(.composer-popover) {
+    flex-wrap: wrap;
+    overflow-x: visible;
+  }
+
+  body[data-shell="web"] .composer-controls .composer-menu-anchor,
+  body[data-shell="web"] .composer-controls .composer-option-anchor {
+    display: contents;
+    position: static;
+  }
+
+  body[data-shell="web"] .composer-config-control,
+  body[data-shell="web"] .composer-isolation-control {
+    display: none;
+  }
+
+  body[data-shell="web"] .composer-mobile-options-anchor {
+    display: contents;
+  }
+
+  body[data-shell="web"] .composer-mobile-options-anchor > .composer-pill {
+    order: 1;
+  }
+
+  body[data-shell="web"] .composer-config-control-anchor > .composer-popover,
+  body[data-shell="web"] .composer-isolation-control-anchor > .composer-popover {
+    order: 2;
+  }
+
+  body[data-shell="web"] .composer-controls .composer-pill {
+    min-width: 0;
+    width: fit-content;
+    max-width: min(260px, 100%);
+    flex: 0 1 auto;
+  }
+
+  body[data-shell="web"] .composer-controls::-webkit-scrollbar {
+    display: none;
+  }
+
+  body[data-shell="web"] .composer-pill,
+  body[data-shell="web"] .composer-submit-pending {
+    min-height: 30px;
+  }
+
+  body[data-shell="web"] .composer-pill {
+    border: 0;
+    font-size: 12px;
+    font-weight: 500;
+    padding-inline: 6px;
+  }
+
+  body[data-shell="web"] .composer-controls .composer-icon-button,
+  body[data-shell="web"] .composer-actions .composer-icon-button,
+  body[data-shell="web"] .composer-submit-pending,
+  body[data-shell="web"] .composer-footer > .composer-icon-button {
+    min-height: 36px;
+    min-width: 36px;
+    width: 36px;
+    height: 36px;
+  }
+
+  body[data-shell="web"] .new-task-context-controls .composer-pill {
+    min-height: 30px;
+  }
+}
+
+@media (hover: none) {
+  body[data-shell="web"] .composer .composer-pill:hover:not(:disabled) {
+    background: transparent;
+  }
+
+  body[data-shell="web"] .composer .composer-pill:active:not(:disabled),
+  body[data-shell="web"] .composer .composer-pill[aria-expanded="true"] {
+    background: color-mix(in oklch, var(--oa-text) 7%, transparent);
+  }
+}
+
+@media (max-width: 430px) {
+  body[data-shell="web"] .web-workbench-shell .sidebar {
+    width: min(288px, calc(100vw - 96px));
+    padding-inline: 8px;
+  }
+
+  body[data-shell="web"] .composer-controls {
+    gap: 5px;
+  }
+
+  body[data-shell="web"] .new-task-context-controls .composer-pill {
+    max-width: min(180px, 42vw);
+  }
+}
+
+@media (max-height: 320px) {
+  body[data-shell="web"] .new-task-center {
+    gap: 6px;
+    padding-block: 12px;
+  }
+
+  body[data-shell="web"] .composer {
+    gap: 4px;
+    padding: 8px;
+  }
+
+  body[data-shell="web"] .composer textarea,
+  body[data-shell="web"] .composer-editor {
+    min-height: 40px;
+    max-height: 80px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  body[data-shell="web"] .web-workbench-shell.mobile-navigation-open .sidebar,
+  body[data-shell="web"] .web-workbench-shell .sidebar,
+  body[data-shell="web"] .mobile-navigation-backdrop {
+    transition: none;
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "name": "openaide",
+  "version": "0.1.0",
+  "license": "AGPL-3.0-only",
+  "private": true,
+  "description": "Local agent workbench for inspectable task execution.",
+  "workspaces": [
+    "packages/app-shell-contracts",
+    "packages/app-server-client",
+    "packages/frontend",
+    "apps/web",
+    "apps/vscode-extension"
+  ],
+  "scripts": {
+    "build": "npm run build:backend && npm run build:frontend",
+    "build:backend": "cargo build --workspace && node scripts/sync-app-server-assets.mjs",
+    "build:frontend": "npm run build --workspace @openaide/app-server-client && npm run build --workspace @openaide/app-shell-contracts && npm run build --workspace openaide-frontend && node scripts/sync-frontend-assets.mjs && npm run build --workspace openaide-vscode-extension",
+    "check": "npm run check:source-size && cargo check --workspace && npm run protocol:check && npm run build --workspace @openaide/app-server-client && npm run check --workspaces --if-present && node scripts/check-app-server-client-dist-import.mjs",
+    "check:source-size": "node scripts/check-production-source-size.mjs",
+    "test": "npm run test:gate && npm run backend:test && npm run test --workspaces --if-present",
+    "test:gate": "node scripts/test-workspace-gate.test.mjs",
+    "protocol:generate": "node scripts/generate-app-server-protocol.mjs",
+    "protocol:check": "node scripts/check-app-server-protocol-generated.mjs",
+    "web:dev": "npm run dev --workspace openaide-web",
+    "web:local": "bash deploy/local-web.sh refresh",
+    "web:local:restart": "bash deploy/local-web.sh restart",
+    "web:target": "OPENAIDE_WEB_ROLE=target bash deploy/local-web.sh refresh",
+    "web:target:restart": "OPENAIDE_WEB_ROLE=target bash deploy/local-web.sh restart",
+    "web:driver": "OPENAIDE_WEB_ROLE=driver bash deploy/local-web.sh refresh",
+    "web:driver:restart": "OPENAIDE_WEB_ROLE=driver bash deploy/local-web.sh restart",
+    "web:preview": "OPENAIDE_WEB_PORT=5574 OPENAIDE_WEB_VITE_PORT=5573 OPENAIDE_WEB_STATE_ROOT=.openaide-web-preview/state OPENAIDE_WEB_RUNTIME_ROOT=.openaide-web-preview/runtime OPENAIDE_WEB_STATIC_ROOT=.openaide-web-preview/static OPENAIDE_WEB_PID_FILE=/tmp/openaide-web-preview-5574.pid OPENAIDE_WEB_LOG_FILE=/tmp/openaide-web-preview-5574.log OPENAIDE_WEB_ALLOWED_HOSTS=localhost,127.0.0.1 OPENAIDE_WEB_BUILD=1 bash deploy/local-web.sh restart",
+    "web:redeploy": "node scripts/redeploy-web-dev.mjs",
+    "vscode:launch": "npm run build && code --extensionDevelopmentPath=$(pwd)/apps/vscode-extension $(pwd)",
+    "backend:test": "cargo test --workspace",
+    "app-server:build": "cargo build -p openaide-app-server",
+    "app-server:test": "cargo test -p openaide-app-server"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.6"
+  }
+}

@@ -1,0 +1,161 @@
+import { useEffect, useRef, useState } from "react";
+import { Archive, MoreHorizontal, RotateCcw } from "lucide-react";
+import type { TaskStatus, TaskSummary } from "@openaide/app-shell-contracts";
+import { PENDING_NEW_TASK_ID } from "./appControllerDerivedState";
+import { AgentIcon } from "./AgentIcon";
+import { SidebarRowActionSlot } from "./SidebarRowParts";
+import { relativeTime, splitGeneratedTaskTitle } from "./taskSurfaceHelpers";
+
+export function SidebarTaskRow({
+  activeTaskId,
+  onArchiveTask,
+  onOpenTask,
+  onRestoreTask,
+  showArchived,
+  task,
+}: {
+  activeTaskId?: string;
+  onArchiveTask: (taskId: string) => void;
+  onOpenTask: (taskId: string) => void;
+  onRestoreTask: (taskId: string) => void;
+  showArchived: boolean;
+  task: TaskSummary;
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const actionSlotRef = useRef<HTMLDivElement>(null);
+  const actionTriggerRef = useRef<HTMLButtonElement>(null);
+  const pendingNewTask = task.task_id === PENDING_NEW_TASK_ID;
+  const title = splitGeneratedTaskTitle(task.title);
+  const actionLabel = showArchived ? "Restore task" : "Archive task";
+  const runAction = () => {
+    setMenuOpen(false);
+    if (showArchived) {
+      onRestoreTask(task.task_id);
+    } else {
+      onArchiveTask(task.task_id);
+    }
+  };
+  useEffect(() => {
+    if (!menuOpen || typeof document === "undefined") return;
+    const dismissOnPointerDown = (event: PointerEvent) => {
+      if (actionSlotRef.current?.contains(event.target as Node | null)) return;
+      setMenuOpen(false);
+    };
+    const dismissOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      setMenuOpen(false);
+      actionTriggerRef.current?.focus();
+    };
+    document.addEventListener("pointerdown", dismissOnPointerDown);
+    document.addEventListener("keydown", dismissOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", dismissOnPointerDown);
+      document.removeEventListener("keydown", dismissOnEscape);
+    };
+  }, [menuOpen]);
+  return (
+    <div className={`task-row task-product-row ${task.task_id === activeTaskId ? "selected" : ""}`} role="listitem">
+      <button
+        className="task-open"
+        disabled={pendingNewTask}
+        onClick={() => onOpenTask(task.task_id)}
+        type="button"
+      >
+        <span aria-label={`Agent: ${task.agent_name}`} className="task-agent-icon" role="img" title={task.agent_name}>
+          <AgentIcon agentId={task.agent_id} agentName={task.agent_name} size={12} />
+        </span>
+        <span className="task-row-body">
+          <span className="task-title" title={title.originalTitle}>{title.title}</span>
+          <TaskTrailingMeta
+            status={task.status}
+            timestamp={task.last_activity}
+            unread={task.unread}
+          />
+        </span>
+      </button>
+      <SidebarRowActionSlot containerRef={actionSlotRef}>
+        {pendingNewTask ? null : (
+          <button
+            ref={actionTriggerRef}
+            className="task-row-action"
+            onClick={() => setMenuOpen((open) => !open)}
+            title={menuOpen ? undefined : "Task actions"}
+            type="button"
+            aria-expanded={menuOpen}
+            aria-label={`Task actions for ${task.title}`}
+          >
+            <MoreHorizontal size={14} />
+          </button>
+        )}
+        {menuOpen ? (
+          <div className="task-row-menu" role="menu">
+            <button onClick={runAction} type="button" role="menuitem">
+              {showArchived ? <RotateCcw size={13} /> : <Archive size={13} />}
+              {actionLabel}
+            </button>
+          </div>
+        ) : null}
+      </SidebarRowActionSlot>
+    </div>
+  );
+}
+
+function TaskTrailingMeta({
+  status,
+  timestamp,
+  unread,
+}: {
+  status: TaskStatus;
+  timestamp?: string;
+  unread: boolean;
+}) {
+  return (
+    <span className="task-trailing-meta">
+      <TaskStateOrAge status={status} timestamp={timestamp} unread={unread} />
+    </span>
+  );
+}
+
+function TaskStateOrAge({ status, timestamp, unread }: { status: TaskStatus; timestamp?: string; unread: boolean }) {
+  // Runtime state takes the age slot. Active work is live by definition, so stale
+  // persisted unread data must never add a second indicator to the spinner.
+  if (status === "active") {
+    return (
+      <span aria-label="In progress" className="task-trailing-indicator" role="img" title="In progress">
+        <span className="task-state-spinner" />
+      </span>
+    );
+  }
+  if (status === "blocked") {
+    const label = unread ? "Waiting, unread" : "Waiting";
+    return (
+      <span aria-label={label} className="task-trailing-indicator" role="img" title={label}>
+        <span className="task-state-pause" />
+        {unread ? <span className="task-state-unread-badge" /> : null}
+      </span>
+    );
+  }
+  if (status === "failed") {
+    const label = unread ? "Failed, unread" : "Failed";
+    return (
+      <span aria-label={label} className="task-trailing-indicator" role="img" title={label}>
+        <span className="task-state-error">!</span>
+        {unread ? <span className="task-state-unread-badge" /> : null}
+      </span>
+    );
+  }
+  if (unread) {
+    return (
+      <span aria-label="Unread" className="task-trailing-indicator" role="img" title="Unread">
+        <span className="task-state-unread-dot" />
+      </span>
+    );
+  }
+  const age = timestamp ? relativeTime(timestamp) : "";
+  return age ? (
+    <span className="task-meta-age" title={`Last activity: ${timestamp}`}>
+      {age}
+    </span>
+  ) : null;
+}
