@@ -6,6 +6,7 @@ use serde_json::Value;
 
 use crate::agent::acp_errors::acp_error;
 use crate::agent::acp_update_projection::normalize_config_options;
+use crate::agent::ConfigOptionPolicy;
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::ConfigOptionsCatalog;
 
@@ -51,6 +52,7 @@ pub(super) async fn apply_config_options(
     active_session: &mut agent_client_protocol::ActiveSession<'static, Agent>,
     initial_options: Vec<SessionConfigOption>,
     selected_options: Option<&Value>,
+    policy: ConfigOptionPolicy,
 ) -> Result<ConfigOptionsCatalog, RuntimeError> {
     let mut selected = config_selection(selected_options)?;
     let mut catalog = normalize_config_options(agent_id, initial_options);
@@ -72,6 +74,10 @@ pub(super) async fn apply_config_options(
                 continue;
             };
             if !option.values.iter().any(|candidate| candidate.id == value) {
+                if policy == ConfigOptionPolicy::ReconcileWithAgentDefaults {
+                    selected.remove(&option.id);
+                    continue;
+                }
                 return Err(RuntimeError::InvalidParams(format!(
                     "config_options.{}",
                     option.id
@@ -99,6 +105,9 @@ pub(super) async fn apply_config_options(
     }
 
     if selected.keys().any(|id| !seen_ids.contains(id)) {
+        if policy == ConfigOptionPolicy::ReconcileWithAgentDefaults {
+            return Ok(catalog);
+        }
         let id = selected
             .keys()
             .find(|id| !initial_ids.contains(*id))

@@ -43,6 +43,7 @@ impl TaskTurnLifecycle {
                     cwd,
                     model_id,
                     config_options: None,
+                    config_option_policy: crate::agent::ConfigOptionPolicy::Strict,
                     context,
                     cancellation: TurnCancellation::new(),
                     secret_resolver: None,

@@ -112,6 +112,7 @@ pub(super) async fn open_acp_session<'a>(
                 &mut active_session,
                 initial_options,
                 request.config_options.as_ref(),
+                request.config_option_policy,
             )
             .await
             {

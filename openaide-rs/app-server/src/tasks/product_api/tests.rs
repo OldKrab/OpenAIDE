@@ -199,6 +199,59 @@ fn create_passes_selected_config_into_draft_session_preparation() {
 }
 
 #[test]
+fn create_reconciles_stale_draft_config_with_fresh_agent_defaults() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let mut draft = task_record("task-draft", "/workspace/app");
+    draft.first_prompt_sent = false;
+    draft.config_options = [("mode".to_string(), "full-access".to_string())]
+        .into_iter()
+        .collect();
+    draft.config_options_catalog = Some(mode_config_catalog("full-access"));
+    store.write_task(&draft).unwrap();
+    let agent = Arc::new(RecordingAgent {
+        config_catalog: Some(mode_config_catalog("agent-full-access")),
+        ..RecordingAgent::default()
+    });
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        agent,
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+
+    api.create(TaskCreateParams {
+        project_id: project_id_for_workspace("/workspace/app"),
+        agent_id: AgentId::from("codex"),
+        workspace_root: None,
+        config_options: Default::default(),
+    })
+    .unwrap();
+
+    wait_until(|| {
+        matches!(
+            store.read_task("task-draft").unwrap().preparation,
+            TaskPreparationRecord::Ready
+        )
+    });
+    let recovered = store.read_task("task-draft").unwrap();
+    assert_eq!(
+        recovered.config_options.get("mode").map(String::as_str),
+        Some("agent-full-access")
+    );
+    assert_eq!(
+        recovered
+            .config_options_catalog
+            .expect("fresh catalog")
+            .options[0]
+            .current_value,
+        "agent-full-access"
+    );
+}
+
+#[test]
 fn shutdown_marks_storage_clean_after_task_runtime_shutdown() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
@@ -4073,6 +4126,27 @@ fn config_catalog(current_value: &str) -> ConfigOptionsCatalog {
                     group_label: None,
                 },
             ],
+        }],
+    }
+}
+
+fn mode_config_catalog(current_value: &str) -> ConfigOptionsCatalog {
+    ConfigOptionsCatalog {
+        agent_id: "codex".to_string(),
+        status: ConfigOptionsStatus::Ready,
+        options: vec![ConfigOption {
+            id: "mode".to_string(),
+            label: "Approval Preset".to_string(),
+            description: None,
+            category: Some(ConfigOptionCategory::Mode),
+            current_value: current_value.to_string(),
+            values: vec![ConfigOptionValue {
+                id: "agent-full-access".to_string(),
+                label: "Full Access".to_string(),
+                description: None,
+                group_id: None,
+                group_label: None,
+            }],
         }],
     }
 }

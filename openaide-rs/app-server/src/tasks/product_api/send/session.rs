@@ -103,6 +103,7 @@ impl TaskProductApi {
                 cwd: task.workspace_root.clone(),
                 model_id: task.model_id.clone(),
                 config_options: config_options_payload(task),
+                config_option_policy: crate::agent::ConfigOptionPolicy::Strict,
                 context: Vec::new(),
                 cancellation,
                 secret_resolver: Some(self.task_secret_resolver(&task.task_id)),

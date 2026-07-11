@@ -1,6 +1,6 @@
 use openaide_app_server_protocol::errors::{ProtocolError, ProtocolErrorCode};
 
-use crate::agent::{AgentSessionResume, AgentSessionStart, TurnCancellation};
+use crate::agent::{AgentSessionResume, AgentSessionStart, ConfigOptionPolicy, TurnCancellation};
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::TaskStatus as LegacyTaskStatus;
 use crate::storage::records::{TaskPreparationRecord, TaskRecord};
@@ -31,6 +31,7 @@ impl TaskProductApi {
                 config_options: serde_json::to_value(&task.config_options)
                     .ok()
                     .filter(|value| !value.as_object().is_some_and(serde_json::Map::is_empty)),
+                config_option_policy: ConfigOptionPolicy::ReconcileWithAgentDefaults,
                 context: Vec::new(),
                 cancellation: cancellation.clone(),
                 secret_resolver: Some(self.task_secret_resolver(&task.task_id)),
@@ -76,18 +77,13 @@ impl TaskProductApi {
                 }
                 let task = ctx.task_mut();
                 task.agent_session_id = Some(session_id.clone());
-                for (config_id, value) in &config_options {
-                    task.config_options
-                        .entry(config_id.clone())
-                        .or_insert_with(|| value.clone());
-                }
-                if task.config_options_catalog.is_none() {
-                    task.config_options_catalog = config_catalog.clone();
-                }
+                // The fresh Agent catalog is authoritative after draft recovery.
+                task.config_options = config_options.clone();
+                task.config_options_catalog = config_catalog.clone();
                 if task.agent_commands_catalog.is_none() {
                     task.agent_commands_catalog = commands_catalog.clone();
                 }
-                task.model_id = task.model_id.clone().or(model_id.clone());
+                task.model_id = model_id.clone();
                 task.preparation = TaskPreparationRecord::Ready;
                 task.updated_at = now.clone();
                 Ok(TaskMutationResult::Changed)

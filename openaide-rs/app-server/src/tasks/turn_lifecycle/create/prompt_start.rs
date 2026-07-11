@@ -41,6 +41,7 @@ impl TaskTurnLifecycle {
                 config_options: serde_json::to_value(&selected_config_options)
                     .ok()
                     .filter(|value| !value.as_object().is_some_and(serde_json::Map::is_empty)),
+                config_option_policy: crate::agent::ConfigOptionPolicy::Strict,
                 context: params.context.clone(),
                 cancellation: TurnCancellation::new(),
                 secret_resolver: None,

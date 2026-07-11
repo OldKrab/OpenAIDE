@@ -63,5 +63,5 @@ pub use runtime::{
     AgentMetadataField, AgentProbeRequest, AgentPrompt, AgentRuntime, AgentSecretResolver,
     AgentSession, AgentSessionDelete, AgentSessionEventSink, AgentSessionLoad,
     AgentSessionMetadataUpdate, AgentSessionResume, AgentSessionSetConfigOptionRequest,
-    AgentSessionStart, TurnCancellation,
+    AgentSessionStart, ConfigOptionPolicy, TurnCancellation,
 };

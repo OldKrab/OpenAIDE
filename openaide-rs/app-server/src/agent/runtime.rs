@@ -65,9 +65,19 @@ pub struct AgentSessionStart {
     pub cwd: String,
     pub model_id: Option<String>,
     pub config_options: Option<Value>,
+    pub config_option_policy: ConfigOptionPolicy,
     pub context: Vec<Attachment>,
     pub cancellation: TurnCancellation,
     pub secret_resolver: Option<Arc<dyn AgentSecretResolver>>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ConfigOptionPolicy {
+    /// Reject selections that are absent from the Agent's fresh catalog.
+    #[default]
+    Strict,
+    /// Keep fresh Agent defaults when persisted draft selections are stale.
+    ReconcileWithAgentDefaults,
 }
 
 #[derive(Clone)]

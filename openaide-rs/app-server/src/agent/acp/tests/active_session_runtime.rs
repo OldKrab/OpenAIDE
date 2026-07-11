@@ -142,10 +142,29 @@ fn start_request(task_id: &str, cwd: String) -> AgentSessionStart {
         cwd,
         model_id: None,
         config_options: None,
+        config_option_policy: crate::agent::ConfigOptionPolicy::Strict,
         context: Vec::new(),
         cancellation: TurnCancellation::new(),
         secret_resolver: None,
     }
+}
+
+#[test]
+fn draft_recovery_ignores_config_missing_from_fresh_agent_catalog() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((runtime, _log_path)) = fixture_runtime(&temp, "reconciled-session") else {
+        return;
+    };
+    let mut request = start_request("task-stale-config", cwd_string());
+    request.config_options = Some(serde_json::json!({ "mode": "full-access" }));
+    request.config_option_policy = crate::agent::ConfigOptionPolicy::ReconcileWithAgentDefaults;
+
+    let session = runtime
+        .start_session(request)
+        .expect("reconcile stale option");
+
+    assert_eq!(session.session_id, "reconciled-session");
+    assert!(session.config_options.is_empty());
 }
 
 fn inactive_runtime() -> AcpAgentRuntime {
