@@ -3,9 +3,9 @@ import type { ComponentProps, ComponentType } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { TaskSnapshot } from "@openaide/app-shell-contracts";
 import type { AgentOption } from "../state/composerOptions";
-import { selectionWithProject } from "../state/composerOptions";
+import { selectionWithAgent, selectionWithProject } from "../state/composerOptions";
 import { appReducer, type AppAction } from "../state/appReducer";
-import { createInitialState } from "../state/store";
+import { createInitialState as createStoreInitialState } from "../state/store";
 import { Composer } from "./Composer";
 import { NewTaskView as ProductionNewTaskView } from "./NewTaskView";
 import type { TaskFileBrowserCallbacks } from "./appControllerCallbackTypes";
@@ -17,6 +17,12 @@ beforeEach(() => {
 type TestNewTaskViewProps = Omit<ComponentProps<typeof ProductionNewTaskView>, "onRemoveAttachment">
   & Partial<Pick<ComponentProps<typeof ProductionNewTaskView>, "onRemoveAttachment">>;
 const NewTaskView = ProductionNewTaskView as ComponentType<TestNewTaskViewProps>;
+
+function createInitialState() {
+  const state = createStoreInitialState();
+  state.newTask.selection = selectionWithAgent(state.newTask.selection, "codex", "Codex");
+  return state;
+}
 
 describe("NewTaskView", () => {
   it("uses fixed VS Code workspace context without rendering project selection", () => {

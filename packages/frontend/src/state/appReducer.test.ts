@@ -84,7 +84,7 @@ describe("app reducer composer state", () => {
     let state = createInitialState();
     state = appReducer(state, {
       type: "projects",
-      activeProjectId: "project-2",
+      initialProjectId: "project-2",
       projects: [
         { projectId: "project-1", label: "API" },
         { projectId: "project-2", label: "App" },
@@ -128,7 +128,7 @@ describe("app reducer composer state", () => {
     let state = createInitialState();
     state = appReducer(state, {
       type: "projects",
-      activeProjectId: "project-1",
+      initialProjectId: "project-1",
       projects: [
         { projectId: "project-1", label: "API" },
         { projectId: "project-2", label: "App" },
@@ -142,7 +142,7 @@ describe("app reducer composer state", () => {
 
     state = appReducer(state, {
       type: "projects",
-      activeProjectId: "project-1",
+      initialProjectId: "project-1",
       projects: [
         { projectId: "project-1", label: "API" },
         { projectId: "project-2", label: "Renamed App" },
@@ -157,7 +157,7 @@ describe("app reducer composer state", () => {
     let state = createInitialState();
     state = appReducer(state, {
       type: "projects",
-      activeProjectId: "project-1",
+      initialProjectId: "project-1",
       projects: [{ projectId: "project-1", label: "OpenAIDE" }],
     });
     state = appReducer(state, { type: "newTask:projectId", projectId: "project-1" });

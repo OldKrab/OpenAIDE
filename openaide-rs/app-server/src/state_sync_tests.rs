@@ -100,10 +100,7 @@ fn filtered_events_keep_each_client_delivery_cursor_contiguous() {
             state_root_id: StateRootId::from("root-1"),
         },
         AppServerEventPayload::AgentCollectionUpdated {
-            agents: AgentCollectionSnapshot {
-                agents: Vec::new(),
-                default_agent_id: None,
-            },
+            agents: AgentCollectionSnapshot { agents: Vec::new() },
         },
         |client_id| Some(delivery(client_id)),
         AppServerTime(2),
@@ -153,10 +150,7 @@ fn agent_collection_update_delivers_to_agent_subscribers() {
             state_root_id: StateRootId::from("root-1"),
         },
         AppServerEventPayload::AgentCollectionUpdated {
-            agents: AgentCollectionSnapshot {
-                agents: Vec::new(),
-                default_agent_id: None,
-            },
+            agents: AgentCollectionSnapshot { agents: Vec::new() },
         },
         |client_id| {
             Some(Delivery {
@@ -191,7 +185,6 @@ fn project_collection_update_delivers_to_project_subscribers() {
         AppServerEventPayload::ProjectCollectionUpdated {
             projects: ProjectCollectionSnapshot {
                 projects: Vec::new(),
-                active_project_id: None,
             },
         },
         |client_id| {
@@ -236,7 +229,6 @@ fn event_matching_multiple_subscriptions_is_delivered_once_per_client() {
         AppServerEventPayload::ProjectCollectionUpdated {
             projects: ProjectCollectionSnapshot {
                 projects: Vec::new(),
-                active_project_id: None,
             },
         },
         |client_id| Some(delivery(client_id)),
@@ -266,7 +258,6 @@ fn project_collection_update_advances_task_navigation_subscribers() {
         AppServerEventPayload::ProjectCollectionUpdated {
             projects: ProjectCollectionSnapshot {
                 projects: Vec::new(),
-                active_project_id: None,
             },
         },
         |client_id| {
@@ -304,7 +295,6 @@ fn project_collection_update_advances_task_subscribers() {
         AppServerEventPayload::ProjectCollectionUpdated {
             projects: ProjectCollectionSnapshot {
                 projects: Vec::new(),
-                active_project_id: None,
             },
         },
         |client_id| {

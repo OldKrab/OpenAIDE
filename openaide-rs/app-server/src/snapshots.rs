@@ -5,11 +5,12 @@ use std::sync::Arc;
 use openaide_app_server_protocol::ids::{AgentId, ProjectId, ServerId, StateRootId, TaskId};
 use openaide_app_server_protocol::snapshot::{
     AgentCollectionSnapshot, ChatSnapshot, ClientSnapshot, ClientSnapshotScope,
-    LiveSessionDataState, ProjectCollectionSnapshot, ProtocolVersion, ServerCapabilities,
-    ServerSnapshot, StateRootSnapshot, TaskAgentCommandsSnapshot, TaskAgentConfigSnapshot,
-    TaskLifecycle, TaskNavigationSnapshot, TaskPreparationAction, TaskPreparationSnapshot,
-    TaskSendBlocker, TaskSendBlockerKind, TaskSendCapabilitySnapshot, TaskSendCapabilityState,
-    TaskSetupBlocker, TaskSetupBlockerKind, TaskSnapshot, TaskStatus, TaskSummary,
+    LiveSessionDataState, NewTaskDefaultsSnapshot, ProjectCollectionSnapshot, ProtocolVersion,
+    ServerCapabilities, ServerSnapshot, StateRootSnapshot, TaskAgentCommandsSnapshot,
+    TaskAgentConfigSnapshot, TaskLifecycle, TaskNavigationSnapshot, TaskPreparationAction,
+    TaskPreparationSnapshot, TaskSendBlocker, TaskSendBlockerKind, TaskSendCapabilitySnapshot,
+    TaskSendCapabilityState, TaskSetupBlocker, TaskSetupBlockerKind, TaskSnapshot, TaskStatus,
+    TaskSummary,
 };
 use openaide_app_server_protocol::state::{SubscriptionScope, SubscriptionSnapshot};
 
@@ -37,15 +38,62 @@ pub trait SnapshotProvider {
     ) -> Result<SubscriptionSnapshot, ProtocolError>;
 }
 
+pub trait NewTaskDefaultsSnapshotSource: Send + Sync {
+    fn snapshot(&self) -> Result<NewTaskDefaultsSnapshot, ProtocolError>;
+}
+
+impl NewTaskDefaultsSnapshotSource for crate::storage::Store {
+    fn snapshot(&self) -> Result<NewTaskDefaultsSnapshot, ProtocolError> {
+        self.read_new_task_defaults()
+            .map_err(|error| ProtocolError {
+                code: ProtocolErrorCode::Internal,
+                message: format!("Failed to read New Task defaults: {error}"),
+                recoverable: true,
+                target: None,
+            })
+    }
+}
+
 #[derive(Clone)]
 pub struct SnapshotBuilder {
     server_id: ServerId,
     state_root_id: StateRootId,
+    new_task_defaults: Arc<dyn NewTaskDefaultsSnapshotSource>,
     agents: Arc<dyn AgentCollectionSnapshotSource>,
     projects: Arc<dyn ProjectCollectionSnapshotSource>,
     settings: Arc<dyn SettingsSnapshotSource>,
     task_navigation: Arc<dyn TaskNavigationSnapshotSource>,
     task_snapshots: Arc<dyn TaskSnapshotSource>,
+}
+
+/// Groups snapshot projections so adding one source does not widen every construction call.
+pub struct SnapshotSources {
+    new_task_defaults: Arc<dyn NewTaskDefaultsSnapshotSource>,
+    agents: Arc<dyn AgentCollectionSnapshotSource>,
+    projects: Arc<dyn ProjectCollectionSnapshotSource>,
+    settings: Arc<dyn SettingsSnapshotSource>,
+    task_navigation: Arc<dyn TaskNavigationSnapshotSource>,
+    task_snapshots: Arc<dyn TaskSnapshotSource>,
+}
+
+impl SnapshotSources {
+    pub fn new(
+        new_task_defaults: Arc<dyn NewTaskDefaultsSnapshotSource>,
+        agents: Arc<dyn AgentCollectionSnapshotSource>,
+        projects: Arc<dyn ProjectCollectionSnapshotSource>,
+        settings: Arc<dyn SettingsSnapshotSource>,
+        task_navigation: Arc<dyn TaskNavigationSnapshotSource>,
+        task_snapshots: Arc<dyn TaskSnapshotSource>,
+    ) -> Self {
+        Self {
+            new_task_defaults,
+            agents,
+            projects,
+            settings,
+            task_navigation,
+            task_snapshots,
+        }
+    }
 }
 
 impl SnapshotBuilder {
@@ -61,31 +109,31 @@ impl SnapshotBuilder {
         Self::with_sources(
             server_id,
             state_root_id,
-            Arc::new(EmptyAgentCollection),
-            Arc::new(EmptyProjectCollection),
-            Arc::new(SettingsCatalog::default()),
-            task_navigation,
-            Arc::new(EmptyTaskSnapshots),
+            SnapshotSources::new(
+                Arc::new(EmptyNewTaskDefaults),
+                Arc::new(EmptyAgentCollection),
+                Arc::new(EmptyProjectCollection),
+                Arc::new(SettingsCatalog::default()),
+                task_navigation,
+                Arc::new(EmptyTaskSnapshots),
+            ),
         )
     }
 
     pub fn with_sources(
         server_id: ServerId,
         state_root_id: StateRootId,
-        agents: Arc<dyn AgentCollectionSnapshotSource>,
-        projects: Arc<dyn ProjectCollectionSnapshotSource>,
-        settings: Arc<dyn SettingsSnapshotSource>,
-        task_navigation: Arc<dyn TaskNavigationSnapshotSource>,
-        task_snapshots: Arc<dyn TaskSnapshotSource>,
+        sources: SnapshotSources,
     ) -> Self {
         Self {
             server_id,
             state_root_id,
-            agents,
-            projects,
-            settings,
-            task_navigation,
-            task_snapshots,
+            new_task_defaults: sources.new_task_defaults,
+            agents: sources.agents,
+            projects: sources.projects,
+            settings: sources.settings,
+            task_navigation: sources.task_navigation,
+            task_snapshots: sources.task_snapshots,
         }
     }
 
@@ -122,6 +170,7 @@ impl SnapshotBuilder {
                 shell_kind: ctx.shell.kind,
                 surface: requested_surface,
             },
+            new_task_defaults: self.new_task_defaults.snapshot()?,
             projects: Some(self.projects.snapshot()?),
             agents: Some(self.agents.snapshot()?),
             tasks: Some(self.task_navigation.snapshot(None)?),
@@ -175,12 +224,18 @@ impl SnapshotProvider for SnapshotBuilder {
 #[derive(Debug)]
 struct EmptyAgentCollection;
 
+#[derive(Debug)]
+struct EmptyNewTaskDefaults;
+
+impl NewTaskDefaultsSnapshotSource for EmptyNewTaskDefaults {
+    fn snapshot(&self) -> Result<NewTaskDefaultsSnapshot, ProtocolError> {
+        Ok(NewTaskDefaultsSnapshot::default())
+    }
+}
+
 impl AgentCollectionSnapshotSource for EmptyAgentCollection {
     fn snapshot(&self) -> Result<AgentCollectionSnapshot, ProtocolError> {
-        Ok(AgentCollectionSnapshot {
-            agents: Vec::new(),
-            default_agent_id: None,
-        })
+        Ok(AgentCollectionSnapshot { agents: Vec::new() })
     }
 }
 
@@ -191,7 +246,6 @@ impl ProjectCollectionSnapshotSource for EmptyProjectCollection {
     fn snapshot(&self) -> Result<ProjectCollectionSnapshot, ProtocolError> {
         Ok(ProjectCollectionSnapshot {
             projects: Vec::new(),
-            active_project_id: None,
         })
     }
 }

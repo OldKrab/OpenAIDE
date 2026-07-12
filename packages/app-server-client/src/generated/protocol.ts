@@ -512,7 +512,7 @@ export type AppServerEventPayload = { "kind": "snapshotReplaced", snapshot: Clie
 
 export type TextChunk = { sequence: number, text: string, finalChunk?: boolean, };
 
-export type ClientSnapshot = { cursor: EventCursor, server: ServerSnapshot, stateRoot: StateRootSnapshot, client: ClientSnapshotScope, projects?: ProjectCollectionSnapshot | null, agents?: AgentCollectionSnapshot | null, tasks?: TaskNavigationSnapshot | null, activeTask?: TaskSnapshot | null, settings?: SettingsSnapshot | null, pendingRequests?: Array<PendingRequestSnapshot>, };
+export type ClientSnapshot = { cursor: EventCursor, server: ServerSnapshot, stateRoot: StateRootSnapshot, client: ClientSnapshotScope, newTaskDefaults: NewTaskDefaultsSnapshot, projects?: ProjectCollectionSnapshot | null, agents?: AgentCollectionSnapshot | null, tasks?: TaskNavigationSnapshot | null, activeTask?: TaskSnapshot | null, settings?: SettingsSnapshot | null, pendingRequests?: Array<PendingRequestSnapshot>, };
 
 export type ServerSnapshot = { serverId: ServerId, protocolVersion: ProtocolVersion, capabilities?: ServerCapabilities, };
 
@@ -524,11 +524,13 @@ export type StateRootSnapshot = { stateRootId: StateRootId, };
 
 export type ClientSnapshotScope = { clientInstanceId: ClientInstanceId, shellKind: ShellKind, surface: RequestedSurface, };
 
-export type ProjectCollectionSnapshot = { projects: Array<ProjectSummary>, activeProjectId?: ProjectId | null, };
+export type NewTaskDefaultsSnapshot = { projectId?: ProjectId | null, agentId?: AgentId | null, };
+
+export type ProjectCollectionSnapshot = { projects: Array<ProjectSummary>, };
 
 export type ProjectSummary = { projectId: ProjectId, label: string, };
 
-export type AgentCollectionSnapshot = { agents: Array<AgentSummary>, defaultAgentId?: AgentId | null, };
+export type AgentCollectionSnapshot = { agents: Array<AgentSummary>, };
 
 export type AgentSummary = { agentId: AgentId, label: string, status: AgentStatus, capabilities?: AgentCapabilities, };
 

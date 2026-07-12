@@ -52,6 +52,7 @@ impl Store {
     }
 
     fn write_app_preferences(&self, preferences: &AppPreferences) -> Result<(), RuntimeError> {
+        let _guard = self.lock_settings_write();
         atomic::write_json(
             &self.app_preferences_path(),
             &StoredAppPreferences::from(preferences.clone()),

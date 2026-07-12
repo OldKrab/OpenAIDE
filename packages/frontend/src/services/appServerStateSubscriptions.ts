@@ -302,7 +302,6 @@ function actionsFromSubscriptionSnapshot(
       context.projects = snapshot.projects.projects;
       return [{
         type: "projects",
-        activeProjectId: snapshot.projects.activeProjectId ?? undefined,
         projects: snapshot.projects.projects.map((project) => ({
           projectId: project.projectId,
           label: project.label,

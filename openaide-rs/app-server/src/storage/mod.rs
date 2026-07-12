@@ -3,6 +3,7 @@ pub mod atomic;
 pub mod cursor;
 pub mod id;
 pub mod message_store;
+pub mod new_task_defaults;
 pub mod records;
 pub mod root;
 pub mod send_receipts;
@@ -13,7 +14,6 @@ use std::path::{Path, PathBuf};
 #[cfg(test)]
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
-#[cfg(test)]
 use std::sync::Mutex;
 
 use crate::protocol::errors::RuntimeError;
@@ -30,6 +30,7 @@ struct StoreInner {
     root: PathBuf,
     recovery: RecoveryClassification,
     open_guard: StorageOpenGuard,
+    settings_write_lock: Mutex<()>,
     #[cfg(test)]
     fail_next_tail_page: AtomicBool,
     #[cfg(test)]
@@ -63,6 +64,7 @@ impl Store {
                 root,
                 recovery: open.recovery,
                 open_guard: open.guard,
+                settings_write_lock: Mutex::new(()),
                 #[cfg(test)]
                 fail_next_tail_page: AtomicBool::new(false),
                 #[cfg(test)]
@@ -102,6 +104,13 @@ impl Store {
 
     pub fn settings_dir(&self) -> PathBuf {
         self.inner.root.join("settings")
+    }
+
+    pub(crate) fn lock_settings_write(&self) -> std::sync::MutexGuard<'_, ()> {
+        self.inner
+            .settings_write_lock
+            .lock()
+            .expect("settings write lock poisoned")
     }
 
     pub fn task_dir(&self, task_id: &str) -> Result<PathBuf, RuntimeError> {

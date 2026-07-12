@@ -1,8 +1,6 @@
 use openaide_app_server_protocol::ids::AgentId;
 use uuid::Uuid;
 
-use crate::agent::registry::{AgentDefinitionSummary, CODEX_AGENT_ID};
-
 const CUSTOM_AGENT_PREFIX: &str = "custom.";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,14 +44,6 @@ pub(crate) fn valid_env_name(value: &str) -> bool {
     let mut chars = value.chars();
     matches!(chars.next(), Some(first) if first == '_' || first.is_ascii_alphabetic())
         && chars.all(|item| item == '_' || item.is_ascii_alphanumeric())
-}
-
-pub(crate) fn default_agent_id(summaries: &[AgentDefinitionSummary]) -> Option<AgentId> {
-    summaries
-        .iter()
-        .find(|agent| agent.id == CODEX_AGENT_ID)
-        .or_else(|| summaries.first())
-        .map(|agent| AgentId::from(agent.id.clone()))
 }
 
 fn valid_agent_id(value: &str) -> bool {

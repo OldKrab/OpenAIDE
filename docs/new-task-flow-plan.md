@@ -1,6 +1,6 @@
 # New Task Flow Implementation Plan
 
-Status: accepted design, not implemented
+Status: accepted design, implementation in progress (`AP-003`, `AP-005`, `AP-006`, and `AP-008` resolved)
 
 This focused plan is the implementation handoff for the New Task refactor. It resolves `AP-003` and `AP-005` through `AP-008` in `docs/architecture-problems.md` and must be implemented through a feature branch and pull request. A new agent session should read `CONTEXT.md`, `PRODUCT.md`, ADR 0022, `docs/refactor-plan.md`, and this file before changing code.
 
@@ -58,7 +58,7 @@ Selection priority is:
 1. the client's retained valid selection;
 2. an explicit App Shell Project hint, such as the current VS Code Project Context;
 3. App Server's persisted last-used default when it remains available;
-4. a documented deterministic available fallback.
+4. the first available Project in collection label/id order and the first available Agent in registry order.
 
 App Server returns the global defaults in the initialized client snapshot. Frontend adopts them only when it has no retained choice and validates them against the current Project and Agent collections. App Server updates the global last-used values as part of the first successful send for the corresponding New Task; no extra preference request is required. Updates do not overwrite selections already held by connected clients.
 

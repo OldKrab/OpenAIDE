@@ -215,7 +215,7 @@ describe("app controller mounted lifecycle", () => {
             { agentId: "opencode" as never, label: "OpenCode", status: "disconnected" },
             { agentId: "custom.one" as never, label: "Custom One", status: "disconnected" },
           ],
-          defaultAgentId: "custom.one",
+          newTaskDefaultAgentId: "custom.one",
         }),
       })),
       request: vi.fn(),
@@ -454,7 +454,7 @@ describe("app controller mounted lifecycle", () => {
             { agentId: "opencode" as never, label: "OpenCode", status: "disconnected" },
             { agentId: "custom.one" as never, label: "Custom One", status: "disconnected" },
           ],
-          defaultAgentId: "custom.one",
+          newTaskDefaultAgentId: "custom.one",
         }),
       });
       await deferred.promise;
@@ -1365,7 +1365,6 @@ describe("app controller mounted lifecycle", () => {
             snapshot: {
               kind: "projects",
               projects: {
-                activeProjectId: "project_1",
                 projects: [{ projectId: "project_1", label: "OpenAIDE" }],
               },
             },
@@ -1378,7 +1377,6 @@ describe("app controller mounted lifecycle", () => {
             snapshot: {
               kind: "agents",
               agents: {
-                defaultAgentId: "codex",
                 agents: [{ agentId: "codex", label: "Codex", status: "connected" }],
               },
             },
@@ -3172,7 +3170,7 @@ function clientSnapshot(
     activeTaskTitle?: string;
     activeTaskStatus?: "idle" | "running";
     agents?: NonNullable<ClientSnapshot["agents"]>["agents"];
-    defaultAgentId?: string;
+    newTaskDefaultAgentId?: string;
     includeTasks?: boolean;
     includeActiveTask?: boolean;
     appPreferences?: NonNullable<ClientSnapshot["settings"]>["preferences"];
@@ -3195,8 +3193,10 @@ function clientSnapshot(
       shellKind: "vscodeExtension",
       surface: { kind: "home" },
     },
+    newTaskDefaults: {
+      agentId: (options.newTaskDefaultAgentId ?? "codex") as never,
+    },
     agents: {
-      defaultAgentId: (options.defaultAgentId ?? "codex") as never,
       agents: options.agents ?? [{ agentId: "codex" as never, label: "Codex", status: "connected" }],
     },
     settings: {
@@ -3298,7 +3298,7 @@ function nonTaskSubscriptionSnapshot(
       scope,
       snapshot: {
         kind: "projects" as const,
-        projects: { activeProjectId: "project_1" as never, projects: [] },
+        projects: { projects: [] },
       },
     };
   }
@@ -3309,7 +3309,6 @@ function nonTaskSubscriptionSnapshot(
       snapshot: {
         kind: "agents" as const,
         agents: {
-          defaultAgentId: "codex" as never,
           agents: [{ agentId: "codex" as never, label: "Codex", status: "connected" as const }],
         },
       },

@@ -119,7 +119,7 @@ User option changes are App Server requests that call the Agent and later commit
 
 ## AP-008: New Task defaults are conflated with collection fallbacks
 
-**Status:** confirmed
+**Status:** resolved
 
 **Area:** New Task Project and Agent selection
 
@@ -132,6 +132,8 @@ This conflates three different concepts: a client-local last-used selection, an 
 **Desired direction:** Let each live client remember its last-used Project and Agent and reuse them when they remain valid. Persist state-root-wide last-used Project and Agent values in App Server only as initial defaults for clients without retained selection, updating them as part of an already-required successful first send rather than through extra selection traffic. When neither client selection nor valid persisted default exists, apply one documented deterministic fallback after considering the shell Project hint.
 
 The accepted implementation design for `AP-003` and `AP-005` through `AP-008` is recorded in `docs/new-task-flow-plan.md`.
+
+**Resolution:** Project and Agent collection snapshots now contain only collections. `client/initialize` returns a separate state-root-wide `newTaskDefaults` value, while Frontend retains each client's selection locally and validates it through one priority function. A successful first Send from a New Task persists that Task's actual Project and Agent as the next-client defaults; selector changes create no App Server preference traffic.
 
 ## AP-009: Composer sendability is duplicated and New Task ignores authoritative readiness
 

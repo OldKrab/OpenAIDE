@@ -1,9 +1,11 @@
 use openaide_app_server_protocol::errors::{ErrorTarget, ProtocolError, ProtocolErrorCode};
 use openaide_app_server_protocol::ids::{ClientInstanceId, MessageId, TurnId};
+use openaide_app_server_protocol::snapshot::NewTaskDefaultsSnapshot;
 use openaide_app_server_protocol::task::TaskSendParams;
 use uuid::Uuid;
 
 use crate::attachment_runtime::{AttachmentOwner, ResolvedSendAttachments};
+use crate::projects::ProjectIdentity;
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::TaskStatus as LegacyTaskStatus;
 use crate::storage::records::{TaskLifecycle, TaskPreparationRecord, TaskRecord};
@@ -192,6 +194,21 @@ impl TaskProductApi {
         let sync_generation = sync_generation.ok_or_else(|| {
             internal_error("Committed send did not acquire history sync ownership")
         })?;
+        if matches!(existing_task.lifecycle, TaskLifecycle::New { .. }) {
+            let project = ProjectIdentity::from_workspace_root(&existing_task.workspace_root);
+            let defaults = NewTaskDefaultsSnapshot {
+                project_id: Some(project.project_id),
+                agent_id: Some(existing_task.agent_id.clone().into()),
+            };
+            // Defaults are auxiliary initialization state. A preference write failure must not
+            // invalidate a user message that is already durably accepted.
+            if let Err(error) = self.store.write_new_task_defaults(&defaults) {
+                crate::logging::error(
+                    "new_task_defaults_write_failed",
+                    serde_json::json!({ "task_id": task_id, "error": error.to_string() }),
+                );
+            }
+        }
         let attachments = attachment_reservation.commit();
         let committed_send =
             CommittedSend::new(task_id.clone(), turn_id.clone(), user_message_id.clone());

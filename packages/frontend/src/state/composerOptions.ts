@@ -62,8 +62,8 @@ export const isolationOptions: IsolationOption[] = [
 
 export function defaultSelection(workspace?: WorkspaceRoot): ComposerSelection {
   return {
-    agentId: defaultAgent.id,
-    agentLabel: defaultAgent.label,
+    agentId: "",
+    agentLabel: "",
     isolation: "local",
     configOptions: {},
     projectId: workspace?.projectId,

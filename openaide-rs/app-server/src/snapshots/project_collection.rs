@@ -39,10 +39,7 @@ impl ProjectCollectionSnapshotSource for ProjectCollectionStore {
             self.store.list_tasks().map_err(snapshot_read_error)?,
             &self.configured_roots,
         );
-        Ok(ProjectCollectionSnapshot {
-            projects,
-            active_project_id: None,
-        })
+        Ok(ProjectCollectionSnapshot { projects })
     }
 }
 

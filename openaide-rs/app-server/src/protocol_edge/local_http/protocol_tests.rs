@@ -329,6 +329,7 @@ fn client_snapshot() -> ClientSnapshot {
             shell_kind: ShellKind::Web,
             surface: RequestedSurface::Home,
         },
+        new_task_defaults: Default::default(),
         projects: None,
         agents: None,
         tasks: None,
@@ -348,7 +349,6 @@ fn app_event(previous_cursor: &str, cursor: &str) -> AppServerEvent {
         payload: AppServerEventPayload::ProjectCollectionUpdated {
             projects: ProjectCollectionSnapshot {
                 projects: Vec::new(),
-                active_project_id: None,
             },
         },
     }

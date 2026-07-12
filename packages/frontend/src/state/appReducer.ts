@@ -47,7 +47,7 @@ type AppActionPayload =
   | { type: "snapshot"; snapshot: TaskSnapshot; intent: SnapshotIntent }
   | { type: "taskScroll:record"; taskId: string; scrollState: TaskChatScrollState }
   | { type: "prompt"; prompt: string }
-  | { type: "projects"; projects: ProjectOption[]; activeProjectId?: string }
+  | { type: "projects"; projects: ProjectOption[]; initialProjectId?: string }
   | { type: "workspace:roots"; roots: WorkspaceRoot[] }
   | { type: "submit:start"; prompt?: string; context?: ComposerAttachment[]; idempotencyKey?: import("@openaide/app-server-client").TaskSendIdempotencyKey }
   | { type: "submit:attempt"; idempotencyKey: import("@openaide/app-server-client").TaskSendIdempotencyKey }
@@ -306,7 +306,7 @@ function reduceGlobalState(state: AppState, action: GlobalAction): AppState {
     case "projects": {
       const selected = state.newTask.selection.projectId
         ? action.projects.find((project) => project.projectId === state.newTask.selection.projectId)
-        : selectedProject(action.projects, action.activeProjectId);
+        : selectedProject(action.projects, action.initialProjectId);
       const selection = selected
         ? selectionWithProject(state.newTask.selection, selected)
         : state.newTask.selection;
@@ -370,6 +370,6 @@ function taskListCacheKey(showArchived: boolean) {
   return showArchived ? "archived" : "active";
 }
 
-function selectedProject(projects: ProjectOption[], activeProjectId: string | undefined) {
-  return projects.find((project) => project.projectId === activeProjectId) ?? projects[0];
+function selectedProject(projects: ProjectOption[], initialProjectId: string | undefined) {
+  return projects.find((project) => project.projectId === initialProjectId) ?? projects[0];
 }

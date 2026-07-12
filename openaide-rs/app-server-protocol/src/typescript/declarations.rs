@@ -71,10 +71,10 @@ use crate::snapshot::{
     AgentSlashCommandInputSnapshot, AgentSlashCommandSnapshot, AgentStatus, AgentSummary,
     AttachmentKind, AttachmentSnapshot, ChatItem, ChatItemStatus, ChatRole, ChatSnapshot,
     ClientSnapshot, ClientSnapshotScope, LiveSessionDataState, MessagePart,
-    PendingAgentConfigChange, PendingRequestKind, PendingRequestScope, PendingRequestSnapshot,
-    PermissionMessageDecision, PermissionMessageOption, PermissionMessageOptionKind,
-    PermissionMessageState, ProjectCollectionSnapshot, ProjectSummary, ProtocolVersion,
-    QuestionMessageAction, QuestionMessageState, RecoveryAction, RecoverySnapshot,
+    NewTaskDefaultsSnapshot, PendingAgentConfigChange, PendingRequestKind, PendingRequestScope,
+    PendingRequestSnapshot, PermissionMessageDecision, PermissionMessageOption,
+    PermissionMessageOptionKind, PermissionMessageState, ProjectCollectionSnapshot, ProjectSummary,
+    ProtocolVersion, QuestionMessageAction, QuestionMessageState, RecoveryAction, RecoverySnapshot,
     ServerCapabilities, ServerSnapshot, SettingsSnapshot, StateRootSnapshot,
     TaskAgentCommandsSnapshot, TaskAgentConfigSnapshot, TaskHistorySyncSnapshot, TaskLifecycle,
     TaskNavigationSnapshot, TaskPreparationAction, TaskPreparationSnapshot, TaskPreparationStep,
@@ -329,6 +329,7 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<ServerCapabilities>(output, config);
     push_decl::<StateRootSnapshot>(output, config);
     push_decl::<ClientSnapshotScope>(output, config);
+    push_decl::<NewTaskDefaultsSnapshot>(output, config);
     push_decl::<ProjectCollectionSnapshot>(output, config);
     push_decl::<ProjectSummary>(output, config);
     push_decl::<AgentCollectionSnapshot>(output, config);

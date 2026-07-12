@@ -13,7 +13,7 @@ use openaide_app_server_protocol::state::{SubscriptionScope, SubscriptionSnapsho
 
 use super::{
     AgentRegistrySnapshotSource, EmptyTaskNavigation, ProjectCollectionSnapshotSource,
-    SnapshotBuilder, SnapshotProvider, TaskListSnapshot, TaskSnapshotSource,
+    SnapshotBuilder, SnapshotProvider, SnapshotSources, TaskListSnapshot, TaskSnapshotSource,
 };
 use crate::agent::registry::{AgentRegistry, CODEX_AGENT_ID};
 use crate::client_lifecycle::{ClientContext, ConnectionId};
@@ -33,7 +33,6 @@ fn client_snapshot_includes_backend_owned_agent_collection() {
         .unwrap();
 
     let agents = snapshot.agents.unwrap();
-    assert_eq!(agents.default_agent_id, Some(AgentId::from(CODEX_AGENT_ID)));
     assert_eq!(agents.agents.len(), 2);
     assert!(agents
         .agents
@@ -57,6 +56,23 @@ fn client_snapshot_includes_backend_owned_project_collection() {
 }
 
 #[test]
+fn client_snapshot_keeps_new_task_defaults_separate_from_collections() {
+    let snapshot = builder()
+        .client_snapshot(
+            &ctx(),
+            RequestedSurface::Home,
+            &CursorSequencer::new().read_token(),
+        )
+        .unwrap();
+
+    assert_eq!(
+        snapshot.new_task_defaults.project_id,
+        Some("project-1".into())
+    );
+    assert_eq!(snapshot.new_task_defaults.agent_id, Some("codex".into()));
+}
+
+#[test]
 fn agent_subscription_uses_backend_owned_agent_collection() {
     let SubscriptionSnapshot::Agents { agents } = builder()
         .snapshot(
@@ -69,7 +85,6 @@ fn agent_subscription_uses_backend_owned_agent_collection() {
         panic!("expected agents snapshot");
     };
 
-    assert_eq!(agents.default_agent_id, Some(AgentId::from(CODEX_AGENT_ID)));
     assert_eq!(agents.agents[0].agent_id, AgentId::from(CODEX_AGENT_ID));
 }
 
@@ -175,13 +190,16 @@ fn builder() -> SnapshotBuilder {
     SnapshotBuilder::with_sources(
         "server-1".into(),
         "root-1".into(),
-        Arc::new(AgentRegistrySnapshotSource::new(
-            AgentRegistry::default_built_ins(),
-        )),
-        Arc::new(StaticProjectCollection),
-        Arc::new(SettingsCatalog::default()),
-        Arc::new(EmptyTaskNavigation),
-        Arc::new(StaticTaskSnapshots),
+        SnapshotSources::new(
+            Arc::new(FixedNewTaskDefaultsForTest),
+            Arc::new(AgentRegistrySnapshotSource::new(
+                AgentRegistry::default_built_ins(),
+            )),
+            Arc::new(StaticProjectCollection),
+            Arc::new(SettingsCatalog::default()),
+            Arc::new(EmptyTaskNavigation),
+            Arc::new(StaticTaskSnapshots),
+        ),
     )
 }
 
@@ -198,8 +216,26 @@ impl ProjectCollectionSnapshotSource for StaticProjectCollection {
                 project_id: "project-1".into(),
                 label: "Project".to_string(),
             }],
-            active_project_id: None,
         })
+    }
+}
+
+#[derive(Debug)]
+struct FixedNewTaskDefaultsForTest;
+
+impl super::NewTaskDefaultsSnapshotSource for FixedNewTaskDefaultsForTest {
+    fn snapshot(
+        &self,
+    ) -> Result<
+        openaide_app_server_protocol::snapshot::NewTaskDefaultsSnapshot,
+        openaide_app_server_protocol::errors::ProtocolError,
+    > {
+        Ok(
+            openaide_app_server_protocol::snapshot::NewTaskDefaultsSnapshot {
+                project_id: Some("project-1".into()),
+                agent_id: Some("codex".into()),
+            },
+        )
     }
 }
 

@@ -29,6 +29,7 @@ describe("App Server initial snapshot ingestion", () => {
 
     expect(ingestion.actions).toMatchObject([
       { type: "projects", projects: [{ projectId: "project-1", label: "Project" }] },
+      { type: "newTask:agent", agentId: "codex" },
       { type: "settings:runtimeSettings", settings: { developer: { acp_trace: { enabled: true } } } },
       { type: "settings:preferences", preferences: { composer_submit_shortcut: "enter" } },
       {
@@ -44,7 +45,7 @@ describe("App Server initial snapshot ingestion", () => {
 
   it("returns no actions when initialize did not include renderable task state", () => {
     expect(actionsFromInitialSnapshot(clientSnapshot({ projects: null, tasks: null, activeTask: null }))).toEqual({
-      actions: [],
+      actions: [{ type: "newTask:agent", agentId: "codex", agentLabel: "Codex" }],
       warnings: [],
       requiresNativeSurface: false,
     });
@@ -53,16 +54,18 @@ describe("App Server initial snapshot ingestion", () => {
   it("can suppress task slices that were already loaded by legacy startup", () => {
     expect(actionsFromInitialSnapshot(clientSnapshot(), { includeTaskNavigation: false }).actions).toMatchObject([
       { type: "projects" },
+      { type: "newTask:agent" },
       { type: "snapshot" },
     ]);
     expect(actionsFromInitialSnapshot(clientSnapshot(), { includeActiveTask: false }).actions).toMatchObject([
       { type: "projects" },
+      { type: "newTask:agent" },
       { type: "tasks" },
       { type: "selection:set" },
     ]);
   });
 
-  it("uses a requested new-task project before the active project fallback", () => {
+  it("uses retained choices before shell and App Server defaults", () => {
     const ingestion = actionsFromInitialSnapshot(clientSnapshot({
       client: {
         clientInstanceId: "client-1" as ClientInstanceId,
@@ -70,23 +73,39 @@ describe("App Server initial snapshot ingestion", () => {
         surface: { kind: "newTask", projectId: "project-2" as ProjectId },
       },
       projects: {
-        activeProjectId: "project-1" as ProjectId,
         projects: [
           { projectId: "project-1" as ProjectId, label: "API" },
           { projectId: "project-2" as ProjectId, label: "App" },
         ],
       },
+      agents: {
+        agents: [
+          { agentId: "codex" as AgentId, label: "Codex", status: "connected" },
+          { agentId: "opencode" as AgentId, label: "OpenCode", status: "connected" },
+        ],
+      },
+      newTaskDefaults: {
+        projectId: "project-1" as ProjectId,
+        agentId: "codex" as AgentId,
+      },
       tasks: null,
       activeTask: null,
-    }));
+    }), {
+      retainedNewTaskContext: { projectId: "project-2", agentId: "opencode" },
+    });
 
     expect(ingestion.actions[0]).toEqual({
       type: "projects",
-      activeProjectId: "project-2",
+      initialProjectId: "project-2",
       projects: [
         { projectId: "project-1", label: "API" },
         { projectId: "project-2", label: "App" },
       ],
+    });
+    expect(ingestion.actions[1]).toEqual({
+      type: "newTask:agent",
+      agentId: "opencode",
+      agentLabel: "OpenCode",
     });
   });
 });
@@ -104,6 +123,7 @@ function clientSnapshot(overrides: Partial<ClientSnapshot> = {}): ClientSnapshot
       shellKind: "vscodeExtension",
       surface: { kind: "task", taskId: "task-1" as TaskId },
     },
+    newTaskDefaults: {},
     projects: {
       projects: [{ projectId: "project-1" as ProjectId, label: "Project" }],
     },

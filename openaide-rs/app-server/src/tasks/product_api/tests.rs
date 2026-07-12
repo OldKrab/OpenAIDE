@@ -2671,6 +2671,12 @@ fn send_commits_user_message_and_running_turn() {
         accepted.task.chat.items[0].message_id,
         accepted.user_message_id
     );
+    let defaults = store.read_new_task_defaults().unwrap();
+    assert_eq!(
+        defaults.project_id,
+        Some(project_id_for_workspace("/workspace/app"))
+    );
+    assert_eq!(defaults.agent_id, Some(AgentId::from("codex")));
 }
 
 #[test]

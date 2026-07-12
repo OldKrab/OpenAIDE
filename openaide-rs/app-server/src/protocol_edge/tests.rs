@@ -42,8 +42,8 @@ use crate::settings::{
 };
 use crate::shell_file_handles::ShellFileRevealRegistry;
 use crate::snapshots::{
-    AgentRegistrySnapshotSource, ProjectCollectionStore, SnapshotBuilder, TaskListSnapshot,
-    TaskNavigationStore, TaskSnapshotSource, TaskSnapshotStore,
+    AgentRegistrySnapshotSource, ProjectCollectionStore, SnapshotBuilder, SnapshotSources,
+    TaskListSnapshot, TaskNavigationStore, TaskSnapshotSource, TaskSnapshotStore,
 };
 use crate::state_sync::StateStream;
 use crate::storage::Store;
@@ -1616,16 +1616,19 @@ fn gateway_with_project_context_and_store() -> (RpcGateway, Store) {
     let snapshots = SnapshotBuilder::with_sources(
         "server-1".into(),
         "root-1".into(),
-        Arc::new(AgentRegistrySnapshotSource::new(
-            crate::agent::registry::AgentRegistry::default_built_ins(),
-        )),
-        Arc::new(ProjectCollectionStore::new_with_configured_roots(
-            store.clone(),
-            project_roots.clone(),
-        )),
-        Arc::new(SettingsCatalog::default()),
-        Arc::new(TaskNavigationStore::new(store.clone())),
-        task_snapshots.clone(),
+        SnapshotSources::new(
+            Arc::new(store.clone()),
+            Arc::new(AgentRegistrySnapshotSource::new(
+                crate::agent::registry::AgentRegistry::default_built_ins(),
+            )),
+            Arc::new(ProjectCollectionStore::new_with_configured_roots(
+                store.clone(),
+                project_roots.clone(),
+            )),
+            Arc::new(SettingsCatalog::default()),
+            Arc::new(TaskNavigationStore::new(store.clone())),
+            task_snapshots.clone(),
+        ),
     );
     let gateway = RpcGateway::new(
         ClientHub::new(10),

@@ -8,6 +8,7 @@ import {
   postHostMessage,
 } from "../services/hostBridge";
 import { clientInstanceIdForBootstrap } from "../services/backendInitialization";
+import { retainNewTaskContext } from "../state/newTaskSelectionDefaults";
 import { readPendingTaskSendRecovery } from "../services/pendingTaskSendRecovery";
 import {
   executeTaskSendAttempt,
@@ -79,6 +80,14 @@ export function useAppController({ backendConnection }: AppControllerOptions = {
   const [agents, setAgents] = useState<AgentOption[] | undefined>(undefined);
   const currentAgentId = useRef(state.newTask.selection.agentId);
   currentAgentId.current = state.newTask.selection.agentId;
+  const currentNewTaskContext = useRef({
+    projectId: state.newTask.selection.projectId,
+    agentId: state.newTask.selection.agentId || undefined,
+  });
+  currentNewTaskContext.current = {
+    projectId: state.newTask.selection.projectId,
+    agentId: state.newTask.selection.agentId || undefined,
+  };
   const pendingPreparedNewTask = useRef<PendingNewTaskPreparation | undefined>(undefined);
   const newTaskController = useMemo(() => new NewTaskController(), []);
   const newTaskSnapshot = useSyncExternalStore(newTaskController.subscribe, newTaskController.getSnapshot);
@@ -122,6 +131,7 @@ export function useAppController({ backendConnection }: AppControllerOptions = {
   } = useAppControllerBackendLifecycle({
     backendConnection: backendConnectionRef,
     currentAgentId,
+    currentNewTaskContext,
     dispatch,
     initialBootstrap,
     newTaskController,
@@ -163,6 +173,18 @@ export function useAppController({ backendConnection }: AppControllerOptions = {
   const newTaskBootstrapProjectId = bootstrap.surface === "task" && !bootstrap.taskId
     ? bootstrap.projectId
     : undefined;
+  useEffect(() => {
+    if (!state.appServerStateRootId) return;
+    retainNewTaskContext(state.appServerStateRootId, clientInstanceId, {
+      projectId: state.newTask.selection.projectId,
+      agentId: state.newTask.selection.agentId || undefined,
+    });
+  }, [
+    clientInstanceId,
+    state.appServerStateRootId,
+    state.newTask.selection.agentId,
+    state.newTask.selection.projectId,
+  ]);
   useNewTaskPreparation({
     attachmentResources,
     backendConnection: backendConnectionRef,

@@ -81,7 +81,7 @@ describe("state ingestion", () => {
 
   it("requires resync when an out-of-scope event exposes a cursor gap", () => {
     const state = createSubscriptionIngestionState(
-      subscribeResult({ kind: "agents" }, { kind: "agents", agents: { defaultAgentId: agentId("agent-1"), agents: [] } }, "cursor-504"),
+      subscribeResult({ kind: "agents" }, { kind: "agents", agents: { agents: [] } }, "cursor-504"),
       { stateRootId: stateRoot("root-1") },
     );
     const event: AppServerEvent = {
@@ -101,7 +101,7 @@ describe("state ingestion", () => {
     const state = createSubscriptionIngestionState(
       subscribeResult(
         { kind: "projects" },
-        { kind: "projects", projects: { projects: [], activeProjectId: null } },
+        { kind: "projects", projects: { projects: [] } },
         "cursor-1",
       ),
       { stateRootId: stateRoot("root-1") },
@@ -172,7 +172,7 @@ describe("state ingestion", () => {
 
   it("does not resync after ignored same-stream events before a matching event", () => {
     const state = createSubscriptionIngestionState(
-      subscribeResult({ kind: "projects" }, { kind: "projects", projects: { projects: [], activeProjectId: null } }, "cursor-1"),
+      subscribeResult({ kind: "projects" }, { kind: "projects", projects: { projects: [] } }, "cursor-1"),
       { stateRootId: stateRoot("root-1") },
     );
     const taskEvent: AppServerEvent = {
@@ -500,7 +500,7 @@ describe("state ingestion", () => {
 
   it("applies project collection updates to project subscriptions", () => {
     const state = createSubscriptionIngestionState(
-      subscribeResult({ kind: "projects" }, { kind: "projects", projects: { projects: [], activeProjectId: null } }, "cursor-1"),
+      subscribeResult({ kind: "projects" }, { kind: "projects", projects: { projects: [] } }, "cursor-1"),
       { stateRootId: stateRoot("root-1") },
     );
     const event = projectCollectionEvent("root-1", "cursor-1", "cursor-2");
@@ -518,7 +518,7 @@ describe("state ingestion", () => {
 
   it("resyncs replacement state-root events when the client stream skipped cursor steps", () => {
     const state = createSubscriptionIngestionState(
-      subscribeResult({ kind: "projects" }, { kind: "projects", projects: { projects: [], activeProjectId: null } }, "cursor-504"),
+      subscribeResult({ kind: "projects" }, { kind: "projects", projects: { projects: [] } }, "cursor-504"),
       { stateRootId: stateRoot("root-1") },
     );
     const event = projectCollectionEvent("root-1", "cursor-506", "cursor-507");
@@ -531,7 +531,7 @@ describe("state ingestion", () => {
 
   it("ignores duplicate replacement state-root events with an already-applied cursor", () => {
     const state = createSubscriptionIngestionState(
-      subscribeResult({ kind: "projects" }, { kind: "projects", projects: { projects: [{ projectId: projectId("project-1"), label: "Project" }], activeProjectId: null } }, "cursor-507"),
+      subscribeResult({ kind: "projects" }, { kind: "projects", projects: { projects: [{ projectId: projectId("project-1"), label: "Project" }] } }, "cursor-507"),
       { stateRootId: stateRoot("root-1") },
     );
     const duplicate = projectCollectionEvent("root-1", "cursor-506", "cursor-507");
@@ -606,6 +606,7 @@ function taskSnapshot(id: string, items: ChatItem[] = []): SubscriptionSnapshot 
 function taskSnapshotBody(id: string, items: ChatItem[] = []): TaskSnapshot {
   return {
     task: taskSummary(id),
+    lifecycle: "visible",
     revision: 1,
     preparation: { kind: "ready" as const },
     agentConfig: { state: "ready" as const, options: [] },
@@ -622,7 +623,7 @@ function taskSummary(id: string, project = "project-1"): TaskSummary {
     taskId: taskId(id),
     projectId: projectId(project),
     agentId: agentId("agent-1"),
-    title: `Task ${id}`,
+    title: { value: `Task ${id}`, source: "user" },
     status: "idle",
     updatedAt: "2026-06-26T00:00:00.000Z",
     lastActivity: "2026-06-26T00:00:00.000Z",
@@ -677,7 +678,6 @@ function projectCollectionEvent(rootId: string, previousCursor: string, cursor: 
       kind: "projectCollectionUpdated",
       projects: {
         projects: [{ projectId: projectId("project-1"), label: "Project" }],
-        activeProjectId: null,
       },
     },
   };
@@ -693,6 +693,7 @@ function clientSnapshot(
     server: { serverId: serverId("server-1"), protocolVersion: { major: 1, minor: 0 } },
     stateRoot: { stateRootId: stateRoot(rootId) },
     client: { clientInstanceId: clientInstance(clientId), shellKind: "web", surface: { kind: "home" } },
+    newTaskDefaults: {},
     pendingRequests: [],
     ...snapshot,
   };

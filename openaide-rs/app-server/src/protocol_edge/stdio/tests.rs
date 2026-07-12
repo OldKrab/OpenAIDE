@@ -141,8 +141,8 @@ fn initialize_succeeds_through_protocol_edge_stdio() {
         "client-1"
     );
     assert_eq!(
-        response["result"]["result"]["snapshot"]["agents"]["defaultAgentId"],
-        "codex"
+        response["result"]["result"]["snapshot"]["newTaskDefaults"],
+        serde_json::json!({})
     );
     assert_eq!(
         response["result"]["result"]["snapshot"]["agents"]["agents"][0]["agentId"],
@@ -669,10 +669,6 @@ fn initialize_uses_stored_agent_catalog_in_production_startup_path() {
     let responses = dispatcher.handle_line(&init_request("1", "client-1"));
 
     let response = response(&responses[0]);
-    assert_eq!(
-        response["result"]["result"]["snapshot"]["agents"]["defaultAgentId"],
-        "custom.local"
-    );
     assert_eq!(
         response["result"]["result"]["snapshot"]["agents"]["agents"][0]["agentId"],
         "custom.local"

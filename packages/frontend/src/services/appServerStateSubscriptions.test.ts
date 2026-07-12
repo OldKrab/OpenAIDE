@@ -373,7 +373,6 @@ describe("startAppServerStateSubscription", () => {
       snapshot: {
         kind: "projects",
         projects: {
-          activeProjectId: "project_1" as ProjectId,
           projects: [{ projectId: "project_1" as ProjectId, label: "OpenAIDE" }],
         },
       },
@@ -396,7 +395,6 @@ describe("startAppServerStateSubscription", () => {
         snapshot: {
           kind: "agents" as const,
           agents: {
-            defaultAgentId: "opencode" as never,
             agents: [
               { agentId: "codex" as never, label: "Codex", status: "connected" as const },
               { agentId: "opencode" as never, label: "OpenCode", status: "connected" as const },
@@ -431,8 +429,8 @@ describe("startAppServerStateSubscription", () => {
     ]);
     expect(dispatch).toHaveBeenCalledWith({
       type: "newTask:agent",
-      agentId: "opencode",
-      agentLabel: "OpenCode",
+      agentId: "codex",
+      agentLabel: "Codex",
     });
   });
 

@@ -4099,7 +4099,6 @@ function protocolAgents(ids: string[]) {
       status: "disconnected" as const,
       capabilities: { resumeTasks: false, deleteNativeSessions: false },
     })),
-    defaultAgentId: ids[0] as never,
   };
 }
 

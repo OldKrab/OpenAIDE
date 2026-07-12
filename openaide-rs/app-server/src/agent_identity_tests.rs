@@ -1,10 +1,8 @@
 use openaide_app_server_protocol::ids::AgentId;
 
 use super::{
-    default_agent_id, normalized_existing_custom_agent_id, normalized_icon, normalized_label,
-    valid_env_name,
+    normalized_existing_custom_agent_id, normalized_icon, normalized_label, valid_env_name,
 };
-use crate::agent::registry::{AgentDefinitionSummary, AgentSourceKind};
 
 #[test]
 fn existing_custom_agent_id_accepts_custom_valid_ids() {
@@ -49,28 +47,4 @@ fn env_names_follow_shell_identifier_shape() {
     assert!(valid_env_name("_TOKEN1"));
     assert!(!valid_env_name("1TOKEN"));
     assert!(!valid_env_name("BAD-NAME"));
-}
-
-#[test]
-fn default_agent_prefers_codex_then_first_summary() {
-    let summaries = vec![
-        summary("custom.local"),
-        summary("codex"),
-        summary("opencode"),
-    ];
-
-    assert_eq!(default_agent_id(&summaries), Some(AgentId::from("codex")));
-    assert_eq!(
-        default_agent_id(&[summary("custom.local")]),
-        Some(AgentId::from("custom.local"))
-    );
-    assert_eq!(default_agent_id(&[]), None);
-}
-
-fn summary(id: &str) -> AgentDefinitionSummary {
-    AgentDefinitionSummary {
-        id: id.to_string(),
-        label: id.to_string(),
-        source_kind: AgentSourceKind::Custom,
-    }
 }

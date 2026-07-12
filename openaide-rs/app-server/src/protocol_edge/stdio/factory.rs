@@ -17,8 +17,8 @@ use crate::settings::{
 };
 use crate::shell_file_handles::ShellFileRevealRegistry;
 use crate::snapshots::{
-    AgentRegistrySnapshotSource, ProjectCollectionStore, SnapshotBuilder, TaskNavigationStore,
-    TaskSnapshotStore,
+    AgentRegistrySnapshotSource, ProjectCollectionStore, SnapshotBuilder, SnapshotSources,
+    TaskNavigationStore, TaskSnapshotStore,
 };
 use crate::state_sync::StateStream;
 use crate::storage::Store;
@@ -97,14 +97,17 @@ pub(super) fn gateway(
         SnapshotBuilder::with_sources(
             server_id.into(),
             state_root_id.into(),
-            Arc::new(agent_snapshots),
-            Arc::new(projects),
-            Arc::new(SettingsCatalog::with_backend_settings(
-                app_preferences.clone(),
-                runtime_settings.clone(),
-            )),
-            Arc::new(task_navigation),
-            task_snapshots.clone(),
+            SnapshotSources::new(
+                Arc::new(store.clone()),
+                Arc::new(agent_snapshots),
+                Arc::new(projects),
+                Arc::new(SettingsCatalog::with_backend_settings(
+                    app_preferences.clone(),
+                    runtime_settings.clone(),
+                )),
+                Arc::new(task_navigation),
+                task_snapshots.clone(),
+            ),
         ),
         task_snapshots,
         configured_projects,

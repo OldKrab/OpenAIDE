@@ -48,7 +48,6 @@ fn projects_visible_task_records_into_collection_snapshot() {
 
     let snapshot = ProjectCollectionStore::new(store).snapshot().unwrap();
 
-    assert_eq!(snapshot.active_project_id, None);
     assert_eq!(snapshot.projects.len(), 2);
     assert_eq!(snapshot.projects[0].label, "app");
     assert_eq!(

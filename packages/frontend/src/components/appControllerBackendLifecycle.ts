@@ -23,8 +23,12 @@ import {
 import { initializeParamsForBootstrap, taskNavigationScopeForBootstrap } from "../services/backendInitialization";
 import { postHostMessage, subscribeHostMessages } from "../services/hostBridge";
 import { startHostMessageSession } from "../services/hostMessageSession";
-import { applyProtocolAgents } from "../state/appServerAgents";
+import { agentOptionsFromProtocol } from "../state/appServerAgents";
 import { actionsFromInitialSnapshot } from "../state/appServerInitialSnapshot";
+import {
+  retainedNewTaskContextForInitialization,
+  type NewTaskContextIds,
+} from "../state/newTaskSelectionDefaults";
 import {
   bindAppServerReplicaEpoch,
   type AppAction,
@@ -61,6 +65,7 @@ export type BackendConnectionState =
 type BackendLifecycleOptions = {
   backendConnection?: AppControllerBackendConnection;
   currentAgentId: RefObject<string>;
+  currentNewTaskContext: RefObject<NewTaskContextIds>;
   dispatch: Dispatch<AppAction>;
   initialBootstrap: WebviewBootstrap;
   newTaskController: NewTaskController;
@@ -75,6 +80,7 @@ type BackendLifecycleOptions = {
 export function useAppControllerBackendLifecycle({
   backendConnection,
   currentAgentId,
+  currentNewTaskContext,
   dispatch,
   initialBootstrap,
   newTaskController,
@@ -279,6 +285,10 @@ export function useAppControllerBackendLifecycle({
             const ingestion = actionsFromInitialSnapshot(result.snapshot, {
               includeTaskNavigation: canApplyStartupNavigation,
               includeActiveTask: initialBootstrap.surface === "task",
+              retainedNewTaskContext: retainedNewTaskContextForInitialization(
+                result.snapshot,
+                currentNewTaskContext.current,
+              ),
             });
             const subscriptionContext = mappingContextFromClientSnapshot(result.snapshot);
             stateSubscriptionContext.current = subscriptionContext;
@@ -290,7 +300,9 @@ export function useAppControllerBackendLifecycle({
               }
               initializedDispatch(action);
             }
-            applyProtocolAgents(result.snapshot.agents, currentAgentId.current, setAgents, initializedDispatch);
+            if (result.snapshot.agents) {
+              setAgents(agentOptionsFromProtocol(result.snapshot.agents));
+            }
             if (backendConnection.events) {
               const subscriptionConnection = {
                 events: backendConnection.events,
