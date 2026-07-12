@@ -297,7 +297,7 @@ impl RpcGateway {
         task_id: &TaskId,
         now: AppServerTime,
     ) -> Vec<GatewayEventDelivery> {
-        let Ok(task) = self.task_snapshots.open(task_id) else {
+        let Ok(task) = self.task_snapshots.open_internal(task_id) else {
             return Vec::new();
         };
         let task = self.task_with_pending_requests(task);

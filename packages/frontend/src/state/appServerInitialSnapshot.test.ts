@@ -116,6 +116,7 @@ function clientSnapshot(overrides: Partial<ClientSnapshot> = {}): ClientSnapshot
     },
     activeTask: {
       task: taskSummary(),
+      lifecycle: "visible",
       revision: 2,
       preparation: { kind: "ready" },
       agentConfig: { state: "ready", options: [] },

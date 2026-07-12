@@ -1,6 +1,6 @@
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::NormalizedMessage;
-use crate::storage::records::TaskRecord;
+use crate::storage::records::{TaskLifecycle, TaskRecord};
 use crate::storage::Store;
 use crate::tasks::mutation::create_validation::TaskCreationValidationContext;
 use crate::tasks::snapshot::build_snapshot;
@@ -119,6 +119,87 @@ pub(super) fn create_task_with_validation_and_writer(
     Ok(TaskCommitResult {
         outcome: TaskCommitOutcome::Committed(facts),
         response_snapshot: snapshot,
+    })
+}
+
+pub(super) fn resolve_or_create_new_task(
+    target: &TaskMutations,
+    task: TaskRecord,
+    initial_messages: Vec<NormalizedMessage>,
+    options: TaskCommitOptions,
+) -> Result<TaskCommitResult, RuntimeError> {
+    let _guard = target.lock();
+    let TaskLifecycle::New {
+        owner_client_instance_id,
+    } = &task.lifecycle
+    else {
+        return Err(RuntimeError::InvalidParams("task.lifecycle".to_string()));
+    };
+    let existing = target
+        .store
+        .list_all_task_records_strict()?
+        .into_iter()
+        .find(|candidate| {
+            !candidate.tombstoned
+                && matches!(
+                    &candidate.lifecycle,
+                    TaskLifecycle::New {
+                        owner_client_instance_id: candidate_owner
+                    } if candidate_owner == owner_client_instance_id
+                )
+        });
+    if let Some(existing) = existing {
+        if existing.archived {
+            return Err(RuntimeError::Conflict(
+                "Client-owned New Task is archived, which violates its lifecycle invariant"
+                    .to_string(),
+            ));
+        }
+        if existing.agent_id != task.agent_id
+            || existing.workspace_root != task.workspace_root
+            || existing.isolation != task.isolation
+        {
+            return Err(RuntimeError::Conflict(
+                "New Task already exists with different Project Context or Agent".to_string(),
+            ));
+        }
+        let response_snapshot = match options.response_snapshot_tail_limit {
+            Some(limit) => Some(build_snapshot(&target.store, &existing.task_id, limit)?),
+            None => None,
+        };
+        return Ok(TaskCommitResult {
+            outcome: TaskCommitOutcome::Rejected(TaskCommitRejection::NoChange),
+            response_snapshot,
+        });
+    }
+
+    let task_id = task.task_id.clone();
+    match target.store.read_task(&task_id) {
+        Ok(_) => return Err(RuntimeError::InvalidParams("task_id".to_string())),
+        Err(RuntimeError::TaskNotFound(_)) => {}
+        Err(error) => return Err(error),
+    }
+    let message_backup = target.store.backup_message_files(&task_id)?;
+    let mut task = task;
+    let facts = match persist_new_task(target, &mut task, initial_messages, |store, task| {
+        store.write_task(task)
+    }) {
+        Ok(facts) => facts,
+        Err(error) => {
+            target
+                .store
+                .restore_message_files(&task_id, &message_backup)?;
+            return Err(error);
+        }
+    };
+    notify_task_updated(target, &facts);
+    let response_snapshot = match options.response_snapshot_tail_limit {
+        Some(limit) => Some(build_snapshot(&target.store, &task_id, limit)?),
+        None => None,
+    };
+    Ok(TaskCommitResult {
+        outcome: TaskCommitOutcome::Committed(facts),
+        response_snapshot,
     })
 }
 

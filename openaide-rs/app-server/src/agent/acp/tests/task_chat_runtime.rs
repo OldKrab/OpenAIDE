@@ -17,9 +17,7 @@ use crate::server_requests::ServerRequestRuntime;
 use crate::storage::records::TaskPreparationRecord;
 use crate::storage::Store;
 use crate::task_events::TaskUpdateNotifier;
-use crate::tasks::product_api::{
-    TaskAdoptNativeSessionWorkflow, TaskCreateWorkflow, TaskOpenWorkflow, TaskProductApi,
-};
+use crate::tasks::product_api::{TaskAdoptNativeSessionWorkflow, TaskProductApi};
 
 #[test]
 fn live_acp_message_ids_create_separate_chat_messages() {
@@ -28,7 +26,7 @@ fn live_acp_message_ids_create_separate_chat_messages() {
         return;
     };
     let created = api
-        .create(TaskCreateParams {
+        .create_for_test(TaskCreateParams {
             project_id: project_id_for_workspace(&workspace_root),
             agent_id: AgentId::from("codex"),
             workspace_root: None,
@@ -45,7 +43,7 @@ fn live_acp_message_ids_create_separate_chat_messages() {
         )
     });
     let ready = api
-        .open(openaide_app_server_protocol::task::TaskOpenParams {
+        .open_for_test(openaide_app_server_protocol::task::TaskOpenParams {
             task_id: task_id.clone(),
         })
         .expect("open ready task");
@@ -65,7 +63,7 @@ fn live_acp_message_ids_create_separate_chat_messages() {
             .unwrap_or(false)
     });
     let completed = api
-        .open(openaide_app_server_protocol::task::TaskOpenParams {
+        .open_for_test(openaide_app_server_protocol::task::TaskOpenParams {
             task_id: task_id.clone(),
         })
         .expect("open completed task");

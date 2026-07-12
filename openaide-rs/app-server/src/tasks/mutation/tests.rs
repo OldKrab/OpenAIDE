@@ -487,7 +487,7 @@ fn task_record(task_id: &str) -> TaskRecord {
         agent_id: "codex".to_string(),
         isolation: IsolationKind::Local,
         workspace_root: "/tmp/workspace".to_string(),
-        first_prompt_sent: true,
+        lifecycle: crate::storage::records::TaskLifecycle::Visible,
         agent_session_id: None,
         active_turn_id: None,
         archived: false,

@@ -1,5 +1,5 @@
 use openaide_app_server_protocol::errors::{ProtocolError, ProtocolErrorCode};
-use openaide_app_server_protocol::ids::{ProjectId, TaskId, TaskListCursor};
+use openaide_app_server_protocol::ids::{ClientInstanceId, ProjectId, TaskId, TaskListCursor};
 use openaide_app_server_protocol::snapshot::{
     ChatSnapshot, TaskHistorySyncSnapshot, TaskSnapshot, TaskSummary,
 };
@@ -31,7 +31,15 @@ pub trait TaskSnapshotSource: Send + Sync {
         cursor: Option<&TaskListCursor>,
     ) -> Result<TaskListSnapshot, ProtocolError>;
 
-    fn open(&self, task_id: &TaskId) -> Result<TaskSnapshot, ProtocolError>;
+    /// Reads a Task for internal publication after its audience is already established.
+    fn open_internal(&self, task_id: &TaskId) -> Result<TaskSnapshot, ProtocolError>;
+
+    /// Reads a Task on behalf of a client, enforcing New Task ownership.
+    fn open_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        task_id: &TaskId,
+    ) -> Result<TaskSnapshot, ProtocolError>;
 }
 
 /// Supplies process-local history reconciliation state for otherwise durable Task snapshots.
@@ -103,7 +111,7 @@ impl TaskSnapshotSource for TaskSnapshotStore {
             .collect();
         let revision = self
             .store
-            .max_task_revision()
+            .max_visible_task_revision()
             .map_err(snapshot_read_error)?;
         Ok(TaskListSnapshot {
             tasks,
@@ -112,7 +120,29 @@ impl TaskSnapshotSource for TaskSnapshotStore {
         })
     }
 
-    fn open(&self, task_id: &TaskId) -> Result<TaskSnapshot, ProtocolError> {
+    fn open_internal(&self, task_id: &TaskId) -> Result<TaskSnapshot, ProtocolError> {
+        self.open_authorized(task_id, |_| Ok(()))
+    }
+
+    fn open_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        task_id: &TaskId,
+    ) -> Result<TaskSnapshot, ProtocolError> {
+        self.open_authorized(task_id, |task| {
+            crate::tasks::access::require_client_task_access(task, client_instance_id)
+        })
+    }
+}
+
+impl TaskSnapshotStore {
+    fn open_authorized(
+        &self,
+        task_id: &TaskId,
+        authorize: impl FnOnce(
+            &crate::storage::records::TaskRecord,
+        ) -> Result<(), crate::protocol::errors::RuntimeError>,
+    ) -> Result<TaskSnapshot, ProtocolError> {
         let task = self
             .store
             .read_task(task_id.as_str())
@@ -125,6 +155,7 @@ impl TaskSnapshotSource for TaskSnapshotStore {
                 target: None,
             });
         }
+        authorize(&task).map_err(task_snapshot_error)?;
         let snapshot = build_snapshot(&self.store, task_id.as_str(), self.tail_limit)
             .map_err(task_snapshot_error)?;
         let history_sync = self.history_sync.history_sync_snapshot(task_id.as_str());
@@ -164,6 +195,14 @@ pub(crate) fn project_stored_task_snapshot_with_history_sync(
     snapshot: StoredTaskSnapshot,
     history_sync: TaskHistorySyncSnapshot,
 ) -> Result<TaskSnapshot, ProtocolError> {
+    let lifecycle = match snapshot.lifecycle {
+        crate::storage::records::TaskLifecycle::New { .. } => {
+            openaide_app_server_protocol::snapshot::TaskLifecycle::New
+        }
+        crate::storage::records::TaskLifecycle::Visible => {
+            openaide_app_server_protocol::snapshot::TaskLifecycle::Visible
+        }
+    };
     let send_capability = send_capability_for_task(snapshot.task.status, &snapshot.preparation);
     let agent_config = agent_config_snapshot(&snapshot);
     let agent_commands = agent_commands_snapshot(&snapshot);
@@ -173,6 +212,7 @@ pub(crate) fn project_stored_task_snapshot_with_history_sync(
     task.status = projected_status;
     Ok(TaskSnapshot {
         task,
+        lifecycle,
         revision: snapshot.revision,
         preparation: preparation_snapshot(&snapshot.preparation),
         agent_config,

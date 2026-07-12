@@ -139,7 +139,7 @@ fn runtime_startup_recovers_stale_active_turn_and_session_binding() {
             agent_id: "codex".to_string(),
             isolation: IsolationKind::Local,
             workspace_root: tmp.path().to_string_lossy().to_string(),
-            first_prompt_sent: true,
+            lifecycle: openaide_app_server::storage::records::TaskLifecycle::Visible,
             agent_session_id: Some("session_stale_boot".to_string()),
             active_turn_id: Some("turn_stale_boot".to_string()),
             archived: false,
@@ -480,7 +480,7 @@ fn legacy_task_records_without_archive_fields_remain_listable() {
             "agent_name": "Codex",
             "isolation": "local",
             "workspace_root": "/workspace",
-            "first_prompt_sent": true,
+            "lifecycle": { "state": "visible" },
             "model_id": null
         }))
         .unwrap(),

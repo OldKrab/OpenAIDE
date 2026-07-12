@@ -61,8 +61,6 @@ impl TaskTransitions {
 
     fn recoverable_records(&self) -> Result<Vec<TaskRecord>, RuntimeError> {
         let _guard = self.mutations.lock();
-        let mut records = self.mutations.store().list_tasks()?;
-        records.extend(self.mutations.store().list_archived_tasks()?);
-        Ok(records)
+        self.mutations.store().list_all_task_records()
     }
 }

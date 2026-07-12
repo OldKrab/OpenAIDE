@@ -38,7 +38,14 @@ impl RpcGateway {
                 return self.error(connection_id, id, meta, responses::invalid_params(error))
             }
         };
-        let result = match self.attachments.list_roots(params) {
+        let client = self
+            .client_hub
+            .context_for_connection(&connection_id)
+            .expect("routing requires an initialized client for attachment roots");
+        let result = match self
+            .attachments
+            .list_roots(&client.client_instance_id, params)
+        {
             Ok(result) => result,
             Err(error) => return self.error(connection_id, id, meta, error),
         };

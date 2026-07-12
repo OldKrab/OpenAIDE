@@ -1,4 +1,5 @@
 use openaide_app_server_protocol::errors::ProtocolError;
+use openaide_app_server_protocol::ids::ClientInstanceId;
 use openaide_app_server_protocol::task::TaskCancelParams;
 use uuid::Uuid;
 
@@ -17,9 +18,11 @@ use super::{
 impl TaskProductApi {
     pub(super) fn cancel_task(
         &self,
+        client_instance_id: &ClientInstanceId,
         params: TaskCancelParams,
     ) -> Result<openaide_app_server_protocol::snapshot::TaskSnapshot, ProtocolError> {
         let task_id = params.task_id.as_str().to_string();
+        self.read_task_for_client(&task_id, client_instance_id)?;
         self.turn_acceptance
             .serialize(&task_id, || self.cancel_task_serialized(params))
     }

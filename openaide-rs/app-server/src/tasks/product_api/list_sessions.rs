@@ -60,7 +60,7 @@ impl TaskProductApi {
     ) -> Result<Vec<crate::protocol::model::AgentListedSession>, ProtocolError> {
         let records = self
             .store
-            .list_all_task_records()
+            .list_all_task_records_strict()
             .map_err(protocol_error_from_runtime)?;
         let mut owned: std::collections::HashSet<AgentSessionKey> = records
             .into_iter()

@@ -1,4 +1,5 @@
 use openaide_app_server_protocol::errors::ProtocolError;
+use openaide_app_server_protocol::ids::ClientInstanceId;
 use openaide_app_server_protocol::task::TaskSetConfigOptionParams;
 
 use crate::agent::AgentSessionSetConfigOptionRequest;
@@ -18,9 +19,11 @@ use super::{
 impl TaskProductApi {
     pub(super) fn set_config_option_on_task(
         &self,
+        client_instance_id: &ClientInstanceId,
         params: TaskSetConfigOptionParams,
     ) -> Result<openaide_app_server_protocol::snapshot::TaskSnapshot, ProtocolError> {
         let task_id = params.task_id.as_str().to_string();
+        self.read_task_for_client(&task_id, client_instance_id)?;
         self.config_operations.serialize(&task_id, || {
             self.set_config_option_on_task_serialized(&task_id, params)
         })

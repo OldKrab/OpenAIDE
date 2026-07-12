@@ -1,4 +1,5 @@
 use openaide_app_server_protocol::errors::ProtocolError;
+use openaide_app_server_protocol::ids::ClientInstanceId;
 use openaide_app_server_protocol::snapshot::TaskSnapshot;
 use openaide_app_server_protocol::task::{
     TaskMarkReadParams, TaskOpenParams, TaskRetryHistorySyncParams,
@@ -11,7 +12,7 @@ use crate::agent::{
 use crate::logging;
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{AgentListedSession, TaskStatus as LegacyTaskStatus};
-use crate::storage::records::TaskRecord;
+use crate::storage::records::{TaskLifecycle, TaskRecord};
 use crate::tasks::mutation::{TaskCommitOptions, TaskCommitOutcome, TaskMutationResult};
 use crate::tasks::task_start_transaction::TaskSessionStartGuard;
 
@@ -19,24 +20,38 @@ use super::session_cursor::OpaqueSessionCursor;
 use super::{internal_error, protocol_error_from_runtime, runtime_error, TaskProductApi};
 
 pub(crate) trait TaskOpenWorkflow: Send + Sync {
-    fn open(&self, params: TaskOpenParams) -> Result<TaskSnapshot, ProtocolError>;
-    fn mark_read(&self, params: TaskMarkReadParams) -> Result<TaskSnapshot, ProtocolError>;
+    fn open_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        params: TaskOpenParams,
+    ) -> Result<TaskSnapshot, ProtocolError>;
+    fn mark_read_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        params: TaskMarkReadParams,
+    ) -> Result<TaskSnapshot, ProtocolError>;
     fn retry_history_sync(
         &self,
+        client_instance_id: &ClientInstanceId,
         params: TaskRetryHistorySyncParams,
     ) -> Result<TaskSnapshot, ProtocolError> {
-        self.open(TaskOpenParams {
-            task_id: params.task_id,
-        })
+        self.open_for_client(
+            client_instance_id,
+            TaskOpenParams {
+                task_id: params.task_id,
+            },
+        )
     }
 }
 
 impl TaskProductApi {
     pub(super) fn mark_task_read(
         &self,
+        client_instance_id: &ClientInstanceId,
         params: TaskMarkReadParams,
     ) -> Result<TaskSnapshot, ProtocolError> {
         let task_id = params.task_id.as_str().to_string();
+        self.read_task_for_client(&task_id, client_instance_id)?;
         let result = self
             .mutations
             .commit_existing_task(&task_id, super::response_snapshot_options(), |ctx| {
@@ -56,10 +71,13 @@ impl TaskProductApi {
         self.project_task_snapshot(snapshot)
     }
 
-    pub(super) fn open_task(&self, params: TaskOpenParams) -> Result<TaskSnapshot, ProtocolError> {
+    pub(super) fn open_task(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        params: TaskOpenParams,
+    ) -> Result<TaskSnapshot, ProtocolError> {
         let task_id = params.task_id.as_str().to_string();
-        let task = self.store.read_task(&task_id).map_err(runtime_error)?;
-        super::reject_tombstoned_task(&task)?;
+        let task = self.read_task_for_client(&task_id, client_instance_id)?;
 
         let result = self
             .mutations
@@ -139,7 +157,7 @@ impl TaskProductApi {
         task: &TaskRecord,
         generation: crate::tasks::history_sync::PassiveSyncGeneration,
     ) -> Result<Option<crate::protocol::model::TaskSnapshot>, ProtocolError> {
-        if !task.first_prompt_sent
+        if matches!(task.lifecycle, TaskLifecycle::New { .. })
             || task.status == LegacyTaskStatus::Active
             || task.active_turn_id.is_some()
         {
@@ -237,7 +255,6 @@ impl TaskProductApi {
                     }
                     task.status = LegacyTaskStatus::Inactive;
                     task.unread = false;
-                    task.first_prompt_sent = true;
                     task.agent_session_id = Some(loaded_session_id.clone());
                     task.config_options = config_options;
                     task.config_options_catalog = config_options_catalog;
@@ -348,13 +365,17 @@ impl TaskProductApi {
 
     fn retry_history_sync_serialized(
         &self,
+        client_instance_id: &ClientInstanceId,
         params: TaskRetryHistorySyncParams,
     ) -> Result<TaskSnapshot, ProtocolError> {
         let task_id = params.task_id.as_str().to_string();
         if !self.pending_send_sync.contains(&task_id) {
-            return self.open_task(TaskOpenParams {
-                task_id: params.task_id,
-            });
+            return self.open_task(
+                client_instance_id,
+                TaskOpenParams {
+                    task_id: params.task_id,
+                },
+            );
         }
         let task = self.store.read_task(&task_id).map_err(runtime_error)?;
         super::reject_tombstoned_task(&task)?;
@@ -364,9 +385,12 @@ impl TaskProductApi {
         // Do not consume the only exact prompt/attachment payload until every
         // fallible pre-start read and projection has succeeded.
         let Some(pending) = self.pending_send_sync.take(&task_id) else {
-            return self.open_task(TaskOpenParams {
-                task_id: params.task_id,
-            });
+            return self.open_task(
+                client_instance_id,
+                TaskOpenParams {
+                    task_id: params.task_id,
+                },
+            );
         };
         let sync_generation = self.history_sync.begin_send(&task_id);
         self.publish_history_sync(
@@ -412,20 +436,31 @@ fn newer_native_activity(native_session: &AgentListedSession, task: &TaskRecord)
 }
 
 impl TaskOpenWorkflow for TaskProductApi {
-    fn open(&self, params: TaskOpenParams) -> Result<TaskSnapshot, ProtocolError> {
-        self.open_task(params)
+    fn open_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        params: TaskOpenParams,
+    ) -> Result<TaskSnapshot, ProtocolError> {
+        self.open_task(client_instance_id, params)
     }
 
-    fn mark_read(&self, params: TaskMarkReadParams) -> Result<TaskSnapshot, ProtocolError> {
-        self.mark_task_read(params)
+    fn mark_read_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        params: TaskMarkReadParams,
+    ) -> Result<TaskSnapshot, ProtocolError> {
+        self.mark_task_read(client_instance_id, params)
     }
 
     fn retry_history_sync(
         &self,
+        client_instance_id: &ClientInstanceId,
         params: TaskRetryHistorySyncParams,
     ) -> Result<TaskSnapshot, ProtocolError> {
         let task_id = params.task_id.as_str().to_string();
-        self.turn_acceptance
-            .serialize(&task_id, || self.retry_history_sync_serialized(params))
+        self.read_task_for_client(&task_id, client_instance_id)?;
+        self.turn_acceptance.serialize(&task_id, || {
+            self.retry_history_sync_serialized(client_instance_id, params)
+        })
     }
 }

@@ -1,3 +1,4 @@
+pub(crate) mod access;
 pub(crate) mod agent_service;
 #[cfg(test)]
 mod boundary_tests;

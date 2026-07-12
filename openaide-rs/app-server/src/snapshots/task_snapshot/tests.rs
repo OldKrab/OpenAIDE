@@ -54,6 +54,27 @@ fn list_projects_visible_tasks_and_revision() {
 }
 
 #[test]
+fn list_revision_ignores_client_private_new_tasks() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    store.write_task(&task_record("task-visible")).unwrap();
+    let mut new_task = task_record("task-new");
+    new_task.revision = 99;
+    new_task.lifecycle = crate::storage::records::TaskLifecycle::New {
+        owner_client_instance_id: openaide_app_server_protocol::ids::ClientInstanceId::from(
+            "client-a",
+        ),
+    };
+    store.write_task(&new_task).unwrap();
+
+    let result = TaskSnapshotStore::new(store)
+        .list(false, None, None)
+        .expect("list");
+
+    assert_eq!(result.revision, 7);
+}
+
+#[test]
 fn open_projects_preparing_task_status() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
@@ -62,7 +83,7 @@ fn open_projects_preparing_task_status() {
     store.write_task(&task).unwrap();
 
     let snapshot = TaskSnapshotStore::new(store)
-        .open(&TaskId::from("task-1"))
+        .open_internal(&TaskId::from("task-1"))
         .expect("open");
 
     assert_eq!(snapshot.task.status, ProtocolTaskStatus::Preparing);
@@ -79,7 +100,7 @@ fn open_overlays_current_history_sync_state_for_resubscribe() {
         TaskSnapshotStore::with_history_sync(store.clone(), Arc::new(history_sync.clone()));
 
     let syncing = snapshots
-        .open(&TaskId::from("task-1"))
+        .open_internal(&TaskId::from("task-1"))
         .expect("open syncing");
 
     assert_eq!(
@@ -98,7 +119,7 @@ fn open_overlays_current_history_sync_state_for_resubscribe() {
     });
 
     let failed = snapshots
-        .open(&TaskId::from("task-1"))
+        .open_internal(&TaskId::from("task-1"))
         .expect("open after unrelated mutation");
 
     assert_eq!(
@@ -112,7 +133,7 @@ fn open_overlays_current_history_sync_state_for_resubscribe() {
 
     history_sync.set(TaskHistorySyncSnapshot::Updated { generation: 7 });
     let updated = snapshots
-        .open(&TaskId::from("task-1"))
+        .open_internal(&TaskId::from("task-1"))
         .expect("resubscribe after history update");
     assert_eq!(
         updated.history_sync,
@@ -155,7 +176,7 @@ fn open_projects_durable_chat_without_raw_attachment_paths() {
     sync_task_message_history_version(&store, "task-1");
 
     let snapshot = TaskSnapshotStore::new(store)
-        .open(&TaskId::from("task-1"))
+        .open_internal(&TaskId::from("task-1"))
         .expect("open");
 
     assert_eq!(snapshot.task.task_id.as_str(), "task-1");
@@ -211,7 +232,7 @@ fn open_retries_when_message_commit_interleaves_with_snapshot_read() {
     });
 
     let snapshot = TaskSnapshotStore::new(store)
-        .open(&TaskId::from("task-1"))
+        .open_internal(&TaskId::from("task-1"))
         .expect("consistent snapshot");
 
     assert_eq!(snapshot.revision, 8);
@@ -263,7 +284,7 @@ fn open_projects_durable_permission_history_as_permission_part() {
     sync_task_message_history_version(&store, "task-1");
 
     let snapshot = TaskSnapshotStore::new(store)
-        .open(&TaskId::from("task-1"))
+        .open_internal(&TaskId::from("task-1"))
         .expect("open");
 
     let [MessagePart::Permission {
@@ -331,7 +352,7 @@ fn cancelled_pending_permission_projects_as_cancelled_not_denied() {
     sync_task_message_history_version(&store, "task-1");
 
     let snapshot = TaskSnapshotStore::new(store)
-        .open(&TaskId::from("task-1"))
+        .open_internal(&TaskId::from("task-1"))
         .expect("open");
 
     let [MessagePart::Permission {
@@ -387,13 +408,13 @@ fn failed_task_with_ready_preparation_is_sendable_for_follow_up_recovery() {
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut task = task_record("task-1");
     task.status = TaskStatus::Failed;
-    task.first_prompt_sent = true;
+    task.lifecycle = crate::storage::records::TaskLifecycle::Visible;
     task.agent_session_id = Some("session-1".to_string());
     task.preparation = TaskPreparationRecord::Ready;
     store.write_task(&task).unwrap();
 
     let snapshot = TaskSnapshotStore::new(store)
-        .open(&TaskId::from("task-1"))
+        .open_internal(&TaskId::from("task-1"))
         .expect("open");
 
     assert_eq!(snapshot.task.status, ProtocolTaskStatus::Failed);
@@ -411,11 +432,44 @@ fn missing_task_returns_not_found_error() {
     let store = Store::open(temp.path().to_path_buf()).unwrap();
 
     let error = TaskSnapshotStore::new(store)
-        .open(&TaskId::from("missing"))
+        .open_internal(&TaskId::from("missing"))
         .unwrap_err();
 
     assert_eq!(error.code, ProtocolErrorCode::NotFound);
     assert!(!error.recoverable);
+}
+
+#[test]
+fn client_snapshot_read_hides_another_clients_new_task() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let mut task = task_record("task-new");
+    task.lifecycle = crate::storage::records::TaskLifecycle::New {
+        owner_client_instance_id: openaide_app_server_protocol::ids::ClientInstanceId::from(
+            "test-client",
+        ),
+    };
+    store.write_task(&task).unwrap();
+    let snapshots = TaskSnapshotStore::new(store);
+
+    let owner = snapshots
+        .open_for_client(
+            &openaide_app_server_protocol::ids::ClientInstanceId::from("test-client"),
+            &TaskId::from("task-new"),
+        )
+        .unwrap();
+    let hidden = snapshots
+        .open_for_client(
+            &openaide_app_server_protocol::ids::ClientInstanceId::from("other-client"),
+            &TaskId::from("task-new"),
+        )
+        .unwrap_err();
+
+    assert_eq!(
+        owner.lifecycle,
+        openaide_app_server_protocol::snapshot::TaskLifecycle::New
+    );
+    assert_eq!(hidden.code, ProtocolErrorCode::NotFound);
 }
 
 #[test]
@@ -492,7 +546,7 @@ fn task_record(task_id: &str) -> TaskRecord {
         agent_name: "Agent A".to_string(),
         isolation: IsolationKind::Local,
         workspace_root: "/workspace/a".to_string(),
-        first_prompt_sent: false,
+        lifecycle: crate::storage::records::TaskLifecycle::Visible,
         agent_session_id: None,
         active_turn_id: None,
         archived: false,

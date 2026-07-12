@@ -55,7 +55,7 @@ impl RpcGateway {
             self.pending_event_deliveries.extend(delta_events.clone());
             return delta_events;
         }
-        let Ok(task) = self.task_snapshots.open(&task_id) else {
+        let Ok(task) = self.task_snapshots.open_internal(&task_id) else {
             // Removal/tombstone updates cannot open a Task snapshot, but they can
             // change both independent Project ownership and Task Navigation.
             let mut events = self
@@ -69,6 +69,24 @@ impl RpcGateway {
         let events = self.publish_task_updates(&task, now);
         self.pending_event_deliveries.extend(events.clone());
         events
+    }
+
+    /// A New Task is private to its owner's Task subscription until First Send promotes it.
+    fn publish_new_task_update(
+        &mut self,
+        task: &TaskSnapshot,
+        now: AppServerTime,
+    ) -> Vec<GatewayEventDelivery> {
+        let client_hub = self.client_hub.clone();
+        event_deliveries(self.state_stream.publish_committed(
+            EventScope::Task {
+                state_root_id: self.state_stream.state_root_id().clone(),
+                task_id: task.task.task_id.clone(),
+            },
+            AppServerEventPayload::TaskSnapshotUpdated { task: task.clone() },
+            |client_id| client_hub.delivery_for(client_id),
+            now,
+        ))
     }
 
     pub(crate) fn publish_task_update_for_connection(
@@ -140,6 +158,17 @@ impl RpcGateway {
     }
 
     pub(crate) fn publish_task_updates(
+        &mut self,
+        task: &TaskSnapshot,
+        now: AppServerTime,
+    ) -> Vec<GatewayEventDelivery> {
+        if task.lifecycle == openaide_app_server_protocol::snapshot::TaskLifecycle::New {
+            return self.publish_new_task_update(task, now);
+        }
+        self.publish_visible_task_updates(task, now)
+    }
+
+    fn publish_visible_task_updates(
         &mut self,
         task: &TaskSnapshot,
         now: AppServerTime,

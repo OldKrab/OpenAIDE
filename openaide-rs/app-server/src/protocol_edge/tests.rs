@@ -1044,6 +1044,57 @@ fn heartbeat_drains_queued_async_task_events_for_connection() {
 }
 
 #[test]
+fn new_task_update_is_delivered_only_to_its_owner_task_subscription() {
+    let (mut gateway, store) = gateway_with_project_context_and_store();
+    store
+        .write_task(&client_new_task_record("task-new", "client-1"))
+        .unwrap();
+    gateway.handle_inbound(
+        ConnectionId::new("conn-1"),
+        request("1", CLIENT_INITIALIZE, init_params("client-1")),
+        AppServerTime(1),
+    );
+    gateway.handle_inbound(
+        ConnectionId::new("conn-2"),
+        request("2", CLIENT_INITIALIZE, init_params("client-2")),
+        AppServerTime(2),
+    );
+    response_value(gateway.handle_inbound(
+        ConnectionId::new("conn-1"),
+        request(
+            "3",
+            STATE_SUBSCRIBE,
+            StateSubscribeParams {
+                scope: SubscriptionScope::Task {
+                    task_id: TaskId::from("task-new"),
+                },
+            },
+        ),
+        AppServerTime(3),
+    ));
+    response_value(gateway.handle_inbound(
+        ConnectionId::new("conn-2"),
+        request(
+            "4",
+            STATE_SUBSCRIBE,
+            StateSubscribeParams {
+                scope: SubscriptionScope::TaskNavigation { project_id: None },
+            },
+        ),
+        AppServerTime(4),
+    ));
+
+    let events = gateway.publish_task_update_by_id(&TaskId::from("task-new"), AppServerTime(5));
+
+    assert_eq!(events.len(), 1);
+    assert_eq!(events[0].delivery.client_instance_id.as_str(), "client-1");
+    assert!(matches!(
+        events[0].event.payload,
+        AppServerEventPayload::TaskSnapshotUpdated { .. }
+    ));
+}
+
+#[test]
 fn shared_gateway_distinguishes_initialized_event_stream_connections() {
     let gateway = SharedRpcGateway::new(initialized_gateway("client-1", "local-http:client-1"));
 
@@ -1554,6 +1605,10 @@ fn gateway() -> RpcGateway {
 }
 
 fn gateway_with_project_context() -> RpcGateway {
+    gateway_with_project_context_and_store().0
+}
+
+fn gateway_with_project_context_and_store() -> (RpcGateway, Store) {
     let root = tempfile::tempdir().unwrap().keep();
     let store = Store::open(root).unwrap();
     let project_roots = crate::projects::ConfiguredProjectRoots::default();
@@ -1569,10 +1624,10 @@ fn gateway_with_project_context() -> RpcGateway {
             project_roots.clone(),
         )),
         Arc::new(SettingsCatalog::default()),
-        Arc::new(TaskNavigationStore::new(store)),
+        Arc::new(TaskNavigationStore::new(store.clone())),
         task_snapshots.clone(),
     );
-    RpcGateway::new(
+    let gateway = RpcGateway::new(
         ClientHub::new(10),
         AppLifecycle::new(),
         StateStream::new(StateRootId::from("root-1")),
@@ -1604,7 +1659,8 @@ fn gateway_with_project_context() -> RpcGateway {
         Arc::new(RejectingTaskDiscard),
         Arc::new(RejectingTaskArchive),
         Arc::new(FixedShutdown),
-    )
+    );
+    (gateway, store)
 }
 
 fn gateway_with_attachments(attachments: Arc<dyn AttachmentFileBrowserWorkflow>) -> RpcGateway {
@@ -1931,6 +1987,7 @@ impl AttachmentFileBrowserWorkflow for RejectingAttachments {
 
     fn list_roots(
         &self,
+        _client_instance_id: &ClientInstanceId,
         _params: openaide_app_server_protocol::attachment::AttachmentListRootsParams,
     ) -> Result<
         openaide_app_server_protocol::attachment::AttachmentListRootsResult,
@@ -2080,12 +2137,13 @@ impl AttachmentFileBrowserWorkflow for RevealAttachments {
 
     fn list_roots(
         &self,
+        client_instance_id: &ClientInstanceId,
         params: openaide_app_server_protocol::attachment::AttachmentListRootsParams,
     ) -> Result<
         openaide_app_server_protocol::attachment::AttachmentListRootsResult,
         openaide_app_server_protocol::errors::ProtocolError,
     > {
-        RejectingAttachments.list_roots(params)
+        RejectingAttachments.list_roots(client_instance_id, params)
     }
 
     fn list_directory(
@@ -2285,7 +2343,7 @@ impl TaskSnapshotSource for EmptyTaskSnapshots {
         })
     }
 
-    fn open(
+    fn open_internal(
         &self,
         task_id: &openaide_app_server_protocol::ids::TaskId,
     ) -> Result<
@@ -2299,13 +2357,25 @@ impl TaskSnapshotSource for EmptyTaskSnapshots {
             target: None,
         })
     }
+
+    fn open_for_client(
+        &self,
+        _client_instance_id: &ClientInstanceId,
+        task_id: &openaide_app_server_protocol::ids::TaskId,
+    ) -> Result<
+        openaide_app_server_protocol::snapshot::TaskSnapshot,
+        openaide_app_server_protocol::errors::ProtocolError,
+    > {
+        self.open_internal(task_id)
+    }
 }
 
 struct RejectingTaskCreate;
 
 impl TaskCreateWorkflow for RejectingTaskCreate {
-    fn create(
+    fn create_for_client(
         &self,
+        _client_instance_id: &ClientInstanceId,
         _params: openaide_app_server_protocol::task::TaskCreateParams,
     ) -> Result<
         openaide_app_server_protocol::snapshot::TaskSnapshot,
@@ -2359,8 +2429,9 @@ impl TaskAdoptNativeSessionWorkflow for RejectingTaskAdoptNativeSession {
 }
 
 impl TaskCancelWorkflow for RejectingTaskCancel {
-    fn cancel(
+    fn cancel_for_client(
         &self,
+        _client_instance_id: &ClientInstanceId,
         _params: openaide_app_server_protocol::task::TaskCancelParams,
     ) -> Result<
         openaide_app_server_protocol::snapshot::TaskSnapshot,
@@ -2393,8 +2464,9 @@ impl TaskCancelWorkflow for RejectingTaskCancel {
 struct RejectingTaskOpen;
 
 impl TaskOpenWorkflow for RejectingTaskOpen {
-    fn mark_read(
+    fn mark_read_for_client(
         &self,
+        _client_instance_id: &ClientInstanceId,
         _params: openaide_app_server_protocol::task::TaskMarkReadParams,
     ) -> Result<
         openaide_app_server_protocol::snapshot::TaskSnapshot,
@@ -2408,8 +2480,9 @@ impl TaskOpenWorkflow for RejectingTaskOpen {
         })
     }
 
-    fn open(
+    fn open_for_client(
         &self,
+        _client_instance_id: &ClientInstanceId,
         _params: openaide_app_server_protocol::task::TaskOpenParams,
     ) -> Result<
         openaide_app_server_protocol::snapshot::TaskSnapshot,
@@ -2427,8 +2500,9 @@ impl TaskOpenWorkflow for RejectingTaskOpen {
 struct FixedTaskChatPage;
 
 impl TaskChatPageWorkflow for FixedTaskChatPage {
-    fn chat_page(
+    fn chat_page_for_client(
         &self,
+        _client_instance_id: &ClientInstanceId,
         _params: openaide_app_server_protocol::task::TaskChatPageParams,
     ) -> Result<
         openaide_app_server_protocol::task::TaskChatPageResult,
@@ -2459,8 +2533,9 @@ struct RejectingTaskSetConfigOption;
 struct RejectingTaskChatPage;
 
 impl TaskChatPageWorkflow for RejectingTaskChatPage {
-    fn chat_page(
+    fn chat_page_for_client(
         &self,
+        _client_instance_id: &ClientInstanceId,
         _params: openaide_app_server_protocol::task::TaskChatPageParams,
     ) -> Result<
         openaide_app_server_protocol::task::TaskChatPageResult,
@@ -2478,8 +2553,9 @@ impl TaskChatPageWorkflow for RejectingTaskChatPage {
 struct FixedTaskToolDetail;
 
 impl TaskToolDetailWorkflow for FixedTaskToolDetail {
-    fn tool_detail(
+    fn tool_detail_for_client(
         &self,
+        _client_instance_id: &ClientInstanceId,
         _params: openaide_app_server_protocol::task::TaskToolDetailParams,
     ) -> Result<
         openaide_app_server_protocol::task::TaskToolDetailResult,
@@ -2523,8 +2599,9 @@ impl TaskToolDetailWorkflow for FixedTaskToolDetail {
 struct RejectingTaskToolDetail;
 
 impl TaskToolDetailWorkflow for RejectingTaskToolDetail {
-    fn tool_detail(
+    fn tool_detail_for_client(
         &self,
+        _client_instance_id: &ClientInstanceId,
         _params: openaide_app_server_protocol::task::TaskToolDetailParams,
     ) -> Result<
         openaide_app_server_protocol::task::TaskToolDetailResult,
@@ -2540,8 +2617,9 @@ impl TaskToolDetailWorkflow for RejectingTaskToolDetail {
 }
 
 impl TaskSetConfigOptionWorkflow for RejectingTaskSetConfigOption {
-    fn set_config_option(
+    fn set_config_option_for_client(
         &self,
+        _client_instance_id: &ClientInstanceId,
         _params: openaide_app_server_protocol::task::TaskSetConfigOptionParams,
     ) -> Result<
         openaide_app_server_protocol::snapshot::TaskSnapshot,
@@ -2559,8 +2637,9 @@ impl TaskSetConfigOptionWorkflow for RejectingTaskSetConfigOption {
 struct RejectingTaskDiscard;
 
 impl TaskDiscardWorkflow for RejectingTaskDiscard {
-    fn discard(
+    fn discard_for_client(
         &self,
+        _client_instance_id: &ClientInstanceId,
         _params: openaide_app_server_protocol::task::TaskDiscardParams,
     ) -> Result<
         openaide_app_server_protocol::snapshot::TaskNavigationSnapshot,
@@ -2578,8 +2657,9 @@ impl TaskDiscardWorkflow for RejectingTaskDiscard {
 struct RejectingTaskArchive;
 
 impl TaskArchiveWorkflow for RejectingTaskArchive {
-    fn set_archived(
+    fn set_archived_for_client(
         &self,
+        _client_instance_id: &ClientInstanceId,
         _params: openaide_app_server_protocol::task::TaskSetArchivedParams,
     ) -> Result<
         openaide_app_server_protocol::snapshot::TaskNavigationSnapshot,
@@ -2602,6 +2682,42 @@ fn initialized_gateway(client_id: &str, connection_id: &str) -> RpcGateway {
         AppServerTime(1),
     );
     gateway
+}
+
+fn client_new_task_record(
+    task_id: &str,
+    owner_client_instance_id: &str,
+) -> crate::storage::records::TaskRecord {
+    crate::storage::records::TaskRecord {
+        task_id: task_id.to_string(),
+        title: "New task".to_string(),
+        agent_title: None,
+        status: crate::protocol::model::TaskStatus::Inactive,
+        task_version: 1,
+        message_history_version: 0,
+        unread: false,
+        created_at: "2026-01-01T00:00:00.000Z".to_string(),
+        updated_at: "2026-01-01T00:00:00.000Z".to_string(),
+        last_activity: "2026-01-01T00:00:00.000Z".to_string(),
+        agent_id: "codex".to_string(),
+        agent_name: "Codex".to_string(),
+        isolation: crate::protocol::model::IsolationKind::Local,
+        workspace_root: "/workspace/app".to_string(),
+        lifecycle: crate::storage::records::TaskLifecycle::New {
+            owner_client_instance_id: ClientInstanceId::from(owner_client_instance_id),
+        },
+        agent_session_id: None,
+        active_turn_id: None,
+        archived: false,
+        tombstoned: false,
+        revision: 1,
+        config_options: Default::default(),
+        config_options_catalog: None,
+        config_mutation: Default::default(),
+        agent_commands_catalog: None,
+        model_id: None,
+        preparation: crate::storage::records::TaskPreparationRecord::Ready,
+    }
 }
 
 fn initialize(gateway: &mut RpcGateway, connection_id: ConnectionId) {

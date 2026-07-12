@@ -75,7 +75,7 @@ describe("app controller callbacks", () => {
     });
   });
 
-  it("submits selected config atomically with Draft Task creation before Send", async () => {
+  it("submits selected config atomically with New Task creation before Send", async () => {
     const dispatch = vi.fn();
     const request = vi.fn(async (method: string) => {
       if (method === TASK_CREATE) return { task: protocolTaskSnapshot("task_1", "New task") };
@@ -3999,6 +3999,7 @@ function editableConfigOptions(): NonNullable<TaskSnapshot["agent_config"]> {
 function protocolTaskSnapshot(taskId: string, title: string): ProtocolTaskSnapshot {
   return {
     task: protocolTaskSummary(taskId, title),
+    lifecycle: "visible",
     revision: 2,
     preparation: { kind: "ready" as const },
     agentConfig: { state: "ready" as const, options: [] },

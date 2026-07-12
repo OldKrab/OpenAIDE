@@ -26,6 +26,10 @@ The plan is intentionally top-level. Module internals are grilled after this pla
 - No VS Code API dependency in Rust App Server crates.
 - No hidden local machine URLs, temporary domains, private paths, or conversation-specific setup in source, docs, package metadata, comments, or UI text.
 
+## Focused Implementation Plans
+
+- [New Task flow](new-task-flow-plan.md): accepted client-private New Task lifecycle, defaults, persistence, protocol, Frontend ownership, first-send promotion, and verification plan.
+
 ## Top-Level Module Interface
 
 OpenAIDE has two top-level modules:

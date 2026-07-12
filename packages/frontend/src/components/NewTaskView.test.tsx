@@ -345,7 +345,7 @@ describe("NewTaskView", () => {
     expect(textContent(tree)).toContain("Preparing Codex options");
   });
 
-  it("preserves typed new-task text in Shell state before the Draft Task is prepared", () => {
+  it("preserves typed new-task text in Shell state before the New Task is prepared", () => {
     let state = createInitialState();
     const project = { projectId: "project_1", label: "OpenAIDE" };
     const dispatch = vi.fn((action: AppAction) => {

@@ -104,6 +104,17 @@ impl Store {
         Ok(revision)
     }
 
+    /// Returns the collection revision without exposing client-private New Task activity.
+    pub(crate) fn max_visible_task_revision(&self) -> Result<u64, RuntimeError> {
+        Ok(self
+            .list_all_task_records_strict()?
+            .into_iter()
+            .filter(|task| task.lifecycle.is_visible())
+            .map(|task| task.revision)
+            .max()
+            .unwrap_or(0))
+    }
+
     pub fn task_record_count(&self) -> Result<usize, RuntimeError> {
         let mut count = 0;
         for entry in fs::read_dir(self.tasks_dir())? {
@@ -138,7 +149,7 @@ fn read_task_record_from_entry(
     let Some(record) = read_any_task_record_from_entry(entry)? else {
         return Ok(None);
     };
-    if record.tombstoned || record.archived != archived_filter {
+    if record.tombstoned || !record.lifecycle.is_visible() || record.archived != archived_filter {
         return Ok(None);
     }
     Ok(Some(record))
@@ -151,7 +162,7 @@ fn read_task_record_from_entry_strict(
     let Some(record) = read_any_task_record_from_entry_strict(entry)? else {
         return Ok(None);
     };
-    if record.tombstoned || record.archived != archived_filter {
+    if record.tombstoned || !record.lifecycle.is_visible() || record.archived != archived_filter {
         return Ok(None);
     }
     Ok(Some(record))

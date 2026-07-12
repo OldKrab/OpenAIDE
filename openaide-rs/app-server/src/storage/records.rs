@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use openaide_app_server_protocol::ids::ClientInstanceId;
+
 use crate::protocol::model::{
     AgentCommandsCatalog, ChatMessage, ConfigOptionsCatalog, IsolationKind, TaskStatus, TaskSummary,
 };
@@ -16,6 +18,26 @@ pub enum TaskPreparationRecord {
     Failed {
         message: String,
     },
+}
+
+/// Controls whether a Task belongs to normal product history or to one client's New Task surface.
+///
+/// New Tasks already have durable App Server and Native Session identities, but they stay private
+/// until the first user message is accepted. The owner is persistence-only authorization data and
+/// is never exposed in client snapshots.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(tag = "state", rename_all = "snake_case")]
+pub enum TaskLifecycle {
+    New {
+        owner_client_instance_id: ClientInstanceId,
+    },
+    Visible,
+}
+
+impl TaskLifecycle {
+    pub fn is_visible(&self) -> bool {
+        matches!(self, Self::Visible)
+    }
 }
 
 /// App Server ordering state for one Task's Agent-owned configuration changes.
@@ -63,7 +85,7 @@ pub struct TaskRecord {
     pub agent_name: String,
     pub isolation: IsolationKind,
     pub workspace_root: String,
-    pub first_prompt_sent: bool,
+    pub lifecycle: TaskLifecycle,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_session_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

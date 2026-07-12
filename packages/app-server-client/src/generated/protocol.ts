@@ -542,7 +542,9 @@ export type TaskSummary = { taskId: TaskId, projectId: ProjectId, agentId: Agent
 
 export type TaskStatus = "preparing" | "idle" | "running" | "blocked" | "interrupted" | "failed" | "completed";
 
-export type TaskSnapshot = { task: TaskSummary, revision: number, preparation: TaskPreparationSnapshot, agentConfig: TaskAgentConfigSnapshot, agentCommands: TaskAgentCommandsSnapshot, sendCapability: TaskSendCapabilitySnapshot, chat: ChatSnapshot, historySync: TaskHistorySyncSnapshot, pendingRequests?: Array<PendingRequestSnapshot>, recovery?: RecoverySnapshot | null, };
+export type TaskLifecycle = "new" | "visible";
+
+export type TaskSnapshot = { task: TaskSummary, lifecycle: TaskLifecycle, revision: number, preparation: TaskPreparationSnapshot, agentConfig: TaskAgentConfigSnapshot, agentCommands: TaskAgentCommandsSnapshot, sendCapability: TaskSendCapabilitySnapshot, chat: ChatSnapshot, historySync: TaskHistorySyncSnapshot, pendingRequests?: Array<PendingRequestSnapshot>, recovery?: RecoverySnapshot | null, };
 
 export type TaskHistorySyncSnapshot = { "state": "idle", generation: number, } | { "state": "checking", generation: number, } | { "state": "syncing", generation: number, } | { "state": "updated", generation: number, } | { "state": "failed", generation: number, message: string, beforeSend: boolean, };
 

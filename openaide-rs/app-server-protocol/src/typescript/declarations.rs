@@ -76,7 +76,7 @@ use crate::snapshot::{
     PermissionMessageState, ProjectCollectionSnapshot, ProjectSummary, ProtocolVersion,
     QuestionMessageAction, QuestionMessageState, RecoveryAction, RecoverySnapshot,
     ServerCapabilities, ServerSnapshot, SettingsSnapshot, StateRootSnapshot,
-    TaskAgentCommandsSnapshot, TaskAgentConfigSnapshot, TaskHistorySyncSnapshot,
+    TaskAgentCommandsSnapshot, TaskAgentConfigSnapshot, TaskHistorySyncSnapshot, TaskLifecycle,
     TaskNavigationSnapshot, TaskPreparationAction, TaskPreparationSnapshot, TaskPreparationStep,
     TaskPreparationStepKind, TaskPreparationStepStatus, TaskSendBlocker, TaskSendBlockerKind,
     TaskSendCapabilitySnapshot, TaskSendCapabilityState, TaskSetupBlocker, TaskSetupBlockerKind,
@@ -338,6 +338,7 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<TaskNavigationSnapshot>(output, config);
     push_decl::<TaskSummary>(output, config);
     push_decl::<TaskStatus>(output, config);
+    push_decl::<TaskLifecycle>(output, config);
     push_decl::<TaskSnapshot>(output, config);
     push_decl::<TaskHistorySyncSnapshot>(output, config);
     push_decl::<TaskPreparationSnapshot>(output, config);

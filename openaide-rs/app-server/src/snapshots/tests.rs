@@ -210,7 +210,7 @@ impl TaskSnapshotSource for StaticTaskSnapshots {
         })
     }
 
-    fn open(
+    fn open_internal(
         &self,
         task_id: &TaskId,
     ) -> Result<TaskSnapshot, openaide_app_server_protocol::errors::ProtocolError> {
@@ -226,6 +226,7 @@ impl TaskSnapshotSource for StaticTaskSnapshots {
                 unread: false,
                 has_messages: false,
             },
+            lifecycle: openaide_app_server_protocol::snapshot::TaskLifecycle::Visible,
             revision: 7,
             preparation: TaskPreparationSnapshot::Ready,
             agent_config: TaskAgentConfigSnapshot {
@@ -255,6 +256,14 @@ impl TaskSnapshotSource for StaticTaskSnapshots {
             recovery: None,
             history_sync: Default::default(),
         })
+    }
+
+    fn open_for_client(
+        &self,
+        _client_instance_id: &openaide_app_server_protocol::ids::ClientInstanceId,
+        task_id: &TaskId,
+    ) -> Result<TaskSnapshot, openaide_app_server_protocol::errors::ProtocolError> {
+        self.open_internal(task_id)
     }
 }
 

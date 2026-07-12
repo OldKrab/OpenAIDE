@@ -1,14 +1,24 @@
 use openaide_app_server_protocol::errors::ProtocolError;
+use openaide_app_server_protocol::ids::ClientInstanceId;
 use openaide_app_server_protocol::task::{TaskChatPageParams, TaskChatPageResult};
 
 use super::{protocol_error_from_runtime, TaskProductApi};
 
 pub(crate) trait TaskChatPageWorkflow: Send + Sync {
-    fn chat_page(&self, params: TaskChatPageParams) -> Result<TaskChatPageResult, ProtocolError>;
+    fn chat_page_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        params: TaskChatPageParams,
+    ) -> Result<TaskChatPageResult, ProtocolError>;
 }
 
 impl TaskChatPageWorkflow for TaskProductApi {
-    fn chat_page(&self, params: TaskChatPageParams) -> Result<TaskChatPageResult, ProtocolError> {
+    fn chat_page_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        params: TaskChatPageParams,
+    ) -> Result<TaskChatPageResult, ProtocolError> {
+        self.read_task_for_client(params.task_id.as_str(), client_instance_id)?;
         let page = self
             .store
             .page_before(

@@ -4,7 +4,7 @@ use crate::agent::{
     AgentSession, AgentSessionLoad, AgentSessionResume, AgentSessionStart, TurnCancellation,
 };
 use crate::protocol::errors::RuntimeError;
-use crate::storage::records::TaskRecord;
+use crate::storage::records::{TaskLifecycle, TaskRecord};
 use crate::tasks::task_start_transaction::TaskSessionStartGuard;
 
 use super::TaskProductApi;
@@ -122,7 +122,7 @@ impl TaskProductApi {
                 // An unsent draft has no agent history to preserve. If its eagerly
                 // prepared session disappeared with the agent runtime, replace it
                 // instead of failing the user's first message.
-                Err(_error) if !task.first_prompt_sent => self
+                Err(_error) if matches!(task.lifecycle, TaskLifecycle::New { .. }) => self
                     .start_fresh_agent_session(task, cancellation)
                     .map_err(super::super::protocol_error_from_runtime),
                 Err(error) if is_runtime_restart_resume_gap(&error) => self

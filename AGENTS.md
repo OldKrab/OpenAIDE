@@ -2,58 +2,34 @@
 
 This file is the short operating guide for agents working in this repo. Keep detailed product and architecture policy in docs, not here.
 
-## Read First
+## Useful files
 
 - Product language: `CONTEXT.md`.
 - Product purpose and UX principles: `PRODUCT.md`.
 - Visual system: `DESIGN.md`.
-- Backend/Frontend architecture and attachment rules: `docs/adr/0022-backend-frontend-app-shell-architecture.md`.
-- Larger refactor sequencing: `docs/refactor-plan.md`.
 - Other ADRs under `docs/adr/` when touching their area.
 
 ## Working Rules
 
-- Build production-quality code with clear names, modular structure, no duplication, and tests at the user-visible or protocol boundary.
-- Push changes through a feature branch and a pull request. Never push directly to `main`; before pushing, run `npm run ci` and report any failures instead of bypassing the gate.
+- Document code. Leave comments on improtant funcitons, classes, not obvious code pieces.
+- Use logging in code. It is essential for future debugging.
 - Before committing, inspect the complete staged diff for secrets, credentials, personal domains, email addresses, usernames, home-directory paths, machine-specific configuration, and other sensitive or personal data. Keep local machine configuration in ignored files. Report any findings and unresolved failing checks before committing.
 - Keep Backend and Frontend concerns separate. App Server owns product state and workflow decisions; Frontend owns rendering and ephemeral presentation state.
-- Keep App Server, App Server Protocol, App Shells, storage, transport, Agent runtime, and shared Frontend surfaces in their proper modules.
-- Use the typed App Server Protocol seam. Do not add untyped method strings, `unknown` protocol payload plumbing, or shell-specific product protocols.
-- When Rust App Server Protocol types, method maps, event payloads, or envelope shapes change, regenerate TypeScript bindings with `npm run protocol:generate` and verify with `npm run protocol:check`.
-- If App Server or Web App bootstrap code changes while a Web App dev instance is running, redeploy with `npm run web:redeploy` before browser verification.
-- Do not expose implementation provenance in project-facing docs, UI, comments, package metadata, or commit messages.
-- Do not hard-code local development URLs, machine-specific paths, private domains, usernames, temporary preview hosts, or conversation-specific setup details in source, tests, docs, UI text, comments, package metadata, or commit messages.
-- Avoid catch-all modules. Document invariants where they matter: protocol fields, storage atomicity/cursors, task lifecycle, stale response guards, and agent boundaries.
-
-## Planning
-
+- When Rust App Server Protocol change, regenerate TypeScript bindings with `npm run protocol:generate` and verify with `npm run protocol:check`.
 - For non-trivial architecture or API design, discuss the approach first and state the next planned step.
-- A clear imperative implementation request is approval to proceed unless it is destructive, safety-sensitive, conflicts with rules, or has unclear scope.
-- For hard refactor planning, use `docs/refactor-plan.md` as the living top-level plan.
+- Treat simplicity as a primary constraint for every code and design change, including features, fixes, and refactors. Do not preserve existing complexity merely because it exists. Prefer one owner, one state representation, one ordering mechanism, one validation pass, and visible failure with explicit recovery. If implementation would expand an agreed design, stop and discuss it first.
+- During the current architecture replacement, provide no compatibility with superseded OpenAIDE implementation details, internal or App Server interfaces, protocol shapes, or persisted development-data formats. Remove old paths completely; do not add adapters, migrations, dual reads/writes, or fallback deserialization for them.
+
 
 ## Bugs And TDD
 
 - When the user reports a bug, use TDD: reproduce or add a failing regression test first, then fix, then rerun the test.
-- Fixes should be clean and thought through; avoid broad rewrites unless the bug proves the module boundary is wrong.
 - Regression tests should catch the bug at the closest real user, protocol, or storage boundary. Do not duplicate existing coverage.
-
-## UI Work
-
-- Use the `impeccable` skill before significant frontend changes and again for audit/polish.
-- Match `DESIGN.md` and `.impeccable/design.json`; do not duplicate design rules here.
-- Verify desktop and narrow/mobile widths when changing layout.
-- For UI QA, use Playwright screenshots and inspect them; look for UX polish issues, flicker, overflow, and confusing states, not just functional bugs.
+- Do not accept mocks that hide protocol semantics. If ACP sends chunks, updates, or replayed history, tests must model chunks, updates, and replayed history.
 
 ## Prototyping
 
 - Follow `docs/prototyping.md` for disposable UI and logic prototypes.
-- Keep UI prototype implementations under the ignored `packages/frontend/prototypes/` directory. Never force-add or commit them.
-- Reuse production components through the prototype harness and use Target hot reload for review; do not add temporary prototype routes to the primary application.
-
-## Attachment Policy
-
-- Do not keep detailed attachment rules here. Follow `docs/adr/0022-backend-frontend-app-shell-architecture.md`.
-- Current v1 direction: Web App supports App Server-backed file browsing for local file references and explicit browser upload/paste for uploaded files such as images. App Server-owned handles, validation state, safe labels, and send-time checks are authoritative.
 
 ## Source Size And Tests
 
@@ -67,9 +43,6 @@ This file is the short operating guide for agents working in this repo. Keep det
 ## Verification
 
 Run the narrowest relevant checks first, then broaden when contracts or shared behavior change.
-
-- App Server/protocol work needs integration tests for the real external shape, including streamed chunks, partial updates, stale responses, permission branches, failed operations, retries, cleanup paths, and persisted state reloads.
-- Do not accept mocks that hide protocol semantics. If ACP sends chunks, updates, or replayed history, tests must model chunks, updates, and replayed history.
 - Rust format: `cargo fmt --all --check`
 - Rust tests: `cargo test -p openaide-app-server`
 - Rust lint: `cargo clippy -p openaide-app-server --all-targets -- -D warnings`

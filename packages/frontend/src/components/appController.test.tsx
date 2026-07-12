@@ -1486,7 +1486,7 @@ describe("app controller mounted lifecycle", () => {
     expect(latestController?.state.snapshot?.task.task_id).toBe("task_prepared");
   });
 
-  it("discards its prepared Draft Task when routing to an existing Task", async () => {
+  it("discards its prepared New Task when routing to an existing Task", async () => {
     const request = vi.fn(async (method: string, params?: { taskId?: string }) => {
       if (method === AGENT_LIST_SESSIONS) {
         return { agentId: "codex", projectLabel: "OpenAIDE", sessions: [], nextCursor: null };
@@ -1533,7 +1533,7 @@ describe("app controller mounted lifecycle", () => {
     ]);
   });
 
-  it("retains its prepared Draft Task for Backend reuse when the new-task surface unmounts", async () => {
+  it("retains its prepared New Task for Backend reuse when the new-task surface unmounts", async () => {
     const request = vi.fn(async (method: string, params?: { taskId?: string }) => {
       if (method === AGENT_LIST_SESSIONS) {
         return { agentId: "codex", projectLabel: "OpenAIDE", sessions: [], nextCursor: null };
@@ -3177,6 +3177,7 @@ function protocolTaskSnapshot(
   const userText = typeof options === "string" ? undefined : options.userText;
   return {
     task: protocolTaskSummary(taskId, title, status, hasMessages),
+    lifecycle: "visible",
     revision: 1,
     preparation: { kind: "ready" as const },
     agentConfig: { state: "ready" as const, options: [] },

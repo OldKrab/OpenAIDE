@@ -5,7 +5,7 @@ use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{NormalizedMessage, TaskSnapshot, TaskStatus};
 use crate::protocol::params::TaskCreateParams;
 use crate::storage::records::TaskPreparationRecord;
-use crate::storage::records::TaskRecord;
+use crate::storage::records::{TaskLifecycle, TaskRecord};
 use crate::tasks::config_options::selected_config_options;
 use crate::tasks::lifecycle::running_turn_message;
 use crate::tasks::task_start_transaction::TaskSessionStartGuard;
@@ -68,7 +68,7 @@ impl TaskTurnLifecycle {
                 agent_id: params.selected_agent_id,
                 isolation: params.selected_isolation,
                 workspace_root: params.workspace_root,
-                first_prompt_sent: true,
+                lifecycle: TaskLifecycle::Visible,
                 agent_session_id: Some(session.session_id.clone()),
                 active_turn_id: Some(turn_id.clone()),
                 archived: false,

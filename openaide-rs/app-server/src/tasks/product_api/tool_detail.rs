@@ -1,4 +1,5 @@
 use openaide_app_server_protocol::errors::ProtocolError;
+use openaide_app_server_protocol::ids::ClientInstanceId;
 use openaide_app_server_protocol::task::{
     ActivityToolContent, ActivityToolField, ActivityToolInput, ActivityToolLocation,
     ActivityToolOutput, TaskToolDetailParams, TaskToolDetailResult,
@@ -7,17 +8,20 @@ use openaide_app_server_protocol::task::{
 use super::{protocol_error_from_runtime, TaskProductApi};
 
 pub(crate) trait TaskToolDetailWorkflow: Send + Sync {
-    fn tool_detail(
+    fn tool_detail_for_client(
         &self,
+        client_instance_id: &ClientInstanceId,
         params: TaskToolDetailParams,
     ) -> Result<TaskToolDetailResult, ProtocolError>;
 }
 
 impl TaskToolDetailWorkflow for TaskProductApi {
-    fn tool_detail(
+    fn tool_detail_for_client(
         &self,
+        client_instance_id: &ClientInstanceId,
         params: TaskToolDetailParams,
     ) -> Result<TaskToolDetailResult, ProtocolError> {
+        self.read_task_for_client(params.task_id.as_str(), client_instance_id)?;
         let details = self
             .store
             .read_tool_artifact(params.task_id.as_str(), &params.artifact_id)

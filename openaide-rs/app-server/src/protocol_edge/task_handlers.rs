@@ -59,7 +59,14 @@ impl RpcGateway {
                 return self.error(connection_id, id, meta, responses::invalid_params(error))
             }
         };
-        let task = match self.task_create.create(params) {
+        let client = self
+            .client_hub
+            .context_for_connection(&connection_id)
+            .expect("routing requires an initialized client for task create");
+        let task = match self
+            .task_create
+            .create_for_client(&client.client_instance_id, params)
+        {
             Ok(task) => task,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
@@ -143,7 +150,14 @@ impl RpcGateway {
                 return self.error(connection_id, id, meta, responses::invalid_params(error))
             }
         };
-        let task = match self.task_cancel.cancel(params) {
+        let client = self
+            .client_hub
+            .context_for_connection(&connection_id)
+            .expect("routing requires an initialized client for task cancel");
+        let task = match self
+            .task_cancel
+            .cancel_for_client(&client.client_instance_id, params)
+        {
             Ok(task) => task,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
@@ -164,7 +178,14 @@ impl RpcGateway {
                 return self.error(connection_id, id, meta, responses::invalid_params(error))
             }
         };
-        let task = match self.task_set_config_option.set_config_option(params) {
+        let client = self
+            .client_hub
+            .context_for_connection(&connection_id)
+            .expect("routing requires an initialized client for config changes");
+        let task = match self
+            .task_set_config_option
+            .set_config_option_for_client(&client.client_instance_id, params)
+        {
             Ok(task) => task,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
@@ -189,7 +210,14 @@ impl RpcGateway {
                 return self.error(connection_id, id, meta, responses::invalid_params(error))
             }
         };
-        let task = match self.task_open.open(params) {
+        let client = self
+            .client_hub
+            .context_for_connection(&connection_id)
+            .expect("routing requires an initialized client for task open");
+        let task = match self
+            .task_open
+            .open_for_client(&client.client_instance_id, params)
+        {
             Ok(task) => task,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
@@ -210,7 +238,14 @@ impl RpcGateway {
                 return self.error(connection_id, id, meta, responses::invalid_params(error))
             }
         };
-        let task = match self.task_open.retry_history_sync(params) {
+        let client = self
+            .client_hub
+            .context_for_connection(&connection_id)
+            .expect("routing requires an initialized client for history retry");
+        let task = match self
+            .task_open
+            .retry_history_sync(&client.client_instance_id, params)
+        {
             Ok(task) => task,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
@@ -237,7 +272,14 @@ impl RpcGateway {
                 return self.error(connection_id, id, meta, responses::invalid_params(error))
             }
         };
-        let task = match self.task_open.mark_read(params) {
+        let client = self
+            .client_hub
+            .context_for_connection(&connection_id)
+            .expect("routing requires an initialized client for task mark-read");
+        let task = match self
+            .task_open
+            .mark_read_for_client(&client.client_instance_id, params)
+        {
             Ok(task) => task,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
@@ -258,7 +300,14 @@ impl RpcGateway {
                 return self.error(connection_id, id, meta, responses::invalid_params(error))
             }
         };
-        let page = match self.task_chat_page.chat_page(params) {
+        let client = self
+            .client_hub
+            .context_for_connection(&connection_id)
+            .expect("routing requires an initialized client for Chat paging");
+        let page = match self
+            .task_chat_page
+            .chat_page_for_client(&client.client_instance_id, params)
+        {
             Ok(page) => page,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
@@ -278,7 +327,14 @@ impl RpcGateway {
                 return self.error(connection_id, id, meta, responses::invalid_params(error))
             }
         };
-        let details = match self.task_tool_detail.tool_detail(params) {
+        let client = self
+            .client_hub
+            .context_for_connection(&connection_id)
+            .expect("routing requires an initialized client for Tool details");
+        let details = match self
+            .task_tool_detail
+            .tool_detail_for_client(&client.client_instance_id, params)
+        {
             Ok(details) => details,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
@@ -300,7 +356,14 @@ impl RpcGateway {
             }
         };
         let discarded_task_id = params.task_id.clone();
-        let tasks = match self.task_discard.discard(params) {
+        let client = self
+            .client_hub
+            .context_for_connection(&connection_id)
+            .expect("routing requires an initialized client for task discard");
+        let tasks = match self
+            .task_discard
+            .discard_for_client(&client.client_instance_id, params)
+        {
             Ok(tasks) => tasks,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
@@ -331,7 +394,14 @@ impl RpcGateway {
         };
         let task_id = params.task_id.clone();
         let archived = params.archived;
-        let tasks = match self.task_archive.set_archived(params) {
+        let client = self
+            .client_hub
+            .context_for_connection(&connection_id)
+            .expect("routing requires an initialized client for task archive");
+        let tasks = match self
+            .task_archive
+            .set_archived_for_client(&client.client_instance_id, params)
+        {
             Ok(tasks) => tasks,
             Err(error) => return self.error(connection_id, id, meta, error),
         };

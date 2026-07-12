@@ -588,6 +588,7 @@ describe("App Server Protocol state mapping", () => {
 function protocolSnapshot(overrides: Partial<ProtocolTaskSnapshot> = {}): ProtocolTaskSnapshot {
   return {
     task: protocolSummary({ status: "preparing" }),
+    lifecycle: "visible",
     revision: 7,
     preparation: { kind: "ready" },
     agentConfig: {

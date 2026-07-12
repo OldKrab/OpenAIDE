@@ -77,7 +77,11 @@ fn task_record() -> TaskRecord {
         agent_name: "Codex".to_string(),
         isolation: IsolationKind::Local,
         workspace_root: "/workspace".to_string(),
-        first_prompt_sent: false,
+        lifecycle: crate::storage::records::TaskLifecycle::New {
+            owner_client_instance_id: openaide_app_server_protocol::ids::ClientInstanceId::from(
+                "test-client",
+            ),
+        },
         agent_session_id: None,
         active_turn_id: None,
         archived: false,

@@ -210,6 +210,17 @@ impl TaskMutations {
         self.create_task_with_validation(task, initial_messages, options, |_| Ok(()))
     }
 
+    /// Resolves one client-owned New Task or creates it while holding the same storage lock.
+    /// This keeps lookup and creation atomic without adding a second ownership index.
+    pub(crate) fn resolve_or_create_new_task(
+        &self,
+        task: TaskRecord,
+        initial_messages: Vec<NormalizedMessage>,
+        options: TaskCommitOptions,
+    ) -> Result<TaskCommitResult, RuntimeError> {
+        commit::resolve_or_create_new_task(self, task, initial_messages, options)
+    }
+
     #[allow(dead_code)]
     pub(crate) fn publish_current_task(&self, task_id: &str) -> Result<(), RuntimeError> {
         commit::publish_current_task(self, task_id)

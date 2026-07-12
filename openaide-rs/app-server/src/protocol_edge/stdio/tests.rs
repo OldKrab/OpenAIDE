@@ -779,7 +779,9 @@ fn agent_custom_create_updates_live_registry_and_emits_agent_event() {
     let custom_agent_id: String;
     {
         let store = Store::open(temp.path().to_path_buf()).unwrap();
-        store.write_task(&task_record("task-existing")).unwrap();
+        let mut project_anchor = task_record("task-existing");
+        project_anchor.lifecycle = crate::storage::records::TaskLifecycle::Visible;
+        store.write_task(&project_anchor).unwrap();
     }
     {
         let state_root = StateRoot::resolve(temp.path()).expect("state root");
@@ -1601,7 +1603,7 @@ fn task_create_persists_idle_task_without_prompt_after_initialize() {
         .as_str()
         .expect("created task id")
         .to_string();
-    assert_eq!(task_id, "task-existing");
+    assert_ne!(task_id, "task-existing");
     assert_eq!(
         response["result"]["result"]["task"]["preparation"]["kind"],
         "preparing"
@@ -1621,12 +1623,19 @@ fn task_create_persists_idle_task_without_prompt_after_initialize() {
     let store = open_store_after_dispatcher_drop(temp.path());
     let record = store.read_task(&task_id).unwrap();
     assert_eq!(record.status, TaskStatus::Inactive);
-    assert!(!record.first_prompt_sent);
+    assert_eq!(
+        record.lifecycle,
+        crate::storage::records::TaskLifecycle::New {
+            owner_client_instance_id: openaide_app_server_protocol::ids::ClientInstanceId::from(
+                "client-1"
+            ),
+        }
+    );
     assert_eq!(record.active_turn_id, None);
 }
 
 #[test]
-fn task_create_emits_project_collection_update_after_initialize() {
+fn task_create_does_not_publish_private_new_task_to_project_subscribers() {
     let temp = tempfile::TempDir::new().expect("temp dir");
     {
         let store = Store::open(temp.path().to_path_buf()).unwrap();
@@ -1664,13 +1673,7 @@ fn task_create_emits_project_collection_update_after_initialize() {
         .recv_timeout(Duration::from_secs(1))
         .expect("task create notification");
     let events = dispatcher.handle_task_update(committed);
-    let event =
-        app_event_payload(&events, "projectCollectionUpdated").expect("project collection update");
-    assert!(event["projects"]["projects"]
-        .as_array()
-        .expect("projects")
-        .iter()
-        .any(|project| project["projectId"] == project_id_for_workspace("/workspace/a").as_str()));
+    assert!(events.is_empty());
 }
 
 #[test]
@@ -1717,7 +1720,10 @@ fn task_adopt_native_session_loads_agent_session_after_initialize() {
     let store = open_store_after_dispatcher_drop(temp.path());
     let record = store.read_task(&task_id).unwrap();
     assert_eq!(record.agent_session_id.as_deref(), Some("native-session-1"));
-    assert!(record.first_prompt_sent);
+    assert_eq!(
+        record.lifecycle,
+        crate::storage::records::TaskLifecycle::Visible
+    );
     assert!(matches!(record.preparation, TaskPreparationRecord::Ready));
 }
 
@@ -1788,7 +1794,10 @@ fn task_send_commits_user_message_and_active_turn_after_initialize() {
     drop(dispatcher);
     let store = open_store_after_dispatcher_drop(temp.path());
     let record = store.read_task("task-existing").unwrap();
-    assert!(record.first_prompt_sent);
+    assert_eq!(
+        record.lifecycle,
+        crate::storage::records::TaskLifecycle::Visible
+    );
     assert!(record.agent_session_id.is_some());
     assert!(store.read_messages("task-existing").unwrap().len() >= 2);
 }
@@ -2337,9 +2346,15 @@ fn task_discard_hides_empty_pre_send_task_after_initialize() {
     let temp = tempfile::TempDir::new().expect("temp dir");
     {
         let store = Store::open(temp.path().to_path_buf()).unwrap();
-        store.write_task(&task_record("task-draft")).unwrap();
+        let mut draft = task_record("task-draft");
+        draft.lifecycle = crate::storage::records::TaskLifecycle::New {
+            owner_client_instance_id: openaide_app_server_protocol::ids::ClientInstanceId::from(
+                "client-1",
+            ),
+        };
+        store.write_task(&draft).unwrap();
         let mut existing = task_record("task-existing");
-        existing.first_prompt_sent = true;
+        existing.lifecycle = crate::storage::records::TaskLifecycle::Visible;
         store.write_task(&existing).unwrap();
     }
     let state_root = StateRoot::resolve(temp.path()).expect("state root");
@@ -2449,6 +2464,11 @@ fn task_discard_keeps_the_configured_project_after_its_last_task() {
         let store = Store::open(temp.path().to_path_buf()).unwrap();
         let mut draft = task_record("task-draft");
         draft.workspace_root = workspace_root.to_string();
+        draft.lifecycle = crate::storage::records::TaskLifecycle::New {
+            owner_client_instance_id: openaide_app_server_protocol::ids::ClientInstanceId::from(
+                "client-1",
+            ),
+        };
         store.write_task(&draft).unwrap();
     }
     let state_root = StateRoot::resolve(temp.path()).expect("state root");
@@ -2640,7 +2660,7 @@ fn task_record(task_id: &str) -> TaskRecord {
         agent_name: "Codex".to_string(),
         isolation: IsolationKind::Local,
         workspace_root: "/workspace/a".to_string(),
-        first_prompt_sent: false,
+        lifecycle: crate::storage::records::TaskLifecycle::Visible,
         agent_session_id: None,
         active_turn_id: None,
         archived: false,

@@ -48,10 +48,19 @@ pub enum TaskStatus {
     Completed,
 }
 
+/// Client-visible Task history membership. New Task ownership remains private to App Server.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum TaskLifecycle {
+    New,
+    Visible,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskSnapshot {
     pub task: TaskSummary,
+    pub lifecycle: TaskLifecycle,
     pub revision: u64,
     pub preparation: TaskPreparationSnapshot,
     pub agent_config: TaskAgentConfigSnapshot,

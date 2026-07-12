@@ -7,9 +7,9 @@ use openaide_app_server_protocol::snapshot::{
     AgentCollectionSnapshot, ChatSnapshot, ClientSnapshot, ClientSnapshotScope,
     LiveSessionDataState, ProjectCollectionSnapshot, ProtocolVersion, ServerCapabilities,
     ServerSnapshot, StateRootSnapshot, TaskAgentCommandsSnapshot, TaskAgentConfigSnapshot,
-    TaskNavigationSnapshot, TaskPreparationAction, TaskPreparationSnapshot, TaskSendBlocker,
-    TaskSendBlockerKind, TaskSendCapabilitySnapshot, TaskSendCapabilityState, TaskSetupBlocker,
-    TaskSetupBlockerKind, TaskSnapshot, TaskStatus, TaskSummary,
+    TaskLifecycle, TaskNavigationSnapshot, TaskPreparationAction, TaskPreparationSnapshot,
+    TaskSendBlocker, TaskSendBlockerKind, TaskSendCapabilitySnapshot, TaskSendCapabilityState,
+    TaskSetupBlocker, TaskSetupBlockerKind, TaskSnapshot, TaskStatus, TaskSummary,
 };
 use openaide_app_server_protocol::state::{SubscriptionScope, SubscriptionSnapshot};
 
@@ -96,7 +96,10 @@ impl SnapshotBuilder {
         token: &SnapshotReadToken,
     ) -> Result<ClientSnapshot, ProtocolError> {
         let active_task = match &requested_surface {
-            RequestedSurface::Task { task_id } => Some(self.task_snapshots.open(task_id)?),
+            RequestedSurface::Task { task_id } => Some(
+                self.task_snapshots
+                    .open_for_client(&ctx.client_instance_id, task_id)?,
+            ),
             _ => None,
         };
         Ok(ClientSnapshot {
@@ -138,7 +141,7 @@ impl SnapshotBuilder {
 impl SnapshotProvider for SnapshotBuilder {
     fn snapshot(
         &self,
-        _ctx: &ClientContext,
+        ctx: &ClientContext,
         scope: &SubscriptionScope,
         _token: &SnapshotReadToken,
     ) -> Result<SubscriptionSnapshot, ProtocolError> {
@@ -161,7 +164,9 @@ impl SnapshotProvider for SnapshotBuilder {
                 }
             }
             SubscriptionScope::Task { task_id } => SubscriptionSnapshot::Task {
-                task: self.task_snapshots.open(task_id)?,
+                task: self
+                    .task_snapshots
+                    .open_for_client(&ctx.client_instance_id, task_id)?,
             },
         })
     }
@@ -223,7 +228,15 @@ impl TaskSnapshotSource for EmptyTaskSnapshots {
         })
     }
 
-    fn open(&self, task_id: &TaskId) -> Result<TaskSnapshot, ProtocolError> {
+    fn open_internal(&self, task_id: &TaskId) -> Result<TaskSnapshot, ProtocolError> {
+        Ok(unavailable_task_snapshot(task_id.clone()))
+    }
+
+    fn open_for_client(
+        &self,
+        _client_instance_id: &openaide_app_server_protocol::ids::ClientInstanceId,
+        task_id: &TaskId,
+    ) -> Result<TaskSnapshot, ProtocolError> {
         Ok(unavailable_task_snapshot(task_id.clone()))
     }
 }
@@ -241,6 +254,7 @@ fn unavailable_task_snapshot(task_id: TaskId) -> TaskSnapshot {
             unread: false,
             has_messages: false,
         },
+        lifecycle: TaskLifecycle::Visible,
         revision: 0,
         preparation: TaskPreparationSnapshot::Blocked {
             blocker: TaskSetupBlocker {

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::storage::records::TaskPreparationRecord;
+use crate::storage::records::{TaskLifecycle, TaskPreparationRecord};
 
 use super::{AgentCommandsCatalog, ConfigOptionsCatalog, MessagePage, NormalizedMessage};
 
@@ -43,6 +43,7 @@ pub struct TaskSummary {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TaskSnapshot {
     pub task: TaskSummary,
+    pub lifecycle: TaskLifecycle,
     pub chat: MessagePage,
     pub permissions: Vec<NormalizedMessage>,
     pub settings_summary: SettingsSummary,

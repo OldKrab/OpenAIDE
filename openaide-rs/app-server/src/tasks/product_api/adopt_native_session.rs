@@ -10,7 +10,7 @@ use crate::protocol::model::{
     IsolationKind, NormalizedMessage, TaskSnapshot as StoredTaskSnapshot,
     TaskStatus as LegacyTaskStatus,
 };
-use crate::storage::records::{TaskPreparationRecord, TaskRecord};
+use crate::storage::records::{TaskLifecycle, TaskPreparationRecord, TaskRecord};
 use crate::tasks::mutation::TaskCommitOptions;
 use crate::tasks::task_start_transaction::TaskSessionStartGuard;
 use crate::tasks::transitions::TaskTransitions;
@@ -128,7 +128,7 @@ impl TaskProductApi {
             agent_id: selected_agent_id.clone(),
             isolation,
             workspace_root: workspace_root.clone(),
-            first_prompt_sent: true,
+            lifecycle: TaskLifecycle::Visible,
             agent_session_id: Some(session_id.clone()),
             active_turn_id: None,
             archived: false,

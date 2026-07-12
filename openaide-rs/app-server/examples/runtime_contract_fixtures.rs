@@ -112,6 +112,7 @@ fn main() {
 
     let snapshot = TaskSnapshot {
         task: task.clone(),
+        lifecycle: openaide_app_server::storage::records::TaskLifecycle::Visible,
         chat: chat.clone(),
         permissions: vec![chat.items[3].message.clone()],
         settings_summary: SettingsSummary {

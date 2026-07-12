@@ -36,6 +36,7 @@ pub fn build_snapshot(
                 }
             }),
             agent_commands_catalog: task.agent_commands_catalog.clone(),
+            lifecycle: task.lifecycle.clone(),
             preparation: task.preparation.clone(),
             permissions: chat
                 .items

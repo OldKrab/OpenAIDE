@@ -9,16 +9,12 @@ The canonical product identity.
 _Avoid_: Alternate product names
 
 **Task**:
-A unit of agent work in OpenAIDE's task list that has status, Project Context, Agent selection, and an Agent-owned Native Session. A Task begins in the Draft phase and becomes Established when App Server durably accepts its first message.
+A visible unit of agent work in OpenAIDE's task list that has status, Project Context, Agent selection, an Agent-owned Native Session, and at least one durably accepted user message.
 _Avoid_: Chat, conversation
 
-**Draft Task**:
-A Task whose required start context is selected and whose Native Session is being acquired or retained, but whose first user message has not yet been accepted. Leaving its page does not discard it.
-_Avoid_: Temporary Frontend-only task, orphan prepared session
-
-**Established Task**:
-A Task whose first user message has been durably accepted, whether its current Turn is starting, running, completed, interrupted, or failed.
-_Avoid_: Treating Agent startup success as the point where the Task becomes real
+**New Task**:
+A client-private, reusable pre-history Task instance with an App Server-owned identity, selected Project Context and Agent, and a Native Session that is being acquired or retained. It is not visible in Task Navigation, Task lists, Archive, or other clients. App Server promotes it to a visible Task when it durably accepts the first user message. Ordinary navigation does not discard it.
+_Avoid_: Draft Task, slot, temporary Frontend-only task, visible empty Task
 
 **Chat**:
 The user-facing message surface inside a Task where the user and agent exchange messages and folded tool activity.
@@ -113,7 +109,7 @@ An Agent-provided setting for a Native Session whose available choices and curre
 _Avoid_: Static hard-coded model or mode controls
 
 **Running Task**:
-A Task with an active Agent turn owned by one App Server process and its Agent Native Session that may still need permissions, files, terminals, or user input.
+A Task whose primary Agent prompt is active, owned by one App Server process and its Agent Native Session, and which may still need permissions, files, terminals, or user input.
 _Avoid_: Blocking all existing Tasks as if they were running
 
 ## Relationships
@@ -129,9 +125,11 @@ _Avoid_: Blocking all existing Tasks as if they were running
 - Web App, Desktop App, and Mobile App share as much **Frontend** composition as their shell constraints allow.
 - VS Code Extension composes the same **Frontend** surfaces into VS Code-specific locations.
 - A **Task** can be moved to the **Archive**.
-- A **Draft Task** is reused for its Project Context until it is established or explicitly discarded.
-- Closing a **Task Page** does not discard its **Draft Task** or close its **Native Session**.
-- A **Draft Task** becomes an **Established Task** when App Server durably accepts the first user message and starting Turn.
+- A **New Task** is private to one App Shell client and is never reused by another client.
+- A **New Task** is reused by its owning client until its first message is durably accepted or the user explicitly discards it.
+- While the first send is unresolved and App Server still identifies the instance as the client's **New Task**, invoking New Task simply reopens that same instance in its submitting state. A later New Task action creates another instance only after first-send acceptance has made the previous one a visible **Task**.
+- Closing or leaving the **New Task** surface does not discard it or close its **Native Session**.
+- A **New Task** becomes a visible **Task** when App Server durably accepts its first user message and starting Task state.
 - A **Task** belongs to the OpenAIDE task list and has **Project Context**.
 - **Project Context** is always a **Project**.
 - A **Task** is created only after the user selects the required start context.
@@ -157,7 +155,7 @@ _Avoid_: Blocking all existing Tasks as if they were running
 - A **Task** can be bound to one **Native Session**.
 - Live interaction with a **Native Session** is owned by one **App Server** process at a time.
 - A **Native Session** can expose **Configuration Options**.
-- A **Running Task** is owned by one **App Server** process and its **Native Session** while its active turn is running.
+- A **Running Task** is owned by one **App Server** process and its **Native Session** while its primary prompt is active.
 - The App Shell client that started a **Running Task** is only the origin for client-scoped capabilities.
 - Subscribed App Shell clients can observe a **Running Task**. Connected App Shell clients that advertised the required response capability can answer Task-scoped requests independently of state subscriptions.
 - Closing the last **App Shell** client lets **App Server** shut down gracefully; closing a **Task Page** or losing a **Frontend** view is not cancellation.
@@ -165,10 +163,10 @@ _Avoid_: Blocking all existing Tasks as if they were running
 ## Example dialogue
 
 > **Dev:** "When a user opens OpenAIDE, are they starting an agent immediately?"
-> **Domain expert:** "No. A **Task** starts only after the user chooses the required Project Context and Agent. OpenAIDE starts the Agent-owned **Native Session** for that Task, but the first Agent turn starts only when the user sends work."
+> **Domain expert:** "No. A **Task** starts only after the user chooses the required Project Context and Agent. OpenAIDE starts the Agent-owned **Native Session** for that Task, but Agent work starts only when the user sends the first message."
 
 > **Dev:** "What happens if the user leaves New Task before sending?"
-> **Domain expert:** "The **Draft Task** remains. Returning reopens the same Task and reuses, resumes, loads, or safely replaces its empty **Native Session** behind the App Server seam."
+> **Domain expert:** "The client-private **New Task** remains. Returning reopens the same instance and reuses, resumes, loads, or safely replaces its empty **Native Session** behind the App Server seam."
 
 > **Dev:** "Should old chats appear under Recent?"
 > **Domain expert:** "Use **Task**, not chat. Old tasks stay in the default list until the user moves them to the **Archive**."

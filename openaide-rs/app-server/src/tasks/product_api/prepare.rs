@@ -5,7 +5,7 @@ use crate::agent::{
 };
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::TaskStatus as LegacyTaskStatus;
-use crate::storage::records::{TaskPreparationRecord, TaskRecord};
+use crate::storage::records::{TaskLifecycle, TaskPreparationRecord, TaskRecord};
 use crate::tasks::mutation::{TaskCommitOptions, TaskCommitOutcome, TaskMutationResult};
 use crate::tasks::task_start_transaction::TaskSessionStartGuard;
 use crate::time::now_string;
@@ -85,7 +85,7 @@ impl TaskProductApi {
                 task.agent_session_id = Some(session_id.clone());
                 // A fresh start returns an authoritative catalog. Resume only
                 // reattaches identity, so missing metadata must preserve the
-                // catalog already persisted for the Draft Task.
+                // catalog already persisted for the New Task.
                 if config_catalog.is_some() {
                     task.config_options = config_options.clone();
                     task.config_options_catalog = config_catalog.clone();
@@ -240,7 +240,7 @@ pub(super) fn reject_if_preparation_not_ready(task: &TaskRecord) -> Result<(), P
 
 fn is_abandoned_preparation(task: &TaskRecord) -> bool {
     !task.tombstoned
-        && !task.first_prompt_sent
+        && matches!(task.lifecycle, TaskLifecycle::New { .. })
         && task.status == LegacyTaskStatus::Inactive
         && matches!(
             task.preparation,

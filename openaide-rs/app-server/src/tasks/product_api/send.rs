@@ -6,8 +6,7 @@ use uuid::Uuid;
 use crate::attachment_runtime::{AttachmentOwner, ResolvedSendAttachments};
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::TaskStatus as LegacyTaskStatus;
-use crate::storage::records::TaskPreparationRecord;
-use crate::storage::records::TaskRecord;
+use crate::storage::records::{TaskLifecycle, TaskPreparationRecord, TaskRecord};
 use crate::storage::send_receipts::TaskSendReceipt;
 use crate::task_recovery::RESTART_INTERRUPTION_MESSAGE;
 use crate::tasks::mutation::{TaskCommitOutcome, TaskMutationResult};
@@ -59,8 +58,7 @@ impl TaskProductApi {
         params: TaskSendParams,
     ) -> Result<TaskSendAccepted, ProtocolError> {
         let task_id = params.task_id.as_str().to_string();
-        let mut existing_task = self.store.read_task(&task_id).map_err(runtime_error)?;
-        super::reject_tombstoned_task(&existing_task)?;
+        let mut existing_task = self.read_task_for_client(&task_id, client_instance_id)?;
         let idempotency_key = params.idempotency_key.as_str().to_string();
         let idempotency_identity = send_identity(&idempotency_key);
         if let Some(existing) = self.existing_send(&task_id, &idempotency_key)? {
@@ -118,10 +116,16 @@ impl TaskProductApi {
             return Err(conflict_error("Task is already starting a Turn"));
         }
         let mut sync_generation = None;
+        let sending_client = client_instance_id.clone();
         let commit_result =
             self.mutations
                 .commit_existing_task(&task_id, durable_send_commit_options(), |ctx| {
                     if ctx.task().tombstoned {
+                        return Ok(TaskMutationResult::Rejected);
+                    }
+                    if crate::tasks::access::require_client_task_access(ctx.task(), &sending_client)
+                        .is_err()
+                    {
                         return Ok(TaskMutationResult::Rejected);
                     }
                     if ctx.task().active_turn_id.is_some() {
@@ -160,7 +164,9 @@ impl TaskProductApi {
 
                     let task = ctx.task_mut();
                     task.status = LegacyTaskStatus::Active;
-                    task.first_prompt_sent = true;
+                    // Promotion is durable before Agent work starts, so permissions and other
+                    // Agent requests can never belong to a client-private New Task.
+                    task.lifecycle = TaskLifecycle::Visible;
                     task.active_turn_id = Some(turn_id.as_str().to_string());
                     task.updated_at = now.clone();
                     task.last_activity = now;
@@ -272,7 +278,7 @@ impl TaskProductApi {
         let task_id = existing_task.task_id.clone();
         let turn_id = committed_send.turn_id().clone();
         let retryable_history_sync =
-            existing_task.first_prompt_sent && existing_task.agent_session_id.is_some();
+            existing_task.lifecycle.is_visible() && existing_task.agent_session_id.is_some();
         let pending_send = PendingSendSync {
             prompt_text: prompt_text.clone(),
             attachments: attachments.clone(),
@@ -480,7 +486,7 @@ impl TaskProductApi {
         sync_generation: u64,
     ) -> Result<Option<TaskRecord>, RuntimeError> {
         let task_id = initial.task_id.clone();
-        let first_prompt_was_already_sent = initial.first_prompt_sent;
+        let lifecycle_before_send = initial.lifecycle.clone();
         let mut initial = (!matches!(
             initial.preparation,
             TaskPreparationRecord::Needed | TaskPreparationRecord::Preparing
@@ -494,7 +500,7 @@ impl TaskProductApi {
                 };
                 // The persisted Task already includes this accepted send. Session opening still
                 // needs the pre-send value to distinguish a draft from recoverable Agent history.
-                task.first_prompt_sent = first_prompt_was_already_sent;
+                task.lifecycle = lifecycle_before_send.clone();
                 match &task.preparation {
                     TaskPreparationRecord::Ready => Ok(Some(task)),
                     TaskPreparationRecord::Failed { message } => Err(RuntimeError::NotReady(

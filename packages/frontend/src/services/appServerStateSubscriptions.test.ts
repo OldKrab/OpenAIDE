@@ -987,6 +987,7 @@ function textChunkEvent(
 function protocolTaskSnapshot(taskIdValue: string) {
   return {
     task: taskSummary(taskIdValue, "Task"),
+    lifecycle: "visible" as const,
     revision: 1,
     preparation: { kind: "ready" as const },
     agentConfig: { state: "ready" as const, options: [] },

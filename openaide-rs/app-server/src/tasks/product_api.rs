@@ -63,7 +63,7 @@ pub(crate) struct TaskProductApi {
     config_operations: crate::tasks::task_operation::TaskOperationCoordinator,
     pending_send_sync: crate::tasks::pending_send_sync::PendingSendSyncCoordinator,
     // ACP may expose a newly started session before its Task metadata commit finishes.
-    // Keep that session reserved so external-session listing never leaks a Draft Task.
+    // Keep that session reserved so external-session listing never leaks a New Task.
     preparing_session_ids: Arc<Mutex<HashSet<AgentSessionKey>>>,
     history_sync: crate::tasks::history_sync::HistorySyncCoordinator,
     #[allow(dead_code)]
@@ -72,7 +72,11 @@ pub(crate) struct TaskProductApi {
 }
 
 pub(crate) trait TaskCreateWorkflow: Send + Sync {
-    fn create(&self, params: TaskCreateParams) -> Result<TaskSnapshot, ProtocolError>;
+    fn create_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        params: TaskCreateParams,
+    ) -> Result<TaskSnapshot, ProtocolError>;
 }
 
 pub(crate) trait TaskAdoptNativeSessionWorkflow: Send + Sync {
@@ -105,7 +109,11 @@ pub(crate) trait TaskSendWorkflow: Send + Sync {
 }
 
 pub(crate) trait TaskCancelWorkflow: Send + Sync {
-    fn cancel(&self, params: TaskCancelParams) -> Result<TaskSnapshot, ProtocolError>;
+    fn cancel_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        params: TaskCancelParams,
+    ) -> Result<TaskSnapshot, ProtocolError>;
     fn recover_stuck_sessions(
         &self,
         params: SupportRecoverStuckSessionsParams,
@@ -115,19 +123,25 @@ pub(crate) trait TaskCancelWorkflow: Send + Sync {
 pub(crate) use open::TaskOpenWorkflow;
 
 pub(crate) trait TaskSetConfigOptionWorkflow: Send + Sync {
-    fn set_config_option(
+    fn set_config_option_for_client(
         &self,
+        client_instance_id: &ClientInstanceId,
         params: TaskSetConfigOptionParams,
     ) -> Result<TaskSnapshot, ProtocolError>;
 }
 
 pub(crate) trait TaskDiscardWorkflow: Send + Sync {
-    fn discard(&self, params: TaskDiscardParams) -> Result<TaskNavigationSnapshot, ProtocolError>;
+    fn discard_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        params: TaskDiscardParams,
+    ) -> Result<TaskNavigationSnapshot, ProtocolError>;
 }
 
 pub(crate) trait TaskArchiveWorkflow: Send + Sync {
-    fn set_archived(
+    fn set_archived_for_client(
         &self,
+        client_instance_id: &ClientInstanceId,
         params: TaskSetArchivedParams,
     ) -> Result<TaskNavigationSnapshot, ProtocolError>;
 }
@@ -137,6 +151,19 @@ pub(crate) use chat_page::TaskChatPageWorkflow;
 pub(crate) use tool_detail::TaskToolDetailWorkflow;
 
 impl TaskProductApi {
+    /// Reads a Task at a client intent boundary and hides another client's New Task.
+    pub(super) fn read_task_for_client(
+        &self,
+        task_id: &str,
+        client_instance_id: &ClientInstanceId,
+    ) -> Result<TaskRecord, ProtocolError> {
+        let task = self.store.read_task(task_id).map_err(runtime_error)?;
+        crate::tasks::access::require_client_task_access(&task, client_instance_id)
+            .map_err(runtime_error)?;
+        reject_tombstoned_task(&task)?;
+        Ok(task)
+    }
+
     #[cfg(test)]
     pub(crate) fn attachment_runtime(&self) -> AttachmentRuntime {
         self.attachments.clone()
@@ -254,8 +281,12 @@ impl AppServerShutdownWorkflow for TaskProductApi {
 }
 
 impl TaskCreateWorkflow for TaskProductApi {
-    fn create(&self, params: TaskCreateParams) -> Result<TaskSnapshot, ProtocolError> {
-        self.create_task(params)
+    fn create_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        params: TaskCreateParams,
+    ) -> Result<TaskSnapshot, ProtocolError> {
+        self.create_task(client_instance_id, params)
     }
 }
 
@@ -280,6 +311,87 @@ impl TaskSendWorkflow for TaskProductApi {
 
 #[cfg(test)]
 impl TaskProductApi {
+    pub(crate) fn create_for_test(
+        &self,
+        params: TaskCreateParams,
+    ) -> Result<TaskSnapshot, ProtocolError> {
+        self.create_task(
+            &crate::attachment_runtime::AttachmentOwner::test_client_instance_id(),
+            params,
+        )
+    }
+
+    pub(crate) fn open_for_test(
+        &self,
+        params: openaide_app_server_protocol::task::TaskOpenParams,
+    ) -> Result<TaskSnapshot, ProtocolError> {
+        self.open_task(
+            &crate::attachment_runtime::AttachmentOwner::test_client_instance_id(),
+            params,
+        )
+    }
+
+    pub(crate) fn mark_read_for_test(
+        &self,
+        params: openaide_app_server_protocol::task::TaskMarkReadParams,
+    ) -> Result<TaskSnapshot, ProtocolError> {
+        self.mark_task_read(
+            &crate::attachment_runtime::AttachmentOwner::test_client_instance_id(),
+            params,
+        )
+    }
+
+    pub(crate) fn retry_history_sync_for_test(
+        &self,
+        params: openaide_app_server_protocol::task::TaskRetryHistorySyncParams,
+    ) -> Result<TaskSnapshot, ProtocolError> {
+        TaskOpenWorkflow::retry_history_sync(
+            self,
+            &crate::attachment_runtime::AttachmentOwner::test_client_instance_id(),
+            params,
+        )
+    }
+
+    pub(crate) fn set_config_option_for_test(
+        &self,
+        params: TaskSetConfigOptionParams,
+    ) -> Result<TaskSnapshot, ProtocolError> {
+        self.set_config_option_on_task(
+            &crate::attachment_runtime::AttachmentOwner::test_client_instance_id(),
+            params,
+        )
+    }
+
+    pub(crate) fn discard_for_test(
+        &self,
+        params: TaskDiscardParams,
+    ) -> Result<TaskNavigationSnapshot, ProtocolError> {
+        self.discard_task(
+            &crate::attachment_runtime::AttachmentOwner::test_client_instance_id(),
+            params,
+        )
+    }
+
+    pub(crate) fn cancel_for_test(
+        &self,
+        params: TaskCancelParams,
+    ) -> Result<TaskSnapshot, ProtocolError> {
+        self.cancel_task(
+            &crate::attachment_runtime::AttachmentOwner::test_client_instance_id(),
+            params,
+        )
+    }
+
+    pub(crate) fn set_archived_for_test(
+        &self,
+        params: TaskSetArchivedParams,
+    ) -> Result<TaskNavigationSnapshot, ProtocolError> {
+        self.set_task_archived(
+            &crate::attachment_runtime::AttachmentOwner::test_client_instance_id(),
+            params,
+        )
+    }
+
     pub(crate) fn send(&self, params: TaskSendParams) -> Result<TaskSendAccepted, ProtocolError> {
         self.send_message(
             &crate::attachment_runtime::AttachmentOwner::test_client_instance_id(),
@@ -289,8 +401,12 @@ impl TaskProductApi {
 }
 
 impl TaskCancelWorkflow for TaskProductApi {
-    fn cancel(&self, params: TaskCancelParams) -> Result<TaskSnapshot, ProtocolError> {
-        self.cancel_task(params)
+    fn cancel_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        params: TaskCancelParams,
+    ) -> Result<TaskSnapshot, ProtocolError> {
+        self.cancel_task(client_instance_id, params)
     }
 
     fn recover_stuck_sessions(
@@ -302,26 +418,32 @@ impl TaskCancelWorkflow for TaskProductApi {
 }
 
 impl TaskSetConfigOptionWorkflow for TaskProductApi {
-    fn set_config_option(
+    fn set_config_option_for_client(
         &self,
+        client_instance_id: &ClientInstanceId,
         params: TaskSetConfigOptionParams,
     ) -> Result<TaskSnapshot, ProtocolError> {
-        self.set_config_option_on_task(params)
+        self.set_config_option_on_task(client_instance_id, params)
     }
 }
 
 impl TaskDiscardWorkflow for TaskProductApi {
-    fn discard(&self, params: TaskDiscardParams) -> Result<TaskNavigationSnapshot, ProtocolError> {
-        self.discard_task(params)
+    fn discard_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        params: TaskDiscardParams,
+    ) -> Result<TaskNavigationSnapshot, ProtocolError> {
+        self.discard_task(client_instance_id, params)
     }
 }
 
 impl TaskArchiveWorkflow for TaskProductApi {
-    fn set_archived(
+    fn set_archived_for_client(
         &self,
+        client_instance_id: &ClientInstanceId,
         params: TaskSetArchivedParams,
     ) -> Result<TaskNavigationSnapshot, ProtocolError> {
-        self.set_task_archived(params)
+        self.set_task_archived(client_instance_id, params)
     }
 }
 
@@ -339,6 +461,7 @@ pub(super) fn protocol_error_from_runtime(error: RuntimeError) -> ProtocolError 
             recoverable: false,
             target: None,
         },
+        RuntimeError::Conflict(message) => conflict_error(&message),
         other => ProtocolError {
             code: ProtocolErrorCode::Internal,
             message: other.to_string(),

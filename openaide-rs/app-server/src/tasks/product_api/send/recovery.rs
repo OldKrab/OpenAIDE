@@ -4,6 +4,7 @@ use crate::protocol::model::{
     ActivityStatus, ActivityStep, InterruptionReason, NormalizedMessage,
     TaskStatus as LegacyTaskStatus,
 };
+use crate::storage::records::TaskLifecycle;
 use crate::task_recovery::RESTART_INTERRUPTION_MESSAGE;
 use crate::tasks::mutation::{TaskCommitOutcome, TaskMutationResult};
 use crate::time::now_string;
@@ -62,7 +63,7 @@ impl TaskProductApi {
                     };
                     task.active_turn_id = None;
                 }
-                task.first_prompt_sent = true;
+                task.lifecycle = TaskLifecycle::Visible;
                 task.unread |= interrupted;
                 task.updated_at = now.clone();
                 task.last_activity = now.clone();

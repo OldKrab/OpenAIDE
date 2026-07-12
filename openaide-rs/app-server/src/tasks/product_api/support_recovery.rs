@@ -36,10 +36,11 @@ impl TaskProductApi {
         &self,
     ) -> Result<Vec<TaskRecord>, crate::protocol::errors::RuntimeError> {
         let _guard = self.mutations.lock();
-        let mut tasks = self.store.list_tasks()?;
-        tasks.extend(self.store.list_archived_tasks()?);
-        Ok(tasks
+        Ok(self
+            .store
+            .list_all_task_records()?
             .into_iter()
+            .filter(|task| !task.tombstoned)
             .filter(|task| task.status == LegacyTaskStatus::Active || task.active_turn_id.is_some())
             .collect())
     }

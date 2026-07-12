@@ -445,6 +445,24 @@ fn activity_message_with_edit_details(id: &str) -> ChatMessage {
     }
 }
 
+#[test]
+fn visible_task_queries_exclude_client_private_new_tasks() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let visible = task_record("task-visible", TaskStatus::Inactive, "1");
+    let mut new_task = task_record("task-new", TaskStatus::Inactive, "2");
+    new_task.lifecycle = super::records::TaskLifecycle::New {
+        owner_client_instance_id: openaide_app_server_protocol::ids::ClientInstanceId::from(
+            "client-a",
+        ),
+    };
+    store.write_task(&visible).unwrap();
+    store.write_task(&new_task).unwrap();
+
+    assert_eq!(listed_task_ids(&store), vec!["task-visible"]);
+    assert_eq!(store.list_all_task_records().unwrap().len(), 2);
+}
+
 fn listed_task_ids(store: &Store) -> Vec<String> {
     store
         .list_tasks()
@@ -470,7 +488,7 @@ fn task_record(task_id: &str, status: TaskStatus, created_at: &str) -> TaskRecor
         agent_name: "Codex".to_string(),
         isolation: IsolationKind::Local,
         workspace_root: "/workspace".to_string(),
-        first_prompt_sent: true,
+        lifecycle: super::records::TaskLifecycle::Visible,
         agent_session_id: None,
         active_turn_id: None,
         archived: false,

@@ -26,7 +26,7 @@ use crate::agent::{
 };
 use crate::attachment_runtime::AttachmentRuntimeError;
 use crate::client_lifecycle::{AppServerTime, ConnectionId, Delivery};
-use crate::projects::{project_id_for_workspace, StorageProjectResolver};
+use crate::projects::{project_id_for_workspace, ProjectTaskContext, StorageProjectResolver};
 use crate::protocol::model::{
     ActivityStatus, ActivityStep, AgentCommand, AgentCommandsCatalog, AgentListSessionsResult,
     AgentListedSession, Attachment, ChatMessage, ConfigOption, ConfigOptionCategory,
@@ -35,7 +35,7 @@ use crate::protocol::model::{
 };
 use crate::server_requests::{ServerRequestAnswer, ServerRequestRuntime};
 use crate::snapshots::task_snapshot::project_stored_task_snapshot;
-use crate::storage::records::{TaskPreparationRecord, TaskRecord};
+use crate::storage::records::{TaskLifecycle, TaskPreparationRecord, TaskRecord};
 use crate::storage::send_receipts::TaskSendReceipt;
 use crate::storage::Store;
 use crate::task_events::TaskUpdateNotifier;
@@ -48,7 +48,7 @@ fn create_persists_idle_task_without_prompt_or_turn() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut record = task_record("task-existing", "/workspace/app");
-    record.first_prompt_sent = false;
+    record.lifecycle = test_new_task_lifecycle();
     store.write_task(&record).unwrap();
     let project_id = project_id_for_workspace("/workspace/app");
     let api = TaskProductApi::new(
@@ -61,7 +61,7 @@ fn create_persists_idle_task_without_prompt_or_turn() {
     .unwrap();
 
     let snapshot = api
-        .create(TaskCreateParams {
+        .create_for_test(TaskCreateParams {
             project_id,
             agent_id: AgentId::from("codex"),
             workspace_root: None,
@@ -71,7 +71,7 @@ fn create_persists_idle_task_without_prompt_or_turn() {
 
     let record = store.read_task(snapshot.task.task_id.as_str()).unwrap();
     assert_eq!(record.status, TaskStatus::Inactive);
-    assert!(!record.first_prompt_sent);
+    assert!(matches!(record.lifecycle, TaskLifecycle::New { .. }));
     assert_eq!(record.active_turn_id, None);
     assert!(store.read_messages(&record.task_id).unwrap().is_empty());
     assert_eq!(snapshot.chat.items.len(), 0);
@@ -82,7 +82,7 @@ fn create_reopens_the_existing_draft_for_the_same_project_and_agent() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut project_anchor = task_record("task-project-anchor", "/workspace/app");
-    project_anchor.first_prompt_sent = true;
+    project_anchor.lifecycle = TaskLifecycle::Visible;
     store.write_task(&project_anchor).unwrap();
     let project_id = project_id_for_workspace("/workspace/app");
     let api = TaskProductApi::new(
@@ -100,11 +100,241 @@ fn create_reopens_the_existing_draft_for_the_same_project_and_agent() {
         config_options: Default::default(),
     };
 
-    let first = api.create(params.clone()).unwrap();
-    let reopened = api.create(params).unwrap();
+    let first = api.create_for_test(params.clone()).unwrap();
+    let reopened = api.create_for_test(params).unwrap();
 
     assert_eq!(reopened.task.task_id, first.task.task_id);
     assert_eq!(store.task_record_count().unwrap(), 2);
+}
+
+#[test]
+fn different_clients_get_distinct_new_tasks() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    store
+        .write_task(&task_record("task-project-anchor", "/workspace/app"))
+        .unwrap();
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store)),
+        AgentRegistry::default_built_ins(),
+        Arc::new(crate::agent::mock::MockAgent),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+    let params = TaskCreateParams {
+        project_id: project_id_for_workspace("/workspace/app"),
+        agent_id: AgentId::from("codex"),
+        workspace_root: None,
+        config_options: Default::default(),
+    };
+
+    let first = api
+        .create_for_client(&ClientInstanceId::from("client-a"), params.clone())
+        .unwrap();
+    let second = api
+        .create_for_client(&ClientInstanceId::from("client-b"), params)
+        .unwrap();
+
+    assert_ne!(first.task.task_id, second.task.task_id);
+}
+
+#[test]
+fn new_task_context_change_is_a_conflict() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    store
+        .write_task(&task_record("task-project-anchor", "/workspace/app"))
+        .unwrap();
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store)),
+        AgentRegistry::default_built_ins(),
+        Arc::new(crate::agent::mock::MockAgent),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+    let client = ClientInstanceId::from("client-a");
+    let params = |agent_id| TaskCreateParams {
+        project_id: project_id_for_workspace("/workspace/app"),
+        agent_id: AgentId::from(agent_id),
+        workspace_root: None,
+        config_options: Default::default(),
+    };
+    api.create_for_client(&client, params("codex")).unwrap();
+
+    let error = api
+        .create_for_client(&client, params("opencode"))
+        .unwrap_err();
+
+    assert_eq!(error.code, ProtocolErrorCode::Conflict);
+}
+
+#[test]
+fn concurrent_create_for_one_client_resolves_one_new_task() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    store
+        .write_task(&task_record("task-project-anchor", "/workspace/app"))
+        .unwrap();
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        Arc::new(crate::agent::mock::MockAgent),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+    let barrier = Arc::new(std::sync::Barrier::new(3));
+    let mut workers = Vec::new();
+    for _ in 0..2 {
+        let api = api.clone();
+        let barrier = barrier.clone();
+        workers.push(std::thread::spawn(move || {
+            barrier.wait();
+            api.create_for_client(
+                &ClientInstanceId::from("client-a"),
+                TaskCreateParams {
+                    project_id: project_id_for_workspace("/workspace/app"),
+                    agent_id: AgentId::from("codex"),
+                    workspace_root: None,
+                    config_options: Default::default(),
+                },
+            )
+            .unwrap()
+            .task
+            .task_id
+        }));
+    }
+    barrier.wait();
+    let first = workers.remove(0).join().unwrap();
+    let second = workers.remove(0).join().unwrap();
+
+    assert_eq!(first, second);
+    assert_eq!(
+        store
+            .list_all_task_records()
+            .unwrap()
+            .into_iter()
+            .filter(|task| matches!(task.lifecycle, TaskLifecycle::New { .. }))
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn create_after_discard_allocates_a_new_task() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    store
+        .write_task(&task_record("task-project-anchor", "/workspace/app"))
+        .unwrap();
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store)),
+        AgentRegistry::default_built_ins(),
+        Arc::new(crate::agent::mock::MockAgent),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+    let params = TaskCreateParams {
+        project_id: project_id_for_workspace("/workspace/app"),
+        agent_id: AgentId::from("codex"),
+        workspace_root: None,
+        config_options: Default::default(),
+    };
+    let first = api.create_for_test(params.clone()).unwrap();
+    api.discard_for_test(TaskDiscardParams {
+        task_id: first.task.task_id.clone(),
+    })
+    .unwrap();
+
+    let second = api.create_for_test(params).unwrap();
+
+    assert_ne!(first.task.task_id, second.task.task_id);
+}
+
+#[test]
+fn new_task_cannot_be_archived_or_replaced() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    store
+        .write_task(&task_record("task-project-anchor", "/workspace/app"))
+        .unwrap();
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store)),
+        AgentRegistry::default_built_ins(),
+        Arc::new(crate::agent::mock::MockAgent),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+    let params = TaskCreateParams {
+        project_id: project_id_for_workspace("/workspace/app"),
+        agent_id: AgentId::from("codex"),
+        workspace_root: None,
+        config_options: Default::default(),
+    };
+    let created = api.create_for_test(params.clone()).unwrap();
+
+    let error = api
+        .set_archived_for_test(TaskSetArchivedParams {
+            task_id: created.task.task_id.clone(),
+            archived: true,
+        })
+        .unwrap_err();
+    let reopened = api.create_for_test(params).unwrap();
+
+    assert_eq!(error.code, ProtocolErrorCode::Conflict);
+    assert_eq!(reopened.task.task_id, created.task.task_id);
+}
+
+#[test]
+fn create_fails_closed_when_task_ownership_records_are_malformed() {
+    struct FixedProjectResolver;
+
+    impl ProjectResolver for FixedProjectResolver {
+        fn resolve_task_context(
+            &self,
+            project_id: &ProjectId,
+        ) -> Result<ProjectTaskContext, ProtocolError> {
+            Ok(ProjectTaskContext {
+                project_id: project_id.clone(),
+                workspace_root: "/workspace/app".to_string(),
+                label: "app".to_string(),
+                isolation: IsolationKind::Local,
+            })
+        }
+    }
+
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let corrupt_dir = store.tasks_dir().join("corrupt-task");
+    std::fs::create_dir_all(&corrupt_dir).unwrap();
+    std::fs::write(corrupt_dir.join("task.json"), "{not-json").unwrap();
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(FixedProjectResolver),
+        AgentRegistry::default_built_ins(),
+        Arc::new(crate::agent::mock::MockAgent),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+
+    let error = api
+        .create_for_client(
+            &ClientInstanceId::from("client-a"),
+            TaskCreateParams {
+                project_id: ProjectId::from("project-app"),
+                agent_id: AgentId::from("codex"),
+                workspace_root: None,
+                config_options: Default::default(),
+            },
+        )
+        .unwrap_err();
+
+    assert_eq!(error.code, ProtocolErrorCode::Internal);
+    assert_eq!(store.task_record_count().unwrap(), 1);
 }
 
 #[test]
@@ -112,7 +342,7 @@ fn create_reactivates_the_reused_draft_native_session() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut draft = task_record("task-draft", "/workspace/app");
-    draft.first_prompt_sent = false;
+    draft.lifecycle = test_new_task_lifecycle();
     draft.agent_session_id = Some("session-draft".to_string());
     draft.preparation = TaskPreparationRecord::Ready;
     draft.config_options = mode_config_catalog("agent").current_values();
@@ -131,7 +361,7 @@ fn create_reactivates_the_reused_draft_native_session() {
     )
     .unwrap();
 
-    api.create(TaskCreateParams {
+    api.create_for_test(TaskCreateParams {
         project_id: project_id_for_workspace("/workspace/app"),
         agent_id: AgentId::from("codex"),
         workspace_root: None,
@@ -160,16 +390,14 @@ fn create_reactivates_the_reused_draft_native_session() {
         Some("agent")
     );
     assert!(reopened.config_options_catalog.is_none());
-    let updated = TaskSetConfigOptionWorkflow::set_config_option(
-        &api,
-        TaskSetConfigOptionParams {
+    let updated = api
+        .set_config_option_for_test(TaskSetConfigOptionParams {
             task_id: "task-draft".into(),
             config_id: "model".into(),
             value: "gpt-5.6-terra".to_string(),
             client_mutation_id: "reactivated-draft-config".into(),
-        },
-    )
-    .unwrap();
+        })
+        .unwrap();
     assert_eq!(
         updated.agent_config.options[0].current_value,
         "gpt-5.6-terra"
@@ -193,7 +421,7 @@ fn create_passes_selected_config_into_draft_session_preparation() {
     )
     .unwrap();
 
-    api.create(TaskCreateParams {
+    api.create_for_test(TaskCreateParams {
         project_id: project_id_for_workspace("/workspace/app"),
         agent_id: AgentId::from("codex"),
         workspace_root: None,
@@ -215,7 +443,7 @@ fn create_reconciles_stale_draft_config_with_fresh_agent_defaults() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut draft = task_record("task-draft", "/workspace/app");
-    draft.first_prompt_sent = false;
+    draft.lifecycle = test_new_task_lifecycle();
     draft.config_options = [("mode".to_string(), "full-access".to_string())]
         .into_iter()
         .collect();
@@ -234,7 +462,7 @@ fn create_reconciles_stale_draft_config_with_fresh_agent_defaults() {
     )
     .unwrap();
 
-    api.create(TaskCreateParams {
+    api.create_for_test(TaskCreateParams {
         project_id: project_id_for_workspace("/workspace/app"),
         agent_id: AgentId::from("codex"),
         workspace_root: None,
@@ -280,7 +508,7 @@ fn draft_preparation_keeps_catalogs_delivered_immediately_when_the_sink_attaches
     .unwrap();
 
     let created = api
-        .create(TaskCreateParams {
+        .create_for_test(TaskCreateParams {
             project_id: project_id_for_workspace("/workspace/app"),
             agent_id: AgentId::from("codex"),
             workspace_root: None,
@@ -296,7 +524,7 @@ fn draft_preparation_keeps_catalogs_delivered_immediately_when_the_sink_attaches
     });
 
     let prepared = api
-        .open(TaskOpenParams {
+        .open_for_test(TaskOpenParams {
             task_id: task_id.clone(),
         })
         .unwrap();
@@ -398,7 +626,7 @@ fn create_persists_preparing_and_starts_one_native_session_asynchronously() {
     .unwrap();
 
     let snapshot = api
-        .create(TaskCreateParams {
+        .create_for_test(TaskCreateParams {
             project_id: project_id_for_workspace("/workspace/app"),
             agent_id: AgentId::from("codex"),
             workspace_root: None,
@@ -449,7 +677,7 @@ fn create_persists_preparing_and_starts_one_native_session_asynchronously() {
         )
     });
     let ready = api
-        .open(TaskOpenParams {
+        .open_for_test(TaskOpenParams {
             task_id: snapshot.task.task_id.clone(),
         })
         .unwrap();
@@ -492,7 +720,7 @@ fn create_projects_native_session_start_failure_into_the_accepted_turn() {
     .unwrap();
 
     let created = api
-        .create(TaskCreateParams {
+        .create_for_test(TaskCreateParams {
             project_id: project_id_for_workspace("/workspace/app"),
             agent_id: AgentId::from("codex"),
             workspace_root: None,
@@ -511,7 +739,7 @@ fn create_projects_native_session_start_failure_into_the_accepted_turn() {
     });
     let failed_record = store.read_task(created.task.task_id.as_str()).unwrap();
     let failed = api
-        .open(TaskOpenParams {
+        .open_for_test(TaskOpenParams {
             task_id: created.task.task_id.clone(),
         })
         .unwrap();
@@ -591,7 +819,7 @@ fn task_preparation_resolves_custom_agent_secrets_through_typed_server_requests(
     .unwrap();
 
     let created = api
-        .create(TaskCreateParams {
+        .create_for_test(TaskCreateParams {
             project_id: project_id_for_workspace("/workspace/app"),
             agent_id: AgentId::from("custom.agent"),
             workspace_root: None,
@@ -660,7 +888,7 @@ fn create_closes_native_session_when_preparation_event_attachment_fails() {
     .unwrap();
 
     let created = api
-        .create(TaskCreateParams {
+        .create_for_test(TaskCreateParams {
             project_id: project_id_for_workspace("/workspace/app"),
             agent_id: AgentId::from("codex"),
             workspace_root: None,
@@ -705,7 +933,7 @@ fn first_send_reuses_the_native_session_prepared_during_create() {
     .unwrap();
 
     let created = api
-        .create(TaskCreateParams {
+        .create_for_test(TaskCreateParams {
             project_id: project_id_for_workspace("/workspace/app"),
             agent_id: AgentId::from("codex"),
             workspace_root: None,
@@ -752,7 +980,7 @@ fn first_send_returns_authoritative_user_message_while_session_resume_is_blocked
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut draft = task_record("task-draft", "/workspace/app");
-    draft.first_prompt_sent = false;
+    draft.lifecycle = test_new_task_lifecycle();
     draft.agent_session_id = Some("prepared-session".to_string());
     store.write_task(&draft).unwrap();
     store
@@ -793,7 +1021,7 @@ fn first_send_replaces_a_prepared_session_missing_from_the_agent_runtime() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut draft = task_record("task-draft", "/workspace/app");
-    draft.first_prompt_sent = false;
+    draft.lifecycle = test_new_task_lifecycle();
     draft.agent_session_id = Some("missing-session".to_string());
     store.write_task(&draft).unwrap();
     let agent = Arc::new(RecordingAgent {
@@ -924,7 +1152,7 @@ fn startup_marks_abandoned_preparation_failed_instead_of_loading_forever() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut task = task_record("task-preparing", "/workspace/app");
-    task.first_prompt_sent = false;
+    task.lifecycle = test_new_task_lifecycle();
     task.preparation = TaskPreparationRecord::Preparing;
     task.agent_session_id = Some("bound-before-attach".to_string());
     task.config_options = config_catalog("gpt-5.5").current_values();
@@ -985,7 +1213,7 @@ fn create_rejects_unknown_project() {
     .unwrap();
 
     let error = api
-        .create(TaskCreateParams {
+        .create_for_test(TaskCreateParams {
             project_id: ProjectId::from("project-missing"),
             agent_id: AgentId::from("codex"),
             workspace_root: None,
@@ -1011,7 +1239,7 @@ fn create_accepts_new_workspace_root_for_unknown_project() {
     let workspace_root = "/workspace/new-app";
 
     let snapshot = api
-        .create(TaskCreateParams {
+        .create_for_test(TaskCreateParams {
             project_id: project_id_for_workspace(workspace_root),
             agent_id: AgentId::from("codex"),
             workspace_root: Some(workspace_root.to_string()),
@@ -1041,7 +1269,7 @@ fn create_rejects_mismatched_new_workspace_root_project_id() {
     .unwrap();
 
     let error = api
-        .create(TaskCreateParams {
+        .create_for_test(TaskCreateParams {
             project_id: project_id_for_workspace("/workspace/other"),
             agent_id: AgentId::from("codex"),
             workspace_root: Some("/workspace/new-app".to_string()),
@@ -1098,7 +1326,7 @@ fn create_rejects_unknown_agent() {
     .unwrap();
 
     let error = api
-        .create(TaskCreateParams {
+        .create_for_test(TaskCreateParams {
             project_id: project_id_for_workspace("/workspace/app"),
             agent_id: AgentId::from("missing-agent"),
             workspace_root: None,
@@ -1171,8 +1399,13 @@ fn native_session_adoption_is_scoped_by_agent_not_workspace() {
         title: None,
     };
 
-    api.adopt_native_session(params("/workspace/a", "codex"))
+    let adopted = api
+        .adopt_native_session(params("/workspace/a", "codex"))
         .expect("first Agent session owner");
+    assert_eq!(
+        adopted.lifecycle,
+        openaide_app_server_protocol::snapshot::TaskLifecycle::Visible
+    );
     let listed = api
         .list_agent_sessions(AgentListSessionsParams {
             agent_id: AgentId::from("codex"),
@@ -1219,7 +1452,7 @@ fn list_agent_sessions_hides_a_native_session_while_draft_ownership_is_committin
     )
     .unwrap();
 
-    api.create(TaskCreateParams {
+    api.create_for_test(TaskCreateParams {
         project_id: project_id_for_workspace("/workspace/app"),
         agent_id: AgentId::from("codex"),
         workspace_root: None,
@@ -1331,7 +1564,7 @@ fn task_open_history_refresh_treats_a_session_cursor_cycle_as_exhausted() {
     )
     .unwrap();
 
-    api.open(TaskOpenParams {
+    api.open_for_test(TaskOpenParams {
         task_id: "task-existing".into(),
     })
     .unwrap();
@@ -1420,7 +1653,7 @@ fn open_readopts_adopted_task_when_native_session_is_newer_than_cached_history()
     .unwrap();
 
     let snapshot = api
-        .open(TaskOpenParams {
+        .open_for_test(TaskOpenParams {
             task_id: "task-existing".into(),
         })
         .unwrap();
@@ -1466,7 +1699,7 @@ fn open_returns_cached_task_while_native_session_refresh_is_blocked() {
 
     let (result_tx, result_rx) = std::sync::mpsc::channel();
     std::thread::spawn(move || {
-        let result = api.open(TaskOpenParams {
+        let result = api.open_for_test(TaskOpenParams {
             task_id: "task-existing".into(),
         });
         let _ = result_tx.send(result);
@@ -1509,12 +1742,12 @@ fn repeated_task_opens_reuse_recent_native_session_listing() {
     )
     .unwrap();
 
-    api.open(TaskOpenParams {
+    api.open_for_test(TaskOpenParams {
         task_id: "task-existing".into(),
     })
     .unwrap();
     wait_until(|| agent.list_calls.load(Ordering::SeqCst) == 1);
-    api.open(TaskOpenParams {
+    api.open_for_test(TaskOpenParams {
         task_id: "task-existing".into(),
     })
     .unwrap();
@@ -1547,7 +1780,7 @@ fn concurrent_task_opens_coalesce_native_session_listing() {
     .unwrap();
 
     for task_id in ["task-one", "task-two"] {
-        api.open(TaskOpenParams {
+        api.open_for_test(TaskOpenParams {
             task_id: task_id.into(),
         })
         .unwrap();
@@ -1580,7 +1813,7 @@ fn failed_native_session_listing_is_not_cached() {
     .unwrap();
 
     for expected in 1..=2 {
-        api.open(TaskOpenParams {
+        api.open_for_test(TaskOpenParams {
             task_id: "task-existing".into(),
         })
         .unwrap();
@@ -1613,7 +1846,7 @@ fn rejected_send_does_not_supersede_the_active_history_check() {
     )
     .unwrap();
 
-    api.open(TaskOpenParams {
+    api.open_for_test(TaskOpenParams {
         task_id: "task-existing".into(),
     })
     .unwrap();
@@ -1687,7 +1920,7 @@ fn send_supersedes_blocked_history_listing_and_reconciles_replay_before_prompt()
     )
     .unwrap();
 
-    api.open(TaskOpenParams {
+    api.open_for_test(TaskOpenParams {
         task_id: "task-existing".into(),
     })
     .unwrap();
@@ -1751,7 +1984,7 @@ fn failed_pre_send_sync_retries_without_duplicating_the_accepted_message() {
         .active_turn_id
         .is_some());
 
-    api.retry_history_sync(TaskRetryHistorySyncParams {
+    api.retry_history_sync_for_test(TaskRetryHistorySyncParams {
         task_id: "task-existing".into(),
     })
     .unwrap();
@@ -1811,13 +2044,13 @@ fn transient_retry_snapshot_failure_keeps_the_exact_pending_send_retryable() {
     store.fail_next_tail_page_for_test();
 
     let error = api
-        .retry_history_sync(TaskRetryHistorySyncParams {
+        .retry_history_sync_for_test(TaskRetryHistorySyncParams {
             task_id: "task-existing".into(),
         })
         .unwrap_err();
     assert_eq!(error.code, ProtocolErrorCode::Internal);
 
-    api.retry_history_sync(TaskRetryHistorySyncParams {
+    api.retry_history_sync_for_test(TaskRetryHistorySyncParams {
         task_id: "task-existing".into(),
     })
     .unwrap();
@@ -1863,12 +2096,12 @@ fn stopping_failed_pre_send_sync_discards_retry_payload() {
         .send(send_params("task-existing", 1, "cancel-sync", "Continue"))
         .unwrap();
     wait_until(|| agent.loads.load(Ordering::SeqCst) == 1);
-    api.cancel(TaskCancelParams {
+    api.cancel_for_test(TaskCancelParams {
         task_id: "task-existing".into(),
         turn_id: Some(accepted.turn_id),
     })
     .unwrap();
-    api.retry_history_sync(TaskRetryHistorySyncParams {
+    api.retry_history_sync_for_test(TaskRetryHistorySyncParams {
         task_id: "task-existing".into(),
     })
     .unwrap();
@@ -1930,7 +2163,7 @@ fn cancel_linearizes_before_a_failed_send_can_defer_its_retry_payload() {
     let cancel = std::thread::spawn(move || {
         cancel_started_tx.send(()).unwrap();
         cancel_finished_tx
-            .send(cancel_api.cancel(TaskCancelParams {
+            .send(cancel_api.cancel_for_test(TaskCancelParams {
                 task_id: "task-existing".into(),
                 turn_id: Some(accepted.turn_id),
             }))
@@ -1960,7 +2193,7 @@ fn cancel_linearizes_before_a_failed_send_can_defer_its_retry_payload() {
         "cancel must share turn-acceptance ownership with failure deferral"
     );
     assert!(!api.pending_send_sync.contains("task-existing"));
-    api.retry_history_sync(TaskRetryHistorySyncParams {
+    api.retry_history_sync_for_test(TaskRetryHistorySyncParams {
         task_id: "task-existing".into(),
     })
     .unwrap();
@@ -2008,7 +2241,7 @@ fn retry_history_sync_waits_for_the_task_turn_acceptance_operation() {
     let (retry_finished_tx, retry_finished_rx) = mpsc::channel();
     let retry_api = api.clone();
     let retry = std::thread::spawn(move || {
-        let result = retry_api.retry_history_sync(TaskRetryHistorySyncParams {
+        let result = retry_api.retry_history_sync_for_test(TaskRetryHistorySyncParams {
             task_id: "task-existing".into(),
         });
         retry_finished_tx.send(result).unwrap();
@@ -2033,7 +2266,7 @@ fn open_does_not_load_native_history_for_an_unsent_draft() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut task = task_record("task-draft", "/workspace/app");
-    task.first_prompt_sent = false;
+    task.lifecycle = test_new_task_lifecycle();
     task.agent_session_id = Some("prepared-session".to_string());
     task.updated_at = "2026-01-01T00:00:00.000Z".to_string();
     store.write_task(&task).unwrap();
@@ -2057,7 +2290,7 @@ fn open_does_not_load_native_history_for_an_unsent_draft() {
     )
     .unwrap();
 
-    api.open(TaskOpenParams {
+    api.open_for_test(TaskOpenParams {
         task_id: "task-draft".into(),
     })
     .unwrap();
@@ -2122,7 +2355,7 @@ fn passive_refresh_never_closes_an_already_active_native_session() {
     .unwrap();
 
     let snapshot = api
-        .open(TaskOpenParams {
+        .open_for_test(TaskOpenParams {
             task_id: "task-existing".into(),
         })
         .unwrap();
@@ -2201,7 +2434,7 @@ fn open_keeps_adopted_task_cache_when_native_session_is_not_newer() {
     .unwrap();
 
     let snapshot = api
-        .open(TaskOpenParams {
+        .open_for_test(TaskOpenParams {
             task_id: "task-existing".into(),
         })
         .unwrap();
@@ -2269,7 +2502,7 @@ fn open_keeps_adopted_task_cache_when_native_session_has_no_activity_time() {
     )
     .unwrap();
 
-    api.open(TaskOpenParams {
+    api.open_for_test(TaskOpenParams {
         task_id: "task-existing".into(),
     })
     .unwrap();
@@ -2314,7 +2547,7 @@ fn mark_read_clears_unread_without_refreshing_native_session_history() {
     .unwrap();
 
     let snapshot = api
-        .mark_read(TaskMarkReadParams {
+        .mark_read_for_test(TaskMarkReadParams {
             task_id: "task-existing".into(),
         })
         .unwrap();
@@ -2357,7 +2590,7 @@ fn unrelated_task_responses_preserve_current_history_sync_state() {
         store.write_task(&task).unwrap();
 
         let snapshot = api
-            .mark_read(TaskMarkReadParams {
+            .mark_read_for_test(TaskMarkReadParams {
                 task_id: "task-existing".into(),
             })
             .unwrap();
@@ -2370,9 +2603,9 @@ fn unrelated_task_responses_preserve_current_history_sync_state() {
 fn send_commits_user_message_and_running_turn() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    store
-        .write_task(&task_record("task-existing", "/workspace/app"))
-        .unwrap();
+    let mut new_task = task_record("task-existing", "/workspace/app");
+    new_task.lifecycle = test_new_task_lifecycle();
+    store.write_task(&new_task).unwrap();
     let api = TaskProductApi::new(
         store.clone(),
         Arc::new(StorageProjectResolver::new(store.clone())),
@@ -2391,7 +2624,7 @@ fn send_commits_user_message_and_running_turn() {
         TaskHistorySyncSnapshot::Syncing { generation } if generation > 0
     ));
     let record = store.read_task("task-existing").unwrap();
-    assert!(record.first_prompt_sent);
+    assert_eq!(record.lifecycle, TaskLifecycle::Visible);
     if record.status == TaskStatus::Active {
         assert_eq!(
             record.active_turn_id.as_deref(),
@@ -2465,7 +2698,7 @@ fn first_send_is_accepted_while_draft_session_preparation_is_running() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut project_anchor = task_record("task-project-anchor", "/workspace/app");
-    project_anchor.first_prompt_sent = true;
+    project_anchor.lifecycle = TaskLifecycle::Visible;
     store.write_task(&project_anchor).unwrap();
     let agent = Arc::new(RecordingAgent::default());
     agent.block_start.store(true, Ordering::SeqCst);
@@ -2478,7 +2711,7 @@ fn first_send_is_accepted_while_draft_session_preparation_is_running() {
     )
     .unwrap();
     let draft = api
-        .create(TaskCreateParams {
+        .create_for_test(TaskCreateParams {
             project_id: project_id_for_workspace("/workspace/app"),
             agent_id: AgentId::from("codex"),
             workspace_root: None,
@@ -2503,7 +2736,7 @@ fn accepted_send_waiting_for_draft_preparation_remains_the_owned_shutdown_blocke
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut project_anchor = task_record("task-project-anchor", "/workspace/app");
-    project_anchor.first_prompt_sent = true;
+    project_anchor.lifecycle = TaskLifecycle::Visible;
     store.write_task(&project_anchor).unwrap();
     let agent = Arc::new(RecordingAgent::default());
     agent.block_start.store(true, Ordering::SeqCst);
@@ -2516,7 +2749,7 @@ fn accepted_send_waiting_for_draft_preparation_remains_the_owned_shutdown_blocke
     )
     .unwrap();
     let draft = api
-        .create(TaskCreateParams {
+        .create_for_test(TaskCreateParams {
             project_id: project_id_for_workspace("/workspace/app"),
             agent_id: AgentId::from("codex"),
             workspace_root: None,
@@ -2565,7 +2798,7 @@ fn stopping_a_send_waiting_for_draft_preparation_retires_its_sync_generation() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut project_anchor = task_record("task-project-anchor", "/workspace/app");
-    project_anchor.first_prompt_sent = true;
+    project_anchor.lifecycle = TaskLifecycle::Visible;
     store.write_task(&project_anchor).unwrap();
     let agent = Arc::new(RecordingAgent::default());
     agent.block_start.store(true, Ordering::SeqCst);
@@ -2579,7 +2812,7 @@ fn stopping_a_send_waiting_for_draft_preparation_retires_its_sync_generation() {
     )
     .unwrap();
     let draft = api
-        .create(TaskCreateParams {
+        .create_for_test(TaskCreateParams {
             project_id: project_id_for_workspace("/workspace/app"),
             agent_id: AgentId::from("codex"),
             workspace_root: None,
@@ -2606,7 +2839,7 @@ fn stopping_a_send_waiting_for_draft_preparation_retires_its_sync_generation() {
         }
     };
 
-    api.cancel(TaskCancelParams {
+    api.cancel_for_test(TaskCancelParams {
         task_id: draft.task.task_id.clone(),
         turn_id: Some(accepted.turn_id),
     })
@@ -2819,7 +3052,7 @@ fn send_after_restart_hydrates_loaded_native_session_state_authoritatively() {
     .unwrap();
     wait_until(|| agent.prompts.load(Ordering::SeqCst) == 1);
     let snapshot = api
-        .open(TaskOpenParams {
+        .open_for_test(TaskOpenParams {
             task_id: "task-existing".into(),
         })
         .unwrap();
@@ -2888,7 +3121,7 @@ fn send_preserves_hydrated_session_state_when_resume_returns_identity_only() {
     assert_eq!(agent.loads.load(Ordering::SeqCst), 0);
     assert_eq!(agent.starts.load(Ordering::SeqCst), 0);
     let snapshot = api
-        .open(TaskOpenParams {
+        .open_for_test(TaskOpenParams {
             task_id: "task-existing".into(),
         })
         .unwrap();
@@ -3166,7 +3399,7 @@ fn send_retry_after_process_crash_before_task_record_does_not_duplicate() {
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut record = task_record("task-existing", "/workspace/app");
     record.title = "New task".to_string();
-    record.first_prompt_sent = false;
+    record.lifecycle = test_new_task_lifecycle();
     store.write_task(&record).unwrap();
     let api = TaskProductApi::new(
         store.clone(),
@@ -3258,7 +3491,7 @@ fn send_retry_after_process_crash_before_task_record_does_not_duplicate() {
     let task = reopened_store.read_task("task-existing").unwrap();
     assert_eq!(task.status, TaskStatus::Inactive);
     assert_eq!(task.active_turn_id, None);
-    assert!(task.first_prompt_sent);
+    assert_eq!(task.lifecycle, TaskLifecycle::Visible);
     assert_eq!(task.title, "hello");
     assert_eq!(
         task.message_history_version,
@@ -3849,7 +4082,7 @@ fn send_rejects_a_second_prompt_while_the_task_turn_is_active() {
             NormalizedMessage::User { ref text, .. } if text == "second prompt"
         )));
 
-    api.cancel(TaskCancelParams {
+    api.cancel_for_test(TaskCancelParams {
         task_id: "task-existing".into(),
         turn_id: Some(first.turn_id),
     })
@@ -3911,7 +4144,7 @@ fn send_rejects_a_second_prompt_while_active_turn_is_blocked_on_permission() {
             NormalizedMessage::User { ref text, .. } if text == "why no answer?"
         )));
 
-    api.cancel(TaskCancelParams {
+    api.cancel_for_test(TaskCancelParams {
         task_id: "task-existing".into(),
         turn_id: Some(first.turn_id),
     })
@@ -4126,7 +4359,7 @@ fn send_commits_attachment_only_image_without_an_empty_text_part() {
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut task = task_record("task-existing", "/workspace/app");
     task.title = "New task".to_string();
-    task.first_prompt_sent = false;
+    task.lifecycle = test_new_task_lifecycle();
     store.write_task(&task).unwrap();
     let api = TaskProductApi::new(
         store.clone(),
@@ -4328,7 +4561,7 @@ fn cancel_clears_active_turn_and_appends_interruption() {
     .unwrap();
 
     let snapshot = api
-        .cancel(TaskCancelParams {
+        .cancel_for_test(TaskCancelParams {
             task_id: "task-existing".into(),
             turn_id: Some("turn-active".into()),
         })
@@ -4389,7 +4622,7 @@ fn cancel_signals_live_agent_turn_started_by_task_send() {
         .unwrap();
     wait_until(|| agent.prompts.load(Ordering::SeqCst) == 1);
 
-    api.cancel(TaskCancelParams {
+    api.cancel_for_test(TaskCancelParams {
         task_id: "task-existing".into(),
         turn_id: Some(sent.turn_id),
     })
@@ -4440,7 +4673,7 @@ fn stale_cancel_cannot_retire_the_generation_of_a_newer_accepted_send() {
     });
     let cancel_api = api.clone();
     let cancel = std::thread::spawn(move || {
-        cancel_api.cancel(TaskCancelParams {
+        cancel_api.cancel_for_test(TaskCancelParams {
             task_id: "task-existing".into(),
             turn_id: Some(first.turn_id),
         })
@@ -4456,7 +4689,7 @@ fn stale_cancel_cannot_retire_the_generation_of_a_newer_accepted_send() {
             .map(|task| task.active_turn_id.is_none())
             .unwrap_or(false)
     });
-    api.open(TaskOpenParams {
+    api.open_for_test(TaskOpenParams {
         task_id: "task-existing".into(),
     })
     .unwrap();
@@ -4496,7 +4729,7 @@ fn failed_cancel_commit_does_not_retire_an_accepted_send_waiting_for_preparation
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut project_anchor = task_record("task-project-anchor", "/workspace/app");
-    project_anchor.first_prompt_sent = true;
+    project_anchor.lifecycle = TaskLifecycle::Visible;
     store.write_task(&project_anchor).unwrap();
     let agent = Arc::new(RecordingAgent {
         block_start: AtomicBool::new(true),
@@ -4512,7 +4745,7 @@ fn failed_cancel_commit_does_not_retire_an_accepted_send_waiting_for_preparation
     )
     .unwrap();
     let draft = api
-        .create(TaskCreateParams {
+        .create_for_test(TaskCreateParams {
             project_id: project_id_for_workspace("/workspace/app"),
             agent_id: AgentId::from("codex"),
             workspace_root: None,
@@ -4531,7 +4764,7 @@ fn failed_cancel_commit_does_not_retire_an_accepted_send_waiting_for_preparation
 
     store.fail_next_task_write_for_test();
     let error = api
-        .cancel(TaskCancelParams {
+        .cancel_for_test(TaskCancelParams {
             task_id: draft.task.task_id.clone(),
             turn_id: Some(accepted.turn_id.clone()),
         })
@@ -4550,7 +4783,7 @@ fn failed_cancel_commit_does_not_retire_an_accepted_send_waiting_for_preparation
     );
     assert_eq!(api.shutdown_blockers().unwrap().active_turns, 1);
 
-    api.cancel(TaskCancelParams {
+    api.cancel_for_test(TaskCancelParams {
         task_id: draft.task.task_id,
         turn_id: Some(accepted.turn_id),
     })
@@ -4671,7 +4904,7 @@ fn cancel_rejects_mismatched_turn_id() {
         .unwrap();
 
     let error = api
-        .cancel(TaskCancelParams {
+        .cancel_for_test(TaskCancelParams {
             task_id: "task-existing".into(),
             turn_id: Some("turn-other".into()),
         })
@@ -4701,16 +4934,14 @@ fn set_config_option_persists_for_idle_task() {
     )
     .unwrap();
 
-    let snapshot = TaskSetConfigOptionWorkflow::set_config_option(
-        &api,
-        TaskSetConfigOptionParams {
+    let snapshot = api
+        .set_config_option_for_test(TaskSetConfigOptionParams {
             task_id: "task-existing".into(),
             config_id: "model".into(),
             value: "gpt-5.5".to_string(),
             client_mutation_id: "mutation-1".into(),
-        },
-    )
-    .unwrap();
+        })
+        .unwrap();
 
     assert_eq!(
         store
@@ -4747,7 +4978,7 @@ fn restart_hides_persisted_agent_controls_until_native_session_recovery() {
     .unwrap();
 
     let snapshot = api
-        .open(TaskOpenParams {
+        .open_for_test(TaskOpenParams {
             task_id: "task-existing".into(),
         })
         .unwrap();
@@ -4788,7 +5019,7 @@ fn restart_clears_a_config_mutation_interrupted_during_agent_io() {
     )
     .unwrap();
     let snapshot = api
-        .open(TaskOpenParams {
+        .open_for_test(TaskOpenParams {
             task_id: "task-existing".into(),
         })
         .unwrap();
@@ -4835,7 +5066,7 @@ fn task_open_republishes_controls_from_recovered_native_session() {
     .unwrap();
 
     let initial = api
-        .open(TaskOpenParams {
+        .open_for_test(TaskOpenParams {
             task_id: "task-existing".into(),
         })
         .unwrap();
@@ -4850,7 +5081,7 @@ fn task_open_republishes_controls_from_recovered_native_session() {
 
     wait_until(|| agent.loads.load(Ordering::SeqCst) == 1);
     let recovered = api
-        .open(TaskOpenParams {
+        .open_for_test(TaskOpenParams {
             task_id: "task-existing".into(),
         })
         .unwrap();
@@ -4879,16 +5110,14 @@ fn set_config_option_without_native_session_does_not_project_persisted_catalog()
     )
     .unwrap();
 
-    let snapshot = TaskSetConfigOptionWorkflow::set_config_option(
-        &api,
-        TaskSetConfigOptionParams {
+    let snapshot = api
+        .set_config_option_for_test(TaskSetConfigOptionParams {
             task_id: "task-existing".into(),
             config_id: "model".into(),
             value: "gpt-5.5".to_string(),
             client_mutation_id: "mutation-1".into(),
-        },
-    )
-    .unwrap();
+        })
+        .unwrap();
 
     let stored = store.read_task("task-existing").unwrap();
     assert!(stored.config_options_catalog.is_none());
@@ -4916,16 +5145,14 @@ fn set_config_option_without_native_session_does_not_project_unsupported_fallbac
     )
     .unwrap();
 
-    let snapshot = TaskSetConfigOptionWorkflow::set_config_option(
-        &api,
-        TaskSetConfigOptionParams {
+    let snapshot = api
+        .set_config_option_for_test(TaskSetConfigOptionParams {
             task_id: "task-existing".into(),
             config_id: "custom".into(),
             value: "enabled".to_string(),
             client_mutation_id: "mutation-1".into(),
-        },
-    )
-    .unwrap();
+        })
+        .unwrap();
 
     assert_eq!(
         snapshot.agent_config.state,
@@ -4957,16 +5184,14 @@ fn set_config_option_applies_to_running_task_live_session() {
     record.agent_session_id = Some("session-active".to_string());
     store.write_task(&record).unwrap();
 
-    let snapshot = TaskSetConfigOptionWorkflow::set_config_option(
-        &api,
-        TaskSetConfigOptionParams {
+    let snapshot = api
+        .set_config_option_for_test(TaskSetConfigOptionParams {
             task_id: "task-existing".into(),
             config_id: "model".into(),
             value: "gpt-5.5".to_string(),
             client_mutation_id: "mutation-1".into(),
-        },
-    )
-    .unwrap();
+        })
+        .unwrap();
 
     assert_eq!(
         agent.session_config_updates.lock().unwrap().as_slice(),
@@ -5006,15 +5231,12 @@ fn set_config_option_applies_to_prepared_task_native_session() {
     )
     .unwrap();
 
-    TaskSetConfigOptionWorkflow::set_config_option(
-        &api,
-        TaskSetConfigOptionParams {
-            task_id: "task-prepared".into(),
-            config_id: "model".into(),
-            value: "gpt-5.5".to_string(),
-            client_mutation_id: "mutation-prepared".into(),
-        },
-    )
+    api.set_config_option_for_test(TaskSetConfigOptionParams {
+        task_id: "task-prepared".into(),
+        config_id: "model".into(),
+        value: "gpt-5.5".to_string(),
+        client_mutation_id: "mutation-prepared".into(),
+    })
     .unwrap();
 
     assert_eq!(
@@ -5053,21 +5275,20 @@ fn set_config_option_projects_the_pending_client_mutation_during_agent_io() {
 
     std::thread::spawn(move || {
         result_tx
-            .send(TaskSetConfigOptionWorkflow::set_config_option(
-                &setting_api,
-                TaskSetConfigOptionParams {
+            .send(
+                setting_api.set_config_option_for_test(TaskSetConfigOptionParams {
                     task_id: "task-existing".into(),
                     config_id: "model".into(),
                     value: "gpt-5.5".to_string(),
                     client_mutation_id: "mutation-pending".into(),
-                },
-            ))
+                }),
+            )
             .unwrap();
     });
     wait_until(|| agent.session_config_updates.lock().unwrap().len() == 1);
 
     let pending = api
-        .open(TaskOpenParams {
+        .open_for_test(TaskOpenParams {
             task_id: "task-existing".into(),
         })
         .unwrap();
@@ -5110,7 +5331,7 @@ fn same_task_config_changes_reach_agent_and_storage_in_admission_order() {
     .unwrap();
     let older_api = api.clone();
     let older = std::thread::spawn(move || {
-        older_api.set_config_option(TaskSetConfigOptionParams {
+        older_api.set_config_option_for_test(TaskSetConfigOptionParams {
             task_id: "task-existing".into(),
             config_id: "model".into(),
             value: "gpt-5.1".to_string(),
@@ -5123,7 +5344,7 @@ fn same_task_config_changes_reach_agent_and_storage_in_admission_order() {
     let (submitted_tx, submitted_rx) = std::sync::mpsc::channel();
     let newer = std::thread::spawn(move || {
         submitted_tx.send(()).unwrap();
-        newer_api.set_config_option(TaskSetConfigOptionParams {
+        newer_api.set_config_option_for_test(TaskSetConfigOptionParams {
             task_id: "task-existing".into(),
             config_id: "model".into(),
             value: "gpt-5.2".to_string(),
@@ -5193,7 +5414,7 @@ fn blocked_config_change_does_not_stall_an_unrelated_task() {
 
     let blocked_api = api.clone();
     let blocked = std::thread::spawn(move || {
-        blocked_api.set_config_option(TaskSetConfigOptionParams {
+        blocked_api.set_config_option_for_test(TaskSetConfigOptionParams {
             task_id: "task-blocked".into(),
             config_id: "model".into(),
             value: "gpt-5.1".to_string(),
@@ -5208,12 +5429,14 @@ fn blocked_config_change_does_not_stall_an_unrelated_task() {
     let unrelated = std::thread::spawn(move || {
         submitted_tx.send(()).unwrap();
         result_tx
-            .send(unrelated_api.set_config_option(TaskSetConfigOptionParams {
-                task_id: "task-unrelated".into(),
-                config_id: "model".into(),
-                value: "gpt-5.2".to_string(),
-                client_mutation_id: "mutation-unrelated".into(),
-            }))
+            .send(
+                unrelated_api.set_config_option_for_test(TaskSetConfigOptionParams {
+                    task_id: "task-unrelated".into(),
+                    config_id: "model".into(),
+                    value: "gpt-5.2".to_string(),
+                    client_mutation_id: "mutation-unrelated".into(),
+                }),
+            )
             .unwrap();
     });
     submitted_rx
@@ -5273,15 +5496,14 @@ fn set_config_option_does_not_apply_session_a_catalog_after_task_binds_session_b
 
     std::thread::spawn(move || {
         result_tx
-            .send(TaskSetConfigOptionWorkflow::set_config_option(
-                &setting_api,
-                TaskSetConfigOptionParams {
+            .send(
+                setting_api.set_config_option_for_test(TaskSetConfigOptionParams {
                     task_id: "task-existing".into(),
                     config_id: "model".into(),
                     value: "gpt-5.5".to_string(),
                     client_mutation_id: "session-a-change".into(),
-                },
-            ))
+                }),
+            )
             .unwrap();
     });
     wait_until(|| agent.session_config_updates.lock().unwrap().len() == 1);
@@ -5336,15 +5558,14 @@ fn set_config_option_is_a_noop_when_same_session_event_already_persisted_catalog
 
     std::thread::spawn(move || {
         result_tx
-            .send(TaskSetConfigOptionWorkflow::set_config_option(
-                &setting_api,
-                TaskSetConfigOptionParams {
+            .send(
+                setting_api.set_config_option_for_test(TaskSetConfigOptionParams {
                     task_id: "task-existing".into(),
                     config_id: "model".into(),
                     value: "gpt-5.5".to_string(),
                     client_mutation_id: "same-session-change".into(),
-                },
-            ))
+                }),
+            )
             .unwrap();
     });
     wait_until(|| agent.session_config_updates.lock().unwrap().len() == 1);
@@ -5376,7 +5597,7 @@ fn discard_tombstones_empty_pre_send_task_and_returns_navigation() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut draft = task_record("task-draft", "/workspace/app");
-    draft.first_prompt_sent = false;
+    draft.lifecycle = test_new_task_lifecycle();
     store.write_task(&draft).unwrap();
     store
         .write_task(&task_record("task-existing", "/workspace/app"))
@@ -5391,7 +5612,7 @@ fn discard_tombstones_empty_pre_send_task_and_returns_navigation() {
     .unwrap();
 
     let navigation = api
-        .discard(TaskDiscardParams {
+        .discard_for_test(TaskDiscardParams {
             task_id: "task-draft".into(),
         })
         .unwrap();
@@ -5405,7 +5626,7 @@ fn discard_tombstones_empty_pre_send_task_and_returns_navigation() {
 }
 
 #[test]
-fn discard_cleans_all_presend_attachment_resources_for_the_draft_task() {
+fn discard_cleans_all_presend_attachment_resources_for_the_new_task() {
     let temp = tempfile::tempdir().unwrap();
     let workspace = temp.path().join("workspace");
     std::fs::create_dir(&workspace).unwrap();
@@ -5413,7 +5634,7 @@ fn discard_cleans_all_presend_attachment_resources_for_the_draft_task() {
     std::fs::write(&attachment_path, "hello").unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut draft = task_record("task-draft", workspace.to_string_lossy().as_ref());
-    draft.first_prompt_sent = false;
+    draft.lifecycle = test_new_task_lifecycle();
     store.write_task(&draft).unwrap();
     let api = TaskProductApi::new(
         store.clone(),
@@ -5436,7 +5657,7 @@ fn discard_cleans_all_presend_attachment_resources_for_the_draft_task() {
         .unwrap()
         .candidate;
 
-    api.discard(TaskDiscardParams {
+    api.discard_for_test(TaskDiscardParams {
         task_id: task_id.clone(),
     })
     .unwrap();
@@ -5456,7 +5677,7 @@ fn discard_releases_prepared_native_session_ownership_when_close_fails() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut draft = task_record("task-draft", "/workspace/app");
-    draft.first_prompt_sent = false;
+    draft.lifecycle = test_new_task_lifecycle();
     draft.agent_session_id = Some("prepared-session".to_string());
     store.write_task(&draft).unwrap();
     store
@@ -5485,7 +5706,7 @@ fn discard_releases_prepared_native_session_ownership_when_close_fails() {
 
     let discard_api = api.clone();
     let discard = std::thread::spawn(move || {
-        discard_api.discard(TaskDiscardParams {
+        discard_api.discard_for_test(TaskDiscardParams {
             task_id: "task-draft".into(),
         })
     });
@@ -5525,7 +5746,7 @@ fn discard_rejects_task_after_first_prompt_was_sent() {
     .unwrap();
 
     let error = api
-        .discard(TaskDiscardParams {
+        .discard_for_test(TaskDiscardParams {
             task_id: "task-existing".into(),
         })
         .unwrap_err();
@@ -5539,7 +5760,7 @@ fn discard_rejects_task_with_chat_history_even_before_prompt_flag() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut record = task_record("task-existing", "/workspace/app");
-    record.first_prompt_sent = false;
+    record.lifecycle = test_new_task_lifecycle();
     store.write_task(&record).unwrap();
     append_old_completed_turn(&store, "task-existing");
     let api = TaskProductApi::new(
@@ -5552,7 +5773,7 @@ fn discard_rejects_task_with_chat_history_even_before_prompt_flag() {
     .unwrap();
 
     let error = api
-        .discard(TaskDiscardParams {
+        .discard_for_test(TaskDiscardParams {
             task_id: "task-existing".into(),
         })
         .unwrap_err();
@@ -5566,7 +5787,7 @@ fn discard_rejects_running_task() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut record = task_record("task-existing", "/workspace/app");
-    record.first_prompt_sent = false;
+    record.lifecycle = test_new_task_lifecycle();
     record.status = TaskStatus::Active;
     record.active_turn_id = Some("turn-active".to_string());
     store.write_task(&record).unwrap();
@@ -5580,7 +5801,7 @@ fn discard_rejects_running_task() {
     .unwrap();
 
     let error = api
-        .discard(TaskDiscardParams {
+        .discard_for_test(TaskDiscardParams {
             task_id: "task-existing".into(),
         })
         .unwrap_err();
@@ -5606,12 +5827,12 @@ fn discard_rejects_tombstoned_historical_task() {
     .unwrap();
 
     let error = api
-        .discard(TaskDiscardParams {
+        .discard_for_test(TaskDiscardParams {
             task_id: "task-existing".into(),
         })
         .unwrap_err();
 
-    assert_eq!(error.code, ProtocolErrorCode::Conflict);
+    assert_eq!(error.code, ProtocolErrorCode::NotFound);
 }
 
 #[test]
@@ -5619,7 +5840,7 @@ fn send_rejects_tombstoned_task() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut record = task_record("task-existing", "/workspace/app");
-    record.first_prompt_sent = false;
+    record.lifecycle = test_new_task_lifecycle();
     record.tombstoned = true;
     store.write_task(&record).unwrap();
     let api = TaskProductApi::new(
@@ -5661,7 +5882,7 @@ fn archiving_task_does_not_refresh_last_activity() {
     )
     .unwrap();
 
-    api.set_archived(TaskSetArchivedParams {
+    api.set_archived_for_test(TaskSetArchivedParams {
         task_id: "task-old".into(),
         archived: true,
     })
@@ -5693,7 +5914,7 @@ fn task_record(task_id: &str, workspace_root: &str) -> TaskRecord {
         agent_name: "Codex".to_string(),
         isolation: IsolationKind::Local,
         workspace_root: workspace_root.to_string(),
-        first_prompt_sent: true,
+        lifecycle: TaskLifecycle::Visible,
         agent_session_id: None,
         active_turn_id: None,
         archived: false,
@@ -5705,6 +5926,13 @@ fn task_record(task_id: &str, workspace_root: &str) -> TaskRecord {
         agent_commands_catalog: None,
         model_id: None,
         preparation: TaskPreparationRecord::Ready,
+    }
+}
+
+fn test_new_task_lifecycle() -> TaskLifecycle {
+    TaskLifecycle::New {
+        owner_client_instance_id:
+            crate::attachment_runtime::AttachmentOwner::test_client_instance_id(),
     }
 }
 
