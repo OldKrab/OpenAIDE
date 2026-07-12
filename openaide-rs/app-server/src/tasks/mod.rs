@@ -8,6 +8,7 @@ pub(crate) mod history_sync;
 pub(crate) mod lifecycle;
 pub(crate) mod mutation;
 pub(crate) mod native_session_lifecycle;
+pub(crate) mod native_session_service;
 pub(crate) mod product_api;
 pub(crate) mod query;
 pub(crate) mod query_store;

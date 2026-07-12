@@ -55,10 +55,8 @@ export type TaskSnapshot = {
 
 export type HistorySyncState =
   | { state: "idle"; generation: number }
-  | { state: "checking"; generation: number }
   | { state: "syncing"; generation: number }
-  | { state: "updated"; generation: number }
-  | { state: "failed"; generation: number; message: string; before_send: boolean };
+  | { state: "updated"; generation: number };
 
 export type TaskListResult = {
   tasks: TaskSummary[];

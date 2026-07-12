@@ -19,7 +19,7 @@ const HIDE_JUMP_TO_LATEST_DISTANCE_PX = 48;
 const JUMP_TO_LATEST_DURATION_MS = 180;
 
 type UseTaskChatScrollOptions = {
-  historySyncState?: "idle" | "checking" | "syncing" | "updated" | "failed";
+  historySyncState?: "idle" | "syncing" | "updated";
   itemCount: number;
   onScrollState: (scrollState: TaskChatScrollState) => void;
   pendingPrepend: boolean;
@@ -106,7 +106,7 @@ export function useTaskChatScroll(options: UseTaskChatScrollOptions) {
   const refreshHistorySyncBaseline = useCallback((messageList: HTMLDivElement) => {
     const anchor = historyAnchorRef.current;
     if (!anchor) return false;
-    // Intrinsic growth while history is checking/syncing belongs to the live
+    // Intrinsic growth while history is syncing belongs to the live
     // timeline, not the later native-history prepend.
     anchor.scrollHeight = messageList.scrollHeight;
     anchor.scrollTop = messageList.scrollTop;
@@ -217,7 +217,7 @@ export function useTaskChatScroll(options: UseTaskChatScrollOptions) {
   useLayoutEffect(() => {
     const messageList = messageListRef.current;
     if (!messageList) return;
-    if (historySyncState === "checking" || historySyncState === "syncing") {
+    if (historySyncState === "syncing") {
       historyAnchorRef.current ??= {
         scrollHeight: messageList.scrollHeight,
         scrollTop: messageList.scrollTop,

@@ -166,6 +166,16 @@ impl Store {
     }
 
     fn write_meta(&self, task_id: &str, messages: &[StoredMessage]) -> Result<(), RuntimeError> {
+        self.write_meta_at_least(task_id, messages, 0)
+    }
+
+    /// Advances the Chat clock to cover an authoritative Native Session snapshot.
+    fn write_meta_at_least(
+        &self,
+        task_id: &str,
+        messages: &[StoredMessage],
+        minimum_updated_at: u128,
+    ) -> Result<(), RuntimeError> {
         let version = self.next_message_version(task_id, messages.len() as u64)?;
         let previous = self
             .local_history_updated_at(task_id)
@@ -175,7 +185,10 @@ impl Store {
         let now = crate::time::now_string()
             .parse::<u128>()
             .unwrap_or_default();
-        let local_history_updated_at = now.max(previous.saturating_add(1)).to_string();
+        let local_history_updated_at = now
+            .max(previous.saturating_add(1))
+            .max(minimum_updated_at)
+            .to_string();
         let meta = MessageMeta {
             task_id: task_id.to_string(),
             version,

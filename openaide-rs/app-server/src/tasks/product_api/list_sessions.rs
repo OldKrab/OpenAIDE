@@ -9,6 +9,53 @@ use super::session_cursor::OpaqueSessionCursor;
 use super::{protocol_error_from_runtime, AgentListSessionsWorkflow, TaskProductApi};
 
 impl TaskProductApi {
+    pub(super) fn refresh_native_session_catalogs(&self) -> Result<(), ProtocolError> {
+        let contexts = self
+            .store
+            .list_all_task_records_strict()
+            .map_err(protocol_error_from_runtime)?
+            .into_iter()
+            .filter(|task| !task.tombstoned && task.agent_session_id.is_some())
+            .map(|task| (task.agent_id, task.workspace_root))
+            .collect::<std::collections::HashSet<_>>();
+        let mut first_error = None;
+        for (agent_id, workspace_root) in contexts {
+            match self.fetch_complete_native_catalog(&agent_id, &workspace_root) {
+                Ok(sessions) => {
+                    self.history_sync
+                        .replace_listed_sessions(&agent_id, &workspace_root, sessions)
+                }
+                Err(error) => {
+                    first_error.get_or_insert(error);
+                }
+            }
+        }
+        first_error.map_or(Ok(()), Err)
+    }
+
+    fn fetch_complete_native_catalog(
+        &self,
+        agent_id: &str,
+        workspace_root: &str,
+    ) -> Result<Vec<crate::protocol::model::AgentListedSession>, ProtocolError> {
+        let mut cursor = OpaqueSessionCursor::new(None);
+        let mut sessions = Vec::new();
+        loop {
+            let result = self
+                .agent_gateway
+                .list_sessions(AgentListSessionsRequest {
+                    agent_id: agent_id.to_string(),
+                    cwd: workspace_root.to_string(),
+                    cursor: cursor.current(),
+                })
+                .map_err(protocol_error_from_runtime)?;
+            sessions.extend(result.sessions);
+            if cursor.advance(result.next_cursor).is_none() {
+                return Ok(sessions);
+            }
+        }
+    }
+
     fn list_sessions_for_project(
         &self,
         params: AgentListSessionsParams,
@@ -31,6 +78,11 @@ impl TaskProductApi {
                 })
                 .map_err(protocol_error_from_runtime)?;
             let next_cursor = cursor.advance(result.next_cursor);
+            self.history_sync.record_listed_sessions(
+                params.agent_id.as_str(),
+                &project.workspace_root,
+                &result.sessions,
+            );
             let sessions = self
                 .unowned_native_sessions(params.agent_id.as_str(), result.sessions)?
                 .into_iter()
@@ -97,5 +149,9 @@ impl AgentListSessionsWorkflow for TaskProductApi {
         params: AgentListSessionsParams,
     ) -> Result<AgentListSessionsResult, ProtocolError> {
         self.list_sessions_for_project(params)
+    }
+
+    fn refresh_native_session_catalogs(&self) -> Result<(), ProtocolError> {
+        TaskProductApi::refresh_native_session_catalogs(self)
     }
 }

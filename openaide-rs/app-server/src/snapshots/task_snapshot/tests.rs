@@ -112,23 +112,15 @@ fn open_overlays_current_history_sync_state_for_resubscribe() {
     task.unread = !task.unread;
     task.revision += 1;
     store.write_task(&task).unwrap();
-    history_sync.set(TaskHistorySyncSnapshot::Failed {
-        generation: 7,
-        message: "Native history is unavailable".to_string(),
-        before_send: false,
-    });
+    history_sync.set(TaskHistorySyncSnapshot::Idle { generation: 7 });
 
-    let failed = snapshots
+    let idle = snapshots
         .open_internal(&TaskId::from("task-1"))
         .expect("open after unrelated mutation");
 
     assert_eq!(
-        failed.history_sync,
-        TaskHistorySyncSnapshot::Failed {
-            generation: 7,
-            message: "Native history is unavailable".to_string(),
-            before_send: false,
-        }
+        idle.history_sync,
+        TaskHistorySyncSnapshot::Idle { generation: 7 }
     );
 
     history_sync.set(TaskHistorySyncSnapshot::Updated { generation: 7 });

@@ -5,7 +5,6 @@ import {
   ATTACHMENT_LIST_ROOTS,
   ATTACHMENT_REVEAL,
   TASK_CHAT_PAGE,
-  TASK_RETRY_HISTORY_SYNC,
   TASK_SET_CONFIG_OPTION,
   TASK_TOOL_DETAIL,
   type AgentConfigOptionId,
@@ -171,21 +170,6 @@ export function createTaskCallbacks({
     },
     respondToQuestion: (requestId, response) => {
       respondToQuestionIntent({ backendConnection, dispatch, state }, requestId, response);
-    },
-    retryHistory: () => {
-      if (!state.snapshot || !backendConnection?.request) return;
-      const taskId = state.snapshot.task.task_id;
-      void backendConnection.request(TASK_RETRY_HISTORY_SYNC, { taskId: taskId as TaskId })
-        .then((result) => dispatch({
-          type: "snapshot",
-          snapshot: mapProtocolTaskSnapshot(result.task).snapshot,
-          intent: "refresh",
-        }))
-        .catch((error) => dispatch({
-        type: "taskInput:error",
-        taskId,
-        message: safeErrorMessage(error),
-        }));
     },
     sendPrompt: (prompt) => {
       if (!state.snapshot) return;

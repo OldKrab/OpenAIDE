@@ -15,6 +15,16 @@ impl Store {
         task_id: &str,
         messages: Vec<NormalizedMessage>,
     ) -> Result<(), RuntimeError> {
+        self.replace_messages_with_normalized_at(task_id, messages, 0)
+    }
+
+    /// Replaces Chat from one Native Session load and records the Native Session clock.
+    pub(crate) fn replace_messages_with_normalized_at(
+        &self,
+        task_id: &str,
+        messages: Vec<NormalizedMessage>,
+        native_updated_at: u128,
+    ) -> Result<(), RuntimeError> {
         let existing_ids = self
             .read_messages(task_id)?
             .into_iter()
@@ -39,6 +49,6 @@ impl Store {
             });
         }
         self.write_messages(task_id, &stored_messages)?;
-        self.write_meta(task_id, &stored_messages)
+        self.write_meta_at_least(task_id, &stored_messages, native_updated_at)
     }
 }

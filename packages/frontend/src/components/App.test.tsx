@@ -142,15 +142,8 @@ describe("task working status label", () => {
   it("uses the live activity row for conversation history synchronization", async () => {
     const { taskWorkingStatusLabel } = await import("./App");
 
-    expect(taskWorkingStatusLabel([], "inactive", false, { state: "checking", generation: 1 })).toBe("Checking for newer history");
     expect(taskWorkingStatusLabel([], "active", false, { state: "syncing", generation: 1 })).toBe("Syncing conversation history");
     expect(taskWorkingStatusLabel([], "inactive", false, { state: "updated", generation: 1 })).toBe("History updated");
-    expect(taskWorkingStatusLabel([], "inactive", false, { state: "failed", generation: 1, message: "offline", before_send: false })).toBe(
-      "Couldn’t refresh history",
-    );
-    expect(taskWorkingStatusLabel([], "active", false, { state: "failed", generation: 1, message: "offline", before_send: true })).toBe(
-      "Couldn’t sync conversation history",
-    );
   });
 });
 

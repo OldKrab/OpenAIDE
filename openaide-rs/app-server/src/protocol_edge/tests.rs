@@ -24,6 +24,7 @@ use openaide_app_server_protocol::state::{
 };
 use serde_json::json;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use crate::agent::product_api::{
@@ -433,6 +434,22 @@ fn agent_list_sessions_returns_typed_result_without_workspace_paths() {
         json!("session-1")
     );
     assert!(value["result"]["sessions"][0].get("cwd").is_none());
+}
+
+#[test]
+fn background_native_catalog_refresh_coalesces_while_one_refresh_is_running() {
+    let workflow = Arc::new(BlockingCatalogRefresh::default());
+    let gateway = SharedRpcGateway::new(gateway_with_agent_session_listing(workflow.clone()));
+
+    gateway.request_native_session_catalog_refresh();
+    gateway.request_native_session_catalog_refresh();
+    wait_for(|| workflow.calls.load(Ordering::SeqCst) == 1);
+    assert_eq!(workflow.calls.load(Ordering::SeqCst), 1);
+
+    workflow.release.store(true, Ordering::SeqCst);
+    wait_for(|| !gateway.native_catalog_refresh_is_running_for_test());
+    gateway.request_native_session_catalog_refresh();
+    wait_for(|| workflow.calls.load(Ordering::SeqCst) == 2);
 }
 
 #[test]
@@ -1976,6 +1993,45 @@ impl AgentListSessionsWorkflow for ListingAgentSessions {
                 next_cursor: params.cursor.map(|_| "cursor-2".to_string()),
             },
         )
+    }
+}
+
+#[derive(Default)]
+struct BlockingCatalogRefresh {
+    calls: AtomicUsize,
+    release: AtomicBool,
+}
+
+impl AgentListSessionsWorkflow for BlockingCatalogRefresh {
+    fn list_agent_sessions(
+        &self,
+        _params: openaide_app_server_protocol::agent::AgentListSessionsParams,
+    ) -> Result<
+        openaide_app_server_protocol::agent::AgentListSessionsResult,
+        openaide_app_server_protocol::errors::ProtocolError,
+    > {
+        Err(test_unavailable("interactive listing is not used"))
+    }
+
+    fn refresh_native_session_catalogs(
+        &self,
+    ) -> Result<(), openaide_app_server_protocol::errors::ProtocolError> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        while !self.release.load(Ordering::SeqCst) {
+            std::thread::yield_now();
+        }
+        Ok(())
+    }
+}
+
+fn wait_for(condition: impl Fn() -> bool) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+    while !condition() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "timed out waiting for asynchronous condition"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(1));
     }
 }
 

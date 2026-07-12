@@ -6,11 +6,11 @@ use uuid::Uuid;
 
 use crate::attachment_runtime::{AttachmentOwner, ResolvedSendAttachments};
 use crate::projects::ProjectIdentity;
-use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::TaskStatus as LegacyTaskStatus;
 use crate::storage::records::{TaskLifecycle, TaskRecord};
 use crate::task_recovery::RESTART_INTERRUPTION_MESSAGE;
 use crate::tasks::mutation::{TaskCommitOutcome, TaskMutationResult};
+use crate::tasks::native_session_service::PrimaryPromptRequest;
 use crate::tasks::snapshot::build_snapshot;
 use crate::tasks::transitions::TaskTransitions;
 use crate::time::now_string;
@@ -19,8 +19,6 @@ use super::{
     conflict_error, runtime_error, storage_error, validation_error, TaskProductApi,
     TaskSendAccepted,
 };
-
-mod session;
 
 use revision_guard::same_send_target;
 
@@ -214,76 +212,17 @@ impl TaskProductApi {
     ) -> Result<(), ProtocolError> {
         let task_id = existing_task.task_id.clone();
         let turn_id = committed_send.turn_id().clone();
-
-        let opened_session = match self.open_agent_session(&existing_task) {
-            Ok(opened_session) => opened_session,
-            Err(error) => {
-                committed_send.fail(self, RuntimeError::Internal(error.message))?;
-                self.turn_acceptance
-                    .retire_pending_turn(&task_id, turn_id.as_str());
-                return Ok(());
-            }
-        };
-        let session_id = opened_session.session().session_id.clone();
-        let session_task_state = opened_session.task_state();
-        let session_commit =
-            self.mutations
-                .commit_existing_task(&task_id, durable_send_commit_options(), |ctx| {
-                    if ctx.task().active_turn_id.as_deref() != Some(turn_id.as_str()) {
-                        return Ok(TaskMutationResult::Rejected);
-                    }
-                    session_task_state.apply_to(ctx.task_mut());
-                    Ok(TaskMutationResult::Changed)
-                });
-        match session_commit {
-            Ok(result) if matches!(result.outcome, TaskCommitOutcome::Committed(_)) => {}
-            Ok(_) => {
-                committed_send.fail(
-                    self,
-                    RuntimeError::NotReady(
-                        "Native Session changed before prompt start".to_string(),
-                    ),
-                )?;
-                self.turn_acceptance
-                    .retire_pending_turn(&task_id, turn_id.as_str());
-                return Ok(());
-            }
-            Err(error) => {
-                committed_send.fail(self, error)?;
-                self.turn_acceptance
-                    .retire_pending_turn(&task_id, turn_id.as_str());
-                return Ok(());
-            }
-        }
-        // Bind the Native Session before attaching its metadata sink. Updates
-        // emitted during session startup remain buffered until this point and
-        // then pass the sink's stale-session guard.
         if let Err(error) = self
-            .turn_runner
-            .attach_session_events(task_id.clone(), &opened_session.session().key())
+            .native_sessions
+            .start_primary_prompt(PrimaryPromptRequest {
+                task: existing_task,
+                turn_id: turn_id.clone(),
+                text: prompt_text,
+                attachments: attachments.agent_attachments(),
+            })
         {
-            self.mutations
-                .commit_existing_task(&task_id, durable_send_commit_options(), |ctx| {
-                    if ctx.task().agent_session_id.as_deref() != Some(session_id.as_str()) {
-                        return Ok(TaskMutationResult::Unchanged);
-                    }
-                    ctx.task_mut().agent_session_id = None;
-                    Ok(TaskMutationResult::Changed)
-                })
-                .map_err(super::protocol_error_from_runtime)?;
             committed_send.fail(self, error)?;
-            self.turn_acceptance
-                .retire_pending_turn(&task_id, turn_id.as_str());
-            return Ok(());
         }
-        let session = opened_session.commit();
-        self.turn_runner.spawn_agent_turn(
-            task_id.clone(),
-            prompt_text,
-            attachments.agent_attachments(),
-            turn_id.as_str().to_string(),
-            session,
-        );
         self.turn_acceptance
             .retire_pending_turn(&task_id, turn_id.as_str());
         Ok(())

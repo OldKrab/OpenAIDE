@@ -16,11 +16,18 @@ const SECRET_READ_TIMEOUT: Duration = Duration::from_secs(5);
 
 impl TaskProductApi {
     pub(super) fn task_secret_resolver(&self, task_id: &str) -> Arc<dyn AgentSecretResolver> {
-        Arc::new(TaskSecretResolver {
-            server_requests: self.server_requests.clone(),
-            task_id: TaskId::from(task_id.to_string()),
-        })
+        task_secret_resolver(&self.server_requests, task_id)
     }
+}
+
+pub(crate) fn task_secret_resolver(
+    server_requests: &ServerRequestRuntime,
+    task_id: &str,
+) -> Arc<dyn AgentSecretResolver> {
+    Arc::new(TaskSecretResolver {
+        server_requests: server_requests.clone(),
+        task_id: TaskId::from(task_id.to_string()),
+    })
 }
 
 struct TaskSecretResolver {

@@ -55,7 +55,6 @@ export const TASK_SEND = "task/send" as const;
 export const TASK_SET_CONFIG_OPTION = "task/setConfigOption" as const;
 export const TASK_CANCEL = "task/cancel" as const;
 export const TASK_OPEN = "task/open" as const;
-export const TASK_RETRY_HISTORY_SYNC = "task/retryHistorySync" as const;
 export const TASK_MARK_READ = "task/markRead" as const;
 export const TASK_CHAT_PAGE = "task/chatPage" as const;
 export const TASK_TOOL_DETAIL = "task/toolDetail" as const;
@@ -478,10 +477,6 @@ export type TaskOpenParams = { taskId: TaskId, };
 
 export type TaskOpenResult = { task: TaskSnapshot, };
 
-export type TaskRetryHistorySyncParams = { taskId: TaskId, };
-
-export type TaskRetryHistorySyncResult = { task: TaskSnapshot, };
-
 export type TaskMarkReadParams = { taskId: TaskId, };
 
 export type TaskMarkReadResult = { task: TaskSnapshot, };
@@ -550,7 +545,7 @@ export type TaskLifecycle = "new" | "visible";
 
 export type TaskSnapshot = { task: TaskSummary, lifecycle: TaskLifecycle, revision: number, preparation: TaskPreparationSnapshot, agentConfig: TaskAgentConfigSnapshot, agentCommands: TaskAgentCommandsSnapshot, sendCapability: TaskSendCapabilitySnapshot, chat: ChatSnapshot, historySync: TaskHistorySyncSnapshot, pendingRequests?: Array<PendingRequestSnapshot>, recovery?: RecoverySnapshot | null, };
 
-export type TaskHistorySyncSnapshot = { "state": "idle", generation: number, } | { "state": "checking", generation: number, } | { "state": "syncing", generation: number, } | { "state": "updated", generation: number, } | { "state": "failed", generation: number, message: string, beforeSend: boolean, };
+export type TaskHistorySyncSnapshot = { "state": "idle", generation: number, } | { "state": "syncing", generation: number, } | { "state": "updated", generation: number, };
 
 export type TaskPreparationSnapshot = { "kind": "preparing", steps: Array<TaskPreparationStep>, } | { "kind": "ready" } | { "kind": "blocked", blocker: TaskSetupBlocker, actions: Array<TaskPreparationAction>, } | { "kind": "failed", error: ProtocolError, actions: Array<TaskPreparationAction>, };
 
@@ -634,7 +629,7 @@ export type PendingRequestScope = { "kind": "client", clientInstanceId: ClientIn
 
 export type PendingRequestKind = "permission" | "question" | "secret" | "shellCapability";
 
-export type ProtocolMethod = typeof CLIENT_PROBE | typeof CLIENT_INITIALIZE | typeof CLIENT_CAPABILITIES_CHANGED | typeof CLIENT_HEARTBEAT | typeof STATE_SUBSCRIBE | typeof STATE_UNSUBSCRIBE | typeof DIAGNOSTICS_GET_RUNTIME | typeof SUPPORT_RECOVER_STUCK_SESSIONS | typeof AGENT_PROBE | typeof AGENT_AUTHENTICATE | typeof AGENT_LIST_SESSIONS | typeof AGENT_CREATE_CUSTOM | typeof AGENT_UPDATE_CUSTOM_METADATA | typeof AGENT_REPLACE_CUSTOM | typeof AGENT_DELETE_CUSTOM | typeof AGENT_SET_ENABLED | typeof SETTINGS_GET_AGENT_DETAILS | typeof SETTINGS_GET_MCP_SERVERS | typeof SETTINGS_GET_SKILLS | typeof SETTINGS_GET_PREFERENCES | typeof SETTINGS_UPDATE_PREFERENCES | typeof SETTINGS_GET_RUNTIME | typeof SETTINGS_UPDATE_RUNTIME | typeof ATTACHMENT_LIST_ROOTS | typeof ATTACHMENT_LIST_DIRECTORY | typeof ATTACHMENT_CREATE_FILE_REFERENCE | typeof ATTACHMENT_CREATE_PASTED_IMAGE | typeof ATTACHMENT_CREATE_EMBEDDED_CANDIDATE | typeof ATTACHMENT_CONFIRM_EMBEDDED | typeof ATTACHMENT_REFRESH_HANDLES | typeof ATTACHMENT_RELEASE | typeof ATTACHMENT_REVEAL | typeof SHELL_RESOLVE_FILE_REVEAL | typeof WORKSPACE_LIST_ROOTS | typeof WORKSPACE_LIST_DIRECTORY | typeof TASK_CREATE | typeof TASK_ADOPT_NATIVE_SESSION | typeof TASK_SEND | typeof TASK_SET_CONFIG_OPTION | typeof TASK_CANCEL | typeof TASK_OPEN | typeof TASK_RETRY_HISTORY_SYNC | typeof TASK_MARK_READ | typeof TASK_CHAT_PAGE | typeof TASK_TOOL_DETAIL | typeof TASK_LIST | typeof TASK_DISCARD | typeof TASK_SET_ARCHIVED;
+export type ProtocolMethod = typeof CLIENT_PROBE | typeof CLIENT_INITIALIZE | typeof CLIENT_CAPABILITIES_CHANGED | typeof CLIENT_HEARTBEAT | typeof STATE_SUBSCRIBE | typeof STATE_UNSUBSCRIBE | typeof DIAGNOSTICS_GET_RUNTIME | typeof SUPPORT_RECOVER_STUCK_SESSIONS | typeof AGENT_PROBE | typeof AGENT_AUTHENTICATE | typeof AGENT_LIST_SESSIONS | typeof AGENT_CREATE_CUSTOM | typeof AGENT_UPDATE_CUSTOM_METADATA | typeof AGENT_REPLACE_CUSTOM | typeof AGENT_DELETE_CUSTOM | typeof AGENT_SET_ENABLED | typeof SETTINGS_GET_AGENT_DETAILS | typeof SETTINGS_GET_MCP_SERVERS | typeof SETTINGS_GET_SKILLS | typeof SETTINGS_GET_PREFERENCES | typeof SETTINGS_UPDATE_PREFERENCES | typeof SETTINGS_GET_RUNTIME | typeof SETTINGS_UPDATE_RUNTIME | typeof ATTACHMENT_LIST_ROOTS | typeof ATTACHMENT_LIST_DIRECTORY | typeof ATTACHMENT_CREATE_FILE_REFERENCE | typeof ATTACHMENT_CREATE_PASTED_IMAGE | typeof ATTACHMENT_CREATE_EMBEDDED_CANDIDATE | typeof ATTACHMENT_CONFIRM_EMBEDDED | typeof ATTACHMENT_REFRESH_HANDLES | typeof ATTACHMENT_RELEASE | typeof ATTACHMENT_REVEAL | typeof SHELL_RESOLVE_FILE_REVEAL | typeof WORKSPACE_LIST_ROOTS | typeof WORKSPACE_LIST_DIRECTORY | typeof TASK_CREATE | typeof TASK_ADOPT_NATIVE_SESSION | typeof TASK_SEND | typeof TASK_SET_CONFIG_OPTION | typeof TASK_CANCEL | typeof TASK_OPEN | typeof TASK_MARK_READ | typeof TASK_CHAT_PAGE | typeof TASK_TOOL_DETAIL | typeof TASK_LIST | typeof TASK_DISCARD | typeof TASK_SET_ARCHIVED;
 export type RequestParamsByMethod = {
   [CLIENT_PROBE]: ClientProbeParams;
   [CLIENT_INITIALIZE]: InitializeParams;
@@ -677,7 +672,6 @@ export type RequestParamsByMethod = {
   [TASK_SET_CONFIG_OPTION]: TaskSetConfigOptionParams;
   [TASK_CANCEL]: TaskCancelParams;
   [TASK_OPEN]: TaskOpenParams;
-  [TASK_RETRY_HISTORY_SYNC]: TaskRetryHistorySyncParams;
   [TASK_MARK_READ]: TaskMarkReadParams;
   [TASK_CHAT_PAGE]: TaskChatPageParams;
   [TASK_TOOL_DETAIL]: TaskToolDetailParams;
@@ -728,7 +722,6 @@ export type ResponseResultByMethod = {
   [TASK_SET_CONFIG_OPTION]: TaskSetConfigOptionResult;
   [TASK_CANCEL]: TaskCancelResult;
   [TASK_OPEN]: TaskOpenResult;
-  [TASK_RETRY_HISTORY_SYNC]: TaskRetryHistorySyncResult;
   [TASK_MARK_READ]: TaskMarkReadResult;
   [TASK_CHAT_PAGE]: TaskChatPageResult;
   [TASK_TOOL_DETAIL]: TaskToolDetailResult;

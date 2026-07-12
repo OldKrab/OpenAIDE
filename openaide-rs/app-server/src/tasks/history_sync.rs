@@ -1,8 +1,6 @@
-use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, Condvar, Mutex};
-use std::time::{Duration, Instant};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
 
-use openaide_app_server_protocol::errors::ProtocolError;
 use openaide_app_server_protocol::snapshot::TaskHistorySyncSnapshot;
 
 use crate::protocol::model::AgentListedSession;
@@ -12,8 +10,6 @@ use crate::tasks::task_operation::TaskOperationCoordinator;
 #[cfg(test)]
 #[path = "history_sync_tests.rs"]
 mod tests;
-
-const SESSION_LIST_FRESHNESS: Duration = Duration::from_secs(30);
 
 /// Serializes Native Session history reconciliation for one Task.
 #[derive(Clone, Default)]
@@ -39,14 +35,37 @@ impl PassiveSyncGeneration {
 }
 
 impl HistorySyncCoordinator {
-    /// Shares only complete successful pagination results. Failures wake waiters but are never cached.
-    pub(super) fn listed_sessions(
+    /// Returns only catalog state already refreshed outside Task opening.
+    pub(super) fn cached_session(
         &self,
         agent_id: &str,
         workspace_root: &str,
-        fetch: impl FnOnce() -> Result<Vec<AgentListedSession>, ProtocolError>,
-    ) -> Result<Vec<AgentListedSession>, ProtocolError> {
-        self.listings.get_or_fetch(agent_id, workspace_root, fetch)
+        session_id: &str,
+    ) -> Option<AgentListedSession> {
+        self.listings
+            .get(agent_id, workspace_root)
+            .into_iter()
+            .find(|session| session.session_id == session_id)
+    }
+
+    /// Merges one successful Native Session page into the shared catalog.
+    pub(super) fn record_listed_sessions(
+        &self,
+        agent_id: &str,
+        workspace_root: &str,
+        sessions: &[AgentListedSession],
+    ) {
+        self.listings.merge(agent_id, workspace_root, sessions);
+    }
+
+    /// Replaces one fully paged catalog only after the refresh succeeds.
+    pub(super) fn replace_listed_sessions(
+        &self,
+        agent_id: &str,
+        workspace_root: &str,
+        sessions: Vec<AgentListedSession>,
+    ) {
+        self.listings.replace(agent_id, workspace_root, sessions);
     }
 
     /// Registers one passive history-check generation.
@@ -110,22 +129,14 @@ impl TaskHistorySyncSnapshotSource for HistorySyncCoordinator {
 fn history_sync_generation(snapshot: &TaskHistorySyncSnapshot) -> u64 {
     match snapshot {
         TaskHistorySyncSnapshot::Idle { generation }
-        | TaskHistorySyncSnapshot::Checking { generation }
         | TaskHistorySyncSnapshot::Syncing { generation }
-        | TaskHistorySyncSnapshot::Updated { generation }
-        | TaskHistorySyncSnapshot::Failed { generation, .. } => *generation,
+        | TaskHistorySyncSnapshot::Updated { generation } => *generation,
     }
 }
 
 #[derive(Clone, Default)]
 struct NativeSessionCache {
-    shared: Arc<(Mutex<CacheState>, Condvar)>,
-}
-
-#[derive(Default)]
-struct CacheState {
-    entries: HashMap<CacheKey, CacheEntry>,
-    in_flight: HashSet<CacheKey>,
+    entries: Arc<Mutex<HashMap<CacheKey, Vec<AgentListedSession>>>>,
 }
 
 #[derive(Clone, Eq, Hash, PartialEq)]
@@ -134,52 +145,47 @@ struct CacheKey {
     workspace_root: String,
 }
 
-struct CacheEntry {
-    fetched_at: Instant,
-    sessions: Vec<AgentListedSession>,
-}
-
 impl NativeSessionCache {
-    fn get_or_fetch(
-        &self,
-        agent_id: &str,
-        workspace_root: &str,
-        fetch: impl FnOnce() -> Result<Vec<AgentListedSession>, ProtocolError>,
-    ) -> Result<Vec<AgentListedSession>, ProtocolError> {
+    fn get(&self, agent_id: &str, workspace_root: &str) -> Vec<AgentListedSession> {
         let key = CacheKey {
             agent_id: agent_id.to_string(),
             workspace_root: workspace_root.to_string(),
         };
-        let (state_lock, ready) = &*self.shared;
-        let mut state = state_lock.lock().expect("native session cache poisoned");
-        loop {
-            if let Some(entry) = state.entries.get(&key) {
-                if entry.fetched_at.elapsed() < SESSION_LIST_FRESHNESS {
-                    return Ok(entry.sessions.clone());
-                }
-            }
-            if state.in_flight.insert(key.clone()) {
-                break;
-            }
-            state = ready
-                .wait(state)
-                .expect("native session cache wait poisoned");
-        }
-        drop(state);
+        self.entries
+            .lock()
+            .expect("native session cache poisoned")
+            .get(&key)
+            .cloned()
+            .unwrap_or_default()
+    }
 
-        let result = fetch();
-        let mut state = state_lock.lock().expect("native session cache poisoned");
-        state.in_flight.remove(&key);
-        if let Ok(sessions) = &result {
-            state.entries.insert(
-                key,
-                CacheEntry {
-                    fetched_at: Instant::now(),
-                    sessions: sessions.clone(),
-                },
-            );
+    fn merge(&self, agent_id: &str, workspace_root: &str, sessions: &[AgentListedSession]) {
+        let key = CacheKey {
+            agent_id: agent_id.to_string(),
+            workspace_root: workspace_root.to_string(),
+        };
+        let mut entries = self.entries.lock().expect("native session cache poisoned");
+        let entry = entries.entry(key).or_default();
+        for session in sessions {
+            if let Some(existing) = entry
+                .iter_mut()
+                .find(|existing| existing.session_id == session.session_id)
+            {
+                *existing = session.clone();
+            } else {
+                entry.push(session.clone());
+            }
         }
-        ready.notify_all();
-        result
+    }
+
+    fn replace(&self, agent_id: &str, workspace_root: &str, sessions: Vec<AgentListedSession>) {
+        let key = CacheKey {
+            agent_id: agent_id.to_string(),
+            workspace_root: workspace_root.to_string(),
+        };
+        self.entries
+            .lock()
+            .expect("native session cache poisoned")
+            .insert(key, sessions);
     }
 }

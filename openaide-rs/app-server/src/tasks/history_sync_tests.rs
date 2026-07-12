@@ -20,10 +20,8 @@ fn stale_passive_generation_cannot_replace_current_history_state() {
     assert!(coordinator.set_current("task-history", current_state.clone()));
     assert!(!coordinator.set_current(
         "task-history",
-        TaskHistorySyncSnapshot::Failed {
+        TaskHistorySyncSnapshot::Idle {
             generation: stale.value(),
-            message: "stale refresh failed".to_string(),
-            before_send: false,
         },
     ));
     assert_eq!(

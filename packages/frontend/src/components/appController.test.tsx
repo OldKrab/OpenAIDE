@@ -678,7 +678,7 @@ describe("app controller mounted lifecycle", () => {
     });
     await act(async () => {
       for (const listener of eventListeners) {
-        listener(historyEvent("cursor-1", "cursor-2", { state: "checking", generation: 7 }));
+        listener(historyEvent("cursor-1", "cursor-2", { state: "syncing", generation: 7 }));
         listener(historyEvent("cursor-2", "cursor-3", { state: "idle", generation: 7 }));
       }
       await Promise.resolve();
@@ -687,7 +687,7 @@ describe("app controller mounted lifecycle", () => {
 
     const staleOpen = protocolTaskSnapshot("task_1", "Newer durable title");
     staleOpen.revision = 2;
-    staleOpen.historySync = { state: "checking", generation: 7 };
+    staleOpen.historySync = { state: "syncing", generation: 7 };
     await act(async () => {
       opened.resolve({ task: staleOpen });
       await opened.promise;
@@ -812,7 +812,7 @@ describe("app controller mounted lifecycle", () => {
         const task = protocolTaskSnapshot("task_1", "Recovered Task");
         task.historySync = openCount === 1
           ? { state: "updated", generation: 8 }
-          : { state: "checking", generation: 1 };
+          : { state: "syncing", generation: 1 };
         return { task };
       }
       throw new Error(method);
@@ -850,7 +850,7 @@ describe("app controller mounted lifecycle", () => {
       [TASK_OPEN, { taskId: "task_1" }],
       [TASK_OPEN, { taskId: "task_1" }],
     ]);
-    expect(latestController?.state.snapshot?.history_sync).toEqual({ state: "checking", generation: 1 });
+    expect(latestController?.state.snapshot?.history_sync).toEqual({ state: "syncing", generation: 1 });
   });
 
   it("keeps task mutations unavailable until the reset Task subscription has a baseline", async () => {

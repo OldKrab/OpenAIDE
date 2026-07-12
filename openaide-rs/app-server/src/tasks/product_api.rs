@@ -43,7 +43,7 @@ mod discard;
 mod list_sessions;
 mod open;
 mod prepare;
-mod secret_resolver;
+pub(crate) mod secret_resolver;
 pub(crate) mod send;
 mod session_cursor;
 mod set_config_option;
@@ -59,6 +59,7 @@ pub(crate) struct TaskProductApi {
     agent_gateway: AgentGateway,
     attachments: AttachmentRuntime,
     turn_runner: TurnRunner,
+    native_sessions: crate::tasks::native_session_service::NativeSessionService,
     turn_acceptance: crate::tasks::turn_acceptance::TurnAcceptanceCoordinator,
     config_operations: crate::tasks::task_operation::TaskOperationCoordinator,
     // ACP may expose a newly started session before its Task metadata commit finishes.
@@ -90,6 +91,11 @@ pub(crate) trait AgentListSessionsWorkflow: Send + Sync {
         &self,
         params: AgentListSessionsParams,
     ) -> Result<AgentListSessionsResult, ProtocolError>;
+
+    /// Refreshes the Native Session catalog used by fast Task-open freshness checks.
+    fn refresh_native_session_catalogs(&self) -> Result<(), ProtocolError> {
+        Ok(())
+    }
 }
 
 #[derive(Debug)]
@@ -203,22 +209,33 @@ impl TaskProductApi {
         );
         let agent_gateway = AgentGateway::new(agent_runtime.clone());
         let attachments = AttachmentRuntime::new();
+        let agent_registry = agent_registry.into();
         let turn_runner = TurnRunner::new_with_server_requests(
             mutations.clone(),
             agent_runtime,
             server_requests.clone(),
         );
+        let preparing_session_ids = Arc::new(Mutex::new(HashSet::new()));
+        let native_sessions = crate::tasks::native_session_service::NativeSessionService::new(
+            agent_registry.clone(),
+            agent_gateway.clone(),
+            mutations.clone(),
+            turn_runner.clone(),
+            server_requests.clone(),
+            preparing_session_ids.clone(),
+        );
         let api = Self {
             store,
             project_resolver,
-            agent_registry: agent_registry.into(),
+            agent_registry,
             mutations,
             agent_gateway,
             attachments,
             turn_runner,
+            native_sessions,
             turn_acceptance: Default::default(),
             config_operations: Default::default(),
-            preparing_session_ids: Arc::new(Mutex::new(HashSet::new())),
+            preparing_session_ids,
             history_sync: crate::tasks::history_sync::HistorySyncCoordinator::default(),
             server_requests,
             task_notifier: notifier,

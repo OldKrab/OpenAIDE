@@ -1213,7 +1213,7 @@ describe("app reducer composer state", () => {
   it("drops retained rows when synchronized history is authoritatively replaced", () => {
     let state = createInitialState();
     const checking = snapshot("task_1", [chatMessage("old-tail", "stale tail")]);
-    checking.history_sync = { state: "checking", generation: 2 };
+    checking.history_sync = { state: "syncing", generation: 2 };
     state = appReducer(state, { type: "snapshot", intent: "open", snapshot: checking });
     state = appReducer(state, { type: "chatPage:start", taskId: "task_1", requestGeneration: 1 });
     state = appReducer(state, {
@@ -1224,7 +1224,7 @@ describe("app reducer composer state", () => {
     });
 
     const replacement = snapshot("task_1", [chatMessage("native-row", "native history")], 2);
-    replacement.history_sync = { state: "checking", generation: 2 };
+    replacement.history_sync = { state: "syncing", generation: 2 };
     state = appReducer(state, { type: "snapshot", intent: "refresh", snapshot: replacement });
     expect(state.chatPages.task_1).toBeDefined();
 
@@ -1296,7 +1296,7 @@ describe("app reducer composer state", () => {
     state = appReducer(state, { type: "snapshot", intent: "refresh", snapshot: completed });
 
     const staleOpen = snapshot("task_1", [chatMessage("m1", "Current history")], 2);
-    staleOpen.history_sync = { state: "checking", generation: 7 };
+    staleOpen.history_sync = { state: "syncing", generation: 7 };
     state = appReducer(state, { type: "snapshot", intent: "open", snapshot: staleOpen });
 
     expect(state.snapshot?.history_sync).toEqual({ state: "idle", generation: 7 });
@@ -1312,7 +1312,7 @@ describe("app reducer composer state", () => {
       chatMessage("m1", "Current history"),
       chatMessage("m2", "New durable row"),
     ], 3);
-    durableGrowth.history_sync = { state: "checking", generation: 7 };
+    durableGrowth.history_sync = { state: "syncing", generation: 7 };
     state = appReducer(state, { type: "snapshot", intent: "refresh", snapshot: durableGrowth });
 
     expect(state.snapshot?.revision).toBe(3);
@@ -1326,7 +1326,7 @@ describe("app reducer composer state", () => {
       chatMessage("m1", "Existing history"),
       chatMessage("m2", "New durable row"),
     ], 3);
-    durable.history_sync = { state: "checking", generation: 7 };
+    durable.history_sync = { state: "syncing", generation: 7 };
     state = appReducer(state, { type: "snapshot", intent: "open", snapshot: durable });
 
     const subscriptionCompletion = snapshot("task_1", [chatMessage("m1", "Existing history")], 2);
@@ -1364,7 +1364,7 @@ describe("app reducer composer state", () => {
     });
 
     const restartedProcess = snapshot("task_1", [chatMessage("m1", "Durable history")], 3);
-    restartedProcess.history_sync = { state: "checking", generation: 1 };
+    restartedProcess.history_sync = { state: "syncing", generation: 1 };
     state = appReducer(state, {
       type: "snapshot",
       intent: "refresh",
@@ -1379,7 +1379,7 @@ describe("app reducer composer state", () => {
       replicaEpoch: 1,
     });
 
-    expect(state.snapshot?.history_sync).toEqual({ state: "checking", generation: 1 });
+    expect(state.snapshot?.history_sync).toEqual({ state: "syncing", generation: 1 });
 
     const settledRestart = { ...restartedProcess, history_sync: { state: "idle" as const, generation: 1 } };
     state = appReducer(state, {
@@ -1416,7 +1416,7 @@ describe("app reducer composer state", () => {
     });
 
     const resubscribed = snapshot("task_1", [chatMessage("tail", "Fresh durable tail")], 4);
-    resubscribed.history_sync = { state: "checking", generation: 7 };
+    resubscribed.history_sync = { state: "syncing", generation: 7 };
     state = appReducer(state, {
       type: "appServer:replica",
       epoch: 1,

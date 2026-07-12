@@ -838,7 +838,6 @@ function controllerFor(surface: AppController["bootstrap"]["surface"]): AppContr
         removeAttachment: vi.fn(),
         respondToPermission: vi.fn(),
         respondToQuestion: vi.fn(),
-        retryHistory: vi.fn(),
         selectConfigOption: vi.fn(),
         sendPrompt: vi.fn(),
       },

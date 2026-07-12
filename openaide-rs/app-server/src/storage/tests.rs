@@ -514,6 +514,32 @@ fn local_history_timestamp_advances_for_every_chat_write() {
     assert!(second > first);
 }
 
+#[test]
+fn native_history_replacement_records_the_native_history_clock() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let task_id = "task-native-history-clock";
+    let native_updated_at = u128::MAX - 1;
+
+    store
+        .replace_messages_with_normalized_at(
+            task_id,
+            vec![NormalizedMessage::AgentText {
+                id: "native-message".to_string(),
+                text: "Loaded history".to_string(),
+                created_at: "1".to_string(),
+                streaming: false,
+            }],
+            native_updated_at,
+        )
+        .unwrap();
+
+    assert_eq!(
+        store.local_history_updated_at(task_id).unwrap(),
+        native_updated_at.to_string()
+    );
+}
+
 fn task_record(task_id: &str, status: TaskStatus, created_at: &str) -> TaskRecord {
     TaskRecord {
         task_id: task_id.to_string(),

@@ -106,12 +106,16 @@ impl TaskMutationContext<'_> {
         self.committed_delta = Some(delta);
     }
 
-    pub(crate) fn replace_messages(
+    pub(crate) fn replace_messages_from_native_session(
         &self,
         messages: Vec<NormalizedMessage>,
+        native_updated_at: u128,
     ) -> Result<(), RuntimeError> {
-        self.store
-            .replace_messages_with_normalized(&self.task.task_id, messages)
+        self.store.replace_messages_with_normalized_at(
+            &self.task.task_id,
+            messages,
+            native_updated_at,
+        )
     }
 
     pub(crate) fn finish_running_activities(

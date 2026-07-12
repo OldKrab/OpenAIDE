@@ -85,7 +85,6 @@ export function TaskView({
   onRetryConnection,
   onRevealAttachment,
   onRemoveAttachment,
-  onRetryHistory,
   onRestoreTask,
   onSendPrompt,
   onSelectConfigOption,
@@ -121,7 +120,6 @@ export function TaskView({
   onRetryConnection?: () => void;
   onRevealAttachment: (attachmentId: string) => Promise<void> | void;
   onRemoveAttachment: (attachmentId: string) => void;
-  onRetryHistory?: () => void;
   onRestoreTask?: (taskId: string) => void;
   onSendPrompt: (prompt?: string) => void;
   onSelectConfigOption: (configId: string, value: string) => void;
@@ -284,10 +282,7 @@ export function TaskView({
             />
           ))}
             {workingLabel ? (
-              <WorkingStatus
-                label={workingLabel}
-                onRetry={snapshot.history_sync.state === "failed" ? onRetryHistory : undefined}
-              />
+              <WorkingStatus label={workingLabel} />
             ) : null}
           </div>
           {chatScroll.showJumpToLatest ? (

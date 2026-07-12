@@ -695,7 +695,7 @@ fn create_persists_preparing_and_starts_one_native_session_asynchronously() {
     assert!(accepted.turn_id.as_str().starts_with("turn_"));
     wait_until(|| agent.prompts.load(Ordering::SeqCst) == 1);
     assert_eq!(agent.starts.load(Ordering::SeqCst), 1);
-    assert_eq!(agent.attaches.load(Ordering::SeqCst), 2);
+    assert_eq!(agent.attaches.load(Ordering::SeqCst), 1);
     assert_eq!(
         store
             .read_task(snapshot.task.task_id.as_str())
@@ -958,6 +958,7 @@ fn first_send_reuses_the_native_session_prepared_during_create() {
 
     wait_until(|| agent.prompts.load(Ordering::SeqCst) == 1);
     assert_eq!(agent.starts.load(Ordering::SeqCst), 1);
+    assert_eq!(agent.attaches.load(Ordering::SeqCst), 1);
     assert_eq!(
         agent.prompt_calls.lock().unwrap().as_slice(),
         &[("recorded-session".to_string(), "hello".to_string())]
@@ -1545,50 +1546,23 @@ fn list_agent_sessions_stops_when_empty_pages_cycle_between_cursors() {
 }
 
 #[test]
-fn task_open_history_refresh_treats_a_session_cursor_cycle_as_exhausted() {
+fn background_native_catalog_refresh_treats_a_session_cursor_cycle_as_exhausted() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut task = task_record("task-existing", "/workspace/app");
     task.agent_session_id = Some("missing-native-session".to_string());
     store.write_task(&task).unwrap();
     let agent = Arc::new(CyclingEmptySessionAgent::default());
-    let (notifier, updates) = TaskUpdateNotifier::channel();
     let api = TaskProductApi::new(
         store.clone(),
         Arc::new(StorageProjectResolver::new(store)),
         AgentRegistry::default_built_ins(),
         agent.clone(),
-        notifier,
+        TaskUpdateNotifier::disabled(),
     )
     .unwrap();
 
-    api.open_for_test(TaskOpenParams {
-        task_id: "task-existing".into(),
-    })
-    .unwrap();
-    let checking_generation = loop {
-        let update = updates
-            .recv_timeout(Duration::from_millis(250))
-            .expect("task/open should begin native history reconciliation");
-        if let Some(TaskHistorySyncSnapshot::Checking { generation }) = update.history_sync {
-            break generation;
-        }
-    };
-    let terminal = loop {
-        let update = updates
-            .recv_timeout(Duration::from_millis(250))
-            .expect("cursor-cycle reconciliation should terminate");
-        if let Some(history_sync) = update.history_sync {
-            break history_sync;
-        }
-    };
-
-    assert_eq!(
-        terminal,
-        TaskHistorySyncSnapshot::Idle {
-            generation: checking_generation,
-        }
-    );
+    api.refresh_native_session_catalogs().unwrap();
     assert_eq!(
         agent.requested_cursors(),
         vec![None, Some("page-2".to_string()), Some("page-3".to_string())]
@@ -1624,14 +1598,20 @@ fn open_readopts_adopted_task_when_native_session_is_newer_than_cached_history()
     let mut task = store.read_task("task-existing").unwrap();
     task.message_history_version = store.message_history_version("task-existing").unwrap();
     store.write_task(&task).unwrap();
+    let native_updated_at = store
+        .local_history_updated_at("task-existing")
+        .unwrap()
+        .parse::<u128>()
+        .unwrap()
+        + 6_000;
     let agent = Arc::new(RecordingAgent {
         resume_after_restart_unavailable: true,
         listed_sessions: Mutex::new(vec![AgentListedSession {
             session_id: "native-session".to_string(),
             cwd: "/workspace/app".to_string(),
             title: Some("Native title".to_string()),
-            last_activity: Some("2026-01-02T00:00:00.000Z".to_string()),
-            updated_at: Some("2026-01-02T00:00:00.000Z".to_string()),
+            last_activity: Some(native_updated_at.to_string()),
+            updated_at: Some(native_updated_at.to_string()),
         }]),
         replayed_messages: Mutex::new(vec![NormalizedMessage::AgentText {
             id: "native:fresh".to_string(),
@@ -1641,14 +1621,22 @@ fn open_readopts_adopted_task_when_native_session_is_newer_than_cached_history()
         }]),
         ..Default::default()
     });
+    let (notifier, updates) = TaskUpdateNotifier::channel();
     let api = TaskProductApi::new(
         store.clone(),
         Arc::new(StorageProjectResolver::new(store.clone())),
         AgentRegistry::default_built_ins(),
         agent.clone(),
-        TaskUpdateNotifier::disabled(),
+        notifier,
     )
     .unwrap();
+    api.list_agent_sessions(AgentListSessionsParams {
+        agent_id: AgentId::from("codex"),
+        project_id: project_id_for_workspace("/workspace/app"),
+        cursor: None,
+    })
+    .unwrap();
+    while updates.try_recv().is_ok() {}
 
     let snapshot = api
         .open_for_test(TaskOpenParams {
@@ -1668,6 +1656,13 @@ fn open_readopts_adopted_task_when_native_session_is_newer_than_cached_history()
         snapshot.chat.items[0].parts.first(),
         Some(MessagePart::Text { text }) if text == "Stale cached history."
     ));
+    let syncing = updates
+        .recv_timeout(Duration::from_millis(250))
+        .expect("stale cached history should start loading");
+    assert!(matches!(
+        syncing.history_sync,
+        Some(TaskHistorySyncSnapshot::Syncing { .. })
+    ));
     wait_until(|| agent.loads.load(Ordering::SeqCst) == 1);
     assert_eq!(agent.loads.load(Ordering::SeqCst), 1);
     assert_eq!(agent.attaches.load(Ordering::SeqCst), 1);
@@ -1679,7 +1674,17 @@ fn open_readopts_adopted_task_when_native_session_is_newer_than_cached_history()
     ));
     let record = store.read_task("task-existing").unwrap();
     assert!(!record.unread);
-    assert_eq!(record.last_activity, "2026-01-02T00:00:00.000Z");
+    assert_eq!(record.last_activity, native_updated_at.to_string());
+    assert_eq!(
+        store.local_history_updated_at("task-existing").unwrap(),
+        native_updated_at.to_string()
+    );
+    api.open_for_test(TaskOpenParams {
+        task_id: "task-existing".into(),
+    })
+    .unwrap();
+    std::thread::sleep(Duration::from_millis(25));
+    assert_eq!(agent.loads.load(Ordering::SeqCst), 1);
 }
 
 #[test]
@@ -1719,22 +1724,19 @@ fn open_returns_cached_task_while_native_session_refresh_is_blocked() {
 }
 
 #[test]
-fn repeated_task_opens_reuse_recent_native_session_listing() {
+fn open_without_a_cached_native_catalog_does_not_contact_the_agent() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut task = task_record("task-existing", "/workspace/app");
     task.agent_session_id = Some("native-session".to_string());
-    task.last_activity = "2026-01-02T00:00:00.000Z".to_string();
-    task.updated_at = task.last_activity.clone();
     store.write_task(&task).unwrap();
     let agent = Arc::new(RecordingAgent {
-        resume_after_restart_unavailable: true,
         listed_sessions: Mutex::new(vec![AgentListedSession {
             session_id: "native-session".to_string(),
             cwd: "/workspace/app".to_string(),
             title: None,
-            last_activity: Some("2026-01-01T00:00:00.000Z".to_string()),
-            updated_at: Some("2026-01-01T00:00:00.000Z".to_string()),
+            last_activity: Some("9999999999999".to_string()),
+            updated_at: Some("9999999999999".to_string()),
         }]),
         ..Default::default()
     });
@@ -1751,49 +1753,11 @@ fn repeated_task_opens_reuse_recent_native_session_listing() {
         task_id: "task-existing".into(),
     })
     .unwrap();
-    wait_until(|| agent.list_calls.load(Ordering::SeqCst) == 1);
-    api.open_for_test(TaskOpenParams {
-        task_id: "task-existing".into(),
-    })
-    .unwrap();
-    std::thread::sleep(Duration::from_millis(50));
+    std::thread::sleep(Duration::from_millis(25));
 
-    assert_eq!(agent.list_calls.load(Ordering::SeqCst), 1);
-}
-
-#[test]
-fn concurrent_task_opens_coalesce_native_session_listing() {
-    let temp = tempfile::tempdir().unwrap();
-    let store = Store::open(temp.path().to_path_buf()).unwrap();
-    for task_id in ["task-one", "task-two"] {
-        let mut task = task_record(task_id, "/workspace/app");
-        task.agent_session_id = Some(format!("native-{task_id}"));
-        store.write_task(&task).unwrap();
-    }
-    let agent = Arc::new(RecordingAgent {
-        block_list: AtomicBool::new(true),
-        resume_after_restart_unavailable: true,
-        ..Default::default()
-    });
-    let api = TaskProductApi::new(
-        store.clone(),
-        Arc::new(StorageProjectResolver::new(store)),
-        AgentRegistry::default_built_ins(),
-        agent.clone(),
-        TaskUpdateNotifier::disabled(),
-    )
-    .unwrap();
-
-    for task_id in ["task-one", "task-two"] {
-        api.open_for_test(TaskOpenParams {
-            task_id: task_id.into(),
-        })
-        .unwrap();
-    }
-    wait_until(|| agent.list_calls.load(Ordering::SeqCst) == 1);
-    std::thread::sleep(Duration::from_millis(50));
-    assert_eq!(agent.list_calls.load(Ordering::SeqCst), 1);
-    agent.block_list.store(false, Ordering::SeqCst);
+    assert_eq!(agent.resumes.load(Ordering::SeqCst), 0);
+    assert_eq!(agent.list_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(agent.loads.load(Ordering::SeqCst), 0);
 }
 
 #[test]
@@ -1818,69 +1782,11 @@ fn failed_native_session_listing_is_not_cached() {
     .unwrap();
 
     for expected in 1..=2 {
-        api.open_for_test(TaskOpenParams {
-            task_id: "task-existing".into(),
-        })
-        .unwrap();
-        wait_until(|| agent.list_calls.load(Ordering::SeqCst) >= expected);
+        assert!(api.refresh_native_session_catalogs().is_err());
+        assert_eq!(agent.list_calls.load(Ordering::SeqCst), expected);
     }
 
     assert_eq!(agent.list_calls.load(Ordering::SeqCst), 2);
-}
-
-#[test]
-fn rejected_send_does_not_supersede_the_active_history_check() {
-    let temp = tempfile::tempdir().unwrap();
-    let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut task = task_record("task-existing", "/workspace/app");
-    task.agent_id = "missing-agent".to_string();
-    task.agent_session_id = Some("native-session".to_string());
-    store.write_task(&task).unwrap();
-    let agent = Arc::new(RecordingAgent {
-        block_list: AtomicBool::new(true),
-        resume_after_restart_unavailable: true,
-        ..Default::default()
-    });
-    let (notifier, updates) = TaskUpdateNotifier::channel();
-    let api = TaskProductApi::new(
-        store.clone(),
-        Arc::new(StorageProjectResolver::new(store)),
-        AgentRegistry::default_built_ins(),
-        agent.clone(),
-        notifier,
-    )
-    .unwrap();
-
-    api.open_for_test(TaskOpenParams {
-        task_id: "task-existing".into(),
-    })
-    .unwrap();
-    let checking = updates
-        .recv_timeout(Duration::from_millis(250))
-        .expect("task/open should publish history checking");
-    let generation = match checking.history_sync {
-        Some(TaskHistorySyncSnapshot::Checking { generation }) => generation,
-        other => panic!("expected history checking, got {other:?}"),
-    };
-    wait_until(|| agent.list_calls.load(Ordering::SeqCst) == 1);
-
-    let error = api
-        .send(send_params("task-existing", 1, "Do not accept this"))
-        .unwrap_err();
-    agent.block_list.store(false, Ordering::SeqCst);
-
-    assert_eq!(error.code, ProtocolErrorCode::CapabilityUnavailable);
-    let terminal = updates
-        .recv_timeout(Duration::from_millis(500))
-        .expect("the active history check should reach a terminal state");
-    assert!(matches!(
-        terminal.history_sync,
-        Some(TaskHistorySyncSnapshot::Idle { generation: current })
-            | Some(TaskHistorySyncSnapshot::Failed {
-                generation: current,
-                ..
-            }) if current == generation
-    ));
 }
 
 #[test]
@@ -1920,16 +1826,15 @@ fn send_does_not_wait_for_or_apply_a_blocked_history_listing() {
     )
     .unwrap();
 
-    api.open_for_test(TaskOpenParams {
-        task_id: "task-existing".into(),
-    })
-    .unwrap();
+    let refresh_api = api.clone();
+    let refresh = std::thread::spawn(move || refresh_api.refresh_native_session_catalogs());
     wait_until(|| agent.list_calls.load(Ordering::SeqCst) == 1);
     api.send(send_params("task-existing", 1, "What next?"))
         .unwrap();
     wait_until(|| agent.prompts.load(Ordering::SeqCst) == 1);
     let prompted_while_listing_blocked = agent.prompts.load(Ordering::SeqCst);
     agent.block_list.store(false, Ordering::SeqCst);
+    refresh.join().unwrap().unwrap();
 
     assert_eq!(prompted_while_listing_blocked, 1);
     assert_eq!(agent.loads.load(Ordering::SeqCst), 1);
@@ -1985,7 +1890,7 @@ fn open_does_not_load_native_history_for_an_unsent_draft() {
 }
 
 #[test]
-fn passive_refresh_never_closes_an_already_active_native_session() {
+fn history_load_failure_adds_activity_and_leaves_task_sendable() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut task = task_record("task-existing", "/workspace/app");
@@ -2013,14 +1918,20 @@ fn passive_refresh_never_closes_an_already_active_native_session() {
     let mut task = store.read_task("task-existing").unwrap();
     task.message_history_version = store.message_history_version("task-existing").unwrap();
     store.write_task(&task).unwrap();
+    let native_updated_at = store
+        .local_history_updated_at("task-existing")
+        .unwrap()
+        .parse::<u128>()
+        .unwrap()
+        + 6_000;
     let agent = Arc::new(RecordingAgent {
         resume_after_restart_unavailable: true,
         listed_sessions: Mutex::new(vec![AgentListedSession {
             session_id: "native-session".to_string(),
             cwd: "/workspace/app".to_string(),
             title: Some("Native title".to_string()),
-            last_activity: Some("2026-01-02T00:00:00.000Z".to_string()),
-            updated_at: Some("2026-01-02T00:00:00.000Z".to_string()),
+            last_activity: Some(native_updated_at.to_string()),
+            updated_at: Some(native_updated_at.to_string()),
         }]),
         replayed_messages: Mutex::new(vec![NormalizedMessage::AgentText {
             id: "native:fresh".to_string(),
@@ -2038,6 +1949,12 @@ fn passive_refresh_never_closes_an_already_active_native_session() {
         agent.clone(),
         TaskUpdateNotifier::disabled(),
     )
+    .unwrap();
+    api.list_agent_sessions(AgentListSessionsParams {
+        agent_id: AgentId::from("codex"),
+        project_id: project_id_for_workspace("/workspace/app"),
+        cursor: None,
+    })
     .unwrap();
 
     let snapshot = api
@@ -2059,6 +1976,24 @@ fn passive_refresh_never_closes_an_already_active_native_session() {
     assert!(matches!(
         &stored_messages[0].chat.message,
         NormalizedMessage::AgentText { text, .. } if text == "Stale cached history."
+    ));
+    assert!(stored_messages.iter().any(|message| matches!(
+        &message.chat.message,
+        NormalizedMessage::Activity { title, status: ActivityStatus::Error, .. }
+            if title == "History update failed"
+    )));
+    let current = api
+        .project_task_snapshot(
+            crate::tasks::snapshot::build_snapshot(&store, "task-existing", 100).unwrap(),
+        )
+        .unwrap();
+    assert_eq!(
+        current.send_capability.state,
+        TaskSendCapabilityState::Ready
+    );
+    assert!(matches!(
+        current.history_sync,
+        TaskHistorySyncSnapshot::Idle { .. }
     ));
 }
 
@@ -2109,14 +2044,19 @@ fn open_keeps_adopted_task_cache_when_native_session_is_not_newer() {
         }]),
         ..Default::default()
     });
-    let (notifier, updates) = TaskUpdateNotifier::channel();
     let api = TaskProductApi::new(
         store.clone(),
         Arc::new(StorageProjectResolver::new(store.clone())),
         AgentRegistry::default_built_ins(),
         agent.clone(),
-        notifier,
+        TaskUpdateNotifier::disabled(),
     )
+    .unwrap();
+    api.list_agent_sessions(AgentListSessionsParams {
+        agent_id: AgentId::from("codex"),
+        project_id: project_id_for_workspace("/workspace/app"),
+        cursor: None,
+    })
     .unwrap();
 
     let snapshot = api
@@ -2125,19 +2065,8 @@ fn open_keeps_adopted_task_cache_when_native_session_is_not_newer() {
         })
         .unwrap();
 
-    let terminal_history_sync = loop {
-        let update = updates
-            .recv_timeout(Duration::from_millis(250))
-            .expect("native history comparison should finish");
-        if let Some(history_sync) = update.history_sync {
-            if !matches!(history_sync, TaskHistorySyncSnapshot::Checking { .. }) {
-                break history_sync;
-            }
-        }
-    };
-
     assert!(matches!(
-        terminal_history_sync,
+        snapshot.history_sync,
         TaskHistorySyncSnapshot::Idle { .. }
     ));
     assert_eq!(agent.loads.load(Ordering::SeqCst), 0);
@@ -2185,33 +2114,29 @@ fn open_keeps_adopted_task_cache_when_native_session_has_no_activity_time() {
         }]),
         ..Default::default()
     });
-    let (notifier, updates) = TaskUpdateNotifier::channel();
     let api = TaskProductApi::new(
         store.clone(),
         Arc::new(StorageProjectResolver::new(store.clone())),
         AgentRegistry::default_built_ins(),
         agent.clone(),
-        notifier,
+        TaskUpdateNotifier::disabled(),
     )
     .unwrap();
-
-    api.open_for_test(TaskOpenParams {
-        task_id: "task-existing".into(),
+    api.list_agent_sessions(AgentListSessionsParams {
+        agent_id: AgentId::from("codex"),
+        project_id: project_id_for_workspace("/workspace/app"),
+        cursor: None,
     })
     .unwrap();
-    let terminal_history_sync = loop {
-        let update = updates
-            .recv_timeout(Duration::from_millis(250))
-            .expect("native history comparison should finish");
-        if let Some(history_sync) = update.history_sync {
-            if !matches!(history_sync, TaskHistorySyncSnapshot::Checking { .. }) {
-                break history_sync;
-            }
-        }
-    };
+
+    let snapshot = api
+        .open_for_test(TaskOpenParams {
+            task_id: "task-existing".into(),
+        })
+        .unwrap();
 
     assert!(matches!(
-        terminal_history_sync,
+        snapshot.history_sync,
         TaskHistorySyncSnapshot::Idle { .. }
     ));
     assert_eq!(agent.loads.load(Ordering::SeqCst), 0);
@@ -2273,11 +2198,7 @@ fn unrelated_task_responses_preserve_current_history_sync_state() {
 
     for expected in [
         TaskHistorySyncSnapshot::Syncing { generation },
-        TaskHistorySyncSnapshot::Failed {
-            generation,
-            message: "Native history is unavailable".to_string(),
-            before_send: false,
-        },
+        TaskHistorySyncSnapshot::Idle { generation },
         TaskHistorySyncSnapshot::Updated { generation },
     ] {
         api.publish_history_sync("task-existing", expected.clone());
@@ -3668,7 +3589,7 @@ fn cancel_signals_live_agent_turn_started_by_task_send() {
 }
 
 #[test]
-fn stale_cancel_cannot_retire_the_generation_of_a_newer_accepted_send() {
+fn stale_cancel_cannot_retire_a_newer_accepted_send() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
@@ -3676,15 +3597,6 @@ fn stale_cancel_cannot_retire_the_generation_of_a_newer_accepted_send() {
         .unwrap();
     let agent = Arc::new(RecordingAgent {
         block_prompt: true,
-        block_load: AtomicBool::new(true),
-        resume_after_restart_unavailable: true,
-        listed_sessions: Mutex::new(vec![AgentListedSession {
-            session_id: "recorded-session".to_string(),
-            cwd: "/workspace/app".to_string(),
-            title: Some("Existing".to_string()),
-            updated_at: Some("2099-01-01T00:00:00.000Z".to_string()),
-            last_activity: Some("2099-01-01T00:00:00.000Z".to_string()),
-        }]),
         ..RecordingAgent::default()
     });
     let api = TaskProductApi::new(
@@ -3722,11 +3634,6 @@ fn stale_cancel_cannot_retire_the_generation_of_a_newer_accepted_send() {
             .map(|task| task.active_turn_id.is_none())
             .unwrap_or(false)
     });
-    api.open_for_test(TaskOpenParams {
-        task_id: "task-existing".into(),
-    })
-    .unwrap();
-    wait_until(|| agent.loads.load(Ordering::SeqCst) == 1);
     let revision = store.read_task("task-existing").unwrap().revision;
     let (second_started_tx, second_started_rx) = std::sync::mpsc::sync_channel(0);
     let second_api = api.clone();
@@ -3739,7 +3646,6 @@ fn stale_cancel_cannot_retire_the_generation_of_a_newer_accepted_send() {
     release_read_tx.send(()).unwrap();
     let stale_cancel = cancel.join().unwrap();
     let second = second.join().unwrap().unwrap();
-    agent.block_load.store(false, Ordering::SeqCst);
     wait_until(|| agent.prompts.load(Ordering::SeqCst) == 2);
 
     assert_eq!(stale_cancel.unwrap_err().code, ProtocolErrorCode::Conflict);
@@ -4076,6 +3982,32 @@ fn task_open_republishes_controls_from_recovered_native_session() {
     record.updated_at = "2025-12-31T00:00:00.000Z".to_string();
     record.last_activity = record.updated_at.clone();
     store.write_task(&record).unwrap();
+    store
+        .append_message(
+            "task-existing",
+            ChatMessage {
+                cursor: "m:1".to_string(),
+                identity: "cached:controls".to_string(),
+                message_type: "agent_text".to_string(),
+                message_id: "cached-controls".to_string(),
+                message: NormalizedMessage::AgentText {
+                    id: "cached:controls".to_string(),
+                    text: "Cached history".to_string(),
+                    created_at: "2025-12-31T00:00:00.000Z".to_string(),
+                    streaming: false,
+                },
+            },
+        )
+        .unwrap();
+    let mut record = store.read_task("task-existing").unwrap();
+    record.message_history_version = store.message_history_version("task-existing").unwrap();
+    store.write_task(&record).unwrap();
+    let native_updated_at = store
+        .local_history_updated_at("task-existing")
+        .unwrap()
+        .parse::<u128>()
+        .unwrap()
+        + 6_000;
     let agent = Arc::new(RecordingAgent {
         config_catalog: Some(config_catalog("gpt-5.5")),
         commands_catalog: Some(command_catalog()),
@@ -4085,8 +4017,8 @@ fn task_open_republishes_controls_from_recovered_native_session() {
             session_id: "persisted-session".to_string(),
             cwd: "/workspace/app".to_string(),
             title: None,
-            last_activity: Some("2026-01-01T00:00:00.000Z".to_string()),
-            updated_at: Some("2026-01-01T00:00:00.000Z".to_string()),
+            last_activity: Some(native_updated_at.to_string()),
+            updated_at: Some(native_updated_at.to_string()),
         }]),
         ..Default::default()
     });
@@ -4098,6 +4030,7 @@ fn task_open_republishes_controls_from_recovered_native_session() {
         TaskUpdateNotifier::disabled(),
     )
     .unwrap();
+    api.refresh_native_session_catalogs().unwrap();
 
     let initial = api
         .open_for_test(TaskOpenParams {

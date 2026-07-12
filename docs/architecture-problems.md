@@ -181,7 +181,7 @@ The request envelope already supports `clientRequestId`, while `task/send` addit
 
 ## AP-012: First Send runs through history and Native Session recovery orchestration
 
-**Status:** confirmed
+**Status:** resolved
 
 **Area:** First-send background execution and Agent runtime seam
 
@@ -192,6 +192,8 @@ After accepting every Send, App Server publishes `historySync: syncing`, waits f
 **Desired direction:** New Task creation acquires an opaque handle from a deep `NativeSessionService` and establishes its session update subscription once. First Send commits the user message and `starting` Task state, returns acceptance, and starts the primary prompt through the service in background with no history-sync state. The service privately uses an existing, loaded, resumed, or recreated ACP session. Existing-Task history status changes to `syncing` only when real reconciliation starts and to `updated` only when persisted history changes.
 
 History freshness must not compare Native Session activity with generic Task `updated_at` or with the timestamp of the last history synchronization. Generic Task metadata can change without Chat, while Chat can continue changing through live Agent work after a synchronization. Persist a dedicated `localHistoryUpdatedAt` that advances whenever stored Chat changes, and compare the cached Native Session `updatedAt` against that value only when the user opens the Task.
+
+**Resolution:** First Send now commits and returns a `starting` Task without entering history synchronization. A deep `NativeSessionService` owns preparation, start/load/resume/recreate selection, session binding, one update subscription, and primary prompt startup; the Send workflow only hands it the accepted prompt. Task open consults a separately refreshed Native Session catalog and starts `session/load` only when its cached native timestamp is more than five seconds newer than the dedicated durable Chat clock. Successful replay replaces Chat and advances that clock to the native timestamp, while failure records a Live Activity and returns history state to idle. The catalog refreshes independently at process start and every minute, manual session listing also feeds it, and the obsolete checking/failed history states and retry method were removed.
 
 ## AP-013: Session updates are incorrectly scoped to an active Turn
 

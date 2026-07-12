@@ -1,7 +1,7 @@
 use std::net::SocketAddr;
 use std::path::Path;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::client_lifecycle::{AppServerTime, ClientExpiryOutcome};
 use crate::protocol_edge::local_http::listener::{handle_app_stream, LocalHttpProbeListener};
@@ -231,8 +231,14 @@ fn local_http_error_fields(
 fn start_client_liveness_expirer(gateway: SharedRpcGateway, endpoint: PublishedAppServerEndpoint) {
     thread::spawn(move || {
         let mut shutdown_monitor = IdleShutdownMonitor::default();
+        gateway.request_native_session_catalog_refresh();
+        let mut last_native_catalog_refresh = Instant::now();
         loop {
             thread::sleep(Duration::from_secs(1));
+            if last_native_catalog_refresh.elapsed() >= Duration::from_secs(60) {
+                gateway.request_native_session_catalog_refresh();
+                last_native_catalog_refresh = Instant::now();
+            }
             let expired = gateway.expire_inactive_clients(AppServerTime::now());
             if !expired.is_empty() {
                 crate::logging::info(

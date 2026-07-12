@@ -90,7 +90,6 @@ export function AppPrimaryTaskSurface({ controller, focusRequestKey, model }: Ap
         onRetryConnection={retryTaskOpen}
         onRevealAttachment={callbacks.task.revealAttachment}
         onRemoveAttachment={callbacks.task.removeAttachment}
-        onRetryHistory={callbacks.task.retryHistory}
         onRestoreTask={callbacks.navigation.restoreTask}
         onSelectConfigOption={callbacks.task.selectConfigOption}
         onSendPrompt={callbacks.task.sendPrompt}

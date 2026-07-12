@@ -522,7 +522,7 @@ describe("useTaskChatScroll", () => {
     const messageList = scrollNode({ clientHeight: 400, scrollHeight: 1400 });
     let tree!: ReactTestRenderer;
     act(() => {
-      tree = create(<Harness historySyncState="checking" itemCount={1} />, {
+      tree = create(<Harness historySyncState="syncing" itemCount={1} />, {
         createNodeMock: (element) => (
           (element.props as { className?: string }).className === "message-list" ? messageList : null
         ),
@@ -546,7 +546,7 @@ describe("useTaskChatScroll", () => {
     const messageList = scrollNode({ clientHeight: 400, scrollHeight: 1400 });
     let tree!: ReactTestRenderer;
     act(() => {
-      tree = create(<Harness historySyncState="checking" itemCount={1} />, {
+      tree = create(<Harness historySyncState="syncing" itemCount={1} />, {
         createNodeMock: (element) => (
           (element.props as { className?: string }).className === "message-list" ? messageList : null
         ),
@@ -680,7 +680,7 @@ describe("useTaskChatScroll", () => {
     const messageList = scrollNode({ clientHeight: 400, scrollHeight: 1400 });
     let tree!: ReactTestRenderer;
     act(() => {
-      tree = create(<Harness historySyncState="checking" itemCount={1} />, {
+      tree = create(<Harness historySyncState="syncing" itemCount={1} />, {
         createNodeMock: (element) => (
           (element.props as { className?: string }).className === "message-list" ? messageList : null
         ),
@@ -701,7 +701,7 @@ function Harness({
   prependRequestGeneration = pendingPrepend ? 1 : 0,
   taskId = "task_1",
 }: {
-  historySyncState?: "idle" | "checking" | "syncing" | "updated" | "failed";
+  historySyncState?: "idle" | "syncing" | "updated";
   itemCount: number;
   pendingPrepend?: boolean;
   prependRequestGeneration?: number;

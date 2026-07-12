@@ -332,7 +332,7 @@ fn task_history_sync_update_delivers_to_matching_task_subscribers() {
         },
         AppServerEventPayload::TaskHistorySyncUpdated {
             task_id: TaskId::from("task-1"),
-            history_sync: TaskHistorySyncSnapshot::Checking { generation: 1 },
+            history_sync: TaskHistorySyncSnapshot::Syncing { generation: 1 },
         },
         |client_id| Some(delivery(client_id)),
         AppServerTime(2),

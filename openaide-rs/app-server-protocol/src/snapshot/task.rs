@@ -97,23 +97,9 @@ pub struct TaskSnapshot {
     rename_all_fields = "camelCase"
 )]
 pub enum TaskHistorySyncSnapshot {
-    Idle {
-        generation: u64,
-    },
-    Checking {
-        generation: u64,
-    },
-    Syncing {
-        generation: u64,
-    },
-    Updated {
-        generation: u64,
-    },
-    Failed {
-        generation: u64,
-        message: String,
-        before_send: bool,
-    },
+    Idle { generation: u64 },
+    Syncing { generation: u64 },
+    Updated { generation: u64 },
 }
 
 impl Default for TaskHistorySyncSnapshot {

@@ -103,8 +103,7 @@ function retainedChatPage(
       || (
         snapshot.history_sync.generation === previousSyncSnapshot.history_sync.generation
         && (
-          previousSyncSnapshot.history_sync.state === "checking"
-          || previousSyncSnapshot.history_sync.state === "syncing"
+          previousSyncSnapshot.history_sync.state === "syncing"
         )
       )
     );
@@ -185,11 +184,11 @@ export function reconcileTaskSnapshot(
 }
 
 function historySyncIsTerminal(sync: TaskSnapshot["history_sync"]) {
-  return sync.state === "idle" || sync.state === "updated" || sync.state === "failed";
+  return sync.state === "idle" || sync.state === "updated";
 }
 
 function historySyncIsPending(sync: TaskSnapshot["history_sync"]) {
-  return sync.state === "checking" || sync.state === "syncing";
+  return sync.state === "syncing";
 }
 
 export function upsertTaskSummary(tasks: TaskSummary[], task: TaskSummary) {
