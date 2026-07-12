@@ -119,8 +119,10 @@ fn corrupt_task_record_blocks_project_resolution() {
 fn task_record(task_id: &str, workspace_root: &str) -> TaskRecord {
     TaskRecord {
         task_id: task_id.to_string(),
-        title: "Task".to_string(),
-        agent_title: None,
+        title: crate::storage::records::TaskTitle::new(
+            "Task",
+            crate::storage::records::TaskTitleSource::User,
+        ),
         status: TaskStatus::Inactive,
         task_version: 1,
         message_history_version: 0,

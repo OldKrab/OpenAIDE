@@ -260,7 +260,7 @@ async function submitNewTask({
         type: "surface.openTask",
         payload: {
           task_id: taskId,
-          title: task.task.title,
+          title: task.task.title?.value ?? (task.lifecycle === "new" ? "New task" : "Untitled task"),
         },
       });
     }

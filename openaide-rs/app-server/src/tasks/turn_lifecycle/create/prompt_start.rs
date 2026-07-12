@@ -11,7 +11,7 @@ use crate::tasks::lifecycle::running_turn_message;
 use crate::tasks::task_start_transaction::TaskSessionStartGuard;
 use crate::time::now_string;
 
-use super::helpers::{required_optional_prompt_text, title_from_prompt};
+use super::helpers::required_optional_prompt_text;
 use super::{create_snapshot_commit_options, TaskTurnLifecycle};
 
 impl TaskTurnLifecycle {
@@ -24,11 +24,6 @@ impl TaskTurnLifecycle {
         let selected_config_options = selected_config_options(params.config_options.as_ref())?;
         let now = now_string();
         let task_id = format!("task_{}", Uuid::new_v4());
-        let title = if params.title.trim().is_empty() {
-            title_from_prompt(&prompt_text)
-        } else {
-            params.title
-        };
         let prompt_attachments = params.context.clone();
         let turn_id = Uuid::new_v4().to_string();
         let mut session_start = TaskSessionStartGuard::new(
@@ -52,8 +47,7 @@ impl TaskTurnLifecycle {
             let session = session_start.session();
             let record = TaskRecord {
                 task_id: task_id.clone(),
-                title,
-                agent_title: None,
+                title: None,
                 status: TaskStatus::Active,
                 task_version: 1,
                 message_history_version: 0,

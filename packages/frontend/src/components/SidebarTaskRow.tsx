@@ -4,7 +4,7 @@ import type { TaskStatus, TaskSummary } from "@openaide/app-shell-contracts";
 import { PENDING_NEW_TASK_ID } from "./appControllerDerivedState";
 import { AgentIcon } from "./AgentIcon";
 import { SidebarRowActionSlot } from "./SidebarRowParts";
-import { relativeTime, splitGeneratedTaskTitle } from "./taskSurfaceHelpers";
+import { relativeTime } from "./taskSurfaceHelpers";
 
 export function SidebarTaskRow({
   activeTaskId,
@@ -25,7 +25,7 @@ export function SidebarTaskRow({
   const actionSlotRef = useRef<HTMLDivElement>(null);
   const actionTriggerRef = useRef<HTMLButtonElement>(null);
   const pendingNewTask = task.task_id === PENDING_NEW_TASK_ID;
-  const title = splitGeneratedTaskTitle(task.title);
+  const title = task.title || "Untitled task";
   const actionLabel = showArchived ? "Restore task" : "Archive task";
   const runAction = () => {
     setMenuOpen(false);
@@ -66,7 +66,7 @@ export function SidebarTaskRow({
           <AgentIcon agentId={task.agent_id} agentName={task.agent_name} size={12} />
         </span>
         <span className="task-row-body">
-          <span className="task-title" title={title.originalTitle}>{title.title}</span>
+          <span className="task-title" title={title}>{title}</span>
           <TaskTrailingMeta
             status={task.status}
             timestamp={task.last_activity}
@@ -83,7 +83,7 @@ export function SidebarTaskRow({
             title={menuOpen ? undefined : "Task actions"}
             type="button"
             aria-expanded={menuOpen}
-            aria-label={`Task actions for ${task.title}`}
+            aria-label={`Task actions for ${title}`}
           >
             <MoreHorizontal size={14} />
           </button>

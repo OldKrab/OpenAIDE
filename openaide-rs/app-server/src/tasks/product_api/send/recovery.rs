@@ -9,7 +9,7 @@ use crate::task_recovery::RESTART_INTERRUPTION_MESSAGE;
 use crate::tasks::mutation::{TaskCommitOutcome, TaskMutationResult};
 use crate::time::now_string;
 
-use super::support::{title_from_prompt, ExistingSend};
+use super::support::ExistingSend;
 use super::TaskProductApi;
 
 impl TaskProductApi {
@@ -67,9 +67,6 @@ impl TaskProductApi {
                 task.unread |= interrupted;
                 task.updated_at = now.clone();
                 task.last_activity = now.clone();
-                if task.title == "New task" {
-                    task.title = title_from_prompt(&existing.fingerprint.text);
-                }
                 Ok(TaskMutationResult::Changed)
             })
             .map_err(super::super::protocol_error_from_runtime)?;

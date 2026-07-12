@@ -29,9 +29,7 @@ mod revision_guard;
 mod support;
 
 use committed::CommittedSend;
-use support::{
-    protocol_error_from_attachment_runtime, send_identity, title_from_prompt, SendFingerprint,
-};
+use support::{protocol_error_from_attachment_runtime, send_identity, SendFingerprint};
 
 #[derive(Clone)]
 pub(crate) struct PendingSendSync {
@@ -170,9 +168,6 @@ impl TaskProductApi {
                     task.active_turn_id = Some(turn_id.as_str().to_string());
                     task.updated_at = now.clone();
                     task.last_activity = now;
-                    if task.title == "New task" {
-                        task.title = title_from_prompt(&fingerprint.text);
-                    }
                     Ok(TaskMutationResult::Changed)
                 });
         let result = match commit_result {

@@ -250,16 +250,3 @@ fn attachment_handle_invalid_error() -> ProtocolError {
 pub(super) fn send_identity(idempotency_key: &str) -> String {
     format!("send:{idempotency_key}")
 }
-
-pub(super) fn title_from_prompt(prompt: &str) -> String {
-    let prompt = prompt.trim();
-    let title: String = prompt.chars().take(60).collect();
-    if title.is_empty() {
-        return "Untitled task".to_string();
-    }
-    if prompt.chars().count() > 60 {
-        format!("{title}...")
-    } else {
-        title
-    }
-}

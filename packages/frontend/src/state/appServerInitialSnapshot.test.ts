@@ -134,7 +134,7 @@ function taskSummary() {
     taskId: "task-1" as TaskId,
     projectId: "project-1" as ProjectId,
     agentId: "codex" as AgentId,
-    title: "Task",
+    title: { value: "Task", source: "user" as const },
     status: "idle" as const,
     updatedAt: "2026-06-27T12:00:00.000Z",
     lastActivity: "2026-06-27T12:00:00.000Z",

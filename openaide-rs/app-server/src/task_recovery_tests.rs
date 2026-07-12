@@ -64,8 +64,10 @@ fn volatile_recovery_retires_an_interrupted_config_mutation() {
 fn task_record() -> TaskRecord {
     TaskRecord {
         task_id: "task-1".to_string(),
-        title: "Task".to_string(),
-        agent_title: None,
+        title: crate::storage::records::TaskTitle::new(
+            "Task",
+            crate::storage::records::TaskTitleSource::User,
+        ),
         status: TaskStatus::Inactive,
         task_version: 1,
         message_history_version: 0,

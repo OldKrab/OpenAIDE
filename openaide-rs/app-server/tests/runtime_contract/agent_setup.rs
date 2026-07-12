@@ -172,7 +172,7 @@ fn idle_config_option_updates_mutate_task_settings_and_replace_model() {
 }
 
 #[test]
-fn idle_agent_title_updates_persist_and_clear_back_to_the_local_fallback() {
+fn idle_agent_title_updates_persist_and_clear_the_agent_owned_title() {
     let tmp = TempDir::new().unwrap();
     let agent = Arc::new(IdleOptionUpdateAgent::default());
     let service = TaskService::new(
@@ -216,8 +216,10 @@ fn idle_agent_title_updates_persist_and_clear_back_to_the_local_fallback() {
             })
             .unwrap()
             .task
-            .title,
-        "Agent generated title"
+            .title
+            .as_ref()
+            .map(|title| title.value()),
+        Some("Agent generated title")
     );
 
     agent.emit_metadata_update(AgentSessionMetadataUpdate {
@@ -233,6 +235,6 @@ fn idle_agent_title_updates_persist_and_clear_back_to_the_local_fallback() {
             .unwrap()
             .task
             .title,
-        "Local fallback"
+        None
     );
 }

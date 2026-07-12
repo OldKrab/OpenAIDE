@@ -302,7 +302,7 @@ TaskLifecycle
 
 New Task lookup must be indexed or otherwise transactionally unique by `clientInstanceId`. Do not locate a reusable New Task by scanning for matching Agent and workspace alone.
 
-Persist one optional current Task title plus explicit provenance. New Tasks have no stored title by default; Frontend renders `New task` as presentation fallback. First-send local derivation, user changes, and Agent metadata updates set the single title with corresponding provenance and explicit replacement precedence.
+Persist one optional current Task title plus explicit provenance. New Tasks have no stored title by default; Frontend renders `New task` as presentation fallback. First Send does not invent a title. Agent metadata sets or clears only an Agent-owned title and never replaces a User-owned title. Native Session adoption stores the supplied session title as Agent-owned. User title mutation is a future interface and is not added implicitly as part of this flow.
 
 Do not migrate existing records from the superseded lifecycle representation. New code reads and writes only the explicit lifecycle model.
 

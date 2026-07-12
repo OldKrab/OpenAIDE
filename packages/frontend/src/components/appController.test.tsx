@@ -3152,7 +3152,7 @@ function protocolTaskSummary(taskId: string, title: string, status: "idle" | "ru
     taskId: taskId as never,
     projectId: "project_1" as never,
     agentId: "codex" as never,
-    title,
+    title: { value: title, source: "user" as const },
     status,
     updatedAt: "2026-05-22T00:00:00.000Z",
     lastActivity: "2026-05-22T00:00:00.000Z",

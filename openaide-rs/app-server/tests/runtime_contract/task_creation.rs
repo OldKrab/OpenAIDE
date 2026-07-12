@@ -154,7 +154,7 @@ fn task_create_adopts_external_session_with_replayed_history() {
     assert_eq!(loads.load(Ordering::SeqCst), 1);
     assert_eq!(prompts.load(Ordering::SeqCst), 0);
     assert_eq!(snapshot.task.status, TaskStatus::Inactive);
-    assert_eq!(snapshot.task.title, "Prior user question");
+    assert_eq!(snapshot.task.title, None);
     assert_eq!(
         snapshot.settings_summary.model_id.as_deref(),
         Some("gpt-5.5")

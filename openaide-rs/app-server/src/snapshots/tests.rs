@@ -139,7 +139,14 @@ fn client_snapshot_includes_requested_task_for_task_surface() {
 
     let active_task = snapshot.active_task.expect("active task snapshot");
     assert_eq!(active_task.task.task_id.as_str(), "task-1");
-    assert_eq!(active_task.task.title, "Stored task");
+    assert_eq!(
+        active_task
+            .task
+            .title
+            .as_ref()
+            .map(|title| title.value.as_str()),
+        Some("Stored task")
+    );
 }
 
 #[test]
@@ -158,7 +165,10 @@ fn task_subscription_uses_backend_owned_task_snapshot() {
     };
 
     assert_eq!(task.task.task_id.as_str(), "task-1");
-    assert_eq!(task.task.title, "Stored task");
+    assert_eq!(
+        task.task.title.as_ref().map(|title| title.value.as_str()),
+        Some("Stored task")
+    );
 }
 
 fn builder() -> SnapshotBuilder {
@@ -219,7 +229,10 @@ impl TaskSnapshotSource for StaticTaskSnapshots {
                 task_id: task_id.clone(),
                 project_id: "project-1".into(),
                 agent_id: CODEX_AGENT_ID.into(),
-                title: "Stored task".to_string(),
+                title: Some(openaide_app_server_protocol::snapshot::TaskTitle {
+                    value: "Stored task".to_string(),
+                    source: openaide_app_server_protocol::snapshot::TaskTitleSource::User,
+                }),
                 status: TaskStatus::Idle,
                 updated_at: "2026-06-28T00:00:00.000Z".to_string(),
                 last_activity: "2026-06-28T00:00:00.000Z".to_string(),

@@ -20,6 +20,30 @@ fn second_store_open_is_blocked_while_first_store_lives() {
 }
 
 #[test]
+fn task_title_persists_as_one_owned_value() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().to_path_buf()).unwrap();
+    let mut task = task_record("task-title", TaskStatus::Inactive, "1");
+    task.title = crate::storage::records::TaskTitle::new(
+        "  Agent title  ",
+        crate::storage::records::TaskTitleSource::Agent,
+    );
+
+    store.write_task(&task).unwrap();
+
+    let stored: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(store.task_dir("task-title").unwrap().join("task.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        stored["title"],
+        serde_json::json!({ "value": "Agent title", "source": "agent" })
+    );
+    assert!(stored.get("agent_title").is_none());
+    assert_eq!(store.read_task("task-title").unwrap().title, task.title);
+}
+
+#[test]
 fn blocked_store_open_does_not_create_product_dirs() {
     let dir = tempfile::tempdir().unwrap();
     let runtime_dir = dir.path().join(".openaide-runtime");
@@ -475,8 +499,10 @@ fn listed_task_ids(store: &Store) -> Vec<String> {
 fn task_record(task_id: &str, status: TaskStatus, created_at: &str) -> TaskRecord {
     TaskRecord {
         task_id: task_id.to_string(),
-        title: task_id.to_string(),
-        agent_title: None,
+        title: crate::storage::records::TaskTitle::new(
+            task_id,
+            crate::storage::records::TaskTitleSource::User,
+        ),
         status,
         task_version: 1,
         message_history_version: 1,

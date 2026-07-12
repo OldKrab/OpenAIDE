@@ -454,7 +454,10 @@ fn task_updated_delivers_to_project_filtered_task_navigation_subscribers() {
                 task_id: "task-1".into(),
                 project_id: "project-a".into(),
                 agent_id: "codex".into(),
-                title: "Task".to_string(),
+                title: Some(openaide_app_server_protocol::snapshot::TaskTitle {
+                    value: "Task".to_string(),
+                    source: openaide_app_server_protocol::snapshot::TaskTitleSource::User,
+                }),
                 status: ProtocolTaskStatus::Idle,
                 updated_at: "2026-01-01T00:00:00.000Z".to_string(),
                 last_activity: "2026-01-01T00:00:00.000Z".to_string(),
@@ -600,8 +603,10 @@ fn delivery(client_id: &ClientInstanceId) -> Delivery {
 fn task_record(task_id: &str) -> TaskRecord {
     TaskRecord {
         task_id: task_id.to_string(),
-        title: "Task".to_string(),
-        agent_title: None,
+        title: crate::storage::records::TaskTitle::new(
+            "Task",
+            crate::storage::records::TaskTitleSource::User,
+        ),
         status: TaskStatus::Inactive,
         task_version: 1,
         message_history_version: 0,

@@ -4,13 +4,14 @@ use crate::agent::{AgentSessionLoad, TurnCancellation};
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{TaskSnapshot, TaskStatus};
 use crate::protocol::params::TaskCreateParams;
-use crate::storage::records::TaskPreparationRecord;
-use crate::storage::records::{TaskLifecycle, TaskRecord};
+use crate::storage::records::{
+    TaskLifecycle, TaskPreparationRecord, TaskRecord, TaskTitle, TaskTitleSource,
+};
 use crate::tasks::config_options::selected_config_options;
 use crate::tasks::task_start_transaction::TaskSessionStartGuard;
 use crate::time::now_string;
 
-use super::helpers::{required_optional_text, title_from_loaded_messages};
+use super::helpers::required_optional_text;
 use super::{create_snapshot_commit_options, TaskTurnLifecycle};
 
 impl TaskTurnLifecycle {
@@ -41,9 +42,7 @@ impl TaskTurnLifecycle {
             secret_resolver: None,
         })?;
         let mut session_start = TaskSessionStartGuard::new(&self.agent_gateway, loaded.session);
-        let agent_title =
-            (!params.title.trim().is_empty()).then(|| params.title.trim().to_string());
-        let fallback_title = title_from_loaded_messages(&loaded.replayed_messages);
+        let title = TaskTitle::new(params.title, TaskTitleSource::Agent);
 
         let persist_result: Result<TaskSnapshot, RuntimeError> = (|| {
             let session = session_start.session();
@@ -51,8 +50,7 @@ impl TaskTurnLifecycle {
             let session_id = session.session_id.clone();
             let record = TaskRecord {
                 task_id: task_id.clone(),
-                title: fallback_title,
-                agent_title,
+                title,
                 status: TaskStatus::Inactive,
                 task_version: 1,
                 message_history_version: 0,

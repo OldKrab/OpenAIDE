@@ -4065,7 +4065,7 @@ function protocolTaskSummary(taskId: string, title: string) {
     taskId: taskId as never,
     projectId: "project_1" as never,
     agentId: "codex" as never,
-    title,
+    title: { value: title, source: "user" as const },
     status: "idle" as const,
     hasMessages: true,
     unread: false,

@@ -69,7 +69,12 @@ export function mapProtocolTaskSnapshot(
   snapshot: ProtocolTaskSnapshot,
   context: ProtocolMappingContext = {},
 ): ProtocolTaskSnapshotMapping {
-  const mappedTask = mapProtocolTaskSummaryWithWarnings(snapshot.task, snapshot.revision, context);
+  const mappedTask = mapProtocolTaskSummaryWithWarnings(
+    snapshot.task,
+    snapshot.revision,
+    context,
+    snapshot.lifecycle === "new" ? "New task" : "Untitled task",
+  );
   const task = mappedTask.task;
   const items = snapshot.chat.items.map((item) => mapProtocolChatItem(item, task.updated_at));
   const representedQuestionRequestIds = new Set(items.flatMap((item) => (
@@ -199,6 +204,7 @@ function mapProtocolTaskSummaryWithWarnings(
   summary: ProtocolTaskSummary,
   revision: number,
   context: ProtocolMappingContext,
+  fallbackTitle = "Untitled task",
 ): { task: TaskSummary; warnings: ProtocolMappingWarning[] } {
   const agent = context.agents?.find((candidate) => candidate.agentId === summary.agentId);
   const project = context.projects?.find((candidate) => candidate.projectId === summary.projectId);
@@ -213,7 +219,7 @@ function mapProtocolTaskSummaryWithWarnings(
       task_id: summary.taskId,
       project_id: summary.projectId,
       project_label: project?.label,
-      title: summary.title,
+      title: summary.title?.value ?? fallbackTitle,
       status: taskSummaryStatusFromProtocol(summary.status),
       task_version: revision,
       message_history_version: revision,

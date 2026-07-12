@@ -126,8 +126,10 @@ fn runtime_startup_recovers_stale_active_turn_and_session_binding() {
     store
         .write_task(&TaskRecord {
             task_id: task_id.clone(),
-            title: "Stale boot".to_string(),
-            agent_title: None,
+            title: openaide_app_server::storage::records::TaskTitle::new(
+                "Stale boot",
+                openaide_app_server::storage::records::TaskTitleSource::User,
+            ),
             status: TaskStatus::Active,
             task_version: 1,
             message_history_version: 0,
@@ -457,42 +459,4 @@ fn task_updates_emit_typed_task_updates() {
             .any(|update| update.task_id == task_id),
         "expected task update for task"
     );
-}
-
-#[test]
-fn legacy_task_records_without_archive_fields_remain_listable() {
-    let tmp = TempDir::new().unwrap();
-    let task_dir = tmp.path().join("store/tasks/task_legacy");
-    std::fs::create_dir_all(&task_dir).unwrap();
-    std::fs::write(
-        task_dir.join("task.json"),
-        serde_json::to_string_pretty(&json!({
-            "task_id": "task_legacy",
-            "title": "Legacy task",
-            "status": "inactive",
-            "task_version": 1,
-            "message_history_version": 0,
-            "unread": false,
-            "created_at": "2026-05-17T00:00:00Z",
-            "updated_at": "2026-05-17T00:00:00Z",
-            "last_activity": "2026-05-17T00:00:00Z",
-            "agent_id": "codex",
-            "agent_name": "Codex",
-            "isolation": "local",
-            "workspace_root": "/workspace",
-            "lifecycle": { "state": "visible" },
-            "model_id": null
-        }))
-        .unwrap(),
-    )
-    .unwrap();
-
-    let runtime = Runtime::new(tmp.path().join("store")).unwrap();
-    let list = runtime
-        .service()
-        .list(TaskListParams { archived: false })
-        .unwrap();
-
-    assert_eq!(list.tasks[0].task_id, "task_legacy");
-    assert_eq!(list.revision, 0);
 }

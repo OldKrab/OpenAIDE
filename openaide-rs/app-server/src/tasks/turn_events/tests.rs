@@ -13,7 +13,7 @@ use crate::client_lifecycle::AppServerTime;
 use crate::protocol::model::{IsolationKind, NormalizedMessage, TaskStatus};
 use crate::server_requests::ServerRequestRuntime;
 use crate::server_requests::{ResponderScope, ServerRequestAnswer};
-use crate::storage::records::{TaskPreparationRecord, TaskRecord};
+use crate::storage::records::{TaskPreparationRecord, TaskRecord, TaskTitle, TaskTitleSource};
 use crate::storage::Store;
 use crate::task_events::CommittedTaskDelta;
 use crate::task_events::TaskUpdateNotifier;
@@ -28,7 +28,7 @@ use openaide_app_server_protocol::server_requests::{
 use super::{TaskEventSink, TaskSessionEventSink};
 
 #[test]
-fn agent_session_title_updates_override_and_restore_the_local_fallback() {
+fn agent_session_title_updates_set_and_clear_agent_owned_title() {
     let (_dir, store, mutations, _server_requests) = test_runtime();
     store.write_task(&running_task("task_1")).unwrap();
     let sink = TaskSessionEventSink::new(
@@ -44,8 +44,10 @@ fn agent_session_title_updates_override_and_restore_the_local_fallback() {
     })
     .unwrap();
     let titled = store.read_task("task_1").unwrap();
-    assert_eq!(titled.agent_title.as_deref(), Some("Agent title"));
-    assert_eq!(titled.summary().title, "Agent title");
+    assert_eq!(
+        titled.title,
+        Some(TaskTitle::new("Agent title", TaskTitleSource::Agent).unwrap())
+    );
 
     sink.metadata_changed(AgentSessionMetadataUpdate {
         title: AgentMetadataField::Clear,
@@ -53,8 +55,62 @@ fn agent_session_title_updates_override_and_restore_the_local_fallback() {
     })
     .unwrap();
     let cleared = store.read_task("task_1").unwrap();
-    assert_eq!(cleared.agent_title, None);
-    assert_eq!(cleared.summary().title, "Task");
+    assert_eq!(cleared.title, None);
+}
+
+#[test]
+fn blank_agent_session_title_value_does_not_clear_the_agent_owned_title() {
+    let (_dir, store, mutations, _server_requests) = test_runtime();
+    let mut task = running_task("task_1");
+    task.title = TaskTitle::new("Agent title", TaskTitleSource::Agent);
+    store.write_task(&task).unwrap();
+    let sink = TaskSessionEventSink::new(
+        mutations,
+        "task_1".to_string(),
+        "session_1".to_string(),
+        ServerRequestRuntime::new(),
+    );
+
+    sink.metadata_changed(AgentSessionMetadataUpdate {
+        title: AgentMetadataField::Value("   ".to_string()),
+        updated_at: AgentMetadataField::Unchanged,
+    })
+    .unwrap();
+
+    assert_eq!(
+        store.read_task("task_1").unwrap().title,
+        TaskTitle::new("Agent title", TaskTitleSource::Agent)
+    );
+}
+
+#[test]
+fn agent_session_title_updates_never_replace_or_clear_a_user_owned_title() {
+    let (_dir, store, mutations, _server_requests) = test_runtime();
+    let mut task = running_task("task_1");
+    task.title = TaskTitle::new("User title", TaskTitleSource::User);
+    store.write_task(&task).unwrap();
+    let sink = TaskSessionEventSink::new(
+        mutations,
+        "task_1".to_string(),
+        "session_1".to_string(),
+        ServerRequestRuntime::new(),
+    );
+
+    sink.metadata_changed(AgentSessionMetadataUpdate {
+        title: AgentMetadataField::Value("Agent title".to_string()),
+        updated_at: AgentMetadataField::Unchanged,
+    })
+    .unwrap();
+    sink.metadata_changed(AgentSessionMetadataUpdate {
+        title: AgentMetadataField::Clear,
+        updated_at: AgentMetadataField::Unchanged,
+    })
+    .unwrap();
+
+    assert_eq!(
+        store.read_task("task_1").unwrap().title,
+        TaskTitle::new("User title", TaskTitleSource::User)
+    );
 }
 
 #[test]
@@ -76,8 +132,8 @@ fn agent_session_metadata_rejects_updates_from_a_stale_native_session() {
         .unwrap();
 
     let task = store.read_task("task_1").unwrap();
-    assert_eq!(task.agent_title, None);
-    assert_eq!(task.summary().title, "Task");
+    assert_eq!(task.title, None);
+    assert_eq!(task.summary().title, None);
     assert_eq!(task.last_activity, "1");
 }
 
@@ -683,8 +739,7 @@ fn test_runtime() -> (
 fn running_task(task_id: &str) -> TaskRecord {
     TaskRecord {
         task_id: task_id.to_string(),
-        title: "Task".to_string(),
-        agent_title: None,
+        title: None,
         status: TaskStatus::Active,
         task_version: 0,
         message_history_version: 0,

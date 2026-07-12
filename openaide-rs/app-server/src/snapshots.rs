@@ -247,7 +247,7 @@ fn unavailable_task_snapshot(task_id: TaskId) -> TaskSnapshot {
             task_id,
             project_id: ProjectId::from("unavailable-project"),
             agent_id: AgentId::from("unavailable-agent"),
-            title: "Task unavailable".to_string(),
+            title: None,
             status: TaskStatus::Failed,
             updated_at: "1970-01-01T00:00:00.000Z".to_string(),
             last_activity: "1970-01-01T00:00:00.000Z".to_string(),

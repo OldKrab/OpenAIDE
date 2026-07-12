@@ -264,7 +264,10 @@ fn main() {
 fn task_summary() -> TaskSummary {
     TaskSummary {
         task_id: "task_1".to_string(),
-        title: "Update docs".to_string(),
+        title: openaide_app_server::storage::records::TaskTitle::new(
+            "Update docs",
+            openaide_app_server::storage::records::TaskTitleSource::User,
+        ),
         status: TaskStatus::Blocked,
         task_version: 4,
         message_history_version: 6,

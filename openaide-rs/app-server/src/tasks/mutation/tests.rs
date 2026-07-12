@@ -73,7 +73,10 @@ fn rejected_commit_returns_rejection_without_storage_or_publication_facts() {
 
     let result = mutations
         .commit_existing_task("task_rejected", TaskCommitOptions::metadata(), |ctx| {
-            ctx.task_mut().title = "Should not persist".to_string();
+            ctx.task_mut().title = crate::storage::records::TaskTitle::new(
+                "Should not persist",
+                crate::storage::records::TaskTitleSource::User,
+            );
             Ok(TaskMutationResult::Rejected)
         })
         .unwrap();
@@ -109,7 +112,10 @@ fn chat_commit_refreshes_message_history_before_task_write() {
                 response_snapshot_tail_limit: None,
             },
             |ctx| {
-                ctx.task_mut().title = "Updated".to_string();
+                ctx.task_mut().title = crate::storage::records::TaskTitle::new(
+                    "Updated",
+                    crate::storage::records::TaskTitleSource::User,
+                );
                 Ok(TaskMutationResult::Changed)
             },
         )
@@ -474,8 +480,10 @@ fn test_mutations(
 fn task_record(task_id: &str) -> TaskRecord {
     TaskRecord {
         task_id: task_id.to_string(),
-        title: "Task".to_string(),
-        agent_title: None,
+        title: crate::storage::records::TaskTitle::new(
+            "Task",
+            crate::storage::records::TaskTitleSource::User,
+        ),
         status: TaskStatus::Inactive,
         task_version: 0,
         message_history_version: 0,

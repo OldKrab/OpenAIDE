@@ -251,7 +251,7 @@ impl TaskProductApi {
                     ctx.replace_messages(replayed_messages)?;
                     let task = ctx.task_mut();
                     if let Some(title) = refreshed_title {
-                        task.agent_title = Some(title);
+                        task.set_agent_title(&title);
                     }
                     task.status = LegacyTaskStatus::Inactive;
                     task.unread = false;

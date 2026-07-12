@@ -64,13 +64,13 @@ describe("App Server Protocol state mapping", () => {
       tasks: [
         protocolSummary({
           taskId: "task-empty" as TaskId,
-          title: "New task",
+          title: { value: "New task", source: "user" },
           status: "idle",
           hasMessages: false,
         }),
         protocolSummary({
           taskId: "task-sent" as TaskId,
-          title: "Implement feature",
+          title: { value: "Implement feature", source: "user" },
           status: "running",
           hasMessages: true,
         }),
@@ -79,6 +79,14 @@ describe("App Server Protocol state mapping", () => {
 
     expect(mapping.tasks.map((task) => task.task_id)).toEqual(["task-sent"]);
     expect(mapping.activeTaskId).toBe("task-sent");
+  });
+
+  it("uses lifecycle-specific presentation titles when App Server has no title", () => {
+    expect(mapProtocolTaskSummary(protocolSummary({ title: null })).title).toBe("Untitled task");
+    expect(mapProtocolTaskSnapshot(protocolSnapshot({
+      lifecycle: "new",
+      task: protocolSummary({ title: null }),
+    })).snapshot.task.title).toBe("New task");
   });
 
   it("maps task snapshots into current frontend task snapshots", () => {
@@ -675,7 +683,7 @@ function protocolSummary(overrides: Partial<ProtocolTaskSummary> = {}): Protocol
     taskId: "task-1" as TaskId,
     projectId: "project-1" as ProjectId,
     agentId: "codex" as AgentId,
-    title: "Task",
+    title: { value: "Task", source: "user" },
     status: "idle" as const,
     updatedAt: "2026-06-27T12:00:00.000Z",
     lastActivity: "2026-06-27T12:00:00.000Z",

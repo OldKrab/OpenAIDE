@@ -28,12 +28,27 @@ pub struct TaskSummary {
     pub task_id: TaskId,
     pub project_id: ProjectId,
     pub agent_id: AgentId,
-    pub title: String,
+    pub title: Option<TaskTitle>,
     pub status: TaskStatus,
     pub updated_at: String,
     pub last_activity: String,
     pub unread: bool,
     pub has_messages: bool,
+}
+
+/// A Task title together with the authority that most recently set it.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskTitle {
+    pub value: String,
+    pub source: TaskTitleSource,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum TaskTitleSource {
+    Agent,
+    User,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]

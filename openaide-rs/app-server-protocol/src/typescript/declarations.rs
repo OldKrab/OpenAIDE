@@ -80,7 +80,7 @@ use crate::snapshot::{
     TaskNavigationSnapshot, TaskPreparationAction, TaskPreparationSnapshot, TaskPreparationStep,
     TaskPreparationStepKind, TaskPreparationStepStatus, TaskSendBlocker, TaskSendBlockerKind,
     TaskSendCapabilitySnapshot, TaskSendCapabilityState, TaskSetupBlocker, TaskSetupBlockerKind,
-    TaskSnapshot, TaskStatus, TaskSummary,
+    TaskSnapshot, TaskStatus, TaskSummary, TaskTitle, TaskTitleSource,
 };
 use crate::state::{
     StateSubscribeParams, StateSubscribeResult, StateUnsubscribeParams, StateUnsubscribeResult,
@@ -337,6 +337,8 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<AgentCapabilities>(output, config);
     push_decl::<TaskNavigationSnapshot>(output, config);
     push_decl::<TaskSummary>(output, config);
+    push_decl::<TaskTitle>(output, config);
+    push_decl::<TaskTitleSource>(output, config);
     push_decl::<TaskStatus>(output, config);
     push_decl::<TaskLifecycle>(output, config);
     push_decl::<TaskSnapshot>(output, config);

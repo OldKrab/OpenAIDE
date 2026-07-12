@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::storage::records::{TaskLifecycle, TaskPreparationRecord};
+use crate::storage::records::{TaskLifecycle, TaskPreparationRecord, TaskTitle};
 
 use super::{AgentCommandsCatalog, ConfigOptionsCatalog, MessagePage, NormalizedMessage};
 
@@ -26,7 +26,7 @@ pub enum IsolationKind {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TaskSummary {
     pub task_id: String,
-    pub title: String,
+    pub title: Option<TaskTitle>,
     pub status: TaskStatus,
     pub task_version: u64,
     pub message_history_version: u64,

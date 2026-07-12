@@ -151,8 +151,10 @@ fn storage_read_failure_returns_recoverable_error() {
 fn task_record(task_id: &str, workspace_root: &str, updated_at: &str) -> TaskRecord {
     TaskRecord {
         task_id: task_id.to_string(),
-        title: "Task".to_string(),
-        agent_title: None,
+        title: crate::storage::records::TaskTitle::new(
+            "Task",
+            crate::storage::records::TaskTitleSource::User,
+        ),
         status: TaskStatus::Inactive,
         task_version: 1,
         message_history_version: 0,

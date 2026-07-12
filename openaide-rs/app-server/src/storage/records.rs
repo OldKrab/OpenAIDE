@@ -34,6 +34,52 @@ pub enum TaskLifecycle {
     Visible,
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskTitleSource {
+    Agent,
+    User,
+}
+
+/// A durable Task title with its owner. Construction enforces the stored title invariant.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct TaskTitle {
+    value: String,
+    source: TaskTitleSource,
+}
+
+impl TaskTitle {
+    pub fn new(value: impl Into<String>, source: TaskTitleSource) -> Option<Self> {
+        let value = value.into().trim().to_string();
+        (!value.is_empty()).then_some(Self { value, source })
+    }
+
+    pub fn value(&self) -> &str {
+        &self.value
+    }
+
+    pub fn source(&self) -> TaskTitleSource {
+        self.source
+    }
+}
+
+impl<'de> Deserialize<'de> for TaskTitle {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        struct SerializedTaskTitle {
+            value: String,
+            source: TaskTitleSource,
+        }
+
+        let title = SerializedTaskTitle::deserialize(deserializer)?;
+        Self::new(title.value, title.source)
+            .ok_or_else(|| serde::de::Error::custom("Task title must be non-empty"))
+    }
+}
+
 impl TaskLifecycle {
     pub fn is_visible(&self) -> bool {
         matches!(self, Self::Visible)
@@ -69,11 +115,7 @@ pub struct PendingTaskConfigChange {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TaskRecord {
     pub task_id: String,
-    /// Local title fallback derived from OpenAIDE-owned input or imported history.
-    pub title: String,
-    /// Agent-owned title takes display priority and may be cleared by session metadata updates.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub agent_title: Option<String>,
+    pub title: Option<TaskTitle>,
     pub status: TaskStatus,
     pub task_version: u64,
     pub message_history_version: u64,
@@ -110,22 +152,42 @@ pub struct TaskRecord {
 }
 
 impl TaskRecord {
-    pub fn effective_title(&self) -> &str {
-        self.agent_title
-            .as_deref()
-            .map(str::trim)
-            .filter(|title| !title.is_empty())
-            .or_else(|| {
-                let fallback = self.title.trim();
-                (!fallback.is_empty()).then_some(fallback)
-            })
-            .unwrap_or("Untitled task")
+    /// Applies an Agent title only while the Agent owns the title field.
+    pub fn set_agent_title(&mut self, value: &str) -> bool {
+        if self
+            .title
+            .as_ref()
+            .is_some_and(|title| title.source() == TaskTitleSource::User)
+        {
+            return false;
+        }
+        let Some(next) = TaskTitle::new(value, TaskTitleSource::Agent) else {
+            return false;
+        };
+        if self.title.as_ref() == Some(&next) {
+            return false;
+        }
+        self.title = Some(next);
+        true
+    }
+
+    /// Clears an Agent title without erasing a future user-owned title.
+    pub fn clear_agent_title(&mut self) -> bool {
+        if !self
+            .title
+            .as_ref()
+            .is_some_and(|title| title.source() == TaskTitleSource::Agent)
+        {
+            return false;
+        }
+        self.title = None;
+        true
     }
 
     pub fn summary(&self) -> TaskSummary {
         TaskSummary {
             task_id: self.task_id.clone(),
-            title: self.effective_title().to_string(),
+            title: self.title.clone(),
             status: self.status,
             task_version: self.task_version,
             message_history_version: self.message_history_version,

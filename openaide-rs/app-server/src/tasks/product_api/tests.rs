@@ -48,6 +48,7 @@ fn create_persists_idle_task_without_prompt_or_turn() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut record = task_record("task-existing", "/workspace/app");
+    record.title = None;
     record.lifecycle = test_new_task_lifecycle();
     store.write_task(&record).unwrap();
     let project_id = project_id_for_workspace("/workspace/app");
@@ -68,6 +69,7 @@ fn create_persists_idle_task_without_prompt_or_turn() {
             config_options: Default::default(),
         })
         .unwrap();
+    assert_eq!(snapshot.task.title, None);
 
     let record = store.read_task(snapshot.task.task_id.as_str()).unwrap();
     assert_eq!(record.status, TaskStatus::Inactive);
@@ -940,6 +942,7 @@ fn first_send_reuses_the_native_session_prepared_during_create() {
             config_options: Default::default(),
         })
         .unwrap();
+    assert_eq!(created.task.title, None);
     wait_until(|| {
         matches!(
             store
@@ -972,6 +975,13 @@ fn first_send_reuses_the_native_session_prepared_during_create() {
             .agent_session_id
             .as_deref(),
         Some("recorded-session")
+    );
+    assert_eq!(
+        store
+            .read_task(created.task.task_id.as_str())
+            .unwrap()
+            .title,
+        None
     );
 }
 
@@ -1396,7 +1406,7 @@ fn native_session_adoption_is_scoped_by_agent_not_workspace() {
         project_id: project_id_for_workspace(workspace),
         agent_id: AgentId::from(agent_id),
         native_session_id: "shared-native-session".to_string(),
-        title: None,
+        title: Some("  Shared session  ".to_string()),
     };
 
     let adopted = api
@@ -1405,6 +1415,13 @@ fn native_session_adoption_is_scoped_by_agent_not_workspace() {
     assert_eq!(
         adopted.lifecycle,
         openaide_app_server_protocol::snapshot::TaskLifecycle::Visible
+    );
+    assert_eq!(
+        adopted.task.title,
+        Some(openaide_app_server_protocol::snapshot::TaskTitle {
+            value: "Shared session".to_string(),
+            source: openaide_app_server_protocol::snapshot::TaskTitleSource::Agent,
+        })
     );
     let listed = api
         .list_agent_sessions(AgentListSessionsParams {
@@ -1658,7 +1675,14 @@ fn open_readopts_adopted_task_when_native_session_is_newer_than_cached_history()
         })
         .unwrap();
 
-    assert_eq!(snapshot.task.title, "Existing");
+    assert_eq!(
+        snapshot
+            .task
+            .title
+            .as_ref()
+            .map(|title| title.value.as_str()),
+        Some("Existing")
+    );
     assert!(matches!(
         snapshot.chat.items[0].parts.first(),
         Some(MessagePart::Text { text }) if text == "Stale cached history."
@@ -2456,7 +2480,14 @@ fn open_keeps_adopted_task_cache_when_native_session_is_not_newer() {
     ));
     assert_eq!(agent.loads.load(Ordering::SeqCst), 0);
     assert_eq!(agent.attaches.load(Ordering::SeqCst), 0);
-    assert_eq!(snapshot.task.title, "Existing");
+    assert_eq!(
+        snapshot
+            .task
+            .title
+            .as_ref()
+            .map(|title| title.value.as_str()),
+        Some("Existing")
+    );
     assert!(matches!(
         snapshot.chat.items[0].parts.first(),
         Some(MessagePart::Text { text }) if text == "Current cached history."
@@ -3398,7 +3429,7 @@ fn send_retry_after_process_crash_before_task_record_does_not_duplicate() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut record = task_record("task-existing", "/workspace/app");
-    record.title = "New task".to_string();
+    record.title = None;
     record.lifecycle = test_new_task_lifecycle();
     store.write_task(&record).unwrap();
     let api = TaskProductApi::new(
@@ -3492,7 +3523,7 @@ fn send_retry_after_process_crash_before_task_record_does_not_duplicate() {
     assert_eq!(task.status, TaskStatus::Inactive);
     assert_eq!(task.active_turn_id, None);
     assert_eq!(task.lifecycle, TaskLifecycle::Visible);
-    assert_eq!(task.title, "hello");
+    assert_eq!(task.title, None);
     assert_eq!(
         task.message_history_version,
         reopened_store
@@ -4358,7 +4389,7 @@ fn send_commits_attachment_only_image_without_an_empty_text_part() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut task = task_record("task-existing", "/workspace/app");
-    task.title = "New task".to_string();
+    task.title = None;
     task.lifecycle = test_new_task_lifecycle();
     store.write_task(&task).unwrap();
     let api = TaskProductApi::new(
@@ -4396,11 +4427,8 @@ fn send_commits_attachment_only_image_without_an_empty_text_part() {
         panic!("expected attachment-only user message");
     };
     assert_eq!(attachment.label, "pasted.png");
-    assert_eq!(accepted.task.task.title, "Untitled task");
-    assert_eq!(
-        store.read_task("task-existing").unwrap().title,
-        "Untitled task"
-    );
+    assert_eq!(accepted.task.task.title, None);
+    assert_eq!(store.read_task("task-existing").unwrap().title, None);
 }
 
 #[test]
@@ -5901,8 +5929,10 @@ fn archiving_task_does_not_refresh_last_activity() {
 fn task_record(task_id: &str, workspace_root: &str) -> TaskRecord {
     TaskRecord {
         task_id: task_id.to_string(),
-        title: "Existing".to_string(),
-        agent_title: None,
+        title: crate::storage::records::TaskTitle::new(
+            "Existing",
+            crate::storage::records::TaskTitleSource::User,
+        ),
         status: TaskStatus::Inactive,
         task_version: 1,
         message_history_version: 0,

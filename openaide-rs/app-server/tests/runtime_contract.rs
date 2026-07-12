@@ -23,7 +23,7 @@ use openaide_app_server::protocol::model::{
 };
 use openaide_app_server::protocol::params::{
     DeleteMode, PermissionRespondParams, SessionPromptParams, TaskCreateMode, TaskCreateParams,
-    TaskDeleteParams, TaskIdParams, TaskListParams, TaskSnapshotParams,
+    TaskDeleteParams, TaskIdParams, TaskSnapshotParams,
 };
 use openaide_app_server::storage::records::{TaskPreparationRecord, TaskRecord};
 use openaide_app_server::storage::Store;

@@ -113,16 +113,6 @@ export function relativeTime(value: string) {
   return `${days}d`;
 }
 
-export function splitGeneratedTaskTitle(title: string) {
-  const trimmed = title.trim();
-  const match = /^(.*?\D)\s+(\d{8,})(?:\b.*)?$/.exec(trimmed);
-  if (!match) return { title: trimmed, originalTitle: trimmed };
-  return {
-    originalTitle: trimmed,
-    title: match[1].trim(),
-  };
-}
-
 export function nativeSessionTitle(session: AgentListedSession) {
   const title = session.title?.trim();
   return title || "Untitled task";

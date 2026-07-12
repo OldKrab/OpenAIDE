@@ -1472,7 +1472,7 @@ fn task_subscription_emits_pending_server_request_over_stdio() {
     assert_eq!(subscribe_response["id"], "2");
     assert_eq!(
         subscribe_response["result"]["result"]["snapshot"]["task"]["task"]["title"],
-        "Task"
+        serde_json::json!({ "value": "Task", "source": "user" })
     );
     assert_eq!(
         subscribe_response["result"]["result"]["snapshot"]["task"]["pendingRequests"][0]
@@ -1710,7 +1710,7 @@ fn task_adopt_native_session_loads_agent_session_after_initialize() {
     assert!(task_id.starts_with("task_"));
     assert_eq!(
         response["result"]["result"]["task"]["task"]["title"],
-        "Imported native session"
+        serde_json::json!({ "value": "Imported native session", "source": "agent" })
     );
     assert_eq!(
         response["result"]["result"]["task"]["chat"]["items"][0]["parts"][0]["text"],
@@ -2647,8 +2647,10 @@ fn notifications_do_not_emit_responses() {
 fn task_record(task_id: &str) -> TaskRecord {
     TaskRecord {
         task_id: task_id.to_string(),
-        title: "Task".to_string(),
-        agent_title: None,
+        title: crate::storage::records::TaskTitle::new(
+            "Task",
+            crate::storage::records::TaskTitleSource::User,
+        ),
         status: TaskStatus::Inactive,
         task_version: 1,
         message_history_version: 0,

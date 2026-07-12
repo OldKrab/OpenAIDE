@@ -2690,8 +2690,7 @@ fn client_new_task_record(
 ) -> crate::storage::records::TaskRecord {
     crate::storage::records::TaskRecord {
         task_id: task_id.to_string(),
-        title: "New task".to_string(),
-        agent_title: None,
+        title: None,
         status: crate::protocol::model::TaskStatus::Inactive,
         task_version: 1,
         message_history_version: 0,

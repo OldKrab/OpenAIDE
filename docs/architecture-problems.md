@@ -45,7 +45,7 @@ The architectural intent is sound: shared product UI should request navigation w
 
 ## AP-003: Task title state is split and uses display text as a lifecycle marker
 
-**Status:** confirmed
+**Status:** resolved
 
 **Area:** Task domain model and presentation
 
@@ -55,7 +55,9 @@ This mixes presentation fallback, lifecycle state, and title ownership. It also 
 
 **Impact:** Title changes can overwrite the wrong owner, lose provenance, or accidentally depend on UI wording. The persisted record does not directly express why the current displayed title exists.
 
-**Desired direction:** Store one optional current Task title together with explicit provenance, such as user-set, initial local derivation, or Agent-provided. Keep `"New task"` as a render-only fallback when no title exists. Define replacement precedence explicitly instead of encoding it through separate fields or magic strings.
+**Desired direction:** Store one optional current Task title together with explicit User or Agent provenance. Keep `"New task"` as a render-only fallback when no title exists. Do not derive a title from the first prompt. Define replacement precedence explicitly instead of encoding it through separate fields or magic strings.
+
+**Implementation:** `TaskRecord` now stores one optional `TaskTitle { value, source }`. New Tasks and first Send leave it absent; `"New task"` and `"Untitled task"` are Frontend-only fallbacks. Agent metadata may replace or clear only an Agent-owned title and cannot overwrite a User-owned title. Native Session adoption records its supplied Agent title as Agent-owned. The protocol exposes the same optional nested value, and prompt-derived title invention, the magic lifecycle string, and Frontend title rewriting were removed without compatibility behavior.
 
 ## AP-004: The Frontend App Controller is an orchestration nexus
 
@@ -87,7 +89,7 @@ This makes view navigation an implicit destructive Task-lifecycle operation. It 
 
 ## AP-006: New Tasks are globally reusable and visible as normal Tasks
 
-**Status:** implemented, uncommitted
+**Status:** resolved
 
 **Area:** New Task ownership, storage, and queries
 

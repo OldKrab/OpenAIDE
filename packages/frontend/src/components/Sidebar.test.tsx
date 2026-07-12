@@ -192,7 +192,7 @@ describe("SidebarTaskRow", () => {
     expect(onRestoreTask).toHaveBeenCalledWith("task_2");
   });
 
-  it("moves generated numeric suffixes from title text into metadata", () => {
+  it("renders Agent titles without rewriting numeric suffixes", () => {
     const tree = render(
       <SidebarTaskRow
         onArchiveTask={vi.fn()}
@@ -203,7 +203,8 @@ describe("SidebarTaskRow", () => {
       />,
     );
 
-    expect(tree.root.findByProps({ className: "task-title" }).children.join("")).toBe("QA reload recovery");
+    expect(tree.root.findByProps({ className: "task-title" }).children.join(""))
+      .toBe("QA reload recovery 1782881988");
     expect(tree.root.findByProps({ className: "task-title" }).props.title).toBe("QA reload recovery 1782881988");
     expect(tree.root.findByProps({ className: "task-meta-age" }).props.title).toBe(
       "Last activity: 2026-05-22T00:00:00.000Z",
@@ -226,7 +227,7 @@ describe("SidebarTaskRow", () => {
     expect(tree.root.findByProps({ className: "task-title" }).props.title).toBe(fullTitle);
   });
 
-  it("moves generated IDs out of titles even when extra machine text follows", () => {
+  it("renders the full Agent title when it contains machine-looking text", () => {
     const tree = render(
       <SidebarTaskRow
         onArchiveTask={vi.fn()}
@@ -237,7 +238,8 @@ describe("SidebarTaskRow", () => {
       />,
     );
 
-    expect(tree.root.findByProps({ className: "task-title" }).children.join("")).toBe("QA multitab long");
+    expect(tree.root.findByProps({ className: "task-title" }).children.join(""))
+      .toBe("QA multitab long 1782881214972: retry run");
     expect(tree.root.findByProps({ className: "task-title" }).props.title).toBe("QA multitab long 1782881214972: retry run");
     expect(tree.root.findAllByProps({ className: "task-meta-reference" })).toHaveLength(0);
   });
