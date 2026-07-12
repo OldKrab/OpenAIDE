@@ -167,7 +167,7 @@ The request envelope already supports `clientRequestId`, while `task/send` addit
 
 ## AP-011: Frontend routes to Task before first-send acceptance
 
-**Status:** confirmed
+**Status:** resolved
 
 **Area:** New Task first-send navigation and durable acceptance
 
@@ -176,6 +176,8 @@ The request envelope already supports `clientRequestId`, while `task/send` addit
 **Impact:** Routing implies that a private New Task has become a visible Task before the authoritative lifecycle transition. Rejected and unknown sends require special rendering on an existing-Task route, shell panel adoption can occur too early, and navigation becomes another participant in send recovery.
 
 **Desired direction:** Keep the New Task surface rendered in submitting state until `task/send` returns durable acceptance. Then ingest the accepted snapshot, clear the submitted composer, and route/adopt the now-visible Task. Rejection keeps the same New Task surface and draft. Transport loss reconnects/resynchronizes without replay.
+
+**Resolution:** New Task now remains routed and submitting while `task/send` is pending. Frontend ingests the accepted visible Task snapshot and settles the composer before asking the App Shell to open the Task. The route title comes only from the accepted App Server snapshot. Rejection restores the draft without routing, and a navigation change while Send is pending prevents the late acceptance from hijacking the current surface.
 
 ## AP-012: First Send runs through history and Native Session recovery orchestration
 

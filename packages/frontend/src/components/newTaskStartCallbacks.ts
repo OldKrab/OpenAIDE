@@ -189,11 +189,9 @@ async function submitNewTask({
       : undefined;
     let taskId: TaskId;
     let taskRevision: number;
-    let taskTitle: string;
     if (cachedNewTask) {
       taskId = cachedNewTask.task.task_id as TaskId;
       taskRevision = cachedNewTask.revision;
-      taskTitle = cachedNewTask.task.title ?? "New task";
       newTaskLease = newTaskController.currentLease(taskId) ?? newTaskController.claim({
         attachmentResources,
         preparationKey,
@@ -213,8 +211,6 @@ async function submitNewTask({
       );
       taskId = prepared.taskId;
       taskRevision = prepared.task.revision;
-      taskTitle = prepared.task.task.title?.value
-        ?? (prepared.task.lifecycle === "new" ? "New task" : "Untitled task");
       const snapshot = mapProtocolTaskSnapshot(prepared.task).snapshot;
       newTaskLease = newTaskController.retain({
         attachmentResources,
@@ -253,15 +249,6 @@ async function submitNewTask({
       message,
     });
     newTaskController.protectSend(newTaskLease);
-    if (currentNavigationGeneration() === navigationGeneration) {
-      postHostMessage({
-        type: "surface.openTask",
-        payload: {
-          task_id: taskId,
-          title: taskTitle,
-        },
-      });
-    }
     const sent = await pendingSend;
     attempt.sendInFlight = false;
     newTaskController.settleSend(taskId);
@@ -277,6 +264,15 @@ async function submitNewTask({
       taskId,
       userMessageId: sent.userMessageId,
     });
+    if (currentNavigationGeneration() === navigationGeneration) {
+      postHostMessage({
+        type: "surface.openTask",
+        payload: {
+          task_id: taskId,
+          ...(snapshot.task.title ? { title: snapshot.task.title } : {}),
+        },
+      });
+    }
     if (attempt.cancelled) {
       await request(TASK_CANCEL, { taskId });
       if (newTaskStartAttempt.current === attempt) newTaskStartAttempt.current = undefined;

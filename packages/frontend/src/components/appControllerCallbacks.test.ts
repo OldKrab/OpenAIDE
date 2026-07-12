@@ -771,7 +771,7 @@ describe("app controller callbacks", () => {
     });
   });
 
-  it("adopts the prepared Task while keeping its draft pending until Send is accepted", async () => {
+  it("keeps New Task routed until Send is accepted, then adopts the accepted Task", async () => {
     const dispatch = vi.fn();
     const pendingSend = deferred<{
       task: ReturnType<typeof protocolTaskSnapshot>;
@@ -807,10 +807,7 @@ describe("app controller callbacks", () => {
       taskId: "task_1",
       input: { prompt: "Build the thing", context: [] },
     }));
-    expect(postHostMessage).toHaveBeenCalledWith({
-      type: "surface.openTask",
-      payload: { task_id: "task_1", title: "New task" },
-    });
+    expect(postHostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "surface.openTask" }));
 
     pendingSend.resolve({
       turnId: "turn-1",
@@ -846,7 +843,10 @@ describe("app controller callbacks", () => {
       taskId: "task_1",
       userMessageId: "user-message",
     }));
-    expect(postHostMessage).toHaveBeenCalledTimes(1);
+    expect(postHostMessage).toHaveBeenCalledWith({
+      type: "surface.openTask",
+      payload: { task_id: "task_1", title: "Accepted task" },
+    });
   });
 
   it("settles an accepted first send before cancelling its active turn", async () => {
@@ -1077,55 +1077,6 @@ describe("app controller callbacks", () => {
     }
   });
 
-  it("adopts the prepared Task route before the first send outcome is known", async () => {
-    const pendingSend = deferred<{
-      task: ReturnType<typeof protocolTaskSnapshot>;
-      turnId: string;
-      userMessageId: string;
-    }>();
-    const dispatch = vi.fn();
-    const request = vi.fn((method: string) => {
-      if (method === TASK_CREATE) {
-        return Promise.resolve({ task: protocolTaskSnapshot("task_1", "New task") });
-      }
-      if (method === TASK_SEND) return pendingSend.promise;
-      return Promise.reject(new Error(method));
-    });
-    const state = createInitialState();
-    state.newTask.prompt = "Build the thing";
-    state.newTask.selection = {
-      ...state.newTask.selection,
-      agentId: "codex",
-      agentLabel: "Codex",
-      projectId: "project_1",
-      workspaceRoot: "/workspace",
-      workspaceLabel: "workspace",
-    };
-
-    callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
-      dispatch,
-      state,
-    }).newTask.submit();
-    await settlePromises();
-
-    expect(request).toHaveBeenCalledWith(TASK_SEND, expect.objectContaining({ taskId: "task_1" }));
-    expect(postHostMessage).toHaveBeenCalledWith({
-      type: "surface.openTask",
-      payload: {
-        task_id: "task_1",
-        title: "New task",
-      },
-    });
-
-    pendingSend.resolve({
-      task: { ...protocolTaskSnapshot("task_1", "Accepted task"), revision: 3 },
-      turnId: "turn_1",
-      userMessageId: "message_1",
-    });
-    await settlePromises();
-  });
-
   it("keeps the prepared Task route and restores its draft when first send fails", async () => {
     const dispatch = vi.fn();
     const request = vi.fn(async (method: string) => {
@@ -1158,10 +1109,7 @@ describe("app controller callbacks", () => {
       message: "send failed",
     });
     expect(dispatch).toHaveBeenCalledWith({ type: "submit:error", message: "send failed" });
-    expect(postHostMessage).toHaveBeenCalledWith({
-      type: "surface.openTask",
-      payload: { task_id: "task_1", title: "New task" },
-    });
+    expect(postHostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "surface.openTask" }));
   });
 
   it("sends immediately when the prepared Task already owns the selected config options", async () => {

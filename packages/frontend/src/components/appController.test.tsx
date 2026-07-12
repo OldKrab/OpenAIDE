@@ -1882,7 +1882,7 @@ describe("app controller mounted lifecycle", () => {
       type: "surface.openTask",
       payload: {
         task_id: "task_new",
-        title: "New task",
+        title: "Sent task",
       },
     });
   });
@@ -2002,10 +2002,7 @@ describe("app controller mounted lifecycle", () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(postHostMessage).toHaveBeenCalledWith({
-      type: "surface.openTask",
-      payload: { task_id: "task_new", title: "New task" },
-    });
+    expect(postHostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "surface.openTask" }));
 
     await act(async () => {
       sent.resolve({
