@@ -31,6 +31,17 @@ test("default npm test runs the backend and every maintained workspace exactly o
   }
 });
 
+test("default gate runs maintained repository integration tests", () => {
+  const gate = rootPackage.scripts["test:gate"];
+  for (const testFile of [
+    "deploy/local-web.test.mjs",
+    "scripts/local-web.test.mjs",
+    "scripts/redeploy-web-dev.test.mjs",
+  ]) {
+    assert.match(gate, new RegExp(testFile.replaceAll(".", "\\.")));
+  }
+});
+
 test("default npm check includes every workspace that exposes a check script", () => {
   const rootCheck = rootPackage.scripts.check;
   assert.equal(occurrences(rootCheck, "npm run build:typescript-deps"), 1);
@@ -63,6 +74,7 @@ test("release publishing produces only Linux and Windows VSIX packages", () => {
 
   assert.match(release, /target: linux-x64/);
   assert.match(release, /target: win32-x64/);
+  assert.match(release, /cp LICENSE apps\/vscode-extension\/LICENSE/);
   assert.match(release, /@vscode\/vsce@3\.6\.0 package/);
   assert.match(release, /@vscode\/vsce@3\.6\.0 publish/);
   assert.match(release, /if: \$\{\{ !contains\(github\.ref_name, '-'\) \}\}/);

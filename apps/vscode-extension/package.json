@@ -1,11 +1,30 @@
 {
   "name": "openaide-vscode-extension",
   "displayName": "OpenAIDE",
+  "description": "Run local ACP coding agents from an inspectable, recoverable task workbench.",
   "version": "0.0.1-alpha.1",
   "publisher": "openaide",
   "icon": "media/openaide.png",
   "license": "AGPL-3.0-only",
   "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/OldKrab/OpenAIDE.git"
+  },
+  "homepage": "https://github.com/OldKrab/OpenAIDE#readme",
+  "bugs": {
+    "url": "https://github.com/OldKrab/OpenAIDE/issues"
+  },
+  "categories": [
+    "Machine Learning",
+    "Other"
+  ],
+  "keywords": [
+    "acp",
+    "agents",
+    "coding agents",
+    "tasks"
+  ],
   "type": "commonjs",
   "main": "./dist/extension.js",
   "engines": {

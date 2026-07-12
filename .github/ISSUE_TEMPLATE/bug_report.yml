@@ -1,0 +1,45 @@
+name: Bug report
+description: Report reproducible OpenAIDE behavior that is incorrect.
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Do not include credentials, private workspace contents, or unredacted diagnostics.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      placeholder: 0.0.1-alpha.1 or commit SHA
+    validations:
+      required: true
+  - type: dropdown
+    id: shell
+    attributes:
+      label: App Shell
+      options: [VS Code Extension, Web App]
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Redacted diagnostics
+      description: Attach only diagnostics you have reviewed and intentionally chosen to share.

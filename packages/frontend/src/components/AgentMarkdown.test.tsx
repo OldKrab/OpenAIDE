@@ -5,10 +5,10 @@ import { AgentMarkdown } from "./AgentMarkdown";
 describe("AgentMarkdown", () => {
   it("renders GFM markdown for agent messages", () => {
     const html = renderToStaticMarkup(
-      <AgentMarkdown text={"Yes: **openaide.com**\n\n- Use `.com`\n- Redirect `.ai`\n\n| registrar | price |\n| - | - |\n| Cloudflare | $10 |"} />,
+      <AgentMarkdown text={"Yes: **example.com**\n\n- Use `.com`\n- Redirect `.net`\n\n| registrar | price |\n| - | - |\n| Cloudflare | $10 |"} />,
     );
 
-    expect(html).toContain("<strong>openaide.com</strong>");
+    expect(html).toContain("<strong>example.com</strong>");
     expect(html).toContain("<ul>");
     expect(html).toContain("<code>.com</code>");
     expect(html).toContain("<table>");

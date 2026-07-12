@@ -29,22 +29,13 @@ check names become selectable.
    for the release tag.
 2. Create and push an annotated SemVer tag from the merged `main` commit, such as
    `v0.0.1-alpha.1` for a prerelease or `v0.0.1` for a stable release.
-3. The release workflow validates the version, repeats tests, builds release-mode
-   artifacts, publishes a versioned container, and creates a GitHub Release.
-   Tags with a prerelease identifier create a GitHub prerelease and only publish
-   the exact prerelease container tag. Stable releases may additionally update the
-   matching `MAJOR.MINOR` container tag.
-4. Verify checksums and smoke-test the published artifact before promotion.
+3. The release workflow validates the root and VS Code extension versions,
+   repeats tests, builds Linux x64 and Windows x64 VSIX packages, and creates a
+   GitHub Release. Prerelease tags create GitHub prereleases. Stable tags also
+   publish both platform packages to the VS Code Marketplace.
+4. Install and smoke-test each published VSIX before promoting the release.
 
 Releases are never rebuilt in place. Correct a bad release with a new patch
 or prerelease version. For example, replace a bad `0.0.1-alpha.1` build with
-`0.0.1-alpha.2`. Roll back a deployment by promoting the previously verified
-container digest.
-
-## Deployment environments
-
-Create `staging` and `production` GitHub environments when deployment targets are
-known. Production must require manual approval. Deployment workflows must consume
-the published container digest from the release workflow rather than rebuild the
-source. This repository intentionally does not include a provider-specific deploy
-step until the target infrastructure is defined.
+`0.0.1-alpha.2`. Marketplace releases are immutable; correct them with a new
+version rather than rebuilding an existing tag.

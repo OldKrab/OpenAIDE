@@ -18,29 +18,20 @@ Download files from the repository's GitHub Releases page. Alpha versions are ma
 
 The VS Code extension is the simplest packaged alpha to test. It requires VS Code 1.100 or newer.
 
-1. Download `openaide-vscode-VERSION.vsix` from the release.
+1. Download the VSIX for your platform: `openaide-vscode-linux-x64-VERSION.vsix`
+   or `openaide-vscode-win32-x64-VERSION.vsix`.
 2. In VS Code, run **Extensions: Install from VSIX...** and select the file, or use:
 
    ```sh
-   code --install-extension openaide-vscode-VERSION.vsix
+   code --install-extension openaide-vscode-PLATFORM-VERSION.vsix
    ```
 
 3. Open the OpenAIDE view and check Agent Settings before creating a task.
 
 Codex and OpenCode must be authenticated separately. OpenAIDE first uses compatible agent commands already on `PATH` and may fall back to `npx`, which requires Node.js, npm, and network access on first launch.
 
-### Other release artifacts
-
-- `openaide-app-server-linux-x64-VERSION` is the standalone Linux x64 App Server binary for shell and protocol integration testing. It is not a complete graphical application by itself.
-- `openaide-web-assets-VERSION.tar.gz` contains static shared Frontend assets for packaging and integration. It is not a standalone Web App server.
-- `SHA256SUMS` contains checksums for the downloadable files.
-- The versioned GitHub Container Registry image contains the local Web App, App Server, and Codex ACP adapter. Its exact image name is shown on the release page. The container path is experimental and requires explicit local state, workspace, authentication, and host configuration.
-
-Verify a downloaded artifact before installing it:
-
-```sh
-sha256sum --check SHA256SUMS
-```
+Each VSIX bundles the matching App Server executable. Standalone App Server,
+Web App archive, and container artifacts are not published in the current alpha.
 
 ## Build from source
 
@@ -90,7 +81,16 @@ npm run vscode:launch
 
 ## Releases
 
-Pull requests are checked by GitHub Actions. A versioned tag builds release-mode artifacts, publishes a container image, and creates a GitHub Release according to the [release policy](docs/release-policy.md). Prerelease tags such as `v0.0.1-alpha.1` create GitHub prereleases.
+Pull requests are checked by GitHub Actions. A versioned tag builds Linux and
+Windows VSIX packages and creates a GitHub Release according to the
+[release policy](docs/release-policy.md). Stable tags also publish those packages
+to the VS Code Marketplace; prerelease tags such as `v0.0.1-alpha.1` remain
+GitHub prereleases.
+
+## Contributing and security
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request. Report
+security vulnerabilities privately by following [SECURITY.md](SECURITY.md).
 
 ## License
 

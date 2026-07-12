@@ -112,6 +112,7 @@ test("local web role loads its role-specific env file", () => {
     env: {
       ...process.env,
       OPENAIDE_WEB_ROLE: "target",
+      OPENAIDE_WEB_DAEMON: "background",
     },
   });
 
@@ -156,7 +157,7 @@ test("target role uses a durable isolated systemd service", () => {
 test("driver role uses a durable isolated systemd service", () => {
   const driverEnv = readFileSync(new URL("./local-web.driver.env", import.meta.url), "utf8");
 
-  assert.match(driverEnv, /^OPENAIDE_WEB_ALLOWED_HOSTS=temp\.old\.dedyn\.io,localhost,127\.0\.0\.1$/m);
+  assert.match(driverEnv, /^OPENAIDE_WEB_ALLOWED_HOSTS=localhost,127\.0\.0\.1$/m);
   assert.match(driverEnv, /^OPENAIDE_WEB_PORT=5474$/m);
   assert.match(driverEnv, /^OPENAIDE_WEB_VITE_PORT=5473$/m);
   assert.doesNotMatch(driverEnv, /OPENAIDE_WEB_PROTOTYPE_PORT/);

@@ -78,6 +78,9 @@ jobs:
       - run: npm ci
       - run: cargo build --release -p openaide-app-server
       - run: npm run build:frontend
+      - name: Add extension license
+        shell: bash
+        run: cp LICENSE apps/vscode-extension/LICENSE
       - name: Package platform VSIX
         shell: bash
         run: |
