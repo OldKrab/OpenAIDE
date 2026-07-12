@@ -65,8 +65,8 @@ fn live_acp_message_ids_create_separate_chat_messages() {
     assert_eq!(
         agent_text_statuses(&completed.chat.items),
         [
-            ("Commentary message".to_string(), ChatItemStatus::Complete),
-            ("Final message".to_string(), ChatItemStatus::Complete),
+            ("Commentary message".to_string(), ChatItemStatus::Streaming),
+            ("Final message".to_string(), ChatItemStatus::Streaming),
         ]
     );
     api.shutdown().expect("shutdown task runtime");

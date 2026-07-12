@@ -64,13 +64,14 @@ impl TurnRunner {
             .is_some_and(|active| active.task_id == task_id)
     }
 
-    pub fn spawn_agent_turn(
+    pub(crate) fn spawn_agent_turn(
         &self,
         task_id: String,
         prompt_text: String,
         prompt_attachments: Vec<crate::protocol::model::Attachment>,
         turn_id: String,
         session: AgentSession,
+        session_sink: Arc<TaskSessionEventSink>,
     ) {
         let runner = self.clone();
         let cancellation = TurnCancellation::new();
@@ -103,10 +104,11 @@ impl TurnRunner {
                 }
             }
 
-            let sink = Arc::new(TaskEventSink::new(
+            let sink = Arc::new(TaskEventSink::with_session_sink(
                 runner.mutations.clone(),
                 task_id.clone(),
                 turn_id.clone(),
+                session_sink,
                 runner.server_requests.clone(),
                 cancellation.clone(),
             ));
@@ -121,7 +123,6 @@ impl TurnRunner {
                 },
                 sink.clone(),
             );
-            let result = result.and(sink.finish());
             let _ = runner.transitions().finish_turn(&task_id, &turn_id, result);
         });
     }
@@ -164,18 +165,20 @@ impl TurnRunner {
             .route_agent_permission_response(request_id, option_id, commit)
     }
 
-    pub fn attach_session_events(
+    pub(crate) fn attach_session_events(
         &self,
         task_id: String,
         session: &AgentSessionKey,
-    ) -> Result<(), RuntimeError> {
-        let sink: Arc<dyn AgentSessionEventSink> = Arc::new(TaskSessionEventSink::new(
+    ) -> Result<Arc<TaskSessionEventSink>, RuntimeError> {
+        let sink = Arc::new(TaskSessionEventSink::new(
             self.mutations.clone(),
             task_id,
             session.session_id().to_string(),
             self.server_requests.clone(),
         ));
-        self.agent.attach_session_event_sink(session, sink)
+        self.agent
+            .attach_session_event_sink(session, sink.clone() as Arc<dyn AgentSessionEventSink>)?;
+        Ok(sink)
     }
 
     pub fn shutdown(&self) -> Result<(), RuntimeError> {

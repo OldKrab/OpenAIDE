@@ -93,19 +93,22 @@ impl TaskTurnLifecycle {
             })?
         };
 
-        if let Err(error) = self
+        let session_sink = match self
             .turn_runner
             .attach_session_events(task_id.clone(), &session_start.session().key())
         {
-            let session_id = session_start.session_id().to_string();
-            let _ = session_start.close();
-            if let Err(finalize_error) = self.fail_created_task_start(&task_id, &error) {
-                return Err(RuntimeError::Internal(format!(
-                    "{error}; failed to finalize task after session event attachment failure for {session_id}: {finalize_error}"
-                )));
+            Ok(sink) => sink,
+            Err(error) => {
+                let session_id = session_start.session_id().to_string();
+                let _ = session_start.close();
+                if let Err(finalize_error) = self.fail_created_task_start(&task_id, &error) {
+                    return Err(RuntimeError::Internal(format!(
+                        "{error}; failed to finalize task after session event attachment failure for {session_id}: {finalize_error}"
+                    )));
+                }
+                return Err(error);
             }
-            return Err(error);
-        }
+        };
         let session = session_start.commit();
         self.turn_runner.spawn_agent_turn(
             task_id.clone(),
@@ -113,6 +116,7 @@ impl TaskTurnLifecycle {
             prompt_attachments,
             turn_id,
             session,
+            session_sink,
         );
         Ok(snapshot)
     }

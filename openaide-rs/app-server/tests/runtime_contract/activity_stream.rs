@@ -106,19 +106,13 @@ fn tool_call_updates_replace_existing_activity_by_identity() {
             })
             .map(|snapshot| {
                 snapshot.task.status == TaskStatus::Inactive
-                    && snapshot
-                        .chat
-                        .items
-                        .iter()
-                        .filter(|item| {
-                            matches!(
-                                &item.message,
-                                NormalizedMessage::Activity { title, .. }
-                                    if title == "Read configuration"
-                            )
-                        })
-                        .count()
-                        == 2
+                    && snapshot.chat.items.iter().any(|item| {
+                        matches!(
+                            &item.message,
+                            NormalizedMessage::Activity { title, .. }
+                                if title == "Read configuration"
+                        )
+                    })
             })
             .unwrap_or(false)
     });
@@ -140,8 +134,7 @@ fn tool_call_updates_replace_existing_activity_by_identity() {
             _ => None,
         })
         .collect::<Vec<_>>();
-    assert_eq!(identities.len(), 2);
-    assert_ne!(identities[0], identities[1]);
+    assert_eq!(identities.len(), 1);
     assert!(identities.iter().all(|id| id.ends_with(":tool_call_1")));
 }
 

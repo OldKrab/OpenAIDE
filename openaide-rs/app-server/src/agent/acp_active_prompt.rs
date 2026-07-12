@@ -21,12 +21,14 @@ pub(super) struct ActivePrompt {
     completion_rx: mpsc::UnboundedReceiver<Result<(), RuntimeError>>,
     // Holding the slot keeps host requests bound to this projection until the prompt exits.
     _projection_slot: CurrentPromptSlot,
-    projection: LivePromptProjection,
     cancellation: TurnCancellation,
     task_id: String,
 }
 
 impl ActivePrompt {
+    // Prompt startup joins ACP request inputs with two independently owned
+    // session registries; keeping those seams explicit avoids another context bag.
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn start(
         active_session: &agent_client_protocol::ActiveSession<'static, Agent>,
         current_prompts: &AcpSessionPromptMap,
@@ -35,19 +37,24 @@ impl ActivePrompt {
         trace: Option<&AcpTraceSession>,
         prompt: AgentPrompt,
         sink: Arc<dyn AgentEventSink>,
+        session_projection: Option<&LivePromptProjection>,
     ) -> Result<Self, RuntimeError> {
         let projection_slot =
             CurrentPromptSlot::new(current_prompts, &active_session.session_id().to_string());
         let cancellation = prompt.cancellation.clone();
         let task_id = prompt.task_id.clone();
-        let projection = LivePromptProjection::new(agent_id, sink, cancellation.clone());
+        let projection = LivePromptProjection::for_prompt(
+            agent_id,
+            sink,
+            cancellation.clone(),
+            session_projection,
+        );
         projection_slot.activate(projection.clone());
         let (completion_tx, completion_rx) = mpsc::unbounded_channel();
         send_prompt_request(active_session, prompt, content_policy, trace, completion_tx)?;
         Ok(Self {
             completion_rx,
             _projection_slot: projection_slot,
-            projection,
             cancellation,
             task_id,
         })
@@ -59,10 +66,6 @@ impl ActivePrompt {
 
     pub(super) fn cancellation(&self) -> &TurnCancellation {
         &self.cancellation
-    }
-
-    pub(super) fn projection(&self) -> LivePromptProjection {
-        self.projection.clone()
     }
 
     pub(super) fn task_id(&self) -> &str {

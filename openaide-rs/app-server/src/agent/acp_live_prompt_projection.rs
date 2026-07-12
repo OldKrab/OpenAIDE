@@ -19,7 +19,7 @@ use crate::agent::events::{
     AgentPermissionRequest, AgentToolCall, AgentToolCallRef, AgentToolCallStatus,
 };
 use crate::agent::tool_details::{tool_call_event, tool_kind_name};
-use crate::agent::{AgentEventSink, TurnCancellation};
+use crate::agent::{AgentEventSink, AgentSessionEventSink, TurnCancellation};
 use crate::logging;
 use crate::protocol::errors::RuntimeError;
 
@@ -33,15 +33,29 @@ pub(super) struct LivePromptProjection {
 }
 
 impl LivePromptProjection {
+    #[cfg(test)]
     pub(super) fn new(
         agent_id: impl Into<String>,
         sink: Arc<dyn AgentEventSink>,
         cancellation: TurnCancellation,
     ) -> Self {
+        Self::for_prompt(agent_id, sink, cancellation, None)
+    }
+
+    /// Keeps permission tool attribution on the same Native Session tool state
+    /// that receives permanent session updates.
+    pub(super) fn for_prompt(
+        agent_id: impl Into<String>,
+        sink: Arc<dyn AgentEventSink>,
+        cancellation: TurnCancellation,
+        session_projection: Option<&Self>,
+    ) -> Self {
         Self {
             agent_id: agent_id.into(),
             sink,
-            tool_calls: Arc::default(),
+            tool_calls: session_projection
+                .map(|projection| projection.tool_calls.clone())
+                .unwrap_or_default(),
             published_tools: Arc::default(),
             cancellation,
         }
@@ -49,6 +63,19 @@ impl LivePromptProjection {
 
     pub(super) fn cancellation(&self) -> TurnCancellation {
         self.cancellation.clone()
+    }
+
+    /// Creates the projection that survives individual session/prompt requests.
+    pub(super) fn for_session(
+        agent_id: impl Into<String>,
+        sink: Arc<dyn AgentSessionEventSink>,
+    ) -> Self {
+        Self::for_prompt(
+            agent_id,
+            Arc::new(SessionUpdateEventSink { sink }),
+            TurnCancellation::new(),
+            None,
+        )
     }
 
     pub(super) fn remember_tool_call(&self, tool_call: ToolCall) {
@@ -188,6 +215,30 @@ impl LivePromptProjection {
             }),
         );
         self.sink.emit(AgentEvent::ToolCall(event))
+    }
+}
+
+struct SessionUpdateEventSink {
+    sink: Arc<dyn AgentSessionEventSink>,
+}
+
+impl AgentEventSink for SessionUpdateEventSink {
+    fn emit(&self, event: AgentEvent) -> Result<(), RuntimeError> {
+        // Catalogs and metadata retain their dedicated typed session callbacks.
+        if matches!(
+            event,
+            AgentEvent::ConfigOptionsChanged(_) | AgentEvent::CommandsChanged(_)
+        ) {
+            return Ok(());
+        }
+        self.sink.session_update(event)
+    }
+
+    fn request_permission(
+        &self,
+        _request: AgentPermissionRequest,
+    ) -> Result<AgentPermissionOutcome, RuntimeError> {
+        Ok(AgentPermissionOutcome::Cancelled)
     }
 }
 

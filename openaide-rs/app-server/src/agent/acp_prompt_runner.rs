@@ -1,5 +1,4 @@
 use std::sync::{mpsc, Arc, Mutex};
-use std::time::Duration;
 
 use agent_client_protocol::schema::SessionNotification;
 use agent_client_protocol::util::MatchDispatch;
@@ -12,8 +11,9 @@ use crate::agent::acp_config_options_apply::set_task_config_option_after_prior_u
 use crate::agent::acp_errors::acp_error;
 use crate::agent::acp_host_capabilities::AcpSessionPromptMap;
 use crate::agent::acp_session_catalogs::{
-    attach_session_event_sink_to_slot, deliver_session_metadata_update,
-    session_metadata_from_update, PendingSessionCatalogs,
+    attach_session_event_sink_to_slot, deliver_session_commands_catalog,
+    deliver_session_config_catalog, deliver_session_metadata_update, session_catalogs_from_update,
+    DispatchSessionCatalogs, PendingSessionCatalogs,
 };
 use crate::agent::acp_session_client::{AcpSessionCommand, AcpSessionConfigCommand};
 use crate::agent::acp_session_termination::close_active_session;
@@ -25,10 +25,6 @@ use crate::agent::{AgentEventSink, AgentPrompt, AgentSessionEventSink};
 use crate::logging;
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::ConfigOptionsCatalog;
-
-// TODO(acp-sdk): Replace this bounded drain when rich prompt requests expose an
-// ordered completion boundary that guarantees all preceding Session updates.
-const POST_PROMPT_UPDATE_DRAIN: Duration = Duration::from_millis(100);
 
 pub(super) struct PromptRunContext<'a> {
     pub(super) agent_id: &'a str,
@@ -53,6 +49,7 @@ pub(super) async fn run_prompt(
     config_rx: &mut tokio_mpsc::UnboundedReceiver<AcpSessionConfigCommand>,
     config_catalog: &mut ConfigOptionsCatalog,
     session_event_sink: &mut Option<Arc<dyn AgentSessionEventSink>>,
+    session_projection: &mut Option<LivePromptProjection>,
     pending_session_catalogs: &mut PendingSessionCatalogs,
 ) -> Result<(), RuntimeError> {
     if prompt.cancellation.is_cancelled() {
@@ -68,6 +65,7 @@ pub(super) async fn run_prompt(
         context.trace.as_ref(),
         prompt,
         sink,
+        session_projection.as_ref(),
     )?;
 
     let mut cancel_sent = false;
@@ -126,6 +124,9 @@ pub(super) async fn run_prompt(
                             pending_session_catalogs,
                             sink,
                         )?;
+                        *session_projection = session_event_sink.as_ref().map(|sink| {
+                            LivePromptProjection::for_session(context.agent_id, sink.clone())
+                        });
                     }
                     AcpSessionCommand::Prompt { done_tx, .. } => {
                         let _ = done_tx.send(Err(RuntimeError::NotReady(
@@ -153,7 +154,7 @@ pub(super) async fn run_prompt(
                 handle_prompt_config_command(
                     active_session,
                     config_catalog,
-                    active_prompt.projection(),
+                    session_projection.clone(),
                     session_event_sink.clone(),
                     pending_session_catalogs,
                     config,
@@ -174,19 +175,6 @@ pub(super) async fn run_prompt(
                         "result": if succeeded { "stop_reason" } else { "error" },
                     }),
                 );
-                if succeeded {
-                    if let Err(error) = drain_post_prompt_updates(
-                        active_session,
-                        active_prompt.projection(),
-                        context.trace.as_ref(),
-                        session_event_sink.clone(),
-                        pending_session_catalogs,
-                    )
-                    .await
-                    {
-                        break Err(error);
-                    }
-                }
                 break result;
             }
             update = active_session.read_update() => {
@@ -196,13 +184,16 @@ pub(super) async fn run_prompt(
                 };
                 match update {
                     SessionMessage::SessionMessage(dispatch) => {
-                        if let Err(error) = dispatch_session_notification(
+                        match dispatch_session_notification(
+                            context.agent_id,
                             dispatch,
-                            active_prompt.projection(),
+                            session_projection.clone(),
                             session_event_sink.clone(),
                             pending_session_catalogs,
                         ).await {
-                            break Err(error);
+                            Ok(Some(catalog)) => *config_catalog = catalog,
+                            Ok(None) => {}
+                            Err(error) => break Err(error),
                         }
                     }
                     SessionMessage::StopReason(_) => {
@@ -243,7 +234,7 @@ fn runtime_result_name(result: &Result<(), RuntimeError>) -> &'static str {
 async fn handle_prompt_config_command(
     active_session: &mut agent_client_protocol::ActiveSession<'static, Agent>,
     catalog: &mut ConfigOptionsCatalog,
-    projection: LivePromptProjection,
+    projection: Option<LivePromptProjection>,
     session_event_sink: Option<Arc<dyn AgentSessionEventSink>>,
     pending_session_catalogs: &mut PendingSessionCatalogs,
     command: AcpSessionConfigCommand,
@@ -276,6 +267,7 @@ async fn handle_prompt_config_command(
                     continue;
                 };
                 if let Err(error) = dispatch_session_notification(
+                    &agent_id,
                     dispatch,
                     projection.clone(),
                     session_event_sink.clone(),
@@ -297,67 +289,56 @@ async fn handle_prompt_config_command(
     Ok(())
 }
 
-async fn drain_post_prompt_updates(
-    active_session: &mut agent_client_protocol::ActiveSession<'static, Agent>,
-    projection: LivePromptProjection,
-    _trace: Option<&AcpTraceSession>,
-    session_event_sink: Option<Arc<dyn AgentSessionEventSink>>,
-    pending_session_catalogs: &mut PendingSessionCatalogs,
-) -> Result<(), RuntimeError> {
-    loop {
-        let update =
-            tokio::time::timeout(POST_PROMPT_UPDATE_DRAIN, active_session.read_update()).await;
-        let Ok(update) = update else {
-            return Ok(());
-        };
-        match update.map_err(acp_error)? {
-            SessionMessage::SessionMessage(dispatch) => {
-                dispatch_session_notification(
-                    dispatch,
-                    projection.clone(),
-                    session_event_sink.clone(),
-                    pending_session_catalogs,
-                )
-                .await?;
-            }
-            SessionMessage::StopReason(_) => {}
-            _ => {}
-        }
-    }
-}
-
-async fn dispatch_session_notification(
+pub(super) async fn dispatch_session_notification(
+    agent_id: &str,
     dispatch: Dispatch,
-    projection: LivePromptProjection,
+    projection: Option<LivePromptProjection>,
     session_event_sink: Option<Arc<dyn AgentSessionEventSink>>,
     pending_session_catalogs: &mut PendingSessionCatalogs,
-) -> Result<(), RuntimeError> {
-    let metadata = Arc::new(Mutex::new(None));
-    let metadata_sink = metadata.clone();
+) -> Result<Option<ConfigOptionsCatalog>, RuntimeError> {
+    let catalogs = Arc::new(Mutex::new(DispatchSessionCatalogs::default()));
+    let catalogs_sink = catalogs.clone();
     MatchDispatch::new(dispatch)
         .if_notification(async move |notification: SessionNotification| {
-            *metadata_sink
+            *catalogs_sink
                 .lock()
-                .expect("ACP session metadata update lock poisoned") =
-                session_metadata_from_update(&notification.update);
-            projection
-                .emit(notification.update)
-                .map_err(|error| agent_client_protocol::util::internal_error(error.to_string()))?;
+                .expect("ACP session catalog update lock poisoned") =
+                session_catalogs_from_update(agent_id, &notification.update);
+            if let Some(projection) = projection {
+                projection.emit(notification.update).map_err(|error| {
+                    agent_client_protocol::util::internal_error(error.to_string())
+                })?;
+            }
             Ok(())
         })
         .await
         .otherwise_ignore()
         .map_err(acp_error)?;
-    let update = metadata
-        .lock()
-        .expect("ACP session metadata update lock poisoned")
-        .take();
-    if let Some(update) = update {
+    let mut catalogs = std::mem::take(
+        &mut *catalogs
+            .lock()
+            .expect("ACP session catalog update lock poisoned"),
+    );
+    if let Some(catalog) = catalogs.config.clone() {
+        deliver_session_config_catalog(
+            catalog,
+            session_event_sink.as_ref(),
+            pending_session_catalogs,
+        )?;
+    }
+    if let Some(catalog) = catalogs.commands.take() {
+        deliver_session_commands_catalog(
+            catalog,
+            session_event_sink.as_ref(),
+            pending_session_catalogs,
+        )?;
+    }
+    if let Some(update) = catalogs.metadata.take() {
         deliver_session_metadata_update(
             update,
             session_event_sink.as_ref(),
             pending_session_catalogs,
         )?;
     }
-    Ok(())
+    Ok(catalogs.config)
 }

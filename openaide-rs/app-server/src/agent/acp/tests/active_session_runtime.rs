@@ -552,6 +552,10 @@ for line in sys.stdin:
         elif prompt_mode == "late_text_after_response":
             respond(message, {"stopReason": "end_turn"})
             notify_text_chunk("late response text")
+        elif prompt_mode == "late_text_after_prompt_return":
+            respond(message, {"stopReason": "end_turn"})
+            time.sleep(0.25)
+            notify_text_chunk("session-owned late text")
         elif prompt_mode == "title_during_prompt":
             notify_title("Title from active turn")
             respond(message, {"stopReason": "end_turn"})
@@ -830,9 +834,9 @@ fn authentication_reuses_the_active_agent_process() {
 }
 
 #[test]
-fn prompt_delivers_text_update_sent_after_prompt_response() {
+fn session_sink_receives_text_update_after_prompt_has_returned() {
     let temp = tempfile::TempDir::new().expect("temp dir");
-    let Some((_runtime, log_path)) = fixture_runtime(&temp, "late-text-session") else {
+    let Some((_runtime, log_path)) = fixture_runtime(&temp, "session-owned-late-text") else {
         return;
     };
     let script_path = temp.path().join("fixture_agent.py");
@@ -847,43 +851,51 @@ fn prompt_delivers_text_update_sent_after_prompt_response() {
             ),
             (
                 "OPENAIDE_ACP_FIXTURE_SESSION".to_string(),
-                "late-text-session".to_string(),
+                "session-owned-late-text".to_string(),
             ),
             (
                 "OPENAIDE_ACP_FIXTURE_PROMPT_MODE".to_string(),
-                "late_text_after_response".to_string(),
+                "late_text_after_prompt_return".to_string(),
             ),
         ],
         secret_env: Vec::new(),
     });
-
-    let capture = Arc::new(CapturingEventSink::default());
+    let prompt_sink = Arc::new(CapturingEventSink::default());
+    let session_sink = Arc::new(CapturingSessionSink::default());
     let session = runtime
-        .start_session(start_request("task-late-text", cwd_string()))
+        .start_session(start_request("task-session-owned-text", cwd_string()))
         .expect("start session");
+    runtime
+        .attach_session_event_sink(&session.key(), session_sink.clone())
+        .expect("attach session sink");
+
     runtime
         .prompt(
             AgentPrompt {
                 agent_id: "codex".to_string(),
-                task_id: "task-late-text".to_string(),
+                task_id: "task-session-owned-text".to_string(),
                 session_id: session.session_id.clone(),
                 text: "hello".to_string(),
                 attachments: Vec::new(),
                 cancellation: TurnCancellation::new(),
             },
-            capture.clone(),
+            prompt_sink.clone(),
         )
         .expect("prompt");
+    assert!(prompt_sink.events().is_empty());
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while session_sink.events().is_empty() {
+        assert!(Instant::now() < deadline, "late session update timed out");
+        std::thread::sleep(Duration::from_millis(5));
+    }
     runtime
         .close_session(&session.key())
         .expect("close session");
 
-    let events = capture.events();
-    assert_eq!(events.len(), 1);
-    match &events[0] {
-        AgentEvent::TextChunk { text, .. } => assert_eq!(text, "late response text"),
-        other => panic!("expected late text event, got {other:?}"),
-    }
+    assert!(matches!(
+        session_sink.events().as_slice(),
+        [AgentEvent::TextChunk { text, .. }] if text == "session-owned late text"
+    ));
 }
 
 #[test]
@@ -1330,6 +1342,10 @@ fn session_title_update_during_prompt_is_delivered_to_session_sink() {
         )
         .expect("prompt");
 
+    let started = Instant::now();
+    while sink.metadata_updates().is_empty() && started.elapsed() < Duration::from_secs(2) {
+        std::thread::sleep(Duration::from_millis(10));
+    }
     assert_eq!(
         sink.metadata_updates(),
         vec![AgentSessionMetadataUpdate {

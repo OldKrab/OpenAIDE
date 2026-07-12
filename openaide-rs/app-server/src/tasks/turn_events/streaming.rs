@@ -67,12 +67,9 @@ impl StreamingRuns {
         )
     }
 
+    #[cfg(test)]
     pub(super) fn finish_text(&self, now: &str) -> Vec<StreamingWrite> {
         finish_runs(&self.text, now, MessageKind::AgentText)
-    }
-
-    pub(super) fn finish_thought(&self, now: &str) -> Vec<StreamingWrite> {
-        finish_runs(&self.thought, now, MessageKind::Thought)
     }
 
     pub(super) fn finish_anonymous_text(&self, now: &str) -> Option<StreamingWrite> {
@@ -246,6 +243,7 @@ fn new_text_run() -> TextRun {
     }
 }
 
+#[cfg(test)]
 fn finish_runs(slot: &Mutex<TextRuns>, now: &str, kind: MessageKind) -> Vec<StreamingWrite> {
     let mut runs = slot.lock().expect("streaming run lock poisoned");
     let mut writes = Vec::with_capacity(runs.sourced.len() + usize::from(runs.anonymous.is_some()));

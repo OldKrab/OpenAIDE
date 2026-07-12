@@ -67,6 +67,7 @@ mod task_chat_runtime;
 
 #[derive(Default)]
 struct CapturingSessionSink {
+    events: Mutex<Vec<AgentEvent>>,
     catalogs: Mutex<Vec<ConfigOptionsCatalog>>,
     command_catalogs: Mutex<Vec<AgentCommandsCatalog>>,
     metadata_updates: Mutex<Vec<AgentSessionMetadataUpdate>>,
@@ -468,6 +469,13 @@ fn terminal_wait_request_can_be_cancelled_without_deadline() {
 }
 
 impl CapturingSessionSink {
+    fn events(&self) -> Vec<AgentEvent> {
+        self.events
+            .lock()
+            .expect("captured session event lock poisoned")
+            .clone()
+    }
+
     fn current_values(&self) -> Vec<String> {
         self.catalogs
             .lock()
@@ -497,6 +505,14 @@ impl CapturingSessionSink {
 }
 
 impl AgentSessionEventSink for CapturingSessionSink {
+    fn session_update(&self, event: AgentEvent) -> Result<(), RuntimeError> {
+        self.events
+            .lock()
+            .expect("captured session event lock poisoned")
+            .push(event);
+        Ok(())
+    }
+
     fn config_options_changed(&self, catalog: ConfigOptionsCatalog) -> Result<(), RuntimeError> {
         self.catalogs
             .lock()

@@ -5,11 +5,11 @@ use agent_client_protocol::{Agent, SessionMessage};
 use tokio::sync::mpsc as tokio_mpsc;
 
 use crate::agent::acp_config_options_apply::set_task_config_option_after_prior_updates;
-use crate::agent::acp_prompt_runner::{run_prompt, PromptRunContext};
+use crate::agent::acp_prompt_runner::{
+    dispatch_session_notification, run_prompt, PromptRunContext,
+};
 use crate::agent::acp_session_catalogs::{
-    attach_session_event_sink_to_slot, deliver_session_commands_catalog,
-    deliver_session_config_catalog, deliver_session_metadata_update,
-    session_catalogs_from_dispatch, PendingSessionCatalogs,
+    attach_session_event_sink_to_slot, PendingSessionCatalogs,
 };
 use crate::agent::acp_session_client::{AcpSessionCommand, AcpSessionConfigCommand};
 use crate::agent::acp_session_opening::OpenedAcpSession;
@@ -55,6 +55,7 @@ pub(super) async fn run_opened_acp_session(
         ..
     } = opened;
     let mut session_event_sink: Option<Arc<dyn AgentSessionEventSink>> = None;
+    let mut session_projection: Option<LivePromptProjection> = None;
     let mut pending_session_catalogs = PendingSessionCatalogs::default();
     let mut config_catalog = active_session_config_catalog(&started_session);
     let session_id = active_session.session_id().to_string();
@@ -90,9 +91,13 @@ pub(super) async fn run_opened_acp_session(
                         attach_session_event_sink_to_slot(
                             &mut session_event_sink,
                             &mut pending_session_catalogs,
-                            sink,
+                            sink.clone(),
                         )
                         .map_err(|error| agent_client_protocol::util::internal_error(error.to_string()))?;
+                        session_projection = Some(LivePromptProjection::for_session(
+                            request_agent_id.clone(),
+                            sink,
+                        ));
                     }
                     AcpSessionCommand::Prompt {
                         prompt,
@@ -117,6 +122,7 @@ pub(super) async fn run_opened_acp_session(
                             &mut config_rx,
                             &mut config_catalog,
                             &mut session_event_sink,
+                            &mut session_projection,
                             &mut pending_session_catalogs,
                         )
                         .await;
@@ -144,6 +150,7 @@ pub(super) async fn run_opened_acp_session(
                     &mut active_session,
                     &mut config_catalog,
                     session_event_sink.as_ref(),
+                    session_projection.clone(),
                     &mut pending_session_catalogs,
                     config,
                 )
@@ -157,6 +164,7 @@ pub(super) async fn run_opened_acp_session(
                     update,
                     &mut config_catalog,
                     session_event_sink.as_ref(),
+                    session_projection.clone(),
                     &mut pending_session_catalogs,
                 )
                 .await
@@ -207,21 +215,22 @@ async fn apply_opened_session_message(
     update: SessionMessage,
     config_catalog: &mut ConfigOptionsCatalog,
     session_event_sink: Option<&Arc<dyn AgentSessionEventSink>>,
+    session_projection: Option<LivePromptProjection>,
     pending_session_catalogs: &mut PendingSessionCatalogs,
 ) -> Result<(), RuntimeError> {
     let SessionMessage::SessionMessage(dispatch) = update else {
         return Ok(());
     };
-    let catalogs = session_catalogs_from_dispatch(agent_id, dispatch).await?;
-    if let Some(catalog) = catalogs.config {
-        *config_catalog = catalog.clone();
-        deliver_session_config_catalog(catalog, session_event_sink, pending_session_catalogs)?;
-    }
-    if let Some(catalog) = catalogs.commands {
-        deliver_session_commands_catalog(catalog, session_event_sink, pending_session_catalogs)?;
-    }
-    if let Some(update) = catalogs.metadata {
-        deliver_session_metadata_update(update, session_event_sink, pending_session_catalogs)?;
+    if let Some(catalog) = dispatch_session_notification(
+        agent_id,
+        dispatch,
+        session_projection,
+        session_event_sink.cloned(),
+        pending_session_catalogs,
+    )
+    .await?
+    {
+        *config_catalog = catalog;
     }
     Ok(())
 }
@@ -230,6 +239,7 @@ async fn handle_session_config_command(
     active_session: &mut agent_client_protocol::ActiveSession<'static, Agent>,
     catalog: &mut ConfigOptionsCatalog,
     session_event_sink: Option<&Arc<dyn AgentSessionEventSink>>,
+    session_projection: Option<LivePromptProjection>,
     pending_session_catalogs: &mut PendingSessionCatalogs,
     command: AcpSessionConfigCommand,
 ) -> Result<(), RuntimeError> {
@@ -262,6 +272,7 @@ async fn handle_session_config_command(
                     update,
                     catalog,
                     session_event_sink,
+                    session_projection.clone(),
                     pending_session_catalogs,
                 )
                 .await

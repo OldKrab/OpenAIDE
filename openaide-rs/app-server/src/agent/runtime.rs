@@ -359,6 +359,11 @@ pub struct AgentSessionMetadataUpdate {
 }
 
 pub trait AgentSessionEventSink: Send + Sync {
+    /// Receives normalized session/update content independently from any prompt request.
+    fn session_update(&self, _event: AgentEvent) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+
     fn config_options_changed(&self, catalog: ConfigOptionsCatalog) -> Result<(), RuntimeError>;
 
     fn commands_changed(&self, catalog: AgentCommandsCatalog) -> Result<(), RuntimeError>;

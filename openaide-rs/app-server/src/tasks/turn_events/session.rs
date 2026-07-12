@@ -10,6 +10,10 @@ use super::config::{update_task_config_options, ConfigUpdateTarget};
 use super::{CatalogUpdateSource, TaskSessionEventSink};
 
 impl AgentSessionEventSink for TaskSessionEventSink {
+    fn session_update(&self, event: crate::agent::events::AgentEvent) -> Result<(), RuntimeError> {
+        self.handle_session_update(event)
+    }
+
     fn config_options_changed(
         &self,
         catalog: crate::protocol::model::ConfigOptionsCatalog,

@@ -142,7 +142,7 @@ impl TaskTurnLifecycle {
         &self,
         task_id: String,
         session: &AgentSessionKey,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<std::sync::Arc<crate::tasks::turn_events::TaskSessionEventSink>, RuntimeError> {
         self.turn_runner.attach_session_events(task_id, session)
     }
 

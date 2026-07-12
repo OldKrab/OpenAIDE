@@ -17,6 +17,7 @@ use crate::tasks::mutation::{
 };
 use crate::tasks::product_api::secret_resolver::task_secret_resolver;
 use crate::tasks::task_start_transaction::TaskSessionStartGuard;
+use crate::tasks::turn_events::TaskSessionEventSink;
 use crate::tasks::turns::TurnRunner;
 use crate::time::now_string;
 
@@ -32,7 +33,7 @@ pub(crate) struct NativeSessionService {
     turn_runner: TurnRunner,
     server_requests: ServerRequestRuntime,
     preparing_session_ids: Arc<Mutex<HashSet<AgentSessionKey>>>,
-    subscriptions: Arc<Mutex<HashMap<String, AgentSessionKey>>>,
+    subscriptions: Arc<Mutex<HashMap<String, NativeSessionSubscription>>>,
 }
 
 pub(crate) struct PrimaryPromptRequest {
@@ -208,20 +209,24 @@ impl NativeSessionService {
             ));
         }
 
-        if let Err(error) = self.ensure_update_subscription(&task_id, &opened.session().key()) {
-            self.mutations.commit_existing_task(
-                &task_id,
-                TaskCommitOptions::metadata(),
-                |ctx| {
-                    if ctx.task().agent_session_id.as_deref() != Some(session_id.as_str()) {
-                        return Ok(TaskMutationResult::Unchanged);
-                    }
-                    ctx.task_mut().agent_session_id = None;
-                    Ok(TaskMutationResult::Changed)
-                },
-            )?;
-            return Err(error);
-        }
+        let session_sink = match self.ensure_update_subscription(&task_id, &opened.session().key())
+        {
+            Ok(sink) => sink,
+            Err(error) => {
+                self.mutations.commit_existing_task(
+                    &task_id,
+                    TaskCommitOptions::metadata(),
+                    |ctx| {
+                        if ctx.task().agent_session_id.as_deref() != Some(session_id.as_str()) {
+                            return Ok(TaskMutationResult::Unchanged);
+                        }
+                        ctx.task_mut().agent_session_id = None;
+                        Ok(TaskMutationResult::Changed)
+                    },
+                )?;
+                return Err(error);
+            }
+        };
         let session = opened.commit();
         self.turn_runner.spawn_agent_turn(
             task_id,
@@ -229,6 +234,7 @@ impl NativeSessionService {
             attachments,
             turn_id.as_str().to_string(),
             session,
+            session_sink,
         );
         Ok(())
     }
@@ -433,26 +439,43 @@ impl NativeSessionService {
         &self,
         task_id: &str,
         session: &AgentSessionKey,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<Arc<TaskSessionEventSink>, RuntimeError> {
         let mut subscriptions = self.subscriptions.lock().map_err(|_| {
             RuntimeError::Internal("Native Session subscription lock poisoned".into())
         })?;
-        if subscriptions.get(task_id) == Some(session) {
-            return Ok(());
+        if let Some(subscription) = subscriptions.get(task_id) {
+            if &subscription.session == session {
+                return Ok(subscription.sink.clone());
+            }
         }
-        self.turn_runner
+        let sink = self
+            .turn_runner
             .attach_session_events(task_id.to_string(), session)?;
-        subscriptions.insert(task_id.to_string(), session.clone());
-        Ok(())
+        subscriptions.insert(
+            task_id.to_string(),
+            NativeSessionSubscription {
+                session: session.clone(),
+                sink: sink.clone(),
+            },
+        );
+        Ok(sink)
     }
 
     fn forget_update_subscription(&self, task_id: &str, session: &AgentSession) {
         if let Ok(mut subscriptions) = self.subscriptions.lock() {
-            if subscriptions.get(task_id) == Some(&session.key()) {
+            if subscriptions
+                .get(task_id)
+                .is_some_and(|subscription| subscription.session == session.key())
+            {
                 subscriptions.remove(task_id);
             }
         }
     }
+}
+
+struct NativeSessionSubscription {
+    session: AgentSessionKey,
+    sink: Arc<TaskSessionEventSink>,
 }
 
 enum OpenedNativeSession<'a> {

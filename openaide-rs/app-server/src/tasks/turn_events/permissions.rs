@@ -16,8 +16,13 @@ impl TaskEventSink {
         // Opening the request and persisting its Chat row form one ordered emission.
         // The human wait below must not hold this lock: Agents can continue sending
         // output and tool progress while a permission decision is pending.
-        let emission_guard = self.emission_lock.lock().expect("event sink lock poisoned");
-        self.finish_anonymous_streaming_runs(&now_string())?;
+        let emission_guard = self
+            .session_sink
+            .emission_lock
+            .lock()
+            .expect("event sink lock poisoned");
+        self.session_sink
+            .finish_anonymous_streaming_runs(&now_string())?;
         let request_id = request.request_id.clone();
         let Some(server_request_id) = self.server_requests.open_permission_request(
             &self.task_id,
@@ -89,7 +94,11 @@ impl TaskEventSink {
             }),
         );
         if let AgentPermissionOutcome::Selected { option_id } = &response.outcome {
-            let _guard = self.emission_lock.lock().expect("event sink lock poisoned");
+            let _guard = self
+                .session_sink
+                .emission_lock
+                .lock()
+                .expect("event sink lock poisoned");
             if let Err(error) = self.resolve_permission(&request_id, option_id, response.decision) {
                 if !is_permission_already_resolved(&error) {
                     return Err(error);

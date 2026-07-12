@@ -67,12 +67,15 @@ impl TaskTurnLifecycle {
                 false,
             ),
         };
-        if let Err(error) = self.attach_session_events(task_id.clone(), &session.key()) {
-            if close_on_failure {
-                let _ = self.agent_gateway.close_session(&session.key());
+        let session_sink = match self.attach_session_events(task_id.clone(), &session.key()) {
+            Ok(sink) => sink,
+            Err(error) => {
+                if close_on_failure {
+                    let _ = self.agent_gateway.close_session(&session.key());
+                }
+                return Err(error);
             }
-            return Err(error);
-        }
+        };
         let commit =
             self.mutations
                 .commit_existing_task(&task_id, snapshot_chat_commit_options(), |ctx| {
@@ -122,6 +125,7 @@ impl TaskTurnLifecycle {
                 agent_prompt_attachments,
                 turn_id,
                 session,
+                session_sink,
             );
         }
         Ok(snapshot)

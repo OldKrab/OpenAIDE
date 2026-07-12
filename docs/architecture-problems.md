@@ -197,7 +197,7 @@ History freshness must not compare Native Session activity with generic Task `up
 
 ## AP-013: Session updates are incorrectly scoped to an active Turn
 
-**Status:** confirmed
+**Status:** resolved
 
 **Area:** ACP session event projection and steering
 
@@ -206,6 +206,8 @@ ACP `session/update` notifications identify their Native Session, not the `sessi
 **Impact:** Prompt completion controls the lifetime of a session-wide event consumer. This is incompatible with late Agent updates and with steering prompts whose updates cannot be attributed to one prompt request. It also forces message streaming, tools, permissions, options, and commands through unnecessary Turn identity checks.
 
 **Desired direction:** Install one update consumer for the lifetime of the acquired Native Session and keep it attached until the session closes or is replaced. Persist every accepted session update in arrival order. Use Agent `messageId` to append later chunks to an in-progress Agent message and `toolCallId` to update tools. Do not require an active OpenAIDE Turn for a session update to reach Chat. The primary prompt response controls Task `working` state only; it does not end the update subscription.
+
+**Resolution:** Each opened ACP Native Session now owns one permanent update projection and one Task-bound session sink. The Native Session service retains and reuses that sink for prompt execution, so text, thought, tool, command, option, and metadata updates pass through one ordered session boundary and are accepted while the same Native Session remains bound, even after the primary prompt response clears the active Task work. Prompt completion no longer drains an arbitrary timing window or finalizes session-owned streaming runs; the prompt sink remains only for prompt-specific requests such as permission handling.
 
 ## AP-014: Non-text Agent message content is silently discarded
 

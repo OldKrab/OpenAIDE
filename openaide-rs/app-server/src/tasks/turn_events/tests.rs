@@ -429,6 +429,34 @@ fn active_turn_agent_message_does_not_refresh_last_activity() {
 }
 
 #[test]
+fn native_session_update_is_persisted_after_prompt_completion() {
+    let (_dir, store, mutations, server_requests) = test_runtime();
+    store.write_task(&running_task("task_1")).unwrap();
+    let sink = TaskSessionEventSink::new(
+        mutations.clone(),
+        "task_1".to_string(),
+        "session_1".to_string(),
+        server_requests,
+    );
+    TaskTransitions::new(mutations)
+        .finish_turn("task_1", "turn_1", Ok(()))
+        .unwrap();
+
+    sink.session_update(AgentEvent::TextChunk {
+        text: "late session update".to_string(),
+        source_message_id: Some("agent-message-1".to_string()),
+    })
+    .unwrap();
+
+    assert!(store.read_messages("task_1").unwrap().iter().any(|stored| {
+        matches!(
+            &stored.chat.message,
+            NormalizedMessage::AgentText { text, .. } if text == "late session update"
+        )
+    }));
+}
+
+#[test]
 fn agent_text_notifications_describe_only_durable_ordered_deltas() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path().to_path_buf()).unwrap();
@@ -537,7 +565,7 @@ fn interleaved_source_message_ids_update_their_original_agent_messages() {
 }
 
 #[test]
-fn prompt_completion_finalizes_the_last_text_run() {
+fn prompt_completion_does_not_finalize_session_owned_text_run() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path().to_path_buf()).unwrap();
     store.write_task(&running_task("task_1")).unwrap();
@@ -558,23 +586,11 @@ fn prompt_completion_finalizes_the_last_text_run() {
 
     sink.emit(AgentEvent::Text("complete me".to_string()))
         .unwrap();
-    let appended = notifications.recv().unwrap();
-    let message_id = match appended.delta.unwrap() {
-        CommittedTaskDelta::ChatItemAppended { item } => item.message_id,
-        other => panic!("expected append, got {other:?}"),
-    };
-    sink.finish().unwrap();
-
-    let finalized = notifications.recv().unwrap();
-    assert!(matches!(
-        finalized.delta,
-        Some(CommittedTaskDelta::ChatItemChunk { message_id: id, chunk })
-            if id == message_id && chunk.sequence == 1 && chunk.final_chunk
-    ));
+    let _appended = notifications.recv().unwrap();
     assert!(matches!(
         &store.read_messages("task_1").unwrap()[0].chat.message,
         NormalizedMessage::AgentText {
-            streaming: false,
+            streaming: true,
             ..
         }
     ));

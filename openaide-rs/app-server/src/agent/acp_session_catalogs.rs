@@ -1,8 +1,12 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
-use agent_client_protocol::schema::{MaybeUndefined, SessionNotification, SessionUpdate};
+#[cfg(test)]
+use agent_client_protocol::schema::SessionNotification;
+use agent_client_protocol::schema::{MaybeUndefined, SessionUpdate};
+#[cfg(test)]
 use agent_client_protocol::util::MatchDispatch;
 
+#[cfg(test)]
 use crate::agent::acp_errors::acp_error;
 use crate::agent::acp_update_projection::{normalize_available_commands, normalize_config_options};
 use crate::agent::{AgentMetadataField, AgentSessionEventSink, AgentSessionMetadataUpdate};
@@ -23,30 +27,19 @@ pub(super) struct DispatchSessionCatalogs {
     pub(super) metadata: Option<AgentSessionMetadataUpdate>,
 }
 
+#[cfg(test)]
 pub(super) async fn session_catalogs_from_dispatch(
     agent_id: &str,
     dispatch: agent_client_protocol::Dispatch,
 ) -> Result<DispatchSessionCatalogs, RuntimeError> {
-    let catalogs: Arc<Mutex<DispatchSessionCatalogs>> = Arc::default();
+    let catalogs = Arc::new(std::sync::Mutex::new(DispatchSessionCatalogs::default()));
     let catalogs_sink = catalogs.clone();
     MatchDispatch::new(dispatch)
         .if_notification(async move |notification: SessionNotification| {
-            let mut catalogs = catalogs_sink
+            *catalogs_sink
                 .lock()
-                .expect("ACP session catalog update lock poisoned");
-            match notification.update {
-                SessionUpdate::ConfigOptionUpdate(update) => {
-                    catalogs.config =
-                        Some(normalize_config_options(agent_id, update.config_options));
-                }
-                SessionUpdate::AvailableCommandsUpdate(update) => {
-                    catalogs.commands = Some(normalize_available_commands(update));
-                }
-                SessionUpdate::SessionInfoUpdate(update) => {
-                    catalogs.metadata = Some(metadata_update_from_acp(update));
-                }
-                _ => {}
-            }
+                .expect("ACP session catalog update lock poisoned") =
+                session_catalogs_from_update(agent_id, &notification.update);
             Ok(())
         })
         .await
@@ -60,6 +53,29 @@ pub(super) async fn session_catalogs_from_dispatch(
     Ok(result)
 }
 
+pub(super) fn session_catalogs_from_update(
+    agent_id: &str,
+    update: &SessionUpdate,
+) -> DispatchSessionCatalogs {
+    let mut catalogs = DispatchSessionCatalogs::default();
+    match update {
+        SessionUpdate::ConfigOptionUpdate(update) => {
+            catalogs.config = Some(normalize_config_options(
+                agent_id,
+                update.config_options.clone(),
+            ));
+        }
+        SessionUpdate::AvailableCommandsUpdate(update) => {
+            catalogs.commands = Some(normalize_available_commands(update.clone()));
+        }
+        SessionUpdate::SessionInfoUpdate(update) => {
+            catalogs.metadata = Some(metadata_update_from_acp(update.clone()));
+        }
+        _ => {}
+    }
+    catalogs
+}
+
 fn metadata_update_from_acp(
     update: agent_client_protocol::schema::SessionInfoUpdate,
 ) -> AgentSessionMetadataUpdate {
@@ -67,18 +83,6 @@ fn metadata_update_from_acp(
         title: metadata_field(update.title),
         updated_at: metadata_field(update.updated_at),
     }
-}
-
-pub(super) fn session_metadata_from_update(
-    update: &SessionUpdate,
-) -> Option<AgentSessionMetadataUpdate> {
-    let SessionUpdate::SessionInfoUpdate(update) = update else {
-        return None;
-    };
-    Some(AgentSessionMetadataUpdate {
-        title: metadata_field(update.title.clone()),
-        updated_at: metadata_field(update.updated_at.clone()),
-    })
 }
 
 fn metadata_field(value: MaybeUndefined<String>) -> AgentMetadataField<String> {

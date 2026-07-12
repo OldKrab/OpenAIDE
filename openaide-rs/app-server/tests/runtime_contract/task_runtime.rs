@@ -203,7 +203,7 @@ fn cancel_signals_agent_after_turn_started() {
             tail_limit: 20,
         })
         .unwrap();
-    assert!(!passive
+    assert!(passive
         .chat
         .items
         .iter()
