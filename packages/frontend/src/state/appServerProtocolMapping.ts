@@ -263,6 +263,7 @@ function taskWithCapabilityStatus(task: TaskSummary, snapshot: ProtocolTaskSnaps
 function taskSummaryStatusFromProtocol(status: ProtocolTaskStatus): TaskSummary["status"] {
   switch (status) {
     case "running":
+    case "starting":
     case "preparing":
       return "active";
     case "blocked":

@@ -38,10 +38,6 @@ impl CommittedSend {
         &self.turn_id
     }
 
-    pub(super) fn user_message_id(&self) -> &MessageId {
-        &self.user_message_id
-    }
-
     pub(super) fn accepted(&self, api: &TaskProductApi) -> Result<TaskSendAccepted, ProtocolError> {
         let snapshot = build_snapshot(&api.store, &self.task_id, 100).map_err(storage_error)?;
         Ok(TaskSendAccepted {

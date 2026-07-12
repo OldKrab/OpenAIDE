@@ -92,6 +92,16 @@ impl TurnRunner {
             if cancellation.is_cancelled() || !runner.turn_is_active(&task_id, &turn_id) {
                 return;
             }
+            match runner.transitions().mark_turn_running(&task_id, &turn_id) {
+                Ok(true) => {}
+                Ok(false) => return,
+                Err(error) => {
+                    let _ = runner
+                        .transitions()
+                        .finish_turn(&task_id, &turn_id, Err(error));
+                    return;
+                }
+            }
 
             let sink = Arc::new(TaskEventSink::new(
                 runner.mutations.clone(),

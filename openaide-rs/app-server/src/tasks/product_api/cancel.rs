@@ -78,17 +78,9 @@ impl TaskProductApi {
         // Keep Task acceptance serialized through generation retirement. Failed persistence
         // leaves the accepted Turn untouched, and a successful cancel cannot invalidate a newer
         // send between its exact-Turn commit and startup cancellation.
-        let cancellation_generation = self.history_sync.begin_send(&task_id);
         self.turn_runner.cancel_turn(&active_turn_id);
         self.turn_acceptance
             .retire_pending_turn(&task_id, &active_turn_id);
-        self.pending_send_sync.take(&task_id);
-        self.publish_history_sync(
-            &task_id,
-            openaide_app_server_protocol::snapshot::TaskHistorySyncSnapshot::Idle {
-                generation: cancellation_generation,
-            },
-        );
         let snapshot = result
             .response_snapshot
             .ok_or_else(|| internal_error("missing task cancel snapshot"))?;

@@ -55,6 +55,7 @@ pub enum TaskTitleSource {
 #[serde(rename_all = "camelCase")]
 pub enum TaskStatus {
     Preparing,
+    Starting,
     Idle,
     Running,
     Blocked,

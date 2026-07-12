@@ -31,8 +31,6 @@ struct StoreInner {
     open_guard: StorageOpenGuard,
     settings_write_lock: Mutex<()>,
     #[cfg(test)]
-    fail_next_tail_page: AtomicBool,
-    #[cfg(test)]
     fail_next_task_write: AtomicBool,
     #[cfg(test)]
     message_file_write_count: AtomicUsize,
@@ -62,8 +60,6 @@ impl Store {
                 recovery: open.recovery,
                 open_guard: open.guard,
                 settings_write_lock: Mutex::new(()),
-                #[cfg(test)]
-                fail_next_tail_page: AtomicBool::new(false),
                 #[cfg(test)]
                 fail_next_task_write: AtomicBool::new(false),
                 #[cfg(test)]
@@ -111,16 +107,6 @@ impl Store {
     pub fn task_dir(&self, task_id: &str) -> Result<PathBuf, RuntimeError> {
         id::validate_task_id(task_id)?;
         Ok(self.tasks_dir().join(task_id))
-    }
-
-    #[cfg(test)]
-    pub(crate) fn fail_next_tail_page_for_test(&self) {
-        self.inner.fail_next_tail_page.store(true, Ordering::SeqCst);
-    }
-
-    #[cfg(test)]
-    pub(super) fn take_tail_page_failure_for_test(&self) -> bool {
-        self.inner.fail_next_tail_page.swap(false, Ordering::SeqCst)
     }
 
     #[cfg(test)]

@@ -11,10 +11,7 @@ use super::TaskProductApi;
 
 pub(super) enum OpenedAgentSession<'a> {
     Started(TaskSessionStartGuard<'a>),
-    Loaded {
-        guard: TaskSessionStartGuard<'a>,
-        replayed_messages: Vec<crate::protocol::model::NormalizedMessage>,
-    },
+    Loaded { guard: TaskSessionStartGuard<'a> },
     Resumed(AgentSession),
 }
 
@@ -37,15 +34,6 @@ impl OpenedAgentSession<'_> {
             OpenedAgentSession::Started(guard) => guard.commit(),
             OpenedAgentSession::Loaded { guard, .. } => guard.commit(),
             OpenedAgentSession::Resumed(session) => session,
-        }
-    }
-
-    pub(super) fn replayed_messages(&self) -> &[crate::protocol::model::NormalizedMessage] {
-        match self {
-            OpenedAgentSession::Loaded {
-                replayed_messages, ..
-            } => replayed_messages,
-            _ => &[],
         }
     }
 
@@ -138,7 +126,6 @@ impl TaskProductApi {
                     })
                     .map(|loaded| OpenedAgentSession::Loaded {
                         guard: TaskSessionStartGuard::new(&self.agent_gateway, loaded.session),
-                        replayed_messages: loaded.replayed_messages,
                     })
                     .or_else(|error| {
                         if is_restart_load_start_gap(&error) {

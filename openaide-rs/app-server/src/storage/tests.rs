@@ -496,6 +496,24 @@ fn listed_task_ids(store: &Store) -> Vec<String> {
         .collect()
 }
 
+#[test]
+fn local_history_timestamp_advances_for_every_chat_write() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let task_id = "task-history-clock";
+
+    store
+        .append_message(task_id, chat_message("message-1", "First"))
+        .unwrap();
+    let first = store.local_history_updated_at(task_id).unwrap();
+    store
+        .append_message(task_id, chat_message("message-2", "Second"))
+        .unwrap();
+    let second = store.local_history_updated_at(task_id).unwrap();
+
+    assert!(second > first);
+}
+
 fn task_record(task_id: &str, status: TaskStatus, created_at: &str) -> TaskRecord {
     TaskRecord {
         task_id: task_id.to_string(),

@@ -544,7 +544,7 @@ export type TaskTitle = { value: string, source: TaskTitleSource, };
 
 export type TaskTitleSource = "agent" | "user";
 
-export type TaskStatus = "preparing" | "idle" | "running" | "blocked" | "interrupted" | "failed" | "completed";
+export type TaskStatus = "preparing" | "starting" | "idle" | "running" | "blocked" | "interrupted" | "failed" | "completed";
 
 export type TaskLifecycle = "new" | "visible";
 

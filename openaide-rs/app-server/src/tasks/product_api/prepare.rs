@@ -19,9 +19,6 @@ impl TaskProductApi {
             if let Err(error) = api.prepare_task_native_session(&task) {
                 let _ = api.persist_preparation_failure(&task.task_id, &error);
             }
-            // Preparation persistence and send waiting use different locks. Notify only after
-            // the commit attempt so waiters either observe Ready/Failed or remain cancellable.
-            api.history_sync.notify_task_state_changed();
         });
     }
 

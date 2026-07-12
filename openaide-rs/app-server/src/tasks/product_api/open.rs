@@ -362,60 +362,6 @@ impl TaskProductApi {
             }
         }
     }
-
-    fn retry_history_sync_serialized(
-        &self,
-        client_instance_id: &ClientInstanceId,
-        params: TaskRetryHistorySyncParams,
-    ) -> Result<TaskSnapshot, ProtocolError> {
-        let task_id = params.task_id.as_str().to_string();
-        if !self.pending_send_sync.contains(&task_id) {
-            return self.open_task(
-                client_instance_id,
-                TaskOpenParams {
-                    task_id: params.task_id,
-                },
-            );
-        }
-        let task = self.store.read_task(&task_id).map_err(runtime_error)?;
-        super::reject_tombstoned_task(&task)?;
-        let snapshot = crate::tasks::snapshot::build_snapshot(&self.store, &task_id, 100)
-            .map_err(super::storage_error)?;
-        let snapshot = self.project_task_snapshot(snapshot)?;
-        // Do not consume the only exact prompt/attachment payload until every
-        // fallible pre-start read and projection has succeeded.
-        let Some(pending) = self.pending_send_sync.take(&task_id) else {
-            return self.open_task(
-                client_instance_id,
-                TaskOpenParams {
-                    task_id: params.task_id,
-                },
-            );
-        };
-        let sync_generation = self.history_sync.begin_send(&task_id);
-        self.publish_history_sync(
-            &task_id,
-            openaide_app_server_protocol::snapshot::TaskHistorySyncSnapshot::Syncing {
-                generation: sync_generation,
-            },
-        );
-        let api = self.clone();
-        std::thread::spawn(move || {
-            if let Err(error) = api.start_committed_send(
-                task,
-                pending.prompt_text,
-                pending.attachments,
-                pending.committed_send,
-                sync_generation,
-            ) {
-                logging::error(
-                    "task_history_sync_retry_failed",
-                    serde_json::json!({ "task_id": task_id, "error": error.message }),
-                );
-            }
-        });
-        Ok(snapshot)
-    }
 }
 
 /// Native history replacement is destructive, so missing or incomparable clocks never win.
@@ -457,10 +403,11 @@ impl TaskOpenWorkflow for TaskProductApi {
         client_instance_id: &ClientInstanceId,
         params: TaskRetryHistorySyncParams,
     ) -> Result<TaskSnapshot, ProtocolError> {
-        let task_id = params.task_id.as_str().to_string();
-        self.read_task_for_client(&task_id, client_instance_id)?;
-        self.turn_acceptance.serialize(&task_id, || {
-            self.retry_history_sync_serialized(client_instance_id, params)
-        })
+        self.open_task(
+            client_instance_id,
+            TaskOpenParams {
+                task_id: params.task_id,
+            },
+        )
     }
 }

@@ -98,17 +98,9 @@ impl TaskProductApi {
         match result.outcome {
             TaskCommitOutcome::Committed(_) => {
                 if let Some(turn_id) = candidate.active_turn_id.as_deref() {
-                    let cancellation_generation = self.history_sync.begin_send(&candidate.task_id);
                     self.turn_runner.detach_stuck_turn(turn_id);
                     self.turn_acceptance
                         .retire_pending_turn(&candidate.task_id, turn_id);
-                    self.pending_send_sync.take(&candidate.task_id);
-                    self.publish_history_sync(
-                        &candidate.task_id,
-                        openaide_app_server_protocol::snapshot::TaskHistorySyncSnapshot::Idle {
-                            generation: cancellation_generation,
-                        },
-                    );
                 }
                 let snapshot = result
                     .response_snapshot

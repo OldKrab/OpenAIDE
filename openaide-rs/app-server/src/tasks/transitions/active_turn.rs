@@ -13,6 +13,38 @@ impl TaskTransitions {
         Ok(self.mutations.store().read_task(task_id)?.active_turn_id)
     }
 
+    /// Marks durable acceptance as running immediately before the Agent receives the prompt.
+    pub(crate) fn mark_turn_running(
+        &self,
+        task_id: &str,
+        turn_id: &str,
+    ) -> Result<bool, RuntimeError> {
+        let mut prompt_may_start = false;
+        let result = self.mutations.commit_existing_task(
+            task_id,
+            crate::tasks::mutation::TaskCommitOptions::metadata(),
+            |ctx| {
+                if ctx.task().active_turn_id.as_deref() != Some(turn_id) {
+                    return Ok(TaskMutationResult::Unchanged);
+                }
+                if ctx.task().status == TaskStatus::Active {
+                    prompt_may_start = true;
+                    return Ok(TaskMutationResult::Unchanged);
+                }
+                if ctx.task().status != TaskStatus::Starting {
+                    return Ok(TaskMutationResult::Unchanged);
+                }
+                prompt_may_start = true;
+                let task = ctx.task_mut();
+                task.status = TaskStatus::Active;
+                task.updated_at = now_string();
+                Ok(TaskMutationResult::Changed)
+            },
+        )?;
+        let _ = result;
+        Ok(prompt_may_start)
+    }
+
     pub(crate) fn cancel_running_task(
         &self,
         task_id: &str,

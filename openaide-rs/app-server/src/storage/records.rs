@@ -218,6 +218,7 @@ pub struct MessageMeta {
     pub task_id: String,
     pub version: u64,
     pub message_count: u64,
+    pub local_history_updated_at: String,
     pub first_cursor: Option<String>,
     pub last_cursor: Option<String>,
 }

@@ -1768,7 +1768,7 @@ fn task_send_commits_user_message_and_active_turn_after_initialize() {
     let response = response(&responses[0]);
     assert_eq!(
         response["result"]["result"]["task"]["task"]["status"],
-        "running"
+        "starting"
     );
     assert_eq!(
         response["result"]["result"]["task"]["chat"]["items"][0]["parts"][0]["text"],

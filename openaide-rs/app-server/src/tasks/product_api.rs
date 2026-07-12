@@ -61,7 +61,6 @@ pub(crate) struct TaskProductApi {
     turn_runner: TurnRunner,
     turn_acceptance: crate::tasks::turn_acceptance::TurnAcceptanceCoordinator,
     config_operations: crate::tasks::task_operation::TaskOperationCoordinator,
-    pending_send_sync: crate::tasks::pending_send_sync::PendingSendSyncCoordinator,
     // ACP may expose a newly started session before its Task metadata commit finishes.
     // Keep that session reserved so external-session listing never leaks a New Task.
     preparing_session_ids: Arc<Mutex<HashSet<AgentSessionKey>>>,
@@ -219,7 +218,6 @@ impl TaskProductApi {
             turn_runner,
             turn_acceptance: Default::default(),
             config_operations: Default::default(),
-            pending_send_sync: Default::default(),
             preparing_session_ids: Arc::new(Mutex::new(HashSet::new())),
             history_sync: crate::tasks::history_sync::HistorySyncCoordinator::default(),
             server_requests,
@@ -336,17 +334,6 @@ impl TaskProductApi {
         params: openaide_app_server_protocol::task::TaskMarkReadParams,
     ) -> Result<TaskSnapshot, ProtocolError> {
         self.mark_task_read(
-            &crate::attachment_runtime::AttachmentOwner::test_client_instance_id(),
-            params,
-        )
-    }
-
-    pub(crate) fn retry_history_sync_for_test(
-        &self,
-        params: openaide_app_server_protocol::task::TaskRetryHistorySyncParams,
-    ) -> Result<TaskSnapshot, ProtocolError> {
-        TaskOpenWorkflow::retry_history_sync(
-            self,
             &crate::attachment_runtime::AttachmentOwner::test_client_instance_id(),
             params,
         )

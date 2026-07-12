@@ -123,6 +123,7 @@ function safeText(value: unknown) {
 function activeTaskStatus(value: unknown): RuntimeDiagnostics["tasks"]["active_tasks"][number]["status"] | undefined {
   switch (value) {
     case "preparing":
+    case "starting":
     case "idle":
     case "running":
     case "blocked":

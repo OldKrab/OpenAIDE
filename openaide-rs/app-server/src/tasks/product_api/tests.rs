@@ -1,19 +1,19 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use openaide_app_server_protocol::agent::AgentListSessionsParams;
 use openaide_app_server_protocol::ids::{AgentId, ClientInstanceId, ProjectId, TaskId};
 use openaide_app_server_protocol::snapshot::{
     LiveSessionDataState, MessagePart, TaskHistorySyncSnapshot, TaskPreparationSnapshot,
-    TaskSendCapabilityState,
+    TaskSendCapabilityState, TaskStatus as ProtocolTaskStatus,
 };
 use openaide_app_server_protocol::support::SupportRecoverStuckSessionsParams;
 use openaide_app_server_protocol::task::{
     ComposerMessage, TaskAdoptNativeSessionParams, TaskCancelParams, TaskCreateParams,
-    TaskDiscardParams, TaskMarkReadParams, TaskOpenParams, TaskRetryHistorySyncParams,
-    TaskSendParams, TaskSetArchivedParams, TaskSetConfigOptionParams,
+    TaskDiscardParams, TaskMarkReadParams, TaskOpenParams, TaskSendParams, TaskSetArchivedParams,
+    TaskSetConfigOptionParams,
 };
 use openaide_app_server_protocol::workspace::WorkspaceListDirectoryParams;
 
@@ -636,13 +636,13 @@ fn create_persists_preparing_and_starts_one_native_session_asynchronously() {
 
     wait_until(|| agent.starts.load(Ordering::SeqCst) == 1);
     let preparing_record = store.read_task(snapshot.task.task_id.as_str()).unwrap();
-    let accepted = api
+    let too_early = api
         .send(send_params(
             snapshot.task.task_id.as_str(),
             snapshot.revision,
             "too soon",
         ))
-        .unwrap();
+        .unwrap_err();
     agent.block_start.store(false, Ordering::SeqCst);
 
     assert!(matches!(
@@ -659,12 +659,11 @@ fn create_persists_preparing_and_starts_one_native_session_asynchronously() {
         TaskPreparationRecord::Preparing
     ));
     assert_eq!(preparing_record.agent_session_id, None);
-    assert!(accepted.turn_id.as_str().starts_with("turn_"));
+    assert_eq!(too_early.code, ProtocolErrorCode::Conflict);
     assert!(store
         .read_messages(snapshot.task.task_id.as_str())
         .unwrap()
-        .iter()
-        .any(|message| matches!(message.chat.message, NormalizedMessage::User { .. })));
+        .is_empty());
 
     wait_until(|| {
         matches!(
@@ -686,6 +685,14 @@ fn create_persists_preparing_and_starts_one_native_session_asynchronously() {
     assert_eq!(ready.agent_config.options[0].current_value, "gpt-5");
     assert_eq!(ready.agent_commands.state, LiveSessionDataState::Ready);
     assert_eq!(ready.agent_commands.commands[0].name, "web");
+    let accepted = api
+        .send(send_params(
+            snapshot.task.task_id.as_str(),
+            ready.revision,
+            "ready now",
+        ))
+        .unwrap();
+    assert!(accepted.turn_id.as_str().starts_with("turn_"));
     wait_until(|| agent.prompts.load(Ordering::SeqCst) == 1);
     assert_eq!(agent.starts.load(Ordering::SeqCst), 1);
     assert_eq!(agent.attaches.load(Ordering::SeqCst), 2);
@@ -699,7 +706,7 @@ fn create_persists_preparing_and_starts_one_native_session_asynchronously() {
 }
 
 #[test]
-fn create_projects_native_session_start_failure_into_the_accepted_turn() {
+fn create_projects_native_session_start_failure_into_send_readiness() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
@@ -742,20 +749,13 @@ fn create_projects_native_session_start_failure_into_the_accepted_turn() {
             task_id: created.task.task_id.clone(),
         })
         .unwrap();
-    let accepted = api
+    let rejected = api
         .send(send_params(
             created.task.task_id.as_str(),
             failed.revision,
             "do not commit",
         ))
-        .unwrap();
-
-    wait_until(|| {
-        store
-            .read_task(created.task.task_id.as_str())
-            .map(|task| task.status == TaskStatus::Failed)
-            .unwrap_or(false)
-    });
+        .unwrap_err();
 
     assert!(matches!(
         failed.preparation,
@@ -772,14 +772,13 @@ fn create_projects_native_session_start_failure_into_the_accepted_turn() {
             if message.contains("agent failed to start")
     ));
     assert_eq!(failed_record.agent_session_id, None);
-    assert!(accepted.turn_id.as_str().starts_with("turn_"));
+    assert_eq!(rejected.code, ProtocolErrorCode::Internal);
     assert_eq!(agent.starts.load(Ordering::SeqCst), 1);
     assert_eq!(agent.prompts.load(Ordering::SeqCst), 0);
     assert!(store
         .read_messages(created.task.task_id.as_str())
         .unwrap()
-        .iter()
-        .any(|message| matches!(message.chat.message, NormalizedMessage::User { .. })));
+        .is_empty());
 }
 
 #[test]
@@ -1184,16 +1183,11 @@ fn startup_marks_abandoned_preparation_failed_instead_of_loading_forever() {
         Some("gpt-5.5")
     );
     assert_eq!(record.model_id.as_deref(), Some("gpt-5.5"));
-    let accepted = api
+    let rejected = api
         .send(send_params("task-preparing", record.revision, "hello"))
-        .unwrap();
-    wait_until(|| {
-        store
-            .read_task("task-preparing")
-            .map(|task| task.status == TaskStatus::Failed)
-            .unwrap_or(false)
-    });
-    assert!(accepted.turn_id.as_str().starts_with("turn_"));
+        .unwrap_err();
+    assert_eq!(rejected.code, ProtocolErrorCode::Internal);
+    assert!(store.read_messages("task-preparing").unwrap().is_empty());
 }
 
 #[test]
@@ -1890,7 +1884,7 @@ fn rejected_send_does_not_supersede_the_active_history_check() {
 }
 
 #[test]
-fn send_supersedes_blocked_history_listing_and_reconciles_replay_before_prompt() {
+fn send_does_not_wait_for_or_apply_a_blocked_history_listing() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut task = task_record("task-existing", "/workspace/app");
@@ -1950,306 +1944,7 @@ fn send_supersedes_blocked_history_listing_and_reconciles_replay_before_prompt()
             _ => None,
         })
         .collect::<Vec<_>>();
-    assert_eq!(texts, ["History only the Agent had.", "What next?"]);
-}
-
-#[test]
-fn failed_pre_send_sync_retries_without_duplicating_the_accepted_message() {
-    let temp = tempfile::tempdir().unwrap();
-    let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut task = task_record("task-existing", "/workspace/app");
-    task.agent_session_id = Some("native-session".to_string());
-    store.write_task(&task).unwrap();
-    let agent = Arc::new(RecordingAgent {
-        resume_after_restart_unavailable: true,
-        fail_load_once_with_already_active: AtomicBool::new(true),
-        loaded_session_id: Some("native-session".to_string()),
-        ..Default::default()
-    });
-    let api = TaskProductApi::new(
-        store.clone(),
-        Arc::new(StorageProjectResolver::new(store.clone())),
-        AgentRegistry::default_built_ins(),
-        agent.clone(),
-        TaskUpdateNotifier::disabled(),
-    )
-    .unwrap();
-
-    api.send(send_params("task-existing", 1, "Continue"))
-        .unwrap();
-    wait_until(|| agent.loads.load(Ordering::SeqCst) == 1);
-    assert_eq!(agent.prompts.load(Ordering::SeqCst), 0);
-    assert!(store
-        .read_task("task-existing")
-        .unwrap()
-        .active_turn_id
-        .is_some());
-
-    api.retry_history_sync_for_test(TaskRetryHistorySyncParams {
-        task_id: "task-existing".into(),
-    })
-    .unwrap();
-    wait_until(|| agent.prompts.load(Ordering::SeqCst) == 1);
-
-    let user_messages = store
-        .read_messages("task-existing")
-        .unwrap()
-        .into_iter()
-        .filter(|message| matches!(message.chat.message, NormalizedMessage::User { .. }))
-        .count();
-    assert_eq!(user_messages, 1);
-    assert_eq!(agent.loads.load(Ordering::SeqCst), 2);
-    assert_eq!(agent.prompts.load(Ordering::SeqCst), 1);
-}
-
-#[test]
-fn transient_retry_snapshot_failure_keeps_the_exact_pending_send_retryable() {
-    let temp = tempfile::tempdir().unwrap();
-    let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let workspace = temp.path().join("workspace");
-    std::fs::create_dir(&workspace).unwrap();
-    let attachment_path = workspace.join("notes.md");
-    std::fs::write(&attachment_path, "retry context").unwrap();
-    let mut task = task_record("task-existing", workspace.to_string_lossy().as_ref());
-    task.agent_session_id = Some("native-session".to_string());
-    store.write_task(&task).unwrap();
-    let agent = Arc::new(RecordingAgent {
-        resume_after_restart_unavailable: true,
-        fail_load_once_with_already_active: AtomicBool::new(true),
-        loaded_session_id: Some("native-session".to_string()),
-        ..Default::default()
-    });
-    let api = TaskProductApi::new(
-        store.clone(),
-        Arc::new(StorageProjectResolver::new(store.clone())),
-        AgentRegistry::default_built_ins(),
-        agent.clone(),
-        TaskUpdateNotifier::disabled(),
-    )
-    .unwrap();
-    let attachment = api.attachment_runtime().register_file_reference_for_test(
-        TaskId::from("task-existing"),
-        "notes.md",
-        attachment_path,
-    );
-    let mut params = send_params("task-existing", 1, "Continue exactly once");
-    params.message.attachments.push(attachment.handle_id);
-
-    api.send(params).unwrap();
-    wait_until(|| agent.loads.load(Ordering::SeqCst) == 1);
-    store.fail_next_tail_page_for_test();
-
-    let error = api
-        .retry_history_sync_for_test(TaskRetryHistorySyncParams {
-            task_id: "task-existing".into(),
-        })
-        .unwrap_err();
-    assert_eq!(error.code, ProtocolErrorCode::Internal);
-
-    api.retry_history_sync_for_test(TaskRetryHistorySyncParams {
-        task_id: "task-existing".into(),
-    })
-    .unwrap();
-    wait_until(|| agent.prompts.load(Ordering::SeqCst) == 1);
-
-    assert_eq!(agent.loads.load(Ordering::SeqCst), 2);
-    assert_eq!(agent.prompts.load(Ordering::SeqCst), 1);
-    assert_eq!(
-        agent.prompt_calls.lock().unwrap().as_slice(),
-        &[(
-            "native-session".to_string(),
-            "Continue exactly once".to_string()
-        )]
-    );
-    assert_eq!(
-        agent.prompt_attachments.lock().unwrap()[0][0].label,
-        "notes.md"
-    );
-}
-
-#[test]
-fn stopping_failed_pre_send_sync_discards_retry_payload() {
-    let temp = tempfile::tempdir().unwrap();
-    let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut task = task_record("task-existing", "/workspace/app");
-    task.agent_session_id = Some("native-session".to_string());
-    store.write_task(&task).unwrap();
-    let agent = Arc::new(RecordingAgent {
-        resume_after_restart_unavailable: true,
-        fail_load_once_with_already_active: AtomicBool::new(true),
-        ..Default::default()
-    });
-    let api = TaskProductApi::new(
-        store.clone(),
-        Arc::new(StorageProjectResolver::new(store.clone())),
-        AgentRegistry::default_built_ins(),
-        agent.clone(),
-        TaskUpdateNotifier::disabled(),
-    )
-    .unwrap();
-
-    let accepted = api
-        .send(send_params("task-existing", 1, "Continue"))
-        .unwrap();
-    wait_until(|| agent.loads.load(Ordering::SeqCst) == 1);
-    api.cancel_for_test(TaskCancelParams {
-        task_id: "task-existing".into(),
-        turn_id: Some(accepted.turn_id),
-    })
-    .unwrap();
-    api.retry_history_sync_for_test(TaskRetryHistorySyncParams {
-        task_id: "task-existing".into(),
-    })
-    .unwrap();
-    std::thread::sleep(Duration::from_millis(25));
-
-    assert_eq!(agent.prompts.load(Ordering::SeqCst), 0);
-    assert!(store
-        .read_task("task-existing")
-        .unwrap()
-        .active_turn_id
-        .is_none());
-}
-
-#[test]
-fn cancel_linearizes_before_a_failed_send_can_defer_its_retry_payload() {
-    let temp = tempfile::tempdir().unwrap();
-    let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut task = task_record("task-existing", "/workspace/app");
-    task.agent_session_id = Some("native-session".to_string());
-    store.write_task(&task).unwrap();
-    let agent = Arc::new(RecordingAgent {
-        resume_after_restart_unavailable: true,
-        fail_load_once_with_already_active: AtomicBool::new(true),
-        ..Default::default()
-    });
-    let api = TaskProductApi::new(
-        store.clone(),
-        Arc::new(StorageProjectResolver::new(store.clone())),
-        AgentRegistry::default_built_ins(),
-        agent.clone(),
-        TaskUpdateNotifier::disabled(),
-    )
-    .unwrap();
-    let (defer_entered_tx, defer_entered_rx) = mpsc::channel();
-    let (release_defer_tx, release_defer_rx) = mpsc::channel();
-    let (defer_finished_tx, defer_finished_rx) = mpsc::channel();
-    api.pending_send_sync.before_next_defer_for_test(move || {
-        defer_entered_tx.send(()).unwrap();
-        release_defer_rx.recv().unwrap();
-    });
-    api.pending_send_sync
-        .after_next_defer_for_test(move || defer_finished_tx.send(()).unwrap());
-
-    let accepted = api
-        .send(send_params("task-existing", 1, "Do not resurrect"))
-        .unwrap();
-    defer_entered_rx
-        .recv_timeout(Duration::from_millis(250))
-        .expect("failed send should reach retry deferral");
-
-    let cancel_api = api.clone();
-    let (cancel_started_tx, cancel_started_rx) = mpsc::channel();
-    let (cancel_finished_tx, cancel_finished_rx) = mpsc::channel();
-    let cancel = std::thread::spawn(move || {
-        cancel_started_tx.send(()).unwrap();
-        cancel_finished_tx
-            .send(cancel_api.cancel_for_test(TaskCancelParams {
-                task_id: "task-existing".into(),
-                turn_id: Some(accepted.turn_id),
-            }))
-            .unwrap();
-    });
-    cancel_started_rx.recv().unwrap();
-    let cancel_finished_before_defer = cancel_finished_rx
-        .recv_timeout(Duration::from_millis(100))
-        .ok();
-    let cancel_completed_early = cancel_finished_before_defer.is_some();
-
-    release_defer_tx.send(()).unwrap();
-    defer_finished_rx
-        .recv_timeout(Duration::from_millis(250))
-        .expect("failed send should finish its deferral attempt");
-    let cancel_result = match cancel_finished_before_defer {
-        Some(result) => result,
-        None => cancel_finished_rx
-            .recv_timeout(Duration::from_millis(250))
-            .expect("cancel should finish after deferral releases"),
-    };
-    cancel.join().unwrap();
-
-    cancel_result.unwrap();
-    assert!(
-        !cancel_completed_early,
-        "cancel must share turn-acceptance ownership with failure deferral"
-    );
-    assert!(!api.pending_send_sync.contains("task-existing"));
-    api.retry_history_sync_for_test(TaskRetryHistorySyncParams {
-        task_id: "task-existing".into(),
-    })
-    .unwrap();
-    assert_eq!(agent.prompts.load(Ordering::SeqCst), 0);
-}
-
-#[test]
-fn retry_history_sync_waits_for_the_task_turn_acceptance_operation() {
-    let temp = tempfile::tempdir().unwrap();
-    let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut task = task_record("task-existing", "/workspace/app");
-    task.agent_session_id = Some("native-session".to_string());
-    store.write_task(&task).unwrap();
-    let agent = Arc::new(RecordingAgent {
-        resume_after_restart_unavailable: true,
-        fail_load_once_with_already_active: AtomicBool::new(true),
-        ..Default::default()
-    });
-    let api = TaskProductApi::new(
-        store.clone(),
-        Arc::new(StorageProjectResolver::new(store)),
-        AgentRegistry::default_built_ins(),
-        agent.clone(),
-        TaskUpdateNotifier::disabled(),
-    )
-    .unwrap();
-
-    api.send(send_params("task-existing", 1, "Continue"))
-        .unwrap();
-    wait_until(|| agent.loads.load(Ordering::SeqCst) == 1);
-
-    let (operation_entered_tx, operation_entered_rx) = mpsc::channel();
-    let (release_operation_tx, release_operation_rx) = mpsc::channel();
-    let holding_api = api.clone();
-    let holding_operation = std::thread::spawn(move || {
-        holding_api.turn_acceptance.serialize("task-existing", || {
-            operation_entered_tx.send(()).unwrap();
-            release_operation_rx.recv().unwrap();
-        });
-    });
-    operation_entered_rx
-        .recv_timeout(Duration::from_millis(250))
-        .expect("the acceptance operation should hold the Task");
-
-    let (retry_finished_tx, retry_finished_rx) = mpsc::channel();
-    let retry_api = api.clone();
-    let retry = std::thread::spawn(move || {
-        let result = retry_api.retry_history_sync_for_test(TaskRetryHistorySyncParams {
-            task_id: "task-existing".into(),
-        });
-        retry_finished_tx.send(result).unwrap();
-    });
-
-    assert!(retry_finished_rx
-        .recv_timeout(Duration::from_millis(25))
-        .is_err());
-    assert_eq!(agent.loads.load(Ordering::SeqCst), 1);
-
-    release_operation_tx.send(()).unwrap();
-    holding_operation.join().unwrap();
-    retry_finished_rx
-        .recv_timeout(Duration::from_millis(250))
-        .expect("retry should continue after the Task operation")
-        .unwrap();
-    retry.join().unwrap();
+    assert_eq!(texts, ["What next?"]);
 }
 
 #[test]
@@ -2570,7 +2265,11 @@ fn unrelated_task_responses_preserve_current_history_sync_state() {
         TaskUpdateNotifier::disabled(),
     )
     .unwrap();
-    let generation = api.history_sync.begin_send("task-existing");
+    let generation = api
+        .history_sync
+        .begin_passive("task-existing")
+        .expect("history generation")
+        .value();
 
     for expected in [
         TaskHistorySyncSnapshot::Syncing { generation },
@@ -2598,7 +2297,7 @@ fn unrelated_task_responses_preserve_current_history_sync_state() {
 }
 
 #[test]
-fn send_commits_user_message_and_running_turn() {
+fn first_send_accepts_starting_task_without_history_sync() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut new_task = task_record("task-existing", "/workspace/app");
@@ -2615,13 +2314,14 @@ fn send_commits_user_message_and_running_turn() {
 
     let accepted = api.send(send_params("task-existing", 1, "hello")).unwrap();
 
-    assert!(matches!(
+    assert_eq!(accepted.task.task.status, ProtocolTaskStatus::Starting);
+    assert_eq!(
         accepted.task.history_sync,
-        TaskHistorySyncSnapshot::Syncing { generation } if generation > 0
-    ));
+        TaskHistorySyncSnapshot::Idle { generation: 0 }
+    );
     let record = store.read_task("task-existing").unwrap();
     assert_eq!(record.lifecycle, TaskLifecycle::Visible);
-    if record.status == TaskStatus::Active {
+    if matches!(record.status, TaskStatus::Starting | TaskStatus::Active) {
         assert_eq!(
             record.active_turn_id.as_deref(),
             Some(accepted.turn_id.as_str())
@@ -2686,51 +2386,16 @@ fn send_returns_after_durable_acceptance_without_waiting_for_session_start() {
 }
 
 #[test]
-fn first_send_is_accepted_while_draft_session_preparation_is_running() {
+fn accepted_task_becomes_running_only_when_agent_prompt_starts() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut project_anchor = task_record("task-project-anchor", "/workspace/app");
-    project_anchor.lifecycle = TaskLifecycle::Visible;
-    store.write_task(&project_anchor).unwrap();
-    let agent = Arc::new(RecordingAgent::default());
-    agent.block_start.store(true, Ordering::SeqCst);
-    let api = TaskProductApi::new(
-        store.clone(),
-        Arc::new(StorageProjectResolver::new(store)),
-        AgentRegistry::default_built_ins(),
-        agent.clone(),
-        TaskUpdateNotifier::disabled(),
-    )
-    .unwrap();
-    let draft = api
-        .create_for_test(TaskCreateParams {
-            project_id: project_id_for_workspace("/workspace/app"),
-            agent_id: AgentId::from("codex"),
-            workspace_root: None,
-            config_options: Default::default(),
-        })
+    store
+        .write_task(&task_record("task-existing", "/workspace/app"))
         .unwrap();
-    wait_until(|| agent.starts.load(Ordering::SeqCst) == 1);
-
-    let accepted = api.send(send_params(
-        draft.task.task_id.as_str(),
-        draft.revision,
-        "hello",
-    ));
-    agent.block_start.store(false, Ordering::SeqCst);
-
-    assert!(accepted.is_ok(), "first Send waited for Task preparation");
-}
-
-#[test]
-fn accepted_send_waiting_for_draft_preparation_remains_the_owned_shutdown_blocker() {
-    let temp = tempfile::tempdir().unwrap();
-    let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut project_anchor = task_record("task-project-anchor", "/workspace/app");
-    project_anchor.lifecycle = TaskLifecycle::Visible;
-    store.write_task(&project_anchor).unwrap();
-    let agent = Arc::new(RecordingAgent::default());
-    agent.block_start.store(true, Ordering::SeqCst);
+    let agent = Arc::new(RecordingAgent {
+        block_prompt: true,
+        ..RecordingAgent::default()
+    });
     let api = TaskProductApi::new(
         store.clone(),
         Arc::new(StorageProjectResolver::new(store.clone())),
@@ -2739,122 +2404,16 @@ fn accepted_send_waiting_for_draft_preparation_remains_the_owned_shutdown_blocke
         TaskUpdateNotifier::disabled(),
     )
     .unwrap();
-    let draft = api
-        .create_for_test(TaskCreateParams {
-            project_id: project_id_for_workspace("/workspace/app"),
-            agent_id: AgentId::from("codex"),
-            workspace_root: None,
-            config_options: Default::default(),
-        })
-        .unwrap();
-    wait_until(|| agent.starts.load(Ordering::SeqCst) == 1);
 
-    let accepted = api
-        .send(send_params(
-            draft.task.task_id.as_str(),
-            draft.revision,
-            "first",
-        ))
-        .unwrap();
-    let blockers = api.shutdown_blockers().unwrap();
-    let second = api.send(send_params(
-        draft.task.task_id.as_str(),
-        accepted.task.revision,
-        "second",
-    ));
-    let task_while_preparing = store.read_task(draft.task.task_id.as_str()).unwrap();
-
-    agent.block_start.store(false, Ordering::SeqCst);
-    wait_until(|| {
-        matches!(
-            store
-                .read_task(draft.task.task_id.as_str())
-                .map(|task| task.preparation),
-            Ok(TaskPreparationRecord::Ready)
-        )
-    });
-
-    assert_eq!(blockers.active_turns, 1);
-    assert_eq!(second.unwrap_err().code, ProtocolErrorCode::Conflict);
+    let accepted = api.send(send_params("task-existing", 1, "hello")).unwrap();
+    assert_eq!(accepted.task.task.status, ProtocolTaskStatus::Starting);
+    wait_until(|| agent.prompts.load(Ordering::SeqCst) == 1);
     assert_eq!(
-        task_while_preparing.active_turn_id.as_deref(),
-        Some(accepted.turn_id.as_str())
+        store.read_task("task-existing").unwrap().status,
+        TaskStatus::Active,
     );
-}
 
-#[test]
-fn stopping_a_send_waiting_for_draft_preparation_retires_its_sync_generation() {
-    let temp = tempfile::tempdir().unwrap();
-    let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut project_anchor = task_record("task-project-anchor", "/workspace/app");
-    project_anchor.lifecycle = TaskLifecycle::Visible;
-    store.write_task(&project_anchor).unwrap();
-    let agent = Arc::new(RecordingAgent::default());
-    agent.block_start.store(true, Ordering::SeqCst);
-    let (notifier, updates) = TaskUpdateNotifier::channel();
-    let api = TaskProductApi::new(
-        store.clone(),
-        Arc::new(StorageProjectResolver::new(store.clone())),
-        AgentRegistry::default_built_ins(),
-        agent.clone(),
-        notifier,
-    )
-    .unwrap();
-    let draft = api
-        .create_for_test(TaskCreateParams {
-            project_id: project_id_for_workspace("/workspace/app"),
-            agent_id: AgentId::from("codex"),
-            workspace_root: None,
-            config_options: Default::default(),
-        })
-        .unwrap();
-    wait_until(|| agent.starts.load(Ordering::SeqCst) == 1);
-    while updates.try_recv().is_ok() {}
-
-    let accepted = api
-        .send(send_params(
-            draft.task.task_id.as_str(),
-            draft.revision,
-            "hello",
-        ))
-        .unwrap();
-    let syncing_generation = loop {
-        let update = updates
-            .recv_timeout(Duration::from_millis(250))
-            .expect("Send should publish its history-sync generation");
-        if let Some(TaskHistorySyncSnapshot::Syncing { generation }) = update.history_sync {
-            break generation;
-        }
-    };
-
-    api.cancel_for_test(TaskCancelParams {
-        task_id: draft.task.task_id.clone(),
-        turn_id: Some(accepted.turn_id),
-    })
-    .unwrap();
-    let terminal = loop {
-        match updates.recv_timeout(Duration::from_millis(250)) {
-            Ok(update) if update.history_sync.is_some() => break update.history_sync,
-            Ok(_) => {}
-            Err(_) => break None,
-        }
-    };
-    agent.block_start.store(false, Ordering::SeqCst);
-    wait_until(|| {
-        matches!(
-            store
-                .read_task(draft.task.task_id.as_str())
-                .unwrap()
-                .preparation,
-            TaskPreparationRecord::Ready
-        )
-    });
-
-    assert!(matches!(
-        terminal,
-        Some(TaskHistorySyncSnapshot::Idle { generation }) if generation > syncing_generation
-    ));
-    assert_eq!(agent.prompts.load(Ordering::SeqCst), 0);
+    agent.release_prompt.store(true, Ordering::SeqCst);
 }
 
 #[test]
@@ -4192,7 +3751,7 @@ fn stale_cancel_cannot_retire_the_generation_of_a_newer_accepted_send() {
 }
 
 #[test]
-fn failed_cancel_commit_does_not_retire_an_accepted_send_waiting_for_preparation() {
+fn failed_cancel_commit_does_not_retire_an_accepted_send() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut project_anchor = task_record("task-project-anchor", "/workspace/app");
@@ -4220,13 +3779,28 @@ fn failed_cancel_commit_does_not_retire_an_accepted_send_waiting_for_preparation
         })
         .unwrap();
     wait_until(|| agent.starts.load(Ordering::SeqCst) == 1);
+    agent.block_start.store(false, Ordering::SeqCst);
+    wait_until(|| {
+        matches!(
+            store
+                .read_task(draft.task.task_id.as_str())
+                .map(|task| task.preparation),
+            Ok(TaskPreparationRecord::Ready)
+        )
+    });
+    let ready = api
+        .open_for_test(TaskOpenParams {
+            task_id: draft.task.task_id.clone(),
+        })
+        .unwrap();
     let accepted = api
         .send(send_params(
             draft.task.task_id.as_str(),
-            draft.revision,
+            ready.revision,
             "hello",
         ))
         .unwrap();
+    wait_until(|| agent.prompts.load(Ordering::SeqCst) == 1);
 
     store.fail_next_task_write_for_test();
     let error = api
@@ -4235,8 +3809,6 @@ fn failed_cancel_commit_does_not_retire_an_accepted_send_waiting_for_preparation
             turn_id: Some(accepted.turn_id.clone()),
         })
         .unwrap_err();
-    agent.block_start.store(false, Ordering::SeqCst);
-    wait_until(|| agent.prompts.load(Ordering::SeqCst) == 1);
 
     assert_eq!(error.code, ProtocolErrorCode::Internal);
     assert_eq!(

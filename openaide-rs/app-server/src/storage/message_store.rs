@@ -92,12 +92,6 @@ impl Store {
     }
 
     pub fn tail_page(&self, task_id: &str, limit: usize) -> Result<MessagePage, RuntimeError> {
-        #[cfg(test)]
-        if self.take_tail_page_failure_for_test() {
-            return Err(RuntimeError::Storage(
-                "injected Task snapshot read failure".to_string(),
-            ));
-        }
         let limit = limit.clamp(1, 500);
         let messages = self.read_messages(task_id)?;
         let total = messages.len();
@@ -136,6 +130,13 @@ impl Store {
         self.read_message_version(task_id, messages.len() as u64)
     }
 
+    /// Timestamp of the latest durable Chat write, independent from Task metadata changes.
+    pub fn local_history_updated_at(&self, task_id: &str) -> Result<String, RuntimeError> {
+        let path = self.task_dir(task_id)?.join("message_meta.json");
+        let text = fs::read_to_string(path)?;
+        Ok(serde_json::from_str::<MessageMeta>(&text)?.local_history_updated_at)
+    }
+
     pub fn message_history_has_messages(&self, task_id: &str) -> Result<bool, RuntimeError> {
         let path = self.task_dir(task_id)?.join("message_meta.json");
         if path.exists() {
@@ -166,10 +167,20 @@ impl Store {
 
     fn write_meta(&self, task_id: &str, messages: &[StoredMessage]) -> Result<(), RuntimeError> {
         let version = self.next_message_version(task_id, messages.len() as u64)?;
+        let previous = self
+            .local_history_updated_at(task_id)
+            .ok()
+            .and_then(|value| value.parse::<u128>().ok())
+            .unwrap_or_default();
+        let now = crate::time::now_string()
+            .parse::<u128>()
+            .unwrap_or_default();
+        let local_history_updated_at = now.max(previous.saturating_add(1)).to_string();
         let meta = MessageMeta {
             task_id: task_id.to_string(),
             version,
             message_count: messages.len() as u64,
+            local_history_updated_at,
             first_cursor: messages.first().map(|message| message.chat.cursor.clone()),
             last_cursor: messages.last().map(|message| message.chat.cursor.clone()),
         };

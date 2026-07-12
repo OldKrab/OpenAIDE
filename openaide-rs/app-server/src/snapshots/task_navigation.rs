@@ -117,6 +117,7 @@ pub(crate) fn project_legacy_task_summary(
 
 pub(crate) fn project_status(status: TaskStatus) -> ProtocolTaskStatus {
     match status {
+        TaskStatus::Starting => ProtocolTaskStatus::Starting,
         TaskStatus::Active => ProtocolTaskStatus::Running,
         TaskStatus::Inactive => ProtocolTaskStatus::Idle,
         TaskStatus::Failed => ProtocolTaskStatus::Failed,

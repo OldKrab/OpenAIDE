@@ -8,6 +8,7 @@ use super::{AgentCommandsCatalog, ConfigOptionsCatalog, MessagePage, NormalizedM
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskStatus {
+    Starting,
     Active,
     Inactive,
     Failed,
