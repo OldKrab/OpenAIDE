@@ -7,6 +7,7 @@ fn generated_bindings_include_protocol_method_maps() {
     for expected in [
         "export const CLIENT_PROBE = \"client/probe\" as const;",
         "export const CLIENT_INITIALIZE = \"client/initialize\" as const;",
+        "export const CLIENT_CAPABILITIES_CHANGED = \"client/capabilitiesChanged\" as const;",
         "export const STATE_SUBSCRIBE = \"state/subscribe\" as const;",
         "export const STATE_UNSUBSCRIBE = \"state/unsubscribe\" as const;",
         "export const DIAGNOSTICS_GET_RUNTIME = \"diagnostics/getRuntime\" as const;",
@@ -44,6 +45,7 @@ fn generated_bindings_include_protocol_method_maps() {
         "export type RequestParamsByMethod = {",
         "[CLIENT_PROBE]: ClientProbeParams;",
         "[CLIENT_INITIALIZE]: InitializeParams;",
+        "[CLIENT_CAPABILITIES_CHANGED]: ClientCapabilitiesChangedParams;",
         "[STATE_SUBSCRIBE]: StateSubscribeParams;",
         "[STATE_UNSUBSCRIBE]: StateUnsubscribeParams;",
         "[DIAGNOSTICS_GET_RUNTIME]: RuntimeDiagnosticsParams;",
@@ -76,6 +78,7 @@ fn generated_bindings_include_protocol_method_maps() {
         "export type ResponseResultByMethod = {",
         "[CLIENT_PROBE]: ClientProbeResult;",
         "[CLIENT_INITIALIZE]: InitializeResult;",
+        "[CLIENT_CAPABILITIES_CHANGED]: ClientCapabilitiesChangedResult;",
         "[STATE_SUBSCRIBE]: StateSubscribeResult;",
         "[STATE_UNSUBSCRIBE]: StateUnsubscribeResult;",
         "[DIAGNOSTICS_GET_RUNTIME]: RuntimeDiagnosticsResult;",
@@ -112,6 +115,8 @@ fn generated_bindings_include_protocol_method_maps() {
         "export type ClientProbeResponse = ResponseEnvelope<ClientProbeResult>;",
         "export type ClientInitializeRequest = TypedClientRequest<typeof CLIENT_INITIALIZE>;",
         "export type ClientInitializeResponse = ResponseEnvelope<InitializeResult>;",
+        "export type ClientCapabilitiesChangedRequest = TypedClientRequest<typeof CLIENT_CAPABILITIES_CHANGED>;",
+        "export type ClientCapabilitiesChangedResponse = ResponseEnvelope<ClientCapabilitiesChangedResult>;",
         "export type StateSubscribeResponse = ResponseEnvelope<StateSubscribeResult>;",
         "export type StateUnsubscribeResponse = ResponseEnvelope<StateUnsubscribeResult>;",
         "export type DiagnosticsGetRuntimeResponse = ResponseEnvelope<RuntimeDiagnosticsResult>;",
@@ -173,6 +178,9 @@ fn generated_bindings_include_protocol_method_maps() {
         "export type ShellResolveFileRevealResult =",
         "export type StateSubscribeResult =",
         "export type ClientProbeResult =",
+        "export type ClientCapabilitiesChangedParams =",
+        "export type ClientCapabilitiesChangedResult =",
+        "export type ClientWorkspaceRoot =",
         "export type ClientProbeLifecycle = \"running\" | \"draining\" | \"stopping\";",
         "export type SubscriptionScope =",
         "export type SubscriptionSnapshot =",
@@ -191,4 +199,15 @@ fn generated_bindings_include_protocol_method_maps() {
             "missing generated binding line: {expected}"
         );
     }
+}
+
+#[test]
+fn generated_bindings_have_no_trailing_whitespace() {
+    let output = super::bindings();
+    let trailing_line = output.lines().find(|line| *line != line.trim_end());
+
+    assert!(
+        trailing_line.is_none(),
+        "generated TypeScript line has trailing whitespace: {trailing_line:?}"
+    );
 }

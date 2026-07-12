@@ -271,6 +271,54 @@ fn app_server_handoff_initializes_new_task_screen_with_renderable_project_and_ag
 }
 
 #[test]
+fn app_server_handoff_registers_vscode_workspace_project_without_task_history() {
+    let storage = TempDir::new().expect("storage root");
+    let runtime = TempDir::new().expect("runtime root");
+    let mut child = spawn_handoff_runtime_without_configured_projects(&storage, &runtime);
+    let connection = handoff_connection(child.stdout.take().expect("runtime stdout"));
+    let endpoint_url = connection["endpointUrl"].as_str().expect("endpoint url");
+    let auth_token = connection["authToken"].as_str().expect("auth token");
+
+    let initialized = post_local_http_json(
+        endpoint_url,
+        auth_token,
+        "vscode-empty-workspace-client",
+        json!({
+            "jsonrpc": "2.0",
+            "id": "initialize-vscode-workspace",
+            "method": "client/initialize",
+            "params": {
+                "clientInstanceId": "vscode-empty-workspace-client",
+                "shell": { "kind": "vscodeExtension" },
+                "requestedSurface": {
+                    "kind": "project",
+                    "projectId": "project-d997698f027765f9"
+                },
+                "capabilities": {},
+                "workspaceRoots": [{ "path": "/workspace/OpenAIDE" }]
+            }
+        }),
+    );
+
+    let snapshot = &initialized[0]["result"]["result"]["snapshot"];
+    assert!(snapshot["projects"]["projects"]
+        .as_array()
+        .expect("project collection")
+        .iter()
+        .any(|project| {
+            project["projectId"] == "project-d997698f027765f9"
+                && project["label"] == "OpenAIDE"
+        }));
+    assert!(snapshot["tasks"]["tasks"]
+        .as_array()
+        .expect("task navigation")
+        .is_empty());
+
+    child.kill().expect("stop handoff runtime");
+    let _ = child.wait();
+}
+
+#[test]
 fn app_server_handoff_user_can_reopen_prepared_new_task_after_reload_and_send() {
     let storage = TempDir::new().expect("storage root");
     let runtime = TempDir::new().expect("runtime root");
@@ -487,15 +535,35 @@ fn app_server_handoff_user_can_send_first_prompt_after_task_preparation() {
 }
 
 fn spawn_handoff_runtime(storage: &TempDir, runtime: &TempDir) -> std::process::Child {
-    std::process::Command::new(env!("CARGO_BIN_EXE_openaide-app-server"))
+    spawn_handoff_runtime_with_project_roots(storage, runtime, Some(storage.path()))
+}
+
+fn spawn_handoff_runtime_without_configured_projects(
+    storage: &TempDir,
+    runtime: &TempDir,
+) -> std::process::Child {
+    spawn_handoff_runtime_with_project_roots(storage, runtime, None)
+}
+
+fn spawn_handoff_runtime_with_project_roots(
+    storage: &TempDir,
+    runtime: &TempDir,
+    project_roots: Option<&std::path::Path>,
+) -> std::process::Child {
+    let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_openaide-app-server"));
+    command
         .env("OPENAIDE_STORAGE_ROOT", storage.path())
         .env("OPENAIDE_RUNTIME_ROOT", runtime.path())
-        .env("OPENAIDE_PROJECT_ROOTS", storage.path())
         .env("OPENAIDE_APP_SERVER_PROTOCOL", "app-server-handoff")
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
+        .stderr(std::process::Stdio::piped());
+    if let Some(project_roots) = project_roots {
+        command.env("OPENAIDE_PROJECT_ROOTS", project_roots);
+    } else {
+        command.env_remove("OPENAIDE_PROJECT_ROOTS");
+    }
+    command.spawn()
         .expect("spawn handoff runtime")
 }
 

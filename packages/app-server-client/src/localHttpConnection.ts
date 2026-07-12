@@ -6,6 +6,7 @@ import {
   type BackendUnsubscribe,
 } from "./backendConnection.js";
 import type {
+  ClientCapabilitiesChangedParams,
   InitializeParams,
   InitializeResult,
   ProtocolMethod,
@@ -16,7 +17,11 @@ import type {
   ServerRequestMethod,
   ServerRequestResponseResultByMethod,
 } from "./generated/protocol.js";
-import { CLIENT_HEARTBEAT, CLIENT_INITIALIZE } from "./generated/protocol.js";
+import {
+  CLIENT_CAPABILITIES_CHANGED,
+  CLIENT_HEARTBEAT,
+  CLIENT_INITIALIZE,
+} from "./generated/protocol.js";
 import {
   parseLocalHttpWireMessages,
   responseResultForId,
@@ -217,13 +222,34 @@ function createHttpBackendConnection(
     params: RequestParamsByMethod[M],
     meta?: RequestMeta,
   ): Promise<ResponseResultByMethod[M]> {
+    // Background event-stream recovery can race this request. Record the new
+    // declaration first so a concurrent 409 never replays stale workspace facts.
+    rememberInitializationContextUpdate(method, params);
+    let result: ResponseResultByMethod[M];
     try {
-      return await sendRequest(method, params, meta);
+      result = await sendRequest(method, params, meta);
     } catch (error) {
       if (!isNotInitializedError(error) || !lastInitializeParams) throw error;
       await reinitializeConnection();
-      return sendRequest(method, params, meta);
+      result = await sendRequest(method, params, meta);
     }
+    return result;
+  }
+
+  function rememberInitializationContextUpdate<M extends ProtocolMethod>(
+    method: M,
+    params: RequestParamsByMethod[M],
+  ) {
+    if (method !== CLIENT_CAPABILITIES_CHANGED || !lastInitializeParams) return;
+    const update = params as ClientCapabilitiesChangedParams;
+    const next = { ...lastInitializeParams };
+    if (update.capabilities !== undefined && update.capabilities !== null) {
+      next.capabilities = update.capabilities;
+    }
+    if (update.workspaceRoots !== undefined && update.workspaceRoots !== null) {
+      next.workspaceRoots = update.workspaceRoots.map(({ path }) => ({ path }));
+    }
+    lastInitializeParams = next;
   }
 
   async function reinitializeConnection() {

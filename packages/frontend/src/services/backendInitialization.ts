@@ -25,6 +25,13 @@ export function getClientInstanceId(storage = availableSessionStorage()): Client
   return id;
 }
 
+export function clientInstanceIdForBootstrap(bootstrap: WebviewBootstrap): ClientInstanceId {
+  if (bootstrap.surface !== "invalid" && bootstrap.clientInstanceId) {
+    return bootstrap.clientInstanceId as ClientInstanceId;
+  }
+  return getClientInstanceId();
+}
+
 export function taskNavigationScopeForBootstrap(bootstrap: WebviewBootstrap): SubscriptionScope {
   const fixedProjectId = bootstrap.surface !== "invalid" && shellKindForBootstrap(bootstrap) === "vscodeExtension"
     ? bootstrap.projectId
@@ -36,7 +43,7 @@ export function taskNavigationScopeForBootstrap(bootstrap: WebviewBootstrap): Su
 
 export function initializeParamsForBootstrap(
   bootstrap: WebviewBootstrap,
-  clientInstanceId = getClientInstanceId(),
+  clientInstanceId = clientInstanceIdForBootstrap(bootstrap),
 ): InitializeParams {
   const shellKind = shellKindForBootstrap(bootstrap);
   return {

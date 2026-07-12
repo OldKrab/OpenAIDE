@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::Mutex;
 
 use openaide_app_server_protocol::events::TextChunk;
@@ -11,7 +11,9 @@ use crate::protocol::model::NormalizedMessage;
 #[path = "streaming_tests.rs"]
 mod tests;
 
-const MAX_ACTIVE_STREAMS_PER_KIND: usize = 256;
+// Agents overwhelmingly update recent messages. Bounding this working set keeps
+// a pathological Turn from retaining every sourced message until completion.
+const MAX_ACTIVE_STREAMS_PER_KIND: usize = 32;
 
 #[derive(Default)]
 pub(super) struct StreamingRuns {
@@ -40,7 +42,7 @@ impl StreamingRuns {
         text: String,
         source_message_id: Option<String>,
         now: &str,
-    ) -> Result<StreamingWrite, RuntimeError> {
+    ) -> Result<Vec<StreamingWrite>, RuntimeError> {
         stream_chunk(
             &self.text,
             text,
@@ -55,7 +57,7 @@ impl StreamingRuns {
         text: String,
         source_message_id: Option<String>,
         now: &str,
-    ) -> Result<StreamingWrite, RuntimeError> {
+    ) -> Result<Vec<StreamingWrite>, RuntimeError> {
         stream_chunk(
             &self.thought,
             text,
@@ -91,10 +93,18 @@ impl StreamingRuns {
             RunKey::Anonymous => runs.anonymous = write.previous,
             RunKey::Sourced(source_message_id) => match write.previous {
                 Some(previous) => {
+                    touch_recency(&mut runs.sourced_recency, &source_message_id);
                     runs.sourced.insert(source_message_id, previous);
                 }
                 None => {
                     runs.sourced.remove(&source_message_id);
+                    if let Some(index) = runs
+                        .sourced_recency
+                        .iter()
+                        .position(|id| id == &source_message_id)
+                    {
+                        runs.sourced_recency.remove(index);
+                    }
                 }
             },
         }
@@ -105,6 +115,7 @@ impl StreamingRuns {
 struct TextRuns {
     anonymous: Option<TextRun>,
     sourced: BTreeMap<String, TextRun>,
+    sourced_recency: VecDeque<String>,
 }
 
 #[derive(Clone)]
@@ -139,16 +150,17 @@ fn stream_chunk(
     source_message_id: Option<String>,
     now: &str,
     kind: MessageKind,
-) -> Result<StreamingWrite, RuntimeError> {
+) -> Result<Vec<StreamingWrite>, RuntimeError> {
     let mut runs = slot.lock().expect("streaming run lock poisoned");
     let run_key = source_message_id
         .as_ref()
         .map_or(RunKey::Anonymous, |id| RunKey::Sourced(id.clone()));
+    let mut finalized = Vec::new();
     let (run, previous) = match &run_key {
         RunKey::Anonymous => {
             let previous = runs.anonymous.clone();
             if previous.is_none() && active_stream_count(&runs) >= MAX_ACTIVE_STREAMS_PER_KIND {
-                return Err(active_stream_limit_error());
+                finalized.push(evict_oldest_sourced(&mut runs, now, kind)?);
             }
             let run = runs.anonymous.get_or_insert_with(|| new_text_run(None));
             (run, previous)
@@ -160,9 +172,10 @@ fn stream_chunk(
                     anonymous.source_message_id = Some(source_message_id.clone());
                     runs.sourced.insert(source_message_id.clone(), anonymous);
                 } else if active_stream_count(&runs) >= MAX_ACTIVE_STREAMS_PER_KIND {
-                    return Err(active_stream_limit_error());
+                    finalized.push(evict_oldest_sourced(&mut runs, now, kind)?);
                 }
             }
+            touch_recency(&mut runs.sourced_recency, source_message_id);
             let run = runs
                 .sourced
                 .entry(source_message_id.clone())
@@ -183,23 +196,44 @@ fn stream_chunk(
             final_chunk: false,
         })
     };
-    Ok(StreamingWrite {
+    finalized.push(StreamingWrite {
         message: message(kind, run, now, true),
         delta,
         stream: stream_kind(kind),
         run_key,
         previous,
-    })
+    });
+    Ok(finalized)
 }
 
 fn active_stream_count(runs: &TextRuns) -> usize {
     runs.sourced.len() + usize::from(runs.anonymous.is_some())
 }
 
-fn active_stream_limit_error() -> RuntimeError {
-    RuntimeError::Internal(format!(
-        "active Agent message stream limit exceeded ({MAX_ACTIVE_STREAMS_PER_KIND})"
+fn evict_oldest_sourced(
+    runs: &mut TextRuns,
+    now: &str,
+    kind: MessageKind,
+) -> Result<StreamingWrite, RuntimeError> {
+    let source_message_id = runs.sourced_recency.pop_front().ok_or_else(|| {
+        RuntimeError::Internal("active Agent message streams have no evictable source".to_string())
+    })?;
+    let run = runs.sourced.remove(&source_message_id).ok_or_else(|| {
+        RuntimeError::Internal("active Agent message recency is inconsistent".to_string())
+    })?;
+    Ok(finish_write(
+        run,
+        RunKey::Sourced(source_message_id),
+        now,
+        kind,
     ))
+}
+
+fn touch_recency(recency: &mut VecDeque<String>, source_message_id: &str) {
+    if let Some(index) = recency.iter().position(|id| id == source_message_id) {
+        recency.remove(index);
+    }
+    recency.push_back(source_message_id.to_string());
 }
 
 fn new_text_run(source_message_id: Option<String>) -> TextRun {
@@ -224,6 +258,7 @@ fn finish_runs(slot: &Mutex<TextRuns>, now: &str, kind: MessageKind) -> Vec<Stre
                 finish_write(run, RunKey::Sourced(source_message_id), now, kind)
             }),
     );
+    runs.sourced_recency.clear();
     writes
 }
 

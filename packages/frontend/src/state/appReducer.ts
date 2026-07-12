@@ -79,6 +79,7 @@ export type AppAction =
   | { type: "taskInput:submit"; taskId: string; input?: { prompt: string; context: ComposerAttachment[] } }
   | { type: "taskInput:error"; taskId: string; message?: string }
   | { type: "taskInput:attachments:invalidate"; taskId: string; message: string }
+  | { type: "taskOpen:start"; taskId: string }
   | { type: "taskOpen:error"; taskId: string; message: string }
   | { type: "chatPage:start"; taskId: string }
   | { type: "chatPage:result"; taskId: string; page: MessagePage }

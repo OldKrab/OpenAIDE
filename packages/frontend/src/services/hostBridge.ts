@@ -9,7 +9,7 @@ import {
   createWebProxyBackendConnection,
 } from "@openaide/app-server-client";
 import type { WebviewBootstrap } from "../state/surfaceTypes";
-import { getClientInstanceId } from "./backendInitialization";
+import { clientInstanceIdForBootstrap } from "./backendInitialization";
 import { createStandaloneHost, standaloneBootstrap } from "./devHost";
 
 declare global {
@@ -39,6 +39,7 @@ export function getBootstrap(): WebviewBootstrap {
   if (surface === "navigation" || surface === "settings" || surface === "task") {
     return {
       surface,
+      clientInstanceId: document.body.dataset.clientInstanceId || undefined,
       taskId: document.body.dataset.taskId || undefined,
       projectId: document.body.dataset.projectId || undefined,
       preferences,
@@ -78,13 +79,13 @@ export function getBackendConnection() {
   if (bootstrap.surface !== "invalid" && bootstrap.appServerConnection?.kind === "localHttp") {
     return createLocalHttpBackendConnection({
       ...bootstrap.appServerConnection,
-      connectionId: getClientInstanceId(),
+      connectionId: clientInstanceIdForBootstrap(bootstrap),
     });
   }
   if (bootstrap.surface !== "invalid" && bootstrap.appServerConnection?.kind === "webProxy") {
     return createWebProxyBackendConnection({
       endpointUrl: bootstrap.appServerConnection.endpointUrl,
-      connectionId: getClientInstanceId(),
+      connectionId: clientInstanceIdForBootstrap(bootstrap),
     });
   }
   return undefined;
@@ -96,20 +97,29 @@ export function subscribeHostMessages(listener: (message: HostToWebviewMessage) 
   return () => window.removeEventListener("message", onMessage);
 }
 
-export function subscribeWebRouteChanges(listener: (bootstrap: WebviewBootstrap) => void) {
-  if (typeof window === "undefined" || typeof document === "undefined" || document.body.dataset.shell !== "web") {
-    return () => {};
-  }
+export function subscribeSurfaceRouteChanges(listener: (bootstrap: WebviewBootstrap) => void) {
+  if (typeof window === "undefined" || typeof document === "undefined") return () => {};
+  const isWebShell = document.body.dataset.shell === "web";
   const onRoute = (event: Event) => {
     const detail = event instanceof CustomEvent ? event.detail : undefined;
     listener(isWebviewBootstrap(detail) ? detail : getBootstrap());
   };
   const onPopState = () => listener(getBootstrap());
-  window.addEventListener(WEB_ROUTE_EVENT, onRoute);
-  window.addEventListener("popstate", onPopState);
+  const onMessage = (event: MessageEvent) => {
+    const nextBootstrap = bootstrapForSurfaceRouteMessage(event.data);
+    if (nextBootstrap) listener(nextBootstrap);
+  };
+  if (isWebShell) {
+    window.addEventListener(WEB_ROUTE_EVENT, onRoute);
+    window.addEventListener("popstate", onPopState);
+  }
+  window.addEventListener("message", onMessage);
   return () => {
-    window.removeEventListener(WEB_ROUTE_EVENT, onRoute);
-    window.removeEventListener("popstate", onPopState);
+    if (isWebShell) {
+      window.removeEventListener(WEB_ROUTE_EVENT, onRoute);
+      window.removeEventListener("popstate", onPopState);
+    }
+    window.removeEventListener("message", onMessage);
   };
 }
 
@@ -262,4 +272,25 @@ function isWebviewBootstrap(value: unknown): value is WebviewBootstrap {
   if (!value || typeof value !== "object") return false;
   const surface = (value as { surface?: unknown }).surface;
   return surface === "navigation" || surface === "task" || surface === "settings" || surface === "invalid";
+}
+
+function bootstrapForSurfaceRouteMessage(message: unknown): WebviewBootstrap | undefined {
+  if (!message || typeof message !== "object") return undefined;
+  const candidate = message as Partial<HostToWebviewMessage> & { payload?: unknown };
+  if (candidate.type !== "surface.routeChanged" || !candidate.payload || typeof candidate.payload !== "object") {
+    return undefined;
+  }
+  const payload = candidate.payload as { surface?: unknown; task_id?: unknown };
+  if (payload.surface !== "task" || typeof payload.task_id !== "string" || !payload.task_id) return undefined;
+  const current = getBootstrap();
+  return current.surface === "invalid"
+    ? { surface: "task", taskId: payload.task_id }
+    : {
+        ...current,
+        surface: "task",
+        taskId: payload.task_id,
+        projectId: undefined,
+        settingsTab: undefined,
+        archived: undefined,
+      };
 }

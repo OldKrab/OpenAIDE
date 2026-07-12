@@ -14,6 +14,7 @@ type TaskInteractionAction =
   | { type: "taskInput:submit"; taskId: string; input?: { prompt: string; context: ComposerAttachment[] } }
   | { type: "taskInput:error"; taskId: string; message?: string }
   | { type: "taskInput:attachments:invalidate"; taskId: string; message: string }
+  | { type: "taskOpen:start"; taskId: string }
   | { type: "taskOpen:error"; taskId: string; message: string }
   | { type: "chatPage:start"; taskId: string }
   | { type: "chatPage:result"; taskId: string; page: MessagePage }
@@ -151,8 +152,14 @@ export function reduceTaskInteractionState(state: AppState, action: AppAction): 
         },
       };
     }
+    case "taskOpen:start":
+      if (state.taskOpenError?.taskId !== action.taskId) return state;
+      return { ...state, taskOpenError: undefined };
     case "taskOpen:error":
-      if (state.snapshot || (state.activeTaskId !== undefined && state.activeTaskId !== action.taskId)) return state;
+      if (
+        (state.snapshot && state.snapshot.task.task_id !== action.taskId)
+        || (state.activeTaskId !== undefined && state.activeTaskId !== action.taskId)
+      ) return state;
       return { ...state, taskOpenError: { taskId: action.taskId, message: action.message } };
     case "chatPage:start": {
       const current = state.chatPages[action.taskId] ?? { olderItems: [], hasBefore: true };
@@ -273,6 +280,7 @@ export function reduceTaskInteractionState(state: AppState, action: AppAction): 
 
 function isTaskInteractionAction(action: AppAction): action is TaskInteractionAction {
   return action.type.startsWith("taskInput:")
+    || action.type === "taskOpen:start"
     || action.type === "taskOpen:error"
     || action.type.startsWith("chatPage:")
     || action.type.startsWith("toolDetail:")

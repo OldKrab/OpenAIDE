@@ -119,6 +119,14 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     );
   }
 
+  if (state.appServerError && !isWebShell) {
+    return (
+      <main className="app-shell editor-shell">
+        <AppServerErrorView message={state.appServerError} />
+      </main>
+    );
+  }
+
   if (bootstrap.surface === "settings" && !isWebShell) {
     return (
       <main className="app-shell editor-shell">
@@ -293,12 +301,13 @@ function mobileNavigationFocusableElements(root: HTMLElement) {
 
 function AppServerErrorView({ message }: { message: string }) {
   return (
-    <section className="task-surface task-loading app-server-error" aria-label="App Server connection error">
+    <section
+      aria-label="App Server connection error"
+      aria-live="polite"
+      className="task-surface task-loading app-server-error"
+    >
       <p>App Server connection unavailable.</p>
       <small>{message}</small>
-      <button type="button" onClick={() => window.location.reload()}>
-        Retry
-      </button>
     </section>
   );
 }

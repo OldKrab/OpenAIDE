@@ -45,16 +45,16 @@ describe("VS Code webview surfaces", () => {
     vscodeMocks.panels.length = 0;
     vscodeMocks.createWebviewPanel.mockReset();
     vi.mocked(handleWebviewMessage).mockReset();
-    vi.mocked(handleWebviewMessage).mockImplementation(async (message, context: { onTaskSnapshot?: (snapshot: unknown) => void }) => {
-      const snapshot = isObject(message) && isObject(message.snapshot)
-        ? message.snapshot
-        : {
-        task: {
-          task_id: "created_task",
-          title: "Created task",
-        },
-      };
-      context.onTaskSnapshot?.(snapshot);
+    vi.mocked(handleWebviewMessage).mockImplementation(async (message, context: {
+      adoptTask?: (taskId: string, title?: string) => void;
+      surfaces?: { openTask: (taskId: string, title?: string) => void };
+    }) => {
+      if (!isObject(message) || message.type !== "surface.openTask" || !isObject(message.payload)) return;
+      const taskId = typeof message.payload.task_id === "string" ? message.payload.task_id : undefined;
+      if (!taskId) return;
+      const title = typeof message.payload.title === "string" ? message.payload.title : undefined;
+      context.adoptTask?.(taskId, title);
+      context.surfaces?.openTask(taskId, title);
     });
     vscodeMocks.createWebviewPanel.mockImplementation(() => {
       const panel = createPanelMock();
@@ -114,6 +114,19 @@ describe("VS Code webview surfaces", () => {
       expect.objectContaining({ enableScripts: true, retainContextWhenHidden: true }),
     );
     expect(vscodeMocks.panels[2].webview.html).toContain('data-surface="settings"');
+  });
+
+  it("gives task webviews with the same VS Code origin distinct client identities", () => {
+    const manager = new TaskEditorManager(context(), runtime(), runtimeProcess(), logger());
+
+    manager.openNewTask();
+    manager.openTask("task_1", "Fix ACP");
+
+    const newTaskClientId = dataAttribute(vscodeMocks.panels[0].webview.html, "client-instance-id");
+    const taskClientId = dataAttribute(vscodeMocks.panels[1].webview.html, "client-instance-id");
+    expect(newTaskClientId).toBeTruthy();
+    expect(taskClientId).toBeTruthy();
+    expect(taskClientId).not.toBe(newTaskClientId);
   });
 
   it("renders a preparing shell until App Server handoff supplies bootstrap connection info", async () => {
@@ -237,7 +250,10 @@ describe("VS Code webview surfaces", () => {
     await settle();
     const originalHtml = panel.webview.html;
 
-    triggerLastMessageHandler(panel, { type: "task.create" });
+    triggerLastMessageHandler(panel, {
+      type: "surface.openTask",
+      payload: { task_id: "created_task", title: "Created task" },
+    });
 
     expect(panel.title).toBe("Created task");
     expect(panel.webview.html).toBe(originalHtml);
@@ -265,7 +281,10 @@ describe("VS Code webview surfaces", () => {
 
     manager.openNewTask();
     const firstPanel = vscodeMocks.panels[0];
-    triggerLastMessageHandler(firstPanel, { type: "task.create" });
+    triggerLastMessageHandler(firstPanel, {
+      type: "surface.openTask",
+      payload: { task_id: "created_task", title: "Created task" },
+    });
     manager.openNewTask();
     const secondPanel = vscodeMocks.panels[1];
 
@@ -276,7 +295,7 @@ describe("VS Code webview surfaces", () => {
     expect(secondPanel.reveal).toHaveBeenCalledWith(1);
   });
 
-  it("adopts a New Task panel without replacing its webview HTML", () => {
+  it("adopts a successful New Task in place through the production surface route", () => {
     const manager = new TaskEditorManager(context(), runtime(), runtimeProcess(), logger());
 
     manager.openNewTask();
@@ -284,30 +303,23 @@ describe("VS Code webview surfaces", () => {
     const originalHtml = panel.webview.html;
     expect(panel.webview.html).toContain('data-task-id=""');
 
-    triggerLastMessageHandler(panel, { type: "task.create" });
+    triggerLastMessageHandler(panel, {
+      type: "surface.openTask",
+      payload: { task_id: "created_task", title: "Created task" },
+    });
 
     expect(panel.title).toBe("Created task");
     expect(panel.webview.html).toBe(originalHtml);
-  });
-
-  it("does not replace existing task editor HTML after normal snapshots", () => {
-    const manager = new TaskEditorManager(context(), runtime(), runtimeProcess(), logger());
-
-    manager.openTask("task_1", "Fix ACP");
-    const panel = vscodeMocks.panels[0];
-    const originalHtml = panel.webview.html;
-
-    triggerLastMessageHandler(panel, {
-      snapshot: {
-        task: {
-          task_id: "task_1",
-          title: "Renamed task",
-        },
-      },
+    expect(panel.webview.postMessage).toHaveBeenCalledWith({
+      type: "surface.routeChanged",
+      payload: { surface: "task", task_id: "created_task" },
     });
+    manager.openTask("created_task", "Created task");
+    expect(vscodeMocks.createWebviewPanel).toHaveBeenCalledTimes(1);
+    expect(panel.reveal).toHaveBeenCalledWith(1);
 
-    expect(panel.title).toBe("Renamed task");
-    expect(panel.webview.html).toBe(originalHtml);
+    manager.openNewTask();
+    expect(vscodeMocks.createWebviewPanel).toHaveBeenCalledTimes(2);
   });
 
 });
@@ -376,6 +388,10 @@ function createWebviewMock() {
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
+}
+
+function dataAttribute(html: string, name: string) {
+  return new RegExp(`data-${name}="([^"]*)"`).exec(html)?.[1];
 }
 
 function triggerLastMessageHandler(panel: ReturnType<typeof createPanelMock>, message: unknown) {

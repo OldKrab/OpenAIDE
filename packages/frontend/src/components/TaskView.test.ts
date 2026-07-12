@@ -26,6 +26,24 @@ describe("TaskView permission response state", () => {
     ).toEqual({ responding: true });
   });
 
+  it("keeps a permission row stable when live state is replaced by persisted history", async () => {
+    const { chatRowKey } = await import("./TaskView");
+    const live = permissionMessage(
+      "agent-request-1",
+      "server-request-1",
+      "tool-1",
+      "app-server-permission-server-request-1",
+    );
+    const persisted = resolvedPermissionMessage(
+      "agent-request-1",
+      "server-request-1",
+      "tool-1",
+      "persisted-permission-1",
+    );
+
+    expect(chatRowKey(live)).toBe(chatRowKey(persisted));
+  });
+
   it("replaces thin pending App Server request markers with delivered permission cards", async () => {
     const { chatItemsWithAppServerPermissions } = await import("./TaskView");
     const permission = permissionMessage("agent-request-1", "server-request-1");
@@ -333,7 +351,7 @@ describe("TaskView permission response state", () => {
   });
 
   it("does not dedupe distinct saved permissions that reuse App Server request ids", async () => {
-    const { chatItemsWithAppServerPermissions } = await import("./TaskView");
+    const { chatItemsWithAppServerPermissions, chatRowKey } = await import("./TaskView");
     const oldPermission = {
       ...permissionMessage("agent-request-old", "server-request-1", "tool-old", "permission-old"),
       message: {
@@ -352,6 +370,7 @@ describe("TaskView permission response state", () => {
     );
 
     expect(items.map((item) => item.message_id)).toEqual(["permission-old", "permission-new"]);
+    expect(new Set(items.map(chatRowKey)).size).toBe(items.length);
   });
 
   it("restores saved chat scroll position and defaults uncached opens to the end", async () => {

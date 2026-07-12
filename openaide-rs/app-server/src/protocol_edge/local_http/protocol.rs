@@ -90,26 +90,30 @@ impl LocalHttpProtocolHandler {
     }
 
     pub(crate) fn drain_push_messages(&self, lease: &EventStreamLease) -> String {
-        let connection_id = lease.connection_id();
-        let events = self
-            .gateway
-            .drain_event_deliveries_for_connection(connection_id);
-        let server_requests = self
-            .gateway
-            .drain_server_requests_for_connection(connection_id, AppServerTime::now());
-        if events.is_empty() && server_requests.is_empty() {
-            return String::new();
-        }
-        serde_json::to_string(
-            &event_wire_messages(connection_id.clone(), events)
-                .into_iter()
-                .chain(server_request_wire_messages(
-                    connection_id.clone(),
-                    server_requests,
-                ))
-                .collect::<Vec<_>>(),
-        )
-        .expect("LocalHttp push messages serialize")
+        self.event_streams
+            .with_current(lease, || {
+                let connection_id = lease.connection_id();
+                let events = self
+                    .gateway
+                    .drain_event_deliveries_for_connection(connection_id);
+                let server_requests = self
+                    .gateway
+                    .drain_server_requests_for_connection(connection_id, AppServerTime::now());
+                if events.is_empty() && server_requests.is_empty() {
+                    return String::new();
+                }
+                serde_json::to_string(
+                    &event_wire_messages(connection_id.clone(), events)
+                        .into_iter()
+                        .chain(server_request_wire_messages(
+                            connection_id.clone(),
+                            server_requests,
+                        ))
+                        .collect::<Vec<_>>(),
+                )
+                .expect("LocalHttp push messages serialize")
+            })
+            .unwrap_or_default()
     }
 }
 

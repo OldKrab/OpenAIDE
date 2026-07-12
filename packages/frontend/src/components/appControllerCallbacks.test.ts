@@ -560,6 +560,10 @@ describe("app controller callbacks", () => {
     const state = createInitialState();
     state.activeTaskId = "task_1";
     state.snapshot = snapshot("task_1");
+    state.newTask.nativeSessions.items = [
+      { session_id: "session_1", cwd: "/workspace", title: "Recent" },
+      { session_id: "session_2", cwd: "/workspace", title: "Older" },
+    ];
 
     callbacks({
       backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
@@ -569,7 +573,7 @@ describe("app controller callbacks", () => {
     }).navigation.loadNativeSessions();
     await settlePromises();
 
-    expect(requestNativeSessions).toHaveBeenCalledWith(undefined, false);
+    expect(requestNativeSessions).toHaveBeenCalledWith(undefined, false, 2);
     expect(request).toHaveBeenCalledWith(TASK_OPEN, { taskId: "task_1" });
     expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
       type: "snapshot",
@@ -578,6 +582,14 @@ describe("app controller callbacks", () => {
         task: expect.objectContaining({ task_id: "task_1", title: "Updated adopted task" }),
       }),
     }));
+  });
+
+  it("loads fifteen additional visible tasks for each history-page request", () => {
+    const requestNativeSessions = vi.fn();
+
+    callbacks({ requestNativeSessions }).navigation.loadNativeSessions("cursor_2");
+
+    expect(requestNativeSessions).toHaveBeenCalledWith("cursor_2", true, 15);
   });
 
   it("opens the prepared new Task while send capability is still preparing", async () => {

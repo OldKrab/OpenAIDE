@@ -12,7 +12,7 @@ export type MessageContext = {
   logger: ExtensionLogger;
   developerSettingsStore?: DeveloperSettingsStore;
   agentSecretStore?: vscode.SecretStorage;
-  onTaskSnapshot?: (snapshot: unknown) => void;
+  adoptTask?: (taskId: string, title?: string) => void;
   surfaces?: {
     openNewTask: (projectId?: string) => void;
     openSettings: () => void;

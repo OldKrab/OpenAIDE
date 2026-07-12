@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::ids::{ClientInstanceId, ProjectId, TaskId};
-use crate::snapshot::ClientSnapshot;
+use crate::snapshot::{ClientSnapshot, ProjectCollectionSnapshot};
 
 pub const APP_SERVER_PROTOCOL_VERSION: &str = "1";
 
@@ -43,12 +43,38 @@ pub struct InitializeParams {
     pub requested_surface: RequestedSurface,
     #[serde(default, skip_serializing_if = "ClientCapabilities::is_empty")]
     pub capabilities: ClientCapabilities,
+    /// Local workspace facts supplied by the App Shell for Project canonicalization.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub workspace_roots: Vec<ClientWorkspaceRoot>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct InitializeResult {
     pub snapshot: ClientSnapshot,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientCapabilitiesChangedParams {
+    /// Omitted capabilities preserve the client's existing capability declaration.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capabilities: Option<ClientCapabilities>,
+    /// A present list replaces this client's complete shell-reported workspace set.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_roots: Option<Vec<ClientWorkspaceRoot>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientCapabilitiesChangedResult {
+    pub projects: ProjectCollectionSnapshot,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientWorkspaceRoot {
+    pub path: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]

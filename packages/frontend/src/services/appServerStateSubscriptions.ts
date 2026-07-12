@@ -52,6 +52,7 @@ export function startAppServerStateSubscription({
   context,
   currentAgentId,
   dispatch,
+  onBaselineError,
   onBaselineLost,
   onBaselineReady,
   setAgents,
@@ -63,6 +64,8 @@ export function startAppServerStateSubscription({
   dispatch: Dispatch<AppAction>;
   /** Signals that events must stop mutating product state until a fresh baseline is installed. */
   onBaselineLost?: () => void;
+  /** Reports a failed baseline read that will be retried with bounded backoff. */
+  onBaselineError?: (error: unknown) => void;
   /** Signals that the current scope has a cursor baseline and no queued resync gap. */
   onBaselineReady?: () => void;
   setAgents?: (agents: AgentOption[]) => void;
@@ -116,7 +119,8 @@ export function startAppServerStateSubscription({
       applySnapshot(result.snapshot);
       replayPendingEvents();
       if (!subscribeAgain) onBaselineReady?.();
-    } catch {
+    } catch (error) {
+      onBaselineError?.(error);
       scheduleSubscribeRetry();
     } finally {
       subscribeInFlight = false;

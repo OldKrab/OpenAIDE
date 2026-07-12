@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useEffect,
   useRef,
   useState,
@@ -35,6 +36,12 @@ export type AppControllerBackendConnection = Pick<
   "initialize" | "request" | "respond" | "serverRequests" | "close"
 > & Partial<Pick<BackendConnection, "events" | "stateResets">>;
 
+export type BackendConnectionState =
+  | { status: "connecting" }
+  | { status: "ready" }
+  | { status: "reconnecting"; message: string }
+  | { status: "unavailable"; message: string };
+
 type BackendLifecycleOptions = {
   backendConnection?: AppControllerBackendConnection;
   currentAgentId: RefObject<string>;
@@ -58,6 +65,9 @@ export function useAppControllerBackendLifecycle({
 }: BackendLifecycleOptions) {
   const { bootstrap, bootstrapRef } = useRoutedBootstrap(initialBootstrap, dispatch);
   const [backendReady, setBackendReady] = useState(false);
+  const [backendConnectionState, setBackendConnectionState] = useState<BackendConnectionState>({
+    status: "connecting",
+  });
   const [backendStateGeneration, setBackendStateGeneration] = useState(0);
   const [readyTaskSubscriptionKey, setReadyTaskSubscriptionKey] = useState<string | undefined>();
   const [readyRouteOpenKey, setReadyRouteOpenKey] = useState<string | undefined>();
@@ -66,8 +76,10 @@ export function useAppControllerBackendLifecycle({
   const backendInitialized = useRef(false);
   const lastRequestedRouteTaskKey = useRef<string | undefined>(undefined);
   const routeOpenInFlight = useRef<{ promise: Promise<void>; taskId: string } | undefined>(undefined);
+  const routeOpenError = useRef<string | undefined>(undefined);
   const navigationGeneration = useRef(0);
   const stateSubscriptionContext = useRef<StateSubscriptionMappingContext | undefined>(undefined);
+  const failedSubscriptionBaselines = useRef(new Map<string, string>());
   const {
     latestNativeSessionSelection,
     latestOptionsRequestKey,
@@ -90,6 +102,24 @@ export function useAppControllerBackendLifecycle({
     return navigationGeneration.current;
   };
   const currentNavigationGeneration = () => navigationGeneration.current;
+  const markSubscriptionError = (key: string, error: unknown) => {
+    const message = error instanceof Error ? error.message : "Unable to refresh App Server state.";
+    failedSubscriptionBaselines.current.set(key, message);
+    setBackendConnectionState({ status: "reconnecting", message });
+  };
+  const markSubscriptionReady = (key: string) => {
+    failedSubscriptionBaselines.current.delete(key);
+    const remainingMessage = [...failedSubscriptionBaselines.current.values()].at(-1);
+    if (remainingMessage) {
+      setBackendConnectionState({ status: "reconnecting", message: remainingMessage });
+      return;
+    }
+    if (routeOpenError.current) {
+      setBackendConnectionState({ status: "unavailable", message: routeOpenError.current });
+      return;
+    }
+    if (backendInitialized.current) setBackendConnectionState({ status: "ready" });
+  };
 
   useEffect(() => {
     if (initialBootstrap.surface === "invalid") return;
@@ -122,11 +152,19 @@ export function useAppControllerBackendLifecycle({
       setBackendStateGeneration(backendStateGenerationRef.current);
       setReadyTaskSubscriptionKey(undefined);
       setReadyRouteOpenKey(undefined);
+      routeOpenError.current = undefined;
+      setBackendConnectionState({
+        status: "reconnecting",
+        message: "Connection interrupted. Reconnecting automatically.",
+      });
     });
     backendStateGenerationRef.current += 1;
     setBackendStateGeneration(backendStateGenerationRef.current);
     backendInitialized.current = false;
+    failedSubscriptionBaselines.current.clear();
+    routeOpenError.current = undefined;
     setBackendReady(false);
+    setBackendConnectionState({ status: "connecting" });
     setReadyTaskSubscriptionKey(undefined);
     setReadyRouteOpenKey(undefined);
     if (initialBootstrap.surface === "navigation") {
@@ -182,6 +220,8 @@ export function useAppControllerBackendLifecycle({
                 backendConnection: subscriptionConnection,
                 context: subscriptionContext,
                 dispatch,
+                onBaselineError: (error) => markSubscriptionError("projects", error),
+                onBaselineReady: () => markSubscriptionReady("projects"),
                 scope: { kind: "projects" },
               }));
               stopSubscriptions.push(startAppServerStateSubscription({
@@ -189,6 +229,8 @@ export function useAppControllerBackendLifecycle({
                 context: subscriptionContext,
                 currentAgentId: () => currentAgentId.current,
                 dispatch,
+                onBaselineError: (error) => markSubscriptionError("agents", error),
+                onBaselineReady: () => markSubscriptionReady("agents"),
                 scope: { kind: "agents" },
                 setAgents,
               }));
@@ -196,6 +238,8 @@ export function useAppControllerBackendLifecycle({
                 backendConnection: subscriptionConnection,
                 context: subscriptionContext,
                 dispatch,
+                onBaselineError: (error) => markSubscriptionError("task-navigation", error),
+                onBaselineReady: () => markSubscriptionReady("task-navigation"),
                 scope: taskNavigationScopeForBootstrap(initialBootstrap),
               }));
             }
@@ -234,18 +278,27 @@ export function useAppControllerBackendLifecycle({
             // own task/open even when initialize already supplied cached task state.
             backendInitialized.current = true;
             setBackendReady(true);
+            if (failedSubscriptionBaselines.current.size === 0) {
+              setBackendConnectionState({ status: "ready" });
+            }
           })
           .catch((error) => {
             if (!active) return;
             backendInitialized.current = false;
             setBackendReady(false);
+            const message = error instanceof Error ? error.message : "Unable to connect to App Server.";
+            setBackendConnectionState({ status: "unavailable", message });
             dispatch({
               type: "appServer:error",
-              message: error instanceof Error ? error.message : "Unable to connect to App Server.",
+              message,
             });
             dispatchStartupReadError(bootstrap, dispatch);
           });
       } else {
+        setBackendConnectionState({
+          status: "unavailable",
+          message: "App Server connection unavailable.",
+        });
         dispatch({
           type: "appServer:error",
           message: "App Server connection unavailable.",
@@ -265,8 +318,10 @@ export function useAppControllerBackendLifecycle({
     return () => {
       active = false;
       backendInitialized.current = false;
+      failedSubscriptionBaselines.current.clear();
       lastRequestedRouteTaskKey.current = undefined;
       routeOpenInFlight.current = undefined;
+      routeOpenError.current = undefined;
       setBackendReady(false);
       setReadyTaskSubscriptionKey(undefined);
       setReadyRouteOpenKey(undefined);
@@ -295,17 +350,27 @@ export function useAppControllerBackendLifecycle({
       dispatch,
       onBaselineLost: () => {
         if (!active) return;
+        setBackendConnectionState({
+          status: "reconnecting",
+          message: "Connection interrupted. Reconnecting automatically.",
+        });
         setReadyTaskSubscriptionKey((current) => (
           current === subscriptionKey ? undefined : current
         ));
       },
+      onBaselineError: (error) => {
+        if (active) markSubscriptionError(subscriptionKey, error);
+      },
       onBaselineReady: () => {
-        if (active) setReadyTaskSubscriptionKey(subscriptionKey);
+        if (!active) return;
+        setReadyTaskSubscriptionKey(subscriptionKey);
+        markSubscriptionReady(subscriptionKey);
       },
       scope: { kind: "task", taskId: taskId as TaskId },
     });
     return () => {
       active = false;
+      failedSubscriptionBaselines.current.delete(subscriptionKey);
       stop();
     };
   }, [backendConnection, backendReady, backendStateGeneration, state.snapshot?.task.task_id]);
@@ -314,6 +379,10 @@ export function useAppControllerBackendLifecycle({
     if (bootstrap.surface !== "task" || !bootstrap.taskId) {
       lastRequestedRouteTaskKey.current = undefined;
       routeOpenInFlight.current = undefined;
+      routeOpenError.current = undefined;
+      if (backendInitialized.current && failedSubscriptionBaselines.current.size === 0) {
+        setBackendConnectionState({ status: "ready" });
+      }
       return;
     }
     const taskId = bootstrap.taskId;
@@ -330,6 +399,9 @@ export function useAppControllerBackendLifecycle({
     if (lastRequestedRouteTaskKey.current === requestKey) return;
     if (routeOpenInFlight.current?.taskId === taskId) return;
     lastRequestedRouteTaskKey.current = requestKey;
+    const wasUnavailable = routeOpenError.current !== undefined;
+    routeOpenError.current = undefined;
+    if (wasUnavailable) setBackendConnectionState({ status: "connecting" });
     const requestGeneration = backendStateGeneration;
     let openAccepted = false;
 
@@ -346,13 +418,17 @@ export function useAppControllerBackendLifecycle({
       .then(() => {
         if (openAccepted && backendStateGenerationRef.current === requestGeneration) {
           setReadyRouteOpenKey(requestKey);
+          if (failedSubscriptionBaselines.current.size === 0) {
+            setBackendConnectionState({ status: "ready" });
+          }
         }
       })
-      .catch(() => dispatch({
-        type: "taskOpen:error",
-        taskId,
-        message: "Unable to open task from App Server",
-      }));
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : "Unable to open task from App Server.";
+        routeOpenError.current = message;
+        setBackendConnectionState({ status: "unavailable", message });
+        dispatch({ type: "taskOpen:error", taskId, message });
+      });
     routeOpenInFlight.current = { promise: openRequest, taskId };
     void openRequest.finally(() => {
       if (routeOpenInFlight.current?.promise === openRequest) {
@@ -383,14 +459,25 @@ export function useAppControllerBackendLifecycle({
     ? `${backendStateGeneration}:${bootstrap.taskId}`
     : undefined;
   const routeOpenReady = routeOpenKey === undefined || readyRouteOpenKey === routeOpenKey;
+  const retryTaskOpen = useCallback(() => {
+    if (bootstrap.surface !== "task" || !bootstrap.taskId || !backendInitialized.current) return;
+    lastRequestedRouteTaskKey.current = undefined;
+    routeOpenError.current = undefined;
+    setReadyRouteOpenKey(undefined);
+    setBackendConnectionState({ status: "reconnecting", message: "Retrying task open." });
+    dispatch({ type: "taskOpen:start", taskId: bootstrap.taskId });
+    setRouteOpenSettlement((settlement) => settlement + 1);
+  }, [bootstrap.surface, bootstrap.taskId, dispatch]);
 
   return {
     acceptSnapshotRequest,
     backendInitialized,
+    backendConnectionState,
     backendReady: backendReady && taskSubscriptionReady && routeOpenReady,
     beginNavigationChange,
     bootstrap,
     createSnapshotRequestId,
     currentNavigationGeneration,
+    retryTaskOpen,
   };
 }

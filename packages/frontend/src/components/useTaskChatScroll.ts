@@ -1,5 +1,5 @@
-import { useCallback, useLayoutEffect, useRef, useState } from "react";
-import type { PointerEvent, UIEvent, WheelEvent } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { KeyboardEvent, PointerEvent, UIEvent, WheelEvent } from "react";
 import {
   chatFollowModeForPosition,
   initialTaskScrollTop,
@@ -48,7 +48,10 @@ export function useTaskChatScroll({
   const lastScrollTopRef = useRef<number | undefined>(undefined);
   const skipGeneratedFollowOnceRef = useRef(false);
   const scrollOwnershipRef = useRef<ScrollOwnership>("following");
-  const touchScrollActiveRef = useRef(false);
+  const pointerScrollActiveRef = useRef(false);
+  const pendingPermissionIdsRef = useRef(diagnosticContext.pendingPermissions);
+  const permissionLayoutRecoveryRef = useRef(false);
+  const permissionLayoutRecoveryFrameRef = useRef<number | undefined>(undefined);
   const towardLatestIntentUntilRef = useRef(0);
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
   const setScrollOwnership = useCallback((ownership: ScrollOwnership, reason = "unspecified") => {
@@ -69,6 +72,12 @@ export function useTaskChatScroll({
     cancelAnimationFrame(jumpAnimationFrameRef.current);
     jumpAnimationFrameRef.current = undefined;
   }, []);
+  const clearPermissionLayoutRecovery = useCallback(() => {
+    permissionLayoutRecoveryRef.current = false;
+    if (permissionLayoutRecoveryFrameRef.current === undefined) return;
+    cancelAnimationFrame(permissionLayoutRecoveryFrameRef.current);
+    permissionLayoutRecoveryFrameRef.current = undefined;
+  }, []);
 
   // Scroll persistence feeds this hook's props. Restore only when task identity changes so user scrolling
   // cannot re-enable follow mode.
@@ -81,6 +90,10 @@ export function useTaskChatScroll({
     const diagnostics = diagnosticsRef.current.recorder;
     diagnostics.recordLifecycle("mounted");
     cancelJumpAnimation();
+    clearPermissionLayoutRecovery();
+    pointerScrollActiveRef.current = false;
+    pendingPermissionIdsRef.current = diagnosticContext.pendingPermissions;
+    towardLatestIntentUntilRef.current = 0;
     const scrollTop = initialTaskScrollTop(savedScrollTop, messageList.scrollHeight);
     messageList.scrollTop = scrollTop;
     setScrollOwnership(chatFollowModeForPosition({
@@ -92,12 +105,52 @@ export function useTaskChatScroll({
     lastScrollTopRef.current = scrollTop;
     lastScrollHeightRef.current = messageList.scrollHeight;
     diagnostics.recordGeometry(chatScrollGeometry(messageList));
-    return () => diagnostics.recordLifecycle("unmounted");
-  }, [cancelJumpAnimation, setScrollOwnership, taskId]);
+    return () => {
+      clearPermissionLayoutRecovery();
+      diagnostics.recordLifecycle("unmounted");
+    };
+  }, [cancelJumpAnimation, clearPermissionLayoutRecovery, setScrollOwnership, taskId]);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.addEventListener !== "function") return undefined;
+    const finishPointerScroll = () => {
+      pointerScrollActiveRef.current = false;
+    };
+    // Pointer release can occur outside Chat after a scrollbar drag. Window-level
+    // cleanup prevents that completed gesture from owning later layout scrolls.
+    window.addEventListener("pointerup", finishPointerScroll);
+    window.addEventListener("pointercancel", finishPointerScroll);
+    return () => {
+      window.removeEventListener("pointerup", finishPointerScroll);
+      window.removeEventListener("pointercancel", finishPointerScroll);
+    };
+  }, []);
 
   useLayoutEffect(() => {
     diagnosticsRef.current?.recorder.recordRender(diagnosticContext);
   });
+
+  const pendingPermissionsKey = JSON.stringify(diagnosticContext.pendingPermissions);
+  useLayoutEffect(() => {
+    const nextPermissionIds = diagnosticContext.pendingPermissions;
+    const permissionResolved = pendingPermissionIdsRef.current.some(
+      (requestId) => !nextPermissionIds.includes(requestId),
+    );
+    pendingPermissionIdsRef.current = nextPermissionIds;
+    if (permissionResolved) {
+      // The terminal card and resumed activity can settle in the same browser
+      // frame. Recovery is a one-paint layout transaction, not a time window
+      // that could later override reader intent.
+      clearPermissionLayoutRecovery();
+      permissionLayoutRecoveryRef.current = true;
+      if (typeof requestAnimationFrame === "function") {
+        permissionLayoutRecoveryFrameRef.current = requestAnimationFrame(() => {
+          permissionLayoutRecoveryRef.current = false;
+          permissionLayoutRecoveryFrameRef.current = undefined;
+        });
+      }
+    }
+  }, [clearPermissionLayoutRecovery, pendingPermissionsKey]);
 
   useLayoutEffect(() => {
     const messageList = messageListRef.current;
@@ -171,7 +224,7 @@ export function useTaskChatScroll({
     const messageList = event.currentTarget;
     const scrollTop = messageList.scrollTop;
     const previousScrollTop = lastScrollTopRef.current;
-    if (touchScrollActiveRef.current && previousScrollTop !== undefined) {
+    if (pointerScrollActiveRef.current && previousScrollTop !== undefined) {
       if (scrollTop > previousScrollTop) {
         towardLatestIntentUntilRef.current = Date.now() + USER_SCROLL_INTENT_WINDOW_MS;
       } else if (scrollTop < previousScrollTop) {
@@ -181,7 +234,29 @@ export function useTaskChatScroll({
     if (
       previousScrollTop !== undefined
       && scrollTop < previousScrollTop
-      && (touchScrollActiveRef.current || !isAtLatest(messageList))
+      && scrollOwnershipRef.current === "following"
+      && !pointerScrollActiveRef.current
+      && permissionLayoutRecoveryRef.current
+      && lastScrollHeightRef.current !== undefined
+      && messageList.scrollHeight !== lastScrollHeightRef.current
+      && !isAtLatest(messageList)
+    ) {
+      // Permission resolution can contract the list and then append resumed work
+      // before the browser delivers its scroll event. Keep layout movement from
+      // masquerading as user intent and stranding a following viewport.
+      messageList.scrollTop = messageList.scrollHeight;
+      lastScrollTopRef.current = messageList.scrollTop;
+      lastScrollHeightRef.current = messageList.scrollHeight;
+      clearPermissionLayoutRecovery();
+      diagnosticsRef.current?.recorder.recordGeometry(chatScrollGeometry(messageList));
+      updateJumpToLatestVisibility(messageList);
+      onScrollTop(messageList.scrollTop);
+      return;
+    }
+    if (
+      previousScrollTop !== undefined
+      && scrollTop < previousScrollTop
+      && (pointerScrollActiveRef.current || !isAtLatest(messageList))
     ) {
       setScrollOwnership("reading", "scrollTopDecreased");
     } else if (
@@ -189,7 +264,7 @@ export function useTaskChatScroll({
       && scrollTop > previousScrollTop
       && scrollOwnershipRef.current === "reading"
       && isAtLatest(messageList)
-      && (touchScrollActiveRef.current || Date.now() <= towardLatestIntentUntilRef.current)
+      && (pointerScrollActiveRef.current || Date.now() <= towardLatestIntentUntilRef.current)
     ) {
       towardLatestIntentUntilRef.current = 0;
       setScrollOwnership("following", "reachedLatestWithIntent");
@@ -205,7 +280,7 @@ export function useTaskChatScroll({
     }
     updateJumpToLatestVisibility(messageList);
     onScrollTop(scrollTop);
-  }, [onScrollTop, setScrollOwnership, updateJumpToLatestVisibility]);
+  }, [clearPermissionLayoutRecovery, onScrollTop, setScrollOwnership, updateJumpToLatestVisibility]);
 
   const onWheel = useCallback((event: WheelEvent<HTMLDivElement>) => {
     cancelJumpAnimation();
@@ -221,14 +296,41 @@ export function useTaskChatScroll({
     }
   }, [cancelJumpAnimation, setScrollOwnership]);
 
-  const onPointerDown = useCallback((event: PointerEvent<HTMLDivElement>) => {
+  const onKeyDown = useCallback((event: KeyboardEvent<HTMLDivElement>) => {
+    if (
+      event.defaultPrevented
+      || event.altKey
+      || event.ctrlKey
+      || event.metaKey
+      || nestedControlOwnsScrollKey(event.target, event.currentTarget)
+    ) return;
+    const direction = keyboardScrollDirection(event.key, event.shiftKey);
+    if (!direction) return;
     cancelJumpAnimation();
-    if (event.pointerType === "touch") touchScrollActiveRef.current = true;
+    diagnosticsRef.current?.recorder.recordIntent(
+      direction === "towardEarlier" ? "towardEarlier" : "towardLatest",
+    );
+    if (direction === "towardEarlier") {
+      towardLatestIntentUntilRef.current = 0;
+      setScrollOwnership("reading", "keyboardTowardEarlier");
+      return;
+    }
+    towardLatestIntentUntilRef.current = Date.now() + USER_SCROLL_INTENT_WINDOW_MS;
+    const messageList = messageListRef.current;
+    if (messageList && isAtLatest(messageList)) {
+      towardLatestIntentUntilRef.current = 0;
+      setScrollOwnership("following", "keyboardReachedLatest");
+    }
+  }, [cancelJumpAnimation, setScrollOwnership]);
+
+  const onPointerDown = useCallback((_event: PointerEvent<HTMLDivElement>) => {
+    cancelJumpAnimation();
+    // Pointer ownership covers touch gestures and mouse scrollbar dragging.
+    pointerScrollActiveRef.current = true;
   }, [cancelJumpAnimation]);
 
-  const finishPointerScroll = useCallback((event: PointerEvent<HTMLDivElement>) => {
-    if (event.pointerType !== "touch") return;
-    touchScrollActiveRef.current = false;
+  const finishPointerScroll = useCallback((_event: PointerEvent<HTMLDivElement>) => {
+    pointerScrollActiveRef.current = false;
   }, []);
 
   const capturePrependAnchor = useCallback(() => {
@@ -244,6 +346,7 @@ export function useTaskChatScroll({
     const messageList = messageListRef.current;
     if (!messageList) return;
     cancelJumpAnimation();
+    towardLatestIntentUntilRef.current = 0;
     setScrollOwnership("following", "jumpToLatest");
     setShowJumpToLatest(false);
     const startScrollTop = messageList.scrollTop;
@@ -274,6 +377,7 @@ export function useTaskChatScroll({
     capturePrependAnchor,
     jumpToLatest,
     messageListRef,
+    onKeyDown,
     onPointerCancel: finishPointerScroll,
     onPointerDown,
     onPointerUp: finishPointerScroll,
@@ -281,6 +385,26 @@ export function useTaskChatScroll({
     onWheel,
     showJumpToLatest,
   };
+}
+
+function keyboardScrollDirection(key: string, shiftKey: boolean) {
+  if (key === "PageUp" || key === "Home" || key === "ArrowUp" || (key === " " && shiftKey)) {
+    return "towardEarlier" as const;
+  }
+  if (key === "PageDown" || key === "End" || key === "ArrowDown" || (key === " " && !shiftKey)) {
+    return "towardLatest" as const;
+  }
+  return undefined;
+}
+
+function nestedControlOwnsScrollKey(target: EventTarget, viewport: HTMLDivElement) {
+  if (target === viewport) return false;
+  const closest = (target as { closest?: (selector: string) => Element | null }).closest;
+  if (typeof closest !== "function") return true;
+  return Boolean(closest.call(
+    target,
+    "a[href], button, input, select, summary, textarea, [contenteditable='true'], [role='listbox'], [role='slider']",
+  ));
 }
 
 function isAtLatest(messageList: HTMLDivElement) {

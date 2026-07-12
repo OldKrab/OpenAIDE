@@ -1167,6 +1167,7 @@ describe("Sidebar", () => {
   });
 
   it("limits loaded project task and native-session rows together", () => {
+    const onLoadNativeSessions = vi.fn();
     const sessions = Array.from({ length: 16 }, (_, index) =>
       nativeSession({
         session_id: `session_${index + 1}`,
@@ -1179,7 +1180,8 @@ describe("Sidebar", () => {
         {...sidebarCallbacks()}
         groupByProject={true}
         nativeSessionProjectId="project_1"
-        nativeSessions={nativeSessions({ items: sessions })}
+        nativeSessions={nativeSessions({ items: sessions, nextCursor: "cursor_2" })}
+        onLoadNativeSessions={onLoadNativeSessions}
         projects={[{ projectId: "project_1", label: "OpenAIDE" }]}
         showArchived={false}
         tasks={[
@@ -1203,8 +1205,10 @@ describe("Sidebar", () => {
 
     expect(localTaskRows(tree)).toHaveLength(1);
     expect(tree.root.findAllByProps({ className: "task-row external-session-row" })).toHaveLength(16);
-    expect(tree.root.findAllByProps({ className: "project-task-more" })).toHaveLength(0);
+    expect(tree.root.findByProps({ className: "project-task-more" }).children.join(""))
+      .toBe("Load more tasks");
     expect(taskRows(tree)).toHaveLength(17);
+    expect(onLoadNativeSessions).toHaveBeenCalledWith("cursor_2");
   });
 });
 

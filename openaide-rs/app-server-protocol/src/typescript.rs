@@ -14,7 +14,15 @@ pub fn bindings() -> String {
     declarations::push_protocol_declarations(&mut output, &config);
     method_maps::push_method_maps(&mut output);
 
-    output
+    // ts-rs emits a space before newlines around documented fields. Normalize
+    // once at the generator boundary so checked-in bindings stay diff-clean.
+    let mut normalized = output
+        .lines()
+        .map(str::trim_end)
+        .collect::<Vec<_>>()
+        .join("\n");
+    normalized.push('\n');
+    normalized
 }
 
 #[cfg(test)]

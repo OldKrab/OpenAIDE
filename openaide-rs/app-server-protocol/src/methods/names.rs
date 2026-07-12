@@ -1,5 +1,6 @@
 pub const CLIENT_PROBE: &str = "client/probe";
 pub const CLIENT_INITIALIZE: &str = "client/initialize";
+pub const CLIENT_CAPABILITIES_CHANGED: &str = "client/capabilitiesChanged";
 pub const CLIENT_HEARTBEAT: &str = "client/heartbeat";
 pub const STATE_SUBSCRIBE: &str = "state/subscribe";
 pub const STATE_UNSUBSCRIBE: &str = "state/unsubscribe";
@@ -49,6 +50,7 @@ pub const TASK_SET_ARCHIVED: &str = "task/setArchived";
 pub const CLIENT_METHODS: &[&str] = &[
     CLIENT_PROBE,
     CLIENT_INITIALIZE,
+    CLIENT_CAPABILITIES_CHANGED,
     CLIENT_HEARTBEAT,
     STATE_SUBSCRIBE,
     STATE_UNSUBSCRIBE,

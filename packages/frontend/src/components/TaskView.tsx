@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Dispatch } from "react";
 import { ArrowDown } from "lucide-react";
-import type { AppPreferencesRecord, ConfigOptionsCatalog, ElicitationResponse, PermissionDecision, TaskSnapshot, TaskSummary } from "@openaide/app-shell-contracts";
+import type {
+  AppPreferencesRecord,
+  ChatMessage,
+  ConfigOptionsCatalog,
+  ElicitationResponse,
+  PermissionDecision,
+  TaskSnapshot,
+  TaskSummary,
+} from "@openaide/app-shell-contracts";
 import type { AppAction } from "../state/appReducer";
 import { renderedChat } from "../state/chatPaging";
 import type { AppState, TaskComposerInput } from "../state/store";
@@ -27,6 +35,7 @@ import {
 } from "./taskChatPresentation";
 import { useTaskChatScroll } from "./useTaskChatScroll";
 import { appServerAttachmentHandles } from "../state/composerOptions";
+import type { BackendConnectionState } from "./appControllerBackendLifecycle";
 
 export {
   chatFollowModeForPosition,
@@ -43,7 +52,18 @@ export {
   questionResponseForMessage,
 } from "./taskChatPresentation";
 
-export function TaskLoadingView({ error }: { error?: string }) {
+export function TaskLoadingView({ error, onRetry }: { error?: string; onRetry?: () => void }) {
+  if (error) {
+    return (
+      <section className="task-surface task-loading" aria-label="Unable to open task">
+        <p>Unable to open task.</p>
+        <small className="inline-error" role="alert">
+          {error}
+        </small>
+        {onRetry ? <button type="button" onClick={onRetry}>Retry</button> : null}
+      </section>
+    );
+  }
   return (
     <section className="task-surface task-loading" aria-label="Opening task">
       <div className="task-loading-status" role="status" aria-live="polite">
@@ -54,7 +74,6 @@ export function TaskLoadingView({ error }: { error?: string }) {
         </span>
         <span>Opening task</span>
       </div>
-      {error ? <p className="inline-error">{error}</p> : null}
     </section>
   );
 }
@@ -64,6 +83,7 @@ export function TaskView({
   appServerPermissionRequests,
   appServerQuestionRequests = {},
   archived = false,
+  backendConnectionState,
   backendReady,
   chatPageState,
   dispatch,
@@ -73,6 +93,7 @@ export function TaskView({
   onLoadToolDetail,
   onPermissionRespond,
   onQuestionRespond,
+  onRetryConnection,
   onRevealAttachment,
   onRemoveAttachment,
   onRetryHistory,
@@ -93,6 +114,7 @@ export function TaskView({
   appServerPermissionRequests: AppState["appServerPermissionRequests"];
   appServerQuestionRequests?: AppState["appServerQuestionRequests"];
   archived?: boolean;
+  backendConnectionState?: BackendConnectionState;
   backendReady: boolean;
   chatPageState: AppState["chatPages"][string] | undefined;
   dispatch: Dispatch<AppAction>;
@@ -107,6 +129,7 @@ export function TaskView({
     source?: "agent" | "appServer",
   ) => void;
   onQuestionRespond?: (requestId: string, response: ElicitationResponse) => void;
+  onRetryConnection?: () => void;
   onRevealAttachment: (attachmentId: string) => Promise<void> | void;
   onRemoveAttachment: (attachmentId: string) => void;
   onRetryHistory?: () => void;
@@ -134,11 +157,13 @@ export function TaskView({
     appServerQuestionRequests,
     snapshot.task.task_id,
   );
+  const latestChatItem = chatItems.at(-1);
   const preparationBlocked = chatItems.some((item) => item.message_id === "app-server-preparation");
   const turnBusy = snapshot.task.status === "active";
   const composerAvailability = taskComposerAvailability({
     archived,
     backendReady,
+    connectionStatus: backendConnectionState?.status,
     inputPending,
     preparationBlocked,
     taskStatus: snapshot.task.status,
@@ -234,6 +259,7 @@ export function TaskView({
         <div className="message-list-shell">
           <div
             className="message-list"
+            onKeyDown={chatScroll.onKeyDown}
             onPointerCancel={chatScroll.onPointerCancel}
             onPointerDown={chatScroll.onPointerDown}
             onPointerUp={chatScroll.onPointerUp}
@@ -269,8 +295,9 @@ export function TaskView({
           {chat.error ? <p className="chat-system">{chat.error}</p> : null}
           {chatItems.map((message) => (
             <ChatRow
-              key={message.message_id}
+              key={chatRowKey(message)}
               message={message}
+              showStreamingCaret={message === latestChatItem}
               taskId={snapshot.task.task_id}
               toolDetails={toolDetails}
               onLoadToolDetail={onLoadToolDetail}
@@ -300,6 +327,19 @@ export function TaskView({
             </button>
           ) : null}
         </div>
+        {backendConnectionState?.status === "reconnecting" || backendConnectionState?.status === "unavailable" ? (
+          <div className="task-connection-notice" role="status" aria-live="polite">
+            <span>
+              {backendConnectionState.status === "reconnecting"
+                ? "Reconnecting to App Server."
+                : "Unable to refresh task."}
+            </span>
+            <small>{backendConnectionState.message}</small>
+            {backendConnectionState.status === "unavailable" && onRetryConnection ? (
+              <button type="button" onClick={onRetryConnection}>Retry</button>
+            ) : null}
+          </div>
+        ) : null}
         <Composer
           agentLocked
           attachments={taskInput.context}
@@ -343,6 +383,14 @@ export function TaskView({
       </div>
     </section>
   );
+}
+
+// Live App Server cards and their persisted Chat records have different message IDs.
+// Permission request identity keeps the same DOM row mounted across that handoff.
+export function chatRowKey(message: ChatMessage) {
+  if (message.message.kind !== "permission") return message.message_id;
+  const requestId = message.message.app_server_request_id ?? message.message.request_id;
+  return `permission:${requestId}:${message.message.tool_call.id}`;
 }
 
 function WorkingStatus({ label, onRetry }: { label: string; onRetry?: () => void }) {

@@ -1,6 +1,7 @@
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import * as vscode from "vscode";
 import type {
+  ClientWorkspaceRoot,
   ProtocolMethod,
   RequestMeta,
   RequestParamsByMethod,
@@ -59,6 +60,10 @@ export class RuntimeClient implements vscode.Disposable {
     meta?: RequestMeta,
   ): Promise<ResponseResultByMethod[M]> {
     return this.appServerHostClient.request(method, params, meta);
+  }
+
+  async syncWorkspaceRoots(roots: ClientWorkspaceRoot[]) {
+    await this.appServerHostClient.syncWorkspaceRoots(roots);
   }
 
   dispose() {

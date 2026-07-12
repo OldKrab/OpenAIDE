@@ -228,9 +228,7 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
           ...state.newTask,
           nativeSessions: {
             ...state.newTask.nativeSessions,
-            items: action.append ? state.newTask.nativeSessions.items : [],
             loading: true,
-            loaded: action.append ? state.newTask.nativeSessions.loaded : false,
             error: undefined,
           },
         },

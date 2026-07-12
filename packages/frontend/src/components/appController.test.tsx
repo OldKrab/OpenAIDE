@@ -40,7 +40,7 @@ vi.mock("../services/hostBridge", () => ({
   getBootstrap: () => bootstrap,
   postHostMessage: (message: unknown) => postHostMessage(message),
   updateWebSettingsTabRoute: (tab: unknown) => updateWebSettingsTabRoute(tab),
-  subscribeWebRouteChanges: (listener: (nextBootstrap: TestBootstrap) => void) => {
+  subscribeSurfaceRouteChanges: (listener: (nextBootstrap: TestBootstrap) => void) => {
     webRouteListeners.push(listener);
     return () => {
       const index = webRouteListeners.indexOf(listener);
@@ -126,6 +126,30 @@ describe("app controller mounted lifecycle", () => {
       mounted.unmount();
     });
     expect(close).toHaveBeenCalledOnce();
+  });
+
+  it("settles an initialization failure as unavailable", async () => {
+    backendConnection = {
+      initialize: vi.fn(async () => {
+        throw new Error("App Server request timed out.");
+      }),
+      request: vi.fn() as unknown as BackendConnection["request"],
+      respond: vi.fn(),
+      close: vi.fn(),
+    };
+    bootstrap = taskBootstrap("task_1");
+
+    await act(async () => {
+      create(<ControllerProbe />);
+      await Promise.resolve();
+    });
+
+    expect(latestController?.backendConnectionState).toEqual({
+      status: "unavailable",
+      message: "App Server request timed out.",
+    });
+    expect(latestController?.state.appServerError).toBe("App Server request timed out.");
+    expect(latestController?.backendReady).toBe(false);
   });
 
   it("keeps a completed open task unread until the user returns attention", async () => {
@@ -596,6 +620,50 @@ describe("app controller mounted lifecycle", () => {
     expect(latestController?.state.snapshot?.task.title).toBe("Typed Open");
   });
 
+  it("retries a failed task open in place without discarding the draft", async () => {
+    let openAttempts = 0;
+    const request = vi.fn(async (method: string) => {
+      if (method !== TASK_OPEN) throw new Error(method);
+      openAttempts += 1;
+      if (openAttempts === 1) throw new Error("Connection closed.");
+      return { task: protocolTaskSnapshot("task_1", "Recovered Task") };
+    });
+    backendConnection = {
+      initialize: vi.fn(async () => ({ snapshot: clientSnapshot() })),
+      request: request as unknown as BackendConnection["request"],
+      respond: vi.fn(),
+      close: vi.fn(),
+    };
+    bootstrap = taskBootstrap("task_1");
+
+    await act(async () => {
+      create(<ControllerProbe />);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(latestController?.state.taskOpenError).toEqual({
+      taskId: "task_1",
+      message: "Connection closed.",
+    });
+    expect(latestController?.backendConnectionState).toEqual({
+      status: "unavailable",
+      message: "Connection closed.",
+    });
+
+    act(() => {
+      latestController?.dispatch({ type: "taskInput:prompt", taskId: "task_1", prompt: "Keep this draft" });
+    });
+    await act(async () => {
+      latestController?.retryTaskOpen();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(request.mock.calls.filter(([method]) => method === TASK_OPEN)).toHaveLength(2);
+    expect(latestController?.state.snapshot?.task.title).toBe("Recovered Task");
+    expect(latestController?.state.taskInputs.task_1?.prompt).toBe("Keep this draft");
+  });
+
   it("opens an initialized task route to recover unavailable Agent config", async () => {
     const initial = clientSnapshot();
     if (!initial.activeTask) throw new Error("expected active task fixture");
@@ -836,6 +904,61 @@ describe("app controller mounted lifecycle", () => {
 
     expect(latestController?.backendReady).toBe(true);
     expect(JSON.stringify(latestController?.state.snapshot?.chat.items)).toContain("Done without reload");
+  });
+
+  it("reports automatic Task subscription recovery without discarding the draft", async () => {
+    let taskSubscriptionAttempts = 0;
+    const request = vi.fn(async (
+      method: string,
+      params?: { scope?: { kind: string; taskId?: string } },
+    ) => {
+      if (method === TASK_OPEN) {
+        return { task: protocolTaskSnapshot("task_1", "Task") };
+      }
+      if (method === STATE_UNSUBSCRIBE) return { scope: params?.scope };
+      if (method !== STATE_SUBSCRIBE) throw new Error(method);
+      if (params?.scope?.kind !== "task") {
+        return nonTaskSubscriptionSnapshot(params?.scope, "cursor_1");
+      }
+      taskSubscriptionAttempts += 1;
+      if (taskSubscriptionAttempts === 1) throw new Error("Connection closed.");
+      return taskSubscriptionSnapshot("cursor_2");
+    });
+    backendConnection = {
+      initialize: vi.fn(async () => ({ snapshot: clientSnapshot() })),
+      request: request as unknown as BackendConnection["request"],
+      events: () => () => undefined,
+      respond: vi.fn(),
+      close: vi.fn(),
+    };
+    bootstrap = taskBootstrap("task_1");
+
+    await act(async () => {
+      create(<ControllerProbe />);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(latestController?.backendConnectionState).toEqual({
+      status: "reconnecting",
+      message: "Connection closed.",
+    });
+    expect(latestController?.backendReady).toBe(false);
+
+    act(() => {
+      latestController?.dispatch({ type: "taskInput:prompt", taskId: "task_1", prompt: "Keep this draft" });
+    });
+    await act(async () => {
+      vi.advanceTimersByTime(500);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(taskSubscriptionAttempts).toBe(2);
+    expect(latestController?.backendConnectionState).toEqual({ status: "ready" });
+    expect(latestController?.backendReady).toBe(true);
+    expect(latestController?.state.taskInputs.task_1?.prompt).toBe("Keep this draft");
   });
 
   it("retries an in-flight task open after the backend resets", async () => {

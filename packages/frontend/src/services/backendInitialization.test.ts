@@ -57,6 +57,23 @@ describe("backend initialization", () => {
     ).requestedSurface).toEqual({ kind: "settings" });
   });
 
+  it("uses the identity injected for a VS Code webview instead of shared session storage", () => {
+    const sharedStorage = memoryStorage();
+    sharedStorage.setItem("openaide.clientInstanceId", "shared-origin-client");
+    vi.stubGlobal("sessionStorage", sharedStorage);
+
+    expect(initializeParamsForBootstrap({
+      surface: "task",
+      clientInstanceId: "task-panel-1" as ClientInstanceId,
+    }).clientInstanceId).toBe("task-panel-1");
+    expect(initializeParamsForBootstrap({
+      surface: "task",
+      clientInstanceId: "task-panel-2" as ClientInstanceId,
+    }).clientInstanceId).toBe("task-panel-2");
+
+    vi.unstubAllGlobals();
+  });
+
   it("identifies web proxy bootstrap as the web shell", () => {
     const initialized = initializeParamsForBootstrap(
       {

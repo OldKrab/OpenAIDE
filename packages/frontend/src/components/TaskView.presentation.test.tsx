@@ -19,7 +19,7 @@ describe("TaskView timeline presentation", () => {
     vi.unstubAllGlobals();
   });
 
-  it("renders authoritative streaming text and later timeline rows without presentation gating", async () => {
+  it("does not show a stale caret on streaming text superseded by later timeline rows", async () => {
     const { TaskView } = await import("./TaskView");
     let tree!: ReactTestRenderer;
 
@@ -33,6 +33,25 @@ describe("TaskView timeline presentation", () => {
     expect(renderedTask).toContain("npm test");
     expect(renderedTask).toContain("Latest update");
     expect(renderedTask).not.toContain("chat-streaming-caret");
+  });
+
+  it("renders a task-open failure as a settled recoverable state", async () => {
+    const { TaskLoadingView } = await import("./TaskView");
+    const retry = vi.fn();
+    let tree!: ReactTestRenderer;
+
+    act(() => {
+      tree = create(<TaskLoadingView error="Connection closed." onRetry={retry} />);
+    });
+
+    expect(tree.root.findByType("section").props["aria-label"]).toBe("Unable to open task");
+    expect(tree.root.findAllByProps({ className: "working-status-dots" })).toHaveLength(0);
+    expect(JSON.stringify(tree.toJSON())).toContain("Connection closed.");
+
+    act(() => {
+      tree.root.findByType("button").props.onClick();
+    });
+    expect(retry).toHaveBeenCalledOnce();
   });
 
   it("announces each completed history generation only once", async () => {
@@ -89,6 +108,57 @@ describe("TaskView timeline presentation", () => {
       typeof node.props.className === "string"
       && node.props.className.split(/\s+/).includes("composer-config-control"));
     expect(configControl.props.disabled).toBe(true);
+  });
+
+  it("keeps a draft editable while the Task subscription reconnects", async () => {
+    const { TaskView } = await import("./TaskView");
+    let tree!: ReactTestRenderer;
+
+    act(() => {
+      tree = create(
+        <TaskView
+          {...taskViewProps(snapshotWithAuthoritativeTail(true))}
+          backendConnectionState={{ status: "reconnecting", message: "Connection closed." }}
+          backendReady={false}
+          taskInput={{ prompt: "Keep this draft", context: [] }}
+        />,
+      );
+    });
+
+    const rendered = JSON.stringify(tree.toJSON());
+    expect(rendered).toContain("Reconnecting to App Server.");
+    expect(rendered).toContain("Connection closed.");
+    const editor = tree.root.findByProps({ role: "textbox", "aria-label": "Message" });
+    expect(editor.props.contentEditable).toBe(true);
+    expect(editor.props["aria-placeholder"]).toBe("Reconnecting. Draft is saved here.");
+    expect(tree.root.findByProps({ "aria-label": "Send message" }).props.disabled).toBe(true);
+  });
+
+  it("shows cached task history with an in-place retry when task refresh fails", async () => {
+    const { TaskView } = await import("./TaskView");
+    const retry = vi.fn();
+    let tree!: ReactTestRenderer;
+
+    act(() => {
+      tree = create(
+        <TaskView
+          {...taskViewProps(snapshotWithAuthoritativeTail(true))}
+          backendConnectionState={{ status: "unavailable", message: "Connection closed." }}
+          backendReady={false}
+          onRetryConnection={retry}
+          taskInput={{ prompt: "Keep this draft", context: [] }}
+        />,
+      );
+    });
+
+    const rendered = JSON.stringify(tree.toJSON());
+    expect(rendered).toContain("Unable to refresh task.");
+    expect(rendered).toContain("Earlier response");
+    expect(rendered).toContain("Connection closed.");
+    expect(tree.root.findByProps({ role: "textbox", "aria-label": "Message" }).props.contentEditable).toBe(true);
+    const retryButton = tree.root.find((node) => node.type === "button" && node.children.includes("Retry"));
+    act(() => retryButton.props.onClick());
+    expect(retry).toHaveBeenCalledOnce();
   });
 });
 

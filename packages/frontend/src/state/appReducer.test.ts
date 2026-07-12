@@ -316,6 +316,29 @@ describe("app reducer composer state", () => {
     expect(state.newTask.nativeSessions.nextCursor).toBeUndefined();
   });
 
+  it("keeps expanded session history visible while refreshing it", () => {
+    let state = createInitialState();
+    state = appReducer(state, {
+      type: "newTask:nativeSessions:result",
+      append: false,
+      result: {
+        agent_id: "codex",
+        sessions: [
+          { session_id: "session_1", cwd: "/workspace/app", title: "Recent" },
+          { session_id: "session_2", cwd: "/workspace/app", title: "Older" },
+        ],
+      },
+    });
+
+    state = appReducer(state, { type: "newTask:nativeSessions:start", append: false });
+
+    expect(state.newTask.nativeSessions.loading).toBe(true);
+    expect(state.newTask.nativeSessions.items.map((session) => session.session_id)).toEqual([
+      "session_1",
+      "session_2",
+    ]);
+  });
+
   it("tracks native session adoption and clears it on errors", () => {
     let state = createInitialState();
 

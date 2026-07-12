@@ -141,7 +141,7 @@ describe("task list row styles", () => {
   });
 
   it("centers task loading states in the full task surface", () => {
-    expect(appCss).toMatch(/\.task-loading\s*{[^}]*grid-template-rows:\s*minmax\(0, 1fr\);[^}]*place-items:\s*center;/);
+    expect(appCss).toMatch(/\.task-loading\s*{[^}]*grid-template-rows:\s*auto;[^}]*place-items:\s*center;[^}]*align-content:\s*center;/);
     expect(appCss).toMatch(/\.task-loading-status\s*{[^}]*display:\s*inline-flex;[^}]*gap:\s*8px;/);
   });
 
@@ -443,7 +443,7 @@ describe("task list row styles", () => {
     expect(appCss).toMatch(/body\[data-shell="web"\] \.mobile-navigation-backdrop\s*{[^}]*display:\s*block;[^}]*position:\s*fixed;/);
     expect(appCss).toMatch(/body\[data-shell="web"\] \.web-main-surface\s*{[^}]*grid-column:\s*1;[^}]*grid-row:\s*2;/);
     expect(appCss).toMatch(/body\[data-shell="web"\] \.web-main-surface \.task-surface,[^{]+{\s*height:\s*100%;/);
-    expect(appCss).toMatch(/body\[data-shell="web"\] \.web-main-surface \.task-surface\s*{\s*grid-template-rows:\s*minmax\(0,\s*1fr\);/);
+    expect(appCss).toMatch(/body\[data-shell="web"\] \.web-main-surface \.task-surface:not\(\.task-loading\)\s*{\s*grid-template-rows:\s*minmax\(0,\s*1fr\);/);
     expect(appCss).toMatch(/body\[data-shell="web"\] \.chat-column\s*{[^}]*height:\s*100%;[^}]*grid-template-rows:\s*minmax\(0,\s*1fr\) auto;/);
     expect(appCss).toMatch(/body\[data-shell="web"\] \.sidebar-search input\s*{[^}]*min-height:\s*44px;[^}]*font-size:\s*16px;/);
     expect(appCss).toMatch(/body\[data-shell="web"\] \.project-task-group-header\s*{[^}]*min-height:\s*44px;[^}]*height:\s*auto;[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);/);

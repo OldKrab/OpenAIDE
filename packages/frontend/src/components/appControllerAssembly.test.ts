@@ -208,6 +208,67 @@ describe("deriveAppControllerState", () => {
 });
 
 describe("requestControllerNativeSessions", () => {
+  it("refreshes enough session-history pages to preserve the expanded task list", async () => {
+    const dispatch = vi.fn();
+    const request = vi.fn()
+      .mockResolvedValueOnce({
+        agentId: "codex",
+        projectId: "project-1",
+        projectLabel: "Workspace",
+        sessions: [
+          { sessionId: "session_1", title: "Newest" },
+          { sessionId: "session_2", title: "Recent" },
+        ],
+        nextCursor: "cursor_2",
+      })
+      .mockResolvedValueOnce({
+        agentId: "codex",
+        projectId: "project-1",
+        projectLabel: "Workspace",
+        sessions: [
+          { sessionId: "session_3", title: "Older" },
+          { sessionId: "session_4", title: "Oldest" },
+        ],
+        nextCursor: "cursor_3",
+      });
+
+    requestControllerNativeSessions({
+      agentId: "codex",
+      backendConnection: { request },
+      dispatch,
+      latestSessionListRequestId: { current: undefined },
+      minimumSessionCount: 3,
+      nextSessionListRequestId: { current: 0 },
+      projectId: "project-1",
+    });
+    await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+
+    expect(request).toHaveBeenNthCalledWith(1, "agent/listSessions", {
+      agentId: "codex",
+      projectId: "project-1",
+      cursor: null,
+    });
+    expect(request).toHaveBeenNthCalledWith(2, "agent/listSessions", {
+      agentId: "codex",
+      projectId: "project-1",
+      cursor: "cursor_2",
+    });
+    expect(dispatch).toHaveBeenLastCalledWith({
+      type: "newTask:nativeSessions:result",
+      append: false,
+      result: {
+        agent_id: "codex",
+        next_cursor: "cursor_3",
+        sessions: [
+          { session_id: "session_1", cwd: "Workspace", title: "Newest" },
+          { session_id: "session_2", cwd: "Workspace", title: "Recent" },
+          { session_id: "session_3", cwd: "Workspace", title: "Older" },
+          { session_id: "session_4", cwd: "Workspace", title: "Oldest" },
+        ],
+      },
+    });
+  });
+
   it("reports the typed App Server failure when session history cannot load", async () => {
     const dispatch = vi.fn();
     const onFailure = vi.fn();

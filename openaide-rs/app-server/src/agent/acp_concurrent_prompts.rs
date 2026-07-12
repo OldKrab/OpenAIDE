@@ -254,7 +254,15 @@ fn send_prompt_request(
                 }
                 Err(error) => Err(acp_error(error)),
             };
-            let _ = completion_tx.send(PromptCompletion { token, result });
+            if completion_tx
+                .send(PromptCompletion { token, result })
+                .is_err()
+            {
+                crate::logging::warn(
+                    "acp_prompt_completion_receiver_dropped",
+                    serde_json::json!({ "prompt_token": token }),
+                );
+            }
             Ok(())
         })
         .map_err(acp_error)

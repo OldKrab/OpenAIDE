@@ -14,6 +14,8 @@ export type WebviewAppServerConnection = {
 
 export type WebviewBootstrap = {
   surface: WebviewSurfaceKind;
+  /** Host-issued identity unique to this webview instance. */
+  clientInstanceId?: string;
   taskId?: string;
   projectId?: string;
   settingsTab?: SettingsTabId;

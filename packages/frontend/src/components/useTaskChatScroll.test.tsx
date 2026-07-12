@@ -12,7 +12,7 @@ describe("useTaskChatScroll", () => {
 
   afterEach(() => vi.unstubAllGlobals());
 
-  it("freezes a Task-scoped diagnostic trace when layout movement strands a follower", () => {
+  it("recovers a follower when permission layout contracts and grows before its scroll event", () => {
     const messageList = scrollNode({ clientHeight: 400, scrollHeight: 1400 });
     let tree!: ReactTestRenderer;
 
@@ -24,18 +24,17 @@ describe("useTaskChatScroll", () => {
       });
     });
 
+    act(() => tree.update(<Harness itemCount={1} pendingPermissions={[]} />));
     messageList.scrollHeight = 800;
     messageList.scrollHeight = 2000;
     act(() => {
       tree.root.findByProps({ className: "message-list" }).props.onScroll({ currentTarget: messageList });
     });
 
+    expect(messageList.scrollTop).toBe(1600);
     const trace = JSON.parse(sessionStorage.getItem("openaide:scroll-diagnostics:task_1") ?? "null");
-    expect(trace).toMatchObject({ frozen: true, taskId: "task_1" });
-    expect(trace.events.at(-1)).toMatchObject({
-      type: "anomaly",
-      geometry: { scrollTop: 400, scrollHeight: 2000, clientHeight: 400, distanceFromBottom: 1200 },
-    });
+    expect(trace).toMatchObject({ frozen: false, taskId: "task_1" });
+    expect(trace.events).not.toContainEqual(expect.objectContaining({ type: "anomaly" }));
     expect(trace.events).toContainEqual(expect.objectContaining({
       type: "render",
       context: {
@@ -49,10 +48,9 @@ describe("useTaskChatScroll", () => {
         taskStatus: "blocked",
       },
     }));
-    expect(trace.events).toContainEqual(expect.objectContaining({
+    expect(trace.events).not.toContainEqual(expect.objectContaining({
       type: "ownership",
       ownership: "reading",
-      reason: "scrollTopDecreased",
     }));
     expect(JSON.stringify(trace)).not.toContain("messageText");
   });
@@ -126,6 +124,133 @@ describe("useTaskChatScroll", () => {
     expect(messageList.scrollTop).toBe(998);
   });
 
+  it("keeps an unclassified reader scroll on stable geometry", () => {
+    const messageList = scrollNode({ clientHeight: 400, scrollHeight: 1400 });
+    let tree!: ReactTestRenderer;
+
+    act(() => {
+      tree = create(<Harness itemCount={1} pendingPermissions={[]} />, {
+        createNodeMock: (element) => (
+          (element.props as { className?: string }).className === "message-list" ? messageList : null
+        ),
+      });
+    });
+
+    messageList.scrollTop = 700;
+    act(() => {
+      tree.root.findByProps({ className: "message-list" }).props.onScroll({ currentTarget: messageList });
+    });
+
+    expect(messageList.scrollTop).toBe(700);
+    messageList.scrollHeight = 1500;
+    act(() => tree.update(<Harness itemCount={2} pendingPermissions={[]} />));
+    expect(messageList.scrollTop).toBe(700);
+  });
+
+  it("preserves keyboard reader intent after a permission resolves", () => {
+    const messageList = scrollNode({ clientHeight: 400, scrollHeight: 1400 });
+    let tree!: ReactTestRenderer;
+
+    act(() => {
+      tree = create(<Harness itemCount={1} />, {
+        createNodeMock: (element) => (
+          (element.props as { className?: string }).className === "message-list" ? messageList : null
+        ),
+      });
+    });
+
+    messageList.scrollHeight = 800;
+    messageList.scrollHeight = 2000;
+    act(() => tree.update(<Harness itemCount={1} pendingPermissions={[]} />));
+
+    const viewport = tree.root.findByProps({ className: "message-list" });
+    messageList.scrollTop = 700;
+    act(() => {
+      viewport.props.onKeyDown({
+        altKey: false,
+        ctrlKey: false,
+        currentTarget: messageList,
+        defaultPrevented: false,
+        key: "PageUp",
+        metaKey: false,
+        shiftKey: false,
+        target: messageList,
+      });
+      viewport.props.onScroll({ currentTarget: messageList });
+    });
+
+    messageList.scrollHeight = 2100;
+    act(() => tree.update(<Harness itemCount={2} pendingPermissions={[]} />));
+    expect(messageList.scrollTop).toBe(700);
+  });
+
+  it("expires permission layout recovery after the resolution paint", () => {
+    const messageList = scrollNode({ clientHeight: 400, scrollHeight: 1400 });
+    let afterPaint: FrameRequestCallback | undefined;
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
+      afterPaint = callback;
+      return 1;
+    });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    let tree!: ReactTestRenderer;
+
+    act(() => {
+      tree = create(<Harness itemCount={1} />, {
+        createNodeMock: (element) => (
+          (element.props as { className?: string }).className === "message-list" ? messageList : null
+        ),
+      });
+    });
+
+    act(() => tree.update(<Harness itemCount={1} pendingPermissions={[]} />));
+    expect(afterPaint).toBeTypeOf("function");
+    afterPaint?.(16);
+
+    messageList.scrollHeight = 800;
+    messageList.scrollHeight = 2000;
+    act(() => {
+      tree.root.findByProps({ className: "message-list" }).props.onScroll({ currentTarget: messageList });
+    });
+
+    expect(messageList.scrollTop).toBe(400);
+  });
+
+  it("restores following when keyboard navigation reaches the latest message", () => {
+    const messageList = scrollNode({ clientHeight: 400, scrollHeight: 1400 });
+    let tree!: ReactTestRenderer;
+
+    act(() => {
+      tree = create(<Harness itemCount={1} pendingPermissions={[]} />, {
+        createNodeMock: (element) => (
+          (element.props as { className?: string }).className === "message-list" ? messageList : null
+        ),
+      });
+    });
+
+    const viewport = tree.root.findByProps({ className: "message-list" });
+    messageList.scrollTop = 700;
+    act(() => {
+      viewport.props.onWheel({ deltaY: -20 });
+      viewport.props.onScroll({ currentTarget: messageList });
+      viewport.props.onKeyDown({
+        altKey: false,
+        ctrlKey: false,
+        currentTarget: messageList,
+        defaultPrevented: false,
+        key: "End",
+        metaKey: false,
+        shiftKey: false,
+        target: messageList,
+      });
+      messageList.scrollTop = 1000;
+      viewport.props.onScroll({ currentTarget: messageList });
+    });
+
+    messageList.scrollHeight = 1500;
+    act(() => tree.update(<Harness itemCount={2} pendingPermissions={[]} />));
+    expect(messageList.scrollTop).toBe(1100);
+  });
+
   it("follows final output when the Task becomes inactive in the same update", () => {
     const messageList = scrollNode({ clientHeight: 400, scrollHeight: 1400 });
     let tree!: ReactTestRenderer;
@@ -191,6 +316,61 @@ describe("useTaskChatScroll", () => {
     expect(messageList.scrollTop).toBe(999);
   });
 
+  it("lets a mouse scrollbar drag leave follow mode", () => {
+    const messageList = scrollNode({ clientHeight: 400, scrollHeight: 1400 });
+    let tree!: ReactTestRenderer;
+
+    act(() => {
+      tree = create(<Harness itemCount={1} />, {
+        createNodeMock: (element) => (
+          (element.props as { className?: string }).className === "message-list" ? messageList : null
+        ),
+      });
+    });
+
+    messageList.scrollTop = 700;
+    act(() => {
+      const viewport = tree.root.findByProps({ className: "message-list" });
+      viewport.props.onPointerDown({ pointerType: "mouse" });
+      viewport.props.onScroll({ currentTarget: messageList });
+      viewport.props.onPointerUp({ pointerType: "mouse" });
+    });
+    messageList.scrollHeight = 1500;
+    act(() => tree.update(<Harness itemCount={2} />));
+
+    expect(messageList.scrollTop).toBe(700);
+  });
+
+  it("ends pointer ownership when the pointer is released outside Chat", () => {
+    const windowListeners = new Map<string, EventListener>();
+    vi.stubGlobal("window", {
+      addEventListener: (type: string, listener: EventListener) => windowListeners.set(type, listener),
+      removeEventListener: (type: string) => windowListeners.delete(type),
+    });
+    const messageList = scrollNode({ clientHeight: 400, scrollHeight: 1400 });
+    let tree!: ReactTestRenderer;
+
+    act(() => {
+      tree = create(<Harness itemCount={1} />, {
+        createNodeMock: (element) => (
+          (element.props as { className?: string }).className === "message-list" ? messageList : null
+        ),
+      });
+    });
+
+    const viewport = tree.root.findByProps({ className: "message-list" });
+    act(() => {
+      viewport.props.onPointerDown({ pointerType: "mouse" });
+      windowListeners.get("pointerup")?.(new Event("pointerup"));
+      tree.update(<Harness itemCount={1} pendingPermissions={[]} />);
+    });
+    messageList.scrollHeight = 800;
+    messageList.scrollHeight = 2000;
+    act(() => viewport.props.onScroll({ currentTarget: messageList }));
+
+    expect(messageList.scrollTop).toBe(1600);
+  });
+
   it("keeps a reader anchored when synchronized history is inserted", () => {
     const messageList = scrollNode({ clientHeight: 400, scrollHeight: 1400 });
     let tree!: ReactTestRenderer;
@@ -236,10 +416,12 @@ function Harness({
   generating = true,
   historySyncState = "idle",
   itemCount,
+  pendingPermissions = ["permission-1"],
 }: {
   generating?: boolean;
   historySyncState?: "idle" | "checking" | "syncing" | "updated" | "failed";
   itemCount: number;
+  pendingPermissions?: string[];
 }) {
   const [savedScrollTop, setSavedScrollTop] = useState(1000);
   const chatScroll = useTaskChatScroll({
@@ -249,7 +431,7 @@ function Harness({
       itemCount,
       itemKindCounts: { permission: 1 },
       olderItemCount: 3,
-      pendingPermissions: ["permission-1"],
+      pendingPermissions,
       snapshotRevision: 9,
       taskStatus: "blocked",
     },
@@ -265,7 +447,10 @@ function Harness({
   return (
     <div
       className="message-list"
+      onPointerCancel={chatScroll.onPointerCancel}
       onPointerDown={chatScroll.onPointerDown}
+      onPointerUp={chatScroll.onPointerUp}
+      onKeyDown={chatScroll.onKeyDown}
       onScroll={chatScroll.onScroll}
       onWheel={chatScroll.onWheel}
       ref={chatScroll.messageListRef}

@@ -38,6 +38,7 @@ use crate::agent::product_api::{
 use crate::app_lifecycle::{AppLifecycle, InitializeAdmission, LifecycleState};
 use crate::client_lifecycle::{AppServerTime, ClientHub, ConnectionId};
 use crate::diagnostics::RuntimeDiagnosticsWorkflow;
+use crate::projects::ConfiguredProjectRoots;
 use crate::protocol::errors::RuntimeError;
 use crate::server_requests::ServerRequestRuntime;
 use crate::settings::{
@@ -65,6 +66,7 @@ pub struct RpcGateway {
     pub(crate) shell_file_reveals: ShellFileRevealRegistry,
     pub(crate) snapshots: SnapshotBuilder,
     pub(crate) task_snapshots: Arc<dyn TaskSnapshotSource>,
+    project_roots: ConfiguredProjectRoots,
     probe_facts: AppServerProbeFacts,
     diagnostics: Arc<dyn RuntimeDiagnosticsWorkflow>,
     agent_probe: Arc<dyn AgentProbeWorkflow>,
@@ -145,6 +147,7 @@ impl RpcGateway {
         shell_file_reveals: ShellFileRevealRegistry,
         snapshots: SnapshotBuilder,
         task_snapshots: Arc<dyn TaskSnapshotSource>,
+        project_roots: ConfiguredProjectRoots,
         probe_facts: AppServerProbeFacts,
         diagnostics: Arc<dyn RuntimeDiagnosticsWorkflow>,
         agent_probe: Arc<dyn AgentProbeWorkflow>,
@@ -178,6 +181,7 @@ impl RpcGateway {
             shell_file_reveals,
             snapshots,
             task_snapshots,
+            project_roots,
             probe_facts,
             diagnostics,
             agent_probe,
@@ -248,6 +252,10 @@ impl RpcGateway {
         if let InitializeAdmission::Rejected(error) = self.lifecycle.admit_initialize(now) {
             return self.error(connection_id, id, meta, error);
         }
+        let projects_changed = self.project_roots.replace_client_workspace_roots(
+            &params.client_instance_id,
+            params.workspace_roots.iter().map(|root| root.path.clone()),
+        );
         let outcome = self
             .client_hub
             .initialize(connection_id.clone(), params, now);
@@ -289,11 +297,18 @@ impl RpcGateway {
         snapshot.pending_requests = self
             .server_requests
             .pending_for_client(&context.client_instance_id);
-        self.result_with_server_requests(
+        let events = if projects_changed {
+            self.publish_project_collection_update(now)
+                .unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        responses::result_with_events_and_server_requests(
             connection_id,
             id,
             meta,
             InitializeResult { snapshot },
+            events,
             server_requests,
         )
     }

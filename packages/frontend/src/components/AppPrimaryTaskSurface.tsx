@@ -46,12 +46,16 @@ export function AppPrimaryTaskSurface({ controller, focusRequestKey, model }: Ap
     taskLoadingError,
   } = model;
   const isWebShell = bootstrap.surface !== "invalid" && bootstrap.appServerConnection?.kind === "webProxy";
+  const retryTaskOpen = taskLoadingError || controller.backendConnectionState.status === "unavailable"
+    ? controller.retryTaskOpen
+    : undefined;
 
   if (renderableTaskSnapshot && !openingNativeSession) {
     return (
       <TaskView
         activeTask={activeTask}
         archived={renderableTaskArchived}
+        backendConnectionState={controller.backendConnectionState}
         chatPageState={state.chatPages[renderableTaskSnapshot.task.task_id]}
         backendReady={backendReady}
         dispatch={dispatch}
@@ -63,6 +67,7 @@ export function AppPrimaryTaskSurface({ controller, focusRequestKey, model }: Ap
         onLoadToolDetail={callbacks.task.loadToolDetail}
         onPermissionRespond={callbacks.task.respondToPermission}
         onQuestionRespond={callbacks.task.respondToQuestion}
+        onRetryConnection={retryTaskOpen}
         onRevealAttachment={callbacks.task.revealAttachment}
         onRemoveAttachment={callbacks.task.removeAttachment}
         onRetryHistory={callbacks.task.retryHistory}
@@ -85,7 +90,12 @@ export function AppPrimaryTaskSurface({ controller, focusRequestKey, model }: Ap
   }
 
   if (bootstrap.taskId || openingNativeSession) {
-    return <TaskLoadingView error={taskLoadingError} />;
+    return (
+      <TaskLoadingView
+        error={taskLoadingError}
+        onRetry={retryTaskOpen}
+      />
+    );
   }
 
   return (

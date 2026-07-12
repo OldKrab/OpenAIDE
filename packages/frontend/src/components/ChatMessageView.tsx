@@ -22,6 +22,7 @@ export const ChatRow = memo(function ChatRow({
   taskId,
   toolDetails,
   commandCatalog,
+  showStreamingCaret = true,
 }: {
   commandCatalog?: AgentCommandsCatalog;
   message: ChatMessage;
@@ -37,6 +38,7 @@ export const ChatRow = memo(function ChatRow({
   questionResponse?: { responding: boolean; error?: string };
   taskId: string;
   toolDetails?: Record<string, { loading: boolean; details?: ActivityToolDetails; error?: string }>;
+  showStreamingCaret?: boolean;
 }) {
   const [openImage, setOpenImage] = useState<AttachmentImagePreviewSource | undefined>();
   const body = message.message;
@@ -52,7 +54,7 @@ export const ChatRow = memo(function ChatRow({
     );
   }
   if (body.kind === "agent_text") {
-    return <AgentTextMessage text={body.text} />;
+    return <AgentTextMessage streaming={body.streaming === true && showStreamingCaret} text={body.text} />;
   }
   if (body.kind === "thought") {
     return (
@@ -111,10 +113,10 @@ function UserAttachments({
   );
 }
 
-function AgentTextMessage({ text }: { text: string }) {
+function AgentTextMessage({ streaming, text }: { streaming: boolean; text: string }) {
   return (
-    <div className="chat-agent-block">
-      <AgentMarkdown className="chat-agent" text={text} />
+    <div className="chat-agent-block" aria-busy={streaming || undefined}>
+      <AgentMarkdown className="chat-agent" streaming={streaming} text={text} />
       <MessageCopyAction text={text} />
     </div>
   );

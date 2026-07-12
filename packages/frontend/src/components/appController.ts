@@ -27,6 +27,7 @@ import type { NewTaskStartAttempt } from "./appControllerCallbackTypes";
 import {
   useAppControllerBackendLifecycle,
   type AppControllerBackendConnection,
+  type BackendConnectionState,
 } from "./appControllerBackendLifecycle";
 import { appControllerDerivedStateDeps, deriveAppControllerState } from "./appControllerDerivedState";
 import { createRequestControllerNativeSessions } from "./appControllerNativeSessions";
@@ -41,11 +42,13 @@ export type AppController = {
   activeNavigationTaskId?: string;
   agents?: AgentOption[];
   backendReady: boolean;
+  backendConnectionState: BackendConnectionState;
   bootstrap: WebviewBootstrap;
   callbacks: AppControllerCallbacks;
   createSnapshotRequestId: (taskId?: string, intent?: SnapshotIntent) => number;
   dispatch: Dispatch<AppAction>;
   preferences: AppPreferencesRecord;
+  retryTaskOpen: () => void;
   state: AppState;
   visibleTasks: AppState["tasks"];
 };
@@ -75,11 +78,13 @@ export function useAppController({ backendConnection }: AppControllerOptions = {
   const {
     acceptSnapshotRequest,
     backendInitialized,
+    backendConnectionState,
     backendReady,
     beginNavigationChange,
     bootstrap,
     createSnapshotRequestId,
     currentNavigationGeneration,
+    retryTaskOpen,
   } = useAppControllerBackendLifecycle({
     backendConnection: backendConnectionRef,
     currentAgentId,
@@ -323,12 +328,14 @@ export function useAppController({ backendConnection }: AppControllerOptions = {
     activeNavigationTaskId,
     activeTask,
     agents,
+    backendConnectionState,
     backendReady,
     bootstrap,
     callbacks,
     createSnapshotRequestId,
     dispatch,
     preferences,
+    retryTaskOpen,
     state,
     visibleTasks,
   };

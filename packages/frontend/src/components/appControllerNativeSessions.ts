@@ -25,6 +25,7 @@ export function requestControllerNativeSessions({
   backendConnection,
   dispatch,
   latestSessionListRequestId,
+  minimumSessionCount = 0,
   nextSessionListRequestId,
   projectId,
   onFailure,
@@ -35,6 +36,7 @@ export function requestControllerNativeSessions({
   backendConnection?: Pick<BackendConnection, "request">;
   dispatch: Dispatch<AppAction>;
   latestSessionListRequestId: MutableRefObject<number | undefined>;
+  minimumSessionCount?: number;
   nextSessionListRequestId: MutableRefObject<number>;
   projectId?: string;
   onFailure?: (failure: NativeSessionLoadFailure) => void;
@@ -48,28 +50,42 @@ export function requestControllerNativeSessions({
       dispatch({ type: "newTask:nativeSessions:error", message: "Workspace is not ready yet." });
       return;
     }
-    void backendConnection.request(AGENT_LIST_SESSIONS, {
-      agentId: agentId as AgentId,
-      projectId: projectId as ProjectId,
-      cursor: cursor ?? null,
-    }).then((result) => {
-      if (latestSessionListRequestId.current !== requestId) return;
-      dispatch({
-        type: "newTask:nativeSessions:result",
-        result: {
-          agent_id: result.agentId,
-          next_cursor: result.nextCursor ?? undefined,
-          sessions: result.sessions.map((session) => ({
+    const loadPages = async () => {
+      let nextCursor = cursor;
+      let resultAgentId = agentId;
+      const sessions = new Map<string, AgentListedSessionResult>();
+      do {
+        const result = await backendConnection.request(AGENT_LIST_SESSIONS, {
+          agentId: agentId as AgentId,
+          projectId: projectId as ProjectId,
+          cursor: nextCursor ?? null,
+        });
+        if (latestSessionListRequestId.current !== requestId) return;
+        resultAgentId = result.agentId;
+        for (const session of result.sessions) {
+          sessions.set(session.sessionId, {
             cwd: result.projectLabel,
             session_id: session.sessionId,
             title: session.title ?? undefined,
             last_activity: session.lastActivity ?? session.updatedAt ?? undefined,
             updated_at: session.updatedAt ?? undefined,
-          })),
+          });
+        }
+        nextCursor = result.nextCursor ?? undefined;
+      } while (nextCursor && sessions.size < minimumSessionCount);
+
+      if (latestSessionListRequestId.current !== requestId) return;
+      dispatch({
+        type: "newTask:nativeSessions:result",
+        result: {
+          agent_id: resultAgentId,
+          next_cursor: nextCursor,
+          sessions: [...sessions.values()],
         },
         append,
       });
-    }).catch((error: unknown) => {
+    };
+    void loadPages().catch((error: unknown) => {
       if (latestSessionListRequestId.current !== requestId) return;
       onFailure?.(nativeSessionLoadFailure(error, { agentId, projectId, requestId }));
       dispatch({ type: "newTask:nativeSessions:error", message: "Unable to load Agent session history." });
@@ -96,7 +112,7 @@ export function createRequestControllerNativeSessions({
   nextSessionListRequestId: MutableRefObject<number>;
   onFailure?: (failure: NativeSessionLoadFailure) => void;
 }) {
-  return (cursor?: string, append = false) => {
+  return (cursor?: string, append = false, minimumSessionCount = 0) => {
     requestControllerNativeSessions({
       agentId: getAgentId(),
       append,
@@ -104,12 +120,21 @@ export function createRequestControllerNativeSessions({
       cursor,
       dispatch,
       latestSessionListRequestId,
+      minimumSessionCount,
       nextSessionListRequestId,
       onFailure,
       projectId: getProjectId(),
     });
   };
 }
+
+type AgentListedSessionResult = {
+  cwd: string;
+  session_id: string;
+  title?: string;
+  last_activity?: string;
+  updated_at?: string;
+};
 
 function nativeSessionLoadFailure(
   error: unknown,

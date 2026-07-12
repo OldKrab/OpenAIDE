@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type Dispatch, type RefObject } from "react";
 import type { BackendConnection } from "@openaide/app-server-client";
-import { subscribeWebRouteChanges } from "../services/hostBridge";
+import { subscribeSurfaceRouteChanges } from "../services/hostBridge";
 import { refreshSettingsProjectionsThroughBackend } from "../intents/settingsProjectionIntents";
 import type { AppAction } from "../state/appReducer";
 import type { AgentOption } from "../state/composerOptions";
@@ -16,7 +16,7 @@ export function useRoutedBootstrap(
   bootstrapRef.current = bootstrap;
 
   useEffect(() => {
-    return subscribeWebRouteChanges((nextBootstrap) => {
+    return subscribeSurfaceRouteChanges((nextBootstrap) => {
       setBootstrap(nextBootstrap);
       if (nextBootstrap.surface !== "task") return;
       if (nextBootstrap.taskId) {

@@ -8,6 +8,7 @@ import { registerTerminalHostHandlers } from "./runtime/hostTerminal";
 import { RuntimeClient } from "./runtime/rpcClient";
 import { TaskEditorManager } from "./webview/editorManager";
 import { TaskViewProvider } from "./webview/navigationProvider";
+import { registerWorkspaceProjectSync } from "./workspace/projectSync";
 
 export async function activate(context: vscode.ExtensionContext) {
   const logger = new ExtensionLogger("openaide");
@@ -17,6 +18,8 @@ export async function activate(context: vscode.ExtensionContext) {
   const fileSystemHostHandlers = registerFileSystemHostHandlers(runtime);
   const agentSecretHandlers = registerAgentSecretHandlers(runtime, context.secrets);
   const terminalHostHandlers = registerTerminalHostHandlers(runtime);
+  const workspaceProjectSync = registerWorkspaceProjectSync(runtime, logger);
+  await workspaceProjectSync.ready;
   const taskViewProvider = new TaskViewProvider(context, runtime, runtimeProcess, logger, taskEditors);
 
   context.subscriptions.push(runtime);
@@ -24,6 +27,7 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(fileSystemHostHandlers);
   context.subscriptions.push(agentSecretHandlers);
   context.subscriptions.push(terminalHostHandlers);
+  context.subscriptions.push(workspaceProjectSync);
   context.subscriptions.push(taskEditors);
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(TaskViewProvider.viewType, taskViewProvider, {

@@ -1,17 +1,18 @@
 use openaide_app_server_protocol::client::{
-    ClientCapabilities, ClientProtocolCapability, InitializeParams, RequestedSurface,
-    ShellCapability, ShellDescriptor, ShellKind,
+    ClientCapabilities, ClientCapabilitiesChangedParams, ClientProtocolCapability,
+    ClientWorkspaceRoot, InitializeParams, RequestedSurface, ShellCapability, ShellDescriptor,
+    ShellKind,
 };
 use openaide_app_server_protocol::envelopes::{ErrorEnvelope, RequestMeta};
 use openaide_app_server_protocol::errors::ProtocolErrorCode;
 use openaide_app_server_protocol::events::{AppServerEventPayload, EventScope};
 use openaide_app_server_protocol::ids::{ClientInstanceId, ClientRequestId, StateRootId, TaskId};
 use openaide_app_server_protocol::methods::{
-    AGENT_AUTHENTICATE, AGENT_LIST_SESSIONS, ATTACHMENT_REVEAL, CLIENT_HEARTBEAT,
-    CLIENT_INITIALIZE, DIAGNOSTICS_GET_RUNTIME, SETTINGS_GET_MCP_SERVERS, SETTINGS_GET_PREFERENCES,
-    SETTINGS_GET_RUNTIME, SETTINGS_GET_SKILLS, SETTINGS_UPDATE_PREFERENCES,
-    SETTINGS_UPDATE_RUNTIME, SHELL_RESOLVE_FILE_REVEAL, STATE_SUBSCRIBE, STATE_UNSUBSCRIBE,
-    TASK_CHAT_PAGE, TASK_TOOL_DETAIL,
+    AGENT_AUTHENTICATE, AGENT_LIST_SESSIONS, ATTACHMENT_REVEAL, CLIENT_CAPABILITIES_CHANGED,
+    CLIENT_HEARTBEAT, CLIENT_INITIALIZE, DIAGNOSTICS_GET_RUNTIME, SETTINGS_GET_MCP_SERVERS,
+    SETTINGS_GET_PREFERENCES, SETTINGS_GET_RUNTIME, SETTINGS_GET_SKILLS,
+    SETTINGS_UPDATE_PREFERENCES, SETTINGS_UPDATE_RUNTIME, SHELL_RESOLVE_FILE_REVEAL,
+    STATE_SUBSCRIBE, STATE_UNSUBSCRIBE, TASK_CHAT_PAGE, TASK_TOOL_DETAIL,
 };
 use openaide_app_server_protocol::settings::{
     AppPreferencesPatch, AppPreferencesUpdateParams, ComposerSubmitShortcut,
@@ -36,11 +37,16 @@ use crate::diagnostics::RuntimeDiagnosticsWorkflow;
 use crate::server_requests::ServerRequestRuntime;
 use crate::server_requests::{OpenRequestOutcome, ServerRequestAnswer, ServerRequestDraft};
 use crate::settings::{
-    AppPreferencesService, McpServersSettingsService, RuntimeSettingsService, SkillsSettingsService,
+    AppPreferencesService, McpServersSettingsService, RuntimeSettingsService, SettingsCatalog,
+    SkillsSettingsService,
 };
 use crate::shell_file_handles::ShellFileRevealRegistry;
-use crate::snapshots::{SnapshotBuilder, TaskListSnapshot, TaskSnapshotSource};
+use crate::snapshots::{
+    AgentRegistrySnapshotSource, ProjectCollectionStore, SnapshotBuilder, TaskListSnapshot,
+    TaskNavigationStore, TaskSnapshotSource, TaskSnapshotStore,
+};
 use crate::state_sync::StateStream;
+use crate::storage::Store;
 use crate::task_events::{CommittedTaskDelta, TaskUpdate};
 use crate::tasks::product_api::{
     AgentListSessionsWorkflow, AttachmentFileBrowserWorkflow, TaskAdoptNativeSessionWorkflow,
@@ -102,6 +108,299 @@ fn initialize_records_client_and_returns_snapshot_cursor() {
         .client_hub
         .context_for_connection(&ConnectionId::new("conn-1"))
         .is_some());
+}
+
+#[test]
+fn client_capabilities_changed_replaces_reported_workspace_roots() {
+    let mut gateway = gateway_with_project_context();
+    let connection_id = ConnectionId::new("conn-1");
+    let mut params = init_params("client-1");
+    params.workspace_roots = vec![ClientWorkspaceRoot {
+        path: "/workspace/alpha".to_string(),
+    }];
+    response_value(gateway.handle_inbound(
+        connection_id.clone(),
+        request("1", CLIENT_INITIALIZE, params),
+        AppServerTime(1),
+    ));
+
+    let changed = response_value(gateway.handle_inbound(
+        connection_id,
+        request(
+            "2",
+            CLIENT_CAPABILITIES_CHANGED,
+            ClientCapabilitiesChangedParams {
+                capabilities: None,
+                workspace_roots: Some(vec![ClientWorkspaceRoot {
+                    path: "/workspace/beta".to_string(),
+                }]),
+            },
+        ),
+        AppServerTime(2),
+    ));
+
+    let projects = changed["result"]["projects"]["projects"]
+        .as_array()
+        .expect("Project collection");
+    assert_eq!(projects.len(), 1);
+    assert_eq!(projects[0]["label"], json!("beta"));
+}
+
+#[test]
+fn workspace_root_replacement_preserves_other_clients_projects() {
+    let mut gateway = gateway_with_project_context();
+    let first_connection = ConnectionId::new("conn-1");
+    let second_connection = ConnectionId::new("conn-2");
+    let mut first = init_params("client-1");
+    first.workspace_roots = vec![ClientWorkspaceRoot {
+        path: "/workspace/alpha".to_string(),
+    }];
+    response_value(gateway.handle_inbound(
+        first_connection.clone(),
+        request("1", CLIENT_INITIALIZE, first),
+        AppServerTime(1),
+    ));
+    let mut second = init_params("client-2");
+    second.workspace_roots = vec![ClientWorkspaceRoot {
+        path: "/workspace/beta".to_string(),
+    }];
+    response_value(gateway.handle_inbound(
+        second_connection,
+        request("2", CLIENT_INITIALIZE, second),
+        AppServerTime(2),
+    ));
+
+    let changed = response_value(gateway.handle_inbound(
+        first_connection,
+        request(
+            "3",
+            CLIENT_CAPABILITIES_CHANGED,
+            ClientCapabilitiesChangedParams {
+                capabilities: None,
+                workspace_roots: Some(vec![ClientWorkspaceRoot {
+                    path: "/workspace/gamma".to_string(),
+                }]),
+            },
+        ),
+        AppServerTime(3),
+    ));
+
+    let labels = changed["result"]["projects"]["projects"]
+        .as_array()
+        .expect("Project collection")
+        .iter()
+        .map(|project| project["label"].as_str().expect("Project label"))
+        .collect::<Vec<_>>();
+    assert_eq!(labels, vec!["beta", "gamma"]);
+}
+
+#[test]
+fn expired_client_workspace_roots_leave_the_project_collection() {
+    let mut gateway = gateway_with_project_context();
+    let first_connection = ConnectionId::new("conn-1");
+    let second_connection = ConnectionId::new("conn-2");
+    let mut first = init_params("client-1");
+    first.workspace_roots = vec![ClientWorkspaceRoot {
+        path: "/workspace/alpha".to_string(),
+    }];
+    response_value(gateway.handle_inbound(
+        first_connection.clone(),
+        request("1", CLIENT_INITIALIZE, first),
+        AppServerTime(1),
+    ));
+    let mut second = init_params("client-2");
+    second.workspace_roots = vec![ClientWorkspaceRoot {
+        path: "/workspace/beta".to_string(),
+    }];
+    response_value(gateway.handle_inbound(
+        second_connection.clone(),
+        request("2", CLIENT_INITIALIZE, second),
+        AppServerTime(2),
+    ));
+    gateway.handle_transport_closed(&first_connection, AppServerTime(3));
+
+    assert!(matches!(
+        gateway.expire_client_after_reconnect_grace(
+            &ClientInstanceId::from("client-1"),
+            AppServerTime(13),
+        ),
+        ClientExpiryOutcome::Expired { .. }
+    ));
+    let current = response_value(gateway.handle_inbound(
+        second_connection,
+        request(
+            "3",
+            CLIENT_CAPABILITIES_CHANGED,
+            ClientCapabilitiesChangedParams::default(),
+        ),
+        AppServerTime(14),
+    ));
+
+    let projects = current["result"]["projects"]["projects"]
+        .as_array()
+        .expect("Project collection");
+    assert_eq!(projects.len(), 1);
+    assert_eq!(projects[0]["label"], json!("beta"));
+}
+
+#[test]
+fn expired_client_workspace_roots_publish_projects_to_existing_subscribers() {
+    let mut gateway = gateway_with_project_context();
+    let host_connection = ConnectionId::new("conn-host");
+    let webview_connection = ConnectionId::new("conn-webview");
+    let mut host = init_params("client-host");
+    host.workspace_roots = vec![ClientWorkspaceRoot {
+        path: "/workspace/alpha".to_string(),
+    }];
+    response_value(gateway.handle_inbound(
+        host_connection.clone(),
+        request("1", CLIENT_INITIALIZE, host),
+        AppServerTime(1),
+    ));
+    response_value(gateway.handle_inbound(
+        webview_connection.clone(),
+        request("2", CLIENT_INITIALIZE, init_params("client-webview")),
+        AppServerTime(2),
+    ));
+    response_value(gateway.handle_inbound(
+        webview_connection.clone(),
+        request(
+            "3",
+            STATE_SUBSCRIBE,
+            StateSubscribeParams {
+                scope: SubscriptionScope::Projects,
+            },
+        ),
+        AppServerTime(3),
+    ));
+    gateway.handle_transport_closed(&host_connection, AppServerTime(4));
+
+    assert!(matches!(
+        gateway.expire_client_after_reconnect_grace(
+            &ClientInstanceId::from("client-host"),
+            AppServerTime(14),
+        ),
+        ClientExpiryOutcome::Expired { .. }
+    ));
+    let events = response_events(gateway.handle_inbound(
+        webview_connection,
+        request("4", CLIENT_HEARTBEAT, serde_json::json!({})),
+        AppServerTime(15),
+    ));
+
+    assert!(events.iter().any(|delivery| {
+        delivery.delivery.client_instance_id == ClientInstanceId::from("client-webview")
+            && matches!(
+                &delivery.event.payload,
+                AppServerEventPayload::ProjectCollectionUpdated { projects }
+                    if projects.projects.is_empty()
+            )
+    }));
+}
+
+#[test]
+fn workspace_root_changes_publish_projects_to_other_subscribed_clients() {
+    let mut gateway = gateway_with_project_context();
+    let host_connection = ConnectionId::new("conn-host");
+    let webview_connection = ConnectionId::new("conn-webview");
+    let mut host = init_params("client-host");
+    host.workspace_roots = vec![ClientWorkspaceRoot {
+        path: "/workspace/alpha".to_string(),
+    }];
+    response_value(gateway.handle_inbound(
+        host_connection.clone(),
+        request("1", CLIENT_INITIALIZE, host),
+        AppServerTime(1),
+    ));
+    response_value(gateway.handle_inbound(
+        webview_connection.clone(),
+        request("2", CLIENT_INITIALIZE, init_params("client-webview")),
+        AppServerTime(2),
+    ));
+    response_value(gateway.handle_inbound(
+        webview_connection,
+        request(
+            "3",
+            STATE_SUBSCRIBE,
+            StateSubscribeParams {
+                scope: SubscriptionScope::Projects,
+            },
+        ),
+        AppServerTime(3),
+    ));
+
+    let events = response_events(gateway.handle_inbound(
+        host_connection,
+        request(
+            "4",
+            CLIENT_CAPABILITIES_CHANGED,
+            ClientCapabilitiesChangedParams {
+                capabilities: None,
+                workspace_roots: Some(vec![ClientWorkspaceRoot {
+                    path: "/workspace/beta".to_string(),
+                }]),
+            },
+        ),
+        AppServerTime(4),
+    ));
+
+    let project_update = events
+        .into_iter()
+        .find(|delivery| {
+            delivery.delivery.client_instance_id == ClientInstanceId::from("client-webview")
+                && matches!(
+                    delivery.event.payload,
+                    AppServerEventPayload::ProjectCollectionUpdated { .. }
+                )
+        })
+        .expect("subscribed webview receives Project collection update");
+    let AppServerEventPayload::ProjectCollectionUpdated { projects } = project_update.event.payload
+    else {
+        unreachable!("filtered to Project collection update")
+    };
+    assert_eq!(projects.projects.len(), 1);
+    assert_eq!(projects.projects[0].label, "beta");
+}
+
+#[test]
+fn initialize_workspace_roots_publish_projects_to_existing_subscribers() {
+    let mut gateway = gateway_with_project_context();
+    let webview_connection = ConnectionId::new("conn-webview");
+    response_value(gateway.handle_inbound(
+        webview_connection.clone(),
+        request("1", CLIENT_INITIALIZE, init_params("client-webview")),
+        AppServerTime(1),
+    ));
+    response_value(gateway.handle_inbound(
+        webview_connection,
+        request(
+            "2",
+            STATE_SUBSCRIBE,
+            StateSubscribeParams {
+                scope: SubscriptionScope::Projects,
+            },
+        ),
+        AppServerTime(2),
+    ));
+    let mut host = init_params("client-host");
+    host.workspace_roots = vec![ClientWorkspaceRoot {
+        path: "/workspace/alpha".to_string(),
+    }];
+
+    let events = response_events(gateway.handle_inbound(
+        ConnectionId::new("conn-host"),
+        request("3", CLIENT_INITIALIZE, host),
+        AppServerTime(3),
+    ));
+
+    assert!(events.iter().any(|delivery| {
+        delivery.delivery.client_instance_id == ClientInstanceId::from("client-webview")
+            && matches!(
+                &delivery.event.payload,
+                AppServerEventPayload::ProjectCollectionUpdated { projects }
+                    if projects.projects.iter().any(|project| project.label == "alpha")
+            )
+    }));
 }
 
 #[test]
@@ -1250,6 +1549,60 @@ fn gateway() -> RpcGateway {
     gateway_with_attachments(Arc::new(RejectingAttachments))
 }
 
+fn gateway_with_project_context() -> RpcGateway {
+    let root = tempfile::tempdir().unwrap().keep();
+    let store = Store::open(root).unwrap();
+    let project_roots = crate::projects::ConfiguredProjectRoots::default();
+    let task_snapshots = Arc::new(TaskSnapshotStore::new(store.clone()));
+    let snapshots = SnapshotBuilder::with_sources(
+        "server-1".into(),
+        "root-1".into(),
+        Arc::new(AgentRegistrySnapshotSource::new(
+            crate::agent::registry::AgentRegistry::default_built_ins(),
+        )),
+        Arc::new(ProjectCollectionStore::new_with_configured_roots(
+            store.clone(),
+            project_roots.clone(),
+        )),
+        Arc::new(SettingsCatalog::default()),
+        Arc::new(TaskNavigationStore::new(store)),
+        task_snapshots.clone(),
+    );
+    RpcGateway::new(
+        ClientHub::new(10),
+        AppLifecycle::new(),
+        StateStream::new(StateRootId::from("root-1")),
+        ServerRequestRuntime::new(),
+        ShellFileRevealRegistry::new(),
+        snapshots,
+        task_snapshots,
+        project_roots,
+        AppServerProbeFacts::new("root-1"),
+        runtime_diagnostics(),
+        Arc::new(RejectingAgentProbe),
+        Arc::new(RejectingAgentAuthenticate),
+        Arc::new(RejectingAgentCatalogMutations),
+        Arc::new(RejectingAgentSettingsDetails),
+        Arc::new(McpServersSettingsService::new()),
+        Arc::new(SkillsSettingsService::new()),
+        app_preferences(),
+        runtime_settings(),
+        Arc::new(RejectingAgentListSessions),
+        Arc::new(RejectingAttachments),
+        Arc::new(RejectingTaskCreate),
+        Arc::new(RejectingTaskAdoptNativeSession),
+        Arc::new(RejectingTaskSend),
+        Arc::new(RejectingTaskCancel),
+        Arc::new(RejectingTaskOpen),
+        Arc::new(RejectingTaskChatPage),
+        Arc::new(RejectingTaskToolDetail),
+        Arc::new(RejectingTaskSetConfigOption),
+        Arc::new(RejectingTaskDiscard),
+        Arc::new(RejectingTaskArchive),
+        Arc::new(FixedShutdown),
+    )
+}
+
 fn gateway_with_attachments(attachments: Arc<dyn AttachmentFileBrowserWorkflow>) -> RpcGateway {
     gateway_with_attachments_and_shutdown(attachments, Arc::new(FixedShutdown))
 }
@@ -1270,6 +1623,7 @@ fn gateway_with_attachments_and_shutdown(
         ShellFileRevealRegistry::new(),
         SnapshotBuilder::new("server-1".into(), "root-1".into()),
         std::sync::Arc::new(EmptyTaskSnapshots),
+        crate::projects::ConfiguredProjectRoots::default(),
         AppServerProbeFacts::new("root-1"),
         runtime_diagnostics(),
         std::sync::Arc::new(RejectingAgentProbe),
@@ -1348,6 +1702,7 @@ fn gateway_with_agent_session_listing(
         ShellFileRevealRegistry::new(),
         SnapshotBuilder::new("server-1".into(), "root-1".into()),
         std::sync::Arc::new(EmptyTaskSnapshots),
+        crate::projects::ConfiguredProjectRoots::default(),
         AppServerProbeFacts::new("root-1"),
         runtime_diagnostics(),
         std::sync::Arc::new(RejectingAgentProbe),
@@ -1385,6 +1740,7 @@ fn gateway_with_agent_authenticate(
         ShellFileRevealRegistry::new(),
         SnapshotBuilder::new("server-1".into(), "root-1".into()),
         std::sync::Arc::new(EmptyTaskSnapshots),
+        crate::projects::ConfiguredProjectRoots::default(),
         AppServerProbeFacts::new("root-1"),
         runtime_diagnostics(),
         std::sync::Arc::new(RejectingAgentProbe),
@@ -2286,6 +2642,7 @@ fn init_params(client_id: &str) -> InitializeParams {
             ],
             shell: Vec::new(),
         },
+        workspace_roots: Vec::new(),
     }
 }
 

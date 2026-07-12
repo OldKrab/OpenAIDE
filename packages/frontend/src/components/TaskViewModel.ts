@@ -3,22 +3,32 @@ import type { TaskStatus } from "@openaide/app-shell-contracts";
 export function taskComposerAvailability({
   archived = false,
   backendReady,
+  connectionStatus,
   inputPending,
   preparationBlocked,
   taskStatus,
 }: {
   archived?: boolean;
   backendReady: boolean;
+  connectionStatus?: "connecting" | "ready" | "reconnecting" | "unavailable";
   inputPending: boolean;
   preparationBlocked: boolean;
   taskStatus: TaskStatus;
 }) {
   const turnBusy = taskStatus === "active" || taskStatus === "blocked";
-  const editingDisabled = archived || !backendReady || inputPending || preparationBlocked;
-  const sendDisabled = editingDisabled;
+  const keepingDraftAvailable = !backendReady
+    && (connectionStatus === "reconnecting" || connectionStatus === "unavailable");
+  const editingDisabled = archived || (!backendReady && !keepingDraftAvailable) || inputPending || preparationBlocked;
+  const sendDisabled = archived || !backendReady || inputPending || preparationBlocked;
   if (archived) return { editingDisabled, sendDisabled, placeholder: "Restore task to send follow-up." };
   if (preparationBlocked) return { editingDisabled, sendDisabled, placeholder: "Preparing task." };
-  if (!backendReady) return { editingDisabled, sendDisabled, placeholder: "Connecting to App Server." };
+  if (!backendReady) {
+    return {
+      editingDisabled,
+      sendDisabled,
+      placeholder: keepingDraftAvailable ? "Reconnecting. Draft is saved here." : "Connecting to App Server.",
+    };
+  }
   if (inputPending) return { editingDisabled, sendDisabled, placeholder: "Sending." };
   if (taskStatus === "blocked") {
     return { editingDisabled, sendDisabled, placeholder: "Draft follow-up while input is pending." };

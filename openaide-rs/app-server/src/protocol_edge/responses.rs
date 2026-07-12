@@ -39,6 +39,24 @@ pub fn result_with_server_requests<T: Serialize>(
     result: T,
     server_requests: Vec<ServerRequestDelivery>,
 ) -> GatewayOutcome {
+    result_with_events_and_server_requests(
+        connection_id,
+        id,
+        meta,
+        result,
+        Vec::new(),
+        server_requests,
+    )
+}
+
+pub fn result_with_events_and_server_requests<T: Serialize>(
+    connection_id: ConnectionId,
+    id: String,
+    meta: RequestMeta,
+    result: T,
+    events: Vec<GatewayEventDelivery>,
+    server_requests: Vec<ServerRequestDelivery>,
+) -> GatewayOutcome {
     GatewayOutcome::Respond {
         connection_id,
         id,
@@ -51,7 +69,7 @@ pub fn result_with_server_requests<T: Serialize>(
             ))
             .expect("protocol response should serialize"),
         ),
-        events: Vec::new(),
+        events,
         server_requests,
     }
 }

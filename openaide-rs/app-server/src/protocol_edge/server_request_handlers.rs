@@ -75,6 +75,7 @@ impl RpcGateway {
         if let ClientExpiryOutcome::Expired { last_client, .. } = &outcome {
             self.server_requests
                 .observe_client_expired(client_instance_id, now);
+            self.remove_expired_client_workspace_roots(client_instance_id, now);
             if *last_client {
                 self.lifecycle.observe_last_client_expired();
             }
@@ -84,9 +85,16 @@ impl RpcGateway {
 
     pub fn expire_inactive_clients(&mut self, now: AppServerTime) -> Vec<ClientExpiryOutcome> {
         let batch = self.client_hub.expire_inactive_clients(now);
+        let mut projects_changed = false;
         for client_instance_id in &batch.expired {
             self.server_requests
                 .observe_client_expired(client_instance_id, now);
+            projects_changed |= self
+                .project_roots
+                .remove_client_workspace_roots(client_instance_id);
+        }
+        if projects_changed {
+            self.queue_project_collection_update(now);
         }
         if batch.last_client_expired {
             self.lifecycle.observe_last_client_expired();
@@ -103,6 +111,25 @@ impl RpcGateway {
                 last_client: Some(index) == last_expired_index,
             })
             .collect()
+    }
+
+    fn remove_expired_client_workspace_roots(
+        &mut self,
+        client_instance_id: &openaide_app_server_protocol::ids::ClientInstanceId,
+        now: AppServerTime,
+    ) {
+        if self
+            .project_roots
+            .remove_client_workspace_roots(client_instance_id)
+        {
+            self.queue_project_collection_update(now);
+        }
+    }
+
+    fn queue_project_collection_update(&mut self, now: AppServerTime) {
+        if let Some(events) = self.publish_project_collection_update(now) {
+            self.pending_event_deliveries.extend(events);
+        }
     }
 
     pub(crate) fn drain_event_deliveries_for_connection(

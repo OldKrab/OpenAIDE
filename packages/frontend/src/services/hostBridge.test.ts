@@ -7,7 +7,7 @@ describe("host bridge", () => {
   });
 
   it("creates a direct LocalHttp BackendConnection from bootstrap endpoint info", async () => {
-    const fetch = vi.fn(async () => ({
+    const fetch = vi.fn(async (_input: string, _init?: unknown) => ({
       ok: true,
       status: 200,
       async text() {
@@ -60,6 +60,101 @@ describe("host bridge", () => {
         }),
       }),
     );
+  });
+
+  it("keeps LocalHttp connection identities distinct for task webviews sharing session storage", async () => {
+    const fetch = vi.fn(async (_input: string, _init?: unknown) => ({
+      ok: true,
+      status: 200,
+      async text() {
+        return JSON.stringify([{
+          jsonrpc: "2.0",
+          id: "local-http-request-1",
+          result: { result: initializeResult() },
+        }]);
+      },
+    }));
+    const sharedStorage = memoryStorage();
+    sharedStorage.setItem("openaide.clientInstanceId", "shared-origin-client");
+    const dataset: Record<string, string> = {
+      surface: "task",
+      clientInstanceId: "task-panel-1",
+      appServerConnection: JSON.stringify({
+        kind: "localHttp",
+        endpointUrl: "http://127.0.0.1:4321/probe",
+        authToken: "token-1",
+      }),
+    };
+    vi.stubGlobal("fetch", fetch);
+    vi.stubGlobal("sessionStorage", sharedStorage);
+    vi.stubGlobal("document", { body: { dataset } });
+    vi.stubGlobal("window", {
+      acquireVsCodeApi: undefined,
+      location: { pathname: "/" },
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    });
+
+    const { getBackendConnection, getBootstrap } = await import("./hostBridge");
+    const { initializeParamsForBootstrap } = await import("./backendInitialization");
+    const firstBootstrap = getBootstrap();
+    const first = getBackendConnection();
+    await first?.initialize(initializeParamsForBootstrap(firstBootstrap));
+    dataset.clientInstanceId = "task-panel-2";
+    const secondBootstrap = getBootstrap();
+    const second = getBackendConnection();
+    await second?.initialize(initializeParamsForBootstrap(secondBootstrap));
+
+    expect(initializeParamsForBootstrap(firstBootstrap).clientInstanceId).toBe("task-panel-1");
+    expect(initializeParamsForBootstrap(secondBootstrap).clientInstanceId).toBe("task-panel-2");
+    const connectionIds = fetch.mock.calls.map(([, init]) =>
+      (init as { headers: Record<string, string> }).headers["X-OpenAIDE-Connection-Id"]
+    );
+    expect(connectionIds).toContain("task-panel-1");
+    expect(connectionIds).toContain("task-panel-2");
+    expect(connectionIds).not.toContain("shared-origin-client");
+  });
+
+  it("turns a VS Code task adoption message into an in-place bootstrap route", async () => {
+    const listeners = new Map<string, (event: { data?: unknown }) => void>();
+    vi.stubGlobal("document", {
+      body: {
+        dataset: {
+          surface: "task",
+          clientInstanceId: "task-panel-1",
+          appServerConnection: JSON.stringify({
+            kind: "localHttp",
+            endpointUrl: "http://127.0.0.1:4321/probe",
+            authToken: "token-1",
+          }),
+        },
+      },
+    });
+    vi.stubGlobal("window", {
+      acquireVsCodeApi: () => ({ postMessage: vi.fn() }),
+      location: { pathname: "/" },
+      addEventListener: vi.fn((type: string, listener: (event: { data?: unknown }) => void) => {
+        listeners.set(type, listener);
+      }),
+      removeEventListener: vi.fn(),
+    });
+
+    const { subscribeSurfaceRouteChanges } = await import("./hostBridge");
+    const routed = vi.fn();
+    subscribeSurfaceRouteChanges(routed);
+    listeners.get("message")?.({
+      data: {
+        type: "surface.routeChanged",
+        payload: { surface: "task", task_id: "created_task" },
+      },
+    });
+
+    expect(routed).toHaveBeenCalledWith(expect.objectContaining({
+      surface: "task",
+      taskId: "created_task",
+      clientInstanceId: "task-panel-1",
+      appServerConnection: expect.objectContaining({ kind: "localHttp" }),
+    }));
   });
 
   it("creates a tokenless WebProxy BackendConnection from bootstrap endpoint info", async () => {

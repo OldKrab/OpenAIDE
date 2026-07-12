@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  CLIENT_CAPABILITIES_CHANGED,
   CLIENT_HEARTBEAT,
   CLIENT_INITIALIZE,
   PERMISSION_REQUEST,
@@ -273,6 +274,48 @@ describe("LocalHttpBackendConnection", () => {
       CLIENT_INITIALIZE,
       STATE_SUBSCRIBE,
     ]);
+  });
+
+  it("replays the latest workspace roots when reinitializing after a capability update", async () => {
+    const fetch = fetchSequence([
+      [response("local-http-request-1", { result: initializeResult() })],
+      [response("local-http-request-2", {
+        result: { projects: { projects: [] } },
+      })],
+      [protocolError(
+        "local-http-request-3",
+        "notInitialized",
+        "client/initialize must succeed before product requests",
+      )],
+      [response("local-http-request-4", { result: initializeResult() })],
+      [response("local-http-request-5", {
+        result: {
+          cursor: "cursor-3",
+          scope: { kind: "projects" },
+          snapshot: { kind: "projects", projects: { projects: [] } },
+        },
+      })],
+    ]);
+    const connection = createLocalHttpBackendConnection(connectionOptions(fetch));
+    const initialParams = {
+      ...initializeParams(),
+      workspaceRoots: [{ path: "/workspace/alpha" }],
+    } as InitializeParams;
+
+    await connection.initialize(initialParams);
+    await connection.request(CLIENT_CAPABILITIES_CHANGED, {
+      workspaceRoots: [{ path: "/workspace/beta" }],
+    });
+    await connection.request(STATE_SUBSCRIBE, { scope: { kind: "projects" } });
+
+    const requests = fetch.mock.calls
+      .filter(([, init]) => init.headers.Accept !== "text/event-stream")
+      .map(([, init]) => JSON.parse(init.body));
+    expect(requests[3]).toMatchObject({
+      method: CLIENT_INITIALIZE,
+      params: { workspaceRoots: [{ path: "/workspace/beta" }] },
+    });
+    connection.close();
   });
 
   it("retries initialization on a later request after transient reinitialize failure", async () => {

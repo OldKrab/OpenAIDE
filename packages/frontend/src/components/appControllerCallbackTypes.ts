@@ -127,7 +127,7 @@ export type AppCallbacksDependencies = {
   latestOptionsRequestKey: { current: string | undefined };
   newTaskStartAttempt: { current: NewTaskStartAttempt | undefined };
   pendingPreparedNewTask: (key: string) => Promise<PendingNewTaskPreparationResult> | undefined;
-  requestNativeSessions: (cursor?: string, append?: boolean) => void;
+  requestNativeSessions: (cursor?: string, append?: boolean, minimumSessionCount?: number) => void;
   setAgents?: (agents: AgentOption[]) => void;
   setPreferences: (preferences: AppPreferencesRecord) => void;
   state: AppState;

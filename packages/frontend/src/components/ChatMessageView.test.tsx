@@ -32,19 +32,28 @@ describe("ChatRow", () => {
     expect(agentHtml).toContain('aria-label="Copy message"');
   });
 
-  it("renders authoritative live Agent text immediately without a synthetic caret", async () => {
+  it("shows a caret only while authoritative Agent text is streaming", async () => {
     const { ChatRow } = await import("./ChatMessageView");
-    const html = renderToStaticMarkup(
+    const streamingHtml = renderToStaticMarkup(
       <ChatRow
         message={agentMessage("a1", "The complete received chunk is visible now.", true)}
         onPermissionRespond={vi.fn()}
         taskId="task_1"
       />,
     );
+    const completedHtml = renderToStaticMarkup(
+      <ChatRow
+        message={agentMessage("a1", "The complete received chunk is visible now.", false)}
+        onPermissionRespond={vi.fn()}
+        taskId="task_1"
+      />,
+    );
 
-    expect(html).toContain("The complete received chunk is visible now.");
-    expect(html).not.toContain("chat-streaming-caret");
-    expect(html).not.toContain('aria-busy="true"');
+    expect(streamingHtml).toContain("The complete received chunk is visible now.");
+    expect(streamingHtml).toContain('class="chat-streaming-caret"');
+    expect(streamingHtml).toContain('aria-busy="true"');
+    expect(completedHtml).not.toContain("chat-streaming-caret");
+    expect(completedHtml).not.toContain('aria-busy="true"');
   });
 
   it("renders appended live Agent text on the update that receives it", async () => {
@@ -66,7 +75,7 @@ describe("ChatRow", () => {
     const rendered = JSON.stringify(tree!.toJSON());
     expect(rendered).toContain("Agent text arrives as one larger network chunk.");
     expect(rendered).toContain("Copy message");
-    expect(rendered).not.toContain("chat-streaming-caret");
+    expect(rendered).toContain("chat-streaming-caret");
   });
 
   it("renders thought messages as their own collapsed row", async () => {
@@ -963,8 +972,8 @@ describe("ChatRow", () => {
     const element = ChatPermissionCard({ permission, onRespond });
     const buttons = findElements(element, (candidate) => candidate.type === "button");
     expect(buttons[1].props.disabled).toBe(true);
-    buttons[0].props.onClick();
-    buttons[2].props.onClick();
+    buttons[0].props.onClick(permissionActionEvent());
+    buttons[2].props.onClick(permissionActionEvent());
     expect(onRespond).toHaveBeenNthCalledWith(1, "request_p1", "allow_once", "approved", "agent");
     expect(onRespond).toHaveBeenNthCalledWith(2, "request_p1", "reject", "denied", "agent");
 
@@ -972,7 +981,8 @@ describe("ChatRow", () => {
       ...permission,
       app_server_request_id: "server-request-1",
     };
-    findElements(ChatPermissionCard({ permission: appServerPermission, onRespond }), (candidate) => candidate.type === "button")[0].props.onClick();
+    findElements(ChatPermissionCard({ permission: appServerPermission, onRespond }), (candidate) => candidate.type === "button")[0]
+      .props.onClick(permissionActionEvent());
     expect(onRespond).toHaveBeenLastCalledWith("server-request-1", "allow_once", "approved", "appServer");
 
     const respondingElement = ChatPermissionCard({
@@ -984,6 +994,43 @@ describe("ChatRow", () => {
       onRespond,
     });
     expect(findElements(respondingElement, (candidate) => candidate.type === "button")[0].props.disabled).toBe(true);
+
+    const failedElement = ChatPermissionCard({
+      permission,
+      response: { responding: false, error: "Permission response failed" },
+      onRespond,
+    });
+    const error = findElement(failedElement, (candidate) => candidate.props.className === "permission-error");
+    expect(error.props.role).toBe("alert");
+  });
+
+  it("moves focus off the action before resolving a permission", async () => {
+    const { ChatPermissionCard } = await import("./ChatPermissionCard");
+    const focus = vi.fn();
+    const onRespond = vi.fn();
+    const permission = permissionMessage("p1", "mkdir archive", [
+      { id: "allow_once", label: "Allow once", kind: "allow" },
+    ]).message as Extract<ChatMessage["message"], { kind: "permission" }>;
+    const element = ChatPermissionCard({ permission, onRespond });
+    const card = findElement(element, (candidate) => candidate.type === "section");
+    const action = findElement(element, (candidate) => candidate.props.className === "allow");
+    const status = findElement(element, (candidate) => (
+      typeof candidate.props.className === "string" && candidate.props.className.startsWith("permission-state")
+    ));
+    action.props.onClick({
+      currentTarget: {
+        closest: () => ({ focus }),
+      },
+    });
+
+    expect(card.props.tabIndex).toBe(-1);
+    expect(status.props).toMatchObject({
+      "aria-atomic": "true",
+      "aria-live": "polite",
+      role: "status",
+    });
+    expect(focus).toHaveBeenCalledWith({ preventScroll: true });
+    expect(onRespond).toHaveBeenCalledWith("request_p1", "allow_once", "approved", "agent");
   });
 });
 
@@ -991,6 +1038,10 @@ function findElement(element: ReactNode, predicate: (element: ReactElement<Recor
   const matches = findElements(element, predicate);
   if (!matches[0]) throw new Error("Expected React element was not found.");
   return matches[0];
+}
+
+function permissionActionEvent() {
+  return { currentTarget: { closest: () => null } };
 }
 
 function findElements(element: ReactNode, predicate: (element: ReactElement<Record<string, any>>) => boolean) {

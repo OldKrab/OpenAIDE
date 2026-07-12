@@ -187,28 +187,37 @@ pub(super) async fn run_prompt(
                     }),
                 );
                 if succeeded {
-                    drain_post_prompt_updates(
+                    if let Err(error) = drain_post_prompt_updates(
                         active_session,
                         prompts.projection(),
                         context.trace.as_ref(),
                         session_event_sink.clone(),
                         pending_session_catalogs,
                     )
-                    .await?;
+                    .await
+                    {
+                        break Err(error);
+                    }
                 }
                 if let Some(result) = prompts.complete(completion) {
                     break result;
                 }
             }
             update = active_session.read_update() => {
-                match update.map_err(acp_error)? {
+                let update = match update.map_err(acp_error) {
+                    Ok(update) => update,
+                    Err(error) => break Err(error),
+                };
+                match update {
                     SessionMessage::SessionMessage(dispatch) => {
-                        dispatch_session_notification(
+                        if let Err(error) = dispatch_session_notification(
                             dispatch,
                             prompts.projection(),
                             session_event_sink.clone(),
                             pending_session_catalogs,
-                        ).await?;
+                        ).await {
+                            break Err(error);
+                        }
                     }
                     SessionMessage::StopReason(_) => {
                         logging::info(

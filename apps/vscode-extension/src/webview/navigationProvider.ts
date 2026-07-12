@@ -2,7 +2,12 @@ import * as vscode from "vscode";
 import { ExtensionLogger } from "../logging/logger";
 import { RuntimeProcess } from "../runtime/process";
 import { RuntimeClient } from "../runtime/rpcClient";
-import { renderWebviewHtml, renderWebviewPreparingHtml, webviewRoot } from "./html";
+import {
+  createWebviewClientInstanceId,
+  renderWebviewHtml,
+  renderWebviewPreparingHtml,
+  webviewRoot,
+} from "./html";
 import { handleWebviewMessage } from "./messaging";
 import type { WebviewHost } from "./types";
 import { resolveWebviewAppServerConnection } from "./appServerConnection";
@@ -22,13 +27,14 @@ export class TaskViewProvider implements vscode.WebviewViewProvider {
   ) {}
 
   resolveWebviewView(view: vscode.WebviewView) {
+    const clientInstanceId = createWebviewClientInstanceId();
     this.view = view;
     view.webview.options = {
       enableScripts: true,
       localResourceRoots: [webviewRoot(this.context)],
     };
     view.webview.html = renderWebviewPreparingHtml(this.context, view.webview);
-    void this.renderWhenAppServerReady(view, this.nextRenderGeneration());
+    void this.renderWhenAppServerReady(view, clientInstanceId, this.nextRenderGeneration());
     view.webview.onDidReceiveMessage((message) =>
       handleWebviewMessage(message, {
         runtime: this.runtime,
@@ -42,26 +48,31 @@ export class TaskViewProvider implements vscode.WebviewViewProvider {
     );
   }
 
-  private async renderWhenAppServerReady(view: vscode.WebviewView, generation: number) {
+  private async renderWhenAppServerReady(
+    view: vscode.WebviewView,
+    clientInstanceId: string,
+    generation: number,
+  ) {
     try {
       const connection = await resolveWebviewAppServerConnection(
         await this.runtimeProcess.startAppServerConnection(),
       );
       if (!this.isRenderGenerationCurrent(generation) || this.view !== view) return;
       view.webview.html = renderWebviewHtml(this.context, view.webview, {
-        ...this.bootstrap(),
+        ...this.bootstrap(clientInstanceId),
         appServerConnection: connection,
       });
     } catch (error) {
       if (!this.isRenderGenerationCurrent(generation) || this.view !== view) return;
       this.logger.warn("app server handoff failed; rendering without app server connection", { error: String(error) });
-      view.webview.html = renderWebviewHtml(this.context, view.webview, this.bootstrap());
+      view.webview.html = renderWebviewHtml(this.context, view.webview, this.bootstrap(clientInstanceId));
     }
   }
 
-  private bootstrap(): Parameters<typeof renderWebviewHtml>[2] {
+  private bootstrap(clientInstanceId: string): Parameters<typeof renderWebviewHtml>[2] {
     return {
       surface: "navigation",
+      clientInstanceId,
       projectId: currentWorkspaceRoot()?.projectId,
     };
   }

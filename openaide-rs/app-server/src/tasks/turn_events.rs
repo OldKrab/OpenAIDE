@@ -158,10 +158,10 @@ impl TaskEventSink {
         source_message_id: Option<String>,
         now: &str,
     ) -> Result<(), RuntimeError> {
-        let write = self
+        let writes = self
             .streaming_runs
             .agent_text_chunk(text, source_message_id, now)?;
-        self.commit_streaming_write(write, now)
+        self.commit_streaming_writes(writes, now)
     }
 
     fn finish_text_run(&self, now: &str) -> Result<(), RuntimeError> {
@@ -178,10 +178,10 @@ impl TaskEventSink {
         source_message_id: Option<String>,
         now: &str,
     ) -> Result<(), RuntimeError> {
-        let write = self
+        let writes = self
             .streaming_runs
             .thought_chunk(text, source_message_id, now)?;
-        self.commit_streaming_write(write, now)
+        self.commit_streaming_writes(writes, now)
     }
 
     fn finish_thought_run(&self, now: &str) -> Result<(), RuntimeError> {
@@ -220,8 +220,16 @@ impl TaskEventSink {
         writes: Vec<StreamingWrite>,
         now: &str,
     ) -> Result<(), RuntimeError> {
-        for write in writes {
-            self.commit_streaming_write(write, now)?;
+        let mut pending = writes.into_iter();
+        while let Some(write) = pending.next() {
+            if let Err(error) = self.commit_streaming_write(write, now) {
+                // The writes were prepared as one in-memory transition. Undo
+                // any later writes that persistence never had a chance to see.
+                for uncommitted in pending {
+                    self.streaming_runs.rollback(uncommitted);
+                }
+                return Err(error);
+            }
         }
         Ok(())
     }

@@ -29,7 +29,9 @@ export async function routeSurfaceCommand(message: WebviewToHostMessage, context
   if (message.type === "surface.openTask" && isObject(message.payload)) {
     const taskId = typeof message.payload.task_id === "string" ? message.payload.task_id : undefined;
     if (taskId) {
-      context.surfaces?.openTask(taskId, typeof message.payload.title === "string" ? message.payload.title : undefined);
+      const title = typeof message.payload.title === "string" ? message.payload.title : undefined;
+      context.adoptTask?.(taskId, title);
+      context.surfaces?.openTask(taskId, title);
     }
     return true;
   }

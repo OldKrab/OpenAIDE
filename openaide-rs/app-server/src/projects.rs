@@ -1,5 +1,7 @@
 use openaide_app_server_protocol::errors::{ProtocolError, ProtocolErrorCode};
-use openaide_app_server_protocol::ids::ProjectId;
+use openaide_app_server_protocol::ids::{ClientInstanceId, ProjectId};
+use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
 
 use crate::protocol::model::IsolationKind;
 use crate::storage::Store;
@@ -17,43 +19,113 @@ pub struct ProjectTaskContext {
 
 #[derive(Clone, Default)]
 pub struct ConfiguredProjectRoots {
-    projects: Vec<ProjectTaskContext>,
+    state: Arc<RwLock<ProjectRootsState>>,
+}
+
+#[derive(Default)]
+struct ProjectRootsState {
+    configured_projects: Vec<ProjectTaskContext>,
+    client_projects: HashMap<ClientInstanceId, Vec<ProjectTaskContext>>,
 }
 
 impl ConfiguredProjectRoots {
     pub fn from_workspace_roots(roots: impl IntoIterator<Item = String>) -> Self {
-        let mut projects = roots
-            .into_iter()
-            .filter(|root| !root.trim().is_empty())
-            .map(|root| {
-                let identity = ProjectIdentity::from_workspace_root(&root);
-                ProjectTaskContext {
-                    project_id: identity.project_id,
-                    workspace_root: identity.workspace_root,
-                    label: identity.label,
-                    isolation: IsolationKind::Local,
-                }
-            })
-            .collect::<Vec<_>>();
-        projects.sort_by(|left, right| {
-            left.label
-                .cmp(&right.label)
-                .then_with(|| left.project_id.cmp(&right.project_id))
-        });
-        projects.dedup_by(|left, right| left.project_id == right.project_id);
-        Self { projects }
+        let configured_projects = project_contexts_from_workspace_roots(roots);
+        Self {
+            state: Arc::new(RwLock::new(ProjectRootsState {
+                configured_projects,
+                client_projects: HashMap::new(),
+            })),
+        }
     }
 
-    pub fn projects(&self) -> &[ProjectTaskContext] {
-        &self.projects
+    pub fn projects(&self) -> Vec<ProjectTaskContext> {
+        let state = self
+            .state
+            .read()
+            .expect("Project Context registry lock poisoned");
+        visible_projects(&state)
+    }
+
+    /// Replaces one initialized client's workspace facts as a single generation.
+    pub fn replace_client_workspace_roots(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        roots: impl IntoIterator<Item = String>,
+    ) -> bool {
+        let replacement = project_contexts_from_workspace_roots(roots);
+        let mut projects = self
+            .state
+            .write()
+            .expect("Project Context registry lock poisoned");
+        let before = visible_projects(&projects);
+        if replacement.is_empty() {
+            projects.client_projects.remove(client_instance_id);
+        } else {
+            projects
+                .client_projects
+                .insert(client_instance_id.clone(), replacement);
+        }
+        before != visible_projects(&projects)
+    }
+
+    /// Removes shell context only after the client's reconnect grace has expired.
+    pub fn remove_client_workspace_roots(&self, client_instance_id: &ClientInstanceId) -> bool {
+        let mut projects = self
+            .state
+            .write()
+            .expect("Project Context registry lock poisoned");
+        let before = visible_projects(&projects);
+        projects.client_projects.remove(client_instance_id);
+        before != visible_projects(&projects)
     }
 
     fn resolve(&self, project_id: &ProjectId) -> Option<ProjectTaskContext> {
-        self.projects
+        let state = self
+            .state
+            .read()
+            .expect("Project Context registry lock poisoned");
+        visible_projects(&state)
             .iter()
             .find(|project| project.project_id == *project_id)
             .cloned()
     }
+}
+
+fn project_contexts_from_workspace_roots(
+    roots: impl IntoIterator<Item = String>,
+) -> Vec<ProjectTaskContext> {
+    let mut projects = roots
+        .into_iter()
+        .filter(|root| !root.trim().is_empty())
+        .map(|root| {
+            let identity = ProjectIdentity::from_workspace_root(&root);
+            ProjectTaskContext {
+                project_id: identity.project_id,
+                workspace_root: identity.workspace_root,
+                label: identity.label,
+                isolation: IsolationKind::Local,
+            }
+        })
+        .collect::<Vec<_>>();
+    sort_and_deduplicate_projects(&mut projects);
+    projects
+}
+
+fn visible_projects(state: &ProjectRootsState) -> Vec<ProjectTaskContext> {
+    let mut projects = state.configured_projects.clone();
+    projects.extend(state.client_projects.values().flatten().cloned());
+    sort_and_deduplicate_projects(&mut projects);
+    projects
+}
+
+fn sort_and_deduplicate_projects(projects: &mut Vec<ProjectTaskContext>) {
+    projects.sort_by(|left, right| {
+        left.label
+            .cmp(&right.label)
+            .then_with(|| left.project_id.cmp(&right.project_id))
+    });
+    projects.dedup_by(|left, right| left.project_id == right.project_id);
 }
 
 pub trait ProjectResolver: Send + Sync {

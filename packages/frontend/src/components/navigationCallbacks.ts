@@ -6,6 +6,7 @@ import {
 } from "@openaide/app-server-client";
 import { requestTaskList, requestTaskOpen, requestTaskSetArchived } from "../intents/taskReadIntents";
 import { mapProtocolTaskSnapshot } from "../state/appServerProtocolMapping";
+import { TASK_NAVIGATION_PAGE_SIZE } from "../state/taskNavigationPolicy";
 import type { AppCallbacksDependencies, NavigationCallbacks } from "./appControllerCallbackTypes";
 
 type NavigationDependencies = Pick<
@@ -68,7 +69,11 @@ export function createNavigationCallbacks({
     },
     changeSearch: (query) => dispatch({ type: "search:set", query }),
     loadNativeSessions: (cursor) => {
-      requestNativeSessions(cursor, cursor !== undefined);
+      requestNativeSessions(
+        cursor,
+        cursor !== undefined,
+        cursor === undefined ? state.newTask.nativeSessions.items.length : TASK_NAVIGATION_PAGE_SIZE,
+      );
       if (cursor !== undefined) return;
       const taskId = state.snapshot?.task.task_id ?? state.activeTaskId;
       if (!taskId || !backendConnection?.request) return;

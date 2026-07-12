@@ -385,6 +385,26 @@ describe("AppSurfaces callback wiring", () => {
     );
   });
 
+  it("keeps cached task history visible with the in-place refresh retry", () => {
+    const controller = controllerFor("task");
+    controller.bootstrap = { surface: "task", taskId: "task_1" };
+    controller.state.snapshot = snapshot("task_1", true);
+    // A concurrent subscription snapshot can clear taskOpenError after task/open fails.
+    controller.backendConnectionState = { status: "unavailable", message: "Connection closed." };
+
+    render(controller);
+
+    expect(surfaceMocks.task).toHaveBeenCalledWith(
+      expect.objectContaining({
+        backendConnectionState: controller.backendConnectionState,
+        onRetryConnection: controller.retryTaskOpen,
+        snapshot: controller.state.snapshot,
+      }),
+      undefined,
+    );
+    expect(surfaceMocks.taskLoading).not.toHaveBeenCalled();
+  });
+
   it("keeps the New Task surface visible while authoritative Send is pending", () => {
     const controller = controllerFor("task");
     controller.state.snapshot = snapshot("task_starting", false);
@@ -509,6 +529,22 @@ describe("AppSurfaces callback wiring", () => {
       undefined,
     );
     expect(surfaceMocks.newTask).not.toHaveBeenCalled();
+  });
+
+  it("offers the in-place retry after task opening fails", () => {
+    const controller = controllerFor("task");
+    controller.bootstrap = { surface: "task", taskId: "task_1" };
+    controller.state.taskOpenError = { taskId: "task_1", message: "Connection closed." };
+
+    render(controller);
+
+    expect(surfaceMocks.taskLoading).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: "Connection closed.",
+        onRetry: controller.retryTaskOpen,
+      }),
+      undefined,
+    );
   });
 
   it("renders task loading state while a native session is opening", () => {
@@ -646,6 +682,18 @@ describe("AppSurfaces callback wiring", () => {
     expect(JSON.stringify(tree)).toContain("App Server request timed out.");
     expect(surfaceMocks.newTask).not.toHaveBeenCalled();
   });
+
+  it("shows an editor App Server initialization failure instead of an endless connecting composer", () => {
+    const controller = controllerFor("task");
+    controller.state.appServerError = "App Server request timed out.";
+
+    const rendered = JSON.stringify(render(controller).toJSON());
+
+    expect(rendered).toContain("App Server connection unavailable.");
+    expect(rendered).toContain("App Server request timed out.");
+    expect(rendered).not.toContain("Retry");
+    expect(surfaceMocks.newTask).not.toHaveBeenCalled();
+  });
 });
 
 function render(controller: AppController) {
@@ -661,6 +709,7 @@ function controllerFor(surface: AppController["bootstrap"]["surface"]): AppContr
   return {
     activeTask: undefined,
     agents: [],
+    backendConnectionState: { status: "connecting" },
     backendReady: false,
     bootstrap: { surface },
     callbacks: {
@@ -710,6 +759,7 @@ function controllerFor(surface: AppController["bootstrap"]["surface"]): AppContr
     createSnapshotRequestId: vi.fn(),
     dispatch: vi.fn(),
     preferences: { composer_submit_shortcut: "mod_enter" },
+    retryTaskOpen: vi.fn(),
     state,
     visibleTasks: [],
   };

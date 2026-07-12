@@ -24,8 +24,9 @@ use crate::attachment::{
     FileBrowserRoot, PreSendAttachment,
 };
 use crate::client::{
-    ClientCapabilities, ClientHeartbeatParams, ClientHeartbeatResult, ClientProbeLifecycle,
-    ClientProbeParams, ClientProbeResult, ClientProtocolCapability, InitializeParams,
+    ClientCapabilities, ClientCapabilitiesChangedParams, ClientCapabilitiesChangedResult,
+    ClientHeartbeatParams, ClientHeartbeatResult, ClientProbeLifecycle, ClientProbeParams,
+    ClientProbeResult, ClientProtocolCapability, ClientWorkspaceRoot, InitializeParams,
     InitializeResult, RequestedSurface, SettingsSection, ShellCapability, ShellDescriptor,
     ShellKind,
 };
@@ -140,6 +141,9 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<ClientProbeLifecycle>(output, config);
     push_decl::<InitializeParams>(output, config);
     push_decl::<InitializeResult>(output, config);
+    push_decl::<ClientCapabilitiesChangedParams>(output, config);
+    push_decl::<ClientCapabilitiesChangedResult>(output, config);
+    push_decl::<ClientWorkspaceRoot>(output, config);
     push_decl::<ShellDescriptor>(output, config);
     push_decl::<ShellKind>(output, config);
     push_decl::<RequestedSurface>(output, config);

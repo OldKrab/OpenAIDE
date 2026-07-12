@@ -49,8 +49,10 @@ pub(super) fn gateway(
     );
     let task_navigation = TaskNavigationStore::new(store.clone());
     let task_snapshots = Arc::new(TaskSnapshotStore::new(store.clone()));
-    let project_resolver =
-        StorageProjectResolver::new_with_configured_roots(store.clone(), configured_projects);
+    let project_resolver = StorageProjectResolver::new_with_configured_roots(
+        store.clone(),
+        configured_projects.clone(),
+    );
     let server_requests = ServerRequestRuntime::new();
     let shell_file_reveals = ShellFileRevealRegistry::new();
     let app_preferences = Arc::new(AppPreferencesService::new(store.clone()));
@@ -98,6 +100,7 @@ pub(super) fn gateway(
             task_snapshots.clone(),
         ),
         task_snapshots,
+        configured_projects,
         AppServerProbeFacts::new(state_root.fingerprint().as_str()),
         Arc::new(RuntimeDiagnosticsService::new(store.clone())),
         Arc::new(agent_product_api.clone()),
