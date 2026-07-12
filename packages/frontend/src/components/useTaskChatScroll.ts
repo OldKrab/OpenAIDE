@@ -6,6 +6,11 @@ import {
   scrollTopAfterPrependedContent,
   scrollTopForGeneratedContent,
 } from "./TaskViewModel";
+import {
+  chatScrollGeometry,
+  TaskChatScrollDiagnostics,
+  type TaskChatScrollDiagnosticContext,
+} from "./taskChatScrollDiagnostics";
 
 type ScrollOwnership = "following" | "reading";
 const USER_SCROLL_INTENT_WINDOW_MS = 500;
@@ -16,14 +21,18 @@ const JUMP_TO_LATEST_DURATION_MS = 180;
 // Owns the Chat viewport policy. Geometry can initialize ownership, but only explicit user intent
 // changes it afterward, so streamed layout changes cannot steal control from the reader.
 export function useTaskChatScroll({
+  diagnosticContext,
   generating,
+  historySyncState,
   itemCount,
   onScrollTop,
   pendingPrepend,
   savedScrollTop,
   taskId,
 }: {
+  diagnosticContext: TaskChatScrollDiagnosticContext;
   generating: boolean;
+  historySyncState?: "idle" | "checking" | "syncing" | "updated" | "failed";
   itemCount: number;
   onScrollTop: (scrollTop: number) => void;
   pendingPrepend: boolean;
@@ -31,8 +40,10 @@ export function useTaskChatScroll({
   taskId: string;
 }) {
   const messageListRef = useRef<HTMLDivElement | null>(null);
+  const diagnosticsRef = useRef<{ taskId: string; recorder: TaskChatScrollDiagnostics } | undefined>(undefined);
   const jumpAnimationFrameRef = useRef<number | undefined>(undefined);
   const prependAnchorRef = useRef<{ scrollHeight: number; scrollTop: number } | undefined>(undefined);
+  const historyAnchorRef = useRef<{ scrollHeight: number; scrollTop: number; following: boolean } | undefined>(undefined);
   const lastScrollHeightRef = useRef<number | undefined>(undefined);
   const lastScrollTopRef = useRef<number | undefined>(undefined);
   const skipGeneratedFollowOnceRef = useRef(false);
@@ -40,8 +51,10 @@ export function useTaskChatScroll({
   const touchScrollActiveRef = useRef(false);
   const towardLatestIntentUntilRef = useRef(0);
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
-  const setScrollOwnership = useCallback((ownership: ScrollOwnership) => {
+  const setScrollOwnership = useCallback((ownership: ScrollOwnership, reason = "unspecified") => {
+    if (scrollOwnershipRef.current === ownership) return;
     scrollOwnershipRef.current = ownership;
+    diagnosticsRef.current?.recorder.recordOwnership(ownership, reason);
   }, []);
   const updateJumpToLatestVisibility = useCallback((messageList: HTMLDivElement) => {
     const distanceFromBottom = distanceFromLatest(messageList);
@@ -62,6 +75,11 @@ export function useTaskChatScroll({
   useLayoutEffect(() => {
     const messageList = messageListRef.current;
     if (!messageList) return;
+    if (diagnosticsRef.current?.taskId !== taskId) {
+      diagnosticsRef.current = { taskId, recorder: new TaskChatScrollDiagnostics(taskId) };
+    }
+    const diagnostics = diagnosticsRef.current.recorder;
+    diagnostics.recordLifecycle("mounted");
     cancelJumpAnimation();
     const scrollTop = initialTaskScrollTop(savedScrollTop, messageList.scrollHeight);
     messageList.scrollTop = scrollTop;
@@ -69,11 +87,44 @@ export function useTaskChatScroll({
       scrollTop,
       scrollHeight: messageList.scrollHeight,
       clientHeight: messageList.clientHeight,
-    }) ? "following" : "reading");
+    }) ? "following" : "reading", "taskRestored");
     setShowJumpToLatest(distanceFromLatest(messageList) > SHOW_JUMP_TO_LATEST_DISTANCE_PX);
     lastScrollTopRef.current = scrollTop;
     lastScrollHeightRef.current = messageList.scrollHeight;
+    diagnostics.recordGeometry(chatScrollGeometry(messageList));
+    return () => diagnostics.recordLifecycle("unmounted");
   }, [cancelJumpAnimation, setScrollOwnership, taskId]);
+
+  useLayoutEffect(() => {
+    diagnosticsRef.current?.recorder.recordRender(diagnosticContext);
+  });
+
+  useLayoutEffect(() => {
+    const messageList = messageListRef.current;
+    if (!messageList) return;
+    if (historySyncState === "checking" || historySyncState === "syncing") {
+      historyAnchorRef.current = {
+        scrollHeight: messageList.scrollHeight,
+        scrollTop: messageList.scrollTop,
+        following: scrollOwnershipRef.current === "following",
+      };
+      return;
+    }
+    const anchor = historyAnchorRef.current;
+    if (!anchor) return;
+    messageList.scrollTop = anchor.following
+      ? messageList.scrollHeight
+      : scrollTopAfterPrependedContent({
+          previousScrollHeight: anchor.scrollHeight,
+          previousScrollTop: anchor.scrollTop,
+          nextScrollHeight: messageList.scrollHeight,
+        });
+    lastScrollTopRef.current = messageList.scrollTop;
+    lastScrollHeightRef.current = messageList.scrollHeight;
+    historyAnchorRef.current = undefined;
+    skipGeneratedFollowOnceRef.current = true;
+    updateJumpToLatestVisibility(messageList);
+  }, [historySyncState, updateJumpToLatestVisibility]);
 
   useLayoutEffect(() => {
     const messageList = messageListRef.current;
@@ -127,8 +178,12 @@ export function useTaskChatScroll({
         towardLatestIntentUntilRef.current = 0;
       }
     }
-    if (previousScrollTop !== undefined && scrollTop < previousScrollTop) {
-      setScrollOwnership("reading");
+    if (
+      previousScrollTop !== undefined
+      && scrollTop < previousScrollTop
+      && (touchScrollActiveRef.current || !isAtLatest(messageList))
+    ) {
+      setScrollOwnership("reading", "scrollTopDecreased");
     } else if (
       previousScrollTop !== undefined
       && scrollTop > previousScrollTop
@@ -137,9 +192,17 @@ export function useTaskChatScroll({
       && (touchScrollActiveRef.current || Date.now() <= towardLatestIntentUntilRef.current)
     ) {
       towardLatestIntentUntilRef.current = 0;
-      setScrollOwnership("following");
+      setScrollOwnership("following", "reachedLatestWithIntent");
     }
     lastScrollTopRef.current = scrollTop;
+    diagnosticsRef.current?.recorder.recordGeometry(chatScrollGeometry(messageList));
+    if (historyAnchorRef.current) {
+      historyAnchorRef.current = {
+        scrollHeight: messageList.scrollHeight,
+        scrollTop,
+        following: scrollOwnershipRef.current === "following",
+      };
+    }
     updateJumpToLatestVisibility(messageList);
     onScrollTop(scrollTop);
   }, [onScrollTop, setScrollOwnership, updateJumpToLatestVisibility]);
@@ -147,11 +210,13 @@ export function useTaskChatScroll({
   const onWheel = useCallback((event: WheelEvent<HTMLDivElement>) => {
     cancelJumpAnimation();
     if (event.deltaY < 0) {
+      diagnosticsRef.current?.recorder.recordIntent("towardEarlier");
       towardLatestIntentUntilRef.current = 0;
-      setScrollOwnership("reading");
+      setScrollOwnership("reading", "wheelTowardEarlier");
       return;
     }
     if (event.deltaY > 0) {
+      diagnosticsRef.current?.recorder.recordIntent("towardLatest");
       towardLatestIntentUntilRef.current = Date.now() + USER_SCROLL_INTENT_WINDOW_MS;
     }
   }, [cancelJumpAnimation, setScrollOwnership]);
@@ -179,7 +244,7 @@ export function useTaskChatScroll({
     const messageList = messageListRef.current;
     if (!messageList) return;
     cancelJumpAnimation();
-    setScrollOwnership("following");
+    setScrollOwnership("following", "jumpToLatest");
     setShowJumpToLatest(false);
     const startScrollTop = messageList.scrollTop;
     if (prefersReducedMotion()) {

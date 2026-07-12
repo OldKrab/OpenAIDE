@@ -4,23 +4,19 @@ import remarkGfm from "remark-gfm";
 
 type AgentMarkdownProps = {
   className?: string;
-  streaming?: boolean;
   text: string;
 };
 
-export function AgentMarkdown({ className, streaming = false, text }: AgentMarkdownProps) {
+export function AgentMarkdown({ className, text }: AgentMarkdownProps) {
   const parts = splitDataImageMarkdown(text);
   return (
     <div className={className}>
       {parts.map((part, index) => (
         <Fragment key={index}>
           {part.kind === "image" ? (
-            <>
-              <AgentMarkdownImage label={part.label} url={part.url} />
-              {streaming && index === parts.length - 1 ? <StreamingCaret /> : null}
-            </>
+            <AgentMarkdownImage label={part.label} url={part.url} />
           ) : (
-            <MarkdownRenderer streaming={streaming && index === parts.length - 1} text={part.text} />
+            <MarkdownRenderer text={part.text} />
           )}
         </Fragment>
       ))}
@@ -28,11 +24,10 @@ export function AgentMarkdown({ className, streaming = false, text }: AgentMarkd
   );
 }
 
-function MarkdownRenderer({ streaming, text }: { streaming: boolean; text: string }) {
-  if (!text) return streaming ? <StreamingCaret /> : null;
+function MarkdownRenderer({ text }: { text: string }) {
+  if (!text) return null;
   return (
     <Markdown
-      rehypePlugins={streaming ? [appendStreamingCaret] : []}
       remarkPlugins={[remarkGfm]}
       skipHtml
       urlTransform={safeMarkdownUrl}
@@ -55,60 +50,6 @@ function MarkdownRenderer({ streaming, text }: { streaming: boolean; text: strin
       {text}
     </Markdown>
   );
-}
-
-type MarkdownTreeNode = {
-  children?: MarkdownTreeNode[];
-  properties?: Record<string, unknown>;
-  tagName?: string;
-  type: string;
-  value?: string;
-};
-
-const atomicInlineTags = new Set(["a", "code", "del", "em", "img", "strong"]);
-
-// Append inside the final rendered block, but outside inline formatting so the caret does not
-// inherit link, emphasis, or inline-code styling.
-function appendStreamingCaret() {
-  return (tree: MarkdownTreeNode) => {
-    const insertion = finalCaretInsertion(tree);
-    if (!insertion) return;
-    insertion.parent.children?.splice(insertion.index, 0, streamingCaretNode());
-  };
-}
-
-function finalCaretInsertion(parent: MarkdownTreeNode): { parent: MarkdownTreeNode; index: number } | undefined {
-  const children = parent.children ?? [];
-  for (let index = children.length - 1; index >= 0; index -= 1) {
-    const child = children[index];
-    if (!child || !hasVisibleContent(child)) continue;
-    if (child.type === "text" || (child.type === "element" && child.tagName && atomicInlineTags.has(child.tagName))) {
-      return { parent, index: index + 1 };
-    }
-    const nested = finalCaretInsertion(child);
-    if (nested) return nested;
-    return { parent, index: index + 1 };
-  }
-  return undefined;
-}
-
-function hasVisibleContent(node: MarkdownTreeNode): boolean {
-  if (node.type === "text") return Boolean(node.value?.trim());
-  if (node.type === "element" && node.tagName === "img") return true;
-  return node.children?.some(hasVisibleContent) ?? false;
-}
-
-function streamingCaretNode(): MarkdownTreeNode {
-  return {
-    type: "element",
-    tagName: "span",
-    properties: { ariaHidden: "true", className: ["chat-streaming-caret"] },
-    children: [],
-  };
-}
-
-function StreamingCaret() {
-  return <span aria-hidden="true" className="chat-streaming-caret" />;
 }
 
 function AgentMarkdownImage({ label, url }: { label: string; url: string }) {

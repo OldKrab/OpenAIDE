@@ -247,8 +247,8 @@ pub trait AgentRuntime: Send + Sync {
 pub trait AgentEventSink: Send + Sync {
     fn emit(&self, event: AgentEvent) -> Result<(), RuntimeError>;
 
-    /// Finalizes output owned by the current Agent prompt before another prompt takes over.
-    fn finish_prompt(&self) -> Result<(), RuntimeError> {
+    /// Preserves identified message continuity while closing anonymous output at a steer boundary.
+    fn prepare_for_steering(&self) -> Result<(), RuntimeError> {
         Ok(())
     }
 

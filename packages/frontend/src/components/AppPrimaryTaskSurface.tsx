@@ -45,6 +45,7 @@ export function AppPrimaryTaskSurface({ controller, focusRequestKey, model }: Ap
     startupConfigOptions,
     taskLoadingError,
   } = model;
+  const isWebShell = bootstrap.surface !== "invalid" && bootstrap.appServerConnection?.kind === "webProxy";
 
   if (renderableTaskSnapshot && !openingNativeSession) {
     return (
@@ -64,6 +65,7 @@ export function AppPrimaryTaskSurface({ controller, focusRequestKey, model }: Ap
         onQuestionRespond={callbacks.task.respondToQuestion}
         onRevealAttachment={callbacks.task.revealAttachment}
         onRemoveAttachment={callbacks.task.removeAttachment}
+        onRetryHistory={callbacks.task.retryHistory}
         onRestoreTask={callbacks.navigation.restoreTask}
         onSelectConfigOption={callbacks.task.selectConfigOption}
         onSendPrompt={callbacks.task.sendPrompt}
@@ -77,6 +79,7 @@ export function AppPrimaryTaskSurface({ controller, focusRequestKey, model }: Ap
         submitShortcut={preferences.composer_submit_shortcut}
         taskInput={state.taskInputs[renderableTaskSnapshot.task.task_id] ?? { prompt: "", context: [] }}
         toolDetails={state.toolDetails}
+        showWorkspaceContext={isWebShell}
       />
     );
   }
@@ -95,6 +98,7 @@ export function AppPrimaryTaskSurface({ controller, focusRequestKey, model }: Ap
       onCancelTask={callbacks.newTask.cancel}
       onSelectConfigOption={callbacks.newTask.selectConfigOption}
       onSubmitTask={callbacks.newTask.submit}
+      projectContextMode={isWebShell ? "selectable" : "fixed"}
       resetOptionsRequestKey={callbacks.newTask.resetOptionsRequestKey}
       state={state}
       submitShortcut={preferences.composer_submit_shortcut}

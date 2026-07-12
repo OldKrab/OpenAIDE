@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use uuid::Uuid;
 
 use crate::protocol::errors::RuntimeError;
@@ -13,6 +15,11 @@ impl Store {
         task_id: &str,
         messages: Vec<NormalizedMessage>,
     ) -> Result<(), RuntimeError> {
+        let existing_ids = self
+            .read_messages(task_id)?
+            .into_iter()
+            .map(|message| (message.chat.identity, message.chat.message_id))
+            .collect::<HashMap<_, _>>();
         let mut stored_messages = Vec::with_capacity(messages.len());
         for (index, mut message) in messages.into_iter().enumerate() {
             self.persist_tool_artifacts(task_id, &mut message)?;
@@ -23,7 +30,10 @@ impl Store {
                     cursor: cursor::from_sequence(sequence),
                     identity: message.identity(),
                     message_type: message.message_type().to_string(),
-                    message_id: Uuid::new_v4().to_string(),
+                    message_id: existing_ids
+                        .get(&message.identity())
+                        .cloned()
+                        .unwrap_or_else(|| Uuid::new_v4().to_string()),
                     message,
                 },
             });

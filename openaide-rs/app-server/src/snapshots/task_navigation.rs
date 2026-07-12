@@ -122,4 +122,5 @@ pub(crate) fn snapshot_read_error(error: impl std::fmt::Display) -> ProtocolErro
 }
 
 #[cfg(test)]
+#[path = "task_navigation_tests.rs"]
 mod tests;

@@ -12,4 +12,5 @@ pub(super) fn acp_error(error: impl std::fmt::Display) -> RuntimeError {
 }
 
 #[cfg(test)]
+#[path = "acp_errors_tests.rs"]
 mod tests;

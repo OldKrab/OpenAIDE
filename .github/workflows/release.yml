@@ -28,10 +28,15 @@ jobs:
             echo "Tag version $version does not match package.json version $package_version" >&2
             exit 1
           fi
+          extension_version="$(node -p "require('./apps/vscode-extension/package.json').version")"
+          if [[ "$version" != "$extension_version" ]]; then
+            echo "Release version $version does not match VSIX version $extension_version" >&2
+            exit 1
+          fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
-  artifacts:
-    name: Build release artifacts
+  checks:
+    name: Release checks
     needs: validate
     runs-on: ubuntu-24.04
     steps:
@@ -47,68 +52,81 @@ jobs:
       - run: cargo test --workspace
       - run: npm run test:gate
       - run: npm run test --workspaces --if-present
+
+  artifacts:
+    name: Build ${{ matrix.target }} VSIX
+    needs: [validate, checks]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: linux-x64
+            binary: openaide-app-server
+          - os: windows-2025
+            target: win32-x64
+            binary: openaide-app-server.exe
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: npm ci
       - run: cargo build --release -p openaide-app-server
       - run: npm run build:frontend
-      - name: Package release files
+      - name: Package platform VSIX
         shell: bash
         run: |
           mkdir -p release apps/vscode-extension/dist/app-server
-          cp target/release/openaide-app-server apps/vscode-extension/dist/app-server/
+          cp "target/release/${{ matrix.binary }}" apps/vscode-extension/dist/app-server/
           npx --yes @vscode/vsce@3.6.0 package \
+            --target "${{ matrix.target }}" \
             --cwd apps/vscode-extension \
-            --out "../../release/openaide-vscode-${{ needs.validate.outputs.version }}.vsix"
-          tar -C packages/frontend/dist -czf \
-            "release/openaide-web-assets-${{ needs.validate.outputs.version }}.tar.gz" .
-          cp target/release/openaide-app-server \
-            "release/openaide-app-server-linux-x64-${{ needs.validate.outputs.version }}"
-          cd release
-          sha256sum openaide-* > SHA256SUMS
+            --out "../../release/openaide-vscode-${{ matrix.target }}-${{ needs.validate.outputs.version }}.vsix"
       - uses: actions/upload-artifact@v4
         with:
-          name: release-artifacts
+          name: release-${{ matrix.target }}
           path: release/
           if-no-files-found: error
 
-  container:
-    name: Publish container
-    needs: validate
+  marketplace:
+    name: Publish VS Code Marketplace packages
+    if: ${{ !contains(github.ref_name, '-') }}
+    needs: [validate, artifacts]
     runs-on: ubuntu-24.04
-    permissions:
-      contents: read
-      packages: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/login-action@v3
+      - uses: actions/setup-node@v4
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/metadata-action@v5
-        id: meta
+          node-version: 24
+      - uses: actions/download-artifact@v4
         with:
-          images: ghcr.io/${{ github.repository }}
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}},enable=${{ !contains(github.ref_name, '-') }}
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: deploy/demo/Dockerfile
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          pattern: release-*
+          path: release
+          merge-multiple: true
+      - name: Publish platform packages
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          for package in release/*.vsix; do
+            npx --yes @vscode/vsce@3.6.0 publish --packagePath "$package"
+          done
 
   github-release:
     name: Publish GitHub release
-    needs: [validate, artifacts, container]
+    needs: [validate, artifacts]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
       - uses: actions/download-artifact@v4
         with:
-          name: release-artifacts
+          pattern: release-*
           path: release
+          merge-multiple: true
       - uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true

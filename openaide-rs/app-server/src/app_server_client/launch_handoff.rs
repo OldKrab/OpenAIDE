@@ -123,4 +123,5 @@ pub enum LaunchHandoffError {
 }
 
 #[cfg(test)]
+#[path = "launch_handoff_tests.rs"]
 mod tests;

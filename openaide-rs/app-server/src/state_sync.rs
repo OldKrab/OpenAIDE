@@ -1,5 +1,7 @@
+use std::collections::{HashMap, HashSet};
+
 use openaide_app_server_protocol::events::{AppServerEvent, AppServerEventPayload, EventScope};
-use openaide_app_server_protocol::ids::{ClientInstanceId, StateRootId};
+use openaide_app_server_protocol::ids::{ClientInstanceId, EventCursor, StateRootId};
 use openaide_app_server_protocol::state::{
     StateSubscribeResult, StateUnsubscribeResult, SubscriptionScope,
 };
@@ -16,14 +18,22 @@ pub struct SubscriptionRecord {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PublishOutcome {
+    pub deliveries: Vec<StateEventDelivery>,
+}
+
+/// One client transport delivery with a cursor link scoped to that client's observed stream.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StateEventDelivery {
+    pub delivery: Delivery,
     pub event: AppServerEvent,
-    pub deliveries: Vec<Delivery>,
 }
 
 #[derive(Debug, Clone)]
 pub struct StateStream {
     state_root_id: StateRootId,
+    // Event cursors stay globally unique while previous_cursor follows each client's delivery path.
     cursors: CursorSequencer,
+    client_cursors: HashMap<ClientInstanceId, EventCursor>,
     subscriptions: Vec<SubscriptionRecord>,
 }
 
@@ -32,6 +42,7 @@ impl StateStream {
         Self {
             state_root_id,
             cursors: CursorSequencer::new(),
+            client_cursors: HashMap::new(),
             subscriptions: Vec::new(),
         }
     }
@@ -43,7 +54,7 @@ impl StateStream {
         snapshot_provider: &impl SnapshotProvider,
         _now: AppServerTime,
     ) -> Result<StateSubscribeResult, openaide_app_server_protocol::errors::ProtocolError> {
-        let token = self.cursors.read_token();
+        let token = self.read_token_for_client(&ctx.client_instance_id);
         self.upsert_subscription(ctx.client_instance_id.clone(), scope.clone());
         let snapshot = snapshot_provider.snapshot(ctx, &scope, &token)?;
         Ok(StateSubscribeResult {
@@ -72,19 +83,28 @@ impl StateStream {
         deliveries: impl Fn(&ClientInstanceId) -> Option<Delivery>,
         _now: AppServerTime,
     ) -> PublishOutcome {
-        let (previous_cursor, cursor) = self.cursors.advance();
-        let event = AppServerEvent {
-            previous_cursor,
-            cursor,
-            scope: scope.clone(),
-            payload,
-        };
+        let (stream_previous_cursor, cursor) = self.cursors.advance();
         let deliveries = self
-            .subscribers_for_event(&scope, &event.payload)
+            .subscribers_for_event(&scope, &payload)
             .into_iter()
-            .filter_map(|client_id| deliveries(&client_id))
+            .filter_map(|client_id| {
+                let delivery = deliveries(&client_id)?;
+                let previous_cursor = self
+                    .client_cursors
+                    .get(&client_id)
+                    .cloned()
+                    .unwrap_or_else(|| stream_previous_cursor.clone());
+                let event = AppServerEvent {
+                    previous_cursor,
+                    cursor: cursor.clone(),
+                    scope: scope.clone(),
+                    payload: payload.clone(),
+                };
+                self.client_cursors.insert(client_id, cursor.clone());
+                Some(StateEventDelivery { delivery, event })
+            })
             .collect();
-        PublishOutcome { event, deliveries }
+        PublishOutcome { deliveries }
     }
 
     pub fn subscribers_for_scope(&self, scope: &SubscriptionScope) -> Vec<ClientInstanceId> {
@@ -119,6 +139,20 @@ impl StateStream {
         self.cursors.read_token()
     }
 
+    /// Returns the cursor of the event stream actually observed by one App Shell client.
+    pub fn read_token_for_client(
+        &mut self,
+        client_instance_id: &ClientInstanceId,
+    ) -> SnapshotReadToken {
+        let stream_cursor = self.cursors.read_token().cursor().clone();
+        let cursor = self
+            .client_cursors
+            .entry(client_instance_id.clone())
+            .or_insert(stream_cursor)
+            .clone();
+        SnapshotReadToken::from_cursor(cursor)
+    }
+
     pub fn state_root_id(&self) -> &StateRootId {
         &self.state_root_id
     }
@@ -143,12 +177,15 @@ impl StateStream {
         scope: &EventScope,
         payload: &AppServerEventPayload,
     ) -> Vec<ClientInstanceId> {
+        let mut clients = HashSet::new();
         self.subscriptions
             .iter()
-            .filter(|subscription| {
-                event_matches_subscription(scope, payload, subscription, &self.state_root_id)
+            .filter_map(|subscription| {
+                let client_instance_id = &subscription.client_instance_id;
+                (event_matches_subscription(scope, payload, subscription, &self.state_root_id)
+                    && clients.insert(client_instance_id.clone()))
+                .then(|| client_instance_id.clone())
             })
-            .map(|subscription| subscription.client_instance_id.clone())
             .collect()
     }
 }
@@ -257,6 +294,7 @@ fn payload_matches_subscription(
                 | AppServerEventPayload::ProjectCollectionUpdated { .. }
                 | AppServerEventPayload::TaskUpdated { .. }
                 | AppServerEventPayload::TaskSnapshotUpdated { .. }
+                | AppServerEventPayload::TaskHistorySyncUpdated { .. }
                 | AppServerEventPayload::ChatItemAppended { .. }
                 | AppServerEventPayload::ChatItemChunk { .. }
                 | AppServerEventPayload::RequestUpdated { .. }
@@ -265,4 +303,5 @@ fn payload_matches_subscription(
 }
 
 #[cfg(test)]
+#[path = "state_sync_tests.rs"]
 mod tests;

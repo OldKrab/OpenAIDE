@@ -423,6 +423,42 @@ fn agent_text_notifications_describe_only_durable_ordered_deltas() {
 }
 
 #[test]
+fn interleaved_source_message_ids_update_their_original_agent_messages() {
+    let (_dir, store, mutations, server_requests) = test_runtime();
+    store.write_task(&running_task("task_1")).unwrap();
+    let sink = TaskEventSink::new(
+        mutations,
+        "task_1".to_string(),
+        "turn_1".to_string(),
+        server_requests,
+        TurnCancellation::new(),
+    );
+
+    for (source_message_id, text) in [
+        ("message-a", "A1"),
+        ("message-b", "B1"),
+        ("message-a", "A2"),
+        ("message-b", "B2"),
+    ] {
+        sink.emit(AgentEvent::TextChunk {
+            text: text.to_string(),
+            source_message_id: Some(source_message_id.to_string()),
+        })
+        .unwrap();
+    }
+
+    let messages = store.read_messages("task_1").unwrap();
+    let agent_texts = messages
+        .iter()
+        .filter_map(|stored| match &stored.chat.message {
+            NormalizedMessage::AgentText { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(agent_texts, ["A1A2", "B1B2"]);
+}
+
+#[test]
 fn prompt_completion_finalizes_the_last_text_run() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path().to_path_buf()).unwrap();
@@ -512,6 +548,62 @@ fn permission_request_splits_active_agent_text_run() {
         })
         .collect();
     assert_eq!(agent_text, vec!["before permission", " after permission"]);
+}
+
+#[test]
+fn permission_wait_does_not_block_concurrent_agent_events() {
+    let (_dir, store, mutations, server_requests) = test_runtime();
+    store.write_task(&running_task("task_1")).unwrap();
+    register_permission_responder(&server_requests, "task_1");
+    let sink = Arc::new(TaskEventSink::new(
+        mutations,
+        "task_1".to_string(),
+        "turn_1".to_string(),
+        server_requests.clone(),
+        TurnCancellation::new(),
+    ));
+
+    let permission_sink = sink.clone();
+    let permission_thread = std::thread::spawn(move || {
+        permission_sink.request_permission(permission_request("permission_1"))
+    });
+    while server_requests.pending_count() == 0 {
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+
+    let (emit_done_tx, emit_done_rx) = std::sync::mpsc::channel();
+    let event_sink = sink.clone();
+    let event_thread = std::thread::spawn(move || {
+        let result = event_sink.emit(AgentEvent::Text("while waiting".to_string()));
+        let _ = emit_done_tx.send(result);
+    });
+    let emitted_while_waiting = emit_done_rx
+        .recv_timeout(std::time::Duration::from_millis(250))
+        .is_ok();
+
+    server_requests
+        .route_agent_permission_response(
+            "permission_1",
+            "allow".to_string(),
+            |_| -> Result<(), crate::protocol::errors::RuntimeError> { Ok(()) },
+        )
+        .unwrap();
+    permission_thread
+        .join()
+        .expect("permission thread joins")
+        .unwrap();
+    event_thread.join().expect("event thread joins");
+
+    assert!(
+        emitted_while_waiting,
+        "agent events must continue while a permission decision is pending"
+    );
+    assert!(store.read_messages("task_1").unwrap().iter().any(|stored| {
+        matches!(
+            &stored.chat.message,
+            NormalizedMessage::AgentText { text, .. } if text == "while waiting"
+        )
+    }));
 }
 
 #[test]

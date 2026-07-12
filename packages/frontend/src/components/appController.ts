@@ -32,7 +32,7 @@ import { appControllerDerivedStateDeps, deriveAppControllerState } from "./appCo
 import { createRequestControllerNativeSessions } from "./appControllerNativeSessions";
 import { useAppControllerRefs } from "./appControllerRefs";
 import { useSettingsRouteRefresh } from "./appControllerRouting";
-import { useActiveTaskPolling } from "./appControllerTaskPolling";
+import { usePreparedTaskSendRetry } from "./appControllerTaskRecovery";
 import { useNewTaskPreparation, type PendingNewTaskPreparation } from "./useNewTaskPreparation";
 import { useTaskAttentionReadReceipt } from "./useTaskAttentionReadReceipt";
 import { newTaskProjectIdForRequests } from "./newTaskRequestContext";
@@ -57,7 +57,7 @@ export function useAppController({ backendConnection }: AppControllerOptions = {
   const backendConnectionRef = useMemo(() => backendConnection ?? getBackendConnection(), [backendConnection]);
   const initialBootstrap = useMemo(() => getBootstrap(), []);
   const [state, dispatch] = useReducer(appReducer, undefined, createInitialState);
-  const [preferences, setPreferences] = useState<AppPreferencesRecord>(initialBootstrap.preferences ?? { composer_submit_shortcut: "mod_enter" });
+  const [preferences, setPreferences] = useState<AppPreferencesRecord>(initialBootstrap.preferences ?? { composer_submit_shortcut: "enter" });
   const [agents, setAgents] = useState<AgentOption[] | undefined>(undefined);
   const currentAgentId = useRef(state.newTask.selection.agentId);
   currentAgentId.current = state.newTask.selection.agentId;
@@ -113,6 +113,16 @@ export function useAppController({ backendConnection }: AppControllerOptions = {
     getProjectId: () => state.newTask.selection.projectId,
     latestSessionListRequestId,
     nextSessionListRequestId,
+    onFailure: (failure) => sendWebviewTelemetry(postHostMessage, "native_sessions_load_failed", {
+      surface: bootstrap.surface,
+      request: failure.request,
+      session_list_request_id: failure.requestId,
+      agent_id: failure.agentId,
+      project_id: failure.projectId,
+      error_name: failure.errorName,
+      error_code: failure.errorCode,
+      error_message: failure.errorMessage,
+    }),
   });
   useEffect(() => {
     if (
@@ -230,7 +240,7 @@ export function useAppController({ backendConnection }: AppControllerOptions = {
     setAgents,
     state,
   });
-  useActiveTaskPolling({
+  usePreparedTaskSendRetry({
     backendConnectionRef,
     backendInitialized,
     createSnapshotRequestId,

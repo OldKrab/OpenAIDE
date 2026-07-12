@@ -41,7 +41,7 @@ mod list_sessions;
 mod open;
 mod prepare;
 mod secret_resolver;
-mod send;
+pub(crate) mod send;
 mod set_config_option;
 mod support_recovery;
 mod tool_detail;
@@ -58,8 +58,10 @@ pub(crate) struct TaskProductApi {
     // ACP may expose a newly started session before its Task metadata commit finishes.
     // Keep that session reserved so external-session listing never leaks a Draft Task.
     preparing_session_ids: Arc<Mutex<HashSet<String>>>,
+    history_sync: crate::tasks::history_sync::HistorySyncCoordinator,
     #[allow(dead_code)]
     server_requests: ServerRequestRuntime,
+    task_notifier: TaskUpdateNotifier,
 }
 
 pub(crate) trait TaskCreateWorkflow: Send + Sync {
@@ -164,7 +166,7 @@ impl TaskProductApi {
             store.clone(),
             Arc::new(Mutex::new(())),
             Arc::new(Mutex::new(RuntimeState::with_revision(initial_revision))),
-            notifier,
+            notifier.clone(),
         );
         let agent_gateway = AgentGateway::new(agent_runtime.clone());
         let attachments = AttachmentRuntime::new();
@@ -182,11 +184,24 @@ impl TaskProductApi {
             attachments,
             turn_runner,
             preparing_session_ids: Arc::new(Mutex::new(HashSet::new())),
+            history_sync: crate::tasks::history_sync::HistorySyncCoordinator::default(),
             server_requests,
+            task_notifier: notifier,
         };
         TaskTransitions::new(api.mutations.clone()).recover_volatile_runtime_state()?;
         api.recover_abandoned_preparations()?;
         Ok(api)
+    }
+
+    pub(super) fn publish_history_sync(
+        &self,
+        task_id: &str,
+        state: openaide_app_server_protocol::snapshot::TaskHistorySyncSnapshot,
+    ) {
+        if let Ok(task) = self.store.read_task(task_id) {
+            self.task_notifier
+                .history_sync_updated(task_id, task.revision, state);
+        }
     }
 
     pub(crate) fn shutdown(&self) -> Result<(), RuntimeError> {

@@ -17,11 +17,15 @@ import {
 } from "./dev-server-auth.mjs";
 import { injectBootstrap, webRoute } from "./dev-server-routes.mjs";
 import { pipeProxyResponse } from "./dev-server-streams.mjs";
+import { createViteProxy } from "./dev-server-vite-proxy.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const host = process.env.OPENAIDE_WEB_HOST ?? "127.0.0.1";
 const port = Number(process.env.OPENAIDE_WEB_PORT ?? "5174");
 const vitePort = Number(process.env.OPENAIDE_WEB_VITE_PORT ?? "5173");
+const prototypePort = process.env.OPENAIDE_WEB_PROTOTYPE_PORT
+  ? Number(process.env.OPENAIDE_WEB_PROTOTYPE_PORT)
+  : undefined;
 const staticRoot = process.env.OPENAIDE_WEB_STATIC_ROOT
   ? path.resolve(process.env.OPENAIDE_WEB_STATIC_ROOT)
   : undefined;
@@ -39,6 +43,10 @@ const webPresentation = {
   instanceLabel,
   title: process.env.OPENAIDE_WEB_TITLE?.trim() || (instanceLabel ? `OpenAIDE ${instanceLabel}` : "OpenAIDE"),
 };
+
+if (prototypePort !== undefined && (!Number.isInteger(prototypePort) || prototypePort < 1 || prototypePort > 65_535)) {
+  throw new Error("OPENAIDE_WEB_PROTOTYPE_PORT must be a valid TCP port.");
+}
 
 if (!existsSync(appServerPath)) {
   throw new Error(`OpenAIDE App Server not found at ${appServerPath}. Run npm run app-server:build first.`);
@@ -64,6 +72,22 @@ const appServerManager = createAppServerManager({
   readHandoffConnection,
   spawnAppServer,
 });
+const mainViteProxy = createViteProxy({
+  port: vitePort,
+  transformResponse: ({ body, headers, url }) => {
+    const route = webRoute(url.pathname);
+    if (route && headers["content-type"]?.includes("text/html")) {
+      body = Buffer.from(injectBootstrap(body.toString("utf8"), route, webPresentation), "utf8");
+    }
+    return { body, headers };
+  },
+});
+const prototypeViteProxy = prototypePort === undefined
+  ? undefined
+  : createViteProxy({
+      port: prototypePort,
+      unavailableMessage: "Prototype server is not running. Start it with npm run prototype:target.",
+    });
 
 await startAppServer();
 
@@ -91,10 +115,18 @@ const server = http.createServer(async (req, res) => {
       await proxyAppServer(req, res, url);
       return;
     }
+    if (isPrototypePath(url.pathname)) {
+      if (!prototypeViteProxy) {
+        writeText(res, 404, "Not found");
+        return;
+      }
+      await prototypeViteProxy.request(req, res, url);
+      return;
+    }
     if (staticRoot) {
       await serveStaticFrontend(req, res, url);
     } else {
-      await proxyVite(req, res, url);
+      await mainViteProxy.request(req, res, url);
     }
   } catch (error) {
     writeText(res, 502, error instanceof Error ? error.message : String(error));
@@ -115,10 +147,15 @@ server.on("upgrade", (req, socket, head) => {
       socket.destroy();
       return;
     }
+    if (isPrototypePath(url.pathname)) {
+      if (prototypeViteProxy) prototypeViteProxy.upgrade(req, socket, head, url);
+      else socket.destroy();
+      return;
+    }
     if (staticRoot) {
       socket.destroy();
     } else {
-      proxyViteUpgrade(req, socket, head, url);
+      mainViteProxy.upgrade(req, socket, head, url);
     }
   } catch {
     socket.destroy();
@@ -143,24 +180,6 @@ function shutdown(signal) {
   vite?.kill(signal);
   appServerManager.currentProcess()?.kill(signal);
   process.exit(signal === "SIGINT" ? 130 : 143);
-}
-
-async function proxyVite(req, res, url) {
-  const response = await fetch(new URL(url.pathname + url.search, `http://127.0.0.1:${vitePort}`), {
-    method: req.method,
-    headers: headersForFetch(req.headers, `127.0.0.1:${vitePort}`),
-    body: requestBody(req),
-    duplex: "half",
-  });
-  const headers = responseHeaders(response);
-  let body = Buffer.from(await response.arrayBuffer());
-  const route = webRoute(url.pathname);
-  if (route && headers["content-type"]?.includes("text/html")) {
-    body = Buffer.from(injectBootstrap(body.toString("utf8"), route, webPresentation), "utf8");
-    headers["content-length"] = String(body.byteLength);
-  }
-  res.writeHead(response.status, headers);
-  res.end(body);
 }
 
 async function serveStaticFrontend(req, res, url) {
@@ -209,29 +228,6 @@ async function serveStaticFrontend(req, res, url) {
     return;
   }
   createReadStream(filePath).pipe(res);
-}
-
-function proxyViteUpgrade(req, socket, head, url) {
-  const proxyReq = http.request({
-    hostname: "127.0.0.1",
-    port: vitePort,
-    path: url.pathname + url.search,
-    method: req.method,
-    headers: upgradeHeaders(req.headers, `127.0.0.1:${vitePort}`),
-  });
-  proxyReq.on("upgrade", (proxyRes, proxySocket, proxyHead) => {
-    socket.write(`HTTP/1.1 ${proxyRes.statusCode} ${proxyRes.statusMessage}\r\n`);
-    for (let i = 0; i < proxyRes.rawHeaders.length; i += 2) {
-      socket.write(`${proxyRes.rawHeaders[i]}: ${proxyRes.rawHeaders[i + 1]}\r\n`);
-    }
-    socket.write("\r\n");
-    if (proxyHead.length) socket.write(proxyHead);
-    if (head.length) proxySocket.write(head);
-    proxySocket.pipe(socket);
-    socket.pipe(proxySocket);
-  });
-  proxyReq.on("error", () => socket.destroy());
-  proxyReq.end();
 }
 
 async function proxyAppServer(req, res, url) {
@@ -352,51 +348,23 @@ function contentType(filePath) {
   }
 }
 
-function requestBody(req) {
-  return req.method === "GET" || req.method === "HEAD" ? undefined : req;
-}
-
-function headersForFetch(headers, hostHeader) {
-  const out = {};
-  for (const [key, value] of Object.entries(headers)) {
-    if (value === undefined) continue;
-    const lower = key.toLowerCase();
-    if (lower === "connection" || lower === "content-length" || lower === "host") continue;
-    out[key] = Array.isArray(value) ? value.join(", ") : value;
-  }
-  out.host = hostHeader;
-  return out;
-}
-
-function upgradeHeaders(headers, hostHeader) {
-  const out = headersForFetch(headers, hostHeader);
-  out.connection = "Upgrade";
-  out.upgrade = headers.upgrade ?? "websocket";
-  return out;
-}
-
-function responseHeaders(response) {
-  const out = {};
-  for (const [key, value] of response.headers.entries()) {
-    const lower = key.toLowerCase();
-    if (lower === "connection" || lower === "etag" || lower === "last-modified") continue;
-    out[key] = value;
-  }
-  out["cache-control"] = "no-store, max-age=0, must-revalidate";
-  out.pragma = "no-cache";
-  out.expires = "0";
-  return out;
-}
-
 function writeText(res, status, text) {
   res.writeHead(status, { "content-type": "text/plain; charset=utf-8" });
   res.end(text);
 }
 
+function isPrototypePath(pathname) {
+  return pathname === "/prototype" || pathname.startsWith("/prototype/");
+}
+
 function writeFavicon(res) {
   const body = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
   <rect width="64" height="64" rx="14" fill="#252526"/>
-  <path fill="#4d9cff" d="M18 43 29 18h6l11 25h-7l-2.2-5.4h-9.7L25 43h-7Zm11.4-11.3h5.1L32 25.4l-2.6 6.3Z"/>
+  <g transform="translate(4 4) scale(2.333333)" color="#4d9cff">
+    <path d="M12 2V7M12 17V22M2 12H7M17 12H22" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="square" stroke-linejoin="bevel"/>
+    <path d="M4.2 4.2L7.8 7.8M16.2 7.8L19.8 4.2M16.2 16.2L19.8 19.8M7.8 16.2L4.2 19.8" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="square" stroke-linejoin="bevel"/>
+    <path d="M12 7L17 12L12 17L7 12L12 7Z" fill="currentColor"/>
+  </g>
 </svg>`, "utf8");
   res.writeHead(200, {
     "content-type": "image/svg+xml; charset=utf-8",

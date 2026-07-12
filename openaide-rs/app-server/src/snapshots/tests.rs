@@ -253,6 +253,7 @@ impl TaskSnapshotSource for StaticTaskSnapshots {
             },
             pending_requests: Vec::new(),
             recovery: None,
+            history_sync: Default::default(),
         })
     }
 }

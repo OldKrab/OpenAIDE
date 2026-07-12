@@ -6,6 +6,7 @@ use agent_client_protocol::{JsonRpcNotification, JsonRpcRequest, JsonRpcResponse
 use serde::{Deserialize, Serialize};
 
 #[cfg(test)]
+#[path = "acp_elicitation_wire_tests.rs"]
 mod tests;
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonRpcRequest)]

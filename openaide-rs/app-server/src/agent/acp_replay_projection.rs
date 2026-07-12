@@ -10,31 +10,46 @@ use crate::agent::tool_details::tool_call_event;
 use crate::protocol::model::NormalizedMessage;
 use crate::time::now_string;
 
-pub(super) struct ReplayProjection;
+pub(super) struct ReplayProjection {
+    session_id: String,
+}
 
 impl ReplayProjection {
-    pub(super) fn new() -> Self {
-        Self
+    pub(super) fn new(session_id: impl Into<String>) -> Self {
+        Self {
+            session_id: session_id.into(),
+        }
     }
 
     pub(super) fn project(&self, updates: Vec<SessionUpdate>) -> Vec<NormalizedMessage> {
         let created_at = now_string();
         let tool_calls = Arc::new(Mutex::new(Default::default()));
-        let mut replay = ReplayBuffer::default();
+        let mut replay = ReplayBuffer::new(&self.session_id);
         for update in updates {
             replay.project(update, &created_at, &tool_calls);
         }
+        replay.finalize_fallback_ids();
         replay.messages
     }
 }
 
-#[derive(Default)]
 struct ReplayBuffer {
     messages: Vec<NormalizedMessage>,
     active_text: Option<ActiveTextRun>,
+    session_id: String,
+    next_text_ordinal: usize,
 }
 
 impl ReplayBuffer {
+    fn new(session_id: &str) -> Self {
+        Self {
+            messages: Vec::new(),
+            active_text: None,
+            session_id: session_id.to_string(),
+            next_text_ordinal: 0,
+        }
+    }
+
     fn project(&mut self, update: SessionUpdate, created_at: &str, tool_calls: &ToolCallState) {
         match update {
             SessionUpdate::UserMessageChunk(chunk) => {
@@ -98,6 +113,12 @@ impl ReplayBuffer {
                 && append_text_chunk(&mut self.messages[message_index], &text)
             {
                 if active.source_message_id.is_none() {
+                    if let Some(source_message_id) = source_message_id.as_deref() {
+                        set_message_id(
+                            &mut self.messages[message_index],
+                            stable_source_id(&self.session_id, source_message_id),
+                        );
+                    }
                     self.active_text
                         .as_mut()
                         .expect("active replay text run")
@@ -108,7 +129,21 @@ impl ReplayBuffer {
         }
 
         let message_index = self.messages.len();
-        self.messages.push(kind.new_message(text, created_at));
+        let message_id = source_message_id
+            .as_deref()
+            .map(|source| stable_source_id(&self.session_id, source))
+            .unwrap_or_else(|| {
+                let id = format!(
+                    "acp:{}:replay:{}:{}",
+                    self.session_id,
+                    kind.label(),
+                    self.next_text_ordinal
+                );
+                self.next_text_ordinal += 1;
+                id
+            });
+        self.messages
+            .push(kind.new_message(message_id, text, created_at));
         self.active_text = Some(ActiveTextRun {
             kind,
             message_index,
@@ -133,9 +168,31 @@ impl ReplayBuffer {
     fn end_text_run(&mut self) {
         self.active_text = None;
     }
+
+    fn finalize_fallback_ids(&mut self) {
+        let mut occurrences = std::collections::HashMap::<(ReplayTextKind, u64), usize>::new();
+        for message in &mut self.messages {
+            let Some((kind, text, id)) = replay_text_parts(message) else {
+                continue;
+            };
+            if !id.contains(":replay:") {
+                continue;
+            }
+            let fingerprint = stable_text_fingerprint(text);
+            let occurrence = occurrences.entry((kind, fingerprint)).or_default();
+            let stable_id = format!(
+                "acp:{}:replay:{}:{fingerprint:016x}:{}",
+                self.session_id,
+                kind.label(),
+                *occurrence
+            );
+            *occurrence += 1;
+            set_message_id(message, stable_id);
+        }
+    }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Hash, PartialEq, Eq)]
 enum ReplayTextKind {
     User,
     Agent,
@@ -143,8 +200,15 @@ enum ReplayTextKind {
 }
 
 impl ReplayTextKind {
-    fn new_message(self, text: String, created_at: &str) -> NormalizedMessage {
-        let id = uuid::Uuid::new_v4().to_string();
+    fn label(self) -> &'static str {
+        match self {
+            Self::User => "user",
+            Self::Agent => "agent",
+            Self::Thought => "thought",
+        }
+    }
+
+    fn new_message(self, id: String, text: String, created_at: &str) -> NormalizedMessage {
         match self {
             Self::User => NormalizedMessage::User {
                 id,
@@ -166,6 +230,37 @@ impl ReplayTextKind {
             },
         }
     }
+}
+
+fn stable_source_id(session_id: &str, source_message_id: &str) -> String {
+    format!("acp:{session_id}:message:{source_message_id}")
+}
+
+fn set_message_id(message: &mut NormalizedMessage, message_id: String) {
+    match message {
+        NormalizedMessage::User { id, .. }
+        | NormalizedMessage::AgentText { id, .. }
+        | NormalizedMessage::Thought { id, .. } => *id = message_id,
+        _ => {}
+    }
+}
+
+fn replay_text_parts(message: &NormalizedMessage) -> Option<(ReplayTextKind, &str, &str)> {
+    match message {
+        NormalizedMessage::User { id, text, .. } => Some((ReplayTextKind::User, text, id)),
+        NormalizedMessage::AgentText { id, text, .. } => Some((ReplayTextKind::Agent, text, id)),
+        NormalizedMessage::Thought { id, text, .. } => Some((ReplayTextKind::Thought, text, id)),
+        _ => None,
+    }
+}
+
+fn stable_text_fingerprint(text: &str) -> u64 {
+    // FNV-1a is deliberately fixed rather than process-randomized: replay identity must survive restarts.
+    text.as_bytes()
+        .iter()
+        .fold(0xcbf29ce484222325, |hash, byte| {
+            (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3)
+        })
 }
 
 #[derive(Clone)]

@@ -295,4 +295,5 @@ fn error(message: impl Into<String>) -> ClientProbeExchangeError {
 }
 
 #[cfg(test)]
+#[path = "local_http_tests.rs"]
 mod tests;

@@ -12,6 +12,7 @@ import type {
 } from "./generated/protocol.js";
 import {
   PERMISSION_REQUEST,
+  QUESTION_REQUEST,
   SECRET_READ,
   SHELL_REVEAL_FILE,
   SHELL_SHOW_NOTIFICATION,
@@ -96,6 +97,7 @@ function isPendingRequestScope(value: unknown): value is PendingRequestScope {
 function isServerRequestMethod(method: string): method is ServerRequestMethod {
   return (
     method === PERMISSION_REQUEST ||
+    method === QUESTION_REQUEST ||
     method === SECRET_READ ||
     method === SHELL_SHOW_NOTIFICATION ||
     method === SHELL_REVEAL_FILE
@@ -116,6 +118,32 @@ function validateServerRequestParams(method: ServerRequestMethod, params: unknow
       requiredString(method, item, "optionId", `options[${index}].optionId`);
       requiredString(method, item, "name", `options[${index}].name`);
       requiredString(method, item, "kind", `options[${index}].kind`);
+    }
+    return;
+  }
+  if (method === QUESTION_REQUEST) {
+    requiredString(method, object, "message");
+    const fields = object.fields;
+    if (!Array.isArray(fields)) throw new Error(`${method} params.fields must be an array`);
+    for (const [index, field] of fields.entries()) {
+      const item = recordParams(method, field, `fields[${index}]`);
+      const kind = requiredString(method, item, "kind", `fields[${index}].kind`);
+      requiredString(method, item, "key", `fields[${index}].key`);
+      requiredString(method, item, "title", `fields[${index}].title`);
+      if (typeof item.required !== "boolean") {
+        throw new Error(`${method} params.fields[${index}].required must be a boolean`);
+      }
+      if (kind === "singleSelect" || kind === "multiSelect") {
+        const options = item.options;
+        if (!Array.isArray(options)) {
+          throw new Error(`${method} params.fields[${index}].options must be an array`);
+        }
+        for (const [optionIndex, option] of options.entries()) {
+          const choice = recordParams(method, option, `fields[${index}].options[${optionIndex}]`);
+          requiredString(method, choice, "value", `fields[${index}].options[${optionIndex}].value`);
+          requiredString(method, choice, "label", `fields[${index}].options[${optionIndex}].label`);
+        }
+      }
     }
     return;
   }

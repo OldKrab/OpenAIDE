@@ -363,4 +363,5 @@ fn attachment_payload_u64(attachment: &Attachment, key: &str) -> Option<u64> {
 }
 
 #[cfg(test)]
+#[path = "chat_projection_tests.rs"]
 mod tests;

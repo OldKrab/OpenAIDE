@@ -55,18 +55,25 @@ pub enum AppServerEventPayload {
     TaskSnapshotUpdated {
         task: TaskSnapshot,
     },
+    TaskHistorySyncUpdated {
+        task_id: TaskId,
+        history_sync: crate::snapshot::TaskHistorySyncSnapshot,
+    },
     TaskNavigationUpdated {
         navigation: TaskNavigationSnapshot,
     },
     ProjectCollectionUpdated {
         projects: ProjectCollectionSnapshot,
     },
+    // Hot Chat deltas carry the resulting durable Task revision so replicas advance with the stream.
     ChatItemAppended {
         task_id: TaskId,
+        revision: u64,
         item: ChatItem,
     },
     ChatItemChunk {
         task_id: TaskId,
+        revision: u64,
         message_id: MessageId,
         chunk: TextChunk,
     },
@@ -86,3 +93,7 @@ pub struct TextChunk {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub final_chunk: bool,
 }
+
+#[cfg(test)]
+#[path = "events_tests.rs"]
+mod tests;

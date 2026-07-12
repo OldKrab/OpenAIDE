@@ -245,4 +245,5 @@ struct StoredAgentCatalog {
 }
 
 #[cfg(test)]
+#[path = "catalog_store_tests.rs"]
 mod tests;

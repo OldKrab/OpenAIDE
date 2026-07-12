@@ -50,11 +50,19 @@ pub(super) fn agent_config_snapshot(snapshot: &StoredTaskSnapshot) -> TaskAgentC
                 error: None,
             }
         }
-        TaskPreparationRecord::Ready => TaskAgentConfigSnapshot {
-            state: LiveSessionDataState::Ready,
-            options: agent_config_options(snapshot),
-            pending_change: None,
-            error: None,
+        TaskPreparationRecord::Ready => match &snapshot.config_options_catalog {
+            Some(_) => TaskAgentConfigSnapshot {
+                state: LiveSessionDataState::Ready,
+                options: agent_config_options(snapshot),
+                pending_change: None,
+                error: None,
+            },
+            None => TaskAgentConfigSnapshot {
+                state: LiveSessionDataState::Unavailable,
+                options: Vec::new(),
+                pending_change: None,
+                error: None,
+            },
         },
         TaskPreparationRecord::Failed { message } => TaskAgentConfigSnapshot {
             state: LiveSessionDataState::Failed,

@@ -1971,9 +1971,10 @@ describe("app controller mounted lifecycle", () => {
   });
 
   it("emits task_rendered telemetry for initialized active tasks without polling refresh snapshots", async () => {
+    const request = vi.fn();
     backendConnection = {
       initialize: vi.fn(async () => ({ snapshot: clientSnapshot({ activeTaskStatus: "running" }) })),
-      request: vi.fn() as unknown as BackendConnection["request"],
+      request: request as unknown as BackendConnection["request"],
       respond: vi.fn(),
       close: vi.fn(),
     };
@@ -1994,11 +1995,13 @@ describe("app controller mounted lifecycle", () => {
       }),
     });
     postHostMessage.mockClear();
+    request.mockClear();
 
     act(() => {
       vi.advanceTimersByTime(1200);
     });
     expect(postHostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "task.snapshot" }));
+    expect(request).not.toHaveBeenCalled();
   });
 });
 
@@ -2088,6 +2091,7 @@ function snapshot(taskId: string, status: TaskSnapshot["task"]["status"], title 
       isolation: "local",
       workspace_root: "/workspace",
     },
+    history_sync: { state: "idle", generation: 0 },
     chat: {
       task_id: taskId,
       items: [],
@@ -2188,6 +2192,7 @@ function protocolTaskSnapshot(
     agentConfig: { state: "ready" as const, options: [] },
     agentCommands: { state: "ready" as const, commands: [] },
     sendCapability: { state: sendReady ? "ready" as const : "loading" as const },
+    historySync: { state: "idle", generation: 0 },
     chat: {
       items: userText
         ? [{

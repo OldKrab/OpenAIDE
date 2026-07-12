@@ -4,7 +4,11 @@ import type { AppState } from "./store";
 
 export type PendingInputReconciliation = ReturnType<typeof pendingInputReconciliation>;
 
-export function pendingInputReconciliation(state: AppState, snapshot: TaskSnapshot) {
+export function pendingInputReconciliation(
+  state: AppState,
+  snapshot: TaskSnapshot,
+  options: { clearCommittedDraft?: boolean } = {},
+) {
   const input = state.taskInputs[snapshot.task.task_id];
   const taskInputCommitted = input?.pending
     ? snapshotContainsPendingInput(snapshot, input.pending)
@@ -12,10 +16,13 @@ export function pendingInputReconciliation(state: AppState, snapshot: TaskSnapsh
   const taskInputRestoredSendCommitted = input && !input.pending && input.error
     ? snapshotContainsPendingInput(snapshot, input)
     : false;
+  const taskInputDraftCommitted = options.clearCommittedDraft && input && !input.pending && !input.error
+    ? snapshotContainsPendingInput(snapshot, input)
+    : false;
   const newTaskCommitted = state.newTask.pending
     ? snapshotContainsPendingInput(snapshot, state.newTask.pending)
     : false;
-  return { taskInputCommitted, taskInputRestoredSendCommitted, newTaskCommitted };
+  return { taskInputCommitted, taskInputRestoredSendCommitted, taskInputDraftCommitted, newTaskCommitted };
 }
 
 export function applyPendingInputReconciliation(
@@ -26,6 +33,7 @@ export function applyPendingInputReconciliation(
   if (
     !reconciliation.taskInputCommitted
     && !reconciliation.taskInputRestoredSendCommitted
+    && !reconciliation.taskInputDraftCommitted
     && !reconciliation.newTaskCommitted
   ) {
     return state;
@@ -33,12 +41,14 @@ export function applyPendingInputReconciliation(
   const input = state.taskInputs[taskId];
   return {
     ...state,
-    taskInputs: input && (reconciliation.taskInputCommitted || reconciliation.taskInputRestoredSendCommitted)
+    taskInputs: input && (
+      reconciliation.taskInputCommitted
+      || reconciliation.taskInputRestoredSendCommitted
+      || reconciliation.taskInputDraftCommitted
+    )
       ? {
           ...state.taskInputs,
-          [taskId]: reconciliation.taskInputRestoredSendCommitted
-            ? { prompt: "", context: [] }
-            : { prompt: "", context: [] },
+          [taskId]: { prompt: "", context: [] },
         }
       : state.taskInputs,
     newTask: reconciliation.newTaskCommitted

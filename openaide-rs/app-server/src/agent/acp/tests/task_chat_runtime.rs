@@ -143,6 +143,71 @@ fn coalesced_steering_response_clears_active_turn_without_cancel() {
 }
 
 #[test]
+fn steering_continues_the_latest_agent_message_with_the_same_source_id() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((api, store, _server_requests, workspace_root)) =
+        task_chat_fixture(&temp, "continued_message_steering")
+    else {
+        return;
+    };
+    let created = api
+        .create(TaskCreateParams {
+            project_id: project_id_for_workspace(&workspace_root),
+            agent_id: AgentId::from("codex"),
+            workspace_root: None,
+            config_options: Default::default(),
+        })
+        .expect("create task");
+    let task_id = created.task.task_id;
+    wait_until(|| {
+        matches!(
+            store
+                .read_task(task_id.as_str())
+                .map(|task| task.preparation),
+            Ok(TaskPreparationRecord::Ready)
+        )
+    });
+    let ready = api
+        .open(openaide_app_server_protocol::task::TaskOpenParams {
+            task_id: task_id.clone(),
+        })
+        .expect("open ready task");
+
+    api.send(send_params(
+        &task_id,
+        ready.revision,
+        "send-primary",
+        "start work",
+    ))
+    .expect("send primary prompt");
+    wait_until(|| agent_texts(&store, &task_id) == ["first"]);
+
+    api.send(send_params(
+        &task_id,
+        store.read_task(task_id.as_str()).unwrap().revision,
+        "send-steer",
+        "steer now",
+    ))
+    .expect("send steering prompt");
+
+    wait_until(|| {
+        store
+            .read_task(task_id.as_str())
+            .map(|task| task.status == TaskStatus::Inactive && task.active_turn_id.is_none())
+            .unwrap_or(false)
+    });
+    assert_eq!(
+        logical_text_messages(&store, &task_id),
+        [
+            ("user", "start work".to_string()),
+            ("agent", "first continued".to_string()),
+            ("user", "steer now".to_string()),
+        ]
+    );
+    api.shutdown().expect("shutdown task runtime");
+}
+
+#[test]
 fn steered_acp_prompt_uses_fresh_chat_identity_across_permission_boundary() {
     let temp = tempfile::TempDir::new().expect("temp dir");
     let Some((api, store, server_requests, workspace_root)) = task_chat_fixture(&temp, "steering")
@@ -526,6 +591,8 @@ for line in sys.stdin:
                     "22222222-2222-4222-8222-222222222222",
                 )
                 finish_first()
+            elif mode == "continued_message_steering":
+                update_chunk("agent_message_chunk", "first", "continued-message")
             else:
                 update_text("first response")
             if mode not in ("coalesced_steering", "steering", "message_ids"):
@@ -533,7 +600,10 @@ for line in sys.stdin:
         else:
             with state_lock:
                 state["second_id"] = message.get("id")
-            if mode == "coalesced_steering":
+            if mode == "continued_message_steering":
+                update_chunk("agent_message_chunk", " continued", "continued-message")
+                finish_first()
+            elif mode == "coalesced_steering":
                 update_text("steering applied")
                 finish_first()
             else:

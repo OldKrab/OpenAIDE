@@ -40,6 +40,7 @@ export function getBootstrap(): WebviewBootstrap {
     return {
       surface,
       taskId: document.body.dataset.taskId || undefined,
+      projectId: document.body.dataset.projectId || undefined,
       preferences,
       appServerConnection,
     };

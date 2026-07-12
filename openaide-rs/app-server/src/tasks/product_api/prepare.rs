@@ -77,13 +77,17 @@ impl TaskProductApi {
                 }
                 let task = ctx.task_mut();
                 task.agent_session_id = Some(session_id.clone());
-                // The fresh Agent catalog is authoritative after draft recovery.
-                task.config_options = config_options.clone();
-                task.config_options_catalog = config_catalog.clone();
+                // A fresh start returns an authoritative catalog. Resume only
+                // reattaches identity, so missing metadata must preserve the
+                // catalog already persisted for the Draft Task.
+                if config_catalog.is_some() {
+                    task.config_options = config_options.clone();
+                    task.config_options_catalog = config_catalog.clone();
+                    task.model_id = model_id.clone();
+                }
                 if task.agent_commands_catalog.is_none() {
                     task.agent_commands_catalog = commands_catalog.clone();
                 }
-                task.model_id = model_id.clone();
                 task.preparation = TaskPreparationRecord::Ready;
                 task.updated_at = now.clone();
                 Ok(TaskMutationResult::Changed)

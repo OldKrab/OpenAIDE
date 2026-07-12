@@ -265,4 +265,5 @@ fn target_matches_record(
 }
 
 #[cfg(test)]
+#[path = "runner_tests.rs"]
 mod tests;

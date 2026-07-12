@@ -241,7 +241,7 @@ textarea:focus-visible,
     padding-block: 18px;
   }
 
-  body[data-shell="web"] .new-task-center {
+  .new-task-center {
     padding-bottom: 18px;
   }
 }

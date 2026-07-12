@@ -196,4 +196,5 @@ pub enum AttachmentCandidateErrorCode {
 }
 
 #[cfg(test)]
+#[path = "attachment_tests.rs"]
 mod tests;

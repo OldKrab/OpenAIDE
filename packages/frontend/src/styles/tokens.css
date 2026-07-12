@@ -18,5 +18,5 @@
   --oa-chat-font: var(--oa-ui-font);
   --oa-mono-font: var(--vscode-editor-font-family, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
   font-family: var(--oa-ui-font);
-  font-size: calc(var(--vscode-font-size, 13px) + 1px);
+  font-size: 14px;
 }

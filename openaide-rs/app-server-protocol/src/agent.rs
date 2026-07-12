@@ -291,4 +291,5 @@ fn default_custom_icon() -> String {
 }
 
 #[cfg(test)]
+#[path = "agent_tests.rs"]
 mod tests;

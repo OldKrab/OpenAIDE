@@ -134,4 +134,5 @@ fn tool_call_status(status: AgentToolCallStatus) -> ActivityStatus {
 }
 
 #[cfg(test)]
+#[path = "normalizer_tests.rs"]
 mod tests;

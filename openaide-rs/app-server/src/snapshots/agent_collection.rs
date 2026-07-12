@@ -74,4 +74,5 @@ fn collection_from_registry_summaries_with_statuses(
 }
 
 #[cfg(test)]
+#[path = "agent_collection_tests.rs"]
 mod tests;

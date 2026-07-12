@@ -86,15 +86,15 @@ impl AgentEventSink for TaskEventSink {
         let _guard = self.emission_lock.lock().expect("event sink lock poisoned");
         let now = now_string();
         if let AgentEvent::ConfigOptionsChanged(catalog) = event {
-            self.finish_streaming_runs(&now)?;
+            self.finish_anonymous_streaming_runs(&now)?;
             return self.update_task_config_options(catalog, &now);
         }
         if let AgentEvent::CommandsChanged(catalog) = event {
-            self.finish_streaming_runs(&now)?;
+            self.finish_anonymous_streaming_runs(&now)?;
             return self.update_task_commands(catalog, &now);
         }
         if let AgentEvent::Text(text) = event {
-            self.finish_thought_run(&now)?;
+            self.finish_anonymous_thought_run(&now)?;
             return self.append_agent_text_chunk(text, None, &now);
         }
         if let AgentEvent::TextChunk {
@@ -102,16 +102,11 @@ impl AgentEventSink for TaskEventSink {
             source_message_id,
         } = event
         {
-            self.finish_thought_run(&now)?;
-            self.commit_optional_streaming_write(
-                self.streaming_runs
-                    .finish_text_for_source_change(source_message_id.as_deref(), &now),
-                &now,
-            )?;
+            self.finish_anonymous_thought_run(&now)?;
             return self.append_agent_text_chunk(text, source_message_id, &now);
         }
         if let AgentEvent::Thought(text) = event {
-            self.finish_text_run(&now)?;
+            self.finish_anonymous_text_run(&now)?;
             return self.append_agent_thought_chunk(text, None, &now);
         }
         if let AgentEvent::ThoughtChunk {
@@ -119,15 +114,10 @@ impl AgentEventSink for TaskEventSink {
             source_message_id,
         } = event
         {
-            self.finish_text_run(&now)?;
-            self.commit_optional_streaming_write(
-                self.streaming_runs
-                    .finish_thought_for_source_change(source_message_id.as_deref(), &now),
-                &now,
-            )?;
+            self.finish_anonymous_text_run(&now)?;
             return self.append_agent_thought_chunk(text, source_message_id, &now);
         }
-        self.finish_streaming_runs(&now)?;
+        self.finish_anonymous_streaming_runs(&now)?;
         let write_mode = if let AgentEvent::ToolCall(tool_call) = &mut event {
             tool_call
                 .scope_id
@@ -140,16 +130,23 @@ impl AgentEventSink for TaskEventSink {
         self.append_agent_message(message, &now, None, write_mode)
     }
 
-    fn finish_prompt(&self) -> Result<(), RuntimeError> {
-        self.finish()
+    fn prepare_for_steering(&self) -> Result<(), RuntimeError> {
+        let _guard = self.emission_lock.lock().expect("event sink lock poisoned");
+        let now = now_string();
+        self.commit_optional_streaming_write(
+            self.streaming_runs.finish_anonymous_text(&now),
+            &now,
+        )?;
+        self.commit_optional_streaming_write(
+            self.streaming_runs.finish_anonymous_thought(&now),
+            &now,
+        )
     }
 
     fn request_permission(
         &self,
         request: AgentPermissionRequest,
     ) -> Result<AgentPermissionOutcome, RuntimeError> {
-        let _guard = self.emission_lock.lock().expect("event sink lock poisoned");
-        self.finish_streaming_runs(&now_string())?;
         self.handle_permission_request(request)
     }
 }
@@ -161,15 +158,18 @@ impl TaskEventSink {
         source_message_id: Option<String>,
         now: &str,
     ) -> Result<(), RuntimeError> {
-        self.commit_streaming_write(
-            self.streaming_runs
-                .agent_text_chunk(text, source_message_id, now),
-            now,
-        )
+        let write = self
+            .streaming_runs
+            .agent_text_chunk(text, source_message_id, now)?;
+        self.commit_streaming_write(write, now)
     }
 
     fn finish_text_run(&self, now: &str) -> Result<(), RuntimeError> {
-        self.commit_optional_streaming_write(self.streaming_runs.finish_text(now), now)
+        self.commit_streaming_writes(self.streaming_runs.finish_text(now), now)
+    }
+
+    fn finish_anonymous_text_run(&self, now: &str) -> Result<(), RuntimeError> {
+        self.commit_optional_streaming_write(self.streaming_runs.finish_anonymous_text(now), now)
     }
 
     fn append_agent_thought_chunk(
@@ -178,15 +178,25 @@ impl TaskEventSink {
         source_message_id: Option<String>,
         now: &str,
     ) -> Result<(), RuntimeError> {
-        self.commit_streaming_write(
-            self.streaming_runs
-                .thought_chunk(text, source_message_id, now),
-            now,
-        )
+        let write = self
+            .streaming_runs
+            .thought_chunk(text, source_message_id, now)?;
+        self.commit_streaming_write(write, now)
     }
 
     fn finish_thought_run(&self, now: &str) -> Result<(), RuntimeError> {
-        self.commit_optional_streaming_write(self.streaming_runs.finish_thought(now), now)
+        self.commit_streaming_writes(self.streaming_runs.finish_thought(now), now)
+    }
+
+    fn finish_anonymous_thought_run(&self, now: &str) -> Result<(), RuntimeError> {
+        self.commit_optional_streaming_write(self.streaming_runs.finish_anonymous_thought(now), now)
+    }
+
+    /// Source-correlated streams remain active for the whole turn. Only anonymous
+    /// streams need inferred boundaries when another event kind is observed.
+    fn finish_anonymous_streaming_runs(&self, now: &str) -> Result<(), RuntimeError> {
+        self.finish_anonymous_text_run(now)?;
+        self.finish_anonymous_thought_run(now)
     }
 
     fn finish_streaming_runs(&self, now: &str) -> Result<(), RuntimeError> {
@@ -203,6 +213,17 @@ impl TaskEventSink {
             Some(write) => self.commit_streaming_write(write, now),
             None => Ok(()),
         }
+    }
+
+    fn commit_streaming_writes(
+        &self,
+        writes: Vec<StreamingWrite>,
+        now: &str,
+    ) -> Result<(), RuntimeError> {
+        for write in writes {
+            self.commit_streaming_write(write, now)?;
+        }
+        Ok(())
     }
 
     fn commit_streaming_write(&self, write: StreamingWrite, now: &str) -> Result<(), RuntimeError> {

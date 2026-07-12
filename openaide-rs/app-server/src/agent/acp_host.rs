@@ -14,6 +14,7 @@ use crate::protocol::errors::RuntimeError;
 use crate::protocol::host::HostBridge;
 
 #[cfg(test)]
+#[path = "acp_host_tests.rs"]
 mod tests;
 
 const HOST_CAPABILITY_TIMEOUT: Duration = Duration::from_secs(30);

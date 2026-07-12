@@ -21,6 +21,7 @@ impl RpcGateway {
                 task_id: task_id.as_str().to_string(),
                 revision: 0,
                 delta: None,
+                history_sync: None,
             },
             now,
         )
@@ -32,6 +33,23 @@ impl RpcGateway {
         now: AppServerTime,
     ) -> Vec<GatewayEventDelivery> {
         let task_id = TaskId::from(update.task_id.clone());
+        if let Some(history_sync) = update.history_sync.clone() {
+            let client_hub = self.client_hub.clone();
+            let events = event_deliveries(self.state_stream.publish_committed(
+                EventScope::Task {
+                    state_root_id: self.state_stream.state_root_id().clone(),
+                    task_id: task_id.clone(),
+                },
+                AppServerEventPayload::TaskHistorySyncUpdated {
+                    task_id,
+                    history_sync,
+                },
+                |client_id| client_hub.delivery_for(client_id),
+                now,
+            ));
+            self.pending_event_deliveries.extend(events.clone());
+            return events;
+        }
         let delta_events = self.publish_committed_task_delta(&task_id, update, now);
         if update.delta.is_some() {
             self.pending_event_deliveries.extend(delta_events.clone());
@@ -91,12 +109,14 @@ impl RpcGateway {
             CommittedTaskDelta::ChatItemAppended { item } => {
                 AppServerEventPayload::ChatItemAppended {
                     task_id: task_id.clone(),
+                    revision: update.revision,
                     item,
                 }
             }
             CommittedTaskDelta::ChatItemChunk { message_id, chunk } => {
                 AppServerEventPayload::ChatItemChunk {
                     task_id: task_id.clone(),
+                    revision: update.revision,
                     message_id,
                     chunk,
                 }

@@ -6,6 +6,7 @@ use crate::agent::acp_trace::AcpTraceSession;
 use crate::protocol::errors::RuntimeError;
 
 #[cfg(test)]
+#[path = "acp_session_termination_tests.rs"]
 mod tests;
 
 pub(super) async fn close_active_session(

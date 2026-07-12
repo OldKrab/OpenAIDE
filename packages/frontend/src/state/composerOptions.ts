@@ -1,4 +1,5 @@
 import type { AgentIconId, Attachment, ConfigOptionsCatalog, IsolationKind } from "@openaide/app-shell-contracts";
+import { projectIdForWorkspaceRoot } from "@openaide/app-shell-contracts";
 import type { AttachmentHandleId, PreSendAttachment } from "@openaide/app-server-client";
 import { agentCatalogEntry, builtInAgents, defaultAgent } from "@openaide/app-shell-contracts";
 
@@ -96,7 +97,7 @@ export function selectionWithConfigOptions(
 export function selectionWithWorkspace(selection: ComposerSelection, workspace: WorkspaceRoot): ComposerSelection {
   return {
     ...selection,
-    projectId: workspace.projectId ?? selection.projectId,
+    projectId: workspace.projectId ?? projectIdForWorkspaceRoot(workspace.path),
     workspaceRoot: workspace.path,
     workspaceLabel: workspace.label,
   };

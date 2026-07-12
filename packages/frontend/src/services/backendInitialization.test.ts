@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ClientInstanceId } from "@openaide/app-server-client";
-import { getClientInstanceId, initializeParamsForBootstrap } from "./backendInitialization";
+import { getClientInstanceId, initializeParamsForBootstrap, taskNavigationScopeForBootstrap } from "./backendInitialization";
 
 describe("backend initialization", () => {
   it("builds initialize params from the current shell surface", () => {
@@ -30,6 +30,11 @@ describe("backend initialization", () => {
         ],
       },
     });
+
+    expect(initializeParamsForBootstrap(
+      { surface: "navigation", projectId: "project-1" },
+      "client-1" as ClientInstanceId,
+    ).requestedSurface).toEqual({ kind: "project", projectId: "project-1" });
 
     expect(initializeParamsForBootstrap(
       { surface: "task", taskId: "task-1" },
@@ -67,6 +72,18 @@ describe("backend initialization", () => {
     expect(initialized.shell).toEqual({ kind: "web" });
     expect(initialized.capabilities?.shell ?? []).not.toContain("readSecret");
     expect(initialized.capabilities?.shell ?? []).not.toContain("writeSecret");
+  });
+
+  it("scopes only the VS Code task list to its fixed Project Context", () => {
+    expect(taskNavigationScopeForBootstrap({ surface: "navigation", projectId: "project-1" })).toEqual({
+      kind: "taskNavigation",
+      projectId: "project-1",
+    });
+    expect(taskNavigationScopeForBootstrap({
+      surface: "task",
+      projectId: "project-1",
+      appServerConnection: { kind: "webProxy", endpointUrl: "/probe" },
+    })).toEqual({ kind: "taskNavigation" });
   });
 
   it("uses session storage for stable tab identity", () => {

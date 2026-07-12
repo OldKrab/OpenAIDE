@@ -1,4 +1,4 @@
-import type { AgentListedSession, ChatMessage, TaskStatus } from "@openaide/app-shell-contracts";
+import type { AgentListedSession, ChatMessage, HistorySyncState, TaskStatus } from "@openaide/app-shell-contracts";
 import { activityStepCompletedLabel, activityStepProgressLabel } from "../state/activityLabels";
 
 export function newTaskStatusLabel({
@@ -25,7 +25,20 @@ export function newTaskStatusLabel({
   return undefined;
 }
 
-export function taskWorkingStatusLabel(items: ChatMessage[], status: TaskStatus, inputPending: boolean) {
+export function taskWorkingStatusLabel(
+  items: ChatMessage[],
+  status: TaskStatus,
+  inputPending: boolean,
+  historySync: HistorySyncState = { state: "idle", generation: 0 },
+) {
+  if (historySync.state === "checking") return "Checking for newer history";
+  if (historySync.state === "syncing") return "Syncing conversation history";
+  if (historySync.state === "updated") return "History updated";
+  if (historySync.state === "failed") {
+    return historySync.before_send
+      ? "Couldn’t sync conversation history"
+      : "Couldn’t refresh history";
+  }
   // Pending Shell input remains in the frozen composer until App Server acceptance.
   // Chat activity only describes authoritative task state.
   if (inputPending) return undefined;
@@ -47,8 +60,13 @@ export function taskWorkingStatusLabel(items: ChatMessage[], status: TaskStatus,
   const reversedUserIndex = [...items].reverse().findIndex((item) => item.message.kind === "user");
   const currentTurnItems = reversedUserIndex === -1 ? items : items.slice(items.length - reversedUserIndex);
   const latestWork = [...currentTurnItems].reverse().find((item) => {
-    return item.message.kind === "activity" || item.message.kind === "agent_text";
+    return item.message.kind === "activity" || item.message.kind === "agent_text" || item.message.kind === "thought";
   });
+  if (latestWork?.message.kind === "thought") {
+    return latestWork.message.streaming
+      ? activityStepProgressLabel(latestWork.message)
+      : activityStepCompletedLabel(latestWork.message);
+  }
   if (latestWork?.message.kind === "agent_text") {
     return latestWork.message.streaming ? "Writing response" : "Generated response";
   }

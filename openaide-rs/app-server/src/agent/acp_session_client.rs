@@ -220,4 +220,5 @@ fn strip_runtime_error_prefixes(mut message: &str) -> &str {
 }
 
 #[cfg(test)]
+#[path = "acp_session_client_tests.rs"]
 mod tests;

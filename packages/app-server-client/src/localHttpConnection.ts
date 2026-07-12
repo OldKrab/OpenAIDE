@@ -2,6 +2,7 @@ import {
   type BackendConnection,
   type BackendEventListener,
   type BackendServerRequestListener,
+  type BackendStateResetListener,
   type BackendUnsubscribe,
 } from "./backendConnection.js";
 import type {
@@ -99,6 +100,7 @@ function createHttpBackendConnection(
   if (!fetchImpl) throw new Error("LocalHttp BackendConnection requires fetch");
 
   const events = new Set<BackendEventListener>();
+  const stateResetListeners = new Set<BackendStateResetListener>();
   const serverRequests = new Set<BackendServerRequestListener>();
   let nextId = 1;
   let initialized = false;
@@ -107,10 +109,12 @@ function createHttpBackendConnection(
   let lastInitializeMeta: RequestMeta | undefined;
   let lastInitializeParams: InitializeParams | undefined;
   let initializePromise: Promise<InitializeResult> | undefined;
+  let reinitializePromise: Promise<void> | undefined;
   let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
   let eventStreamAbort: AbortController | undefined;
   let eventStreamReader: LocalHttpStreamReader | undefined;
   let eventStreamRetryTimer: ReturnType<typeof setTimeout> | undefined;
+  let eventStreamContinuityLost = false;
 
   const connection: BackendConnection = {
     async initialize(params: InitializeParams, meta?: RequestMeta) {
@@ -122,6 +126,7 @@ function createHttpBackendConnection(
 
       initializePromise = sendRequest(CLIENT_INITIALIZE, params, meta)
         .then((result) => {
+          if (closed) throw new Error("Backend connection closed");
           initialized = true;
           initializeResult = result;
           startHeartbeat();
@@ -140,7 +145,13 @@ function createHttpBackendConnection(
     ) {
       if (closed) return Promise.reject(new Error("Backend connection closed"));
       if (!initialized) {
-        return Promise.reject(new Error("Backend connection is not initialized"));
+        if (!lastInitializeParams) {
+          return Promise.reject(new Error("Backend connection is not initialized"));
+        }
+        // A failed restart attempt must not make the connection terminal. The
+        // caller's normal retry is also the next initialization attempt, and
+        // concurrent callers share the same reinitialize promise.
+        return reinitializeConnection().then(() => sendRequestWithInitializedRetry(method, params, meta));
       }
       return sendRequestWithInitializedRetry(method, params, meta);
     },
@@ -158,6 +169,10 @@ function createHttpBackendConnection(
       events.add(listener);
       return () => events.delete(listener);
     },
+    stateResets(listener: BackendStateResetListener): BackendUnsubscribe {
+      stateResetListeners.add(listener);
+      return () => stateResetListeners.delete(listener);
+    },
     serverRequests(listener: BackendServerRequestListener): BackendUnsubscribe {
       serverRequests.add(listener);
       return () => serverRequests.delete(listener);
@@ -169,9 +184,11 @@ function createHttpBackendConnection(
       lastInitializeMeta = undefined;
       lastInitializeParams = undefined;
       initializePromise = undefined;
+      reinitializePromise = undefined;
       stopHeartbeat();
       stopEventStream();
       events.clear();
+      stateResetListeners.clear();
       serverRequests.clear();
     },
   };
@@ -204,15 +221,37 @@ function createHttpBackendConnection(
       return await sendRequest(method, params, meta);
     } catch (error) {
       if (!isNotInitializedError(error) || !lastInitializeParams) throw error;
-      initialized = false;
-      initializeResult = undefined;
-      await connection.initialize(lastInitializeParams, lastInitializeMeta);
+      await reinitializeConnection();
       return sendRequest(method, params, meta);
     }
   }
 
+  async function reinitializeConnection() {
+    if (!lastInitializeParams) throw new Error("Backend connection has no initialization context");
+    if (reinitializePromise) return reinitializePromise;
+    const params = lastInitializeParams;
+    const meta = lastInitializeMeta;
+    reinitializePromise = (async () => {
+      // Initialization owns the server-side subscription registry. Replacing it
+      // always invalidates every watched snapshot, regardless of which request
+      // first discovered the restart.
+      eventStreamContinuityLost = true;
+      // The event stream starts from initialize's success callback, so a very
+      // fast 409 can race the promise's final cleanup. Let that generation settle
+      // before replacing it.
+      if (initializePromise) await initializePromise;
+      initialized = false;
+      initializeResult = undefined;
+      await connection.initialize(params, meta);
+      notifyStateResetIfNeeded();
+    })().finally(() => {
+      reinitializePromise = undefined;
+    });
+    return reinitializePromise;
+  }
+
   async function sendJsonRpc(id: JsonRpcId, body: unknown): Promise<LocalHttpWireMessage[]> {
-  try {
+    try {
       const response = await fetchWithTimeout(fetchImpl, options, JSON.stringify(body));
       const text = await response.text();
       if (!response.ok) {
@@ -255,7 +294,7 @@ function createHttpBackendConnection(
     const interval = options.heartbeatIntervalMs ?? 5_000;
     heartbeatTimer = setInterval(() => {
       if (closed || !initialized) return;
-      void sendRequest(CLIENT_HEARTBEAT, {}, undefined).catch(() => {
+      void sendRequestWithInitializedRetry(CLIENT_HEARTBEAT, {}, undefined).catch(() => {
         // Normal requests surface transport failures. Heartbeat failure is only
         // a liveness hint for the App Server, so keep UI state owned by callers.
       });
@@ -285,6 +324,7 @@ function createHttpBackendConnection(
   }
 
   async function consumeEventStream(signal: AbortSignal) {
+    let reader: LocalHttpStreamReader | undefined;
     try {
       const response = await fetchImpl(options.endpointUrl, {
         method: "POST",
@@ -292,8 +332,17 @@ function createHttpBackendConnection(
         body: "",
         signal,
       });
+      if (response.status === 409 && lastInitializeParams) {
+        // A restarted App Server no longer knows this connection or its scopes.
+        // Reinitialize first; the replacement stream will then invalidate all
+        // watched state so callers can establish fresh snapshots.
+        eventStreamContinuityLost = true;
+        await reinitializeConnection();
+        return;
+      }
       if (!response.ok || !response.body) return;
-      const reader = response.body.getReader();
+      notifyStateResetIfNeeded();
+      reader = response.body.getReader();
       eventStreamReader = reader;
       const decoder = new TextDecoder();
       let buffered = "";
@@ -310,11 +359,20 @@ function createHttpBackendConnection(
         // Heartbeats continue to recover queued events when streaming is unavailable.
       }
     } finally {
-      eventStreamReader = undefined;
+      if (eventStreamReader === reader) eventStreamReader = undefined;
       if (!signal.aborted && !closed && eventStreamAbort?.signal === signal) {
+        // The server drains deliveries before writing them, so any broken stream
+        // invalidates all subscription cursors even when no gap event follows.
+        eventStreamContinuityLost = true;
         eventStreamRetryTimer = setTimeout(() => startEventStream(), EVENT_STREAM_RETRY_MS);
       }
     }
+  }
+
+  function notifyStateResetIfNeeded() {
+    if (!eventStreamContinuityLost) return;
+    eventStreamContinuityLost = false;
+    for (const listener of stateResetListeners) listener();
   }
 
   function processEventStreamFrame(frame: string) {

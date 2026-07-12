@@ -53,9 +53,9 @@ pub(crate) fn event_deliveries(
     outcome
         .deliveries
         .into_iter()
-        .map(|delivery| GatewayEventDelivery {
-            delivery,
-            event: outcome.event.clone(),
+        .map(|published| GatewayEventDelivery {
+            delivery: published.delivery,
+            event: published.event,
         })
         .collect()
 }

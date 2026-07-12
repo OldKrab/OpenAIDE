@@ -26,6 +26,8 @@ describe("task list row styles", () => {
     expect(tokensCss).toMatch(/--oa-ui-font:\s*"Inter Variable",\s*system-ui,\s*sans-serif;/);
     expect(tokensCss).toMatch(/--oa-chat-font:\s*var\(--oa-ui-font\);/);
     expect(tokensCss).toMatch(/--oa-mono-font:\s*var\(--vscode-editor-font-family,/);
+    expect(tokensCss).toMatch(/font-size:\s*14px;/);
+    expect(tokensCss).not.toContain("var(--vscode-font-size");
   });
 
   it("uses one token-based scrollbar style across the webview", () => {
@@ -110,12 +112,12 @@ describe("task list row styles", () => {
   });
 
   it("keeps narrow transcript controls touchable", () => {
-    expect(appCss).toMatch(/body\[data-shell="web"\] \.chat-message-actions\s*{[^}]*min-height:\s*28px;/);
-    expect(appCss).toMatch(/body\[data-shell="web"\] \.chat-message-action\s*{[^}]*width:\s*36px;[^}]*min-height:\s*36px;/);
-    expect(appCss).toMatch(/body\[data-shell="web"\] \.activity-group > \.activity-disclosure-trigger,[^{]+\.chat-thought-block > \.activity-disclosure-trigger\s*{[^}]*min-height:\s*36px;/);
+    expect(appCss).toMatch(/\.chat-message-actions\s*{[^}]*min-height:\s*28px;/);
+    expect(appCss).toMatch(/\.chat-message-action\s*{[^}]*width:\s*36px;[^}]*min-height:\s*36px;/);
+    expect(appCss).toMatch(/\.activity-group > \.activity-disclosure-trigger,[^{]+\.chat-thought-block > \.activity-disclosure-trigger\s*{[^}]*min-height:\s*36px;/);
     expect(appCss).not.toMatch(/body\[data-shell="web"\] \.chat-agent-block,[^{]+\.message-list > \.chat-thought-block,[^{]+\.message-list > \.activity-group\s*{[^}]*margin-inline-start:/);
     expect(appCss).not.toMatch(/body\[data-shell="web"\] \.chat-user-block\s*{[^}]*margin-inline-end:/);
-    expect(appCss).toMatch(/body\[data-shell="web"\] \.chat-agent,[^{]+\.chat-user,[^{]+\.chat-system\s*{[^}]*font-size:\s*15px;[^}]*line-height:\s*1\.5;/);
+    expect(appCss).toMatch(/\.chat-agent,[^{]+\.chat-user,[^{]+\.chat-system\s*{[^}]*font-size:\s*15px;[^}]*line-height:\s*1\.5;/);
   });
 
   it("keeps the task composer docked while only chat history scrolls", () => {
@@ -127,10 +129,12 @@ describe("task list row styles", () => {
     expect(appCss).toMatch(/\.message-list\s*{[^}]*gap:\s*8px;/);
     expect(appCss).toMatch(/\.message-list\s*{[^}]*padding-inline:\s*max\(0px,\s*calc\(\(100% - 760px\) \/ 2\)\);/);
     expect(appCss).toMatch(/\.message-list\s*{[^}]*padding-bottom:\s*64px;/);
-    expect(appCss).toMatch(/@media \(max-width:\s*760px\)\s*{[^}]*body\[data-shell="web"\] \.message-list\s*{[^}]*padding-bottom:\s*36px;/);
+    expect(appCss).toMatch(/@media \(max-width:\s*760px\)\s*{[^}]*\.message-list\s*{[^}]*padding-bottom:\s*36px;/);
   });
 
   it("shows working status as a quiet animated row in the message stream", () => {
+    expect(appCss).toMatch(/\.working-status\s*{[^}]*margin-top:\s*32px;/);
+    expect(appCss).toMatch(/\.message-list > \.activity-group \+ \.working-status\s*{[^}]*margin-top:\s*28px;/);
     expect(appCss).toMatch(/\.working-status\s*{[^}]*color:\s*var\(--oa-muted\);[^}]*display:\s*inline-flex;/);
     expect(appCss).toMatch(/\.working-status-dots span\s*{[^}]*animation:\s*working-dot-pulse 1\.2s ease-in-out infinite;/);
     expect(appCss).toMatch(/@media \(prefers-reduced-motion:\s*reduce\)\s*{[^}]*\.working-status-dots span,\s*\.composer-submit-pending svg\s*{\s*animation:\s*none;/);
@@ -252,34 +256,37 @@ describe("task list row styles", () => {
     expect(appCss).not.toMatch(/\.permission-card\.tool-execute \.permission-icon\s*{[^}]*background:/);
   });
 
-  it("keeps the web composer neutral until it receives focus", () => {
-    expect(appCss).toMatch(/\.composer\[data-keyboard-focus="true"\]:focus-within\s*{\s*border-color:\s*var\(--oa-focus\);/);
+  it("shares new-task and composer geometry across app shells", () => {
+    expect(appCss).toMatch(/\.composer\[data-keyboard-focus="true"\]:focus-within\s*{\s*border-color:\s*color-mix\(in oklch, var\(--oa-focus\) 42%, var\(--oa-border\)\);/);
     expect(appCss).not.toMatch(/\.composer:focus-within\s*{/);
     expect(appCss).toMatch(/\.composer textarea:focus-visible,\s*\.composer-editor:focus-visible\s*{\s*outline:\s*0;/);
-    expect(appCss).toMatch(/body\[data-shell="web"\] \.composer\s*{[^}]*border-color:\s*color-mix\(in oklch, var\(--oa-border\) 58%, transparent\);[^}]*border-radius:\s*20px;[^}]*box-shadow:\s*none;/);
-    expect(appCss).toMatch(/body\[data-shell="web"\] \.composer\[data-keyboard-focus="true"\]:focus-within\s*{[^}]*border-color:\s*color-mix\(in oklch, var\(--oa-focus\) 42%, var\(--oa-border\)\);[^}]*box-shadow:\s*none;/);
+    expect(appCss).toMatch(/\.composer\s*{[^}]*width:\s*min\(760px, 100%\);[^}]*border-radius:\s*20px;[^}]*box-shadow:\s*none;/);
+    expect(appCss).toMatch(/\.new-task-context-controls\s*{[^}]*width:\s*fit-content;[^}]*border-radius:\s*999px;/);
+    expect(appCss).toMatch(/\.composer-send-button:not\(:disabled\)\s*{[^}]*width:\s*32px;[^}]*height:\s*32px;[^}]*border-radius:\s*999px;/);
+    expect(appCss).not.toMatch(/body\[data-shell="web"\] \.composer\s*{[^}]*width:\s*min\(760px, 100%\)/);
+    expect(appCss).not.toMatch(/body\[data-shell="web"\] \.new-task-context-controls\s*{[^}]*width:\s*fit-content/);
   });
 
-  it("keeps composer send and stop hover states more specific than their web defaults", () => {
-    expect(appCss).toMatch(/body\[data-shell="web"\] \.composer-send-button:not\(:disabled\)\s*{[^}]*width:\s*32px;[^}]*height:\s*32px;[^}]*border-radius:\s*999px;[^}]*background:\s*var\(--vscode-button-background, var\(--oa-focus\)\);[^}]*color:\s*var\(--vscode-button-foreground, oklch\(0\.97 0\.008 250\)\);/);
-    expect(appCss).toMatch(/body\[data-shell="web"\] \.composer-send-button:hover:not\(:disabled\)\s*{\s*background:\s*var\(--vscode-button-hoverBackground, color-mix\(in oklch, var\(--oa-focus\) 82%, var\(--oa-text\)\)\);/);
-    expect(appCss).toMatch(/body\[data-shell="web"\] \.composer-stop-button:not\(:disabled\)\s*{[^}]*background:\s*transparent;/);
-    expect(appCss).toMatch(/body\[data-shell="web"\] \.composer-stop-button:hover:not\(:disabled\)\s*{\s*background:\s*color-mix\(in oklch, var\(--oa-danger\) 12%, transparent\);/);
+  it("keeps shared composer send and stop hover states specific", () => {
+    expect(appCss).toMatch(/\.composer-send-button:not\(:disabled\)\s*{[^}]*width:\s*32px;[^}]*height:\s*32px;[^}]*border-radius:\s*999px;[^}]*background:\s*var\(--vscode-button-background, var\(--oa-focus\)\);[^}]*color:\s*var\(--vscode-button-foreground, oklch\(0\.97 0\.008 250\)\);/);
+    expect(appCss).toMatch(/\.composer-send-button:hover:not\(:disabled\)\s*{\s*background:\s*var\(--vscode-button-hoverBackground, color-mix\(in oklch, var\(--oa-focus\) 82%, var\(--oa-text\)\)\);/);
+    expect(appCss).toMatch(/\.composer-stop-button:not\(:disabled\)\s*{[^}]*background:\s*transparent;/);
+    expect(appCss).toMatch(/\.composer-stop-button:hover:not\(:disabled\)\s*{\s*background:\s*color-mix\(in oklch, var\(--oa-danger\) 12%, transparent\);/);
   });
 
   it("centers composer action button icons in a stable square hit target", () => {
-    expect(appCss).toMatch(/\.composer-actions \.composer-icon-button\s*{[^}]*min-width:\s*30px;[^}]*min-height:\s*30px;[^}]*width:\s*30px;[^}]*height:\s*30px;[^}]*display:\s*grid;[^}]*place-items:\s*center;[^}]*line-height:\s*0;/);
-    expect(appCss).toMatch(/\.composer-actions \.composer-icon-button svg\s*{\s*display:\s*block;/);
+    expect(appCss).toMatch(/\.composer-actions \.composer-icon-button:not\(\.composer-send-button\)\s*{[^}]*min-width:\s*30px;[^}]*min-height:\s*30px;[^}]*width:\s*30px;[^}]*height:\s*30px;[^}]*display:\s*grid;[^}]*place-items:\s*center;[^}]*line-height:\s*0;/);
+    expect(appCss).toMatch(/\.composer-actions \.composer-icon-button:not\(\.composer-send-button\) svg\s*{\s*display:\s*block;/);
   });
 
-  it("gives the web new-task screen a restrained but clear visual hierarchy", () => {
-    expect(appCss).toMatch(/body\[data-shell="web"\] \.new-task-center\s*{[^}]*align-content:\s*center;[^}]*gap:\s*12px;[^}]*padding:\s*clamp\(12px,\s*3vh,\s*24px\) clamp\(18px,\s*8vw,\s*84px\) clamp\(16px,\s*6vh,\s*42px\);/);
-    expect(appCss).toMatch(/body\[data-shell="web"\] \.new-task-center h1\s*{[^}]*font-size:\s*20px;[^}]*font-weight:\s*500;/);
+  it("gives the shared new-task screen a restrained but clear visual hierarchy", () => {
+    expect(appCss).toMatch(/\.new-task-center\s*{[^}]*align-content:\s*center;[^}]*gap:\s*12px;[^}]*padding:\s*clamp\(12px,\s*3vh,\s*24px\) clamp\(18px,\s*8vw,\s*84px\) clamp\(16px,\s*6vh,\s*42px\);/);
+    expect(appCss).toMatch(/\.new-task-center h1\s*{[^}]*font-size:\s*20px;[^}]*font-weight:\s*500;/);
   });
 
   it("keeps the mobile new-task form visible when the software keyboard reduces the viewport", () => {
     expect(indexHtml).toMatch(/name="viewport" content="[^"]*interactive-widget=resizes-content[^"]*"/);
-    expect(appCss).toMatch(/body\[data-shell="web"\] \.new-task-center\s*{[^}]*align-content:\s*start;[^}]*padding:\s*clamp\(28px,\s*16dvh,\s*112px\) 12px 12px;/);
+    expect(appCss).toMatch(/\.new-task-center\s*{[^}]*align-content:\s*start;[^}]*padding:\s*clamp\(28px,\s*16dvh,\s*112px\) 12px 12px;/);
   });
 
   it("opens the mobile new-task slash menu below the composer instead of behind the header", () => {
@@ -287,18 +294,18 @@ describe("task list row styles", () => {
   });
 
   it("keeps new-task context menus from resizing the composer layout", () => {
-    expect(appCss).toMatch(/\.new-task-context-anchor\s*{[^}]*position:\s*relative;/);
+    expect(appCss).toMatch(/\.new-task-context-anchor\s*{[^}]*position:\s*static;/);
     expect(appCss).not.toMatch(/\.new-task-context-anchor\.context-menu-open\s*{[^}]*grid-row:\s*span 2;/);
     expect(appCss).toMatch(/\.new-task-context-menu\s*{[^}]*position:\s*absolute;[^}]*top:\s*calc\(100% \+ 6px\);/);
-    expect(appCss).toMatch(/@media \(max-height:\s*320px\)\s*{[^}]*body\[data-shell="web"\] \.new-task-center\s*{[^}]*gap:\s*6px;[^}]*padding-block:\s*12px;/);
-    expect(appCss).toMatch(/body\[data-shell="web"\] \.composer textarea,\s*body\[data-shell="web"\] \.composer-editor\s*{[^}]*min-height:\s*40px;[^}]*max-height:\s*80px;/);
+    expect(appCss).toMatch(/@media \(max-height:\s*320px\)\s*{[^}]*\.new-task-center\s*{[^}]*gap:\s*6px;[^}]*padding-block:\s*12px;/);
+    expect(appCss).toMatch(/\.composer textarea,\s*\.composer-editor\s*{[^}]*min-height:\s*40px;[^}]*max-height:\s*80px;/);
   });
 
   it("renders new-task context selectors as one quiet control group", () => {
-    expect(appCss).toMatch(/body\[data-shell="web"\] \.new-task-context-controls\s*{[^}]*width:\s*fit-content;[^}]*position:\s*relative;[^}]*border:\s*1px solid color-mix\(in oklch, var\(--oa-border\) 48%, transparent\);[^}]*border-radius:\s*999px;[^}]*background:\s*color-mix\(in oklch, var\(--oa-panel\) 72%, transparent\);/);
-    expect(appCss).toMatch(/body\[data-shell="web"\] \.new-task-context-anchor\s*{[^}]*position:\s*static;/);
-    expect(appCss).toMatch(/body\[data-shell="web"\] \.new-task-context-controls \.composer-pill\s*{[^}]*min-height:\s*30px;[^}]*border-radius:\s*999px;[^}]*padding-inline:\s*9px;/);
-    expect(appCss).toMatch(/body\[data-shell="web"\] \.new-task-context-controls \.composer-pill\[aria-expanded="true"\]\s*{[^}]*background:\s*color-mix\(in oklch, var\(--oa-text\) 9%, transparent\);[^}]*color:\s*var\(--oa-text\);/);
+    expect(appCss).toMatch(/\.new-task-context-controls\s*{[^}]*width:\s*fit-content;[^}]*position:\s*relative;[^}]*border:\s*1px solid color-mix\(in oklch, var\(--oa-border\) 48%, transparent\);[^}]*border-radius:\s*999px;[^}]*background:\s*color-mix\(in oklch, var\(--oa-panel\) 72%, transparent\);/);
+    expect(appCss).toMatch(/\.new-task-context-anchor\s*{[^}]*position:\s*static;/);
+    expect(appCss).toMatch(/\.new-task-context-controls \.composer-pill\s*{[^}]*min-height:\s*30px;[^}]*border-radius:\s*999px;[^}]*padding-inline:\s*9px;/);
+    expect(appCss).toMatch(/\.new-task-context-controls \.composer-pill\[aria-expanded="true"\]\s*{[^}]*background:\s*color-mix\(in oklch, var\(--oa-text\) 9%, transparent\);[^}]*color:\s*var\(--oa-text\);/);
   });
 
   it("gives project and agent menus enough room for readable option details", () => {
@@ -306,10 +313,10 @@ describe("task list row styles", () => {
     expect(appCss).toMatch(/\.new-task-context-anchor-project \.new-task-context-menu\s*{[^}]*width:\s*min\(360px,\s*calc\(100vw - 32px\)\);/);
     expect(appCss).toMatch(/\.new-task-context-menu > button\s*{[^}]*min-height:\s*42px;[^}]*grid-template-columns:\s*18px minmax\(0,\s*1fr\) 16px;[^}]*padding:\s*7px 9px;/);
     expect(appCss).toMatch(/\.new-task-context-menu > button small\s*{[^}]*font-size:\s*12px;[^}]*line-height:\s*1\.3;/);
-    expect(appCss).toMatch(/body\[data-shell="web"\] \.new-task-context-menu > button\[aria-checked="true"\]\s*{[^}]*background:\s*color-mix\(in oklch, var\(--oa-text\) 5%, transparent\);/);
+    expect(appCss).toMatch(/\.new-task-context-menu > button\[aria-checked="true"\]\s*{[^}]*background:\s*color-mix\(in oklch, var\(--oa-text\) 5%, transparent\);/);
     expect(appCss).toMatch(/\.composer-menu-selection\s*{[^}]*display:\s*grid;[^}]*place-items:\s*center;/);
-    expect(appCss).toMatch(/body\[data-shell="web"\] \.new-task-context-anchor-project \.new-task-context-menu > \.composer-menu-choice-compact\s*{[^}]*min-height:\s*36px;[^}]*align-items:\s*center;/);
-    expect(appCss).toMatch(/body\[data-shell="web"\] \.new-task-context-anchor-project \.new-task-context-menu,[^{]+\.new-task-context-anchor-agent \.new-task-context-menu\s*{[^}]*left:\s*50%;[^}]*right:\s*auto;[^}]*transform:\s*translateX\(-50%\);/);
+    expect(appCss).toMatch(/\.new-task-context-anchor-project \.new-task-context-menu > \.composer-menu-choice-compact\s*{[^}]*min-height:\s*36px;[^}]*align-items:\s*center;/);
+    expect(appCss).toMatch(/\.new-task-context-anchor-project \.new-task-context-menu,[^{]+\.new-task-context-anchor-agent \.new-task-context-menu\s*{[^}]*left:\s*50%;[^}]*right:\s*auto;[^}]*transform:\s*translateX\(-50%\);/);
   });
 
   it("separates project choices, folder browsing, and manual workspace entry", () => {
@@ -322,7 +329,7 @@ describe("task list row styles", () => {
   it("opens composer popovers outside the composer so file lists do not cover the textarea", () => {
     expect(appCss).toMatch(/\.composer-menu-anchor\s*{\s*display:\s*contents;/);
     expect(appCss).toMatch(/\.composer-popover\s*{[^}]*bottom:\s*calc\(100% \+ 6px\);/);
-    expect(appCss).toMatch(/body\[data-shell="web"\] \.new-task-surface \.composer-popover\s*{[^}]*top:\s*calc\(100% \+ 6px\);[^}]*bottom:\s*auto;/);
+    expect(appCss).toMatch(/\.new-task-surface \.composer-popover\s*{[^}]*top:\s*calc\(100% \+ 6px\);[^}]*bottom:\s*auto;/);
     expect(appCss).not.toMatch(/\.composer-menu-anchor\s*{\s*position:\s*relative;/);
     expect(appCss).not.toMatch(/\.composer-popover\s*{[^}]*bottom:\s*42px;/);
   });
@@ -446,21 +453,21 @@ describe("task list row styles", () => {
     expect(appCss).toMatch(/body\[data-shell="web"\] \.settings-header \.settings-title-button\s*{[^}]*min-height:\s*44px;[^}]*display:\s*inline-flex;/);
     expect(appCss).toMatch(/body\[data-shell="web"\] \.settings-tabs button\s*{[^}]*min-height:\s*44px;/);
     expect(appCss).toMatch(/body\[data-shell="web"\] \.settings-panel-title button\s*{[^}]*min-height:\s*44px;/);
-    expect(appCss).toMatch(/body\[data-shell="web"\] \.composer-pill,[^{]+\.composer-submit-pending\s*{[^}]*min-height:\s*30px;/);
-    expect(appCss).toMatch(/body\[data-shell="web"\] \.composer-controls \.composer-icon-button,[^{]+\.composer-submit-pending,[^{]+\.composer-footer > \.composer-icon-button\s*{[^}]*min-width:\s*36px;[^}]*width:\s*36px;/);
-    expect(appCss).toMatch(/body\[data-shell="web"\] \.composer-actions \.composer-icon-button,[^{]+\.composer-submit-pending,[^{]+\.composer-footer > \.composer-icon-button\s*{[^}]*min-height:\s*36px;[^}]*height:\s*36px;/);
-    expect(appCss).toMatch(/body\[data-shell="web"\] \.new-task-context-controls \.composer-pill\s*{\s*min-height:\s*30px;/);
-    expect(appCss).toMatch(/body\[data-shell="web"\] \.composer-footer\s*{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\) auto;[^}]*align-items:\s*center;[^}]*gap:\s*8px;/);
-    expect(appCss).toMatch(/body\[data-shell="web"\] \.composer-footer > \.composer-icon-button,[^{]+\.composer-footer > \.composer-submit-pending\s*{[^}]*grid-column:\s*2;[^}]*justify-self:\s*end;/);
-    expect(appCss).toMatch(/body\[data-shell="web"\] \.composer-controls\s*{[^}]*display:\s*flex;[^}]*flex-wrap:\s*nowrap;[^}]*overflow-x:\s*visible;/);
-    expect(appCss).toMatch(/body\[data-shell="web"\] \.composer-controls:has\(\.composer-popover\)\s*{[^}]*flex-wrap:\s*wrap;[^}]*overflow-x:\s*visible;/);
-    expect(appCss).toMatch(/body\[data-shell="web"\] \.composer-controls \.composer-menu-anchor,[^{]+\.composer-controls \.composer-option-anchor\s*{[^}]*display:\s*contents;[^}]*position:\s*static;/);
-    expect(appCss).toMatch(/body\[data-shell="web"\] \.composer-config-control,[^{]+\.composer-isolation-control\s*{\s*display:\s*none;/);
-    expect(appCss).toMatch(/body\[data-shell="web"\] \.composer-mobile-options-anchor\s*{[^}]*display:\s*contents;/);
-    expect(appCss).toMatch(/body\[data-shell="web"\] \.composer-mobile-options-anchor > \.composer-pill\s*{[^}]*order:\s*1;/);
-    expect(appCss).toMatch(/body\[data-shell="web"\] \.composer-config-control-anchor > \.composer-popover,[^{]+\.composer-isolation-control-anchor > \.composer-popover\s*{[^}]*order:\s*2;/);
-    expect(appCss).toMatch(/body\[data-shell="web"\] \.composer-controls \.composer-pill\s*{[^}]*width:\s*fit-content;[^}]*max-width:\s*min\(260px,\s*100%\);[^}]*flex:\s*0 1 auto;/);
-    expect(appCss).toMatch(/@media \(hover:\s*none\)\s*{[^}]*body\[data-shell="web"\] \.composer \.composer-pill:hover:not\(:disabled\)\s*{[^}]*background:\s*transparent;/);
+    expect(appCss).toMatch(/\.composer-pill,[^{]+\.composer-submit-pending\s*{[^}]*min-height:\s*30px;/);
+    expect(appCss).toMatch(/\.composer-controls \.composer-icon-button,[^{]+\.composer-submit-pending,[^{]+\.composer-footer > \.composer-icon-button\s*{[^}]*min-width:\s*36px;[^}]*width:\s*36px;/);
+    expect(appCss).toMatch(/\.composer-actions \.composer-icon-button,[^{]+\.composer-submit-pending,[^{]+\.composer-footer > \.composer-icon-button\s*{[^}]*min-height:\s*36px;[^}]*height:\s*36px;/);
+    expect(appCss).toMatch(/\.new-task-context-controls \.composer-pill\s*{\s*min-height:\s*30px;/);
+    expect(appCss).toMatch(/\.composer-footer\s*{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\) auto;[^}]*align-items:\s*center;[^}]*gap:\s*8px;/);
+    expect(appCss).toMatch(/\.composer-footer > \.composer-icon-button,[^{]+\.composer-footer > \.composer-submit-pending\s*{[^}]*grid-column:\s*2;[^}]*justify-self:\s*end;/);
+    expect(appCss).toMatch(/\.composer-controls\s*{[^}]*display:\s*flex;[^}]*flex-wrap:\s*nowrap;[^}]*overflow-x:\s*visible;/);
+    expect(appCss).toMatch(/\.composer-controls:has\(\.composer-popover\)\s*{[^}]*flex-wrap:\s*wrap;[^}]*overflow-x:\s*visible;/);
+    expect(appCss).toMatch(/\.composer-controls \.composer-menu-anchor,[^{]+\.composer-controls \.composer-option-anchor\s*{[^}]*display:\s*contents;[^}]*position:\s*static;/);
+    expect(appCss).toMatch(/\.composer-config-control,[^{]+\.composer-isolation-control\s*{\s*display:\s*none;/);
+    expect(appCss).toMatch(/\.composer-mobile-options-anchor\s*{[^}]*display:\s*contents;/);
+    expect(appCss).toMatch(/\.composer-mobile-options-anchor > \.composer-pill\s*{[^}]*order:\s*1;/);
+    expect(appCss).toMatch(/\.composer-config-control-anchor > \.composer-popover,[^{]+\.composer-isolation-control-anchor > \.composer-popover\s*{[^}]*order:\s*2;/);
+    expect(appCss).toMatch(/\.composer-controls \.composer-pill\s*{[^}]*width:\s*fit-content;[^}]*max-width:\s*min\(260px,\s*100%\);[^}]*flex:\s*0 1 auto;/);
+    expect(appCss).toMatch(/@media \(hover:\s*none\)\s*{[^}]*\.composer \.composer-pill:hover:not\(:disabled\)\s*{[^}]*background:\s*transparent;/);
     expect(appCss).not.toMatch(/\.composer-menu-anchor > \.composer-popover:not\(\.composer-file-browser-popover\)\s*{[^}]*position:\s*static;/);
     expect(appCss).not.toMatch(/\.composer-option-anchor > \.composer-popover:not\(\.composer-file-browser-popover\)\s*{[^}]*position:\s*static;/);
     expect(appCss).not.toMatch(/\.composer-mobile-options-anchor > \.composer-popover:not\(\.composer-file-browser-popover\)\s*{[^}]*position:\s*static;/);
@@ -520,14 +527,14 @@ describe("task list row styles", () => {
   });
 
   it("opens the new-task project picker toward available viewport space", () => {
-    expect(appCss).toMatch(/body\[data-shell="web"\] \.new-task-surface \.composer-file-browser-popover\s*{[^}]*top:\s*auto;[^}]*bottom:\s*calc\(100% \+ 6px\);/);
+    expect(appCss).toMatch(/\.new-task-surface \.composer-file-browser-popover\s*{[^}]*top:\s*auto;[^}]*bottom:\s*calc\(100% \+ 6px\);/);
   });
 
   it("keeps the mobile project picker viewport-anchored with uncrowded file actions", () => {
-    expect(appCss).toMatch(/@media \(max-width:\s*430px\)\s*{[^}]*body\[data-shell="web"\] \.new-task-surface \.composer-file-browser-popover\s*{[^}]*width:\s*calc\(100vw - 24px\);/);
-    expect(appCss).toMatch(/body\[data-shell="web"\] \.new-task-surface \.composer-file-browser-popover\s*{[^}]*position:\s*fixed;[^}]*top:\s*auto;[^}]*left:\s*12px;[^}]*right:\s*auto;[^}]*bottom:\s*max\(12px,\s*env\(safe-area-inset-bottom\)\);[^}]*transform:\s*none;[^}]*max-height:\s*min\(420px,\s*calc\(100dvh - 96px\)\);/);
-    expect(appCss).toMatch(/body\[data-shell="web"\] \.composer-file-row\.file\s*{[^}]*grid-template-columns:\s*18px minmax\(0,\s*1fr\);[^}]*grid-template-areas:\s*"icon label"\s*"actions actions";/);
-    expect(appCss).toMatch(/body\[data-shell="web"\] \.composer-file-row-actions\s*{[^}]*grid-area:\s*actions;[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\);/);
-    expect(appCss).toMatch(/body\[data-shell="web"\] \.composer-file-row-actions button\s*{[^}]*min-height:\s*44px;/);
+    expect(appCss).toMatch(/@media \(max-width:\s*430px\)\s*{[^}]*\.new-task-surface \.composer-file-browser-popover\s*{[^}]*width:\s*calc\(100vw - 24px\);/);
+    expect(appCss).toMatch(/\.new-task-surface \.composer-file-browser-popover\s*{[^}]*position:\s*fixed;[^}]*top:\s*auto;[^}]*left:\s*12px;[^}]*right:\s*auto;[^}]*bottom:\s*max\(12px,\s*env\(safe-area-inset-bottom\)\);[^}]*transform:\s*none;[^}]*max-height:\s*min\(420px,\s*calc\(100dvh - 96px\)\);/);
+    expect(appCss).toMatch(/\.composer-file-row\.file\s*{[^}]*grid-template-columns:\s*18px minmax\(0,\s*1fr\);[^}]*grid-template-areas:\s*"icon label"\s*"actions actions";/);
+    expect(appCss).toMatch(/\.composer-file-row-actions\s*{[^}]*grid-area:\s*actions;[^}]*grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\);/);
+    expect(appCss).toMatch(/\.composer-file-row-actions button\s*{[^}]*min-height:\s*44px;/);
   });
 });

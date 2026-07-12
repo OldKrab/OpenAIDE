@@ -236,4 +236,5 @@ pub enum AppServerEndpointPublishError {
 }
 
 #[cfg(test)]
+#[path = "app_server_process_tests.rs"]
 mod tests;

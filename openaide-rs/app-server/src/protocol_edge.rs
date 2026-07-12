@@ -275,7 +275,9 @@ impl RpcGateway {
                 &self.responder_scopes(&context),
                 now,
             );
-        let token = self.state_stream.read_token();
+        let token = self
+            .state_stream
+            .read_token_for_client(&context.client_instance_id);
         let mut snapshot = match self.snapshots.client_snapshot(
             &context,
             context.requested_surface.clone(),

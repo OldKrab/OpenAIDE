@@ -34,6 +34,7 @@ describe("state ingestion", () => {
     const event = taskEvent("root-1", "task-1", "cursor-1", "cursor-2", {
       kind: "chatItemAppended",
       taskId: taskId("task-1"),
+      revision: 2,
       item: chatItem("message-1", "Hello"),
     });
 
@@ -242,6 +243,7 @@ describe("state ingestion", () => {
     const event = taskEvent("root-1", "task-1", "cursor-1", "cursor-2", {
       kind: "chatItemChunk",
       taskId: taskId("task-1"),
+      revision: 2,
       messageId: messageId("message-1"),
       chunk: { sequence: 1, text: "lo", finalChunk: true },
     });
@@ -256,6 +258,73 @@ describe("state ingestion", () => {
     expect(result.state.snapshot.task.chat.items[0]?.status).toBe("complete");
   });
 
+  it("advances the task revision across committed append and chunk deltas", () => {
+    const snapshot = taskSnapshot("task-1");
+    if (snapshot.kind !== "task") throw new Error("expected task snapshot");
+    snapshot.task.revision = 8;
+    const state = createSubscriptionIngestionState(subscribeResult(taskScope("task-1"), snapshot, "cursor-1"), {
+      stateRootId: stateRoot("root-1"),
+    });
+    const appendPayload = {
+      kind: "chatItemAppended" as const,
+      taskId: taskId("task-1"),
+      revision: 9,
+      item: chatItem("message-1", "Hel"),
+    };
+    const appendEvent = taskEvent("root-1", "task-1", "cursor-1", "cursor-2", appendPayload);
+
+    const appended = applySubscriptionEvent(state, appendEvent);
+
+    expect(appended.kind).toBe("applied");
+    if (appended.kind !== "applied" || appended.state.snapshot.kind !== "task") {
+      throw new Error("expected applied append");
+    }
+    expect(appended.state.snapshot.task.revision).toBe(9);
+
+    const chunkPayload = {
+      kind: "chatItemChunk" as const,
+      taskId: taskId("task-1"),
+      revision: 10,
+      messageId: messageId("message-1"),
+      chunk: { sequence: 1, text: "lo", finalChunk: true },
+    };
+    const chunkEvent = taskEvent("root-1", "task-1", "cursor-2", "cursor-3", chunkPayload);
+    const chunked = applySubscriptionEvent(appended.state, chunkEvent);
+
+    expect(chunked.kind).toBe("applied");
+    if (chunked.kind !== "applied" || chunked.state.snapshot.kind !== "task") {
+      throw new Error("expected applied chunk");
+    }
+    expect(chunked.state.snapshot.task.revision).toBe(10);
+    expect(chunked.state.snapshot.task.chat.items[0]?.parts).toEqual([{ kind: "text", text: "Hello" }]);
+  });
+
+  it("does not replay a text delta already represented by the snapshot revision", () => {
+    const snapshot = taskSnapshot("task-1", [chatItem("message-1", "Hello")]);
+    if (snapshot.kind !== "task") throw new Error("expected task snapshot");
+    snapshot.task.revision = 2;
+    const state = createSubscriptionIngestionState(subscribeResult(taskScope("task-1"), snapshot, "cursor-1"), {
+      stateRootId: stateRoot("root-1"),
+    });
+    const event = taskEvent("root-1", "task-1", "cursor-1", "cursor-2", {
+      kind: "chatItemChunk",
+      taskId: taskId("task-1"),
+      revision: 2,
+      messageId: messageId("message-1"),
+      chunk: { sequence: 1, text: "lo", finalChunk: false },
+    });
+
+    const result = applySubscriptionEvent(state, event);
+
+    expect(result.kind).toBe("applied");
+    if (result.kind !== "applied" || result.state.snapshot.kind !== "task") {
+      throw new Error("expected already represented delta to advance only the cursor");
+    }
+    expect(result.snapshotChanged).toBe(false);
+    expect(result.state.snapshot.task.chat.items[0]?.parts).toEqual([{ kind: "text", text: "Hello" }]);
+    expect(result.state.cursor).toBe("cursor-2");
+  });
+
   it("requires resync when a text chunk targets a missing chat item", () => {
     const snapshot = taskSnapshot("task-1");
     const state = createSubscriptionIngestionState(subscribeResult(taskScope("task-1"), snapshot, "cursor-1"), {
@@ -264,6 +333,7 @@ describe("state ingestion", () => {
     const event = taskEvent("root-1", "task-1", "cursor-1", "cursor-2", {
       kind: "chatItemChunk",
       taskId: taskId("task-1"),
+      revision: 2,
       messageId: messageId("missing-message"),
       chunk: { sequence: 1, text: "orphan", finalChunk: false },
     });
@@ -291,6 +361,49 @@ describe("state ingestion", () => {
     expect(result.state.snapshot.kind).toBe("task");
     if (result.state.snapshot.kind !== "task") throw new Error("expected task snapshot");
     expect(result.state.snapshot.task).toBe(updatedTask);
+  });
+
+  it("does not let an older durable snapshot overwrite live history synchronization", () => {
+    const snapshot = taskSnapshot("task-1");
+    if (snapshot.kind !== "task") throw new Error("expected task snapshot");
+    snapshot.task.historySync = { state: "syncing", generation: 4 };
+    const state = createSubscriptionIngestionState(subscribeResult(taskScope("task-1"), snapshot, "cursor-1"), {
+      stateRootId: stateRoot("root-1"),
+    });
+    const olderTask = taskSnapshotBody("task-1", [chatItem("message-1", "Replayed")]);
+    const event = taskEvent("root-1", "task-1", "cursor-1", "cursor-2", {
+      kind: "taskSnapshotUpdated",
+      task: olderTask,
+    });
+
+    const result = applySubscriptionEvent(state, event);
+
+    expect(result.kind).toBe("applied");
+    if (result.kind !== "applied" || result.state.snapshot.kind !== "task") {
+      throw new Error("expected applied task snapshot update");
+    }
+    expect(result.state.snapshot.task.historySync).toEqual({ state: "syncing", generation: 4 });
+    expect(result.state.snapshot.task.chat.items).toHaveLength(1);
+  });
+
+  it("applies task history synchronization updates", () => {
+    const state = createSubscriptionIngestionState(
+      subscribeResult(taskScope("task-1"), taskSnapshot("task-1"), "cursor-1"),
+      { stateRootId: stateRoot("root-1") },
+    );
+    const event = taskEvent("root-1", "task-1", "cursor-1", "cursor-2", {
+      kind: "taskHistorySyncUpdated",
+      taskId: taskId("task-1"),
+      historySync: { state: "syncing", generation: 2 },
+    });
+
+    const result = applySubscriptionEvent(state, event);
+
+    expect(result.kind).toBe("applied");
+    if (result.kind !== "applied" || result.state.snapshot.kind !== "task") {
+      throw new Error("expected applied task history synchronization update");
+    }
+    expect(result.state.snapshot.task.historySync).toEqual({ state: "syncing", generation: 2 });
   });
 
   it("upserts task-scoped pending request updates", () => {
@@ -449,6 +562,7 @@ function taskSnapshotBody(id: string, items: ChatItem[] = []) {
     agentConfig: { state: "ready" as const, options: [] },
     agentCommands: { state: "ready" as const, commands: [] },
     sendCapability: { state: "ready" as const },
+    historySync: { state: "idle" as const, generation: 0 },
     chat: { items, hasMessages: items.length > 0 },
     pendingRequests: [],
   };

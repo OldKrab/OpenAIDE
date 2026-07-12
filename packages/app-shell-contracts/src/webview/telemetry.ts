@@ -14,6 +14,9 @@ export type WebviewTelemetryPayload = {
   chat_items?: number;
   has_active_task?: boolean;
   error_name?: string;
+  error_code?: string;
   error_message?: string;
+  agent_id?: string;
+  project_id?: string;
+  session_list_request_id?: number;
 };
-

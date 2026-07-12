@@ -89,7 +89,7 @@ impl AcpAgentConfig {
         })
     }
 
-    fn ensure_command_available(&self) -> Result<(), RuntimeError> {
+    pub(crate) fn ensure_command_available(&self) -> Result<(), RuntimeError> {
         if command_has_path_separator(&self.command) {
             let path = Path::new(&self.command);
             if !path.is_file() {

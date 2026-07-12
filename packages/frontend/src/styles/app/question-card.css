@@ -332,10 +332,10 @@
 }
 
 @media (max-width: 760px) {
-  body[data-shell="web"] .question-actions button,
-  body[data-shell="web"] .question-choice-list label,
-  body[data-shell="web"] .question-value-field > input,
-  body[data-shell="web"] .question-choice-field > select {
+  .question-actions button,
+  .question-choice-list label,
+  .question-value-field > input,
+  .question-choice-field > select {
     min-height: 36px;
   }
 }

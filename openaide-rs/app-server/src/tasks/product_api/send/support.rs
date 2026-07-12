@@ -157,7 +157,7 @@ pub(super) struct SendFingerprint {
 impl SendFingerprint {
     pub(super) fn from_request_message(message: &ComposerMessage) -> Self {
         Self {
-            text: message.text.clone().unwrap_or_default(),
+            text: normalized_message_text(message),
             attachment_handles: message
                 .attachments
                 .iter()
@@ -170,8 +170,8 @@ impl SendFingerprint {
         message: &ComposerMessage,
         attachments: &ResolvedSendAttachments,
     ) -> Result<Self, ProtocolError> {
-        let text = message.text.as_deref().unwrap_or("").to_string();
-        if text.trim().is_empty() && attachments.fingerprint_handles().is_empty() {
+        let text = normalized_message_text(message);
+        if text.is_empty() && attachments.fingerprint_handles().is_empty() {
             return Err(validation_error("message.text", "Message text is required"));
         }
         Ok(Self {
@@ -179,6 +179,10 @@ impl SendFingerprint {
             attachment_handles: attachments.fingerprint_handles(),
         })
     }
+}
+
+fn normalized_message_text(message: &ComposerMessage) -> String {
+    message.text.as_deref().unwrap_or("").trim().to_string()
 }
 
 pub(super) struct ExistingSend {

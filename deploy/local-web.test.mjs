@@ -68,73 +68,6 @@ test("refresh reuses the owned listener when its wrapper pid is dead", async (t)
   assert.equal(listener.exitCode, null);
 });
 
-test("refresh republishes configured prototypes into the static root", async (t) => {
-  const fixtureRoot = mkdtempSync(join(tmpdir(), "openaide-local-web-prototypes-"));
-  const stateRoot = join(fixtureRoot, "state");
-  const runtimeRoot = join(fixtureRoot, "runtime");
-  const staticRoot = join(fixtureRoot, "static");
-  const prototypeRoot = join(fixtureRoot, "prototypes");
-  const npmLog = join(fixtureRoot, "npm.log");
-  const pidFile = join(fixtureRoot, "dead-wrapper.pid");
-  const fakeBin = join(fixtureRoot, "bin");
-  const fakeNpm = join(fakeBin, "npm");
-  mkdirSync(fakeBin);
-  mkdirSync(prototypeRoot);
-  writeFileSync(join(prototypeRoot, "status.html"), "prototype survives refresh\n");
-  writeFileSync(fakeNpm, `#!/usr/bin/env bash\nprintf '%s\\n' "$*" >> "$OPENAIDE_TEST_NPM_LOG"\n`);
-  chmodSync(fakeNpm, 0o755);
-  writeFileSync(pidFile, "99999999\n");
-
-  const listener = spawn(process.execPath, ["-e", `
-    const net = require("node:net");
-    const server = net.createServer((socket) => socket.end());
-    server.listen(0, "127.0.0.1", () => console.log(server.address().port));
-    process.on("SIGTERM", () => server.close(() => process.exit(0)));
-  `], {
-    env: {
-      ...process.env,
-      OPENAIDE_WEB_STATE_ROOT: stateRoot,
-      OPENAIDE_WEB_RUNTIME_ROOT: runtimeRoot,
-      OPENAIDE_WEB_STATIC_ROOT: staticRoot,
-    },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  t.after(() => {
-    listener.kill("SIGTERM");
-    rmSync(fixtureRoot, { recursive: true, force: true });
-  });
-  const port = await firstOutputLine(listener);
-
-  const result = spawnSync("bash", ["deploy/local-web.sh", "refresh"], {
-    cwd: new URL("..", import.meta.url),
-    encoding: "utf8",
-    env: {
-      ...process.env,
-      PATH: `${fakeBin}:${process.env.PATH}`,
-      OPENAIDE_TEST_NPM_LOG: npmLog,
-      OPENAIDE_WEB_ROLE: "",
-      OPENAIDE_WEB_HOST: "127.0.0.1",
-      OPENAIDE_WEB_PORT: port,
-      OPENAIDE_WEB_VITE_PORT: port,
-      OPENAIDE_WEB_ALLOWED_HOSTS: "localhost,127.0.0.1",
-      OPENAIDE_WEB_STATE_ROOT: stateRoot,
-      OPENAIDE_WEB_RUNTIME_ROOT: runtimeRoot,
-      OPENAIDE_WEB_STATIC_ROOT: staticRoot,
-      OPENAIDE_WEB_PROTOTYPE_ROOT: prototypeRoot,
-      OPENAIDE_WEB_PID_FILE: pidFile,
-      OPENAIDE_WEB_LOG_FILE: join(fixtureRoot, "web.log"),
-      OPENAIDE_WEB_SKIP_BUILD: "1",
-      OPENAIDE_WEB_DAEMON: "background",
-    },
-  });
-
-  assert.equal(result.status, 0, result.stderr);
-  assert.equal(
-    readFileSync(join(staticRoot, "prototype", "status.html"), "utf8"),
-    "prototype survives refresh\n",
-  );
-});
-
 function firstOutputLine(child) {
   return new Promise((resolve, reject) => {
     let stdout = "";
@@ -216,6 +149,8 @@ test("target role uses a durable isolated systemd service", () => {
 
   assert.match(targetEnv, /^OPENAIDE_WEB_DAEMON=systemd$/m);
   assert.match(targetEnv, /^OPENAIDE_WEB_SYSTEMD_UNIT=openaide-web-target-5574$/m);
+  assert.match(targetEnv, /^OPENAIDE_WEB_PROTOTYPE_PORT=5572$/m);
+  assert.doesNotMatch(targetEnv, /OPENAIDE_WEB_PROTOTYPE_ROOT/);
 });
 
 test("driver role uses a durable isolated systemd service", () => {
@@ -224,6 +159,7 @@ test("driver role uses a durable isolated systemd service", () => {
   assert.match(driverEnv, /^OPENAIDE_WEB_ALLOWED_HOSTS=temp\.old\.dedyn\.io,localhost,127\.0\.0\.1$/m);
   assert.match(driverEnv, /^OPENAIDE_WEB_PORT=5474$/m);
   assert.match(driverEnv, /^OPENAIDE_WEB_VITE_PORT=5473$/m);
+  assert.doesNotMatch(driverEnv, /OPENAIDE_WEB_PROTOTYPE_PORT/);
   assert.match(driverEnv, /^OPENAIDE_WEB_STATE_ROOT=.*\/\.openaide-web-dev\/state$/m);
   assert.match(driverEnv, /^OPENAIDE_WEB_RUNTIME_ROOT=.*\/\.openaide-web-dev\/runtime$/m);
   assert.match(driverEnv, /^OPENAIDE_WEB_STATIC_ROOT=.*\/\.openaide-web-dev\/static-5474$/m);

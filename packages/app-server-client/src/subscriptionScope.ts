@@ -95,6 +95,7 @@ function payloadMatchesSubscriptionScope(scope: SubscriptionScope, payload: AppS
         payload.kind === "snapshotReplaced" ||
         payload.kind === "taskUpdated" ||
         payload.kind === "taskSnapshotUpdated" ||
+        payload.kind === "taskHistorySyncUpdated" ||
         payload.kind === "chatItemAppended" ||
         payload.kind === "chatItemChunk" ||
         payload.kind === "requestUpdated"

@@ -38,7 +38,15 @@ export type TaskSnapshot = {
     attachment_only: boolean;
   };
   revision: number;
+  history_sync: HistorySyncState;
 };
+
+export type HistorySyncState =
+  | { state: "idle"; generation: number }
+  | { state: "checking"; generation: number }
+  | { state: "syncing"; generation: number }
+  | { state: "updated"; generation: number }
+  | { state: "failed"; generation: number; message: string; before_send: boolean };
 
 export type TaskListResult = {
   tasks: TaskSummary[];

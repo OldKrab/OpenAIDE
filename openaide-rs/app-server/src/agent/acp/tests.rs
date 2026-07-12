@@ -1,10 +1,8 @@
 use super::*;
 use crate::agent::acp_agent_status::agent_probe_result_from_initialize;
-use crate::agent::acp_auth_method_cache::AcpAuthMethodCache;
 use crate::agent::acp_host::{
     host_request, initialize_request, read_text_file_from_host, write_text_file_from_host,
 };
-use crate::agent::acp_probe_auth_runner::AcpProbeAuthRunner;
 use crate::agent::acp_runtime_threading::close_in_parallel;
 use crate::agent::acp_session_capabilities::{
     validate_auth_method, validate_initialize_protocol, validate_session_list_capability,
@@ -59,7 +57,6 @@ use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
 #[cfg(unix)]
-use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Mutex;
 use std::thread;
@@ -304,66 +301,6 @@ fn session_update_dispatch(update: SessionUpdate) -> agent_client_protocol::Disp
             .to_untyped_message()
             .unwrap(),
     )
-}
-
-#[cfg(unix)]
-fn python3_available() -> bool {
-    Command::new("python3").arg("--version").output().is_ok()
-}
-
-#[cfg(unix)]
-fn auth_fixture_config(temp: &tempfile::TempDir) -> Option<AcpAgentConfig> {
-    if !python3_available() {
-        eprintln!("skipping ACP auth runner fixture: python3 not found");
-        return None;
-    }
-
-    let script_path = temp.path().join("auth_fixture_agent.py");
-    fs::write(
-        &script_path,
-        r#"import json
-import sys
-
-def respond(message, result):
-    sys.stdout.write(json.dumps({
-        "jsonrpc": "2.0",
-        "id": message.get("id"),
-        "result": result,
-    }) + "\n")
-    sys.stdout.flush()
-
-for line in sys.stdin:
-    message = json.loads(line)
-    method = message.get("method")
-    if method == "initialize":
-        respond(message, {
-            "protocolVersion": 1,
-            "agentCapabilities": {},
-            "authMethods": [{"id": "codex-login", "name": "Codex login"}],
-        })
-    elif method == "authenticate":
-        if message.get("params", {}).get("methodId") != "codex-login":
-            raise SystemExit(2)
-        respond(message, {})
-        break
-    else:
-        sys.stdout.write(json.dumps({
-            "jsonrpc": "2.0",
-            "id": message.get("id"),
-            "error": {"code": -32601, "message": "unknown method"},
-        }) + "\n")
-        sys.stdout.flush()
-"#,
-    )
-    .expect("auth fixture agent script");
-
-    Some(AcpAgentConfig {
-        agent_id: "codex".to_string(),
-        command: "python3".to_string(),
-        args: vec![script_path.to_string_lossy().to_string()],
-        env: Vec::new(),
-        secret_env: Vec::new(),
-    })
 }
 
 #[test]
@@ -822,96 +759,6 @@ fn validate_auth_method_accepts_agent_methods_only() {
 }
 
 #[test]
-fn authenticate_rejects_blank_method_without_starting_agent() {
-    let cache = AcpAuthMethodCache::default();
-    let runner = AcpProbeAuthRunner::new(
-        AgentRegistry::codex(AcpAgentConfig {
-            agent_id: "codex".to_string(),
-            command: "definitely-missing-openaide-agent".to_string(),
-            args: Vec::new(),
-            env: Vec::new(),
-            secret_env: Vec::new(),
-        }),
-        HostBridge::disabled(),
-        cache.clone(),
-    );
-
-    let error = runner
-        .authenticate_with_timeout(
-            AgentAuthenticateRequest {
-                agent_id: "codex".to_string(),
-                method_id: "  ".to_string(),
-            },
-            Duration::from_millis(10),
-        )
-        .unwrap_err()
-        .to_string();
-
-    assert_eq!(error, "invalid params: method_id");
-    assert!(cache.preferred_method().is_none());
-}
-
-#[cfg(unix)]
-#[test]
-fn authenticate_records_preferred_method_for_later_session_runners() {
-    let temp = tempfile::TempDir::new().expect("temp dir");
-    let Some(config) = auth_fixture_config(&temp) else {
-        return;
-    };
-    let cache = AcpAuthMethodCache::default();
-    let runner = AcpProbeAuthRunner::new(
-        AgentRegistry::codex(config),
-        HostBridge::disabled(),
-        cache.clone(),
-    );
-
-    let result = runner
-        .authenticate_with_timeout(
-            AgentAuthenticateRequest {
-                agent_id: "codex".to_string(),
-                method_id: "codex-login".to_string(),
-            },
-            Duration::from_secs(2),
-        )
-        .expect("authenticate");
-
-    assert_eq!(result.method_id, "codex-login");
-    assert_eq!(cache.preferred_method().as_deref(), Some("codex-login"));
-}
-
-#[cfg(unix)]
-#[test]
-fn authenticate_timeout_reports_stable_error_text() {
-    let runner = AcpProbeAuthRunner::new(
-        AgentRegistry::codex(AcpAgentConfig {
-            agent_id: "codex".to_string(),
-            command: "sh".to_string(),
-            args: vec!["-c".to_string(), "sleep 30".to_string()],
-            env: Vec::new(),
-            secret_env: Vec::new(),
-        }),
-        HostBridge::disabled(),
-        AcpAuthMethodCache::default(),
-    );
-
-    let error = runner
-        .authenticate_with_timeout(
-            AgentAuthenticateRequest {
-                agent_id: "codex".to_string(),
-                method_id: "codex-login".to_string(),
-            },
-            Duration::from_millis(20),
-        )
-        .unwrap_err()
-        .to_string();
-
-    assert!(
-        error.contains("ACP Agent authentication timed out"),
-        "{error}"
-    );
-}
-
-#[test]
 fn session_list_capability_requires_explicit_support() {
     let without_list = InitializeResponse::new(ProtocolVersion::V1);
     assert!(matches!(
@@ -941,7 +788,7 @@ fn load_session_capability_requires_explicit_support() {
 
 #[test]
 fn replayed_session_updates_are_normalized_as_chat_history() {
-    let messages = ReplayProjection::new().project(vec![
+    let messages = ReplayProjection::new("session-replay").project(vec![
         SessionUpdate::UserMessageChunk(ContentChunk::new(ContentBlock::Text(TextContent::new(
             "Prior user question",
         )))),
@@ -1007,6 +854,23 @@ fn replayed_session_updates_are_normalized_as_chat_history() {
         }
         other => panic!("expected agent replay, got {other:?}"),
     }
+}
+
+#[test]
+fn replayed_text_without_source_ids_has_restart_stable_identity() {
+    let updates = || {
+        vec![SessionUpdate::AgentMessageChunk(ContentChunk::new(
+            ContentBlock::Text(TextContent::new("Stable replay")),
+        ))]
+    };
+
+    let first = ReplayProjection::new("session-stable").project(updates());
+    let second = ReplayProjection::new("session-stable").project(updates());
+
+    assert_eq!(first[0].identity(), second[0].identity());
+    assert!(first[0]
+        .identity()
+        .starts_with("acp:session-stable:replay:agent:"));
 }
 
 #[test]

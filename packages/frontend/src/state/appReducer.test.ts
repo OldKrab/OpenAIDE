@@ -450,6 +450,28 @@ describe("app reducer composer state", () => {
     expect(state.taskInputs.task_1.error).toBeUndefined();
   });
 
+  it("clears a stale opened-task draft that matches committed chat", () => {
+    let state = createInitialState();
+    state = { ...state, activeTaskId: "task_1" };
+    state = appReducer(state, { type: "taskInput:prompt", taskId: "task_1", prompt: "Explain this screenshot" });
+    state = appReducer(state, {
+      type: "taskInput:attachment:add",
+      taskId: "task_1",
+      attachment: { kind: "file", label: "screenshot.png", path: "/workspace/screenshot.png" },
+    });
+
+    state = appReducer(state, {
+      type: "snapshot",
+      intent: "open",
+      snapshot: snapshot("task_1", [userMessage("user_1", "Explain this screenshot", 1)], 2),
+    });
+
+    expect(state.taskInputs.task_1.prompt).toBe("");
+    expect(state.taskInputs.task_1.context).toHaveLength(0);
+    expect(state.taskInputs.task_1.pending).toBeUndefined();
+    expect(state.taskInputs.task_1.error).toBeUndefined();
+  });
+
   it("keeps submitted follow-up visible as pending until committed chat arrives", () => {
     let state = createInitialState();
     state = { ...state, activeTaskId: "task_1" };
@@ -833,6 +855,27 @@ describe("app reducer composer state", () => {
     ]);
   });
 
+  it("drops retained rows when synchronized history is authoritatively replaced", () => {
+    let state = createInitialState();
+    const checking = snapshot("task_1", [chatMessage("old-tail", "stale tail")]);
+    checking.history_sync = { state: "checking", generation: 2 };
+    state = appReducer(state, { type: "snapshot", intent: "open", snapshot: checking });
+    state = appReducer(state, {
+      type: "chatPage:result",
+      taskId: "task_1",
+      page: page("task_1", [chatMessage("old-page", "stale page")], false),
+    });
+
+    const replacement = snapshot("task_1", [chatMessage("native-row", "native history")], 2);
+    replacement.history_sync = { state: "checking", generation: 2 };
+    state = appReducer(state, { type: "snapshot", intent: "refresh", snapshot: replacement });
+
+    expect(state.chatPages.task_1).toBeUndefined();
+    expect(renderedChat(state.snapshot!, state.chatPages.task_1).items.map((item) => item.message_id)).toEqual([
+      "native-row",
+    ]);
+  });
+
   it("restores the retained Chat window and scroll position after switching Tasks", () => {
     let state = createInitialState();
     state = appReducer(state, {
@@ -1165,6 +1208,7 @@ function snapshot(taskId: string, items: ChatMessage[] = [], revision = 1): Task
       end_cursor: items.at(-1)?.cursor,
     },
     permissions: [],
+    history_sync: { state: "idle", generation: 0 },
     send_capability: { state: "ready", attachment_only: true },
     settings_summary: {
       agent_id: "codex",

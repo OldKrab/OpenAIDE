@@ -24,7 +24,7 @@ export function groupedTasks(
   if (options.includeProjectId && !groups.has(options.includeProjectId)) {
     groups.set(options.includeProjectId, {
       key: options.includeProjectId,
-      label: projectLabels.get(options.includeProjectId) ?? "Current project",
+      label: projectLabels.get(options.includeProjectId) ?? "Current workspace",
       tasks: [],
     });
   }
@@ -32,7 +32,7 @@ export function groupedTasks(
     const key = task.project_id ?? (task.workspace_root || "unknown");
     const label = task.project_label
       ?? (task.project_id ? projectLabels.get(task.project_id) : undefined)
-      ?? (task.workspace_root || "Other");
+      ?? (task.workspace_root || "Other workspace");
     const group = groups.get(key) ?? { key, label, tasks: [] };
     group.tasks.push(task);
     groups.set(key, group);

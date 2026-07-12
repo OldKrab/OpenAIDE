@@ -4,13 +4,20 @@ import { handleWebviewMessage } from "./messaging";
 import { TaskViewProvider } from "./navigationProvider";
 
 const vscodeMocks = vi.hoisted(() => ({
+  asExternalUri: vi.fn(async (uri: { toString(): string }) => ({
+    toString: () => uri.toString(),
+  })),
   createWebviewPanel: vi.fn(),
   panels: [] as Array<ReturnType<typeof createPanelMock>>,
 }));
 
 vi.mock("vscode", () => ({
+  env: {
+    asExternalUri: vscodeMocks.asExternalUri,
+  },
   Uri: {
     joinPath: (base: { fsPath: string }, ...parts: string[]) => ({ fsPath: [base.fsPath, ...parts].join("/") }),
+    parse: (value: string) => ({ toString: () => value }),
   },
   ViewColumn: { Active: 1 },
   window: {
@@ -25,8 +32,16 @@ vi.mock("./messaging", () => ({
   handleWebviewMessage: vi.fn(),
 }));
 
+vi.mock("../workspace/roots", () => ({
+  currentWorkspaceRoot: () => ({ label: "OpenAIDE", path: "/workspace/OpenAIDE", projectId: "project-current" }),
+}));
+
 describe("VS Code webview surfaces", () => {
   beforeEach(() => {
+    vscodeMocks.asExternalUri.mockReset();
+    vscodeMocks.asExternalUri.mockImplementation(async (uri: { toString(): string }) => ({
+      toString: () => uri.toString(),
+    }));
     vscodeMocks.panels.length = 0;
     vscodeMocks.createWebviewPanel.mockReset();
     vi.mocked(handleWebviewMessage).mockReset();
@@ -56,7 +71,8 @@ describe("VS Code webview surfaces", () => {
 
     expect(view.webview.html).toContain('data-surface="navigation"');
     expect(view.webview.html).toContain('data-task-id=""');
-    expect(view.webview.html).toContain('data-composer-submit-shortcut="mod_enter"');
+    expect(view.webview.html).toContain('data-project-id="project-current"');
+    expect(view.webview.html).toContain('data-composer-submit-shortcut="enter"');
     expect(view.webview.html).not.toContain('data-surface="task"');
     expect(view.webview.html).not.toContain('data-surface="settings"');
   });
@@ -77,7 +93,8 @@ describe("VS Code webview surfaces", () => {
     );
     expect(vscodeMocks.panels[0].webview.html).toContain('data-surface="task"');
     expect(vscodeMocks.panels[0].webview.html).toContain('data-task-id=""');
-    expect(vscodeMocks.panels[0].webview.html).toContain('data-composer-submit-shortcut="mod_enter"');
+    expect(vscodeMocks.panels[0].webview.html).toContain('data-project-id="project-current"');
+    expect(vscodeMocks.panels[0].webview.html).toContain('data-composer-submit-shortcut="enter"');
 
     expect(vscodeMocks.createWebviewPanel).toHaveBeenNthCalledWith(
       2,
@@ -117,6 +134,60 @@ describe("VS Code webview surfaces", () => {
     expect(panel.webview.html).toContain('data-surface="task"');
     expect(panel.webview.html).toContain("&quot;endpointUrl&quot;:&quot;http://127.0.0.1:1234/probe&quot;");
     expect(panel.webview.html).toContain("&quot;authToken&quot;:&quot;token-1&quot;");
+  });
+
+  it("forwards the remote App Server endpoint before bootstrapping an editor webview", async () => {
+    vscodeMocks.asExternalUri.mockResolvedValue({
+      toString: () => "http://127.0.0.1:54321/probe",
+    });
+    const manager = new TaskEditorManager(
+      context(),
+      runtime(),
+      runtimeProcess(Promise.resolve({
+        kind: "localHttp",
+        endpointUrl: "http://127.0.0.1:1234/probe",
+        authToken: "token-1",
+      })),
+      logger(),
+    );
+
+    manager.openNewTask();
+    await settle();
+
+    expect(vscodeMocks.asExternalUri).toHaveBeenCalledWith(
+      expect.objectContaining({ toString: expect.any(Function) }),
+    );
+    expect(vscodeMocks.panels[0].webview.html).toContain(
+      "&quot;endpointUrl&quot;:&quot;http://127.0.0.1:54321/probe&quot;",
+    );
+    expect(vscodeMocks.panels[0].webview.html).not.toContain(
+      "&quot;endpointUrl&quot;:&quot;http://127.0.0.1:1234/probe&quot;",
+    );
+  });
+
+  it("forwards the remote App Server endpoint before bootstrapping task navigation", async () => {
+    vscodeMocks.asExternalUri.mockResolvedValue({
+      toString: () => "http://127.0.0.1:54321/probe",
+    });
+    const view = createViewMock();
+    const provider = new TaskViewProvider(
+      context(),
+      runtime(),
+      runtimeProcess(Promise.resolve({
+        kind: "localHttp",
+        endpointUrl: "http://127.0.0.1:1234/probe",
+        authToken: "token-1",
+      })),
+      logger(),
+      surfaces(),
+    );
+
+    provider.resolveWebviewView(view as never);
+    await settle();
+
+    expect(view.webview.html).toContain(
+      "&quot;endpointUrl&quot;:&quot;http://127.0.0.1:54321/probe&quot;",
+    );
   });
 
   it("renders without App Server connection when handoff fails", async () => {

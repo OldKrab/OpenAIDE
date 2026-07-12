@@ -202,6 +202,60 @@ fn streamed_agent_text_chunks_are_persisted_as_one_message_per_contiguous_run() 
 }
 
 #[test]
+fn source_message_id_preserves_one_agent_message_across_tool_activity() {
+    let tmp = TempDir::new().unwrap();
+    let service = TaskService::new(
+        Store::open(tmp.path().join("store")).unwrap(),
+        Arc::new(MessageIdSpanningToolAgent),
+    );
+
+    let snapshot = service
+        .create(TaskCreateParams {
+            mode: TaskCreateMode::PromptStart,
+            title: "Message spanning tool activity".to_string(),
+            workspace_root: tmp.path().to_string_lossy().to_string(),
+            selected_agent_id: "codex".to_string(),
+            selected_agent_label: None,
+            selected_isolation: IsolationKind::Local,
+            prompt_text: Some("respond around a tool call".to_string()),
+            external_session_id: None,
+            model_id: None,
+            config_options: None,
+            context: Vec::new(),
+        })
+        .unwrap();
+    let task_id = snapshot.task.task_id;
+
+    wait_until(|| {
+        service
+            .snapshot(TaskSnapshotParams {
+                task_id: task_id.clone(),
+                tail_limit: 100,
+            })
+            .map(|snapshot| snapshot.task.status == TaskStatus::Inactive)
+            .unwrap_or(false)
+    });
+
+    let snapshot = service
+        .snapshot(TaskSnapshotParams {
+            task_id,
+            tail_limit: 100,
+        })
+        .unwrap();
+    let agent_texts = snapshot
+        .chat
+        .items
+        .iter()
+        .filter_map(|item| match &item.message {
+            NormalizedMessage::AgentText { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(agent_texts, vec!["Before after."]);
+}
+
+#[test]
 fn permission_requests_split_streamed_agent_text_runs() {
     let tmp = TempDir::new().unwrap();
     let service = TaskService::new(

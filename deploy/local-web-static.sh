@@ -18,23 +18,4 @@ validate_static_root() {
     exit 2
   fi
 
-  if [[ -n "$prototype_root" ]]; then
-    if [[ "$prototype_root" == "$resolved_static_root" || "$prototype_root" == "$resolved_static_root/"* || "$resolved_static_root" == "$prototype_root/"* ]]; then
-      echo "Refusing overlapping prototype and static roots: $prototype_root and $resolved_static_root" >&2
-      exit 2
-    fi
-  fi
-}
-
-publish_prototypes() {
-  if [[ -z "$prototype_root" ]]; then
-    return
-  fi
-  if [[ ! -d "$prototype_root" ]]; then
-    echo "Configured prototype root does not exist: $prototype_root" >&2
-    exit 2
-  fi
-
-  mkdir -p "$static_root/prototype"
-  cp -R "$prototype_root"/. "$static_root/prototype"/
 }

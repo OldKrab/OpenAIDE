@@ -220,4 +220,5 @@ fn host_error_to_runtime(error: RpcError) -> RuntimeError {
 }
 
 #[cfg(test)]
+#[path = "host_tests.rs"]
 mod tests;

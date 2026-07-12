@@ -13,6 +13,8 @@ use std::path::{Path, PathBuf};
 #[cfg(test)]
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::Arc;
+#[cfg(test)]
+use std::sync::Mutex;
 
 use crate::protocol::errors::RuntimeError;
 use crate::storage_runtime::{RecoveryClassification, StorageOpenGuard};
@@ -34,6 +36,8 @@ struct StoreInner {
     crash_before_next_task_write: AtomicBool,
     #[cfg(test)]
     message_file_write_count: AtomicUsize,
+    #[cfg(test)]
+    after_next_task_snapshot_read: Mutex<Option<Box<dyn FnOnce() + Send>>>,
 }
 
 impl From<StoreOpenError> for RuntimeError {
@@ -61,6 +65,8 @@ impl Store {
                 crash_before_next_task_write: AtomicBool::new(false),
                 #[cfg(test)]
                 message_file_write_count: AtomicUsize::new(0),
+                #[cfg(test)]
+                after_next_task_snapshot_read: Mutex::new(None),
             }),
         })
     }
@@ -122,6 +128,31 @@ impl Store {
     #[cfg(test)]
     pub(crate) fn message_file_write_count_for_test(&self) -> usize {
         self.inner.message_file_write_count.load(Ordering::SeqCst)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn after_next_task_snapshot_read_for_test(
+        &self,
+        hook: impl FnOnce() + Send + 'static,
+    ) {
+        *self
+            .inner
+            .after_next_task_snapshot_read
+            .lock()
+            .expect("Task snapshot hook poisoned") = Some(Box::new(hook));
+    }
+
+    #[cfg(test)]
+    pub(crate) fn run_after_task_snapshot_read_hook_for_test(&self) {
+        let hook = self
+            .inner
+            .after_next_task_snapshot_read
+            .lock()
+            .expect("Task snapshot hook poisoned")
+            .take();
+        if let Some(hook) = hook {
+            hook();
+        }
     }
 }
 

@@ -80,10 +80,10 @@ export function ComposerControls({
         {openMenu === "add" ? (
           <Popover label="Add context">
             <MenuButton
-              description="Browse files and images in this project."
+              description="Browse files and images in this workspace."
               disabled={!fileBrowser}
               icon={<Paperclip size={13} />}
-              label="Project files"
+              label="Workspace files"
               onClick={() => {
                 if (fileBrowser) setOpenMenu("files");
               }}
@@ -107,7 +107,7 @@ export function ComposerControls({
           </Popover>
         ) : null}
         {openMenu === "files" && fileBrowser ? (
-          <Popover className="composer-file-browser-popover" label="Project files">
+          <Popover className="composer-file-browser-popover" label="Workspace files">
             <ComposerFileBrowser browser={fileBrowser} onAttached={() => setOpenMenu(undefined)} />
           </Popover>
         ) : null}

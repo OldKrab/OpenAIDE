@@ -18,7 +18,7 @@
   max-height: min(320px, calc(100dvh - 24px));
 }
 
-body[data-shell="web"] .new-task-surface .composer-file-browser-popover {
+.new-task-surface .composer-file-browser-popover {
   top: auto;
   bottom: calc(100% + 6px);
 }
@@ -71,8 +71,8 @@ body[data-shell="web"] .new-task-surface .composer-file-browser-popover {
 }
 
 @media (max-width: 430px) {
-  body[data-shell="web"] .composer-file-browser-popover,
-  body[data-shell="web"] .new-task-surface .composer-file-browser-popover {
+  .composer-file-browser-popover,
+  .new-task-surface .composer-file-browser-popover {
     width: calc(100vw - 24px);
     position: fixed;
     top: auto;
@@ -83,7 +83,7 @@ body[data-shell="web"] .new-task-surface .composer-file-browser-popover {
     max-height: min(420px, calc(100dvh - 96px));
   }
 
-  body[data-shell="web"] .composer-file-row.file {
+  .composer-file-row.file {
     grid-template-columns: 18px minmax(0, 1fr);
     grid-template-areas:
       "icon label"
@@ -93,25 +93,25 @@ body[data-shell="web"] .new-task-surface .composer-file-browser-popover {
     padding-block: 7px;
   }
 
-  body[data-shell="web"] .composer-file-row.file > svg {
+  .composer-file-row.file > svg {
     grid-area: icon;
     margin-top: 4px;
   }
 
-  body[data-shell="web"] .composer-file-row.file > span {
+  .composer-file-row.file > span {
     grid-area: label;
     min-width: 0;
     overflow-wrap: anywhere;
   }
 
-  body[data-shell="web"] .composer-file-row-actions {
+  .composer-file-row-actions {
     grid-area: actions;
     grid-auto-flow: row;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 6px;
   }
 
-  body[data-shell="web"] .composer-file-row-actions button {
+  .composer-file-row-actions button {
     min-height: 44px;
   }
 }

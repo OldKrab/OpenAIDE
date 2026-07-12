@@ -85,6 +85,7 @@ export type TaskCallbacks = {
     source?: "agent" | "appServer",
   ) => void;
   respondToQuestion: (requestId: string, response: ElicitationResponse) => void;
+  retryHistory: () => void;
   sendPrompt: (prompt?: string) => void;
   selectConfigOption: (configId: string, value: string) => void;
 };

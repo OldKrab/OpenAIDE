@@ -32,7 +32,7 @@ pub(super) fn read_http_request(
             .split(',')
             .any(|item| item.trim() == "text/event-stream")
     });
-    let content_length = content_length(&headers)?;
+    let content_length = content_length(&headers, &method)?;
     if content_length > MAX_BODY_BYTES {
         return Err(LocalHttpProbeListenerError::MalformedRequest(
             "body is too large",
@@ -181,10 +181,18 @@ fn request_method(headers: &str) -> Result<String, LocalHttpProbeListenerError> 
     Ok(method.to_string())
 }
 
-fn content_length(headers: &str) -> Result<usize, LocalHttpProbeListenerError> {
-    let value = header_value(headers, "content-length").ok_or(
-        LocalHttpProbeListenerError::MalformedRequest("missing Content-Length"),
-    )?;
+fn content_length(headers: &str, method: &str) -> Result<usize, LocalHttpProbeListenerError> {
+    let Some(value) = header_value(headers, "content-length") else {
+        // Browser CORS preflights have no body and are not required to carry a
+        // Content-Length header. Protocol POST requests remain strictly framed.
+        return if method == "OPTIONS" {
+            Ok(0)
+        } else {
+            Err(LocalHttpProbeListenerError::MalformedRequest(
+                "missing Content-Length",
+            ))
+        };
+    };
     value
         .parse::<usize>()
         .map_err(|_| LocalHttpProbeListenerError::MalformedRequest("invalid Content-Length"))

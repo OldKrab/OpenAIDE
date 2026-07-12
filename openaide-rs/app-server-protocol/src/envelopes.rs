@@ -104,4 +104,5 @@ impl ResponseMeta {
 }
 
 #[cfg(test)]
+#[path = "envelopes_tests.rs"]
 mod tests;

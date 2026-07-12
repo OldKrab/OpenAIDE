@@ -142,23 +142,28 @@
   display: grid;
   align-content: center;
   justify-items: center;
-  gap: 10px;
-  padding: clamp(16px, 5vh, 36px) clamp(18px, 8vw, 84px) clamp(20px, 8vh, 54px);
+  gap: 12px;
+  padding: clamp(12px, 3vh, 24px) clamp(18px, 8vw, 84px) clamp(16px, 6vh, 42px);
 }
 
 .new-task-context-controls {
   min-width: 0;
-  width: min(760px, 100%);
+  width: fit-content;
+  position: relative;
+  border: 1px solid color-mix(in oklch, var(--oa-border) 48%, transparent);
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--oa-panel) 72%, transparent);
   display: grid;
   grid-template-columns: repeat(2, minmax(0, max-content));
   justify-content: center;
   align-items: start;
-  gap: 8px;
+  gap: 2px;
+  padding: 2px;
 }
 
 .new-task-context-anchor {
   min-width: 0;
-  position: relative;
+  position: static;
   display: grid;
   justify-items: center;
 }
@@ -280,27 +285,7 @@
   font-size: 12px;
 }
 
-body[data-shell="web"] .new-task-center {
-  align-content: center;
-  gap: 12px;
-  padding: clamp(12px, 3vh, 24px) clamp(18px, 8vw, 84px) clamp(16px, 6vh, 42px);
-}
-
-body[data-shell="web"] .new-task-context-controls {
-  width: fit-content;
-  position: relative;
-  border: 1px solid color-mix(in oklch, var(--oa-border) 48%, transparent);
-  border-radius: 999px;
-  background: color-mix(in oklch, var(--oa-panel) 72%, transparent);
-  gap: 2px;
-  padding: 2px;
-}
-
-body[data-shell="web"] .new-task-context-anchor {
-  position: static;
-}
-
-body[data-shell="web"] .new-task-context-controls .composer-pill {
+.new-task-context-controls .composer-pill {
   min-height: 30px;
   border: 0;
   border-radius: 999px;
@@ -312,12 +297,12 @@ body[data-shell="web"] .new-task-context-controls .composer-pill {
   font-weight: 500;
 }
 
-body[data-shell="web"] .new-task-context-controls .composer-pill:hover:not(:disabled) {
+.new-task-context-controls .composer-pill:hover:not(:disabled) {
   background: color-mix(in oklch, var(--oa-text) 6%, transparent);
   color: var(--oa-text);
 }
 
-body[data-shell="web"] .new-task-context-controls .composer-pill[aria-expanded="true"] {
+.new-task-context-controls .composer-pill[aria-expanded="true"] {
   background: color-mix(in oklch, var(--oa-text) 9%, transparent);
   color: var(--oa-text);
 }

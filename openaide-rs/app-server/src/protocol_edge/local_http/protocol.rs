@@ -293,4 +293,5 @@ fn wire_value(message: WireMessage) -> Value {
 }
 
 #[cfg(test)]
+#[path = "protocol_tests.rs"]
 mod tests;

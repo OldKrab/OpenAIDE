@@ -11,7 +11,10 @@ use super::TaskProductApi;
 
 pub(super) enum OpenedAgentSession<'a> {
     Started(TaskSessionStartGuard<'a>),
-    Loaded(TaskSessionStartGuard<'a>),
+    Loaded {
+        guard: TaskSessionStartGuard<'a>,
+        replayed_messages: Vec<crate::protocol::model::NormalizedMessage>,
+    },
     Resumed(AgentSession),
 }
 
@@ -19,7 +22,7 @@ impl OpenedAgentSession<'_> {
     pub(super) fn session(&self) -> &AgentSession {
         match self {
             OpenedAgentSession::Started(guard) => guard.session(),
-            OpenedAgentSession::Loaded(guard) => guard.session(),
+            OpenedAgentSession::Loaded { guard, .. } => guard.session(),
             OpenedAgentSession::Resumed(session) => session,
         }
     }
@@ -27,8 +30,17 @@ impl OpenedAgentSession<'_> {
     pub(super) fn commit(self) -> AgentSession {
         match self {
             OpenedAgentSession::Started(guard) => guard.commit(),
-            OpenedAgentSession::Loaded(guard) => guard.commit(),
+            OpenedAgentSession::Loaded { guard, .. } => guard.commit(),
             OpenedAgentSession::Resumed(session) => session,
+        }
+    }
+
+    pub(super) fn replayed_messages(&self) -> &[crate::protocol::model::NormalizedMessage] {
+        match self {
+            OpenedAgentSession::Loaded {
+                replayed_messages, ..
+            } => replayed_messages,
+            _ => &[],
         }
     }
 }
@@ -69,11 +81,9 @@ impl TaskProductApi {
                         cancellation: cancellation.clone(),
                         secret_resolver: Some(self.task_secret_resolver(&task.task_id)),
                     })
-                    .map(|loaded| {
-                        OpenedAgentSession::Loaded(TaskSessionStartGuard::new(
-                            &self.agent_gateway,
-                            loaded.session,
-                        ))
+                    .map(|loaded| OpenedAgentSession::Loaded {
+                        guard: TaskSessionStartGuard::new(&self.agent_gateway, loaded.session),
+                        replayed_messages: loaded.replayed_messages,
                     })
                     .or_else(|error| {
                         if is_restart_load_start_gap(&error) {

@@ -112,7 +112,7 @@ pub(super) async fn load_active_session(
         .unwrap_or_default();
     let response = response?;
     let response_options = response.config_options.clone().unwrap_or_default();
-    let active_response = NewSessionResponse::new(session_id)
+    let active_response = NewSessionResponse::new(session_id.clone())
         .modes(response.modes)
         .config_options(response.config_options)
         .meta(response.meta);
@@ -120,7 +120,7 @@ pub(super) async fn load_active_session(
         .attach_session(active_response, Vec::new())
         .map_err(acp_error)?;
     let replayed_command_catalog = latest_command_catalog(&replayed_updates);
-    let replayed_messages = ReplayProjection::new().project(replayed_updates);
+    let replayed_messages = ReplayProjection::new(session_id.to_string()).project(replayed_updates);
     Ok((
         active_session,
         normalize_config_options(agent_id, response_options),

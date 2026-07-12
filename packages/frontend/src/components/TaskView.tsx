@@ -10,11 +10,9 @@ import { Composer } from "./Composer";
 import { TaskHeader } from "./TaskHeader";
 import {
   chatFollowModeForPosition,
-  chatItemsThroughPresentationBarrier,
   initialTaskScrollTop,
   scrollTopAfterPrependedContent,
   scrollTopForGeneratedContent,
-  presentationNeedsImmediateFlush,
   taskComposerAvailability,
 } from "./TaskViewModel";
 import { taskWorkingStatusLabel, workspaceLabel } from "./taskSurfaceHelpers";
@@ -32,7 +30,6 @@ import { appServerAttachmentHandles } from "../state/composerOptions";
 
 export {
   chatFollowModeForPosition,
-  chatItemsThroughPresentationBarrier,
   initialTaskScrollTop,
   scrollTopAfterPrependedContent,
   scrollTopForGeneratedContent,
@@ -78,6 +75,7 @@ export function TaskView({
   onQuestionRespond,
   onRevealAttachment,
   onRemoveAttachment,
+  onRetryHistory,
   onRestoreTask,
   onSendPrompt,
   onSelectConfigOption,
@@ -89,6 +87,7 @@ export function TaskView({
   taskInput,
   toolDetails,
   submitShortcut,
+  showWorkspaceContext = true,
 }: {
   activeTask?: TaskSummary;
   appServerPermissionRequests: AppState["appServerPermissionRequests"];
@@ -110,6 +109,7 @@ export function TaskView({
   onQuestionRespond?: (requestId: string, response: ElicitationResponse) => void;
   onRevealAttachment: (attachmentId: string) => Promise<void> | void;
   onRemoveAttachment: (attachmentId: string) => void;
+  onRetryHistory?: () => void;
   onRestoreTask?: (taskId: string) => void;
   onSendPrompt: (prompt?: string) => void;
   onSelectConfigOption: (configId: string, value: string) => void;
@@ -121,6 +121,7 @@ export function TaskView({
   taskInput: TaskComposerInput;
   toolDetails: AppState["toolDetails"];
   submitShortcut: AppPreferencesRecord["composer_submit_shortcut"];
+  showWorkspaceContext?: boolean;
 }) {
   const inputPending = taskInput.pending !== undefined;
   const chat = renderedChat(snapshot, chatPageState);
@@ -133,19 +134,6 @@ export function TaskView({
     appServerQuestionRequests,
     snapshot.task.task_id,
   );
-  const [presentingMessageIds, setPresentingMessageIds] = useState<Set<string>>(() => new Set());
-  const onPresentationStateChange = useCallback((messageId: string, presenting: boolean) => {
-    setPresentingMessageIds((current) => {
-      if (current.has(messageId) === presenting) return current;
-      const next = new Set(current);
-      if (presenting) next.add(messageId);
-      else next.delete(messageId);
-      return next;
-    });
-  }, []);
-  useEffect(() => setPresentingMessageIds(new Set()), [snapshot.task.task_id]);
-  const presentedChatItems = chatItemsThroughPresentationBarrier(chatItems, presentingMessageIds);
-  const forcePresentationImmediate = presentationNeedsImmediateFlush(chatItems, presentingMessageIds);
   const preparationBlocked = chatItems.some((item) => item.message_id === "app-server-preparation");
   const turnBusy = snapshot.task.status === "active";
   const composerAvailability = taskComposerAvailability({
@@ -159,7 +147,24 @@ export function TaskView({
   const attachmentsSendable = taskInput.context.length === 0
     || appServerAttachmentHandles(taskInput.context) !== undefined;
   const canSend = !composerAvailability.sendDisabled && attachmentsSendable;
-  const workingLabel = taskWorkingStatusLabel(chatItems, snapshot.task.status, inputPending);
+  const [showHistoryUpdated, setShowHistoryUpdated] = useState(false);
+  useEffect(() => {
+    if (snapshot.history_sync.state !== "updated") {
+      setShowHistoryUpdated(false);
+      return undefined;
+    }
+    setShowHistoryUpdated(true);
+    const timer = window.setTimeout(() => setShowHistoryUpdated(false), 2_000);
+    return () => window.clearTimeout(timer);
+  }, [snapshot.history_sync.state]);
+  const workingLabel = taskWorkingStatusLabel(
+    chatItems,
+    snapshot.task.status,
+    inputPending,
+    snapshot.history_sync.state === "updated" && !showHistoryUpdated
+      ? { state: "idle", generation: snapshot.history_sync.generation }
+      : snapshot.history_sync,
+  );
   const taskSelection = {
     agentId: snapshot.task.agent_id,
     agentLabel: activeTask?.agent_name ?? snapshot.task.agent_name,
@@ -171,12 +176,30 @@ export function TaskView({
   const recordTaskScroll = useCallback((scrollTop: number) => {
     dispatch({ type: "taskScroll:record", taskId: snapshot.task.task_id, scrollTop });
   }, [dispatch, snapshot.task.task_id]);
+  const diagnosticItemKindCounts = chatItems.reduce<Record<string, number>>((counts, item) => {
+    counts[item.message.kind] = (counts[item.message.kind] ?? 0) + 1;
+    return counts;
+  }, {});
   const chatScroll = useTaskChatScroll({
+    diagnosticContext: {
+      chatVersion: snapshot.chat.version,
+      historySyncState: snapshot.history_sync.state,
+      itemCount: chatItems.length,
+      itemKindCounts: diagnosticItemKindCounts,
+      olderItemCount: chatPageState?.olderItems.length ?? 0,
+      pendingPermissions: chatItems
+        .filter((item) => item.message.kind === "permission" && item.message.state === "pending")
+        .map((item) => item.message.kind === "permission"
+          ? item.message.app_server_request_id ?? item.message.request_id
+          : item.message_id),
+      snapshotRevision: snapshot.revision,
+      taskStatus: snapshot.task.status,
+    },
     generating: taskChatHasLiveUpdates({
       inputPending,
-      presentationPending: presentingMessageIds.size > 0,
       taskStatus: snapshot.task.status,
     }),
+    historySyncState: snapshot.history_sync.state,
     itemCount: chat.items.length,
     onScrollTop: recordTaskScroll,
     pendingPrepend: chat.pending,
@@ -198,6 +221,7 @@ export function TaskView({
         status={snapshot.task.status}
         title={activeTask?.title ?? snapshot.task.title}
         workspaceRoot={snapshot.task.workspace_root}
+        showWorkspaceContext={showWorkspaceContext}
       />
       <div className="chat-column">
         <div className="message-list-shell">
@@ -236,12 +260,10 @@ export function TaskView({
             </div>
           ) : null}
           {chat.error ? <p className="chat-system">{chat.error}</p> : null}
-          {presentedChatItems.map((message) => (
+          {chatItems.map((message) => (
             <ChatRow
-              forcePresentationImmediate={forcePresentationImmediate}
               key={message.message_id}
               message={message}
-              onPresentationStateChange={onPresentationStateChange}
               taskId={snapshot.task.task_id}
               toolDetails={toolDetails}
               onLoadToolDetail={onLoadToolDetail}
@@ -252,7 +274,12 @@ export function TaskView({
               commandCatalog={snapshot.agent_commands}
             />
           ))}
-            {workingLabel ? <WorkingStatus label={workingLabel} /> : null}
+            {workingLabel ? (
+              <WorkingStatus
+                label={workingLabel}
+                onRetry={snapshot.history_sync.state === "failed" ? onRetryHistory : undefined}
+              />
+            ) : null}
           </div>
           {chatScroll.showJumpToLatest ? (
             <button
@@ -301,6 +328,7 @@ export function TaskView({
           submitPending={inputPending}
           submitPendingLabel="Sending message"
           submitRequiresText={!snapshot.send_capability.attachment_only}
+          submissionSettlementKey={snapshot.revision}
           showAgentSelector={false}
           showIsolationSelector={false}
         />
@@ -309,7 +337,7 @@ export function TaskView({
   );
 }
 
-function WorkingStatus({ label }: { label: string }) {
+function WorkingStatus({ label, onRetry }: { label: string; onRetry?: () => void }) {
   return (
     <div className="working-status" role="status" aria-live="polite">
       <span className="working-status-dots" aria-hidden="true">
@@ -318,6 +346,7 @@ function WorkingStatus({ label }: { label: string }) {
         <span />
       </span>
       <span>{label}</span>
+      {onRetry ? <button type="button" onClick={onRetry}>Retry</button> : null}
     </div>
   );
 }

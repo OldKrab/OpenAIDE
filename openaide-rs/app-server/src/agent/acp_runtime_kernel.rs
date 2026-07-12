@@ -1,13 +1,9 @@
-use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use crate::agent::acp_active_session_manager::AcpActiveSessionManager;
 use crate::agent::acp_auth_method_cache::AcpAuthMethodCache;
-use crate::agent::acp_probe_auth_runner::AcpProbeAuthRunner;
-use crate::agent::acp_runtime_threading::block_on_new_runtime;
 use crate::agent::acp_runtime_threading::close_in_parallel;
-use crate::agent::acp_session_listing::run_agent_session_list;
 use crate::agent::acp_trace::AcpTraceState;
 use crate::agent::registry_handle::AgentRegistryHandle;
 use crate::agent::{
@@ -22,12 +18,11 @@ use crate::protocol::model::{
 };
 
 pub(super) const PROBE_TIMEOUT: Duration = Duration::from_secs(8);
-pub(super) const AUTHENTICATE_TIMEOUT: Duration = Duration::from_secs(120);
 
 pub(super) struct AcpRuntimeKernel {
     registry: AgentRegistryHandle,
-    probe_auth: AcpProbeAuthRunner,
     active_sessions: AcpActiveSessionManager,
+    agent_process_operations: Mutex<()>,
 }
 
 impl AcpRuntimeKernel {
@@ -38,15 +33,10 @@ impl AcpRuntimeKernel {
             host_bridge.clone(),
             auth_method_cache.clone(),
         );
-        let probe_auth = AcpProbeAuthRunner::new(
-            registry.clone(),
-            host_bridge.clone(),
-            auth_method_cache.clone(),
-        );
         Self {
             registry,
-            probe_auth,
             active_sessions,
+            agent_process_operations: Mutex::new(()),
         }
     }
 
@@ -58,36 +48,31 @@ impl AcpRuntimeKernel {
         &self,
         request: AgentProbeRequest,
     ) -> Result<AgentProbeResult, RuntimeError> {
-        self.probe_with_timeout(request, PROBE_TIMEOUT)
+        let _operation = self.lock_agent_process_operations()?;
+        self.active_sessions.probe(&request.agent_id, PROBE_TIMEOUT)
     }
 
     pub(super) fn authenticate(
         &self,
         request: AgentAuthenticateRequest,
     ) -> Result<AgentAuthenticateResult, RuntimeError> {
-        self.authenticate_with_timeout(request, AUTHENTICATE_TIMEOUT)
+        let _operation = self.lock_agent_process_operations()?;
+        self.active_sessions.authenticate(request)
     }
 
     pub(super) fn list_sessions(
         &self,
         request: AgentListSessionsRequest,
     ) -> Result<AgentListSessionsResult, RuntimeError> {
+        let _operation = self.lock_agent_process_operations()?;
         self.registry.require(&request.agent_id)?;
 
-        let cwd = PathBuf::from(request.cwd.clone());
+        let cwd = std::path::PathBuf::from(request.cwd.clone());
         if !cwd.is_absolute() {
             return Err(RuntimeError::InvalidParams("workspace_root".to_string()));
         }
 
-        let config = self.registry.require_acp_config(&request.agent_id)?;
-        block_on_new_runtime(run_agent_session_list(
-            config,
-            request.agent_id,
-            cwd,
-            request.cursor,
-            self.probe_auth.preferred_auth_method_id(),
-            self.probe_auth.host_bridge(),
-        ))?
+        self.active_sessions.list_sessions(request)
     }
 
     pub(super) fn set_session_config_option(
@@ -102,6 +87,7 @@ impl AcpRuntimeKernel {
         &self,
         request: AgentSessionStart,
     ) -> Result<AgentSession, RuntimeError> {
+        let _operation = self.lock_agent_process_operations()?;
         self.active_sessions.start_session(request)
     }
 
@@ -109,6 +95,7 @@ impl AcpRuntimeKernel {
         &self,
         request: AgentSessionLoad,
     ) -> Result<AgentLoadedSession, RuntimeError> {
+        let _operation = self.lock_agent_process_operations()?;
         self.active_sessions.load_session(request)
     }
 
@@ -155,19 +142,19 @@ impl AcpRuntimeKernel {
         Ok(())
     }
 
+    #[cfg(test)]
     pub(super) fn probe_with_timeout(
         &self,
         request: AgentProbeRequest,
         timeout: Duration,
     ) -> Result<AgentProbeResult, RuntimeError> {
-        self.probe_auth.probe_with_timeout(request, timeout)
+        let _operation = self.lock_agent_process_operations()?;
+        self.active_sessions.probe(&request.agent_id, timeout)
     }
 
-    fn authenticate_with_timeout(
-        &self,
-        request: AgentAuthenticateRequest,
-        timeout: Duration,
-    ) -> Result<AgentAuthenticateResult, RuntimeError> {
-        self.probe_auth.authenticate_with_timeout(request, timeout)
+    fn lock_agent_process_operations(&self) -> Result<std::sync::MutexGuard<'_, ()>, RuntimeError> {
+        self.agent_process_operations
+            .lock()
+            .map_err(|_| RuntimeError::Internal("ACP process operation lock poisoned".to_string()))
     }
 }

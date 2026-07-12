@@ -22,6 +22,7 @@ export function TaskHeader({
   statusLabel,
   title,
   workspaceRoot,
+  showWorkspaceContext = true,
 }: {
   agentId: string;
   agentName: string;
@@ -29,6 +30,7 @@ export function TaskHeader({
   statusLabel?: string;
   title: string;
   workspaceRoot: string;
+  showWorkspaceContext?: boolean;
 }) {
   const statusPresentation = STATUS_PRESENTATION[status];
   const visibleStatusLabel = statusLabel ?? statusPresentation.label;
@@ -53,7 +55,7 @@ export function TaskHeader({
           </span>
         </span>
       </span>
-      {projectLabel ? <span className="task-header-workspace" title={workspaceRoot}>{projectLabel}</span> : null}
+      {showWorkspaceContext && projectLabel ? <span className="task-header-workspace" title={workspaceRoot}>{projectLabel}</span> : null}
     </header>
   );
 }

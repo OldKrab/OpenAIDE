@@ -278,7 +278,7 @@ export const Sidebar = memo(function Sidebar({
             onClick={() => setVisibleProjectLimit((current) => current + maxVisibleProjects)}
             type="button"
           >
-            Show {Math.min(maxVisibleProjects, hiddenProjectCount)} more projects
+            Show {Math.min(maxVisibleProjects, hiddenProjectCount)} more workspaces
           </button>
         ) : null}
       </div>

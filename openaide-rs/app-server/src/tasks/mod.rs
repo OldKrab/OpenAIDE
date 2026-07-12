@@ -3,6 +3,7 @@ pub(crate) mod agent_service;
 mod boundary_tests;
 pub mod commands;
 pub(crate) mod config_options;
+pub(crate) mod history_sync;
 pub(crate) mod lifecycle;
 pub(crate) mod mutation;
 pub(crate) mod native_session_lifecycle;

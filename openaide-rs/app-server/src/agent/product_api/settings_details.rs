@@ -243,4 +243,5 @@ fn generated_at() -> String {
 }
 
 #[cfg(test)]
+#[path = "settings_details_tests.rs"]
 mod tests;

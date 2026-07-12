@@ -10,10 +10,10 @@ env_override_names=(
   OPENAIDE_WEB_HOST
   OPENAIDE_WEB_PORT
   OPENAIDE_WEB_VITE_PORT
+  OPENAIDE_WEB_PROTOTYPE_PORT
   OPENAIDE_WEB_STATE_ROOT
   OPENAIDE_WEB_RUNTIME_ROOT
   OPENAIDE_WEB_STATIC_ROOT
-  OPENAIDE_WEB_PROTOTYPE_ROOT
   OPENAIDE_WEB_PROJECT_ROOTS
   OPENAIDE_WEB_PID_FILE
   OPENAIDE_WEB_LOG_FILE
@@ -80,10 +80,10 @@ command="${1:-refresh}"
 host="${OPENAIDE_WEB_HOST:-127.0.0.1}"
 port="${OPENAIDE_WEB_PORT:-5474}"
 vite_port="${OPENAIDE_WEB_VITE_PORT:-5473}"
+prototype_port="${OPENAIDE_WEB_PROTOTYPE_PORT:-}"
 state_root="${OPENAIDE_WEB_STATE_ROOT:-$repo_root/.openaide-web-dev/state}"
 runtime_root="${OPENAIDE_WEB_RUNTIME_ROOT:-$repo_root/.openaide-web-dev/runtime}"
 static_root="${OPENAIDE_WEB_STATIC_ROOT:-$repo_root/.openaide-web-dev/static-$port}"
-prototype_root="${OPENAIDE_WEB_PROTOTYPE_ROOT:-}"
 source_static_root="$repo_root/packages/frontend/dist"
 project_roots="${OPENAIDE_WEB_PROJECT_ROOTS:-$repo_root}"
 pid_file="${OPENAIDE_WEB_PID_FILE:-/tmp/openaide-local-web-$port.pid}"
@@ -95,9 +95,6 @@ systemd_unit="${OPENAIDE_WEB_SYSTEMD_UNIT:-openaide-local-web-$port}"
 state_root="$(node -e "console.log(require('node:path').resolve(process.argv[1]))" "$state_root")"
 runtime_root="$(node -e "console.log(require('node:path').resolve(process.argv[1]))" "$runtime_root")"
 static_root="$(node -e "console.log(require('node:path').resolve(process.argv[1]))" "$static_root")"
-if [[ -n "$prototype_root" ]]; then
-  prototype_root="$(node -e "console.log(require('node:path').resolve(process.argv[1], process.argv[2]))" "$repo_root" "$prototype_root")"
-fi
 
 usage() {
   cat <<EOF
@@ -107,10 +104,10 @@ Optional env:
   OPENAIDE_WEB_ROLE=<role> loads deploy/local-web.<role>.env and its ignored .local.env override
   OPENAIDE_WEB_PORT=$port
   OPENAIDE_WEB_VITE_PORT=$vite_port
+  OPENAIDE_WEB_PROTOTYPE_PORT=${prototype_port:-<disabled>}
   OPENAIDE_WEB_STATE_ROOT=$state_root
   OPENAIDE_WEB_RUNTIME_ROOT=$runtime_root
   OPENAIDE_WEB_STATIC_ROOT=$static_root
-  OPENAIDE_WEB_PROTOTYPE_ROOT=${prototype_root:-<disabled>}
   OPENAIDE_WEB_BUILD=1
   OPENAIDE_WEB_DAEMON=systemd
   OPENAIDE_WEB_SMOKE=1
@@ -199,7 +196,6 @@ build_static_frontend() {
   (cd "$repo_root" && npm run build --workspace @openaide/app-server-client)
   (cd "$repo_root" && npm run build --workspace @openaide/app-shell-contracts)
   (cd "$repo_root" && npm run build --workspace openaide-frontend -- --outDir "$static_root" --emptyOutDir)
-  publish_prototypes
 }
 
 build_if_requested() {
@@ -279,6 +275,7 @@ start_server() {
     OPENAIDE_WEB_HOST="$host" \
     OPENAIDE_WEB_PORT="$port" \
     OPENAIDE_WEB_VITE_PORT="$vite_port" \
+    OPENAIDE_WEB_PROTOTYPE_PORT="$prototype_port" \
     OPENAIDE_WEB_ALLOWED_HOSTS="$OPENAIDE_WEB_ALLOWED_HOSTS" \
     OPENAIDE_WEB_STATE_ROOT="$state_root" \
     OPENAIDE_WEB_RUNTIME_ROOT="$runtime_root" \
@@ -342,6 +339,7 @@ start_systemd_server() {
     --setenv "OPENAIDE_WEB_HOST=$host" \
     --setenv "OPENAIDE_WEB_PORT=$port" \
     --setenv "OPENAIDE_WEB_VITE_PORT=$vite_port" \
+    --setenv "OPENAIDE_WEB_PROTOTYPE_PORT=$prototype_port" \
     --setenv "OPENAIDE_WEB_ALLOWED_HOSTS=$OPENAIDE_WEB_ALLOWED_HOSTS" \
     --setenv "OPENAIDE_WEB_STATE_ROOT=$state_root" \
     --setenv "OPENAIDE_WEB_RUNTIME_ROOT=$runtime_root" \

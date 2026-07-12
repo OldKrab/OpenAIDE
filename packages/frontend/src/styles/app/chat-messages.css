@@ -23,24 +23,6 @@
   gap: 0;
 }
 
-.chat-streaming-caret {
-  display: inline-block;
-  width: 1px;
-  height: 12px;
-  margin-inline-start: 2px;
-  vertical-align: -1px;
-  background: color-mix(in oklch, var(--oa-text) 72%, transparent);
-  animation: chat-streaming-caret 820ms steps(2, jump-none) infinite;
-}
-
-@keyframes chat-streaming-caret {
-  50% { opacity: 0.25; }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .chat-streaming-caret { animation: none; }
-}
-
 .chat-agent > :first-child {
   margin-top: 0;
 }

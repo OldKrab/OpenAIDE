@@ -10,6 +10,12 @@ vi.mock("vscode", () => ({
 }));
 
 describe("webview html", () => {
+  it("allows bundled frontend fonts in the webview CSP", () => {
+    const html = renderWebviewHtml(context(), webview(), { surface: "navigation" });
+
+    expect(html).toContain("font-src vscode-webview:;");
+  });
+
   it("embeds LocalHttp bootstrap info and allows that origin in CSP", () => {
     const html = renderWebviewHtml(context(), webview(), {
       surface: "navigation",

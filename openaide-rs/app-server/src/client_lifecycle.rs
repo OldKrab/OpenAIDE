@@ -345,4 +345,5 @@ fn request_capabilities(capabilities: &ClientCapabilities) -> Vec<RequestCapabil
 }
 
 #[cfg(test)]
+#[path = "client_lifecycle_tests.rs"]
 mod tests;

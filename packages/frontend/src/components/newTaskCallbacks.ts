@@ -224,7 +224,7 @@ async function submitNewTask({ backendConnection, currentNavigationGeneration, d
   }
   const projectId = state.newTask.selection.projectId;
   if (!projectId) {
-    dispatch({ type: "submit:error", message: "Project unavailable. Refresh and try again." });
+    dispatch({ type: "submit:error", message: "Workspace unavailable. Refresh and try again." });
     return;
   }
   const draftInput = newTaskDraftInput(state, draft);
@@ -341,7 +341,7 @@ export async function prepareNewTask({
   }
   const projectId = state.newTask.selection.projectId;
   if (!projectId) {
-    throw new Error("Project unavailable. Refresh and try again.");
+    throw new Error("Workspace unavailable. Refresh and try again.");
   }
 
   const preparedTask = options.preparedTask ?? (state.snapshot && !state.snapshot.task.has_messages

@@ -300,4 +300,5 @@ pub struct ShellResolveFileRevealResult {
 }
 
 #[cfg(test)]
+#[path = "server_requests_tests.rs"]
 mod tests;

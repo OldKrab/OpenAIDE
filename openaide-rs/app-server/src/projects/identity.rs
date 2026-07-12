@@ -72,4 +72,5 @@ fn safe_project_label(workspace_root: &str) -> String {
 }
 
 #[cfg(test)]
+#[path = "identity_tests.rs"]
 mod tests;

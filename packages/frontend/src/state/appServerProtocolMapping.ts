@@ -120,10 +120,21 @@ export function mapProtocolTaskSnapshot(
         attachment_only: snapshot.sendCapability.attachmentOnly === true,
       },
       revision: snapshot.revision,
+      history_sync: mapHistorySync(snapshot.historySync ?? { state: "idle", generation: 0 }),
     },
     warnings,
     requiresNativeSurface: warnings.some(requiresNativeSurface),
   };
+}
+
+function mapHistorySync(sync: ProtocolTaskSnapshot["historySync"]): NonNullable<TaskSnapshot["history_sync"]> {
+  switch (sync.state) {
+    case "checking": return { state: "checking", generation: sync.generation };
+    case "syncing": return { state: "syncing", generation: sync.generation };
+    case "updated": return { state: "updated", generation: sync.generation };
+    case "failed": return { state: "failed", generation: sync.generation, message: sync.message, before_send: sync.beforeSend };
+    case "idle": return { state: "idle", generation: sync.generation };
+  }
 }
 
 export function mapProtocolTaskSummary(

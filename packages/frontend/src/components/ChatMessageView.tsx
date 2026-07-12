@@ -1,5 +1,5 @@
 import { ChevronRight } from "lucide-react";
-import { memo, useLayoutEffect, useState } from "react";
+import { memo, useState } from "react";
 import type { ActivityToolDetails, AgentCommandsCatalog, Attachment, ChatMessage, ElicitationResponse } from "@openaide/app-shell-contracts";
 import { AgentMarkdown, splitDataImageMarkdown } from "./AgentMarkdown";
 import { AttachmentImagePreviewLightbox, chatImagePreview, type AttachmentImagePreviewSource } from "./AttachmentImagePreview";
@@ -9,7 +9,6 @@ import { ChatPermissionCard } from "./ChatPermissionCard";
 import { QuestionCard } from "./QuestionCard";
 import { SlashCommandText } from "./SlashCommandText";
 import { UserMessageAttachments } from "./UserMessageAttachments";
-import { useLiveTextPresentation } from "./useLiveTextPresentation";
 
 export { firstToolPath } from "../state/toolDetailsViewModel";
 
@@ -23,8 +22,6 @@ export const ChatRow = memo(function ChatRow({
   taskId,
   toolDetails,
   commandCatalog,
-  forcePresentationImmediate = false,
-  onPresentationStateChange,
 }: {
   commandCatalog?: AgentCommandsCatalog;
   message: ChatMessage;
@@ -40,8 +37,6 @@ export const ChatRow = memo(function ChatRow({
   questionResponse?: { responding: boolean; error?: string };
   taskId: string;
   toolDetails?: Record<string, { loading: boolean; details?: ActivityToolDetails; error?: string }>;
-  forcePresentationImmediate?: boolean;
-  onPresentationStateChange?: (messageId: string, presenting: boolean) => void;
 }) {
   const [openImage, setOpenImage] = useState<AttachmentImagePreviewSource | undefined>();
   const body = message.message;
@@ -57,15 +52,7 @@ export const ChatRow = memo(function ChatRow({
     );
   }
   if (body.kind === "agent_text") {
-    return (
-      <AgentTextMessage
-        forceImmediate={forcePresentationImmediate}
-        messageId={message.message_id}
-        onPresentationStateChange={onPresentationStateChange}
-        streaming={body.streaming === true}
-        text={body.text}
-      />
-    );
+    return <AgentTextMessage text={body.text} />;
   }
   if (body.kind === "thought") {
     return (
@@ -124,32 +111,11 @@ function UserAttachments({
   );
 }
 
-function AgentTextMessage({
-  forceImmediate,
-  messageId,
-  onPresentationStateChange,
-  streaming,
-  text,
-}: {
-  forceImmediate: boolean;
-  messageId: string;
-  onPresentationStateChange?: (messageId: string, presenting: boolean) => void;
-  streaming: boolean;
-  text: string;
-}) {
-  const presentation = useLiveTextPresentation(text, streaming, forceImmediate);
-  const presenting = streaming || !presentation.caughtUp;
-  useLayoutEffect(() => {
-    onPresentationStateChange?.(messageId, presenting);
-  }, [messageId, onPresentationStateChange, presenting]);
-  useLayoutEffect(
-    () => () => onPresentationStateChange?.(messageId, false),
-    [messageId, onPresentationStateChange],
-  );
+function AgentTextMessage({ text }: { text: string }) {
   return (
-    <div className="chat-agent-block" aria-busy={presenting}>
-      <AgentMarkdown className="chat-agent" streaming={presenting} text={presentation.text} />
-      {!presenting ? <MessageCopyAction text={text} /> : null}
+    <div className="chat-agent-block">
+      <AgentMarkdown className="chat-agent" text={text} />
+      <MessageCopyAction text={text} />
     </div>
   );
 }

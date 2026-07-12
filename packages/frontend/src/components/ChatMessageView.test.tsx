@@ -6,6 +6,7 @@ import type { ActivityToolDetails, Attachment, ChatMessage, PermissionOption } f
 
 describe("ChatRow", () => {
   beforeEach(() => {
+    (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     vi.resetModules();
     vi.stubGlobal("window", { acquireVsCodeApi: undefined });
   });
@@ -31,54 +32,28 @@ describe("ChatRow", () => {
     expect(agentHtml).toContain('aria-label="Copy message"');
   });
 
-  it("reveals the first live Agent chunk instead of mounting it fully visible", async () => {
-    const frames: FrameRequestCallback[] = [];
-    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
-      frames.push(callback);
-      return frames.length;
-    });
-    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+  it("renders authoritative live Agent text immediately without a synthetic caret", async () => {
     const { ChatRow } = await import("./ChatMessageView");
-    let tree: ReturnType<typeof create>;
-    act(() => {
-      tree = create(
-        <ChatRow
-          message={agentMessage("a1", "First streamed chunk should become visible gradually.", true)}
-          onPermissionRespond={vi.fn()}
-          taskId="task_1"
-        />,
-      );
-    });
+    const html = renderToStaticMarkup(
+      <ChatRow
+        message={agentMessage("a1", "The complete received chunk is visible now.", true)}
+        onPermissionRespond={vi.fn()}
+        taskId="task_1"
+      />,
+    );
 
-    const initial = JSON.stringify(tree!.toJSON());
-    expect(initial).not.toContain("visible gradually");
-    expect(initial).toContain('"aria-busy":true');
-
-    for (let frame = 0; frame < 24; frame += 1) {
-      act(() => frames.shift()?.(frame * 16));
-    }
-    const caughtUp = JSON.stringify(tree!.toJSON());
-    expect(caughtUp).toContain("visible gradually");
-    expect(caughtUp).not.toContain("Copy message");
-    expect(caughtUp).toContain('"aria-busy":true');
+    expect(html).toContain("The complete received chunk is visible now.");
+    expect(html).not.toContain("chat-streaming-caret");
+    expect(html).not.toContain('aria-busy="true"');
   });
 
-  it("reveals appended live Agent text over frames and hides Copy while catching up", async () => {
-    const frames: FrameRequestCallback[] = [];
-    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => {
-      frames.push(callback);
-      return frames.length;
-    });
-    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+  it("renders appended live Agent text on the update that receives it", async () => {
     const { ChatRow } = await import("./ChatMessageView");
     const props = { onPermissionRespond: vi.fn(), taskId: "task_1" };
     let tree: ReturnType<typeof create>;
     act(() => {
       tree = create(<ChatRow {...props} message={agentMessage("a1", "Agent", true)} />);
     });
-    for (let frame = 0; frame < 12; frame += 1) {
-      act(() => frames.shift()?.(frame * 16));
-    }
     act(() => {
       tree!.update(
         <ChatRow
@@ -88,28 +63,10 @@ describe("ChatRow", () => {
       );
     });
 
-    expect(JSON.stringify(tree!.toJSON())).not.toContain("network chunk");
-    expect(JSON.stringify(tree!.toJSON())).not.toContain("Copy message");
-
-    act(() => frames.shift()?.(208));
-    const firstFrame = JSON.stringify(tree!.toJSON());
-    expect(firstFrame).toContain("Agent text");
-    expect(firstFrame).not.toContain("network chunk");
-
-    for (let frame = 0; frame < 16; frame += 1) {
-      act(() => frames.shift()?.(224 + frame * 16));
-    }
-    expect(JSON.stringify(tree!.toJSON())).toContain("network chunk");
-    expect(JSON.stringify(tree!.toJSON())).not.toContain("Copy message");
-    act(() => {
-      tree!.update(
-        <ChatRow
-          {...props}
-          message={agentMessage("a1", "Agent text arrives as one larger network chunk.", false)}
-        />,
-      );
-    });
-    expect(JSON.stringify(tree!.toJSON())).toContain("Copy message");
+    const rendered = JSON.stringify(tree!.toJSON());
+    expect(rendered).toContain("Agent text arrives as one larger network chunk.");
+    expect(rendered).toContain("Copy message");
+    expect(rendered).not.toContain("chat-streaming-caret");
   });
 
   it("renders thought messages as their own collapsed row", async () => {

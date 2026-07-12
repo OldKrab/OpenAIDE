@@ -20,7 +20,7 @@ describe("standalone dev host", () => {
     expect(standaloneBootstrapFrom({ hasDatasetSurface: false, hasVsCodeApi: false, pathname: "/task" })).toMatchObject({
       surface: "task",
       taskId: "demo_task",
-      preferences: { composer_submit_shortcut: "mod_enter" },
+      preferences: { composer_submit_shortcut: "enter" },
     });
     expect(standaloneBootstrapFrom({ hasDatasetSurface: false, hasVsCodeApi: false, pathname: "/new-task" })).toMatchObject({
       surface: "task",

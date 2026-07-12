@@ -7,17 +7,24 @@ use agent_client_protocol::{Agent, ConnectionTo};
 use tokio::sync::mpsc as tokio_mpsc;
 
 use crate::agent::acp_agent_config::AcpAgentConfig;
+use crate::agent::acp_agent_status::agent_probe_result_from_initialize;
 use crate::agent::acp_host::initialize_request;
 use crate::agent::acp_host_terminal_ownership::{AcpHostTerminalRegistry, AcpTerminalOwnerId};
+use crate::agent::acp_session_capabilities::validate_auth_method;
 use crate::agent::acp_session_runner::{acp_start_error, initialize_agent_connection};
 use crate::agent::acp_trace::AcpTraceSession;
 use crate::agent::{
-    AgentSecretResolver, AgentSession, AgentSessionLoad, AgentSessionStart, TurnCancellation,
+    AgentAuthenticateRequest, AgentListSessionsRequest, AgentSecretResolver, AgentSession,
+    AgentSessionLoad, AgentSessionStart, TurnCancellation,
 };
 use crate::logging;
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::host::HostBridge;
-use crate::protocol::model::NormalizedMessage;
+use crate::protocol::model::{
+    AgentAuthenticateResult, AgentAuthenticateStatus, AgentListSessionsResult, AgentProbeResult,
+    NormalizedMessage,
+};
+use agent_client_protocol::schema::AuthenticateRequest;
 
 use crate::agent::acp_errors::acp_error;
 use crate::agent::acp_opened_session_worker::{
@@ -27,9 +34,10 @@ use crate::agent::acp_session_client::{AcpSessionCommand, AcpSessionConfigComman
 use crate::agent::acp_session_connection::{
     connect_acp_session_client, AcpSessionConnectionContext,
 };
-use crate::agent::acp_session_lifecycle::LoadReplayCapture;
+use crate::agent::acp_session_lifecycle::{
+    agent_list_sessions_result_from_response, request_session_list, LoadReplayCapture,
+};
 use crate::agent::acp_session_opening::{open_acp_session, OpenAcpSessionContext};
-use crate::agent::acp_session_termination::close_active_session;
 use crate::agent::acp_update_projection::LivePromptProjection;
 
 pub(super) enum AcpSessionOpenRequest {
@@ -93,10 +101,30 @@ pub(super) struct AcpAgentProcessOpen {
 
 pub(super) struct AcpAgentProcessInput {
     pub(super) config: AcpAgentConfig,
-    pub(super) first_open: AcpAgentProcessOpen,
+    pub(super) first_open: Option<AcpAgentProcessOpen>,
     pub(super) open_rx: tokio_mpsc::UnboundedReceiver<AcpAgentProcessOpen>,
+    pub(super) list_rx: tokio_mpsc::UnboundedReceiver<AcpAgentProcessList>,
+    pub(super) control_rx: tokio_mpsc::UnboundedReceiver<AcpAgentProcessControl>,
+    pub(super) shutdown_rx: tokio::sync::watch::Receiver<bool>,
     pub(super) host_bridge: HostBridge,
     pub(super) terminal_registry: AcpHostTerminalRegistry,
+}
+
+pub(super) enum AcpAgentProcessControl {
+    Probe {
+        agent_id: String,
+        reply_tx: mpsc::Sender<Result<AgentProbeResult, RuntimeError>>,
+    },
+    Authenticate {
+        request: AgentAuthenticateRequest,
+        reply_tx: mpsc::Sender<Result<AgentAuthenticateResult, RuntimeError>>,
+    },
+}
+
+pub(super) struct AcpAgentProcessList {
+    pub(super) request: AgentListSessionsRequest,
+    pub(super) preferred_auth_method_id: Option<String>,
+    pub(super) reply_tx: mpsc::Sender<Result<AgentListSessionsResult, RuntimeError>>,
 }
 
 pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result<(), RuntimeError> {
@@ -104,6 +132,9 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
         config,
         first_open,
         mut open_rx,
+        mut list_rx,
+        mut control_rx,
+        mut shutdown_rx,
         host_bridge,
         terminal_registry,
     } = input;
@@ -115,22 +146,28 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
         Arc::default();
     let elicitation_cancellations: crate::agent::acp_host_capabilities::AcpElicitationCancellationMap =
         Arc::default();
-    let first_started_tx = first_open.started_tx.clone();
-    terminal_registry.begin_open(first_open.terminal_owner_id);
+    let first_started_tx = first_open.as_ref().map(|open| open.started_tx.clone());
+    if let Some(open) = &first_open {
+        terminal_registry.begin_open(open.terminal_owner_id);
+    }
     let agent = match config.to_acp_agent(
-        first_open.trace.clone(),
+        first_open.as_ref().and_then(|open| open.trace.clone()),
         &host_bridge,
-        first_open.request.secret_resolver(),
+        first_open
+            .as_ref()
+            .and_then(|open| open.request.secret_resolver()),
     ) {
         Ok(agent) => agent,
         Err(error) => {
-            let _ = first_open.started_tx.send(Err(error.to_string()));
+            if let Some(open) = &first_open {
+                let _ = open.started_tx.send(Err(error.to_string()));
+            }
             return Err(error);
         }
     };
     let connection_context = AcpSessionConnectionContext {
         host_bridge: host_bridge.clone(),
-        trace: first_open.trace.clone(),
+        trace: first_open.as_ref().and_then(|open| open.trace.clone()),
         current_prompts: current_prompts.clone(),
         load_replay: load_replay.clone(),
         terminal_registry: terminal_registry.clone(),
@@ -139,27 +176,18 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
     };
     let connection_terminal_registry = terminal_registry.clone();
 
-    let result = connect_acp_session_client(
+    let connection = connect_acp_session_client(
         agent,
         connection_context,
         |connection: ConnectionTo<Agent>| async move {
-            let initialize =
-                initialize_shared_process_connection(&connection, &host_bridge, &first_open)
-                    .await?;
-            open_on_shared_process(
+            let initialize = initialize_shared_process_connection(
                 &connection,
-                initialize.clone(),
                 &host_bridge,
-                &current_prompts,
-                &load_replay,
-                &active_session_ids,
-                &connection_terminal_registry,
-                &session_event_sinks,
-                first_open,
+                first_open.as_ref(),
             )
             .await?;
-            while let Some(open) = open_rx.recv().await {
-                if let Err(error) = open_on_shared_process(
+            if let Some(first_open) = first_open {
+                open_on_shared_process(
                     &connection,
                     initialize.clone(),
                     &host_bridge,
@@ -168,22 +196,63 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
                     &active_session_ids,
                     &connection_terminal_registry,
                     &session_event_sinks,
-                    open,
+                    first_open,
                 )
-                .await
-                {
-                    logging::warn(
-                        "acp_shared_session_open_failed",
-                        serde_json::json!({ "error": error.to_string() }),
-                    );
+                .await?;
+            }
+            loop {
+                tokio::select! {
+                    open = open_rx.recv() => {
+                        let Some(open) = open else { break };
+                        if let Err(error) = open_on_shared_process(
+                            &connection,
+                            initialize.clone(),
+                            &host_bridge,
+                            &current_prompts,
+                            &load_replay,
+                            &active_session_ids,
+                            &connection_terminal_registry,
+                            &session_event_sinks,
+                            open,
+                        ).await {
+                            logging::warn(
+                                "acp_shared_session_open_failed",
+                                serde_json::json!({ "error": error.to_string() }),
+                            );
+                        }
+                    }
+                    list = list_rx.recv() => {
+                        let Some(list) = list else { break };
+                        let result = list_sessions_on_shared_process(
+                            &connection,
+                            &initialize,
+                            list.request,
+                            list.preferred_auth_method_id.as_deref(),
+                        ).await;
+                        let _ = list.reply_tx.send(result);
+                    }
+                    control = control_rx.recv() => {
+                        let Some(control) = control else { break };
+                        match control {
+                            AcpAgentProcessControl::Probe { agent_id, reply_tx } => {
+                                let _ = reply_tx.send(Ok(agent_probe_result_from_initialize(agent_id, &initialize)));
+                            }
+                            AcpAgentProcessControl::Authenticate { request, reply_tx } => {
+                                let result = authenticate_on_shared_process(&connection, &initialize, request).await;
+                                let _ = reply_tx.send(result);
+                            }
+                        }
+                    }
                 }
             }
             Ok(())
         },
-    )
-    .await
-    .map_err(acp_error);
-    if let Err(error) = &result {
+    );
+    let result = tokio::select! {
+        result = connection => result.map_err(acp_error),
+        _ = shutdown_rx.changed() => Ok(()),
+    };
+    if let (Err(error), Some(first_started_tx)) = (&result, first_started_tx) {
         let _ = first_started_tx.send(Err(format!("ACP error: {error}")));
     }
     tokio::task::spawn_blocking(move || terminal_registry.close_all())
@@ -192,16 +261,67 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
     result
 }
 
+async fn authenticate_on_shared_process(
+    connection: &ConnectionTo<Agent>,
+    initialize: &InitializeResponse,
+    request: AgentAuthenticateRequest,
+) -> Result<AgentAuthenticateResult, RuntimeError> {
+    validate_auth_method(initialize, &request.method_id)?;
+    connection
+        .send_request(AuthenticateRequest::new(request.method_id.clone()))
+        .block_task()
+        .await
+        .map_err(acp_error)?;
+    Ok(AgentAuthenticateResult {
+        agent_id: request.agent_id,
+        method_id: request.method_id,
+        status: AgentAuthenticateStatus::Authenticated,
+    })
+}
+
+async fn list_sessions_on_shared_process(
+    connection: &ConnectionTo<Agent>,
+    initialize: &InitializeResponse,
+    request: AgentListSessionsRequest,
+    preferred_auth_method_id: Option<&str>,
+) -> Result<AgentListSessionsResult, RuntimeError> {
+    let cwd = std::path::PathBuf::from(&request.cwd);
+    let response = request_session_list(
+        connection,
+        cwd.clone(),
+        request.cursor,
+        initialize,
+        preferred_auth_method_id,
+    )
+    .await
+    .map_err(acp_error)?;
+    Ok(agent_list_sessions_result_from_response(
+        request.agent_id,
+        response,
+        &cwd,
+        None,
+    ))
+}
+
 async fn initialize_shared_process_connection(
     connection: &ConnectionTo<Agent>,
     host_bridge: &HostBridge,
-    first_open: &AcpAgentProcessOpen,
+    first_open: Option<&AcpAgentProcessOpen>,
 ) -> agent_client_protocol::Result<InitializeResponse> {
     let initialize_request = initialize_request(host_bridge);
-    let cancellation = first_open.request.cancellation();
-    if let Some(trace) = &first_open.trace {
+    if let Some(trace) = first_open.and_then(|open| open.trace.as_ref()) {
         trace.record("client_to_agent", "initialize.request", &initialize_request);
     }
+    let Some(first_open) = first_open else {
+        let initialize = connection
+            .send_request(initialize_request)
+            .block_task()
+            .await?;
+        crate::agent::acp_session_capabilities::validate_initialize_protocol(&initialize)
+            .map_err(|error| agent_client_protocol::util::internal_error(error.to_string()))?;
+        return Ok(initialize);
+    };
+    let cancellation = first_open.request.cancellation();
     tokio::select! {
         result = initialize_agent_connection(
             connection,
@@ -281,14 +401,8 @@ async fn open_on_shared_process(
         }
     };
     if duplicate {
-        let connection = opened.active_session.connection();
-        close_active_session(
-            &connection,
-            opened.active_session.session_id().clone(),
-            opened.supports_session_close,
-            trace.as_ref(),
-        )
-        .await;
+        // The Agent session ID is already owned by another local worker. Closing the
+        // rejected binding would close that shared Agent-owned session as well.
         let owner = terminal_owner.clone();
         let _ = tokio::task::spawn_blocking(move || owner.close()).await;
         let _ = started_tx.send(Err("agent_session_id already active".to_string()));

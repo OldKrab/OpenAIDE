@@ -283,6 +283,7 @@ fn unavailable_task_snapshot(task_id: TaskId) -> TaskSnapshot {
         },
         pending_requests: Vec::new(),
         recovery: None,
+        history_sync: Default::default(),
     }
 }
 

@@ -702,6 +702,7 @@ function controllerFor(surface: AppController["bootstrap"]["surface"]): AppContr
         removeAttachment: vi.fn(),
         respondToPermission: vi.fn(),
         respondToQuestion: vi.fn(),
+        retryHistory: vi.fn(),
         selectConfigOption: vi.fn(),
         sendPrompt: vi.fn(),
       },
@@ -775,6 +776,7 @@ function snapshot(taskId: string, hasMessages = true): TaskSnapshot {
       version: 1,
     },
     permissions: [],
+    history_sync: { state: "idle", generation: 0 },
     send_capability: { state: "ready", attachment_only: true },
     revision: 1,
     settings_summary: {

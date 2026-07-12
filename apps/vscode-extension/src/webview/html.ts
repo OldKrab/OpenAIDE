@@ -16,12 +16,12 @@ export function renderWebviewHtml(
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; script-src 'nonce-${nonce}';${connectSource ? ` connect-src ${connectSource};` : ""}">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; font-src ${webview.cspSource}; script-src 'nonce-${nonce}';${connectSource ? ` connect-src ${connectSource};` : ""}">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="stylesheet" href="${styleUri}">
   <title>OpenAIDE</title>
 </head>
-<body data-surface="${escapeAttribute(bootstrap.surface)}" data-task-id="${escapeAttribute(bootstrap.taskId ?? "")}" data-composer-submit-shortcut="${escapeAttribute(bootstrap.preferences?.composer_submit_shortcut ?? "mod_enter")}" data-app-server-connection="${escapeAttribute(JSON.stringify(bootstrap.appServerConnection ?? null))}">
+<body data-surface="${escapeAttribute(bootstrap.surface)}" data-task-id="${escapeAttribute(bootstrap.taskId ?? "")}" data-project-id="${escapeAttribute(bootstrap.projectId ?? "")}" data-composer-submit-shortcut="${escapeAttribute(bootstrap.preferences?.composer_submit_shortcut ?? "enter")}" data-app-server-connection="${escapeAttribute(JSON.stringify(bootstrap.appServerConnection ?? null))}">
   <div id="root"></div>
   <script nonce="${nonce}" type="module" src="${scriptUri}"></script>
 </body>
@@ -39,7 +39,7 @@ export function renderWebviewPreparingHtml(
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource};">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource}; font-src ${webview.cspSource};">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <link rel="stylesheet" href="${styleUri}">
   <title>OpenAIDE</title>

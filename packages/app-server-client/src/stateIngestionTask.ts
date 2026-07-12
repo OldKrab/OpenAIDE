@@ -20,14 +20,27 @@ export function updateTaskSnapshot(
     case "taskUpdated":
       return payload.task.taskId === task.task.taskId ? changed({ ...snapshot, task: { ...task, task: payload.task } }) : unchanged(snapshot);
     case "taskSnapshotUpdated":
-      return payload.task.task.taskId === task.task.taskId ? changed({ ...snapshot, task: payload.task }) : unchanged(snapshot);
-    case "chatItemAppended":
+      return payload.task.task.taskId === task.task.taskId
+        ? changed({
+            ...snapshot,
+            task: payload.task.historySync.generation < task.historySync.generation
+              ? { ...payload.task, historySync: task.historySync }
+              : payload.task,
+          })
+        : unchanged(snapshot);
+    case "taskHistorySyncUpdated":
       return payload.taskId === task.task.taskId
-        ? changed({ ...snapshot, task: appendChatItem(task, payload.item) })
+        && payload.historySync.generation >= task.historySync.generation
+        ? changed({ ...snapshot, task: { ...task, historySync: payload.historySync } })
+        : unchanged(snapshot);
+    case "chatItemAppended":
+      return payload.taskId === task.task.taskId && payload.revision > task.revision
+        ? changed({ ...snapshot, task: appendChatItem(task, payload.revision, payload.item) })
         : unchanged(snapshot);
     case "chatItemChunk":
       if (payload.taskId !== task.task.taskId) return unchanged(snapshot);
-      return updateChatItemChunk(task, payload.messageId, payload.chunk.text, payload.chunk.finalChunk === true);
+      if (payload.revision <= task.revision) return unchanged(snapshot);
+      return updateChatItemChunk(task, payload.revision, payload.messageId, payload.chunk.text, payload.chunk.finalChunk === true);
     case "requestUpdated":
       return requestMatchesTask(payload.request, task.task.taskId)
         ? changed({ ...snapshot, task: upsertPendingRequest(task, payload.request) })
@@ -37,9 +50,10 @@ export function updateTaskSnapshot(
   }
 }
 
-function appendChatItem(task: TaskSnapshot, item: ChatItem): TaskSnapshot {
+function appendChatItem(task: TaskSnapshot, revision: number, item: ChatItem): TaskSnapshot {
   return {
     ...task,
+    revision,
     chat: {
       ...task.chat,
       items: [...task.chat.items, item],
@@ -48,7 +62,7 @@ function appendChatItem(task: TaskSnapshot, item: ChatItem): TaskSnapshot {
   };
 }
 
-function updateChatItemChunk(task: TaskSnapshot, messageId: string, text: string, finalChunk: boolean): SnapshotUpdate {
+function updateChatItemChunk(task: TaskSnapshot, revision: number, messageId: string, text: string, finalChunk: boolean): SnapshotUpdate {
   const itemIndex = task.chat.items.findIndex((item) => item.messageId === messageId);
   if (itemIndex === -1) return { kind: "resyncRequired", reason: "missingChatItem" };
 
@@ -65,6 +79,7 @@ function updateChatItemChunk(task: TaskSnapshot, messageId: string, text: string
     kind: "task",
     task: {
       ...task,
+      revision,
       chat: {
         ...task.chat,
         items,

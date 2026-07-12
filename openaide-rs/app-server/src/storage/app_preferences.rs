@@ -68,4 +68,5 @@ fn default_submit_shortcut() -> ComposerSubmitShortcut {
 }
 
 #[cfg(test)]
+#[path = "app_preferences_tests.rs"]
 mod tests;

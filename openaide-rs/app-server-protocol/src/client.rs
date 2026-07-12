@@ -142,4 +142,5 @@ pub enum ShellCapability {
 }
 
 #[cfg(test)]
+#[path = "client_tests.rs"]
 mod tests;

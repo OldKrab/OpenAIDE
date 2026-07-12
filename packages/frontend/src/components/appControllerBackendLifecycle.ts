@@ -16,7 +16,7 @@ import {
   startAppServerStateSubscription,
   type StateSubscriptionMappingContext,
 } from "../services/appServerStateSubscriptions";
-import { initializeParamsForBootstrap } from "../services/backendInitialization";
+import { initializeParamsForBootstrap, taskNavigationScopeForBootstrap } from "../services/backendInitialization";
 import { postHostMessage, subscribeHostMessages } from "../services/hostBridge";
 import { startHostMessageSession } from "../services/hostMessageSession";
 import { applyProtocolAgents } from "../state/appServerAgents";
@@ -33,7 +33,7 @@ import { dispatchStartupReadError, useRoutedBootstrap } from "./appControllerRou
 export type AppControllerBackendConnection = Pick<
   BackendConnection,
   "initialize" | "request" | "respond" | "serverRequests" | "close"
-> & Partial<Pick<BackendConnection, "events">>;
+> & Partial<Pick<BackendConnection, "events" | "stateResets">>;
 
 type BackendLifecycleOptions = {
   backendConnection?: AppControllerBackendConnection;
@@ -160,6 +160,7 @@ export function useAppControllerBackendLifecycle({
               const subscriptionConnection = {
                 events: backendConnection.events,
                 request: backendConnection.request,
+                stateResets: backendConnection.stateResets,
               };
               stopSubscriptions.push(startAppServerStateSubscription({
                 backendConnection: subscriptionConnection,
@@ -179,7 +180,7 @@ export function useAppControllerBackendLifecycle({
                 backendConnection: subscriptionConnection,
                 context: subscriptionContext,
                 dispatch,
-                scope: { kind: "taskNavigation" },
+                scope: taskNavigationScopeForBootstrap(initialBootstrap),
               }));
             }
             if (initialBootstrap.surface === "settings") {
@@ -269,6 +270,7 @@ export function useAppControllerBackendLifecycle({
       backendConnection: {
         events: backendConnection.events,
         request: backendConnection.request,
+        stateResets: backendConnection.stateResets,
       },
       context,
       dispatch,

@@ -96,7 +96,7 @@ export function createNavigationCallbacks({
         if (!projectId) {
           dispatch({
             type: "newTask:nativeSessions:error",
-            message: "Project unavailable. Refresh and try again.",
+            message: "Workspace unavailable. Refresh and try again.",
           });
           return;
         }

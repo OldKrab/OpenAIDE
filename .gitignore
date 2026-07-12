@@ -21,6 +21,7 @@ tmp-*.spec.js
 tmp/
 qa-artifacts/
 packages/frontend/public/
+packages/frontend/prototypes/
 pnpm-lock.yaml
 deploy/demo/vendor/
 deploy/local-web.env

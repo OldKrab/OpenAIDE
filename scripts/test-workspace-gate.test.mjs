@@ -58,6 +58,18 @@ test("the local CI command runs every required validation class", () => {
   assert.match(ci, /npm run build/);
 });
 
+test("release publishing produces only Linux and Windows VSIX packages", () => {
+  const release = readFileSync(path.join(repoRoot, ".github/workflows/release.yml"), "utf8");
+
+  assert.match(release, /target: linux-x64/);
+  assert.match(release, /target: win32-x64/);
+  assert.match(release, /@vscode\/vsce@3\.6\.0 package/);
+  assert.match(release, /@vscode\/vsce@3\.6\.0 publish/);
+  assert.match(release, /if: \$\{\{ !contains\(github\.ref_name, '-'\) \}\}/);
+  assert.match(release, /VSCE_PAT: \$\{\{ secrets\.VSCE_PAT \}\}/);
+  assert.doesNotMatch(release, /openaide-web-assets|docker\/build-push-action|openaide-app-server-linux/);
+});
+
 function packageJson(relativePath) {
   return JSON.parse(readFileSync(path.join(repoRoot, relativePath), "utf8"));
 }

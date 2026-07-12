@@ -14,25 +14,6 @@ describe("AgentMarkdown", () => {
     expect(html).toContain("<table>");
   });
 
-  it("places the streaming caret inside the final rendered Markdown block", () => {
-    const cases = [
-      { text: "Streaming words", ending: 'Streaming words<span aria-hidden="true" class="chat-streaming-caret"></span></p>' },
-      { text: "- first\n- last", ending: 'last<span aria-hidden="true" class="chat-streaming-caret"></span></li>' },
-      {
-        text: "| item | price |\n| --- | --- |\n| plan | $10 |",
-        ending: '$10<span aria-hidden="true" class="chat-streaming-caret"></span></td>',
-      },
-      {
-        text: "```text\nlast line\n```",
-        ending: 'last line\n</code><span aria-hidden="true" class="chat-streaming-caret"></span></pre>',
-      },
-    ];
-
-    for (const item of cases) {
-      expect(renderToStaticMarkup(<AgentMarkdown streaming text={item.text} />)).toContain(item.ending);
-    }
-  });
-
   it("drops raw HTML from agent messages", () => {
     const html = renderToStaticMarkup(<AgentMarkdown text={"<script>alert(1)</script>\n\n<strong>raw</strong>"} />);
 

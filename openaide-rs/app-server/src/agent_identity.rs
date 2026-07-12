@@ -68,4 +68,5 @@ fn validation_error(field: &'static str) -> AgentIdentityValidationError {
 }
 
 #[cfg(test)]
+#[path = "agent_identity_tests.rs"]
 mod tests;

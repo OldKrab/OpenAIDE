@@ -11,6 +11,7 @@ import type {
 } from "@openaide/app-server-client";
 import {
   mapProtocolConfigOptions,
+  mapProtocolAgentCommands,
   mapProtocolTaskNavigation,
   mapProtocolTaskSnapshot,
   mapProtocolTaskSummary,
@@ -238,6 +239,15 @@ describe("App Server Protocol state mapping", () => {
       status: "ready",
       options: [{ id: "model", category: "model", current_value: "gpt-5", values: [{ id: "gpt-5" }] }],
     });
+  });
+
+  it("does not expose Agent controls without live Native Session data", () => {
+    expect(mapProtocolConfigOptions({ state: "unavailable" }, "codex")).toEqual({
+      agent_id: "codex",
+      status: "empty",
+      options: [],
+    });
+    expect(mapProtocolAgentCommands({ state: "unavailable" }, "codex")).toBeUndefined();
   });
 
   it("keeps normal task preparation out of chat while preserving startup state", () => {
@@ -572,6 +582,7 @@ function protocolSnapshot(overrides: Partial<ProtocolTaskSnapshot> = {}): Protoc
     },
     agentCommands: { state: "ready", commands: [] },
     sendCapability: { state: "ready", attachmentOnly: true },
+    historySync: { state: "idle", generation: 0 },
     chat: {
       hasMoreBefore: true,
       hasMessages: true,

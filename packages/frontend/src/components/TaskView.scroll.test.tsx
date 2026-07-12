@@ -106,6 +106,35 @@ describe("TaskView follow scroll", () => {
     expect(focus.mock.calls.length).toBeGreaterThan(focusCallsAfterFirstTask);
   });
 
+  it("shows both buffered and newly received text immediately", async () => {
+    const { TaskView } = await import("./TaskView");
+    let tree!: ReactTestRenderer;
+
+    act(() => {
+      tree = create(<TaskView {...taskViewProps(snapshot("active", 1, "task-1"))} />);
+    });
+    act(() => tree.update(<TaskView {...taskViewProps(snapshot("active", 1, "task-2"))} />));
+    act(() => {
+      tree.update(
+        <TaskView
+          {...taskViewProps(snapshotWithStreamingText("task-1", "Buffered while away."))}
+        />,
+      );
+    });
+
+    expect(JSON.stringify(tree.toJSON())).toContain("Buffered while away.");
+
+    act(() => {
+      tree.update(
+        <TaskView
+          {...taskViewProps(snapshotWithStreamingText("task-1", "Buffered while away. Newly received."))}
+        />,
+      );
+    });
+
+    expect(JSON.stringify(tree.toJSON())).toContain("Newly received.");
+  });
+
   it("smoothly returns to the latest message when the user clicks the jump control", async () => {
     const { TaskView } = await import("./TaskView");
     const messageList = scrollNode({ clientHeight: 400, scrollHeight: 1400 });
@@ -216,6 +245,7 @@ function snapshot(status: TaskSnapshot["task"]["status"], revision = 1, taskId =
       isolation: "local",
       workspace_root: "/workspace",
     },
+    history_sync: { state: "idle", generation: 0 },
     chat: {
       task_id: taskId,
       items: [],
@@ -229,6 +259,26 @@ function snapshot(status: TaskSnapshot["task"]["status"], revision = 1, taskId =
     settings_summary: { agent_id: "codex", isolation: "local" },
     revision,
   };
+}
+
+function snapshotWithStreamingText(taskId: string, text: string): TaskSnapshot {
+  const taskSnapshot = snapshot("active", 2, taskId);
+  taskSnapshot.task.has_messages = true;
+  taskSnapshot.chat.has_messages = true;
+  taskSnapshot.chat.items = [{
+    cursor: "message-1",
+    identity: "message-1",
+    message_type: "agent_text",
+    message_id: "message-1",
+    message: {
+      kind: "agent_text",
+      id: "agent-1",
+      text,
+      created_at: "2026-07-10T00:00:00Z",
+      streaming: true,
+    },
+  }];
+  return taskSnapshot;
 }
 
 function scrollNode({ clientHeight, scrollHeight }: { clientHeight: number; scrollHeight: number }) {

@@ -7,6 +7,7 @@ use openaide_app_server::protocol_edge::stdio::ProtocolEdgeStdioDispatcher;
 use openaide_app_server::task_events::{TaskUpdate, TaskUpdateReceiver};
 
 #[cfg(test)]
+#[path = "protocol_edge_process_tests.rs"]
 mod tests;
 
 pub(super) fn run_stdio(mut dispatcher: ProtocolEdgeStdioDispatcher) {

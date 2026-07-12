@@ -331,7 +331,7 @@ fn app_preferences_get_and_update_use_app_server_protocol() {
     );
     assert_eq!(
         response_value(initial)["result"]["preferences"]["composerSubmitShortcut"],
-        json!("modEnter")
+        json!("enter")
     );
 
     let updated = gateway.handle_inbound(
@@ -341,7 +341,7 @@ fn app_preferences_get_and_update_use_app_server_protocol() {
             SETTINGS_UPDATE_PREFERENCES,
             AppPreferencesUpdateParams {
                 preferences: AppPreferencesPatch {
-                    composer_submit_shortcut: ComposerSubmitShortcut::Enter,
+                    composer_submit_shortcut: ComposerSubmitShortcut::ModEnter,
                 },
             },
         ),
@@ -350,7 +350,7 @@ fn app_preferences_get_and_update_use_app_server_protocol() {
 
     assert_eq!(
         response_value(updated)["result"]["preferences"]["composerSubmitShortcut"],
-        json!("enter")
+        json!("modEnter")
     );
 }
 
@@ -817,18 +817,18 @@ fn committed_agent_text_deltas_publish_append_chunk_and_finalization_in_order() 
 
     assert!(matches!(
         &payloads[0],
-        AppServerEventPayload::ChatItemAppended { item, .. }
-            if item.status == ChatItemStatus::Streaming
+        AppServerEventPayload::ChatItemAppended { revision, item, .. }
+            if *revision == 2 && item.status == ChatItemStatus::Streaming
     ));
     assert!(matches!(
         &payloads[1],
-        AppServerEventPayload::ChatItemChunk { chunk, .. }
-            if chunk.sequence == 1 && chunk.text == " second" && !chunk.final_chunk
+        AppServerEventPayload::ChatItemChunk { revision, chunk, .. }
+            if *revision == 3 && chunk.sequence == 1 && chunk.text == " second" && !chunk.final_chunk
     ));
     assert!(matches!(
         &payloads[2],
-        AppServerEventPayload::ChatItemChunk { chunk, .. }
-            if chunk.sequence == 2 && chunk.text.is_empty() && chunk.final_chunk
+        AppServerEventPayload::ChatItemChunk { revision, chunk, .. }
+            if *revision == 4 && chunk.sequence == 2 && chunk.text.is_empty() && chunk.final_chunk
     ));
 }
 
@@ -934,7 +934,7 @@ fn reinitialized_client_receives_later_events_on_new_connection() {
 
     assert_eq!(publish.deliveries.len(), 1);
     assert_eq!(
-        publish.deliveries[0].connection_id,
+        publish.deliveries[0].delivery.connection_id,
         ConnectionId::new("conn-2")
     );
 }

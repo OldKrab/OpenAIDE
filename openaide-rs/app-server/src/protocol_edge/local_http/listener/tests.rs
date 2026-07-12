@@ -208,7 +208,7 @@ fn options_preflight_returns_cors_headers_without_delegating() {
 
     let response = send(
         addr,
-        "OPTIONS /probe HTTP/1.1\r\nOrigin: http://localhost\r\nAccess-Control-Request-Headers: authorization,x-openaide-connection-id\r\nContent-Length: 0\r\n\r\n",
+        "OPTIONS /probe HTTP/1.1\r\nOrigin: http://localhost\r\nAccess-Control-Request-Headers: authorization,x-openaide-connection-id\r\n\r\n",
     );
     server.join().unwrap();
 

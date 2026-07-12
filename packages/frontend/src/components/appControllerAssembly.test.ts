@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { TaskSummary } from "@openaide/app-shell-contracts";
+import { AppServerProtocolError } from "@openaide/app-server-client";
 import { createInitialState } from "../state/store";
 import { appControllerDerivedStateDeps, deriveAppControllerState, visibleTasks } from "./appControllerDerivedState";
 import { requestControllerNativeSessions } from "./appControllerNativeSessions";
@@ -207,6 +208,44 @@ describe("deriveAppControllerState", () => {
 });
 
 describe("requestControllerNativeSessions", () => {
+  it("reports the typed App Server failure when session history cannot load", async () => {
+    const dispatch = vi.fn();
+    const onFailure = vi.fn();
+    const request = vi.fn().mockRejectedValue(new AppServerProtocolError({
+      error: {
+        code: "notFound",
+        message: "Project project-current was not found",
+        target: { method: "agent/listSessions", field: "projectId" },
+      },
+    }));
+
+    requestControllerNativeSessions({
+      agentId: "codex",
+      backendConnection: { request },
+      dispatch,
+      latestSessionListRequestId: { current: undefined },
+      nextSessionListRequestId: { current: 0 },
+      onFailure,
+      projectId: "project-current",
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(onFailure).toHaveBeenCalledWith({
+      agentId: "codex",
+      errorCode: "notFound",
+      errorMessage: "Project project-current was not found",
+      errorName: "AppServerProtocolError",
+      projectId: "project-current",
+      request: "agent/listSessions",
+      requestId: 1,
+    });
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "newTask:nativeSessions:error",
+      message: "Unable to load Agent session history.",
+    });
+  });
+
   it("increments request ids and reports an error when listing sessions without BackendConnection", () => {
     const dispatch = vi.fn();
     const latestSessionListRequestId = { current: undefined as number | undefined };

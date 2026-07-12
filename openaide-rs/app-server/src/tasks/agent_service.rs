@@ -75,4 +75,5 @@ impl AgentService {
 }
 
 #[cfg(test)]
+#[path = "agent_service_tests.rs"]
 mod tests;

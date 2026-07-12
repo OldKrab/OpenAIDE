@@ -1,8 +1,10 @@
 import type {
   ClientInstanceId,
   InitializeParams,
+  ProjectId,
   RequestedSurface,
   ShellCapability,
+  SubscriptionScope,
 } from "@openaide/app-server-client";
 import type { WebviewBootstrap } from "../state/surfaceTypes";
 
@@ -21,6 +23,15 @@ export function getClientInstanceId(storage = availableSessionStorage()): Client
     // sessionStorage may be present but blocked; memory identity still keeps this tab stable.
   }
   return id;
+}
+
+export function taskNavigationScopeForBootstrap(bootstrap: WebviewBootstrap): SubscriptionScope {
+  const fixedProjectId = bootstrap.surface !== "invalid" && shellKindForBootstrap(bootstrap) === "vscodeExtension"
+    ? bootstrap.projectId
+    : undefined;
+  return fixedProjectId
+    ? { kind: "taskNavigation", projectId: fixedProjectId as ProjectId }
+    : { kind: "taskNavigation" };
 }
 
 export function initializeParamsForBootstrap(
@@ -61,7 +72,9 @@ function shellKindForBootstrap(bootstrap: WebviewBootstrap) {
 function requestedSurfaceForBootstrap(bootstrap: WebviewBootstrap): RequestedSurface {
   switch (bootstrap.surface) {
     case "navigation":
-      return { kind: "home" };
+      return bootstrap.projectId
+        ? { kind: "project", projectId: bootstrap.projectId as RequestedSurfaceProjectId }
+        : { kind: "home" };
     case "settings":
       return { kind: "settings" };
     case "task":

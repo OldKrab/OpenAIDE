@@ -22,4 +22,5 @@ impl Default for ChatHistoryPolicy {
 }
 
 #[cfg(test)]
+#[path = "chat_history_tests.rs"]
 mod tests;

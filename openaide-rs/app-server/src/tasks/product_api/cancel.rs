@@ -32,6 +32,8 @@ impl TaskProductApi {
                 return Err(conflict_error("Task turn is not active"));
             }
         }
+        // Stop also owns synchronization cancellation, including a Retry that has not prompted yet.
+        let cancellation_generation = self.history_sync.begin_send(&task_id);
         self.turn_runner.cancel_turn(&active_turn_id);
 
         let now = now_string();
@@ -65,6 +67,14 @@ impl TaskProductApi {
             .map_err(protocol_error_from_runtime)?;
         if !matches!(result.outcome, TaskCommitOutcome::Committed(_)) {
             return Err(conflict_error("Task turn is not active"));
+        }
+        if self.history_sync.take_deferred_send(&task_id).is_some() {
+            self.publish_history_sync(
+                &task_id,
+                openaide_app_server_protocol::snapshot::TaskHistorySyncSnapshot::Idle {
+                    generation: cancellation_generation,
+                },
+            );
         }
         let snapshot = result
             .response_snapshot

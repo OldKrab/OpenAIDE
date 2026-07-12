@@ -1,10 +1,12 @@
 use openaide_app_server_protocol::errors::ProtocolError;
 use openaide_app_server_protocol::snapshot::TaskSnapshot;
-use openaide_app_server_protocol::task::{TaskMarkReadParams, TaskOpenParams};
+use openaide_app_server_protocol::task::{
+    TaskMarkReadParams, TaskOpenParams, TaskRetryHistorySyncParams,
+};
 use std::time::Instant;
 
 use crate::agent::{
-    AgentListSessionsRequest, AgentLoadedSession, AgentSessionLoad, TurnCancellation,
+    AgentListSessionsRequest, AgentSessionLoad, AgentSessionResume, TurnCancellation,
 };
 use crate::logging;
 use crate::protocol::errors::RuntimeError;
@@ -19,6 +21,14 @@ use super::{internal_error, protocol_error_from_runtime, runtime_error, TaskProd
 pub(crate) trait TaskOpenWorkflow: Send + Sync {
     fn open(&self, params: TaskOpenParams) -> Result<TaskSnapshot, ProtocolError>;
     fn mark_read(&self, params: TaskMarkReadParams) -> Result<TaskSnapshot, ProtocolError>;
+    fn retry_history_sync(
+        &self,
+        params: TaskRetryHistorySyncParams,
+    ) -> Result<TaskSnapshot, ProtocolError> {
+        self.open(TaskOpenParams {
+            task_id: params.task_id,
+        })
+    }
 }
 
 impl TaskProductApi {
@@ -51,10 +61,6 @@ impl TaskProductApi {
         let task = self.store.read_task(&task_id).map_err(runtime_error)?;
         super::reject_tombstoned_task(&task)?;
 
-        if let Some(snapshot) = self.refresh_adopted_task_from_native_session_if_newer(&task)? {
-            return project_stored_task_snapshot(snapshot);
-        }
-
         let result = self
             .mutations
             .commit_existing_task(&task_id, super::response_snapshot_options(), |ctx| {
@@ -71,12 +77,65 @@ impl TaskProductApi {
         let snapshot = result
             .response_snapshot
             .ok_or_else(|| internal_error("missing task open snapshot"))?;
+        self.spawn_adopted_task_refresh(task);
         project_stored_task_snapshot(snapshot)
+    }
+
+    /// Native history reconciliation may involve a slow Agent operation. Task opening is
+    /// cache-first; any fresher history is committed and published after the response.
+    fn spawn_adopted_task_refresh(&self, task: TaskRecord) {
+        let generation = self.history_sync.begin_passive(&task.task_id);
+        self.publish_history_sync(
+            &task.task_id,
+            openaide_app_server_protocol::snapshot::TaskHistorySyncSnapshot::Checking {
+                generation: generation.value(),
+            },
+        );
+        let api = self.clone();
+        std::thread::spawn(move || {
+            let result = api.refresh_adopted_task_from_native_session_if_newer(&task, generation);
+            if !api.history_sync.is_current(&task.task_id, generation) {
+                return;
+            }
+            match result {
+                Ok(Some(_)) => api.publish_history_sync(
+                    &task.task_id,
+                    openaide_app_server_protocol::snapshot::TaskHistorySyncSnapshot::Updated {
+                        generation: generation.value(),
+                    },
+                ),
+                Ok(None) => api.publish_history_sync(
+                    &task.task_id,
+                    openaide_app_server_protocol::snapshot::TaskHistorySyncSnapshot::Idle {
+                        generation: generation.value(),
+                    },
+                ),
+                Err(error) => {
+                    api.publish_history_sync(
+                        &task.task_id,
+                        openaide_app_server_protocol::snapshot::TaskHistorySyncSnapshot::Failed {
+                            generation: generation.value(),
+                            message: error.message.clone(),
+                            before_send: false,
+                        },
+                    );
+                    logging::warn(
+                        "adopted_task_background_refresh_failed",
+                        serde_json::json!({
+                            "task_id": task.task_id,
+                            "agent_id": task.agent_id,
+                            "error": error.message,
+                        }),
+                    );
+                }
+            }
+        });
     }
 
     fn refresh_adopted_task_from_native_session_if_newer(
         &self,
         task: &TaskRecord,
+        generation: crate::tasks::history_sync::PassiveSyncGeneration,
     ) -> Result<Option<crate::protocol::model::TaskSnapshot>, ProtocolError> {
         if !task.first_prompt_sent
             || task.status == LegacyTaskStatus::Active
@@ -87,21 +146,49 @@ impl TaskProductApi {
         let Some(stored_session_id) = task.agent_session_id.clone() else {
             return Ok(None);
         };
-        let Some(native_session) = self.newer_native_session_for_task(task, &stored_session_id)?
-        else {
+        if self.native_session_is_active(task, &stored_session_id)? {
+            return Ok(None);
+        }
+        let Some(native_session) = self.native_session_for_task(task, &stored_session_id)? else {
             return Ok(None);
         };
+        self.history_sync
+            .run_passive(&task.task_id, generation, || {
+                self.refresh_adopted_task_from_native_session_if_newer_exclusive(
+                    task,
+                    stored_session_id,
+                    native_session,
+                )
+            })
+            .unwrap_or(Ok(None))
+    }
+
+    fn refresh_adopted_task_from_native_session_if_newer_exclusive(
+        &self,
+        task: &TaskRecord,
+        stored_session_id: String,
+        native_session: AgentListedSession,
+    ) -> Result<Option<crate::protocol::model::TaskSnapshot>, ProtocolError> {
+        let current_task = self.store.read_task(&task.task_id).map_err(runtime_error)?;
+        if current_task.agent_session_id.as_deref() != Some(stored_session_id.as_str())
+            || self.native_session_is_active(&current_task, &stored_session_id)?
+        {
+            return Ok(None);
+        }
         let refresh_started = Instant::now();
         let load_started = Instant::now();
-        let loaded = self.load_adopted_session_for_refresh(AgentSessionLoad {
-            agent_id: task.agent_id.clone(),
-            task_id: task.task_id.clone(),
-            cwd: task.workspace_root.clone(),
-            model_id: task.model_id.clone(),
-            session_id: stored_session_id.clone(),
-            cancellation: TurnCancellation::new(),
-            secret_resolver: Some(self.task_secret_resolver(&task.task_id)),
-        })?;
+        let loaded = self
+            .agent_gateway
+            .load_session(AgentSessionLoad {
+                agent_id: task.agent_id.clone(),
+                task_id: task.task_id.clone(),
+                cwd: task.workspace_root.clone(),
+                model_id: task.model_id.clone(),
+                session_id: stored_session_id.clone(),
+                cancellation: TurnCancellation::new(),
+                secret_resolver: Some(self.task_secret_resolver(&task.task_id)),
+            })
+            .map_err(protocol_error_from_runtime)?;
         let load_ms = load_started.elapsed().as_millis();
         let mut session_start =
             TaskSessionStartGuard::new(&self.agent_gateway, loaded.session.clone());
@@ -195,32 +282,50 @@ impl TaskProductApi {
         Ok(Some(snapshot))
     }
 
-    fn load_adopted_session_for_refresh(
+    fn native_session_is_active(
         &self,
-        request: AgentSessionLoad,
-    ) -> Result<AgentLoadedSession, ProtocolError> {
-        match self.agent_gateway.load_session(request.clone()) {
-            Ok(loaded) => Ok(loaded),
-            Err(RuntimeError::InvalidParams(message))
-                if message == "agent_session_id already active" =>
+        task: &TaskRecord,
+        session_id: &str,
+    ) -> Result<bool, ProtocolError> {
+        match self.agent_gateway.resume_session(AgentSessionResume {
+            agent_id: task.agent_id.clone(),
+            task_id: task.task_id.clone(),
+            session_id: session_id.to_string(),
+            cwd: task.workspace_root.clone(),
+            model_id: task.model_id.clone(),
+            cancellation: TurnCancellation::new(),
+        }) {
+            Ok(_) => Ok(true),
+            Err(RuntimeError::CapabilityMissing(capability))
+                if capability == "acp_session_resume_after_runtime_restart" =>
             {
-                self.agent_gateway
-                    .close_session(&request.session_id)
-                    .map_err(protocol_error_from_runtime)?;
-                self.agent_gateway
-                    .load_session(request)
-                    .map_err(protocol_error_from_runtime)
+                Ok(false)
             }
             Err(error) => Err(protocol_error_from_runtime(error)),
         }
     }
 
-    fn newer_native_session_for_task(
+    fn native_session_for_task(
         &self,
         task: &TaskRecord,
         session_id: &str,
     ) -> Result<Option<AgentListedSession>, ProtocolError> {
+        let sessions =
+            self.history_sync
+                .listed_sessions(&task.agent_id, &task.workspace_root, || {
+                    self.fetch_native_sessions(task)
+                })?;
+        Ok(sessions
+            .into_iter()
+            .find(|session| session.session_id == session_id))
+    }
+
+    fn fetch_native_sessions(
+        &self,
+        task: &TaskRecord,
+    ) -> Result<Vec<AgentListedSession>, ProtocolError> {
         let mut cursor = None;
+        let mut sessions = Vec::new();
         loop {
             let result = match self.agent_gateway.list_sessions(AgentListSessionsRequest {
                 agent_id: task.agent_id.clone(),
@@ -228,17 +333,11 @@ impl TaskProductApi {
                 cursor: cursor.clone(),
             }) {
                 Ok(result) => result,
-                Err(_) => return Ok(None),
+                Err(error) => return Err(protocol_error_from_runtime(error)),
             };
-            if let Some(session) = result
-                .sessions
-                .into_iter()
-                .find(|session| session.session_id == session_id)
-            {
-                return Ok(native_session_is_newer(task, &session).then_some(session));
-            }
+            sessions.extend(result.sessions);
             if result.next_cursor.is_none() || result.next_cursor == cursor {
-                return Ok(None);
+                return Ok(sessions);
             }
             cursor = result.next_cursor;
         }
@@ -253,122 +352,43 @@ impl TaskOpenWorkflow for TaskProductApi {
     fn mark_read(&self, params: TaskMarkReadParams) -> Result<TaskSnapshot, ProtocolError> {
         self.mark_task_read(params)
     }
-}
 
-fn native_session_is_newer(task: &TaskRecord, session: &AgentListedSession) -> bool {
-    let Some(native_last_activity) = session.last_activity.as_deref() else {
-        return false;
-    };
-    timestamp_compare(native_last_activity, &task.last_activity).is_gt()
-}
-
-fn timestamp_compare(left: &str, right: &str) -> std::cmp::Ordering {
-    let left_millis = timestamp_millis(left);
-    let right_millis = timestamp_millis(right);
-    match (left_millis, right_millis) {
-        (Some(left), Some(right)) => left.cmp(&right),
-        _ => left.cmp(right),
+    fn retry_history_sync(
+        &self,
+        params: TaskRetryHistorySyncParams,
+    ) -> Result<TaskSnapshot, ProtocolError> {
+        let task_id = params.task_id.as_str().to_string();
+        let Some(pending) = self.history_sync.take_deferred_send(&task_id) else {
+            return self.open_task(TaskOpenParams {
+                task_id: params.task_id,
+            });
+        };
+        let task = self.store.read_task(&task_id).map_err(runtime_error)?;
+        super::reject_tombstoned_task(&task)?;
+        let snapshot = crate::tasks::snapshot::build_snapshot(&self.store, &task_id, 100)
+            .map_err(super::storage_error)?;
+        let sync_generation = self.history_sync.begin_send(&task_id);
+        self.publish_history_sync(
+            &task_id,
+            openaide_app_server_protocol::snapshot::TaskHistorySyncSnapshot::Syncing {
+                generation: sync_generation,
+            },
+        );
+        let api = self.clone();
+        std::thread::spawn(move || {
+            if let Err(error) = api.start_committed_send(
+                task,
+                pending.prompt_text,
+                pending.attachments,
+                pending.committed_send,
+                sync_generation,
+            ) {
+                logging::error(
+                    "task_history_sync_retry_failed",
+                    serde_json::json!({ "task_id": task_id, "error": error.message }),
+                );
+            }
+        });
+        project_stored_task_snapshot(snapshot)
     }
-}
-
-fn timestamp_millis(value: &str) -> Option<i128> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return None;
-    }
-    if trimmed.as_bytes().iter().all(|byte| byte.is_ascii_digit()) {
-        return trimmed.parse::<i128>().ok();
-    }
-    iso_utc_millis(trimmed)
-}
-
-fn iso_utc_millis(value: &str) -> Option<i128> {
-    let bytes = value.as_bytes();
-    if bytes.len() < 20
-        || bytes.get(4) != Some(&b'-')
-        || bytes.get(7) != Some(&b'-')
-        || !matches!(bytes.get(10), Some(b'T' | b't'))
-        || bytes.get(13) != Some(&b':')
-        || bytes.get(16) != Some(&b':')
-        || !value.ends_with('Z')
-    {
-        return None;
-    }
-    let year = parse_digits(value, 0, 4)? as i32;
-    let month = parse_digits(value, 5, 7)?;
-    let day = parse_digits(value, 8, 10)?;
-    let hour = parse_digits(value, 11, 13)?;
-    let minute = parse_digits(value, 14, 16)?;
-    let second = parse_digits(value, 17, 19)?;
-    if !(1..=12).contains(&month)
-        || !(1..=31).contains(&day)
-        || hour > 23
-        || minute > 59
-        || second > 60
-    {
-        return None;
-    }
-    let millis = if bytes.get(19) == Some(&b'.') {
-        parse_fraction_millis(&value[20..value.len() - 1])?
-    } else if bytes.get(19) == Some(&b'Z') {
-        0
-    } else {
-        return None;
-    };
-    let days = days_from_civil(year, month, day)?;
-    Some(
-        (((days * 24 + hour as i128) * 60 + minute as i128) * 60 + second as i128) * 1000
-            + millis as i128,
-    )
-}
-
-fn parse_digits(value: &str, start: usize, end: usize) -> Option<u32> {
-    value.get(start..end)?.parse().ok()
-}
-
-fn parse_fraction_millis(fraction: &str) -> Option<u32> {
-    if fraction.is_empty() || !fraction.as_bytes().iter().all(|byte| byte.is_ascii_digit()) {
-        return None;
-    }
-    let mut digits = fraction
-        .as_bytes()
-        .iter()
-        .take(3)
-        .map(|digit| (digit - b'0') as u32);
-    let hundreds = digits.next().unwrap_or(0);
-    let tens = digits.next().unwrap_or(0);
-    let ones = digits.next().unwrap_or(0);
-    Some(hundreds * 100 + tens * 10 + ones)
-}
-
-fn days_from_civil(year: i32, month: u32, day: u32) -> Option<i128> {
-    let leap = is_leap_year(year);
-    let month_lengths = [
-        31,
-        if leap { 29 } else { 28 },
-        31,
-        30,
-        31,
-        30,
-        31,
-        31,
-        30,
-        31,
-        30,
-        31,
-    ];
-    if day == 0 || day > month_lengths[(month - 1) as usize] {
-        return None;
-    }
-    let year = year - (month <= 2) as i32;
-    let era = if year >= 0 { year } else { year - 399 } / 400;
-    let yoe = year - era * 400;
-    let month = month as i32;
-    let doy = (153 * (month + if month > 2 { -3 } else { 9 }) + 2) / 5 + day as i32 - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    Some((era * 146097 + doe - 719468) as i128)
-}
-
-fn is_leap_year(year: i32) -> bool {
-    (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
 }

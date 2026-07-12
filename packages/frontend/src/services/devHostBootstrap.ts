@@ -14,7 +14,7 @@ export function standaloneBootstrapFrom(input: StandaloneBootstrapInput): Webvie
   return {
     surface,
     taskId: surface === "task" && !isNewTaskPath(input.pathname) ? "demo_task" : undefined,
-    preferences: { composer_submit_shortcut: "mod_enter" },
+    preferences: { composer_submit_shortcut: "enter" },
   };
 }
 

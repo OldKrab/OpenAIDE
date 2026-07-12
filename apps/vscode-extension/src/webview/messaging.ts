@@ -45,7 +45,12 @@ async function routeWebviewMessage(message: WebviewToHostMessage, context: Messa
 
 async function routeRuntimeCommand(message: WebviewToHostMessage, context: MessageContext) {
   if (message.type === "webview.telemetry" && isObject(message.payload)) {
-    context.logger.info("webview telemetry", webviewTelemetryFields(message.payload));
+    const fields = webviewTelemetryFields(message.payload);
+    if (message.payload.event === "native_sessions_load_failed") {
+      context.logger.error("webview telemetry", fields);
+    } else {
+      context.logger.info("webview telemetry", fields);
+    }
     return true;
   }
   return false;

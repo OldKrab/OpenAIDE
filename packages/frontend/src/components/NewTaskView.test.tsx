@@ -13,6 +13,53 @@ beforeEach(() => {
 });
 
 describe("NewTaskView", () => {
+  it("uses fixed VS Code workspace context without rendering project selection", () => {
+    const state = createInitialState();
+    state.workspaceRootsLoaded = true;
+    state.newTask.selection = {
+      ...state.newTask.selection,
+      projectId: "project_1",
+      workspaceLabel: "OpenAIDE",
+      workspaceRoot: "/workspace/OpenAIDE",
+    };
+    const tree = render(
+      <NewTaskView
+        agents={[]}
+        dispatch={vi.fn()}
+        onSelectConfigOption={vi.fn()}
+        onSubmitTask={vi.fn()}
+        projectContextMode="fixed"
+        resetOptionsRequestKey={vi.fn()}
+        state={state}
+        submitShortcut="mod_enter"
+      />,
+    );
+
+    expect(textContent(tree)).not.toContain("Choose workspace");
+    expect(tree.root.findAllByProps({ className: "new-task-context-anchor new-task-context-anchor-project " })).toHaveLength(0);
+    expect(buttonWithText(tree, "Codex")).toBeDefined();
+  });
+
+  it("asks users to open a VS Code folder when fixed context is unavailable", () => {
+    const state = createInitialState();
+    state.workspaceRootsLoaded = true;
+    const tree = render(
+      <NewTaskView
+        agents={[]}
+        dispatch={vi.fn()}
+        onSelectConfigOption={vi.fn()}
+        onSubmitTask={vi.fn()}
+        projectContextMode="fixed"
+        resetOptionsRequestKey={vi.fn()}
+        state={state}
+        submitShortcut="mod_enter"
+      />,
+    );
+
+    expect(textContent(tree)).toContain("Open a folder in VS Code to start a task.");
+    expect(textContent(tree)).not.toContain("Choose or enter");
+  });
+
   it("renders backend-provided project and agent choices in the context selectors", () => {
     const state = createInitialState();
     const project = { projectId: "project_1", label: "OpenAIDE" };
@@ -88,7 +135,7 @@ describe("NewTaskView", () => {
     expect(menuLabels(tree).length).toBeGreaterThan(0);
   });
 
-  it("shows project loading instead of a final empty project selector before App Server state arrives", () => {
+  it("shows workspace loading instead of a final empty workspace selector before App Server state arrives", () => {
     const state = createInitialState();
     const tree = render(
       <NewTaskView
@@ -104,7 +151,7 @@ describe("NewTaskView", () => {
     );
 
     expect(buttonWithText(tree, "Loading").props.disabled).toBe(true);
-    expect(textContent(tree)).toContain("Loading projects.");
+    expect(textContent(tree)).toContain("Loading workspaces.");
   });
 
   it("accepts a workspace path when no project has been seen before", () => {
@@ -345,7 +392,7 @@ describe("NewTaskView", () => {
 
     act(() => tree.root.findByProps({ "aria-label": "Add context" }).props.onClick());
 
-    expect(menuButtonByStrongLabel(tree, "Project files").props.disabled).toBe(true);
+    expect(menuButtonByStrongLabel(tree, "Workspace files").props.disabled).toBe(true);
     expect(menuButtonByStrongLabel(tree, "Upload or photo").props.disabled).toBe(true);
     expect(tree.root.findAllByProps({ type: "file" })[0].props.disabled).toBe(true);
   });
@@ -372,7 +419,7 @@ describe("NewTaskView", () => {
 
     act(() => tree.root.findByProps({ "aria-label": "Add context" }).props.onClick());
 
-    expect(menuButtonByStrongLabel(tree, "Project files").props.disabled).toBeFalsy();
+    expect(menuButtonByStrongLabel(tree, "Workspace files").props.disabled).toBeFalsy();
     expect(menuButtonByStrongLabel(tree, "Upload or photo").props.disabled).toBeFalsy();
     expect(tree.root.findAllByProps({ type: "file" })[0].props.disabled).toBeFalsy();
   });
@@ -1010,6 +1057,7 @@ function taskSnapshot(taskId: string, hasMessages: boolean): TaskSnapshot {
       total_count: 0,
       version: 1,
     },
+    history_sync: { state: "idle", generation: 0 },
     permissions: [],
     settings_summary: {
       agent_id: "codex",

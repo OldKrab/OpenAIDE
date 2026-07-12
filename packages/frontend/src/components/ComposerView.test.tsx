@@ -148,9 +148,9 @@ describe("Composer view behavior", () => {
 
     const menu = menuByLabel(renderer.root, "Add context");
     expect(menu.findAllByProps({ role: "menuitem" })).toHaveLength(2);
-    expect(text(menuButtonByStrongLabel(renderer.root, "Project files"))).toContain("Browse files and images in this project.");
+    expect(text(menuButtonByStrongLabel(renderer.root, "Workspace files"))).toContain("Browse files and images in this workspace.");
     expect(text(menuButtonByStrongLabel(renderer.root, "Upload or photo"))).toContain("Choose images from this device.");
-    expect(menuButtonByStrongLabel(renderer.root, "Project files").props.disabled).toBe(true);
+    expect(menuButtonByStrongLabel(renderer.root, "Workspace files").props.disabled).toBe(true);
     expect(menuButtonByStrongLabel(renderer.root, "Upload or photo").props.disabled).toBe(true);
     expect(renderer.root.findAllByProps({ type: "file" })[0].props.disabled).toBe(true);
   });
@@ -160,22 +160,22 @@ describe("Composer view behavior", () => {
     const renderer = renderComposer({ fileBrowser });
 
     click(buttonByLabel(renderer.root, "Add context"));
-    click(menuButtonByStrongLabel(renderer.root, "Project files"));
+    click(menuButtonByStrongLabel(renderer.root, "Workspace files"));
     await settleRenderer();
 
     expect(fileBrowser.listRoots).toHaveBeenCalledTimes(1);
     expect(fileBrowser.listDirectory).toHaveBeenCalledWith("root-1");
-    expect(text(menuByLabel(renderer.root, "Project files"))).toContain("notes.md");
-    expect(text(menuByLabel(renderer.root, "Project files"))).toContain("diagram.png");
+    expect(text(menuByLabel(renderer.root, "Workspace files"))).toContain("notes.md");
+    expect(text(menuByLabel(renderer.root, "Workspace files"))).toContain("diagram.png");
 
     click(buttonByText(renderer.root, "Reference"));
     await settleRenderer();
 
     expect(fileBrowser.attachFileReference).toHaveBeenCalledWith("entry-notes");
-    expect(menusByLabel(renderer.root, "Project files")).toHaveLength(0);
+    expect(menusByLabel(renderer.root, "Workspace files")).toHaveLength(0);
 
     click(buttonByLabel(renderer.root, "Add context"));
-    click(menuButtonByStrongLabel(renderer.root, "Project files"));
+    click(menuButtonByStrongLabel(renderer.root, "Workspace files"));
     await settleRenderer();
     const diagramRow = renderer.root
       .findAllByProps({ className: "composer-file-row file" })
@@ -185,7 +185,7 @@ describe("Composer view behavior", () => {
     await settleRenderer();
 
     expect(fileBrowser.attachEmbedded).toHaveBeenCalledWith("entry-diagram");
-    expect(menusByLabel(renderer.root, "Project files")).toHaveLength(0);
+    expect(menusByLabel(renderer.root, "Workspace files")).toHaveLength(0);
   });
 
   it("closes the project file picker on Escape and click-away inside the composer", async () => {
@@ -193,25 +193,25 @@ describe("Composer view behavior", () => {
     const renderer = renderComposer({ fileBrowser });
 
     click(buttonByLabel(renderer.root, "Add context"));
-    click(menuButtonByStrongLabel(renderer.root, "Project files"));
+    click(menuButtonByStrongLabel(renderer.root, "Workspace files"));
     await settleRenderer();
 
-    expect(menuByLabel(renderer.root, "Project files")).toBeTruthy();
+    expect(menuByLabel(renderer.root, "Workspace files")).toBeTruthy();
 
     act(() => {
       renderer.root.findByType("section").props.onKeyDown({ key: "Escape" });
     });
-    expect(menusByLabel(renderer.root, "Project files")).toHaveLength(0);
+    expect(menusByLabel(renderer.root, "Workspace files")).toHaveLength(0);
 
     click(buttonByLabel(renderer.root, "Add context"));
-    click(menuButtonByStrongLabel(renderer.root, "Project files"));
+    click(menuButtonByStrongLabel(renderer.root, "Workspace files"));
     await settleRenderer();
-    expect(menuByLabel(renderer.root, "Project files")).toBeTruthy();
+    expect(menuByLabel(renderer.root, "Workspace files")).toBeTruthy();
 
     act(() => {
       textarea(renderer.root).props.onPointerDown();
     });
-    expect(menusByLabel(renderer.root, "Project files")).toHaveLength(0);
+    expect(menusByLabel(renderer.root, "Workspace files")).toHaveLength(0);
   });
 
   it("uploads every selected image through the App Server attachment callback", async () => {
@@ -655,6 +655,19 @@ describe("Composer view behavior", () => {
     expect(onSubmit).not.toHaveBeenCalled();
   });
 
+  it("enables attachment-only sending only after an attachment is added", () => {
+    const emptyRenderer = renderComposer({ submitRequiresText: false });
+
+    expect(buttonByLabel(emptyRenderer.root, "Send message").props.disabled).toBe(true);
+
+    const attachmentRenderer = renderComposer({
+      attachments: [attachment("attachment_1", "pasted.png", "attachment-handle-image")],
+      submitRequiresText: false,
+    });
+
+    expect(buttonByLabel(attachmentRenderer.root, "Send message").props.disabled).toBe(false);
+  });
+
   it("keeps keystrokes out of React callbacks and submits the DOM draft", () => {
     const onChange = vi.fn();
     const onSubmit = vi.fn();
@@ -699,6 +712,33 @@ describe("Composer view behavior", () => {
     });
     act(() => {
       renderer.update(composerElement({ commandCatalog: commandCatalog(), onCancel: vi.fn(), onSubmit, prompt: "", submitPending: false }));
+    });
+
+    expect(editorDom.innerHTML).toBe("");
+  });
+
+  it("clears the local draft when Backend acceptance is batched past the pending render", () => {
+    const onSubmit = vi.fn();
+    const { editorDom, renderer } = renderComposerWithEditorDom({
+      commandCatalog: commandCatalog(),
+      onCancel: vi.fn(),
+      onSubmit,
+      prompt: "",
+      submissionSettlementKey: 1,
+    });
+
+    editorDom.innerHTML = "Accepted immediately";
+    inputText(textarea(renderer.root), "Accepted immediately");
+    click(buttonByLabel(renderer.root, "Send message"));
+    act(() => {
+      renderer.update(composerElement({
+        commandCatalog: commandCatalog(),
+        onCancel: vi.fn(),
+        onSubmit,
+        prompt: "",
+        submissionSettlementKey: 2,
+        submitPending: false,
+      }));
     });
 
     expect(editorDom.innerHTML).toBe("");
@@ -963,6 +1003,8 @@ function composerElement(overrides: Partial<ComposerTestProps> = {}) {
       showIsolationSelector={overrides.showIsolationSelector}
       submitDisabled={overrides.submitDisabled ?? false}
       submitPending={overrides.submitPending}
+      submitRequiresText={overrides.submitRequiresText}
+      submissionSettlementKey={overrides.submissionSettlementKey}
       submitShortcut={overrides.submitShortcut ?? "mod_enter"}
     />
   );
@@ -995,6 +1037,8 @@ type ComposerTestProps = {
   showIsolationSelector: boolean;
   submitDisabled: boolean;
   submitPending: boolean;
+  submitRequiresText: boolean;
+  submissionSettlementKey: number | string;
   submitShortcut: ComposerSubmitShortcut;
 };
 

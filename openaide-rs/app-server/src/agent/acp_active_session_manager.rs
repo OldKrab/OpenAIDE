@@ -14,13 +14,15 @@ use crate::agent::acp_session_worker::{
 use crate::agent::acp_trace::{AcpTraceSession, AcpTraceState};
 use crate::agent::registry_handle::AgentRegistryHandle;
 use crate::agent::{
-    AgentEventSink, AgentLoadedSession, AgentPrompt, AgentSession, AgentSessionDelete,
-    AgentSessionEventSink, AgentSessionLoad, AgentSessionResume,
-    AgentSessionSetConfigOptionRequest, AgentSessionStart,
+    AgentAuthenticateRequest, AgentEventSink, AgentListSessionsRequest, AgentLoadedSession,
+    AgentPrompt, AgentSession, AgentSessionDelete, AgentSessionEventSink, AgentSessionLoad,
+    AgentSessionResume, AgentSessionSetConfigOptionRequest, AgentSessionStart,
 };
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::host::HostBridge;
-use crate::protocol::model::ConfigOptionsCatalog;
+use crate::protocol::model::{
+    AgentAuthenticateResult, AgentListSessionsResult, AgentProbeResult, ConfigOptionsCatalog,
+};
 
 const DEFAULT_START_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -67,6 +69,32 @@ impl AcpActiveSessionManager {
 
         let started = self.open_session(AcpSessionOpenRequest::Start(request))?;
         Ok(started.session)
+    }
+
+    pub(super) fn list_sessions(
+        &self,
+        request: AgentListSessionsRequest,
+    ) -> Result<AgentListSessionsResult, RuntimeError> {
+        self.processes
+            .list_sessions(request, self.auth_method_cache.preferred_method())
+    }
+
+    pub(super) fn probe(
+        &self,
+        agent_id: &str,
+        timeout: Duration,
+    ) -> Result<AgentProbeResult, RuntimeError> {
+        self.processes.probe(agent_id, timeout)
+    }
+
+    pub(super) fn authenticate(
+        &self,
+        request: AgentAuthenticateRequest,
+    ) -> Result<AgentAuthenticateResult, RuntimeError> {
+        let result = self.processes.authenticate(request)?;
+        self.auth_method_cache
+            .record_authenticated_method(result.method_id.clone());
+        Ok(result)
     }
 
     pub(super) fn load_session(

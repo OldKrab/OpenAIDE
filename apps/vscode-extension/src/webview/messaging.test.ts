@@ -168,6 +168,42 @@ describe("webview messaging composer routes", () => {
     expect(posted).toEqual([]);
   });
 
+  it("records native session load failures as structured error logs", async () => {
+    const posted: unknown[] = [];
+    const logger = { warn: vi.fn(), info: vi.fn(), error: vi.fn() };
+
+    await handleWebviewMessage(
+      {
+        type: "webview.telemetry",
+        payload: {
+          event: "native_sessions_load_failed",
+          surface: "navigation",
+          request: "agent/listSessions",
+          session_list_request_id: 4,
+          agent_id: "codex",
+          project_id: "project-current",
+          error_name: "AppServerProtocolError",
+          error_code: "notFound",
+          error_message: "Project /workspace/private was not found",
+        },
+      },
+      context({}, posted, undefined, logger),
+    );
+
+    expect(logger.error).toHaveBeenCalledWith("webview telemetry", {
+      event: "native_sessions_load_failed",
+      surface: "navigation",
+      request: "agent/listSessions",
+      session_list_request_id: 4,
+      agent_id: "codex",
+      project_id: "project-current",
+      error_name: "AppServerProtocolError",
+      error_code: "notFound",
+      error_message: "Project [path] was not found",
+    });
+    expect(posted).toEqual([]);
+  });
+
   it("answers App Server secret read requests from VS Code secrets", async () => {
     const posted: unknown[] = [];
     const agentSecretStore = {

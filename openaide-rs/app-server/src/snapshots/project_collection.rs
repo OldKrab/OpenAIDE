@@ -99,4 +99,5 @@ fn snapshot_read_error(error: impl std::fmt::Display) -> ProtocolError {
 }
 
 #[cfg(test)]
+#[path = "project_collection_tests.rs"]
 mod tests;

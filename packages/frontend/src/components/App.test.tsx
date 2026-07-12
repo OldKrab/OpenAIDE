@@ -100,6 +100,12 @@ describe("task working status label", () => {
     );
   });
 
+  it("shows a standalone streaming thought as the latest live activity", async () => {
+    const { taskWorkingStatusLabel } = await import("./App");
+
+    expect(taskWorkingStatusLabel([thoughtMessage("m8", true)], "active", false)).toBe("Thinking");
+  });
+
   it("starts a new turn instead of reusing work from before the latest user message", async () => {
     const { taskWorkingStatusLabel } = await import("./App");
     const previousResponse = agentMessage("m8", "The first turn is complete.");
@@ -131,6 +137,20 @@ describe("task working status label", () => {
     expect(taskWorkingStatusLabel([], "blocked", false)).toBe("Permission needed");
     expect(taskWorkingStatusLabel([systemMessage("app-server-preparation")], "blocked", false)).toBe("Preparing task");
     expect(taskWorkingStatusLabel([], "inactive", false)).toBeUndefined();
+  });
+
+  it("uses the live activity row for conversation history synchronization", async () => {
+    const { taskWorkingStatusLabel } = await import("./App");
+
+    expect(taskWorkingStatusLabel([], "inactive", false, { state: "checking", generation: 1 })).toBe("Checking for newer history");
+    expect(taskWorkingStatusLabel([], "active", false, { state: "syncing", generation: 1 })).toBe("Syncing conversation history");
+    expect(taskWorkingStatusLabel([], "inactive", false, { state: "updated", generation: 1 })).toBe("History updated");
+    expect(taskWorkingStatusLabel([], "inactive", false, { state: "failed", generation: 1, message: "offline", before_send: false })).toBe(
+      "Couldn’t refresh history",
+    );
+    expect(taskWorkingStatusLabel([], "active", false, { state: "failed", generation: 1, message: "offline", before_send: true })).toBe(
+      "Couldn’t sync conversation history",
+    );
   });
 });
 
@@ -255,6 +275,22 @@ function agentMessage(id: string, text: string, streaming = false): ChatMessage 
       kind: "agent_text",
       id,
       text,
+      streaming,
+      created_at: "2026-05-17T00:00:01Z",
+    },
+  };
+}
+
+function thoughtMessage(id: string, streaming = false): ChatMessage {
+  return {
+    cursor: `cursor_${id}`,
+    identity: id,
+    message_type: "thought",
+    message_id: id,
+    message: {
+      kind: "thought",
+      id,
+      text: "Check the current state.",
       streaming,
       created_at: "2026-05-17T00:00:01Z",
     },

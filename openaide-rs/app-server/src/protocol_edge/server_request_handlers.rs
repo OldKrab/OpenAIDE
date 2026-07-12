@@ -291,7 +291,9 @@ impl RpcGateway {
         context: &ClientContext,
         now: AppServerTime,
     ) -> Vec<GatewayEventDelivery> {
-        let token = self.state_stream.read_token();
+        let token = self
+            .state_stream
+            .read_token_for_client(&context.client_instance_id);
         let Ok(mut snapshot) =
             self.snapshots
                 .client_snapshot(context, context.requested_surface.clone(), &token)

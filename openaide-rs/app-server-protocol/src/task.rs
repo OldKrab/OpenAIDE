@@ -110,6 +110,18 @@ pub struct TaskOpenResult {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
+pub struct TaskRetryHistorySyncParams {
+    pub task_id: TaskId,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskRetryHistorySyncResult {
+    pub task: TaskSnapshot,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
 pub struct TaskMarkReadParams {
     pub task_id: TaskId,
 }
@@ -283,4 +295,5 @@ pub struct TaskSetArchivedResult {
 }
 
 #[cfg(test)]
+#[path = "task_tests.rs"]
 mod tests;

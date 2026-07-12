@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 use crate::client_lifecycle::ConnectionId;
 
 #[cfg(test)]
+#[path = "event_streams_tests.rs"]
 mod tests;
 
 #[derive(Clone, Default)]

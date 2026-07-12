@@ -14,6 +14,7 @@ import { NewTaskStartingView } from "./NewTaskStartingView";
 import { newTaskStatusLabel } from "./taskSurfaceHelpers";
 
 type NewTaskContextMenu = "project" | "agent";
+export type ProjectContextMode = "fixed" | "selectable";
 
 export function NewTaskView({
   dispatch,
@@ -28,11 +29,13 @@ export function NewTaskView({
   fileBrowser,
   focusRequestKey,
   workspaceBrowser,
+  projectContextMode = "selectable",
 }: {
   state: AppState;
   dispatch: Dispatch<AppAction>;
   fileBrowser?: TaskFileBrowserCallbacks;
   workspaceBrowser?: WorkspaceBrowserCallbacks;
+  projectContextMode?: ProjectContextMode;
   focusRequestKey?: number;
   loadingProjects?: boolean;
   onSelectConfigOption: (configId: string, value: string) => void;
@@ -73,6 +76,7 @@ export function NewTaskView({
   }, [externalPrompt]);
   const composerPrompt = localPrompt;
   const needsProject = !state.newTask.selection.projectId;
+  const fixedProjectContext = projectContextMode === "fixed";
   const openingNativeSession = state.newTask.nativeSessions.adoptingSessionId !== undefined;
   const projectSelectorLabel = selectedProject?.label
     ?? (state.newTask.selection.projectId ? state.newTask.selection.workspaceLabel : loadingProjects ? "Loading" : "Choose workspace");
@@ -213,7 +217,7 @@ export function NewTaskView({
       <div className="new-task-center">
         <h1>What are we working on?</h1>
         <div className="new-task-context-controls" aria-label="Task start context" ref={contextControlsRef}>
-          <div className={`new-task-context-anchor new-task-context-anchor-project ${openContextMenu === "project" ? "context-menu-open" : ""}`}>
+          {!fixedProjectContext ? <div className={`new-task-context-anchor new-task-context-anchor-project ${openContextMenu === "project" ? "context-menu-open" : ""}`}>
             <Selector
               disabled={loadingProjects || state.newTask.submitting}
               icon={<FolderOpen size={12} />}
@@ -223,8 +227,8 @@ export function NewTaskView({
               onClick={() => toggleContextMenu("project")}
             />
             {openContextMenu === "project" ? (
-              <Popover className="new-task-context-menu" label="Project">
-                {projectChoices.length ? <div className="new-task-context-menu-heading" role="none">Projects</div> : null}
+              <Popover className="new-task-context-menu" label="Workspace">
+                {projectChoices.length ? <div className="new-task-context-menu-heading" role="none">Workspaces</div> : null}
                 {projectChoices.map((project) => (
                   <MenuButton
                     active={state.newTask.selection.projectId === project.projectId}
@@ -244,7 +248,7 @@ export function NewTaskView({
                   />
                 ) : null}
                 <div className="new-workspace-entry" role="none">
-                  <label htmlFor="new-task-workspace-root">Open workspace path</label>
+                  <label htmlFor="new-task-workspace-root">Open folder path</label>
                   <div className="new-workspace-entry-row">
                     <input
                       id="new-task-workspace-root"
@@ -255,7 +259,7 @@ export function NewTaskView({
                           useWorkspacePath();
                         }
                       }}
-                      placeholder="/path/to/project"
+                      placeholder="/path/to/workspace"
                       type="text"
                       value={workspacePath}
                     />
@@ -272,7 +276,7 @@ export function NewTaskView({
                 </div>
               </Popover>
             ) : null}
-          </div>
+          </div> : null}
           <div className={`new-task-context-anchor new-task-context-anchor-agent ${openContextMenu === "agent" ? "context-menu-open" : ""}`}>
             <Selector
               disabled={state.newTask.submitting}
@@ -325,8 +329,12 @@ export function NewTaskView({
             <span>{waitStatus}</span>
           </div>
         ) : null}
-        {needsProject ? <p className="inline-hint">{loadingProjects ? "Loading projects." : "Choose or enter a workspace to start a task."}</p> : null}
-        {needsWorkspace ? <p className="inline-hint">Enter a workspace path to start a task.</p> : null}
+        {fixedProjectContext && !state.workspaceRootsLoaded ? <p className="inline-hint">Loading workspace.</p> : null}
+        {fixedProjectContext && state.workspaceRootsLoaded && (needsProject || needsWorkspace) ? (
+          <p className="inline-hint">Open a folder in VS Code to start a task.</p>
+        ) : null}
+        {!fixedProjectContext && needsProject ? <p className="inline-hint">{loadingProjects ? "Loading workspaces." : "Choose or enter a workspace to start a task."}</p> : null}
+        {!fixedProjectContext && needsWorkspace ? <p className="inline-hint">Enter a workspace path to start a task.</p> : null}
         {composerConfigOptionsError ? <p className="inline-error">{composerConfigOptionsError}</p> : null}
         {state.newTask.error ? <p className="inline-error">{state.newTask.error}</p> : null}
       </div>

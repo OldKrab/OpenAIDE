@@ -55,6 +55,7 @@ type ComposerProps = {
   submitDisabled: boolean;
   submitRequiresText?: boolean;
   showTextRequirementError?: boolean;
+  submissionSettlementKey?: number | string;
   submitPending?: boolean;
   submitPendingLabel?: string;
   showAgentSelector?: boolean;
@@ -89,6 +90,7 @@ export function Composer({
   submitDisabled,
   submitRequiresText = true,
   showTextRequirementError = true,
+  submissionSettlementKey,
   submitPending = false,
   submitPendingLabel = "Task starting",
   showAgentSelector,
@@ -106,6 +108,7 @@ export function Composer({
   const localErrorRef = useRef<HTMLParagraphElement | null>(null);
   const draftRef = useRef(prompt);
   const lastPromptRef = useRef(prompt);
+  const submittedDraftRef = useRef<string | undefined>(undefined);
   const commandCatalogRevision = commandCatalogKey(commandCatalog);
   const lastCommandCatalogKey = useRef(commandCatalogRevision);
   const lastSubmitPendingRef = useRef(submitPending);
@@ -132,18 +135,24 @@ export function Composer({
   }, [openMenu]);
 
   useEffect(() => {
-    const promptChanged = prompt !== lastPromptRef.current;
+    const submittedDraft = submittedDraftRef.current;
+    const hideSubmittedDraft = submittedDraft !== undefined
+      && !error
+      && (submitPending || prompt === "" || prompt === submittedDraft);
+    const renderedPrompt = hideSubmittedDraft ? "" : prompt;
+    const promptChanged = renderedPrompt !== lastPromptRef.current;
     const submissionSettled = lastSubmitPendingRef.current && !submitPending;
-    lastPromptRef.current = prompt;
+    lastPromptRef.current = renderedPrompt;
     lastSubmitPendingRef.current = submitPending;
-    if (promptChanged || submissionSettled) {
-      draftRef.current = prompt;
-      renderEditorText(prompt);
+    if (promptChanged || submissionSettled || submittedDraft !== undefined) {
+      draftRef.current = renderedPrompt;
+      renderEditorText(renderedPrompt);
     }
+    if (submittedDraft !== undefined && !submitPending) submittedDraftRef.current = undefined;
     const draft = draftRef.current;
     setHasDraftContent(hasComposerContent(draft, attachments.length));
     syncSubmitButton(draft);
-  }, [attachments.length, prompt, submitDisabled, submitPending, submitRequiresText]);
+  }, [attachments.length, error, prompt, submissionSettlementKey, submitDisabled, submitPending, submitRequiresText]);
 
   useEffect(() => {
     const catalogChanged = commandCatalogRevision !== lastCommandCatalogKey.current;
@@ -203,13 +212,16 @@ export function Composer({
   };
 
   const submitBlocked = (value: string) =>
-    submitDisabled || (submitRequiresText && !hasComposerText(value));
+    submitDisabled ||
+    !hasComposerContent(value, attachments.length) ||
+    (submitRequiresText && !hasComposerText(value));
   const localMessageShapeBlocked = (value: string) =>
     !submitDisabled && submitRequiresText && !hasComposerText(value);
 
   const submitDraft = () => {
     const draft = draftRef.current;
     if (submitBlocked(draft)) return;
+    submittedDraftRef.current = draft;
     onSubmit(draft);
   };
 

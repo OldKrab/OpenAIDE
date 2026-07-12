@@ -135,4 +135,5 @@ fn contains_sensitive_word(word: &str) -> bool {
 }
 
 #[cfg(test)]
+#[path = "logging_tests.rs"]
 mod tests;

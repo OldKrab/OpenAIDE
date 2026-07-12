@@ -51,8 +51,8 @@ impl LivePromptProjection {
         self.cancellation.clone()
     }
 
-    pub(super) fn finish_prompt(&self) -> Result<(), RuntimeError> {
-        self.sink.finish_prompt()
+    pub(super) fn prepare_for_steering(&self) -> Result<(), RuntimeError> {
+        self.sink.prepare_for_steering()
     }
 
     pub(super) fn remember_tool_call(&self, tool_call: ToolCall) {

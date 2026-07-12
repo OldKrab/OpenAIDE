@@ -396,48 +396,15 @@ describe("TaskView permission response state", () => {
     })).toBeUndefined();
   });
 
-  it("keeps live follow active while terminal text is still being presented", async () => {
+  it("keeps live follow active only for App Server work or pending input", async () => {
     const { taskChatHasLiveUpdates } = await import("./taskChatPresentation");
 
     expect(taskChatHasLiveUpdates({
       inputPending: false,
-      presentationPending: true,
-      taskStatus: "inactive",
+      taskStatus: "active",
     })).toBe(true);
-  });
-
-  it("holds later activity behind text that is still being presented", async () => {
-    const { chatItemsThroughPresentationBarrier } = await import("./TaskView");
-    const text = agentMessage("agent-1");
-    const activity = activityMessage("activity-1", "tool-1");
-
-    expect(chatItemsThroughPresentationBarrier([text, activity], new Set(["agent-1"]))).toEqual([text]);
-
-    const permission = permissionMessage("agent-request-1", "server-request-1", "tool-1");
-    expect(chatItemsThroughPresentationBarrier([text, activity, permission], new Set(["agent-1"]))).toEqual([
-      text,
-      activity,
-      permission,
-    ]);
-
-    const interruption: ChatMessage = {
-      cursor: "interruption-1",
-      identity: "interruption-1",
-      message_id: "interruption-1",
-      message_type: "interruption",
-      message: {
-        kind: "interruption",
-        id: "interruption-1",
-        reason: "canceled",
-        message: "Task stopped.",
-        created_at: "2026-06-27T00:00:00Z",
-        recoverable: true,
-      },
-    };
-    expect(chatItemsThroughPresentationBarrier([text, interruption], new Set(["agent-1"]))).toEqual([
-      text,
-      interruption,
-    ]);
+    expect(taskChatHasLiveUpdates({ inputPending: true, taskStatus: "inactive" })).toBe(true);
+    expect(taskChatHasLiveUpdates({ inputPending: false, taskStatus: "inactive" })).toBe(false);
   });
 
   it("leaves follow mode when the user scrolls upward near the end", async () => {

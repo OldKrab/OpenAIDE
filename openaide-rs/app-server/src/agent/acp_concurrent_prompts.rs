@@ -1,5 +1,6 @@
 //! Dispatches same-session prompts immediately and tracks their responses independently.
-//! ACP updates are session-scoped, so the newest prompt projection owns later updates.
+//! Steering remains part of the active logical turn, so all concurrent prompt requests share
+//! one update projection and its source-message continuity state.
 
 use std::collections::HashMap;
 use std::sync::{mpsc, Arc};
@@ -26,7 +27,8 @@ pub(super) struct ConcurrentPrompts {
     primary_token: PromptToken,
     primary_result: Option<Result<(), RuntimeError>>,
     cancelled: bool,
-    projection_slot: CurrentPromptSlot,
+    // Holding the slot keeps the active projection registered until the prompt group exits.
+    _projection_slot: CurrentPromptSlot,
     projection: LivePromptProjection,
     cancellation: TurnCancellation,
     task_id: String,
@@ -67,7 +69,7 @@ impl ConcurrentPrompts {
             primary_token,
             primary_result: None,
             cancelled: false,
-            projection_slot,
+            _projection_slot: projection_slot,
             projection,
             cancellation,
             task_id,
@@ -78,27 +80,23 @@ impl ConcurrentPrompts {
     pub(super) fn dispatch(
         &mut self,
         active_session: &agent_client_protocol::ActiveSession<'static, Agent>,
-        agent_id: &str,
+        _agent_id: &str,
         content_policy: PromptContentPolicy,
         trace: Option<&AcpTraceSession>,
         prompt: AgentPrompt,
-        sink: Arc<dyn AgentEventSink>,
+        _sink: Arc<dyn AgentEventSink>,
         done_tx: mpsc::Sender<Result<(), RuntimeError>>,
     ) {
         if self.cancelled || prompt.cancellation.is_cancelled() {
             let _ = done_tx.send(Ok(()));
             return;
         }
-        // ACP routes session-scoped updates to the newest prompt projection. Finalize the
-        // outgoing projection first so its durable Chat rows cannot remain streaming forever.
-        if let Err(error) = self.projection.finish_prompt() {
+        if let Err(error) = self.projection.prepare_for_steering() {
             let _ = done_tx.send(Err(error));
             return;
         }
         let token = self.next_token;
         self.next_token += 1;
-        self.projection = LivePromptProjection::new(agent_id, sink, prompt.cancellation.clone());
-        self.projection_slot.activate(self.projection.clone());
         self.waiters.insert(
             token,
             PromptWaiter {

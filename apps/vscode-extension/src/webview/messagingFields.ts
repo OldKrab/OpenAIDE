@@ -42,6 +42,10 @@ export function webviewTelemetryFields(payload: Record<string, unknown>) {
     chat_items: numberField(payload.chat_items),
     has_active_task: booleanField(payload.has_active_task),
     error_name: stringField(payload.error_name),
+    error_code: stringField(payload.error_code),
+    agent_id: stringField(payload.agent_id),
+    project_id: stringField(payload.project_id),
+    session_list_request_id: numberField(payload.session_list_request_id),
     error_message:
       typeof payload.error_message === "string" && payload.error_message.length > 0
         ? sanitizeDiagnosticText(payload.error_message)

@@ -123,4 +123,5 @@ impl Default for AppLifecycle {
 }
 
 #[cfg(test)]
+#[path = "app_lifecycle_tests.rs"]
 mod tests;

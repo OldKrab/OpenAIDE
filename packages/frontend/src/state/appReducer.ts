@@ -209,7 +209,9 @@ function reduceGlobalState(state: AppState, action: GlobalAction): AppState {
       if (action.intent === "refresh" && state.activeTaskId !== action.snapshot.task.task_id) {
         return reconcileBackgroundTaskSnapshot(state, action.snapshot);
       }
-      const pendingReconciliation = pendingInputReconciliation(state, action.snapshot);
+      const pendingReconciliation = pendingInputReconciliation(state, action.snapshot, {
+        clearCommittedDraft: action.intent === "open",
+      });
       if (shouldIgnoreStaleTaskSnapshot(state.snapshot, action.snapshot)) {
         return applyPendingInputReconciliation(state, action.snapshot.task.task_id, pendingReconciliation);
       }
@@ -228,9 +230,15 @@ function reduceGlobalState(state: AppState, action: GlobalAction): AppState {
       const questionResponses = omitKeys(state.questionResponses, terminalQuestionIds);
       const taskId = action.snapshot.task.task_id;
       const previousSnapshot = state.taskSnapshots[taskId];
-      const retainedChatPage = previousSnapshot
+      // A completed Native Session reconciliation is an authoritative replacement. Retaining
+      // the old paging window here can resurrect rows the Agent no longer reports.
+      const historyWasReconciled = (
+        previousSnapshot?.history_sync.state === "checking"
+        || previousSnapshot?.history_sync.state === "syncing"
+      ) && previousSnapshot.chat.version !== action.snapshot.chat.version;
+      const retainedChatPage = previousSnapshot && !historyWasReconciled
         ? retainSnapshotWindow(state.chatPages[taskId], previousSnapshot.chat, action.snapshot.chat)
-        : state.chatPages[taskId];
+        : undefined;
       return {
         ...state,
         snapshot: action.snapshot,
@@ -242,7 +250,7 @@ function reduceGlobalState(state: AppState, action: GlobalAction): AppState {
         },
         chatPages: retainedChatPage
           ? { ...state.chatPages, [taskId]: retainedChatPage }
-          : state.chatPages,
+          : omitKeys(state.chatPages, new Set([taskId])),
         tasks,
         taskListCache: {
           ...state.taskListCache,
@@ -254,12 +262,14 @@ function reduceGlobalState(state: AppState, action: GlobalAction): AppState {
         permissionResponses,
         appServerQuestionRequests,
         questionResponses,
-        taskInputs: input && (pendingReconciliation.taskInputCommitted || pendingReconciliation.taskInputRestoredSendCommitted)
+        taskInputs: input && (
+          pendingReconciliation.taskInputCommitted
+          || pendingReconciliation.taskInputRestoredSendCommitted
+          || pendingReconciliation.taskInputDraftCommitted
+        )
           ? {
               ...state.taskInputs,
-              [action.snapshot.task.task_id]: pendingReconciliation.taskInputRestoredSendCommitted
-                ? { prompt: "", context: [] }
-                : { prompt: "", context: [] },
+              [action.snapshot.task.task_id]: { prompt: "", context: [] },
             }
           : state.taskInputs,
         newTask: {

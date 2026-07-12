@@ -146,6 +146,7 @@ pub(crate) fn project_stored_task_snapshot(
             start_cursor: snapshot.chat.start_cursor.map(Into::into),
             end_cursor: snapshot.chat.end_cursor.map(Into::into),
         },
+        history_sync: Default::default(),
         pending_requests: Vec::new(),
         recovery: None,
     })

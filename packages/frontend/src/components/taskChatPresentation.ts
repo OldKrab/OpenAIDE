@@ -13,14 +13,12 @@ export function chatItemsWithPendingInput(
 
 export function taskChatHasLiveUpdates({
   inputPending,
-  presentationPending = false,
   taskStatus,
 }: {
   inputPending: boolean;
-  presentationPending?: boolean;
   taskStatus: TaskStatus;
 }) {
-  return presentationPending || inputPending || taskStatus === "active" || taskStatus === "blocked";
+  return inputPending || taskStatus === "active" || taskStatus === "blocked";
 }
 
 export function chatItemsWithAppServerPermissions(

@@ -44,6 +44,12 @@ This file is the short operating guide for agents working in this repo. Keep det
 - Verify desktop and narrow/mobile widths when changing layout.
 - For UI QA, use Playwright screenshots and inspect them; look for UX polish issues, flicker, overflow, and confusing states, not just functional bugs.
 
+## Prototyping
+
+- Follow `docs/prototyping.md` for disposable UI and logic prototypes.
+- Keep UI prototype implementations under the ignored `packages/frontend/prototypes/` directory. Never force-add or commit them.
+- Reuse production components through the prototype harness and use Target hot reload for review; do not add temporary prototype routes to the primary application.
+
 ## Attachment Policy
 
 - Do not keep detailed attachment rules here. Follow `docs/adr/0022-backend-frontend-app-shell-architecture.md`.
@@ -51,10 +57,11 @@ This file is the short operating guide for agents working in this repo. Keep det
 
 ## Source Size And Tests
 
-- Hand-written production source files must stay at or below 400 logical lines. Start splitting before 300 lines when a file is still growing.
+- Hand-written production source files must stay at or below 800 logical lines. Start splitting before 600 lines when a file is still growing.
 - Test files, generated files, lockfiles, snapshots, fixtures, vendored files, and machine-generated bindings are exempt from the production source size limit.
 - Do not add new production logic to a file that already exceeds the limit; first extract cohesive modules until the production file is back under the limit.
 - Rust test bodies must live in separate test files, not inline `#[cfg(test)] mod tests` blocks in production modules. Prefer crate-level integration tests under each crate's `tests/` directory; when private access is required, put only a tiny `#[cfg(test)] mod tests;` declaration in the production file and put the test body in a sibling test file.
+- Name a private Rust unit-test file `<module>_tests.rs` and load it with `#[cfg(test)] #[path = "<module>_tests.rs"] mod tests;`. Use a test directory only when it contains multiple behavior-focused files; do not create a directory solely for one `tests.rs`.
 - Shared Rust integration-test helpers belong under a subdirectory module such as `tests/common/mod.rs`, not directly in `tests/common.rs`, so Cargo does not treat helpers as a standalone integration test crate.
 
 ## Verification

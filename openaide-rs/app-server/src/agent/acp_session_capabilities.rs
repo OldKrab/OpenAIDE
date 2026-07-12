@@ -62,6 +62,7 @@ pub(super) fn auth_method_kind(method: &AuthMethod) -> String {
         .unwrap_or_else(|| "agent".to_string())
 }
 
+#[cfg(test)]
 pub(super) fn validate_session_list_capability(
     initialize: &InitializeResponse,
 ) -> Result<(), RuntimeError> {

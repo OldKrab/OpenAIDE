@@ -9,7 +9,7 @@ use crate::tasks::transitions::TaskTransitions;
 use super::{storage_error, TaskProductApi, TaskSendAccepted};
 
 #[derive(Clone)]
-pub(super) struct CommittedSend {
+pub(crate) struct CommittedSend {
     task_id: String,
     turn_id: TurnId,
     user_message_id: MessageId,
@@ -39,12 +39,8 @@ impl CommittedSend {
         &self.turn_id
     }
 
-    pub(super) fn fail_protocol(
-        &self,
-        api: &TaskProductApi,
-        error: &ProtocolError,
-    ) -> Result<TaskSendAccepted, ProtocolError> {
-        self.fail(api, RuntimeError::Internal(error.message.clone()))
+    pub(super) fn user_message_id(&self) -> &MessageId {
+        &self.user_message_id
     }
 
     pub(super) fn accepted(&self, api: &TaskProductApi) -> Result<TaskSendAccepted, ProtocolError> {

@@ -1,28 +1,4 @@
-import type { ChatMessage, TaskStatus } from "@openaide/app-shell-contracts";
-
-export function chatItemsThroughPresentationBarrier(
-  items: ChatMessage[],
-  presentingMessageIds: ReadonlySet<string>,
-) {
-  const barrierIndex = items.findIndex((item) => presentingMessageIds.has(item.message_id));
-  if (barrierIndex === -1) return items;
-  return presentationNeedsImmediateFlush(items, presentingMessageIds)
-    ? items
-    : items.slice(0, barrierIndex + 1);
-}
-
-export function presentationNeedsImmediateFlush(
-  items: ChatMessage[],
-  presentingMessageIds: ReadonlySet<string>,
-) {
-  const barrierIndex = items.findIndex((item) => presentingMessageIds.has(item.message_id));
-  if (barrierIndex === -1) return false;
-  return items.slice(barrierIndex + 1).some((item) => (
-    (item.message.kind === "permission" && item.message.state === "pending")
-    || (item.message.kind === "elicitation" && item.message.state === "pending")
-    || item.message.kind === "interruption"
-  ));
-}
+import type { TaskStatus } from "@openaide/app-shell-contracts";
 
 export function taskComposerAvailability({
   archived = false,

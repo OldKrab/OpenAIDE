@@ -97,4 +97,5 @@ fn safe_file_label(path: &Path) -> String {
 }
 
 #[cfg(test)]
+#[path = "shell_file_handles_tests.rs"]
 mod tests;

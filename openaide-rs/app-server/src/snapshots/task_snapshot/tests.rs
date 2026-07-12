@@ -76,6 +76,7 @@ fn open_projects_durable_chat_without_raw_attachment_paths() {
             }),
         )
         .unwrap();
+    sync_task_message_history_version(&store, "task-1");
 
     let snapshot = TaskSnapshotStore::new(store)
         .open(&TaskId::from("task-1"))
@@ -105,6 +106,40 @@ fn open_projects_durable_chat_without_raw_attachment_paths() {
     let rendered = serde_json::to_string(&snapshot).unwrap();
     assert!(rendered.contains("main.rs"));
     assert!(!rendered.contains("/secret/workspace"));
+}
+
+#[test]
+fn open_retries_when_message_commit_interleaves_with_snapshot_read() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    store.write_task(&task_record("task-1")).unwrap();
+    let interleaving_store = store.clone();
+    store.after_next_task_snapshot_read_for_test(move || {
+        interleaving_store
+            .append_message(
+                "task-1",
+                chat_message(NormalizedMessage::AgentText {
+                    id: "agent-1".to_string(),
+                    text: "committed while reading".to_string(),
+                    created_at: "2026-01-01T00:00:01.000Z".to_string(),
+                    streaming: true,
+                }),
+            )
+            .unwrap();
+        let mut committed_task = interleaving_store.read_task("task-1").unwrap();
+        committed_task.message_history_version = interleaving_store
+            .message_history_version("task-1")
+            .unwrap();
+        committed_task.revision = 8;
+        interleaving_store.write_task(&committed_task).unwrap();
+    });
+
+    let snapshot = TaskSnapshotStore::new(store)
+        .open(&TaskId::from("task-1"))
+        .expect("consistent snapshot");
+
+    assert_eq!(snapshot.revision, 8);
+    assert_eq!(snapshot.chat.items.len(), 1);
 }
 
 #[test]
@@ -149,6 +184,7 @@ fn open_projects_durable_permission_history_as_permission_part() {
             }),
         )
         .unwrap();
+    sync_task_message_history_version(&store, "task-1");
 
     let snapshot = TaskSnapshotStore::new(store)
         .open(&TaskId::from("task-1"))
@@ -216,6 +252,7 @@ fn cancelled_pending_permission_projects_as_cancelled_not_denied() {
         )
         .unwrap();
     store.cancel_pending_permissions("task-1").unwrap();
+    sync_task_message_history_version(&store, "task-1");
 
     let snapshot = TaskSnapshotStore::new(store)
         .open(&TaskId::from("task-1"))
@@ -355,6 +392,12 @@ fn activity_status(message: &NormalizedMessage) -> Option<ActivityStatus> {
         NormalizedMessage::Activity { status, .. } => Some(*status),
         _ => None,
     }
+}
+
+fn sync_task_message_history_version(store: &Store, task_id: &str) {
+    let mut task = store.read_task(task_id).unwrap();
+    task.message_history_version = store.message_history_version(task_id).unwrap();
+    store.write_task(&task).unwrap();
 }
 
 fn task_record(task_id: &str) -> TaskRecord {

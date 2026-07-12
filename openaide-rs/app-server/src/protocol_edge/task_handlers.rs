@@ -3,9 +3,10 @@ use openaide_app_server_protocol::task::{
     TaskAdoptNativeSessionParams, TaskAdoptNativeSessionResult, TaskCancelParams, TaskCancelResult,
     TaskChatPageParams, TaskChatPageResult, TaskCreateParams, TaskCreateResult, TaskDiscardParams,
     TaskDiscardResult, TaskListParams, TaskListResult, TaskMarkReadParams, TaskMarkReadResult,
-    TaskOpenParams, TaskOpenResult, TaskSendParams, TaskSendResult, TaskSetArchivedParams,
-    TaskSetArchivedResult, TaskSetConfigOptionParams, TaskSetConfigOptionResult,
-    TaskToolDetailParams, TaskToolDetailResult,
+    TaskOpenParams, TaskOpenResult, TaskRetryHistorySyncParams, TaskRetryHistorySyncResult,
+    TaskSendParams, TaskSendResult, TaskSetArchivedParams, TaskSetArchivedResult,
+    TaskSetConfigOptionParams, TaskSetConfigOptionResult, TaskToolDetailParams,
+    TaskToolDetailResult,
 };
 use serde_json::Value;
 
@@ -214,6 +215,32 @@ impl RpcGateway {
         };
         let task = self.task_with_pending_requests(task);
         self.result::<TaskOpenResult>(connection_id, id, meta, TaskOpenResult { task })
+    }
+
+    pub(super) fn handle_task_retry_history_sync(
+        &mut self,
+        connection_id: ConnectionId,
+        id: String,
+        params: Value,
+        meta: RequestMeta,
+    ) -> GatewayOutcome {
+        let params = match serde_json::from_value::<TaskRetryHistorySyncParams>(params) {
+            Ok(params) => params,
+            Err(error) => {
+                return self.error(connection_id, id, meta, responses::invalid_params(error))
+            }
+        };
+        let task = match self.task_open.retry_history_sync(params) {
+            Ok(task) => task,
+            Err(error) => return self.error(connection_id, id, meta, error),
+        };
+        let task = self.task_with_pending_requests(task);
+        self.result::<TaskRetryHistorySyncResult>(
+            connection_id,
+            id,
+            meta,
+            TaskRetryHistorySyncResult { task },
+        )
     }
 
     pub(super) fn handle_task_mark_read(

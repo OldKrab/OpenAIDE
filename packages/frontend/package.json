@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "build": "vite build",
-    "check": "tsc -p tsconfig.json --noEmit",
+    "check": "tsc -p tsconfig.json --noEmit && tsc -p prototype-harness/tsconfig.json --noEmit",
     "test": "vitest run"
   },
   "dependencies": {

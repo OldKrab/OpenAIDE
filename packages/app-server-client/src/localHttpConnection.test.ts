@@ -3,6 +3,7 @@ import {
   CLIENT_HEARTBEAT,
   CLIENT_INITIALIZE,
   PERMISSION_REQUEST,
+  QUESTION_REQUEST,
   STATE_SUBSCRIBE,
   type AppServerEvent,
   type ClientInstanceId,
@@ -18,6 +19,39 @@ import {
 import { AppServerProtocolError } from "./protocolError";
 
 describe("LocalHttpBackendConnection", () => {
+  it("does not restart background work when initialization resolves after close", async () => {
+    vi.useFakeTimers();
+    try {
+      const initializeResponse = deferred<ReturnType<typeof fetchResponse>>();
+      let eventStreamAttempts = 0;
+      const fetch = vi.fn<LocalHttpFetch>(async (_input, init) => {
+        if (init.headers.Accept === "text/event-stream") {
+          eventStreamAttempts += 1;
+          return eventStreamResponse([]);
+        }
+        return initializeResponse.promise;
+      });
+      const connection = createLocalHttpBackendConnection({
+        ...connectionOptions(fetch),
+        heartbeatIntervalMs: 25,
+      });
+
+      const initializing = connection.initialize(initializeParams());
+      connection.close();
+      initializeResponse.resolve(fetchResponse([
+        response("local-http-request-1", { result: initializeResult() }),
+      ]));
+
+      await expect(initializing).rejects.toThrow("Backend connection closed");
+      await vi.advanceTimersByTimeAsync(50);
+
+      expect(eventStreamAttempts).toBe(0);
+      expect(fetch).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("initializes over LocalHttp with bearer auth and stable connection id", async () => {
     const fetch = fetchReturning([
       response("local-http-request-1", { result: initializeResult() }),
@@ -151,6 +185,65 @@ describe("LocalHttpBackendConnection", () => {
     connection.close();
   });
 
+  it("invalidates subscribed state after event-stream continuity is lost", async () => {
+    vi.useFakeTimers();
+    try {
+      let streamAttempt = 0;
+      const fetch = vi.fn<LocalHttpFetch>(async (_input, init) => {
+        if (init.headers.Accept === "text/event-stream") {
+          streamAttempt += 1;
+          return streamAttempt === 1 ? closedEventStreamResponse() : eventStreamResponse([]);
+        }
+        const request = JSON.parse(init.body) as { id: string };
+        return fetchResponse([response(request.id, { result: initializeResult() })]);
+      });
+      const connection = createLocalHttpBackendConnection(connectionOptions(fetch));
+      const resets: string[] = [];
+
+      connection.stateResets(() => resets.push("reset"));
+      await connection.initialize(initializeParams());
+      await vi.advanceTimersByTimeAsync(500);
+
+      expect(streamAttempt).toBe(2);
+      expect(resets).toEqual(["reset"]);
+      connection.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reinitializes before reconnecting when the server rejects the event stream", async () => {
+    vi.useFakeTimers();
+    try {
+      let initializeAttempts = 0;
+      let streamAttempts = 0;
+      const fetch = vi.fn<LocalHttpFetch>(async (_input, init) => {
+        if (init.headers.Accept === "text/event-stream") {
+          streamAttempts += 1;
+          return streamAttempts === 1
+            ? { ok: false, status: 409, async text() { return ""; } }
+            : eventStreamResponse([]);
+        }
+        initializeAttempts += 1;
+        const request = JSON.parse(init.body) as { id: string };
+        return fetchResponse([response(request.id, { result: initializeResult() })]);
+      });
+      const connection = createLocalHttpBackendConnection(connectionOptions(fetch));
+      const reset = vi.fn();
+      connection.stateResets(reset);
+
+      await connection.initialize(initializeParams());
+      await vi.advanceTimersByTimeAsync(500);
+
+      expect(initializeAttempts).toBe(2);
+      expect(streamAttempts).toBe(2);
+      expect(reset).toHaveBeenCalledOnce();
+      connection.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("reinitializes and retries once when the server forgets the client", async () => {
     const fetch = fetchSequence([
       [response("local-http-request-1", { result: initializeResult() })],
@@ -180,6 +273,130 @@ describe("LocalHttpBackendConnection", () => {
       CLIENT_INITIALIZE,
       STATE_SUBSCRIBE,
     ]);
+  });
+
+  it("retries initialization on a later request after transient reinitialize failure", async () => {
+    let initializeAttempts = 0;
+    let subscribeAttempts = 0;
+    const fetch = vi.fn<LocalHttpFetch>(async (_input, init) => {
+      if (init.headers.Accept === "text/event-stream") return eventStreamResponse([]);
+      const request = JSON.parse(init.body) as { id: string; method: string };
+      if (request.method === CLIENT_INITIALIZE) {
+        initializeAttempts += 1;
+        if (initializeAttempts === 2) {
+          return { ok: false, status: 503, async text() { return "temporarily unavailable"; } };
+        }
+        return fetchResponse([response(request.id, { result: initializeResult() })]);
+      }
+      subscribeAttempts += 1;
+      if (subscribeAttempts === 1) {
+        return fetchResponse([
+          protocolError(request.id, "notInitialized", "client/initialize must succeed before product requests"),
+        ]);
+      }
+      return fetchResponse([
+        response(request.id, {
+          result: {
+            cursor: "cursor-2",
+            scope: { kind: "projects" },
+            snapshot: { kind: "projects", projects: { projects: [] } },
+          },
+        }),
+      ]);
+    });
+    const connection = createLocalHttpBackendConnection(connectionOptions(fetch));
+
+    await connection.initialize(initializeParams());
+    await expect(connection.request(STATE_SUBSCRIBE, { scope: { kind: "projects" } }))
+      .rejects.toThrow("App Server request failed with HTTP 503");
+    await expect(connection.request(STATE_SUBSCRIBE, { scope: { kind: "projects" } }))
+      .resolves.toMatchObject({ cursor: "cursor-2" });
+
+    expect(initializeAttempts).toBe(3);
+    expect(subscribeAttempts).toBe(2);
+    connection.close();
+  });
+
+  it("invalidates subscribed state after reinitialize even when the replacement event stream stays down", async () => {
+    let subscribeAttempts = 0;
+    let streamAttempts = 0;
+    const fetch = vi.fn<LocalHttpFetch>(async (_input, init) => {
+      if (init.headers.Accept === "text/event-stream") {
+        streamAttempts += 1;
+        return streamAttempts === 1
+          ? eventStreamResponse([])
+          : { ok: false, status: 503, async text() { return "unavailable"; } };
+      }
+      const request = JSON.parse(init.body) as { id: string; method: string };
+      if (request.method === CLIENT_INITIALIZE) {
+        return fetchResponse([response(request.id, { result: initializeResult() })]);
+      }
+      subscribeAttempts += 1;
+      if (subscribeAttempts === 1) {
+        return fetchResponse([
+          protocolError(request.id, "notInitialized", "client/initialize must succeed before product requests"),
+        ]);
+      }
+      return fetchResponse([
+        response(request.id, {
+          result: {
+            cursor: "cursor-2",
+            scope: { kind: "projects" },
+            snapshot: { kind: "projects", projects: { projects: [] } },
+          },
+        }),
+      ]);
+    });
+    const connection = createLocalHttpBackendConnection(connectionOptions(fetch));
+    const reset = vi.fn();
+    connection.stateResets(reset);
+
+    await connection.initialize(initializeParams());
+    await connection.request(STATE_SUBSCRIBE, { scope: { kind: "projects" } });
+
+    expect(streamAttempts).toBe(2);
+    expect(reset).toHaveBeenCalledOnce();
+
+    connection.close();
+  });
+
+  it("coalesces reinitialization when concurrent requests discover the same restart", async () => {
+    let initializeAttempts = 0;
+    let subscribeAttempts = 0;
+    const fetch = vi.fn<LocalHttpFetch>(async (_input, init) => {
+      if (init.headers.Accept === "text/event-stream") return eventStreamResponse([]);
+      const request = JSON.parse(init.body) as { id: string; method: string };
+      if (request.method === CLIENT_INITIALIZE) {
+        initializeAttempts += 1;
+        return fetchResponse([response(request.id, { result: initializeResult() })]);
+      }
+      subscribeAttempts += 1;
+      if (subscribeAttempts <= 2) {
+        return fetchResponse([
+          protocolError(request.id, "notInitialized", "client/initialize must succeed before product requests"),
+        ]);
+      }
+      return fetchResponse([
+        response(request.id, {
+          result: {
+            cursor: `cursor-${subscribeAttempts}`,
+            scope: { kind: "projects" },
+            snapshot: { kind: "projects", projects: { projects: [] } },
+          },
+        }),
+      ]);
+    });
+    const connection = createLocalHttpBackendConnection(connectionOptions(fetch));
+
+    await connection.initialize(initializeParams());
+    await Promise.all([
+      connection.request(STATE_SUBSCRIBE, { scope: { kind: "projects" } }),
+      connection.request(STATE_SUBSCRIBE, { scope: { kind: "projects" } }),
+    ]);
+
+    expect(initializeAttempts).toBe(2);
+    expect(subscribeAttempts).toBe(4);
+    connection.close();
   });
 
   it("delivers backend-initiated server requests from response batches", async () => {
@@ -224,6 +441,51 @@ describe("LocalHttpBackendConnection", () => {
           options: [{ optionId: "allow-once", name: "Allow once", kind: "allowOnce" }],
         },
       },
+    ]);
+  });
+
+  it("delivers typed question requests without breaking the connection", async () => {
+    const fetch = fetchSequence([
+      [response("local-http-request-1", { result: initializeResult() })],
+      [
+        response("local-http-request-2", {
+          result: {
+            cursor: "cursor-2",
+            scope: { kind: "projects" },
+            snapshot: { kind: "projects", projects: { projects: [] } },
+          },
+        }),
+        {
+          jsonrpc: "2.0",
+          id: "server-request-1",
+          scope: { kind: "task", taskId: "task-1" },
+          method: QUESTION_REQUEST,
+          params: {
+            message: "Which environment?",
+            fields: [{
+              kind: "singleSelect",
+              key: "environment",
+              title: "Environment",
+              required: true,
+              options: [{ value: "target", label: "Target" }],
+            }],
+          },
+        },
+      ],
+    ]);
+    const connection = createLocalHttpBackendConnection(connectionOptions(fetch));
+    const requests: unknown[] = [];
+
+    connection.serverRequests((request) => requests.push(request));
+    await connection.initialize(initializeParams());
+    await connection.request(STATE_SUBSCRIBE, { scope: { kind: "projects" } });
+
+    expect(requests).toEqual([
+      expect.objectContaining({
+        requestId: "server-request-1",
+        method: QUESTION_REQUEST,
+        params: expect.objectContaining({ message: "Which environment?" }),
+      }),
     ]);
   });
 
@@ -546,4 +808,14 @@ function appEvent(): AppServerEvent {
     scope: { kind: "stateRoot", stateRootId: "root-1" },
     payload: { kind: "projectCollectionUpdated", projects: { projects: [] } },
   } as unknown as AppServerEvent;
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
 }

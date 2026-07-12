@@ -40,6 +40,11 @@ impl TaskTransitions {
                         task.unread = true;
                         task.last_activity = now.clone();
                     }
+                    if plan.invalidate_live_session_data {
+                        let task = ctx.task_mut();
+                        task.config_options_catalog = None;
+                        task.agent_commands_catalog = None;
+                    }
 
                     Ok(TaskMutationResult::Changed)
                 })?;

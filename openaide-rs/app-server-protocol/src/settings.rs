@@ -162,7 +162,7 @@ pub enum ComposerSubmitShortcut {
 impl Default for AppPreferences {
     fn default() -> Self {
         Self {
-            composer_submit_shortcut: ComposerSubmitShortcut::ModEnter,
+            composer_submit_shortcut: ComposerSubmitShortcut::Enter,
         }
     }
 }

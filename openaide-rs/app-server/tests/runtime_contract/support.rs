@@ -378,6 +378,39 @@ impl AgentRuntime for ChunkedTextAgent {
     }
 }
 
+struct MessageIdSpanningToolAgent;
+
+impl AgentRuntime for MessageIdSpanningToolAgent {
+    fn start_session(&self, _request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
+        Ok(AgentSession::new("session_message_id_spanning_tool"))
+    }
+
+    fn prompt(
+        &self,
+        _prompt: AgentPrompt,
+        sink: Arc<dyn AgentEventSink>,
+    ) -> Result<(), RuntimeError> {
+        sink.emit(AgentEvent::TextChunk {
+            text: "Before ".to_string(),
+            source_message_id: Some("message-1".to_string()),
+        })?;
+        sink.emit(AgentEvent::ToolCall(AgentToolCall {
+            tool_call_id: "tool_between_chunks".to_string(),
+            scope_id: None,
+            title: "Tool between chunks".to_string(),
+            kind: "execute".to_string(),
+            status: AgentToolCallStatus::Completed,
+            input_summary: None,
+            output_preview: None,
+            details: None,
+        }))?;
+        sink.emit(AgentEvent::TextChunk {
+            text: "after.".to_string(),
+            source_message_id: Some("message-1".to_string()),
+        })
+    }
+}
+
 struct PermissionBoundaryTextAgent;
 
 impl AgentRuntime for PermissionBoundaryTextAgent {

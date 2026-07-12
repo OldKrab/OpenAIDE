@@ -58,8 +58,41 @@ pub struct TaskSnapshot {
     pub agent_commands: TaskAgentCommandsSnapshot,
     pub send_capability: TaskSendCapabilitySnapshot,
     pub chat: ChatSnapshot,
+    pub history_sync: TaskHistorySyncSnapshot,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending_requests: Vec<PendingRequestSnapshot>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recovery: Option<RecoverySnapshot>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(
+    tag = "state",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum TaskHistorySyncSnapshot {
+    Idle {
+        generation: u64,
+    },
+    Checking {
+        generation: u64,
+    },
+    Syncing {
+        generation: u64,
+    },
+    Updated {
+        generation: u64,
+    },
+    Failed {
+        generation: u64,
+        message: String,
+        before_send: bool,
+    },
+}
+
+impl Default for TaskHistorySyncSnapshot {
+    fn default() -> Self {
+        Self::Idle { generation: 0 }
+    }
 }

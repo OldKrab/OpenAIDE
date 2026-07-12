@@ -24,6 +24,7 @@ pub struct TaskUpdate {
     pub task_id: String,
     pub revision: u64,
     pub delta: Option<CommittedTaskDelta>,
+    pub history_sync: Option<openaide_app_server_protocol::snapshot::TaskHistorySyncSnapshot>,
 }
 
 impl TaskUpdate {
@@ -32,6 +33,7 @@ impl TaskUpdate {
             task_id: task_id.into(),
             revision,
             delta: Some(delta),
+            history_sync: None,
         }
     }
 }
@@ -71,6 +73,21 @@ impl TaskUpdateNotifier {
             task_id: task_id.to_string(),
             revision,
             delta: None,
+            history_sync: None,
+        });
+    }
+
+    pub(crate) fn history_sync_updated(
+        &self,
+        task_id: &str,
+        revision: u64,
+        history_sync: openaide_app_server_protocol::snapshot::TaskHistorySyncSnapshot,
+    ) {
+        self.publish(TaskUpdate {
+            task_id: task_id.to_string(),
+            revision,
+            delta: None,
+            history_sync: Some(history_sync),
         });
     }
 

@@ -259,4 +259,5 @@ fn unhandled_session_update<Cx>(
 }
 
 #[cfg(test)]
+#[path = "acp_session_connection_tests.rs"]
 mod tests;

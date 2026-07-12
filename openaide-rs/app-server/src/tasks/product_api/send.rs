@@ -19,7 +19,7 @@ use crate::tasks::transitions::TaskTransitions;
 use crate::time::now_string;
 
 use super::{
-    conflict_error, runtime_error, storage_error, validation_error, TaskProductApi,
+    conflict_error, internal_error, runtime_error, storage_error, validation_error, TaskProductApi,
     TaskSendAccepted,
 };
 
@@ -27,7 +27,7 @@ mod session;
 
 use revision_guard::same_send_target;
 
-mod committed;
+pub(crate) mod committed;
 mod recovery;
 mod revision_guard;
 mod support;
@@ -36,6 +36,13 @@ use committed::CommittedSend;
 use support::{
     protocol_error_from_attachment_runtime, send_identity, title_from_prompt, SendFingerprint,
 };
+
+#[derive(Clone)]
+pub(crate) struct PendingSendSync {
+    pub(crate) prompt_text: String,
+    pub(crate) attachments: ResolvedSendAttachments,
+    pub(crate) committed_send: CommittedSend,
+}
 
 impl TaskProductApi {
     pub(super) fn send_message(
@@ -59,6 +66,9 @@ impl TaskProductApi {
                 user_message_id: existing.user_message_id,
             });
         }
+        // Reserve synchronization ownership before validating resources or committing the Turn.
+        // A blocked advisory session/list may finish, but it can no longer load or close a session.
+        let sync_generation = self.history_sync.begin_send(&task_id);
         let attachment_owner = AttachmentOwner::new(client_instance_id, &params.task_id);
         let attachment_reservation = self
             .attachments
@@ -158,6 +168,12 @@ impl TaskProductApi {
         // contend with session/storage resources. The Turn is already durable,
         // so the background start is launched regardless of snapshot success.
         let accepted = committed_send.accepted(self);
+        self.publish_history_sync(
+            &task_id,
+            openaide_app_server_protocol::snapshot::TaskHistorySyncSnapshot::Syncing {
+                generation: sync_generation,
+            },
+        );
 
         let api = self.clone();
         let background_send = committed_send.clone();
@@ -167,6 +183,7 @@ impl TaskProductApi {
                 fingerprint.text,
                 attachments,
                 background_send,
+                sync_generation,
             ) {
                 crate::logging::error(
                     "task_committed_send_start_failed",
@@ -177,20 +194,56 @@ impl TaskProductApi {
         accepted
     }
 
-    fn start_committed_send(
+    pub(super) fn start_committed_send(
         &self,
         existing_task: TaskRecord,
         prompt_text: String,
         attachments: ResolvedSendAttachments,
         committed_send: CommittedSend,
+        sync_generation: u64,
+    ) -> Result<(), ProtocolError> {
+        let task_id = existing_task.task_id.clone();
+        self.history_sync
+            .run_send(&task_id.clone(), sync_generation, || {
+                self.start_committed_send_exclusive(
+                    existing_task,
+                    prompt_text,
+                    attachments,
+                    committed_send,
+                    sync_generation,
+                )
+            })
+    }
+
+    fn start_committed_send_exclusive(
+        &self,
+        existing_task: TaskRecord,
+        prompt_text: String,
+        attachments: ResolvedSendAttachments,
+        committed_send: CommittedSend,
+        sync_generation: u64,
     ) -> Result<(), ProtocolError> {
         let task_id = existing_task.task_id.clone();
         let turn_id = committed_send.turn_id().clone();
+        let retryable_history_sync =
+            existing_task.first_prompt_sent && existing_task.agent_session_id.is_some();
+        let pending_send = PendingSendSync {
+            prompt_text: prompt_text.clone(),
+            attachments: attachments.clone(),
+            committed_send: committed_send.clone(),
+        };
 
         let existing_task = match self.wait_for_session_preparation(existing_task) {
             Ok(task) => task,
             Err(error) => {
-                committed_send.fail(self, error)?;
+                self.handle_send_start_failure(
+                    retryable_history_sync,
+                    &task_id,
+                    pending_send.clone(),
+                    error,
+                    "Could not prepare conversation history before sending",
+                    sync_generation,
+                )?;
                 return Ok(());
             }
         };
@@ -198,7 +251,15 @@ impl TaskProductApi {
         let opened_session = match self.open_agent_session(&existing_task) {
             Ok(opened_session) => opened_session,
             Err(error) => {
-                committed_send.fail_protocol(self, &error)?;
+                let message = error.message.clone();
+                self.handle_send_start_failure(
+                    retryable_history_sync,
+                    &task_id,
+                    pending_send.clone(),
+                    RuntimeError::Internal(error.message),
+                    &message,
+                    sync_generation,
+                )?;
                 return Ok(());
             }
         };
@@ -206,11 +267,39 @@ impl TaskProductApi {
         let session_config_options = opened_session.session().config_options.clone();
         let session_config_catalog = opened_session.session().config_catalog.clone();
         let session_model_id = opened_session.session().model_id.clone();
+        let replayed_messages = opened_session.replayed_messages().to_vec();
+        let history_reconciled = !replayed_messages.is_empty();
+        let reconciled_messages = if replayed_messages.is_empty() {
+            None
+        } else {
+            let messages = self.store.read_messages(&task_id).map_err(runtime_error)?;
+            let suffix_start = messages
+                .iter()
+                .position(|message| {
+                    message.chat.message_id == committed_send.user_message_id().as_str()
+                })
+                .ok_or_else(|| {
+                    internal_error("committed user message missing before history sync")
+                })?;
+            Some(
+                replayed_messages
+                    .into_iter()
+                    .chain(
+                        messages[suffix_start..]
+                            .iter()
+                            .map(|message| message.chat.message.clone()),
+                    )
+                    .collect::<Vec<_>>(),
+            )
+        };
         let session_commit =
             self.mutations
                 .commit_existing_task(&task_id, durable_send_commit_options(), |ctx| {
                     if ctx.task().active_turn_id.as_deref() != Some(turn_id.as_str()) {
                         return Ok(TaskMutationResult::Rejected);
+                    }
+                    if let Some(messages) = reconciled_messages {
+                        ctx.replace_messages(messages)?;
                     }
                     let task = ctx.task_mut();
                     task.agent_session_id = Some(session_id.clone());
@@ -228,14 +317,25 @@ impl TaskProductApi {
         match session_commit {
             Ok(result) if matches!(result.outcome, TaskCommitOutcome::Committed(_)) => {}
             Ok(_) => {
-                let error = RuntimeError::NotReady(
-                    "Task changed before session start completed".to_string(),
-                );
-                committed_send.fail(self, error)?;
+                self.handle_send_start_failure(
+                    retryable_history_sync,
+                    &task_id,
+                    pending_send.clone(),
+                    RuntimeError::NotReady("Conversation changed while synchronizing".to_string()),
+                    "Conversation changed while synchronizing",
+                    sync_generation,
+                )?;
                 return Ok(());
             }
             Err(error) => {
-                committed_send.fail(self, error)?;
+                self.handle_send_start_failure(
+                    retryable_history_sync,
+                    &task_id,
+                    pending_send.clone(),
+                    error,
+                    "Could not save synchronized conversation history",
+                    sync_generation,
+                )?;
                 return Ok(());
             }
         }
@@ -255,16 +355,72 @@ impl TaskProductApi {
                     Ok(TaskMutationResult::Changed)
                 })
                 .map_err(super::protocol_error_from_runtime)?;
-            committed_send.fail(self, error)?;
+            self.handle_send_start_failure(
+                retryable_history_sync,
+                &task_id,
+                pending_send,
+                error,
+                "Could not attach the synchronized Agent session",
+                sync_generation,
+            )?;
             return Ok(());
         }
         let session = opened_session.commit();
         self.turn_runner.spawn_agent_turn(
-            task_id,
+            task_id.clone(),
             prompt_text,
             attachments.agent_attachments(),
             turn_id.as_str().to_string(),
             session,
+        );
+        self.publish_history_sync(
+            &task_id,
+            if history_reconciled {
+                openaide_app_server_protocol::snapshot::TaskHistorySyncSnapshot::Updated {
+                    generation: sync_generation,
+                }
+            } else {
+                openaide_app_server_protocol::snapshot::TaskHistorySyncSnapshot::Idle {
+                    generation: sync_generation,
+                }
+            },
+        );
+        Ok(())
+    }
+
+    fn handle_send_start_failure(
+        &self,
+        retryable_history_sync: bool,
+        task_id: &str,
+        pending_send: PendingSendSync,
+        error: RuntimeError,
+        message: &str,
+        sync_generation: u64,
+    ) -> Result<(), ProtocolError> {
+        if !self
+            .history_sync
+            .is_generation_current(task_id, sync_generation)
+        {
+            return Ok(());
+        }
+        if retryable_history_sync {
+            self.history_sync.defer_send(task_id, pending_send);
+            self.publish_history_sync(
+                task_id,
+                openaide_app_server_protocol::snapshot::TaskHistorySyncSnapshot::Failed {
+                    generation: sync_generation,
+                    message: message.to_string(),
+                    before_send: true,
+                },
+            );
+            return Ok(());
+        }
+        pending_send.committed_send.fail(self, error)?;
+        self.publish_history_sync(
+            task_id,
+            openaide_app_server_protocol::snapshot::TaskHistorySyncSnapshot::Idle {
+                generation: sync_generation,
+            },
         );
         Ok(())
     }

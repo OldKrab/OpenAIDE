@@ -1,0 +1,109 @@
+.prototype-canvas {
+  width: 100%;
+  min-height: 100vh;
+}
+
+.prototype-marker {
+  position: fixed;
+  top: 10px;
+  right: 10px;
+  z-index: 10000;
+  border: 1px solid color-mix(in oklch, var(--oa-warning) 45%, var(--oa-border));
+  border-radius: var(--oa-radius-sm);
+  background: color-mix(in oklch, var(--oa-warning) 12%, var(--oa-panel));
+  color: var(--oa-text);
+  padding: 3px 6px;
+  font-size: 10px;
+  font-weight: 650;
+  text-transform: uppercase;
+}
+
+.prototype-switcher {
+  position: fixed;
+  left: 50%;
+  bottom: 18px;
+  z-index: 10000;
+  min-height: 40px;
+  transform: translateX(-50%);
+  border: 1px solid color-mix(in oklch, var(--oa-text) 70%, var(--oa-border));
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--oa-text) 94%, var(--oa-bg));
+  color: var(--oa-bg);
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  padding: 4px;
+  box-shadow: 0 8px 24px color-mix(in oklch, var(--oa-text) 22%, transparent);
+}
+
+.prototype-switcher button {
+  width: 31px;
+  height: 31px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.prototype-switcher button:hover {
+  background: color-mix(in oklch, var(--oa-bg) 14%, transparent);
+}
+
+.prototype-switcher span {
+  min-width: 150px;
+  padding-inline: 7px;
+  text-align: center;
+  font-size: 12px;
+}
+
+.prototype-index {
+  width: min(680px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 72px 0;
+}
+
+.prototype-index header > span {
+  color: var(--oa-muted);
+  font-size: 11px;
+  font-weight: 650;
+  text-transform: uppercase;
+}
+
+.prototype-index h1 {
+  margin: 8px 0;
+  font-size: 22px;
+}
+
+.prototype-index p {
+  color: var(--oa-muted);
+}
+
+.prototype-index ul {
+  margin: 28px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+  list-style: none;
+}
+
+.prototype-index a {
+  border-radius: var(--oa-radius-sm);
+  color: var(--oa-text);
+  display: grid;
+  gap: 3px;
+  padding: 9px 10px;
+  text-decoration: none;
+}
+
+.prototype-index a:hover {
+  background: var(--oa-raised);
+}
+
+.prototype-index small {
+  color: var(--oa-muted);
+}
+
+.prototype-empty {
+  margin-top: 28px;
+}

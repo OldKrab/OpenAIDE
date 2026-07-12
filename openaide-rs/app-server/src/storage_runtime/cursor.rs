@@ -6,6 +6,10 @@ pub struct SnapshotReadToken {
 }
 
 impl SnapshotReadToken {
+    pub(crate) fn from_cursor(cursor: EventCursor) -> Self {
+        Self { cursor }
+    }
+
     pub fn cursor(&self) -> &EventCursor {
         &self.cursor
     }

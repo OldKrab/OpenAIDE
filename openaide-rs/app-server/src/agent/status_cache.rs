@@ -101,4 +101,5 @@ fn status_from_probe_error(error: &RuntimeError) -> AgentStatus {
 }
 
 #[cfg(test)]
+#[path = "status_cache_tests.rs"]
 mod tests;

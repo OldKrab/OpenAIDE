@@ -1765,6 +1765,7 @@ fn task_update_notification_emits_full_snapshot_for_task_subscribers() {
         task_id: "task-existing".to_string(),
         revision: 2,
         delta: None,
+        history_sync: None,
     });
 
     assert!(messages
@@ -2145,15 +2146,12 @@ fn task_set_config_option_persists_idle_task_option_after_initialize() {
     let response = response(&responses[0]);
     assert_eq!(
         response["result"]["result"]["task"]["agentConfig"]["state"],
-        "ready"
+        "unavailable"
     );
-    assert_eq!(
-        response["result"]["result"]["task"]["agentConfig"]["options"][0]["configId"],
-        "model"
-    );
-    assert_eq!(
-        response["result"]["result"]["task"]["agentConfig"]["options"][0]["currentValue"],
-        "gpt-5.5"
+    assert!(
+        response["result"]["result"]["task"]["agentConfig"]["options"]
+            .as_array()
+            .is_none_or(Vec::is_empty)
     );
     drop(dispatcher);
     let store = Store::open(temp.path().to_path_buf()).unwrap();

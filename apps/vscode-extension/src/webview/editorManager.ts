@@ -5,6 +5,8 @@ import { RuntimeClient } from "../runtime/rpcClient";
 import { renderWebviewHtml, renderWebviewPreparingHtml, webviewRoot } from "./html";
 import { handleWebviewMessage } from "./messaging";
 import type { WebviewBootstrap, WebviewHost } from "./types";
+import { resolveWebviewAppServerConnection } from "./appServerConnection";
+import { currentWorkspaceRoot } from "../workspace/roots";
 
 export class TaskEditorManager implements vscode.Disposable, WebviewHost {
   private readonly taskPanels = new Map<string, vscode.WebviewPanel>();
@@ -25,7 +27,10 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost {
       this.newTaskPanel.reveal(vscode.ViewColumn.Active);
       return;
     }
-    const panel = this.createPanel("openaide.task", "New task", { surface: "task", projectId });
+    const panel = this.createPanel("openaide.task", "New task", {
+      surface: "task",
+      projectId: projectId ?? currentWorkspaceRoot()?.projectId,
+    });
     this.newTaskPanel = panel;
     panel.onDidDispose(() => {
       this.nextPanelGeneration(panel);
@@ -100,7 +105,9 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost {
     generation: number,
   ) {
     try {
-      const connection = await this.runtimeProcess.startAppServerConnection();
+      const connection = await resolveWebviewAppServerConnection(
+        await this.runtimeProcess.startAppServerConnection(),
+      );
       if (!this.isPanelGenerationCurrent(panel, generation)) return;
       this.renderPanel(panel, {
         ...this.bootstrap(bootstrap),

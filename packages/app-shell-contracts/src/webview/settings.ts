@@ -21,6 +21,7 @@ export type DiagnosticsSnapshot = {
 export type WorkspaceRootSummary = {
   path: string;
   label: string;
+  projectId?: string;
 };
 
 export type AgentSettingsRecord = {

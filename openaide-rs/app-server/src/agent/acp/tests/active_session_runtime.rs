@@ -167,6 +167,56 @@ fn draft_recovery_ignores_config_missing_from_fresh_agent_catalog() {
     assert!(session.config_options.is_empty());
 }
 
+#[test]
+fn draft_recovery_keeps_fresh_catalog_when_one_saved_value_is_stale() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    if !python3_available() {
+        return;
+    }
+    let script_path = temp.path().join("fixture_agent.py");
+    let log_path = temp.path().join("fixture.log");
+    fs::write(&script_path, fixture_agent_script()).expect("fixture agent script");
+    let runtime = AcpAgentRuntime::new(AcpAgentConfig {
+        agent_id: "codex".to_string(),
+        command: "python3".to_string(),
+        args: vec![script_path.to_string_lossy().to_string()],
+        env: vec![
+            (
+                "OPENAIDE_ACP_FIXTURE_LOG".to_string(),
+                log_path.to_string_lossy().to_string(),
+            ),
+            (
+                "OPENAIDE_ACP_FIXTURE_SESSION".to_string(),
+                "catalog-session".to_string(),
+            ),
+            (
+                "OPENAIDE_ACP_FIXTURE_CONFIG_OPTIONS".to_string(),
+                "1".to_string(),
+            ),
+        ],
+        secret_env: Vec::new(),
+    });
+    let mut request = start_request("task-stale-config", cwd_string());
+    request.config_options = Some(serde_json::json!({
+        "mode": "full-access",
+        "model": "gpt-5.5"
+    }));
+    request.config_option_policy = crate::agent::ConfigOptionPolicy::ReconcileWithAgentDefaults;
+
+    let session = runtime
+        .start_session(request)
+        .expect("reconcile stale option");
+
+    assert_eq!(
+        session.config_options.get("mode").map(String::as_str),
+        Some("agent")
+    );
+    assert_eq!(
+        session.config_options.get("model").map(String::as_str),
+        Some("gpt-5.5")
+    );
+}
+
 fn inactive_runtime() -> AcpAgentRuntime {
     AcpAgentRuntime::new(AcpAgentConfig {
         agent_id: "codex".to_string(),
@@ -287,6 +337,7 @@ import sys
 log_path = os.environ["OPENAIDE_ACP_FIXTURE_LOG"]
 session_id = os.environ.get("OPENAIDE_ACP_FIXTURE_SESSION", "fixture-session")
 prompt_mode = os.environ.get("OPENAIDE_ACP_FIXTURE_PROMPT_MODE", "")
+with_config_options = os.environ.get("OPENAIDE_ACP_FIXTURE_CONFIG_OPTIONS", "") == "1"
 pending_prompt_ids = []
 next_session_number = 0
 closed_session_count = 0
@@ -361,7 +412,7 @@ def initialize_result():
                 "list": {},
             },
         },
-        "authMethods": [],
+        "authMethods": [{"id": "test-auth", "name": "Test auth"}],
     }
 
 for line in sys.stdin:
@@ -379,7 +430,7 @@ for line in sys.stdin:
             request_terminal("startup-terminal-create")
         elif session_id == "__counter__":
             respond(message, {"sessionId": f"counter-session-{next_session_number}"})
-        elif session_id == "__second_new_error__" and next_session_number == 2:
+        elif session_id == "__second_new_error__" and next_session_number >= 2:
             sys.stdout.write(json.dumps({
                 "jsonrpc": "2.0",
                 "id": message.get("id"),
@@ -387,13 +438,36 @@ for line in sys.stdin:
             }) + "\n")
             sys.stdout.flush()
         else:
-            respond(message, {"sessionId": session_id})
+            result = {"sessionId": session_id}
+            if with_config_options:
+                result["configOptions"] = [{
+                    "id": "mode",
+                    "name": "Mode",
+                    "type": "select",
+                    "currentValue": "agent",
+                    "options": [
+                        {"value": "agent", "name": "Agent"},
+                        {"value": "agent-full-access", "name": "Agent (full access)"},
+                    ],
+                }, {
+                    "id": "model",
+                    "name": "Model",
+                    "type": "select",
+                    "currentValue": "gpt-5.6-sol",
+                    "options": [
+                        {"value": "gpt-5.6-sol", "name": "GPT-5.6-Sol"},
+                        {"value": "gpt-5.5", "name": "GPT-5.5"},
+                    ],
+                }]
+            respond(message, result)
             if prompt_mode == "title_after_new":
                 notify_title("Agent generated title")
     elif method == "session/load":
         respond(message, {"configOptions": []})
     elif method == "session/list":
         respond(message, {"sessions": []})
+    elif method == "authenticate":
+        respond(message, {})
     elif method == "session/prompt":
         if prompt_mode == "host_terminal_wait_for_cancel":
             pending_prompt_ids.append(message.get("id"))
@@ -418,6 +492,25 @@ for line in sys.stdin:
         params = message.get("params", {})
         config_id = params.get("configId", "model")
         value = params.get("value", "gpt-5")
+        if with_config_options:
+            respond(message, {
+                "configOptions": [{
+                    "id": "mode", "name": "Mode", "type": "select",
+                    "currentValue": "agent",
+                    "options": [
+                        {"value": "agent", "name": "Agent"},
+                        {"value": "agent-full-access", "name": "Agent (full access)"},
+                    ],
+                }, {
+                    "id": "model", "name": "Model", "type": "select",
+                    "currentValue": value,
+                    "options": [
+                        {"value": "gpt-5.6-sol", "name": "GPT-5.6-Sol"},
+                        {"value": "gpt-5.5", "name": "GPT-5.5"},
+                    ],
+                }],
+            })
+            continue
         respond(message, {
             "configOptions": [{
                 "id": config_id,
@@ -537,6 +630,111 @@ fn listing_sessions_does_not_create_a_native_session() {
     assert_eq!(
         read_fixture_methods(&log_path),
         ["initialize", "session/list"]
+    );
+}
+
+#[test]
+fn listing_then_starting_reuses_one_agent_process() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((runtime, log_path)) = fixture_runtime(&temp, "list-before-start-session") else {
+        return;
+    };
+
+    runtime
+        .list_sessions(AgentListSessionsRequest {
+            agent_id: "codex".to_string(),
+            cwd: cwd_string(),
+            cursor: None,
+        })
+        .expect("list sessions");
+    let session = runtime
+        .start_session(start_request("task-after-list", cwd_string()))
+        .expect("start session");
+    runtime
+        .close_session(&session.session_id)
+        .expect("close session");
+
+    assert_eq!(
+        read_fixture_methods(&log_path),
+        ["initialize", "session/list", "session/new", "session/close"]
+    );
+}
+
+#[test]
+fn listing_sessions_reuses_the_active_agent_process() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((runtime, log_path)) = fixture_runtime(&temp, "shared-list-session") else {
+        return;
+    };
+    let session = runtime
+        .start_session(start_request("task-shared-list", cwd_string()))
+        .expect("start session");
+
+    runtime
+        .list_sessions(AgentListSessionsRequest {
+            agent_id: "codex".to_string(),
+            cwd: cwd_string(),
+            cursor: None,
+        })
+        .expect("list sessions");
+    runtime
+        .close_session(&session.session_id)
+        .expect("close session");
+
+    assert_eq!(
+        read_fixture_methods(&log_path),
+        ["initialize", "session/new", "session/list", "session/close"]
+    );
+}
+
+#[test]
+fn probing_reuses_the_active_agent_process() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((runtime, log_path)) = fixture_runtime(&temp, "shared-probe-session") else {
+        return;
+    };
+    let session = runtime
+        .start_session(start_request("task-shared-probe", cwd_string()))
+        .expect("start session");
+
+    runtime
+        .probe(crate::agent::AgentProbeRequest {
+            agent_id: "codex".to_string(),
+        })
+        .expect("probe agent");
+    runtime
+        .close_session(&session.session_id)
+        .expect("close session");
+
+    assert_eq!(
+        read_fixture_methods(&log_path),
+        ["initialize", "session/new", "session/close"]
+    );
+}
+
+#[test]
+fn authentication_reuses_the_active_agent_process() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((runtime, log_path)) = fixture_runtime(&temp, "shared-auth-session") else {
+        return;
+    };
+    let session = runtime
+        .start_session(start_request("task-shared-auth", cwd_string()))
+        .expect("start session");
+
+    runtime
+        .authenticate(crate::agent::AgentAuthenticateRequest {
+            agent_id: "codex".to_string(),
+            method_id: "test-auth".to_string(),
+        })
+        .expect("authenticate agent");
+    runtime
+        .close_session(&session.session_id)
+        .expect("close session");
+
+    assert_eq!(
+        read_fixture_methods(&log_path),
+        ["initialize", "session/new", "authenticate", "session/close"]
     );
 }
 
@@ -1374,6 +1572,18 @@ fn duplicate_active_session_id_keeps_original_session_active() {
 
     assert_eq!(error, "invalid params: agent_session_id already active");
     runtime
+        .prompt(
+            AgentPrompt {
+                task_id: "task-duplicate-one".to_string(),
+                session_id: session.session_id.clone(),
+                text: "original remains active".to_string(),
+                attachments: Vec::new(),
+                cancellation: TurnCancellation::new(),
+            },
+            Arc::new(CapturingEventSink::default()),
+        )
+        .expect("prompt original session after duplicate rejection");
+    runtime
         .close_session(&session.session_id)
         .expect("close original session");
 
@@ -1383,7 +1593,7 @@ fn duplicate_active_session_id_keeps_original_session_active() {
             "initialize",
             "session/new",
             "session/new",
-            "session/close",
+            "session/prompt",
             "session/close"
         ]
     );
@@ -1421,7 +1631,14 @@ fn shared_process_open_failure_reports_without_start_timeout() {
         .expect("close first session");
     assert_eq!(
         read_fixture_methods(&log_path),
-        ["initialize", "session/new", "session/new", "session/close"]
+        [
+            "initialize",
+            "session/new",
+            "session/new",
+            "authenticate",
+            "session/new",
+            "session/close"
+        ]
     );
 }
 
@@ -1686,7 +1903,6 @@ fn delete_session_dispatches_to_active_session() {
     );
 }
 
-#[cfg(unix)]
 #[test]
 fn active_session_start_timeout_reports_stable_error() {
     let mut manager = AcpActiveSessionManager::new(

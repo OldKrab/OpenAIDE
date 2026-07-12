@@ -5,6 +5,8 @@ import { RuntimeClient } from "../runtime/rpcClient";
 import { renderWebviewHtml, renderWebviewPreparingHtml, webviewRoot } from "./html";
 import { handleWebviewMessage } from "./messaging";
 import type { WebviewHost } from "./types";
+import { resolveWebviewAppServerConnection } from "./appServerConnection";
+import { currentWorkspaceRoot } from "../workspace/roots";
 
 export class TaskViewProvider implements vscode.WebviewViewProvider {
   static readonly viewType = "openaide.tasks";
@@ -42,7 +44,9 @@ export class TaskViewProvider implements vscode.WebviewViewProvider {
 
   private async renderWhenAppServerReady(view: vscode.WebviewView, generation: number) {
     try {
-      const connection = await this.runtimeProcess.startAppServerConnection();
+      const connection = await resolveWebviewAppServerConnection(
+        await this.runtimeProcess.startAppServerConnection(),
+      );
       if (!this.isRenderGenerationCurrent(generation) || this.view !== view) return;
       view.webview.html = renderWebviewHtml(this.context, view.webview, {
         ...this.bootstrap(),
@@ -58,6 +62,7 @@ export class TaskViewProvider implements vscode.WebviewViewProvider {
   private bootstrap(): Parameters<typeof renderWebviewHtml>[2] {
     return {
       surface: "navigation",
+      projectId: currentWorkspaceRoot()?.projectId,
     };
   }
 

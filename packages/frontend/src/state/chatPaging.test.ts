@@ -150,6 +150,7 @@ function snapshot(items: ChatMessage[]): TaskSnapshot {
     },
     chat: page(items, false),
     permissions: [],
+    history_sync: { state: "idle", generation: 0 },
     send_capability: { state: "ready", attachment_only: true },
     settings_summary: { agent_id: "codex", isolation: "local" },
     revision: 1,
