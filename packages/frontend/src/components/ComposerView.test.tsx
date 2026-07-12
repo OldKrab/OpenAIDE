@@ -214,6 +214,30 @@ describe("Composer view behavior", () => {
     expect(menusByLabel(renderer.root, "Workspace files")).toHaveLength(0);
   });
 
+  it("closes attachment popovers and locks add controls when Send starts", async () => {
+    const fileBrowser = fileBrowserCallbacks();
+    const renderer = renderComposer({ fileBrowser });
+
+    click(buttonByLabel(renderer.root, "Add context"));
+    click(menuButtonByStrongLabel(renderer.root, "Workspace files"));
+    await settleRenderer();
+    expect(menuByLabel(renderer.root, "Workspace files")).toBeTruthy();
+
+    act(() => {
+      renderer.update(composerElement({
+        disabled: true,
+        fileBrowser,
+        prompt: "Sending",
+        submitDisabled: true,
+        submitPending: true,
+      }));
+    });
+
+    expect(menusByLabel(renderer.root, "Workspace files")).toHaveLength(0);
+    expect(menusByLabel(renderer.root, "Add context")).toHaveLength(0);
+    expect(buttonByLabel(renderer.root, "Add context").props.disabled).toBe(true);
+  });
+
   it("uploads every selected image through the App Server attachment callback", async () => {
     const first = new File(["first"], "first.png", { type: "image/png" });
     const second = new File(["second"], "second.png", { type: "image/png" });
@@ -418,6 +442,31 @@ describe("Composer view behavior", () => {
     expect(text(menuByLabel(renderer.root, "Run options"))).toContain("Model");
   });
 
+  it("keeps compact Configuration Options locked while leaving mutable Isolation available", () => {
+    const renderer = renderComposer({
+      configLocked: true,
+      configOptions: configOptions(),
+      showIsolationSelector: true,
+    });
+    const compactAnchor = renderer.root.findByProps({ className: "composer-mobile-options-anchor" });
+
+    click(compactAnchor.findByType("button"));
+
+    expect(menuButtonByStrongLabel(renderer.root, "Reasoning").props.disabled).toBe(true);
+    expect(menuButtonByStrongLabel(renderer.root, "Isolation").props.disabled).toBe(false);
+  });
+
+  it("disables compact Options when every contained control is locked", () => {
+    const renderer = renderComposer({
+      configLocked: true,
+      configOptions: configOptions(),
+      showIsolationSelector: false,
+    });
+    const compactAnchor = renderer.root.findByProps({ className: "composer-mobile-options-anchor" });
+
+    expect(compactAnchor.findByType("span").props.className).toContain("locked");
+  });
+
   it("labels mode config controls with the compact selected value", () => {
     const renderer = renderComposer({
       configOptions: {
@@ -605,7 +654,7 @@ describe("Composer view behavior", () => {
       typeof node.props.className === "string" &&
       node.props.className.split(/\s+/).includes("composer-pill") &&
       node.props.className.split(/\s+/).includes("locked"),
-    )).toHaveLength(3);
+    )).toHaveLength(4);
     expect(buttonsByLabel(lockedRenderer.root, "Send message")).toHaveLength(0);
     expect(buttonsByLabel(lockedRenderer.root, "Stop task")).toHaveLength(1);
     click(buttonByLabel(lockedRenderer.root, "Stop task"));
@@ -634,6 +683,34 @@ describe("Composer view behavior", () => {
 
     expect(onSubmit).toHaveBeenCalledWith("steer the current work");
     expect(onCancel).not.toHaveBeenCalled();
+  });
+
+  it("keeps Stop available when an active-task draft is not sendable", () => {
+    const onCancel = vi.fn();
+    const renderer = renderComposer({ onCancel, submitDisabled: true });
+
+    inputText(textarea(renderer.root), "Draft for later");
+
+    expect(buttonsByLabel(renderer.root, "Send message")).toHaveLength(0);
+    const stopButton = buttonByLabel(renderer.root, "Stop task");
+    click(stopButton);
+    expect(onCancel).toHaveBeenCalledOnce();
+  });
+
+  it("keeps Stop available while a send attempt is pending", () => {
+    const onCancel = vi.fn();
+    const renderer = renderComposer({
+      onCancel,
+      prompt: "Waiting for acceptance",
+      submitDisabled: true,
+      submitPending: true,
+    });
+
+    expect(renderer.root.findByProps({ "aria-label": "Task starting" })).toBeDefined();
+    expect(buttonsByLabel(renderer.root, "Send message")).toHaveLength(0);
+    const stopButton = buttonByLabel(renderer.root, "Stop task");
+    click(stopButton);
+    expect(onCancel).toHaveBeenCalledOnce();
   });
 
   it("submits from the textarea shortcut only when submit is enabled", () => {
@@ -686,7 +763,7 @@ describe("Composer view behavior", () => {
     expect(buttonByLabel(attachmentRenderer.root, "Send message").props.disabled).toBe(false);
   });
 
-  it("keeps keystrokes out of React callbacks and submits the DOM draft", () => {
+  it("publishes every editor change to the task-scoped draft owner", () => {
     const onChange = vi.fn();
     const onSubmit = vi.fn();
     const renderer = renderComposer({ onChange, onSubmit });
@@ -694,7 +771,7 @@ describe("Composer view behavior", () => {
 
     inputText(input, "No reducer per key");
 
-    expect(onChange).not.toHaveBeenCalled();
+    expect(onChange).toHaveBeenCalledWith("No reducer per key");
 
     click(buttonByLabel(renderer.root, "Send message"));
 
@@ -718,7 +795,7 @@ describe("Composer view behavior", () => {
     expect(editorDom.innerHTML).toBe("seed grows");
   });
 
-  it("clears the local draft after Backend acceptance settles submission", () => {
+  it("keeps submitted text visible until Backend acceptance clears the authoritative draft", () => {
     const onSubmit = vi.fn();
     const { editorDom, renderer } = renderComposerWithEditorDom({ commandCatalog: commandCatalog(), onCancel: vi.fn(), onSubmit, prompt: "" });
 
@@ -726,8 +803,10 @@ describe("Composer view behavior", () => {
     inputText(textarea(renderer.root), "Try reload target again");
     click(buttonByLabel(renderer.root, "Send message"));
     act(() => {
-      renderer.update(composerElement({ commandCatalog: commandCatalog(), onCancel: vi.fn(), onSubmit, prompt: "", submitPending: true }));
+      renderer.update(composerElement({ commandCatalog: commandCatalog(), onCancel: vi.fn(), onSubmit, prompt: "Try reload target again", submitPending: true }));
     });
+    expect(editorDom.innerHTML).toBe("Try reload target again");
+
     act(() => {
       renderer.update(composerElement({ commandCatalog: commandCatalog(), onCancel: vi.fn(), onSubmit, prompt: "", submitPending: false }));
     });
@@ -735,7 +814,7 @@ describe("Composer view behavior", () => {
     expect(editorDom.innerHTML).toBe("");
   });
 
-  it("clears the local draft when Backend acceptance is batched past the pending render", () => {
+  it("clears the local draft when acceptance is batched past a pending render", () => {
     const onSubmit = vi.fn();
     const { editorDom, renderer } = renderComposerWithEditorDom({
       commandCatalog: commandCatalog(),
@@ -777,7 +856,7 @@ describe("Composer view behavior", () => {
     expect(onSubmit).toHaveBeenCalledWith("steer without clearing");
   });
 
-  it("keeps composer callbacks fresh when a parent refresh leaves editor markup unchanged", () => {
+  it("does not republish an unchanged draft after a parent refresh", () => {
     const firstOnChange = vi.fn();
     const nextOnChange = vi.fn();
     const renderer = renderComposer({ onChange: firstOnChange, prompt: "" });
@@ -786,10 +865,9 @@ describe("Composer view behavior", () => {
     act(() => {
       renderer.update(composerElement({ onChange: nextOnChange, prompt: "" }));
     });
-    textarea(renderer.root).props.onBlur();
-
-    expect(firstOnChange).not.toHaveBeenCalled();
-    expect(nextOnChange).toHaveBeenCalledWith("commit through latest callback");
+    expect(firstOnChange).toHaveBeenCalledOnce();
+    expect(firstOnChange).toHaveBeenCalledWith("commit through latest callback");
+    expect(nextOnChange).not.toHaveBeenCalled();
   });
 
   it("inserts a visible newline from the configured newline shortcut when Enter sends", () => {
@@ -813,7 +891,7 @@ describe("Composer view behavior", () => {
     });
 
     expect(preventDefault).toHaveBeenCalledTimes(1);
-    expect(onChange).not.toHaveBeenCalled();
+    expect(onChange).toHaveBeenCalledWith("line1\n");
     expect(editorDom.innerHTML).toBe("line1<br><br>");
   });
 
@@ -1282,6 +1360,7 @@ function commandCatalog(): AgentCommandsCatalog {
 
 function fileBrowserCallbacks(): TaskFileBrowserCallbacks {
   return {
+    ownerKey: "task:test",
     attachEmbedded: vi.fn(async () => undefined),
     attachFileReference: vi.fn(async () => undefined),
     attachPastedImage: vi.fn(async () => undefined),

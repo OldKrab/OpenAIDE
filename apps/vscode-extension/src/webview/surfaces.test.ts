@@ -276,6 +276,33 @@ describe("VS Code webview surfaces", () => {
     expect(vscodeMocks.panels[2].reveal).toHaveBeenCalledWith(1);
   });
 
+  it("reuses the registered Task panel when a New Task routes to the same Task", () => {
+    const manager = new TaskEditorManager(context(), runtime(), runtimeProcess(), logger());
+
+    manager.openTask("task_1", "Existing task");
+    const existingTaskPanel = vscodeMocks.panels[0];
+    manager.openNewTask();
+    const supersededNewTaskPanel = vscodeMocks.panels[1];
+
+    triggerLastMessageHandler(supersededNewTaskPanel, {
+      type: "surface.openTask",
+      payload: { task_id: "task_1", title: "Existing task" },
+    });
+
+    expect(supersededNewTaskPanel.dispose).toHaveBeenCalledOnce();
+    expect(existingTaskPanel.dispose).not.toHaveBeenCalled();
+    expect(existingTaskPanel.reveal).toHaveBeenCalledWith(1);
+    expect(supersededNewTaskPanel.webview.postMessage).not.toHaveBeenCalledWith({
+      type: "surface.routeChanged",
+      payload: { surface: "task", task_id: "task_1" },
+    });
+
+    manager.openTask("task_1", "Existing task");
+    expect(vscodeMocks.createWebviewPanel).toHaveBeenCalledTimes(2);
+    manager.openNewTask();
+    expect(vscodeMocks.createWebviewPanel).toHaveBeenCalledTimes(3);
+  });
+
   it("keeps adopted task panels from clearing a newer New Task panel", () => {
     const manager = new TaskEditorManager(context(), runtime(), runtimeProcess(), logger());
 

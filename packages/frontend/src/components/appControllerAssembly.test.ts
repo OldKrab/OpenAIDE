@@ -77,7 +77,7 @@ describe("deriveAppControllerState", () => {
     state.taskInputs.task_2 = {
       prompt: "",
       context: [],
-      pending: { prompt: "Build the thing", context: [] },
+      pending: { prompt: "Build the thing", context: [], state: "sending" },
     };
 
     const derived = deriveAppControllerState(state);
@@ -101,7 +101,7 @@ describe("deriveAppControllerState", () => {
     state.taskInputs.task_2 = {
       prompt: "",
       context: [],
-      pending: { prompt: "Build the thing", context: [] },
+      pending: { prompt: "Build the thing", context: [], state: "sending" },
     };
 
     const derived = deriveAppControllerState(state);
@@ -269,6 +269,96 @@ describe("requestControllerNativeSessions", () => {
     });
   });
 
+  it("loads the requested number of new unique sessions when appending pages", async () => {
+    const dispatch = vi.fn();
+    const request = vi.fn()
+      .mockResolvedValueOnce({
+        agentId: "codex",
+        projectId: "project-1",
+        projectLabel: "Workspace",
+        sessions: [
+          { sessionId: "session_1", title: "Already loaded" },
+          { sessionId: "session_2", title: "Newer" },
+        ],
+        nextCursor: "cursor_3",
+      })
+      .mockResolvedValueOnce({
+        agentId: "codex",
+        projectId: "project-1",
+        projectLabel: "Workspace",
+        sessions: [
+          { sessionId: "session_2", title: "Newer duplicate" },
+          { sessionId: "session_3", title: "Older" },
+        ],
+        nextCursor: "cursor_4",
+      });
+
+    requestControllerNativeSessions({
+      agentId: "codex",
+      append: true,
+      backendConnection: { request },
+      cursor: "cursor_2",
+      dispatch,
+      existingSessionIds: ["session_1"],
+      latestSessionListRequestId: { current: undefined },
+      minimumSessionCount: 2,
+      nextSessionListRequestId: { current: 0 },
+      projectId: "project-1",
+    });
+    await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+
+    expect(dispatch).toHaveBeenLastCalledWith({
+      type: "newTask:nativeSessions:result",
+      append: true,
+      result: {
+        agent_id: "codex",
+        next_cursor: "cursor_4",
+        sessions: [
+          { session_id: "session_2", cwd: "Workspace", title: "Newer" },
+          { session_id: "session_3", cwd: "Workspace", title: "Older" },
+        ],
+      },
+    });
+  });
+
+  it("stops pagination when the Agent repeats a session cursor", async () => {
+    const dispatch = vi.fn();
+    const request = vi.fn()
+      .mockResolvedValueOnce({
+        agentId: "codex",
+        projectId: "project-1",
+        projectLabel: "Workspace",
+        sessions: [{ sessionId: "session_2", title: "Only new session" }],
+        nextCursor: "cursor_2",
+      })
+      .mockRejectedValue(new Error("repeated cursor must not be requested"));
+
+    requestControllerNativeSessions({
+      agentId: "codex",
+      append: true,
+      backendConnection: { request },
+      cursor: "cursor_2",
+      dispatch,
+      existingSessionIds: ["session_1"],
+      latestSessionListRequestId: { current: undefined },
+      minimumSessionCount: 2,
+      nextSessionListRequestId: { current: 0 },
+      projectId: "project-1",
+    });
+    await vi.waitFor(() => expect(dispatch).toHaveBeenCalledTimes(2));
+
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(dispatch).toHaveBeenLastCalledWith({
+      type: "newTask:nativeSessions:result",
+      append: true,
+      result: {
+        agent_id: "codex",
+        next_cursor: undefined,
+        sessions: [{ session_id: "session_2", cwd: "Workspace", title: "Only new session" }],
+      },
+    });
+  });
+
   it("reports the typed App Server failure when session history cannot load", async () => {
     const dispatch = vi.fn();
     const onFailure = vi.fn();
@@ -302,7 +392,7 @@ describe("requestControllerNativeSessions", () => {
       requestId: 1,
     });
     expect(dispatch).toHaveBeenCalledWith({
-      type: "newTask:nativeSessions:error",
+      type: "newTask:nativeSessions:listError",
       message: "Unable to load Agent session history.",
     });
   });
@@ -325,7 +415,7 @@ describe("requestControllerNativeSessions", () => {
     expect(latestSessionListRequestId.current).toBe(42);
     expect(dispatch).toHaveBeenCalledWith({ type: "newTask:nativeSessions:start", append: true });
     expect(dispatch).toHaveBeenCalledWith({
-      type: "newTask:nativeSessions:error",
+      type: "newTask:nativeSessions:listError",
       message: "App Server connection unavailable.",
     });
   });
@@ -344,7 +434,7 @@ describe("requestControllerNativeSessions", () => {
 
     expect(dispatch).toHaveBeenCalledWith({ type: "newTask:nativeSessions:start", append: false });
     expect(dispatch).toHaveBeenCalledWith({
-      type: "newTask:nativeSessions:error",
+      type: "newTask:nativeSessions:listError",
       message: "App Server connection unavailable.",
     });
   });

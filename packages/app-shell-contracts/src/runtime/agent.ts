@@ -34,6 +34,12 @@ export type ConfigOptionsCatalog = {
   agent_id: string;
   status: ConfigOptionsStatus;
   options: ConfigOption[];
+  pending_change?: {
+    mutation_id: string;
+    option_id: string;
+    requested_value: string;
+  };
+  error?: string;
 };
 
 export type ConfigOption = {

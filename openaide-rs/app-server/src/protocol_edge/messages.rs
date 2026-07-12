@@ -44,7 +44,7 @@ pub struct GatewayEventDelivery {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GatewayResponse {
     Result(Value),
-    Error(ErrorEnvelope),
+    Error(Box<ErrorEnvelope>),
 }
 
 pub(crate) fn event_deliveries(

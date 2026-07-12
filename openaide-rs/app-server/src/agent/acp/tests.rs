@@ -874,6 +874,226 @@ fn replayed_text_without_source_ids_has_restart_stable_identity() {
 }
 
 #[test]
+fn replay_continues_a_sourced_message_across_tool_activity() {
+    let messages = ReplayProjection::new("session-source-tool-source").project(vec![
+        SessionUpdate::AgentMessageChunk(
+            ContentChunk::new(ContentBlock::Text(TextContent::new("Before")))
+                .message_id("agent-message-1".to_string()),
+        ),
+        SessionUpdate::ToolCall(
+            ToolCall::new("tool_call_1", "Read file")
+                .kind(ToolKind::Read)
+                .status(ToolCallStatus::InProgress),
+        ),
+        SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+            "tool_call_1",
+            ToolCallUpdateFields::new().status(ToolCallStatus::Completed),
+        )),
+        SessionUpdate::AgentMessageChunk(
+            ContentChunk::new(ContentBlock::Text(TextContent::new(" after")))
+                .message_id("agent-message-1".to_string()),
+        ),
+    ]);
+
+    assert_eq!(messages.len(), 2);
+    match &messages[0] {
+        NormalizedMessage::AgentText {
+            id,
+            text,
+            streaming,
+            ..
+        } => {
+            assert_eq!(id, "acp:session-source-tool-source:message:agent-message-1");
+            assert_eq!(text, "Before after");
+            assert!(!streaming);
+        }
+        other => panic!("expected one sourced message, got {other:?}"),
+    }
+    assert!(matches!(
+        &messages[1],
+        NormalizedMessage::Activity {
+            status: ActivityStatus::Completed,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn replay_continues_each_sourced_message_across_interleaved_messages() {
+    let messages = ReplayProjection::new("session-interleaved-sources").project(vec![
+        SessionUpdate::AgentMessageChunk(
+            ContentChunk::new(ContentBlock::Text(TextContent::new("First")))
+                .message_id("agent-message-a".to_string()),
+        ),
+        SessionUpdate::AgentMessageChunk(
+            ContentChunk::new(ContentBlock::Text(TextContent::new("Second")))
+                .message_id("agent-message-b".to_string()),
+        ),
+        SessionUpdate::AgentMessageChunk(
+            ContentChunk::new(ContentBlock::Text(TextContent::new(" continued")))
+                .message_id("agent-message-a".to_string()),
+        ),
+    ]);
+
+    assert_eq!(messages.len(), 2);
+    match messages.as_slice() {
+        [NormalizedMessage::AgentText {
+            id: first_id,
+            text: first_text,
+            ..
+        }, NormalizedMessage::AgentText {
+            id: second_id,
+            text: second_text,
+            ..
+        }] => {
+            assert_eq!(
+                first_id,
+                "acp:session-interleaved-sources:message:agent-message-a"
+            );
+            assert_eq!(first_text, "First continued");
+            assert_eq!(
+                second_id,
+                "acp:session-interleaved-sources:message:agent-message-b"
+            );
+            assert_eq!(second_text, "Second");
+        }
+        other => panic!("expected one row per sourced message, got {other:?}"),
+    }
+}
+
+#[test]
+fn replay_ends_anonymous_text_at_tool_activity() {
+    let messages = ReplayProjection::new("session-anonymous-tool-boundary").project(vec![
+        SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Text(TextContent::new(
+            "Before",
+        )))),
+        SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Text(TextContent::new(
+            " tool",
+        )))),
+        SessionUpdate::ToolCall(
+            ToolCall::new("tool_call_1", "Read file")
+                .kind(ToolKind::Read)
+                .status(ToolCallStatus::Completed),
+        ),
+        SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Text(TextContent::new(
+            "After tool",
+        )))),
+    ]);
+
+    assert_eq!(messages.len(), 3);
+    assert!(matches!(
+        &messages[0],
+        NormalizedMessage::AgentText { text, .. } if text == "Before tool"
+    ));
+    assert!(matches!(&messages[1], NormalizedMessage::Activity { .. }));
+    assert!(matches!(
+        &messages[2],
+        NormalizedMessage::AgentText { text, .. } if text == "After tool"
+    ));
+    assert_ne!(messages[0].identity(), messages[2].identity());
+}
+
+#[test]
+fn replay_keeps_anonymous_text_distinct_when_the_next_chunk_has_a_source_id() {
+    let updates = || {
+        vec![
+            SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Text(
+                TextContent::new("Anonymous message"),
+            ))),
+            SessionUpdate::AgentMessageChunk(
+                ContentChunk::new(ContentBlock::Text(TextContent::new("Sourced message")))
+                    .message_id("source-message-1".to_string()),
+            ),
+        ]
+    };
+
+    let first = ReplayProjection::new("session-identity-boundary").project(updates());
+    let second = ReplayProjection::new("session-identity-boundary").project(updates());
+
+    assert_eq!(first.len(), 2);
+    assert_eq!(
+        first
+            .iter()
+            .map(NormalizedMessage::identity)
+            .collect::<Vec<_>>(),
+        second
+            .iter()
+            .map(NormalizedMessage::identity)
+            .collect::<Vec<_>>()
+    );
+    match first.as_slice() {
+        [NormalizedMessage::AgentText {
+            id: anonymous_id,
+            text: anonymous_text,
+            ..
+        }, NormalizedMessage::AgentText {
+            id: sourced_id,
+            text: sourced_text,
+            ..
+        }] => {
+            assert!(anonymous_id.starts_with("acp:session-identity-boundary:replay:agent:"));
+            assert_eq!(anonymous_text, "Anonymous message");
+            assert_eq!(
+                sourced_id,
+                "acp:session-identity-boundary:message:source-message-1"
+            );
+            assert_eq!(sourced_text, "Sourced message");
+        }
+        other => panic!("expected distinct anonymous and sourced messages, got {other:?}"),
+    }
+}
+
+#[test]
+fn replay_keeps_sourced_text_distinct_when_the_next_chunk_is_anonymous() {
+    let updates = || {
+        vec![
+            SessionUpdate::AgentMessageChunk(
+                ContentChunk::new(ContentBlock::Text(TextContent::new("Sourced message")))
+                    .message_id("source-message-1".to_string()),
+            ),
+            SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Text(
+                TextContent::new("Anonymous message"),
+            ))),
+        ]
+    };
+
+    let first = ReplayProjection::new("session-reverse-identity-boundary").project(updates());
+    let second = ReplayProjection::new("session-reverse-identity-boundary").project(updates());
+
+    assert_eq!(first.len(), 2);
+    assert_eq!(
+        first
+            .iter()
+            .map(NormalizedMessage::identity)
+            .collect::<Vec<_>>(),
+        second
+            .iter()
+            .map(NormalizedMessage::identity)
+            .collect::<Vec<_>>()
+    );
+    match first.as_slice() {
+        [NormalizedMessage::AgentText {
+            id: sourced_id,
+            text: sourced_text,
+            ..
+        }, NormalizedMessage::AgentText {
+            id: anonymous_id,
+            text: anonymous_text,
+            ..
+        }] => {
+            assert_eq!(
+                sourced_id,
+                "acp:session-reverse-identity-boundary:message:source-message-1"
+            );
+            assert_eq!(sourced_text, "Sourced message");
+            assert!(anonymous_id.starts_with("acp:session-reverse-identity-boundary:replay:agent:"));
+            assert_eq!(anonymous_text, "Anonymous message");
+        }
+        other => panic!("expected distinct sourced and anonymous messages, got {other:?}"),
+    }
+}
+
+#[test]
 fn live_agent_thought_chunks_emit_thought_events_not_tool_activity() {
     let capture = Arc::new(CapturingEventSink::default());
     let sink: Arc<dyn AgentEventSink> = capture.clone();

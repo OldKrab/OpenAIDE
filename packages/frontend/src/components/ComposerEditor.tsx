@@ -23,7 +23,6 @@ type ComposerEditorProps = {
   ariaLabel: string;
   commandCatalog?: AgentCommandsCatalog;
   disabled: boolean;
-  onBlur: () => void;
   onInputText: (value: string, cursor: number) => void;
   onKeyDown: (event: KeyboardEvent<HTMLDivElement>) => void;
   onPaste: (event: ClipboardEvent<HTMLDivElement>) => void;
@@ -37,7 +36,6 @@ export const ComposerEditor = forwardRef<ComposerEditorHandle, ComposerEditorPro
   ariaLabel,
   commandCatalog,
   disabled,
-  onBlur,
   onInputText,
   onKeyDown,
   onPaste,
@@ -47,14 +45,12 @@ export const ComposerEditor = forwardRef<ComposerEditorHandle, ComposerEditorPro
   value,
 }, ref) {
   const handlersRef = useRef<ComposerEditorHandlers>({
-    onBlur,
     onInputText,
     onKeyDown,
     onPaste,
     onPointerDown,
   });
   handlersRef.current = {
-    onBlur,
     onInputText,
     onKeyDown,
     onPaste,
@@ -77,7 +73,7 @@ export const ComposerEditor = forwardRef<ComposerEditorHandle, ComposerEditorPro
 
 type ComposerEditorHandlers = Pick<
   ComposerEditorProps,
-  "onBlur" | "onInputText" | "onKeyDown" | "onPaste" | "onPointerDown"
+  "onInputText" | "onKeyDown" | "onPaste" | "onPointerDown"
 >;
 
 type ComposerEditorSurfaceProps = {
@@ -137,7 +133,6 @@ const ComposerEditorSurface = memo(forwardRef<ComposerEditorHandle, ComposerEdit
       contentEditable={!disabled}
       data-empty={valueLength === 0 ? true : undefined}
       data-placeholder={placeholder}
-      onBlur={() => handlersRef.current.onBlur()}
       onInput={(event) => {
         const nextValue = editableText(event.currentTarget);
         event.currentTarget.toggleAttribute("data-empty", nextValue.length === 0);

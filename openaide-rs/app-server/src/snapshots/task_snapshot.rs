@@ -1,6 +1,9 @@
 use openaide_app_server_protocol::errors::{ProtocolError, ProtocolErrorCode};
 use openaide_app_server_protocol::ids::{ProjectId, TaskId, TaskListCursor};
-use openaide_app_server_protocol::snapshot::{ChatSnapshot, TaskSnapshot, TaskSummary};
+use openaide_app_server_protocol::snapshot::{
+    ChatSnapshot, TaskHistorySyncSnapshot, TaskSnapshot, TaskSummary,
+};
+use std::sync::Arc;
 
 use crate::chat_history::ChatHistoryPolicy;
 use crate::protocol::model::TaskSnapshot as StoredTaskSnapshot;
@@ -31,6 +34,20 @@ pub trait TaskSnapshotSource: Send + Sync {
     fn open(&self, task_id: &TaskId) -> Result<TaskSnapshot, ProtocolError>;
 }
 
+/// Supplies process-local history reconciliation state for otherwise durable Task snapshots.
+pub(crate) trait TaskHistorySyncSnapshotSource: Send + Sync {
+    fn history_sync_snapshot(&self, task_id: &str) -> TaskHistorySyncSnapshot;
+}
+
+#[derive(Default)]
+struct IdleTaskHistorySyncSnapshots;
+
+impl TaskHistorySyncSnapshotSource for IdleTaskHistorySyncSnapshots {
+    fn history_sync_snapshot(&self, _task_id: &str) -> TaskHistorySyncSnapshot {
+        TaskHistorySyncSnapshot::default()
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct TaskListSnapshot {
     pub tasks: Vec<TaskSummary>,
@@ -42,6 +59,7 @@ pub struct TaskListSnapshot {
 pub struct TaskSnapshotStore {
     store: Store,
     tail_limit: usize,
+    history_sync: Arc<dyn TaskHistorySyncSnapshotSource>,
 }
 
 impl TaskSnapshotStore {
@@ -49,6 +67,18 @@ impl TaskSnapshotStore {
         Self {
             store,
             tail_limit: ChatHistoryPolicy::default().task_snapshot_tail_limit(),
+            history_sync: Arc::new(IdleTaskHistorySyncSnapshots),
+        }
+    }
+
+    pub(crate) fn with_history_sync(
+        store: Store,
+        history_sync: Arc<dyn TaskHistorySyncSnapshotSource>,
+    ) -> Self {
+        Self {
+            store,
+            tail_limit: ChatHistoryPolicy::default().task_snapshot_tail_limit(),
+            history_sync,
         }
     }
 }
@@ -97,7 +127,8 @@ impl TaskSnapshotSource for TaskSnapshotStore {
         }
         let snapshot = build_snapshot(&self.store, task_id.as_str(), self.tail_limit)
             .map_err(task_snapshot_error)?;
-        project_stored_task_snapshot(snapshot)
+        let history_sync = self.history_sync.history_sync_snapshot(task_id.as_str());
+        project_stored_task_snapshot_with_history_sync(snapshot, history_sync)
     }
 }
 
@@ -122,8 +153,16 @@ impl TaskSnapshotStoreArchiveList for Store {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn project_stored_task_snapshot(
     snapshot: StoredTaskSnapshot,
+) -> Result<TaskSnapshot, ProtocolError> {
+    project_stored_task_snapshot_with_history_sync(snapshot, TaskHistorySyncSnapshot::default())
+}
+
+pub(crate) fn project_stored_task_snapshot_with_history_sync(
+    snapshot: StoredTaskSnapshot,
+    history_sync: TaskHistorySyncSnapshot,
 ) -> Result<TaskSnapshot, ProtocolError> {
     let send_capability = send_capability_for_task(snapshot.task.status, &snapshot.preparation);
     let agent_config = agent_config_snapshot(&snapshot);
@@ -146,7 +185,7 @@ pub(crate) fn project_stored_task_snapshot(
             start_cursor: snapshot.chat.start_cursor.map(Into::into),
             end_cursor: snapshot.chat.end_cursor.map(Into::into),
         },
-        history_sync: Default::default(),
+        history_sync,
         pending_requests: Vec::new(),
         recovery: None,
     })

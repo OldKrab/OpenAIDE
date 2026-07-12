@@ -43,7 +43,7 @@ export async function requestTaskList({
 }: TaskReadIntentDependencies, archived = false) {
   const result = await backendConnection.request(TASK_LIST, { archived });
   if (acceptTaskList && !acceptTaskList()) return;
-  dispatchTaskListResult(dispatch, result);
+  dispatchTaskListResult(dispatch, result, archived);
 }
 
 export async function requestTaskSetArchived(
@@ -67,9 +67,14 @@ export async function requestTaskOpen(
   dispatchTaskOpenResult(dispatch, result, intent, requestId, acceptTaskOpen);
 }
 
-function dispatchTaskListResult(dispatch: (action: AppAction) => void, result: TaskListResult) {
+function dispatchTaskListResult(
+  dispatch: (action: AppAction) => void,
+  result: TaskListResult,
+  archived: boolean,
+) {
   dispatch({
     type: "tasks",
+    archived,
     tasks: result.tasks.map((task) => mapProtocolTaskSummary(task, result.revision)),
   });
 }

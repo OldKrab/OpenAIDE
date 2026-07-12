@@ -185,7 +185,7 @@ describe("TaskView follow scroll", () => {
           taskInput={{
             prompt: "",
             context: [],
-            pending: { prompt: "Ship the follow-up", context: [] },
+            pending: { prompt: "Ship the follow-up", context: [], state: "sending" },
           }}
         />,
       );

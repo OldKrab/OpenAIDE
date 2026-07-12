@@ -137,15 +137,42 @@ pub struct AttachmentRefreshHandlesResult {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
-pub struct AttachmentReleaseHandlesParams {
+pub struct AttachmentReleaseParams {
     pub task_id: TaskId,
-    pub handles: Vec<AttachmentHandleId>,
+    /// Resolver resources are released independently in this order.
+    pub resources: Vec<AttachmentResourceId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
-pub struct AttachmentReleaseHandlesResult {
-    pub released_handles: Vec<AttachmentHandleId>,
+pub struct AttachmentReleaseResult {
+    /// Contains exactly one outcome per requested resource, preserving request order.
+    pub outcomes: Vec<AttachmentReleaseOutcome>,
+}
+
+/// Identifies one transient resolver resource without conflating handles and candidates.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum AttachmentResourceId {
+    Handle { id: AttachmentHandleId },
+    Candidate { id: AttachmentCandidateId },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachmentReleaseOutcome {
+    pub resource: AttachmentResourceId,
+    pub status: AttachmentReleaseStatus,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum AttachmentReleaseStatus {
+    Released,
+    /// The resource was absent, expired, consumed, or protected by an active send reservation.
+    NoOp,
+    /// The resource exists but belongs to another client or Task scope.
+    Forbidden,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]

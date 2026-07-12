@@ -11,11 +11,11 @@ use crate::agent::{
 use crate::logging;
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{AgentListedSession, TaskStatus as LegacyTaskStatus};
-use crate::snapshots::task_snapshot::project_stored_task_snapshot;
 use crate::storage::records::TaskRecord;
 use crate::tasks::mutation::{TaskCommitOptions, TaskCommitOutcome, TaskMutationResult};
 use crate::tasks::task_start_transaction::TaskSessionStartGuard;
 
+use super::session_cursor::OpaqueSessionCursor;
 use super::{internal_error, protocol_error_from_runtime, runtime_error, TaskProductApi};
 
 pub(crate) trait TaskOpenWorkflow: Send + Sync {
@@ -53,7 +53,7 @@ impl TaskProductApi {
         let snapshot = result
             .response_snapshot
             .ok_or_else(|| internal_error("missing task mark-read snapshot"))?;
-        project_stored_task_snapshot(snapshot)
+        self.project_task_snapshot(snapshot)
     }
 
     pub(super) fn open_task(&self, params: TaskOpenParams) -> Result<TaskSnapshot, ProtocolError> {
@@ -78,13 +78,15 @@ impl TaskProductApi {
             .response_snapshot
             .ok_or_else(|| internal_error("missing task open snapshot"))?;
         self.spawn_adopted_task_refresh(task);
-        project_stored_task_snapshot(snapshot)
+        self.project_task_snapshot(snapshot)
     }
 
     /// Native history reconciliation may involve a slow Agent operation. Task opening is
     /// cache-first; any fresher history is committed and published after the response.
     fn spawn_adopted_task_refresh(&self, task: TaskRecord) {
-        let generation = self.history_sync.begin_passive(&task.task_id);
+        let Some(generation) = self.history_sync.begin_passive(&task.task_id) else {
+            return;
+        };
         self.publish_history_sync(
             &task.task_id,
             openaide_app_server_protocol::snapshot::TaskHistorySyncSnapshot::Checking {
@@ -152,6 +154,9 @@ impl TaskProductApi {
         let Some(native_session) = self.native_session_for_task(task, &stored_session_id)? else {
             return Ok(None);
         };
+        if newer_native_activity(&native_session, task).is_none() {
+            return Ok(None);
+        }
         self.history_sync
             .run_passive(&task.task_id, generation, || {
                 self.refresh_adopted_task_from_native_session_if_newer_exclusive(
@@ -175,6 +180,9 @@ impl TaskProductApi {
         {
             return Ok(None);
         }
+        let Some(refreshed_at) = newer_native_activity(&native_session, &current_task) else {
+            return Ok(None);
+        };
         let refresh_started = Instant::now();
         let load_started = Instant::now();
         let loaded = self
@@ -193,10 +201,6 @@ impl TaskProductApi {
         let mut session_start =
             TaskSessionStartGuard::new(&self.agent_gateway, loaded.session.clone());
         let loaded_session_id = session_start.session_id().to_string();
-        let refreshed_at = native_session
-            .last_activity
-            .clone()
-            .unwrap_or_else(crate::time::now_string);
         let refreshed_title = native_session
             .title
             .as_deref()
@@ -260,7 +264,7 @@ impl TaskProductApi {
         let attach_started = Instant::now();
         if let Err(error) = self
             .turn_runner
-            .attach_session_events(task.task_id.clone(), &loaded_session_id)
+            .attach_session_events(task.task_id.clone(), &session_start.session().key())
         {
             let _ = session_start.close();
             return Err(protocol_error_from_runtime(error));
@@ -324,49 +328,46 @@ impl TaskProductApi {
         &self,
         task: &TaskRecord,
     ) -> Result<Vec<AgentListedSession>, ProtocolError> {
-        let mut cursor = None;
+        let mut cursor = OpaqueSessionCursor::new(None);
         let mut sessions = Vec::new();
         loop {
             let result = match self.agent_gateway.list_sessions(AgentListSessionsRequest {
                 agent_id: task.agent_id.clone(),
                 cwd: task.workspace_root.clone(),
-                cursor: cursor.clone(),
+                cursor: cursor.current(),
             }) {
                 Ok(result) => result,
                 Err(error) => return Err(protocol_error_from_runtime(error)),
             };
             sessions.extend(result.sessions);
-            if result.next_cursor.is_none() || result.next_cursor == cursor {
+            if cursor.advance(result.next_cursor).is_none() {
                 return Ok(sessions);
             }
-            cursor = result.next_cursor;
         }
     }
-}
 
-impl TaskOpenWorkflow for TaskProductApi {
-    fn open(&self, params: TaskOpenParams) -> Result<TaskSnapshot, ProtocolError> {
-        self.open_task(params)
-    }
-
-    fn mark_read(&self, params: TaskMarkReadParams) -> Result<TaskSnapshot, ProtocolError> {
-        self.mark_task_read(params)
-    }
-
-    fn retry_history_sync(
+    fn retry_history_sync_serialized(
         &self,
         params: TaskRetryHistorySyncParams,
     ) -> Result<TaskSnapshot, ProtocolError> {
         let task_id = params.task_id.as_str().to_string();
-        let Some(pending) = self.history_sync.take_deferred_send(&task_id) else {
+        if !self.pending_send_sync.contains(&task_id) {
             return self.open_task(TaskOpenParams {
                 task_id: params.task_id,
             });
-        };
+        }
         let task = self.store.read_task(&task_id).map_err(runtime_error)?;
         super::reject_tombstoned_task(&task)?;
         let snapshot = crate::tasks::snapshot::build_snapshot(&self.store, &task_id, 100)
             .map_err(super::storage_error)?;
+        let snapshot = self.project_task_snapshot(snapshot)?;
+        // Do not consume the only exact prompt/attachment payload until every
+        // fallible pre-start read and projection has succeeded.
+        let Some(pending) = self.pending_send_sync.take(&task_id) else {
+            return self.open_task(TaskOpenParams {
+                task_id: params.task_id,
+            });
+        };
         let sync_generation = self.history_sync.begin_send(&task_id);
         self.publish_history_sync(
             &task_id,
@@ -389,6 +390,42 @@ impl TaskOpenWorkflow for TaskProductApi {
                 );
             }
         });
-        project_stored_task_snapshot(snapshot)
+        Ok(snapshot)
+    }
+}
+
+/// Native history replacement is destructive, so missing or incomparable clocks never win.
+fn newer_native_activity(native_session: &AgentListedSession, task: &TaskRecord) -> Option<String> {
+    let (native_time, native_value) = [
+        native_session.last_activity.as_deref(),
+        native_session.updated_at.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    .filter_map(|value| crate::time::activity_millis(value).map(|time| (time, value)))
+    .max_by_key(|(time, _)| *time)?;
+    let task_time = [&task.last_activity, &task.updated_at]
+        .into_iter()
+        .filter_map(|value| crate::time::activity_millis(value))
+        .max()?;
+    (native_time > task_time).then(|| native_value.to_string())
+}
+
+impl TaskOpenWorkflow for TaskProductApi {
+    fn open(&self, params: TaskOpenParams) -> Result<TaskSnapshot, ProtocolError> {
+        self.open_task(params)
+    }
+
+    fn mark_read(&self, params: TaskMarkReadParams) -> Result<TaskSnapshot, ProtocolError> {
+        self.mark_task_read(params)
+    }
+
+    fn retry_history_sync(
+        &self,
+        params: TaskRetryHistorySyncParams,
+    ) -> Result<TaskSnapshot, ProtocolError> {
+        let task_id = params.task_id.as_str().to_string();
+        self.turn_acceptance
+            .serialize(&task_id, || self.retry_history_sync_serialized(params))
     }
 }

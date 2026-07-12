@@ -1,16 +1,22 @@
 import { act, create } from "react-test-renderer";
+import type { ComponentProps, ComponentType } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { TaskSnapshot } from "@openaide/app-shell-contracts";
 import type { AgentOption } from "../state/composerOptions";
 import { selectionWithProject } from "../state/composerOptions";
+import { appReducer, type AppAction } from "../state/appReducer";
 import { createInitialState } from "../state/store";
 import { Composer } from "./Composer";
-import { NewTaskView } from "./NewTaskView";
+import { NewTaskView as ProductionNewTaskView } from "./NewTaskView";
 import type { TaskFileBrowserCallbacks } from "./appControllerCallbackTypes";
 
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 });
+
+type TestNewTaskViewProps = Omit<ComponentProps<typeof ProductionNewTaskView>, "onRemoveAttachment">
+  & Partial<Pick<ComponentProps<typeof ProductionNewTaskView>, "onRemoveAttachment">>;
+const NewTaskView = ProductionNewTaskView as ComponentType<TestNewTaskViewProps>;
 
 describe("NewTaskView", () => {
   it("uses fixed VS Code workspace context without rendering project selection", () => {
@@ -91,7 +97,7 @@ describe("NewTaskView", () => {
     expect(menuLabels(tree)).toEqual(expect.arrayContaining(["Codex", "OpenCode"]));
   });
 
-  it("keeps project and agent menus populated during transient App Server state gaps", () => {
+  it("does not synthesize authoritative workspace choices from Task history", () => {
     const state = createInitialState();
     state.tasks = [{
       agent_id: "codex",
@@ -129,7 +135,7 @@ describe("NewTaskView", () => {
     );
 
     act(() => buttonWithText(tree, "OpenAIDE").props.onClick());
-    expect(menuLabels(tree)).toContain("OpenAIDE");
+    expect(menuLabels(tree)).not.toContain("OpenAIDE");
 
     act(() => buttonWithText(tree, "Codex").props.onClick());
     expect(menuLabels(tree).length).toBeGreaterThan(0);
@@ -340,9 +346,11 @@ describe("NewTaskView", () => {
   });
 
   it("preserves typed new-task text in Shell state before the Draft Task is prepared", () => {
-    const state = createInitialState();
+    let state = createInitialState();
     const project = { projectId: "project_1", label: "OpenAIDE" };
-    const dispatch = vi.fn();
+    const dispatch = vi.fn((action: AppAction) => {
+      state = appReducer(state, action);
+    });
     const onSubmitTask = vi.fn();
     state.projects = [project];
     state.newTask.selection = selectionWithProject(state.newTask.selection, project);
@@ -363,6 +371,18 @@ describe("NewTaskView", () => {
     act(() => tree.root.findByType(Composer).props.onChange("Fix the typing lag"));
 
     expect(dispatch).toHaveBeenCalledWith({ type: "prompt", prompt: "Fix the typing lag" });
+
+    act(() => tree.update(
+      <NewTaskView
+        agents={[]}
+        dispatch={dispatch}
+        onSelectConfigOption={vi.fn()}
+        onSubmitTask={onSubmitTask}
+        resetOptionsRequestKey={vi.fn()}
+        state={state}
+        submitShortcut="mod_enter"
+      />,
+    ));
 
     act(() => tree.root.findByProps({ "aria-label": "Send message" }).props.onClick());
 
@@ -841,7 +861,7 @@ describe("NewTaskView", () => {
       />,
     );
 
-    expect(composerButtonLabels(tree)).toEqual([
+    expect(composerControlLabels(tree)).toEqual([
       "fast-mode: Off",
       "Agent",
       "Medium",
@@ -961,14 +981,11 @@ function menuLabels(tree: ReturnType<typeof render>) {
     .map((node) => node.children.join(""));
 }
 
-function composerButtonLabels(tree: ReturnType<typeof render>) {
+function composerControlLabels(tree: ReturnType<typeof render>) {
   return tree.root.findByType(Composer)
-    .findAllByType("button")
-    .map((button) =>
-      button.children
-        .filter((child): child is string => typeof child === "string")
-        .join(""),
-    )
+    .findAll((node) => typeof node.props.className === "string"
+      && node.props.className.split(" ").includes("composer-pill"))
+    .map((control) => nodeText(control).replace(/\s+/g, " ").trim())
     .filter(Boolean);
 }
 
@@ -1003,6 +1020,7 @@ function menuButtonsByStrongLabel(tree: ReturnType<typeof render>, label: string
 
 function fileBrowserCallbacks(): TaskFileBrowserCallbacks {
   return {
+    ownerKey: "new-task-files:test",
     attachEmbedded: vi.fn(async () => undefined),
     attachFileReference: vi.fn(async () => undefined),
     attachPastedImage: vi.fn(async () => undefined),
@@ -1013,6 +1031,7 @@ function fileBrowserCallbacks(): TaskFileBrowserCallbacks {
 
 function workspaceBrowserCallbacks() {
   return {
+    ownerKey: "new-task-workspace:test",
     listRoots: vi.fn(async () => [{ label: "Workspace", path: "/workspace" }]),
     listDirectory: vi.fn(async (path: string) => {
       if (path === "/workspace") {

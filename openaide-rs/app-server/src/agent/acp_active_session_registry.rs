@@ -2,12 +2,14 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use crate::agent::acp_session_client::AcpSessionClient;
-use crate::agent::{AgentEventSink, AgentPrompt, AgentSessionDelete, AgentSessionEventSink};
+use crate::agent::{
+    AgentEventSink, AgentPrompt, AgentSessionDelete, AgentSessionEventSink, AgentSessionKey,
+};
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::ConfigOptionsCatalog;
 
 pub(super) struct AcpActiveSessionRegistry {
-    sessions: Mutex<HashMap<String, AcpSessionClient>>,
+    sessions: Mutex<HashMap<AgentSessionKey, AcpSessionClient>>,
 }
 
 impl AcpActiveSessionRegistry {
@@ -17,20 +19,20 @@ impl AcpActiveSessionRegistry {
         }
     }
 
-    pub(super) fn contains(&self, session_id: &str) -> bool {
+    pub(super) fn contains(&self, session: &AgentSessionKey) -> bool {
         self.sessions
             .lock()
             .expect("ACP session registry poisoned")
-            .contains_key(session_id)
+            .contains_key(session)
     }
 
     pub(super) fn insert_started_session(
         &self,
-        session_id: &str,
+        session: AgentSessionKey,
         session_client: AcpSessionClient,
     ) -> Result<(), RuntimeError> {
         let mut sessions = self.sessions.lock().expect("ACP session registry poisoned");
-        if sessions.contains_key(session_id) {
+        if sessions.contains_key(&session) {
             drop(sessions);
             let _ = session_client.close();
             return Err(RuntimeError::InvalidParams(
@@ -38,27 +40,29 @@ impl AcpActiveSessionRegistry {
             ));
         }
 
-        sessions.insert(session_id.to_string(), session_client);
+        sessions.insert(session, session_client);
         Ok(())
     }
 
     pub(super) fn attach_session_event_sink(
         &self,
-        session_id: &str,
+        session: &AgentSessionKey,
         sink: Arc<dyn AgentSessionEventSink>,
     ) -> Result<(), RuntimeError> {
-        self.require_session(session_id)?.set_event_sink(sink)
+        self.require_session(session)?.set_event_sink(sink)
     }
 
     pub(super) fn set_config_option(
         &self,
-        session_id: &str,
-        agent_id: String,
+        session: &AgentSessionKey,
         config_id: String,
         value: String,
     ) -> Result<ConfigOptionsCatalog, RuntimeError> {
-        self.require_session(session_id)?
-            .set_config_option(agent_id, config_id, value)
+        self.require_session(session)?.set_config_option(
+            session.agent_id().to_string(),
+            config_id,
+            value,
+        )
     }
 
     pub(super) fn prompt(
@@ -66,27 +70,28 @@ impl AcpActiveSessionRegistry {
         prompt: AgentPrompt,
         sink: Arc<dyn AgentEventSink>,
     ) -> Result<(), RuntimeError> {
-        self.require_session(&prompt.session_id)?
-            .prompt(prompt, sink)
+        let session = prompt.session_key();
+        self.require_session(&session)?.prompt(prompt, sink)
     }
 
-    pub(super) fn cancel_session(&self, session_id: &str) -> Result<(), RuntimeError> {
-        if let Some(session) = self.get(session_id) {
-            session.cancel()?;
+    pub(super) fn cancel_session(&self, session: &AgentSessionKey) -> Result<(), RuntimeError> {
+        if let Some(client) = self.get(session) {
+            client.cancel()?;
         }
         Ok(())
     }
 
-    pub(super) fn close_session(&self, session_id: &str) -> Result<(), RuntimeError> {
-        if let Some(session) = self.remove(session_id) {
-            session.close()?;
+    pub(super) fn close_session(&self, session: &AgentSessionKey) -> Result<(), RuntimeError> {
+        if let Some(client) = self.remove(session) {
+            client.close()?;
         }
         Ok(())
     }
 
     pub(super) fn delete_session(&self, request: AgentSessionDelete) -> Result<(), RuntimeError> {
-        let session = self.remove(&request.session_id).ok_or_else(not_ready)?;
-        session.delete()
+        let key = request.session_key();
+        let client = self.remove(&key).ok_or_else(not_ready)?;
+        client.delete()
     }
 
     pub(super) fn take_shutdown_close_tasks(&self) -> Vec<Box<dyn FnOnce() + Send + 'static>> {
@@ -102,23 +107,23 @@ impl AcpActiveSessionRegistry {
             .collect()
     }
 
-    fn require_session(&self, session_id: &str) -> Result<AcpSessionClient, RuntimeError> {
-        self.get(session_id).ok_or_else(not_ready)
+    fn require_session(&self, session: &AgentSessionKey) -> Result<AcpSessionClient, RuntimeError> {
+        self.get(session).ok_or_else(not_ready)
     }
 
-    fn get(&self, session_id: &str) -> Option<AcpSessionClient> {
+    fn get(&self, session: &AgentSessionKey) -> Option<AcpSessionClient> {
         self.sessions
             .lock()
             .expect("ACP session registry poisoned")
-            .get(session_id)
+            .get(session)
             .cloned()
     }
 
-    fn remove(&self, session_id: &str) -> Option<AcpSessionClient> {
+    fn remove(&self, session: &AgentSessionKey) -> Option<AcpSessionClient> {
         self.sessions
             .lock()
             .expect("ACP session registry poisoned")
-            .remove(session_id)
+            .remove(session)
     }
 }
 

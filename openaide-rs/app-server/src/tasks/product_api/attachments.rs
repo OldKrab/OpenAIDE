@@ -5,7 +5,7 @@ use openaide_app_server_protocol::attachment::{
     AttachmentCreatePastedImageParams, AttachmentCreatePastedImageResult,
     AttachmentListDirectoryParams, AttachmentListDirectoryResult, AttachmentListRootsParams,
     AttachmentListRootsResult, AttachmentRefreshHandlesParams, AttachmentRefreshHandlesResult,
-    AttachmentReleaseHandlesParams, AttachmentReleaseHandlesResult, AttachmentRevealParams,
+    AttachmentReleaseParams, AttachmentReleaseResult, AttachmentRevealParams,
 };
 use openaide_app_server_protocol::errors::{ProtocolError, ProtocolErrorCode};
 use openaide_app_server_protocol::ids::ClientInstanceId;
@@ -67,11 +67,11 @@ pub(crate) trait AttachmentFileBrowserWorkflow: Send + Sync {
         params: AttachmentRefreshHandlesParams,
     ) -> Result<AttachmentRefreshHandlesResult, ProtocolError>;
 
-    fn release_handles(
+    fn release_resources(
         &self,
         client_instance_id: &ClientInstanceId,
-        params: AttachmentReleaseHandlesParams,
-    ) -> Result<AttachmentReleaseHandlesResult, ProtocolError>;
+        params: AttachmentReleaseParams,
+    ) -> Result<AttachmentReleaseResult, ProtocolError>;
 
     fn resolve_reveal_target(
         &self,
@@ -215,18 +215,20 @@ impl AttachmentFileBrowserWorkflow for TaskProductApi {
             .map_err(protocol_error_from_attachment_runtime)
     }
 
-    fn release_handles(
+    fn release_resources(
         &self,
         client_instance_id: &ClientInstanceId,
-        params: AttachmentReleaseHandlesParams,
-    ) -> Result<AttachmentReleaseHandlesResult, ProtocolError> {
+        params: AttachmentReleaseParams,
+    ) -> Result<AttachmentReleaseResult, ProtocolError> {
         let task = self
             .store
             .read_task(params.task_id.as_str())
             .map_err(runtime_error)?;
         reject_tombstoned_task(&task)?;
         let owner = AttachmentOwner::new(client_instance_id, &params.task_id);
-        Ok(self.attachments.release_handles(&owner, &params.handles))
+        Ok(self
+            .attachments
+            .release_resources(&owner, &params.resources))
     }
 
     fn resolve_reveal_target(

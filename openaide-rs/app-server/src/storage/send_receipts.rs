@@ -15,6 +15,13 @@ pub(crate) struct TaskSendReceipt {
     pub attachment_handles: Vec<String>,
     pub user_message_id: String,
     pub turn_id: String,
+    /// True only after both locally owned Chat rows reached durable storage.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub durable_chat_written: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !value
 }
 
 impl Store {

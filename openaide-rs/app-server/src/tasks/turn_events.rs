@@ -23,6 +23,31 @@ use self::config::{update_task_config_options, ConfigUpdateTarget};
 use self::streaming::{StreamingDelta, StreamingRuns, StreamingWrite};
 use std::sync::Mutex;
 
+#[derive(Clone, Copy)]
+enum CatalogUpdateSource<'a> {
+    ActiveTurn {
+        turn_id: &'a str,
+        cancellation: &'a TurnCancellation,
+    },
+    BoundSession {
+        session_id: &'a str,
+    },
+}
+
+impl CatalogUpdateSource<'_> {
+    fn matches(self, task: &crate::storage::records::TaskRecord) -> bool {
+        match self {
+            Self::ActiveTurn {
+                turn_id,
+                cancellation,
+            } => task.active_turn_id.as_deref() == Some(turn_id) && !cancellation.is_cancelled(),
+            Self::BoundSession { session_id } => {
+                task.agent_session_id.as_deref() == Some(session_id)
+            }
+        }
+    }
+}
+
 pub(crate) struct TaskEventSink {
     mutations: TaskMutations,
     task_id: String,
@@ -128,19 +153,6 @@ impl AgentEventSink for TaskEventSink {
         };
         let message = normalize_event(event, &now);
         self.append_agent_message(message, &now, None, write_mode)
-    }
-
-    fn prepare_for_steering(&self) -> Result<(), RuntimeError> {
-        let _guard = self.emission_lock.lock().expect("event sink lock poisoned");
-        let now = now_string();
-        self.commit_optional_streaming_write(
-            self.streaming_runs.finish_anonymous_text(&now),
-            &now,
-        )?;
-        self.commit_optional_streaming_write(
-            self.streaming_runs.finish_anonymous_thought(&now),
-            &now,
-        )
     }
 
     fn request_permission(
@@ -284,7 +296,10 @@ impl TaskEventSink {
             },
             catalog,
             now,
-            Some((&self.turn_id, &self.cancellation)),
+            CatalogUpdateSource::ActiveTurn {
+                turn_id: &self.turn_id,
+                cancellation: &self.cancellation,
+            },
         )
     }
 
@@ -335,7 +350,10 @@ impl TaskEventSink {
             },
             catalog,
             now,
-            Some((&self.turn_id, &self.cancellation)),
+            CatalogUpdateSource::ActiveTurn {
+                turn_id: &self.turn_id,
+                cancellation: &self.cancellation,
+            },
         )
     }
 }

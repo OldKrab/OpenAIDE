@@ -58,9 +58,13 @@
   margin: 0 0 7px;
 }
 
-.chat-agent ul,
+.chat-agent ul {
+  padding-inline-start: 20px;
+}
+
 .chat-agent ol {
-  padding-left: 20px;
+  /* Keep multi-digit counters inside the horizontally scrollable transcript. */
+  padding-inline-start: 2.4em;
 }
 
 .chat-agent li {

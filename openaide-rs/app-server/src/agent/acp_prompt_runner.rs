@@ -7,7 +7,7 @@ use agent_client_protocol::{Agent, Dispatch, SessionMessage};
 use serde_json::json;
 use tokio::sync::mpsc as tokio_mpsc;
 
-use crate::agent::acp_concurrent_prompts::{cancel_active_prompt, ConcurrentPrompts};
+use crate::agent::acp_active_prompt::{cancel_active_prompt, ActivePrompt};
 use crate::agent::acp_config_options_apply::set_task_config_option_after_prior_updates;
 use crate::agent::acp_errors::acp_error;
 use crate::agent::acp_host_capabilities::AcpSessionPromptMap;
@@ -26,6 +26,8 @@ use crate::logging;
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::ConfigOptionsCatalog;
 
+// TODO(acp-sdk): Replace this bounded drain when rich prompt requests expose an
+// ordered completion boundary that guarantees all preceding Session updates.
 const POST_PROMPT_UPDATE_DRAIN: Duration = Duration::from_millis(100);
 
 pub(super) struct PromptRunContext<'a> {
@@ -58,7 +60,7 @@ pub(super) async fn run_prompt(
     }
     let active_session_id = active_session.session_id().to_string();
     while cancel_rx.try_recv().is_ok() {}
-    let mut prompts = ConcurrentPrompts::start(
+    let mut active_prompt = ActivePrompt::start(
         active_session,
         context.current_prompts,
         context.agent_id,
@@ -70,19 +72,17 @@ pub(super) async fn run_prompt(
 
     let mut cancel_sent = false;
     let result = loop {
-        if prompts.cancellation().is_cancelled() && !cancel_sent {
-            prompts.cancel();
+        if active_prompt.cancellation().is_cancelled() && !cancel_sent {
             cancel_active_prompt(active_session, context.trace.as_ref()).await;
             cancel_sent = true;
         }
         tokio::select! {
             Some(()) = cancel_rx.recv(), if !cancel_sent => {
-                prompts.cancel();
                 logging::warn(
                     "acp_prompt_cancel_requested",
                     json!({
                         "agent_id": context.agent_id,
-                        "task_id": prompts.task_id(),
+                        "task_id": active_prompt.task_id(),
                         "active_session_id": active_session_id.as_str(),
                     }),
                 );
@@ -105,12 +105,11 @@ pub(super) async fn run_prompt(
                 )
                 .await;
                 let _ = reply_tx.send(Ok(()));
-                prompts.finish("ACP session closed");
                 logging::warn(
                     "acp_prompt_session_closed",
                     json!({
                         "agent_id": context.agent_id,
-                        "task_id": prompts.task_id(),
+                        "task_id": active_prompt.task_id(),
                         "active_session_id": active_session_id.as_str(),
                     }),
                 );
@@ -118,7 +117,6 @@ pub(super) async fn run_prompt(
             }
             command = command_rx.recv() => {
                 let Some(command) = command else {
-                    prompts.finish("ACP command channel stopped");
                     break Err(RuntimeError::NotReady("ACP command channel stopped".to_string()));
                 };
                 match command {
@@ -129,20 +127,10 @@ pub(super) async fn run_prompt(
                             sink,
                         )?;
                     }
-                    AcpSessionCommand::Prompt {
-                        prompt,
-                        sink,
-                        done_tx,
-                    } => {
-                        prompts.dispatch(
-                            active_session,
-                            context.agent_id,
-                            context.content_policy,
-                            context.trace.as_ref(),
-                            prompt,
-                            sink,
-                            done_tx,
-                        );
+                    AcpSessionCommand::Prompt { done_tx, .. } => {
+                        let _ = done_tx.send(Err(RuntimeError::NotReady(
+                            "ACP session already has an active prompt".to_string(),
+                        )));
                     }
                     AcpSessionCommand::Delete { reply_tx } => {
                         let connection = active_session.connection();
@@ -154,34 +142,34 @@ pub(super) async fn run_prompt(
                         )
                         .await;
                         let _ = reply_tx.send(result);
-                        prompts.finish("ACP session deleted");
                         break Err(RuntimeError::NotReady("ACP session deleted".to_string()));
                     }
                 }
             }
             config = config_rx.recv() => {
                 let Some(config) = config else {
-                    prompts.finish("ACP config channel stopped");
                     break Err(RuntimeError::NotReady("ACP config channel stopped".to_string()));
                 };
                 handle_prompt_config_command(
                     active_session,
                     config_catalog,
+                    active_prompt.projection(),
+                    session_event_sink.clone(),
+                    pending_session_catalogs,
                     config,
                 )
-                .await;
+                .await?;
             }
-            completion = prompts.next_completion() => {
-                let Some(completion) = completion else {
-                    prompts.finish("ACP prompt completion channel stopped");
+            completion = active_prompt.next_completion() => {
+                let Some(result) = completion else {
                     break Err(RuntimeError::NotReady("ACP prompt completion channel stopped".to_string()));
                 };
-                let succeeded = completion.is_ok();
+                let succeeded = result.is_ok();
                 logging::info(
                     "acp_prompt_result",
                     json!({
                         "agent_id": context.agent_id,
-                        "task_id": prompts.task_id(),
+                        "task_id": active_prompt.task_id(),
                         "active_session_id": active_session_id.as_str(),
                         "result": if succeeded { "stop_reason" } else { "error" },
                     }),
@@ -189,7 +177,7 @@ pub(super) async fn run_prompt(
                 if succeeded {
                     if let Err(error) = drain_post_prompt_updates(
                         active_session,
-                        prompts.projection(),
+                        active_prompt.projection(),
                         context.trace.as_ref(),
                         session_event_sink.clone(),
                         pending_session_catalogs,
@@ -199,9 +187,7 @@ pub(super) async fn run_prompt(
                         break Err(error);
                     }
                 }
-                if let Some(result) = prompts.complete(completion) {
-                    break result;
-                }
+                break result;
             }
             update = active_session.read_update() => {
                 let update = match update.map_err(acp_error) {
@@ -212,7 +198,7 @@ pub(super) async fn run_prompt(
                     SessionMessage::SessionMessage(dispatch) => {
                         if let Err(error) = dispatch_session_notification(
                             dispatch,
-                            prompts.projection(),
+                            active_prompt.projection(),
                             session_event_sink.clone(),
                             pending_session_catalogs,
                         ).await {
@@ -224,7 +210,7 @@ pub(super) async fn run_prompt(
                             "acp_prompt_update_stop_reason",
                             json!({
                                 "agent_id": context.agent_id,
-                                "task_id": prompts.task_id(),
+                                "task_id": active_prompt.task_id(),
                                 "active_session_id": active_session_id.as_str(),
                             }),
                         );
@@ -239,7 +225,7 @@ pub(super) async fn run_prompt(
         "acp_prompt_finish",
         json!({
             "agent_id": context.agent_id,
-            "task_id": prompts.task_id(),
+            "task_id": active_prompt.task_id(),
             "active_session_id": active_session_id.as_str(),
             "result": runtime_result_name(&result),
         }),
@@ -257,8 +243,11 @@ fn runtime_result_name(result: &Result<(), RuntimeError>) -> &'static str {
 async fn handle_prompt_config_command(
     active_session: &mut agent_client_protocol::ActiveSession<'static, Agent>,
     catalog: &mut ConfigOptionsCatalog,
+    projection: LivePromptProjection,
+    session_event_sink: Option<Arc<dyn AgentSessionEventSink>>,
+    pending_session_catalogs: &mut PendingSessionCatalogs,
     command: AcpSessionConfigCommand,
-) {
+) -> Result<(), RuntimeError> {
     match command {
         AcpSessionConfigCommand::SetConfigOption {
             agent_id,
@@ -267,21 +256,45 @@ async fn handle_prompt_config_command(
             reply_tx,
         } => {
             let connection = active_session.connection();
-            let result = set_task_config_option_after_prior_updates(
+            let mut response = match set_task_config_option_after_prior_updates(
                 &connection,
                 active_session,
                 config_id,
                 value,
-                catalog,
                 &agent_id,
             )
-            .await;
+            .await
+            {
+                Ok(response) => response,
+                Err(error) => {
+                    let _ = reply_tx.send(Err(RuntimeError::Internal(error.to_string())));
+                    return Err(error);
+                }
+            };
+            for update in response.take_prior_updates() {
+                let SessionMessage::SessionMessage(dispatch) = update else {
+                    continue;
+                };
+                if let Err(error) = dispatch_session_notification(
+                    dispatch,
+                    projection.clone(),
+                    session_event_sink.clone(),
+                    pending_session_catalogs,
+                )
+                .await
+                {
+                    let _ = reply_tx.send(Err(RuntimeError::Internal(error.to_string())));
+                    return Err(error);
+                }
+            }
+            let result = response.finish();
             if let Ok(next_catalog) = &result {
                 *catalog = next_catalog.clone();
             }
             let _ = reply_tx.send(result);
         }
     }
+    Ok(())
 }
 
 async fn drain_post_prompt_updates(

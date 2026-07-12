@@ -1,6 +1,11 @@
 import { act, create } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { FileBrowserRoot, FileBrowserRootId } from "@openaide/app-server-client";
+import type {
+  AttachmentListDirectoryResult,
+  FileBrowserEntryId,
+  FileBrowserRoot,
+  FileBrowserRootId,
+} from "@openaide/app-server-client";
 import { ComposerFileBrowser } from "./ComposerFileBrowser";
 import type { TaskFileBrowserCallbacks } from "./appControllerCallbackTypes";
 
@@ -32,6 +37,72 @@ describe("ComposerFileBrowser", () => {
     expect(textContent(tree!)).toContain("Still loading workspace files");
     expect(textContent(tree!)).toContain("Waiting for App Server file listing.");
   });
+
+  it("keeps its directory when callback implementations refresh for the same owner", async () => {
+    const first = fileBrowserCallbacks("task-1");
+    const refreshed = fileBrowserCallbacks("task-1");
+    let tree: ReturnType<typeof create> | undefined;
+
+    await act(async () => {
+      tree = create(<ComposerFileBrowser browser={first} onAttached={vi.fn()} />);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(textContent(tree!)).toContain("Workspace");
+
+    await act(async () => {
+      tree!.update(<ComposerFileBrowser browser={refreshed} onAttached={vi.fn()} />);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(first.listRoots).toHaveBeenCalledTimes(1);
+    expect(refreshed.listRoots).not.toHaveBeenCalled();
+    expect(textContent(tree!)).toContain("Workspace");
+  });
+
+  it("ignores a directory response owned by the previous task", async () => {
+    let resolveOldDirectory: ((listing: AttachmentListDirectoryResult) => void) | undefined;
+    const oldDirectory = new Promise<AttachmentListDirectoryResult>((resolve) => {
+      resolveOldDirectory = resolve;
+    });
+    const first = fileBrowserCallbacks("task-1");
+    first.listDirectory = vi.fn()
+      .mockResolvedValueOnce(directoryListing("Task one", [{
+        entryId: "old-folder" as FileBrowserEntryId,
+        kind: "directory",
+        label: "Old folder",
+        selectable: false,
+      }]))
+      .mockReturnValueOnce(oldDirectory);
+    const second = fileBrowserCallbacks("task-2", "Task two");
+    let tree: ReturnType<typeof create> | undefined;
+
+    await act(async () => {
+      tree = create(<ComposerFileBrowser browser={first} onAttached={vi.fn()} />);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    act(() => {
+      tree!.root.findByProps({ children: "Old folder" }).parent?.props.onClick();
+    });
+
+    await act(async () => {
+      tree!.update(<ComposerFileBrowser browser={second} onAttached={vi.fn()} />);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(textContent(tree!)).toContain("Task two");
+
+    await act(async () => {
+      resolveOldDirectory?.(directoryListing("Stale task one"));
+      await oldDirectory;
+      await Promise.resolve();
+    });
+
+    expect(textContent(tree!)).toContain("Task two");
+    expect(textContent(tree!)).not.toContain("Stale task one");
+  });
 });
 
 function textContent(tree: ReturnType<typeof create>) {
@@ -42,12 +113,26 @@ function textContent(tree: ReturnType<typeof create>) {
     .join(" ");
 }
 
-function fileBrowserCallbacks(): TaskFileBrowserCallbacks {
+function fileBrowserCallbacks(
+  ownerKey = "task-1",
+  directoryLabel = "Workspace",
+): TaskFileBrowserCallbacks & { ownerKey: string } {
   return {
+    ownerKey,
     attachEmbedded: vi.fn(async () => undefined),
     attachFileReference: vi.fn(async () => undefined),
     attachPastedImage: vi.fn(async () => undefined),
-    listDirectory: vi.fn(async () => ({ directory: { label: "Workspace", rootId: "root-1" as FileBrowserRootId }, entries: [] })),
+    listDirectory: vi.fn(async () => directoryListing(directoryLabel)),
     listRoots: vi.fn(async () => [{ label: "Workspace", rootId: "root-1" as FileBrowserRootId }]),
+  };
+}
+
+function directoryListing(
+  label: string,
+  entries: AttachmentListDirectoryResult["entries"] = [],
+): AttachmentListDirectoryResult {
+  return {
+    directory: { label, rootId: "root-1" as FileBrowserRootId },
+    entries,
   };
 }

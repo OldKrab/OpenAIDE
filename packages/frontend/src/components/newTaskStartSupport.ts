@@ -1,12 +1,13 @@
 import {
+  AppServerProtocolError,
   TASK_CANCEL,
   TASK_DISCARD,
   type BackendConnection,
-  type ClientMutationId,
   type TaskId,
 } from "@openaide/app-server-client";
 import type { AppState } from "../state/store";
 import type { NewTaskDraftInput } from "./appControllerCallbackTypes";
+import { preparedTaskMatchesNewTaskContext } from "../state/newTaskPreparationContext";
 
 /** Stops a pre-send Task, falling through to turn cancellation if send won the race. */
 export async function discardOrCancelStartedTask(
@@ -15,27 +16,14 @@ export async function discardOrCancelStartedTask(
 ) {
   try {
     await request(TASK_DISCARD, { taskId });
-  } catch {
+    return "discarded" as const;
+  } catch (error) {
+    if (!(error instanceof AppServerProtocolError) || error.protocolError.code !== "conflict") {
+      throw error;
+    }
     await request(TASK_CANCEL, { taskId });
+    return "cancelled" as const;
   }
-}
-
-export async function fileToBase64(file: File) {
-  const bytes = new Uint8Array(await file.arrayBuffer());
-  let binary = "";
-  const chunkSize = 0x8000;
-  for (let index = 0; index < bytes.length; index += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
-  }
-  return btoa(binary);
-}
-
-let nextNewTaskMutationId = 1;
-
-export function createNewTaskMutationId(configId: string): ClientMutationId {
-  const id = `frontend-new-task-${configId}-${nextNewTaskMutationId}`;
-  nextNewTaskMutationId += 1;
-  return id as ClientMutationId;
 }
 
 export function submitErrorMessage(error: unknown) {
@@ -43,16 +31,19 @@ export function submitErrorMessage(error: unknown) {
 }
 
 export function newTaskDraftInput(state: AppState, draft?: NewTaskDraftInput) {
-  const preparedTaskId = state.snapshot && !state.snapshot.task.has_messages
-    ? state.snapshot.task.task_id
+  const preparedTask = state.snapshot?.task;
+  const preparedTaskId = preparedTask
+    && !preparedTask.has_messages
+    && preparedTaskMatchesNewTaskContext(state, {
+      agentId: preparedTask.agent_id,
+      projectId: preparedTask.project_id,
+      workspaceRoot: preparedTask.workspace_root,
+    })
+    ? preparedTask.task_id
     : undefined;
   const preparedInput = preparedTaskId ? state.taskInputs[preparedTaskId] : undefined;
   if (preparedInput) {
     return draft ? { ...preparedInput, prompt: draft.prompt, context: draft.context } : preparedInput;
   }
   return draft ?? { prompt: state.newTask.prompt, context: state.newTask.context };
-}
-
-export function shouldPreservePendingSendRecovery() {
-  return typeof document !== "undefined" && document.visibilityState === "hidden";
 }

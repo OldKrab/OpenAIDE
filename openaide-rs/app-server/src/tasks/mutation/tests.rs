@@ -495,6 +495,7 @@ fn task_record(task_id: &str) -> TaskRecord {
         revision: 0,
         config_options: Default::default(),
         config_options_catalog: None,
+        config_mutation: Default::default(),
         agent_commands_catalog: None,
         model_id: None,
         preparation: TaskPreparationRecord::Ready,
@@ -508,6 +509,7 @@ fn send_receipt(idempotency_key: &str, user_message_id: &str) -> TaskSendReceipt
         attachment_handles: Vec::new(),
         user_message_id: user_message_id.to_string(),
         turn_id: "turn-1".to_string(),
+        durable_chat_written: false,
     }
 }
 

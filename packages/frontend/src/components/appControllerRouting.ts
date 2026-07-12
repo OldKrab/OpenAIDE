@@ -9,6 +9,7 @@ import type { AppState } from "../state/store";
 
 export function useRoutedBootstrap(
   initialBootstrap: WebviewBootstrap,
+  beginNavigationChange: (archived?: boolean) => number,
   dispatch: Dispatch<AppAction>,
 ) {
   const [bootstrap, setBootstrap] = useState(initialBootstrap);
@@ -17,6 +18,12 @@ export function useRoutedBootstrap(
 
   useEffect(() => {
     return subscribeSurfaceRouteChanges((nextBootstrap) => {
+      // Route events can originate outside Frontend callbacks (browser history,
+      // another shell owner, or a restored URL). They must supersede the same
+      // in-flight reads and mutations as an in-app navigation action.
+      beginNavigationChange(
+        nextBootstrap.surface === "navigation" ? nextBootstrap.archived === true : undefined,
+      );
       setBootstrap(nextBootstrap);
       if (nextBootstrap.surface !== "task") return;
       if (nextBootstrap.taskId) {
@@ -31,7 +38,7 @@ export function useRoutedBootstrap(
       dispatch({ type: "newTask:reset" });
       dispatch({ type: "selection:clear" });
     });
-  }, [dispatch]);
+  }, [beginNavigationChange, dispatch]);
 
   return { bootstrap, bootstrapRef };
 }

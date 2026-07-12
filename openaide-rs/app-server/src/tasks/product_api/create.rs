@@ -5,7 +5,6 @@ use uuid::Uuid;
 
 use crate::projects::{resolve_project_context, ProjectTaskContext};
 use crate::protocol::model::TaskStatus as LegacyTaskStatus;
-use crate::snapshots::task_snapshot::project_stored_task_snapshot;
 use crate::storage::records::{TaskPreparationRecord, TaskRecord};
 use crate::tasks::snapshot::build_snapshot;
 use crate::time::now_string;
@@ -57,6 +56,7 @@ impl TaskProductApi {
                 .map(|(id, value)| (id.clone(), value.clone()))
                 .collect(),
             config_options_catalog: None,
+            config_mutation: Default::default(),
             agent_commands_catalog: None,
             model_id: None,
             preparation: TaskPreparationRecord::Preparing,
@@ -68,7 +68,7 @@ impl TaskProductApi {
         let snapshot = result
             .response_snapshot
             .ok_or_else(super::prepare::missing_prepared_task_snapshot)?;
-        let snapshot = project_stored_task_snapshot(snapshot)?;
+        let snapshot = self.project_task_snapshot(snapshot)?;
         self.spawn_task_preparation(record);
         Ok(snapshot)
     }
@@ -98,7 +98,7 @@ impl TaskProductApi {
         if matches!(task.preparation, TaskPreparationRecord::Preparing) {
             let snapshot =
                 build_snapshot(&self.store, &task.task_id, 100).map_err(storage_error)?;
-            return project_stored_task_snapshot(snapshot);
+            return self.project_task_snapshot(snapshot);
         }
 
         let task_id = task.task_id.clone();
@@ -125,7 +125,7 @@ impl TaskProductApi {
         ) {
             self.spawn_task_preparation(prepared);
         }
-        project_stored_task_snapshot(snapshot)
+        self.project_task_snapshot(snapshot)
     }
 
     fn resolve_create_project_context(

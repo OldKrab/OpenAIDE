@@ -51,7 +51,7 @@ impl RpcGateway {
         id: String,
         params: Value,
         meta: RequestMeta,
-        now: AppServerTime,
+        _now: AppServerTime,
     ) -> GatewayOutcome {
         let params = match serde_json::from_value::<TaskCreateParams>(params) {
             Ok(params) => params,
@@ -63,14 +63,7 @@ impl RpcGateway {
             Ok(task) => task,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
-        let events = self.publish_task_updates(&task, now);
-        self.result_with_events::<TaskCreateResult>(
-            connection_id,
-            id,
-            meta,
-            TaskCreateResult { task },
-            events,
-        )
+        self.result::<TaskCreateResult>(connection_id, id, meta, TaskCreateResult { task })
     }
 
     pub(super) fn handle_task_adopt_native_session(
@@ -79,7 +72,7 @@ impl RpcGateway {
         id: String,
         params: Value,
         meta: RequestMeta,
-        now: AppServerTime,
+        _now: AppServerTime,
     ) -> GatewayOutcome {
         let params = match serde_json::from_value::<TaskAdoptNativeSessionParams>(params) {
             Ok(params) => params,
@@ -91,13 +84,11 @@ impl RpcGateway {
             Ok(task) => task,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
-        let events = self.publish_task_updates(&task, now);
-        self.result_with_events::<TaskAdoptNativeSessionResult>(
+        self.result::<TaskAdoptNativeSessionResult>(
             connection_id,
             id,
             meta,
             TaskAdoptNativeSessionResult { task },
-            events,
         )
     }
 
@@ -107,7 +98,7 @@ impl RpcGateway {
         id: String,
         params: Value,
         meta: RequestMeta,
-        now: AppServerTime,
+        _now: AppServerTime,
     ) -> GatewayOutcome {
         let params = match serde_json::from_value::<TaskSendParams>(params) {
             Ok(params) => params,
@@ -126,8 +117,7 @@ impl RpcGateway {
             Ok(accepted) => accepted,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
-        let events = self.publish_task_updates(&accepted.task, now);
-        self.result_with_events::<TaskSendResult>(
+        self.result::<TaskSendResult>(
             connection_id,
             id,
             meta,
@@ -136,7 +126,6 @@ impl RpcGateway {
                 turn_id: accepted.turn_id,
                 user_message_id: accepted.user_message_id,
             },
-            events,
         )
     }
 
@@ -146,7 +135,7 @@ impl RpcGateway {
         id: String,
         params: Value,
         meta: RequestMeta,
-        now: AppServerTime,
+        _now: AppServerTime,
     ) -> GatewayOutcome {
         let params = match serde_json::from_value::<TaskCancelParams>(params) {
             Ok(params) => params,
@@ -158,14 +147,7 @@ impl RpcGateway {
             Ok(task) => task,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
-        let events = self.publish_task_updates(&task, now);
-        self.result_with_events::<TaskCancelResult>(
-            connection_id,
-            id,
-            meta,
-            TaskCancelResult { task },
-            events,
-        )
+        self.result::<TaskCancelResult>(connection_id, id, meta, TaskCancelResult { task })
     }
 
     pub(super) fn handle_task_set_config_option(
@@ -174,7 +156,7 @@ impl RpcGateway {
         id: String,
         params: Value,
         meta: RequestMeta,
-        now: AppServerTime,
+        _now: AppServerTime,
     ) -> GatewayOutcome {
         let params = match serde_json::from_value::<TaskSetConfigOptionParams>(params) {
             Ok(params) => params,
@@ -186,13 +168,11 @@ impl RpcGateway {
             Ok(task) => task,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
-        let events = self.publish_task_updates(&task, now);
-        self.result_with_events::<TaskSetConfigOptionResult>(
+        self.result::<TaskSetConfigOptionResult>(
             connection_id,
             id,
             meta,
             TaskSetConfigOptionResult { task },
-            events,
         )
     }
 
@@ -249,7 +229,7 @@ impl RpcGateway {
         id: String,
         params: Value,
         meta: RequestMeta,
-        now: AppServerTime,
+        _now: AppServerTime,
     ) -> GatewayOutcome {
         let params = match serde_json::from_value::<TaskMarkReadParams>(params) {
             Ok(params) => params,
@@ -262,14 +242,7 @@ impl RpcGateway {
             Err(error) => return self.error(connection_id, id, meta, error),
         };
         let task = self.task_with_pending_requests(task);
-        let events = self.publish_task_updates(&task, now);
-        self.result_with_events::<TaskMarkReadResult>(
-            connection_id,
-            id,
-            meta,
-            TaskMarkReadResult { task },
-            events,
-        )
+        self.result::<TaskMarkReadResult>(connection_id, id, meta, TaskMarkReadResult { task })
     }
 
     pub(super) fn handle_task_chat_page(
@@ -318,7 +291,7 @@ impl RpcGateway {
         id: String,
         params: Value,
         meta: RequestMeta,
-        now: AppServerTime,
+        _now: AppServerTime,
     ) -> GatewayOutcome {
         let params = match serde_json::from_value::<TaskDiscardParams>(params) {
             Ok(params) => params,
@@ -331,11 +304,7 @@ impl RpcGateway {
             Ok(tasks) => tasks,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
-        let mut events = self
-            .publish_project_collection_update(now)
-            .unwrap_or_default();
-        events.extend(self.publish_task_navigation_snapshot(tasks.clone(), now));
-        self.result_with_events::<TaskDiscardResult>(
+        self.result::<TaskDiscardResult>(
             connection_id,
             id,
             meta,
@@ -343,7 +312,6 @@ impl RpcGateway {
                 discarded_task_id,
                 tasks,
             },
-            events,
         )
     }
 
@@ -353,7 +321,7 @@ impl RpcGateway {
         id: String,
         params: Value,
         meta: RequestMeta,
-        now: AppServerTime,
+        _now: AppServerTime,
     ) -> GatewayOutcome {
         let params = match serde_json::from_value::<TaskSetArchivedParams>(params) {
             Ok(params) => params,
@@ -367,11 +335,7 @@ impl RpcGateway {
             Ok(tasks) => tasks,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
-        let mut events = self
-            .publish_project_collection_update(now)
-            .unwrap_or_default();
-        events.extend(self.publish_task_navigation_snapshot(tasks.clone(), now));
-        self.result_with_events::<TaskSetArchivedResult>(
+        self.result::<TaskSetArchivedResult>(
             connection_id,
             id,
             meta,
@@ -380,7 +344,6 @@ impl RpcGateway {
                 archived,
                 tasks,
             },
-            events,
         )
     }
 

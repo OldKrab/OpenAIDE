@@ -7,7 +7,7 @@ use crate::time::now_string;
 
 use super::commands::{update_task_commands, CommandsUpdateTarget};
 use super::config::{update_task_config_options, ConfigUpdateTarget};
-use super::TaskSessionEventSink;
+use super::{CatalogUpdateSource, TaskSessionEventSink};
 
 impl AgentSessionEventSink for TaskSessionEventSink {
     fn config_options_changed(
@@ -21,7 +21,9 @@ impl AgentSessionEventSink for TaskSessionEventSink {
             },
             catalog,
             &now_string(),
-            None,
+            CatalogUpdateSource::BoundSession {
+                session_id: &self.session_id,
+            },
         )
     }
 
@@ -36,7 +38,9 @@ impl AgentSessionEventSink for TaskSessionEventSink {
             },
             catalog,
             &now_string(),
-            None,
+            CatalogUpdateSource::BoundSession {
+                session_id: &self.session_id,
+            },
         )
     }
 

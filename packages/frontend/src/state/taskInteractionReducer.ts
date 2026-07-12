@@ -11,14 +11,19 @@ type TaskInteractionAction =
   | { type: "taskInput:attachment:addAppServer"; taskId: string; attachment: ComposerAttachment }
   | { type: "taskInput:attachment:remove"; taskId: string; attachmentId: string }
   | { type: "taskInput:clear"; taskId: string }
-  | { type: "taskInput:submit"; taskId: string; input?: { prompt: string; context: ComposerAttachment[] } }
+  | { type: "taskInput:submit"; taskId: string; input?: { prompt: string; context: ComposerAttachment[] }; idempotencyKey?: import("@openaide/app-server-client").TaskSendIdempotencyKey }
+  | { type: "taskInput:restoreSend"; taskId: string; input: { prompt: string; context: ComposerAttachment[] }; idempotencyKey: import("@openaide/app-server-client").TaskSendIdempotencyKey }
+  | { type: "taskInput:sendUncertain"; taskId: string; idempotencyKey: import("@openaide/app-server-client").TaskSendIdempotencyKey; message: string }
+  | { type: "taskInput:sendError"; taskId: string; idempotencyKey: import("@openaide/app-server-client").TaskSendIdempotencyKey; message?: string }
+  | { type: "taskSend:accepted"; taskId: string; idempotencyKey: import("@openaide/app-server-client").TaskSendIdempotencyKey; userMessageId: import("@openaide/app-server-client").MessageId }
   | { type: "taskInput:error"; taskId: string; message?: string }
+  | { type: "taskInput:cancelError"; taskId: string; message: string }
   | { type: "taskInput:attachments:invalidate"; taskId: string; message: string }
   | { type: "taskOpen:start"; taskId: string }
   | { type: "taskOpen:error"; taskId: string; message: string }
-  | { type: "chatPage:start"; taskId: string }
-  | { type: "chatPage:result"; taskId: string; page: MessagePage }
-  | { type: "chatPage:error"; taskId: string; message: string }
+  | { type: "chatPage:start"; taskId: string; requestGeneration: number }
+  | { type: "chatPage:result"; taskId: string; requestGeneration: number; page: MessagePage }
+  | { type: "chatPage:error"; taskId: string; requestGeneration: number; message: string }
   | { type: "toolDetail:start"; taskId: string; artifactId: string }
   | { type: "toolDetail:result"; taskId: string; artifactId: string; details: ActivityToolDetails }
   | { type: "toolDetail:error"; taskId: string; artifactId: string; message: string }
@@ -36,6 +41,7 @@ export function reduceTaskInteractionState(state: AppState, action: AppAction): 
   switch (action.type) {
     case "taskInput:prompt":
       const input = state.taskInputs[action.taskId];
+      if (input?.pending) return state;
       return {
         ...state,
         taskInputs: {
@@ -50,6 +56,7 @@ export function reduceTaskInteractionState(state: AppState, action: AppAction): 
       };
     case "taskInput:attachment:add": {
       const input = state.taskInputs[action.taskId] ?? { prompt: "", context: [] };
+      if (input.pending) return state;
       return {
         ...state,
         taskInputs: {
@@ -64,6 +71,7 @@ export function reduceTaskInteractionState(state: AppState, action: AppAction): 
     }
     case "taskInput:attachment:addAppServer": {
       const input = state.taskInputs[action.taskId] ?? { prompt: "", context: [] };
+      if (input.pending) return state;
       return {
         ...state,
         taskInputs: {
@@ -78,6 +86,7 @@ export function reduceTaskInteractionState(state: AppState, action: AppAction): 
     }
     case "taskInput:attachment:remove": {
       const input = state.taskInputs[action.taskId] ?? { prompt: "", context: [] };
+      if (input.pending) return state;
       return {
         ...state,
         taskInputs: {
@@ -94,8 +103,10 @@ export function reduceTaskInteractionState(state: AppState, action: AppAction): 
       const { [action.taskId]: _input, ...taskInputs } = state.taskInputs;
       return { ...state, taskInputs };
     }
-    case "taskInput:submit": {
-      const input = action.input ?? state.taskInputs[action.taskId] ?? { prompt: "", context: [] };
+    case "taskInput:submit":
+    case "taskInput:restoreSend": {
+      const previousInput = state.taskInputs[action.taskId];
+      const input = action.input ?? previousInput ?? { prompt: "", context: [] };
       return {
         ...state,
         taskInputs: {
@@ -103,28 +114,36 @@ export function reduceTaskInteractionState(state: AppState, action: AppAction): 
           [action.taskId]: {
             prompt: input.prompt,
             context: input.context,
+            ...acceptedInputIdentity(previousInput),
             error: undefined,
-            pending: { prompt: input.prompt, context: input.context },
+            pending: {
+              prompt: input.prompt,
+              context: input.context,
+              idempotencyKey: action.idempotencyKey,
+              state: "sending",
+            },
           },
         },
       };
     }
-    case "taskInput:error": {
+    case "taskInput:sendUncertain": {
       const input = state.taskInputs[action.taskId];
-      if (!input?.pending) {
-        if (!action.message) return state;
-        return {
-          ...state,
-          taskInputs: {
-            ...state.taskInputs,
-            [action.taskId]: {
-              prompt: input?.prompt ?? "",
-              context: input?.context ?? [],
-              error: action.message,
-            },
+      if (input?.pending?.idempotencyKey !== action.idempotencyKey) return state;
+      return {
+        ...state,
+        taskInputs: {
+          ...state.taskInputs,
+          [action.taskId]: {
+            ...input,
+            error: action.message,
+            pending: { ...input.pending, state: "uncertain" },
           },
-        };
-      }
+        },
+      };
+    }
+    case "taskInput:sendError": {
+      const input = state.taskInputs[action.taskId];
+      if (input?.pending?.idempotencyKey !== action.idempotencyKey) return state;
       return {
         ...state,
         taskInputs: {
@@ -132,8 +151,65 @@ export function reduceTaskInteractionState(state: AppState, action: AppAction): 
           [action.taskId]: {
             prompt: input.pending.prompt,
             context: input.pending.context,
+            ...acceptedInputIdentity(input),
             error: action.message,
           },
+        },
+      };
+    }
+    case "taskSend:accepted": {
+      const input = state.taskInputs[action.taskId];
+      const hasAcceptedMessage = typeof action.userMessageId === "string" && action.userMessageId.length > 0;
+      const acceptedTaskInput = input?.pending?.idempotencyKey === action.idempotencyKey
+        && hasAcceptedMessage;
+      const acceptedNewTask = state.newTask.pending?.idempotencyKey === action.idempotencyKey
+        && hasAcceptedMessage;
+      if (!acceptedTaskInput && !acceptedNewTask) return state;
+      return {
+        ...state,
+        taskInputs: acceptedTaskInput
+          ? {
+              ...state.taskInputs,
+              [action.taskId]: {
+                prompt: "",
+                context: [],
+                acceptedUserMessageId: action.userMessageId,
+              },
+            }
+          : state.taskInputs,
+        newTask: acceptedNewTask
+          ? {
+              ...state.newTask,
+              prompt: "",
+              context: [],
+              pending: undefined,
+              submitting: false,
+              error: undefined,
+            }
+          : state.newTask,
+      };
+    }
+    case "taskInput:error": {
+      const input = state.taskInputs[action.taskId];
+      if (!action.message) return state;
+      return {
+        ...state,
+        taskInputs: {
+          ...state.taskInputs,
+          [action.taskId]: {
+            ...(input ?? { prompt: "", context: [] }),
+            error: action.message,
+          },
+        },
+      };
+    }
+    case "taskInput:cancelError": {
+      const input = state.taskInputs[action.taskId] ?? { prompt: "", context: [] };
+      return {
+        ...state,
+        taskInputs: {
+          ...state.taskInputs,
+          [action.taskId]: { ...input, error: action.message },
         },
       };
     }
@@ -147,6 +223,7 @@ export function reduceTaskInteractionState(state: AppState, action: AppAction): 
           [action.taskId]: {
             prompt: draft.prompt,
             context: invalidateAppServerAttachments(draft.context, action.message),
+            ...acceptedInputIdentity(input),
             error: action.message,
           },
         },
@@ -163,27 +240,34 @@ export function reduceTaskInteractionState(state: AppState, action: AppAction): 
       return { ...state, taskOpenError: { taskId: action.taskId, message: action.message } };
     case "chatPage:start": {
       const current = state.chatPages[action.taskId] ?? { olderItems: [], hasBefore: true };
+      if ((current.requestGeneration ?? 0) >= action.requestGeneration) return state;
       return {
         ...state,
         chatPages: {
           ...state.chatPages,
-          [action.taskId]: { ...current, pending: true, error: undefined },
+          [action.taskId]: {
+            ...current,
+            requestGeneration: action.requestGeneration,
+            pending: true,
+            error: undefined,
+          },
         },
       };
     }
     case "chatPage:result": {
-      if (state.snapshot?.task.task_id !== action.taskId) return state;
+      const current = state.chatPages[action.taskId];
+      if (!current?.pending || current.requestGeneration !== action.requestGeneration) return state;
       return {
         ...state,
         chatPages: {
           ...state.chatPages,
-          [action.taskId]: mergePageState(state.chatPages[action.taskId], action.page),
+          [action.taskId]: mergePageState(current, action.page),
         },
       };
     }
     case "chatPage:error": {
-      if (state.snapshot?.task.task_id !== action.taskId) return state;
-      const current = state.chatPages[action.taskId] ?? { olderItems: [], hasBefore: true };
+      const current = state.chatPages[action.taskId];
+      if (!current?.pending || current.requestGeneration !== action.requestGeneration) return state;
       return {
         ...state,
         chatPages: {
@@ -278,8 +362,15 @@ export function reduceTaskInteractionState(state: AppState, action: AppAction): 
   }
 }
 
+function acceptedInputIdentity(input: AppState["taskInputs"][string] | undefined) {
+  return input?.acceptedUserMessageId
+    ? { acceptedUserMessageId: input.acceptedUserMessageId }
+    : {};
+}
+
 function isTaskInteractionAction(action: AppAction): action is TaskInteractionAction {
   return action.type.startsWith("taskInput:")
+    || action.type === "taskSend:accepted"
     || action.type === "taskOpen:start"
     || action.type === "taskOpen:error"
     || action.type.startsWith("chatPage:")

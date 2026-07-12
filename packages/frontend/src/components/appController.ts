@@ -1,18 +1,25 @@
-import { useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { Dispatch } from "react";
 import type { AppPreferencesRecord, TaskSummary } from "@openaide/app-shell-contracts";
-import { TASK_SEND, type TaskId } from "@openaide/app-server-client";
 import { defaultAgent } from "@openaide/app-shell-contracts";
 import {
   getBackendConnection,
   getBootstrap,
   postHostMessage,
 } from "../services/hostBridge";
+import { clientInstanceIdForBootstrap } from "../services/backendInitialization";
+import { readPendingTaskSendRecovery } from "../services/pendingTaskSendRecovery";
 import {
-  clearPendingTaskSendRecovery,
-  readPendingTaskSendRecovery,
-} from "../services/pendingTaskSendRecovery";
-import { appReducer, type AppAction, type SnapshotIntent } from "../state/appReducer";
+  executeTaskSendAttempt,
+  isTaskSendOutcomeUnknown,
+  TASK_SEND_OUTCOME_UNKNOWN_MESSAGE,
+} from "../services/taskSendAttempt";
+import {
+  appReducer,
+  bindAppServerReplicaEpoch,
+  type AppAction,
+  type SnapshotIntent,
+} from "../state/appReducer";
 import { mapProtocolTaskSnapshot } from "../state/appServerProtocolMapping";
 import type { AgentOption } from "../state/composerOptions";
 import { sendWebviewTelemetry } from "../state/hostMessageRouter";
@@ -27,16 +34,22 @@ import type { NewTaskStartAttempt } from "./appControllerCallbackTypes";
 import {
   useAppControllerBackendLifecycle,
   type AppControllerBackendConnection,
+  type AppServerReplicaTransition,
   type BackendConnectionState,
 } from "./appControllerBackendLifecycle";
 import { appControllerDerivedStateDeps, deriveAppControllerState } from "./appControllerDerivedState";
 import { createRequestControllerNativeSessions } from "./appControllerNativeSessions";
-import { useAppControllerRefs } from "./appControllerRefs";
+import {
+  invalidateAppControllerReplicaRequests,
+  useAppControllerRefs,
+} from "./appControllerRefs";
 import { useSettingsRouteRefresh } from "./appControllerRouting";
-import { usePreparedTaskSendRetry } from "./appControllerTaskRecovery";
 import { useNewTaskPreparation, type PendingNewTaskPreparation } from "./useNewTaskPreparation";
 import { useTaskAttentionReadReceipt } from "./useTaskAttentionReadReceipt";
 import { newTaskProjectIdForRequests } from "./newTaskRequestContext";
+import { useComposerAttachmentResources } from "./useComposerAttachmentResources";
+import { newTaskPreparationKey } from "../state/newTaskPreparationContext";
+import { PreparedTaskOwnership } from "./preparedTaskOwnership";
 export type AppController = {
   activeTask?: TaskSummary;
   activeNavigationTaskId?: string;
@@ -59,22 +72,40 @@ export type AppControllerOptions = {
 export function useAppController({ backendConnection }: AppControllerOptions = {}) {
   const backendConnectionRef = useMemo(() => backendConnection ?? getBackendConnection(), [backendConnection]);
   const initialBootstrap = useMemo(() => getBootstrap(), []);
+  const clientInstanceId = useMemo(() => clientInstanceIdForBootstrap(initialBootstrap), [initialBootstrap]);
   const [state, dispatch] = useReducer(appReducer, undefined, createInitialState);
   const [preferences, setPreferences] = useState<AppPreferencesRecord>(initialBootstrap.preferences ?? { composer_submit_shortcut: "enter" });
   const [agents, setAgents] = useState<AgentOption[] | undefined>(undefined);
   const currentAgentId = useRef(state.newTask.selection.agentId);
   currentAgentId.current = state.newTask.selection.agentId;
   const pendingPreparedNewTask = useRef<PendingNewTaskPreparation | undefined>(undefined);
+  const preparedTaskOwnership = useMemo(() => new PreparedTaskOwnership(), []);
   const newTaskStartAttempt = useRef<NewTaskStartAttempt | undefined>(undefined);
-  const recoveringTaskSend = useRef<string | undefined>(undefined);
+  const currentNewTaskPreparationKey = useRef<string | undefined>(undefined);
+  currentNewTaskPreparationKey.current = newTaskPreparationKey(state);
+  const recoveredTaskSendAttempts = useRef(new Set<string>());
+  const attachmentResourcesRef = useRef<ReturnType<typeof useComposerAttachmentResources> | undefined>(undefined);
   const controllerRefs = useAppControllerRefs();
   const {
     latestNativeSessionSelection,
     latestNavigationSessionKey,
     latestOptionsRequestKey,
     latestSessionListRequestId,
+    nextChatPageRequestGeneration,
     nextSessionListRequestId,
   } = controllerRefs;
+  const handleReplicaChanged = useCallback((transition: AppServerReplicaTransition) => {
+    if (!transition.previous) return;
+    invalidateAppControllerReplicaRequests(controllerRefs);
+    pendingPreparedNewTask.current = undefined;
+    recoveredTaskSendAttempts.current.clear();
+    attachmentResourcesRef.current?.replaceReplica();
+    if (!transition.rootChanged) return;
+    // Task ids and cleanup tombstones can collide across roots. Forget them
+    // locally without issuing cleanup requests into the replacement root.
+    preparedTaskOwnership.replaceStateRoot();
+    newTaskStartAttempt.current = undefined;
+  }, [controllerRefs, preparedTaskOwnership]);
   const {
     acceptSnapshotRequest,
     backendInitialized,
@@ -84,28 +115,45 @@ export function useAppController({ backendConnection }: AppControllerOptions = {
     bootstrap,
     createSnapshotRequestId,
     currentNavigationGeneration,
+    replicaEpoch,
     retryTaskOpen,
   } = useAppControllerBackendLifecycle({
     backendConnection: backendConnectionRef,
     currentAgentId,
     dispatch,
     initialBootstrap,
+    onReplicaChanged: handleReplicaChanged,
     refs: controllerRefs,
     setAgents,
     setPreferences,
     state,
   });
+  const replicaDispatch = useMemo(
+    () => bindAppServerReplicaEpoch(dispatch, replicaEpoch),
+    [dispatch, replicaEpoch],
+  );
+  const attachmentResources = useComposerAttachmentResources({
+    backendConnection: backendConnectionRef,
+    clientInstanceId,
+    dispatch: replicaDispatch,
+    state,
+    taskSurfaceMounted: bootstrap.surface === "task",
+  });
+  attachmentResourcesRef.current = attachmentResources;
   const newTaskBootstrapProjectId = bootstrap.surface === "task" && !bootstrap.taskId
     ? bootstrap.projectId
     : undefined;
   useNewTaskPreparation({
+    attachmentResources,
     backendConnection: backendConnectionRef,
     backendReady,
     bootstrap,
     currentNavigationGeneration,
-    dispatch,
+    dispatch: replicaDispatch,
     latestOptionsRequestKey,
     pendingPreparation: pendingPreparedNewTask,
+    preparedTaskOwnership,
+    replicaEpoch,
     startAttempt: newTaskStartAttempt,
     state,
   });
@@ -113,8 +161,9 @@ export function useAppController({ backendConnection }: AppControllerOptions = {
     pendingPreparedNewTask.current?.key === key ? pendingPreparedNewTask.current.promise : undefined;
   const requestNativeSessions = createRequestControllerNativeSessions({
     backendConnection: backendConnectionRef,
-    dispatch,
+    dispatch: replicaDispatch,
     getAgentId: () => state.newTask.selection.agentId,
+    getExistingSessionIds: () => state.newTask.nativeSessions.items.map((session) => session.session_id),
     getProjectId: () => state.newTask.selection.projectId,
     latestSessionListRequestId,
     nextSessionListRequestId,
@@ -136,7 +185,7 @@ export function useAppController({ backendConnection }: AppControllerOptions = {
       newTaskBootstrapProjectId &&
       state.newTask.selection.projectId !== newTaskBootstrapProjectId
     ) {
-      dispatch({ type: "newTask:projectId", projectId: newTaskBootstrapProjectId });
+      replicaDispatch({ type: "newTask:projectId", projectId: newTaskBootstrapProjectId });
     }
   }, [bootstrap.surface, bootstrap.taskId, newTaskBootstrapProjectId, state.newTask.selection.projectId]);
 
@@ -146,7 +195,7 @@ export function useAppController({ backendConnection }: AppControllerOptions = {
     if (selected && selected.enabled !== false) return;
     const fallback = agents.find((agent) => agent.enabled !== false) ?? defaultAgent;
     latestOptionsRequestKey.current = undefined;
-    dispatch({ type: "newTask:agent", agentId: fallback.id, agentLabel: fallback.label });
+    replicaDispatch({ type: "newTask:agent", agentId: fallback.id, agentLabel: fallback.label });
   }, [agents, bootstrap.surface, bootstrap.taskId, state.newTask.selection.agentId]);
 
   useEffect(() => {
@@ -155,51 +204,68 @@ export function useAppController({ backendConnection }: AppControllerOptions = {
       !bootstrap.taskId ||
       !backendReady ||
       !backendConnectionRef?.request ||
+      !state.appServerStateRootId ||
       !state.snapshot ||
-      state.snapshot.task.task_id !== bootstrap.taskId ||
-      state.snapshot.task.has_messages
+      state.snapshot.task.task_id !== bootstrap.taskId
     ) {
       return;
     }
-    const recovery = readPendingTaskSendRecovery(bootstrap.taskId);
-    if (!recovery || recoveringTaskSend.current === recovery.taskId) return;
-    recoveringTaskSend.current = recovery.taskId;
-    dispatch({ type: "taskInput:prompt", taskId: recovery.taskId, prompt: recovery.renderState.prompt });
-    for (const attachment of recovery.renderState.context) {
-      dispatch({ type: "taskInput:attachment:addAppServer", taskId: recovery.taskId, attachment });
-    }
-    dispatch({ type: "taskInput:submit", taskId: recovery.taskId });
-    void backendConnectionRef.request(TASK_SEND, {
-      taskId: recovery.taskId as TaskId,
-      taskRevision: recovery.taskRevision,
+    const recovery = readPendingTaskSendRecovery(
+      state.appServerStateRootId,
+      clientInstanceId,
+      bootstrap.taskId,
+    );
+    if (!recovery) return;
+    const recoveryKey = `${recovery.stateRootId}:${recovery.taskId}:${recovery.idempotencyKey}`;
+    if (recoveredTaskSendAttempts.current.has(recoveryKey)) return;
+    recoveredTaskSendAttempts.current.add(recoveryKey);
+    replicaDispatch({
+      type: "taskInput:restoreSend",
+      taskId: recovery.taskId,
+      input: recovery.renderState,
       idempotencyKey: recovery.idempotencyKey,
-      message: recovery.message,
-    }).then((result) => {
-      clearPendingTaskSendRecovery(recovery.taskId);
-      dispatch({
+    });
+    void executeTaskSendAttempt({
+      attempt: recovery,
+      backendConnection: backendConnectionRef,
+      refreshRevisionOnConflict: true,
+    }).then(({ attempt, result }) => {
+      replicaDispatch({
         type: "snapshot",
         snapshot: mapProtocolTaskSnapshot(result.task).snapshot,
         intent: "refresh",
       });
-    }).catch((error) => {
-      clearPendingTaskSendRecovery(recovery.taskId);
-      dispatch({
-        type: "taskInput:error",
+      replicaDispatch({
+        type: "taskSend:accepted",
         taskId: recovery.taskId,
+        idempotencyKey: attempt.idempotencyKey,
+        userMessageId: result.userMessageId,
+      });
+    }).catch((error) => {
+      if (isTaskSendOutcomeUnknown(error)) {
+        replicaDispatch({
+          type: "taskInput:sendUncertain",
+          taskId: recovery.taskId,
+          idempotencyKey: recovery.idempotencyKey,
+          message: TASK_SEND_OUTCOME_UNKNOWN_MESSAGE,
+        });
+        return;
+      }
+      replicaDispatch({
+        type: "taskInput:sendError",
+        taskId: recovery.taskId,
+        idempotencyKey: recovery.idempotencyKey,
         message: error instanceof Error ? error.message : "Unable to recover submitted message.",
       });
-    }).finally(() => {
-      if (recoveringTaskSend.current === recovery.taskId) {
-        recoveringTaskSend.current = undefined;
-      }
     });
   }, [
     backendConnectionRef,
     backendReady,
     bootstrap.surface,
     bootstrap.taskId,
+    clientInstanceId,
+    state.appServerStateRootId,
     state.snapshot?.task.task_id,
-    state.snapshot?.task.has_messages,
   ]);
 
   useEffect(() => {
@@ -207,8 +273,8 @@ export function useAppController({ backendConnection }: AppControllerOptions = {
     const snapshotHasPendingInput = snapshotTaskId
       ? state.taskInputs[snapshotTaskId]?.pending !== undefined
       : false;
-    const snapshotHasPendingRecovery = snapshotTaskId
-      ? readPendingTaskSendRecovery(snapshotTaskId) !== undefined
+    const snapshotHasPendingRecovery = state.appServerStateRootId && snapshotTaskId
+      ? readPendingTaskSendRecovery(state.appServerStateRootId, clientInstanceId, snapshotTaskId) !== undefined
       : false;
     if (
       bootstrap.surface !== "task" ||
@@ -235,27 +301,21 @@ export function useAppController({ backendConnection }: AppControllerOptions = {
     state.snapshot?.task.status,
     state.snapshot?.task.project_id,
     state.snapshot ? state.taskInputs[state.snapshot.task.task_id]?.pending : undefined,
+    clientInstanceId,
+    state.appServerStateRootId,
   ]);
   useSettingsRouteRefresh({
     backendConnectionRef,
     backendInitialized,
     bootstrap,
     currentAgentId,
-    dispatch,
+    dispatch: replicaDispatch,
     setAgents,
-    state,
-  });
-  usePreparedTaskSendRetry({
-    backendConnectionRef,
-    backendInitialized,
-    createSnapshotRequestId,
-    dispatch,
-    postHostMessage,
     state,
   });
   useTaskAttentionReadReceipt({
     backendConnection: backendConnectionRef,
-    dispatch,
+    dispatch: replicaDispatch,
     revision: state.snapshot?.revision,
     taskId: bootstrap.surface === "task" ? state.snapshot?.task.task_id : undefined,
     unread: state.snapshot?.task.unread === true,
@@ -283,6 +343,7 @@ export function useAppController({ backendConnection }: AppControllerOptions = {
   }, [
     backendReady,
     bootstrap.surface,
+    replicaEpoch,
     state.newTask.selection.agentId,
     state.newTask.selection.projectId,
     state.newTask.selection.workspaceRoot,
@@ -310,14 +371,22 @@ export function useAppController({ backendConnection }: AppControllerOptions = {
 
   const callbacks = createAppCallbacks({
     acceptTaskOpen: acceptSnapshotRequest,
+    attachmentResources,
     backendConnection: backendConnectionRef,
     beginNavigationChange,
+    clientInstanceId,
+    createChatPageRequestGeneration: () => {
+      nextChatPageRequestGeneration.current += 1;
+      return nextChatPageRequestGeneration.current;
+    },
     createSnapshotRequestId,
     currentNavigationGeneration,
-    dispatch,
+    currentNewTaskPreparationKey: () => currentNewTaskPreparationKey.current,
+    dispatch: replicaDispatch,
     latestOptionsRequestKey,
     newTaskStartAttempt,
     pendingPreparedNewTask: pendingPreparedNewTaskForKey,
+    preparedTaskOwnership,
     requestNativeSessions,
     setAgents,
     setPreferences,
@@ -333,20 +402,10 @@ export function useAppController({ backendConnection }: AppControllerOptions = {
     bootstrap,
     callbacks,
     createSnapshotRequestId,
-    dispatch,
+    dispatch: replicaDispatch,
     preferences,
     retryTaskOpen,
     state,
     visibleTasks,
   };
-}
-
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    timeoutId = setTimeout(() => reject(new Error(message)), timeoutMs);
-  });
-  return Promise.race([promise, timeout]).finally(() => {
-    if (timeoutId !== undefined) clearTimeout(timeoutId);
-  });
 }

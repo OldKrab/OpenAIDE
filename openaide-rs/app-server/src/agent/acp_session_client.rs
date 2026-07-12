@@ -1,10 +1,10 @@
-use std::sync::{mpsc, Arc, Mutex};
+use std::sync::{mpsc, Arc, Condvar, Mutex};
 use std::time::Duration;
 
 use tokio::sync::mpsc as tokio_mpsc;
 
 use crate::agent::acp_host_terminal_ownership::AcpTerminalOwner;
-use crate::agent::{AgentEventSink, AgentPrompt, AgentSessionEventSink};
+use crate::agent::{AgentEventSink, AgentPrompt, AgentSessionEventSink, TurnCancellation};
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::ConfigOptionsCatalog;
 
@@ -16,6 +16,7 @@ pub(super) struct AcpSessionClient {
     close_tx: tokio_mpsc::UnboundedSender<mpsc::Sender<Result<(), RuntimeError>>>,
     terminal_error: Arc<Mutex<Option<String>>>,
     terminal_owner: AcpTerminalOwner,
+    prompt_lifecycle: Arc<PromptLifecycle>,
 }
 
 impl AcpSessionClient {
@@ -34,6 +35,7 @@ impl AcpSessionClient {
             close_tx,
             terminal_error,
             terminal_owner,
+            prompt_lifecycle: Arc::default(),
         }
     }
 
@@ -55,6 +57,18 @@ impl AcpSessionClient {
         if cancellation.is_cancelled() {
             return Ok(());
         }
+        if self.has_terminal_error() {
+            return Err(self.worker_stopped_error());
+        }
+        // A cancelled prompt still owns the Native Session until its worker observes
+        // the Agent's prompt response and finishes draining the ordered update stream.
+        let _settlement = self.prompt_lifecycle.admit(&cancellation)?;
+        if cancellation.is_cancelled() {
+            return Ok(());
+        }
+        if self.has_terminal_error() {
+            return Err(self.worker_stopped_error());
+        }
         self.terminal_owner.activate()?;
         if cancellation.is_cancelled() {
             let _ = self.terminal_owner.cancel();
@@ -75,9 +89,6 @@ impl AcpSessionClient {
                     return Err(self.worker_stopped_error());
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {
-                    if cancellation.is_cancelled() {
-                        return Ok(());
-                    }
                     if self.has_terminal_error() {
                         return Err(self.worker_stopped_error());
                     }
@@ -150,6 +161,57 @@ impl AcpSessionClient {
             .lock()
             .expect("ACP terminal error lock poisoned")
             .is_some()
+    }
+}
+
+#[derive(Default)]
+struct PromptLifecycle {
+    active: Mutex<Option<TurnCancellation>>,
+    settled: Condvar,
+}
+
+impl PromptLifecycle {
+    fn admit(
+        self: &Arc<Self>,
+        cancellation: &TurnCancellation,
+    ) -> Result<PromptSettlementGuard, RuntimeError> {
+        let mut active = self.active.lock().expect("ACP prompt lifecycle poisoned");
+        loop {
+            match active.as_ref() {
+                None => {
+                    *active = Some(cancellation.clone());
+                    return Ok(PromptSettlementGuard {
+                        lifecycle: self.clone(),
+                    });
+                }
+                Some(current) if current.is_cancelled() => {
+                    active = self
+                        .settled
+                        .wait(active)
+                        .expect("ACP prompt lifecycle poisoned");
+                }
+                Some(_) => {
+                    return Err(RuntimeError::NotReady(
+                        "ACP session already has an active prompt".to_string(),
+                    ));
+                }
+            }
+        }
+    }
+}
+
+struct PromptSettlementGuard {
+    lifecycle: Arc<PromptLifecycle>,
+}
+
+impl Drop for PromptSettlementGuard {
+    fn drop(&mut self) {
+        self.lifecycle
+            .active
+            .lock()
+            .expect("ACP prompt lifecycle poisoned")
+            .take();
+        self.lifecycle.settled.notify_all();
     }
 }
 

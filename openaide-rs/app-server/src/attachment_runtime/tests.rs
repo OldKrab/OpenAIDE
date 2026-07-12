@@ -1,5 +1,8 @@
 use std::time::Duration;
 
+use openaide_app_server_protocol::attachment::{
+    AttachmentReleaseOutcome, AttachmentReleaseStatus, AttachmentResourceId,
+};
 use openaide_app_server_protocol::ids::{ClientInstanceId, TaskId};
 
 use super::{AttachmentOwner, AttachmentRuntime, AttachmentRuntimeError};
@@ -329,6 +332,89 @@ fn confirms_embedded_candidate_into_sendable_text_handle() {
     );
 }
 
+#[test]
+fn concurrent_embedded_candidate_confirmations_create_one_handle() {
+    let files = tempfile::tempdir().unwrap();
+    std::fs::write(files.path().join("notes.txt"), "hello embedded").unwrap();
+    let runtime = AttachmentRuntime::new();
+    let task_id = TaskId::from("task-1");
+    let root = runtime.list_roots(&task_id, files.path()).roots.remove(0);
+    let listing = runtime
+        .list_directory(&task_id, files.path(), &root.root_id, None)
+        .unwrap();
+    let candidate_id = runtime
+        .create_embedded_candidate(&task_id, &listing.entries[0].entry_id)
+        .unwrap()
+        .candidate
+        .candidate_id;
+    let gate = runtime.pause_embedded_confirmations_for_test(2);
+
+    let confirmations = (0..2)
+        .map(|_| {
+            let runtime = runtime.clone();
+            let task_id = task_id.clone();
+            let candidate_id = candidate_id.clone();
+            std::thread::spawn(move || runtime.confirm_embedded(task_id, &[candidate_id]))
+        })
+        .collect::<Vec<_>>();
+    gate.wait_until_arrived();
+    gate.release();
+    let results = confirmations
+        .into_iter()
+        .map(|confirmation| confirmation.join().unwrap())
+        .collect::<Vec<_>>();
+
+    let attachments = results
+        .iter()
+        .flat_map(|result| result.attachments.iter())
+        .collect::<Vec<_>>();
+    assert_eq!(attachments.len(), 1);
+    assert_eq!(
+        results
+            .iter()
+            .map(|result| result.errors.len())
+            .sum::<usize>(),
+        1
+    );
+    assert!(runtime
+        .resolve_for_send(&task_id, std::slice::from_ref(&attachments[0].handle_id))
+        .is_ok());
+}
+
+#[test]
+fn release_during_embedded_confirmation_prevents_handle_creation() {
+    let files = tempfile::tempdir().unwrap();
+    std::fs::write(files.path().join("notes.txt"), "hello embedded").unwrap();
+    let runtime = AttachmentRuntime::new();
+    let task_id = TaskId::from("task-1");
+    let root = runtime.list_roots(&task_id, files.path()).roots.remove(0);
+    let listing = runtime
+        .list_directory(&task_id, files.path(), &root.root_id, None)
+        .unwrap();
+    let candidate_id = runtime
+        .create_embedded_candidate(&task_id, &listing.entries[0].entry_id)
+        .unwrap()
+        .candidate
+        .candidate_id;
+    let gate = runtime.pause_embedded_confirmations_for_test(1);
+    let confirming_runtime = runtime.clone();
+    let confirming_task_id = task_id.clone();
+    let confirming_candidate_id = candidate_id.clone();
+    let confirmation = std::thread::spawn(move || {
+        confirming_runtime.confirm_embedded(confirming_task_id, &[confirming_candidate_id])
+    });
+    gate.wait_until_arrived();
+
+    let resource = candidate_resource(candidate_id);
+    let released = runtime.release_resources(&task_id, std::slice::from_ref(&resource));
+    assert_eq!(released.outcomes, vec![released_outcome(resource)]);
+    gate.release();
+    let result = confirmation.join().unwrap();
+
+    assert!(result.attachments.is_empty());
+    assert_eq!(result.errors.len(), 1);
+}
+
 #[cfg(unix)]
 #[test]
 fn embedded_send_rejects_a_source_replaced_with_an_escaping_symlink() {
@@ -459,11 +545,12 @@ fn refresh_and_release_presend_handles_are_task_scoped() {
         AttachmentRuntimeError::WrongTask
     );
 
-    let released = runtime.release_handles(
-        TaskId::from("task-1"),
-        std::slice::from_ref(&handle.handle_id),
-    );
-    assert_eq!(released.released_handles, vec![handle.handle_id.clone()]);
+    let resource = handle_resource(handle.handle_id.clone());
+    let denied = runtime.release_resources(TaskId::from("task-2"), std::slice::from_ref(&resource));
+    assert_eq!(denied.outcomes, vec![forbidden_outcome(resource.clone())]);
+    let released =
+        runtime.release_resources(TaskId::from("task-1"), std::slice::from_ref(&resource));
+    assert_eq!(released.outcomes, vec![released_outcome(resource)]);
     assert_eq!(
         runtime
             .refresh_handles(
@@ -492,10 +579,13 @@ fn presend_handle_access_and_release_are_client_scoped_within_a_task() {
             .unwrap_err(),
         AttachmentRuntimeError::UnknownHandle
     );
-    assert!(runtime
-        .release_handles(&other_client, std::slice::from_ref(&handle.handle_id))
-        .released_handles
-        .is_empty());
+    let resource = handle_resource(handle.handle_id.clone());
+    assert_eq!(
+        runtime
+            .release_resources(&other_client, std::slice::from_ref(&resource))
+            .outcomes,
+        vec![forbidden_outcome(resource)]
+    );
     assert_eq!(
         runtime
             .refresh_handles(&owner, std::slice::from_ref(&handle.handle_id))
@@ -504,6 +594,71 @@ fn presend_handle_access_and_release_are_client_scoped_within_a_task() {
             .handle_id,
         handle.handle_id
     );
+}
+
+#[test]
+fn embedded_candidate_release_is_client_scoped_and_idempotent() {
+    let files = tempfile::tempdir().unwrap();
+    std::fs::write(files.path().join("notes.txt"), "hello").unwrap();
+    let runtime = AttachmentRuntime::new();
+    let task_id = TaskId::from("task-1");
+    let owner = AttachmentOwner::new(&ClientInstanceId::from("client-1"), &task_id);
+    let other_client = AttachmentOwner::new(&ClientInstanceId::from("client-2"), &task_id);
+    let root = runtime.list_roots(&task_id, files.path()).roots.remove(0);
+    let listing = runtime
+        .list_directory(&owner, files.path(), &root.root_id, None)
+        .unwrap();
+    let candidate = runtime
+        .create_embedded_candidate(&owner, &listing.entries[0].entry_id)
+        .unwrap()
+        .candidate;
+
+    let resource = candidate_resource(candidate.candidate_id);
+    let denied = runtime.release_resources(&other_client, std::slice::from_ref(&resource));
+    assert_eq!(denied.outcomes, vec![forbidden_outcome(resource.clone())]);
+
+    let released = runtime.release_resources(&owner, std::slice::from_ref(&resource));
+    assert_eq!(released.outcomes, vec![released_outcome(resource.clone())]);
+
+    let repeated = runtime.release_resources(&owner, std::slice::from_ref(&resource));
+    assert_eq!(repeated.outcomes, vec![no_op_outcome(resource)]);
+}
+
+#[test]
+fn attachment_release_returns_ordered_outcomes_without_short_circuiting() {
+    let files = tempfile::tempdir().unwrap();
+    let owned_path = files.path().join("owned.txt");
+    let foreign_path = files.path().join("foreign.txt");
+    std::fs::write(&owned_path, "owned").unwrap();
+    std::fs::write(&foreign_path, "foreign").unwrap();
+    let runtime = AttachmentRuntime::new();
+    let task_id = TaskId::from("task-1");
+    let owner = AttachmentOwner::new(&ClientInstanceId::from("client-1"), &task_id);
+    let other_client = AttachmentOwner::new(&ClientInstanceId::from("client-2"), &task_id);
+    let owned = runtime.register_file_reference_for_test(&owner, "owned.txt", owned_path);
+    let foreign =
+        runtime.register_file_reference_for_test(&other_client, "foreign.txt", foreign_path);
+
+    let resources = vec![
+        handle_resource("missing-handle".into()),
+        handle_resource(owned.handle_id.clone()),
+        handle_resource(foreign.handle_id.clone()),
+        handle_resource(owned.handle_id),
+    ];
+    let released = runtime.release_resources(&owner, &resources);
+
+    assert_eq!(
+        released.outcomes,
+        vec![
+            no_op_outcome(resources[0].clone()),
+            released_outcome(resources[1].clone()),
+            forbidden_outcome(resources[2].clone()),
+            no_op_outcome(resources[3].clone()),
+        ]
+    );
+    assert!(runtime
+        .refresh_handles(&other_client, &[foreign.handle_id])
+        .is_ok());
 }
 
 #[test]
@@ -592,10 +747,11 @@ fn reserved_handles_cannot_be_released_and_commit_consumes_them() {
         .reserve_for_send(&task_id, std::slice::from_ref(&handle.handle_id))
         .unwrap();
 
-    let released = runtime.release_handles(&task_id, std::slice::from_ref(&handle.handle_id));
+    let resource = handle_resource(handle.handle_id.clone());
+    let released = runtime.release_resources(&task_id, std::slice::from_ref(&resource));
     let resolved = reservation.commit();
 
-    assert!(released.released_handles.is_empty());
+    assert_eq!(released.outcomes, vec![no_op_outcome(resource)]);
     assert_eq!(resolved.chat_attachments()[0].label, "notes.md");
     assert_eq!(
         runtime
@@ -763,6 +919,39 @@ fn registered_file_reference(
     std::fs::write(&path, "hello").unwrap();
     let handle = runtime.register_file_reference_for_test(TaskId::from(task_id), "notes.md", path);
     (files, handle)
+}
+
+fn handle_resource(
+    id: openaide_app_server_protocol::ids::AttachmentHandleId,
+) -> AttachmentResourceId {
+    AttachmentResourceId::Handle { id }
+}
+
+fn candidate_resource(
+    id: openaide_app_server_protocol::ids::AttachmentCandidateId,
+) -> AttachmentResourceId {
+    AttachmentResourceId::Candidate { id }
+}
+
+fn released_outcome(resource: AttachmentResourceId) -> AttachmentReleaseOutcome {
+    AttachmentReleaseOutcome {
+        resource,
+        status: AttachmentReleaseStatus::Released,
+    }
+}
+
+fn no_op_outcome(resource: AttachmentResourceId) -> AttachmentReleaseOutcome {
+    AttachmentReleaseOutcome {
+        resource,
+        status: AttachmentReleaseStatus::NoOp,
+    }
+}
+
+fn forbidden_outcome(resource: AttachmentResourceId) -> AttachmentReleaseOutcome {
+    AttachmentReleaseOutcome {
+        resource,
+        status: AttachmentReleaseStatus::Forbidden,
+    }
 }
 
 trait TestEntryKindSort {

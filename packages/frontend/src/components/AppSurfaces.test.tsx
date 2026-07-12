@@ -412,7 +412,7 @@ describe("AppSurfaces callback wiring", () => {
     controller.state.taskInputs.task_starting = {
       prompt: "",
       context: [],
-      pending: { prompt: "Build the thing", context: [] },
+      pending: { prompt: "Build the thing", context: [], state: "sending" },
     };
 
     render(controller);
@@ -478,7 +478,7 @@ describe("AppSurfaces callback wiring", () => {
     controller.state.taskInputs.task_1 = {
       prompt: "",
       context: [],
-      pending: { prompt: "Build the thing", context: [] },
+      pending: { prompt: "Build the thing", context: [], state: "sending" },
     };
     controller.state.newTask.pending = {
       prompt: "Build the thing",
@@ -507,6 +507,73 @@ describe("AppSurfaces callback wiring", () => {
       undefined,
     );
     expect(surfaceMocks.newTask).not.toHaveBeenCalled();
+  });
+
+  it("renders an active no-message Task with its Task-scoped Stop action", () => {
+    const controller = controllerFor("task");
+    controller.bootstrap = { surface: "task", taskId: "task_1" };
+    controller.state.snapshot = snapshot("task_1", false);
+    controller.state.snapshot.task.status = "active";
+
+    render(controller);
+
+    expect(surfaceMocks.task).toHaveBeenCalledWith(
+      expect.objectContaining({
+        onCancel: controller.callbacks.task.cancel,
+        snapshot: controller.state.snapshot,
+      }),
+      undefined,
+    );
+    expect(surfaceMocks.taskLoading).not.toHaveBeenCalled();
+  });
+
+  it("keeps an ambiguous first-send draft visible on its adopted Task route", () => {
+    const controller = controllerFor("task");
+    controller.bootstrap = { surface: "task", taskId: "task_1" };
+    controller.state.snapshot = snapshot("task_1", false);
+    controller.state.taskInputs.task_1 = {
+      prompt: "Build the thing",
+      context: [],
+      error: "Connection closed before Send was acknowledged.",
+    };
+
+    render(controller);
+
+    expect(surfaceMocks.task).toHaveBeenCalledWith(
+      expect.objectContaining({
+        snapshot: controller.state.snapshot,
+        taskInput: controller.state.taskInputs.task_1,
+      }),
+      undefined,
+    );
+    expect(surfaceMocks.taskLoading).not.toHaveBeenCalled();
+  });
+
+  it("keeps an authoritatively rejected first-send draft editable on its Task route", () => {
+    const controller = controllerFor("task");
+    controller.bootstrap = { surface: "task", taskId: "task_1" };
+    controller.state.snapshot = snapshot("task_1", false);
+    controller.state.taskInputs.task_1 = {
+      prompt: "Inspect this file",
+      context: [{
+        kind: "file",
+        label: "notes.md",
+        local_id: "attachment-1",
+        validation_error: "Reselect this file.",
+      }],
+      error: "Attachment is no longer available.",
+    };
+
+    render(controller);
+
+    expect(surfaceMocks.task).toHaveBeenCalledWith(
+      expect.objectContaining({
+        snapshot: controller.state.snapshot,
+        taskInput: controller.state.taskInputs.task_1,
+      }),
+      undefined,
+    );
+    expect(surfaceMocks.taskLoading).not.toHaveBeenCalled();
   });
 
   it("renders web task loading state while an existing task snapshot is opening", () => {
@@ -726,6 +793,7 @@ function controllerFor(surface: AppController["bootstrap"]["surface"]): AppContr
       },
       newTask: {
         cancel: vi.fn(),
+        removeAttachment: vi.fn(),
         resetOptionsRequestKey: vi.fn(),
         selectConfigOption: vi.fn(),
         submit: vi.fn(),

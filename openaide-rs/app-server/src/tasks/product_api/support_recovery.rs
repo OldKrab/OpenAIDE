@@ -8,7 +8,6 @@ use uuid::Uuid;
 use crate::protocol::model::{
     ActivityStatus, InterruptionReason, NormalizedMessage, TaskStatus as LegacyTaskStatus,
 };
-use crate::snapshots::task_snapshot::project_stored_task_snapshot;
 use crate::storage::records::TaskRecord;
 use crate::tasks::mutation::{TaskCommitOutcome, TaskMutationResult};
 use crate::time::now_string;
@@ -49,18 +48,25 @@ impl TaskProductApi {
         &self,
         candidate: TaskRecord,
     ) -> Result<Option<TaskSnapshot>, ProtocolError> {
-        if let Some(turn_id) = candidate.active_turn_id.as_deref() {
-            self.turn_runner.detach_stuck_turn(turn_id);
-        }
+        let task_id = candidate.task_id.clone();
+        self.turn_acceptance.serialize(&task_id, || {
+            self.recover_stuck_session_candidate_serialized(candidate)
+        })
+    }
 
+    fn recover_stuck_session_candidate_serialized(
+        &self,
+        candidate: TaskRecord,
+    ) -> Result<Option<TaskSnapshot>, ProtocolError> {
         let result = self
             .mutations
             .commit_existing_task(
                 &candidate.task_id,
                 super::response_snapshot_options(),
                 |ctx| {
-                    if ctx.task().status != LegacyTaskStatus::Active
-                        && ctx.task().active_turn_id.is_none()
+                    if ctx.task().active_turn_id != candidate.active_turn_id
+                        || (candidate.active_turn_id.is_none()
+                            && ctx.task().status != LegacyTaskStatus::Active)
                     {
                         return Ok(TaskMutationResult::Unchanged);
                     }
@@ -90,10 +96,23 @@ impl TaskProductApi {
 
         match result.outcome {
             TaskCommitOutcome::Committed(_) => {
+                if let Some(turn_id) = candidate.active_turn_id.as_deref() {
+                    let cancellation_generation = self.history_sync.begin_send(&candidate.task_id);
+                    self.turn_runner.detach_stuck_turn(turn_id);
+                    self.turn_acceptance
+                        .retire_pending_turn(&candidate.task_id, turn_id);
+                    self.pending_send_sync.take(&candidate.task_id);
+                    self.publish_history_sync(
+                        &candidate.task_id,
+                        openaide_app_server_protocol::snapshot::TaskHistorySyncSnapshot::Idle {
+                            generation: cancellation_generation,
+                        },
+                    );
+                }
                 let snapshot = result
                     .response_snapshot
                     .ok_or_else(|| super::internal_error("missing support recovery snapshot"))?;
-                project_stored_task_snapshot(snapshot).map(Some)
+                self.project_task_snapshot(snapshot).map(Some)
             }
             TaskCommitOutcome::Rejected(_) => Ok(None),
         }

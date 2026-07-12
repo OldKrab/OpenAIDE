@@ -43,8 +43,8 @@ struct CountingAgent {
 }
 
 impl AgentRuntime for CountingAgent {
-    fn start_session(&self, _request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
-        Ok(AgentSession::new("session_counting"))
+    fn start_session(&self, request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
+        Ok(AgentSession::new(request.agent_id, "session_counting"))
     }
 
     fn prompt(
@@ -73,8 +73,11 @@ struct PassiveSnapshotAgent {
 }
 
 impl AgentRuntime for PassiveSnapshotAgent {
-    fn start_session(&self, _request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
-        Ok(AgentSession::new("session_passive_snapshot"))
+    fn start_session(&self, request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
+        Ok(AgentSession::new(
+            request.agent_id,
+            "session_passive_snapshot",
+        ))
     }
 
     fn prompt(
@@ -100,8 +103,8 @@ struct WaitingAgent {
 }
 
 impl AgentRuntime for WaitingAgent {
-    fn start_session(&self, _request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
-        Ok(AgentSession::new("session_waiting"))
+    fn start_session(&self, request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
+        Ok(AgentSession::new(request.agent_id, "session_waiting"))
     }
 
     fn prompt(
@@ -130,15 +133,15 @@ struct SessionTrackingAgent {
 impl AgentRuntime for SessionTrackingAgent {
     fn start_session(&self, request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
         self.starts.fetch_add(1, Ordering::SeqCst);
-        Ok(AgentSession::new(format!(
-            "session_for_{}",
-            request.task_id
-        )))
+        Ok(AgentSession::new(
+            request.agent_id,
+            format!("session_for_{}", request.task_id),
+        ))
     }
 
     fn resume_session(&self, request: AgentSessionResume) -> Result<AgentSession, RuntimeError> {
         self.resumes.fetch_add(1, Ordering::SeqCst);
-        Ok(AgentSession::new(request.session_id))
+        Ok(AgentSession::new(request.agent_id, request.session_id))
     }
 
     fn prompt(
@@ -172,7 +175,7 @@ impl AgentRuntime for LoadSessionAgent {
         assert!(!request.cancellation.is_cancelled());
         self.loads.fetch_add(1, Ordering::SeqCst);
 
-        let mut session = AgentSession::new(request.session_id);
+        let mut session = AgentSession::new(request.agent_id, request.session_id);
         session
             .config_options
             .insert("model".to_string(), "gpt-5.5".to_string());
@@ -206,11 +209,11 @@ impl AgentRuntime for LoadSessionAgent {
     fn resume_session(&self, request: AgentSessionResume) -> Result<AgentSession, RuntimeError> {
         assert_eq!(request.session_id, "external-session");
         self.resumes.fetch_add(1, Ordering::SeqCst);
-        Ok(AgentSession::new(request.session_id))
+        Ok(AgentSession::new(request.agent_id, request.session_id))
     }
 
-    fn close_session(&self, session_id: &str) -> Result<(), RuntimeError> {
-        assert_eq!(session_id, "external-session");
+    fn close_session(&self, session: &AgentSessionKey) -> Result<(), RuntimeError> {
+        assert_eq!(session.session_id(), "external-session");
         self.closes.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
@@ -242,7 +245,7 @@ impl AgentRuntime for DeleteTrackingLoadSessionAgent {
     fn load_session(&self, request: AgentSessionLoad) -> Result<AgentLoadedSession, RuntimeError> {
         assert_eq!(request.session_id, "external-session");
         Ok(AgentLoadedSession {
-            session: AgentSession::new(request.session_id),
+            session: AgentSession::new(request.agent_id, request.session_id),
             replayed_messages: Vec::new(),
         })
     }
@@ -278,8 +281,8 @@ impl AgentRuntime for DeleteTrackingLoadSessionAgent {
 struct DelayedAgent;
 
 impl AgentRuntime for DelayedAgent {
-    fn start_session(&self, _request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
-        Ok(AgentSession::new("session_delayed"))
+    fn start_session(&self, request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
+        Ok(AgentSession::new(request.agent_id, "session_delayed"))
     }
 
     fn prompt(
@@ -295,8 +298,8 @@ impl AgentRuntime for DelayedAgent {
 struct OptionUpdateAgent;
 
 impl AgentRuntime for OptionUpdateAgent {
-    fn start_session(&self, _request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
-        Ok(AgentSession::new("session_option_update")
+    fn start_session(&self, request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
+        Ok(AgentSession::new(request.agent_id, "session_option_update")
             .with_config_options(&model_catalog("gpt-5.4")))
     }
 
@@ -313,8 +316,11 @@ impl AgentRuntime for OptionUpdateAgent {
 struct ToolCallUpdateAgent;
 
 impl AgentRuntime for ToolCallUpdateAgent {
-    fn start_session(&self, _request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
-        Ok(AgentSession::new("session_tool_call_update"))
+    fn start_session(&self, request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
+        Ok(AgentSession::new(
+            request.agent_id,
+            "session_tool_call_update",
+        ))
     }
 
     fn prompt(
@@ -349,8 +355,8 @@ impl AgentRuntime for ToolCallUpdateAgent {
 struct ChunkedTextAgent;
 
 impl AgentRuntime for ChunkedTextAgent {
-    fn start_session(&self, _request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
-        Ok(AgentSession::new("session_chunked_text"))
+    fn start_session(&self, request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
+        Ok(AgentSession::new(request.agent_id, "session_chunked_text"))
     }
 
     fn prompt(
@@ -381,8 +387,11 @@ impl AgentRuntime for ChunkedTextAgent {
 struct MessageIdSpanningToolAgent;
 
 impl AgentRuntime for MessageIdSpanningToolAgent {
-    fn start_session(&self, _request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
-        Ok(AgentSession::new("session_message_id_spanning_tool"))
+    fn start_session(&self, request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
+        Ok(AgentSession::new(
+            request.agent_id,
+            "session_message_id_spanning_tool",
+        ))
     }
 
     fn prompt(
@@ -414,8 +423,11 @@ impl AgentRuntime for MessageIdSpanningToolAgent {
 struct PermissionBoundaryTextAgent;
 
 impl AgentRuntime for PermissionBoundaryTextAgent {
-    fn start_session(&self, _request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
-        Ok(AgentSession::new("session_permission_boundary_text"))
+    fn start_session(&self, request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
+        Ok(AgentSession::new(
+            request.agent_id,
+            "session_permission_boundary_text",
+        ))
     }
 
     fn prompt(
@@ -455,8 +467,11 @@ struct AttachmentCapturingAgent {
 }
 
 impl AgentRuntime for AttachmentCapturingAgent {
-    fn start_session(&self, _request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
-        Ok(AgentSession::new("session_attachment_capture"))
+    fn start_session(&self, request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
+        Ok(AgentSession::new(
+            request.agent_id,
+            "session_attachment_capture",
+        ))
     }
 
     fn prompt(
@@ -497,14 +512,14 @@ impl IdleOptionUpdateAgent {
 }
 
 impl AgentRuntime for IdleOptionUpdateAgent {
-    fn start_session(&self, _request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
-        Ok(AgentSession::new("session_idle_option_update")
+    fn start_session(&self, request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
+        Ok(AgentSession::new(request.agent_id, "session_idle_option_update")
             .with_config_options(&model_catalog("gpt-5.4")))
     }
 
     fn attach_session_event_sink(
         &self,
-        _session_id: &str,
+        _session: &AgentSessionKey,
         sink: Arc<dyn AgentSessionEventSink>,
     ) -> Result<(), RuntimeError> {
         *self.sink.lock().unwrap() = Some(sink);
@@ -525,8 +540,11 @@ struct ShutdownTrackingAgent {
 }
 
 impl AgentRuntime for ShutdownTrackingAgent {
-    fn start_session(&self, _request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
-        Ok(AgentSession::new("session_shutdown_tracking"))
+    fn start_session(&self, request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
+        Ok(AgentSession::new(
+            request.agent_id,
+            "session_shutdown_tracking",
+        ))
     }
 
     fn prompt(
@@ -555,8 +573,11 @@ struct ShutdownBlockingAgent {
 }
 
 impl AgentRuntime for ShutdownBlockingAgent {
-    fn start_session(&self, _request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
-        Ok(AgentSession::new("session_shutdown_blocking"))
+    fn start_session(&self, request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
+        Ok(AgentSession::new(
+            request.agent_id,
+            "session_shutdown_blocking",
+        ))
     }
 
     fn prompt(
@@ -591,13 +612,16 @@ struct AttachFailingAgent {
 }
 
 impl AgentRuntime for AttachFailingAgent {
-    fn start_session(&self, _request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
-        Ok(AgentSession::new("session_attach_failing"))
+    fn start_session(&self, request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
+        Ok(AgentSession::new(
+            request.agent_id,
+            "session_attach_failing",
+        ))
     }
 
     fn attach_session_event_sink(
         &self,
-        _session_id: &str,
+        _session: &AgentSessionKey,
         _sink: Arc<dyn AgentSessionEventSink>,
     ) -> Result<(), RuntimeError> {
         Err(RuntimeError::NotReady("session worker stopped".to_string()))
@@ -612,7 +636,7 @@ impl AgentRuntime for AttachFailingAgent {
         Ok(())
     }
 
-    fn close_session(&self, _session_id: &str) -> Result<(), RuntimeError> {
+    fn close_session(&self, _session: &AgentSessionKey) -> Result<(), RuntimeError> {
         self.closes.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
@@ -627,19 +651,22 @@ struct FollowupAttachFailingAgent {
 }
 
 impl AgentRuntime for FollowupAttachFailingAgent {
-    fn start_session(&self, _request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
+    fn start_session(&self, request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
         let idx = self.starts.fetch_add(1, Ordering::SeqCst);
-        Ok(AgentSession::new(format!("session_followup_{idx}")))
+        Ok(AgentSession::new(
+            request.agent_id,
+            format!("session_followup_{idx}"),
+        ))
     }
 
     fn resume_session(&self, request: AgentSessionResume) -> Result<AgentSession, RuntimeError> {
         self.resumes.fetch_add(1, Ordering::SeqCst);
-        Ok(AgentSession::new(request.session_id))
+        Ok(AgentSession::new(request.agent_id, request.session_id))
     }
 
     fn attach_session_event_sink(
         &self,
-        _session_id: &str,
+        _session: &AgentSessionKey,
         _sink: Arc<dyn AgentSessionEventSink>,
     ) -> Result<(), RuntimeError> {
         let call = self.attach_calls.fetch_add(1, Ordering::SeqCst);
@@ -659,7 +686,7 @@ impl AgentRuntime for FollowupAttachFailingAgent {
         sink.emit(AgentEvent::Text("follow-up response".to_string()))
     }
 
-    fn close_session(&self, _session_id: &str) -> Result<(), RuntimeError> {
+    fn close_session(&self, _session: &AgentSessionKey) -> Result<(), RuntimeError> {
         self.closes.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }

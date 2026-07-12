@@ -42,4 +42,22 @@ describe("protocol errors", () => {
       },
     });
   });
+
+  it("preserves authoritative Task state carried by a revision conflict", () => {
+    const currentTask = { task: { taskId: "task-a" }, revision: 9 };
+
+    const envelope = errorEnvelopeFromUnknown({
+      error: {
+        code: "conflict",
+        message: "Task changed before the message was sent",
+        recoverable: true,
+        target: { field: "taskRevision", currentTask },
+      },
+    });
+
+    expect(envelope?.error.target).toMatchObject({
+      field: "taskRevision",
+      currentTask,
+    });
+  });
 });

@@ -36,6 +36,18 @@ export type TaskSnapshot = {
   send_capability: {
     state: "loading" | "ready" | "blocked" | "failed";
     attachment_only: boolean;
+    blockers?: Array<{
+      kind:
+        | "taskPreparing"
+        | "taskRunning"
+        | "agentConfigNotReady"
+        | "slashCommandsNotReady"
+        | "attachmentsNeedRefresh"
+        | "emptyMessage"
+        | "missingRequiredOptions"
+        | "failedValidation";
+      message: string;
+    }>;
   };
   revision: number;
   history_sync: HistorySyncState;

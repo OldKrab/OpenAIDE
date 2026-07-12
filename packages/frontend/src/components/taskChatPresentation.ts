@@ -1,25 +1,5 @@
-import type { TaskSnapshot, TaskStatus } from "@openaide/app-shell-contracts";
-import type { AppState, TaskComposerInput } from "../state/store";
-
-export function chatItemsWithPendingInput(
-  items: TaskSnapshot["chat"]["items"],
-  taskInput: TaskComposerInput,
-  taskId: string,
-) {
-  void taskInput;
-  void taskId;
-  return items;
-}
-
-export function taskChatHasLiveUpdates({
-  inputPending,
-  taskStatus,
-}: {
-  inputPending: boolean;
-  taskStatus: TaskStatus;
-}) {
-  return inputPending || taskStatus === "active" || taskStatus === "blocked";
-}
+import type { TaskSnapshot } from "@openaide/app-shell-contracts";
+import type { AppState } from "../state/store";
 
 export function chatItemsWithAppServerPermissions(
   items: TaskSnapshot["chat"]["items"],

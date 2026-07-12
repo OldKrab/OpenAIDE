@@ -14,6 +14,7 @@ import type { AgentOption, ComposerAttachment } from "../state/composerOptions";
 import type { AppState } from "../state/store";
 import type {
   AttachmentListDirectoryResult,
+  ClientInstanceId,
   FileBrowserEntryId,
   FileBrowserRoot,
   FileBrowserRootId,
@@ -23,6 +24,8 @@ import type {
   WorkspaceBrowserRoot,
   WorkspaceListDirectoryResult,
 } from "@openaide/app-server-client";
+import type { ComposerAttachmentResourceOwner } from "../services/attachmentResources";
+import type { PreparedTaskLease, PreparedTaskOwnership } from "./preparedTaskOwnership";
 
 export type AppControllerCallbacks = {
   navigation: NavigationCallbacks;
@@ -60,6 +63,7 @@ export type SettingsCallbacks = {
 export type NewTaskCallbacks = {
   cancel: () => void;
   fileBrowser?: TaskFileBrowserCallbacks;
+  removeAttachment: (attachmentId: string) => void;
   resetOptionsRequestKey: () => void;
   selectConfigOption: (configId: string, value: string) => void;
   submit: (draft?: NewTaskDraftInput) => void;
@@ -74,7 +78,8 @@ export type NewTaskDraftInput = {
 export type TaskCallbacks = {
   cancel: () => void;
   fileBrowser?: TaskFileBrowserCallbacks;
-  loadChatPage: (beforeCursor: string) => void;
+  /** Starts one earlier-page request and returns its viewport/reducer generation. */
+  loadChatPage: (beforeCursor: string) => number | undefined;
   loadToolDetail: (artifactId: string, refresh?: boolean) => void;
   revealAttachment: (attachmentId: string) => Promise<void>;
   removeAttachment: (attachmentId: string) => void;
@@ -91,6 +96,8 @@ export type TaskCallbacks = {
 };
 
 export type TaskFileBrowserCallbacks = {
+  /** Logical Task/composer owner; callback objects may refresh while this stays stable. */
+  ownerKey: string;
   attachEmbedded: (entryId: FileBrowserEntryId) => Promise<void>;
   attachFileReference: (entryId: FileBrowserEntryId) => Promise<void>;
   attachPastedImage: (file: File, draft?: NewTaskDraftInput) => Promise<void>;
@@ -99,6 +106,8 @@ export type TaskFileBrowserCallbacks = {
 };
 
 export type WorkspaceBrowserCallbacks = {
+  /** Logical navigation owner for async listing settlement. */
+  ownerKey: string;
   listDirectory: (path: string) => Promise<WorkspaceListDirectoryResult>;
   listRoots: () => Promise<WorkspaceBrowserRoot[]>;
 };
@@ -107,26 +116,34 @@ export type SnapshotRequestIdFactory = (taskId?: string, intent?: SnapshotIntent
 
 export type PendingNewTaskPreparationResult = {
   taskId: TaskId;
-  task?: ProtocolTaskSnapshot;
+  task: ProtocolTaskSnapshot;
 };
 
 export type NewTaskStartAttempt = {
   cancelled: boolean;
   draft: NewTaskDraftInput;
+  preparedTaskLease?: PreparedTaskLease;
+  /** Defers cancellation until task/send has an authoritative outcome. */
+  sendInFlight?: boolean;
   taskId?: TaskId;
 };
 
 export type AppCallbacksDependencies = {
   acceptTaskOpen?: (taskId: string, requestId: number | undefined, intent: SnapshotIntent) => boolean;
+  attachmentResources?: ComposerAttachmentResourceOwner;
   backendConnection?: Pick<BackendConnection, "respond">
     & Partial<Pick<BackendConnection, "events" | "request">>;
   beginNavigationChange: (archived?: boolean) => number;
+  clientInstanceId: ClientInstanceId | string;
+  createChatPageRequestGeneration: () => number;
   createSnapshotRequestId: SnapshotRequestIdFactory;
   currentNavigationGeneration: () => number;
+  currentNewTaskPreparationKey: () => string | undefined;
   dispatch: Dispatch<AppAction>;
   latestOptionsRequestKey: { current: string | undefined };
   newTaskStartAttempt: { current: NewTaskStartAttempt | undefined };
   pendingPreparedNewTask: (key: string) => Promise<PendingNewTaskPreparationResult> | undefined;
+  preparedTaskOwnership?: PreparedTaskOwnership;
   requestNativeSessions: (cursor?: string, append?: boolean, minimumSessionCount?: number) => void;
   setAgents?: (agents: AgentOption[]) => void;
   setPreferences: (preferences: AppPreferencesRecord) => void;

@@ -478,6 +478,7 @@ fn task_record(task_id: &str, status: TaskStatus, created_at: &str) -> TaskRecor
         revision: 1,
         config_options: HashMap::new(),
         config_options_catalog: None,
+        config_mutation: Default::default(),
         agent_commands_catalog: None,
         model_id: None,
         preparation: TaskPreparationRecord::Ready,

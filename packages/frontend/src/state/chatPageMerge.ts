@@ -8,6 +8,7 @@ export function mergePageState(current: ChatPageState | undefined, page: Message
     olderItems,
     hasBefore: page.has_before,
     startCursor: page.start_cursor ?? olderItems[0]?.cursor,
+    requestGeneration: current?.requestGeneration,
     pending: false,
   };
 }
@@ -26,6 +27,7 @@ export function retainSnapshotWindow(
     olderItems: retained,
     hasBefore: current?.hasBefore ?? previousPage.has_before,
     startCursor: current?.startCursor ?? retained[0]?.cursor ?? previousPage.start_cursor ?? nextPage.start_cursor,
+    requestGeneration: current?.requestGeneration,
     pending: current?.pending,
     error: current?.error,
   };

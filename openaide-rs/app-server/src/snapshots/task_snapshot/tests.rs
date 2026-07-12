@@ -1,7 +1,8 @@
 use openaide_app_server_protocol::snapshot::{
-    MessagePart, PermissionMessageDecision, PermissionMessageState, TaskSendCapabilityState,
-    TaskStatus as ProtocolTaskStatus,
+    MessagePart, PermissionMessageDecision, PermissionMessageState, TaskHistorySyncSnapshot,
+    TaskSendCapabilityState, TaskStatus as ProtocolTaskStatus,
 };
+use std::sync::{Arc, Mutex};
 
 use crate::protocol::model::{
     ActivityStatus, ActivityStep, ChatMessage, IsolationKind, NormalizedMessage,
@@ -12,6 +13,29 @@ use crate::storage::records::{TaskPreparationRecord, TaskRecord};
 use crate::storage::Store;
 
 use super::*;
+
+#[derive(Clone)]
+struct MutableHistorySyncSource {
+    current: Arc<Mutex<TaskHistorySyncSnapshot>>,
+}
+
+impl MutableHistorySyncSource {
+    fn new(current: TaskHistorySyncSnapshot) -> Self {
+        Self {
+            current: Arc::new(Mutex::new(current)),
+        }
+    }
+
+    fn set(&self, current: TaskHistorySyncSnapshot) {
+        *self.current.lock().unwrap() = current;
+    }
+}
+
+impl TaskHistorySyncSnapshotSource for MutableHistorySyncSource {
+    fn history_sync_snapshot(&self, _task_id: &str) -> TaskHistorySyncSnapshot {
+        self.current.lock().unwrap().clone()
+    }
+}
 
 #[test]
 fn list_projects_visible_tasks_and_revision() {
@@ -42,6 +66,58 @@ fn open_projects_preparing_task_status() {
         .expect("open");
 
     assert_eq!(snapshot.task.status, ProtocolTaskStatus::Preparing);
+}
+
+#[test]
+fn open_overlays_current_history_sync_state_for_resubscribe() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    store.write_task(&task_record("task-1")).unwrap();
+    let history_sync =
+        MutableHistorySyncSource::new(TaskHistorySyncSnapshot::Syncing { generation: 7 });
+    let snapshots =
+        TaskSnapshotStore::with_history_sync(store.clone(), Arc::new(history_sync.clone()));
+
+    let syncing = snapshots
+        .open(&TaskId::from("task-1"))
+        .expect("open syncing");
+
+    assert_eq!(
+        syncing.history_sync,
+        TaskHistorySyncSnapshot::Syncing { generation: 7 }
+    );
+
+    let mut task = store.read_task("task-1").unwrap();
+    task.unread = !task.unread;
+    task.revision += 1;
+    store.write_task(&task).unwrap();
+    history_sync.set(TaskHistorySyncSnapshot::Failed {
+        generation: 7,
+        message: "Native history is unavailable".to_string(),
+        before_send: false,
+    });
+
+    let failed = snapshots
+        .open(&TaskId::from("task-1"))
+        .expect("open after unrelated mutation");
+
+    assert_eq!(
+        failed.history_sync,
+        TaskHistorySyncSnapshot::Failed {
+            generation: 7,
+            message: "Native history is unavailable".to_string(),
+            before_send: false,
+        }
+    );
+
+    history_sync.set(TaskHistorySyncSnapshot::Updated { generation: 7 });
+    let updated = snapshots
+        .open(&TaskId::from("task-1"))
+        .expect("resubscribe after history update");
+    assert_eq!(
+        updated.history_sync,
+        TaskHistorySyncSnapshot::Updated { generation: 7 }
+    );
 }
 
 #[test]
@@ -424,6 +500,7 @@ fn task_record(task_id: &str) -> TaskRecord {
         revision: 7,
         config_options: Default::default(),
         config_options_catalog: None,
+        config_mutation: Default::default(),
         agent_commands_catalog: None,
         model_id: None,
         preparation: TaskPreparationRecord::Ready,

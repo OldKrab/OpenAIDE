@@ -18,6 +18,32 @@ pub enum TaskPreparationRecord {
     },
 }
 
+/// App Server ordering state for one Task's Agent-owned configuration changes.
+///
+/// The sequence is monotonic across settled changes so a late Agent response can
+/// never become authoritative again after a newer client mutation supersedes it.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct TaskConfigMutationState {
+    #[serde(default)]
+    pub sequence: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending: Option<PendingTaskConfigChange>,
+}
+
+impl TaskConfigMutationState {
+    fn is_empty(&self) -> bool {
+        self.sequence == 0 && self.pending.is_none()
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct PendingTaskConfigChange {
+    pub sequence: u64,
+    pub client_mutation_id: String,
+    pub config_id: String,
+    pub requested_value: String,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TaskRecord {
     pub task_id: String,
@@ -52,6 +78,8 @@ pub struct TaskRecord {
     pub config_options: HashMap<String, String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config_options_catalog: Option<ConfigOptionsCatalog>,
+    #[serde(default, skip_serializing_if = "TaskConfigMutationState::is_empty")]
+    pub config_mutation: TaskConfigMutationState,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_commands_catalog: Option<AgentCommandsCatalog>,
     pub model_id: Option<String>,

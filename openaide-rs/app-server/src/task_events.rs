@@ -144,10 +144,6 @@ pub(crate) struct BlockingTaskUpdate {
 
 #[cfg(test)]
 impl BlockingTaskUpdate {
-    pub(crate) fn rearm(&self) {
-        self.inner.armed.store(true, Ordering::SeqCst);
-    }
-
     pub(crate) fn wait_until_blocked(&self) {
         self.inner.reached.wait();
     }

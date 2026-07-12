@@ -147,6 +147,7 @@ fn runtime_startup_recovers_stale_active_turn_and_session_binding() {
             revision: 1,
             config_options: Default::default(),
             config_options_catalog: None,
+            config_mutation: Default::default(),
             agent_commands_catalog: None,
             model_id: None,
             preparation: TaskPreparationRecord::Ready,

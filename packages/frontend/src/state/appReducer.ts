@@ -24,33 +24,32 @@ import {
   type WorkspaceRoot,
 } from "./composerOptions";
 import { reduceNewTaskState } from "./newTaskReducer";
+import { applyAppServerReplica } from "./appServerReplicaState";
 import { reduceSettingsState } from "./settingsReducer";
 import {
-  applyPendingInputReconciliation,
-  pendingInputReconciliation,
   reconcileBackgroundTaskSnapshot,
-  reconcileTaskNavigationTasks,
-  shouldIgnoreStaleTaskSnapshot,
+  reconcileTaskSnapshotDependents,
   upsertTaskSummary,
 } from "./taskSnapshotReconciliation";
 import { reduceTaskInteractionState } from "./taskInteractionReducer";
-import { retainSnapshotWindow } from "./chatPageMerge";
-import type { AppState } from "./store";
+import type { AppState, TaskChatScrollState } from "./store";
 
 export type SnapshotIntent = "open" | "refresh";
 
-export type AppAction =
+type AppActionPayload =
   | { type: "appServer:error"; message: string }
   | { type: "appServer:ready" }
-  | { type: "tasks"; tasks: TaskSummary[] }
+  | { type: "appServer:replica"; epoch: number; stateRootId: string }
+  | { type: "tasks"; archived: boolean; tasks: TaskSummary[] }
   | { type: "tasks:error"; message: string }
   | { type: "task:list:remove"; taskId: string }
   | { type: "snapshot"; snapshot: TaskSnapshot; intent: SnapshotIntent }
-  | { type: "taskScroll:record"; taskId: string; scrollTop: number }
+  | { type: "taskScroll:record"; taskId: string; scrollState: TaskChatScrollState }
   | { type: "prompt"; prompt: string }
   | { type: "projects"; projects: ProjectOption[]; activeProjectId?: string }
   | { type: "workspace:roots"; roots: WorkspaceRoot[] }
-  | { type: "submit:start"; prompt?: string; context?: ComposerAttachment[] }
+  | { type: "submit:start"; prompt?: string; context?: ComposerAttachment[]; idempotencyKey?: import("@openaide/app-server-client").TaskSendIdempotencyKey }
+  | { type: "submit:attempt"; idempotencyKey: import("@openaide/app-server-client").TaskSendIdempotencyKey }
   | { type: "submit:cancel" }
   | { type: "submit:error"; message: string }
   | { type: "submit:attachments:invalidate"; taskId: string; message: string }
@@ -65,7 +64,8 @@ export type AppAction =
   | { type: "newTask:configOptions:error"; message: string }
   | { type: "newTask:nativeSessions:start"; append: boolean }
   | { type: "newTask:nativeSessions:result"; result: AgentListSessionsResult; append: boolean }
-  | { type: "newTask:nativeSessions:error"; message: string }
+  | { type: "newTask:nativeSessions:listError"; message: string }
+  | { type: "newTask:nativeSessions:error"; sessionId: string; message: string }
   | { type: "newTask:nativeSessions:adopt"; sessionId: string }
   | { type: "newTask:nativeSessions:remove"; sessionId: string }
   | { type: "newTask:workspace"; workspace: WorkspaceRoot }
@@ -76,14 +76,19 @@ export type AppAction =
   | { type: "taskInput:attachment:addAppServer"; taskId: string; attachment: ComposerAttachment }
   | { type: "taskInput:attachment:remove"; taskId: string; attachmentId: string }
   | { type: "taskInput:clear"; taskId: string }
-  | { type: "taskInput:submit"; taskId: string; input?: { prompt: string; context: ComposerAttachment[] } }
+  | { type: "taskInput:submit"; taskId: string; input?: { prompt: string; context: ComposerAttachment[] }; idempotencyKey?: import("@openaide/app-server-client").TaskSendIdempotencyKey }
+  | { type: "taskInput:restoreSend"; taskId: string; input: { prompt: string; context: ComposerAttachment[] }; idempotencyKey: import("@openaide/app-server-client").TaskSendIdempotencyKey }
+  | { type: "taskInput:sendUncertain"; taskId: string; idempotencyKey: import("@openaide/app-server-client").TaskSendIdempotencyKey; message: string }
+  | { type: "taskInput:sendError"; taskId: string; idempotencyKey: import("@openaide/app-server-client").TaskSendIdempotencyKey; message?: string }
+  | { type: "taskSend:accepted"; taskId: string; idempotencyKey: import("@openaide/app-server-client").TaskSendIdempotencyKey; userMessageId: import("@openaide/app-server-client").MessageId }
   | { type: "taskInput:error"; taskId: string; message?: string }
+  | { type: "taskInput:cancelError"; taskId: string; message: string }
   | { type: "taskInput:attachments:invalidate"; taskId: string; message: string }
   | { type: "taskOpen:start"; taskId: string }
   | { type: "taskOpen:error"; taskId: string; message: string }
-  | { type: "chatPage:start"; taskId: string }
-  | { type: "chatPage:result"; taskId: string; page: MessagePage }
-  | { type: "chatPage:error"; taskId: string; message: string }
+  | { type: "chatPage:start"; taskId: string; requestGeneration: number }
+  | { type: "chatPage:result"; taskId: string; requestGeneration: number; page: MessagePage }
+  | { type: "chatPage:error"; taskId: string; requestGeneration: number; message: string }
   | { type: "toolDetail:start"; taskId: string; artifactId: string }
   | { type: "toolDetail:result"; taskId: string; artifactId: string; details: ActivityToolDetails }
   | { type: "toolDetail:error"; taskId: string; artifactId: string; message: string }
@@ -118,11 +123,25 @@ export type AppAction =
   | { type: "settings:runtimeSettings"; settings: RuntimeSettingsResult }
   | { type: "settings:tab"; tab: SettingsTabId };
 
+export type AppAction = AppActionPayload & {
+  /** Rejects results produced by an App Server process that has been replaced. */
+  replicaEpoch?: number;
+};
+
+/** Binds App Server work to the process that started it so late outcomes are rejected. */
+export function bindAppServerReplicaEpoch(
+  dispatch: (action: AppAction) => void,
+  replicaEpoch: number,
+) {
+  return (action: AppAction) => dispatch({ ...action, replicaEpoch } as AppAction);
+}
+
 type GlobalAction = Extract<
   AppAction,
   | { type: "tasks" }
   | { type: "appServer:error" }
   | { type: "appServer:ready" }
+  | { type: "appServer:replica" }
   | { type: "tasks:error" }
   | { type: "task:list:remove" }
   | { type: "snapshot" }
@@ -136,6 +155,9 @@ type GlobalAction = Extract<
 >;
 
 export function appReducer(state: AppState, action: AppAction): AppState {
+  if (action.replicaEpoch !== undefined && action.replicaEpoch < state.appServerReplicaEpoch) {
+    return state;
+  }
   const domainState =
     reduceNewTaskState(state, action)
     ?? reduceTaskInteractionState(state, action)
@@ -151,6 +173,7 @@ function isGlobalAction(action: AppAction): action is GlobalAction {
     case "tasks":
     case "appServer:error":
     case "appServer:ready":
+    case "appServer:replica":
     case "tasks:error":
     case "task:list:remove":
     case "snapshot":
@@ -173,15 +196,22 @@ function reduceGlobalState(state: AppState, action: GlobalAction): AppState {
       return { ...state, appServerError: action.message, taskListError: action.message };
     case "appServer:ready":
       return { ...state, appServerError: undefined };
+    case "appServer:replica":
+      return applyAppServerReplica(state, action.epoch, action.stateRootId);
     case "tasks": {
-      const tasks = reconcileTaskNavigationTasks(state, action.tasks);
+      const tasks = action.tasks;
+      const cacheKey = taskListCacheKey(action.archived);
+      const taskListCache = {
+        ...state.taskListCache,
+        [cacheKey]: tasks,
+      };
+      if (state.showArchived !== action.archived) {
+        return { ...state, taskListCache };
+      }
       return {
         ...state,
         tasks,
-        taskListCache: {
-          ...state.taskListCache,
-          [taskListCacheKey(state.showArchived)]: tasks,
-        },
+        taskListCache,
         taskListError: undefined,
       };
     }
@@ -192,7 +222,8 @@ function reduceGlobalState(state: AppState, action: GlobalAction): AppState {
         const cacheKey = taskListCacheKey(state.showArchived);
         const nextTasks = state.tasks.filter((task) => task.task_id !== action.taskId);
         const { [action.taskId]: _snapshot, ...taskSnapshots } = state.taskSnapshots;
-        const { [action.taskId]: _scrollTop, ...taskScrollPositions } = state.taskScrollPositions;
+        const { [action.taskId]: _snapshotEpoch, ...taskSnapshotReplicaEpochs } = state.taskSnapshotReplicaEpochs;
+        const { [action.taskId]: _scrollState, ...taskChatScrollStates } = state.taskChatScrollStates;
         return {
           ...state,
           tasks: nextTasks,
@@ -203,95 +234,46 @@ function reduceGlobalState(state: AppState, action: GlobalAction): AppState {
           activeTaskId: state.activeTaskId === action.taskId ? undefined : state.activeTaskId,
           snapshot: state.snapshot?.task.task_id === action.taskId ? undefined : state.snapshot,
           taskSnapshots,
-          taskScrollPositions,
+          taskSnapshotReplicaEpochs,
+          taskChatScrollStates,
         };
       }
     case "snapshot": {
+      const replicaEpoch = action.replicaEpoch ?? state.appServerReplicaEpoch;
+      if (replicaEpoch < state.appServerReplicaEpoch) return state;
       if (action.intent === "refresh" && state.activeTaskId !== action.snapshot.task.task_id) {
-        return reconcileBackgroundTaskSnapshot(state, action.snapshot);
+        return reconcileBackgroundTaskSnapshot(state, action.snapshot, replicaEpoch);
       }
-      const pendingReconciliation = pendingInputReconciliation(state, action.snapshot, {
-        clearCommittedDraft: action.intent === "open",
-      });
-      if (shouldIgnoreStaleTaskSnapshot(state.snapshot, action.snapshot)) {
-        return applyPendingInputReconciliation(state, action.snapshot.task.task_id, pendingReconciliation);
-      }
-      const hasMessages = action.snapshot.task.has_messages;
-      const input = state.taskInputs[action.snapshot.task.task_id];
-      const newTaskCommitted = pendingReconciliation.newTaskCommitted || (!state.newTask.pending && hasMessages);
-      const tasks = upsertTaskSummary(state.tasks, action.snapshot.task);
-      const terminalPermissionIds = terminalAppServerPermissionIds(action.snapshot);
-      const appServerPermissionRequests = omitKeys(
-        state.appServerPermissionRequests,
-        terminalPermissionIds,
-      );
-      const permissionResponses = omitKeys(state.permissionResponses, terminalPermissionIds);
-      const terminalQuestionIds = terminalAppServerQuestionIds(action.snapshot);
-      const appServerQuestionRequests = omitKeys(state.appServerQuestionRequests, terminalQuestionIds);
-      const questionResponses = omitKeys(state.questionResponses, terminalQuestionIds);
       const taskId = action.snapshot.task.task_id;
-      const previousSnapshot = state.taskSnapshots[taskId];
-      // A completed Native Session reconciliation is an authoritative replacement. Retaining
-      // the old paging window here can resurrect rows the Agent no longer reports.
-      const historyWasReconciled = (
-        previousSnapshot?.history_sync.state === "checking"
-        || previousSnapshot?.history_sync.state === "syncing"
-      ) && previousSnapshot.chat.version !== action.snapshot.chat.version;
-      const retainedChatPage = previousSnapshot && !historyWasReconciled
-        ? retainSnapshotWindow(state.chatPages[taskId], previousSnapshot.chat, action.snapshot.chat)
-        : undefined;
+      const reconciliation = reconcileTaskSnapshotDependents(state, action.snapshot, replicaEpoch);
+      if (reconciliation.state === state) return state;
+      const { snapshot } = reconciliation;
+      const tasks = upsertTaskSummary(state.tasks, snapshot.task);
       return {
-        ...state,
-        snapshot: action.snapshot,
+        ...reconciliation.state,
+        snapshot,
         showArchived: state.showArchived,
         searchQuery: action.intent === "open" ? "" : state.searchQuery,
-        taskSnapshots: {
-          ...state.taskSnapshots,
-          [taskId]: action.snapshot,
-        },
-        chatPages: retainedChatPage
-          ? { ...state.chatPages, [taskId]: retainedChatPage }
-          : omitKeys(state.chatPages, new Set([taskId])),
         tasks,
         taskListCache: {
           ...state.taskListCache,
           [taskListCacheKey(state.showArchived)]: tasks,
         },
-        activeTaskId: action.snapshot.task.task_id,
+        activeTaskId: snapshot.task.task_id,
         taskOpenError: undefined,
-        appServerPermissionRequests,
-        permissionResponses,
-        appServerQuestionRequests,
-        questionResponses,
-        taskInputs: input && (
-          pendingReconciliation.taskInputCommitted
-          || pendingReconciliation.taskInputRestoredSendCommitted
-          || pendingReconciliation.taskInputDraftCommitted
-        )
-          ? {
-              ...state.taskInputs,
-              [action.snapshot.task.task_id]: { prompt: "", context: [] },
-            }
-          : state.taskInputs,
         newTask: {
           ...state.newTask,
-          prompt: newTaskCommitted ? "" : state.newTask.prompt,
-          context: newTaskCommitted ? [] : state.newTask.context,
-          pending: newTaskCommitted ? undefined : state.newTask.pending,
-          submitting: newTaskCommitted ? false : state.newTask.submitting,
-          error: newTaskCommitted ? undefined : state.newTask.error,
           configOptionsLoading: false,
           configOptionsError: undefined,
-          nativeSessions: { ...state.newTask.nativeSessions, adoptingSessionId: undefined, error: undefined },
         },
       };
     }
     case "taskScroll:record":
       return {
         ...state,
-        taskScrollPositions: {
-          ...state.taskScrollPositions,
-          [action.taskId]: action.scrollTop,
+        taskChatScrollStates: {
+          ...state.taskChatScrollStates,
+          [action.taskId]: action.scrollState,
         },
       };
     case "projects": {
@@ -359,41 +341,6 @@ function abandonNativeSessionOpening(newTask: AppState["newTask"]): AppState["ne
 
 function taskListCacheKey(showArchived: boolean) {
   return showArchived ? "archived" : "active";
-}
-
-function terminalAppServerPermissionIds(snapshot: TaskSnapshot) {
-  return new Set(
-    snapshot.chat.items.flatMap((item) => {
-      const message = item.message;
-      if (message.kind !== "permission") return [];
-      if (message.state !== "resolved" && message.state !== "cancelled") return [];
-      return [message.app_server_request_id, message.request_id].filter((id): id is string => Boolean(id));
-    }),
-  );
-}
-
-function terminalAppServerQuestionIds(snapshot: TaskSnapshot) {
-  return new Set(
-    snapshot.chat.items.flatMap((item) => {
-      const message = item.message;
-      if (message.kind !== "elicitation" || message.state === "pending") return [];
-      return [message.app_server_request_id, message.request_id].filter((id): id is string => Boolean(id));
-    }),
-  );
-}
-
-function omitKeys<T>(record: Record<string, T>, keys: Set<string>) {
-  if (!keys.size) return record;
-  let changed = false;
-  const next: Record<string, T> = {};
-  for (const [key, value] of Object.entries(record)) {
-    if (keys.has(key)) {
-      changed = true;
-      continue;
-    }
-    next[key] = value;
-  }
-  return changed ? next : record;
 }
 
 function selectedProject(projects: ProjectOption[], activeProjectId: string | undefined) {

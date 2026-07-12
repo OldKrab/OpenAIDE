@@ -1032,9 +1032,13 @@ fn heartbeat_drains_queued_async_task_events_for_connection() {
     );
 
     let events = response_events(outcome);
-    assert_eq!(events.len(), 1);
+    assert_eq!(events.len(), 2);
     assert!(matches!(
         events[0].event.payload,
+        AppServerEventPayload::ProjectCollectionUpdated { .. }
+    ));
+    assert!(matches!(
+        events[1].event.payload,
         AppServerEventPayload::TaskNavigationUpdated { .. }
     ));
 }
@@ -2015,12 +2019,12 @@ impl AttachmentFileBrowserWorkflow for RejectingAttachments {
         ))
     }
 
-    fn release_handles(
+    fn release_resources(
         &self,
         _client_instance_id: &ClientInstanceId,
-        _params: openaide_app_server_protocol::attachment::AttachmentReleaseHandlesParams,
+        _params: openaide_app_server_protocol::attachment::AttachmentReleaseParams,
     ) -> Result<
-        openaide_app_server_protocol::attachment::AttachmentReleaseHandlesResult,
+        openaide_app_server_protocol::attachment::AttachmentReleaseResult,
         openaide_app_server_protocol::errors::ProtocolError,
     > {
         Err(test_unavailable(
@@ -2150,15 +2154,15 @@ impl AttachmentFileBrowserWorkflow for RevealAttachments {
         RejectingAttachments.refresh_handles(client_instance_id, params)
     }
 
-    fn release_handles(
+    fn release_resources(
         &self,
         client_instance_id: &ClientInstanceId,
-        params: openaide_app_server_protocol::attachment::AttachmentReleaseHandlesParams,
+        params: openaide_app_server_protocol::attachment::AttachmentReleaseParams,
     ) -> Result<
-        openaide_app_server_protocol::attachment::AttachmentReleaseHandlesResult,
+        openaide_app_server_protocol::attachment::AttachmentReleaseResult,
         openaide_app_server_protocol::errors::ProtocolError,
     > {
-        RejectingAttachments.release_handles(client_instance_id, params)
+        RejectingAttachments.release_resources(client_instance_id, params)
     }
 
     fn resolve_reveal_target(
@@ -2691,7 +2695,7 @@ fn response_error(outcome: GatewayOutcome) -> ErrorEnvelope {
         GatewayOutcome::Respond {
             response: GatewayResponse::Error(error),
             ..
-        } => error,
+        } => *error,
         other => panic!("expected error response, got {other:?}"),
     }
 }

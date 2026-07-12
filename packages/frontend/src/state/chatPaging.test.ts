@@ -33,19 +33,17 @@ describe("chatPaging", () => {
     expect(chat.error).toBe("Page failed");
   });
 
-  it("coalesces streamed thought rows using first identity, last cursor, text order, and streaming flag", () => {
+  it("preserves distinct thought identities instead of guessing chunk boundaries from adjacency", () => {
     const chat = renderedChat(snapshot([thoughtMessage("m1", "Think", false), thoughtMessage("m2", "ing", true)]), undefined);
 
-    expect(chat.items).toHaveLength(1);
-    expect(chat.items[0]).toMatchObject({
-      identity: "m1",
-      message_id: "m1",
-      cursor: "cursor_m2",
-      message: { kind: "thought", id: "m1", text: "Thinking", streaming: true },
-    });
+    expect(chat.items.map((item) => item.message_id)).toEqual(["m1", "m2"]);
+    expect(chat.items.map((item) => item.message)).toMatchObject([
+      { kind: "thought", id: "m1", text: "Think", streaming: false },
+      { kind: "thought", id: "m2", text: "ing", streaming: true },
+    ]);
   });
 
-  it("coalesces streamed agent text chunks using first identity, last cursor, text order, and streaming flag", () => {
+  it("preserves distinct Agent message identities instead of joining short adjacent text", () => {
     const chat = renderedChat(
       snapshot([
         agentMessage("m1", "Run", false),
@@ -55,16 +53,15 @@ describe("chatPaging", () => {
       undefined,
     );
 
-    expect(chat.items).toHaveLength(1);
-    expect(chat.items[0]).toMatchObject({
-      identity: "m1",
-      message_id: "m1",
-      cursor: "cursor_m3",
-      message: { kind: "agent_text", id: "m1", text: "Run `pwd", streaming: true },
-    });
+    expect(chat.items.map((item) => item.message_id)).toEqual(["m1", "m2", "m3"]);
+    expect(chat.items.map((item) => item.message)).toMatchObject([
+      { kind: "agent_text", id: "m1", text: "Run", streaming: false },
+      { kind: "agent_text", id: "m2", text: " `", streaming: true },
+      { kind: "agent_text", id: "m3", text: "pwd", streaming: false },
+    ]);
   });
 
-  it("coalesces activity runs without promoting a failed tool to the group status", () => {
+  it("preserves each activity identity and status", () => {
     const chat = renderedChat(
       snapshot([
         activityMessage("m1", "exec_command", "completed", false, [
@@ -80,26 +77,15 @@ describe("chatPaging", () => {
       undefined,
     );
 
-    expect(chat.items).toHaveLength(1);
-    expect(chat.items[0]).toMatchObject({
-      identity: "m1",
-      message_id: "m1",
-      cursor: "cursor_m3",
-      message: {
-        kind: "activity",
-        title: "Commands",
-        status: "completed",
-        collapsed: false,
-        steps: [
-          { kind: "tool", input_summary: "git status" },
-          { kind: "tool", input_summary: "npm test" },
-          { kind: "command", command_label: "cargo test" },
-        ],
-      },
-    });
+    expect(chat.items.map((item) => item.message_id)).toEqual(["m1", "m2", "m3"]);
+    expect(chat.items.map((item) => item.message)).toMatchObject([
+      { kind: "activity", status: "completed", steps: [{ kind: "tool", input_summary: "git status" }] },
+      { kind: "activity", status: "running", steps: [{ kind: "tool", input_summary: "npm test" }] },
+      { kind: "activity", status: "error", steps: [{ kind: "command", command_label: "cargo test" }] },
+    ]);
   });
 
-  it("classifies coalesced terminal input and generic tool activity runs", () => {
+  it("does not rewrite activity titles from neighboring rows", () => {
     const terminalChat = renderedChat(
       snapshot([
         activityMessage("m1", "write_stdin", "completed", true, [{ kind: "text", text: "npm", level: "info" }]),
@@ -119,14 +105,16 @@ describe("chatPaging", () => {
       undefined,
     );
 
-    expect(terminalChat.items[0]).toMatchObject({
-      cursor: "cursor_m2",
-      message: { kind: "activity", title: "Terminal input", collapsed: true },
-    });
-    expect(toolChat.items[0]).toMatchObject({
-      cursor: "cursor_m4",
-      message: { kind: "activity", title: "Tool activity", collapsed: true },
-    });
+    expect(terminalChat.items.map((item) => item.message_id)).toEqual(["m1", "m2"]);
+    expect(terminalChat.items.map((item) => item.message)).toMatchObject([
+      { kind: "activity", title: "write_stdin", collapsed: true },
+      { kind: "activity", title: "write_stdin", collapsed: true },
+    ]);
+    expect(toolChat.items.map((item) => item.message_id)).toEqual(["m3", "m4"]);
+    expect(toolChat.items.map((item) => item.message)).toMatchObject([
+      { kind: "activity", title: "Search files", collapsed: true },
+      { kind: "activity", title: "Read file", collapsed: true },
+    ]);
   });
 });
 

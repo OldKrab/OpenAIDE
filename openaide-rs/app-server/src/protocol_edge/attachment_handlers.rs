@@ -5,7 +5,7 @@ use openaide_app_server_protocol::attachment::{
     AttachmentCreatePastedImageParams, AttachmentCreatePastedImageResult,
     AttachmentListDirectoryParams, AttachmentListDirectoryResult, AttachmentListRootsParams,
     AttachmentListRootsResult, AttachmentRefreshHandlesParams, AttachmentRefreshHandlesResult,
-    AttachmentReleaseHandlesParams, AttachmentReleaseHandlesResult, AttachmentRevealParams,
+    AttachmentReleaseParams, AttachmentReleaseResult, AttachmentRevealParams,
     AttachmentRevealResult,
 };
 use openaide_app_server_protocol::envelopes::RequestMeta;
@@ -208,14 +208,14 @@ impl RpcGateway {
         self.result::<AttachmentRefreshHandlesResult>(connection_id, id, meta, result)
     }
 
-    pub(super) fn handle_attachment_release_handles(
+    pub(super) fn handle_attachment_release(
         &self,
         connection_id: ConnectionId,
         id: String,
         params: Value,
         meta: RequestMeta,
     ) -> GatewayOutcome {
-        let params = match serde_json::from_value::<AttachmentReleaseHandlesParams>(params) {
+        let params = match serde_json::from_value::<AttachmentReleaseParams>(params) {
             Ok(params) => params,
             Err(error) => {
                 return self.error(connection_id, id, meta, responses::invalid_params(error))
@@ -227,12 +227,12 @@ impl RpcGateway {
             .expect("routing requires an initialized client for attachment release");
         let result = match self
             .attachments
-            .release_handles(&client.client_instance_id, params)
+            .release_resources(&client.client_instance_id, params)
         {
             Ok(result) => result,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
-        self.result::<AttachmentReleaseHandlesResult>(connection_id, id, meta, result)
+        self.result::<AttachmentReleaseResult>(connection_id, id, meta, result)
     }
 
     pub(super) fn handle_attachment_reveal(

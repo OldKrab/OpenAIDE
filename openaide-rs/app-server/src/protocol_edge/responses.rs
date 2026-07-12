@@ -107,12 +107,12 @@ pub fn error(
     GatewayOutcome::Respond {
         connection_id,
         id,
-        response: GatewayResponse::Error(ErrorEnvelope::new(
+        response: GatewayResponse::Error(Box::new(ErrorEnvelope::new(
             error,
             ResponseMeta {
                 client_request_id: meta.client_request_id,
             },
-        )),
+        ))),
         events: Vec::new(),
         server_requests: Vec::new(),
     }
@@ -126,6 +126,7 @@ pub fn not_initialized(method: String) -> ProtocolError {
         target: Some(ErrorTarget {
             method: Some(method),
             field: None,
+            current_task: None,
         }),
     }
 }
@@ -138,6 +139,7 @@ pub fn invalid_params(error: serde_json::Error) -> ProtocolError {
         target: Some(ErrorTarget {
             method: None,
             field: Some("params".to_string()),
+            current_task: None,
         }),
     }
 }

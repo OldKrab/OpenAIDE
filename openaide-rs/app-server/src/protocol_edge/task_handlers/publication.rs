@@ -56,7 +56,12 @@ impl RpcGateway {
             return delta_events;
         }
         let Ok(task) = self.task_snapshots.open(&task_id) else {
-            let events = self.publish_task_navigation_update(now).unwrap_or_default();
+            // Removal/tombstone updates cannot open a Task snapshot, but they can
+            // change both independent Project ownership and Task Navigation.
+            let mut events = self
+                .publish_project_collection_update(now)
+                .unwrap_or_default();
+            events.extend(self.publish_task_navigation_update(now).unwrap_or_default());
             self.pending_event_deliveries.extend(events.clone());
             return events;
         };

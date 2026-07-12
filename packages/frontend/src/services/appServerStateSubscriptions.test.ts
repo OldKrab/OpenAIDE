@@ -90,7 +90,7 @@ describe("startAppServerStateSubscription", () => {
   });
 
   it("refreshes its snapshot when the connection loses event continuity", async () => {
-    let resetListener: (() => void) | undefined;
+    let resetListener: Parameters<BackendConnection["stateResets"]>[0] | undefined;
     const dispatch = vi.fn();
     const request = vi.fn(async () => taskSubscription(
       request.mock.calls.length === 1 ? "cursor_1" : "cursor_5",
@@ -101,7 +101,7 @@ describe("startAppServerStateSubscription", () => {
       events() {
         return vi.fn();
       },
-      stateResets(listener: () => void) {
+      stateResets(listener: Parameters<BackendConnection["stateResets"]>[0]) {
         resetListener = listener;
         return vi.fn();
       },
@@ -118,11 +118,98 @@ describe("startAppServerStateSubscription", () => {
     });
     await Promise.resolve();
 
-    resetListener?.();
+    resetListener?.({ serverId: "server_1" as never, stateRootId: "root_1" as StateRootId });
     await Promise.resolve();
 
     expect(request).toHaveBeenCalledTimes(2);
     expect(dispatch).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not replay events queued before a replica reset onto its replacement baseline", async () => {
+    let eventListener: ((event: AppServerEvent) => void) | undefined;
+    let resetListener: Parameters<BackendConnection["stateResets"]>[0] | undefined;
+    const firstSubscribe = deferred<StateSubscribeResult>();
+    const secondSubscribe = deferred<StateSubscribeResult>();
+    const dispatch = vi.fn();
+    const request = vi.fn(() => (
+      request.mock.calls.length === 1 ? firstSubscribe.promise : secondSubscribe.promise
+    ));
+    const connection = {
+      request,
+      events(listener: (event: AppServerEvent) => void) {
+        eventListener = listener;
+        return vi.fn();
+      },
+      stateResets(listener: Parameters<BackendConnection["stateResets"]>[0]) {
+        resetListener = listener;
+        return vi.fn();
+      },
+    } as Pick<BackendConnection, "events" | "request" | "stateResets">;
+
+    startAppServerStateSubscription({
+      backendConnection: connection,
+      context: {
+        stateRootId: "root_1" as StateRootId,
+        clientInstanceId: "client_1" as never,
+      },
+      dispatch,
+      scope: { kind: "task", taskId: "task_1" as TaskId },
+    });
+    await Promise.resolve();
+
+    eventListener?.(taskEvent("cursor_1", "cursor_2", "task_1"));
+    resetListener?.({ serverId: "server_2" as never, stateRootId: "root_1" as StateRootId });
+    firstSubscribe.resolve(taskSubscription("cursor_1", "task_1"));
+    await firstSubscribe.promise;
+    await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+
+    secondSubscribe.resolve(taskSubscription("cursor_10", "task_1"));
+    await secondSubscribe.promise;
+    await vi.waitFor(() => expect(dispatch).toHaveBeenCalledOnce());
+    expect(request).toHaveBeenCalledTimes(2);
+  });
+
+  it("uses the replacement state root for its reset baseline and live events", async () => {
+    let eventListener: ((event: AppServerEvent) => void) | undefined;
+    let resetListener: Parameters<BackendConnection["stateResets"]>[0] | undefined;
+    const dispatch = vi.fn();
+    const context = {
+      stateRootId: "root_1" as StateRootId,
+      clientInstanceId: "client_1" as never,
+    };
+    const request = vi.fn(async () => taskSubscription(
+      request.mock.calls.length === 1 ? "cursor_1" : "cursor_10",
+      "task_1",
+    ));
+    const connection = {
+      request,
+      events(listener: (event: AppServerEvent) => void) {
+        eventListener = listener;
+        return vi.fn();
+      },
+      stateResets(listener: Parameters<BackendConnection["stateResets"]>[0]) {
+        resetListener = listener;
+        return vi.fn();
+      },
+    } as Pick<BackendConnection, "events" | "request" | "stateResets">;
+
+    startAppServerStateSubscription({
+      backendConnection: connection,
+      context,
+      dispatch,
+      scope: { kind: "task", taskId: "task_1" as TaskId },
+    });
+    await vi.waitFor(() => expect(dispatch).toHaveBeenCalledOnce());
+
+    context.stateRootId = "root_2" as StateRootId;
+    resetListener?.({ serverId: "server_2" as never, stateRootId: context.stateRootId });
+    await vi.waitFor(() => expect(dispatch).toHaveBeenCalledTimes(2));
+
+    eventListener?.(taskEvent("cursor_10", "cursor_11", "task_1", "root_2"));
+    expect(dispatch).toHaveBeenCalledTimes(3);
+    eventListener?.(taskEvent("cursor_11", "cursor_12", "task_1", "root_1"));
+    expect(dispatch).toHaveBeenCalledTimes(3);
+    expect(request).toHaveBeenCalledTimes(3);
   });
 
   it("dispatches each ordered live text delta before finalization", async () => {
@@ -231,6 +318,7 @@ describe("startAppServerStateSubscription", () => {
 
     expect(dispatch).toHaveBeenLastCalledWith({
       type: "tasks",
+      archived: false,
       tasks: [expect.objectContaining({
         task_id: "task_1",
         project_id: "project_1",
@@ -238,6 +326,63 @@ describe("startAppServerStateSubscription", () => {
         title: "Real task",
       })],
     });
+  });
+
+  it("remaps task labels when project metadata arrives after task navigation", async () => {
+    const projects = deferred<StateSubscribeResult>();
+    const dispatch = vi.fn();
+    const context = {
+      stateRootId: "root_1" as StateRootId,
+      clientInstanceId: "client_1" as never,
+      agents: [{ agentId: "codex" as never, label: "Codex", status: "connected" as const }],
+    };
+    const request = vi.fn((method: string, params?: { scope?: { kind: string } }) => {
+      expect(method).toBe(STATE_SUBSCRIBE);
+      if (params?.scope?.kind === "taskNavigation") {
+        return Promise.resolve(taskNavigationSubscription("cursor_navigation", [
+          taskSummary("task_1", "Task without project metadata"),
+        ]));
+      }
+      return projects.promise;
+    });
+    const connection = {
+      request,
+      events() {
+        return vi.fn();
+      },
+    } as Pick<BackendConnection, "request" | "events">;
+
+    startAppServerStateSubscription({
+      backendConnection: connection,
+      context,
+      dispatch,
+      scope: { kind: "taskNavigation" },
+    });
+    await vi.waitFor(() => expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "tasks" })));
+    expect(dispatch.mock.calls.at(-1)?.[0].tasks[0].project_label).toBeUndefined();
+
+    startAppServerStateSubscription({
+      backendConnection: connection,
+      context,
+      dispatch,
+      scope: { kind: "projects" },
+    });
+    projects.resolve({
+      cursor: "cursor_projects" as EventCursor,
+      scope: { kind: "projects" },
+      snapshot: {
+        kind: "projects",
+        projects: {
+          activeProjectId: "project_1" as ProjectId,
+          projects: [{ projectId: "project_1" as ProjectId, label: "OpenAIDE" }],
+        },
+      },
+    });
+    await projects.promise;
+    await vi.waitFor(() => expect(dispatch.mock.calls.at(-1)?.[0]).toMatchObject({
+      type: "tasks",
+      tasks: [{ task_id: "task_1", project_label: "OpenAIDE" }],
+    }));
   });
 
   it("maps App Server agent subscription snapshots into frontend agent choices", async () => {
@@ -335,6 +480,7 @@ describe("startAppServerStateSubscription", () => {
 
     expect(dispatch).toHaveBeenLastCalledWith({
       type: "tasks",
+      archived: false,
       tasks: [expect.objectContaining({
         task_id: "task_1",
         title: "Finished task",
@@ -431,6 +577,7 @@ describe("startAppServerStateSubscription", () => {
     expect(dispatch).toHaveBeenCalledTimes(1);
     expect(dispatch).toHaveBeenLastCalledWith({
       type: "tasks",
+      archived: false,
       tasks: [expect.objectContaining({
         task_id: "task_1",
         title: "Included task",
@@ -792,13 +939,18 @@ function taskSubscription(cursor: string, taskIdValue: string): StateSubscribeRe
   };
 }
 
-function taskEvent(previousCursor: string, cursor: string, taskIdValue: string): AppServerEvent {
+function taskEvent(
+  previousCursor: string,
+  cursor: string,
+  taskIdValue: string,
+  stateRootId = "root_1",
+): AppServerEvent {
   return {
     previousCursor: previousCursor as EventCursor,
     cursor: cursor as EventCursor,
     scope: {
       kind: "task",
-      stateRootId: "root_1" as StateRootId,
+      stateRootId: stateRootId as StateRootId,
       taskId: taskIdValue as TaskId,
     },
     payload: {

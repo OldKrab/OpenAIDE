@@ -121,7 +121,6 @@ struct TextRuns {
 #[derive(Clone)]
 struct TextRun {
     id: String,
-    source_message_id: Option<String>,
     text: String,
     next_sequence: u64,
 }
@@ -162,16 +161,19 @@ fn stream_chunk(
             if previous.is_none() && active_stream_count(&runs) >= MAX_ACTIVE_STREAMS_PER_KIND {
                 finalized.push(evict_oldest_sourced(&mut runs, now, kind)?);
             }
-            let run = runs.anonymous.get_or_insert_with(|| new_text_run(None));
+            let run = runs.anonymous.get_or_insert_with(new_text_run);
             (run, previous)
         }
         RunKey::Sourced(source_message_id) => {
             let previous = runs.sourced.get(source_message_id).cloned();
             if previous.is_none() {
-                if let Some(mut anonymous) = runs.anonymous.take() {
-                    anonymous.source_message_id = Some(source_message_id.clone());
-                    runs.sourced.insert(source_message_id.clone(), anonymous);
-                } else if active_stream_count(&runs) >= MAX_ACTIVE_STREAMS_PER_KIND {
+                // Anonymous and sourced chunks have no shared protocol identity.
+                // Preserve them as distinct Chat rows instead of guessing that a
+                // later source id retroactively names the anonymous run.
+                if let Some(anonymous) = runs.anonymous.take() {
+                    finalized.push(finish_write(anonymous, RunKey::Anonymous, now, kind));
+                }
+                if active_stream_count(&runs) >= MAX_ACTIVE_STREAMS_PER_KIND {
                     finalized.push(evict_oldest_sourced(&mut runs, now, kind)?);
                 }
             }
@@ -179,7 +181,7 @@ fn stream_chunk(
             let run = runs
                 .sourced
                 .entry(source_message_id.clone())
-                .or_insert_with(|| new_text_run(Some(source_message_id.clone())));
+                .or_insert_with(new_text_run);
             (run, previous)
         }
     };
@@ -236,10 +238,9 @@ fn touch_recency(recency: &mut VecDeque<String>, source_message_id: &str) {
     recency.push_back(source_message_id.to_string());
 }
 
-fn new_text_run(source_message_id: Option<String>) -> TextRun {
+fn new_text_run() -> TextRun {
     TextRun {
         id: Uuid::new_v4().to_string(),
-        source_message_id,
         text: String::new(),
         next_sequence: 1,
     }

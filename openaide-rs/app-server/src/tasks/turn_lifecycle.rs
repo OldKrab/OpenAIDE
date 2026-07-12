@@ -4,7 +4,7 @@ use uuid::Uuid;
 
 use crate::agent::gateway::AgentGateway;
 use crate::agent::registry::AgentRegistry;
-use crate::agent::{AgentSession, AgentSessionResume, AgentSessionStart};
+use crate::agent::{AgentSession, AgentSessionKey, AgentSessionResume, AgentSessionStart};
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{
     InterruptionReason, NormalizedMessage, PermissionDecision, TaskSnapshot, TaskStatus,
@@ -138,8 +138,12 @@ impl TaskTurnLifecycle {
         self.agent_gateway.resume_session(request)
     }
 
-    fn attach_session_events(&self, task_id: String, session_id: &str) -> Result<(), RuntimeError> {
-        self.turn_runner.attach_session_events(task_id, session_id)
+    fn attach_session_events(
+        &self,
+        task_id: String,
+        session: &AgentSessionKey,
+    ) -> Result<(), RuntimeError> {
+        self.turn_runner.attach_session_events(task_id, session)
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, ()> {

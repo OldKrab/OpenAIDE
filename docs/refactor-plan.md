@@ -152,6 +152,99 @@ current code against the accepted architecture rules. Each follow-up still uses
 the workflow review loop and may be implemented through small commits when
 needed.
 
+### Active Chat-State Remediation
+
+Recent persisted-session evidence falsified several previously reported fixes:
+durable sends and completed turns could remain stale in one live client; active-turn
+steering could lose later Chat rows; Configuration Option changes could revive a
+history-sync announcement; and Composer settlement guessed acceptance from message
+text or snapshot revision. The active remediation therefore uses these stricter
+contracts:
+
+- Generic ACP prompt turns are sequential. OpenAIDE does not issue a second
+  `session/prompt` while the first is pending; active Tasks expose blocked Send
+  capability while keeping the local draft editable.
+- One task-scoped Composer attempt owns its idempotency key until `task/send`
+  returns `userMessageId`. Identical historical text never settles a draft, and a
+  lost response retries the same attempt instead of manufacturing a new send.
+- Every event delivered to a client shares one cursor lineage. Any cursor gap,
+  including one first observed on an out-of-scope or replacement event, suspends
+  incremental application until resubscription installs a baseline.
+- Each App Server gateway exposes one stable, process-unique `ServerId`.
+  Frontend stamps asynchronous outcomes with the matching replica epoch: a
+  same-process stream resubscribe preserves history clocks and paging, a new
+  process accepts its lower process-local clock, and a changed `StateRootId`
+  clears every root-owned Task/cache identity before collisions are accepted.
+- LocalHttp reinitializes after `notInitialized` but never replays the
+  originating product method into the replacement replica. The owner receives a
+  replica-changed error and decides whether to reconcile, retry an idempotent
+  send, or surface failure under the new epoch.
+- Protocol Chat message identities are authoritative. Frontend paging may dedupe
+  the same identity across windows, but it must not merge distinct adjacent text,
+  thought, or activity rows from whitespace, size, or position heuristics.
+- Configuration Option readiness, pending mutation identity, stale/unavailable
+  state, and errors survive projection into Frontend state. A ready empty catalog
+  is settled, not indefinitely loading. ACP notifications proven to precede a
+  set-option response are projected before the response catalog, so an older
+  queued catalog cannot regress the confirmed value.
+- A stale `task/send` revision conflict targets `taskRevision` and carries the
+  current authoritative Task render state. Frontend retries the same idempotency
+  key from that state only; it does not parse error text, reopen the Task, or
+  retry unrelated conflicts such as an already-running Task.
+- Project identity is owned independently from surviving Tasks, and one visible
+  Task panel/client owns a routed Task in each App Shell.
+- Durable send receipts survive authoritative Native Session replay. A receipt
+  is trusted only after its local Chat rows were durably written, and replay may
+  replace those row identities without reopening the idempotency key.
+- Stop is ordered behind exact send admission, and a cancelled ACP prompt keeps
+  its Native Session slot until the original prompt response settles. A later
+  prompt waits for that settlement instead of racing the Agent's active turn.
+- Native history replaces cached Chat only when its activity timestamp is
+  present, comparable, and strictly newer. Frontend drops retained paging rows
+  only when that synchronization generation reaches `updated`; ordinary live
+  growth during `syncing` preserves the reader's window and scroll ownership.
+  ACP RFC 3339 activity timestamps are normalized with UTC or numeric offsets.
+- Earlier-page requests carry controller-owned generations through their result
+  and error actions. Clearing or replacing a paging window cannot let an older
+  response settle a newer request, and active/background snapshot ingestion
+  shares the same paging and terminal-request cleanup rules.
+- Durable Task revision and process-local history-sync generation are independent
+  clocks. Snapshot reconciliation may accept newer durable fields while retaining
+  a newer history clock, and a same-generation terminal state cannot be reopened
+  by a late `task/open` response.
+- Pre-send attachment handles and candidates share the typed
+  `attachment/release` batch contract with ordered per-resource outcomes.
+  Candidate confirmation, concurrent confirmation, and release are linearized
+  so cleanup cannot resurrect or duplicate resolver resources.
+- Native Session identity is `(agentId, sessionId)` at every runtime, ownership,
+  prompt, update, configuration, cancellation, and close seam. A session id may
+  be reused by another Agent, but one Agent/session pair cannot belong to two
+  Tasks even when their workspaces differ.
+- An empty prepared Task has one explicit Frontend owner until first-send
+  recovery becomes durable. Context replacement, existing-Task navigation,
+  Native Session adoption, and Settings navigation dispose that owner exactly
+  once; ordinary surface unmount preserves the Backend-recoverable draft.
+  Attachment adoption transfers to a replacement prepared Task synchronously
+  rather than waiting for a render.
+- Task Navigation snapshots own active/archived list membership. Background
+  Task snapshots may refresh an existing row and cached details, but cannot
+  insert a Task omitted by the authoritative list or place an active row into
+  the Archived slice.
+- Process-local send recovery and cleared-attempt tombstones take precedence
+  over stale browser storage. Unrelated Task/config/history errors cannot settle
+  an exact send; only its keyed acceptance or keyed rejection may unlock it.
+- Pending-send recovery, in-flight de-duplication, and attachment protection are
+  namespaced by `(StateRootId, clientInstanceId, taskId)`. Legacy unscoped records
+  are quarantined, so a colliding Task id in another root cannot receive an old
+  prompt or resolver handle.
+- Process replacement clears pending server requests, option/session projections,
+  tool details, and editable resolver handles while retaining durable Chat and
+  exact locked-send recovery. All required global subscription baselines must be
+  fresh before mutations become ready again.
+- Deferred zero-client shutdown remains pending while accepted turns or Task
+  requests settle and is rechecked without requiring another client-expiry
+  event. Repeated checks do not emit duplicate deferred-status logs.
+
 0. **Stabilize the active ACP session termination split.**
    - Add the missing regression tests for unsupported close no-op behavior,
      unsupported delete errors, close/delete trace and ACP error mapping, and
@@ -1341,6 +1434,11 @@ Desktop, and VS Code smoke coverage.
      checks, focused chat paging/reducer tests, repo-wide check, repo-wide test
      after one unrelated transient backend test retry, JSON validation, diff
      whitespace check, boundary scan, and source-size scan.
+   - Superseded behavior note: the module split remains useful, but the accepted
+     adjacency-based text/thought/activity coalescing behavior did not survive
+     real-session evidence. App Server now supplies stable Chat identities and
+     chunks update those identities directly, so the Frontend facade preserves
+     distinct rows and no longer invokes the heuristic coalescers.
    - Proposed next slice: split `components/Sidebar.tsx` into a public
      composition facade, pure sidebar view-model derivation, focused task-row
      rendering, and focused native-session row rendering while keeping the

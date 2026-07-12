@@ -49,9 +49,20 @@ pub struct TaskSnapshot {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub config_options_catalog: Option<ConfigOptionsCatalog>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub pending_config_change: Option<PendingTaskConfigChange>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_commands_catalog: Option<AgentCommandsCatalog>,
     pub preparation: TaskPreparationRecord,
     pub revision: u64,
+}
+
+/// Process-neutral projection of an in-flight config mutation.
+/// Server sequencing remains private to the durable Task record.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct PendingTaskConfigChange {
+    pub client_mutation_id: String,
+    pub config_id: String,
+    pub requested_value: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

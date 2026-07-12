@@ -45,6 +45,12 @@ impl TaskTransitions {
                         task.config_options_catalog = None;
                         task.agent_commands_catalog = None;
                     }
+                    if plan.clear_pending_config_change {
+                        // Agent I/O cannot be resumed after process restart. Preserve the
+                        // monotonic sequence, but retire the volatile client mutation so
+                        // App Shells can issue a fresh, explicitly ordered request.
+                        ctx.task_mut().config_mutation.pending = None;
+                    }
 
                     Ok(TaskMutationResult::Changed)
                 })?;

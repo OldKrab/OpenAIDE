@@ -18,6 +18,7 @@ import type {
   SubscriptionSnapshot,
   TaskId,
   TaskNavigationSnapshot,
+  TaskSnapshot,
   TaskSummary,
 } from "./generated/protocol.js";
 import {
@@ -78,7 +79,7 @@ describe("state ingestion", () => {
     expect(result.state.cursor).toBe("cursor-2");
   });
 
-  it("ignores out-of-scope state-root events even when their previous cursor skipped scoped events", () => {
+  it("requires resync when an out-of-scope event exposes a cursor gap", () => {
     const state = createSubscriptionIngestionState(
       subscribeResult({ kind: "agents" }, { kind: "agents", agents: { defaultAgentId: agentId("agent-1"), agents: [] } }, "cursor-504"),
       { stateRootId: stateRoot("root-1") },
@@ -92,8 +93,25 @@ describe("state ingestion", () => {
 
     const result = applySubscriptionEvent(state, event);
 
-    expect(result).toMatchObject({ kind: "ignored", reason: "subscriptionMismatch" });
-    expect(result.state.cursor).toBe("cursor-507");
+    expect(result).toMatchObject({ kind: "resyncRequired", reason: "cursorGap" });
+    expect(result.state.cursor).toBe("cursor-504");
+  });
+
+  it("requires resync when a state-root replacement exposes a cursor gap", () => {
+    const state = createSubscriptionIngestionState(
+      subscribeResult(
+        { kind: "projects" },
+        { kind: "projects", projects: { projects: [], activeProjectId: null } },
+        "cursor-1",
+      ),
+      { stateRootId: stateRoot("root-1") },
+    );
+    const event = projectCollectionEvent("root-1", "cursor-missing", "cursor-3");
+
+    const result = applySubscriptionEvent(state, event);
+
+    expect(result).toMatchObject({ kind: "resyncRequired", reason: "cursorGap" });
+    expect(result.state.cursor).toBe("cursor-1");
   });
 
   it("requires resync for events from another state root", () => {
@@ -363,7 +381,7 @@ describe("state ingestion", () => {
     expect(result.state.snapshot.task).toBe(updatedTask);
   });
 
-  it("does not let an older durable snapshot overwrite live history synchronization", () => {
+  it("uses the history synchronization state from an authoritative task snapshot", () => {
     const snapshot = taskSnapshot("task-1");
     if (snapshot.kind !== "task") throw new Error("expected task snapshot");
     snapshot.task.historySync = { state: "syncing", generation: 4 };
@@ -371,6 +389,12 @@ describe("state ingestion", () => {
       stateRootId: stateRoot("root-1"),
     });
     const olderTask = taskSnapshotBody("task-1", [chatItem("message-1", "Replayed")]);
+    olderTask.historySync = {
+      state: "failed",
+      generation: 3,
+      message: "Native history is unavailable",
+      beforeSend: false,
+    };
     const event = taskEvent("root-1", "task-1", "cursor-1", "cursor-2", {
       kind: "taskSnapshotUpdated",
       task: olderTask,
@@ -382,8 +406,37 @@ describe("state ingestion", () => {
     if (result.kind !== "applied" || result.state.snapshot.kind !== "task") {
       throw new Error("expected applied task snapshot update");
     }
-    expect(result.state.snapshot.task.historySync).toEqual({ state: "syncing", generation: 4 });
+    expect(result.state.snapshot.task.historySync).toEqual({
+      state: "failed",
+      generation: 3,
+      message: "Native history is unavailable",
+      beforeSend: false,
+    });
     expect(result.state.snapshot.task.chat.items).toHaveLength(1);
+  });
+
+  it("does not revive a superseded history completion from client-side state", () => {
+    const snapshot = taskSnapshot("task-1");
+    if (snapshot.kind !== "task") throw new Error("expected task snapshot");
+    snapshot.task.historySync = { state: "updated", generation: 4 };
+    const state = createSubscriptionIngestionState(subscribeResult(taskScope("task-1"), snapshot, "cursor-1"), {
+      stateRootId: stateRoot("root-1"),
+    });
+    const optionMutationSnapshot = taskSnapshotBody("task-1");
+    optionMutationSnapshot.revision = 2;
+    optionMutationSnapshot.historySync = { state: "syncing", generation: 2 };
+    const event = taskEvent("root-1", "task-1", "cursor-1", "cursor-2", {
+      kind: "taskSnapshotUpdated",
+      task: optionMutationSnapshot,
+    });
+
+    const result = applySubscriptionEvent(state, event);
+
+    expect(result.kind).toBe("applied");
+    if (result.kind !== "applied" || result.state.snapshot.kind !== "task") {
+      throw new Error("expected applied task snapshot update");
+    }
+    expect(result.state.snapshot.task.historySync).toEqual({ state: "syncing", generation: 2 });
   });
 
   it("applies task history synchronization updates", () => {
@@ -463,7 +516,7 @@ describe("state ingestion", () => {
     expect(result.state.snapshot.projects.projects[0]?.projectId).toBe(projectId("project-1"));
   });
 
-  it("applies replacement state-root events when scoped batches skip unrelated cursor steps", () => {
+  it("resyncs replacement state-root events when the client stream skipped cursor steps", () => {
     const state = createSubscriptionIngestionState(
       subscribeResult({ kind: "projects" }, { kind: "projects", projects: { projects: [], activeProjectId: null } }, "cursor-504"),
       { stateRootId: stateRoot("root-1") },
@@ -472,12 +525,8 @@ describe("state ingestion", () => {
 
     const result = applySubscriptionEvent(state, event);
 
-    expect(result.kind).toBe("applied");
-    if (result.kind !== "applied") throw new Error("expected tolerant project update");
-    expect(result.state.cursor).toBe("cursor-507");
-    expect(result.state.snapshot.kind).toBe("projects");
-    if (result.state.snapshot.kind !== "projects") throw new Error("expected projects snapshot");
-    expect(result.state.snapshot.projects.projects[0]?.label).toBe("Project");
+    expect(result).toMatchObject({ kind: "resyncRequired", reason: "cursorGap" });
+    expect(result.state.cursor).toBe("cursor-504");
   });
 
   it("ignores duplicate replacement state-root events with an already-applied cursor", () => {
@@ -554,7 +603,7 @@ function taskSnapshot(id: string, items: ChatItem[] = []): SubscriptionSnapshot 
   };
 }
 
-function taskSnapshotBody(id: string, items: ChatItem[] = []) {
+function taskSnapshotBody(id: string, items: ChatItem[] = []): TaskSnapshot {
   return {
     task: taskSummary(id),
     revision: 1,

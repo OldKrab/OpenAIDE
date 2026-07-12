@@ -172,6 +172,7 @@ fn task_record(task_id: &str, workspace_root: &str, updated_at: &str) -> TaskRec
         revision: 1,
         config_options: Default::default(),
         config_options_catalog: None,
+        config_mutation: Default::default(),
         agent_commands_catalog: None,
         model_id: None,
         preparation: TaskPreparationRecord::Ready,

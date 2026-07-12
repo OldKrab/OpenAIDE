@@ -1,25 +1,34 @@
 import type { TaskStatus } from "@openaide/app-shell-contracts";
+import type { TaskChatScrollState } from "../state/store";
 
 export function taskComposerAvailability({
   archived = false,
   backendReady,
   connectionStatus,
   inputPending,
+  inputUncertain = false,
   preparationBlocked,
+  sendCapabilityState = "ready",
   taskStatus,
 }: {
   archived?: boolean;
   backendReady: boolean;
   connectionStatus?: "connecting" | "ready" | "reconnecting" | "unavailable";
   inputPending: boolean;
+  inputUncertain?: boolean;
   preparationBlocked: boolean;
+  sendCapabilityState?: "loading" | "ready" | "blocked" | "failed";
   taskStatus: TaskStatus;
 }) {
   const turnBusy = taskStatus === "active" || taskStatus === "blocked";
   const keepingDraftAvailable = !backendReady
     && (connectionStatus === "reconnecting" || connectionStatus === "unavailable");
-  const editingDisabled = archived || (!backendReady && !keepingDraftAvailable) || inputPending || preparationBlocked;
-  const sendDisabled = archived || !backendReady || inputPending || preparationBlocked;
+  const editingDisabled = archived || (!backendReady && !keepingDraftAvailable) || inputPending || inputUncertain || preparationBlocked;
+  const sendDisabled = archived
+    || !backendReady
+    || inputPending
+    || preparationBlocked
+    || sendCapabilityState !== "ready";
   if (archived) return { editingDisabled, sendDisabled, placeholder: "Restore task to send follow-up." };
   if (preparationBlocked) return { editingDisabled, sendDisabled, placeholder: "Preparing task." };
   if (!backendReady) {
@@ -30,6 +39,13 @@ export function taskComposerAvailability({
     };
   }
   if (inputPending) return { editingDisabled, sendDisabled, placeholder: "Sending." };
+  if (inputUncertain) {
+    return {
+      editingDisabled,
+      sendDisabled: !backendReady,
+      placeholder: "Retry this exact message.",
+    };
+  }
   if (taskStatus === "blocked") {
     return { editingDisabled, sendDisabled, placeholder: "Draft follow-up while input is pending." };
   }
@@ -37,8 +53,17 @@ export function taskComposerAvailability({
   return { editingDisabled, sendDisabled, placeholder: "Send follow-up" };
 }
 
-export function initialTaskScrollTop(savedScrollTop: number | undefined, scrollHeight: number) {
-  return savedScrollTop ?? scrollHeight;
+/** Returns the only programmatic position owned by Chat; readers keep their current viewport. */
+export function scrollTopForFollowingViewport({
+  clientHeight,
+  ownership,
+  scrollHeight,
+}: {
+  clientHeight: number;
+  ownership: TaskChatScrollState["ownership"];
+  scrollHeight: number;
+}) {
+  return ownership === "following" ? Math.max(0, scrollHeight - clientHeight) : undefined;
 }
 
 export function scrollTopAfterPrependedContent({
@@ -51,33 +76,4 @@ export function scrollTopAfterPrependedContent({
   previousScrollTop: number;
 }) {
   return previousScrollTop + Math.max(0, nextScrollHeight - previousScrollHeight);
-}
-
-export function chatFollowModeForPosition({
-  clientHeight,
-  previousScrollTop,
-  scrollHeight,
-  scrollTop,
-}: {
-  clientHeight: number;
-  previousScrollTop?: number;
-  scrollHeight: number;
-  scrollTop: number;
-}) {
-  const distanceFromBottom = scrollHeight - (scrollTop + clientHeight);
-  if (previousScrollTop !== undefined && scrollTop < previousScrollTop) return false;
-  return distanceFromBottom <= 48;
-}
-
-export function scrollTopForGeneratedContent({
-  followMode,
-  generating,
-  scrollHeight,
-}: {
-  followMode: boolean;
-  generating: boolean;
-  scrollHeight: number;
-}) {
-  if (!followMode || !generating) return undefined;
-  return scrollHeight;
 }

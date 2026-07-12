@@ -18,6 +18,11 @@ pub(super) enum OpenedAgentSession<'a> {
     Resumed(AgentSession),
 }
 
+pub(super) struct OpenedSessionTaskState {
+    session: AgentSession,
+    metadata_is_authoritative: bool,
+}
+
 impl OpenedAgentSession<'_> {
     pub(super) fn session(&self) -> &AgentSession {
         match self {
@@ -41,6 +46,56 @@ impl OpenedAgentSession<'_> {
                 replayed_messages, ..
             } => replayed_messages,
             _ => &[],
+        }
+    }
+
+    /// `session/load` returns the Native Session's authoritative current state.
+    /// Start and resume responses can be sparse, so absent metadata there must
+    /// not erase state already persisted while the session was opening.
+    pub(super) fn task_state(&self) -> OpenedSessionTaskState {
+        let (session, metadata_is_authoritative) = match self {
+            OpenedAgentSession::Started(guard) => (guard.session(), false),
+            OpenedAgentSession::Loaded { guard, .. } => (guard.session(), true),
+            OpenedAgentSession::Resumed(session) => (session, false),
+        };
+        OpenedSessionTaskState {
+            session: session.clone(),
+            metadata_is_authoritative,
+        }
+    }
+}
+
+impl OpenedSessionTaskState {
+    pub(super) fn apply_to(self, task: &mut TaskRecord) {
+        let AgentSession {
+            session_id,
+            config_options,
+            config_catalog,
+            commands_catalog,
+            model_id,
+            ..
+        } = self.session;
+        task.agent_session_id = Some(session_id);
+
+        if self.metadata_is_authoritative {
+            task.config_options = config_options;
+            task.config_options_catalog = config_catalog;
+            task.agent_commands_catalog = commands_catalog;
+            task.model_id = model_id;
+            return;
+        }
+
+        // Start and resume metadata can be sparse. Replace a category only when
+        // supplied; otherwise retain state persisted while the session opened.
+        if let Some(catalog) = config_catalog {
+            task.config_options = config_options;
+            task.config_options_catalog = Some(catalog);
+            task.model_id = model_id;
+        } else if let Some(model_id) = model_id {
+            task.model_id = Some(model_id);
+        }
+        if let Some(commands_catalog) = commands_catalog {
+            task.agent_commands_catalog = Some(commands_catalog);
         }
     }
 }

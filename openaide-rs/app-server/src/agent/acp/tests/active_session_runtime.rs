@@ -3,12 +3,13 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 use std::process::Command;
-use std::sync::{mpsc, Arc};
+use std::sync::{mpsc, Arc, Barrier};
 use std::time::{Duration, Instant};
 
 use crate::agent::acp_active_session_manager::AcpActiveSessionManager;
 use crate::agent::acp_auth_method_cache::AcpAuthMethodCache;
-use crate::agent::registry::AgentRegistry;
+use crate::agent::registry::{AgentCatalogRecord, AgentRegistry};
+use crate::agent::registry_handle::AgentRegistryHandle;
 use crate::agent::{AgentSecretResolver, AgentSessionSetConfigOptionRequest, TurnCancellation};
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::host::HostBridge;
@@ -122,6 +123,68 @@ fn fixture_manager(
         AcpAuthMethodCache::default(),
     );
     Some((manager, log_path))
+}
+
+fn colliding_session_runtime(
+    temp: &tempfile::TempDir,
+    session_id: &str,
+) -> Option<(AcpAgentRuntime, PathBuf, PathBuf)> {
+    if !python3_available() {
+        eprintln!("skipping ACP colliding-session fixture: python3 not found");
+        return None;
+    }
+
+    let script_path = temp.path().join("fixture_agent.py");
+    fs::write(&script_path, fixture_agent_script()).expect("fixture agent script");
+    let records = ["agent-a", "agent-b"].map(|agent_id| {
+        let log_path = temp.path().join(format!("{agent_id}.log"));
+        AgentCatalogRecord::custom(
+            agent_id.to_string(),
+            agent_id.to_string(),
+            "C".to_string(),
+            true,
+            "python3".to_string(),
+            String::new(),
+            vec![script_path.to_string_lossy().to_string()],
+            HashMap::from([
+                (
+                    "OPENAIDE_ACP_FIXTURE_LOG".to_string(),
+                    log_path.to_string_lossy().to_string(),
+                ),
+                (
+                    "OPENAIDE_ACP_FIXTURE_SESSION".to_string(),
+                    session_id.to_string(),
+                ),
+                (
+                    "OPENAIDE_ACP_FIXTURE_CONFIG_OPTIONS".to_string(),
+                    "1".to_string(),
+                ),
+                (
+                    "OPENAIDE_ACP_FIXTURE_PROMPT_MODE".to_string(),
+                    "wait_for_cancel".to_string(),
+                ),
+                (
+                    "OPENAIDE_ACP_FIXTURE_TITLE".to_string(),
+                    format!("{agent_id} title"),
+                ),
+                (
+                    "OPENAIDE_ACP_FIXTURE_LOG_DETAILS".to_string(),
+                    "1".to_string(),
+                ),
+            ]),
+            Vec::new(),
+        )
+    });
+    let registry = AgentRegistry::from_agent_catalog(records.into_iter().collect())
+        .expect("two-Agent fixture registry");
+    Some((
+        AcpAgentRuntime::new_with_registry(
+            AgentRegistryHandle::new(registry),
+            HostBridge::disabled(),
+        ),
+        temp.path().join("agent-a.log"),
+        temp.path().join("agent-b.log"),
+    ))
 }
 
 fn python3_available() -> bool {
@@ -333,12 +396,16 @@ fn fixture_agent_script() -> &'static str {
     r#"import json
 import os
 import sys
+import time
 
 log_path = os.environ["OPENAIDE_ACP_FIXTURE_LOG"]
 session_id = os.environ.get("OPENAIDE_ACP_FIXTURE_SESSION", "fixture-session")
 prompt_mode = os.environ.get("OPENAIDE_ACP_FIXTURE_PROMPT_MODE", "")
 with_config_options = os.environ.get("OPENAIDE_ACP_FIXTURE_CONFIG_OPTIONS", "") == "1"
+fixture_title = os.environ.get("OPENAIDE_ACP_FIXTURE_TITLE", "")
+log_details = os.environ.get("OPENAIDE_ACP_FIXTURE_LOG_DETAILS", "") == "1"
 pending_prompt_ids = []
+prompt_request_count = 0
 next_session_number = 0
 closed_session_count = 0
 
@@ -462,6 +529,8 @@ for line in sys.stdin:
             respond(message, result)
             if prompt_mode == "title_after_new":
                 notify_title("Agent generated title")
+            elif fixture_title:
+                notify_title(fixture_title)
     elif method == "session/load":
         respond(message, {"configOptions": []})
     elif method == "session/list":
@@ -469,16 +538,16 @@ for line in sys.stdin:
     elif method == "authenticate":
         respond(message, {})
     elif method == "session/prompt":
+        if log_details:
+            log("prompt:" + json.dumps(message.get("params", {}), sort_keys=True))
+        prompt_request_count += 1
         if prompt_mode == "host_terminal_wait_for_cancel":
             pending_prompt_ids.append(message.get("id"))
             request_terminal("prompt-terminal-create-1")
             request_terminal("prompt-terminal-create-2")
-        elif prompt_mode == "coalesced_steering_response":
-            pending_prompt_ids.append(message.get("id"))
-            if len(pending_prompt_ids) == 2:
-                notify_text_chunk("steering applied")
-                respond_id(pending_prompt_ids.pop(0), {"stopReason": "end_turn"})
-        elif prompt_mode == "wait_for_cancel":
+        elif prompt_mode == "wait_for_cancel" or (
+            prompt_mode == "delay_first_cancel_response" and prompt_request_count == 1
+        ):
             pending_prompt_ids.append(message.get("id"))
         elif prompt_mode == "late_text_after_response":
             respond(message, {"stopReason": "end_turn"})
@@ -490,8 +559,27 @@ for line in sys.stdin:
             respond(message, {"stopReason": "end_turn"})
     elif method == "session/set_config_option":
         params = message.get("params", {})
+        if log_details:
+            log("config:" + json.dumps(params, sort_keys=True))
         config_id = params.get("configId", "model")
         value = params.get("value", "gpt-5")
+        if prompt_mode == "config_update_before_config_response":
+            notify("session/update", {
+                "sessionId": session_id,
+                "update": {
+                    "sessionUpdate": "config_option_update",
+                    "configOptions": [{
+                        "id": "model",
+                        "name": "Model",
+                        "type": "select",
+                        "currentValue": "gpt-intermediate",
+                        "options": [
+                            {"value": "gpt-intermediate", "name": "Intermediate"},
+                            {"value": "gpt-final", "name": "Final"},
+                        ],
+                    }],
+                },
+            })
         if with_config_options:
             respond(message, {
                 "configOptions": [{
@@ -524,6 +612,8 @@ for line in sys.stdin:
             }],
         })
     elif method == "session/cancel":
+        if prompt_mode == "delay_first_cancel_response":
+            time.sleep(0.3)
         while pending_prompt_ids:
             respond_id(pending_prompt_ids.pop(0), {"stopReason": "cancelled"})
     elif method == "session/close":
@@ -588,6 +678,7 @@ fn start_prompt_and_close_dispatch_through_active_sessions() {
     runtime
         .prompt(
             AgentPrompt {
+                agent_id: "codex".to_string(),
                 task_id: "task-runtime-start".to_string(),
                 session_id: session.session_id.clone(),
                 text: "hello".to_string(),
@@ -598,7 +689,7 @@ fn start_prompt_and_close_dispatch_through_active_sessions() {
         )
         .expect("prompt");
     runtime
-        .close_session(&session.session_id)
+        .close_session(&session.key())
         .expect("close session");
 
     assert_eq!(
@@ -651,7 +742,7 @@ fn listing_then_starting_reuses_one_agent_process() {
         .start_session(start_request("task-after-list", cwd_string()))
         .expect("start session");
     runtime
-        .close_session(&session.session_id)
+        .close_session(&session.key())
         .expect("close session");
 
     assert_eq!(
@@ -678,7 +769,7 @@ fn listing_sessions_reuses_the_active_agent_process() {
         })
         .expect("list sessions");
     runtime
-        .close_session(&session.session_id)
+        .close_session(&session.key())
         .expect("close session");
 
     assert_eq!(
@@ -703,7 +794,7 @@ fn probing_reuses_the_active_agent_process() {
         })
         .expect("probe agent");
     runtime
-        .close_session(&session.session_id)
+        .close_session(&session.key())
         .expect("close session");
 
     assert_eq!(
@@ -729,7 +820,7 @@ fn authentication_reuses_the_active_agent_process() {
         })
         .expect("authenticate agent");
     runtime
-        .close_session(&session.session_id)
+        .close_session(&session.key())
         .expect("close session");
 
     assert_eq!(
@@ -773,6 +864,7 @@ fn prompt_delivers_text_update_sent_after_prompt_response() {
     runtime
         .prompt(
             AgentPrompt {
+                agent_id: "codex".to_string(),
                 task_id: "task-late-text".to_string(),
                 session_id: session.session_id.clone(),
                 text: "hello".to_string(),
@@ -783,7 +875,7 @@ fn prompt_delivers_text_update_sent_after_prompt_response() {
         )
         .expect("prompt");
     runtime
-        .close_session(&session.session_id)
+        .close_session(&session.key())
         .expect("close session");
 
     let events = capture.events();
@@ -815,7 +907,7 @@ fn start_session_passes_resolved_secret_env_to_acp_process() {
     let session = runtime.start_session(request).expect("start session");
     assert_eq!(session.session_id, "secret-session");
     wait_for_method(&log_path, "secret:resolved-secret");
-    runtime.close_session(&session.session_id).unwrap();
+    runtime.close_session(&session.key()).unwrap();
 }
 
 #[test]
@@ -841,19 +933,340 @@ fn resume_and_attach_session_event_sink_use_active_session_registry() {
     assert_eq!(resumed.session_id, session.session_id);
 
     runtime
-        .attach_session_event_sink(
-            &session.session_id,
-            Arc::new(CapturingSessionSink::default()),
-        )
+        .attach_session_event_sink(&session.key(), Arc::new(CapturingSessionSink::default()))
         .expect("attach session sink");
     runtime
-        .close_session(&session.session_id)
+        .close_session(&session.key())
         .expect("close session");
 
     assert_eq!(
         read_fixture_methods(&log_path),
         ["initialize", "session/new", "session/close"]
     );
+}
+
+#[test]
+fn config_response_waits_for_prior_session_updates_to_reach_the_bound_task() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((runtime, _log_path)) = fixture_runtime_with_prompt_mode(
+        &temp,
+        "ordered-config-session",
+        "config_update_before_config_response",
+    ) else {
+        return;
+    };
+    let runtime = Arc::new(runtime);
+    let session = runtime
+        .start_session(start_request("task-ordered-config", cwd_string()))
+        .expect("start session");
+    let (update_started_tx, update_started_rx) = mpsc::channel();
+    let release_update = Arc::new(Barrier::new(2));
+    runtime
+        .attach_session_event_sink(
+            &session.key(),
+            Arc::new(BlockingConfigSessionSink {
+                update_started_tx,
+                release_update: release_update.clone(),
+            }),
+        )
+        .expect("attach session sink");
+
+    let (result_tx, result_rx) = mpsc::channel();
+    let runtime_for_change = runtime.clone();
+    let session_id = session.session_id.clone();
+    let change = std::thread::spawn(move || {
+        let result =
+            runtime_for_change.set_session_config_option(AgentSessionSetConfigOptionRequest {
+                agent_id: "codex".to_string(),
+                session_id,
+                config_id: "model".to_string(),
+                value: "gpt-final".to_string(),
+            });
+        result_tx.send(result).expect("report config result");
+    });
+
+    let prior_catalog = update_started_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("prior config update should reach the bound session sink");
+    let early_result = match result_rx.try_recv() {
+        Ok(result) => Some(result),
+        Err(mpsc::TryRecvError::Empty) => None,
+        Err(mpsc::TryRecvError::Disconnected) => panic!("config result channel disconnected"),
+    };
+    let response_overtook_update = early_result.is_some();
+    release_update.wait();
+    let result = early_result.unwrap_or_else(|| {
+        result_rx
+            .recv_timeout(Duration::from_secs(2))
+            .expect("config response should follow the prior update")
+    });
+    change.join().expect("config change thread");
+    runtime
+        .close_session(&session.key())
+        .expect("close session");
+
+    assert_eq!(
+        prior_catalog
+            .current_values()
+            .get("model")
+            .map(String::as_str),
+        Some("gpt-intermediate")
+    );
+    assert!(
+        !response_overtook_update,
+        "the Agent response must not overtake a preceding session update"
+    );
+    assert_eq!(
+        result
+            .expect("set config option")
+            .current_values()
+            .get("model")
+            .map(String::as_str),
+        Some("gpt-final")
+    );
+}
+
+struct BlockingConfigSessionSink {
+    update_started_tx: mpsc::Sender<ConfigOptionsCatalog>,
+    release_update: Arc<Barrier>,
+}
+
+impl AgentSessionEventSink for BlockingConfigSessionSink {
+    fn config_options_changed(&self, catalog: ConfigOptionsCatalog) -> Result<(), RuntimeError> {
+        self.update_started_tx
+            .send(catalog)
+            .map_err(|error| RuntimeError::Internal(error.to_string()))?;
+        self.release_update.wait();
+        Ok(())
+    }
+
+    fn commands_changed(&self, _catalog: AgentCommandsCatalog) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+}
+
+#[test]
+fn different_agents_may_own_the_same_native_session_id() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((runtime, agent_a_log, agent_b_log)) =
+        colliding_session_runtime(&temp, "shared-native-session")
+    else {
+        return;
+    };
+    let runtime = Arc::new(runtime);
+    let mut agent_a_request = start_request("task-agent-a", cwd_string());
+    agent_a_request.agent_id = "agent-a".to_string();
+    let agent_a = runtime
+        .start_session(agent_a_request)
+        .expect("start Agent A session");
+    let mut agent_b_request = start_request("task-agent-b", cwd_string());
+    agent_b_request.agent_id = "agent-b".to_string();
+
+    let agent_b = match runtime.start_session(agent_b_request) {
+        Ok(session) => session,
+        Err(error) => {
+            let _ = runtime.shutdown();
+            panic!("Agent B must not collide with Agent A's native session id: {error}");
+        }
+    };
+
+    assert_eq!(agent_a.session_id, "shared-native-session");
+    assert_eq!(agent_b.session_id, "shared-native-session");
+    assert_eq!(agent_a.agent_id, "agent-a");
+    assert_eq!(agent_b.agent_id, "agent-b");
+
+    for (agent_id, task_id) in [("agent-a", "task-agent-a"), ("agent-b", "task-agent-b")] {
+        let resumed = runtime
+            .resume_session(AgentSessionResume {
+                agent_id: agent_id.to_string(),
+                task_id: task_id.to_string(),
+                session_id: "shared-native-session".to_string(),
+                cwd: cwd_string(),
+                model_id: None,
+                cancellation: TurnCancellation::new(),
+            })
+            .expect("resume the matching Agent session");
+        assert_eq!(resumed.agent_id, agent_id);
+    }
+
+    let agent_a_sink = Arc::new(CapturingSessionSink::default());
+    let agent_b_sink = Arc::new(CapturingSessionSink::default());
+    runtime
+        .attach_session_event_sink(&agent_a.key(), agent_a_sink.clone())
+        .expect("attach Agent A session sink");
+    runtime
+        .attach_session_event_sink(&agent_b.key(), agent_b_sink.clone())
+        .expect("attach Agent B session sink");
+    let metadata_deadline = Instant::now() + Duration::from_secs(2);
+    while (agent_a_sink.metadata_updates().is_empty() || agent_b_sink.metadata_updates().is_empty())
+        && Instant::now() < metadata_deadline
+    {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(
+        agent_a_sink.metadata_updates()[0].title,
+        AgentMetadataField::Value("agent-a title".to_string())
+    );
+    assert_eq!(
+        agent_b_sink.metadata_updates()[0].title,
+        AgentMetadataField::Value("agent-b title".to_string())
+    );
+
+    let agent_a_attachment_path = temp.path().join("agent-a.txt");
+    let agent_b_attachment_path = temp.path().join("agent-b.txt");
+    fs::write(&agent_a_attachment_path, "Agent A context").expect("Agent A attachment");
+    fs::write(&agent_b_attachment_path, "Agent B context").expect("Agent B attachment");
+    let (agent_a_prompt_tx, agent_a_prompt_rx) = mpsc::channel();
+    let agent_a_prompt = std::thread::spawn({
+        let runtime = runtime.clone();
+        let session_id = agent_a.session_id.clone();
+        move || {
+            let result = runtime.prompt(
+                AgentPrompt {
+                    agent_id: "agent-a".to_string(),
+                    task_id: "task-agent-a".to_string(),
+                    session_id,
+                    text: "continue Agent A".to_string(),
+                    attachments: vec![Attachment {
+                        kind: "file".to_string(),
+                        label: "agent-a.txt".to_string(),
+                        path: Some(agent_a_attachment_path.to_string_lossy().to_string()),
+                        payload: None,
+                    }],
+                    cancellation: TurnCancellation::new(),
+                },
+                Arc::new(CapturingEventSink::default()),
+            );
+            let _ = agent_a_prompt_tx.send(result);
+        }
+    });
+    let (agent_b_prompt_tx, agent_b_prompt_rx) = mpsc::channel();
+    let agent_b_prompt = std::thread::spawn({
+        let runtime = runtime.clone();
+        let session_id = agent_b.session_id.clone();
+        move || {
+            let result = runtime.prompt(
+                AgentPrompt {
+                    agent_id: "agent-b".to_string(),
+                    task_id: "task-agent-b".to_string(),
+                    session_id,
+                    text: "continue Agent B".to_string(),
+                    attachments: vec![Attachment {
+                        kind: "file".to_string(),
+                        label: "agent-b.txt".to_string(),
+                        path: Some(agent_b_attachment_path.to_string_lossy().to_string()),
+                        payload: None,
+                    }],
+                    cancellation: TurnCancellation::new(),
+                },
+                Arc::new(CapturingEventSink::default()),
+            );
+            let _ = agent_b_prompt_tx.send(result);
+        }
+    });
+    wait_for_method(&agent_a_log, "session/prompt");
+    wait_for_method(&agent_b_log, "session/prompt");
+
+    let agent_a_catalog = runtime
+        .set_session_config_option(AgentSessionSetConfigOptionRequest {
+            agent_id: "agent-a".to_string(),
+            session_id: agent_a.session_id.clone(),
+            config_id: "model".to_string(),
+            value: "gpt-5.5".to_string(),
+        })
+        .expect("set Agent A config");
+    let agent_b_catalog = runtime
+        .set_session_config_option(AgentSessionSetConfigOptionRequest {
+            agent_id: "agent-b".to_string(),
+            session_id: agent_b.session_id.clone(),
+            config_id: "model".to_string(),
+            value: "gpt-5.6-sol".to_string(),
+        })
+        .expect("set Agent B config");
+    assert_eq!(
+        agent_a_catalog
+            .current_values()
+            .get("model")
+            .map(String::as_str),
+        Some("gpt-5.5")
+    );
+    assert_eq!(
+        agent_b_catalog
+            .current_values()
+            .get("model")
+            .map(String::as_str),
+        Some("gpt-5.6-sol")
+    );
+
+    runtime
+        .cancel_session(&agent_a.key())
+        .expect("cancel Agent A prompt");
+    agent_a_prompt_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("Agent A prompt returned")
+        .expect("Agent A prompt cancelled cleanly");
+    assert!(matches!(
+        agent_b_prompt_rx.recv_timeout(Duration::from_millis(100)),
+        Err(mpsc::RecvTimeoutError::Timeout)
+    ));
+    runtime
+        .cancel_session(&agent_b.key())
+        .expect("cancel Agent B prompt");
+    agent_b_prompt_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("Agent B prompt returned")
+        .expect("Agent B prompt cancelled cleanly");
+    agent_a_prompt.join().expect("Agent A prompt thread");
+    agent_b_prompt.join().expect("Agent B prompt thread");
+
+    runtime
+        .close_session(&agent_a.key())
+        .expect("close Agent A session");
+    let agent_a_resume = runtime.resume_session(AgentSessionResume {
+        agent_id: "agent-a".to_string(),
+        task_id: "task-agent-a".to_string(),
+        session_id: agent_a.session_id.clone(),
+        cwd: cwd_string(),
+        model_id: None,
+        cancellation: TurnCancellation::new(),
+    });
+    assert!(agent_a_resume.is_err());
+    runtime
+        .resume_session(AgentSessionResume {
+            agent_id: "agent-b".to_string(),
+            task_id: "task-agent-b".to_string(),
+            session_id: agent_b.session_id.clone(),
+            cwd: cwd_string(),
+            model_id: None,
+            cancellation: TurnCancellation::new(),
+        })
+        .expect("Agent B remains active after Agent A closes");
+    runtime
+        .close_session(&agent_b.key())
+        .expect("close Agent B session");
+
+    let agent_a_methods = read_fixture_methods(&agent_a_log);
+    let agent_b_methods = read_fixture_methods(&agent_b_log);
+    for (methods, own_attachment, other_attachment, own_model) in [
+        (&agent_a_methods, "agent-a.txt", "agent-b.txt", "gpt-5.5"),
+        (
+            &agent_b_methods,
+            "agent-b.txt",
+            "agent-a.txt",
+            "gpt-5.6-sol",
+        ),
+    ] {
+        assert!(methods.iter().any(|line| line == "session/prompt"));
+        assert!(methods
+            .iter()
+            .any(|line| line.starts_with("prompt:") && line.contains(own_attachment)));
+        assert!(!methods.iter().any(|line| line.contains(other_attachment)));
+        assert!(methods
+            .iter()
+            .any(|line| { line.starts_with("config:") && line.contains(own_model) }));
+        assert!(methods.iter().any(|line| line == "session/cancel"));
+        assert!(methods.iter().any(|line| line == "session/close"));
+    }
 }
 
 #[test]
@@ -870,7 +1283,7 @@ fn session_title_update_before_sink_attachment_is_delivered() {
     let sink = Arc::new(CapturingSessionSink::default());
 
     runtime
-        .attach_session_event_sink(&session.session_id, sink.clone())
+        .attach_session_event_sink(&session.key(), sink.clone())
         .expect("attach session sink");
 
     let started = Instant::now();
@@ -884,7 +1297,7 @@ fn session_title_update_before_sink_attachment_is_delivered() {
             updated_at: AgentMetadataField::Unchanged,
         }]
     );
-    runtime.close_session(&session.session_id).unwrap();
+    runtime.close_session(&session.key()).unwrap();
 }
 
 #[test]
@@ -900,12 +1313,13 @@ fn session_title_update_during_prompt_is_delivered_to_session_sink() {
         .expect("start session");
     let sink = Arc::new(CapturingSessionSink::default());
     runtime
-        .attach_session_event_sink(&session.session_id, sink.clone())
+        .attach_session_event_sink(&session.key(), sink.clone())
         .expect("attach session sink");
 
     runtime
         .prompt(
             AgentPrompt {
+                agent_id: "codex".to_string(),
                 task_id: "task-active-metadata".to_string(),
                 session_id: session.session_id.clone(),
                 text: "do work".to_string(),
@@ -923,12 +1337,13 @@ fn session_title_update_during_prompt_is_delivered_to_session_sink() {
             updated_at: AgentMetadataField::Unchanged,
         }]
     );
-    runtime.close_session(&session.session_id).unwrap();
+    runtime.close_session(&session.key()).unwrap();
 }
 
 #[test]
 fn inactive_session_registry_reports_stable_missing_session_errors() {
     let runtime = inactive_runtime();
+    let missing_session = AgentSessionKey::new("codex", "missing-session");
 
     let resume_error = match runtime.resume_session(AgentSessionResume {
         agent_id: "codex".to_string(),
@@ -950,7 +1365,7 @@ fn inactive_session_registry_reports_stable_missing_session_errors() {
     );
 
     let attach_error = runtime
-        .attach_session_event_sink("missing-session", Arc::new(CapturingSessionSink::default()))
+        .attach_session_event_sink(&missing_session, Arc::new(CapturingSessionSink::default()))
         .expect_err("missing attach should fail")
         .to_string();
     assert_eq!(attach_error, "runtime not ready: ACP session is not active");
@@ -958,6 +1373,7 @@ fn inactive_session_registry_reports_stable_missing_session_errors() {
     let prompt_error = runtime
         .prompt(
             AgentPrompt {
+                agent_id: "codex".to_string(),
                 task_id: "task-missing-prompt".to_string(),
                 session_id: "missing-session".to_string(),
                 text: "hello".to_string(),
@@ -972,6 +1388,7 @@ fn inactive_session_registry_reports_stable_missing_session_errors() {
 
     let delete_error = runtime
         .delete_session(AgentSessionDelete {
+            agent_id: "codex".to_string(),
             session_id: "missing-session".to_string(),
         })
         .expect_err("missing delete should fail")
@@ -982,12 +1399,13 @@ fn inactive_session_registry_reports_stable_missing_session_errors() {
 #[test]
 fn inactive_session_cancel_and_close_are_idempotent() {
     let runtime = inactive_runtime();
+    let missing_session = AgentSessionKey::new("codex", "missing-session");
 
     runtime
-        .cancel_session("missing-session")
+        .cancel_session(&missing_session)
         .expect("missing cancel remains idempotent");
     runtime
-        .close_session("missing-session")
+        .close_session(&missing_session)
         .expect("missing close remains idempotent");
 }
 
@@ -1029,6 +1447,7 @@ fn cancel_session_dispatches_to_active_prompt() {
         move || {
             runtime_for_prompt.prompt(
                 AgentPrompt {
+                    agent_id: "codex".to_string(),
                     task_id: "task-cancel".to_string(),
                     session_id: prompt_session_id,
                     text: "cancel me".to_string(),
@@ -1042,12 +1461,12 @@ fn cancel_session_dispatches_to_active_prompt() {
 
     wait_for_method(&log_path, "session/prompt");
     runtime
-        .cancel_session(&session.session_id)
+        .cancel_session(&session.key())
         .expect("cancel session");
     let prompt_result = prompt_handle.join().expect("prompt thread");
     prompt_result.expect("prompt should finish after cancel");
     runtime
-        .close_session(&session.session_id)
+        .close_session(&session.key())
         .expect("close session");
 
     assert_eq!(
@@ -1057,6 +1476,88 @@ fn cancel_session_dispatches_to_active_prompt() {
             "session/new",
             "session/prompt",
             "session/cancel",
+            "session/close"
+        ]
+    );
+}
+
+#[test]
+fn cancelled_prompt_settles_before_session_accepts_next_prompt() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((runtime, log_path)) = fixture_runtime_with_prompt_mode(
+        &temp,
+        "cancel-then-send-session",
+        "delay_first_cancel_response",
+    ) else {
+        return;
+    };
+    let runtime = Arc::new(runtime);
+    let session = runtime
+        .start_session(start_request("task-cancel-then-send", cwd_string()))
+        .expect("start session");
+    let first_cancellation = TurnCancellation::new();
+    let prompt_cancellation = first_cancellation.clone();
+    let prompt_session_id = session.session_id.clone();
+    let first_prompt = std::thread::spawn({
+        let runtime = runtime.clone();
+        move || {
+            runtime.prompt(
+                AgentPrompt {
+                    agent_id: "codex".to_string(),
+                    task_id: "task-cancel-then-send".to_string(),
+                    session_id: prompt_session_id,
+                    text: "cancel me".to_string(),
+                    attachments: Vec::new(),
+                    cancellation: prompt_cancellation,
+                },
+                Arc::new(CapturingEventSink::default()),
+            )
+        }
+    });
+
+    wait_for_method(&log_path, "session/prompt");
+    first_cancellation.cancel();
+    runtime
+        .cancel_session(&session.key())
+        .expect("cancel first prompt");
+    let second_session_id = session.session_id.clone();
+    let second_prompt = std::thread::spawn({
+        let runtime = runtime.clone();
+        move || {
+            runtime.prompt(
+                AgentPrompt {
+                    agent_id: "codex".to_string(),
+                    task_id: "task-cancel-then-send".to_string(),
+                    session_id: second_session_id,
+                    text: "continue after cancel".to_string(),
+                    attachments: Vec::new(),
+                    cancellation: TurnCancellation::new(),
+                },
+                Arc::new(CapturingEventSink::default()),
+            )
+        }
+    });
+
+    first_prompt
+        .join()
+        .expect("first prompt thread")
+        .expect("cancelled prompt should settle cleanly");
+    second_prompt
+        .join()
+        .expect("second prompt thread")
+        .expect("next prompt should start after cancellation settles");
+    runtime
+        .close_session(&session.key())
+        .expect("close session");
+
+    assert_eq!(
+        read_fixture_methods(&log_path),
+        [
+            "initialize",
+            "session/new",
+            "session/prompt",
+            "session/cancel",
+            "session/prompt",
             "session/close"
         ]
     );
@@ -1105,6 +1606,7 @@ fn cancel_session_kills_and_releases_owned_host_terminals_before_returning() {
         move || {
             runtime.prompt(
                 AgentPrompt {
+                    agent_id: "codex".to_string(),
                     task_id: "task-terminal-cancel".to_string(),
                     session_id: prompt_session_id,
                     text: "run a terminal".to_string(),
@@ -1123,7 +1625,7 @@ fn cancel_session_kills_and_releases_owned_host_terminals_before_returning() {
     wait_for_method_count(&log_path, "terminal/create.response", 2);
 
     runtime
-        .cancel_session(&session.session_id)
+        .cancel_session(&session.key())
         .expect("cancel session");
 
     let mut killed = HashSet::new();
@@ -1157,7 +1659,7 @@ fn cancel_session_kills_and_releases_owned_host_terminals_before_returning() {
         .expect("prompt thread")
         .expect("prompt cancelled");
     runtime
-        .close_session(&session.session_id)
+        .close_session(&session.key())
         .expect("close session");
 }
 
@@ -1216,9 +1718,9 @@ fn timed_out_session_start_cleans_up_terminals_created_during_partial_start() {
 }
 
 #[test]
-fn steering_prompt_dispatches_while_prior_prompt_is_running() {
+fn second_prompt_is_rejected_while_prior_prompt_is_running() {
     let temp = tempfile::TempDir::new().expect("temp dir");
-    let Some((_runtime, log_path)) = fixture_runtime(&temp, "steer-session") else {
+    let Some((_runtime, log_path)) = fixture_runtime(&temp, "sequential-session") else {
         return;
     };
     let script_path = temp.path().join("fixture_agent.py");
@@ -1233,7 +1735,7 @@ fn steering_prompt_dispatches_while_prior_prompt_is_running() {
             ),
             (
                 "OPENAIDE_ACP_FIXTURE_SESSION".to_string(),
-                "steer-session".to_string(),
+                "sequential-session".to_string(),
             ),
             (
                 "OPENAIDE_ACP_FIXTURE_PROMPT_MODE".to_string(),
@@ -1244,7 +1746,7 @@ fn steering_prompt_dispatches_while_prior_prompt_is_running() {
     }));
 
     let session = runtime
-        .start_session(start_request("task-steer", cwd_string()))
+        .start_session(start_request("task-sequential", cwd_string()))
         .expect("start session");
     let first_session_id = session.session_id.clone();
     let first_prompt = std::thread::spawn({
@@ -1252,7 +1754,8 @@ fn steering_prompt_dispatches_while_prior_prompt_is_running() {
         move || {
             runtime.prompt(
                 AgentPrompt {
-                    task_id: "task-steer".to_string(),
+                    agent_id: "codex".to_string(),
+                    task_id: "task-sequential".to_string(),
                     session_id: first_session_id,
                     text: "start work".to_string(),
                     attachments: Vec::new(),
@@ -1264,141 +1767,62 @@ fn steering_prompt_dispatches_while_prior_prompt_is_running() {
     });
     wait_for_method_count(&log_path, "session/prompt", 1);
 
-    let steer_session_id = session.session_id.clone();
-    let steer_cancellation = TurnCancellation::new();
-    let steer_prompt = std::thread::spawn({
+    let second_session_id = session.session_id.clone();
+    let (second_result_tx, second_result_rx) = mpsc::channel();
+    let second_prompt = std::thread::spawn({
         let runtime = runtime.clone();
-        let cancellation = steer_cancellation.clone();
         move || {
-            runtime.prompt(
+            let result = runtime.prompt(
                 AgentPrompt {
-                    task_id: "task-steer".to_string(),
-                    session_id: steer_session_id,
-                    text: "steer now".to_string(),
+                    agent_id: "codex".to_string(),
+                    task_id: "task-sequential".to_string(),
+                    session_id: second_session_id,
+                    text: "second prompt".to_string(),
                     attachments: Vec::new(),
-                    cancellation,
+                    cancellation: TurnCancellation::new(),
                 },
                 Arc::new(CapturingEventSink::default()),
-            )
+            );
+            let _ = second_result_tx.send(result);
         }
     });
 
     std::thread::sleep(Duration::from_millis(100));
-    assert_eq!(
-        read_fixture_methods(&log_path)
-            .iter()
-            .filter(|method| method.as_str() == "session/prompt")
-            .count(),
-        2,
-        "steering must reach the Agent without waiting for the active ACP request"
-    );
-    steer_cancellation.cancel();
+    let prompt_method_count = read_fixture_methods(&log_path)
+        .iter()
+        .filter(|method| method.as_str() == "session/prompt")
+        .count();
+    let second_result = second_result_rx.recv_timeout(Duration::from_millis(250));
     runtime
-        .cancel_session(&session.session_id)
+        .cancel_session(&session.key())
         .expect("cancel session");
     first_prompt
         .join()
         .expect("first prompt thread")
         .expect("first prompt should finish after cancel");
-    steer_prompt
-        .join()
-        .expect("steer prompt thread")
-        .expect("steer prompt should finish after cancel");
+    second_prompt.join().expect("second prompt thread");
     runtime
-        .close_session(&session.session_id)
+        .close_session(&session.key())
         .expect("close session");
 
+    assert_eq!(
+        prompt_method_count, 1,
+        "a second prompt must not reach an Agent with an active ACP prompt turn"
+    );
+    let error = second_result
+        .expect("second prompt should be rejected before the active prompt finishes")
+        .expect_err("second prompt should be rejected");
+    assert!(error.to_string().contains("active prompt"));
     assert_eq!(
         read_fixture_methods(&log_path),
         [
             "initialize",
             "session/new",
             "session/prompt",
-            "session/prompt",
             "session/cancel",
             "session/close"
         ]
     );
-}
-
-#[test]
-fn coalesced_steering_response_finishes_logical_prompt_without_cancel() {
-    let temp = tempfile::TempDir::new().expect("temp dir");
-    let Some((runtime, log_path)) = fixture_runtime_with_prompt_mode(
-        &temp,
-        "coalesced-steer-session",
-        "coalesced_steering_response",
-    ) else {
-        return;
-    };
-    let runtime = Arc::new(runtime);
-    let session = runtime
-        .start_session(start_request("task-coalesced-steer", cwd_string()))
-        .expect("start session");
-    let (result_tx, result_rx) = mpsc::channel();
-
-    let primary_prompt = std::thread::spawn({
-        let runtime = runtime.clone();
-        let result_tx = result_tx.clone();
-        let session_id = session.session_id.clone();
-        move || {
-            let result = runtime.prompt(
-                AgentPrompt {
-                    task_id: "task-coalesced-steer".to_string(),
-                    session_id,
-                    text: "start work".to_string(),
-                    attachments: Vec::new(),
-                    cancellation: TurnCancellation::new(),
-                },
-                Arc::new(CapturingEventSink::default()),
-            );
-            let _ = result_tx.send(("primary", result));
-        }
-    });
-    wait_for_method_count(&log_path, "session/prompt", 1);
-
-    let steering_prompt = std::thread::spawn({
-        let runtime = runtime.clone();
-        let result_tx = result_tx.clone();
-        let session_id = session.session_id.clone();
-        move || {
-            let result = runtime.prompt(
-                AgentPrompt {
-                    task_id: "task-coalesced-steer".to_string(),
-                    session_id,
-                    text: "steer now".to_string(),
-                    attachments: Vec::new(),
-                    cancellation: TurnCancellation::new(),
-                },
-                Arc::new(CapturingEventSink::default()),
-            );
-            let _ = result_tx.send(("steering", result));
-        }
-    });
-    wait_for_method_count(&log_path, "session/prompt", 2);
-
-    let first = result_rx.recv_timeout(Duration::from_millis(500));
-    let second = result_rx.recv_timeout(Duration::from_millis(500));
-    if first.is_err() || second.is_err() {
-        runtime
-            .cancel_session(&session.session_id)
-            .expect("clean up stuck coalesced prompt");
-    }
-    let mut completed = [
-        first.expect("first logical prompt completion"),
-        second.expect("second logical prompt completion"),
-    ];
-    completed.sort_by_key(|(name, _)| *name);
-    assert!(completed.into_iter().all(|(_, result)| result.is_ok()));
-    assert!(!read_fixture_methods(&log_path)
-        .iter()
-        .any(|method| method == "session/cancel"));
-
-    primary_prompt.join().expect("primary prompt thread");
-    steering_prompt.join().expect("steering prompt thread");
-    runtime
-        .close_session(&session.session_id)
-        .expect("close session");
 }
 
 #[test]
@@ -1438,6 +1862,7 @@ fn set_config_option_dispatches_while_prompt_is_running() {
         move || {
             runtime_for_prompt.prompt(
                 AgentPrompt {
+                    agent_id: "codex".to_string(),
                     task_id: "task-live-config".to_string(),
                     session_id: prompt_session_id,
                     text: "keep running".to_string(),
@@ -1464,14 +1889,14 @@ fn set_config_option_dispatches_while_prompt_is_running() {
     );
 
     runtime
-        .cancel_session(&session.session_id)
+        .cancel_session(&session.key())
         .expect("cancel session");
     prompt_handle
         .join()
         .expect("prompt thread")
         .expect("prompt cancelled cleanly");
     runtime
-        .close_session(&session.session_id)
+        .close_session(&session.key())
         .expect("close session");
 
     assert!(read_fixture_methods(&log_path)
@@ -1517,6 +1942,7 @@ fn close_session_dispatches_while_prompt_is_running() {
         move || {
             runtime_for_prompt.prompt(
                 AgentPrompt {
+                    agent_id: "codex".to_string(),
                     task_id: "task-close-running".to_string(),
                     session_id: prompt_session_id,
                     text: "close me".to_string(),
@@ -1530,7 +1956,7 @@ fn close_session_dispatches_while_prompt_is_running() {
 
     wait_for_method(&log_path, "session/prompt");
     runtime
-        .close_session(&session.session_id)
+        .close_session(&session.key())
         .expect("close running prompt");
     let prompt_error = prompt_handle
         .join()
@@ -1574,6 +2000,7 @@ fn duplicate_active_session_id_keeps_original_session_active() {
     runtime
         .prompt(
             AgentPrompt {
+                agent_id: "codex".to_string(),
                 task_id: "task-duplicate-one".to_string(),
                 session_id: session.session_id.clone(),
                 text: "original remains active".to_string(),
@@ -1584,7 +2011,7 @@ fn duplicate_active_session_id_keeps_original_session_active() {
         )
         .expect("prompt original session after duplicate rejection");
     runtime
-        .close_session(&session.session_id)
+        .close_session(&session.key())
         .expect("close original session");
 
     assert_eq!(
@@ -1627,7 +2054,7 @@ fn shared_process_open_failure_reports_without_start_timeout() {
     );
 
     manager
-        .close_session(&first.session_id)
+        .close_session(&first.key())
         .expect("close first session");
     assert_eq!(
         read_fixture_methods(&log_path),
@@ -1660,10 +2087,10 @@ fn start_sessions_reuses_agent_process_for_same_agent() {
     assert_eq!(first.session_id, "counter-session-1");
     assert_eq!(second.session_id, "counter-session-2");
     runtime
-        .close_session(&first.session_id)
+        .close_session(&first.key())
         .expect("close first session");
     runtime
-        .close_session(&second.session_id)
+        .close_session(&second.key())
         .expect("close second session");
 
     assert_eq!(
@@ -1722,6 +2149,7 @@ fn start_session_while_existing_prompt_is_running_reuses_agent_process() {
         move || {
             runtime.prompt(
                 AgentPrompt {
+                    agent_id: "codex".to_string(),
                     task_id: "task-running-one".to_string(),
                     session_id: first_session_id,
                     text: "keep running".to_string(),
@@ -1744,17 +2172,17 @@ fn start_session_while_existing_prompt_is_running_reuses_agent_process() {
     assert_eq!(second.session_id, "counter-session-2");
 
     runtime
-        .cancel_session(&first.session_id)
+        .cancel_session(&first.key())
         .expect("cancel first prompt");
     prompt_handle
         .join()
         .expect("prompt thread")
         .expect("prompt cancelled cleanly");
     runtime
-        .close_session(&first.session_id)
+        .close_session(&first.key())
         .expect("close first session");
     runtime
-        .close_session(&second.session_id)
+        .close_session(&second.key())
         .expect("close second session");
 
     assert_eq!(
@@ -1797,10 +2225,10 @@ fn start_and_load_sessions_reuse_agent_process_for_same_agent() {
     assert_eq!(started.session_id, "counter-session-1");
     assert_eq!(loaded.session.session_id, "loaded-session");
     runtime
-        .close_session(&started.session_id)
+        .close_session(&started.key())
         .expect("close started session");
     runtime
-        .close_session(&loaded.session.session_id)
+        .close_session(&loaded.session.key())
         .expect("close loaded session");
 
     assert_eq!(
@@ -1827,13 +2255,13 @@ fn closed_agent_process_is_reused_for_later_session() {
         .start_session(start_request("task-reuse-before-close", cwd.clone()))
         .expect("first start");
     runtime
-        .close_session(&first.session_id)
+        .close_session(&first.key())
         .expect("close first session");
     let second = runtime
         .start_session(start_request("task-reuse-after-close", cwd))
         .expect("second start");
     runtime
-        .close_session(&second.session_id)
+        .close_session(&second.key())
         .expect("close second session");
 
     assert_eq!(first.session_id, "counter-session-1");
@@ -1872,7 +2300,7 @@ fn load_session_registers_active_session_for_close() {
     assert_eq!(loaded.session.session_id, "loaded-session");
     assert!(loaded.replayed_messages.is_empty());
     runtime
-        .close_session(&loaded.session.session_id)
+        .close_session(&loaded.session.key())
         .expect("close loaded session");
 
     assert_eq!(
@@ -1893,6 +2321,7 @@ fn delete_session_dispatches_to_active_session() {
         .expect("start session");
     runtime
         .delete_session(AgentSessionDelete {
+            agent_id: session.agent_id,
             session_id: session.session_id,
         })
         .expect("delete session");

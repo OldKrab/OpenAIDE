@@ -1,6 +1,8 @@
 use openaide_app_server_protocol::errors::{ProtocolError, ProtocolErrorCode};
 
-use crate::agent::{AgentSessionResume, AgentSessionStart, ConfigOptionPolicy, TurnCancellation};
+use crate::agent::{
+    AgentSessionKey, AgentSessionResume, AgentSessionStart, ConfigOptionPolicy, TurnCancellation,
+};
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::TaskStatus as LegacyTaskStatus;
 use crate::storage::records::{TaskPreparationRecord, TaskRecord};
@@ -17,6 +19,9 @@ impl TaskProductApi {
             if let Err(error) = api.prepare_task_native_session(&task) {
                 let _ = api.persist_preparation_failure(&task.task_id, &error);
             }
+            // Preparation persistence and send waiting use different locks. Notify only after
+            // the commit attempt so waiters either observe Ready/Failed or remain cancellable.
+            api.history_sync.notify_task_state_changed();
         });
     }
 
@@ -54,18 +59,19 @@ impl TaskProductApi {
         let session_start = TaskSessionStartGuard::new(&self.agent_gateway, session);
         let _ownership = PreparingSessionOwnership::reserve(
             self.preparing_session_ids.clone(),
-            session_start.session_id(),
+            session_start.session().key(),
         )?;
-        self.turn_runner
-            .attach_session_events(task.task_id.clone(), session_start.session_id())?;
-
         let session_id = session_start.session().session_id.clone();
         let config_options = session_start.session().config_options.clone();
         let config_catalog = session_start.session().config_catalog.clone();
         let commands_catalog = session_start.session().commands_catalog.clone();
         let model_id = session_start.session().model_id.clone();
         let now = now_string();
-        let result = self.mutations.commit_existing_task(
+
+        // Bind the Native Session before attaching its metadata sink. A runtime may
+        // synchronously flush buffered catalogs during attachment, and the sink's
+        // stale-session guard must already recognize those updates as authoritative.
+        let binding = self.mutations.commit_existing_task(
             &task.task_id,
             TaskCommitOptions::metadata(),
             |ctx| {
@@ -88,12 +94,37 @@ impl TaskProductApi {
                 if task.agent_commands_catalog.is_none() {
                     task.agent_commands_catalog = commands_catalog.clone();
                 }
-                task.preparation = TaskPreparationRecord::Ready;
                 task.updated_at = now.clone();
                 Ok(TaskMutationResult::Changed)
             },
         )?;
-        if !matches!(result.outcome, TaskCommitOutcome::Committed(_)) {
+        if !matches!(binding.outcome, TaskCommitOutcome::Committed(_)) {
+            return Err(RuntimeError::NotReady(
+                "Task changed before Agent preparation completed".to_string(),
+            ));
+        }
+
+        self.turn_runner
+            .attach_session_events(task.task_id.clone(), &session_start.session().key())?;
+
+        let ready_at = now_string();
+        let completion = self.mutations.commit_existing_task(
+            &task.task_id,
+            TaskCommitOptions::metadata(),
+            |ctx| {
+                if ctx.task().tombstoned
+                    || ctx.task().agent_session_id.as_deref() != Some(session_id.as_str())
+                    || !matches!(ctx.task().preparation, TaskPreparationRecord::Preparing)
+                {
+                    return Ok(TaskMutationResult::Rejected);
+                }
+                let task = ctx.task_mut();
+                task.preparation = TaskPreparationRecord::Ready;
+                task.updated_at = ready_at;
+                Ok(TaskMutationResult::Changed)
+            },
+        )?;
+        if !matches!(completion.outcome, TaskCommitOutcome::Committed(_)) {
             return Err(RuntimeError::NotReady(
                 "Task changed before Agent preparation completed".to_string(),
             ));
@@ -120,6 +151,10 @@ impl TaskProductApi {
                 }
                 let task = ctx.task_mut();
                 task.agent_session_id = None;
+                // Catalogs are live Native Session data. If attachment or finalization
+                // failed, no closed session may remain the source of visible controls.
+                task.config_options_catalog = None;
+                task.agent_commands_catalog = None;
                 task.preparation = TaskPreparationRecord::Failed { message };
                 task.updated_at = now;
                 Ok(TaskMutationResult::Changed)
@@ -141,7 +176,14 @@ impl TaskProductApi {
                     if !is_abandoned_preparation(ctx.task()) {
                         return Ok(TaskMutationResult::Unchanged);
                     }
-                    ctx.task_mut().preparation = TaskPreparationRecord::Failed { message };
+                    let task = ctx.task_mut();
+                    // A crash may happen after session binding but before sink attachment or
+                    // readiness. The process-local Native Session is gone, so keep only the
+                    // user's selected values for retry and discard every live-session claim.
+                    task.agent_session_id = None;
+                    task.config_options_catalog = None;
+                    task.agent_commands_catalog = None;
+                    task.preparation = TaskPreparationRecord::Failed { message };
                     Ok(TaskMutationResult::Changed)
                 },
             )?;
@@ -151,32 +193,29 @@ impl TaskProductApi {
 }
 
 struct PreparingSessionOwnership {
-    session_ids: std::sync::Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
-    session_id: String,
+    sessions: std::sync::Arc<std::sync::Mutex<std::collections::HashSet<AgentSessionKey>>>,
+    session: AgentSessionKey,
 }
 
 impl PreparingSessionOwnership {
     fn reserve(
-        session_ids: std::sync::Arc<std::sync::Mutex<std::collections::HashSet<String>>>,
-        session_id: &str,
+        sessions: std::sync::Arc<std::sync::Mutex<std::collections::HashSet<AgentSessionKey>>>,
+        session: AgentSessionKey,
     ) -> Result<Self, RuntimeError> {
-        session_ids
+        sessions
             .lock()
             .map_err(|_| {
                 RuntimeError::Internal("preparing session ownership lock poisoned".to_string())
             })?
-            .insert(session_id.to_string());
-        Ok(Self {
-            session_ids,
-            session_id: session_id.to_string(),
-        })
+            .insert(session.clone());
+        Ok(Self { sessions, session })
     }
 }
 
 impl Drop for PreparingSessionOwnership {
     fn drop(&mut self) {
-        if let Ok(mut session_ids) = self.session_ids.lock() {
-            session_ids.remove(&self.session_id);
+        if let Ok(mut sessions) = self.sessions.lock() {
+            sessions.remove(&self.session);
         }
     }
 }

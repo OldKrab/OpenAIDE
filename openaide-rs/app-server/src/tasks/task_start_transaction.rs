@@ -27,7 +27,7 @@ impl<'a> TaskSessionStartGuard<'a> {
 
     pub(crate) fn close(&mut self) -> Result<(), RuntimeError> {
         if let Some(session) = self.session.take() {
-            self.agent_gateway.close_session(&session.session_id)?;
+            self.agent_gateway.close_session(&session.key())?;
         }
         Ok(())
     }

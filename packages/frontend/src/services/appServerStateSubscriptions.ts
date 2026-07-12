@@ -12,6 +12,7 @@ import {
   type SubscriptionIngestionState,
   type SubscriptionScope,
   type SubscriptionSnapshot,
+  type TaskNavigationSnapshot,
 } from "@openaide/app-server-client";
 import type { Dispatch } from "react";
 import type { AppAction } from "../state/appReducer";
@@ -36,6 +37,7 @@ const subscriptionLeases = new WeakMap<
 export type StateSubscriptionMappingContext = SubscriptionIngestionContext & {
   agents?: AgentSummary[];
   projects?: ProjectSummary[];
+  taskNavigation?: TaskNavigationSnapshot;
 };
 
 export function mappingContextFromClientSnapshot(snapshot: ClientSnapshot): StateSubscriptionMappingContext {
@@ -139,6 +141,9 @@ export function startAppServerStateSubscription({
 
   function handleStateReset() {
     if (disposed) return;
+    // Events queued before continuity was re-established belong to the old
+    // cursor/process generation and cannot be replayed onto the new baseline.
+    pendingEvents = [];
     if (subscribeInFlight) {
       subscribeAgain = true;
       return;
@@ -302,16 +307,16 @@ function actionsFromSubscriptionSnapshot(
           projectId: project.projectId,
           label: project.label,
         })),
-      }];
+      }, ...remappedTaskNavigationActions(context)];
     case "agents":
       context.agents = snapshot.agents.agents;
       if (agents.setAgents) {
         applyProtocolAgents(snapshot.agents, agents.currentAgentId?.() ?? "", agents.setAgents, agents.dispatch);
       }
-      return [];
+      return remappedTaskNavigationActions(context);
     case "taskNavigation": {
-      const mapped = mapProtocolTaskNavigation(snapshot.navigation, context);
-      return [{ type: "tasks", tasks: mapped.tasks }];
+      context.taskNavigation = snapshot.navigation;
+      return remappedTaskNavigationActions(context);
     }
     case "task": {
       const mapped = mapProtocolTaskSnapshot(snapshot.task, context);
@@ -320,4 +325,10 @@ function actionsFromSubscriptionSnapshot(
     case "settings":
       return [];
   }
+}
+
+function remappedTaskNavigationActions(context: StateSubscriptionMappingContext): AppAction[] {
+  if (!context.taskNavigation) return [];
+  const mapped = mapProtocolTaskNavigation(context.taskNavigation, context);
+  return [{ type: "tasks", archived: false, tasks: mapped.tasks }];
 }

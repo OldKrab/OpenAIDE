@@ -110,6 +110,39 @@ describe("TaskView timeline presentation", () => {
     expect(configControl.props.disabled).toBe(true);
   });
 
+  it("locks Configuration Options until the correlated change settles", async () => {
+    const { TaskView } = await import("./TaskView");
+    const snapshot = snapshotWithAuthoritativeTail(true);
+    snapshot.agent_config = {
+      agent_id: "codex",
+      status: "ready",
+      pending_change: {
+        mutation_id: "mutation-1",
+        option_id: "fast-mode",
+        requested_value: "on",
+      },
+      options: [{
+        current_value: "off",
+        id: "fast-mode",
+        label: "Fast mode",
+        values: [
+          { id: "off", label: "Off" },
+          { id: "on", label: "On" },
+        ],
+      }],
+    };
+    let tree!: ReactTestRenderer;
+
+    act(() => {
+      tree = create(<TaskView {...taskViewProps(snapshot)} backendReady />);
+    });
+
+    const configControl = tree.root.find((node) =>
+      typeof node.props.className === "string"
+      && node.props.className.split(/\s+/).includes("composer-config-control"));
+    expect(configControl.props.disabled).toBe(true);
+  });
+
   it("keeps a draft editable while the Task subscription reconnects", async () => {
     const { TaskView } = await import("./TaskView");
     let tree!: ReactTestRenderer;

@@ -9,7 +9,6 @@ export function newTaskProjectIdForRequests(
   if (selectedProjectId && selectedProjectId === routeProjectId) return selectedProjectId;
   if (!selectedProjectId) return undefined;
   if (state.projects.some((project) => project.projectId === selectedProjectId)) return selectedProjectId;
-  if (state.tasks.some((task) => task.project_id === selectedProjectId)) return selectedProjectId;
   return undefined;
 }
 

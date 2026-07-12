@@ -153,7 +153,7 @@ fn product_transport_returns_error_when_client_response_is_rejected() {
             GatewayOutcome::Respond {
                 connection_id,
                 id: "server-request-1".to_string(),
-                response: GatewayResponse::Error(ErrorEnvelope::new(
+                response: GatewayResponse::Error(Box::new(ErrorEnvelope::new(
                     openaide_app_server_protocol::errors::ProtocolError {
                         code: openaide_app_server_protocol::errors::ProtocolErrorCode::RequestAlreadyResolved,
                         message: "Permission request is no longer answerable.".to_string(),
@@ -161,7 +161,7 @@ fn product_transport_returns_error_when_client_response_is_rejected() {
                         target: None,
                     },
                     ResponseMeta::default(),
-                )),
+                ))),
                 events: Vec::new(),
                 server_requests: Vec::new(),
             }

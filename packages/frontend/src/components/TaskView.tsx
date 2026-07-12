@@ -12,15 +12,12 @@ import type {
 } from "@openaide/app-shell-contracts";
 import type { AppAction } from "../state/appReducer";
 import { renderedChat } from "../state/chatPaging";
-import type { AppState, TaskComposerInput } from "../state/store";
+import type { AppState, TaskChatScrollState, TaskComposerInput } from "../state/store";
 import { ChatRow } from "./ChatMessageView";
 import { Composer } from "./Composer";
 import { TaskHeader } from "./TaskHeader";
 import {
-  chatFollowModeForPosition,
-  initialTaskScrollTop,
   scrollTopAfterPrependedContent,
-  scrollTopForGeneratedContent,
   taskComposerAvailability,
 } from "./TaskViewModel";
 import { taskWorkingStatusLabel, workspaceLabel } from "./taskSurfaceHelpers";
@@ -28,26 +25,21 @@ import type { TaskFileBrowserCallbacks } from "./appControllerCallbackTypes";
 import {
   chatItemsWithAppServerPermissions,
   chatItemsWithAppServerQuestions,
-  chatItemsWithPendingInput,
   permissionResponseForMessage,
   questionResponseForMessage,
-  taskChatHasLiveUpdates,
 } from "./taskChatPresentation";
 import { useTaskChatScroll } from "./useTaskChatScroll";
 import { appServerAttachmentHandles } from "../state/composerOptions";
+import { configOptionsMutable } from "../state/configOptionState";
 import type { BackendConnectionState } from "./appControllerBackendLifecycle";
 
 export {
-  chatFollowModeForPosition,
-  initialTaskScrollTop,
   scrollTopAfterPrependedContent,
-  scrollTopForGeneratedContent,
   taskComposerAvailability,
 } from "./TaskViewModel";
 export {
   chatItemsWithAppServerPermissions,
   chatItemsWithAppServerQuestions,
-  chatItemsWithPendingInput,
   permissionResponseForMessage,
   questionResponseForMessage,
 } from "./taskChatPresentation";
@@ -104,7 +96,7 @@ export function TaskView({
   questionResponses = {},
   startupConfigOptions,
   snapshot,
-  savedScrollTop,
+  savedScrollState,
   taskInput,
   toolDetails,
   submitShortcut,
@@ -120,7 +112,7 @@ export function TaskView({
   dispatch: Dispatch<AppAction>;
   onCancel: () => void;
   fileBrowser?: TaskFileBrowserCallbacks;
-  onLoadChatPage: (beforeCursor: string) => void;
+  onLoadChatPage: (beforeCursor: string) => number | undefined;
   onLoadToolDetail: (artifactId: string, refresh?: boolean) => void;
   onPermissionRespond: (
     requestId: string,
@@ -140,17 +132,18 @@ export function TaskView({
   questionResponses?: AppState["questionResponses"];
   startupConfigOptions?: ConfigOptionsCatalog;
   snapshot: TaskSnapshot;
-  savedScrollTop?: number;
+  savedScrollState?: TaskChatScrollState;
   taskInput: TaskComposerInput;
   toolDetails: AppState["toolDetails"];
   submitShortcut: AppPreferencesRecord["composer_submit_shortcut"];
   showWorkspaceContext?: boolean;
 }) {
-  const inputPending = taskInput.pending !== undefined;
+  const inputPending = taskInput.pending?.state === "sending";
+  const inputUncertain = taskInput.pending?.state === "uncertain";
   const chat = renderedChat(snapshot, chatPageState);
   const chatItems = chatItemsWithAppServerQuestions(
     chatItemsWithAppServerPermissions(
-      chatItemsWithPendingInput(chat.items, taskInput, snapshot.task.task_id),
+      chat.items,
       appServerPermissionRequests,
       snapshot.task.task_id,
     ),
@@ -165,10 +158,13 @@ export function TaskView({
     backendReady,
     connectionStatus: backendConnectionState?.status,
     inputPending,
+    inputUncertain,
     preparationBlocked,
+    sendCapabilityState: snapshot.send_capability.state,
     taskStatus: snapshot.task.status,
   });
   const composerDisabled = composerAvailability.editingDisabled;
+  const taskConfigOptions = startupConfigOptions ?? snapshot.agent_config;
   const attachmentsSendable = taskInput.context.length === 0
     || appServerAttachmentHandles(taskInput.context) !== undefined;
   const canSend = !composerAvailability.sendDisabled && attachmentsSendable;
@@ -205,37 +201,16 @@ export function TaskView({
     workspaceRoot: snapshot.task.workspace_root,
     workspaceLabel: workspaceLabel(snapshot.task.workspace_root),
   };
-  const recordTaskScroll = useCallback((scrollTop: number) => {
-    dispatch({ type: "taskScroll:record", taskId: snapshot.task.task_id, scrollTop });
+  const recordTaskScroll = useCallback((scrollState: TaskChatScrollState) => {
+    dispatch({ type: "taskScroll:record", taskId: snapshot.task.task_id, scrollState });
   }, [dispatch, snapshot.task.task_id]);
-  const diagnosticItemKindCounts = chatItems.reduce<Record<string, number>>((counts, item) => {
-    counts[item.message.kind] = (counts[item.message.kind] ?? 0) + 1;
-    return counts;
-  }, {});
   const chatScroll = useTaskChatScroll({
-    diagnosticContext: {
-      chatVersion: snapshot.chat.version,
-      historySyncState: snapshot.history_sync.state,
-      itemCount: chatItems.length,
-      itemKindCounts: diagnosticItemKindCounts,
-      olderItemCount: chatPageState?.olderItems.length ?? 0,
-      pendingPermissions: chatItems
-        .filter((item) => item.message.kind === "permission" && item.message.state === "pending")
-        .map((item) => item.message.kind === "permission"
-          ? item.message.app_server_request_id ?? item.message.request_id
-          : item.message_id),
-      snapshotRevision: snapshot.revision,
-      taskStatus: snapshot.task.status,
-    },
-    generating: taskChatHasLiveUpdates({
-      inputPending,
-      taskStatus: snapshot.task.status,
-    }),
     historySyncState: snapshot.history_sync.state,
     itemCount: chat.items.length,
-    onScrollTop: recordTaskScroll,
+    onScrollState: recordTaskScroll,
     pendingPrepend: chat.pending,
-    savedScrollTop,
+    prependRequestGeneration: chatPageState?.requestGeneration ?? 0,
+    savedScrollState,
     taskId: snapshot.task.task_id,
   });
 
@@ -283,8 +258,10 @@ export function TaskView({
                 disabled={chat.pending || !chat.beforeCursor}
                 onClick={() => {
                   if (!chat.beforeCursor || chat.pending) return;
-                  chatScroll.capturePrependAnchor();
-                  onLoadChatPage(chat.beforeCursor);
+                  const requestGeneration = onLoadChatPage(chat.beforeCursor);
+                  if (requestGeneration !== undefined) {
+                    chatScroll.capturePrependAnchor(requestGeneration);
+                  }
                 }}
                 type="button"
               >
@@ -344,15 +321,15 @@ export function TaskView({
           agentLocked
           attachments={taskInput.context}
           autoFocus
-          configLocked={!backendReady}
-          configOptions={startupConfigOptions ?? snapshot.agent_config}
+          configLocked={!backendReady || !configOptionsMutable(taskConfigOptions)}
+          configOptions={taskConfigOptions}
           commandCatalog={snapshot.agent_commands}
           disabled={composerDisabled}
-          error={taskInput.error}
+          error={taskInput.error ?? taskConfigOptions?.error}
           fileBrowser={fileBrowser}
           focusRequestKey={snapshot.task.task_id}
           onCancel={
-            turnBusy || inputPending
+            backendReady && (turnBusy || inputPending)
               ? onCancel
               : undefined
           }
@@ -373,10 +350,11 @@ export function TaskView({
           selection={taskSelection}
           submitShortcut={submitShortcut}
           submitDisabled={!canSend}
+          submitActionLabel={inputUncertain ? "Retry sending exact message" : undefined}
           submitPending={inputPending}
           submitPendingLabel="Sending message"
           submitRequiresText={!snapshot.send_capability.attachment_only}
-          submissionSettlementKey={snapshot.revision}
+          submissionSettlementKey={taskInput.acceptedUserMessageId}
           showAgentSelector={false}
           showIsolationSelector={false}
         />

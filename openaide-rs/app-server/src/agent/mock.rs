@@ -64,10 +64,10 @@ impl AgentRuntime for MockAgent {
         if request.cancellation.is_cancelled() {
             return Err(RuntimeError::InvalidParams("session cancelled".to_string()));
         }
-        Ok(AgentSession::new(format!(
-            "session_{}",
-            uuid::Uuid::new_v4()
-        )))
+        Ok(AgentSession::new(
+            request.agent_id,
+            format!("session_{}", uuid::Uuid::new_v4()),
+        ))
     }
 
     fn load_session(&self, request: AgentSessionLoad) -> Result<AgentLoadedSession, RuntimeError> {
@@ -75,7 +75,7 @@ impl AgentRuntime for MockAgent {
             return Err(RuntimeError::InvalidParams("session cancelled".to_string()));
         }
         Ok(AgentLoadedSession {
-            session: AgentSession::new(request.session_id),
+            session: AgentSession::new(request.agent_id, request.session_id),
             replayed_messages: vec![NormalizedMessage::AgentText {
                 id: "mock-loaded-agent-message".to_string(),
                 text: "Mock loaded session.".to_string(),

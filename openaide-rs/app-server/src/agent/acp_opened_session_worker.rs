@@ -143,46 +143,24 @@ pub(super) async fn run_opened_acp_session(
                 handle_session_config_command(
                     &mut active_session,
                     &mut config_catalog,
+                    session_event_sink.as_ref(),
+                    &mut pending_session_catalogs,
                     config,
                 )
-                .await;
+                .await
+                .map_err(|error| agent_client_protocol::util::internal_error(error.to_string()))?;
             }
             update = active_session.read_update() => {
-                match update {
-                    Ok(SessionMessage::SessionMessage(dispatch)) => {
-                        let catalogs = session_catalogs_from_dispatch(&request_agent_id, dispatch)
-                            .await
-                            .map_err(|error| agent_client_protocol::util::internal_error(error.to_string()))?;
-                        if let Some(catalog) = catalogs.config {
-                            config_catalog = catalog.clone();
-                            deliver_session_config_catalog(
-                                catalog,
-                                session_event_sink.as_ref(),
-                                &mut pending_session_catalogs,
-                            )
-                            .map_err(|error| agent_client_protocol::util::internal_error(error.to_string()))?;
-                        }
-                        if let Some(catalog) = catalogs.commands {
-                            deliver_session_commands_catalog(
-                                catalog,
-                                session_event_sink.as_ref(),
-                                &mut pending_session_catalogs,
-                            )
-                            .map_err(|error| agent_client_protocol::util::internal_error(error.to_string()))?;
-                        }
-                        if let Some(update) = catalogs.metadata {
-                            deliver_session_metadata_update(
-                                update,
-                                session_event_sink.as_ref(),
-                                &mut pending_session_catalogs,
-                            )
-                            .map_err(|error| agent_client_protocol::util::internal_error(error.to_string()))?;
-                        }
-                    }
-                    Ok(SessionMessage::StopReason(_)) => {}
-                    Ok(_) => {}
-                    Err(error) => return Err(error),
-                }
+                let update = update?;
+                apply_opened_session_message(
+                    &request_agent_id,
+                    update,
+                    &mut config_catalog,
+                    session_event_sink.as_ref(),
+                    &mut pending_session_catalogs,
+                )
+                .await
+                .map_err(|error| agent_client_protocol::util::internal_error(error.to_string()))?;
             }
         }
     }
@@ -224,11 +202,37 @@ fn active_session_config_catalog(session: &AgentSession) -> ConfigOptionsCatalog
         })
 }
 
+async fn apply_opened_session_message(
+    agent_id: &str,
+    update: SessionMessage,
+    config_catalog: &mut ConfigOptionsCatalog,
+    session_event_sink: Option<&Arc<dyn AgentSessionEventSink>>,
+    pending_session_catalogs: &mut PendingSessionCatalogs,
+) -> Result<(), RuntimeError> {
+    let SessionMessage::SessionMessage(dispatch) = update else {
+        return Ok(());
+    };
+    let catalogs = session_catalogs_from_dispatch(agent_id, dispatch).await?;
+    if let Some(catalog) = catalogs.config {
+        *config_catalog = catalog.clone();
+        deliver_session_config_catalog(catalog, session_event_sink, pending_session_catalogs)?;
+    }
+    if let Some(catalog) = catalogs.commands {
+        deliver_session_commands_catalog(catalog, session_event_sink, pending_session_catalogs)?;
+    }
+    if let Some(update) = catalogs.metadata {
+        deliver_session_metadata_update(update, session_event_sink, pending_session_catalogs)?;
+    }
+    Ok(())
+}
+
 async fn handle_session_config_command(
     active_session: &mut agent_client_protocol::ActiveSession<'static, Agent>,
     catalog: &mut ConfigOptionsCatalog,
+    session_event_sink: Option<&Arc<dyn AgentSessionEventSink>>,
+    pending_session_catalogs: &mut PendingSessionCatalogs,
     command: AcpSessionConfigCommand,
-) {
+) -> Result<(), RuntimeError> {
     match command {
         AcpSessionConfigCommand::SetConfigOption {
             agent_id,
@@ -237,19 +241,41 @@ async fn handle_session_config_command(
             reply_tx,
         } => {
             let connection = active_session.connection();
-            let result = set_task_config_option_after_prior_updates(
+            let mut response = match set_task_config_option_after_prior_updates(
                 &connection,
                 active_session,
                 config_id,
                 value,
-                catalog,
                 &agent_id,
             )
-            .await;
+            .await
+            {
+                Ok(response) => response,
+                Err(error) => {
+                    let _ = reply_tx.send(Err(RuntimeError::Internal(error.to_string())));
+                    return Err(error);
+                }
+            };
+            for update in response.take_prior_updates() {
+                if let Err(error) = apply_opened_session_message(
+                    &agent_id,
+                    update,
+                    catalog,
+                    session_event_sink,
+                    pending_session_catalogs,
+                )
+                .await
+                {
+                    let _ = reply_tx.send(Err(RuntimeError::Internal(error.to_string())));
+                    return Err(error);
+                }
+            }
+            let result = response.finish();
             if let Ok(next_catalog) = &result {
                 *catalog = next_catalog.clone();
             }
             let _ = reply_tx.send(result);
         }
     }
+    Ok(())
 }

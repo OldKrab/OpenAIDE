@@ -15,6 +15,9 @@ impl<'a> NativeSessionLifecycle<'a> {
         let Some(session_id) = task.agent_session_id.clone() else {
             return Ok(());
         };
-        self.agent.delete_session(AgentSessionDelete { session_id })
+        self.agent.delete_session(AgentSessionDelete {
+            agent_id: task.agent_id.clone(),
+            session_id,
+        })
     }
 }

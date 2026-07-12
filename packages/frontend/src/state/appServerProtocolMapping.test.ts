@@ -241,11 +241,27 @@ describe("App Server Protocol state mapping", () => {
     });
   });
 
-  it("does not expose Agent controls without live Native Session data", () => {
+  it("preserves unavailable and pending Configuration Option state", () => {
     expect(mapProtocolConfigOptions({ state: "unavailable" }, "codex")).toEqual({
       agent_id: "codex",
-      status: "empty",
+      status: "unavailable",
       options: [],
+    });
+    expect(mapProtocolConfigOptions({
+      ...protocolSnapshot().agentConfig,
+      state: "stale",
+      pendingChange: {
+        clientMutationId: "mutation-1" as never,
+        configId: "model" as never,
+        requestedValue: "gpt-5.1",
+      },
+    }, "codex")).toMatchObject({
+      status: "stale",
+      pending_change: {
+        mutation_id: "mutation-1",
+        option_id: "model",
+        requested_value: "gpt-5.1",
+      },
     });
     expect(mapProtocolAgentCommands({ state: "unavailable" }, "codex")).toBeUndefined();
   });
@@ -266,7 +282,11 @@ describe("App Server Protocol state mapping", () => {
 
     expect(mapping.snapshot.chat.items).toEqual([]);
     expect(mapping.snapshot.task.status).toBe("active");
-    expect(mapping.snapshot.send_capability.state).toBe("loading");
+    expect(mapping.snapshot.send_capability).toEqual({
+      state: "loading",
+      attachment_only: false,
+      blockers: [{ kind: "taskPreparing", message: "Task Agent preparation is still running" }],
+    });
   });
 
   it("keeps lossy App Server-only state visible and reported", () => {
@@ -548,6 +568,9 @@ describe("App Server Protocol state mapping", () => {
     }));
 
     expect(mapping.snapshot.task.status).toBe("active");
+    expect(mapping.snapshot.send_capability.blockers).toEqual([
+      { kind: "taskRunning", message: "Task is already running" },
+    ]);
     expect(mapping.snapshot.chat.items.map((item) => item.message)).not.toEqual(
       expect.arrayContaining([
         expect.objectContaining({

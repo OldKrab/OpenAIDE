@@ -67,9 +67,9 @@ impl TaskTurnLifecycle {
                 false,
             ),
         };
-        if let Err(error) = self.attach_session_events(task_id.clone(), &session.session_id) {
+        if let Err(error) = self.attach_session_events(task_id.clone(), &session.key()) {
             if close_on_failure {
-                let _ = self.agent_gateway.close_session(&session.session_id);
+                let _ = self.agent_gateway.close_session(&session.key());
             }
             return Err(error);
         }
@@ -101,7 +101,7 @@ impl TaskTurnLifecycle {
                     .ok_or_else(|| RuntimeError::Internal("missing prompt snapshot".to_string()))?,
                 TaskCommitOutcome::Rejected(_) => {
                     if close_on_failure {
-                        let _ = self.agent_gateway.close_session(&session.session_id);
+                        let _ = self.agent_gateway.close_session(&session.key());
                     }
                     return Err(RuntimeError::InvalidParams(
                         "task already has an active turn".to_string(),
@@ -110,7 +110,7 @@ impl TaskTurnLifecycle {
             },
             Err(error) => {
                 if close_on_failure {
-                    let _ = self.agent_gateway.close_session(&session.session_id);
+                    let _ = self.agent_gateway.close_session(&session.key());
                 }
                 return Err(error);
             }

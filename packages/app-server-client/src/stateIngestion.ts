@@ -67,6 +67,13 @@ export function applySubscriptionEvent(
     };
   }
 
+  // Every event delivered to a client participates in one contiguous stream, even
+  // when it does not match this particular subscription. A gap can therefore hide
+  // an earlier in-scope mutation and must be repaired before advancing any replica.
+  if (event.previousCursor !== state.cursor) {
+    return { kind: "resyncRequired", state, reason: "cursorGap", event };
+  }
+
   if (match.kind === "subscriptionMismatch") {
     return {
       kind: "ignored",
@@ -77,10 +84,6 @@ export function applySubscriptionEvent(
       reason: "subscriptionMismatch",
       event,
     };
-  }
-
-  if (event.previousCursor !== state.cursor && !canApplyWithCursorGap(event)) {
-    return { kind: "resyncRequired", state, reason: "cursorGap", event };
   }
 
   const update = updateSubscriptionSnapshot(state.scope, state.snapshot, event.payload);
@@ -98,13 +101,4 @@ export function applySubscriptionEvent(
     snapshotChanged: update.changed,
     event,
   };
-}
-
-function canApplyWithCursorGap(event: AppServerEvent) {
-  if (event.scope.kind !== "stateRoot") return false;
-  return (
-    event.payload.kind === "projectCollectionUpdated" ||
-    event.payload.kind === "taskNavigationUpdated" ||
-    event.payload.kind === "snapshotReplaced"
-  );
 }

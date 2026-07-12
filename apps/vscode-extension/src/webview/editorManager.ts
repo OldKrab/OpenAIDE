@@ -138,6 +138,15 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost {
   private adoptTaskPanel(panel: vscode.WebviewPanel, taskId: string, title = "Task") {
     const adoptingNewTaskPanel = this.newTaskPanel === panel;
     if (!adoptingNewTaskPanel) return;
+    const existingTaskPanel = this.taskPanels.get(taskId);
+    if (existingTaskPanel && existingTaskPanel !== panel) {
+      this.newTaskPanel = undefined;
+      // Invalidate pending bootstrap work before closing its superseded Backend client.
+      this.nextPanelGeneration(panel);
+      panel.dispose();
+      existingTaskPanel.reveal(vscode.ViewColumn.Active);
+      return;
+    }
     panel.title = title.trim() || "Task";
     const current = this.panelBootstraps.get(panel);
     this.panelBootstraps.set(panel, {

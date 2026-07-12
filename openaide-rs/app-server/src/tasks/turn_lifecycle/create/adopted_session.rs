@@ -26,11 +26,8 @@ impl TaskTurnLifecycle {
             return Err(RuntimeError::InvalidParams("config_options".to_string()));
         }
 
-        self.mutations.ensure_native_session_unowned(
-            &params.selected_agent_id,
-            &params.workspace_root,
-            &external_session_id,
-        )?;
+        self.mutations
+            .ensure_native_session_unowned(&params.selected_agent_id, &external_session_id)?;
 
         let now = now_string();
         let task_id = format!("task_{}", Uuid::new_v4());
@@ -51,7 +48,6 @@ impl TaskTurnLifecycle {
         let persist_result: Result<TaskSnapshot, RuntimeError> = (|| {
             let session = session_start.session();
             let selected_agent_id = params.selected_agent_id.clone();
-            let workspace_root = params.workspace_root.clone();
             let session_id = session.session_id.clone();
             let record = TaskRecord {
                 task_id: task_id.clone(),
@@ -79,6 +75,7 @@ impl TaskTurnLifecycle {
                 revision: 0,
                 config_options: session.config_options.clone(),
                 config_options_catalog: session.config_catalog.clone(),
+                config_mutation: Default::default(),
                 agent_commands_catalog: session.commands_catalog.clone(),
                 model_id: params.model_id.or(session.model_id.clone()),
                 preparation: TaskPreparationRecord::Ready,
@@ -89,11 +86,7 @@ impl TaskTurnLifecycle {
                 loaded.replayed_messages,
                 create_snapshot_commit_options(),
                 |validation| {
-                    validation.ensure_native_session_unowned(
-                        &selected_agent_id,
-                        &workspace_root,
-                        &session_id,
-                    )
+                    validation.ensure_native_session_unowned(&selected_agent_id, &session_id)
                 },
             )?;
             result
@@ -112,7 +105,7 @@ impl TaskTurnLifecycle {
 
         if let Err(error) = self
             .turn_runner
-            .attach_session_events(task_id.clone(), session_start.session_id())
+            .attach_session_events(task_id.clone(), &session_start.session().key())
         {
             let session_id = session_start.session_id().to_string();
             let _ = session_start.close();

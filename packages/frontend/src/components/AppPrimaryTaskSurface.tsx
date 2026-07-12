@@ -5,8 +5,13 @@ import type { AppController } from "./appController";
 export function primaryTaskSurfaceModel(controller: AppController) {
   const { activeTask, bootstrap, state } = controller;
   const snapshotTaskInput = state.snapshot ? state.taskInputs[state.snapshot.task.task_id] : undefined;
+  const adoptedEmptyTaskHasDraft = bootstrap.surface === "task"
+    && bootstrap.taskId === state.snapshot?.task.task_id
+    && hasVisibleTaskDraft(snapshotTaskInput);
+  const activeNoMessageTask = state.snapshot?.task.status === "active";
   const renderableTaskSnapshot = state.snapshot?.task.has_messages === true
-    || (bootstrap.surface === "task" && bootstrap.taskId && snapshotTaskInput?.pending)
+    || adoptedEmptyTaskHasDraft
+    || activeNoMessageTask
     ? state.snapshot
     : undefined;
   const startupConfigOptions = renderableTaskSnapshot?.task.has_messages === false && snapshotTaskInput?.pending
@@ -28,6 +33,18 @@ export function primaryTaskSurfaceModel(controller: AppController) {
     startupConfigOptions,
     taskLoadingError,
   };
+}
+
+function hasVisibleTaskDraft(input: AppController["state"]["taskInputs"][string] | undefined) {
+  return Boolean(
+    input
+    && (
+      input.pending !== undefined
+      || input.prompt.length !== 0
+      || input.context.length !== 0
+      || input.error !== undefined
+    )
+  );
 }
 
 type AppPrimaryTaskSurfaceProps = {
@@ -60,7 +77,7 @@ export function AppPrimaryTaskSurface({ controller, focusRequestKey, model }: Ap
         backendReady={backendReady}
         dispatch={dispatch}
         fileBrowser={callbacks.task.fileBrowser}
-        onCancel={renderableTaskSnapshot.task.has_messages
+        onCancel={renderableTaskSnapshot.task.has_messages || renderableTaskSnapshot.task.status === "active"
           ? callbacks.task.cancel
           : callbacks.newTask.cancel}
         onLoadChatPage={callbacks.task.loadChatPage}
@@ -78,7 +95,7 @@ export function AppPrimaryTaskSurface({ controller, focusRequestKey, model }: Ap
         appServerQuestionRequests={state.appServerQuestionRequests}
         permissionResponses={state.permissionResponses}
         questionResponses={state.questionResponses}
-        savedScrollTop={state.taskScrollPositions[renderableTaskSnapshot.task.task_id]}
+        savedScrollState={state.taskChatScrollStates[renderableTaskSnapshot.task.task_id]}
         snapshot={renderableTaskSnapshot}
         startupConfigOptions={startupConfigOptions}
         submitShortcut={preferences.composer_submit_shortcut}
@@ -106,6 +123,7 @@ export function AppPrimaryTaskSurface({ controller, focusRequestKey, model }: Ap
       focusRequestKey={focusRequestKey}
       loadingProjects={!backendReady}
       onCancelTask={callbacks.newTask.cancel}
+      onRemoveAttachment={callbacks.newTask.removeAttachment}
       onSelectConfigOption={callbacks.newTask.selectConfigOption}
       onSubmitTask={callbacks.newTask.submit}
       projectContextMode={isWebShell ? "selectable" : "fixed"}

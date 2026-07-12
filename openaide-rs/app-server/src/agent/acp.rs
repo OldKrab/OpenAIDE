@@ -8,7 +8,7 @@ use crate::agent::registry_handle::AgentRegistryHandle;
 use crate::agent::{
     AgentAuthenticateRequest, AgentEventSink, AgentListSessionsRequest, AgentLoadedSession,
     AgentProbeRequest, AgentPrompt, AgentRuntime, AgentSession, AgentSessionDelete,
-    AgentSessionEventSink, AgentSessionLoad, AgentSessionResume,
+    AgentSessionEventSink, AgentSessionKey, AgentSessionLoad, AgentSessionResume,
     AgentSessionSetConfigOptionRequest, AgentSessionStart,
 };
 use crate::protocol::errors::RuntimeError;
@@ -105,10 +105,10 @@ impl AgentRuntime for AcpAgentRuntime {
 
     fn attach_session_event_sink(
         &self,
-        session_id: &str,
+        session: &AgentSessionKey,
         sink: Arc<dyn AgentSessionEventSink>,
     ) -> Result<(), RuntimeError> {
-        self.kernel.attach_session_event_sink(session_id, sink)
+        self.kernel.attach_session_event_sink(session, sink)
     }
 
     fn prompt(
@@ -119,12 +119,12 @@ impl AgentRuntime for AcpAgentRuntime {
         self.kernel.prompt(prompt, sink)
     }
 
-    fn cancel_session(&self, session_id: &str) -> Result<(), RuntimeError> {
-        self.kernel.cancel_session(session_id)
+    fn cancel_session(&self, session: &AgentSessionKey) -> Result<(), RuntimeError> {
+        self.kernel.cancel_session(session)
     }
 
-    fn close_session(&self, session_id: &str) -> Result<(), RuntimeError> {
-        self.kernel.close_session(session_id)
+    fn close_session(&self, session: &AgentSessionKey) -> Result<(), RuntimeError> {
+        self.kernel.close_session(session)
     }
 
     fn delete_session(&self, request: AgentSessionDelete) -> Result<(), RuntimeError> {

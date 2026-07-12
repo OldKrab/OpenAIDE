@@ -1,9 +1,10 @@
 import { Check, FolderOpen } from "lucide-react";
 import { useEffect, useRef, useState, type Dispatch } from "react";
-import type { AppPreferencesRecord, TaskSummary } from "@openaide/app-shell-contracts";
+import type { AppPreferencesRecord } from "@openaide/app-shell-contracts";
 import type { AppAction } from "../state/appReducer";
 import { agentOptions, appServerAttachmentHandles, type AgentOption } from "../state/composerOptions";
 import { projectIdForWorkspaceRoot, workspaceLabel } from "../state/projectIdentity";
+import { configOptionsMutable, configOptionsSettled } from "../state/configOptionState";
 import type { AppState } from "../state/store";
 import { AgentIcon } from "./AgentIcon";
 import { Composer } from "./Composer";
@@ -21,6 +22,7 @@ export function NewTaskView({
   state,
   onSelectConfigOption,
   onCancelTask,
+  onRemoveAttachment,
   onSubmitTask,
   resetOptionsRequestKey,
   agents,
@@ -40,6 +42,7 @@ export function NewTaskView({
   loadingProjects?: boolean;
   onSelectConfigOption: (configId: string, value: string) => void;
   onCancelTask?: () => void;
+  onRemoveAttachment: (attachmentId: string) => void;
   onSubmitTask: (draft: { prompt: string; context: AppState["newTask"]["context"] }) => void;
   resetOptionsRequestKey: () => void;
   agents?: AgentOption[];
@@ -50,14 +53,19 @@ export function NewTaskView({
   const contextControlsRef = useRef<HTMLDivElement | null>(null);
   const agentChoices = agents?.length ? agents : agentOptions;
   const selectedAgent = agentChoices.find((agent) => agent.id === state.newTask.selection.agentId);
-  const projectChoices = state.projects.length ? state.projects : projectsFromTasks(state.tasks);
+  const projectChoices = state.projects;
   const selectedProject = projectChoices.find((project) => project.projectId === state.newTask.selection.projectId);
   const enteredWorkspacePath = workspacePath.trim();
   const preparedTaskId = state.snapshot && !state.snapshot.task.has_messages ? state.snapshot.task.task_id : undefined;
   const preparedTaskInput = preparedTaskId ? state.taskInputs[preparedTaskId] : undefined;
   const preparedConfigOptions = preparedTaskId ? state.snapshot?.agent_config : undefined;
-  const composerConfigOptions = preparedConfigOptions?.options.length ? preparedConfigOptions : undefined;
-  const composerConfigOptionsError = preparedTaskId ? undefined : state.newTask.configOptionsError;
+  const currentConfigOptions = preparedTaskId ? preparedConfigOptions : state.newTask.configOptions;
+  const composerConfigOptions = currentConfigOptions && (
+    currentConfigOptions.options.length > 0 || currentConfigOptions.status === "empty"
+  ) ? currentConfigOptions : undefined;
+  const composerConfigOptionsError = currentConfigOptions?.status === "failed"
+    ? currentConfigOptions.error
+    : preparedTaskId ? undefined : state.newTask.configOptionsError;
   const composerAttachments = state.newTask.submitting
     ? state.newTask.pending?.context ?? preparedTaskInput?.pending?.context ?? []
     : preparedTaskInput?.context ?? state.newTask.context;
@@ -67,14 +75,7 @@ export function NewTaskView({
   const externalPrompt = state.newTask.submitting
     ? state.newTask.pending?.prompt ?? preparedTaskInput?.pending?.prompt ?? ""
     : preparedTaskInput?.prompt ?? state.newTask.prompt;
-  const [localPrompt, setLocalPrompt] = useState(externalPrompt);
-  const lastExternalPromptRef = useRef(externalPrompt);
-  useEffect(() => {
-    if (externalPrompt === lastExternalPromptRef.current) return;
-    lastExternalPromptRef.current = externalPrompt;
-    setLocalPrompt(externalPrompt);
-  }, [externalPrompt]);
-  const composerPrompt = localPrompt;
+  const composerPrompt = externalPrompt;
   const needsProject = !state.newTask.selection.projectId;
   const fixedProjectContext = projectContextMode === "fixed";
   const openingNativeSession = state.newTask.nativeSessions.adoptingSessionId !== undefined;
@@ -85,7 +86,7 @@ export function NewTaskView({
     agentLabel: state.newTask.selection.agentLabel,
     configOptionsError: composerConfigOptionsError,
     configOptionsLoading: state.newTask.configOptionsLoading,
-    configOptionsReady: composerConfigOptions !== undefined,
+    configOptionsReady: configOptionsSettled(currentConfigOptions),
     needsWorkspace,
     openingNativeSession,
     submitting: state.newTask.submitting,
@@ -140,7 +141,7 @@ export function NewTaskView({
     <Composer
       attachments={composerAttachments}
       autoFocus
-      configLocked={state.newTask.configOptionsLoading}
+      configLocked={state.newTask.configOptionsLoading || !configOptionsMutable(currentConfigOptions)}
       configOptions={composerConfigOptions}
       commandCatalog={preparedTaskId ? state.snapshot?.agent_commands : undefined}
       disabled={state.newTask.submitting}
@@ -149,7 +150,6 @@ export function NewTaskView({
       focusRequestKey={composerFocusKey}
       onCancel={state.newTask.submitting ? onCancelTask : undefined}
       onChange={(prompt) => {
-        setLocalPrompt(prompt);
         dispatch(preparedTaskId
           ? { type: "taskInput:prompt", taskId: preparedTaskId, prompt }
           : { type: "prompt", prompt });
@@ -160,10 +160,7 @@ export function NewTaskView({
           message: message ?? "Images can be attached after the Task is open.",
         })
       }
-      onRemoveAttachment={(attachmentId) =>
-        preparedTaskId
-          ? dispatch({ type: "taskInput:attachment:remove", taskId: preparedTaskId, attachmentId })
-          : dispatch({ type: "newTask:attachment:remove", attachmentId })}
+      onRemoveAttachment={onRemoveAttachment}
       onSelectAgent={(agentId) => {
         resetOptionsRequestKey();
         dispatch({
@@ -244,6 +241,7 @@ export function NewTaskView({
                 {workspaceBrowser ? (
                   <NewWorkspacePicker
                     browser={workspaceBrowser}
+                    key={workspaceBrowser.ownerKey}
                     onSelect={(workspace) => selectWorkspacePath(workspace.path, workspace.label)}
                   />
                 ) : null}
@@ -340,16 +338,4 @@ export function NewTaskView({
       </div>
     </section>
   );
-}
-
-function projectsFromTasks(tasks: TaskSummary[]) {
-  const projects = new Map<string, { projectId: string; label: string }>();
-  for (const task of tasks) {
-    if (!task.project_id || projects.has(task.project_id)) continue;
-    projects.set(task.project_id, {
-      projectId: task.project_id,
-      label: task.project_label || task.workspace_root || "Project",
-    });
-  }
-  return [...projects.values()];
 }

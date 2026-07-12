@@ -93,6 +93,7 @@ export function mapProtocolTaskSnapshot(
     ...mappedTask.warnings,
     ...snapshotWarnings(snapshot),
   ];
+  const sendBlockers = snapshot.sendCapability.blockers ?? [];
 
   return {
     snapshot: {
@@ -118,6 +119,9 @@ export function mapProtocolTaskSnapshot(
       send_capability: {
         state: snapshot.sendCapability.state,
         attachment_only: snapshot.sendCapability.attachmentOnly === true,
+        ...(sendBlockers.length > 0
+          ? { blockers: sendBlockers.map((blocker) => ({ ...blocker })) }
+          : {}),
       },
       revision: snapshot.revision,
       history_sync: mapHistorySync(snapshot.historySync ?? { state: "idle", generation: 0 }),
@@ -149,21 +153,28 @@ export function mapProtocolConfigOptions(
   snapshot: ProtocolTaskSnapshot["agentConfig"],
   agentId: string,
 ): ConfigOptionsCatalog {
+  const options = (snapshot.options ?? []).map((option) => ({
+    id: option.configId,
+    label: option.label,
+    description: option.description ?? undefined,
+    category: configCategoryFromProtocol(option.category),
+    current_value: option.currentValue,
+    values: option.values.map((value) => ({
+      id: value.value,
+      label: value.label,
+      description: value.description ?? undefined,
+    })),
+  }));
   return {
     agent_id: agentId,
-    status: snapshot.state === "ready" && snapshot.options?.length ? "ready" : "empty",
-    options: (snapshot.options ?? []).map((option) => ({
-      id: option.configId,
-      label: option.label,
-      description: option.description ?? undefined,
-      category: configCategoryFromProtocol(option.category),
-      current_value: option.currentValue,
-      values: option.values.map((value) => ({
-        id: value.value,
-        label: value.label,
-        description: value.description ?? undefined,
-      })),
-    })),
+    status: snapshot.state === "ready" ? (options.length ? "ready" : "empty") : snapshot.state,
+    options,
+    pending_change: snapshot.pendingChange ? {
+      mutation_id: snapshot.pendingChange.clientMutationId,
+      option_id: snapshot.pendingChange.configId,
+      requested_value: snapshot.pendingChange.requestedValue,
+    } : undefined,
+    error: snapshot.error?.message,
   };
 }
 

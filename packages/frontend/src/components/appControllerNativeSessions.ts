@@ -24,6 +24,7 @@ export function requestControllerNativeSessions({
   cursor,
   backendConnection,
   dispatch,
+  existingSessionIds = [],
   latestSessionListRequestId,
   minimumSessionCount = 0,
   nextSessionListRequestId,
@@ -35,6 +36,7 @@ export function requestControllerNativeSessions({
   cursor?: string;
   backendConnection?: Pick<BackendConnection, "request">;
   dispatch: Dispatch<AppAction>;
+  existingSessionIds?: Iterable<string>;
   latestSessionListRequestId: MutableRefObject<number | undefined>;
   minimumSessionCount?: number;
   nextSessionListRequestId: MutableRefObject<number>;
@@ -47,14 +49,25 @@ export function requestControllerNativeSessions({
   dispatch({ type: "newTask:nativeSessions:start", append });
   if (backendConnection) {
     if (!projectId) {
-      dispatch({ type: "newTask:nativeSessions:error", message: "Workspace is not ready yet." });
+      dispatch({ type: "newTask:nativeSessions:listError", message: "Workspace is not ready yet." });
       return;
     }
     const loadPages = async () => {
       let nextCursor = cursor;
       let resultAgentId = agentId;
       const sessions = new Map<string, AgentListedSessionResult>();
+      const existing = append ? new Set(existingSessionIds) : new Set<string>();
+      const requestedCursors = new Set<string>();
       do {
+        if (nextCursor) {
+          if (requestedCursors.has(nextCursor)) {
+            // A cursor is an opaque continuation token, but it must still make
+            // progress. Treat a repeated token as exhaustion instead of looping.
+            nextCursor = undefined;
+            break;
+          }
+          requestedCursors.add(nextCursor);
+        }
         const result = await backendConnection.request(AGENT_LIST_SESSIONS, {
           agentId: agentId as AgentId,
           projectId: projectId as ProjectId,
@@ -63,6 +76,7 @@ export function requestControllerNativeSessions({
         if (latestSessionListRequestId.current !== requestId) return;
         resultAgentId = result.agentId;
         for (const session of result.sessions) {
+          if (existing.has(session.sessionId) || sessions.has(session.sessionId)) continue;
           sessions.set(session.sessionId, {
             cwd: result.projectLabel,
             session_id: session.sessionId,
@@ -88,17 +102,18 @@ export function requestControllerNativeSessions({
     void loadPages().catch((error: unknown) => {
       if (latestSessionListRequestId.current !== requestId) return;
       onFailure?.(nativeSessionLoadFailure(error, { agentId, projectId, requestId }));
-      dispatch({ type: "newTask:nativeSessions:error", message: "Unable to load Agent session history." });
+      dispatch({ type: "newTask:nativeSessions:listError", message: "Unable to load Agent session history." });
     });
     return;
   }
-  dispatch({ type: "newTask:nativeSessions:error", message: "App Server connection unavailable." });
+  dispatch({ type: "newTask:nativeSessions:listError", message: "App Server connection unavailable." });
 }
 
 export function createRequestControllerNativeSessions({
   backendConnection,
   dispatch,
   getAgentId,
+  getExistingSessionIds,
   getProjectId,
   latestSessionListRequestId,
   nextSessionListRequestId,
@@ -107,6 +122,7 @@ export function createRequestControllerNativeSessions({
   backendConnection?: Pick<BackendConnection, "request">;
   dispatch: Dispatch<AppAction>;
   getAgentId: () => string;
+  getExistingSessionIds?: () => Iterable<string>;
   getProjectId: () => string | undefined;
   latestSessionListRequestId: MutableRefObject<number | undefined>;
   nextSessionListRequestId: MutableRefObject<number>;
@@ -119,6 +135,7 @@ export function createRequestControllerNativeSessions({
       backendConnection,
       cursor,
       dispatch,
+      existingSessionIds: append ? getExistingSessionIds?.() : undefined,
       latestSessionListRequestId,
       minimumSessionCount,
       nextSessionListRequestId,

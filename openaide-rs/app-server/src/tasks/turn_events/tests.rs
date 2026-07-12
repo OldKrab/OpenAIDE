@@ -82,6 +82,28 @@ fn agent_session_metadata_rejects_updates_from_a_stale_native_session() {
 }
 
 #[test]
+fn agent_session_catalogs_reject_updates_from_a_stale_native_session() {
+    let (_dir, store, mutations, _server_requests) = test_runtime();
+    store.write_task(&running_task("task_1")).unwrap();
+    let stale_sink = TaskSessionEventSink::new(
+        mutations,
+        "task_1".to_string(),
+        "replaced-session".to_string(),
+        ServerRequestRuntime::new(),
+    );
+
+    stale_sink
+        .config_options_changed(crate::protocol::model::ConfigOptionsCatalog::empty("codex"))
+        .unwrap();
+    stale_sink.commands_changed(Default::default()).unwrap();
+
+    let task = store.read_task("task_1").unwrap();
+    assert_eq!(task.config_options_catalog, None);
+    assert_eq!(task.agent_commands_catalog, None);
+    assert_eq!(task.revision, 0);
+}
+
+#[test]
 fn repeated_identical_session_catalogs_do_not_churn_task_revision() {
     let (_dir, store, mutations, _server_requests) = test_runtime();
     store.write_task(&running_task("task_1")).unwrap();
@@ -682,6 +704,7 @@ fn running_task(task_id: &str) -> TaskRecord {
         revision: 0,
         config_options: Default::default(),
         config_options_catalog: None,
+        config_mutation: Default::default(),
         agent_commands_catalog: None,
         model_id: None,
         preparation: TaskPreparationRecord::Ready,

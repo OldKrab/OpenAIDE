@@ -1,5 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+#[cfg(test)]
+use std::sync::Barrier;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -44,6 +46,40 @@ pub(super) struct AttachmentRuntimeState {
     pub(super) candidates: HashMap<String, EmbeddedAttachmentCandidateHandle>,
     pub(super) entries: HashMap<String, FileBrowserEntryHandle>,
     pub(super) reserved_handles: HashSet<String>,
+    #[cfg(test)]
+    embedded_confirmation_gate: Option<Arc<EmbeddedConfirmationTestGate>>,
+}
+
+#[cfg(test)]
+#[derive(Debug)]
+struct EmbeddedConfirmationTestGate {
+    arrival: Barrier,
+    continuation: Barrier,
+}
+
+#[cfg(test)]
+impl EmbeddedConfirmationTestGate {
+    fn new(expected_arrivals: usize) -> Self {
+        assert!(expected_arrivals > 0);
+        let participants = expected_arrivals + 1;
+        Self {
+            arrival: Barrier::new(participants),
+            continuation: Barrier::new(participants),
+        }
+    }
+
+    fn arrive_and_wait(&self) {
+        self.arrival.wait();
+        self.continuation.wait();
+    }
+
+    fn wait_until_arrived(&self) {
+        self.arrival.wait();
+    }
+
+    fn release(&self) {
+        self.continuation.wait();
+    }
 }
 
 #[allow(dead_code)]
@@ -105,6 +141,32 @@ impl AttachmentRuntime {
         }
         for entry in state.entries.values_mut() {
             entry.expires_at = expired;
+        }
+    }
+
+    #[cfg(test)]
+    fn pause_embedded_confirmations_for_test(
+        &self,
+        expected_arrivals: usize,
+    ) -> Arc<EmbeddedConfirmationTestGate> {
+        let gate = Arc::new(EmbeddedConfirmationTestGate::new(expected_arrivals));
+        self.state
+            .lock()
+            .expect("attachment runtime mutex poisoned")
+            .embedded_confirmation_gate = Some(Arc::clone(&gate));
+        gate
+    }
+
+    #[cfg(test)]
+    fn pause_after_embedded_candidate_lookup_for_test(&self) {
+        let gate = self
+            .state
+            .lock()
+            .expect("attachment runtime mutex poisoned")
+            .embedded_confirmation_gate
+            .clone();
+        if let Some(gate) = gate {
+            gate.arrive_and_wait();
         }
     }
 
@@ -277,6 +339,26 @@ impl AttachmentRuntime {
         state
             .entries
             .retain(|_, entry| !entry.owner.belongs_to_client(client_instance_id));
+        state.remove_orphaned_reservations();
+    }
+
+    pub(crate) fn discard_resources_for_task(
+        &self,
+        task_id: &openaide_app_server_protocol::ids::TaskId,
+    ) {
+        let mut state = self
+            .state
+            .lock()
+            .expect("attachment runtime mutex poisoned");
+        state
+            .handles
+            .retain(|_, handle| !handle.owner.belongs_to_task_id(task_id));
+        state
+            .candidates
+            .retain(|_, candidate| !candidate.owner.belongs_to_task_id(task_id));
+        state
+            .entries
+            .retain(|_, entry| !entry.owner.belongs_to_task_id(task_id));
         state.remove_orphaned_reservations();
     }
 }

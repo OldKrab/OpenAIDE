@@ -1,4 +1,5 @@
 export * from "./backendConnection.js";
+export * from "./backendReplicaChangedError.js";
 export * from "./appServerHandoff.js";
 export * from "./generated/protocol.js";
 export * from "./localHttpConnection.js";

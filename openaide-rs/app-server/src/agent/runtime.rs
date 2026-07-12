@@ -1,8 +1,8 @@
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use serde_json::Value;
+use tokio::sync::watch;
 
 use crate::agent::events::{AgentEvent, AgentPermissionOutcome, AgentPermissionRequest};
 use crate::protocol::errors::RuntimeError;
@@ -11,8 +11,36 @@ use crate::protocol::model::{
     Attachment, ConfigOptionsCatalog, NormalizedMessage,
 };
 
+/// Identifies a Native Session within the Agent that owns its identifier.
+///
+/// ACP only guarantees `session_id` uniqueness inside one Agent. Runtime
+/// registries and lifecycle operations must therefore carry both fields.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct AgentSessionKey {
+    agent_id: String,
+    session_id: String,
+}
+
+impl AgentSessionKey {
+    pub fn new(agent_id: impl Into<String>, session_id: impl Into<String>) -> Self {
+        Self {
+            agent_id: agent_id.into(),
+            session_id: session_id.into(),
+        }
+    }
+
+    pub fn agent_id(&self) -> &str {
+        &self.agent_id
+    }
+
+    pub fn session_id(&self) -> &str {
+        &self.session_id
+    }
+}
+
 #[derive(Clone)]
 pub struct AgentSession {
+    pub agent_id: String,
     pub session_id: String,
     pub config_options: HashMap<String, String>,
     pub config_catalog: Option<ConfigOptionsCatalog>,
@@ -21,14 +49,19 @@ pub struct AgentSession {
 }
 
 impl AgentSession {
-    pub fn new(session_id: impl Into<String>) -> Self {
+    pub fn new(agent_id: impl Into<String>, session_id: impl Into<String>) -> Self {
         Self {
+            agent_id: agent_id.into(),
             session_id: session_id.into(),
             config_options: HashMap::new(),
             config_catalog: None,
             commands_catalog: None,
             model_id: None,
         }
+    }
+
+    pub fn key(&self) -> AgentSessionKey {
+        AgentSessionKey::new(self.agent_id.clone(), self.session_id.clone())
     }
 
     pub fn with_config_options(mut self, catalog: &ConfigOptionsCatalog) -> Self {
@@ -90,6 +123,12 @@ pub struct AgentSessionResume {
     pub cancellation: TurnCancellation,
 }
 
+impl AgentSessionResume {
+    pub fn session_key(&self) -> AgentSessionKey {
+        AgentSessionKey::new(self.agent_id.clone(), self.session_id.clone())
+    }
+}
+
 #[derive(Clone)]
 pub struct AgentSessionLoad {
     pub agent_id: String,
@@ -101,13 +140,26 @@ pub struct AgentSessionLoad {
     pub secret_resolver: Option<Arc<dyn AgentSecretResolver>>,
 }
 
+impl AgentSessionLoad {
+    pub fn session_key(&self) -> AgentSessionKey {
+        AgentSessionKey::new(self.agent_id.clone(), self.session_id.clone())
+    }
+}
+
 #[derive(Clone)]
 pub struct AgentPrompt {
+    pub agent_id: String,
     pub task_id: String,
     pub session_id: String,
     pub text: String,
     pub attachments: Vec<Attachment>,
     pub cancellation: TurnCancellation,
+}
+
+impl AgentPrompt {
+    pub fn session_key(&self) -> AgentSessionKey {
+        AgentSessionKey::new(self.agent_id.clone(), self.session_id.clone())
+    }
 }
 
 #[derive(Clone)]
@@ -116,6 +168,12 @@ pub struct AgentSessionSetConfigOptionRequest {
     pub session_id: String,
     pub config_id: String,
     pub value: String,
+}
+
+impl AgentSessionSetConfigOptionRequest {
+    pub fn session_key(&self) -> AgentSessionKey {
+        AgentSessionKey::new(self.agent_id.clone(), self.session_id.clone())
+    }
 }
 
 #[derive(Clone)]
@@ -138,12 +196,26 @@ pub struct AgentListSessionsRequest {
 
 #[derive(Clone)]
 pub struct AgentSessionDelete {
+    pub agent_id: String,
     pub session_id: String,
 }
 
-#[derive(Clone, Default)]
+impl AgentSessionDelete {
+    pub fn session_key(&self) -> AgentSessionKey {
+        AgentSessionKey::new(self.agent_id.clone(), self.session_id.clone())
+    }
+}
+
+#[derive(Clone)]
 pub struct TurnCancellation {
-    cancelled: Arc<AtomicBool>,
+    cancelled: watch::Sender<bool>,
+}
+
+impl Default for TurnCancellation {
+    fn default() -> Self {
+        let (cancelled, _receiver) = watch::channel(false);
+        Self { cancelled }
+    }
 }
 
 impl TurnCancellation {
@@ -152,11 +224,24 @@ impl TurnCancellation {
     }
 
     pub fn cancel(&self) {
-        self.cancelled.store(true, Ordering::SeqCst);
+        self.cancelled.send_replace(true);
     }
 
     pub fn is_cancelled(&self) -> bool {
-        self.cancelled.load(Ordering::SeqCst)
+        *self.cancelled.borrow()
+    }
+
+    /// Waits on the cancellation edge without adding polling latency.
+    pub(crate) async fn cancelled(&self) {
+        let mut cancelled = self.cancelled.subscribe();
+        if *cancelled.borrow() {
+            return;
+        }
+        while cancelled.changed().await.is_ok() {
+            if *cancelled.borrow_and_update() {
+                return;
+            }
+        }
     }
 }
 
@@ -208,12 +293,12 @@ pub trait AgentRuntime: Send + Sync {
     }
 
     fn resume_session(&self, request: AgentSessionResume) -> Result<AgentSession, RuntimeError> {
-        Ok(AgentSession::new(request.session_id))
+        Ok(AgentSession::new(request.agent_id, request.session_id))
     }
 
     fn attach_session_event_sink(
         &self,
-        _session_id: &str,
+        _session: &AgentSessionKey,
         _sink: Arc<dyn AgentSessionEventSink>,
     ) -> Result<(), RuntimeError> {
         Ok(())
@@ -225,11 +310,11 @@ pub trait AgentRuntime: Send + Sync {
         sink: Arc<dyn AgentEventSink>,
     ) -> Result<(), RuntimeError>;
 
-    fn cancel_session(&self, _session_id: &str) -> Result<(), RuntimeError> {
+    fn cancel_session(&self, _session: &AgentSessionKey) -> Result<(), RuntimeError> {
         Ok(())
     }
 
-    fn close_session(&self, _session_id: &str) -> Result<(), RuntimeError> {
+    fn close_session(&self, _session: &AgentSessionKey) -> Result<(), RuntimeError> {
         Ok(())
     }
 
@@ -244,13 +329,12 @@ pub trait AgentRuntime: Send + Sync {
     }
 }
 
+#[cfg(test)]
+#[path = "runtime_tests.rs"]
+mod tests;
+
 pub trait AgentEventSink: Send + Sync {
     fn emit(&self, event: AgentEvent) -> Result<(), RuntimeError>;
-
-    /// Preserves identified message continuity while closing anonymous output at a steer boundary.
-    fn prepare_for_steering(&self) -> Result<(), RuntimeError> {
-        Ok(())
-    }
 
     fn request_permission(
         &self,

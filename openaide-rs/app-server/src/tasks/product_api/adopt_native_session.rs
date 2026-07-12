@@ -30,11 +30,7 @@ impl TaskProductApi {
             .require(params.agent_id.as_str())
             .map_err(protocol_error_from_runtime)?;
         self.mutations
-            .ensure_native_session_unowned(
-                params.agent_id.as_str(),
-                &project.workspace_root,
-                &params.native_session_id,
-            )
+            .ensure_native_session_unowned(params.agent_id.as_str(), &params.native_session_id)
             .map_err(protocol_error_from_runtime)?;
 
         let now = now_string();
@@ -83,7 +79,7 @@ impl TaskProductApi {
 
         if let Err(error) = self
             .turn_runner
-            .attach_session_events(task_id.clone(), &session_id)
+            .attach_session_events(task_id.clone(), &session_start.session().key())
         {
             let _ = session_start.close();
             if let Err(finalize_error) =
@@ -96,7 +92,7 @@ impl TaskProductApi {
             return Err(protocol_error_from_runtime(error));
         }
         let _session = session_start.commit();
-        crate::snapshots::task_snapshot::project_stored_task_snapshot(snapshot)
+        self.project_task_snapshot(snapshot)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -140,6 +136,7 @@ impl TaskProductApi {
             revision: 0,
             config_options: loaded.session.config_options.clone(),
             config_options_catalog: loaded.session.config_catalog.clone(),
+            config_mutation: Default::default(),
             agent_commands_catalog: loaded.session.commands_catalog.clone(),
             model_id: loaded.session.model_id.clone(),
             preparation: TaskPreparationRecord::Ready,
@@ -151,13 +148,7 @@ impl TaskProductApi {
                 refresh_message_history: false,
                 response_snapshot_tail_limit: Some(100),
             },
-            |validation| {
-                validation.ensure_native_session_unowned(
-                    &selected_agent_id,
-                    &workspace_root,
-                    &session_id,
-                )
-            },
+            |validation| validation.ensure_native_session_unowned(&selected_agent_id, &session_id),
         )?;
         result
             .response_snapshot

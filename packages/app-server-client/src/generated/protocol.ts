@@ -40,7 +40,7 @@ export const ATTACHMENT_CREATE_EMBEDDED_CANDIDATE = "attachment/createEmbeddedCa
 export const ATTACHMENT_CONFIRM_EMBEDDED = "attachment/confirmEmbedded" as const;
 
 export const ATTACHMENT_REFRESH_HANDLES = "attachment/refreshHandles" as const;
-export const ATTACHMENT_RELEASE_HANDLES = "attachment/releaseHandles" as const;
+export const ATTACHMENT_RELEASE = "attachment/release" as const;
 
 export const ATTACHMENT_REVEAL = "attachment/reveal" as const;
 
@@ -128,7 +128,11 @@ export type ProtocolError = { code: ProtocolErrorCode, message: string, recovera
 
 export type ProtocolErrorCode = "invalidRequest" | "notInitialized" | "unauthorized" | "notFound" | "conflict" | "validationFailed" | "attachmentHandleInvalid" | "capabilityUnavailable" | "requestAlreadyResolved" | "serverStopping" | "staleCursor" | "internal";
 
-export type ErrorTarget = { method?: string | null, field?: string | null, };
+export type ErrorTarget = { method?: string | null, field?: string | null,
+/**
+ * Current authoritative render state when resolving the targeted field requires it.
+ */
+currentTask?: TaskSnapshot | null, };
 
 export type ClientProbeParams = Record<symbol, never>;
 
@@ -360,9 +364,23 @@ export type AttachmentRefreshHandlesParams = { taskId: TaskId, handles: Array<At
 
 export type AttachmentRefreshHandlesResult = { attachments: Array<PreSendAttachment>, };
 
-export type AttachmentReleaseHandlesParams = { taskId: TaskId, handles: Array<AttachmentHandleId>, };
+export type AttachmentResourceId = { "kind": "handle", id: AttachmentHandleId, } | { "kind": "candidate", id: AttachmentCandidateId, };
 
-export type AttachmentReleaseHandlesResult = { releasedHandles: Array<AttachmentHandleId>, };
+export type AttachmentReleaseStatus = "released" | "noOp" | "forbidden";
+
+export type AttachmentReleaseOutcome = { resource: AttachmentResourceId, status: AttachmentReleaseStatus, };
+
+export type AttachmentReleaseParams = { taskId: TaskId,
+/**
+ * Resolver resources are released independently in this order.
+ */
+resources: Array<AttachmentResourceId>, };
+
+export type AttachmentReleaseResult = {
+/**
+ * Contains exactly one outcome per requested resource, preserving request order.
+ */
+outcomes: Array<AttachmentReleaseOutcome>, };
 
 export type AttachmentRevealParams = { taskId: TaskId, handleId: AttachmentHandleId, };
 
@@ -610,7 +628,7 @@ export type PendingRequestScope = { "kind": "client", clientInstanceId: ClientIn
 
 export type PendingRequestKind = "permission" | "question" | "secret" | "shellCapability";
 
-export type ProtocolMethod = typeof CLIENT_PROBE | typeof CLIENT_INITIALIZE | typeof CLIENT_CAPABILITIES_CHANGED | typeof CLIENT_HEARTBEAT | typeof STATE_SUBSCRIBE | typeof STATE_UNSUBSCRIBE | typeof DIAGNOSTICS_GET_RUNTIME | typeof SUPPORT_RECOVER_STUCK_SESSIONS | typeof AGENT_PROBE | typeof AGENT_AUTHENTICATE | typeof AGENT_LIST_SESSIONS | typeof AGENT_CREATE_CUSTOM | typeof AGENT_UPDATE_CUSTOM_METADATA | typeof AGENT_REPLACE_CUSTOM | typeof AGENT_DELETE_CUSTOM | typeof AGENT_SET_ENABLED | typeof SETTINGS_GET_AGENT_DETAILS | typeof SETTINGS_GET_MCP_SERVERS | typeof SETTINGS_GET_SKILLS | typeof SETTINGS_GET_PREFERENCES | typeof SETTINGS_UPDATE_PREFERENCES | typeof SETTINGS_GET_RUNTIME | typeof SETTINGS_UPDATE_RUNTIME | typeof ATTACHMENT_LIST_ROOTS | typeof ATTACHMENT_LIST_DIRECTORY | typeof ATTACHMENT_CREATE_FILE_REFERENCE | typeof ATTACHMENT_CREATE_PASTED_IMAGE | typeof ATTACHMENT_CREATE_EMBEDDED_CANDIDATE | typeof ATTACHMENT_CONFIRM_EMBEDDED | typeof ATTACHMENT_REFRESH_HANDLES | typeof ATTACHMENT_RELEASE_HANDLES | typeof ATTACHMENT_REVEAL | typeof SHELL_RESOLVE_FILE_REVEAL | typeof WORKSPACE_LIST_ROOTS | typeof WORKSPACE_LIST_DIRECTORY | typeof TASK_CREATE | typeof TASK_ADOPT_NATIVE_SESSION | typeof TASK_SEND | typeof TASK_SET_CONFIG_OPTION | typeof TASK_CANCEL | typeof TASK_OPEN | typeof TASK_RETRY_HISTORY_SYNC | typeof TASK_MARK_READ | typeof TASK_CHAT_PAGE | typeof TASK_TOOL_DETAIL | typeof TASK_LIST | typeof TASK_DISCARD | typeof TASK_SET_ARCHIVED;
+export type ProtocolMethod = typeof CLIENT_PROBE | typeof CLIENT_INITIALIZE | typeof CLIENT_CAPABILITIES_CHANGED | typeof CLIENT_HEARTBEAT | typeof STATE_SUBSCRIBE | typeof STATE_UNSUBSCRIBE | typeof DIAGNOSTICS_GET_RUNTIME | typeof SUPPORT_RECOVER_STUCK_SESSIONS | typeof AGENT_PROBE | typeof AGENT_AUTHENTICATE | typeof AGENT_LIST_SESSIONS | typeof AGENT_CREATE_CUSTOM | typeof AGENT_UPDATE_CUSTOM_METADATA | typeof AGENT_REPLACE_CUSTOM | typeof AGENT_DELETE_CUSTOM | typeof AGENT_SET_ENABLED | typeof SETTINGS_GET_AGENT_DETAILS | typeof SETTINGS_GET_MCP_SERVERS | typeof SETTINGS_GET_SKILLS | typeof SETTINGS_GET_PREFERENCES | typeof SETTINGS_UPDATE_PREFERENCES | typeof SETTINGS_GET_RUNTIME | typeof SETTINGS_UPDATE_RUNTIME | typeof ATTACHMENT_LIST_ROOTS | typeof ATTACHMENT_LIST_DIRECTORY | typeof ATTACHMENT_CREATE_FILE_REFERENCE | typeof ATTACHMENT_CREATE_PASTED_IMAGE | typeof ATTACHMENT_CREATE_EMBEDDED_CANDIDATE | typeof ATTACHMENT_CONFIRM_EMBEDDED | typeof ATTACHMENT_REFRESH_HANDLES | typeof ATTACHMENT_RELEASE | typeof ATTACHMENT_REVEAL | typeof SHELL_RESOLVE_FILE_REVEAL | typeof WORKSPACE_LIST_ROOTS | typeof WORKSPACE_LIST_DIRECTORY | typeof TASK_CREATE | typeof TASK_ADOPT_NATIVE_SESSION | typeof TASK_SEND | typeof TASK_SET_CONFIG_OPTION | typeof TASK_CANCEL | typeof TASK_OPEN | typeof TASK_RETRY_HISTORY_SYNC | typeof TASK_MARK_READ | typeof TASK_CHAT_PAGE | typeof TASK_TOOL_DETAIL | typeof TASK_LIST | typeof TASK_DISCARD | typeof TASK_SET_ARCHIVED;
 export type RequestParamsByMethod = {
   [CLIENT_PROBE]: ClientProbeParams;
   [CLIENT_INITIALIZE]: InitializeParams;
@@ -642,7 +660,7 @@ export type RequestParamsByMethod = {
   [ATTACHMENT_CREATE_EMBEDDED_CANDIDATE]: AttachmentCreateEmbeddedCandidateParams;
   [ATTACHMENT_CONFIRM_EMBEDDED]: AttachmentConfirmEmbeddedParams;
   [ATTACHMENT_REFRESH_HANDLES]: AttachmentRefreshHandlesParams;
-  [ATTACHMENT_RELEASE_HANDLES]: AttachmentReleaseHandlesParams;
+  [ATTACHMENT_RELEASE]: AttachmentReleaseParams;
   [ATTACHMENT_REVEAL]: AttachmentRevealParams;
   [SHELL_RESOLVE_FILE_REVEAL]: ShellResolveFileRevealParams;
   [WORKSPACE_LIST_ROOTS]: WorkspaceListRootsParams;
@@ -693,7 +711,7 @@ export type ResponseResultByMethod = {
   [ATTACHMENT_CREATE_EMBEDDED_CANDIDATE]: AttachmentCreateEmbeddedCandidateResult;
   [ATTACHMENT_CONFIRM_EMBEDDED]: AttachmentConfirmEmbeddedResult;
   [ATTACHMENT_REFRESH_HANDLES]: AttachmentRefreshHandlesResult;
-  [ATTACHMENT_RELEASE_HANDLES]: AttachmentReleaseHandlesResult;
+  [ATTACHMENT_RELEASE]: AttachmentReleaseResult;
   [ATTACHMENT_REVEAL]: AttachmentRevealResult;
   [SHELL_RESOLVE_FILE_REVEAL]: ShellResolveFileRevealResult;
   [WORKSPACE_LIST_ROOTS]: WorkspaceListRootsResult;
@@ -753,7 +771,7 @@ export type AttachmentCreatePastedImageResponse = ResponseEnvelope<AttachmentCre
 export type AttachmentCreateEmbeddedCandidateResponse = ResponseEnvelope<AttachmentCreateEmbeddedCandidateResult>;
 export type AttachmentConfirmEmbeddedResponse = ResponseEnvelope<AttachmentConfirmEmbeddedResult>;
 export type AttachmentRefreshHandlesResponse = ResponseEnvelope<AttachmentRefreshHandlesResult>;
-export type AttachmentReleaseHandlesResponse = ResponseEnvelope<AttachmentReleaseHandlesResult>;
+export type AttachmentReleaseResponse = ResponseEnvelope<AttachmentReleaseResult>;
 export type AttachmentRevealResponse = ResponseEnvelope<AttachmentRevealResult>;
 export type WorkspaceListRootsResponse = ResponseEnvelope<WorkspaceListRootsResult>;
 export type WorkspaceListDirectoryResponse = ResponseEnvelope<WorkspaceListDirectoryResult>;

@@ -196,10 +196,10 @@ impl RpcGateway {
             return GatewayOutcome::Respond {
                 connection_id,
                 id: request_id,
-                response: GatewayResponse::Error(ErrorEnvelope::new(
+                response: GatewayResponse::Error(Box::new(ErrorEnvelope::new(
                     server_request_response_error(outcome),
                     ResponseMeta::default(),
-                )),
+                ))),
                 events: Vec::new(),
                 server_requests: Vec::new(),
             };

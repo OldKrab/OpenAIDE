@@ -7,11 +7,17 @@ import {
 import { requestTaskList, requestTaskOpen, requestTaskSetArchived } from "../intents/taskReadIntents";
 import { mapProtocolTaskSnapshot } from "../state/appServerProtocolMapping";
 import { TASK_NAVIGATION_PAGE_SIZE } from "../state/taskNavigationPolicy";
+import { newTaskPreparationKey } from "../state/newTaskPreparationContext";
 import type { AppCallbacksDependencies, NavigationCallbacks } from "./appControllerCallbackTypes";
+import {
+  disposablePreparedTaskId,
+  type PreparedTaskOwnership,
+} from "./preparedTaskOwnership";
 
 type NavigationDependencies = Pick<
   AppCallbacksDependencies,
   | "acceptTaskOpen"
+  | "attachmentResources"
   | "backendConnection"
   | "beginNavigationChange"
   | "createSnapshotRequestId"
@@ -19,18 +25,40 @@ type NavigationDependencies = Pick<
   | "dispatch"
   | "requestNativeSessions"
   | "state"
->;
+> & { preparedTaskOwnership: PreparedTaskOwnership };
 
 export function createNavigationCallbacks({
   acceptTaskOpen,
+  attachmentResources,
   backendConnection,
   beginNavigationChange,
   createSnapshotRequestId,
   currentNavigationGeneration,
   dispatch,
+  preparedTaskOwnership,
   requestNativeSessions,
   state,
 }: NavigationDependencies): NavigationCallbacks {
+  const discardPreparedTask = () => {
+    const taskId = disposablePreparedTaskId(state, preparedTaskOwnership);
+    if (!taskId) return undefined;
+    const preparationKey = newTaskPreparationKey(state);
+    if (!preparationKey) return undefined;
+    const currentLease = preparedTaskOwnership.currentLease();
+    if (currentLease && currentLease.taskId !== taskId) return undefined;
+    const lease = currentLease ?? preparedTaskOwnership.claim({
+      attachmentResources,
+      preparationKey,
+      taskId,
+    });
+    return preparedTaskOwnership.discard({
+      attachmentResources,
+      dispatch,
+      lease,
+      request: backendConnection?.request,
+      taskId,
+    });
+  };
   return {
     archiveTask: (taskId) => {
       const archivedTask = state.tasks.find((task) => task.task_id === taskId);
@@ -94,23 +122,28 @@ export function createNavigationCallbacks({
     },
     openNativeSession: (session) => {
       if (state.newTask.submitting) return;
+      const preparedTaskDisposal = discardPreparedTask();
       const navigationGeneration = beginNavigationChange();
       dispatch({ type: "newTask:nativeSessions:adopt", sessionId: session.session_id });
       if (backendConnection?.request) {
+        const request = backendConnection.request;
         const projectId = state.newTask.selection.projectId;
         if (!projectId) {
           dispatch({
             type: "newTask:nativeSessions:error",
+            sessionId: session.session_id,
             message: "Workspace unavailable. Refresh and try again.",
           });
           return;
         }
-        void backendConnection.request(TASK_ADOPT_NATIVE_SESSION, {
+        const adopt = () => request(TASK_ADOPT_NATIVE_SESSION, {
           projectId: projectId as ProjectId,
           agentId: state.newTask.selection.agentId as AgentId,
           nativeSessionId: session.session_id,
           title: session.title,
-        }).then((result) => {
+        });
+        const adoption = preparedTaskDisposal ? preparedTaskDisposal.then(adopt) : adopt();
+        void adoption.then((result) => {
           if (currentNavigationGeneration() !== navigationGeneration) {
             dispatch({ type: "newTask:nativeSessions:remove", sessionId: session.session_id });
             return;
@@ -129,6 +162,7 @@ export function createNavigationCallbacks({
           if (currentNavigationGeneration() !== navigationGeneration) return;
           dispatch({
             type: "newTask:nativeSessions:error",
+            sessionId: session.session_id,
             message: error instanceof Error ? error.message : "Unable to open task.",
           });
         });
@@ -136,6 +170,7 @@ export function createNavigationCallbacks({
       }
       dispatch({
         type: "newTask:nativeSessions:error",
+        sessionId: session.session_id,
         message: "App Server connection unavailable.",
       });
     },
@@ -146,10 +181,12 @@ export function createNavigationCallbacks({
         : { type: "surface.openNewTask" });
     },
     openSettings: () => {
+      void discardPreparedTask();
       beginNavigationChange();
       postHostMessage({ type: "surface.openSettings" });
     },
     openTask: (taskId) => {
+      void discardPreparedTask();
       beginNavigationChange();
       const task = state.tasks.find((item) => item.task_id === taskId);
       dispatch({ type: "selection:set", taskId });

@@ -71,7 +71,7 @@ export function actionsFromInitialSnapshot(
 
   if (includeTaskNavigation && snapshot.tasks) {
     const mapped = mapProtocolTaskNavigation(snapshot.tasks, context);
-    actions.push({ type: "tasks", tasks: mapped.tasks });
+    actions.push({ type: "tasks", archived: false, tasks: mapped.tasks });
     if (mapped.activeTaskId) actions.push({ type: "selection:set", taskId: mapped.activeTaskId });
     warnings.push(...mapped.warnings);
     requiresNativeSurface ||= mapped.requiresNativeSurface;

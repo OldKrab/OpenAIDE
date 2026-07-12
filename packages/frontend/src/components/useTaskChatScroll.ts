@@ -1,64 +1,68 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { KeyboardEvent, PointerEvent, UIEvent, WheelEvent } from "react";
 import {
-  chatFollowModeForPosition,
-  initialTaskScrollTop,
   scrollTopAfterPrependedContent,
-  scrollTopForGeneratedContent,
+  scrollTopForFollowingViewport,
 } from "./TaskViewModel";
-import {
-  chatScrollGeometry,
-  TaskChatScrollDiagnostics,
-  type TaskChatScrollDiagnosticContext,
-} from "./taskChatScrollDiagnostics";
+import type { TaskChatScrollState } from "../state/store";
 
-type ScrollOwnership = "following" | "reading";
-const USER_SCROLL_INTENT_WINDOW_MS = 500;
+type ScrollIntent = "towardEarlier" | "towardLatest";
+type PointerScrollGesture =
+  | { kind: "scrollbar" }
+  | { kind: "touch"; lastClientY: number };
+type ScrollAnchor = { scrollHeight: number; scrollTop: number };
+type HistoryAnchor = ScrollAnchor & { ownership: TaskChatScrollState["ownership"] };
+type PrependAnchor = ScrollAnchor & { requestGeneration: number; requestStarted: boolean };
+
 const SHOW_JUMP_TO_LATEST_DISTANCE_PX = 96;
 const HIDE_JUMP_TO_LATEST_DISTANCE_PX = 48;
 const JUMP_TO_LATEST_DURATION_MS = 180;
 
-// Owns the Chat viewport policy. Geometry can initialize ownership, but only explicit user intent
-// changes it afterward, so streamed layout changes cannot steal control from the reader.
-export function useTaskChatScroll({
-  diagnosticContext,
-  generating,
-  historySyncState,
-  itemCount,
-  onScrollTop,
-  pendingPrepend,
-  savedScrollTop,
-  taskId,
-}: {
-  diagnosticContext: TaskChatScrollDiagnosticContext;
-  generating: boolean;
+type UseTaskChatScrollOptions = {
   historySyncState?: "idle" | "checking" | "syncing" | "updated" | "failed";
   itemCount: number;
-  onScrollTop: (scrollTop: number) => void;
+  onScrollState: (scrollState: TaskChatScrollState) => void;
   pendingPrepend: boolean;
-  savedScrollTop?: number;
+  prependRequestGeneration: number;
+  savedScrollState?: TaskChatScrollState;
   taskId: string;
-}) {
+};
+
+/** Owns the Chat viewport: content follows only until explicit reader input takes control. */
+export function useTaskChatScroll(options: UseTaskChatScrollOptions) {
+  const {
+    historySyncState,
+    itemCount,
+    onScrollState,
+    pendingPrepend,
+    prependRequestGeneration,
+    savedScrollState,
+    taskId,
+  } = options;
   const messageListRef = useRef<HTMLDivElement | null>(null);
-  const diagnosticsRef = useRef<{ taskId: string; recorder: TaskChatScrollDiagnostics } | undefined>(undefined);
+  const historyAnchorRef = useRef<HistoryAnchor | undefined>(undefined);
   const jumpAnimationFrameRef = useRef<number | undefined>(undefined);
-  const prependAnchorRef = useRef<{ scrollHeight: number; scrollTop: number } | undefined>(undefined);
-  const historyAnchorRef = useRef<{ scrollHeight: number; scrollTop: number; following: boolean } | undefined>(undefined);
-  const lastScrollHeightRef = useRef<number | undefined>(undefined);
   const lastScrollTopRef = useRef<number | undefined>(undefined);
-  const skipGeneratedFollowOnceRef = useRef(false);
-  const scrollOwnershipRef = useRef<ScrollOwnership>("following");
-  const pointerScrollActiveRef = useRef(false);
-  const pendingPermissionIdsRef = useRef(diagnosticContext.pendingPermissions);
-  const permissionLayoutRecoveryRef = useRef(false);
-  const permissionLayoutRecoveryFrameRef = useRef<number | undefined>(undefined);
-  const towardLatestIntentUntilRef = useRef(0);
+  const onScrollStateRef = useRef(onScrollState);
+  const pointerGestureRef = useRef<PointerScrollGesture | undefined>(undefined);
+  const prependAnchorRef = useRef<PrependAnchor | undefined>(undefined);
+  const scrollIntentRef = useRef<ScrollIntent | undefined>(undefined);
+  const scrollOwnershipRef = useRef<TaskChatScrollState["ownership"]>("following");
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
-  const setScrollOwnership = useCallback((ownership: ScrollOwnership, reason = "unspecified") => {
+  onScrollStateRef.current = onScrollState;
+
+  const setScrollOwnership = useCallback((ownership: TaskChatScrollState["ownership"]) => {
     if (scrollOwnershipRef.current === ownership) return;
     scrollOwnershipRef.current = ownership;
-    diagnosticsRef.current?.recorder.recordOwnership(ownership, reason);
+    const messageList = messageListRef.current;
+    if (messageList) onScrollStateRef.current({ ownership, scrollTop: messageList.scrollTop });
   }, []);
+
+  const setScrollIntent = useCallback((intent: ScrollIntent) => {
+    if (scrollIntentRef.current === intent) return;
+    scrollIntentRef.current = intent;
+  }, []);
+
   const updateJumpToLatestVisibility = useCallback((messageList: HTMLDivElement) => {
     const distanceFromBottom = distanceFromLatest(messageList);
     setShowJumpToLatest((visible) => (
@@ -67,234 +71,254 @@ export function useTaskChatScroll({
         : distanceFromBottom > SHOW_JUMP_TO_LATEST_DISTANCE_PX
     ));
   }, []);
+
   const cancelJumpAnimation = useCallback(() => {
-    if (jumpAnimationFrameRef.current === undefined) return;
-    cancelAnimationFrame(jumpAnimationFrameRef.current);
+    const frame = jumpAnimationFrameRef.current;
+    if (frame === undefined) return;
+    globalThis.cancelAnimationFrame?.(frame);
     jumpAnimationFrameRef.current = undefined;
   }, []);
-  const clearPermissionLayoutRecovery = useCallback(() => {
-    permissionLayoutRecoveryRef.current = false;
-    if (permissionLayoutRecoveryFrameRef.current === undefined) return;
-    cancelAnimationFrame(permissionLayoutRecoveryFrameRef.current);
-    permissionLayoutRecoveryFrameRef.current = undefined;
+
+  const reconcileViewport = useCallback((messageList: HTMLDivElement) => {
+    const followingScrollTop = scrollTopForFollowingViewport({
+      clientHeight: messageList.clientHeight,
+      ownership: scrollOwnershipRef.current,
+      scrollHeight: messageList.scrollHeight,
+    });
+    if (followingScrollTop !== undefined) messageList.scrollTop = followingScrollTop;
+    lastScrollTopRef.current = messageList.scrollTop;
+    updateJumpToLatestVisibility(messageList);
+  }, [updateJumpToLatestVisibility]);
+
+  const refreshPendingPrependBaseline = useCallback((messageList: HTMLDivElement) => {
+    const anchor = prependAnchorRef.current;
+    if (
+      !anchor
+      || !pendingPrepend
+      || prependRequestGeneration !== anchor.requestGeneration
+    ) return false;
+    anchor.requestStarted = true;
+    anchor.scrollHeight = messageList.scrollHeight;
+    anchor.scrollTop = messageList.scrollTop;
+    return true;
+  }, [pendingPrepend, prependRequestGeneration]);
+
+  const refreshHistorySyncBaseline = useCallback((messageList: HTMLDivElement) => {
+    const anchor = historyAnchorRef.current;
+    if (!anchor) return false;
+    // Intrinsic growth while history is checking/syncing belongs to the live
+    // timeline, not the later native-history prepend.
+    anchor.scrollHeight = messageList.scrollHeight;
+    anchor.scrollTop = messageList.scrollTop;
+    anchor.ownership = scrollOwnershipRef.current;
+    return true;
   }, []);
 
-  // Scroll persistence feeds this hook's props. Restore only when task identity changes so user scrolling
-  // cannot re-enable follow mode.
+  // Scroll persistence feeds this hook's props. Restore only when Task identity changes.
   useLayoutEffect(() => {
     const messageList = messageListRef.current;
-    if (!messageList) return;
-    if (diagnosticsRef.current?.taskId !== taskId) {
-      diagnosticsRef.current = { taskId, recorder: new TaskChatScrollDiagnostics(taskId) };
-    }
-    const diagnostics = diagnosticsRef.current.recorder;
-    diagnostics.recordLifecycle("mounted");
+    if (!messageList) return undefined;
     cancelJumpAnimation();
-    clearPermissionLayoutRecovery();
-    pointerScrollActiveRef.current = false;
-    pendingPermissionIdsRef.current = diagnosticContext.pendingPermissions;
-    towardLatestIntentUntilRef.current = 0;
-    const scrollTop = initialTaskScrollTop(savedScrollTop, messageList.scrollHeight);
-    messageList.scrollTop = scrollTop;
-    setScrollOwnership(chatFollowModeForPosition({
-      scrollTop,
-      scrollHeight: messageList.scrollHeight,
-      clientHeight: messageList.clientHeight,
-    }) ? "following" : "reading", "taskRestored");
-    setShowJumpToLatest(distanceFromLatest(messageList) > SHOW_JUMP_TO_LATEST_DISTANCE_PX);
-    lastScrollTopRef.current = scrollTop;
-    lastScrollHeightRef.current = messageList.scrollHeight;
-    diagnostics.recordGeometry(chatScrollGeometry(messageList));
+    historyAnchorRef.current = undefined;
+    pointerGestureRef.current = undefined;
+    prependAnchorRef.current = undefined;
+    scrollIntentRef.current = undefined;
+
+    scrollOwnershipRef.current = savedScrollState?.ownership ?? "following";
+    messageList.scrollTop = savedScrollState?.scrollTop ?? messageList.scrollHeight;
+    reconcileViewport(messageList);
+
     return () => {
-      clearPermissionLayoutRecovery();
-      diagnostics.recordLifecycle("unmounted");
+      cancelJumpAnimation();
+      historyAnchorRef.current = undefined;
+      pointerGestureRef.current = undefined;
+      prependAnchorRef.current = undefined;
+      scrollIntentRef.current = undefined;
     };
-  }, [cancelJumpAnimation, clearPermissionLayoutRecovery, setScrollOwnership, taskId]);
+  }, [cancelJumpAnimation, reconcileViewport, taskId]);
+
+  const finishPointerGesture = useCallback(() => {
+    if (!pointerGestureRef.current) return;
+    pointerGestureRef.current = undefined;
+    scrollIntentRef.current = undefined;
+  }, []);
+
+  const trackTouchGesture = useCallback((event: globalThis.PointerEvent) => {
+    const gesture = pointerGestureRef.current;
+    if (gesture?.kind !== "touch" || event.pointerType !== "touch") return;
+    const movement = event.clientY - gesture.lastClientY;
+    if (movement === 0) return;
+    gesture.lastClientY = event.clientY;
+    cancelJumpAnimation();
+    if (movement > 0) {
+      setScrollIntent("towardEarlier");
+      setScrollOwnership("reading");
+    } else {
+      setScrollIntent("towardLatest");
+    }
+  }, [cancelJumpAnimation, setScrollIntent, setScrollOwnership]);
 
   useEffect(() => {
     if (typeof window === "undefined" || typeof window.addEventListener !== "function") return undefined;
-    const finishPointerScroll = () => {
-      pointerScrollActiveRef.current = false;
-    };
-    // Pointer release can occur outside Chat after a scrollbar drag. Window-level
-    // cleanup prevents that completed gesture from owning later layout scrolls.
-    window.addEventListener("pointerup", finishPointerScroll);
-    window.addEventListener("pointercancel", finishPointerScroll);
+    window.addEventListener("pointermove", trackTouchGesture);
+    window.addEventListener("pointerup", finishPointerGesture);
+    window.addEventListener("pointercancel", finishPointerGesture);
     return () => {
-      window.removeEventListener("pointerup", finishPointerScroll);
-      window.removeEventListener("pointercancel", finishPointerScroll);
+      window.removeEventListener("pointermove", trackTouchGesture);
+      window.removeEventListener("pointerup", finishPointerGesture);
+      window.removeEventListener("pointercancel", finishPointerGesture);
     };
-  }, []);
+  }, [finishPointerGesture, taskId, trackTouchGesture]);
 
+  // Rows are observed directly because an overflow container's own box does not change when
+  // markdown, images, permissions, or tool details change its scroll height.
   useLayoutEffect(() => {
-    diagnosticsRef.current?.recorder.recordRender(diagnosticContext);
-  });
-
-  const pendingPermissionsKey = JSON.stringify(diagnosticContext.pendingPermissions);
-  useLayoutEffect(() => {
-    const nextPermissionIds = diagnosticContext.pendingPermissions;
-    const permissionResolved = pendingPermissionIdsRef.current.some(
-      (requestId) => !nextPermissionIds.includes(requestId),
-    );
-    pendingPermissionIdsRef.current = nextPermissionIds;
-    if (permissionResolved) {
-      // The terminal card and resumed activity can settle in the same browser
-      // frame. Recovery is a one-paint layout transaction, not a time window
-      // that could later override reader intent.
-      clearPermissionLayoutRecovery();
-      permissionLayoutRecoveryRef.current = true;
-      if (typeof requestAnimationFrame === "function") {
-        permissionLayoutRecoveryFrameRef.current = requestAnimationFrame(() => {
-          permissionLayoutRecoveryRef.current = false;
-          permissionLayoutRecoveryFrameRef.current = undefined;
-        });
+    const messageList = messageListRef.current;
+    if (!messageList || typeof ResizeObserver !== "function") return undefined;
+    let active = true;
+    const onResize = () => {
+      if (!active || messageListRef.current !== messageList) return;
+      reconcileViewport(messageList);
+      refreshHistorySyncBaseline(messageList);
+      refreshPendingPrependBaseline(messageList);
+    };
+    const resizeObserver = new ResizeObserver(onResize);
+    const observedChildren = new Set<Element>();
+    const observeCurrentChildren = () => {
+      const currentChildren = new Set(Array.from(messageList.children));
+      for (const child of observedChildren) {
+        if (currentChildren.has(child)) continue;
+        resizeObserver.unobserve(child);
+        observedChildren.delete(child);
       }
-    }
-  }, [clearPermissionLayoutRecovery, pendingPermissionsKey]);
+      for (const child of currentChildren) {
+        if (observedChildren.has(child)) continue;
+        resizeObserver.observe(child);
+        observedChildren.add(child);
+      }
+    };
+    resizeObserver.observe(messageList);
+    observeCurrentChildren();
+    const mutationObserver = typeof MutationObserver === "function"
+      ? new MutationObserver(() => {
+          observeCurrentChildren();
+          onResize();
+        })
+      : undefined;
+    mutationObserver?.observe(messageList, { childList: true, subtree: true });
+
+    return () => {
+      active = false;
+      mutationObserver?.disconnect();
+      resizeObserver.disconnect();
+    };
+  }, [reconcileViewport, refreshHistorySyncBaseline, refreshPendingPrependBaseline, taskId]);
 
   useLayoutEffect(() => {
     const messageList = messageListRef.current;
     if (!messageList) return;
     if (historySyncState === "checking" || historySyncState === "syncing") {
-      historyAnchorRef.current = {
+      historyAnchorRef.current ??= {
         scrollHeight: messageList.scrollHeight,
         scrollTop: messageList.scrollTop,
-        following: scrollOwnershipRef.current === "following",
+        ownership: scrollOwnershipRef.current,
       };
       return;
     }
     const anchor = historyAnchorRef.current;
     if (!anchor) return;
-    messageList.scrollTop = anchor.following
-      ? messageList.scrollHeight
-      : scrollTopAfterPrependedContent({
-          previousScrollHeight: anchor.scrollHeight,
-          previousScrollTop: anchor.scrollTop,
-          nextScrollHeight: messageList.scrollHeight,
-        });
-    lastScrollTopRef.current = messageList.scrollTop;
-    lastScrollHeightRef.current = messageList.scrollHeight;
+    if (historySyncState === "updated") {
+      messageList.scrollTop = anchor.ownership === "following"
+        ? latestScrollTop(messageList)
+        : scrollTopAfterPrependedContent({
+            previousScrollHeight: anchor.scrollHeight,
+            previousScrollTop: anchor.scrollTop,
+            nextScrollHeight: messageList.scrollHeight,
+          });
+    }
     historyAnchorRef.current = undefined;
-    skipGeneratedFollowOnceRef.current = true;
-    updateJumpToLatestVisibility(messageList);
-  }, [historySyncState, updateJumpToLatestVisibility]);
+    reconcileViewport(messageList);
+  }, [historySyncState, reconcileViewport]);
 
   useLayoutEffect(() => {
     const messageList = messageListRef.current;
     const anchor = prependAnchorRef.current;
     if (!messageList || !anchor) return;
-    if (pendingPrepend && messageList.scrollHeight === anchor.scrollHeight) return;
+    if (prependRequestGeneration < anchor.requestGeneration) return;
+    if (prependRequestGeneration > anchor.requestGeneration) {
+      prependAnchorRef.current = undefined;
+      return;
+    }
+    if (refreshPendingPrependBaseline(messageList)) {
+      // While the request is in flight, new live rows and intrinsic layout changes are
+      // unrelated to the future prepend. Advance the baseline without moving the reader.
+      return;
+    }
+    if (!anchor.requestStarted) return;
     messageList.scrollTop = scrollTopAfterPrependedContent({
       previousScrollHeight: anchor.scrollHeight,
       previousScrollTop: anchor.scrollTop,
       nextScrollHeight: messageList.scrollHeight,
     });
-    lastScrollTopRef.current = messageList.scrollTop;
-    lastScrollHeightRef.current = messageList.scrollHeight;
-    updateJumpToLatestVisibility(messageList);
     prependAnchorRef.current = undefined;
-    skipGeneratedFollowOnceRef.current = true;
-  }, [itemCount, pendingPrepend, updateJumpToLatestVisibility]);
+    reconcileViewport(messageList);
+  }, [itemCount, pendingPrepend, prependRequestGeneration, reconcileViewport, refreshPendingPrependBaseline]);
 
+  // React updates are reconciled before paint; observers cover later intrinsic reflow.
   useLayoutEffect(() => {
     const messageList = messageListRef.current;
-    if (!messageList) return;
-    if (skipGeneratedFollowOnceRef.current) {
-      skipGeneratedFollowOnceRef.current = false;
-      return;
-    }
-    const contentGrew = lastScrollHeightRef.current !== undefined
-      && messageList.scrollHeight > lastScrollHeightRef.current;
-    lastScrollHeightRef.current = messageList.scrollHeight;
-    const scrollTop = scrollTopForGeneratedContent({
-      followMode: scrollOwnershipRef.current === "following",
-      // Final output can arrive in the same snapshot that marks the Task inactive.
-      generating: generating || contentGrew,
-      scrollHeight: messageList.scrollHeight,
-    });
-    if (scrollTop !== undefined) {
-      messageList.scrollTop = scrollTop;
-      lastScrollTopRef.current = messageList.scrollTop;
-    }
-    // Button visibility follows geometry, independently of whether streamed content may auto-follow.
-    updateJumpToLatestVisibility(messageList);
+    if (messageList) reconcileViewport(messageList);
   });
 
   const onScroll = useCallback((event: UIEvent<HTMLDivElement>) => {
     const messageList = event.currentTarget;
-    const scrollTop = messageList.scrollTop;
     const previousScrollTop = lastScrollTopRef.current;
-    if (pointerScrollActiveRef.current && previousScrollTop !== undefined) {
-      if (scrollTop > previousScrollTop) {
-        towardLatestIntentUntilRef.current = Date.now() + USER_SCROLL_INTENT_WINDOW_MS;
-      } else if (scrollTop < previousScrollTop) {
-        towardLatestIntentUntilRef.current = 0;
+    const pointerGesture = pointerGestureRef.current;
+    if (pointerGesture?.kind === "scrollbar" && previousScrollTop !== undefined) {
+      if (messageList.scrollTop < previousScrollTop) {
+        setScrollIntent("towardEarlier");
+        setScrollOwnership("reading");
+      } else if (messageList.scrollTop > previousScrollTop) {
+        setScrollIntent("towardLatest");
       }
     }
     if (
-      previousScrollTop !== undefined
-      && scrollTop < previousScrollTop
-      && scrollOwnershipRef.current === "following"
-      && !pointerScrollActiveRef.current
-      && permissionLayoutRecoveryRef.current
-      && lastScrollHeightRef.current !== undefined
-      && messageList.scrollHeight !== lastScrollHeightRef.current
-      && !isAtLatest(messageList)
-    ) {
-      // Permission resolution can contract the list and then append resumed work
-      // before the browser delivers its scroll event. Keep layout movement from
-      // masquerading as user intent and stranding a following viewport.
-      messageList.scrollTop = messageList.scrollHeight;
-      lastScrollTopRef.current = messageList.scrollTop;
-      lastScrollHeightRef.current = messageList.scrollHeight;
-      clearPermissionLayoutRecovery();
-      diagnosticsRef.current?.recorder.recordGeometry(chatScrollGeometry(messageList));
-      updateJumpToLatestVisibility(messageList);
-      onScrollTop(messageList.scrollTop);
-      return;
-    }
-    if (
-      previousScrollTop !== undefined
-      && scrollTop < previousScrollTop
-      && (pointerScrollActiveRef.current || !isAtLatest(messageList))
-    ) {
-      setScrollOwnership("reading", "scrollTopDecreased");
-    } else if (
-      previousScrollTop !== undefined
-      && scrollTop > previousScrollTop
-      && scrollOwnershipRef.current === "reading"
+      scrollOwnershipRef.current === "reading"
+      && scrollIntentRef.current === "towardLatest"
       && isAtLatest(messageList)
-      && (pointerScrollActiveRef.current || Date.now() <= towardLatestIntentUntilRef.current)
     ) {
-      towardLatestIntentUntilRef.current = 0;
-      setScrollOwnership("following", "reachedLatestWithIntent");
+      scrollIntentRef.current = undefined;
+      setScrollOwnership("following");
     }
-    lastScrollTopRef.current = scrollTop;
-    diagnosticsRef.current?.recorder.recordGeometry(chatScrollGeometry(messageList));
+    // Wheel/keyboard intent belongs to this scroll transaction; pointer gestures set it again
+    // for each movement while they remain active.
+    scrollIntentRef.current = undefined;
+    reconcileViewport(messageList);
     if (historyAnchorRef.current) {
       historyAnchorRef.current = {
         scrollHeight: messageList.scrollHeight,
-        scrollTop,
-        following: scrollOwnershipRef.current === "following",
+        scrollTop: messageList.scrollTop,
+        ownership: scrollOwnershipRef.current,
       };
     }
-    updateJumpToLatestVisibility(messageList);
-    onScrollTop(scrollTop);
-  }, [clearPermissionLayoutRecovery, onScrollTop, setScrollOwnership, updateJumpToLatestVisibility]);
+    onScrollStateRef.current({ ownership: scrollOwnershipRef.current, scrollTop: messageList.scrollTop });
+  }, [reconcileViewport, setScrollIntent, setScrollOwnership]);
 
   const onWheel = useCallback((event: WheelEvent<HTMLDivElement>) => {
+    if (event.deltaY === 0) return;
     cancelJumpAnimation();
     if (event.deltaY < 0) {
-      diagnosticsRef.current?.recorder.recordIntent("towardEarlier");
-      towardLatestIntentUntilRef.current = 0;
-      setScrollOwnership("reading", "wheelTowardEarlier");
-      return;
+      setScrollIntent("towardEarlier");
+      setScrollOwnership("reading");
+    } else {
+      setScrollIntent("towardLatest");
+      const messageList = event.currentTarget ?? messageListRef.current;
+      if (messageList && isAtLatest(messageList)) {
+        scrollIntentRef.current = undefined;
+        setScrollOwnership("following");
+      }
     }
-    if (event.deltaY > 0) {
-      diagnosticsRef.current?.recorder.recordIntent("towardLatest");
-      towardLatestIntentUntilRef.current = Date.now() + USER_SCROLL_INTENT_WINDOW_MS;
-    }
-  }, [cancelJumpAnimation, setScrollOwnership]);
+  }, [cancelJumpAnimation, setScrollIntent, setScrollOwnership]);
 
   const onKeyDown = useCallback((event: KeyboardEvent<HTMLDivElement>) => {
     if (
@@ -307,36 +331,29 @@ export function useTaskChatScroll({
     const direction = keyboardScrollDirection(event.key, event.shiftKey);
     if (!direction) return;
     cancelJumpAnimation();
-    diagnosticsRef.current?.recorder.recordIntent(
-      direction === "towardEarlier" ? "towardEarlier" : "towardLatest",
-    );
+    setScrollIntent(direction);
     if (direction === "towardEarlier") {
-      towardLatestIntentUntilRef.current = 0;
-      setScrollOwnership("reading", "keyboardTowardEarlier");
-      return;
+      setScrollOwnership("reading");
+    } else if (isAtLatest(event.currentTarget)) {
+      scrollIntentRef.current = undefined;
+      setScrollOwnership("following");
     }
-    towardLatestIntentUntilRef.current = Date.now() + USER_SCROLL_INTENT_WINDOW_MS;
-    const messageList = messageListRef.current;
-    if (messageList && isAtLatest(messageList)) {
-      towardLatestIntentUntilRef.current = 0;
-      setScrollOwnership("following", "keyboardReachedLatest");
-    }
-  }, [cancelJumpAnimation, setScrollOwnership]);
+  }, [cancelJumpAnimation, setScrollIntent, setScrollOwnership]);
 
-  const onPointerDown = useCallback((_event: PointerEvent<HTMLDivElement>) => {
-    cancelJumpAnimation();
-    // Pointer ownership covers touch gestures and mouse scrollbar dragging.
-    pointerScrollActiveRef.current = true;
+  const onPointerDown = useCallback((event: PointerEvent<HTMLDivElement>) => {
+    const gesture = event.pointerType === "touch"
+      ? { kind: "touch" as const, lastClientY: event.clientY }
+      : (isVerticalScrollbarPointer(event) ? { kind: "scrollbar" as const } : undefined);
+    pointerGestureRef.current = gesture;
+    if (gesture?.kind === "scrollbar") cancelJumpAnimation();
   }, [cancelJumpAnimation]);
 
-  const finishPointerScroll = useCallback((_event: PointerEvent<HTMLDivElement>) => {
-    pointerScrollActiveRef.current = false;
-  }, []);
-
-  const capturePrependAnchor = useCallback(() => {
+  const capturePrependAnchor = useCallback((requestGeneration: number) => {
     const messageList = messageListRef.current;
     if (!messageList) return;
     prependAnchorRef.current = {
+      requestGeneration,
+      requestStarted: false,
       scrollHeight: messageList.scrollHeight,
       scrollTop: messageList.scrollTop,
     };
@@ -346,53 +363,56 @@ export function useTaskChatScroll({
     const messageList = messageListRef.current;
     if (!messageList) return;
     cancelJumpAnimation();
-    towardLatestIntentUntilRef.current = 0;
-    setScrollOwnership("following", "jumpToLatest");
+    scrollIntentRef.current = undefined;
     setShowJumpToLatest(false);
-    const startScrollTop = messageList.scrollTop;
-    if (prefersReducedMotion()) {
-      messageList.scrollTop = messageList.scrollHeight;
+    const finish = () => {
+      messageList.scrollTop = latestScrollTop(messageList);
       lastScrollTopRef.current = messageList.scrollTop;
-      onScrollTop(messageList.scrollTop);
+      scrollOwnershipRef.current = "following";
+      onScrollStateRef.current({ ownership: "following", scrollTop: messageList.scrollTop });
+    };
+    if (prefersReducedMotion() || typeof requestAnimationFrame !== "function") {
+      finish();
       return;
     }
+    const startScrollTop = messageList.scrollTop;
     const startedAt = performance.now();
     const animate = (now: number) => {
       const progress = Math.min(1, (now - startedAt) / JUMP_TO_LATEST_DURATION_MS);
       const easedProgress = 1 - ((1 - progress) ** 4);
-      const targetScrollTop = messageList.scrollHeight - messageList.clientHeight;
+      const targetScrollTop = latestScrollTop(messageList);
       messageList.scrollTop = startScrollTop + ((targetScrollTop - startScrollTop) * easedProgress);
       lastScrollTopRef.current = messageList.scrollTop;
       if (progress < 1) {
         jumpAnimationFrameRef.current = requestAnimationFrame(animate);
-        return;
+      } else {
+        jumpAnimationFrameRef.current = undefined;
+        finish();
       }
-      jumpAnimationFrameRef.current = undefined;
-      onScrollTop(messageList.scrollTop);
     };
     jumpAnimationFrameRef.current = requestAnimationFrame(animate);
-  }, [cancelJumpAnimation, onScrollTop, setScrollOwnership]);
+  }, [cancelJumpAnimation]);
 
   return {
     capturePrependAnchor,
     jumpToLatest,
     messageListRef,
     onKeyDown,
-    onPointerCancel: finishPointerScroll,
+    onPointerCancel: finishPointerGesture,
     onPointerDown,
-    onPointerUp: finishPointerScroll,
+    onPointerUp: finishPointerGesture,
     onScroll,
     onWheel,
     showJumpToLatest,
   };
 }
 
-function keyboardScrollDirection(key: string, shiftKey: boolean) {
+function keyboardScrollDirection(key: string, shiftKey: boolean): ScrollIntent | undefined {
   if (key === "PageUp" || key === "Home" || key === "ArrowUp" || (key === " " && shiftKey)) {
-    return "towardEarlier" as const;
+    return "towardEarlier";
   }
   if (key === "PageDown" || key === "End" || key === "ArrowDown" || (key === " " && !shiftKey)) {
-    return "towardLatest" as const;
+    return "towardLatest";
   }
   return undefined;
 }
@@ -407,12 +427,24 @@ function nestedControlOwnsScrollKey(target: EventTarget, viewport: HTMLDivElemen
   ));
 }
 
+function isVerticalScrollbarPointer(event: PointerEvent<HTMLDivElement>) {
+  if (event.pointerType !== "mouse") return false;
+  const scrollbarWidth = event.currentTarget.offsetWidth - event.currentTarget.clientWidth;
+  if (scrollbarWidth <= 0) return false;
+  const bounds = event.currentTarget.getBoundingClientRect();
+  return event.clientX >= bounds.right - scrollbarWidth && event.clientX <= bounds.right;
+}
+
 function isAtLatest(messageList: HTMLDivElement) {
   return distanceFromLatest(messageList) <= 2;
 }
 
 function distanceFromLatest(messageList: HTMLDivElement) {
   return messageList.scrollHeight - messageList.scrollTop - messageList.clientHeight;
+}
+
+function latestScrollTop(messageList: HTMLDivElement) {
+  return Math.max(0, messageList.scrollHeight - messageList.clientHeight);
 }
 
 function prefersReducedMotion() {

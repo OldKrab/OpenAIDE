@@ -115,31 +115,6 @@ describe("TaskView permission response state", () => {
     expect(items.map((item) => item.message_id)).toEqual(["activity-1", "message-1"]);
   });
 
-  it("does not render pending Shell input as authoritative Chat", async () => {
-    const { chatItemsWithPendingInput } = await import("./TaskView");
-    const activity = activityMessage("activity-1");
-
-    const items = chatItemsWithPendingInput(
-      [activity],
-      {
-        prompt: "",
-        context: [],
-        pending: {
-          prompt: "Ship the fix",
-          context: [{
-            kind: "file",
-            label: "screenshot.png",
-            local_id: "attachment_1",
-            preview_url: "data:image/png;base64,c2NyZWVuc2hvdA==",
-          }],
-        },
-      },
-      "task_1",
-    );
-
-    expect(items.map((item) => item.message_id)).toEqual(["activity-1"]);
-  });
-
   it("blocks the task composer until App Server initialize completes", async () => {
     const { taskComposerAvailability } = await import("./TaskView");
 
@@ -175,7 +150,7 @@ describe("TaskView permission response state", () => {
     });
   });
 
-  it("keeps the task composer editable and sendable while the agent is working", async () => {
+  it("keeps the task draft editable but disables Send while the Agent turn blocks sending", async () => {
     const { taskComposerAvailability } = await import("./TaskView");
 
     expect(
@@ -183,16 +158,17 @@ describe("TaskView permission response state", () => {
         backendReady: true,
         inputPending: false,
         preparationBlocked: false,
+        sendCapabilityState: "blocked",
         taskStatus: "active",
       }),
     ).toEqual({
       editingDisabled: false,
-      sendDisabled: false,
+      sendDisabled: true,
       placeholder: "Send a follow-up",
     });
   });
 
-  it("keeps the task composer editable and sendable while the task is blocked", async () => {
+  it("keeps the task draft editable but disables Send while a request blocks the Task", async () => {
     const { taskComposerAvailability } = await import("./TaskView");
 
     expect(
@@ -200,12 +176,32 @@ describe("TaskView permission response state", () => {
         backendReady: true,
         inputPending: false,
         preparationBlocked: false,
+        sendCapabilityState: "blocked",
         taskStatus: "blocked",
       }),
     ).toEqual({
       editingDisabled: false,
-      sendDisabled: false,
+      sendDisabled: true,
       placeholder: "Draft follow-up while input is pending.",
+    });
+  });
+
+  it("locks an uncertain send while keeping its exact retry available", async () => {
+    const { taskComposerAvailability } = await import("./TaskView");
+
+    expect(
+      taskComposerAvailability({
+        backendReady: true,
+        inputPending: false,
+        inputUncertain: true,
+        preparationBlocked: false,
+        sendCapabilityState: "blocked",
+        taskStatus: "active",
+      }),
+    ).toEqual({
+      editingDisabled: true,
+      sendDisabled: false,
+      placeholder: "Retry this exact message.",
     });
   });
 
@@ -327,18 +323,21 @@ describe("TaskView permission response state", () => {
     expect(items.map((item) => item.message_id)).toEqual(["activity-1", "message-1", "agent-1"]);
   });
 
-  it("keeps saved pending permission cards after coalesced activity runs", async () => {
+  it("keeps a saved permission next to its matching ungrouped activity row", async () => {
     const { chatItemsWithAppServerPermissions } = await import("./TaskView");
-    const { coalesceAdjacentActivities } = await import("../state/chatActivityCoalescing");
     const activity = activityMessage("activity-1", "tool-1");
     const thought = thoughtMessage("thought-1");
     const command = activityMessage("activity-2", "tool-2");
     const permission = resolvedPermissionMessage("agent-request-1", "server-request-1", "tool-2", "permission-1");
-    const renderedItems = coalesceAdjacentActivities([activity, thought, command, permission]);
 
-    const items = chatItemsWithAppServerPermissions(renderedItems, {}, "task_1");
+    const items = chatItemsWithAppServerPermissions([activity, thought, command, permission], {}, "task_1");
 
-    expect(items.map((item) => item.message_id)).toEqual(["activity-1", "permission-1"]);
+    expect(items.map((item) => item.message_id)).toEqual([
+      "activity-1",
+      "thought-1",
+      "activity-2",
+      "permission-1",
+    ]);
   });
 
   it("does not show a separate working status while a permission decision is pending", async () => {
@@ -373,13 +372,6 @@ describe("TaskView permission response state", () => {
     expect(new Set(items.map(chatRowKey)).size).toBe(items.length);
   });
 
-  it("restores saved chat scroll position and defaults uncached opens to the end", async () => {
-    const { initialTaskScrollTop } = await import("./TaskView");
-
-    expect(initialTaskScrollTop(240, 1000)).toBe(240);
-    expect(initialTaskScrollTop(undefined, 1000)).toBe(1000);
-  });
-
   it("keeps the same visible chat content anchored after earlier messages prepend", async () => {
     const { scrollTopAfterPrependedContent } = await import("./TaskView");
 
@@ -395,65 +387,6 @@ describe("TaskView permission response state", () => {
     })).toBe(240);
   });
 
-  it("follows generated chat content only while the user is near the end", async () => {
-    const { scrollTopForGeneratedContent } = await import("./TaskView");
-
-    expect(scrollTopForGeneratedContent({
-      followMode: true,
-      generating: true,
-      scrollHeight: 1380,
-    })).toBe(1380);
-    expect(scrollTopForGeneratedContent({
-      followMode: false,
-      generating: true,
-      scrollHeight: 1380,
-    })).toBeUndefined();
-    expect(scrollTopForGeneratedContent({
-      followMode: true,
-      generating: false,
-      scrollHeight: 1380,
-    })).toBeUndefined();
-  });
-
-  it("keeps live follow active only for App Server work or pending input", async () => {
-    const { taskChatHasLiveUpdates } = await import("./taskChatPresentation");
-
-    expect(taskChatHasLiveUpdates({
-      inputPending: false,
-      taskStatus: "active",
-    })).toBe(true);
-    expect(taskChatHasLiveUpdates({ inputPending: true, taskStatus: "inactive" })).toBe(true);
-    expect(taskChatHasLiveUpdates({ inputPending: false, taskStatus: "inactive" })).toBe(false);
-  });
-
-  it("leaves follow mode when the user scrolls upward near the end", async () => {
-    const { chatFollowModeForPosition } = await import("./TaskView");
-
-    expect(chatFollowModeForPosition({
-      previousScrollTop: 1000,
-      scrollTop: 968,
-      scrollHeight: 1400,
-      clientHeight: 400,
-    })).toBe(false);
-    expect(chatFollowModeForPosition({
-      previousScrollTop: 1000,
-      scrollTop: 998,
-      scrollHeight: 1400,
-      clientHeight: 400,
-    })).toBe(false);
-    expect(chatFollowModeForPosition({
-      previousScrollTop: 920,
-      scrollTop: 968,
-      scrollHeight: 1400,
-      clientHeight: 400,
-    })).toBe(true);
-    expect(chatFollowModeForPosition({
-      previousScrollTop: 920,
-      scrollTop: 968,
-      scrollHeight: 1400,
-      clientHeight: 400,
-    })).toBe(true);
-  });
 });
 
 function activityMessage(id: string, toolCallId?: string): ChatMessage {

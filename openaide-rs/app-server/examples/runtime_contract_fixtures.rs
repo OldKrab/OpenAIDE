@@ -121,6 +121,7 @@ fn main() {
             config_options: HashMap::from([("model".to_string(), "gpt-5.5".to_string())]),
         },
         config_options_catalog: None,
+        pending_config_change: None,
         agent_commands_catalog: None,
         preparation: TaskPreparationRecord::Ready,
         revision: 9,

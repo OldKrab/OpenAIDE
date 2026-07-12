@@ -439,10 +439,6 @@ async fn open_on_shared_process(
 }
 
 async fn wait_for_shared_startup_cancellation(cancellation: TurnCancellation) -> RuntimeError {
-    loop {
-        if cancellation.is_cancelled() {
-            return RuntimeError::NotReady("ACP session start cancelled".to_string());
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-    }
+    cancellation.cancelled().await;
+    RuntimeError::NotReady("ACP session start cancelled".to_string())
 }

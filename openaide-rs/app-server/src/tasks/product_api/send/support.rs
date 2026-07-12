@@ -59,8 +59,15 @@ impl TaskProductApi {
                         && attachments.len() == receipt.attachment_handles.len()
                 )
         });
+        let task_points_to_receipt =
+            task.active_turn_id.as_deref() == Some(receipt.turn_id.as_str());
         if !has_user_message {
-            return Ok(None);
+            // Native Session reconciliation deliberately replaces local Chat identities.
+            // A completed receipt journal remains authoritative after that replacement;
+            // a tentative/orphan receipt still cannot manufacture an accepted send.
+            return Ok(receipt
+                .durable_chat_written
+                .then_some(task_points_to_receipt));
         }
         let expected_turn_identity = format!("turn:{}", receipt.turn_id);
         let turn_status = messages.iter().find_map(|stored| {
@@ -72,8 +79,6 @@ impl TaskProductApi {
                 _ => None,
             }
         });
-        let task_points_to_receipt =
-            task.active_turn_id.as_deref() == Some(receipt.turn_id.as_str());
         Ok(Some(match turn_status {
             Some(ActivityStatus::Running) => !task_points_to_receipt,
             Some(_) => task_points_to_receipt,

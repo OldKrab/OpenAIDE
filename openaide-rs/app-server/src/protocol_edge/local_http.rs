@@ -207,7 +207,7 @@ fn gateway_response(id: Value, response: GatewayResponse) -> Value {
             "id": id,
             "result": result,
         }),
-        GatewayResponse::Error(error) => jsonrpc_error(id, error),
+        GatewayResponse::Error(error) => jsonrpc_error(id, *error),
     }
 }
 
@@ -228,6 +228,7 @@ fn invalid_request(message: impl Into<String>) -> ErrorEnvelope {
             target: Some(ErrorTarget {
                 method: None,
                 field: None,
+                current_task: None,
             }),
         },
         ResponseMeta::default(),

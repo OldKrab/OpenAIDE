@@ -5,7 +5,6 @@ use uuid::Uuid;
 use crate::protocol::model::{
     ActivityStatus, InterruptionReason, NormalizedMessage, TaskStatus as LegacyTaskStatus,
 };
-use crate::snapshots::task_snapshot::project_stored_task_snapshot;
 use crate::tasks::mutation::{TaskCommitOutcome, TaskMutationResult};
 use crate::tasks::snapshot::build_snapshot;
 use crate::time::now_string;
@@ -21,21 +20,26 @@ impl TaskProductApi {
         params: TaskCancelParams,
     ) -> Result<openaide_app_server_protocol::snapshot::TaskSnapshot, ProtocolError> {
         let task_id = params.task_id.as_str().to_string();
+        self.turn_acceptance
+            .serialize(&task_id, || self.cancel_task_serialized(params))
+    }
+
+    fn cancel_task_serialized(
+        &self,
+        params: TaskCancelParams,
+    ) -> Result<openaide_app_server_protocol::snapshot::TaskSnapshot, ProtocolError> {
+        let task_id = params.task_id.as_str().to_string();
         let task = self.store.read_task(&task_id).map_err(runtime_error)?;
         super::reject_tombstoned_task(&task)?;
         let Some(active_turn_id) = task.active_turn_id.clone() else {
             let snapshot = build_snapshot(&self.store, &task_id, 100).map_err(storage_error)?;
-            return project_stored_task_snapshot(snapshot);
+            return self.project_task_snapshot(snapshot);
         };
         if let Some(expected) = params.turn_id.as_ref() {
             if expected.as_str() != active_turn_id {
                 return Err(conflict_error("Task turn is not active"));
             }
         }
-        // Stop also owns synchronization cancellation, including a Retry that has not prompted yet.
-        let cancellation_generation = self.history_sync.begin_send(&task_id);
-        self.turn_runner.cancel_turn(&active_turn_id);
-
         let now = now_string();
         let result = self
             .mutations
@@ -68,17 +72,23 @@ impl TaskProductApi {
         if !matches!(result.outcome, TaskCommitOutcome::Committed(_)) {
             return Err(conflict_error("Task turn is not active"));
         }
-        if self.history_sync.take_deferred_send(&task_id).is_some() {
-            self.publish_history_sync(
-                &task_id,
-                openaide_app_server_protocol::snapshot::TaskHistorySyncSnapshot::Idle {
-                    generation: cancellation_generation,
-                },
-            );
-        }
+        // Keep Task acceptance serialized through generation retirement. Failed persistence
+        // leaves the accepted Turn untouched, and a successful cancel cannot invalidate a newer
+        // send between its exact-Turn commit and startup cancellation.
+        let cancellation_generation = self.history_sync.begin_send(&task_id);
+        self.turn_runner.cancel_turn(&active_turn_id);
+        self.turn_acceptance
+            .retire_pending_turn(&task_id, &active_turn_id);
+        self.pending_send_sync.take(&task_id);
+        self.publish_history_sync(
+            &task_id,
+            openaide_app_server_protocol::snapshot::TaskHistorySyncSnapshot::Idle {
+                generation: cancellation_generation,
+            },
+        );
         let snapshot = result
             .response_snapshot
             .ok_or_else(|| internal_error("missing task cancel snapshot"))?;
-        project_stored_task_snapshot(snapshot)
+        self.project_task_snapshot(snapshot)
     }
 }

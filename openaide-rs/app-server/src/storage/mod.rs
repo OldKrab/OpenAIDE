@@ -35,9 +35,13 @@ struct StoreInner {
     #[cfg(test)]
     crash_before_next_task_write: AtomicBool,
     #[cfg(test)]
+    fail_next_task_write: AtomicBool,
+    #[cfg(test)]
     message_file_write_count: AtomicUsize,
     #[cfg(test)]
     after_next_task_snapshot_read: Mutex<Option<Box<dyn FnOnce() + Send>>>,
+    #[cfg(test)]
+    after_next_task_read: Mutex<Option<Box<dyn FnOnce() + Send>>>,
 }
 
 impl From<StoreOpenError> for RuntimeError {
@@ -64,9 +68,13 @@ impl Store {
                 #[cfg(test)]
                 crash_before_next_task_write: AtomicBool::new(false),
                 #[cfg(test)]
+                fail_next_task_write: AtomicBool::new(false),
+                #[cfg(test)]
                 message_file_write_count: AtomicUsize::new(0),
                 #[cfg(test)]
                 after_next_task_snapshot_read: Mutex::new(None),
+                #[cfg(test)]
+                after_next_task_read: Mutex::new(None),
             }),
         })
     }
@@ -126,6 +134,20 @@ impl Store {
     }
 
     #[cfg(test)]
+    pub(crate) fn fail_next_task_write_for_test(&self) {
+        self.inner
+            .fail_next_task_write
+            .store(true, Ordering::SeqCst);
+    }
+
+    #[cfg(test)]
+    pub(super) fn take_task_write_failure_for_test(&self) -> bool {
+        self.inner
+            .fail_next_task_write
+            .swap(false, Ordering::SeqCst)
+    }
+
+    #[cfg(test)]
     pub(crate) fn message_file_write_count_for_test(&self) -> usize {
         self.inner.message_file_write_count.load(Ordering::SeqCst)
     }
@@ -149,6 +171,28 @@ impl Store {
             .after_next_task_snapshot_read
             .lock()
             .expect("Task snapshot hook poisoned")
+            .take();
+        if let Some(hook) = hook {
+            hook();
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn after_next_task_read_for_test(&self, hook: impl FnOnce() + Send + 'static) {
+        *self
+            .inner
+            .after_next_task_read
+            .lock()
+            .expect("Task read hook poisoned") = Some(Box::new(hook));
+    }
+
+    #[cfg(test)]
+    pub(super) fn run_after_task_read_hook_for_test(&self) {
+        let hook = self
+            .inner
+            .after_next_task_read
+            .lock()
+            .expect("Task read hook poisoned")
             .take();
         if let Some(hook) = hook {
             hook();

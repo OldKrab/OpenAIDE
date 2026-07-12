@@ -21,4 +21,6 @@ pub use chat::{
 pub use permission::{
     PermissionDecision, PermissionOption, PermissionOptionKind, PermissionState, PermissionToolCall,
 };
-pub use task::{IsolationKind, SettingsSummary, TaskSnapshot, TaskStatus, TaskSummary};
+pub use task::{
+    IsolationKind, PendingTaskConfigChange, SettingsSummary, TaskSnapshot, TaskStatus, TaskSummary,
+};

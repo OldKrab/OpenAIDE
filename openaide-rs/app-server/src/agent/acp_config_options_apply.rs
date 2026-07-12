@@ -1,7 +1,8 @@
 use std::collections::{HashMap, HashSet};
+use std::time::Duration;
 
 use agent_client_protocol::schema::{SessionConfigOption, SetSessionConfigOptionRequest};
-use agent_client_protocol::{Agent, ConnectionTo};
+use agent_client_protocol::{Agent, ConnectionTo, SessionMessage};
 use serde_json::Value;
 
 use crate::agent::acp_errors::acp_error;
@@ -33,17 +34,86 @@ pub(super) async fn set_task_config_option_after_prior_updates(
     active_session: &mut agent_client_protocol::ActiveSession<'static, Agent>,
     config_id: String,
     value: String,
-    _catalog: &mut ConfigOptionsCatalog,
     agent_id: &str,
-) -> Result<ConfigOptionsCatalog, RuntimeError> {
-    let options = set_prepared_config_option(
-        connection,
-        active_session.session_id().to_string(),
+) -> Result<OrderedConfigOptionResponse, RuntimeError> {
+    let request = SetSessionConfigOptionRequest::new(
+        active_session.session_id().clone(),
         config_id,
-        value,
-    )
-    .await?;
-    Ok(normalize_config_options(agent_id, options))
+        value.as_str(),
+    );
+    let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+    let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+    let agent_id = agent_id.to_string();
+    connection
+        .send_request_to(Agent, request)
+        .on_receiving_result(move |result| async move {
+            let result = result
+                .map(|response| normalize_config_options(&agent_id, response.config_options))
+                .map_err(acp_error);
+            let _ = response_tx.send(result);
+            // Holding this callback keeps the ACP dispatch loop on the response
+            // boundary, so later notifications cannot enter the session queue.
+            let _ = release_rx.await;
+            Ok(())
+        })
+        .map_err(acp_error)?;
+    let result = response_rx
+        .await
+        .map_err(|_| RuntimeError::NotReady("ACP config response channel stopped".to_string()))?;
+    let prior_updates = take_queued_session_updates(active_session).await?;
+    Ok(OrderedConfigOptionResponse {
+        result: Some(result),
+        prior_updates,
+        release: Some(release_tx),
+    })
+}
+
+/// Holds the ACP response boundary until its preceding session updates are projected.
+pub(super) struct OrderedConfigOptionResponse {
+    result: Option<Result<ConfigOptionsCatalog, RuntimeError>>,
+    prior_updates: Vec<SessionMessage>,
+    release: Option<tokio::sync::oneshot::Sender<()>>,
+}
+
+impl OrderedConfigOptionResponse {
+    pub(super) fn take_prior_updates(&mut self) -> Vec<SessionMessage> {
+        std::mem::take(&mut self.prior_updates)
+    }
+
+    /// Releases ACP dispatch only after the caller has projected every prior update.
+    pub(super) fn finish(mut self) -> Result<ConfigOptionsCatalog, RuntimeError> {
+        self.release_boundary();
+        self.result
+            .take()
+            .expect("ordered config response is consumed once")
+    }
+
+    fn release_boundary(&mut self) {
+        if let Some(release) = self.release.take() {
+            let _ = release.send(());
+        }
+    }
+}
+
+impl Drop for OrderedConfigOptionResponse {
+    fn drop(&mut self) {
+        self.release_boundary();
+    }
+}
+
+async fn take_queued_session_updates(
+    active_session: &mut agent_client_protocol::ActiveSession<'static, Agent>,
+) -> Result<Vec<SessionMessage>, RuntimeError> {
+    let mut updates = Vec::new();
+    loop {
+        // The response callback holds ACP dispatch, so every currently queued
+        // message preceded the response and a pending read means the queue is drained.
+        let Ok(update) = tokio::time::timeout(Duration::ZERO, active_session.read_update()).await
+        else {
+            return Ok(updates);
+        };
+        updates.push(update.map_err(acp_error)?);
+    }
 }
 
 pub(super) async fn apply_config_options(
@@ -85,16 +155,14 @@ pub(super) async fn apply_config_options(
             }
             selected.remove(&option.id);
             if option.current_value != value {
-                let next_catalog = set_task_config_option_after_prior_updates(
+                let options = set_prepared_config_option(
                     connection,
-                    active_session,
+                    active_session.session_id().to_string(),
                     option.id,
                     value,
-                    &mut catalog,
-                    agent_id,
                 )
                 .await?;
-                catalog = next_catalog;
+                catalog = normalize_config_options(agent_id, options);
             }
             applied = true;
             break;

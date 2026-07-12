@@ -28,6 +28,13 @@ pub fn build_snapshot(
                 config_options: task.config_options.clone(),
             },
             config_options_catalog: task.config_options_catalog.clone(),
+            pending_config_change: task.config_mutation.pending.as_ref().map(|pending| {
+                crate::protocol::model::PendingTaskConfigChange {
+                    client_mutation_id: pending.client_mutation_id.clone(),
+                    config_id: pending.config_id.clone(),
+                    requested_value: pending.requested_value.clone(),
+                }
+            }),
             agent_commands_catalog: task.agent_commands_catalog.clone(),
             preparation: task.preparation.clone(),
             permissions: chat

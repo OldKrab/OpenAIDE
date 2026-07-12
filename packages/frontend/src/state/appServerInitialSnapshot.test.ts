@@ -31,7 +31,11 @@ describe("App Server initial snapshot ingestion", () => {
       { type: "projects", projects: [{ projectId: "project-1", label: "Project" }] },
       { type: "settings:runtimeSettings", settings: { developer: { acp_trace: { enabled: true } } } },
       { type: "settings:preferences", preferences: { composer_submit_shortcut: "enter" } },
-      { type: "tasks", tasks: [{ task_id: "task-1", agent_name: "Codex", workspace_root: "" }] },
+      {
+        type: "tasks",
+        archived: false,
+        tasks: [{ task_id: "task-1", agent_name: "Codex", workspace_root: "" }],
+      },
       { type: "selection:set", taskId: "task-1" },
       { type: "snapshot", intent: "open", snapshot: { task: { task_id: "task-1" } } },
     ]);

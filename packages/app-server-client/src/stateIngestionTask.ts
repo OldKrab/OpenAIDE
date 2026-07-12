@@ -21,12 +21,7 @@ export function updateTaskSnapshot(
       return payload.task.taskId === task.task.taskId ? changed({ ...snapshot, task: { ...task, task: payload.task } }) : unchanged(snapshot);
     case "taskSnapshotUpdated":
       return payload.task.task.taskId === task.task.taskId
-        ? changed({
-            ...snapshot,
-            task: payload.task.historySync.generation < task.historySync.generation
-              ? { ...payload.task, historySync: task.historySync }
-              : payload.task,
-          })
+        ? changed({ ...snapshot, task: payload.task })
         : unchanged(snapshot);
     case "taskHistorySyncUpdated":
       return payload.taskId === task.task.taskId

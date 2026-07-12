@@ -16,12 +16,15 @@ use openaide_app_server_protocol::task::{TaskDiscardParams, TaskSetConfigOptionP
 
 use crate::agent::gateway::AgentGateway;
 use crate::agent::registry_handle::AgentRegistryHandle;
-use crate::agent::AgentRuntime;
+use crate::agent::{AgentRuntime, AgentSessionKey};
 use crate::attachment_runtime::AttachmentRuntime;
 use crate::projects::ProjectResolver;
 use crate::protocol::errors::RuntimeError;
 use crate::protocol_edge::{AppServerShutdownWorkflow, ShutdownBlockers};
 use crate::server_requests::ServerRequestRuntime;
+use crate::snapshots::task_snapshot::{
+    project_stored_task_snapshot_with_history_sync, TaskHistorySyncSnapshotSource,
+};
 use crate::storage::records::TaskRecord;
 use crate::storage::Store;
 use crate::task_events::TaskUpdateNotifier;
@@ -42,6 +45,7 @@ mod open;
 mod prepare;
 mod secret_resolver;
 pub(crate) mod send;
+mod session_cursor;
 mod set_config_option;
 mod support_recovery;
 mod tool_detail;
@@ -55,9 +59,12 @@ pub(crate) struct TaskProductApi {
     agent_gateway: AgentGateway,
     attachments: AttachmentRuntime,
     turn_runner: TurnRunner,
+    turn_acceptance: crate::tasks::turn_acceptance::TurnAcceptanceCoordinator,
+    config_operations: crate::tasks::task_operation::TaskOperationCoordinator,
+    pending_send_sync: crate::tasks::pending_send_sync::PendingSendSyncCoordinator,
     // ACP may expose a newly started session before its Task metadata commit finishes.
     // Keep that session reserved so external-session listing never leaks a Draft Task.
-    preparing_session_ids: Arc<Mutex<HashSet<String>>>,
+    preparing_session_ids: Arc<Mutex<HashSet<AgentSessionKey>>>,
     history_sync: crate::tasks::history_sync::HistorySyncCoordinator,
     #[allow(dead_code)]
     server_requests: ServerRequestRuntime,
@@ -183,6 +190,9 @@ impl TaskProductApi {
             agent_gateway,
             attachments,
             turn_runner,
+            turn_acceptance: Default::default(),
+            config_operations: Default::default(),
+            pending_send_sync: Default::default(),
             preparing_session_ids: Arc::new(Mutex::new(HashSet::new())),
             history_sync: crate::tasks::history_sync::HistorySyncCoordinator::default(),
             server_requests,
@@ -198,10 +208,28 @@ impl TaskProductApi {
         task_id: &str,
         state: openaide_app_server_protocol::snapshot::TaskHistorySyncSnapshot,
     ) {
+        if !self.history_sync.set_current(task_id, state.clone()) {
+            return;
+        }
         if let Ok(task) = self.store.read_task(task_id) {
             self.task_notifier
                 .history_sync_updated(task_id, task.revision, state);
         }
+    }
+
+    /// Projects durable Task data with the current process-local reconciliation state.
+    pub(super) fn project_task_snapshot(
+        &self,
+        snapshot: crate::protocol::model::TaskSnapshot,
+    ) -> Result<TaskSnapshot, ProtocolError> {
+        let history_sync = self
+            .history_sync
+            .history_sync_snapshot(&snapshot.task.task_id);
+        project_stored_task_snapshot_with_history_sync(snapshot, history_sync)
+    }
+
+    pub(crate) fn history_sync_snapshots(&self) -> Arc<dyn TaskHistorySyncSnapshotSource> {
+        Arc::new(self.history_sync.clone())
     }
 
     pub(crate) fn shutdown(&self) -> Result<(), RuntimeError> {
@@ -216,8 +244,10 @@ impl AppServerShutdownWorkflow for TaskProductApi {
     }
 
     fn shutdown_blockers(&self) -> Result<ShutdownBlockers, RuntimeError> {
+        let mut owned_turns = self.turn_acceptance.owned_turns();
+        owned_turns.extend(self.turn_runner.active_turns());
         Ok(ShutdownBlockers {
-            active_turns: self.turn_runner.active_turn_count(),
+            active_turns: owned_turns.len(),
             pending_task_requests: self.server_requests.pending_count(),
         })
     }
@@ -351,6 +381,7 @@ pub(super) fn validation_error(field: &str, message: &str) -> ProtocolError {
         target: Some(openaide_app_server_protocol::errors::ErrorTarget {
             method: None,
             field: Some(field.to_string()),
+            current_task: None,
         }),
     }
 }

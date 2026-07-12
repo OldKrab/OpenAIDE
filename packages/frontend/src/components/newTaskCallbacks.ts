@@ -1,87 +1,84 @@
 import {
-  ATTACHMENT_CONFIRM_EMBEDDED,
-  ATTACHMENT_CREATE_EMBEDDED_CANDIDATE,
-  ATTACHMENT_CREATE_FILE_REFERENCE,
-  ATTACHMENT_CREATE_PASTED_IMAGE,
-  ATTACHMENT_LIST_DIRECTORY,
-  ATTACHMENT_LIST_ROOTS,
-  TASK_CREATE,
-  TASK_CANCEL,
-  TASK_OPEN,
   TASK_SET_CONFIG_OPTION,
-  WORKSPACE_LIST_DIRECTORY,
-  WORKSPACE_LIST_ROOTS,
   type AgentConfigOptionId,
-  type AgentId,
-  type BackendConnection,
-  type FileBrowserEntryId,
-  type FileBrowserRootId,
-  type ProjectId,
+  type ClientMutationId,
   type TaskId,
-  type TaskSnapshot as ProtocolTaskSnapshot,
 } from "@openaide/app-server-client";
-import { createTaskSendIdempotencyKey } from "../intents/taskMutationIntents";
-import { postHostMessage } from "../services/hostBridge";
 import {
-  clearPendingTaskSendRecovery,
-  savePendingTaskSendRecovery,
-} from "../services/pendingTaskSendRecovery";
-import { appServerAttachment, appServerAttachmentHandles } from "../state/composerOptions";
+  attachmentHandleResource,
+  releaseAttachmentResources,
+} from "../services/attachmentResources";
 import { mapProtocolTaskSnapshot } from "../state/appServerProtocolMapping";
-import type { AppAction } from "../state/appReducer";
-import type { AppState } from "../state/store";
-import { isInvalidAttachmentHandleError } from "../state/attachmentValidation";
-import type { AppCallbacksDependencies, NewTaskCallbacks, NewTaskDraftInput, NewTaskStartAttempt } from "./appControllerCallbackTypes";
-import { newTaskPreparationKey, taskCreateParams } from "./newTaskPreparationContext";
-import { sendNewTaskMessageWithFreshRevision } from "./newTaskSending";
-import {
-  createNewTaskMutationId,
-  discardOrCancelStartedTask,
-  fileToBase64,
-  newTaskDraftInput,
-  shouldPreservePendingSendRecovery,
-  submitErrorMessage,
-} from "./newTaskStartSupport";
+import { newTaskPreparationKey } from "../state/newTaskPreparationContext";
+import type { AppCallbacksDependencies, NewTaskCallbacks } from "./appControllerCallbackTypes";
+import { createNewTaskBrowserCallbacks } from "./newTaskBrowserCallbacks";
+import { createNewTaskStartCallbacks } from "./newTaskStartCallbacks";
+import type { PreparedTaskOwnership } from "./preparedTaskOwnership";
+import { refreshTaskSnapshotAfterMutationFailure } from "./taskSnapshotRefresh";
 
 type NewTaskDependencies = Pick<
   AppCallbacksDependencies,
-  "backendConnection" | "currentNavigationGeneration" | "dispatch" | "latestOptionsRequestKey" | "newTaskStartAttempt" | "pendingPreparedNewTask" | "state"
->;
+  | "attachmentResources"
+  | "backendConnection"
+  | "beginNavigationChange"
+  | "clientInstanceId"
+  | "currentNavigationGeneration"
+  | "currentNewTaskPreparationKey"
+  | "dispatch"
+  | "latestOptionsRequestKey"
+  | "newTaskStartAttempt"
+  | "pendingPreparedNewTask"
+  | "state"
+> & { preparedTaskOwnership: PreparedTaskOwnership };
 
-export function createNewTaskCallbacks({
-  backendConnection,
-  currentNavigationGeneration,
-  dispatch,
-  latestOptionsRequestKey,
-  newTaskStartAttempt,
-  pendingPreparedNewTask,
-  state,
-}: NewTaskDependencies): NewTaskCallbacks {
+/** Composes deep New Task start and browser workflows with the remaining immediate mutations. */
+export function createNewTaskCallbacks(dependencies: NewTaskDependencies): NewTaskCallbacks {
+  const {
+    attachmentResources,
+    backendConnection,
+    currentNavigationGeneration,
+    currentNewTaskPreparationKey,
+    dispatch,
+    latestOptionsRequestKey,
+    state,
+  } = dependencies;
   return {
-    cancel: () => {
-      const attempt = newTaskStartAttempt.current;
-      if (!attempt || attempt.cancelled) return;
-      attempt.cancelled = true;
-      dispatch({ type: "submit:cancel" });
-      postHostMessage(state.newTask.selection.projectId
-        ? { type: "surface.openNewTask", payload: { project_id: state.newTask.selection.projectId } }
-        : { type: "surface.openNewTask" });
-      if (attempt.taskId && backendConnection?.request) {
-        void discardOrCancelStartedTask(backendConnection.request, attempt.taskId).finally(() => {
-          if (newTaskStartAttempt.current === attempt) newTaskStartAttempt.current = undefined;
-        });
+    ...createNewTaskStartCallbacks(dependencies),
+    ...createNewTaskBrowserCallbacks(dependencies),
+    removeAttachment: (attachmentId) => {
+      const taskId = state.snapshot && !state.snapshot.task.has_messages
+        ? state.snapshot.task.task_id
+        : undefined;
+      if (!taskId) {
+        dispatch({ type: "newTask:attachment:remove", attachmentId });
+        return;
       }
+      const attachment = state.taskInputs[taskId]?.context.find((item) => item.local_id === attachmentId);
+      dispatch({ type: "taskInput:attachment:remove", taskId, attachmentId });
+      if (attachment?.app_server_handle_id && attachmentResources) {
+        attachmentResources.release({ taskId, handleId: attachment.app_server_handle_id });
+        return;
+      }
+      releaseAttachmentResources(
+        backendConnection,
+        taskId,
+        attachment?.app_server_handle_id
+          ? [attachmentHandleResource(attachment.app_server_handle_id)]
+          : [],
+      );
     },
-    fileBrowser: createNewTaskFileBrowserCallbacks({ backendConnection, dispatch, latestOptionsRequestKey, pendingPreparedNewTask, state }),
     resetOptionsRequestKey: () => {
       latestOptionsRequestKey.current = undefined;
     },
     selectConfigOption: (configId, value) => {
+      const mutationNavigationGeneration = currentNavigationGeneration();
+      const mutationPreparationKey = newTaskPreparationKey(state);
       const taskId = state.snapshot && !state.snapshot.task.has_messages
         ? state.snapshot.task.task_id
         : undefined;
-      if (backendConnection?.request && taskId) {
-        void backendConnection.request(TASK_SET_CONFIG_OPTION, {
+      const request = backendConnection?.request;
+      if (request && taskId) {
+        void request(TASK_SET_CONFIG_OPTION, {
           taskId: taskId as TaskId,
           configId: configId as AgentConfigOptionId,
           value,
@@ -90,272 +87,31 @@ export function createNewTaskCallbacks({
           dispatch({ type: "snapshot", snapshot: mapProtocolTaskSnapshot(result.task).snapshot, intent: "refresh" });
         }).catch(() => {
           dispatch({ type: "newTask:configOptions:error", message: "Unable to update Agent option." });
+          void refreshTaskSnapshotAfterMutationFailure({
+            dispatch,
+            request,
+            taskId,
+          }).then(() => {
+            if (
+              currentNavigationGeneration() !== mutationNavigationGeneration
+              || currentNewTaskPreparationKey() !== mutationPreparationKey
+            ) return;
+            // Snapshot ingestion clears transient new-task errors. Reassert only
+            // the failure that still owns this exact preparation context.
+            dispatch({ type: "newTask:configOptions:error", message: "Unable to update Agent option." });
+          });
         });
         return;
       }
       dispatch({ type: "newTask:configOptions:error", message: "Task session is not ready yet." });
     },
-    submit: (draft) => {
-      void submitNewTask({ backendConnection, currentNavigationGeneration, dispatch, draft, newTaskStartAttempt, pendingPreparedNewTask, state });
-    },
-    workspaceBrowser: createWorkspaceBrowserCallbacks({ backendConnection }),
   };
 }
 
-type NewTaskSubmitDependencies = Pick<NewTaskDependencies, "backendConnection" | "currentNavigationGeneration" | "dispatch" | "newTaskStartAttempt" | "state"> & {
-  draft?: NewTaskDraftInput;
-  pendingPreparedNewTask?: NewTaskDependencies["pendingPreparedNewTask"];
-};
-type NewTaskFileBrowserDependencies = Pick<
-  NewTaskDependencies,
-  "backendConnection" | "dispatch" | "latestOptionsRequestKey" | "pendingPreparedNewTask" | "state"
->;
-type PreparedTaskCallback = (task: ProtocolTaskSnapshot, taskId: TaskId) => void;
-type PrepareNewTaskOptions = {
-  acceptPreparedTask?: () => boolean;
-  preparedTask?: ProtocolTaskSnapshot;
-  snapshotIntent?: "open" | "refresh";
-};
+let nextNewTaskMutationId = 1;
 
-function createWorkspaceBrowserCallbacks({
-  backendConnection,
-}: Pick<NewTaskDependencies, "backendConnection">) {
-  const request = backendConnection?.request;
-  if (!request) return undefined;
-  return {
-    listRoots: async () => (await request(WORKSPACE_LIST_ROOTS, {})).roots,
-    listDirectory: async (path: string) => request(WORKSPACE_LIST_DIRECTORY, { path }),
-  };
-}
-
-function createNewTaskFileBrowserCallbacks({
-  backendConnection,
-  dispatch,
-  latestOptionsRequestKey,
-  pendingPreparedNewTask,
-  state,
-}: NewTaskFileBrowserDependencies) {
-  const request = backendConnection?.request;
-  if (!request) return undefined;
-  let preparedTaskId = state.snapshot?.task.task_id as TaskId | undefined;
-  const ensureTaskId = async (draft?: NewTaskDraftInput) => {
-    if (preparedTaskId) return preparedTaskId;
-    latestOptionsRequestKey.current = undefined;
-    const key = newTaskPreparationKey(state);
-    const pending = key ? pendingPreparedNewTask(key) : undefined;
-    const prepared = pending
-      ? await pending
-      : await prepareNewTask({ backendConnection, dispatch, state });
-    preparedTaskId = prepared.taskId;
-    dispatch({ type: "taskInput:prompt", taskId: prepared.taskId, prompt: draft?.prompt ?? state.newTask.prompt });
-    return preparedTaskId;
-  };
-
-  return {
-    listRoots: async () => {
-      const taskId = await ensureTaskId();
-      const result = await request(ATTACHMENT_LIST_ROOTS, { taskId });
-      return result.roots;
-    },
-    listDirectory: async (rootId: FileBrowserRootId, directoryId?: FileBrowserEntryId) => {
-      const taskId = await ensureTaskId();
-      return request(ATTACHMENT_LIST_DIRECTORY, {
-        taskId,
-        rootId,
-        directoryId,
-      });
-    },
-    attachFileReference: async (entryId: FileBrowserEntryId) => {
-      const taskId = await ensureTaskId();
-      const result = await request(ATTACHMENT_CREATE_FILE_REFERENCE, {
-        taskId,
-        entryId,
-      });
-      dispatch({
-        type: "taskInput:attachment:addAppServer",
-        taskId,
-        attachment: appServerAttachment(result.attachment),
-      });
-    },
-    attachPastedImage: async (file: File, draft?: NewTaskDraftInput) => {
-      const taskId = await ensureTaskId(draft);
-      const data = await fileToBase64(file);
-      const previewUrl = `data:${file.type || "image/png"};base64,${data}`;
-      const result = await request(ATTACHMENT_CREATE_PASTED_IMAGE, {
-        taskId,
-        label: file.name || "Pasted image",
-        mimeType: file.type || "image/png",
-        data,
-      });
-      dispatch({
-        type: "taskInput:attachment:addAppServer",
-        taskId,
-        attachment: appServerAttachment(result.attachment, { previewUrl }),
-      });
-    },
-    attachEmbedded: async (entryId: FileBrowserEntryId) => {
-      const taskId = await ensureTaskId();
-      const candidate = await request(ATTACHMENT_CREATE_EMBEDDED_CANDIDATE, {
-        taskId,
-        entryId,
-      });
-      const confirmed = await request(ATTACHMENT_CONFIRM_EMBEDDED, {
-        taskId,
-        candidates: [candidate.candidate.candidateId],
-      });
-      const error = confirmed.errors[0];
-      if (error) throw new Error(error.message);
-      const attachment = confirmed.attachments[0];
-      if (!attachment) throw new Error("Embedded attachment was not confirmed.");
-      dispatch({
-        type: "taskInput:attachment:addAppServer",
-        taskId,
-        attachment: appServerAttachment(attachment),
-      });
-    },
-  };
-}
-
-async function submitNewTask({ backendConnection, currentNavigationGeneration, dispatch, draft, newTaskStartAttempt, pendingPreparedNewTask, state }: NewTaskSubmitDependencies) {
-  const request = backendConnection?.request;
-  if (!request) {
-    dispatch({ type: "submit:error", message: "App Server connection unavailable." });
-    return;
-  }
-  const projectId = state.newTask.selection.projectId;
-  if (!projectId) {
-    dispatch({ type: "submit:error", message: "Workspace unavailable. Refresh and try again." });
-    return;
-  }
-  const draftInput = newTaskDraftInput(state, draft);
-  const attempt: NewTaskStartAttempt = { cancelled: false, draft: draftInput };
-  newTaskStartAttempt.current = attempt;
-  const attachments = appServerAttachmentHandles(draftInput.context);
-  if (draftInput.context.length > 0 && !attachments) {
-    dispatch({ type: "submit:error", message: "Reselect attachments from the file browser before sending." });
-    return;
-  }
-
-  dispatch(draft
-    ? { type: "submit:start", prompt: draftInput.prompt, context: draftInput.context }
-    : { type: "submit:start" });
-  const navigationGeneration = currentNavigationGeneration();
-  let createdTaskId: TaskId | undefined;
-  const stagePreparedTask: PreparedTaskCallback = (_task, taskId) => {
-    dispatch({ type: "taskInput:prompt", taskId, prompt: draftInput.prompt });
-    dispatch({ type: "taskInput:submit", taskId });
-  };
-  try {
-    const preparationKey = newTaskPreparationKey(state);
-    const pendingPreparation = preparationKey ? pendingPreparedNewTask?.(preparationKey) : undefined;
-    const preparedTask = pendingPreparation ? (await pendingPreparation).task : undefined;
-    let { task, taskId } = await prepareNewTask(
-      { backendConnection, dispatch, onPreparedTask: stagePreparedTask, state },
-      {
-        acceptPreparedTask: () => !attempt.cancelled,
-        preparedTask,
-        snapshotIntent: currentNavigationGeneration() === navigationGeneration ? "open" : "refresh",
-      },
-    );
-    createdTaskId = taskId;
-    attempt.taskId = taskId;
-    if (attempt.cancelled) {
-      await discardOrCancelStartedTask(request, taskId);
-      if (newTaskStartAttempt.current === attempt) newTaskStartAttempt.current = undefined;
-      return;
-    }
-
-    const idempotencyKey = createTaskSendIdempotencyKey();
-    const message = attachments?.length ? { text: draftInput.prompt, attachments } : { text: draftInput.prompt };
-    savePendingTaskSendRecovery({
-      taskId,
-      taskRevision: task.revision,
-      idempotencyKey,
-      message,
-      renderState: draftInput,
-    });
-    const sent = await sendNewTaskMessageWithFreshRevision({
-      idempotencyKey,
-      message,
-      request,
-      taskId,
-      taskRevision: task.revision,
-    });
-    clearPendingTaskSendRecovery(taskId);
-    if (attempt.cancelled) {
-      await request(TASK_CANCEL, { taskId });
-      if (newTaskStartAttempt.current === attempt) newTaskStartAttempt.current = undefined;
-      return;
-    }
-    const snapshot = mapProtocolTaskSnapshot(sent.task).snapshot;
-    dispatch({ type: "snapshot", snapshot, intent: "refresh" });
-    if (currentNavigationGeneration() === navigationGeneration) {
-      postHostMessage({
-        type: "surface.openTask",
-        payload: {
-          task_id: taskId,
-          title: sent.task.task.title,
-        },
-      });
-    }
-    if (newTaskStartAttempt.current === attempt) newTaskStartAttempt.current = undefined;
-  } catch (error) {
-    if (attempt.cancelled) {
-      if (newTaskStartAttempt.current === attempt) newTaskStartAttempt.current = undefined;
-      return;
-    }
-    const message = submitErrorMessage(error);
-    if (createdTaskId) {
-      if (!shouldPreservePendingSendRecovery()) {
-        clearPendingTaskSendRecovery(createdTaskId);
-      }
-      if (isInvalidAttachmentHandleError(error)) {
-        dispatch({
-          type: "submit:attachments:invalidate",
-          taskId: createdTaskId,
-          message: error.message,
-        });
-        if (newTaskStartAttempt.current === attempt) newTaskStartAttempt.current = undefined;
-        return;
-      }
-      dispatch({ type: "taskInput:prompt", taskId: createdTaskId, prompt: draftInput.prompt });
-      dispatch({ type: "taskInput:error", taskId: createdTaskId, message });
-      dispatch({ type: "submit:error", message });
-      if (newTaskStartAttempt.current === attempt) newTaskStartAttempt.current = undefined;
-      return;
-    }
-    dispatch({ type: "submit:error", message });
-    if (newTaskStartAttempt.current === attempt) newTaskStartAttempt.current = undefined;
-  }
-}
-
-export async function prepareNewTask({
-  backendConnection,
-  dispatch,
-  onPreparedTask,
-  state,
-}: Pick<NewTaskSubmitDependencies, "backendConnection" | "dispatch" | "state"> & { onPreparedTask?: PreparedTaskCallback }, options: PrepareNewTaskOptions = {}) {
-  const request = backendConnection?.request;
-  if (!request) {
-    throw new Error("App Server connection unavailable.");
-  }
-  const projectId = state.newTask.selection.projectId;
-  if (!projectId) {
-    throw new Error("Workspace unavailable. Refresh and try again.");
-  }
-
-  const preparedTask = options.preparedTask ?? (state.snapshot && !state.snapshot.task.has_messages
-    ? await request(TASK_OPEN, { taskId: state.snapshot.task.task_id as TaskId }).then((result) => result.task)
-    : (await request(TASK_CREATE, taskCreateParams(state, projectId))).task);
-  if (!preparedTask) throw new Error("Task preparation returned no Task snapshot.");
-  const task: ProtocolTaskSnapshot = preparedTask;
-  const taskId = task.task.taskId as TaskId;
-  if (options.acceptPreparedTask && !options.acceptPreparedTask()) {
-    return { task, taskId };
-  }
-  dispatch({ type: "snapshot", snapshot: mapProtocolTaskSnapshot(task).snapshot, intent: options.snapshotIntent ?? "open" });
-  dispatch({ type: "newTask:prepared", taskId });
-  onPreparedTask?.(task, taskId);
-
-  return { task, taskId };
+function createNewTaskMutationId(configId: string): ClientMutationId {
+  const id = `frontend-new-task-${configId}-${nextNewTaskMutationId}`;
+  nextNewTaskMutationId += 1;
+  return id as ClientMutationId;
 }
