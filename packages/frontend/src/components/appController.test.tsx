@@ -8,6 +8,7 @@ import {
   SETTINGS_GET_MCP_SERVERS,
   SETTINGS_GET_SKILLS,
   STATE_SUBSCRIBE,
+  STATE_UNSUBSCRIBE,
   TASK_CREATE,
   TASK_DISCARD,
   TASK_LIST,
@@ -15,6 +16,7 @@ import {
   TASK_OPEN,
   TASK_SEND,
   TASK_SET_CONFIG_OPTION,
+  type AppServerEvent,
   type BackendConnection,
   type ClientSnapshot,
   type InitializeParams,
@@ -589,8 +591,343 @@ describe("app controller mounted lifecycle", () => {
       await Promise.resolve();
     });
 
+    expect(request).toHaveBeenCalledTimes(1);
     expect(request).toHaveBeenCalledWith(TASK_OPEN, { taskId: "task_1" });
     expect(latestController?.state.snapshot?.task.title).toBe("Typed Open");
+  });
+
+  it("opens an initialized task route to recover unavailable Agent config", async () => {
+    const initial = clientSnapshot();
+    if (!initial.activeTask) throw new Error("expected active task fixture");
+    initial.activeTask.agentConfig = { state: "unavailable" };
+
+    const recovered = protocolTaskSnapshot("task_1", "Recovered Task");
+    recovered.agentConfig = {
+      state: "ready",
+      options: [{
+        configId: "model" as never,
+        label: "Model",
+        category: "model",
+        kind: "select",
+        currentValue: "gpt-5.6-sol",
+        values: [{ value: "gpt-5.6-sol", label: "GPT-5.6 Sol" }],
+      }],
+    };
+    const opened = deferredValue<{ task: ReturnType<typeof protocolTaskSnapshot> }>();
+    const request = vi.fn((method: string) => {
+      if (method === TASK_OPEN) return opened.promise;
+      throw new Error(method);
+    });
+    backendConnection = {
+      initialize: vi.fn(async () => ({ snapshot: initial })),
+      request: request as unknown as BackendConnection["request"],
+      respond: vi.fn(),
+      close: vi.fn(),
+    };
+    bootstrap = taskBootstrap("task_1");
+
+    await act(async () => {
+      create(<ControllerProbe />);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(request.mock.calls.filter(([method]) => method === TASK_OPEN)).toEqual([
+      [TASK_OPEN, { taskId: "task_1" }],
+    ]);
+    expect(latestController?.state.snapshot).toMatchObject({
+      task: { task_id: "task_1", title: "Task" },
+      agent_config: { status: "empty", options: [] },
+    });
+
+    await act(async () => {
+      opened.resolve({ task: recovered });
+      await opened.promise;
+    });
+
+    expect(latestController?.state.snapshot?.agent_config).toMatchObject({
+      status: "ready",
+      options: [{ id: "model", current_value: "gpt-5.6-sol" }],
+    });
+  });
+
+  it("reopens the current task once after the backend state resets", async () => {
+    let notifyStateReset: (() => void) | undefined;
+    const request = vi.fn(async (method: string) => {
+      if (method === TASK_OPEN) {
+        return { task: protocolTaskSnapshot("task_1", "Recovered Task") };
+      }
+      throw new Error(method);
+    });
+    backendConnection = {
+      initialize: vi.fn(async () => ({ snapshot: clientSnapshot() })),
+      request: request as unknown as BackendConnection["request"],
+      stateResets: (listener) => {
+        notifyStateReset = listener;
+        return () => undefined;
+      },
+      respond: vi.fn(),
+      close: vi.fn(),
+    };
+    bootstrap = taskBootstrap("task_1");
+
+    await act(async () => {
+      create(<ControllerProbe />);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(request.mock.calls.filter(([method]) => method === TASK_OPEN)).toHaveLength(1);
+
+    await act(async () => {
+      notifyStateReset?.();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(notifyStateReset).toBeDefined();
+    expect(request.mock.calls.filter(([method]) => method === TASK_OPEN)).toEqual([
+      [TASK_OPEN, { taskId: "task_1" }],
+      [TASK_OPEN, { taskId: "task_1" }],
+    ]);
+  });
+
+  it("keeps task mutations unavailable until the reset Task subscription has a baseline", async () => {
+    const stateResetListeners: Array<() => void> = [];
+    const eventListeners: Array<(event: AppServerEvent) => void> = [];
+    const recoveredTaskSubscription = deferredValue<ReturnType<typeof taskSubscriptionSnapshot>>();
+    const gapTaskSubscription = deferredValue<ReturnType<typeof taskSubscriptionSnapshot>>();
+    let connectionGeneration = 0;
+    let taskSubscriptionCount = 0;
+    const request = vi.fn((method: string, params?: { scope?: { kind: string; taskId?: string } }) => {
+      if (method === TASK_OPEN) {
+        return Promise.resolve({ task: protocolTaskSnapshot("task_1", "Recovered Task") });
+      }
+      if (method === TASK_SEND) {
+        const accepted = protocolTaskSnapshot("task_1", "Task", {
+          status: "running",
+          userText: "do the work",
+        });
+        accepted.revision = 2;
+        return Promise.resolve({ task: accepted });
+      }
+      if (method === STATE_UNSUBSCRIBE) {
+        return Promise.resolve({ scope: params?.scope });
+      }
+      if (method === STATE_SUBSCRIBE) {
+        if (params?.scope?.kind === "task") {
+          taskSubscriptionCount += 1;
+          if (taskSubscriptionCount === 1) {
+            return Promise.resolve(taskSubscriptionSnapshot("cursor_task_1"));
+          }
+          return taskSubscriptionCount === 2
+            ? recoveredTaskSubscription.promise
+            : gapTaskSubscription.promise;
+        }
+        return Promise.resolve(nonTaskSubscriptionSnapshot(
+          params?.scope,
+          connectionGeneration === 0 ? "cursor_task_1" : "cursor_task_2",
+        ));
+      }
+      throw new Error(method);
+    });
+    backendConnection = {
+      initialize: vi.fn(async () => ({ snapshot: clientSnapshot() })),
+      request: request as unknown as BackendConnection["request"],
+      events: (listener) => {
+        eventListeners.push(listener);
+        return () => {
+          const index = eventListeners.indexOf(listener);
+          if (index >= 0) eventListeners.splice(index, 1);
+        };
+      },
+      stateResets: (listener) => {
+        stateResetListeners.push(listener);
+        return () => {
+          const index = stateResetListeners.indexOf(listener);
+          if (index >= 0) stateResetListeners.splice(index, 1);
+        };
+      },
+      respond: vi.fn(),
+      close: vi.fn(),
+    };
+    bootstrap = taskBootstrap("task_1");
+
+    await act(async () => {
+      create(<ControllerProbe />);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(latestController?.backendReady).toBe(true);
+
+    await act(async () => {
+      connectionGeneration = 1;
+      for (const listener of [...stateResetListeners]) listener();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(taskSubscriptionCount).toBe(2);
+    expect(latestController?.backendReady).toBe(false);
+
+    await act(async () => {
+      recoveredTaskSubscription.resolve(taskSubscriptionSnapshot("cursor_task_2"));
+      await recoveredTaskSubscription.promise;
+      await Promise.resolve();
+    });
+
+    expect(latestController?.backendReady).toBe(true);
+
+    await act(async () => {
+      latestController?.dispatch({ type: "taskInput:prompt", taskId: "task_1", prompt: "do the work" });
+      await Promise.resolve();
+    });
+    await act(async () => {
+      latestController?.callbacks.task.sendPrompt();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(latestController?.state.snapshot?.task.status).toBe("active");
+
+    const completed = protocolTaskSnapshot("task_1", "Task");
+    completed.revision = 3;
+    completed.chat.items.push({
+      messageId: "answer_1" as never,
+      role: "agent",
+      status: "complete",
+      parts: [{ kind: "text", text: "Done without reload" }],
+    });
+    const completedEvent: AppServerEvent = {
+      previousCursor: "cursor_task_2" as never,
+      cursor: "cursor_task_3" as never,
+      scope: {
+        kind: "task",
+        stateRootId: "state_root_1" as never,
+        taskId: "task_1" as never,
+      },
+      payload: { kind: "taskSnapshotUpdated", task: completed },
+    };
+    await act(async () => {
+      for (const listener of [...eventListeners]) listener(completedEvent);
+      await Promise.resolve();
+    });
+
+    expect(latestController?.state.snapshot?.task.status).toBe("inactive");
+    expect(JSON.stringify(latestController?.state.snapshot?.chat.items)).toContain("Done without reload");
+
+    const gapEvent = {
+      ...completedEvent,
+      previousCursor: "missing_cursor" as never,
+      cursor: "cursor_task_4" as never,
+    };
+    await act(async () => {
+      for (const listener of [...eventListeners]) listener(gapEvent);
+      await Promise.resolve();
+    });
+
+    expect(taskSubscriptionCount).toBe(3);
+    expect(latestController?.backendReady).toBe(false);
+
+    await act(async () => {
+      gapTaskSubscription.resolve(taskSubscriptionSnapshot("cursor_task_4", completed));
+      await gapTaskSubscription.promise;
+      await Promise.resolve();
+    });
+
+    expect(latestController?.backendReady).toBe(true);
+    expect(JSON.stringify(latestController?.state.snapshot?.chat.items)).toContain("Done without reload");
+  });
+
+  it("retries an in-flight task open after the backend resets", async () => {
+    const firstOpen = deferredValue<{ task: ReturnType<typeof protocolTaskSnapshot> }>();
+    const secondOpen = deferredValue<{ task: ReturnType<typeof protocolTaskSnapshot> }>();
+    let notifyStateReset: (() => void) | undefined;
+    let openCount = 0;
+    const request = vi.fn((method: string) => {
+      if (method !== TASK_OPEN) throw new Error(method);
+      openCount += 1;
+      return openCount === 1
+        ? firstOpen.promise
+        : secondOpen.promise;
+    });
+    backendConnection = {
+      initialize: vi.fn(async () => ({ snapshot: clientSnapshot() })),
+      request: request as unknown as BackendConnection["request"],
+      stateResets: (listener) => {
+        notifyStateReset = listener;
+        return () => undefined;
+      },
+      respond: vi.fn(),
+      close: vi.fn(),
+    };
+    bootstrap = taskBootstrap("task_1");
+
+    await act(async () => {
+      create(<ControllerProbe />);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      notifyStateReset?.();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(request.mock.calls.filter(([method]) => method === TASK_OPEN)).toHaveLength(1);
+
+    await act(async () => {
+      firstOpen.resolve({ task: protocolTaskSnapshot("task_1", "Stale Starting", "running") });
+      await firstOpen.promise;
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(request.mock.calls.filter(([method]) => method === TASK_OPEN)).toEqual([
+      [TASK_OPEN, { taskId: "task_1" }],
+      [TASK_OPEN, { taskId: "task_1" }],
+    ]);
+    expect(latestController?.state.snapshot?.task.title).toBe("Task");
+    expect(latestController?.backendReady).toBe(false);
+
+    await act(async () => {
+      secondOpen.resolve({ task: protocolTaskSnapshot("task_1", "Recovered Again") });
+      await secondOpen.promise;
+      await Promise.resolve();
+    });
+
+    expect(latestController?.state.snapshot?.task.title).toBe("Recovered Again");
+    expect(latestController?.backendReady).toBe(true);
+  });
+
+  it("opens a task once when navigation changes to its route", async () => {
+    const request = vi.fn(async (method: string) => {
+      if (method === TASK_OPEN) {
+        return { task: protocolTaskSnapshot("task_1", "Opened Task") };
+      }
+      throw new Error(method);
+    });
+    backendConnection = {
+      initialize: vi.fn(async () => ({ snapshot: clientSnapshot() })),
+      request: request as unknown as BackendConnection["request"],
+      respond: vi.fn(),
+      close: vi.fn(),
+    };
+    bootstrap = navigationBootstrap();
+
+    await act(async () => {
+      create(<ControllerProbe />);
+      await Promise.resolve();
+    });
+    await act(async () => {
+      latestController?.callbacks.navigation.openTask("task_1");
+      webRouteListeners.forEach((listener) => listener(webTaskBootstrap("task_1")));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(request.mock.calls.filter(([method]) => method === TASK_OPEN)).toEqual([
+      [TASK_OPEN, { taskId: "task_1" }],
+    ]);
+    expect(latestController?.state.snapshot?.task.title).toBe("Opened Task");
   });
 
   it("prepares a new Task with slash commands before the first send", async () => {
@@ -2016,6 +2353,7 @@ type TestBackendConnection = {
   initialize: (params: InitializeParams) => Promise<InitializeResult>;
   request: BackendConnection["request"];
   events?: BackendConnection["events"];
+  stateResets?: BackendConnection["stateResets"];
   respond: () => void;
   close: () => void;
 };
@@ -2206,6 +2544,61 @@ function protocolTaskSnapshot(
       hasMessages,
     },
   };
+}
+
+function taskSubscriptionSnapshot(
+  cursor: string,
+  task = protocolTaskSnapshot("task_1", "Task"),
+) {
+  const scope = { kind: "task" as const, taskId: "task_1" as never };
+  return {
+    cursor: cursor as never,
+    scope,
+    snapshot: {
+      kind: "task" as const,
+      task,
+    },
+  };
+}
+
+function nonTaskSubscriptionSnapshot(
+  scope: { kind: string; taskId?: string } | undefined,
+  cursor = "cursor_navigation",
+) {
+  if (scope?.kind === "projects") {
+    return {
+      cursor: cursor as never,
+      scope,
+      snapshot: {
+        kind: "projects" as const,
+        projects: { activeProjectId: "project_1" as never, projects: [] },
+      },
+    };
+  }
+  if (scope?.kind === "agents") {
+    return {
+      cursor: cursor as never,
+      scope,
+      snapshot: {
+        kind: "agents" as const,
+        agents: {
+          defaultAgentId: "codex" as never,
+          agents: [{ agentId: "codex" as never, label: "Codex", status: "connected" as const }],
+        },
+      },
+    };
+  }
+  if (scope?.kind === "taskNavigation") {
+    return {
+      cursor: cursor as never,
+      scope,
+      snapshot: {
+        kind: "taskNavigation" as const,
+        navigation: { activeTaskId: "task_1" as never, tasks: [] },
+      },
+    };
+  }
+  throw new Error(`unexpected subscription scope: ${scope?.kind ?? "missing"}`);
 }
 
 function readyConfigOptions() {

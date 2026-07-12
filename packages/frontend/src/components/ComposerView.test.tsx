@@ -573,6 +573,24 @@ describe("Composer view behavior", () => {
     expect(onSelectConfigOption).toHaveBeenCalledWith("reasoning", "high");
   });
 
+  it("closes an open configuration menu when configuration becomes locked", () => {
+    const props = {
+      configOptions: configOptions(),
+      showAgentSelector: false,
+      showIsolationSelector: false,
+    };
+    const renderer = renderComposer(props);
+
+    click(configControlButtonsByText(renderer.root, "Balanced")[0]);
+    expect(menusByLabel(renderer.root, "Reasoning")).toHaveLength(1);
+
+    act(() => {
+      renderer.update(composerElement({ ...props, configLocked: true }));
+    });
+
+    expect(menusByLabel(renderer.root, "Reasoning")).toHaveLength(0);
+  });
+
   it("preserves locked controls while showing stop instead of send", () => {
     const onSubmit = vi.fn();
     const onCancel = vi.fn();

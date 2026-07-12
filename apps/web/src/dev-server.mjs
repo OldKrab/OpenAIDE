@@ -16,7 +16,7 @@ import {
   writeUnauthorized,
 } from "./dev-server-auth.mjs";
 import { injectBootstrap, webRoute } from "./dev-server-routes.mjs";
-import { pipeProxyResponse } from "./dev-server-streams.mjs";
+import { pipeProxyResponse, watchPendingProxyResponse } from "./dev-server-streams.mjs";
 import { createViteProxy } from "./dev-server-vite-proxy.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -262,10 +262,19 @@ function forwardAppServerRequest(req, res, url, body) {
       method: req.method,
       headers,
     }, (proxyRes) => {
+      if (!pendingResponse.handoff()) {
+        proxyRes.destroy();
+        return;
+      }
       res.writeHead(proxyRes.statusCode ?? 502, proxyRes.headers);
       pipeProxyResponse(proxyRes, res).then(resolve, reject);
     });
-    proxyReq.on("error", reject);
+    const pendingResponse = watchPendingProxyResponse(proxyReq, res);
+    void pendingResponse.cancelled.then(resolve);
+    proxyReq.on("error", (error) => {
+      pendingResponse.handoff();
+      reject(error);
+    });
     proxyReq.end(body);
   });
 }

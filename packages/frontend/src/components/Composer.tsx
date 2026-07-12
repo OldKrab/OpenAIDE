@@ -135,6 +135,14 @@ export function Composer({
   }, [openMenu]);
 
   useEffect(() => {
+    if (!configLocked) return;
+    // A connection reset can lock configuration while its menu is open. Close
+    // that stale affordance before it can issue a mutation without a baseline.
+    setOpenMenu((current) =>
+      current === "options" || current?.startsWith("config:") ? undefined : current);
+  }, [configLocked]);
+
+  useEffect(() => {
     const submittedDraft = submittedDraftRef.current;
     const hideSubmittedDraft = submittedDraft !== undefined
       && !error

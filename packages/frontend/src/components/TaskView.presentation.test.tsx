@@ -6,10 +6,18 @@ import type { ChatMessage, TaskSnapshot } from "@openaide/app-shell-contracts";
 describe("TaskView timeline presentation", () => {
   beforeEach(() => {
     (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
-    vi.stubGlobal("window", { acquireVsCodeApi: undefined });
+    vi.useFakeTimers();
+    vi.stubGlobal("window", {
+      acquireVsCodeApi: undefined,
+      clearTimeout: globalThis.clearTimeout,
+      setTimeout: globalThis.setTimeout,
+    });
   });
 
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
 
   it("renders authoritative streaming text and later timeline rows without presentation gating", async () => {
     const { TaskView } = await import("./TaskView");
@@ -25,6 +33,62 @@ describe("TaskView timeline presentation", () => {
     expect(renderedTask).toContain("npm test");
     expect(renderedTask).toContain("Latest update");
     expect(renderedTask).not.toContain("chat-streaming-caret");
+  });
+
+  it("announces each completed history generation only once", async () => {
+    const { TaskView } = await import("./TaskView");
+    const updated = snapshotWithAuthoritativeTail(true);
+    updated.history_sync = { state: "updated", generation: 3 };
+    let tree!: ReactTestRenderer;
+
+    act(() => {
+      tree = create(<TaskView {...taskViewProps(updated)} />);
+    });
+    expect(JSON.stringify(tree.toJSON())).toContain("History updated");
+
+    act(() => {
+      vi.advanceTimersByTime(2_000);
+    });
+    expect(JSON.stringify(tree.toJSON())).not.toContain("History updated");
+
+    const stale = snapshotWithAuthoritativeTail(true);
+    stale.history_sync = { state: "idle", generation: 0 };
+    act(() => {
+      tree.update(<TaskView {...taskViewProps(stale)} />);
+    });
+    act(() => {
+      tree.update(<TaskView {...taskViewProps(updated)} />);
+    });
+
+    expect(JSON.stringify(tree.toJSON())).not.toContain("History updated");
+  });
+
+  it("locks Agent configuration while the Task subscription is unavailable", async () => {
+    const { TaskView } = await import("./TaskView");
+    const snapshot = snapshotWithAuthoritativeTail(true);
+    snapshot.agent_config = {
+      agent_id: "codex",
+      status: "ready",
+      options: [{
+        current_value: "off",
+        id: "fast-mode",
+        label: "Fast mode",
+        values: [
+          { id: "off", label: "Off" },
+          { id: "on", label: "On" },
+        ],
+      }],
+    };
+    let tree!: ReactTestRenderer;
+
+    act(() => {
+      tree = create(<TaskView {...taskViewProps(snapshot)} backendReady={false} />);
+    });
+
+    const configControl = tree.root.find((node) =>
+      typeof node.props.className === "string"
+      && node.props.className.split(/\s+/).includes("composer-config-control"));
+    expect(configControl.props.disabled).toBe(true);
   });
 });
 

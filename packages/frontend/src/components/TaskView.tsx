@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Dispatch } from "react";
 import { ArrowDown } from "lucide-react";
 import type { AppPreferencesRecord, ConfigOptionsCatalog, ElicitationResponse, PermissionDecision, TaskSnapshot, TaskSummary } from "@openaide/app-shell-contracts";
@@ -148,15 +148,22 @@ export function TaskView({
     || appServerAttachmentHandles(taskInput.context) !== undefined;
   const canSend = !composerAvailability.sendDisabled && attachmentsSendable;
   const [showHistoryUpdated, setShowHistoryUpdated] = useState(false);
+  const announcedHistoryUpdate = useRef<string | undefined>(undefined);
   useEffect(() => {
     if (snapshot.history_sync.state !== "updated") {
       setShowHistoryUpdated(false);
       return undefined;
     }
+    const announcementKey = `${snapshot.task.task_id}:${snapshot.history_sync.generation}`;
+    if (announcedHistoryUpdate.current === announcementKey) {
+      setShowHistoryUpdated(false);
+      return undefined;
+    }
+    announcedHistoryUpdate.current = announcementKey;
     setShowHistoryUpdated(true);
     const timer = window.setTimeout(() => setShowHistoryUpdated(false), 2_000);
     return () => window.clearTimeout(timer);
-  }, [snapshot.history_sync.state]);
+  }, [snapshot.history_sync.generation, snapshot.history_sync.state, snapshot.task.task_id]);
   const workingLabel = taskWorkingStatusLabel(
     chatItems,
     snapshot.task.status,
@@ -297,6 +304,7 @@ export function TaskView({
           agentLocked
           attachments={taskInput.context}
           autoFocus
+          configLocked={!backendReady}
           configOptions={startupConfigOptions ?? snapshot.agent_config}
           commandCatalog={snapshot.agent_commands}
           disabled={composerDisabled}

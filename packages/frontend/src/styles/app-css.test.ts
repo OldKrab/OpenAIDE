@@ -262,13 +262,13 @@ describe("task list row styles", () => {
     expect(appCss).toMatch(/\.composer textarea:focus-visible,\s*\.composer-editor:focus-visible\s*{\s*outline:\s*0;/);
     expect(appCss).toMatch(/\.composer\s*{[^}]*width:\s*min\(760px, 100%\);[^}]*border-radius:\s*20px;[^}]*box-shadow:\s*none;/);
     expect(appCss).toMatch(/\.new-task-context-controls\s*{[^}]*width:\s*fit-content;[^}]*border-radius:\s*999px;/);
-    expect(appCss).toMatch(/\.composer-send-button:not\(:disabled\)\s*{[^}]*width:\s*32px;[^}]*height:\s*32px;[^}]*border-radius:\s*999px;/);
+    expect(appCss).toMatch(/\.composer-send-button\s*{[^}]*width:\s*32px;[^}]*height:\s*32px;[^}]*border-radius:\s*999px;/);
     expect(appCss).not.toMatch(/body\[data-shell="web"\] \.composer\s*{[^}]*width:\s*min\(760px, 100%\)/);
     expect(appCss).not.toMatch(/body\[data-shell="web"\] \.new-task-context-controls\s*{[^}]*width:\s*fit-content/);
   });
 
   it("keeps shared composer send and stop hover states specific", () => {
-    expect(appCss).toMatch(/\.composer-send-button:not\(:disabled\)\s*{[^}]*width:\s*32px;[^}]*height:\s*32px;[^}]*border-radius:\s*999px;[^}]*background:\s*var\(--vscode-button-background, var\(--oa-focus\)\);[^}]*color:\s*var\(--vscode-button-foreground, oklch\(0\.97 0\.008 250\)\);/);
+    expect(appCss).toMatch(/\.composer-send-button:not\(:disabled\)\s*{[^}]*background:\s*var\(--vscode-button-background, var\(--oa-focus\)\);[^}]*color:\s*var\(--vscode-button-foreground, oklch\(0\.97 0\.008 250\)\);/);
     expect(appCss).toMatch(/\.composer-send-button:hover:not\(:disabled\)\s*{\s*background:\s*var\(--vscode-button-hoverBackground, color-mix\(in oklch, var\(--oa-focus\) 82%, var\(--oa-text\)\)\);/);
     expect(appCss).toMatch(/\.composer-stop-button:not\(:disabled\)\s*{[^}]*background:\s*transparent;/);
     expect(appCss).toMatch(/\.composer-stop-button:hover:not\(:disabled\)\s*{\s*background:\s*color-mix\(in oklch, var\(--oa-danger\) 12%, transparent\);/);

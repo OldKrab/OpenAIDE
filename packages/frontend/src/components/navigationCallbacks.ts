@@ -148,22 +148,6 @@ export function createNavigationCallbacks({
       beginNavigationChange();
       const task = state.tasks.find((item) => item.task_id === taskId);
       dispatch({ type: "selection:set", taskId });
-      if (backendConnection?.request) {
-        void requestTaskOpen(
-          {
-            acceptTaskOpen,
-            backendConnection: { request: backendConnection.request },
-            createTaskOpenRequestId: createSnapshotRequestId,
-            dispatch,
-          },
-          taskId,
-          "open",
-        ).catch((error) => dispatch({
-          type: "taskOpen:error",
-          taskId,
-          message: error instanceof Error ? error.message : "Unable to open task from App Server",
-        }));
-      }
       postHostMessage({ type: "surface.openTask", payload: { task_id: taskId, title: task?.title } });
     },
     restoreTask: (taskId) => {

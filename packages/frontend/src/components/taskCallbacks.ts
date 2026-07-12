@@ -34,7 +34,7 @@ type TaskDependencies = Pick<
   "backendConnection" | "createSnapshotRequestId" | "dispatch" | "state"
 >;
 
-type TaskBackendConnection = Partial<Pick<BackendConnection, "request">>;
+type TaskBackendConnection = Partial<Pick<BackendConnection, "events" | "request">>;
 
 export function createTaskCallbacks({
   backendConnection,
@@ -166,6 +166,9 @@ export function createTaskCallbacks({
         clientMutationId: createTaskConfigMutationId(configId),
       })
         .then((result) => {
+          // Event-capable connections publish the same mutation before resolving
+          // the request. Keep one authoritative Task snapshot path per mutation.
+          if (backendConnection.events) return;
           dispatch({ type: "snapshot", snapshot: mapProtocolTaskSnapshot(result.task).snapshot, intent: "refresh" });
         })
         .catch((error) => {

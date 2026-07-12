@@ -505,7 +505,7 @@ describe("app controller callbacks", () => {
     });
   });
 
-  it("opens existing tasks through App Server so unread is cleared", async () => {
+  it("routes existing tasks for the destination surface to open", async () => {
     const dispatch = vi.fn();
     const request = vi.fn(async (method: string) => {
       if (method === TASK_OPEN) {
@@ -540,15 +540,8 @@ describe("app controller callbacks", () => {
     }).navigation.openTask("task_1");
     await settlePromises();
 
-    expect(request).toHaveBeenCalledWith(TASK_OPEN, { taskId: "task_1" });
+    expect(request).not.toHaveBeenCalled();
     expect(dispatch).toHaveBeenCalledWith({ type: "selection:set", taskId: "task_1" });
-    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
-      type: "snapshot",
-      intent: "open",
-      snapshot: expect.objectContaining({
-        task: expect.objectContaining({ task_id: "task_1", unread: false }),
-      }),
-    }));
     expect(postHostMessage).toHaveBeenCalledWith({
       type: "surface.openTask",
       payload: { task_id: "task_1", title: "Unread task" },
@@ -843,6 +836,33 @@ describe("app controller callbacks", () => {
       clientMutationId: expect.stringMatching(/^frontend-task-config-model-/),
     });
     expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "snapshot", intent: "refresh" }));
+  });
+
+  it("lets subscribed Task events own config option results", async () => {
+    const dispatch = vi.fn();
+    const request = vi.fn(async (method: string) => {
+      if (method === TASK_SET_CONFIG_OPTION) {
+        return { task: { ...protocolTaskSnapshot("task_1", "Task"), revision: 2 } };
+      }
+      throw new Error(method);
+    });
+    const backendConnection = {
+      events: vi.fn(),
+      request: request as unknown as BackendConnection["request"],
+      respond: vi.fn(),
+    };
+    const state = createInitialState();
+    state.snapshot = snapshot("task_1");
+
+    callbacks({ backendConnection, dispatch, state }).task.selectConfigOption("model", "gpt-5");
+    await settlePromises();
+
+    expect(request).toHaveBeenCalledWith(TASK_SET_CONFIG_OPTION, expect.objectContaining({
+      taskId: "task_1",
+      configId: "model",
+      value: "gpt-5",
+    }));
+    expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: "snapshot" }));
   });
 
   it("surfaces a new-task error when typed create prerequisites are missing", () => {

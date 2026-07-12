@@ -118,7 +118,8 @@ export type NewTaskStartAttempt = {
 
 export type AppCallbacksDependencies = {
   acceptTaskOpen?: (taskId: string, requestId: number | undefined, intent: SnapshotIntent) => boolean;
-  backendConnection?: Pick<BackendConnection, "respond"> & Partial<Pick<BackendConnection, "request">>;
+  backendConnection?: Pick<BackendConnection, "respond">
+    & Partial<Pick<BackendConnection, "events" | "request">>;
   beginNavigationChange: (archived?: boolean) => number;
   createSnapshotRequestId: SnapshotRequestIdFactory;
   currentNavigationGeneration: () => number;

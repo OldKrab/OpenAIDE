@@ -8,7 +8,7 @@ import {
 } from "react";
 import type { AppPreferencesRecord } from "@openaide/app-shell-contracts";
 import type { BackendConnection, TaskId } from "@openaide/app-server-client";
-import { requestMissingInitialTaskRead, requestTaskOpen } from "../intents/taskReadIntents";
+import { requestMissingInitialTaskList, requestTaskOpen } from "../intents/taskReadIntents";
 import { refreshSettingsProjectionsThroughBackend } from "../intents/settingsProjectionIntents";
 import { startAppServerServerRequestBridge } from "../services/appServerServerRequests";
 import {
@@ -58,8 +58,14 @@ export function useAppControllerBackendLifecycle({
 }: BackendLifecycleOptions) {
   const { bootstrap, bootstrapRef } = useRoutedBootstrap(initialBootstrap, dispatch);
   const [backendReady, setBackendReady] = useState(false);
+  const [backendStateGeneration, setBackendStateGeneration] = useState(0);
+  const [readyTaskSubscriptionKey, setReadyTaskSubscriptionKey] = useState<string | undefined>();
+  const [readyRouteOpenKey, setReadyRouteOpenKey] = useState<string | undefined>();
+  const [routeOpenSettlement, setRouteOpenSettlement] = useState(0);
+  const backendStateGenerationRef = useRef(0);
   const backendInitialized = useRef(false);
-  const lastRequestedRouteTaskId = useRef<string | undefined>(undefined);
+  const lastRequestedRouteTaskKey = useRef<string | undefined>(undefined);
+  const routeOpenInFlight = useRef<{ promise: Promise<void>; taskId: string } | undefined>(undefined);
   const navigationGeneration = useRef(0);
   const stateSubscriptionContext = useRef<StateSubscriptionMappingContext | undefined>(undefined);
   const {
@@ -111,8 +117,18 @@ export function useAppControllerBackendLifecycle({
         })
       : undefined;
     const stopSubscriptions: Array<() => void> = [];
+    const stopBackendStateResets = backendConnection?.stateResets?.(() => {
+      backendStateGenerationRef.current += 1;
+      setBackendStateGeneration(backendStateGenerationRef.current);
+      setReadyTaskSubscriptionKey(undefined);
+      setReadyRouteOpenKey(undefined);
+    });
+    backendStateGenerationRef.current += 1;
+    setBackendStateGeneration(backendStateGenerationRef.current);
     backendInitialized.current = false;
     setBackendReady(false);
+    setReadyTaskSubscriptionKey(undefined);
+    setReadyRouteOpenKey(undefined);
     if (initialBootstrap.surface === "navigation") {
       const archived = initialBootstrap.archived === true;
       beginNavigationChange(archived);
@@ -203,22 +219,19 @@ export function useAppControllerBackendLifecycle({
                 });
               });
             }
-            requestMissingInitialTaskRead(
+            requestMissingInitialTaskList(
               {
-                acceptTaskOpen: acceptSnapshotRequest,
                 acceptTaskList: () => navigationGeneration.current === startupNavigationGeneration
                   && snapshotRequests.current.currentArchived()
                     === (initialBootstrap.surface === "navigation" && initialBootstrap.archived === true),
                 backendConnection,
-                createTaskOpenRequestId: createSnapshotRequestId,
                 dispatch,
               },
               initialBootstrap,
               result.snapshot,
             );
-            if (initialBootstrap.surface === "task" && initialBootstrap.taskId) {
-              lastRequestedRouteTaskId.current = initialBootstrap.taskId;
-            }
+            // Route opening also starts App Server recovery work, so the route effect must
+            // own task/open even when initialize already supplied cached task state.
             backendInitialized.current = true;
             setBackendReady(true);
           })
@@ -252,9 +265,13 @@ export function useAppControllerBackendLifecycle({
     return () => {
       active = false;
       backendInitialized.current = false;
-      lastRequestedRouteTaskId.current = undefined;
+      lastRequestedRouteTaskKey.current = undefined;
+      routeOpenInFlight.current = undefined;
       setBackendReady(false);
+      setReadyTaskSubscriptionKey(undefined);
+      setReadyRouteOpenKey(undefined);
       stateSubscriptionContext.current = undefined;
+      stopBackendStateResets?.();
       for (const stop of stopSubscriptions) stop();
       serverRequestBridge?.dispose();
       stopSession();
@@ -263,24 +280,40 @@ export function useAppControllerBackendLifecycle({
   }, [backendConnection, initialBootstrap.surface, initialBootstrap.taskId]);
 
   useEffect(() => {
-    if (!backendConnection?.events || !backendInitialized.current || !state.snapshot) return;
+    if (!backendConnection?.events || !backendReady || !backendInitialized.current || !state.snapshot) return;
     const context = stateSubscriptionContext.current;
     if (!context) return;
-    return startAppServerStateSubscription({
+    const taskId = state.snapshot.task.task_id;
+    const subscriptionKey = `${backendStateGeneration}:${taskId}`;
+    let active = true;
+    const stop = startAppServerStateSubscription({
       backendConnection: {
         events: backendConnection.events,
         request: backendConnection.request,
-        stateResets: backendConnection.stateResets,
       },
       context,
       dispatch,
-      scope: { kind: "task", taskId: state.snapshot.task.task_id as TaskId },
+      onBaselineLost: () => {
+        if (!active) return;
+        setReadyTaskSubscriptionKey((current) => (
+          current === subscriptionKey ? undefined : current
+        ));
+      },
+      onBaselineReady: () => {
+        if (active) setReadyTaskSubscriptionKey(subscriptionKey);
+      },
+      scope: { kind: "task", taskId: taskId as TaskId },
     });
-  }, [backendConnection, state.snapshot?.task.task_id]);
+    return () => {
+      active = false;
+      stop();
+    };
+  }, [backendConnection, backendReady, backendStateGeneration, state.snapshot?.task.task_id]);
 
   useEffect(() => {
     if (bootstrap.surface !== "task" || !bootstrap.taskId) {
-      lastRequestedRouteTaskId.current = undefined;
+      lastRequestedRouteTaskKey.current = undefined;
+      routeOpenInFlight.current = undefined;
       return;
     }
     const taskId = bootstrap.taskId;
@@ -293,24 +326,68 @@ export function useAppControllerBackendLifecycle({
       return;
     }
     if (!backendInitialized.current) return;
-    if (lastRequestedRouteTaskId.current === taskId) return;
-    lastRequestedRouteTaskId.current = taskId;
-    void requestTaskOpen({
-      acceptTaskOpen: acceptSnapshotRequest,
+    const requestKey = `${backendStateGeneration}:${taskId}`;
+    if (lastRequestedRouteTaskKey.current === requestKey) return;
+    if (routeOpenInFlight.current?.taskId === taskId) return;
+    lastRequestedRouteTaskKey.current = requestKey;
+    const requestGeneration = backendStateGeneration;
+    let openAccepted = false;
+
+    const openRequest = requestTaskOpen({
+      acceptTaskOpen: (openedTaskId, requestId, intent) => {
+        if (backendStateGenerationRef.current !== requestGeneration) return false;
+        openAccepted = acceptSnapshotRequest(openedTaskId, requestId, intent);
+        return openAccepted;
+      },
       backendConnection,
       createTaskOpenRequestId: createSnapshotRequestId,
       dispatch,
-    }, taskId, "open").catch(() => dispatch({
-      type: "taskOpen:error",
-      taskId,
-      message: "Unable to open task from App Server",
-    }));
-  }, [backendConnection, backendReady, bootstrap.surface, bootstrap.taskId]);
+    }, taskId, "open")
+      .then(() => {
+        if (openAccepted && backendStateGenerationRef.current === requestGeneration) {
+          setReadyRouteOpenKey(requestKey);
+        }
+      })
+      .catch(() => dispatch({
+        type: "taskOpen:error",
+        taskId,
+        message: "Unable to open task from App Server",
+      }));
+    routeOpenInFlight.current = { promise: openRequest, taskId };
+    void openRequest.finally(() => {
+      if (routeOpenInFlight.current?.promise === openRequest) {
+        routeOpenInFlight.current = undefined;
+      }
+      // A reset can supersede an open already in flight. Re-run the effect after
+      // settlement so the current Backend generation receives its own task/open.
+      if (backendInitialized.current) {
+        setRouteOpenSettlement((settlement) => settlement + 1);
+      }
+    });
+  }, [
+    backendConnection,
+    backendReady,
+    backendStateGeneration,
+    bootstrap.surface,
+    bootstrap.taskId,
+    routeOpenSettlement,
+  ]);
+
+  const taskSubscriptionKey = state.snapshot
+    ? `${backendStateGeneration}:${state.snapshot.task.task_id}`
+    : undefined;
+  const taskSubscriptionReady = !backendConnection?.events
+    || taskSubscriptionKey === undefined
+    || readyTaskSubscriptionKey === taskSubscriptionKey;
+  const routeOpenKey = bootstrap.surface === "task" && bootstrap.taskId
+    ? `${backendStateGeneration}:${bootstrap.taskId}`
+    : undefined;
+  const routeOpenReady = routeOpenKey === undefined || readyRouteOpenKey === routeOpenKey;
 
   return {
     acceptSnapshotRequest,
     backendInitialized,
-    backendReady,
+    backendReady: backendReady && taskSubscriptionReady && routeOpenReady,
     beginNavigationChange,
     bootstrap,
     createSnapshotRequestId,

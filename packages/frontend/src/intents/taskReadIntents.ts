@@ -21,27 +21,16 @@ export type TaskReadIntentDependencies = {
   dispatch: (action: AppAction) => void;
 };
 
-export function requestMissingInitialTaskRead(
-  dependencies: TaskReadIntentDependencies,
+export function requestMissingInitialTaskList(
+  dependencies: Pick<TaskReadIntentDependencies, "acceptTaskList" | "backendConnection" | "dispatch">,
   bootstrap: WebviewBootstrap,
-  snapshot: { tasks?: unknown; activeTask?: unknown },
+  snapshot: { tasks?: unknown },
 ) {
   if (bootstrap.surface === "navigation" && !snapshot.tasks) {
     void requestTaskList(dependencies, bootstrap.archived === true).catch((error) => {
       dependencies.dispatch({
         type: "tasks:error",
         message: error instanceof Error ? error.message : "Unable to load tasks from App Server",
-      });
-    });
-  }
-
-  if (bootstrap.surface === "task" && bootstrap.taskId && !snapshot.activeTask) {
-    const taskId = bootstrap.taskId;
-    void requestTaskOpen(dependencies, taskId, "open").catch(() => {
-      dependencies.dispatch({
-        type: "taskOpen:error",
-        taskId,
-        message: "Unable to open task from App Server",
       });
     });
   }

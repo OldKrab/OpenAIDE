@@ -52,6 +52,8 @@ export function startAppServerStateSubscription({
   context,
   currentAgentId,
   dispatch,
+  onBaselineLost,
+  onBaselineReady,
   setAgents,
   scope,
 }: {
@@ -59,6 +61,10 @@ export function startAppServerStateSubscription({
   context: StateSubscriptionMappingContext;
   currentAgentId?: () => string;
   dispatch: Dispatch<AppAction>;
+  /** Signals that events must stop mutating product state until a fresh baseline is installed. */
+  onBaselineLost?: () => void;
+  /** Signals that the current scope has a cursor baseline and no queued resync gap. */
+  onBaselineReady?: () => void;
   setAgents?: (agents: AgentOption[]) => void;
   scope: SubscriptionScope;
 }) {
@@ -88,6 +94,7 @@ export function startAppServerStateSubscription({
     if (subscribeInFlight) return;
     if (retryTimer !== undefined) clearTimeout(retryTimer);
     retryTimer = undefined;
+    if (!refreshing) onBaselineLost?.();
     refreshing = true;
     subscribeInFlight = true;
     try {
@@ -108,6 +115,7 @@ export function startAppServerStateSubscription({
       retryDelay = SUBSCRIPTION_RETRY_MS;
       applySnapshot(result.snapshot);
       replayPendingEvents();
+      if (!subscribeAgain) onBaselineReady?.();
     } catch {
       scheduleSubscribeRetry();
     } finally {
