@@ -11,11 +11,9 @@ type TaskInteractionAction =
   | { type: "taskInput:attachment:addAppServer"; taskId: string; attachment: ComposerAttachment }
   | { type: "taskInput:attachment:remove"; taskId: string; attachmentId: string }
   | { type: "taskInput:clear"; taskId: string }
-  | { type: "taskInput:submit"; taskId: string; input?: { prompt: string; context: ComposerAttachment[] }; idempotencyKey?: import("@openaide/app-server-client").TaskSendIdempotencyKey }
-  | { type: "taskInput:restoreSend"; taskId: string; input: { prompt: string; context: ComposerAttachment[] }; idempotencyKey: import("@openaide/app-server-client").TaskSendIdempotencyKey }
-  | { type: "taskInput:sendUncertain"; taskId: string; idempotencyKey: import("@openaide/app-server-client").TaskSendIdempotencyKey; message: string }
-  | { type: "taskInput:sendError"; taskId: string; idempotencyKey: import("@openaide/app-server-client").TaskSendIdempotencyKey; message?: string }
-  | { type: "taskSend:accepted"; taskId: string; idempotencyKey: import("@openaide/app-server-client").TaskSendIdempotencyKey; userMessageId: import("@openaide/app-server-client").MessageId }
+  | { type: "taskInput:submit"; taskId: string; input?: { prompt: string; context: ComposerAttachment[] } }
+  | { type: "taskInput:sendError"; taskId: string; message?: string }
+  | { type: "taskSend:accepted"; taskId: string; userMessageId: import("@openaide/app-server-client").MessageId }
   | { type: "taskInput:error"; taskId: string; message?: string }
   | { type: "taskInput:cancelError"; taskId: string; message: string }
   | { type: "taskInput:attachments:invalidate"; taskId: string; message: string }
@@ -103,8 +101,7 @@ export function reduceTaskInteractionState(state: AppState, action: AppAction): 
       const { [action.taskId]: _input, ...taskInputs } = state.taskInputs;
       return { ...state, taskInputs };
     }
-    case "taskInput:submit":
-    case "taskInput:restoreSend": {
+    case "taskInput:submit": {
       const previousInput = state.taskInputs[action.taskId];
       const input = action.input ?? previousInput ?? { prompt: "", context: [] };
       return {
@@ -119,31 +116,15 @@ export function reduceTaskInteractionState(state: AppState, action: AppAction): 
             pending: {
               prompt: input.prompt,
               context: input.context,
-              idempotencyKey: action.idempotencyKey,
               state: "sending",
             },
           },
         },
       };
     }
-    case "taskInput:sendUncertain": {
-      const input = state.taskInputs[action.taskId];
-      if (input?.pending?.idempotencyKey !== action.idempotencyKey) return state;
-      return {
-        ...state,
-        taskInputs: {
-          ...state.taskInputs,
-          [action.taskId]: {
-            ...input,
-            error: action.message,
-            pending: { ...input.pending, state: "uncertain" },
-          },
-        },
-      };
-    }
     case "taskInput:sendError": {
       const input = state.taskInputs[action.taskId];
-      if (input?.pending?.idempotencyKey !== action.idempotencyKey) return state;
+      if (!input?.pending) return state;
       return {
         ...state,
         taskInputs: {
@@ -160,10 +141,8 @@ export function reduceTaskInteractionState(state: AppState, action: AppAction): 
     case "taskSend:accepted": {
       const input = state.taskInputs[action.taskId];
       const hasAcceptedMessage = typeof action.userMessageId === "string" && action.userMessageId.length > 0;
-      const acceptedTaskInput = input?.pending?.idempotencyKey === action.idempotencyKey
-        && hasAcceptedMessage;
-      const acceptedNewTask = state.newTask.pending?.idempotencyKey === action.idempotencyKey
-        && hasAcceptedMessage;
+      const acceptedTaskInput = input?.pending !== undefined && hasAcceptedMessage;
+      const acceptedNewTask = state.newTask.pending !== undefined && hasAcceptedMessage;
       if (!acceptedTaskInput && !acceptedNewTask) return state;
       return {
         ...state,

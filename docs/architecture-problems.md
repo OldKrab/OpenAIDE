@@ -153,7 +153,7 @@ The `attachment_only` protocol field is also currently derived only from Task pr
 
 ## AP-010: Send retry recovery is over-specialized and duplicates request identity
 
-**Status:** confirmed
+**Status:** resolved
 
 **Area:** App Server Protocol mutation identity and Send recovery
 
@@ -162,6 +162,8 @@ The request envelope already supports `clientRequestId`, while `task/send` addit
 **Impact:** One user intent has two request identities with different typing and persistence rules, and a rare lost-response case dominates Frontend, protocol, storage, and recovery complexity. Automatic replay also performs a product mutation after reconnection instead of first resynchronizing authoritative state.
 
 **Desired direction:** Issue `task/send` once and never automatically replay it after transport loss, reconnect, or reload. Remove the Send-specific idempotency field and durable browser recovery machinery. Reconnect/resubscribe to authoritative Task state: accepted work appears from App Server; rejected work keeps the live in-memory draft; a full reload may lose an unaccepted memory-only draft as an explicit trade-off. Keep ordinary request correlation only where useful.
+
+**Resolution:** `task/send` now carries only the Task id, current revision, and message. Frontend issues it once, keeps only the live in-memory submitting draft, restores that draft after any request failure, and never stores or replays a send after reconnect or reload. App Server no longer stores Send receipts, fingerprints messages, or recovers a request by a second identity; ordinary request-envelope correlation remains transport-only.
 
 ## AP-011: Frontend routes to Task before first-send acceptance
 

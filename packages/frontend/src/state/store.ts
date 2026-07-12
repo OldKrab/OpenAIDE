@@ -19,15 +19,12 @@ import {
   type ProjectOption,
   type WorkspaceRoot,
 } from "./composerOptions";
-import type { MessageId, TaskSendIdempotencyKey } from "@openaide/app-server-client";
+import type { MessageId } from "@openaide/app-server-client";
 
 export type PendingComposerSend = {
   prompt: string;
   context: ComposerAttachment[];
-  /** Identifies the exact task/send attempt awaiting an authoritative response. */
-  idempotencyKey?: TaskSendIdempotencyKey;
-  /** Sending is in flight; uncertain is locked until the same attempt is retried. */
-  state: "sending" | "uncertain";
+  state: "sending";
 };
 
 export type NativeSessionsState = {
@@ -48,7 +45,6 @@ export type NewTaskState = {
     prompt: string;
     context: ComposerAttachment[];
     configOptions?: ConfigOptionsCatalog;
-    idempotencyKey?: TaskSendIdempotencyKey;
   };
   selection: ComposerSelection;
   configOptions?: ConfigOptionsCatalog;

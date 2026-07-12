@@ -297,7 +297,6 @@ fn attachment_handle_is_scoped_to_its_originating_client_at_protocol_boundary() 
             TASK_SEND,
             json!({
                 "taskId": "task-1",
-                "idempotencyKey": "other-send",
                 "taskRevision": 1,
                 "message": { "text": "inspect", "attachments": [handle_id] },
             }),
@@ -1754,7 +1753,6 @@ fn task_send_commits_user_message_and_active_turn_after_initialize() {
             "method": TASK_SEND,
             "params": {
                 "taskId": task_id,
-                "idempotencyKey": "send-1",
                 "taskRevision": 1,
                 "message": { "text": "hello from protocol edge" }
             }
@@ -1828,7 +1826,6 @@ fn runtime_task_update_notification_emits_app_event_after_agent_completion() {
             "method": TASK_SEND,
             "params": {
                 "taskId": task_id,
-                "idempotencyKey": "send-1",
                 "taskRevision": 1,
                 "message": { "text": "hello from protocol edge" }
             }
@@ -1931,7 +1928,6 @@ fn runtime_permission_request_round_trips_over_server_request_stdio() {
             "method": TASK_SEND,
             "params": {
                 "taskId": "task-existing",
-                "idempotencyKey": "send-permission",
                 "taskRevision": 1,
                 "message": { "text": "please request permission" }
             }
@@ -2017,7 +2013,6 @@ fn runtime_permission_request_reject_option_persists_denied_decision() {
             "method": TASK_SEND,
             "params": {
                 "taskId": "task-existing",
-                "idempotencyKey": "send-permission-deny",
                 "taskRevision": 1,
                 "message": { "text": "please request permission" }
             }
@@ -2146,7 +2141,6 @@ fn attachment_file_browser_creates_handle_used_by_task_send() {
             "method": TASK_SEND,
             "params": {
                 "taskId": task_id,
-                "idempotencyKey": "send-with-attachment",
                 "taskRevision": 1,
                 "message": {
                     "text": "Use this context",

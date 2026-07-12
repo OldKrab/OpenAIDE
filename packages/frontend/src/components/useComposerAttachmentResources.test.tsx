@@ -6,17 +6,10 @@ import {
   type BackendConnection,
 } from "@openaide/app-server-client";
 import { createInitialState, type AppState } from "../state/store";
-import {
-  clearPendingTaskSendRecovery,
-  savePendingTaskSendRecovery,
-} from "../services/pendingTaskSendRecovery";
 import { useComposerAttachmentResources } from "./useComposerAttachmentResources";
 
 describe("composer attachment resource lifecycle", () => {
   afterEach(() => {
-    for (const stateRootId of ["root-a", "root-b"]) {
-      clearPendingTaskSendRecovery(stateRootId, "client-1", "task-1");
-    }
     vi.unstubAllGlobals();
   });
 
@@ -107,64 +100,6 @@ describe("composer attachment resource lifecycle", () => {
     await act(async () => renderer.unmount());
 
     expect(request).not.toHaveBeenCalledWith(ATTACHMENT_RELEASE, expect.anything());
-  });
-
-  it("keeps the current state root's persisted send handle protected", async () => {
-    vi.stubGlobal("sessionStorage", memoryStorage());
-    const state = stateWithDraft();
-    savePendingTaskSendRecovery({
-      clientInstanceId: "client-1" as never,
-      stateRootId: "root-a" as never,
-      taskId: "task-1",
-      taskRevision: 1,
-      idempotencyKey: "send-root-a" as never,
-      message: { text: "Draft", attachments: ["handle-1" as never] },
-      renderState: { prompt: "Draft", context: state.taskInputs["task-1"].context },
-    });
-    const request = vi.fn();
-    let renderer!: ReturnType<typeof create>;
-
-    await act(async () => {
-      renderer = create(<Probe
-        request={request as unknown as BackendConnection["request"]}
-        state={state}
-        taskSurfaceMounted
-      />);
-    });
-    await act(async () => renderer.unmount());
-
-    expect(request).not.toHaveBeenCalledWith(ATTACHMENT_RELEASE, expect.anything());
-  });
-
-  it("does not let another state root's colliding recovery protect a resolver handle", async () => {
-    vi.stubGlobal("sessionStorage", memoryStorage());
-    const state = stateWithDraft();
-    state.appServerStateRootId = "root-b";
-    savePendingTaskSendRecovery({
-      clientInstanceId: "client-1" as never,
-      stateRootId: "root-a" as never,
-      taskId: "task-1",
-      taskRevision: 1,
-      idempotencyKey: "send-root-a" as never,
-      message: { text: "Draft", attachments: ["handle-1" as never] },
-      renderState: { prompt: "Draft", context: state.taskInputs["task-1"].context },
-    });
-    const request = vi.fn(async () => ({ outcomes: [] }));
-    let renderer!: ReturnType<typeof create>;
-
-    await act(async () => {
-      renderer = create(<Probe
-        request={request as unknown as BackendConnection["request"]}
-        state={state}
-        taskSurfaceMounted
-      />);
-    });
-    await act(async () => renderer.unmount());
-
-    expect(request).toHaveBeenCalledWith(ATTACHMENT_RELEASE, {
-      taskId: "task-1",
-      resources: [{ kind: "handle", id: "handle-1" }],
-    });
   });
 
   it("does not release a previous state root's resolver handle through the new root", async () => {

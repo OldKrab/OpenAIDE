@@ -1,91 +1,15 @@
 use openaide_app_server_protocol::errors::{ProtocolError, ProtocolErrorCode};
-use openaide_app_server_protocol::ids::{MessageId, TurnId};
 use openaide_app_server_protocol::task::ComposerMessage;
 use uuid::Uuid;
 
-use crate::attachment_runtime::{AttachmentRuntimeError, ResolvedSendAttachments};
-use crate::protocol::model::{ActivityStatus, ChatMessage, NormalizedMessage};
+use crate::attachment_runtime::AttachmentRuntimeError;
+use crate::protocol::model::{ChatMessage, NormalizedMessage};
 use crate::storage::cursor;
-use crate::storage::send_receipts::TaskSendReceipt;
 use crate::tasks::lifecycle::running_turn_message;
 
-use super::{conflict_error, storage_error, validation_error, TaskProductApi};
+use super::{validation_error, TaskProductApi};
 
 impl TaskProductApi {
-    pub(super) fn existing_send(
-        &self,
-        task_id: &str,
-        idempotency_key: &str,
-    ) -> Result<Option<ExistingSend>, ProtocolError> {
-        let Some(receipt) = self
-            .store
-            .read_send_receipt(task_id, idempotency_key)
-            .map_err(storage_error)?
-        else {
-            return Ok(None);
-        };
-        let Some(recovery_required) = self.send_recovery_requirement(task_id, &receipt)? else {
-            return Ok(None);
-        };
-        Ok(Some(ExistingSend {
-            fingerprint: SendFingerprint {
-                text: receipt.text,
-                attachment_handles: receipt.attachment_handles,
-            },
-            user_message_id: MessageId::from(receipt.user_message_id),
-            turn_id: TurnId::from(receipt.turn_id),
-            recovery_required,
-        }))
-    }
-
-    fn send_recovery_requirement(
-        &self,
-        task_id: &str,
-        receipt: &TaskSendReceipt,
-    ) -> Result<Option<bool>, ProtocolError> {
-        let task = self.store.read_task(task_id).map_err(storage_error)?;
-        let messages = self.store.read_messages(task_id).map_err(storage_error)?;
-        let expected_identity = send_identity(&receipt.idempotency_key);
-        let has_user_message = messages.iter().any(|stored| {
-            stored.chat.message_id == receipt.user_message_id
-                && stored.chat.identity == expected_identity
-                && matches!(
-                    &stored.chat.message,
-                    NormalizedMessage::User {
-                        text,
-                        attachments,
-                        ..
-                    } if text == &receipt.text
-                        && attachments.len() == receipt.attachment_handles.len()
-                )
-        });
-        let task_points_to_receipt =
-            task.active_turn_id.as_deref() == Some(receipt.turn_id.as_str());
-        if !has_user_message {
-            // Native Session reconciliation deliberately replaces local Chat identities.
-            // A completed receipt journal remains authoritative after that replacement;
-            // a tentative/orphan receipt still cannot manufacture an accepted send.
-            return Ok(receipt
-                .durable_chat_written
-                .then_some(task_points_to_receipt));
-        }
-        let expected_turn_identity = format!("turn:{}", receipt.turn_id);
-        let turn_status = messages.iter().find_map(|stored| {
-            if stored.chat.identity != expected_turn_identity {
-                return None;
-            }
-            match &stored.chat.message {
-                NormalizedMessage::Activity { status, .. } => Some(*status),
-                _ => None,
-            }
-        });
-        Ok(Some(match turn_status {
-            Some(ActivityStatus::Running) => !task_points_to_receipt,
-            Some(_) => task_points_to_receipt,
-            None => true,
-        }))
-    }
-
     pub(super) fn append_user_message(
         &self,
         task_id: &str,
@@ -154,61 +78,8 @@ impl TaskProductApi {
     }
 }
 
-pub(super) struct SendFingerprint {
-    pub(super) text: String,
-    pub(super) attachment_handles: Vec<String>,
-}
-
-impl SendFingerprint {
-    pub(super) fn from_request_message(message: &ComposerMessage) -> Self {
-        Self {
-            text: normalized_message_text(message),
-            attachment_handles: message
-                .attachments
-                .iter()
-                .map(|handle| handle.as_str().to_string())
-                .collect(),
-        }
-    }
-
-    pub(super) fn from_message(
-        message: &ComposerMessage,
-        attachments: &ResolvedSendAttachments,
-    ) -> Result<Self, ProtocolError> {
-        let text = normalized_message_text(message);
-        if text.is_empty() && attachments.fingerprint_handles().is_empty() {
-            return Err(validation_error("message.text", "Message text is required"));
-        }
-        Ok(Self {
-            text,
-            attachment_handles: attachments.fingerprint_handles(),
-        })
-    }
-}
-
-fn normalized_message_text(message: &ComposerMessage) -> String {
+pub(super) fn normalized_message_text(message: &ComposerMessage) -> String {
     message.text.as_deref().unwrap_or("").trim().to_string()
-}
-
-pub(super) struct ExistingSend {
-    pub(super) fingerprint: SendFingerprint,
-    pub(super) user_message_id: MessageId,
-    pub(super) turn_id: TurnId,
-    pub(super) recovery_required: bool,
-}
-
-impl ExistingSend {
-    pub(super) fn validate(&self, expected: &SendFingerprint) -> Result<(), ProtocolError> {
-        if self.fingerprint.text == expected.text
-            && self.fingerprint.attachment_handles == expected.attachment_handles
-        {
-            Ok(())
-        } else {
-            Err(conflict_error(
-                "Idempotency key was already used with different message content",
-            ))
-        }
-    }
 }
 
 pub(super) fn protocol_error_from_attachment_runtime(
@@ -245,8 +116,4 @@ fn attachment_handle_invalid_error() -> ProtocolError {
     error.code = ProtocolErrorCode::AttachmentHandleInvalid;
     error.recoverable = true;
     error
-}
-
-pub(super) fn send_identity(idempotency_key: &str) -> String {
-    format!("send:{idempotency_key}")
 }

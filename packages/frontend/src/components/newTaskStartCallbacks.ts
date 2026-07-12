@@ -1,20 +1,12 @@
 import {
   TASK_CANCEL,
+  TASK_SEND,
   type TaskId,
 } from "@openaide/app-server-client";
-import { createTaskSendIdempotencyKey } from "../intents/taskMutationIntents";
 import {
   releaseComposerAttachments,
 } from "../services/attachmentResources";
 import { postHostMessage } from "../services/hostBridge";
-import { clearPendingTaskSendRecovery } from "../services/pendingTaskSendRecovery";
-import {
-  executeTaskSendAttempt,
-  isTaskSendOutcomeUnknown,
-  resolveTaskSendAttempt,
-  TASK_SEND_OUTCOME_UNKNOWN_MESSAGE,
-  taskSendAttemptRecord,
-} from "../services/taskSendAttempt";
 import { isInvalidAttachmentHandleError } from "../state/attachmentValidation";
 import { appServerAttachmentHandles } from "../state/composerOptions";
 import { mapProtocolTaskSnapshot } from "../state/appServerProtocolMapping";
@@ -43,7 +35,6 @@ type NewTaskStartDependencies = Pick<
   | "attachmentResources"
   | "backendConnection"
   | "beginNavigationChange"
-  | "clientInstanceId"
   | "currentNavigationGeneration"
   | "dispatch"
   | "newTaskStartAttempt"
@@ -67,7 +58,6 @@ function cancelNewTaskStart({
   attachmentResources,
   backendConnection,
   beginNavigationChange,
-  clientInstanceId,
   dispatch,
   newTaskStartAttempt,
   newTaskController,
@@ -89,14 +79,10 @@ function cancelNewTaskStart({
     const lease = attempt.newTaskLease
       ?? newTaskController.currentLease(taskId)
       ?? (preparationKey ? newTaskController.claim({ attachmentResources, preparationKey, taskId }) : undefined);
-    const protectionKey = lease ? `prepared-cancel:${lease.generation}` : undefined;
-    if (lease && protectionKey) newTaskController.protectSend(lease, protectionKey);
+    if (lease) newTaskController.protectSend(lease);
     void discardOrCancelStartedTask(backendConnection.request, taskId).then((outcome) => {
       if (outcome !== "discarded" || !attempt.taskId) return;
       newTaskController.recordDiscarded(attempt.taskId);
-      if (state.appServerStateRootId) {
-        clearPendingTaskSendRecovery(state.appServerStateRootId, clientInstanceId, attempt.taskId);
-      }
       releaseComposerAttachments({
         attachmentResources,
         attachments: attempt.draft.context,
@@ -105,7 +91,7 @@ function cancelNewTaskStart({
       });
       dispatch({ type: "taskInput:clear", taskId: attempt.taskId });
     }).catch((error) => {
-      if (protectionKey) newTaskController.settleSend(protectionKey);
+      newTaskController.settleSend(taskId);
       if (lease) newTaskController.reclaim(lease, attachmentResources);
       dispatch({ type: "submit:error", message: submitErrorMessage(error) });
     }).finally(() => {
@@ -119,7 +105,6 @@ type SubmitNewTaskDependencies = NewTaskStartDependencies & { draft?: NewTaskDra
 async function submitNewTask({
   attachmentResources,
   backendConnection,
-  clientInstanceId,
   currentNavigationGeneration,
   dispatch,
   draft,
@@ -131,11 +116,6 @@ async function submitNewTask({
   const request = backendConnection?.request;
   if (!request) {
     dispatch({ type: "submit:error", message: "App Server connection unavailable." });
-    return;
-  }
-  const stateRootId = state.appServerStateRootId;
-  if (!stateRootId) {
-    dispatch({ type: "submit:error", message: "App Server state root unavailable. Refresh and try again." });
     return;
   }
   const projectId = state.newTask.selection.projectId;
@@ -155,17 +135,16 @@ async function submitNewTask({
     return;
   }
 
-  const proposedIdempotencyKey = createTaskSendIdempotencyKey();
   const attempt: NewTaskStartAttempt = { cancelled: false, draft: draftInput };
   newTaskStartAttempt.current = attempt;
   attachmentResources?.lockAdoptions();
   dispatch(draft
-    ? { type: "submit:start", prompt: draftInput.prompt, context: draftInput.context, idempotencyKey: proposedIdempotencyKey }
-    : { type: "submit:start", idempotencyKey: proposedIdempotencyKey });
+    ? { type: "submit:start", prompt: draftInput.prompt, context: draftInput.context }
+    : { type: "submit:start" });
   const navigationGeneration = currentNavigationGeneration();
   let createdTaskId: TaskId | undefined;
   let newTaskLease: NewTaskLease | undefined;
-  let sendAttempt: ReturnType<typeof taskSendAttemptRecord> | undefined;
+  let sendStarted = false;
   const discardNewTask = (taskId: TaskId) => newTaskController.discard({
     attachmentResources,
     dispatch,
@@ -175,7 +154,6 @@ async function submitNewTask({
   });
   const settleDiscardedTask = (taskId: TaskId) => {
     newTaskController.recordDiscarded(taskId);
-    clearPendingTaskSendRecovery(stateRootId, clientInstanceId, taskId);
     releaseComposerAttachments({
       attachmentResources,
       attachments: draftInput.context,
@@ -188,14 +166,13 @@ async function submitNewTask({
     dispatch({ type: "taskInput:prompt", taskId, prompt: draftInput.prompt });
   };
   const discardOrCancelOwnedTask = async (taskId: TaskId, lease: NonNullable<typeof newTaskLease>) => {
-    const protectionKey = `prepared-cancel:${lease.generation}`;
-    newTaskController.protectSend(lease, protectionKey);
+    newTaskController.protectSend(lease);
     try {
       const outcome = await discardOrCancelStartedTask(request, taskId);
-      if (outcome === "discarded") newTaskController.settleSend(protectionKey);
+      if (outcome === "discarded") newTaskController.settleSend(taskId);
       return outcome;
     } catch (error) {
-      newTaskController.settleSend(protectionKey);
+      newTaskController.settleSend(taskId);
       newTaskController.reclaim(lease, attachmentResources);
       throw error;
     }
@@ -263,30 +240,19 @@ async function submitNewTask({
     }
 
     const message = attachments?.length ? { text: draftInput.prompt, attachments } : { text: draftInput.prompt };
-    sendAttempt = resolveTaskSendAttempt(taskSendAttemptRecord({
-      clientInstanceId,
-      idempotencyKey: proposedIdempotencyKey,
-      message,
-      renderState: draftInput,
-      stateRootId,
-      taskId,
-      taskRevision,
-    }));
-    dispatch({ type: "submit:attempt", idempotencyKey: sendAttempt.idempotencyKey });
     dispatch({
       type: "taskInput:submit",
       taskId,
       input: draftInput,
-      idempotencyKey: sendAttempt.idempotencyKey,
     });
     attempt.sendInFlight = true;
-    const pendingSend = executeTaskSendAttempt({
-      attempt: sendAttempt,
-      backendConnection: { request },
-      refreshRevisionOnConflict: true,
+    sendStarted = true;
+    const pendingSend = request(TASK_SEND, {
+      taskId,
+      taskRevision,
+      message,
     });
-    // A durable send receipt, rather than a route render, transfers ownership to Task Chat.
-    newTaskController.protectSend(newTaskLease, sendAttempt.idempotencyKey);
+    newTaskController.protectSend(newTaskLease);
     if (currentNavigationGeneration() === navigationGeneration) {
       postHostMessage({
         type: "surface.openTask",
@@ -296,9 +262,9 @@ async function submitNewTask({
         },
       });
     }
-    const { attempt: acceptedAttempt, result: sent } = await pendingSend;
+    const sent = await pendingSend;
     attempt.sendInFlight = false;
-    newTaskController.settleSend(acceptedAttempt.idempotencyKey);
+    newTaskController.settleSend(taskId);
     newTaskController.confirmSentTask(taskId);
     const snapshot = mapProtocolTaskSnapshot(sent.task).snapshot;
     dispatch({
@@ -309,7 +275,6 @@ async function submitNewTask({
     dispatch({
       type: "taskSend:accepted",
       taskId,
-      idempotencyKey: acceptedAttempt.idempotencyKey,
       userMessageId: sent.userMessageId,
     });
     if (attempt.cancelled) {
@@ -339,7 +304,7 @@ async function submitNewTask({
     const message = submitErrorMessage(error);
     if (createdTaskId) {
       if (isInvalidAttachmentHandleError(error)) {
-        if (sendAttempt) newTaskController.settleSend(sendAttempt.idempotencyKey);
+        if (sendStarted) newTaskController.settleSend(createdTaskId);
         if (newTaskLease) newTaskController.reclaim(newTaskLease, attachmentResources);
         releaseComposerAttachments({
           attachmentResources,
@@ -355,20 +320,12 @@ async function submitNewTask({
         if (newTaskStartAttempt.current === attempt) newTaskStartAttempt.current = undefined;
         return;
       }
-      if (isTaskSendOutcomeUnknown(error)) {
-        dispatch({
-          type: "taskInput:sendUncertain",
-          taskId: createdTaskId,
-          idempotencyKey: sendAttempt?.idempotencyKey ?? proposedIdempotencyKey,
-          message: TASK_SEND_OUTCOME_UNKNOWN_MESSAGE,
-        });
-      } else if (sendAttempt) {
-        newTaskController.settleSend(sendAttempt.idempotencyKey);
+      if (sendStarted) {
+        newTaskController.settleSend(createdTaskId);
         if (newTaskLease) newTaskController.reclaim(newTaskLease, attachmentResources);
         dispatch({
           type: "taskInput:sendError",
           taskId: createdTaskId,
-          idempotencyKey: sendAttempt.idempotencyKey,
           message,
         });
       } else {

@@ -36,10 +36,8 @@ use crate::protocol::model::{
 use crate::server_requests::{ServerRequestAnswer, ServerRequestRuntime};
 use crate::snapshots::task_snapshot::project_stored_task_snapshot;
 use crate::storage::records::{TaskLifecycle, TaskPreparationRecord, TaskRecord};
-use crate::storage::send_receipts::TaskSendReceipt;
 use crate::storage::Store;
 use crate::task_events::TaskUpdateNotifier;
-use crate::tasks::mutation::TaskMutationResult;
 
 use super::*;
 
@@ -642,7 +640,6 @@ fn create_persists_preparing_and_starts_one_native_session_asynchronously() {
         .send(send_params(
             snapshot.task.task_id.as_str(),
             snapshot.revision,
-            "send-before-ready",
             "too soon",
         ))
         .unwrap();
@@ -749,7 +746,6 @@ fn create_projects_native_session_start_failure_into_the_accepted_turn() {
         .send(send_params(
             created.task.task_id.as_str(),
             failed.revision,
-            "send-after-failure",
             "do not commit",
         ))
         .unwrap();
@@ -957,7 +953,6 @@ fn first_send_reuses_the_native_session_prepared_during_create() {
     api.send(send_params(
         created.task.task_id.as_str(),
         ready.revision,
-        "first-send",
         "hello",
     ))
     .unwrap();
@@ -1011,7 +1006,7 @@ fn first_send_returns_authoritative_user_message_while_session_resume_is_blocked
     let (finished_tx, finished_rx) = std::sync::mpsc::channel();
 
     std::thread::spawn(move || {
-        let result = api.send(send_params("task-draft", 1, "first-send", "hello"));
+        let result = api.send(send_params("task-draft", 1, "hello"));
         finished_tx.send(result).unwrap();
     });
 
@@ -1047,8 +1042,7 @@ fn first_send_replaces_a_prepared_session_missing_from_the_agent_runtime() {
     )
     .unwrap();
 
-    api.send(send_params("task-draft", 1, "first-send", "hello"))
-        .unwrap();
+    api.send(send_params("task-draft", 1, "hello")).unwrap();
 
     wait_until(|| agent.prompts.load(Ordering::SeqCst) == 1);
     assert_eq!(agent.resumes.load(Ordering::SeqCst), 1);
@@ -1080,8 +1074,7 @@ fn send_projects_agent_config_catalog_metadata() {
     )
     .unwrap();
 
-    api.send(send_params("task-existing", 1, "send-1", "hello"))
-        .unwrap();
+    api.send(send_params("task-existing", 1, "hello")).unwrap();
     let task_id = "task-existing";
 
     wait_until(|| {
@@ -1129,8 +1122,7 @@ fn send_projects_agent_command_catalog_metadata() {
     )
     .unwrap();
 
-    api.send(send_params("task-existing", 1, "send-1", "hello"))
-        .unwrap();
+    api.send(send_params("task-existing", 1, "hello")).unwrap();
     let task_id = "task-existing";
 
     wait_until(|| {
@@ -1193,12 +1185,7 @@ fn startup_marks_abandoned_preparation_failed_instead_of_loading_forever() {
     );
     assert_eq!(record.model_id.as_deref(), Some("gpt-5.5"));
     let accepted = api
-        .send(send_params(
-            "task-preparing",
-            record.revision,
-            "send-1",
-            "hello",
-        ))
+        .send(send_params("task-preparing", record.revision, "hello"))
         .unwrap();
     wait_until(|| {
         store
@@ -1884,12 +1871,7 @@ fn rejected_send_does_not_supersede_the_active_history_check() {
     wait_until(|| agent.list_calls.load(Ordering::SeqCst) == 1);
 
     let error = api
-        .send(send_params(
-            "task-existing",
-            1,
-            "rejected-send",
-            "Do not accept this",
-        ))
+        .send(send_params("task-existing", 1, "Do not accept this"))
         .unwrap_err();
     agent.block_list.store(false, Ordering::SeqCst);
 
@@ -1949,13 +1931,8 @@ fn send_supersedes_blocked_history_listing_and_reconciles_replay_before_prompt()
     })
     .unwrap();
     wait_until(|| agent.list_calls.load(Ordering::SeqCst) == 1);
-    api.send(send_params(
-        "task-existing",
-        1,
-        "send-while-syncing",
-        "What next?",
-    ))
-    .unwrap();
+    api.send(send_params("task-existing", 1, "What next?"))
+        .unwrap();
     wait_until(|| agent.prompts.load(Ordering::SeqCst) == 1);
     let prompted_while_listing_blocked = agent.prompts.load(Ordering::SeqCst);
     agent.block_list.store(false, Ordering::SeqCst);
@@ -1998,7 +1975,7 @@ fn failed_pre_send_sync_retries_without_duplicating_the_accepted_message() {
     )
     .unwrap();
 
-    api.send(send_params("task-existing", 1, "retry-sync", "Continue"))
+    api.send(send_params("task-existing", 1, "Continue"))
         .unwrap();
     wait_until(|| agent.loads.load(Ordering::SeqCst) == 1);
     assert_eq!(agent.prompts.load(Ordering::SeqCst), 0);
@@ -2055,12 +2032,7 @@ fn transient_retry_snapshot_failure_keeps_the_exact_pending_send_retryable() {
         "notes.md",
         attachment_path,
     );
-    let mut params = send_params(
-        "task-existing",
-        1,
-        "retry-after-snapshot-failure",
-        "Continue exactly once",
-    );
+    let mut params = send_params("task-existing", 1, "Continue exactly once");
     params.message.attachments.push(attachment.handle_id);
 
     api.send(params).unwrap();
@@ -2117,7 +2089,7 @@ fn stopping_failed_pre_send_sync_discards_retry_payload() {
     .unwrap();
 
     let accepted = api
-        .send(send_params("task-existing", 1, "cancel-sync", "Continue"))
+        .send(send_params("task-existing", 1, "Continue"))
         .unwrap();
     wait_until(|| agent.loads.load(Ordering::SeqCst) == 1);
     api.cancel_for_test(TaskCancelParams {
@@ -2170,12 +2142,7 @@ fn cancel_linearizes_before_a_failed_send_can_defer_its_retry_payload() {
         .after_next_defer_for_test(move || defer_finished_tx.send(()).unwrap());
 
     let accepted = api
-        .send(send_params(
-            "task-existing",
-            1,
-            "cancel-during-deferral",
-            "Do not resurrect",
-        ))
+        .send(send_params("task-existing", 1, "Do not resurrect"))
         .unwrap();
     defer_entered_rx
         .recv_timeout(Duration::from_millis(250))
@@ -2245,7 +2212,7 @@ fn retry_history_sync_waits_for_the_task_turn_acceptance_operation() {
     )
     .unwrap();
 
-    api.send(send_params("task-existing", 1, "retry-sync", "Continue"))
+    api.send(send_params("task-existing", 1, "Continue"))
         .unwrap();
     wait_until(|| agent.loads.load(Ordering::SeqCst) == 1);
 
@@ -2646,9 +2613,7 @@ fn send_commits_user_message_and_running_turn() {
     )
     .unwrap();
 
-    let accepted = api
-        .send(send_params("task-existing", 1, "send-1", "hello"))
-        .unwrap();
+    let accepted = api.send(send_params("task-existing", 1, "hello")).unwrap();
 
     assert!(matches!(
         accepted.task.history_sync,
@@ -2701,12 +2666,7 @@ fn send_returns_after_durable_acceptance_without_waiting_for_session_start() {
 
     std::thread::spawn(move || {
         accepted_tx
-            .send(send_api.send(send_params(
-                "task-existing",
-                1,
-                "send-fast-acceptance",
-                "hello",
-            )))
+            .send(send_api.send(send_params("task-existing", 1, "hello")))
             .unwrap();
     });
 
@@ -2717,12 +2677,7 @@ fn send_returns_after_durable_acceptance_without_waiting_for_session_start() {
         .unwrap();
     let blockers = api.shutdown_blockers().unwrap();
     let task_revision = store.read_task("task-existing").unwrap().revision;
-    let second = api.send(send_params(
-        "task-existing",
-        task_revision,
-        "send-while-starting",
-        "second",
-    ));
+    let second = api.send(send_params("task-existing", task_revision, "second"));
     agent.block_start.store(false, Ordering::SeqCst);
 
     assert!(accepted.task.chat.items.len() >= 2);
@@ -2760,7 +2715,6 @@ fn first_send_is_accepted_while_draft_session_preparation_is_running() {
     let accepted = api.send(send_params(
         draft.task.task_id.as_str(),
         draft.revision,
-        "send-during-preparation",
         "hello",
     ));
     agent.block_start.store(false, Ordering::SeqCst);
@@ -2799,7 +2753,6 @@ fn accepted_send_waiting_for_draft_preparation_remains_the_owned_shutdown_blocke
         .send(send_params(
             draft.task.task_id.as_str(),
             draft.revision,
-            "send-during-preparation",
             "first",
         ))
         .unwrap();
@@ -2807,7 +2760,6 @@ fn accepted_send_waiting_for_draft_preparation_remains_the_owned_shutdown_blocke
     let second = api.send(send_params(
         draft.task.task_id.as_str(),
         accepted.task.revision,
-        "different-send",
         "second",
     ));
     let task_while_preparing = store.read_task(draft.task.task_id.as_str()).unwrap();
@@ -2863,7 +2815,6 @@ fn stopping_a_send_waiting_for_draft_preparation_retires_its_sync_generation() {
         .send(send_params(
             draft.task.task_id.as_str(),
             draft.revision,
-            "cancel-during-preparation",
             "hello",
         ))
         .unwrap();
@@ -2923,8 +2874,7 @@ fn send_starts_agent_session_and_prompts_after_commit() {
     )
     .unwrap();
 
-    api.send(send_params("task-existing", 1, "send-1", "hello"))
-        .unwrap();
+    api.send(send_params("task-existing", 1, "hello")).unwrap();
 
     wait_until(|| {
         store
@@ -2965,12 +2915,7 @@ fn send_recovers_stale_active_turn_and_starts_current_prompt() {
     let stale_revision = store.read_task("task-existing").unwrap().revision;
 
     let accepted = api
-        .send(send_params(
-            "task-existing",
-            stale_revision,
-            "send-1",
-            "why stuck",
-        ))
+        .send(send_params("task-existing", stale_revision, "why stuck"))
         .unwrap();
 
     wait_until(|| {
@@ -3038,8 +2983,7 @@ fn send_loads_stored_agent_session_when_live_resume_is_unavailable() {
     )
     .unwrap();
 
-    api.send(send_params("task-existing", 1, "send-1", "hello"))
-        .unwrap();
+    api.send(send_params("task-existing", 1, "hello")).unwrap();
 
     wait_until(|| agent.prompts.load(Ordering::SeqCst) == 1);
     assert_eq!(agent.resumes.load(Ordering::SeqCst), 1);
@@ -3080,13 +3024,8 @@ fn send_after_restart_hydrates_loaded_native_session_state_authoritatively() {
     .unwrap();
     let revision = store.read_task("task-existing").unwrap().revision;
 
-    api.send(send_params(
-        "task-existing",
-        revision,
-        "send-after-restart",
-        "hello",
-    ))
-    .unwrap();
+    api.send(send_params("task-existing", revision, "hello"))
+        .unwrap();
     wait_until(|| agent.prompts.load(Ordering::SeqCst) == 1);
     let snapshot = api
         .open_for_test(TaskOpenParams {
@@ -3146,13 +3085,8 @@ fn send_preserves_hydrated_session_state_when_resume_returns_identity_only() {
     task.model_id = Some("gpt-5.5".to_string());
     store.write_task(&task).unwrap();
 
-    api.send(send_params(
-        "task-existing",
-        task.revision,
-        "send-on-resumed-session",
-        "hello",
-    ))
-    .unwrap();
+    api.send(send_params("task-existing", task.revision, "hello"))
+        .unwrap();
     wait_until(|| agent.prompts.load(Ordering::SeqCst) == 1);
     assert_eq!(agent.resumes.load(Ordering::SeqCst), 1);
     assert_eq!(agent.loads.load(Ordering::SeqCst), 0);
@@ -3196,8 +3130,7 @@ fn send_after_restart_starts_fresh_session_when_stored_session_load_times_out() 
     )
     .unwrap();
 
-    api.send(send_params("task-existing", 1, "send-1", "hello"))
-        .unwrap();
+    api.send(send_params("task-existing", 1, "hello")).unwrap();
 
     wait_until(|| agent.prompts.load(Ordering::SeqCst) == 1);
     assert_eq!(agent.resumes.load(Ordering::SeqCst), 1);
@@ -3238,7 +3171,7 @@ fn send_rejects_task_when_current_agent_registry_no_longer_has_agent() {
     );
 
     let error = api
-        .send(send_params("task-existing", 1, "send-1", "hello"))
+        .send(send_params("task-existing", 1, "hello"))
         .unwrap_err();
 
     assert_eq!(error.code, ProtocolErrorCode::CapabilityUnavailable);
@@ -3266,9 +3199,7 @@ fn send_tolerates_attach_time_command_catalog_revision_bump() {
     )
     .unwrap();
 
-    let accepted = api
-        .send(send_params("task-existing", 1, "send-1", "hello"))
-        .unwrap();
+    let accepted = api.send(send_params("task-existing", 1, "hello")).unwrap();
 
     wait_until(|| agent.prompts.load(Ordering::SeqCst) == 1);
     let record = store.read_task("task-existing").unwrap();
@@ -3311,11 +3242,9 @@ fn send_start_failure_returns_accepted_failed_turn() {
     )
     .unwrap();
 
-    let params = send_params("task-existing", 1, "send-1", "hello");
     let accepted = api
-        .send(params.clone())
+        .send(send_params("task-existing", 1, "hello"))
         .expect("a durably committed send must remain accepted");
-    let retry = api.send(params).unwrap();
 
     wait_until(|| {
         store
@@ -3324,8 +3253,7 @@ fn send_start_failure_returns_accepted_failed_turn() {
             .unwrap_or(false)
     });
 
-    assert_eq!(retry.turn_id, accepted.turn_id);
-    assert_eq!(retry.user_message_id, accepted.user_message_id);
+    assert!(accepted.turn_id.as_str().starts_with("turn_"));
     let messages = store.read_messages("task-existing").unwrap();
     assert!(messages.iter().any(|message| matches!(
         message.chat.message,
@@ -3371,17 +3299,13 @@ fn send_session_attach_failure_returns_accepted_failed_turn_and_closes_new_sessi
         TaskUpdateNotifier::disabled(),
     )
     .unwrap();
-    let params = send_params("task-existing", 1, "send-1", "hello");
-
     let accepted = api
-        .send(params.clone())
+        .send(send_params("task-existing", 1, "hello"))
         .expect("a durably committed send must remain accepted");
-    let retry = api.send(params).unwrap();
 
     wait_until(|| agent.closes.load(Ordering::SeqCst) == 1);
 
-    assert_eq!(retry.turn_id, accepted.turn_id);
-    assert_eq!(retry.user_message_id, accepted.user_message_id);
+    assert!(accepted.turn_id.as_str().starts_with("turn_"));
     assert_eq!(agent.starts.load(Ordering::SeqCst), 1);
     assert_eq!(agent.attaches.load(Ordering::SeqCst), 1);
     assert_eq!(agent.closes.load(Ordering::SeqCst), 1);
@@ -3390,201 +3314,6 @@ fn send_session_attach_failure_returns_accepted_failed_turn_and_closes_new_sessi
     assert_eq!(task.status, TaskStatus::Failed);
     assert_eq!(task.active_turn_id, None);
     assert_eq!(task.agent_session_id, None);
-}
-
-#[test]
-fn send_snapshot_failure_after_commit_preserves_idempotent_accepted_turn() {
-    let temp = tempfile::tempdir().unwrap();
-    let store = Store::open(temp.path().to_path_buf()).unwrap();
-    store
-        .write_task(&task_record("task-existing", "/workspace/app"))
-        .unwrap();
-    let agent = Arc::new(RecordingAgent::default());
-    let api = TaskProductApi::new(
-        store.clone(),
-        Arc::new(StorageProjectResolver::new(store.clone())),
-        AgentRegistry::default_built_ins(),
-        agent.clone(),
-        TaskUpdateNotifier::disabled(),
-    )
-    .unwrap();
-    let params = send_params("task-existing", 1, "send-1", "hello");
-    store.fail_next_tail_page_for_test();
-
-    let error = api.send(params.clone()).unwrap_err();
-    assert_eq!(error.code, ProtocolErrorCode::Internal);
-    let retry = api.send(params).unwrap();
-
-    wait_until(|| agent.prompts.load(Ordering::SeqCst) == 1);
-    assert!(retry.turn_id.as_str().starts_with("turn_"));
-    assert_eq!(agent.starts.load(Ordering::SeqCst), 1);
-    assert_eq!(agent.prompts.load(Ordering::SeqCst), 1);
-    assert_eq!(
-        store
-            .read_messages("task-existing")
-            .unwrap()
-            .iter()
-            .filter(|message| matches!(message.chat.message, NormalizedMessage::User { .. }))
-            .count(),
-        1
-    );
-}
-
-#[test]
-fn send_retry_after_process_crash_before_task_record_does_not_duplicate() {
-    let temp = tempfile::tempdir().unwrap();
-    let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut record = task_record("task-existing", "/workspace/app");
-    record.title = None;
-    record.lifecycle = test_new_task_lifecycle();
-    store.write_task(&record).unwrap();
-    let api = TaskProductApi::new(
-        store.clone(),
-        Arc::new(StorageProjectResolver::new(store.clone())),
-        AgentRegistry::default_built_ins(),
-        Arc::new(crate::agent::mock::MockAgent),
-        TaskUpdateNotifier::disabled(),
-    )
-    .unwrap();
-    let params = send_params("task-existing", 1, "send-crash", "hello");
-    store.crash_before_next_task_write_for_test();
-
-    let crashed = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        let _ = api.send(params.clone());
-    }));
-
-    assert!(crashed.is_err());
-    let committed_receipt = store
-        .read_send_receipt("task-existing", "send-crash")
-        .unwrap()
-        .expect("receipt must identify the accepted send before Task persistence");
-    assert_eq!(
-        store
-            .read_messages("task-existing")
-            .unwrap()
-            .iter()
-            .filter(|message| matches!(message.chat.message, NormalizedMessage::User { .. }))
-            .count(),
-        1
-    );
-    drop(api);
-    drop(store);
-
-    let reopened_store = Store::open(temp.path().to_path_buf()).unwrap();
-    let agent = Arc::new(RecordingAgent::default());
-    let reopened_api = TaskProductApi::new(
-        reopened_store.clone(),
-        Arc::new(StorageProjectResolver::new(reopened_store.clone())),
-        AgentRegistry::default_built_ins(),
-        agent.clone(),
-        TaskUpdateNotifier::disabled(),
-    )
-    .unwrap();
-
-    let retried = reopened_api.send(params).unwrap();
-
-    assert_eq!(retried.turn_id.as_str(), committed_receipt.turn_id);
-    assert_eq!(
-        retried.user_message_id.as_str(),
-        committed_receipt.user_message_id
-    );
-    assert_eq!(agent.starts.load(Ordering::SeqCst), 0);
-    assert_eq!(agent.prompts.load(Ordering::SeqCst), 0);
-    let messages = reopened_store.read_messages("task-existing").unwrap();
-    assert_eq!(
-        messages
-            .iter()
-            .filter(|message| matches!(message.chat.message, NormalizedMessage::User { .. }))
-            .count(),
-        1
-    );
-    assert_eq!(
-        messages
-            .iter()
-            .filter(|message| {
-                message.chat.identity == format!("turn:{}", retried.turn_id.as_str())
-            })
-            .count(),
-        1
-    );
-    assert!(messages.iter().any(|message| matches!(
-        &message.chat.message,
-        NormalizedMessage::Activity {
-            status: ActivityStatus::Completed,
-            ..
-        } if message.chat.identity == format!("turn:{}", retried.turn_id.as_str())
-    )));
-    assert_eq!(
-        messages
-            .iter()
-            .filter(|message| matches!(
-                &message.chat.message,
-                NormalizedMessage::Interruption { message, .. }
-                    if message == crate::task_recovery::RESTART_INTERRUPTION_MESSAGE
-            ))
-            .count(),
-        1
-    );
-    let task = reopened_store.read_task("task-existing").unwrap();
-    assert_eq!(task.status, TaskStatus::Inactive);
-    assert_eq!(task.active_turn_id, None);
-    assert_eq!(task.lifecycle, TaskLifecycle::Visible);
-    assert_eq!(task.title, None);
-    assert_eq!(
-        task.message_history_version,
-        reopened_store
-            .message_history_version("task-existing")
-            .unwrap()
-    );
-}
-
-#[test]
-fn send_ignores_orphan_receipt_without_durable_user_turn() {
-    let temp = tempfile::tempdir().unwrap();
-    let store = Store::open(temp.path().to_path_buf()).unwrap();
-    store
-        .write_task(&task_record("task-existing", "/workspace/app"))
-        .unwrap();
-    store
-        .write_send_receipt(
-            "task-existing",
-            TaskSendReceipt {
-                idempotency_key: "send-1".to_string(),
-                text: "hello".to_string(),
-                attachment_handles: Vec::new(),
-                user_message_id: "orphan-message".to_string(),
-                turn_id: "orphan-turn".to_string(),
-                durable_chat_written: false,
-            },
-        )
-        .unwrap();
-    let agent = Arc::new(RecordingAgent::default());
-    let api = TaskProductApi::new(
-        store.clone(),
-        Arc::new(StorageProjectResolver::new(store.clone())),
-        AgentRegistry::default_built_ins(),
-        agent.clone(),
-        TaskUpdateNotifier::disabled(),
-    )
-    .unwrap();
-
-    let accepted = api
-        .send(send_params("task-existing", 1, "send-1", "hello"))
-        .unwrap();
-
-    wait_until(|| agent.prompts.load(Ordering::SeqCst) == 1);
-    assert_ne!(accepted.user_message_id.as_str(), "orphan-message");
-    assert_ne!(accepted.turn_id.as_str(), "orphan-turn");
-    assert_eq!(agent.prompts.load(Ordering::SeqCst), 1);
-    assert_eq!(
-        store
-            .read_messages("task-existing")
-            .unwrap()
-            .iter()
-            .filter(|message| matches!(message.chat.message, NormalizedMessage::User { .. }))
-            .count(),
-        1
-    );
 }
 
 #[test]
@@ -3622,7 +3351,6 @@ fn send_post_commit_start_failure_consumes_attachment_and_returns_accepted_turn(
 
     let params = TaskSendParams {
         task_id: "task-existing".into(),
-        idempotency_key: "send-1".into(),
         task_revision: 1,
         message: ComposerMessage {
             text: Some("hello".to_string()),
@@ -3630,9 +3358,8 @@ fn send_post_commit_start_failure_consumes_attachment_and_returns_accepted_turn(
         },
     };
     let accepted = api
-        .send(params.clone())
+        .send(params)
         .expect("a durably committed send must remain accepted");
-    let retry = api.send(params).unwrap();
     wait_until(|| {
         store
             .read_task("task-existing")
@@ -3643,7 +3370,6 @@ fn send_post_commit_start_failure_consumes_attachment_and_returns_accepted_turn(
     let reuse_error = api
         .send(TaskSendParams {
             task_id: "task-existing".into(),
-            idempotency_key: "send-2".into(),
             task_revision: failed_revision,
             message: ComposerMessage {
                 text: Some("reuse".to_string()),
@@ -3652,8 +3378,7 @@ fn send_post_commit_start_failure_consumes_attachment_and_returns_accepted_turn(
         })
         .unwrap_err();
 
-    assert_eq!(retry.turn_id, accepted.turn_id);
-    assert_eq!(retry.user_message_id, accepted.user_message_id);
+    assert!(accepted.turn_id.as_str().starts_with("turn_"));
     assert_eq!(reuse_error.code, ProtocolErrorCode::AttachmentHandleInvalid);
     assert_eq!(agent.prompts.load(Ordering::SeqCst), 0);
     let messages = store.read_messages("task-existing").unwrap();
@@ -3715,7 +3440,6 @@ fn send_reservation_wins_release_race_after_durable_commit() {
     let send_thread = std::thread::spawn(move || {
         send_api.send(TaskSendParams {
             task_id: "task-existing".into(),
-            idempotency_key: "send-1".into(),
             task_revision: 1,
             message: ComposerMessage {
                 text: Some("hello".to_string()),
@@ -3769,7 +3493,7 @@ fn send_start_failure_does_not_poison_later_task_start() {
     .unwrap();
 
     let accepted = api
-        .send(send_params("task-first", 1, "send-1", "first"))
+        .send(send_params("task-first", 1, "first"))
         .expect("a durably committed send must remain accepted");
 
     assert!(accepted.turn_id.as_str().starts_with("turn_"));
@@ -3784,8 +3508,7 @@ fn send_start_failure_does_not_poison_later_task_start() {
     assert_eq!(first.active_turn_id, None);
     assert_eq!(first.agent_session_id, None);
 
-    api.send(send_params("task-second", 1, "send-2", "second"))
-        .unwrap();
+    api.send(send_params("task-second", 1, "second")).unwrap();
     wait_until(|| {
         agent.prompts.load(Ordering::SeqCst) == 1
             && store
@@ -3799,237 +3522,6 @@ fn send_start_failure_does_not_poison_later_task_start() {
     assert_eq!(second.active_turn_id, None);
     assert_eq!(second.agent_session_id.as_deref(), Some("recorded-session"));
     assert_eq!(agent.starts.load(Ordering::SeqCst), 2);
-}
-
-#[test]
-fn send_retries_same_idempotency_key_without_duplicate_messages() {
-    let temp = tempfile::tempdir().unwrap();
-    let store = Store::open(temp.path().to_path_buf()).unwrap();
-    store
-        .write_task(&task_record("task-existing", "/workspace/app"))
-        .unwrap();
-    let api = TaskProductApi::new(
-        store.clone(),
-        Arc::new(StorageProjectResolver::new(store.clone())),
-        AgentRegistry::default_built_ins(),
-        Arc::new(crate::agent::mock::MockAgent),
-        TaskUpdateNotifier::disabled(),
-    )
-    .unwrap();
-
-    let first = api
-        .send(send_params("task-existing", 1, "send-1", "hello"))
-        .unwrap();
-    let retry = api
-        .send(send_params("task-existing", 1, "send-1", "hello"))
-        .unwrap();
-
-    assert_eq!(retry.turn_id, first.turn_id);
-    assert_eq!(retry.user_message_id, first.user_message_id);
-    assert_eq!(
-        store
-            .read_messages("task-existing")
-            .unwrap()
-            .iter()
-            .filter(|message| matches!(message.chat.message, NormalizedMessage::User { .. }))
-            .count(),
-        1
-    );
-}
-
-#[test]
-fn send_retry_keeps_its_receipt_after_native_history_replaces_local_message_ids() {
-    let temp = tempfile::tempdir().unwrap();
-    let store = Store::open(temp.path().to_path_buf()).unwrap();
-    store
-        .write_task(&task_record("task-existing", "/workspace/app"))
-        .unwrap();
-    let agent = Arc::new(RecordingAgent::default());
-    let api = TaskProductApi::new(
-        store.clone(),
-        Arc::new(StorageProjectResolver::new(store.clone())),
-        AgentRegistry::default_built_ins(),
-        agent.clone(),
-        TaskUpdateNotifier::disabled(),
-    )
-    .unwrap();
-    let first = api
-        .send(send_params("task-existing", 1, "send-1", "hello"))
-        .unwrap();
-    wait_until(|| {
-        agent.prompts.load(Ordering::SeqCst) == 1
-            && store
-                .read_task("task-existing")
-                .is_ok_and(|task| task.active_turn_id.is_none())
-    });
-
-    api.mutations
-        .commit_existing_task(
-            "task-existing",
-            TaskCommitOptions {
-                refresh_message_history: true,
-                response_snapshot_tail_limit: None,
-            },
-            |ctx| {
-                ctx.replace_messages(vec![
-                    NormalizedMessage::User {
-                        id: "acp:native-session:message:user-1".to_string(),
-                        text: "hello".to_string(),
-                        created_at: "2026-01-02T00:00:00.000Z".to_string(),
-                        attachments: Vec::new(),
-                    },
-                    NormalizedMessage::AgentText {
-                        id: "acp:native-session:message:agent-1".to_string(),
-                        text: "done".to_string(),
-                        created_at: "2026-01-02T00:00:01.000Z".to_string(),
-                        streaming: false,
-                    },
-                ])?;
-                Ok(TaskMutationResult::Changed)
-            },
-        )
-        .unwrap();
-    let refreshed_revision = store.read_task("task-existing").unwrap().revision;
-
-    let retry = api
-        .send(send_params(
-            "task-existing",
-            refreshed_revision,
-            "send-1",
-            "hello",
-        ))
-        .unwrap();
-
-    assert_eq!(retry.turn_id, first.turn_id);
-    assert_eq!(retry.user_message_id, first.user_message_id);
-    std::thread::sleep(Duration::from_millis(25));
-    assert_eq!(agent.prompts.load(Ordering::SeqCst), 1);
-}
-
-#[test]
-fn overlapping_same_key_sends_with_one_attachment_return_the_same_receipt() {
-    let temp = tempfile::tempdir().unwrap();
-    let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let workspace = temp.path().join("workspace");
-    std::fs::create_dir(&workspace).unwrap();
-    let attachment_path = workspace.join("notes.md");
-    std::fs::write(&attachment_path, "hello").unwrap();
-    store
-        .write_task(&task_record(
-            "task-existing",
-            workspace.to_string_lossy().as_ref(),
-        ))
-        .unwrap();
-    let agent = Arc::new(RecordingAgent::default());
-    let api = TaskProductApi::new(
-        store.clone(),
-        Arc::new(StorageProjectResolver::new(store.clone())),
-        AgentRegistry::default_built_ins(),
-        agent.clone(),
-        TaskUpdateNotifier::disabled(),
-    )
-    .unwrap();
-    let task_id = TaskId::from("task-existing");
-    let handle = api.attachment_runtime().register_file_reference_for_test(
-        task_id.clone(),
-        "notes.md",
-        attachment_path,
-    );
-    let params = TaskSendParams {
-        task_id: task_id.clone(),
-        idempotency_key: "same-send".into(),
-        task_revision: 1,
-        message: ComposerMessage {
-            text: Some("hello".to_string()),
-            attachments: vec![handle.handle_id.clone()],
-        },
-    };
-    let commit_guard = api.mutations.lock();
-    let first_api = api.clone();
-    let first_params = params.clone();
-    let first = std::thread::spawn(move || first_api.send(first_params));
-    wait_until(|| {
-        matches!(
-            api.attachment_runtime()
-                .resolve_for_send(&task_id, std::slice::from_ref(&handle.handle_id)),
-            Err(AttachmentRuntimeError::UnknownHandle)
-        )
-    });
-    let second_api = api.clone();
-    let second = std::thread::spawn(move || second_api.send(params));
-
-    drop(commit_guard);
-    let first = first.join().unwrap().unwrap();
-    let second = second.join().unwrap().unwrap();
-
-    assert_eq!(second.turn_id, first.turn_id);
-    assert_eq!(second.user_message_id, first.user_message_id);
-    assert_eq!(
-        store
-            .read_messages("task-existing")
-            .unwrap()
-            .iter()
-            .filter(|message| matches!(message.chat.message, NormalizedMessage::User { .. }))
-            .count(),
-        1
-    );
-    wait_until(|| agent.prompts.load(Ordering::SeqCst) == 1);
-}
-
-#[test]
-fn send_retry_does_not_prompt_agent_again() {
-    let temp = tempfile::tempdir().unwrap();
-    let store = Store::open(temp.path().to_path_buf()).unwrap();
-    store
-        .write_task(&task_record("task-existing", "/workspace/app"))
-        .unwrap();
-    let agent = Arc::new(RecordingAgent::default());
-    let api = TaskProductApi::new(
-        store.clone(),
-        Arc::new(StorageProjectResolver::new(store.clone())),
-        AgentRegistry::default_built_ins(),
-        agent.clone(),
-        TaskUpdateNotifier::disabled(),
-    )
-    .unwrap();
-
-    api.send(send_params("task-existing", 1, "send-1", "hello"))
-        .unwrap();
-    api.send(send_params("task-existing", 1, "send-1", "hello"))
-        .unwrap();
-
-    wait_until(|| agent.prompts.load(Ordering::SeqCst) == 1);
-    assert_eq!(agent.starts.load(Ordering::SeqCst), 1);
-    assert_eq!(agent.prompts.load(Ordering::SeqCst), 1);
-}
-
-#[test]
-fn send_retry_returns_the_turn_created_for_that_idempotency_key() {
-    let temp = tempfile::tempdir().unwrap();
-    let store = Store::open(temp.path().to_path_buf()).unwrap();
-    store
-        .write_task(&task_record("task-existing", "/workspace/app"))
-        .unwrap();
-    append_old_completed_turn(&store, "task-existing");
-    let api = TaskProductApi::new(
-        store.clone(),
-        Arc::new(StorageProjectResolver::new(store.clone())),
-        AgentRegistry::default_built_ins(),
-        Arc::new(crate::agent::mock::MockAgent),
-        TaskUpdateNotifier::disabled(),
-    )
-    .unwrap();
-
-    let first = api
-        .send(send_params("task-existing", 1, "send-new", "new prompt"))
-        .unwrap();
-    let retry = api
-        .send(send_params("task-existing", 1, "send-new", "new prompt"))
-        .unwrap();
-
-    assert_eq!(retry.turn_id, first.turn_id);
-    assert_ne!(retry.turn_id.as_str(), "turn_old");
-    assert_eq!(retry.user_message_id, first.user_message_id);
 }
 
 #[test]
@@ -4052,7 +3544,6 @@ fn send_trims_surrounding_whitespace_from_prompt_text() {
         .send(send_params(
             "task-existing",
             1,
-            "send-1",
             "  first line\n  indented line  ",
         ))
         .unwrap();
@@ -4085,7 +3576,7 @@ fn send_rejects_a_second_prompt_while_the_task_turn_is_active() {
     )
     .unwrap();
     let first = api
-        .send(send_params("task-existing", 1, "send-1", "start work"))
+        .send(send_params("task-existing", 1, "start work"))
         .unwrap();
     wait_until(|| agent.prompts.load(Ordering::SeqCst) == 1);
 
@@ -4094,7 +3585,6 @@ fn send_rejects_a_second_prompt_while_the_task_turn_is_active() {
         .send(send_params(
             "task-existing",
             active_revision,
-            "send-2",
             "second prompt",
         ))
         .unwrap_err();
@@ -4146,7 +3636,7 @@ fn send_rejects_a_second_prompt_while_active_turn_is_blocked_on_permission() {
     )
     .unwrap();
     let first = api
-        .send(send_params("task-existing", 1, "send-1", "start work"))
+        .send(send_params("task-existing", 1, "start work"))
         .unwrap();
     wait_until(|| agent.prompts.load(Ordering::SeqCst) == 1);
 
@@ -4159,7 +3649,6 @@ fn send_rejects_a_second_prompt_while_active_turn_is_blocked_on_permission() {
         .send(send_params(
             "task-existing",
             blocked_revision,
-            "send-2",
             "why no answer?",
         ))
         .unwrap_err();
@@ -4189,31 +3678,6 @@ fn send_rejects_a_second_prompt_while_active_turn_is_blocked_on_permission() {
 }
 
 #[test]
-fn send_rejects_same_idempotency_key_with_different_message() {
-    let temp = tempfile::tempdir().unwrap();
-    let store = Store::open(temp.path().to_path_buf()).unwrap();
-    store
-        .write_task(&task_record("task-existing", "/workspace/app"))
-        .unwrap();
-    let api = TaskProductApi::new(
-        store.clone(),
-        Arc::new(StorageProjectResolver::new(store.clone())),
-        AgentRegistry::default_built_ins(),
-        Arc::new(crate::agent::mock::MockAgent),
-        TaskUpdateNotifier::disabled(),
-    )
-    .unwrap();
-    api.send(send_params("task-existing", 1, "send-1", "hello"))
-        .unwrap();
-
-    let error = api
-        .send(send_params("task-existing", 1, "send-1", "changed"))
-        .unwrap_err();
-
-    assert_eq!(error.code, ProtocolErrorCode::Conflict);
-}
-
-#[test]
 fn send_rejects_stale_revision_for_new_submission() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
@@ -4230,7 +3694,7 @@ fn send_rejects_stale_revision_for_new_submission() {
     .unwrap();
 
     let error = api
-        .send(send_params("task-existing", 0, "send-1", "hello"))
+        .send(send_params("task-existing", 0, "hello"))
         .unwrap_err();
 
     assert_eq!(error.code, ProtocolErrorCode::Conflict);
@@ -4261,9 +3725,7 @@ fn send_keeps_committed_message_when_config_changes_while_agent_session_opens() 
     )
     .unwrap();
 
-    let accepted = api
-        .send(send_params("task-existing", 1, "send-1", "hello"))
-        .unwrap();
+    let accepted = api.send(send_params("task-existing", 1, "hello")).unwrap();
 
     wait_until(|| {
         store
@@ -4307,7 +3769,6 @@ fn send_rejects_unknown_attachment_handles_with_reselection_error() {
     let error = api
         .send(TaskSendParams {
             task_id: "task-existing".into(),
-            idempotency_key: "send-1".into(),
             task_revision: 1,
             message: ComposerMessage {
                 text: Some("hello".to_string()),
@@ -4360,18 +3821,6 @@ fn send_commits_valid_attachment_handles_as_safe_chat_metadata() {
     let accepted = api
         .send(TaskSendParams {
             task_id: "task-existing".into(),
-            idempotency_key: "send-1".into(),
-            task_revision: 1,
-            message: ComposerMessage {
-                text: Some("hello".to_string()),
-                attachments: vec![handle.handle_id.clone()],
-            },
-        })
-        .unwrap();
-    let retry = api
-        .send(TaskSendParams {
-            task_id: "task-existing".into(),
-            idempotency_key: "send-1".into(),
             task_revision: 1,
             message: ComposerMessage {
                 text: Some("hello".to_string()),
@@ -4380,7 +3829,6 @@ fn send_commits_valid_attachment_handles_as_safe_chat_metadata() {
         })
         .unwrap();
 
-    assert_eq!(retry.user_message_id, accepted.user_message_id);
     assert_eq!(accepted.task.chat.items[0].parts.len(), 2);
     let openaide_app_server_protocol::snapshot::MessagePart::Attachment { attachment } =
         &accepted.task.chat.items[0].parts[1]
@@ -4419,7 +3867,6 @@ fn send_commits_attachment_only_image_without_an_empty_text_part() {
     let accepted = api
         .send(TaskSendParams {
             task_id: "task-existing".into(),
-            idempotency_key: "send-image-only".into(),
             task_revision: 1,
             message: ComposerMessage {
                 text: None,
@@ -4472,7 +3919,6 @@ fn rejected_send_releases_attachment_reservation_for_retry() {
     let error = api
         .send(TaskSendParams {
             task_id: "task-existing".into(),
-            idempotency_key: "stale-send".into(),
             task_revision: 0,
             message: message.clone(),
         })
@@ -4480,7 +3926,6 @@ fn rejected_send_releases_attachment_reservation_for_retry() {
     let accepted = api
         .send(TaskSendParams {
             task_id: "task-existing".into(),
-            idempotency_key: "current-send".into(),
             task_revision: 1,
             message,
         })
@@ -4543,7 +3988,6 @@ fn send_rejects_a_selected_file_replaced_with_an_escaping_symlink_without_commit
     let error = api
         .send(TaskSendParams {
             task_id,
-            idempotency_key: "send-1".into(),
             task_revision: 1,
             message: ComposerMessage {
                 text: Some("hello".to_string()),
@@ -4651,9 +4095,7 @@ fn cancel_signals_live_agent_turn_started_by_task_send() {
         TaskUpdateNotifier::disabled(),
     )
     .unwrap();
-    let sent = api
-        .send(send_params("task-existing", 1, "send-1", "hello"))
-        .unwrap();
+    let sent = api.send(send_params("task-existing", 1, "hello")).unwrap();
     wait_until(|| agent.prompts.load(Ordering::SeqCst) == 1);
 
     api.cancel_for_test(TaskCancelParams {
@@ -4694,9 +4136,7 @@ fn stale_cancel_cannot_retire_the_generation_of_a_newer_accepted_send() {
         TaskUpdateNotifier::disabled(),
     )
     .unwrap();
-    let first = api
-        .send(send_params("task-existing", 1, "send-1", "first"))
-        .unwrap();
+    let first = api.send(send_params("task-existing", 1, "first")).unwrap();
     wait_until(|| agent.prompts.load(Ordering::SeqCst) == 1);
 
     let (stale_read_tx, stale_read_rx) = std::sync::mpsc::sync_channel(0);
@@ -4733,7 +4173,7 @@ fn stale_cancel_cannot_retire_the_generation_of_a_newer_accepted_send() {
     let second_api = api.clone();
     let second = std::thread::spawn(move || {
         second_started_tx.send(()).unwrap();
-        second_api.send(send_params("task-existing", revision, "send-2", "second"))
+        second_api.send(send_params("task-existing", revision, "second"))
     });
     second_started_rx.recv().unwrap();
 
@@ -4748,14 +4188,7 @@ fn stale_cancel_cannot_retire_the_generation_of_a_newer_accepted_send() {
         agent.prompt_calls.lock().unwrap().last().cloned(),
         Some(("recorded-session".to_string(), "second".to_string()))
     );
-    assert_eq!(
-        store
-            .read_send_receipt("task-existing", "send-2")
-            .unwrap()
-            .unwrap()
-            .turn_id,
-        second.turn_id.as_str()
-    );
+    assert!(second.turn_id.as_str().starts_with("turn_"));
 }
 
 #[test]
@@ -4791,7 +4224,6 @@ fn failed_cancel_commit_does_not_retire_an_accepted_send_waiting_for_preparation
         .send(send_params(
             draft.task.task_id.as_str(),
             draft.revision,
-            "send-before-failed-cancel",
             "hello",
         ))
         .unwrap();
@@ -4843,8 +4275,7 @@ fn support_recovery_clears_live_stuck_turn_without_waiting_for_agent() {
         TaskUpdateNotifier::disabled(),
     )
     .unwrap();
-    api.send(send_params("task-existing", 1, "send-1", "hello"))
-        .unwrap();
+    api.send(send_params("task-existing", 1, "hello")).unwrap();
     wait_until(|| agent.prompts.load(Ordering::SeqCst) == 1);
 
     let result = api
@@ -4895,9 +4326,7 @@ fn support_recovery_retires_an_accepted_turn_still_starting_its_session() {
         TaskUpdateNotifier::disabled(),
     )
     .unwrap();
-    let accepted = api
-        .send(send_params("task-existing", 1, "send-1", "hello"))
-        .unwrap();
+    let accepted = api.send(send_params("task-existing", 1, "hello")).unwrap();
     wait_until(|| agent.resumes.load(Ordering::SeqCst) == 1);
 
     let result = api
@@ -4934,8 +4363,7 @@ fn cancel_rejects_mismatched_turn_id() {
         TaskUpdateNotifier::disabled(),
     )
     .unwrap();
-    api.send(send_params("task-existing", 1, "send-1", "hello"))
-        .unwrap();
+    api.send(send_params("task-existing", 1, "hello")).unwrap();
 
     let error = api
         .cancel_for_test(TaskCancelParams {
@@ -5887,7 +5315,7 @@ fn send_rejects_tombstoned_task() {
     .unwrap();
 
     let error = api
-        .send(send_params("task-existing", 1, "send-1", "hello"))
+        .send(send_params("task-existing", 1, "hello"))
         .unwrap_err();
 
     assert_eq!(error.code, ProtocolErrorCode::NotFound);
@@ -5972,10 +5400,9 @@ fn test_new_task_lifecycle() -> TaskLifecycle {
     }
 }
 
-fn send_params(task_id: &str, revision: u64, key: &str, text: &str) -> TaskSendParams {
+fn send_params(task_id: &str, revision: u64, text: &str) -> TaskSendParams {
     TaskSendParams {
         task_id: task_id.into(),
-        idempotency_key: key.into(),
         task_revision: revision,
         message: ComposerMessage {
             text: Some(text.to_string()),

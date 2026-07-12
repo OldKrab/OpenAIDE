@@ -31,7 +31,6 @@ import { mapProtocolChatPage, mapProtocolToolDetail } from "../state/taskReadMap
 import { toolDetailCacheKey } from "../state/store";
 import type { AppCallbacksDependencies, TaskCallbacks } from "./appControllerCallbackTypes";
 import { refreshTaskSnapshotAfterMutationFailure } from "./taskSnapshotRefresh";
-import { inFlightTaskSendAttempt } from "../services/taskSendAttempt";
 
 type TaskDependencies = Pick<
   AppCallbacksDependencies,
@@ -68,23 +67,7 @@ export function createTaskCallbacks({
         },
         state.snapshot,
       );
-      const taskId = state.snapshot?.task.task_id;
-      const pending = taskId ? state.taskInputs[taskId]?.pending : undefined;
-      const inFlight = state.appServerStateRootId && taskId && pending?.state === "sending" && pending.idempotencyKey
-        ? inFlightTaskSendAttempt({
-            clientInstanceId,
-            stateRootId: state.appServerStateRootId,
-            taskId,
-            idempotencyKey: pending.idempotencyKey,
-          })
-        : undefined;
-      if (!inFlight) {
-        cancel();
-        return;
-      }
-      // Stop is ordered behind the exact send admission. Otherwise a fast
-      // cancel can no-op before task/send creates the turn it was meant to stop.
-      void inFlight.then(cancel, cancel);
+      cancel();
     },
     fileBrowser: createTaskFileBrowserCallbacks(backendConnection, dispatch, state, attachmentResources),
     loadChatPage: (beforeCursor) => {

@@ -2,7 +2,6 @@ import {
   TASK_DISCARD,
   type BackendConnection,
   type TaskId,
-  type TaskSendIdempotencyKey,
 } from "@openaide/app-server-client";
 import type { ComposerAttachmentResourceOwner } from "../services/attachmentResources";
 import type { AppAction } from "../state/appReducer";
@@ -34,7 +33,7 @@ export class NewTaskController {
   private readonly disposals = new Map<TaskId, Promise<void>>();
   // Send protection is independent of the current controller lease. A newer New Task
   // must not make an older in-flight or ambiguous send disposable.
-  private readonly sendProtections = new Map<string, TaskId>();
+  private readonly sendProtections = new Set<TaskId>();
 
   getSnapshot = () => this.cachedSnapshot;
 
@@ -106,19 +105,17 @@ export class NewTaskController {
   }
 
   /** Protects a send independently from subsequent New Task lease changes. */
-  protectSend(lease: NewTaskLease, idempotencyKey: TaskSendIdempotencyKey | string) {
+  protectSend(lease: NewTaskLease) {
     if (this.isCurrent(lease)) this.current = undefined;
-    this.sendProtections.set(idempotencyKey, lease.taskId);
+    this.sendProtections.add(lease.taskId);
   }
 
-  settleSend(idempotencyKey: TaskSendIdempotencyKey | string) {
-    this.sendProtections.delete(idempotencyKey);
+  settleSend(taskId: TaskId | string) {
+    this.sendProtections.delete(taskId as TaskId);
   }
 
   settleTaskSends(taskId: TaskId | string) {
-    for (const [key, protectedTaskId] of this.sendProtections) {
-      if (protectedTaskId === taskId) this.sendProtections.delete(key);
-    }
+    this.sendProtections.delete(taskId as TaskId);
   }
 
   confirmSentTask(taskId: TaskId | string) {
@@ -153,9 +150,7 @@ export class NewTaskController {
   }
 
   isDisposable(taskId: TaskId | string) {
-    const sendProtected = [...this.sendProtections.values()].some((protectedTaskId) => (
-      protectedTaskId === taskId
-    ));
+    const sendProtected = this.sendProtections.has(taskId as TaskId);
     return !sendProtected && !this.disposals.has(taskId as TaskId);
   }
 

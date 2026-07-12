@@ -107,8 +107,4 @@ id_type!(
     TaskListCursor,
     "string & { readonly __openaideBrand: \"TaskListCursor\" }"
 );
-id_type!(
-    TaskSendIdempotencyKey,
-    "string & { readonly __openaideBrand: \"TaskSendIdempotencyKey\" }"
-);
 id_type!(TurnId, "string & { readonly __openaideBrand: \"TurnId\" }");

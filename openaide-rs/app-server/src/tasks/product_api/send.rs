@@ -9,7 +9,6 @@ use crate::projects::ProjectIdentity;
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::TaskStatus as LegacyTaskStatus;
 use crate::storage::records::{TaskLifecycle, TaskPreparationRecord, TaskRecord};
-use crate::storage::send_receipts::TaskSendReceipt;
 use crate::task_recovery::RESTART_INTERRUPTION_MESSAGE;
 use crate::tasks::mutation::{TaskCommitOutcome, TaskMutationResult};
 use crate::tasks::snapshot::build_snapshot;
@@ -26,12 +25,11 @@ mod session;
 use revision_guard::same_send_target;
 
 pub(crate) mod committed;
-mod recovery;
 mod revision_guard;
 mod support;
 
 use committed::CommittedSend;
-use support::{protocol_error_from_attachment_runtime, send_identity, SendFingerprint};
+use support::{normalized_message_text, protocol_error_from_attachment_runtime};
 
 #[derive(Clone)]
 pub(crate) struct PendingSendSync {
@@ -59,19 +57,6 @@ impl TaskProductApi {
     ) -> Result<TaskSendAccepted, ProtocolError> {
         let task_id = params.task_id.as_str().to_string();
         let mut existing_task = self.read_task_for_client(&task_id, client_instance_id)?;
-        let idempotency_key = params.idempotency_key.as_str().to_string();
-        let idempotency_identity = send_identity(&idempotency_key);
-        if let Some(existing) = self.existing_send(&task_id, &idempotency_key)? {
-            existing.validate(&SendFingerprint::from_request_message(&params.message))?;
-            self.recover_existing_send(&task_id, &existing)?;
-            let snapshot = build_snapshot(&self.store, &task_id, 100).map_err(storage_error)?;
-            let task = self.project_task_snapshot(snapshot)?;
-            return Ok(TaskSendAccepted {
-                task,
-                turn_id: existing.turn_id,
-                user_message_id: existing.user_message_id,
-            });
-        }
         let recovered_stale_turn =
             if let Some(active_turn_id) = existing_task.active_turn_id.clone() {
                 if self
@@ -101,8 +86,15 @@ impl TaskProductApi {
             .attachments
             .reserve_for_send(&attachment_owner, &params.message.attachments)
             .map_err(protocol_error_from_attachment_runtime)?;
-        let fingerprint =
-            SendFingerprint::from_message(&params.message, attachment_reservation.attachments())?;
+        let prompt_text = normalized_message_text(&params.message);
+        if prompt_text.is_empty()
+            && attachment_reservation
+                .attachments()
+                .fingerprint_handles()
+                .is_empty()
+        {
+            return Err(validation_error("message.text", "Message text is required"));
+        }
         self.agent_registry
             .require(&existing_task.agent_id)
             .map_err(super::protocol_error_from_runtime)?;
@@ -138,29 +130,15 @@ impl TaskProductApi {
                     // acceptance guards pass. A racing rejected send must not
                     // supersede the generation owned by the accepted Turn.
                     sync_generation = Some(self.history_sync.begin_send(&task_id));
-                    // The tentative receipt closes the crash window before Chat writes. The
-                    // second write proves those rows once existed even if authoritative Native
-                    // Session replay later replaces their local message identities.
-                    let mut receipt = TaskSendReceipt {
-                        idempotency_key: idempotency_key.clone(),
-                        text: fingerprint.text.clone(),
-                        attachment_handles: fingerprint.attachment_handles.clone(),
-                        user_message_id: user_message_id.as_str().to_string(),
-                        turn_id: turn_id.as_str().to_string(),
-                        durable_chat_written: false,
-                    };
-                    self.store.write_send_receipt(&task_id, receipt.clone())?;
                     self.append_user_message(
                         &task_id,
-                        &idempotency_identity,
+                        &format!("user:{}", user_message_id.as_str()),
                         user_message_id.as_str(),
-                        fingerprint.text.clone(),
+                        prompt_text.clone(),
                         attachment_reservation.attachments().chat_attachments(),
                         &now,
                     )?;
                     self.append_running_turn(&task_id, turn_id.as_str(), &now)?;
-                    receipt.durable_chat_written = true;
-                    self.store.write_send_receipt(&task_id, receipt)?;
 
                     let task = ctx.task_mut();
                     task.status = LegacyTaskStatus::Active;
@@ -228,7 +206,7 @@ impl TaskProductApi {
         std::thread::spawn(move || {
             if let Err(error) = api.start_committed_send(
                 existing_task,
-                fingerprint.text,
+                prompt_text,
                 attachments,
                 background_send,
                 sync_generation,

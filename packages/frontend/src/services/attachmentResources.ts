@@ -224,8 +224,7 @@ export class ComposerAttachmentResourceOwner {
       mountedTaskId: undefined,
       taskSurfaceMounted: false,
     });
-    // Protected resources belong to an in-flight/recoverable task/send attempt.
-    // The next same-client mount owns recovery; this controller must not release them.
+    // Reconciliation above releases anything no longer retained by the mounted composer.
     this.owned.clear();
     this.disposed = true;
   }

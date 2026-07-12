@@ -54,7 +54,6 @@ async function runSmoke() {
     {
       taskId,
       taskRevision: revision,
-      idempotencyKey: `smoke-${Date.now()}`,
       message: { text: prompt, attachments: [] },
     },
     sendTimeoutMs,

@@ -49,8 +49,7 @@ type AppActionPayload =
   | { type: "prompt"; prompt: string }
   | { type: "projects"; projects: ProjectOption[]; initialProjectId?: string }
   | { type: "workspace:roots"; roots: WorkspaceRoot[] }
-  | { type: "submit:start"; prompt?: string; context?: ComposerAttachment[]; idempotencyKey?: import("@openaide/app-server-client").TaskSendIdempotencyKey }
-  | { type: "submit:attempt"; idempotencyKey: import("@openaide/app-server-client").TaskSendIdempotencyKey }
+  | { type: "submit:start"; prompt?: string; context?: ComposerAttachment[] }
   | { type: "submit:cancel" }
   | { type: "submit:error"; message: string }
   | { type: "submit:attachments:invalidate"; taskId: string; message: string }
@@ -77,11 +76,9 @@ type AppActionPayload =
   | { type: "taskInput:attachment:addAppServer"; taskId: string; attachment: ComposerAttachment }
   | { type: "taskInput:attachment:remove"; taskId: string; attachmentId: string }
   | { type: "taskInput:clear"; taskId: string }
-  | { type: "taskInput:submit"; taskId: string; input?: { prompt: string; context: ComposerAttachment[] }; idempotencyKey?: import("@openaide/app-server-client").TaskSendIdempotencyKey }
-  | { type: "taskInput:restoreSend"; taskId: string; input: { prompt: string; context: ComposerAttachment[] }; idempotencyKey: import("@openaide/app-server-client").TaskSendIdempotencyKey }
-  | { type: "taskInput:sendUncertain"; taskId: string; idempotencyKey: import("@openaide/app-server-client").TaskSendIdempotencyKey; message: string }
-  | { type: "taskInput:sendError"; taskId: string; idempotencyKey: import("@openaide/app-server-client").TaskSendIdempotencyKey; message?: string }
-  | { type: "taskSend:accepted"; taskId: string; idempotencyKey: import("@openaide/app-server-client").TaskSendIdempotencyKey; userMessageId: import("@openaide/app-server-client").MessageId }
+  | { type: "taskInput:submit"; taskId: string; input?: { prompt: string; context: ComposerAttachment[] } }
+  | { type: "taskInput:sendError"; taskId: string; message?: string }
+  | { type: "taskSend:accepted"; taskId: string; userMessageId: import("@openaide/app-server-client").MessageId }
   | { type: "taskInput:error"; taskId: string; message?: string }
   | { type: "taskInput:cancelError"; taskId: string; message: string }
   | { type: "taskInput:attachments:invalidate"; taskId: string; message: string }

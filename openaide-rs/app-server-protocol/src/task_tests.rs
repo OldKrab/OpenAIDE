@@ -6,7 +6,6 @@ use super::*;
 fn task_send_message_is_text_plus_ordered_attachment_handles() {
     let params = TaskSendParams {
         task_id: "task-1".into(),
-        idempotency_key: "send-1".into(),
         task_revision: 7,
         message: ComposerMessage {
             text: Some("/plan implement this".to_string()),
@@ -18,6 +17,7 @@ fn task_send_message_is_text_plus_ordered_attachment_handles() {
 
     assert_eq!(value["taskId"], json!("task-1"));
     assert_eq!(value["taskRevision"], json!(7));
+    assert!(value.get("idempotencyKey").is_none());
     assert_eq!(value["message"]["text"], json!("/plan implement this"));
     assert_eq!(
         value["message"]["attachments"],

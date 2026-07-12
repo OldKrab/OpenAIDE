@@ -5,12 +5,12 @@ import { createInitialState } from "../state/store";
 import { disposableNewTaskControllerId, NewTaskController } from "./newTaskController";
 
 describe("New Task controller", () => {
-  it("keeps an ambiguous send protected after a newer New Task is claimed", async () => {
+  it("keeps an in-flight send protected after a newer New Task is claimed", async () => {
     const request = vi.fn(async () => ({ discarded: true })) as unknown as BackendConnection["request"];
     const dispatch = vi.fn();
     const controller = new NewTaskController();
     const leaseA = controller.claim({ preparationKey: "context-a", taskId: "task_a" as never });
-    controller.protectSend(leaseA, "send-a");
+    controller.protectSend(leaseA);
     const leaseB = controller.claim({ preparationKey: "context-b", taskId: "task_b" as never });
 
     await controller.discard({ dispatch, lease: leaseA, request, taskId: "task_a" as never });
@@ -23,10 +23,10 @@ describe("New Task controller", () => {
   it("does not let an older rejected send reclaim a newer New Task lease", () => {
     const controller = new NewTaskController();
     const leaseA = controller.claim({ preparationKey: "context-a", taskId: "task_a" as never });
-    controller.protectSend(leaseA, "send-a");
+    controller.protectSend(leaseA);
     const leaseB = controller.claim({ preparationKey: "context-b", taskId: "task_b" as never });
 
-    controller.settleSend("send-a");
+    controller.settleSend("task_a");
 
     expect(controller.reclaim(leaseA)).toBe(false);
     expect(controller.currentLease()).toBe(leaseB);

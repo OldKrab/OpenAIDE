@@ -9,12 +9,6 @@ import {
 } from "../services/hostBridge";
 import { clientInstanceIdForBootstrap } from "../services/backendInitialization";
 import { retainNewTaskContext } from "../state/newTaskSelectionDefaults";
-import { readPendingTaskSendRecovery } from "../services/pendingTaskSendRecovery";
-import {
-  executeTaskSendAttempt,
-  isTaskSendOutcomeUnknown,
-  TASK_SEND_OUTCOME_UNKNOWN_MESSAGE,
-} from "../services/taskSendAttempt";
 import {
   appReducer,
   bindAppServerReplicaEpoch,
@@ -94,7 +88,6 @@ export function useAppController({ backendConnection }: AppControllerOptions = {
   const newTaskStartAttempt = useRef<NewTaskStartAttempt | undefined>(undefined);
   const currentNewTaskPreparationKey = useRef<string | undefined>(undefined);
   currentNewTaskPreparationKey.current = newTaskPreparationKey(state);
-  const recoveredTaskSendAttempts = useRef(new Set<string>());
   const attachmentResourcesRef = useRef<ReturnType<typeof useComposerAttachmentResources> | undefined>(undefined);
   const controllerRefs = useAppControllerRefs();
   const {
@@ -109,7 +102,6 @@ export function useAppController({ backendConnection }: AppControllerOptions = {
     if (!transition.previous) return;
     invalidateAppControllerReplicaRequests(controllerRefs);
     pendingPreparedNewTask.current = undefined;
-    recoveredTaskSendAttempts.current.clear();
     attachmentResourcesRef.current?.replaceReplica();
     if (!transition.rootChanged) return;
     // Task ids and cleanup tombstones can collide across roots. Forget them
@@ -240,82 +232,9 @@ export function useAppController({ backendConnection }: AppControllerOptions = {
   }, [agents, bootstrap.surface, bootstrap.taskId, state.newTask.selection.agentId]);
 
   useEffect(() => {
-    if (
-      bootstrap.surface !== "task" ||
-      !bootstrap.taskId ||
-      !backendReady ||
-      !backendConnectionRef?.request ||
-      !state.appServerStateRootId ||
-      !state.snapshot ||
-      state.snapshot.task.task_id !== bootstrap.taskId
-    ) {
-      return;
-    }
-    const recovery = readPendingTaskSendRecovery(
-      state.appServerStateRootId,
-      clientInstanceId,
-      bootstrap.taskId,
-    );
-    if (!recovery) return;
-    const recoveryKey = `${recovery.stateRootId}:${recovery.taskId}:${recovery.idempotencyKey}`;
-    if (recoveredTaskSendAttempts.current.has(recoveryKey)) return;
-    recoveredTaskSendAttempts.current.add(recoveryKey);
-    replicaDispatch({
-      type: "taskInput:restoreSend",
-      taskId: recovery.taskId,
-      input: recovery.renderState,
-      idempotencyKey: recovery.idempotencyKey,
-    });
-    void executeTaskSendAttempt({
-      attempt: recovery,
-      backendConnection: backendConnectionRef,
-      refreshRevisionOnConflict: true,
-    }).then(({ attempt, result }) => {
-      replicaDispatch({
-        type: "snapshot",
-        snapshot: mapProtocolTaskSnapshot(result.task).snapshot,
-        intent: "refresh",
-      });
-      replicaDispatch({
-        type: "taskSend:accepted",
-        taskId: recovery.taskId,
-        idempotencyKey: attempt.idempotencyKey,
-        userMessageId: result.userMessageId,
-      });
-    }).catch((error) => {
-      if (isTaskSendOutcomeUnknown(error)) {
-        replicaDispatch({
-          type: "taskInput:sendUncertain",
-          taskId: recovery.taskId,
-          idempotencyKey: recovery.idempotencyKey,
-          message: TASK_SEND_OUTCOME_UNKNOWN_MESSAGE,
-        });
-        return;
-      }
-      replicaDispatch({
-        type: "taskInput:sendError",
-        taskId: recovery.taskId,
-        idempotencyKey: recovery.idempotencyKey,
-        message: error instanceof Error ? error.message : "Unable to recover submitted message.",
-      });
-    });
-  }, [
-    backendConnectionRef,
-    backendReady,
-    bootstrap.surface,
-    bootstrap.taskId,
-    clientInstanceId,
-    state.appServerStateRootId,
-    state.snapshot?.task.task_id,
-  ]);
-
-  useEffect(() => {
     const snapshotTaskId = state.snapshot?.task.task_id;
     const snapshotHasPendingInput = snapshotTaskId
       ? state.taskInputs[snapshotTaskId]?.pending !== undefined
-      : false;
-    const snapshotHasPendingRecovery = state.appServerStateRootId && snapshotTaskId
-      ? readPendingTaskSendRecovery(state.appServerStateRootId, clientInstanceId, snapshotTaskId) !== undefined
       : false;
     if (
       bootstrap.surface !== "task" ||
@@ -323,8 +242,7 @@ export function useAppController({ backendConnection }: AppControllerOptions = {
       !state.snapshot ||
       state.snapshot.task.has_messages ||
       state.snapshot.task.status !== "inactive" ||
-      snapshotHasPendingInput ||
-      snapshotHasPendingRecovery
+      snapshotHasPendingInput
     ) {
       return;
     }
@@ -342,8 +260,6 @@ export function useAppController({ backendConnection }: AppControllerOptions = {
     state.snapshot?.task.status,
     state.snapshot?.task.project_id,
     state.snapshot ? state.taskInputs[state.snapshot.task.task_id]?.pending : undefined,
-    clientInstanceId,
-    state.appServerStateRootId,
   ]);
   useSettingsRouteRefresh({
     backendConnectionRef,

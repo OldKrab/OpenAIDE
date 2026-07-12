@@ -346,7 +346,6 @@ describe("app reducer composer state", () => {
       type: "submit:start",
       prompt: "Start this Task once",
       context: [],
-      idempotencyKey: "send-attempt-1" as never,
     });
 
     state = appReducer(state, {
@@ -355,7 +354,6 @@ describe("app reducer composer state", () => {
     } as never);
 
     expect(state.newTask.submitting).toBe(true);
-    expect(state.newTask.pending?.idempotencyKey).toBe("send-attempt-1");
     expect(state.newTask.nativeSessions).toMatchObject({
       error: "Unable to load Agent session history.",
       loaded: true,
@@ -434,13 +432,11 @@ describe("app reducer composer state", () => {
       type: "submit:start",
       prompt: "Start newer Task",
       context: [],
-      idempotencyKey: "send-attempt-new" as never,
     });
 
     state = appReducer(state, { type: "newTask:nativeSessions:remove", sessionId: "session_1" });
 
     expect(state.newTask.submitting).toBe(true);
-    expect(state.newTask.pending?.idempotencyKey).toBe("send-attempt-new");
     expect(state.newTask.nativeSessions.adoptingSessionId).toBeUndefined();
     expect(state.newTask.nativeSessions.items).toEqual([]);
   });
@@ -453,7 +449,6 @@ describe("app reducer composer state", () => {
       type: "submit:start",
       prompt: "Start newer Task",
       context: [],
-      idempotencyKey: "send-attempt-new" as never,
     });
 
     state = appReducer(state, {
@@ -463,7 +458,6 @@ describe("app reducer composer state", () => {
     } as never);
 
     expect(state.newTask.submitting).toBe(true);
-    expect(state.newTask.pending?.idempotencyKey).toBe("send-attempt-new");
     expect(state.newTask.nativeSessions.error).toBeUndefined();
   });
 
@@ -523,7 +517,6 @@ describe("app reducer composer state", () => {
     state = appReducer(state, {
       type: "taskInput:submit",
       taskId: "task_1",
-      idempotencyKey: "send-attempt-1" as never,
     });
     expect(state.taskInputs.task_1.prompt).toBe("Use context");
     expect(state.taskInputs.task_1.context).toHaveLength(1);
@@ -532,7 +525,6 @@ describe("app reducer composer state", () => {
     state = appReducer(state, {
       type: "taskInput:sendError",
       taskId: "task_1",
-      idempotencyKey: "send-attempt-1" as never,
       message: "Send failed",
     } as never);
     expect(state.taskInputs.task_1.prompt).toBe("Use context");
@@ -547,7 +539,6 @@ describe("app reducer composer state", () => {
       type: "taskInput:submit",
       taskId: "task_1",
       input: { prompt: "Keep this pending", context: [] },
-      idempotencyKey: "send-attempt-1" as never,
     });
 
     state = appReducer(state, {
@@ -563,7 +554,6 @@ describe("app reducer composer state", () => {
       pending: {
         prompt: "Keep this pending",
         context: [],
-        idempotencyKey: "send-attempt-1",
         state: "sending",
       },
     });
@@ -575,7 +565,6 @@ describe("app reducer composer state", () => {
       type: "taskInput:submit",
       taskId: "task_1",
       input: { prompt: "Keep this exact send", context: [] },
-      idempotencyKey: "send-attempt-1" as never,
     });
 
     state = appReducer(state, {
@@ -591,7 +580,6 @@ describe("app reducer composer state", () => {
       pending: {
         prompt: "Keep this exact send",
         context: [],
-        idempotencyKey: "send-attempt-1",
         state: "sending",
       },
     });
@@ -613,7 +601,6 @@ describe("app reducer composer state", () => {
     state = appReducer(state, {
       type: "taskInput:submit",
       taskId: "task_1",
-      idempotencyKey: "send-attempt-1" as never,
     });
 
     state = appReducer(state, {
@@ -627,7 +614,6 @@ describe("app reducer composer state", () => {
     state = appReducer(state, {
       type: "taskSend:accepted",
       taskId: "task_1",
-      idempotencyKey: "send-attempt-1" as never,
       userMessageId: "accepted-message" as never,
     });
 
@@ -638,113 +624,6 @@ describe("app reducer composer state", () => {
     });
   });
 
-  it("restores a persisted send as one exact pending attempt", () => {
-    let state = createInitialState();
-    const input = {
-      prompt: "Recover this",
-      context: [{
-        app_server_handle_id: "attachment-handle-1" as never,
-        kind: "file" as const,
-        label: "trace.png",
-        local_id: "attachment-1",
-      }],
-    };
-
-    state = appReducer(state, {
-      type: "taskInput:restoreSend",
-      taskId: "task_1",
-      input,
-      idempotencyKey: "send-attempt-1",
-    } as never);
-
-    expect(state.taskInputs.task_1).toEqual({
-      ...input,
-      error: undefined,
-      pending: { ...input, idempotencyKey: "send-attempt-1", state: "sending" },
-    });
-  });
-
-  it("locks an uncertain send on its exact visible draft until retry", () => {
-    let state = createInitialState();
-    const context = [{
-      app_server_handle_id: "attachment-handle-1" as never,
-      kind: "file" as const,
-      label: "trace.png",
-      local_id: "attachment-1",
-    }];
-    state = appReducer(state, {
-      type: "taskInput:submit",
-      taskId: "task_1",
-      input: { prompt: "Original message", context },
-      idempotencyKey: "send-attempt-1" as never,
-    });
-
-    state = appReducer(state, {
-      type: "taskInput:sendUncertain",
-      taskId: "task_1",
-      idempotencyKey: "send-attempt-1" as never,
-      message: "Send status is unknown. Retry sends this exact message.",
-    });
-    state = appReducer(state, { type: "taskInput:prompt", taskId: "task_1", prompt: "Edited" });
-    state = appReducer(state, {
-      type: "taskInput:attachment:remove",
-      taskId: "task_1",
-      attachmentId: "attachment-1",
-    });
-
-    expect(state.taskInputs.task_1).toEqual({
-      prompt: "Original message",
-      context,
-      error: "Send status is unknown. Retry sends this exact message.",
-      pending: {
-        prompt: "Original message",
-        context,
-        idempotencyKey: "send-attempt-1",
-        state: "uncertain",
-      },
-    });
-  });
-
-  it("ignores a late acceptance for an older send attempt", () => {
-    let state = createInitialState();
-    state = appReducer(state, {
-      type: "taskInput:submit",
-      taskId: "task_1",
-      input: { prompt: "New draft", context: [] },
-      idempotencyKey: "send-attempt-new" as never,
-    });
-
-    state = appReducer(state, {
-      type: "taskSend:accepted",
-      taskId: "task_1",
-      idempotencyKey: "send-attempt-old" as never,
-      userMessageId: "old-message" as never,
-    });
-
-    expect(state.taskInputs.task_1.pending).toMatchObject({
-      prompt: "New draft",
-      idempotencyKey: "send-attempt-new",
-    });
-  });
-
-  it("ignores an incomplete send acceptance result", () => {
-    let state = createInitialState();
-    state = appReducer(state, {
-      type: "taskInput:submit",
-      taskId: "task_1",
-      input: { prompt: "Keep this", context: [] },
-      idempotencyKey: "send-attempt-1" as never,
-    });
-
-    state = appReducer(state, {
-      type: "taskSend:accepted",
-      taskId: "task_1",
-      idempotencyKey: "send-attempt-1",
-    } as never);
-
-    expect(state.taskInputs.task_1.pending?.prompt).toBe("Keep this");
-  });
-
   it("does not settle a pending follow-up from matching snapshot content", () => {
     let state = createInitialState();
     state = { ...state, activeTaskId: "task_1" };
@@ -752,7 +631,6 @@ describe("app reducer composer state", () => {
     state = appReducer(state, {
       type: "taskInput:submit",
       taskId: "task_1",
-      idempotencyKey: "send-attempt-1" as never,
     });
 
     state = appReducer(state, {
@@ -763,38 +641,6 @@ describe("app reducer composer state", () => {
 
     expect(state.taskInputs.task_1.prompt).toBe("Accepted");
     expect(state.taskInputs.task_1.context).toHaveLength(0);
-    expect(state.taskInputs.task_1.pending?.idempotencyKey).toBe("send-attempt-1");
-  });
-
-  it("preserves a restored send error draft when historical text matches", () => {
-    let state = createInitialState();
-    state = { ...state, activeTaskId: "task_1" };
-    state = appReducer(state, { type: "taskInput:prompt", taskId: "task_1", prompt: "Stop now" });
-    state = appReducer(state, {
-      type: "taskInput:submit",
-      taskId: "task_1",
-      idempotencyKey: "send-attempt-1" as never,
-    });
-    state = appReducer(state, {
-      type: "taskInput:sendError",
-      taskId: "task_1",
-      idempotencyKey: "send-attempt-1" as never,
-      message: "request failed",
-    });
-
-    expect(state.taskInputs.task_1.prompt).toBe("Stop now");
-    expect(state.taskInputs.task_1.error).toBe("request failed");
-
-    state = appReducer(state, {
-      type: "snapshot",
-      intent: "refresh",
-      snapshot: snapshot("task_1", [userMessage("user_1", "Stop now")], 2),
-    });
-
-    expect(state.taskInputs.task_1.prompt).toBe("Stop now");
-    expect(state.taskInputs.task_1.context).toHaveLength(0);
-    expect(state.taskInputs.task_1.pending).toBeUndefined();
-    expect(state.taskInputs.task_1.error).toBe("request failed");
   });
 
   it("preserves an opened-task draft that matches historical chat", () => {
@@ -845,7 +691,6 @@ describe("app reducer composer state", () => {
     state = appReducer(state, {
       type: "taskInput:submit",
       taskId: "task_1",
-      idempotencyKey: "send-attempt-1" as never,
     });
 
     const accepted = snapshot("task_1", [userMessage("user_1", "Accepted")], 2);
@@ -853,7 +698,6 @@ describe("app reducer composer state", () => {
     state = appReducer(state, {
       type: "taskSend:accepted",
       taskId: "task_1",
-      idempotencyKey: "send-attempt-1" as never,
       userMessageId: "user_1" as never,
     });
     state = appReducer(state, {
@@ -892,7 +736,6 @@ describe("app reducer composer state", () => {
     state = appReducer(state, {
       type: "taskInput:submit",
       taskId: "task_1",
-      idempotencyKey: "send-attempt-1" as never,
     });
     state = appReducer(state, {
       type: "snapshot",
@@ -905,7 +748,6 @@ describe("app reducer composer state", () => {
     state = appReducer(state, {
       type: "taskSend:accepted",
       taskId: "task_1",
-      idempotencyKey: "send-attempt-1" as never,
       userMessageId: "user_1" as never,
     });
     state = appReducer(state, { type: "taskInput:prompt", taskId: "task_1", prompt: "Committed again" });
@@ -1009,7 +851,7 @@ describe("app reducer composer state", () => {
       label: "screenshot.png",
       local_id: "attachment_1",
     }];
-    state = appReducer(state, { type: "submit:start", idempotencyKey: "send-attempt-1" as never });
+    state = appReducer(state, { type: "submit:start" });
 
     state = appReducer(state, {
       type: "snapshot",
@@ -1019,12 +861,10 @@ describe("app reducer composer state", () => {
 
     expect(state.newTask.prompt).toBe("Explain this");
     expect(state.newTask.context).toHaveLength(1);
-    expect(state.newTask.pending?.idempotencyKey).toBe("send-attempt-1");
 
     state = appReducer(state, {
       type: "taskSend:accepted",
       taskId: "task_new",
-      idempotencyKey: "send-attempt-1" as never,
       userMessageId: "user_1" as never,
     });
 
@@ -1619,7 +1459,6 @@ describe("app reducer composer state", () => {
       type: "taskInput:submit",
       taskId: "task_1",
       input: { prompt: "Keep exact send", context: [attachment] },
-      idempotencyKey: "send_1" as never,
       replicaEpoch: 1,
     });
     state = appReducer(state, {
@@ -1684,11 +1523,10 @@ describe("app reducer composer state", () => {
     expect(state.newTask.context[0]).not.toHaveProperty("app_server_handle_id");
     expect(state.taskInputs.task_1).toMatchObject({
       prompt: "Keep exact send",
-      error: "Send status is unknown after App Server restart. Retry sends this exact message.",
-      pending: { state: "uncertain", idempotencyKey: "send_1" },
+      error: "App Server restarted. Review the draft before sending again.",
     });
-    expect(state.taskInputs.task_1.context[0]).toHaveProperty("app_server_handle_id", "handle_1");
-    expect(state.taskInputs.task_1.pending?.context[0]).toHaveProperty("app_server_handle_id", "handle_1");
+    expect(state.taskInputs.task_1.context[0]).not.toHaveProperty("app_server_handle_id");
+    expect(state.taskInputs.task_1.pending).toBeUndefined();
     expect(state.taskInputs.task_2.context[0]).toMatchObject({
       validation_error: "Attachment must be reselected after App Server restart.",
     });
@@ -1926,64 +1764,6 @@ describe("app reducer composer state", () => {
       { kind: "thought", text: "The" },
       { kind: "thought", text: " user" },
       { kind: "agent_text", text: "Done" },
-    ]);
-  });
-
-  it("preserves adjacent thought and tool activity rows", () => {
-    const taskSnapshot = snapshot("task_1", [
-      thoughtMessage("m1", "The"),
-      thoughtMessage("m2", " user asked for search"),
-      activityMessage("m3", "Search files", "completed", [
-        { kind: "tool", name: "search", status: "completed", input_summary: "beta" },
-      ]),
-    ]);
-
-    const chat = renderedChat(taskSnapshot, undefined);
-
-    expect(chat.items.map((item) => item.message_id)).toEqual(["m1", "m2", "m3"]);
-    expect(chat.items.map((item) => item.message)).toMatchObject([
-      { kind: "thought", text: "The" },
-      { kind: "thought", text: " user asked for search" },
-      {
-        kind: "activity",
-        title: "Search files",
-        steps: [{ kind: "tool", name: "search", input_summary: "beta" }],
-      },
-    ]);
-  });
-
-  it("preserves adjacent activity rows and their titles", () => {
-    const taskSnapshot = snapshot("task_1", [
-      activityMessage("m1", "exec_command", "completed", [
-        { kind: "tool", name: "execute", status: "completed", input_summary: "git status --short" },
-      ]),
-      activityMessage("m2", "exec_command", "completed", [
-        { kind: "tool", name: "execute", status: "completed", input_summary: "npm run check" },
-      ]),
-      chatMessage("m3", "Done"),
-      activityMessage("m4", "Search files", "completed", [
-        { kind: "tool", name: "search", status: "completed", input_summary: "activity" },
-      ]),
-    ]);
-
-    const chat = renderedChat(taskSnapshot, undefined);
-
-    expect(chat.items.map((item) => item.message_id)).toEqual(["m1", "m2", "m3", "m4"]);
-    expect(chat.items.map((item) => item.message)).toMatchObject([
-      {
-        kind: "activity",
-        title: "exec_command",
-        status: "completed",
-        steps: [{ kind: "tool", input_summary: "git status --short" }],
-      },
-      {
-        kind: "activity",
-        title: "exec_command",
-        status: "completed",
-        steps: [{ kind: "tool", input_summary: "npm run check" }],
-      },
-      { kind: "agent_text", text: "Done" },
-      { kind: "activity", title: "Search files" },
     ]);
   });
 

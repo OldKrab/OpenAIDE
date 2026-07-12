@@ -184,7 +184,6 @@ fn generated_bindings_include_protocol_method_maps() {
         "export type ClientProbeLifecycle = \"running\" | \"draining\" | \"stopping\";",
         "export type SubscriptionScope =",
         "export type SubscriptionSnapshot =",
-        "export type TaskSendIdempotencyKey = string & { readonly __openaideBrand: \"TaskSendIdempotencyKey\" };",
         "export type AppServerEvent = { previousCursor: EventCursor, cursor: EventCursor, scope: EventScope, payload: AppServerEventPayload, };",
         "export type ClientSnapshot =",
         "export type TaskSnapshot =",

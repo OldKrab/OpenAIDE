@@ -5,9 +5,7 @@ import {
   attachmentHandleResource,
   composerAttachmentResourceFrame,
   releaseAttachmentResources,
-  type ComposerAttachmentResource,
 } from "../services/attachmentResources";
-import { readPendingTaskSendRecovery } from "../services/pendingTaskSendRecovery";
 import type { AppAction } from "../state/appReducer";
 import type { AppState } from "../state/store";
 
@@ -29,8 +27,8 @@ export function useComposerAttachmentResources({
   state,
   taskSurfaceMounted,
 }: ComposerAttachmentResourceOptions) {
-  const latest = useRef({ backendConnection, clientInstanceId, stateRootId: state.appServerStateRootId });
-  latest.current = { backendConnection, clientInstanceId, stateRootId: state.appServerStateRootId };
+  const latest = useRef({ backendConnection });
+  latest.current = { backendConnection };
   const frame = composerAttachmentResourceFrame(state, taskSurfaceMounted, newTaskId);
   const latestFrame = useRef(frame);
   latestFrame.current = frame;
@@ -39,11 +37,6 @@ export function useComposerAttachmentResources({
   const owner = useRef<ComposerAttachmentResourceOwner | undefined>(undefined);
   if (!owner.current) {
     owner.current = new ComposerAttachmentResourceOwner({
-      isProtected: (resource) => hasPendingSendRecovery(
-        latest.current.stateRootId,
-        latest.current.clientInstanceId,
-        resource,
-      ),
       release: (taskId, handleIds) => {
         releaseAttachmentResources(
           latest.current.backendConnection,
@@ -85,15 +78,4 @@ export function useComposerAttachmentResources({
   }, []);
 
   return owner.current;
-}
-
-function hasPendingSendRecovery(
-  stateRootId: string | undefined,
-  clientInstanceId: ClientInstanceId | string,
-  resource: ComposerAttachmentResource,
-) {
-  if (!stateRootId) return false;
-  return readPendingTaskSendRecovery(stateRootId, clientInstanceId, resource.taskId)
-    ?.message.attachments
-    ?.includes(resource.handleId) === true;
 }

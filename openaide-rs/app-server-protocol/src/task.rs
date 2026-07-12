@@ -4,7 +4,7 @@ use ts_rs::TS;
 
 use crate::ids::{
     AgentConfigOptionId, AgentId, AttachmentHandleId, ClientMutationId, MessageId, ProjectId,
-    TaskId, TaskListCursor, TaskSendIdempotencyKey, TurnId,
+    TaskId, TaskListCursor, TurnId,
 };
 use crate::snapshot::{ChatItem, TaskNavigationSnapshot, TaskSnapshot, TaskSummary};
 
@@ -45,7 +45,6 @@ pub struct TaskAdoptNativeSessionResult {
 #[serde(rename_all = "camelCase")]
 pub struct TaskSendParams {
     pub task_id: TaskId,
-    pub idempotency_key: TaskSendIdempotencyKey,
     pub task_revision: u64,
     pub message: ComposerMessage,
 }

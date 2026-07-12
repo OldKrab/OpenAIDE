@@ -21,8 +21,7 @@ import { newTaskPreparationKey } from "./newTaskPreparationContext";
 
 type NewTaskAction =
   | { type: "prompt"; prompt: string }
-  | { type: "submit:start"; prompt?: string; context?: AppState["newTask"]["context"]; idempotencyKey?: import("@openaide/app-server-client").TaskSendIdempotencyKey }
-  | { type: "submit:attempt"; idempotencyKey: import("@openaide/app-server-client").TaskSendIdempotencyKey }
+  | { type: "submit:start"; prompt?: string; context?: AppState["newTask"]["context"] }
   | { type: "submit:cancel" }
   | { type: "submit:error"; message: string }
   | { type: "submit:attachments:invalidate"; taskId: string; message: string }
@@ -63,25 +62,12 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
             prompt: submittedPrompt,
             context: submittedContext,
             configOptions: state.newTask.configOptions,
-            idempotencyKey: action.idempotencyKey,
           },
           submitting: true,
           error: undefined,
         },
       };
     }
-    case "submit:attempt":
-      if (!state.newTask.pending) return state;
-      return {
-        ...state,
-        newTask: {
-          ...state.newTask,
-          pending: {
-            ...state.newTask.pending,
-            idempotencyKey: action.idempotencyKey,
-          },
-        },
-      };
     case "submit:error":
       return {
         ...state,
@@ -376,7 +362,6 @@ function replacePreparedDraftOnContextChange(
 function isNewTaskAction(action: AppAction): action is NewTaskAction {
   return action.type === "prompt"
     || action.type === "submit:start"
-    || action.type === "submit:attempt"
     || action.type === "submit:cancel"
     || action.type === "submit:error"
     || action.type === "submit:attachments:invalidate"

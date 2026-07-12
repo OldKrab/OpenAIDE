@@ -6,7 +6,6 @@ pub mod message_store;
 pub mod new_task_defaults;
 pub mod records;
 pub mod root;
-pub mod send_receipts;
 pub mod task_store;
 pub mod tool_artifacts;
 
@@ -33,8 +32,6 @@ struct StoreInner {
     settings_write_lock: Mutex<()>,
     #[cfg(test)]
     fail_next_tail_page: AtomicBool,
-    #[cfg(test)]
-    crash_before_next_task_write: AtomicBool,
     #[cfg(test)]
     fail_next_task_write: AtomicBool,
     #[cfg(test)]
@@ -67,8 +64,6 @@ impl Store {
                 settings_write_lock: Mutex::new(()),
                 #[cfg(test)]
                 fail_next_tail_page: AtomicBool::new(false),
-                #[cfg(test)]
-                crash_before_next_task_write: AtomicBool::new(false),
                 #[cfg(test)]
                 fail_next_task_write: AtomicBool::new(false),
                 #[cfg(test)]
@@ -126,20 +121,6 @@ impl Store {
     #[cfg(test)]
     pub(super) fn take_tail_page_failure_for_test(&self) -> bool {
         self.inner.fail_next_tail_page.swap(false, Ordering::SeqCst)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn crash_before_next_task_write_for_test(&self) {
-        self.inner
-            .crash_before_next_task_write
-            .store(true, Ordering::SeqCst);
-    }
-
-    #[cfg(test)]
-    pub(super) fn take_task_write_crash_for_test(&self) -> bool {
-        self.inner
-            .crash_before_next_task_write
-            .swap(false, Ordering::SeqCst)
     }
 
     #[cfg(test)]

@@ -45,7 +45,7 @@ use crate::ids::{
     AgentConfigOptionId, AgentId, AttachmentCandidateId, AttachmentHandleId, AttachmentId,
     ClientInstanceId, ClientMutationId, ClientRequestId, EventCursor, FileBrowserEntryId,
     FileBrowserRootId, MessageId, ProjectId, RequestId, ServerId, StateRootId, TaskId,
-    TaskListCursor, TaskSendIdempotencyKey, TurnId,
+    TaskListCursor, TurnId,
 };
 use crate::server_requests::{
     PermissionRequestOption, PermissionRequestOptionKind, PermissionRequestParams,
@@ -122,7 +122,6 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<StateRootId>(output, config);
     push_decl::<TaskId>(output, config);
     push_decl::<TaskListCursor>(output, config);
-    push_decl::<TaskSendIdempotencyKey>(output, config);
     push_decl::<TurnId>(output, config);
 
     push_decl::<ClientRequestEnvelope<Dummy>>(output, config);

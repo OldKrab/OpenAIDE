@@ -417,7 +417,8 @@ Each slice starts with a failing boundary test and ends with narrow checks befor
 6. **Frontend shell routing seam**
    - Move Web routing and VS Code routing into injected App Shell adapters.
 7. **Frontend New Task controller and draft store**
-   - Replace navigation-driven discard, durable browser Send replay, and split composer ownership with the accepted state machine, memory cache, reconnect/resync behavior, and no automatic product-request replay.
+   - Durable browser Send replay and its duplicate request identity are removed. Frontend now issues one `task/send`, keeps only live in-memory submitting state, and restores the draft after a request failure without automatic retry.
+   - Navigation timing and the remaining split New Task/Task composer ownership are handled by the following implementation slices.
 8. **Option and command reconciliation**
    - Unify ordering and superseded non-error behavior.
 9. **Remove legacy paths**

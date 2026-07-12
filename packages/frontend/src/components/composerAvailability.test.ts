@@ -70,10 +70,5 @@ describe("composer availability", () => {
       submissionAllowed: false,
       placeholder: "Restore task to send follow-up.",
     });
-    expect(composerAvailability({ ...base, uncertain: true })).toMatchObject({
-      canEdit: false,
-      submissionAllowed: true,
-      placeholder: "Retry this exact message.",
-    });
   });
 });

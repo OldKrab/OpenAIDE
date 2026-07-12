@@ -29,7 +29,6 @@ export function composerAvailability({
   submitActionLabel = "Send message",
   submitPendingLabel = "Sending message",
   submitting = false,
-  uncertain = false,
 }: {
   allowEditingWhileSendBlocked: boolean;
   archived?: boolean;
@@ -43,7 +42,6 @@ export function composerAvailability({
   submitActionLabel?: string;
   submitPendingLabel?: string;
   submitting?: boolean;
-  uncertain?: boolean;
 }): ComposerAvailability {
   if (archived) {
     return unavailable("Restore task to send follow-up.");
@@ -65,16 +63,6 @@ export function composerAvailability({
     return {
       ...unavailable(canEdit ? "Reconnecting. Draft is saved here." : "Connecting to App Server."),
       canEdit,
-    };
-  }
-  if (uncertain) {
-    return {
-      canEdit: false,
-      submissionAllowed: true,
-      placeholder: "Retry this exact message.",
-      submitting: false,
-      submitActionLabel,
-      submitPendingLabel,
     };
   }
   if (sendCapability?.state !== "ready") {

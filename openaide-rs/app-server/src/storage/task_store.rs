@@ -9,10 +9,6 @@ use super::Store;
 impl Store {
     pub fn write_task(&self, record: &TaskRecord) -> Result<(), RuntimeError> {
         #[cfg(test)]
-        if self.take_task_write_crash_for_test() {
-            panic!("injected process crash before Task record replacement");
-        }
-        #[cfg(test)]
         if self.take_task_write_failure_for_test() {
             return Err(RuntimeError::Storage(
                 "injected Task record write failure".to_string(),

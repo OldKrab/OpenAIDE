@@ -108,8 +108,6 @@ export type TaskId = string & { readonly __openaideBrand: "TaskId" };
 
 export type TaskListCursor = string & { readonly __openaideBrand: "TaskListCursor" };
 
-export type TaskSendIdempotencyKey = string & { readonly __openaideBrand: "TaskSendIdempotencyKey" };
-
 export type TurnId = string & { readonly __openaideBrand: "TurnId" };
 
 export type ClientRequestEnvelope<P> = { method: string, params: P, meta?: RequestMeta, };
@@ -444,7 +442,7 @@ export type TaskAdoptNativeSessionParams = { projectId: ProjectId, agentId: Agen
 
 export type TaskAdoptNativeSessionResult = { task: TaskSnapshot, };
 
-export type TaskSendParams = { taskId: TaskId, idempotencyKey: TaskSendIdempotencyKey, taskRevision: number, message: ComposerMessage, };
+export type TaskSendParams = { taskId: TaskId, taskRevision: number, message: ComposerMessage, };
 
 export type ComposerMessage = { text?: string | null, attachments?: Array<AttachmentHandleId>, };
 

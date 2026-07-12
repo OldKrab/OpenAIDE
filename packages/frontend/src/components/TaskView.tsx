@@ -136,7 +136,6 @@ export function TaskView({
   showWorkspaceContext?: boolean;
 }) {
   const inputPending = taskInput.pending?.state === "sending";
-  const inputUncertain = taskInput.pending?.state === "uncertain";
   const chat = renderedChat(snapshot, chatPageState);
   const chatItems = chatItemsWithAppServerQuestions(
     chatItemsWithAppServerPermissions(
@@ -162,10 +161,8 @@ export function TaskView({
     contextReady: true,
     readyPlaceholder: "Send follow-up",
     sendCapability: snapshot.send_capability,
-    submitActionLabel: inputUncertain ? "Retry sending exact message" : undefined,
     submitPendingLabel: "Sending message",
     submitting: inputPending,
-    uncertain: inputUncertain,
   });
   const canSubmit = composerCanSubmit(availability, taskInput.prompt, taskInput.context.length);
   const taskConfigOptions = startupConfigOptions ?? snapshot.agent_config;

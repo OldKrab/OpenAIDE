@@ -211,7 +211,6 @@ fn app_server_handoff_user_can_create_new_task_and_send_first_prompt() {
         "new-task-client",
         task_id,
         revision,
-        "frontend-send-contract-1",
         "hello from web",
     );
 
@@ -372,7 +371,6 @@ fn app_server_handoff_user_can_reopen_prepared_new_task_after_reload_and_send() 
         "reload-client",
         task_id,
         revision,
-        "frontend-send-contract-reload",
         "after reload",
     );
     assert!(sent["turnId"].as_str().is_some());
@@ -403,7 +401,6 @@ fn app_server_handoff_task_created_in_one_tab_is_visible_to_another_tab() {
         "creator-tab",
         task_id,
         revision,
-        "frontend-send-contract-two-tabs",
         "visible from another tab",
     );
     assert_eq!(sent["task"]["task"]["hasMessages"], true);
@@ -438,7 +435,6 @@ fn app_server_handoff_reinitialize_home_lists_the_current_task_after_send() {
         "project-list-client",
         task_id,
         revision,
-        "frontend-send-contract-project-list",
         "show this task in navigation",
     );
 
@@ -501,7 +497,6 @@ fn app_server_handoff_user_can_send_first_prompt_after_task_preparation() {
         "preparation-client",
         task_id,
         ready_revision,
-        "frontend-send-contract-first",
         "first try",
     );
     assert!(sent["turnId"].as_str().is_some());
@@ -648,10 +643,9 @@ fn send_task(
     connection_id: &str,
     task_id: &str,
     revision: u64,
-    idempotency_key: &str,
     text: &str,
 ) -> Value {
-    let send = |revision| post_local_http_json(
+    let response = post_local_http_json(
         endpoint_url,
         auth_token,
         connection_id,
@@ -661,36 +655,16 @@ fn send_task(
             "method": "task/send",
             "params": {
                 "taskId": task_id,
-                "idempotencyKey": idempotency_key,
                 "taskRevision": revision,
                 "message": { "text": text }
             }
         }),
     );
-    let first = send(revision);
-    if first[0]["result"]["result"].is_object() {
-        return first[0]["result"]["result"].clone();
-    }
-    assert_eq!(
-        first[0]["error"]["error"]["code"], "conflict",
-        "unexpected task/send failure: {first:#?}"
-    );
-
-    // Task preparation can publish session metadata after readiness. The error
-    // carries the coherent current render state needed for one same-key retry.
-    assert_eq!(
-        first[0]["error"]["error"]["target"]["field"],
-        "taskRevision"
-    );
-    let current_revision = first[0]["error"]["error"]["target"]["currentTask"]["revision"]
-        .as_u64()
-        .expect("revision conflict current Task state");
-    let retry = send(current_revision);
     assert!(
-        retry[0]["result"]["result"].is_object(),
-        "task/send retry failed: {retry:#?}"
+        response[0]["result"]["result"].is_object(),
+        "task/send failed: {response:#?}"
     );
-    retry[0]["result"]["result"].clone()
+    response[0]["result"]["result"].clone()
 }
 
 fn wait_until_task_send_ready(

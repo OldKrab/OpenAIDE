@@ -122,15 +122,6 @@ impl TaskMutationContext<'_> {
             .finish_running_activities(&self.task.task_id, status)
     }
 
-    pub(crate) fn finish_running_activity(
-        &self,
-        identity: &str,
-        status: ActivityStatus,
-    ) -> Result<bool, RuntimeError> {
-        self.store
-            .finish_running_activity_by_identity(&self.task.task_id, identity, status)
-    }
-
     pub(crate) fn cancel_pending_permissions(&self) -> Result<bool, RuntimeError> {
         self.store.cancel_pending_permissions(&self.task.task_id)
     }

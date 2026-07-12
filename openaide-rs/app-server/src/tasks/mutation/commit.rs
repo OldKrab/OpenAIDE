@@ -21,14 +21,7 @@ pub(super) fn commit_existing_task(
     let original_active_turn = task.active_turn_id.clone();
     let original_version_fields = VersionFields::from_task(&task);
     let message_backup = target.store.backup_message_files(task_id)?;
-    let send_receipts_backup = target.store.backup_send_receipts(task_id)?;
-    let rollback = || {
-        let message_result = target.store.restore_message_files(task_id, &message_backup);
-        let receipt_result = target
-            .store
-            .restore_send_receipts(task_id, send_receipts_backup.as_deref());
-        message_result.and(receipt_result)
-    };
+    let rollback = || target.store.restore_message_files(task_id, &message_backup);
     let mut ctx = TaskMutationContext {
         store: &target.store,
         task: &mut task,

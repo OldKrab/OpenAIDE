@@ -39,11 +39,6 @@ import {
   type TaskSnapshot as ProtocolTaskSnapshot,
 } from "@openaide/app-server-client";
 import { createAppCallbacks } from "./appControllerCallbacks";
-import {
-  clearPendingTaskSendRecovery,
-  readPendingTaskSendRecovery,
-  savePendingTaskSendRecovery,
-} from "../services/pendingTaskSendRecovery";
 import { ComposerAttachmentResourceOwner } from "../services/attachmentResources";
 import { projectIdForWorkspaceRoot } from "../state/projectIdentity";
 import { appReducer } from "../state/appReducer";
@@ -64,9 +59,6 @@ vi.mock("../services/agentSecretTransaction", () => ({
 
 describe("app controller callbacks", () => {
   beforeEach(() => {
-    for (const taskId of ["task_1", "task_2", "task_new"]) {
-      clearPendingTaskSendRecovery("state_root_1", "test-client", taskId);
-    }
     postHostMessage.mockClear();
     beginAgentSecretTransaction.mockReset();
     beginAgentSecretTransaction.mockResolvedValue({
@@ -104,7 +96,6 @@ describe("app controller callbacks", () => {
 
     expect(dispatch).toHaveBeenNthCalledWith(1, expect.objectContaining({
       type: "submit:start",
-      idempotencyKey: expect.stringMatching(/^frontend-send-/),
     }));
     expect(request).toHaveBeenNthCalledWith(1, TASK_CREATE, {
       projectId: "project_1",
@@ -114,7 +105,6 @@ describe("app controller callbacks", () => {
     expect(request).toHaveBeenNthCalledWith(2, TASK_SEND, {
       taskId: "task_1",
       taskRevision: 2,
-      idempotencyKey: expect.stringMatching(/^frontend-send-/),
       message: { text: "Build the thing" },
     });
     expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "snapshot", intent: "open" }));
@@ -122,7 +112,6 @@ describe("app controller callbacks", () => {
       type: "taskInput:submit",
       taskId: "task_1",
       input: { prompt: "Build the thing", context: [] },
-      idempotencyKey: expect.stringMatching(/^frontend-send-/),
     }));
     expect(postHostMessage).toHaveBeenCalledWith({
       type: "surface.openTask",
@@ -247,60 +236,6 @@ describe("app controller callbacks", () => {
       message: "connection closed",
     });
     expect(dispatch).not.toHaveBeenCalledWith({ type: "taskInput:clear", taskId: "task_1" });
-  });
-
-  it("forgets resolver rows and recovery after a prepared Task is discarded", async () => {
-    const dispatch = vi.fn();
-    const release = vi.fn();
-    const attachmentResources = new ComposerAttachmentResourceOwner({ release });
-    const context = [{
-      kind: "file" as const,
-      label: "notes.md",
-      local_id: "attachment-1",
-      app_server_handle_id: "attachment-handle-1" as AttachmentHandleId,
-    }];
-    attachmentResources.reconcile({
-      acceptedUserMessageIds: new Map(),
-      acceptsAdoptions: false,
-      retained: [{ taskId: "task_1", handleId: "attachment-handle-1" as AttachmentHandleId }],
-      mountedTaskId: "task_1",
-      protected: new Set(["task_1\u0000attachment-handle-1"]),
-      taskSurfaceMounted: true,
-    });
-    savePendingTaskSendRecovery({
-      clientInstanceId: "test-client" as never,
-      idempotencyKey: "send-1" as never,
-      message: { text: "Build", attachments: ["attachment-handle-1" as AttachmentHandleId] },
-      renderState: { prompt: "Build", context },
-      stateRootId: "state_root_1" as never,
-      taskId: "task_1",
-      taskRevision: 2,
-    });
-    const request = vi.fn(async (method: string) => {
-      if (method === TASK_DISCARD) return { discardedTaskId: "task_1", tasks: { tasks: [], activeTaskId: null } };
-      throw new Error(method);
-    });
-    const state = createInitialState();
-    state.newTask.pending = { prompt: "Build", context, idempotencyKey: "send-1" as never };
-    state.newTask.submitting = true;
-    const attempt = {
-      cancelled: false,
-      draft: { prompt: "Build", context },
-      taskId: "task_1" as never,
-    };
-
-    callbacks({
-      attachmentResources,
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
-      dispatch,
-      newTaskStartAttempt: { current: attempt },
-      state,
-    }).newTask.cancel();
-    await settlePromises();
-
-    expect(readPendingTaskSendRecovery("state_root_1", "test-client", "task_1")).toBeUndefined();
-    expect(release).toHaveBeenCalledWith("task_1", ["attachment-handle-1"]);
-    expect(dispatch).toHaveBeenCalledWith({ type: "taskInput:clear", taskId: "task_1" });
   });
 
   it("includes a new workspace root when creating a task for an unseen project", async () => {
@@ -699,7 +634,6 @@ describe("app controller callbacks", () => {
     expect(request).toHaveBeenCalledWith(TASK_SEND, {
       taskId: "task_1",
       taskRevision: 2,
-      idempotencyKey: expect.stringMatching(/^frontend-send-/),
       message: {
         text: "Explain this image",
         attachments: ["attachment-handle-image"],
@@ -709,7 +643,6 @@ describe("app controller callbacks", () => {
       type: "taskInput:submit",
       taskId: "task_1",
       input: state.taskInputs.task_1,
-      idempotencyKey: expect.stringMatching(/^frontend-send-/),
     }));
   });
 
@@ -831,7 +764,6 @@ describe("app controller callbacks", () => {
     expect(request).toHaveBeenCalledWith(TASK_SEND, {
       taskId: "task_1",
       taskRevision: 2,
-      idempotencyKey: expect.stringMatching(/^frontend-send-/),
       message: {
         text: "send the visible attachments",
         attachments: ["attachment-handle-1", "attachment-handle-2", "attachment-handle-3"],
@@ -874,7 +806,6 @@ describe("app controller callbacks", () => {
       type: "taskInput:submit",
       taskId: "task_1",
       input: { prompt: "Build the thing", context: [] },
-      idempotencyKey: expect.stringMatching(/^frontend-send-/),
     }));
     expect(postHostMessage).toHaveBeenCalledWith({
       type: "surface.openTask",
@@ -914,7 +845,6 @@ describe("app controller callbacks", () => {
       type: "taskSend:accepted",
       taskId: "task_1",
       userMessageId: "user-message",
-      idempotencyKey: expect.stringMatching(/^frontend-send-/),
     }));
     expect(postHostMessage).toHaveBeenCalledTimes(1);
   });
@@ -973,7 +903,6 @@ describe("app controller callbacks", () => {
     expect(dispatch.mock.calls[acceptedIndex]?.[0]).toEqual({
       type: "taskSend:accepted",
       taskId: "task_1",
-      idempotencyKey: submitted.idempotencyKey,
       userMessageId: "message-1",
     });
     expect(dispatch.mock.invocationCallOrder[acceptedIndex])
@@ -1148,69 +1077,6 @@ describe("app controller callbacks", () => {
     }
   });
 
-  it("retries the first new-task send from authoritative revision-conflict state", async () => {
-    const dispatch = vi.fn();
-    const request = vi.fn(async (method: string, _params?: unknown) => {
-      if (method === TASK_CREATE) return { task: { ...protocolTaskSnapshot("task_1", "New task"), revision: 1 } };
-      if (method === TASK_SEND && request.mock.calls.filter(([called]) => called === TASK_SEND).length === 1) {
-        throw new AppServerProtocolError({
-          error: {
-            code: "conflict",
-            message: "Task changed before the message was sent",
-            recoverable: true,
-            target: {
-              field: "taskRevision",
-              currentTask: { ...protocolTaskSnapshot("task_1", "New task"), revision: 2 },
-            },
-          },
-        });
-      }
-      if (method === TASK_SEND) return { task: { ...protocolTaskSnapshot("task_1", "New task"), revision: 3 } };
-      throw new Error(method);
-    });
-    const state = createInitialState();
-    state.newTask.prompt = "Build the thing";
-    state.newTask.selection = {
-      ...state.newTask.selection,
-      agentId: "codex",
-      agentLabel: "Codex",
-      projectId: "project_1",
-      workspaceRoot: "/workspace",
-      workspaceLabel: "workspace",
-    };
-
-    callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
-      dispatch,
-      state,
-    }).newTask.submit();
-    await settlePromises();
-
-    expect(request).toHaveBeenNthCalledWith(2, TASK_SEND, {
-      taskId: "task_1",
-      taskRevision: 1,
-      idempotencyKey: expect.stringMatching(/^frontend-send-/),
-      message: { text: "Build the thing" },
-    });
-    expect(request).toHaveBeenNthCalledWith(3, TASK_SEND, {
-      taskId: "task_1",
-      taskRevision: 2,
-      idempotencyKey: expect.stringMatching(/^frontend-send-/),
-      message: { text: "Build the thing" },
-    });
-    const firstSend = request.mock.calls[1][1] as { idempotencyKey: string };
-    const retrySend = request.mock.calls[2][1] as { idempotencyKey: string };
-    expect(retrySend.idempotencyKey).toBe(firstSend.idempotencyKey);
-    expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: "taskInput:error" }));
-    expect(postHostMessage).toHaveBeenCalledWith({
-      type: "surface.openTask",
-      payload: {
-        task_id: "task_1",
-        title: "New task",
-      },
-    });
-  });
-
   it("adopts the prepared Task route before the first send outcome is known", async () => {
     const pendingSend = deferred<{
       task: ReturnType<typeof protocolTaskSnapshot>;
@@ -1260,7 +1126,7 @@ describe("app controller callbacks", () => {
     await settlePromises();
   });
 
-  it("keeps the prepared Task route and restores its draft when first send is ambiguous", async () => {
+  it("keeps the prepared Task route and restores its draft when first send fails", async () => {
     const dispatch = vi.fn();
     const request = vi.fn(async (method: string) => {
       if (method === TASK_CREATE) return { task: protocolTaskSnapshot("task_1", "New task") };
@@ -1287,102 +1153,15 @@ describe("app controller callbacks", () => {
 
     expect(dispatch).toHaveBeenCalledWith({ type: "taskInput:prompt", taskId: "task_1", prompt: "Build the thing" });
     expect(dispatch).toHaveBeenCalledWith({
-      type: "taskInput:sendUncertain",
+      type: "taskInput:sendError",
       taskId: "task_1",
-      idempotencyKey: expect.stringMatching(/^frontend-send-/),
-      message: "Send status is unknown. Retry sends this exact message.",
+      message: "send failed",
     });
     expect(dispatch).toHaveBeenCalledWith({ type: "submit:error", message: "send failed" });
     expect(postHostMessage).toHaveBeenCalledWith({
       type: "surface.openTask",
       payload: { task_id: "task_1", title: "New task" },
     });
-  });
-
-  it("keeps pending new-task send recovery after an ambiguous transport failure", async () => {
-    vi.stubGlobal("sessionStorage", memoryStorage());
-    try {
-      const dispatch = vi.fn();
-      const request = vi.fn(async (method: string) => {
-        if (method === TASK_CREATE) return { task: protocolTaskSnapshot("task_1", "New task") };
-        if (method === TASK_SEND) throw new Error("request aborted");
-        throw new Error(method);
-      });
-      const state = createInitialState();
-      state.newTask.prompt = "Build the thing";
-      state.newTask.selection = {
-        ...state.newTask.selection,
-        agentId: "codex",
-        agentLabel: "Codex",
-        projectId: "project_1",
-        workspaceRoot: "/workspace",
-        workspaceLabel: "workspace",
-      };
-
-      callbacks({
-        backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
-        dispatch,
-        state,
-      }).newTask.submit();
-      await settlePromises();
-
-      expect(readPendingTaskSendRecovery("state_root_1", "test-client", "task_1")).toMatchObject({
-        idempotencyKey: expect.stringMatching(/^frontend-send-/),
-        renderState: { prompt: "Build the thing", context: [] },
-      });
-    } finally {
-      vi.unstubAllGlobals();
-    }
-  });
-
-  it("retries a new-task send with the persisted idempotency key", async () => {
-    vi.stubGlobal("sessionStorage", memoryStorage());
-    try {
-      const pendingRetry = deferred<never>();
-      const request = vi.fn(async (method: string, _params?: unknown) => {
-        if (method === TASK_OPEN) return { task: protocolTaskSnapshot("task_1", "New task") };
-        if (method === TASK_SEND && request.mock.calls.filter(([called]) => called === TASK_SEND).length === 1) {
-          throw new Error("connection closed");
-        }
-        if (method === TASK_SEND) return pendingRetry.promise;
-        throw new Error(method);
-      });
-      const state = createInitialState();
-      state.snapshot = snapshot("task_1");
-      state.snapshot.task.has_messages = false;
-      state.snapshot.task.project_id = "project_1";
-      state.newTask.selection = {
-        ...state.newTask.selection,
-        agentId: "codex",
-        projectId: "project_1",
-        workspaceRoot: "/workspace",
-        workspaceLabel: "workspace",
-      };
-      state.taskInputs.task_1 = { prompt: "Build the thing", context: [] };
-      const controllerCallbacks = callbacks({
-        backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
-        state,
-      });
-
-      controllerCallbacks.newTask.submit();
-      await settlePromises();
-      controllerCallbacks.newTask.submit();
-      await settlePromises();
-
-      const sends = request.mock.calls.filter(([method]) => method === TASK_SEND);
-      expect(sends).toHaveLength(2);
-      const firstSend = sends[0]?.[1] as { idempotencyKey: string };
-      const secondSend = sends[1]?.[1] as { idempotencyKey: string };
-      expect(secondSend).toMatchObject({
-        idempotencyKey: firstSend.idempotencyKey,
-        message: { text: "Build the thing" },
-        taskId: "task_1",
-      });
-      expect(readPendingTaskSendRecovery("state_root_1", "test-client", "task_1")?.idempotencyKey)
-        .toBe(secondSend.idempotencyKey);
-    } finally {
-      vi.unstubAllGlobals();
-    }
   });
 
   it("sends immediately when the prepared Task already owns the selected config options", async () => {
@@ -1589,13 +1368,11 @@ describe("app controller callbacks", () => {
       type: "taskInput:submit",
       taskId: "task_1",
       input: { prompt: "Send exactly once", context: [] },
-      idempotencyKey: "send-attempt-1" as never,
     });
     configMutation.reject(new Error("Agent rejected the option"));
     await settlePromises();
 
     expect(renderedState.taskInputs.task_1.pending).toMatchObject({
-      idempotencyKey: "send-attempt-1",
       prompt: "Send exactly once",
       state: "sending",
     });
@@ -2181,14 +1958,12 @@ describe("app controller callbacks", () => {
     expect(request).toHaveBeenCalledWith(TASK_SEND, {
       taskId: "task_1",
       taskRevision: 1,
-      idempotencyKey: expect.stringMatching(/^frontend-send-/),
       message: { text: "Continue" },
     });
     expect(dispatch).toHaveBeenNthCalledWith(1, {
       type: "taskInput:submit",
       taskId: "task_1",
       input: { prompt: "Continue", context: [] },
-      idempotencyKey: expect.stringMatching(/^frontend-send-/),
     });
     expect(dispatch).toHaveBeenNthCalledWith(2, expect.objectContaining({ type: "snapshot", intent: "refresh" }));
     expect(postHostMessage).not.toHaveBeenCalled();
@@ -2252,7 +2027,6 @@ describe("app controller callbacks", () => {
     expect(request).toHaveBeenCalledWith(TASK_SEND, {
       taskId: "task_1",
       taskRevision: 1,
-      idempotencyKey: expect.stringMatching(/^frontend-send-/),
       message: {
         text: "Continue",
         attachments: ["attachment-handle-1"],
@@ -2667,63 +2441,6 @@ describe("app controller callbacks", () => {
     expect(postHostMessage).not.toHaveBeenCalled();
   });
 
-  it("waits for an in-flight send to settle before cancelling that Task", async () => {
-    const dispatch = vi.fn();
-    const pendingSend = deferred<{
-      task: ProtocolTaskSnapshot;
-      userMessageId: string;
-    }>();
-    const request = vi.fn((method: string) => {
-      if (method === TASK_SEND) return pendingSend.promise;
-      if (method === TASK_CANCEL) {
-        return Promise.resolve({ task: protocolTaskSnapshot("task_1", "Cancelled") });
-      }
-      throw new Error(method);
-    });
-    const state = createInitialState();
-    state.snapshot = snapshot("task_1");
-    state.taskInputs.task_1 = { prompt: "Start then stop", context: [] };
-    const dependencies = {
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
-      dispatch,
-      state,
-    };
-
-    callbacks(dependencies).task.sendPrompt();
-    const submit = dispatch.mock.calls
-      .map(([action]) => action)
-      .find((action) => action.type === "taskInput:submit");
-    state.taskInputs.task_1 = {
-      prompt: "Start then stop",
-      context: [],
-      pending: {
-        prompt: "Start then stop",
-        context: [],
-        idempotencyKey: submit.idempotencyKey,
-        state: "sending",
-      },
-    };
-
-    callbacks(dependencies).task.cancel();
-
-    expect(request).toHaveBeenCalledTimes(1);
-    expect(request).not.toHaveBeenCalledWith(TASK_CANCEL, { taskId: "task_1" });
-
-    pendingSend.resolve({
-      task: protocolTaskSnapshot("task_1", "Started"),
-      userMessageId: "accepted-user-message",
-    });
-    await settlePromises();
-
-    const acceptedIndex = dispatch.mock.calls
-      .findIndex(([action]) => action.type === "taskSend:accepted");
-    const cancelIndex = request.mock.calls.findIndex(([method]) => method === TASK_CANCEL);
-    expect(acceptedIndex).toBeGreaterThanOrEqual(0);
-    expect(cancelIndex).toBeGreaterThanOrEqual(0);
-    expect(dispatch.mock.invocationCallOrder[acceptedIndex])
-      .toBeLessThan(request.mock.invocationCallOrder[cancelIndex]);
-  });
-
   it("surfaces an error when cancel has no BackendConnection", () => {
     const dispatch = vi.fn();
     const state = createInitialState();
@@ -2735,31 +2452,6 @@ describe("app controller callbacks", () => {
       type: "taskInput:cancelError",
       taskId: "task_1",
       message: "App Server connection unavailable.",
-    });
-    expect(postHostMessage).not.toHaveBeenCalled();
-  });
-
-  it("locks the exact typed prompt after a send outcome becomes unknown", async () => {
-    const dispatch = vi.fn();
-    const state = createInitialState();
-    state.snapshot = snapshot("task_1");
-    state.taskInputs.task_1 = { prompt: "Continue", context: [] };
-
-    callbacks({
-      backendConnection: {
-        request: vi.fn(async () => { throw new Error("stale revision"); }) as unknown as BackendConnection["request"],
-        respond: vi.fn(),
-      },
-      dispatch,
-      state,
-    }).task.sendPrompt();
-    await settlePromises();
-
-    expect(dispatch).toHaveBeenCalledWith({
-      type: "taskInput:sendUncertain",
-      taskId: "task_1",
-      idempotencyKey: expect.stringMatching(/^frontend-send-/),
-      message: "Send status is unknown. Retry sends this exact message.",
     });
     expect(postHostMessage).not.toHaveBeenCalled();
   });
@@ -2787,7 +2479,6 @@ describe("app controller callbacks", () => {
     expect(dispatch).toHaveBeenCalledWith({
       type: "taskInput:sendError",
       taskId: "task_1",
-      idempotencyKey: expect.stringMatching(/^frontend-send-/),
       message: "Task is running",
     });
     expect(postHostMessage).not.toHaveBeenCalled();
@@ -3139,7 +2830,7 @@ describe("app controller callbacks", () => {
       preparationKey: newTaskPreparationKey(state) as string,
       taskId: "task_prepared" as never,
     });
-    newTaskController.protectSend(lease, "send-prepared");
+    newTaskController.protectSend(lease);
 
     callbacks({
       backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
@@ -3307,14 +2998,12 @@ describe("app controller callbacks", () => {
       type: "submit:start",
       prompt: "Start this newer Task",
       context: [],
-      idempotencyKey: "send-attempt-new" as never,
     });
 
     adopted.resolve({ task: protocolTaskSnapshot("task_adopted", "Native Session") });
     await settlePromises();
 
     expect(renderedState.newTask.submitting).toBe(true);
-    expect(renderedState.newTask.pending?.idempotencyKey).toBe("send-attempt-new");
     expect(renderedState.newTask.nativeSessions.adoptingSessionId).toBeUndefined();
   });
 

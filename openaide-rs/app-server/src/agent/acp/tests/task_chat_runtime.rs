@@ -48,13 +48,8 @@ fn live_acp_message_ids_create_separate_chat_messages() {
         })
         .expect("open ready task");
 
-    api.send(send_params(
-        &task_id,
-        ready.revision,
-        "send-message-ids",
-        "respond twice",
-    ))
-    .expect("send prompt");
+    api.send(send_params(&task_id, ready.revision, "respond twice"))
+        .expect("send prompt");
 
     wait_until(|| {
         store
@@ -149,10 +144,9 @@ fn task_chat_fixture(
     Some((api, store, workspace_root))
 }
 
-fn send_params(task_id: &TaskId, revision: u64, key: &str, text: &str) -> TaskSendParams {
+fn send_params(task_id: &TaskId, revision: u64, text: &str) -> TaskSendParams {
     TaskSendParams {
         task_id: task_id.clone(),
-        idempotency_key: key.into(),
         task_revision: revision,
         message: ComposerMessage {
             text: Some(text.to_string()),

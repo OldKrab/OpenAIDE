@@ -3,7 +3,6 @@ use std::sync::{Arc, Mutex};
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{IsolationKind, NormalizedMessage, TaskStatus};
 use crate::storage::records::{TaskPreparationRecord, TaskRecord};
-use crate::storage::send_receipts::TaskSendReceipt;
 use crate::storage::Store;
 use crate::task_events::{TaskUpdateNotifier, TaskUpdateReceiver};
 use crate::tasks::mutation::{
@@ -205,47 +204,6 @@ fn rejected_commit_rolls_back_context_message_side_effects() {
         store.read_task("task_reject_side_effect").unwrap().revision,
         3
     );
-    assert_eq!(mutations.current_revision(), 3);
-    assert!(notifications.try_recv().is_err());
-}
-
-#[test]
-fn rejected_commit_rolls_back_send_receipt_side_effects() {
-    let (_dir, store, mutations, notifications) = test_mutations(3);
-    let mut record = task_record("task_reject_receipt");
-    record.revision = 3;
-    store.write_task(&record).unwrap();
-    store
-        .write_send_receipt(
-            "task_reject_receipt",
-            send_receipt("accepted-send", "accepted-message"),
-        )
-        .unwrap();
-    let mutation_store = store.clone();
-
-    let result = mutations
-        .commit_existing_task(
-            "task_reject_receipt",
-            TaskCommitOptions::metadata(),
-            |_ctx| {
-                mutation_store.write_send_receipt(
-                    "task_reject_receipt",
-                    send_receipt("rejected-send", "rejected-message"),
-                )?;
-                Ok(TaskMutationResult::Rejected)
-            },
-        )
-        .unwrap();
-
-    assert_rejected_no_change(result.outcome);
-    assert!(store
-        .read_send_receipt("task_reject_receipt", "accepted-send")
-        .unwrap()
-        .is_some());
-    assert!(store
-        .read_send_receipt("task_reject_receipt", "rejected-send")
-        .unwrap()
-        .is_none());
     assert_eq!(mutations.current_revision(), 3);
     assert!(notifications.try_recv().is_err());
 }
@@ -507,17 +465,6 @@ fn task_record(task_id: &str) -> TaskRecord {
         agent_commands_catalog: None,
         model_id: None,
         preparation: TaskPreparationRecord::Ready,
-    }
-}
-
-fn send_receipt(idempotency_key: &str, user_message_id: &str) -> TaskSendReceipt {
-    TaskSendReceipt {
-        idempotency_key: idempotency_key.to_string(),
-        text: "hello".to_string(),
-        attachment_handles: Vec::new(),
-        user_message_id: user_message_id.to_string(),
-        turn_id: "turn-1".to_string(),
-        durable_chat_written: false,
     }
 }
 

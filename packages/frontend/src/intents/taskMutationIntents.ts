@@ -1,12 +1,12 @@
 import {
   AppServerProtocolError,
   TASK_CANCEL,
+  TASK_SEND,
   type BackendConnection,
   type ClientInstanceId,
   type ComposerMessage,
   type StateRootId,
   type TaskId,
-  type TaskSendIdempotencyKey,
 } from "@openaide/app-server-client";
 import type { TaskSnapshot } from "@openaide/app-shell-contracts";
 import type { AppAction, SnapshotIntent } from "../state/appReducer";
@@ -15,13 +15,6 @@ import type { TaskComposerInput } from "../state/store";
 import { mapProtocolTaskSnapshot } from "../state/appServerProtocolMapping";
 import type { PostHostMessage } from "../state/postHostMessage";
 import { isInvalidAttachmentHandleError } from "../state/attachmentValidation";
-import {
-  executeTaskSendAttempt,
-  isTaskSendOutcomeUnknown,
-  resolveTaskSendAttempt,
-  TASK_SEND_OUTCOME_UNKNOWN_MESSAGE,
-  taskSendAttemptRecord,
-} from "../services/taskSendAttempt";
 import {
   releaseComposerAttachments,
   type ComposerAttachmentResourceOwner,
@@ -79,8 +72,7 @@ export function sendTaskPromptIntent(
   if (!snapshot) return;
   const message = appServerComposerMessage(input);
   const taskId = snapshot.task.task_id;
-  const exactRetry = input.pending?.state === "uncertain";
-  if (snapshot.send_capability.state !== "ready" && !exactRetry) {
+  if (snapshot.send_capability.state !== "ready") {
     dependencies.dispatch({
       type: "taskInput:error",
       taskId,
@@ -96,14 +88,6 @@ export function sendTaskPromptIntent(
     });
     return;
   }
-  if (!dependencies.stateRootId) {
-    dependencies.dispatch({
-      type: "taskInput:error",
-      taskId,
-      message: "App Server state root unavailable. Refresh and try again.",
-    });
-    return;
-  }
   if (!message) {
     dependencies.dispatch({
       type: "taskInput:error",
@@ -112,38 +96,18 @@ export function sendTaskPromptIntent(
     });
     return;
   }
-  let attempt;
-  try {
-    attempt = resolveTaskSendAttempt(taskSendAttemptRecord({
-      clientInstanceId: dependencies.clientInstanceId,
-      idempotencyKey: input.pending?.idempotencyKey ?? createTaskSendIdempotencyKey(),
-      message,
-      renderState: input,
-      stateRootId: dependencies.stateRootId,
-      taskId,
-      taskRevision: snapshot.revision,
-    }));
-  } catch (error) {
-    dependencies.dispatch({
-      type: "taskInput:error",
-      taskId,
-      message: taskMutationErrorMessage(error, "Unable to send message."),
-    });
-    return;
-  }
   dependencies.attachmentResources?.lockAdoptions();
   dependencies.dispatch({
     type: "taskInput:submit",
     taskId,
-    input: attempt.renderState,
-    idempotencyKey: attempt.idempotencyKey,
+    input,
   });
-  void executeTaskSendAttempt({
-    attempt,
-    backendConnection: dependencies.backendConnection as TaskMutationConnection,
-    refreshRevisionOnConflict: true,
+  void dependencies.backendConnection.request(TASK_SEND, {
+    taskId: taskId as TaskId,
+    taskRevision: snapshot.revision,
+    message,
   })
-    .then(({ result }) => {
+    .then((result) => {
       dependencies.dispatch({
         type: "snapshot",
         snapshot: mapProtocolTaskSnapshot(result.task).snapshot,
@@ -152,7 +116,6 @@ export function sendTaskPromptIntent(
       dependencies.dispatch({
         type: "taskSend:accepted",
         taskId,
-        idempotencyKey: attempt.idempotencyKey,
         userMessageId: result.userMessageId,
       });
     })
@@ -160,7 +123,7 @@ export function sendTaskPromptIntent(
       if (isInvalidAttachmentHandleError(error)) {
         releaseComposerAttachments({
           attachmentResources: dependencies.attachmentResources,
-          attachments: attempt.renderState.context,
+          attachments: input.context,
           backendConnection: dependencies.backendConnection,
           taskId,
         });
@@ -171,19 +134,9 @@ export function sendTaskPromptIntent(
         });
         return;
       }
-      if (isTaskSendOutcomeUnknown(error)) {
-        dependencies.dispatch({
-          type: "taskInput:sendUncertain",
-          taskId,
-          idempotencyKey: attempt.idempotencyKey,
-          message: TASK_SEND_OUTCOME_UNKNOWN_MESSAGE,
-        });
-        return;
-      }
       dependencies.dispatch({
         type: "taskInput:sendError",
         taskId,
-        idempotencyKey: attempt.idempotencyKey,
         message: taskSendErrorMessage(error),
       });
     });
@@ -193,17 +146,6 @@ function appServerComposerMessage(input: TaskComposerInput): ComposerMessage | u
   const attachments = appServerAttachmentHandles(input.context);
   if (input.context.length > 0 && !attachments) return undefined;
   return attachments?.length ? { text: input.prompt, attachments } : { text: input.prompt };
-}
-
-export function createTaskSendIdempotencyKey(): TaskSendIdempotencyKey {
-  const id = `frontend-send-${randomId()}`;
-  return id as TaskSendIdempotencyKey;
-}
-
-function randomId() {
-  const randomUuid = globalThis.crypto?.randomUUID?.();
-  if (randomUuid) return randomUuid;
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 }
 
 function taskSendErrorMessage(error: unknown) {

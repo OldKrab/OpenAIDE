@@ -168,9 +168,9 @@ contracts:
 - Generic ACP prompt turns are sequential. OpenAIDE does not issue a second
   `session/prompt` while the first is pending; active Tasks expose blocked Send
   capability while keeping the local draft editable.
-- One task-scoped Composer attempt owns its idempotency key until `task/send`
-  returns `userMessageId`. Identical historical text never settles a draft, and a
-  lost response retries the same attempt instead of manufacturing a new send.
+- One task-scoped Composer allows one in-flight `task/send`. Success clears its
+  submitted draft directly; failure restores the live draft. Frontend never
+  automatically retries or reconstructs a lost request.
 - Every event delivered to a client shares one cursor lineage. Any cursor gap,
   including one first observed on an out-of-scope or replacement event, suspends
   incremental application until resubscription installs a baseline.
@@ -181,8 +181,8 @@ contracts:
   clears every root-owned Task/cache identity before collisions are accepted.
 - LocalHttp reinitializes after `notInitialized` but never replays the
   originating product method into the replacement replica. The owner receives a
-  replica-changed error and decides whether to reconcile, retry an idempotent
-  send, or surface failure under the new epoch.
+  replica-changed error and resynchronizes authoritative state without replaying
+  the product mutation.
 - Protocol Chat message identities are authoritative. Frontend paging may dedupe
   the same identity across windows, but it must not merge distinct adjacent text,
   thought, or activity rows from whitespace, size, or position heuristics.
@@ -192,17 +192,14 @@ contracts:
   set-option response are projected before the response catalog, so an older
   queued catalog cannot regress the confirmed value.
 - A stale `task/send` revision conflict targets `taskRevision` and carries the
-  current authoritative Task render state. Frontend retries the same idempotency
-  key from that state only; it does not parse error text, reopen the Task, or
-  retry unrelated conflicts such as an already-running Task.
+  current authoritative Task render state. Frontend restores the draft and
+  surfaces the rejection; it does not parse error text or automatically retry.
 - Project identity is owned independently from surviving Tasks, and one visible
   Task panel/client owns a routed Task in each App Shell.
-- Durable send receipts survive authoritative Native Session replay. A receipt
-  is trusted only after its local Chat rows were durably written, and replay may
-  replace those row identities without reopening the idempotency key.
-- Stop is ordered behind exact send admission, and a cancelled ACP prompt keeps
-  its Native Session slot until the original prompt response settles. A later
-  prompt waits for that settlement instead of racing the Agent's active turn.
+- Stop is an independent user request rather than Send-recovery coordination. A
+  cancelled ACP prompt keeps its Native Session slot until the original prompt
+  response settles. A later prompt waits for that settlement instead of racing
+  the Agent's active turn.
 - Native history replaces cached Chat only when its activity timestamp is
   present, comparable, and strictly newer. Frontend drops retained paging rows
   only when that synchronization generation reaches `updated`; ordinary live
@@ -480,8 +477,8 @@ Desktop, and VS Code smoke coverage.
    - ACP session config options are live Agent/session state, not durable authoritative OpenAIDE Task state. `task/create` does not accept config option values; Backend refreshes options from ACP session setup, load, resume, `session/set_config_option` responses, and `config_option_update` notifications.
    - Config option changes use one generic `task/setConfigOption` method keyed by Task, config id, value, and client mutation id. Frontend may show option changes optimistically as pending presentation, but Backend-returned Task snapshots and events are authoritative. OpenAIDE allows config option changes while a turn is running because ACP allows it, but UI must attribute pending, confirmed, and failed changes clearly.
    - `task/send` v1 sends one composer message: optional normalized text plus ordered message-level attachment handles. Slash commands are normal text in that body. Future protocol/storage shapes may support inline parts, but v1 UI and send API use one text body plus ordered attachments.
-   - `task/send` uses optimistic pending presentation keyed by the send idempotency key or client request id. Backend success returns the committed `turnId`, committed `userMessageId`, and updated `TaskSnapshot`; validation or setup failure restores the editable composer with errors; lost responses retry with the same idempotency key.
-   - `task/send` includes a stale-send guard such as a Task or composer revision. Backend revalidates readiness, config, attachments, allowed roots, capabilities, and request fingerprint authoritatively; stale or conflicting sends return structured errors plus updated render state.
+   - `task/send` uses one in-memory pending presentation. Backend success returns the committed `turnId`, committed `userMessageId`, and updated `TaskSnapshot`; any request failure restores the editable live composer with errors; Frontend never automatically retries a lost response.
+   - `task/send` includes a stale-send guard such as a Task or composer revision. Backend validates readiness, config, attachments, allowed roots, capabilities, and message content authoritatively once; stale or conflicting sends return structured errors plus updated render state.
    - The first `task/*` protocol slice includes `task/create`, `task/send`, `task/setConfigOption`, `task/cancel`, `task/open`, `task/list`, and `task/discard` for empty or pre-send Tasks.
    - `task/open` loads or focuses an existing Task without reinitializing the client. `task/list` supports Web/Desktop all-project history and VS Code project-scoped history through filters. `task/cancel` is core Task lifecycle. `task/discard` cleans up empty new-task sessions when the user changes Project/Agent or leaves the new-task flow.
    - Historical Task deletion is a separate feature, not part of the first `task/*` protocol slice; it must account for local storage deletion, Agent native delete capability when present, and user-visible warnings.
