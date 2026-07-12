@@ -3,7 +3,7 @@ import { createNavigationCallbacks } from "./navigationCallbacks";
 import { createNewTaskCallbacks } from "./newTaskCallbacks";
 import { createSettingsCallbacks } from "./settingsCallbacks";
 import { createTaskCallbacks } from "./taskCallbacks";
-import { PreparedTaskOwnership } from "./preparedTaskOwnership";
+import { NewTaskController } from "./newTaskController";
 
 export type {
   AppControllerCallbacks,
@@ -27,7 +27,7 @@ export function createAppCallbacks({
   latestOptionsRequestKey,
   newTaskStartAttempt,
   pendingPreparedNewTask,
-  preparedTaskOwnership = new PreparedTaskOwnership(),
+  newTaskController = new NewTaskController(),
   requestNativeSessions,
   setAgents,
   setPreferences,
@@ -42,7 +42,7 @@ export function createAppCallbacks({
       createSnapshotRequestId,
       currentNavigationGeneration,
       dispatch,
-      preparedTaskOwnership,
+      newTaskController,
       requestNativeSessions,
       state,
     }),
@@ -57,7 +57,7 @@ export function createAppCallbacks({
       latestOptionsRequestKey,
       newTaskStartAttempt,
       pendingPreparedNewTask,
-      preparedTaskOwnership,
+      newTaskController,
       state,
     }),
     settings: createSettingsCallbacks({ backendConnection, dispatch, setAgents, setPreferences, state }),

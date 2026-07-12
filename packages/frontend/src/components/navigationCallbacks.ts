@@ -10,9 +10,9 @@ import { TASK_NAVIGATION_PAGE_SIZE } from "../state/taskNavigationPolicy";
 import { newTaskPreparationKey } from "../state/newTaskPreparationContext";
 import type { AppCallbacksDependencies, NavigationCallbacks } from "./appControllerCallbackTypes";
 import {
-  disposablePreparedTaskId,
-  type PreparedTaskOwnership,
-} from "./preparedTaskOwnership";
+  disposableNewTaskControllerId,
+  type NewTaskController,
+} from "./newTaskController";
 
 type NavigationDependencies = Pick<
   AppCallbacksDependencies,
@@ -25,7 +25,7 @@ type NavigationDependencies = Pick<
   | "dispatch"
   | "requestNativeSessions"
   | "state"
-> & { preparedTaskOwnership: PreparedTaskOwnership };
+> & { newTaskController: NewTaskController };
 
 export function createNavigationCallbacks({
   acceptTaskOpen,
@@ -35,23 +35,23 @@ export function createNavigationCallbacks({
   createSnapshotRequestId,
   currentNavigationGeneration,
   dispatch,
-  preparedTaskOwnership,
+  newTaskController,
   requestNativeSessions,
   state,
 }: NavigationDependencies): NavigationCallbacks {
-  const discardPreparedTask = () => {
-    const taskId = disposablePreparedTaskId(state, preparedTaskOwnership);
+  const discardNewTask = () => {
+    const taskId = disposableNewTaskControllerId(state, newTaskController);
     if (!taskId) return undefined;
     const preparationKey = newTaskPreparationKey(state);
     if (!preparationKey) return undefined;
-    const currentLease = preparedTaskOwnership.currentLease();
+    const currentLease = newTaskController.currentLease();
     if (currentLease && currentLease.taskId !== taskId) return undefined;
-    const lease = currentLease ?? preparedTaskOwnership.claim({
+    const lease = currentLease ?? newTaskController.claim({
       attachmentResources,
       preparationKey,
       taskId,
     });
-    return preparedTaskOwnership.discard({
+    return newTaskController.discard({
       attachmentResources,
       dispatch,
       lease,
@@ -122,7 +122,7 @@ export function createNavigationCallbacks({
     },
     openNativeSession: (session) => {
       if (state.newTask.submitting) return;
-      const preparedTaskDisposal = discardPreparedTask();
+      const newTaskDisposal = discardNewTask();
       const navigationGeneration = beginNavigationChange();
       dispatch({ type: "newTask:nativeSessions:adopt", sessionId: session.session_id });
       if (backendConnection?.request) {
@@ -142,7 +142,7 @@ export function createNavigationCallbacks({
           nativeSessionId: session.session_id,
           title: session.title,
         });
-        const adoption = preparedTaskDisposal ? preparedTaskDisposal.then(adopt) : adopt();
+        const adoption = newTaskDisposal ? newTaskDisposal.then(adopt) : adopt();
         void adoption.then((result) => {
           if (currentNavigationGeneration() !== navigationGeneration) {
             dispatch({ type: "newTask:nativeSessions:remove", sessionId: session.session_id });
@@ -181,12 +181,10 @@ export function createNavigationCallbacks({
         : { type: "surface.openNewTask" });
     },
     openSettings: () => {
-      void discardPreparedTask();
       beginNavigationChange();
       postHostMessage({ type: "surface.openSettings" });
     },
     openTask: (taskId) => {
-      void discardPreparedTask();
       beginNavigationChange();
       const task = state.tasks.find((item) => item.task_id === taskId);
       dispatch({ type: "selection:set", taskId });

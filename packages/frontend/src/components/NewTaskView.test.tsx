@@ -1050,6 +1050,7 @@ function workspaceBrowserCallbacks() {
 
 function taskSnapshot(taskId: string, hasMessages: boolean): TaskSnapshot {
   return {
+    lifecycle: hasMessages ? "visible" : "new",
     task: {
       task_id: taskId,
       title: "New task",

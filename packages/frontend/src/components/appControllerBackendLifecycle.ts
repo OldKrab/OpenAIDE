@@ -42,6 +42,8 @@ import {
   useAppServerReplicaLifecycle,
   type AppServerReplicaTransition,
 } from "./appServerReplicaLifecycle";
+import type { NewTaskController } from "./newTaskController";
+import { useNewTaskSubscription } from "./useNewTaskSubscription";
 
 export type { AppServerReplicaTransition } from "./appServerReplicaLifecycle";
 
@@ -61,6 +63,8 @@ type BackendLifecycleOptions = {
   currentAgentId: RefObject<string>;
   dispatch: Dispatch<AppAction>;
   initialBootstrap: WebviewBootstrap;
+  newTaskController: NewTaskController;
+  newTaskId?: string;
   onReplicaChanged?: (transition: AppServerReplicaTransition) => void;
   refs: AppControllerRefs;
   setAgents: Dispatch<SetStateAction<AgentOption[] | undefined>>;
@@ -73,6 +77,8 @@ export function useAppControllerBackendLifecycle({
   currentAgentId,
   dispatch,
   initialBootstrap,
+  newTaskController,
+  newTaskId,
   onReplicaChanged,
   refs,
   setAgents,
@@ -278,6 +284,10 @@ export function useAppControllerBackendLifecycle({
             stateSubscriptionContext.current = subscriptionContext;
             for (const action of ingestion.actions) {
               if (action.type === "settings:preferences") setPreferences(action.preferences);
+              if (action.type === "snapshot" && action.snapshot.lifecycle === "new") {
+                newTaskController.updateSnapshot(action.snapshot);
+                continue;
+              }
               initializedDispatch(action);
             }
             applyProtocolAgents(result.snapshot.agents, currentAgentId.current, setAgents, initializedDispatch);
@@ -409,6 +419,17 @@ export function useAppControllerBackendLifecycle({
       backendConnection?.close();
     };
   }, [backendConnection, initialBootstrap.surface, initialBootstrap.taskId]);
+
+  useNewTaskSubscription({
+    backendConnection,
+    backendInitialized,
+    backendReady,
+    backendStateGeneration,
+    context: stateSubscriptionContext,
+    dispatch: dispatchForCurrentReplica,
+    newTaskController,
+    newTaskId,
+  });
 
   useEffect(() => {
     if (!backendConnection?.events || !backendReady || !backendInitialized.current || !state.snapshot) return;

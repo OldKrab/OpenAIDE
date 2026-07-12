@@ -7,31 +7,67 @@ import {
 import type { ComposerAttachmentResourceOwner } from "../services/attachmentResources";
 import type { AppAction } from "../state/appReducer";
 import type { AppState } from "../state/store";
+import type { TaskSnapshot } from "@openaide/app-shell-contracts";
 
-export type PreparedTaskLease = Readonly<{
+export type NewTaskLease = Readonly<{
   generation: number;
   preparationKey: string;
   taskId: TaskId;
 }>;
 
-type PreparedTaskDisposal = {
+type NewTaskDisposal = {
   attachmentResources?: ComposerAttachmentResourceOwner;
   dispatch: (action: AppAction) => void;
-  lease?: PreparedTaskLease;
+  lease?: NewTaskLease;
   request?: NonNullable<BackendConnection["request"]>;
   taskId: TaskId;
 };
 
-/** Owns the one empty Task behind New Task until it is sent or explicitly discarded. */
-export class PreparedTaskOwnership {
-  private current?: PreparedTaskLease;
+/** Owns the one client-private New Task from creation until Send or explicit discard. */
+export class NewTaskController {
+  private current?: NewTaskLease;
+  private cachedSnapshot?: TaskSnapshot;
   private generation = 0;
-  // Settled IDs stay for this controller's lifetime: late preparation/browser
+  private readonly listeners = new Set<() => void>();
+  // Settled IDs stay for this controller's lifetime: late creation/browser
   // promises can otherwise issue a second discard after the first one completes.
   private readonly disposals = new Map<TaskId, Promise<void>>();
-  // Send protection is independent of the current prepared lease. A newer New Task
+  // Send protection is independent of the current controller lease. A newer New Task
   // must not make an older in-flight or ambiguous send disposable.
   private readonly sendProtections = new Map<string, TaskId>();
+
+  getSnapshot = () => this.cachedSnapshot;
+
+  subscribe = (listener: () => void) => {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  };
+
+  /** Installs a newer snapshot only for this controller's current New Task identity. */
+  updateSnapshot(snapshot: TaskSnapshot) {
+    if (snapshot.lifecycle !== "new") return false;
+    const taskId = this.cachedSnapshot?.task.task_id ?? this.current?.taskId;
+    if (taskId !== undefined && taskId !== snapshot.task.task_id) return false;
+    if (this.cachedSnapshot === snapshot) return true;
+    this.cachedSnapshot = snapshot;
+    this.emit();
+    return true;
+  }
+
+  retain({
+    attachmentResources,
+    preparationKey,
+    snapshot,
+  }: {
+    attachmentResources?: ComposerAttachmentResourceOwner;
+    preparationKey: string;
+    snapshot: TaskSnapshot;
+  }) {
+    if (!this.updateSnapshot(snapshot)) return undefined;
+    return this.claim({ attachmentResources, preparationKey, taskId: snapshot.task.task_id as TaskId });
+  }
 
   claim({
     attachmentResources,
@@ -41,14 +77,14 @@ export class PreparedTaskOwnership {
     attachmentResources?: ComposerAttachmentResourceOwner;
     preparationKey: string;
     taskId: TaskId;
-  }): PreparedTaskLease {
+  }): NewTaskLease {
     if (this.current?.taskId === taskId && this.current.preparationKey === preparationKey) {
-      attachmentResources?.claimPreparedTask(taskId);
+      attachmentResources?.claimNewTaskController(taskId);
       return this.current;
     }
     const lease = { generation: ++this.generation, preparationKey, taskId };
     this.current = lease;
-    attachmentResources?.claimPreparedTask(taskId);
+    attachmentResources?.claimNewTaskController(taskId);
     return lease;
   }
 
@@ -58,19 +94,19 @@ export class PreparedTaskOwnership {
   }
 
   currentTaskId() {
-    return this.current?.taskId;
+    return (this.cachedSnapshot?.task.task_id as TaskId | undefined) ?? this.current?.taskId;
   }
 
   ownsPreparation(preparationKey: string) {
     return this.current?.preparationKey === preparationKey;
   }
 
-  isCurrent(lease: PreparedTaskLease) {
+  isCurrent(lease: NewTaskLease) {
     return this.current?.generation === lease.generation;
   }
 
   /** Protects a send independently from subsequent New Task lease changes. */
-  protectSend(lease: PreparedTaskLease, idempotencyKey: TaskSendIdempotencyKey | string) {
+  protectSend(lease: NewTaskLease, idempotencyKey: TaskSendIdempotencyKey | string) {
     if (this.isCurrent(lease)) this.current = undefined;
     this.sendProtections.set(idempotencyKey, lease.taskId);
   }
@@ -87,23 +123,31 @@ export class PreparedTaskOwnership {
 
   confirmSentTask(taskId: TaskId | string) {
     if (this.current?.taskId === taskId) this.current = undefined;
+    if (this.cachedSnapshot?.task.task_id === taskId) {
+      this.cachedSnapshot = undefined;
+      this.emit();
+    }
     this.settleTaskSends(taskId);
   }
 
   /** Reclaims only the exact lease that started a rejected send. */
   reclaim(
-    lease: PreparedTaskLease,
+    lease: NewTaskLease,
     attachmentResources?: ComposerAttachmentResourceOwner,
   ) {
     if (this.generation !== lease.generation || this.current) return false;
     this.current = lease;
-    attachmentResources?.claimPreparedTask(lease.taskId);
+    attachmentResources?.claimNewTaskController(lease.taskId);
     return true;
   }
 
   /** Records disposal completed by the first-send cancellation workflow. */
   recordDiscarded(taskId: TaskId) {
     if (this.current?.taskId === taskId) this.current = undefined;
+    if (this.cachedSnapshot?.task.task_id === taskId) {
+      this.cachedSnapshot = undefined;
+      this.emit();
+    }
     this.settleTaskSends(taskId);
     if (!this.disposals.has(taskId)) this.disposals.set(taskId, Promise.resolve());
   }
@@ -117,19 +161,26 @@ export class PreparedTaskOwnership {
 
   /** Drops identities that are not comparable after the state root changes. */
   replaceStateRoot() {
+    const hadSnapshot = this.cachedSnapshot !== undefined;
     this.generation += 1;
     this.current = undefined;
+    this.cachedSnapshot = undefined;
     this.disposals.clear();
     this.sendProtections.clear();
+    if (hadSnapshot) this.emit();
   }
 
   /** Discards an empty Task at most once and only for its current lease. */
-  discard({ attachmentResources, dispatch, lease, request, taskId }: PreparedTaskDisposal) {
+  discard({ attachmentResources, dispatch, lease, request, taskId }: NewTaskDisposal) {
     if (!this.isDisposable(taskId)) return Promise.resolve();
     if (lease && !this.isCurrent(lease)) return Promise.resolve();
     const existing = this.disposals.get(taskId);
     if (existing) return existing;
     if (this.current?.taskId === taskId) this.current = undefined;
+    if (this.cachedSnapshot?.task.task_id === taskId) {
+      this.cachedSnapshot = undefined;
+      this.emit();
+    }
     attachmentResources?.releaseTask(taskId);
     // Local ownership ends synchronously; backend acknowledgement may settle after routing.
     dispatch({ type: "taskInput:clear", taskId });
@@ -138,20 +189,25 @@ export class PreparedTaskOwnership {
       try {
         await request?.(TASK_DISCARD, { taskId });
       } catch {
-        // Navigation and context replacement must still forget a stale local Draft.
+        // Explicit discard already ended local ownership; remote cleanup is best effort.
       }
     })();
     this.disposals.set(taskId, disposal);
     return disposal;
   }
+
+  private emit() {
+    for (const listener of this.listeners) listener();
+  }
 }
 
 /** Returns only a genuinely disposable New Task snapshot, never a protected send. */
-export function disposablePreparedTaskId(
+export function disposableNewTaskControllerId(
   state: AppState,
-  ownership?: PreparedTaskOwnership,
+  controller: NewTaskController,
 ): TaskId | undefined {
-  if (state.newTask.submitting || state.snapshot?.task.has_messages !== false) return undefined;
+  if (state.newTask.submitting || state.snapshot?.lifecycle !== "new") return undefined;
   const taskId = state.snapshot.task.task_id as TaskId;
-  return ownership?.isDisposable(taskId) === false ? undefined : taskId;
+  if (controller.currentTaskId() !== taskId || !controller.isDisposable(taskId)) return undefined;
+  return taskId;
 }

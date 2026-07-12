@@ -13,7 +13,7 @@ import { newTaskPreparationKey } from "../state/newTaskPreparationContext";
 import type { AppCallbacksDependencies, NewTaskCallbacks } from "./appControllerCallbackTypes";
 import { createNewTaskBrowserCallbacks } from "./newTaskBrowserCallbacks";
 import { createNewTaskStartCallbacks } from "./newTaskStartCallbacks";
-import type { PreparedTaskOwnership } from "./preparedTaskOwnership";
+import type { NewTaskController } from "./newTaskController";
 import { refreshTaskSnapshotAfterMutationFailure } from "./taskSnapshotRefresh";
 
 type NewTaskDependencies = Pick<
@@ -29,7 +29,7 @@ type NewTaskDependencies = Pick<
   | "newTaskStartAttempt"
   | "pendingPreparedNewTask"
   | "state"
-> & { preparedTaskOwnership: PreparedTaskOwnership };
+> & { newTaskController: NewTaskController };
 
 /** Composes deep New Task start and browser workflows with the remaining immediate mutations. */
 export function createNewTaskCallbacks(dependencies: NewTaskDependencies): NewTaskCallbacks {

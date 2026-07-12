@@ -83,10 +83,12 @@ describe("App Server Protocol state mapping", () => {
 
   it("uses lifecycle-specific presentation titles when App Server has no title", () => {
     expect(mapProtocolTaskSummary(protocolSummary({ title: null })).title).toBe("Untitled task");
-    expect(mapProtocolTaskSnapshot(protocolSnapshot({
+    const newTask = mapProtocolTaskSnapshot(protocolSnapshot({
       lifecycle: "new",
       task: protocolSummary({ title: null }),
-    })).snapshot.task.title).toBe("New task");
+    })).snapshot;
+    expect(newTask.task.title).toBe("New task");
+    expect(newTask.lifecycle).toBe("new");
   });
 
   it("maps task snapshots into current frontend task snapshots", () => {

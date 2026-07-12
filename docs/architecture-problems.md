@@ -75,7 +75,7 @@ The problem is not the line count alone. Many workflows meet through shared refs
 
 ## AP-005: Navigation discards New Tasks and their composer resources
 
-**Status:** confirmed
+**Status:** resolved
 
 **Area:** New Task lifecycle and Frontend navigation
 
@@ -86,6 +86,8 @@ This makes view navigation an implicit destructive Task-lifecycle operation. It 
 **Impact:** Switching surfaces can lose unsent text and attachment selections, repeat Task creation and Agent preparation, create timing-sensitive cleanup/recreation races, and make browser history behave differently from stable Task navigation.
 
 **Desired direction:** Create a client-private New Task once for its required start context and retain its Task id, snapshot, local composer state, and live attachment ownership while the Frontend client remains active. Navigation should hide or suspend the view without discarding product state. Returning should render cached state immediately and refresh/open the known Task id when needed; it should not call `task/create` again. Discard must require explicit user intent or a separately defined lifecycle policy, not ordinary navigation.
+
+**Implementation:** `NewTaskController` owns the client-private New Task identity, snapshot, preparation lease, and Send protection independently from the visible Task reducer. Protocol lifecycle is preserved through Frontend mapping, and New Task snapshots never enter normal Task collections, active Task state, or visible Task caches. Ordinary navigation retains composer input and attachment handles, returning renders the cached New Task without another create/open request, late creation stays in the controller without changing the current route, and a dedicated hidden Task subscription keeps preparation, options, and commands current. Explicit context replacement and discard remain separate product operations.
 
 ## AP-006: New Tasks are globally reusable and visible as normal Tasks
 

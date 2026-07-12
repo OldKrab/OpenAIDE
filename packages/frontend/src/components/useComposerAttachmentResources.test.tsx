@@ -44,6 +44,38 @@ describe("composer attachment resource lifecycle", () => {
     });
   });
 
+  it("retains the hidden New Task attachment across ordinary navigation", async () => {
+    const dispatch = vi.fn();
+    const request = vi.fn(async () => ({ outcomes: [] }));
+    const state = stateWithDraft();
+    let renderer: ReturnType<typeof create>;
+
+    await act(async () => {
+      renderer = create(<Probe
+        dispatch={dispatch}
+        newTaskId="task-1"
+        request={request as unknown as BackendConnection["request"]}
+        state={state}
+        taskSurfaceMounted
+      />);
+    });
+    await act(async () => {
+      renderer.update(<Probe
+        dispatch={dispatch}
+        newTaskId="task-1"
+        request={request as unknown as BackendConnection["request"]}
+        state={{ ...state, snapshot: taskSnapshot("task-2") }}
+        taskSurfaceMounted={false}
+      />);
+    });
+
+    expect(request).not.toHaveBeenCalledWith(ATTACHMENT_RELEASE, expect.anything());
+    expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({
+      type: "taskInput:attachment:remove",
+      taskId: "task-1",
+    }));
+  });
+
   it("releases the visible draft before the Frontend controller disconnects", async () => {
     const request = vi.fn(async () => ({ outcomes: [] }));
     let renderer!: ReturnType<typeof create>;
@@ -204,11 +236,13 @@ describe("composer attachment resource lifecycle", () => {
 
 function Probe({
   dispatch,
+  newTaskId,
   request,
   state,
   taskSurfaceMounted,
 }: {
   dispatch?: Parameters<typeof useComposerAttachmentResources>[0]["dispatch"];
+  newTaskId?: string;
   request: BackendConnection["request"];
   state: AppState;
   taskSurfaceMounted: boolean;
@@ -217,6 +251,7 @@ function Probe({
     backendConnection: { request },
     clientInstanceId: "client-1",
     dispatch,
+    newTaskId,
     state,
     taskSurfaceMounted,
   });
@@ -259,6 +294,7 @@ function memoryStorage(): Storage {
 
 function taskSnapshot(taskId: string): NonNullable<AppState["snapshot"]> {
   return {
+    lifecycle: "visible",
     task: {
       task_id: taskId,
       title: "Task",

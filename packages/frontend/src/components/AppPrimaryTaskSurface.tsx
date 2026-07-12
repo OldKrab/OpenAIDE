@@ -115,6 +115,10 @@ export function AppPrimaryTaskSurface({ controller, focusRequestKey, model }: Ap
     );
   }
 
+  const newTaskState = controller.newTaskSnapshot
+    ? { ...state, snapshot: controller.newTaskSnapshot }
+    : state;
+
   return (
     <NewTaskView
       agents={agents}
@@ -128,7 +132,7 @@ export function AppPrimaryTaskSurface({ controller, focusRequestKey, model }: Ap
       onSubmitTask={callbacks.newTask.submit}
       projectContextMode={isWebShell ? "selectable" : "fixed"}
       resetOptionsRequestKey={callbacks.newTask.resetOptionsRequestKey}
-      state={state}
+      state={newTaskState}
       submitShortcut={preferences.composer_submit_shortcut}
       workspaceBrowser={callbacks.newTask.workspaceBrowser}
     />

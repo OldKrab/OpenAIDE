@@ -1054,6 +1054,19 @@ describe("app reducer composer state", () => {
     expect(state.tasks.map((task) => task.task_id)).toEqual(["task_1"]);
   });
 
+  it("keeps a client-private New Task out of visible Task state", () => {
+    let state = createInitialState();
+    const newTask = { ...noMessageSnapshot("task_new"), lifecycle: "new" as const };
+
+    state = appReducer(state, { type: "snapshot", intent: "open", snapshot: newTask });
+
+    expect(state.tasks).toEqual([]);
+    expect(state.taskListCache).toEqual({});
+    expect(state.activeTaskId).toBeUndefined();
+    expect(state.snapshot).toBeUndefined();
+    expect(state.taskSnapshots.task_new).toBeUndefined();
+  });
+
   it("updates an existing task list row from task snapshots without reordering it", () => {
     let state = createInitialState();
     state = {
@@ -2303,6 +2316,7 @@ describe("app reducer composer state", () => {
 function snapshot(taskId: string, items: ChatMessage[] = [], revision = 1): TaskSnapshot {
   const task = taskSummary(taskId);
   return {
+    lifecycle: "visible",
     task: { ...task, task_version: revision, message_history_version: revision },
     chat: {
       task_id: taskId,

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "react";
 import type { Dispatch } from "react";
 import type { AppPreferencesRecord, TaskSummary } from "@openaide/app-shell-contracts";
 import { defaultAgent } from "@openaide/app-shell-contracts";
@@ -49,7 +49,7 @@ import { useTaskAttentionReadReceipt } from "./useTaskAttentionReadReceipt";
 import { newTaskProjectIdForRequests } from "./newTaskRequestContext";
 import { useComposerAttachmentResources } from "./useComposerAttachmentResources";
 import { newTaskPreparationKey } from "../state/newTaskPreparationContext";
-import { PreparedTaskOwnership } from "./preparedTaskOwnership";
+import { NewTaskController } from "./newTaskController";
 export type AppController = {
   activeTask?: TaskSummary;
   activeNavigationTaskId?: string;
@@ -60,6 +60,7 @@ export type AppController = {
   callbacks: AppControllerCallbacks;
   createSnapshotRequestId: (taskId?: string, intent?: SnapshotIntent) => number;
   dispatch: Dispatch<AppAction>;
+  newTaskSnapshot?: import("@openaide/app-shell-contracts").TaskSnapshot;
   preferences: AppPreferencesRecord;
   retryTaskOpen: () => void;
   state: AppState;
@@ -79,7 +80,8 @@ export function useAppController({ backendConnection }: AppControllerOptions = {
   const currentAgentId = useRef(state.newTask.selection.agentId);
   currentAgentId.current = state.newTask.selection.agentId;
   const pendingPreparedNewTask = useRef<PendingNewTaskPreparation | undefined>(undefined);
-  const preparedTaskOwnership = useMemo(() => new PreparedTaskOwnership(), []);
+  const newTaskController = useMemo(() => new NewTaskController(), []);
+  const newTaskSnapshot = useSyncExternalStore(newTaskController.subscribe, newTaskController.getSnapshot);
   const newTaskStartAttempt = useRef<NewTaskStartAttempt | undefined>(undefined);
   const currentNewTaskPreparationKey = useRef<string | undefined>(undefined);
   currentNewTaskPreparationKey.current = newTaskPreparationKey(state);
@@ -103,9 +105,9 @@ export function useAppController({ backendConnection }: AppControllerOptions = {
     if (!transition.rootChanged) return;
     // Task ids and cleanup tombstones can collide across roots. Forget them
     // locally without issuing cleanup requests into the replacement root.
-    preparedTaskOwnership.replaceStateRoot();
+    newTaskController.replaceStateRoot();
     newTaskStartAttempt.current = undefined;
-  }, [controllerRefs, preparedTaskOwnership]);
+  }, [controllerRefs, newTaskController]);
   const {
     acceptSnapshotRequest,
     backendInitialized,
@@ -122,6 +124,8 @@ export function useAppController({ backendConnection }: AppControllerOptions = {
     currentAgentId,
     dispatch,
     initialBootstrap,
+    newTaskController,
+    newTaskId: newTaskSnapshot?.task.task_id,
     onReplicaChanged: handleReplicaChanged,
     refs: controllerRefs,
     setAgents,
@@ -132,10 +136,26 @@ export function useAppController({ backendConnection }: AppControllerOptions = {
     () => bindAppServerReplicaEpoch(dispatch, replicaEpoch),
     [dispatch, replicaEpoch],
   );
+  const newTaskDispatch = useCallback((action: AppAction) => {
+    switch (action.type) {
+      case "newTask:agent":
+      case "newTask:project":
+      case "newTask:projectId":
+      case "newTask:workspace":
+        replicaDispatch({
+          ...action,
+          newTaskId: action.newTaskId ?? newTaskSnapshot?.task.task_id,
+        });
+        return;
+      default:
+        replicaDispatch(action);
+    }
+  }, [newTaskSnapshot?.task.task_id, replicaDispatch]);
   const attachmentResources = useComposerAttachmentResources({
     backendConnection: backendConnectionRef,
     clientInstanceId,
-    dispatch: replicaDispatch,
+    dispatch: newTaskDispatch,
+    newTaskId: newTaskSnapshot?.task.task_id,
     state,
     taskSurfaceMounted: bootstrap.surface === "task",
   });
@@ -148,11 +168,10 @@ export function useAppController({ backendConnection }: AppControllerOptions = {
     backendConnection: backendConnectionRef,
     backendReady,
     bootstrap,
-    currentNavigationGeneration,
-    dispatch: replicaDispatch,
+    dispatch: newTaskDispatch,
     latestOptionsRequestKey,
     pendingPreparation: pendingPreparedNewTask,
-    preparedTaskOwnership,
+    newTaskController: newTaskController,
     replicaEpoch,
     startAttempt: newTaskStartAttempt,
     state,
@@ -185,7 +204,7 @@ export function useAppController({ backendConnection }: AppControllerOptions = {
       newTaskBootstrapProjectId &&
       state.newTask.selection.projectId !== newTaskBootstrapProjectId
     ) {
-      replicaDispatch({ type: "newTask:projectId", projectId: newTaskBootstrapProjectId });
+      newTaskDispatch({ type: "newTask:projectId", projectId: newTaskBootstrapProjectId });
     }
   }, [bootstrap.surface, bootstrap.taskId, newTaskBootstrapProjectId, state.newTask.selection.projectId]);
 
@@ -195,7 +214,7 @@ export function useAppController({ backendConnection }: AppControllerOptions = {
     if (selected && selected.enabled !== false) return;
     const fallback = agents.find((agent) => agent.enabled !== false) ?? defaultAgent;
     latestOptionsRequestKey.current = undefined;
-    replicaDispatch({ type: "newTask:agent", agentId: fallback.id, agentLabel: fallback.label });
+    newTaskDispatch({ type: "newTask:agent", agentId: fallback.id, agentLabel: fallback.label });
   }, [agents, bootstrap.surface, bootstrap.taskId, state.newTask.selection.agentId]);
 
   useEffect(() => {
@@ -309,13 +328,13 @@ export function useAppController({ backendConnection }: AppControllerOptions = {
     backendInitialized,
     bootstrap,
     currentAgentId,
-    dispatch: replicaDispatch,
+    dispatch: newTaskDispatch,
     setAgents,
     state,
   });
   useTaskAttentionReadReceipt({
     backendConnection: backendConnectionRef,
-    dispatch: replicaDispatch,
+    dispatch: newTaskDispatch,
     revision: state.snapshot?.revision,
     taskId: bootstrap.surface === "task" ? state.snapshot?.task.task_id : undefined,
     unread: state.snapshot?.task.unread === true,
@@ -369,6 +388,10 @@ export function useAppController({ backendConnection }: AppControllerOptions = {
     });
   }, [hasActiveTask, bootstrap.surface, state.snapshot?.task.task_id, state.snapshot?.task.status, state.snapshot?.chat.items.length]);
 
+  const callbackState = bootstrap.surface === "task" && !bootstrap.taskId && newTaskSnapshot
+    ? { ...state, snapshot: newTaskSnapshot }
+    : state;
+
   const callbacks = createAppCallbacks({
     acceptTaskOpen: acceptSnapshotRequest,
     attachmentResources,
@@ -382,15 +405,15 @@ export function useAppController({ backendConnection }: AppControllerOptions = {
     createSnapshotRequestId,
     currentNavigationGeneration,
     currentNewTaskPreparationKey: () => currentNewTaskPreparationKey.current,
-    dispatch: replicaDispatch,
+    dispatch: newTaskDispatch,
     latestOptionsRequestKey,
     newTaskStartAttempt,
     pendingPreparedNewTask: pendingPreparedNewTaskForKey,
-    preparedTaskOwnership,
+    newTaskController: newTaskController,
     requestNativeSessions,
     setAgents,
     setPreferences,
-    state,
+    state: callbackState,
   });
 
   return {
@@ -402,7 +425,8 @@ export function useAppController({ backendConnection }: AppControllerOptions = {
     bootstrap,
     callbacks,
     createSnapshotRequestId,
-    dispatch: replicaDispatch,
+    dispatch: newTaskDispatch,
+    newTaskSnapshot,
     preferences,
     retryTaskOpen,
     state,

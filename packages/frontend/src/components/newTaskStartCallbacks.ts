@@ -18,7 +18,10 @@ import {
 import { isInvalidAttachmentHandleError } from "../state/attachmentValidation";
 import { appServerAttachmentHandles } from "../state/composerOptions";
 import { mapProtocolTaskSnapshot } from "../state/appServerProtocolMapping";
-import { newTaskPreparationKey } from "../state/newTaskPreparationContext";
+import {
+  newTaskPreparationKey,
+  preparedTaskMatchesNewTaskContext,
+} from "../state/newTaskPreparationContext";
 import type {
   AppCallbacksDependencies,
   NewTaskCallbacks,
@@ -33,7 +36,7 @@ import {
   newTaskDraftInput,
   submitErrorMessage,
 } from "./newTaskStartSupport";
-import type { PreparedTaskLease, PreparedTaskOwnership } from "./preparedTaskOwnership";
+import type { NewTaskController, NewTaskLease } from "./newTaskController";
 
 type NewTaskStartDependencies = Pick<
   AppCallbacksDependencies,
@@ -46,7 +49,7 @@ type NewTaskStartDependencies = Pick<
   | "newTaskStartAttempt"
   | "pendingPreparedNewTask"
   | "state"
-> & { preparedTaskOwnership: PreparedTaskOwnership };
+> & { newTaskController: NewTaskController };
 
 /** Owns the complete first-send lifecycle, including cancellation and ambiguous outcomes. */
 export function createNewTaskStartCallbacks(
@@ -67,7 +70,7 @@ function cancelNewTaskStart({
   clientInstanceId,
   dispatch,
   newTaskStartAttempt,
-  preparedTaskOwnership,
+  newTaskController,
   state,
 }: NewTaskStartDependencies) {
   const attempt = newTaskStartAttempt.current;
@@ -83,14 +86,14 @@ function cancelNewTaskStart({
   if (attempt.taskId && backendConnection?.request) {
     const taskId = attempt.taskId;
     const preparationKey = newTaskPreparationKey(state);
-    const lease = attempt.preparedTaskLease
-      ?? preparedTaskOwnership.currentLease(taskId)
-      ?? (preparationKey ? preparedTaskOwnership.claim({ attachmentResources, preparationKey, taskId }) : undefined);
+    const lease = attempt.newTaskLease
+      ?? newTaskController.currentLease(taskId)
+      ?? (preparationKey ? newTaskController.claim({ attachmentResources, preparationKey, taskId }) : undefined);
     const protectionKey = lease ? `prepared-cancel:${lease.generation}` : undefined;
-    if (lease && protectionKey) preparedTaskOwnership.protectSend(lease, protectionKey);
+    if (lease && protectionKey) newTaskController.protectSend(lease, protectionKey);
     void discardOrCancelStartedTask(backendConnection.request, taskId).then((outcome) => {
       if (outcome !== "discarded" || !attempt.taskId) return;
-      preparedTaskOwnership.recordDiscarded(attempt.taskId);
+      newTaskController.recordDiscarded(attempt.taskId);
       if (state.appServerStateRootId) {
         clearPendingTaskSendRecovery(state.appServerStateRootId, clientInstanceId, attempt.taskId);
       }
@@ -102,8 +105,8 @@ function cancelNewTaskStart({
       });
       dispatch({ type: "taskInput:clear", taskId: attempt.taskId });
     }).catch((error) => {
-      if (protectionKey) preparedTaskOwnership.settleSend(protectionKey);
-      if (lease) preparedTaskOwnership.reclaim(lease, attachmentResources);
+      if (protectionKey) newTaskController.settleSend(protectionKey);
+      if (lease) newTaskController.reclaim(lease, attachmentResources);
       dispatch({ type: "submit:error", message: submitErrorMessage(error) });
     }).finally(() => {
       if (newTaskStartAttempt.current === attempt) newTaskStartAttempt.current = undefined;
@@ -122,7 +125,7 @@ async function submitNewTask({
   draft,
   newTaskStartAttempt,
   pendingPreparedNewTask,
-  preparedTaskOwnership,
+  newTaskController,
   state,
 }: SubmitNewTaskDependencies) {
   const request = backendConnection?.request;
@@ -161,17 +164,17 @@ async function submitNewTask({
     : { type: "submit:start", idempotencyKey: proposedIdempotencyKey });
   const navigationGeneration = currentNavigationGeneration();
   let createdTaskId: TaskId | undefined;
-  let preparedTaskLease: PreparedTaskLease | undefined;
+  let newTaskLease: NewTaskLease | undefined;
   let sendAttempt: ReturnType<typeof taskSendAttemptRecord> | undefined;
-  const discardPreparedTask = (taskId: TaskId) => preparedTaskOwnership.discard({
+  const discardNewTask = (taskId: TaskId) => newTaskController.discard({
     attachmentResources,
     dispatch,
-    lease: preparedTaskOwnership.currentLease(taskId),
+    lease: newTaskController.currentLease(taskId),
     request,
     taskId,
   });
   const settleDiscardedTask = (taskId: TaskId) => {
-    preparedTaskOwnership.recordDiscarded(taskId);
+    newTaskController.recordDiscarded(taskId);
     clearPendingTaskSendRecovery(stateRootId, clientInstanceId, taskId);
     releaseComposerAttachments({
       attachmentResources,
@@ -184,42 +187,71 @@ async function submitNewTask({
   const stagePreparedTask = (_task: unknown, taskId: TaskId) => {
     dispatch({ type: "taskInput:prompt", taskId, prompt: draftInput.prompt });
   };
-  const discardOrCancelOwnedTask = async (taskId: TaskId, lease: NonNullable<typeof preparedTaskLease>) => {
+  const discardOrCancelOwnedTask = async (taskId: TaskId, lease: NonNullable<typeof newTaskLease>) => {
     const protectionKey = `prepared-cancel:${lease.generation}`;
-    preparedTaskOwnership.protectSend(lease, protectionKey);
+    newTaskController.protectSend(lease, protectionKey);
     try {
       const outcome = await discardOrCancelStartedTask(request, taskId);
-      if (outcome === "discarded") preparedTaskOwnership.settleSend(protectionKey);
+      if (outcome === "discarded") newTaskController.settleSend(protectionKey);
       return outcome;
     } catch (error) {
-      preparedTaskOwnership.settleSend(protectionKey);
-      preparedTaskOwnership.reclaim(lease, attachmentResources);
+      newTaskController.settleSend(protectionKey);
+      newTaskController.reclaim(lease, attachmentResources);
       throw error;
     }
   };
   try {
-    const pendingPreparation = pendingPreparedNewTask(preparationKey);
-    const preparedTask = pendingPreparation ? (await pendingPreparation).task : undefined;
-    const { task, taskId } = await prepareNewTask(
-      { backendConnection, dispatch, onPreparedTask: stagePreparedTask, state },
-      {
-        acceptPreparedTask: () => !attempt.cancelled,
-        discardPreparedTask,
-        preparedTask,
-        snapshotIntent: currentNavigationGeneration() === navigationGeneration ? "open" : "refresh",
-      },
-    );
+    const cachedSnapshot = newTaskController.getSnapshot();
+    const cachedNewTask = cachedSnapshot?.lifecycle === "new"
+      && preparedTaskMatchesNewTaskContext(state, {
+        agentId: cachedSnapshot.task.agent_id,
+        projectId: cachedSnapshot.task.project_id,
+        workspaceRoot: cachedSnapshot.task.workspace_root,
+      })
+      ? cachedSnapshot
+      : undefined;
+    let taskId: TaskId;
+    let taskRevision: number;
+    let taskTitle: string;
+    if (cachedNewTask) {
+      taskId = cachedNewTask.task.task_id as TaskId;
+      taskRevision = cachedNewTask.revision;
+      taskTitle = cachedNewTask.task.title ?? "New task";
+      newTaskLease = newTaskController.currentLease(taskId) ?? newTaskController.claim({
+        attachmentResources,
+        preparationKey,
+        taskId,
+      });
+    } else {
+      const pendingPreparation = pendingPreparedNewTask(preparationKey);
+      const pendingTask = pendingPreparation ? (await pendingPreparation).task : undefined;
+      const prepared = await prepareNewTask(
+        { backendConnection, dispatch, onPreparedTask: stagePreparedTask, state },
+        {
+          acceptPreparedTask: () => !attempt.cancelled,
+          discardPreparedTask: discardNewTask,
+          preparedTask: pendingTask,
+          snapshotIntent: currentNavigationGeneration() === navigationGeneration ? "open" : "refresh",
+        },
+      );
+      taskId = prepared.taskId;
+      taskRevision = prepared.task.revision;
+      taskTitle = prepared.task.task.title?.value
+        ?? (prepared.task.lifecycle === "new" ? "New task" : "Untitled task");
+      const snapshot = mapProtocolTaskSnapshot(prepared.task).snapshot;
+      newTaskLease = newTaskController.retain({
+        attachmentResources,
+        preparationKey,
+        snapshot,
+      });
+      if (!newTaskLease) throw new Error("New Task changed before Send could start.");
+    }
     createdTaskId = taskId;
     attempt.taskId = taskId;
-    preparedTaskLease = preparedTaskOwnership.claim({
-      attachmentResources,
-      preparationKey,
-      taskId,
-    });
-    attempt.preparedTaskLease = preparedTaskLease;
+    attempt.newTaskLease = newTaskLease;
     if (attempt.cancelled) {
       try {
-        const outcome = await discardOrCancelOwnedTask(taskId, preparedTaskLease);
+        const outcome = await discardOrCancelOwnedTask(taskId, newTaskLease);
         if (outcome === "discarded") {
           settleDiscardedTask(taskId);
         }
@@ -238,7 +270,7 @@ async function submitNewTask({
       renderState: draftInput,
       stateRootId,
       taskId,
-      taskRevision: task.revision,
+      taskRevision,
     }));
     dispatch({ type: "submit:attempt", idempotencyKey: sendAttempt.idempotencyKey });
     dispatch({
@@ -254,22 +286,26 @@ async function submitNewTask({
       refreshRevisionOnConflict: true,
     });
     // A durable send receipt, rather than a route render, transfers ownership to Task Chat.
-    preparedTaskOwnership.protectSend(preparedTaskLease, sendAttempt.idempotencyKey);
+    newTaskController.protectSend(newTaskLease, sendAttempt.idempotencyKey);
     if (currentNavigationGeneration() === navigationGeneration) {
       postHostMessage({
         type: "surface.openTask",
         payload: {
           task_id: taskId,
-          title: task.task.title?.value ?? (task.lifecycle === "new" ? "New task" : "Untitled task"),
+          title: taskTitle,
         },
       });
     }
     const { attempt: acceptedAttempt, result: sent } = await pendingSend;
     attempt.sendInFlight = false;
-    preparedTaskOwnership.settleSend(acceptedAttempt.idempotencyKey);
-    preparedTaskOwnership.confirmSentTask(taskId);
+    newTaskController.settleSend(acceptedAttempt.idempotencyKey);
+    newTaskController.confirmSentTask(taskId);
     const snapshot = mapProtocolTaskSnapshot(sent.task).snapshot;
-    dispatch({ type: "snapshot", snapshot, intent: "refresh" });
+    dispatch({
+      type: "task:promoted",
+      snapshot,
+      activate: currentNavigationGeneration() === navigationGeneration,
+    });
     dispatch({
       type: "taskSend:accepted",
       taskId,
@@ -287,8 +323,8 @@ async function submitNewTask({
     if (attempt.cancelled) {
       if (createdTaskId) {
         try {
-          const lease = preparedTaskLease ?? attempt.preparedTaskLease;
-          if (!lease) throw new Error("Prepared Task lease unavailable during cancellation.");
+          const lease = newTaskLease ?? attempt.newTaskLease;
+          if (!lease) throw new Error("New Task lease unavailable during cancellation.");
           const outcome = await discardOrCancelOwnedTask(createdTaskId, lease);
           if (outcome === "discarded") {
             settleDiscardedTask(createdTaskId);
@@ -303,8 +339,8 @@ async function submitNewTask({
     const message = submitErrorMessage(error);
     if (createdTaskId) {
       if (isInvalidAttachmentHandleError(error)) {
-        if (sendAttempt) preparedTaskOwnership.settleSend(sendAttempt.idempotencyKey);
-        if (preparedTaskLease) preparedTaskOwnership.reclaim(preparedTaskLease, attachmentResources);
+        if (sendAttempt) newTaskController.settleSend(sendAttempt.idempotencyKey);
+        if (newTaskLease) newTaskController.reclaim(newTaskLease, attachmentResources);
         releaseComposerAttachments({
           attachmentResources,
           attachments: draftInput.context,
@@ -327,8 +363,8 @@ async function submitNewTask({
           message: TASK_SEND_OUTCOME_UNKNOWN_MESSAGE,
         });
       } else if (sendAttempt) {
-        preparedTaskOwnership.settleSend(sendAttempt.idempotencyKey);
-        if (preparedTaskLease) preparedTaskOwnership.reclaim(preparedTaskLease, attachmentResources);
+        newTaskController.settleSend(sendAttempt.idempotencyKey);
+        if (newTaskLease) newTaskController.reclaim(newTaskLease, attachmentResources);
         dispatch({
           type: "taskInput:sendError",
           taskId: createdTaskId,

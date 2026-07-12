@@ -28,9 +28,9 @@ type NewTaskAction =
   | { type: "submit:attachments:invalidate"; taskId: string; message: string }
   | { type: "newTask:reset" }
   | { type: "newTask:prepared"; taskId: string }
-  | { type: "newTask:agent"; agentId: string; agentLabel?: string }
-  | { type: "newTask:project"; project: ProjectOption }
-  | { type: "newTask:projectId"; projectId: string }
+  | { type: "newTask:agent"; agentId: string; agentLabel?: string; newTaskId?: string }
+  | { type: "newTask:project"; project: ProjectOption; newTaskId?: string }
+  | { type: "newTask:projectId"; projectId: string; newTaskId?: string }
   | { type: "newTask:isolation"; isolation: IsolationKind }
   | { type: "newTask:configOptions:start" }
   | { type: "newTask:configOptions:result"; catalog: ConfigOptionsCatalog }
@@ -41,7 +41,7 @@ type NewTaskAction =
   | { type: "newTask:nativeSessions:error"; sessionId: string; message: string }
   | { type: "newTask:nativeSessions:adopt"; sessionId: string }
   | { type: "newTask:nativeSessions:remove"; sessionId: string }
-  | { type: "newTask:workspace"; workspace: WorkspaceRoot }
+  | { type: "newTask:workspace"; workspace: WorkspaceRoot; newTaskId?: string }
   | { type: "newTask:attachment:add"; attachment: Attachment }
   | { type: "newTask:attachment:remove"; attachmentId: string };
 
@@ -171,7 +171,7 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
           configOptionsLoading: false,
           configOptionsError: undefined,
           nativeSessions: emptyNativeSessions(),
-      });
+      }, action.newTaskId);
     case "newTask:project":
       return replacePreparedDraftOnContextChange(state, {
           ...state.newTask,
@@ -180,7 +180,7 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
           configOptionsLoading: false,
           configOptionsError: undefined,
           nativeSessions: emptyNativeSessions(),
-      });
+      }, action.newTaskId);
     case "newTask:projectId": {
       const project = state.projects.find((candidate) => candidate.projectId === action.projectId);
       const sameProject = state.newTask.selection.projectId === action.projectId;
@@ -196,7 +196,7 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
           configOptionsLoading: sameProject ? state.newTask.configOptionsLoading : false,
           configOptionsError: sameProject ? state.newTask.configOptionsError : undefined,
           nativeSessions: sameProject ? state.newTask.nativeSessions : emptyNativeSessions(),
-      });
+      }, action.newTaskId);
     }
     case "newTask:isolation":
       return {
@@ -329,7 +329,7 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
           configOptionsLoading: false,
           configOptionsError: undefined,
           nativeSessions: emptyNativeSessions(),
-      });
+      }, action.newTaskId);
     case "newTask:attachment:add":
       return {
         ...state,
@@ -353,13 +353,12 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
 function replacePreparedDraftOnContextChange(
   state: AppState,
   nextNewTask: AppState["newTask"],
+  newTaskId?: string,
 ) {
   if (newTaskPreparationKey({ newTask: state.newTask }) === newTaskPreparationKey({ newTask: nextNewTask })) {
     return { ...state, newTask: nextNewTask };
   }
-  const preparedTaskId = state.snapshot && !state.snapshot.task.has_messages
-    ? state.snapshot.task.task_id
-    : undefined;
+  const preparedTaskId = newTaskId;
   if (!preparedTaskId) return { ...state, newTask: nextNewTask };
   const preparedInput = state.taskInputs[preparedTaskId];
   const { [preparedTaskId]: _discardedInput, ...taskInputs } = state.taskInputs;

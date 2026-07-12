@@ -15,6 +15,7 @@ type ComposerAttachmentResourceOptions = {
   backendConnection?: Partial<Pick<BackendConnection, "request">>;
   clientInstanceId: ClientInstanceId | string;
   dispatch?: Dispatch<AppAction>;
+  newTaskId?: string;
   state: AppState;
   taskSurfaceMounted: boolean;
 };
@@ -24,12 +25,13 @@ export function useComposerAttachmentResources({
   backendConnection,
   clientInstanceId,
   dispatch,
+  newTaskId,
   state,
   taskSurfaceMounted,
 }: ComposerAttachmentResourceOptions) {
   const latest = useRef({ backendConnection, clientInstanceId, stateRootId: state.appServerStateRootId });
   latest.current = { backendConnection, clientInstanceId, stateRootId: state.appServerStateRootId };
-  const frame = composerAttachmentResourceFrame(state, taskSurfaceMounted);
+  const frame = composerAttachmentResourceFrame(state, taskSurfaceMounted, newTaskId);
   const latestFrame = useRef(frame);
   latestFrame.current = frame;
   const previousStateRootId = useRef(state.appServerStateRootId);
@@ -65,6 +67,7 @@ export function useComposerAttachmentResources({
       // The owner releases resolver resources below. Remove their rows in the
       // same commit so a later route cannot render a handle that was released.
       for (const [taskId, input] of Object.entries(state.taskInputs)) {
+        if (taskId === newTaskId) continue;
         for (const attachment of input.context) {
           if (!attachment.app_server_handle_id) continue;
           dispatch({
@@ -76,7 +79,7 @@ export function useComposerAttachmentResources({
       }
     }
     owner.current?.reconcile(frame);
-  }, [dispatch, frame, state.appServerStateRootId, state.taskInputs, taskSurfaceMounted]);
+  }, [dispatch, frame, newTaskId, state.appServerStateRootId, state.taskInputs, taskSurfaceMounted]);
   useLayoutEffect(() => () => {
     owner.current?.dispose(latestFrame.current);
   }, []);

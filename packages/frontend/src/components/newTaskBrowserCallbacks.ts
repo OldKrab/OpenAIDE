@@ -16,6 +16,7 @@ import {
 } from "../services/attachmentResources";
 import { createConfirmedEmbeddedAttachment } from "../services/embeddedAttachmentSelection";
 import { appServerAttachment } from "../state/composerOptions";
+import { mapProtocolTaskSnapshot } from "../state/appServerProtocolMapping";
 import { newTaskPreparationKey } from "../state/newTaskPreparationContext";
 import type {
   AppCallbacksDependencies,
@@ -28,9 +29,9 @@ import {
   preparedSnapshotMatchesSelection,
 } from "./newTaskPreparation";
 import {
-  disposablePreparedTaskId,
-  type PreparedTaskOwnership,
-} from "./preparedTaskOwnership";
+  disposableNewTaskControllerId,
+  type NewTaskController,
+} from "./newTaskController";
 
 type NewTaskBrowserDependencies = Pick<
   AppCallbacksDependencies,
@@ -42,7 +43,7 @@ type NewTaskBrowserDependencies = Pick<
   | "latestOptionsRequestKey"
   | "pendingPreparedNewTask"
   | "state"
-> & { preparedTaskOwnership: PreparedTaskOwnership };
+> & { newTaskController: NewTaskController };
 
 /** Builds both browser surfaces while hiding prepared-Task leases and late-result cleanup. */
 export function createNewTaskBrowserCallbacks(
@@ -75,7 +76,7 @@ function createFileBrowserCallbacks({
   dispatch,
   latestOptionsRequestKey,
   pendingPreparedNewTask,
-  preparedTaskOwnership,
+  newTaskController,
   state,
 }: NewTaskBrowserDependencies) {
   const request = backendConnection?.request;
@@ -91,10 +92,10 @@ function createFileBrowserCallbacks({
   const assertOperationCurrent = (navigationGeneration: number) => {
     if (!operationIsCurrent(navigationGeneration)) throw new SupersededNewTaskFileBrowserOperation();
   };
-  const discardPreparedTask = (taskId: TaskId) => preparedTaskOwnership.discard({
+  const discardNewTask = (taskId: TaskId) => newTaskController.discard({
     attachmentResources,
     dispatch,
-    lease: preparedTaskOwnership.currentLease(taskId),
+    lease: newTaskController.currentLease(taskId),
     request,
     taskId,
   });
@@ -103,7 +104,7 @@ function createFileBrowserCallbacks({
     assertOperationCurrent(navigationGeneration);
     const activePreparationKey = preparationKey as string;
     if (preparedTaskId) {
-      preparedTaskOwnership.claim({
+      newTaskController.claim({
         attachmentResources,
         preparationKey: activePreparationKey,
         taskId: preparedTaskId,
@@ -111,14 +112,14 @@ function createFileBrowserCallbacks({
       return { navigationGeneration, taskId: preparedTaskId };
     }
 
-    const staleTaskId = disposablePreparedTaskId(state, preparedTaskOwnership);
-    if (staleTaskId) await discardPreparedTask(staleTaskId);
+    const staleTaskId = disposableNewTaskControllerId(state, newTaskController);
+    if (staleTaskId) await discardNewTask(staleTaskId);
     assertOperationCurrent(navigationGeneration);
     latestOptionsRequestKey.current = undefined;
     const pending = pendingPreparedNewTask(activePreparationKey);
     const pendingResult = pending ? await pending : undefined;
     if (pendingResult?.task && !preparedProtocolTaskMatchesSelection(pendingResult.task, state)) {
-      await discardPreparedTask(pendingResult.taskId);
+      await discardNewTask(pendingResult.taskId);
       throw new SupersededNewTaskFileBrowserOperation();
     }
     const prepared = await prepareNewTask(
@@ -127,7 +128,7 @@ function createFileBrowserCallbacks({
         acceptPreparedTask: (task) =>
           operationIsCurrent(navigationGeneration)
           && preparedProtocolTaskMatchesSelection(task, state),
-        discardPreparedTask,
+        discardPreparedTask: discardNewTask,
         preparedTask: pendingResult?.task,
         reuseSnapshot: false,
       },
@@ -136,15 +137,19 @@ function createFileBrowserCallbacks({
       !operationIsCurrent(navigationGeneration)
       || !preparedProtocolTaskMatchesSelection(prepared.task, state)
     ) {
-      await discardPreparedTask(prepared.taskId);
+      await discardNewTask(prepared.taskId);
       throw new SupersededNewTaskFileBrowserOperation();
     }
     preparedTaskId = prepared.taskId;
-    preparedTaskOwnership.claim({
+    const lease = newTaskController.retain({
       attachmentResources,
       preparationKey: activePreparationKey,
-      taskId: preparedTaskId,
+      snapshot: mapProtocolTaskSnapshot(prepared.task).snapshot,
     });
+    if (!lease) {
+      await discardNewTask(prepared.taskId);
+      throw new SupersededNewTaskFileBrowserOperation();
+    }
     // `newTask:prepared` transfers current reducer text. An explicit paste draft
     // can be newer than that state transition and is the only required override.
     if (draft) {

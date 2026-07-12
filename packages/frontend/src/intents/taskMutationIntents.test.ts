@@ -298,6 +298,7 @@ describe("task mutation intents", () => {
 
 function taskSnapshot(): TaskSnapshot {
   return {
+    lifecycle: "visible",
     task: {
       task_id: "task-a",
       project_id: "project-a",

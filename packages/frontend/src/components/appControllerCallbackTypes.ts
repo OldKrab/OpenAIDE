@@ -25,7 +25,7 @@ import type {
   WorkspaceListDirectoryResult,
 } from "@openaide/app-server-client";
 import type { ComposerAttachmentResourceOwner } from "../services/attachmentResources";
-import type { PreparedTaskLease, PreparedTaskOwnership } from "./preparedTaskOwnership";
+import type { NewTaskController, NewTaskLease } from "./newTaskController";
 
 export type AppControllerCallbacks = {
   navigation: NavigationCallbacks;
@@ -122,7 +122,7 @@ export type PendingNewTaskPreparationResult = {
 export type NewTaskStartAttempt = {
   cancelled: boolean;
   draft: NewTaskDraftInput;
-  preparedTaskLease?: PreparedTaskLease;
+  newTaskLease?: NewTaskLease;
   /** Defers cancellation until task/send has an authoritative outcome. */
   sendInFlight?: boolean;
   taskId?: TaskId;
@@ -143,7 +143,7 @@ export type AppCallbacksDependencies = {
   latestOptionsRequestKey: { current: string | undefined };
   newTaskStartAttempt: { current: NewTaskStartAttempt | undefined };
   pendingPreparedNewTask: (key: string) => Promise<PendingNewTaskPreparationResult> | undefined;
-  preparedTaskOwnership?: PreparedTaskOwnership;
+  newTaskController?: NewTaskController;
   requestNativeSessions: (cursor?: string, append?: boolean, minimumSessionCount?: number) => void;
   setAgents?: (agents: AgentOption[]) => void;
   setPreferences: (preferences: AppPreferencesRecord) => void;

@@ -37,6 +37,7 @@ export type ComposerAttachmentResourceFrame = {
 export function composerAttachmentResourceFrame(
   state: AppState,
   taskSurfaceMounted: boolean,
+  newTaskId?: string,
 ): ComposerAttachmentResourceFrame {
   const acceptedUserMessageIds = new Map(
     Object.entries(state.taskInputs).map(([taskId, input]) => [taskId, input.acceptedUserMessageId]),
@@ -50,11 +51,21 @@ export function composerAttachmentResourceFrame(
     addResourceKeys(protectedResources, snapshotTaskId, state.newTask.pending?.context ?? []);
   }
 
+  const retainedResources = new Map<string, ComposerAttachmentResource>();
+  if (newTaskId) {
+    for (const resource of resourcesFromAttachments(
+      newTaskId,
+      state.taskInputs[newTaskId]?.context ?? [],
+    )) {
+      retainedResources.set(resourceKey(resource), resource);
+    }
+  }
+
   if (!taskSurfaceMounted || !snapshotTaskId || !state.snapshot) {
     return {
       acceptedUserMessageIds,
       acceptsAdoptions: taskSurfaceMounted && !state.newTask.submitting,
-      retained: [],
+      retained: [...retainedResources.values()],
       mountedTaskId: undefined,
       protected: protectedResources,
       taskSurfaceMounted,
@@ -66,7 +77,6 @@ export function composerAttachmentResourceFrame(
     : state.newTask.submitting
       ? state.newTask.pending?.context ?? taskInput?.pending?.context ?? []
       : taskInput?.context ?? state.newTask.context;
-  const retainedResources = new Map<string, ComposerAttachmentResource>();
   for (const [taskId, input] of Object.entries(state.taskInputs)) {
     for (const resource of resourcesFromAttachments(taskId, input.context)) {
       retainedResources.set(resourceKey(resource), resource);
@@ -108,8 +118,8 @@ export class ComposerAttachmentResourceOwner {
     release: (taskId: string, handleIds: AttachmentHandleId[]) => void;
   }) {}
 
-  /** Hands the mounted New Task composer to a current prepared-Task lease before React commits. */
-  claimPreparedTask(taskId: string) {
+  /** Hands the mounted New Task composer to the current controller lease before React commits. */
+  claimNewTaskController(taskId: string) {
     if (this.disposed || !this.taskSurfaceMounted || this.adoptionsLocked) return false;
     if (this.mountedTaskId !== taskId) this.adoptionGeneration += 1;
     this.mountedTaskId = taskId;
@@ -186,7 +196,7 @@ export class ComposerAttachmentResourceOwner {
     this.releaseAll([resource]);
   }
 
-  /** Releases every transient resource owned by an abandoned prepared Task. */
+  /** Releases every transient resource owned by a discarded New Task. */
   releaseTask(taskId: string) {
     this.releaseAll([...this.owned.values()].filter((resource) => resource.taskId === taskId));
   }

@@ -49,7 +49,7 @@ import { projectIdForWorkspaceRoot } from "../state/projectIdentity";
 import { appReducer } from "../state/appReducer";
 import { createInitialState, toolDetailCacheKey, type AppState } from "../state/store";
 import { newTaskPreparationKey } from "../state/newTaskPreparationContext";
-import { PreparedTaskOwnership } from "./preparedTaskOwnership";
+import { NewTaskController } from "./newTaskController";
 
 const postHostMessage = vi.fn();
 const beginAgentSecretTransaction = vi.fn();
@@ -885,7 +885,7 @@ describe("app controller callbacks", () => {
       turnId: "turn-1",
       userMessageId: "user-message",
       task: {
-        ...protocolTaskSnapshot("task_1", "Accepted task"),
+        ...protocolTaskSnapshot("task_1", "Accepted task", "visible"),
         revision: 3,
         chat: {
           items: [{
@@ -902,7 +902,8 @@ describe("app controller callbacks", () => {
     await settlePromises();
 
     expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
-      type: "snapshot",
+      type: "task:promoted",
+      activate: true,
       snapshot: expect.objectContaining({
         chat: expect.objectContaining({
           items: [expect.objectContaining({ message: expect.objectContaining({ text: "Build the thing" }) })],
@@ -990,16 +991,16 @@ describe("app controller callbacks", () => {
     });
     const state = preparedNewTaskState("task_a");
     state.taskInputs.task_a = { prompt: "Send A", context: [] };
-    const preparedTaskOwnership = new PreparedTaskOwnership();
+    const newTaskController = new NewTaskController();
     const newTask = callbacks({
       backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
-      preparedTaskOwnership,
+      newTaskController,
       state,
     }).newTask;
 
     newTask.submit();
     await settlePromises();
-    const leaseB = preparedTaskOwnership.claim({
+    const leaseB = newTaskController.claim({
       preparationKey: "context-b",
       taskId: "task_b" as never,
     });
@@ -1008,7 +1009,7 @@ describe("app controller callbacks", () => {
     }));
     await settlePromises();
 
-    expect(preparedTaskOwnership.currentLease()).toBe(leaseB);
+    expect(newTaskController.currentLease()).toBe(leaseB);
   });
 
   it("routes existing tasks for the destination surface to open", async () => {
@@ -3049,48 +3050,48 @@ describe("app controller callbacks", () => {
     expect(postHostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "task.create" }));
   });
 
-  it("discards a prepared Task exactly once when opening an existing Task", async () => {
+  it("retains the New Task when opening an existing Task", async () => {
     const dispatch = vi.fn();
-    const request = vi.fn(async (method: string) => {
-      if (method === TASK_DISCARD) return { discarded: true };
-      throw new Error(method);
-    });
+    const release = vi.fn();
+    const attachmentResources = new ComposerAttachmentResourceOwner({ release });
+    const request = vi.fn();
     const state = preparedNewTaskState("task_prepared");
     const navigation = callbacks({
+      attachmentResources,
       backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
       dispatch,
       state,
     }).navigation;
 
     navigation.openTask("task_existing");
-    navigation.openTask("task_existing");
     await settlePromises();
 
-    expect(request.mock.calls.filter(([method]) => method === TASK_DISCARD)).toEqual([
-      [TASK_DISCARD, { taskId: "task_prepared" }],
-    ]);
+    expect(request).not.toHaveBeenCalledWith(TASK_DISCARD, expect.anything());
+    expect(release).not.toHaveBeenCalled();
+    expect(dispatch).not.toHaveBeenCalledWith({ type: "taskInput:clear", taskId: "task_prepared" });
+    expect(dispatch).not.toHaveBeenCalledWith({ type: "task:list:remove", taskId: "task_prepared" });
   });
 
-  it("discards a prepared Task exactly once when opening Settings", async () => {
+  it("retains the New Task when opening Settings", async () => {
     const dispatch = vi.fn();
-    const request = vi.fn(async (method: string) => {
-      if (method === TASK_DISCARD) return { discarded: true };
-      throw new Error(method);
-    });
+    const release = vi.fn();
+    const attachmentResources = new ComposerAttachmentResourceOwner({ release });
+    const request = vi.fn();
     const state = preparedNewTaskState("task_prepared");
     const navigation = callbacks({
+      attachmentResources,
       backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
       dispatch,
       state,
     }).navigation;
 
     navigation.openSettings();
-    navigation.openSettings();
     await settlePromises();
 
-    expect(request.mock.calls.filter(([method]) => method === TASK_DISCARD)).toEqual([
-      [TASK_DISCARD, { taskId: "task_prepared" }],
-    ]);
+    expect(request).not.toHaveBeenCalledWith(TASK_DISCARD, expect.anything());
+    expect(release).not.toHaveBeenCalled();
+    expect(dispatch).not.toHaveBeenCalledWith({ type: "taskInput:clear", taskId: "task_prepared" });
+    expect(dispatch).not.toHaveBeenCalledWith({ type: "task:list:remove", taskId: "task_prepared" });
   });
 
   it("discards the prepared Task before adopting a Native Session", async () => {
@@ -3133,17 +3134,17 @@ describe("app controller callbacks", () => {
       throw new Error(method);
     });
     const state = preparedNewTaskState("task_prepared");
-    const preparedTaskOwnership = new PreparedTaskOwnership();
-    const lease = preparedTaskOwnership.claim({
+    const newTaskController = new NewTaskController();
+    const lease = newTaskController.claim({
       preparationKey: newTaskPreparationKey(state) as string,
       taskId: "task_prepared" as never,
     });
-    preparedTaskOwnership.protectSend(lease, "send-prepared");
+    newTaskController.protectSend(lease, "send-prepared");
 
     callbacks({
       backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
       dispatch,
-      preparedTaskOwnership,
+      newTaskController,
       newTaskStartAttempt: {
         current: {
           cancelled: false,
@@ -3165,21 +3166,21 @@ describe("app controller callbacks", () => {
       throw new Error(method);
     });
     const state = preparedNewTaskState("task_stale");
-    const preparedTaskOwnership = new PreparedTaskOwnership();
-    const currentLease = preparedTaskOwnership.claim({
+    const newTaskController = new NewTaskController();
+    const currentLease = newTaskController.claim({
       preparationKey: "newer-context",
       taskId: "task_newer" as never,
     });
 
     callbacks({
       backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
-      preparedTaskOwnership,
+      newTaskController,
       state,
     }).navigation.openSettings();
     await settlePromises();
 
     expect(request).not.toHaveBeenCalledWith(TASK_DISCARD, expect.anything());
-    expect(preparedTaskOwnership.currentLease()).toBe(currentLease);
+    expect(newTaskController.currentLease()).toBe(currentLease);
   });
 
   it("does not redirect when native-session adoption resolves after a newer navigation intent", async () => {
@@ -3884,12 +3885,22 @@ function callbacks({
   latestOptionsRequestKey = { current: undefined as string | undefined },
   newTaskStartAttempt = { current: undefined },
   pendingPreparedNewTask = vi.fn(() => undefined),
-  preparedTaskOwnership,
+  newTaskController,
   requestNativeSessions = vi.fn(),
   setAgents = vi.fn(),
   setPreferences = vi.fn(),
 }: Partial<Parameters<typeof createAppCallbacks>[0]> = {}) {
   state.appServerStateRootId ??= "state_root_1";
+  const ownedNewTaskController = newTaskController ?? new NewTaskController();
+  if (state.snapshot?.lifecycle === "new" && !ownedNewTaskController.currentTaskId()) {
+    const preparationKey = newTaskPreparationKey(state);
+    if (preparationKey) {
+      ownedNewTaskController.claim({
+        preparationKey,
+        taskId: state.snapshot.task.task_id as never,
+      });
+    }
+  }
   return createAppCallbacks({
     attachmentResources,
     backendConnection,
@@ -3903,7 +3914,7 @@ function callbacks({
     latestOptionsRequestKey,
     newTaskStartAttempt,
     pendingPreparedNewTask,
-    preparedTaskOwnership,
+    newTaskController: ownedNewTaskController,
     requestNativeSessions,
     setAgents,
     setPreferences,
@@ -3924,6 +3935,7 @@ function preparedNewTaskState(taskId?: string) {
   if (taskId) {
     state.snapshot = {
       ...snapshot(taskId),
+      lifecycle: "new",
       task: {
         ...snapshot(taskId).task,
         project_id: "project_1",
@@ -3944,6 +3956,7 @@ function settlePromises() {
 
 function snapshot(taskId: string): TaskSnapshot {
   return {
+    lifecycle: "visible",
     task: {
       task_id: taskId,
       title: "Task",
@@ -3996,10 +4009,14 @@ function editableConfigOptions(): NonNullable<TaskSnapshot["agent_config"]> {
   };
 }
 
-function protocolTaskSnapshot(taskId: string, title: string): ProtocolTaskSnapshot {
+function protocolTaskSnapshot(
+  taskId: string,
+  title: string,
+  lifecycle: ProtocolTaskSnapshot["lifecycle"] = "new",
+): ProtocolTaskSnapshot {
   return {
     task: protocolTaskSummary(taskId, title),
-    lifecycle: "visible",
+    lifecycle,
     revision: 2,
     preparation: { kind: "ready" as const },
     agentConfig: { state: "ready" as const, options: [] },

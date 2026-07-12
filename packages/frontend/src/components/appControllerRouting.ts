@@ -33,9 +33,8 @@ export function useRoutedBootstrap(
       if (nextBootstrap.projectId) {
         dispatch({ type: "newTask:projectId", projectId: nextBootstrap.projectId });
       }
-      // A new-task route is a fresh composer even when a previously created Task is
-      // still sending in the background through its task-local pending input.
-      dispatch({ type: "newTask:reset" });
+      // New Task navigation reopens the retained client-private instance. Only an
+      // explicit discard or context replacement may reset its composer state.
       dispatch({ type: "selection:clear" });
     });
   }, [beginNavigationChange, dispatch]);

@@ -120,6 +120,7 @@ describe("chatPaging", () => {
 
 function snapshot(items: ChatMessage[]): TaskSnapshot {
   return {
+    lifecycle: "visible",
     task: {
       task_id: "task_1",
       title: "Task",

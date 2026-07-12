@@ -12,7 +12,7 @@ import type { AppControllerBackendConnection } from "./appControllerBackendLifec
 import type { PendingNewTaskPreparationResult } from "./appControllerCallbackTypes";
 import type { NewTaskStartAttempt } from "./appControllerCallbackTypes";
 import { newTaskPreparationKey, taskCreateParams } from "../state/newTaskPreparationContext";
-import type { PreparedTaskOwnership } from "./preparedTaskOwnership";
+import type { NewTaskController } from "./newTaskController";
 
 export type PendingNewTaskPreparation = {
   key: string;
@@ -24,11 +24,10 @@ type NewTaskPreparationOptions = {
   backendReady: boolean;
   bootstrap: WebviewBootstrap;
   attachmentResources?: ComposerAttachmentResourceOwner;
-  currentNavigationGeneration: () => number;
   dispatch: Dispatch<AppAction>;
   latestOptionsRequestKey: MutableRefObject<string | undefined>;
   pendingPreparation: MutableRefObject<PendingNewTaskPreparation | undefined>;
-  preparedTaskOwnership: PreparedTaskOwnership;
+  newTaskController: NewTaskController;
   replicaEpoch: number;
   startAttempt: MutableRefObject<NewTaskStartAttempt | undefined>;
   state: AppState;
@@ -40,11 +39,10 @@ export function useNewTaskPreparation({
   backendConnection,
   backendReady,
   bootstrap,
-  currentNavigationGeneration,
   dispatch,
   latestOptionsRequestKey,
   pendingPreparation,
-  preparedTaskOwnership,
+  newTaskController,
   replicaEpoch,
   startAttempt,
   state,
@@ -70,19 +68,16 @@ export function useNewTaskPreparation({
     pendingPreparation.current = undefined;
     completedPreparationKey.current = undefined;
   }
-  if (
-    state.snapshot?.task.has_messages
-  ) {
-    preparedTaskOwnership.confirmSentTask(state.snapshot.task.task_id);
-    pendingPreparation.current = undefined;
+  const retainedSnapshot = newTaskController.getSnapshot();
+  const preparedTaskMatches = Boolean(
+    retainedSnapshot
+      && retainedSnapshot.lifecycle === "new"
+      && retainedSnapshot.task.project_id === state.newTask.selection.projectId
+      && retainedSnapshot.task.agent_id === state.newTask.selection.agentId,
+  );
+  if (isNewTaskRoute && preparedTaskMatches && preparationKey) {
     completedPreparationKey.current = preparationKey;
   }
-  const preparedTaskMatches = Boolean(
-    state.snapshot
-      && !state.snapshot.task.has_messages
-      && state.snapshot.task.project_id === state.newTask.selection.projectId
-      && state.snapshot.task.agent_id === state.newTask.selection.agentId,
-  );
 
   useEffect(() => {
     if (
@@ -91,7 +86,6 @@ export function useNewTaskPreparation({
       || !backendReady
       || !backendConnection?.request
       || !preparationKey
-      || state.snapshot?.task.has_messages
       || preparedTaskMatches
       || completedPreparationKey.current === preparationKey
       || failedPreparationKey.current === preparationKey
@@ -102,15 +96,14 @@ export function useNewTaskPreparation({
 
     const request = backendConnection.request;
     const requestReplicaEpoch = replicaEpoch;
-    const navigationGeneration = currentNavigationGeneration();
     const previousPreparation = pendingPreparation.current?.promise;
-    const staleTaskId = state.snapshot && !state.snapshot.task.has_messages
-      ? state.snapshot.task.task_id as TaskId
+    const staleTaskId = retainedSnapshot && !preparedTaskMatches
+      ? retainedSnapshot.task.task_id as TaskId
       : undefined;
-    const discard = (taskId: TaskId) => preparedTaskOwnership.discard({
+    const discard = (taskId: TaskId) => newTaskController.discard({
       attachmentResources,
       dispatch,
-      lease: preparedTaskOwnership.currentLease(taskId),
+      lease: newTaskController.currentLease(taskId),
       request,
       taskId,
     });
@@ -140,22 +133,20 @@ export function useNewTaskPreparation({
         if (startAttempt.current === cancelledAttempt) startAttempt.current = undefined;
         return { taskId, task };
       }
-      if (
-        currentPreparationKey.current !== preparationKey
-        || currentNavigationGeneration() !== navigationGeneration
-      ) {
+      if (currentPreparationKey.current !== preparationKey) {
         await discard(taskId);
         throw new SupersededPreparation();
       }
 
-      preparedTaskOwnership.claim({
+      const snapshot = mapProtocolTaskSnapshot(task).snapshot;
+      const lease = newTaskController.retain({
         attachmentResources,
         preparationKey,
-        taskId,
+        snapshot,
       });
-      const intent = currentNavigationGeneration() === navigationGeneration ? "open" : "refresh";
-      dispatch({ type: "snapshot", snapshot: mapProtocolTaskSnapshot(task).snapshot, intent });
+      if (!lease) throw new SupersededPreparation();
       dispatch({ type: "newTask:prepared", taskId });
+      completedPreparationKey.current = preparationKey;
       latestOptionsRequestKey.current = undefined;
       failedPreparationKey.current = undefined;
       return { taskId, task };
@@ -173,7 +164,7 @@ export function useNewTaskPreparation({
     }).then(() => undefined, () => undefined).finally(() => {
       // Successful preparations stay available so immediate submit/upload can reuse
       // the exact Task even before React publishes its mapped snapshot.
-      if (preparedTaskOwnership.ownsPreparation(preparationKey)) return;
+      if (newTaskController.ownsPreparation(preparationKey)) return;
       if (pendingPreparation.current?.promise === promise) {
         pendingPreparation.current = undefined;
       }
@@ -184,60 +175,16 @@ export function useNewTaskPreparation({
     attachmentResources,
     bootstrap.surface,
     bootstrap.taskId,
-    currentNavigationGeneration,
     dispatch,
     latestOptionsRequestKey,
     pendingPreparation,
     preparationKey,
-    preparedTaskOwnership,
+    newTaskController,
     preparedTaskMatches,
     replicaEpoch,
+    retainedSnapshot,
     state,
     startAttempt,
-  ]);
-
-  useEffect(() => {
-    if (
-      !isNewTaskRoute
-      || state.newTask.submitting
-      || !preparedTaskMatches
-      || !preparationKey
-      || !state.snapshot
-      || !preparedTaskOwnership.isDisposable(state.snapshot.task.task_id)
-    ) return;
-    preparedTaskOwnership.claim({
-      attachmentResources,
-      preparationKey,
-      taskId: state.snapshot.task.task_id as TaskId,
-    });
-  }, [
-    attachmentResources,
-    isNewTaskRoute,
-    preparationKey,
-    preparedTaskMatches,
-    preparedTaskOwnership,
-    state.newTask.submitting,
-    state.snapshot?.task.task_id,
-  ]);
-
-  useEffect(() => {
-    if (isNewTaskRoute || state.newTask.submitting || !backendConnection?.request) return;
-    const taskId = preparedTaskOwnership.currentTaskId();
-    if (!taskId) return;
-    void preparedTaskOwnership.discard({
-      attachmentResources,
-      dispatch,
-      lease: preparedTaskOwnership.currentLease(taskId),
-      request: backendConnection.request,
-      taskId,
-    });
-  }, [
-    attachmentResources,
-    backendConnection,
-    dispatch,
-    isNewTaskRoute,
-    preparedTaskOwnership,
-    state.newTask.submitting,
   ]);
 
 }

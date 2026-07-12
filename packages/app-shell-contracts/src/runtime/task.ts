@@ -22,6 +22,7 @@ export type TaskSummary = {
 };
 
 export type TaskSnapshot = {
+  lifecycle: "new" | "visible";
   task: TaskSummary;
   chat: MessagePage;
   permissions: NormalizedMessage[];

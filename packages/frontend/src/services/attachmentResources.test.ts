@@ -201,7 +201,7 @@ describe("composer attachment resource ownership", () => {
     const owner = new ComposerAttachmentResourceOwner({ release });
     owner.reconcile(frame({ taskSurfaceMounted: true }));
 
-    owner.claimPreparedTask("task-1");
+    owner.claimNewTaskController("task-1");
     owner.adopt(resource("task-1", "handle-1"));
 
     expect(release).not.toHaveBeenCalled();
@@ -286,6 +286,7 @@ function attachment(handleId: string) {
 
 function taskSnapshot(taskId: string, hasMessages: boolean): NonNullable<AppState["snapshot"]> {
   return {
+    lifecycle: hasMessages ? "visible" : "new",
     task: {
       task_id: taskId,
       title: "Task",

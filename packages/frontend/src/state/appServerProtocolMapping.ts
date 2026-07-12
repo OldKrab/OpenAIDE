@@ -102,6 +102,7 @@ export function mapProtocolTaskSnapshot(
 
   return {
     snapshot: {
+      lifecycle: snapshot.lifecycle,
       task: taskWithCapabilityStatus(task, snapshot),
       chat: {
         task_id: task.task_id,

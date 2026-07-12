@@ -43,6 +43,7 @@ type AppActionPayload =
   | { type: "tasks"; archived: boolean; tasks: TaskSummary[] }
   | { type: "tasks:error"; message: string }
   | { type: "task:list:remove"; taskId: string }
+  | { type: "task:promoted"; snapshot: TaskSnapshot; activate: boolean }
   | { type: "snapshot"; snapshot: TaskSnapshot; intent: SnapshotIntent }
   | { type: "taskScroll:record"; taskId: string; scrollState: TaskChatScrollState }
   | { type: "prompt"; prompt: string }
@@ -55,9 +56,9 @@ type AppActionPayload =
   | { type: "submit:attachments:invalidate"; taskId: string; message: string }
   | { type: "newTask:reset" }
   | { type: "newTask:prepared"; taskId: string }
-  | { type: "newTask:agent"; agentId: string; agentLabel?: string }
-  | { type: "newTask:project"; project: ProjectOption }
-  | { type: "newTask:projectId"; projectId: string }
+  | { type: "newTask:agent"; agentId: string; agentLabel?: string; newTaskId?: string }
+  | { type: "newTask:project"; project: ProjectOption; newTaskId?: string }
+  | { type: "newTask:projectId"; projectId: string; newTaskId?: string }
   | { type: "newTask:isolation"; isolation: IsolationKind }
   | { type: "newTask:configOptions:start" }
   | { type: "newTask:configOptions:result"; catalog: ConfigOptionsCatalog }
@@ -68,7 +69,7 @@ type AppActionPayload =
   | { type: "newTask:nativeSessions:error"; sessionId: string; message: string }
   | { type: "newTask:nativeSessions:adopt"; sessionId: string }
   | { type: "newTask:nativeSessions:remove"; sessionId: string }
-  | { type: "newTask:workspace"; workspace: WorkspaceRoot }
+  | { type: "newTask:workspace"; workspace: WorkspaceRoot; newTaskId?: string }
   | { type: "newTask:attachment:add"; attachment: Attachment }
   | { type: "newTask:attachment:remove"; attachmentId: string }
   | { type: "taskInput:prompt"; taskId: string; prompt: string }
@@ -144,6 +145,7 @@ type GlobalAction = Extract<
   | { type: "appServer:replica" }
   | { type: "tasks:error" }
   | { type: "task:list:remove" }
+  | { type: "task:promoted" }
   | { type: "snapshot" }
   | { type: "taskScroll:record" }
   | { type: "projects" }
@@ -176,6 +178,7 @@ function isGlobalAction(action: AppAction): action is GlobalAction {
     case "appServer:replica":
     case "tasks:error":
     case "task:list:remove":
+    case "task:promoted":
     case "snapshot":
     case "taskScroll:record":
     case "projects":
@@ -238,7 +241,31 @@ function reduceGlobalState(state: AppState, action: GlobalAction): AppState {
           taskChatScrollStates,
         };
       }
+    case "task:promoted": {
+      if (action.activate) {
+        return reduceGlobalState(state, {
+          type: "snapshot",
+          snapshot: action.snapshot,
+          intent: "open",
+          replicaEpoch: action.replicaEpoch,
+        });
+      }
+      const replicaEpoch = action.replicaEpoch ?? state.appServerReplicaEpoch;
+      const reconciled = reconcileBackgroundTaskSnapshot(state, action.snapshot, replicaEpoch);
+      const tasks = upsertTaskSummary(reconciled.tasks, action.snapshot.task);
+      return {
+        ...reconciled,
+        tasks,
+        taskListCache: {
+          ...reconciled.taskListCache,
+          [taskListCacheKey(reconciled.showArchived)]: tasks,
+        },
+      };
+    }
     case "snapshot": {
+      // New Task state belongs to the client-private New Task controller. It must not
+      // enter visible Task navigation, active Task state, or normal Task caches.
+      if (action.snapshot.lifecycle === "new") return state;
       const replicaEpoch = action.replicaEpoch ?? state.appServerReplicaEpoch;
       if (replicaEpoch < state.appServerReplicaEpoch) return state;
       if (action.intent === "refresh" && state.activeTaskId !== action.snapshot.task.task_id) {

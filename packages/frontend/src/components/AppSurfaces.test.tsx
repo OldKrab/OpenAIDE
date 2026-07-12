@@ -885,6 +885,7 @@ function stubMobileWindow() {
 
 function snapshot(taskId: string, hasMessages = true): TaskSnapshot {
   return {
+    lifecycle: hasMessages ? "visible" : "new",
     chat: {
       has_before: false,
       has_messages: hasMessages,
