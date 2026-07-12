@@ -150,11 +150,12 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
   }
 
   if (isWebWorkbench) {
+    const routedActiveTask = bootstrap.taskId ? activeTask : undefined;
     const mobileTitle = bootstrap.surface === "settings"
       ? "Settings"
-      : renderableTaskSnapshot?.task.title ?? activeTask?.title ?? (bootstrap.taskId || openingNativeSession ? "Opening task" : "New task");
+      : renderableTaskSnapshot?.task.title ?? routedActiveTask?.title ?? (bootstrap.taskId || openingNativeSession ? "Opening task" : "New task");
     const mobileProject = activeTask?.project_label ?? state.projects[0]?.label ?? "OpenAIDE";
-    const mobileTaskStatus = renderableTaskSnapshot?.task.status ?? activeTask?.status;
+    const mobileTaskStatus = renderableTaskSnapshot?.task.status ?? routedActiveTask?.status;
     const mobileSubtitle = bootstrap.surface === "settings"
       ? "Agent and app configuration"
       : [mobileTaskStatus ? taskStatusLabel(mobileTaskStatus) : undefined, mobileProject].filter(Boolean).join(" · ");

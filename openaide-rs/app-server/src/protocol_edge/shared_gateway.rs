@@ -55,6 +55,18 @@ impl SharedRpcGateway {
             .is_some()
     }
 
+    /// Keeps a client live while its event stream is still accepting writes.
+    pub fn observe_event_stream_activity(
+        &self,
+        connection_id: &ConnectionId,
+        now: AppServerTime,
+    ) -> bool {
+        self.gateway
+            .lock()
+            .expect("protocol gateway lock poisoned")
+            .observe_event_stream_activity(connection_id, now)
+    }
+
     pub fn publish_task_update_by_id(
         &self,
         task_id: &TaskId,

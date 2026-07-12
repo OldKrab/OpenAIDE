@@ -69,6 +69,13 @@ impl LocalHttpAppHandler {
         self.protocol.event_stream_is_current(lease)
     }
 
+    pub(crate) fn observe_event_stream_activity(
+        &self,
+        lease: &event_streams::EventStreamLease,
+    ) -> bool {
+        self.protocol.observe_event_stream_activity(lease)
+    }
+
     pub(crate) fn finish_event_stream(&self, lease: &event_streams::EventStreamLease) {
         self.protocol.finish_event_stream(lease);
     }

@@ -201,9 +201,15 @@ fn handle_event_stream(
             let messages = handler.drain_push_messages(&lease);
             if !messages.is_empty() {
                 write_event_stream_data(stream, &messages)?;
+                if !handler.observe_event_stream_activity(&lease) {
+                    break;
+                }
                 last_heartbeat = std::time::Instant::now();
             } else if last_heartbeat.elapsed() >= Duration::from_secs(1) {
                 write_event_stream_heartbeat(stream)?;
+                if !handler.observe_event_stream_activity(&lease) {
+                    break;
+                }
                 last_heartbeat = std::time::Instant::now();
             }
             std::thread::sleep(Duration::from_millis(16));

@@ -3155,7 +3155,7 @@ function snapshot(taskId: string, status: TaskSnapshot["task"]["status"], title 
       version: 1,
     },
     permissions: [],
-    send_capability: { state: "ready", attachment_only: true },
+    send_capability: { state: "ready" },
     settings_summary: {
       agent_id: "codex",
       isolation: "local",

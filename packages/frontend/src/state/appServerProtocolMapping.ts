@@ -124,7 +124,6 @@ export function mapProtocolTaskSnapshot(
       agent_commands: mapProtocolAgentCommands(snapshot.agentCommands, task.agent_id),
       send_capability: {
         state: snapshot.sendCapability.state,
-        attachment_only: snapshot.sendCapability.attachmentOnly === true,
         ...(sendBlockers.length > 0
           ? { blockers: sendBlockers.map((blocker) => ({ ...blocker })) }
           : {}),

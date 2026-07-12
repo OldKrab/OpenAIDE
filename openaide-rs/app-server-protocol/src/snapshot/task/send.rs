@@ -5,8 +5,6 @@ use ts_rs::TS;
 #[serde(rename_all = "camelCase")]
 pub struct TaskSendCapabilitySnapshot {
     pub state: TaskSendCapabilityState,
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub attachment_only: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub blockers: Vec<TaskSendBlocker>,
 }
@@ -39,3 +37,7 @@ pub enum TaskSendBlockerKind {
     MissingRequiredOptions,
     FailedValidation,
 }
+
+#[cfg(test)]
+#[path = "send_tests.rs"]
+mod tests;

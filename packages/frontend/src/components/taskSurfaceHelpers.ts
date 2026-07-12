@@ -85,21 +85,6 @@ export function taskWorkingStatusLabel(
   return "Starting";
 }
 
-export function composerMessageShapeError({
-  attachmentCount,
-  otherwiseSendable,
-  prompt,
-}: {
-  attachmentCount: number;
-  otherwiseSendable: boolean;
-  prompt: string;
-}) {
-  if (otherwiseSendable && attachmentCount > 0 && prompt.trim().length === 0) {
-    return "Add a message for this Agent.";
-  }
-  return undefined;
-}
-
 export function relativeTime(value: string) {
   const timestamp = timestampMillis(value);
   if (Number.isNaN(timestamp)) return "";

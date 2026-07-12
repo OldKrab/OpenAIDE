@@ -8,7 +8,10 @@ export function primaryTaskSurfaceModel(controller: AppController) {
   const adoptedEmptyTaskHasDraft = bootstrap.surface === "task"
     && bootstrap.taskId === state.snapshot?.task.task_id
     && hasVisibleTaskDraft(snapshotTaskInput);
-  const activeNoMessageTask = state.snapshot?.task.status === "active";
+  // Task preparation can publish an active New Task while the route remains
+  // /new-task. Only an explicit Task route may promote that snapshot to TaskView.
+  const activeNoMessageTask = bootstrap.taskId === state.snapshot?.task.task_id
+    && state.snapshot?.task.status === "active";
   const renderableTaskSnapshot = state.snapshot?.task.has_messages === true
     || adoptedEmptyTaskHasDraft
     || activeNoMessageTask

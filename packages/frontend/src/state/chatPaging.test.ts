@@ -61,12 +61,13 @@ describe("chatPaging", () => {
     ]);
   });
 
-  it("preserves each activity identity and status", () => {
+  it("groups adjacent activity and thought rows into one tool run", () => {
     const chat = renderedChat(
       snapshot([
         activityMessage("m1", "exec_command", "completed", false, [
           { kind: "tool", name: "execute", status: "completed", input_summary: "git status" },
         ]),
+        thoughtMessage("thought-1", "Check the test result"),
         activityMessage("m2", "exec_command", "running", true, [
           { kind: "tool", name: "execute", status: "running", input_summary: "npm test" },
         ]),
@@ -77,15 +78,25 @@ describe("chatPaging", () => {
       undefined,
     );
 
-    expect(chat.items.map((item) => item.message_id)).toEqual(["m1", "m2", "m3"]);
-    expect(chat.items.map((item) => item.message)).toMatchObject([
-      { kind: "activity", status: "completed", steps: [{ kind: "tool", input_summary: "git status" }] },
-      { kind: "activity", status: "running", steps: [{ kind: "tool", input_summary: "npm test" }] },
-      { kind: "activity", status: "error", steps: [{ kind: "command", command_label: "cargo test" }] },
-    ]);
+    expect(chat.items).toHaveLength(1);
+    expect(chat.items[0]).toMatchObject({
+      message_id: "m1",
+      cursor: "cursor_m3",
+      message: {
+        kind: "activity",
+        title: "Commands",
+        status: "completed",
+        steps: [
+          { kind: "tool", input_summary: "git status" },
+          { kind: "thought", text: "Check the test result" },
+          { kind: "tool", input_summary: "npm test" },
+          { kind: "command", command_label: "cargo test" },
+        ],
+      },
+    });
   });
 
-  it("does not rewrite activity titles from neighboring rows", () => {
+  it("labels grouped activity by the work represented in the run", () => {
     const terminalChat = renderedChat(
       snapshot([
         activityMessage("m1", "write_stdin", "completed", true, [{ kind: "text", text: "npm", level: "info" }]),
@@ -105,16 +116,23 @@ describe("chatPaging", () => {
       undefined,
     );
 
-    expect(terminalChat.items.map((item) => item.message_id)).toEqual(["m1", "m2"]);
-    expect(terminalChat.items.map((item) => item.message)).toMatchObject([
-      { kind: "activity", title: "write_stdin", collapsed: true },
-      { kind: "activity", title: "write_stdin", collapsed: true },
-    ]);
-    expect(toolChat.items.map((item) => item.message_id)).toEqual(["m3", "m4"]);
-    expect(toolChat.items.map((item) => item.message)).toMatchObject([
-      { kind: "activity", title: "Search files", collapsed: true },
-      { kind: "activity", title: "Read file", collapsed: true },
-    ]);
+    expect(terminalChat.items).toHaveLength(1);
+    expect(terminalChat.items[0]?.message).toMatchObject({
+      kind: "activity",
+      title: "Terminal input",
+      collapsed: true,
+      steps: [{ kind: "text", text: "npm" }, { kind: "text", text: " test" }],
+    });
+    expect(toolChat.items).toHaveLength(1);
+    expect(toolChat.items[0]?.message).toMatchObject({
+      kind: "activity",
+      title: "Tool activity",
+      collapsed: true,
+      steps: [
+        { kind: "tool", input_summary: "alpha" },
+        { kind: "tool", input_summary: "src/main.ts" },
+      ],
+    });
   });
 });
 
@@ -140,7 +158,7 @@ function snapshot(items: ChatMessage[]): TaskSnapshot {
     chat: page(items, false),
     permissions: [],
     history_sync: { state: "idle", generation: 0 },
-    send_capability: { state: "ready", attachment_only: true },
+    send_capability: { state: "ready" },
     settings_summary: { agent_id: "codex", isolation: "local" },
     revision: 1,
   };

@@ -15,11 +15,9 @@ import { renderedChat } from "../state/chatPaging";
 import type { AppState, TaskChatScrollState, TaskComposerInput } from "../state/store";
 import { ChatRow } from "./ChatMessageView";
 import { Composer } from "./Composer";
+import { composerAvailability, composerCanSubmit } from "./composerAvailability";
 import { TaskHeader } from "./TaskHeader";
-import {
-  scrollTopAfterPrependedContent,
-  taskComposerAvailability,
-} from "./TaskViewModel";
+import { scrollTopAfterPrependedContent } from "./TaskViewModel";
 import { taskWorkingStatusLabel, workspaceLabel } from "./taskSurfaceHelpers";
 import type { TaskFileBrowserCallbacks } from "./appControllerCallbackTypes";
 import {
@@ -35,7 +33,6 @@ import type { BackendConnectionState } from "./appControllerBackendLifecycle";
 
 export {
   scrollTopAfterPrependedContent,
-  taskComposerAvailability,
 } from "./TaskViewModel";
 export {
   chatItemsWithAppServerPermissions,
@@ -151,23 +148,27 @@ export function TaskView({
     snapshot.task.task_id,
   );
   const latestChatItem = chatItems.at(-1);
-  const preparationBlocked = chatItems.some((item) => item.message_id === "app-server-preparation");
   const turnBusy = snapshot.task.status === "active";
-  const composerAvailability = taskComposerAvailability({
-    archived,
-    backendReady,
-    connectionStatus: backendConnectionState?.status,
-    inputPending,
-    inputUncertain,
-    preparationBlocked,
-    sendCapabilityState: snapshot.send_capability.state,
-    taskStatus: snapshot.task.status,
-  });
-  const composerDisabled = composerAvailability.editingDisabled;
-  const taskConfigOptions = startupConfigOptions ?? snapshot.agent_config;
   const attachmentsSendable = taskInput.context.length === 0
     || appServerAttachmentHandles(taskInput.context) !== undefined;
-  const canSend = !composerAvailability.sendDisabled && attachmentsSendable;
+  const availability = composerAvailability({
+    allowEditingWhileSendBlocked: true,
+    archived,
+    attachmentsReady: attachmentsSendable,
+    blockedPlaceholder: snapshot.task.status === "blocked"
+      ? "Draft follow-up while input is pending."
+      : snapshot.task.status === "active" ? "Send a follow-up" : undefined,
+    connectionStatus: backendReady ? "ready" : backendConnectionState?.status ?? "connecting",
+    contextReady: true,
+    readyPlaceholder: "Send follow-up",
+    sendCapability: snapshot.send_capability,
+    submitActionLabel: inputUncertain ? "Retry sending exact message" : undefined,
+    submitPendingLabel: "Sending message",
+    submitting: inputPending,
+    uncertain: inputUncertain,
+  });
+  const canSubmit = composerCanSubmit(availability, taskInput.prompt, taskInput.context.length);
+  const taskConfigOptions = startupConfigOptions ?? snapshot.agent_config;
   const [showHistoryUpdated, setShowHistoryUpdated] = useState(false);
   const announcedHistoryUpdate = useRef<string | undefined>(undefined);
   useEffect(() => {
@@ -215,7 +216,7 @@ export function TaskView({
   });
 
   const submit = (prompt: string) => {
-    if (!canSend) return;
+    if (!canSubmit) return;
     chatScroll.jumpToLatest();
     onSendPrompt(prompt);
   };
@@ -321,10 +322,10 @@ export function TaskView({
           agentLocked
           attachments={taskInput.context}
           autoFocus
+          availability={availability}
           configLocked={!backendReady || !configOptionsMutable(taskConfigOptions)}
           configOptions={taskConfigOptions}
           commandCatalog={snapshot.agent_commands}
-          disabled={composerDisabled}
           error={taskInput.error ?? taskConfigOptions?.error}
           fileBrowser={fileBrowser}
           focusRequestKey={snapshot.task.task_id}
@@ -345,15 +346,9 @@ export function TaskView({
           onRemoveAttachment={onRemoveAttachment}
           onSelectConfigOption={onSelectConfigOption}
           onSubmit={submit}
-          placeholder={composerAvailability.placeholder}
           prompt={taskInput.prompt}
           selection={taskSelection}
           submitShortcut={submitShortcut}
-          submitDisabled={!canSend}
-          submitActionLabel={inputUncertain ? "Retry sending exact message" : undefined}
-          submitPending={inputPending}
-          submitPendingLabel="Sending message"
-          submitRequiresText={!snapshot.send_capability.attachment_only}
           submissionSettlementKey={taskInput.acceptedUserMessageId}
           showAgentSelector={false}
           showIsolationSelector={false}

@@ -247,6 +247,7 @@ describe("NewTaskView", () => {
       workspaceLabel: "new-app",
     };
     state.newTask.prompt = "Start in a new workspace";
+    state.snapshot = taskSnapshot("task_1", false);
     const onSubmitTask = vi.fn();
 
     const tree = render(
@@ -320,7 +321,7 @@ describe("NewTaskView", () => {
     expect(onSubmitTask).not.toHaveBeenCalled();
   });
 
-  it("allows starting a typed task while agent config options are still loading", () => {
+  it("blocks a typed task while authoritative Agent preparation is loading", () => {
     const state = createInitialState();
     const project = { projectId: "project_1", label: "OpenAIDE" };
     const onSubmitTask = vi.fn();
@@ -329,6 +330,11 @@ describe("NewTaskView", () => {
     state.newTask.configOptions = undefined;
     state.newTask.configOptionsLoading = true;
     state.newTask.prompt = "Start without waiting for optional model options";
+    state.snapshot = {
+      ...taskSnapshot("task_1", false),
+      agent_config: { agent_id: "codex", options: [], status: "loading" },
+      send_capability: { state: "loading" },
+    };
 
     const tree = render(
       <NewTaskView
@@ -343,15 +349,14 @@ describe("NewTaskView", () => {
     );
 
     const send = tree.root.findByProps({ "aria-label": "Send message" });
-    expect(send.props.disabled).toBe(false);
+    expect(send.props.disabled).toBe(true);
 
     act(() => send.props.onClick());
 
-    expect(onSubmitTask).toHaveBeenCalledTimes(1);
-    expect(textContent(tree)).toContain("Preparing Codex options");
+    expect(onSubmitTask).not.toHaveBeenCalled();
   });
 
-  it("preserves typed new-task text in Shell state before the New Task is prepared", () => {
+  it("preserves typed new-task text after the New Task is prepared", () => {
     let state = createInitialState();
     const project = { projectId: "project_1", label: "OpenAIDE" };
     const dispatch = vi.fn((action: AppAction) => {
@@ -361,6 +366,7 @@ describe("NewTaskView", () => {
     state.projects = [project];
     state.newTask.selection = selectionWithProject(state.newTask.selection, project);
     state.newTask.configOptions = { agent_id: "codex", options: [], status: "ready" };
+    state.snapshot = taskSnapshot("task_1", false);
 
     const tree = render(
       <NewTaskView
@@ -376,7 +382,11 @@ describe("NewTaskView", () => {
 
     act(() => tree.root.findByType(Composer).props.onChange("Fix the typing lag"));
 
-    expect(dispatch).toHaveBeenCalledWith({ type: "prompt", prompt: "Fix the typing lag" });
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "taskInput:prompt",
+      taskId: "task_1",
+      prompt: "Fix the typing lag",
+    });
 
     act(() => tree.update(
       <NewTaskView
@@ -416,11 +426,7 @@ describe("NewTaskView", () => {
       />,
     );
 
-    act(() => tree.root.findByProps({ "aria-label": "Add context" }).props.onClick());
-
-    expect(menuButtonByStrongLabel(tree, "Workspace files").props.disabled).toBe(true);
-    expect(menuButtonByStrongLabel(tree, "Upload or photo").props.disabled).toBe(true);
-    expect(tree.root.findAllByProps({ type: "file" })[0].props.disabled).toBe(true);
+    expect(tree.root.findByProps({ "aria-label": "Add context" }).props.disabled).toBe(true);
   });
 
   it("enables only App Server-backed attachment actions when project context is ready", () => {
@@ -429,6 +435,7 @@ describe("NewTaskView", () => {
     state.projects = [project];
     state.newTask.selection = selectionWithProject(state.newTask.selection, project);
     state.newTask.configOptions = { agent_id: "codex", options: [], status: "ready" };
+    state.snapshot = taskSnapshot("task_1", false);
 
     const tree = render(
       <NewTaskView
@@ -485,7 +492,7 @@ describe("NewTaskView", () => {
     expect(editorHtml(tree)).toBe("Explain this");
   });
 
-  it("explains that attachments need a message before sending", () => {
+  it("allows a prepared New Task to send a valid attachment without text", () => {
     const state = createInitialState();
     const project = { projectId: "project_1", label: "OpenAIDE" };
     state.projects = [project];
@@ -497,6 +504,7 @@ describe("NewTaskView", () => {
       local_id: "attachment_1",
       app_server_handle_id: "attachment-handle-readme" as never,
     }];
+    state.snapshot = taskSnapshot("task_1", false);
 
     const tree = render(
       <NewTaskView
@@ -510,10 +518,11 @@ describe("NewTaskView", () => {
       />,
     );
 
-    expect(textContent(tree)).toContain("Add a message for this Agent.");
+    expect(textContent(tree)).not.toContain("Add a message for this Agent.");
+    expect(tree.root.findByProps({ "aria-label": "Send message" }).props.disabled).toBe(false);
   });
 
-  it("does not show a text-required error while attachment-only capability is loading", () => {
+  it("keeps attachment sending disabled while authoritative capability is loading", () => {
     const state = createInitialState();
     const project = { projectId: "project_1", label: "OpenAIDE" };
     state.projects = [project];
@@ -531,7 +540,7 @@ describe("NewTaskView", () => {
     };
     state.snapshot = {
       ...taskSnapshot("task_1", false),
-      send_capability: { state: "loading", attachment_only: false },
+      send_capability: { state: "loading" },
     };
 
     const tree = render(
@@ -547,6 +556,7 @@ describe("NewTaskView", () => {
     );
 
     expect(textContent(tree)).not.toContain("Add a message for this Agent.");
+    expect(tree.root.findByProps({ "aria-label": "Send message" }).props.disabled).toBe(true);
   });
 
   it("sends an attachment-only image when the prepared Task supports it", () => {
@@ -564,7 +574,7 @@ describe("NewTaskView", () => {
     }];
     state.snapshot = {
       ...taskSnapshot("task_1", false),
-      send_capability: { state: "ready", attachment_only: true },
+      send_capability: { state: "ready" },
     };
     const onSubmitTask = vi.fn();
 
@@ -611,6 +621,7 @@ describe("NewTaskView", () => {
     const waitingFocusKey = tree.root.findByType(Composer).props.focusRequestKey;
 
     act(() => {
+      state.snapshot = taskSnapshot("task_1", false);
       tree.update(
         <NewTaskView
           agents={[]}
@@ -664,7 +675,7 @@ describe("NewTaskView", () => {
 
     expect(editorHtml(tree)).toBe("Do not erase this");
     expect(composerEditor(tree).props["aria-disabled"]).toBe(true);
-    expect(composerEditor(tree).props["data-placeholder"]).toBe("");
+    expect(composerEditor(tree).props["data-placeholder"]).toBe("Sending.");
     expect(tree.root.findAllByProps({ "aria-label": "Send message" })).toHaveLength(0);
     expect(tree.root.findAllByProps({ "aria-label": "Task status: Starting" })).toHaveLength(0);
     expect(tree.root.findAllByProps({ className: "new-task-starting-status" })).toHaveLength(0);
@@ -1090,7 +1101,7 @@ function taskSnapshot(taskId: string, hasMessages: boolean): TaskSnapshot {
       isolation: "local",
       config_options: {},
     },
-    send_capability: { state: "ready", attachment_only: false },
+    send_capability: { state: "ready" },
     revision: 1,
   };
 }

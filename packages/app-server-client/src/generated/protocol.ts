@@ -586,7 +586,7 @@ export type AgentSlashCommandInputSnapshot = { hint: string, };
 
 export type LiveSessionDataState = "loading" | "ready" | "stale" | "unavailable" | "failed";
 
-export type TaskSendCapabilitySnapshot = { state: TaskSendCapabilityState, attachmentOnly?: boolean, blockers?: Array<TaskSendBlocker>, };
+export type TaskSendCapabilitySnapshot = { state: TaskSendCapabilityState, blockers?: Array<TaskSendBlocker>, };
 
 export type TaskSendCapabilityState = "loading" | "ready" | "blocked" | "failed";
 

@@ -137,7 +137,7 @@ The accepted implementation design for `AP-003` and `AP-005` through `AP-008` is
 
 ## AP-009: Composer sendability is duplicated and New Task ignores authoritative readiness
 
-**Status:** confirmed
+**Status:** resolved
 
 **Area:** Composer capability projection and message validation
 
@@ -148,6 +148,8 @@ The `attachment_only` protocol field is also currently derived only from Task pr
 **Impact:** New Task can present Send as available while authoritative preparation is loading, blocked, or failed; New Task and existing Task can disagree for the same capability state; and boolean prop combinations can represent contradictory composer behavior.
 
 **Desired direction:** App Server supplies one authoritative Task send-capability projection with explicit readiness, structured blockers, and message-shape capability derived from real Task/Agent support. A shared Frontend composer-availability module combines that projection only with truly local facts such as text emptiness, visible attachment rows, and in-flight UI state. Pass a cohesive render model to `Composer` instead of several loosely related boolean props, while retaining authoritative validation in `task/send`.
+
+**Resolution:** App Server now projects only authoritative readiness and structured blockers. Frontend resolves that state with connection, context, submission, text, and attachment-handle facts through one `composerAvailability` model used by New Task, existing Task, and `Composer`. The false `attachment_only` capability and the split boolean Composer API were removed. ACP defines prompts as content-block arrays and exposes capabilities for block types, not a text-required mode, so OpenAIDE allows attachment-only messages when every selected attachment has a valid App Server handle and still rejects a completely empty message.
 
 ## AP-010: Send retry recovery is over-specialized and duplicates request identity
 

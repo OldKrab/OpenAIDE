@@ -10,6 +10,22 @@ use crate::client_lifecycle::{AppServerTime, ConnectionId};
 use super::{responses, GatewayOutcome, RpcGateway};
 
 impl RpcGateway {
+    /// A successful server-to-client stream write proves the client transport is live.
+    pub(crate) fn observe_event_stream_activity(
+        &mut self,
+        connection_id: &ConnectionId,
+        now: AppServerTime,
+    ) -> bool {
+        let Some(client_instance_id) = self
+            .client_hub
+            .observe_connection_activity(connection_id, now)
+        else {
+            return false;
+        };
+        self.attachments.keep_alive_for_client(&client_instance_id);
+        true
+    }
+
     pub(super) fn handle_client_capabilities_changed(
         &mut self,
         connection_id: ConnectionId,

@@ -336,7 +336,6 @@ fn unavailable_task_snapshot(task_id: TaskId) -> TaskSnapshot {
         },
         send_capability: TaskSendCapabilitySnapshot {
             state: TaskSendCapabilityState::Blocked,
-            attachment_only: false,
             blockers: vec![TaskSendBlocker {
                 kind: TaskSendBlockerKind::TaskPreparing,
                 message: "Task workflow is not available".to_string(),

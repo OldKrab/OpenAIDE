@@ -141,7 +141,7 @@ describe("App Server Protocol state mapping", () => {
       },
     ]);
     expect(snapshot.settings_summary.config_options).toEqual({ model: "gpt-5" });
-    expect(snapshot.send_capability).toEqual({ state: "ready", attachment_only: true });
+    expect(snapshot.send_capability).toEqual({ state: "ready" });
     expect(mapping.warnings).toEqual([]);
     expect(mapping.requiresNativeSurface).toBe(false);
   });
@@ -294,7 +294,6 @@ describe("App Server Protocol state mapping", () => {
     expect(mapping.snapshot.task.status).toBe("active");
     expect(mapping.snapshot.send_capability).toEqual({
       state: "loading",
-      attachment_only: false,
       blockers: [{ kind: "taskPreparing", message: "Task Agent preparation is still running" }],
     });
   });
@@ -615,7 +614,7 @@ function protocolSnapshot(overrides: Partial<ProtocolTaskSnapshot> = {}): Protoc
       ],
     },
     agentCommands: { state: "ready", commands: [] },
-    sendCapability: { state: "ready", attachmentOnly: true },
+    sendCapability: { state: "ready" },
     historySync: { state: "idle", generation: 0 },
     chat: {
       hasMoreBefore: true,

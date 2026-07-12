@@ -291,7 +291,6 @@ impl TaskSnapshotSource for StaticTaskSnapshots {
             },
             send_capability: TaskSendCapabilitySnapshot {
                 state: TaskSendCapabilityState::Blocked,
-                attachment_only: false,
                 blockers: Vec::new(),
             },
             chat: ChatSnapshot {

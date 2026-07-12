@@ -113,7 +113,6 @@ describe("task mutation intents", () => {
     const snapshot = taskSnapshot();
     snapshot.send_capability = {
       state: "blocked",
-      attachment_only: false,
       blockers: [{ kind: "taskRunning", message: "Task is already running" }],
     };
 
@@ -326,7 +325,7 @@ function taskSnapshot(): TaskSnapshot {
     },
     permissions: [],
     settings_summary: { agent_id: "codex", isolation: "local" },
-    send_capability: { state: "ready", attachment_only: false },
+    send_capability: { state: "ready" },
     revision: 1,
     history_sync: { state: "idle", generation: 0 },
   };

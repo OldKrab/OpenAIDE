@@ -422,7 +422,6 @@ fn failed_task_with_ready_preparation_is_sendable_for_follow_up_recovery() {
         snapshot.send_capability.state,
         TaskSendCapabilityState::Ready
     );
-    assert!(snapshot.send_capability.attachment_only);
     assert!(snapshot.send_capability.blockers.is_empty());
 }
 

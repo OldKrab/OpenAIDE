@@ -8,9 +8,9 @@ import { ComposerEditor, type ComposerEditorHandle } from "./ComposerEditor";
 import {
   composerErrorMessage,
   hasComposerContent,
-  hasComposerText,
   pastedImageFiles,
 } from "./composerDraftPolicy";
+import { composerCanSubmit, type ComposerAvailability } from "./composerAvailability";
 import type { TaskFileBrowserCallbacks } from "./appControllerCallbackTypes";
 import { IconButton } from "./ComposerPrimitives";
 import { shouldInsertComposerNewline, shouldSubmitComposerKey } from "./composerKeymap";
@@ -31,10 +31,10 @@ type ComposerProps = {
   agentLocked?: boolean;
   attachments: ComposerAttachment[];
   autoFocus?: boolean;
+  availability: ComposerAvailability;
   commandCatalog?: AgentCommandsCatalog;
   configLocked?: boolean;
   configOptions?: ConfigOptionsCatalog;
-  disabled: boolean;
   error?: string;
   fileBrowser?: TaskFileBrowserCallbacks;
   focusRequestKey?: number | string;
@@ -48,17 +48,10 @@ type ComposerProps = {
   onSelectConfigOption?: (configId: string, value: string) => void;
   onSelectIsolation?: (isolation: IsolationKind) => void;
   onSubmit: (prompt: string) => void;
-  placeholder: string;
   prompt: string;
   selection: ComposerSelection;
   submitShortcut: ComposerSubmitShortcut;
-  submitDisabled: boolean;
-  submitActionLabel?: string;
-  submitRequiresText?: boolean;
-  showTextRequirementError?: boolean;
   submissionSettlementKey?: number | string;
-  submitPending?: boolean;
-  submitPendingLabel?: string;
   showAgentSelector?: boolean;
   showIsolationSelector?: boolean;
 };
@@ -67,10 +60,10 @@ export function Composer({
   agentLocked = false,
   attachments,
   autoFocus = false,
+  availability,
   commandCatalog,
   configLocked = false,
   configOptions,
-  disabled,
   error,
   fileBrowser,
   focusRequestKey,
@@ -84,20 +77,14 @@ export function Composer({
   onSelectConfigOption,
   onSelectIsolation,
   onSubmit,
-  placeholder,
   prompt,
   selection,
   submitShortcut,
-  submitDisabled,
-  submitActionLabel = "Send message",
-  submitRequiresText = true,
-  showTextRequirementError = true,
   submissionSettlementKey,
-  submitPending = false,
-  submitPendingLabel = "Task starting",
   showAgentSelector,
   showIsolationSelector,
 }: ComposerProps) {
+  const disabled = !availability.canEdit;
   const [openMenu, setOpenMenu] = useState<ComposerMenu | undefined>();
   const [slashPicker, setSlashPicker] = useState<SlashPickerState | undefined>();
   const [editorText, setEditorText] = useState(prompt);
@@ -112,6 +99,7 @@ export function Composer({
   const lastCommandCatalogKey = useRef(commandCatalogRevision);
   const lastSubmissionSettlementKey = useRef(submissionSettlementKey);
   const hasDraftContent = hasComposerContent(editorText, attachments.length);
+  const canSubmit = composerCanSubmit(availability, editorText, attachments.length);
 
   useComposerAutoFocus({ autoFocus, disabled, editorRef, focusRequestKey });
 
@@ -165,8 +153,8 @@ export function Composer({
       draftRef.current = prompt;
       renderEditorText(prompt);
     }
-    if (!submitPending && (prompt === "" || error)) submittedDraftRef.current = undefined;
-  }, [error, prompt, submissionSettlementKey, submitPending]);
+    if (!availability.submitting && (prompt === "" || error)) submittedDraftRef.current = undefined;
+  }, [availability.submitting, error, prompt, submissionSettlementKey]);
 
   useEffect(() => {
     const catalogChanged = commandCatalogRevision !== lastCommandCatalogKey.current;
@@ -210,18 +198,12 @@ export function Composer({
     if (picker) setOpenMenu(undefined);
   };
 
-  const submitBlocked = (value: string) =>
-    submitDisabled ||
-    !hasComposerContent(value, attachments.length) ||
-    (submitRequiresText && !hasComposerText(value));
-  const localMessageShapeBlocked = (value: string) =>
-    !submitDisabled && submitRequiresText && !hasComposerText(value);
-  const showStopAction = Boolean(onCancel && (!hasDraftContent || submitDisabled));
-  const showSendAction = !onCancel || (hasDraftContent && !submitDisabled);
+  const showStopAction = Boolean(onCancel && (!hasDraftContent || !canSubmit));
+  const showSendAction = !onCancel || (hasDraftContent && canSubmit);
 
   const submitDraft = () => {
     const draft = draftRef.current;
-    if (submitBlocked(draft)) return;
+    if (!composerCanSubmit(availability, draft, attachments.length)) return;
     submittedDraftRef.current = draft;
     onSubmit(draft);
   };
@@ -342,7 +324,7 @@ export function Composer({
               return;
             }
           }
-          if (shouldSubmitComposerKey(event, submitShortcut) && !submitDisabled) {
+          if (shouldSubmitComposerKey(event, submitShortcut) && canSubmit) {
             event.preventDefault();
             submitDraft();
             return;
@@ -357,7 +339,7 @@ export function Composer({
             insertEditorText("\n");
           }
         }}
-        placeholder={placeholder}
+        placeholder={availability.placeholder}
         ref={editorRef}
         renderRevision={editorRenderRevision}
         value={editorText}
@@ -370,9 +352,6 @@ export function Composer({
         />
       ) : null}
       {error ? <p className="inline-error">{error}</p> : null}
-      {!error && showTextRequirementError && attachments.length > 0 ? (
-        <p className="inline-error" hidden={!localMessageShapeBlocked(editorText)}>Add a message for this Agent.</p>
-      ) : null}
       <div className="composer-footer">
         <ComposerControls
           agentLocked={agentLocked}
@@ -394,19 +373,19 @@ export function Composer({
           showIsolationSelector={showIsolationSelector}
         />
         <div className="composer-actions">
-          {submitPending ? (
-            <span aria-label={submitPendingLabel} className="composer-submit-pending">
+          {availability.submitting ? (
+            <span aria-label={availability.submitPendingLabel} className="composer-submit-pending">
               <LoaderCircle size={14} aria-hidden="true" />
             </span>
           ) : null}
           {showStopAction && onCancel ? (
             <IconButton ariaLabel="Stop task" className="composer-stop-button" icon={<CircleStop size={14} />} onClick={onCancel} />
           ) : null}
-          {!submitPending && showSendAction ? (
+          {!availability.submitting && showSendAction ? (
             <IconButton
-              ariaLabel={submitActionLabel}
+              ariaLabel={availability.submitActionLabel}
               className="composer-send-button"
-              disabled={submitBlocked(editorText)}
+              disabled={!canSubmit}
               icon={<ArrowUp size={15} />}
               onClick={submitDraft}
             />

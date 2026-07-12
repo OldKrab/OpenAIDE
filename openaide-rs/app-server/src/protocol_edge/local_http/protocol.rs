@@ -85,6 +85,13 @@ impl LocalHttpProtocolHandler {
         self.event_streams.is_current(lease)
     }
 
+    pub(crate) fn observe_event_stream_activity(&self, lease: &EventStreamLease) -> bool {
+        self.event_streams.is_current(lease)
+            && self
+                .gateway
+                .observe_event_stream_activity(lease.connection_id(), AppServerTime::now())
+    }
+
     pub(crate) fn finish_event_stream(&self, lease: &EventStreamLease) {
         self.event_streams.finish(lease);
     }

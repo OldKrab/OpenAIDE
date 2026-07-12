@@ -198,7 +198,6 @@ pub(super) fn send_capability_for_task(
         TaskPreparationRecord::Needed | TaskPreparationRecord::Preparing => {
             return TaskSendCapabilitySnapshot {
                 state: TaskSendCapabilityState::Loading,
-                attachment_only: false,
                 blockers: vec![TaskSendBlocker {
                     kind: TaskSendBlockerKind::TaskPreparing,
                     message: "Task Agent preparation is still running".to_string(),
@@ -208,7 +207,6 @@ pub(super) fn send_capability_for_task(
         TaskPreparationRecord::Failed { message } => {
             return TaskSendCapabilitySnapshot {
                 state: TaskSendCapabilityState::Failed,
-                attachment_only: false,
                 blockers: vec![TaskSendBlocker {
                     kind: TaskSendBlockerKind::FailedValidation,
                     message: format!("Task Agent preparation failed: {message}"),
@@ -220,12 +218,10 @@ pub(super) fn send_capability_for_task(
     match status {
         LegacyTaskStatus::Inactive | LegacyTaskStatus::Completed => TaskSendCapabilitySnapshot {
             state: TaskSendCapabilityState::Ready,
-            attachment_only: true,
             blockers: Vec::new(),
         },
         LegacyTaskStatus::Active | LegacyTaskStatus::Blocked => TaskSendCapabilitySnapshot {
             state: TaskSendCapabilityState::Blocked,
-            attachment_only: true,
             blockers: vec![TaskSendBlocker {
                 kind: TaskSendBlockerKind::TaskRunning,
                 message: "Task is already running".to_string(),
@@ -233,7 +229,6 @@ pub(super) fn send_capability_for_task(
         },
         LegacyTaskStatus::Failed => TaskSendCapabilitySnapshot {
             state: TaskSendCapabilityState::Ready,
-            attachment_only: true,
             blockers: Vec::new(),
         },
     }

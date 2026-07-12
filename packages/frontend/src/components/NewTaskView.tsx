@@ -8,6 +8,7 @@ import { configOptionsMutable, configOptionsSettled } from "../state/configOptio
 import type { AppState } from "../state/store";
 import { AgentIcon } from "./AgentIcon";
 import { Composer } from "./Composer";
+import { composerAvailability, composerCanSubmit } from "./composerAvailability";
 import { MenuButton, Popover, Selector } from "./ComposerPrimitives";
 import type { TaskFileBrowserCallbacks, WorkspaceBrowserCallbacks } from "./appControllerCallbackTypes";
 import { NewWorkspacePicker } from "./NewWorkspacePicker";
@@ -69,9 +70,6 @@ export function NewTaskView({
   const composerAttachments = state.newTask.submitting
     ? state.newTask.pending?.context ?? preparedTaskInput?.pending?.context ?? []
     : preparedTaskInput?.context ?? state.newTask.context;
-  const attachmentOnlySend = preparedTaskId !== undefined
-    && state.snapshot?.send_capability.attachment_only === true;
-  const showTextRequirementError = state.snapshot?.send_capability.state !== "loading";
   const externalPrompt = state.newTask.submitting
     ? state.newTask.pending?.prompt ?? preparedTaskInput?.pending?.prompt ?? ""
     : preparedTaskInput?.prompt ?? state.newTask.prompt;
@@ -91,18 +89,24 @@ export function NewTaskView({
     openingNativeSession,
     submitting: state.newTask.submitting,
   });
-  const canSend =
-    !needsProject &&
-    !needsWorkspace &&
-    !loadingProjects &&
-    !state.newTask.submitting &&
-    !composerConfigOptionsError &&
-    (composerAttachments.length === 0 || appServerAttachmentHandles(composerAttachments) !== undefined);
-  const composerFocusKey = `${focusRequestKey ?? 0}:${canSend && composerPrompt.trim().length > 0 ? "ready" : "waiting"}`;
+  const availability = composerAvailability({
+    allowEditingWhileSendBlocked: false,
+    attachmentsReady: composerAttachments.length === 0
+      || appServerAttachmentHandles(composerAttachments) !== undefined,
+    connectionStatus: loadingProjects ? "connecting" : "ready",
+    contextPlaceholder: waitStatus ?? "Preparing task.",
+    contextReady: !needsProject && !needsWorkspace && !loadingProjects && !composerConfigOptionsError,
+    readyPlaceholder: "Describe the task.",
+    sendCapability: preparedTaskId ? state.snapshot?.send_capability : undefined,
+    submitPendingLabel: "Task starting",
+    submitting: state.newTask.submitting,
+  });
+  const canSubmit = composerCanSubmit(availability, composerPrompt, composerAttachments.length);
+  const composerFocusKey = `${focusRequestKey ?? 0}:${canSubmit ? "ready" : "waiting"}`;
   const composerFileBrowser = needsProject || needsWorkspace || loadingProjects ? undefined : fileBrowser;
 
   const submit = (prompt: string) => {
-    if (!canSend) return;
+    if (!canSubmit) return;
     onSubmitTask({ prompt, context: composerAttachments });
   };
   const toggleContextMenu = (menu: NewTaskContextMenu) => {
@@ -141,10 +145,10 @@ export function NewTaskView({
     <Composer
       attachments={composerAttachments}
       autoFocus
+      availability={availability}
       configLocked={state.newTask.configOptionsLoading || !configOptionsMutable(currentConfigOptions)}
       configOptions={composerConfigOptions}
       commandCatalog={preparedTaskId ? state.snapshot?.agent_commands : undefined}
-      disabled={state.newTask.submitting}
       error={undefined}
       fileBrowser={composerFileBrowser}
       focusRequestKey={composerFocusKey}
@@ -172,15 +176,10 @@ export function NewTaskView({
       onSelectConfigOption={onSelectConfigOption}
       onSelectIsolation={(isolation) => dispatch({ type: "newTask:isolation", isolation })}
       onSubmit={submit}
-      placeholder={state.newTask.submitting ? "" : "Describe the task."}
       prompt={composerPrompt}
       selection={state.newTask.selection}
       agents={agentChoices}
       submitShortcut={submitShortcut}
-      submitDisabled={!canSend}
-      submitPending={state.newTask.submitting}
-      submitRequiresText={!attachmentOnlySend}
-      showTextRequirementError={showTextRequirementError}
       showAgentSelector={false}
       showIsolationSelector={false}
     />

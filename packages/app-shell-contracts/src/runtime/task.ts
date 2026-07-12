@@ -36,7 +36,6 @@ export type TaskSnapshot = {
   agent_commands?: AgentCommandsCatalog;
   send_capability: {
     state: "loading" | "ready" | "blocked" | "failed";
-    attachment_only: boolean;
     blockers?: Array<{
       kind:
         | "taskPreparing"

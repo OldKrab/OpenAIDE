@@ -1,6 +1,6 @@
 # New Task Flow Implementation Plan
 
-Status: accepted design, implementation in progress (`AP-003`, `AP-005`, `AP-006`, and `AP-008` resolved)
+Status: accepted design, implementation in progress (`AP-003`, `AP-005`, `AP-006`, `AP-008`, and `AP-009` resolved)
 
 This focused plan is the implementation handoff for the New Task refactor. It resolves `AP-003` and `AP-005` through `AP-008` in `docs/architecture-problems.md` and must be implemented through a feature branch and pull request. A new agent session should read `CONTEXT.md`, `PRODUCT.md`, ADR 0022, `docs/refactor-plan.md`, and this file before changing code.
 
@@ -108,6 +108,8 @@ App Server sends owner-scoped Task events as Native Session preparation changes.
 - recoverable preparation errors.
 
 Frontend applies only cursor-contiguous, monotonically newer state. The page remains rendered throughout preparation. Composer controls expose honest disabled or preparing states until their required capability is ready.
+
+App Server send capability contains authoritative readiness and blockers only. Frontend combines it with local draft content and attachment-handle validity through one shared Composer availability model. ACP has no text-required prompt capability: a completely empty message is invalid, while attachment-only input is valid when every attachment resolves to an Agent-supported ACP content block.
 
 ### Navigate away and return
 

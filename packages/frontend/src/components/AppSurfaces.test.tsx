@@ -471,6 +471,25 @@ describe("AppSurfaces callback wiring", () => {
     expect(surfaceMocks.task).not.toHaveBeenCalled();
   });
 
+  it("keeps an active prepared New Task on the new-task surface", () => {
+    const controller = webControllerFor("task");
+    controller.state.snapshot = snapshot("task_prepared", false);
+    controller.state.snapshot.task.status = "active";
+    controller.activeTask = controller.state.snapshot.task;
+
+    const tree = render(controller);
+
+    expect(surfaceMocks.newTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        onSubmitTask: controller.callbacks.newTask.submit,
+      }),
+      undefined,
+    );
+    expect(surfaceMocks.task).not.toHaveBeenCalled();
+    expect(tree.root.findByProps({ className: "mobile-workbench-bar" }).findByType("small").children.join(""))
+      .toBe("OpenAIDE");
+  });
+
   it("renders pending empty task snapshots through the task view", () => {
     const controller = controllerFor("task");
     controller.bootstrap = { surface: "task", taskId: "task_1" };
@@ -896,7 +915,7 @@ function snapshot(taskId: string, hasMessages = true): TaskSnapshot {
     },
     permissions: [],
     history_sync: { state: "idle", generation: 0 },
-    send_capability: { state: "ready", attachment_only: true },
+    send_capability: { state: "ready" },
     revision: 1,
     settings_summary: {
       agent_id: "codex",

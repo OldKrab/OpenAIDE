@@ -1367,6 +1367,24 @@ fn heartbeat_refreshes_client_liveness() {
 }
 
 #[test]
+fn event_stream_activity_refreshes_client_liveness() {
+    let mut gateway = initialized_gateway("client-1", "conn-1");
+
+    assert!(gateway.observe_event_stream_activity(&ConnectionId::new("conn-1"), AppServerTime(9),));
+
+    assert!(gateway
+        .expire_inactive_clients(AppServerTime(10))
+        .is_empty());
+    assert_eq!(
+        gateway.expire_inactive_clients(AppServerTime(19)),
+        vec![ClientExpiryOutcome::Expired {
+            client_instance_id: ClientInstanceId::from("client-1"),
+            last_client: true,
+        }]
+    );
+}
+
+#[test]
 fn idle_shutdown_waits_when_last_client_expired_but_task_work_is_active() {
     let mut gateway = gateway_with_shutdown(Arc::new(BlockingShutdown {
         active_turns: 1,
