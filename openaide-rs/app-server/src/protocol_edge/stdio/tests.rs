@@ -2390,15 +2390,12 @@ fn task_discard_hides_empty_pre_send_task_after_initialize() {
         response["result"]["result"]["discardedTaskId"],
         "task-draft"
     );
-    let tasks = response["result"]["result"]["tasks"]["tasks"]
-        .as_array()
-        .expect("tasks");
-    assert_eq!(tasks.len(), 1);
-    assert!(tasks.iter().any(|task| task["taskId"] == "task-existing"));
+    assert!(response["result"]["result"].get("tasks").is_none());
     assert_eq!(responses.len(), 1);
     let committed = notifications
         .recv_timeout(Duration::from_secs(1))
         .expect("task discard notification");
+    // New Tasks are private and were never present in Task Navigation.
     assert!(dispatcher.handle_task_update(committed).is_empty());
     drop(dispatcher);
     let store = Store::open(temp.path().to_path_buf()).unwrap();
@@ -2431,13 +2428,21 @@ fn task_set_archived_moves_task_between_navigation_lists() {
         "task-active"
     );
     assert_eq!(archive_response["result"]["result"]["archived"], true);
-    assert_eq!(
-        archive_response["result"]["result"]["tasks"]["tasks"]
-            .as_array()
-            .expect("active tasks after archive")
-            .len(),
-        0
+    assert!(archive_response["result"]["result"].get("tasks").is_none());
+
+    let active = dispatcher.handle_line(
+        &json!({
+            "jsonrpc": "2.0",
+            "id": "list-active",
+            "method": TASK_LIST,
+            "params": { "archived": false }
+        })
+        .to_string(),
     );
+    assert!(response(&active[0])["result"]["result"]["tasks"]
+        .as_array()
+        .expect("active tasks after archive")
+        .is_empty());
 
     let archived = dispatcher.handle_line(
         &json!({

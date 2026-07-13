@@ -1084,7 +1084,7 @@ fn unknown_client_response_returns_permission_error() {
 }
 
 #[test]
-fn heartbeat_does_not_replay_navigation_changes_as_response_events() {
+fn heartbeat_delivers_a_queued_navigation_change_once() {
     let mut gateway = initialized_gateway("client-1", "local-http:client-1");
     gateway.handle_inbound(
         ConnectionId::new("local-http:client-1"),
@@ -1109,7 +1109,7 @@ fn heartbeat_does_not_replay_navigation_changes_as_response_events() {
         AppServerTime(3),
     );
 
-    assert!(published.is_empty());
+    assert_eq!(published.len(), 1);
 
     let outcome = gateway.handle_inbound(
         ConnectionId::new("local-http:client-1"),
@@ -1118,7 +1118,18 @@ fn heartbeat_does_not_replay_navigation_changes_as_response_events() {
     );
 
     let events = response_events(outcome);
-    assert!(events.is_empty());
+    assert_eq!(events.len(), 1);
+    assert!(matches!(
+        &events[0].event.payload,
+        AppServerEventPayload::TaskNavigationChanged { .. }
+    ));
+
+    let second = gateway.handle_inbound(
+        ConnectionId::new("local-http:client-1"),
+        request("4", CLIENT_HEARTBEAT, serde_json::json!({})),
+        AppServerTime(5),
+    );
+    assert!(response_events(second).is_empty());
 }
 
 #[test]
