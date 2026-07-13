@@ -1,5 +1,5 @@
 import { SETTINGS_UPDATE_PREFERENCES, SETTINGS_UPDATE_RUNTIME } from "@openaide/app-server-client";
-import { postHostMessage, updateWebSettingsTabRoute } from "../services/hostBridge";
+import { postHostMessage, replaceSettingsTabRoute } from "../services/hostBridge";
 import { mapProtocolAppPreferences, protocolComposerSubmitShortcut } from "../state/appPreferencesMapping";
 import { mapProtocolRuntimeSettings } from "../state/runtimeSettingsMapping";
 import type { AppCallbacksDependencies, SettingsCallbacks } from "./appControllerCallbackTypes";
@@ -76,7 +76,7 @@ export function createSettingsCallbacks({
     },
     selectSettingsTab: (tab) => {
       dispatch({ type: "settings:tab", tab });
-      updateWebSettingsTabRoute(tab);
+      replaceSettingsTabRoute(tab);
     },
     setAcpTrace: (enabled) => {
       dispatch({ type: "settings:developerAcpTrace", enabled });

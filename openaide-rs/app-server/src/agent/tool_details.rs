@@ -1,5 +1,5 @@
 use agent_client_protocol::schema::{
-    ContentBlock, ToolCall, ToolCallContent, ToolCallStatus, ToolKind,
+    ContentBlock, EmbeddedResourceResource, ToolCall, ToolCallContent, ToolCallStatus, ToolKind,
 };
 use std::ffi::OsStr;
 
@@ -132,21 +132,74 @@ fn tool_content_detail(content: &ToolCallContent) -> ActivityToolContent {
             ContentBlock::Text(text) => ActivityToolContent::Text {
                 text: text.text.clone(),
             },
-            ContentBlock::ResourceLink(_) => ActivityToolContent::Other {
-                label: "Resource link".to_string(),
+            ContentBlock::Image(image) => {
+                if crate::media::validate_base64_image(
+                    &image.mime_type,
+                    &image.data,
+                    MAX_INLINE_TOOL_MEDIA_BYTES,
+                )
+                .is_ok()
+                {
+                    ActivityToolContent::Image {
+                        media_type: image.mime_type.clone(),
+                        data: image.data.clone(),
+                        uri: image.uri.clone(),
+                    }
+                } else {
+                    unsupported_tool_content(
+                        "image",
+                        Some(image.mime_type.clone()),
+                        image.uri.clone(),
+                    )
+                }
+            }
+            ContentBlock::Audio(audio) => {
+                if crate::media::validate_base64_audio(
+                    &audio.mime_type,
+                    &audio.data,
+                    MAX_INLINE_TOOL_MEDIA_BYTES,
+                )
+                .is_ok()
+                {
+                    ActivityToolContent::Audio {
+                        media_type: audio.mime_type.clone(),
+                        data: audio.data.clone(),
+                    }
+                } else {
+                    unsupported_tool_content("audio", Some(audio.mime_type.clone()), None)
+                }
+            }
+            ContentBlock::ResourceLink(resource) => ActivityToolContent::Resource {
+                uri: resource.uri.clone(),
+                name: Some(resource.name.clone()),
+                title: resource.title.clone(),
+                description: resource.description.clone(),
+                media_type: resource.mime_type.clone(),
+                size_bytes: resource.size.filter(|size| *size >= 0),
+                text: None,
             },
-            ContentBlock::Resource(_) => ActivityToolContent::Other {
-                label: "Resource".to_string(),
+            ContentBlock::Resource(resource) => match &resource.resource {
+                EmbeddedResourceResource::TextResourceContents(resource) => {
+                    ActivityToolContent::Resource {
+                        uri: resource.uri.clone(),
+                        name: None,
+                        title: None,
+                        description: None,
+                        media_type: resource.mime_type.clone(),
+                        size_bytes: None,
+                        text: Some(resource.text.clone()),
+                    }
+                }
+                EmbeddedResourceResource::BlobResourceContents(resource) => {
+                    ActivityToolContent::Unsupported {
+                        content_type: "resource_blob".to_string(),
+                        media_type: resource.mime_type.clone(),
+                        uri: Some(resource.uri.clone()),
+                    }
+                }
+                _ => unsupported_tool_content("resource", None, None),
             },
-            ContentBlock::Image(_) => ActivityToolContent::Other {
-                label: "Image".to_string(),
-            },
-            ContentBlock::Audio(_) => ActivityToolContent::Other {
-                label: "Audio".to_string(),
-            },
-            _ => ActivityToolContent::Other {
-                label: "Content".to_string(),
-            },
+            _ => unsupported_tool_content("content", None, None),
         },
         ToolCallContent::Diff(diff) => ActivityToolContent::Diff {
             path: diff.path.display().to_string(),
@@ -156,11 +209,23 @@ fn tool_content_detail(content: &ToolCallContent) -> ActivityToolContent {
         ToolCallContent::Terminal(terminal) => ActivityToolContent::Terminal {
             terminal_id: terminal.terminal_id.to_string(),
         },
-        _ => ActivityToolContent::Other {
-            label: "Tool content".to_string(),
-        },
+        _ => unsupported_tool_content("tool_content", None, None),
     }
 }
+
+fn unsupported_tool_content(
+    content_type: &str,
+    media_type: Option<String>,
+    uri: Option<String>,
+) -> ActivityToolContent {
+    ActivityToolContent::Unsupported {
+        content_type: content_type.to_string(),
+        media_type,
+        uri,
+    }
+}
+
+const MAX_INLINE_TOOL_MEDIA_BYTES: usize = 10 * 1024 * 1024;
 
 pub(crate) fn tool_kind_name(kind: ToolKind) -> String {
     match kind {

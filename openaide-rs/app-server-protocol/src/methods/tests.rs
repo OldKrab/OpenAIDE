@@ -4,6 +4,10 @@ use super::*;
 fn client_initialize_uses_slash_method_namespace() {
     assert_eq!(ClientProbe::METHOD, "client/probe");
     assert_eq!(ClientInitialize::METHOD, "client/initialize");
+    assert_eq!(
+        ClientCapabilitiesChanged::METHOD,
+        "client/capabilitiesChanged"
+    );
 }
 
 #[test]
@@ -58,10 +62,7 @@ fn attachment_methods_use_attachment_namespace() {
         AttachmentRefreshHandles::METHOD,
         "attachment/refreshHandles"
     );
-    assert_eq!(
-        AttachmentReleaseHandles::METHOD,
-        "attachment/releaseHandles"
-    );
+    assert_eq!(AttachmentRelease::METHOD, "attachment/release");
     assert_eq!(AttachmentReveal::METHOD, "attachment/reveal");
 }
 

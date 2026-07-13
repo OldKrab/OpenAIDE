@@ -1,8 +1,11 @@
 use std::fs;
-use std::io::Write;
+use std::io::{BufRead, Write};
+use std::time::Instant;
 
 use crate::protocol::errors::RuntimeError;
-use crate::protocol::model::{ActivityStep, ChatMessage, MessagePage, NormalizedMessage};
+use crate::protocol::model::{
+    ActivityStep, AgentMessageRole, ChatMessage, MessagePage, NormalizedMessage,
+};
 
 use super::atomic;
 use super::cursor;
@@ -10,36 +13,24 @@ use super::records::{MessageMeta, StoredMessage};
 use super::tool_artifacts::{lightweight_detail_summary, should_replace_input_summary};
 use super::Store;
 
+mod agent_append;
+mod journal;
 mod mutations;
 mod replace;
+mod transaction;
 
-pub(crate) struct MessageFilesBackup {
-    messages: Option<Vec<u8>>,
-    meta: Option<Vec<u8>>,
+pub(crate) use agent_append::AgentMessageAppend;
+pub(super) use agent_append::AgentMessageCache;
+
+const MESSAGE_BASE_RECORD: &str = "message_base";
+
+#[derive(serde::Deserialize, serde::Serialize)]
+struct MessageBaseHeader {
+    record_type: String,
+    journal_sequence: u64,
 }
 
 impl Store {
-    pub(crate) fn backup_message_files(
-        &self,
-        task_id: &str,
-    ) -> Result<MessageFilesBackup, RuntimeError> {
-        let task_dir = self.task_dir(task_id)?;
-        Ok(MessageFilesBackup {
-            messages: read_optional_bytes(&task_dir.join("messages.jsonl"))?,
-            meta: read_optional_bytes(&task_dir.join("message_meta.json"))?,
-        })
-    }
-
-    pub(crate) fn restore_message_files(
-        &self,
-        task_id: &str,
-        backup: &MessageFilesBackup,
-    ) -> Result<(), RuntimeError> {
-        let task_dir = self.task_dir(task_id)?;
-        restore_optional_bytes(&task_dir.join("messages.jsonl"), backup.messages.as_deref())?;
-        restore_optional_bytes(&task_dir.join("message_meta.json"), backup.meta.as_deref())
-    }
-
     pub fn append_message(
         &self,
         task_id: &str,
@@ -67,6 +58,9 @@ impl Store {
             .iter_mut()
             .find(|stored| stored.chat.identity == message.identity)
         {
+            message
+                .message
+                .preserve_tool_permission_outcomes_from(&stored.chat.message);
             message.cursor = stored.chat.cursor.clone();
             message.message_id = stored.chat.message_id.clone();
             message
@@ -92,12 +86,6 @@ impl Store {
     }
 
     pub fn tail_page(&self, task_id: &str, limit: usize) -> Result<MessagePage, RuntimeError> {
-        #[cfg(test)]
-        if self.take_tail_page_failure_for_test() {
-            return Err(RuntimeError::Storage(
-                "injected Task snapshot read failure".to_string(),
-            ));
-        }
         let limit = limit.clamp(1, 500);
         let messages = self.read_messages(task_id)?;
         let total = messages.len();
@@ -119,21 +107,89 @@ impl Store {
     }
 
     pub fn read_messages(&self, task_id: &str) -> Result<Vec<StoredMessage>, RuntimeError> {
-        let path = self.task_dir(task_id)?.join("messages.jsonl");
-        if !path.exists() {
-            return Ok(Vec::new());
-        }
-        let text = fs::read_to_string(path)?;
+        self.read_messages_with_journal_sequence(task_id)
+            .map(|(messages, _)| messages)
+    }
+
+    fn read_messages_with_journal_sequence(
+        &self,
+        task_id: &str,
+    ) -> Result<(Vec<StoredMessage>, u64), RuntimeError> {
+        #[cfg(test)]
+        self.inner
+            .message_file_read_count
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let task_dir = self.task_dir(task_id)?;
+        let path = task_dir.join("messages.jsonl");
         let mut messages = Vec::new();
-        for line in text.lines().filter(|line| !line.trim().is_empty()) {
-            messages.push(serde_json::from_str(line)?);
+        let mut applied_journal_sequence = 0;
+        if path.exists() {
+            let text = fs::read_to_string(path)?;
+            for line in text.lines().filter(|line| !line.trim().is_empty()) {
+                let value: serde_json::Value = serde_json::from_str(line)?;
+                if value.get("record_type").and_then(|value| value.as_str())
+                    == Some(MESSAGE_BASE_RECORD)
+                {
+                    applied_journal_sequence =
+                        serde_json::from_value::<MessageBaseHeader>(value)?.journal_sequence;
+                } else {
+                    messages.push(serde_json::from_value(value)?);
+                }
+            }
         }
-        Ok(messages)
+        let journal_sequence = journal::replay(&task_dir, applied_journal_sequence, &mut messages)?;
+        Ok((messages, journal_sequence))
+    }
+
+    /// Materializes the append journal after a prompt boundary without delaying chunk commits.
+    pub(crate) fn compact_message_journal(&self, task_id: &str) -> Result<(), RuntimeError> {
+        let task_dir = self.task_dir(task_id)?;
+        let journal_path = journal::path(&task_dir);
+        if !journal_path.exists() {
+            return Ok(());
+        }
+        let started = Instant::now();
+        let journal_bytes = journal_path
+            .metadata()
+            .map(|metadata| metadata.len())
+            .unwrap_or_default();
+        let journal_sequence = journal::latest_sequence(&task_dir)?;
+        let applied_sequence = read_applied_journal_sequence(&task_dir.join("messages.jsonl"))?;
+        let message_count = if applied_sequence >= journal_sequence {
+            None
+        } else {
+            let messages = self.read_messages(task_id)?;
+            let message_count = messages.len();
+            self.write_messages(task_id, &messages)?;
+            Some(message_count)
+        };
+        journal::remove(&task_dir)?;
+        crate::logging::info(
+            "message_journal_compacted",
+            serde_json::json!({
+                "task_id": task_id,
+                "message_count": message_count,
+                "journal_bytes": journal_bytes,
+                "duration_ms": started.elapsed().as_millis(),
+            }),
+        );
+        Ok(())
     }
 
     pub fn message_history_version(&self, task_id: &str) -> Result<u64, RuntimeError> {
+        let meta_path = self.task_dir(task_id)?.join("message_meta.json");
+        if meta_path.exists() {
+            return self.read_message_version(task_id, 0);
+        }
         let messages = self.read_messages(task_id)?;
-        self.read_message_version(task_id, messages.len() as u64)
+        Ok(messages.len() as u64)
+    }
+
+    /// Timestamp of the latest durable Chat write, independent from Task metadata changes.
+    pub fn local_history_updated_at(&self, task_id: &str) -> Result<String, RuntimeError> {
+        let path = self.task_dir(task_id)?.join("message_meta.json");
+        let text = fs::read_to_string(path)?;
+        Ok(serde_json::from_str::<MessageMeta>(&text)?.local_history_updated_at)
     }
 
     pub fn message_history_has_messages(&self, task_id: &str) -> Result<bool, RuntimeError> {
@@ -157,19 +213,56 @@ impl Store {
             .message_file_write_count
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let mut bytes = Vec::new();
+        let task_dir = self.task_dir(task_id)?;
+        let journal_sequence = journal::latest_sequence(&task_dir)?;
+        if journal_sequence > 0 {
+            serde_json::to_writer(
+                &mut bytes,
+                &MessageBaseHeader {
+                    record_type: MESSAGE_BASE_RECORD.to_string(),
+                    journal_sequence,
+                },
+            )?;
+            writeln!(&mut bytes).map_err(|error| RuntimeError::Storage(error.to_string()))?;
+        }
         for message in messages {
             serde_json::to_writer(&mut bytes, message)?;
             writeln!(&mut bytes).map_err(|error| RuntimeError::Storage(error.to_string()))?;
         }
-        atomic::write_bytes(&self.task_dir(task_id)?.join("messages.jsonl"), &bytes)
+        atomic::write_bytes(&task_dir.join("messages.jsonl"), &bytes)?;
+        self.invalidate_agent_message_cache(task_id);
+        Ok(())
     }
 
     fn write_meta(&self, task_id: &str, messages: &[StoredMessage]) -> Result<(), RuntimeError> {
+        self.write_meta_at_least(task_id, messages, 0)
+    }
+
+    /// Advances the Chat clock to cover an authoritative Native Session snapshot.
+    fn write_meta_at_least(
+        &self,
+        task_id: &str,
+        messages: &[StoredMessage],
+        minimum_updated_at: u128,
+    ) -> Result<(), RuntimeError> {
         let version = self.next_message_version(task_id, messages.len() as u64)?;
+        let previous = self
+            .local_history_updated_at(task_id)
+            .ok()
+            .and_then(|value| value.parse::<u128>().ok())
+            .unwrap_or_default();
+        let now = crate::time::now_string()
+            .parse::<u128>()
+            .unwrap_or_default();
+        let local_history_updated_at = now
+            .max(previous.saturating_add(1))
+            .max(minimum_updated_at)
+            .to_string();
         let meta = MessageMeta {
             task_id: task_id.to_string(),
             version,
             message_count: messages.len() as u64,
+            local_history_updated_at,
             first_cursor: messages.first().map(|message| message.chat.cursor.clone()),
             last_cursor: messages.last().map(|message| message.chat.cursor.clone()),
         };
@@ -245,6 +338,30 @@ impl Store {
             .map(|meta| meta.version)
             .map_err(RuntimeError::from)
     }
+
+    fn invalidate_agent_message_cache(&self, task_id: &str) {
+        self.inner
+            .agent_message_cache
+            .lock()
+            .expect("Agent message cache poisoned")
+            .remove(task_id);
+    }
+}
+
+fn read_applied_journal_sequence(path: &std::path::Path) -> Result<u64, RuntimeError> {
+    if !path.exists() {
+        return Ok(0);
+    }
+    let mut first_line = String::new();
+    std::io::BufReader::new(fs::File::open(path)?).read_line(&mut first_line)?;
+    if first_line.trim().is_empty() {
+        return Ok(0);
+    }
+    let value: serde_json::Value = serde_json::from_str(&first_line)?;
+    if value.get("record_type").and_then(|value| value.as_str()) != Some(MESSAGE_BASE_RECORD) {
+        return Ok(0);
+    }
+    Ok(serde_json::from_value::<MessageBaseHeader>(value)?.journal_sequence)
 }
 
 const TARGET_CHAT_TURNS: usize = 10;
@@ -277,7 +394,11 @@ fn chat_page_start(messages: &[StoredMessage], requested_start: usize, end: usiz
         .unwrap_or(requested_start);
     if !matches!(
         &messages[requested_start].chat.message,
-        NormalizedMessage::Activity { .. } | NormalizedMessage::Thought { .. }
+        NormalizedMessage::Activity { .. }
+            | NormalizedMessage::AgentMessage {
+                role: AgentMessageRole::Thought,
+                ..
+            }
     ) {
         return requested_start;
     }
@@ -286,7 +407,11 @@ fn chat_page_start(messages: &[StoredMessage], requested_start: usize, end: usiz
     while run_start > 0
         && matches!(
             &messages[run_start].chat.message,
-            NormalizedMessage::Activity { .. } | NormalizedMessage::Thought { .. }
+            NormalizedMessage::Activity { .. }
+                | NormalizedMessage::AgentMessage {
+                    role: AgentMessageRole::Thought,
+                    ..
+                }
         )
     {
         run_start -= 1;
@@ -318,26 +443,4 @@ fn page_before_index(
         .iter()
         .position(|message| message.chat.cursor == before_cursor)
         .ok_or_else(|| RuntimeError::InvalidParams("before_cursor".to_string()))
-}
-
-fn read_optional_bytes(path: &std::path::Path) -> Result<Option<Vec<u8>>, RuntimeError> {
-    if path.exists() {
-        Ok(Some(fs::read(path)?))
-    } else {
-        Ok(None)
-    }
-}
-
-fn restore_optional_bytes(
-    path: &std::path::Path,
-    bytes: Option<&[u8]>,
-) -> Result<(), RuntimeError> {
-    match bytes {
-        Some(bytes) => atomic::write_bytes(path, bytes),
-        None => match fs::remove_file(path) {
-            Ok(()) => Ok(()),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(error) => Err(RuntimeError::from(error)),
-        },
-    }
 }

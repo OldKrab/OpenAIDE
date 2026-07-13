@@ -1,4 +1,5 @@
-use std::{env, sync::Arc};
+use std::sync::Arc;
+use uuid::Uuid;
 
 use crate::agent::{
     catalog_store::AgentCatalogStore, product_api::AgentProductApi,
@@ -16,8 +17,8 @@ use crate::settings::{
 };
 use crate::shell_file_handles::ShellFileRevealRegistry;
 use crate::snapshots::{
-    AgentRegistrySnapshotSource, ProjectCollectionStore, SnapshotBuilder, TaskNavigationStore,
-    TaskSnapshotStore,
+    AgentRegistrySnapshotSource, ProjectCollectionStore, SnapshotBuilder, SnapshotSources,
+    TaskNavigationStore, TaskSnapshotStore,
 };
 use crate::state_sync::StateStream;
 use crate::storage::Store;
@@ -40,17 +41,18 @@ pub(super) fn gateway(
     agent_registry: AgentRegistryHandle,
     agent_runtime: Arc<dyn AgentRuntime>,
     acp_trace_state: crate::agent::acp_trace::AcpTraceState,
+    configured_projects: ConfiguredProjectRoots,
 ) -> Result<GatewayFactoryOutput, ProtocolEdgeStdioStartError> {
     let (task_notifier, task_updates) = TaskUpdateNotifier::channel();
-    let configured_projects = configured_project_roots_from_env();
     let projects = ProjectCollectionStore::new_with_configured_roots(
         store.clone(),
         configured_projects.clone(),
     );
     let task_navigation = TaskNavigationStore::new(store.clone());
-    let task_snapshots = Arc::new(TaskSnapshotStore::new(store.clone()));
-    let project_resolver =
-        StorageProjectResolver::new_with_configured_roots(store.clone(), configured_projects);
+    let project_resolver = StorageProjectResolver::new_with_configured_roots(
+        store.clone(),
+        configured_projects.clone(),
+    );
     let server_requests = ServerRequestRuntime::new();
     let shell_file_reveals = ShellFileRevealRegistry::new();
     let app_preferences = Arc::new(AppPreferencesService::new(store.clone()));
@@ -76,9 +78,16 @@ pub(super) fn gateway(
         task_notifier,
         server_requests.clone(),
     )?);
+    let task_snapshots = Arc::new(TaskSnapshotStore::with_history_sync(
+        store.clone(),
+        task_product_api.history_sync_snapshots(),
+    ));
     #[cfg(test)]
     let attachment_runtime = task_product_api.attachment_runtime();
     let state_root_id = state_root.fingerprint().as_str().to_string();
+    // A gateway construction is one App Server process epoch. Replicas use this ID to
+    // distinguish restarts, while SnapshotBuilder keeps it stable for every snapshot in the epoch.
+    let server_id = Uuid::new_v4().to_string();
     let gateway = RpcGateway::new(
         ClientHub::new(10_000),
         AppLifecycle::new(),
@@ -86,18 +95,22 @@ pub(super) fn gateway(
         server_requests,
         shell_file_reveals,
         SnapshotBuilder::with_sources(
-            "local-app-server".into(),
+            server_id.into(),
             state_root_id.into(),
-            Arc::new(agent_snapshots),
-            Arc::new(projects),
-            Arc::new(SettingsCatalog::with_backend_settings(
-                app_preferences.clone(),
-                runtime_settings.clone(),
-            )),
-            Arc::new(task_navigation),
-            task_snapshots.clone(),
+            SnapshotSources::new(
+                Arc::new(store.clone()),
+                Arc::new(agent_snapshots),
+                Arc::new(projects),
+                Arc::new(SettingsCatalog::with_backend_settings(
+                    app_preferences.clone(),
+                    runtime_settings.clone(),
+                )),
+                Arc::new(task_navigation),
+                task_snapshots.clone(),
+            ),
         ),
         task_snapshots,
+        configured_projects,
         AppServerProbeFacts::new(state_root.fingerprint().as_str()),
         Arc::new(RuntimeDiagnosticsService::new(store.clone())),
         Arc::new(agent_product_api.clone()),
@@ -119,7 +132,6 @@ pub(super) fn gateway(
         task_product_api.clone(),
         task_product_api.clone(),
         task_product_api.clone(),
-        task_product_api.clone(),
         task_product_api,
     );
     Ok(GatewayFactoryOutput {
@@ -128,13 +140,4 @@ pub(super) fn gateway(
         #[cfg(test)]
         attachment_runtime,
     })
-}
-
-fn configured_project_roots_from_env() -> ConfiguredProjectRoots {
-    let Some(paths) = env::var_os("OPENAIDE_PROJECT_ROOTS") else {
-        return ConfiguredProjectRoots::default();
-    };
-    ConfiguredProjectRoots::from_workspace_roots(
-        env::split_paths(&paths).map(|path| path.to_string_lossy().to_string()),
-    )
 }

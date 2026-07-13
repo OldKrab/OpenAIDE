@@ -1,6 +1,7 @@
 import {
   applySubscriptionEvent,
   createSubscriptionIngestionState,
+  subscriptionScopesEqual,
   STATE_SUBSCRIBE,
   STATE_UNSUBSCRIBE,
   type AgentSummary,
@@ -12,18 +13,20 @@ import {
   type SubscriptionIngestionState,
   type SubscriptionScope,
   type SubscriptionSnapshot,
+  type TaskNavigationSnapshot,
 } from "@openaide/app-server-client";
 import type { Dispatch } from "react";
 import type { AppAction } from "../state/appReducer";
 import { applyProtocolAgents } from "../state/appServerAgents";
 import {
+  createProtocolTaskSnapshotMapper,
   mapProtocolTaskNavigation,
-  mapProtocolTaskSnapshot,
 } from "../state/appServerProtocolMapping";
+import { mapProtocolToolDetail } from "../state/appServerProtocolChatMapping";
 import type { AgentOption } from "../state/composerOptions";
 
 type StateSubscriptionConnection = Pick<BackendConnection, "events" | "request">
-  & Partial<Pick<BackendConnection, "stateResets">>;
+  & Partial<Pick<BackendConnection, "eventStreamDisconnects" | "stateResets">>;
 const SUBSCRIPTION_RETRY_MS = 500;
 const MAX_SUBSCRIPTION_RETRY_MS = 5_000;
 const MAX_PENDING_EVENTS = 1_000;
@@ -36,6 +39,7 @@ const subscriptionLeases = new WeakMap<
 export type StateSubscriptionMappingContext = SubscriptionIngestionContext & {
   agents?: AgentSummary[];
   projects?: ProjectSummary[];
+  taskNavigation?: TaskNavigationSnapshot;
 };
 
 export function mappingContextFromClientSnapshot(snapshot: ClientSnapshot): StateSubscriptionMappingContext {
@@ -52,6 +56,7 @@ export function startAppServerStateSubscription({
   context,
   currentAgentId,
   dispatch,
+  onBaselineError,
   onBaselineLost,
   onBaselineReady,
   setAgents,
@@ -63,22 +68,28 @@ export function startAppServerStateSubscription({
   dispatch: Dispatch<AppAction>;
   /** Signals that events must stop mutating product state until a fresh baseline is installed. */
   onBaselineLost?: () => void;
+  /** Reports a failed baseline read that will be retried with bounded backoff. */
+  onBaselineError?: (error: unknown) => void;
   /** Signals that the current scope has a cursor baseline and no queued resync gap. */
   onBaselineReady?: () => void;
   setAgents?: (agents: AgentOption[]) => void;
   scope: SubscriptionScope;
 }) {
+  const mapTaskSnapshot = createProtocolTaskSnapshotMapper();
   const scopeLease = acquireSubscriptionLease(backendConnection.request, scope);
   let disposed = false;
   let state: SubscriptionIngestionState | undefined;
   let pendingEvents: AppServerEvent[] = [];
-  let unsubscribe = backendConnection.events(handleEvent);
-  const unsubscribeStateResets = backendConnection.stateResets?.(handleStateReset);
-  let subscribeInFlight = false;
-  let subscribeAgain = false;
+  let subscribeInFlightGeneration: number | undefined;
+  let subscribeAgainGeneration: number | undefined;
   let refreshing = true;
   let retryTimer: ReturnType<typeof setTimeout> | undefined;
   let retryDelay = SUBSCRIPTION_RETRY_MS;
+  let streamConnected = true;
+  let streamGeneration = 0;
+  const unsubscribe = backendConnection.events(handleEvent);
+  const unsubscribeEventStreamDisconnects = backendConnection.eventStreamDisconnects?.(handleEventStreamDisconnect);
+  const unsubscribeStateResets = backendConnection.stateResets?.(handleStateReset);
 
   void subscribe();
 
@@ -86,17 +97,23 @@ export function startAppServerStateSubscription({
     disposed = true;
     if (retryTimer !== undefined) clearTimeout(retryTimer);
     unsubscribe();
+    unsubscribeEventStreamDisconnects?.();
     unsubscribeStateResets?.();
     scopeLease.release(unsubscribeScope);
   };
 
   async function subscribe() {
-    if (subscribeInFlight) return;
+    if (!streamConnected) return;
+    const attemptGeneration = streamGeneration;
+    if (subscribeInFlightGeneration === attemptGeneration) {
+      subscribeAgainGeneration = attemptGeneration;
+      return;
+    }
+    subscribeInFlightGeneration = attemptGeneration;
     if (retryTimer !== undefined) clearTimeout(retryTimer);
     retryTimer = undefined;
     if (!refreshing) onBaselineLost?.();
     refreshing = true;
-    subscribeInFlight = true;
     try {
       const pendingCleanup = scopeLease.waitForCleanup();
       if (pendingCleanup) await pendingCleanup;
@@ -109,19 +126,23 @@ export function startAppServerStateSubscription({
         await scopeLease.cleanupAfterLateSubscribe(unsubscribeScope);
         return;
       }
-      if (subscribeAgain) return;
+      if (!streamConnected || attemptGeneration !== streamGeneration) return;
+      if (subscribeAgainGeneration === attemptGeneration) return;
       state = createSubscriptionIngestionState(result, context);
       refreshing = false;
       retryDelay = SUBSCRIPTION_RETRY_MS;
       applySnapshot(result.snapshot);
       replayPendingEvents();
-      if (!subscribeAgain) onBaselineReady?.();
-    } catch {
+      if (subscribeAgainGeneration !== attemptGeneration) onBaselineReady?.();
+    } catch (error) {
+      if (!streamConnected || attemptGeneration !== streamGeneration) return;
+      onBaselineError?.(error);
       scheduleSubscribeRetry();
     } finally {
-      subscribeInFlight = false;
-      if (subscribeAgain && !disposed) {
-        subscribeAgain = false;
+      if (subscribeInFlightGeneration !== attemptGeneration) return;
+      subscribeInFlightGeneration = undefined;
+      if (subscribeAgainGeneration === attemptGeneration && !disposed) {
+        subscribeAgainGeneration = undefined;
         void subscribe();
       }
     }
@@ -135,15 +156,30 @@ export function startAppServerStateSubscription({
 
   function handleStateReset() {
     if (disposed) return;
-    if (subscribeInFlight) {
-      subscribeAgain = true;
-      return;
-    }
+    streamConnected = true;
+    streamGeneration += 1;
+    subscribeAgainGeneration = undefined;
+    // Events queued before continuity was re-established belong to the old
+    // cursor/process generation and cannot be replayed onto the new baseline.
+    pendingEvents = [];
     void subscribe();
   }
 
+  function handleEventStreamDisconnect() {
+    if (disposed || !streamConnected) return;
+    streamConnected = false;
+    streamGeneration += 1;
+    state = undefined;
+    pendingEvents = [];
+    refreshing = true;
+    subscribeAgainGeneration = undefined;
+    if (retryTimer !== undefined) clearTimeout(retryTimer);
+    retryTimer = undefined;
+    onBaselineLost?.();
+  }
+
   function scheduleSubscribeRetry() {
-    if (disposed || retryTimer !== undefined) return;
+    if (disposed || !streamConnected || retryTimer !== undefined) return;
     const delay = retryDelay;
     retryDelay = Math.min(retryDelay * 2, MAX_SUBSCRIPTION_RETRY_MS);
     retryTimer = setTimeout(() => {
@@ -160,37 +196,44 @@ export function startAppServerStateSubscription({
       queuePendingEvent(event);
       return;
     }
-    applyEvent(event);
+    applyEvent(event, true);
   }
 
-  function applyEvent(event: AppServerEvent) {
+  function applyEvent(event: AppServerEvent, presentLive: boolean) {
     if (!state || disposed) return false;
     const result = applySubscriptionEvent(state, event);
     if (result.kind === "ignored") {
-      // Every listener shares one connection stream. Even events owned by another
-      // subscription advance that stream's transport cursor.
       state = result.state;
       return true;
     }
     if (result.kind === "resyncRequired") {
-      if (subscribeInFlight) subscribeAgain = true;
-      else void subscribe();
+      void subscribe();
       return false;
     }
     state = result.state;
-    if (result.snapshotChanged) applySnapshot(result.state.snapshot);
+    const liveText = presentLive
+      ? liveTextPresentationAction(event, result.state.snapshot)
+      : undefined;
+    if (result.snapshotChanged) {
+      applySnapshot(result.state.snapshot, liveText);
+    } else if (liveText) {
+      dispatch(liveText);
+    }
     return true;
   }
 
   function replayPendingEvents() {
     if (!state || pendingEvents.length === 0) return;
-    const snapshotCursorIndex = pendingEvents.findIndex((event) => event.cursor === state?.cursor);
+    const scopedEvents = pendingEvents.filter((event) => (
+      subscriptionScopesEqual(event.subscription, scope)
+    ));
+    const snapshotCursorIndex = scopedEvents.findIndex((event) => event.cursor === state?.cursor);
     const events = snapshotCursorIndex === -1
-      ? pendingEvents
-      : pendingEvents.slice(snapshotCursorIndex + 1);
+      ? scopedEvents
+      : scopedEvents.slice(snapshotCursorIndex + 1);
     pendingEvents = [];
     for (const [index, event] of events.entries()) {
-      if (applyEvent(event)) continue;
+      if (applyEvent(event, false)) continue;
       for (const remaining of events.slice(index + 1)) queuePendingEvent(remaining);
       break;
     }
@@ -201,20 +244,73 @@ export function startAppServerStateSubscription({
       // An unbounded queue cannot be reconciled safely. Drop the old generation
       // and require a snapshot taken after the overflow.
       pendingEvents = [];
-      if (subscribeInFlight) subscribeAgain = true;
+      if (subscribeInFlightGeneration === streamGeneration) {
+        subscribeAgainGeneration = streamGeneration;
+      }
     }
     pendingEvents.push(event);
   }
 
-  function applySnapshot(snapshot: SubscriptionSnapshot) {
+  function applySnapshot(
+    snapshot: SubscriptionSnapshot,
+    liveText?: Extract<AppAction, { type: "taskChat:liveText" }>,
+  ) {
     for (const action of actionsFromSubscriptionSnapshot(snapshot, context, {
       currentAgentId,
       dispatch,
       setAgents,
-    })) {
-      dispatch(action);
+    }, mapTaskSnapshot)) {
+      if (
+        action.type === "snapshot"
+        && liveText
+        && action.snapshot.task.task_id === liveText.taskId
+      ) {
+        dispatch({
+          ...action,
+          liveText: {
+            messageId: liveText.messageId,
+            channel: liveText.channel,
+            eventCursor: liveText.eventCursor,
+          },
+        });
+      } else {
+        dispatch(action);
+      }
     }
   }
+}
+
+function liveTextPresentationAction(
+  event: AppServerEvent,
+  snapshot: SubscriptionSnapshot,
+): Extract<AppAction, { type: "taskChat:liveText" }> | undefined {
+  if (snapshot.kind !== "task") return undefined;
+  const payload = event.payload;
+  if (payload.kind !== "taskChanged") return undefined;
+  const liveChange = [...(payload.changes.chat ?? [])].reverse().find((change) => (
+    change.kind === "append" || change.kind === "appendText"
+  ));
+  if (!liveChange) return undefined;
+  const messageId = liveChange.kind === "append" ? liveChange.item.messageId : liveChange.messageId;
+  const item = liveChange.kind === "append"
+    ? liveChange.item
+    : snapshot.task.chat.items.find((candidate) => candidate.messageId === messageId);
+  const channel = item && textChannel(item);
+  if (!channel) return undefined;
+  return {
+    type: "taskChat:liveText",
+    taskId: payload.taskId,
+    messageId,
+    channel,
+    eventCursor: event.cursor,
+  };
+}
+
+function textChannel(item: import("@openaide/app-server-client").ChatItem) {
+  if (!item.parts.some((part) => part.kind === "text")) return undefined;
+  if (item.role === "agent") return "agent" as const;
+  if (item.role === "system") return "thought" as const;
+  return undefined;
 }
 
 function acquireSubscriptionLease(
@@ -276,6 +372,8 @@ function subscriptionScopeKey(scope: SubscriptionScope) {
       return `taskNavigation:${scope.projectId ?? ""}`;
     case "task":
       return `task:${scope.taskId}`;
+    case "toolDetail":
+      return `toolDetail:${scope.taskId}:${scope.artifactId}`;
   }
 }
 
@@ -287,33 +385,46 @@ function actionsFromSubscriptionSnapshot(
     dispatch: Dispatch<AppAction>;
     setAgents?: (agents: AgentOption[]) => void;
   },
+  mapTaskSnapshot = createProtocolTaskSnapshotMapper(),
 ): AppAction[] {
   switch (snapshot.kind) {
     case "projects":
       context.projects = snapshot.projects.projects;
       return [{
         type: "projects",
-        activeProjectId: snapshot.projects.activeProjectId ?? undefined,
         projects: snapshot.projects.projects.map((project) => ({
           projectId: project.projectId,
           label: project.label,
         })),
-      }];
+      }, ...remappedTaskNavigationActions(context)];
     case "agents":
       context.agents = snapshot.agents.agents;
       if (agents.setAgents) {
         applyProtocolAgents(snapshot.agents, agents.currentAgentId?.() ?? "", agents.setAgents, agents.dispatch);
       }
-      return [];
+      return remappedTaskNavigationActions(context);
     case "taskNavigation": {
-      const mapped = mapProtocolTaskNavigation(snapshot.navigation, context);
-      return [{ type: "tasks", tasks: mapped.tasks }];
+      context.taskNavigation = snapshot.navigation;
+      return remappedTaskNavigationActions(context);
     }
     case "task": {
-      const mapped = mapProtocolTaskSnapshot(snapshot.task, context);
+      const mapped = mapTaskSnapshot(snapshot.task, context);
       return [{ type: "snapshot", snapshot: mapped.snapshot, intent: "refresh" }];
     }
     case "settings":
       return [];
+    case "toolDetail":
+      return [{
+        type: "toolDetail:result",
+        taskId: snapshot.taskId,
+        artifactId: snapshot.artifactId,
+        details: mapProtocolToolDetail(snapshot.details),
+      }];
   }
+}
+
+function remappedTaskNavigationActions(context: StateSubscriptionMappingContext): AppAction[] {
+  if (!context.taskNavigation) return [];
+  const mapped = mapProtocolTaskNavigation(context.taskNavigation, context);
+  return [{ type: "tasks", archived: false, tasks: mapped.tasks }];
 }

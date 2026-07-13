@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  CLIENT_CAPABILITIES_CHANGED,
   CLIENT_HEARTBEAT,
   CLIENT_INITIALIZE,
   PERMISSION_REQUEST,
@@ -16,6 +17,7 @@ import {
   createWebProxyBackendConnection,
   type LocalHttpFetch,
 } from "./localHttpConnection";
+import { BackendReplicaChangedError } from "./backendReplicaChangedError";
 import { AppServerProtocolError } from "./protocolError";
 
 describe("LocalHttpBackendConnection", () => {
@@ -185,7 +187,36 @@ describe("LocalHttpBackendConnection", () => {
     connection.close();
   });
 
-  it("invalidates subscribed state after event-stream continuity is lost", async () => {
+  it("backs off repeated event-stream reconnect failures", async () => {
+    vi.useFakeTimers();
+    try {
+      let streamAttempt = 0;
+      const fetch = vi.fn<LocalHttpFetch>(async (_input, init) => {
+        if (init.headers.Accept === "text/event-stream") {
+          streamAttempt += 1;
+          return streamAttempt < 3 ? closedEventStreamResponse() : eventStreamResponse([]);
+        }
+        const request = JSON.parse(init.body) as { id: string };
+        return fetchResponse([response(request.id, { result: initializeResult() })]);
+      });
+      const connection = createLocalHttpBackendConnection(connectionOptions(fetch));
+
+      await connection.initialize(initializeParams());
+      await Promise.resolve();
+      expect(streamAttempt).toBe(1);
+      await vi.advanceTimersByTimeAsync(500);
+      expect(streamAttempt).toBe(2);
+      await vi.advanceTimersByTimeAsync(999);
+      expect(streamAttempt).toBe(2);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(streamAttempt).toBe(3);
+      connection.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("invalidates subscribed state only after the replacement event stream connects", async () => {
     vi.useFakeTimers();
     try {
       let streamAttempt = 0;
@@ -198,14 +229,25 @@ describe("LocalHttpBackendConnection", () => {
         return fetchResponse([response(request.id, { result: initializeResult() })]);
       });
       const connection = createLocalHttpBackendConnection(connectionOptions(fetch));
-      const resets: string[] = [];
+      const resets: unknown[] = [];
+      const disconnected = vi.fn();
 
-      connection.stateResets(() => resets.push("reset"));
+      connection.eventStreamDisconnects(disconnected);
+      connection.stateResets((reset) => resets.push(reset));
       await connection.initialize(initializeParams());
+      await vi.waitFor(() => expect(streamAttempt).toBe(1));
+      expect(disconnected).toHaveBeenCalledOnce();
+      const lateDisconnected = vi.fn();
+      connection.eventStreamDisconnects(lateDisconnected);
+      expect(lateDisconnected).toHaveBeenCalledOnce();
+      expect(resets).toEqual([]);
+      expect(streamAttempt).toBe(1);
       await vi.advanceTimersByTimeAsync(500);
 
       expect(streamAttempt).toBe(2);
-      expect(resets).toEqual(["reset"]);
+      expect(resets).toEqual([
+        { serverId: "server-1", stateRootId: "root-1" },
+      ]);
       connection.close();
     } finally {
       vi.useRealTimers();
@@ -226,7 +268,9 @@ describe("LocalHttpBackendConnection", () => {
         }
         initializeAttempts += 1;
         const request = JSON.parse(init.body) as { id: string };
-        return fetchResponse([response(request.id, { result: initializeResult() })]);
+        return fetchResponse([response(request.id, {
+          result: initializeResult(initializeAttempts === 1 ? "server-1" : "server-2"),
+        })]);
       });
       const connection = createLocalHttpBackendConnection(connectionOptions(fetch));
       const reset = vi.fn();
@@ -238,32 +282,35 @@ describe("LocalHttpBackendConnection", () => {
       expect(initializeAttempts).toBe(2);
       expect(streamAttempts).toBe(2);
       expect(reset).toHaveBeenCalledOnce();
+      expect(reset).toHaveBeenCalledWith({
+        serverId: "server-2",
+        stateRootId: "root-1",
+      });
       connection.close();
     } finally {
       vi.useRealTimers();
     }
   });
 
-  it("reinitializes and retries once when the server forgets the client", async () => {
+  it("reinitializes without replaying a product request into the replacement replica", async () => {
     const fetch = fetchSequence([
       [response("local-http-request-1", { result: initializeResult() })],
       [protocolError("local-http-request-2", "notInitialized", "client/initialize must succeed before product requests")],
-      [response("local-http-request-3", { result: initializeResult() })],
-      [
-        response("local-http-request-4", {
-          result: {
-            cursor: "cursor-2",
-            scope: { kind: "projects" },
-            snapshot: { kind: "projects", projects: { projects: [] } },
-          },
-        }),
-      ],
+      [response("local-http-request-3", { result: initializeResult("server-2") })],
     ]);
     const connection = createLocalHttpBackendConnection(connectionOptions(fetch));
 
     await connection.initialize(initializeParams());
-    await expect(connection.request(STATE_SUBSCRIBE, { scope: { kind: "projects" } }))
-      .resolves.toMatchObject({ cursor: "cursor-2" });
+    const error = await connection.request(STATE_SUBSCRIBE, { scope: { kind: "projects" } })
+      .catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(BackendReplicaChangedError);
+    expect(error).not.toBeInstanceOf(AppServerProtocolError);
+    expect(error).toMatchObject({
+      name: "BackendReplicaChangedError",
+      method: STATE_SUBSCRIBE,
+      previousReplica: { serverId: "server-1", stateRootId: "root-1" },
+      currentReplica: { serverId: "server-2", stateRootId: "root-1" },
+    });
 
     expect(fetch.mock.calls
       .filter((call) => call[1].headers.Accept !== "text/event-stream")
@@ -271,8 +318,58 @@ describe("LocalHttpBackendConnection", () => {
       CLIENT_INITIALIZE,
       STATE_SUBSCRIBE,
       CLIENT_INITIALIZE,
-      STATE_SUBSCRIBE,
     ]);
+    connection.close();
+  });
+
+  it("uses the latest workspace roots to initialize the replacement replica", async () => {
+    const fetch = fetchSequence([
+      [response("local-http-request-1", { result: initializeResult() })],
+      [response("local-http-request-2", {
+        result: { projects: { projects: [] } },
+      })],
+      [protocolError(
+        "local-http-request-3",
+        "notInitialized",
+        "client/initialize must succeed before product requests",
+      )],
+      [response("local-http-request-4", { result: initializeResult("server-2") })],
+      [response("local-http-request-5", {
+        result: {
+          cursor: "cursor-3",
+          scope: { kind: "projects" },
+          snapshot: { kind: "projects", projects: { projects: [] } },
+        },
+      })],
+    ]);
+    const connection = createLocalHttpBackendConnection(connectionOptions(fetch));
+    const initialParams = {
+      ...initializeParams(),
+      capabilities: { protocol: ["resync"] },
+      workspaceRoots: [{ path: "/workspace/alpha" }],
+    } as InitializeParams;
+
+    await connection.initialize(initialParams);
+    await connection.request(CLIENT_CAPABILITIES_CHANGED, {
+      capabilities: { protocol: ["requestResponses"] },
+      workspaceRoots: [{ path: "/workspace/beta" }],
+    });
+    await expect(connection.request(STATE_SUBSCRIBE, { scope: { kind: "projects" } }))
+      .rejects.toBeInstanceOf(BackendReplicaChangedError);
+    await expect(connection.request(STATE_SUBSCRIBE, { scope: { kind: "projects" } }))
+      .resolves.toMatchObject({ cursor: "cursor-3" });
+
+    const requests = fetch.mock.calls
+      .filter(([, init]) => init.headers.Accept !== "text/event-stream")
+      .map(([, init]) => JSON.parse(init.body));
+    expect(requests[3]).toMatchObject({
+      method: CLIENT_INITIALIZE,
+      params: {
+        capabilities: { protocol: ["requestResponses"] },
+        workspaceRoots: [{ path: "/workspace/beta" }],
+      },
+    });
+    connection.close();
   });
 
   it("retries initialization on a later request after transient reinitialize failure", async () => {
@@ -310,6 +407,8 @@ describe("LocalHttpBackendConnection", () => {
     await expect(connection.request(STATE_SUBSCRIBE, { scope: { kind: "projects" } }))
       .rejects.toThrow("App Server request failed with HTTP 503");
     await expect(connection.request(STATE_SUBSCRIBE, { scope: { kind: "projects" } }))
+      .rejects.toBeInstanceOf(BackendReplicaChangedError);
+    await expect(connection.request(STATE_SUBSCRIBE, { scope: { kind: "projects" } }))
       .resolves.toMatchObject({ cursor: "cursor-2" });
 
     expect(initializeAttempts).toBe(3);
@@ -317,8 +416,9 @@ describe("LocalHttpBackendConnection", () => {
     connection.close();
   });
 
-  it("invalidates subscribed state after reinitialize even when the replacement event stream stays down", async () => {
+  it("keeps subscribed state disconnected when reinitialize cannot restore the event stream", async () => {
     let subscribeAttempts = 0;
+    let initializeAttempts = 0;
     let streamAttempts = 0;
     const fetch = vi.fn<LocalHttpFetch>(async (_input, init) => {
       if (init.headers.Accept === "text/event-stream") {
@@ -329,7 +429,10 @@ describe("LocalHttpBackendConnection", () => {
       }
       const request = JSON.parse(init.body) as { id: string; method: string };
       if (request.method === CLIENT_INITIALIZE) {
-        return fetchResponse([response(request.id, { result: initializeResult() })]);
+        initializeAttempts += 1;
+        return fetchResponse([response(request.id, {
+          result: initializeResult(initializeAttempts === 1 ? "server-1" : "server-2"),
+        })]);
       }
       subscribeAttempts += 1;
       if (subscribeAttempts === 1) {
@@ -348,54 +451,114 @@ describe("LocalHttpBackendConnection", () => {
       ]);
     });
     const connection = createLocalHttpBackendConnection(connectionOptions(fetch));
+    const disconnected = vi.fn();
     const reset = vi.fn();
+    connection.eventStreamDisconnects(disconnected);
     connection.stateResets(reset);
 
     await connection.initialize(initializeParams());
-    await connection.request(STATE_SUBSCRIBE, { scope: { kind: "projects" } });
+    await expect(connection.request(STATE_SUBSCRIBE, { scope: { kind: "projects" } }))
+      .rejects.toBeInstanceOf(BackendReplicaChangedError);
 
     expect(streamAttempts).toBe(2);
-    expect(reset).toHaveBeenCalledOnce();
+    expect(disconnected).toHaveBeenCalledOnce();
+    expect(reset).not.toHaveBeenCalled();
 
     connection.close();
   });
 
   it("coalesces reinitialization when concurrent requests discover the same restart", async () => {
+    const replacementInitialize = deferred<ReturnType<typeof fetchResponse>>();
     let initializeAttempts = 0;
     let subscribeAttempts = 0;
+    let replacementInitializeRequestId = "";
     const fetch = vi.fn<LocalHttpFetch>(async (_input, init) => {
       if (init.headers.Accept === "text/event-stream") return eventStreamResponse([]);
       const request = JSON.parse(init.body) as { id: string; method: string };
       if (request.method === CLIENT_INITIALIZE) {
         initializeAttempts += 1;
-        return fetchResponse([response(request.id, { result: initializeResult() })]);
+        if (initializeAttempts === 1) {
+          return fetchResponse([response(request.id, { result: initializeResult() })]);
+        }
+        replacementInitializeRequestId = request.id;
+        return replacementInitialize.promise;
       }
       subscribeAttempts += 1;
-      if (subscribeAttempts <= 2) {
-        return fetchResponse([
-          protocolError(request.id, "notInitialized", "client/initialize must succeed before product requests"),
-        ]);
+      return fetchResponse([
+        protocolError(request.id, "notInitialized", "client/initialize must succeed before product requests"),
+      ]);
+    });
+    const connection = createLocalHttpBackendConnection(connectionOptions(fetch));
+    const reset = vi.fn();
+    connection.stateResets(reset);
+
+    await connection.initialize(initializeParams());
+    const requests = [
+      connection.request(STATE_SUBSCRIBE, { scope: { kind: "projects" } }).catch((error) => error),
+      connection.request(STATE_SUBSCRIBE, { scope: { kind: "projects" } }).catch((error) => error),
+    ];
+    await vi.waitFor(() => expect(initializeAttempts).toBe(2));
+    replacementInitialize.resolve(fetchResponse([
+      response(replacementInitializeRequestId, { result: initializeResult("server-2") }),
+    ]));
+    const errors = await Promise.all(requests);
+
+    expect(errors).toEqual([
+      expect.any(BackendReplicaChangedError),
+      expect.any(BackendReplicaChangedError),
+    ]);
+    expect(initializeAttempts).toBe(2);
+    expect(subscribeAttempts).toBe(2);
+    expect(reset).toHaveBeenCalledOnce();
+    expect(reset).toHaveBeenCalledWith({ serverId: "server-2", stateRootId: "root-1" });
+    connection.close();
+  });
+
+  it("rejects an old-replica result that arrives after concurrent recovery", async () => {
+    const delayedResult = deferred<ReturnType<typeof fetchResponse>>();
+    let initializeAttempts = 0;
+    let subscribeAttempts = 0;
+    let delayedRequestId = "";
+    const fetch = vi.fn<LocalHttpFetch>(async (_input, init) => {
+      if (init.headers.Accept === "text/event-stream") return eventStreamResponse([]);
+      const request = JSON.parse(init.body) as { id: string; method: string };
+      if (request.method === CLIENT_INITIALIZE) {
+        initializeAttempts += 1;
+        return fetchResponse([response(request.id, {
+          result: initializeResult(initializeAttempts === 1 ? "server-1" : "server-2"),
+        })]);
+      }
+      subscribeAttempts += 1;
+      if (subscribeAttempts === 1) {
+        delayedRequestId = request.id;
+        return delayedResult.promise;
       }
       return fetchResponse([
-        response(request.id, {
-          result: {
-            cursor: `cursor-${subscribeAttempts}`,
-            scope: { kind: "projects" },
-            snapshot: { kind: "projects", projects: { projects: [] } },
-          },
-        }),
+        protocolError(request.id, "notInitialized", "client/initialize must succeed before product requests"),
       ]);
     });
     const connection = createLocalHttpBackendConnection(connectionOptions(fetch));
 
     await connection.initialize(initializeParams());
-    await Promise.all([
-      connection.request(STATE_SUBSCRIBE, { scope: { kind: "projects" } }),
-      connection.request(STATE_SUBSCRIBE, { scope: { kind: "projects" } }),
-    ]);
+    const staleRequest = connection.request(STATE_SUBSCRIBE, { scope: { kind: "projects" } })
+      .catch((error) => error);
+    const recoveryRequest = connection.request(STATE_SUBSCRIBE, { scope: { kind: "projects" } })
+      .catch((error) => error);
 
+    await expect(recoveryRequest).resolves.toBeInstanceOf(BackendReplicaChangedError);
+    delayedResult.resolve(fetchResponse([
+      response(delayedRequestId, {
+        result: {
+          cursor: "cursor-from-server-1",
+          scope: { kind: "projects" },
+          snapshot: { kind: "projects", projects: { projects: [] } },
+        },
+      }),
+    ]));
+
+    await expect(staleRequest).resolves.toBeInstanceOf(BackendReplicaChangedError);
     expect(initializeAttempts).toBe(2);
-    expect(subscribeAttempts).toBe(4);
+    expect(subscribeAttempts).toBe(2);
     connection.close();
   });
 
@@ -786,12 +949,12 @@ function initializeParams(): InitializeParams {
   };
 }
 
-function initializeResult(): InitializeResult {
+function initializeResult(serverId = "server-1", stateRootId = "root-1"): InitializeResult {
   return {
     snapshot: {
       cursor: "cursor-1",
-      server: { serverId: "server-1", protocolVersion: { major: 1, minor: 0 } },
-      stateRoot: { stateRootId: "root-1" },
+      server: { serverId, protocolVersion: { major: 1, minor: 0 } },
+      stateRoot: { stateRootId },
       client: {
         clientInstanceId: "client-1",
         shellKind: "web",
@@ -803,6 +966,7 @@ function initializeResult(): InitializeResult {
 
 function appEvent(): AppServerEvent {
   return {
+    subscription: { kind: "projects" },
     previousCursor: "cursor-1",
     cursor: "cursor-2",
     scope: { kind: "stateRoot", stateRootId: "root-1" },

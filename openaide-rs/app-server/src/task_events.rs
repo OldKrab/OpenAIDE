@@ -4,38 +4,45 @@ use std::sync::mpsc;
 #[cfg(test)]
 use std::sync::{Arc, Barrier};
 
-use openaide_app_server_protocol::events::TextChunk;
+use openaide_app_server_protocol::events::{TaskChanges, TaskNavigationChange};
 use openaide_app_server_protocol::ids::MessageId;
 use openaide_app_server_protocol::snapshot::ChatItem;
+use openaide_app_server_protocol::task::ToolDetailSnapshot;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum CommittedTaskDelta {
-    ChatItemAppended {
-        item: ChatItem,
-    },
-    ChatItemChunk {
-        message_id: MessageId,
-        chunk: TextChunk,
-    },
+pub enum CommittedChatChange {
+    Append { item: ChatItem },
+    Upsert { item: ChatItem },
+    AppendText { message_id: MessageId, text: String },
+    Replace,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolDetailUpdate {
+    pub artifact_id: String,
+    pub details: ToolDetailSnapshot,
+}
+
+/// The complete focused publication produced by one durable Task transaction.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommittedTaskChange {
+    /// Exact values captured by the durable transaction, never re-read during publication.
+    pub changes: TaskChanges,
+    pub tool_details: Vec<ToolDetailUpdate>,
+    pub navigation: Option<TaskNavigationChange>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TaskUpdateKind {
+    Changed(Box<CommittedTaskChange>),
+    HistorySync(openaide_app_server_protocol::snapshot::TaskHistorySyncSnapshot),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TaskUpdate {
     pub task_id: String,
     pub revision: u64,
-    pub delta: Option<CommittedTaskDelta>,
-    pub history_sync: Option<openaide_app_server_protocol::snapshot::TaskHistorySyncSnapshot>,
-}
-
-impl TaskUpdate {
-    pub fn committed(task_id: impl Into<String>, revision: u64, delta: CommittedTaskDelta) -> Self {
-        Self {
-            task_id: task_id.into(),
-            revision,
-            delta: Some(delta),
-            history_sync: None,
-        }
-    }
+    pub kind: TaskUpdateKind,
 }
 
 #[derive(Clone, Default)]
@@ -68,12 +75,11 @@ impl TaskUpdateNotifier {
         )
     }
 
-    pub fn task_updated(&self, task_id: &str, revision: u64) {
+    pub(crate) fn task_changed(&self, task_id: &str, revision: u64, change: CommittedTaskChange) {
         self.publish(TaskUpdate {
             task_id: task_id.to_string(),
             revision,
-            delta: None,
-            history_sync: None,
+            kind: TaskUpdateKind::Changed(Box::new(change)),
         });
     }
 
@@ -86,18 +92,8 @@ impl TaskUpdateNotifier {
         self.publish(TaskUpdate {
             task_id: task_id.to_string(),
             revision,
-            delta: None,
-            history_sync: Some(history_sync),
+            kind: TaskUpdateKind::HistorySync(history_sync),
         });
-    }
-
-    pub(crate) fn task_updated_with_delta(
-        &self,
-        task_id: &str,
-        revision: u64,
-        delta: CommittedTaskDelta,
-    ) {
-        self.publish(TaskUpdate::committed(task_id, revision, delta));
     }
 
     fn publish(&self, update: TaskUpdate) {
@@ -144,10 +140,6 @@ pub(crate) struct BlockingTaskUpdate {
 
 #[cfg(test)]
 impl BlockingTaskUpdate {
-    pub(crate) fn rearm(&self) {
-        self.inner.armed.store(true, Ordering::SeqCst);
-    }
-
     pub(crate) fn wait_until_blocked(&self) {
         self.inner.reached.wait();
     }

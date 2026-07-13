@@ -1,13 +1,19 @@
 use openaide_app_server_protocol::errors::{ProtocolError, ProtocolErrorCode};
-use openaide_app_server_protocol::ids::{ProjectId, TaskId, TaskListCursor};
-use openaide_app_server_protocol::snapshot::{ChatSnapshot, TaskSnapshot, TaskSummary};
+use openaide_app_server_protocol::ids::{ClientInstanceId, ProjectId, TaskId, TaskListCursor};
+use openaide_app_server_protocol::snapshot::{
+    ChatSnapshot, TaskHistorySyncSnapshot, TaskSnapshot, TaskSummary,
+};
+use openaide_app_server_protocol::task::ToolDetailSnapshot;
+use std::sync::Arc;
 
 use crate::chat_history::ChatHistoryPolicy;
+use crate::protocol::model::MessagePage;
 use crate::protocol::model::TaskSnapshot as StoredTaskSnapshot;
+use crate::storage::records::TaskRecord;
 use crate::storage::Store;
-use crate::tasks::snapshot::build_snapshot;
+use crate::tasks::snapshot::{build_snapshot, snapshot_from_record_and_chat};
 
-pub(crate) use chat_projection::project_chat_item;
+pub(crate) use chat_projection::{project_chat_item, project_tool_details};
 use readiness::{
     agent_commands_snapshot, agent_config_snapshot, preparation_snapshot, send_capability_for_task,
 };
@@ -28,7 +34,37 @@ pub trait TaskSnapshotSource: Send + Sync {
         cursor: Option<&TaskListCursor>,
     ) -> Result<TaskListSnapshot, ProtocolError>;
 
-    fn open(&self, task_id: &TaskId) -> Result<TaskSnapshot, ProtocolError>;
+    /// Reads a Task for internal publication after its audience is already established.
+    fn open_internal(&self, task_id: &TaskId) -> Result<TaskSnapshot, ProtocolError>;
+
+    /// Reads a Task on behalf of a client, enforcing New Task ownership.
+    fn open_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        task_id: &TaskId,
+    ) -> Result<TaskSnapshot, ProtocolError>;
+
+    /// Reads one expanded Tool detail after enforcing Task access for the client.
+    fn tool_detail_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        task_id: &TaskId,
+        artifact_id: &str,
+    ) -> Result<ToolDetailSnapshot, ProtocolError>;
+}
+
+/// Supplies process-local history reconciliation state for otherwise durable Task snapshots.
+pub(crate) trait TaskHistorySyncSnapshotSource: Send + Sync {
+    fn history_sync_snapshot(&self, task_id: &str) -> TaskHistorySyncSnapshot;
+}
+
+#[derive(Default)]
+struct IdleTaskHistorySyncSnapshots;
+
+impl TaskHistorySyncSnapshotSource for IdleTaskHistorySyncSnapshots {
+    fn history_sync_snapshot(&self, _task_id: &str) -> TaskHistorySyncSnapshot {
+        TaskHistorySyncSnapshot::default()
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -42,6 +78,7 @@ pub struct TaskListSnapshot {
 pub struct TaskSnapshotStore {
     store: Store,
     tail_limit: usize,
+    history_sync: Arc<dyn TaskHistorySyncSnapshotSource>,
 }
 
 impl TaskSnapshotStore {
@@ -49,6 +86,18 @@ impl TaskSnapshotStore {
         Self {
             store,
             tail_limit: ChatHistoryPolicy::default().task_snapshot_tail_limit(),
+            history_sync: Arc::new(IdleTaskHistorySyncSnapshots),
+        }
+    }
+
+    pub(crate) fn with_history_sync(
+        store: Store,
+        history_sync: Arc<dyn TaskHistorySyncSnapshotSource>,
+    ) -> Self {
+        Self {
+            store,
+            tail_limit: ChatHistoryPolicy::default().task_snapshot_tail_limit(),
+            history_sync,
         }
     }
 }
@@ -73,7 +122,7 @@ impl TaskSnapshotSource for TaskSnapshotStore {
             .collect();
         let revision = self
             .store
-            .max_task_revision()
+            .max_visible_task_revision()
             .map_err(snapshot_read_error)?;
         Ok(TaskListSnapshot {
             tasks,
@@ -82,7 +131,48 @@ impl TaskSnapshotSource for TaskSnapshotStore {
         })
     }
 
-    fn open(&self, task_id: &TaskId) -> Result<TaskSnapshot, ProtocolError> {
+    fn open_internal(&self, task_id: &TaskId) -> Result<TaskSnapshot, ProtocolError> {
+        self.open_authorized(task_id, |_| Ok(()))
+    }
+
+    fn open_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        task_id: &TaskId,
+    ) -> Result<TaskSnapshot, ProtocolError> {
+        self.open_authorized(task_id, |task| {
+            crate::tasks::access::require_client_task_access(task, client_instance_id)
+        })
+    }
+
+    fn tool_detail_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        task_id: &TaskId,
+        artifact_id: &str,
+    ) -> Result<ToolDetailSnapshot, ProtocolError> {
+        let task = self
+            .store
+            .read_task(task_id.as_str())
+            .map_err(task_snapshot_error)?;
+        crate::tasks::access::require_client_task_access(&task, client_instance_id)
+            .map_err(task_snapshot_error)?;
+        let details = self
+            .store
+            .read_tool_artifact(task_id.as_str(), artifact_id)
+            .map_err(task_snapshot_error)?;
+        Ok(project_tool_details(&details))
+    }
+}
+
+impl TaskSnapshotStore {
+    fn open_authorized(
+        &self,
+        task_id: &TaskId,
+        authorize: impl FnOnce(
+            &crate::storage::records::TaskRecord,
+        ) -> Result<(), crate::protocol::errors::RuntimeError>,
+    ) -> Result<TaskSnapshot, ProtocolError> {
         let task = self
             .store
             .read_task(task_id.as_str())
@@ -95,9 +185,11 @@ impl TaskSnapshotSource for TaskSnapshotStore {
                 target: None,
             });
         }
+        authorize(&task).map_err(task_snapshot_error)?;
         let snapshot = build_snapshot(&self.store, task_id.as_str(), self.tail_limit)
             .map_err(task_snapshot_error)?;
-        project_stored_task_snapshot(snapshot)
+        let history_sync = self.history_sync.history_sync_snapshot(task_id.as_str());
+        project_stored_task_snapshot_with_history_sync(snapshot, history_sync)
     }
 }
 
@@ -122,9 +214,25 @@ impl TaskSnapshotStoreArchiveList for Store {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn project_stored_task_snapshot(
     snapshot: StoredTaskSnapshot,
 ) -> Result<TaskSnapshot, ProtocolError> {
+    project_stored_task_snapshot_with_history_sync(snapshot, TaskHistorySyncSnapshot::default())
+}
+
+pub(crate) fn project_stored_task_snapshot_with_history_sync(
+    snapshot: StoredTaskSnapshot,
+    history_sync: TaskHistorySyncSnapshot,
+) -> Result<TaskSnapshot, ProtocolError> {
+    let lifecycle = match snapshot.lifecycle {
+        crate::storage::records::TaskLifecycle::New { .. } => {
+            openaide_app_server_protocol::snapshot::TaskLifecycle::New
+        }
+        crate::storage::records::TaskLifecycle::Visible => {
+            openaide_app_server_protocol::snapshot::TaskLifecycle::Visible
+        }
+    };
     let send_capability = send_capability_for_task(snapshot.task.status, &snapshot.preparation);
     let agent_config = agent_config_snapshot(&snapshot);
     let agent_commands = agent_commands_snapshot(&snapshot);
@@ -134,22 +242,52 @@ pub(crate) fn project_stored_task_snapshot(
     task.status = projected_status;
     Ok(TaskSnapshot {
         task,
+        lifecycle,
         revision: snapshot.revision,
         preparation: preparation_snapshot(&snapshot.preparation),
         agent_config,
         agent_commands,
         send_capability,
-        chat: ChatSnapshot {
-            items: snapshot.chat.items.iter().map(project_chat_item).collect(),
-            has_more_before: snapshot.chat.has_before,
-            has_messages: snapshot.chat.total_count > 0,
-            start_cursor: snapshot.chat.start_cursor.map(Into::into),
-            end_cursor: snapshot.chat.end_cursor.map(Into::into),
-        },
-        history_sync: Default::default(),
+        chat: project_chat_page(snapshot.chat),
+        history_sync,
         pending_requests: Vec::new(),
         recovery: None,
     })
+}
+
+/// Projects metadata from the exact committed Task record without reading Chat from storage.
+pub(crate) fn project_committed_task_state(
+    task: TaskRecord,
+    has_messages: bool,
+) -> Result<TaskSnapshot, ProtocolError> {
+    let task_id = task.task_id.clone();
+    let version = task.message_history_version;
+    project_stored_task_snapshot_with_history_sync(
+        snapshot_from_record_and_chat(
+            task,
+            MessagePage {
+                task_id,
+                items: Vec::new(),
+                has_before: false,
+                total_count: u64::from(has_messages),
+                version,
+                start_cursor: None,
+                end_cursor: None,
+            },
+        ),
+        TaskHistorySyncSnapshot::default(),
+    )
+}
+
+/// Projects a Chat page captured under the same mutation lock as its Task revision.
+pub(crate) fn project_chat_page(chat: MessagePage) -> ChatSnapshot {
+    ChatSnapshot {
+        items: chat.items.iter().map(project_chat_item).collect(),
+        has_more_before: chat.has_before,
+        has_messages: chat.total_count > 0,
+        start_cursor: chat.start_cursor.map(Into::into),
+        end_cursor: chat.end_cursor.map(Into::into),
+    }
 }
 
 fn unsupported_cursor_error() -> ProtocolError {

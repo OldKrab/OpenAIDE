@@ -1,5 +1,6 @@
 pub const CLIENT_PROBE: &str = "client/probe";
 pub const CLIENT_INITIALIZE: &str = "client/initialize";
+pub const CLIENT_CAPABILITIES_CHANGED: &str = "client/capabilitiesChanged";
 pub const CLIENT_HEARTBEAT: &str = "client/heartbeat";
 pub const STATE_SUBSCRIBE: &str = "state/subscribe";
 pub const STATE_UNSUBSCRIBE: &str = "state/unsubscribe";
@@ -27,7 +28,7 @@ pub const ATTACHMENT_CREATE_PASTED_IMAGE: &str = "attachment/createPastedImage";
 pub const ATTACHMENT_CREATE_EMBEDDED_CANDIDATE: &str = "attachment/createEmbeddedCandidate";
 pub const ATTACHMENT_CONFIRM_EMBEDDED: &str = "attachment/confirmEmbedded";
 pub const ATTACHMENT_REFRESH_HANDLES: &str = "attachment/refreshHandles";
-pub const ATTACHMENT_RELEASE_HANDLES: &str = "attachment/releaseHandles";
+pub const ATTACHMENT_RELEASE: &str = "attachment/release";
 pub const ATTACHMENT_REVEAL: &str = "attachment/reveal";
 pub const SHELL_RESOLVE_FILE_REVEAL: &str = "shell/resolveFileReveal";
 pub const WORKSPACE_LIST_ROOTS: &str = "workspace/listRoots";
@@ -38,10 +39,8 @@ pub const TASK_SEND: &str = "task/send";
 pub const TASK_SET_CONFIG_OPTION: &str = "task/setConfigOption";
 pub const TASK_CANCEL: &str = "task/cancel";
 pub const TASK_OPEN: &str = "task/open";
-pub const TASK_RETRY_HISTORY_SYNC: &str = "task/retryHistorySync";
 pub const TASK_MARK_READ: &str = "task/markRead";
 pub const TASK_CHAT_PAGE: &str = "task/chatPage";
-pub const TASK_TOOL_DETAIL: &str = "task/toolDetail";
 pub const TASK_LIST: &str = "task/list";
 pub const TASK_DISCARD: &str = "task/discard";
 pub const TASK_SET_ARCHIVED: &str = "task/setArchived";
@@ -49,6 +48,7 @@ pub const TASK_SET_ARCHIVED: &str = "task/setArchived";
 pub const CLIENT_METHODS: &[&str] = &[
     CLIENT_PROBE,
     CLIENT_INITIALIZE,
+    CLIENT_CAPABILITIES_CHANGED,
     CLIENT_HEARTBEAT,
     STATE_SUBSCRIBE,
     STATE_UNSUBSCRIBE,
@@ -76,7 +76,7 @@ pub const CLIENT_METHODS: &[&str] = &[
     ATTACHMENT_CREATE_EMBEDDED_CANDIDATE,
     ATTACHMENT_CONFIRM_EMBEDDED,
     ATTACHMENT_REFRESH_HANDLES,
-    ATTACHMENT_RELEASE_HANDLES,
+    ATTACHMENT_RELEASE,
     ATTACHMENT_REVEAL,
     SHELL_RESOLVE_FILE_REVEAL,
     WORKSPACE_LIST_ROOTS,
@@ -87,10 +87,8 @@ pub const CLIENT_METHODS: &[&str] = &[
     TASK_SET_CONFIG_OPTION,
     TASK_CANCEL,
     TASK_OPEN,
-    TASK_RETRY_HISTORY_SYNC,
     TASK_MARK_READ,
     TASK_CHAT_PAGE,
-    TASK_TOOL_DETAIL,
     TASK_LIST,
     TASK_DISCARD,
     TASK_SET_ARCHIVED,

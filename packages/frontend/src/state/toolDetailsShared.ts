@@ -5,6 +5,7 @@ import type {
   ActivityToolField,
   ActivityToolInput,
   ActivityToolOutput,
+  ActivityToolValue,
 } from "@openaide/app-shell-contracts";
 
 export function readDetailPath(details: ActivityToolDetails) {
@@ -18,7 +19,21 @@ export function readDetailOutput(details: ActivityToolDetails, fallbackPreview?:
 }
 
 export function firstFieldValue(fields: ActivityToolField[] | undefined, name: string) {
-  return fields?.find((field) => field.name.toLowerCase() === name.toLowerCase())?.value;
+  const value = fields?.find((field) => field.name.toLowerCase() === name.toLowerCase())?.value;
+  return value ? toolValueText(value) : undefined;
+}
+
+/** Produces compact text for labels while detailed views retain the typed tree. */
+export function toolValueText(value: ActivityToolValue): string | undefined {
+  if (value.kind === "string" || value.kind === "number") return value.value;
+  if (value.kind === "boolean") return String(value.value);
+  if (value.kind === "null") return "null";
+  if (value.kind === "redacted") return "[redacted]";
+  if (value.kind === "array") {
+    const items = value.items.map(toolValueText);
+    return items.every((item) => item !== undefined) ? items.join(", ") : undefined;
+  }
+  return undefined;
 }
 
 export function hasToolDetails(step: Extract<ActivityStep, { kind: "tool" }>) {
@@ -60,8 +75,9 @@ export function filteredOutputFields(details: ActivityToolDetails) {
   const fields = details.output?.fields ?? [];
   return fields.filter((field) => {
     const name = field.name.toLowerCase();
-    const value = field.value.toLowerCase();
-    if (name === "cwd" && field.value === details.input?.cwd) return false;
+    const fieldText = toolValueText(field.value);
+    const value = fieldText?.toLowerCase() ?? "";
+    if (name === "cwd" && fieldText === details.input?.cwd) return false;
     if (name === "status" && ["completed", "success", "succeeded"].includes(value)) return false;
     if (name === "success" && ["true", "yes", "1"].includes(value)) return false;
     return true;

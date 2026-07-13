@@ -2,7 +2,6 @@ use openaide_app_server_protocol::errors::ProtocolError;
 use openaide_app_server_protocol::ids::{MessageId, TurnId};
 
 use crate::protocol::errors::RuntimeError;
-use crate::snapshots::task_snapshot::project_stored_task_snapshot;
 use crate::tasks::snapshot::build_snapshot;
 use crate::tasks::transitions::TaskTransitions;
 
@@ -29,7 +28,7 @@ impl CommittedSend {
         api: &TaskProductApi,
         error: RuntimeError,
     ) -> Result<TaskSendAccepted, ProtocolError> {
-        TaskTransitions::new(api.mutations.clone())
+        TaskTransitions::new(api.mutations.clone(), api.server_requests.clone())
             .finish_turn(&self.task_id, self.turn_id.as_str(), Err(error))
             .map_err(super::super::protocol_error_from_runtime)?;
         self.accepted(api)
@@ -39,14 +38,10 @@ impl CommittedSend {
         &self.turn_id
     }
 
-    pub(super) fn user_message_id(&self) -> &MessageId {
-        &self.user_message_id
-    }
-
     pub(super) fn accepted(&self, api: &TaskProductApi) -> Result<TaskSendAccepted, ProtocolError> {
         let snapshot = build_snapshot(&api.store, &self.task_id, 100).map_err(storage_error)?;
         Ok(TaskSendAccepted {
-            task: project_stored_task_snapshot(snapshot)?,
+            task: api.project_task_snapshot(snapshot)?,
             turn_id: self.turn_id.clone(),
             user_message_id: self.user_message_id.clone(),
         })

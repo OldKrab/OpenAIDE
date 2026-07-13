@@ -7,13 +7,12 @@ use crate::agent::AgentRuntime;
 use crate::diagnostics::TaskDiagnostics;
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{
-    ActivityToolDetails, AgentAuthenticateResult, AgentListSessionsResult, AgentProbeResult,
-    MessagePage, TaskSnapshot,
+    AgentAuthenticateResult, AgentListSessionsResult, AgentProbeResult, MessagePage, TaskSnapshot,
 };
 use crate::protocol::params::{
     AgentAuthenticateParams, AgentListSessionsParams, AgentProbeParams, ChatPageParams,
-    ChatTailParams, PermissionRespondParams, SessionPromptParams, TaskCreateParams,
-    TaskDeleteParams, TaskIdParams, TaskListParams, TaskSnapshotParams, ToolDetailParams,
+    ChatTailParams, SessionPromptParams, TaskCreateParams, TaskDeleteParams, TaskIdParams,
+    TaskListParams, TaskSnapshotParams,
 };
 use crate::protocol::results::TaskListResult;
 use crate::storage::Store;
@@ -172,26 +171,12 @@ impl TaskService {
         self.queries.page(params)
     }
 
-    pub fn tool_detail(
-        &self,
-        params: ToolDetailParams,
-    ) -> Result<ActivityToolDetails, RuntimeError> {
-        self.queries.tool_detail(params)
-    }
-
     pub fn prompt(&self, params: SessionPromptParams) -> Result<TaskSnapshot, RuntimeError> {
         self.turn_lifecycle().prompt(params)
     }
 
     pub fn cancel(&self, params: TaskIdParams) -> Result<TaskSnapshot, RuntimeError> {
         self.turn_lifecycle().cancel(params)
-    }
-
-    pub fn respond_permission(
-        &self,
-        params: PermissionRespondParams,
-    ) -> Result<TaskSnapshot, RuntimeError> {
-        self.turn_lifecycle().respond_permission(params)
     }
 
     pub fn mark_read(&self, params: TaskIdParams) -> Result<TaskSnapshot, RuntimeError> {

@@ -15,12 +15,13 @@ use crate::attachment::{
     AttachmentCreatePastedImageParams, AttachmentCreatePastedImageResult,
     AttachmentListDirectoryParams, AttachmentListDirectoryResult, AttachmentListRootsParams,
     AttachmentListRootsResult, AttachmentRefreshHandlesParams, AttachmentRefreshHandlesResult,
-    AttachmentReleaseHandlesParams, AttachmentReleaseHandlesResult, AttachmentRevealParams,
+    AttachmentReleaseParams, AttachmentReleaseResult, AttachmentRevealParams,
     AttachmentRevealResult,
 };
 use crate::client::{
-    ClientHeartbeatParams, ClientHeartbeatResult, ClientProbeParams, ClientProbeResult,
-    InitializeParams, InitializeResult,
+    ClientCapabilitiesChangedParams, ClientCapabilitiesChangedResult, ClientHeartbeatParams,
+    ClientHeartbeatResult, ClientProbeParams, ClientProbeResult, InitializeParams,
+    InitializeResult,
 };
 use crate::diagnostics::{RuntimeDiagnosticsParams, RuntimeDiagnosticsResult};
 use crate::envelopes::{ClientRequestEnvelope, RequestMeta, ResponseEnvelope, ResponseMeta};
@@ -38,10 +39,8 @@ use crate::task::{
     TaskAdoptNativeSessionParams, TaskAdoptNativeSessionResult, TaskCancelParams, TaskCancelResult,
     TaskChatPageParams, TaskChatPageResult, TaskCreateParams, TaskCreateResult, TaskDiscardParams,
     TaskDiscardResult, TaskListParams, TaskListResult, TaskMarkReadParams, TaskMarkReadResult,
-    TaskOpenParams, TaskOpenResult, TaskRetryHistorySyncParams, TaskRetryHistorySyncResult,
-    TaskSendParams, TaskSendResult, TaskSetArchivedParams, TaskSetArchivedResult,
-    TaskSetConfigOptionParams, TaskSetConfigOptionResult, TaskToolDetailParams,
-    TaskToolDetailResult,
+    TaskOpenParams, TaskOpenResult, TaskSendParams, TaskSendResult, TaskSetArchivedParams,
+    TaskSetArchivedResult, TaskSetConfigOptionParams, TaskSetConfigOptionResult,
 };
 use crate::workspace::{
     WorkspaceListDirectoryParams, WorkspaceListDirectoryResult, WorkspaceListRootsParams,
@@ -98,6 +97,12 @@ protocol_method!(
     CLIENT_INITIALIZE,
     InitializeParams,
     InitializeResult
+);
+protocol_method!(
+    ClientCapabilitiesChanged,
+    CLIENT_CAPABILITIES_CHANGED,
+    ClientCapabilitiesChangedParams,
+    ClientCapabilitiesChangedResult
 );
 protocol_method!(
     ClientHeartbeat,
@@ -269,10 +274,10 @@ protocol_method!(
     AttachmentRefreshHandlesResult
 );
 protocol_method!(
-    AttachmentReleaseHandles,
-    ATTACHMENT_RELEASE_HANDLES,
-    AttachmentReleaseHandlesParams,
-    AttachmentReleaseHandlesResult
+    AttachmentRelease,
+    ATTACHMENT_RELEASE,
+    AttachmentReleaseParams,
+    AttachmentReleaseResult
 );
 protocol_method!(
     AttachmentReveal,
@@ -303,12 +308,6 @@ protocol_method!(
 protocol_method!(TaskCancel, TASK_CANCEL, TaskCancelParams, TaskCancelResult);
 protocol_method!(TaskOpen, TASK_OPEN, TaskOpenParams, TaskOpenResult);
 protocol_method!(
-    TaskRetryHistorySync,
-    TASK_RETRY_HISTORY_SYNC,
-    TaskRetryHistorySyncParams,
-    TaskRetryHistorySyncResult
-);
-protocol_method!(
     TaskMarkRead,
     TASK_MARK_READ,
     TaskMarkReadParams,
@@ -319,12 +318,6 @@ protocol_method!(
     TASK_CHAT_PAGE,
     TaskChatPageParams,
     TaskChatPageResult
-);
-protocol_method!(
-    TaskToolDetail,
-    TASK_TOOL_DETAIL,
-    TaskToolDetailParams,
-    TaskToolDetailResult
 );
 protocol_method!(TaskList, TASK_LIST, TaskListParams, TaskListResult);
 protocol_method!(

@@ -1,14 +1,19 @@
 import { useEffect, useRef, useState, type Dispatch, type RefObject } from "react";
 import type { BackendConnection } from "@openaide/app-server-client";
-import { subscribeWebRouteChanges } from "../services/hostBridge";
+import { subscribeSurfaceRouteChanges } from "../services/hostBridge";
 import { refreshSettingsProjectionsThroughBackend } from "../intents/settingsProjectionIntents";
 import type { AppAction } from "../state/appReducer";
 import type { AgentOption } from "../state/composerOptions";
 import type { WebviewBootstrap } from "../state/surfaceTypes";
 import type { AppState } from "../state/store";
+import {
+  navigationTargetForBootstrap,
+  type AsyncOperationOwner,
+} from "../state/asyncOperationOwner";
 
 export function useRoutedBootstrap(
   initialBootstrap: WebviewBootstrap,
+  asyncOperations: AsyncOperationOwner,
   dispatch: Dispatch<AppAction>,
 ) {
   const [bootstrap, setBootstrap] = useState(initialBootstrap);
@@ -16,7 +21,11 @@ export function useRoutedBootstrap(
   bootstrapRef.current = bootstrap;
 
   useEffect(() => {
-    return subscribeWebRouteChanges((nextBootstrap) => {
+    return subscribeSurfaceRouteChanges((nextBootstrap) => {
+      asyncOperations.observeNavigation(
+        navigationTargetForBootstrap(nextBootstrap),
+        nextBootstrap.surface === "navigation" ? nextBootstrap.archived === true : undefined,
+      );
       setBootstrap(nextBootstrap);
       if (nextBootstrap.surface !== "task") return;
       if (nextBootstrap.taskId) {
@@ -26,12 +35,11 @@ export function useRoutedBootstrap(
       if (nextBootstrap.projectId) {
         dispatch({ type: "newTask:projectId", projectId: nextBootstrap.projectId });
       }
-      // A new-task route is a fresh composer even when a previously created Task is
-      // still sending in the background through its task-local pending input.
-      dispatch({ type: "newTask:reset" });
+      // New Task navigation reopens the retained client-private instance. Only an
+      // explicit discard or context replacement may reset its composer state.
       dispatch({ type: "selection:clear" });
     });
-  }, [dispatch]);
+  }, [asyncOperations, dispatch]);
 
   return { bootstrap, bootstrapRef };
 }

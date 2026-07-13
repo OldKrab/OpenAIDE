@@ -7,8 +7,10 @@ import type {
   RequestMeta,
   RequestParamsByMethod,
   ResponseResultByMethod,
+  ServerId,
   ServerRequestMethod,
   ServerRequestResponseResultByMethod,
+  StateRootId,
   TypedServerRequest,
 } from "./generated/protocol.js";
 
@@ -17,7 +19,12 @@ export type BackendServerRequestListener = (
   request: TypedServerRequest<ServerRequestMethod>,
 ) => void;
 export type BackendUnsubscribe = () => void;
-export type BackendStateResetListener = () => void;
+export type BackendStateReset = {
+  serverId: ServerId;
+  stateRootId: StateRootId;
+};
+export type BackendStateResetListener = (reset: BackendStateReset) => void;
+export type BackendEventStreamDisconnectListener = () => void;
 
 export interface BackendConnection {
   initialize(params: InitializeParams, meta?: RequestMeta): Promise<InitializeResult>;
@@ -27,7 +34,9 @@ export interface BackendConnection {
     meta?: RequestMeta,
   ): Promise<ResponseResultByMethod[M]>;
   events(listener: BackendEventListener): BackendUnsubscribe;
-  /** Fires when event-stream continuity was lost and watched state needs a fresh snapshot. */
+  /** Reports event-stream loss immediately, including when already disconnected at registration. */
+  eventStreamDisconnects(listener: BackendEventStreamDisconnectListener): BackendUnsubscribe;
+  /** Fires after the replacement event stream connects and fresh baselines may be requested. */
   stateResets(listener: BackendStateResetListener): BackendUnsubscribe;
   serverRequests(listener: BackendServerRequestListener): BackendUnsubscribe;
   respond<M extends ServerRequestMethod>(

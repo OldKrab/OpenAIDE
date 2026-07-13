@@ -120,7 +120,7 @@ fn task_scoped_request_survives_one_client_disconnect() {
 }
 
 #[test]
-fn last_task_responder_disconnect_interrupts_interactive_request() {
+fn task_request_survives_disconnect_and_is_redelivered_after_reconnect() {
     let mut broker = ServerRequestBroker::new();
     let opened = broker.open(
         task_request("task-1"),
@@ -132,34 +132,30 @@ fn last_task_responder_disconnect_interrupts_interactive_request() {
     let outcomes =
         broker.observe_responder_unavailable(&ClientInstanceId::from("client-1"), AppServerTime(2));
 
-    assert_eq!(
-        outcomes,
-        vec![RequestLifecycleOutcome::Interrupted {
-            request_id: request_id.clone(),
-            scope: PendingRequestScope::Task {
-                task_id: TaskId::from("task-1"),
-            },
-        }]
-    );
+    assert!(outcomes.is_empty());
 
     let deliveries = broker.observe_responder_available(
         delivery("client-1", "conn-2"),
-        &[ResponderScope::Task(TaskId::from("task-1"))],
+        &[
+            ResponderScope::Client(ClientInstanceId::from("client-1")),
+            ResponderScope::Task(TaskId::from("task-1")),
+        ],
         AppServerTime(4),
     );
-    assert!(deliveries.is_empty());
-    assert_eq!(broker.pending_count(), 0);
+    assert_eq!(deliveries.len(), 1);
+    assert_eq!(deliveries[0].envelope.request_id, request_id);
+    assert_eq!(broker.pending_count(), 1);
 }
 
 #[test]
-fn task_scoped_interactive_request_is_unavailable_without_connected_responders() {
+fn task_scoped_interactive_request_waits_without_connected_responders() {
     let mut broker = ServerRequestBroker::new();
-    assert_eq!(
-        broker.open(task_request("task-1"), Vec::new(), AppServerTime(1)),
-        OpenRequestOutcome::Unavailable {
-            reason: RequestUnavailableReason::NoEligibleResponder,
-        }
-    );
+    let opened = broker.open(task_request("task-1"), Vec::new(), AppServerTime(1));
+    assert!(matches!(
+        opened,
+        OpenRequestOutcome::Opened { deliveries, .. } if deliveries.is_empty()
+    ));
+    assert_eq!(broker.pending_count(), 1);
 }
 
 #[test]
@@ -238,7 +234,7 @@ fn subscription_removal_does_not_revoke_connection_level_permission_capability()
 }
 
 #[test]
-fn losing_the_last_response_capability_interrupts_interactive_request() {
+fn task_request_survives_capability_loss_and_is_redelivered_when_restored() {
     let mut broker = ServerRequestBroker::new();
     let request_id = opened_request_id(broker.open(
         task_request("task-1"),
@@ -248,26 +244,25 @@ fn losing_the_last_response_capability_interrupts_interactive_request() {
 
     let outcomes = broker.observe_capability_unavailable(
         &ClientInstanceId::from("client-1"),
-        &[ResponderScope::Task(TaskId::from("task-1"))],
+        &[
+            ResponderScope::Client(ClientInstanceId::from("client-1")),
+            ResponderScope::Task(TaskId::from("task-1")),
+        ],
         AppServerTime(2),
     );
-    assert_eq!(
-        outcomes,
-        vec![RequestLifecycleOutcome::Interrupted {
-            request_id: request_id.clone(),
-            scope: PendingRequestScope::Task {
-                task_id: TaskId::from("task-1"),
-            },
-        }]
-    );
+    assert!(outcomes.is_empty());
 
     let deliveries = broker.observe_capability_available(
         delivery("client-1", "conn-2"),
-        &[ResponderScope::Task(TaskId::from("task-1"))],
+        &[
+            ResponderScope::Client(ClientInstanceId::from("client-1")),
+            ResponderScope::Task(TaskId::from("task-1")),
+        ],
         AppServerTime(4),
     );
-    assert!(deliveries.is_empty());
-    assert_eq!(broker.pending_count(), 0);
+    assert_eq!(deliveries.len(), 1);
+    assert_eq!(deliveries[0].envelope.request_id, request_id);
+    assert_eq!(broker.pending_count(), 1);
 }
 
 #[test]

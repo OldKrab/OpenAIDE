@@ -7,10 +7,11 @@ use openaide_app_server_protocol::task::TaskAdoptNativeSessionParams;
 use crate::agent::{AgentLoadedSession, AgentSessionLoad, TurnCancellation};
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{
-    IsolationKind, NormalizedMessage, TaskSnapshot as StoredTaskSnapshot,
-    TaskStatus as LegacyTaskStatus,
+    IsolationKind, TaskSnapshot as StoredTaskSnapshot, TaskStatus as LegacyTaskStatus,
 };
-use crate::storage::records::{TaskPreparationRecord, TaskRecord};
+use crate::storage::records::{
+    TaskLifecycle, TaskPreparationRecord, TaskRecord, TaskTitle, TaskTitleSource,
+};
 use crate::tasks::mutation::TaskCommitOptions;
 use crate::tasks::task_start_transaction::TaskSessionStartGuard;
 use crate::tasks::transitions::TaskTransitions;
@@ -30,11 +31,7 @@ impl TaskProductApi {
             .require(params.agent_id.as_str())
             .map_err(protocol_error_from_runtime)?;
         self.mutations
-            .ensure_native_session_unowned(
-                params.agent_id.as_str(),
-                &project.workspace_root,
-                &params.native_session_id,
-            )
+            .ensure_native_session_unowned(params.agent_id.as_str(), &params.native_session_id)
             .map_err(protocol_error_from_runtime)?;
 
         let now = now_string();
@@ -53,12 +50,10 @@ impl TaskProductApi {
             .map_err(protocol_error_from_runtime)?;
         let mut session_start =
             TaskSessionStartGuard::new(&self.agent_gateway, loaded.session.clone());
-        let agent_title = params
+        let title = params
             .title
             .clone()
-            .map(|title| title.trim().to_string())
-            .filter(|title| !title.is_empty());
-        let fallback_title = title_from_loaded_messages(&loaded.replayed_messages);
+            .and_then(|title| TaskTitle::new(title, TaskTitleSource::Agent));
         let session_id = session_start.session_id().to_string();
 
         let persist_result = self.persist_adopted_session_task(
@@ -67,8 +62,7 @@ impl TaskProductApi {
             project.isolation,
             &task_id,
             &now,
-            &fallback_title,
-            agent_title,
+            title,
             &session_id,
             loaded,
         );
@@ -83,7 +77,7 @@ impl TaskProductApi {
 
         if let Err(error) = self
             .turn_runner
-            .attach_session_events(task_id.clone(), &session_id)
+            .attach_session_events(task_id.clone(), &session_start.session().key())
         {
             let _ = session_start.close();
             if let Err(finalize_error) =
@@ -96,7 +90,7 @@ impl TaskProductApi {
             return Err(protocol_error_from_runtime(error));
         }
         let _session = session_start.commit();
-        crate::snapshots::task_snapshot::project_stored_task_snapshot(snapshot)
+        self.project_task_snapshot(snapshot)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -107,8 +101,7 @@ impl TaskProductApi {
         isolation: IsolationKind,
         task_id: &str,
         now: &str,
-        fallback_title: &str,
-        agent_title: Option<String>,
+        title: Option<TaskTitle>,
         session_id: &str,
         loaded: AgentLoadedSession,
     ) -> Result<StoredTaskSnapshot, RuntimeError> {
@@ -117,8 +110,7 @@ impl TaskProductApi {
         let session_id = session_id.to_string();
         let record = TaskRecord {
             task_id: task_id.to_string(),
-            title: fallback_title.to_string(),
-            agent_title,
+            title,
             status: LegacyTaskStatus::Inactive,
             task_version: 1,
             message_history_version: 0,
@@ -132,7 +124,7 @@ impl TaskProductApi {
             agent_id: selected_agent_id.clone(),
             isolation,
             workspace_root: workspace_root.clone(),
-            first_prompt_sent: true,
+            lifecycle: TaskLifecycle::Visible,
             agent_session_id: Some(session_id.clone()),
             active_turn_id: None,
             archived: false,
@@ -140,6 +132,7 @@ impl TaskProductApi {
             revision: 0,
             config_options: loaded.session.config_options.clone(),
             config_options_catalog: loaded.session.config_catalog.clone(),
+            config_mutation: Default::default(),
             agent_commands_catalog: loaded.session.commands_catalog.clone(),
             model_id: loaded.session.model_id.clone(),
             preparation: TaskPreparationRecord::Ready,
@@ -151,13 +144,7 @@ impl TaskProductApi {
                 refresh_message_history: false,
                 response_snapshot_tail_limit: Some(100),
             },
-            |validation| {
-                validation.ensure_native_session_unowned(
-                    &selected_agent_id,
-                    &workspace_root,
-                    &session_id,
-                )
-            },
+            |validation| validation.ensure_native_session_unowned(&selected_agent_id, &session_id),
         )?;
         result
             .response_snapshot
@@ -170,29 +157,7 @@ impl TaskProductApi {
         session_id: &str,
         error: &RuntimeError,
     ) -> Result<(), RuntimeError> {
-        TaskTransitions::new(self.mutations.clone())
+        TaskTransitions::new(self.mutations.clone(), self.server_requests.clone())
             .fail_adopted_task_attach(task_id, session_id, error)
-    }
-}
-
-fn title_from_loaded_messages(messages: &[NormalizedMessage]) -> String {
-    messages
-        .iter()
-        .rev()
-        .find_map(message_text)
-        .and_then(|text| text.trim().lines().next().map(str::to_string))
-        .filter(|line| !line.is_empty())
-        .unwrap_or_else(|| "Imported session".to_string())
-}
-
-fn message_text(message: &NormalizedMessage) -> Option<&str> {
-    match message {
-        NormalizedMessage::User { text, .. }
-        | NormalizedMessage::AgentText { text, .. }
-        | NormalizedMessage::Thought { text, .. } => Some(text),
-        NormalizedMessage::Activity { .. }
-        | NormalizedMessage::Permission { .. }
-        | NormalizedMessage::Question { .. }
-        | NormalizedMessage::Interruption { .. } => None,
     }
 }

@@ -119,8 +119,10 @@ fn corrupt_task_record_blocks_project_resolution() {
 fn task_record(task_id: &str, workspace_root: &str) -> TaskRecord {
     TaskRecord {
         task_id: task_id.to_string(),
-        title: "Task".to_string(),
-        agent_title: None,
+        title: crate::storage::records::TaskTitle::new(
+            "Task",
+            crate::storage::records::TaskTitleSource::User,
+        ),
         status: TaskStatus::Inactive,
         task_version: 1,
         message_history_version: 0,
@@ -132,7 +134,7 @@ fn task_record(task_id: &str, workspace_root: &str) -> TaskRecord {
         agent_name: "Agent A".to_string(),
         isolation: IsolationKind::Local,
         workspace_root: workspace_root.to_string(),
-        first_prompt_sent: false,
+        lifecycle: crate::storage::records::TaskLifecycle::Visible,
         agent_session_id: None,
         active_turn_id: None,
         archived: false,
@@ -140,6 +142,7 @@ fn task_record(task_id: &str, workspace_root: &str) -> TaskRecord {
         revision: 1,
         config_options: Default::default(),
         config_options_catalog: None,
+        config_mutation: Default::default(),
         agent_commands_catalog: None,
         model_id: None,
         preparation: TaskPreparationRecord::Ready,

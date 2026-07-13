@@ -166,5 +166,6 @@ fn init_params(client_instance_id: ClientInstanceId) -> InitializeParams {
         },
         requested_surface: RequestedSurface::Home,
         capabilities: ClientCapabilities::default(),
+        workspace_roots: Vec::new(),
     }
 }

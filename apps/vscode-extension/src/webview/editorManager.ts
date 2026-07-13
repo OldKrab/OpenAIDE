@@ -2,7 +2,12 @@ import * as vscode from "vscode";
 import { ExtensionLogger } from "../logging/logger";
 import { RuntimeProcess } from "../runtime/process";
 import { RuntimeClient } from "../runtime/rpcClient";
-import { renderWebviewHtml, renderWebviewPreparingHtml, webviewRoot } from "./html";
+import {
+  createWebviewClientInstanceId,
+  renderWebviewHtml,
+  renderWebviewPreparingHtml,
+  webviewRoot,
+} from "./html";
 import { handleWebviewMessage } from "./messaging";
 import type { WebviewBootstrap, WebviewHost } from "./types";
 import { resolveWebviewAppServerConnection } from "./appServerConnection";
@@ -77,13 +82,18 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost {
   }
 
   private createPanel(viewType: string, title: string, bootstrap: WebviewBootstrap) {
+    // Panels of one view type share browser storage, so the host owns per-panel connection identity.
+    const panelBootstrap = {
+      ...bootstrap,
+      clientInstanceId: createWebviewClientInstanceId(),
+    };
     const panel = vscode.window.createWebviewPanel(viewType, title, vscode.ViewColumn.Active, {
       enableScripts: true,
       localResourceRoots: [webviewRoot(this.context)],
       retainContextWhenHidden: true,
     });
     panel.webview.html = renderWebviewPreparingHtml(this.context, panel.webview);
-    void this.renderPanelWhenAppServerReady(panel, bootstrap, this.nextPanelGeneration(panel));
+    void this.renderPanelWhenAppServerReady(panel, panelBootstrap, this.nextPanelGeneration(panel));
     panel.webview.onDidReceiveMessage((message) =>
       handleWebviewMessage(message, {
         runtime: this.runtime,
@@ -92,7 +102,7 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost {
         logger: this.logger,
         developerSettingsStore: this.context.globalState,
         agentSecretStore: this.context.secrets,
-        onTaskSnapshot: (snapshot) => this.adoptTaskPanel(panel, snapshot),
+        adoptTask: (taskId, taskTitle) => this.adoptTaskPanel(panel, taskId, taskTitle),
         surfaces: this,
       }),
     );
@@ -125,21 +135,27 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost {
     panel.webview.html = renderWebviewHtml(this.context, panel.webview, bootstrap);
   }
 
-  private adoptTaskPanel(panel: vscode.WebviewPanel, snapshot: unknown) {
-    if (!isObject(snapshot) || !isObject(snapshot.task) || typeof snapshot.task.task_id !== "string") return;
-    const taskId = snapshot.task.task_id;
-    const title = typeof snapshot.task.title === "string" && snapshot.task.title.trim() ? snapshot.task.title : "Task";
+  private adoptTaskPanel(panel: vscode.WebviewPanel, taskId: string, title = "Task") {
     const adoptingNewTaskPanel = this.newTaskPanel === panel;
-    panel.title = title;
-    if (adoptingNewTaskPanel) {
-      const current = this.panelBootstraps.get(panel);
-      this.nextPanelGeneration(panel);
-      this.panelBootstraps.set(panel, {
-        ...this.bootstrap({ surface: "task", taskId }),
-        appServerConnection: current?.appServerConnection,
-      });
+    if (!adoptingNewTaskPanel) return;
+    const existingTaskPanel = this.taskPanels.get(taskId);
+    if (existingTaskPanel && existingTaskPanel !== panel) {
       this.newTaskPanel = undefined;
+      // Invalidate pending bootstrap work before closing its superseded Backend client.
+      this.nextPanelGeneration(panel);
+      panel.dispose();
+      existingTaskPanel.reveal(vscode.ViewColumn.Active);
+      return;
     }
+    panel.title = title.trim() || "Task";
+    const current = this.panelBootstraps.get(panel);
+    this.panelBootstraps.set(panel, {
+      ...current,
+      surface: "task",
+      taskId,
+      projectId: undefined,
+    });
+    this.newTaskPanel = undefined;
     if (!this.taskPanels.has(taskId)) {
       this.taskPanels.set(taskId, panel);
       panel.onDidDispose(() => {
@@ -149,6 +165,10 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost {
         }
       });
     }
+    void panel.webview.postMessage({
+      type: "surface.routeChanged",
+      payload: { surface: "task", task_id: taskId },
+    });
   }
 
   private nextPanelGeneration(panel: vscode.WebviewPanel) {
@@ -164,8 +184,4 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost {
   private bootstrap(bootstrap: WebviewBootstrap): WebviewBootstrap {
     return bootstrap;
   }
-}
-
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
 }

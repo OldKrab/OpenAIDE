@@ -1,12 +1,19 @@
 import { Check, FolderOpen } from "lucide-react";
-import { useEffect, useRef, useState, type Dispatch } from "react";
-import type { AppPreferencesRecord, TaskSummary } from "@openaide/app-shell-contracts";
-import type { AppAction } from "../state/appReducer";
-import { agentOptions, appServerAttachmentHandles, type AgentOption } from "../state/composerOptions";
+import { useEffect, useRef, useState } from "react";
+import type { AppPreferencesRecord } from "@openaide/app-shell-contracts";
+import {
+  agentOptions,
+  appServerAttachmentHandles,
+  type AgentOption,
+  type ComposerSelection,
+  type ProjectOption,
+} from "../state/composerOptions";
 import { projectIdForWorkspaceRoot, workspaceLabel } from "../state/projectIdentity";
-import type { AppState } from "../state/store";
+import { configOptionsMutable, configOptionsSettled } from "../state/configOptionState";
+import type { AppState, NewTaskState, TaskComposerInput } from "../state/store";
 import { AgentIcon } from "./AgentIcon";
 import { Composer } from "./Composer";
+import { composerAvailability, composerCanSubmit } from "./composerAvailability";
 import { MenuButton, Popover, Selector } from "./ComposerPrimitives";
 import type { TaskFileBrowserCallbacks, WorkspaceBrowserCallbacks } from "./appControllerCallbackTypes";
 import { NewWorkspacePicker } from "./NewWorkspacePicker";
@@ -16,13 +23,30 @@ import { newTaskStatusLabel } from "./taskSurfaceHelpers";
 type NewTaskContextMenu = "project" | "agent";
 export type ProjectContextMode = "fixed" | "selectable";
 
+export type NewTaskViewState = {
+  newTask: NewTaskState;
+  preparedTaskInput?: TaskComposerInput;
+  projects: AppState["projects"];
+  snapshot?: AppState["snapshot"];
+  workspaceRootsLoaded: boolean;
+};
+
+export type NewTaskViewIntents = {
+  changePrompt: (prompt: string) => void;
+  reportAttachmentError: (message?: string) => void;
+  selectAgent: (agentId: string, agentLabel?: string) => void;
+  selectIsolation: (isolation: ComposerSelection["isolation"]) => void;
+  selectProject: (project: ProjectOption) => void;
+  selectWorkspace: (workspace: { path: string; label: string; projectId: string }) => void;
+};
+
 export function NewTaskView({
-  dispatch,
+  intents,
   state,
   onSelectConfigOption,
   onCancelTask,
+  onRemoveAttachment,
   onSubmitTask,
-  resetOptionsRequestKey,
   agents,
   loadingProjects = false,
   submitShortcut,
@@ -31,8 +55,8 @@ export function NewTaskView({
   workspaceBrowser,
   projectContextMode = "selectable",
 }: {
-  state: AppState;
-  dispatch: Dispatch<AppAction>;
+  state: NewTaskViewState;
+  intents: NewTaskViewIntents;
   fileBrowser?: TaskFileBrowserCallbacks;
   workspaceBrowser?: WorkspaceBrowserCallbacks;
   projectContextMode?: ProjectContextMode;
@@ -40,8 +64,8 @@ export function NewTaskView({
   loadingProjects?: boolean;
   onSelectConfigOption: (configId: string, value: string) => void;
   onCancelTask?: () => void;
+  onRemoveAttachment: (attachmentId: string) => void;
   onSubmitTask: (draft: { prompt: string; context: AppState["newTask"]["context"] }) => void;
-  resetOptionsRequestKey: () => void;
   agents?: AgentOption[];
   submitShortcut: AppPreferencesRecord["composer_submit_shortcut"];
 }) {
@@ -50,31 +74,26 @@ export function NewTaskView({
   const contextControlsRef = useRef<HTMLDivElement | null>(null);
   const agentChoices = agents?.length ? agents : agentOptions;
   const selectedAgent = agentChoices.find((agent) => agent.id === state.newTask.selection.agentId);
-  const projectChoices = state.projects.length ? state.projects : projectsFromTasks(state.tasks);
+  const projectChoices = state.projects;
   const selectedProject = projectChoices.find((project) => project.projectId === state.newTask.selection.projectId);
   const enteredWorkspacePath = workspacePath.trim();
   const preparedTaskId = state.snapshot && !state.snapshot.task.has_messages ? state.snapshot.task.task_id : undefined;
-  const preparedTaskInput = preparedTaskId ? state.taskInputs[preparedTaskId] : undefined;
+  const preparedTaskInput = preparedTaskId ? state.preparedTaskInput : undefined;
   const preparedConfigOptions = preparedTaskId ? state.snapshot?.agent_config : undefined;
-  const composerConfigOptions = preparedConfigOptions?.options.length ? preparedConfigOptions : undefined;
-  const composerConfigOptionsError = preparedTaskId ? undefined : state.newTask.configOptionsError;
+  const currentConfigOptions = preparedTaskId ? preparedConfigOptions : state.newTask.configOptions;
+  const composerConfigOptions = currentConfigOptions && (
+    currentConfigOptions.options.length > 0 || currentConfigOptions.status === "empty"
+  ) ? currentConfigOptions : undefined;
+  const composerConfigOptionsError = currentConfigOptions?.status === "failed"
+    ? currentConfigOptions.error
+    : preparedTaskId ? undefined : state.newTask.configOptionsError;
   const composerAttachments = state.newTask.submitting
     ? state.newTask.pending?.context ?? preparedTaskInput?.pending?.context ?? []
     : preparedTaskInput?.context ?? state.newTask.context;
-  const attachmentOnlySend = preparedTaskId !== undefined
-    && state.snapshot?.send_capability.attachment_only === true;
-  const showTextRequirementError = state.snapshot?.send_capability.state !== "loading";
   const externalPrompt = state.newTask.submitting
     ? state.newTask.pending?.prompt ?? preparedTaskInput?.pending?.prompt ?? ""
     : preparedTaskInput?.prompt ?? state.newTask.prompt;
-  const [localPrompt, setLocalPrompt] = useState(externalPrompt);
-  const lastExternalPromptRef = useRef(externalPrompt);
-  useEffect(() => {
-    if (externalPrompt === lastExternalPromptRef.current) return;
-    lastExternalPromptRef.current = externalPrompt;
-    setLocalPrompt(externalPrompt);
-  }, [externalPrompt]);
-  const composerPrompt = localPrompt;
+  const composerPrompt = externalPrompt;
   const needsProject = !state.newTask.selection.projectId;
   const fixedProjectContext = projectContextMode === "fixed";
   const openingNativeSession = state.newTask.nativeSessions.adoptingSessionId !== undefined;
@@ -85,23 +104,29 @@ export function NewTaskView({
     agentLabel: state.newTask.selection.agentLabel,
     configOptionsError: composerConfigOptionsError,
     configOptionsLoading: state.newTask.configOptionsLoading,
-    configOptionsReady: composerConfigOptions !== undefined,
+    configOptionsReady: configOptionsSettled(currentConfigOptions),
     needsWorkspace,
     openingNativeSession,
     submitting: state.newTask.submitting,
   });
-  const canSend =
-    !needsProject &&
-    !needsWorkspace &&
-    !loadingProjects &&
-    !state.newTask.submitting &&
-    !composerConfigOptionsError &&
-    (composerAttachments.length === 0 || appServerAttachmentHandles(composerAttachments) !== undefined);
-  const composerFocusKey = `${focusRequestKey ?? 0}:${canSend && composerPrompt.trim().length > 0 ? "ready" : "waiting"}`;
+  const availability = composerAvailability({
+    allowEditingWhileSendBlocked: false,
+    attachmentsReady: composerAttachments.length === 0
+      || appServerAttachmentHandles(composerAttachments) !== undefined,
+    connectionStatus: loadingProjects ? "connecting" : "ready",
+    contextPlaceholder: waitStatus ?? "Preparing task.",
+    contextReady: !needsProject && !needsWorkspace && !loadingProjects && !composerConfigOptionsError,
+    readyPlaceholder: "Describe the task.",
+    sendCapability: preparedTaskId ? state.snapshot?.send_capability : undefined,
+    submitPendingLabel: "Task starting",
+    submitting: state.newTask.submitting,
+  });
+  const canSubmit = composerCanSubmit(availability, composerPrompt, composerAttachments.length);
+  const composerFocusKey = `${focusRequestKey ?? 0}:${canSubmit ? "ready" : "waiting"}`;
   const composerFileBrowser = needsProject || needsWorkspace || loadingProjects ? undefined : fileBrowser;
 
   const submit = (prompt: string) => {
-    if (!canSend) return;
+    if (!canSubmit) return;
     onSubmitTask({ prompt, context: composerAttachments });
   };
   const toggleContextMenu = (menu: NewTaskContextMenu) => {
@@ -114,14 +139,10 @@ export function NewTaskView({
   const selectWorkspacePath = (path: string, label = workspaceLabel(path)) => {
     const trimmedPath = path.trim();
     if (!trimmedPath) return;
-    resetOptionsRequestKey();
-    dispatch({
-      type: "newTask:workspace",
-      workspace: {
-        path: trimmedPath,
-        label,
-        projectId: projectIdForWorkspaceRoot(trimmedPath),
-      },
+    intents.selectWorkspace({
+      path: trimmedPath,
+      label,
+      projectId: projectIdForWorkspaceRoot(trimmedPath),
     });
     setOpenContextMenu(undefined);
   };
@@ -140,50 +161,27 @@ export function NewTaskView({
     <Composer
       attachments={composerAttachments}
       autoFocus
-      configLocked={state.newTask.configOptionsLoading}
+      availability={availability}
+      configLocked={state.newTask.configOptionsLoading || !configOptionsMutable(currentConfigOptions)}
       configOptions={composerConfigOptions}
       commandCatalog={preparedTaskId ? state.snapshot?.agent_commands : undefined}
-      disabled={state.newTask.submitting}
       error={undefined}
       fileBrowser={composerFileBrowser}
       focusRequestKey={composerFocusKey}
       onCancel={state.newTask.submitting ? onCancelTask : undefined}
-      onChange={(prompt) => {
-        setLocalPrompt(prompt);
-        dispatch(preparedTaskId
-          ? { type: "taskInput:prompt", taskId: preparedTaskId, prompt }
-          : { type: "prompt", prompt });
-      }}
-      onUnsupportedImageAttachment={(message) =>
-        dispatch({
-          type: "submit:error",
-          message: message ?? "Images can be attached after the Task is open.",
-        })
-      }
-      onRemoveAttachment={(attachmentId) =>
-        preparedTaskId
-          ? dispatch({ type: "taskInput:attachment:remove", taskId: preparedTaskId, attachmentId })
-          : dispatch({ type: "newTask:attachment:remove", attachmentId })}
+      onChange={intents.changePrompt}
+      onUnsupportedImageAttachment={intents.reportAttachmentError}
+      onRemoveAttachment={onRemoveAttachment}
       onSelectAgent={(agentId) => {
-        resetOptionsRequestKey();
-        dispatch({
-          type: "newTask:agent",
-          agentId,
-          agentLabel: agentChoices.find((agent) => agent.id === agentId)?.label,
-        });
+        intents.selectAgent(agentId, agentChoices.find((agent) => agent.id === agentId)?.label);
       }}
       onSelectConfigOption={onSelectConfigOption}
-      onSelectIsolation={(isolation) => dispatch({ type: "newTask:isolation", isolation })}
+      onSelectIsolation={intents.selectIsolation}
       onSubmit={submit}
-      placeholder={state.newTask.submitting ? "" : "Describe the task."}
       prompt={composerPrompt}
       selection={state.newTask.selection}
       agents={agentChoices}
       submitShortcut={submitShortcut}
-      submitDisabled={!canSend}
-      submitPending={state.newTask.submitting}
-      submitRequiresText={!attachmentOnlySend}
-      showTextRequirementError={showTextRequirementError}
       showAgentSelector={false}
       showIsolationSelector={false}
     />
@@ -236,14 +234,14 @@ export function NewTaskView({
                     key={project.projectId}
                     label={project.label}
                     onClick={() => selectContextAndClose(() => {
-                      resetOptionsRequestKey();
-                      dispatch({ type: "newTask:project", project });
+                      intents.selectProject(project);
                     })}
                   />
                 ))}
                 {workspaceBrowser ? (
                   <NewWorkspacePicker
                     browser={workspaceBrowser}
+                    key={workspaceBrowser.ownerKey}
                     onSelect={(workspace) => selectWorkspacePath(workspace.path, workspace.label)}
                   />
                 ) : null}
@@ -304,12 +302,7 @@ export function NewTaskView({
                     label={agent.label}
                     onClick={() =>
                       selectContextAndClose(() => {
-                        resetOptionsRequestKey();
-                        dispatch({
-                          type: "newTask:agent",
-                          agentId: agent.id,
-                          agentLabel: agent.label,
-                        });
+                        intents.selectAgent(agent.id, agent.label);
                       })
                     }
                   />
@@ -340,16 +333,4 @@ export function NewTaskView({
       </div>
     </section>
   );
-}
-
-function projectsFromTasks(tasks: TaskSummary[]) {
-  const projects = new Map<string, { projectId: string; label: string }>();
-  for (const task of tasks) {
-    if (!task.project_id || projects.has(task.project_id)) continue;
-    projects.set(task.project_id, {
-      projectId: task.project_id,
-      label: task.project_label || task.workspace_root || "Project",
-    });
-  }
-  return [...projects.values()];
 }

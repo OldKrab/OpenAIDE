@@ -17,6 +17,7 @@ import {
 } from "./composerOptions";
 import type { AppAction } from "./appReducer";
 import type { AppState } from "./store";
+import { newTaskPreparationKey } from "./newTaskPreparationContext";
 
 type NewTaskAction =
   | { type: "prompt"; prompt: string }
@@ -26,19 +27,20 @@ type NewTaskAction =
   | { type: "submit:attachments:invalidate"; taskId: string; message: string }
   | { type: "newTask:reset" }
   | { type: "newTask:prepared"; taskId: string }
-  | { type: "newTask:agent"; agentId: string; agentLabel?: string }
-  | { type: "newTask:project"; project: ProjectOption }
-  | { type: "newTask:projectId"; projectId: string }
+  | { type: "newTask:agent"; agentId: string; agentLabel?: string; newTaskId?: string }
+  | { type: "newTask:project"; project: ProjectOption; newTaskId?: string }
+  | { type: "newTask:projectId"; projectId: string; newTaskId?: string }
   | { type: "newTask:isolation"; isolation: IsolationKind }
   | { type: "newTask:configOptions:start" }
   | { type: "newTask:configOptions:result"; catalog: ConfigOptionsCatalog }
   | { type: "newTask:configOptions:error"; message: string }
   | { type: "newTask:nativeSessions:start"; append: boolean }
   | { type: "newTask:nativeSessions:result"; result: AgentListSessionsResult; append: boolean }
-  | { type: "newTask:nativeSessions:error"; message: string }
+  | { type: "newTask:nativeSessions:listError"; message: string }
+  | { type: "newTask:nativeSessions:error"; sessionId: string; message: string }
   | { type: "newTask:nativeSessions:adopt"; sessionId: string }
   | { type: "newTask:nativeSessions:remove"; sessionId: string }
-  | { type: "newTask:workspace"; workspace: WorkspaceRoot }
+  | { type: "newTask:workspace"; workspace: WorkspaceRoot; newTaskId?: string }
   | { type: "newTask:attachment:add"; attachment: Attachment }
   | { type: "newTask:attachment:remove"; attachmentId: string };
 
@@ -148,35 +150,27 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
       };
     }
     case "newTask:agent":
-      return {
-        ...state,
-        newTask: {
+      return replacePreparedDraftOnContextChange(state, {
           ...state.newTask,
           selection: { ...selectionWithAgent(state.newTask.selection, action.agentId, action.agentLabel), configOptions: {} },
           configOptions: undefined,
           configOptionsLoading: false,
           configOptionsError: undefined,
           nativeSessions: emptyNativeSessions(),
-        },
-      };
+      }, action.newTaskId);
     case "newTask:project":
-      return {
-        ...state,
-        newTask: {
+      return replacePreparedDraftOnContextChange(state, {
           ...state.newTask,
           selection: { ...selectionWithProject(state.newTask.selection, action.project), configOptions: {} },
           configOptions: undefined,
           configOptionsLoading: false,
           configOptionsError: undefined,
           nativeSessions: emptyNativeSessions(),
-        },
-      };
+      }, action.newTaskId);
     case "newTask:projectId": {
       const project = state.projects.find((candidate) => candidate.projectId === action.projectId);
       const sameProject = state.newTask.selection.projectId === action.projectId;
-      return {
-        ...state,
-        newTask: {
+      return replacePreparedDraftOnContextChange(state, {
           ...state.newTask,
           selection: {
             ...state.newTask.selection,
@@ -188,8 +182,7 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
           configOptionsLoading: sameProject ? state.newTask.configOptionsLoading : false,
           configOptionsError: sameProject ? state.newTask.configOptionsError : undefined,
           nativeSessions: sameProject ? state.newTask.nativeSessions : emptyNativeSessions(),
-        },
-      };
+      }, action.newTaskId);
     }
     case "newTask:isolation":
       return {
@@ -228,9 +221,7 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
           ...state.newTask,
           nativeSessions: {
             ...state.newTask.nativeSessions,
-            items: action.append ? state.newTask.nativeSessions.items : [],
             loading: true,
-            loaded: action.append ? state.newTask.nativeSessions.loaded : false,
             error: undefined,
           },
         },
@@ -256,7 +247,21 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
         },
       };
     }
+    case "newTask:nativeSessions:listError":
+      return {
+        ...state,
+        newTask: {
+          ...state.newTask,
+          nativeSessions: {
+            ...state.newTask.nativeSessions,
+            loading: false,
+            loaded: true,
+            error: action.message,
+          },
+        },
+      };
     case "newTask:nativeSessions:error":
+      if (state.newTask.nativeSessions.adoptingSessionId !== action.sessionId) return state;
       return {
         ...state,
         newTask: {
@@ -281,34 +286,36 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
           nativeSessions: {
             ...state.newTask.nativeSessions,
             adoptingSessionId: action.sessionId,
+            error: undefined,
           },
         },
       };
-    case "newTask:nativeSessions:remove":
+    case "newTask:nativeSessions:remove": {
+      const settlesCurrentAdoption = state.newTask.nativeSessions.adoptingSessionId === action.sessionId;
       return {
         ...state,
         newTask: {
           ...state.newTask,
-          submitting: false,
+          submitting: settlesCurrentAdoption ? false : state.newTask.submitting,
           nativeSessions: {
             ...state.newTask.nativeSessions,
-            adoptingSessionId: undefined,
+            adoptingSessionId: settlesCurrentAdoption
+              ? undefined
+              : state.newTask.nativeSessions.adoptingSessionId,
             items: state.newTask.nativeSessions.items.filter((session) => session.session_id !== action.sessionId),
           },
         },
       };
+    }
     case "newTask:workspace":
-      return {
-        ...state,
-        newTask: {
+      return replacePreparedDraftOnContextChange(state, {
           ...state.newTask,
           selection: { ...selectionWithWorkspace(state.newTask.selection, action.workspace), configOptions: {} },
           configOptions: undefined,
           configOptionsLoading: false,
           configOptionsError: undefined,
           nativeSessions: emptyNativeSessions(),
-        },
-      };
+      }, action.newTaskId);
     case "newTask:attachment:add":
       return {
         ...state,
@@ -328,8 +335,37 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
   }
 }
 
+/** Moves only text across prepared-Task ownership; App Server handles cannot transfer Tasks. */
+function replacePreparedDraftOnContextChange(
+  state: AppState,
+  nextNewTask: AppState["newTask"],
+  newTaskId?: string,
+) {
+  if (newTaskPreparationKey({ newTask: state.newTask }) === newTaskPreparationKey({ newTask: nextNewTask })) {
+    return { ...state, newTask: nextNewTask };
+  }
+  const preparedTaskId = newTaskId;
+  if (!preparedTaskId) return { ...state, newTask: nextNewTask };
+  const preparedInput = state.taskInputs[preparedTaskId];
+  const { [preparedTaskId]: _discardedInput, ...taskInputs } = state.taskInputs;
+  return {
+    ...state,
+    newTask: {
+      ...nextNewTask,
+      prompt: preparedInput?.prompt ?? nextNewTask.prompt,
+      context: [],
+    },
+    taskInputs,
+  };
+}
+
 function isNewTaskAction(action: AppAction): action is NewTaskAction {
-  return action.type === "prompt" || action.type === "submit:start" || action.type === "submit:cancel" || action.type === "submit:error" || action.type.startsWith("newTask:");
+  return action.type === "prompt"
+    || action.type === "submit:start"
+    || action.type === "submit:cancel"
+    || action.type === "submit:error"
+    || action.type === "submit:attachments:invalidate"
+    || action.type.startsWith("newTask:");
 }
 
 function emptyNativeSessions() {

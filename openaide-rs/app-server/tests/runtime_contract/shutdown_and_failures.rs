@@ -126,8 +126,10 @@ fn runtime_startup_recovers_stale_active_turn_and_session_binding() {
     store
         .write_task(&TaskRecord {
             task_id: task_id.clone(),
-            title: "Stale boot".to_string(),
-            agent_title: None,
+            title: openaide_app_server::storage::records::TaskTitle::new(
+                "Stale boot",
+                openaide_app_server::storage::records::TaskTitleSource::User,
+            ),
             status: TaskStatus::Active,
             task_version: 1,
             message_history_version: 0,
@@ -139,7 +141,7 @@ fn runtime_startup_recovers_stale_active_turn_and_session_binding() {
             agent_id: "codex".to_string(),
             isolation: IsolationKind::Local,
             workspace_root: tmp.path().to_string_lossy().to_string(),
-            first_prompt_sent: true,
+            lifecycle: openaide_app_server::storage::records::TaskLifecycle::Visible,
             agent_session_id: Some("session_stale_boot".to_string()),
             active_turn_id: Some("turn_stale_boot".to_string()),
             archived: false,
@@ -147,6 +149,7 @@ fn runtime_startup_recovers_stale_active_turn_and_session_binding() {
             revision: 1,
             config_options: Default::default(),
             config_options_catalog: None,
+            config_mutation: Default::default(),
             agent_commands_catalog: None,
             model_id: None,
             preparation: TaskPreparationRecord::Ready,
@@ -176,7 +179,7 @@ fn runtime_startup_recovers_stale_active_turn_and_session_binding() {
         .unwrap();
     assert_eq!(snapshot.task.status, TaskStatus::Inactive);
     assert!(has_interruption_reason(&snapshot, |reason| {
-        matches!(reason, InterruptionReason::Canceled)
+        matches!(reason, InterruptionReason::BackendUnavailable)
     }));
 
     runtime.service().shutdown().unwrap();
@@ -301,7 +304,7 @@ fn task_create_attach_failure_finalizes_created_task() {
     assert_eq!(closes.load(Ordering::SeqCst), 1);
     let records = store.list_tasks().unwrap();
     assert_eq!(records.len(), 1);
-    assert_eq!(records[0].status, TaskStatus::Failed);
+    assert_eq!(records[0].status, TaskStatus::Inactive);
     assert!(records[0].active_turn_id.is_none());
     assert!(records[0].agent_session_id.is_none());
 
@@ -456,42 +459,4 @@ fn task_updates_emit_typed_task_updates() {
             .any(|update| update.task_id == task_id),
         "expected task update for task"
     );
-}
-
-#[test]
-fn legacy_task_records_without_archive_fields_remain_listable() {
-    let tmp = TempDir::new().unwrap();
-    let task_dir = tmp.path().join("store/tasks/task_legacy");
-    std::fs::create_dir_all(&task_dir).unwrap();
-    std::fs::write(
-        task_dir.join("task.json"),
-        serde_json::to_string_pretty(&json!({
-            "task_id": "task_legacy",
-            "title": "Legacy task",
-            "status": "inactive",
-            "task_version": 1,
-            "message_history_version": 0,
-            "unread": false,
-            "created_at": "2026-05-17T00:00:00Z",
-            "updated_at": "2026-05-17T00:00:00Z",
-            "last_activity": "2026-05-17T00:00:00Z",
-            "agent_id": "codex",
-            "agent_name": "Codex",
-            "isolation": "local",
-            "workspace_root": "/workspace",
-            "first_prompt_sent": true,
-            "model_id": null
-        }))
-        .unwrap(),
-    )
-    .unwrap();
-
-    let runtime = Runtime::new(tmp.path().join("store")).unwrap();
-    let list = runtime
-        .service()
-        .list(TaskListParams { archived: false })
-        .unwrap();
-
-    assert_eq!(list.tasks[0].task_id, "task_legacy");
-    assert_eq!(list.revision, 0);
 }

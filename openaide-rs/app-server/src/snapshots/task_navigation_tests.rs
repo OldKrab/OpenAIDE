@@ -55,7 +55,13 @@ fn projects_visible_task_records_into_navigation_snapshot() {
     assert_eq!(snapshot.active_task_id, None);
     assert_eq!(snapshot.tasks.len(), 2);
     assert_eq!(snapshot.tasks[0].task_id.as_str(), "task-newer");
-    assert_eq!(snapshot.tasks[0].title, "New");
+    assert_eq!(
+        snapshot.tasks[0]
+            .title
+            .as_ref()
+            .map(|title| title.value.as_str()),
+        Some("New")
+    );
     assert_eq!(snapshot.tasks[0].status, ProtocolTaskStatus::Idle);
     assert_eq!(snapshot.tasks[0].agent_id.as_str(), "agent-a");
     assert!(!snapshot.tasks[0].has_messages);
@@ -169,8 +175,10 @@ fn storage_read_failure_returns_recoverable_error() {
 fn task_record(task_id: &str, title: &str, updated_at: &str) -> TaskRecord {
     TaskRecord {
         task_id: task_id.to_string(),
-        title: title.to_string(),
-        agent_title: None,
+        title: crate::storage::records::TaskTitle::new(
+            title,
+            crate::storage::records::TaskTitleSource::User,
+        ),
         status: TaskStatus::Inactive,
         task_version: 1,
         message_history_version: 0,
@@ -182,7 +190,7 @@ fn task_record(task_id: &str, title: &str, updated_at: &str) -> TaskRecord {
         agent_name: "Agent A".to_string(),
         isolation: IsolationKind::Local,
         workspace_root: "/workspace/a".to_string(),
-        first_prompt_sent: false,
+        lifecycle: crate::storage::records::TaskLifecycle::Visible,
         agent_session_id: None,
         active_turn_id: None,
         archived: false,
@@ -190,6 +198,7 @@ fn task_record(task_id: &str, title: &str, updated_at: &str) -> TaskRecord {
         revision: 1,
         config_options: Default::default(),
         config_options_catalog: None,
+        config_mutation: Default::default(),
         agent_commands_catalog: None,
         model_id: None,
         preparation: TaskPreparationRecord::Ready,

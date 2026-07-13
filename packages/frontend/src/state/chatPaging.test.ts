@@ -10,7 +10,10 @@ describe("chatPaging", () => {
     );
 
     expect(state.olderItems.map((item) => item.message_id)).toEqual(["m1", "m2", "m3"]);
-    expect((state.olderItems[1].message as Extract<ChatMessage["message"], { kind: "agent_text" }>).text).toBe("new m2");
+    expect((state.olderItems[1].message as Extract<ChatMessage["message"], { kind: "agent_message" }>).parts[0]).toEqual({
+      kind: "text",
+      text: "new m2",
+    });
     expect(state.hasBefore).toBe(false);
     expect(state.startCursor).toBe("cursor_m1");
     expect(state.pending).toBe(false);
@@ -33,45 +36,62 @@ describe("chatPaging", () => {
     expect(chat.error).toBe("Page failed");
   });
 
-  it("coalesces streamed thought rows using first identity, last cursor, text order, and streaming flag", () => {
-    const chat = renderedChat(snapshot([thoughtMessage("m1", "Think", false), thoughtMessage("m2", "ing", true)]), undefined);
+  it("uses the live tail value when loaded history contains a stale copy of the same row", () => {
+    const chat = renderedChat(snapshot([
+      agentMessage("answer", "Complete response including the final chunk"),
+    ]), {
+      olderItems: [
+        agentMessage("older", "Earlier context"),
+        agentMessage("answer", "Complete response"),
+      ],
+      hasBefore: false,
+      pending: false,
+    });
 
-    expect(chat.items).toHaveLength(1);
-    expect(chat.items[0]).toMatchObject({
-      identity: "m1",
-      message_id: "m1",
-      cursor: "cursor_m2",
-      message: { kind: "thought", id: "m1", text: "Thinking", streaming: true },
+    expect(chat.items.map((item) => item.message_id)).toEqual(["older", "answer"]);
+    expect(chat.items[1]?.message).toMatchObject({
+      kind: "agent_message",
+      parts: [{ kind: "text", text: "Complete response including the final chunk" }],
     });
   });
 
-  it("coalesces streamed agent text chunks using first identity, last cursor, text order, and streaming flag", () => {
+  it("preserves distinct thought identities instead of guessing chunk boundaries from adjacency", () => {
+    const chat = renderedChat(snapshot([thoughtMessage("m1", "Think"), thoughtMessage("m2", "ing")]), undefined);
+
+    expect(chat.items.map((item) => item.message_id)).toEqual(["m1", "m2"]);
+    expect(chat.items.map((item) => item.message)).toMatchObject([
+      { kind: "agent_message", id: "m1", role: "thought", parts: [{ kind: "text", text: "Think" }] },
+      { kind: "agent_message", id: "m2", role: "thought", parts: [{ kind: "text", text: "ing" }] },
+    ]);
+  });
+
+  it("preserves distinct Agent message identities instead of joining short adjacent text", () => {
     const chat = renderedChat(
       snapshot([
-        agentMessage("m1", "Run", false),
-        agentMessage("m2", " `", true),
-        agentMessage("m3", "pwd", false),
+        agentMessage("m1", "Run"),
+        agentMessage("m2", " `"),
+        agentMessage("m3", "pwd"),
       ]),
       undefined,
     );
 
-    expect(chat.items).toHaveLength(1);
-    expect(chat.items[0]).toMatchObject({
-      identity: "m1",
-      message_id: "m1",
-      cursor: "cursor_m3",
-      message: { kind: "agent_text", id: "m1", text: "Run `pwd", streaming: true },
-    });
+    expect(chat.items.map((item) => item.message_id)).toEqual(["m1", "m2", "m3"]);
+    expect(chat.items.map((item) => item.message)).toMatchObject([
+      { kind: "agent_message", id: "m1", role: "agent", parts: [{ kind: "text", text: "Run" }] },
+      { kind: "agent_message", id: "m2", role: "agent", parts: [{ kind: "text", text: " `" }] },
+      { kind: "agent_message", id: "m3", role: "agent", parts: [{ kind: "text", text: "pwd" }] },
+    ]);
   });
 
-  it("coalesces activity runs without promoting a failed tool to the group status", () => {
+  it("groups adjacent activity and thought rows into one tool run", () => {
     const chat = renderedChat(
       snapshot([
         activityMessage("m1", "exec_command", "completed", false, [
-          { kind: "tool", name: "execute", status: "completed", input_summary: "git status" },
+          { kind: "tool", tool_call_id: "tool-1", name: "execute", status: "completed", input_summary: "git status" },
         ]),
+        thoughtMessage("thought-1", "Check the test result"),
         activityMessage("m2", "exec_command", "running", true, [
-          { kind: "tool", name: "execute", status: "running", input_summary: "npm test" },
+          { kind: "tool", tool_call_id: "tool-2", name: "execute", status: "running", input_summary: "npm test" },
         ]),
         activityMessage("m3", "exec_command", "error", true, [
           { kind: "command", command_label: "cargo test", status: "error", exit_code: 1 },
@@ -82,24 +102,38 @@ describe("chatPaging", () => {
 
     expect(chat.items).toHaveLength(1);
     expect(chat.items[0]).toMatchObject({
-      identity: "m1",
       message_id: "m1",
       cursor: "cursor_m3",
       message: {
         kind: "activity",
         title: "Commands",
         status: "completed",
-        collapsed: false,
         steps: [
-          { kind: "tool", input_summary: "git status" },
-          { kind: "tool", input_summary: "npm test" },
+          { kind: "tool", tool_call_id: "tool-1", input_summary: "git status" },
+          { kind: "thought", message_id: "thought-1", text: "Check the test result" },
+          { kind: "tool", tool_call_id: "tool-2", input_summary: "npm test" },
           { kind: "command", command_label: "cargo test" },
         ],
       },
     });
   });
 
-  it("classifies coalesced terminal input and generic tool activity runs", () => {
+  it("preserves an unchanged grouped activity row while later live text changes", () => {
+    const activities = [
+      activityMessage("m1", "Read file", "completed", true, [
+        { kind: "tool", name: "read", status: "completed", input_summary: "src/main.ts" },
+      ]),
+      activityMessage("m2", "Search files", "completed", true, [
+        { kind: "tool", name: "search", status: "completed", input_summary: "needle" },
+      ]),
+    ];
+    const first = renderedChat(snapshot([...activities, agentMessage("answer", "Partial")]), undefined);
+    const second = renderedChat(snapshot([...activities, agentMessage("answer", "Partial response")]), undefined);
+
+    expect(second.items[0]).toBe(first.items[0]);
+  });
+
+  it("labels grouped activity by the work represented in the run", () => {
     const terminalChat = renderedChat(
       snapshot([
         activityMessage("m1", "write_stdin", "completed", true, [{ kind: "text", text: "npm", level: "info" }]),
@@ -119,19 +153,58 @@ describe("chatPaging", () => {
       undefined,
     );
 
-    expect(terminalChat.items[0]).toMatchObject({
-      cursor: "cursor_m2",
-      message: { kind: "activity", title: "Terminal input", collapsed: true },
+    expect(terminalChat.items).toHaveLength(1);
+    expect(terminalChat.items[0]?.message).toMatchObject({
+      kind: "activity",
+      title: "Terminal input",
+      collapsed: true,
+      steps: [{ kind: "text", text: "npm" }, { kind: "text", text: " test" }],
     });
-    expect(toolChat.items[0]).toMatchObject({
-      cursor: "cursor_m4",
-      message: { kind: "activity", title: "Tool activity", collapsed: true },
+    expect(toolChat.items).toHaveLength(1);
+    expect(toolChat.items[0]?.message).toMatchObject({
+      kind: "activity",
+      title: "Tool activity",
+      collapsed: true,
+      steps: [
+        { kind: "tool", input_summary: "alpha" },
+        { kind: "tool", input_summary: "src/main.ts" },
+      ],
+    });
+  });
+
+  it("keeps a text-only Agent outcome outside adjacent Tool groups", () => {
+    const chat = renderedChat(
+      snapshot([
+        activityMessage("tool-before", "Read file", "completed", true, [
+          { kind: "tool", name: "read", status: "completed", input_summary: "src/main.ts" },
+        ]),
+        activityMessage("prompt-limit", "Agent stopped", "error", false, [
+          { kind: "text", text: "The Agent reached its token limit.", level: "error" },
+        ]),
+        activityMessage("tool-after", "Search files", "completed", true, [
+          { kind: "tool", name: "search", status: "completed", input_summary: "retry" },
+        ]),
+      ]),
+      undefined,
+    );
+
+    expect(chat.items.map((item) => item.message_id)).toEqual([
+      "tool-before",
+      "prompt-limit",
+      "tool-after",
+    ]);
+    expect(chat.items[1]?.message).toMatchObject({
+      kind: "activity",
+      title: "Agent stopped",
+      status: "error",
+      steps: [{ kind: "text", text: "The Agent reached its token limit." }],
     });
   });
 });
 
 function snapshot(items: ChatMessage[]): TaskSnapshot {
   return {
+    lifecycle: "visible",
     task: {
       task_id: "task_1",
       title: "Task",
@@ -149,9 +222,9 @@ function snapshot(items: ChatMessage[]): TaskSnapshot {
       workspace_root: "/workspace",
     },
     chat: page(items, false),
-    permissions: [],
+    active_requests: [],
     history_sync: { state: "idle", generation: 0 },
-    send_capability: { state: "ready", attachment_only: true },
+    send_capability: { state: "ready" },
     settings_summary: { agent_id: "codex", isolation: "local" },
     revision: 1,
   };
@@ -170,34 +243,34 @@ function page(items: ChatMessage[], hasBefore: boolean): MessagePage {
   };
 }
 
-function agentMessage(id: string, text: string, streaming = false): ChatMessage {
+function agentMessage(id: string, text: string): ChatMessage {
   return {
     cursor: `cursor_${id}`,
     identity: id,
-    message_type: "agent_text",
+    message_type: "agent_message",
     message_id: id,
     message: {
-      kind: "agent_text",
+      kind: "agent_message",
       id,
-      text,
+      role: "agent",
+      parts: [{ kind: "text", text }],
       created_at: "2026-05-17T00:00:00Z",
-      streaming,
     },
   };
 }
 
-function thoughtMessage(id: string, text: string, streaming = false): ChatMessage {
+function thoughtMessage(id: string, text: string): ChatMessage {
   return {
     cursor: `cursor_${id}`,
     identity: id,
-    message_type: "thought",
+    message_type: "agent_message",
     message_id: id,
     message: {
-      kind: "thought",
+      kind: "agent_message",
       id,
-      text,
+      role: "thought",
+      parts: [{ kind: "text", text }],
       created_at: "2026-05-17T00:00:00Z",
-      streaming,
     },
   };
 }

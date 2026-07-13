@@ -25,6 +25,7 @@ export function mapProtocolQuestion(
     fields,
     answers: question.action === "submit" ? questionAnswers(question.fields, question.content) : undefined,
     error: question.error ?? undefined,
+    resolution_message: question.resolutionMessage ?? undefined,
   };
 }
 

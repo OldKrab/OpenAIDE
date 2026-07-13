@@ -55,6 +55,7 @@ export type WebviewToHostMessage =
 export type HostToWebviewMessage =
   | AppServerServerRequestResultMessage
   | SecretTransactionResultMessage
+  | { type: "surface.routeChanged"; payload: { surface: "task"; task_id: string } }
   | { type: "diagnostics.snapshot.result"; payload: DiagnosticsSnapshot }
   | { type: "workspace.roots.result"; payload: { roots: WorkspaceRootSummary[] } }
   | { type: "runtime.settings.result"; payload: RuntimeSettingsResult }

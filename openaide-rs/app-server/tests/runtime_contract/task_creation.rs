@@ -154,7 +154,7 @@ fn task_create_adopts_external_session_with_replayed_history() {
     assert_eq!(loads.load(Ordering::SeqCst), 1);
     assert_eq!(prompts.load(Ordering::SeqCst), 0);
     assert_eq!(snapshot.task.status, TaskStatus::Inactive);
-    assert_eq!(snapshot.task.title, "Prior user question");
+    assert_eq!(snapshot.task.title, None);
     assert_eq!(
         snapshot.settings_summary.model_id.as_deref(),
         Some("gpt-5.5")
@@ -176,15 +176,10 @@ fn task_create_adopts_external_session_with_replayed_history() {
         NormalizedMessage::User { text, .. } => assert_eq!(text, "Prior user question"),
         other => panic!("expected replayed user message, got {other:?}"),
     }
-    match &snapshot.chat.items[1].message {
-        NormalizedMessage::AgentText {
-            text, streaming, ..
-        } => {
-            assert_eq!(text, "Prior agent answer");
-            assert!(!streaming);
-        }
-        other => panic!("expected replayed agent message, got {other:?}"),
-    }
+    assert_eq!(
+        agent_message_text(&snapshot.chat.items[1].message),
+        Some("Prior agent answer")
+    );
 
     service
         .prompt(SessionPromptParams {

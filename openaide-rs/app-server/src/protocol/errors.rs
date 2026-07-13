@@ -10,6 +10,8 @@ pub enum RuntimeError {
     TaskNotFound(String),
     #[error("runtime not ready: {0}")]
     NotReady(String),
+    #[error("conflict: {0}")]
+    Conflict(String),
     #[error("agent authentication required: {0}")]
     AuthRequired(String),
     #[error("agent setup required: {0}")]
@@ -31,6 +33,7 @@ impl RuntimeError {
         match self {
             RuntimeError::InvalidParams(_) => -32602,
             RuntimeError::TaskNotFound(_) => -32005,
+            RuntimeError::Conflict(_) => -32009,
             RuntimeError::NotReady(_)
             | RuntimeError::AuthRequired(_)
             | RuntimeError::SetupRequired(_) => -32002,
@@ -45,6 +48,7 @@ impl RuntimeError {
             RuntimeError::InvalidParams(_) => "validation_failed",
             RuntimeError::TaskNotFound(_) => "task_not_found",
             RuntimeError::NotReady(_) => "not_ready",
+            RuntimeError::Conflict(_) => "conflict",
             RuntimeError::AuthRequired(_) => "auth_required",
             RuntimeError::SetupRequired(_) => "setup_required",
             RuntimeError::Unsupported(_) => "unsupported",

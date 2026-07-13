@@ -6,13 +6,14 @@ import type {
   PendingRequestSnapshot,
   PermissionRequestOptionKind,
   PermissionRequestParams,
-  TaskToolDetailResult,
+  ToolDetailSnapshot,
   TaskSnapshot as ProtocolTaskSnapshot,
 } from "@openaide/app-server-client";
 import type {
   ActivityStatus,
   ActivityStep,
   ActivityToolDetails,
+  AgentMessagePart,
   Attachment,
   ChatMessage,
   NormalizedMessage,
@@ -25,27 +26,21 @@ export function mapProtocolChatItem(item: ChatItem, createdAt: string): ChatMess
 }
 
 export function pendingRequestItems(requests: PendingRequestSnapshot[], createdAt: string): ChatMessage[] {
-  return requests
-    .filter((request) => request.scope.kind === "task")
-    .map((request) => {
-      const permission = permissionRequestParams(request);
-      if (request.kind === "permission" && permission) {
-        return permissionMessageFromPendingRequest(request, permission, createdAt);
-      }
-      if (request.kind === "question" && request.question) {
-        const messageId = `pending-${request.requestId}`;
-        return chatMessageFromProtocol(messageId, {
-          ...mapPendingProtocolQuestion(request.requestId, request.question, createdAt),
-          id: messageId,
-        });
-      }
-      return systemInterruptionItem(
-        `pending-${request.requestId}`,
-        `${request.title} needs the App Server request surface.`,
-        createdAt,
-        true,
-      );
-    });
+  return requests.flatMap((request) => {
+    if (request.scope.kind !== "task") return [];
+    const permission = permissionRequestParams(request);
+    if (request.kind === "permission" && permission) {
+      return [permissionMessageFromPendingRequest(request, permission, createdAt)];
+    }
+    if (request.kind === "question" && request.question) {
+      const messageId = `pending-${request.requestId}`;
+      return [chatMessageFromProtocol(messageId, {
+        ...mapPendingProtocolQuestion(request.requestId, request.question, createdAt),
+        id: messageId,
+      })];
+    }
+    return [];
+  });
 }
 
 function permissionRequestParams(request: PendingRequestSnapshot): PermissionRequestParams | undefined {
@@ -123,39 +118,22 @@ function mapProtocolMessage(item: ChatItem, createdAt: string): NormalizedMessag
     };
   }
 
-  const permission = firstPermissionPart(item.parts);
-  if (permission) {
-    return {
-      kind: "permission",
-      id: item.messageId,
-      request_id: permission.requestId,
-      app_server_request_id: permission.appServerRequestId ?? undefined,
-      title: permission.title,
-      description: permission.description ?? undefined,
-      scope: permission.scope ?? undefined,
-      risk: permission.risk ?? undefined,
-      tool_call: {
-        id: permission.toolCall.id,
-        title: permission.toolCall.title,
-        kind: permission.toolCall.kind ?? undefined,
-      },
-      state: permission.state,
-      created_at: createdAt,
-      options: permission.options.map((option) => ({
-        id: option.optionId,
-        label: option.name,
-        kind: option.kind ? permissionMessageOptionKind(option.kind) : undefined,
-      })),
-      selected_option: permission.selectedOption ?? undefined,
-      decision: permission.decision ?? undefined,
-    };
-  }
-
   const question = firstQuestionPart(item.parts);
   if (question) {
     return {
       ...mapProtocolQuestion(question, createdAt),
       id: item.messageId,
+    };
+  }
+
+  const agentParts = agentMessageParts(item.parts);
+  if (agentParts.length > 0) {
+    return {
+      kind: "agent_message",
+      id: item.messageId,
+      role: item.role === "system" ? "thought" : "agent",
+      parts: agentParts,
+      created_at: createdAt,
     };
   }
 
@@ -172,13 +150,7 @@ function mapProtocolMessage(item: ChatItem, createdAt: string): NormalizedMessag
     };
   }
 
-  return {
-    kind: item.role === "system" ? "thought" : "agent_text",
-    id: item.messageId,
-    text,
-    created_at: createdAt,
-    streaming: item.status === "streaming",
-  };
+  return interruptionMessage(item.messageId, text || "Unsupported Chat message.", createdAt, false);
 }
 
 function interruptionMessage(id: string, message: string, createdAt: string, recoverable: boolean): NormalizedMessage {
@@ -234,18 +206,43 @@ function firstActivityPart(parts: MessagePart[]) {
   return parts.find((part): part is Extract<MessagePart, { kind: "activity" }> => part.kind === "activity");
 }
 
-function firstPermissionPart(parts: MessagePart[]) {
-  return parts.find((part): part is Extract<MessagePart, { kind: "permission" }> => part.kind === "permission");
+function agentMessageParts(parts: MessagePart[]): AgentMessagePart[] {
+  return parts.flatMap((part): AgentMessagePart[] => {
+    if (part.kind === "text") return [{ kind: "text", text: part.text }];
+    if (part.kind === "image") {
+      return [{
+        kind: "image",
+        media_type: part.mediaType,
+        data_url: part.dataUrl,
+        uri: part.uri ?? undefined,
+      }];
+    }
+    if (part.kind === "resource") {
+      return [{
+        kind: "resource",
+        uri: part.uri,
+        name: part.name ?? undefined,
+        title: part.title ?? undefined,
+        description: part.description ?? undefined,
+        media_type: part.mediaType ?? undefined,
+        size_bytes: part.sizeBytes ?? undefined,
+        text: part.text ?? undefined,
+      }];
+    }
+    if (part.kind === "unsupported") {
+      return [{
+        kind: "unsupported",
+        content_type: part.contentType,
+        media_type: part.mediaType ?? undefined,
+        uri: part.uri ?? undefined,
+      }];
+    }
+    return [];
+  });
 }
 
 function firstQuestionPart(parts: MessagePart[]) {
   return parts.find((part): part is Extract<MessagePart, { kind: "question" }> => part.kind === "question");
-}
-
-function permissionMessageOptionKind(kind: Extract<MessagePart, { kind: "permission" }>["options"][number]["kind"]) {
-  if (kind === "allow") return "allow";
-  if (kind === "deny") return "deny";
-  return "other";
 }
 
 function activitySteps(activity: Extract<MessagePart, { kind: "activity" }>): ActivityStep[] {
@@ -285,6 +282,13 @@ function activityStepFromProtocol(step: ActivityStepSnapshot, activityTitle: str
     output_preview: step.outputPreview ?? undefined,
     detail_artifact_id: step.detailArtifactId ?? undefined,
     details: step.details ? mapProtocolToolDetail(step.details) : undefined,
+    permission_outcomes: (step.permissionOutcomes ?? []).map((outcome) => ({
+      request_id: outcome.requestId,
+      decision: outcome.decision,
+      option_id: outcome.optionId ?? undefined,
+      option_label: outcome.optionLabel ?? undefined,
+      resolved_at: outcome.resolvedAt,
+    })),
   };
 }
 
@@ -297,13 +301,14 @@ function activityStepLevel(level: string | null | undefined): Extract<ActivitySt
   return undefined;
 }
 
-function mapProtocolToolDetail(details: TaskToolDetailResult): ActivityToolDetails {
+export function mapProtocolToolDetail(details: ToolDetailSnapshot): ActivityToolDetails {
   return {
     locations: details.locations.map((location) => ({
       path: location.path,
       line: location.line ?? undefined,
     })),
     content: details.content.map((content) => {
+      if (content.kind === "text") return content;
       if (content.kind === "diff") {
         return {
           kind: "diff" as const,
@@ -313,7 +318,35 @@ function mapProtocolToolDetail(details: TaskToolDetailResult): ActivityToolDetai
         };
       }
       if (content.kind === "terminal") return { kind: "terminal" as const, terminal_id: content.terminalId };
-      return content;
+      if (content.kind === "image") {
+        return {
+          kind: "image" as const,
+          media_type: content.mediaType,
+          data_url: content.dataUrl,
+          uri: content.uri ?? undefined,
+        };
+      }
+      if (content.kind === "audio") {
+        return { kind: "audio" as const, media_type: content.mediaType, data_url: content.dataUrl };
+      }
+      if (content.kind === "resource") {
+        return {
+          kind: "resource" as const,
+          uri: content.uri,
+          name: content.name ?? undefined,
+          title: content.title ?? undefined,
+          description: content.description ?? undefined,
+          media_type: content.mediaType ?? undefined,
+          size_bytes: content.sizeBytes ?? undefined,
+          text: content.text ?? undefined,
+        };
+      }
+      return {
+        kind: "unsupported" as const,
+        content_type: content.contentType,
+        media_type: content.mediaType ?? undefined,
+        uri: content.uri ?? undefined,
+      };
     }),
     input: details.input
       ? {

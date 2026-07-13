@@ -1,12 +1,15 @@
 use openaide_app_server_protocol::errors::{ProtocolError, ProtocolErrorCode};
 use openaide_app_server_protocol::ids::{AgentId, ProjectId, TaskId};
 use openaide_app_server_protocol::snapshot::{
-    TaskNavigationSnapshot, TaskStatus as ProtocolTaskStatus, TaskSummary,
+    TaskNavigationSnapshot, TaskStatus as ProtocolTaskStatus, TaskSummary, TaskTitle,
+    TaskTitleSource,
 };
 
 use crate::projects::ProjectIdentity;
 use crate::protocol::model::{TaskStatus, TaskSummary as LegacyTaskSummary};
-use crate::storage::records::TaskRecord;
+use crate::storage::records::{
+    TaskRecord, TaskTitle as StoredTaskTitle, TaskTitleSource as StoredTaskTitleSource,
+};
 use crate::storage::Store;
 
 pub trait TaskNavigationSnapshotSource: Send + Sync {
@@ -56,7 +59,7 @@ pub(crate) fn project_task_summary_with_has_messages(
     record: TaskRecord,
     has_messages: bool,
 ) -> TaskSummary {
-    let title = record.effective_title().to_string();
+    let title = record.title.map(project_title);
     let status = project_status_with_preparation(record.status, &record.preparation);
     TaskSummary {
         task_id: TaskId::from(record.task_id),
@@ -68,6 +71,17 @@ pub(crate) fn project_task_summary_with_has_messages(
         last_activity: record.last_activity,
         unread: record.unread,
         has_messages,
+    }
+}
+
+fn project_title(title: StoredTaskTitle) -> TaskTitle {
+    TaskTitle {
+        value: title.value().to_string(),
+        source: match title.source() {
+            StoredTaskTitleSource::Prompt => TaskTitleSource::Prompt,
+            StoredTaskTitleSource::Agent => TaskTitleSource::Agent,
+            StoredTaskTitleSource::User => TaskTitleSource::User,
+        },
     }
 }
 
@@ -93,7 +107,7 @@ pub(crate) fn project_legacy_task_summary(
         task_id: TaskId::from(summary.task_id),
         project_id: ProjectIdentity::from_workspace_root(&summary.workspace_root).project_id,
         agent_id: AgentId::from(summary.agent_id),
-        title: summary.title,
+        title: summary.title.map(project_title),
         status: project_status(summary.status),
         updated_at: summary.updated_at,
         last_activity: summary.last_activity,
@@ -104,11 +118,13 @@ pub(crate) fn project_legacy_task_summary(
 
 pub(crate) fn project_status(status: TaskStatus) -> ProtocolTaskStatus {
     match status {
+        TaskStatus::Starting => ProtocolTaskStatus::Starting,
         TaskStatus::Active => ProtocolTaskStatus::Running,
+        TaskStatus::Stopping => ProtocolTaskStatus::Stopping,
         TaskStatus::Inactive => ProtocolTaskStatus::Idle,
         TaskStatus::Failed => ProtocolTaskStatus::Failed,
         TaskStatus::Completed => ProtocolTaskStatus::Completed,
-        TaskStatus::Blocked => ProtocolTaskStatus::Blocked,
+        TaskStatus::Waiting => ProtocolTaskStatus::Waiting,
     }
 }
 

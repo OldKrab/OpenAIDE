@@ -1,12 +1,13 @@
 use openaide_app_server_protocol::errors::ProtocolError;
+use openaide_app_server_protocol::ids::ClientInstanceId;
 use openaide_app_server_protocol::snapshot::TaskSnapshot;
 use openaide_app_server_protocol::task::TaskCreateParams;
 use uuid::Uuid;
 
 use crate::projects::{resolve_project_context, ProjectTaskContext};
 use crate::protocol::model::TaskStatus as LegacyTaskStatus;
-use crate::snapshots::task_snapshot::project_stored_task_snapshot;
-use crate::storage::records::{TaskPreparationRecord, TaskRecord};
+use crate::storage::records::{TaskLifecycle, TaskPreparationRecord, TaskRecord};
+use crate::tasks::mutation::TaskCommitOutcome;
 use crate::tasks::snapshot::build_snapshot;
 use crate::time::now_string;
 
@@ -17,20 +18,17 @@ use super::{
 impl TaskProductApi {
     pub(super) fn create_task(
         &self,
+        client_instance_id: &ClientInstanceId,
         params: TaskCreateParams,
     ) -> Result<TaskSnapshot, ProtocolError> {
         let project = self.resolve_create_project_context(&params)?;
         self.agent_registry
             .require(params.agent_id.as_str())
             .map_err(protocol_error_from_runtime)?;
-        if let Some(task) = self.reusable_draft(&params, &project)? {
-            return self.reopen_draft(task);
-        }
         let now = now_string();
         let record = TaskRecord {
             task_id: format!("task_{}", Uuid::new_v4()),
-            title: "New task".to_string(),
-            agent_title: None,
+            title: None,
             status: LegacyTaskStatus::Inactive,
             task_version: 1,
             message_history_version: 0,
@@ -45,7 +43,9 @@ impl TaskProductApi {
             agent_id: params.agent_id.into_string(),
             isolation: project.isolation,
             workspace_root: project.workspace_root,
-            first_prompt_sent: false,
+            lifecycle: TaskLifecycle::New {
+                owner_client_instance_id: client_instance_id.clone(),
+            },
             agent_session_id: None,
             active_turn_id: None,
             archived: false,
@@ -57,48 +57,35 @@ impl TaskProductApi {
                 .map(|(id, value)| (id.clone(), value.clone()))
                 .collect(),
             config_options_catalog: None,
+            config_mutation: Default::default(),
             agent_commands_catalog: None,
             model_id: None,
             preparation: TaskPreparationRecord::Preparing,
         };
         let result = self
             .mutations
-            .create_task(record.clone(), Vec::new(), response_snapshot_options())
+            .resolve_or_create_new_task(record.clone(), Vec::new(), response_snapshot_options())
             .map_err(protocol_error_from_runtime)?;
         let snapshot = result
             .response_snapshot
             .ok_or_else(super::prepare::missing_prepared_task_snapshot)?;
-        let snapshot = project_stored_task_snapshot(snapshot)?;
-        self.spawn_task_preparation(record);
-        Ok(snapshot)
+        if matches!(result.outcome, TaskCommitOutcome::Committed(_)) {
+            let snapshot = self.project_task_snapshot(snapshot)?;
+            self.spawn_task_preparation(record);
+            return Ok(snapshot);
+        }
+        let existing = self
+            .store
+            .read_task(&snapshot.task.task_id)
+            .map_err(protocol_error_from_runtime)?;
+        self.reopen_new_task(existing)
     }
 
-    fn reusable_draft(
-        &self,
-        params: &TaskCreateParams,
-        project: &ProjectTaskContext,
-    ) -> Result<Option<TaskRecord>, ProtocolError> {
-        self.store
-            .list_tasks()
-            .map_err(protocol_error_from_runtime)
-            .map(|tasks| {
-                tasks.into_iter().find(|task| {
-                    !task.tombstoned
-                        && !task.archived
-                        && !task.first_prompt_sent
-                        && task.active_turn_id.is_none()
-                        && task.status == LegacyTaskStatus::Inactive
-                        && task.agent_id == params.agent_id.as_str()
-                        && task.workspace_root == project.workspace_root
-                })
-            })
-    }
-
-    fn reopen_draft(&self, task: TaskRecord) -> Result<TaskSnapshot, ProtocolError> {
+    fn reopen_new_task(&self, task: TaskRecord) -> Result<TaskSnapshot, ProtocolError> {
         if matches!(task.preparation, TaskPreparationRecord::Preparing) {
             let snapshot =
                 build_snapshot(&self.store, &task.task_id, 100).map_err(storage_error)?;
-            return project_stored_task_snapshot(snapshot);
+            return self.project_task_snapshot(snapshot);
         }
 
         let task_id = task.task_id.clone();
@@ -125,7 +112,7 @@ impl TaskProductApi {
         ) {
             self.spawn_task_preparation(prepared);
         }
-        project_stored_task_snapshot(snapshot)
+        self.project_task_snapshot(snapshot)
     }
 
     fn resolve_create_project_context(

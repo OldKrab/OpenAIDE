@@ -1,4 +1,5 @@
 pub mod acp;
+pub(crate) mod acp_active_prompt;
 pub(crate) mod acp_active_session_manager;
 pub(crate) mod acp_active_session_registry;
 pub(crate) mod acp_agent_config;
@@ -6,9 +7,9 @@ pub(crate) mod acp_agent_process_pool;
 pub(crate) mod acp_agent_status;
 pub(crate) mod acp_auth_method_cache;
 pub(crate) mod acp_commands_projection;
-pub(crate) mod acp_concurrent_prompts;
 pub(crate) mod acp_config_options_apply;
 pub(crate) mod acp_config_projection;
+pub(crate) mod acp_content_projection;
 pub(crate) mod acp_elicitation_form;
 pub(crate) mod acp_elicitation_wire;
 pub(crate) mod acp_errors;
@@ -17,6 +18,7 @@ pub(crate) mod acp_host_capabilities;
 pub(crate) mod acp_host_terminal_cleanup;
 pub(crate) mod acp_host_terminal_ownership;
 pub(crate) mod acp_live_prompt_projection;
+pub(crate) mod acp_message_identity;
 pub(crate) mod acp_opened_session_worker;
 pub(crate) mod acp_prompt_runner;
 pub(crate) mod acp_replay_projection;
@@ -57,8 +59,8 @@ mod tool_details_sanitizer;
 pub use acp_trace::{AcpTraceStatus, RuntimeDeveloperSettings, RuntimeSettings};
 pub use runtime::{
     AgentAuthenticateRequest, AgentEventSink, AgentListSessionsRequest, AgentLoadedSession,
-    AgentMetadataField, AgentProbeRequest, AgentPrompt, AgentRuntime, AgentSecretResolver,
-    AgentSession, AgentSessionDelete, AgentSessionEventSink, AgentSessionLoad,
-    AgentSessionMetadataUpdate, AgentSessionResume, AgentSessionSetConfigOptionRequest,
-    AgentSessionStart, ConfigOptionPolicy, TurnCancellation,
+    AgentMetadataField, AgentProbeRequest, AgentPrompt, AgentPromptOutcome, AgentRuntime,
+    AgentSecretResolver, AgentSession, AgentSessionDelete, AgentSessionEventSink, AgentSessionKey,
+    AgentSessionLoad, AgentSessionMetadataUpdate, AgentSessionResume,
+    AgentSessionSetConfigOptionRequest, AgentSessionStart, ConfigOptionPolicy, TurnCancellation,
 };

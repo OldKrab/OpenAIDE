@@ -82,8 +82,15 @@ fn cancel_stops_pending_agent_turn() {
             task_id: snapshot.task.task_id.clone(),
         })
         .unwrap();
-    assert_eq!(stopped.task.status, TaskStatus::Inactive);
-    assert!(!has_running_activity(&stopped));
+    // The Agent may acknowledge cancellation before cancel() reads its return snapshot.
+    assert!(matches!(
+        stopped.task.status,
+        TaskStatus::Stopping | TaskStatus::Inactive
+    ));
+    assert_eq!(
+        has_running_activity(&stopped),
+        stopped.task.status == TaskStatus::Stopping
+    );
     wait_until(|| {
         service
             .snapshot(TaskSnapshotParams {
@@ -107,13 +114,14 @@ fn cancel_stops_pending_agent_turn() {
             tail_limit: 10,
         })
         .unwrap();
+    assert_eq!(passive.task.status, TaskStatus::Inactive);
+    assert!(!has_running_activity(&passive));
     assert_eq!(calls.load(Ordering::SeqCst), 0);
     assert!(!passive
         .chat
         .items
         .iter()
-        .any(|item| item.message_type == "agent_text"));
-    assert!(!has_running_activity(&passive));
+        .any(|item| item.message_type == "agent_message"));
 }
 
 #[test]
@@ -193,20 +201,27 @@ fn cancel_signals_agent_after_turn_started() {
             task_id: snapshot.task.task_id.clone(),
         })
         .unwrap();
-    assert_eq!(stopped.task.status, TaskStatus::Inactive);
+    assert_eq!(stopped.task.status, TaskStatus::Stopping);
 
     wait_until(|| cancelled.load(Ordering::SeqCst) == 1);
-    thread::sleep(Duration::from_millis(40));
+    wait_until(|| {
+        service
+            .snapshot(TaskSnapshotParams {
+                task_id: snapshot.task.task_id.clone(),
+                tail_limit: 20,
+            })
+            .is_ok_and(|snapshot| snapshot.task.status == TaskStatus::Inactive)
+    });
     let passive = service
         .snapshot(TaskSnapshotParams {
             task_id: snapshot.task.task_id,
             tail_limit: 20,
         })
         .unwrap();
-    assert!(!passive
+    assert!(passive
         .chat
         .items
         .iter()
-        .any(|item| item.message_type == "agent_text"));
+        .any(|item| item.message_type == "agent_message"));
     assert!(!has_running_activity(&passive));
 }

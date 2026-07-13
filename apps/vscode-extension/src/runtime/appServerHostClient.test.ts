@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   AppServerProtocolError,
+  CLIENT_CAPABILITIES_CHANGED,
   CLIENT_INITIALIZE,
   TASK_OPEN,
   type LocalHttpFetch,
@@ -34,6 +35,8 @@ describe("AppServerHostClient", () => {
     const provider = providerReturningConnection();
     client = new AppServerHostClient(provider);
 
+    await client.syncWorkspaceRoots([{ path: "/workspace/app" }]);
+
     await expect(client.request(TASK_OPEN, { taskId: "task-1" as never }, {
       clientRequestId: "client-request-1" as never,
     })).resolves.toEqual({ task: { taskId: "task-1" } });
@@ -49,6 +52,7 @@ describe("AppServerHostClient", () => {
         shell: { kind: "vscodeExtension", name: "OpenAIDE" },
         requestedSurface: { kind: "home" },
         capabilities: { shell: ["resolveFileReveal"] },
+        workspaceRoots: [{ path: "/workspace/app" }],
       },
     });
     expect(JSON.parse(String(rpcCalls[1]?.[1].body))).toEqual({
@@ -59,7 +63,76 @@ describe("AppServerHostClient", () => {
       meta: { clientRequestId: "client-request-1" },
     });
     expect(rpcCalls[0]?.[1].headers["X-OpenAIDE-Connection-Id"])
-      .toBe("vscode-host-host-client-1");
+      .toBe("vscode-connection-host-client-1");
+  });
+
+  it("replaces the workspace roots reported by an initialized host client", async () => {
+    const fetch = fetchSequence([
+      [response("local-http-request-1", { result: initializeResult() })],
+      [response("local-http-request-2", { result: { projects: projectCollection() } })],
+    ]);
+    vi.stubGlobal("fetch", fetch);
+    client = new AppServerHostClient(providerReturningConnection());
+
+    await client.syncWorkspaceRoots([{ path: "/workspace/app" }]);
+    await client.syncWorkspaceRoots([{ path: "/workspace/web" }]);
+
+    expect(JSON.parse(String(jsonRpcCalls(fetch)[1]?.[1].body))).toEqual({
+      jsonrpc: "2.0",
+      id: "local-http-request-2",
+      method: CLIENT_CAPABILITIES_CHANGED,
+      params: { workspaceRoots: [{ path: "/workspace/web" }] },
+    });
+  });
+
+  it("reports an empty root list when the last VS Code workspace closes", async () => {
+    const fetch = fetchSequence([
+      [response("local-http-request-1", { result: initializeResult() })],
+      [response("local-http-request-2", { result: { projects: projectCollection() } })],
+    ]);
+    vi.stubGlobal("fetch", fetch);
+    client = new AppServerHostClient(providerReturningConnection());
+
+    await client.syncWorkspaceRoots([{ path: "/workspace/app" }]);
+    await client.syncWorkspaceRoots([]);
+
+    expect(JSON.parse(String(jsonRpcCalls(fetch)[1]?.[1].body))).toMatchObject({
+      method: CLIENT_CAPABILITIES_CHANGED,
+      params: { workspaceRoots: [] },
+    });
+  });
+
+  it("serializes a workspace replacement that races host initialization", async () => {
+    const initializeResponse = deferred<ReturnType<typeof fetchResponse>>();
+    const fetch = vi.fn<LocalHttpFetch>(async (_input, init) => {
+      if (init.headers.Accept === "text/event-stream") return fetchResponse([]);
+      const request = JSON.parse(init.body) as { id: string; method: string };
+      if (request.method === CLIENT_INITIALIZE) return initializeResponse.promise;
+      return fetchResponse([
+        response(request.id, { result: { projects: projectCollection() } }),
+      ]);
+    });
+    vi.stubGlobal("fetch", fetch);
+    client = new AppServerHostClient(providerReturningConnection());
+
+    const initialSync = client.syncWorkspaceRoots([{ path: "/workspace/app" }]);
+    await vi.waitFor(() => expect(jsonRpcCalls(fetch)).toHaveLength(1));
+    const replacementSync = client.syncWorkspaceRoots([{ path: "/workspace/web" }]);
+    initializeResponse.resolve(fetchResponse([
+      response("local-http-request-1", { result: initializeResult() }),
+    ]));
+
+    await Promise.all([initialSync, replacementSync]);
+    expect(jsonRpcCalls(fetch).map(([, init]) => JSON.parse(init.body))).toMatchObject([
+      {
+        method: CLIENT_INITIALIZE,
+        params: { workspaceRoots: [{ path: "/workspace/app" }] },
+      },
+      {
+        method: CLIENT_CAPABILITIES_CHANGED,
+        params: { workspaceRoots: [{ path: "/workspace/web" }] },
+      },
+    ]);
   });
 
   it("reuses one initialized LocalHttp connection for later typed requests", async () => {
@@ -155,6 +228,16 @@ function response(id: string, payload: unknown) {
   };
 }
 
+function fetchResponse(messages: unknown[]) {
+  return {
+    ok: true,
+    status: 200,
+    async text() {
+      return JSON.stringify(messages);
+    },
+  };
+}
+
 function initializeResult() {
   return {
     snapshot: {
@@ -168,4 +251,16 @@ function initializeResult() {
       },
     },
   };
+}
+
+function projectCollection() {
+  return { projects: [] };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
 }

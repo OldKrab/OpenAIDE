@@ -3,28 +3,17 @@ use crate::agent::registry::{AgentSourceKind, CODEX_AGENT_ID, OPENCODE_AGENT_ID}
 use openaide_app_server_protocol::snapshot::AgentStatus;
 
 #[test]
-fn collection_uses_codex_as_default_when_available() {
+fn collection_preserves_registry_order_without_inventing_a_default() {
     let snapshot = collection_from_registry_summaries(vec![
         summary(OPENCODE_AGENT_ID, "OpenCode"),
         summary(CODEX_AGENT_ID, "Codex"),
     ]);
 
     assert_eq!(
-        snapshot.default_agent_id,
-        Some(AgentId::from(CODEX_AGENT_ID))
-    );
-    assert_eq!(
         snapshot.agents[0].agent_id,
         AgentId::from(OPENCODE_AGENT_ID)
     );
     assert_eq!(snapshot.agents[0].status, AgentStatus::Disconnected);
-}
-
-#[test]
-fn collection_uses_first_agent_as_default_without_codex() {
-    let snapshot = collection_from_registry_summaries(vec![summary("custom.one", "Custom")]);
-
-    assert_eq!(snapshot.default_agent_id, Some(AgentId::from("custom.one")));
 }
 
 #[test]

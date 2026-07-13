@@ -2,6 +2,7 @@ import type { ActivityStep, ActivityToolDetails } from "@openaide/app-shell-cont
 import { useEffect, useState } from "react";
 import { ToolCodeBlock } from "./ChatToolBlocks";
 import { EditToolDetails } from "./EditToolDetails";
+import { DefinedToolDetails } from "./DefinedToolDetails";
 import { ExecuteToolDetails } from "./ExecuteToolDetails";
 import { GenericToolStepDetails } from "./GenericToolDetails";
 import { ReadToolDetails } from "./ReadToolDetails";
@@ -34,6 +35,9 @@ export function ChatToolDetails({
   if (step.name === "search") return <SearchToolDetails details={details} fallbackPreview={fallbackPreview} step={step} />;
   if (step.name === "web_search") return <WebSearchToolDetails details={details} fallbackPreview={fallbackPreview} step={step} />;
   if (step.name === "execute") return <ExecuteToolDetails details={details} fallbackPreview={fallbackPreview} step={step} />;
+  if (["delete", "move", "think", "fetch", "switch_mode"].includes(step.name)) {
+    return <DefinedToolDetails details={details} fallbackPreview={fallbackPreview} step={step} />;
+  }
   return <GenericToolStepDetails details={details} fallbackPreview={fallbackPreview} step={step} />;
 }
 

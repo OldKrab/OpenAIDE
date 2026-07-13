@@ -31,22 +31,17 @@ export function taskWorkingStatusLabel(
   inputPending: boolean,
   historySync: HistorySyncState = { state: "idle", generation: 0 },
 ) {
-  if (historySync.state === "checking") return "Checking for newer history";
   if (historySync.state === "syncing") return "Syncing conversation history";
   if (historySync.state === "updated") return "History updated";
-  if (historySync.state === "failed") {
-    return historySync.before_send
-      ? "Couldn’t sync conversation history"
-      : "Couldn’t refresh history";
-  }
   // Pending Shell input remains in the frozen composer until App Server acceptance.
   // Chat activity only describes authoritative task state.
   if (inputPending) return undefined;
+  if (status === "stopping") return "Stopping";
   if (items.some((item) => (
     (item.message.kind === "permission" || item.message.kind === "elicitation")
     && item.message.state === "pending"
   ))) return undefined;
-  if (status === "blocked") {
+  if (status === "waiting") {
     if (items.some((item) => item.message_id === "app-server-preparation")) {
       return "Preparing task";
     }
@@ -60,15 +55,10 @@ export function taskWorkingStatusLabel(
   const reversedUserIndex = [...items].reverse().findIndex((item) => item.message.kind === "user");
   const currentTurnItems = reversedUserIndex === -1 ? items : items.slice(items.length - reversedUserIndex);
   const latestWork = [...currentTurnItems].reverse().find((item) => {
-    return item.message.kind === "activity" || item.message.kind === "agent_text" || item.message.kind === "thought";
+    return item.message.kind === "activity" || item.message.kind === "agent_message";
   });
-  if (latestWork?.message.kind === "thought") {
-    return latestWork.message.streaming
-      ? activityStepProgressLabel(latestWork.message)
-      : activityStepCompletedLabel(latestWork.message);
-  }
-  if (latestWork?.message.kind === "agent_text") {
-    return latestWork.message.streaming ? "Writing response" : "Generated response";
+  if (latestWork?.message.kind === "agent_message") {
+    return latestWork.message.role === "thought" ? "Thinking" : "Writing response";
   }
   if (latestWork?.message.kind === "activity") {
     // The footer tracks the newest concrete action while the folded group keeps its broader title.
@@ -85,21 +75,6 @@ export function taskWorkingStatusLabel(
   return "Starting";
 }
 
-export function composerMessageShapeError({
-  attachmentCount,
-  otherwiseSendable,
-  prompt,
-}: {
-  attachmentCount: number;
-  otherwiseSendable: boolean;
-  prompt: string;
-}) {
-  if (otherwiseSendable && attachmentCount > 0 && prompt.trim().length === 0) {
-    return "Add a message for this Agent.";
-  }
-  return undefined;
-}
-
 export function relativeTime(value: string) {
   const timestamp = timestampMillis(value);
   if (Number.isNaN(timestamp)) return "";
@@ -111,16 +86,6 @@ export function relativeTime(value: string) {
   if (hours < 24) return `${hours}h`;
   const days = Math.floor(hours / 24);
   return `${days}d`;
-}
-
-export function splitGeneratedTaskTitle(title: string) {
-  const trimmed = title.trim();
-  const match = /^(.*?\D)\s+(\d{8,})(?:\b.*)?$/.exec(trimmed);
-  if (!match) return { title: trimmed, originalTitle: trimmed };
-  return {
-    originalTitle: trimmed,
-    title: match[1].trim(),
-  };
 }
 
 export function nativeSessionTitle(session: AgentListedSession) {

@@ -7,7 +7,7 @@ describe("host bridge", () => {
   });
 
   it("creates a direct LocalHttp BackendConnection from bootstrap endpoint info", async () => {
-    const fetch = vi.fn(async () => ({
+    const fetch = vi.fn(async (_input: string, _init?: unknown) => ({
       ok: true,
       status: 200,
       async text() {
@@ -42,7 +42,7 @@ describe("host bridge", () => {
       removeEventListener: vi.fn(),
     });
 
-    const { getBackendConnection } = await import("./hostBridge");
+    const { getBackendConnection } = await installedHostBridge();
     const connection = getBackendConnection();
 
     await connection?.initialize({
@@ -56,10 +56,106 @@ describe("host bridge", () => {
       expect.objectContaining({
         headers: expect.objectContaining({
           Authorization: "Bearer token-1",
-          "X-OpenAIDE-Connection-Id": "client-local",
+          "X-OpenAIDE-Connection-Id": "frontend-connection-client-local",
         }),
       }),
     );
+  });
+
+  it("keeps LocalHttp connection identities distinct for task webviews sharing session storage", async () => {
+    const fetch = vi.fn(async (_input: string, _init?: unknown) => ({
+      ok: true,
+      status: 200,
+      async text() {
+        return JSON.stringify([{
+          jsonrpc: "2.0",
+          id: "local-http-request-1",
+          result: { result: initializeResult() },
+        }]);
+      },
+    }));
+    const sharedStorage = memoryStorage();
+    sharedStorage.setItem("openaide.clientInstanceId", "shared-origin-client");
+    const dataset: Record<string, string> = {
+      surface: "task",
+      clientInstanceId: "task-panel-1",
+      appServerConnection: JSON.stringify({
+        kind: "localHttp",
+        endpointUrl: "http://127.0.0.1:4321/probe",
+        authToken: "token-1",
+      }),
+    };
+    vi.stubGlobal("fetch", fetch);
+    vi.stubGlobal("sessionStorage", sharedStorage);
+    vi.stubGlobal("document", { body: { dataset } });
+    vi.stubGlobal("window", {
+      acquireVsCodeApi: undefined,
+      location: { pathname: "/" },
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    });
+
+    const { getBackendConnection, getBootstrap } = await installedHostBridge();
+    const { initializeParamsForBootstrap } = await import("./backendInitialization");
+    const firstBootstrap = getBootstrap();
+    const first = getBackendConnection();
+    await first?.initialize(initializeParamsForBootstrap(firstBootstrap));
+    dataset.clientInstanceId = "task-panel-2";
+    const secondBootstrap = getBootstrap();
+    const second = getBackendConnection();
+    await second?.initialize(initializeParamsForBootstrap(secondBootstrap));
+
+    expect(initializeParamsForBootstrap(firstBootstrap).clientInstanceId).toBe("task-panel-1");
+    expect(initializeParamsForBootstrap(secondBootstrap).clientInstanceId).toBe("task-panel-2");
+    const connectionIds = fetch.mock.calls.map(([, init]) =>
+      (init as { headers: Record<string, string> }).headers["X-OpenAIDE-Connection-Id"]
+    );
+    expect(new Set(connectionIds).size).toBe(2);
+    expect(connectionIds).not.toContain("task-panel-1");
+    expect(connectionIds).not.toContain("task-panel-2");
+    expect(connectionIds).not.toContain("shared-origin-client");
+  });
+
+  it("turns a VS Code task adoption message into an in-place bootstrap route", async () => {
+    const listeners = new Map<string, (event: { data?: unknown }) => void>();
+    vi.stubGlobal("document", {
+      body: {
+        dataset: {
+          surface: "task",
+          clientInstanceId: "task-panel-1",
+          appServerConnection: JSON.stringify({
+            kind: "localHttp",
+            endpointUrl: "http://127.0.0.1:4321/probe",
+            authToken: "token-1",
+          }),
+        },
+      },
+    });
+    vi.stubGlobal("window", {
+      acquireVsCodeApi: () => ({ postMessage: vi.fn() }),
+      location: { pathname: "/" },
+      addEventListener: vi.fn((type: string, listener: (event: { data?: unknown }) => void) => {
+        listeners.set(type, listener);
+      }),
+      removeEventListener: vi.fn(),
+    });
+
+    const { subscribeSurfaceRouteChanges } = await installedHostBridge();
+    const routed = vi.fn();
+    subscribeSurfaceRouteChanges(routed);
+    listeners.get("message")?.({
+      data: {
+        type: "surface.routeChanged",
+        payload: { surface: "task", task_id: "created_task" },
+      },
+    });
+
+    expect(routed).toHaveBeenCalledWith(expect.objectContaining({
+      surface: "task",
+      taskId: "created_task",
+      clientInstanceId: "task-panel-1",
+      appServerConnection: expect.objectContaining({ kind: "localHttp" }),
+    }));
   });
 
   it("creates a tokenless WebProxy BackendConnection from bootstrap endpoint info", async () => {
@@ -97,7 +193,7 @@ describe("host bridge", () => {
       removeEventListener: vi.fn(),
     });
 
-    const { getBackendConnection } = await import("./hostBridge");
+    const { getBackendConnection } = await installedHostBridge();
     const connection = getBackendConnection();
 
     await connection?.initialize({
@@ -111,7 +207,7 @@ describe("host bridge", () => {
       expect.objectContaining({
         headers: {
           "Content-Type": "application/json",
-          "X-OpenAIDE-Connection-Id": "client-web",
+          "X-OpenAIDE-Connection-Id": "frontend-connection-client-web",
         },
       }),
     );
@@ -142,8 +238,8 @@ describe("host bridge", () => {
       removeEventListener: vi.fn(),
     });
 
-    const { postHostMessage } = await import("./hostBridge");
-    postHostMessage({ type: "surface.openTask", payload: { task_id: "task/1" } });
+    const { openTaskSurface } = await installedHostBridge();
+    openTaskSurface("task/1");
 
     expect(pushState).toHaveBeenCalledWith(null, "", "/task/task%2F1");
     expect(reload).not.toHaveBeenCalled();
@@ -173,20 +269,19 @@ describe("host bridge", () => {
       removeEventListener: vi.fn(),
     });
 
-    const { postHostMessage } = await import("./hostBridge");
-    postHostMessage({ type: "surface.openNewTask", payload: { project_id: "project/1" } });
+    const { openNewTaskSurface } = await installedHostBridge();
+    openNewTaskSurface("project/1");
 
     expect(pushState).toHaveBeenCalledWith(null, "", "/new-task?projectId=project%2F1");
   });
 
-  it("routes web shell archive navigation through browser history", async () => {
+  it("reads archive navigation from browser history", async () => {
     const location = { pathname: "/new-task", search: "" };
     const pushState = vi.fn((_state: unknown, _title: string, path: string) => {
       const next = new URL(path, "http://localhost");
       location.pathname = next.pathname;
       location.search = next.search;
     });
-    const dispatchEvent = vi.fn();
     vi.stubGlobal("document", {
       body: {
         dataset: {
@@ -204,15 +299,14 @@ describe("host bridge", () => {
       history: { pushState },
       location,
       addEventListener: vi.fn(),
-      dispatchEvent,
+      dispatchEvent: vi.fn(),
       removeEventListener: vi.fn(),
     });
 
-    const { getBootstrap, postHostMessage } = await import("./hostBridge");
-    postHostMessage({ type: "surface.openArchive" });
+    const { getBootstrap } = await installedHostBridge();
+    window.history.pushState(null, "", "/archive");
 
     expect(pushState).toHaveBeenCalledWith(null, "", "/archive");
-    expect(dispatchEvent).toHaveBeenCalledWith(expect.objectContaining({ type: "openaide:webRoute" }));
     expect(getBootstrap()).toMatchObject({ archived: true });
   });
 
@@ -239,7 +333,7 @@ describe("host bridge", () => {
       removeEventListener: vi.fn(),
     });
 
-    const { getBootstrap } = await import("./hostBridge");
+    const { getBootstrap } = await installedHostBridge();
 
     expect(getBootstrap()).toMatchObject({
       surface: "navigation",
@@ -268,7 +362,7 @@ describe("host bridge", () => {
       removeEventListener: vi.fn(),
     });
 
-    const { getBootstrap } = await import("./hostBridge");
+    const { getBootstrap } = await installedHostBridge();
 
     expect(getBootstrap()).toMatchObject({
       surface: "settings",
@@ -292,7 +386,7 @@ describe("host bridge", () => {
       removeEventListener: vi.fn(),
     });
 
-    const { getBootstrap } = await import("./hostBridge");
+    const { getBootstrap } = await installedHostBridge();
 
     const bootstrap = getBootstrap();
     expect(bootstrap.surface).toBe("settings");
@@ -320,13 +414,23 @@ describe("host bridge", () => {
       removeEventListener: vi.fn(),
     });
 
-    const { updateWebSettingsTabRoute } = await import("./hostBridge");
-    updateWebSettingsTabRoute("skills");
+    const { replaceSettingsTabRoute } = await installedHostBridge();
+    replaceSettingsTabRoute("skills");
 
     expect(replaceState).toHaveBeenCalledWith(null, "", "/settings?tab=skills");
     expect(dispatchEvent).toHaveBeenCalledWith(expect.objectContaining({ type: "openaide:webRoute" }));
   });
 });
+
+async function installedHostBridge() {
+  const [{ installFrontendShell }, { createBrowserShell }, hostBridge] = await Promise.all([
+    import("./frontendShell"),
+    import("../../../../apps/browser/frontend/browserShell"),
+    import("./hostBridge"),
+  ]);
+  installFrontendShell(createBrowserShell());
+  return hostBridge;
+}
 
 function initializeResult() {
   return {

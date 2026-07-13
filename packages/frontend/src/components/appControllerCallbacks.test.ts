@@ -13,7 +13,7 @@ import {
   ATTACHMENT_CREATE_PASTED_IMAGE,
   ATTACHMENT_LIST_DIRECTORY,
   ATTACHMENT_LIST_ROOTS,
-  ATTACHMENT_RELEASE_HANDLES,
+  ATTACHMENT_RELEASE,
   ATTACHMENT_REVEAL,
   AppServerProtocolError,
   SETTINGS_GET_AGENT_DETAILS,
@@ -21,6 +21,8 @@ import {
   SETTINGS_GET_SKILLS,
   SETTINGS_UPDATE_PREFERENCES,
   SETTINGS_UPDATE_RUNTIME,
+  STATE_SUBSCRIBE,
+  STATE_UNSUBSCRIBE,
   TASK_ADOPT_NATIVE_SESSION,
   TASK_CANCEL,
   TASK_CHAT_PAGE,
@@ -31,7 +33,6 @@ import {
   TASK_SEND,
   TASK_SET_ARCHIVED,
   TASK_SET_CONFIG_OPTION,
-  TASK_TOOL_DETAIL,
   type AttachmentHandleId,
   type BackendConnection,
   type FileBrowserEntryId,
@@ -39,15 +40,28 @@ import {
   type TaskSnapshot as ProtocolTaskSnapshot,
 } from "@openaide/app-server-client";
 import { createAppCallbacks } from "./appControllerCallbacks";
-import { PENDING_TASK_SEND_RECOVERY_KEY } from "../services/pendingTaskSendRecovery";
+import { ComposerAttachmentResourceOwner } from "../services/attachmentResources";
 import { projectIdForWorkspaceRoot } from "../state/projectIdentity";
-import { createInitialState, toolDetailCacheKey, type AppState } from "../state/store";
+import { appReducer } from "../state/appReducer";
+import { createInitialState, type AppState } from "../state/store";
+import { newTaskPreparationKey } from "../state/newTaskPreparationContext";
+import { AsyncOperationOwner } from "../state/asyncOperationOwner";
+import { NewTaskController } from "./newTaskController";
 
 const postHostMessage = vi.fn();
 const beginAgentSecretTransaction = vi.fn();
 
 vi.mock("../services/hostBridge", () => ({
+  openNewTaskSurface: (projectId?: string) => postHostMessage(projectId
+    ? { type: "surface.openNewTask", payload: { project_id: projectId } }
+    : { type: "surface.openNewTask" }),
+  openSettingsSurface: () => postHostMessage({ type: "surface.openSettings" }),
+  openTaskSurface: (taskId: string, title?: string) => postHostMessage({
+    type: "surface.openTask",
+    payload: { task_id: taskId, ...(title ? { title } : {}) },
+  }),
   postHostMessage: (message: unknown) => postHostMessage(message),
+  replaceSettingsTabRoute: vi.fn(),
 }));
 
 vi.mock("../services/agentSecretTransaction", () => ({
@@ -64,7 +78,7 @@ describe("app controller callbacks", () => {
     });
   });
 
-  it("submits selected config atomically with Draft Task creation before Send", async () => {
+  it("submits selected config atomically with New Task creation before Send", async () => {
     const dispatch = vi.fn();
     const request = vi.fn(async (method: string) => {
       if (method === TASK_CREATE) return { task: protocolTaskSnapshot("task_1", "New task") };
@@ -91,7 +105,9 @@ describe("app controller callbacks", () => {
     }).newTask.submit();
     await settlePromises();
 
-    expect(dispatch).toHaveBeenNthCalledWith(1, { type: "submit:start" });
+    expect(dispatch).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      type: "submit:start",
+    }));
     expect(request).toHaveBeenNthCalledWith(1, TASK_CREATE, {
       projectId: "project_1",
       agentId: "codex",
@@ -99,12 +115,14 @@ describe("app controller callbacks", () => {
     });
     expect(request).toHaveBeenNthCalledWith(2, TASK_SEND, {
       taskId: "task_1",
-      taskRevision: 2,
-      idempotencyKey: expect.stringMatching(/^frontend-send-/),
       message: { text: "Build the thing" },
     });
     expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "snapshot", intent: "open" }));
-    expect(dispatch).toHaveBeenCalledWith({ type: "taskInput:submit", taskId: "task_1" });
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
+      type: "taskInput:submit",
+      taskId: "task_1",
+      input: { prompt: "Build the thing", context: [] },
+    }));
     expect(postHostMessage).toHaveBeenCalledWith({
       type: "surface.openTask",
       payload: {
@@ -117,7 +135,7 @@ describe("app controller callbacks", () => {
   it("stops a pre-send startup by discarding its prepared Task", async () => {
     const dispatch = vi.fn();
     const request = vi.fn(async (method: string) => {
-      if (method === TASK_DISCARD) return { discardedTaskId: "task_1", tasks: { tasks: [], activeTaskId: null } };
+      if (method === TASK_DISCARD) return { discardedTaskId: "task_1" };
       throw new Error(method);
     });
     const state = createInitialState();
@@ -147,6 +165,87 @@ describe("app controller callbacks", () => {
       type: "surface.openNewTask",
       payload: { project_id: "project_1" },
     });
+  });
+
+  it("cleans the prepared Task and its attachments when cancellation wins preparation", async () => {
+    const prepared = deferred<{ taskId: never; task: ReturnType<typeof protocolTaskSnapshot> }>();
+    const dispatch = vi.fn();
+    const release = vi.fn();
+    const attachmentResources = new ComposerAttachmentResourceOwner({ release });
+    const attachment = {
+      kind: "file" as const,
+      label: "notes.md",
+      local_id: "attachment-1",
+      app_server_handle_id: "handle-1" as AttachmentHandleId,
+    };
+    attachmentResources.reconcile({
+      acceptedUserMessageIds: new Map(),
+      acceptsAdoptions: true,
+      retained: [{ taskId: "task_1", handleId: attachment.app_server_handle_id }],
+      mountedTaskId: "task_1",
+      protected: new Set(),
+      taskSurfaceMounted: true,
+    });
+    const request = vi.fn(async (method: string) => {
+      if (method === TASK_DISCARD) return { discarded: true };
+      throw new Error(method);
+    });
+    const state = preparedNewTaskState();
+    state.newTask.prompt = "Build";
+    state.newTask.context = [attachment];
+    const newTask = callbacks({
+      attachmentResources,
+      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      dispatch,
+      pendingPreparedNewTask: () => prepared.promise,
+      state,
+    }).newTask;
+
+    newTask.submit();
+    newTask.cancel();
+    prepared.resolve({ taskId: "task_1" as never, task: protocolTaskSnapshot("task_1", "New task") });
+    await settlePromises();
+
+    expect(request.mock.calls.filter(([method]) => method === TASK_DISCARD)).toEqual([
+      [TASK_DISCARD, { taskId: "task_1" }],
+    ]);
+    expect(request).not.toHaveBeenCalledWith(TASK_SEND, expect.anything());
+    expect(release).toHaveBeenCalledWith("task_1", ["handle-1"]);
+    expect(dispatch).toHaveBeenCalledWith({ type: "taskInput:clear", taskId: "task_1" });
+  });
+
+  it("surfaces ambiguous prepared-Task cleanup without issuing a no-op cancel", async () => {
+    const dispatch = vi.fn();
+    const request = vi.fn(async (method: string) => {
+      if (method === TASK_DISCARD) throw new Error("connection closed");
+      if (method === TASK_CANCEL) return { cancelled: true };
+      throw new Error(method);
+    });
+    const state = createInitialState();
+    state.newTask.selection.projectId = "project_1";
+    state.newTask.submitting = true;
+    const newTaskStartAttempt = {
+      current: {
+        cancelled: false,
+        draft: { prompt: "Build", context: [] },
+        taskId: "task_1" as never,
+      },
+    };
+
+    callbacks({
+      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      dispatch,
+      newTaskStartAttempt,
+      state,
+    }).newTask.cancel();
+    await settlePromises();
+
+    expect(request).not.toHaveBeenCalledWith(TASK_CANCEL, { taskId: "task_1" });
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "submit:error",
+      message: "connection closed",
+    });
+    expect(dispatch).not.toHaveBeenCalledWith({ type: "taskInput:clear", taskId: "task_1" });
   });
 
   it("includes a new workspace root when creating a task for an unseen project", async () => {
@@ -181,8 +280,67 @@ describe("app controller callbacks", () => {
     });
   });
 
+  it("does not send through an empty prepared Task after its Agent and Project selection changed", async () => {
+    const dispatch = vi.fn();
+    const request = vi.fn(async (method: string) => {
+      if (method === TASK_DISCARD) return { discarded: true };
+      if (method === TASK_CREATE) {
+        return { task: protocolTaskSnapshotForContext("task_new", "project_2", "mock") };
+      }
+      if (method === TASK_SEND) {
+        return {
+          task: { ...protocolTaskSnapshotForContext("task_new", "project_2", "mock"), revision: 3 },
+          turnId: "turn_1",
+          userMessageId: "message_1",
+        };
+      }
+      if (method === TASK_OPEN) return { task: protocolTaskSnapshot("task_old", "Old task") };
+      throw new Error(method);
+    });
+    const state = preparedNewTaskState("task_old");
+    state.newTask.prompt = "Use the new context";
+    state.taskInputs.task_old = { prompt: "Old draft", context: [] };
+    state.newTask.selection = {
+      ...state.newTask.selection,
+      agentId: "mock",
+      agentLabel: "Mock",
+      projectId: "project_2",
+      workspaceRoot: "",
+      workspaceLabel: "Project 2",
+    };
+
+    callbacks({
+      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      dispatch,
+      state,
+    }).newTask.submit();
+    await settlePromises();
+
+    expect(request).toHaveBeenCalledWith(TASK_DISCARD, { taskId: "task_old" });
+    expect(dispatch).toHaveBeenCalledWith({ type: "taskInput:clear", taskId: "task_old" });
+    expect(request).not.toHaveBeenCalledWith(TASK_OPEN, { taskId: "task_old" });
+    expect(request).toHaveBeenCalledWith(TASK_CREATE, {
+      projectId: "project_2",
+      agentId: "mock",
+    });
+    expect(request).toHaveBeenCalledWith(TASK_SEND, expect.objectContaining({
+      taskId: "task_new",
+      message: { text: "Use the new context" },
+    }));
+  });
+
   it("attaches a pasted image from the new-task composer by preparing the Task first", async () => {
     const dispatch = vi.fn();
+    const release = vi.fn();
+    const attachmentResources = new ComposerAttachmentResourceOwner({ release });
+    attachmentResources.reconcile({
+      acceptedUserMessageIds: new Map(),
+      acceptsAdoptions: true,
+      retained: [],
+      mountedTaskId: undefined,
+      protected: new Set(),
+      taskSurfaceMounted: true,
+    });
     const request = vi.fn(async (method: string) => {
       if (method === TASK_CREATE) return { task: protocolTaskSnapshot("task_1", "New task") };
       if (method === ATTACHMENT_CREATE_PASTED_IMAGE) {
@@ -202,6 +360,7 @@ describe("app controller callbacks", () => {
     };
 
     await callbacks({
+      attachmentResources,
       backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
       dispatch,
       state,
@@ -232,7 +391,71 @@ describe("app controller callbacks", () => {
       }),
     });
     expect(request).not.toHaveBeenCalledWith(TASK_SEND, expect.anything());
+    expect(release).not.toHaveBeenCalled();
     expect(postHostMessage).not.toHaveBeenCalled();
+  });
+
+  it("hands a direct paste from a superseded prepared Task to its replacement", async () => {
+    const dispatch = vi.fn();
+    const release = vi.fn();
+    const attachmentResources = new ComposerAttachmentResourceOwner({ release });
+    const staleAttachment = {
+      kind: "file" as const,
+      label: "old.md",
+      local_id: "old-attachment",
+      app_server_handle_id: "old-handle" as AttachmentHandleId,
+    };
+    attachmentResources.reconcile({
+      acceptedUserMessageIds: new Map(),
+      acceptsAdoptions: true,
+      retained: [{ taskId: "task_old", handleId: staleAttachment.app_server_handle_id }],
+      mountedTaskId: "task_old",
+      protected: new Set(),
+      taskSurfaceMounted: true,
+    });
+    const request = vi.fn(async (method: string) => {
+      if (method === TASK_DISCARD) return { discarded: true };
+      if (method === TASK_CREATE) {
+        return { task: protocolTaskSnapshotForContext("task_new", "project_2", "mock") };
+      }
+      if (method === ATTACHMENT_CREATE_PASTED_IMAGE) {
+        return { attachment: { handleId: "new-handle", label: "pasted.png" } };
+      }
+      throw new Error(method);
+    });
+    const state = preparedNewTaskState("task_old");
+    state.taskInputs.task_old = { prompt: "Old draft", context: [staleAttachment] };
+    state.newTask.selection = {
+      ...state.newTask.selection,
+      agentId: "mock",
+      agentLabel: "Mock",
+      projectId: "project_2",
+      workspaceRoot: "",
+      workspaceLabel: "Project 2",
+    };
+
+    await expect(callbacks({
+      attachmentResources,
+      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      dispatch,
+      state,
+    }).newTask.fileBrowser?.attachPastedImage(
+      new File([new Uint8Array([1, 2, 3])], "pasted.png", { type: "image/png" }),
+      { prompt: "Explain the new image", context: [] },
+    )).resolves.toBeUndefined();
+
+    expect(request.mock.calls.filter(([method]) => method === TASK_DISCARD)).toEqual([
+      [TASK_DISCARD, { taskId: "task_old" }],
+    ]);
+    expect(release).toHaveBeenCalledWith("task_old", ["old-handle"]);
+    expect(request).toHaveBeenCalledWith(ATTACHMENT_CREATE_PASTED_IMAGE, expect.objectContaining({
+      taskId: "task_new",
+    }));
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "taskInput:attachment:addAppServer",
+      taskId: "task_new",
+      attachment: expect.objectContaining({ app_server_handle_id: "new-handle" }),
+    });
   });
 
   it("does not wait for send readiness before attaching a pasted image to a prepared new Task", async () => {
@@ -272,6 +495,141 @@ describe("app controller callbacks", () => {
     });
   });
 
+  it("releases a file selection that returns after its prepared Task context is superseded", async () => {
+    const selected = deferred<{ attachment: { handleId: string; label: string } }>();
+    const dispatch = vi.fn();
+    const release = vi.fn();
+    const attachmentResources = new ComposerAttachmentResourceOwner({ release });
+    attachmentResources.reconcile({
+      acceptedUserMessageIds: new Map(),
+      acceptsAdoptions: true,
+      retained: [],
+      mountedTaskId: "task_1",
+      protected: new Set(),
+      taskSurfaceMounted: true,
+    });
+    const request = vi.fn((method: string) => {
+      if (method === ATTACHMENT_CREATE_FILE_REFERENCE) return selected.promise;
+      return Promise.reject(new Error(method));
+    });
+    const state = preparedNewTaskState("task_1");
+    const asyncOperations = new AsyncOperationOwner();
+    const backendConnection = {
+      request: request as unknown as BackendConnection["request"],
+      respond: vi.fn(),
+    };
+    const fileBrowser = callbacks({
+      attachmentResources,
+      asyncOperations,
+      backendConnection,
+      dispatch,
+      state,
+    }).newTask.fileBrowser;
+
+    const attaching = fileBrowser?.attachFileReference("entry-1" as FileBrowserEntryId);
+    await vi.waitFor(() => expect(request).toHaveBeenCalledWith(ATTACHMENT_CREATE_FILE_REFERENCE, {
+      taskId: "task_1",
+      entryId: "entry-1",
+    }));
+    const nextState = {
+      ...state,
+      newTask: {
+        ...state.newTask,
+        selection: { ...state.newTask.selection, projectId: "project_2", agentId: "other-agent" },
+      },
+    };
+    const newerFileBrowser = callbacks({ asyncOperations, backendConnection, dispatch, state: nextState }).newTask.fileBrowser;
+    expect(newerFileBrowser?.ownerKey).not.toBe(fileBrowser?.ownerKey);
+    selected.resolve({ attachment: { handleId: "late-handle", label: "late.md" } });
+
+    await expect(attaching).rejects.toThrow("New Task context changed");
+    expect(release).toHaveBeenCalledWith("task_1", ["late-handle"]);
+    expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({
+      type: "taskInput:attachment:addAppServer",
+    }));
+  });
+
+  it("discards a Task prepared after its file picker context was superseded", async () => {
+    const created = deferred<{ task: ReturnType<typeof protocolTaskSnapshot> }>();
+    const dispatch = vi.fn();
+    const request = vi.fn((method: string) => {
+      if (method === TASK_CREATE) return created.promise;
+      if (method === TASK_DISCARD) return Promise.resolve({ discarded: true });
+      if (method === ATTACHMENT_LIST_ROOTS) return Promise.resolve({ roots: [] });
+      return Promise.reject(new Error(method));
+    });
+    const state = preparedNewTaskState();
+    const asyncOperations = new AsyncOperationOwner();
+    const backendConnection = {
+      request: request as unknown as BackendConnection["request"],
+      respond: vi.fn(),
+    };
+    const fileBrowser = callbacks({
+      asyncOperations,
+      backendConnection,
+      dispatch,
+      state,
+    }).newTask.fileBrowser;
+
+    const listing = fileBrowser?.listRoots();
+    await Promise.resolve();
+    const nextState = {
+      ...state,
+      newTask: {
+        ...state.newTask,
+        selection: { ...state.newTask.selection, projectId: "project_2", agentId: "other-agent" },
+      },
+    };
+    const newerFileBrowser = callbacks({ asyncOperations, backendConnection, dispatch, state: nextState }).newTask.fileBrowser;
+    expect(newerFileBrowser?.ownerKey).not.toBe(fileBrowser?.ownerKey);
+    created.resolve({ task: protocolTaskSnapshot("task_late", "Late task") });
+
+    await expect(listing).rejects.toThrow("New Task context changed");
+    expect(request).toHaveBeenCalledWith(TASK_DISCARD, { taskId: "task_late" });
+    expect(request).not.toHaveBeenCalledWith(ATTACHMENT_LIST_ROOTS, expect.anything());
+    expect(dispatch).toHaveBeenCalledWith({ type: "taskInput:clear", taskId: "task_late" });
+    expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: "snapshot" }));
+    expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({
+      type: "taskInput:prompt",
+      taskId: "task_late",
+    }));
+  });
+
+  it("lets prepared-task ingestion transfer the latest prompt during file browsing", async () => {
+    const created = deferred<{ task: ReturnType<typeof protocolTaskSnapshot> }>();
+    const dispatch = vi.fn();
+    const request = vi.fn((method: string) => {
+      if (method === TASK_CREATE) return created.promise;
+      if (method === ATTACHMENT_LIST_ROOTS) return Promise.resolve({ roots: [] });
+      return Promise.reject(new Error(method));
+    });
+    const state = preparedNewTaskState();
+    state.newTask.prompt = "prompt captured before Task preparation";
+    const fileBrowser = callbacks({
+      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      dispatch,
+      state,
+    }).newTask.fileBrowser;
+
+    const listing = fileBrowser?.listRoots();
+    await Promise.resolve();
+    const preparedTask = protocolTaskSnapshot("task_prepared", "Prepared task");
+    created.resolve({
+      task: {
+        ...preparedTask,
+        task: { ...preparedTask.task, hasMessages: false },
+      },
+    });
+    await listing;
+
+    expect(dispatch).toHaveBeenCalledWith({ type: "newTask:prepared", taskId: "task_prepared" });
+    expect(dispatch).not.toHaveBeenCalledWith({
+      type: "taskInput:prompt",
+      taskId: "task_prepared",
+      prompt: "prompt captured before Task preparation",
+    });
+  });
+
   it("sends pasted image attachments from a prepared new Task", async () => {
     const dispatch = vi.fn();
     const request = vi.fn(async (method: string) => {
@@ -282,6 +640,7 @@ describe("app controller callbacks", () => {
     const state = createInitialState();
     state.snapshot = snapshot("task_1");
     state.snapshot.task.has_messages = false;
+    state.snapshot.task.project_id = "project_1";
     state.newTask.prompt = "stale text";
     state.newTask.selection = {
       ...state.newTask.selection,
@@ -312,14 +671,16 @@ describe("app controller callbacks", () => {
     expect(request).toHaveBeenCalledWith(TASK_OPEN, { taskId: "task_1" });
     expect(request).toHaveBeenCalledWith(TASK_SEND, {
       taskId: "task_1",
-      taskRevision: 2,
-      idempotencyKey: expect.stringMatching(/^frontend-send-/),
       message: {
         text: "Explain this image",
         attachments: ["attachment-handle-image"],
       },
     });
-    expect(dispatch).toHaveBeenCalledWith({ type: "taskInput:submit", taskId: "task_1" });
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
+      type: "taskInput:submit",
+      taskId: "task_1",
+      input: state.taskInputs.task_1,
+    }));
   });
 
   it("invalidates prepared new-task attachments when App Server continuity is lost", async () => {
@@ -336,13 +697,18 @@ describe("app controller callbacks", () => {
           },
         });
       }
+      if (method === ATTACHMENT_RELEASE) {
+        return { outcomes: [] };
+      }
       throw new Error(method);
     });
     const state = createInitialState();
     state.snapshot = snapshot("task_1");
     state.snapshot.task.has_messages = false;
+    state.snapshot.task.project_id = "project_1";
     state.newTask.selection = {
       ...state.newTask.selection,
+      agentId: "codex",
       projectId: "project_1",
       workspaceRoot: "/workspace",
     };
@@ -368,6 +734,10 @@ describe("app controller callbacks", () => {
       taskId: "task_1",
       message: "Attachment is no longer available. Reselect it and try again.",
     });
+    expect(request).toHaveBeenCalledWith(ATTACHMENT_RELEASE, {
+      taskId: "task_1",
+      resources: [{ kind: "handle", id: "attachment-handle-image" }],
+    });
   });
 
   it("sends every visible draft attachment from a prepared new Task", async () => {
@@ -380,6 +750,7 @@ describe("app controller callbacks", () => {
     const state = createInitialState();
     state.snapshot = snapshot("task_1");
     state.snapshot.task.has_messages = false;
+    state.snapshot.task.project_id = "project_1";
     state.newTask.selection = {
       ...state.newTask.selection,
       agentId: "codex",
@@ -429,8 +800,6 @@ describe("app controller callbacks", () => {
 
     expect(request).toHaveBeenCalledWith(TASK_SEND, {
       taskId: "task_1",
-      taskRevision: 2,
-      idempotencyKey: expect.stringMatching(/^frontend-send-/),
       message: {
         text: "send the visible attachments",
         attachments: ["attachment-handle-1", "attachment-handle-2", "attachment-handle-3"],
@@ -438,9 +807,13 @@ describe("app controller callbacks", () => {
     });
   });
 
-  it("keeps New Task visible until Send returns the authoritative user message", async () => {
+  it("keeps New Task routed until Send is accepted, then adopts the accepted Task", async () => {
     const dispatch = vi.fn();
-    const pendingSend = deferred<{ task: ReturnType<typeof protocolTaskSnapshot> }>();
+    const pendingSend = deferred<{
+      task: ReturnType<typeof protocolTaskSnapshot>;
+      turnId: string;
+      userMessageId: string;
+    }>();
     const request = vi.fn((method: string) => {
       if (method === TASK_CREATE) return Promise.resolve({ task: protocolTaskSnapshot("task_1", "New task") });
       if (method === TASK_SEND) return pendingSend.promise;
@@ -465,14 +838,18 @@ describe("app controller callbacks", () => {
     await settlePromises();
 
     expect(request).toHaveBeenCalledWith(TASK_SEND, expect.objectContaining({ taskId: "task_1" }));
-    expect(dispatch).toHaveBeenCalledWith({ type: "taskInput:submit", taskId: "task_1" });
-    expect(postHostMessage).not.toHaveBeenCalledWith(expect.objectContaining({
-      type: "surface.openTask",
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
+      type: "taskInput:submit",
+      taskId: "task_1",
+      input: { prompt: "Build the thing", context: [] },
     }));
+    expect(postHostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "surface.openTask" }));
 
     pendingSend.resolve({
+      turnId: "turn-1",
+      userMessageId: "user-message",
       task: {
-        ...protocolTaskSnapshot("task_1", "Accepted task"),
+        ...protocolTaskSnapshot("task_1", "Accepted task", "visible"),
         revision: 3,
         chat: {
           items: [{
@@ -489,20 +866,115 @@ describe("app controller callbacks", () => {
     await settlePromises();
 
     expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
-      type: "snapshot",
+      type: "task:promoted",
+      activate: true,
       snapshot: expect.objectContaining({
         chat: expect.objectContaining({
           items: [expect.objectContaining({ message: expect.objectContaining({ text: "Build the thing" }) })],
         }),
       }),
     }));
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
+      type: "taskSend:accepted",
+      taskId: "task_1",
+      userMessageId: "user-message",
+    }));
     expect(postHostMessage).toHaveBeenCalledWith({
       type: "surface.openTask",
-      payload: {
-        task_id: "task_1",
-        title: "Accepted task",
-      },
+      payload: { task_id: "task_1", title: "Accepted task" },
     });
+  });
+
+  it("settles an accepted first send before cancelling its active turn", async () => {
+    const pendingSend = deferred<{
+      task: ReturnType<typeof protocolTaskSnapshot>;
+      turnId: string;
+      userMessageId: string;
+    }>();
+    const dispatch = vi.fn();
+    const request = vi.fn((method: string) => {
+      if (method === TASK_CREATE) return Promise.resolve({ task: protocolTaskSnapshot("task_1", "New task") });
+      if (method === TASK_SEND) return pendingSend.promise;
+      if (method === TASK_DISCARD) return Promise.reject(new Error("Task already has an active turn."));
+      if (method === TASK_CANCEL) return Promise.resolve({});
+      return Promise.reject(new Error(method));
+    });
+    const state = createInitialState();
+    state.newTask.prompt = "Build the thing";
+    state.newTask.selection = {
+      ...state.newTask.selection,
+      agentId: "codex",
+      agentLabel: "Codex",
+      projectId: "project_1",
+      workspaceRoot: "/workspace",
+      workspaceLabel: "workspace",
+    };
+    const newTaskStartAttempt = { current: undefined };
+    const newTask = callbacks({
+      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      dispatch,
+      newTaskStartAttempt,
+      state,
+    }).newTask;
+
+    newTask.submit();
+    await settlePromises();
+    newTask.cancel();
+    await settlePromises();
+
+    expect(request).not.toHaveBeenCalledWith(TASK_CANCEL, expect.anything());
+
+    pendingSend.resolve({
+      task: { ...protocolTaskSnapshot("task_1", "Accepted task"), revision: 3 },
+      turnId: "turn-1",
+      userMessageId: "message-1",
+    });
+    await settlePromises();
+
+    const submitted = dispatch.mock.calls
+      .map(([action]) => action)
+      .find((action) => action.type === "taskInput:submit");
+    const acceptedIndex = dispatch.mock.calls.findIndex(([action]) => action.type === "taskSend:accepted");
+    const cancelIndex = request.mock.calls.findIndex(([method]) => method === TASK_CANCEL);
+    expect(dispatch.mock.calls[acceptedIndex]?.[0]).toEqual({
+      type: "taskSend:accepted",
+      taskId: "task_1",
+      userMessageId: "message-1",
+    });
+    expect(dispatch.mock.invocationCallOrder[acceptedIndex])
+      .toBeLessThan(request.mock.invocationCallOrder[cancelIndex]);
+  });
+
+  it("does not let an older first-send rejection reclaim a newer prepared lease", async () => {
+    const pendingSend = deferred<never>();
+    const request = vi.fn((method: string) => {
+      if (method === TASK_OPEN) {
+        return Promise.resolve({ task: protocolTaskSnapshot("task_a", "First draft") });
+      }
+      if (method === TASK_SEND) return pendingSend.promise;
+      return Promise.reject(new Error(method));
+    });
+    const state = preparedNewTaskState("task_a");
+    state.taskInputs.task_a = { prompt: "Send A", context: [] };
+    const newTaskController = new NewTaskController();
+    const newTask = callbacks({
+      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      newTaskController,
+      state,
+    }).newTask;
+
+    newTask.submit();
+    await settlePromises();
+    const leaseB = newTaskController.claim({
+      preparationKey: "context-b",
+      taskId: "task_b" as never,
+    });
+    pendingSend.reject(new AppServerProtocolError({
+      error: { code: "conflict", message: "Send A rejected", recoverable: true },
+    }));
+    await settlePromises();
+
+    expect(newTaskController.currentLease()).toBe(leaseB);
   });
 
   it("routes existing tasks for the destination surface to open", async () => {
@@ -560,6 +1032,10 @@ describe("app controller callbacks", () => {
     const state = createInitialState();
     state.activeTaskId = "task_1";
     state.snapshot = snapshot("task_1");
+    state.newTask.nativeSessions.items = [
+      { session_id: "session_1", cwd: "/workspace", title: "Recent" },
+      { session_id: "session_2", cwd: "/workspace", title: "Older" },
+    ];
 
     callbacks({
       backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
@@ -569,7 +1045,7 @@ describe("app controller callbacks", () => {
     }).navigation.loadNativeSessions();
     await settlePromises();
 
-    expect(requestNativeSessions).toHaveBeenCalledWith(undefined, false);
+    expect(requestNativeSessions).toHaveBeenCalledWith(undefined, false, 2);
     expect(request).toHaveBeenCalledWith(TASK_OPEN, { taskId: "task_1" });
     expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
       type: "snapshot",
@@ -580,11 +1056,19 @@ describe("app controller callbacks", () => {
     }));
   });
 
+  it("loads fifteen additional visible tasks for each history-page request", () => {
+    const requestNativeSessions = vi.fn();
+
+    callbacks({ requestNativeSessions }).navigation.loadNativeSessions("cursor_2");
+
+    expect(requestNativeSessions).toHaveBeenCalledWith("cursor_2", true, 15);
+  });
+
   it("opens the prepared new Task while send capability is still preparing", async () => {
     vi.useFakeTimers();
     try {
       const dispatch = vi.fn();
-      const request = vi.fn(async (method: string) => {
+      const request = vi.fn(async (method: string, _params?: unknown) => {
         if (method === TASK_CREATE) return { task: protocolPreparingTaskSnapshot("task_1", "New task") };
         if (method === TASK_OPEN) return { task: protocolTaskSnapshot("task_1", "New task") };
         if (method === TASK_SEND) return { task: { ...protocolTaskSnapshot("task_1", "New task"), revision: 3 } };
@@ -629,65 +1113,7 @@ describe("app controller callbacks", () => {
     }
   });
 
-  it("reopens and retries the first new-task send when preparation changes the task revision", async () => {
-    const dispatch = vi.fn();
-    const request = vi.fn(async (method: string) => {
-      if (method === TASK_CREATE) return { task: { ...protocolTaskSnapshot("task_1", "New task"), revision: 1 } };
-      if (method === TASK_SEND && request.mock.calls.filter(([called]) => called === TASK_SEND).length === 1) {
-        throw new AppServerProtocolError({
-          error: {
-            code: "conflict",
-            message: "Task changed before the message was sent",
-            recoverable: true,
-          },
-        });
-      }
-      if (method === TASK_OPEN) return { task: { ...protocolTaskSnapshot("task_1", "New task"), revision: 2 } };
-      if (method === TASK_SEND) return { task: { ...protocolTaskSnapshot("task_1", "New task"), revision: 3 } };
-      throw new Error(method);
-    });
-    const state = createInitialState();
-    state.newTask.prompt = "Build the thing";
-    state.newTask.selection = {
-      ...state.newTask.selection,
-      agentId: "codex",
-      agentLabel: "Codex",
-      projectId: "project_1",
-      workspaceRoot: "/workspace",
-      workspaceLabel: "workspace",
-    };
-
-    callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
-      dispatch,
-      state,
-    }).newTask.submit();
-    await settlePromises();
-
-    expect(request).toHaveBeenNthCalledWith(2, TASK_SEND, {
-      taskId: "task_1",
-      taskRevision: 1,
-      idempotencyKey: expect.stringMatching(/^frontend-send-/),
-      message: { text: "Build the thing" },
-    });
-    expect(request).toHaveBeenNthCalledWith(3, TASK_OPEN, { taskId: "task_1" });
-    expect(request).toHaveBeenNthCalledWith(4, TASK_SEND, {
-      taskId: "task_1",
-      taskRevision: 2,
-      idempotencyKey: expect.stringMatching(/^frontend-send-/),
-      message: { text: "Build the thing" },
-    });
-    expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: "taskInput:error" }));
-    expect(postHostMessage).toHaveBeenCalledWith({
-      type: "surface.openTask",
-      payload: {
-        task_id: "task_1",
-        title: "New task",
-      },
-    });
-  });
-
-  it("clears new-task startup state when first send fails after preparation", async () => {
+  it("keeps the prepared Task route and restores its draft when first send fails", async () => {
     const dispatch = vi.fn();
     const request = vi.fn(async (method: string) => {
       if (method === TASK_CREATE) return { task: protocolTaskSnapshot("task_1", "New task") };
@@ -713,45 +1139,13 @@ describe("app controller callbacks", () => {
     await settlePromises();
 
     expect(dispatch).toHaveBeenCalledWith({ type: "taskInput:prompt", taskId: "task_1", prompt: "Build the thing" });
-    expect(dispatch).toHaveBeenCalledWith({ type: "taskInput:error", taskId: "task_1", message: "send failed" });
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "taskInput:sendError",
+      taskId: "task_1",
+      message: "send failed",
+    });
     expect(dispatch).toHaveBeenCalledWith({ type: "submit:error", message: "send failed" });
-    expect(postHostMessage).not.toHaveBeenCalledWith(expect.objectContaining({
-      type: "surface.openTask",
-    }));
-  });
-
-  it("keeps pending new-task send recovery when navigation aborts the send request", async () => {
-    vi.stubGlobal("sessionStorage", memoryStorage());
-    vi.stubGlobal("document", { visibilityState: "hidden" });
-    try {
-      const dispatch = vi.fn();
-      const request = vi.fn(async (method: string) => {
-        if (method === TASK_CREATE) return { task: protocolTaskSnapshot("task_1", "New task") };
-        if (method === TASK_SEND) throw new Error("request aborted");
-        throw new Error(method);
-      });
-      const state = createInitialState();
-      state.newTask.prompt = "Build the thing";
-      state.newTask.selection = {
-        ...state.newTask.selection,
-        agentId: "codex",
-        agentLabel: "Codex",
-        projectId: "project_1",
-        workspaceRoot: "/workspace",
-        workspaceLabel: "workspace",
-      };
-
-      callbacks({
-        backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
-        dispatch,
-        state,
-      }).newTask.submit();
-      await settlePromises();
-
-      expect(sessionStorage.getItem(PENDING_TASK_SEND_RECOVERY_KEY)).toContain("Build the thing");
-    } finally {
-      vi.unstubAllGlobals();
-    }
+    expect(postHostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "surface.openTask" }));
   });
 
   it("sends immediately when the prepared Task already owns the selected config options", async () => {
@@ -821,6 +1215,7 @@ describe("app controller callbacks", () => {
     });
     const state = createInitialState();
     state.snapshot = snapshot("task_1");
+    state.snapshot.agent_config = editableConfigOptions();
 
     callbacks({
       backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
@@ -838,7 +1233,7 @@ describe("app controller callbacks", () => {
     expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "snapshot", intent: "refresh" }));
   });
 
-  it("lets subscribed Task events own config option results", async () => {
+  it("ingests config option results even when the event stream is subscribed", async () => {
     const dispatch = vi.fn();
     const request = vi.fn(async (method: string) => {
       if (method === TASK_SET_CONFIG_OPTION) {
@@ -853,6 +1248,7 @@ describe("app controller callbacks", () => {
     };
     const state = createInitialState();
     state.snapshot = snapshot("task_1");
+    state.snapshot.agent_config = editableConfigOptions();
 
     callbacks({ backendConnection, dispatch, state }).task.selectConfigOption("model", "gpt-5");
     await settlePromises();
@@ -862,7 +1258,109 @@ describe("app controller callbacks", () => {
       configId: "model",
       value: "gpt-5",
     }));
-    expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: "snapshot" }));
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "snapshot", intent: "refresh" }));
+  });
+
+  it("does not mutate config options while the authoritative catalog is changing", async () => {
+    const dispatch = vi.fn();
+    const request = vi.fn();
+    const state = createInitialState();
+    state.snapshot = snapshot("task_1");
+    state.snapshot.agent_config = {
+      ...editableConfigOptions(),
+      pending_change: {
+        mutation_id: "mutation_1",
+        option_id: "model",
+        requested_value: "gpt-5",
+      },
+    };
+
+    callbacks({
+      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      dispatch,
+      state,
+    }).task.selectConfigOption("model", "gpt-5");
+    await settlePromises();
+
+    expect(request).not.toHaveBeenCalled();
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "taskInput:error",
+      taskId: "task_1",
+      message: "Configuration options are not currently editable.",
+    });
+  });
+
+  it("refreshes an existing Task after a config mutation error clears backend pending state", async () => {
+    const dispatch = vi.fn();
+    const request = vi.fn(async (method: string) => {
+      if (method === TASK_SET_CONFIG_OPTION) {
+        throw new AppServerProtocolError({
+          error: { code: "internal", message: "Agent rejected the option", recoverable: true },
+        });
+      }
+      if (method === TASK_OPEN) {
+        return { task: { ...protocolTaskSnapshot("task_1", "Task"), revision: 4 } };
+      }
+      throw new Error(method);
+    });
+    const state = createInitialState();
+    state.activeTaskId = "task_1";
+    state.snapshot = snapshot("task_1");
+    state.snapshot.agent_config = editableConfigOptions();
+
+    callbacks({
+      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      dispatch,
+      state,
+    }).task.selectConfigOption("model", "gpt-5");
+    await settlePromises();
+
+    expect(request).toHaveBeenCalledWith(TASK_OPEN, { taskId: "task_1" });
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "taskInput:error",
+      taskId: "task_1",
+      message: "Agent rejected the option",
+    });
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "snapshot", intent: "refresh" }));
+  });
+
+  it("keeps an exact send pending when an older config mutation fails", async () => {
+    const configMutation = deferred<never>();
+    const request = vi.fn((method: string) => {
+      if (method === TASK_SET_CONFIG_OPTION) return configMutation.promise;
+      if (method === TASK_OPEN) {
+        return Promise.resolve({ task: { ...protocolTaskSnapshot("task_1", "Task"), revision: 4 } });
+      }
+      throw new Error(method);
+    });
+    let renderedState = createInitialState();
+    renderedState.activeTaskId = "task_1";
+    renderedState.snapshot = snapshot("task_1");
+    renderedState.snapshot.agent_config = editableConfigOptions();
+    const callbackState = renderedState;
+    const dispatch = vi.fn((action) => {
+      renderedState = appReducer(renderedState, action);
+    });
+    const task = callbacks({
+      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      dispatch,
+      state: callbackState,
+    }).task;
+
+    task.selectConfigOption("model", "gpt-5");
+    dispatch({
+      type: "taskInput:submit",
+      taskId: "task_1",
+      input: { prompt: "Send exactly once", context: [] },
+    });
+    configMutation.reject(new Error("Agent rejected the option"));
+    await settlePromises();
+
+    expect(renderedState.taskInputs.task_1.pending).toMatchObject({
+      prompt: "Send exactly once",
+      state: "sending",
+    });
+    expect(renderedState.taskInputs.task_1.error).toBe("Agent rejected the option");
   });
 
   it("surfaces a new-task error when typed create prerequisites are missing", () => {
@@ -1443,8 +1941,6 @@ describe("app controller callbacks", () => {
 
     expect(request).toHaveBeenCalledWith(TASK_SEND, {
       taskId: "task_1",
-      taskRevision: 1,
-      idempotencyKey: expect.stringMatching(/^frontend-send-/),
       message: { text: "Continue" },
     });
     expect(dispatch).toHaveBeenNthCalledWith(1, {
@@ -1513,8 +2009,6 @@ describe("app controller callbacks", () => {
 
     expect(request).toHaveBeenCalledWith(TASK_SEND, {
       taskId: "task_1",
-      taskRevision: 1,
-      idempotencyKey: expect.stringMatching(/^frontend-send-/),
       message: {
         text: "Continue",
         attachments: ["attachment-handle-1"],
@@ -1550,7 +2044,7 @@ describe("app controller callbacks", () => {
 
   it("releases App Server attachment handles when task composer attachments are removed", async () => {
     const dispatch = vi.fn();
-    const request = vi.fn(async () => ({ releasedHandles: ["attachment-handle-1"] }));
+    const request = vi.fn(async () => ({ outcomes: [] }));
     const state = createInitialState();
     state.snapshot = snapshot("task_1");
     state.taskInputs.task_1 = {
@@ -1577,9 +2071,47 @@ describe("app controller callbacks", () => {
       taskId: "task_1",
       attachmentId: "ctx_1",
     });
-    expect(request).toHaveBeenCalledWith(ATTACHMENT_RELEASE_HANDLES, {
+    expect(request).toHaveBeenCalledWith(ATTACHMENT_RELEASE, {
       taskId: "task_1",
-      handles: ["attachment-handle-1"],
+      resources: [{ kind: "handle", id: "attachment-handle-1" }],
+    });
+  });
+
+  it("releases prepared new-task attachment handles when their composer rows are removed", async () => {
+    const dispatch = vi.fn();
+    const request = vi.fn(async () => ({ outcomes: [] }));
+    const state = createInitialState();
+    state.snapshot = {
+      ...snapshot("task_1"),
+      task: { ...snapshot("task_1").task, has_messages: false },
+    };
+    state.taskInputs.task_1 = {
+      prompt: "Draft",
+      context: [
+        {
+          local_id: "ctx_1",
+          kind: "file",
+          label: "notes.md",
+          app_server_handle_id: "attachment-handle-1" as AttachmentHandleId,
+        },
+      ],
+    };
+
+    callbacks({
+      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      dispatch,
+      state,
+    }).newTask.removeAttachment("ctx_1");
+    await settlePromises();
+
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "taskInput:attachment:remove",
+      taskId: "task_1",
+      attachmentId: "ctx_1",
+    });
+    expect(request).toHaveBeenCalledWith(ATTACHMENT_RELEASE, {
+      taskId: "task_1",
+      resources: [{ kind: "handle", id: "attachment-handle-1" }],
     });
   });
 
@@ -1672,6 +2204,97 @@ describe("app controller callbacks", () => {
     });
   });
 
+  it("releases a selected handle returned after the Task composer was abandoned", async () => {
+    const dispatch = vi.fn();
+    const release = vi.fn();
+    const attachmentResources = new ComposerAttachmentResourceOwner({ release });
+    attachmentResources.reconcile({
+      acceptedUserMessageIds: new Map(),
+      acceptsAdoptions: true,
+      retained: [],
+      mountedTaskId: "task_1",
+      protected: new Set(),
+      taskSurfaceMounted: true,
+    });
+    const selected = deferred<{ attachment: { handleId: string; label: string } }>();
+    const request = vi.fn(() => selected.promise);
+    const state = createInitialState();
+    state.snapshot = snapshot("task_1");
+
+    const attaching = callbacks({
+      attachmentResources,
+      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      dispatch,
+      state,
+    }).task.fileBrowser?.attachFileReference("entry-1" as FileBrowserEntryId);
+    attachmentResources.reconcile({
+      acceptedUserMessageIds: new Map(),
+      acceptsAdoptions: true,
+      retained: [],
+      mountedTaskId: "task_2",
+      protected: new Set(),
+      taskSurfaceMounted: true,
+    });
+    selected.resolve({ attachment: { handleId: "attachment-handle-1", label: "notes.md" } });
+    await attaching;
+
+    expect(release).toHaveBeenCalledWith("task_1", ["attachment-handle-1"]);
+    expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({
+      type: "taskInput:attachment:addAppServer",
+    }));
+  });
+
+  it("rejects a selection response that arrives after Send starts", async () => {
+    const selected = deferred<{ attachment: { handleId: string; label: string } }>();
+    const sent = deferred<{
+      task: ReturnType<typeof protocolTaskSnapshot>;
+      turnId: string;
+      userMessageId: string;
+    }>();
+    const dispatch = vi.fn();
+    const release = vi.fn();
+    const attachmentResources = new ComposerAttachmentResourceOwner({ release });
+    attachmentResources.reconcile({
+      acceptedUserMessageIds: new Map(),
+      acceptsAdoptions: true,
+      retained: [],
+      mountedTaskId: "task_1",
+      protected: new Set(),
+      taskSurfaceMounted: true,
+    });
+    const request = vi.fn((method: string) => {
+      if (method === ATTACHMENT_CREATE_FILE_REFERENCE) return selected.promise;
+      if (method === TASK_SEND) return sent.promise;
+      return Promise.reject(new Error(method));
+    });
+    const state = createInitialState();
+    state.snapshot = snapshot("task_1");
+    state.taskInputs.task_1 = { prompt: "Start now", context: [] };
+    const task = callbacks({
+      attachmentResources,
+      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      dispatch,
+      state,
+    }).task;
+    const attaching = task.fileBrowser?.attachFileReference("entry-1" as FileBrowserEntryId);
+
+    task.sendPrompt();
+    selected.resolve({ attachment: { handleId: "late-handle", label: "late.md" } });
+    await attaching;
+
+    expect(release).toHaveBeenCalledWith("task_1", ["late-handle"]);
+    expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({
+      type: "taskInput:attachment:addAppServer",
+    }));
+
+    sent.resolve({
+      task: protocolTaskSnapshot("task_1", "Task"),
+      turnId: "turn-1",
+      userMessageId: "message-1",
+    });
+    await settlePromises();
+  });
+
   it("confirms embedded candidates before adding App Server embedded attachments", async () => {
     const dispatch = vi.fn();
     const request = vi.fn(async (method: string) => {
@@ -1710,6 +2333,43 @@ describe("app controller callbacks", () => {
         label: "notes.md",
         app_server_handle_id: "attachment-handle-2",
       }),
+    });
+  });
+
+  it("releases an embedded candidate when confirmation leaves it non-sendable", async () => {
+    const request = vi.fn(async (method: string) => {
+      if (method === ATTACHMENT_CREATE_EMBEDDED_CANDIDATE) {
+        return { candidate: { candidateId: "candidate-1", label: "notes.md" } };
+      }
+      if (method === ATTACHMENT_CONFIRM_EMBEDDED) {
+        return {
+          attachments: [],
+          errors: [{
+            candidateId: "candidate-1",
+            code: "tooLarge",
+            message: "Attachment is too large.",
+          }],
+        };
+      }
+      if (method === ATTACHMENT_RELEASE) {
+        return { outcomes: [] };
+      }
+      throw new Error(method);
+    });
+    const state = createInitialState();
+    state.snapshot = snapshot("task_1");
+    const task = callbacks({
+      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      state,
+    }).task;
+
+    await expect(task.fileBrowser?.attachEmbedded("entry-1" as FileBrowserEntryId))
+      .rejects.toThrow("Attachment is too large.");
+    await settlePromises();
+
+    expect(request).toHaveBeenCalledWith(ATTACHMENT_RELEASE, {
+      taskId: "task_1",
+      resources: [{ kind: "candidate", id: "candidate-1" }],
     });
   });
 
@@ -1771,33 +2431,9 @@ describe("app controller callbacks", () => {
     callbacks({ dispatch, state }).task.cancel();
 
     expect(dispatch).toHaveBeenCalledWith({
-      type: "taskInput:error",
+      type: "taskInput:cancelError",
       taskId: "task_1",
       message: "App Server connection unavailable.",
-    });
-    expect(postHostMessage).not.toHaveBeenCalled();
-  });
-
-  it("restores typed prompt sends after request rejection", async () => {
-    const dispatch = vi.fn();
-    const state = createInitialState();
-    state.snapshot = snapshot("task_1");
-    state.taskInputs.task_1 = { prompt: "Continue", context: [] };
-
-    callbacks({
-      backendConnection: {
-        request: vi.fn(async () => { throw new Error("stale revision"); }) as unknown as BackendConnection["request"],
-        respond: vi.fn(),
-      },
-      dispatch,
-      state,
-    }).task.sendPrompt();
-    await settlePromises();
-
-    expect(dispatch).toHaveBeenCalledWith({
-      type: "taskInput:error",
-      taskId: "task_1",
-      message: "stale revision",
     });
     expect(postHostMessage).not.toHaveBeenCalled();
   });
@@ -1823,7 +2459,7 @@ describe("app controller callbacks", () => {
     await settlePromises();
 
     expect(dispatch).toHaveBeenCalledWith({
-      type: "taskInput:error",
+      type: "taskInput:sendError",
       taskId: "task_1",
       message: "Task is running",
     });
@@ -1846,25 +2482,9 @@ describe("app controller callbacks", () => {
     await settlePromises();
 
     expect(dispatch).toHaveBeenCalledWith({
-      type: "taskInput:error",
+      type: "taskInput:cancelError",
       taskId: "task_1",
       message: "not running",
-    });
-    expect(postHostMessage).not.toHaveBeenCalled();
-  });
-
-  it("rejects legacy Agent permission responses without bridge replay", () => {
-    const dispatch = vi.fn();
-    const state = createInitialState();
-    state.snapshot = snapshot("task_1");
-
-    callbacks({ dispatch, state }).task.respondToPermission("permission_1", "allow_once", "approved");
-
-    expect(dispatch).toHaveBeenNthCalledWith(1, { type: "permission:responding", requestId: "permission_1" });
-    expect(dispatch).toHaveBeenNthCalledWith(2, {
-      type: "permission:error",
-      requestId: "permission_1",
-      message: "Permission request is no longer answerable.",
     });
     expect(postHostMessage).not.toHaveBeenCalled();
   });
@@ -1878,8 +2498,6 @@ describe("app controller callbacks", () => {
     callbacks({ backendConnection: { respond }, dispatch, state }).task.respondToPermission(
       "server-request-1",
       "allow_once",
-      "approved",
-      "appServer",
     );
 
     expect(dispatch).toHaveBeenNthCalledWith(1, {
@@ -1890,7 +2508,7 @@ describe("app controller callbacks", () => {
     expect(postHostMessage).not.toHaveBeenCalled();
   });
 
-  it("clears App Server permission state after an accepted response", async () => {
+  it("waits for the authoritative Task snapshot after an accepted response", async () => {
     const dispatch = vi.fn();
     const state = createInitialState();
     state.snapshot = snapshot("task_1");
@@ -1899,38 +2517,14 @@ describe("app controller callbacks", () => {
       backendConnection: { respond: vi.fn(async () => undefined) },
       dispatch,
       state,
-    }).task.respondToPermission("server-request-1", "allow_once", "approved", "appServer");
+    }).task.respondToPermission("server-request-1", "allow_once");
     await settlePromises();
 
     expect(dispatch).toHaveBeenNthCalledWith(1, {
       type: "permission:responding",
       requestId: "server-request-1",
     });
-    expect(dispatch).toHaveBeenNthCalledWith(2, {
-      type: "appServerPermission:resolved",
-      requestId: "server-request-1",
-    });
-    expect(postHostMessage).not.toHaveBeenCalled();
-  });
-
-  it("does not answer server-shaped legacy Agent permission ids through BackendConnection", () => {
-    const dispatch = vi.fn();
-    const respond = vi.fn();
-    const state = createInitialState();
-    state.snapshot = snapshot("task_1");
-
-    callbacks({ backendConnection: { respond }, dispatch, state }).task.respondToPermission(
-      "server-request-shaped-agent-id",
-      "allow_once",
-      "approved",
-    );
-
-    expect(respond).not.toHaveBeenCalled();
-    expect(dispatch).toHaveBeenNthCalledWith(2, {
-      type: "permission:error",
-      requestId: "server-request-shaped-agent-id",
-      message: "Permission request is no longer answerable.",
-    });
+    expect(dispatch).toHaveBeenCalledTimes(1);
     expect(postHostMessage).not.toHaveBeenCalled();
   });
 
@@ -1943,7 +2537,7 @@ describe("app controller callbacks", () => {
       backendConnection: { respond: () => Promise.reject(new Error("connection closed")) },
       dispatch,
       state,
-    }).task.respondToPermission("server-request-1", "allow_once", "approved", "appServer");
+    }).task.respondToPermission("server-request-1", "allow_once");
     await Promise.resolve();
 
     expect(dispatch).toHaveBeenNthCalledWith(1, {
@@ -1966,8 +2560,6 @@ describe("app controller callbacks", () => {
     callbacks({ dispatch, state }).task.respondToPermission(
       "server-request-1",
       "allow_once",
-      "approved",
-      "appServer",
     );
 
     expect(dispatch).toHaveBeenNthCalledWith(1, {
@@ -1995,7 +2587,7 @@ describe("app controller callbacks", () => {
       },
       dispatch,
       state,
-    }).task.respondToPermission("server-request-1", "allow_once", "approved", "appServer");
+    }).task.respondToPermission("server-request-1", "allow_once");
 
     expect(dispatch).toHaveBeenNthCalledWith(1, {
       type: "permission:responding",
@@ -2032,6 +2624,7 @@ describe("app controller callbacks", () => {
     });
     expect(dispatch).toHaveBeenCalledWith({
       type: "newTask:nativeSessions:error",
+      sessionId: "native_1",
       message: "App Server connection unavailable.",
     });
     expect(postHostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "task.create" }));
@@ -2086,18 +2679,146 @@ describe("app controller callbacks", () => {
     expect(postHostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "task.create" }));
   });
 
+  it("retains the New Task when opening an existing Task", async () => {
+    const dispatch = vi.fn();
+    const release = vi.fn();
+    const attachmentResources = new ComposerAttachmentResourceOwner({ release });
+    const request = vi.fn();
+    const state = preparedNewTaskState("task_prepared");
+    const navigation = callbacks({
+      attachmentResources,
+      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      dispatch,
+      state,
+    }).navigation;
+
+    navigation.openTask("task_existing");
+    await settlePromises();
+
+    expect(request).not.toHaveBeenCalledWith(TASK_DISCARD, expect.anything());
+    expect(release).not.toHaveBeenCalled();
+    expect(dispatch).not.toHaveBeenCalledWith({ type: "taskInput:clear", taskId: "task_prepared" });
+    expect(dispatch).not.toHaveBeenCalledWith({ type: "task:list:remove", taskId: "task_prepared" });
+  });
+
+  it("retains the New Task when opening Settings", async () => {
+    const dispatch = vi.fn();
+    const release = vi.fn();
+    const attachmentResources = new ComposerAttachmentResourceOwner({ release });
+    const request = vi.fn();
+    const state = preparedNewTaskState("task_prepared");
+    const navigation = callbacks({
+      attachmentResources,
+      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      dispatch,
+      state,
+    }).navigation;
+
+    navigation.openSettings();
+    await settlePromises();
+
+    expect(request).not.toHaveBeenCalledWith(TASK_DISCARD, expect.anything());
+    expect(release).not.toHaveBeenCalled();
+    expect(dispatch).not.toHaveBeenCalledWith({ type: "taskInput:clear", taskId: "task_prepared" });
+    expect(dispatch).not.toHaveBeenCalledWith({ type: "task:list:remove", taskId: "task_prepared" });
+  });
+
+  it("discards the prepared Task before adopting a Native Session", async () => {
+    const dispatch = vi.fn();
+    const request = vi.fn(async (method: string) => {
+      if (method === TASK_DISCARD) return { discarded: true };
+      if (method === TASK_ADOPT_NATIVE_SESSION) {
+        return { task: protocolTaskSnapshot("task_adopted", "Native Session") };
+      }
+      throw new Error(method);
+    });
+    const state = preparedNewTaskState("task_prepared");
+
+    callbacks({
+      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      dispatch,
+      state,
+    }).navigation.openNativeSession({
+      cwd: "/workspace",
+      session_id: "native_1",
+      title: "Native Session",
+      updated_at: "2026-06-27T00:00:00Z",
+    });
+    await settlePromises();
+
+    expect(request.mock.calls.filter(([method]) => method === TASK_DISCARD)).toEqual([
+      [TASK_DISCARD, { taskId: "task_prepared" }],
+    ]);
+    expect(request.mock.calls.findIndex(([method]) => method === TASK_DISCARD))
+      .toBeLessThan(request.mock.calls.findIndex(([method]) => method === TASK_ADOPT_NATIVE_SESSION));
+    expect(request).toHaveBeenCalledWith(TASK_ADOPT_NATIVE_SESSION, expect.objectContaining({
+      nativeSessionId: "native_1",
+    }));
+  });
+
+  it("does not discard a prepared Task after its first send has started", async () => {
+    const dispatch = vi.fn();
+    const request = vi.fn(async (method: string) => {
+      if (method === TASK_DISCARD) return { discarded: true };
+      throw new Error(method);
+    });
+    const state = preparedNewTaskState("task_prepared");
+    const newTaskController = new NewTaskController();
+    const lease = newTaskController.claim({
+      preparationKey: newTaskPreparationKey(state) as string,
+      taskId: "task_prepared" as never,
+    });
+    newTaskController.protectSend(lease);
+
+    callbacks({
+      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      dispatch,
+      newTaskController,
+      newTaskStartAttempt: {
+        current: {
+          cancelled: false,
+          draft: { prompt: "Sending", context: [] },
+          sendInFlight: true,
+          taskId: "task_prepared" as never,
+        },
+      },
+      state,
+    }).navigation.openSettings();
+    await settlePromises();
+
+    expect(request).not.toHaveBeenCalledWith(TASK_DISCARD, expect.anything());
+  });
+
+  it("does not let a stale prepared snapshot replace a newer ownership lease", async () => {
+    const request = vi.fn(async (method: string) => {
+      if (method === TASK_DISCARD) return { discarded: true };
+      throw new Error(method);
+    });
+    const state = preparedNewTaskState("task_stale");
+    const newTaskController = new NewTaskController();
+    const currentLease = newTaskController.claim({
+      preparationKey: "newer-context",
+      taskId: "task_newer" as never,
+    });
+
+    callbacks({
+      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      newTaskController,
+      state,
+    }).navigation.openSettings();
+    await settlePromises();
+
+    expect(request).not.toHaveBeenCalledWith(TASK_DISCARD, expect.anything());
+    expect(newTaskController.currentLease()).toBe(currentLease);
+  });
+
   it("does not redirect when native-session adoption resolves after a newer navigation intent", async () => {
     const dispatch = vi.fn();
     let resolveRequest: ((value: { task: ReturnType<typeof protocolTaskSnapshot> }) => void) | undefined;
     const request = vi.fn(() => new Promise<{ task: ReturnType<typeof protocolTaskSnapshot> }>((resolve) => {
       resolveRequest = resolve;
     }));
-    let generation = 0;
-    const beginNavigationChange = vi.fn(() => {
-      generation += 1;
-      return generation;
-    });
-    const currentNavigationGeneration = vi.fn(() => generation);
+    const asyncOperations = new AsyncOperationOwner();
     const state = createInitialState();
     state.newTask.selection = {
       ...state.newTask.selection,
@@ -2109,8 +2830,7 @@ describe("app controller callbacks", () => {
 
     callbacks({
       backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
-      beginNavigationChange,
-      currentNavigationGeneration,
+      asyncOperations,
       dispatch,
       state,
     }).navigation.openNativeSession({
@@ -2120,7 +2840,7 @@ describe("app controller callbacks", () => {
       updated_at: "2026-06-27T00:00:00Z",
     });
 
-    generation += 1;
+    asyncOperations.beginNavigation("settings:default");
     resolveRequest?.({ task: protocolTaskSnapshot("task_1", "Native Session") });
     await settlePromises();
 
@@ -2139,13 +2859,91 @@ describe("app controller callbacks", () => {
     expect(postHostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "surface.openTask" }));
   });
 
+  it("cancels native-session opening without letting its late result hijack the New Task surface", async () => {
+    const adopted = deferred<{ task: ReturnType<typeof protocolTaskSnapshot> }>();
+    const dispatch = vi.fn();
+    const asyncOperations = new AsyncOperationOwner();
+    const beginNavigation = vi.spyOn(asyncOperations, "beginNavigation");
+    const state = preparedNewTaskState();
+    const controllerCallbacks = callbacks({
+      backendConnection: {
+        request: vi.fn(() => adopted.promise) as unknown as BackendConnection["request"],
+        respond: vi.fn(),
+      },
+      asyncOperations,
+      dispatch,
+      state,
+    });
+
+    controllerCallbacks.navigation.openNativeSession({
+      cwd: "/workspace",
+      session_id: "native_1",
+      title: "Native Session",
+      updated_at: "2026-06-27T00:00:00Z",
+    });
+    state.newTask.submitting = true;
+    state.newTask.nativeSessions.adoptingSessionId = "native_1";
+    controllerCallbacks.newTask.cancel();
+    adopted.resolve({ task: protocolTaskSnapshot("task_adopted", "Native Session") });
+    await settlePromises();
+
+    expect(beginNavigation).toHaveBeenCalledTimes(2);
+    expect(dispatch).toHaveBeenCalledWith({ type: "submit:cancel" });
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "newTask:nativeSessions:remove",
+      sessionId: "native_1",
+    });
+    expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: "snapshot", intent: "open" }));
+    expect(postHostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "surface.openTask" }));
+  });
+
+  it("does not let a stale native-session result unlock a newer first send", async () => {
+    const adopted = deferred<{ task: ReturnType<typeof protocolTaskSnapshot> }>();
+    const asyncOperations = new AsyncOperationOwner();
+    let renderedState = preparedNewTaskState();
+    const callbackState = renderedState;
+    const dispatch = vi.fn((action) => {
+      renderedState = appReducer(renderedState, action);
+    });
+    const controllerCallbacks = callbacks({
+      backendConnection: {
+        request: vi.fn(() => adopted.promise) as unknown as BackendConnection["request"],
+        respond: vi.fn(),
+      },
+      asyncOperations,
+      dispatch,
+      state: callbackState,
+    });
+
+    controllerCallbacks.navigation.openNativeSession({
+      cwd: "/workspace",
+      session_id: "native_1",
+      title: "Native Session",
+      updated_at: "2026-06-27T00:00:00Z",
+    });
+    callbackState.newTask.submitting = true;
+    callbackState.newTask.nativeSessions.adoptingSessionId = "native_1";
+    controllerCallbacks.newTask.cancel();
+    dispatch({
+      type: "submit:start",
+      prompt: "Start this newer Task",
+      context: [],
+    });
+
+    adopted.resolve({ task: protocolTaskSnapshot("task_adopted", "Native Session") });
+    await settlePromises();
+
+    expect(renderedState.newTask.submitting).toBe(true);
+    expect(renderedState.newTask.nativeSessions.adoptingSessionId).toBeUndefined();
+  });
+
   it("does not surface a superseded native-session adoption error", async () => {
     const dispatch = vi.fn();
     let rejectRequest: ((error: Error) => void) | undefined;
     const request = vi.fn(() => new Promise((_, reject) => {
       rejectRequest = reject;
     }));
-    let generation = 0;
+    const asyncOperations = new AsyncOperationOwner();
     const state = createInitialState();
     state.newTask.selection = {
       ...state.newTask.selection,
@@ -2157,8 +2955,7 @@ describe("app controller callbacks", () => {
 
     callbacks({
       backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
-      beginNavigationChange: () => ++generation,
-      currentNavigationGeneration: () => generation,
+      asyncOperations,
       dispatch,
       state,
     }).navigation.openNativeSession({
@@ -2168,7 +2965,7 @@ describe("app controller callbacks", () => {
       updated_at: "2026-06-27T00:00:00Z",
     });
 
-    generation += 1;
+    asyncOperations.beginNavigation("settings:default");
     rejectRequest?.(new Error("Slow session load failed"));
     await settlePromises();
 
@@ -2200,11 +2997,7 @@ describe("app controller callbacks", () => {
         return {
           taskId: "task_1",
           archived: true,
-          tasks: { tasks: [protocolTaskSummary("task_2", "Remaining")], activeTaskId: null },
         };
-      }
-      if (method === TASK_LIST) {
-        return { revision: 2, tasks: [protocolTaskSummary("task_2", "Remaining")] };
       }
       throw new Error(method);
     });
@@ -2237,13 +3030,10 @@ describe("app controller callbacks", () => {
     await settlePromises();
 
     expect(request).toHaveBeenCalledWith(TASK_SET_ARCHIVED, { taskId: "task_1", archived: true });
-    expect(request).toHaveBeenCalledWith(TASK_LIST, { archived: false });
+    expect(request).toHaveBeenCalledTimes(1);
     expect(dispatch).toHaveBeenCalledWith({ type: "selection:clear" });
-    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
-      type: "tasks",
-      tasks: [expect.objectContaining({ task_id: "task_2" })],
-    }));
-    expect(dispatch).toHaveBeenCalledWith({ type: "task:list:remove", taskId: "task_1" });
+    expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: "tasks" }));
+    expect(dispatch).not.toHaveBeenCalledWith({ type: "task:list:remove", taskId: "task_1" });
     expect(postHostMessage).toHaveBeenCalledWith({
       type: "surface.openNewTask",
       payload: { project_id: "project_1" },
@@ -2257,11 +3047,7 @@ describe("app controller callbacks", () => {
         return {
           taskId: "task_1",
           archived: false,
-          tasks: { tasks: [protocolTaskSummary("task_1", "Restored")], activeTaskId: null },
         };
-      }
-      if (method === TASK_LIST) {
-        return { revision: 3, tasks: [protocolTaskSummary("task_1", "Restored")] };
       }
       throw new Error(method);
     });
@@ -2276,12 +3062,9 @@ describe("app controller callbacks", () => {
     await settlePromises();
 
     expect(request).toHaveBeenCalledWith(TASK_SET_ARCHIVED, { taskId: "task_1", archived: false });
-    expect(request).toHaveBeenCalledWith(TASK_LIST, { archived: false });
+    expect(request).toHaveBeenCalledTimes(1);
     expect(dispatch).toHaveBeenCalledWith({ type: "archive:set", showArchived: false });
-    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
-      type: "tasks",
-      tasks: [expect.objectContaining({ task_id: "task_1" })],
-    }));
+    expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: "tasks" }));
     expect(dispatch).not.toHaveBeenCalledWith({ type: "task:list:remove", taskId: "task_1" });
     expect(postHostMessage).toHaveBeenCalledWith({
       type: "surface.openTask",
@@ -2296,11 +3079,7 @@ describe("app controller callbacks", () => {
         return {
           taskId: "task_1",
           archived: false,
-          tasks: { tasks: [protocolTaskSummary("task_1", "Restored")], activeTaskId: null },
         };
-      }
-      if (method === TASK_LIST) {
-        return { revision: 3, tasks: [protocolTaskSummary("task_1", "Restored")] };
       }
       throw new Error(method);
     });
@@ -2312,14 +3091,13 @@ describe("app controller callbacks", () => {
 
     callbacks({
       backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
-      beginNavigationChange: vi.fn(),
       dispatch,
       state,
     }).navigation.restoreTask("task_1");
     await settlePromises();
 
     expect(request).toHaveBeenCalledWith(TASK_SET_ARCHIVED, { taskId: "task_1", archived: false });
-    expect(request).toHaveBeenCalledWith(TASK_LIST, { archived: false });
+    expect(request).toHaveBeenCalledTimes(1);
     expect(dispatch).toHaveBeenCalledWith({ type: "taskInput:clear", taskId: "task_1" });
     expect(dispatch).toHaveBeenCalledWith({ type: "archive:set", showArchived: false });
     expect(dispatch).not.toHaveBeenCalledWith({ type: "task:list:remove", taskId: "task_1" });
@@ -2336,11 +3114,7 @@ describe("app controller callbacks", () => {
         return {
           taskId: "task_1",
           archived: true,
-          tasks: { tasks: [protocolTaskSummary("task_2", "Remaining")], activeTaskId: null },
         };
-      }
-      if (method === TASK_LIST) {
-        return { revision: 2, tasks: [protocolTaskSummary("task_2", "Remaining")] };
       }
       throw new Error(method);
     });
@@ -2357,7 +3131,8 @@ describe("app controller callbacks", () => {
     await settlePromises();
 
     expect(dispatch).toHaveBeenCalledWith({ type: "selection:clear" });
-    expect(dispatch).toHaveBeenCalledWith({ type: "task:list:remove", taskId: "task_1" });
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(dispatch).not.toHaveBeenCalledWith({ type: "task:list:remove", taskId: "task_1" });
     expect(postHostMessage).toHaveBeenCalledWith({
       type: "surface.openNewTask",
       payload: { project_id: "project_1" },
@@ -2405,13 +3180,14 @@ describe("app controller callbacks", () => {
   });
 
   it("toggles archive mode and reports an error when listing without BackendConnection", () => {
-    const beginNavigationChange = vi.fn();
+    const asyncOperations = new AsyncOperationOwner();
+    const beginNavigation = vi.spyOn(asyncOperations, "beginNavigation");
     const dispatch = vi.fn();
     const state = createInitialState();
 
-    callbacks({ beginNavigationChange, dispatch, state }).navigation.toggleArchived();
+    callbacks({ asyncOperations, dispatch, state }).navigation.toggleArchived();
 
-    expect(beginNavigationChange).toHaveBeenCalledWith(true);
+    expect(beginNavigation).toHaveBeenCalledWith("navigation:archived", true);
     expect(dispatch).toHaveBeenNthCalledWith(1, { type: "archive:set", showArchived: true });
     expect(postHostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "surface.openArchive" }));
     expect(postHostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "surface.openNewTask" }));
@@ -2420,11 +3196,12 @@ describe("app controller callbacks", () => {
       message: "App Server connection unavailable.",
     });
     expect(postHostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "task.list" }));
-    expectCalledBefore(beginNavigationChange, dispatch);
+    expectCalledBefore(beginNavigation, dispatch);
   });
 
   it("toggles archive mode through typed task list when BackendConnection is available", async () => {
-    const beginNavigationChange = vi.fn();
+    const asyncOperations = new AsyncOperationOwner();
+    const beginNavigation = vi.spyOn(asyncOperations, "beginNavigation");
     const dispatch = vi.fn();
     const request = vi.fn(async () => ({
       revision: 7,
@@ -2435,26 +3212,28 @@ describe("app controller callbacks", () => {
 
     callbacks({
       backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
-      beginNavigationChange,
+      asyncOperations,
       dispatch,
       state,
     }).navigation.toggleArchived();
     await settlePromises();
 
-    expect(beginNavigationChange).toHaveBeenCalledWith(true);
+    expect(beginNavigation).toHaveBeenCalledWith("navigation:archived", true);
     expect(dispatch).toHaveBeenNthCalledWith(1, { type: "archive:set", showArchived: true });
     expect(postHostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "surface.openArchive" }));
     expect(postHostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "surface.openNewTask" }));
     expect(request).toHaveBeenCalledWith(TASK_LIST, { archived: true });
     expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
       type: "tasks",
+      archived: true,
       tasks: [expect.objectContaining({ task_id: "task_archived" })],
     }));
     expect(postHostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "task.list" }));
   });
 
   it("uses cached archive task list without requesting it again", async () => {
-    const beginNavigationChange = vi.fn();
+    const asyncOperations = new AsyncOperationOwner();
+    const beginNavigation = vi.spyOn(asyncOperations, "beginNavigation");
     const dispatch = vi.fn();
     const request = vi.fn(async () => ({
       revision: 7,
@@ -2465,20 +3244,19 @@ describe("app controller callbacks", () => {
 
     callbacks({
       backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
-      beginNavigationChange,
+      asyncOperations,
       dispatch,
       state,
     }).navigation.toggleArchived();
     await settlePromises();
 
-    expect(beginNavigationChange).toHaveBeenCalledWith(true);
+    expect(beginNavigation).toHaveBeenCalledWith("navigation:archived", true);
     expect(dispatch).toHaveBeenCalledWith({ type: "archive:set", showArchived: true });
     expect(request).not.toHaveBeenCalled();
   });
 
   it("reports an error for config option changes without BackendConnection", () => {
     const dispatch = vi.fn();
-    const latestOptionsRequestKey = { current: undefined as string | undefined };
     const state = createInitialState();
     state.newTask.selection = {
       ...state.newTask.selection,
@@ -2486,9 +3264,8 @@ describe("app controller callbacks", () => {
       projectId: "project-1",
     };
 
-    callbacks({ dispatch, latestOptionsRequestKey, state }).newTask.selectConfigOption("model", "gpt-5");
+    callbacks({ dispatch, state }).newTask.selectConfigOption("model", "gpt-5");
 
-    expect(latestOptionsRequestKey.current).toBeUndefined();
     expect(dispatch).toHaveBeenCalledWith({
       type: "newTask:configOptions:error",
       message: "Task session is not ready yet.",
@@ -2499,7 +3276,6 @@ describe("app controller callbacks", () => {
   it("uses the prepared Task Native Session for config option changes", async () => {
     const dispatch = vi.fn();
     const request = vi.fn(async () => ({ task: protocolTaskSnapshot("task-prepared", "New task") }));
-    const latestOptionsRequestKey = { current: undefined as string | undefined };
     const state = createInitialState();
     state.newTask.selection = {
       ...state.newTask.selection,
@@ -2514,7 +3290,6 @@ describe("app controller callbacks", () => {
     callbacks({
       backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
       dispatch,
-      latestOptionsRequestKey,
       state,
     }).newTask.selectConfigOption("model", "gpt-5");
     await settlePromises();
@@ -2529,32 +3304,44 @@ describe("app controller callbacks", () => {
     expect(postHostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "session.setConfigOption" }));
   });
 
-  it("does not reload tool details that are already loading or loaded", () => {
-    const dispatch = vi.fn();
-    const loadingState = createInitialState();
-    loadingState.snapshot = snapshot("task_1");
-    loadingState.toolDetails[toolDetailCacheKey("task_1", "artifact_1")] = { loading: true };
+  it("refreshes a prepared Task after a config mutation error clears backend pending state", async () => {
+    let renderedState = preparedNewTaskState("task-prepared");
+    renderedState.activeTaskId = "task-prepared";
+    const dispatch = vi.fn((action) => {
+      renderedState = appReducer(renderedState, action);
+    });
+    const request = vi.fn(async (method: string) => {
+      if (method === TASK_SET_CONFIG_OPTION) {
+        throw new AppServerProtocolError({
+          error: { code: "internal", message: "Agent rejected the option", recoverable: true },
+        });
+      }
+      if (method === TASK_OPEN) {
+        return { task: { ...protocolTaskSnapshot("task-prepared", "New task"), revision: 4 } };
+      }
+      throw new Error(method);
+    });
+    const state = renderedState;
 
-    callbacks({ dispatch, state: loadingState }).task.loadToolDetail("artifact_1");
+    callbacks({
+      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      dispatch,
+      state,
+    }).newTask.selectConfigOption("model", "gpt-5");
+    await settlePromises();
 
-    expect(dispatch).not.toHaveBeenCalled();
-    expect(postHostMessage).not.toHaveBeenCalled();
-
-    const loadedState = createInitialState();
-    loadedState.snapshot = snapshot("task_1");
-    loadedState.toolDetails[toolDetailCacheKey("task_1", "artifact_1")] = {
-      details: { content: [], input: undefined, locations: [] },
-      loading: false,
-    };
-
-    callbacks({ dispatch, state: loadedState }).task.loadToolDetail("artifact_1");
-
-    expect(dispatch).not.toHaveBeenCalled();
-    expect(postHostMessage).not.toHaveBeenCalled();
+    expect(request).toHaveBeenCalledWith(TASK_OPEN, { taskId: "task-prepared" });
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "newTask:configOptions:error",
+      message: "Unable to update Agent option.",
+    });
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "snapshot", intent: "refresh" }));
+    expect(renderedState.newTask.configOptionsError).toBe("Unable to update Agent option.");
   });
 
   it("loads earlier chat pages through BackendConnection", async () => {
     const dispatch = vi.fn();
+    const asyncOperations = new AsyncOperationOwner();
     const request = vi.fn(async () => ({
       taskId: "task_1",
       items: [{
@@ -2572,14 +3359,20 @@ describe("app controller callbacks", () => {
     const state = createInitialState();
     state.snapshot = snapshot("task_1");
 
-    callbacks({
+    const requestGeneration = callbacks({
       backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      asyncOperations,
       dispatch,
       state,
     }).task.loadChatPage("cursor_1");
     await settlePromises();
 
-    expect(dispatch).toHaveBeenNthCalledWith(1, { type: "chatPage:start", taskId: "task_1" });
+    expect(requestGeneration).toEqual(expect.any(Number));
+    expect(dispatch).toHaveBeenNthCalledWith(1, {
+      type: "chatPage:start",
+      taskId: "task_1",
+      requestGeneration,
+    });
     expect(request).toHaveBeenCalledWith(TASK_CHAT_PAGE, {
       taskId: "task_1",
       beforeCursor: "cursor_1",
@@ -2588,6 +3381,7 @@ describe("app controller callbacks", () => {
     expect(dispatch).toHaveBeenCalledWith({
       type: "chatPage:result",
       taskId: "task_1",
+      requestGeneration,
       page: expect.objectContaining({
         task_id: "task_1",
         items: [expect.objectContaining({ message_id: "msg_1" })],
@@ -2596,28 +3390,43 @@ describe("app controller callbacks", () => {
     expect(postHostMessage).not.toHaveBeenCalled();
   });
 
-  it("loads tool details through BackendConnection", async () => {
+  it("subscribes to tool details until the disclosure releases its lease", async () => {
     const dispatch = vi.fn();
-    const request = vi.fn(async () => ({
-      locations: [{ path: "src/main.rs", line: 7 }],
-      content: [{ kind: "text", text: "details" }],
-      input: null,
-      output: { exitCode: 0, success: true, fields: [] },
-    }));
+    const request = vi.fn(async (method: string) => {
+      if (method === STATE_SUBSCRIBE) {
+        return {
+          cursor: "cursor_1",
+          scope: { kind: "toolDetail", taskId: "task_1", artifactId: "artifact_1" },
+          snapshot: {
+            kind: "toolDetail",
+            taskId: "task_1",
+            artifactId: "artifact_1",
+            details: {
+              locations: [{ path: "src/main.rs", line: 7 }],
+              content: [{ kind: "text", text: "details" }],
+              input: null,
+              output: { exitCode: 0, success: true, fields: [] },
+            },
+          },
+        };
+      }
+      if (method === STATE_UNSUBSCRIBE) return { scope: { kind: "toolDetail", taskId: "task_1", artifactId: "artifact_1" } };
+      throw new Error(method);
+    });
+    const events = vi.fn(() => vi.fn());
     const state = createInitialState();
     state.snapshot = snapshot("task_1");
 
-    callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+    const cleanup = callbacks({
+      backendConnection: { events, request: request as unknown as BackendConnection["request"], respond: vi.fn() },
       dispatch,
       state,
-    }).task.loadToolDetail("artifact_1");
+    }).task.subscribeToolDetail("artifact_1");
     await settlePromises();
 
     expect(dispatch).toHaveBeenNthCalledWith(1, { type: "toolDetail:start", taskId: "task_1", artifactId: "artifact_1" });
-    expect(request).toHaveBeenCalledWith(TASK_TOOL_DETAIL, {
-      taskId: "task_1",
-      artifactId: "artifact_1",
+    expect(request).toHaveBeenCalledWith(STATE_SUBSCRIBE, {
+      scope: { kind: "toolDetail", taskId: "task_1", artifactId: "artifact_1" },
     });
     expect(dispatch).toHaveBeenCalledWith({
       type: "toolDetail:result",
@@ -2627,6 +3436,11 @@ describe("app controller callbacks", () => {
         locations: [{ path: "src/main.rs", line: 7 }],
         output: expect.objectContaining({ exit_code: 0 }),
       }),
+    });
+    cleanup();
+    await settlePromises();
+    expect(request).toHaveBeenCalledWith(STATE_UNSUBSCRIBE, {
+      scope: { kind: "toolDetail", taskId: "task_1", artifactId: "artifact_1" },
     });
     expect(postHostMessage).not.toHaveBeenCalled();
   });
@@ -2638,8 +3452,8 @@ describe("app controller callbacks", () => {
 
     task.cancel();
     task.loadChatPage("cursor_1");
-    task.loadToolDetail("artifact_1");
-    task.respondToPermission("permission_1", "allow_once", "approved");
+    task.subscribeToolDetail("artifact_1");
+    task.respondToPermission("permission_1", "allow_once");
     task.sendPrompt();
 
     expect(dispatch).not.toHaveBeenCalled();
@@ -2649,32 +3463,68 @@ describe("app controller callbacks", () => {
 });
 
 function callbacks({
+  attachmentResources,
+  asyncOperations = new AsyncOperationOwner(),
   backendConnection,
-  beginNavigationChange = vi.fn(() => 1),
-  currentNavigationGeneration = vi.fn(() => 1),
+  state = createInitialState(),
   dispatch = vi.fn(),
-  latestOptionsRequestKey = { current: undefined as string | undefined },
   newTaskStartAttempt = { current: undefined },
   pendingPreparedNewTask = vi.fn(() => undefined),
+  newTaskController,
   requestNativeSessions = vi.fn(),
   setAgents = vi.fn(),
   setPreferences = vi.fn(),
-  state = createInitialState(),
 }: Partial<Parameters<typeof createAppCallbacks>[0]> = {}) {
+  state.appServerStateRootId ??= "state_root_1";
+  const ownedNewTaskController = newTaskController ?? new NewTaskController();
+  if (state.snapshot?.lifecycle === "new" && !ownedNewTaskController.currentTaskId()) {
+    const preparationKey = newTaskPreparationKey(state);
+    if (preparationKey) {
+      ownedNewTaskController.claim({
+        preparationKey,
+        taskId: state.snapshot.task.task_id as never,
+      });
+    }
+  }
   return createAppCallbacks({
+    attachmentResources,
+    asyncOperations,
     backendConnection,
-    beginNavigationChange,
+    clientInstanceId: "test-client",
     createSnapshotRequestId: vi.fn(() => 91),
-    currentNavigationGeneration,
     dispatch,
-    latestOptionsRequestKey,
     newTaskStartAttempt,
     pendingPreparedNewTask,
+    newTaskController: ownedNewTaskController,
     requestNativeSessions,
     setAgents,
     setPreferences,
     state,
   });
+}
+
+function preparedNewTaskState(taskId?: string) {
+  const state = createInitialState();
+  state.newTask.selection = {
+    ...state.newTask.selection,
+    agentId: "codex",
+    agentLabel: "Codex",
+    projectId: "project_1",
+    workspaceRoot: "/workspace",
+    workspaceLabel: "workspace",
+  };
+  if (taskId) {
+    state.snapshot = {
+      ...snapshot(taskId),
+      lifecycle: "new",
+      task: {
+        ...snapshot(taskId).task,
+        project_id: "project_1",
+        has_messages: false,
+      },
+    };
+  }
+  return state;
 }
 
 function expectCalledBefore(first: ReturnType<typeof vi.fn>, second: ReturnType<typeof vi.fn>) {
@@ -2687,6 +3537,7 @@ function settlePromises() {
 
 function snapshot(taskId: string): TaskSnapshot {
   return {
+    lifecycle: "visible",
     task: {
       task_id: taskId,
       title: "Task",
@@ -2712,8 +3563,8 @@ function snapshot(taskId: string): TaskSnapshot {
       total_count: 0,
       version: 1,
     },
-    permissions: [],
-    send_capability: { state: "ready", attachment_only: true },
+    active_requests: [],
+    send_capability: { state: "ready" },
     settings_summary: {
       agent_id: "codex",
       isolation: "local",
@@ -2723,9 +3574,30 @@ function snapshot(taskId: string): TaskSnapshot {
   };
 }
 
-function protocolTaskSnapshot(taskId: string, title: string): ProtocolTaskSnapshot {
+function editableConfigOptions(): NonNullable<TaskSnapshot["agent_config"]> {
+  return {
+    agent_id: "codex",
+    status: "ready",
+    options: [{
+      id: "model",
+      label: "Model",
+      current_value: "gpt",
+      values: [
+        { id: "gpt", label: "GPT" },
+        { id: "gpt-5", label: "GPT-5" },
+      ],
+    }],
+  };
+}
+
+function protocolTaskSnapshot(
+  taskId: string,
+  title: string,
+  lifecycle: ProtocolTaskSnapshot["lifecycle"] = "new",
+): ProtocolTaskSnapshot {
   return {
     task: protocolTaskSummary(taskId, title),
+    lifecycle,
     revision: 2,
     preparation: { kind: "ready" as const },
     agentConfig: { state: "ready" as const, options: [] },
@@ -2733,6 +3605,18 @@ function protocolTaskSnapshot(taskId: string, title: string): ProtocolTaskSnapsh
     sendCapability: { state: "ready" as const },
     historySync: { state: "idle", generation: 0 },
     chat: { items: [], hasMoreBefore: false, hasMessages: true },
+  };
+}
+
+function protocolTaskSnapshotForContext(taskId: string, projectId: string, agentId: string) {
+  const task = protocolTaskSnapshot(taskId, "New task");
+  return {
+    ...task,
+    task: {
+      ...task.task,
+      projectId: projectId as never,
+      agentId: agentId as never,
+    },
   };
 }
 
@@ -2779,7 +3663,7 @@ function protocolTaskSummary(taskId: string, title: string) {
     taskId: taskId as never,
     projectId: "project_1" as never,
     agentId: "codex" as never,
-    title,
+    title: { value: title, source: "user" as const },
     status: "idle" as const,
     hasMessages: true,
     unread: false,
@@ -2796,7 +3680,6 @@ function protocolAgents(ids: string[]) {
       status: "disconnected" as const,
       capabilities: { resumeTasks: false, deleteNativeSessions: false },
     })),
-    defaultAgentId: ids[0] as never,
   };
 }
 

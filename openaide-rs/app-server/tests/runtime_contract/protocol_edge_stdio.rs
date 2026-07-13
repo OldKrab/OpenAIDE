@@ -205,29 +205,20 @@ fn app_server_handoff_user_can_create_new_task_and_send_first_prompt() {
         wait_until_task_send_ready(endpoint_url, auth_token, "new-task-client", task_id);
     let revision = ready_task["revision"].as_u64().expect("task revision");
 
-    let sent = post_local_http_json(
+    let sent = send_task(
         endpoint_url,
         auth_token,
         "new-task-client",
-        json!({
-            "jsonrpc": "2.0",
-            "id": "send",
-            "method": "task/send",
-            "params": {
-                "taskId": task_id,
-                "idempotencyKey": "frontend-send-contract-1",
-                "taskRevision": revision,
-                "message": { "text": "hello from web" }
-            }
-        }),
+        task_id,
+        revision,
+        "hello from web",
     );
 
-    assert_eq!(sent[0]["id"], "send");
-    assert!(sent[0]["result"]["result"]["turnId"].as_str().is_some());
-    assert_eq!(
-        sent[0]["result"]["result"]["task"]["task"]["hasMessages"],
-        true
+    assert!(
+        sent["turnId"].as_str().is_some(),
+        "unexpected send response: {sent:#?}"
     );
+    assert_eq!(sent["task"]["task"]["hasMessages"], true);
 
     child.kill().expect("stop handoff runtime");
     let _ = child.wait();
@@ -265,6 +256,54 @@ fn app_server_handoff_initializes_new_task_screen_with_renderable_project_and_ag
         .iter()
         .any(|agent| agent["agentId"] == "codex"));
     assert!(snapshot["activeTask"].is_null());
+
+    child.kill().expect("stop handoff runtime");
+    let _ = child.wait();
+}
+
+#[test]
+fn app_server_handoff_registers_vscode_workspace_project_without_task_history() {
+    let storage = TempDir::new().expect("storage root");
+    let runtime = TempDir::new().expect("runtime root");
+    let mut child = spawn_handoff_runtime_without_configured_projects(&storage, &runtime);
+    let connection = handoff_connection(child.stdout.take().expect("runtime stdout"));
+    let endpoint_url = connection["endpointUrl"].as_str().expect("endpoint url");
+    let auth_token = connection["authToken"].as_str().expect("auth token");
+
+    let initialized = post_local_http_json(
+        endpoint_url,
+        auth_token,
+        "vscode-empty-workspace-client",
+        json!({
+            "jsonrpc": "2.0",
+            "id": "initialize-vscode-workspace",
+            "method": "client/initialize",
+            "params": {
+                "clientInstanceId": "vscode-empty-workspace-client",
+                "shell": { "kind": "vscodeExtension" },
+                "requestedSurface": {
+                    "kind": "project",
+                    "projectId": "project-d997698f027765f9"
+                },
+                "capabilities": {},
+                "workspaceRoots": [{ "path": "/workspace/OpenAIDE" }]
+            }
+        }),
+    );
+
+    let snapshot = &initialized[0]["result"]["result"]["snapshot"];
+    assert!(snapshot["projects"]["projects"]
+        .as_array()
+        .expect("project collection")
+        .iter()
+        .any(|project| {
+            project["projectId"] == "project-d997698f027765f9"
+                && project["label"] == "OpenAIDE"
+        }));
+    assert!(snapshot["tasks"]["tasks"]
+        .as_array()
+        .expect("task navigation")
+        .is_empty());
 
     child.kill().expect("stop handoff runtime");
     let _ = child.wait();
@@ -326,24 +365,15 @@ fn app_server_handoff_user_can_reopen_prepared_new_task_after_reload_and_send() 
     let opened = wait_until_task_send_ready(endpoint_url, auth_token, "reload-client", task_id);
     let revision = opened["revision"].as_u64().expect("task revision");
 
-    let sent = post_local_http_json(
+    let sent = send_task(
         endpoint_url,
         auth_token,
         "reload-client",
-        json!({
-            "jsonrpc": "2.0",
-            "id": "send",
-            "method": "task/send",
-            "params": {
-                "taskId": task_id,
-                "idempotencyKey": "frontend-send-contract-reload",
-                "taskRevision": revision,
-                "message": { "text": "after reload" }
-            }
-        }),
+        task_id,
+        revision,
+        "after reload",
     );
-    assert_eq!(sent[0]["id"], "send");
-    assert!(sent[0]["result"]["result"]["turnId"].as_str().is_some());
+    assert!(sent["turnId"].as_str().is_some());
 
     child.kill().expect("stop handoff runtime");
     let _ = child.wait();
@@ -371,7 +401,6 @@ fn app_server_handoff_task_created_in_one_tab_is_visible_to_another_tab() {
         "creator-tab",
         task_id,
         revision,
-        "frontend-send-contract-two-tabs",
         "visible from another tab",
     );
     assert_eq!(sent["task"]["task"]["hasMessages"], true);
@@ -406,7 +435,6 @@ fn app_server_handoff_reinitialize_home_lists_the_current_task_after_send() {
         "project-list-client",
         task_id,
         revision,
-        "frontend-send-contract-project-list",
         "show this task in navigation",
     );
 
@@ -463,39 +491,50 @@ fn app_server_handoff_user_can_send_first_prompt_after_task_preparation() {
     let ready = wait_until_task_send_ready(endpoint_url, auth_token, "preparation-client", task_id);
     let ready_revision = ready["revision"].as_u64().expect("ready revision");
 
-    let sent = post_local_http_json(
+    let sent = send_task(
         endpoint_url,
         auth_token,
         "preparation-client",
-        json!({
-            "jsonrpc": "2.0",
-            "id": "first-send",
-            "method": "task/send",
-            "params": {
-                "taskId": task_id,
-                "idempotencyKey": "frontend-send-contract-first",
-                "taskRevision": ready_revision,
-                "message": { "text": "first try" }
-            }
-        }),
+        task_id,
+        ready_revision,
+        "first try",
     );
-    assert_eq!(sent[0]["id"], "first-send");
-    assert!(sent[0]["result"]["result"]["turnId"].as_str().is_some());
+    assert!(sent["turnId"].as_str().is_some());
 
     child.kill().expect("stop handoff runtime");
     let _ = child.wait();
 }
 
 fn spawn_handoff_runtime(storage: &TempDir, runtime: &TempDir) -> std::process::Child {
-    std::process::Command::new(env!("CARGO_BIN_EXE_openaide-app-server"))
+    spawn_handoff_runtime_with_project_roots(storage, runtime, Some(storage.path()))
+}
+
+fn spawn_handoff_runtime_without_configured_projects(
+    storage: &TempDir,
+    runtime: &TempDir,
+) -> std::process::Child {
+    spawn_handoff_runtime_with_project_roots(storage, runtime, None)
+}
+
+fn spawn_handoff_runtime_with_project_roots(
+    storage: &TempDir,
+    runtime: &TempDir,
+    project_roots: Option<&std::path::Path>,
+) -> std::process::Child {
+    let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_openaide-app-server"));
+    command
         .env("OPENAIDE_STORAGE_ROOT", storage.path())
         .env("OPENAIDE_RUNTIME_ROOT", runtime.path())
-        .env("OPENAIDE_PROJECT_ROOTS", storage.path())
         .env("OPENAIDE_APP_SERVER_PROTOCOL", "app-server-handoff")
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped())
-        .spawn()
+        .stderr(std::process::Stdio::piped());
+    if let Some(project_roots) = project_roots {
+        command.env("OPENAIDE_PROJECT_ROOTS", project_roots);
+    } else {
+        command.env_remove("OPENAIDE_PROJECT_ROOTS");
+    }
+    command.spawn()
         .expect("spawn handoff runtime")
 }
 
@@ -603,11 +642,10 @@ fn send_task(
     auth_token: &str,
     connection_id: &str,
     task_id: &str,
-    revision: u64,
-    idempotency_key: &str,
+    _revision: u64,
     text: &str,
 ) -> Value {
-    let sent = post_local_http_json(
+    let response = post_local_http_json(
         endpoint_url,
         auth_token,
         connection_id,
@@ -617,13 +655,15 @@ fn send_task(
             "method": "task/send",
             "params": {
                 "taskId": task_id,
-                "idempotencyKey": idempotency_key,
-                "taskRevision": revision,
                 "message": { "text": text }
             }
         }),
     );
-    sent[0]["result"]["result"].clone()
+    assert!(
+        response[0]["result"]["result"].is_object(),
+        "task/send failed: {response:#?}"
+    );
+    response[0]["result"]["result"].clone()
 }
 
 fn wait_until_task_send_ready(

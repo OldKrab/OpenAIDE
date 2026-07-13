@@ -1,10 +1,12 @@
+use crate::agent::AgentPromptOutcome;
 use crate::protocol::errors::RuntimeError;
-use crate::protocol::model::{ActivityStatus, InterruptionReason, TaskStatus};
-use crate::storage::records::TaskRecord;
+use crate::protocol::model::{ActivityStatus, ActivityStep, NormalizedMessage, TaskStatus};
 use crate::tasks::mutation::{TaskCommitOutcome, TaskMutationResult};
 use crate::time::now_string;
 
-use super::helpers::{append_interruption, chat_commit_options};
+use super::active_work_end::apply_active_work_end;
+use super::helpers::chat_commit_options;
+use super::ActiveWorkEnd;
 use super::TaskTransitions;
 
 impl TaskTransitions {
@@ -13,49 +15,72 @@ impl TaskTransitions {
         Ok(self.mutations.store().read_task(task_id)?.active_turn_id)
     }
 
-    pub(crate) fn cancel_running_task(
+    /// Marks durable acceptance as running immediately before the Agent receives the prompt.
+    pub(crate) fn mark_turn_running(
         &self,
         task_id: &str,
-        expected_turn_id: Option<&str>,
-        message: &str,
-        unread: bool,
+        turn_id: &str,
     ) -> Result<bool, RuntimeError> {
-        let result =
-            self.mutations
-                .commit_existing_task(task_id, chat_commit_options(), |ctx| {
-                    if !active_turn_matches(ctx.task(), expected_turn_id) {
-                        return Ok(TaskMutationResult::Unchanged);
-                    }
+        let mut prompt_may_start = false;
+        self.mutations.commit_existing_task(
+            task_id,
+            crate::tasks::mutation::TaskCommitOptions::metadata(),
+            |ctx| {
+                if ctx.task().active_turn_id.as_deref() != Some(turn_id) {
+                    return Ok(TaskMutationResult::Unchanged);
+                }
+                if ctx.task().status == TaskStatus::Active {
+                    prompt_may_start = true;
+                    return Ok(TaskMutationResult::Unchanged);
+                }
+                if ctx.task().status != TaskStatus::Starting {
+                    return Ok(TaskMutationResult::Unchanged);
+                }
+                prompt_may_start = true;
+                let task = ctx.task_mut();
+                task.status = TaskStatus::Active;
+                task.updated_at = now_string();
+                Ok(TaskMutationResult::Changed)
+            },
+        )?;
+        Ok(prompt_may_start)
+    }
 
-                    let now = now_string();
-                    ctx.finish_running_activities(ActivityStatus::Completed)?;
-                    ctx.cancel_pending_permissions()?;
-                    ctx.cancel_pending_questions()?;
-                    append_interruption(
-                        ctx,
-                        InterruptionReason::Canceled,
-                        message,
-                        now.clone(),
-                        true,
-                    )?;
-
-                    let task = ctx.task_mut();
-                    task.status = TaskStatus::Inactive;
-                    task.active_turn_id = None;
-                    task.unread |= unread;
-                    task.updated_at = now.clone();
-                    task.last_activity = now;
-                    Ok(TaskMutationResult::Changed)
-                })?;
-        Ok(matches!(result.outcome, TaskCommitOutcome::Committed(_)))
+    /// Records accepted Stop intent while retaining the active prompt identity.
+    pub(crate) fn mark_turn_stopping(
+        &self,
+        task_id: &str,
+        turn_id: &str,
+    ) -> Result<bool, RuntimeError> {
+        let mut stop_accepted = false;
+        self.mutations.commit_existing_task(
+            task_id,
+            crate::tasks::mutation::TaskCommitOptions::metadata(),
+            |ctx| {
+                if ctx.task().active_turn_id.as_deref() != Some(turn_id) {
+                    return Ok(TaskMutationResult::Unchanged);
+                }
+                stop_accepted = true;
+                if ctx.task().status == TaskStatus::Stopping {
+                    return Ok(TaskMutationResult::Unchanged);
+                }
+                let task = ctx.task_mut();
+                task.status = TaskStatus::Stopping;
+                task.updated_at = now_string();
+                Ok(TaskMutationResult::Changed)
+            },
+        )?;
+        Ok(stop_accepted)
     }
 
     pub(crate) fn finish_turn(
         &self,
         task_id: &str,
         turn_id: &str,
-        result: Result<(), RuntimeError>,
+        result: Result<AgentPromptOutcome, RuntimeError>,
     ) -> Result<bool, RuntimeError> {
+        let mut active_work_ended = false;
+        let mut active_work_end_name = None;
         let commit =
             self.mutations
                 .commit_existing_task(task_id, chat_commit_options(), |ctx| {
@@ -64,21 +89,38 @@ impl TaskTransitions {
                     }
 
                     let now = now_string();
+                    if ctx.task().status == TaskStatus::Stopping {
+                        let cause = match &result {
+                            Ok(_) => ActiveWorkEnd::UserStopped,
+                            Err(error) => ActiveWorkEnd::CancellationFailed(error.to_string()),
+                        };
+                        active_work_end_name = Some(cause.name());
+                        apply_active_work_end(ctx, &cause, now)?;
+                        active_work_ended = true;
+                        return Ok(TaskMutationResult::Changed);
+                    }
                     match &result {
-                        Ok(()) => {
-                            ctx.finish_running_activities(ActivityStatus::Completed)?;
+                        Ok(AgentPromptOutcome::EndTurn | AgentPromptOutcome::Cancelled) => {
+                            ctx.finish_running_activity(
+                                &format!("turn:{turn_id}"),
+                                ActivityStatus::Completed,
+                            )?;
+                            ctx.task_mut().status = TaskStatus::Inactive;
+                        }
+                        Ok(outcome) => {
+                            ctx.finish_running_activity(
+                                &format!("turn:{turn_id}"),
+                                ActivityStatus::Completed,
+                            )?;
+                            append_prompt_outcome_activity(ctx, outcome, now.clone())?;
                             ctx.task_mut().status = TaskStatus::Inactive;
                         }
                         Err(error) => {
-                            ctx.finish_running_activities(ActivityStatus::Error)?;
-                            append_interruption(
-                                ctx,
-                                InterruptionReason::Failed,
-                                &error.to_string(),
-                                now.clone(),
-                                true,
-                            )?;
-                            ctx.task_mut().status = TaskStatus::Failed;
+                            let cause = ActiveWorkEnd::AgentFailed(error.to_string());
+                            active_work_end_name = Some(cause.name());
+                            apply_active_work_end(ctx, &cause, now)?;
+                            active_work_ended = true;
+                            return Ok(TaskMutationResult::Changed);
                         }
                     }
 
@@ -89,14 +131,53 @@ impl TaskTransitions {
                     task.last_activity = now;
                     Ok(TaskMutationResult::Changed)
                 })?;
-        Ok(matches!(commit.outcome, TaskCommitOutcome::Committed(_)))
+        let committed = matches!(commit.outcome, TaskCommitOutcome::Committed(_));
+        if committed && active_work_ended {
+            self.close_task_requests(task_id);
+            crate::logging::warn(
+                "task_active_work_ended",
+                serde_json::json!({
+                    "task_id": task_id,
+                    "cause": active_work_end_name,
+                }),
+            );
+        }
+        if committed {
+            if let Err(error) = self.mutations.compact_message_journal(task_id) {
+                crate::logging::warn(
+                    "message_journal_compaction_failed",
+                    serde_json::json!({
+                        "task_id": task_id,
+                        "error": error.to_string(),
+                    }),
+                );
+            }
+        }
+        Ok(committed)
     }
 }
 
-fn active_turn_matches(task: &TaskRecord, expected_turn_id: Option<&str>) -> bool {
-    match (task.active_turn_id.as_deref(), expected_turn_id) {
-        (None, _) => false,
-        (Some(_), None) => true,
-        (Some(active), Some(expected)) => active == expected,
-    }
+fn append_prompt_outcome_activity(
+    ctx: &mut crate::tasks::mutation::TaskMutationContext<'_>,
+    outcome: &AgentPromptOutcome,
+    created_at: String,
+) -> Result<(), RuntimeError> {
+    let message = match outcome {
+        AgentPromptOutcome::MaxTokens => "The Agent reached its token limit.".to_string(),
+        AgentPromptOutcome::MaxTurnRequests => "The Agent reached its request limit.".to_string(),
+        AgentPromptOutcome::Refusal => "The Agent refused this request.".to_string(),
+        AgentPromptOutcome::Other(reason) => format!("The Agent stopped: {reason}."),
+        AgentPromptOutcome::EndTurn | AgentPromptOutcome::Cancelled => return Ok(()),
+    };
+    ctx.append_message(NormalizedMessage::Activity {
+        id: uuid::Uuid::new_v4().to_string(),
+        title: "Agent stopped".to_string(),
+        status: ActivityStatus::Error,
+        created_at,
+        collapsed: false,
+        steps: vec![ActivityStep::Text {
+            text: message,
+            level: Some("error".to_string()),
+        }],
+    })
 }

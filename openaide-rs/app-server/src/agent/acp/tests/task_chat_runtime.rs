@@ -11,27 +11,22 @@ use openaide_app_server_protocol::task::{
 
 use crate::agent::acp::{AcpAgentConfig, AcpAgentRuntime};
 use crate::agent::registry::AgentRegistry;
-use crate::client_lifecycle::{AppServerTime, ConnectionId, Delivery, RequestCapability};
 use crate::projects::{project_id_for_workspace, ConfiguredProjectRoots, StorageProjectResolver};
-use crate::protocol::model::{NormalizedMessage, TaskStatus};
+use crate::protocol::model::{AgentMessagePart, AgentMessageRole, NormalizedMessage, TaskStatus};
 use crate::server_requests::ServerRequestRuntime;
 use crate::storage::records::TaskPreparationRecord;
 use crate::storage::Store;
 use crate::task_events::TaskUpdateNotifier;
-use crate::tasks::product_api::{
-    TaskAdoptNativeSessionWorkflow, TaskCreateWorkflow, TaskOpenWorkflow, TaskProductApi,
-};
+use crate::tasks::product_api::{TaskAdoptNativeSessionWorkflow, TaskProductApi};
 
 #[test]
 fn live_acp_message_ids_create_separate_chat_messages() {
     let temp = tempfile::TempDir::new().expect("temp dir");
-    let Some((api, store, _server_requests, workspace_root)) =
-        task_chat_fixture(&temp, "message_ids")
-    else {
+    let Some((api, store, workspace_root)) = task_chat_fixture(&temp, "message_ids") else {
         return;
     };
     let created = api
-        .create(TaskCreateParams {
+        .create_for_test(TaskCreateParams {
             project_id: project_id_for_workspace(&workspace_root),
             agent_id: AgentId::from("codex"),
             workspace_root: None,
@@ -47,19 +42,8 @@ fn live_acp_message_ids_create_separate_chat_messages() {
             Ok(TaskPreparationRecord::Ready)
         )
     });
-    let ready = api
-        .open(openaide_app_server_protocol::task::TaskOpenParams {
-            task_id: task_id.clone(),
-        })
-        .expect("open ready task");
-
-    api.send(send_params(
-        &task_id,
-        ready.revision,
-        "send-message-ids",
-        "respond twice",
-    ))
-    .expect("send prompt");
+    api.send(send_params(&task_id, "respond twice"))
+        .expect("send prompt");
 
     wait_until(|| {
         store
@@ -68,266 +52,32 @@ fn live_acp_message_ids_create_separate_chat_messages() {
             .unwrap_or(false)
     });
     let completed = api
-        .open(openaide_app_server_protocol::task::TaskOpenParams {
+        .open_for_test(openaide_app_server_protocol::task::TaskOpenParams {
             task_id: task_id.clone(),
         })
         .expect("open completed task");
     assert_eq!(
-        agent_text_statuses(&completed.chat.items),
+        agent_text_items(&completed.chat.items),
         [
-            ("Commentary message".to_string(), ChatItemStatus::Complete),
-            ("Final message".to_string(), ChatItemStatus::Complete),
-        ]
-    );
-    api.shutdown().expect("shutdown task runtime");
-}
-
-#[test]
-fn coalesced_steering_response_clears_active_turn_without_cancel() {
-    let temp = tempfile::TempDir::new().expect("temp dir");
-    let Some((api, store, _server_requests, workspace_root)) =
-        task_chat_fixture(&temp, "coalesced_steering")
-    else {
-        return;
-    };
-    let created = api
-        .create(TaskCreateParams {
-            project_id: project_id_for_workspace(&workspace_root),
-            agent_id: AgentId::from("codex"),
-            workspace_root: None,
-            config_options: Default::default(),
-        })
-        .expect("create task");
-    let task_id = created.task.task_id;
-    wait_until(|| {
-        matches!(
-            store
-                .read_task(task_id.as_str())
-                .map(|task| task.preparation),
-            Ok(TaskPreparationRecord::Ready)
-        )
-    });
-    let ready = api
-        .open(openaide_app_server_protocol::task::TaskOpenParams {
-            task_id: task_id.clone(),
-        })
-        .expect("open ready task");
-
-    api.send(send_params(
-        &task_id,
-        ready.revision,
-        "send-primary",
-        "start work",
-    ))
-    .expect("send primary prompt");
-    wait_until(|| agent_texts(&store, &task_id) == ["first response"]);
-    api.send(send_params(
-        &task_id,
-        store.read_task(task_id.as_str()).unwrap().revision,
-        "send-steer",
-        "steer now",
-    ))
-    .expect("send steering prompt");
-
-    wait_until(|| {
-        store
-            .read_task(task_id.as_str())
-            .map(|task| task.status == TaskStatus::Inactive && task.active_turn_id.is_none())
-            .unwrap_or(false)
-    });
-    assert_eq!(
-        agent_texts(&store, &task_id),
-        ["first response", "steering applied"]
-    );
-    api.shutdown().expect("shutdown task runtime");
-}
-
-#[test]
-fn steering_continues_the_latest_agent_message_with_the_same_source_id() {
-    let temp = tempfile::TempDir::new().expect("temp dir");
-    let Some((api, store, _server_requests, workspace_root)) =
-        task_chat_fixture(&temp, "continued_message_steering")
-    else {
-        return;
-    };
-    let created = api
-        .create(TaskCreateParams {
-            project_id: project_id_for_workspace(&workspace_root),
-            agent_id: AgentId::from("codex"),
-            workspace_root: None,
-            config_options: Default::default(),
-        })
-        .expect("create task");
-    let task_id = created.task.task_id;
-    wait_until(|| {
-        matches!(
-            store
-                .read_task(task_id.as_str())
-                .map(|task| task.preparation),
-            Ok(TaskPreparationRecord::Ready)
-        )
-    });
-    let ready = api
-        .open(openaide_app_server_protocol::task::TaskOpenParams {
-            task_id: task_id.clone(),
-        })
-        .expect("open ready task");
-
-    api.send(send_params(
-        &task_id,
-        ready.revision,
-        "send-primary",
-        "start work",
-    ))
-    .expect("send primary prompt");
-    wait_until(|| agent_texts(&store, &task_id) == ["first"]);
-
-    api.send(send_params(
-        &task_id,
-        store.read_task(task_id.as_str()).unwrap().revision,
-        "send-steer",
-        "steer now",
-    ))
-    .expect("send steering prompt");
-
-    wait_until(|| {
-        store
-            .read_task(task_id.as_str())
-            .map(|task| task.status == TaskStatus::Inactive && task.active_turn_id.is_none())
-            .unwrap_or(false)
-    });
-    assert_eq!(
-        logical_text_messages(&store, &task_id),
-        [
-            ("user", "start work".to_string()),
-            ("agent", "first continued".to_string()),
-            ("user", "steer now".to_string()),
-        ]
-    );
-    api.shutdown().expect("shutdown task runtime");
-}
-
-#[test]
-fn steered_acp_prompt_uses_fresh_chat_identity_across_permission_boundary() {
-    let temp = tempfile::TempDir::new().expect("temp dir");
-    let Some((api, store, server_requests, workspace_root)) = task_chat_fixture(&temp, "steering")
-    else {
-        return;
-    };
-    let project_id = project_id_for_workspace(&workspace_root);
-    let created = api
-        .create(TaskCreateParams {
-            project_id,
-            agent_id: AgentId::from("codex"),
-            workspace_root: None,
-            config_options: Default::default(),
-        })
-        .expect("create task");
-    let task_id = created.task.task_id;
-    server_requests.observe_subscription_added(
-        Delivery::new("client-1".into(), ConnectionId::new("conn-1"))
-            .with_request_capabilities(vec![RequestCapability::Permission]),
-        task_id.clone(),
-        AppServerTime(0),
-    );
-    wait_until(|| {
-        matches!(
-            store
-                .read_task(task_id.as_str())
-                .map(|task| task.preparation),
-            Ok(TaskPreparationRecord::Ready)
-        )
-    });
-    let ready = api
-        .open(openaide_app_server_protocol::task::TaskOpenParams {
-            task_id: task_id.clone(),
-        })
-        .expect("open ready task");
-
-    api.send(send_params(
-        &task_id,
-        ready.revision,
-        "send-primary",
-        "primary",
-    ))
-    .expect("send primary prompt");
-    wait_until(|| agent_texts(&store, &task_id) == ["first response"]);
-
-    let active_revision = store.read_task(task_id.as_str()).unwrap().revision;
-    api.send(send_params(
-        &task_id,
-        active_revision,
-        "send-steer",
-        "steer with permission",
-    ))
-    .expect("send steering prompt");
-    wait_until(|| persisted_permission_request_id(&store, &task_id).is_some());
-
-    assert_eq!(server_requests.pending_count(), 1);
-    wait_until(|| {
-        api.open(openaide_app_server_protocol::task::TaskOpenParams {
-            task_id: task_id.clone(),
-        })
-        .map(|snapshot| agent_text_statuses(&snapshot.chat.items).len() == 2)
-        .unwrap_or(false)
-    });
-    let active = api
-        .open(openaide_app_server_protocol::task::TaskOpenParams {
-            task_id: task_id.clone(),
-        })
-        .expect("open active steered task");
-    assert_eq!(
-        agent_text_statuses(&active.chat.items),
-        [
-            ("first response".to_string(), ChatItemStatus::Complete),
             (
-                "steered before permission".to_string(),
+                "acp:task-chat-session:message:11111111-1111-4111-8111-111111111111".to_string(),
+                "Commentary message".to_string(),
+                ChatItemStatus::Complete,
+            ),
+            (
+                "acp:task-chat-session:message:22222222-2222-4222-8222-222222222222".to_string(),
+                "Final message".to_string(),
                 ChatItemStatus::Complete,
             ),
         ]
     );
-    assert_eq!(
-        agent_texts(&store, &task_id),
-        ["first response", "steered before permission"]
-    );
-    let agent_request_id =
-        persisted_permission_request_id(&store, &task_id).expect("agent permission request id");
-    server_requests
-        .route_agent_permission_response(&agent_request_id, "allow".to_string(), |_| Ok(()))
-        .expect("answer permission");
-
-    wait_until(|| {
-        store
-            .read_task(task_id.as_str())
-            .map(|task| task.status == TaskStatus::Inactive)
-            .unwrap_or(false)
-    });
-    assert_eq!(
-        agent_texts(&store, &task_id),
-        [
-            "first response",
-            "steered before permission",
-            "steered after permission",
-        ]
-    );
-    let identities = store
-        .read_messages(task_id.as_str())
-        .unwrap()
-        .into_iter()
-        .filter_map(|message| {
-            matches!(message.chat.message, NormalizedMessage::AgentText { .. })
-                .then_some(message.chat.identity)
-        })
-        .collect::<std::collections::HashSet<_>>();
-    assert_eq!(identities.len(), 3);
     api.shutdown().expect("shutdown task runtime");
 }
 
 #[test]
 fn replayed_acp_chunks_use_live_logical_message_grouping() {
     let temp = tempfile::TempDir::new().expect("temp dir");
-    let Some((api, store, _server_requests, workspace_root)) = task_chat_fixture(&temp, "replay")
-    else {
+    let Some((api, store, workspace_root)) = task_chat_fixture(&temp, "replay") else {
         return;
     };
 
@@ -350,20 +100,132 @@ fn replayed_acp_chunks_use_live_logical_message_grouping() {
             ("thought", "Work it out".to_string()),
         ]
     );
+    assert!(adopted.chat.items.iter().any(|item| {
+        matches!(
+            item.parts.as_slice(),
+            [MessagePart::Image { media_type, .. }] if media_type == "image/png"
+        )
+    }));
     let identities = store
         .read_messages(task_id.as_str())
         .expect("read replayed messages")
         .into_iter()
         .map(|stored| stored.chat.identity)
         .collect::<std::collections::HashSet<_>>();
-    assert_eq!(identities.len(), 4);
+    assert_eq!(identities.len(), 5);
+    api.shutdown().expect("shutdown task runtime");
+}
+
+#[test]
+fn non_text_acp_output_is_visible_as_typed_chat_parts() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((api, store, workspace_root)) = task_chat_fixture(&temp, "content_blocks") else {
+        return;
+    };
+    let created = api
+        .create_for_test(TaskCreateParams {
+            project_id: project_id_for_workspace(&workspace_root),
+            agent_id: AgentId::from("codex"),
+            workspace_root: None,
+            config_options: Default::default(),
+        })
+        .expect("create task");
+    let task_id = created.task.task_id;
+    wait_until(|| {
+        matches!(
+            store
+                .read_task(task_id.as_str())
+                .map(|task| task.preparation),
+            Ok(TaskPreparationRecord::Ready)
+        )
+    });
+    api.send(send_params(&task_id, "show rich output"))
+        .expect("send prompt");
+    wait_until(|| {
+        store
+            .read_task(task_id.as_str())
+            .map(|task| task.status == TaskStatus::Inactive)
+            .unwrap_or(false)
+    });
+    wait_until(|| {
+        api.open_for_test(openaide_app_server_protocol::task::TaskOpenParams {
+            task_id: task_id.clone(),
+        })
+        .map(|snapshot| {
+            snapshot
+                .chat
+                .items
+                .iter()
+                .filter(|item| item.role == ChatRole::Agent)
+                .count()
+                == 6
+        })
+        .unwrap_or(false)
+    });
+    let completed = api
+        .open_for_test(openaide_app_server_protocol::task::TaskOpenParams {
+            task_id: task_id.clone(),
+        })
+        .expect("open completed task");
+    let agent_parts = completed
+        .chat
+        .items
+        .iter()
+        .filter(|item| item.role == ChatRole::Agent)
+        .flat_map(|item| item.parts.iter())
+        .map(|part| serde_json::to_value(part).expect("serialize Chat part"))
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        agent_parts,
+        vec![
+            serde_json::json!({
+                "kind": "image",
+                "mediaType": "image/png",
+                "dataUrl": "data:image/png;base64,aW1hZ2U=",
+                "uri": "memory://diagram.png"
+            }),
+            serde_json::json!({
+                "kind": "resource",
+                "uri": "memory://notes.txt",
+                "mediaType": "text/plain",
+                "text": "Embedded notes"
+            }),
+            serde_json::json!({
+                "kind": "resource",
+                "uri": "https://example.test/report.pdf",
+                "name": "report.pdf",
+                "title": "Report",
+                "description": "Generated report",
+                "mediaType": "application/pdf",
+                "sizeBytes": 42
+            }),
+            serde_json::json!({
+                "kind": "unsupported",
+                "contentType": "audio",
+                "mediaType": "audio/wav"
+            }),
+            serde_json::json!({
+                "kind": "unsupported",
+                "contentType": "embedded_binary_resource",
+                "mediaType": "application/octet-stream",
+                "uri": "memory://archive.bin"
+            }),
+            serde_json::json!({
+                "kind": "unsupported",
+                "contentType": "image",
+                "mediaType": "text/html",
+                "uri": "memory://not-an-image"
+            }),
+        ]
+    );
     api.shutdown().expect("shutdown task runtime");
 }
 
 fn task_chat_fixture(
     temp: &tempfile::TempDir,
     mode: &str,
-) -> Option<(TaskProductApi, Store, ServerRequestRuntime, String)> {
+) -> Option<(TaskProductApi, Store, String)> {
     if Command::new("python3").arg("--version").output().is_err() {
         return None;
     }
@@ -381,7 +243,6 @@ fn task_chat_fixture(
     };
     let store = Store::open(temp.path().join("store")).expect("store");
     let projects = ConfiguredProjectRoots::from_workspace_roots([workspace_root.clone()]);
-    let server_requests = ServerRequestRuntime::new();
     let api = TaskProductApi::new_with_server_requests(
         store.clone(),
         Arc::new(StorageProjectResolver::new_with_configured_roots(
@@ -391,17 +252,15 @@ fn task_chat_fixture(
         AgentRegistry::codex(config.clone()),
         Arc::new(AcpAgentRuntime::new(config)),
         TaskUpdateNotifier::disabled(),
-        server_requests.clone(),
+        ServerRequestRuntime::new(),
     )
     .expect("task product api");
-    Some((api, store, server_requests, workspace_root))
+    Some((api, store, workspace_root))
 }
 
-fn send_params(task_id: &TaskId, revision: u64, key: &str, text: &str) -> TaskSendParams {
+fn send_params(task_id: &TaskId, text: &str) -> TaskSendParams {
     TaskSendParams {
         task_id: task_id.clone(),
-        idempotency_key: key.into(),
-        task_revision: revision,
         message: ComposerMessage {
             text: Some(text.to_string()),
             attachments: Vec::new(),
@@ -409,38 +268,19 @@ fn send_params(task_id: &TaskId, revision: u64, key: &str, text: &str) -> TaskSe
     }
 }
 
-fn agent_texts(store: &Store, task_id: &TaskId) -> Vec<String> {
-    store
-        .read_messages(task_id.as_str())
-        .unwrap()
-        .into_iter()
-        .filter_map(|message| match message.chat.message {
-            NormalizedMessage::AgentText { text, .. } => Some(text),
-            _ => None,
-        })
-        .collect()
-}
-
-fn agent_text_statuses(items: &[ChatItem]) -> Vec<(String, ChatItemStatus)> {
+fn agent_text_items(items: &[ChatItem]) -> Vec<(String, String, ChatItemStatus)> {
     items
         .iter()
         .filter(|item| item.role == ChatRole::Agent)
         .filter_map(|item| match item.parts.first() {
-            Some(MessagePart::Text { text }) => Some((text.clone(), item.status)),
+            Some(MessagePart::Text { text }) => Some((
+                item.message_id.as_str().to_string(),
+                text.clone(),
+                item.status,
+            )),
             _ => None,
         })
         .collect()
-}
-
-fn persisted_permission_request_id(store: &Store, task_id: &TaskId) -> Option<String> {
-    store
-        .read_messages(task_id.as_str())
-        .expect("read permission message")
-        .into_iter()
-        .find_map(|stored| match stored.chat.message {
-            NormalizedMessage::Permission { request_id, .. } => Some(request_id),
-            _ => None,
-        })
 }
 
 fn logical_text_messages(store: &Store, task_id: &TaskId) -> Vec<(&'static str, String)> {
@@ -450,8 +290,18 @@ fn logical_text_messages(store: &Store, task_id: &TaskId) -> Vec<(&'static str, 
         .into_iter()
         .filter_map(|stored| match stored.chat.message {
             NormalizedMessage::User { text, .. } => Some(("user", text)),
-            NormalizedMessage::AgentText { text, .. } => Some(("agent", text)),
-            NormalizedMessage::Thought { text, .. } => Some(("thought", text)),
+            NormalizedMessage::AgentMessage { role, parts, .. } => {
+                parts.into_iter().find_map(|part| match part {
+                    AgentMessagePart::Text { text } => Some((
+                        match role {
+                            AgentMessageRole::Agent => "agent",
+                            AgentMessageRole::Thought => "thought",
+                        },
+                        text,
+                    )),
+                    _ => None,
+                })
+            }
             _ => None,
         })
         .collect()
@@ -469,74 +319,49 @@ fn task_chat_agent_script() -> &'static str {
     r#"import json
 import os
 import sys
-import threading
 
-mode = os.environ.get("OPENAIDE_TASK_CHAT_MODE", "steering")
+mode = os.environ.get("OPENAIDE_TASK_CHAT_MODE", "message_ids")
 session_id = "task-chat-session"
-write_lock = threading.Lock()
-state_lock = threading.Lock()
-state = {"prompt_count": 0, "first_id": None, "first_done": False, "second_id": None}
 
 def write(message):
-    with write_lock:
-        sys.stdout.write(json.dumps(message) + "\n")
-        sys.stdout.flush()
-
-def respond_id(message_id, result):
-    write({"jsonrpc": "2.0", "id": message_id, "result": result})
+    sys.stdout.write(json.dumps(message) + "\n")
+    sys.stdout.flush()
 
 def respond(message, result):
-    respond_id(message.get("id"), result)
+    write({"jsonrpc": "2.0", "id": message.get("id"), "result": result})
 
-def update_text(text):
-    update_chunk("agent_message_chunk", text)
-
-def update_chunk(kind, text, message_id=None):
-    update = {
-        "sessionUpdate": kind,
-        "content": {"type": "text", "text": text},
-    }
-    if message_id is not None:
-        update["messageId"] = message_id
+def update_chunk(kind, text, message_id):
     write({
         "jsonrpc": "2.0",
         "method": "session/update",
         "params": {
             "sessionId": session_id,
-            "update": update,
+            "update": {
+                "sessionUpdate": kind,
+                "messageId": message_id,
+                "content": {"type": "text", "text": text},
+            },
         },
     })
 
-def finish_first(stop_reason="end_turn"):
-    with state_lock:
-        if state["first_done"] or state["first_id"] is None:
-            return
-        state["first_done"] = True
-        message_id = state["first_id"]
-    respond_id(message_id, {"stopReason": stop_reason})
-
-def request_permission():
+def update_content(content, message_id):
     write({
         "jsonrpc": "2.0",
-        "id": "steer-permission",
-        "method": "session/request_permission",
+        "method": "session/update",
         "params": {
             "sessionId": session_id,
-            "toolCall": {"toolCallId": "steer-tool"},
-            "options": [{"optionId": "allow", "name": "Allow", "kind": "allow_once"}],
+            "update": {
+                "sessionUpdate": "agent_message_chunk",
+                "messageId": message_id,
+                "content": content,
+            },
         },
     })
 
 for line in sys.stdin:
     message = json.loads(line)
     method = message.get("method")
-    if method is None:
-        if message.get("id") == "steer-permission":
-            update_text("steered after permission")
-            with state_lock:
-                second_id = state["second_id"]
-            respond_id(second_id, {"stopReason": "end_turn"})
-    elif method == "initialize":
+    if method == "initialize":
         respond(message, {
             "protocolVersion": 1,
             "agentCapabilities": {
@@ -549,70 +374,30 @@ for line in sys.stdin:
         respond(message, {"sessionId": session_id})
     elif method == "session/load":
         if mode == "replay":
-            user_id = "33333333-3333-4333-8333-333333333333"
-            first_agent_id = "44444444-4444-4444-8444-444444444444"
-            final_agent_id = "55555555-5555-4555-8555-555555555555"
-            thought_id = "66666666-6666-4666-8666-666666666666"
-            update_chunk("user_message_chunk", "Prior ", user_id)
-            update_chunk("user_message_chunk", "question", user_id)
-            update_chunk("agent_message_chunk", "First ", first_agent_id)
-            update_chunk("agent_message_chunk", "answer", first_agent_id)
-            update_chunk("agent_message_chunk", "Final ", final_agent_id)
-            update_chunk("agent_message_chunk", "answer", final_agent_id)
-            update_chunk("agent_thought_chunk", "Work ", thought_id)
-            update_chunk("agent_thought_chunk", "it out", thought_id)
+            update_chunk("user_message_chunk", "Prior ", "33333333-3333-4333-8333-333333333333")
+            update_chunk("user_message_chunk", "question", "33333333-3333-4333-8333-333333333333")
+            update_chunk("agent_message_chunk", "First ", "44444444-4444-4444-8444-444444444444")
+            update_chunk("agent_message_chunk", "answer", "44444444-4444-4444-8444-444444444444")
+            update_chunk("agent_message_chunk", "Final ", "55555555-5555-4555-8555-555555555555")
+            update_chunk("agent_message_chunk", "answer", "55555555-5555-4555-8555-555555555555")
+            update_chunk("agent_thought_chunk", "Work ", "66666666-6666-4666-8666-666666666666")
+            update_chunk("agent_thought_chunk", "it out", "66666666-6666-4666-8666-666666666666")
+            update_content({"type": "image", "mimeType": "image/png", "data": "aW1hZ2U="}, "replayed-image")
         respond(message, {"configOptions": []})
     elif method == "session/prompt":
-        with state_lock:
-            state["prompt_count"] += 1
-            prompt_count = state["prompt_count"]
-        if prompt_count == 1:
-            with state_lock:
-                state["first_id"] = message.get("id")
-            if mode == "message_ids":
-                update_chunk(
-                    "agent_message_chunk",
-                    "Commentary ",
-                    "11111111-1111-4111-8111-111111111111",
-                )
-                update_chunk(
-                    "agent_message_chunk",
-                    "message",
-                    "11111111-1111-4111-8111-111111111111",
-                )
-                update_chunk(
-                    "agent_message_chunk",
-                    "Final ",
-                    "22222222-2222-4222-8222-222222222222",
-                )
-                update_chunk(
-                    "agent_message_chunk",
-                    "message",
-                    "22222222-2222-4222-8222-222222222222",
-                )
-                finish_first()
-            elif mode == "continued_message_steering":
-                update_chunk("agent_message_chunk", "first", "continued-message")
-            else:
-                update_text("first response")
-            if mode not in ("coalesced_steering", "steering", "message_ids"):
-                threading.Timer(1.0, finish_first).start()
+        if mode == "content_blocks":
+            update_content({"type": "image", "mimeType": "image/png", "data": "aW1hZ2U=", "uri": "memory://diagram.png"}, "content-image")
+            update_content({"type": "resource", "resource": {"uri": "memory://notes.txt", "mimeType": "text/plain", "text": "Embedded notes"}}, "content-text-resource")
+            update_content({"type": "resource_link", "uri": "https://example.test/report.pdf", "name": "report.pdf", "title": "Report", "description": "Generated report", "mimeType": "application/pdf", "size": 42}, "content-resource-link")
+            update_content({"type": "audio", "mimeType": "audio/wav", "data": "YXVkaW8="}, "content-audio")
+            update_content({"type": "resource", "resource": {"uri": "memory://archive.bin", "mimeType": "application/octet-stream", "blob": "YmluYXJ5"}}, "content-binary-resource")
+            update_content({"type": "image", "mimeType": "text/html", "data": "PGh0bWw+", "uri": "memory://not-an-image"}, "content-invalid-image")
         else:
-            with state_lock:
-                state["second_id"] = message.get("id")
-            if mode == "continued_message_steering":
-                update_chunk("agent_message_chunk", " continued", "continued-message")
-                finish_first()
-            elif mode == "coalesced_steering":
-                update_text("steering applied")
-                finish_first()
-            else:
-                update_text("steered before permission")
-                request_permission()
-    elif method == "session/cancel":
-        if mode == "coalesced_steering":
-            update_text("unexpected cancel")
-        finish_first("cancelled")
+            update_chunk("agent_message_chunk", "Commentary ", "11111111-1111-4111-8111-111111111111")
+            update_chunk("agent_message_chunk", "message", "11111111-1111-4111-8111-111111111111")
+            update_chunk("agent_message_chunk", "Final ", "22222222-2222-4222-8222-222222222222")
+            update_chunk("agent_message_chunk", "message", "22222222-2222-4222-8222-222222222222")
+        respond(message, {"stopReason": "end_turn"})
     elif method == "session/close":
         respond(message, {})
         break

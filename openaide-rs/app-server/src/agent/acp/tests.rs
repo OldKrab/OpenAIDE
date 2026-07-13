@@ -29,23 +29,26 @@ use crate::agent::prompt_content::{
 use crate::agent::tool_details::tool_call_event;
 use crate::agent::{AgentMetadataField, AgentSessionMetadataUpdate};
 use crate::protocol::model::{
-    ActivityStatus, ActivityToolContent, AgentCommandsCatalog, Attachment, ConfigOption,
-    ConfigOptionCategory, ConfigOptionValue, ConfigOptionsStatus, NormalizedMessage,
+    ActivityStatus, ActivityToolContent, ActivityToolValue, AgentCommandsCatalog, AgentMessagePart,
+    AgentMessageRole, Attachment, ConfigOption, ConfigOptionCategory, ConfigOptionValue,
+    ConfigOptionsStatus, NormalizedMessage,
 };
 use agent_client_protocol::schema::{
-    AgentCapabilities, AuthMethod, AuthMethodAgent, AuthenticateRequest, AuthenticateResponse,
-    AvailableCommand, AvailableCommandInput, AvailableCommandsUpdate, ContentBlock, ContentChunk,
-    CreateTerminalRequest, CreateTerminalResponse, Diff, Implementation, InitializeRequest,
-    InitializeResponse, ListSessionsRequest, ListSessionsResponse, LoadSessionRequest,
-    LoadSessionResponse, McpCapabilities, NewSessionRequest, NewSessionResponse, PermissionOption,
-    PermissionOptionKind, PromptCapabilities, ProtocolVersion, ReadTextFileRequest,
-    RequestPermissionOutcome, RequestPermissionRequest, SessionCapabilities,
-    SessionCloseCapabilities, SessionConfigOption,
-    SessionConfigOptionCategory as AcpConfigOptionCategory, SessionConfigSelectOption,
-    SessionDeleteCapabilities, SessionInfo, SessionInfoUpdate, SessionListCapabilities,
-    SessionNotification, SessionUpdate, TextContent, ToolCall, ToolCallContent, ToolCallLocation,
-    ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind, UnstructuredCommandInput,
-    WaitForTerminalExitRequest, WaitForTerminalExitResponse, WriteTextFileRequest,
+    AgentCapabilities, AudioContent, AuthMethod, AuthMethodAgent, AuthenticateRequest,
+    AuthenticateResponse, AvailableCommand, AvailableCommandInput, AvailableCommandsUpdate,
+    BlobResourceContents, ContentBlock, ContentChunk, CreateTerminalRequest,
+    CreateTerminalResponse, Diff, EmbeddedResource, EmbeddedResourceResource, ImageContent,
+    Implementation, InitializeRequest, InitializeResponse, ListSessionsRequest,
+    ListSessionsResponse, LoadSessionRequest, LoadSessionResponse, McpCapabilities,
+    NewSessionRequest, NewSessionResponse, PermissionOption, PermissionOptionKind,
+    PromptCapabilities, ProtocolVersion, ReadTextFileRequest, RequestPermissionOutcome,
+    RequestPermissionRequest, ResourceLink, SessionCapabilities, SessionCloseCapabilities,
+    SessionConfigOption, SessionConfigOptionCategory as AcpConfigOptionCategory,
+    SessionConfigSelectOption, SessionDeleteCapabilities, SessionInfo, SessionInfoUpdate,
+    SessionListCapabilities, SessionNotification, SessionUpdate, TextContent, TextResourceContents,
+    ToolCall, ToolCallContent, ToolCallLocation, ToolCallStatus, ToolCallUpdate,
+    ToolCallUpdateFields, ToolKind, UnstructuredCommandInput, WaitForTerminalExitRequest,
+    WaitForTerminalExitResponse, WriteTextFileRequest,
 };
 use agent_client_protocol::JsonRpcMessage;
 use agent_client_protocol::{Agent, Client, ConnectionTo, Handled};
@@ -65,8 +68,23 @@ use std::time::{Duration, Instant};
 mod active_session_runtime;
 mod task_chat_runtime;
 
+fn agent_message_text(message: &NormalizedMessage, role: AgentMessageRole) -> Option<&str> {
+    match message {
+        NormalizedMessage::AgentMessage {
+            role: message_role,
+            parts,
+            ..
+        } if *message_role == role => match parts.as_slice() {
+            [AgentMessagePart::Text { text }] => Some(text),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 #[derive(Default)]
 struct CapturingSessionSink {
+    events: Mutex<Vec<AgentEvent>>,
     catalogs: Mutex<Vec<ConfigOptionsCatalog>>,
     command_catalogs: Mutex<Vec<AgentCommandsCatalog>>,
     metadata_updates: Mutex<Vec<AgentSessionMetadataUpdate>>,
@@ -468,6 +486,13 @@ fn terminal_wait_request_can_be_cancelled_without_deadline() {
 }
 
 impl CapturingSessionSink {
+    fn events(&self) -> Vec<AgentEvent> {
+        self.events
+            .lock()
+            .expect("captured session event lock poisoned")
+            .clone()
+    }
+
     fn current_values(&self) -> Vec<String> {
         self.catalogs
             .lock()
@@ -497,6 +522,14 @@ impl CapturingSessionSink {
 }
 
 impl AgentSessionEventSink for CapturingSessionSink {
+    fn session_update(&self, event: AgentEvent) -> Result<(), RuntimeError> {
+        self.events
+            .lock()
+            .expect("captured session event lock poisoned")
+            .push(event);
+        Ok(())
+    }
+
     fn config_options_changed(&self, catalog: ConfigOptionsCatalog) -> Result<(), RuntimeError> {
         self.catalogs
             .lock()
@@ -823,15 +856,10 @@ fn replayed_session_updates_are_normalized_as_chat_history() {
         }
         other => panic!("expected user replay, got {other:?}"),
     }
-    match &messages[1] {
-        NormalizedMessage::Thought {
-            text, streaming, ..
-        } => {
-            assert_eq!(text, "private streamed thought");
-            assert!(!streaming);
-        }
-        other => panic!("expected thought replay, got {other:?}"),
-    }
+    assert_eq!(
+        agent_message_text(&messages[1], AgentMessageRole::Thought),
+        Some("private streamed thought")
+    );
     match &messages[2] {
         NormalizedMessage::Activity {
             title,
@@ -845,15 +873,10 @@ fn replayed_session_updates_are_normalized_as_chat_history() {
         }
         other => panic!("expected completed tool replay, got {other:?}"),
     }
-    match &messages[3] {
-        NormalizedMessage::AgentText {
-            text, streaming, ..
-        } => {
-            assert_eq!(text, "Prior agent answer");
-            assert!(!streaming);
-        }
-        other => panic!("expected agent replay, got {other:?}"),
-    }
+    assert_eq!(
+        agent_message_text(&messages[3], AgentMessageRole::Agent),
+        Some("Prior agent answer")
+    );
 }
 
 #[test]
@@ -871,6 +894,244 @@ fn replayed_text_without_source_ids_has_restart_stable_identity() {
     assert!(first[0]
         .identity()
         .starts_with("acp:session-stable:replay:agent:"));
+}
+
+#[test]
+fn replay_continues_a_sourced_message_across_tool_activity() {
+    let messages = ReplayProjection::new("session-source-tool-source").project(vec![
+        SessionUpdate::AgentMessageChunk(
+            ContentChunk::new(ContentBlock::Text(TextContent::new("Before")))
+                .message_id("agent-message-1".to_string()),
+        ),
+        SessionUpdate::ToolCall(
+            ToolCall::new("tool_call_1", "Read file")
+                .kind(ToolKind::Read)
+                .status(ToolCallStatus::InProgress),
+        ),
+        SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+            "tool_call_1",
+            ToolCallUpdateFields::new().status(ToolCallStatus::Completed),
+        )),
+        SessionUpdate::AgentMessageChunk(
+            ContentChunk::new(ContentBlock::Text(TextContent::new(" after")))
+                .message_id("agent-message-1".to_string()),
+        ),
+    ]);
+
+    assert_eq!(messages.len(), 2);
+    assert_eq!(
+        messages[0].identity(),
+        "acp:session-source-tool-source:message:agent-message-1"
+    );
+    assert_eq!(
+        agent_message_text(&messages[0], AgentMessageRole::Agent),
+        Some("Before after")
+    );
+    assert!(matches!(
+        &messages[1],
+        NormalizedMessage::Activity {
+            status: ActivityStatus::Completed,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn replay_preserves_mixed_content_as_one_ordered_agent_message() {
+    let messages = ReplayProjection::new("session-mixed-content").project(vec![
+        SessionUpdate::AgentMessageChunk(
+            ContentChunk::new(ContentBlock::Text(TextContent::new("Before")))
+                .message_id("agent-message-1".to_string()),
+        ),
+        SessionUpdate::AgentMessageChunk(
+            ContentChunk::new(ContentBlock::Image(ImageContent::new(
+                "aW1hZ2U=",
+                "image/png",
+            )))
+            .message_id("agent-message-1".to_string()),
+        ),
+        SessionUpdate::AgentMessageChunk(
+            ContentChunk::new(ContentBlock::Text(TextContent::new("After")))
+                .message_id("agent-message-1".to_string()),
+        ),
+    ]);
+
+    assert_eq!(messages.len(), 1);
+    match &messages[0] {
+        NormalizedMessage::AgentMessage {
+            id, role, parts, ..
+        } => {
+            assert_eq!(id, "acp:session-mixed-content:message:agent-message-1");
+            assert_eq!(role, &crate::protocol::model::AgentMessageRole::Agent);
+            assert!(matches!(
+                parts.as_slice(),
+                [
+                    crate::protocol::model::AgentMessagePart::Text { text: before },
+                    crate::protocol::model::AgentMessagePart::Image { media_type, .. },
+                    crate::protocol::model::AgentMessagePart::Text { text: after },
+                ] if before == "Before" && media_type == "image/png" && after == "After"
+            ));
+        }
+        other => panic!("expected one mixed-content Agent message, got {other:?}"),
+    }
+}
+
+#[test]
+fn replay_continues_each_sourced_message_across_interleaved_messages() {
+    let messages = ReplayProjection::new("session-interleaved-sources").project(vec![
+        SessionUpdate::AgentMessageChunk(
+            ContentChunk::new(ContentBlock::Text(TextContent::new("First")))
+                .message_id("agent-message-a".to_string()),
+        ),
+        SessionUpdate::AgentMessageChunk(
+            ContentChunk::new(ContentBlock::Text(TextContent::new("Second")))
+                .message_id("agent-message-b".to_string()),
+        ),
+        SessionUpdate::AgentMessageChunk(
+            ContentChunk::new(ContentBlock::Text(TextContent::new(" continued")))
+                .message_id("agent-message-a".to_string()),
+        ),
+    ]);
+
+    assert_eq!(messages.len(), 2);
+    assert_eq!(
+        messages[0].identity(),
+        "acp:session-interleaved-sources:message:agent-message-a"
+    );
+    assert_eq!(
+        agent_message_text(&messages[0], AgentMessageRole::Agent),
+        Some("First continued")
+    );
+    assert_eq!(
+        messages[1].identity(),
+        "acp:session-interleaved-sources:message:agent-message-b"
+    );
+    assert_eq!(
+        agent_message_text(&messages[1], AgentMessageRole::Agent),
+        Some("Second")
+    );
+}
+
+#[test]
+fn replay_ends_anonymous_text_at_tool_activity() {
+    let messages = ReplayProjection::new("session-anonymous-tool-boundary").project(vec![
+        SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Text(TextContent::new(
+            "Before",
+        )))),
+        SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Text(TextContent::new(
+            " tool",
+        )))),
+        SessionUpdate::ToolCall(
+            ToolCall::new("tool_call_1", "Read file")
+                .kind(ToolKind::Read)
+                .status(ToolCallStatus::Completed),
+        ),
+        SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Text(TextContent::new(
+            "After tool",
+        )))),
+    ]);
+
+    assert_eq!(messages.len(), 3);
+    assert!(matches!(
+        &messages[0],
+        message if agent_message_text(message, AgentMessageRole::Agent) == Some("Before tool")
+    ));
+    assert!(matches!(&messages[1], NormalizedMessage::Activity { .. }));
+    assert!(matches!(
+        &messages[2],
+        message if agent_message_text(message, AgentMessageRole::Agent) == Some("After tool")
+    ));
+    assert_ne!(messages[0].identity(), messages[2].identity());
+}
+
+#[test]
+fn replay_keeps_anonymous_text_distinct_when_the_next_chunk_has_a_source_id() {
+    let updates = || {
+        vec![
+            SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Text(
+                TextContent::new("Anonymous message"),
+            ))),
+            SessionUpdate::AgentMessageChunk(
+                ContentChunk::new(ContentBlock::Text(TextContent::new("Sourced message")))
+                    .message_id("source-message-1".to_string()),
+            ),
+        ]
+    };
+
+    let first = ReplayProjection::new("session-identity-boundary").project(updates());
+    let second = ReplayProjection::new("session-identity-boundary").project(updates());
+
+    assert_eq!(first.len(), 2);
+    assert_eq!(
+        first
+            .iter()
+            .map(NormalizedMessage::identity)
+            .collect::<Vec<_>>(),
+        second
+            .iter()
+            .map(NormalizedMessage::identity)
+            .collect::<Vec<_>>()
+    );
+    assert!(first[0]
+        .identity()
+        .starts_with("acp:session-identity-boundary:replay:agent:"));
+    assert_eq!(
+        agent_message_text(&first[0], AgentMessageRole::Agent),
+        Some("Anonymous message")
+    );
+    assert_eq!(
+        first[1].identity(),
+        "acp:session-identity-boundary:message:source-message-1"
+    );
+    assert_eq!(
+        agent_message_text(&first[1], AgentMessageRole::Agent),
+        Some("Sourced message")
+    );
+}
+
+#[test]
+fn replay_keeps_sourced_text_distinct_when_the_next_chunk_is_anonymous() {
+    let updates = || {
+        vec![
+            SessionUpdate::AgentMessageChunk(
+                ContentChunk::new(ContentBlock::Text(TextContent::new("Sourced message")))
+                    .message_id("source-message-1".to_string()),
+            ),
+            SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Text(
+                TextContent::new("Anonymous message"),
+            ))),
+        ]
+    };
+
+    let first = ReplayProjection::new("session-reverse-identity-boundary").project(updates());
+    let second = ReplayProjection::new("session-reverse-identity-boundary").project(updates());
+
+    assert_eq!(first.len(), 2);
+    assert_eq!(
+        first
+            .iter()
+            .map(NormalizedMessage::identity)
+            .collect::<Vec<_>>(),
+        second
+            .iter()
+            .map(NormalizedMessage::identity)
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        first[0].identity(),
+        "acp:session-reverse-identity-boundary:message:source-message-1"
+    );
+    assert_eq!(
+        agent_message_text(&first[0], AgentMessageRole::Agent),
+        Some("Sourced message")
+    );
+    assert!(first[1]
+        .identity()
+        .starts_with("acp:session-reverse-identity-boundary:replay:agent:"));
+    assert_eq!(
+        agent_message_text(&first[1], AgentMessageRole::Agent),
+        Some("Anonymous message")
+    );
 }
 
 #[test]
@@ -894,11 +1155,19 @@ fn live_agent_thought_chunks_emit_thought_events_not_tool_activity() {
     let events = capture.events();
     assert_eq!(events.len(), 2);
     match &events[0] {
-        AgentEvent::ThoughtChunk { text, .. } => assert_eq!(text, "one"),
+        AgentEvent::MessageChunk {
+            role: AgentMessageRole::Thought,
+            part: AgentMessagePart::Text { text },
+            ..
+        } => assert_eq!(text, "one"),
         other => panic!("expected thought event, got {other:?}"),
     }
     match &events[1] {
-        AgentEvent::ThoughtChunk { text, .. } => assert_eq!(text, " more"),
+        AgentEvent::MessageChunk {
+            role: AgentMessageRole::Thought,
+            part: AgentMessagePart::Text { text },
+            ..
+        } => assert_eq!(text, " more"),
         other => panic!("expected thought event, got {other:?}"),
     }
 }
@@ -1091,12 +1360,10 @@ fn load_active_session_captures_replayed_updates_before_response() {
                         }
                         other => panic!("expected replayed user message, got {other:?}"),
                     }
-                    match &replayed_messages[1] {
-                        NormalizedMessage::AgentText { text, .. } => {
-                            assert_eq!(text, "Prior agent answer");
-                        }
-                        other => panic!("expected replayed agent message, got {other:?}"),
-                    }
+                    assert_eq!(
+                        agent_message_text(&replayed_messages[1], AgentMessageRole::Agent),
+                        Some("Prior agent answer")
+                    );
                     Ok(())
                 },
             )
@@ -1249,7 +1516,7 @@ fn tool_call_update_keeps_partial_fields_from_existing_call() {
 }
 
 #[test]
-fn running_tool_output_bursts_publish_only_presentation_changes() {
+fn every_running_tool_output_update_reaches_the_session_sink() {
     let capture = Arc::new(CapturingEventSink::default());
     let sink: Arc<dyn AgentEventSink> = capture.clone();
     let projection =
@@ -1280,7 +1547,15 @@ fn running_tool_output_bursts_publish_only_presentation_changes() {
         .unwrap();
 
     let events = capture.events();
-    assert_eq!(events.len(), 2);
+    assert_eq!(events.len(), 102);
+    assert!(matches!(
+        &events[100],
+        AgentEvent::ToolCall(tool_call)
+            if tool_call.status == AgentToolCallStatus::InProgress
+                && tool_call.details.as_ref()
+                    .and_then(|details| details.output.as_ref())
+                    .and_then(|output| output.formatted_output.as_deref()) == Some("line 99")
+    ));
     assert!(matches!(
         events.last(),
         Some(AgentEvent::ToolCall(tool_call))
@@ -1363,6 +1638,13 @@ fn minimal_permission_uses_existing_tool_call_attribution() {
     assert_eq!(permissions[0].title, "Allow file write");
     assert_eq!(permissions[0].tool_call.title, "Allow file write");
     assert_eq!(permissions[0].tool_call.kind.as_deref(), Some("edit"));
+    assert!(matches!(
+        capture.events().as_slice(),
+        [AgentEvent::ToolCall(tool_call)]
+            if tool_call.title == "Allow file write"
+                && tool_call.kind == "edit"
+                && tool_call.status == AgentToolCallStatus::Pending
+    ));
 }
 
 #[test]
@@ -1468,12 +1750,8 @@ fn tool_call_preview_does_not_expose_raw_fields_or_full_diff_paths() {
             let details = tool_call.details.expect("command details");
             let input = details.input.expect("command input");
             assert_eq!(
-                input
-                    .fields
-                    .iter()
-                    .find(|field| field.name == "cmd")
-                    .map(|field| field.value.as_str()),
-                Some("printf token=[redacted] .env")
+                input.command,
+                ["printf token=[redacted] /workspace/project/.env"]
             );
         }
         other => panic!("expected tool call event, got {other:?}"),
@@ -1493,6 +1771,31 @@ fn tool_call_preview_does_not_expose_raw_fields_or_full_diff_paths() {
                 tool_call.input_summary.as_deref(),
                 Some("find . -name 'index.md' -print")
             );
+        }
+        other => panic!("expected tool call event, got {other:?}"),
+    }
+
+    let secret_argument = tool_call_event(
+        &ToolCall::new("tool_call_secret_argument", "Authenticated request")
+            .kind(ToolKind::Execute)
+            .raw_input(serde_json::json!({
+                "command": ["curl", "--token", "secret", "/workspace/result.json"]
+            })),
+    );
+    match secret_argument {
+        AgentEvent::ToolCall(tool_call) => {
+            assert!(!tool_call
+                .input_summary
+                .as_deref()
+                .unwrap_or_default()
+                .contains("secret"));
+            let command = &tool_call
+                .details
+                .expect("command details")
+                .input
+                .expect("command input")
+                .command;
+            assert_eq!(command, &["curl --token [redacted] /workspace/result.json"]);
         }
         other => panic!("expected tool call event, got {other:?}"),
     }
@@ -1531,6 +1834,115 @@ fn tool_call_preview_does_not_expose_raw_fields_or_full_diff_paths() {
         }
         other => panic!("expected tool call event, got {other:?}"),
     }
+}
+
+#[test]
+fn tool_call_details_preserve_typed_acp_content_and_nested_safe_fields() {
+    let event = tool_call_event(
+        &ToolCall::new("tool_call_typed_content", "Fetch context")
+            .kind(ToolKind::Fetch)
+            .content(vec![
+                ToolCallContent::from(ContentBlock::Image(
+                    ImageContent::new("aW1hZ2U=", "image/png").uri("file:///preview.png"),
+                )),
+                ToolCallContent::from(ContentBlock::Audio(AudioContent::new(
+                    "YXVkaW8=",
+                    "audio/wav",
+                ))),
+                ToolCallContent::from(ContentBlock::ResourceLink(
+                    ResourceLink::new("Guide", "https://example.test/guide")
+                        .description("Reference guide")
+                        .mime_type("text/html")
+                        .size(42),
+                )),
+                ToolCallContent::from(ContentBlock::Resource(EmbeddedResource::new(
+                    EmbeddedResourceResource::TextResourceContents(
+                        TextResourceContents::new("embedded text", "file:///guide.txt")
+                            .mime_type("text/plain"),
+                    ),
+                ))),
+                ToolCallContent::from(ContentBlock::Resource(EmbeddedResource::new(
+                    EmbeddedResourceResource::BlobResourceContents(
+                        BlobResourceContents::new("YmxvYg==", "file:///archive.bin")
+                            .mime_type("application/octet-stream"),
+                    ),
+                ))),
+            ])
+            .raw_input(serde_json::json!({
+                "url": "https://example.test/guide",
+                "filters": {"languages": ["rust", "typescript"], "limit": 10},
+                "api_token": "do-not-project"
+            }))
+            .raw_output(serde_json::json!({
+                "result": {"cached": false, "pages": [1, 2]},
+                "authorization": "do-not-project"
+            })),
+    );
+
+    let AgentEvent::ToolCall(tool_call) = event else {
+        panic!("expected tool call event");
+    };
+    let details = tool_call.details.expect("typed details");
+    assert!(matches!(
+        &details.content[0],
+        ActivityToolContent::Image { media_type, data, uri }
+            if media_type == "image/png" && data == "aW1hZ2U=" && uri.as_deref() == Some("file:///preview.png")
+    ));
+    assert!(matches!(
+        &details.content[1],
+        ActivityToolContent::Audio { media_type, data }
+            if media_type == "audio/wav" && data == "YXVkaW8="
+    ));
+    assert!(matches!(
+        &details.content[2],
+        ActivityToolContent::Resource { uri, name, text, .. }
+            if uri == "https://example.test/guide" && name.as_deref() == Some("Guide") && text.is_none()
+    ));
+    assert!(matches!(
+        &details.content[3],
+        ActivityToolContent::Resource { uri, text, .. }
+            if uri == "file:///guide.txt" && text.as_deref() == Some("embedded text")
+    ));
+    assert!(matches!(
+        &details.content[4],
+        ActivityToolContent::Unsupported { content_type, media_type, uri }
+            if content_type == "resource_blob"
+                && media_type.as_deref() == Some("application/octet-stream")
+                && uri.as_deref() == Some("file:///archive.bin")
+    ));
+
+    let input = details.input.expect("nested input");
+    let filters = input
+        .fields
+        .iter()
+        .find(|field| field.name == "filters")
+        .expect("filters field");
+    assert!(matches!(filters.value, ActivityToolValue::Object { .. }));
+    assert!(matches!(
+        input
+            .fields
+            .iter()
+            .find(|field| field.name == "api_token")
+            .map(|field| &field.value),
+        Some(ActivityToolValue::Redacted)
+    ));
+    let output = details.output.expect("nested output");
+    assert!(matches!(
+        output
+            .fields
+            .iter()
+            .find(|field| field.name == "result")
+            .map(|field| &field.value),
+        Some(ActivityToolValue::Object { .. })
+    ));
+    assert!(matches!(
+        output
+            .fields
+            .iter()
+            .find(|field| field.name == "authorization")
+            .map(|field| &field.value),
+        Some(ActivityToolValue::Redacted)
+    ));
 }
 
 #[test]

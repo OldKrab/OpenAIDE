@@ -1,48 +1,60 @@
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::sync::Arc;
 
 use agent_client_protocol::schema::{
-    ContentBlock, PermissionOptionKind, RequestPermissionOutcome, RequestPermissionRequest,
+    PermissionOptionKind, RequestPermissionOutcome, RequestPermissionRequest,
     RequestPermissionResponse, SelectedPermissionOutcome, SessionUpdate, ToolCall, ToolCallStatus,
     ToolCallUpdate,
 };
 use serde_json::json;
 
 use crate::agent::acp_config_projection::normalize_config_options;
+use crate::agent::acp_content_projection::project_content_block;
 use crate::agent::acp_tool_call_projection::{
     merge_tool_call_update, remember_tool_call, ToolCallState,
 };
 use crate::agent::acp_update_projection::normalize_available_commands;
 use crate::agent::events::{
     AgentEvent, AgentPermissionOption, AgentPermissionOptionKind, AgentPermissionOutcome,
-    AgentPermissionRequest, AgentToolCall, AgentToolCallRef, AgentToolCallStatus,
+    AgentPermissionRequest, AgentToolCallRef,
 };
 use crate::agent::tool_details::{tool_call_event, tool_kind_name};
-use crate::agent::{AgentEventSink, TurnCancellation};
+use crate::agent::{AgentEventSink, AgentSessionEventSink, TurnCancellation};
 use crate::logging;
 use crate::protocol::errors::RuntimeError;
+use crate::protocol::model::AgentMessageRole;
 
 #[derive(Clone)]
 pub(super) struct LivePromptProjection {
     agent_id: String,
     sink: Arc<dyn AgentEventSink>,
     tool_calls: ToolCallState,
-    published_tools: Arc<Mutex<HashMap<String, PublishedTool>>>,
     cancellation: TurnCancellation,
 }
 
 impl LivePromptProjection {
+    #[cfg(test)]
     pub(super) fn new(
         agent_id: impl Into<String>,
         sink: Arc<dyn AgentEventSink>,
         cancellation: TurnCancellation,
     ) -> Self {
+        Self::for_prompt(agent_id, sink, cancellation, None)
+    }
+
+    /// Keeps permission tool attribution on the same Native Session tool state
+    /// that receives permanent session updates.
+    pub(super) fn for_prompt(
+        agent_id: impl Into<String>,
+        sink: Arc<dyn AgentEventSink>,
+        cancellation: TurnCancellation,
+        session_projection: Option<&Self>,
+    ) -> Self {
         Self {
             agent_id: agent_id.into(),
             sink,
-            tool_calls: Arc::default(),
-            published_tools: Arc::default(),
+            tool_calls: session_projection
+                .map(|projection| projection.tool_calls.clone())
+                .unwrap_or_default(),
             cancellation,
         }
     }
@@ -51,8 +63,17 @@ impl LivePromptProjection {
         self.cancellation.clone()
     }
 
-    pub(super) fn prepare_for_steering(&self) -> Result<(), RuntimeError> {
-        self.sink.prepare_for_steering()
+    /// Creates the projection that survives individual session/prompt requests.
+    pub(super) fn for_session(
+        agent_id: impl Into<String>,
+        sink: Arc<dyn AgentSessionEventSink>,
+    ) -> Self {
+        Self::for_prompt(
+            agent_id,
+            Arc::new(SessionUpdateEventSink { sink }),
+            TurnCancellation::new(),
+            None,
+        )
     }
 
     pub(super) fn remember_tool_call(&self, tool_call: ToolCall) {
@@ -68,6 +89,10 @@ impl LivePromptProjection {
         request: RequestPermissionRequest,
     ) -> Result<RequestPermissionResponse, RuntimeError> {
         let tool_call = self.merge_tool_call_update(request.tool_call.clone());
+        // ACP permission requests carry the authoritative tool-call update. Publish it
+        // before waiting so Chat shows the activity beside the transient request even
+        // when the Agent did not send a separate tool-call notification first.
+        self.publish_tool_call(&tool_call)?;
         let permission = permission_request_from_acp(request, &tool_call);
         logging::info(
             "acp_permission_bridge_wait_start",
@@ -108,20 +133,18 @@ impl LivePromptProjection {
     pub(super) fn emit(&self, update: SessionUpdate) -> Result<(), RuntimeError> {
         match update {
             SessionUpdate::AgentMessageChunk(chunk) => {
-                if let ContentBlock::Text(text) = chunk.content {
-                    self.sink.emit(AgentEvent::TextChunk {
-                        text: text.text,
-                        source_message_id: chunk.message_id,
-                    })?;
-                }
+                self.sink.emit(AgentEvent::MessageChunk {
+                    role: AgentMessageRole::Agent,
+                    part: project_content_block(chunk.content, AgentMessageRole::Agent),
+                    source_message_id: chunk.message_id,
+                })?
             }
             SessionUpdate::AgentThoughtChunk(chunk) => {
-                if let ContentBlock::Text(text) = chunk.content {
-                    self.sink.emit(AgentEvent::ThoughtChunk {
-                        text: text.text,
-                        source_message_id: chunk.message_id,
-                    })?;
-                }
+                self.sink.emit(AgentEvent::MessageChunk {
+                    role: AgentMessageRole::Thought,
+                    part: project_content_block(chunk.content, AgentMessageRole::Thought),
+                    source_message_id: chunk.message_id,
+                })?
             }
             SessionUpdate::ToolCall(tool_call) => {
                 self.remember_tool_call(tool_call.clone());
@@ -153,35 +176,6 @@ impl LivePromptProjection {
         let AgentEvent::ToolCall(event) = tool_call_event(tool_call) else {
             unreachable!("tool_call_event always returns a tool event");
         };
-        let presentation = ToolPresentation::from(&event);
-        let suppress = {
-            let mut published = self
-                .published_tools
-                .lock()
-                .expect("published tool presentation lock poisoned");
-            let now = Instant::now();
-            let unchanged_recently = published.get(&event.tool_call_id).is_some_and(|previous| {
-                previous.presentation.same_control_state(&presentation)
-                    && now.duration_since(previous.published_at) < TOOL_DETAIL_PUBLISH_INTERVAL
-            });
-            if !unchanged_recently {
-                published.insert(
-                    event.tool_call_id.clone(),
-                    PublishedTool {
-                        presentation,
-                        published_at: now,
-                    },
-                );
-            }
-            unchanged_recently
-                && matches!(
-                    event.status,
-                    AgentToolCallStatus::Pending | AgentToolCallStatus::InProgress
-                )
-        };
-        if suppress {
-            return Ok(());
-        }
         logging::info(
             "acp_tool_call_update_projected",
             json!({
@@ -195,40 +189,27 @@ impl LivePromptProjection {
     }
 }
 
-const TOOL_DETAIL_PUBLISH_INTERVAL: Duration = Duration::from_millis(250);
-
-struct PublishedTool {
-    presentation: ToolPresentation,
-    published_at: Instant,
+struct SessionUpdateEventSink {
+    sink: Arc<dyn AgentSessionEventSink>,
 }
 
-#[derive(PartialEq, Eq)]
-struct ToolPresentation {
-    title: String,
-    kind: String,
-    status: AgentToolCallStatus,
-    input_summary: Option<String>,
-    output_preview: Option<String>,
-}
-
-impl From<&AgentToolCall> for ToolPresentation {
-    fn from(tool_call: &AgentToolCall) -> Self {
-        Self {
-            title: tool_call.title.clone(),
-            kind: tool_call.kind.clone(),
-            status: tool_call.status,
-            input_summary: tool_call.input_summary.clone(),
-            output_preview: tool_call.output_preview.clone(),
+impl AgentEventSink for SessionUpdateEventSink {
+    fn emit(&self, event: AgentEvent) -> Result<(), RuntimeError> {
+        // Catalogs and metadata retain their dedicated typed session callbacks.
+        if matches!(
+            event,
+            AgentEvent::ConfigOptionsChanged(_) | AgentEvent::CommandsChanged(_)
+        ) {
+            return Ok(());
         }
+        self.sink.session_update(event)
     }
-}
 
-impl ToolPresentation {
-    fn same_control_state(&self, other: &Self) -> bool {
-        self.title == other.title
-            && self.kind == other.kind
-            && self.status == other.status
-            && self.input_summary == other.input_summary
+    fn request_permission(
+        &self,
+        _request: AgentPermissionRequest,
+    ) -> Result<AgentPermissionOutcome, RuntimeError> {
+        Ok(AgentPermissionOutcome::Cancelled)
     }
 }
 

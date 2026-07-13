@@ -1,21 +1,21 @@
 use openaide_app_server_protocol::ids::MessageId;
 use openaide_app_server_protocol::snapshot::{
     ActivityStatus as ProtocolActivityStatus, ActivityStepSnapshot, AttachmentKind,
-    AttachmentSnapshot, ChatItem, ChatItemStatus, ChatRole, MessagePart, PermissionMessageDecision,
-    PermissionMessageOption, PermissionMessageOptionKind, PermissionMessageState,
-    QuestionMessageAction, QuestionMessageState,
+    AttachmentSnapshot, ChatItem, ChatItemStatus, ChatRole, MessagePart, QuestionMessageAction,
+    QuestionMessageState, ToolPermissionDecisionSnapshot, ToolPermissionOutcomeSnapshot,
 };
 use openaide_app_server_protocol::task::{
     ActivityToolContent as ProtocolActivityToolContent,
     ActivityToolField as ProtocolActivityToolField, ActivityToolInput as ProtocolActivityToolInput,
     ActivityToolLocation as ProtocolActivityToolLocation,
-    ActivityToolOutput as ProtocolActivityToolOutput, TaskToolDetailResult,
+    ActivityToolOutput as ProtocolActivityToolOutput,
+    ActivityToolValue as ProtocolActivityToolValue, ToolDetailSnapshot,
 };
 
 use crate::protocol::model::{
-    ActivityStatus, ActivityStep, ActivityToolContent, ActivityToolDetails, Attachment,
-    ChatMessage, NormalizedMessage, PermissionDecision, PermissionOption, PermissionOptionKind,
-    PermissionState, QuestionAction, QuestionState,
+    ActivityStatus, ActivityStep, ActivityToolContent, ActivityToolDetails, ActivityToolValue,
+    AgentMessagePart, AgentMessageRole, Attachment, ChatMessage, NormalizedMessage, QuestionAction,
+    QuestionState,
 };
 
 pub(crate) fn project_chat_item(message: &ChatMessage) -> ChatItem {
@@ -47,27 +47,13 @@ fn project_message(message: &NormalizedMessage) -> (ChatRole, ChatItemStatus, Ve
             }));
             (ChatRole::User, ChatItemStatus::Complete, parts)
         }
-        NormalizedMessage::AgentText {
-            text, streaming, ..
-        } => (
-            ChatRole::Agent,
-            if *streaming {
-                ChatItemStatus::Streaming
-            } else {
-                ChatItemStatus::Complete
+        NormalizedMessage::AgentMessage { role, parts, .. } => (
+            match role {
+                AgentMessageRole::Agent => ChatRole::Agent,
+                AgentMessageRole::Thought => ChatRole::System,
             },
-            vec![MessagePart::Text { text: text.clone() }],
-        ),
-        NormalizedMessage::Thought {
-            text, streaming, ..
-        } => (
-            ChatRole::System,
-            if *streaming {
-                ChatItemStatus::Streaming
-            } else {
-                ChatItemStatus::Complete
-            },
-            vec![MessagePart::Text { text: text.clone() }],
+            ChatItemStatus::Complete,
+            parts.iter().map(project_agent_message_part).collect(),
         ),
         NormalizedMessage::Activity {
             title,
@@ -83,40 +69,6 @@ fn project_message(message: &NormalizedMessage) -> (ChatRole, ChatItemStatus, Ve
                 steps: steps.iter().map(project_activity_step).collect(),
             }],
         ),
-        NormalizedMessage::Permission {
-            request_id,
-            app_server_request_id,
-            title,
-            description,
-            scope,
-            risk,
-            tool_call,
-            state,
-            options,
-            selected_option,
-            decision,
-            ..
-        } => (
-            ChatRole::System,
-            ChatItemStatus::Complete,
-            vec![MessagePart::Permission {
-                request_id: request_id.clone().into(),
-                app_server_request_id: app_server_request_id.clone().map(Into::into),
-                title: title.clone(),
-                description: description.clone(),
-                scope: scope.clone(),
-                risk: risk.clone(),
-                tool_call: openaide_app_server_protocol::server_requests::PermissionToolCallRef {
-                    id: tool_call.id.clone(),
-                    title: tool_call.title.clone(),
-                    kind: tool_call.kind.clone(),
-                },
-                state: project_permission_state(*state),
-                options: options.iter().map(project_permission_option).collect(),
-                selected_option: selected_option.clone(),
-                decision: decision.map(project_permission_decision),
-            }],
-        ),
         NormalizedMessage::Question {
             request_id,
             message,
@@ -125,6 +77,7 @@ fn project_message(message: &NormalizedMessage) -> (ChatRole, ChatItemStatus, Ve
             action,
             content,
             error,
+            resolution_message,
             ..
         } => (
             ChatRole::System,
@@ -145,6 +98,7 @@ fn project_message(message: &NormalizedMessage) -> (ChatRole, ChatItemStatus, Ve
                 }),
                 content: content.clone(),
                 error: error.clone(),
+                resolution_message: resolution_message.clone(),
             }],
         ),
         NormalizedMessage::Interruption { message, .. } => (
@@ -157,35 +111,44 @@ fn project_message(message: &NormalizedMessage) -> (ChatRole, ChatItemStatus, Ve
     }
 }
 
-fn project_permission_state(state: PermissionState) -> PermissionMessageState {
-    match state {
-        PermissionState::Pending => PermissionMessageState::Pending,
-        PermissionState::Responding => PermissionMessageState::Responding,
-        PermissionState::Resolved => PermissionMessageState::Resolved,
-        PermissionState::Cancelled => PermissionMessageState::Cancelled,
-    }
-}
-
-fn project_permission_decision(decision: PermissionDecision) -> PermissionMessageDecision {
-    match decision {
-        PermissionDecision::Approved => PermissionMessageDecision::Approved,
-        PermissionDecision::Denied => PermissionMessageDecision::Denied,
-    }
-}
-
-fn project_permission_option(option: &PermissionOption) -> PermissionMessageOption {
-    PermissionMessageOption {
-        option_id: option.id.clone(),
-        name: option.label.clone(),
-        kind: option.kind.map(project_permission_option_kind),
-    }
-}
-
-fn project_permission_option_kind(kind: PermissionOptionKind) -> PermissionMessageOptionKind {
-    match kind {
-        PermissionOptionKind::Allow => PermissionMessageOptionKind::Allow,
-        PermissionOptionKind::Deny => PermissionMessageOptionKind::Deny,
-        PermissionOptionKind::Other => PermissionMessageOptionKind::Other,
+fn project_agent_message_part(content: &AgentMessagePart) -> MessagePart {
+    match content {
+        AgentMessagePart::Text { text } => MessagePart::Text { text: text.clone() },
+        AgentMessagePart::Image {
+            media_type,
+            data,
+            uri,
+        } => MessagePart::Image {
+            media_type: media_type.clone(),
+            data_url: format!("data:{media_type};base64,{data}"),
+            uri: uri.clone(),
+        },
+        AgentMessagePart::Resource {
+            uri,
+            name,
+            title,
+            description,
+            media_type,
+            size_bytes,
+            text,
+        } => MessagePart::Resource {
+            uri: uri.clone(),
+            name: name.clone(),
+            title: title.clone(),
+            description: description.clone(),
+            media_type: media_type.clone(),
+            size_bytes: *size_bytes,
+            text: text.clone(),
+        },
+        AgentMessagePart::Unsupported {
+            content_type,
+            media_type,
+            uri,
+        } => MessagePart::Unsupported {
+            content_type: content_type.clone(),
+            media_type: media_type.clone(),
+            uri: uri.clone(),
+        },
     }
 }
 
@@ -203,6 +166,7 @@ fn project_activity_step(step: &ActivityStep) -> ActivityStepSnapshot {
             output_preview,
             detail_artifact_id,
             details,
+            permission_outcomes,
         } => ActivityStepSnapshot::Tool {
             tool_call_id: tool_call_id.clone(),
             name: name.clone(),
@@ -211,6 +175,26 @@ fn project_activity_step(step: &ActivityStep) -> ActivityStepSnapshot {
             output_preview: output_preview.clone(),
             detail_artifact_id: detail_artifact_id.clone(),
             details: details.as_deref().map(project_tool_details),
+            permission_outcomes: permission_outcomes
+                .iter()
+                .map(|outcome| ToolPermissionOutcomeSnapshot {
+                    request_id: outcome.request_id.clone().into(),
+                    decision: match outcome.decision {
+                        crate::protocol::model::ToolPermissionDecision::Approved => {
+                            ToolPermissionDecisionSnapshot::Approved
+                        }
+                        crate::protocol::model::ToolPermissionDecision::Rejected => {
+                            ToolPermissionDecisionSnapshot::Rejected
+                        }
+                        crate::protocol::model::ToolPermissionDecision::Cancelled => {
+                            ToolPermissionDecisionSnapshot::Cancelled
+                        }
+                    },
+                    option_id: outcome.option_id.clone(),
+                    option_label: outcome.option_label.clone(),
+                    resolved_at: outcome.resolved_at.clone(),
+                })
+                .collect(),
         },
         ActivityStep::Command {
             command_label,
@@ -226,8 +210,8 @@ fn project_activity_step(step: &ActivityStep) -> ActivityStepSnapshot {
     }
 }
 
-fn project_tool_details(details: &ActivityToolDetails) -> TaskToolDetailResult {
-    TaskToolDetailResult {
+pub(crate) fn project_tool_details(details: &ActivityToolDetails) -> ToolDetailSnapshot {
+    ToolDetailSnapshot {
         locations: details
             .locations
             .iter()
@@ -281,8 +265,44 @@ fn project_tool_content(content: &ActivityToolContent) -> ProtocolActivityToolCo
         ActivityToolContent::Terminal { terminal_id } => ProtocolActivityToolContent::Terminal {
             terminal_id: terminal_id.clone(),
         },
-        ActivityToolContent::Other { label } => ProtocolActivityToolContent::Other {
-            label: label.clone(),
+        ActivityToolContent::Image {
+            media_type,
+            data,
+            uri,
+        } => ProtocolActivityToolContent::Image {
+            media_type: media_type.clone(),
+            data_url: format!("data:{media_type};base64,{data}"),
+            uri: uri.clone(),
+        },
+        ActivityToolContent::Audio { media_type, data } => ProtocolActivityToolContent::Audio {
+            media_type: media_type.clone(),
+            data_url: format!("data:{media_type};base64,{data}"),
+        },
+        ActivityToolContent::Resource {
+            uri,
+            name,
+            title,
+            description,
+            media_type,
+            size_bytes,
+            text,
+        } => ProtocolActivityToolContent::Resource {
+            uri: uri.clone(),
+            name: name.clone(),
+            title: title.clone(),
+            description: description.clone(),
+            media_type: media_type.clone(),
+            size_bytes: *size_bytes,
+            text: text.clone(),
+        },
+        ActivityToolContent::Unsupported {
+            content_type,
+            media_type,
+            uri,
+        } => ProtocolActivityToolContent::Unsupported {
+            content_type: content_type.clone(),
+            media_type: media_type.clone(),
+            uri: uri.clone(),
         },
     }
 }
@@ -294,15 +314,38 @@ fn project_tool_fields(
         .iter()
         .map(|field| ProtocolActivityToolField {
             name: field.name.clone(),
-            value: field.value.clone(),
+            value: project_tool_value(&field.value),
         })
         .collect()
+}
+
+fn project_tool_value(value: &ActivityToolValue) -> ProtocolActivityToolValue {
+    match value {
+        ActivityToolValue::Null => ProtocolActivityToolValue::Null,
+        ActivityToolValue::Boolean { value } => {
+            ProtocolActivityToolValue::Boolean { value: *value }
+        }
+        ActivityToolValue::Number { value } => ProtocolActivityToolValue::Number {
+            value: value.clone(),
+        },
+        ActivityToolValue::String { value } => ProtocolActivityToolValue::String {
+            value: value.clone(),
+        },
+        ActivityToolValue::Array { items } => ProtocolActivityToolValue::Array {
+            items: items.iter().map(project_tool_value).collect(),
+        },
+        ActivityToolValue::Object { fields } => ProtocolActivityToolValue::Object {
+            fields: project_tool_fields(fields),
+        },
+        ActivityToolValue::Redacted => ProtocolActivityToolValue::Redacted,
+    }
 }
 
 fn activity_item_status(status: ActivityStatus) -> ChatItemStatus {
     match status {
         ActivityStatus::Running => ChatItemStatus::Streaming,
         ActivityStatus::Completed => ChatItemStatus::Complete,
+        ActivityStatus::Interrupted => ChatItemStatus::Interrupted,
         ActivityStatus::Error => ChatItemStatus::Failed,
     }
 }
@@ -311,6 +354,7 @@ fn project_activity_status(status: ActivityStatus) -> ProtocolActivityStatus {
     match status {
         ActivityStatus::Running => ProtocolActivityStatus::Running,
         ActivityStatus::Completed => ProtocolActivityStatus::Completed,
+        ActivityStatus::Interrupted => ProtocolActivityStatus::Interrupted,
         ActivityStatus::Error => ProtocolActivityStatus::Failed,
     }
 }

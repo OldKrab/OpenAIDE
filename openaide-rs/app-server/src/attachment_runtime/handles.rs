@@ -2,7 +2,8 @@ use std::collections::BTreeSet;
 use std::time::Instant;
 
 use openaide_app_server_protocol::attachment::{
-    AttachmentRefreshHandlesResult, AttachmentReleaseHandlesResult, PreSendAttachment,
+    AttachmentRefreshHandlesResult, AttachmentReleaseOutcome, AttachmentReleaseResult,
+    AttachmentReleaseStatus, AttachmentResourceId, PreSendAttachment,
 };
 use openaide_app_server_protocol::ids::AttachmentHandleId;
 
@@ -55,30 +56,56 @@ impl AttachmentRuntime {
         Ok(AttachmentRefreshHandlesResult { attachments })
     }
 
-    pub(crate) fn release_handles(
+    pub(crate) fn release_resources(
         &self,
         owner: impl Into<AttachmentOwner>,
-        handles: &[AttachmentHandleId],
-    ) -> AttachmentReleaseHandlesResult {
+        resources: &[AttachmentResourceId],
+    ) -> AttachmentReleaseResult {
         let owner = owner.into();
         let mut state = self
             .state
             .lock()
             .expect("attachment runtime mutex poisoned");
         state.prune_expired(Instant::now());
-        let mut released_handles = Vec::new();
-        for handle_id in handles {
-            let should_release = state
-                .handles
-                .get(handle_id.as_str())
-                .is_some_and(|handle| handle.owner.belongs_to(&owner))
-                && !state.reserved_handles.contains(handle_id.as_str());
-            if should_release {
-                state.handles.remove(handle_id.as_str());
-                released_handles.push(handle_id.clone());
-            }
-        }
-        AttachmentReleaseHandlesResult { released_handles }
+        // Sequential outcomes make duplicate ids deterministic while one resource never blocks
+        // cleanup of the rest of the batch.
+        let outcomes = resources
+            .iter()
+            .map(|resource| {
+                let status = match resource {
+                    AttachmentResourceId::Handle { id } => match state.handles.get(id.as_str()) {
+                        None => AttachmentReleaseStatus::NoOp,
+                        Some(handle) if !handle.owner.belongs_to(&owner) => {
+                            AttachmentReleaseStatus::Forbidden
+                        }
+                        Some(_) if state.reserved_handles.contains(id.as_str()) => {
+                            AttachmentReleaseStatus::NoOp
+                        }
+                        Some(_) => {
+                            state.handles.remove(id.as_str());
+                            AttachmentReleaseStatus::Released
+                        }
+                    },
+                    AttachmentResourceId::Candidate { id } => {
+                        match state.candidates.get(id.as_str()) {
+                            None => AttachmentReleaseStatus::NoOp,
+                            Some(candidate) if !candidate.owner.belongs_to(&owner) => {
+                                AttachmentReleaseStatus::Forbidden
+                            }
+                            Some(_) => {
+                                state.candidates.remove(id.as_str());
+                                AttachmentReleaseStatus::Released
+                            }
+                        }
+                    }
+                };
+                AttachmentReleaseOutcome {
+                    resource: resource.clone(),
+                    status,
+                }
+            })
+            .collect();
+        AttachmentReleaseResult { outcomes }
     }
 
     #[cfg(test)]

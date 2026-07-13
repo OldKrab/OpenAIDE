@@ -1,7 +1,7 @@
 use super::*;
 use crate::protocol::model::{
-    ActivityStatus, ActivityStep, ActivityToolContent, ActivityToolDetails, ChatMessage,
-    IsolationKind, NormalizedMessage, TaskStatus,
+    ActivityStatus, ActivityStep, ActivityToolContent, ActivityToolDetails, AgentMessagePart,
+    AgentMessageRole, ChatMessage, IsolationKind, NormalizedMessage, TaskStatus,
 };
 use crate::storage::records::{StoredMessage, TaskPreparationRecord, TaskRecord};
 use crate::storage_runtime::RecoveryClassification;
@@ -17,6 +17,30 @@ fn second_store_open_is_blocked_while_first_store_lives() {
         Store::open(dir.path().to_path_buf()),
         Err(StoreOpenError::LockedByLiveServer)
     ));
+}
+
+#[test]
+fn task_title_persists_as_one_owned_value() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().to_path_buf()).unwrap();
+    let mut task = task_record("task-title", TaskStatus::Inactive, "1");
+    task.title = crate::storage::records::TaskTitle::new(
+        "  Agent title  ",
+        crate::storage::records::TaskTitleSource::Agent,
+    );
+
+    store.write_task(&task).unwrap();
+
+    let stored: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(store.task_dir("task-title").unwrap().join("task.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        stored["title"],
+        serde_json::json!({ "value": "Agent title", "source": "agent" })
+    );
+    assert!(stored.get("agent_title").is_none());
+    assert_eq!(store.read_task("task-title").unwrap().title, task.title);
 }
 
 #[test]
@@ -156,6 +180,7 @@ fn persisted_tool_artifacts_keep_a_lightweight_file_summary() {
                 input: None,
                 output: None,
             })),
+            permission_outcomes: Vec::new(),
         }],
     };
 
@@ -400,13 +425,15 @@ fn agent_chat_message(id: &str, text: &str) -> ChatMessage {
     ChatMessage {
         cursor: id.to_string(),
         identity: id.to_string(),
-        message_type: "agent_text".to_string(),
+        message_type: "agent_message".to_string(),
         message_id: id.to_string(),
-        message: NormalizedMessage::AgentText {
+        message: NormalizedMessage::AgentMessage {
             id: id.to_string(),
-            text: text.to_string(),
+            role: AgentMessageRole::Agent,
+            parts: vec![AgentMessagePart::Text {
+                text: text.to_string(),
+            }],
             created_at: "2026-07-01T00:00:00Z".to_string(),
-            streaming: false,
         },
     }
 }
@@ -440,9 +467,28 @@ fn activity_message_with_edit_details(id: &str) -> ChatMessage {
                     input: None,
                     output: None,
                 })),
+                permission_outcomes: Vec::new(),
             }],
         },
     }
+}
+
+#[test]
+fn visible_task_queries_exclude_client_private_new_tasks() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let visible = task_record("task-visible", TaskStatus::Inactive, "1");
+    let mut new_task = task_record("task-new", TaskStatus::Inactive, "2");
+    new_task.lifecycle = super::records::TaskLifecycle::New {
+        owner_client_instance_id: openaide_app_server_protocol::ids::ClientInstanceId::from(
+            "client-a",
+        ),
+    };
+    store.write_task(&visible).unwrap();
+    store.write_task(&new_task).unwrap();
+
+    assert_eq!(listed_task_ids(&store), vec!["task-visible"]);
+    assert_eq!(store.list_all_task_records().unwrap().len(), 2);
 }
 
 fn listed_task_ids(store: &Store) -> Vec<String> {
@@ -454,11 +500,257 @@ fn listed_task_ids(store: &Store) -> Vec<String> {
         .collect()
 }
 
+#[test]
+fn local_history_timestamp_advances_for_every_chat_write() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let task_id = "task-history-clock";
+
+    store
+        .append_message(task_id, chat_message("message-1", "First"))
+        .unwrap();
+    let first = store.local_history_updated_at(task_id).unwrap();
+    store
+        .append_message(task_id, chat_message("message-2", "Second"))
+        .unwrap();
+    let second = store.local_history_updated_at(task_id).unwrap();
+
+    assert!(second > first);
+}
+
+#[test]
+fn agent_text_chunk_is_durable_without_rewriting_existing_history() {
+    let temp = tempfile::tempdir().unwrap();
+    let task_id = "task-agent-text-journal";
+    let messages_path = temp
+        .path()
+        .join("tasks")
+        .join(task_id)
+        .join("messages.jsonl");
+    {
+        let store = Store::open(temp.path().to_path_buf()).unwrap();
+        store
+            .append_message(task_id, agent_chat_message("agent-message", "Hello"))
+            .unwrap();
+        let history_before_chunk = std::fs::read(&messages_path).unwrap();
+
+        store
+            .append_agent_message_part(
+                task_id,
+                NormalizedMessage::AgentMessage {
+                    id: "agent-message".to_string(),
+                    role: AgentMessageRole::Agent,
+                    parts: vec![AgentMessagePart::Text {
+                        text: " world".to_string(),
+                    }],
+                    created_at: "2026-07-01T00:00:01Z".to_string(),
+                },
+            )
+            .unwrap();
+
+        assert_eq!(std::fs::read(&messages_path).unwrap(), history_before_chunk);
+    }
+
+    let reopened = Store::open(temp.path().to_path_buf()).unwrap();
+    let page = reopened.tail_page(task_id, 10).unwrap();
+    let NormalizedMessage::AgentMessage { parts, .. } = &page.items[0].message else {
+        panic!("expected Agent message");
+    };
+    assert_eq!(
+        parts,
+        &[AgentMessagePart::Text {
+            text: "Hello world".to_string(),
+        }]
+    );
+}
+
+#[test]
+fn first_agent_text_chunk_appends_without_rewriting_existing_history() {
+    let temp = tempfile::tempdir().unwrap();
+    let task_id = "task-first-agent-text-journal";
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    store
+        .append_message(task_id, chat_message("user-message", "Prompt"))
+        .unwrap();
+    let messages_path = store.task_dir(task_id).unwrap().join("messages.jsonl");
+    let history_before_chunk = std::fs::read(&messages_path).unwrap();
+
+    let result = store
+        .append_agent_message_part(
+            task_id,
+            NormalizedMessage::AgentMessage {
+                id: "agent-message".to_string(),
+                role: AgentMessageRole::Agent,
+                parts: vec![AgentMessagePart::Text {
+                    text: "Answer".to_string(),
+                }],
+                created_at: "2026-07-01T00:00:01Z".to_string(),
+            },
+        )
+        .unwrap();
+
+    assert!(matches!(
+        result,
+        crate::storage::message_store::AgentMessageAppend::Appended(_)
+    ));
+    assert_eq!(std::fs::read(&messages_path).unwrap(), history_before_chunk);
+    assert_eq!(store.read_messages(task_id).unwrap().len(), 2);
+}
+
+#[test]
+fn compacted_agent_text_accepts_later_durable_chunks() {
+    let temp = tempfile::tempdir().unwrap();
+    let task_id = "task-agent-text-compaction";
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    store
+        .append_message(task_id, agent_chat_message("agent-message", "one"))
+        .unwrap();
+    for text in [" two", " three"] {
+        store
+            .append_agent_message_part(
+                task_id,
+                NormalizedMessage::AgentMessage {
+                    id: "agent-message".to_string(),
+                    role: AgentMessageRole::Agent,
+                    parts: vec![AgentMessagePart::Text {
+                        text: text.to_string(),
+                    }],
+                    created_at: "2026-07-01T00:00:01Z".to_string(),
+                },
+            )
+            .unwrap();
+    }
+
+    store.compact_message_journal(task_id).unwrap();
+    assert!(!store
+        .task_dir(task_id)
+        .unwrap()
+        .join("message_journal.jsonl")
+        .exists());
+    store
+        .append_agent_message_part(
+            task_id,
+            NormalizedMessage::AgentMessage {
+                id: "agent-message".to_string(),
+                role: AgentMessageRole::Agent,
+                parts: vec![AgentMessagePart::Text {
+                    text: " four".to_string(),
+                }],
+                created_at: "2026-07-01T00:00:02Z".to_string(),
+            },
+        )
+        .unwrap();
+    drop(store);
+
+    let reopened = Store::open(temp.path().to_path_buf()).unwrap();
+    let messages = reopened.read_messages(task_id).unwrap();
+    let NormalizedMessage::AgentMessage { parts, .. } = &messages[0].chat.message else {
+        panic!("expected Agent message");
+    };
+    assert_eq!(
+        parts,
+        &[AgentMessagePart::Text {
+            text: "one two three four".to_string(),
+        }]
+    );
+}
+
+#[test]
+fn incomplete_final_journal_record_does_not_poison_later_chunks() {
+    let temp = tempfile::tempdir().unwrap();
+    let task_id = "task-agent-text-partial-record";
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    store
+        .append_message(task_id, agent_chat_message("agent-message", "one"))
+        .unwrap();
+    store
+        .append_agent_message_part(
+            task_id,
+            NormalizedMessage::AgentMessage {
+                id: "agent-message".to_string(),
+                role: AgentMessageRole::Agent,
+                parts: vec![AgentMessagePart::Text {
+                    text: " two".to_string(),
+                }],
+                created_at: "2026-07-01T00:00:01Z".to_string(),
+            },
+        )
+        .unwrap();
+    let journal_path = store
+        .task_dir(task_id)
+        .unwrap()
+        .join("message_journal.jsonl");
+    use std::io::Write as _;
+    std::fs::OpenOptions::new()
+        .append(true)
+        .open(&journal_path)
+        .unwrap()
+        .write_all(br#"{"sequence":999"#)
+        .unwrap();
+
+    store
+        .append_agent_message_part(
+            task_id,
+            NormalizedMessage::AgentMessage {
+                id: "agent-message".to_string(),
+                role: AgentMessageRole::Agent,
+                parts: vec![AgentMessagePart::Text {
+                    text: " three".to_string(),
+                }],
+                created_at: "2026-07-01T00:00:02Z".to_string(),
+            },
+        )
+        .unwrap();
+    drop(store);
+
+    let reopened = Store::open(temp.path().to_path_buf()).unwrap();
+    let messages = reopened.read_messages(task_id).unwrap();
+    let NormalizedMessage::AgentMessage { parts, .. } = &messages[0].chat.message else {
+        panic!("expected Agent message");
+    };
+    assert_eq!(
+        parts,
+        &[AgentMessagePart::Text {
+            text: "one two three".to_string(),
+        }]
+    );
+}
+
+#[test]
+fn native_history_replacement_records_the_native_history_clock() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let task_id = "task-native-history-clock";
+    let native_updated_at = u128::MAX - 1;
+
+    store
+        .replace_messages_with_normalized_at(
+            task_id,
+            vec![NormalizedMessage::AgentMessage {
+                id: "native-message".to_string(),
+                role: AgentMessageRole::Agent,
+                parts: vec![AgentMessagePart::Text {
+                    text: "Loaded history".to_string(),
+                }],
+                created_at: "1".to_string(),
+            }],
+            native_updated_at,
+        )
+        .unwrap();
+
+    assert_eq!(
+        store.local_history_updated_at(task_id).unwrap(),
+        native_updated_at.to_string()
+    );
+}
+
 fn task_record(task_id: &str, status: TaskStatus, created_at: &str) -> TaskRecord {
     TaskRecord {
         task_id: task_id.to_string(),
-        title: task_id.to_string(),
-        agent_title: None,
+        title: crate::storage::records::TaskTitle::new(
+            task_id,
+            crate::storage::records::TaskTitleSource::User,
+        ),
         status,
         task_version: 1,
         message_history_version: 1,
@@ -470,7 +762,7 @@ fn task_record(task_id: &str, status: TaskStatus, created_at: &str) -> TaskRecor
         agent_name: "Codex".to_string(),
         isolation: IsolationKind::Local,
         workspace_root: "/workspace".to_string(),
-        first_prompt_sent: true,
+        lifecycle: super::records::TaskLifecycle::Visible,
         agent_session_id: None,
         active_turn_id: None,
         archived: false,
@@ -478,6 +770,7 @@ fn task_record(task_id: &str, status: TaskStatus, created_at: &str) -> TaskRecor
         revision: 1,
         config_options: HashMap::new(),
         config_options_catalog: None,
+        config_mutation: Default::default(),
         agent_commands_catalog: None,
         model_id: None,
         preparation: TaskPreparationRecord::Ready,

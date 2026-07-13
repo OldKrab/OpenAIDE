@@ -20,7 +20,7 @@ describe("respondToQuestionIntent", () => {
       content: { scope: "form", count: 3 },
     });
     expect(dispatch).toHaveBeenNthCalledWith(1, { type: "question:responding", requestId: "question-1" });
-    expect(dispatch).toHaveBeenNthCalledWith(2, { type: "appServerQuestion:resolved", requestId: "question-1" });
+    expect(dispatch).toHaveBeenCalledTimes(1);
   });
 
   it("keeps a rejected response recoverable", async () => {

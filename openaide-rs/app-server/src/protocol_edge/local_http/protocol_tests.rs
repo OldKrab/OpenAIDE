@@ -153,7 +153,7 @@ fn product_transport_returns_error_when_client_response_is_rejected() {
             GatewayOutcome::Respond {
                 connection_id,
                 id: "server-request-1".to_string(),
-                response: GatewayResponse::Error(ErrorEnvelope::new(
+                response: GatewayResponse::Error(Box::new(ErrorEnvelope::new(
                     openaide_app_server_protocol::errors::ProtocolError {
                         code: openaide_app_server_protocol::errors::ProtocolErrorCode::RequestAlreadyResolved,
                         message: "Permission request is no longer answerable.".to_string(),
@@ -161,7 +161,7 @@ fn product_transport_returns_error_when_client_response_is_rejected() {
                         target: None,
                     },
                     ResponseMeta::default(),
-                )),
+                ))),
                 events: Vec::new(),
                 server_requests: Vec::new(),
             }
@@ -329,6 +329,7 @@ fn client_snapshot() -> ClientSnapshot {
             shell_kind: ShellKind::Web,
             surface: RequestedSurface::Home,
         },
+        new_task_defaults: Default::default(),
         projects: None,
         agents: None,
         tasks: None,
@@ -340,6 +341,7 @@ fn client_snapshot() -> ClientSnapshot {
 
 fn app_event(previous_cursor: &str, cursor: &str) -> AppServerEvent {
     AppServerEvent {
+        subscription: openaide_app_server_protocol::state::SubscriptionScope::Projects,
         previous_cursor: previous_cursor.into(),
         cursor: cursor.into(),
         scope: EventScope::StateRoot {
@@ -348,7 +350,6 @@ fn app_event(previous_cursor: &str, cursor: &str) -> AppServerEvent {
         payload: AppServerEventPayload::ProjectCollectionUpdated {
             projects: ProjectCollectionSnapshot {
                 projects: Vec::new(),
-                active_project_id: None,
             },
         },
     }

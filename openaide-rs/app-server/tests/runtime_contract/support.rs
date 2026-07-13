@@ -43,21 +43,26 @@ struct CountingAgent {
 }
 
 impl AgentRuntime for CountingAgent {
-    fn start_session(&self, _request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
-        Ok(AgentSession::new("session_counting"))
+    fn start_session(&self, request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
+        Ok(AgentSession::new(request.agent_id, "session_counting"))
     }
 
     fn prompt(
         &self,
         prompt: AgentPrompt,
         sink: Arc<dyn AgentEventSink>,
-    ) -> Result<(), RuntimeError> {
-        thread::sleep(Duration::from_millis(50));
+    ) -> Result<openaide_app_server::agent::AgentPromptOutcome, RuntimeError> {
+        // Keep the prompt active until the cancellation path under test reaches it.
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !prompt.cancellation.is_cancelled() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(5));
+        }
         if prompt.cancellation.is_cancelled() {
-            return Ok(());
+            return Ok(openaide_app_server::agent::AgentPromptOutcome::Cancelled);
         }
         self.calls.fetch_add(1, Ordering::SeqCst);
-        sink.emit(AgentEvent::Text("counted response".to_string()))
+        sink.emit(agent_text_event("counted response"))?;
+        Ok(openaide_app_server::agent::AgentPromptOutcome::EndTurn)
     }
 }
 
@@ -73,15 +78,18 @@ struct PassiveSnapshotAgent {
 }
 
 impl AgentRuntime for PassiveSnapshotAgent {
-    fn start_session(&self, _request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
-        Ok(AgentSession::new("session_passive_snapshot"))
+    fn start_session(&self, request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
+        Ok(AgentSession::new(
+            request.agent_id,
+            "session_passive_snapshot",
+        ))
     }
 
     fn prompt(
         &self,
         _prompt: AgentPrompt,
         sink: Arc<dyn AgentEventSink>,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<openaide_app_server::agent::AgentPromptOutcome, RuntimeError> {
         self.calls.fetch_add(1, Ordering::SeqCst);
         let (state_lock, changed) = &*self.state;
         let mut state = state_lock.lock().unwrap();
@@ -90,7 +98,8 @@ impl AgentRuntime for PassiveSnapshotAgent {
         while !state.released {
             state = changed.wait(state).unwrap();
         }
-        sink.emit(AgentEvent::Text("counted response".to_string()))
+        sink.emit(agent_text_event("counted response"))?;
+        Ok(openaide_app_server::agent::AgentPromptOutcome::EndTurn)
     }
 }
 
@@ -100,15 +109,15 @@ struct WaitingAgent {
 }
 
 impl AgentRuntime for WaitingAgent {
-    fn start_session(&self, _request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
-        Ok(AgentSession::new("session_waiting"))
+    fn start_session(&self, request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
+        Ok(AgentSession::new(request.agent_id, "session_waiting"))
     }
 
     fn prompt(
         &self,
         prompt: AgentPrompt,
         sink: Arc<dyn AgentEventSink>,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<openaide_app_server::agent::AgentPromptOutcome, RuntimeError> {
         self.started.fetch_add(1, Ordering::SeqCst);
         let deadline = Instant::now() + Duration::from_secs(2);
         while !prompt.cancellation.is_cancelled() && Instant::now() < deadline {
@@ -117,7 +126,8 @@ impl AgentRuntime for WaitingAgent {
         if prompt.cancellation.is_cancelled() {
             self.cancelled.fetch_add(1, Ordering::SeqCst);
         }
-        sink.emit(AgentEvent::Text("should not be stored".to_string()))
+        sink.emit(agent_text_event("should not be stored"))?;
+        Ok(openaide_app_server::agent::AgentPromptOutcome::Cancelled)
     }
 }
 
@@ -130,25 +140,26 @@ struct SessionTrackingAgent {
 impl AgentRuntime for SessionTrackingAgent {
     fn start_session(&self, request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
         self.starts.fetch_add(1, Ordering::SeqCst);
-        Ok(AgentSession::new(format!(
-            "session_for_{}",
-            request.task_id
-        )))
+        Ok(AgentSession::new(
+            request.agent_id,
+            format!("session_for_{}", request.task_id),
+        ))
     }
 
     fn resume_session(&self, request: AgentSessionResume) -> Result<AgentSession, RuntimeError> {
         self.resumes.fetch_add(1, Ordering::SeqCst);
-        Ok(AgentSession::new(request.session_id))
+        Ok(AgentSession::new(request.agent_id, request.session_id))
     }
 
     fn prompt(
         &self,
         prompt: AgentPrompt,
         sink: Arc<dyn AgentEventSink>,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<openaide_app_server::agent::AgentPromptOutcome, RuntimeError> {
         assert!(!prompt.session_id.is_empty());
         self.prompts.fetch_add(1, Ordering::SeqCst);
-        sink.emit(AgentEvent::Text("tracked response".to_string()))
+        sink.emit(agent_text_event("tracked response"))?;
+        Ok(openaide_app_server::agent::AgentPromptOutcome::EndTurn)
     }
 }
 
@@ -172,7 +183,7 @@ impl AgentRuntime for LoadSessionAgent {
         assert!(!request.cancellation.is_cancelled());
         self.loads.fetch_add(1, Ordering::SeqCst);
 
-        let mut session = AgentSession::new(request.session_id);
+        let mut session = AgentSession::new(request.agent_id, request.session_id);
         session
             .config_options
             .insert("model".to_string(), "gpt-5.5".to_string());
@@ -193,12 +204,11 @@ impl AgentRuntime for LoadSessionAgent {
                     created_at: "2026-05-18T00:00:00Z".to_string(),
                     attachments: Vec::new(),
                 },
-                NormalizedMessage::AgentText {
-                    id: "replayed-agent".to_string(),
-                    text: "Prior agent answer".to_string(),
-                    created_at: "2026-05-18T00:00:01Z".to_string(),
-                    streaming: false,
-                },
+                normalized_agent_text(
+                    "replayed-agent",
+                    "Prior agent answer",
+                    "2026-05-18T00:00:01Z",
+                ),
             ],
         })
     }
@@ -206,11 +216,11 @@ impl AgentRuntime for LoadSessionAgent {
     fn resume_session(&self, request: AgentSessionResume) -> Result<AgentSession, RuntimeError> {
         assert_eq!(request.session_id, "external-session");
         self.resumes.fetch_add(1, Ordering::SeqCst);
-        Ok(AgentSession::new(request.session_id))
+        Ok(AgentSession::new(request.agent_id, request.session_id))
     }
 
-    fn close_session(&self, session_id: &str) -> Result<(), RuntimeError> {
-        assert_eq!(session_id, "external-session");
+    fn close_session(&self, session: &AgentSessionKey) -> Result<(), RuntimeError> {
+        assert_eq!(session.session_id(), "external-session");
         self.closes.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
@@ -219,10 +229,11 @@ impl AgentRuntime for LoadSessionAgent {
         &self,
         prompt: AgentPrompt,
         sink: Arc<dyn AgentEventSink>,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<openaide_app_server::agent::AgentPromptOutcome, RuntimeError> {
         assert_eq!(prompt.session_id, "external-session");
         self.prompts.fetch_add(1, Ordering::SeqCst);
-        sink.emit(AgentEvent::Text("continued loaded session".to_string()))
+        sink.emit(agent_text_event("continued loaded session"))?;
+        Ok(openaide_app_server::agent::AgentPromptOutcome::EndTurn)
     }
 }
 
@@ -242,7 +253,7 @@ impl AgentRuntime for DeleteTrackingLoadSessionAgent {
     fn load_session(&self, request: AgentSessionLoad) -> Result<AgentLoadedSession, RuntimeError> {
         assert_eq!(request.session_id, "external-session");
         Ok(AgentLoadedSession {
-            session: AgentSession::new(request.session_id),
+            session: AgentSession::new(request.agent_id, request.session_id),
             replayed_messages: Vec::new(),
         })
     }
@@ -270,33 +281,34 @@ impl AgentRuntime for DeleteTrackingLoadSessionAgent {
         &self,
         _prompt: AgentPrompt,
         _sink: Arc<dyn AgentEventSink>,
-    ) -> Result<(), RuntimeError> {
-        Ok(())
+    ) -> Result<openaide_app_server::agent::AgentPromptOutcome, RuntimeError> {
+        Ok(openaide_app_server::agent::AgentPromptOutcome::EndTurn)
     }
 }
 
 struct DelayedAgent;
 
 impl AgentRuntime for DelayedAgent {
-    fn start_session(&self, _request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
-        Ok(AgentSession::new("session_delayed"))
+    fn start_session(&self, request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
+        Ok(AgentSession::new(request.agent_id, "session_delayed"))
     }
 
     fn prompt(
         &self,
         _prompt: AgentPrompt,
         sink: Arc<dyn AgentEventSink>,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<openaide_app_server::agent::AgentPromptOutcome, RuntimeError> {
         thread::sleep(Duration::from_millis(80));
-        sink.emit(AgentEvent::Text("delayed response".to_string()))
+        sink.emit(agent_text_event("delayed response"))?;
+        Ok(openaide_app_server::agent::AgentPromptOutcome::EndTurn)
     }
 }
 
 struct OptionUpdateAgent;
 
 impl AgentRuntime for OptionUpdateAgent {
-    fn start_session(&self, _request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
-        Ok(AgentSession::new("session_option_update")
+    fn start_session(&self, request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
+        Ok(AgentSession::new(request.agent_id, "session_option_update")
             .with_config_options(&model_catalog("gpt-5.4")))
     }
 
@@ -304,24 +316,28 @@ impl AgentRuntime for OptionUpdateAgent {
         &self,
         _prompt: AgentPrompt,
         sink: Arc<dyn AgentEventSink>,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<openaide_app_server::agent::AgentPromptOutcome, RuntimeError> {
         sink.emit(AgentEvent::ConfigOptionsChanged(model_catalog("gpt-5.5")))?;
-        sink.emit(AgentEvent::Text("updated".to_string()))
+        sink.emit(agent_text_event("updated"))?;
+        Ok(openaide_app_server::agent::AgentPromptOutcome::EndTurn)
     }
 }
 
 struct ToolCallUpdateAgent;
 
 impl AgentRuntime for ToolCallUpdateAgent {
-    fn start_session(&self, _request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
-        Ok(AgentSession::new("session_tool_call_update"))
+    fn start_session(&self, request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
+        Ok(AgentSession::new(
+            request.agent_id,
+            "session_tool_call_update",
+        ))
     }
 
     fn prompt(
         &self,
         _prompt: AgentPrompt,
         sink: Arc<dyn AgentEventSink>,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<openaide_app_server::agent::AgentPromptOutcome, RuntimeError> {
         sink.emit(AgentEvent::ToolCall(AgentToolCall {
             tool_call_id: "tool_call_1".to_string(),
             scope_id: None,
@@ -342,24 +358,25 @@ impl AgentRuntime for ToolCallUpdateAgent {
             output_preview: Some("Found configuration".to_string()),
             details: None,
         }))?;
-        sink.emit(AgentEvent::Text("done".to_string()))
+        sink.emit(agent_text_event("done"))?;
+        Ok(openaide_app_server::agent::AgentPromptOutcome::EndTurn)
     }
 }
 
 struct ChunkedTextAgent;
 
 impl AgentRuntime for ChunkedTextAgent {
-    fn start_session(&self, _request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
-        Ok(AgentSession::new("session_chunked_text"))
+    fn start_session(&self, request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
+        Ok(AgentSession::new(request.agent_id, "session_chunked_text"))
     }
 
     fn prompt(
         &self,
         _prompt: AgentPrompt,
         sink: Arc<dyn AgentEventSink>,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<openaide_app_server::agent::AgentPromptOutcome, RuntimeError> {
         for chunk in ["I will ", "run ", "`pwd`."] {
-            sink.emit(AgentEvent::Text(chunk.to_string()))?;
+            sink.emit(agent_text_event(chunk))?;
         }
         sink.emit(AgentEvent::ToolCall(AgentToolCall {
             tool_call_id: "tool_call_pwd".to_string(),
@@ -372,28 +389,28 @@ impl AgentRuntime for ChunkedTextAgent {
             details: None,
         }))?;
         for chunk in ["Called", " `", "pwd", "`:", " `/", "home", "/us", "er", "`"] {
-            sink.emit(AgentEvent::Text(chunk.to_string()))?;
+            sink.emit(agent_text_event(chunk))?;
         }
-        Ok(())
+        Ok(openaide_app_server::agent::AgentPromptOutcome::EndTurn)
     }
 }
 
 struct MessageIdSpanningToolAgent;
 
 impl AgentRuntime for MessageIdSpanningToolAgent {
-    fn start_session(&self, _request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
-        Ok(AgentSession::new("session_message_id_spanning_tool"))
+    fn start_session(&self, request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
+        Ok(AgentSession::new(
+            request.agent_id,
+            "session_message_id_spanning_tool",
+        ))
     }
 
     fn prompt(
         &self,
         _prompt: AgentPrompt,
         sink: Arc<dyn AgentEventSink>,
-    ) -> Result<(), RuntimeError> {
-        sink.emit(AgentEvent::TextChunk {
-            text: "Before ".to_string(),
-            source_message_id: Some("message-1".to_string()),
-        })?;
+    ) -> Result<openaide_app_server::agent::AgentPromptOutcome, RuntimeError> {
+        sink.emit(sourced_agent_text_event("Before ", "message-1"))?;
         sink.emit(AgentEvent::ToolCall(AgentToolCall {
             tool_call_id: "tool_between_chunks".to_string(),
             scope_id: None,
@@ -404,49 +421,8 @@ impl AgentRuntime for MessageIdSpanningToolAgent {
             output_preview: None,
             details: None,
         }))?;
-        sink.emit(AgentEvent::TextChunk {
-            text: "after.".to_string(),
-            source_message_id: Some("message-1".to_string()),
-        })
-    }
-}
-
-struct PermissionBoundaryTextAgent;
-
-impl AgentRuntime for PermissionBoundaryTextAgent {
-    fn start_session(&self, _request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
-        Ok(AgentSession::new("session_permission_boundary_text"))
-    }
-
-    fn prompt(
-        &self,
-        _prompt: AgentPrompt,
-        sink: Arc<dyn AgentEventSink>,
-    ) -> Result<(), RuntimeError> {
-        for chunk in ["Need ", "approval."] {
-            sink.emit(AgentEvent::Text(chunk.to_string()))?;
-        }
-        let _outcome = sink.request_permission(AgentPermissionRequest {
-            request_id: "permission_boundary".to_string(),
-            title: "Allow follow-up".to_string(),
-            description: Some("Continue after approval.".to_string()),
-            scope: Some("workspace".to_string()),
-            risk: None,
-            tool_call: AgentToolCallRef {
-                tool_call_id: "tool_permission_boundary".to_string(),
-                title: "Allow follow-up".to_string(),
-                kind: Some("edit".to_string()),
-            },
-            options: vec![AgentPermissionOption {
-                option_id: "allow".to_string(),
-                name: "Allow".to_string(),
-                kind: AgentPermissionOptionKind::AllowOnce,
-            }],
-        })?;
-        for chunk in ["After ", "approval."] {
-            sink.emit(AgentEvent::Text(chunk.to_string()))?;
-        }
-        Ok(())
+        sink.emit(sourced_agent_text_event("after.", "message-1"))?;
+        Ok(openaide_app_server::agent::AgentPromptOutcome::EndTurn)
     }
 }
 
@@ -455,17 +431,21 @@ struct AttachmentCapturingAgent {
 }
 
 impl AgentRuntime for AttachmentCapturingAgent {
-    fn start_session(&self, _request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
-        Ok(AgentSession::new("session_attachment_capture"))
+    fn start_session(&self, request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
+        Ok(AgentSession::new(
+            request.agent_id,
+            "session_attachment_capture",
+        ))
     }
 
     fn prompt(
         &self,
         prompt: AgentPrompt,
         sink: Arc<dyn AgentEventSink>,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<openaide_app_server::agent::AgentPromptOutcome, RuntimeError> {
         self.prompts.lock().unwrap().push(prompt.attachments);
-        sink.emit(AgentEvent::Text("captured attachments".to_string()))
+        sink.emit(agent_text_event("captured attachments"))?;
+        Ok(openaide_app_server::agent::AgentPromptOutcome::EndTurn)
     }
 }
 
@@ -497,14 +477,14 @@ impl IdleOptionUpdateAgent {
 }
 
 impl AgentRuntime for IdleOptionUpdateAgent {
-    fn start_session(&self, _request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
-        Ok(AgentSession::new("session_idle_option_update")
+    fn start_session(&self, request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
+        Ok(AgentSession::new(request.agent_id, "session_idle_option_update")
             .with_config_options(&model_catalog("gpt-5.4")))
     }
 
     fn attach_session_event_sink(
         &self,
-        _session_id: &str,
+        _session: &AgentSessionKey,
         sink: Arc<dyn AgentSessionEventSink>,
     ) -> Result<(), RuntimeError> {
         *self.sink.lock().unwrap() = Some(sink);
@@ -515,8 +495,9 @@ impl AgentRuntime for IdleOptionUpdateAgent {
         &self,
         _prompt: AgentPrompt,
         sink: Arc<dyn AgentEventSink>,
-    ) -> Result<(), RuntimeError> {
-        sink.emit(AgentEvent::Text("done".to_string()))
+    ) -> Result<openaide_app_server::agent::AgentPromptOutcome, RuntimeError> {
+        sink.emit(agent_text_event("done"))?;
+        Ok(openaide_app_server::agent::AgentPromptOutcome::EndTurn)
     }
 }
 
@@ -525,16 +506,20 @@ struct ShutdownTrackingAgent {
 }
 
 impl AgentRuntime for ShutdownTrackingAgent {
-    fn start_session(&self, _request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
-        Ok(AgentSession::new("session_shutdown_tracking"))
+    fn start_session(&self, request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
+        Ok(AgentSession::new(
+            request.agent_id,
+            "session_shutdown_tracking",
+        ))
     }
 
     fn prompt(
         &self,
         _prompt: AgentPrompt,
         sink: Arc<dyn AgentEventSink>,
-    ) -> Result<(), RuntimeError> {
-        sink.emit(AgentEvent::Text("response".to_string()))
+    ) -> Result<openaide_app_server::agent::AgentPromptOutcome, RuntimeError> {
+        sink.emit(agent_text_event("response"))?;
+        Ok(openaide_app_server::agent::AgentPromptOutcome::EndTurn)
     }
 
     fn shutdown(&self) -> Result<(), RuntimeError> {
@@ -555,15 +540,18 @@ struct ShutdownBlockingAgent {
 }
 
 impl AgentRuntime for ShutdownBlockingAgent {
-    fn start_session(&self, _request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
-        Ok(AgentSession::new("session_shutdown_blocking"))
+    fn start_session(&self, request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
+        Ok(AgentSession::new(
+            request.agent_id,
+            "session_shutdown_blocking",
+        ))
     }
 
     fn prompt(
         &self,
         _prompt: AgentPrompt,
         _sink: Arc<dyn AgentEventSink>,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<openaide_app_server::agent::AgentPromptOutcome, RuntimeError> {
         let (state_lock, changed) = &*self.state;
         let mut state = state_lock.lock().unwrap();
         state.prompt_started = true;
@@ -591,13 +579,16 @@ struct AttachFailingAgent {
 }
 
 impl AgentRuntime for AttachFailingAgent {
-    fn start_session(&self, _request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
-        Ok(AgentSession::new("session_attach_failing"))
+    fn start_session(&self, request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
+        Ok(AgentSession::new(
+            request.agent_id,
+            "session_attach_failing",
+        ))
     }
 
     fn attach_session_event_sink(
         &self,
-        _session_id: &str,
+        _session: &AgentSessionKey,
         _sink: Arc<dyn AgentSessionEventSink>,
     ) -> Result<(), RuntimeError> {
         Err(RuntimeError::NotReady("session worker stopped".to_string()))
@@ -607,12 +598,12 @@ impl AgentRuntime for AttachFailingAgent {
         &self,
         _prompt: AgentPrompt,
         _sink: Arc<dyn AgentEventSink>,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<openaide_app_server::agent::AgentPromptOutcome, RuntimeError> {
         self.prompts.fetch_add(1, Ordering::SeqCst);
-        Ok(())
+        Ok(openaide_app_server::agent::AgentPromptOutcome::EndTurn)
     }
 
-    fn close_session(&self, _session_id: &str) -> Result<(), RuntimeError> {
+    fn close_session(&self, _session: &AgentSessionKey) -> Result<(), RuntimeError> {
         self.closes.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }
@@ -627,19 +618,22 @@ struct FollowupAttachFailingAgent {
 }
 
 impl AgentRuntime for FollowupAttachFailingAgent {
-    fn start_session(&self, _request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
+    fn start_session(&self, request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
         let idx = self.starts.fetch_add(1, Ordering::SeqCst);
-        Ok(AgentSession::new(format!("session_followup_{idx}")))
+        Ok(AgentSession::new(
+            request.agent_id,
+            format!("session_followup_{idx}"),
+        ))
     }
 
     fn resume_session(&self, request: AgentSessionResume) -> Result<AgentSession, RuntimeError> {
         self.resumes.fetch_add(1, Ordering::SeqCst);
-        Ok(AgentSession::new(request.session_id))
+        Ok(AgentSession::new(request.agent_id, request.session_id))
     }
 
     fn attach_session_event_sink(
         &self,
-        _session_id: &str,
+        _session: &AgentSessionKey,
         _sink: Arc<dyn AgentSessionEventSink>,
     ) -> Result<(), RuntimeError> {
         let call = self.attach_calls.fetch_add(1, Ordering::SeqCst);
@@ -654,12 +648,13 @@ impl AgentRuntime for FollowupAttachFailingAgent {
         &self,
         _prompt: AgentPrompt,
         sink: Arc<dyn AgentEventSink>,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<openaide_app_server::agent::AgentPromptOutcome, RuntimeError> {
         self.prompts.fetch_add(1, Ordering::SeqCst);
-        sink.emit(AgentEvent::Text("follow-up response".to_string()))
+        sink.emit(agent_text_event("follow-up response"))?;
+        Ok(openaide_app_server::agent::AgentPromptOutcome::EndTurn)
     }
 
-    fn close_session(&self, _session_id: &str) -> Result<(), RuntimeError> {
+    fn close_session(&self, _session: &AgentSessionKey) -> Result<(), RuntimeError> {
         self.closes.fetch_add(1, Ordering::SeqCst);
         Ok(())
     }

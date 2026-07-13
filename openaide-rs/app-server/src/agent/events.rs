@@ -1,17 +1,14 @@
-use crate::protocol::model::{ActivityToolDetails, AgentCommandsCatalog, ConfigOptionsCatalog};
+use crate::protocol::model::{
+    ActivityToolDetails, AgentCommandsCatalog, AgentMessagePart, AgentMessageRole,
+    ConfigOptionsCatalog,
+};
 
 #[derive(Debug, Clone)]
 pub enum AgentEvent {
-    Text(String),
-    Thought(String),
-    TextChunk {
-        text: String,
-        /// Agent correlation key used only to preserve streamed message boundaries.
-        source_message_id: Option<String>,
-    },
-    ThoughtChunk {
-        text: String,
-        /// Agent correlation key used only to preserve streamed message boundaries.
+    MessageChunk {
+        role: AgentMessageRole,
+        part: AgentMessagePart,
+        /// ACP correlation key shared by every ordered part of one message.
         source_message_id: Option<String>,
     },
     ToolCall(AgentToolCall),

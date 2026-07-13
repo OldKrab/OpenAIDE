@@ -13,8 +13,6 @@ export function ChatPermissionCard({
   onRespond: (
     requestId: string,
     optionId: string,
-    decision: "approved" | "denied",
-    source?: "agent" | "appServer",
   ) => void;
 }) {
   const selected = permission.options.find((option) => option.id === permission.selected_option);
@@ -28,15 +26,16 @@ export function ChatPermissionCard({
   const showFacts = Boolean(permission.scope || permission.risk);
   const showBody = Boolean(display.description || showCommand || showFacts || response?.error || !terminal);
 
-  const respond = (option: PermissionOption) => {
+  const respond = (option: PermissionOption, action?: HTMLButtonElement) => {
     if (responding || terminal) return;
     const decision = permissionDecisionForOption(option);
     if (!decision) return;
+    // The action row disappears after resolution. Keep focus on the stable card
+    // without letting native focus restoration move the Chat viewport.
+    action?.closest<HTMLElement>(".permission-card")?.focus({ preventScroll: true });
     onRespond(
       permission.app_server_request_id ?? permission.request_id,
       option.id,
-      decision,
-      permission.app_server_request_id ? "appServer" : "agent",
     );
   };
 
@@ -44,6 +43,7 @@ export function ChatPermissionCard({
     <section
       className={`permission-card tool-${toolKindClass(permission.tool_call.kind ?? "other")} ${terminal ? "resolved" : ""}`}
       aria-label="Permission request"
+      tabIndex={-1}
     >
       <header className="permission-head">
         <span className="permission-icon" aria-hidden="true">
@@ -53,9 +53,12 @@ export function ChatPermissionCard({
           <strong>{display.title}</strong>
         </span>
         <span
+          aria-atomic="true"
+          aria-live="polite"
           className={`permission-state ${
             responding ? "responding" : terminal ? (approved ? "approved" : permission.state === "cancelled" ? "cancelled" : "denied") : "waiting"
           }`}
+          role="status"
         >
           {responding ? (
             <LoaderCircle size={14} aria-hidden="true" />
@@ -101,7 +104,7 @@ export function ChatPermissionCard({
                   key={option.id}
                   className={option.kind === "deny" ? "deny" : option.id.includes("amendment") ? "remember" : "allow"}
                   disabled={responding || !permissionDecisionForOption(option)}
-                  onClick={() => respond(option)}
+                  onClick={(event) => respond(option, event.currentTarget)}
                   type="button"
                 >
                   {option.label}
@@ -109,7 +112,7 @@ export function ChatPermissionCard({
               ))}
             </div>
           ) : null}
-          {response?.error ? <p className="permission-error">{response.error}</p> : null}
+          {response?.error ? <p className="permission-error" role="alert">{response.error}</p> : null}
         </div>
       ) : null}
     </section>
@@ -130,7 +133,7 @@ function permissionResolutionLabel(
       ? { status: `Denied, ${selected.label}` }
       : { status: "Denied" };
   }
-  return { status: "Permission request cancelled" };
+  return { status: permission.resolution_message ?? "Permission request cancelled" };
 }
 
 function permissionDisplay(permission: Extract<NormalizedMessage, { kind: "permission" }>) {

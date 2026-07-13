@@ -7,7 +7,6 @@ use crate::agent::registry::AgentDefinitionSummary;
 use crate::agent::registry::AgentRegistry;
 use crate::agent::registry_handle::AgentRegistryHandle;
 use crate::agent::status_cache::AgentStatusCache;
-use crate::agent_identity::default_agent_id;
 
 pub trait AgentCollectionSnapshotSource: Send + Sync {
     fn snapshot(&self) -> Result<AgentCollectionSnapshot, ProtocolError>;
@@ -57,7 +56,6 @@ fn collection_from_registry_summaries_with_statuses(
     statuses: &AgentStatusCache,
 ) -> AgentCollectionSnapshot {
     AgentCollectionSnapshot {
-        default_agent_id: default_agent_id(&summaries),
         agents: summaries
             .into_iter()
             .map(|agent| {

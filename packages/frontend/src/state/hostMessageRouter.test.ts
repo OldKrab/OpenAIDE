@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { HostToWebviewMessage } from "@openaide/app-shell-contracts";
 import { routeHostMessage } from "./hostMessageRouter";
-import { SnapshotRequestTracker } from "./snapshotRequests";
 import type { HostMessageRouterContext } from "./hostMessageRouterTypes";
 
 describe("host message router", () => {
@@ -39,8 +38,8 @@ describe("host message router", () => {
     routeHostMessage({ type: "newTask" }, context);
     routeHostMessage({ type: "showSettings" }, context);
 
-    expect(context.postHostMessage).toHaveBeenCalledWith({ type: "surface.openNewTask" });
-    expect(context.postHostMessage).toHaveBeenCalledWith({ type: "surface.openSettings" });
+    expect(context.openNewTaskSurface).toHaveBeenCalledOnce();
+    expect(context.openSettingsSurface).toHaveBeenCalledOnce();
   });
 
   it("routes secret storage failures back to Agent Settings", () => {
@@ -70,14 +69,10 @@ function routerContextBase() {
   return {
     bootstrap: { surface: "navigation" as const },
     dispatch: vi.fn(),
+    openNewTaskSurface: vi.fn(),
+    openSettingsSurface: vi.fn(),
     setAgents: vi.fn(),
     setPreferences: vi.fn(),
-    snapshotRequests: { current: new SnapshotRequestTracker() },
-    latestOptionsRequestKey: { current: undefined as string | undefined },
-    latestSessionListRequestId: { current: undefined as number | undefined },
-    nextSessionListRequestId: { current: 0 },
-    latestNativeSessionSelection: { current: { agentId: "codex", workspaceRoot: "/workspace/app" } },
-    createSnapshotRequestId: vi.fn(() => 1),
     postHostMessage: vi.fn(),
   };
 }

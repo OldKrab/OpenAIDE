@@ -49,7 +49,7 @@ fn task_commands_do_not_bypass_task_mutations() {
             ".upsert_message_by_identity(",
             "append_normalized_to_store(",
             "upsert_normalized_to_store(",
-            ".task_updated(",
+            ".task_changed(",
             "RuntimeNotifier",
         ],
     );

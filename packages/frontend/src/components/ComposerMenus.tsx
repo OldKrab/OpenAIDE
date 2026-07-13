@@ -55,12 +55,15 @@ export function ComposerControls({
   toggleMenu,
 }: ComposerControlsProps) {
   const controlsLocked = disabled || agentLocked;
+  const configControlsLocked = disabled || configLocked;
   const optionControls = configOptions?.options ?? [];
+  const mobileOptionsLocked = (optionControls.length === 0 || configControlsLocked)
+    && (!showIsolationSelector || controlsLocked);
   const mobileOptionsLabel = compactRunOptionsLabel(optionControls, selection.isolation, showIsolationSelector);
   const imageUploadRef = useRef<HTMLInputElement | null>(null);
   const uploadImages = (files: File[], input: HTMLInputElement) => {
     input.value = "";
-    if (files.length === 0 || !fileBrowser?.attachPastedImage) return;
+    if (disabled || files.length === 0 || !fileBrowser?.attachPastedImage) return;
     void attachEveryImage(files, (file) => fileBrowser.attachPastedImage(file)).then(
       () => setOpenMenu(undefined),
       (error: unknown) => onUnsupportedImageAttachment?.(errorMessage(error, "Unable to upload image.")),
@@ -81,7 +84,7 @@ export function ComposerControls({
           <Popover label="Add context">
             <MenuButton
               description="Browse files and images in this workspace."
-              disabled={!fileBrowser}
+              disabled={disabled || !fileBrowser}
               icon={<Paperclip size={13} />}
               label="Workspace files"
               onClick={() => {
@@ -90,14 +93,14 @@ export function ComposerControls({
             />
             <MenuButton
               description="Choose images from this device."
-              disabled={!fileBrowser}
+              disabled={disabled || !fileBrowser}
               icon={<Image size={13} />}
               label="Upload or photo"
               onClick={() => imageUploadRef.current?.click()}
             />
             <input
               accept="image/*"
-              disabled={!fileBrowser}
+              disabled={disabled || !fileBrowser}
               multiple
               onChange={(event) => uploadImages(Array.from(event.target.files ?? []), event.currentTarget)}
               ref={imageUploadRef}
@@ -108,7 +111,11 @@ export function ComposerControls({
         ) : null}
         {openMenu === "files" && fileBrowser ? (
           <Popover className="composer-file-browser-popover" label="Workspace files">
-            <ComposerFileBrowser browser={fileBrowser} onAttached={() => setOpenMenu(undefined)} />
+            <ComposerFileBrowser
+              browser={fileBrowser}
+              key={fileBrowser.ownerKey}
+              onAttached={() => setOpenMenu(undefined)}
+            />
           </Popover>
         ) : null}
       </div>
@@ -144,10 +151,10 @@ export function ComposerControls({
           <div className="composer-option-anchor composer-config-control-anchor" key={option.id}>
             <Selector
               className="composer-config-control"
-              disabled={configLocked}
+              disabled={configControlsLocked}
               icon={configIcon(option)}
               label={configOptionLabel(option)}
-              locked={configLocked}
+              locked={configControlsLocked}
               menuOpen={openMenu === menuId}
               onClick={() => toggleMenu(menuId)}
             />
@@ -163,6 +170,7 @@ export function ComposerControls({
                   <MenuButton
                     active={option.current_value === value.id}
                     description={value.description ?? value.group_label ?? option.description ?? ""}
+                    disabled={configControlsLocked}
                     icon={configIcon(option, 13)}
                     key={value.id}
                     label={value.label}
@@ -197,6 +205,7 @@ export function ComposerControls({
                 <MenuButton
                   active={selection.isolation === isolation.id}
                   description={isolation.description}
+                  disabled={controlsLocked}
                   icon={<Shield size={13} />}
                   key={isolation.id}
                   label={isolation.label}
@@ -210,10 +219,10 @@ export function ComposerControls({
       {optionControls.length > 0 || showIsolationSelector ? (
         <div className="composer-mobile-options-anchor">
           <Selector
-            disabled={disabled}
+            disabled={disabled || mobileOptionsLocked}
             icon={<SlidersHorizontal size={12} />}
             label={mobileOptionsLabel}
-            locked={false}
+            locked={mobileOptionsLocked}
             menuOpen={openMenu === "options"}
             onClick={() => toggleMenu("options")}
           />
@@ -222,6 +231,7 @@ export function ComposerControls({
               {optionControls.map((option) => (
                 <MenuButton
                   description={runOptionDescription(option)}
+                  disabled={configControlsLocked}
                   icon={configIcon(option, 13)}
                   key={option.id}
                   label={runOptionLabel(option)}
@@ -231,6 +241,7 @@ export function ComposerControls({
               {showIsolationSelector ? (
                 <MenuButton
                   description={`Current: ${isolationLabel(selection.isolation)}`}
+                  disabled={controlsLocked}
                   icon={<Shield size={13} />}
                   label="Isolation"
                   onClick={() => setOpenMenu("isolation")}

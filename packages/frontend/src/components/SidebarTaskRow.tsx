@@ -1,10 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { Archive, MoreHorizontal, RotateCcw } from "lucide-react";
 import type { TaskStatus, TaskSummary } from "@openaide/app-shell-contracts";
-import { PENDING_NEW_TASK_ID } from "./appControllerDerivedState";
 import { AgentIcon } from "./AgentIcon";
 import { SidebarRowActionSlot } from "./SidebarRowParts";
-import { relativeTime, splitGeneratedTaskTitle } from "./taskSurfaceHelpers";
+import { relativeTime } from "./taskSurfaceHelpers";
 
 export function SidebarTaskRow({
   activeTaskId,
@@ -24,8 +23,7 @@ export function SidebarTaskRow({
   const [menuOpen, setMenuOpen] = useState(false);
   const actionSlotRef = useRef<HTMLDivElement>(null);
   const actionTriggerRef = useRef<HTMLButtonElement>(null);
-  const pendingNewTask = task.task_id === PENDING_NEW_TASK_ID;
-  const title = splitGeneratedTaskTitle(task.title);
+  const title = task.title || "Untitled task";
   const actionLabel = showArchived ? "Restore task" : "Archive task";
   const runAction = () => {
     setMenuOpen(false);
@@ -58,7 +56,6 @@ export function SidebarTaskRow({
     <div className={`task-row task-product-row ${task.task_id === activeTaskId ? "selected" : ""}`} role="listitem">
       <button
         className="task-open"
-        disabled={pendingNewTask}
         onClick={() => onOpenTask(task.task_id)}
         type="button"
       >
@@ -66,7 +63,7 @@ export function SidebarTaskRow({
           <AgentIcon agentId={task.agent_id} agentName={task.agent_name} size={12} />
         </span>
         <span className="task-row-body">
-          <span className="task-title" title={title.originalTitle}>{title.title}</span>
+          <span className="task-title" title={title}>{title}</span>
           <TaskTrailingMeta
             status={task.status}
             timestamp={task.last_activity}
@@ -75,19 +72,17 @@ export function SidebarTaskRow({
         </span>
       </button>
       <SidebarRowActionSlot containerRef={actionSlotRef}>
-        {pendingNewTask ? null : (
-          <button
-            ref={actionTriggerRef}
-            className="task-row-action"
-            onClick={() => setMenuOpen((open) => !open)}
-            title={menuOpen ? undefined : "Task actions"}
-            type="button"
-            aria-expanded={menuOpen}
-            aria-label={`Task actions for ${task.title}`}
-          >
-            <MoreHorizontal size={14} />
-          </button>
-        )}
+        <button
+          ref={actionTriggerRef}
+          className="task-row-action"
+          onClick={() => setMenuOpen((open) => !open)}
+          title={menuOpen ? undefined : "Task actions"}
+          type="button"
+          aria-expanded={menuOpen}
+          aria-label={`Task actions for ${title}`}
+        >
+          <MoreHorizontal size={14} />
+        </button>
         {menuOpen ? (
           <div className="task-row-menu" role="menu">
             <button onClick={runAction} type="button" role="menuitem">
@@ -120,14 +115,15 @@ function TaskTrailingMeta({
 function TaskStateOrAge({ status, timestamp, unread }: { status: TaskStatus; timestamp?: string; unread: boolean }) {
   // Runtime state takes the age slot. Active work is live by definition, so stale
   // persisted unread data must never add a second indicator to the spinner.
-  if (status === "active") {
+  if (status === "active" || status === "stopping") {
+    const label = status === "stopping" ? "Stopping" : "In progress";
     return (
-      <span aria-label="In progress" className="task-trailing-indicator" role="img" title="In progress">
+      <span aria-label={label} className="task-trailing-indicator" role="img" title={label}>
         <span className="task-state-spinner" />
       </span>
     );
   }
-  if (status === "blocked") {
+  if (status === "waiting") {
     const label = unread ? "Waiting, unread" : "Waiting";
     return (
       <span aria-label={label} className="task-trailing-indicator" role="img" title={label}>

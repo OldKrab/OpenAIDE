@@ -15,7 +15,7 @@ import {
   type CustomAgentMetadataUpdateParams,
   type CustomAgentReplaceParams,
 } from "@openaide/app-shell-contracts";
-import { agentOptionsFromProtocol, defaultAgentActionFromProtocol } from "../state/appServerAgents";
+import { agentOptionsFromProtocol, fallbackAgentActionFromProtocol } from "../state/appServerAgents";
 import {
   beginAgentSecretTransaction,
   type AgentSecretTransaction,
@@ -294,6 +294,6 @@ function applyAgentMutationResult(
   agents: AgentCollectionSnapshot,
 ) {
   context.setAgents(agentOptionsFromProtocol(agents));
-  const action = defaultAgentActionFromProtocol(agents, context.currentAgentId);
+  const action = fallbackAgentActionFromProtocol(agents, context.currentAgentId);
   if (action) context.dispatch(action);
 }

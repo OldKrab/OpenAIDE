@@ -3,15 +3,15 @@ use openaide_app_server_protocol::methods::{
     AGENT_REPLACE_CUSTOM, AGENT_SET_ENABLED, AGENT_UPDATE_CUSTOM_METADATA,
     ATTACHMENT_CONFIRM_EMBEDDED, ATTACHMENT_CREATE_EMBEDDED_CANDIDATE,
     ATTACHMENT_CREATE_FILE_REFERENCE, ATTACHMENT_CREATE_PASTED_IMAGE, ATTACHMENT_LIST_DIRECTORY,
-    ATTACHMENT_LIST_ROOTS, ATTACHMENT_REFRESH_HANDLES, ATTACHMENT_RELEASE_HANDLES,
-    ATTACHMENT_REVEAL, CLIENT_HEARTBEAT, CLIENT_INITIALIZE, CLIENT_PROBE, DIAGNOSTICS_GET_RUNTIME,
-    SETTINGS_GET_AGENT_DETAILS, SETTINGS_GET_MCP_SERVERS, SETTINGS_GET_PREFERENCES,
-    SETTINGS_GET_RUNTIME, SETTINGS_GET_SKILLS, SETTINGS_UPDATE_PREFERENCES,
-    SETTINGS_UPDATE_RUNTIME, SHELL_RESOLVE_FILE_REVEAL, STATE_SUBSCRIBE, STATE_UNSUBSCRIBE,
-    SUPPORT_RECOVER_STUCK_SESSIONS, TASK_ADOPT_NATIVE_SESSION, TASK_CANCEL, TASK_CHAT_PAGE,
-    TASK_CREATE, TASK_DISCARD, TASK_LIST, TASK_MARK_READ, TASK_OPEN, TASK_RETRY_HISTORY_SYNC,
-    TASK_SEND, TASK_SET_ARCHIVED, TASK_SET_CONFIG_OPTION, TASK_TOOL_DETAIL,
-    WORKSPACE_LIST_DIRECTORY, WORKSPACE_LIST_ROOTS,
+    ATTACHMENT_LIST_ROOTS, ATTACHMENT_REFRESH_HANDLES, ATTACHMENT_RELEASE, ATTACHMENT_REVEAL,
+    CLIENT_CAPABILITIES_CHANGED, CLIENT_HEARTBEAT, CLIENT_INITIALIZE, CLIENT_PROBE,
+    DIAGNOSTICS_GET_RUNTIME, SETTINGS_GET_AGENT_DETAILS, SETTINGS_GET_MCP_SERVERS,
+    SETTINGS_GET_PREFERENCES, SETTINGS_GET_RUNTIME, SETTINGS_GET_SKILLS,
+    SETTINGS_UPDATE_PREFERENCES, SETTINGS_UPDATE_RUNTIME, SHELL_RESOLVE_FILE_REVEAL,
+    STATE_SUBSCRIBE, STATE_UNSUBSCRIBE, SUPPORT_RECOVER_STUCK_SESSIONS, TASK_ADOPT_NATIVE_SESSION,
+    TASK_CANCEL, TASK_CHAT_PAGE, TASK_CREATE, TASK_DISCARD, TASK_LIST, TASK_MARK_READ, TASK_OPEN,
+    TASK_SEND, TASK_SET_ARCHIVED, TASK_SET_CONFIG_OPTION, WORKSPACE_LIST_DIRECTORY,
+    WORKSPACE_LIST_ROOTS,
 };
 
 use crate::client_lifecycle::{AppServerTime, ConnectionId};
@@ -58,6 +58,9 @@ impl RpcGateway {
         match method.as_str() {
             CLIENT_PROBE => self.handle_client_probe(connection_id, id, params, meta),
             CLIENT_INITIALIZE => self.handle_initialize(connection_id, id, params, meta, now),
+            CLIENT_CAPABILITIES_CHANGED => {
+                self.handle_client_capabilities_changed(connection_id, id, params, meta, now)
+            }
             CLIENT_HEARTBEAT => self.handle_client_heartbeat(connection_id, id, params, meta, now),
             STATE_SUBSCRIBE => self.handle_subscribe(connection_id, id, params, meta, now),
             STATE_UNSUBSCRIBE => self.handle_unsubscribe(connection_id, id, params, meta, now),
@@ -125,9 +128,7 @@ impl RpcGateway {
             ATTACHMENT_REFRESH_HANDLES => {
                 self.handle_attachment_refresh_handles(connection_id, id, params, meta)
             }
-            ATTACHMENT_RELEASE_HANDLES => {
-                self.handle_attachment_release_handles(connection_id, id, params, meta)
-            }
+            ATTACHMENT_RELEASE => self.handle_attachment_release(connection_id, id, params, meta),
             ATTACHMENT_REVEAL => {
                 self.handle_attachment_reveal(connection_id, id, params, meta, now)
             }
@@ -147,7 +148,6 @@ impl RpcGateway {
             TASK_SEND => self.handle_task_send(connection_id, id, params, meta, now),
             TASK_CANCEL => self.handle_task_cancel(connection_id, id, params, meta, now),
             TASK_CHAT_PAGE => self.handle_task_chat_page(connection_id, id, params, meta),
-            TASK_TOOL_DETAIL => self.handle_task_tool_detail(connection_id, id, params, meta),
             TASK_SET_CONFIG_OPTION => {
                 self.handle_task_set_config_option(connection_id, id, params, meta, now)
             }
@@ -157,9 +157,6 @@ impl RpcGateway {
             }
             TASK_LIST => self.handle_task_list(connection_id, id, params, meta),
             TASK_OPEN => self.handle_task_open(connection_id, id, params, meta),
-            TASK_RETRY_HISTORY_SYNC => {
-                self.handle_task_retry_history_sync(connection_id, id, params, meta)
-            }
             TASK_MARK_READ => self.handle_task_mark_read(connection_id, id, params, meta, now),
             _ => self.error(
                 connection_id,

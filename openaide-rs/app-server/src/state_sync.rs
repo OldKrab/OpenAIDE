@@ -1,7 +1,7 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use openaide_app_server_protocol::events::{AppServerEvent, AppServerEventPayload, EventScope};
-use openaide_app_server_protocol::ids::{ClientInstanceId, EventCursor, StateRootId};
+use openaide_app_server_protocol::ids::{ClientInstanceId, StateRootId};
 use openaide_app_server_protocol::state::{
     StateSubscribeResult, StateUnsubscribeResult, SubscriptionScope,
 };
@@ -31,9 +31,9 @@ pub struct StateEventDelivery {
 #[derive(Debug, Clone)]
 pub struct StateStream {
     state_root_id: StateRootId,
-    // Event cursors stay globally unique while previous_cursor follows each client's delivery path.
+    // Client snapshots retain a coarse process cursor; live subscriptions use independent cursors.
     cursors: CursorSequencer,
-    client_cursors: HashMap<ClientInstanceId, EventCursor>,
+    scope_cursors: HashMap<SubscriptionScope, CursorSequencer>,
     subscriptions: Vec<SubscriptionRecord>,
 }
 
@@ -42,7 +42,7 @@ impl StateStream {
         Self {
             state_root_id,
             cursors: CursorSequencer::new(),
-            client_cursors: HashMap::new(),
+            scope_cursors: HashMap::new(),
             subscriptions: Vec::new(),
         }
     }
@@ -54,9 +54,9 @@ impl StateStream {
         snapshot_provider: &impl SnapshotProvider,
         _now: AppServerTime,
     ) -> Result<StateSubscribeResult, openaide_app_server_protocol::errors::ProtocolError> {
-        let token = self.read_token_for_client(&ctx.client_instance_id);
-        self.upsert_subscription(ctx.client_instance_id.clone(), scope.clone());
+        let token = self.read_token_for_scope(&scope);
         let snapshot = snapshot_provider.snapshot(ctx, &scope, &token)?;
+        self.upsert_subscription(ctx.client_instance_id.clone(), scope.clone());
         Ok(StateSubscribeResult {
             cursor: token.cursor().clone(),
             scope,
@@ -83,28 +83,55 @@ impl StateStream {
         deliveries: impl Fn(&ClientInstanceId) -> Option<Delivery>,
         _now: AppServerTime,
     ) -> PublishOutcome {
-        let (stream_previous_cursor, cursor) = self.cursors.advance();
-        let deliveries = self
-            .subscribers_for_event(&scope, &payload)
-            .into_iter()
-            .filter_map(|client_id| {
-                let delivery = deliveries(&client_id)?;
-                let previous_cursor = self
-                    .client_cursors
-                    .get(&client_id)
-                    .cloned()
-                    .unwrap_or_else(|| stream_previous_cursor.clone());
-                let event = AppServerEvent {
-                    previous_cursor,
-                    cursor: cursor.clone(),
-                    scope: scope.clone(),
-                    payload: payload.clone(),
-                };
-                self.client_cursors.insert(client_id, cursor.clone());
-                Some(StateEventDelivery { delivery, event })
+        self.cursors.advance();
+        let matching = self
+            .subscriptions
+            .iter()
+            .filter(|subscription| {
+                event_matches_subscription(&scope, &payload, subscription, &self.state_root_id)
             })
-            .collect();
-        PublishOutcome { deliveries }
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut by_scope = Vec::<(SubscriptionScope, Vec<ClientInstanceId>)>::new();
+        for subscription in matching {
+            if let Some((_, clients)) = by_scope
+                .iter_mut()
+                .find(|(candidate, _)| candidate == &subscription.scope)
+            {
+                if !clients.contains(&subscription.client_instance_id) {
+                    clients.push(subscription.client_instance_id);
+                }
+            } else {
+                by_scope.push((subscription.scope, vec![subscription.client_instance_id]));
+            }
+        }
+
+        let mut published = Vec::new();
+        for (subscription, clients) in by_scope {
+            let (previous_cursor, cursor) = self
+                .scope_cursors
+                .entry(subscription.clone())
+                .or_default()
+                .advance();
+            for client_id in clients {
+                let Some(delivery) = deliveries(&client_id) else {
+                    continue;
+                };
+                published.push(StateEventDelivery {
+                    delivery,
+                    event: AppServerEvent {
+                        subscription: subscription.clone(),
+                        previous_cursor: previous_cursor.clone(),
+                        cursor: cursor.clone(),
+                        scope: scope.clone(),
+                        payload: payload.clone(),
+                    },
+                });
+            }
+        }
+        PublishOutcome {
+            deliveries: published,
+        }
     }
 
     pub fn subscribers_for_scope(&self, scope: &SubscriptionScope) -> Vec<ClientInstanceId> {
@@ -139,18 +166,12 @@ impl StateStream {
         self.cursors.read_token()
     }
 
-    /// Returns the cursor of the event stream actually observed by one App Shell client.
+    /// Client snapshots use a coarse cursor only as an initialization marker.
     pub fn read_token_for_client(
         &mut self,
-        client_instance_id: &ClientInstanceId,
+        _client_instance_id: &ClientInstanceId,
     ) -> SnapshotReadToken {
-        let stream_cursor = self.cursors.read_token().cursor().clone();
-        let cursor = self
-            .client_cursors
-            .entry(client_instance_id.clone())
-            .or_insert(stream_cursor)
-            .clone();
-        SnapshotReadToken::from_cursor(cursor)
+        self.cursors.read_token()
     }
 
     pub fn state_root_id(&self) -> &StateRootId {
@@ -172,21 +193,11 @@ impl StateStream {
         }
     }
 
-    fn subscribers_for_event(
-        &self,
-        scope: &EventScope,
-        payload: &AppServerEventPayload,
-    ) -> Vec<ClientInstanceId> {
-        let mut clients = HashSet::new();
-        self.subscriptions
-            .iter()
-            .filter_map(|subscription| {
-                let client_instance_id = &subscription.client_instance_id;
-                (event_matches_subscription(scope, payload, subscription, &self.state_root_id)
-                    && clients.insert(client_instance_id.clone()))
-                .then(|| client_instance_id.clone())
-            })
-            .collect()
+    fn read_token_for_scope(&mut self, scope: &SubscriptionScope) -> SnapshotReadToken {
+        self.scope_cursors
+            .entry(scope.clone())
+            .or_default()
+            .read_token()
     }
 }
 
@@ -225,7 +236,12 @@ fn event_matches_subscription(
             task_id,
         } => {
             event_state_root == state_root_id
-                && matches!(subscription_scope, SubscriptionScope::Task { task_id: subscribed } if subscribed == task_id)
+                && matches!(
+                    subscription_scope,
+                    SubscriptionScope::Task { task_id: subscribed }
+                        | SubscriptionScope::ToolDetail { task_id: subscribed, .. }
+                        if subscribed == task_id
+                )
         }
     };
     scope_matches && payload_matches_subscription(payload, subscription_scope)
@@ -252,52 +268,55 @@ fn payload_matches_subscription(
     subscription_scope: &SubscriptionScope,
 ) -> bool {
     match subscription_scope {
-        SubscriptionScope::Projects => {
-            matches!(
-                payload,
-                AppServerEventPayload::SnapshotReplaced { .. }
-                    | AppServerEventPayload::ProjectCollectionUpdated { .. }
-            )
-        }
+        SubscriptionScope::Projects => matches!(
+            payload,
+            AppServerEventPayload::SnapshotReplaced { .. }
+                | AppServerEventPayload::ProjectCollectionUpdated { .. }
+        ),
         SubscriptionScope::Agents => {
             matches!(
                 payload,
                 AppServerEventPayload::SnapshotReplaced { .. }
-                    | AppServerEventPayload::ProjectCollectionUpdated { .. }
                     | AppServerEventPayload::AgentCollectionUpdated { .. }
             )
         }
         SubscriptionScope::Settings { .. } => {
-            matches!(
-                payload,
-                AppServerEventPayload::SnapshotReplaced { .. }
-                    | AppServerEventPayload::ProjectCollectionUpdated { .. }
-            )
+            matches!(payload, AppServerEventPayload::SnapshotReplaced { .. })
         }
         SubscriptionScope::TaskNavigation { project_id } => {
-            if project_id.is_some()
-                && matches!(payload, AppServerEventPayload::TaskNavigationUpdated { .. })
-            {
-                return false;
-            }
-            matches!(
-                payload,
-                AppServerEventPayload::SnapshotReplaced { .. }
-                    | AppServerEventPayload::TaskNavigationUpdated { .. }
-                    | AppServerEventPayload::ProjectCollectionUpdated { .. }
-                    | AppServerEventPayload::TaskUpdated { .. }
-            )
+            matches!(payload, AppServerEventPayload::SnapshotReplaced { .. })
+                || matches!(
+                    payload,
+                    AppServerEventPayload::TaskNavigationChanged {
+                        change:
+                            openaide_app_server_protocol::events::TaskNavigationChange::Remove { .. }
+                    }
+                )
+                || matches!(
+                    payload,
+                    AppServerEventPayload::TaskNavigationChanged {
+                        change: openaide_app_server_protocol::events::TaskNavigationChange::Upsert { task }
+                    } if project_id.as_ref().is_none_or(|project_id| &task.project_id == project_id)
+                )
         }
         SubscriptionScope::Task { .. } => matches!(
             payload,
             AppServerEventPayload::SnapshotReplaced { .. }
-                | AppServerEventPayload::ProjectCollectionUpdated { .. }
-                | AppServerEventPayload::TaskUpdated { .. }
-                | AppServerEventPayload::TaskSnapshotUpdated { .. }
+                | AppServerEventPayload::TaskChanged { .. }
                 | AppServerEventPayload::TaskHistorySyncUpdated { .. }
-                | AppServerEventPayload::ChatItemAppended { .. }
-                | AppServerEventPayload::ChatItemChunk { .. }
+                | AppServerEventPayload::TaskRequestsUpdated { .. }
                 | AppServerEventPayload::RequestUpdated { .. }
+        ),
+        SubscriptionScope::ToolDetail {
+            task_id,
+            artifact_id,
+        } => matches!(
+            payload,
+            AppServerEventPayload::ToolDetailUpdated {
+                task_id: updated_task_id,
+                artifact_id: updated_artifact_id,
+                ..
+            } if updated_task_id == task_id && updated_artifact_id == artifact_id
         ),
     }
 }

@@ -5,7 +5,7 @@ use crate::protocol::model::{InterruptionReason, NormalizedMessage};
 use crate::tasks::mutation::{TaskCommitOptions, TaskMutationContext};
 
 pub(super) fn append_interruption(
-    ctx: &TaskMutationContext<'_>,
+    ctx: &mut TaskMutationContext<'_>,
     reason: InterruptionReason,
     message: &str,
     created_at: String,

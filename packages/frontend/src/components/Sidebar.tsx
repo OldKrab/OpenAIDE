@@ -3,6 +3,7 @@ import { Plus, RefreshCcw, Search, Settings } from "lucide-react";
 import type { AgentListedSession, TaskSummary } from "@openaide/app-shell-contracts";
 import type { ProjectOption } from "../state/composerOptions";
 import type { AppState } from "../state/store";
+import { TASK_NAVIGATION_PAGE_SIZE } from "../state/taskNavigationPolicy";
 import { SidebarNativeSessionRow } from "./SidebarNativeSessionRow";
 import { SidebarProjectTaskGroup } from "./SidebarProjectTaskGroup";
 import { SidebarTaskRow } from "./SidebarTaskRow";
@@ -39,7 +40,7 @@ type SidebarProps = {
   showNativeSessions?: boolean;
 };
 
-export const DEFAULT_MAX_TASKS_PER_PROJECT = 15;
+export const DEFAULT_MAX_TASKS_PER_PROJECT = TASK_NAVIGATION_PAGE_SIZE;
 
 export const Sidebar = memo(function Sidebar({
   activeTaskId,
@@ -209,13 +210,19 @@ export const Sidebar = memo(function Sidebar({
                     : []
                 }
                 nativeSessionsAdoptingSessionId={nativeSessions.adoptingSessionId}
+                nativeSessionsHaveMore={nativeSessions.nextCursor !== undefined}
                 onArchiveTask={onArchiveTask}
-                onLoadMore={() =>
-                  setProjectRowLimits((current) => {
+                onLoadMore={(visibleIncrement) =>
+                  {
+                    setProjectRowLimits((current) => {
                     const next = new Map(current);
-                    next.set(group.key, (current.get(group.key) ?? maxTasksPerProject) + maxTasksPerProject);
+                    next.set(group.key, (current.get(group.key) ?? maxTasksPerProject) + visibleIncrement);
                     return next;
-                  })
+                    });
+                    if (nativeSessions.nextCursor && nativeSessionProjectId === group.key) {
+                      onLoadNativeSessions(nativeSessions.nextCursor);
+                    }
+                  }
                 }
                 onOpenNativeSession={onOpenNativeSession}
                 onOpenTask={onOpenTask}

@@ -1,9 +1,10 @@
 use std::sync::{Arc, Mutex};
 
 use crate::protocol::errors::RuntimeError;
-use crate::protocol::model::{IsolationKind, NormalizedMessage, TaskStatus};
+use crate::protocol::model::{
+    AgentMessagePart, AgentMessageRole, IsolationKind, NormalizedMessage, TaskStatus,
+};
 use crate::storage::records::{TaskPreparationRecord, TaskRecord};
-use crate::storage::send_receipts::TaskSendReceipt;
 use crate::storage::Store;
 use crate::task_events::{TaskUpdateNotifier, TaskUpdateReceiver};
 use crate::tasks::mutation::{
@@ -42,6 +43,38 @@ fn metadata_commit_assigns_revision_once_and_returns_publication_facts() {
 }
 
 #[test]
+fn queued_updates_keep_values_from_their_own_committed_revision() {
+    let (_dir, store, mutations, notifications) = test_mutations(0);
+    store.write_task(&task_record("task_ordered")).unwrap();
+
+    for title in ["First", "Second"] {
+        mutations
+            .commit_existing_task("task_ordered", TaskCommitOptions::metadata(), |ctx| {
+                ctx.task_mut().title = crate::storage::records::TaskTitle::new(
+                    title,
+                    crate::storage::records::TaskTitleSource::User,
+                );
+                Ok(TaskMutationResult::Changed)
+            })
+            .unwrap();
+    }
+
+    let titles = [notifications.recv().unwrap(), notifications.recv().unwrap()].map(|update| {
+        match update.kind {
+            crate::task_events::TaskUpdateKind::Changed(change) => change
+                .changes
+                .task
+                .and_then(|task| task.title)
+                .map(|title| title.value)
+                .expect("summary change should contain its committed title"),
+            other => panic!("expected Task change, got {other:?}"),
+        }
+    });
+
+    assert_eq!(titles, ["First", "Second"]);
+}
+
+#[test]
 fn unchanged_commit_returns_rejection_without_revision_or_notification() {
     let (_dir, store, mutations, notifications) = test_mutations(5);
     let mut record = task_record("task_no_change");
@@ -73,7 +106,10 @@ fn rejected_commit_returns_rejection_without_storage_or_publication_facts() {
 
     let result = mutations
         .commit_existing_task("task_rejected", TaskCommitOptions::metadata(), |ctx| {
-            ctx.task_mut().title = "Should not persist".to_string();
+            ctx.task_mut().title = crate::storage::records::TaskTitle::new(
+                "Should not persist",
+                crate::storage::records::TaskTitleSource::User,
+            );
             Ok(TaskMutationResult::Rejected)
         })
         .unwrap();
@@ -109,7 +145,10 @@ fn chat_commit_refreshes_message_history_before_task_write() {
                 response_snapshot_tail_limit: None,
             },
             |ctx| {
-                ctx.task_mut().title = "Updated".to_string();
+                ctx.task_mut().title = crate::storage::records::TaskTitle::new(
+                    "Updated",
+                    crate::storage::records::TaskTitleSource::User,
+                );
                 Ok(TaskMutationResult::Changed)
             },
         )
@@ -179,11 +218,13 @@ fn rejected_commit_rolls_back_context_message_side_effects() {
             "task_reject_side_effect",
             TaskCommitOptions::metadata(),
             |ctx| {
-                ctx.append_message(NormalizedMessage::AgentText {
+                ctx.append_message(NormalizedMessage::AgentMessage {
                     id: "message_2".to_string(),
-                    text: "should roll back".to_string(),
+                    role: AgentMessageRole::Agent,
+                    parts: vec![AgentMessagePart::Text {
+                        text: "should roll back".to_string(),
+                    }],
                     created_at: "3".to_string(),
-                    streaming: false,
                 })?;
                 Ok(TaskMutationResult::Rejected)
             },
@@ -204,44 +245,136 @@ fn rejected_commit_rolls_back_context_message_side_effects() {
 }
 
 #[test]
-fn rejected_commit_rolls_back_send_receipt_side_effects() {
+fn rejected_commit_rolls_back_durable_agent_text_chunk() {
     let (_dir, store, mutations, notifications) = test_mutations(3);
-    let mut record = task_record("task_reject_receipt");
+    let mut record = task_record("task_reject_agent_chunk");
     record.revision = 3;
     store.write_task(&record).unwrap();
-    store
-        .write_send_receipt(
-            "task_reject_receipt",
-            send_receipt("accepted-send", "accepted-message"),
+    mutations
+        .append_message(
+            "task_reject_agent_chunk",
+            NormalizedMessage::AgentMessage {
+                id: "agent-message".to_string(),
+                role: AgentMessageRole::Agent,
+                parts: vec![AgentMessagePart::Text {
+                    text: "original".to_string(),
+                }],
+                created_at: "2".to_string(),
+            },
         )
         .unwrap();
-    let mutation_store = store.clone();
 
     let result = mutations
         .commit_existing_task(
-            "task_reject_receipt",
+            "task_reject_agent_chunk",
             TaskCommitOptions::metadata(),
-            |_ctx| {
-                mutation_store.write_send_receipt(
-                    "task_reject_receipt",
-                    send_receipt("rejected-send", "rejected-message"),
-                )?;
+            |ctx| {
+                ctx.append_agent_message_part(NormalizedMessage::AgentMessage {
+                    id: "agent-message".to_string(),
+                    role: AgentMessageRole::Agent,
+                    parts: vec![AgentMessagePart::Text {
+                        text: " should roll back".to_string(),
+                    }],
+                    created_at: "3".to_string(),
+                })?;
                 Ok(TaskMutationResult::Rejected)
             },
         )
         .unwrap();
 
     assert_rejected_no_change(result.outcome);
-    assert!(store
-        .read_send_receipt("task_reject_receipt", "accepted-send")
-        .unwrap()
-        .is_some());
-    assert!(store
-        .read_send_receipt("task_reject_receipt", "rejected-send")
-        .unwrap()
-        .is_none());
+    let messages = store.read_messages("task_reject_agent_chunk").unwrap();
+    let NormalizedMessage::AgentMessage { parts, .. } = &messages[0].chat.message else {
+        panic!("expected Agent message");
+    };
+    assert_eq!(
+        parts,
+        &[AgentMessagePart::Text {
+            text: "original".to_string(),
+        }]
+    );
+    assert_eq!(
+        store.read_task("task_reject_agent_chunk").unwrap().revision,
+        3
+    );
     assert_eq!(mutations.current_revision(), 3);
     assert!(notifications.try_recv().is_err());
+}
+
+#[test]
+fn streamed_agent_text_materializes_large_history_only_once() {
+    let (_dir, store, mutations, _notifications) = test_mutations(0);
+    store.write_task(&task_record("task_stream_cache")).unwrap();
+    let mut history = (0..2_000)
+        .map(|index| NormalizedMessage::User {
+            id: format!("history-{index}"),
+            text: "x".repeat(600),
+            created_at: "1".to_string(),
+            attachments: Vec::new(),
+        })
+        .collect::<Vec<_>>();
+    history.push(NormalizedMessage::AgentMessage {
+        id: "agent-message".to_string(),
+        role: AgentMessageRole::Agent,
+        parts: vec![AgentMessagePart::Text {
+            text: "start".to_string(),
+        }],
+        created_at: "2".to_string(),
+    });
+    store
+        .replace_messages_with_normalized("task_stream_cache", history)
+        .unwrap();
+
+    for text in [" first", " second"] {
+        mutations
+            .commit_existing_task(
+                "task_stream_cache",
+                TaskCommitOptions {
+                    refresh_message_history: true,
+                    response_snapshot_tail_limit: None,
+                },
+                |ctx| {
+                    ctx.append_agent_message_part(NormalizedMessage::AgentMessage {
+                        id: "agent-message".to_string(),
+                        role: AgentMessageRole::Agent,
+                        parts: vec![AgentMessagePart::Text {
+                            text: text.to_string(),
+                        }],
+                        created_at: "3".to_string(),
+                    })?;
+                    Ok(TaskMutationResult::Changed)
+                },
+            )
+            .unwrap();
+        if text == " first" {
+            let reads_after_first_chunk = store.message_file_read_count_for_test();
+            assert!(reads_after_first_chunk > 0);
+        }
+    }
+
+    let reads_after_stream = store.message_file_read_count_for_test();
+    mutations
+        .commit_existing_task(
+            "task_stream_cache",
+            TaskCommitOptions {
+                refresh_message_history: true,
+                response_snapshot_tail_limit: None,
+            },
+            |ctx| {
+                ctx.append_agent_message_part(NormalizedMessage::AgentMessage {
+                    id: "agent-message".to_string(),
+                    role: AgentMessageRole::Agent,
+                    parts: vec![AgentMessagePart::Text {
+                        text: " third".to_string(),
+                    }],
+                    created_at: "4".to_string(),
+                })?;
+                Ok(TaskMutationResult::Changed)
+            },
+        )
+        .unwrap();
+
+    assert_eq!(store.message_file_read_count_for_test(), reads_after_stream);
 }
 
 #[test]
@@ -256,11 +389,13 @@ fn invariant_failure_rolls_back_context_message_side_effects() {
             "task_invariant_side_effect",
             TaskCommitOptions::metadata(),
             |ctx| {
-                ctx.append_message(NormalizedMessage::AgentText {
+                ctx.append_message(NormalizedMessage::AgentMessage {
                     id: "message_1".to_string(),
-                    text: "should roll back".to_string(),
+                    role: AgentMessageRole::Agent,
+                    parts: vec![AgentMessagePart::Text {
+                        text: "should roll back".to_string(),
+                    }],
                     created_at: "3".to_string(),
-                    streaming: false,
                 })?;
                 ctx.task_mut().revision = 99;
                 Ok(TaskMutationResult::Changed)
@@ -310,19 +445,53 @@ fn create_task_persists_initial_chat_and_returns_commit_facts() {
         panic!("create commit should be committed");
     };
     assert_eq!(facts.task_id, "task_create_commit");
-    assert_eq!(facts.revision, 11);
+    assert_eq!(facts.revision, 1);
     assert!(result.response_snapshot.is_some());
 
     let stored = store.read_task("task_create_commit").unwrap();
     assert_eq!(stored.task_version, 1);
-    assert_eq!(stored.revision, 11);
+    assert_eq!(stored.revision, 1);
     assert_eq!(stored.message_history_version, 1);
     assert_eq!(store.read_messages("task_create_commit").unwrap().len(), 1);
     assert_eq!(mutations.current_revision(), 11);
 
     let notification = notifications.try_recv().unwrap();
     assert_eq!(notification.task_id, "task_create_commit");
-    assert_eq!(notification.revision, 11);
+    assert_eq!(notification.revision, 1);
+}
+
+#[test]
+fn task_revisions_are_consecutive_across_interleaved_task_commits() {
+    let (_dir, store, mutations, notifications) = test_mutations(0);
+    store.write_task(&task_record("task-a")).unwrap();
+    store.write_task(&task_record("task-b")).unwrap();
+
+    for task_id in ["task-a", "task-b", "task-a"] {
+        mutations
+            .commit_existing_task(task_id, TaskCommitOptions::metadata(), |ctx| {
+                let unread = ctx.task().unread;
+                ctx.task_mut().unread = !unread;
+                Ok(TaskMutationResult::Changed)
+            })
+            .unwrap();
+    }
+
+    assert_eq!(store.read_task("task-a").unwrap().revision, 2);
+    assert_eq!(store.read_task("task-b").unwrap().revision, 1);
+    let revisions = [
+        notifications.recv().unwrap(),
+        notifications.recv().unwrap(),
+        notifications.recv().unwrap(),
+    ]
+    .map(|update| (update.task_id, update.revision));
+    assert_eq!(
+        revisions,
+        [
+            ("task-a".to_string(), 1),
+            ("task-b".to_string(), 1),
+            ("task-a".to_string(), 2),
+        ]
+    );
 }
 
 #[test]
@@ -383,14 +552,19 @@ fn failed_create_task_write_rolls_back_initial_chat_and_revision() {
 }
 
 #[test]
-fn migrated_service_paths_have_no_direct_task_updated_calls() {
-    let allowed = [("src/tasks/mutation/commit.rs", "notify_task_updated")];
+fn migrated_service_paths_have_no_direct_task_changed_calls() {
+    let allowed = [("src/tasks/mutation/commit.rs", "notify_task_changed")];
     let mut actual = Vec::new();
 
     for path in rust_source_files("src/tasks") {
-        let path_string = path.to_string_lossy().replace('\\', "/");
+        let path_string = path
+            .strip_prefix(env!("CARGO_MANIFEST_DIR"))
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .trim_start_matches('/')
+            .replace('\\', "/");
         let text = std::fs::read_to_string(&path).unwrap();
-        actual.extend(task_updated_calls_by_function(&path_string, &text));
+        actual.extend(task_changed_calls_by_function(&path_string, &text));
     }
 
     actual.sort();
@@ -407,7 +581,9 @@ fn task_turn_lifecycle_has_no_direct_commit_bypasses() {
     let mut offenders = Vec::new();
     let lifecycle_paths = rust_source_files("src/tasks/turn_lifecycle")
         .into_iter()
-        .chain([std::path::PathBuf::from("src/tasks/turn_lifecycle.rs")]);
+        .chain([
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tasks/turn_lifecycle.rs")
+        ]);
 
     for path in lifecycle_paths {
         let path_string = path.to_string_lossy().replace('\\', "/");
@@ -415,8 +591,8 @@ fn task_turn_lifecycle_has_no_direct_commit_bypasses() {
         for (line_index, line) in text.lines().enumerate() {
             let trimmed = line.trim_start();
             for pattern in [
-                ".task_updated(",
-                " task_updated(",
+                ".task_changed(",
+                " task_changed(",
                 "next_revision(",
                 ".write_task(",
                 "append_normalized_to_store(",
@@ -474,8 +650,10 @@ fn test_mutations(
 fn task_record(task_id: &str) -> TaskRecord {
     TaskRecord {
         task_id: task_id.to_string(),
-        title: "Task".to_string(),
-        agent_title: None,
+        title: crate::storage::records::TaskTitle::new(
+            "Task",
+            crate::storage::records::TaskTitleSource::User,
+        ),
         status: TaskStatus::Inactive,
         task_version: 0,
         message_history_version: 0,
@@ -487,7 +665,7 @@ fn task_record(task_id: &str) -> TaskRecord {
         agent_id: "codex".to_string(),
         isolation: IsolationKind::Local,
         workspace_root: "/tmp/workspace".to_string(),
-        first_prompt_sent: true,
+        lifecycle: crate::storage::records::TaskLifecycle::Visible,
         agent_session_id: None,
         active_turn_id: None,
         archived: false,
@@ -495,19 +673,10 @@ fn task_record(task_id: &str) -> TaskRecord {
         revision: 0,
         config_options: Default::default(),
         config_options_catalog: None,
+        config_mutation: Default::default(),
         agent_commands_catalog: None,
         model_id: None,
         preparation: TaskPreparationRecord::Ready,
-    }
-}
-
-fn send_receipt(idempotency_key: &str, user_message_id: &str) -> TaskSendReceipt {
-    TaskSendReceipt {
-        idempotency_key: idempotency_key.to_string(),
-        text: "hello".to_string(),
-        attachment_handles: Vec::new(),
-        user_message_id: user_message_id.to_string(),
-        turn_id: "turn-1".to_string(),
     }
 }
 
@@ -527,7 +696,10 @@ fn assert_rejected_no_change(outcome: TaskCommitOutcome) {
 
 fn rust_source_files(root: &str) -> Vec<std::path::PathBuf> {
     let mut files = Vec::new();
-    collect_rust_source_files(std::path::Path::new(root), &mut files);
+    collect_rust_source_files(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(root),
+        &mut files,
+    );
     files.sort();
     files
 }
@@ -552,7 +724,7 @@ fn is_production_rust_source(path: &std::path::Path) -> bool {
         && !name.ends_with("_tests.rs")
 }
 
-fn task_updated_calls_by_function(path: &str, text: &str) -> Vec<(String, String)> {
+fn task_changed_calls_by_function(path: &str, text: &str) -> Vec<(String, String)> {
     let mut calls = Vec::new();
     let mut current_function: Option<String> = None;
     for line in text.lines() {
@@ -560,7 +732,7 @@ fn task_updated_calls_by_function(path: &str, text: &str) -> Vec<(String, String
         if let Some(name) = function_name(trimmed) {
             current_function = Some(name.to_string());
         }
-        if trimmed.contains(".task_updated(") || trimmed.contains(" task_updated(") {
+        if trimmed.contains(".task_changed(") || trimmed.contains(" task_changed(") {
             calls.push((
                 path.to_string(),
                 current_function

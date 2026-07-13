@@ -1,4 +1,4 @@
-import type { Dispatch, MutableRefObject } from "react";
+import type { Dispatch } from "react";
 import {
   AGENT_LIST_SESSIONS,
   AppServerProtocolError,
@@ -7,6 +7,7 @@ import {
   type ProjectId,
 } from "@openaide/app-server-client";
 import type { AppAction } from "../state/appReducer";
+import type { AsyncOperationOwner } from "../state/asyncOperationOwner";
 
 export type NativeSessionLoadFailure = {
   agentId: string;
@@ -24,8 +25,9 @@ export function requestControllerNativeSessions({
   cursor,
   backendConnection,
   dispatch,
-  latestSessionListRequestId,
-  nextSessionListRequestId,
+  existingSessionIds = [],
+  asyncOperations,
+  minimumSessionCount = 0,
   projectId,
   onFailure,
 }: {
@@ -34,82 +36,117 @@ export function requestControllerNativeSessions({
   cursor?: string;
   backendConnection?: Pick<BackendConnection, "request">;
   dispatch: Dispatch<AppAction>;
-  latestSessionListRequestId: MutableRefObject<number | undefined>;
-  nextSessionListRequestId: MutableRefObject<number>;
+  existingSessionIds?: Iterable<string>;
+  asyncOperations: AsyncOperationOwner;
+  minimumSessionCount?: number;
   projectId?: string;
   onFailure?: (failure: NativeSessionLoadFailure) => void;
 }) {
-  const requestId = nextSessionListRequestId.current + 1;
-  nextSessionListRequestId.current = requestId;
-  latestSessionListRequestId.current = requestId;
+  const operation = asyncOperations.claim("native-session-list");
+  const requestId = operation.id;
   dispatch({ type: "newTask:nativeSessions:start", append });
   if (backendConnection) {
     if (!projectId) {
-      dispatch({ type: "newTask:nativeSessions:error", message: "Workspace is not ready yet." });
+      dispatch({ type: "newTask:nativeSessions:listError", message: "Workspace is not ready yet." });
       return;
     }
-    void backendConnection.request(AGENT_LIST_SESSIONS, {
-      agentId: agentId as AgentId,
-      projectId: projectId as ProjectId,
-      cursor: cursor ?? null,
-    }).then((result) => {
-      if (latestSessionListRequestId.current !== requestId) return;
-      dispatch({
-        type: "newTask:nativeSessions:result",
-        result: {
-          agent_id: result.agentId,
-          next_cursor: result.nextCursor ?? undefined,
-          sessions: result.sessions.map((session) => ({
+    const loadPages = async () => {
+      let nextCursor = cursor;
+      let resultAgentId = agentId;
+      const sessions = new Map<string, AgentListedSessionResult>();
+      const existing = append ? new Set(existingSessionIds) : new Set<string>();
+      const requestedCursors = new Set<string>();
+      do {
+        if (nextCursor) {
+          if (requestedCursors.has(nextCursor)) {
+            // A cursor is an opaque continuation token, but it must still make
+            // progress. Treat a repeated token as exhaustion instead of looping.
+            nextCursor = undefined;
+            break;
+          }
+          requestedCursors.add(nextCursor);
+        }
+        const result = await backendConnection.request(AGENT_LIST_SESSIONS, {
+          agentId: agentId as AgentId,
+          projectId: projectId as ProjectId,
+          cursor: nextCursor ?? null,
+        });
+        if (!asyncOperations.owns(operation)) return;
+        resultAgentId = result.agentId;
+        for (const session of result.sessions) {
+          if (existing.has(session.sessionId) || sessions.has(session.sessionId)) continue;
+          sessions.set(session.sessionId, {
             cwd: result.projectLabel,
             session_id: session.sessionId,
             title: session.title ?? undefined,
             last_activity: session.lastActivity ?? session.updatedAt ?? undefined,
             updated_at: session.updatedAt ?? undefined,
-          })),
+          });
+        }
+        nextCursor = result.nextCursor ?? undefined;
+      } while (nextCursor && sessions.size < minimumSessionCount);
+
+      if (!asyncOperations.owns(operation)) return;
+      dispatch({
+        type: "newTask:nativeSessions:result",
+        result: {
+          agent_id: resultAgentId,
+          next_cursor: nextCursor,
+          sessions: [...sessions.values()],
         },
         append,
       });
-    }).catch((error: unknown) => {
-      if (latestSessionListRequestId.current !== requestId) return;
+    };
+    void loadPages().catch((error: unknown) => {
+      if (!asyncOperations.owns(operation)) return;
       onFailure?.(nativeSessionLoadFailure(error, { agentId, projectId, requestId }));
-      dispatch({ type: "newTask:nativeSessions:error", message: "Unable to load Agent session history." });
+      dispatch({ type: "newTask:nativeSessions:listError", message: "Unable to load Agent session history." });
     });
     return;
   }
-  dispatch({ type: "newTask:nativeSessions:error", message: "App Server connection unavailable." });
+  dispatch({ type: "newTask:nativeSessions:listError", message: "App Server connection unavailable." });
 }
 
 export function createRequestControllerNativeSessions({
   backendConnection,
   dispatch,
   getAgentId,
+  getExistingSessionIds,
   getProjectId,
-  latestSessionListRequestId,
-  nextSessionListRequestId,
+  asyncOperations,
   onFailure,
 }: {
   backendConnection?: Pick<BackendConnection, "request">;
   dispatch: Dispatch<AppAction>;
   getAgentId: () => string;
+  getExistingSessionIds?: () => Iterable<string>;
   getProjectId: () => string | undefined;
-  latestSessionListRequestId: MutableRefObject<number | undefined>;
-  nextSessionListRequestId: MutableRefObject<number>;
+  asyncOperations: AsyncOperationOwner;
   onFailure?: (failure: NativeSessionLoadFailure) => void;
 }) {
-  return (cursor?: string, append = false) => {
+  return (cursor?: string, append = false, minimumSessionCount = 0) => {
     requestControllerNativeSessions({
       agentId: getAgentId(),
       append,
       backendConnection,
       cursor,
       dispatch,
-      latestSessionListRequestId,
-      nextSessionListRequestId,
+      existingSessionIds: append ? getExistingSessionIds?.() : undefined,
+      asyncOperations,
+      minimumSessionCount,
       onFailure,
       projectId: getProjectId(),
     });
   };
 }
+
+type AgentListedSessionResult = {
+  cwd: string;
+  session_id: string;
+  title?: string;
+  last_activity?: string;
+  updated_at?: string;
+};
 
 function nativeSessionLoadFailure(
   error: unknown,

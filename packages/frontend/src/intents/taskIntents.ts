@@ -1,5 +1,5 @@
 import { PERMISSION_REQUEST, QUESTION_REQUEST, type BackendConnection, type RequestId } from "@openaide/app-server-client";
-import type { ElicitationResponse, PermissionDecision } from "@openaide/app-shell-contracts";
+import type { ElicitationResponse } from "@openaide/app-shell-contracts";
 import type { AppAction } from "../state/appReducer";
 import type { AppState } from "../state/store";
 
@@ -13,17 +13,11 @@ export function respondToPermissionIntent(
   dependencies: TaskIntentDependencies,
   requestId: string,
   optionId: string,
-  _decision: PermissionDecision,
-  source: "agent" | "appServer" = "agent",
 ) {
   const { backendConnection, dispatch, state } = dependencies;
   if (!state.snapshot) return;
 
   dispatch({ type: "permission:responding", requestId });
-  if (source !== "appServer") {
-    dispatchPermissionError(dispatch, requestId, new Error("Permission request is no longer answerable."));
-    return;
-  }
   if (!backendConnection) {
     dispatchPermissionError(dispatch, requestId, new Error("App Server connection unavailable"));
     return;
@@ -36,17 +30,9 @@ export function respondToPermissionIntent(
     return;
   }
   if (isPromiseLike(result)) {
-    void result.then(
-      () => {
-        dispatch({ type: "appServerPermission:resolved", requestId });
-      },
-      (error) => {
-        dispatchPermissionError(dispatch, requestId, error);
-      },
-    );
+    void result.catch((error) => dispatchPermissionError(dispatch, requestId, error));
     return;
   }
-  dispatch({ type: "appServerPermission:resolved", requestId });
 }
 
 export function respondToQuestionIntent(
@@ -68,13 +54,9 @@ export function respondToQuestionIntent(
     return;
   }
   if (isPromiseLike(result)) {
-    void result.then(
-      () => dispatch({ type: "appServerQuestion:resolved", requestId }),
-      (error) => dispatchQuestionError(dispatch, requestId, error),
-    );
+    void result.catch((error) => dispatchQuestionError(dispatch, requestId, error));
     return;
   }
-  dispatch({ type: "appServerQuestion:resolved", requestId });
 }
 
 function isPromiseLike(value: void | Promise<void>): value is Promise<void> {

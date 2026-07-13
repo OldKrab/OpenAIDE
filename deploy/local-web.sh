@@ -92,6 +92,11 @@ static_root_file="$pid_file.static-root"
 lock_file="${OPENAIDE_WEB_LOCK_FILE:-/tmp/openaide-local-web-$port.lock}"
 daemon_mode="${OPENAIDE_WEB_DAEMON:-background}"
 systemd_unit="${OPENAIDE_WEB_SYSTEMD_UNIT:-openaide-local-web-$port}"
+# Keep JavaScript stack traces mapped to their TypeScript sources in every local role.
+node_options="${NODE_OPTIONS:-}"
+if [[ " $node_options " != *" --enable-source-maps "* ]]; then
+  node_options="${node_options:+$node_options }--enable-source-maps"
+fi
 state_root="$(node -e "console.log(require('node:path').resolve(process.argv[1]))" "$state_root")"
 runtime_root="$(node -e "console.log(require('node:path').resolve(process.argv[1]))" "$runtime_root")"
 static_root="$(node -e "console.log(require('node:path').resolve(process.argv[1]))" "$static_root")"
@@ -270,6 +275,7 @@ start_server() {
   fi
 
   setsid env \
+    NODE_OPTIONS="$node_options" \
     OPENAIDE_WEB_INSTANCE_LABEL="${OPENAIDE_WEB_INSTANCE_LABEL:-}" \
     OPENAIDE_WEB_TITLE="${OPENAIDE_WEB_TITLE:-}" \
     OPENAIDE_WEB_HOST="$host" \
@@ -334,6 +340,7 @@ start_systemd_server() {
     --property "StandardError=append:$log_file" \
     --setenv "HOME=$HOME" \
     --setenv "PATH=$PATH" \
+    --setenv "NODE_OPTIONS=$node_options" \
     --setenv "OPENAIDE_WEB_INSTANCE_LABEL=${OPENAIDE_WEB_INSTANCE_LABEL:-}" \
     --setenv "OPENAIDE_WEB_TITLE=${OPENAIDE_WEB_TITLE:-}" \
     --setenv "OPENAIDE_WEB_HOST=$host" \

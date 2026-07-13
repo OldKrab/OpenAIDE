@@ -1,12 +1,13 @@
 use uuid::Uuid;
 
+use openaide_app_server_protocol::ids::TaskId;
 use openaide_app_server_protocol::server_requests::{
     QuestionRequestParams, QuestionRequestResponse,
 };
 
 use crate::agent::TurnCancellation;
 use crate::protocol::errors::RuntimeError;
-use crate::protocol::model::{NormalizedMessage, QuestionState, TaskStatus};
+use crate::protocol::model::{NormalizedMessage, QuestionAction, QuestionState, TaskStatus};
 use crate::tasks::mutation::{TaskCommitOptions, TaskMutationResult};
 use crate::time::now_string;
 
@@ -27,6 +28,7 @@ impl TaskSessionEventSink {
                     action: None,
                     content: None,
                     error: Some(message.clone()),
+                    resolution_message: None,
                 })?;
                 ctx.task_mut().updated_at = now.clone();
                 Ok(TaskMutationResult::Changed)
@@ -45,34 +47,23 @@ impl TaskSessionEventSink {
         else {
             return Ok(QuestionRequestResponse::Cancel);
         };
-        let now = now_string();
-        let append_result =
-            self.mutations
-                .commit_existing_task(&self.task_id, chat_commit_options(), |ctx| {
-                    if ctx.task().agent_session_id.as_deref() != Some(self.session_id.as_str()) {
-                        return Err(RuntimeError::InvalidParams(
-                            "elicitation session is not bound to this Task".to_string(),
-                        ));
-                    }
-                    ctx.append_message(NormalizedMessage::Question {
-                        id: Uuid::new_v4().to_string(),
-                        request_id: request_id.as_str().to_string(),
-                        message: form.message.clone(),
-                        fields: form.fields.clone(),
-                        state: QuestionState::Pending,
-                        created_at: now.clone(),
-                        action: None,
-                        content: None,
-                        error: None,
-                    })?;
-                    let task = ctx.task_mut();
-                    task.status = TaskStatus::Blocked;
-                    task.unread = true;
-                    task.updated_at = now.clone();
-                    task.last_activity = now.clone();
-                    Ok(TaskMutationResult::Changed)
-                });
-        if let Err(error) = append_result {
+        let waiting_result = self.mutations.commit_existing_task(
+            &self.task_id,
+            TaskCommitOptions::metadata(),
+            |ctx| {
+                if ctx.task().agent_session_id.as_deref() != Some(self.session_id.as_str()) {
+                    return Err(RuntimeError::InvalidParams(
+                        "elicitation session is not bound to this Task".to_string(),
+                    ));
+                }
+                let task = ctx.task_mut();
+                task.status = TaskStatus::Waiting;
+                task.unread = true;
+                task.updated_at = now_string();
+                Ok(TaskMutationResult::Changed)
+            },
+        );
+        if let Err(error) = waiting_result {
             self.server_requests
                 .interrupt_request(&request_id, crate::client_lifecycle::AppServerTime(0));
             return Err(error);
@@ -82,10 +73,38 @@ impl TaskSessionEventSink {
             .server_requests
             .wait_question_response(&request_id, &cancellation)?;
         let now = now_string();
+        let stopped = cancellation.is_cancelled();
+        let (state, action, content) = match &response {
+            QuestionRequestResponse::Submit { content } => (
+                QuestionState::Resolved,
+                QuestionAction::Submit,
+                Some(content.clone()),
+            ),
+            QuestionRequestResponse::Cancel => {
+                (QuestionState::Cancelled, QuestionAction::Cancel, None)
+            }
+        };
         self.mutations
             .commit_existing_task(&self.task_id, chat_commit_options(), |ctx| {
-                let has_pending = ctx.resolve_question(request_id.as_str(), &response)?;
-                if !has_pending && ctx.task().status == TaskStatus::Blocked {
+                ctx.append_message(NormalizedMessage::Question {
+                    id: Uuid::new_v4().to_string(),
+                    request_id: request_id.as_str().to_string(),
+                    message: form.message.clone(),
+                    fields: form.fields.clone(),
+                    state,
+                    created_at: now.clone(),
+                    action: Some(action),
+                    content: content.clone(),
+                    error: None,
+                    resolution_message: stopped
+                        .then(|| "Task stopped while a question was pending.".to_string()),
+                })?;
+                // Read broker state inside the ordered Task mutation. A request that
+                // opens concurrently will mark the Task waiting after this commit.
+                let has_pending_request = self
+                    .server_requests
+                    .has_pending_for_task(&TaskId::from(self.task_id.clone()));
+                if !has_pending_request && !stopped && ctx.task().status == TaskStatus::Waiting {
                     ctx.task_mut().status = if ctx.task().active_turn_id.is_some() {
                         TaskStatus::Active
                     } else {

@@ -5,13 +5,13 @@ use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{NormalizedMessage, TaskSnapshot, TaskStatus};
 use crate::protocol::params::TaskCreateParams;
 use crate::storage::records::TaskPreparationRecord;
-use crate::storage::records::TaskRecord;
+use crate::storage::records::{TaskLifecycle, TaskRecord};
 use crate::tasks::config_options::selected_config_options;
 use crate::tasks::lifecycle::running_turn_message;
 use crate::tasks::task_start_transaction::TaskSessionStartGuard;
 use crate::time::now_string;
 
-use super::helpers::{required_optional_prompt_text, title_from_prompt};
+use super::helpers::required_optional_prompt_text;
 use super::{create_snapshot_commit_options, TaskTurnLifecycle};
 
 impl TaskTurnLifecycle {
@@ -24,11 +24,6 @@ impl TaskTurnLifecycle {
         let selected_config_options = selected_config_options(params.config_options.as_ref())?;
         let now = now_string();
         let task_id = format!("task_{}", Uuid::new_v4());
-        let title = if params.title.trim().is_empty() {
-            title_from_prompt(&prompt_text)
-        } else {
-            params.title
-        };
         let prompt_attachments = params.context.clone();
         let turn_id = Uuid::new_v4().to_string();
         let mut session_start = TaskSessionStartGuard::new(
@@ -52,8 +47,7 @@ impl TaskTurnLifecycle {
             let session = session_start.session();
             let record = TaskRecord {
                 task_id: task_id.clone(),
-                title,
-                agent_title: None,
+                title: None,
                 status: TaskStatus::Active,
                 task_version: 1,
                 message_history_version: 0,
@@ -68,7 +62,7 @@ impl TaskTurnLifecycle {
                 agent_id: params.selected_agent_id,
                 isolation: params.selected_isolation,
                 workspace_root: params.workspace_root,
-                first_prompt_sent: true,
+                lifecycle: TaskLifecycle::Visible,
                 agent_session_id: Some(session.session_id.clone()),
                 active_turn_id: Some(turn_id.clone()),
                 archived: false,
@@ -76,6 +70,7 @@ impl TaskTurnLifecycle {
                 revision: 0,
                 config_options: session.config_options.clone(),
                 config_options_catalog: session.config_catalog.clone(),
+                config_mutation: Default::default(),
                 agent_commands_catalog: None,
                 model_id: params.model_id.or(session.model_id.clone()),
                 preparation: TaskPreparationRecord::Ready,
@@ -98,19 +93,22 @@ impl TaskTurnLifecycle {
             })?
         };
 
-        if let Err(error) = self
+        let session_sink = match self
             .turn_runner
-            .attach_session_events(task_id.clone(), session_start.session_id())
+            .attach_session_events(task_id.clone(), &session_start.session().key())
         {
-            let session_id = session_start.session_id().to_string();
-            let _ = session_start.close();
-            if let Err(finalize_error) = self.fail_created_task_start(&task_id, &error) {
-                return Err(RuntimeError::Internal(format!(
-                    "{error}; failed to finalize task after session event attachment failure for {session_id}: {finalize_error}"
-                )));
+            Ok(sink) => sink,
+            Err(error) => {
+                let session_id = session_start.session_id().to_string();
+                let _ = session_start.close();
+                if let Err(finalize_error) = self.fail_created_task_start(&task_id, &error) {
+                    return Err(RuntimeError::Internal(format!(
+                        "{error}; failed to finalize task after session event attachment failure for {session_id}: {finalize_error}"
+                    )));
+                }
+                return Err(error);
             }
-            return Err(error);
-        }
+        };
         let session = session_start.commit();
         self.turn_runner.spawn_agent_turn(
             task_id.clone(),
@@ -118,6 +116,7 @@ impl TaskTurnLifecycle {
             prompt_attachments,
             turn_id,
             session,
+            session_sink,
         );
         Ok(snapshot)
     }

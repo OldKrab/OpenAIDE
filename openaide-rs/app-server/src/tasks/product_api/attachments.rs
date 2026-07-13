@@ -5,7 +5,7 @@ use openaide_app_server_protocol::attachment::{
     AttachmentCreatePastedImageParams, AttachmentCreatePastedImageResult,
     AttachmentListDirectoryParams, AttachmentListDirectoryResult, AttachmentListRootsParams,
     AttachmentListRootsResult, AttachmentRefreshHandlesParams, AttachmentRefreshHandlesResult,
-    AttachmentReleaseHandlesParams, AttachmentReleaseHandlesResult, AttachmentRevealParams,
+    AttachmentReleaseParams, AttachmentReleaseResult, AttachmentRevealParams,
 };
 use openaide_app_server_protocol::errors::{ProtocolError, ProtocolErrorCode};
 use openaide_app_server_protocol::ids::ClientInstanceId;
@@ -20,7 +20,7 @@ use crate::attachment_runtime::{
     AttachmentOwner, AttachmentRuntimeError, ResolvedRevealAttachment,
 };
 
-use super::{reject_tombstoned_task, runtime_error, validation_error, TaskProductApi};
+use super::{validation_error, TaskProductApi};
 
 pub(crate) trait AttachmentFileBrowserWorkflow: Send + Sync {
     fn keep_alive_for_client(&self, client_instance_id: &ClientInstanceId);
@@ -28,6 +28,7 @@ pub(crate) trait AttachmentFileBrowserWorkflow: Send + Sync {
 
     fn list_roots(
         &self,
+        client_instance_id: &ClientInstanceId,
         params: AttachmentListRootsParams,
     ) -> Result<AttachmentListRootsResult, ProtocolError>;
 
@@ -67,11 +68,11 @@ pub(crate) trait AttachmentFileBrowserWorkflow: Send + Sync {
         params: AttachmentRefreshHandlesParams,
     ) -> Result<AttachmentRefreshHandlesResult, ProtocolError>;
 
-    fn release_handles(
+    fn release_resources(
         &self,
         client_instance_id: &ClientInstanceId,
-        params: AttachmentReleaseHandlesParams,
-    ) -> Result<AttachmentReleaseHandlesResult, ProtocolError>;
+        params: AttachmentReleaseParams,
+    ) -> Result<AttachmentReleaseResult, ProtocolError>;
 
     fn resolve_reveal_target(
         &self,
@@ -102,13 +103,10 @@ impl AttachmentFileBrowserWorkflow for TaskProductApi {
 
     fn list_roots(
         &self,
+        client_instance_id: &ClientInstanceId,
         params: AttachmentListRootsParams,
     ) -> Result<AttachmentListRootsResult, ProtocolError> {
-        let task = self
-            .store
-            .read_task(params.task_id.as_str())
-            .map_err(runtime_error)?;
-        reject_tombstoned_task(&task)?;
+        let task = self.read_task_for_client(params.task_id.as_str(), client_instance_id)?;
         Ok(self
             .attachments
             .list_roots(&params.task_id, task.workspace_root))
@@ -119,11 +117,7 @@ impl AttachmentFileBrowserWorkflow for TaskProductApi {
         client_instance_id: &ClientInstanceId,
         params: AttachmentListDirectoryParams,
     ) -> Result<AttachmentListDirectoryResult, ProtocolError> {
-        let task = self
-            .store
-            .read_task(params.task_id.as_str())
-            .map_err(runtime_error)?;
-        reject_tombstoned_task(&task)?;
+        let task = self.read_task_for_client(params.task_id.as_str(), client_instance_id)?;
         let owner = AttachmentOwner::new(client_instance_id, &params.task_id);
         self.attachments
             .list_directory(
@@ -140,11 +134,7 @@ impl AttachmentFileBrowserWorkflow for TaskProductApi {
         client_instance_id: &ClientInstanceId,
         params: AttachmentCreateFileReferenceParams,
     ) -> Result<AttachmentCreateFileReferenceResult, ProtocolError> {
-        let task = self
-            .store
-            .read_task(params.task_id.as_str())
-            .map_err(runtime_error)?;
-        reject_tombstoned_task(&task)?;
+        self.read_task_for_client(params.task_id.as_str(), client_instance_id)?;
         let owner = AttachmentOwner::new(client_instance_id, &params.task_id);
         self.attachments
             .create_file_reference(&owner, &params.entry_id)
@@ -156,11 +146,7 @@ impl AttachmentFileBrowserWorkflow for TaskProductApi {
         client_instance_id: &ClientInstanceId,
         params: AttachmentCreatePastedImageParams,
     ) -> Result<AttachmentCreatePastedImageResult, ProtocolError> {
-        let task = self
-            .store
-            .read_task(params.task_id.as_str())
-            .map_err(runtime_error)?;
-        reject_tombstoned_task(&task)?;
+        self.read_task_for_client(params.task_id.as_str(), client_instance_id)?;
         let owner = AttachmentOwner::new(client_instance_id, &params.task_id);
         self.attachments
             .create_pasted_image(&owner, params.label, params.mime_type, params.data)
@@ -172,11 +158,7 @@ impl AttachmentFileBrowserWorkflow for TaskProductApi {
         client_instance_id: &ClientInstanceId,
         params: AttachmentCreateEmbeddedCandidateParams,
     ) -> Result<AttachmentCreateEmbeddedCandidateResult, ProtocolError> {
-        let task = self
-            .store
-            .read_task(params.task_id.as_str())
-            .map_err(runtime_error)?;
-        reject_tombstoned_task(&task)?;
+        self.read_task_for_client(params.task_id.as_str(), client_instance_id)?;
         let owner = AttachmentOwner::new(client_instance_id, &params.task_id);
         self.attachments
             .create_embedded_candidate(&owner, &params.entry_id)
@@ -188,11 +170,7 @@ impl AttachmentFileBrowserWorkflow for TaskProductApi {
         client_instance_id: &ClientInstanceId,
         params: AttachmentConfirmEmbeddedParams,
     ) -> Result<AttachmentConfirmEmbeddedResult, ProtocolError> {
-        let task = self
-            .store
-            .read_task(params.task_id.as_str())
-            .map_err(runtime_error)?;
-        reject_tombstoned_task(&task)?;
+        self.read_task_for_client(params.task_id.as_str(), client_instance_id)?;
         let owner = AttachmentOwner::new(client_instance_id, &params.task_id);
         Ok(self
             .attachments
@@ -204,29 +182,23 @@ impl AttachmentFileBrowserWorkflow for TaskProductApi {
         client_instance_id: &ClientInstanceId,
         params: AttachmentRefreshHandlesParams,
     ) -> Result<AttachmentRefreshHandlesResult, ProtocolError> {
-        let task = self
-            .store
-            .read_task(params.task_id.as_str())
-            .map_err(runtime_error)?;
-        reject_tombstoned_task(&task)?;
+        self.read_task_for_client(params.task_id.as_str(), client_instance_id)?;
         let owner = AttachmentOwner::new(client_instance_id, &params.task_id);
         self.attachments
             .refresh_handles(&owner, &params.handles)
             .map_err(protocol_error_from_attachment_runtime)
     }
 
-    fn release_handles(
+    fn release_resources(
         &self,
         client_instance_id: &ClientInstanceId,
-        params: AttachmentReleaseHandlesParams,
-    ) -> Result<AttachmentReleaseHandlesResult, ProtocolError> {
-        let task = self
-            .store
-            .read_task(params.task_id.as_str())
-            .map_err(runtime_error)?;
-        reject_tombstoned_task(&task)?;
+        params: AttachmentReleaseParams,
+    ) -> Result<AttachmentReleaseResult, ProtocolError> {
+        self.read_task_for_client(params.task_id.as_str(), client_instance_id)?;
         let owner = AttachmentOwner::new(client_instance_id, &params.task_id);
-        Ok(self.attachments.release_handles(&owner, &params.handles))
+        Ok(self
+            .attachments
+            .release_resources(&owner, &params.resources))
     }
 
     fn resolve_reveal_target(
@@ -234,11 +206,7 @@ impl AttachmentFileBrowserWorkflow for TaskProductApi {
         client_instance_id: &ClientInstanceId,
         params: AttachmentRevealParams,
     ) -> Result<ResolvedRevealAttachment, ProtocolError> {
-        let task = self
-            .store
-            .read_task(params.task_id.as_str())
-            .map_err(runtime_error)?;
-        reject_tombstoned_task(&task)?;
+        self.read_task_for_client(params.task_id.as_str(), client_instance_id)?;
         let owner = AttachmentOwner::new(client_instance_id, &params.task_id);
         self.attachments
             .resolve_for_reveal(&owner, &params.handle_id)

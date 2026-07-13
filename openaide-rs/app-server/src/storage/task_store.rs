@@ -9,8 +9,10 @@ use super::Store;
 impl Store {
     pub fn write_task(&self, record: &TaskRecord) -> Result<(), RuntimeError> {
         #[cfg(test)]
-        if self.take_task_write_crash_for_test() {
-            panic!("injected process crash before Task record replacement");
+        if self.take_task_write_failure_for_test() {
+            return Err(RuntimeError::Storage(
+                "injected Task record write failure".to_string(),
+            ));
         }
         atomic::write_json(&self.task_dir(&record.task_id)?.join("task.json"), record)
     }
@@ -21,7 +23,10 @@ impl Store {
             return Err(RuntimeError::TaskNotFound(task_id.to_string()));
         }
         let text = fs::read_to_string(path)?;
-        Ok(serde_json::from_str(&text)?)
+        let task = serde_json::from_str(&text)?;
+        #[cfg(test)]
+        self.run_after_task_read_hook_for_test();
+        Ok(task)
     }
 
     pub fn list_tasks(&self) -> Result<Vec<TaskRecord>, RuntimeError> {
@@ -95,6 +100,17 @@ impl Store {
         Ok(revision)
     }
 
+    /// Returns the collection revision without exposing client-private New Task activity.
+    pub(crate) fn max_visible_task_revision(&self) -> Result<u64, RuntimeError> {
+        Ok(self
+            .list_all_task_records_strict()?
+            .into_iter()
+            .filter(|task| task.lifecycle.is_visible())
+            .map(|task| task.revision)
+            .max()
+            .unwrap_or(0))
+    }
+
     pub fn task_record_count(&self) -> Result<usize, RuntimeError> {
         let mut count = 0;
         for entry in fs::read_dir(self.tasks_dir())? {
@@ -117,70 +133,9 @@ fn compare_task_records_for_navigation(
 }
 
 fn compare_desc(left: &str, right: &str) -> std::cmp::Ordering {
-    activity_millis(right).cmp(&activity_millis(left))
-}
-
-fn activity_millis(value: &str) -> i128 {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        return 0;
-    }
-    if trimmed.bytes().all(|byte| byte.is_ascii_digit()) {
-        return trimmed.parse::<i128>().unwrap_or(0);
-    }
-    parse_iso_utc_millis(trimmed).unwrap_or(0)
-}
-
-fn parse_iso_utc_millis(value: &str) -> Option<i128> {
-    let (date, time) = value.split_once('T')?;
-    let mut date_parts = date.split('-');
-    let year = date_parts.next()?.parse::<i32>().ok()?;
-    let month = date_parts.next()?.parse::<u32>().ok()?;
-    let day = date_parts.next()?.parse::<u32>().ok()?;
-    if date_parts.next().is_some() {
-        return None;
-    }
-
-    let time = time.strip_suffix('Z').unwrap_or(time);
-    let mut time_parts = time.split(':');
-    let hour = time_parts.next()?.parse::<u32>().ok()?;
-    let minute = time_parts.next()?.parse::<u32>().ok()?;
-    let second_and_millis = time_parts.next()?;
-    if time_parts.next().is_some() {
-        return None;
-    }
-    let (second, millis) = match second_and_millis.split_once('.') {
-        Some((second, fraction)) => {
-            let millis = fraction.chars().take(3).collect::<String>();
-            let millis = format!("{millis:0<3}").parse::<u32>().ok()?;
-            (second.parse::<u32>().ok()?, millis)
-        }
-        None => (second_and_millis.parse::<u32>().ok()?, 0),
-    };
-    if !(1..=12).contains(&month)
-        || !(1..=31).contains(&day)
-        || hour > 23
-        || minute > 59
-        || second > 59
-    {
-        return None;
-    }
-
-    let days = days_from_civil(year, month, day);
-    Some(
-        (((days * 24 + hour as i128) * 60 + minute as i128) * 60 + second as i128) * 1000
-            + millis as i128,
-    )
-}
-
-fn days_from_civil(year: i32, month: u32, day: u32) -> i128 {
-    let year = year as i128 - if month <= 2 { 1 } else { 0 };
-    let era = if year >= 0 { year } else { year - 399 } / 400;
-    let yoe = year - era * 400;
-    let month = month as i128;
-    let doy = (153 * (month + if month > 2 { -3 } else { 9 }) + 2) / 5 + day as i128 - 1;
-    let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    era * 146_097 + doe - 719_468
+    crate::time::activity_millis(right)
+        .unwrap_or(0)
+        .cmp(&crate::time::activity_millis(left).unwrap_or(0))
 }
 
 fn read_task_record_from_entry(
@@ -190,7 +145,7 @@ fn read_task_record_from_entry(
     let Some(record) = read_any_task_record_from_entry(entry)? else {
         return Ok(None);
     };
-    if record.tombstoned || record.archived != archived_filter {
+    if record.tombstoned || !record.lifecycle.is_visible() || record.archived != archived_filter {
         return Ok(None);
     }
     Ok(Some(record))
@@ -203,7 +158,7 @@ fn read_task_record_from_entry_strict(
     let Some(record) = read_any_task_record_from_entry_strict(entry)? else {
         return Ok(None);
     };
-    if record.tombstoned || record.archived != archived_filter {
+    if record.tombstoned || !record.lifecycle.is_visible() || record.archived != archived_filter {
         return Ok(None);
     }
     Ok(Some(record))

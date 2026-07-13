@@ -18,14 +18,16 @@ use crate::attachment::{
     AttachmentCreateFileReferenceResult, AttachmentCreatePastedImageParams,
     AttachmentCreatePastedImageResult, AttachmentListDirectoryParams,
     AttachmentListDirectoryResult, AttachmentListRootsParams, AttachmentListRootsResult,
-    AttachmentRefreshHandlesParams, AttachmentRefreshHandlesResult, AttachmentReleaseHandlesParams,
-    AttachmentReleaseHandlesResult, AttachmentRevealParams, AttachmentRevealResult,
+    AttachmentRefreshHandlesParams, AttachmentRefreshHandlesResult, AttachmentReleaseOutcome,
+    AttachmentReleaseParams, AttachmentReleaseResult, AttachmentReleaseStatus,
+    AttachmentResourceId, AttachmentRevealParams, AttachmentRevealResult,
     EmbeddedAttachmentCandidate, FileBrowserDirectory, FileBrowserEntry, FileBrowserEntryKind,
     FileBrowserRoot, PreSendAttachment,
 };
 use crate::client::{
-    ClientCapabilities, ClientHeartbeatParams, ClientHeartbeatResult, ClientProbeLifecycle,
-    ClientProbeParams, ClientProbeResult, ClientProtocolCapability, InitializeParams,
+    ClientCapabilities, ClientCapabilitiesChangedParams, ClientCapabilitiesChangedResult,
+    ClientHeartbeatParams, ClientHeartbeatResult, ClientProbeLifecycle, ClientProbeParams,
+    ClientProbeResult, ClientProtocolCapability, ClientWorkspaceRoot, InitializeParams,
     InitializeResult, RequestedSurface, SettingsSection, ShellCapability, ShellDescriptor,
     ShellKind,
 };
@@ -38,12 +40,15 @@ use crate::envelopes::{
     ServerRequestEnvelope,
 };
 use crate::errors::{ErrorTarget, ProtocolError, ProtocolErrorCode};
-use crate::events::{AppServerEvent, AppServerEventPayload, EventScope, TextChunk};
+use crate::events::{
+    AppServerEvent, AppServerEventPayload, EventScope, TaskChanges, TaskChatChange,
+    TaskNavigationChange,
+};
 use crate::ids::{
     AgentConfigOptionId, AgentId, AttachmentCandidateId, AttachmentHandleId, AttachmentId,
     ClientInstanceId, ClientMutationId, ClientRequestId, EventCursor, FileBrowserEntryId,
     FileBrowserRootId, MessageId, ProjectId, RequestId, ServerId, StateRootId, TaskId,
-    TaskListCursor, TaskSendIdempotencyKey, TurnId,
+    TaskListCursor, TurnId,
 };
 use crate::server_requests::{
     PermissionRequestOption, PermissionRequestOptionKind, PermissionRequestParams,
@@ -69,16 +74,16 @@ use crate::snapshot::{
     AgentSlashCommandInputSnapshot, AgentSlashCommandSnapshot, AgentStatus, AgentSummary,
     AttachmentKind, AttachmentSnapshot, ChatItem, ChatItemStatus, ChatRole, ChatSnapshot,
     ClientSnapshot, ClientSnapshotScope, LiveSessionDataState, MessagePart,
-    PendingAgentConfigChange, PendingRequestKind, PendingRequestScope, PendingRequestSnapshot,
-    PermissionMessageDecision, PermissionMessageOption, PermissionMessageOptionKind,
-    PermissionMessageState, ProjectCollectionSnapshot, ProjectSummary, ProtocolVersion,
+    NewTaskDefaultsSnapshot, PendingAgentConfigChange, PendingRequestKind, PendingRequestScope,
+    PendingRequestSnapshot, ProjectCollectionSnapshot, ProjectSummary, ProtocolVersion,
     QuestionMessageAction, QuestionMessageState, RecoveryAction, RecoverySnapshot,
     ServerCapabilities, ServerSnapshot, SettingsSnapshot, StateRootSnapshot,
-    TaskAgentCommandsSnapshot, TaskAgentConfigSnapshot, TaskHistorySyncSnapshot,
+    TaskAgentCommandsSnapshot, TaskAgentConfigSnapshot, TaskHistorySyncSnapshot, TaskLifecycle,
     TaskNavigationSnapshot, TaskPreparationAction, TaskPreparationSnapshot, TaskPreparationStep,
     TaskPreparationStepKind, TaskPreparationStepStatus, TaskSendBlocker, TaskSendBlockerKind,
     TaskSendCapabilitySnapshot, TaskSendCapabilityState, TaskSetupBlocker, TaskSetupBlockerKind,
-    TaskSnapshot, TaskStatus, TaskSummary,
+    TaskSnapshot, TaskStatus, TaskSummary, TaskTitle, TaskTitleSource,
+    ToolPermissionDecisionSnapshot, ToolPermissionOutcomeSnapshot,
 };
 use crate::state::{
     StateSubscribeParams, StateSubscribeResult, StateUnsubscribeParams, StateUnsubscribeResult,
@@ -87,13 +92,12 @@ use crate::state::{
 use crate::support::{SupportRecoverStuckSessionsParams, SupportRecoverStuckSessionsResult};
 use crate::task::{
     ActivityToolContent, ActivityToolField, ActivityToolInput, ActivityToolLocation,
-    ActivityToolOutput, ComposerMessage, TaskAdoptNativeSessionParams,
+    ActivityToolOutput, ActivityToolValue, ComposerMessage, TaskAdoptNativeSessionParams,
     TaskAdoptNativeSessionResult, TaskCancelParams, TaskCancelResult, TaskChatPageParams,
     TaskChatPageResult, TaskCreateParams, TaskCreateResult, TaskDiscardParams, TaskDiscardResult,
     TaskListParams, TaskListResult, TaskMarkReadParams, TaskMarkReadResult, TaskOpenParams,
-    TaskOpenResult, TaskRetryHistorySyncParams, TaskRetryHistorySyncResult, TaskSendParams,
-    TaskSendResult, TaskSetArchivedParams, TaskSetArchivedResult, TaskSetConfigOptionParams,
-    TaskSetConfigOptionResult, TaskToolDetailParams, TaskToolDetailResult,
+    TaskOpenResult, TaskSendParams, TaskSendResult, TaskSetArchivedParams, TaskSetArchivedResult,
+    TaskSetConfigOptionParams, TaskSetConfigOptionResult, ToolDetailSnapshot,
 };
 use crate::workspace::{
     WorkspaceBrowserDirectory, WorkspaceBrowserEntry, WorkspaceBrowserRoot,
@@ -120,7 +124,6 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<StateRootId>(output, config);
     push_decl::<TaskId>(output, config);
     push_decl::<TaskListCursor>(output, config);
-    push_decl::<TaskSendIdempotencyKey>(output, config);
     push_decl::<TurnId>(output, config);
 
     push_decl::<ClientRequestEnvelope<Dummy>>(output, config);
@@ -140,6 +143,9 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<ClientProbeLifecycle>(output, config);
     push_decl::<InitializeParams>(output, config);
     push_decl::<InitializeResult>(output, config);
+    push_decl::<ClientCapabilitiesChangedParams>(output, config);
+    push_decl::<ClientCapabilitiesChangedResult>(output, config);
+    push_decl::<ClientWorkspaceRoot>(output, config);
     push_decl::<ShellDescriptor>(output, config);
     push_decl::<ShellKind>(output, config);
     push_decl::<RequestedSurface>(output, config);
@@ -244,8 +250,11 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<AttachmentConfirmEmbeddedResult>(output, config);
     push_decl::<AttachmentRefreshHandlesParams>(output, config);
     push_decl::<AttachmentRefreshHandlesResult>(output, config);
-    push_decl::<AttachmentReleaseHandlesParams>(output, config);
-    push_decl::<AttachmentReleaseHandlesResult>(output, config);
+    push_decl::<AttachmentResourceId>(output, config);
+    push_decl::<AttachmentReleaseStatus>(output, config);
+    push_decl::<AttachmentReleaseOutcome>(output, config);
+    push_decl::<AttachmentReleaseParams>(output, config);
+    push_decl::<AttachmentReleaseResult>(output, config);
     push_decl::<AttachmentRevealParams>(output, config);
     push_decl::<AttachmentRevealResult>(output, config);
     push_decl::<PreSendAttachment>(output, config);
@@ -288,17 +297,15 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<TaskCancelResult>(output, config);
     push_decl::<TaskChatPageParams>(output, config);
     push_decl::<TaskChatPageResult>(output, config);
-    push_decl::<TaskToolDetailParams>(output, config);
-    push_decl::<TaskToolDetailResult>(output, config);
+    push_decl::<ToolDetailSnapshot>(output, config);
     push_decl::<ActivityToolLocation>(output, config);
     push_decl::<ActivityToolContent>(output, config);
     push_decl::<ActivityToolInput>(output, config);
     push_decl::<ActivityToolOutput>(output, config);
     push_decl::<ActivityToolField>(output, config);
+    push_decl::<ActivityToolValue>(output, config);
     push_decl::<TaskOpenParams>(output, config);
     push_decl::<TaskOpenResult>(output, config);
-    push_decl::<TaskRetryHistorySyncParams>(output, config);
-    push_decl::<TaskRetryHistorySyncResult>(output, config);
     push_decl::<TaskMarkReadParams>(output, config);
     push_decl::<TaskMarkReadResult>(output, config);
     push_decl::<TaskListParams>(output, config);
@@ -313,7 +320,9 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<AppServerEvent>(output, config);
     push_decl::<EventScope>(output, config);
     push_decl::<AppServerEventPayload>(output, config);
-    push_decl::<TextChunk>(output, config);
+    push_decl::<TaskChanges>(output, config);
+    push_decl::<TaskChatChange>(output, config);
+    push_decl::<TaskNavigationChange>(output, config);
 
     push_decl::<ClientSnapshot>(output, config);
     push_decl::<ServerSnapshot>(output, config);
@@ -321,6 +330,7 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<ServerCapabilities>(output, config);
     push_decl::<StateRootSnapshot>(output, config);
     push_decl::<ClientSnapshotScope>(output, config);
+    push_decl::<NewTaskDefaultsSnapshot>(output, config);
     push_decl::<ProjectCollectionSnapshot>(output, config);
     push_decl::<ProjectSummary>(output, config);
     push_decl::<AgentCollectionSnapshot>(output, config);
@@ -329,7 +339,10 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<AgentCapabilities>(output, config);
     push_decl::<TaskNavigationSnapshot>(output, config);
     push_decl::<TaskSummary>(output, config);
+    push_decl::<TaskTitle>(output, config);
+    push_decl::<TaskTitleSource>(output, config);
     push_decl::<TaskStatus>(output, config);
+    push_decl::<TaskLifecycle>(output, config);
     push_decl::<TaskSnapshot>(output, config);
     push_decl::<TaskHistorySyncSnapshot>(output, config);
     push_decl::<TaskPreparationSnapshot>(output, config);
@@ -357,14 +370,12 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<ChatRole>(output, config);
     push_decl::<ChatItemStatus>(output, config);
     push_decl::<MessagePart>(output, config);
-    push_decl::<PermissionMessageOption>(output, config);
-    push_decl::<PermissionMessageOptionKind>(output, config);
-    push_decl::<PermissionMessageState>(output, config);
-    push_decl::<PermissionMessageDecision>(output, config);
     push_decl::<QuestionMessageState>(output, config);
     push_decl::<QuestionMessageAction>(output, config);
     push_decl::<ActivityStatus>(output, config);
     push_decl::<ActivityStepSnapshot>(output, config);
+    push_decl::<ToolPermissionOutcomeSnapshot>(output, config);
+    push_decl::<ToolPermissionDecisionSnapshot>(output, config);
     push_decl::<AttachmentSnapshot>(output, config);
     push_decl::<AttachmentKind>(output, config);
     push_decl::<RecoverySnapshot>(output, config);

@@ -7,6 +7,7 @@ fn generated_bindings_include_protocol_method_maps() {
     for expected in [
         "export const CLIENT_PROBE = \"client/probe\" as const;",
         "export const CLIENT_INITIALIZE = \"client/initialize\" as const;",
+        "export const CLIENT_CAPABILITIES_CHANGED = \"client/capabilitiesChanged\" as const;",
         "export const STATE_SUBSCRIBE = \"state/subscribe\" as const;",
         "export const STATE_UNSUBSCRIBE = \"state/unsubscribe\" as const;",
         "export const DIAGNOSTICS_GET_RUNTIME = \"diagnostics/getRuntime\" as const;",
@@ -33,7 +34,6 @@ fn generated_bindings_include_protocol_method_maps() {
         "export const TASK_OPEN = \"task/open\" as const;",
         "export const TASK_MARK_READ = \"task/markRead\" as const;",
         "export const TASK_CHAT_PAGE = \"task/chatPage\" as const;",
-        "export const TASK_TOOL_DETAIL = \"task/toolDetail\" as const;",
         "export const TASK_LIST = \"task/list\" as const;",
         "export const TASK_DISCARD = \"task/discard\" as const;",
         "export const PERMISSION_REQUEST = \"permission/request\" as const;",
@@ -44,6 +44,7 @@ fn generated_bindings_include_protocol_method_maps() {
         "export type RequestParamsByMethod = {",
         "[CLIENT_PROBE]: ClientProbeParams;",
         "[CLIENT_INITIALIZE]: InitializeParams;",
+        "[CLIENT_CAPABILITIES_CHANGED]: ClientCapabilitiesChangedParams;",
         "[STATE_SUBSCRIBE]: StateSubscribeParams;",
         "[STATE_UNSUBSCRIBE]: StateUnsubscribeParams;",
         "[DIAGNOSTICS_GET_RUNTIME]: RuntimeDiagnosticsParams;",
@@ -70,12 +71,12 @@ fn generated_bindings_include_protocol_method_maps() {
         "[TASK_OPEN]: TaskOpenParams;",
         "[TASK_MARK_READ]: TaskMarkReadParams;",
         "[TASK_CHAT_PAGE]: TaskChatPageParams;",
-        "[TASK_TOOL_DETAIL]: TaskToolDetailParams;",
         "[TASK_LIST]: TaskListParams;",
         "[TASK_DISCARD]: TaskDiscardParams;",
         "export type ResponseResultByMethod = {",
         "[CLIENT_PROBE]: ClientProbeResult;",
         "[CLIENT_INITIALIZE]: InitializeResult;",
+        "[CLIENT_CAPABILITIES_CHANGED]: ClientCapabilitiesChangedResult;",
         "[STATE_SUBSCRIBE]: StateSubscribeResult;",
         "[STATE_UNSUBSCRIBE]: StateUnsubscribeResult;",
         "[DIAGNOSTICS_GET_RUNTIME]: RuntimeDiagnosticsResult;",
@@ -102,7 +103,6 @@ fn generated_bindings_include_protocol_method_maps() {
         "[TASK_OPEN]: TaskOpenResult;",
         "[TASK_MARK_READ]: TaskMarkReadResult;",
         "[TASK_CHAT_PAGE]: TaskChatPageResult;",
-        "[TASK_TOOL_DETAIL]: TaskToolDetailResult;",
         "[TASK_LIST]: TaskListResult;",
         "[TASK_DISCARD]: TaskDiscardResult;",
         "export type TypedClientRequest<M extends ProtocolMethod> = ClientRequestEnvelope<RequestParamsByMethod[M]> & {",
@@ -112,6 +112,8 @@ fn generated_bindings_include_protocol_method_maps() {
         "export type ClientProbeResponse = ResponseEnvelope<ClientProbeResult>;",
         "export type ClientInitializeRequest = TypedClientRequest<typeof CLIENT_INITIALIZE>;",
         "export type ClientInitializeResponse = ResponseEnvelope<InitializeResult>;",
+        "export type ClientCapabilitiesChangedRequest = TypedClientRequest<typeof CLIENT_CAPABILITIES_CHANGED>;",
+        "export type ClientCapabilitiesChangedResponse = ResponseEnvelope<ClientCapabilitiesChangedResult>;",
         "export type StateSubscribeResponse = ResponseEnvelope<StateSubscribeResult>;",
         "export type StateUnsubscribeResponse = ResponseEnvelope<StateUnsubscribeResult>;",
         "export type DiagnosticsGetRuntimeResponse = ResponseEnvelope<RuntimeDiagnosticsResult>;",
@@ -146,7 +148,6 @@ fn generated_bindings_include_protocol_method_maps() {
         "export type TaskCancelResponse = ResponseEnvelope<TaskCancelResult>;",
         "export type TaskOpenResponse = ResponseEnvelope<TaskOpenResult>;",
         "export type TaskChatPageResponse = ResponseEnvelope<TaskChatPageResult>;",
-        "export type TaskToolDetailResponse = ResponseEnvelope<TaskToolDetailResult>;",
         "export type TaskListResponse = ResponseEnvelope<TaskListResult>;",
         "export type TaskDiscardResponse = ResponseEnvelope<TaskDiscardResult>;",
         "export type ServerRequestMethod = typeof PERMISSION_REQUEST | typeof QUESTION_REQUEST | typeof SECRET_READ | typeof SHELL_SHOW_NOTIFICATION | typeof SHELL_REVEAL_FILE;",
@@ -173,11 +174,14 @@ fn generated_bindings_include_protocol_method_maps() {
         "export type ShellResolveFileRevealResult =",
         "export type StateSubscribeResult =",
         "export type ClientProbeResult =",
+        "export type ClientCapabilitiesChangedParams =",
+        "export type ClientCapabilitiesChangedResult =",
+        "export type ClientWorkspaceRoot =",
         "export type ClientProbeLifecycle = \"running\" | \"draining\" | \"stopping\";",
         "export type SubscriptionScope =",
         "export type SubscriptionSnapshot =",
-        "export type TaskSendIdempotencyKey = string & { readonly __openaideBrand: \"TaskSendIdempotencyKey\" };",
-        "export type AppServerEvent = { previousCursor: EventCursor, cursor: EventCursor, scope: EventScope, payload: AppServerEventPayload, };",
+        "export type AppServerEvent = {",
+        "subscription: SubscriptionScope, previousCursor: EventCursor, cursor: EventCursor, scope: EventScope, payload: AppServerEventPayload, };",
         "export type ClientSnapshot =",
         "export type TaskSnapshot =",
         "pendingRequests?: Array<PendingRequestSnapshot>",
@@ -191,4 +195,15 @@ fn generated_bindings_include_protocol_method_maps() {
             "missing generated binding line: {expected}"
         );
     }
+}
+
+#[test]
+fn generated_bindings_have_no_trailing_whitespace() {
+    let output = super::bindings();
+    let trailing_line = output.lines().find(|line| *line != line.trim_end());
+
+    assert!(
+        trailing_line.is_none(),
+        "generated TypeScript line has trailing whitespace: {trailing_line:?}"
+    );
 }

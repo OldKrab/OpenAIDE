@@ -68,6 +68,7 @@ export type ElicitationMessage = {
   fields: ElicitationField[];
   answers?: ElicitationAnswer[];
   error?: string;
+  resolution_message?: string;
 };
 
 export type ElicitationResponse =

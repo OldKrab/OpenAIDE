@@ -185,7 +185,7 @@ describe("TaskView follow scroll", () => {
           taskInput={{
             prompt: "",
             context: [],
-            pending: { prompt: "Ship the follow-up", context: [] },
+            pending: { prompt: "Ship the follow-up", context: [], state: "sending" },
           }}
         />,
       );
@@ -207,13 +207,16 @@ function jumpButtons(tree: ReactTestRenderer) {
 
 function taskViewProps(taskSnapshot: TaskSnapshot) {
   return {
-    appServerPermissionRequests: {},
     backendReady: true,
     chatPageState: undefined,
-    dispatch: vi.fn(),
+    intents: {
+      changePrompt: vi.fn(),
+      recordScroll: vi.fn(),
+      reportAttachmentError: vi.fn(),
+    },
     onCancel: vi.fn(),
     onLoadChatPage: vi.fn(),
-    onLoadToolDetail: vi.fn(),
+    onSubscribeToolDetail: vi.fn(() => vi.fn()),
     onPermissionRespond: vi.fn(),
     onRevealAttachment: vi.fn(),
     onRemoveAttachment: vi.fn(),
@@ -229,6 +232,7 @@ function taskViewProps(taskSnapshot: TaskSnapshot) {
 
 function snapshot(status: TaskSnapshot["task"]["status"], revision = 1, taskId = "task-1"): TaskSnapshot {
   return {
+    lifecycle: "visible",
     task: {
       task_id: taskId,
       title: "Task",
@@ -254,8 +258,8 @@ function snapshot(status: TaskSnapshot["task"]["status"], revision = 1, taskId =
       total_count: revision,
       version: revision,
     },
-    permissions: [],
-    send_capability: { state: "ready", attachment_only: true },
+    active_requests: [],
+    send_capability: { state: "ready" },
     settings_summary: { agent_id: "codex", isolation: "local" },
     revision,
   };
@@ -268,14 +272,14 @@ function snapshotWithStreamingText(taskId: string, text: string): TaskSnapshot {
   taskSnapshot.chat.items = [{
     cursor: "message-1",
     identity: "message-1",
-    message_type: "agent_text",
+    message_type: "agent_message",
     message_id: "message-1",
     message: {
-      kind: "agent_text",
+      kind: "agent_message",
       id: "agent-1",
-      text,
+      role: "agent",
+      parts: [{ kind: "text", text }],
       created_at: "2026-07-10T00:00:00Z",
-      streaming: true,
     },
   }];
   return taskSnapshot;

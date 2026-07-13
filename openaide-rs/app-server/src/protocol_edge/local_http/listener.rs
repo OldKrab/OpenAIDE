@@ -201,9 +201,15 @@ fn handle_event_stream(
             let messages = handler.drain_push_messages(&lease);
             if !messages.is_empty() {
                 write_event_stream_data(stream, &messages)?;
+                if !handler.observe_event_stream_activity(&lease) {
+                    break;
+                }
                 last_heartbeat = std::time::Instant::now();
             } else if last_heartbeat.elapsed() >= Duration::from_secs(1) {
                 write_event_stream_heartbeat(stream)?;
+                if !handler.observe_event_stream_activity(&lease) {
+                    break;
+                }
                 last_heartbeat = std::time::Instant::now();
             }
             std::thread::sleep(Duration::from_millis(16));
@@ -267,18 +273,10 @@ impl LocalHttpProbeListenerError {
     pub fn is_transient_io(&self) -> bool {
         matches!(
             self,
-            Self::Io(error)
-                if matches!(
-                    error.kind(),
-                    ErrorKind::Interrupted | ErrorKind::TimedOut | ErrorKind::WouldBlock
-                )
+            Self::Io(error) if is_transient_socket_kind(error.kind())
         ) || matches!(
             self,
-            Self::IoWithContext { source, .. }
-                if matches!(
-                    source.kind(),
-                    ErrorKind::Interrupted | ErrorKind::TimedOut | ErrorKind::WouldBlock
-                )
+            Self::IoWithContext { source, .. } if is_transient_socket_kind(source.kind())
         )
     }
 
@@ -319,6 +317,19 @@ impl LocalHttpProbeListenerError {
             _ => None,
         }
     }
+}
+
+fn is_transient_socket_kind(kind: ErrorKind) -> bool {
+    matches!(
+        kind,
+        ErrorKind::Interrupted
+            | ErrorKind::TimedOut
+            | ErrorKind::WouldBlock
+            // Browsers routinely close event streams during navigation, refresh, and suspension.
+            | ErrorKind::BrokenPipe
+            | ErrorKind::ConnectionReset
+            | ErrorKind::ConnectionAborted
+    )
 }
 
 #[cfg(test)]

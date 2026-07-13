@@ -4,13 +4,14 @@ use crate::agent::{AgentSessionLoad, TurnCancellation};
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{TaskSnapshot, TaskStatus};
 use crate::protocol::params::TaskCreateParams;
-use crate::storage::records::TaskPreparationRecord;
-use crate::storage::records::TaskRecord;
+use crate::storage::records::{
+    TaskLifecycle, TaskPreparationRecord, TaskRecord, TaskTitle, TaskTitleSource,
+};
 use crate::tasks::config_options::selected_config_options;
 use crate::tasks::task_start_transaction::TaskSessionStartGuard;
 use crate::time::now_string;
 
-use super::helpers::{required_optional_text, title_from_loaded_messages};
+use super::helpers::required_optional_text;
 use super::{create_snapshot_commit_options, TaskTurnLifecycle};
 
 impl TaskTurnLifecycle {
@@ -26,11 +27,8 @@ impl TaskTurnLifecycle {
             return Err(RuntimeError::InvalidParams("config_options".to_string()));
         }
 
-        self.mutations.ensure_native_session_unowned(
-            &params.selected_agent_id,
-            &params.workspace_root,
-            &external_session_id,
-        )?;
+        self.mutations
+            .ensure_native_session_unowned(&params.selected_agent_id, &external_session_id)?;
 
         let now = now_string();
         let task_id = format!("task_{}", Uuid::new_v4());
@@ -44,19 +42,15 @@ impl TaskTurnLifecycle {
             secret_resolver: None,
         })?;
         let mut session_start = TaskSessionStartGuard::new(&self.agent_gateway, loaded.session);
-        let agent_title =
-            (!params.title.trim().is_empty()).then(|| params.title.trim().to_string());
-        let fallback_title = title_from_loaded_messages(&loaded.replayed_messages);
+        let title = TaskTitle::new(params.title, TaskTitleSource::Agent);
 
         let persist_result: Result<TaskSnapshot, RuntimeError> = (|| {
             let session = session_start.session();
             let selected_agent_id = params.selected_agent_id.clone();
-            let workspace_root = params.workspace_root.clone();
             let session_id = session.session_id.clone();
             let record = TaskRecord {
                 task_id: task_id.clone(),
-                title: fallback_title,
-                agent_title,
+                title,
                 status: TaskStatus::Inactive,
                 task_version: 1,
                 message_history_version: 0,
@@ -71,7 +65,7 @@ impl TaskTurnLifecycle {
                 agent_id: params.selected_agent_id,
                 isolation: params.selected_isolation,
                 workspace_root: params.workspace_root,
-                first_prompt_sent: true,
+                lifecycle: TaskLifecycle::Visible,
                 agent_session_id: Some(session.session_id.clone()),
                 active_turn_id: None,
                 archived: false,
@@ -79,6 +73,7 @@ impl TaskTurnLifecycle {
                 revision: 0,
                 config_options: session.config_options.clone(),
                 config_options_catalog: session.config_catalog.clone(),
+                config_mutation: Default::default(),
                 agent_commands_catalog: session.commands_catalog.clone(),
                 model_id: params.model_id.or(session.model_id.clone()),
                 preparation: TaskPreparationRecord::Ready,
@@ -89,11 +84,7 @@ impl TaskTurnLifecycle {
                 loaded.replayed_messages,
                 create_snapshot_commit_options(),
                 |validation| {
-                    validation.ensure_native_session_unowned(
-                        &selected_agent_id,
-                        &workspace_root,
-                        &session_id,
-                    )
+                    validation.ensure_native_session_unowned(&selected_agent_id, &session_id)
                 },
             )?;
             result
@@ -112,7 +103,7 @@ impl TaskTurnLifecycle {
 
         if let Err(error) = self
             .turn_runner
-            .attach_session_events(task_id.clone(), session_start.session_id())
+            .attach_session_events(task_id.clone(), &session_start.session().key())
         {
             let session_id = session_start.session_id().to_string();
             let _ = session_start.close();

@@ -3,7 +3,9 @@ use serde_json::json;
 use super::{
     AttachmentConfirmEmbeddedParams, AttachmentCreateEmbeddedCandidateParams,
     AttachmentCreateFileReferenceParams, AttachmentCreatePastedImageParams,
-    AttachmentListDirectoryParams, AttachmentListRootsParams, AttachmentRevealParams,
+    AttachmentListDirectoryParams, AttachmentListRootsParams, AttachmentReleaseOutcome,
+    AttachmentReleaseParams, AttachmentReleaseResult, AttachmentReleaseStatus,
+    AttachmentResourceId, AttachmentRevealParams,
 };
 
 #[test]
@@ -77,5 +79,74 @@ fn attachment_file_browser_params_are_task_scoped_and_opaque() {
     assert_eq!(
         reveal,
         json!({ "taskId": "task-1", "handleId": "attachment-handle-1" })
+    );
+}
+
+#[test]
+fn attachment_release_wire_shape_is_tagged_and_ordered() {
+    let release = serde_json::to_value(AttachmentReleaseParams {
+        task_id: "task-1".into(),
+        resources: vec![
+            AttachmentResourceId::Handle {
+                id: "attachment-handle-1".into(),
+            },
+            AttachmentResourceId::Candidate {
+                id: "candidate-1".into(),
+            },
+        ],
+    })
+    .unwrap();
+    assert_eq!(
+        release,
+        json!({
+            "taskId": "task-1",
+            "resources": [
+                { "kind": "handle", "id": "attachment-handle-1" },
+                { "kind": "candidate", "id": "candidate-1" }
+            ]
+        })
+    );
+
+    let released = serde_json::to_value(AttachmentReleaseResult {
+        outcomes: vec![
+            AttachmentReleaseOutcome {
+                resource: AttachmentResourceId::Handle {
+                    id: "attachment-handle-1".into(),
+                },
+                status: AttachmentReleaseStatus::Released,
+            },
+            AttachmentReleaseOutcome {
+                resource: AttachmentResourceId::Candidate {
+                    id: "candidate-1".into(),
+                },
+                status: AttachmentReleaseStatus::NoOp,
+            },
+            AttachmentReleaseOutcome {
+                resource: AttachmentResourceId::Handle {
+                    id: "attachment-handle-2".into(),
+                },
+                status: AttachmentReleaseStatus::Forbidden,
+            },
+        ],
+    })
+    .unwrap();
+    assert_eq!(
+        released,
+        json!({
+            "outcomes": [
+                {
+                    "resource": { "kind": "handle", "id": "attachment-handle-1" },
+                    "status": "released"
+                },
+                {
+                    "resource": { "kind": "candidate", "id": "candidate-1" },
+                    "status": "noOp"
+                },
+                {
+                    "resource": { "kind": "handle", "id": "attachment-handle-2" },
+                    "status": "forbidden"
+                }
+            ]
+        })
     );
 }

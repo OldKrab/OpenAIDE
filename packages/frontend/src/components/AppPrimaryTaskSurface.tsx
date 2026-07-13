@@ -3,23 +3,32 @@ import { TaskLoadingView, TaskView } from "./TaskView";
 import type { AppController } from "./appController";
 
 export function primaryTaskSurfaceModel(controller: AppController) {
-  const { activeTask, bootstrap, state } = controller;
-  const snapshotTaskInput = state.snapshot ? state.taskInputs[state.snapshot.task.task_id] : undefined;
-  const renderableTaskSnapshot = state.snapshot?.task.has_messages === true
-    || (bootstrap.surface === "task" && bootstrap.taskId && snapshotTaskInput?.pending)
-    ? state.snapshot
+  const { activeTask, bootstrap, view } = controller;
+  const { primaryTask } = view;
+  const snapshotTaskInput = primaryTask.taskInput;
+  const adoptedEmptyTaskHasDraft = bootstrap.surface === "task"
+    && bootstrap.taskId === primaryTask.snapshot?.task.task_id
+    && hasVisibleTaskDraft(snapshotTaskInput);
+  // Task preparation can publish an active New Task while the route remains
+  // /new-task. Only an explicit Task route may promote that snapshot to TaskView.
+  const activeNoMessageTask = bootstrap.taskId === primaryTask.snapshot?.task.task_id
+    && primaryTask.snapshot?.task.status === "active";
+  const renderableTaskSnapshot = primaryTask.snapshot?.task.has_messages === true
+    || adoptedEmptyTaskHasDraft
+    || activeNoMessageTask
+    ? primaryTask.snapshot
     : undefined;
   const startupConfigOptions = renderableTaskSnapshot?.task.has_messages === false && snapshotTaskInput?.pending
-    ? state.newTask.pending?.configOptions
+    ? primaryTask.newTask.newTask.pending?.configOptions
     : undefined;
-  const openingNativeSession = state.newTask.nativeSessions.adoptingSessionId !== undefined;
+  const openingNativeSession = primaryTask.newTask.newTask.nativeSessions.adoptingSessionId !== undefined;
   const renderableTaskArchived = Boolean(
-    state.showArchived
+    view.navigation.showArchived
       && renderableTaskSnapshot
       && activeTask?.task_id === renderableTaskSnapshot.task.task_id,
   );
-  const taskLoadingError = bootstrap.taskId && state.taskOpenError?.taskId === bootstrap.taskId
-    ? state.taskOpenError.message
+  const taskLoadingError = bootstrap.taskId && primaryTask.taskOpenError?.taskId === bootstrap.taskId
+    ? primaryTask.taskOpenError.message
     : undefined;
   return {
     openingNativeSession,
@@ -30,6 +39,18 @@ export function primaryTaskSurfaceModel(controller: AppController) {
   };
 }
 
+function hasVisibleTaskDraft(input: AppController["view"]["primaryTask"]["taskInput"]) {
+  return Boolean(
+    input
+    && (
+      input.pending !== undefined
+      || input.prompt.length !== 0
+      || input.context.length !== 0
+      || input.error !== undefined
+    )
+  );
+}
+
 type AppPrimaryTaskSurfaceProps = {
   controller: AppController;
   focusRequestKey: number;
@@ -37,7 +58,8 @@ type AppPrimaryTaskSurfaceProps = {
 };
 
 export function AppPrimaryTaskSurface({ controller, focusRequestKey, model }: AppPrimaryTaskSurfaceProps) {
-  const { activeTask, agents, backendReady, bootstrap, callbacks, dispatch, preferences, state } = controller;
+  const { activeTask, agents, backendReady, bootstrap, callbacks, intents, preferences, view } = controller;
+  const { primaryTask } = view;
   const {
     openingNativeSession,
     renderableTaskArchived,
@@ -46,61 +68,69 @@ export function AppPrimaryTaskSurface({ controller, focusRequestKey, model }: Ap
     taskLoadingError,
   } = model;
   const isWebShell = bootstrap.surface !== "invalid" && bootstrap.appServerConnection?.kind === "webProxy";
+  const retryTaskOpen = taskLoadingError || controller.backendConnectionState.status === "unavailable"
+    ? controller.retryTaskOpen
+    : undefined;
 
   if (renderableTaskSnapshot && !openingNativeSession) {
     return (
       <TaskView
         activeTask={activeTask}
         archived={renderableTaskArchived}
-        chatPageState={state.chatPages[renderableTaskSnapshot.task.task_id]}
+        backendConnectionState={controller.backendConnectionState}
+        chatPageState={primaryTask.chatPageState}
         backendReady={backendReady}
-        dispatch={dispatch}
         fileBrowser={callbacks.task.fileBrowser}
-        onCancel={renderableTaskSnapshot.task.has_messages
+        intents={intents.task}
+        onCancel={renderableTaskSnapshot.task.has_messages || renderableTaskSnapshot.task.status === "active"
           ? callbacks.task.cancel
           : callbacks.newTask.cancel}
         onLoadChatPage={callbacks.task.loadChatPage}
-        onLoadToolDetail={callbacks.task.loadToolDetail}
+        onSubscribeToolDetail={callbacks.task.subscribeToolDetail}
         onPermissionRespond={callbacks.task.respondToPermission}
         onQuestionRespond={callbacks.task.respondToQuestion}
+        onRetryConnection={retryTaskOpen}
         onRevealAttachment={callbacks.task.revealAttachment}
         onRemoveAttachment={callbacks.task.removeAttachment}
-        onRetryHistory={callbacks.task.retryHistory}
         onRestoreTask={callbacks.navigation.restoreTask}
         onSelectConfigOption={callbacks.task.selectConfigOption}
         onSendPrompt={callbacks.task.sendPrompt}
-        appServerPermissionRequests={state.appServerPermissionRequests}
-        appServerQuestionRequests={state.appServerQuestionRequests}
-        permissionResponses={state.permissionResponses}
-        questionResponses={state.questionResponses}
-        savedScrollTop={state.taskScrollPositions[renderableTaskSnapshot.task.task_id]}
+        permissionResponses={primaryTask.permissionResponses}
+        liveTextPresentation={primaryTask.liveTextPresentation}
+        questionResponses={primaryTask.questionResponses}
+        savedScrollState={primaryTask.savedScrollState}
         snapshot={renderableTaskSnapshot}
         startupConfigOptions={startupConfigOptions}
         submitShortcut={preferences.composer_submit_shortcut}
-        taskInput={state.taskInputs[renderableTaskSnapshot.task.task_id] ?? { prompt: "", context: [] }}
-        toolDetails={state.toolDetails}
+        taskInput={primaryTask.taskInput ?? { prompt: "", context: [] }}
+        toolDetails={primaryTask.toolDetails}
         showWorkspaceContext={isWebShell}
       />
     );
   }
 
   if (bootstrap.taskId || openingNativeSession) {
-    return <TaskLoadingView error={taskLoadingError} />;
+    return (
+      <TaskLoadingView
+        error={taskLoadingError}
+        onRetry={retryTaskOpen}
+      />
+    );
   }
 
   return (
     <NewTaskView
       agents={agents}
-      dispatch={dispatch}
       fileBrowser={callbacks.newTask.fileBrowser}
       focusRequestKey={focusRequestKey}
+      intents={intents.newTask}
       loadingProjects={!backendReady}
       onCancelTask={callbacks.newTask.cancel}
+      onRemoveAttachment={callbacks.newTask.removeAttachment}
       onSelectConfigOption={callbacks.newTask.selectConfigOption}
       onSubmitTask={callbacks.newTask.submit}
       projectContextMode={isWebShell ? "selectable" : "fixed"}
-      resetOptionsRequestKey={callbacks.newTask.resetOptionsRequestKey}
-      state={state}
+      state={primaryTask.newTask}
       submitShortcut={preferences.composer_submit_shortcut}
       workspaceBrowser={callbacks.newTask.workspaceBrowser}
     />

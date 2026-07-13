@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use openaide_app_server_protocol::agent::{AgentListSessionsParams, AgentListSessionsResult};
 use openaide_app_server_protocol::errors::{ProtocolError, ProtocolErrorCode};
 use openaide_app_server_protocol::ids::{ClientInstanceId, MessageId, TurnId};
-use openaide_app_server_protocol::snapshot::{TaskNavigationSnapshot, TaskSnapshot};
+use openaide_app_server_protocol::snapshot::TaskSnapshot;
 use openaide_app_server_protocol::support::{
     SupportRecoverStuckSessionsParams, SupportRecoverStuckSessionsResult,
 };
@@ -16,12 +16,15 @@ use openaide_app_server_protocol::task::{TaskDiscardParams, TaskSetConfigOptionP
 
 use crate::agent::gateway::AgentGateway;
 use crate::agent::registry_handle::AgentRegistryHandle;
-use crate::agent::AgentRuntime;
+use crate::agent::{AgentRuntime, AgentSessionKey};
 use crate::attachment_runtime::AttachmentRuntime;
 use crate::projects::ProjectResolver;
 use crate::protocol::errors::RuntimeError;
 use crate::protocol_edge::{AppServerShutdownWorkflow, ShutdownBlockers};
 use crate::server_requests::ServerRequestRuntime;
+use crate::snapshots::task_snapshot::{
+    project_stored_task_snapshot_with_history_sync, TaskHistorySyncSnapshotSource,
+};
 use crate::storage::records::TaskRecord;
 use crate::storage::Store;
 use crate::task_events::TaskUpdateNotifier;
@@ -40,11 +43,11 @@ mod discard;
 mod list_sessions;
 mod open;
 mod prepare;
-mod secret_resolver;
+pub(crate) mod secret_resolver;
 pub(crate) mod send;
+mod session_cursor;
 mod set_config_option;
 mod support_recovery;
-mod tool_detail;
 
 #[derive(Clone)]
 pub(crate) struct TaskProductApi {
@@ -55,17 +58,25 @@ pub(crate) struct TaskProductApi {
     agent_gateway: AgentGateway,
     attachments: AttachmentRuntime,
     turn_runner: TurnRunner,
+    native_sessions: crate::tasks::native_session_service::NativeSessionService,
+    turn_acceptance: crate::tasks::turn_acceptance::TurnAcceptanceCoordinator,
+    config_operations: crate::tasks::task_operation::TaskOperationCoordinator,
     // ACP may expose a newly started session before its Task metadata commit finishes.
-    // Keep that session reserved so external-session listing never leaks a Draft Task.
-    preparing_session_ids: Arc<Mutex<HashSet<String>>>,
+    // Keep that session reserved so external-session listing never leaks a New Task.
+    preparing_session_ids: Arc<Mutex<HashSet<AgentSessionKey>>>,
     history_sync: crate::tasks::history_sync::HistorySyncCoordinator,
+    native_catalog_refresh: list_sessions::NativeCatalogRefreshCoordinator,
     #[allow(dead_code)]
     server_requests: ServerRequestRuntime,
     task_notifier: TaskUpdateNotifier,
 }
 
 pub(crate) trait TaskCreateWorkflow: Send + Sync {
-    fn create(&self, params: TaskCreateParams) -> Result<TaskSnapshot, ProtocolError>;
+    fn create_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        params: TaskCreateParams,
+    ) -> Result<TaskSnapshot, ProtocolError>;
 }
 
 pub(crate) trait TaskAdoptNativeSessionWorkflow: Send + Sync {
@@ -80,6 +91,9 @@ pub(crate) trait AgentListSessionsWorkflow: Send + Sync {
         &self,
         params: AgentListSessionsParams,
     ) -> Result<AgentListSessionsResult, ProtocolError>;
+
+    /// Requests coalesced background reconciliation without blocking the caller.
+    fn request_native_session_catalog_refresh(&self) {}
 }
 
 #[derive(Debug)]
@@ -98,7 +112,11 @@ pub(crate) trait TaskSendWorkflow: Send + Sync {
 }
 
 pub(crate) trait TaskCancelWorkflow: Send + Sync {
-    fn cancel(&self, params: TaskCancelParams) -> Result<TaskSnapshot, ProtocolError>;
+    fn cancel_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        params: TaskCancelParams,
+    ) -> Result<TaskSnapshot, ProtocolError>;
     fn recover_stuck_sessions(
         &self,
         params: SupportRecoverStuckSessionsParams,
@@ -108,28 +126,46 @@ pub(crate) trait TaskCancelWorkflow: Send + Sync {
 pub(crate) use open::TaskOpenWorkflow;
 
 pub(crate) trait TaskSetConfigOptionWorkflow: Send + Sync {
-    fn set_config_option(
+    fn set_config_option_for_client(
         &self,
+        client_instance_id: &ClientInstanceId,
         params: TaskSetConfigOptionParams,
     ) -> Result<TaskSnapshot, ProtocolError>;
 }
 
 pub(crate) trait TaskDiscardWorkflow: Send + Sync {
-    fn discard(&self, params: TaskDiscardParams) -> Result<TaskNavigationSnapshot, ProtocolError>;
+    fn discard_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        params: TaskDiscardParams,
+    ) -> Result<(), ProtocolError>;
 }
 
 pub(crate) trait TaskArchiveWorkflow: Send + Sync {
-    fn set_archived(
+    fn set_archived_for_client(
         &self,
+        client_instance_id: &ClientInstanceId,
         params: TaskSetArchivedParams,
-    ) -> Result<TaskNavigationSnapshot, ProtocolError>;
+    ) -> Result<(), ProtocolError>;
 }
 
 pub(crate) use attachments::AttachmentFileBrowserWorkflow;
 pub(crate) use chat_page::TaskChatPageWorkflow;
-pub(crate) use tool_detail::TaskToolDetailWorkflow;
 
 impl TaskProductApi {
+    /// Reads a Task at a client intent boundary and hides another client's New Task.
+    pub(super) fn read_task_for_client(
+        &self,
+        task_id: &str,
+        client_instance_id: &ClientInstanceId,
+    ) -> Result<TaskRecord, ProtocolError> {
+        let task = self.store.read_task(task_id).map_err(runtime_error)?;
+        crate::tasks::access::require_client_task_access(&task, client_instance_id)
+            .map_err(runtime_error)?;
+        reject_tombstoned_task(&task)?;
+        Ok(task)
+    }
+
     #[cfg(test)]
     pub(crate) fn attachment_runtime(&self) -> AttachmentRuntime {
         self.attachments.clone()
@@ -170,25 +206,40 @@ impl TaskProductApi {
         );
         let agent_gateway = AgentGateway::new(agent_runtime.clone());
         let attachments = AttachmentRuntime::new();
+        let agent_registry = agent_registry.into();
         let turn_runner = TurnRunner::new_with_server_requests(
             mutations.clone(),
             agent_runtime,
             server_requests.clone(),
         );
+        let preparing_session_ids = Arc::new(Mutex::new(HashSet::new()));
+        let native_sessions = crate::tasks::native_session_service::NativeSessionService::new(
+            agent_registry.clone(),
+            agent_gateway.clone(),
+            mutations.clone(),
+            turn_runner.clone(),
+            server_requests.clone(),
+            preparing_session_ids.clone(),
+        );
         let api = Self {
             store,
             project_resolver,
-            agent_registry: agent_registry.into(),
+            agent_registry,
             mutations,
             agent_gateway,
             attachments,
             turn_runner,
-            preparing_session_ids: Arc::new(Mutex::new(HashSet::new())),
+            native_sessions,
+            turn_acceptance: Default::default(),
+            config_operations: Default::default(),
+            preparing_session_ids,
             history_sync: crate::tasks::history_sync::HistorySyncCoordinator::default(),
+            native_catalog_refresh: Default::default(),
             server_requests,
             task_notifier: notifier,
         };
-        TaskTransitions::new(api.mutations.clone()).recover_volatile_runtime_state()?;
+        TaskTransitions::new(api.mutations.clone(), api.server_requests.clone())
+            .recover_volatile_runtime_state()?;
         api.recover_abandoned_preparations()?;
         Ok(api)
     }
@@ -198,10 +249,28 @@ impl TaskProductApi {
         task_id: &str,
         state: openaide_app_server_protocol::snapshot::TaskHistorySyncSnapshot,
     ) {
+        if !self.history_sync.set_current(task_id, state.clone()) {
+            return;
+        }
         if let Ok(task) = self.store.read_task(task_id) {
             self.task_notifier
                 .history_sync_updated(task_id, task.revision, state);
         }
+    }
+
+    /// Projects durable Task data with the current process-local reconciliation state.
+    pub(super) fn project_task_snapshot(
+        &self,
+        snapshot: crate::protocol::model::TaskSnapshot,
+    ) -> Result<TaskSnapshot, ProtocolError> {
+        let history_sync = self
+            .history_sync
+            .history_sync_snapshot(&snapshot.task.task_id);
+        project_stored_task_snapshot_with_history_sync(snapshot, history_sync)
+    }
+
+    pub(crate) fn history_sync_snapshots(&self) -> Arc<dyn TaskHistorySyncSnapshotSource> {
+        Arc::new(self.history_sync.clone())
     }
 
     pub(crate) fn shutdown(&self) -> Result<(), RuntimeError> {
@@ -216,16 +285,22 @@ impl AppServerShutdownWorkflow for TaskProductApi {
     }
 
     fn shutdown_blockers(&self) -> Result<ShutdownBlockers, RuntimeError> {
+        let mut owned_turns = self.turn_acceptance.owned_turns();
+        owned_turns.extend(self.turn_runner.active_turns());
         Ok(ShutdownBlockers {
-            active_turns: self.turn_runner.active_turn_count(),
+            active_turns: owned_turns.len(),
             pending_task_requests: self.server_requests.pending_count(),
         })
     }
 }
 
 impl TaskCreateWorkflow for TaskProductApi {
-    fn create(&self, params: TaskCreateParams) -> Result<TaskSnapshot, ProtocolError> {
-        self.create_task(params)
+    fn create_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        params: TaskCreateParams,
+    ) -> Result<TaskSnapshot, ProtocolError> {
+        self.create_task(client_instance_id, params)
     }
 }
 
@@ -250,6 +325,73 @@ impl TaskSendWorkflow for TaskProductApi {
 
 #[cfg(test)]
 impl TaskProductApi {
+    pub(crate) fn create_for_test(
+        &self,
+        params: TaskCreateParams,
+    ) -> Result<TaskSnapshot, ProtocolError> {
+        self.create_task(
+            &crate::attachment_runtime::AttachmentOwner::test_client_instance_id(),
+            params,
+        )
+    }
+
+    pub(crate) fn open_for_test(
+        &self,
+        params: openaide_app_server_protocol::task::TaskOpenParams,
+    ) -> Result<TaskSnapshot, ProtocolError> {
+        self.open_task(
+            &crate::attachment_runtime::AttachmentOwner::test_client_instance_id(),
+            params,
+        )
+    }
+
+    pub(crate) fn mark_read_for_test(
+        &self,
+        params: openaide_app_server_protocol::task::TaskMarkReadParams,
+    ) -> Result<TaskSnapshot, ProtocolError> {
+        self.mark_task_read(
+            &crate::attachment_runtime::AttachmentOwner::test_client_instance_id(),
+            params,
+        )
+    }
+
+    pub(crate) fn set_config_option_for_test(
+        &self,
+        params: TaskSetConfigOptionParams,
+    ) -> Result<TaskSnapshot, ProtocolError> {
+        self.set_config_option_on_task(
+            &crate::attachment_runtime::AttachmentOwner::test_client_instance_id(),
+            params,
+        )
+    }
+
+    pub(crate) fn discard_for_test(&self, params: TaskDiscardParams) -> Result<(), ProtocolError> {
+        self.discard_task(
+            &crate::attachment_runtime::AttachmentOwner::test_client_instance_id(),
+            params,
+        )
+    }
+
+    pub(crate) fn cancel_for_test(
+        &self,
+        params: TaskCancelParams,
+    ) -> Result<TaskSnapshot, ProtocolError> {
+        self.cancel_task(
+            &crate::attachment_runtime::AttachmentOwner::test_client_instance_id(),
+            params,
+        )
+    }
+
+    pub(crate) fn set_archived_for_test(
+        &self,
+        params: TaskSetArchivedParams,
+    ) -> Result<(), ProtocolError> {
+        self.set_task_archived(
+            &crate::attachment_runtime::AttachmentOwner::test_client_instance_id(),
+            params,
+        )
+    }
+
     pub(crate) fn send(&self, params: TaskSendParams) -> Result<TaskSendAccepted, ProtocolError> {
         self.send_message(
             &crate::attachment_runtime::AttachmentOwner::test_client_instance_id(),
@@ -259,8 +401,12 @@ impl TaskProductApi {
 }
 
 impl TaskCancelWorkflow for TaskProductApi {
-    fn cancel(&self, params: TaskCancelParams) -> Result<TaskSnapshot, ProtocolError> {
-        self.cancel_task(params)
+    fn cancel_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        params: TaskCancelParams,
+    ) -> Result<TaskSnapshot, ProtocolError> {
+        self.cancel_task(client_instance_id, params)
     }
 
     fn recover_stuck_sessions(
@@ -272,26 +418,32 @@ impl TaskCancelWorkflow for TaskProductApi {
 }
 
 impl TaskSetConfigOptionWorkflow for TaskProductApi {
-    fn set_config_option(
+    fn set_config_option_for_client(
         &self,
+        client_instance_id: &ClientInstanceId,
         params: TaskSetConfigOptionParams,
     ) -> Result<TaskSnapshot, ProtocolError> {
-        self.set_config_option_on_task(params)
+        self.set_config_option_on_task(client_instance_id, params)
     }
 }
 
 impl TaskDiscardWorkflow for TaskProductApi {
-    fn discard(&self, params: TaskDiscardParams) -> Result<TaskNavigationSnapshot, ProtocolError> {
-        self.discard_task(params)
+    fn discard_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        params: TaskDiscardParams,
+    ) -> Result<(), ProtocolError> {
+        self.discard_task(client_instance_id, params)
     }
 }
 
 impl TaskArchiveWorkflow for TaskProductApi {
-    fn set_archived(
+    fn set_archived_for_client(
         &self,
+        client_instance_id: &ClientInstanceId,
         params: TaskSetArchivedParams,
-    ) -> Result<TaskNavigationSnapshot, ProtocolError> {
-        self.set_task_archived(params)
+    ) -> Result<(), ProtocolError> {
+        self.set_task_archived(client_instance_id, params)
     }
 }
 
@@ -309,6 +461,7 @@ pub(super) fn protocol_error_from_runtime(error: RuntimeError) -> ProtocolError 
             recoverable: false,
             target: None,
         },
+        RuntimeError::Conflict(message) => conflict_error(&message),
         other => ProtocolError {
             code: ProtocolErrorCode::Internal,
             message: other.to_string(),
@@ -351,6 +504,7 @@ pub(super) fn validation_error(field: &str, message: &str) -> ProtocolError {
         target: Some(openaide_app_server_protocol::errors::ErrorTarget {
             method: None,
             field: Some(field.to_string()),
+            current_task: None,
         }),
     }
 }

@@ -14,6 +14,34 @@ import type {
 import { startAppServerStateSubscription } from "./appServerStateSubscriptions";
 
 describe("startAppServerStateSubscription", () => {
+  it("does not request an initial baseline while the event stream is disconnected", async () => {
+    const request = vi.fn();
+    const baselineLost = vi.fn();
+    const connection = {
+      request,
+      events: () => vi.fn(),
+      eventStreamDisconnects(listener: Parameters<BackendConnection["eventStreamDisconnects"]>[0]) {
+        listener();
+        return vi.fn();
+      },
+    } as Pick<BackendConnection, "eventStreamDisconnects" | "events" | "request">;
+
+    startAppServerStateSubscription({
+      backendConnection: connection,
+      context: {
+        stateRootId: "root_1" as StateRootId,
+        clientInstanceId: "client_1" as never,
+      },
+      dispatch: vi.fn(),
+      onBaselineLost: baselineLost,
+      scope: { kind: "task", taskId: "task_1" as TaskId },
+    });
+    await Promise.resolve();
+
+    expect(baselineLost).toHaveBeenCalledOnce();
+    expect(request).not.toHaveBeenCalled();
+  });
+
   it("retries an initial subscription failure until a snapshot is available", async () => {
     vi.useFakeTimers();
     try {
@@ -89,9 +117,11 @@ describe("startAppServerStateSubscription", () => {
     }
   });
 
-  it("refreshes its snapshot when the connection loses event continuity", async () => {
-    let resetListener: (() => void) | undefined;
+  it("waits for the replacement stream before refreshing a lost subscription", async () => {
+    let disconnectListener: Parameters<BackendConnection["eventStreamDisconnects"]>[0] | undefined;
+    let resetListener: Parameters<BackendConnection["stateResets"]>[0] | undefined;
     const dispatch = vi.fn();
+    const baselineLost = vi.fn();
     const request = vi.fn(async () => taskSubscription(
       request.mock.calls.length === 1 ? "cursor_1" : "cursor_5",
       "task_1",
@@ -101,7 +131,89 @@ describe("startAppServerStateSubscription", () => {
       events() {
         return vi.fn();
       },
-      stateResets(listener: () => void) {
+      eventStreamDisconnects(listener: Parameters<BackendConnection["eventStreamDisconnects"]>[0]) {
+        disconnectListener = listener;
+        return vi.fn();
+      },
+      stateResets(listener: Parameters<BackendConnection["stateResets"]>[0]) {
+        resetListener = listener;
+        return vi.fn();
+      },
+    } as Pick<BackendConnection, "eventStreamDisconnects" | "events" | "request" | "stateResets">;
+
+    startAppServerStateSubscription({
+      backendConnection: connection,
+      context: {
+        stateRootId: "root_1" as StateRootId,
+        clientInstanceId: "client_1" as never,
+      },
+      dispatch,
+      onBaselineLost: baselineLost,
+      scope: { kind: "task", taskId: "task_1" as TaskId },
+    });
+    await Promise.resolve();
+
+    disconnectListener?.();
+    await Promise.resolve();
+    expect(baselineLost).toHaveBeenCalledOnce();
+    expect(request).toHaveBeenCalledOnce();
+
+    resetListener?.({ serverId: "server_1" as never, stateRootId: "root_1" as StateRootId });
+    await Promise.resolve();
+
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(dispatch).toHaveBeenCalledTimes(2);
+  });
+
+  it("ignores a baseline failure from the disconnected stream generation", async () => {
+    let disconnectListener: Parameters<BackendConnection["eventStreamDisconnects"]>[0] | undefined;
+    const firstSubscribe = deferred<StateSubscribeResult>();
+    const baselineError = vi.fn();
+    const connection = {
+      request: vi.fn(() => firstSubscribe.promise),
+      events: () => vi.fn(),
+      eventStreamDisconnects(listener: Parameters<BackendConnection["eventStreamDisconnects"]>[0]) {
+        disconnectListener = listener;
+        return vi.fn();
+      },
+    } as Pick<BackendConnection, "eventStreamDisconnects" | "events" | "request">;
+
+    startAppServerStateSubscription({
+      backendConnection: connection,
+      context: {
+        stateRootId: "root_1" as StateRootId,
+        clientInstanceId: "client_1" as never,
+      },
+      dispatch: vi.fn(),
+      onBaselineError: baselineError,
+      scope: { kind: "task", taskId: "task_1" as TaskId },
+    });
+    await Promise.resolve();
+
+    disconnectListener?.();
+    firstSubscribe.reject(new Error("connection closed"));
+    await firstSubscribe.promise.catch(() => undefined);
+    await Promise.resolve();
+
+    expect(baselineError).not.toHaveBeenCalled();
+  });
+
+  it("does not replay events queued before a replica reset onto its replacement baseline", async () => {
+    let eventListener: ((event: AppServerEvent) => void) | undefined;
+    let resetListener: Parameters<BackendConnection["stateResets"]>[0] | undefined;
+    const firstSubscribe = deferred<StateSubscribeResult>();
+    const secondSubscribe = deferred<StateSubscribeResult>();
+    const dispatch = vi.fn();
+    const request = vi.fn(() => (
+      request.mock.calls.length === 1 ? firstSubscribe.promise : secondSubscribe.promise
+    ));
+    const connection = {
+      request,
+      events(listener: (event: AppServerEvent) => void) {
+        eventListener = listener;
+        return vi.fn();
+      },
+      stateResets(listener: Parameters<BackendConnection["stateResets"]>[0]) {
         resetListener = listener;
         return vi.fn();
       },
@@ -118,14 +230,65 @@ describe("startAppServerStateSubscription", () => {
     });
     await Promise.resolve();
 
-    resetListener?.();
+    eventListener?.(taskEvent("cursor_1", "cursor_2", "task_1"));
+    resetListener?.({ serverId: "server_2" as never, stateRootId: "root_1" as StateRootId });
+    await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+
+    secondSubscribe.resolve(taskSubscription("cursor_10", "task_1"));
+    await secondSubscribe.promise;
+    await vi.waitFor(() => expect(dispatch).toHaveBeenCalledOnce());
+    firstSubscribe.resolve(taskSubscription("cursor_1", "task_1"));
+    await firstSubscribe.promise;
     await Promise.resolve();
 
+    expect(dispatch).toHaveBeenCalledOnce();
     expect(request).toHaveBeenCalledTimes(2);
-    expect(dispatch).toHaveBeenCalledTimes(2);
   });
 
-  it("dispatches each ordered live text delta before finalization", async () => {
+  it("uses the replacement state root for its reset baseline and live events", async () => {
+    let eventListener: ((event: AppServerEvent) => void) | undefined;
+    let resetListener: Parameters<BackendConnection["stateResets"]>[0] | undefined;
+    const dispatch = vi.fn();
+    const context = {
+      stateRootId: "root_1" as StateRootId,
+      clientInstanceId: "client_1" as never,
+    };
+    const request = vi.fn(async () => taskSubscription(
+      request.mock.calls.length === 1 ? "cursor_1" : "cursor_10",
+      "task_1",
+    ));
+    const connection = {
+      request,
+      events(listener: (event: AppServerEvent) => void) {
+        eventListener = listener;
+        return vi.fn();
+      },
+      stateResets(listener: Parameters<BackendConnection["stateResets"]>[0]) {
+        resetListener = listener;
+        return vi.fn();
+      },
+    } as Pick<BackendConnection, "events" | "request" | "stateResets">;
+
+    startAppServerStateSubscription({
+      backendConnection: connection,
+      context,
+      dispatch,
+      scope: { kind: "task", taskId: "task_1" as TaskId },
+    });
+    await vi.waitFor(() => expect(dispatch).toHaveBeenCalledOnce());
+
+    context.stateRootId = "root_2" as StateRootId;
+    resetListener?.({ serverId: "server_2" as never, stateRootId: context.stateRootId });
+    await vi.waitFor(() => expect(dispatch).toHaveBeenCalledTimes(2));
+
+    eventListener?.(taskEvent("cursor_10", "cursor_11", "task_1", "root_2"));
+    expect(dispatch).toHaveBeenCalledTimes(3);
+    eventListener?.(taskEvent("cursor_11", "cursor_12", "task_1", "root_1"));
+    expect(dispatch).toHaveBeenCalledTimes(3);
+    expect(request).toHaveBeenCalledTimes(3);
+  });
+
+  it("dispatches presentation signals for ordered live Agent text deltas", async () => {
     let eventListener: ((event: AppServerEvent) => void) | undefined;
     const dispatch = vi.fn();
     const connection = {
@@ -152,31 +315,53 @@ describe("startAppServerStateSubscription", () => {
       taskId: "task_1" as TaskId,
     };
     eventListener?.({
+      subscription: { kind: "task", taskId: "task_1" as TaskId },
       previousCursor: "cursor_1" as EventCursor,
       cursor: "cursor_2" as EventCursor,
       scope,
       payload: {
-        kind: "chatItemAppended",
+        kind: "taskChanged",
         taskId: "task_1" as TaskId,
         revision: 2,
-        item: {
+        changes: { chat: [{ kind: "append", item: {
           messageId: "message_1" as MessageId,
           role: "agent",
-          status: "streaming",
+          status: "complete",
           parts: [{ kind: "text", text: "One" }],
-        },
+        } }] },
       },
     });
-    eventListener?.(textChunkEvent("cursor_2", "cursor_3", " two", false));
-    eventListener?.(textChunkEvent("cursor_3", "cursor_4", "", true));
+    eventListener?.(textChunkEvent("cursor_2", "cursor_3", " two"));
 
     const snapshots = dispatch.mock.calls
       .map(([action]) => action)
       .filter((action) => action.type === "snapshot");
-    expect(snapshots).toHaveLength(4);
-    expect(snapshots[1].snapshot.chat.items[0].message).toMatchObject({ text: "One", streaming: true });
-    expect(snapshots[2].snapshot.chat.items[0].message).toMatchObject({ text: "One two", streaming: true });
-    expect(snapshots[3].snapshot.chat.items[0].message).toMatchObject({ text: "One two", streaming: false });
+    expect(snapshots).toHaveLength(3);
+    expect(snapshots[1].snapshot.chat.items[0].message).toMatchObject({
+      kind: "agent_message",
+      role: "agent",
+      parts: [{ kind: "text", text: "One" }],
+    });
+    expect(snapshots[2].snapshot.chat.items[0].message).toMatchObject({
+      kind: "agent_message",
+      role: "agent",
+      parts: [{ kind: "text", text: "One two" }],
+    });
+    expect(snapshots[1]).toMatchObject({
+      liveText: {
+        messageId: "message_1",
+        channel: "agent",
+        eventCursor: "cursor_2",
+      },
+    });
+    expect(snapshots[2]).toMatchObject({
+      liveText: {
+        messageId: "message_1",
+        channel: "agent",
+        eventCursor: "cursor_3",
+      },
+    });
+    expect(dispatch.mock.calls.map(([action]) => action).filter((action) => action.type === "taskChat:liveText")).toEqual([]);
   });
 
   it("maps ordered App Server task navigation events into frontend task state", async () => {
@@ -208,29 +393,29 @@ describe("startAppServerStateSubscription", () => {
     await Promise.resolve();
 
     eventListener?.({
+      subscription: { kind: "taskNavigation" },
       previousCursor: "cursor_1" as EventCursor,
       cursor: "cursor_2" as EventCursor,
       scope: { kind: "stateRoot", stateRootId: "root_1" as StateRootId },
       payload: {
-        kind: "taskNavigationUpdated",
-        navigation: {
-          tasks: [{
+        kind: "taskNavigationChanged",
+        change: { kind: "upsert", task: {
             taskId: "task_1" as TaskId,
             projectId: "project_1" as ProjectId,
             agentId: "codex" as never,
-            title: "Real task",
+            title: { value: "Real task", source: "user" },
             status: "idle",
             updatedAt: "2026-06-28T00:00:00.000Z",
             lastActivity: "2026-06-28T00:00:00.000Z",
             unread: false,
             hasMessages: true,
-          }],
-        },
+          } },
       },
     });
 
     expect(dispatch).toHaveBeenLastCalledWith({
       type: "tasks",
+      archived: false,
       tasks: [expect.objectContaining({
         task_id: "task_1",
         project_id: "project_1",
@@ -238,6 +423,62 @@ describe("startAppServerStateSubscription", () => {
         title: "Real task",
       })],
     });
+  });
+
+  it("remaps task labels when project metadata arrives after task navigation", async () => {
+    const projects = deferred<StateSubscribeResult>();
+    const dispatch = vi.fn();
+    const context = {
+      stateRootId: "root_1" as StateRootId,
+      clientInstanceId: "client_1" as never,
+      agents: [{ agentId: "codex" as never, label: "Codex", status: "connected" as const }],
+    };
+    const request = vi.fn((method: string, params?: { scope?: { kind: string } }) => {
+      expect(method).toBe(STATE_SUBSCRIBE);
+      if (params?.scope?.kind === "taskNavigation") {
+        return Promise.resolve(taskNavigationSubscription("cursor_navigation", [
+          taskSummary("task_1", "Task without project metadata"),
+        ]));
+      }
+      return projects.promise;
+    });
+    const connection = {
+      request,
+      events() {
+        return vi.fn();
+      },
+    } as Pick<BackendConnection, "request" | "events">;
+
+    startAppServerStateSubscription({
+      backendConnection: connection,
+      context,
+      dispatch,
+      scope: { kind: "taskNavigation" },
+    });
+    await vi.waitFor(() => expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "tasks" })));
+    expect(dispatch.mock.calls.at(-1)?.[0].tasks[0].project_label).toBeUndefined();
+
+    startAppServerStateSubscription({
+      backendConnection: connection,
+      context,
+      dispatch,
+      scope: { kind: "projects" },
+    });
+    projects.resolve({
+      cursor: "cursor_projects" as EventCursor,
+      scope: { kind: "projects" },
+      snapshot: {
+        kind: "projects",
+        projects: {
+          projects: [{ projectId: "project_1" as ProjectId, label: "OpenAIDE" }],
+        },
+      },
+    });
+    await projects.promise;
+    await vi.waitFor(() => expect(dispatch.mock.calls.at(-1)?.[0]).toMatchObject({
+      type: "tasks",
+      tasks: [{ task_id: "task_1", project_label: "OpenAIDE" }],
+    }));
   });
 
   it("maps App Server agent subscription snapshots into frontend agent choices", async () => {
@@ -251,7 +492,6 @@ describe("startAppServerStateSubscription", () => {
         snapshot: {
           kind: "agents" as const,
           agents: {
-            defaultAgentId: "opencode" as never,
             agents: [
               { agentId: "codex" as never, label: "Codex", status: "connected" as const },
               { agentId: "opencode" as never, label: "OpenCode", status: "connected" as const },
@@ -286,8 +526,8 @@ describe("startAppServerStateSubscription", () => {
     ]);
     expect(dispatch).toHaveBeenCalledWith({
       type: "newTask:agent",
-      agentId: "opencode",
-      agentLabel: "OpenCode",
+      agentId: "codex",
+      agentLabel: "Codex",
     });
   });
 
@@ -321,12 +561,13 @@ describe("startAppServerStateSubscription", () => {
     await Promise.resolve();
 
     eventListener?.({
+      subscription: { kind: "taskNavigation" },
       previousCursor: "cursor_1" as EventCursor,
       cursor: "cursor_2" as EventCursor,
       scope: { kind: "stateRoot", stateRootId: "root_1" as StateRootId },
       payload: {
-        kind: "taskUpdated",
-        task: taskSummary("task_1", "Finished task", "completed"),
+        kind: "taskNavigationChanged",
+        change: { kind: "upsert", task: taskSummary("task_1", "Finished task", "completed") },
       },
     });
     subscribe.resolve(taskNavigationSubscription("cursor_1", []));
@@ -335,6 +576,7 @@ describe("startAppServerStateSubscription", () => {
 
     expect(dispatch).toHaveBeenLastCalledWith({
       type: "tasks",
+      archived: false,
       tasks: [expect.objectContaining({
         task_id: "task_1",
         title: "Finished task",
@@ -412,16 +654,18 @@ describe("startAppServerStateSubscription", () => {
     await Promise.resolve();
 
     eventListener?.({
+      subscription: { kind: "taskNavigation" },
       previousCursor: "cursor_1" as EventCursor,
       cursor: "cursor_2" as EventCursor,
       scope: { kind: "stateRoot", stateRootId: "root_1" as StateRootId },
-      payload: { kind: "taskUpdated", task: taskSummary("task_1", "Older task", "running") },
+      payload: { kind: "taskNavigationChanged", change: { kind: "upsert", task: taskSummary("task_1", "Older task", "running") } },
     });
     eventListener?.({
+      subscription: { kind: "taskNavigation" },
       previousCursor: "cursor_2" as EventCursor,
       cursor: "cursor_3" as EventCursor,
       scope: { kind: "stateRoot", stateRootId: "root_1" as StateRootId },
-      payload: { kind: "taskUpdated", task: taskSummary("task_1", "Included task", "completed") },
+      payload: { kind: "taskNavigationChanged", change: { kind: "upsert", task: taskSummary("task_1", "Included task", "completed") } },
     });
     subscribe.resolve(taskNavigationSubscription("cursor_3", [taskSummary("task_1", "Included task", "completed")]));
     await subscribe.promise;
@@ -431,6 +675,7 @@ describe("startAppServerStateSubscription", () => {
     expect(dispatch).toHaveBeenCalledTimes(1);
     expect(dispatch).toHaveBeenLastCalledWith({
       type: "tasks",
+      archived: false,
       tasks: [expect.objectContaining({
         task_id: "task_1",
         title: "Included task",
@@ -562,7 +807,7 @@ describe("startAppServerStateSubscription", () => {
     }
   });
 
-  it("keeps the connection cursor across events owned by another subscription", async () => {
+  it("ignores another subscription without advancing the Task cursor", async () => {
     let eventListener: ((event: AppServerEvent) => void) | undefined;
     const dispatch = vi.fn();
     const request = vi.fn(async () => taskSubscription("cursor_1", "task_1"));
@@ -586,16 +831,63 @@ describe("startAppServerStateSubscription", () => {
     await Promise.resolve();
 
     eventListener?.({
-      previousCursor: "cursor_1" as EventCursor,
-      cursor: "cursor_2" as EventCursor,
+      subscription: { kind: "taskNavigation" },
+      previousCursor: "cursor_90" as EventCursor,
+      cursor: "cursor_91" as EventCursor,
       scope: { kind: "stateRoot", stateRootId: "root_1" as StateRootId },
-      payload: { kind: "taskUpdated", task: taskSummary("task_2", "Other task") },
+      payload: { kind: "taskNavigationChanged", change: { kind: "upsert", task: taskSummary("task_2", "Other task") } },
     });
-    eventListener?.(taskEvent("cursor_2", "cursor_3", "task_1"));
+    eventListener?.(taskEvent("cursor_1", "cursor_2", "task_1"));
     await Promise.resolve();
 
     expect(request).toHaveBeenCalledTimes(1);
     expect(dispatch).toHaveBeenCalledTimes(2);
+  });
+
+  it("replays queued Task events independently from equal cursors in another subscription", async () => {
+    let eventListener: ((event: AppServerEvent) => void) | undefined;
+    const dispatch = vi.fn();
+    const subscribe = deferred<StateSubscribeResult>();
+    const request = vi.fn(async () => subscribe.promise);
+    const connection = {
+      request,
+      events(listener: (event: AppServerEvent) => void) {
+        eventListener = listener;
+        return vi.fn();
+      },
+    } as Pick<BackendConnection, "request" | "events">;
+
+    startAppServerStateSubscription({
+      backendConnection: connection,
+      context: {
+        stateRootId: "root_1" as StateRootId,
+        clientInstanceId: "client_1" as never,
+      },
+      dispatch,
+      scope: { kind: "task", taskId: "task_1" as TaskId },
+    });
+    await Promise.resolve();
+
+    eventListener?.(taskEvent("cursor_1", "cursor_2", "task_1"));
+    eventListener?.({
+      subscription: { kind: "taskNavigation" },
+      previousCursor: "navigation_0" as EventCursor,
+      cursor: "cursor_1" as EventCursor,
+      scope: { kind: "stateRoot", stateRootId: "root_1" as StateRootId },
+      payload: {
+        kind: "taskNavigationChanged",
+        change: { kind: "upsert", task: taskSummary("task_2", "Other task") },
+      },
+    });
+    subscribe.resolve(taskSubscription("cursor_1", "task_1"));
+    await subscribe.promise;
+    await Promise.resolve();
+
+    expect(dispatch).toHaveBeenCalledTimes(2);
+    expect(dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
+      type: "snapshot",
+      snapshot: expect.objectContaining({ revision: 2 }),
+    }));
   });
 
   it("unsubscribes the App Server scope when disposed", async () => {
@@ -774,10 +1066,11 @@ function taskNavigationSubscription(
 
 function taskNavigationEvent(previousCursor: string, cursor: string): AppServerEvent {
   return {
+    subscription: { kind: "taskNavigation" },
     previousCursor: previousCursor as EventCursor,
     cursor: cursor as EventCursor,
     scope: { kind: "stateRoot", stateRootId: "root_1" as StateRootId },
-    payload: { kind: "taskNavigationUpdated", navigation: { tasks: [] } },
+    payload: { kind: "taskNavigationChanged", change: { kind: "remove", taskId: "absent" as TaskId } },
   };
 }
 
@@ -792,18 +1085,27 @@ function taskSubscription(cursor: string, taskIdValue: string): StateSubscribeRe
   };
 }
 
-function taskEvent(previousCursor: string, cursor: string, taskIdValue: string): AppServerEvent {
+function taskEvent(
+  previousCursor: string,
+  cursor: string,
+  taskIdValue: string,
+  stateRootId = "root_1",
+  revision = 2,
+): AppServerEvent {
   return {
+    subscription: { kind: "task", taskId: taskIdValue as TaskId },
     previousCursor: previousCursor as EventCursor,
     cursor: cursor as EventCursor,
     scope: {
       kind: "task",
-      stateRootId: "root_1" as StateRootId,
+      stateRootId: stateRootId as StateRootId,
       taskId: taskIdValue as TaskId,
     },
     payload: {
-      kind: "taskUpdated",
-      task: taskSummary(taskIdValue, "Task"),
+      kind: "taskChanged",
+      taskId: taskIdValue as TaskId,
+      revision,
+      changes: { task: taskSummary(taskIdValue, "Task") },
     },
   };
 }
@@ -812,9 +1114,9 @@ function textChunkEvent(
   previousCursor: string,
   cursor: string,
   text: string,
-  finalChunk: boolean,
 ): AppServerEvent {
   return {
+    subscription: { kind: "task", taskId: "task_1" as TaskId },
     previousCursor: previousCursor as EventCursor,
     cursor: cursor as EventCursor,
     scope: {
@@ -823,11 +1125,10 @@ function textChunkEvent(
       taskId: "task_1" as TaskId,
     },
     payload: {
-      kind: "chatItemChunk",
+      kind: "taskChanged",
       taskId: "task_1" as TaskId,
       revision: Number(cursor.slice(-1)),
-      messageId: "message_1" as MessageId,
-      chunk: { sequence: Number(cursor.slice(-1)), text, finalChunk },
+      changes: { chat: [{ kind: "appendText", messageId: "message_1" as MessageId, text }] },
     },
   };
 }
@@ -835,6 +1136,7 @@ function textChunkEvent(
 function protocolTaskSnapshot(taskIdValue: string) {
   return {
     task: taskSummary(taskIdValue, "Task"),
+    lifecycle: "visible" as const,
     revision: 1,
     preparation: { kind: "ready" as const },
     agentConfig: { state: "ready" as const, options: [] },
@@ -851,7 +1153,7 @@ function taskSummary(taskIdValue: string, title: string, status: ProtocolTaskSum
     taskId: taskIdValue as TaskId,
     projectId: "project_1" as ProjectId,
     agentId: "codex" as never,
-    title,
+    title: { value: title, source: "user" },
     status,
     updatedAt: "2026-06-28T00:00:00.000Z",
     lastActivity: "2026-06-28T00:00:00.000Z",

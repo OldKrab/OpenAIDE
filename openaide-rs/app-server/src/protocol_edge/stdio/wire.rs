@@ -194,7 +194,7 @@ fn wire_response(id: Value, response: GatewayResponse) -> WireResponse {
             jsonrpc: "2.0",
             id,
             result: None,
-            error: Some(error),
+            error: Some(*error),
         },
     }
 }
@@ -212,6 +212,7 @@ fn error_response(id: Value, message: String) -> WireResponse {
                 target: Some(ErrorTarget {
                     method: None,
                     field: None,
+                    current_task: None,
                 }),
             },
             ResponseMeta::default(),

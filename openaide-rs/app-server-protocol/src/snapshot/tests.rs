@@ -25,6 +25,7 @@ fn client_snapshot_omits_categories_outside_scope() {
             shell_kind: ShellKind::Web,
             surface: RequestedSurface::Home,
         },
+        new_task_defaults: Default::default(),
         projects: None,
         agents: None,
         tasks: None,

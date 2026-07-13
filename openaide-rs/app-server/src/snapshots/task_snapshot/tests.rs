@@ -1,17 +1,40 @@
 use openaide_app_server_protocol::snapshot::{
-    MessagePart, PermissionMessageDecision, PermissionMessageState, TaskSendCapabilityState,
-    TaskStatus as ProtocolTaskStatus,
+    ActivityStepSnapshot, MessagePart, TaskHistorySyncSnapshot, TaskSendCapabilityState,
+    TaskStatus as ProtocolTaskStatus, ToolPermissionDecisionSnapshot,
 };
+use std::sync::{Arc, Mutex};
 
 use crate::protocol::model::{
-    ActivityStatus, ActivityStep, ChatMessage, IsolationKind, NormalizedMessage,
-    PermissionDecision, PermissionOption, PermissionOptionKind, PermissionState,
-    PermissionToolCall, TaskStatus,
+    ActivityStatus, ActivityStep, AgentMessagePart, AgentMessageRole, ChatMessage, IsolationKind,
+    NormalizedMessage, TaskStatus, ToolPermissionDecision, ToolPermissionOutcome,
 };
 use crate::storage::records::{TaskPreparationRecord, TaskRecord};
 use crate::storage::Store;
 
 use super::*;
+
+#[derive(Clone)]
+struct MutableHistorySyncSource {
+    current: Arc<Mutex<TaskHistorySyncSnapshot>>,
+}
+
+impl MutableHistorySyncSource {
+    fn new(current: TaskHistorySyncSnapshot) -> Self {
+        Self {
+            current: Arc::new(Mutex::new(current)),
+        }
+    }
+
+    fn set(&self, current: TaskHistorySyncSnapshot) {
+        *self.current.lock().unwrap() = current;
+    }
+}
+
+impl TaskHistorySyncSnapshotSource for MutableHistorySyncSource {
+    fn history_sync_snapshot(&self, _task_id: &str) -> TaskHistorySyncSnapshot {
+        self.current.lock().unwrap().clone()
+    }
+}
 
 #[test]
 fn list_projects_visible_tasks_and_revision() {
@@ -30,6 +53,27 @@ fn list_projects_visible_tasks_and_revision() {
 }
 
 #[test]
+fn list_revision_ignores_client_private_new_tasks() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    store.write_task(&task_record("task-visible")).unwrap();
+    let mut new_task = task_record("task-new");
+    new_task.revision = 99;
+    new_task.lifecycle = crate::storage::records::TaskLifecycle::New {
+        owner_client_instance_id: openaide_app_server_protocol::ids::ClientInstanceId::from(
+            "client-a",
+        ),
+    };
+    store.write_task(&new_task).unwrap();
+
+    let result = TaskSnapshotStore::new(store)
+        .list(false, None, None)
+        .expect("list");
+
+    assert_eq!(result.revision, 7);
+}
+
+#[test]
 fn open_projects_preparing_task_status() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
@@ -38,10 +82,54 @@ fn open_projects_preparing_task_status() {
     store.write_task(&task).unwrap();
 
     let snapshot = TaskSnapshotStore::new(store)
-        .open(&TaskId::from("task-1"))
+        .open_internal(&TaskId::from("task-1"))
         .expect("open");
 
     assert_eq!(snapshot.task.status, ProtocolTaskStatus::Preparing);
+}
+
+#[test]
+fn open_overlays_current_history_sync_state_for_resubscribe() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    store.write_task(&task_record("task-1")).unwrap();
+    let history_sync =
+        MutableHistorySyncSource::new(TaskHistorySyncSnapshot::Syncing { generation: 7 });
+    let snapshots =
+        TaskSnapshotStore::with_history_sync(store.clone(), Arc::new(history_sync.clone()));
+
+    let syncing = snapshots
+        .open_internal(&TaskId::from("task-1"))
+        .expect("open syncing");
+
+    assert_eq!(
+        syncing.history_sync,
+        TaskHistorySyncSnapshot::Syncing { generation: 7 }
+    );
+
+    let mut task = store.read_task("task-1").unwrap();
+    task.unread = !task.unread;
+    task.revision += 1;
+    store.write_task(&task).unwrap();
+    history_sync.set(TaskHistorySyncSnapshot::Idle { generation: 7 });
+
+    let idle = snapshots
+        .open_internal(&TaskId::from("task-1"))
+        .expect("open after unrelated mutation");
+
+    assert_eq!(
+        idle.history_sync,
+        TaskHistorySyncSnapshot::Idle { generation: 7 }
+    );
+
+    history_sync.set(TaskHistorySyncSnapshot::Updated { generation: 7 });
+    let updated = snapshots
+        .open_internal(&TaskId::from("task-1"))
+        .expect("resubscribe after history update");
+    assert_eq!(
+        updated.history_sync,
+        TaskHistorySyncSnapshot::Updated { generation: 7 }
+    );
 }
 
 #[test]
@@ -68,18 +156,20 @@ fn open_projects_durable_chat_without_raw_attachment_paths() {
     store
         .append_message(
             "task-1",
-            chat_message(NormalizedMessage::AgentText {
+            chat_message(NormalizedMessage::AgentMessage {
                 id: "agent-1".to_string(),
-                text: "done".to_string(),
+                role: AgentMessageRole::Agent,
+                parts: vec![AgentMessagePart::Text {
+                    text: "done".to_string(),
+                }],
                 created_at: "2026-01-01T00:00:01.000Z".to_string(),
-                streaming: false,
             }),
         )
         .unwrap();
     sync_task_message_history_version(&store, "task-1");
 
     let snapshot = TaskSnapshotStore::new(store)
-        .open(&TaskId::from("task-1"))
+        .open_internal(&TaskId::from("task-1"))
         .expect("open");
 
     assert_eq!(snapshot.task.task_id.as_str(), "task-1");
@@ -118,11 +208,13 @@ fn open_retries_when_message_commit_interleaves_with_snapshot_read() {
         interleaving_store
             .append_message(
                 "task-1",
-                chat_message(NormalizedMessage::AgentText {
+                chat_message(NormalizedMessage::AgentMessage {
                     id: "agent-1".to_string(),
-                    text: "committed while reading".to_string(),
+                    role: AgentMessageRole::Agent,
+                    parts: vec![AgentMessagePart::Text {
+                        text: "committed while reading".to_string(),
+                    }],
                     created_at: "2026-01-01T00:00:01.000Z".to_string(),
-                    streaming: true,
                 }),
             )
             .unwrap();
@@ -135,7 +227,7 @@ fn open_retries_when_message_commit_interleaves_with_snapshot_read() {
     });
 
     let snapshot = TaskSnapshotStore::new(store)
-        .open(&TaskId::from("task-1"))
+        .open_internal(&TaskId::from("task-1"))
         .expect("consistent snapshot");
 
     assert_eq!(snapshot.revision, 8);
@@ -143,133 +235,60 @@ fn open_retries_when_message_commit_interleaves_with_snapshot_read() {
 }
 
 #[test]
-fn open_projects_durable_permission_history_as_permission_part() {
+fn open_projects_tool_permission_history_inside_activity_part() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store.write_task(&task_record("task-1")).unwrap();
+    let mut activity = activity_message("activity-1", "call-1");
+    let NormalizedMessage::Activity { steps, .. } = &mut activity else {
+        unreachable!("activity fixture must be an activity message");
+    };
+    let ActivityStep::Tool {
+        permission_outcomes,
+        ..
+    } = &mut steps[0]
+    else {
+        unreachable!("activity fixture must contain a tool step");
+    };
+    permission_outcomes.push(ToolPermissionOutcome {
+        request_id: "server-request-1".to_string(),
+        decision: ToolPermissionDecision::Rejected,
+        option_id: Some("reject_once".to_string()),
+        option_label: Some("Reject".to_string()),
+        resolved_at: "2026-01-01T00:00:02.000Z".to_string(),
+    });
     store
-        .append_message(
-            "task-1",
-            chat_message(NormalizedMessage::Permission {
-                id: "permission-1".to_string(),
-                request_id: "agent-permission-1".to_string(),
-                app_server_request_id: Some("server-request-1".to_string()),
-                title: "Tool call".to_string(),
-                description: None,
-                scope: None,
-                risk: None,
-                tool_call: PermissionToolCall {
-                    id: "call-1".to_string(),
-                    title: "Tool call".to_string(),
-                    kind: Some("execute".to_string()),
-                },
-                state: PermissionState::Resolved,
-                created_at: "2026-01-01T00:00:01.000Z".to_string(),
-                options: vec![
-                    PermissionOption {
-                        id: "allow_once".to_string(),
-                        label: "Allow Once".to_string(),
-                        kind: Some(PermissionOptionKind::Allow),
-                        description: None,
-                    },
-                    PermissionOption {
-                        id: "reject_once".to_string(),
-                        label: "Reject".to_string(),
-                        kind: Some(PermissionOptionKind::Deny),
-                        description: None,
-                    },
-                ],
-                selected_option: None,
-                decision: Some(PermissionDecision::Denied),
-            }),
-        )
+        .append_message("task-1", chat_message(activity))
         .unwrap();
     sync_task_message_history_version(&store, "task-1");
 
     let snapshot = TaskSnapshotStore::new(store)
-        .open(&TaskId::from("task-1"))
+        .open_internal(&TaskId::from("task-1"))
         .expect("open");
 
-    let [MessagePart::Permission {
-        request_id,
-        app_server_request_id,
-        title,
-        tool_call,
-        state,
-        options,
-        selected_option,
-        decision,
-        ..
-    }] = snapshot.chat.items[0].parts.as_slice()
-    else {
-        panic!("expected permission message part");
+    let [MessagePart::Activity { steps, .. }] = snapshot.chat.items[0].parts.as_slice() else {
+        panic!("expected activity message part");
     };
-    assert_eq!(request_id.as_str(), "agent-permission-1");
+    let [ActivityStepSnapshot::Tool {
+        permission_outcomes,
+        ..
+    }] = steps.as_slice()
+    else {
+        panic!("expected tool activity step");
+    };
+    assert_eq!(permission_outcomes.len(), 1);
     assert_eq!(
-        app_server_request_id.as_ref().map(|id| id.as_str()),
-        Some("server-request-1")
+        permission_outcomes[0].request_id.as_str(),
+        "server-request-1"
     );
-    assert_eq!(title, "Tool call");
-    assert_eq!(tool_call.kind.as_deref(), Some("execute"));
-    assert_eq!(*state, PermissionMessageState::Resolved);
-    assert_eq!(options[0].option_id, "allow_once");
-    assert_eq!(selected_option, &None);
-    assert_eq!(*decision, Some(PermissionMessageDecision::Denied));
-}
-
-#[test]
-fn cancelled_pending_permission_projects_as_cancelled_not_denied() {
-    let temp = tempfile::tempdir().unwrap();
-    let store = Store::open(temp.path().to_path_buf()).unwrap();
-    store.write_task(&task_record("task-1")).unwrap();
-    store
-        .append_message(
-            "task-1",
-            chat_message(NormalizedMessage::Permission {
-                id: "permission-1".to_string(),
-                request_id: "agent-permission-1".to_string(),
-                app_server_request_id: Some("server-request-1".to_string()),
-                title: "Tool call".to_string(),
-                description: None,
-                scope: None,
-                risk: None,
-                tool_call: PermissionToolCall {
-                    id: "call-1".to_string(),
-                    title: "Tool call".to_string(),
-                    kind: Some("execute".to_string()),
-                },
-                state: PermissionState::Pending,
-                created_at: "2026-01-01T00:00:01.000Z".to_string(),
-                options: vec![PermissionOption {
-                    id: "allow_once".to_string(),
-                    label: "Allow Once".to_string(),
-                    kind: Some(PermissionOptionKind::Allow),
-                    description: None,
-                }],
-                selected_option: None,
-                decision: None,
-            }),
-        )
-        .unwrap();
-    store.cancel_pending_permissions("task-1").unwrap();
-    sync_task_message_history_version(&store, "task-1");
-
-    let snapshot = TaskSnapshotStore::new(store)
-        .open(&TaskId::from("task-1"))
-        .expect("open");
-
-    let [MessagePart::Permission {
-        state,
-        selected_option,
-        decision,
-        ..
-    }] = snapshot.chat.items[0].parts.as_slice()
-    else {
-        panic!("expected permission message part");
-    };
-    assert_eq!(*state, PermissionMessageState::Cancelled);
-    assert_eq!(selected_option, &None);
-    assert_eq!(*decision, None);
+    assert_eq!(
+        permission_outcomes[0].decision,
+        ToolPermissionDecisionSnapshot::Rejected
+    );
+    assert_eq!(
+        permission_outcomes[0].option_id.as_deref(),
+        Some("reject_once")
+    );
 }
 
 #[test]
@@ -311,13 +330,13 @@ fn failed_task_with_ready_preparation_is_sendable_for_follow_up_recovery() {
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut task = task_record("task-1");
     task.status = TaskStatus::Failed;
-    task.first_prompt_sent = true;
+    task.lifecycle = crate::storage::records::TaskLifecycle::Visible;
     task.agent_session_id = Some("session-1".to_string());
     task.preparation = TaskPreparationRecord::Ready;
     store.write_task(&task).unwrap();
 
     let snapshot = TaskSnapshotStore::new(store)
-        .open(&TaskId::from("task-1"))
+        .open_internal(&TaskId::from("task-1"))
         .expect("open");
 
     assert_eq!(snapshot.task.status, ProtocolTaskStatus::Failed);
@@ -325,7 +344,30 @@ fn failed_task_with_ready_preparation_is_sendable_for_follow_up_recovery() {
         snapshot.send_capability.state,
         TaskSendCapabilityState::Ready
     );
-    assert!(snapshot.send_capability.attachment_only);
+    assert!(snapshot.send_capability.blockers.is_empty());
+}
+
+#[test]
+fn working_task_is_sendable_for_steering() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let mut task = task_record("task-1");
+    task.status = TaskStatus::Active;
+    task.lifecycle = crate::storage::records::TaskLifecycle::Visible;
+    task.agent_session_id = Some("session-1".to_string());
+    task.active_turn_id = Some("turn-primary".to_string());
+    task.preparation = TaskPreparationRecord::Ready;
+    store.write_task(&task).unwrap();
+
+    let snapshot = TaskSnapshotStore::new(store)
+        .open_internal(&TaskId::from("task-1"))
+        .expect("open");
+
+    assert_eq!(snapshot.task.status, ProtocolTaskStatus::Running);
+    assert_eq!(
+        snapshot.send_capability.state,
+        TaskSendCapabilityState::Ready
+    );
     assert!(snapshot.send_capability.blockers.is_empty());
 }
 
@@ -335,11 +377,44 @@ fn missing_task_returns_not_found_error() {
     let store = Store::open(temp.path().to_path_buf()).unwrap();
 
     let error = TaskSnapshotStore::new(store)
-        .open(&TaskId::from("missing"))
+        .open_internal(&TaskId::from("missing"))
         .unwrap_err();
 
     assert_eq!(error.code, ProtocolErrorCode::NotFound);
     assert!(!error.recoverable);
+}
+
+#[test]
+fn client_snapshot_read_hides_another_clients_new_task() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let mut task = task_record("task-new");
+    task.lifecycle = crate::storage::records::TaskLifecycle::New {
+        owner_client_instance_id: openaide_app_server_protocol::ids::ClientInstanceId::from(
+            "test-client",
+        ),
+    };
+    store.write_task(&task).unwrap();
+    let snapshots = TaskSnapshotStore::new(store);
+
+    let owner = snapshots
+        .open_for_client(
+            &openaide_app_server_protocol::ids::ClientInstanceId::from("test-client"),
+            &TaskId::from("task-new"),
+        )
+        .unwrap();
+    let hidden = snapshots
+        .open_for_client(
+            &openaide_app_server_protocol::ids::ClientInstanceId::from("other-client"),
+            &TaskId::from("task-new"),
+        )
+        .unwrap_err();
+
+    assert_eq!(
+        owner.lifecycle,
+        openaide_app_server_protocol::snapshot::TaskLifecycle::New
+    );
+    assert_eq!(hidden.code, ProtocolErrorCode::NotFound);
 }
 
 #[test]
@@ -383,6 +458,7 @@ fn activity_message(id: &str, tool_call_id: &str) -> NormalizedMessage {
             output_preview: None,
             detail_artifact_id: None,
             details: None,
+            permission_outcomes: Vec::new(),
         }],
     }
 }
@@ -403,8 +479,10 @@ fn sync_task_message_history_version(store: &Store, task_id: &str) {
 fn task_record(task_id: &str) -> TaskRecord {
     TaskRecord {
         task_id: task_id.to_string(),
-        title: "Task".to_string(),
-        agent_title: None,
+        title: crate::storage::records::TaskTitle::new(
+            "Task",
+            crate::storage::records::TaskTitleSource::User,
+        ),
         status: TaskStatus::Inactive,
         task_version: 1,
         message_history_version: 0,
@@ -416,7 +494,7 @@ fn task_record(task_id: &str) -> TaskRecord {
         agent_name: "Agent A".to_string(),
         isolation: IsolationKind::Local,
         workspace_root: "/workspace/a".to_string(),
-        first_prompt_sent: false,
+        lifecycle: crate::storage::records::TaskLifecycle::Visible,
         agent_session_id: None,
         active_turn_id: None,
         archived: false,
@@ -424,6 +502,7 @@ fn task_record(task_id: &str) -> TaskRecord {
         revision: 7,
         config_options: Default::default(),
         config_options_catalog: None,
+        config_mutation: Default::default(),
         agent_commands_catalog: None,
         model_id: None,
         preparation: TaskPreparationRecord::Ready,

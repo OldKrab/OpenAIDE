@@ -95,9 +95,9 @@ describe("SidebarTaskRow", () => {
     expect(active.root.findAllByProps({ className: "task-state-unread-badge" })).toHaveLength(0);
     expect(active.root.findAllByProps({ className: "task-meta-age" })).toHaveLength(0);
 
-    const waiting = renderState("blocked");
+    const waiting = renderState("waiting");
     expect(waiting.root.findByProps({ "aria-label": "Waiting" })).toBeDefined();
-    const waitingUnread = renderState("blocked", true);
+    const waitingUnread = renderState("waiting", true);
     expect(waitingUnread.root.findByProps({ "aria-label": "Waiting, unread" })).toBeDefined();
     expect(waitingUnread.root.findAllByProps({ className: "task-state-unread-badge" })).toHaveLength(1);
 
@@ -192,7 +192,7 @@ describe("SidebarTaskRow", () => {
     expect(onRestoreTask).toHaveBeenCalledWith("task_2");
   });
 
-  it("moves generated numeric suffixes from title text into metadata", () => {
+  it("renders Agent titles without rewriting numeric suffixes", () => {
     const tree = render(
       <SidebarTaskRow
         onArchiveTask={vi.fn()}
@@ -203,7 +203,8 @@ describe("SidebarTaskRow", () => {
       />,
     );
 
-    expect(tree.root.findByProps({ className: "task-title" }).children.join("")).toBe("QA reload recovery");
+    expect(tree.root.findByProps({ className: "task-title" }).children.join(""))
+      .toBe("QA reload recovery 1782881988");
     expect(tree.root.findByProps({ className: "task-title" }).props.title).toBe("QA reload recovery 1782881988");
     expect(tree.root.findByProps({ className: "task-meta-age" }).props.title).toBe(
       "Last activity: 2026-05-22T00:00:00.000Z",
@@ -226,7 +227,7 @@ describe("SidebarTaskRow", () => {
     expect(tree.root.findByProps({ className: "task-title" }).props.title).toBe(fullTitle);
   });
 
-  it("moves generated IDs out of titles even when extra machine text follows", () => {
+  it("renders the full Agent title when it contains machine-looking text", () => {
     const tree = render(
       <SidebarTaskRow
         onArchiveTask={vi.fn()}
@@ -237,7 +238,8 @@ describe("SidebarTaskRow", () => {
       />,
     );
 
-    expect(tree.root.findByProps({ className: "task-title" }).children.join("")).toBe("QA multitab long");
+    expect(tree.root.findByProps({ className: "task-title" }).children.join(""))
+      .toBe("QA multitab long 1782881214972: retry run");
     expect(tree.root.findByProps({ className: "task-title" }).props.title).toBe("QA multitab long 1782881214972: retry run");
     expect(tree.root.findAllByProps({ className: "task-meta-reference" })).toHaveLength(0);
   });
@@ -1167,6 +1169,7 @@ describe("Sidebar", () => {
   });
 
   it("limits loaded project task and native-session rows together", () => {
+    const onLoadNativeSessions = vi.fn();
     const sessions = Array.from({ length: 16 }, (_, index) =>
       nativeSession({
         session_id: `session_${index + 1}`,
@@ -1179,7 +1182,8 @@ describe("Sidebar", () => {
         {...sidebarCallbacks()}
         groupByProject={true}
         nativeSessionProjectId="project_1"
-        nativeSessions={nativeSessions({ items: sessions })}
+        nativeSessions={nativeSessions({ items: sessions, nextCursor: "cursor_2" })}
+        onLoadNativeSessions={onLoadNativeSessions}
         projects={[{ projectId: "project_1", label: "OpenAIDE" }]}
         showArchived={false}
         tasks={[
@@ -1203,8 +1207,53 @@ describe("Sidebar", () => {
 
     expect(localTaskRows(tree)).toHaveLength(1);
     expect(tree.root.findAllByProps({ className: "task-row external-session-row" })).toHaveLength(16);
-    expect(tree.root.findAllByProps({ className: "project-task-more" })).toHaveLength(0);
+    expect(tree.root.findByProps({ className: "project-task-more" }).children.join(""))
+      .toBe("Load more tasks");
     expect(taskRows(tree)).toHaveLength(17);
+    expect(onLoadNativeSessions).toHaveBeenCalledWith("cursor_2");
+  });
+
+  it("reveals exactly the numeric task count when a prefetched page arrives", () => {
+    const onLoadNativeSessions = vi.fn();
+    const sessions = Array.from({ length: 31 }, (_, index) =>
+      nativeSession({
+        session_id: `session_${index + 1}`,
+        title: `Session ${index + 1}`,
+        updated_at: `2026-05-22T00:${String(index).padStart(2, "0")}:00.000Z`,
+      }),
+    );
+    const sidebar = (items: AgentListedSession[], nextCursor: string) => (
+      <Sidebar
+        {...sidebarCallbacks()}
+        groupByProject={true}
+        nativeSessionProjectId="project_1"
+        nativeSessions={nativeSessions({ items, nextCursor })}
+        onLoadNativeSessions={onLoadNativeSessions}
+        projects={[{ projectId: "project_1", label: "OpenAIDE" }]}
+        showArchived={false}
+        tasks={[
+          task({
+            task_id: "task_1",
+            project_id: "project_1",
+            project_label: "OpenAIDE",
+            title: "Recent task",
+            last_activity: "2026-05-22T00:40:00.000Z",
+          }),
+        ]}
+      />
+    );
+    const tree = render(sidebar(sessions.slice(0, 16), "cursor_2"));
+
+    expect(taskRows(tree)).toHaveLength(15);
+    expect(tree.root.findByProps({ className: "project-task-more" }).children.join(""))
+      .toBe("Load 2 more tasks");
+
+    act(() => tree.root.findByProps({ className: "project-task-more" }).props.onClick());
+    act(() => tree.update(sidebar(sessions, "cursor_3")));
+
+    expect(taskRows(tree)).toHaveLength(17);
+    expect(tree.root.findByProps({ className: "project-task-more" }).children.join(""))
+      .toBe("Load 15 more tasks");
   });
 });
 

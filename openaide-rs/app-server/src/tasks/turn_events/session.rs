@@ -7,9 +7,13 @@ use crate::time::now_string;
 
 use super::commands::{update_task_commands, CommandsUpdateTarget};
 use super::config::{update_task_config_options, ConfigUpdateTarget};
-use super::TaskSessionEventSink;
+use super::{CatalogUpdateSource, TaskSessionEventSink};
 
 impl AgentSessionEventSink for TaskSessionEventSink {
+    fn session_update(&self, event: crate::agent::events::AgentEvent) -> Result<(), RuntimeError> {
+        self.handle_session_update(event)
+    }
+
     fn config_options_changed(
         &self,
         catalog: crate::protocol::model::ConfigOptionsCatalog,
@@ -21,7 +25,9 @@ impl AgentSessionEventSink for TaskSessionEventSink {
             },
             catalog,
             &now_string(),
-            None,
+            CatalogUpdateSource::BoundSession {
+                session_id: &self.session_id,
+            },
         )
     }
 
@@ -36,7 +42,9 @@ impl AgentSessionEventSink for TaskSessionEventSink {
             },
             catalog,
             &now_string(),
-            None,
+            CatalogUpdateSource::BoundSession {
+                session_id: &self.session_id,
+            },
         )
     }
 
@@ -52,14 +60,8 @@ impl AgentSessionEventSink for TaskSessionEventSink {
                 let mut changed = false;
                 match &update.title {
                     AgentMetadataField::Unchanged => {}
-                    AgentMetadataField::Clear => changed |= task.agent_title.take().is_some(),
-                    AgentMetadataField::Value(title) => {
-                        let next = (!title.trim().is_empty()).then(|| title.trim().to_string());
-                        if task.agent_title != next {
-                            task.agent_title = next;
-                            changed = true;
-                        }
-                    }
+                    AgentMetadataField::Clear => changed |= task.clear_agent_title(),
+                    AgentMetadataField::Value(title) => changed |= task.set_agent_title(title),
                 }
                 if let AgentMetadataField::Value(updated_at) = &update.updated_at {
                     let updated_at = updated_at.trim();

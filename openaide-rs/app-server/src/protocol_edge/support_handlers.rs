@@ -15,7 +15,7 @@ impl RpcGateway {
         id: String,
         params: Value,
         meta: RequestMeta,
-        now: AppServerTime,
+        _now: AppServerTime,
     ) -> GatewayOutcome {
         let params = match serde_json::from_value::<SupportRecoverStuckSessionsParams>(params) {
             Ok(params) => params,
@@ -27,16 +27,12 @@ impl RpcGateway {
             Ok(result) => result,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
-        let mut events = Vec::new();
-        for task in &result.recovered_tasks {
-            events.extend(self.publish_task_updates(task, now));
-        }
         self.result_with_events::<SupportRecoverStuckSessionsResult>(
             connection_id,
             id,
             meta,
             result,
-            events,
+            Vec::new(),
         )
     }
 }

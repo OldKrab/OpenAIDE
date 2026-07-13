@@ -41,7 +41,7 @@ describe("tool detail rendering helpers", () => {
       },
       output: {
         exit_code: 0,
-        fields: [{ name: "status", value: "completed" }],
+        fields: [{ name: "status", value: { kind: "string", value: "completed" } }],
       },
     } as unknown as NonNullable<Extract<ActivityStep, { kind: "tool" }>["details"]>;
 
@@ -87,23 +87,20 @@ describe("task working status label", () => {
     expect(taskWorkingStatusLabel([completedCommandAndThoughtActivity("m5")], "active", false)).toBe("Thought");
   });
 
-  it("advances from a tool group to its latest tool and then to the agent response", async () => {
+  it("advances from a tool group to the active Agent response", async () => {
     const { taskWorkingStatusLabel } = await import("./App");
     const activity = completedToolGroupActivity("m6");
 
     expect(taskWorkingStatusLabel([activity], "active", false)).toBe("Read README.md");
-    expect(taskWorkingStatusLabel([activity, agentMessage("m7", "I found the cause.", true)], "active", false)).toBe(
-      "Writing response",
-    );
     expect(taskWorkingStatusLabel([activity, agentMessage("m7", "I found the cause.")], "active", false)).toBe(
-      "Generated response",
+      "Writing response",
     );
   });
 
-  it("shows a standalone streaming thought as the latest live activity", async () => {
+  it("shows a standalone Thought as the latest active work", async () => {
     const { taskWorkingStatusLabel } = await import("./App");
 
-    expect(taskWorkingStatusLabel([thoughtMessage("m8", true)], "active", false)).toBe("Thinking");
+    expect(taskWorkingStatusLabel([thoughtMessage("m8")], "active", false)).toBe("Thinking");
   });
 
   it("starts a new turn instead of reusing work from before the latest user message", async () => {
@@ -134,23 +131,17 @@ describe("task working status label", () => {
     const { taskWorkingStatusLabel } = await import("./App");
 
     expect(taskWorkingStatusLabel([], "inactive", true)).toBeUndefined();
-    expect(taskWorkingStatusLabel([], "blocked", false)).toBe("Permission needed");
-    expect(taskWorkingStatusLabel([systemMessage("app-server-preparation")], "blocked", false)).toBe("Preparing task");
+    expect(taskWorkingStatusLabel([], "waiting", false)).toBe("Permission needed");
+    expect(taskWorkingStatusLabel([systemMessage("app-server-preparation")], "waiting", false)).toBe("Preparing task");
     expect(taskWorkingStatusLabel([], "inactive", false)).toBeUndefined();
+    expect(taskWorkingStatusLabel([], "stopping", false)).toBe("Stopping");
   });
 
   it("uses the live activity row for conversation history synchronization", async () => {
     const { taskWorkingStatusLabel } = await import("./App");
 
-    expect(taskWorkingStatusLabel([], "inactive", false, { state: "checking", generation: 1 })).toBe("Checking for newer history");
     expect(taskWorkingStatusLabel([], "active", false, { state: "syncing", generation: 1 })).toBe("Syncing conversation history");
     expect(taskWorkingStatusLabel([], "inactive", false, { state: "updated", generation: 1 })).toBe("History updated");
-    expect(taskWorkingStatusLabel([], "inactive", false, { state: "failed", generation: 1, message: "offline", before_send: false })).toBe(
-      "Couldn’t refresh history",
-    );
-    expect(taskWorkingStatusLabel([], "active", false, { state: "failed", generation: 1, message: "offline", before_send: true })).toBe(
-      "Couldn’t sync conversation history",
-    );
   });
 });
 
@@ -265,33 +256,33 @@ function completedToolGroupActivity(id: string): ChatMessage {
   };
 }
 
-function agentMessage(id: string, text: string, streaming = false): ChatMessage {
+function agentMessage(id: string, text: string): ChatMessage {
   return {
     cursor: `cursor_${id}`,
     identity: id,
-    message_type: "agent_text",
+    message_type: "agent_message",
     message_id: id,
     message: {
-      kind: "agent_text",
+      kind: "agent_message",
       id,
-      text,
-      streaming,
+      role: "agent",
+      parts: [{ kind: "text", text }],
       created_at: "2026-05-17T00:00:01Z",
     },
   };
 }
 
-function thoughtMessage(id: string, streaming = false): ChatMessage {
+function thoughtMessage(id: string): ChatMessage {
   return {
     cursor: `cursor_${id}`,
     identity: id,
-    message_type: "thought",
+    message_type: "agent_message",
     message_id: id,
     message: {
-      kind: "thought",
+      kind: "agent_message",
       id,
-      text: "Check the current state.",
-      streaming,
+      role: "thought",
+      parts: [{ kind: "text", text: "Check the current state." }],
       created_at: "2026-05-17T00:00:01Z",
     },
   };

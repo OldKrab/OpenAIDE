@@ -1,7 +1,8 @@
 import { ArrowLeft, Check, Folder, HardDrive, RotateCw } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { WorkspaceBrowserEntry, WorkspaceBrowserRoot, WorkspaceListDirectoryResult } from "@openaide/app-server-client";
 import type { WorkspaceBrowserCallbacks } from "./appControllerCallbackTypes";
+import { useBrowserRequestOwnership } from "./browserRequestOwnership";
 
 type Directory = WorkspaceListDirectoryResult["directory"];
 
@@ -19,23 +20,35 @@ export function NewWorkspacePicker({
   onSelect: (workspace: { path: string; label: string }) => void;
 }) {
   const [state, setState] = useState<PickerState>({ status: "loading" });
+  const browserRef = useRef(browser);
+  browserRef.current = browser;
+  const requestOwnership = useBrowserRequestOwnership(browser.ownerKey);
+
+  const loadOwnedRoots = () => {
+    const acceptsResult = requestOwnership.beginLatestRead();
+    void loadRoots(browserRef.current, (next) => {
+      if (acceptsResult()) setState(next);
+    });
+  };
 
   useEffect(() => {
-    let cancelled = false;
-    void loadRoots(browser, (next) => {
-      if (!cancelled) setState(next);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [browser]);
+    loadOwnedRoots();
+    return requestOwnership.invalidateOwner;
+  }, [browser.ownerKey]);
 
   const openDirectory = (path: string) => {
+    const acceptsResult = requestOwnership.beginLatestRead();
     const history = state.status === "directory" ? [...state.history, state.directory] : [];
     setState({ status: "loading" });
     void browser.listDirectory(path).then(
-      (listing) => setState({ status: "directory", directory: listing.directory, entries: listing.entries, history }),
-      (error: unknown) => setState({ status: "error", message: errorMessage(error) }),
+      (listing) => {
+        if (acceptsResult()) {
+          setState({ status: "directory", directory: listing.directory, entries: listing.entries, history });
+        }
+      },
+      (error: unknown) => {
+        if (acceptsResult()) setState({ status: "error", message: errorMessage(error) });
+      },
     );
   };
 
@@ -43,14 +56,21 @@ export function NewWorkspacePicker({
     if (state.status !== "directory") return;
     const previous = state.history[state.history.length - 1];
     if (!previous) {
-      void loadRoots(browser, setState);
+      loadOwnedRoots();
       return;
     }
+    const acceptsResult = requestOwnership.beginLatestRead();
     const history = state.history.slice(0, -1);
     setState({ status: "loading" });
     void browser.listDirectory(previous.path).then(
-      (listing) => setState({ status: "directory", directory: listing.directory, entries: listing.entries, history }),
-      (error: unknown) => setState({ status: "error", message: errorMessage(error) }),
+      (listing) => {
+        if (acceptsResult()) {
+          setState({ status: "directory", directory: listing.directory, entries: listing.entries, history });
+        }
+      },
+      (error: unknown) => {
+        if (acceptsResult()) setState({ status: "error", message: errorMessage(error) });
+      },
     );
   };
 
@@ -61,7 +81,7 @@ export function NewWorkspacePicker({
     return (
       <div className="new-workspace-picker-status">
         <span>{state.message}</span>
-        <button onClick={() => void loadRoots(browser, setState)} type="button">
+        <button onClick={loadOwnedRoots} type="button">
           <RotateCw size={12} />
           Retry
         </button>

@@ -8,6 +8,7 @@ export function mergePageState(current: ChatPageState | undefined, page: Message
     olderItems,
     hasBefore: page.has_before,
     startCursor: page.start_cursor ?? olderItems[0]?.cursor,
+    requestGeneration: current?.requestGeneration,
     pending: false,
   };
 }
@@ -26,6 +27,7 @@ export function retainSnapshotWindow(
     olderItems: retained,
     hasBefore: current?.hasBefore ?? previousPage.has_before,
     startCursor: current?.startCursor ?? retained[0]?.cursor ?? previousPage.start_cursor ?? nextPage.start_cursor,
+    requestGeneration: current?.requestGeneration,
     pending: current?.pending,
     error: current?.error,
   };
@@ -35,6 +37,24 @@ export function mergeMessageRows(left: ChatMessage[], right: ChatMessage[]) {
   const seen = new Set<string>();
   const merged: ChatMessage[] = [];
   for (const item of [...left, ...right]) {
+    if (seen.has(item.message_id)) continue;
+    seen.add(item.message_id);
+    merged.push(item);
+  }
+  return merged;
+}
+
+/** Preserves the loaded window's order while making the live tail authoritative on overlap. */
+export function mergeMessageRowsPreferRight(left: ChatMessage[], right: ChatMessage[]) {
+  const rightById = new Map(right.map((item) => [item.message_id, item]));
+  const seen = new Set<string>();
+  const merged: ChatMessage[] = [];
+  for (const item of left) {
+    if (seen.has(item.message_id)) continue;
+    seen.add(item.message_id);
+    merged.push(rightById.get(item.message_id) ?? item);
+  }
+  for (const item of right) {
     if (seen.has(item.message_id)) continue;
     seen.add(item.message_id);
     merged.push(item);

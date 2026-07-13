@@ -22,6 +22,10 @@ impl AttachmentOwner {
         self.task_id == owner.task_id
     }
 
+    pub(super) fn belongs_to_task_id(&self, task_id: &TaskId) -> bool {
+        &self.task_id == task_id
+    }
+
     pub(super) fn belongs_to_client(&self, client_instance_id: &ClientInstanceId) -> bool {
         &self.client_instance_id == client_instance_id
     }

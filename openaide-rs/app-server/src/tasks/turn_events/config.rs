@@ -1,7 +1,9 @@
-use crate::agent::TurnCancellation;
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::ConfigOptionsCatalog;
+use crate::tasks::config_options::apply_task_config_catalog;
 use crate::tasks::mutation::{TaskCommitOptions, TaskMutationResult, TaskMutations};
+
+use super::CatalogUpdateSource;
 
 pub(super) struct ConfigUpdateTarget<'a> {
     pub(super) mutations: &'a TaskMutations,
@@ -12,33 +14,19 @@ pub(super) fn update_task_config_options(
     target: ConfigUpdateTarget<'_>,
     catalog: ConfigOptionsCatalog,
     now: &str,
-    active_turn: Option<(&str, &TurnCancellation)>,
+    source: CatalogUpdateSource<'_>,
 ) -> Result<(), RuntimeError> {
     target.mutations.commit_existing_task(
         target.task_id,
         TaskCommitOptions::metadata(),
         |ctx| {
-            if let Some((turn_id, cancellation)) = active_turn {
-                if ctx.task().active_turn_id.as_deref() != Some(turn_id)
-                    || cancellation.is_cancelled()
-                {
-                    return Ok(TaskMutationResult::Unchanged);
-                }
-            }
-
-            let task = ctx.task_mut();
-            let config_options = catalog.current_values();
-            let model_id = catalog.model_id();
-            if task.config_options == config_options
-                && task.config_options_catalog.as_ref() == Some(&catalog)
-                && task.model_id == model_id
-            {
+            if !source.matches(ctx.task()) {
                 return Ok(TaskMutationResult::Unchanged);
             }
-            task.config_options = config_options;
-            task.config_options_catalog = Some(catalog);
-            task.model_id = model_id;
-            task.updated_at = now.to_string();
+
+            if !apply_task_config_catalog(ctx.task_mut(), catalog, now) {
+                return Ok(TaskMutationResult::Unchanged);
+            }
             Ok(TaskMutationResult::Changed)
         },
     )?;

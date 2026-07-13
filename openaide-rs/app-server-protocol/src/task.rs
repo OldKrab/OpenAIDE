@@ -4,9 +4,9 @@ use ts_rs::TS;
 
 use crate::ids::{
     AgentConfigOptionId, AgentId, AttachmentHandleId, ClientMutationId, MessageId, ProjectId,
-    TaskId, TaskListCursor, TaskSendIdempotencyKey, TurnId,
+    TaskId, TaskListCursor, TurnId,
 };
-use crate::snapshot::{ChatItem, TaskNavigationSnapshot, TaskSnapshot, TaskSummary};
+use crate::snapshot::{ChatItem, TaskSnapshot, TaskSummary};
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -45,8 +45,6 @@ pub struct TaskAdoptNativeSessionResult {
 #[serde(rename_all = "camelCase")]
 pub struct TaskSendParams {
     pub task_id: TaskId,
-    pub idempotency_key: TaskSendIdempotencyKey,
-    pub task_revision: u64,
     pub message: ComposerMessage,
 }
 
@@ -110,18 +108,6 @@ pub struct TaskOpenResult {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
-pub struct TaskRetryHistorySyncParams {
-    pub task_id: TaskId,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct TaskRetryHistorySyncResult {
-    pub task: TaskSnapshot,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
 pub struct TaskMarkReadParams {
     pub task_id: TaskId,
 }
@@ -156,14 +142,7 @@ pub struct TaskChatPageResult {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
-pub struct TaskToolDetailParams {
-    pub task_id: TaskId,
-    pub artifact_id: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct TaskToolDetailResult {
+pub struct ToolDetailSnapshot {
     pub locations: Vec<ActivityToolLocation>,
     pub content: Vec<ActivityToolContent>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -199,8 +178,37 @@ pub enum ActivityToolContent {
     Terminal {
         terminal_id: String,
     },
-    Other {
-        label: String,
+    Image {
+        media_type: String,
+        data_url: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        uri: Option<String>,
+    },
+    Audio {
+        media_type: String,
+        data_url: String,
+    },
+    Resource {
+        uri: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        description: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        media_type: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        size_bytes: Option<i64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        text: Option<String>,
+    },
+    Unsupported {
+        content_type: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        media_type: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        uri: Option<String>,
     },
 }
 
@@ -243,7 +251,23 @@ pub struct ActivityToolOutput {
 #[serde(rename_all = "camelCase")]
 pub struct ActivityToolField {
     pub name: String,
-    pub value: String,
+    pub value: ActivityToolValue,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum ActivityToolValue {
+    Null,
+    Boolean { value: bool },
+    Number { value: String },
+    String { value: String },
+    Array { items: Vec<ActivityToolValue> },
+    Object { fields: Vec<ActivityToolField> },
+    Redacted,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, TS)]
@@ -276,7 +300,6 @@ pub struct TaskDiscardParams {
 #[serde(rename_all = "camelCase")]
 pub struct TaskDiscardResult {
     pub discarded_task_id: TaskId,
-    pub tasks: TaskNavigationSnapshot,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
@@ -291,7 +314,6 @@ pub struct TaskSetArchivedParams {
 pub struct TaskSetArchivedResult {
     pub task_id: TaskId,
     pub archived: bool,
-    pub tasks: TaskNavigationSnapshot,
 }
 
 #[cfg(test)]

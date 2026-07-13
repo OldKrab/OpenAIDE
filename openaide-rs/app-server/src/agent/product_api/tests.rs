@@ -188,7 +188,7 @@ impl AgentRuntime for ReadyAgent {
         &self,
         _prompt: AgentPrompt,
         _sink: Arc<dyn AgentEventSink>,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<crate::agent::AgentPromptOutcome, RuntimeError> {
         Err(RuntimeError::CapabilityMissing("test".to_string()))
     }
 }
@@ -210,7 +210,7 @@ impl AgentRuntime for AuthRequiredAgent {
         &self,
         _prompt: AgentPrompt,
         _sink: Arc<dyn AgentEventSink>,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<crate::agent::AgentPromptOutcome, RuntimeError> {
         Err(RuntimeError::CapabilityMissing("test".to_string()))
     }
 }
@@ -230,7 +230,7 @@ impl AgentRuntime for InternalFailingAgent {
         &self,
         _prompt: AgentPrompt,
         _sink: Arc<dyn AgentEventSink>,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<crate::agent::AgentPromptOutcome, RuntimeError> {
         Err(RuntimeError::CapabilityMissing("test".to_string()))
     }
 }

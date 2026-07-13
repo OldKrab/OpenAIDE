@@ -2,10 +2,8 @@ use std::sync::{Arc, Mutex};
 
 use crate::diagnostics::TaskDiagnostics;
 use crate::protocol::errors::RuntimeError;
-use crate::protocol::model::{ActivityToolDetails, MessagePage, TaskSnapshot};
-use crate::protocol::params::{
-    ChatPageParams, ChatTailParams, TaskListParams, TaskSnapshotParams, ToolDetailParams,
-};
+use crate::protocol::model::{MessagePage, TaskSnapshot};
+use crate::protocol::params::{ChatPageParams, ChatTailParams, TaskListParams, TaskSnapshotParams};
 use crate::protocol::results::TaskListResult;
 use crate::tasks::query_store::TaskReadStore;
 use crate::tasks::revision_source::TaskRevisionSource;
@@ -62,14 +60,6 @@ impl TaskQueries {
         let _guard = self.lock();
         self.store
             .page_before(&params.task_id, &params.before_cursor, params.limit)
-    }
-
-    pub(crate) fn tool_detail(
-        &self,
-        params: ToolDetailParams,
-    ) -> Result<ActivityToolDetails, RuntimeError> {
-        let _guard = self.lock();
-        self.store.tool_detail(&params.task_id, &params.artifact_id)
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, ()> {

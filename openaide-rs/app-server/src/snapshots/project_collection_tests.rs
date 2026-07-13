@@ -48,7 +48,6 @@ fn projects_visible_task_records_into_collection_snapshot() {
 
     let snapshot = ProjectCollectionStore::new(store).snapshot().unwrap();
 
-    assert_eq!(snapshot.active_project_id, None);
     assert_eq!(snapshot.projects.len(), 2);
     assert_eq!(snapshot.projects[0].label, "app");
     assert_eq!(
@@ -151,8 +150,10 @@ fn storage_read_failure_returns_recoverable_error() {
 fn task_record(task_id: &str, workspace_root: &str, updated_at: &str) -> TaskRecord {
     TaskRecord {
         task_id: task_id.to_string(),
-        title: "Task".to_string(),
-        agent_title: None,
+        title: crate::storage::records::TaskTitle::new(
+            "Task",
+            crate::storage::records::TaskTitleSource::User,
+        ),
         status: TaskStatus::Inactive,
         task_version: 1,
         message_history_version: 0,
@@ -164,7 +165,7 @@ fn task_record(task_id: &str, workspace_root: &str, updated_at: &str) -> TaskRec
         agent_name: "Agent A".to_string(),
         isolation: IsolationKind::Local,
         workspace_root: workspace_root.to_string(),
-        first_prompt_sent: false,
+        lifecycle: crate::storage::records::TaskLifecycle::Visible,
         agent_session_id: None,
         active_turn_id: None,
         archived: false,
@@ -172,6 +173,7 @@ fn task_record(task_id: &str, workspace_root: &str, updated_at: &str) -> TaskRec
         revision: 1,
         config_options: Default::default(),
         config_options_catalog: None,
+        config_mutation: Default::default(),
         agent_commands_catalog: None,
         model_id: None,
         preparation: TaskPreparationRecord::Ready,

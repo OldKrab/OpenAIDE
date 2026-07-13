@@ -30,6 +30,12 @@ export function updateSubscriptionSnapshot(
       return updateTaskNavigationSnapshot(scope, snapshot, payload);
     case "task":
       return updateTaskSnapshot(snapshot, payload);
+    case "toolDetail":
+      return payload.kind === "toolDetailUpdated"
+        && payload.taskId === snapshot.taskId
+        && payload.artifactId === snapshot.artifactId
+        ? changed({ ...snapshot, details: payload.details })
+        : unchanged(snapshot);
   }
 }
 
@@ -53,6 +59,8 @@ function updateFromClientSnapshot(
       return clientSnapshot.activeTask && clientSnapshot.activeTask.task.taskId === snapshot.task.task.taskId
         ? changed({ kind: "task", task: clientSnapshot.activeTask })
         : unchanged(snapshot);
+    case "toolDetail":
+      return unchanged(snapshot);
   }
 }
 
@@ -61,16 +69,27 @@ function updateTaskNavigationSnapshot(
   snapshot: Extract<SubscriptionSnapshot, { kind: "taskNavigation" }>,
   payload: AppServerEventPayload,
 ): SnapshotUpdate {
-  if (payload.kind === "taskNavigationUpdated") {
-    return changed({ ...snapshot, navigation: filterTaskNavigationForScope(payload.navigation, scope) });
-  }
-
-  if (payload.kind === "taskUpdated") {
+  if (payload.kind === "taskNavigationChanged") {
+    const change = payload.change;
+    if (change.kind === "remove") {
+      return changed({
+        ...snapshot,
+        navigation: {
+          ...snapshot.navigation,
+          tasks: snapshot.navigation.tasks.filter((task) => task.taskId !== change.taskId),
+        },
+      });
+    }
+    const matchesProject = scope.kind !== "taskNavigation"
+      || scope.projectId === null
+      || scope.projectId === undefined
+      || change.task.projectId === scope.projectId;
+    if (!matchesProject) return unchanged(snapshot);
     return changed({
       ...snapshot,
       navigation: {
         ...snapshot.navigation,
-        tasks: upsertTaskSummary(snapshot.navigation.tasks, payload.task),
+        tasks: upsertTaskSummary(snapshot.navigation.tasks, change.task),
       },
     });
   }

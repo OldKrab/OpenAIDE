@@ -84,6 +84,7 @@ fn prompt_returns_terminal_error_while_worker_reply_is_pending() {
     let error = client
         .prompt(
             AgentPrompt {
+                agent_id: "codex".to_string(),
                 task_id: "task_terminal_error".to_string(),
                 session_id: "session_terminal_error".to_string(),
                 text: "hello".to_string(),

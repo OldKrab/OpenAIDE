@@ -147,19 +147,15 @@ impl AttachmentRuntime {
             }
         };
 
+        #[cfg(test)]
+        self.pause_after_embedded_candidate_lookup_for_test();
+
         if !candidate.owner.belongs_to(owner) {
-            let (code, message) = if candidate.owner.belongs_to_task(owner) {
-                (
-                    AttachmentCandidateErrorCode::UnknownCandidate,
-                    "Unknown embedded candidate",
-                )
-            } else {
-                (
-                    AttachmentCandidateErrorCode::WrongTask,
-                    "Embedded candidate belongs to another Task",
-                )
-            };
-            return Err(candidate_error(candidate_id.clone(), code, message));
+            return Err(candidate_access_error(
+                candidate_id.clone(),
+                &candidate.owner,
+                owner,
+            ));
         }
         if let Err(error) = candidate.allowed_root.validate_file(&candidate.path) {
             return Err(candidate_error_from_runtime(candidate_id.clone(), error));
@@ -168,53 +164,79 @@ impl AttachmentRuntime {
             return Err(candidate_error_from_runtime(candidate_id.clone(), error));
         }
 
-        self.remove_embedded_candidate(candidate_id);
-        let registered = self.register_embedded_handle(candidate);
+        let registered = {
+            let mut state = self
+                .state
+                .lock()
+                .expect("attachment runtime mutex poisoned");
+            state.prune_expired(Instant::now());
+            let Some(current_candidate) = state.candidates.get(candidate_id.as_str()) else {
+                return Err(candidate_error(
+                    candidate_id.clone(),
+                    AttachmentCandidateErrorCode::UnknownCandidate,
+                    "Unknown embedded candidate",
+                ));
+            };
+            if !current_candidate.owner.belongs_to(owner) {
+                return Err(candidate_access_error(
+                    candidate_id.clone(),
+                    &current_candidate.owner,
+                    owner,
+                ));
+            }
+
+            // Filesystem validation stays outside the mutex. Rechecking, consuming, and
+            // publishing under this lock makes confirmation linearizable with confirm/release.
+            let candidate = state
+                .candidates
+                .remove(candidate_id.as_str())
+                .expect("validated embedded candidate remains registered");
+            state.next_id += 1;
+            let handle_id = openaide_app_server_protocol::ids::AttachmentHandleId::from(format!(
+                "attachment-handle-{}",
+                state.next_id
+            ));
+            state.handles.insert(
+                handle_id.as_str().to_string(),
+                PreSendAttachmentHandle {
+                    owner: candidate.owner,
+                    label: candidate.label.clone(),
+                    target: AttachmentTarget::EmbeddedSnapshot {
+                        path: candidate.path,
+                        allowed_root: candidate.allowed_root,
+                    },
+                    expires_at: self.expires_at(),
+                },
+            );
+            crate::attachment_runtime::RegisteredAttachmentHandle {
+                handle_id,
+                label: candidate.label,
+            }
+        };
         Ok(PreSendAttachment {
             handle_id: registered.handle_id,
             label: registered.label,
         })
     }
+}
 
-    fn remove_embedded_candidate(&self, candidate_id: &AttachmentCandidateId) {
-        let mut state = self
-            .state
-            .lock()
-            .expect("attachment runtime mutex poisoned");
-        state.prune_expired(Instant::now());
-        state.candidates.remove(candidate_id.as_str());
-    }
-
-    fn register_embedded_handle(
-        &self,
-        candidate: EmbeddedAttachmentCandidateHandle,
-    ) -> crate::attachment_runtime::RegisteredAttachmentHandle {
-        let mut state = self
-            .state
-            .lock()
-            .expect("attachment runtime mutex poisoned");
-        state.prune_expired(Instant::now());
-        state.next_id += 1;
-        let handle_id = openaide_app_server_protocol::ids::AttachmentHandleId::from(format!(
-            "attachment-handle-{}",
-            state.next_id
-        ));
-        state.handles.insert(
-            handle_id.as_str().to_string(),
-            PreSendAttachmentHandle {
-                owner: candidate.owner,
-                label: candidate.label.clone(),
-                target: AttachmentTarget::EmbeddedSnapshot {
-                    path: candidate.path,
-                    allowed_root: candidate.allowed_root,
-                },
-                expires_at: self.expires_at(),
-            },
-        );
-        crate::attachment_runtime::RegisteredAttachmentHandle {
-            handle_id,
-            label: candidate.label,
-        }
+fn candidate_access_error(
+    candidate_id: AttachmentCandidateId,
+    actual_owner: &AttachmentOwner,
+    requested_owner: &AttachmentOwner,
+) -> AttachmentCandidateError {
+    if actual_owner.belongs_to_task(requested_owner) {
+        candidate_error(
+            candidate_id,
+            AttachmentCandidateErrorCode::UnknownCandidate,
+            "Unknown embedded candidate",
+        )
+    } else {
+        candidate_error(
+            candidate_id,
+            AttachmentCandidateErrorCode::WrongTask,
+            "Embedded candidate belongs to another Task",
+        )
     }
 }
 

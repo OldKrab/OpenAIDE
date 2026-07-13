@@ -72,6 +72,36 @@
   position: relative;
 }
 
+.task-connection-notice {
+  width: min(760px, 100%);
+  min-height: 30px;
+  border: 1px solid var(--oa-border);
+  border-radius: var(--oa-radius-sm);
+  background: var(--oa-panel);
+  color: var(--oa-text);
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 9px;
+  font-size: 12px;
+}
+
+.task-connection-notice small {
+  min-width: 0;
+  color: var(--oa-muted);
+  overflow-wrap: anywhere;
+}
+
+.task-connection-notice button {
+  min-height: 24px;
+  margin-left: auto;
+  border: 1px solid var(--oa-border);
+  border-radius: var(--oa-radius-sm);
+  background: transparent;
+  color: var(--oa-text);
+  padding: 2px 8px;
+}
+
 .message-list-shell > .message-list {
   height: 100%;
 }

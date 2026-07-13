@@ -17,15 +17,23 @@ pub struct ToolDetailArtifact {
     pub details: ActivityToolDetails,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct PersistedToolDetail {
+    pub artifact_id: String,
+    pub details: ActivityToolDetails,
+}
+
 impl Store {
-    pub fn persist_tool_artifacts(
+    pub(crate) fn persist_tool_artifacts(
         &self,
         task_id: &str,
         message: &mut NormalizedMessage,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<Vec<PersistedToolDetail>, RuntimeError> {
         let NormalizedMessage::Activity { id, steps, .. } = message else {
-            return Ok(());
+            return Ok(Vec::new());
         };
+
+        let mut persisted = Vec::new();
 
         for (index, step) in steps.iter_mut().enumerate() {
             let ActivityStep::Tool {
@@ -47,11 +55,16 @@ impl Store {
             let artifact_id = detail_artifact_id
                 .clone()
                 .unwrap_or_else(|| tool_artifact_id(id, index));
-            self.write_tool_artifact(task_id, &artifact_id, *details)?;
-            *detail_artifact_id = Some(artifact_id);
+            let details = *details;
+            self.write_tool_artifact(task_id, &artifact_id, details.clone())?;
+            *detail_artifact_id = Some(artifact_id.clone());
+            persisted.push(PersistedToolDetail {
+                artifact_id,
+                details,
+            });
         }
 
-        Ok(())
+        Ok(persisted)
     }
 
     pub fn read_tool_artifact(

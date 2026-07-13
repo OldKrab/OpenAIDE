@@ -21,6 +21,7 @@ pub struct ClientSnapshot {
     pub server: ServerSnapshot,
     pub state_root: StateRootSnapshot,
     pub client: ClientSnapshotScope,
+    pub new_task_defaults: NewTaskDefaultsSnapshot,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub projects: Option<ProjectCollectionSnapshot>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -33,6 +34,16 @@ pub struct ClientSnapshot {
     pub settings: Option<SettingsSnapshot>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending_requests: Vec<PendingRequestSnapshot>,
+}
+
+/// State-root-wide initial selection for a client that has no retained New Task choice.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct NewTaskDefaultsSnapshot {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<ProjectId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<AgentId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
@@ -92,8 +103,6 @@ pub struct ClientSnapshotScope {
 #[serde(rename_all = "camelCase")]
 pub struct ProjectCollectionSnapshot {
     pub projects: Vec<ProjectSummary>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub active_project_id: Option<ProjectId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
@@ -107,8 +116,6 @@ pub struct ProjectSummary {
 #[serde(rename_all = "camelCase")]
 pub struct AgentCollectionSnapshot {
     pub agents: Vec<AgentSummary>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub default_agent_id: Option<AgentId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]

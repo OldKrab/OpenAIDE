@@ -90,11 +90,8 @@ impl ServerRequestBroker {
             .map(|responder| responder.delivery.clone())
             .collect::<Vec<_>>();
         eligible_deliveries.extend(available_deliveries);
-        let requires_immediate_responder =
-            matches!(draft.method.as_str(), PERMISSION_REQUEST | QUESTION_REQUEST);
         if eligible_deliveries.is_empty()
-            && (matches!(draft.scope, PendingRequestScope::Client { .. })
-                || requires_immediate_responder)
+            && matches!(draft.scope, PendingRequestScope::Client { .. })
         {
             return OpenRequestOutcome::Unavailable {
                 reason: RequestUnavailableReason::NoEligibleResponder,

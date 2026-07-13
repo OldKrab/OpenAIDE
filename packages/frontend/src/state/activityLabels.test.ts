@@ -1,14 +1,20 @@
 import { describe, expect, it } from "vitest";
 import type { NormalizedMessage } from "@openaide/app-shell-contracts";
 import {
+  activityStatusLabel,
   activityStepCompletedLabel,
   activityStepContext,
   activityStepLabel,
   activityStepProgressLabel,
+  activityStepStatus,
   activitySummary,
 } from "./activityLabels";
 
 describe("activity labels", () => {
+  it("presents interrupted work without calling it completed or failed", () => {
+    expect(activityStatusLabel("interrupted")).toBe("Interrupted");
+    expect(activityStepStatus({ kind: "tool", name: "edit", status: "interrupted" })).toBe("Interrupted");
+  });
   it("turns old generic exec tool rows into command labels", () => {
     expect(
       activitySummary(
@@ -108,6 +114,27 @@ describe("activity labels", () => {
         ]),
       ),
     ).toBe("Ran search");
+  });
+
+  it("gives every defined ACP kind its own action and grouped classification", () => {
+    const steps = [
+      { kind: "tool" as const, name: "delete", status: "completed" as const, input_summary: "old.ts" },
+      { kind: "tool" as const, name: "move", status: "completed" as const, input_summary: "new.ts" },
+      { kind: "tool" as const, name: "think", status: "completed" as const },
+      { kind: "tool" as const, name: "fetch", status: "completed" as const, input_summary: "docs" },
+      { kind: "tool" as const, name: "switch_mode", status: "completed" as const, input_summary: "Plan" },
+    ];
+
+    expect(steps.map(activityStepLabel)).toEqual([
+      "Delete old.ts",
+      "Move new.ts",
+      "Reasoning tool",
+      "Fetch docs",
+      "Switch mode to Plan",
+    ]);
+    expect(activitySummary(activity("Tool activity", "completed", steps))).toBe(
+      "Deleted file, moved file, used reasoning tool, fetched resource, switched mode",
+    );
   });
 
   it("keeps id-only web search rows free of protocol identifiers", () => {

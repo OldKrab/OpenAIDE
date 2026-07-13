@@ -3,6 +3,7 @@ import { createNavigationCallbacks } from "./navigationCallbacks";
 import { createNewTaskCallbacks } from "./newTaskCallbacks";
 import { createSettingsCallbacks } from "./settingsCallbacks";
 import { createTaskCallbacks } from "./taskCallbacks";
+import { NewTaskController } from "./newTaskController";
 
 export type {
   AppControllerCallbacks,
@@ -14,14 +15,15 @@ export type {
 
 export function createAppCallbacks({
   acceptTaskOpen,
+  attachmentResources,
   backendConnection,
-  beginNavigationChange,
+  asyncOperations,
+  clientInstanceId,
   createSnapshotRequestId,
-  currentNavigationGeneration,
   dispatch,
-  latestOptionsRequestKey,
   newTaskStartAttempt,
   pendingPreparedNewTask,
+  newTaskController = new NewTaskController(),
   requestNativeSessions,
   setAgents,
   setPreferences,
@@ -31,23 +33,34 @@ export function createAppCallbacks({
     navigation: createNavigationCallbacks({
       acceptTaskOpen,
       backendConnection,
-      beginNavigationChange,
+      asyncOperations,
+      attachmentResources,
       createSnapshotRequestId,
-      currentNavigationGeneration,
       dispatch,
+      newTaskController,
       requestNativeSessions,
       state,
     }),
     newTask: createNewTaskCallbacks({
+      attachmentResources,
       backendConnection,
-      currentNavigationGeneration,
+      asyncOperations,
+      clientInstanceId,
       dispatch,
-      latestOptionsRequestKey,
       newTaskStartAttempt,
       pendingPreparedNewTask,
+      newTaskController,
       state,
     }),
     settings: createSettingsCallbacks({ backendConnection, dispatch, setAgents, setPreferences, state }),
-    task: createTaskCallbacks({ backendConnection, createSnapshotRequestId, dispatch, state }),
+    task: createTaskCallbacks({
+      attachmentResources,
+      backendConnection,
+      clientInstanceId,
+      asyncOperations,
+      createSnapshotRequestId,
+      dispatch,
+      state,
+    }),
   };
 }

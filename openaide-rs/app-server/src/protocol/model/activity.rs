@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 pub enum ActivityStatus {
     Running,
     Completed,
+    Interrupted,
     Error,
 }
 
@@ -29,6 +30,7 @@ pub enum ActivityStep {
         detail_artifact_id: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         details: Option<Box<ActivityToolDetails>>,
+        permission_outcomes: Vec<ToolPermissionOutcome>,
     },
     Command {
         command_label: String,
@@ -38,6 +40,27 @@ pub enum ActivityStep {
         #[serde(skip_serializing_if = "Option::is_none")]
         output_preview: Option<String>,
     },
+}
+
+/// Durable authorization decisions associated with one ACP tool call.
+/// Execution status remains owned by ACP and is intentionally independent.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct ToolPermissionOutcome {
+    pub request_id: String,
+    pub decision: ToolPermissionDecision,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub option_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub option_label: Option<String>,
+    pub resolved_at: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolPermissionDecision {
+    Approved,
+    Rejected,
+    Cancelled,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -74,8 +97,37 @@ pub enum ActivityToolContent {
     Terminal {
         terminal_id: String,
     },
-    Other {
-        label: String,
+    Image {
+        media_type: String,
+        data: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        uri: Option<String>,
+    },
+    Audio {
+        media_type: String,
+        data: String,
+    },
+    Resource {
+        uri: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        description: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        media_type: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        size_bytes: Option<i64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        text: Option<String>,
+    },
+    Unsupported {
+        content_type: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        media_type: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        uri: Option<String>,
     },
 }
 
@@ -118,5 +170,18 @@ pub struct ActivityToolOutput {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ActivityToolField {
     pub name: String,
-    pub value: String,
+    pub value: ActivityToolValue,
+}
+
+/// Safe, typed projection of arbitrary ACP raw tool input and output.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ActivityToolValue {
+    Null,
+    Boolean { value: bool },
+    Number { value: String },
+    String { value: String },
+    Array { items: Vec<ActivityToolValue> },
+    Object { fields: Vec<ActivityToolField> },
+    Redacted,
 }

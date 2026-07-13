@@ -69,6 +69,13 @@ impl LocalHttpAppHandler {
         self.protocol.event_stream_is_current(lease)
     }
 
+    pub(crate) fn observe_event_stream_activity(
+        &self,
+        lease: &event_streams::EventStreamLease,
+    ) -> bool {
+        self.protocol.observe_event_stream_activity(lease)
+    }
+
     pub(crate) fn finish_event_stream(&self, lease: &event_streams::EventStreamLease) {
         self.protocol.finish_event_stream(lease);
     }
@@ -207,7 +214,7 @@ fn gateway_response(id: Value, response: GatewayResponse) -> Value {
             "id": id,
             "result": result,
         }),
-        GatewayResponse::Error(error) => jsonrpc_error(id, error),
+        GatewayResponse::Error(error) => jsonrpc_error(id, *error),
     }
 }
 
@@ -228,6 +235,7 @@ fn invalid_request(message: impl Into<String>) -> ErrorEnvelope {
             target: Some(ErrorTarget {
                 method: None,
                 field: None,
+                current_task: None,
             }),
         },
         ResponseMeta::default(),

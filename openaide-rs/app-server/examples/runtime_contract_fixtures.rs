@@ -6,20 +6,19 @@ use openaide_app_server::protocol::host::HostRequest;
 use openaide_app_server::protocol::jsonrpc::RpcId;
 use openaide_app_server::protocol::model::{
     ActivityStatus, ActivityStep, ActivityToolContent, ActivityToolDetails, ActivityToolField,
-    ActivityToolInput, ActivityToolLocation, ActivityToolOutput, AgentAuthMethodSummary,
-    AgentAuthenticateResult, AgentAuthenticateStatus, AgentListSessionsResult, AgentListedSession,
+    ActivityToolInput, ActivityToolLocation, ActivityToolOutput, ActivityToolValue,
+    AgentAuthMethodSummary, AgentAuthenticateResult, AgentAuthenticateStatus,
+    AgentListSessionsResult, AgentListedSession, AgentMessagePart, AgentMessageRole,
     AgentProbeCapabilities, AgentProbeResult, AgentProbeStatus, Attachment, ChatMessage,
-    InterruptionReason, IsolationKind, MessagePage, NormalizedMessage, PermissionDecision,
-    PermissionOption, PermissionOptionKind, PermissionState, PermissionToolCall, SettingsSummary,
-    TaskSnapshot, TaskStatus, TaskSummary,
+    InterruptionReason, IsolationKind, MessagePage, NormalizedMessage, SettingsSummary,
+    TaskSnapshot, TaskStatus, TaskSummary, ToolPermissionDecision, ToolPermissionOutcome,
 };
 use openaide_app_server::protocol::notifications::RuntimeNotification;
 use openaide_app_server::protocol::params::{
     AgentAuthenticateParams, AgentListSessionsParams, AgentProbeParams, ChatPageParams,
-    ChatTailParams, DeleteMode, PermissionRespondParams, RuntimeAcpTraceSettingsPatch,
-    RuntimeDeveloperSettingsPatch, RuntimeUpdateSettingsParams, SessionPromptParams,
-    TaskCreateMode, TaskCreateParams, TaskDeleteParams, TaskIdParams, TaskListParams,
-    TaskSnapshotParams, ToolDetailParams,
+    ChatTailParams, DeleteMode, RuntimeAcpTraceSettingsPatch, RuntimeDeveloperSettingsPatch,
+    RuntimeUpdateSettingsParams, SessionPromptParams, TaskCreateMode, TaskCreateParams,
+    TaskDeleteParams, TaskIdParams, TaskListParams, TaskSnapshotParams,
 };
 use openaide_app_server::protocol::results::{HealthResult, TaskListResult};
 use openaide_app_server::storage::records::TaskPreparationRecord;
@@ -37,11 +36,13 @@ fn main() {
                 created_at: "2026-05-22T00:00:00Z".to_string(),
                 attachments: vec![attachment()],
             }),
-            chat_message(NormalizedMessage::AgentText {
+            chat_message(NormalizedMessage::AgentMessage {
                 id: "msg_agent".to_string(),
-                text: "Done.".to_string(),
+                role: AgentMessageRole::Agent,
+                parts: vec![AgentMessagePart::Text {
+                    text: "Done.".to_string(),
+                }],
                 created_at: "2026-05-22T00:00:01Z".to_string(),
-                streaming: true,
             }),
             chat_message(NormalizedMessage::Activity {
                 id: "activity_1".to_string(),
@@ -62,6 +63,13 @@ fn main() {
                         output_preview: Some("content".to_string()),
                         detail_artifact_id: Some("artifact_1".to_string()),
                         details: Some(Box::new(tool_details.clone())),
+                        permission_outcomes: vec![ToolPermissionOutcome {
+                            request_id: "request_1".to_string(),
+                            decision: ToolPermissionDecision::Approved,
+                            option_id: Some("allow_once".to_string()),
+                            option_label: Some("Allow once".to_string()),
+                            resolved_at: "2026-05-22T00:00:03Z".to_string(),
+                        }],
                     },
                     ActivityStep::Command {
                         command_label: "cargo test".to_string(),
@@ -70,30 +78,6 @@ fn main() {
                         output_preview: Some("failed".to_string()),
                     },
                 ],
-            }),
-            chat_message(NormalizedMessage::Permission {
-                id: "perm_1".to_string(),
-                request_id: "request_1".to_string(),
-                app_server_request_id: None,
-                title: "Allow edit".to_string(),
-                description: Some("Edit README.md".to_string()),
-                scope: Some("workspace".to_string()),
-                risk: Some("write".to_string()),
-                tool_call: PermissionToolCall {
-                    id: "tool_1".to_string(),
-                    title: "Edit file".to_string(),
-                    kind: Some("edit".to_string()),
-                },
-                state: PermissionState::Pending,
-                created_at: "2026-05-22T00:00:03Z".to_string(),
-                options: vec![PermissionOption {
-                    id: "allow_once".to_string(),
-                    label: "Allow once".to_string(),
-                    kind: Some(PermissionOptionKind::Allow),
-                    description: Some("Only this request".to_string()),
-                }],
-                selected_option: Some("allow_once".to_string()),
-                decision: Some(PermissionDecision::Approved),
             }),
             chat_message(NormalizedMessage::Interruption {
                 id: "interrupt_1".to_string(),
@@ -104,7 +88,7 @@ fn main() {
             }),
         ],
         has_before: true,
-        total_count: 5,
+        total_count: 4,
         version: 6,
         start_cursor: Some("cursor_1".to_string()),
         end_cursor: Some("cursor_5".to_string()),
@@ -112,8 +96,8 @@ fn main() {
 
     let snapshot = TaskSnapshot {
         task: task.clone(),
+        lifecycle: openaide_app_server::storage::records::TaskLifecycle::Visible,
         chat: chat.clone(),
-        permissions: vec![chat.items[3].message.clone()],
         settings_summary: SettingsSummary {
             agent_id: "codex".to_string(),
             isolation: IsolationKind::Local,
@@ -121,6 +105,7 @@ fn main() {
             config_options: HashMap::from([("model".to_string(), "gpt-5.5".to_string())]),
         },
         config_options_catalog: None,
+        pending_config_change: None,
         agent_commands_catalog: None,
         preparation: TaskPreparationRecord::Ready,
         revision: 9,
@@ -146,7 +131,6 @@ fn main() {
             "task_snapshot": to_value(TaskSnapshotParams { task_id: "task_1".to_string(), tail_limit: 50 }),
             "chat_tail": to_value(ChatTailParams { task_id: "task_1".to_string(), limit: 25 }),
             "chat_page": to_value(ChatPageParams { task_id: "task_1".to_string(), before_cursor: "cursor_10".to_string(), limit: 25 }),
-            "tool_detail": to_value(ToolDetailParams { task_id: "task_1".to_string(), artifact_id: "artifact_1".to_string() }),
             "session_prompt": to_value(SessionPromptParams {
                 task_id: "task_1".to_string(),
                 text: "Follow up".to_string(),
@@ -154,12 +138,6 @@ fn main() {
                 message_id: Some("client_msg_1".to_string()),
             }),
             "task_delete": to_value(TaskDeleteParams { task_id: "task_1".to_string(), mode: DeleteMode::Delete }),
-            "permission_respond": to_value(PermissionRespondParams {
-                task_id: "task_1".to_string(),
-                request_id: "request_1".to_string(),
-                decision: PermissionDecision::Denied,
-                option_id: "deny_once".to_string(),
-            }),
             "runtime_update_settings": to_value(RuntimeUpdateSettingsParams {
                 developer: RuntimeDeveloperSettingsPatch {
                     acp_trace: RuntimeAcpTraceSettingsPatch { enabled: Some(true) },
@@ -262,8 +240,11 @@ fn main() {
 fn task_summary() -> TaskSummary {
     TaskSummary {
         task_id: "task_1".to_string(),
-        title: "Update docs".to_string(),
-        status: TaskStatus::Blocked,
+        title: openaide_app_server::storage::records::TaskTitle::new(
+            "Update docs",
+            openaide_app_server::storage::records::TaskTitleSource::User,
+        ),
+        status: TaskStatus::Waiting,
         task_version: 4,
         message_history_version: 6,
         unread: true,
@@ -314,8 +295,10 @@ fn tool_details() -> ActivityToolDetails {
             ActivityToolContent::Terminal {
                 terminal_id: "terminal_1".to_string(),
             },
-            ActivityToolContent::Other {
-                label: "extra".to_string(),
+            ActivityToolContent::Unsupported {
+                content_type: "extra".to_string(),
+                media_type: None,
+                uri: None,
             },
         ],
         input: Some(ActivityToolInput {
@@ -331,7 +314,9 @@ fn tool_details() -> ActivityToolDetails {
             path: Some("/workspace/app/README.md".to_string()),
             fields: vec![ActivityToolField {
                 name: "mode".to_string(),
-                value: "read".to_string(),
+                value: ActivityToolValue::String {
+                    value: "read".to_string(),
+                },
             }],
         }),
         output: Some(ActivityToolOutput {
@@ -343,7 +328,9 @@ fn tool_details() -> ActivityToolDetails {
             success: Some(true),
             fields: vec![ActivityToolField {
                 name: "bytes".to_string(),
-                value: "128".to_string(),
+                value: ActivityToolValue::Number {
+                    value: "128".to_string(),
+                },
             }],
         }),
     }

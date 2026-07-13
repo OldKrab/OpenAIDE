@@ -1,25 +1,20 @@
-import { useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useCallback, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "react";
 import type { Dispatch } from "react";
-import type { AppPreferencesRecord, TaskSummary } from "@openaide/app-shell-contracts";
-import { TASK_SEND, type TaskId } from "@openaide/app-server-client";
-import { defaultAgent } from "@openaide/app-shell-contracts";
+import type { AppPreferencesRecord, TaskSnapshot, TaskSummary } from "@openaide/app-shell-contracts";
 import {
   getBackendConnection,
   getBootstrap,
-  postHostMessage,
 } from "../services/hostBridge";
+import { clientInstanceIdForBootstrap } from "../services/backendInitialization";
+import type { ComposerAttachmentResourceOwner } from "../services/attachmentResources";
 import {
-  clearPendingTaskSendRecovery,
-  readPendingTaskSendRecovery,
-} from "../services/pendingTaskSendRecovery";
-import { appReducer, type AppAction, type SnapshotIntent } from "../state/appReducer";
-import { mapProtocolTaskSnapshot } from "../state/appServerProtocolMapping";
+  appReducer,
+  bindAppServerReplicaEpoch,
+  type AppAction,
+  type SnapshotIntent,
+} from "../state/appReducer";
 import type { AgentOption } from "../state/composerOptions";
-import { sendWebviewTelemetry } from "../state/hostMessageRouter";
-import {
-  agentProjectRequestKey,
-  shouldLoadNativeSessions,
-} from "../state/surfaceRouting";
+import { AsyncOperationOwner } from "../state/asyncOperationOwner";
 import type { WebviewBootstrap } from "../state/surfaceTypes";
 import { createInitialState, type AppState } from "../state/store";
 import { createAppCallbacks, type AppControllerCallbacks } from "./appControllerCallbacks";
@@ -27,319 +22,293 @@ import type { NewTaskStartAttempt } from "./appControllerCallbackTypes";
 import {
   useAppControllerBackendLifecycle,
   type AppControllerBackendConnection,
+  type AppServerReplicaTransition,
+  type BackendConnectionState,
 } from "./appControllerBackendLifecycle";
-import { appControllerDerivedStateDeps, deriveAppControllerState } from "./appControllerDerivedState";
-import { createRequestControllerNativeSessions } from "./appControllerNativeSessions";
-import { useAppControllerRefs } from "./appControllerRefs";
 import { useSettingsRouteRefresh } from "./appControllerRouting";
-import { usePreparedTaskSendRetry } from "./appControllerTaskRecovery";
-import { useNewTaskPreparation, type PendingNewTaskPreparation } from "./useNewTaskPreparation";
-import { useTaskAttentionReadReceipt } from "./useTaskAttentionReadReceipt";
-import { newTaskProjectIdForRequests } from "./newTaskRequestContext";
+import type { PendingNewTaskPreparation } from "./useNewTaskPreparation";
+import { NewTaskController } from "./newTaskController";
+import { useNewTaskWorkspace } from "./useNewTaskWorkspace";
+import { useTaskWorkspace } from "./useTaskWorkspace";
+import type { NewTaskViewIntents, NewTaskViewState } from "./NewTaskView";
+import type { TaskViewIntents } from "./TaskView";
+
+/** Internal workflow assembly exposed only to the controller lifecycle tests. */
+export type AppControllerTestHarness = {
+  activeTask?: TaskSummary;
+  activeNavigationTaskId?: string;
+  agents?: AgentOption[];
+  backendReady: boolean;
+  backendConnectionState: BackendConnectionState;
+  bootstrap: WebviewBootstrap;
+  callbacks: AppControllerCallbacks;
+  createSnapshotRequestId: (taskId?: string, intent?: SnapshotIntent) => number;
+  dispatch: Dispatch<AppAction>;
+  newTaskSnapshot?: import("@openaide/app-shell-contracts").TaskSnapshot;
+  preferences: AppPreferencesRecord;
+  retryTaskOpen: () => void;
+  state: AppState;
+  visibleTasks: AppState["tasks"];
+};
+
+export type AppControllerView = {
+  appServerError?: string;
+  navigation: {
+    nativeSessions: AppState["newTask"]["nativeSessions"];
+    newTaskSelection: AppState["newTask"]["selection"];
+    projects: AppState["projects"];
+    searchQuery: string;
+    showArchived: boolean;
+    taskListError?: string;
+  };
+  primaryTask: {
+    chatPageState?: AppState["chatPages"][string];
+    liveTextPresentation?: AppState["taskLiveTextPresentation"][string];
+    newTask: NewTaskViewState;
+    permissionResponses: AppState["permissionResponses"];
+    questionResponses: AppState["questionResponses"];
+    savedScrollState?: AppState["taskChatScrollStates"][string];
+    snapshot?: TaskSnapshot;
+    taskInput?: AppState["taskInputs"][string];
+    taskOpenError?: AppState["taskOpenError"];
+    toolDetails: AppState["toolDetails"];
+  };
+  settings: AppState["settings"];
+};
+
+/** Render-ready state and user-intent operations consumed by App surfaces. */
 export type AppController = {
   activeTask?: TaskSummary;
   activeNavigationTaskId?: string;
   agents?: AgentOption[];
   backendReady: boolean;
+  backendConnectionState: BackendConnectionState;
   bootstrap: WebviewBootstrap;
   callbacks: AppControllerCallbacks;
-  createSnapshotRequestId: (taskId?: string, intent?: SnapshotIntent) => number;
-  dispatch: Dispatch<AppAction>;
+  intents: {
+    newTask: NewTaskViewIntents;
+    task: TaskViewIntents;
+  };
   preferences: AppPreferencesRecord;
-  state: AppState;
+  retryTaskOpen: () => void;
+  view: AppControllerView;
   visibleTasks: AppState["tasks"];
 };
 
 export type AppControllerOptions = {
   backendConnection?: AppControllerBackendConnection;
 };
-export function useAppController({ backendConnection }: AppControllerOptions = {}) {
+function useAppControllerCore({ backendConnection }: AppControllerOptions = {}): AppControllerTestHarness {
   const backendConnectionRef = useMemo(() => backendConnection ?? getBackendConnection(), [backendConnection]);
   const initialBootstrap = useMemo(() => getBootstrap(), []);
+  const clientInstanceId = useMemo(() => clientInstanceIdForBootstrap(initialBootstrap), [initialBootstrap]);
   const [state, dispatch] = useReducer(appReducer, undefined, createInitialState);
   const [preferences, setPreferences] = useState<AppPreferencesRecord>(initialBootstrap.preferences ?? { composer_submit_shortcut: "enter" });
   const [agents, setAgents] = useState<AgentOption[] | undefined>(undefined);
   const currentAgentId = useRef(state.newTask.selection.agentId);
   currentAgentId.current = state.newTask.selection.agentId;
+  const currentNewTaskContext = useRef({
+    projectId: state.newTask.selection.projectId,
+    agentId: state.newTask.selection.agentId || undefined,
+  });
+  currentNewTaskContext.current = {
+    projectId: state.newTask.selection.projectId,
+    agentId: state.newTask.selection.agentId || undefined,
+  };
   const pendingPreparedNewTask = useRef<PendingNewTaskPreparation | undefined>(undefined);
+  const newTaskController = useMemo(() => new NewTaskController(), []);
+  const newTaskSnapshot = useSyncExternalStore(newTaskController.subscribe, newTaskController.getSnapshot);
   const newTaskStartAttempt = useRef<NewTaskStartAttempt | undefined>(undefined);
-  const recoveringTaskSend = useRef<string | undefined>(undefined);
-  const controllerRefs = useAppControllerRefs();
-  const {
-    latestNativeSessionSelection,
-    latestNavigationSessionKey,
-    latestOptionsRequestKey,
-    latestSessionListRequestId,
-    nextSessionListRequestId,
-  } = controllerRefs;
+  const attachmentResourcesRef = useRef<ComposerAttachmentResourceOwner | undefined>(undefined);
+  const asyncOperations = useMemo(() => new AsyncOperationOwner(), []);
+  const handleReplicaChanged = useCallback((transition: AppServerReplicaTransition) => {
+    if (!transition.previous) return;
+    asyncOperations.replaceReplica();
+    pendingPreparedNewTask.current = undefined;
+    attachmentResourcesRef.current?.replaceReplica();
+    if (!transition.rootChanged) return;
+    // Task ids and cleanup tombstones can collide across roots. Forget them
+    // locally without issuing cleanup requests into the replacement root.
+    newTaskController.replaceStateRoot();
+    newTaskStartAttempt.current = undefined;
+  }, [asyncOperations, newTaskController]);
   const {
     acceptSnapshotRequest,
     backendInitialized,
+    backendConnectionState,
     backendReady,
-    beginNavigationChange,
     bootstrap,
     createSnapshotRequestId,
-    currentNavigationGeneration,
+    operationOwner,
+    replicaEpoch,
+    retryTaskOpen,
   } = useAppControllerBackendLifecycle({
+    asyncOperations,
     backendConnection: backendConnectionRef,
     currentAgentId,
+    currentNewTaskContext,
     dispatch,
     initialBootstrap,
-    refs: controllerRefs,
+    newTaskController,
+    newTaskId: newTaskSnapshot?.task.task_id,
+    onReplicaChanged: handleReplicaChanged,
     setAgents,
     setPreferences,
     state,
   });
-  const newTaskBootstrapProjectId = bootstrap.surface === "task" && !bootstrap.taskId
-    ? bootstrap.projectId
-    : undefined;
-  useNewTaskPreparation({
+  const replicaDispatch = useMemo(
+    () => bindAppServerReplicaEpoch(dispatch, replicaEpoch),
+    [dispatch, replicaEpoch],
+  );
+  const newTaskWorkspace = useNewTaskWorkspace({
+    agents,
+    asyncOperations,
     backendConnection: backendConnectionRef,
     backendReady,
     bootstrap,
-    currentNavigationGeneration,
-    dispatch,
-    latestOptionsRequestKey,
+    clientInstanceId,
+    dispatch: replicaDispatch,
+    newTaskController,
+    newTaskSnapshot,
     pendingPreparation: pendingPreparedNewTask,
+    replicaEpoch,
     startAttempt: newTaskStartAttempt,
     state,
   });
-  const pendingPreparedNewTaskForKey = (key: string) =>
-    pendingPreparedNewTask.current?.key === key ? pendingPreparedNewTask.current.promise : undefined;
-  const requestNativeSessions = createRequestControllerNativeSessions({
-    backendConnection: backendConnectionRef,
-    dispatch,
-    getAgentId: () => state.newTask.selection.agentId,
-    getProjectId: () => state.newTask.selection.projectId,
-    latestSessionListRequestId,
-    nextSessionListRequestId,
-    onFailure: (failure) => sendWebviewTelemetry(postHostMessage, "native_sessions_load_failed", {
-      surface: bootstrap.surface,
-      request: failure.request,
-      session_list_request_id: failure.requestId,
-      agent_id: failure.agentId,
-      project_id: failure.projectId,
-      error_name: failure.errorName,
-      error_code: failure.errorCode,
-      error_message: failure.errorMessage,
-    }),
-  });
-  useEffect(() => {
-    if (
-      bootstrap.surface === "task" &&
-      !bootstrap.taskId &&
-      newTaskBootstrapProjectId &&
-      state.newTask.selection.projectId !== newTaskBootstrapProjectId
-    ) {
-      dispatch({ type: "newTask:projectId", projectId: newTaskBootstrapProjectId });
-    }
-  }, [bootstrap.surface, bootstrap.taskId, newTaskBootstrapProjectId, state.newTask.selection.projectId]);
-
-  useEffect(() => {
-    if (bootstrap.surface !== "task" || bootstrap.taskId || !agents?.length) return;
-    const selected = agents.find((agent) => agent.id === state.newTask.selection.agentId);
-    if (selected && selected.enabled !== false) return;
-    const fallback = agents.find((agent) => agent.enabled !== false) ?? defaultAgent;
-    latestOptionsRequestKey.current = undefined;
-    dispatch({ type: "newTask:agent", agentId: fallback.id, agentLabel: fallback.label });
-  }, [agents, bootstrap.surface, bootstrap.taskId, state.newTask.selection.agentId]);
-
-  useEffect(() => {
-    if (
-      bootstrap.surface !== "task" ||
-      !bootstrap.taskId ||
-      !backendReady ||
-      !backendConnectionRef?.request ||
-      !state.snapshot ||
-      state.snapshot.task.task_id !== bootstrap.taskId ||
-      state.snapshot.task.has_messages
-    ) {
-      return;
-    }
-    const recovery = readPendingTaskSendRecovery(bootstrap.taskId);
-    if (!recovery || recoveringTaskSend.current === recovery.taskId) return;
-    recoveringTaskSend.current = recovery.taskId;
-    dispatch({ type: "taskInput:prompt", taskId: recovery.taskId, prompt: recovery.renderState.prompt });
-    for (const attachment of recovery.renderState.context) {
-      dispatch({ type: "taskInput:attachment:addAppServer", taskId: recovery.taskId, attachment });
-    }
-    dispatch({ type: "taskInput:submit", taskId: recovery.taskId });
-    void backendConnectionRef.request(TASK_SEND, {
-      taskId: recovery.taskId as TaskId,
-      taskRevision: recovery.taskRevision,
-      idempotencyKey: recovery.idempotencyKey,
-      message: recovery.message,
-    }).then((result) => {
-      clearPendingTaskSendRecovery(recovery.taskId);
-      dispatch({
-        type: "snapshot",
-        snapshot: mapProtocolTaskSnapshot(result.task).snapshot,
-        intent: "refresh",
-      });
-    }).catch((error) => {
-      clearPendingTaskSendRecovery(recovery.taskId);
-      dispatch({
-        type: "taskInput:error",
-        taskId: recovery.taskId,
-        message: error instanceof Error ? error.message : "Unable to recover submitted message.",
-      });
-    }).finally(() => {
-      if (recoveringTaskSend.current === recovery.taskId) {
-        recoveringTaskSend.current = undefined;
-      }
-    });
-  }, [
-    backendConnectionRef,
-    backendReady,
-    bootstrap.surface,
-    bootstrap.taskId,
-    state.snapshot?.task.task_id,
-    state.snapshot?.task.has_messages,
-  ]);
-
-  useEffect(() => {
-    const snapshotTaskId = state.snapshot?.task.task_id;
-    const snapshotHasPendingInput = snapshotTaskId
-      ? state.taskInputs[snapshotTaskId]?.pending !== undefined
-      : false;
-    const snapshotHasPendingRecovery = snapshotTaskId
-      ? readPendingTaskSendRecovery(snapshotTaskId) !== undefined
-      : false;
-    if (
-      bootstrap.surface !== "task" ||
-      !bootstrap.taskId ||
-      !state.snapshot ||
-      state.snapshot.task.has_messages ||
-      state.snapshot.task.status !== "inactive" ||
-      snapshotHasPendingInput ||
-      snapshotHasPendingRecovery
-    ) {
-      return;
-    }
-    postHostMessage({
-      type: "surface.openNewTask",
-      payload: state.snapshot.task.project_id
-        ? { project_id: state.snapshot.task.project_id }
-        : undefined,
-    });
-  }, [
-    bootstrap.surface,
-    bootstrap.taskId,
-    state.snapshot?.task.task_id,
-    state.snapshot?.task.has_messages,
-    state.snapshot?.task.status,
-    state.snapshot?.task.project_id,
-    state.snapshot ? state.taskInputs[state.snapshot.task.task_id]?.pending : undefined,
-  ]);
+  const newTaskDispatch = newTaskWorkspace.dispatch;
+  const attachmentResources = newTaskWorkspace.attachmentResources;
+  attachmentResourcesRef.current = attachmentResources;
   useSettingsRouteRefresh({
     backendConnectionRef,
     backendInitialized,
     bootstrap,
     currentAgentId,
-    dispatch,
+    dispatch: newTaskDispatch,
     setAgents,
     state,
   });
-  usePreparedTaskSendRetry({
-    backendConnectionRef,
-    backendInitialized,
-    createSnapshotRequestId,
-    dispatch,
-    postHostMessage,
+  const { activeNavigationTaskId, activeTask, visibleTasks } = useTaskWorkspace({
+    backendConnection: backendConnectionRef,
+    bootstrap,
+    dispatch: newTaskDispatch,
     state,
   });
-  useTaskAttentionReadReceipt({
-    backendConnection: backendConnectionRef,
-    dispatch,
-    revision: state.snapshot?.revision,
-    taskId: bootstrap.surface === "task" ? state.snapshot?.task.task_id : undefined,
-    unread: state.snapshot?.task.unread === true,
-  });
-  useEffect(() => {
-    const projectId = newTaskProjectIdForRequests(state, newTaskBootstrapProjectId);
-    if (
-      !backendReady ||
-      !shouldLoadNativeSessions(
-        bootstrap,
-        projectId,
-      )
-    ) {
-      return;
-    }
-    if (!projectId) return;
-    const key = agentProjectRequestKey(state.newTask.selection.agentId, projectId);
-    if (latestNavigationSessionKey.current === key) return;
-    latestNavigationSessionKey.current = key;
-    latestNativeSessionSelection.current = {
-      agentId: state.newTask.selection.agentId,
-      workspaceRoot: state.newTask.selection.workspaceRoot,
-    };
-    requestNativeSessions();
-  }, [
-    backendReady,
-    bootstrap.surface,
-    state.newTask.selection.agentId,
-    state.newTask.selection.projectId,
-    state.newTask.selection.workspaceRoot,
-    state.projects,
-    state.tasks,
-    newTaskBootstrapProjectId,
-  ]);
 
-  const derivedStateDeps = appControllerDerivedStateDeps(state);
-  const { activeNavigationTaskId, activeTask, hasActiveTask, visibleTasks } = useMemo(
-    () => deriveAppControllerState(state),
-    derivedStateDeps,
-  );
-
-  useEffect(() => {
-    if (!state.snapshot) return;
-    sendWebviewTelemetry(postHostMessage, "task_rendered", {
-      surface: bootstrap.surface,
-      task_id: state.snapshot.task.task_id,
-      task_status: state.snapshot.task.status,
-      chat_items: state.snapshot.chat.items.length,
-      has_active_task: hasActiveTask,
-    });
-  }, [hasActiveTask, bootstrap.surface, state.snapshot?.task.task_id, state.snapshot?.task.status, state.snapshot?.chat.items.length]);
+  const callbackState = bootstrap.surface === "task" && !bootstrap.taskId && newTaskSnapshot
+    ? { ...state, snapshot: newTaskSnapshot }
+    : state;
 
   const callbacks = createAppCallbacks({
     acceptTaskOpen: acceptSnapshotRequest,
+    attachmentResources,
+    asyncOperations: operationOwner,
     backendConnection: backendConnectionRef,
-    beginNavigationChange,
+    clientInstanceId,
     createSnapshotRequestId,
-    currentNavigationGeneration,
-    dispatch,
-    latestOptionsRequestKey,
+    dispatch: newTaskDispatch,
     newTaskStartAttempt,
-    pendingPreparedNewTask: pendingPreparedNewTaskForKey,
-    requestNativeSessions,
+    pendingPreparedNewTask: newTaskWorkspace.pendingPreparationForKey,
+    newTaskController: newTaskController,
+    requestNativeSessions: newTaskWorkspace.requestNativeSessions,
     setAgents,
     setPreferences,
-    state,
+    state: callbackState,
   });
 
   return {
     activeNavigationTaskId,
     activeTask,
     agents,
+    backendConnectionState,
     backendReady,
     bootstrap,
     callbacks,
     createSnapshotRequestId,
-    dispatch,
+    dispatch: newTaskDispatch,
+    newTaskSnapshot,
     preferences,
+    retryTaskOpen,
     state,
     visibleTasks,
   };
 }
 
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    timeoutId = setTimeout(() => reject(new Error(message)), timeoutMs);
-  });
-  return Promise.race([promise, timeout]).finally(() => {
-    if (timeoutId !== undefined) clearTimeout(timeoutId);
-  });
+export function useAppController(options: AppControllerOptions = {}): AppController {
+  const core = useAppControllerCore(options);
+  const { createSnapshotRequestId: _createSnapshotRequestId, dispatch, newTaskSnapshot, state, ...renderState } = core;
+  const routedTaskId = state.snapshot?.task.task_id;
+  const newTaskViewSnapshot = newTaskSnapshot ?? state.snapshot;
+  const preparedTaskId = newTaskViewSnapshot?.task.has_messages === false
+    ? newTaskViewSnapshot.task.task_id
+    : undefined;
+
+  return {
+    ...renderState,
+    intents: {
+      newTask: {
+        changePrompt: (prompt) => dispatch(preparedTaskId
+          ? { type: "taskInput:prompt", taskId: preparedTaskId, prompt }
+          : { type: "prompt", prompt }),
+        reportAttachmentError: (message) => dispatch({
+          type: "submit:error",
+          message: message ?? "Images can be attached after the Task is open.",
+        }),
+        selectAgent: (agentId, agentLabel) => dispatch({ type: "newTask:agent", agentId, agentLabel }),
+        selectIsolation: (isolation) => dispatch({ type: "newTask:isolation", isolation }),
+        selectProject: (project) => dispatch({ type: "newTask:project", project }),
+        selectWorkspace: (workspace) => dispatch({ type: "newTask:workspace", workspace }),
+      },
+      task: {
+        changePrompt: (prompt) => {
+          if (routedTaskId) dispatch({ type: "taskInput:prompt", taskId: routedTaskId, prompt });
+        },
+        recordScroll: (scrollState) => {
+          if (routedTaskId) dispatch({ type: "taskScroll:record", taskId: routedTaskId, scrollState });
+        },
+        reportAttachmentError: (message) => {
+          if (!routedTaskId) return;
+          dispatch({
+            type: "taskInput:error",
+            taskId: routedTaskId,
+            message: message ?? "Unable to attach image.",
+          });
+        },
+      },
+    },
+    view: {
+      appServerError: state.appServerError,
+      navigation: {
+        nativeSessions: state.newTask.nativeSessions,
+        newTaskSelection: state.newTask.selection,
+        projects: state.projects,
+        searchQuery: state.searchQuery,
+        showArchived: state.showArchived,
+        taskListError: state.taskListError,
+      },
+      primaryTask: {
+        chatPageState: routedTaskId ? state.chatPages[routedTaskId] : undefined,
+        liveTextPresentation: routedTaskId ? state.taskLiveTextPresentation[routedTaskId] : undefined,
+        newTask: {
+          newTask: state.newTask,
+          preparedTaskInput: preparedTaskId ? state.taskInputs[preparedTaskId] : undefined,
+          projects: state.projects,
+          snapshot: newTaskViewSnapshot,
+          workspaceRootsLoaded: state.workspaceRootsLoaded,
+        },
+        permissionResponses: state.permissionResponses,
+        questionResponses: state.questionResponses,
+        savedScrollState: routedTaskId ? state.taskChatScrollStates[routedTaskId] : undefined,
+        snapshot: state.snapshot,
+        taskInput: routedTaskId ? state.taskInputs[routedTaskId] : undefined,
+        taskOpenError: state.taskOpenError,
+        toolDetails: state.toolDetails,
+      },
+      settings: state.settings,
+    },
+  };
+}
+
+/** @internal Prefer `useAppController`; this exposes reducer details for lifecycle tests only. */
+export function useAppControllerTestHarness(options: AppControllerOptions = {}) {
+  return useAppControllerCore(options);
 }

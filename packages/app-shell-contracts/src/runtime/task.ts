@@ -1,4 +1,4 @@
-import type { MessagePage, NormalizedMessage } from "./chat.js";
+import type { ChatMessage, MessagePage } from "./chat.js";
 import type { AgentCommandsCatalog, ConfigOptionsCatalog } from "./agent.js";
 import type { IsolationKind, TaskStatus } from "./primitives.js";
 
@@ -22,9 +22,11 @@ export type TaskSummary = {
 };
 
 export type TaskSnapshot = {
+  lifecycle: "new" | "visible";
   task: TaskSummary;
   chat: MessagePage;
-  permissions: NormalizedMessage[];
+  /** Active App Server requests render after durable Chat and never enter history. */
+  active_requests: ChatMessage[];
   settings_summary: {
     agent_id: string;
     isolation: IsolationKind;
@@ -35,7 +37,18 @@ export type TaskSnapshot = {
   agent_commands?: AgentCommandsCatalog;
   send_capability: {
     state: "loading" | "ready" | "blocked" | "failed";
-    attachment_only: boolean;
+    blockers?: Array<{
+      kind:
+        | "taskPreparing"
+        | "taskRunning"
+        | "agentConfigNotReady"
+        | "slashCommandsNotReady"
+        | "attachmentsNeedRefresh"
+        | "emptyMessage"
+        | "missingRequiredOptions"
+        | "failedValidation";
+      message: string;
+    }>;
   };
   revision: number;
   history_sync: HistorySyncState;
@@ -43,10 +56,8 @@ export type TaskSnapshot = {
 
 export type HistorySyncState =
   | { state: "idle"; generation: number }
-  | { state: "checking"; generation: number }
   | { state: "syncing"; generation: number }
-  | { state: "updated"; generation: number }
-  | { state: "failed"; generation: number; message: string; before_send: boolean };
+  | { state: "updated"; generation: number };
 
 export type TaskListResult = {
   tasks: TaskSummary[];

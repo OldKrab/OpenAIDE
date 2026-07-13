@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 
 const packageRoot = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(packageRoot, "../..");
+const debugBuild = process.env.OPENAIDE_WEB_DEBUG_BUILD === "1";
 
 function allowedHostsFromEnv() {
   const rawHosts = process.env.OPENAIDE_VITE_ALLOWED_HOSTS;
@@ -19,6 +20,8 @@ function allowedHostsFromEnv() {
 export default defineConfig({
   plugins: [react()],
   cacheDir: process.env.OPENAIDE_VITE_CACHE_DIR ?? "node_modules/.vite",
+  // Local Driver/Target bundles favor profiler readability without enabling React's dev runtime.
+  esbuild: debugBuild ? { keepNames: true } : undefined,
   resolve: {
     alias: {
       "@openaide/app-server-client": path.resolve(repoRoot, "packages/app-server-client/src/index.ts"),
@@ -30,6 +33,7 @@ export default defineConfig({
   },
   build: {
     outDir: "dist",
+    minify: !debugBuild,
     sourcemap: true,
     rollupOptions: {
       output: {

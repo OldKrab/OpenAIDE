@@ -15,8 +15,9 @@ use crate::agent::acp_trace::{AcpTraceSession, AcpTraceState};
 use crate::agent::registry_handle::AgentRegistryHandle;
 use crate::agent::{
     AgentAuthenticateRequest, AgentEventSink, AgentListSessionsRequest, AgentLoadedSession,
-    AgentPrompt, AgentSession, AgentSessionDelete, AgentSessionEventSink, AgentSessionLoad,
-    AgentSessionResume, AgentSessionSetConfigOptionRequest, AgentSessionStart,
+    AgentPrompt, AgentPromptOutcome, AgentSession, AgentSessionDelete, AgentSessionEventSink,
+    AgentSessionKey, AgentSessionLoad, AgentSessionResume, AgentSessionSetConfigOptionRequest,
+    AgentSessionStart,
 };
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::host::HostBridge;
@@ -116,8 +117,9 @@ impl AcpActiveSessionManager {
         &self,
         request: AgentSessionResume,
     ) -> Result<AgentSession, RuntimeError> {
-        if self.sessions.contains(&request.session_id) {
-            return Ok(AgentSession::new(request.session_id));
+        let session = request.session_key();
+        if self.sessions.contains(&session) {
+            return Ok(AgentSession::new(request.agent_id, request.session_id));
         }
         Err(RuntimeError::CapabilityMissing(
             "acp_session_resume_after_runtime_restart".to_string(),
@@ -126,38 +128,39 @@ impl AcpActiveSessionManager {
 
     pub(super) fn attach_session_event_sink(
         &self,
-        session_id: &str,
+        session: &AgentSessionKey,
         sink: Arc<dyn AgentSessionEventSink>,
     ) -> Result<(), RuntimeError> {
-        self.sessions.attach_session_event_sink(session_id, sink)
+        self.sessions.attach_session_event_sink(session, sink)
     }
 
     pub(super) fn set_session_config_option(
         &self,
         request: AgentSessionSetConfigOptionRequest,
     ) -> Result<ConfigOptionsCatalog, RuntimeError> {
-        self.sessions.set_config_option(
-            &request.session_id,
-            request.agent_id,
-            request.config_id,
-            request.value,
-        )
+        let session = request.session_key();
+        self.sessions
+            .set_config_option(&session, request.config_id, request.value)
     }
 
     pub(super) fn prompt(
         &self,
         prompt: AgentPrompt,
         sink: Arc<dyn AgentEventSink>,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<AgentPromptOutcome, RuntimeError> {
         self.sessions.prompt(prompt, sink)
     }
 
-    pub(super) fn cancel_session(&self, session_id: &str) -> Result<(), RuntimeError> {
-        self.sessions.cancel_session(session_id)
+    pub(super) fn steer(&self, prompt: AgentPrompt) -> Result<(), RuntimeError> {
+        self.sessions.steer(prompt)
     }
 
-    pub(super) fn close_session(&self, session_id: &str) -> Result<(), RuntimeError> {
-        self.sessions.close_session(session_id)
+    pub(super) fn cancel_session(&self, session: &AgentSessionKey) -> Result<(), RuntimeError> {
+        self.sessions.cancel_session(session)
+    }
+
+    pub(super) fn close_session(&self, session: &AgentSessionKey) -> Result<(), RuntimeError> {
+        self.sessions.close_session(session)
     }
 
     pub(super) fn delete_session(&self, request: AgentSessionDelete) -> Result<(), RuntimeError> {
@@ -229,7 +232,7 @@ impl AcpActiveSessionManager {
             process_session.terminal_owner,
         );
         self.sessions
-            .insert_started_session(&started.session.session_id, session_client)?;
+            .insert_started_session(started.session.key(), session_client)?;
 
         Ok(started)
     }

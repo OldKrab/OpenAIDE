@@ -12,7 +12,7 @@ use openaide_app_server_protocol::methods::{
     AGENT_UPDATE_CUSTOM_METADATA, ATTACHMENT_CONFIRM_EMBEDDED,
     ATTACHMENT_CREATE_EMBEDDED_CANDIDATE, ATTACHMENT_CREATE_FILE_REFERENCE,
     ATTACHMENT_CREATE_PASTED_IMAGE, ATTACHMENT_LIST_DIRECTORY, ATTACHMENT_LIST_ROOTS,
-    ATTACHMENT_REFRESH_HANDLES, ATTACHMENT_RELEASE_HANDLES, ATTACHMENT_REVEAL, CLIENT_HEARTBEAT,
+    ATTACHMENT_REFRESH_HANDLES, ATTACHMENT_RELEASE, ATTACHMENT_REVEAL, CLIENT_HEARTBEAT,
     CLIENT_INITIALIZE, SETTINGS_GET_AGENT_DETAILS, STATE_SUBSCRIBE, TASK_ADOPT_NATIVE_SESSION,
     TASK_CANCEL, TASK_CREATE, TASK_DISCARD, TASK_LIST, TASK_MARK_READ, TASK_OPEN, TASK_SEND,
     TASK_SET_ARCHIVED, TASK_SET_CONFIG_OPTION,
@@ -20,8 +20,10 @@ use openaide_app_server_protocol::methods::{
 use openaide_app_server_protocol::snapshot::PendingRequestScope;
 use openaide_app_server_protocol::state::{StateSubscribeParams, SubscriptionScope};
 
-use crate::projects::project_id_for_workspace;
-use crate::protocol::model::{IsolationKind, NormalizedMessage, PermissionDecision, TaskStatus};
+use crate::projects::{project_id_for_workspace, ConfiguredProjectRoots};
+use crate::protocol::model::{
+    ActivityStep, IsolationKind, NormalizedMessage, TaskStatus, ToolPermissionDecision,
+};
 use crate::storage::records::{TaskPreparationRecord, TaskRecord};
 use crate::storage::Store;
 use crate::task_events::TaskUpdate;
@@ -87,7 +89,7 @@ fn gateway_error(
         GatewayOutcome::Respond {
             response: crate::protocol_edge::GatewayResponse::Error(error),
             ..
-        } => error,
+        } => *error,
         other => panic!("expected gateway error, got {other:?}"),
     }
 }
@@ -141,8 +143,8 @@ fn initialize_succeeds_through_protocol_edge_stdio() {
         "client-1"
     );
     assert_eq!(
-        response["result"]["result"]["snapshot"]["agents"]["defaultAgentId"],
-        "codex"
+        response["result"]["result"]["snapshot"]["newTaskDefaults"],
+        serde_json::json!({})
     );
     assert_eq!(
         response["result"]["result"]["snapshot"]["agents"]["agents"][0]["agentId"],
@@ -164,6 +166,36 @@ fn initialize_succeeds_through_protocol_edge_stdio() {
             .expect("ACP trace directory")
             .contains("diagnostics/acp-traces")
     );
+}
+
+#[test]
+fn initialize_exposes_one_stable_server_id_per_gateway_process_epoch() {
+    let (_first_temp, mut first_process) = dispatcher();
+    let first_snapshot = first_process.handle_line(&init_request("first-1", "client-1"));
+    let repeated_snapshot = first_process.handle_line(&init_request("first-2", "client-1"));
+    let (_second_temp, mut second_process) = dispatcher();
+    let second_snapshot = second_process.handle_line(&init_request("second-1", "client-2"));
+
+    let first_server_id = response(&first_snapshot[0])["result"]["result"]["snapshot"]["server"]
+        ["serverId"]
+        .as_str()
+        .expect("first process ServerId")
+        .to_string();
+    let repeated_server_id = response(&repeated_snapshot[0])["result"]["result"]["snapshot"]
+        ["server"]["serverId"]
+        .as_str()
+        .expect("repeated first process ServerId")
+        .to_string();
+    let second_server_id = response(&second_snapshot[0])["result"]["result"]["snapshot"]["server"]
+        ["serverId"]
+        .as_str()
+        .expect("second process ServerId")
+        .to_string();
+
+    assert!(!first_server_id.is_empty());
+    assert_eq!(repeated_server_id, first_server_id);
+    assert!(!second_server_id.is_empty());
+    assert_ne!(second_server_id, first_server_id);
 }
 
 #[test]
@@ -235,22 +267,38 @@ fn attachment_handle_is_scoped_to_its_originating_client_at_protocol_boundary() 
         other_connection.clone(),
         gateway_request(
             "release-other",
-            ATTACHMENT_RELEASE_HANDLES,
-            json!({ "taskId": "task-1", "handles": [handle_id] }),
+            ATTACHMENT_RELEASE,
+            json!({
+                "taskId": "task-1",
+                "resources": [
+                    { "kind": "handle", "id": handle_id },
+                    { "kind": "handle", "id": "missing-handle" }
+                ]
+            }),
         ),
         AppServerTime(5),
     ));
-    assert_eq!(released["releasedHandles"], json!([]));
+    assert_eq!(
+        released["outcomes"],
+        json!([
+            {
+                "resource": { "kind": "handle", "id": handle_id },
+                "status": "forbidden"
+            },
+            {
+                "resource": { "kind": "handle", "id": "missing-handle" },
+                "status": "noOp"
+            }
+        ])
+    );
 
     let send_error = gateway_error(gateway.handle_inbound(
-        other_connection,
+        other_connection.clone(),
         gateway_request(
             "send-other",
             TASK_SEND,
             json!({
                 "taskId": "task-1",
-                "idempotencyKey": "other-send",
-                "taskRevision": 1,
                 "message": { "text": "inspect", "attachments": [handle_id] },
             }),
         ),
@@ -380,14 +428,70 @@ fn attachment_browser_resources_and_candidates_are_scoped_to_originating_client(
         json!("unknownCandidate")
     );
 
+    let denied_release = gateway_result(gateway.handle_inbound(
+        other_connection.clone(),
+        gateway_request(
+            "release-candidate-other",
+            ATTACHMENT_RELEASE,
+            json!({
+                "taskId": "task-1",
+                "resources": [{ "kind": "candidate", "id": candidate_id }]
+            }),
+        ),
+        AppServerTime(8),
+    ));
+    assert_eq!(denied_release["outcomes"][0]["status"], json!("forbidden"));
+
+    let owner_release = gateway_result(gateway.handle_inbound(
+        owner_connection.clone(),
+        gateway_request(
+            "release-candidate-owner",
+            ATTACHMENT_RELEASE,
+            json!({
+                "taskId": "task-1",
+                "resources": [{ "kind": "candidate", "id": candidate_id }]
+            }),
+        ),
+        AppServerTime(9),
+    ));
+    assert_eq!(owner_release["outcomes"][0]["status"], json!("released"));
+
+    let repeated_release = gateway_result(gateway.handle_inbound(
+        owner_connection.clone(),
+        gateway_request(
+            "release-candidate-again",
+            ATTACHMENT_RELEASE,
+            json!({
+                "taskId": "task-1",
+                "resources": [{ "kind": "candidate", "id": candidate_id }]
+            }),
+        ),
+        AppServerTime(10),
+    ));
+    assert_eq!(repeated_release["outcomes"][0]["status"], json!("noOp"));
+
+    let replacement_candidate = gateway_result(gateway.handle_inbound(
+        owner_connection.clone(),
+        gateway_request(
+            "candidate-owner-replacement",
+            ATTACHMENT_CREATE_EMBEDDED_CANDIDATE,
+            json!({ "taskId": "task-1", "entryId": entry_id }),
+        ),
+        AppServerTime(11),
+    ));
+    let replacement_candidate_id = replacement_candidate["candidate"]["candidateId"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
     let owner_confirmation = gateway_result(gateway.handle_inbound(
         owner_connection.clone(),
         gateway_request(
             "confirm-owner",
             ATTACHMENT_CONFIRM_EMBEDDED,
-            json!({ "taskId": "task-1", "candidates": [candidate_id] }),
+            json!({ "taskId": "task-1", "candidates": [replacement_candidate_id] }),
         ),
-        AppServerTime(8),
+        AppServerTime(12),
     ));
     assert_eq!(
         owner_confirmation["attachments"].as_array().unwrap().len(),
@@ -401,7 +505,7 @@ fn attachment_browser_resources_and_candidates_are_scoped_to_originating_client(
             ATTACHMENT_CREATE_FILE_REFERENCE,
             json!({ "taskId": "task-1", "entryId": entry_id }),
         ),
-        AppServerTime(9),
+        AppServerTime(13),
     ));
     let file_handle = file_reference["attachment"]["handleId"].as_str().unwrap();
     let reveal_error = gateway_error(gateway.handle_inbound(
@@ -566,10 +670,6 @@ fn initialize_uses_stored_agent_catalog_in_production_startup_path() {
 
     let response = response(&responses[0]);
     assert_eq!(
-        response["result"]["result"]["snapshot"]["agents"]["defaultAgentId"],
-        "custom.local"
-    );
-    assert_eq!(
         response["result"]["result"]["snapshot"]["agents"]["agents"][0]["agentId"],
         "custom.local"
     );
@@ -675,7 +775,9 @@ fn agent_custom_create_updates_live_registry_and_emits_agent_event() {
     let custom_agent_id: String;
     {
         let store = Store::open(temp.path().to_path_buf()).unwrap();
-        store.write_task(&task_record("task-existing")).unwrap();
+        let mut project_anchor = task_record("task-existing");
+        project_anchor.lifecycle = crate::storage::records::TaskLifecycle::Visible;
+        store.write_task(&project_anchor).unwrap();
     }
     {
         let state_root = StateRoot::resolve(temp.path()).expect("state root");
@@ -1366,7 +1468,7 @@ fn task_subscription_emits_pending_server_request_over_stdio() {
     assert_eq!(subscribe_response["id"], "2");
     assert_eq!(
         subscribe_response["result"]["result"]["snapshot"]["task"]["task"]["title"],
-        "Task"
+        serde_json::json!({ "value": "Task", "source": "user" })
     );
     assert_eq!(
         subscribe_response["result"]["result"]["snapshot"]["task"]["pendingRequests"][0]
@@ -1391,11 +1493,10 @@ fn task_subscription_emits_pending_server_request_over_stdio() {
     assert_eq!(updates.len(), 1);
     let update = response(&updates[0]);
     assert_eq!(update["method"], "app/event");
-    assert_eq!(update["params"]["payload"]["kind"], "taskSnapshotUpdated");
-    assert!(update["params"]["payload"]["task"]
-        .get("pendingRequests")
-        .and_then(Value::as_array)
-        .is_none_or(Vec::is_empty));
+    assert_eq!(update["params"]["payload"]["kind"], "taskRequestsUpdated");
+    assert!(update["params"]["payload"]["requests"]
+        .as_array()
+        .is_some_and(Vec::is_empty));
     assert!(dispatcher
         .gateway
         .pending_server_requests_for_task(&TaskId::from("task-1"))
@@ -1497,7 +1598,7 @@ fn task_create_persists_idle_task_without_prompt_after_initialize() {
         .as_str()
         .expect("created task id")
         .to_string();
-    assert_eq!(task_id, "task-existing");
+    assert_ne!(task_id, "task-existing");
     assert_eq!(
         response["result"]["result"]["task"]["preparation"]["kind"],
         "preparing"
@@ -1517,12 +1618,19 @@ fn task_create_persists_idle_task_without_prompt_after_initialize() {
     let store = open_store_after_dispatcher_drop(temp.path());
     let record = store.read_task(&task_id).unwrap();
     assert_eq!(record.status, TaskStatus::Inactive);
-    assert!(!record.first_prompt_sent);
+    assert_eq!(
+        record.lifecycle,
+        crate::storage::records::TaskLifecycle::New {
+            owner_client_instance_id: openaide_app_server_protocol::ids::ClientInstanceId::from(
+                "client-1"
+            ),
+        }
+    );
     assert_eq!(record.active_turn_id, None);
 }
 
 #[test]
-fn task_create_emits_project_collection_update_after_initialize() {
+fn task_create_does_not_publish_private_new_task_to_project_subscribers() {
     let temp = tempfile::TempDir::new().expect("temp dir");
     {
         let store = Store::open(temp.path().to_path_buf()).unwrap();
@@ -1530,6 +1638,7 @@ fn task_create_emits_project_collection_update_after_initialize() {
     }
     let state_root = StateRoot::resolve(temp.path()).expect("state root");
     let mut dispatcher = ProtocolEdgeStdioDispatcher::new_for_test(state_root);
+    let notifications = dispatcher.take_task_updates().expect("task updates");
     dispatcher.handle_line(&init_request("1", "client-1"));
     dispatcher.handle_line(
         &json!({
@@ -1554,13 +1663,12 @@ fn task_create_emits_project_collection_update_after_initialize() {
         .to_string(),
     );
 
-    let event = app_event_payload(&responses, "projectCollectionUpdated")
-        .expect("project collection update");
-    assert!(event["projects"]["projects"]
-        .as_array()
-        .expect("projects")
-        .iter()
-        .any(|project| project["projectId"] == project_id_for_workspace("/workspace/a").as_str()));
+    assert_eq!(responses.len(), 1);
+    let committed = notifications
+        .recv_timeout(Duration::from_secs(1))
+        .expect("task create notification");
+    let events = dispatcher.handle_task_update(committed);
+    assert!(events.is_empty());
 }
 
 #[test]
@@ -1597,7 +1705,7 @@ fn task_adopt_native_session_loads_agent_session_after_initialize() {
     assert!(task_id.starts_with("task_"));
     assert_eq!(
         response["result"]["result"]["task"]["task"]["title"],
-        "Imported native session"
+        serde_json::json!({ "value": "Imported native session", "source": "agent" })
     );
     assert_eq!(
         response["result"]["result"]["task"]["chat"]["items"][0]["parts"][0]["text"],
@@ -1607,7 +1715,10 @@ fn task_adopt_native_session_loads_agent_session_after_initialize() {
     let store = open_store_after_dispatcher_drop(temp.path());
     let record = store.read_task(&task_id).unwrap();
     assert_eq!(record.agent_session_id.as_deref(), Some("native-session-1"));
-    assert!(record.first_prompt_sent);
+    assert_eq!(
+        record.lifecycle,
+        crate::storage::records::TaskLifecycle::Visible
+    );
     assert!(matches!(record.preparation, TaskPreparationRecord::Ready));
 }
 
@@ -1621,6 +1732,7 @@ fn task_send_commits_user_message_and_active_turn_after_initialize() {
     };
     let state_root = StateRoot::resolve(temp.path()).expect("state root");
     let mut dispatcher = ProtocolEdgeStdioDispatcher::new_for_test(state_root);
+    let notifications = dispatcher.take_task_updates().expect("task updates");
     dispatcher.handle_line(&init_request("1", "client-1"));
     dispatcher.handle_line(
         &json!({
@@ -1641,22 +1753,21 @@ fn task_send_commits_user_message_and_active_turn_after_initialize() {
             "method": TASK_SEND,
             "params": {
                 "taskId": task_id,
-                "idempotencyKey": "send-1",
-                "taskRevision": 1,
                 "message": { "text": "hello from protocol edge" }
             }
         })
         .to_string(),
     );
 
+    assert_eq!(
+        responses.len(),
+        1,
+        "the mutation response must not duplicate notifier events"
+    );
     let response = response(&responses[0]);
-    assert!(responses
-        .iter()
-        .skip(1)
-        .any(|line| serde_json::from_str::<Value>(line).unwrap()["method"] == "app/event"));
     assert_eq!(
         response["result"]["result"]["task"]["task"]["status"],
-        "running"
+        "starting"
     );
     assert_eq!(
         response["result"]["result"]["task"]["chat"]["items"][0]["parts"][0]["text"],
@@ -1666,10 +1777,20 @@ fn task_send_commits_user_message_and_active_turn_after_initialize() {
         .as_str()
         .unwrap()
         .starts_with("turn_"));
+    let committed = notifications
+        .recv_timeout(Duration::from_secs(1))
+        .expect("committed send notification");
+    let events = dispatcher.handle_task_update(committed);
+    assert!(events
+        .iter()
+        .any(|line| event_payload_kind(line, "taskNavigationChanged")));
     drop(dispatcher);
     let store = open_store_after_dispatcher_drop(temp.path());
     let record = store.read_task("task-existing").unwrap();
-    assert!(record.first_prompt_sent);
+    assert_eq!(
+        record.lifecycle,
+        crate::storage::records::TaskLifecycle::Visible
+    );
     assert!(record.agent_session_id.is_some());
     assert!(store.read_messages("task-existing").unwrap().len() >= 2);
 }
@@ -1692,7 +1813,9 @@ fn runtime_task_update_notification_emits_app_event_after_agent_completion() {
             "id": "subscribe",
             "method": STATE_SUBSCRIBE,
             "params": StateSubscribeParams {
-                scope: SubscriptionScope::TaskNavigation { project_id: None },
+                scope: SubscriptionScope::Task {
+                    task_id: TaskId::from("task-existing"),
+                },
             }
         })
         .to_string(),
@@ -1704,8 +1827,6 @@ fn runtime_task_update_notification_emits_app_event_after_agent_completion() {
             "method": TASK_SEND,
             "params": {
                 "taskId": task_id,
-                "idempotencyKey": "send-1",
-                "taskRevision": 1,
                 "message": { "text": "hello from protocol edge" }
             }
         })
@@ -1729,11 +1850,13 @@ fn runtime_task_update_notification_emits_app_event_after_agent_completion() {
 }
 
 #[test]
-fn task_update_notification_emits_full_snapshot_for_task_subscribers() {
+fn task_update_notification_emits_focused_task_and_navigation_changes() {
     let temp = tempfile::TempDir::new().expect("temp dir");
+    let record = task_record("task-existing");
+    let navigation_task = crate::snapshots::project_task_summary(record.clone());
     {
         let store = Store::open(temp.path().to_path_buf()).unwrap();
-        store.write_task(&task_record("task-existing")).unwrap();
+        store.write_task(&record).unwrap();
     }
     let state_root = StateRoot::resolve(temp.path()).expect("state root");
     let mut dispatcher = ProtocolEdgeStdioDispatcher::new_for_test(state_root);
@@ -1764,16 +1887,25 @@ fn task_update_notification_emits_full_snapshot_for_task_subscribers() {
     let messages = dispatcher.handle_task_update(TaskUpdate {
         task_id: "task-existing".to_string(),
         revision: 2,
-        delta: None,
-        history_sync: None,
+        kind: crate::task_events::TaskUpdateKind::Changed(Box::new(
+            crate::task_events::CommittedTaskChange {
+                changes: openaide_app_server_protocol::events::TaskChanges::default(),
+                tool_details: Vec::new(),
+                navigation: Some(
+                    openaide_app_server_protocol::events::TaskNavigationChange::Upsert {
+                        task: navigation_task,
+                    },
+                ),
+            },
+        )),
     });
 
     assert!(messages
         .iter()
-        .any(|line| event_payload_kind(line, "taskUpdated")));
-    assert!(messages
+        .any(|line| event_payload_kind(line, "taskNavigationChanged")));
+    assert!(!messages
         .iter()
-        .any(|line| event_payload_kind(line, "taskSnapshotUpdated")));
+        .any(|line| event_payload_kind(line, "projectCollectionUpdated")));
 }
 
 #[test]
@@ -1807,8 +1939,6 @@ fn runtime_permission_request_round_trips_over_server_request_stdio() {
             "method": TASK_SEND,
             "params": {
                 "taskId": "task-existing",
-                "idempotencyKey": "send-permission",
-                "taskRevision": 1,
                 "message": { "text": "please request permission" }
             }
         })
@@ -1837,7 +1967,7 @@ fn runtime_permission_request_round_trips_over_server_request_stdio() {
     assert!(updates.iter().any(|line| {
         let value = response(line);
         value["method"] == "app/event"
-            && value["params"]["payload"]["kind"] == "taskSnapshotUpdated"
+            && value["params"]["payload"]["kind"] == "taskRequestsUpdated"
     }));
 
     wait_for_protocol_task_status(&mut dispatcher, &notifications, "task-existing", "idle");
@@ -1848,18 +1978,22 @@ fn runtime_permission_request_round_trips_over_server_request_stdio() {
         .unwrap()
         .into_iter()
         .find_map(|message| match message.chat.message {
-            NormalizedMessage::Permission {
-                app_server_request_id,
-                selected_option,
-                decision,
-                ..
-            } => Some((app_server_request_id, selected_option, decision)),
+            NormalizedMessage::Activity { steps, .. } => steps.into_iter().find_map(|step| {
+                let ActivityStep::Tool {
+                    permission_outcomes,
+                    ..
+                } = step
+                else {
+                    return None;
+                };
+                permission_outcomes.into_iter().next()
+            }),
             _ => None,
         })
-        .expect("permission message");
-    assert_eq!(permission.0.as_deref(), Some("server-request-1"));
-    assert_eq!(permission.1, Some(option_id));
-    assert_eq!(permission.2, Some(PermissionDecision::Approved));
+        .expect("tool permission outcome");
+    assert_eq!(permission.request_id, "server-request-1");
+    assert_eq!(permission.option_id, Some(option_id));
+    assert_eq!(permission.decision, ToolPermissionDecision::Approved);
 }
 
 #[test]
@@ -1893,8 +2027,6 @@ fn runtime_permission_request_reject_option_persists_denied_decision() {
             "method": TASK_SEND,
             "params": {
                 "taskId": "task-existing",
-                "idempotencyKey": "send-permission-deny",
-                "taskRevision": 1,
                 "message": { "text": "please request permission" }
             }
         })
@@ -1923,18 +2055,22 @@ fn runtime_permission_request_reject_option_persists_denied_decision() {
         .unwrap()
         .into_iter()
         .find_map(|message| match message.chat.message {
-            NormalizedMessage::Permission {
-                app_server_request_id,
-                selected_option,
-                decision,
-                ..
-            } => Some((app_server_request_id, selected_option, decision)),
+            NormalizedMessage::Activity { steps, .. } => steps.into_iter().find_map(|step| {
+                let ActivityStep::Tool {
+                    permission_outcomes,
+                    ..
+                } = step
+                else {
+                    return None;
+                };
+                permission_outcomes.into_iter().next()
+            }),
             _ => None,
         })
-        .expect("permission message");
-    assert_eq!(permission.0.as_deref(), Some("server-request-1"));
-    assert_eq!(permission.1, Some(option_id));
-    assert_eq!(permission.2, Some(PermissionDecision::Denied));
+        .expect("tool permission outcome");
+    assert_eq!(permission.request_id, "server-request-1");
+    assert_eq!(permission.option_id, Some(option_id));
+    assert_eq!(permission.decision, ToolPermissionDecision::Rejected);
 }
 
 #[test]
@@ -2022,8 +2158,6 @@ fn attachment_file_browser_creates_handle_used_by_task_send() {
             "method": TASK_SEND,
             "params": {
                 "taskId": task_id,
-                "idempotencyKey": "send-with-attachment",
-                "taskRevision": 1,
                 "message": {
                     "text": "Use this context",
                     "attachments": [handle_id]
@@ -2045,16 +2179,17 @@ fn attachment_file_browser_creates_handle_used_by_task_send() {
         &json!({
             "jsonrpc": "2.0",
             "id": "release-attachment",
-            "method": ATTACHMENT_RELEASE_HANDLES,
-            "params": { "taskId": task_id, "handles": [handle_id] }
+            "method": ATTACHMENT_RELEASE,
+            "params": {
+                "taskId": task_id,
+                "resources": [{ "kind": "handle", "id": handle_id }]
+            }
         })
         .to_string(),
     );
-    assert!(
-        response(&released[0])["result"]["result"]["releasedHandles"]
-            .as_array()
-            .unwrap()
-            .is_empty()
+    assert_eq!(
+        response(&released[0])["result"]["result"]["outcomes"][0]["status"],
+        "noOp"
     );
 }
 
@@ -2217,13 +2352,20 @@ fn task_discard_hides_empty_pre_send_task_after_initialize() {
     let temp = tempfile::TempDir::new().expect("temp dir");
     {
         let store = Store::open(temp.path().to_path_buf()).unwrap();
-        store.write_task(&task_record("task-draft")).unwrap();
+        let mut draft = task_record("task-draft");
+        draft.lifecycle = crate::storage::records::TaskLifecycle::New {
+            owner_client_instance_id: openaide_app_server_protocol::ids::ClientInstanceId::from(
+                "client-1",
+            ),
+        };
+        store.write_task(&draft).unwrap();
         let mut existing = task_record("task-existing");
-        existing.first_prompt_sent = true;
+        existing.lifecycle = crate::storage::records::TaskLifecycle::Visible;
         store.write_task(&existing).unwrap();
     }
     let state_root = StateRoot::resolve(temp.path()).expect("state root");
     let mut dispatcher = ProtocolEdgeStdioDispatcher::new_for_test(state_root);
+    let notifications = dispatcher.take_task_updates().expect("task updates");
     dispatcher.handle_line(&init_request("1", "client-1"));
     dispatcher.handle_line(
         &json!({
@@ -2252,15 +2394,13 @@ fn task_discard_hides_empty_pre_send_task_after_initialize() {
         response["result"]["result"]["discardedTaskId"],
         "task-draft"
     );
-    let tasks = response["result"]["result"]["tasks"]["tasks"]
-        .as_array()
-        .expect("tasks");
-    assert_eq!(tasks.len(), 1);
-    assert!(tasks.iter().any(|task| task["taskId"] == "task-existing"));
-    assert!(responses
-        .iter()
-        .skip(1)
-        .any(|line| serde_json::from_str::<Value>(line).unwrap()["method"] == "app/event"));
+    assert!(response["result"]["result"].get("tasks").is_none());
+    assert_eq!(responses.len(), 1);
+    let committed = notifications
+        .recv_timeout(Duration::from_secs(1))
+        .expect("task discard notification");
+    // New Tasks are private and were never present in Task Navigation.
+    assert!(dispatcher.handle_task_update(committed).is_empty());
     drop(dispatcher);
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     assert!(store.read_task("task-draft").unwrap().tombstoned);
@@ -2292,13 +2432,21 @@ fn task_set_archived_moves_task_between_navigation_lists() {
         "task-active"
     );
     assert_eq!(archive_response["result"]["result"]["archived"], true);
-    assert_eq!(
-        archive_response["result"]["result"]["tasks"]["tasks"]
-            .as_array()
-            .expect("active tasks after archive")
-            .len(),
-        0
+    assert!(archive_response["result"]["result"].get("tasks").is_none());
+
+    let active = dispatcher.handle_line(
+        &json!({
+            "jsonrpc": "2.0",
+            "id": "list-active",
+            "method": TASK_LIST,
+            "params": { "archived": false }
+        })
+        .to_string(),
     );
+    assert!(response(&active[0])["result"]["result"]["tasks"]
+        .as_array()
+        .expect("active tasks after archive")
+        .is_empty());
 
     let archived = dispatcher.handle_line(
         &json!({
@@ -2318,17 +2466,29 @@ fn task_set_archived_moves_task_between_navigation_lists() {
 
 #[test]
 fn task_discard_keeps_the_configured_project_after_its_last_task() {
+    let workspace_root = "/workspace/configured-project";
     let temp = tempfile::TempDir::new().expect("temp dir");
     {
         let store = Store::open(temp.path().to_path_buf()).unwrap();
         let mut draft = task_record("task-draft");
-        draft.workspace_root = "/workspace/draft-only".to_string();
+        draft.workspace_root = workspace_root.to_string();
+        draft.lifecycle = crate::storage::records::TaskLifecycle::New {
+            owner_client_instance_id: openaide_app_server_protocol::ids::ClientInstanceId::from(
+                "client-1",
+            ),
+        };
         store.write_task(&draft).unwrap();
     }
     let state_root = StateRoot::resolve(temp.path()).expect("state root");
-    let mut dispatcher = ProtocolEdgeStdioDispatcher::new_for_test(state_root);
+    let configured_projects =
+        ConfiguredProjectRoots::from_workspace_roots([workspace_root.to_string()]);
+    let mut dispatcher = ProtocolEdgeStdioDispatcher::new_for_test_with_configured_projects(
+        state_root,
+        configured_projects,
+    );
+    let notifications = dispatcher.take_task_updates().expect("task updates");
     dispatcher.handle_line(&init_request("1", "client-1"));
-    dispatcher.handle_line(
+    let subscription = dispatcher.handle_line(
         &json!({
             "jsonrpc": "2.0",
             "id": "subscribe-projects",
@@ -2336,6 +2496,14 @@ fn task_discard_keeps_the_configured_project_after_its_last_task() {
             "params": StateSubscribeParams { scope: SubscriptionScope::Projects }
         })
         .to_string(),
+    );
+    let project_snapshot = response(&subscription[0]);
+    assert_eq!(
+        project_snapshot["result"]["result"]["snapshot"]["projects"]["projects"],
+        json!([{
+            "projectId": project_id_for_workspace(workspace_root),
+            "label": "configured-project",
+        }])
     );
 
     let responses = dispatcher.handle_line(
@@ -2348,15 +2516,11 @@ fn task_discard_keeps_the_configured_project_after_its_last_task() {
         .to_string(),
     );
 
-    let event = app_event_payload(&responses, "projectCollectionUpdated")
-        .expect("project collection update");
-    assert_eq!(
-        event["projects"]["projects"]
-            .as_array()
-            .expect("projects")
-            .len(),
-        1
-    );
+    assert_eq!(responses.len(), 1);
+    let committed = notifications
+        .recv_timeout(Duration::from_secs(1))
+        .expect("task discard notification");
+    assert!(dispatcher.handle_task_update(committed).is_empty());
 }
 
 #[test]
@@ -2490,8 +2654,10 @@ fn notifications_do_not_emit_responses() {
 fn task_record(task_id: &str) -> TaskRecord {
     TaskRecord {
         task_id: task_id.to_string(),
-        title: "Task".to_string(),
-        agent_title: None,
+        title: crate::storage::records::TaskTitle::new(
+            "Task",
+            crate::storage::records::TaskTitleSource::User,
+        ),
         status: TaskStatus::Inactive,
         task_version: 1,
         message_history_version: 0,
@@ -2503,7 +2669,7 @@ fn task_record(task_id: &str) -> TaskRecord {
         agent_name: "Codex".to_string(),
         isolation: IsolationKind::Local,
         workspace_root: "/workspace/a".to_string(),
-        first_prompt_sent: false,
+        lifecycle: crate::storage::records::TaskLifecycle::Visible,
         agent_session_id: None,
         active_turn_id: None,
         archived: false,
@@ -2511,6 +2677,7 @@ fn task_record(task_id: &str) -> TaskRecord {
         revision: 1,
         config_options: Default::default(),
         config_options_catalog: None,
+        config_mutation: Default::default(),
         agent_commands_catalog: None,
         model_id: None,
         preparation: TaskPreparationRecord::Ready,
@@ -2556,21 +2723,14 @@ fn open_store_after_dispatcher_drop(path: &std::path::Path) -> Store {
 fn completed_task_event(line: &str) -> bool {
     let value = serde_json::from_str::<Value>(line).expect("event json");
     value["method"] == "app/event"
-        && value["params"]["payload"]["task"]["taskId"] == "task-existing"
-        && value["params"]["payload"]["task"]["status"] != "running"
+        && value["params"]["payload"]["kind"] == "taskChanged"
+        && value["params"]["payload"]["taskId"] == "task-existing"
+        && value["params"]["payload"]["changes"]["task"]["status"] == "idle"
 }
 
 fn event_payload_kind(line: &str, kind: &str) -> bool {
     let value = response(line);
     value["method"] == "app/event" && value["params"]["payload"]["kind"] == kind
-}
-
-fn app_event_payload(lines: &[String], kind: &str) -> Option<Value> {
-    lines.iter().skip(1).find_map(|line| {
-        let value = serde_json::from_str::<Value>(line).ok()?;
-        (value["method"] == "app/event" && value["params"]["payload"]["kind"] == kind)
-            .then(|| value["params"]["payload"].clone())
-    })
 }
 
 fn wait_for_server_request(

@@ -35,6 +35,9 @@ fn initialize_params_use_typed_method_shape() {
             protocol: vec![ClientProtocolCapability::StableClientRequestIds],
             shell: vec![ShellCapability::RevealFile],
         },
+        workspace_roots: vec![ClientWorkspaceRoot {
+            path: "/workspace/app".to_string(),
+        }],
     };
 
     let value = serde_json::to_value(params).unwrap();
@@ -47,4 +50,18 @@ fn initialize_params_use_typed_method_shape() {
         value["capabilities"]["protocol"],
         json!(["stableClientRequestIds"])
     );
+    assert_eq!(value["workspaceRoots"][0]["path"], json!("/workspace/app"));
+}
+
+#[test]
+fn capabilities_changed_distinguishes_omitted_roots_from_an_empty_replacement() {
+    let unchanged = serde_json::to_value(ClientCapabilitiesChangedParams::default()).unwrap();
+    let cleared = serde_json::to_value(ClientCapabilitiesChangedParams {
+        capabilities: None,
+        workspace_roots: Some(Vec::new()),
+    })
+    .unwrap();
+
+    assert!(unchanged.get("workspaceRoots").is_none());
+    assert_eq!(cleared["workspaceRoots"], json!([]));
 }

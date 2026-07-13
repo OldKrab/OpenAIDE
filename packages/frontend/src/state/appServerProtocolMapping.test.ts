@@ -10,6 +10,7 @@ import type {
   TaskSnapshot as ProtocolTaskSnapshot,
 } from "@openaide/app-server-client";
 import {
+  createProtocolTaskSnapshotMapper,
   mapProtocolConfigOptions,
   mapProtocolAgentCommands,
   mapProtocolTaskNavigation,
@@ -23,16 +24,22 @@ describe("App Server Protocol state mapping", () => {
       activeTaskId: "task-1" as TaskId,
       tasks: [
         protocolSummary({ taskId: "task-1" as TaskId, status: "running" }),
-        protocolSummary({ taskId: "task-2" as TaskId, status: "blocked", unread: true }),
+        protocolSummary({ taskId: "task-2" as TaskId, status: "waiting", unread: true }),
       ],
     }, mappingContext())).toMatchObject({
       activeTaskId: "task-1",
       tasks: [
         { task_id: "task-1", status: "active", agent_id: "codex", agent_name: "Codex", workspace_root: "" },
-        { task_id: "task-2", status: "blocked", unread: true },
+        { task_id: "task-2", status: "waiting", unread: true },
       ],
       warnings: [],
       requiresNativeSurface: false,
+    });
+  });
+
+  it("keeps stopping distinct from running", () => {
+    expect(mapProtocolTaskSummary(protocolSummary({ status: "stopping" }))).toMatchObject({
+      status: "stopping",
     });
   });
 
@@ -64,13 +71,13 @@ describe("App Server Protocol state mapping", () => {
       tasks: [
         protocolSummary({
           taskId: "task-empty" as TaskId,
-          title: "New task",
+          title: { value: "New task", source: "user" },
           status: "idle",
           hasMessages: false,
         }),
         protocolSummary({
           taskId: "task-sent" as TaskId,
-          title: "Implement feature",
+          title: { value: "Implement feature", source: "user" },
           status: "running",
           hasMessages: true,
         }),
@@ -79,6 +86,16 @@ describe("App Server Protocol state mapping", () => {
 
     expect(mapping.tasks.map((task) => task.task_id)).toEqual(["task-sent"]);
     expect(mapping.activeTaskId).toBe("task-sent");
+  });
+
+  it("uses lifecycle-specific presentation titles when App Server has no title", () => {
+    expect(mapProtocolTaskSummary(protocolSummary({ title: null })).title).toBe("Untitled task");
+    const newTask = mapProtocolTaskSnapshot(protocolSnapshot({
+      lifecycle: "new",
+      task: protocolSummary({ title: null }),
+    })).snapshot;
+    expect(newTask.task.title).toBe("New task");
+    expect(newTask.lifecycle).toBe("new");
   });
 
   it("maps task snapshots into current frontend task snapshots", () => {
@@ -110,7 +127,12 @@ describe("App Server Protocol state mapping", () => {
         created_at: "2026-06-27T12:00:00.000Z",
         attachments: [{ kind: "file", label: "README.md" }],
       },
-      { kind: "agent_text", text: "world", created_at: "2026-06-27T12:00:00.000Z", streaming: true },
+      {
+        kind: "agent_message",
+        role: "agent",
+        parts: [{ kind: "text", text: "world" }],
+        created_at: "2026-06-27T12:00:00.000Z",
+      },
       {
         kind: "activity",
         title: "Running tests",
@@ -131,9 +153,31 @@ describe("App Server Protocol state mapping", () => {
       },
     ]);
     expect(snapshot.settings_summary.config_options).toEqual({ model: "gpt-5" });
-    expect(snapshot.send_capability).toEqual({ state: "ready", attachment_only: true });
+    expect(snapshot.send_capability).toEqual({ state: "ready" });
     expect(mapping.warnings).toEqual([]);
     expect(mapping.requiresNativeSurface).toBe(false);
+  });
+
+  it("preserves unchanged Chat row identity across focused text updates", () => {
+    const mapSnapshot = createProtocolTaskSnapshotMapper();
+    const initial = protocolSnapshot();
+    const first = mapSnapshot(initial, mappingContext()).snapshot;
+    const updatedAgent = {
+      ...initial.chat.items[1]!,
+      parts: [{ kind: "text" as const, text: "world continued" }],
+    };
+    const second = mapSnapshot({
+      ...initial,
+      revision: initial.revision + 1,
+      chat: {
+        ...initial.chat,
+        items: [initial.chat.items[0]!, updatedAgent, initial.chat.items[2]!],
+      },
+    }, mappingContext()).snapshot;
+
+    expect(second.chat.items[0]).toBe(first.chat.items[0]);
+    expect(second.chat.items[1]).not.toBe(first.chat.items[1]);
+    expect(second.chat.items[2]).toBe(first.chat.items[2]);
   });
 
   it("keeps the ACP tool title as the visible fallback when tool input is absent", () => {
@@ -151,7 +195,7 @@ describe("App Server Protocol state mapping", () => {
                 kind: "activity",
                 title: "Search for 'activityLabels' in frontend",
                 status: "completed",
-                steps: [{ kind: "tool", name: "search", status: "completed" }],
+                steps: [{ kind: "tool", name: "search", status: "completed", permissionOutcomes: [] }],
               },
             ],
           },
@@ -231,6 +275,115 @@ describe("App Server Protocol state mapping", () => {
     });
   });
 
+  it("maps typed Agent content without exposing protocol objects", () => {
+    const mapping = mapProtocolTaskSnapshot(protocolSnapshot({
+      chat: {
+        hasMoreBefore: false,
+        hasMessages: true,
+        items: [
+          {
+            messageId: "agent-image" as MessageId,
+            role: "agent",
+            status: "complete",
+            parts: [{
+              kind: "image",
+              mediaType: "image/png",
+              dataUrl: "data:image/png;base64,aW1hZ2U=",
+              uri: "memory://diagram.png",
+            }],
+          },
+          {
+            messageId: "agent-resource" as MessageId,
+            role: "agent",
+            status: "complete",
+            parts: [{
+              kind: "resource",
+              uri: "memory://notes.txt",
+              mediaType: "text/plain",
+              text: "Embedded notes",
+            }],
+          },
+          {
+            messageId: "agent-audio" as MessageId,
+            role: "agent",
+            status: "complete",
+            parts: [{ kind: "unsupported", contentType: "audio", mediaType: "audio/wav" }],
+          },
+        ],
+      },
+    }));
+
+    expect(mapping.snapshot.chat.items.map((item) => item.message)).toMatchObject([
+      {
+        kind: "agent_message",
+        role: "agent",
+        parts: [{
+          kind: "image",
+          media_type: "image/png",
+          data_url: "data:image/png;base64,aW1hZ2U=",
+          uri: "memory://diagram.png",
+        }],
+      },
+      {
+        kind: "agent_message",
+        role: "agent",
+        parts: [{
+          kind: "resource",
+          uri: "memory://notes.txt",
+          media_type: "text/plain",
+          text: "Embedded notes",
+        }],
+      },
+      {
+        kind: "agent_message",
+        role: "agent",
+        parts: [{ kind: "unsupported", content_type: "audio", media_type: "audio/wav" }],
+      },
+    ]);
+  });
+
+  it("keeps every ordered part of one mixed Agent message", () => {
+    const mapping = mapProtocolTaskSnapshot(protocolSnapshot({
+      chat: {
+        hasMoreBefore: false,
+        hasMessages: true,
+        items: [{
+          messageId: "agent-mixed" as MessageId,
+          role: "agent",
+          status: "complete",
+          parts: [
+            { kind: "text", text: "Before" },
+            { kind: "resource", uri: "memory://result.txt", text: "Result" },
+            { kind: "text", text: "After" },
+            { kind: "unsupported", contentType: "audio", mediaType: "audio/wav" },
+          ],
+        }],
+      },
+    }));
+
+    expect(mapping.snapshot.chat.items[0]?.message).toEqual({
+      kind: "agent_message",
+      id: "agent-mixed",
+      role: "agent",
+      parts: [
+        { kind: "text", text: "Before" },
+        {
+          kind: "resource",
+          uri: "memory://result.txt",
+          name: undefined,
+          title: undefined,
+          description: undefined,
+          media_type: undefined,
+          size_bytes: undefined,
+          text: "Result",
+        },
+        { kind: "text", text: "After" },
+        { kind: "unsupported", content_type: "audio", media_type: "audio/wav", uri: undefined },
+      ],
+      created_at: "2026-06-27T12:00:00.000Z",
+    });
+  });
+
   it("maps task status and config options conservatively", () => {
     expect(mapProtocolTaskSummary(protocolSummary({ status: "idle" }))).toMatchObject({ status: "inactive" });
     expect(mapProtocolTaskSummary(protocolSummary({ status: "interrupted" }))).toMatchObject({ status: "failed" });
@@ -241,11 +394,27 @@ describe("App Server Protocol state mapping", () => {
     });
   });
 
-  it("does not expose Agent controls without live Native Session data", () => {
+  it("preserves unavailable and pending Configuration Option state", () => {
     expect(mapProtocolConfigOptions({ state: "unavailable" }, "codex")).toEqual({
       agent_id: "codex",
-      status: "empty",
+      status: "unavailable",
       options: [],
+    });
+    expect(mapProtocolConfigOptions({
+      ...protocolSnapshot().agentConfig,
+      state: "stale",
+      pendingChange: {
+        clientMutationId: "mutation-1" as never,
+        configId: "model" as never,
+        requestedValue: "gpt-5.1",
+      },
+    }, "codex")).toMatchObject({
+      status: "stale",
+      pending_change: {
+        mutation_id: "mutation-1",
+        option_id: "model",
+        requested_value: "gpt-5.1",
+      },
     });
     expect(mapProtocolAgentCommands({ state: "unavailable" }, "codex")).toBeUndefined();
   });
@@ -264,9 +433,12 @@ describe("App Server Protocol state mapping", () => {
       },
     }));
 
-    expect(mapping.snapshot.chat.items).toEqual([]);
+    expect(mapping.snapshot.chat.items.map((item) => item.message.kind)).not.toContain("permission");
     expect(mapping.snapshot.task.status).toBe("active");
-    expect(mapping.snapshot.send_capability.state).toBe("loading");
+    expect(mapping.snapshot.send_capability).toEqual({
+      state: "loading",
+      blockers: [{ kind: "taskPreparing", message: "Task Agent preparation is still running" }],
+    });
   });
 
   it("keeps lossy App Server-only state visible and reported", () => {
@@ -291,17 +463,12 @@ describe("App Server Protocol state mapping", () => {
       ],
     }));
 
-    expect(mapping.snapshot.task.status).toBe("blocked");
+    expect(mapping.snapshot.task.status).toBe("waiting");
     expect(mapping.snapshot.chat.items.map((item) => item.message)).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           kind: "interruption",
           message: "Sign in",
-          recoverable: true,
-        }),
-        expect.objectContaining({
-          kind: "interruption",
-          message: "Allow command? needs the App Server request surface.",
           recoverable: true,
         }),
         expect.objectContaining({
@@ -312,6 +479,7 @@ describe("App Server Protocol state mapping", () => {
       ]),
     );
     expect(mapping.snapshot.chat.items.map((item) => item.message.kind)).not.toContain("permission");
+    expect(mapping.snapshot.active_requests).toEqual([]);
     expect(mapping.warnings).toEqual(
       expect.arrayContaining([
         { kind: "pendingRequestsNeedNativeSurface", requestIds: ["request-1"] },
@@ -347,7 +515,7 @@ describe("App Server Protocol state mapping", () => {
       ],
     }));
 
-    expect(mapping.snapshot.chat.items.map((item) => item.message)).toEqual(
+    expect(mapping.snapshot.active_requests.map((item) => item.message)).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           kind: "permission",
@@ -366,6 +534,7 @@ describe("App Server Protocol state mapping", () => {
         }),
       ]),
     );
+    expect(mapping.snapshot.chat.items.map((item) => item.message.kind)).not.toContain("permission");
     expect(mapping.snapshot.chat.items.map((item) => item.message.kind)).not.toContain("interruption");
     expect(mapping.warnings).not.toEqual(
       expect.arrayContaining([{ kind: "pendingRequestsNeedNativeSurface", requestIds: ["request-1"] }]),
@@ -373,28 +542,33 @@ describe("App Server Protocol state mapping", () => {
     expect(mapping.requiresNativeSurface).toBe(false);
   });
 
-  it("maps saved resolved permission message parts to permission history cards", () => {
+  it("maps saved permission outcomes onto their tool activity", () => {
     const mapping = mapProtocolTaskSnapshot(protocolSnapshot({
       chat: {
         hasMessages: true,
         items: [
           {
-            messageId: "permission-1" as MessageId,
+            messageId: "activity-1" as MessageId,
             role: "system",
             status: "complete",
             parts: [
               {
-                kind: "permission",
-                requestId: "agent-permission-1" as RequestId,
-                appServerRequestId: "server-request-1" as RequestId,
+                kind: "activity",
                 title: "Tool call",
-                toolCall: { id: "call-1", title: "Tool call", kind: "execute" },
-                state: "resolved",
-                options: [
-                  { optionId: "allow_once", name: "Allow Once", kind: "allow" },
-                  { optionId: "reject_once", name: "Reject", kind: "deny" },
-                ],
-                decision: "denied",
+                status: "completed",
+                steps: [{
+                  kind: "tool",
+                  toolCallId: "call-1",
+                  name: "execute",
+                  status: "completed",
+                  permissionOutcomes: [{
+                    requestId: "server-request-1" as RequestId,
+                    decision: "rejected",
+                    optionId: "reject_once",
+                    optionLabel: "Reject",
+                    resolvedAt: "2026-01-01T00:00:02.000Z",
+                  }],
+                }],
               },
             ],
           },
@@ -403,17 +577,20 @@ describe("App Server Protocol state mapping", () => {
     }));
 
     expect(mapping.snapshot.chat.items[0].message).toMatchObject({
-      kind: "permission",
-      request_id: "agent-permission-1",
-      app_server_request_id: "server-request-1",
+      kind: "activity",
       title: "Tool call",
-      tool_call: { id: "call-1", title: "Tool call", kind: "execute" },
-      state: "resolved",
-      decision: "denied",
-      options: [
-        { id: "allow_once", label: "Allow Once", kind: "allow" },
-        { id: "reject_once", label: "Reject", kind: "deny" },
-      ],
+      steps: [{
+        kind: "tool",
+        tool_call_id: "call-1",
+        status: "completed",
+        permission_outcomes: [{
+          request_id: "server-request-1",
+          decision: "rejected",
+          option_id: "reject_once",
+          option_label: "Reject",
+          resolved_at: "2026-01-01T00:00:02.000Z",
+        }],
+      }],
     });
   });
 
@@ -450,17 +627,6 @@ describe("App Server Protocol state mapping", () => {
             action: "submit",
             content: { scope: "form" },
           }],
-        }, {
-          messageId: "question-pending-message" as MessageId,
-          role: "system",
-          status: "complete",
-          parts: [{
-            kind: "question",
-            requestId: "question-pending" as RequestId,
-            message: "Choose a scope.",
-            fields: [{ kind: "string", key: "name", title: "Name", required: true }],
-            state: "pending",
-          }],
         }],
       },
     }));
@@ -472,17 +638,19 @@ describe("App Server Protocol state mapping", () => {
         state: "resolved",
         answers: [{ field_id: "scope", label: "Scope", value: "Form only" }],
       }),
+    ]));
+    expect(mapping.snapshot.active_requests.map((item) => item.message)).toEqual([
       expect.objectContaining({
         kind: "elicitation",
         request_id: "question-pending",
         app_server_request_id: "question-pending",
         state: "pending",
       }),
-    ]));
+    ]);
     expect(mapping.warnings).not.toEqual(
       expect.arrayContaining([{ kind: "pendingRequestsNeedNativeSurface", requestIds: ["question-pending"] }]),
     );
-    expect(mapping.snapshot.chat.items.filter((item) => (
+    expect(mapping.snapshot.active_requests.filter((item) => (
       item.message.kind === "elicitation" && item.message.request_id === "question-pending"
     ))).toHaveLength(1);
   });
@@ -548,6 +716,9 @@ describe("App Server Protocol state mapping", () => {
     }));
 
     expect(mapping.snapshot.task.status).toBe("active");
+    expect(mapping.snapshot.send_capability.blockers).toEqual([
+      { kind: "taskRunning", message: "Task is already running" },
+    ]);
     expect(mapping.snapshot.chat.items.map((item) => item.message)).not.toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -560,11 +731,31 @@ describe("App Server Protocol state mapping", () => {
       expect.arrayContaining([{ kind: "sendCapabilityNeedsNativeSurface", state: "blocked" }]),
     );
   });
+
+  it("does not render the normal starting-state send blocker in Chat", () => {
+    const mapping = mapProtocolTaskSnapshot(protocolSnapshot({
+      task: protocolSummary({ status: "starting" }),
+      sendCapability: { state: "blocked", blockers: [{ kind: "taskRunning", message: "Task is already running" }] },
+    }));
+
+    expect(mapping.snapshot.send_capability.blockers).toEqual([
+      { kind: "taskRunning", message: "Task is already running" },
+    ]);
+    expect(mapping.snapshot.chat.items.map((item) => item.message)).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "interruption",
+          message: "Task is already running",
+        }),
+      ]),
+    );
+  });
 });
 
 function protocolSnapshot(overrides: Partial<ProtocolTaskSnapshot> = {}): ProtocolTaskSnapshot {
   return {
     task: protocolSummary({ status: "preparing" }),
+    lifecycle: "visible",
     revision: 7,
     preparation: { kind: "ready" },
     agentConfig: {
@@ -581,7 +772,7 @@ function protocolSnapshot(overrides: Partial<ProtocolTaskSnapshot> = {}): Protoc
       ],
     },
     agentCommands: { state: "ready", commands: [] },
-    sendCapability: { state: "ready", attachmentOnly: true },
+    sendCapability: { state: "ready" },
     historySync: { state: "idle", generation: 0 },
     chat: {
       hasMoreBefore: true,
@@ -635,6 +826,7 @@ function protocolSnapshot(overrides: Partial<ProtocolTaskSnapshot> = {}): Protoc
                   status: "completed",
                   inputSummary: "Editing files",
                   detailArtifactId: "artifact_1",
+                  permissionOutcomes: [],
                 },
               ],
             },
@@ -651,7 +843,7 @@ function protocolSummary(overrides: Partial<ProtocolTaskSummary> = {}): Protocol
     taskId: "task-1" as TaskId,
     projectId: "project-1" as ProjectId,
     agentId: "codex" as AgentId,
-    title: "Task",
+    title: { value: "Task", source: "user" },
     status: "idle" as const,
     updatedAt: "2026-06-27T12:00:00.000Z",
     lastActivity: "2026-06-27T12:00:00.000Z",

@@ -7,8 +7,10 @@ import {
   type SetStateAction,
 } from "react";
 import type { AppPreferencesRecord } from "@openaide/app-shell-contracts";
-import type { BackendConnection, TaskId } from "@openaide/app-server-client";
-import { requestMissingInitialTaskList, requestTaskOpen } from "../intents/taskReadIntents";
+import type {
+  BackendConnection,
+} from "@openaide/app-server-client";
+import { requestMissingInitialTaskList } from "../intents/taskReadIntents";
 import { refreshSettingsProjectionsThroughBackend } from "../intents/settingsProjectionIntents";
 import { startAppServerServerRequestBridge } from "../services/appServerServerRequests";
 import {
@@ -17,79 +19,158 @@ import {
   type StateSubscriptionMappingContext,
 } from "../services/appServerStateSubscriptions";
 import { initializeParamsForBootstrap, taskNavigationScopeForBootstrap } from "../services/backendInitialization";
-import { postHostMessage, subscribeHostMessages } from "../services/hostBridge";
+import {
+  openNewTaskSurface,
+  openSettingsSurface,
+  postHostMessage,
+  subscribeHostMessages,
+} from "../services/hostBridge";
 import { startHostMessageSession } from "../services/hostMessageSession";
-import { applyProtocolAgents } from "../state/appServerAgents";
+import { agentOptionsFromProtocol } from "../state/appServerAgents";
 import { actionsFromInitialSnapshot } from "../state/appServerInitialSnapshot";
-import type { AppAction, SnapshotIntent } from "../state/appReducer";
+import {
+  retainedNewTaskContextForInitialization,
+  type NewTaskContextIds,
+} from "../state/newTaskSelectionDefaults";
+import {
+  bindAppServerReplicaEpoch,
+  type AppAction,
+  type SnapshotIntent,
+} from "../state/appReducer";
 import type { AgentOption } from "../state/composerOptions";
 import { routeHostMessage } from "../state/hostMessageRouter";
 import type { WebviewBootstrap } from "../state/surfaceTypes";
 import type { AppState } from "../state/store";
+import {
+  navigationTargetForBootstrap,
+  type AsyncOperationOwner,
+} from "../state/asyncOperationOwner";
 import { postControllerStarted, postStartupRequests } from "./appControllerEffects";
-import type { AppControllerRefs } from "./appControllerRefs";
 import { dispatchStartupReadError, useRoutedBootstrap } from "./appControllerRouting";
+import {
+  replicaIdentityFromSnapshot,
+  useAppServerReplicaLifecycle,
+  type AppServerReplicaTransition,
+} from "./appServerReplicaLifecycle";
+import type { NewTaskController } from "./newTaskController";
+import { useNewTaskSubscription } from "./useNewTaskSubscription";
+import { useTaskRouteLifecycle } from "./useTaskRouteLifecycle";
+
+export type { AppServerReplicaTransition } from "./appServerReplicaLifecycle";
 
 export type AppControllerBackendConnection = Pick<
   BackendConnection,
   "initialize" | "request" | "respond" | "serverRequests" | "close"
-> & Partial<Pick<BackendConnection, "events" | "stateResets">>;
+> & Partial<Pick<BackendConnection, "events" | "eventStreamDisconnects" | "stateResets">>;
+
+export type BackendConnectionState =
+  | { status: "connecting" }
+  | { status: "ready" }
+  | { status: "reconnecting"; message: string }
+  | { status: "unavailable"; message: string };
 
 type BackendLifecycleOptions = {
+  asyncOperations: AsyncOperationOwner;
   backendConnection?: AppControllerBackendConnection;
   currentAgentId: RefObject<string>;
+  currentNewTaskContext: RefObject<NewTaskContextIds>;
   dispatch: Dispatch<AppAction>;
   initialBootstrap: WebviewBootstrap;
-  refs: AppControllerRefs;
+  newTaskController: NewTaskController;
+  newTaskId?: string;
+  onReplicaChanged?: (transition: AppServerReplicaTransition) => void;
   setAgents: Dispatch<SetStateAction<AgentOption[] | undefined>>;
   setPreferences: Dispatch<SetStateAction<AppPreferencesRecord>>;
   state: AppState;
 };
 
 export function useAppControllerBackendLifecycle({
+  asyncOperations,
   backendConnection,
   currentAgentId,
+  currentNewTaskContext,
   dispatch,
   initialBootstrap,
-  refs,
+  newTaskController,
+  newTaskId,
+  onReplicaChanged,
   setAgents,
   setPreferences,
   state,
 }: BackendLifecycleOptions) {
-  const { bootstrap, bootstrapRef } = useRoutedBootstrap(initialBootstrap, dispatch);
+  const operationOwner = asyncOperations;
+  const operationOwnerInitialized = useRef(false);
+  if (!operationOwnerInitialized.current) {
+    operationOwner.observeNavigation(
+      navigationTargetForBootstrap(initialBootstrap),
+      initialBootstrap.surface === "navigation" ? initialBootstrap.archived === true : undefined,
+    );
+    operationOwnerInitialized.current = true;
+  }
+  const { bootstrap, bootstrapRef } = useRoutedBootstrap(
+    initialBootstrap,
+    operationOwner,
+    dispatch,
+  );
   const [backendReady, setBackendReady] = useState(false);
+  const [backendConnectionState, setBackendConnectionState] = useState<BackendConnectionState>({
+    status: "connecting",
+  });
   const [backendStateGeneration, setBackendStateGeneration] = useState(0);
-  const [readyTaskSubscriptionKey, setReadyTaskSubscriptionKey] = useState<string | undefined>();
-  const [readyRouteOpenKey, setReadyRouteOpenKey] = useState<string | undefined>();
-  const [routeOpenSettlement, setRouteOpenSettlement] = useState(0);
-  const backendStateGenerationRef = useRef(0);
-  const backendInitialized = useRef(false);
-  const lastRequestedRouteTaskKey = useRef<string | undefined>(undefined);
-  const routeOpenInFlight = useRef<{ promise: Promise<void>; taskId: string } | undefined>(undefined);
-  const navigationGeneration = useRef(0);
-  const stateSubscriptionContext = useRef<StateSubscriptionMappingContext | undefined>(undefined);
   const {
-    latestNativeSessionSelection,
-    latestOptionsRequestKey,
-    latestSessionListRequestId,
-    nextSessionListRequestId,
-    snapshotRequests,
-  } = refs;
+    dispatchForCurrentReplica,
+    establishReplica,
+    replicaEpoch,
+    replicaEpochRef,
+    replicaIdentity,
+  } = useAppServerReplicaLifecycle(dispatch, onReplicaChanged);
+  const backendInitialized = useRef(false);
+  const routeOpenError = useRef<string | undefined>(undefined);
+  const stateSubscriptionContext = useRef<StateSubscriptionMappingContext | undefined>(undefined);
+  const failedSubscriptionBaselines = useRef(new Map<string, string>());
+  const pendingGlobalSubscriptionBaselines = useRef(new Set<string>());
 
   const createSnapshotRequestId = (taskId?: string, intent: SnapshotIntent = "refresh") => {
-    return snapshotRequests.current.create(taskId, intent);
+    return operationOwner.createSnapshotRequest(taskId, intent);
   };
   const acceptSnapshotRequest = (
     taskId: string,
     requestId: number | undefined,
     intent: SnapshotIntent,
-  ) => snapshotRequests.current.accept(taskId, requestId, intent).accepted;
-  const beginNavigationChange = (archived?: boolean) => {
-    navigationGeneration.current += 1;
-    snapshotRequests.current.beginNavigationChange(archived);
-    return navigationGeneration.current;
+  ) => operationOwner.acceptSnapshot(taskId, requestId, intent);
+  const markSubscriptionError = (key: string, error: unknown) => {
+    // Browser fetch errors vary by engine and are diagnostic detail, not product copy.
+    console.warn("App Server subscription refresh failed.", error);
+    const message = "App Server is temporarily unavailable.";
+    failedSubscriptionBaselines.current.set(key, message);
+    setBackendConnectionState({ status: "reconnecting", message });
   };
-  const currentNavigationGeneration = () => navigationGeneration.current;
+  const markGlobalSubscriptionLost = (key: string) => {
+    pendingGlobalSubscriptionBaselines.current.add(key);
+    setBackendReady(false);
+    setBackendConnectionState({
+      status: "reconnecting",
+      message: "Connection interrupted. Reconnecting automatically.",
+    });
+  };
+  const markSubscriptionReady = (key: string) => {
+    failedSubscriptionBaselines.current.delete(key);
+    pendingGlobalSubscriptionBaselines.current.delete(key);
+    const remainingMessage = [...failedSubscriptionBaselines.current.values()].at(-1);
+    if (remainingMessage) {
+      setBackendConnectionState({ status: "reconnecting", message: remainingMessage });
+      return;
+    }
+    if (routeOpenError.current) {
+      setBackendConnectionState({ status: "unavailable", message: routeOpenError.current });
+      return;
+    }
+    if (pendingGlobalSubscriptionBaselines.current.size > 0) return;
+    if (backendInitialized.current) {
+      setBackendReady(true);
+      setBackendConnectionState({ status: "ready" });
+    }
+  };
 
   useEffect(() => {
     if (initialBootstrap.surface === "invalid") return;
@@ -97,58 +178,78 @@ export function useAppControllerBackendLifecycle({
     const serverRequestBridge = backendConnection?.serverRequests
       ? startAppServerServerRequestBridge({
           backendConnection,
-          onPermissionRequest: (requestId, message, taskId) => {
-            dispatch({
-              type: "appServerPermission:received",
-              requestId,
-              message,
-              taskId,
-            });
-          },
-          onQuestionRequest: (requestId, message, taskId) => {
-            dispatch({
-              type: "appServerQuestion:received",
-              requestId,
-              message,
-              taskId,
-            });
-          },
+          onTaskRequest: (request) => dispatchForCurrentReplica({
+            type: "taskRequest:opened",
+            request,
+          }),
           postHostMessage,
         })
       : undefined;
     const stopSubscriptions: Array<() => void> = [];
-    const stopBackendStateResets = backendConnection?.stateResets?.(() => {
-      backendStateGenerationRef.current += 1;
-      setBackendStateGeneration(backendStateGenerationRef.current);
-      setReadyTaskSubscriptionKey(undefined);
-      setReadyRouteOpenKey(undefined);
+    const stopEventStreamDisconnects = backendConnection?.eventStreamDisconnects?.(() => {
+      pendingGlobalSubscriptionBaselines.current = new Set([
+        "projects",
+        "agents",
+        "task-navigation",
+      ]);
+      setBackendReady(false);
+      taskRouteLifecycle.reset();
+      setBackendConnectionState({
+        status: "reconnecting",
+        message: "Connection interrupted. Reconnecting automatically.",
+      });
     });
-    backendStateGenerationRef.current += 1;
-    setBackendStateGeneration(backendStateGenerationRef.current);
+    const stopBackendStateResets = backendConnection?.stateResets?.((reset) => {
+      const previousRootId = replicaIdentity.current?.stateRootId;
+      establishReplica(reset);
+      if (reset && stateSubscriptionContext.current) {
+        stateSubscriptionContext.current.stateRootId = reset.stateRootId;
+        if (previousRootId !== undefined && previousRootId !== reset.stateRootId) {
+          // Labels from another root are not valid fallbacks while replacement
+          // project/agent baselines are racing one another.
+          stateSubscriptionContext.current.projects = undefined;
+          stateSubscriptionContext.current.agents = undefined;
+          stateSubscriptionContext.current.taskNavigation = undefined;
+        }
+      }
+      setBackendStateGeneration((generation) => generation + 1);
+      if (backendConnection?.events) {
+        pendingGlobalSubscriptionBaselines.current = new Set([
+          "projects",
+          "agents",
+          "task-navigation",
+        ]);
+        setBackendReady(false);
+      }
+      taskRouteLifecycle.reset();
+      setBackendConnectionState({
+        status: "reconnecting",
+        message: "Connection interrupted. Reconnecting automatically.",
+      });
+    });
+    setBackendStateGeneration((generation) => generation + 1);
     backendInitialized.current = false;
+    failedSubscriptionBaselines.current.clear();
+    pendingGlobalSubscriptionBaselines.current.clear();
+    routeOpenError.current = undefined;
     setBackendReady(false);
-    setReadyTaskSubscriptionKey(undefined);
-    setReadyRouteOpenKey(undefined);
+    setBackendConnectionState({ status: "connecting" });
+    taskRouteLifecycle.reset();
     if (initialBootstrap.surface === "navigation") {
       const archived = initialBootstrap.archived === true;
-      beginNavigationChange(archived);
       dispatch({ type: "archive:set", showArchived: archived });
     }
-    const startupNavigationGeneration = navigationGeneration.current;
+    const startupOperation = operationOwner.claim("startup");
     postControllerStarted(postHostMessage, initialBootstrap);
     const stopSession = startHostMessageSession(subscribeHostMessages, (message) => {
       if (serverRequestBridge?.handleHostMessage(message)) return;
       routeHostMessage(message, {
         bootstrap: bootstrapRef.current,
-        dispatch,
+        dispatch: dispatchForCurrentReplica,
+        openNewTaskSurface,
+        openSettingsSurface,
         setAgents,
         setPreferences,
-        snapshotRequests,
-        latestOptionsRequestKey,
-        latestSessionListRequestId,
-        nextSessionListRequestId,
-        latestNativeSessionSelection,
-        createSnapshotRequestId,
         postHostMessage,
       });
     }, () => {
@@ -157,23 +258,35 @@ export function useAppControllerBackendLifecycle({
           .initialize(initializeParamsForBootstrap(initialBootstrap))
           .then((result) => {
             if (!active) return;
-            dispatch({ type: "appServer:ready" });
+            const initializedReplicaEpoch = establishReplica(replicaIdentityFromSnapshot(result.snapshot));
+            const initializedDispatch = bindAppServerReplicaEpoch(dispatch, initializedReplicaEpoch);
+            initializedDispatch({ type: "appServer:ready" });
             const canApplyStartupNavigation = initialBootstrap.surface !== "navigation"
-              || (navigationGeneration.current === startupNavigationGeneration
-                && !snapshotRequests.current.currentArchived());
+              || (operationOwner.owns(startupOperation) && !operationOwner.currentArchived());
             const ingestion = actionsFromInitialSnapshot(result.snapshot, {
               includeTaskNavigation: canApplyStartupNavigation,
               includeActiveTask: initialBootstrap.surface === "task",
+              retainedNewTaskContext: retainedNewTaskContextForInitialization(
+                result.snapshot,
+                currentNewTaskContext.current,
+              ),
             });
             const subscriptionContext = mappingContextFromClientSnapshot(result.snapshot);
             stateSubscriptionContext.current = subscriptionContext;
             for (const action of ingestion.actions) {
               if (action.type === "settings:preferences") setPreferences(action.preferences);
-              dispatch(action);
+              if (action.type === "snapshot" && action.snapshot.lifecycle === "new") {
+                newTaskController.updateSnapshot(action.snapshot);
+                continue;
+              }
+              initializedDispatch(action);
             }
-            applyProtocolAgents(result.snapshot.agents, currentAgentId.current, setAgents, dispatch);
+            if (result.snapshot.agents) {
+              setAgents(agentOptionsFromProtocol(result.snapshot.agents));
+            }
             if (backendConnection.events) {
               const subscriptionConnection = {
+                eventStreamDisconnects: backendConnection.eventStreamDisconnects,
                 events: backendConnection.events,
                 request: backendConnection.request,
                 stateResets: backendConnection.stateResets,
@@ -181,37 +294,46 @@ export function useAppControllerBackendLifecycle({
               stopSubscriptions.push(startAppServerStateSubscription({
                 backendConnection: subscriptionConnection,
                 context: subscriptionContext,
-                dispatch,
+                dispatch: dispatchForCurrentReplica,
+                onBaselineLost: () => markGlobalSubscriptionLost("projects"),
+                onBaselineError: (error) => markSubscriptionError("projects", error),
+                onBaselineReady: () => markSubscriptionReady("projects"),
                 scope: { kind: "projects" },
               }));
               stopSubscriptions.push(startAppServerStateSubscription({
                 backendConnection: subscriptionConnection,
                 context: subscriptionContext,
                 currentAgentId: () => currentAgentId.current,
-                dispatch,
+                dispatch: dispatchForCurrentReplica,
+                onBaselineLost: () => markGlobalSubscriptionLost("agents"),
+                onBaselineError: (error) => markSubscriptionError("agents", error),
+                onBaselineReady: () => markSubscriptionReady("agents"),
                 scope: { kind: "agents" },
                 setAgents,
               }));
               stopSubscriptions.push(startAppServerStateSubscription({
                 backendConnection: subscriptionConnection,
                 context: subscriptionContext,
-                dispatch,
+                dispatch: dispatchForCurrentReplica,
+                onBaselineLost: () => markGlobalSubscriptionLost("task-navigation"),
+                onBaselineError: (error) => markSubscriptionError("task-navigation", error),
+                onBaselineReady: () => markSubscriptionReady("task-navigation"),
                 scope: taskNavigationScopeForBootstrap(initialBootstrap),
               }));
             }
             if (initialBootstrap.surface === "settings") {
               if (initialBootstrap.settingsTab) {
-                dispatch({ type: "settings:tab", tab: initialBootstrap.settingsTab });
+                initializedDispatch({ type: "settings:tab", tab: initialBootstrap.settingsTab });
               }
-              dispatch({ type: "settings:start" });
+              initializedDispatch({ type: "settings:start" });
               void refreshSettingsProjectionsThroughBackend({
                 backendConnection: { request: backendConnection.request },
                 currentAgentId: currentAgentId.current,
-                dispatch,
+                dispatch: initializedDispatch,
                 setAgents,
                 state,
               }).catch((error) => {
-                dispatch({
+                initializedDispatch({
                   type: "settings:error",
                   message: error instanceof Error
                     ? error.message
@@ -221,11 +343,11 @@ export function useAppControllerBackendLifecycle({
             }
             requestMissingInitialTaskList(
               {
-                acceptTaskList: () => navigationGeneration.current === startupNavigationGeneration
-                  && snapshotRequests.current.currentArchived()
+                acceptTaskList: () => operationOwner.owns(startupOperation)
+                  && operationOwner.currentArchived()
                     === (initialBootstrap.surface === "navigation" && initialBootstrap.archived === true),
                 backendConnection,
-                dispatch,
+                dispatch: initializedDispatch,
               },
               initialBootstrap,
               result.snapshot,
@@ -233,19 +355,29 @@ export function useAppControllerBackendLifecycle({
             // Route opening also starts App Server recovery work, so the route effect must
             // own task/open even when initialize already supplied cached task state.
             backendInitialized.current = true;
-            setBackendReady(true);
+            const globalBaselinesReady = pendingGlobalSubscriptionBaselines.current.size === 0;
+            setBackendReady(globalBaselinesReady);
+            if (failedSubscriptionBaselines.current.size === 0 && globalBaselinesReady) {
+              setBackendConnectionState({ status: "ready" });
+            }
           })
           .catch((error) => {
             if (!active) return;
             backendInitialized.current = false;
             setBackendReady(false);
+            const message = error instanceof Error ? error.message : "Unable to connect to App Server.";
+            setBackendConnectionState({ status: "unavailable", message });
             dispatch({
               type: "appServer:error",
-              message: error instanceof Error ? error.message : "Unable to connect to App Server.",
+              message,
             });
             dispatchStartupReadError(bootstrap, dispatch);
           });
       } else {
+        setBackendConnectionState({
+          status: "unavailable",
+          message: "App Server connection unavailable.",
+        });
         dispatch({
           type: "appServer:error",
           message: "App Server connection unavailable.",
@@ -265,12 +397,12 @@ export function useAppControllerBackendLifecycle({
     return () => {
       active = false;
       backendInitialized.current = false;
-      lastRequestedRouteTaskKey.current = undefined;
-      routeOpenInFlight.current = undefined;
+      failedSubscriptionBaselines.current.clear();
+      pendingGlobalSubscriptionBaselines.current.clear();
       setBackendReady(false);
-      setReadyTaskSubscriptionKey(undefined);
-      setReadyRouteOpenKey(undefined);
+      taskRouteLifecycle.reset();
       stateSubscriptionContext.current = undefined;
+      stopEventStreamDisconnects?.();
       stopBackendStateResets?.();
       for (const stop of stopSubscriptions) stop();
       serverRequestBridge?.dispose();
@@ -279,118 +411,45 @@ export function useAppControllerBackendLifecycle({
     };
   }, [backendConnection, initialBootstrap.surface, initialBootstrap.taskId]);
 
-  useEffect(() => {
-    if (!backendConnection?.events || !backendReady || !backendInitialized.current || !state.snapshot) return;
-    const context = stateSubscriptionContext.current;
-    if (!context) return;
-    const taskId = state.snapshot.task.task_id;
-    const subscriptionKey = `${backendStateGeneration}:${taskId}`;
-    let active = true;
-    const stop = startAppServerStateSubscription({
-      backendConnection: {
-        events: backendConnection.events,
-        request: backendConnection.request,
-      },
-      context,
-      dispatch,
-      onBaselineLost: () => {
-        if (!active) return;
-        setReadyTaskSubscriptionKey((current) => (
-          current === subscriptionKey ? undefined : current
-        ));
-      },
-      onBaselineReady: () => {
-        if (active) setReadyTaskSubscriptionKey(subscriptionKey);
-      },
-      scope: { kind: "task", taskId: taskId as TaskId },
-    });
-    return () => {
-      active = false;
-      stop();
-    };
-  }, [backendConnection, backendReady, backendStateGeneration, state.snapshot?.task.task_id]);
-
-  useEffect(() => {
-    if (bootstrap.surface !== "task" || !bootstrap.taskId) {
-      lastRequestedRouteTaskKey.current = undefined;
-      routeOpenInFlight.current = undefined;
-      return;
-    }
-    const taskId = bootstrap.taskId;
-    if (!backendConnection) {
-      dispatch({
-        type: "taskOpen:error",
-        taskId,
-        message: "App Server connection unavailable.",
-      });
-      return;
-    }
-    if (!backendInitialized.current) return;
-    const requestKey = `${backendStateGeneration}:${taskId}`;
-    if (lastRequestedRouteTaskKey.current === requestKey) return;
-    if (routeOpenInFlight.current?.taskId === taskId) return;
-    lastRequestedRouteTaskKey.current = requestKey;
-    const requestGeneration = backendStateGeneration;
-    let openAccepted = false;
-
-    const openRequest = requestTaskOpen({
-      acceptTaskOpen: (openedTaskId, requestId, intent) => {
-        if (backendStateGenerationRef.current !== requestGeneration) return false;
-        openAccepted = acceptSnapshotRequest(openedTaskId, requestId, intent);
-        return openAccepted;
-      },
-      backendConnection,
-      createTaskOpenRequestId: createSnapshotRequestId,
-      dispatch,
-    }, taskId, "open")
-      .then(() => {
-        if (openAccepted && backendStateGenerationRef.current === requestGeneration) {
-          setReadyRouteOpenKey(requestKey);
-        }
-      })
-      .catch(() => dispatch({
-        type: "taskOpen:error",
-        taskId,
-        message: "Unable to open task from App Server",
-      }));
-    routeOpenInFlight.current = { promise: openRequest, taskId };
-    void openRequest.finally(() => {
-      if (routeOpenInFlight.current?.promise === openRequest) {
-        routeOpenInFlight.current = undefined;
-      }
-      // A reset can supersede an open already in flight. Re-run the effect after
-      // settlement so the current Backend generation receives its own task/open.
-      if (backendInitialized.current) {
-        setRouteOpenSettlement((settlement) => settlement + 1);
-      }
-    });
-  }, [
+  useNewTaskSubscription({
     backendConnection,
+    backendInitialized,
     backendReady,
     backendStateGeneration,
-    bootstrap.surface,
-    bootstrap.taskId,
-    routeOpenSettlement,
-  ]);
-
-  const taskSubscriptionKey = state.snapshot
-    ? `${backendStateGeneration}:${state.snapshot.task.task_id}`
-    : undefined;
-  const taskSubscriptionReady = !backendConnection?.events
-    || taskSubscriptionKey === undefined
-    || readyTaskSubscriptionKey === taskSubscriptionKey;
-  const routeOpenKey = bootstrap.surface === "task" && bootstrap.taskId
-    ? `${backendStateGeneration}:${bootstrap.taskId}`
-    : undefined;
-  const routeOpenReady = routeOpenKey === undefined || readyRouteOpenKey === routeOpenKey;
+    context: stateSubscriptionContext,
+    dispatch: dispatchForCurrentReplica,
+    newTaskController,
+    newTaskId,
+  });
+  const taskRouteLifecycle = useTaskRouteLifecycle({
+    acceptSnapshotRequest,
+    backendConnection,
+    backendInitialized,
+    backendReady,
+    backendStateGeneration,
+    bootstrap,
+    createSnapshotRequestId,
+    dispatch,
+    failedSubscriptionBaselines,
+    markSubscriptionError,
+    markSubscriptionReady,
+    operationOwner,
+    replicaEpochRef,
+    routeOpenError,
+    setBackendConnectionState,
+    snapshot: state.snapshot,
+    stateSubscriptionContext,
+  });
 
   return {
     acceptSnapshotRequest,
     backendInitialized,
-    backendReady: backendReady && taskSubscriptionReady && routeOpenReady,
-    beginNavigationChange,
+    backendConnectionState,
+    backendReady: backendReady && taskRouteLifecycle.ready,
     bootstrap,
     createSnapshotRequestId,
-    currentNavigationGeneration,
+    operationOwner,
+    replicaEpoch,
+    retryTaskOpen: taskRouteLifecycle.retryTaskOpen,
   };
 }

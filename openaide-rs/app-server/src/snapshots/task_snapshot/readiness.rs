@@ -1,9 +1,10 @@
 use openaide_app_server_protocol::errors::{ProtocolError, ProtocolErrorCode};
+use openaide_app_server_protocol::ids::{AgentConfigOptionId, ClientMutationId};
 use openaide_app_server_protocol::snapshot::{
     AgentConfigOptionKind, AgentConfigOptionSnapshot, AgentConfigOptionValueSnapshot,
     AgentSlashCommandInputSnapshot, AgentSlashCommandSnapshot, LiveSessionDataState,
-    TaskAgentCommandsSnapshot, TaskAgentConfigSnapshot, TaskPreparationAction,
-    TaskPreparationSnapshot, TaskPreparationStep, TaskPreparationStepKind,
+    PendingAgentConfigChange, TaskAgentCommandsSnapshot, TaskAgentConfigSnapshot,
+    TaskPreparationAction, TaskPreparationSnapshot, TaskPreparationStep, TaskPreparationStepKind,
     TaskPreparationStepStatus, TaskSendBlocker, TaskSendBlockerKind, TaskSendCapabilitySnapshot,
     TaskSendCapabilityState,
 };
@@ -54,13 +55,13 @@ pub(super) fn agent_config_snapshot(snapshot: &StoredTaskSnapshot) -> TaskAgentC
             Some(_) => TaskAgentConfigSnapshot {
                 state: LiveSessionDataState::Ready,
                 options: agent_config_options(snapshot),
-                pending_change: None,
+                pending_change: pending_config_change(snapshot),
                 error: None,
             },
             None => TaskAgentConfigSnapshot {
                 state: LiveSessionDataState::Unavailable,
                 options: Vec::new(),
-                pending_change: None,
+                pending_change: pending_config_change(snapshot),
                 error: None,
             },
         },
@@ -71,6 +72,17 @@ pub(super) fn agent_config_snapshot(snapshot: &StoredTaskSnapshot) -> TaskAgentC
             error: Some(preparation_error(message)),
         },
     }
+}
+
+fn pending_config_change(snapshot: &StoredTaskSnapshot) -> Option<PendingAgentConfigChange> {
+    snapshot
+        .pending_config_change
+        .as_ref()
+        .map(|pending| PendingAgentConfigChange {
+            client_mutation_id: ClientMutationId::from(pending.client_mutation_id.clone()),
+            config_id: AgentConfigOptionId::from(pending.config_id.clone()),
+            requested_value: pending.requested_value.clone(),
+        })
 }
 
 fn agent_config_options(snapshot: &StoredTaskSnapshot) -> Vec<AgentConfigOptionSnapshot> {
@@ -186,7 +198,6 @@ pub(super) fn send_capability_for_task(
         TaskPreparationRecord::Needed | TaskPreparationRecord::Preparing => {
             return TaskSendCapabilitySnapshot {
                 state: TaskSendCapabilityState::Loading,
-                attachment_only: false,
                 blockers: vec![TaskSendBlocker {
                     kind: TaskSendBlockerKind::TaskPreparing,
                     message: "Task Agent preparation is still running".to_string(),
@@ -196,7 +207,6 @@ pub(super) fn send_capability_for_task(
         TaskPreparationRecord::Failed { message } => {
             return TaskSendCapabilitySnapshot {
                 state: TaskSendCapabilityState::Failed,
-                attachment_only: false,
                 blockers: vec![TaskSendBlocker {
                     kind: TaskSendBlockerKind::FailedValidation,
                     message: format!("Task Agent preparation failed: {message}"),
@@ -206,22 +216,23 @@ pub(super) fn send_capability_for_task(
         TaskPreparationRecord::Ready => {}
     }
     match status {
-        LegacyTaskStatus::Inactive | LegacyTaskStatus::Completed => TaskSendCapabilitySnapshot {
-            state: TaskSendCapabilityState::Ready,
-            attachment_only: true,
-            blockers: Vec::new(),
-        },
-        LegacyTaskStatus::Active | LegacyTaskStatus::Blocked => TaskSendCapabilitySnapshot {
-            state: TaskSendCapabilityState::Blocked,
-            attachment_only: true,
-            blockers: vec![TaskSendBlocker {
-                kind: TaskSendBlockerKind::TaskRunning,
-                message: "Task is already running".to_string(),
-            }],
-        },
+        LegacyTaskStatus::Inactive | LegacyTaskStatus::Completed | LegacyTaskStatus::Active => {
+            TaskSendCapabilitySnapshot {
+                state: TaskSendCapabilityState::Ready,
+                blockers: Vec::new(),
+            }
+        }
+        LegacyTaskStatus::Starting | LegacyTaskStatus::Stopping | LegacyTaskStatus::Waiting => {
+            TaskSendCapabilitySnapshot {
+                state: TaskSendCapabilityState::Blocked,
+                blockers: vec![TaskSendBlocker {
+                    kind: TaskSendBlockerKind::TaskRunning,
+                    message: "Task is already running".to_string(),
+                }],
+            }
+        }
         LegacyTaskStatus::Failed => TaskSendCapabilitySnapshot {
             state: TaskSendCapabilityState::Ready,
-            attachment_only: true,
             blockers: Vec::new(),
         },
     }

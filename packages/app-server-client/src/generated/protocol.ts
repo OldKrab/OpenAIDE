@@ -3,7 +3,7 @@
 
 export const CLIENT_PROBE = "client/probe" as const;
 export const CLIENT_INITIALIZE = "client/initialize" as const;
-
+export const CLIENT_CAPABILITIES_CHANGED = "client/capabilitiesChanged" as const;
 export const CLIENT_HEARTBEAT = "client/heartbeat" as const;
 
 export const STATE_SUBSCRIBE = "state/subscribe" as const;
@@ -40,7 +40,7 @@ export const ATTACHMENT_CREATE_EMBEDDED_CANDIDATE = "attachment/createEmbeddedCa
 export const ATTACHMENT_CONFIRM_EMBEDDED = "attachment/confirmEmbedded" as const;
 
 export const ATTACHMENT_REFRESH_HANDLES = "attachment/refreshHandles" as const;
-export const ATTACHMENT_RELEASE_HANDLES = "attachment/releaseHandles" as const;
+export const ATTACHMENT_RELEASE = "attachment/release" as const;
 
 export const ATTACHMENT_REVEAL = "attachment/reveal" as const;
 
@@ -55,10 +55,8 @@ export const TASK_SEND = "task/send" as const;
 export const TASK_SET_CONFIG_OPTION = "task/setConfigOption" as const;
 export const TASK_CANCEL = "task/cancel" as const;
 export const TASK_OPEN = "task/open" as const;
-export const TASK_RETRY_HISTORY_SYNC = "task/retryHistorySync" as const;
 export const TASK_MARK_READ = "task/markRead" as const;
 export const TASK_CHAT_PAGE = "task/chatPage" as const;
-export const TASK_TOOL_DETAIL = "task/toolDetail" as const;
 export const TASK_LIST = "task/list" as const;
 export const TASK_DISCARD = "task/discard" as const;
 
@@ -108,8 +106,6 @@ export type TaskId = string & { readonly __openaideBrand: "TaskId" };
 
 export type TaskListCursor = string & { readonly __openaideBrand: "TaskListCursor" };
 
-export type TaskSendIdempotencyKey = string & { readonly __openaideBrand: "TaskSendIdempotencyKey" };
-
 export type TurnId = string & { readonly __openaideBrand: "TurnId" };
 
 export type ClientRequestEnvelope<P> = { method: string, params: P, meta?: RequestMeta, };
@@ -128,7 +124,11 @@ export type ProtocolError = { code: ProtocolErrorCode, message: string, recovera
 
 export type ProtocolErrorCode = "invalidRequest" | "notInitialized" | "unauthorized" | "notFound" | "conflict" | "validationFailed" | "attachmentHandleInvalid" | "capabilityUnavailable" | "requestAlreadyResolved" | "serverStopping" | "staleCursor" | "internal";
 
-export type ErrorTarget = { method?: string | null, field?: string | null, };
+export type ErrorTarget = { method?: string | null, field?: string | null,
+/**
+ * Current authoritative render state when resolving the targeted field requires it.
+ */
+currentTask?: TaskSnapshot | null, };
 
 export type ClientProbeParams = Record<symbol, never>;
 
@@ -140,9 +140,27 @@ export type ClientHeartbeatResult = Record<symbol, never>;
 
 export type ClientProbeLifecycle = "running" | "draining" | "stopping";
 
-export type InitializeParams = { clientInstanceId: ClientInstanceId, shell: ShellDescriptor, requestedSurface: RequestedSurface, capabilities?: ClientCapabilities, };
+export type InitializeParams = { clientInstanceId: ClientInstanceId, shell: ShellDescriptor, requestedSurface: RequestedSurface, capabilities?: ClientCapabilities,
+/**
+ * Local workspace facts supplied by the App Shell for Project canonicalization.
+ */
+workspaceRoots?: Array<ClientWorkspaceRoot>, };
 
 export type InitializeResult = { snapshot: ClientSnapshot, };
+
+export type ClientCapabilitiesChangedParams = {
+/**
+ * Omitted capabilities preserve the client's existing capability declaration.
+ */
+capabilities?: ClientCapabilities | null,
+/**
+ * A present list replaces this client's complete shell-reported workspace set.
+ */
+workspaceRoots?: Array<ClientWorkspaceRoot> | null, };
+
+export type ClientCapabilitiesChangedResult = { projects: ProjectCollectionSnapshot, };
+
+export type ClientWorkspaceRoot = { path: string, };
 
 export type ShellDescriptor = { kind: ShellKind, name?: string | null, version?: string | null, };
 
@@ -166,9 +184,9 @@ export type StateUnsubscribeParams = { scope: SubscriptionScope, };
 
 export type StateUnsubscribeResult = { scope: SubscriptionScope, };
 
-export type SubscriptionScope = { "kind": "projects" } | { "kind": "agents" } | { "kind": "settings", section?: SettingsSection | null, } | { "kind": "taskNavigation", projectId?: ProjectId | null, } | { "kind": "task", taskId: TaskId, };
+export type SubscriptionScope = { "kind": "projects" } | { "kind": "agents" } | { "kind": "settings", section?: SettingsSection | null, } | { "kind": "taskNavigation", projectId?: ProjectId | null, } | { "kind": "task", taskId: TaskId, } | { "kind": "toolDetail", taskId: TaskId, artifactId: string, };
 
-export type SubscriptionSnapshot = { "kind": "projects", projects: ProjectCollectionSnapshot, } | { "kind": "agents", agents: AgentCollectionSnapshot, } | { "kind": "settings", settings: SettingsSnapshot, } | { "kind": "taskNavigation", navigation: TaskNavigationSnapshot, } | { "kind": "task", task: TaskSnapshot, };
+export type SubscriptionSnapshot = { "kind": "projects", projects: ProjectCollectionSnapshot, } | { "kind": "agents", agents: AgentCollectionSnapshot, } | { "kind": "settings", settings: SettingsSnapshot, } | { "kind": "taskNavigation", navigation: TaskNavigationSnapshot, } | { "kind": "task", task: TaskSnapshot, } | { "kind": "toolDetail", taskId: TaskId, artifactId: string, details: ToolDetailSnapshot, };
 
 export type RuntimeDiagnosticsParams = Record<symbol, never>;
 
@@ -342,9 +360,23 @@ export type AttachmentRefreshHandlesParams = { taskId: TaskId, handles: Array<At
 
 export type AttachmentRefreshHandlesResult = { attachments: Array<PreSendAttachment>, };
 
-export type AttachmentReleaseHandlesParams = { taskId: TaskId, handles: Array<AttachmentHandleId>, };
+export type AttachmentResourceId = { "kind": "handle", id: AttachmentHandleId, } | { "kind": "candidate", id: AttachmentCandidateId, };
 
-export type AttachmentReleaseHandlesResult = { releasedHandles: Array<AttachmentHandleId>, };
+export type AttachmentReleaseStatus = "released" | "noOp" | "forbidden";
+
+export type AttachmentReleaseOutcome = { resource: AttachmentResourceId, status: AttachmentReleaseStatus, };
+
+export type AttachmentReleaseParams = { taskId: TaskId,
+/**
+ * Resolver resources are released independently in this order.
+ */
+resources: Array<AttachmentResourceId>, };
+
+export type AttachmentReleaseResult = {
+/**
+ * Contains exactly one outcome per requested resource, preserving request order.
+ */
+outcomes: Array<AttachmentReleaseOutcome>, };
 
 export type AttachmentRevealParams = { taskId: TaskId, handleId: AttachmentHandleId, };
 
@@ -408,7 +440,7 @@ export type TaskAdoptNativeSessionParams = { projectId: ProjectId, agentId: Agen
 
 export type TaskAdoptNativeSessionResult = { task: TaskSnapshot, };
 
-export type TaskSendParams = { taskId: TaskId, idempotencyKey: TaskSendIdempotencyKey, taskRevision: number, message: ComposerMessage, };
+export type TaskSendParams = { taskId: TaskId, message: ComposerMessage, };
 
 export type ComposerMessage = { text?: string | null, attachments?: Array<AttachmentHandleId>, };
 
@@ -426,27 +458,23 @@ export type TaskChatPageParams = { taskId: TaskId, beforeCursor: MessageId, limi
 
 export type TaskChatPageResult = { taskId: TaskId, items: Array<ChatItem>, hasBefore: boolean, totalCount: number, revision: number, startCursor?: MessageId | null, endCursor?: MessageId | null, };
 
-export type TaskToolDetailParams = { taskId: TaskId, artifactId: string, };
-
-export type TaskToolDetailResult = { locations: Array<ActivityToolLocation>, content: Array<ActivityToolContent>, input?: ActivityToolInput | null, output?: ActivityToolOutput | null, };
+export type ToolDetailSnapshot = { locations: Array<ActivityToolLocation>, content: Array<ActivityToolContent>, input?: ActivityToolInput | null, output?: ActivityToolOutput | null, };
 
 export type ActivityToolLocation = { path: string, line?: number | null, };
 
-export type ActivityToolContent = { "kind": "text", text: string, } | { "kind": "diff", path: string, oldText?: string | null, newText: string, } | { "kind": "terminal", terminalId: string, } | { "kind": "other", label: string, };
+export type ActivityToolContent = { "kind": "text", text: string, } | { "kind": "diff", path: string, oldText?: string | null, newText: string, } | { "kind": "terminal", terminalId: string, } | { "kind": "image", mediaType: string, dataUrl: string, uri?: string | null, } | { "kind": "audio", mediaType: string, dataUrl: string, } | { "kind": "resource", uri: string, name?: string | null, title?: string | null, description?: string | null, mediaType?: string | null, sizeBytes?: number | null, text?: string | null, } | { "kind": "unsupported", contentType: string, mediaType?: string | null, uri?: string | null, };
 
 export type ActivityToolInput = { command: Array<string>, cwd?: string | null, query?: string | null, queries?: Array<string> | null, url?: string | null, path?: string | null, fields: Array<ActivityToolField>, };
 
 export type ActivityToolOutput = { stdout?: string | null, stderr?: string | null, formattedOutput?: string | null, aggregatedOutput?: string | null, exitCode?: number | null, success?: boolean | null, fields: Array<ActivityToolField>, };
 
-export type ActivityToolField = { name: string, value: string, };
+export type ActivityToolField = { name: string, value: ActivityToolValue, };
+
+export type ActivityToolValue = { "kind": "null" } | { "kind": "boolean", value: boolean, } | { "kind": "number", value: string, } | { "kind": "string", value: string, } | { "kind": "array", items: Array<ActivityToolValue>, } | { "kind": "object", fields: Array<ActivityToolField>, } | { "kind": "redacted" };
 
 export type TaskOpenParams = { taskId: TaskId, };
 
 export type TaskOpenResult = { task: TaskSnapshot, };
-
-export type TaskRetryHistorySyncParams = { taskId: TaskId, };
-
-export type TaskRetryHistorySyncResult = { task: TaskSnapshot, };
 
 export type TaskMarkReadParams = { taskId: TaskId, };
 
@@ -458,25 +486,33 @@ export type TaskListResult = { tasks: Array<TaskSummary>, revision: number, next
 
 export type TaskDiscardParams = { taskId: TaskId, };
 
-export type TaskDiscardResult = { discardedTaskId: TaskId, tasks: TaskNavigationSnapshot, };
+export type TaskDiscardResult = { discardedTaskId: TaskId, };
 
 export type TaskSetArchivedParams = { taskId: TaskId, archived: boolean, };
 
-export type TaskSetArchivedResult = { taskId: TaskId, archived: boolean, tasks: TaskNavigationSnapshot, };
+export type TaskSetArchivedResult = { taskId: TaskId, archived: boolean, };
 
 export type SupportRecoverStuckSessionsParams = Record<symbol, never>;
 
 export type SupportRecoverStuckSessionsResult = { recoveredTasks: Array<TaskSnapshot>, };
 
-export type AppServerEvent = { previousCursor: EventCursor, cursor: EventCursor, scope: EventScope, payload: AppServerEventPayload, };
+export type AppServerEvent = {
+/**
+ * Identifies the independently ordered subscription stream carrying this event.
+ */
+subscription: SubscriptionScope, previousCursor: EventCursor, cursor: EventCursor, scope: EventScope, payload: AppServerEventPayload, };
 
 export type EventScope = { "kind": "stateRoot", stateRootId: StateRootId, } | { "kind": "client", stateRootId: StateRootId, clientInstanceId: ClientInstanceId, } | { "kind": "task", stateRootId: StateRootId, taskId: TaskId, };
 
-export type AppServerEventPayload = { "kind": "snapshotReplaced", snapshot: ClientSnapshot, } | { "kind": "taskUpdated", task: TaskSummary, } | { "kind": "taskSnapshotUpdated", task: TaskSnapshot, } | { "kind": "taskHistorySyncUpdated", taskId: TaskId, historySync: TaskHistorySyncSnapshot, } | { "kind": "taskNavigationUpdated", navigation: TaskNavigationSnapshot, } | { "kind": "projectCollectionUpdated", projects: ProjectCollectionSnapshot, } | { "kind": "chatItemAppended", taskId: TaskId, revision: number, item: ChatItem, } | { "kind": "chatItemChunk", taskId: TaskId, revision: number, messageId: MessageId, chunk: TextChunk, } | { "kind": "requestUpdated", request: PendingRequestSnapshot, } | { "kind": "agentCollectionUpdated", agents: AgentCollectionSnapshot, };
+export type AppServerEventPayload = { "kind": "snapshotReplaced", snapshot: ClientSnapshot, } | { "kind": "taskChanged", taskId: TaskId, revision: number, changes: TaskChanges, } | { "kind": "taskHistorySyncUpdated", taskId: TaskId, historySync: TaskHistorySyncSnapshot, } | { "kind": "taskNavigationChanged", change: TaskNavigationChange, } | { "kind": "projectCollectionUpdated", projects: ProjectCollectionSnapshot, } | { "kind": "taskRequestsUpdated", taskId: TaskId, requests: Array<PendingRequestSnapshot>, } | { "kind": "toolDetailUpdated", taskId: TaskId, artifactId: string, details: ToolDetailSnapshot, } | { "kind": "requestUpdated", request: PendingRequestSnapshot, } | { "kind": "agentCollectionUpdated", agents: AgentCollectionSnapshot, };
 
-export type TextChunk = { sequence: number, text: string, finalChunk?: boolean, };
+export type TaskChanges = { task?: TaskSummary | null, lifecycle?: TaskLifecycle | null, preparation?: TaskPreparationSnapshot | null, agentConfig?: TaskAgentConfigSnapshot | null, agentCommands?: TaskAgentCommandsSnapshot | null, sendCapability?: TaskSendCapabilitySnapshot | null, chat?: Array<TaskChatChange>, removed?: boolean, };
 
-export type ClientSnapshot = { cursor: EventCursor, server: ServerSnapshot, stateRoot: StateRootSnapshot, client: ClientSnapshotScope, projects?: ProjectCollectionSnapshot | null, agents?: AgentCollectionSnapshot | null, tasks?: TaskNavigationSnapshot | null, activeTask?: TaskSnapshot | null, settings?: SettingsSnapshot | null, pendingRequests?: Array<PendingRequestSnapshot>, };
+export type TaskChatChange = { "kind": "append", item: ChatItem, } | { "kind": "upsert", item: ChatItem, } | { "kind": "appendText", messageId: MessageId, text: string, } | { "kind": "replace", chat: ChatSnapshot, };
+
+export type TaskNavigationChange = { "kind": "upsert", task: TaskSummary, } | { "kind": "remove", taskId: TaskId, };
+
+export type ClientSnapshot = { cursor: EventCursor, server: ServerSnapshot, stateRoot: StateRootSnapshot, client: ClientSnapshotScope, newTaskDefaults: NewTaskDefaultsSnapshot, projects?: ProjectCollectionSnapshot | null, agents?: AgentCollectionSnapshot | null, tasks?: TaskNavigationSnapshot | null, activeTask?: TaskSnapshot | null, settings?: SettingsSnapshot | null, pendingRequests?: Array<PendingRequestSnapshot>, };
 
 export type ServerSnapshot = { serverId: ServerId, protocolVersion: ProtocolVersion, capabilities?: ServerCapabilities, };
 
@@ -488,11 +524,13 @@ export type StateRootSnapshot = { stateRootId: StateRootId, };
 
 export type ClientSnapshotScope = { clientInstanceId: ClientInstanceId, shellKind: ShellKind, surface: RequestedSurface, };
 
-export type ProjectCollectionSnapshot = { projects: Array<ProjectSummary>, activeProjectId?: ProjectId | null, };
+export type NewTaskDefaultsSnapshot = { projectId?: ProjectId | null, agentId?: AgentId | null, };
+
+export type ProjectCollectionSnapshot = { projects: Array<ProjectSummary>, };
 
 export type ProjectSummary = { projectId: ProjectId, label: string, };
 
-export type AgentCollectionSnapshot = { agents: Array<AgentSummary>, defaultAgentId?: AgentId | null, };
+export type AgentCollectionSnapshot = { agents: Array<AgentSummary>, };
 
 export type AgentSummary = { agentId: AgentId, label: string, status: AgentStatus, capabilities?: AgentCapabilities, };
 
@@ -502,13 +540,19 @@ export type AgentCapabilities = { resumeTasks?: boolean, deleteNativeSessions?: 
 
 export type TaskNavigationSnapshot = { tasks: Array<TaskSummary>, activeTaskId?: TaskId | null, };
 
-export type TaskSummary = { taskId: TaskId, projectId: ProjectId, agentId: AgentId, title: string, status: TaskStatus, updatedAt: string, lastActivity: string, unread: boolean, hasMessages: boolean, };
+export type TaskSummary = { taskId: TaskId, projectId: ProjectId, agentId: AgentId, title: TaskTitle | null, status: TaskStatus, updatedAt: string, lastActivity: string, unread: boolean, hasMessages: boolean, };
 
-export type TaskStatus = "preparing" | "idle" | "running" | "blocked" | "interrupted" | "failed" | "completed";
+export type TaskTitle = { value: string, source: TaskTitleSource, };
 
-export type TaskSnapshot = { task: TaskSummary, revision: number, preparation: TaskPreparationSnapshot, agentConfig: TaskAgentConfigSnapshot, agentCommands: TaskAgentCommandsSnapshot, sendCapability: TaskSendCapabilitySnapshot, chat: ChatSnapshot, historySync: TaskHistorySyncSnapshot, pendingRequests?: Array<PendingRequestSnapshot>, recovery?: RecoverySnapshot | null, };
+export type TaskTitleSource = "prompt" | "agent" | "user";
 
-export type TaskHistorySyncSnapshot = { "state": "idle", generation: number, } | { "state": "checking", generation: number, } | { "state": "syncing", generation: number, } | { "state": "updated", generation: number, } | { "state": "failed", generation: number, message: string, beforeSend: boolean, };
+export type TaskStatus = "preparing" | "starting" | "idle" | "running" | "stopping" | "waiting" | "interrupted" | "failed" | "completed";
+
+export type TaskLifecycle = "new" | "visible";
+
+export type TaskSnapshot = { task: TaskSummary, lifecycle: TaskLifecycle, revision: number, preparation: TaskPreparationSnapshot, agentConfig: TaskAgentConfigSnapshot, agentCommands: TaskAgentCommandsSnapshot, sendCapability: TaskSendCapabilitySnapshot, chat: ChatSnapshot, historySync: TaskHistorySyncSnapshot, pendingRequests?: Array<PendingRequestSnapshot>, recovery?: RecoverySnapshot | null, };
+
+export type TaskHistorySyncSnapshot = { "state": "idle", generation: number, } | { "state": "syncing", generation: number, } | { "state": "updated", generation: number, };
 
 export type TaskPreparationSnapshot = { "kind": "preparing", steps: Array<TaskPreparationStep>, } | { "kind": "ready" } | { "kind": "blocked", blocker: TaskSetupBlocker, actions: Array<TaskPreparationAction>, } | { "kind": "failed", error: ProtocolError, actions: Array<TaskPreparationAction>, };
 
@@ -542,7 +586,7 @@ export type AgentSlashCommandInputSnapshot = { hint: string, };
 
 export type LiveSessionDataState = "loading" | "ready" | "stale" | "unavailable" | "failed";
 
-export type TaskSendCapabilitySnapshot = { state: TaskSendCapabilityState, attachmentOnly?: boolean, blockers?: Array<TaskSendBlocker>, };
+export type TaskSendCapabilitySnapshot = { state: TaskSendCapabilityState, blockers?: Array<TaskSendBlocker>, };
 
 export type TaskSendCapabilityState = "loading" | "ready" | "blocked" | "failed";
 
@@ -558,23 +602,19 @@ export type ChatRole = "user" | "agent" | "system";
 
 export type ChatItemStatus = "complete" | "streaming" | "failed" | "interrupted";
 
-export type MessagePart = { "kind": "text", text: string, } | { "kind": "attachment", attachment: AttachmentSnapshot, } | { "kind": "activity", title: string, status: ActivityStatus, steps?: Array<ActivityStepSnapshot>, } | { "kind": "permission", requestId: RequestId, appServerRequestId?: RequestId | null, title: string, description?: string | null, scope?: string | null, risk?: string | null, toolCall: PermissionToolCallRef, state: PermissionMessageState, options: Array<PermissionMessageOption>, selectedOption?: string | null, decision?: PermissionMessageDecision | null, } | { "kind": "question", requestId: RequestId, message: string, fields: Array<QuestionField>, state: QuestionMessageState, action?: QuestionMessageAction | null, content?: { [key in string]: QuestionValue } | null, error?: string | null, };
-
-export type PermissionMessageOption = { optionId: string, name: string, kind?: PermissionMessageOptionKind | null, };
-
-export type PermissionMessageOptionKind = "allow" | "deny" | "other";
-
-export type PermissionMessageState = "pending" | "responding" | "resolved" | "cancelled";
-
-export type PermissionMessageDecision = "approved" | "denied";
+export type MessagePart = { "kind": "text", text: string, } | { "kind": "attachment", attachment: AttachmentSnapshot, } | { "kind": "image", mediaType: string, dataUrl: string, uri?: string | null, } | { "kind": "resource", uri: string, name?: string | null, title?: string | null, description?: string | null, mediaType?: string | null, sizeBytes?: number | null, text?: string | null, } | { "kind": "unsupported", contentType: string, mediaType?: string | null, uri?: string | null, } | { "kind": "activity", title: string, status: ActivityStatus, steps?: Array<ActivityStepSnapshot>, } | { "kind": "question", requestId: RequestId, message: string, fields: Array<QuestionField>, state: QuestionMessageState, action?: QuestionMessageAction | null, content?: { [key in string]: QuestionValue } | null, error?: string | null, resolutionMessage?: string | null, };
 
 export type QuestionMessageState = "pending" | "resolved" | "cancelled" | "error";
 
 export type QuestionMessageAction = "submit" | "cancel";
 
-export type ActivityStatus = "running" | "completed" | "failed";
+export type ActivityStatus = "running" | "completed" | "interrupted" | "failed";
 
-export type ActivityStepSnapshot = { "kind": "text", text: string, level?: string | null, } | { "kind": "tool", toolCallId?: string | null, name: string, status: ActivityStatus, inputSummary?: string | null, outputPreview?: string | null, detailArtifactId?: string | null, details?: TaskToolDetailResult | null, } | { "kind": "command", commandLabel: string, status: ActivityStatus, exitCode?: number | null, outputPreview?: string | null, };
+export type ActivityStepSnapshot = { "kind": "text", text: string, level?: string | null, } | { "kind": "tool", toolCallId?: string | null, name: string, status: ActivityStatus, inputSummary?: string | null, outputPreview?: string | null, detailArtifactId?: string | null, details?: ToolDetailSnapshot | null, permissionOutcomes: Array<ToolPermissionOutcomeSnapshot>, } | { "kind": "command", commandLabel: string, status: ActivityStatus, exitCode?: number | null, outputPreview?: string | null, };
+
+export type ToolPermissionOutcomeSnapshot = { requestId: RequestId, decision: ToolPermissionDecisionSnapshot, optionId?: string | null, optionLabel?: string | null, resolvedAt: string, };
+
+export type ToolPermissionDecisionSnapshot = "approved" | "rejected" | "cancelled";
 
 export type AttachmentSnapshot = { attachmentId: AttachmentId, kind: AttachmentKind, label: string, mediaType?: string | null, sizeBytes?: number | null, previewUrl?: string | null, };
 
@@ -592,10 +632,11 @@ export type PendingRequestScope = { "kind": "client", clientInstanceId: ClientIn
 
 export type PendingRequestKind = "permission" | "question" | "secret" | "shellCapability";
 
-export type ProtocolMethod = typeof CLIENT_PROBE | typeof CLIENT_INITIALIZE | typeof CLIENT_HEARTBEAT | typeof STATE_SUBSCRIBE | typeof STATE_UNSUBSCRIBE | typeof DIAGNOSTICS_GET_RUNTIME | typeof SUPPORT_RECOVER_STUCK_SESSIONS | typeof AGENT_PROBE | typeof AGENT_AUTHENTICATE | typeof AGENT_LIST_SESSIONS | typeof AGENT_CREATE_CUSTOM | typeof AGENT_UPDATE_CUSTOM_METADATA | typeof AGENT_REPLACE_CUSTOM | typeof AGENT_DELETE_CUSTOM | typeof AGENT_SET_ENABLED | typeof SETTINGS_GET_AGENT_DETAILS | typeof SETTINGS_GET_MCP_SERVERS | typeof SETTINGS_GET_SKILLS | typeof SETTINGS_GET_PREFERENCES | typeof SETTINGS_UPDATE_PREFERENCES | typeof SETTINGS_GET_RUNTIME | typeof SETTINGS_UPDATE_RUNTIME | typeof ATTACHMENT_LIST_ROOTS | typeof ATTACHMENT_LIST_DIRECTORY | typeof ATTACHMENT_CREATE_FILE_REFERENCE | typeof ATTACHMENT_CREATE_PASTED_IMAGE | typeof ATTACHMENT_CREATE_EMBEDDED_CANDIDATE | typeof ATTACHMENT_CONFIRM_EMBEDDED | typeof ATTACHMENT_REFRESH_HANDLES | typeof ATTACHMENT_RELEASE_HANDLES | typeof ATTACHMENT_REVEAL | typeof SHELL_RESOLVE_FILE_REVEAL | typeof WORKSPACE_LIST_ROOTS | typeof WORKSPACE_LIST_DIRECTORY | typeof TASK_CREATE | typeof TASK_ADOPT_NATIVE_SESSION | typeof TASK_SEND | typeof TASK_SET_CONFIG_OPTION | typeof TASK_CANCEL | typeof TASK_OPEN | typeof TASK_RETRY_HISTORY_SYNC | typeof TASK_MARK_READ | typeof TASK_CHAT_PAGE | typeof TASK_TOOL_DETAIL | typeof TASK_LIST | typeof TASK_DISCARD | typeof TASK_SET_ARCHIVED;
+export type ProtocolMethod = typeof CLIENT_PROBE | typeof CLIENT_INITIALIZE | typeof CLIENT_CAPABILITIES_CHANGED | typeof CLIENT_HEARTBEAT | typeof STATE_SUBSCRIBE | typeof STATE_UNSUBSCRIBE | typeof DIAGNOSTICS_GET_RUNTIME | typeof SUPPORT_RECOVER_STUCK_SESSIONS | typeof AGENT_PROBE | typeof AGENT_AUTHENTICATE | typeof AGENT_LIST_SESSIONS | typeof AGENT_CREATE_CUSTOM | typeof AGENT_UPDATE_CUSTOM_METADATA | typeof AGENT_REPLACE_CUSTOM | typeof AGENT_DELETE_CUSTOM | typeof AGENT_SET_ENABLED | typeof SETTINGS_GET_AGENT_DETAILS | typeof SETTINGS_GET_MCP_SERVERS | typeof SETTINGS_GET_SKILLS | typeof SETTINGS_GET_PREFERENCES | typeof SETTINGS_UPDATE_PREFERENCES | typeof SETTINGS_GET_RUNTIME | typeof SETTINGS_UPDATE_RUNTIME | typeof ATTACHMENT_LIST_ROOTS | typeof ATTACHMENT_LIST_DIRECTORY | typeof ATTACHMENT_CREATE_FILE_REFERENCE | typeof ATTACHMENT_CREATE_PASTED_IMAGE | typeof ATTACHMENT_CREATE_EMBEDDED_CANDIDATE | typeof ATTACHMENT_CONFIRM_EMBEDDED | typeof ATTACHMENT_REFRESH_HANDLES | typeof ATTACHMENT_RELEASE | typeof ATTACHMENT_REVEAL | typeof SHELL_RESOLVE_FILE_REVEAL | typeof WORKSPACE_LIST_ROOTS | typeof WORKSPACE_LIST_DIRECTORY | typeof TASK_CREATE | typeof TASK_ADOPT_NATIVE_SESSION | typeof TASK_SEND | typeof TASK_SET_CONFIG_OPTION | typeof TASK_CANCEL | typeof TASK_OPEN | typeof TASK_MARK_READ | typeof TASK_CHAT_PAGE | typeof TASK_LIST | typeof TASK_DISCARD | typeof TASK_SET_ARCHIVED;
 export type RequestParamsByMethod = {
   [CLIENT_PROBE]: ClientProbeParams;
   [CLIENT_INITIALIZE]: InitializeParams;
+  [CLIENT_CAPABILITIES_CHANGED]: ClientCapabilitiesChangedParams;
   [CLIENT_HEARTBEAT]: ClientHeartbeatParams;
   [STATE_SUBSCRIBE]: StateSubscribeParams;
   [STATE_UNSUBSCRIBE]: StateUnsubscribeParams;
@@ -623,7 +664,7 @@ export type RequestParamsByMethod = {
   [ATTACHMENT_CREATE_EMBEDDED_CANDIDATE]: AttachmentCreateEmbeddedCandidateParams;
   [ATTACHMENT_CONFIRM_EMBEDDED]: AttachmentConfirmEmbeddedParams;
   [ATTACHMENT_REFRESH_HANDLES]: AttachmentRefreshHandlesParams;
-  [ATTACHMENT_RELEASE_HANDLES]: AttachmentReleaseHandlesParams;
+  [ATTACHMENT_RELEASE]: AttachmentReleaseParams;
   [ATTACHMENT_REVEAL]: AttachmentRevealParams;
   [SHELL_RESOLVE_FILE_REVEAL]: ShellResolveFileRevealParams;
   [WORKSPACE_LIST_ROOTS]: WorkspaceListRootsParams;
@@ -634,10 +675,8 @@ export type RequestParamsByMethod = {
   [TASK_SET_CONFIG_OPTION]: TaskSetConfigOptionParams;
   [TASK_CANCEL]: TaskCancelParams;
   [TASK_OPEN]: TaskOpenParams;
-  [TASK_RETRY_HISTORY_SYNC]: TaskRetryHistorySyncParams;
   [TASK_MARK_READ]: TaskMarkReadParams;
   [TASK_CHAT_PAGE]: TaskChatPageParams;
-  [TASK_TOOL_DETAIL]: TaskToolDetailParams;
   [TASK_LIST]: TaskListParams;
   [TASK_DISCARD]: TaskDiscardParams;
   [TASK_SET_ARCHIVED]: TaskSetArchivedParams;
@@ -646,6 +685,7 @@ export type RequestParamsByMethod = {
 export type ResponseResultByMethod = {
   [CLIENT_PROBE]: ClientProbeResult;
   [CLIENT_INITIALIZE]: InitializeResult;
+  [CLIENT_CAPABILITIES_CHANGED]: ClientCapabilitiesChangedResult;
   [CLIENT_HEARTBEAT]: ClientHeartbeatResult;
   [STATE_SUBSCRIBE]: StateSubscribeResult;
   [STATE_UNSUBSCRIBE]: StateUnsubscribeResult;
@@ -673,7 +713,7 @@ export type ResponseResultByMethod = {
   [ATTACHMENT_CREATE_EMBEDDED_CANDIDATE]: AttachmentCreateEmbeddedCandidateResult;
   [ATTACHMENT_CONFIRM_EMBEDDED]: AttachmentConfirmEmbeddedResult;
   [ATTACHMENT_REFRESH_HANDLES]: AttachmentRefreshHandlesResult;
-  [ATTACHMENT_RELEASE_HANDLES]: AttachmentReleaseHandlesResult;
+  [ATTACHMENT_RELEASE]: AttachmentReleaseResult;
   [ATTACHMENT_REVEAL]: AttachmentRevealResult;
   [SHELL_RESOLVE_FILE_REVEAL]: ShellResolveFileRevealResult;
   [WORKSPACE_LIST_ROOTS]: WorkspaceListRootsResult;
@@ -684,10 +724,8 @@ export type ResponseResultByMethod = {
   [TASK_SET_CONFIG_OPTION]: TaskSetConfigOptionResult;
   [TASK_CANCEL]: TaskCancelResult;
   [TASK_OPEN]: TaskOpenResult;
-  [TASK_RETRY_HISTORY_SYNC]: TaskRetryHistorySyncResult;
   [TASK_MARK_READ]: TaskMarkReadResult;
   [TASK_CHAT_PAGE]: TaskChatPageResult;
-  [TASK_TOOL_DETAIL]: TaskToolDetailResult;
   [TASK_LIST]: TaskListResult;
   [TASK_DISCARD]: TaskDiscardResult;
   [TASK_SET_ARCHIVED]: TaskSetArchivedResult;
@@ -703,7 +741,9 @@ export type ClientProbeRequest = TypedClientRequest<typeof CLIENT_PROBE>;
 export type ClientProbeResponse = ResponseEnvelope<ClientProbeResult>;
 export type ClientInitializeRequest = TypedClientRequest<typeof CLIENT_INITIALIZE>;
 export type ClientHeartbeatRequest = TypedClientRequest<typeof CLIENT_HEARTBEAT>;
+export type ClientCapabilitiesChangedRequest = TypedClientRequest<typeof CLIENT_CAPABILITIES_CHANGED>;
 export type ClientInitializeResponse = ResponseEnvelope<InitializeResult>;
+export type ClientCapabilitiesChangedResponse = ResponseEnvelope<ClientCapabilitiesChangedResult>;
 export type ClientHeartbeatResponse = ResponseEnvelope<ClientHeartbeatResult>;
 export type StateSubscribeResponse = ResponseEnvelope<StateSubscribeResult>;
 export type StateUnsubscribeResponse = ResponseEnvelope<StateUnsubscribeResult>;
@@ -731,7 +771,7 @@ export type AttachmentCreatePastedImageResponse = ResponseEnvelope<AttachmentCre
 export type AttachmentCreateEmbeddedCandidateResponse = ResponseEnvelope<AttachmentCreateEmbeddedCandidateResult>;
 export type AttachmentConfirmEmbeddedResponse = ResponseEnvelope<AttachmentConfirmEmbeddedResult>;
 export type AttachmentRefreshHandlesResponse = ResponseEnvelope<AttachmentRefreshHandlesResult>;
-export type AttachmentReleaseHandlesResponse = ResponseEnvelope<AttachmentReleaseHandlesResult>;
+export type AttachmentReleaseResponse = ResponseEnvelope<AttachmentReleaseResult>;
 export type AttachmentRevealResponse = ResponseEnvelope<AttachmentRevealResult>;
 export type WorkspaceListRootsResponse = ResponseEnvelope<WorkspaceListRootsResult>;
 export type WorkspaceListDirectoryResponse = ResponseEnvelope<WorkspaceListDirectoryResult>;
@@ -742,7 +782,6 @@ export type TaskSetConfigOptionResponse = ResponseEnvelope<TaskSetConfigOptionRe
 export type TaskCancelResponse = ResponseEnvelope<TaskCancelResult>;
 export type TaskOpenResponse = ResponseEnvelope<TaskOpenResult>;
 export type TaskChatPageResponse = ResponseEnvelope<TaskChatPageResult>;
-export type TaskToolDetailResponse = ResponseEnvelope<TaskToolDetailResult>;
 export type TaskListResponse = ResponseEnvelope<TaskListResult>;
 export type TaskDiscardResponse = ResponseEnvelope<TaskDiscardResult>;
 export type TaskSetArchivedResponse = ResponseEnvelope<TaskSetArchivedResult>;

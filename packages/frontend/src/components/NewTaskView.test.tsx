@@ -1,16 +1,65 @@
 import { act, create } from "react-test-renderer";
+import type { ComponentProps } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { TaskSnapshot } from "@openaide/app-shell-contracts";
 import type { AgentOption } from "../state/composerOptions";
-import { selectionWithProject } from "../state/composerOptions";
-import { createInitialState } from "../state/store";
+import { selectionWithAgent, selectionWithProject } from "../state/composerOptions";
+import { appReducer, type AppAction } from "../state/appReducer";
+import { createInitialState as createStoreInitialState, type AppState } from "../state/store";
 import { Composer } from "./Composer";
-import { NewTaskView } from "./NewTaskView";
+import { NewTaskView as ProductionNewTaskView } from "./NewTaskView";
 import type { TaskFileBrowserCallbacks } from "./appControllerCallbackTypes";
 
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 });
+
+type TestNewTaskViewProps = Omit<
+  ComponentProps<typeof ProductionNewTaskView>,
+  "intents" | "onRemoveAttachment" | "state"
+> & {
+  dispatch: (action: AppAction) => unknown;
+  onRemoveAttachment?: ComponentProps<typeof ProductionNewTaskView>["onRemoveAttachment"];
+  state: AppState;
+};
+
+function NewTaskView({ dispatch, onRemoveAttachment, state, ...props }: TestNewTaskViewProps) {
+  const preparedTaskId = state.snapshot?.task.has_messages === false
+    ? state.snapshot.task.task_id
+    : undefined;
+  return (
+    <ProductionNewTaskView
+      {...props}
+      intents={{
+        changePrompt: (prompt) => dispatch(preparedTaskId
+          ? { type: "taskInput:prompt", taskId: preparedTaskId, prompt }
+          : { type: "prompt", prompt }),
+        reportAttachmentError: (message) => dispatch({
+          type: "submit:error",
+          message: message ?? "Images can be attached after the Task is open.",
+        }),
+        selectAgent: (agentId, agentLabel) => dispatch({ type: "newTask:agent", agentId, agentLabel }),
+        selectIsolation: (isolation) => dispatch({ type: "newTask:isolation", isolation }),
+        selectProject: (project) => dispatch({ type: "newTask:project", project }),
+        selectWorkspace: (workspace) => dispatch({ type: "newTask:workspace", workspace }),
+      }}
+      onRemoveAttachment={onRemoveAttachment ?? vi.fn()}
+      state={{
+        newTask: state.newTask,
+        preparedTaskInput: preparedTaskId ? state.taskInputs[preparedTaskId] : undefined,
+        projects: state.projects,
+        snapshot: state.snapshot,
+        workspaceRootsLoaded: state.workspaceRootsLoaded,
+      }}
+    />
+  );
+}
+
+function createInitialState() {
+  const state = createStoreInitialState();
+  state.newTask.selection = selectionWithAgent(state.newTask.selection, "codex", "Codex");
+  return state;
+}
 
 describe("NewTaskView", () => {
   it("uses fixed VS Code workspace context without rendering project selection", () => {
@@ -29,7 +78,6 @@ describe("NewTaskView", () => {
         onSelectConfigOption={vi.fn()}
         onSubmitTask={vi.fn()}
         projectContextMode="fixed"
-        resetOptionsRequestKey={vi.fn()}
         state={state}
         submitShortcut="mod_enter"
       />,
@@ -50,7 +98,6 @@ describe("NewTaskView", () => {
         onSelectConfigOption={vi.fn()}
         onSubmitTask={vi.fn()}
         projectContextMode="fixed"
-        resetOptionsRequestKey={vi.fn()}
         state={state}
         submitShortcut="mod_enter"
       />,
@@ -75,7 +122,6 @@ describe("NewTaskView", () => {
         dispatch={vi.fn()}
         onSelectConfigOption={vi.fn()}
         onSubmitTask={vi.fn()}
-        resetOptionsRequestKey={vi.fn()}
         state={state}
         submitShortcut="mod_enter"
       />,
@@ -91,7 +137,7 @@ describe("NewTaskView", () => {
     expect(menuLabels(tree)).toEqual(expect.arrayContaining(["Codex", "OpenCode"]));
   });
 
-  it("keeps project and agent menus populated during transient App Server state gaps", () => {
+  it("does not synthesize authoritative workspace choices from Task history", () => {
     const state = createInitialState();
     state.tasks = [{
       agent_id: "codex",
@@ -122,14 +168,13 @@ describe("NewTaskView", () => {
         dispatch={vi.fn()}
         onSelectConfigOption={vi.fn()}
         onSubmitTask={vi.fn()}
-        resetOptionsRequestKey={vi.fn()}
         state={state}
         submitShortcut="mod_enter"
       />,
     );
 
     act(() => buttonWithText(tree, "OpenAIDE").props.onClick());
-    expect(menuLabels(tree)).toContain("OpenAIDE");
+    expect(menuLabels(tree)).not.toContain("OpenAIDE");
 
     act(() => buttonWithText(tree, "Codex").props.onClick());
     expect(menuLabels(tree).length).toBeGreaterThan(0);
@@ -144,7 +189,6 @@ describe("NewTaskView", () => {
         loadingProjects
         onSelectConfigOption={vi.fn()}
         onSubmitTask={vi.fn()}
-        resetOptionsRequestKey={vi.fn()}
         state={state}
         submitShortcut="mod_enter"
       />,
@@ -164,7 +208,6 @@ describe("NewTaskView", () => {
         dispatch={dispatch}
         onSelectConfigOption={vi.fn()}
         onSubmitTask={vi.fn()}
-        resetOptionsRequestKey={vi.fn()}
         state={state}
         submitShortcut="mod_enter"
       />,
@@ -194,7 +237,6 @@ describe("NewTaskView", () => {
         dispatch={dispatch}
         onSelectConfigOption={vi.fn()}
         onSubmitTask={vi.fn()}
-        resetOptionsRequestKey={vi.fn()}
         state={state}
         submitShortcut="mod_enter"
         workspaceBrowser={workspaceBrowserCallbacks()}
@@ -235,6 +277,7 @@ describe("NewTaskView", () => {
       workspaceLabel: "new-app",
     };
     state.newTask.prompt = "Start in a new workspace";
+    state.snapshot = taskSnapshot("task_1", false);
     const onSubmitTask = vi.fn();
 
     const tree = render(
@@ -243,7 +286,6 @@ describe("NewTaskView", () => {
         dispatch={vi.fn()}
         onSelectConfigOption={vi.fn()}
         onSubmitTask={onSubmitTask}
-        resetOptionsRequestKey={vi.fn()}
         state={state}
         submitShortcut="mod_enter"
       />,
@@ -269,7 +311,6 @@ describe("NewTaskView", () => {
         dispatch={vi.fn()}
         onSelectConfigOption={vi.fn()}
         onSubmitTask={vi.fn()}
-        resetOptionsRequestKey={vi.fn()}
         state={state}
         submitShortcut="mod_enter"
       />,
@@ -294,7 +335,6 @@ describe("NewTaskView", () => {
         loadingProjects
         onSelectConfigOption={vi.fn()}
         onSubmitTask={onSubmitTask}
-        resetOptionsRequestKey={vi.fn()}
         state={state}
         submitShortcut="mod_enter"
       />,
@@ -308,7 +348,7 @@ describe("NewTaskView", () => {
     expect(onSubmitTask).not.toHaveBeenCalled();
   });
 
-  it("allows starting a typed task while agent config options are still loading", () => {
+  it("blocks a typed task while authoritative Agent preparation is loading", () => {
     const state = createInitialState();
     const project = { projectId: "project_1", label: "OpenAIDE" };
     const onSubmitTask = vi.fn();
@@ -317,6 +357,11 @@ describe("NewTaskView", () => {
     state.newTask.configOptions = undefined;
     state.newTask.configOptionsLoading = true;
     state.newTask.prompt = "Start without waiting for optional model options";
+    state.snapshot = {
+      ...taskSnapshot("task_1", false),
+      agent_config: { agent_id: "codex", options: [], status: "loading" },
+      send_capability: { state: "loading" },
+    };
 
     const tree = render(
       <NewTaskView
@@ -324,29 +369,30 @@ describe("NewTaskView", () => {
         dispatch={vi.fn()}
         onSelectConfigOption={vi.fn()}
         onSubmitTask={onSubmitTask}
-        resetOptionsRequestKey={vi.fn()}
         state={state}
         submitShortcut="mod_enter"
       />,
     );
 
     const send = tree.root.findByProps({ "aria-label": "Send message" });
-    expect(send.props.disabled).toBe(false);
+    expect(send.props.disabled).toBe(true);
 
     act(() => send.props.onClick());
 
-    expect(onSubmitTask).toHaveBeenCalledTimes(1);
-    expect(textContent(tree)).toContain("Preparing Codex options");
+    expect(onSubmitTask).not.toHaveBeenCalled();
   });
 
-  it("preserves typed new-task text in Shell state before the Draft Task is prepared", () => {
-    const state = createInitialState();
+  it("preserves typed new-task text after the New Task is prepared", () => {
+    let state = createInitialState();
     const project = { projectId: "project_1", label: "OpenAIDE" };
-    const dispatch = vi.fn();
+    const dispatch = vi.fn((action: AppAction) => {
+      state = appReducer(state, action);
+    });
     const onSubmitTask = vi.fn();
     state.projects = [project];
     state.newTask.selection = selectionWithProject(state.newTask.selection, project);
     state.newTask.configOptions = { agent_id: "codex", options: [], status: "ready" };
+    state.snapshot = taskSnapshot("task_1", false);
 
     const tree = render(
       <NewTaskView
@@ -354,7 +400,6 @@ describe("NewTaskView", () => {
         dispatch={dispatch}
         onSelectConfigOption={vi.fn()}
         onSubmitTask={onSubmitTask}
-        resetOptionsRequestKey={vi.fn()}
         state={state}
         submitShortcut="mod_enter"
       />,
@@ -362,7 +407,22 @@ describe("NewTaskView", () => {
 
     act(() => tree.root.findByType(Composer).props.onChange("Fix the typing lag"));
 
-    expect(dispatch).toHaveBeenCalledWith({ type: "prompt", prompt: "Fix the typing lag" });
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "taskInput:prompt",
+      taskId: "task_1",
+      prompt: "Fix the typing lag",
+    });
+
+    act(() => tree.update(
+      <NewTaskView
+        agents={[]}
+        dispatch={dispatch}
+        onSelectConfigOption={vi.fn()}
+        onSubmitTask={onSubmitTask}
+        state={state}
+        submitShortcut="mod_enter"
+      />,
+    ));
 
     act(() => tree.root.findByProps({ "aria-label": "Send message" }).props.onClick());
 
@@ -384,17 +444,12 @@ describe("NewTaskView", () => {
         loadingProjects
         onSelectConfigOption={vi.fn()}
         onSubmitTask={vi.fn()}
-        resetOptionsRequestKey={vi.fn()}
         state={state}
         submitShortcut="mod_enter"
       />,
     );
 
-    act(() => tree.root.findByProps({ "aria-label": "Add context" }).props.onClick());
-
-    expect(menuButtonByStrongLabel(tree, "Workspace files").props.disabled).toBe(true);
-    expect(menuButtonByStrongLabel(tree, "Upload or photo").props.disabled).toBe(true);
-    expect(tree.root.findAllByProps({ type: "file" })[0].props.disabled).toBe(true);
+    expect(tree.root.findByProps({ "aria-label": "Add context" }).props.disabled).toBe(true);
   });
 
   it("enables only App Server-backed attachment actions when project context is ready", () => {
@@ -403,6 +458,7 @@ describe("NewTaskView", () => {
     state.projects = [project];
     state.newTask.selection = selectionWithProject(state.newTask.selection, project);
     state.newTask.configOptions = { agent_id: "codex", options: [], status: "ready" };
+    state.snapshot = taskSnapshot("task_1", false);
 
     const tree = render(
       <NewTaskView
@@ -411,7 +467,6 @@ describe("NewTaskView", () => {
         fileBrowser={fileBrowserCallbacks()}
         onSelectConfigOption={vi.fn()}
         onSubmitTask={vi.fn()}
-        resetOptionsRequestKey={vi.fn()}
         state={state}
         submitShortcut="mod_enter"
       />,
@@ -448,7 +503,6 @@ describe("NewTaskView", () => {
         dispatch={vi.fn()}
         onSelectConfigOption={vi.fn()}
         onSubmitTask={vi.fn()}
-        resetOptionsRequestKey={vi.fn()}
         state={state}
         submitShortcut="mod_enter"
       />,
@@ -459,7 +513,7 @@ describe("NewTaskView", () => {
     expect(editorHtml(tree)).toBe("Explain this");
   });
 
-  it("explains that attachments need a message before sending", () => {
+  it("allows a prepared New Task to send a valid attachment without text", () => {
     const state = createInitialState();
     const project = { projectId: "project_1", label: "OpenAIDE" };
     state.projects = [project];
@@ -471,6 +525,7 @@ describe("NewTaskView", () => {
       local_id: "attachment_1",
       app_server_handle_id: "attachment-handle-readme" as never,
     }];
+    state.snapshot = taskSnapshot("task_1", false);
 
     const tree = render(
       <NewTaskView
@@ -478,16 +533,16 @@ describe("NewTaskView", () => {
         dispatch={vi.fn()}
         onSelectConfigOption={vi.fn()}
         onSubmitTask={vi.fn()}
-        resetOptionsRequestKey={vi.fn()}
         state={state}
         submitShortcut="mod_enter"
       />,
     );
 
-    expect(textContent(tree)).toContain("Add a message for this Agent.");
+    expect(textContent(tree)).not.toContain("Add a message for this Agent.");
+    expect(tree.root.findByProps({ "aria-label": "Send message" }).props.disabled).toBe(false);
   });
 
-  it("does not show a text-required error while attachment-only capability is loading", () => {
+  it("keeps attachment sending disabled while authoritative capability is loading", () => {
     const state = createInitialState();
     const project = { projectId: "project_1", label: "OpenAIDE" };
     state.projects = [project];
@@ -505,7 +560,7 @@ describe("NewTaskView", () => {
     };
     state.snapshot = {
       ...taskSnapshot("task_1", false),
-      send_capability: { state: "loading", attachment_only: false },
+      send_capability: { state: "loading" },
     };
 
     const tree = render(
@@ -514,13 +569,13 @@ describe("NewTaskView", () => {
         dispatch={vi.fn()}
         onSelectConfigOption={vi.fn()}
         onSubmitTask={vi.fn()}
-        resetOptionsRequestKey={vi.fn()}
         state={state}
         submitShortcut="mod_enter"
       />,
     );
 
     expect(textContent(tree)).not.toContain("Add a message for this Agent.");
+    expect(tree.root.findByProps({ "aria-label": "Send message" }).props.disabled).toBe(true);
   });
 
   it("sends an attachment-only image when the prepared Task supports it", () => {
@@ -538,7 +593,7 @@ describe("NewTaskView", () => {
     }];
     state.snapshot = {
       ...taskSnapshot("task_1", false),
-      send_capability: { state: "ready", attachment_only: true },
+      send_capability: { state: "ready" },
     };
     const onSubmitTask = vi.fn();
 
@@ -548,7 +603,6 @@ describe("NewTaskView", () => {
         dispatch={vi.fn()}
         onSelectConfigOption={vi.fn()}
         onSubmitTask={onSubmitTask}
-        resetOptionsRequestKey={vi.fn()}
         state={state}
         submitShortcut="mod_enter"
       />,
@@ -577,7 +631,6 @@ describe("NewTaskView", () => {
         loadingProjects
         onSelectConfigOption={vi.fn()}
         onSubmitTask={vi.fn()}
-        resetOptionsRequestKey={vi.fn()}
         state={state}
         submitShortcut="enter"
       />,
@@ -585,13 +638,13 @@ describe("NewTaskView", () => {
     const waitingFocusKey = tree.root.findByType(Composer).props.focusRequestKey;
 
     act(() => {
+      state.snapshot = taskSnapshot("task_1", false);
       tree.update(
         <NewTaskView
           agents={[]}
           dispatch={vi.fn()}
           onSelectConfigOption={vi.fn()}
           onSubmitTask={vi.fn()}
-          resetOptionsRequestKey={vi.fn()}
           state={state}
           submitShortcut="enter"
         />,
@@ -630,7 +683,6 @@ describe("NewTaskView", () => {
         onSelectConfigOption={vi.fn()}
         onCancelTask={onCancelTask}
         onSubmitTask={vi.fn()}
-        resetOptionsRequestKey={vi.fn()}
         state={state}
         submitShortcut="mod_enter"
       />,
@@ -638,7 +690,7 @@ describe("NewTaskView", () => {
 
     expect(editorHtml(tree)).toBe("Do not erase this");
     expect(composerEditor(tree).props["aria-disabled"]).toBe(true);
-    expect(composerEditor(tree).props["data-placeholder"]).toBe("");
+    expect(composerEditor(tree).props["data-placeholder"]).toBe("Sending.");
     expect(tree.root.findAllByProps({ "aria-label": "Send message" })).toHaveLength(0);
     expect(tree.root.findAllByProps({ "aria-label": "Task status: Starting" })).toHaveLength(0);
     expect(tree.root.findAllByProps({ className: "new-task-starting-status" })).toHaveLength(0);
@@ -672,7 +724,6 @@ describe("NewTaskView", () => {
         dispatch={vi.fn()}
         onSelectConfigOption={vi.fn()}
         onSubmitTask={vi.fn()}
-        resetOptionsRequestKey={vi.fn()}
         state={state}
         submitShortcut="mod_enter"
       />,
@@ -698,7 +749,6 @@ describe("NewTaskView", () => {
         dispatch={vi.fn()}
         onSelectConfigOption={vi.fn()}
         onSubmitTask={vi.fn()}
-        resetOptionsRequestKey={vi.fn()}
         state={state}
         submitShortcut="mod_enter"
       />,
@@ -728,7 +778,6 @@ describe("NewTaskView", () => {
         dispatch={vi.fn()}
         onSelectConfigOption={vi.fn()}
         onSubmitTask={vi.fn()}
-        resetOptionsRequestKey={vi.fn()}
         state={state}
         submitShortcut="mod_enter"
       />,
@@ -835,13 +884,12 @@ describe("NewTaskView", () => {
         dispatch={vi.fn()}
         onSelectConfigOption={vi.fn()}
         onSubmitTask={vi.fn()}
-        resetOptionsRequestKey={vi.fn()}
         state={state}
         submitShortcut="mod_enter"
       />,
     );
 
-    expect(composerButtonLabels(tree)).toEqual([
+    expect(composerControlLabels(tree)).toEqual([
       "fast-mode: Off",
       "Agent",
       "Medium",
@@ -876,7 +924,6 @@ describe("NewTaskView", () => {
         dispatch={vi.fn()}
         onSelectConfigOption={vi.fn()}
         onSubmitTask={vi.fn()}
-        resetOptionsRequestKey={vi.fn()}
         state={state}
         submitShortcut="mod_enter"
       />,
@@ -961,14 +1008,11 @@ function menuLabels(tree: ReturnType<typeof render>) {
     .map((node) => node.children.join(""));
 }
 
-function composerButtonLabels(tree: ReturnType<typeof render>) {
+function composerControlLabels(tree: ReturnType<typeof render>) {
   return tree.root.findByType(Composer)
-    .findAllByType("button")
-    .map((button) =>
-      button.children
-        .filter((child): child is string => typeof child === "string")
-        .join(""),
-    )
+    .findAll((node) => typeof node.props.className === "string"
+      && node.props.className.split(" ").includes("composer-pill"))
+    .map((control) => nodeText(control).replace(/\s+/g, " ").trim())
     .filter(Boolean);
 }
 
@@ -1003,6 +1047,7 @@ function menuButtonsByStrongLabel(tree: ReturnType<typeof render>, label: string
 
 function fileBrowserCallbacks(): TaskFileBrowserCallbacks {
   return {
+    ownerKey: "new-task-files:test",
     attachEmbedded: vi.fn(async () => undefined),
     attachFileReference: vi.fn(async () => undefined),
     attachPastedImage: vi.fn(async () => undefined),
@@ -1013,6 +1058,7 @@ function fileBrowserCallbacks(): TaskFileBrowserCallbacks {
 
 function workspaceBrowserCallbacks() {
   return {
+    ownerKey: "new-task-workspace:test",
     listRoots: vi.fn(async () => [{ label: "Workspace", path: "/workspace" }]),
     listDirectory: vi.fn(async (path: string) => {
       if (path === "/workspace") {
@@ -1031,6 +1077,7 @@ function workspaceBrowserCallbacks() {
 
 function taskSnapshot(taskId: string, hasMessages: boolean): TaskSnapshot {
   return {
+    lifecycle: hasMessages ? "visible" : "new",
     task: {
       task_id: taskId,
       title: "New task",
@@ -1058,13 +1105,13 @@ function taskSnapshot(taskId: string, hasMessages: boolean): TaskSnapshot {
       version: 1,
     },
     history_sync: { state: "idle", generation: 0 },
-    permissions: [],
+    active_requests: [],
     settings_summary: {
       agent_id: "codex",
       isolation: "local",
       config_options: {},
     },
-    send_capability: { state: "ready", attachment_only: false },
+    send_capability: { state: "ready" },
     revision: 1,
   };
 }

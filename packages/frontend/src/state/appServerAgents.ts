@@ -11,7 +11,7 @@ export function applyProtocolAgents(
 ) {
   if (!snapshot) return;
   setAgents(agentOptionsFromProtocol(snapshot));
-  const action = defaultAgentActionFromProtocol(snapshot, currentAgentId);
+  const action = fallbackAgentActionFromProtocol(snapshot, currentAgentId);
   if (action) dispatch(action);
 }
 
@@ -28,17 +28,16 @@ export function agentOptionsFromProtocol(snapshot: AgentCollectionSnapshot): Age
   });
 }
 
-export function defaultAgentActionFromProtocol(
+export function fallbackAgentActionFromProtocol(
   snapshot: AgentCollectionSnapshot,
   currentAgentId = "",
 ): AppAction | undefined {
   if (snapshot.agents.some((agent) => agent.agentId === currentAgentId)) return undefined;
-  const defaultAgentId = snapshot.defaultAgentId ?? snapshot.agents[0]?.agentId;
-  if (!defaultAgentId) return undefined;
-  const agent = snapshot.agents.find((candidate) => candidate.agentId === defaultAgentId);
+  const fallbackAgent = snapshot.agents[0];
+  if (!fallbackAgent) return undefined;
   return {
     type: "newTask:agent",
-    agentId: defaultAgentId,
-    agentLabel: agent?.label ?? defaultAgentId,
+    agentId: fallbackAgent.agentId,
+    agentLabel: fallbackAgent.label,
   };
 }

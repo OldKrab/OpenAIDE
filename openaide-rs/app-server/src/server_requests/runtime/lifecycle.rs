@@ -19,6 +19,27 @@ impl ServerRequestRuntime {
         scope
     }
 
+    /// Cancels every transient request owned by one Task and releases its Agent waiters.
+    pub fn interrupt_task_requests(&self, task_id: &TaskId, now: AppServerTime) -> usize {
+        let mut inner = self.inner.lock().expect("server request runtime poisoned");
+        let outcomes = inner.broker.interrupt_scope(
+            &PendingRequestScope::Task {
+                task_id: task_id.clone(),
+            },
+            now,
+        );
+        for outcome in &outcomes {
+            let RequestLifecycleOutcome::Interrupted { request_id, .. } = outcome;
+            super::remove_permission_waiter(&mut inner, request_id);
+            inner.question_waiters.remove(request_id);
+            inner.waitable_requests.remove(request_id);
+        }
+        if !outcomes.is_empty() {
+            self.changed.notify_all();
+        }
+        outcomes.len()
+    }
+
     pub fn observe_client_initialized_or_reattached(
         &self,
         delivery: Delivery,

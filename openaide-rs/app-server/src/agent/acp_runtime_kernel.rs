@@ -9,7 +9,8 @@ use crate::agent::registry_handle::AgentRegistryHandle;
 use crate::agent::{
     AgentAuthenticateRequest, AgentEventSink, AgentListSessionsRequest, AgentLoadedSession,
     AgentProbeRequest, AgentPrompt, AgentSession, AgentSessionDelete, AgentSessionEventSink,
-    AgentSessionLoad, AgentSessionResume, AgentSessionSetConfigOptionRequest, AgentSessionStart,
+    AgentSessionKey, AgentSessionLoad, AgentSessionResume, AgentSessionSetConfigOptionRequest,
+    AgentSessionStart,
 };
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::host::HostBridge;
@@ -108,27 +109,31 @@ impl AcpRuntimeKernel {
 
     pub(super) fn attach_session_event_sink(
         &self,
-        session_id: &str,
+        session: &AgentSessionKey,
         sink: Arc<dyn AgentSessionEventSink>,
     ) -> Result<(), RuntimeError> {
         self.active_sessions
-            .attach_session_event_sink(session_id, sink)
+            .attach_session_event_sink(session, sink)
     }
 
     pub(super) fn prompt(
         &self,
         prompt: AgentPrompt,
         sink: Arc<dyn AgentEventSink>,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<crate::agent::AgentPromptOutcome, RuntimeError> {
         self.active_sessions.prompt(prompt, sink)
     }
 
-    pub(super) fn cancel_session(&self, session_id: &str) -> Result<(), RuntimeError> {
-        self.active_sessions.cancel_session(session_id)
+    pub(super) fn steer(&self, prompt: AgentPrompt) -> Result<(), RuntimeError> {
+        self.active_sessions.steer(prompt)
     }
 
-    pub(super) fn close_session(&self, session_id: &str) -> Result<(), RuntimeError> {
-        self.active_sessions.close_session(session_id)
+    pub(super) fn cancel_session(&self, session: &AgentSessionKey) -> Result<(), RuntimeError> {
+        self.active_sessions.cancel_session(session)
+    }
+
+    pub(super) fn close_session(&self, session: &AgentSessionKey) -> Result<(), RuntimeError> {
+        self.active_sessions.close_session(session)
     }
 
     pub(super) fn delete_session(&self, request: AgentSessionDelete) -> Result<(), RuntimeError> {

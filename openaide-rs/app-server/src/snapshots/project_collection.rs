@@ -39,10 +39,7 @@ impl ProjectCollectionSnapshotSource for ProjectCollectionStore {
             self.store.list_tasks().map_err(snapshot_read_error)?,
             &self.configured_roots,
         );
-        Ok(ProjectCollectionSnapshot {
-            projects,
-            active_project_id: None,
-        })
+        Ok(ProjectCollectionSnapshot { projects })
     }
 }
 
@@ -63,10 +60,10 @@ fn project_summaries(
 
     let mut projects = configured_roots
         .projects()
-        .iter()
+        .into_iter()
         .map(|project| ProjectSummary {
-            project_id: project.project_id.clone(),
-            label: project.label.clone(),
+            project_id: project.project_id,
+            label: project.label,
         })
         .collect::<Vec<_>>();
     projects.extend(latest_by_workspace.into_values().map(|record| {

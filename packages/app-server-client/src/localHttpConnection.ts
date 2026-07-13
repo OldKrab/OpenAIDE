@@ -1,11 +1,15 @@
 import {
   type BackendConnection,
   type BackendEventListener,
+  type BackendEventStreamDisconnectListener,
   type BackendServerRequestListener,
+  type BackendStateReset,
   type BackendStateResetListener,
   type BackendUnsubscribe,
 } from "./backendConnection.js";
+import { BackendReplicaChangedError } from "./backendReplicaChangedError.js";
 import type {
+  ClientCapabilitiesChangedParams,
   InitializeParams,
   InitializeResult,
   ProtocolMethod,
@@ -16,7 +20,11 @@ import type {
   ServerRequestMethod,
   ServerRequestResponseResultByMethod,
 } from "./generated/protocol.js";
-import { CLIENT_HEARTBEAT, CLIENT_INITIALIZE } from "./generated/protocol.js";
+import {
+  CLIENT_CAPABILITIES_CHANGED,
+  CLIENT_HEARTBEAT,
+  CLIENT_INITIALIZE,
+} from "./generated/protocol.js";
 import {
   parseLocalHttpWireMessages,
   responseResultForId,
@@ -92,6 +100,7 @@ type HttpBackendConnectionOptions = (LocalHttpBackendConnectionOptions | WebProx
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 120_000;
 const EVENT_STREAM_RETRY_MS = 500;
+const MAX_EVENT_STREAM_RETRY_MS = 5_000;
 
 function createHttpBackendConnection(
   options: HttpBackendConnectionOptions,
@@ -100,12 +109,15 @@ function createHttpBackendConnection(
   if (!fetchImpl) throw new Error("LocalHttp BackendConnection requires fetch");
 
   const events = new Set<BackendEventListener>();
+  const eventStreamDisconnectListeners = new Set<BackendEventStreamDisconnectListener>();
   const stateResetListeners = new Set<BackendStateResetListener>();
   const serverRequests = new Set<BackendServerRequestListener>();
   let nextId = 1;
   let initialized = false;
   let closed = false;
   let initializeResult: InitializeResult | undefined;
+  let lastSuccessfulReplica: BackendStateReset | undefined;
+  let replicaGeneration = 0;
   let lastInitializeMeta: RequestMeta | undefined;
   let lastInitializeParams: InitializeParams | undefined;
   let initializePromise: Promise<InitializeResult> | undefined;
@@ -114,7 +126,9 @@ function createHttpBackendConnection(
   let eventStreamAbort: AbortController | undefined;
   let eventStreamReader: LocalHttpStreamReader | undefined;
   let eventStreamRetryTimer: ReturnType<typeof setTimeout> | undefined;
+  let eventStreamRetryDelay = EVENT_STREAM_RETRY_MS;
   let eventStreamContinuityLost = false;
+  let eventStreamDisconnected = false;
 
   const connection: BackendConnection = {
     async initialize(params: InitializeParams, meta?: RequestMeta) {
@@ -129,6 +143,7 @@ function createHttpBackendConnection(
           if (closed) throw new Error("Backend connection closed");
           initialized = true;
           initializeResult = result;
+          lastSuccessfulReplica = replicaIdentity(result);
           startHeartbeat();
           startEventStream();
           return result;
@@ -144,16 +159,19 @@ function createHttpBackendConnection(
       meta?: RequestMeta,
     ) {
       if (closed) return Promise.reject(new Error("Backend connection closed"));
-      if (!initialized) {
+      // Capability declarations are part of initialization context. Remember
+      // them before waiting for a replacement process so recovery never starts
+      // with workspace facts that this caller has already superseded.
+      rememberInitializationContextUpdate(method, params);
+      const originGeneration = replicaGeneration;
+      const previousReplica = lastSuccessfulReplica;
+      if (!initialized || reinitializePromise) {
         if (!lastInitializeParams) {
           return Promise.reject(new Error("Backend connection is not initialized"));
         }
-        // A failed restart attempt must not make the connection terminal. The
-        // caller's normal retry is also the next initialization attempt, and
-        // concurrent callers share the same reinitialize promise.
-        return reinitializeConnection().then(() => sendRequestWithInitializedRetry(method, params, meta));
+        return reinitializeThenRejectRequest(method, previousReplica, originGeneration);
       }
-      return sendRequestWithInitializedRetry(method, params, meta);
+      return sendRequestWithinReplica(method, params, meta, originGeneration, previousReplica);
     },
     respond<M extends ServerRequestMethod>(
       requestId: RequestId,
@@ -169,6 +187,11 @@ function createHttpBackendConnection(
       events.add(listener);
       return () => events.delete(listener);
     },
+    eventStreamDisconnects(listener: BackendEventStreamDisconnectListener): BackendUnsubscribe {
+      eventStreamDisconnectListeners.add(listener);
+      if (eventStreamDisconnected) listener();
+      return () => eventStreamDisconnectListeners.delete(listener);
+    },
     stateResets(listener: BackendStateResetListener): BackendUnsubscribe {
       stateResetListeners.add(listener);
       return () => stateResetListeners.delete(listener);
@@ -181,6 +204,7 @@ function createHttpBackendConnection(
       closed = true;
       initialized = false;
       initializeResult = undefined;
+      lastSuccessfulReplica = undefined;
       lastInitializeMeta = undefined;
       lastInitializeParams = undefined;
       initializePromise = undefined;
@@ -188,6 +212,7 @@ function createHttpBackendConnection(
       stopHeartbeat();
       stopEventStream();
       events.clear();
+      eventStreamDisconnectListeners.clear();
       stateResetListeners.clear();
       serverRequests.clear();
     },
@@ -212,30 +237,79 @@ function createHttpBackendConnection(
     return responseResultForId(messages, id) as ResponseResultByMethod[M];
   }
 
-  async function sendRequestWithInitializedRetry<M extends ProtocolMethod>(
+  async function sendRequestWithinReplica<M extends ProtocolMethod>(
     method: M,
     params: RequestParamsByMethod[M],
     meta?: RequestMeta,
+    originGeneration = replicaGeneration,
+    previousReplica = lastSuccessfulReplica,
   ): Promise<ResponseResultByMethod[M]> {
+    let result: ResponseResultByMethod[M];
     try {
-      return await sendRequest(method, params, meta);
+      result = await sendRequest(method, params, meta);
     } catch (error) {
       if (!isNotInitializedError(error) || !lastInitializeParams) throw error;
-      await reinitializeConnection();
-      return sendRequest(method, params, meta);
+      await reinitializeConnection(originGeneration);
+      throw replicaChangedError(method, previousReplica);
     }
+    if (originGeneration !== replicaGeneration) {
+      if (reinitializePromise) await reinitializePromise;
+      throw replicaChangedError(method, previousReplica);
+    }
+    return result;
   }
 
-  async function reinitializeConnection() {
+  async function reinitializeThenRejectRequest<M extends ProtocolMethod>(
+    method: M,
+    previousReplica: BackendStateReset | undefined,
+    originGeneration: number,
+  ): Promise<ResponseResultByMethod[M]> {
+    await reinitializeConnection(originGeneration);
+    throw replicaChangedError(method, previousReplica);
+  }
+
+  function replicaChangedError(
+    method: ProtocolMethod,
+    previousReplica: BackendStateReset | undefined,
+  ) {
+    if (!lastSuccessfulReplica) {
+      throw new Error("App Server reinitialized without a replica identity");
+    }
+    return new BackendReplicaChangedError(method, previousReplica, lastSuccessfulReplica);
+  }
+
+  function rememberInitializationContextUpdate<M extends ProtocolMethod>(
+    method: M,
+    params: RequestParamsByMethod[M],
+  ) {
+    if (method !== CLIENT_CAPABILITIES_CHANGED || !lastInitializeParams) return;
+    const update = params as ClientCapabilitiesChangedParams;
+    const next = { ...lastInitializeParams };
+    if (update.capabilities !== undefined && update.capabilities !== null) {
+      next.capabilities = update.capabilities;
+    }
+    if (update.workspaceRoots !== undefined && update.workspaceRoots !== null) {
+      next.workspaceRoots = update.workspaceRoots.map(({ path }) => ({ path }));
+    }
+    lastInitializeParams = next;
+  }
+
+  async function reinitializeConnection(originGeneration = replicaGeneration) {
     if (!lastInitializeParams) throw new Error("Backend connection has no initialization context");
     if (reinitializePromise) return reinitializePromise;
+    // A response from an older generation may arrive after another request has
+    // already completed recovery. It belongs to that same lost replica and must
+    // not cause a second initialization cycle.
+    if (originGeneration !== replicaGeneration) return;
     const params = lastInitializeParams;
     const meta = lastInitializeMeta;
+    replicaGeneration += 1;
     reinitializePromise = (async () => {
       // Initialization owns the server-side subscription registry. Replacing it
       // always invalidates every watched snapshot, regardless of which request
       // first discovered the restart.
       eventStreamContinuityLost = true;
+      notifyEventStreamDisconnected();
       // The event stream starts from initialize's success callback, so a very
       // fast 409 can race the promise's final cleanup. Let that generation settle
       // before replacing it.
@@ -243,7 +317,6 @@ function createHttpBackendConnection(
       initialized = false;
       initializeResult = undefined;
       await connection.initialize(params, meta);
-      notifyStateResetIfNeeded();
     })().finally(() => {
       reinitializePromise = undefined;
     });
@@ -294,7 +367,7 @@ function createHttpBackendConnection(
     const interval = options.heartbeatIntervalMs ?? 5_000;
     heartbeatTimer = setInterval(() => {
       if (closed || !initialized) return;
-      void sendRequestWithInitializedRetry(CLIENT_HEARTBEAT, {}, undefined).catch(() => {
+      void sendRequestWithinReplica(CLIENT_HEARTBEAT, {}, undefined).catch(() => {
         // Normal requests surface transport failures. Heartbeat failure is only
         // a liveness hint for the App Server, so keep UI state owned by callers.
       });
@@ -311,7 +384,7 @@ function createHttpBackendConnection(
   function startEventStream() {
     stopEventStream();
     eventStreamAbort = new AbortController();
-    void consumeEventStream(eventStreamAbort.signal);
+    void consumeEventStream(eventStreamAbort.signal, replicaGeneration);
   }
 
   function stopEventStream() {
@@ -323,7 +396,7 @@ function createHttpBackendConnection(
     eventStreamReader = undefined;
   }
 
-  async function consumeEventStream(signal: AbortSignal) {
+  async function consumeEventStream(signal: AbortSignal, originGeneration: number) {
     let reader: LocalHttpStreamReader | undefined;
     try {
       const response = await fetchImpl(options.endpointUrl, {
@@ -337,10 +410,11 @@ function createHttpBackendConnection(
         // Reinitialize first; the replacement stream will then invalidate all
         // watched state so callers can establish fresh snapshots.
         eventStreamContinuityLost = true;
-        await reinitializeConnection();
+        await reinitializeConnection(originGeneration);
         return;
       }
       if (!response.ok || !response.body) return;
+      eventStreamDisconnected = false;
       notifyStateResetIfNeeded();
       reader = response.body.getReader();
       eventStreamReader = reader;
@@ -349,6 +423,7 @@ function createHttpBackendConnection(
       while (!closed && !signal.aborted) {
         const { done, value } = await reader.read();
         if (done) break;
+        eventStreamRetryDelay = EVENT_STREAM_RETRY_MS;
         buffered += decoder.decode(value, { stream: true });
         const frames = buffered.split(/\r?\n\r?\n/);
         buffered = frames.pop() ?? "";
@@ -364,15 +439,35 @@ function createHttpBackendConnection(
         // The server drains deliveries before writing them, so any broken stream
         // invalidates all subscription cursors even when no gap event follows.
         eventStreamContinuityLost = true;
-        eventStreamRetryTimer = setTimeout(() => startEventStream(), EVENT_STREAM_RETRY_MS);
+        notifyEventStreamDisconnected();
+        // A reset means a replacement stream is ready for fresh baselines. Emitting
+        // it while disconnected makes every scope retry independently and can
+        // install snapshots that have no live event stream behind them.
+        const retryDelay = eventStreamRetryDelay;
+        eventStreamRetryDelay = Math.min(eventStreamRetryDelay * 2, MAX_EVENT_STREAM_RETRY_MS);
+        eventStreamRetryTimer = setTimeout(() => startEventStream(), retryDelay);
       }
     }
   }
 
   function notifyStateResetIfNeeded() {
     if (!eventStreamContinuityLost) return;
+    const snapshot = initializeResult?.snapshot;
+    // Event streams start only after initialize succeeds, so a continuity reset
+    // always has an authoritative process and state-root identity.
+    if (!snapshot) return;
     eventStreamContinuityLost = false;
-    for (const listener of stateResetListeners) listener();
+    const reset = {
+      serverId: snapshot.server.serverId,
+      stateRootId: snapshot.stateRoot.stateRootId,
+    };
+    for (const listener of stateResetListeners) listener(reset);
+  }
+
+  function notifyEventStreamDisconnected() {
+    if (eventStreamDisconnected) return;
+    eventStreamDisconnected = true;
+    for (const listener of eventStreamDisconnectListeners) listener();
   }
 
   function processEventStreamFrame(frame: string) {
@@ -400,6 +495,16 @@ function isAbortError(error: unknown) {
 
 function isNotInitializedError(error: unknown) {
   return error instanceof AppServerProtocolError && error.protocolError.code === "notInitialized";
+}
+
+function replicaIdentity(result: InitializeResult | undefined) {
+  const snapshot = result?.snapshot;
+  return snapshot
+    ? {
+      serverId: snapshot.server.serverId,
+      stateRootId: snapshot.stateRoot.stateRootId,
+    }
+    : undefined;
 }
 
 async function fetchWithTimeout(

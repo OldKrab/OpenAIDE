@@ -1,4 +1,4 @@
-import type { ErrorEnvelope, ProtocolError, ResponseMeta } from "./generated/protocol.js";
+import type { ErrorEnvelope, ProtocolError, ResponseMeta, TaskSnapshot } from "./generated/protocol.js";
 
 export class AppServerProtocolError extends Error {
   readonly name = "AppServerProtocolError";
@@ -50,10 +50,16 @@ function errorTargetFromUnknown(value: unknown): ProtocolError["target"] | undef
   if (value === null) return null;
   if (!value || typeof value !== "object") return undefined;
   const record = value as Record<string, unknown>;
+  const currentTask = objectValue<TaskSnapshot>(record.currentTask);
   return {
     method: typeof record.method === "string" ? record.method : null,
     field: typeof record.field === "string" ? record.field : null,
+    ...(currentTask ? { currentTask } : {}),
   };
+}
+
+function objectValue<T>(value: unknown): T | undefined {
+  return value && typeof value === "object" ? value as T : undefined;
 }
 
 function responseMetaFromUnknown(value: unknown): ResponseMeta | undefined {

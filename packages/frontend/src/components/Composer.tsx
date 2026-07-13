@@ -8,9 +8,9 @@ import { ComposerEditor, type ComposerEditorHandle } from "./ComposerEditor";
 import {
   composerErrorMessage,
   hasComposerContent,
-  hasComposerText,
   pastedImageFiles,
 } from "./composerDraftPolicy";
+import { composerCanSubmit, type ComposerAvailability } from "./composerAvailability";
 import type { TaskFileBrowserCallbacks } from "./appControllerCallbackTypes";
 import { IconButton } from "./ComposerPrimitives";
 import { shouldInsertComposerNewline, shouldSubmitComposerKey } from "./composerKeymap";
@@ -31,10 +31,10 @@ type ComposerProps = {
   agentLocked?: boolean;
   attachments: ComposerAttachment[];
   autoFocus?: boolean;
+  availability: ComposerAvailability;
   commandCatalog?: AgentCommandsCatalog;
   configLocked?: boolean;
   configOptions?: ConfigOptionsCatalog;
-  disabled: boolean;
   error?: string;
   fileBrowser?: TaskFileBrowserCallbacks;
   focusRequestKey?: number | string;
@@ -48,16 +48,10 @@ type ComposerProps = {
   onSelectConfigOption?: (configId: string, value: string) => void;
   onSelectIsolation?: (isolation: IsolationKind) => void;
   onSubmit: (prompt: string) => void;
-  placeholder: string;
   prompt: string;
   selection: ComposerSelection;
   submitShortcut: ComposerSubmitShortcut;
-  submitDisabled: boolean;
-  submitRequiresText?: boolean;
-  showTextRequirementError?: boolean;
   submissionSettlementKey?: number | string;
-  submitPending?: boolean;
-  submitPendingLabel?: string;
   showAgentSelector?: boolean;
   showIsolationSelector?: boolean;
 };
@@ -66,10 +60,10 @@ export function Composer({
   agentLocked = false,
   attachments,
   autoFocus = false,
+  availability,
   commandCatalog,
   configLocked = false,
   configOptions,
-  disabled,
   error,
   fileBrowser,
   focusRequestKey,
@@ -83,35 +77,29 @@ export function Composer({
   onSelectConfigOption,
   onSelectIsolation,
   onSubmit,
-  placeholder,
   prompt,
   selection,
   submitShortcut,
-  submitDisabled,
-  submitRequiresText = true,
-  showTextRequirementError = true,
   submissionSettlementKey,
-  submitPending = false,
-  submitPendingLabel = "Task starting",
   showAgentSelector,
   showIsolationSelector,
 }: ComposerProps) {
+  const disabled = !availability.canEdit;
   const [openMenu, setOpenMenu] = useState<ComposerMenu | undefined>();
   const [slashPicker, setSlashPicker] = useState<SlashPickerState | undefined>();
   const [editorText, setEditorText] = useState(prompt);
   const [editorRenderRevision, setEditorRenderRevision] = useState(0);
-  const [hasDraftContent, setHasDraftContent] = useState(() => hasComposerContent(prompt, attachments.length));
   const { keyboardFocus, onKeyboardNavigation, onPointerInteraction } = useComposerKeyboardFocus();
   const composerRef = useRef<HTMLElement | null>(null);
   const editorRef = useRef<ComposerEditorHandle | null>(null);
-  const submitButtonRef = useRef<HTMLButtonElement | null>(null);
-  const localErrorRef = useRef<HTMLParagraphElement | null>(null);
   const draftRef = useRef(prompt);
   const lastPromptRef = useRef(prompt);
   const submittedDraftRef = useRef<string | undefined>(undefined);
   const commandCatalogRevision = commandCatalogKey(commandCatalog);
   const lastCommandCatalogKey = useRef(commandCatalogRevision);
-  const lastSubmitPendingRef = useRef(submitPending);
+  const lastSubmissionSettlementKey = useRef(submissionSettlementKey);
+  const hasDraftContent = hasComposerContent(editorText, attachments.length);
+  const canSubmit = composerCanSubmit(availability, editorText, attachments.length);
 
   useComposerAutoFocus({ autoFocus, disabled, editorRef, focusRequestKey });
 
@@ -143,24 +131,30 @@ export function Composer({
   }, [configLocked]);
 
   useEffect(() => {
-    const submittedDraft = submittedDraftRef.current;
-    const hideSubmittedDraft = submittedDraft !== undefined
-      && !error
-      && (submitPending || prompt === "" || prompt === submittedDraft);
-    const renderedPrompt = hideSubmittedDraft ? "" : prompt;
-    const promptChanged = renderedPrompt !== lastPromptRef.current;
-    const submissionSettled = lastSubmitPendingRef.current && !submitPending;
-    lastPromptRef.current = renderedPrompt;
-    lastSubmitPendingRef.current = submitPending;
-    if (promptChanged || submissionSettled || submittedDraft !== undefined) {
-      draftRef.current = renderedPrompt;
-      renderEditorText(renderedPrompt);
+    if (!disabled) return;
+    // Sending freezes the full composer input, including any popover or slash
+    // command flow that could otherwise complete after the request begins.
+    setOpenMenu(undefined);
+    setSlashPicker(undefined);
+  }, [disabled]);
+
+  useEffect(() => {
+    const settlementChanged = submissionSettlementKey !== lastSubmissionSettlementKey.current;
+    lastSubmissionSettlementKey.current = submissionSettlementKey;
+    const promptChanged = prompt !== lastPromptRef.current;
+    lastPromptRef.current = prompt;
+
+    // The submitted text remains visible while task/send is pending. It is cleared
+    // only when the task-scoped draft is authoritatively reset after acceptance.
+    const acceptedWithoutIntermediateRender = settlementChanged
+      && submittedDraftRef.current !== undefined
+      && prompt === "";
+    if (promptChanged || acceptedWithoutIntermediateRender) {
+      draftRef.current = prompt;
+      renderEditorText(prompt);
     }
-    if (submittedDraft !== undefined && !submitPending) submittedDraftRef.current = undefined;
-    const draft = draftRef.current;
-    setHasDraftContent(hasComposerContent(draft, attachments.length));
-    syncSubmitButton(draft);
-  }, [attachments.length, error, prompt, submissionSettlementKey, submitDisabled, submitPending, submitRequiresText]);
+    if (!availability.submitting && (prompt === "" || error)) submittedDraftRef.current = undefined;
+  }, [availability.submitting, error, prompt, submissionSettlementKey]);
 
   useEffect(() => {
     const catalogChanged = commandCatalogRevision !== lastCommandCatalogKey.current;
@@ -178,19 +172,13 @@ export function Composer({
   }, [commandCatalogRevision, commandCatalog]);
 
   const toggleMenu = (menu: ComposerMenu) => {
-    if (disabled && menu !== "add" && !menu.startsWith("config:")) return;
-    commitDraft();
+    if (disabled) return;
     setOpenMenu((current) => (current === menu ? undefined : menu));
   };
 
   const selectAndClose = (select: () => void) => {
-    commitDraft();
     select();
     setOpenMenu(undefined);
-  };
-
-  const commitDraft = () => {
-    onChange(draftRef.current);
   };
 
   const renderEditorText = (value: string) => {
@@ -201,8 +189,7 @@ export function Composer({
   const syncDraft = (value: string, options: { renderEditor?: boolean } = {}) => {
     draftRef.current = value;
     if (options.renderEditor) renderEditorText(value);
-    setHasDraftContent(hasComposerContent(value, attachments.length));
-    syncSubmitButton(value);
+    else setEditorText(value);
   };
 
   const updateSlashPicker = (value: string, cursor: number) => {
@@ -211,24 +198,12 @@ export function Composer({
     if (picker) setOpenMenu(undefined);
   };
 
-  const syncSubmitButton = (value: string) => {
-    const button = submitButtonRef.current;
-    const blocked = submitBlocked(value);
-    if (button) button.disabled = blocked;
-    const localError = localErrorRef.current;
-    if (localError) localError.hidden = !localMessageShapeBlocked(value);
-  };
-
-  const submitBlocked = (value: string) =>
-    submitDisabled ||
-    !hasComposerContent(value, attachments.length) ||
-    (submitRequiresText && !hasComposerText(value));
-  const localMessageShapeBlocked = (value: string) =>
-    !submitDisabled && submitRequiresText && !hasComposerText(value);
+  const showStopAction = Boolean(onCancel && (!hasDraftContent || !canSubmit));
+  const showSendAction = !onCancel || (hasDraftContent && canSubmit);
 
   const submitDraft = () => {
     const draft = draftRef.current;
-    if (submitBlocked(draft)) return;
+    if (!composerCanSubmit(availability, draft, attachments.length)) return;
     submittedDraftRef.current = draft;
     onSubmit(draft);
   };
@@ -252,6 +227,7 @@ export function Composer({
     const nextText = `${draft.slice(0, selection.start)}${text}${draft.slice(selection.end)}`;
     const cursor = selection.start + text.length;
     syncDraft(nextText, { renderEditor: true });
+    onChange(nextText);
     queueEditorSelection(cursor);
   };
 
@@ -291,9 +267,9 @@ export function Composer({
         ariaLabel="Message"
         commandCatalog={commandCatalog}
         disabled={disabled}
-        onBlur={commitDraft}
         onInputText={(value, cursor) => {
           syncDraft(value);
+          onChange(value);
           updateSlashPicker(value, cursor);
         }}
         onPointerDown={() => {
@@ -301,6 +277,7 @@ export function Composer({
           setSlashPicker(undefined);
         }}
         onPaste={(event) => {
+          if (disabled) return;
           const images = pastedImageFiles(event.clipboardData);
           if (images.length > 0) {
             event.preventDefault();
@@ -309,7 +286,6 @@ export function Composer({
               return;
             }
             const draft = { prompt: draftRef.current, context: attachments };
-            commitDraft();
             void attachEveryImage(images, (image) => fileBrowser.attachPastedImage(image, draft)).catch((error: unknown) => {
               onUnsupportedImageAttachment?.(composerErrorMessage(error, "Unable to attach image."));
             });
@@ -348,7 +324,7 @@ export function Composer({
               return;
             }
           }
-          if (shouldSubmitComposerKey(event, submitShortcut) && !submitDisabled) {
+          if (shouldSubmitComposerKey(event, submitShortcut) && canSubmit) {
             event.preventDefault();
             submitDraft();
             return;
@@ -363,7 +339,7 @@ export function Composer({
             insertEditorText("\n");
           }
         }}
-        placeholder={placeholder}
+        placeholder={availability.placeholder}
         ref={editorRef}
         renderRevision={editorRenderRevision}
         value={editorText}
@@ -376,9 +352,6 @@ export function Composer({
         />
       ) : null}
       {error ? <p className="inline-error">{error}</p> : null}
-      {!error && showTextRequirementError && attachments.length > 0 ? (
-        <p className="inline-error" hidden={!localMessageShapeBlocked(draftRef.current)} ref={localErrorRef}>Add a message for this Agent.</p>
-      ) : null}
       <div className="composer-footer">
         <ComposerControls
           agentLocked={agentLocked}
@@ -400,22 +373,21 @@ export function Composer({
           showIsolationSelector={showIsolationSelector}
         />
         <div className="composer-actions">
-          {submitPending ? (
-            <span aria-label={submitPendingLabel} className="composer-submit-pending">
+          {availability.submitting ? (
+            <span aria-label={availability.submitPendingLabel} className="composer-submit-pending">
               <LoaderCircle size={14} aria-hidden="true" />
             </span>
           ) : null}
-          {!submitPending && onCancel && !hasDraftContent ? (
+          {showStopAction && onCancel ? (
             <IconButton ariaLabel="Stop task" className="composer-stop-button" icon={<CircleStop size={14} />} onClick={onCancel} />
           ) : null}
-          {!submitPending && (!onCancel || hasDraftContent) ? (
+          {!availability.submitting && showSendAction ? (
             <IconButton
-              ariaLabel="Send message"
+              ariaLabel={availability.submitActionLabel}
               className="composer-send-button"
-              disabled={submitBlocked(draftRef.current)}
+              disabled={!canSubmit}
               icon={<ArrowUp size={15} />}
               onClick={submitDraft}
-              ref={submitButtonRef}
             />
           ) : null}
         </div>

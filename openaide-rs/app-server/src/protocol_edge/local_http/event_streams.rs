@@ -56,6 +56,19 @@ impl EventStreamRegistry {
             == Some(&lease.generation)
     }
 
+    /// Keeps lease validation atomic with work that consumes stream-owned state.
+    pub(super) fn with_current<R>(
+        &self,
+        lease: &EventStreamLease,
+        action: impl FnOnce() -> R,
+    ) -> Option<R> {
+        let state = self
+            .state
+            .lock()
+            .expect("event stream registry lock poisoned");
+        (state.active.get(&lease.connection_id) == Some(&lease.generation)).then(action)
+    }
+
     pub(super) fn finish(&self, lease: &EventStreamLease) {
         let mut state = self
             .state

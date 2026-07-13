@@ -3,10 +3,7 @@ use std::collections::BTreeMap;
 
 use openaide_app_server_protocol::server_requests::{QuestionField, QuestionValue};
 
-use super::{
-    ActivityStatus, ActivityStep, PermissionDecision, PermissionOption, PermissionState,
-    PermissionToolCall,
-};
+use super::{ActivityStatus, ActivityStep};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct MessagePage {
@@ -40,19 +37,11 @@ pub enum NormalizedMessage {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         attachments: Vec<Attachment>,
     },
-    AgentText {
+    AgentMessage {
         id: String,
-        text: String,
+        role: AgentMessageRole,
+        parts: Vec<AgentMessagePart>,
         created_at: String,
-        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-        streaming: bool,
-    },
-    Thought {
-        id: String,
-        text: String,
-        created_at: String,
-        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-        streaming: bool,
     },
     Activity {
         id: String,
@@ -61,27 +50,6 @@ pub enum NormalizedMessage {
         created_at: String,
         collapsed: bool,
         steps: Vec<ActivityStep>,
-    },
-    Permission {
-        id: String,
-        request_id: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        app_server_request_id: Option<String>,
-        title: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        description: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        scope: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        risk: Option<String>,
-        tool_call: PermissionToolCall,
-        state: PermissionState,
-        created_at: String,
-        options: Vec<PermissionOption>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        selected_option: Option<String>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        decision: Option<PermissionDecision>,
     },
     Question {
         id: String,
@@ -96,6 +64,8 @@ pub enum NormalizedMessage {
         content: Option<BTreeMap<String, QuestionValue>>,
         #[serde(skip_serializing_if = "Option::is_none")]
         error: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        resolution_message: Option<String>,
     },
     Interruption {
         id: String,
@@ -110,10 +80,15 @@ impl NormalizedMessage {
     pub fn message_type(&self) -> &'static str {
         match self {
             NormalizedMessage::User { .. } => "user",
-            NormalizedMessage::AgentText { .. } => "agent_text",
-            NormalizedMessage::Thought { .. } => "thought",
+            NormalizedMessage::AgentMessage {
+                role: AgentMessageRole::Agent,
+                ..
+            } => "agent_message",
+            NormalizedMessage::AgentMessage {
+                role: AgentMessageRole::Thought,
+                ..
+            } => "thought_message",
             NormalizedMessage::Activity { .. } => "activity",
-            NormalizedMessage::Permission { .. } => "permission",
             NormalizedMessage::Question { .. } => "question",
             NormalizedMessage::Interruption { .. } => "interruption",
         }
@@ -122,10 +97,8 @@ impl NormalizedMessage {
     pub fn identity(&self) -> String {
         match self {
             NormalizedMessage::User { id, .. }
-            | NormalizedMessage::AgentText { id, .. }
-            | NormalizedMessage::Thought { id, .. }
+            | NormalizedMessage::AgentMessage { id, .. }
             | NormalizedMessage::Activity { id, .. }
-            | NormalizedMessage::Permission { id, .. }
             | NormalizedMessage::Question { id, .. }
             | NormalizedMessage::Interruption { id, .. } => id.clone(),
         }
@@ -134,25 +107,105 @@ impl NormalizedMessage {
     pub fn preserve_created_at_from(&mut self, existing: &NormalizedMessage) {
         let existing_created_at = match existing {
             NormalizedMessage::User { created_at, .. }
-            | NormalizedMessage::AgentText { created_at, .. }
-            | NormalizedMessage::Thought { created_at, .. }
+            | NormalizedMessage::AgentMessage { created_at, .. }
             | NormalizedMessage::Activity { created_at, .. }
-            | NormalizedMessage::Permission { created_at, .. }
             | NormalizedMessage::Question { created_at, .. }
             | NormalizedMessage::Interruption { created_at, .. } => created_at.clone(),
         };
         match self {
             NormalizedMessage::User { created_at, .. }
-            | NormalizedMessage::AgentText { created_at, .. }
-            | NormalizedMessage::Thought { created_at, .. }
+            | NormalizedMessage::AgentMessage { created_at, .. }
             | NormalizedMessage::Activity { created_at, .. }
-            | NormalizedMessage::Permission { created_at, .. }
             | NormalizedMessage::Question { created_at, .. }
             | NormalizedMessage::Interruption { created_at, .. } => {
                 *created_at = existing_created_at
             }
         }
     }
+
+    /// ACP tool updates replace the same activity row, while authorization outcomes
+    /// are App Server-owned history and must survive those replacements.
+    pub fn preserve_tool_permission_outcomes_from(&mut self, existing: &NormalizedMessage) {
+        let (
+            NormalizedMessage::Activity { steps, .. },
+            NormalizedMessage::Activity {
+                steps: existing_steps,
+                ..
+            },
+        ) = (self, existing)
+        else {
+            return;
+        };
+        for step in steps {
+            let super::ActivityStep::Tool {
+                tool_call_id,
+                permission_outcomes,
+                ..
+            } = step
+            else {
+                continue;
+            };
+            let Some(existing_outcomes) = existing_steps.iter().find_map(|existing_step| {
+                let super::ActivityStep::Tool {
+                    tool_call_id: existing_id,
+                    permission_outcomes,
+                    ..
+                } = existing_step
+                else {
+                    return None;
+                };
+                (existing_id == tool_call_id).then_some(permission_outcomes)
+            }) else {
+                continue;
+            };
+            *permission_outcomes = existing_outcomes.clone();
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentMessageRole {
+    Agent,
+    Thought,
+}
+
+/// App Server-owned representation of displayable ACP content.
+/// Reserved ACP metadata and annotations intentionally do not cross this boundary.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum AgentMessagePart {
+    Text {
+        text: String,
+    },
+    Image {
+        media_type: String,
+        data: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        uri: Option<String>,
+    },
+    Resource {
+        uri: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        description: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        media_type: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        size_bytes: Option<u64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        text: Option<String>,
+    },
+    Unsupported {
+        content_type: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        media_type: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        uri: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]

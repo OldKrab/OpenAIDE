@@ -147,7 +147,7 @@ pub(super) async fn open_acp_session<'a>(
         supports_session_close,
         supports_session_delete: runner.supports_session_delete(),
         content_policy,
-        started_session: AgentSession::new(session_id)
+        started_session: AgentSession::new(context.request_agent_id, session_id)
             .with_config_options(&applied_options)
             .with_commands_catalog(replayed_commands),
         replayed_messages,
@@ -157,14 +157,8 @@ pub(super) async fn open_acp_session<'a>(
 async fn wait_for_startup_cancellation(
     cancellation: TurnCancellation,
 ) -> crate::protocol::errors::RuntimeError {
-    loop {
-        if cancellation.is_cancelled() {
-            return crate::protocol::errors::RuntimeError::NotReady(
-                "ACP session start cancelled".to_string(),
-            );
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-    }
+    cancellation.cancelled().await;
+    crate::protocol::errors::RuntimeError::NotReady("ACP session start cancelled".to_string())
 }
 
 fn prompt_content_policy(initialize: &InitializeResponse) -> PromptContentPolicy {

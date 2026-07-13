@@ -47,67 +47,32 @@ fn cancelled_permission_wait_clears_broker_pending_request() {
 }
 
 #[test]
-fn legacy_permission_response_after_protocol_answer_is_rejected_before_commit() {
-    let runtime = ServerRequestRuntime::new();
-    let agent_request = permission_request("agent-request-1");
-    let request_id = runtime
-        .open_permission_request(
-            "task-1",
-            &agent_request,
-            vec![Delivery {
-                client_instance_id: ClientInstanceId::from("client-1"),
-                connection_id: ConnectionId::new("conn-1"),
-                request_capabilities: vec![crate::client_lifecycle::RequestCapability::Permission],
-            }],
-            AppServerTime(1),
-        )
-        .expect("open permission request")
-        .expect("capable permission responder");
-    runtime.handle_response(
-        ClientInstanceId::from("client-1"),
-        request_id,
-        ServerRequestAnswer::Result(json!({ "optionId": "allow" })),
-        AppServerTime(2),
-    );
-
-    let error = runtime
-        .route_agent_permission_response(
-            "agent-request-1",
-            "deny".to_string(),
-            |_| -> Result<(), crate::protocol::errors::RuntimeError> {
-                panic!("legacy commit must not run after protocol answer")
-            },
-        )
-        .unwrap_err();
-
-    assert!(error.to_string().contains("permission already answered"));
-}
-
-#[test]
-fn legacy_permission_response_clears_broker_pending_request() {
+fn interrupting_task_requests_releases_permission_wait_as_cancelled() {
     let runtime = ServerRequestRuntime::new();
     let task_id = TaskId::from("task-1");
-    let agent_request = permission_request("agent-request-1");
-    runtime
+    let request_id = runtime
         .open_permission_request(
-            "task-1",
-            &agent_request,
+            task_id.as_str(),
+            &permission_request("agent-request-1"),
             vec![permission_delivery()],
             AppServerTime(1),
         )
         .expect("open permission request")
         .expect("capable permission responder");
 
-    runtime
-        .route_agent_permission_response(
-            "agent-request-1",
-            "allow".to_string(),
-            |_| -> Result<(), crate::protocol::errors::RuntimeError> { Ok(()) },
-        )
-        .expect("legacy permission response");
+    assert_eq!(
+        runtime.interrupt_task_requests(&task_id, AppServerTime(2)),
+        1
+    );
+    let response = runtime
+        .wait_permission_response(&request_id, &TurnCancellation::new())
+        .expect("interrupted wait settles");
 
+    assert!(matches!(
+        response.outcome,
+        AgentPermissionOutcome::Cancelled
+    ));
     assert!(runtime.pending_for_task(&task_id).is_empty());
-    assert_eq!(runtime.pending_count(), 0);
 }
 
 #[test]

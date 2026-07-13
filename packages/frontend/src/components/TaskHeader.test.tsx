@@ -31,12 +31,12 @@ describe("TaskHeader", () => {
     expect(html.indexOf("Codex")).toBeLessThan(html.indexOf("OpenAIDE"));
   });
 
-  it("uses explicit attention copy for blocked tasks", () => {
+  it("names the waiting state directly", () => {
     const html = renderToStaticMarkup(
-      <TaskHeader agentId="codex" agentName="Codex" status="blocked" title="Blocked task" workspaceRoot="" />,
+      <TaskHeader agentId="codex" agentName="Codex" status="waiting" title="Waiting task" workspaceRoot="" />,
     );
 
-    expect(html).toContain('aria-label="Task status: Needs attention"');
+    expect(html).toContain('aria-label="Task status: Waiting"');
     expect(html).not.toContain("Workspace");
   });
 });

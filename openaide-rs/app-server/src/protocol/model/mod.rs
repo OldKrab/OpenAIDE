@@ -6,7 +6,8 @@ mod task;
 
 pub use activity::{
     ActivityStatus, ActivityStep, ActivityToolContent, ActivityToolDetails, ActivityToolField,
-    ActivityToolInput, ActivityToolLocation, ActivityToolOutput,
+    ActivityToolInput, ActivityToolLocation, ActivityToolOutput, ActivityToolValue,
+    ToolPermissionDecision, ToolPermissionOutcome,
 };
 pub use agent::{
     AgentAuthMethodSummary, AgentAuthenticateResult, AgentAuthenticateStatus, AgentCommand,
@@ -15,10 +16,12 @@ pub use agent::{
     ConfigOptionsCatalog, ConfigOptionsStatus,
 };
 pub use chat::{
-    Attachment, ChatMessage, InterruptionReason, MessagePage, NormalizedMessage, QuestionAction,
-    QuestionState,
+    AgentMessagePart, AgentMessageRole, Attachment, ChatMessage, InterruptionReason, MessagePage,
+    NormalizedMessage, QuestionAction, QuestionState,
 };
 pub use permission::{
     PermissionDecision, PermissionOption, PermissionOptionKind, PermissionState, PermissionToolCall,
 };
-pub use task::{IsolationKind, SettingsSummary, TaskSnapshot, TaskStatus, TaskSummary};
+pub use task::{
+    IsolationKind, PendingTaskConfigChange, SettingsSummary, TaskSnapshot, TaskStatus, TaskSummary,
+};

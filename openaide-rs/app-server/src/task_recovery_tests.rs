@@ -16,6 +16,7 @@ fn volatile_recovery_interrupts_active_turns_without_clearing_native_session_ide
         Some(VolatileRecoveryPlan {
             interrupt_active_turn: true,
             invalidate_live_session_data: false,
+            clear_pending_config_change: false,
         })
     );
 }
@@ -34,6 +35,28 @@ fn volatile_recovery_invalidates_native_session_catalogs() {
         Some(VolatileRecoveryPlan {
             interrupt_active_turn: false,
             invalidate_live_session_data: true,
+            clear_pending_config_change: false,
+        })
+    );
+}
+
+#[test]
+fn volatile_recovery_retires_an_interrupted_config_mutation() {
+    let mut task = task_record();
+    crate::tasks::config_options::begin_task_config_mutation(
+        &mut task,
+        "mutation-1".to_string(),
+        "model".to_string(),
+        "gpt-5.5".to_string(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        volatile_recovery_plan(&task),
+        Some(VolatileRecoveryPlan {
+            interrupt_active_turn: false,
+            invalidate_live_session_data: false,
+            clear_pending_config_change: true,
         })
     );
 }
@@ -41,8 +64,10 @@ fn volatile_recovery_invalidates_native_session_catalogs() {
 fn task_record() -> TaskRecord {
     TaskRecord {
         task_id: "task-1".to_string(),
-        title: "Task".to_string(),
-        agent_title: None,
+        title: crate::storage::records::TaskTitle::new(
+            "Task",
+            crate::storage::records::TaskTitleSource::User,
+        ),
         status: TaskStatus::Inactive,
         task_version: 1,
         message_history_version: 0,
@@ -54,7 +79,11 @@ fn task_record() -> TaskRecord {
         agent_name: "Codex".to_string(),
         isolation: IsolationKind::Local,
         workspace_root: "/workspace".to_string(),
-        first_prompt_sent: false,
+        lifecycle: crate::storage::records::TaskLifecycle::New {
+            owner_client_instance_id: openaide_app_server_protocol::ids::ClientInstanceId::from(
+                "test-client",
+            ),
+        },
         agent_session_id: None,
         active_turn_id: None,
         archived: false,
@@ -62,6 +91,7 @@ fn task_record() -> TaskRecord {
         revision: 0,
         config_options: Default::default(),
         config_options_catalog: None,
+        config_mutation: Default::default(),
         agent_commands_catalog: None,
         model_id: None,
         preparation: TaskPreparationRecord::Ready,

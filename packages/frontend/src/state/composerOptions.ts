@@ -62,8 +62,8 @@ export const isolationOptions: IsolationOption[] = [
 
 export function defaultSelection(workspace?: WorkspaceRoot): ComposerSelection {
   return {
-    agentId: defaultAgent.id,
-    agentLabel: defaultAgent.label,
+    agentId: "",
+    agentLabel: "",
     isolation: "local",
     configOptions: {},
     projectId: workspace?.projectId,
@@ -155,8 +155,12 @@ export function invalidateAppServerAttachments(
   attachments: ComposerAttachment[],
   message: string,
 ): ComposerAttachment[] {
-  return attachments.map(({ app_server_handle_id: _handleId, ...attachment }) => ({
-    ...attachment,
-    validation_error: message,
-  }));
+  return attachments.map((attachment) => {
+    if (!attachment.app_server_handle_id) return attachment;
+    const { app_server_handle_id: _handleId, ...visibleAttachment } = attachment;
+    return {
+      ...visibleAttachment,
+      validation_error: message,
+    };
+  });
 }

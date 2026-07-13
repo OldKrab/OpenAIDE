@@ -3,7 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TaskSnapshot } from "@openaide/app-shell-contracts";
 import type { AppController } from "./appController";
 import { AppSurfaces } from "./AppSurfaces";
-import { createInitialState } from "../state/store";
+import { createInitialState, type AppState } from "../state/store";
+
+type TestController = AppController & { state: AppState };
 
 const surfaceMocks = vi.hoisted(() => ({
   newTask: vi.fn(() => null),
@@ -65,6 +67,25 @@ describe("AppSurfaces callback wiring", () => {
         onSearchChange: controller.callbacks.navigation.changeSearch,
         onSettings: controller.callbacks.navigation.openSettings,
         onToggleArchived: controller.callbacks.navigation.toggleArchived,
+      }),
+      undefined,
+    );
+  });
+
+  it("uses the shared project task group for VS Code navigation", () => {
+    const controller = controllerFor("navigation");
+    controller.state.projects = [{
+      projectId: "project_1",
+      label: "OpenAIDE",
+    }];
+
+    render(controller);
+
+    expect(surfaceMocks.sidebar).toHaveBeenCalledWith(
+      expect.objectContaining({
+        groupByProject: true,
+        maxTasksPerProject: 15,
+        projects: controller.state.projects,
       }),
       undefined,
     );
@@ -374,7 +395,7 @@ describe("AppSurfaces callback wiring", () => {
       expect.objectContaining({
         onCancel: controller.callbacks.task.cancel,
         onLoadChatPage: controller.callbacks.task.loadChatPage,
-        onLoadToolDetail: controller.callbacks.task.loadToolDetail,
+        onSubscribeToolDetail: controller.callbacks.task.subscribeToolDetail,
         onPermissionRespond: controller.callbacks.task.respondToPermission,
         onRevealAttachment: controller.callbacks.task.revealAttachment,
         onRemoveAttachment: controller.callbacks.task.removeAttachment,
@@ -385,6 +406,26 @@ describe("AppSurfaces callback wiring", () => {
     );
   });
 
+  it("keeps cached task history visible with the in-place refresh retry", () => {
+    const controller = controllerFor("task");
+    controller.bootstrap = { surface: "task", taskId: "task_1" };
+    controller.state.snapshot = snapshot("task_1", true);
+    // A concurrent subscription snapshot can clear taskOpenError after task/open fails.
+    controller.backendConnectionState = { status: "unavailable", message: "Connection closed." };
+
+    render(controller);
+
+    expect(surfaceMocks.task).toHaveBeenCalledWith(
+      expect.objectContaining({
+        backendConnectionState: controller.backendConnectionState,
+        onRetryConnection: controller.retryTaskOpen,
+        snapshot: controller.state.snapshot,
+      }),
+      undefined,
+    );
+    expect(surfaceMocks.taskLoading).not.toHaveBeenCalled();
+  });
+
   it("keeps the New Task surface visible while authoritative Send is pending", () => {
     const controller = controllerFor("task");
     controller.state.snapshot = snapshot("task_starting", false);
@@ -392,7 +433,7 @@ describe("AppSurfaces callback wiring", () => {
     controller.state.taskInputs.task_starting = {
       prompt: "",
       context: [],
-      pending: { prompt: "Build the thing", context: [] },
+      pending: { prompt: "Build the thing", context: [], state: "sending" },
     };
 
     render(controller);
@@ -451,6 +492,25 @@ describe("AppSurfaces callback wiring", () => {
     expect(surfaceMocks.task).not.toHaveBeenCalled();
   });
 
+  it("keeps an active prepared New Task on the new-task surface", () => {
+    const controller = webControllerFor("task");
+    controller.state.snapshot = snapshot("task_prepared", false);
+    controller.state.snapshot.task.status = "active";
+    controller.activeTask = controller.state.snapshot.task;
+
+    const tree = render(controller);
+
+    expect(surfaceMocks.newTask).toHaveBeenCalledWith(
+      expect.objectContaining({
+        onSubmitTask: controller.callbacks.newTask.submit,
+      }),
+      undefined,
+    );
+    expect(surfaceMocks.task).not.toHaveBeenCalled();
+    expect(tree.root.findByProps({ className: "mobile-workbench-bar" }).findByType("small").children.join(""))
+      .toBe("OpenAIDE");
+  });
+
   it("renders pending empty task snapshots through the task view", () => {
     const controller = controllerFor("task");
     controller.bootstrap = { surface: "task", taskId: "task_1" };
@@ -458,7 +518,7 @@ describe("AppSurfaces callback wiring", () => {
     controller.state.taskInputs.task_1 = {
       prompt: "",
       context: [],
-      pending: { prompt: "Build the thing", context: [] },
+      pending: { prompt: "Build the thing", context: [], state: "sending" },
     };
     controller.state.newTask.pending = {
       prompt: "Build the thing",
@@ -489,6 +549,73 @@ describe("AppSurfaces callback wiring", () => {
     expect(surfaceMocks.newTask).not.toHaveBeenCalled();
   });
 
+  it("renders an active no-message Task with its Task-scoped Stop action", () => {
+    const controller = controllerFor("task");
+    controller.bootstrap = { surface: "task", taskId: "task_1" };
+    controller.state.snapshot = snapshot("task_1", false);
+    controller.state.snapshot.task.status = "active";
+
+    render(controller);
+
+    expect(surfaceMocks.task).toHaveBeenCalledWith(
+      expect.objectContaining({
+        onCancel: controller.callbacks.task.cancel,
+        snapshot: controller.state.snapshot,
+      }),
+      undefined,
+    );
+    expect(surfaceMocks.taskLoading).not.toHaveBeenCalled();
+  });
+
+  it("keeps a failed first-send draft visible on its adopted Task route", () => {
+    const controller = controllerFor("task");
+    controller.bootstrap = { surface: "task", taskId: "task_1" };
+    controller.state.snapshot = snapshot("task_1", false);
+    controller.state.taskInputs.task_1 = {
+      prompt: "Build the thing",
+      context: [],
+      error: "Connection closed before Send was acknowledged.",
+    };
+
+    render(controller);
+
+    expect(surfaceMocks.task).toHaveBeenCalledWith(
+      expect.objectContaining({
+        snapshot: controller.state.snapshot,
+        taskInput: controller.state.taskInputs.task_1,
+      }),
+      undefined,
+    );
+    expect(surfaceMocks.taskLoading).not.toHaveBeenCalled();
+  });
+
+  it("keeps an authoritatively rejected first-send draft editable on its Task route", () => {
+    const controller = controllerFor("task");
+    controller.bootstrap = { surface: "task", taskId: "task_1" };
+    controller.state.snapshot = snapshot("task_1", false);
+    controller.state.taskInputs.task_1 = {
+      prompt: "Inspect this file",
+      context: [{
+        kind: "file",
+        label: "notes.md",
+        local_id: "attachment-1",
+        validation_error: "Reselect this file.",
+      }],
+      error: "Attachment is no longer available.",
+    };
+
+    render(controller);
+
+    expect(surfaceMocks.task).toHaveBeenCalledWith(
+      expect.objectContaining({
+        snapshot: controller.state.snapshot,
+        taskInput: controller.state.taskInputs.task_1,
+      }),
+      undefined,
+    );
+    expect(surfaceMocks.taskLoading).not.toHaveBeenCalled();
+  });
+
   it("renders web task loading state while an existing task snapshot is opening", () => {
     const controller = webControllerFor("task");
     controller.bootstrap = {
@@ -509,6 +636,22 @@ describe("AppSurfaces callback wiring", () => {
       undefined,
     );
     expect(surfaceMocks.newTask).not.toHaveBeenCalled();
+  });
+
+  it("offers the in-place retry after task opening fails", () => {
+    const controller = controllerFor("task");
+    controller.bootstrap = { surface: "task", taskId: "task_1" };
+    controller.state.taskOpenError = { taskId: "task_1", message: "Connection closed." };
+
+    render(controller);
+
+    expect(surfaceMocks.taskLoading).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: "Connection closed.",
+        onRetry: controller.retryTaskOpen,
+      }),
+      undefined,
+    );
   });
 
   it("renders task loading state while a native session is opening", () => {
@@ -550,7 +693,6 @@ describe("AppSurfaces callback wiring", () => {
       expect.objectContaining({
         onSelectConfigOption: controller.callbacks.newTask.selectConfigOption,
         onSubmitTask: controller.callbacks.newTask.submit,
-        resetOptionsRequestKey: controller.callbacks.newTask.resetOptionsRequestKey,
       }),
       undefined,
     );
@@ -646,9 +788,22 @@ describe("AppSurfaces callback wiring", () => {
     expect(JSON.stringify(tree)).toContain("App Server request timed out.");
     expect(surfaceMocks.newTask).not.toHaveBeenCalled();
   });
+
+  it("shows an editor App Server initialization failure instead of an endless connecting composer", () => {
+    const controller = controllerFor("task");
+    controller.state.appServerError = "App Server request timed out.";
+
+    const rendered = JSON.stringify(render(controller).toJSON());
+
+    expect(rendered).toContain("App Server connection unavailable.");
+    expect(rendered).toContain("App Server request timed out.");
+    expect(rendered).not.toContain("Retry");
+    expect(surfaceMocks.newTask).not.toHaveBeenCalled();
+  });
 });
 
-function render(controller: AppController) {
+function render(controller: TestController) {
+  controller.view = viewFor(controller.state);
   let tree!: ReturnType<typeof create>;
   act(() => {
     tree = create(<AppSurfaces controller={controller} />);
@@ -656,11 +811,12 @@ function render(controller: AppController) {
   return tree;
 }
 
-function controllerFor(surface: AppController["bootstrap"]["surface"]): AppController {
+function controllerFor(surface: AppController["bootstrap"]["surface"]): TestController {
   const state = createInitialState();
   return {
     activeTask: undefined,
     agents: [],
+    backendConnectionState: { status: "connecting" },
     backendReady: false,
     bootstrap: { surface },
     callbacks: {
@@ -677,7 +833,7 @@ function controllerFor(surface: AppController["bootstrap"]["surface"]): AppContr
       },
       newTask: {
         cancel: vi.fn(),
-        resetOptionsRequestKey: vi.fn(),
+        removeAttachment: vi.fn(),
         selectConfigOption: vi.fn(),
         submit: vi.fn(),
       },
@@ -697,25 +853,39 @@ function controllerFor(surface: AppController["bootstrap"]["surface"]): AppContr
       task: {
         cancel: vi.fn(),
         loadChatPage: vi.fn(),
-        loadToolDetail: vi.fn(),
+        subscribeToolDetail: vi.fn(() => vi.fn()),
         revealAttachment: vi.fn(),
         removeAttachment: vi.fn(),
         respondToPermission: vi.fn(),
         respondToQuestion: vi.fn(),
-        retryHistory: vi.fn(),
         selectConfigOption: vi.fn(),
         sendPrompt: vi.fn(),
       },
     },
-    createSnapshotRequestId: vi.fn(),
-    dispatch: vi.fn(),
+    intents: {
+      newTask: {
+        changePrompt: vi.fn(),
+        reportAttachmentError: vi.fn(),
+        selectAgent: vi.fn(),
+        selectIsolation: vi.fn(),
+        selectProject: vi.fn(),
+        selectWorkspace: vi.fn(),
+      },
+      task: {
+        changePrompt: vi.fn(),
+        recordScroll: vi.fn(),
+        reportAttachmentError: vi.fn(),
+      },
+    },
     preferences: { composer_submit_shortcut: "mod_enter" },
+    retryTaskOpen: vi.fn(),
     state,
+    view: viewFor(state),
     visibleTasks: [],
   };
 }
 
-function webControllerFor(surface: "settings" | "task"): AppController {
+function webControllerFor(surface: "settings" | "task"): TestController {
   const controller = controllerFor(surface);
   controller.bootstrap = {
     surface,
@@ -725,6 +895,40 @@ function webControllerFor(surface: "settings" | "task"): AppController {
     },
   };
   return controller;
+}
+
+function viewFor(state: AppState): AppController["view"] {
+  const taskId = state.snapshot?.task.task_id;
+  return {
+    appServerError: state.appServerError,
+    navigation: {
+      nativeSessions: state.newTask.nativeSessions,
+      newTaskSelection: state.newTask.selection,
+      projects: state.projects,
+      searchQuery: state.searchQuery,
+      showArchived: state.showArchived,
+      taskListError: state.taskListError,
+    },
+    primaryTask: {
+      chatPageState: taskId ? state.chatPages[taskId] : undefined,
+      liveTextPresentation: taskId ? state.taskLiveTextPresentation[taskId] : undefined,
+      newTask: {
+        newTask: state.newTask,
+        preparedTaskInput: taskId ? state.taskInputs[taskId] : undefined,
+        projects: state.projects,
+        snapshot: state.snapshot,
+        workspaceRootsLoaded: state.workspaceRootsLoaded,
+      },
+      permissionResponses: state.permissionResponses,
+      questionResponses: state.questionResponses,
+      savedScrollState: taskId ? state.taskChatScrollStates[taskId] : undefined,
+      snapshot: state.snapshot,
+      taskInput: taskId ? state.taskInputs[taskId] : undefined,
+      taskOpenError: state.taskOpenError,
+      toolDetails: state.toolDetails,
+    },
+    settings: state.settings,
+  };
 }
 
 function pointerEvent({
@@ -767,6 +971,7 @@ function stubMobileWindow() {
 
 function snapshot(taskId: string, hasMessages = true): TaskSnapshot {
   return {
+    lifecycle: hasMessages ? "visible" : "new",
     chat: {
       has_before: false,
       has_messages: hasMessages,
@@ -775,9 +980,9 @@ function snapshot(taskId: string, hasMessages = true): TaskSnapshot {
       total_count: hasMessages ? 1 : 0,
       version: 1,
     },
-    permissions: [],
+    active_requests: [],
     history_sync: { state: "idle", generation: 0 },
-    send_capability: { state: "ready", attachment_only: true },
+    send_capability: { state: "ready" },
     revision: 1,
     settings_summary: {
       agent_id: "codex",

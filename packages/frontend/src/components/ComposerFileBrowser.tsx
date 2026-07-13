@@ -1,5 +1,5 @@
 import { ArrowLeft, FileImage, FileText, Folder, RotateCw } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type {
   AttachmentListDirectoryResult,
   FileBrowserEntry,
@@ -8,6 +8,7 @@ import type {
   FileBrowserRootId,
 } from "@openaide/app-server-client";
 import type { TaskFileBrowserCallbacks } from "./appControllerCallbackTypes";
+import { useBrowserRequestOwnership } from "./browserRequestOwnership";
 
 type DirectoryRef = AttachmentListDirectoryResult["directory"];
 
@@ -31,14 +32,21 @@ export function ComposerFileBrowser({
   const [history, setHistory] = useState<DirectoryRef[]>([]);
   const [pendingEntryId, setPendingEntryId] = useState<string | undefined>();
   const [slowLoading, setSlowLoading] = useState(false);
+  const browserRef = useRef(browser);
+  browserRef.current = browser;
+  const requestOwnership = useBrowserRequestOwnership(browser.ownerKey);
+
+  const loadOwnedRoots = () => {
+    const acceptsResult = requestOwnership.beginLatestRead();
+    setHistory([]);
+    setPendingEntryId(undefined);
+    void loadRoots(browserRef.current, setState, acceptsResult);
+  };
 
   useEffect(() => {
-    let cancelled = false;
-    void loadRoots(browser, setState, () => cancelled);
-    return () => {
-      cancelled = true;
-    };
-  }, [browser]);
+    loadOwnedRoots();
+    return requestOwnership.invalidateOwner;
+  }, [browser.ownerKey]);
 
   useEffect(() => {
     if (state.status !== "loading") {
@@ -51,38 +59,49 @@ export function ComposerFileBrowser({
   }, [state.status]);
 
   const openDirectory = (rootId: FileBrowserRootId, directoryId?: FileBrowserEntryId) => {
+    const acceptsResult = requestOwnership.beginLatestRead();
     if (state.status === "ready") {
       setHistory((current) => [...current, state.directory]);
     }
     setState({ status: "loading" });
     void browser.listDirectory(rootId, directoryId).then(
-      (listing) =>
+      (listing) => {
+        if (!acceptsResult()) return;
         setState({
           status: "ready",
           directory: listing.directory,
           entries: listing.entries,
-        }),
-      (error: unknown) => setState({ status: "error", message: errorMessage(error) }),
+        });
+      },
+      (error: unknown) => {
+        if (acceptsResult()) setState({ status: "error", message: errorMessage(error) });
+      },
     );
   };
 
   const openPreviousDirectory = () => {
     const previous = history[history.length - 1];
     if (!previous) return;
+    const acceptsResult = requestOwnership.beginLatestRead();
     setHistory((current) => current.slice(0, -1));
     setState({ status: "loading" });
     void browser.listDirectory(previous.rootId, previous.directoryId ?? undefined).then(
-      (listing) =>
+      (listing) => {
+        if (!acceptsResult()) return;
         setState({
           status: "ready",
           directory: listing.directory,
           entries: listing.entries,
-        }),
-      (error: unknown) => setState({ status: "error", message: errorMessage(error) }),
+        });
+      },
+      (error: unknown) => {
+        if (acceptsResult()) setState({ status: "error", message: errorMessage(error) });
+      },
     );
   };
 
   const attach = (entry: FileBrowserEntry, mode: "reference" | "embedded") => {
+    const ownsResult = requestOwnership.captureOwner();
     setPendingEntryId(entry.entryId);
     const request =
       mode === "reference"
@@ -90,10 +109,12 @@ export function ComposerFileBrowser({
         : browser.attachEmbedded(entry.entryId);
     void request.then(
       () => {
+        if (!ownsResult()) return;
         setPendingEntryId(undefined);
         onAttached();
       },
       (error: unknown) => {
+        if (!ownsResult()) return;
         setPendingEntryId(undefined);
         setState({ status: "error", message: errorMessage(error) });
       },
@@ -112,7 +133,7 @@ export function ComposerFileBrowser({
     return (
       <div className="composer-file-browser-status">
         <span>{state.message}</span>
-        <button onClick={() => void loadRoots(browser, setState)} type="button">
+        <button onClick={loadOwnedRoots} type="button">
           <RotateCw size={12} />
           Retry
         </button>
@@ -178,26 +199,26 @@ function isImageFileLabel(label: string) {
 async function loadRoots(
   browser: TaskFileBrowserCallbacks,
   setState: (state: BrowserState) => void,
-  cancelled: () => boolean = () => false,
+  acceptsResult: () => boolean,
 ) {
-  setState({ status: "loading" });
+  if (acceptsResult()) setState({ status: "loading" });
   try {
     const roots = await browser.listRoots();
-    if (cancelled()) return;
+    if (!acceptsResult()) return;
     const firstRoot = roots[0];
     if (!firstRoot) {
       setState({ status: "error", message: "No file roots available." });
       return;
     }
     const listing = await browser.listDirectory(firstRoot.rootId);
-    if (cancelled()) return;
+    if (!acceptsResult()) return;
     setState({
       status: "ready",
       directory: listing.directory,
       entries: listing.entries,
     });
   } catch (error) {
-    if (!cancelled()) setState({ status: "error", message: errorMessage(error) });
+    if (acceptsResult()) setState({ status: "error", message: errorMessage(error) });
   }
 }
 

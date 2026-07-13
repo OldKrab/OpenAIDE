@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { TaskSummary } from "@openaide/app-shell-contracts";
 import { AppServerProtocolError } from "@openaide/app-server-client";
 import { createInitialState } from "../state/store";
+import { AsyncOperationOwner } from "../state/asyncOperationOwner";
 import { appControllerDerivedStateDeps, deriveAppControllerState, visibleTasks } from "./appControllerDerivedState";
 import { requestControllerNativeSessions } from "./appControllerNativeSessions";
 
@@ -62,7 +63,7 @@ describe("deriveAppControllerState", () => {
     expect(visibleTasks(tasks, "   ").map((visible) => visible.task_id)).toEqual(["task_1"]);
   });
 
-  it("keeps the pending active empty task visible while the first send is in flight", () => {
+  it("keeps a private empty New Task out of navigation while first Send is in flight", () => {
     const state = createInitialState();
     state.activeTaskId = "task_2";
     state.newTask.submitting = true;
@@ -77,21 +78,15 @@ describe("deriveAppControllerState", () => {
     state.taskInputs.task_2 = {
       prompt: "",
       context: [],
-      pending: { prompt: "Build the thing", context: [] },
+      pending: { prompt: "Build the thing", context: [], state: "sending" },
     };
 
     const derived = deriveAppControllerState(state);
 
-    expect(derived.visibleTasks.map((visible) => visible.task_id)).toEqual(["task_1", "task_2"]);
-    expect(derived.visibleTasks.map((visible) => visible.task_id)).not.toContain("__pending_new_task__");
-    expect(derived.visibleTasks[1]).toMatchObject({
-      has_messages: true,
-      status: "active",
-      title: "Build the thing",
-    });
+    expect(derived.visibleTasks.map((visible) => visible.task_id)).toEqual(["task_1"]);
   });
 
-  it("keeps a pending empty task visible after switching to another task", () => {
+  it("keeps a private empty New Task out of navigation after switching tasks", () => {
     const state = createInitialState();
     state.activeTaskId = "task_1";
     state.tasks = [
@@ -101,20 +96,15 @@ describe("deriveAppControllerState", () => {
     state.taskInputs.task_2 = {
       prompt: "",
       context: [],
-      pending: { prompt: "Build the thing", context: [] },
+      pending: { prompt: "Build the thing", context: [], state: "sending" },
     };
 
     const derived = deriveAppControllerState(state);
 
-    expect(derived.visibleTasks.map((visible) => visible.task_id)).toEqual(["task_1", "task_2"]);
-    expect(derived.visibleTasks[1]).toMatchObject({
-      has_messages: true,
-      status: "active",
-      title: "Build the thing",
-    });
+    expect(derived.visibleTasks.map((visible) => visible.task_id)).toEqual(["task_1"]);
   });
 
-  it("shows a selected pending new task row before the Backend returns the created task", () => {
+  it("does not invent a sidebar row while the New Task remains private", () => {
     const state = createInitialState();
     state.tasks = [
       task({ task_id: "task_1", has_messages: true, title: "Previous task" }),
@@ -135,20 +125,11 @@ describe("deriveAppControllerState", () => {
 
     const derived = deriveAppControllerState(state);
 
-    expect(derived.activeNavigationTaskId).toBe("__pending_new_task__");
-    expect(derived.visibleTasks.map((visible) => visible.task_id)).toEqual(["__pending_new_task__", "task_1"]);
-    expect(derived.visibleTasks[0]).toMatchObject({
-      agent_id: "codex",
-      agent_name: "Codex",
-      has_messages: true,
-      project_id: "project_1",
-      project_label: "OpenAIDE",
-      status: "active",
-      title: "Fix the visible startup state",
-    });
+    expect(derived.activeNavigationTaskId).toBeUndefined();
+    expect(derived.visibleTasks.map((visible) => visible.task_id)).toEqual(["task_1"]);
   });
 
-  it("keeps a newly created task stable and in progress until its first send starts", () => {
+  it("does not promote a created New Task into navigation before Send is accepted", () => {
     const state = createInitialState();
     state.tasks = [
       task({ task_id: "task_1", has_messages: true, title: "Previous task" }),
@@ -181,33 +162,173 @@ describe("deriveAppControllerState", () => {
 
     const afterCreate = deriveAppControllerState(state);
 
-    expect(beforeCreate.visibleTasks.map((visible) => visible.title)).toEqual([
-      "Fix the visible startup state",
-      "Previous task",
-    ]);
-    expect(afterCreate.activeNavigationTaskId).toBe("task_new");
-    expect(afterCreate.visibleTasks.map((visible) => visible.task_id)).toEqual(["task_new", "task_1"]);
-    expect(afterCreate.visibleTasks[0]).toMatchObject({
-      has_messages: true,
-      status: "active",
-      title: "Fix the visible startup state",
-    });
+    expect(beforeCreate.visibleTasks.map((visible) => visible.title)).toEqual(["Previous task"]);
+    expect(afterCreate.activeNavigationTaskId).toBeUndefined();
+    expect(afterCreate.visibleTasks.map((visible) => visible.task_id)).toEqual(["task_1"]);
   });
 
   it("matches visible tasks by title, agent name, and status", () => {
     const tasks = [
       task({ task_id: "task_1", title: "Refactor plan", agent_name: "Codex", status: "inactive" }),
       task({ task_id: "task_2", title: "Other", agent_name: "OpenCode", status: "active" }),
-      task({ task_id: "task_3", title: "Archive", agent_name: "Other", status: "blocked" }),
+      task({ task_id: "task_3", title: "Archive", agent_name: "Other", status: "waiting" }),
     ];
 
     expect(visibleTasks(tasks, "plan").map((task) => task.task_id)).toEqual(["task_1"]);
     expect(visibleTasks(tasks, "opencode").map((task) => task.task_id)).toEqual(["task_2"]);
-    expect(visibleTasks(tasks, "BLOCKED").map((task) => task.task_id)).toEqual(["task_3"]);
+    expect(visibleTasks(tasks, "WAITING").map((task) => task.task_id)).toEqual(["task_3"]);
   });
 });
 
 describe("requestControllerNativeSessions", () => {
+  it("refreshes enough session-history pages to preserve the expanded task list", async () => {
+    const dispatch = vi.fn();
+    const request = vi.fn()
+      .mockResolvedValueOnce({
+        agentId: "codex",
+        projectId: "project-1",
+        projectLabel: "Workspace",
+        sessions: [
+          { sessionId: "session_1", title: "Newest" },
+          { sessionId: "session_2", title: "Recent" },
+        ],
+        nextCursor: "cursor_2",
+      })
+      .mockResolvedValueOnce({
+        agentId: "codex",
+        projectId: "project-1",
+        projectLabel: "Workspace",
+        sessions: [
+          { sessionId: "session_3", title: "Older" },
+          { sessionId: "session_4", title: "Oldest" },
+        ],
+        nextCursor: "cursor_3",
+      });
+
+    requestControllerNativeSessions({
+      agentId: "codex",
+      asyncOperations: new AsyncOperationOwner(),
+      backendConnection: { request },
+      dispatch,
+      minimumSessionCount: 3,
+      projectId: "project-1",
+    });
+    await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+
+    expect(request).toHaveBeenNthCalledWith(1, "agent/listSessions", {
+      agentId: "codex",
+      projectId: "project-1",
+      cursor: null,
+    });
+    expect(request).toHaveBeenNthCalledWith(2, "agent/listSessions", {
+      agentId: "codex",
+      projectId: "project-1",
+      cursor: "cursor_2",
+    });
+    expect(dispatch).toHaveBeenLastCalledWith({
+      type: "newTask:nativeSessions:result",
+      append: false,
+      result: {
+        agent_id: "codex",
+        next_cursor: "cursor_3",
+        sessions: [
+          { session_id: "session_1", cwd: "Workspace", title: "Newest" },
+          { session_id: "session_2", cwd: "Workspace", title: "Recent" },
+          { session_id: "session_3", cwd: "Workspace", title: "Older" },
+          { session_id: "session_4", cwd: "Workspace", title: "Oldest" },
+        ],
+      },
+    });
+  });
+
+  it("loads the requested number of new unique sessions when appending pages", async () => {
+    const dispatch = vi.fn();
+    const request = vi.fn()
+      .mockResolvedValueOnce({
+        agentId: "codex",
+        projectId: "project-1",
+        projectLabel: "Workspace",
+        sessions: [
+          { sessionId: "session_1", title: "Already loaded" },
+          { sessionId: "session_2", title: "Newer" },
+        ],
+        nextCursor: "cursor_3",
+      })
+      .mockResolvedValueOnce({
+        agentId: "codex",
+        projectId: "project-1",
+        projectLabel: "Workspace",
+        sessions: [
+          { sessionId: "session_2", title: "Newer duplicate" },
+          { sessionId: "session_3", title: "Older" },
+        ],
+        nextCursor: "cursor_4",
+      });
+
+    requestControllerNativeSessions({
+      agentId: "codex",
+      append: true,
+      asyncOperations: new AsyncOperationOwner(),
+      backendConnection: { request },
+      cursor: "cursor_2",
+      dispatch,
+      existingSessionIds: ["session_1"],
+      minimumSessionCount: 2,
+      projectId: "project-1",
+    });
+    await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+
+    expect(dispatch).toHaveBeenLastCalledWith({
+      type: "newTask:nativeSessions:result",
+      append: true,
+      result: {
+        agent_id: "codex",
+        next_cursor: "cursor_4",
+        sessions: [
+          { session_id: "session_2", cwd: "Workspace", title: "Newer" },
+          { session_id: "session_3", cwd: "Workspace", title: "Older" },
+        ],
+      },
+    });
+  });
+
+  it("stops pagination when the Agent repeats a session cursor", async () => {
+    const dispatch = vi.fn();
+    const request = vi.fn()
+      .mockResolvedValueOnce({
+        agentId: "codex",
+        projectId: "project-1",
+        projectLabel: "Workspace",
+        sessions: [{ sessionId: "session_2", title: "Only new session" }],
+        nextCursor: "cursor_2",
+      })
+      .mockRejectedValue(new Error("repeated cursor must not be requested"));
+
+    requestControllerNativeSessions({
+      agentId: "codex",
+      append: true,
+      asyncOperations: new AsyncOperationOwner(),
+      backendConnection: { request },
+      cursor: "cursor_2",
+      dispatch,
+      existingSessionIds: ["session_1"],
+      minimumSessionCount: 2,
+      projectId: "project-1",
+    });
+    await vi.waitFor(() => expect(dispatch).toHaveBeenCalledTimes(2));
+
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(dispatch).toHaveBeenLastCalledWith({
+      type: "newTask:nativeSessions:result",
+      append: true,
+      result: {
+        agent_id: "codex",
+        next_cursor: undefined,
+        sessions: [{ session_id: "session_2", cwd: "Workspace", title: "Only new session" }],
+      },
+    });
+  });
+
   it("reports the typed App Server failure when session history cannot load", async () => {
     const dispatch = vi.fn();
     const onFailure = vi.fn();
@@ -221,10 +342,9 @@ describe("requestControllerNativeSessions", () => {
 
     requestControllerNativeSessions({
       agentId: "codex",
+      asyncOperations: new AsyncOperationOwner(),
       backendConnection: { request },
       dispatch,
-      latestSessionListRequestId: { current: undefined },
-      nextSessionListRequestId: { current: 0 },
       onFailure,
       projectId: "project-current",
     });
@@ -241,49 +361,41 @@ describe("requestControllerNativeSessions", () => {
       requestId: 1,
     });
     expect(dispatch).toHaveBeenCalledWith({
-      type: "newTask:nativeSessions:error",
+      type: "newTask:nativeSessions:listError",
       message: "Unable to load Agent session history.",
     });
   });
 
-  it("increments request ids and reports an error when listing sessions without BackendConnection", () => {
+  it("reports an error when listing sessions without BackendConnection", () => {
     const dispatch = vi.fn();
-    const latestSessionListRequestId = { current: undefined as number | undefined };
-    const nextSessionListRequestId = { current: 41 };
 
     requestControllerNativeSessions({
       agentId: "codex",
       append: true,
+      asyncOperations: new AsyncOperationOwner(),
       cursor: "cursor_2",
       dispatch,
-      latestSessionListRequestId,
-      nextSessionListRequestId,
     });
 
-    expect(nextSessionListRequestId.current).toBe(42);
-    expect(latestSessionListRequestId.current).toBe(42);
     expect(dispatch).toHaveBeenCalledWith({ type: "newTask:nativeSessions:start", append: true });
     expect(dispatch).toHaveBeenCalledWith({
-      type: "newTask:nativeSessions:error",
+      type: "newTask:nativeSessions:listError",
       message: "App Server connection unavailable.",
     });
   });
 
   it("defaults append to false for fresh navigation loads", () => {
     const dispatch = vi.fn();
-    const latestSessionListRequestId = { current: undefined as number | undefined };
-    const nextSessionListRequestId = { current: 0 };
 
     requestControllerNativeSessions({
       agentId: "codex",
+      asyncOperations: new AsyncOperationOwner(),
       dispatch,
-      latestSessionListRequestId,
-      nextSessionListRequestId,
     });
 
     expect(dispatch).toHaveBeenCalledWith({ type: "newTask:nativeSessions:start", append: false });
     expect(dispatch).toHaveBeenCalledWith({
-      type: "newTask:nativeSessions:error",
+      type: "newTask:nativeSessions:listError",
       message: "App Server connection unavailable.",
     });
   });
@@ -303,15 +415,11 @@ describe("requestControllerNativeSessions", () => {
       }],
       nextCursor: "cursor_2",
     });
-    const latestSessionListRequestId = { current: undefined as number | undefined };
-    const nextSessionListRequestId = { current: 0 };
-
     requestControllerNativeSessions({
       agentId: "codex",
+      asyncOperations: new AsyncOperationOwner(),
       backendConnection: { request },
       dispatch,
-      latestSessionListRequestId,
-      nextSessionListRequestId,
       projectId: "project-1",
     });
 

@@ -19,6 +19,13 @@ import {
   type ProjectOption,
   type WorkspaceRoot,
 } from "./composerOptions";
+import type { MessageId } from "@openaide/app-server-client";
+
+export type PendingComposerSend = {
+  prompt: string;
+  context: ComposerAttachment[];
+  state: "sending";
+};
 
 export type NativeSessionsState = {
   items: AgentListedSession[];
@@ -50,17 +57,33 @@ export type NewTaskState = {
 export type TaskComposerInput = {
   prompt: string;
   context: ComposerAttachment[];
+  /** Changes only when task/send accepts this Task's exact pending attempt. */
+  acceptedUserMessageId?: MessageId;
   error?: string;
-  pending?: {
-    prompt: string;
-    context: ComposerAttachment[];
-  };
+  pending?: PendingComposerSend;
+};
+
+export type TaskChatScrollState = {
+  ownership: "following" | "reading";
+  scrollTop: number;
+};
+
+export type LiveTextPresentationSignal = {
+  messageId: string;
+  eventCursor: string;
+};
+
+export type TaskLiveTextPresentation = {
+  agent?: LiveTextPresentationSignal;
+  thought?: LiveTextPresentationSignal;
 };
 
 export type ChatPageState = {
   olderItems: ChatMessage[];
   hasBefore: boolean;
   startCursor?: string;
+  /** Monotonic identity of the latest earlier-page request for this Task. */
+  requestGeneration?: number;
   pending?: boolean;
   error?: string;
 };
@@ -93,22 +116,14 @@ export type ToolDetailState = {
   error?: string;
 };
 
-export type AppServerPermissionRequestState = {
-  taskId?: string;
-  message: ChatMessage;
-};
-
-export type AppServerQuestionRequestState = {
-  taskId?: string;
-  message: ChatMessage;
-};
-
 export function toolDetailCacheKey(taskId: string, artifactId: string) {
   return `${taskId}\u0000${artifactId}`;
 }
 
 export type AppState = {
   appServerError?: string;
+  appServerReplicaEpoch: number;
+  appServerStateRootId?: string;
   tasks: TaskSummary[];
   taskListCache: {
     active?: TaskSummary[];
@@ -118,10 +133,10 @@ export type AppState = {
   activeTaskId?: string;
   snapshot?: TaskSnapshot;
   taskSnapshots: Record<string, TaskSnapshot>;
-  taskScrollPositions: Record<string, number>;
+  taskSnapshotReplicaEpochs: Record<string, number>;
+  taskChatScrollStates: Record<string, TaskChatScrollState>;
+  taskLiveTextPresentation: Record<string, TaskLiveTextPresentation>;
   taskOpenError?: { taskId: string; message: string };
-  appServerPermissionRequests: Record<string, AppServerPermissionRequestState>;
-  appServerQuestionRequests: Record<string, AppServerQuestionRequestState>;
   permissionResponses: Record<string, { responding: boolean; error?: string }>;
   questionResponses: Record<string, { responding: boolean; error?: string }>;
   searchQuery: string;
@@ -146,12 +161,13 @@ export const welcomeQuestions = [
 
 export function createInitialState(): AppState {
   return {
+    appServerReplicaEpoch: 0,
     tasks: [],
     taskListCache: {},
     taskSnapshots: {},
-    taskScrollPositions: {},
-    appServerPermissionRequests: {},
-    appServerQuestionRequests: {},
+    taskSnapshotReplicaEpochs: {},
+    taskChatScrollStates: {},
+    taskLiveTextPresentation: {},
     permissionResponses: {},
     questionResponses: {},
     searchQuery: "",

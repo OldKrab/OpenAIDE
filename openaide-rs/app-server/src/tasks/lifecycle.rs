@@ -4,6 +4,7 @@ use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{ActivityStatus, ActivityStep, ChatMessage, NormalizedMessage};
 use crate::storage::cursor;
 use crate::storage::records::StoredMessage;
+use crate::storage::tool_artifacts::PersistedToolDetail;
 use crate::storage::Store;
 
 pub(crate) fn running_turn_message(created_at: &str) -> NormalizedMessage {
@@ -32,11 +33,12 @@ pub(crate) fn append_normalized_to_store(
         .map(|m| m.sequence + 1)
         .unwrap_or(1);
     let cursor = cursor::from_sequence(next_sequence);
+    let identity = message.identity();
     let chat = ChatMessage {
         cursor,
-        identity: message.identity(),
+        message_id: identity.clone(),
+        identity,
         message_type: message.message_type().to_string(),
-        message_id: Uuid::new_v4().to_string(),
         message,
     };
     store.append_message(task_id, chat)
@@ -46,14 +48,24 @@ pub(crate) fn upsert_normalized_to_store(
     store: &Store,
     task_id: &str,
     mut message: NormalizedMessage,
-) -> Result<StoredMessage, RuntimeError> {
-    store.persist_tool_artifacts(task_id, &mut message)?;
+) -> Result<UpsertedMessage, RuntimeError> {
+    let tool_details = store.persist_tool_artifacts(task_id, &mut message)?;
+    let identity = message.identity();
     let chat = ChatMessage {
         cursor: String::new(),
-        identity: message.identity(),
+        message_id: identity.clone(),
+        identity,
         message_type: message.message_type().to_string(),
-        message_id: Uuid::new_v4().to_string(),
         message,
     };
-    store.upsert_message_by_identity(task_id, chat)
+    let stored = store.upsert_message_by_identity(task_id, chat)?;
+    Ok(UpsertedMessage {
+        stored,
+        tool_details,
+    })
+}
+
+pub(crate) struct UpsertedMessage {
+    pub stored: StoredMessage,
+    pub tool_details: Vec<PersistedToolDetail>,
 }

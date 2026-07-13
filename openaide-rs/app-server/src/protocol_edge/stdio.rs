@@ -1,3 +1,4 @@
+use std::env;
 use std::sync::mpsc;
 use std::sync::Arc;
 
@@ -7,6 +8,7 @@ use crate::agent::acp::AcpAgentRuntime;
 use crate::agent::catalog_store::AgentCatalogStore;
 use crate::agent::{registry_handle::AgentRegistryHandle, AgentRuntime};
 use crate::client_lifecycle::{AppServerTime, ConnectionId};
+use crate::projects::ConfiguredProjectRoots;
 use crate::protocol::host::{HostBridge, HostRequest};
 use crate::protocol_edge::{GatewayOutcome, InboundProtocolMessage, SharedRpcGateway};
 use crate::storage::Store;
@@ -75,13 +77,21 @@ impl ProtocolEdgeStdioDispatcher {
             agent_registry,
             agent_runtime,
             acp_trace_state,
-            host_bridge,
-            host_requests,
+            configured_project_roots_from_env(),
+            (host_bridge, host_requests),
         )
     }
 
     #[cfg(test)]
     pub(crate) fn new_for_test(state_root: StateRoot) -> Self {
+        Self::new_for_test_with_configured_projects(state_root, ConfiguredProjectRoots::default())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new_for_test_with_configured_projects(
+        state_root: StateRoot,
+        configured_projects: ConfiguredProjectRoots,
+    ) -> Self {
         let store = Store::open(state_root.path().to_path_buf())
             .expect("protocol edge test dispatcher storage must open");
         Self::try_new_with_agent(
@@ -90,8 +100,8 @@ impl ProtocolEdgeStdioDispatcher {
             AgentRegistryHandle::new(crate::agent::registry::AgentRegistry::default_built_ins()),
             Arc::new(crate::agent::mock::MockAgent),
             crate::agent::acp_trace::AcpTraceState::disabled(std::path::Path::new(".")),
-            HostBridge::disabled(),
-            None,
+            configured_projects,
+            (HostBridge::disabled(), None),
         )
         .expect("protocol edge test dispatcher storage must open")
     }
@@ -102,15 +112,17 @@ impl ProtocolEdgeStdioDispatcher {
         agent_registry: AgentRegistryHandle,
         agent_runtime: Arc<dyn AgentRuntime>,
         acp_trace_state: crate::agent::acp_trace::AcpTraceState,
-        host_bridge: HostBridge,
-        host_requests: Option<mpsc::Receiver<HostRequest>>,
+        configured_projects: ConfiguredProjectRoots,
+        host_transport: (HostBridge, Option<mpsc::Receiver<HostRequest>>),
     ) -> Result<Self, ProtocolEdgeStdioStartError> {
+        let (host_bridge, host_requests) = host_transport;
         let output = factory::gateway(
             state_root,
             store,
             agent_registry,
             agent_runtime,
             acp_trace_state,
+            configured_projects,
         )?;
         Ok(Self {
             gateway: SharedRpcGateway::new(output.gateway),
@@ -251,6 +263,15 @@ impl ProtocolEdgeStdioDispatcher {
         self.next_tick += 1;
         AppServerTime(now)
     }
+}
+
+fn configured_project_roots_from_env() -> ConfiguredProjectRoots {
+    let Some(paths) = env::var_os("OPENAIDE_PROJECT_ROOTS") else {
+        return ConfiguredProjectRoots::default();
+    };
+    ConfiguredProjectRoots::from_workspace_roots(
+        env::split_paths(&paths).map(|path| path.to_string_lossy().to_string()),
+    )
 }
 
 #[derive(Debug, thiserror::Error)]

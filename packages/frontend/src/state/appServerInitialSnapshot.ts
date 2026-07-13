@@ -8,6 +8,10 @@ import {
 import { mapProtocolAppPreferences } from "./appPreferencesMapping";
 import { mapProtocolRuntimeSettings } from "./runtimeSettingsMapping";
 import { mapSettingsSections } from "./settingsProjectionMapping";
+import {
+  selectInitialNewTaskContext,
+  type NewTaskContextIds,
+} from "./newTaskSelectionDefaults";
 
 export type InitialSnapshotIngestion = {
   actions: AppAction[];
@@ -18,6 +22,7 @@ export type InitialSnapshotIngestion = {
 export type InitialSnapshotIngestionOptions = {
   includeTaskNavigation?: boolean;
   includeActiveTask?: boolean;
+  retainedNewTaskContext?: NewTaskContextIds;
 };
 
 export function actionsFromInitialSnapshot(
@@ -33,18 +38,35 @@ export function actionsFromInitialSnapshot(
   const actions: AppAction[] = [];
   const warnings: ProtocolMappingWarning[] = [];
   let requiresNativeSurface = false;
+  const projects = snapshot.projects?.projects.map((project) => ({
+    projectId: project.projectId,
+    label: project.label,
+  })) ?? [];
+  const shellProjectId = snapshot.client.surface.kind === "newTask"
+    ? snapshot.client.surface.projectId ?? undefined
+    : undefined;
+  const initialContext = selectInitialNewTaskContext({
+    retained: options.retainedNewTaskContext,
+    shellProjectId,
+    defaults: snapshot.newTaskDefaults,
+    projects,
+    agents: snapshot.agents?.agents ?? [],
+  });
 
   if (snapshot.projects) {
-    const requestedProjectId = snapshot.client.surface.kind === "newTask"
-      ? snapshot.client.surface.projectId ?? undefined
-      : undefined;
     actions.push({
       type: "projects",
-      activeProjectId: requestedProjectId ?? snapshot.projects.activeProjectId ?? undefined,
-      projects: snapshot.projects.projects.map((project) => ({
-        projectId: project.projectId,
-        label: project.label,
-      })),
+      initialProjectId: initialContext.projectId,
+      projects,
+    });
+  }
+
+  if (initialContext.agentId) {
+    const agent = snapshot.agents?.agents.find((candidate) => candidate.agentId === initialContext.agentId);
+    actions.push({
+      type: "newTask:agent",
+      agentId: initialContext.agentId,
+      agentLabel: agent?.label ?? initialContext.agentId,
     });
   }
 
@@ -71,7 +93,7 @@ export function actionsFromInitialSnapshot(
 
   if (includeTaskNavigation && snapshot.tasks) {
     const mapped = mapProtocolTaskNavigation(snapshot.tasks, context);
-    actions.push({ type: "tasks", tasks: mapped.tasks });
+    actions.push({ type: "tasks", archived: false, tasks: mapped.tasks });
     if (mapped.activeTaskId) actions.push({ type: "selection:set", taskId: mapped.activeTaskId });
     warnings.push(...mapped.warnings);
     requiresNativeSurface ||= mapped.requiresNativeSurface;

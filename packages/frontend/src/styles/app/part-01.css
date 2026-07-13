@@ -15,7 +15,7 @@
 
 .task-loading {
   min-height: 100%;
-  grid-template-rows: minmax(0, 1fr);
+  grid-template-rows: auto;
   place-items: center;
   align-content: center;
   gap: 8px;
@@ -31,6 +31,15 @@
   gap: 8px;
   color: var(--oa-muted);
   font-size: 13px;
+}
+
+.task-loading > button {
+  min-height: 28px;
+  border: 1px solid var(--oa-border);
+  border-radius: var(--oa-radius-sm);
+  background: var(--oa-panel);
+  color: var(--oa-text);
+  padding: 4px 10px;
 }
 
 .task-header {
@@ -91,7 +100,7 @@
   color: var(--oa-focus);
 }
 
-.task-header-status.blocked {
+.task-header-status.waiting {
   color: var(--oa-warning);
 }
 

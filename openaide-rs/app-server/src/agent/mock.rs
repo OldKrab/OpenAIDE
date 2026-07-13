@@ -1,11 +1,12 @@
 use crate::agent::events::AgentEvent;
 use crate::agent::events::{
-    AgentPermissionOption, AgentPermissionOptionKind, AgentPermissionRequest, AgentToolCallRef,
+    AgentPermissionOption, AgentPermissionOptionKind, AgentPermissionRequest, AgentToolCall,
+    AgentToolCallRef, AgentToolCallStatus,
 };
 use crate::agent::{
     AgentAuthenticateRequest, AgentEventSink, AgentListSessionsRequest, AgentLoadedSession,
-    AgentProbeRequest, AgentPrompt, AgentRuntime, AgentSession, AgentSessionLoad,
-    AgentSessionStart,
+    AgentProbeRequest, AgentPrompt, AgentPromptOutcome, AgentRuntime, AgentSession,
+    AgentSessionLoad, AgentSessionStart,
 };
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{
@@ -64,10 +65,10 @@ impl AgentRuntime for MockAgent {
         if request.cancellation.is_cancelled() {
             return Err(RuntimeError::InvalidParams("session cancelled".to_string()));
         }
-        Ok(AgentSession::new(format!(
-            "session_{}",
-            uuid::Uuid::new_v4()
-        )))
+        Ok(AgentSession::new(
+            request.agent_id,
+            format!("session_{}", uuid::Uuid::new_v4()),
+        ))
     }
 
     fn load_session(&self, request: AgentSessionLoad) -> Result<AgentLoadedSession, RuntimeError> {
@@ -75,12 +76,14 @@ impl AgentRuntime for MockAgent {
             return Err(RuntimeError::InvalidParams("session cancelled".to_string()));
         }
         Ok(AgentLoadedSession {
-            session: AgentSession::new(request.session_id),
-            replayed_messages: vec![NormalizedMessage::AgentText {
+            session: AgentSession::new(request.agent_id, request.session_id),
+            replayed_messages: vec![NormalizedMessage::AgentMessage {
                 id: "mock-loaded-agent-message".to_string(),
-                text: "Mock loaded session.".to_string(),
+                role: crate::protocol::model::AgentMessageRole::Agent,
+                parts: vec![crate::protocol::model::AgentMessagePart::Text {
+                    text: "Mock loaded session.".to_string(),
+                }],
                 created_at: "2026-05-18T00:00:00Z".to_string(),
-                streaming: false,
             }],
         })
     }
@@ -89,11 +92,24 @@ impl AgentRuntime for MockAgent {
         &self,
         prompt: AgentPrompt,
         sink: Arc<dyn AgentEventSink>,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<AgentPromptOutcome, RuntimeError> {
         if prompt.cancellation.is_cancelled() {
-            return Ok(());
+            return Ok(AgentPromptOutcome::Cancelled);
         }
         if should_request_permission(&prompt.text) {
+            let tool_call_id = format!("call_{}", uuid::Uuid::new_v4());
+            // Match ACP's permission bridge: the linked tool must be projected before
+            // App Server opens the transient request or records its eventual outcome.
+            sink.emit(AgentEvent::ToolCall(AgentToolCall {
+                tool_call_id: tool_call_id.clone(),
+                scope_id: None,
+                title: "Edit workspace files".to_string(),
+                kind: "edit".to_string(),
+                status: AgentToolCallStatus::Pending,
+                input_summary: None,
+                output_preview: None,
+                details: None,
+            }))?;
             let _outcome = sink.request_permission(AgentPermissionRequest {
                 request_id: format!("perm_{}", uuid::Uuid::new_v4()),
                 title: "Allow workspace edit?".to_string(),
@@ -101,7 +117,7 @@ impl AgentRuntime for MockAgent {
                 scope: Some("Workspace".to_string()),
                 risk: Some("File content may change.".to_string()),
                 tool_call: AgentToolCallRef {
-                    tool_call_id: format!("call_{}", uuid::Uuid::new_v4()),
+                    tool_call_id,
                     title: "Edit workspace files".to_string(),
                     kind: Some("edit".to_string()),
                 },
@@ -119,16 +135,23 @@ impl AgentRuntime for MockAgent {
                 ],
             })?;
             if prompt.cancellation.is_cancelled() {
-                return Ok(());
+                return Ok(AgentPromptOutcome::Cancelled);
             }
         }
         let summary = first_words(&prompt.text, 9);
-        sink.emit(AgentEvent::Text(format!("I will work on: {summary}.")))?;
+        sink.emit(AgentEvent::MessageChunk {
+            role: crate::protocol::model::AgentMessageRole::Agent,
+            part: crate::protocol::model::AgentMessagePart::Text {
+                text: format!("I will work on: {summary}."),
+            },
+            source_message_id: None,
+        })?;
         sink.emit(AgentEvent::Activity {
             title: "Checked workspace context".to_string(),
             tool_name: "mock_context".to_string(),
             output_preview: "Workspace context is available for this task.".to_string(),
-        })
+        })?;
+        Ok(AgentPromptOutcome::EndTurn)
     }
 }
 

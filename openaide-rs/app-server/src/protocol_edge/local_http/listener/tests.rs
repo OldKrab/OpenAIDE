@@ -6,17 +6,20 @@ use std::sync::mpsc;
 use super::*;
 
 #[test]
-fn transient_socket_errors_are_classified_for_retry_backoff() {
+fn expected_socket_interruptions_are_classified_as_transient() {
     for kind in [
         ErrorKind::Interrupted,
         ErrorKind::TimedOut,
         ErrorKind::WouldBlock,
+        ErrorKind::BrokenPipe,
+        ErrorKind::ConnectionReset,
+        ErrorKind::ConnectionAborted,
     ] {
         let error = LocalHttpProbeListenerError::Io(Error::from(kind));
         assert!(error.is_transient_io(), "{kind:?} should be transient");
     }
 
-    let error = LocalHttpProbeListenerError::Io(Error::from(ErrorKind::ConnectionReset));
+    let error = LocalHttpProbeListenerError::Io(Error::from(ErrorKind::InvalidData));
     assert!(!error.is_transient_io());
     assert!(!LocalHttpProbeListenerError::NonLoopbackPeer.is_transient_io());
 }

@@ -1,18 +1,20 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::storage::records::TaskPreparationRecord;
+use crate::storage::records::{TaskLifecycle, TaskPreparationRecord, TaskTitle};
 
-use super::{AgentCommandsCatalog, ConfigOptionsCatalog, MessagePage, NormalizedMessage};
+use super::{AgentCommandsCatalog, ConfigOptionsCatalog, MessagePage};
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskStatus {
+    Starting,
     Active,
+    Stopping,
     Inactive,
     Failed,
     Completed,
-    Blocked,
+    Waiting,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
@@ -26,7 +28,7 @@ pub enum IsolationKind {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TaskSummary {
     pub task_id: String,
-    pub title: String,
+    pub title: Option<TaskTitle>,
     pub status: TaskStatus,
     pub task_version: u64,
     pub message_history_version: u64,
@@ -43,15 +45,26 @@ pub struct TaskSummary {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TaskSnapshot {
     pub task: TaskSummary,
+    pub lifecycle: TaskLifecycle,
     pub chat: MessagePage,
-    pub permissions: Vec<NormalizedMessage>,
     pub settings_summary: SettingsSummary,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub config_options_catalog: Option<ConfigOptionsCatalog>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub pending_config_change: Option<PendingTaskConfigChange>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_commands_catalog: Option<AgentCommandsCatalog>,
     pub preparation: TaskPreparationRecord,
     pub revision: u64,
+}
+
+/// Process-neutral projection of an in-flight config mutation.
+/// Server sequencing remains private to the durable Task record.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct PendingTaskConfigChange {
+    pub client_mutation_id: String,
+    pub config_id: String,
+    pub requested_value: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

@@ -1,9 +1,17 @@
 import type { ChatMessage } from "@openaide/app-shell-contracts";
 
 type ActivityChatMessage = ChatMessage & { message: Extract<ChatMessage["message"], { kind: "activity" }> };
-type ThoughtChatMessage = ChatMessage & { message: Extract<ChatMessage["message"], { kind: "thought" }> };
+type ThoughtChatMessage = ChatMessage & {
+  message: Extract<ChatMessage["message"], { kind: "agent_message" }> & { role: "thought" };
+};
 type ActivityRunMessage = ActivityChatMessage | ThoughtChatMessage;
+type ActivityRunProjection = { run: ActivityRunMessage[]; message: ChatMessage };
 
+// Protocol projection preserves source-row identity. Keying the derived group by
+// its first row lets React retain completed tool groups while only the live tail changes.
+const activityRunProjections = new WeakMap<ActivityRunMessage, ActivityRunProjection>();
+
+/** Presents each uninterrupted run of tool activity as one ordered disclosure group. */
 export function coalesceAdjacentActivities(items: ChatMessage[]) {
   const merged: ChatMessage[] = [];
   let index = 0;
@@ -22,7 +30,7 @@ export function coalesceAdjacentActivities(items: ChatMessage[]) {
     }
 
     if (run.length > 1 && run.some((runItem) => runItem.message.kind === "activity")) {
-      merged.push(coalesceActivityRun(run));
+      merged.push(stableActivityRun(run));
     } else {
       merged.push(...run);
     }
@@ -30,15 +38,27 @@ export function coalesceAdjacentActivities(items: ChatMessage[]) {
   return merged;
 }
 
+function stableActivityRun(run: ActivityRunMessage[]) {
+  const first = run[0];
+  const cached = activityRunProjections.get(first);
+  if (cached && cached.run.length === run.length && cached.run.every((item, index) => item === run[index])) {
+    return cached.message;
+  }
+  const message = coalesceActivityRun(run);
+  activityRunProjections.set(first, { run, message });
+  return message;
+}
+
 function coalesceActivityRun(run: ActivityRunMessage[]): ChatMessage {
   const first = run[0];
   const last = run.at(-1) ?? first;
   const activities = run.flatMap((item) => (item.message.kind === "activity" ? [item.message] : []));
   const steps = run.flatMap((item) =>
-    item.message.kind === "thought" ? [{ kind: "thought" as const, text: item.message.text, streaming: item.message.streaming }] : item.message.steps,
+    item.message.kind === "agent_message"
+      ? [{ kind: "thought" as const, message_id: item.message.id, text: thoughtText(item.message), streaming: false }]
+      : item.message.steps,
   );
-  // The group mark communicates whether the latest activity is still live. Individual
-  // tool rows remain authoritative for failures, so one failed tool does not condemn the group.
+  // The latest activity owns the live state; individual steps preserve failures.
   const status: ActivityChatMessage["message"]["status"] =
     activities.at(-1)?.status === "running" ? "running" : "completed";
   const firstActivity = activities[0];
@@ -70,7 +90,19 @@ function activityRunTitle(activities: Extract<ChatMessage["message"], { kind: "a
 }
 
 function isActivityRunItem(item: ChatMessage): item is ActivityRunMessage {
-  return item.message.kind === "activity" || item.message.kind === "thought";
+  if (item.message.kind === "agent_message") {
+    return item.message.role === "thought" && item.message.parts.every((part) => part.kind === "text");
+  }
+  if (item.message.kind !== "activity") return false;
+  // Text-only outcome Activities describe the prompt itself, not a Tool. Keeping
+  // them outside the adjacent Tool run prevents limits and refusals from being
+  // relabelled as generic Tool activity.
+  return item.message.steps.some((step) => step.kind !== "text")
+    || isTerminalInputActivity(item.message);
+}
+
+function thoughtText(message: ThoughtChatMessage["message"]) {
+  return message.parts.map((part) => part.kind === "text" ? part.text : "").join("");
 }
 
 function isCommandActivity(activity: Extract<ChatMessage["message"], { kind: "activity" }>) {

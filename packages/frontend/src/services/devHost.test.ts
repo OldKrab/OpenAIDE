@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { HostToWebviewMessage, WebviewToHostMessage } from "@openaide/app-shell-contracts";
-import { createStandaloneHost } from "./devHost";
-import { standaloneBootstrapFrom } from "./devHostBootstrap";
-import { handleStandaloneHostMessage } from "./devHostRouter";
+import { createStandaloneHost } from "../../../../apps/browser/frontend/standaloneHost";
+import { standaloneBootstrapFrom } from "../../../../apps/browser/frontend/standaloneHostBootstrap";
+import { handleStandaloneHostMessage } from "../../../../apps/browser/frontend/standaloneHostRouter";
 
 describe("standalone dev host", () => {
   afterEach(() => {

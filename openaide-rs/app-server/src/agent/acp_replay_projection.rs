@@ -1,13 +1,16 @@
+use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use agent_client_protocol::schema::{ContentBlock, SessionUpdate};
 
+use crate::agent::acp_content_projection::project_content_block;
+use crate::agent::acp_message_identity::stable_message_id;
 use crate::agent::acp_tool_call_projection::{
     merge_tool_call_update, remember_tool_call, ToolCallState,
 };
 use crate::agent::normalizer::normalize_event;
 use crate::agent::tool_details::tool_call_event;
-use crate::protocol::model::NormalizedMessage;
+use crate::protocol::model::{AgentMessagePart, AgentMessageRole, NormalizedMessage};
 use crate::time::now_string;
 
 pub(super) struct ReplayProjection {
@@ -35,7 +38,11 @@ impl ReplayProjection {
 
 struct ReplayBuffer {
     messages: Vec<NormalizedMessage>,
-    active_text: Option<ActiveTextRun>,
+    // Anonymous chunks have no durable correlation and merge only within one contiguous run.
+    active_anonymous_text: Option<ActiveAnonymousTextRun>,
+    sourced_user_indices: HashMap<String, usize>,
+    // ACP message ids keep Agent and Thought parts open across interleaved updates.
+    sourced_agent_indices: HashMap<String, usize>,
     session_id: String,
     next_text_ordinal: usize,
 }
@@ -44,7 +51,9 @@ impl ReplayBuffer {
     fn new(session_id: &str) -> Self {
         Self {
             messages: Vec::new(),
-            active_text: None,
+            active_anonymous_text: None,
+            sourced_user_indices: HashMap::new(),
+            sourced_agent_indices: HashMap::new(),
             session_id: session_id.to_string(),
             next_text_ordinal: 0,
         }
@@ -54,100 +63,131 @@ impl ReplayBuffer {
         match update {
             SessionUpdate::UserMessageChunk(chunk) => {
                 if let ContentBlock::Text(text) = chunk.content {
-                    self.push_text(
-                        ReplayTextKind::User,
-                        text.text,
-                        chunk.message_id,
-                        created_at,
-                    );
+                    self.push_user_text(text.text, chunk.message_id, created_at);
                 }
             }
-            SessionUpdate::AgentMessageChunk(chunk) => {
-                if let ContentBlock::Text(text) = chunk.content {
-                    self.push_text(
-                        ReplayTextKind::Agent,
-                        text.text,
-                        chunk.message_id,
-                        created_at,
-                    );
-                }
-            }
-            SessionUpdate::AgentThoughtChunk(chunk) => {
-                if let ContentBlock::Text(text) = chunk.content {
-                    self.push_text(
-                        ReplayTextKind::Thought,
-                        text.text,
-                        chunk.message_id,
-                        created_at,
-                    );
-                }
-            }
+            SessionUpdate::AgentMessageChunk(chunk) => self.push_agent_part(
+                AgentMessageRole::Agent,
+                project_content_block(chunk.content, AgentMessageRole::Agent),
+                chunk.message_id,
+                created_at,
+            ),
+            SessionUpdate::AgentThoughtChunk(chunk) => self.push_agent_part(
+                AgentMessageRole::Thought,
+                project_content_block(chunk.content, AgentMessageRole::Thought),
+                chunk.message_id,
+                created_at,
+            ),
             SessionUpdate::ToolCall(tool_call) => {
-                self.end_text_run();
+                self.end_anonymous_text_run();
                 remember_tool_call(tool_calls, tool_call.clone());
                 self.upsert(normalize_event(tool_call_event(&tool_call), created_at));
             }
             SessionUpdate::ToolCallUpdate(update) => {
-                self.end_text_run();
+                self.end_anonymous_text_run();
                 let tool_call = merge_tool_call_update(tool_calls, update);
                 self.upsert(normalize_event(tool_call_event(&tool_call), created_at));
             }
-            _ => self.end_text_run(),
+            _ => self.end_anonymous_text_run(),
         }
     }
 
-    fn push_text(
+    fn push_agent_part(
         &mut self,
-        kind: ReplayTextKind,
+        role: AgentMessageRole,
+        part: AgentMessagePart,
+        source_message_id: Option<String>,
+        created_at: &str,
+    ) {
+        let Some(source_message_id) = source_message_id else {
+            if let AgentMessagePart::Text { text } = part {
+                let kind = match role {
+                    AgentMessageRole::Agent => ReplayTextKind::Agent,
+                    AgentMessageRole::Thought => ReplayTextKind::Thought,
+                };
+                self.push_anonymous_text(kind, text, created_at);
+            } else {
+                self.end_anonymous_text_run();
+                let id = format!(
+                    "acp:{}:replay:{}:{}",
+                    self.session_id,
+                    role.label(),
+                    self.next_text_ordinal
+                );
+                self.next_text_ordinal += 1;
+                self.messages.push(NormalizedMessage::AgentMessage {
+                    id,
+                    role,
+                    parts: vec![part],
+                    created_at: created_at.to_string(),
+                });
+            }
+            return;
+        };
+
+        self.end_anonymous_text_run();
+        if let Some(message_index) = self.sourced_agent_indices.get(&source_message_id).copied() {
+            append_agent_part(&mut self.messages[message_index], role, part);
+            return;
+        }
+        let message_index = self.messages.len();
+        self.messages.push(NormalizedMessage::AgentMessage {
+            id: stable_message_id(&self.session_id, &source_message_id),
+            role,
+            parts: vec![part],
+            created_at: created_at.to_string(),
+        });
+        self.sourced_agent_indices
+            .insert(source_message_id, message_index);
+    }
+
+    fn push_user_text(
+        &mut self,
         text: String,
         source_message_id: Option<String>,
         created_at: &str,
     ) {
-        if let Some(active) = self.active_text.as_ref() {
+        let Some(source_message_id) = source_message_id else {
+            self.push_anonymous_text(ReplayTextKind::User, text, created_at);
+            return;
+        };
+
+        self.end_anonymous_text_run();
+        if let Some(message_index) = self.sourced_user_indices.get(&source_message_id).copied() {
+            append_text_chunk(&mut self.messages[message_index], &text);
+            return;
+        }
+
+        let message_index = self.messages.len();
+        let message_id = stable_message_id(&self.session_id, &source_message_id);
+        self.messages
+            .push(ReplayTextKind::User.new_message(message_id, text, created_at));
+        self.sourced_user_indices
+            .insert(source_message_id, message_index);
+    }
+
+    fn push_anonymous_text(&mut self, kind: ReplayTextKind, text: String, created_at: &str) {
+        if let Some(active) = self.active_anonymous_text.as_ref() {
             let message_index = active.message_index;
-            if active.kind == kind
-                && source_message_ids_match(
-                    active.source_message_id.as_deref(),
-                    source_message_id.as_deref(),
-                )
-                && append_text_chunk(&mut self.messages[message_index], &text)
-            {
-                if active.source_message_id.is_none() {
-                    if let Some(source_message_id) = source_message_id.as_deref() {
-                        set_message_id(
-                            &mut self.messages[message_index],
-                            stable_source_id(&self.session_id, source_message_id),
-                        );
-                    }
-                    self.active_text
-                        .as_mut()
-                        .expect("active replay text run")
-                        .source_message_id = source_message_id;
-                }
+            if active.kind == kind {
+                append_text_chunk(&mut self.messages[message_index], &text);
                 return;
             }
         }
 
         let message_index = self.messages.len();
-        let message_id = source_message_id
-            .as_deref()
-            .map(|source| stable_source_id(&self.session_id, source))
-            .unwrap_or_else(|| {
-                let id = format!(
-                    "acp:{}:replay:{}:{}",
-                    self.session_id,
-                    kind.label(),
-                    self.next_text_ordinal
-                );
-                self.next_text_ordinal += 1;
-                id
-            });
+        let message_id = format!(
+            "acp:{}:replay:{}:{}",
+            self.session_id,
+            kind.label(),
+            self.next_text_ordinal
+        );
+        self.next_text_ordinal += 1;
         self.messages
             .push(kind.new_message(message_id, text, created_at));
-        self.active_text = Some(ActiveTextRun {
+        self.active_anonymous_text = Some(ActiveAnonymousTextRun {
             kind,
             message_index,
-            source_message_id,
         });
     }
 
@@ -165,12 +205,12 @@ impl ReplayBuffer {
         }
     }
 
-    fn end_text_run(&mut self) {
-        self.active_text = None;
+    fn end_anonymous_text_run(&mut self) {
+        self.active_anonymous_text = None;
     }
 
     fn finalize_fallback_ids(&mut self) {
-        let mut occurrences = std::collections::HashMap::<(ReplayTextKind, u64), usize>::new();
+        let mut occurrences = HashMap::<(ReplayTextKind, u64), usize>::new();
         for message in &mut self.messages {
             let Some((kind, text, id)) = replay_text_parts(message) else {
                 continue;
@@ -216,31 +256,27 @@ impl ReplayTextKind {
                 created_at: created_at.to_string(),
                 attachments: Vec::new(),
             },
-            Self::Agent => NormalizedMessage::AgentText {
+            Self::Agent => NormalizedMessage::AgentMessage {
                 id,
-                text,
+                role: AgentMessageRole::Agent,
+                parts: vec![AgentMessagePart::Text { text }],
                 created_at: created_at.to_string(),
-                streaming: false,
             },
-            Self::Thought => NormalizedMessage::Thought {
+            Self::Thought => NormalizedMessage::AgentMessage {
                 id,
-                text,
+                role: AgentMessageRole::Thought,
+                parts: vec![AgentMessagePart::Text { text }],
                 created_at: created_at.to_string(),
-                streaming: false,
             },
         }
     }
 }
 
-fn stable_source_id(session_id: &str, source_message_id: &str) -> String {
-    format!("acp:{session_id}:message:{source_message_id}")
-}
-
 fn set_message_id(message: &mut NormalizedMessage, message_id: String) {
     match message {
-        NormalizedMessage::User { id, .. }
-        | NormalizedMessage::AgentText { id, .. }
-        | NormalizedMessage::Thought { id, .. } => *id = message_id,
+        NormalizedMessage::User { id, .. } | NormalizedMessage::AgentMessage { id, .. } => {
+            *id = message_id
+        }
         _ => {}
     }
 }
@@ -248,8 +284,19 @@ fn set_message_id(message: &mut NormalizedMessage, message_id: String) {
 fn replay_text_parts(message: &NormalizedMessage) -> Option<(ReplayTextKind, &str, &str)> {
     match message {
         NormalizedMessage::User { id, text, .. } => Some((ReplayTextKind::User, text, id)),
-        NormalizedMessage::AgentText { id, text, .. } => Some((ReplayTextKind::Agent, text, id)),
-        NormalizedMessage::Thought { id, text, .. } => Some((ReplayTextKind::Thought, text, id)),
+        NormalizedMessage::AgentMessage {
+            id, role, parts, ..
+        } => match parts.as_slice() {
+            [AgentMessagePart::Text { text }] => Some((
+                match role {
+                    AgentMessageRole::Agent => ReplayTextKind::Agent,
+                    AgentMessageRole::Thought => ReplayTextKind::Thought,
+                },
+                text,
+                id,
+            )),
+            _ => None,
+        },
         _ => None,
     }
 }
@@ -264,23 +311,53 @@ fn stable_text_fingerprint(text: &str) -> u64 {
 }
 
 #[derive(Clone)]
-struct ActiveTextRun {
+struct ActiveAnonymousTextRun {
     kind: ReplayTextKind,
     message_index: usize,
-    source_message_id: Option<String>,
 }
 
-fn source_message_ids_match(current: Option<&str>, incoming: Option<&str>) -> bool {
-    !matches!((current, incoming), (Some(current), Some(incoming)) if current != incoming)
-}
-
-fn append_text_chunk(message: &mut NormalizedMessage, chunk: &str) -> bool {
+fn append_text_chunk(message: &mut NormalizedMessage, chunk: &str) {
     let text = match message {
-        NormalizedMessage::User { text, .. }
-        | NormalizedMessage::AgentText { text, .. }
-        | NormalizedMessage::Thought { text, .. } => text,
-        _ => return false,
+        NormalizedMessage::User { text, .. } => text,
+        NormalizedMessage::AgentMessage { parts, .. } => match parts.last_mut() {
+            Some(AgentMessagePart::Text { text }) => text,
+            _ => unreachable!("replay text index must reference a text message"),
+        },
+        _ => unreachable!("replay text index must reference a text message"),
     };
     text.push_str(chunk);
-    true
+}
+
+fn append_agent_part(
+    message: &mut NormalizedMessage,
+    role: AgentMessageRole,
+    part: AgentMessagePart,
+) {
+    let NormalizedMessage::AgentMessage {
+        role: existing_role,
+        parts,
+        ..
+    } = message
+    else {
+        unreachable!("sourced ACP message index must reference an Agent message")
+    };
+    if *existing_role != role {
+        return;
+    }
+    if let (Some(AgentMessagePart::Text { text }), AgentMessagePart::Text { text: chunk }) =
+        (parts.last_mut(), &part)
+    {
+        text.push_str(chunk);
+    } else {
+        parts.push(part);
+    }
+}
+
+impl AgentMessageRole {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Agent => "agent",
+            Self::Thought => "thought",
+        }
+    }
 }

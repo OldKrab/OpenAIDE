@@ -521,11 +521,13 @@ describe("webview messaging composer routes", () => {
 
   it("routes surface commands to editor managers", async () => {
     const posted: unknown[] = [];
+    const calls: string[] = [];
     const surfaces = {
       openNewTask: vi.fn(),
       openSettings: vi.fn(),
-      openTask: vi.fn(),
+      openTask: vi.fn(() => calls.push("open")),
     };
+    const adoptTask = vi.fn(() => calls.push("adopt"));
 
     await handleWebviewMessage({ type: "surface.openNewTask" }, context({}, posted, surfaces));
     await handleWebviewMessage(
@@ -535,13 +537,15 @@ describe("webview messaging composer routes", () => {
     await handleWebviewMessage({ type: "surface.openSettings" }, context({}, posted, surfaces));
     await handleWebviewMessage(
       { type: "surface.openTask", payload: { task_id: "task_1", title: "Fix ACP" } },
-      context({}, posted, surfaces),
+      context({}, posted, surfaces, undefined, undefined, { adoptTask }),
     );
 
     expect(surfaces.openNewTask).toHaveBeenCalledTimes(2);
     expect(surfaces.openNewTask).toHaveBeenCalledWith("project_1");
     expect(surfaces.openSettings).toHaveBeenCalledTimes(1);
+    expect(adoptTask).toHaveBeenCalledWith("task_1", "Fix ACP");
     expect(surfaces.openTask).toHaveBeenCalledWith("task_1", "Fix ACP");
+    expect(calls).toEqual(["adopt", "open"]);
     expect(posted).toEqual([]);
   });
 });

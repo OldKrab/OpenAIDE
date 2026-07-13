@@ -39,6 +39,24 @@ pub fn result_with_server_requests<T: Serialize>(
     result: T,
     server_requests: Vec<ServerRequestDelivery>,
 ) -> GatewayOutcome {
+    result_with_events_and_server_requests(
+        connection_id,
+        id,
+        meta,
+        result,
+        Vec::new(),
+        server_requests,
+    )
+}
+
+pub fn result_with_events_and_server_requests<T: Serialize>(
+    connection_id: ConnectionId,
+    id: String,
+    meta: RequestMeta,
+    result: T,
+    events: Vec<GatewayEventDelivery>,
+    server_requests: Vec<ServerRequestDelivery>,
+) -> GatewayOutcome {
     GatewayOutcome::Respond {
         connection_id,
         id,
@@ -51,7 +69,7 @@ pub fn result_with_server_requests<T: Serialize>(
             ))
             .expect("protocol response should serialize"),
         ),
-        events: Vec::new(),
+        events,
         server_requests,
     }
 }
@@ -89,12 +107,12 @@ pub fn error(
     GatewayOutcome::Respond {
         connection_id,
         id,
-        response: GatewayResponse::Error(ErrorEnvelope::new(
+        response: GatewayResponse::Error(Box::new(ErrorEnvelope::new(
             error,
             ResponseMeta {
                 client_request_id: meta.client_request_id,
             },
-        )),
+        ))),
         events: Vec::new(),
         server_requests: Vec::new(),
     }
@@ -108,6 +126,7 @@ pub fn not_initialized(method: String) -> ProtocolError {
         target: Some(ErrorTarget {
             method: Some(method),
             field: None,
+            current_task: None,
         }),
     }
 }
@@ -120,6 +139,7 @@ pub fn invalid_params(error: serde_json::Error) -> ProtocolError {
         target: Some(ErrorTarget {
             method: None,
             field: Some("params".to_string()),
+            current_task: None,
         }),
     }
 }

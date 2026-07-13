@@ -3,10 +3,8 @@ use openaide_app_server_protocol::task::{
     TaskAdoptNativeSessionParams, TaskAdoptNativeSessionResult, TaskCancelParams, TaskCancelResult,
     TaskChatPageParams, TaskChatPageResult, TaskCreateParams, TaskCreateResult, TaskDiscardParams,
     TaskDiscardResult, TaskListParams, TaskListResult, TaskMarkReadParams, TaskMarkReadResult,
-    TaskOpenParams, TaskOpenResult, TaskRetryHistorySyncParams, TaskRetryHistorySyncResult,
-    TaskSendParams, TaskSendResult, TaskSetArchivedParams, TaskSetArchivedResult,
-    TaskSetConfigOptionParams, TaskSetConfigOptionResult, TaskToolDetailParams,
-    TaskToolDetailResult,
+    TaskOpenParams, TaskOpenResult, TaskSendParams, TaskSendResult, TaskSetArchivedParams,
+    TaskSetArchivedResult, TaskSetConfigOptionParams, TaskSetConfigOptionResult,
 };
 use serde_json::Value;
 
@@ -51,7 +49,7 @@ impl RpcGateway {
         id: String,
         params: Value,
         meta: RequestMeta,
-        now: AppServerTime,
+        _now: AppServerTime,
     ) -> GatewayOutcome {
         let params = match serde_json::from_value::<TaskCreateParams>(params) {
             Ok(params) => params,
@@ -59,18 +57,18 @@ impl RpcGateway {
                 return self.error(connection_id, id, meta, responses::invalid_params(error))
             }
         };
-        let task = match self.task_create.create(params) {
+        let client = self
+            .client_hub
+            .context_for_connection(&connection_id)
+            .expect("routing requires an initialized client for task create");
+        let task = match self
+            .task_create
+            .create_for_client(&client.client_instance_id, params)
+        {
             Ok(task) => task,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
-        let events = self.publish_task_updates(&task, now);
-        self.result_with_events::<TaskCreateResult>(
-            connection_id,
-            id,
-            meta,
-            TaskCreateResult { task },
-            events,
-        )
+        self.result::<TaskCreateResult>(connection_id, id, meta, TaskCreateResult { task })
     }
 
     pub(super) fn handle_task_adopt_native_session(
@@ -79,7 +77,7 @@ impl RpcGateway {
         id: String,
         params: Value,
         meta: RequestMeta,
-        now: AppServerTime,
+        _now: AppServerTime,
     ) -> GatewayOutcome {
         let params = match serde_json::from_value::<TaskAdoptNativeSessionParams>(params) {
             Ok(params) => params,
@@ -91,13 +89,11 @@ impl RpcGateway {
             Ok(task) => task,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
-        let events = self.publish_task_updates(&task, now);
-        self.result_with_events::<TaskAdoptNativeSessionResult>(
+        self.result::<TaskAdoptNativeSessionResult>(
             connection_id,
             id,
             meta,
             TaskAdoptNativeSessionResult { task },
-            events,
         )
     }
 
@@ -107,7 +103,7 @@ impl RpcGateway {
         id: String,
         params: Value,
         meta: RequestMeta,
-        now: AppServerTime,
+        _now: AppServerTime,
     ) -> GatewayOutcome {
         let params = match serde_json::from_value::<TaskSendParams>(params) {
             Ok(params) => params,
@@ -126,8 +122,7 @@ impl RpcGateway {
             Ok(accepted) => accepted,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
-        let events = self.publish_task_updates(&accepted.task, now);
-        self.result_with_events::<TaskSendResult>(
+        self.result::<TaskSendResult>(
             connection_id,
             id,
             meta,
@@ -136,7 +131,6 @@ impl RpcGateway {
                 turn_id: accepted.turn_id,
                 user_message_id: accepted.user_message_id,
             },
-            events,
         )
     }
 
@@ -146,7 +140,7 @@ impl RpcGateway {
         id: String,
         params: Value,
         meta: RequestMeta,
-        now: AppServerTime,
+        _now: AppServerTime,
     ) -> GatewayOutcome {
         let params = match serde_json::from_value::<TaskCancelParams>(params) {
             Ok(params) => params,
@@ -154,18 +148,18 @@ impl RpcGateway {
                 return self.error(connection_id, id, meta, responses::invalid_params(error))
             }
         };
-        let task = match self.task_cancel.cancel(params) {
+        let client = self
+            .client_hub
+            .context_for_connection(&connection_id)
+            .expect("routing requires an initialized client for task cancel");
+        let task = match self
+            .task_cancel
+            .cancel_for_client(&client.client_instance_id, params)
+        {
             Ok(task) => task,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
-        let events = self.publish_task_updates(&task, now);
-        self.result_with_events::<TaskCancelResult>(
-            connection_id,
-            id,
-            meta,
-            TaskCancelResult { task },
-            events,
-        )
+        self.result::<TaskCancelResult>(connection_id, id, meta, TaskCancelResult { task })
     }
 
     pub(super) fn handle_task_set_config_option(
@@ -174,7 +168,7 @@ impl RpcGateway {
         id: String,
         params: Value,
         meta: RequestMeta,
-        now: AppServerTime,
+        _now: AppServerTime,
     ) -> GatewayOutcome {
         let params = match serde_json::from_value::<TaskSetConfigOptionParams>(params) {
             Ok(params) => params,
@@ -182,17 +176,22 @@ impl RpcGateway {
                 return self.error(connection_id, id, meta, responses::invalid_params(error))
             }
         };
-        let task = match self.task_set_config_option.set_config_option(params) {
+        let client = self
+            .client_hub
+            .context_for_connection(&connection_id)
+            .expect("routing requires an initialized client for config changes");
+        let task = match self
+            .task_set_config_option
+            .set_config_option_for_client(&client.client_instance_id, params)
+        {
             Ok(task) => task,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
-        let events = self.publish_task_updates(&task, now);
-        self.result_with_events::<TaskSetConfigOptionResult>(
+        self.result::<TaskSetConfigOptionResult>(
             connection_id,
             id,
             meta,
             TaskSetConfigOptionResult { task },
-            events,
         )
     }
 
@@ -209,38 +208,19 @@ impl RpcGateway {
                 return self.error(connection_id, id, meta, responses::invalid_params(error))
             }
         };
-        let task = match self.task_open.open(params) {
+        let client = self
+            .client_hub
+            .context_for_connection(&connection_id)
+            .expect("routing requires an initialized client for task open");
+        let task = match self
+            .task_open
+            .open_for_client(&client.client_instance_id, params)
+        {
             Ok(task) => task,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
         let task = self.task_with_pending_requests(task);
         self.result::<TaskOpenResult>(connection_id, id, meta, TaskOpenResult { task })
-    }
-
-    pub(super) fn handle_task_retry_history_sync(
-        &mut self,
-        connection_id: ConnectionId,
-        id: String,
-        params: Value,
-        meta: RequestMeta,
-    ) -> GatewayOutcome {
-        let params = match serde_json::from_value::<TaskRetryHistorySyncParams>(params) {
-            Ok(params) => params,
-            Err(error) => {
-                return self.error(connection_id, id, meta, responses::invalid_params(error))
-            }
-        };
-        let task = match self.task_open.retry_history_sync(params) {
-            Ok(task) => task,
-            Err(error) => return self.error(connection_id, id, meta, error),
-        };
-        let task = self.task_with_pending_requests(task);
-        self.result::<TaskRetryHistorySyncResult>(
-            connection_id,
-            id,
-            meta,
-            TaskRetryHistorySyncResult { task },
-        )
     }
 
     pub(super) fn handle_task_mark_read(
@@ -249,7 +229,7 @@ impl RpcGateway {
         id: String,
         params: Value,
         meta: RequestMeta,
-        now: AppServerTime,
+        _now: AppServerTime,
     ) -> GatewayOutcome {
         let params = match serde_json::from_value::<TaskMarkReadParams>(params) {
             Ok(params) => params,
@@ -257,19 +237,19 @@ impl RpcGateway {
                 return self.error(connection_id, id, meta, responses::invalid_params(error))
             }
         };
-        let task = match self.task_open.mark_read(params) {
+        let client = self
+            .client_hub
+            .context_for_connection(&connection_id)
+            .expect("routing requires an initialized client for task mark-read");
+        let task = match self
+            .task_open
+            .mark_read_for_client(&client.client_instance_id, params)
+        {
             Ok(task) => task,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
         let task = self.task_with_pending_requests(task);
-        let events = self.publish_task_updates(&task, now);
-        self.result_with_events::<TaskMarkReadResult>(
-            connection_id,
-            id,
-            meta,
-            TaskMarkReadResult { task },
-            events,
-        )
+        self.result::<TaskMarkReadResult>(connection_id, id, meta, TaskMarkReadResult { task })
     }
 
     pub(super) fn handle_task_chat_page(
@@ -285,31 +265,18 @@ impl RpcGateway {
                 return self.error(connection_id, id, meta, responses::invalid_params(error))
             }
         };
-        let page = match self.task_chat_page.chat_page(params) {
+        let client = self
+            .client_hub
+            .context_for_connection(&connection_id)
+            .expect("routing requires an initialized client for Chat paging");
+        let page = match self
+            .task_chat_page
+            .chat_page_for_client(&client.client_instance_id, params)
+        {
             Ok(page) => page,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
         self.result::<TaskChatPageResult>(connection_id, id, meta, page)
-    }
-
-    pub(super) fn handle_task_tool_detail(
-        &mut self,
-        connection_id: ConnectionId,
-        id: String,
-        params: Value,
-        meta: RequestMeta,
-    ) -> GatewayOutcome {
-        let params = match serde_json::from_value::<TaskToolDetailParams>(params) {
-            Ok(params) => params,
-            Err(error) => {
-                return self.error(connection_id, id, meta, responses::invalid_params(error))
-            }
-        };
-        let details = match self.task_tool_detail.tool_detail(params) {
-            Ok(details) => details,
-            Err(error) => return self.error(connection_id, id, meta, error),
-        };
-        self.result::<TaskToolDetailResult>(connection_id, id, meta, details)
     }
 
     pub(super) fn handle_task_discard(
@@ -318,7 +285,7 @@ impl RpcGateway {
         id: String,
         params: Value,
         meta: RequestMeta,
-        now: AppServerTime,
+        _now: AppServerTime,
     ) -> GatewayOutcome {
         let params = match serde_json::from_value::<TaskDiscardParams>(params) {
             Ok(params) => params,
@@ -327,23 +294,21 @@ impl RpcGateway {
             }
         };
         let discarded_task_id = params.task_id.clone();
-        let tasks = match self.task_discard.discard(params) {
-            Ok(tasks) => tasks,
-            Err(error) => return self.error(connection_id, id, meta, error),
-        };
-        let mut events = self
-            .publish_project_collection_update(now)
-            .unwrap_or_default();
-        events.extend(self.publish_task_navigation_snapshot(tasks.clone(), now));
-        self.result_with_events::<TaskDiscardResult>(
+        let client = self
+            .client_hub
+            .context_for_connection(&connection_id)
+            .expect("routing requires an initialized client for task discard");
+        if let Err(error) = self
+            .task_discard
+            .discard_for_client(&client.client_instance_id, params)
+        {
+            return self.error(connection_id, id, meta, error);
+        }
+        self.result::<TaskDiscardResult>(
             connection_id,
             id,
             meta,
-            TaskDiscardResult {
-                discarded_task_id,
-                tasks,
-            },
-            events,
+            TaskDiscardResult { discarded_task_id },
         )
     }
 
@@ -353,7 +318,7 @@ impl RpcGateway {
         id: String,
         params: Value,
         meta: RequestMeta,
-        now: AppServerTime,
+        _now: AppServerTime,
     ) -> GatewayOutcome {
         let params = match serde_json::from_value::<TaskSetArchivedParams>(params) {
             Ok(params) => params,
@@ -363,24 +328,21 @@ impl RpcGateway {
         };
         let task_id = params.task_id.clone();
         let archived = params.archived;
-        let tasks = match self.task_archive.set_archived(params) {
-            Ok(tasks) => tasks,
-            Err(error) => return self.error(connection_id, id, meta, error),
-        };
-        let mut events = self
-            .publish_project_collection_update(now)
-            .unwrap_or_default();
-        events.extend(self.publish_task_navigation_snapshot(tasks.clone(), now));
-        self.result_with_events::<TaskSetArchivedResult>(
+        let client = self
+            .client_hub
+            .context_for_connection(&connection_id)
+            .expect("routing requires an initialized client for task archive");
+        if let Err(error) = self
+            .task_archive
+            .set_archived_for_client(&client.client_instance_id, params)
+        {
+            return self.error(connection_id, id, meta, error);
+        }
+        self.result::<TaskSetArchivedResult>(
             connection_id,
             id,
             meta,
-            TaskSetArchivedResult {
-                task_id,
-                archived,
-                tasks,
-            },
-            events,
+            TaskSetArchivedResult { task_id, archived },
         )
     }
 
