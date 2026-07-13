@@ -22,7 +22,7 @@ export const ChatRow = memo(function ChatRow({
   taskId,
   toolDetails,
   commandCatalog,
-  showStreamingCaret = true,
+  showStreamingCaret = false,
 }: {
   commandCatalog?: AgentCommandsCatalog;
   message: ChatMessage;
@@ -54,7 +54,7 @@ export const ChatRow = memo(function ChatRow({
     );
   }
   if (body.kind === "agent_text") {
-    return <AgentTextMessage streaming={body.streaming === true && showStreamingCaret} text={body.text} />;
+    return <AgentTextMessage streaming={showStreamingCaret} text={body.text} />;
   }
   if (body.kind === "agent_content" || body.kind === "thought_content") {
     return (
@@ -66,12 +66,12 @@ export const ChatRow = memo(function ChatRow({
   }
   if (body.kind === "thought") {
     return (
-      <details className="chat-thought-block">
+      <details aria-busy={showStreamingCaret || undefined} className="chat-thought-block">
         <summary>
           <ChevronRight className="chat-thought-disclosure" size={13} aria-hidden="true" />
           <span>Thinking</span>
         </summary>
-        <AgentMarkdown className="chat-thought" text={body.text} />
+        <AgentMarkdown className="chat-thought" streaming={showStreamingCaret} text={body.text} />
         <MessageCopyAction text={body.text} />
       </details>
     );

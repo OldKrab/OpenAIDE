@@ -17,9 +17,9 @@ export type ChatMessage = {
 
 export type NormalizedMessage =
   | { kind: "user"; id: string; text: string; created_at: string; attachments?: Attachment[] }
-  | { kind: "agent_text"; id: string; text: string; created_at: string; streaming?: boolean }
+  | { kind: "agent_text"; id: string; text: string; created_at: string }
   | { kind: "agent_content" | "thought_content"; id: string; content: AgentContent; created_at: string }
-  | { kind: "thought"; id: string; text: string; created_at: string; streaming?: boolean }
+  | { kind: "thought"; id: string; text: string; created_at: string }
   | { kind: "activity"; id: string; title: string; status: ActivityStatus; created_at: string; collapsed: boolean; steps: ActivityStep[] }
   | { kind: "permission"; id: string; request_id: string; app_server_request_id?: string; title: string; description?: string; scope?: string; risk?: string; tool_call: PermissionToolCall; state: PermissionState; created_at: string; options: PermissionOption[]; selected_option?: string; decision?: PermissionDecision }
   | ElicitationMessage

@@ -188,7 +188,6 @@ function mapProtocolMessage(item: ChatItem, createdAt: string): NormalizedMessag
     id: item.messageId,
     text,
     created_at: createdAt,
-    streaming: item.status === "streaming",
   };
 }
 

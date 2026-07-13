@@ -35,7 +35,7 @@ export function updateTaskSnapshot(
     case "chatItemChunk":
       if (payload.taskId !== task.task.taskId) return unchanged(snapshot);
       if (payload.revision <= task.revision) return unchanged(snapshot);
-      return updateChatItemChunk(task, payload.revision, payload.messageId, payload.chunk.text, payload.chunk.finalChunk === true);
+      return updateChatItemChunk(task, payload.revision, payload.messageId, payload.chunk.text);
     case "requestUpdated":
       return requestMatchesTask(payload.request, task.task.taskId)
         ? changed({ ...snapshot, task: upsertPendingRequest(task, payload.request) })
@@ -57,7 +57,7 @@ function appendChatItem(task: TaskSnapshot, revision: number, item: ChatItem): T
   };
 }
 
-function updateChatItemChunk(task: TaskSnapshot, revision: number, messageId: string, text: string, finalChunk: boolean): SnapshotUpdate {
+function updateChatItemChunk(task: TaskSnapshot, revision: number, messageId: string, text: string): SnapshotUpdate {
   const itemIndex = task.chat.items.findIndex((item) => item.messageId === messageId);
   if (itemIndex === -1) return { kind: "resyncRequired", reason: "missingChatItem" };
 
@@ -65,7 +65,6 @@ function updateChatItemChunk(task: TaskSnapshot, revision: number, messageId: st
     if (index !== itemIndex) return item;
     return {
       ...item,
-      status: finalChunk ? ("complete" as const) : item.status,
       parts: appendTextToMessageParts(item.parts, text),
     };
   });

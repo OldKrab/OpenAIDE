@@ -503,7 +503,7 @@ export type EventScope = { "kind": "stateRoot", stateRootId: StateRootId, } | { 
 
 export type AppServerEventPayload = { "kind": "snapshotReplaced", snapshot: ClientSnapshot, } | { "kind": "taskUpdated", task: TaskSummary, } | { "kind": "taskSnapshotUpdated", task: TaskSnapshot, } | { "kind": "taskHistorySyncUpdated", taskId: TaskId, historySync: TaskHistorySyncSnapshot, } | { "kind": "taskNavigationUpdated", navigation: TaskNavigationSnapshot, } | { "kind": "projectCollectionUpdated", projects: ProjectCollectionSnapshot, } | { "kind": "chatItemAppended", taskId: TaskId, revision: number, item: ChatItem, } | { "kind": "chatItemChunk", taskId: TaskId, revision: number, messageId: MessageId, chunk: TextChunk, } | { "kind": "requestUpdated", request: PendingRequestSnapshot, } | { "kind": "agentCollectionUpdated", agents: AgentCollectionSnapshot, };
 
-export type TextChunk = { sequence: number, text: string, finalChunk?: boolean, };
+export type TextChunk = { text: string, };
 
 export type ClientSnapshot = { cursor: EventCursor, server: ServerSnapshot, stateRoot: StateRootSnapshot, client: ClientSnapshotScope, newTaskDefaults: NewTaskDefaultsSnapshot, projects?: ProjectCollectionSnapshot | null, agents?: AgentCollectionSnapshot | null, tasks?: TaskNavigationSnapshot | null, activeTask?: TaskSnapshot | null, settings?: SettingsSnapshot | null, pendingRequests?: Array<PendingRequestSnapshot>, };
 

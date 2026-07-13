@@ -18,7 +18,6 @@ pub(super) fn commit_existing_task(
 ) -> Result<TaskCommitResult, RuntimeError> {
     let _guard = target.lock();
     let mut task = target.store.read_task(task_id)?;
-    let original_active_turn = task.active_turn_id.clone();
     let original_version_fields = VersionFields::from_task(&task);
     let message_backup = target.store.backup_message_files(task_id)?;
     let rollback = || target.store.restore_message_files(task_id, &message_backup);
@@ -38,12 +37,6 @@ pub(super) fn commit_existing_task(
     drop(ctx);
     let outcome = match mutation_result {
         TaskMutationResult::Changed => {
-            if original_active_turn.is_some() && task.active_turn_id.is_none() {
-                if let Err(error) = target.store.finish_streaming_messages(task_id) {
-                    rollback()?;
-                    return Err(error);
-                }
-            }
             if let Err(error) = validate_task_invariants(task_id, &original_version_fields, &task) {
                 rollback()?;
                 return Err(error);

@@ -430,7 +430,6 @@ fn agent_chat_message(id: &str, text: &str) -> ChatMessage {
             id: id.to_string(),
             text: text.to_string(),
             created_at: "2026-07-01T00:00:00Z".to_string(),
-            streaming: false,
         },
     }
 }
@@ -528,7 +527,6 @@ fn native_history_replacement_records_the_native_history_clock() {
                 id: "native-message".to_string(),
                 text: "Loaded history".to_string(),
                 created_at: "1".to_string(),
-                streaming: false,
             }],
             native_updated_at,
         )

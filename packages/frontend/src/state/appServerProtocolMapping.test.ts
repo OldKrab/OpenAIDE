@@ -120,7 +120,7 @@ describe("App Server Protocol state mapping", () => {
         created_at: "2026-06-27T12:00:00.000Z",
         attachments: [{ kind: "file", label: "README.md" }],
       },
-      { kind: "agent_text", text: "world", created_at: "2026-06-27T12:00:00.000Z", streaming: true },
+      { kind: "agent_text", text: "world", created_at: "2026-06-27T12:00:00.000Z" },
       {
         kind: "activity",
         title: "Running tests",

@@ -12,7 +12,7 @@ import type {
 } from "@openaide/app-shell-contracts";
 import type { AppAction } from "../state/appReducer";
 import { renderedChat } from "../state/chatPaging";
-import type { AppState, TaskChatScrollState, TaskComposerInput } from "../state/store";
+import type { AppState, TaskChatScrollState, TaskComposerInput, TaskLiveTextPresentation } from "../state/store";
 import { ChatRow } from "./ChatMessageView";
 import { Composer } from "./Composer";
 import { composerAvailability, composerCanSubmit } from "./composerAvailability";
@@ -30,6 +30,7 @@ import { useTaskChatScroll } from "./useTaskChatScroll";
 import { appServerAttachmentHandles } from "../state/composerOptions";
 import { configOptionsMutable } from "../state/configOptionState";
 import type { BackendConnectionState } from "./appControllerBackendLifecycle";
+import { useLiveTextPresentation } from "./useLiveTextPresentation";
 
 export {
   scrollTopAfterPrependedContent,
@@ -89,6 +90,7 @@ export function TaskView({
   onSendPrompt,
   onSelectConfigOption,
   permissionResponses,
+  liveTextPresentation,
   questionResponses = {},
   startupConfigOptions,
   snapshot,
@@ -124,6 +126,7 @@ export function TaskView({
   onSendPrompt: (prompt?: string) => void;
   onSelectConfigOption: (configId: string, value: string) => void;
   permissionResponses: AppState["permissionResponses"];
+  liveTextPresentation?: TaskLiveTextPresentation;
   questionResponses?: AppState["questionResponses"];
   startupConfigOptions?: ConfigOptionsCatalog;
   snapshot: TaskSnapshot;
@@ -144,7 +147,11 @@ export function TaskView({
     appServerQuestionRequests,
     snapshot.task.task_id,
   );
-  const latestChatItem = chatItems.at(-1);
+  const livePresentation = useLiveTextPresentation(
+    snapshot.task.task_id,
+    chatItems,
+    liveTextPresentation,
+  );
   const turnBusy = snapshot.task.status === "active";
   const attachmentsSendable = taskInput.context.length === 0
     || appServerAttachmentHandles(taskInput.context) !== undefined;
@@ -266,11 +273,11 @@ export function TaskView({
             </div>
           ) : null}
           {chat.error ? <p className="chat-system">{chat.error}</p> : null}
-          {chatItems.map((message) => (
+          {livePresentation.items.map((message) => (
             <ChatRow
               key={chatRowKey(message)}
               message={message}
-              showStreamingCaret={message === latestChatItem}
+              showStreamingCaret={livePresentation.activeMessageIds.has(message.message_id)}
               taskId={snapshot.task.task_id}
               toolDetails={toolDetails}
               onLoadToolDetail={onLoadToolDetail}

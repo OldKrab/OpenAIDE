@@ -169,10 +169,10 @@ export function startAppServerStateSubscription({
       queuePendingEvent(event);
       return;
     }
-    applyEvent(event);
+    applyEvent(event, true);
   }
 
-  function applyEvent(event: AppServerEvent) {
+  function applyEvent(event: AppServerEvent, presentLive: boolean) {
     if (!state || disposed) return false;
     const result = applySubscriptionEvent(state, event);
     if (result.kind === "ignored") {
@@ -187,6 +187,10 @@ export function startAppServerStateSubscription({
       return false;
     }
     state = result.state;
+    if (presentLive) {
+      const action = liveTextPresentationAction(event, result.state.snapshot);
+      if (action) dispatch(action);
+    }
     if (result.snapshotChanged) applySnapshot(result.state.snapshot);
     return true;
   }
@@ -199,7 +203,7 @@ export function startAppServerStateSubscription({
       : pendingEvents.slice(snapshotCursorIndex + 1);
     pendingEvents = [];
     for (const [index, event] of events.entries()) {
-      if (applyEvent(event)) continue;
+      if (applyEvent(event, false)) continue;
       for (const remaining of events.slice(index + 1)) queuePendingEvent(remaining);
       break;
     }
@@ -224,6 +228,43 @@ export function startAppServerStateSubscription({
       dispatch(action);
     }
   }
+}
+
+function liveTextPresentationAction(
+  event: AppServerEvent,
+  snapshot: SubscriptionSnapshot,
+): AppAction | undefined {
+  if (snapshot.kind !== "task") return undefined;
+  const payload = event.payload;
+  if (payload.kind === "chatItemAppended") {
+    const channel = textChannel(payload.item);
+    if (!channel) return undefined;
+    return {
+      type: "taskChat:liveText",
+      taskId: payload.taskId,
+      messageId: payload.item.messageId,
+      channel,
+      eventCursor: event.cursor,
+    };
+  }
+  if (payload.kind !== "chatItemChunk") return undefined;
+  const item = snapshot.task.chat.items.find((candidate) => candidate.messageId === payload.messageId);
+  const channel = item && textChannel(item);
+  if (!channel) return undefined;
+  return {
+    type: "taskChat:liveText",
+    taskId: payload.taskId,
+    messageId: payload.messageId,
+    channel,
+    eventCursor: event.cursor,
+  };
+}
+
+function textChannel(item: import("@openaide/app-server-client").ChatItem) {
+  if (!item.parts.some((part) => part.kind === "text")) return undefined;
+  if (item.role === "agent") return "agent" as const;
+  if (item.role === "system") return "thought" as const;
+  return undefined;
 }
 
 function acquireSubscriptionLease(

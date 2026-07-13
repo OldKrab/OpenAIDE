@@ -32,11 +32,12 @@ pub(crate) fn append_normalized_to_store(
         .map(|m| m.sequence + 1)
         .unwrap_or(1);
     let cursor = cursor::from_sequence(next_sequence);
+    let identity = message.identity();
     let chat = ChatMessage {
         cursor,
-        identity: message.identity(),
+        message_id: identity.clone(),
+        identity,
         message_type: message.message_type().to_string(),
-        message_id: Uuid::new_v4().to_string(),
         message,
     };
     store.append_message(task_id, chat)
@@ -48,11 +49,12 @@ pub(crate) fn upsert_normalized_to_store(
     mut message: NormalizedMessage,
 ) -> Result<StoredMessage, RuntimeError> {
     store.persist_tool_artifacts(task_id, &mut message)?;
+    let identity = message.identity();
     let chat = ChatMessage {
         cursor: String::new(),
-        identity: message.identity(),
+        message_id: identity.clone(),
+        identity,
         message_type: message.message_type().to_string(),
-        message_id: Uuid::new_v4().to_string(),
         message,
     };
     store.upsert_message_by_identity(task_id, chat)

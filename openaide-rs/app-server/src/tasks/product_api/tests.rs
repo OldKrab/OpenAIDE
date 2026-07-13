@@ -1590,7 +1590,6 @@ fn open_readopts_adopted_task_when_native_session_is_newer_than_cached_history()
                     id: "cached:stale".to_string(),
                     text: "Stale cached history.".to_string(),
                     created_at: "2026-01-01T00:00:00.000Z".to_string(),
-                    streaming: false,
                 },
             },
         )
@@ -1617,7 +1616,6 @@ fn open_readopts_adopted_task_when_native_session_is_newer_than_cached_history()
             id: "native:fresh".to_string(),
             text: "Fresh native history.".to_string(),
             created_at: "2026-01-02T00:00:00.000Z".to_string(),
-            streaming: false,
         }]),
         ..Default::default()
     });
@@ -1813,7 +1811,6 @@ fn send_does_not_wait_for_or_apply_a_blocked_history_listing() {
             id: "native-history".to_string(),
             text: "History only the Agent had.".to_string(),
             created_at: "2026-01-02T00:00:00.000Z".to_string(),
-            streaming: false,
         }]),
         ..Default::default()
     });
@@ -1910,7 +1907,6 @@ fn history_load_failure_adds_activity_and_leaves_task_sendable() {
                     id: "cached:stale".to_string(),
                     text: "Stale cached history.".to_string(),
                     created_at: "2026-01-01T00:00:00.000Z".to_string(),
-                    streaming: false,
                 },
             },
         )
@@ -1937,7 +1933,6 @@ fn history_load_failure_adds_activity_and_leaves_task_sendable() {
             id: "native:fresh".to_string(),
             text: "Fresh native history.".to_string(),
             created_at: "2026-01-02T00:00:00.000Z".to_string(),
-            streaming: false,
         }]),
         fail_load_once_with_already_active: AtomicBool::new(true),
         ..Default::default()
@@ -2019,7 +2014,6 @@ fn open_keeps_adopted_task_cache_when_native_session_is_not_newer() {
                     id: "cached:current".to_string(),
                     text: "Current cached history.".to_string(),
                     created_at: "2026-01-02T00:00:00.000Z".to_string(),
-                    streaming: false,
                 },
             },
         )
@@ -2040,7 +2034,6 @@ fn open_keeps_adopted_task_cache_when_native_session_is_not_newer() {
             id: "native:older".to_string(),
             text: "Older native history.".to_string(),
             created_at: "2026-01-01T00:00:00.000Z".to_string(),
-            streaming: false,
         }]),
         ..Default::default()
     });
@@ -2110,7 +2103,6 @@ fn open_keeps_adopted_task_cache_when_native_session_has_no_activity_time() {
             id: "native:unordered".to_string(),
             text: "History with no ordering timestamp.".to_string(),
             created_at: "2026-01-01T00:00:00.000Z".to_string(),
-            streaming: false,
         }]),
         ..Default::default()
     });
@@ -3504,7 +3496,6 @@ fn cancel_clears_active_turn_and_appends_interruption() {
                     id: "agent-stream".to_string(),
                     text: "partial response".to_string(),
                     created_at: "2026-01-01T00:00:00.000Z".to_string(),
-                    streaming: true,
                 },
             },
         )
@@ -3532,15 +3523,9 @@ fn cancel_clears_active_turn_and_appends_interruption() {
         .read_messages("task-existing")
         .unwrap()
         .iter()
-        .all(|message| !matches!(
-            message.chat.message,
-            NormalizedMessage::AgentText {
-                streaming: true,
-                ..
-            } | NormalizedMessage::Thought {
-                streaming: true,
-                ..
-            }
+        .any(|message| matches!(
+            &message.chat.message,
+            NormalizedMessage::AgentText { text, .. } if text == "partial response"
         )));
     assert_eq!(
         snapshot.task.status,
@@ -3994,7 +3979,6 @@ fn task_open_republishes_controls_from_recovered_native_session() {
                     id: "cached:controls".to_string(),
                     text: "Cached history".to_string(),
                     created_at: "2025-12-31T00:00:00.000Z".to_string(),
-                    streaming: false,
                 },
             },
         )

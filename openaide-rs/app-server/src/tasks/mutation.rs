@@ -95,11 +95,11 @@ impl TaskMutationContext<'_> {
         upsert_normalized_to_store(self.store, &self.task.task_id, message).map(|_| ())
     }
 
-    pub(crate) fn upsert_message_with_record(
+    pub(crate) fn append_text_chunk(
         &self,
         message: NormalizedMessage,
-    ) -> Result<crate::storage::records::StoredMessage, RuntimeError> {
-        upsert_normalized_to_store(self.store, &self.task.task_id, message)
+    ) -> Result<crate::storage::message_store::TextChunkAppend, RuntimeError> {
+        self.store.append_text_chunk(&self.task.task_id, message)
     }
 
     pub(crate) fn set_committed_delta(&mut self, delta: CommittedTaskDelta) {

@@ -46,6 +46,7 @@ type AppActionPayload =
   | { type: "task:promoted"; snapshot: TaskSnapshot; activate: boolean }
   | { type: "snapshot"; snapshot: TaskSnapshot; intent: SnapshotIntent }
   | { type: "taskScroll:record"; taskId: string; scrollState: TaskChatScrollState }
+  | { type: "taskChat:liveText"; taskId: string; messageId: string; channel: "agent" | "thought"; eventCursor: string }
   | { type: "prompt"; prompt: string }
   | { type: "projects"; projects: ProjectOption[]; initialProjectId?: string }
   | { type: "workspace:roots"; roots: WorkspaceRoot[] }
@@ -145,6 +146,7 @@ type GlobalAction = Extract<
   | { type: "task:promoted" }
   | { type: "snapshot" }
   | { type: "taskScroll:record" }
+  | { type: "taskChat:liveText" }
   | { type: "projects" }
   | { type: "workspace:roots" }
   | { type: "search:set" }
@@ -178,6 +180,7 @@ function isGlobalAction(action: AppAction): action is GlobalAction {
     case "task:promoted":
     case "snapshot":
     case "taskScroll:record":
+    case "taskChat:liveText":
     case "projects":
     case "workspace:roots":
     case "search:set":
@@ -224,6 +227,7 @@ function reduceGlobalState(state: AppState, action: GlobalAction): AppState {
         const { [action.taskId]: _snapshot, ...taskSnapshots } = state.taskSnapshots;
         const { [action.taskId]: _snapshotEpoch, ...taskSnapshotReplicaEpochs } = state.taskSnapshotReplicaEpochs;
         const { [action.taskId]: _scrollState, ...taskChatScrollStates } = state.taskChatScrollStates;
+        const { [action.taskId]: _liveText, ...taskLiveTextPresentation } = state.taskLiveTextPresentation;
         return {
           ...state,
           tasks: nextTasks,
@@ -236,6 +240,7 @@ function reduceGlobalState(state: AppState, action: GlobalAction): AppState {
           taskSnapshots,
           taskSnapshotReplicaEpochs,
           taskChatScrollStates,
+          taskLiveTextPresentation,
         };
       }
     case "task:promoted": {
@@ -298,6 +303,20 @@ function reduceGlobalState(state: AppState, action: GlobalAction): AppState {
         taskChatScrollStates: {
           ...state.taskChatScrollStates,
           [action.taskId]: action.scrollState,
+        },
+      };
+    case "taskChat:liveText":
+      return {
+        ...state,
+        taskLiveTextPresentation: {
+          ...state.taskLiveTextPresentation,
+          [action.taskId]: {
+            ...state.taskLiveTextPresentation[action.taskId],
+            [action.channel]: {
+              messageId: action.messageId,
+              eventCursor: action.eventCursor,
+            },
+          },
         },
       };
     case "projects": {

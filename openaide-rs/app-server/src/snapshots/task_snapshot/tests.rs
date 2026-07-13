@@ -161,7 +161,6 @@ fn open_projects_durable_chat_without_raw_attachment_paths() {
                 id: "agent-1".to_string(),
                 text: "done".to_string(),
                 created_at: "2026-01-01T00:00:01.000Z".to_string(),
-                streaming: false,
             }),
         )
         .unwrap();
@@ -211,7 +210,6 @@ fn open_retries_when_message_commit_interleaves_with_snapshot_read() {
                     id: "agent-1".to_string(),
                     text: "committed while reading".to_string(),
                     created_at: "2026-01-01T00:00:01.000Z".to_string(),
-                    streaming: true,
                 }),
             )
             .unwrap();

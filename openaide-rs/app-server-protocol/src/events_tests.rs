@@ -10,9 +10,7 @@ fn chat_item_chunk_preserves_task_revision_on_the_wire() {
         "revision": 7,
         "messageId": "message-1",
         "chunk": {
-            "sequence": 2,
-            "text": " world",
-            "finalChunk": true
+            "text": " world"
         }
     });
 
@@ -20,4 +18,5 @@ fn chat_item_chunk_preserves_task_revision_on_the_wire() {
     let encoded = serde_json::to_value(payload).unwrap();
 
     assert_eq!(encoded["revision"], json!(7));
+    assert_eq!(encoded["chunk"], json!({ "text": " world" }));
 }

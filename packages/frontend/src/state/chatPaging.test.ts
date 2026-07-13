@@ -34,30 +34,30 @@ describe("chatPaging", () => {
   });
 
   it("preserves distinct thought identities instead of guessing chunk boundaries from adjacency", () => {
-    const chat = renderedChat(snapshot([thoughtMessage("m1", "Think", false), thoughtMessage("m2", "ing", true)]), undefined);
+    const chat = renderedChat(snapshot([thoughtMessage("m1", "Think"), thoughtMessage("m2", "ing")]), undefined);
 
     expect(chat.items.map((item) => item.message_id)).toEqual(["m1", "m2"]);
     expect(chat.items.map((item) => item.message)).toMatchObject([
-      { kind: "thought", id: "m1", text: "Think", streaming: false },
-      { kind: "thought", id: "m2", text: "ing", streaming: true },
+      { kind: "thought", id: "m1", text: "Think" },
+      { kind: "thought", id: "m2", text: "ing" },
     ]);
   });
 
   it("preserves distinct Agent message identities instead of joining short adjacent text", () => {
     const chat = renderedChat(
       snapshot([
-        agentMessage("m1", "Run", false),
-        agentMessage("m2", " `", true),
-        agentMessage("m3", "pwd", false),
+        agentMessage("m1", "Run"),
+        agentMessage("m2", " `"),
+        agentMessage("m3", "pwd"),
       ]),
       undefined,
     );
 
     expect(chat.items.map((item) => item.message_id)).toEqual(["m1", "m2", "m3"]);
     expect(chat.items.map((item) => item.message)).toMatchObject([
-      { kind: "agent_text", id: "m1", text: "Run", streaming: false },
-      { kind: "agent_text", id: "m2", text: " `", streaming: true },
-      { kind: "agent_text", id: "m3", text: "pwd", streaming: false },
+      { kind: "agent_text", id: "m1", text: "Run" },
+      { kind: "agent_text", id: "m2", text: " `" },
+      { kind: "agent_text", id: "m3", text: "pwd" },
     ]);
   });
 
@@ -177,7 +177,7 @@ function page(items: ChatMessage[], hasBefore: boolean): MessagePage {
   };
 }
 
-function agentMessage(id: string, text: string, streaming = false): ChatMessage {
+function agentMessage(id: string, text: string): ChatMessage {
   return {
     cursor: `cursor_${id}`,
     identity: id,
@@ -188,12 +188,11 @@ function agentMessage(id: string, text: string, streaming = false): ChatMessage 
       id,
       text,
       created_at: "2026-05-17T00:00:00Z",
-      streaming,
     },
   };
 }
 
-function thoughtMessage(id: string, text: string, streaming = false): ChatMessage {
+function thoughtMessage(id: string, text: string): ChatMessage {
   return {
     cursor: `cursor_${id}`,
     identity: id,
@@ -204,7 +203,6 @@ function thoughtMessage(id: string, text: string, streaming = false): ChatMessag
       id,
       text,
       created_at: "2026-05-17T00:00:00Z",
-      streaming,
     },
   };
 }

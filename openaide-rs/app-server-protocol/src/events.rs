@@ -88,10 +88,7 @@ pub enum AppServerEventPayload {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct TextChunk {
-    pub sequence: u64,
     pub text: String,
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub final_chunk: bool,
 }
 
 #[cfg(test)]

@@ -3,9 +3,9 @@ mod config;
 mod permissions;
 mod questions;
 mod session;
-mod streaming;
 #[cfg(test)]
 mod tests;
+mod text_chunks;
 
 use crate::agent::events::{AgentEvent, AgentPermissionOutcome, AgentPermissionRequest};
 use crate::agent::normalizer::normalize_event;
@@ -17,10 +17,11 @@ use crate::snapshots::task_snapshot::project_chat_item;
 use crate::task_events::CommittedTaskDelta;
 use crate::tasks::mutation::{TaskCommitOptions, TaskMutationResult, TaskMutations};
 use crate::time::now_string;
+use openaide_app_server_protocol::events::TextChunk;
 
 use self::commands::{update_task_commands, CommandsUpdateTarget};
 use self::config::{update_task_config_options, ConfigUpdateTarget};
-use self::streaming::{StreamingDelta, StreamingRuns, StreamingWrite};
+use self::text_chunks::{TextChannel, TextChunkRoutes};
 use std::sync::{Arc, Mutex};
 
 #[derive(Clone, Copy)]
@@ -96,7 +97,7 @@ pub(crate) struct TaskSessionEventSink {
     task_id: String,
     session_id: String,
     server_requests: ServerRequestRuntime,
-    streaming_runs: StreamingRuns,
+    text_chunk_routes: TextChunkRoutes,
     emission_lock: Mutex<()>,
 }
 
@@ -110,9 +111,9 @@ impl TaskSessionEventSink {
         Self {
             mutations,
             task_id,
-            session_id,
+            session_id: session_id.clone(),
             server_requests,
-            streaming_runs: StreamingRuns::default(),
+            text_chunk_routes: TextChunkRoutes::new(session_id),
             emission_lock: Mutex::new(()),
         }
     }
@@ -136,15 +137,15 @@ impl TaskSessionEventSink {
         let _guard = self.emission_lock.lock().expect("event sink lock poisoned");
         let now = now_string();
         if let AgentEvent::ConfigOptionsChanged(catalog) = event {
-            self.finish_anonymous_streaming_runs(&now)?;
+            self.finish_anonymous_text_routes();
             return self.update_task_config_options(catalog, &now);
         }
         if let AgentEvent::CommandsChanged(catalog) = event {
-            self.finish_anonymous_streaming_runs(&now)?;
+            self.finish_anonymous_text_routes();
             return self.update_task_commands(catalog, &now);
         }
         if let AgentEvent::Text(text) = event {
-            self.finish_anonymous_thought_run(&now)?;
+            self.finish_anonymous_thought_run();
             return self.append_agent_text_chunk(text, None, &now);
         }
         if let AgentEvent::TextChunk {
@@ -152,11 +153,11 @@ impl TaskSessionEventSink {
             source_message_id,
         } = event
         {
-            self.finish_anonymous_thought_run(&now)?;
+            self.finish_anonymous_thought_run();
             return self.append_agent_text_chunk(text, source_message_id, &now);
         }
         if let AgentEvent::Thought(text) = event {
-            self.finish_anonymous_text_run(&now)?;
+            self.finish_anonymous_text_run();
             return self.append_agent_thought_chunk(text, None, &now);
         }
         if let AgentEvent::ThoughtChunk {
@@ -164,10 +165,10 @@ impl TaskSessionEventSink {
             source_message_id,
         } = event
         {
-            self.finish_anonymous_text_run(&now)?;
+            self.finish_anonymous_text_run();
             return self.append_agent_thought_chunk(text, source_message_id, &now);
         }
-        self.finish_anonymous_streaming_runs(&now)?;
+        self.finish_anonymous_text_routes();
         let write_mode = if let AgentEvent::ToolCall(tool_call) = &mut event {
             tool_call
                 .scope_id
@@ -186,14 +187,14 @@ impl TaskSessionEventSink {
         source_message_id: Option<String>,
         now: &str,
     ) -> Result<(), RuntimeError> {
-        let writes = self
-            .streaming_runs
-            .agent_text_chunk(text, source_message_id, now)?;
-        self.commit_streaming_writes(writes, now)
+        let message_id = self
+            .text_chunk_routes
+            .message_id(TextChannel::Agent, source_message_id);
+        self.commit_text_chunk(TextChannel::Agent, message_id, text, now)
     }
 
-    fn finish_anonymous_text_run(&self, now: &str) -> Result<(), RuntimeError> {
-        self.commit_optional_streaming_write(self.streaming_runs.finish_anonymous_text(now), now)
+    fn finish_anonymous_text_run(&self) {
+        self.text_chunk_routes.finish_anonymous(TextChannel::Agent);
     }
 
     fn append_agent_thought_chunk(
@@ -202,56 +203,44 @@ impl TaskSessionEventSink {
         source_message_id: Option<String>,
         now: &str,
     ) -> Result<(), RuntimeError> {
-        let writes = self
-            .streaming_runs
-            .thought_chunk(text, source_message_id, now)?;
-        self.commit_streaming_writes(writes, now)
+        let message_id = self
+            .text_chunk_routes
+            .message_id(TextChannel::Thought, source_message_id);
+        self.commit_text_chunk(TextChannel::Thought, message_id, text, now)
     }
 
-    fn finish_anonymous_thought_run(&self, now: &str) -> Result<(), RuntimeError> {
-        self.commit_optional_streaming_write(self.streaming_runs.finish_anonymous_thought(now), now)
+    fn finish_anonymous_thought_run(&self) {
+        self.text_chunk_routes
+            .finish_anonymous(TextChannel::Thought);
     }
 
-    /// Source-correlated streams remain active for the whole turn. Only anonymous
-    /// streams need inferred boundaries when another event kind is observed.
-    fn finish_anonymous_streaming_runs(&self, now: &str) -> Result<(), RuntimeError> {
-        self.finish_anonymous_text_run(now)?;
-        self.finish_anonymous_thought_run(now)
+    /// Sourced messages need no inferred lifetime. Only anonymous ACP chunks need
+    /// a boundary when another content kind is observed.
+    fn finish_anonymous_text_routes(&self) {
+        self.text_chunk_routes.finish_all_anonymous();
     }
 
-    fn commit_optional_streaming_write(
+    fn commit_text_chunk(
         &self,
-        write: Option<StreamingWrite>,
+        channel: TextChannel,
+        message_id: String,
+        text: String,
         now: &str,
     ) -> Result<(), RuntimeError> {
-        match write {
-            Some(write) => self.commit_streaming_write(write, now),
-            None => Ok(()),
-        }
-    }
-
-    fn commit_streaming_writes(
-        &self,
-        writes: Vec<StreamingWrite>,
-        now: &str,
-    ) -> Result<(), RuntimeError> {
-        let mut pending = writes.into_iter();
-        while let Some(write) = pending.next() {
-            if let Err(error) = self.commit_streaming_write(write, now) {
-                // The writes were prepared as one in-memory transition. Undo
-                // any later writes that persistence never had a chance to see.
-                for uncommitted in pending {
-                    self.streaming_runs.rollback(uncommitted);
-                }
-                return Err(error);
-            }
-        }
-        Ok(())
-    }
-
-    fn commit_streaming_write(&self, write: StreamingWrite, now: &str) -> Result<(), RuntimeError> {
-        let rollback = write.clone();
-        let result = self.mutations.commit_existing_task(
+        let delta_text = text.clone();
+        let message = match channel {
+            TextChannel::Agent => NormalizedMessage::AgentText {
+                id: message_id,
+                text,
+                created_at: now.to_string(),
+            },
+            TextChannel::Thought => NormalizedMessage::Thought {
+                id: message_id,
+                text,
+                created_at: now.to_string(),
+            },
+        };
+        self.mutations.commit_existing_task(
             &self.task_id,
             TaskCommitOptions {
                 refresh_message_history: true,
@@ -261,28 +250,25 @@ impl TaskSessionEventSink {
                 if ctx.task().agent_session_id.as_deref() != Some(self.session_id.as_str()) {
                     return Ok(TaskMutationResult::Unchanged);
                 }
-                let stored = ctx.upsert_message_with_record(write.message)?;
-                let delta = match write.delta {
-                    StreamingDelta::Append => CommittedTaskDelta::ChatItemAppended {
-                        item: project_chat_item(&stored.chat),
-                    },
-                    StreamingDelta::Chunk(chunk) => CommittedTaskDelta::ChatItemChunk {
-                        message_id: stored.chat.message_id.clone().into(),
-                        chunk,
-                    },
+                let delta = match ctx.append_text_chunk(message)? {
+                    crate::storage::message_store::TextChunkAppend::Appended(stored) => {
+                        CommittedTaskDelta::ChatItemAppended {
+                            item: project_chat_item(&stored.chat),
+                        }
+                    }
+                    crate::storage::message_store::TextChunkAppend::Updated(stored) => {
+                        CommittedTaskDelta::ChatItemChunk {
+                            message_id: stored.chat.message_id.clone().into(),
+                            chunk: TextChunk { text: delta_text },
+                        }
+                    }
                 };
                 ctx.set_committed_delta(delta);
                 ctx.task_mut().updated_at = now.to_string();
                 Ok(TaskMutationResult::Changed)
             },
-        );
-        match result {
-            Ok(_) => Ok(()),
-            Err(error) => {
-                self.streaming_runs.rollback(rollback);
-                Err(error)
-            }
-        }
+        )?;
+        Ok(())
     }
 
     fn update_task_commands(

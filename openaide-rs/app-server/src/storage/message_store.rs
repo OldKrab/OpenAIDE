@@ -18,6 +18,11 @@ pub(crate) struct MessageFilesBackup {
     meta: Option<Vec<u8>>,
 }
 
+pub(crate) enum TextChunkAppend {
+    Appended(StoredMessage),
+    Updated(StoredMessage),
+}
+
 impl Store {
     pub(crate) fn backup_message_files(
         &self,
@@ -89,6 +94,42 @@ impl Store {
         self.write_messages(task_id, &messages)?;
         self.write_meta(task_id, &messages)?;
         Ok(stored)
+    }
+
+    /// Appends one Agent-owned text chunk using the normalized message identity as correlation.
+    pub(crate) fn append_text_chunk(
+        &self,
+        task_id: &str,
+        message: NormalizedMessage,
+    ) -> Result<TextChunkAppend, RuntimeError> {
+        let identity = message.identity();
+        let mut messages = self.read_messages(task_id)?;
+        if let Some(stored) = messages
+            .iter_mut()
+            .find(|stored| stored.chat.identity == identity)
+        {
+            append_normalized_text(&mut stored.chat.message, message)?;
+            let updated = stored.clone();
+            self.write_messages(task_id, &messages)?;
+            self.write_meta(task_id, &messages)?;
+            return Ok(TextChunkAppend::Updated(updated));
+        }
+
+        let sequence = messages.last().map(|item| item.sequence + 1).unwrap_or(1);
+        let stored = StoredMessage {
+            sequence,
+            chat: ChatMessage {
+                cursor: cursor::from_sequence(sequence),
+                identity: identity.clone(),
+                message_type: message.message_type().to_string(),
+                message_id: identity,
+                message,
+            },
+        };
+        messages.push(stored.clone());
+        self.write_messages(task_id, &messages)?;
+        self.write_meta(task_id, &messages)?;
+        Ok(TextChunkAppend::Appended(stored))
     }
 
     pub fn tail_page(&self, task_id: &str, limit: usize) -> Result<MessagePage, RuntimeError> {
@@ -268,6 +309,28 @@ impl Store {
         serde_json::from_str::<MessageMeta>(&text)
             .map(|meta| meta.version)
             .map_err(RuntimeError::from)
+    }
+}
+
+fn append_normalized_text(
+    existing: &mut NormalizedMessage,
+    incoming: NormalizedMessage,
+) -> Result<(), RuntimeError> {
+    match (existing, incoming) {
+        (
+            NormalizedMessage::AgentText { text, .. },
+            NormalizedMessage::AgentText { text: chunk, .. },
+        )
+        | (
+            NormalizedMessage::Thought { text, .. },
+            NormalizedMessage::Thought { text: chunk, .. },
+        ) => {
+            text.push_str(&chunk);
+            Ok(())
+        }
+        _ => Err(RuntimeError::Conflict(
+            "ACP message id changed content channel".to_string(),
+        )),
     }
 }
 

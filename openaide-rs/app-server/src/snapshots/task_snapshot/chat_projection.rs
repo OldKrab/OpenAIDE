@@ -47,15 +47,9 @@ fn project_message(message: &NormalizedMessage) -> (ChatRole, ChatItemStatus, Ve
             }));
             (ChatRole::User, ChatItemStatus::Complete, parts)
         }
-        NormalizedMessage::AgentText {
-            text, streaming, ..
-        } => (
+        NormalizedMessage::AgentText { text, .. } => (
             ChatRole::Agent,
-            if *streaming {
-                ChatItemStatus::Streaming
-            } else {
-                ChatItemStatus::Complete
-            },
+            ChatItemStatus::Complete,
             vec![MessagePart::Text { text: text.clone() }],
         ),
         NormalizedMessage::Content { role, content, .. } => (
@@ -66,15 +60,9 @@ fn project_message(message: &NormalizedMessage) -> (ChatRole, ChatItemStatus, Ve
             ChatItemStatus::Complete,
             vec![project_agent_content(content)],
         ),
-        NormalizedMessage::Thought {
-            text, streaming, ..
-        } => (
+        NormalizedMessage::Thought { text, .. } => (
             ChatRole::System,
-            if *streaming {
-                ChatItemStatus::Streaming
-            } else {
-                ChatItemStatus::Complete
-            },
+            ChatItemStatus::Complete,
             vec![MessagePart::Text { text: text.clone() }],
         ),
         NormalizedMessage::Activity {

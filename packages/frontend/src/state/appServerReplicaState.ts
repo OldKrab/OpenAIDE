@@ -41,6 +41,7 @@ export function applyAppServerReplica(
     taskSnapshots: initial.taskSnapshots,
     taskSnapshotReplicaEpochs: initial.taskSnapshotReplicaEpochs,
     taskChatScrollStates: initial.taskChatScrollStates,
+    taskLiveTextPresentation: initial.taskLiveTextPresentation,
     taskOpenError: undefined,
     appServerPermissionRequests: initial.appServerPermissionRequests,
     appServerQuestionRequests: initial.appServerQuestionRequests,
@@ -84,6 +85,7 @@ function invalidateProcessOwnedState(state: AppState): AppState {
     appServerQuestionRequests: {},
     permissionResponses: {},
     questionResponses: {},
+    taskLiveTextPresentation: {},
     taskInputs,
     toolDetails: {},
     newTask: {

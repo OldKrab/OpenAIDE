@@ -44,8 +44,6 @@ pub enum NormalizedMessage {
         id: String,
         text: String,
         created_at: String,
-        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-        streaming: bool,
     },
     Content {
         id: String,
@@ -59,8 +57,6 @@ pub enum NormalizedMessage {
         id: String,
         text: String,
         created_at: String,
-        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-        streaming: bool,
     },
     Activity {
         id: String,

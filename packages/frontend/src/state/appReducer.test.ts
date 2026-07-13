@@ -1730,43 +1730,6 @@ describe("app reducer composer state", () => {
     expect(chat.items.map((message) => message.message_id)).toEqual(["m3"]);
   });
 
-  it("omits legacy session catalog activity rows from rendered chat", () => {
-    const taskSnapshot = snapshot("task_1", [
-      activityMessage("m1", "Updated slash commands", "completed", [
-        { kind: "text", text: "Slash commands changed.", level: "info" },
-      ]),
-      activityMessage("m2", "Updated session options", "completed", [
-        { kind: "text", text: "Session options changed.", level: "info" },
-      ]),
-      chatMessage("m3", "Done"),
-    ]);
-
-    const chat = renderedChat(taskSnapshot, undefined);
-
-    expect(chat.items.map((message) => message.message_id)).toEqual(["m3"]);
-  });
-
-  it("converts each legacy streamed thought activity row without merging identities", () => {
-    const taskSnapshot = snapshot("task_1", [
-      activityMessage("m1", "Thought", "completed", [
-        { kind: "tool", name: "think", status: "completed", output_preview: "The" },
-      ]),
-      activityMessage("m2", "Thought", "completed", [
-        { kind: "tool", name: "think", status: "completed", output_preview: " user" },
-      ]),
-      chatMessage("m3", "Done"),
-    ]);
-
-    const chat = renderedChat(taskSnapshot, undefined);
-
-    expect(chat.items.map((item) => item.message_id)).toEqual(["m1", "m2", "m3"]);
-    expect(chat.items.map((item) => item.message)).toMatchObject([
-      { kind: "thought", text: "The" },
-      { kind: "thought", text: " user" },
-      { kind: "agent_text", text: "Done" },
-    ]);
-  });
-
   it("ignores stale earlier pages for a task that is no longer selected", () => {
     let state = createInitialState();
     state = appReducer(state, { type: "snapshot", intent: "open", snapshot: snapshot("task_current") });

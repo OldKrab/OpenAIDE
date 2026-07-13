@@ -7,28 +7,6 @@ use crate::protocol::model::{
 use super::Store;
 
 impl Store {
-    pub fn finish_streaming_messages(&self, task_id: &str) -> Result<bool, RuntimeError> {
-        let mut messages = self.read_messages(task_id)?;
-        let mut changed = false;
-        for stored in &mut messages {
-            match &mut stored.chat.message {
-                NormalizedMessage::AgentText { streaming, .. }
-                | NormalizedMessage::Thought { streaming, .. }
-                    if *streaming =>
-                {
-                    *streaming = false;
-                    changed = true;
-                }
-                _ => {}
-            }
-        }
-        if changed {
-            self.write_messages(task_id, &messages)?;
-            self.write_meta(task_id, &messages)?;
-        }
-        Ok(changed)
-    }
-
     pub fn finish_running_activities(
         &self,
         task_id: &str,

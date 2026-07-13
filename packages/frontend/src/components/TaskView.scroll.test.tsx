@@ -276,7 +276,6 @@ function snapshotWithStreamingText(taskId: string, text: string): TaskSnapshot {
       id: "agent-1",
       text,
       created_at: "2026-07-10T00:00:00Z",
-      streaming: true,
     },
   }];
   return taskSnapshot;

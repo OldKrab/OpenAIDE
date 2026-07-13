@@ -68,6 +68,16 @@ export type TaskChatScrollState = {
   scrollTop: number;
 };
 
+export type LiveTextPresentationSignal = {
+  messageId: string;
+  eventCursor: string;
+};
+
+export type TaskLiveTextPresentation = {
+  agent?: LiveTextPresentationSignal;
+  thought?: LiveTextPresentationSignal;
+};
+
 export type ChatPageState = {
   olderItems: ChatMessage[];
   hasBefore: boolean;
@@ -135,6 +145,7 @@ export type AppState = {
   taskSnapshots: Record<string, TaskSnapshot>;
   taskSnapshotReplicaEpochs: Record<string, number>;
   taskChatScrollStates: Record<string, TaskChatScrollState>;
+  taskLiveTextPresentation: Record<string, TaskLiveTextPresentation>;
   taskOpenError?: { taskId: string; message: string };
   appServerPermissionRequests: Record<string, AppServerPermissionRequestState>;
   appServerQuestionRequests: Record<string, AppServerQuestionRequestState>;
@@ -168,6 +179,7 @@ export function createInitialState(): AppState {
     taskSnapshots: {},
     taskSnapshotReplicaEpochs: {},
     taskChatScrollStates: {},
+    taskLiveTextPresentation: {},
     appServerPermissionRequests: {},
     appServerQuestionRequests: {},
     permissionResponses: {},

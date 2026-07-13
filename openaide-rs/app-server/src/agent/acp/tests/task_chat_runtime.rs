@@ -63,10 +63,18 @@ fn live_acp_message_ids_create_separate_chat_messages() {
         })
         .expect("open completed task");
     assert_eq!(
-        agent_text_statuses(&completed.chat.items),
+        agent_text_items(&completed.chat.items),
         [
-            ("Commentary message".to_string(), ChatItemStatus::Streaming),
-            ("Final message".to_string(), ChatItemStatus::Streaming),
+            (
+                "acp:task-chat-session:message:11111111-1111-4111-8111-111111111111".to_string(),
+                "Commentary message".to_string(),
+                ChatItemStatus::Complete,
+            ),
+            (
+                "acp:task-chat-session:message:22222222-2222-4222-8222-222222222222".to_string(),
+                "Final message".to_string(),
+                ChatItemStatus::Complete,
+            ),
         ]
     );
     api.shutdown().expect("shutdown task runtime");
@@ -273,12 +281,16 @@ fn send_params(task_id: &TaskId, revision: u64, text: &str) -> TaskSendParams {
     }
 }
 
-fn agent_text_statuses(items: &[ChatItem]) -> Vec<(String, ChatItemStatus)> {
+fn agent_text_items(items: &[ChatItem]) -> Vec<(String, String, ChatItemStatus)> {
     items
         .iter()
         .filter(|item| item.role == ChatRole::Agent)
         .filter_map(|item| match item.parts.first() {
-            Some(MessagePart::Text { text }) => Some((text.clone(), item.status)),
+            Some(MessagePart::Text { text }) => Some((
+                item.message_id.as_str().to_string(),
+                text.clone(),
+                item.status,
+            )),
             _ => None,
         })
         .collect()

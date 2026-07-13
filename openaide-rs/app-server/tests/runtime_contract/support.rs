@@ -200,7 +200,6 @@ impl AgentRuntime for LoadSessionAgent {
                     id: "replayed-agent".to_string(),
                     text: "Prior agent answer".to_string(),
                     created_at: "2026-05-18T00:00:01Z".to_string(),
-                    streaming: false,
                 },
             ],
         })

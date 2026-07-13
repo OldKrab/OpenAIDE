@@ -87,23 +87,20 @@ describe("task working status label", () => {
     expect(taskWorkingStatusLabel([completedCommandAndThoughtActivity("m5")], "active", false)).toBe("Thought");
   });
 
-  it("advances from a tool group to its latest tool and then to the agent response", async () => {
+  it("advances from a tool group to the active Agent response", async () => {
     const { taskWorkingStatusLabel } = await import("./App");
     const activity = completedToolGroupActivity("m6");
 
     expect(taskWorkingStatusLabel([activity], "active", false)).toBe("Read README.md");
-    expect(taskWorkingStatusLabel([activity, agentMessage("m7", "I found the cause.", true)], "active", false)).toBe(
-      "Writing response",
-    );
     expect(taskWorkingStatusLabel([activity, agentMessage("m7", "I found the cause.")], "active", false)).toBe(
-      "Generated response",
+      "Writing response",
     );
   });
 
-  it("shows a standalone streaming thought as the latest live activity", async () => {
+  it("shows a standalone Thought as the latest active work", async () => {
     const { taskWorkingStatusLabel } = await import("./App");
 
-    expect(taskWorkingStatusLabel([thoughtMessage("m8", true)], "active", false)).toBe("Thinking");
+    expect(taskWorkingStatusLabel([thoughtMessage("m8")], "active", false)).toBe("Thinking");
   });
 
   it("starts a new turn instead of reusing work from before the latest user message", async () => {
@@ -258,7 +255,7 @@ function completedToolGroupActivity(id: string): ChatMessage {
   };
 }
 
-function agentMessage(id: string, text: string, streaming = false): ChatMessage {
+function agentMessage(id: string, text: string): ChatMessage {
   return {
     cursor: `cursor_${id}`,
     identity: id,
@@ -268,13 +265,12 @@ function agentMessage(id: string, text: string, streaming = false): ChatMessage 
       kind: "agent_text",
       id,
       text,
-      streaming,
       created_at: "2026-05-17T00:00:01Z",
     },
   };
 }
 
-function thoughtMessage(id: string, streaming = false): ChatMessage {
+function thoughtMessage(id: string): ChatMessage {
   return {
     cursor: `cursor_${id}`,
     identity: id,
@@ -284,7 +280,6 @@ function thoughtMessage(id: string, streaming = false): ChatMessage {
       kind: "thought",
       id,
       text: "Check the current state.",
-      streaming,
       created_at: "2026-05-17T00:00:01Z",
     },
   };

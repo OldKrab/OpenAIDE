@@ -80,7 +80,6 @@ impl AgentRuntime for MockAgent {
                 id: "mock-loaded-agent-message".to_string(),
                 text: "Mock loaded session.".to_string(),
                 created_at: "2026-05-18T00:00:00Z".to_string(),
-                streaming: false,
             }],
         })
     }

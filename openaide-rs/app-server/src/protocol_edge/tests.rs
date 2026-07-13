@@ -1120,7 +1120,7 @@ fn shared_gateway_distinguishes_initialized_event_stream_connections() {
 }
 
 #[test]
-fn committed_agent_text_deltas_publish_append_chunk_and_finalization_in_order() {
+fn committed_agent_text_deltas_publish_append_and_chunk_in_order() {
     use openaide_app_server_protocol::events::TextChunk;
     use openaide_app_server_protocol::ids::MessageId;
     use openaide_app_server_protocol::snapshot::{ChatItem, ChatItemStatus, ChatRole, MessagePart};
@@ -1143,7 +1143,7 @@ fn committed_agent_text_deltas_publish_append_chunk_and_finalization_in_order() 
         message_id: MessageId::from("message-1"),
         turn_id: None,
         role: ChatRole::Agent,
-        status: ChatItemStatus::Streaming,
+        status: ChatItemStatus::Complete,
         parts: vec![MessagePart::Text {
             text: "first".to_string(),
         }],
@@ -1156,21 +1156,7 @@ fn committed_agent_text_deltas_publish_append_chunk_and_finalization_in_order() 
             CommittedTaskDelta::ChatItemChunk {
                 message_id: MessageId::from("message-1"),
                 chunk: TextChunk {
-                    sequence: 1,
                     text: " second".to_string(),
-                    final_chunk: false,
-                },
-            },
-        ),
-        TaskUpdate::committed(
-            "task-1",
-            4,
-            CommittedTaskDelta::ChatItemChunk {
-                message_id: MessageId::from("message-1"),
-                chunk: TextChunk {
-                    sequence: 2,
-                    text: String::new(),
-                    final_chunk: true,
                 },
             },
         ),
@@ -1189,17 +1175,12 @@ fn committed_agent_text_deltas_publish_append_chunk_and_finalization_in_order() 
     assert!(matches!(
         &payloads[0],
         AppServerEventPayload::ChatItemAppended { revision, item, .. }
-            if *revision == 2 && item.status == ChatItemStatus::Streaming
+            if *revision == 2 && item.status == ChatItemStatus::Complete
     ));
     assert!(matches!(
         &payloads[1],
         AppServerEventPayload::ChatItemChunk { revision, chunk, .. }
-            if *revision == 3 && chunk.sequence == 1 && chunk.text == " second" && !chunk.final_chunk
-    ));
-    assert!(matches!(
-        &payloads[2],
-        AppServerEventPayload::ChatItemChunk { revision, chunk, .. }
-            if *revision == 4 && chunk.sequence == 2 && chunk.text.is_empty() && chunk.final_chunk
+            if *revision == 3 && chunk.text == " second"
     ));
 }
 

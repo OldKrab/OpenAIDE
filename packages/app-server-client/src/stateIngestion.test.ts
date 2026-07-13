@@ -263,7 +263,7 @@ describe("state ingestion", () => {
       taskId: taskId("task-1"),
       revision: 2,
       messageId: messageId("message-1"),
-      chunk: { sequence: 1, text: "lo", finalChunk: true },
+      chunk: { text: "lo" },
     });
 
     const result = applySubscriptionEvent(state, event);
@@ -304,7 +304,7 @@ describe("state ingestion", () => {
       taskId: taskId("task-1"),
       revision: 10,
       messageId: messageId("message-1"),
-      chunk: { sequence: 1, text: "lo", finalChunk: true },
+      chunk: { text: "lo" },
     };
     const chunkEvent = taskEvent("root-1", "task-1", "cursor-2", "cursor-3", chunkPayload);
     const chunked = applySubscriptionEvent(appended.state, chunkEvent);
@@ -329,7 +329,7 @@ describe("state ingestion", () => {
       taskId: taskId("task-1"),
       revision: 2,
       messageId: messageId("message-1"),
-      chunk: { sequence: 1, text: "lo", finalChunk: false },
+      chunk: { text: "lo" },
     });
 
     const result = applySubscriptionEvent(state, event);
@@ -353,7 +353,7 @@ describe("state ingestion", () => {
       taskId: taskId("task-1"),
       revision: 2,
       messageId: messageId("missing-message"),
-      chunk: { sequence: 1, text: "orphan", finalChunk: false },
+      chunk: { text: "orphan" },
     });
 
     const result = applySubscriptionEvent(state, event);
@@ -636,7 +636,7 @@ function chatItem(id: string, text: string): ChatItem {
   return {
     messageId: messageId(id),
     role: "agent",
-    status: "streaming",
+    status: "complete",
     parts: [{ kind: "text", text }],
   };
 }

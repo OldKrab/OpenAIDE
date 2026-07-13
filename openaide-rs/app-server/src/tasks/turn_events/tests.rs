@@ -438,22 +438,37 @@ fn native_session_update_is_persisted_after_prompt_completion() {
         "session_1".to_string(),
         server_requests,
     );
+
+    sink.session_update(AgentEvent::TextChunk {
+        text: "before".to_string(),
+        source_message_id: Some("agent-message-1".to_string()),
+    })
+    .unwrap();
     TaskTransitions::new(mutations)
         .finish_turn("task_1", "turn_1", Ok(()))
         .unwrap();
 
     sink.session_update(AgentEvent::TextChunk {
-        text: "late session update".to_string(),
+        text: " after".to_string(),
         source_message_id: Some("agent-message-1".to_string()),
     })
     .unwrap();
 
-    assert!(store.read_messages("task_1").unwrap().iter().any(|stored| {
-        matches!(
-            &stored.chat.message,
-            NormalizedMessage::AgentText { text, .. } if text == "late session update"
-        )
-    }));
+    let messages = store.read_messages("task_1").unwrap();
+    let message = messages
+        .iter()
+        .find(|stored| matches!(stored.chat.message, NormalizedMessage::AgentText { .. }))
+        .expect("Agent message is retained after prompt completion");
+    assert_eq!(
+        message.chat.identity,
+        "acp:session_1:message:agent-message-1"
+    );
+    assert_eq!(message.chat.message_id, message.chat.identity);
+    assert!(matches!(
+        &message.chat.message,
+        NormalizedMessage::AgentText { id, text, .. }
+            if id == &message.chat.identity && text == "before after"
+    ));
 }
 
 #[test]
@@ -482,7 +497,7 @@ fn agent_text_notifications_describe_only_durable_ordered_deltas() {
         CommittedTaskDelta::ChatItemAppended { item } => {
             assert_eq!(
                 item.status,
-                openaide_app_server_protocol::snapshot::ChatItemStatus::Streaming
+                openaide_app_server_protocol::snapshot::ChatItemStatus::Complete
             );
             item.message_id
         }
@@ -495,13 +510,12 @@ fn agent_text_notifications_describe_only_durable_ordered_deltas() {
     assert!(matches!(
         chunked.delta,
         Some(CommittedTaskDelta::ChatItemChunk { message_id: id, chunk })
-            if id == message_id && chunk.sequence == 1
-                && chunk.text == " second" && !chunk.final_chunk
+            if id == message_id && chunk.text == " second"
     ));
     let stored = store.read_messages("task_1").unwrap();
     assert!(matches!(
         &stored[0].chat.message,
-        NormalizedMessage::AgentText { text, streaming: true, .. }
+        NormalizedMessage::AgentText { text, .. }
             if text == "first second"
     ));
 
@@ -511,21 +525,8 @@ fn agent_text_notifications_describe_only_durable_ordered_deltas() {
         output_preview: "done".to_string(),
     })
     .unwrap();
-    let finalized = notifications.recv().unwrap();
-    assert!(matches!(
-        finalized.delta,
-        Some(CommittedTaskDelta::ChatItemChunk { message_id: id, chunk })
-            if id == message_id && chunk.sequence == 2
-                && chunk.text.is_empty() && chunk.final_chunk
-    ));
-    let stored = store.read_messages("task_1").unwrap();
-    assert!(matches!(
-        &stored[0].chat.message,
-        NormalizedMessage::AgentText {
-            streaming: false,
-            ..
-        }
-    ));
+    let activity_update = notifications.recv().unwrap();
+    assert!(activity_update.delta.is_none());
 }
 
 #[test]
@@ -565,7 +566,7 @@ fn interleaved_source_message_ids_update_their_original_agent_messages() {
 }
 
 #[test]
-fn prompt_completion_does_not_finalize_session_owned_text_run() {
+fn prompt_completion_does_not_change_session_owned_text() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path().to_path_buf()).unwrap();
     store.write_task(&running_task("task_1")).unwrap();
@@ -589,10 +590,7 @@ fn prompt_completion_does_not_finalize_session_owned_text_run() {
     let _appended = notifications.recv().unwrap();
     assert!(matches!(
         &store.read_messages("task_1").unwrap()[0].chat.message,
-        NormalizedMessage::AgentText {
-            streaming: true,
-            ..
-        }
+        NormalizedMessage::AgentText { .. }
     ));
 }
 

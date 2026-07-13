@@ -188,7 +188,6 @@ fn rejected_commit_rolls_back_context_message_side_effects() {
                     id: "message_2".to_string(),
                     text: "should roll back".to_string(),
                     created_at: "3".to_string(),
-                    streaming: false,
                 })?;
                 Ok(TaskMutationResult::Rejected)
             },
@@ -224,7 +223,6 @@ fn invariant_failure_rolls_back_context_message_side_effects() {
                     id: "message_1".to_string(),
                     text: "should roll back".to_string(),
                     created_at: "3".to_string(),
-                    streaming: false,
                 })?;
                 ctx.task_mut().revision = 99;
                 Ok(TaskMutationResult::Changed)

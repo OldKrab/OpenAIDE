@@ -14,9 +14,7 @@ fn local_http_handoff_forwards_committed_delta_without_reducing_it_to_task_id() 
             CommittedTaskDelta::ChatItemChunk {
                 message_id: MessageId::from("message-1"),
                 chunk: TextChunk {
-                    sequence: 1,
                     text: "raw chunk".to_string(),
-                    final_chunk: false,
                 },
             },
         ))
@@ -29,6 +27,6 @@ fn local_http_handoff_forwards_committed_delta_without_reducing_it_to_task_id() 
     assert!(matches!(
         &forwarded[0].delta,
         Some(CommittedTaskDelta::ChatItemChunk { chunk, .. })
-            if chunk.sequence == 1 && chunk.text == "raw chunk"
+            if chunk.text == "raw chunk"
     ));
 }

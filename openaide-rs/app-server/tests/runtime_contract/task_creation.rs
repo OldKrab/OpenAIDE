@@ -177,11 +177,8 @@ fn task_create_adopts_external_session_with_replayed_history() {
         other => panic!("expected replayed user message, got {other:?}"),
     }
     match &snapshot.chat.items[1].message {
-        NormalizedMessage::AgentText {
-            text, streaming, ..
-        } => {
+        NormalizedMessage::AgentText { text, .. } => {
             assert_eq!(text, "Prior agent answer");
-            assert!(!streaming);
         }
         other => panic!("expected replayed agent message, got {other:?}"),
     }

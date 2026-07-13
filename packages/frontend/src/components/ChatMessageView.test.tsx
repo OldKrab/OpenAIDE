@@ -32,18 +32,19 @@ describe("ChatRow", () => {
     expect(agentHtml).toContain('aria-label="Copy message"');
   });
 
-  it("shows a caret only while authoritative Agent text is streaming", async () => {
+  it("shows a caret only when live Frontend presentation requests it", async () => {
     const { ChatRow } = await import("./ChatMessageView");
     const streamingHtml = renderToStaticMarkup(
       <ChatRow
-        message={agentMessage("a1", "The complete received chunk is visible now.", true)}
+        message={agentMessage("a1", "The complete received chunk is visible now.")}
         onPermissionRespond={vi.fn()}
+        showStreamingCaret
         taskId="task_1"
       />,
     );
     const completedHtml = renderToStaticMarkup(
       <ChatRow
-        message={agentMessage("a1", "The complete received chunk is visible now.", false)}
+        message={agentMessage("a1", "The complete received chunk is visible now.")}
         onPermissionRespond={vi.fn()}
         taskId="task_1"
       />,
@@ -61,13 +62,14 @@ describe("ChatRow", () => {
     const props = { onPermissionRespond: vi.fn(), taskId: "task_1" };
     let tree: ReturnType<typeof create>;
     act(() => {
-      tree = create(<ChatRow {...props} message={agentMessage("a1", "Agent", true)} />);
+      tree = create(<ChatRow {...props} message={agentMessage("a1", "Agent")} showStreamingCaret />);
     });
     act(() => {
       tree!.update(
         <ChatRow
           {...props}
-          message={agentMessage("a1", "Agent text arrives as one larger network chunk.", true)}
+          message={agentMessage("a1", "Agent text arrives as one larger network chunk.")}
+          showStreamingCaret
         />,
       );
     });
@@ -1121,7 +1123,7 @@ function userMessage(id: string, text: string, attachments?: Attachment[]): Chat
   };
 }
 
-function agentMessage(id: string, text: string, streaming?: boolean): ChatMessage {
+function agentMessage(id: string, text: string): ChatMessage {
   return {
     cursor: `cursor_${id}`,
     identity: id,
@@ -1132,7 +1134,6 @@ function agentMessage(id: string, text: string, streaming?: boolean): ChatMessag
       id,
       text,
       created_at: "2026-05-23T00:00:00Z",
-      streaming,
     },
   };
 }

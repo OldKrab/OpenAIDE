@@ -212,7 +212,7 @@ describe("startAppServerStateSubscription", () => {
     expect(request).toHaveBeenCalledTimes(3);
   });
 
-  it("dispatches each ordered live text delta before finalization", async () => {
+  it("dispatches presentation signals for ordered live Agent text deltas", async () => {
     let eventListener: ((event: AppServerEvent) => void) | undefined;
     const dispatch = vi.fn();
     const connection = {
@@ -249,21 +249,35 @@ describe("startAppServerStateSubscription", () => {
         item: {
           messageId: "message_1" as MessageId,
           role: "agent",
-          status: "streaming",
+          status: "complete",
           parts: [{ kind: "text", text: "One" }],
         },
       },
     });
-    eventListener?.(textChunkEvent("cursor_2", "cursor_3", " two", false));
-    eventListener?.(textChunkEvent("cursor_3", "cursor_4", "", true));
+    eventListener?.(textChunkEvent("cursor_2", "cursor_3", " two"));
 
     const snapshots = dispatch.mock.calls
       .map(([action]) => action)
       .filter((action) => action.type === "snapshot");
-    expect(snapshots).toHaveLength(4);
-    expect(snapshots[1].snapshot.chat.items[0].message).toMatchObject({ text: "One", streaming: true });
-    expect(snapshots[2].snapshot.chat.items[0].message).toMatchObject({ text: "One two", streaming: true });
-    expect(snapshots[3].snapshot.chat.items[0].message).toMatchObject({ text: "One two", streaming: false });
+    expect(snapshots).toHaveLength(3);
+    expect(snapshots[1].snapshot.chat.items[0].message).toMatchObject({ text: "One" });
+    expect(snapshots[2].snapshot.chat.items[0].message).toMatchObject({ text: "One two" });
+    expect(dispatch.mock.calls.map(([action]) => action).filter((action) => action.type === "taskChat:liveText")).toEqual([
+      {
+        type: "taskChat:liveText",
+        taskId: "task_1",
+        messageId: "message_1",
+        channel: "agent",
+        eventCursor: "cursor_2",
+      },
+      {
+        type: "taskChat:liveText",
+        taskId: "task_1",
+        messageId: "message_1",
+        channel: "agent",
+        eventCursor: "cursor_3",
+      },
+    ]);
   });
 
   it("maps ordered App Server task navigation events into frontend task state", async () => {
@@ -962,7 +976,6 @@ function textChunkEvent(
   previousCursor: string,
   cursor: string,
   text: string,
-  finalChunk: boolean,
 ): AppServerEvent {
   return {
     previousCursor: previousCursor as EventCursor,
@@ -977,7 +990,7 @@ function textChunkEvent(
       taskId: "task_1" as TaskId,
       revision: Number(cursor.slice(-1)),
       messageId: "message_1" as MessageId,
-      chunk: { sequence: Number(cursor.slice(-1)), text, finalChunk },
+      chunk: { text },
     },
   };
 }

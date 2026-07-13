@@ -41,7 +41,6 @@ fn main() {
                 id: "msg_agent".to_string(),
                 text: "Done.".to_string(),
                 created_at: "2026-05-22T00:00:01Z".to_string(),
-                streaming: true,
             }),
             chat_message(NormalizedMessage::Activity {
                 id: "activity_1".to_string(),

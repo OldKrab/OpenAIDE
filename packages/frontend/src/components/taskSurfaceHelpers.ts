@@ -57,12 +57,10 @@ export function taskWorkingStatusLabel(
     return item.message.kind === "activity" || item.message.kind === "agent_text" || item.message.kind === "thought";
   });
   if (latestWork?.message.kind === "thought") {
-    return latestWork.message.streaming
-      ? activityStepProgressLabel(latestWork.message)
-      : activityStepCompletedLabel(latestWork.message);
+    return activityStepProgressLabel(latestWork.message);
   }
   if (latestWork?.message.kind === "agent_text") {
-    return latestWork.message.streaming ? "Writing response" : "Generated response";
+    return "Writing response";
   }
   if (latestWork?.message.kind === "activity") {
     // The footer tracks the newest concrete action while the folded group keeps its broader title.

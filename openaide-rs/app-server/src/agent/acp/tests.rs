@@ -840,11 +840,8 @@ fn replayed_session_updates_are_normalized_as_chat_history() {
         other => panic!("expected user replay, got {other:?}"),
     }
     match &messages[1] {
-        NormalizedMessage::Thought {
-            text, streaming, ..
-        } => {
+        NormalizedMessage::Thought { text, .. } => {
             assert_eq!(text, "private streamed thought");
-            assert!(!streaming);
         }
         other => panic!("expected thought replay, got {other:?}"),
     }
@@ -862,11 +859,8 @@ fn replayed_session_updates_are_normalized_as_chat_history() {
         other => panic!("expected completed tool replay, got {other:?}"),
     }
     match &messages[3] {
-        NormalizedMessage::AgentText {
-            text, streaming, ..
-        } => {
+        NormalizedMessage::AgentText { text, .. } => {
             assert_eq!(text, "Prior agent answer");
-            assert!(!streaming);
         }
         other => panic!("expected agent replay, got {other:?}"),
     }
@@ -913,15 +907,9 @@ fn replay_continues_a_sourced_message_across_tool_activity() {
 
     assert_eq!(messages.len(), 2);
     match &messages[0] {
-        NormalizedMessage::AgentText {
-            id,
-            text,
-            streaming,
-            ..
-        } => {
+        NormalizedMessage::AgentText { id, text, .. } => {
             assert_eq!(id, "acp:session-source-tool-source:message:agent-message-1");
             assert_eq!(text, "Before after");
-            assert!(!streaming);
         }
         other => panic!("expected one sourced message, got {other:?}"),
     }

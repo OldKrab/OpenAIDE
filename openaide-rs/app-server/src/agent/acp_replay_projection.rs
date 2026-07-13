@@ -4,6 +4,7 @@ use std::sync::{Arc, Mutex};
 use agent_client_protocol::schema::{ContentBlock, SessionUpdate};
 
 use crate::agent::acp_content_projection::non_text_content_event;
+use crate::agent::acp_message_identity::stable_message_id;
 use crate::agent::acp_tool_call_projection::{
     merge_tool_call_update, remember_tool_call, ToolCallState,
 };
@@ -143,7 +144,7 @@ impl ReplayBuffer {
         }
 
         let message_index = self.messages.len();
-        let message_id = stable_source_id(&self.session_id, &source_key.1);
+        let message_id = stable_message_id(&self.session_id, &source_key.1);
         self.messages
             .push(kind.new_message(message_id, text, created_at));
         self.sourced_text_indices.insert(source_key, message_index);
@@ -243,20 +244,14 @@ impl ReplayTextKind {
                 id,
                 text,
                 created_at: created_at.to_string(),
-                streaming: false,
             },
             Self::Thought => NormalizedMessage::Thought {
                 id,
                 text,
                 created_at: created_at.to_string(),
-                streaming: false,
             },
         }
     }
-}
-
-fn stable_source_id(session_id: &str, source_message_id: &str) -> String {
-    format!("acp:{session_id}:message:{source_message_id}")
 }
 
 fn set_message_id(message: &mut NormalizedMessage, message_id: String) {

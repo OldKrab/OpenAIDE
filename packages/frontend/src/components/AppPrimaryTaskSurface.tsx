@@ -96,6 +96,7 @@ export function AppPrimaryTaskSurface({ controller, focusRequestKey, model }: Ap
         appServerPermissionRequests={state.appServerPermissionRequests}
         appServerQuestionRequests={state.appServerQuestionRequests}
         permissionResponses={state.permissionResponses}
+        liveTextPresentation={state.taskLiveTextPresentation[renderableTaskSnapshot.task.task_id]}
         questionResponses={state.questionResponses}
         savedScrollState={state.taskChatScrollStates[renderableTaskSnapshot.task.task_id]}
         snapshot={renderableTaskSnapshot}

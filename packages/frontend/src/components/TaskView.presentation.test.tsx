@@ -19,12 +19,28 @@ describe("TaskView timeline presentation", () => {
     vi.unstubAllGlobals();
   });
 
-  it("does not show a stale caret on streaming text superseded by later timeline rows", async () => {
+  it("keeps live presentation on the latest Agent message across later non-Agent rows", async () => {
     const { TaskView } = await import("./TaskView");
     let tree!: ReactTestRenderer;
 
     act(() => {
       tree = create(<TaskView {...taskViewProps(snapshotWithAuthoritativeTail(true))} />);
+    });
+    expect(JSON.stringify(tree.toJSON())).not.toContain("chat-streaming-caret");
+
+    const updated = snapshotWithAuthoritativeTail(true);
+    const latestAgent = updated.chat.items.find((item) => item.message_id === "agent-later");
+    if (latestAgent?.message.kind !== "agent_text") throw new Error("expected latest Agent text");
+    latestAgent.message.text = "Latest update received live";
+    act(() => {
+      tree.update(
+        <TaskView
+          {...taskViewProps(updated)}
+          liveTextPresentation={{
+            agent: { messageId: "agent-later", eventCursor: "cursor-live-1" },
+          }}
+        />,
+      );
     });
 
     const renderedTask = JSON.stringify(tree.toJSON());
@@ -32,7 +48,100 @@ describe("TaskView timeline presentation", () => {
     expect(renderedTask).toContain("Steered follow-up");
     expect(renderedTask).toContain("npm test");
     expect(renderedTask).toContain("Latest update");
-    expect(renderedTask).not.toContain("chat-streaming-caret");
+    expect(renderedTask).not.toContain("received live");
+    expect(renderedTask).toContain("chat-streaming-caret");
+
+    for (let frame = 0; frame < 40; frame += 1) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(20);
+      });
+    }
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(300);
+    });
+    const settledTask = JSON.stringify(tree.toJSON());
+    expect(settledTask).toContain("Latest update received live");
+    expect(settledTask).not.toContain("chat-streaming-caret");
+  });
+
+  it("waits for the matching Chat update when its live signal is reduced first", async () => {
+    const { TaskView } = await import("./TaskView");
+    const initial = snapshotWithAuthoritativeTail(false);
+    const signal = {
+      agent: { messageId: "agent-later", eventCursor: "cursor-live-before-snapshot" },
+    };
+    let tree!: ReactTestRenderer;
+    act(() => {
+      tree = create(<TaskView {...taskViewProps(initial)} />);
+    });
+    act(() => {
+      tree.update(<TaskView {...taskViewProps(initial)} liveTextPresentation={signal} />);
+    });
+
+    const updated = snapshotWithAuthoritativeTail(true);
+    const latestAgent = updated.chat.items.find((item) => item.message_id === "agent-later");
+    if (latestAgent?.message.kind !== "agent_text") throw new Error("expected latest Agent text");
+    latestAgent.message.text = "Latest update received after signal";
+    act(() => {
+      tree.update(<TaskView {...taskViewProps(updated)} liveTextPresentation={signal} />);
+    });
+
+    const renderedTask = JSON.stringify(tree.toJSON());
+    expect(renderedTask).not.toContain("received after signal");
+    expect(renderedTask).toContain("chat-streaming-caret");
+  });
+
+  it("animates at most the latest message in each Agent and Thought channel", async () => {
+    const { TaskView } = await import("./TaskView");
+    const initial = snapshotWithAuthoritativeTail(false);
+    initial.chat.items = [
+      thoughtText("thought-old", "Old thought"),
+      agentText("agent-latest", "Agent answer"),
+      thoughtText("thought-latest", "Latest thought"),
+    ];
+    let tree!: ReactTestRenderer;
+    act(() => {
+      tree = create(<TaskView {...taskViewProps(initial)} />);
+    });
+
+    const lateOldThought = structuredClone(initial);
+    const oldThought = lateOldThought.chat.items[0];
+    if (oldThought?.message.kind !== "thought") throw new Error("expected old Thought");
+    oldThought.message.text = "Old thought arrived late";
+    act(() => {
+      tree.update(
+        <TaskView
+          {...taskViewProps(lateOldThought)}
+          liveTextPresentation={{
+            thought: { messageId: "thought-old", eventCursor: "cursor-thought-old" },
+          }}
+        />,
+      );
+    });
+    expect(JSON.stringify(tree.toJSON())).toContain("Old thought arrived late");
+    expect(JSON.stringify(tree.toJSON())).not.toContain("chat-streaming-caret");
+
+    const liveLatest = structuredClone(lateOldThought);
+    const agent = liveLatest.chat.items[1];
+    const thought = liveLatest.chat.items[2];
+    if (agent?.message.kind !== "agent_text" || thought?.message.kind !== "thought") {
+      throw new Error("expected latest Agent and Thought text");
+    }
+    agent.message.text = "Agent answer live";
+    thought.message.text = "Latest thought live";
+    act(() => {
+      tree.update(
+        <TaskView
+          {...taskViewProps(liveLatest)}
+          liveTextPresentation={{
+            agent: { messageId: "agent-latest", eventCursor: "cursor-agent-live" },
+            thought: { messageId: "thought-latest", eventCursor: "cursor-thought-live" },
+          }}
+        />,
+      );
+    });
+
+    expect(JSON.stringify(tree.toJSON()).match(/chat-streaming-caret/g)).toHaveLength(2);
   });
 
   it("renders a task-open failure as a settled recoverable state", async () => {
@@ -219,9 +328,10 @@ function taskViewProps(snapshot: TaskSnapshot) {
 
 function snapshotWithAuthoritativeTail(includeTail: boolean): TaskSnapshot {
   const revision = includeTail ? 4 : 1;
-  const items: ChatMessage[] = [agentText("agent-streaming", "Earlier response", true)];
+  const items: ChatMessage[] = [agentText("agent-streaming", "Earlier response")];
   if (includeTail) {
     items.push(
+      agentText("agent-later", "Latest update"),
       {
         cursor: "user-steer",
         identity: "user-steer",
@@ -249,7 +359,6 @@ function snapshotWithAuthoritativeTail(includeTail: boolean): TaskSnapshot {
           steps: [{ kind: "tool", name: "execute", status: "running", input_summary: "npm test" }],
         },
       },
-      agentText("agent-later", "Latest update", false),
     );
   }
 
@@ -287,7 +396,7 @@ function snapshotWithAuthoritativeTail(includeTail: boolean): TaskSnapshot {
   };
 }
 
-function agentText(messageId: string, text: string, streaming: boolean): ChatMessage {
+function agentText(messageId: string, text: string): ChatMessage {
   return {
     cursor: messageId,
     identity: messageId,
@@ -298,7 +407,21 @@ function agentText(messageId: string, text: string, streaming: boolean): ChatMes
       id: messageId,
       text,
       created_at: "2026-07-12T00:00:00Z",
-      streaming,
+    },
+  };
+}
+
+function thoughtText(messageId: string, text: string): ChatMessage {
+  return {
+    cursor: messageId,
+    identity: messageId,
+    message_id: messageId,
+    message_type: "thought",
+    message: {
+      kind: "thought",
+      id: messageId,
+      text,
+      created_at: "2026-07-12T00:00:00Z",
     },
   };
 }

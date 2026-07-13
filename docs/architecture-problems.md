@@ -221,11 +221,11 @@ ACP `agent_message_chunk` carries a general `ContentBlock`, which can contain te
 
 **Desired direction:** Normalize supported ACP content blocks into typed App Server Chat parts at the permanent Native Session boundary. Preserve unsupported-but-valid output as an explicit safe Chat representation rather than silently dropping it. Frontend renders only the normalized App Server Protocol model and does not interpret raw ACP payloads.
 
-**Resolution:** Live and replayed ACP Agent message and Thought updates now normalize all five ACP content kinds at the Native Session boundary. Text retains its streaming path; valid bounded images, embedded text resources, and resource links persist as typed App Server Chat content and project through dedicated protocol parts. Audio, binary resources, and malformed images persist as explicit unsupported-content rows with safe metadata and diagnostic logging instead of disappearing. The shared Frontend renders image previews, compact resource disclosures, and clear unsupported-content status without receiving raw ACP objects or reserved metadata.
+**Resolution:** Live and replayed ACP Agent message and Thought updates now normalize all five ACP content kinds at the Native Session boundary. Text retains its incremental update path; valid bounded images, embedded text resources, and resource links persist as typed App Server Chat content and project through dedicated protocol parts. Audio, binary resources, and malformed images persist as explicit unsupported-content rows with safe metadata and diagnostic logging instead of disappearing. The shared Frontend renders image previews, compact resource disclosures, and clear unsupported-content status without receiving raw ACP objects or reserved metadata.
 
 ## AP-015: Agent message completion and identity depend on prompt-scoped memory
 
-**Status:** confirmed
+**Status:** resolved
 
 **Area:** streamed Agent message persistence and presentation
 
@@ -234,6 +234,8 @@ For live output, App Server keeps an in-memory `StreamingRuns` map from optional
 **Impact:** Late chunks can be dropped by the active-Turn guard or become a second Chat row. Live and replayed copies of the same Agent message can receive different local identities. The implementation also invents internal final chunks even though ACP does not provide a final-message-chunk marker.
 
 **Desired direction:** Derive or persist stable Chat identity from Native Session id plus Agent `messageId` for the lifetime of the session, so any later chunk updates the same row without prompt-owned lookup state. Treat smooth reveal and carets as ephemeral Frontend presentation for the latest Agent text message and latest Thought message in the currently opened Task. Other timeline rows do not supersede them; only a newer message in the same channel does. Never animate multiple messages in one channel, persist a fictional ACP message-final event, or let animation hide/delay other rows. Keep a small explicit fallback only for ACP v1 chunks that omit `messageId`.
+
+**Resolution:** Sourced live and replayed text now derives one Chat identity directly from Native Session id plus ACP `messageId`; late chunks append atomically to that row without prompt-owned correlation state. Anonymous ACP v1 chunks use only one small current-run slot per Agent/Thought channel and split at explicit content boundaries. Persisted messages are always complete: the protocol no longer invents chunk sequence, final-chunk, or stored streaming fields, and the Task event cursor remains the only delivery ordering mechanism. Frontend receives a live-presentation signal only for post-baseline text events and locally reveals the latest Agent and latest Thought message in the mounted Task. Baseline, replayed, missed, older, and non-text content appears immediately. Thought identity inside grouped Tool presentation remains owned by AP-017.
 
 ## AP-016: Tool updates republish broad state and use lossy suppression
 
@@ -340,3 +342,15 @@ Only Chat append/chunk and history state currently have committed Task deltas. A
 **Impact:** Small local changes create unnecessary reads, serialization, traffic, reducer work, and cursor-gap recovery. One atomic storage mutation is represented as several independently delivered views of state.
 
 **Desired direction:** Replace the fallback completely with one scope-local ordered stream. Initial subscribe/reconnect returns a full baseline; every durable Task transaction emits exactly one focused `taskChanged` event at the next Task revision. Apply its changed fields atomically. On a revision gap, discard the replica and obtain one fresh baseline. Publish Navigation summary only when Navigation-visible state actually changes.
+
+## AP-025: One ACP message can split into colliding Chat rows by content kind
+
+**Status:** confirmed
+
+**Area:** ACP content identity and Chat composition
+
+ACP defines chunks with the same `messageId` as parts of one logical message, but OpenAIDE currently persists text, image, resource, and unsupported blocks as separate Chat rows. Reusing the message-derived identity for those different rows either collides in storage or requires an undocumented content-specific identity, while losing the fact that the blocks belong to one message.
+
+**Impact:** A valid mixed-content Agent or Thought message can overwrite content, split unpredictably, or receive identities that differ between live updates and history replay.
+
+**Desired direction:** Represent one ACP `messageId` as one ordered logical Chat message containing typed parts. Live updates and replay must use the same message identity and part ordering. Do not solve this by inventing unrelated row identities for each content kind.

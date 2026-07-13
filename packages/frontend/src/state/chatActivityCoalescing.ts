@@ -37,7 +37,7 @@ function coalesceActivityRun(run: ActivityRunMessage[]): ChatMessage {
   const activities = run.flatMap((item) => (item.message.kind === "activity" ? [item.message] : []));
   const steps = run.flatMap((item) =>
     item.message.kind === "thought"
-      ? [{ kind: "thought" as const, text: item.message.text, streaming: item.message.streaming }]
+      ? [{ kind: "thought" as const, text: item.message.text, streaming: false }]
       : item.message.steps,
   );
   // The latest activity owns the live state; individual steps preserve failures.

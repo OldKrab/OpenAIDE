@@ -21,8 +21,7 @@ impl TaskEventSink {
             .emission_lock
             .lock()
             .expect("event sink lock poisoned");
-        self.session_sink
-            .finish_anonymous_streaming_runs(&now_string())?;
+        self.session_sink.finish_anonymous_text_routes();
         let request_id = request.request_id.clone();
         let Some(server_request_id) = self.server_requests.open_permission_request(
             &self.task_id,

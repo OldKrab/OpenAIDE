@@ -15,7 +15,6 @@ pub fn normalize_events(events: Vec<AgentEvent>, created_at: &str) -> Vec<Normal
                     id: Uuid::new_v4().to_string(),
                     text,
                     created_at: created_at.to_string(),
-                    streaming: false,
                 })
             }
             AgentEvent::Thought(text) | AgentEvent::ThoughtChunk { text, .. } => {
@@ -23,7 +22,6 @@ pub fn normalize_events(events: Vec<AgentEvent>, created_at: &str) -> Vec<Normal
                     id: Uuid::new_v4().to_string(),
                     text,
                     created_at: created_at.to_string(),
-                    streaming: false,
                 })
             }
             AgentEvent::Content {
