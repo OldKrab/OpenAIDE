@@ -1,14 +1,11 @@
 use openaide_app_server_protocol::events::{
-    AppServerEventPayload, EventScope, TaskChanges, TaskChatChange,
-    TaskNavigationChange as ProtocolTaskNavigationChange,
+    AppServerEventPayload, EventScope, TaskNavigationChange as ProtocolTaskNavigationChange,
 };
 use openaide_app_server_protocol::ids::TaskId;
 
 use crate::client_lifecycle::{AppServerTime, ConnectionId};
 use crate::server_requests::ServerRequestDelivery;
-use crate::task_events::{
-    CommittedChatChange, CommittedTaskChange, TaskNavigationChange, TaskUpdate, TaskUpdateKind,
-};
+use crate::task_events::{CommittedTaskChange, TaskUpdate, TaskUpdateKind};
 
 use super::RpcGateway;
 use crate::protocol_edge::{event_deliveries, GatewayEventDelivery};
@@ -67,14 +64,12 @@ impl RpcGateway {
         change: &CommittedTaskChange,
         now: AppServerTime,
     ) -> Vec<GatewayEventDelivery> {
-        let task = self.task_snapshots.open_internal(task_id).ok();
-        let changes = project_task_changes(task.as_ref(), change);
         let mut events = self.publish_task_payload(
             task_id,
             AppServerEventPayload::TaskChanged {
                 task_id: task_id.clone(),
                 revision,
-                changes,
+                changes: change.changes.clone(),
             },
             now,
         );
@@ -96,30 +91,8 @@ impl RpcGateway {
             )));
         }
 
-        match (&change.navigation, task.as_ref()) {
-            (TaskNavigationChange::Upsert, Some(task)) => {
-                events.extend(self.publish_navigation_change(
-                    ProtocolTaskNavigationChange::Upsert {
-                        task: task.task.clone(),
-                    },
-                    now,
-                ));
-            }
-            (TaskNavigationChange::Remove, _) => {
-                events.extend(self.publish_navigation_change(
-                    ProtocolTaskNavigationChange::Remove {
-                        task_id: task_id.clone(),
-                    },
-                    now,
-                ));
-            }
-            (TaskNavigationChange::None, _) => {}
-            (TaskNavigationChange::Upsert, None) => {
-                crate::logging::warn(
-                    "task_change_navigation_projection_failed",
-                    serde_json::json!({ "task_id": task_id.as_str() }),
-                );
-            }
+        if let Some(navigation) = &change.navigation {
+            events.extend(self.publish_navigation_change(navigation.clone(), now));
         }
         events
     }
@@ -173,53 +146,5 @@ impl RpcGateway {
             now,
         );
         Some(event_deliveries(outcome))
-    }
-}
-
-fn project_task_changes(
-    task: Option<&openaide_app_server_protocol::snapshot::TaskSnapshot>,
-    committed: &CommittedTaskChange,
-) -> TaskChanges {
-    let fields = &committed.fields;
-    TaskChanges {
-        task: task
-            .filter(|_| fields.summary)
-            .map(|task| task.task.clone()),
-        lifecycle: task.filter(|_| fields.lifecycle).map(|task| task.lifecycle),
-        preparation: task
-            .filter(|_| fields.preparation)
-            .map(|task| task.preparation.clone()),
-        agent_config: task
-            .filter(|_| fields.agent_config)
-            .map(|task| task.agent_config.clone()),
-        agent_commands: task
-            .filter(|_| fields.agent_commands)
-            .map(|task| task.agent_commands.clone()),
-        send_capability: fields
-            .send_capability
-            .then(|| task.map(|task| task.send_capability.clone()))
-            .flatten(),
-        chat: committed
-            .chat
-            .iter()
-            .filter_map(|change| match change {
-                CommittedChatChange::Append { item } => {
-                    Some(TaskChatChange::Append { item: item.clone() })
-                }
-                CommittedChatChange::Upsert { item } => {
-                    Some(TaskChatChange::Upsert { item: item.clone() })
-                }
-                CommittedChatChange::AppendText { message_id, text } => {
-                    Some(TaskChatChange::AppendText {
-                        message_id: message_id.clone(),
-                        text: text.clone(),
-                    })
-                }
-                CommittedChatChange::Replace => task.map(|task| TaskChatChange::Replace {
-                    chat: task.chat.clone(),
-                }),
-            })
-            .collect(),
-        removed: fields.removed,
     }
 }

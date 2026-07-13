@@ -1,7 +1,5 @@
-use openaide_app_server::task_events::{
-    CommittedChatChange, CommittedTaskChange, TaskFieldChanges, TaskNavigationChange, TaskUpdate,
-    TaskUpdateKind,
-};
+use openaide_app_server::task_events::{CommittedTaskChange, TaskUpdate, TaskUpdateKind};
+use openaide_app_server_protocol::events::{TaskChanges, TaskChatChange};
 use openaide_app_server_protocol::ids::MessageId;
 
 use super::forward_local_http_task_updates;
@@ -13,15 +11,17 @@ fn local_http_handoff_forwards_committed_delta_without_reducing_it_to_task_id() 
         .send(TaskUpdate {
             task_id: "task-1".to_string(),
             revision: 2,
-            kind: TaskUpdateKind::Changed(CommittedTaskChange {
-                fields: TaskFieldChanges::default(),
-                chat: vec![CommittedChatChange::AppendText {
-                    message_id: MessageId::from("message-1"),
-                    text: "raw chunk".to_string(),
-                }],
+            kind: TaskUpdateKind::Changed(Box::new(CommittedTaskChange {
+                changes: TaskChanges {
+                    chat: vec![TaskChatChange::AppendText {
+                        message_id: MessageId::from("message-1"),
+                        text: "raw chunk".to_string(),
+                    }],
+                    ..TaskChanges::default()
+                },
                 tool_details: Vec::new(),
-                navigation: TaskNavigationChange::None,
-            }),
+                navigation: None,
+            })),
         })
         .unwrap();
     drop(sender);
@@ -32,7 +32,7 @@ fn local_http_handoff_forwards_committed_delta_without_reducing_it_to_task_id() 
     assert!(matches!(
         &forwarded[0].kind,
         TaskUpdateKind::Changed(change)
-            if matches!(change.chat.as_slice(),
-                [CommittedChatChange::AppendText { text, .. }] if text == "raw chunk")
+            if matches!(change.changes.chat.as_slice(),
+                [TaskChatChange::AppendText { text, .. }] if text == "raw chunk")
     ));
 }

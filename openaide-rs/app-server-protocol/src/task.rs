@@ -6,7 +6,7 @@ use crate::ids::{
     AgentConfigOptionId, AgentId, AttachmentHandleId, ClientMutationId, MessageId, ProjectId,
     TaskId, TaskListCursor, TurnId,
 };
-use crate::snapshot::{ChatItem, TaskNavigationSnapshot, TaskSnapshot, TaskSummary};
+use crate::snapshot::{ChatItem, TaskSnapshot, TaskSummary};
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -301,7 +301,6 @@ pub struct TaskDiscardParams {
 #[serde(rename_all = "camelCase")]
 pub struct TaskDiscardResult {
     pub discarded_task_id: TaskId,
-    pub tasks: TaskNavigationSnapshot,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
@@ -316,7 +315,6 @@ pub struct TaskSetArchivedParams {
 pub struct TaskSetArchivedResult {
     pub task_id: TaskId,
     pub archived: bool,
-    pub tasks: TaskNavigationSnapshot,
 }
 
 #[cfg(test)]

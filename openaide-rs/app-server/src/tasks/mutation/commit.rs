@@ -1,11 +1,11 @@
+use openaide_app_server_protocol::events::{TaskChanges, TaskChatChange, TaskNavigationChange};
+
+use crate::chat_history::ChatHistoryPolicy;
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::NormalizedMessage;
 use crate::storage::records::{TaskLifecycle, TaskRecord};
 use crate::storage::Store;
-use crate::task_events::{
-    CommittedChatChange, CommittedTaskChange, TaskFieldChanges, TaskNavigationChange,
-    ToolDetailUpdate,
-};
+use crate::task_events::{CommittedChatChange, CommittedTaskChange, ToolDetailUpdate};
 use crate::tasks::mutation::create_validation::TaskCreationValidationContext;
 use crate::tasks::snapshot::build_snapshot;
 
@@ -233,21 +233,25 @@ fn persist_changed_task(
     if task.message_history_version != original.message_history_version && chat.is_empty() {
         chat.push(CommittedChatChange::Replace);
     }
+    let fields = changed_fields(original, task);
+    let has_messages = target.store.message_history_has_messages(&task.task_id)?;
+    let projected =
+        crate::snapshots::task_snapshot::project_committed_task_state(task.clone(), has_messages)
+            .map_err(|error| RuntimeError::Internal(error.message))?;
+    let navigation = navigation_change(original, task, fields.summary, &projected.task);
+    let changes = project_committed_changes(target, &projected, fields, chat)?;
     target.store.write_task(task)?;
     target
         .runtime_state
         .lock()
         .expect("runtime state poisoned")
         .commit_revision(runtime_revision);
-    let fields = changed_fields(original, task);
-    let navigation = navigation_change(original, task, fields.summary);
     Ok(TaskCommitFacts {
         task_id: task.task_id.clone(),
         revision: task.revision,
         committed_task: task.clone(),
         change: CommittedTaskChange {
-            fields,
-            chat,
+            changes,
             tool_details,
             navigation,
         },
@@ -270,39 +274,58 @@ fn persist_new_task(
         .replace_messages_with_normalized(&task.task_id, initial_messages)?;
     task.message_history_version = target.store.message_history_version(&task.task_id)?;
     task.revision = 1;
+    let has_messages = target.store.message_history_has_messages(&task.task_id)?;
+    let projected =
+        crate::snapshots::task_snapshot::project_committed_task_state(task.clone(), has_messages)
+            .map_err(|error| RuntimeError::Internal(error.message))?;
+    let fields = ChangedFields {
+        summary: true,
+        lifecycle: true,
+        preparation: true,
+        agent_config: true,
+        agent_commands: true,
+        send_capability: true,
+        removed: task.tombstoned,
+    };
+    let changes = project_committed_changes(
+        target,
+        &projected,
+        fields,
+        vec![CommittedChatChange::Replace],
+    )?;
+    let navigation = navigation_member(task).then(|| TaskNavigationChange::Upsert {
+        task: projected.task.clone(),
+    });
     write_task(&target.store, task)?;
     target
         .runtime_state
         .lock()
         .expect("runtime state poisoned")
         .commit_revision(runtime_revision);
-    let visible = navigation_member(task);
     Ok(TaskCommitFacts {
         task_id: task.task_id.clone(),
         revision: task.revision,
         committed_task: task.clone(),
         change: CommittedTaskChange {
-            fields: TaskFieldChanges {
-                summary: true,
-                lifecycle: true,
-                preparation: true,
-                agent_config: true,
-                agent_commands: true,
-                send_capability: true,
-                removed: task.tombstoned,
-            },
-            chat: vec![CommittedChatChange::Replace],
+            changes,
             tool_details: Vec::new(),
-            navigation: if visible {
-                TaskNavigationChange::Upsert
-            } else {
-                TaskNavigationChange::None
-            },
+            navigation,
         },
     })
 }
 
-fn changed_fields(original: &TaskRecord, task: &TaskRecord) -> TaskFieldChanges {
+#[derive(Clone, Copy)]
+struct ChangedFields {
+    summary: bool,
+    lifecycle: bool,
+    preparation: bool,
+    agent_config: bool,
+    agent_commands: bool,
+    send_capability: bool,
+    removed: bool,
+}
+
+fn changed_fields(original: &TaskRecord, task: &TaskRecord) -> ChangedFields {
     let preparation = original.preparation != task.preparation;
     let summary = original.title != task.title
         || original.status != task.status
@@ -313,7 +336,7 @@ fn changed_fields(original: &TaskRecord, task: &TaskRecord) -> TaskFieldChanges 
         || original.workspace_root != task.workspace_root
         || original.message_history_version != task.message_history_version
         || preparation;
-    TaskFieldChanges {
+    ChangedFields {
         summary,
         lifecycle: original.lifecycle != task.lifecycle,
         preparation,
@@ -333,13 +356,57 @@ fn navigation_change(
     original: &TaskRecord,
     task: &TaskRecord,
     summary_changed: bool,
-) -> TaskNavigationChange {
+    summary: &openaide_app_server_protocol::snapshot::TaskSummary,
+) -> Option<TaskNavigationChange> {
     match (navigation_member(original), navigation_member(task)) {
-        (true, false) => TaskNavigationChange::Remove,
-        (false, true) => TaskNavigationChange::Upsert,
-        (true, true) if summary_changed => TaskNavigationChange::Upsert,
-        _ => TaskNavigationChange::None,
+        (true, false) => Some(TaskNavigationChange::Remove {
+            task_id: task.task_id.clone().into(),
+        }),
+        (false, true) => Some(TaskNavigationChange::Upsert {
+            task: summary.clone(),
+        }),
+        (true, true) if summary_changed => Some(TaskNavigationChange::Upsert {
+            task: summary.clone(),
+        }),
+        _ => None,
     }
+}
+
+fn project_committed_changes(
+    target: &TaskMutations,
+    task: &openaide_app_server_protocol::snapshot::TaskSnapshot,
+    fields: ChangedFields,
+    chat: Vec<CommittedChatChange>,
+) -> Result<TaskChanges, RuntimeError> {
+    let mut projected_chat = Vec::with_capacity(chat.len());
+    for change in chat {
+        projected_chat.push(match change {
+            CommittedChatChange::Append { item } => TaskChatChange::Append { item },
+            CommittedChatChange::Upsert { item } => TaskChatChange::Upsert { item },
+            CommittedChatChange::AppendText { message_id, text } => {
+                TaskChatChange::AppendText { message_id, text }
+            }
+            CommittedChatChange::Replace => {
+                let page = target.store.tail_page(
+                    task.task.task_id.as_str(),
+                    ChatHistoryPolicy::default().task_snapshot_tail_limit(),
+                )?;
+                TaskChatChange::Replace {
+                    chat: crate::snapshots::task_snapshot::project_chat_page(page),
+                }
+            }
+        });
+    }
+    Ok(TaskChanges {
+        task: fields.summary.then(|| task.task.clone()),
+        lifecycle: fields.lifecycle.then_some(task.lifecycle),
+        preparation: fields.preparation.then(|| task.preparation.clone()),
+        agent_config: fields.agent_config.then(|| task.agent_config.clone()),
+        agent_commands: fields.agent_commands.then(|| task.agent_commands.clone()),
+        send_capability: fields.send_capability.then(|| task.send_capability.clone()),
+        chat: projected_chat,
+        removed: fields.removed,
+    })
 }
 
 fn navigation_member(task: &TaskRecord) -> bool {

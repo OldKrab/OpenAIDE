@@ -1,6 +1,5 @@
 use openaide_app_server_protocol::errors::ProtocolError;
 use openaide_app_server_protocol::ids::ClientInstanceId;
-use openaide_app_server_protocol::snapshot::TaskNavigationSnapshot;
 use openaide_app_server_protocol::task::TaskSetArchivedParams;
 
 use crate::storage::records::TaskLifecycle;
@@ -14,7 +13,7 @@ impl TaskProductApi {
         &self,
         client_instance_id: &ClientInstanceId,
         params: TaskSetArchivedParams,
-    ) -> Result<TaskNavigationSnapshot, ProtocolError> {
+    ) -> Result<(), ProtocolError> {
         let task_id = params.task_id.clone();
         let task = self.read_task_for_client(task_id.as_str(), client_instance_id)?;
         if matches!(task.lifecycle, TaskLifecycle::New { .. }) {
@@ -35,18 +34,6 @@ impl TaskProductApi {
             })
             .map_err(protocol_error_from_runtime)?;
 
-        let tasks = if params.archived {
-            self.store.list_tasks()
-        } else {
-            self.store.list_archived_tasks()
-        }
-        .map_err(protocol_error_from_runtime)?
-        .into_iter()
-        .map(crate::snapshots::project_task_summary)
-        .collect();
-        Ok(TaskNavigationSnapshot {
-            tasks,
-            active_task_id: None,
-        })
+        Ok(())
     }
 }

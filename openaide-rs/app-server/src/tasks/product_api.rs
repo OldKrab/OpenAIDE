@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 use openaide_app_server_protocol::agent::{AgentListSessionsParams, AgentListSessionsResult};
 use openaide_app_server_protocol::errors::{ProtocolError, ProtocolErrorCode};
 use openaide_app_server_protocol::ids::{ClientInstanceId, MessageId, TurnId};
-use openaide_app_server_protocol::snapshot::{TaskNavigationSnapshot, TaskSnapshot};
+use openaide_app_server_protocol::snapshot::TaskSnapshot;
 use openaide_app_server_protocol::support::{
     SupportRecoverStuckSessionsParams, SupportRecoverStuckSessionsResult,
 };
@@ -139,7 +139,7 @@ pub(crate) trait TaskDiscardWorkflow: Send + Sync {
         &self,
         client_instance_id: &ClientInstanceId,
         params: TaskDiscardParams,
-    ) -> Result<TaskNavigationSnapshot, ProtocolError>;
+    ) -> Result<(), ProtocolError>;
 }
 
 pub(crate) trait TaskArchiveWorkflow: Send + Sync {
@@ -147,7 +147,7 @@ pub(crate) trait TaskArchiveWorkflow: Send + Sync {
         &self,
         client_instance_id: &ClientInstanceId,
         params: TaskSetArchivedParams,
-    ) -> Result<TaskNavigationSnapshot, ProtocolError>;
+    ) -> Result<(), ProtocolError>;
 }
 
 pub(crate) use attachments::AttachmentFileBrowserWorkflow;
@@ -365,10 +365,7 @@ impl TaskProductApi {
         )
     }
 
-    pub(crate) fn discard_for_test(
-        &self,
-        params: TaskDiscardParams,
-    ) -> Result<TaskNavigationSnapshot, ProtocolError> {
+    pub(crate) fn discard_for_test(&self, params: TaskDiscardParams) -> Result<(), ProtocolError> {
         self.discard_task(
             &crate::attachment_runtime::AttachmentOwner::test_client_instance_id(),
             params,
@@ -388,7 +385,7 @@ impl TaskProductApi {
     pub(crate) fn set_archived_for_test(
         &self,
         params: TaskSetArchivedParams,
-    ) -> Result<TaskNavigationSnapshot, ProtocolError> {
+    ) -> Result<(), ProtocolError> {
         self.set_task_archived(
             &crate::attachment_runtime::AttachmentOwner::test_client_instance_id(),
             params,
@@ -435,7 +432,7 @@ impl TaskDiscardWorkflow for TaskProductApi {
         &self,
         client_instance_id: &ClientInstanceId,
         params: TaskDiscardParams,
-    ) -> Result<TaskNavigationSnapshot, ProtocolError> {
+    ) -> Result<(), ProtocolError> {
         self.discard_task(client_instance_id, params)
     }
 }
@@ -445,7 +442,7 @@ impl TaskArchiveWorkflow for TaskProductApi {
         &self,
         client_instance_id: &ClientInstanceId,
         params: TaskSetArchivedParams,
-    ) -> Result<TaskNavigationSnapshot, ProtocolError> {
+    ) -> Result<(), ProtocolError> {
         self.set_task_archived(client_instance_id, params)
     }
 }

@@ -18,11 +18,12 @@ use crate::server_requests::ServerRequestRuntime;
 use crate::server_requests::{ResponderScope, ServerRequestAnswer};
 use crate::storage::records::{TaskPreparationRecord, TaskRecord, TaskTitle, TaskTitleSource};
 use crate::storage::Store;
+use crate::task_events::TaskUpdateKind;
 use crate::task_events::TaskUpdateNotifier;
-use crate::task_events::{CommittedChatChange, TaskUpdateKind};
 use crate::tasks::mutation::TaskMutations;
 use crate::tasks::runtime_state::RuntimeState;
 use crate::tasks::transitions::TaskTransitions;
+use openaide_app_server_protocol::events::TaskChatChange;
 use openaide_app_server_protocol::ids::{ClientInstanceId, TaskId};
 use openaide_app_server_protocol::server_requests::{
     QuestionField, QuestionRequestParams, QuestionRequestResponse, QuestionValue,
@@ -957,8 +958,8 @@ fn agent_text_notifications_describe_only_durable_ordered_deltas() {
     sink.emit(agent_text_event("first")).unwrap();
     let appended = notifications.recv().unwrap();
     let message_id = match appended.kind {
-        TaskUpdateKind::Changed(change) => match change.chat.as_slice() {
-            [CommittedChatChange::Append { item }] => {
+        TaskUpdateKind::Changed(change) => match change.changes.chat.as_slice() {
+            [TaskChatChange::Append { item }] => {
                 assert_eq!(
                     item.status,
                     openaide_app_server_protocol::snapshot::ChatItemStatus::Complete
@@ -976,8 +977,8 @@ fn agent_text_notifications_describe_only_durable_ordered_deltas() {
     assert!(matches!(
         chunked.kind,
         TaskUpdateKind::Changed(change)
-            if matches!(change.chat.as_slice(),
-                [CommittedChatChange::AppendText { message_id: id, text }]
+            if matches!(change.changes.chat.as_slice(),
+                [TaskChatChange::AppendText { message_id: id, text }]
                     if id == &message_id && text == " second")
     ));
     let stored = store.read_messages("task_1").unwrap();
@@ -996,7 +997,7 @@ fn agent_text_notifications_describe_only_durable_ordered_deltas() {
     assert!(matches!(
         activity_update.kind,
         TaskUpdateKind::Changed(change)
-            if matches!(change.chat.as_slice(), [CommittedChatChange::Append { .. }])
+            if matches!(change.changes.chat.as_slice(), [TaskChatChange::Append { .. }])
     ));
 }
 
@@ -1048,8 +1049,8 @@ fn every_tool_update_commits_one_lightweight_upsert_and_latest_detail() {
         let update = notifications.recv().unwrap();
         match update.kind {
             TaskUpdateKind::Changed(change) => {
-                let [CommittedChatChange::Upsert { item }] = change.chat.as_slice() else {
-                    panic!("expected focused Tool upsert: {:?}", change.chat);
+                let [TaskChatChange::Upsert { item }] = change.changes.chat.as_slice() else {
+                    panic!("expected focused Tool upsert: {:?}", change.changes.chat);
                 };
                 assert_eq!(item.message_id.as_str(), "acp_tool:session_1:tool_1");
                 assert!(item.parts.iter().all(|part| !matches!(

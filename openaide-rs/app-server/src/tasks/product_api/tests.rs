@@ -4725,7 +4725,7 @@ fn set_config_option_preserves_agent_catalog_that_arrives_after_its_response_cat
 }
 
 #[test]
-fn discard_tombstones_empty_pre_send_task_and_returns_navigation() {
+fn discard_tombstones_empty_pre_send_task_without_reloading_navigation() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut draft = task_record("task-draft", "/workspace/app");
@@ -4743,18 +4743,13 @@ fn discard_tombstones_empty_pre_send_task_and_returns_navigation() {
     )
     .unwrap();
 
-    let navigation = api
-        .discard_for_test(TaskDiscardParams {
-            task_id: "task-draft".into(),
-        })
-        .unwrap();
+    api.discard_for_test(TaskDiscardParams {
+        task_id: "task-draft".into(),
+    })
+    .unwrap();
 
     assert!(store.read_task("task-draft").unwrap().tombstoned);
-    assert_eq!(navigation.tasks.len(), 1);
-    assert!(navigation
-        .tasks
-        .iter()
-        .any(|task| task.task_id.as_str() == "task-existing"));
+    assert!(!store.read_task("task-existing").unwrap().tombstoned);
 }
 
 #[test]

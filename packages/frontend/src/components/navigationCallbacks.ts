@@ -78,23 +78,17 @@ export function createNavigationCallbacks({
         dispatch({ type: "selection:clear" });
       }
       if (backendConnection?.request) {
-      if (archivingActiveTask) {
+        if (archivingActiveTask) {
           asyncOperations.beginNavigation(newTaskNavigationTarget(archivedProjectId));
           openNewTaskSurface(archivedProjectId);
         }
         const request = backendConnection.request;
+        // The focused Task Navigation event, not the mutation response, updates the sidebar.
         void requestTaskSetArchived(
           { backendConnection: { request }, dispatch },
           taskId,
           true,
-        ).then(() =>
-          requestTaskList(
-            { backendConnection: { request }, dispatch },
-            state.showArchived,
-          ),
-        ).then(() => {
-          dispatch({ type: "task:list:remove", taskId });
-        }).catch((error) => dispatch({
+        ).catch((error) => dispatch({
           type: "tasks:error",
           message: error instanceof Error ? error.message : "Unable to archive task.",
         }));
@@ -198,11 +192,6 @@ export function createNavigationCallbacks({
           { backendConnection: { request }, dispatch },
           taskId,
           false,
-        ).then(() =>
-          requestTaskList(
-            { backendConnection: { request }, dispatch },
-            false,
-          ),
         ).then(() => {
           dispatch({ type: "taskInput:clear", taskId });
           asyncOperations.beginNavigation(taskNavigationTarget(taskId), false);

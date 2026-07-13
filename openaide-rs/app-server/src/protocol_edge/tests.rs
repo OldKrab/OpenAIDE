@@ -49,8 +49,7 @@ use crate::snapshots::{
 use crate::state_sync::StateStream;
 use crate::storage::Store;
 use crate::task_events::{
-    CommittedChatChange, CommittedTaskChange, TaskFieldChanges, TaskNavigationChange, TaskUpdate,
-    TaskUpdateKind, ToolDetailUpdate,
+    CommittedChatChange, CommittedTaskChange, TaskUpdate, TaskUpdateKind, ToolDetailUpdate,
 };
 use crate::tasks::product_api::{
     AgentListSessionsWorkflow, AttachmentFileBrowserWorkflow, TaskAdoptNativeSessionWorkflow,
@@ -825,7 +824,7 @@ fn tool_detail_subscription_receives_only_full_updates_for_its_artifact() {
             artifact_id: "artifact-1".to_string(),
             details: fixed_tool_detail(),
         }],
-        TaskNavigationChange::None,
+        TestNavigationChange::None,
     );
     let deliveries = gateway.publish_task_update(&update, AppServerTime(5));
 
@@ -1105,7 +1104,7 @@ fn heartbeat_does_not_replay_navigation_changes_as_response_events() {
             2,
             Vec::new(),
             Vec::new(),
-            TaskNavigationChange::Upsert,
+            TestNavigationChange::Upsert,
         ),
         AppServerTime(3),
     );
@@ -1169,7 +1168,7 @@ fn new_task_update_is_delivered_only_to_its_owner_task_subscription() {
             1,
             vec![CommittedChatChange::Replace],
             Vec::new(),
-            TaskNavigationChange::None,
+            TestNavigationChange::None,
         ),
         AppServerTime(5),
     );
@@ -1224,7 +1223,7 @@ fn committed_agent_text_deltas_publish_append_and_chunk_in_order() {
             2,
             vec![CommittedChatChange::Append { item }],
             Vec::new(),
-            TaskNavigationChange::None,
+            TestNavigationChange::None,
         ),
         committed_task_update(
             "task-1",
@@ -1234,7 +1233,7 @@ fn committed_agent_text_deltas_publish_append_and_chunk_in_order() {
                 text: " second".to_string(),
             }],
             Vec::new(),
-            TaskNavigationChange::None,
+            TestNavigationChange::None,
         ),
     ];
 
@@ -2756,10 +2755,7 @@ impl TaskDiscardWorkflow for RejectingTaskDiscard {
         &self,
         _client_instance_id: &ClientInstanceId,
         _params: openaide_app_server_protocol::task::TaskDiscardParams,
-    ) -> Result<
-        openaide_app_server_protocol::snapshot::TaskNavigationSnapshot,
-        openaide_app_server_protocol::errors::ProtocolError,
-    > {
+    ) -> Result<(), openaide_app_server_protocol::errors::ProtocolError> {
         Err(openaide_app_server_protocol::errors::ProtocolError {
             code: openaide_app_server_protocol::errors::ProtocolErrorCode::Internal,
             message: "task discard unavailable in test gateway".to_string(),
@@ -2776,10 +2772,7 @@ impl TaskArchiveWorkflow for RejectingTaskArchive {
         &self,
         _client_instance_id: &ClientInstanceId,
         _params: openaide_app_server_protocol::task::TaskSetArchivedParams,
-    ) -> Result<
-        openaide_app_server_protocol::snapshot::TaskNavigationSnapshot,
-        openaide_app_server_protocol::errors::ProtocolError,
-    > {
+    ) -> Result<(), openaide_app_server_protocol::errors::ProtocolError> {
         Err(openaide_app_server_protocol::errors::ProtocolError {
             code: openaide_app_server_protocol::errors::ProtocolErrorCode::Internal,
             message: "task archive unavailable in test gateway".to_string(),
@@ -2935,18 +2928,63 @@ fn committed_task_update(
     revision: u64,
     chat: Vec<CommittedChatChange>,
     tool_details: Vec<ToolDetailUpdate>,
-    navigation: TaskNavigationChange,
+    navigation: TestNavigationChange,
 ) -> TaskUpdate {
+    use openaide_app_server_protocol::events::{TaskChanges, TaskChatChange, TaskNavigationChange};
+    use openaide_app_server_protocol::snapshot::{ChatSnapshot, TaskStatus, TaskSummary};
+
+    let chat = chat
+        .into_iter()
+        .map(|change| match change {
+            CommittedChatChange::Append { item } => TaskChatChange::Append { item },
+            CommittedChatChange::Upsert { item } => TaskChatChange::Upsert { item },
+            CommittedChatChange::AppendText { message_id, text } => {
+                TaskChatChange::AppendText { message_id, text }
+            }
+            CommittedChatChange::Replace => TaskChatChange::Replace {
+                chat: ChatSnapshot {
+                    items: Vec::new(),
+                    has_more_before: false,
+                    has_messages: false,
+                    start_cursor: None,
+                    end_cursor: None,
+                },
+            },
+        })
+        .collect();
+    let navigation = match navigation {
+        TestNavigationChange::None => None,
+        TestNavigationChange::Upsert => Some(TaskNavigationChange::Upsert {
+            task: TaskSummary {
+                task_id: task_id.into(),
+                project_id: "project-1".into(),
+                agent_id: "codex".into(),
+                title: None,
+                status: TaskStatus::Idle,
+                updated_at: "2026-01-01T00:00:00Z".to_string(),
+                last_activity: "2026-01-01T00:00:00Z".to_string(),
+                unread: false,
+                has_messages: true,
+            },
+        }),
+    };
     TaskUpdate {
         task_id: task_id.to_string(),
         revision,
-        kind: TaskUpdateKind::Changed(CommittedTaskChange {
-            fields: TaskFieldChanges::default(),
-            chat,
+        kind: TaskUpdateKind::Changed(Box::new(CommittedTaskChange {
+            changes: TaskChanges {
+                chat,
+                ..TaskChanges::default()
+            },
             tool_details,
             navigation,
-        }),
+        })),
     }
+}
+
+enum TestNavigationChange {
+    None,
+    Upsert,
 }
 
 fn task_server_request(task_id: &str) -> ServerRequestDraft {

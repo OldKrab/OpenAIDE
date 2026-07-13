@@ -486,11 +486,11 @@ export type TaskListResult = { tasks: Array<TaskSummary>, revision: number, next
 
 export type TaskDiscardParams = { taskId: TaskId, };
 
-export type TaskDiscardResult = { discardedTaskId: TaskId, tasks: TaskNavigationSnapshot, };
+export type TaskDiscardResult = { discardedTaskId: TaskId, };
 
 export type TaskSetArchivedParams = { taskId: TaskId, archived: boolean, };
 
-export type TaskSetArchivedResult = { taskId: TaskId, archived: boolean, tasks: TaskNavigationSnapshot, };
+export type TaskSetArchivedResult = { taskId: TaskId, archived: boolean, };
 
 export type SupportRecoverStuckSessionsParams = Record<symbol, never>;
 

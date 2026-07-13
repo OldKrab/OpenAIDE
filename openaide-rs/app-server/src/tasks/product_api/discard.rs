@@ -1,12 +1,10 @@
 use openaide_app_server_protocol::errors::ProtocolError;
 use openaide_app_server_protocol::ids::ClientInstanceId;
-use openaide_app_server_protocol::snapshot::TaskNavigationSnapshot;
 use openaide_app_server_protocol::task::TaskDiscardParams;
 
 use crate::agent::AgentSessionKey;
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::TaskStatus as LegacyTaskStatus;
-use crate::snapshots::{TaskNavigationSnapshotSource, TaskNavigationStore};
 use crate::storage::records::{TaskLifecycle, TaskRecord};
 use crate::tasks::mutation::{TaskCommitOptions, TaskCommitOutcome, TaskMutationResult};
 use crate::time::now_string;
@@ -18,13 +16,13 @@ impl TaskProductApi {
         &self,
         client_instance_id: &ClientInstanceId,
         params: TaskDiscardParams,
-    ) -> Result<TaskNavigationSnapshot, ProtocolError> {
+    ) -> Result<(), ProtocolError> {
         let task_id = params.task_id.as_str().to_string();
         let task = self.read_task_for_client(&task_id, client_instance_id)?;
         self.require_discard_eligible(&task)?;
 
         if task.tombstoned {
-            return self.task_navigation();
+            return Ok(());
         }
         let now = now_string();
         let mut session_to_close = None;
@@ -63,11 +61,7 @@ impl TaskProductApi {
                 );
             }
         }
-        self.task_navigation()
-    }
-
-    fn task_navigation(&self) -> Result<TaskNavigationSnapshot, ProtocolError> {
-        TaskNavigationStore::new(self.store.clone()).snapshot(None)
+        Ok(())
     }
 
     fn require_discard_eligible(&self, task: &TaskRecord) -> Result<(), ProtocolError> {

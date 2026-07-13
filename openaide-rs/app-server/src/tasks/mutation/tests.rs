@@ -43,6 +43,38 @@ fn metadata_commit_assigns_revision_once_and_returns_publication_facts() {
 }
 
 #[test]
+fn queued_updates_keep_values_from_their_own_committed_revision() {
+    let (_dir, store, mutations, notifications) = test_mutations(0);
+    store.write_task(&task_record("task_ordered")).unwrap();
+
+    for title in ["First", "Second"] {
+        mutations
+            .commit_existing_task("task_ordered", TaskCommitOptions::metadata(), |ctx| {
+                ctx.task_mut().title = crate::storage::records::TaskTitle::new(
+                    title,
+                    crate::storage::records::TaskTitleSource::User,
+                );
+                Ok(TaskMutationResult::Changed)
+            })
+            .unwrap();
+    }
+
+    let titles = [notifications.recv().unwrap(), notifications.recv().unwrap()].map(|update| {
+        match update.kind {
+            crate::task_events::TaskUpdateKind::Changed(change) => change
+                .changes
+                .task
+                .and_then(|task| task.title)
+                .map(|title| title.value)
+                .expect("summary change should contain its committed title"),
+            other => panic!("expected Task change, got {other:?}"),
+        }
+    });
+
+    assert_eq!(titles, ["First", "Second"]);
+}
+
+#[test]
 fn unchanged_commit_returns_rejection_without_revision_or_notification() {
     let (_dir, store, mutations, notifications) = test_mutations(5);
     let mut record = task_record("task_no_change");

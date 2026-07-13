@@ -136,7 +136,7 @@ describe("app controller callbacks", () => {
   it("stops a pre-send startup by discarding its prepared Task", async () => {
     const dispatch = vi.fn();
     const request = vi.fn(async (method: string) => {
-      if (method === TASK_DISCARD) return { discardedTaskId: "task_1", tasks: { tasks: [], activeTaskId: null } };
+      if (method === TASK_DISCARD) return { discardedTaskId: "task_1" };
       throw new Error(method);
     });
     const state = createInitialState();
@@ -3002,11 +3002,7 @@ describe("app controller callbacks", () => {
         return {
           taskId: "task_1",
           archived: true,
-          tasks: { tasks: [protocolTaskSummary("task_2", "Remaining")], activeTaskId: null },
         };
-      }
-      if (method === TASK_LIST) {
-        return { revision: 2, tasks: [protocolTaskSummary("task_2", "Remaining")] };
       }
       throw new Error(method);
     });
@@ -3039,14 +3035,10 @@ describe("app controller callbacks", () => {
     await settlePromises();
 
     expect(request).toHaveBeenCalledWith(TASK_SET_ARCHIVED, { taskId: "task_1", archived: true });
-    expect(request).toHaveBeenCalledWith(TASK_LIST, { archived: false });
+    expect(request).toHaveBeenCalledTimes(1);
     expect(dispatch).toHaveBeenCalledWith({ type: "selection:clear" });
-    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
-      type: "tasks",
-      archived: false,
-      tasks: [expect.objectContaining({ task_id: "task_2" })],
-    }));
-    expect(dispatch).toHaveBeenCalledWith({ type: "task:list:remove", taskId: "task_1" });
+    expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: "tasks" }));
+    expect(dispatch).not.toHaveBeenCalledWith({ type: "task:list:remove", taskId: "task_1" });
     expect(postHostMessage).toHaveBeenCalledWith({
       type: "surface.openNewTask",
       payload: { project_id: "project_1" },
@@ -3060,11 +3052,7 @@ describe("app controller callbacks", () => {
         return {
           taskId: "task_1",
           archived: false,
-          tasks: { tasks: [protocolTaskSummary("task_1", "Restored")], activeTaskId: null },
         };
-      }
-      if (method === TASK_LIST) {
-        return { revision: 3, tasks: [protocolTaskSummary("task_1", "Restored")] };
       }
       throw new Error(method);
     });
@@ -3079,13 +3067,9 @@ describe("app controller callbacks", () => {
     await settlePromises();
 
     expect(request).toHaveBeenCalledWith(TASK_SET_ARCHIVED, { taskId: "task_1", archived: false });
-    expect(request).toHaveBeenCalledWith(TASK_LIST, { archived: false });
+    expect(request).toHaveBeenCalledTimes(1);
     expect(dispatch).toHaveBeenCalledWith({ type: "archive:set", showArchived: false });
-    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
-      type: "tasks",
-      archived: false,
-      tasks: [expect.objectContaining({ task_id: "task_1" })],
-    }));
+    expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: "tasks" }));
     expect(dispatch).not.toHaveBeenCalledWith({ type: "task:list:remove", taskId: "task_1" });
     expect(postHostMessage).toHaveBeenCalledWith({
       type: "surface.openTask",
@@ -3100,11 +3084,7 @@ describe("app controller callbacks", () => {
         return {
           taskId: "task_1",
           archived: false,
-          tasks: { tasks: [protocolTaskSummary("task_1", "Restored")], activeTaskId: null },
         };
-      }
-      if (method === TASK_LIST) {
-        return { revision: 3, tasks: [protocolTaskSummary("task_1", "Restored")] };
       }
       throw new Error(method);
     });
@@ -3122,7 +3102,7 @@ describe("app controller callbacks", () => {
     await settlePromises();
 
     expect(request).toHaveBeenCalledWith(TASK_SET_ARCHIVED, { taskId: "task_1", archived: false });
-    expect(request).toHaveBeenCalledWith(TASK_LIST, { archived: false });
+    expect(request).toHaveBeenCalledTimes(1);
     expect(dispatch).toHaveBeenCalledWith({ type: "taskInput:clear", taskId: "task_1" });
     expect(dispatch).toHaveBeenCalledWith({ type: "archive:set", showArchived: false });
     expect(dispatch).not.toHaveBeenCalledWith({ type: "task:list:remove", taskId: "task_1" });
@@ -3139,11 +3119,7 @@ describe("app controller callbacks", () => {
         return {
           taskId: "task_1",
           archived: true,
-          tasks: { tasks: [protocolTaskSummary("task_2", "Remaining")], activeTaskId: null },
         };
-      }
-      if (method === TASK_LIST) {
-        return { revision: 2, tasks: [protocolTaskSummary("task_2", "Remaining")] };
       }
       throw new Error(method);
     });
@@ -3160,7 +3136,8 @@ describe("app controller callbacks", () => {
     await settlePromises();
 
     expect(dispatch).toHaveBeenCalledWith({ type: "selection:clear" });
-    expect(dispatch).toHaveBeenCalledWith({ type: "task:list:remove", taskId: "task_1" });
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(dispatch).not.toHaveBeenCalledWith({ type: "task:list:remove", taskId: "task_1" });
     expect(postHostMessage).toHaveBeenCalledWith({
       type: "surface.openNewTask",
       payload: { project_id: "project_1" },

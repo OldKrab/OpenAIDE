@@ -7,9 +7,11 @@ use openaide_app_server_protocol::task::ToolDetailSnapshot;
 use std::sync::Arc;
 
 use crate::chat_history::ChatHistoryPolicy;
+use crate::protocol::model::MessagePage;
 use crate::protocol::model::TaskSnapshot as StoredTaskSnapshot;
+use crate::storage::records::TaskRecord;
 use crate::storage::Store;
-use crate::tasks::snapshot::build_snapshot;
+use crate::tasks::snapshot::{build_snapshot, snapshot_from_record_and_chat};
 
 pub(crate) use chat_projection::{project_chat_item, project_tool_details};
 use readiness::{
@@ -246,17 +248,46 @@ pub(crate) fn project_stored_task_snapshot_with_history_sync(
         agent_config,
         agent_commands,
         send_capability,
-        chat: ChatSnapshot {
-            items: snapshot.chat.items.iter().map(project_chat_item).collect(),
-            has_more_before: snapshot.chat.has_before,
-            has_messages: snapshot.chat.total_count > 0,
-            start_cursor: snapshot.chat.start_cursor.map(Into::into),
-            end_cursor: snapshot.chat.end_cursor.map(Into::into),
-        },
+        chat: project_chat_page(snapshot.chat),
         history_sync,
         pending_requests: Vec::new(),
         recovery: None,
     })
+}
+
+/// Projects metadata from the exact committed Task record without reading Chat from storage.
+pub(crate) fn project_committed_task_state(
+    task: TaskRecord,
+    has_messages: bool,
+) -> Result<TaskSnapshot, ProtocolError> {
+    let task_id = task.task_id.clone();
+    let version = task.message_history_version;
+    project_stored_task_snapshot_with_history_sync(
+        snapshot_from_record_and_chat(
+            task,
+            MessagePage {
+                task_id,
+                items: Vec::new(),
+                has_before: false,
+                total_count: u64::from(has_messages),
+                version,
+                start_cursor: None,
+                end_cursor: None,
+            },
+        ),
+        TaskHistorySyncSnapshot::default(),
+    )
+}
+
+/// Projects a Chat page captured under the same mutation lock as its Task revision.
+pub(crate) fn project_chat_page(chat: MessagePage) -> ChatSnapshot {
+    ChatSnapshot {
+        items: chat.items.iter().map(project_chat_item).collect(),
+        has_more_before: chat.has_before,
+        has_messages: chat.total_count > 0,
+        start_cursor: chat.start_cursor.map(Into::into),
+        end_cursor: chat.end_cursor.map(Into::into),
+    }
 }
 
 fn unsupported_cursor_error() -> ProtocolError {

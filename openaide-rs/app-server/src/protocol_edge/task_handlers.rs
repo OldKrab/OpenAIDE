@@ -298,21 +298,17 @@ impl RpcGateway {
             .client_hub
             .context_for_connection(&connection_id)
             .expect("routing requires an initialized client for task discard");
-        let tasks = match self
+        if let Err(error) = self
             .task_discard
             .discard_for_client(&client.client_instance_id, params)
         {
-            Ok(tasks) => tasks,
-            Err(error) => return self.error(connection_id, id, meta, error),
-        };
+            return self.error(connection_id, id, meta, error);
+        }
         self.result::<TaskDiscardResult>(
             connection_id,
             id,
             meta,
-            TaskDiscardResult {
-                discarded_task_id,
-                tasks,
-            },
+            TaskDiscardResult { discarded_task_id },
         )
     }
 
@@ -336,22 +332,17 @@ impl RpcGateway {
             .client_hub
             .context_for_connection(&connection_id)
             .expect("routing requires an initialized client for task archive");
-        let tasks = match self
+        if let Err(error) = self
             .task_archive
             .set_archived_for_client(&client.client_instance_id, params)
         {
-            Ok(tasks) => tasks,
-            Err(error) => return self.error(connection_id, id, meta, error),
-        };
+            return self.error(connection_id, id, meta, error);
+        }
         self.result::<TaskSetArchivedResult>(
             connection_id,
             id,
             meta,
-            TaskSetArchivedResult {
-                task_id,
-                archived,
-                tasks,
-            },
+            TaskSetArchivedResult { task_id, archived },
         )
     }
 

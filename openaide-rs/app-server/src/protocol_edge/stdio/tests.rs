@@ -1853,9 +1853,11 @@ fn runtime_task_update_notification_emits_app_event_after_agent_completion() {
 #[test]
 fn task_update_notification_emits_focused_task_and_navigation_changes() {
     let temp = tempfile::TempDir::new().expect("temp dir");
+    let record = task_record("task-existing");
+    let navigation_task = crate::snapshots::project_task_summary(record.clone());
     {
         let store = Store::open(temp.path().to_path_buf()).unwrap();
-        store.write_task(&task_record("task-existing")).unwrap();
+        store.write_task(&record).unwrap();
     }
     let state_root = StateRoot::resolve(temp.path()).expect("state root");
     let mut dispatcher = ProtocolEdgeStdioDispatcher::new_for_test(state_root);
@@ -1886,14 +1888,17 @@ fn task_update_notification_emits_focused_task_and_navigation_changes() {
     let messages = dispatcher.handle_task_update(TaskUpdate {
         task_id: "task-existing".to_string(),
         revision: 2,
-        kind: crate::task_events::TaskUpdateKind::Changed(
+        kind: crate::task_events::TaskUpdateKind::Changed(Box::new(
             crate::task_events::CommittedTaskChange {
-                fields: crate::task_events::TaskFieldChanges::default(),
-                chat: Vec::new(),
+                changes: openaide_app_server_protocol::events::TaskChanges::default(),
                 tool_details: Vec::new(),
-                navigation: crate::task_events::TaskNavigationChange::Upsert,
+                navigation: Some(
+                    openaide_app_server_protocol::events::TaskNavigationChange::Upsert {
+                        task: navigation_task,
+                    },
+                ),
             },
-        ),
+        )),
     });
 
     assert!(messages

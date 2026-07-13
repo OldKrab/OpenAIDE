@@ -4,6 +4,7 @@ use std::sync::mpsc;
 #[cfg(test)]
 use std::sync::{Arc, Barrier};
 
+use openaide_app_server_protocol::events::{TaskChanges, TaskNavigationChange};
 use openaide_app_server_protocol::ids::MessageId;
 use openaide_app_server_protocol::snapshot::ChatItem;
 use openaide_app_server_protocol::task::ToolDetailSnapshot;
@@ -16,24 +17,6 @@ pub enum CommittedChatChange {
     Replace,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct TaskFieldChanges {
-    pub summary: bool,
-    pub lifecycle: bool,
-    pub preparation: bool,
-    pub agent_config: bool,
-    pub agent_commands: bool,
-    pub send_capability: bool,
-    pub removed: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TaskNavigationChange {
-    None,
-    Upsert,
-    Remove,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolDetailUpdate {
     pub artifact_id: String,
@@ -43,15 +26,15 @@ pub struct ToolDetailUpdate {
 /// The complete focused publication produced by one durable Task transaction.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommittedTaskChange {
-    pub fields: TaskFieldChanges,
-    pub chat: Vec<CommittedChatChange>,
+    /// Exact values captured by the durable transaction, never re-read during publication.
+    pub changes: TaskChanges,
     pub tool_details: Vec<ToolDetailUpdate>,
-    pub navigation: TaskNavigationChange,
+    pub navigation: Option<TaskNavigationChange>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TaskUpdateKind {
-    Changed(CommittedTaskChange),
+    Changed(Box<CommittedTaskChange>),
     HistorySync(openaide_app_server_protocol::snapshot::TaskHistorySyncSnapshot),
 }
 
@@ -96,7 +79,7 @@ impl TaskUpdateNotifier {
         self.publish(TaskUpdate {
             task_id: task_id.to_string(),
             revision,
-            kind: TaskUpdateKind::Changed(change),
+            kind: TaskUpdateKind::Changed(Box::new(change)),
         });
     }
 
