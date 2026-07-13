@@ -15,8 +15,9 @@ use crate::agent::acp_trace::{AcpTraceSession, AcpTraceState};
 use crate::agent::registry_handle::AgentRegistryHandle;
 use crate::agent::{
     AgentAuthenticateRequest, AgentEventSink, AgentListSessionsRequest, AgentLoadedSession,
-    AgentPrompt, AgentSession, AgentSessionDelete, AgentSessionEventSink, AgentSessionKey,
-    AgentSessionLoad, AgentSessionResume, AgentSessionSetConfigOptionRequest, AgentSessionStart,
+    AgentPrompt, AgentPromptOutcome, AgentSession, AgentSessionDelete, AgentSessionEventSink,
+    AgentSessionKey, AgentSessionLoad, AgentSessionResume, AgentSessionSetConfigOptionRequest,
+    AgentSessionStart,
 };
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::host::HostBridge;
@@ -146,7 +147,7 @@ impl AcpActiveSessionManager {
         &self,
         prompt: AgentPrompt,
         sink: Arc<dyn AgentEventSink>,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<AgentPromptOutcome, RuntimeError> {
         self.sessions.prompt(prompt, sink)
     }
 

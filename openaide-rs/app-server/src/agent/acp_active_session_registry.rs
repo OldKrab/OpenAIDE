@@ -3,7 +3,8 @@ use std::sync::{Arc, Mutex};
 
 use crate::agent::acp_session_client::AcpSessionClient;
 use crate::agent::{
-    AgentEventSink, AgentPrompt, AgentSessionDelete, AgentSessionEventSink, AgentSessionKey,
+    AgentEventSink, AgentPrompt, AgentPromptOutcome, AgentSessionDelete, AgentSessionEventSink,
+    AgentSessionKey,
 };
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::ConfigOptionsCatalog;
@@ -69,7 +70,7 @@ impl AcpActiveSessionRegistry {
         &self,
         prompt: AgentPrompt,
         sink: Arc<dyn AgentEventSink>,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<AgentPromptOutcome, RuntimeError> {
         let session = prompt.session_key();
         self.require_session(&session)?.prompt(prompt, sink)
     }

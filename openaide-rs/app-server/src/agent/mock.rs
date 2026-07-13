@@ -4,8 +4,8 @@ use crate::agent::events::{
 };
 use crate::agent::{
     AgentAuthenticateRequest, AgentEventSink, AgentListSessionsRequest, AgentLoadedSession,
-    AgentProbeRequest, AgentPrompt, AgentRuntime, AgentSession, AgentSessionLoad,
-    AgentSessionStart,
+    AgentProbeRequest, AgentPrompt, AgentPromptOutcome, AgentRuntime, AgentSession,
+    AgentSessionLoad, AgentSessionStart,
 };
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{
@@ -88,9 +88,9 @@ impl AgentRuntime for MockAgent {
         &self,
         prompt: AgentPrompt,
         sink: Arc<dyn AgentEventSink>,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<AgentPromptOutcome, RuntimeError> {
         if prompt.cancellation.is_cancelled() {
-            return Ok(());
+            return Ok(AgentPromptOutcome::Cancelled);
         }
         if should_request_permission(&prompt.text) {
             let _outcome = sink.request_permission(AgentPermissionRequest {
@@ -118,7 +118,7 @@ impl AgentRuntime for MockAgent {
                 ],
             })?;
             if prompt.cancellation.is_cancelled() {
-                return Ok(());
+                return Ok(AgentPromptOutcome::Cancelled);
             }
         }
         let summary = first_words(&prompt.text, 9);
@@ -127,7 +127,8 @@ impl AgentRuntime for MockAgent {
             title: "Checked workspace context".to_string(),
             tool_name: "mock_context".to_string(),
             output_preview: "Workspace context is available for this task.".to_string(),
-        })
+        })?;
+        Ok(AgentPromptOutcome::EndTurn)
     }
 }
 

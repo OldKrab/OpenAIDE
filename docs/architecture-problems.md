@@ -303,7 +303,7 @@ The live projection uses a catch-all branch for unhandled updates. This hides bo
 
 ## AP-021: Prompt stop reasons are discarded and completion uses a drain timer
 
-**Status:** confirmed
+**Status:** resolved
 
 **Area:** primary ACP prompt completion
 
@@ -312,6 +312,8 @@ The live projection uses a catch-all branch for unhandled updates. This hides bo
 **Impact:** Meaningful Agent outcomes disappear from the UI, and correctness depends on an arbitrary timing window even though session updates are not owned by prompt completion.
 
 **Desired direction:** Preserve and interpret the ACP stop reason. Let the primary response control only Task `working` state, show non-normal outcomes as Live Activity where appropriate, and keep cancellation single-sourced. Remove the drain timer once the permanent Native Session listener owns all later updates.
+
+**Resolution:** `AgentRuntime::prompt` now returns a typed outcome that preserves every ACP stop reason supported by the locked schema. Normal completion and Agent-confirmed cancellation only end the App Server-owned working marker; they do not close session-owned Agent messages or Tools. Token and request limits, refusal, and future non-normal reasons append one text-only failed Live Activity while returning the Task to idle. The permanent Native Session listener remains responsible for later updates, with no post-response drain window, and text-only prompt outcomes remain separate from adjacent Tool groups in the Frontend.
 
 ## AP-022: Cancellation reports completion before the Agent is cancelled
 

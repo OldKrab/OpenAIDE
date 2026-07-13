@@ -5036,8 +5036,8 @@ impl AgentRuntime for ImmediatePreparationCatalogAgent {
         &self,
         _prompt: AgentPrompt,
         _sink: Arc<dyn AgentEventSink>,
-    ) -> Result<(), RuntimeError> {
-        Ok(())
+    ) -> Result<crate::agent::AgentPromptOutcome, RuntimeError> {
+        Ok(crate::agent::AgentPromptOutcome::EndTurn)
     }
 }
 
@@ -5071,8 +5071,8 @@ impl AgentRuntime for OrderedConfigAgent {
         &self,
         _prompt: AgentPrompt,
         _sink: Arc<dyn AgentEventSink>,
-    ) -> Result<(), RuntimeError> {
-        Ok(())
+    ) -> Result<crate::agent::AgentPromptOutcome, RuntimeError> {
+        Ok(crate::agent::AgentPromptOutcome::EndTurn)
     }
 }
 
@@ -5182,7 +5182,7 @@ impl AgentRuntime for RecordingAgent {
         &self,
         prompt: AgentPrompt,
         _sink: Arc<dyn AgentEventSink>,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<crate::agent::AgentPromptOutcome, RuntimeError> {
         self.prompts.fetch_add(1, Ordering::SeqCst);
         self.prompt_attachments
             .lock()
@@ -5198,7 +5198,7 @@ impl AgentRuntime for RecordingAgent {
             }
             std::thread::sleep(Duration::from_millis(10));
         }
-        Ok(())
+        Ok(crate::agent::AgentPromptOutcome::EndTurn)
     }
 
     fn set_session_config_option(
@@ -5273,8 +5273,8 @@ impl AgentRuntime for SecretResolvingAgent {
         &self,
         _prompt: AgentPrompt,
         _sink: Arc<dyn AgentEventSink>,
-    ) -> Result<(), RuntimeError> {
-        Ok(())
+    ) -> Result<crate::agent::AgentPromptOutcome, RuntimeError> {
+        Ok(crate::agent::AgentPromptOutcome::EndTurn)
     }
 }
 
@@ -5333,8 +5333,8 @@ impl AgentRuntime for CyclingEmptySessionAgent {
         &self,
         _prompt: AgentPrompt,
         _sink: Arc<dyn AgentEventSink>,
-    ) -> Result<(), RuntimeError> {
-        Ok(())
+    ) -> Result<crate::agent::AgentPromptOutcome, RuntimeError> {
+        Ok(crate::agent::AgentPromptOutcome::EndTurn)
     }
 }
 
@@ -5384,8 +5384,8 @@ impl AgentRuntime for PagedSessionAgent {
         &self,
         _prompt: AgentPrompt,
         _sink: Arc<dyn AgentEventSink>,
-    ) -> Result<(), RuntimeError> {
-        Ok(())
+    ) -> Result<crate::agent::AgentPromptOutcome, RuntimeError> {
+        Ok(crate::agent::AgentPromptOutcome::EndTurn)
     }
 }
 
@@ -5468,8 +5468,8 @@ impl AgentRuntime for ConfigMutatingStartAgent {
         &self,
         _prompt: AgentPrompt,
         _sink: Arc<dyn AgentEventSink>,
-    ) -> Result<(), RuntimeError> {
-        Ok(())
+    ) -> Result<crate::agent::AgentPromptOutcome, RuntimeError> {
+        Ok(crate::agent::AgentPromptOutcome::EndTurn)
     }
 }
 

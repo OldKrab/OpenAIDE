@@ -4,7 +4,9 @@ use std::time::Duration;
 use tokio::sync::mpsc as tokio_mpsc;
 
 use crate::agent::acp_host_terminal_ownership::AcpTerminalOwner;
-use crate::agent::{AgentEventSink, AgentPrompt, AgentSessionEventSink, TurnCancellation};
+use crate::agent::{
+    AgentEventSink, AgentPrompt, AgentPromptOutcome, AgentSessionEventSink, TurnCancellation,
+};
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::ConfigOptionsCatalog;
 
@@ -52,19 +54,19 @@ impl AcpSessionClient {
         &self,
         prompt: AgentPrompt,
         sink: Arc<dyn AgentEventSink>,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<AgentPromptOutcome, RuntimeError> {
         let cancellation = prompt.cancellation.clone();
         if cancellation.is_cancelled() {
-            return Ok(());
+            return Ok(AgentPromptOutcome::Cancelled);
         }
         if self.has_terminal_error() {
             return Err(self.worker_stopped_error());
         }
         // A cancelled prompt still owns the Native Session until its worker observes
-        // the Agent's prompt response and finishes draining the ordered update stream.
+        // the Agent's response. Session updates use the independent permanent listener.
         let _settlement = self.prompt_lifecycle.admit(&cancellation)?;
         if cancellation.is_cancelled() {
-            return Ok(());
+            return Ok(AgentPromptOutcome::Cancelled);
         }
         if self.has_terminal_error() {
             return Err(self.worker_stopped_error());
@@ -72,7 +74,7 @@ impl AcpSessionClient {
         self.terminal_owner.activate()?;
         if cancellation.is_cancelled() {
             let _ = self.terminal_owner.cancel();
-            return Ok(());
+            return Ok(AgentPromptOutcome::Cancelled);
         }
         let (done_tx, done_rx) = mpsc::channel();
         self.command_tx
@@ -222,7 +224,7 @@ pub(super) enum AcpSessionCommand {
     Prompt {
         prompt: AgentPrompt,
         sink: Arc<dyn AgentEventSink>,
-        done_tx: mpsc::Sender<Result<(), RuntimeError>>,
+        done_tx: mpsc::Sender<Result<AgentPromptOutcome, RuntimeError>>,
     },
     Delete {
         reply_tx: mpsc::Sender<Result<(), RuntimeError>>,

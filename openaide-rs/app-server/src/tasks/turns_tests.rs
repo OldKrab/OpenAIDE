@@ -160,7 +160,7 @@ impl AgentRuntime for ShutdownContinuationAgent {
         &self,
         _prompt: AgentPrompt,
         _sink: Arc<dyn AgentEventSink>,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<crate::agent::AgentPromptOutcome, RuntimeError> {
         let (state_lock, changed) = &*self.state;
         let mut state = state_lock.lock().expect("shutdown state poisoned");
         state.prompt_count += 1;
@@ -168,7 +168,7 @@ impl AgentRuntime for ShutdownContinuationAgent {
         while !state.release {
             state = changed.wait(state).expect("shutdown state poisoned");
         }
-        Ok(())
+        Ok(crate::agent::AgentPromptOutcome::EndTurn)
     }
 
     fn shutdown(&self) -> Result<(), RuntimeError> {

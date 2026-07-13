@@ -128,6 +128,17 @@ impl TaskMutationContext<'_> {
         self.store
             .finish_running_activities(&self.task.task_id, status)
     }
+
+    /// Finishes only the App Server-owned working marker for this prompt.
+    /// Agent tool activity remains session-owned and may receive later updates.
+    pub(crate) fn finish_running_activity(
+        &self,
+        identity: &str,
+        status: ActivityStatus,
+    ) -> Result<bool, RuntimeError> {
+        self.store
+            .finish_running_activity_by_identity(&self.task.task_id, identity, status)
+    }
 }
 
 impl TaskMutations {

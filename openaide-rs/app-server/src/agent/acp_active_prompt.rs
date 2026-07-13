@@ -14,11 +14,11 @@ use crate::agent::acp_host_capabilities::AcpSessionPromptMap;
 use crate::agent::acp_trace::AcpTraceSession;
 use crate::agent::acp_update_projection::LivePromptProjection;
 use crate::agent::prompt_content::{build_prompt_content_with_policy, PromptContentPolicy};
-use crate::agent::{AgentEventSink, AgentPrompt, TurnCancellation};
+use crate::agent::{AgentEventSink, AgentPrompt, AgentPromptOutcome, TurnCancellation};
 use crate::protocol::errors::RuntimeError;
 
 pub(super) struct ActivePrompt {
-    completion_rx: mpsc::UnboundedReceiver<Result<(), RuntimeError>>,
+    completion_rx: mpsc::UnboundedReceiver<Result<AgentPromptOutcome, RuntimeError>>,
     // Holding the slot keeps host requests bound to this projection until the prompt exits.
     _projection_slot: CurrentPromptSlot,
     cancellation: TurnCancellation,
@@ -60,7 +60,9 @@ impl ActivePrompt {
         })
     }
 
-    pub(super) async fn next_completion(&mut self) -> Option<Result<(), RuntimeError>> {
+    pub(super) async fn next_completion(
+        &mut self,
+    ) -> Option<Result<AgentPromptOutcome, RuntimeError>> {
         self.completion_rx.recv().await
     }
 
@@ -108,7 +110,7 @@ fn send_prompt_request(
     prompt: AgentPrompt,
     content_policy: PromptContentPolicy,
     trace: Option<&AcpTraceSession>,
-    completion_tx: mpsc::UnboundedSender<Result<(), RuntimeError>>,
+    completion_tx: mpsc::UnboundedSender<Result<AgentPromptOutcome, RuntimeError>>,
 ) -> Result<(), RuntimeError> {
     let task_id = prompt.task_id.clone();
     let session_id = active_session.session_id().to_string();
@@ -131,7 +133,7 @@ fn send_prompt_request(
                     if let Some(trace) = &result_trace {
                         trace.record("agent_to_client", "session/prompt.response", &response);
                     }
-                    Ok(())
+                    Ok(prompt_outcome(response.stop_reason))
                 }
                 Err(error) => Err(acp_error(error)),
             };
@@ -147,6 +149,24 @@ fn send_prompt_request(
             Ok(())
         })
         .map_err(acp_error)
+}
+
+fn prompt_outcome(stop_reason: agent_client_protocol::schema::StopReason) -> AgentPromptOutcome {
+    use agent_client_protocol::schema::StopReason;
+
+    match stop_reason {
+        StopReason::EndTurn => AgentPromptOutcome::EndTurn,
+        StopReason::MaxTokens => AgentPromptOutcome::MaxTokens,
+        StopReason::MaxTurnRequests => AgentPromptOutcome::MaxTurnRequests,
+        StopReason::Refusal => AgentPromptOutcome::Refusal,
+        StopReason::Cancelled => AgentPromptOutcome::Cancelled,
+        other => AgentPromptOutcome::Other(
+            serde_json::to_value(other)
+                .ok()
+                .and_then(|value| value.as_str().map(str::to_string))
+                .unwrap_or_else(|| "unknown".to_string()),
+        ),
+    }
 }
 
 pub(super) async fn cancel_active_prompt(

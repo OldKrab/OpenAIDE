@@ -1,5 +1,8 @@
+use crate::agent::AgentPromptOutcome;
 use crate::protocol::errors::RuntimeError;
-use crate::protocol::model::{ActivityStatus, InterruptionReason, TaskStatus};
+use crate::protocol::model::{
+    ActivityStatus, ActivityStep, InterruptionReason, NormalizedMessage, TaskStatus,
+};
 use crate::storage::records::TaskRecord;
 use crate::tasks::mutation::{TaskCommitOutcome, TaskMutationResult};
 use crate::time::now_string;
@@ -84,7 +87,7 @@ impl TaskTransitions {
         &self,
         task_id: &str,
         turn_id: &str,
-        result: Result<(), RuntimeError>,
+        result: Result<AgentPromptOutcome, RuntimeError>,
     ) -> Result<bool, RuntimeError> {
         let commit =
             self.mutations
@@ -95,12 +98,26 @@ impl TaskTransitions {
 
                     let now = now_string();
                     match &result {
-                        Ok(()) => {
-                            ctx.finish_running_activities(ActivityStatus::Completed)?;
+                        Ok(AgentPromptOutcome::EndTurn | AgentPromptOutcome::Cancelled) => {
+                            ctx.finish_running_activity(
+                                &format!("turn:{turn_id}"),
+                                ActivityStatus::Completed,
+                            )?;
+                            ctx.task_mut().status = TaskStatus::Inactive;
+                        }
+                        Ok(outcome) => {
+                            ctx.finish_running_activity(
+                                &format!("turn:{turn_id}"),
+                                ActivityStatus::Completed,
+                            )?;
+                            append_prompt_outcome_activity(ctx, outcome, now.clone())?;
                             ctx.task_mut().status = TaskStatus::Inactive;
                         }
                         Err(error) => {
-                            ctx.finish_running_activities(ActivityStatus::Error)?;
+                            ctx.finish_running_activity(
+                                &format!("turn:{turn_id}"),
+                                ActivityStatus::Error,
+                            )?;
                             append_interruption(
                                 ctx,
                                 InterruptionReason::Failed,
@@ -121,6 +138,31 @@ impl TaskTransitions {
                 })?;
         Ok(matches!(commit.outcome, TaskCommitOutcome::Committed(_)))
     }
+}
+
+fn append_prompt_outcome_activity(
+    ctx: &crate::tasks::mutation::TaskMutationContext<'_>,
+    outcome: &AgentPromptOutcome,
+    created_at: String,
+) -> Result<(), RuntimeError> {
+    let message = match outcome {
+        AgentPromptOutcome::MaxTokens => "The Agent reached its token limit.".to_string(),
+        AgentPromptOutcome::MaxTurnRequests => "The Agent reached its request limit.".to_string(),
+        AgentPromptOutcome::Refusal => "The Agent refused this request.".to_string(),
+        AgentPromptOutcome::Other(reason) => format!("The Agent stopped: {reason}."),
+        AgentPromptOutcome::EndTurn | AgentPromptOutcome::Cancelled => return Ok(()),
+    };
+    ctx.append_message(NormalizedMessage::Activity {
+        id: uuid::Uuid::new_v4().to_string(),
+        title: "Agent stopped".to_string(),
+        status: ActivityStatus::Error,
+        created_at,
+        collapsed: false,
+        steps: vec![ActivityStep::Text {
+            text: message,
+            level: Some("error".to_string()),
+        }],
+    })
 }
 
 fn active_turn_matches(task: &TaskRecord, expected_turn_id: Option<&str>) -> bool {

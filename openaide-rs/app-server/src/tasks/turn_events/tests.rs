@@ -6,12 +6,13 @@ use crate::agent::events::{
     AgentToolCall, AgentToolCallRef, AgentToolCallStatus,
 };
 use crate::agent::{
-    AgentEventSink, AgentMetadataField, AgentSessionEventSink, AgentSessionMetadataUpdate,
-    TurnCancellation,
+    AgentEventSink, AgentMetadataField, AgentPromptOutcome, AgentSessionEventSink,
+    AgentSessionMetadataUpdate, TurnCancellation,
 };
 use crate::client_lifecycle::AppServerTime;
 use crate::protocol::model::{
-    ActivityToolDetails, ActivityToolOutput, IsolationKind, NormalizedMessage, TaskStatus,
+    ActivityStatus, ActivityToolDetails, ActivityToolOutput, IsolationKind, NormalizedMessage,
+    TaskStatus,
 };
 use crate::server_requests::ServerRequestRuntime;
 use crate::server_requests::{ResponderScope, ServerRequestAnswer};
@@ -662,7 +663,7 @@ fn native_session_update_is_persisted_after_prompt_completion() {
     })
     .unwrap();
     TaskTransitions::new(mutations)
-        .finish_turn("task_1", "turn_1", Ok(()))
+        .finish_turn("task_1", "turn_1", Ok(AgentPromptOutcome::EndTurn))
         .unwrap();
 
     sink.session_update(AgentEvent::TextChunk {
@@ -686,6 +687,125 @@ fn native_session_update_is_persisted_after_prompt_completion() {
         NormalizedMessage::AgentText { id, text, .. }
             if id == &message.chat.identity && text == "before after"
     ));
+}
+
+#[test]
+fn prompt_completion_leaves_running_agent_activity_open_for_later_session_updates() {
+    let (_dir, store, mutations, server_requests) = test_runtime();
+    store.write_task(&running_task("task_1")).unwrap();
+    let sink = TaskSessionEventSink::new(
+        mutations.clone(),
+        "task_1".to_string(),
+        "session_1".to_string(),
+        server_requests,
+    );
+    sink.session_update(AgentEvent::ToolCall(AgentToolCall {
+        tool_call_id: "tool_1".to_string(),
+        scope_id: None,
+        title: "Editing".to_string(),
+        kind: "edit".to_string(),
+        status: AgentToolCallStatus::InProgress,
+        input_summary: None,
+        output_preview: None,
+        details: None,
+    }))
+    .unwrap();
+
+    TaskTransitions::new(mutations)
+        .finish_turn("task_1", "turn_1", Ok(AgentPromptOutcome::EndTurn))
+        .unwrap();
+
+    let messages = store.read_messages("task_1").unwrap();
+    assert!(messages.iter().any(|stored| matches!(
+        stored.chat.message,
+        NormalizedMessage::Activity {
+            status: ActivityStatus::Running,
+            ..
+        }
+    )));
+    let task = store.read_task("task_1").unwrap();
+    assert_eq!(task.status, TaskStatus::Inactive);
+    assert_eq!(task.active_turn_id, None);
+}
+
+#[test]
+fn prompt_limit_appends_one_failed_activity_without_closing_agent_activity() {
+    let (_dir, store, mutations, server_requests) = test_runtime();
+    store.write_task(&running_task("task_1")).unwrap();
+    let sink = TaskSessionEventSink::new(
+        mutations.clone(),
+        "task_1".to_string(),
+        "session_1".to_string(),
+        server_requests,
+    );
+    sink.session_update(AgentEvent::ToolCall(AgentToolCall {
+        tool_call_id: "tool_1".to_string(),
+        scope_id: None,
+        title: "Editing".to_string(),
+        kind: "edit".to_string(),
+        status: AgentToolCallStatus::InProgress,
+        input_summary: None,
+        output_preview: None,
+        details: None,
+    }))
+    .unwrap();
+
+    TaskTransitions::new(mutations)
+        .finish_turn("task_1", "turn_1", Ok(AgentPromptOutcome::MaxTokens))
+        .unwrap();
+
+    let messages = store.read_messages("task_1").unwrap();
+    assert_eq!(
+        messages
+            .iter()
+            .filter(|stored| matches!(
+                stored.chat.message,
+                NormalizedMessage::Activity {
+                    status: ActivityStatus::Running,
+                    ..
+                }
+            ))
+            .count(),
+        1
+    );
+    let failures = messages
+        .iter()
+        .filter_map(|stored| match &stored.chat.message {
+            NormalizedMessage::Activity {
+                title,
+                status: ActivityStatus::Error,
+                steps,
+                ..
+            } => Some((title, steps)),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(failures.len(), 1);
+    assert_eq!(failures[0].0, "Agent stopped");
+    assert!(matches!(
+        failures[0].1.as_slice(),
+        [crate::protocol::model::ActivityStep::Text { text, level }]
+            if text == "The Agent reached its token limit."
+                && level.as_deref() == Some("error")
+    ));
+    let task = store.read_task("task_1").unwrap();
+    assert_eq!(task.status, TaskStatus::Inactive);
+    assert_eq!(task.active_turn_id, None);
+}
+
+#[test]
+fn agent_confirmed_cancellation_ends_work_without_adding_chat() {
+    let (_dir, store, mutations, _server_requests) = test_runtime();
+    store.write_task(&running_task("task_1")).unwrap();
+
+    TaskTransitions::new(mutations)
+        .finish_turn("task_1", "turn_1", Ok(AgentPromptOutcome::Cancelled))
+        .unwrap();
+
+    assert!(store.read_messages("task_1").unwrap().is_empty());
+    let task = store.read_task("task_1").unwrap();
+    assert_eq!(task.status, TaskStatus::Inactive);
+    assert_eq!(task.active_turn_id, None);
 }
 
 #[test]
@@ -994,7 +1114,9 @@ fn finishing_active_turn_marks_task_unread_for_user_attention() {
     store.write_task(&running_task("task_1")).unwrap();
     let transitions = TaskTransitions::new(mutations);
 
-    assert!(transitions.finish_turn("task_1", "turn_1", Ok(())).unwrap());
+    assert!(transitions
+        .finish_turn("task_1", "turn_1", Ok(AgentPromptOutcome::EndTurn))
+        .unwrap());
 
     let stored = store.read_task("task_1").unwrap();
     assert!(stored.unread);

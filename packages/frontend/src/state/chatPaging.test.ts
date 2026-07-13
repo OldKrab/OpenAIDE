@@ -134,6 +134,35 @@ describe("chatPaging", () => {
       ],
     });
   });
+
+  it("keeps a text-only Agent outcome outside adjacent Tool groups", () => {
+    const chat = renderedChat(
+      snapshot([
+        activityMessage("tool-before", "Read file", "completed", true, [
+          { kind: "tool", name: "read", status: "completed", input_summary: "src/main.ts" },
+        ]),
+        activityMessage("prompt-limit", "Agent stopped", "error", false, [
+          { kind: "text", text: "The Agent reached its token limit.", level: "error" },
+        ]),
+        activityMessage("tool-after", "Search files", "completed", true, [
+          { kind: "tool", name: "search", status: "completed", input_summary: "retry" },
+        ]),
+      ]),
+      undefined,
+    );
+
+    expect(chat.items.map((item) => item.message_id)).toEqual([
+      "tool-before",
+      "prompt-limit",
+      "tool-after",
+    ]);
+    expect(chat.items[1]?.message).toMatchObject({
+      kind: "activity",
+      title: "Agent stopped",
+      status: "error",
+      steps: [{ kind: "text", text: "The Agent reached its token limit." }],
+    });
+  });
 });
 
 function snapshot(items: ChatMessage[]): TaskSnapshot {

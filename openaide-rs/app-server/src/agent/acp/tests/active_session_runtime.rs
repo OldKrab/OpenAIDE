@@ -10,6 +10,7 @@ use crate::agent::acp_active_session_manager::AcpActiveSessionManager;
 use crate::agent::acp_auth_method_cache::AcpAuthMethodCache;
 use crate::agent::registry::{AgentCatalogRecord, AgentRegistry};
 use crate::agent::registry_handle::AgentRegistryHandle;
+use crate::agent::AgentPromptOutcome;
 use crate::agent::{AgentSecretResolver, AgentSessionSetConfigOptionRequest, TurnCancellation};
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::host::HostBridge;
@@ -559,6 +560,8 @@ for line in sys.stdin:
         elif prompt_mode == "title_during_prompt":
             notify_title("Title from active turn")
             respond(message, {"stopReason": "end_turn"})
+        elif prompt_mode.startswith("stop_reason:"):
+            respond(message, {"stopReason": prompt_mode.split(":", 1)[1]})
         else:
             respond(message, {"stopReason": "end_turn"})
     elif method == "session/set_config_option":
@@ -1577,6 +1580,38 @@ fn cancelled_prompt_settles_before_session_accepts_next_prompt() {
             "session/close"
         ]
     );
+}
+
+#[test]
+fn prompt_preserves_agent_stop_reason() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((runtime, _log_path)) =
+        fixture_runtime_with_prompt_mode(&temp, "stop-reason-session", "stop_reason:max_tokens")
+    else {
+        return;
+    };
+    let session = runtime
+        .start_session(start_request("task-stop-reason", cwd_string()))
+        .expect("start session");
+
+    let outcome = runtime
+        .prompt(
+            AgentPrompt {
+                agent_id: "codex".to_string(),
+                task_id: "task-stop-reason".to_string(),
+                session_id: session.session_id.clone(),
+                text: "continue".to_string(),
+                attachments: Vec::new(),
+                cancellation: TurnCancellation::new(),
+            },
+            Arc::new(CapturingEventSink::default()),
+        )
+        .expect("prompt completes");
+
+    assert_eq!(outcome, AgentPromptOutcome::MaxTokens);
+    runtime
+        .close_session(&session.key())
+        .expect("close session");
 }
 
 #[test]

@@ -21,7 +21,7 @@ use crate::agent::acp_session_termination::delete_active_session;
 use crate::agent::acp_trace::AcpTraceSession;
 use crate::agent::acp_update_projection::LivePromptProjection;
 use crate::agent::prompt_content::PromptContentPolicy;
-use crate::agent::{AgentEventSink, AgentPrompt, AgentSessionEventSink};
+use crate::agent::{AgentEventSink, AgentPrompt, AgentPromptOutcome, AgentSessionEventSink};
 use crate::logging;
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::ConfigOptionsCatalog;
@@ -51,9 +51,9 @@ pub(super) async fn run_prompt(
     session_event_sink: &mut Option<Arc<dyn AgentSessionEventSink>>,
     session_projection: &mut Option<LivePromptProjection>,
     pending_session_catalogs: &mut PendingSessionCatalogs,
-) -> Result<(), RuntimeError> {
+) -> Result<AgentPromptOutcome, RuntimeError> {
     if prompt.cancellation.is_cancelled() {
-        return Ok(());
+        return Ok(AgentPromptOutcome::Cancelled);
     }
     let active_session_id = active_session.session_id().to_string();
     while cancel_rx.try_recv().is_ok() {}
@@ -224,9 +224,14 @@ pub(super) async fn run_prompt(
     result
 }
 
-fn runtime_result_name(result: &Result<(), RuntimeError>) -> &'static str {
+fn runtime_result_name(result: &Result<AgentPromptOutcome, RuntimeError>) -> &'static str {
     match result {
-        Ok(()) => "ok",
+        Ok(AgentPromptOutcome::EndTurn) => "end_turn",
+        Ok(AgentPromptOutcome::MaxTokens) => "max_tokens",
+        Ok(AgentPromptOutcome::MaxTurnRequests) => "max_turn_requests",
+        Ok(AgentPromptOutcome::Refusal) => "refusal",
+        Ok(AgentPromptOutcome::Cancelled) => "cancelled",
+        Ok(AgentPromptOutcome::Other(_)) => "other",
         Err(_) => "error",
     }
 }

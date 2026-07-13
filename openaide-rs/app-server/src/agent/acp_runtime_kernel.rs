@@ -120,7 +120,7 @@ impl AcpRuntimeKernel {
         &self,
         prompt: AgentPrompt,
         sink: Arc<dyn AgentEventSink>,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<crate::agent::AgentPromptOutcome, RuntimeError> {
         self.active_sessions.prompt(prompt, sink)
     }
 

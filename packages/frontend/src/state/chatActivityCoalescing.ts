@@ -72,7 +72,13 @@ function activityRunTitle(activities: Extract<ChatMessage["message"], { kind: "a
 }
 
 function isActivityRunItem(item: ChatMessage): item is ActivityRunMessage {
-  return item.message.kind === "activity" || item.message.kind === "thought";
+  if (item.message.kind === "thought") return true;
+  if (item.message.kind !== "activity") return false;
+  // Text-only outcome Activities describe the prompt itself, not a Tool. Keeping
+  // them outside the adjacent Tool run prevents limits and refusals from being
+  // relabelled as generic Tool activity.
+  return item.message.steps.some((step) => step.kind !== "text")
+    || isTerminalInputActivity(item.message);
 }
 
 function isCommandActivity(activity: Extract<ChatMessage["message"], { kind: "activity" }>) {

@@ -115,7 +115,7 @@ impl AgentRuntime for AcpAgentRuntime {
         &self,
         prompt: AgentPrompt,
         sink: Arc<dyn AgentEventSink>,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<crate::agent::AgentPromptOutcome, RuntimeError> {
         self.kernel.prompt(prompt, sink)
     }
 

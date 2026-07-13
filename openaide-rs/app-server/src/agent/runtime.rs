@@ -83,6 +83,20 @@ pub struct AgentLoadedSession {
     pub replayed_messages: Vec<NormalizedMessage>,
 }
 
+/// Semantic result of one primary ACP prompt request.
+///
+/// Session updates have an independent lifetime; this value only explains why
+/// the Agent stopped working on the request.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AgentPromptOutcome {
+    EndTurn,
+    MaxTokens,
+    MaxTurnRequests,
+    Refusal,
+    Cancelled,
+    Other(String),
+}
+
 pub trait AgentSecretResolver: Send + Sync {
     fn resolve_secret_env(
         &self,
@@ -308,7 +322,7 @@ pub trait AgentRuntime: Send + Sync {
         &self,
         prompt: AgentPrompt,
         sink: Arc<dyn AgentEventSink>,
-    ) -> Result<(), RuntimeError>;
+    ) -> Result<AgentPromptOutcome, RuntimeError>;
 
     fn cancel_session(&self, _session: &AgentSessionKey) -> Result<(), RuntimeError> {
         Ok(())

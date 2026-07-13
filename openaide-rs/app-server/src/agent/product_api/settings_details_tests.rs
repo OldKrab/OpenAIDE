@@ -112,7 +112,7 @@ impl AgentRuntime for ProbeReadyAgentRuntime {
         &self,
         _prompt: AgentPrompt,
         _sink: Arc<dyn AgentEventSink>,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<crate::agent::AgentPromptOutcome, RuntimeError> {
         unreachable!("settings details must not prompt agents")
     }
 }
