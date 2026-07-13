@@ -3,6 +3,8 @@ import { createRoot } from "react-dom/client";
 import type { WebviewSurfaceKind } from "@openaide/app-shell-contracts";
 import { App } from "./components/App";
 import { postHostMessage } from "./services/hostBridge";
+import { installFrontendShell } from "./services/frontendShell";
+import { createBrowserShell } from "./shells/browserShell";
 import "@fontsource-variable/inter";
 import "./styles/tokens.css";
 import "./styles/app.css";
@@ -10,6 +12,8 @@ import "./styles/app.css";
 type ErrorBoundaryState = {
   error?: Error;
 };
+
+installFrontendShell(createBrowserShell());
 
 class WebviewErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundaryState> {
   state: ErrorBoundaryState = {};

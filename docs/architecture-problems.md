@@ -33,7 +33,7 @@ In the Web App, an in-app navigation intent can also invalidate the generation o
 
 ## AP-002: Shared Frontend owns concrete App Shell routing
 
-**Status:** confirmed
+**Status:** resolved
 
 **Area:** Frontend and App Shell seam
 
@@ -44,6 +44,8 @@ The architectural intent is sound: shared product UI should request navigation w
 **Impact:** Shared Frontend code is coupled to current shells and transports. Adding or changing an App Shell can require edits inside the shared Frontend, while tests must account for runtime shell detection and unrelated message families.
 
 **Desired direction:** Define narrow shell interfaces at composition seams. Keep browser routes and history in the Web App adapter, VS Code panels and webview messaging in the VS Code adapter, and inject the selected adapters into the shared Frontend.
+
+**Implementation:** The shared Frontend now depends on one installed `FrontendShell` contract with separate message and navigation capabilities. The browser composition root selects and installs an adapter before React mounts; shared code no longer detects VS Code, parses Web URLs, mutates browser history, or dispatches the `openaide:webRoute` DOM event. Web route parsing/history lives in `apps/web/frontend/webAppShell.ts`, and VS Code API/message routing lives in `apps/vscode-extension/frontend/vsCodeShell.ts`. Surface navigation uses focused `openNewTask`, `openSettings`, and `openTask` methods instead of sending navigation through the broad host-message channel. The old runtime-selecting `hostBridge` implementation was replaced completely by a thin shell facade, with no compatibility path.
 
 ## AP-003: Task title state is split and uses display text as a lifecycle marker
 

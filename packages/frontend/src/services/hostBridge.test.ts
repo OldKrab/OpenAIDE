@@ -42,7 +42,7 @@ describe("host bridge", () => {
       removeEventListener: vi.fn(),
     });
 
-    const { getBackendConnection } = await import("./hostBridge");
+    const { getBackendConnection } = await installedHostBridge();
     const connection = getBackendConnection();
 
     await connection?.initialize({
@@ -95,7 +95,7 @@ describe("host bridge", () => {
       removeEventListener: vi.fn(),
     });
 
-    const { getBackendConnection, getBootstrap } = await import("./hostBridge");
+    const { getBackendConnection, getBootstrap } = await installedHostBridge();
     const { initializeParamsForBootstrap } = await import("./backendInitialization");
     const firstBootstrap = getBootstrap();
     const first = getBackendConnection();
@@ -139,7 +139,7 @@ describe("host bridge", () => {
       removeEventListener: vi.fn(),
     });
 
-    const { subscribeSurfaceRouteChanges } = await import("./hostBridge");
+    const { subscribeSurfaceRouteChanges } = await installedHostBridge();
     const routed = vi.fn();
     subscribeSurfaceRouteChanges(routed);
     listeners.get("message")?.({
@@ -192,7 +192,7 @@ describe("host bridge", () => {
       removeEventListener: vi.fn(),
     });
 
-    const { getBackendConnection } = await import("./hostBridge");
+    const { getBackendConnection } = await installedHostBridge();
     const connection = getBackendConnection();
 
     await connection?.initialize({
@@ -237,8 +237,8 @@ describe("host bridge", () => {
       removeEventListener: vi.fn(),
     });
 
-    const { postHostMessage } = await import("./hostBridge");
-    postHostMessage({ type: "surface.openTask", payload: { task_id: "task/1" } });
+    const { openTaskSurface } = await installedHostBridge();
+    openTaskSurface("task/1");
 
     expect(pushState).toHaveBeenCalledWith(null, "", "/task/task%2F1");
     expect(reload).not.toHaveBeenCalled();
@@ -268,20 +268,19 @@ describe("host bridge", () => {
       removeEventListener: vi.fn(),
     });
 
-    const { postHostMessage } = await import("./hostBridge");
-    postHostMessage({ type: "surface.openNewTask", payload: { project_id: "project/1" } });
+    const { openNewTaskSurface } = await installedHostBridge();
+    openNewTaskSurface("project/1");
 
     expect(pushState).toHaveBeenCalledWith(null, "", "/new-task?projectId=project%2F1");
   });
 
-  it("routes web shell archive navigation through browser history", async () => {
+  it("reads archive navigation from browser history", async () => {
     const location = { pathname: "/new-task", search: "" };
     const pushState = vi.fn((_state: unknown, _title: string, path: string) => {
       const next = new URL(path, "http://localhost");
       location.pathname = next.pathname;
       location.search = next.search;
     });
-    const dispatchEvent = vi.fn();
     vi.stubGlobal("document", {
       body: {
         dataset: {
@@ -299,15 +298,14 @@ describe("host bridge", () => {
       history: { pushState },
       location,
       addEventListener: vi.fn(),
-      dispatchEvent,
+      dispatchEvent: vi.fn(),
       removeEventListener: vi.fn(),
     });
 
-    const { getBootstrap, postHostMessage } = await import("./hostBridge");
-    postHostMessage({ type: "surface.openArchive" });
+    const { getBootstrap } = await installedHostBridge();
+    window.history.pushState(null, "", "/archive");
 
     expect(pushState).toHaveBeenCalledWith(null, "", "/archive");
-    expect(dispatchEvent).toHaveBeenCalledWith(expect.objectContaining({ type: "openaide:webRoute" }));
     expect(getBootstrap()).toMatchObject({ archived: true });
   });
 
@@ -334,7 +332,7 @@ describe("host bridge", () => {
       removeEventListener: vi.fn(),
     });
 
-    const { getBootstrap } = await import("./hostBridge");
+    const { getBootstrap } = await installedHostBridge();
 
     expect(getBootstrap()).toMatchObject({
       surface: "navigation",
@@ -363,7 +361,7 @@ describe("host bridge", () => {
       removeEventListener: vi.fn(),
     });
 
-    const { getBootstrap } = await import("./hostBridge");
+    const { getBootstrap } = await installedHostBridge();
 
     expect(getBootstrap()).toMatchObject({
       surface: "settings",
@@ -387,7 +385,7 @@ describe("host bridge", () => {
       removeEventListener: vi.fn(),
     });
 
-    const { getBootstrap } = await import("./hostBridge");
+    const { getBootstrap } = await installedHostBridge();
 
     const bootstrap = getBootstrap();
     expect(bootstrap.surface).toBe("settings");
@@ -415,13 +413,23 @@ describe("host bridge", () => {
       removeEventListener: vi.fn(),
     });
 
-    const { updateWebSettingsTabRoute } = await import("./hostBridge");
-    updateWebSettingsTabRoute("skills");
+    const { replaceSettingsTabRoute } = await installedHostBridge();
+    replaceSettingsTabRoute("skills");
 
     expect(replaceState).toHaveBeenCalledWith(null, "", "/settings?tab=skills");
     expect(dispatchEvent).toHaveBeenCalledWith(expect.objectContaining({ type: "openaide:webRoute" }));
   });
 });
+
+async function installedHostBridge() {
+  const [{ installFrontendShell }, { createBrowserShell }, hostBridge] = await Promise.all([
+    import("./frontendShell"),
+    import("../shells/browserShell"),
+    import("./hostBridge"),
+  ]);
+  installFrontendShell(createBrowserShell());
+  return hostBridge;
+}
 
 function initializeResult() {
   return {

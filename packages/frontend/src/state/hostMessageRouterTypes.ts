@@ -8,6 +8,8 @@ import type { AgentOption } from "./composerOptions";
 export type HostMessageRouterContext = {
   bootstrap: WebviewBootstrap;
   dispatch: Dispatch<AppAction>;
+  openNewTaskSurface: (projectId?: string) => void;
+  openSettingsSurface: () => void;
   setAgents: (agents: AgentOption[]) => void;
   setPreferences: (preferences: AppPreferencesRecord) => void;
   postHostMessage: PostHostMessage;

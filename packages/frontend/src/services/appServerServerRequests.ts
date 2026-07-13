@@ -8,13 +8,14 @@ import {
   type ServerRequestResponseResultByMethod,
   type TypedServerRequest,
 } from "@openaide/app-server-client";
-import type { HostToWebviewMessage, WebviewToHostMessage } from "@openaide/app-shell-contracts";
+import type { HostToWebviewMessage } from "@openaide/app-shell-contracts";
+import type { PostHostMessage } from "../state/postHostMessage";
 
 type ServerRequestConnection = Pick<BackendConnection, "serverRequests" | "respond">;
 
 type ServerRequestBridgeOptions = {
   backendConnection: ServerRequestConnection;
-  postHostMessage: (message: WebviewToHostMessage) => void;
+  postHostMessage: PostHostMessage;
 };
 
 export function startAppServerServerRequestBridge({

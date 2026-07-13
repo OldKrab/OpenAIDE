@@ -5,6 +5,7 @@ import { defaultAgent } from "@openaide/app-shell-contracts";
 import {
   getBackendConnection,
   getBootstrap,
+  openNewTaskSurface,
   postHostMessage,
 } from "../services/hostBridge";
 import { clientInstanceIdForBootstrap } from "../services/backendInitialization";
@@ -236,12 +237,7 @@ export function useAppController({ backendConnection }: AppControllerOptions = {
     ) {
       return;
     }
-    postHostMessage({
-      type: "surface.openNewTask",
-      payload: state.snapshot.task.project_id
-        ? { project_id: state.snapshot.task.project_id }
-        : undefined,
-    });
+    openNewTaskSurface(state.snapshot.task.project_id);
   }, [
     bootstrap.surface,
     bootstrap.taskId,

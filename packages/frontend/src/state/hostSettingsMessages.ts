@@ -11,7 +11,7 @@ export function routeSettingsMessage(message: HostToWebviewMessage, context: Hos
       context.dispatch({ type: "settings:runtimeSettings", settings: message.payload });
       return true;
     case "showSettings":
-      context.postHostMessage({ type: "surface.openSettings" });
+      context.openSettingsSurface();
       return true;
     default:
       return false;

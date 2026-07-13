@@ -30,7 +30,7 @@ import { projectIdForWorkspaceRoot } from "../state/projectIdentity";
 import { type AppController, useAppController } from "./appController";
 
 const postHostMessage = vi.fn();
-const updateWebSettingsTabRoute = vi.fn();
+const replaceSettingsTabRoute = vi.fn();
 const listeners: Array<(message: HostToWebviewMessage) => void> = [];
 const webRouteListeners: Array<(nextBootstrap: TestBootstrap) => void> = [];
 let bootstrap: TestBootstrap = navigationBootstrap();
@@ -40,8 +40,16 @@ let latestController: AppController | undefined;
 vi.mock("../services/hostBridge", () => ({
   getBackendConnection: () => backendConnection,
   getBootstrap: () => bootstrap,
+  openNewTaskSurface: (projectId?: string) => postHostMessage(projectId
+    ? { type: "surface.openNewTask", payload: { project_id: projectId } }
+    : { type: "surface.openNewTask" }),
+  openSettingsSurface: () => postHostMessage({ type: "surface.openSettings" }),
+  openTaskSurface: (taskId: string, title?: string) => postHostMessage({
+    type: "surface.openTask",
+    payload: { task_id: taskId, ...(title ? { title } : {}) },
+  }),
   postHostMessage: (message: unknown) => postHostMessage(message),
-  updateWebSettingsTabRoute: (tab: unknown) => updateWebSettingsTabRoute(tab),
+  replaceSettingsTabRoute: (tab: unknown) => replaceSettingsTabRoute(tab),
   subscribeSurfaceRouteChanges: (listener: (nextBootstrap: TestBootstrap) => void) => {
     webRouteListeners.push(listener);
     return () => {
@@ -77,7 +85,7 @@ describe("app controller mounted lifecycle", () => {
     });
     vi.stubGlobal("sessionStorage", memoryStorage());
     postHostMessage.mockClear();
-    updateWebSettingsTabRoute.mockClear();
+    replaceSettingsTabRoute.mockClear();
     listeners.length = 0;
     webRouteListeners.length = 0;
     bootstrap = navigationBootstrap();

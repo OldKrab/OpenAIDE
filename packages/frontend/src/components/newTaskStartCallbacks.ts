@@ -6,7 +6,7 @@ import {
 import {
   releaseComposerAttachments,
 } from "../services/attachmentResources";
-import { postHostMessage } from "../services/hostBridge";
+import { openNewTaskSurface, openTaskSurface } from "../services/hostBridge";
 import { isInvalidAttachmentHandleError } from "../state/attachmentValidation";
 import { appServerAttachmentHandles } from "../state/composerOptions";
 import { mapProtocolTaskSnapshot } from "../state/appServerProtocolMapping";
@@ -69,9 +69,7 @@ function cancelNewTaskStart({
   asyncOperations.beginNavigation(newTaskNavigationTarget(state.newTask.selection.projectId));
   if (attempt) attempt.cancelled = true;
   dispatch({ type: "submit:cancel" });
-  postHostMessage(state.newTask.selection.projectId
-    ? { type: "surface.openNewTask", payload: { project_id: state.newTask.selection.projectId } }
-    : { type: "surface.openNewTask" });
+  openNewTaskSurface(state.newTask.selection.projectId);
   if (!attempt || attempt.sendInFlight) return;
   if (attempt.taskId && backendConnection?.request) {
     const taskId = attempt.taskId;
@@ -266,13 +264,7 @@ async function submitNewTask({
     });
     if (asyncOperations.owns(operation)) {
       asyncOperations.expectNavigation(taskNavigationTarget(taskId));
-      postHostMessage({
-        type: "surface.openTask",
-        payload: {
-          task_id: taskId,
-          ...(snapshot.task.title ? { title: snapshot.task.title } : {}),
-        },
-      });
+      openTaskSurface(taskId, snapshot.task.title);
     }
     if (attempt.cancelled) {
       await request(TASK_CANCEL, { taskId });

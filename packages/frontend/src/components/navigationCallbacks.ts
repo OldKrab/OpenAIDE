@@ -1,4 +1,8 @@
-import { postHostMessage } from "../services/hostBridge";
+import {
+  openNewTaskSurface,
+  openSettingsSurface,
+  openTaskSurface,
+} from "../services/hostBridge";
 import {
   TASK_ADOPT_NATIVE_SESSION,
   type AgentId,
@@ -76,9 +80,7 @@ export function createNavigationCallbacks({
       if (backendConnection?.request) {
       if (archivingActiveTask) {
           asyncOperations.beginNavigation(newTaskNavigationTarget(archivedProjectId));
-          postHostMessage(archivedProjectId
-            ? { type: "surface.openNewTask", payload: { project_id: archivedProjectId } }
-            : { type: "surface.openNewTask" });
+          openNewTaskSurface(archivedProjectId);
         }
         const request = backendConnection.request;
         void requestTaskSetArchived(
@@ -158,13 +160,7 @@ export function createNavigationCallbacks({
           dispatch({ type: "snapshot", snapshot, intent: "open" });
           dispatch({ type: "newTask:nativeSessions:remove", sessionId: session.session_id });
           asyncOperations.expectNavigation(taskNavigationTarget(snapshot.task.task_id));
-          postHostMessage({
-            type: "surface.openTask",
-            payload: {
-              task_id: snapshot.task.task_id,
-              title: snapshot.task.title,
-            },
-          });
+          openTaskSurface(snapshot.task.task_id, snapshot.task.title);
         }).catch((error) => {
           if (!asyncOperations.owns(operation)) return;
           dispatch({
@@ -183,19 +179,17 @@ export function createNavigationCallbacks({
     },
     openNewTask: (projectId) => {
       asyncOperations.beginNavigation(newTaskNavigationTarget(projectId));
-      postHostMessage(projectId
-        ? { type: "surface.openNewTask", payload: { project_id: projectId } }
-        : { type: "surface.openNewTask" });
+      openNewTaskSurface(projectId);
     },
     openSettings: () => {
       asyncOperations.beginNavigation(settingsNavigationTarget());
-      postHostMessage({ type: "surface.openSettings" });
+      openSettingsSurface();
     },
     openTask: (taskId) => {
       asyncOperations.beginNavigation(taskNavigationTarget(taskId));
       const task = state.tasks.find((item) => item.task_id === taskId);
       dispatch({ type: "selection:set", taskId });
-      postHostMessage({ type: "surface.openTask", payload: { task_id: taskId, title: task?.title } });
+      openTaskSurface(taskId, task?.title);
     },
     restoreTask: (taskId) => {
       if (backendConnection?.request) {
@@ -213,7 +207,7 @@ export function createNavigationCallbacks({
           dispatch({ type: "taskInput:clear", taskId });
           asyncOperations.beginNavigation(taskNavigationTarget(taskId), false);
           dispatch({ type: "archive:set", showArchived: false });
-          postHostMessage({ type: "surface.openTask", payload: { task_id: taskId } });
+          openTaskSurface(taskId);
         }).catch((error) => dispatch({
           type: "tasks:error",
           message: error instanceof Error ? error.message : "Unable to restore task.",

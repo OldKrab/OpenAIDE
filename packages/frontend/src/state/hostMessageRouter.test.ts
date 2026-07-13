@@ -38,8 +38,8 @@ describe("host message router", () => {
     routeHostMessage({ type: "newTask" }, context);
     routeHostMessage({ type: "showSettings" }, context);
 
-    expect(context.postHostMessage).toHaveBeenCalledWith({ type: "surface.openNewTask" });
-    expect(context.postHostMessage).toHaveBeenCalledWith({ type: "surface.openSettings" });
+    expect(context.openNewTaskSurface).toHaveBeenCalledOnce();
+    expect(context.openSettingsSurface).toHaveBeenCalledOnce();
   });
 
   it("routes secret storage failures back to Agent Settings", () => {
@@ -69,6 +69,8 @@ function routerContextBase() {
   return {
     bootstrap: { surface: "navigation" as const },
     dispatch: vi.fn(),
+    openNewTaskSurface: vi.fn(),
+    openSettingsSurface: vi.fn(),
     setAgents: vi.fn(),
     setPreferences: vi.fn(),
     postHostMessage: vi.fn(),

@@ -21,7 +21,12 @@ import {
   type StateSubscriptionMappingContext,
 } from "../services/appServerStateSubscriptions";
 import { initializeParamsForBootstrap, taskNavigationScopeForBootstrap } from "../services/backendInitialization";
-import { postHostMessage, subscribeHostMessages } from "../services/hostBridge";
+import {
+  openNewTaskSurface,
+  openSettingsSurface,
+  postHostMessage,
+  subscribeHostMessages,
+} from "../services/hostBridge";
 import { startHostMessageSession } from "../services/hostMessageSession";
 import { agentOptionsFromProtocol } from "../state/appServerAgents";
 import { actionsFromInitialSnapshot } from "../state/appServerInitialSnapshot";
@@ -236,6 +241,8 @@ export function useAppControllerBackendLifecycle({
       routeHostMessage(message, {
         bootstrap: bootstrapRef.current,
         dispatch: dispatchForCurrentReplica,
+        openNewTaskSurface,
+        openSettingsSurface,
         setAgents,
         setPreferences,
         postHostMessage,

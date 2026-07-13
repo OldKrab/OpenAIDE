@@ -52,7 +52,16 @@ const postHostMessage = vi.fn();
 const beginAgentSecretTransaction = vi.fn();
 
 vi.mock("../services/hostBridge", () => ({
+  openNewTaskSurface: (projectId?: string) => postHostMessage(projectId
+    ? { type: "surface.openNewTask", payload: { project_id: projectId } }
+    : { type: "surface.openNewTask" }),
+  openSettingsSurface: () => postHostMessage({ type: "surface.openSettings" }),
+  openTaskSurface: (taskId: string, title?: string) => postHostMessage({
+    type: "surface.openTask",
+    payload: { task_id: taskId, ...(title ? { title } : {}) },
+  }),
   postHostMessage: (message: unknown) => postHostMessage(message),
+  replaceSettingsTabRoute: vi.fn(),
 }));
 
 vi.mock("../services/agentSecretTransaction", () => ({
