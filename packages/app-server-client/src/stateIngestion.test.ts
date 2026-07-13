@@ -390,10 +390,8 @@ describe("state ingestion", () => {
     });
     const olderTask = taskSnapshotBody("task-1", [chatItem("message-1", "Replayed")]);
     olderTask.historySync = {
-      state: "failed",
+      state: "updated",
       generation: 3,
-      message: "Native history is unavailable",
-      beforeSend: false,
     };
     const event = taskEvent("root-1", "task-1", "cursor-1", "cursor-2", {
       kind: "taskSnapshotUpdated",
@@ -407,10 +405,8 @@ describe("state ingestion", () => {
       throw new Error("expected applied task snapshot update");
     }
     expect(result.state.snapshot.task.historySync).toEqual({
-      state: "failed",
+      state: "updated",
       generation: 3,
-      message: "Native history is unavailable",
-      beforeSend: false,
     });
     expect(result.state.snapshot.task.chat.items).toHaveLength(1);
   });
