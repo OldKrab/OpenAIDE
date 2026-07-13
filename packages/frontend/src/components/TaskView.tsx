@@ -1,5 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import type { Dispatch } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ArrowDown } from "lucide-react";
 import type {
   AppPreferencesRecord,
@@ -9,7 +8,6 @@ import type {
   TaskSnapshot,
   TaskSummary,
 } from "@openaide/app-shell-contracts";
-import type { AppAction } from "../state/appReducer";
 import { renderedChat } from "../state/chatPaging";
 import type { AppState, TaskChatScrollState, TaskComposerInput, TaskLiveTextPresentation } from "../state/store";
 import { ChatRow } from "./ChatMessageView";
@@ -38,6 +36,12 @@ export {
   permissionResponseForMessage,
   questionResponseForMessage,
 } from "./taskChatPresentation";
+
+export type TaskViewIntents = {
+  changePrompt: (prompt: string) => void;
+  recordScroll: (scrollState: TaskChatScrollState) => void;
+  reportAttachmentError: (message?: string) => void;
+};
 
 export function TaskLoadingView({ error, onRetry }: { error?: string; onRetry?: () => void }) {
   if (error) {
@@ -71,7 +75,7 @@ export function TaskView({
   backendConnectionState,
   backendReady,
   chatPageState,
-  dispatch,
+  intents,
   onCancel,
   fileBrowser,
   onLoadChatPage,
@@ -100,7 +104,7 @@ export function TaskView({
   backendConnectionState?: BackendConnectionState;
   backendReady: boolean;
   chatPageState: AppState["chatPages"][string] | undefined;
-  dispatch: Dispatch<AppAction>;
+  intents: TaskViewIntents;
   onCancel: () => void;
   fileBrowser?: TaskFileBrowserCallbacks;
   onLoadChatPage: (beforeCursor: string) => number | undefined;
@@ -190,13 +194,10 @@ export function TaskView({
     workspaceRoot: snapshot.task.workspace_root,
     workspaceLabel: workspaceLabel(snapshot.task.workspace_root),
   };
-  const recordTaskScroll = useCallback((scrollState: TaskChatScrollState) => {
-    dispatch({ type: "taskScroll:record", taskId: snapshot.task.task_id, scrollState });
-  }, [dispatch, snapshot.task.task_id]);
   const chatScroll = useTaskChatScroll({
     historySyncState: snapshot.history_sync.state,
     itemCount: chatItems.length,
-    onScrollState: recordTaskScroll,
+    onScrollState: intents.recordScroll,
     pendingPrepend: chat.pending,
     prependRequestGeneration: chatPageState?.requestGeneration ?? 0,
     savedScrollState,
@@ -319,14 +320,8 @@ export function TaskView({
               ? onCancel
               : undefined
           }
-          onChange={(prompt) => dispatch({ type: "taskInput:prompt", taskId: snapshot.task.task_id, prompt })}
-          onUnsupportedImageAttachment={(message) =>
-            dispatch({
-              type: "taskInput:error",
-              taskId: snapshot.task.task_id,
-              message: message ?? "Unable to attach image.",
-            })
-          }
+          onChange={intents.changePrompt}
+          onUnsupportedImageAttachment={intents.reportAttachmentError}
           onRevealAttachment={onRevealAttachment}
           onRemoveAttachment={onRemoveAttachment}
           onSelectConfigOption={onSelectConfigOption}

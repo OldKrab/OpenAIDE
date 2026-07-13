@@ -209,7 +209,11 @@ function taskViewProps(taskSnapshot: TaskSnapshot) {
   return {
     backendReady: true,
     chatPageState: undefined,
-    dispatch: vi.fn(),
+    intents: {
+      changePrompt: vi.fn(),
+      recordScroll: vi.fn(),
+      reportAttachmentError: vi.fn(),
+    },
     onCancel: vi.fn(),
     onLoadChatPage: vi.fn(),
     onSubscribeToolDetail: vi.fn(() => vi.fn()),

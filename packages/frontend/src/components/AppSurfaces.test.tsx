@@ -3,7 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TaskSnapshot } from "@openaide/app-shell-contracts";
 import type { AppController } from "./appController";
 import { AppSurfaces } from "./AppSurfaces";
-import { createInitialState } from "../state/store";
+import { createInitialState, type AppState } from "../state/store";
+
+type TestController = AppController & { state: AppState };
 
 const surfaceMocks = vi.hoisted(() => ({
   newTask: vi.fn(() => null),
@@ -781,7 +783,8 @@ describe("AppSurfaces callback wiring", () => {
   });
 });
 
-function render(controller: AppController) {
+function render(controller: TestController) {
+  controller.view = viewFor(controller.state);
   let tree!: ReturnType<typeof create>;
   act(() => {
     tree = create(<AppSurfaces controller={controller} />);
@@ -789,7 +792,7 @@ function render(controller: AppController) {
   return tree;
 }
 
-function controllerFor(surface: AppController["bootstrap"]["surface"]): AppController {
+function controllerFor(surface: AppController["bootstrap"]["surface"]): TestController {
   const state = createInitialState();
   return {
     activeTask: undefined,
@@ -840,16 +843,30 @@ function controllerFor(surface: AppController["bootstrap"]["surface"]): AppContr
         sendPrompt: vi.fn(),
       },
     },
-    createSnapshotRequestId: vi.fn(),
-    dispatch: vi.fn(),
+    intents: {
+      newTask: {
+        changePrompt: vi.fn(),
+        reportAttachmentError: vi.fn(),
+        selectAgent: vi.fn(),
+        selectIsolation: vi.fn(),
+        selectProject: vi.fn(),
+        selectWorkspace: vi.fn(),
+      },
+      task: {
+        changePrompt: vi.fn(),
+        recordScroll: vi.fn(),
+        reportAttachmentError: vi.fn(),
+      },
+    },
     preferences: { composer_submit_shortcut: "mod_enter" },
     retryTaskOpen: vi.fn(),
     state,
+    view: viewFor(state),
     visibleTasks: [],
   };
 }
 
-function webControllerFor(surface: "settings" | "task"): AppController {
+function webControllerFor(surface: "settings" | "task"): TestController {
   const controller = controllerFor(surface);
   controller.bootstrap = {
     surface,
@@ -859,6 +876,40 @@ function webControllerFor(surface: "settings" | "task"): AppController {
     },
   };
   return controller;
+}
+
+function viewFor(state: AppState): AppController["view"] {
+  const taskId = state.snapshot?.task.task_id;
+  return {
+    appServerError: state.appServerError,
+    navigation: {
+      nativeSessions: state.newTask.nativeSessions,
+      newTaskSelection: state.newTask.selection,
+      projects: state.projects,
+      searchQuery: state.searchQuery,
+      showArchived: state.showArchived,
+      taskListError: state.taskListError,
+    },
+    primaryTask: {
+      chatPageState: taskId ? state.chatPages[taskId] : undefined,
+      liveTextPresentation: taskId ? state.taskLiveTextPresentation[taskId] : undefined,
+      newTask: {
+        newTask: state.newTask,
+        preparedTaskInput: taskId ? state.taskInputs[taskId] : undefined,
+        projects: state.projects,
+        snapshot: state.snapshot,
+        workspaceRootsLoaded: state.workspaceRootsLoaded,
+      },
+      permissionResponses: state.permissionResponses,
+      questionResponses: state.questionResponses,
+      savedScrollState: taskId ? state.taskChatScrollStates[taskId] : undefined,
+      snapshot: state.snapshot,
+      taskInput: taskId ? state.taskInputs[taskId] : undefined,
+      taskOpenError: state.taskOpenError,
+      toolDetails: state.toolDetails,
+    },
+    settings: state.settings,
+  };
 }
 
 function pointerEvent({

@@ -1,11 +1,11 @@
 import { act, create } from "react-test-renderer";
-import type { ComponentProps, ComponentType } from "react";
+import type { ComponentProps } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { TaskSnapshot } from "@openaide/app-shell-contracts";
 import type { AgentOption } from "../state/composerOptions";
 import { selectionWithAgent, selectionWithProject } from "../state/composerOptions";
 import { appReducer, type AppAction } from "../state/appReducer";
-import { createInitialState as createStoreInitialState } from "../state/store";
+import { createInitialState as createStoreInitialState, type AppState } from "../state/store";
 import { Composer } from "./Composer";
 import { NewTaskView as ProductionNewTaskView } from "./NewTaskView";
 import type { TaskFileBrowserCallbacks } from "./appControllerCallbackTypes";
@@ -14,9 +14,46 @@ beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 });
 
-type TestNewTaskViewProps = Omit<ComponentProps<typeof ProductionNewTaskView>, "onRemoveAttachment">
-  & Partial<Pick<ComponentProps<typeof ProductionNewTaskView>, "onRemoveAttachment">>;
-const NewTaskView = ProductionNewTaskView as ComponentType<TestNewTaskViewProps>;
+type TestNewTaskViewProps = Omit<
+  ComponentProps<typeof ProductionNewTaskView>,
+  "intents" | "onRemoveAttachment" | "state"
+> & {
+  dispatch: (action: AppAction) => unknown;
+  onRemoveAttachment?: ComponentProps<typeof ProductionNewTaskView>["onRemoveAttachment"];
+  state: AppState;
+};
+
+function NewTaskView({ dispatch, onRemoveAttachment, state, ...props }: TestNewTaskViewProps) {
+  const preparedTaskId = state.snapshot?.task.has_messages === false
+    ? state.snapshot.task.task_id
+    : undefined;
+  return (
+    <ProductionNewTaskView
+      {...props}
+      intents={{
+        changePrompt: (prompt) => dispatch(preparedTaskId
+          ? { type: "taskInput:prompt", taskId: preparedTaskId, prompt }
+          : { type: "prompt", prompt }),
+        reportAttachmentError: (message) => dispatch({
+          type: "submit:error",
+          message: message ?? "Images can be attached after the Task is open.",
+        }),
+        selectAgent: (agentId, agentLabel) => dispatch({ type: "newTask:agent", agentId, agentLabel }),
+        selectIsolation: (isolation) => dispatch({ type: "newTask:isolation", isolation }),
+        selectProject: (project) => dispatch({ type: "newTask:project", project }),
+        selectWorkspace: (workspace) => dispatch({ type: "newTask:workspace", workspace }),
+      }}
+      onRemoveAttachment={onRemoveAttachment ?? vi.fn()}
+      state={{
+        newTask: state.newTask,
+        preparedTaskInput: preparedTaskId ? state.taskInputs[preparedTaskId] : undefined,
+        projects: state.projects,
+        snapshot: state.snapshot,
+        workspaceRootsLoaded: state.workspaceRootsLoaded,
+      }}
+    />
+  );
+}
 
 function createInitialState() {
   const state = createStoreInitialState();

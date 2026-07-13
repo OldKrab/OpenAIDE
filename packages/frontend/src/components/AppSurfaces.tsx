@@ -10,7 +10,8 @@ import { useInputModality } from "./useInputModality";
 
 export function AppSurfaces({ controller }: { controller: AppController }) {
   useInputModality();
-  const { activeNavigationTaskId, activeTask, backendReady, bootstrap, callbacks, preferences, state, visibleTasks } = controller;
+  const { activeNavigationTaskId, activeTask, backendReady, bootstrap, callbacks, preferences, view, visibleTasks } = controller;
+  const { appServerError, navigation, settings } = view;
   const [mobileLayoutActive, setMobileLayoutActive] = useState(() => isMobileWebViewport());
   const [newTaskFocusRequestKey, setNewTaskFocusRequestKey] = useState(0);
   const mobileNavigationButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -97,10 +98,10 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
       <main className="app-shell navigation-shell">
         <Sidebar
           activeTaskId={activeNavigationTaskId}
-          nativeSessions={state.newTask.nativeSessions}
-          nativeSessionAgentId={state.newTask.selection.agentId}
-          nativeSessionAgentName={state.newTask.selection.agentLabel}
-          nativeSessionProjectId={state.newTask.selection.projectId}
+          nativeSessions={navigation.nativeSessions}
+          nativeSessionAgentId={navigation.newTaskSelection.agentId}
+          nativeSessionAgentName={navigation.newTaskSelection.agentLabel}
+          nativeSessionProjectId={navigation.newTaskSelection.projectId}
           onArchiveTask={callbacks.navigation.archiveTask}
           onLoadNativeSessions={callbacks.navigation.loadNativeSessions}
           onNewTask={callbacks.navigation.openNewTask}
@@ -110,19 +111,19 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           onSearchChange={callbacks.navigation.changeSearch}
           onSettings={callbacks.navigation.openSettings}
           onToggleArchived={callbacks.navigation.toggleArchived}
-          searchQuery={state.searchQuery}
-          showArchived={state.showArchived}
-          taskListError={state.taskListError}
+          searchQuery={navigation.searchQuery}
+          showArchived={navigation.showArchived}
+          taskListError={navigation.taskListError}
           tasks={visibleTasks}
         />
       </main>
     );
   }
 
-  if (state.appServerError && !isWebShell) {
+  if (appServerError && !isWebShell) {
     return (
       <main className="app-shell editor-shell">
-        <AppServerErrorView message={state.appServerError} />
+        <AppServerErrorView message={appServerError} />
       </main>
     );
   }
@@ -143,7 +144,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           onUpdateCustomAgentMetadata={callbacks.settings.updateCustomAgentMetadata}
           onUnlockDeveloperSettings={callbacks.settings.unlockDeveloperSettings}
           preferences={preferences}
-          state={state.settings}
+          state={settings}
         />
       </main>
     );
@@ -154,7 +155,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     const mobileTitle = bootstrap.surface === "settings"
       ? "Settings"
       : renderableTaskSnapshot?.task.title ?? routedActiveTask?.title ?? (bootstrap.taskId || openingNativeSession ? "Opening task" : "New task");
-    const mobileProject = activeTask?.project_label ?? state.projects[0]?.label ?? "OpenAIDE";
+    const mobileProject = activeTask?.project_label ?? navigation.projects[0]?.label ?? "OpenAIDE";
     const mobileTaskStatus = renderableTaskSnapshot?.task.status ?? routedActiveTask?.status;
     const mobileSubtitle = bootstrap.surface === "settings"
       ? "Agent and app configuration"
@@ -216,8 +217,8 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           inert={mobileNavigation.active ? true : undefined}
           ref={webMainSurfaceRef}
         >
-          {state.appServerError ? (
-            <AppServerErrorView message={state.appServerError} />
+          {appServerError ? (
+            <AppServerErrorView message={appServerError} />
           ) : bootstrap.surface === "settings" ? (
             <SettingsView
               onAuthenticate={callbacks.settings.authenticateAgent}
@@ -232,7 +233,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
               onUpdateCustomAgentMetadata={callbacks.settings.updateCustomAgentMetadata}
               onUnlockDeveloperSettings={callbacks.settings.unlockDeveloperSettings}
               preferences={preferences}
-              state={state.settings}
+              state={settings}
             />
           ) : (
             <AppPrimaryTaskSurface
@@ -249,10 +250,10 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           maxTasksPerProject={DEFAULT_MAX_TASKS_PER_PROJECT}
           modal={mobileLayoutActive && mobileNavigation.active}
           loadingTasks={!backendReady}
-          nativeSessions={state.newTask.nativeSessions}
-          nativeSessionAgentId={state.newTask.selection.agentId}
-          nativeSessionAgentName={state.newTask.selection.agentLabel}
-          nativeSessionProjectId={state.newTask.selection.projectId}
+          nativeSessions={navigation.nativeSessions}
+          nativeSessionAgentId={navigation.newTaskSelection.agentId}
+          nativeSessionAgentName={navigation.newTaskSelection.agentLabel}
+          nativeSessionProjectId={navigation.newTaskSelection.projectId}
           onArchiveTask={callbacks.navigation.archiveTask}
           onLoadNativeSessions={callbacks.navigation.loadNativeSessions}
           onNewTask={openNewTaskFromNavigation}
@@ -262,11 +263,11 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           onSearchChange={callbacks.navigation.changeSearch}
           onSettings={closeAfter(callbacks.navigation.openSettings)}
           onToggleArchived={callbacks.navigation.toggleArchived}
-          projects={state.projects}
-          searchQuery={state.searchQuery}
+          projects={navigation.projects}
+          searchQuery={navigation.searchQuery}
           settingsActive={bootstrap.surface === "settings"}
-          showArchived={state.showArchived}
-          taskListError={state.taskListError}
+          showArchived={navigation.showArchived}
+          taskListError={navigation.taskListError}
           tasks={visibleTasks}
         />
       </main>

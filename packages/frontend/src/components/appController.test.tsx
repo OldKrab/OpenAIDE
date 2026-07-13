@@ -27,7 +27,12 @@ import {
 } from "@openaide/app-server-client";
 import type { HostToWebviewMessage, TaskSnapshot } from "@openaide/app-shell-contracts";
 import { projectIdForWorkspaceRoot } from "../state/projectIdentity";
-import { type AppController, useAppController } from "./appController";
+import {
+  type AppController,
+  type AppControllerTestHarness,
+  useAppController,
+  useAppControllerTestHarness,
+} from "./appController";
 
 const postHostMessage = vi.fn();
 const replaceSettingsTabRoute = vi.fn();
@@ -35,7 +40,8 @@ const listeners: Array<(message: HostToWebviewMessage) => void> = [];
 const webRouteListeners: Array<(nextBootstrap: TestBootstrap) => void> = [];
 let bootstrap: TestBootstrap = navigationBootstrap();
 let backendConnection: TestBackendConnection | undefined;
-let latestController: AppController | undefined;
+let latestController: AppControllerTestHarness | undefined;
+let latestPublicController: AppController | undefined;
 
 vi.mock("../services/hostBridge", () => ({
   getBackendConnection: () => backendConnection,
@@ -67,7 +73,12 @@ vi.mock("../services/hostBridge", () => ({
 }));
 
 function ControllerProbe() {
-  latestController = useAppController();
+  latestController = useAppControllerTestHarness();
+  return null;
+}
+
+function PublicControllerProbe() {
+  latestPublicController = useAppController();
   return null;
 }
 
@@ -91,6 +102,22 @@ describe("app controller mounted lifecycle", () => {
     bootstrap = navigationBootstrap();
     backendConnection = undefined;
     latestController = undefined;
+    latestPublicController = undefined;
+  });
+
+  it("exposes render-ready surface state and intents without reducer controls", () => {
+    act(() => {
+      create(<PublicControllerProbe />);
+    });
+
+    expect(latestPublicController).not.toHaveProperty("state");
+    expect(latestPublicController).not.toHaveProperty("dispatch");
+    expect(latestPublicController).not.toHaveProperty("createSnapshotRequestId");
+
+    act(() => {
+      latestPublicController?.intents.newTask.changePrompt("Describe the work");
+    });
+    expect(latestPublicController?.view.primaryTask.newTask.newTask.prompt).toBe("Describe the work");
   });
 
   afterEach(() => {

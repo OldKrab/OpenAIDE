@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "react";
 import type { Dispatch } from "react";
-import type { AppPreferencesRecord, TaskSummary } from "@openaide/app-shell-contracts";
+import type { AppPreferencesRecord, TaskSnapshot, TaskSummary } from "@openaide/app-shell-contracts";
 import {
   getBackendConnection,
   getBootstrap,
@@ -30,7 +30,11 @@ import type { PendingNewTaskPreparation } from "./useNewTaskPreparation";
 import { NewTaskController } from "./newTaskController";
 import { useNewTaskWorkspace } from "./useNewTaskWorkspace";
 import { useTaskWorkspace } from "./useTaskWorkspace";
-export type AppController = {
+import type { NewTaskViewIntents, NewTaskViewState } from "./NewTaskView";
+import type { TaskViewIntents } from "./TaskView";
+
+/** Internal workflow assembly exposed only to the controller lifecycle tests. */
+export type AppControllerTestHarness = {
   activeTask?: TaskSummary;
   activeNavigationTaskId?: string;
   agents?: AgentOption[];
@@ -47,10 +51,54 @@ export type AppController = {
   visibleTasks: AppState["tasks"];
 };
 
+export type AppControllerView = {
+  appServerError?: string;
+  navigation: {
+    nativeSessions: AppState["newTask"]["nativeSessions"];
+    newTaskSelection: AppState["newTask"]["selection"];
+    projects: AppState["projects"];
+    searchQuery: string;
+    showArchived: boolean;
+    taskListError?: string;
+  };
+  primaryTask: {
+    chatPageState?: AppState["chatPages"][string];
+    liveTextPresentation?: AppState["taskLiveTextPresentation"][string];
+    newTask: NewTaskViewState;
+    permissionResponses: AppState["permissionResponses"];
+    questionResponses: AppState["questionResponses"];
+    savedScrollState?: AppState["taskChatScrollStates"][string];
+    snapshot?: TaskSnapshot;
+    taskInput?: AppState["taskInputs"][string];
+    taskOpenError?: AppState["taskOpenError"];
+    toolDetails: AppState["toolDetails"];
+  };
+  settings: AppState["settings"];
+};
+
+/** Render-ready state and user-intent operations consumed by App surfaces. */
+export type AppController = {
+  activeTask?: TaskSummary;
+  activeNavigationTaskId?: string;
+  agents?: AgentOption[];
+  backendReady: boolean;
+  backendConnectionState: BackendConnectionState;
+  bootstrap: WebviewBootstrap;
+  callbacks: AppControllerCallbacks;
+  intents: {
+    newTask: NewTaskViewIntents;
+    task: TaskViewIntents;
+  };
+  preferences: AppPreferencesRecord;
+  retryTaskOpen: () => void;
+  view: AppControllerView;
+  visibleTasks: AppState["tasks"];
+};
+
 export type AppControllerOptions = {
   backendConnection?: AppControllerBackendConnection;
 };
-export function useAppController({ backendConnection }: AppControllerOptions = {}) {
+function useAppControllerCore({ backendConnection }: AppControllerOptions = {}): AppControllerTestHarness {
   const backendConnectionRef = useMemo(() => backendConnection ?? getBackendConnection(), [backendConnection]);
   const initialBootstrap = useMemo(() => getBootstrap(), []);
   const clientInstanceId = useMemo(() => clientInstanceIdForBootstrap(initialBootstrap), [initialBootstrap]);
@@ -183,4 +231,84 @@ export function useAppController({ backendConnection }: AppControllerOptions = {
     state,
     visibleTasks,
   };
+}
+
+export function useAppController(options: AppControllerOptions = {}): AppController {
+  const core = useAppControllerCore(options);
+  const { createSnapshotRequestId: _createSnapshotRequestId, dispatch, newTaskSnapshot, state, ...renderState } = core;
+  const routedTaskId = state.snapshot?.task.task_id;
+  const newTaskViewSnapshot = newTaskSnapshot ?? state.snapshot;
+  const preparedTaskId = newTaskViewSnapshot?.task.has_messages === false
+    ? newTaskViewSnapshot.task.task_id
+    : undefined;
+
+  return {
+    ...renderState,
+    intents: {
+      newTask: {
+        changePrompt: (prompt) => dispatch(preparedTaskId
+          ? { type: "taskInput:prompt", taskId: preparedTaskId, prompt }
+          : { type: "prompt", prompt }),
+        reportAttachmentError: (message) => dispatch({
+          type: "submit:error",
+          message: message ?? "Images can be attached after the Task is open.",
+        }),
+        selectAgent: (agentId, agentLabel) => dispatch({ type: "newTask:agent", agentId, agentLabel }),
+        selectIsolation: (isolation) => dispatch({ type: "newTask:isolation", isolation }),
+        selectProject: (project) => dispatch({ type: "newTask:project", project }),
+        selectWorkspace: (workspace) => dispatch({ type: "newTask:workspace", workspace }),
+      },
+      task: {
+        changePrompt: (prompt) => {
+          if (routedTaskId) dispatch({ type: "taskInput:prompt", taskId: routedTaskId, prompt });
+        },
+        recordScroll: (scrollState) => {
+          if (routedTaskId) dispatch({ type: "taskScroll:record", taskId: routedTaskId, scrollState });
+        },
+        reportAttachmentError: (message) => {
+          if (!routedTaskId) return;
+          dispatch({
+            type: "taskInput:error",
+            taskId: routedTaskId,
+            message: message ?? "Unable to attach image.",
+          });
+        },
+      },
+    },
+    view: {
+      appServerError: state.appServerError,
+      navigation: {
+        nativeSessions: state.newTask.nativeSessions,
+        newTaskSelection: state.newTask.selection,
+        projects: state.projects,
+        searchQuery: state.searchQuery,
+        showArchived: state.showArchived,
+        taskListError: state.taskListError,
+      },
+      primaryTask: {
+        chatPageState: routedTaskId ? state.chatPages[routedTaskId] : undefined,
+        liveTextPresentation: routedTaskId ? state.taskLiveTextPresentation[routedTaskId] : undefined,
+        newTask: {
+          newTask: state.newTask,
+          preparedTaskInput: preparedTaskId ? state.taskInputs[preparedTaskId] : undefined,
+          projects: state.projects,
+          snapshot: newTaskViewSnapshot,
+          workspaceRootsLoaded: state.workspaceRootsLoaded,
+        },
+        permissionResponses: state.permissionResponses,
+        questionResponses: state.questionResponses,
+        savedScrollState: routedTaskId ? state.taskChatScrollStates[routedTaskId] : undefined,
+        snapshot: state.snapshot,
+        taskInput: routedTaskId ? state.taskInputs[routedTaskId] : undefined,
+        taskOpenError: state.taskOpenError,
+        toolDetails: state.toolDetails,
+      },
+      settings: state.settings,
+    },
+  };
+}
+
+/** @internal Prefer `useAppController`; this exposes reducer details for lifecycle tests only. */
+export function useAppControllerTestHarness(options: AppControllerOptions = {}) {
+  return useAppControllerCore(options);
 }
