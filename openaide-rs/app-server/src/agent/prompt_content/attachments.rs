@@ -1,4 +1,4 @@
-use agent_client_protocol::schema::ContentBlock;
+use crate::agent::acp_schema::ContentBlock;
 
 use crate::agent::prompt_content_uri::attachment_resource_uri;
 use crate::protocol::model::Attachment;

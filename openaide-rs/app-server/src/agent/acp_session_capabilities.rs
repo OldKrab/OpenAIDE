@@ -1,4 +1,4 @@
-use agent_client_protocol::schema::{AuthMethod, InitializeResponse, ProtocolVersion};
+use crate::agent::acp_schema::{AuthMethod, InitializeResponse, ProtocolVersion};
 
 use crate::protocol::errors::RuntimeError;
 

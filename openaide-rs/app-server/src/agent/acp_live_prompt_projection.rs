@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use agent_client_protocol::schema::{
+use crate::agent::acp_schema::{
     PermissionOptionKind, RequestPermissionOutcome, RequestPermissionRequest,
     RequestPermissionResponse, SelectedPermissionOutcome, SessionUpdate, ToolCall, ToolCallStatus,
     ToolCallUpdate,
@@ -136,14 +136,14 @@ impl LivePromptProjection {
                 self.sink.emit(AgentEvent::MessageChunk {
                     role: AgentMessageRole::Agent,
                     part: project_content_block(chunk.content, AgentMessageRole::Agent),
-                    source_message_id: chunk.message_id,
+                    source_message_id: chunk.message_id.map(|id| id.to_string()),
                 })?
             }
             SessionUpdate::AgentThoughtChunk(chunk) => {
                 self.sink.emit(AgentEvent::MessageChunk {
                     role: AgentMessageRole::Thought,
                     part: project_content_block(chunk.content, AgentMessageRole::Thought),
-                    source_message_id: chunk.message_id,
+                    source_message_id: chunk.message_id.map(|id| id.to_string()),
                 })?
             }
             SessionUpdate::ToolCall(tool_call) => {

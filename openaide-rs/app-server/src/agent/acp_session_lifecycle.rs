@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use agent_client_protocol::schema::{
+use crate::agent::acp_schema::{
     InitializeResponse, ListSessionsResponse, NewSessionResponse, SessionConfigOption, SessionId,
     SessionUpdate,
 };

@@ -1,5 +1,5 @@
 use super::*;
-use agent_client_protocol::schema::EmbeddedResourceResource;
+use crate::agent::acp_schema::EmbeddedResourceResource;
 use serde_json::json;
 
 #[test]

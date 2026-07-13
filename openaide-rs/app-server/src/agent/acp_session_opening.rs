@@ -1,6 +1,6 @@
 use std::sync::mpsc;
 
-use agent_client_protocol::schema::InitializeResponse;
+use crate::agent::acp_schema::InitializeResponse;
 use agent_client_protocol::{Agent, ConnectionTo};
 
 use crate::agent::acp_config_options_apply::apply_config_options;

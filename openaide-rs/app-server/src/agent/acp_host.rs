@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use agent_client_protocol::schema::{
+use crate::agent::acp_schema::{
     ClientCapabilities, CreateTerminalRequest, CreateTerminalResponse, ElicitationCapabilities,
     ElicitationFormCapabilities, FileSystemCapabilities, InitializeRequest, KillTerminalRequest,
     KillTerminalResponse, ProtocolVersion, ReadTextFileRequest, ReadTextFileResponse,

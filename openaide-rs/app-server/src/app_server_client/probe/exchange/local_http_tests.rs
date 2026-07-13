@@ -38,7 +38,13 @@ fn posts_probe_request_with_auth_and_returns_json_response() {
     assert!(request.starts_with("POST /probe HTTP/1.1\r\n"));
     assert!(request.contains("Authorization: Bearer token\r\n"));
     assert!(request.contains("Content-Type: application/json\r\n"));
-    assert!(request.ends_with(r#"{"id":"client_probe","jsonrpc":"2.0"}"#));
+    let (_, body) = request
+        .split_once("\r\n\r\n")
+        .expect("probe request should contain an HTTP body");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(body).unwrap(),
+        json!({"jsonrpc": "2.0", "id": "client_probe"})
+    );
 }
 
 #[test]

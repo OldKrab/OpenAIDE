@@ -1,4 +1,4 @@
-use agent_client_protocol::schema::{ContentBlock, TextContent};
+use crate::agent::acp_schema::{ContentBlock, TextContent};
 use std::fmt;
 
 use crate::protocol::model::Attachment;

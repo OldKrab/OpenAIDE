@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use agent_client_protocol::schema::{ToolCall, ToolCallUpdate};
+use crate::agent::acp_schema::{ToolCall, ToolCallUpdate};
 
 pub(super) type ToolCallState = Arc<Mutex<HashMap<String, ToolCall>>>;
 

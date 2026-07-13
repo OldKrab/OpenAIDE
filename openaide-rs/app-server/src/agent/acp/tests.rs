@@ -4,6 +4,23 @@ use crate::agent::acp_host::{
     host_request, initialize_request, read_text_file_from_host, write_text_file_from_host,
 };
 use crate::agent::acp_runtime_threading::close_in_parallel;
+use crate::agent::acp_schema::{
+    AgentCapabilities, AudioContent, AuthMethod, AuthMethodAgent, AuthenticateRequest,
+    AuthenticateResponse, AvailableCommand, AvailableCommandInput, AvailableCommandsUpdate,
+    BlobResourceContents, ContentBlock, ContentChunk, CreateTerminalRequest,
+    CreateTerminalResponse, Diff, EmbeddedResource, EmbeddedResourceResource, ImageContent,
+    Implementation, InitializeRequest, InitializeResponse, ListSessionsRequest,
+    ListSessionsResponse, LoadSessionRequest, LoadSessionResponse, McpCapabilities,
+    NewSessionRequest, NewSessionResponse, PermissionOption, PermissionOptionKind,
+    PromptCapabilities, ProtocolVersion, ReadTextFileRequest, RequestPermissionOutcome,
+    RequestPermissionRequest, ResourceLink, SessionCapabilities, SessionCloseCapabilities,
+    SessionConfigOption, SessionConfigOptionCategory as AcpConfigOptionCategory,
+    SessionConfigSelectOption, SessionDeleteCapabilities, SessionInfo, SessionInfoUpdate,
+    SessionListCapabilities, SessionNotification, SessionUpdate, TextContent, TextResourceContents,
+    ToolCall, ToolCallContent, ToolCallLocation, ToolCallStatus, ToolCallUpdate,
+    ToolCallUpdateFields, ToolKind, UnstructuredCommandInput, WaitForTerminalExitRequest,
+    WaitForTerminalExitResponse, WriteTextFileRequest,
+};
 use crate::agent::acp_session_capabilities::{
     validate_auth_method, validate_initialize_protocol, validate_session_list_capability,
 };
@@ -32,23 +49,6 @@ use crate::protocol::model::{
     ActivityStatus, ActivityToolContent, ActivityToolValue, AgentCommandsCatalog, AgentMessagePart,
     AgentMessageRole, Attachment, ConfigOption, ConfigOptionCategory, ConfigOptionValue,
     ConfigOptionsStatus, NormalizedMessage,
-};
-use agent_client_protocol::schema::{
-    AgentCapabilities, AudioContent, AuthMethod, AuthMethodAgent, AuthenticateRequest,
-    AuthenticateResponse, AvailableCommand, AvailableCommandInput, AvailableCommandsUpdate,
-    BlobResourceContents, ContentBlock, ContentChunk, CreateTerminalRequest,
-    CreateTerminalResponse, Diff, EmbeddedResource, EmbeddedResourceResource, ImageContent,
-    Implementation, InitializeRequest, InitializeResponse, ListSessionsRequest,
-    ListSessionsResponse, LoadSessionRequest, LoadSessionResponse, McpCapabilities,
-    NewSessionRequest, NewSessionResponse, PermissionOption, PermissionOptionKind,
-    PromptCapabilities, ProtocolVersion, ReadTextFileRequest, RequestPermissionOutcome,
-    RequestPermissionRequest, ResourceLink, SessionCapabilities, SessionCloseCapabilities,
-    SessionConfigOption, SessionConfigOptionCategory as AcpConfigOptionCategory,
-    SessionConfigSelectOption, SessionDeleteCapabilities, SessionInfo, SessionInfoUpdate,
-    SessionListCapabilities, SessionNotification, SessionUpdate, TextContent, TextResourceContents,
-    ToolCall, ToolCallContent, ToolCallLocation, ToolCallStatus, ToolCallUpdate,
-    ToolCallUpdateFields, ToolKind, UnstructuredCommandInput, WaitForTerminalExitRequest,
-    WaitForTerminalExitResponse, WriteTextFileRequest,
 };
 use agent_client_protocol::JsonRpcMessage;
 use agent_client_protocol::{Agent, Client, ConnectionTo, Handled};
@@ -901,7 +901,7 @@ fn replay_continues_a_sourced_message_across_tool_activity() {
     let messages = ReplayProjection::new("session-source-tool-source").project(vec![
         SessionUpdate::AgentMessageChunk(
             ContentChunk::new(ContentBlock::Text(TextContent::new("Before")))
-                .message_id("agent-message-1".to_string()),
+                .message_id("agent-message-1"),
         ),
         SessionUpdate::ToolCall(
             ToolCall::new("tool_call_1", "Read file")
@@ -914,7 +914,7 @@ fn replay_continues_a_sourced_message_across_tool_activity() {
         )),
         SessionUpdate::AgentMessageChunk(
             ContentChunk::new(ContentBlock::Text(TextContent::new(" after")))
-                .message_id("agent-message-1".to_string()),
+                .message_id("agent-message-1"),
         ),
     ]);
 
@@ -941,18 +941,18 @@ fn replay_preserves_mixed_content_as_one_ordered_agent_message() {
     let messages = ReplayProjection::new("session-mixed-content").project(vec![
         SessionUpdate::AgentMessageChunk(
             ContentChunk::new(ContentBlock::Text(TextContent::new("Before")))
-                .message_id("agent-message-1".to_string()),
+                .message_id("agent-message-1"),
         ),
         SessionUpdate::AgentMessageChunk(
             ContentChunk::new(ContentBlock::Image(ImageContent::new(
                 "aW1hZ2U=",
                 "image/png",
             )))
-            .message_id("agent-message-1".to_string()),
+            .message_id("agent-message-1"),
         ),
         SessionUpdate::AgentMessageChunk(
             ContentChunk::new(ContentBlock::Text(TextContent::new("After")))
-                .message_id("agent-message-1".to_string()),
+                .message_id("agent-message-1"),
         ),
     ]);
 
@@ -981,15 +981,15 @@ fn replay_continues_each_sourced_message_across_interleaved_messages() {
     let messages = ReplayProjection::new("session-interleaved-sources").project(vec![
         SessionUpdate::AgentMessageChunk(
             ContentChunk::new(ContentBlock::Text(TextContent::new("First")))
-                .message_id("agent-message-a".to_string()),
+                .message_id("agent-message-a"),
         ),
         SessionUpdate::AgentMessageChunk(
             ContentChunk::new(ContentBlock::Text(TextContent::new("Second")))
-                .message_id("agent-message-b".to_string()),
+                .message_id("agent-message-b"),
         ),
         SessionUpdate::AgentMessageChunk(
             ContentChunk::new(ContentBlock::Text(TextContent::new(" continued")))
-                .message_id("agent-message-a".to_string()),
+                .message_id("agent-message-a"),
         ),
     ]);
 
@@ -1053,7 +1053,7 @@ fn replay_keeps_anonymous_text_distinct_when_the_next_chunk_has_a_source_id() {
             ))),
             SessionUpdate::AgentMessageChunk(
                 ContentChunk::new(ContentBlock::Text(TextContent::new("Sourced message")))
-                    .message_id("source-message-1".to_string()),
+                    .message_id("source-message-1"),
             ),
         ]
     };
@@ -1095,7 +1095,7 @@ fn replay_keeps_sourced_text_distinct_when_the_next_chunk_is_anonymous() {
         vec![
             SessionUpdate::AgentMessageChunk(
                 ContentChunk::new(ContentBlock::Text(TextContent::new("Sourced message")))
-                    .message_id("source-message-1".to_string()),
+                    .message_id("source-message-1"),
             ),
             SessionUpdate::AgentMessageChunk(ContentChunk::new(ContentBlock::Text(
                 TextContent::new("Anonymous message"),

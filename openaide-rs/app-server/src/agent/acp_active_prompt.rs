@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use agent_client_protocol::schema::CancelNotification;
+use crate::agent::acp_schema::CancelNotification;
 use agent_client_protocol::Agent;
 use tokio::sync::mpsc;
 
@@ -143,10 +143,8 @@ fn send_prompt_request(
     let session_id = active_session.session_id().to_string();
     let content = build_prompt_content_with_policy(prompt.text, prompt.attachments, content_policy)
         .map_err(|error| RuntimeError::InvalidParams(error.to_string()))?;
-    let request = agent_client_protocol::schema::PromptRequest::new(
-        active_session.session_id().clone(),
-        content,
-    );
+    let request =
+        crate::agent::acp_schema::PromptRequest::new(active_session.session_id().clone(), content);
     if let Some(trace) = trace {
         trace.record("client_to_agent", "session/prompt.request", &request);
     }
@@ -201,10 +199,8 @@ pub(super) fn send_steering_prompt_request(
     let session_id = active_session.session_id().to_string();
     let content = build_prompt_content_with_policy(prompt.text, prompt.attachments, content_policy)
         .map_err(|error| RuntimeError::InvalidParams(error.to_string()))?;
-    let request = agent_client_protocol::schema::PromptRequest::new(
-        active_session.session_id().clone(),
-        content,
-    );
+    let request =
+        crate::agent::acp_schema::PromptRequest::new(active_session.session_id().clone(), content);
     if let Some(trace) = trace {
         trace.record("client_to_agent", "session/prompt.request", &request);
     }
@@ -244,8 +240,8 @@ pub(super) fn send_steering_prompt_request(
         .map_err(acp_error)
 }
 
-fn prompt_outcome(stop_reason: agent_client_protocol::schema::StopReason) -> AgentPromptOutcome {
-    use agent_client_protocol::schema::StopReason;
+fn prompt_outcome(stop_reason: crate::agent::acp_schema::StopReason) -> AgentPromptOutcome {
+    use crate::agent::acp_schema::StopReason;
 
     match stop_reason {
         StopReason::EndTurn => AgentPromptOutcome::EndTurn,

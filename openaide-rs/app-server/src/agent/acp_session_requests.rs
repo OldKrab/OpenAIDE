@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use agent_client_protocol::schema::{
+use crate::agent::acp_schema::{
     AuthenticateRequest, ErrorCode, InitializeResponse, ListSessionsRequest, ListSessionsResponse,
     LoadSessionRequest, LoadSessionResponse, NewSessionRequest, NewSessionResponse, SessionId,
 };

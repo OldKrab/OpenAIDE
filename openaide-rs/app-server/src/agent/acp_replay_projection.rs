@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use agent_client_protocol::schema::{ContentBlock, SessionUpdate};
+use crate::agent::acp_schema::{ContentBlock, SessionUpdate};
 
 use crate::agent::acp_content_projection::project_content_block;
 use crate::agent::acp_message_identity::stable_message_id;
@@ -63,19 +63,23 @@ impl ReplayBuffer {
         match update {
             SessionUpdate::UserMessageChunk(chunk) => {
                 if let ContentBlock::Text(text) = chunk.content {
-                    self.push_user_text(text.text, chunk.message_id, created_at);
+                    self.push_user_text(
+                        text.text,
+                        chunk.message_id.map(|id| id.to_string()),
+                        created_at,
+                    );
                 }
             }
             SessionUpdate::AgentMessageChunk(chunk) => self.push_agent_part(
                 AgentMessageRole::Agent,
                 project_content_block(chunk.content, AgentMessageRole::Agent),
-                chunk.message_id,
+                chunk.message_id.map(|id| id.to_string()),
                 created_at,
             ),
             SessionUpdate::AgentThoughtChunk(chunk) => self.push_agent_part(
                 AgentMessageRole::Thought,
                 project_content_block(chunk.content, AgentMessageRole::Thought),
-                chunk.message_id,
+                chunk.message_id.map(|id| id.to_string()),
                 created_at,
             ),
             SessionUpdate::ToolCall(tool_call) => {

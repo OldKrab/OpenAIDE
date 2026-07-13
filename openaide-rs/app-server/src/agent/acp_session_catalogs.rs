@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 #[cfg(test)]
-use agent_client_protocol::schema::SessionNotification;
-use agent_client_protocol::schema::{MaybeUndefined, SessionUpdate};
+use crate::agent::acp_schema::SessionNotification;
+use crate::agent::acp_schema::{MaybeUndefined, SessionUpdate};
 #[cfg(test)]
 use agent_client_protocol::util::MatchDispatch;
 
@@ -77,7 +77,7 @@ pub(super) fn session_catalogs_from_update(
 }
 
 fn metadata_update_from_acp(
-    update: agent_client_protocol::schema::SessionInfoUpdate,
+    update: crate::agent::acp_schema::SessionInfoUpdate,
 ) -> AgentSessionMetadataUpdate {
     AgentSessionMetadataUpdate {
         title: metadata_field(update.title),
