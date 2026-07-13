@@ -2,6 +2,7 @@ node_modules/
 dist/
 target/
 *.vsix
+apps/vscode-extension/LICENSE
 .vscode-test/
 .DS_Store
 .agents/**/.cache/

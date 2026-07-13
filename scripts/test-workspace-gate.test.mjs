@@ -71,11 +71,17 @@ test("the local CI command runs every required validation class", () => {
 
 test("release publishing produces only Linux and Windows VSIX packages", () => {
   const release = readFileSync(path.join(repoRoot, ".github/workflows/release.yml"), "utf8");
+  const extensionPackage = packageJson("apps/vscode-extension/package.json");
 
   assert.match(release, /target: linux-x64/);
   assert.match(release, /target: win32-x64/);
   assert.match(release, /cp LICENSE apps\/vscode-extension\/LICENSE/);
+  assert.match(release, /cd apps\/vscode-extension/);
   assert.match(release, /@vscode\/vsce@3\.6\.0 package/);
+  assert.match(release, /--no-dependencies/);
+  assert.doesNotMatch(release, /--cwd/);
+  assert.match(extensionPackage.scripts.build, /esbuild/);
+  assert.match(extensionPackage.scripts.build, /--external:vscode/);
   assert.match(release, /@vscode\/vsce@3\.6\.0 publish/);
   assert.match(release, /if: \$\{\{ !contains\(github\.ref_name, '-'\) \}\}/);
   assert.match(release, /VSCE_PAT: \$\{\{ secrets\.VSCE_PAT \}\}/);

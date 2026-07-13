@@ -1,4 +1,9 @@
 src/**
+scripts/**
+frontend/**
+node_modules/**
+webview/dist/__debug/**
+webview/dist/mockups/**
 tsconfig.json
 **/*.map
 **/*.test.*
