@@ -158,6 +158,11 @@ impl AcpSessionClient {
         worker_stopped_error(&self.terminal_error)
     }
 
+    /// A terminal Agent-process error makes this handle unusable even if its channels remain open.
+    pub(super) fn is_running(&self) -> bool {
+        !self.has_terminal_error()
+    }
+
     fn has_terminal_error(&self) -> bool {
         self.terminal_error
             .lock()

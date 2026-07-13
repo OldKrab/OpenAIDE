@@ -157,7 +157,7 @@ impl TaskProductApi {
         session_id: &str,
         error: &RuntimeError,
     ) -> Result<(), RuntimeError> {
-        TaskTransitions::new(self.mutations.clone())
+        TaskTransitions::new(self.mutations.clone(), self.server_requests.clone())
             .fail_adopted_task_attach(task_id, session_id, error)
     }
 }

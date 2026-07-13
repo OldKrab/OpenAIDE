@@ -654,7 +654,7 @@ fn native_session_update_is_persisted_after_prompt_completion() {
         mutations.clone(),
         "task_1".to_string(),
         "session_1".to_string(),
-        server_requests,
+        server_requests.clone(),
     );
 
     sink.session_update(AgentEvent::TextChunk {
@@ -662,7 +662,7 @@ fn native_session_update_is_persisted_after_prompt_completion() {
         source_message_id: Some("agent-message-1".to_string()),
     })
     .unwrap();
-    TaskTransitions::new(mutations)
+    TaskTransitions::new(mutations, server_requests)
         .finish_turn("task_1", "turn_1", Ok(AgentPromptOutcome::EndTurn))
         .unwrap();
 
@@ -697,7 +697,7 @@ fn prompt_completion_leaves_running_agent_activity_open_for_later_session_update
         mutations.clone(),
         "task_1".to_string(),
         "session_1".to_string(),
-        server_requests,
+        server_requests.clone(),
     );
     sink.session_update(AgentEvent::ToolCall(AgentToolCall {
         tool_call_id: "tool_1".to_string(),
@@ -711,7 +711,7 @@ fn prompt_completion_leaves_running_agent_activity_open_for_later_session_update
     }))
     .unwrap();
 
-    TaskTransitions::new(mutations)
+    TaskTransitions::new(mutations, server_requests)
         .finish_turn("task_1", "turn_1", Ok(AgentPromptOutcome::EndTurn))
         .unwrap();
 
@@ -736,7 +736,7 @@ fn prompt_limit_appends_one_failed_activity_without_closing_agent_activity() {
         mutations.clone(),
         "task_1".to_string(),
         "session_1".to_string(),
-        server_requests,
+        server_requests.clone(),
     );
     sink.session_update(AgentEvent::ToolCall(AgentToolCall {
         tool_call_id: "tool_1".to_string(),
@@ -750,7 +750,7 @@ fn prompt_limit_appends_one_failed_activity_without_closing_agent_activity() {
     }))
     .unwrap();
 
-    TaskTransitions::new(mutations)
+    TaskTransitions::new(mutations, server_requests)
         .finish_turn("task_1", "turn_1", Ok(AgentPromptOutcome::MaxTokens))
         .unwrap();
 
@@ -795,10 +795,10 @@ fn prompt_limit_appends_one_failed_activity_without_closing_agent_activity() {
 
 #[test]
 fn agent_confirmed_cancellation_ends_work_without_adding_chat() {
-    let (_dir, store, mutations, _server_requests) = test_runtime();
+    let (_dir, store, mutations, server_requests) = test_runtime();
     store.write_task(&running_task("task_1")).unwrap();
 
-    TaskTransitions::new(mutations)
+    TaskTransitions::new(mutations, server_requests)
         .finish_turn("task_1", "turn_1", Ok(AgentPromptOutcome::Cancelled))
         .unwrap();
 
@@ -809,10 +809,18 @@ fn agent_confirmed_cancellation_ends_work_without_adding_chat() {
 }
 
 #[test]
-fn cancellation_failure_marks_task_failed_with_explicit_recovery() {
-    let (_dir, store, mutations, _server_requests) = test_runtime();
+fn cancellation_failure_returns_task_to_idle_and_closes_transient_requests() {
+    let (_dir, store, mutations, server_requests) = test_runtime();
     store.write_task(&running_task("task_1")).unwrap();
-    let transitions = TaskTransitions::new(mutations);
+    server_requests
+        .open_task_secret_read_request(
+            openaide_app_server_protocol::ids::TaskId::from("task_1"),
+            "agent.secret".to_string(),
+            Some("Agent secret".to_string()),
+            crate::client_lifecycle::AppServerTime(1),
+        )
+        .unwrap();
+    let transitions = TaskTransitions::new(mutations, server_requests.clone());
     assert!(transitions.mark_turn_stopping("task_1", "turn_1").unwrap());
 
     transitions
@@ -826,7 +834,7 @@ fn cancellation_failure_marks_task_failed_with_explicit_recovery() {
         .unwrap();
 
     let task = store.read_task("task_1").unwrap();
-    assert_eq!(task.status, TaskStatus::Failed);
+    assert_eq!(task.status, TaskStatus::Inactive);
     assert_eq!(task.active_turn_id, None);
     let messages = store.read_messages("task_1").unwrap();
     assert!(messages.iter().any(|stored| matches!(
@@ -837,6 +845,63 @@ fn cancellation_failure_marks_task_failed_with_explicit_recovery() {
             recoverable: true,
             ..
         } if message.contains("Unable to stop the Agent")
+    )));
+    assert!(server_requests
+        .pending_for_task(&openaide_app_server_protocol::ids::TaskId::from("task_1"))
+        .is_empty());
+}
+
+#[test]
+fn agent_failure_interrupts_running_tools_and_returns_task_to_idle() {
+    let (_dir, store, mutations, server_requests) = test_runtime();
+    store.write_task(&running_task("task_1")).unwrap();
+    let sink = TaskSessionEventSink::new(
+        mutations.clone(),
+        "task_1".to_string(),
+        "session_1".to_string(),
+        server_requests.clone(),
+    );
+    sink.session_update(AgentEvent::ToolCall(AgentToolCall {
+        tool_call_id: "tool_1".to_string(),
+        scope_id: None,
+        title: "Editing".to_string(),
+        kind: "edit".to_string(),
+        status: AgentToolCallStatus::InProgress,
+        input_summary: None,
+        output_preview: None,
+        details: None,
+    }))
+    .unwrap();
+
+    TaskTransitions::new(mutations, server_requests)
+        .finish_turn(
+            "task_1",
+            "turn_1",
+            Err(crate::protocol::errors::RuntimeError::NotReady(
+                "Agent process exited".to_string(),
+            )),
+        )
+        .unwrap();
+
+    let task = store.read_task("task_1").unwrap();
+    assert_eq!(task.status, TaskStatus::Inactive);
+    assert_eq!(task.active_turn_id, None);
+    let messages = store.read_messages("task_1").unwrap();
+    assert!(messages.iter().any(|stored| matches!(
+        stored.chat.message,
+        NormalizedMessage::Activity {
+            status: ActivityStatus::Interrupted,
+            ..
+        }
+    )));
+    assert!(messages.iter().any(|stored| matches!(
+        &stored.chat.message,
+        NormalizedMessage::Interruption {
+            reason: crate::protocol::model::InterruptionReason::Failed,
+            message,
+            recoverable: true,
+            ..
+        } if message.contains("Agent work stopped")
     )));
 }
 
@@ -1142,9 +1207,9 @@ fn permission_wait_does_not_block_concurrent_agent_events() {
 
 #[test]
 fn finishing_active_turn_marks_task_unread_for_user_attention() {
-    let (_dir, store, mutations, _server_requests) = test_runtime();
+    let (_dir, store, mutations, server_requests) = test_runtime();
     store.write_task(&running_task("task_1")).unwrap();
-    let transitions = TaskTransitions::new(mutations);
+    let transitions = TaskTransitions::new(mutations, server_requests);
 
     assert!(transitions
         .finish_turn("task_1", "turn_1", Ok(AgentPromptOutcome::EndTurn))

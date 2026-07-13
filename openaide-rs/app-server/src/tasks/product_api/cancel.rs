@@ -38,7 +38,8 @@ impl TaskProductApi {
                 return Err(conflict_error("Task turn is not active"));
             }
         }
-        let transitions = TaskTransitions::new(self.mutations.clone());
+        let transitions =
+            TaskTransitions::new(self.mutations.clone(), self.server_requests.clone());
         if !transitions
             .mark_turn_stopping(&task_id, &active_turn_id)
             .map_err(protocol_error_from_runtime)?

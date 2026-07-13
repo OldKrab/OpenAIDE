@@ -327,11 +327,11 @@ The current `task/cancel` transaction marks running activities completed, persis
 
 **Desired direction:** Replace the old path completely. Introduce `stopping`, cancel transient requests through their shared resolution path, send ACP cancellation, continue consuming updates, and become idle only when the primary prompt confirms cancellation. Mark unfinished activity interrupted rather than completed; surface definitive cancellation failure with explicit recovery.
 
-**Resolution:** Stop now records a durable `stopping` state while retaining the active prompt identity and all running Chat activity. The prompt runner cancels every Task-scoped transient request through one broker operation, signals the prompt cancellation token, and sends ACP cancellation. A live prompt response then atomically interrupts unfinished activity, appends one recoverable `Task was stopped` interruption, clears the active prompt, and returns the Task to idle. If no prompt started, the same final transition runs immediately; a definitive cancellation error instead produces one recoverable failure and failed Task state. Frontend and protocol status models expose `stopping` and `interrupted` directly, so Stop cannot appear as successful completion.
+**Resolution:** Stop now records a durable `stopping` state while retaining the active prompt identity and all running Chat activity. The prompt runner cancels every Task-scoped transient request through one broker operation, signals the prompt cancellation token, and sends ACP cancellation. A live prompt response then atomically interrupts unfinished activity, appends one recoverable `Task was stopped` interruption, clears the active prompt, and returns the Task to idle. If no prompt started, the same final transition runs immediately; a definitive cancellation error instead produces one recoverable failure through the shared active-work termination path and still returns the Task to idle. Frontend and protocol status models expose `stopping` and `interrupted` directly, so Stop cannot appear as successful completion.
 
 ## AP-023: Active-work termination is split across incompatible cleanup paths
 
-**Status:** confirmed
+**Status:** resolved
 
 **Area:** Agent failure, session-worker exit, App Server restart, and user cancellation
 
@@ -340,6 +340,8 @@ Prompt errors, Stop, and restart currently use separate Turn-based transitions w
 **Impact:** The same domain event—active Agent work ending without normal completion—produces inconsistent Chat, Tool, request, and Task state. Some session loss is invisible and some interrupted work is reported as successful.
 
 **Desired direction:** Use one cause-aware termination pipeline for Stop, Agent loss during starting/working/waiting, and restart. Share request closure, Tool interruption, idle transition, and one Live Activity; vary only protocol actions and user-facing cause. Idle handle loss remains quiet and is recovered only on the next explicit Send. Never automatically retry a prompt.
+
+**Resolution:** Replaced the separate Stop, prompt/start failure, restart, shutdown, stale-work, and support-recovery mutations with one cause-aware active-work termination transition. It closes Task-scoped transient requests, marks every unfinished activity interrupted, appends exactly one recoverable cause-specific interruption, clears active work, and returns the Task to idle; no path retries a prompt. A failed idle ACP handle is now evicted from the active-session registry without changing Chat, so the next explicit Send follows the existing Native Session load path instead of reusing a dead handle.
 
 ## AP-024: Ordinary Task mutations fall back to broad snapshot publication
 

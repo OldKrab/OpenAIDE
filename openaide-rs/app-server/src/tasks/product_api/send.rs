@@ -8,7 +8,6 @@ use crate::attachment_runtime::{AttachmentOwner, ResolvedSendAttachments};
 use crate::projects::ProjectIdentity;
 use crate::protocol::model::TaskStatus as LegacyTaskStatus;
 use crate::storage::records::{TaskLifecycle, TaskRecord};
-use crate::task_recovery::RESTART_INTERRUPTION_MESSAGE;
 use crate::tasks::mutation::{TaskCommitOutcome, TaskMutationResult};
 use crate::tasks::native_session_service::PrimaryPromptRequest;
 use crate::tasks::snapshot::build_snapshot;
@@ -229,8 +228,12 @@ impl TaskProductApi {
     }
 
     fn recover_stale_active_turn(&self, task_id: &str, turn_id: &str) -> Result<(), ProtocolError> {
-        TaskTransitions::new(self.mutations.clone())
-            .cancel_running_task(task_id, Some(turn_id), RESTART_INTERRUPTION_MESSAGE, true)
+        TaskTransitions::new(self.mutations.clone(), self.server_requests.clone())
+            .end_active_work(
+                task_id,
+                Some(turn_id),
+                crate::tasks::transitions::ActiveWorkEnd::Restarted,
+            )
             .map_err(super::protocol_error_from_runtime)?;
         Ok(())
     }

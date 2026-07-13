@@ -1,8 +1,5 @@
 use crate::storage::records::TaskRecord;
 
-pub(crate) const RESTART_INTERRUPTION_MESSAGE: &str =
-    "Task was stopped because OpenAIDE restarted.";
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct VolatileRecoveryPlan {
     pub(crate) interrupt_active_turn: bool,

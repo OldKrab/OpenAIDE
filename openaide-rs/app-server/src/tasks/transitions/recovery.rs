@@ -1,17 +1,18 @@
 use crate::protocol::errors::RuntimeError;
-use crate::protocol::model::{ActivityStatus, InterruptionReason, TaskStatus};
 use crate::storage::records::TaskRecord;
-use crate::task_recovery::{volatile_recovery_plan, RESTART_INTERRUPTION_MESSAGE};
+use crate::task_recovery::volatile_recovery_plan;
 use crate::tasks::mutation::TaskMutationResult;
 use crate::time::now_string;
 
-use super::helpers::{append_interruption, chat_commit_options};
-use super::TaskTransitions;
+use super::active_work_end::apply_active_work_end;
+use super::helpers::chat_commit_options;
+use super::{ActiveWorkEnd, TaskTransitions};
 
 impl TaskTransitions {
     pub(crate) fn recover_volatile_runtime_state(&self) -> Result<(), RuntimeError> {
         for task in self.recoverable_records()? {
             let task_id = task.task_id;
+            let mut active_work_ended = false;
             self.mutations
                 .commit_existing_task(&task_id, chat_commit_options(), |ctx| {
                     let now = now_string();
@@ -19,19 +20,8 @@ impl TaskTransitions {
                         return Ok(TaskMutationResult::Unchanged);
                     };
                     if plan.interrupt_active_turn {
-                        ctx.finish_running_activities(ActivityStatus::Completed)?;
-                        append_interruption(
-                            ctx,
-                            InterruptionReason::Canceled,
-                            RESTART_INTERRUPTION_MESSAGE,
-                            now.clone(),
-                            true,
-                        )?;
-                        let task = ctx.task_mut();
-                        task.status = TaskStatus::Inactive;
-                        task.active_turn_id = None;
-                        task.unread = true;
-                        task.last_activity = now.clone();
+                        apply_active_work_end(ctx, &ActiveWorkEnd::Restarted, now.clone())?;
+                        active_work_ended = true;
                     }
                     if plan.invalidate_live_session_data {
                         let task = ctx.task_mut();
@@ -47,6 +37,9 @@ impl TaskTransitions {
 
                     Ok(TaskMutationResult::Changed)
                 })?;
+            if active_work_ended {
+                self.close_task_requests(&task_id);
+            }
         }
 
         Ok(())

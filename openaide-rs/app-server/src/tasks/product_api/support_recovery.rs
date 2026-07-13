@@ -3,19 +3,13 @@ use openaide_app_server_protocol::snapshot::TaskSnapshot;
 use openaide_app_server_protocol::support::{
     SupportRecoverStuckSessionsParams, SupportRecoverStuckSessionsResult,
 };
-use uuid::Uuid;
 
-use crate::protocol::model::{
-    ActivityStatus, InterruptionReason, NormalizedMessage, TaskStatus as LegacyTaskStatus,
-};
+use crate::protocol::model::TaskStatus as LegacyTaskStatus;
 use crate::storage::records::TaskRecord;
-use crate::tasks::mutation::{TaskCommitOutcome, TaskMutationResult};
-use crate::time::now_string;
+use crate::tasks::snapshot::build_snapshot;
+use crate::tasks::transitions::{ActiveWorkEnd, TaskTransitions};
 
 use super::{protocol_error_from_runtime, storage_error, TaskProductApi};
-
-const SUPPORT_RECOVERY_INTERRUPTION_MESSAGE: &str =
-    "Task was stopped by support recovery because the session appeared stuck.";
 
 impl TaskProductApi {
     pub(super) fn recover_stuck_sessions(
@@ -59,53 +53,23 @@ impl TaskProductApi {
         &self,
         candidate: TaskRecord,
     ) -> Result<Option<TaskSnapshot>, ProtocolError> {
-        let result = self
-            .mutations
-            .commit_existing_task(
+        let ended = TaskTransitions::new(self.mutations.clone(), self.server_requests.clone())
+            .end_active_work(
                 &candidate.task_id,
-                super::response_snapshot_options(),
-                |ctx| {
-                    if ctx.task().active_turn_id != candidate.active_turn_id
-                        || (candidate.active_turn_id.is_none()
-                            && ctx.task().status != LegacyTaskStatus::Active)
-                    {
-                        return Ok(TaskMutationResult::Unchanged);
-                    }
-
-                    let now = now_string();
-                    ctx.finish_running_activities(ActivityStatus::Completed)?;
-                    ctx.append_message(NormalizedMessage::Interruption {
-                        id: Uuid::new_v4().to_string(),
-                        reason: InterruptionReason::Canceled,
-                        message: SUPPORT_RECOVERY_INTERRUPTION_MESSAGE.to_string(),
-                        created_at: now.clone(),
-                        recoverable: true,
-                    })?;
-
-                    let task = ctx.task_mut();
-                    task.status = LegacyTaskStatus::Inactive;
-                    task.active_turn_id = None;
-                    task.unread = true;
-                    task.updated_at = now.clone();
-                    task.last_activity = now;
-                    Ok(TaskMutationResult::Changed)
-                },
+                candidate.active_turn_id.as_deref(),
+                ActiveWorkEnd::SupportRecovery,
             )
             .map_err(protocol_error_from_runtime)?;
-
-        match result.outcome {
-            TaskCommitOutcome::Committed(_) => {
-                if let Some(turn_id) = candidate.active_turn_id.as_deref() {
-                    self.turn_runner.detach_stuck_turn(turn_id);
-                    self.turn_acceptance
-                        .retire_pending_turn(&candidate.task_id, turn_id);
-                }
-                let snapshot = result
-                    .response_snapshot
-                    .ok_or_else(|| super::internal_error("missing support recovery snapshot"))?;
-                self.project_task_snapshot(snapshot).map(Some)
-            }
-            TaskCommitOutcome::Rejected(_) => Ok(None),
+        if !ended {
+            return Ok(None);
         }
+        if let Some(turn_id) = candidate.active_turn_id.as_deref() {
+            self.turn_runner.detach_stuck_turn(turn_id);
+            self.turn_acceptance
+                .retire_pending_turn(&candidate.task_id, turn_id);
+        }
+        let snapshot =
+            build_snapshot(&self.store, &candidate.task_id, 100).map_err(storage_error)?;
+        self.project_task_snapshot(snapshot).map(Some)
     }
 }

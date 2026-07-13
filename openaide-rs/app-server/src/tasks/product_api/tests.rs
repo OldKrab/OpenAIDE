@@ -2696,7 +2696,7 @@ fn send_tolerates_attach_time_command_catalog_revision_bump() {
 }
 
 #[test]
-fn send_start_failure_returns_accepted_failed_turn() {
+fn send_start_failure_returns_task_to_idle() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
@@ -2722,7 +2722,7 @@ fn send_start_failure_returns_accepted_failed_turn() {
     wait_until(|| {
         store
             .read_task("task-existing")
-            .map(|task| task.status == TaskStatus::Failed)
+            .map(|task| task.status == TaskStatus::Inactive)
             .unwrap_or(false)
     });
 
@@ -2735,7 +2735,7 @@ fn send_start_failure_returns_accepted_failed_turn() {
     assert!(messages.iter().any(|message| matches!(
         message.chat.message,
         NormalizedMessage::Activity {
-            status: ActivityStatus::Error,
+            status: ActivityStatus::Interrupted,
             ..
         }
     )));
@@ -2748,13 +2748,13 @@ fn send_start_failure_returns_accepted_failed_turn() {
         }
     )));
     let task = store.read_task("task-existing").unwrap();
-    assert_eq!(task.status, TaskStatus::Failed);
+    assert_eq!(task.status, TaskStatus::Inactive);
     assert_eq!(task.active_turn_id, None);
     assert_eq!(task.agent_session_id, None);
 }
 
 #[test]
-fn send_session_attach_failure_returns_accepted_failed_turn_and_closes_new_session() {
+fn send_session_attach_failure_returns_task_to_idle_and_closes_new_session() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
@@ -2784,7 +2784,7 @@ fn send_session_attach_failure_returns_accepted_failed_turn_and_closes_new_sessi
     assert_eq!(agent.closes.load(Ordering::SeqCst), 1);
     assert_eq!(agent.prompts.load(Ordering::SeqCst), 0);
     let task = store.read_task("task-existing").unwrap();
-    assert_eq!(task.status, TaskStatus::Failed);
+    assert_eq!(task.status, TaskStatus::Inactive);
     assert_eq!(task.active_turn_id, None);
     assert_eq!(task.agent_session_id, None);
 }
@@ -2836,7 +2836,7 @@ fn send_post_commit_start_failure_consumes_attachment_and_returns_accepted_turn(
     wait_until(|| {
         store
             .read_task("task-existing")
-            .map(|task| task.status == TaskStatus::Failed)
+            .map(|task| task.status == TaskStatus::Inactive)
             .unwrap_or(false)
     });
     let failed_revision = store.read_task("task-existing").unwrap().revision;
@@ -2862,7 +2862,7 @@ fn send_post_commit_start_failure_consumes_attachment_and_returns_accepted_turn(
     assert!(messages.iter().any(|message| matches!(
         message.chat.message,
         NormalizedMessage::Activity {
-            status: ActivityStatus::Error,
+            status: ActivityStatus::Interrupted,
             ..
         }
     )));
@@ -2875,7 +2875,7 @@ fn send_post_commit_start_failure_consumes_attachment_and_returns_accepted_turn(
         }
     )));
     let task = store.read_task("task-existing").unwrap();
-    assert_eq!(task.status, TaskStatus::Failed);
+    assert_eq!(task.status, TaskStatus::Inactive);
     assert_eq!(task.active_turn_id, None);
     assert_eq!(task.agent_session_id, None);
 }
@@ -2973,11 +2973,11 @@ fn send_start_failure_does_not_poison_later_task_start() {
     wait_until(|| {
         store
             .read_task("task-first")
-            .map(|task| task.status == TaskStatus::Failed)
+            .map(|task| task.status == TaskStatus::Inactive)
             .unwrap_or(false)
     });
     let first = store.read_task("task-first").unwrap();
-    assert_eq!(first.status, TaskStatus::Failed);
+    assert_eq!(first.status, TaskStatus::Inactive);
     assert_eq!(first.active_turn_id, None);
     assert_eq!(first.agent_session_id, None);
 

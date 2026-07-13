@@ -135,7 +135,7 @@ impl TaskTurnLifecycle {
     }
 
     fn transitions(&self) -> TaskTransitions {
-        TaskTransitions::new(self.mutations.clone())
+        TaskTransitions::new(self.mutations.clone(), self.turn_runner.server_requests())
     }
 }
 

@@ -28,7 +28,7 @@ impl CommittedSend {
         api: &TaskProductApi,
         error: RuntimeError,
     ) -> Result<TaskSendAccepted, ProtocolError> {
-        TaskTransitions::new(api.mutations.clone())
+        TaskTransitions::new(api.mutations.clone(), api.server_requests.clone())
             .finish_turn(&self.task_id, self.turn_id.as_str(), Err(error))
             .map_err(super::super::protocol_error_from_runtime)?;
         self.accepted(api)

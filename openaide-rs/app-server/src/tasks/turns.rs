@@ -223,6 +223,10 @@ impl TurnRunner {
             .collect()
     }
 
+    pub(crate) fn server_requests(&self) -> ServerRequestRuntime {
+        self.server_requests.clone()
+    }
+
     fn turn_is_active(&self, task_id: &str, turn_id: &str) -> bool {
         let _guard = self.mutations.lock();
         self.mutations
@@ -234,17 +238,16 @@ impl TurnRunner {
 
     fn finalize_shutdown_turn(&self, task_id: &str, turn_id: &str) -> Result<(), RuntimeError> {
         self.transitions()
-            .cancel_running_task(
+            .end_active_work(
                 task_id,
                 Some(turn_id),
-                "Task was stopped because OpenAIDE shut down.",
-                true,
+                crate::tasks::transitions::ActiveWorkEnd::Shutdown,
             )
             .map(|_| ())
     }
 
     fn transitions(&self) -> TaskTransitions {
-        TaskTransitions::new(self.mutations.clone())
+        TaskTransitions::new(self.mutations.clone(), self.server_requests.clone())
     }
 
     fn wait_for_active_turns_to_exit(&self) -> Result<(), RuntimeError> {

@@ -1,5 +1,5 @@
 use crate::protocol::errors::RuntimeError;
-use crate::protocol::model::{ActivityStatus, InterruptionReason, TaskStatus};
+use crate::protocol::model::{InterruptionReason, TaskStatus};
 use crate::tasks::mutation::TaskMutationResult;
 use crate::time::now_string;
 
@@ -12,31 +12,11 @@ impl TaskTransitions {
         task_id: &str,
         error: &RuntimeError,
     ) -> Result<(), RuntimeError> {
-        self.mutations
-            .commit_existing_task(task_id, chat_commit_options(), |ctx| {
-                if ctx.task().active_turn_id.is_none() {
-                    return Ok(TaskMutationResult::Unchanged);
-                }
-
-                let now = now_string();
-                ctx.finish_running_activities(ActivityStatus::Error)?;
-                append_interruption(
-                    ctx,
-                    InterruptionReason::Failed,
-                    &error.to_string(),
-                    now.clone(),
-                    true,
-                )?;
-
-                let task = ctx.task_mut();
-                task.status = TaskStatus::Failed;
-                task.active_turn_id = None;
-                task.agent_session_id = None;
-                task.unread = true;
-                task.updated_at = now.clone();
-                task.last_activity = now;
-                Ok(TaskMutationResult::Changed)
-            })?;
+        self.end_active_work(
+            task_id,
+            None,
+            super::ActiveWorkEnd::AgentStartFailed(error.to_string()),
+        )?;
         Ok(())
     }
 

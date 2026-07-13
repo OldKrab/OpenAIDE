@@ -238,7 +238,8 @@ impl TaskProductApi {
             server_requests,
             task_notifier: notifier,
         };
-        TaskTransitions::new(api.mutations.clone()).recover_volatile_runtime_state()?;
+        TaskTransitions::new(api.mutations.clone(), api.server_requests.clone())
+            .recover_volatile_runtime_state()?;
         api.recover_abandoned_preparations()?;
         Ok(api)
     }

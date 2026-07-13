@@ -21,10 +21,7 @@ impl AcpActiveSessionRegistry {
     }
 
     pub(super) fn contains(&self, session: &AgentSessionKey) -> bool {
-        self.sessions
-            .lock()
-            .expect("ACP session registry poisoned")
-            .contains_key(session)
+        self.get(session).is_some()
     }
 
     pub(super) fn insert_started_session(
@@ -113,11 +110,18 @@ impl AcpActiveSessionRegistry {
     }
 
     fn get(&self, session: &AgentSessionKey) -> Option<AcpSessionClient> {
-        self.sessions
-            .lock()
-            .expect("ACP session registry poisoned")
+        let mut sessions = self.sessions.lock().expect("ACP session registry poisoned");
+        if sessions
             .get(session)
-            .cloned()
+            .is_some_and(AcpSessionClient::is_running)
+        {
+            return sessions.get(session).cloned();
+        }
+
+        // Dead handles must not make resume succeed. The next explicit Send can then
+        // load the Native Session through the normal session service path.
+        sessions.remove(session);
+        None
     }
 
     fn remove(&self, session: &AgentSessionKey) -> Option<AcpSessionClient> {
@@ -131,3 +135,7 @@ impl AcpActiveSessionRegistry {
 fn not_ready() -> RuntimeError {
     RuntimeError::NotReady("ACP session is not active".to_string())
 }
+
+#[cfg(test)]
+#[path = "acp_active_session_registry_tests.rs"]
+mod tests;
