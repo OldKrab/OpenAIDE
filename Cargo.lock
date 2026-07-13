@@ -9,7 +9,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4361ba6627e51de955b10f3c77fb9eb959c85191a236c1c2c84e32f4ff240faf"
 dependencies = [
  "agent-client-protocol-derive",
- "agent-client-protocol-schema",
+ "agent-client-protocol-schema 0.13.2",
  "async-process",
  "blocking",
  "futures",
@@ -51,6 +51,21 @@ dependencies = [
  "serde_with",
  "strum",
  "tracing",
+]
+
+[[package]]
+name = "agent-client-protocol-schema"
+version = "1.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "06679e1542356341f4550ccfb16338b64f37f6af70de2105446ef6fbb078234c"
+dependencies = [
+ "anyhow",
+ "derive_more",
+ "schemars 1.2.1",
+ "serde",
+ "serde_json",
+ "serde_with",
+ "strum",
 ]
 
 [[package]]
@@ -760,7 +775,7 @@ name = "openaide-app-server"
 version = "0.0.1-alpha.2"
 dependencies = [
  "agent-client-protocol",
- "agent-client-protocol-schema",
+ "agent-client-protocol-schema 1.4.0",
  "base64",
  "fs2",
  "openaide-app-server-protocol",
@@ -1132,6 +1147,7 @@ version = "1.0.150"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e8014e44b4736ed0538adeecded0fce2a272f22dc9578a7eb6b2d9993c74cfb9"
 dependencies = [
+ "indexmap 2.14.0",
  "itoa",
  "memchr",
  "serde",
