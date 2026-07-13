@@ -7,7 +7,7 @@ use serde_json::Value;
 
 use crate::agent::acp_errors::acp_error;
 use crate::agent::acp_update_projection::normalize_config_options;
-use crate::agent::ConfigOptionPolicy;
+use crate::agent::{AgentSessionEventSink, ConfigOptionPolicy};
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::ConfigOptionsCatalog;
 
@@ -80,12 +80,21 @@ impl OrderedConfigOptionResponse {
         std::mem::take(&mut self.prior_updates)
     }
 
-    /// Releases ACP dispatch only after the caller has projected every prior update.
-    pub(super) fn finish(mut self) -> Result<ConfigOptionsCatalog, RuntimeError> {
-        self.release_boundary();
-        self.result
+    /// Projects the response through the same ordered session sink before later
+    /// Agent notifications may enter the ACP dispatch loop.
+    pub(super) fn finish_with_session_sink(
+        mut self,
+        session_event_sink: Option<&dyn AgentSessionEventSink>,
+    ) -> Result<ConfigOptionsCatalog, RuntimeError> {
+        let result = self
+            .result
             .take()
-            .expect("ordered config response is consumed once")
+            .expect("ordered config response is consumed once");
+        if let (Ok(catalog), Some(sink)) = (&result, session_event_sink) {
+            sink.config_options_changed(catalog.clone())?;
+        }
+        self.release_boundary();
+        result
     }
 
     fn release_boundary(&mut self) {

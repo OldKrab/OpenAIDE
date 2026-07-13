@@ -62,7 +62,7 @@ pub(super) fn commit_existing_task(
                     return Err(error);
                 }
             };
-            notify_task_updated(target, &facts);
+            notify_task_changed(target, &facts);
             TaskCommitOutcome::Committed(facts)
         }
         TaskMutationResult::Unchanged => {
@@ -111,7 +111,7 @@ pub(super) fn create_task_with_validation_and_writer(
             return Err(error);
         }
     };
-    notify_task_updated(target, &facts);
+    notify_task_changed(target, &facts);
     let snapshot = match options.response_snapshot_tail_limit {
         Some(limit) => Some(build_snapshot(&target.store, &task_id, limit)?),
         None => None,
@@ -192,7 +192,7 @@ pub(super) fn resolve_or_create_new_task(
             return Err(error);
         }
     };
-    notify_task_updated(target, &facts);
+    notify_task_changed(target, &facts);
     let response_snapshot = match options.response_snapshot_tail_limit {
         Some(limit) => Some(build_snapshot(&target.store, &task_id, limit)?),
         None => None,
@@ -203,7 +203,7 @@ pub(super) fn resolve_or_create_new_task(
     })
 }
 
-pub(super) fn notify_task_updated(target: &TaskMutations, facts: &TaskCommitFacts) {
+pub(super) fn notify_task_changed(target: &TaskMutations, facts: &TaskCommitFacts) {
     target
         .notifier
         .task_changed(&facts.task_id, facts.revision, facts.change.clone());

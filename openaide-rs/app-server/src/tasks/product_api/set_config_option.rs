@@ -63,7 +63,7 @@ impl TaskProductApi {
             return self
                 .set_stored_config_option_without_session(task_id, &config_id, &value, &now);
         };
-        let Some(token) = self.begin_live_config_mutation(
+        let Some(mutation) = self.begin_live_config_mutation(
             task_id,
             expected_session_id.as_deref(),
             client_mutation_id,
@@ -87,14 +87,14 @@ impl TaskProductApi {
                 }) {
                 Ok(catalog) => catalog,
                 Err(error) => {
-                    self.clear_failed_live_config_mutation(task_id, &token)?;
+                    self.clear_failed_live_config_mutation(task_id, &mutation.token)?;
                     return Err(protocol_error_from_runtime(error));
                 }
             };
         self.finish_live_config_mutation(
             task_id,
             expected_session_id.as_deref(),
-            token,
+            mutation,
             live_catalog,
             &now_string(),
         )
@@ -108,7 +108,7 @@ impl TaskProductApi {
         config_id: String,
         requested_value: String,
         now: &str,
-    ) -> Result<Option<TaskConfigMutationToken>, ProtocolError> {
+    ) -> Result<Option<LiveConfigMutation>, ProtocolError> {
         let mut admission = LiveConfigMutationAdmission::Missing;
         self.mutations
             .commit_existing_task(
@@ -131,27 +131,32 @@ impl TaskProductApi {
                             return Ok(TaskMutationResult::Unchanged);
                         }
                     }
+                    let admitted_config_options = ctx.task().config_options.clone();
+                    let admitted_catalog = ctx.task().config_options_catalog.clone();
                     let task = ctx.task_mut();
-                    admission = LiveConfigMutationAdmission::Started(begin_task_config_mutation(
+                    let token = begin_task_config_mutation(
                         task,
                         client_mutation_id,
                         config_id,
                         requested_value,
-                    )?);
+                    )?;
+                    admission = LiveConfigMutationAdmission::Started(LiveConfigMutation {
+                        token,
+                        admitted_config_options,
+                        admitted_catalog,
+                    });
                     task.updated_at = now.to_string();
                     Ok(TaskMutationResult::Changed)
                 },
             )
             .map_err(protocol_error_from_runtime)?;
         match admission {
-            LiveConfigMutationAdmission::Started(token) => Ok(Some(token)),
+            LiveConfigMutationAdmission::Started(mutation) => Ok(Some(mutation)),
             LiveConfigMutationAdmission::Duplicate => Ok(None),
             LiveConfigMutationAdmission::ClientMutationIdReused => Err(conflict_error(
                 "Client mutation id already identifies another config change",
             )),
-            LiveConfigMutationAdmission::TaskChanged => Err(conflict_error(
-                "Task config changed before the Agent request could start",
-            )),
+            LiveConfigMutationAdmission::TaskChanged => Ok(None),
             LiveConfigMutationAdmission::Missing => {
                 Err(internal_error("missing Task config mutation admission"))
             }
@@ -184,24 +189,34 @@ impl TaskProductApi {
         &self,
         task_id: &str,
         expected_session_id: Option<&str>,
-        token: TaskConfigMutationToken,
+        mutation: LiveConfigMutation,
         catalog: crate::protocol::model::ConfigOptionsCatalog,
         now: &str,
     ) -> Result<openaide_app_server_protocol::snapshot::TaskSnapshot, ProtocolError> {
-        let mut task_changed = false;
         let result = self
             .mutations
             .commit_existing_task(task_id, super::response_snapshot_options(), |ctx| {
-                if !live_config_target_is_current(ctx.task(), expected_session_id) {
-                    task_changed = true;
-                    return Ok(if clear_task_config_mutation(ctx.task_mut(), &token, now) {
-                        TaskMutationResult::Changed
-                    } else {
-                        TaskMutationResult::Unchanged
-                    });
+                let newer_catalog_exists = ctx.task().config_options
+                    != mutation.admitted_config_options
+                    || ctx.task().config_options_catalog != mutation.admitted_catalog;
+                if !live_config_target_is_current(ctx.task(), expected_session_id)
+                    || newer_catalog_exists
+                {
+                    return Ok(
+                        if clear_task_config_mutation(ctx.task_mut(), &mutation.token, now) {
+                            TaskMutationResult::Changed
+                        } else {
+                            TaskMutationResult::Unchanged
+                        },
+                    );
                 }
                 Ok(
-                    if apply_task_config_mutation_result(ctx.task_mut(), &token, catalog, now) {
+                    if apply_task_config_mutation_result(
+                        ctx.task_mut(),
+                        &mutation.token,
+                        catalog,
+                        now,
+                    ) {
                         TaskMutationResult::Changed
                     } else {
                         // A newer server-ordered mutation or confirming session event owns state.
@@ -210,11 +225,6 @@ impl TaskProductApi {
                 )
             })
             .map_err(protocol_error_from_runtime)?;
-        if task_changed {
-            return Err(conflict_error(
-                "Task config changed before the Agent response arrived",
-            ));
-        }
         let snapshot = result
             .response_snapshot
             .ok_or_else(|| internal_error("missing task config snapshot"))?;
@@ -228,7 +238,6 @@ impl TaskProductApi {
         value: &str,
         now: &str,
     ) -> Result<openaide_app_server_protocol::snapshot::TaskSnapshot, ProtocolError> {
-        let mut task_changed = false;
         let result = self
             .mutations
             .commit_existing_task(task_id, super::response_snapshot_options(), |ctx| {
@@ -236,7 +245,6 @@ impl TaskProductApi {
                     || super::prepare::reject_if_preparation_not_ready(ctx.task()).is_err()
                     || ctx.task().agent_session_id.is_some()
                 {
-                    task_changed = true;
                     return Ok(TaskMutationResult::Rejected);
                 }
                 let task = ctx.task_mut();
@@ -249,11 +257,6 @@ impl TaskProductApi {
                 Ok(TaskMutationResult::Changed)
             })
             .map_err(protocol_error_from_runtime)?;
-        if task_changed {
-            return Err(conflict_error(
-                "Task config changed before it could be stored",
-            ));
-        }
         let snapshot = result
             .response_snapshot
             .ok_or_else(|| internal_error("missing stored task config snapshot"))?;
@@ -263,10 +266,20 @@ impl TaskProductApi {
 
 enum LiveConfigMutationAdmission {
     Missing,
-    Started(TaskConfigMutationToken),
+    Started(LiveConfigMutation),
     Duplicate,
     ClientMutationIdReused,
     TaskChanged,
+}
+
+struct LiveConfigMutation {
+    token: TaskConfigMutationToken,
+    // ACP projects the complete response catalog through the ordered session sink
+    // before this request resumes. These values reveal whether Agent-owned state
+    // already advanced; fallback runtimes that only return a catalog still use the
+    // direct response commit.
+    admitted_config_options: std::collections::HashMap<String, String>,
+    admitted_catalog: Option<crate::protocol::model::ConfigOptionsCatalog>,
 }
 
 fn live_config_target_is_current(

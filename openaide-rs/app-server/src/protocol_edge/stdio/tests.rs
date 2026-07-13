@@ -1492,11 +1492,10 @@ fn task_subscription_emits_pending_server_request_over_stdio() {
     assert_eq!(updates.len(), 1);
     let update = response(&updates[0]);
     assert_eq!(update["method"], "app/event");
-    assert_eq!(update["params"]["payload"]["kind"], "taskSnapshotUpdated");
-    assert!(update["params"]["payload"]["task"]
-        .get("pendingRequests")
-        .and_then(Value::as_array)
-        .is_none_or(Vec::is_empty));
+    assert_eq!(update["params"]["payload"]["kind"], "taskRequestsUpdated");
+    assert!(update["params"]["payload"]["requests"]
+        .as_array()
+        .is_some_and(Vec::is_empty));
     assert!(dispatcher
         .gateway
         .pending_server_requests_for_task(&TaskId::from("task-1"))
@@ -1784,7 +1783,7 @@ fn task_send_commits_user_message_and_active_turn_after_initialize() {
     let events = dispatcher.handle_task_update(committed);
     assert!(events
         .iter()
-        .any(|line| event_payload_kind(line, "taskUpdated")));
+        .any(|line| event_payload_kind(line, "taskNavigationChanged")));
     drop(dispatcher);
     let store = open_store_after_dispatcher_drop(temp.path());
     let record = store.read_task("task-existing").unwrap();
@@ -1814,7 +1813,9 @@ fn runtime_task_update_notification_emits_app_event_after_agent_completion() {
             "id": "subscribe",
             "method": STATE_SUBSCRIBE,
             "params": StateSubscribeParams {
-                scope: SubscriptionScope::TaskNavigation { project_id: None },
+                scope: SubscriptionScope::Task {
+                    task_id: TaskId::from("task-existing"),
+                },
             }
         })
         .to_string(),
@@ -1963,7 +1964,7 @@ fn runtime_permission_request_round_trips_over_server_request_stdio() {
     assert!(updates.iter().any(|line| {
         let value = response(line);
         value["method"] == "app/event"
-            && value["params"]["payload"]["kind"] == "taskSnapshotUpdated"
+            && value["params"]["payload"]["kind"] == "taskRequestsUpdated"
     }));
 
     wait_for_protocol_task_status(&mut dispatcher, &notifications, "task-existing", "idle");
@@ -2393,10 +2394,7 @@ fn task_discard_hides_empty_pre_send_task_after_initialize() {
     let committed = notifications
         .recv_timeout(Duration::from_secs(1))
         .expect("task discard notification");
-    assert!(dispatcher
-        .handle_task_update(committed)
-        .iter()
-        .any(|line| serde_json::from_str::<Value>(line).unwrap()["method"] == "app/event"));
+    assert!(dispatcher.handle_task_update(committed).is_empty());
     drop(dispatcher);
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     assert!(store.read_task("task-draft").unwrap().tombstoned);
@@ -2476,7 +2474,7 @@ fn task_discard_keeps_the_configured_project_after_its_last_task() {
     );
     let notifications = dispatcher.take_task_updates().expect("task updates");
     dispatcher.handle_line(&init_request("1", "client-1"));
-    dispatcher.handle_line(
+    let subscription = dispatcher.handle_line(
         &json!({
             "jsonrpc": "2.0",
             "id": "subscribe-projects",
@@ -2484,6 +2482,14 @@ fn task_discard_keeps_the_configured_project_after_its_last_task() {
             "params": StateSubscribeParams { scope: SubscriptionScope::Projects }
         })
         .to_string(),
+    );
+    let project_snapshot = response(&subscription[0]);
+    assert_eq!(
+        project_snapshot["result"]["result"]["snapshot"]["projects"]["projects"],
+        json!([{
+            "projectId": project_id_for_workspace(workspace_root),
+            "label": "configured-project",
+        }])
     );
 
     let responses = dispatcher.handle_line(
@@ -2500,16 +2506,7 @@ fn task_discard_keeps_the_configured_project_after_its_last_task() {
     let committed = notifications
         .recv_timeout(Duration::from_secs(1))
         .expect("task discard notification");
-    let events = dispatcher.handle_task_update(committed);
-    let event =
-        app_event_payload(&events, "projectCollectionUpdated").expect("project collection update");
-    assert_eq!(
-        event["projects"]["projects"],
-        json!([{
-            "projectId": project_id_for_workspace(workspace_root),
-            "label": "configured-project",
-        }])
-    );
+    assert!(dispatcher.handle_task_update(committed).is_empty());
 }
 
 #[test]
@@ -2712,21 +2709,14 @@ fn open_store_after_dispatcher_drop(path: &std::path::Path) -> Store {
 fn completed_task_event(line: &str) -> bool {
     let value = serde_json::from_str::<Value>(line).expect("event json");
     value["method"] == "app/event"
-        && value["params"]["payload"]["task"]["taskId"] == "task-existing"
-        && value["params"]["payload"]["task"]["status"] != "running"
+        && value["params"]["payload"]["kind"] == "taskChanged"
+        && value["params"]["payload"]["taskId"] == "task-existing"
+        && value["params"]["payload"]["changes"]["task"]["status"] == "idle"
 }
 
 fn event_payload_kind(line: &str, kind: &str) -> bool {
     let value = response(line);
     value["method"] == "app/event" && value["params"]["payload"]["kind"] == kind
-}
-
-fn app_event_payload(lines: &[String], kind: &str) -> Option<Value> {
-    lines.iter().find_map(|line| {
-        let value = serde_json::from_str::<Value>(line).ok()?;
-        (value["method"] == "app/event" && value["params"]["payload"]["kind"] == kind)
-            .then(|| value["params"]["payload"].clone())
-    })
 }
 
 fn wait_for_server_request(

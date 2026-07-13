@@ -387,14 +387,19 @@ fn failed_create_task_write_rolls_back_initial_chat_and_revision() {
 }
 
 #[test]
-fn migrated_service_paths_have_no_direct_task_updated_calls() {
-    let allowed = [("src/tasks/mutation/commit.rs", "notify_task_updated")];
+fn migrated_service_paths_have_no_direct_task_changed_calls() {
+    let allowed = [("src/tasks/mutation/commit.rs", "notify_task_changed")];
     let mut actual = Vec::new();
 
     for path in rust_source_files("src/tasks") {
-        let path_string = path.to_string_lossy().replace('\\', "/");
+        let path_string = path
+            .strip_prefix(env!("CARGO_MANIFEST_DIR"))
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .trim_start_matches('/')
+            .replace('\\', "/");
         let text = std::fs::read_to_string(&path).unwrap();
-        actual.extend(task_updated_calls_by_function(&path_string, &text));
+        actual.extend(task_changed_calls_by_function(&path_string, &text));
     }
 
     actual.sort();
@@ -411,7 +416,9 @@ fn task_turn_lifecycle_has_no_direct_commit_bypasses() {
     let mut offenders = Vec::new();
     let lifecycle_paths = rust_source_files("src/tasks/turn_lifecycle")
         .into_iter()
-        .chain([std::path::PathBuf::from("src/tasks/turn_lifecycle.rs")]);
+        .chain([
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/tasks/turn_lifecycle.rs")
+        ]);
 
     for path in lifecycle_paths {
         let path_string = path.to_string_lossy().replace('\\', "/");
@@ -419,8 +426,8 @@ fn task_turn_lifecycle_has_no_direct_commit_bypasses() {
         for (line_index, line) in text.lines().enumerate() {
             let trimmed = line.trim_start();
             for pattern in [
-                ".task_updated(",
-                " task_updated(",
+                ".task_changed(",
+                " task_changed(",
                 "next_revision(",
                 ".write_task(",
                 "append_normalized_to_store(",
@@ -524,7 +531,10 @@ fn assert_rejected_no_change(outcome: TaskCommitOutcome) {
 
 fn rust_source_files(root: &str) -> Vec<std::path::PathBuf> {
     let mut files = Vec::new();
-    collect_rust_source_files(std::path::Path::new(root), &mut files);
+    collect_rust_source_files(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(root),
+        &mut files,
+    );
     files.sort();
     files
 }
@@ -549,7 +559,7 @@ fn is_production_rust_source(path: &std::path::Path) -> bool {
         && !name.ends_with("_tests.rs")
 }
 
-fn task_updated_calls_by_function(path: &str, text: &str) -> Vec<(String, String)> {
+fn task_changed_calls_by_function(path: &str, text: &str) -> Vec<(String, String)> {
     let mut calls = Vec::new();
     let mut current_function: Option<String> = None;
     for line in text.lines() {
@@ -557,7 +567,7 @@ fn task_updated_calls_by_function(path: &str, text: &str) -> Vec<(String, String
         if let Some(name) = function_name(trimmed) {
             current_function = Some(name.to_string());
         }
-        if trimmed.contains(".task_updated(") || trimmed.contains(" task_updated(") {
+        if trimmed.contains(".task_changed(") || trimmed.contains(" task_changed(") {
             calls.push((
                 path.to_string(),
                 current_function

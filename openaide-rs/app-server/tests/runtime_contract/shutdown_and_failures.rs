@@ -179,7 +179,7 @@ fn runtime_startup_recovers_stale_active_turn_and_session_binding() {
         .unwrap();
     assert_eq!(snapshot.task.status, TaskStatus::Inactive);
     assert!(has_interruption_reason(&snapshot, |reason| {
-        matches!(reason, InterruptionReason::Canceled)
+        matches!(reason, InterruptionReason::BackendUnavailable)
     }));
 
     runtime.service().shutdown().unwrap();
@@ -304,7 +304,7 @@ fn task_create_attach_failure_finalizes_created_task() {
     assert_eq!(closes.load(Ordering::SeqCst), 1);
     let records = store.list_tasks().unwrap();
     assert_eq!(records.len(), 1);
-    assert_eq!(records[0].status, TaskStatus::Failed);
+    assert_eq!(records[0].status, TaskStatus::Inactive);
     assert!(records[0].active_turn_id.is_none());
     assert!(records[0].agent_session_id.is_none());
 

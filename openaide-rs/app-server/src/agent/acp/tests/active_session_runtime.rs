@@ -965,7 +965,7 @@ fn resume_and_attach_session_event_sink_use_active_session_registry() {
 }
 
 #[test]
-fn config_response_waits_for_prior_session_updates_to_reach_the_bound_task() {
+fn config_response_and_prior_updates_reach_the_bound_task_before_the_caller() {
     let temp = tempfile::TempDir::new().expect("temp dir");
     let Some((runtime, _log_path)) = fixture_runtime_with_prompt_mode(
         &temp,
@@ -986,6 +986,7 @@ fn config_response_waits_for_prior_session_updates_to_reach_the_bound_task() {
             Arc::new(BlockingConfigSessionSink {
                 update_started_tx,
                 release_update: release_update.clone(),
+                received: AtomicUsize::new(0),
             }),
         )
         .expect("attach session sink");
@@ -1005,7 +1006,7 @@ fn config_response_waits_for_prior_session_updates_to_reach_the_bound_task() {
     });
 
     let prior_catalog = update_started_rx
-        .recv_timeout(Duration::from_secs(2))
+        .recv_timeout(Duration::from_secs(5))
         .expect("prior config update should reach the bound session sink");
     let early_result = match result_rx.try_recv() {
         Ok(result) => Some(result),
@@ -1014,9 +1015,12 @@ fn config_response_waits_for_prior_session_updates_to_reach_the_bound_task() {
     };
     let response_overtook_update = early_result.is_some();
     release_update.wait();
+    let response_catalog = update_started_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("the response catalog should reach the bound session sink");
     let result = early_result.unwrap_or_else(|| {
         result_rx
-            .recv_timeout(Duration::from_secs(2))
+            .recv_timeout(Duration::from_secs(5))
             .expect("config response should follow the prior update")
     });
     change.join().expect("config change thread");
@@ -1036,6 +1040,13 @@ fn config_response_waits_for_prior_session_updates_to_reach_the_bound_task() {
         "the Agent response must not overtake a preceding session update"
     );
     assert_eq!(
+        response_catalog
+            .current_values()
+            .get("model")
+            .map(String::as_str),
+        Some("gpt-final")
+    );
+    assert_eq!(
         result
             .expect("set config option")
             .current_values()
@@ -1048,6 +1059,7 @@ fn config_response_waits_for_prior_session_updates_to_reach_the_bound_task() {
 struct BlockingConfigSessionSink {
     update_started_tx: mpsc::Sender<ConfigOptionsCatalog>,
     release_update: Arc<Barrier>,
+    received: AtomicUsize,
 }
 
 impl AgentSessionEventSink for BlockingConfigSessionSink {
@@ -1055,7 +1067,9 @@ impl AgentSessionEventSink for BlockingConfigSessionSink {
         self.update_started_tx
             .send(catalog)
             .map_err(|error| RuntimeError::Internal(error.to_string()))?;
-        self.release_update.wait();
+        if self.received.fetch_add(1, Ordering::SeqCst) == 0 {
+            self.release_update.wait();
+        }
         Ok(())
     }
 

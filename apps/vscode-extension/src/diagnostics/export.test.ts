@@ -3,6 +3,23 @@ import { DIAGNOSTICS_GET_RUNTIME } from "@openaide/app-server-client";
 import { allowlistedRuntimeDiagnostics, collectDiagnostics } from "./snapshot";
 
 describe("diagnostics export", () => {
+  it("preserves a Task that is stopping", () => {
+    const diagnostics = allowlistedRuntimeDiagnostics({
+      tasks: {
+        active_tasks: [{
+          task_id: "task-stopping",
+          agent_id: "codex",
+          status: "stopping",
+          updated_at: "2026-07-06T10:00:00.000Z",
+          last_activity: "2026-07-06T10:00:00.000Z",
+          has_agent_session: true,
+        }],
+      },
+    });
+
+    expect(diagnostics.tasks.active_tasks[0]?.status).toBe("stopping");
+  });
+
   it("allowlists runtime fields and strips sensitive extras", () => {
     const diagnostics = allowlistedRuntimeDiagnostics({
       status: "ready",

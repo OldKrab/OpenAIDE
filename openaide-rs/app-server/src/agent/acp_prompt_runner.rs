@@ -284,7 +284,7 @@ async fn handle_prompt_config_command(
                     return Err(error);
                 }
             }
-            let result = response.finish();
+            let result = response.finish_with_session_sink(session_event_sink.as_deref());
             if let Ok(next_catalog) = &result {
                 *catalog = next_catalog.clone();
             }

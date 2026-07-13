@@ -126,6 +126,7 @@ function activeTaskStatus(value: unknown): RuntimeDiagnostics["tasks"]["active_t
     case "starting":
     case "idle":
     case "running":
+    case "stopping":
     case "waiting":
     case "interrupted":
     case "failed":

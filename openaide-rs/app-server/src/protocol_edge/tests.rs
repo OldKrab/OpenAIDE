@@ -1007,7 +1007,11 @@ fn current_task_subscriber_can_answer_before_server_request_delivery_drains() {
         AppServerTime(4),
     );
 
-    assert!(matches!(outcome, GatewayOutcome::Noop));
+    let events = response_events(outcome);
+    assert!(events.iter().any(|delivery| matches!(
+        delivery.event.payload,
+        AppServerEventPayload::TaskRequestsUpdated { ref requests, .. } if requests.is_empty()
+    )));
     assert!(gateway
         .server_requests
         .pending_for_task(&TaskId::from("task-1"))
@@ -1048,7 +1052,11 @@ fn client_response_resolves_pending_server_request() {
         AppServerTime(4),
     );
 
-    assert!(matches!(outcome, GatewayOutcome::Noop));
+    let events = response_events(outcome);
+    assert!(events.iter().any(|delivery| matches!(
+        delivery.event.payload,
+        AppServerEventPayload::TaskRequestsUpdated { ref requests, .. } if requests.is_empty()
+    )));
     assert!(gateway
         .server_requests
         .pending_for_task(&TaskId::from("task-1"))
@@ -1077,7 +1085,7 @@ fn unknown_client_response_returns_permission_error() {
 }
 
 #[test]
-fn heartbeat_drains_queued_navigation_change_for_connection() {
+fn heartbeat_does_not_replay_navigation_changes_as_response_events() {
     let mut gateway = initialized_gateway("client-1", "local-http:client-1");
     gateway.handle_inbound(
         ConnectionId::new("local-http:client-1"),
@@ -1091,7 +1099,7 @@ fn heartbeat_drains_queued_navigation_change_for_connection() {
         AppServerTime(2),
     );
 
-    gateway.publish_task_update(
+    let published = gateway.publish_task_update(
         &committed_task_update(
             "task-1",
             2,
@@ -1102,6 +1110,8 @@ fn heartbeat_drains_queued_navigation_change_for_connection() {
         AppServerTime(3),
     );
 
+    assert!(published.is_empty());
+
     let outcome = gateway.handle_inbound(
         ConnectionId::new("local-http:client-1"),
         request("3", CLIENT_HEARTBEAT, serde_json::json!({})),
@@ -1109,11 +1119,7 @@ fn heartbeat_drains_queued_navigation_change_for_connection() {
     );
 
     let events = response_events(outcome);
-    assert_eq!(events.len(), 1);
-    assert!(matches!(
-        events[0].event.payload,
-        AppServerEventPayload::TaskNavigationChanged { .. }
-    ));
+    assert!(events.is_empty());
 }
 
 #[test]

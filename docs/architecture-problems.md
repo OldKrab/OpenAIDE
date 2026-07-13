@@ -113,7 +113,7 @@ The agreed model makes a New Task private to the App Shell client that created i
 
 ## AP-007: Agent configuration races can surface as user failures
 
-**Status:** investigating
+**Status:** resolved
 
 **Area:** Agent configuration options and concurrent session metadata
 
@@ -122,6 +122,8 @@ User option changes are App Server requests that call the Agent and later commit
 **Risk:** A benign race between an Agent-owned catalog update and a valid user selection may be presented as if the user made an invalid action. A late response may also compete with newer Agent-owned state unless one ordering authority covers both response and notification paths.
 
 **Desired direction:** Keep the Agent catalog authoritative, apply only monotonically ordered App Server revisions, and treat a superseded user selection as a non-error reconciliation to the newest catalog. Serialize only what is necessary, avoid optimistic option values, and reserve visible errors for genuine transport, setup, or Agent failures.
+
+**Resolution:** ACP configuration responses and preceding `config_option_update` notifications now pass through the same Native Session event sink before the request returns, so App Server persists their complete Agent-owned catalogs in protocol order. The Task request records only the catalog present at admission: if the session or catalog advances during Agent I/O, completion clears the pending marker and returns the newest Task snapshot without overwriting it or reporting a conflict. A runtime that returns a catalog without projecting session events still commits that response once. Session replacement and no-session-to-session races likewise reconcile to the current snapshot without a user-visible error. Frontend continues to apply only revision-aware App Server snapshots and shows failures only when the transport, setup, persistence, or Agent request actually fails; it never writes an optimistic option value. The old conflict responses for benign Task/session timing races were removed rather than retained as compatibility behavior.
 
 ## AP-008: New Task defaults are conflated with collection fallbacks
 

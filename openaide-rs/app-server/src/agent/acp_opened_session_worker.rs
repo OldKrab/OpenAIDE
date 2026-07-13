@@ -281,7 +281,8 @@ async fn handle_session_config_command(
                     return Err(error);
                 }
             }
-            let result = response.finish();
+            let result =
+                response.finish_with_session_sink(session_event_sink.map(|sink| sink.as_ref()));
             if let Ok(next_catalog) = &result {
                 *catalog = next_catalog.clone();
             }

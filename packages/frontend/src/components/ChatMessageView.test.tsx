@@ -1026,7 +1026,12 @@ describe("ChatRow", () => {
   it("opens tool paths through the rendered tool path button", async () => {
     const posted: unknown[] = [];
     vi.stubGlobal("window", { acquireVsCodeApi: () => ({ postMessage: (message: unknown) => posted.push(message) }) });
-    const { ToolPath, toolOpenPathMessage } = await import("./ChatToolBlocks");
+    const [{ installFrontendShell }, { createVsCodeShell }, { ToolPath, toolOpenPathMessage }] = await Promise.all([
+      import("../services/frontendShell"),
+      import("../../../../apps/vscode-extension/frontend/vsCodeShell"),
+      import("./ChatToolBlocks"),
+    ]);
+    installFrontendShell(createVsCodeShell());
     expect(toolOpenPathMessage({ path: "/workspace/notes.md" })).toEqual({
       type: "tool.openPath",
       payload: { line: undefined, path: "/workspace/notes.md" },

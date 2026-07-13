@@ -11,7 +11,7 @@ export type RuntimeDiagnostics = {
     active_tasks: Array<{
       task_id: string;
       agent_id: string;
-      status: "preparing" | "starting" | "idle" | "running" | "waiting" | "interrupted" | "failed" | "completed";
+      status: "preparing" | "starting" | "idle" | "running" | "stopping" | "waiting" | "interrupted" | "failed" | "completed";
       updated_at: string;
       last_activity: string;
       active_turn_id?: string;

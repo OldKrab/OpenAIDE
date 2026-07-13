@@ -82,8 +82,8 @@ fn cancel_stops_pending_agent_turn() {
             task_id: snapshot.task.task_id.clone(),
         })
         .unwrap();
-    assert_eq!(stopped.task.status, TaskStatus::Inactive);
-    assert!(!has_running_activity(&stopped));
+    assert_eq!(stopped.task.status, TaskStatus::Stopping);
+    assert!(has_running_activity(&stopped));
     wait_until(|| {
         service
             .snapshot(TaskSnapshotParams {
@@ -107,13 +107,14 @@ fn cancel_stops_pending_agent_turn() {
             tail_limit: 10,
         })
         .unwrap();
+    assert_eq!(passive.task.status, TaskStatus::Inactive);
+    assert!(!has_running_activity(&passive));
     assert_eq!(calls.load(Ordering::SeqCst), 0);
     assert!(!passive
         .chat
         .items
         .iter()
-        .any(|item| item.message_type == "agent_text"));
-    assert!(!has_running_activity(&passive));
+        .any(|item| item.message_type == "agent_message"));
 }
 
 #[test]
@@ -214,6 +215,6 @@ fn cancel_signals_agent_after_turn_started() {
         .chat
         .items
         .iter()
-        .any(|item| item.message_type == "agent_text"));
+        .any(|item| item.message_type == "agent_message"));
     assert!(!has_running_activity(&passive));
 }

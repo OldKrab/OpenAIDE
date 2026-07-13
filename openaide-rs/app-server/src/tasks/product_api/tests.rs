@@ -587,7 +587,7 @@ fn startup_recovers_active_turn_left_by_previous_product_api_runtime() {
         matches!(
             message.chat.message,
             NormalizedMessage::Activity {
-                status: ActivityStatus::Completed,
+                status: ActivityStatus::Interrupted,
                 ..
             }
         )
@@ -596,7 +596,7 @@ fn startup_recovers_active_turn_left_by_previous_product_api_runtime() {
         matches!(
             message.chat.message,
             NormalizedMessage::Interruption {
-                reason: InterruptionReason::Canceled,
+                reason: InterruptionReason::BackendUnavailable,
                 recoverable: true,
                 ..
             }
@@ -2454,7 +2454,7 @@ fn send_recovers_stale_active_turn_and_starts_current_prompt() {
             message.chat.message,
             NormalizedMessage::Activity {
                 ref id,
-                status: ActivityStatus::Completed,
+                status: ActivityStatus::Interrupted,
                 ..
             } if id == "turn:turn-stale"
         )
@@ -2463,7 +2463,7 @@ fn send_recovers_stale_active_turn_and_starts_current_prompt() {
         matches!(
             message.chat.message,
             NormalizedMessage::Interruption {
-                reason: InterruptionReason::Canceled,
+                reason: InterruptionReason::BackendUnavailable,
                 recoverable: true,
                 ..
             }
@@ -4527,7 +4527,7 @@ fn blocked_config_change_does_not_stall_an_unrelated_task() {
 }
 
 #[test]
-fn set_config_option_does_not_apply_session_a_catalog_after_task_binds_session_b() {
+fn set_config_option_reconciles_without_error_after_task_binds_a_newer_session() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut record = task_record("task-existing", "/workspace/app");
@@ -4574,18 +4574,19 @@ fn set_config_option_does_not_apply_session_a_catalog_after_task_binds_session_b
         .unwrap();
     agent.block_set_config.store(false, Ordering::SeqCst);
 
-    let error = result_rx
+    let snapshot = result_rx
         .recv_timeout(Duration::from_millis(250))
         .expect("the stale session request should finish")
-        .unwrap_err();
+        .unwrap();
     let stored = store.read_task("task-existing").unwrap();
 
-    assert_eq!(error.code, ProtocolErrorCode::Conflict);
     assert_eq!(stored.agent_session_id.as_deref(), Some("session-b"));
     assert_eq!(
         stored.config_options.get("model").map(String::as_str),
         Some("gpt-5")
     );
+    assert_eq!(snapshot.agent_config.options[0].current_value, "gpt-5");
+    assert_eq!(snapshot.agent_config.pending_change, None);
 }
 
 #[test]
@@ -4646,6 +4647,68 @@ fn set_config_option_is_a_noop_when_same_session_event_already_persisted_catalog
     assert_eq!(snapshot.revision, event_revision);
     assert_eq!(stored.revision, event_revision);
     assert_eq!(stored.model_id.as_deref(), Some("gpt-5.5"));
+}
+
+#[test]
+fn set_config_option_preserves_agent_catalog_that_arrives_after_its_response_catalog() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let mut record = task_record("task-existing", "/workspace/app");
+    record.agent_session_id = Some("session-a".to_string());
+    record.config_options = config_catalog("gpt-5").current_values();
+    record.config_options_catalog = Some(config_catalog("gpt-5"));
+    store.write_task(&record).unwrap();
+    let agent = Arc::new(RecordingAgent {
+        block_set_config: AtomicBool::new(true),
+        ..RecordingAgent::default()
+    });
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        agent.clone(),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+    let setting_api = api.clone();
+    let (result_tx, result_rx) = std::sync::mpsc::channel();
+
+    std::thread::spawn(move || {
+        result_tx
+            .send(
+                setting_api.set_config_option_for_test(TaskSetConfigOptionParams {
+                    task_id: "task-existing".into(),
+                    config_id: "model".into(),
+                    value: "gpt-5.5".to_string(),
+                    client_mutation_id: "superseded-change".into(),
+                }),
+            )
+            .unwrap();
+    });
+    wait_until(|| agent.session_config_updates.lock().unwrap().len() == 1);
+    let session_events = crate::tasks::turn_events::TaskSessionEventSink::new(
+        api.mutations.clone(),
+        "task-existing".to_string(),
+        "session-a".to_string(),
+        ServerRequestRuntime::new(),
+    );
+    session_events
+        .config_options_changed(config_catalog("gpt-5.4"))
+        .unwrap();
+    session_events
+        .config_options_changed(config_catalog("gpt-5.2"))
+        .unwrap();
+    agent.block_set_config.store(false, Ordering::SeqCst);
+
+    let snapshot = result_rx
+        .recv_timeout(Duration::from_millis(250))
+        .expect("the superseded config request should reconcile")
+        .unwrap();
+    let stored = store.read_task("task-existing").unwrap();
+
+    assert_eq!(snapshot.agent_config.options[0].current_value, "gpt-5.2");
+    assert_eq!(snapshot.agent_config.pending_change, None);
+    assert_eq!(stored.model_id.as_deref(), Some("gpt-5.2"));
 }
 
 #[test]
