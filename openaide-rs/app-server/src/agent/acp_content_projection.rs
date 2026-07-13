@@ -1,4 +1,4 @@
-use agent_client_protocol::schema::{ContentBlock, EmbeddedResourceResource};
+use crate::agent::acp_schema::{ContentBlock, EmbeddedResourceResource};
 
 use crate::logging;
 use crate::protocol::model::{AgentMessagePart, AgentMessageRole};

@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::sync::mpsc;
 
-use agent_client_protocol::schema::{
+use crate::agent::acp_schema::{
     InitializeRequest, InitializeResponse, SessionConfigOption, SessionId,
 };
 use agent_client_protocol::{Agent, ConnectionTo};

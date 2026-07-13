@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::{mpsc, Arc, Mutex};
 
-use agent_client_protocol::schema::InitializeResponse;
+use crate::agent::acp_schema::InitializeResponse;
 use agent_client_protocol::{Agent, ConnectionTo};
 
 use tokio::sync::mpsc as tokio_mpsc;
@@ -10,6 +10,7 @@ use crate::agent::acp_agent_config::AcpAgentConfig;
 use crate::agent::acp_agent_status::agent_probe_result_from_initialize;
 use crate::agent::acp_host::initialize_request;
 use crate::agent::acp_host_terminal_ownership::{AcpHostTerminalRegistry, AcpTerminalOwnerId};
+use crate::agent::acp_schema::AuthenticateRequest;
 use crate::agent::acp_session_capabilities::validate_auth_method;
 use crate::agent::acp_session_runner::{acp_start_error, initialize_agent_connection};
 use crate::agent::acp_trace::AcpTraceSession;
@@ -24,7 +25,6 @@ use crate::protocol::model::{
     AgentAuthenticateResult, AgentAuthenticateStatus, AgentListSessionsResult, AgentProbeResult,
     NormalizedMessage,
 };
-use agent_client_protocol::schema::AuthenticateRequest;
 
 use crate::agent::acp_errors::acp_error;
 use crate::agent::acp_opened_session_worker::{

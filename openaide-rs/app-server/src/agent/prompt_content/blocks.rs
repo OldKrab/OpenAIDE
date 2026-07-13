@@ -1,4 +1,4 @@
-use agent_client_protocol::schema::{
+use crate::agent::acp_schema::{
     AudioContent, BlobResourceContents, ContentBlock, EmbeddedResource, EmbeddedResourceResource,
     ImageContent, TextResourceContents,
 };

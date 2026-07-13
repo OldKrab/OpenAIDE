@@ -25,6 +25,7 @@ pub(crate) mod acp_replay_projection;
 pub(crate) mod acp_response_boundary;
 pub(crate) mod acp_runtime_kernel;
 pub(crate) mod acp_runtime_threading;
+pub(crate) mod acp_schema;
 pub(crate) mod acp_session_capabilities;
 pub(crate) mod acp_session_catalogs;
 pub(crate) mod acp_session_client;

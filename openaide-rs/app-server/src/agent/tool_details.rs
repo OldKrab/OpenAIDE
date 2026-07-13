@@ -1,4 +1,4 @@
-use agent_client_protocol::schema::{
+use crate::agent::acp_schema::{
     ContentBlock, EmbeddedResourceResource, ToolCall, ToolCallContent, ToolCallStatus, ToolKind,
 };
 use std::ffi::OsStr;

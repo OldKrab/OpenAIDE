@@ -1,4 +1,4 @@
-use agent_client_protocol::schema::{
+use crate::agent::acp_schema::{
     KillTerminalRequest, ReleaseTerminalRequest, WaitForTerminalExitRequest,
 };
 

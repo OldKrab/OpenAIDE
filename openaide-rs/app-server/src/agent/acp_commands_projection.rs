@@ -1,6 +1,4 @@
-use agent_client_protocol::schema::{
-    AvailableCommand, AvailableCommandInput, AvailableCommandsUpdate,
-};
+use crate::agent::acp_schema::{AvailableCommand, AvailableCommandInput, AvailableCommandsUpdate};
 
 use crate::protocol::model::{AgentCommand, AgentCommandsCatalog};
 

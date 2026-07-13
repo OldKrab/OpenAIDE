@@ -1,4 +1,4 @@
-use agent_client_protocol::schema::{ContentBlock, ResourceLink};
+use crate::agent::acp_schema::{ContentBlock, ResourceLink};
 
 use crate::agent::prompt_content_uri::attachment_resource_name;
 use crate::protocol::model::Attachment;

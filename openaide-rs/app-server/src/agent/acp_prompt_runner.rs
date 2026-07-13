@@ -1,6 +1,6 @@
 use std::sync::{mpsc, Arc, Mutex};
 
-use agent_client_protocol::schema::SessionNotification;
+use crate::agent::acp_schema::SessionNotification;
 use agent_client_protocol::util::MatchDispatch;
 use agent_client_protocol::{Agent, Dispatch, SessionMessage};
 use serde_json::json;

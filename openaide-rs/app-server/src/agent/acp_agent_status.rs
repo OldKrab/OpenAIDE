@@ -1,4 +1,4 @@
-use agent_client_protocol::schema::{AuthMethod, InitializeResponse};
+use crate::agent::acp_schema::{AuthMethod, InitializeResponse};
 
 use crate::agent::acp_session_lifecycle::auth_method_kind;
 use crate::protocol::model::{

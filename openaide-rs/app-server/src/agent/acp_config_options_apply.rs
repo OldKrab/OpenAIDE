@@ -1,4 +1,4 @@
-use agent_client_protocol::schema::{SessionConfigOption, SetSessionConfigOptionRequest};
+use crate::agent::acp_schema::{SessionConfigOption, SetSessionConfigOptionRequest};
 use agent_client_protocol::{Agent, ConnectionTo, SessionMessage};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};

@@ -1,10 +1,10 @@
+use crate::agent::acp_schema::{
+    SessionConfigKind, SessionConfigOption, SessionConfigOptionCategory as AcpConfigOptionCategory,
+    SessionConfigSelectOptions,
+};
 use crate::protocol::model::{
     ConfigOption, ConfigOptionCategory, ConfigOptionValue, ConfigOptionsCatalog,
     ConfigOptionsStatus,
-};
-use agent_client_protocol::schema::{
-    SessionConfigKind, SessionConfigOption, SessionConfigOptionCategory as AcpConfigOptionCategory,
-    SessionConfigSelectOptions,
 };
 
 pub(super) fn normalize_config_options(
