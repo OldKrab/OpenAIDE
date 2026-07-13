@@ -2,7 +2,9 @@ use std::fs;
 use std::io::Write;
 
 use crate::protocol::errors::RuntimeError;
-use crate::protocol::model::{ActivityStep, ChatMessage, MessagePage, NormalizedMessage};
+use crate::protocol::model::{
+    ActivityStep, AgentMessagePart, AgentMessageRole, ChatMessage, MessagePage, NormalizedMessage,
+};
 
 use super::atomic;
 use super::cursor;
@@ -18,9 +20,10 @@ pub(crate) struct MessageFilesBackup {
     meta: Option<Vec<u8>>,
 }
 
-pub(crate) enum TextChunkAppend {
+pub(crate) enum AgentMessageAppend {
     Appended(StoredMessage),
-    Updated(StoredMessage),
+    TextAppended(StoredMessage),
+    PartAppended(StoredMessage),
 }
 
 impl Store {
@@ -96,23 +99,27 @@ impl Store {
         Ok(stored)
     }
 
-    /// Appends one Agent-owned text chunk using the normalized message identity as correlation.
-    pub(crate) fn append_text_chunk(
+    /// Appends one ordered ACP content part using the message identity as correlation.
+    pub(crate) fn append_agent_message_part(
         &self,
         task_id: &str,
         message: NormalizedMessage,
-    ) -> Result<TextChunkAppend, RuntimeError> {
+    ) -> Result<AgentMessageAppend, RuntimeError> {
         let identity = message.identity();
         let mut messages = self.read_messages(task_id)?;
         if let Some(stored) = messages
             .iter_mut()
             .find(|stored| stored.chat.identity == identity)
         {
-            append_normalized_text(&mut stored.chat.message, message)?;
+            let text_appended = append_agent_part(&mut stored.chat.message, message)?;
             let updated = stored.clone();
             self.write_messages(task_id, &messages)?;
             self.write_meta(task_id, &messages)?;
-            return Ok(TextChunkAppend::Updated(updated));
+            return Ok(if text_appended {
+                AgentMessageAppend::TextAppended(updated)
+            } else {
+                AgentMessageAppend::PartAppended(updated)
+            });
         }
 
         let sequence = messages.last().map(|item| item.sequence + 1).unwrap_or(1);
@@ -129,7 +136,7 @@ impl Store {
         messages.push(stored.clone());
         self.write_messages(task_id, &messages)?;
         self.write_meta(task_id, &messages)?;
-        Ok(TextChunkAppend::Appended(stored))
+        Ok(AgentMessageAppend::Appended(stored))
     }
 
     pub fn tail_page(&self, task_id: &str, limit: usize) -> Result<MessagePage, RuntimeError> {
@@ -312,21 +319,29 @@ impl Store {
     }
 }
 
-fn append_normalized_text(
+fn append_agent_part(
     existing: &mut NormalizedMessage,
     incoming: NormalizedMessage,
-) -> Result<(), RuntimeError> {
+) -> Result<bool, RuntimeError> {
     match (existing, incoming) {
         (
-            NormalizedMessage::AgentText { text, .. },
-            NormalizedMessage::AgentText { text: chunk, .. },
-        )
-        | (
-            NormalizedMessage::Thought { text, .. },
-            NormalizedMessage::Thought { text: chunk, .. },
-        ) => {
-            text.push_str(&chunk);
-            Ok(())
+            NormalizedMessage::AgentMessage { role, parts, .. },
+            NormalizedMessage::AgentMessage {
+                role: incoming_role,
+                parts: incoming_parts,
+                ..
+            },
+        ) if *role == incoming_role && incoming_parts.len() == 1 => {
+            let part = incoming_parts.into_iter().next().expect("one checked part");
+            if let (Some(AgentMessagePart::Text { text }), AgentMessagePart::Text { text: chunk }) =
+                (parts.last_mut(), &part)
+            {
+                text.push_str(chunk);
+                Ok(true)
+            } else {
+                parts.push(part);
+                Ok(false)
+            }
         }
         _ => Err(RuntimeError::Conflict(
             "ACP message id changed content channel".to_string(),
@@ -364,7 +379,11 @@ fn chat_page_start(messages: &[StoredMessage], requested_start: usize, end: usiz
         .unwrap_or(requested_start);
     if !matches!(
         &messages[requested_start].chat.message,
-        NormalizedMessage::Activity { .. } | NormalizedMessage::Thought { .. }
+        NormalizedMessage::Activity { .. }
+            | NormalizedMessage::AgentMessage {
+                role: AgentMessageRole::Thought,
+                ..
+            }
     ) {
         return requested_start;
     }
@@ -373,7 +392,11 @@ fn chat_page_start(messages: &[StoredMessage], requested_start: usize, end: usiz
     while run_start > 0
         && matches!(
             &messages[run_start].chat.message,
-            NormalizedMessage::Activity { .. } | NormalizedMessage::Thought { .. }
+            NormalizedMessage::Activity { .. }
+                | NormalizedMessage::AgentMessage {
+                    role: AgentMessageRole::Thought,
+                    ..
+                }
         )
     {
         run_start -= 1;

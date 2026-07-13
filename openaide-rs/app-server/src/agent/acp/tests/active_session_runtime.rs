@@ -897,7 +897,11 @@ fn session_sink_receives_text_update_after_prompt_has_returned() {
 
     assert!(matches!(
         session_sink.events().as_slice(),
-        [AgentEvent::TextChunk { text, .. }] if text == "session-owned late text"
+        [AgentEvent::MessageChunk {
+            role: AgentMessageRole::Agent,
+            part: AgentMessagePart::Text { text },
+            ..
+        }] if text == "session-owned late text"
     ));
 }
 

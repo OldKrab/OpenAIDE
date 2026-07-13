@@ -1,7 +1,7 @@
 use super::*;
 use crate::protocol::model::{
-    ActivityStatus, ActivityStep, ActivityToolContent, ActivityToolDetails, ChatMessage,
-    IsolationKind, NormalizedMessage, TaskStatus,
+    ActivityStatus, ActivityStep, ActivityToolContent, ActivityToolDetails, AgentMessagePart,
+    AgentMessageRole, ChatMessage, IsolationKind, NormalizedMessage, TaskStatus,
 };
 use crate::storage::records::{StoredMessage, TaskPreparationRecord, TaskRecord};
 use crate::storage_runtime::RecoveryClassification;
@@ -424,11 +424,14 @@ fn agent_chat_message(id: &str, text: &str) -> ChatMessage {
     ChatMessage {
         cursor: id.to_string(),
         identity: id.to_string(),
-        message_type: "agent_text".to_string(),
+        message_type: "agent_message".to_string(),
         message_id: id.to_string(),
-        message: NormalizedMessage::AgentText {
+        message: NormalizedMessage::AgentMessage {
             id: id.to_string(),
-            text: text.to_string(),
+            role: AgentMessageRole::Agent,
+            parts: vec![AgentMessagePart::Text {
+                text: text.to_string(),
+            }],
             created_at: "2026-07-01T00:00:00Z".to_string(),
         },
     }
@@ -523,9 +526,12 @@ fn native_history_replacement_records_the_native_history_clock() {
     store
         .replace_messages_with_normalized_at(
             task_id,
-            vec![NormalizedMessage::AgentText {
+            vec![NormalizedMessage::AgentMessage {
                 id: "native-message".to_string(),
-                text: "Loaded history".to_string(),
+                role: AgentMessageRole::Agent,
+                parts: vec![AgentMessagePart::Text {
+                    text: "Loaded history".to_string(),
+                }],
                 created_at: "1".to_string(),
             }],
             native_updated_at,

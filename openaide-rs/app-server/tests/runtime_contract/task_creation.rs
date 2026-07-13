@@ -176,12 +176,10 @@ fn task_create_adopts_external_session_with_replayed_history() {
         NormalizedMessage::User { text, .. } => assert_eq!(text, "Prior user question"),
         other => panic!("expected replayed user message, got {other:?}"),
     }
-    match &snapshot.chat.items[1].message {
-        NormalizedMessage::AgentText { text, .. } => {
-            assert_eq!(text, "Prior agent answer");
-        }
-        other => panic!("expected replayed agent message, got {other:?}"),
-    }
+    assert_eq!(
+        agent_message_text(&snapshot.chat.items[1].message),
+        Some("Prior agent answer")
+    );
 
     service
         .prompt(SessionPromptParams {

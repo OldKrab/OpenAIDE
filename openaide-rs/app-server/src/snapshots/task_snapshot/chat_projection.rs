@@ -15,8 +15,9 @@ use openaide_app_server_protocol::task::{
 
 use crate::protocol::model::{
     ActivityStatus, ActivityStep, ActivityToolContent, ActivityToolDetails, ActivityToolValue,
-    AgentContent, AgentContentRole, Attachment, ChatMessage, NormalizedMessage, PermissionDecision,
-    PermissionOption, PermissionOptionKind, PermissionState, QuestionAction, QuestionState,
+    AgentMessagePart, AgentMessageRole, Attachment, ChatMessage, NormalizedMessage,
+    PermissionDecision, PermissionOption, PermissionOptionKind, PermissionState, QuestionAction,
+    QuestionState,
 };
 
 pub(crate) fn project_chat_item(message: &ChatMessage) -> ChatItem {
@@ -48,23 +49,13 @@ fn project_message(message: &NormalizedMessage) -> (ChatRole, ChatItemStatus, Ve
             }));
             (ChatRole::User, ChatItemStatus::Complete, parts)
         }
-        NormalizedMessage::AgentText { text, .. } => (
-            ChatRole::Agent,
-            ChatItemStatus::Complete,
-            vec![MessagePart::Text { text: text.clone() }],
-        ),
-        NormalizedMessage::Content { role, content, .. } => (
+        NormalizedMessage::AgentMessage { role, parts, .. } => (
             match role {
-                AgentContentRole::Agent => ChatRole::Agent,
-                AgentContentRole::Thought => ChatRole::System,
+                AgentMessageRole::Agent => ChatRole::Agent,
+                AgentMessageRole::Thought => ChatRole::System,
             },
             ChatItemStatus::Complete,
-            vec![project_agent_content(content)],
-        ),
-        NormalizedMessage::Thought { text, .. } => (
-            ChatRole::System,
-            ChatItemStatus::Complete,
-            vec![MessagePart::Text { text: text.clone() }],
+            parts.iter().map(project_agent_message_part).collect(),
         ),
         NormalizedMessage::Activity {
             title,
@@ -158,9 +149,10 @@ fn project_message(message: &NormalizedMessage) -> (ChatRole, ChatItemStatus, Ve
     }
 }
 
-fn project_agent_content(content: &AgentContent) -> MessagePart {
+fn project_agent_message_part(content: &AgentMessagePart) -> MessagePart {
     match content {
-        AgentContent::Image {
+        AgentMessagePart::Text { text } => MessagePart::Text { text: text.clone() },
+        AgentMessagePart::Image {
             media_type,
             data,
             uri,
@@ -169,7 +161,7 @@ fn project_agent_content(content: &AgentContent) -> MessagePart {
             data_url: format!("data:{media_type};base64,{data}"),
             uri: uri.clone(),
         },
-        AgentContent::Resource {
+        AgentMessagePart::Resource {
             uri,
             name,
             title,
@@ -186,7 +178,7 @@ fn project_agent_content(content: &AgentContent) -> MessagePart {
             size_bytes: *size_bytes,
             text: text.clone(),
         },
-        AgentContent::Unsupported {
+        AgentMessagePart::Unsupported {
             content_type,
             media_type,
             uri,

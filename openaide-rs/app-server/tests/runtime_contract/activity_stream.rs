@@ -183,10 +183,7 @@ fn streamed_agent_text_chunks_are_persisted_as_one_message_per_contiguous_run() 
         .chat
         .items
         .iter()
-        .filter_map(|item| match &item.message {
-            NormalizedMessage::AgentText { text, .. } => Some(text.as_str()),
-            _ => None,
-        })
+        .filter_map(|item| agent_message_text(&item.message))
         .collect::<Vec<_>>();
     assert_eq!(
         agent_texts,
@@ -239,10 +236,7 @@ fn source_message_id_preserves_one_agent_message_across_tool_activity() {
         .chat
         .items
         .iter()
-        .filter_map(|item| match &item.message {
-            NormalizedMessage::AgentText { text, .. } => Some(text.as_str()),
-            _ => None,
-        })
+        .filter_map(|item| agent_message_text(&item.message))
         .collect::<Vec<_>>();
 
     assert_eq!(agent_texts, vec!["Before after."]);

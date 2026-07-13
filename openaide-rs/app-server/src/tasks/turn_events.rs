@@ -141,29 +141,30 @@ impl TaskSessionEventSink {
             self.finish_anonymous_text_routes();
             return self.update_task_commands(catalog, &now);
         }
-        if let AgentEvent::Text(text) = event {
-            self.finish_anonymous_thought_run();
-            return self.append_agent_text_chunk(text, None, &now);
-        }
-        if let AgentEvent::TextChunk {
-            text,
+        if let AgentEvent::MessageChunk {
+            role,
+            part,
             source_message_id,
         } = event
         {
-            self.finish_anonymous_thought_run();
-            return self.append_agent_text_chunk(text, source_message_id, &now);
-        }
-        if let AgentEvent::Thought(text) = event {
-            self.finish_anonymous_text_run();
-            return self.append_agent_thought_chunk(text, None, &now);
-        }
-        if let AgentEvent::ThoughtChunk {
-            text,
-            source_message_id,
-        } = event
-        {
-            self.finish_anonymous_text_run();
-            return self.append_agent_thought_chunk(text, source_message_id, &now);
+            let channel = match role {
+                crate::protocol::model::AgentMessageRole::Agent => TextChannel::Agent,
+                crate::protocol::model::AgentMessageRole::Thought => TextChannel::Thought,
+            };
+            match channel {
+                TextChannel::Agent => self.finish_anonymous_thought_run(),
+                TextChannel::Thought => self.finish_anonymous_text_run(),
+            }
+            let anonymous_non_text = source_message_id.is_none()
+                && !matches!(&part, crate::protocol::model::AgentMessagePart::Text { .. });
+            let message_id = self
+                .text_chunk_routes
+                .message_id(channel, source_message_id);
+            let result = self.commit_agent_message_part(role, message_id, part, &now);
+            if anonymous_non_text {
+                self.text_chunk_routes.finish_anonymous(channel);
+            }
+            return result;
         }
         self.finish_anonymous_text_routes();
         if let AgentEvent::ToolCall(tool_call) = &mut event {
@@ -175,32 +176,8 @@ impl TaskSessionEventSink {
         self.append_session_message(normalize_event(event, &now), &now)
     }
 
-    fn append_agent_text_chunk(
-        &self,
-        text: String,
-        source_message_id: Option<String>,
-        now: &str,
-    ) -> Result<(), RuntimeError> {
-        let message_id = self
-            .text_chunk_routes
-            .message_id(TextChannel::Agent, source_message_id);
-        self.commit_text_chunk(TextChannel::Agent, message_id, text, now)
-    }
-
     fn finish_anonymous_text_run(&self) {
         self.text_chunk_routes.finish_anonymous(TextChannel::Agent);
-    }
-
-    fn append_agent_thought_chunk(
-        &self,
-        text: String,
-        source_message_id: Option<String>,
-        now: &str,
-    ) -> Result<(), RuntimeError> {
-        let message_id = self
-            .text_chunk_routes
-            .message_id(TextChannel::Thought, source_message_id);
-        self.commit_text_chunk(TextChannel::Thought, message_id, text, now)
     }
 
     fn finish_anonymous_thought_run(&self) {
@@ -214,24 +191,18 @@ impl TaskSessionEventSink {
         self.text_chunk_routes.finish_all_anonymous();
     }
 
-    fn commit_text_chunk(
+    fn commit_agent_message_part(
         &self,
-        channel: TextChannel,
+        role: crate::protocol::model::AgentMessageRole,
         message_id: String,
-        text: String,
+        part: crate::protocol::model::AgentMessagePart,
         now: &str,
     ) -> Result<(), RuntimeError> {
-        let message = match channel {
-            TextChannel::Agent => NormalizedMessage::AgentText {
-                id: message_id,
-                text,
-                created_at: now.to_string(),
-            },
-            TextChannel::Thought => NormalizedMessage::Thought {
-                id: message_id,
-                text,
-                created_at: now.to_string(),
-            },
+        let message = NormalizedMessage::AgentMessage {
+            id: message_id,
+            role,
+            parts: vec![part],
+            created_at: now.to_string(),
         };
         self.mutations.commit_existing_task(
             &self.task_id,
@@ -243,7 +214,7 @@ impl TaskSessionEventSink {
                 if ctx.task().agent_session_id.as_deref() != Some(self.session_id.as_str()) {
                     return Ok(TaskMutationResult::Unchanged);
                 }
-                ctx.append_text_chunk(message)?;
+                ctx.append_agent_message_part(message)?;
                 ctx.task_mut().updated_at = now.to_string();
                 Ok(TaskMutationResult::Changed)
             },

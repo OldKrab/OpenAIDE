@@ -40,22 +40,10 @@ pub enum NormalizedMessage {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         attachments: Vec<Attachment>,
     },
-    AgentText {
+    AgentMessage {
         id: String,
-        text: String,
-        created_at: String,
-    },
-    Content {
-        id: String,
-        role: AgentContentRole,
-        content: AgentContent,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        source_message_id: Option<String>,
-        created_at: String,
-    },
-    Thought {
-        id: String,
-        text: String,
+        role: AgentMessageRole,
+        parts: Vec<AgentMessagePart>,
         created_at: String,
     },
     Activity {
@@ -118,16 +106,14 @@ impl NormalizedMessage {
     pub fn message_type(&self) -> &'static str {
         match self {
             NormalizedMessage::User { .. } => "user",
-            NormalizedMessage::AgentText { .. } => "agent_text",
-            NormalizedMessage::Content {
-                role: AgentContentRole::Agent,
+            NormalizedMessage::AgentMessage {
+                role: AgentMessageRole::Agent,
                 ..
-            } => "agent_content",
-            NormalizedMessage::Content {
-                role: AgentContentRole::Thought,
+            } => "agent_message",
+            NormalizedMessage::AgentMessage {
+                role: AgentMessageRole::Thought,
                 ..
-            } => "thought_content",
-            NormalizedMessage::Thought { .. } => "thought",
+            } => "thought_message",
             NormalizedMessage::Activity { .. } => "activity",
             NormalizedMessage::Permission { .. } => "permission",
             NormalizedMessage::Question { .. } => "question",
@@ -138,9 +124,7 @@ impl NormalizedMessage {
     pub fn identity(&self) -> String {
         match self {
             NormalizedMessage::User { id, .. }
-            | NormalizedMessage::AgentText { id, .. }
-            | NormalizedMessage::Content { id, .. }
-            | NormalizedMessage::Thought { id, .. }
+            | NormalizedMessage::AgentMessage { id, .. }
             | NormalizedMessage::Activity { id, .. }
             | NormalizedMessage::Permission { id, .. }
             | NormalizedMessage::Question { id, .. }
@@ -151,9 +135,7 @@ impl NormalizedMessage {
     pub fn preserve_created_at_from(&mut self, existing: &NormalizedMessage) {
         let existing_created_at = match existing {
             NormalizedMessage::User { created_at, .. }
-            | NormalizedMessage::AgentText { created_at, .. }
-            | NormalizedMessage::Content { created_at, .. }
-            | NormalizedMessage::Thought { created_at, .. }
+            | NormalizedMessage::AgentMessage { created_at, .. }
             | NormalizedMessage::Activity { created_at, .. }
             | NormalizedMessage::Permission { created_at, .. }
             | NormalizedMessage::Question { created_at, .. }
@@ -161,9 +143,7 @@ impl NormalizedMessage {
         };
         match self {
             NormalizedMessage::User { created_at, .. }
-            | NormalizedMessage::AgentText { created_at, .. }
-            | NormalizedMessage::Content { created_at, .. }
-            | NormalizedMessage::Thought { created_at, .. }
+            | NormalizedMessage::AgentMessage { created_at, .. }
             | NormalizedMessage::Activity { created_at, .. }
             | NormalizedMessage::Permission { created_at, .. }
             | NormalizedMessage::Question { created_at, .. }
@@ -174,18 +154,21 @@ impl NormalizedMessage {
     }
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
-pub enum AgentContentRole {
+pub enum AgentMessageRole {
     Agent,
     Thought,
 }
 
 /// App Server-owned representation of displayable ACP content.
 /// Reserved ACP metadata and annotations intentionally do not cross this boundary.
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
-pub enum AgentContent {
+pub enum AgentMessagePart {
+    Text {
+        text: String,
+    },
     Image {
         media_type: String,
         data: String,

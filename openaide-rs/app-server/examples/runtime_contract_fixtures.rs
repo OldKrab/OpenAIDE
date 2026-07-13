@@ -8,10 +8,11 @@ use openaide_app_server::protocol::model::{
     ActivityStatus, ActivityStep, ActivityToolContent, ActivityToolDetails, ActivityToolField,
     ActivityToolInput, ActivityToolLocation, ActivityToolOutput, ActivityToolValue,
     AgentAuthMethodSummary, AgentAuthenticateResult, AgentAuthenticateStatus,
-    AgentListSessionsResult, AgentListedSession, AgentProbeCapabilities, AgentProbeResult,
-    AgentProbeStatus, Attachment, ChatMessage, InterruptionReason, IsolationKind, MessagePage,
-    NormalizedMessage, PermissionDecision, PermissionOption, PermissionOptionKind, PermissionState,
-    PermissionToolCall, SettingsSummary, TaskSnapshot, TaskStatus, TaskSummary,
+    AgentListSessionsResult, AgentListedSession, AgentMessagePart, AgentMessageRole,
+    AgentProbeCapabilities, AgentProbeResult, AgentProbeStatus, Attachment, ChatMessage,
+    InterruptionReason, IsolationKind, MessagePage, NormalizedMessage, PermissionDecision,
+    PermissionOption, PermissionOptionKind, PermissionState, PermissionToolCall, SettingsSummary,
+    TaskSnapshot, TaskStatus, TaskSummary,
 };
 use openaide_app_server::protocol::notifications::RuntimeNotification;
 use openaide_app_server::protocol::params::{
@@ -36,9 +37,12 @@ fn main() {
                 created_at: "2026-05-22T00:00:00Z".to_string(),
                 attachments: vec![attachment()],
             }),
-            chat_message(NormalizedMessage::AgentText {
+            chat_message(NormalizedMessage::AgentMessage {
                 id: "msg_agent".to_string(),
-                text: "Done.".to_string(),
+                role: AgentMessageRole::Agent,
+                parts: vec![AgentMessagePart::Text {
+                    text: "Done.".to_string(),
+                }],
                 created_at: "2026-05-22T00:00:01Z".to_string(),
             }),
             chat_message(NormalizedMessage::Activity {

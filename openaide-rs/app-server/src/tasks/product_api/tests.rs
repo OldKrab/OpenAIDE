@@ -29,9 +29,9 @@ use crate::client_lifecycle::{AppServerTime, ConnectionId, Delivery};
 use crate::projects::{project_id_for_workspace, ProjectTaskContext, StorageProjectResolver};
 use crate::protocol::model::{
     ActivityStatus, ActivityStep, AgentCommand, AgentCommandsCatalog, AgentListSessionsResult,
-    AgentListedSession, Attachment, ChatMessage, ConfigOption, ConfigOptionCategory,
-    ConfigOptionValue, ConfigOptionsCatalog, ConfigOptionsStatus, InterruptionReason,
-    IsolationKind, NormalizedMessage, TaskStatus,
+    AgentListedSession, AgentMessagePart, AgentMessageRole, Attachment, ChatMessage, ConfigOption,
+    ConfigOptionCategory, ConfigOptionValue, ConfigOptionsCatalog, ConfigOptionsStatus,
+    InterruptionReason, IsolationKind, NormalizedMessage, TaskStatus,
 };
 use crate::server_requests::{ServerRequestAnswer, ServerRequestRuntime};
 use crate::snapshots::task_snapshot::project_stored_task_snapshot;
@@ -1585,11 +1585,14 @@ fn open_readopts_adopted_task_when_native_session_is_newer_than_cached_history()
             ChatMessage {
                 cursor: "m:1".to_string(),
                 identity: "cached:stale".to_string(),
-                message_type: "agent_text".to_string(),
+                message_type: "agent_message".to_string(),
                 message_id: "cached_message".to_string(),
-                message: NormalizedMessage::AgentText {
+                message: NormalizedMessage::AgentMessage {
                     id: "cached:stale".to_string(),
-                    text: "Stale cached history.".to_string(),
+                    role: AgentMessageRole::Agent,
+                    parts: vec![AgentMessagePart::Text {
+                        text: "Stale cached history.".to_string(),
+                    }],
                     created_at: "2026-01-01T00:00:00.000Z".to_string(),
                 },
             },
@@ -1613,9 +1616,12 @@ fn open_readopts_adopted_task_when_native_session_is_newer_than_cached_history()
             last_activity: Some(native_updated_at.to_string()),
             updated_at: Some(native_updated_at.to_string()),
         }]),
-        replayed_messages: Mutex::new(vec![NormalizedMessage::AgentText {
+        replayed_messages: Mutex::new(vec![NormalizedMessage::AgentMessage {
             id: "native:fresh".to_string(),
-            text: "Fresh native history.".to_string(),
+            role: AgentMessageRole::Agent,
+            parts: vec![AgentMessagePart::Text {
+                text: "Fresh native history.".to_string(),
+            }],
             created_at: "2026-01-02T00:00:00.000Z".to_string(),
         }]),
         ..Default::default()
@@ -1669,7 +1675,13 @@ fn open_readopts_adopted_task_when_native_session_is_newer_than_cached_history()
     assert_eq!(stored_messages.len(), 1);
     assert!(matches!(
         &stored_messages[0].chat.message,
-        NormalizedMessage::AgentText { text, .. } if text == "Fresh native history."
+        NormalizedMessage::AgentMessage {
+            role: AgentMessageRole::Agent,
+            parts,
+            ..
+        } if parts == &vec![AgentMessagePart::Text {
+            text: "Fresh native history.".to_string(),
+        }]
     ));
     let record = store.read_task("task-existing").unwrap();
     assert!(!record.unread);
@@ -1808,9 +1820,12 @@ fn send_does_not_wait_for_or_apply_a_blocked_history_listing() {
             last_activity: Some("2026-01-02T00:00:00.000Z".to_string()),
             updated_at: Some("2026-01-02T00:00:00.000Z".to_string()),
         }]),
-        replayed_messages: Mutex::new(vec![NormalizedMessage::AgentText {
+        replayed_messages: Mutex::new(vec![NormalizedMessage::AgentMessage {
             id: "native-history".to_string(),
-            text: "History only the Agent had.".to_string(),
+            role: AgentMessageRole::Agent,
+            parts: vec![AgentMessagePart::Text {
+                text: "History only the Agent had.".to_string(),
+            }],
             created_at: "2026-01-02T00:00:00.000Z".to_string(),
         }]),
         ..Default::default()
@@ -1841,9 +1856,15 @@ fn send_does_not_wait_for_or_apply_a_blocked_history_listing() {
     let texts = messages
         .iter()
         .filter_map(|message| match &message.chat.message {
-            NormalizedMessage::AgentText { text, .. } | NormalizedMessage::User { text, .. } => {
-                Some(text.as_str())
-            }
+            NormalizedMessage::AgentMessage {
+                role: AgentMessageRole::Agent,
+                parts,
+                ..
+            } => parts.iter().find_map(|part| match part {
+                AgentMessagePart::Text { text } => Some(text.as_str()),
+                _ => None,
+            }),
+            NormalizedMessage::User { text, .. } => Some(text.as_str()),
             _ => None,
         })
         .collect::<Vec<_>>();
@@ -1902,11 +1923,14 @@ fn history_load_failure_adds_activity_and_leaves_task_sendable() {
             ChatMessage {
                 cursor: "m:1".to_string(),
                 identity: "cached:stale".to_string(),
-                message_type: "agent_text".to_string(),
+                message_type: "agent_message".to_string(),
                 message_id: "cached_message".to_string(),
-                message: NormalizedMessage::AgentText {
+                message: NormalizedMessage::AgentMessage {
                     id: "cached:stale".to_string(),
-                    text: "Stale cached history.".to_string(),
+                    role: AgentMessageRole::Agent,
+                    parts: vec![AgentMessagePart::Text {
+                        text: "Stale cached history.".to_string(),
+                    }],
                     created_at: "2026-01-01T00:00:00.000Z".to_string(),
                 },
             },
@@ -1930,9 +1954,12 @@ fn history_load_failure_adds_activity_and_leaves_task_sendable() {
             last_activity: Some(native_updated_at.to_string()),
             updated_at: Some(native_updated_at.to_string()),
         }]),
-        replayed_messages: Mutex::new(vec![NormalizedMessage::AgentText {
+        replayed_messages: Mutex::new(vec![NormalizedMessage::AgentMessage {
             id: "native:fresh".to_string(),
-            text: "Fresh native history.".to_string(),
+            role: AgentMessageRole::Agent,
+            parts: vec![AgentMessagePart::Text {
+                text: "Fresh native history.".to_string(),
+            }],
             created_at: "2026-01-02T00:00:00.000Z".to_string(),
         }]),
         fail_load_once_with_already_active: AtomicBool::new(true),
@@ -1971,7 +1998,13 @@ fn history_load_failure_adds_activity_and_leaves_task_sendable() {
     let stored_messages = store.read_messages("task-existing").unwrap();
     assert!(matches!(
         &stored_messages[0].chat.message,
-        NormalizedMessage::AgentText { text, .. } if text == "Stale cached history."
+        NormalizedMessage::AgentMessage {
+            role: AgentMessageRole::Agent,
+            parts,
+            ..
+        } if parts == &vec![AgentMessagePart::Text {
+            text: "Stale cached history.".to_string(),
+        }]
     ));
     assert!(stored_messages.iter().any(|message| matches!(
         &message.chat.message,
@@ -2009,11 +2042,14 @@ fn open_keeps_adopted_task_cache_when_native_session_is_not_newer() {
             ChatMessage {
                 cursor: "m:1".to_string(),
                 identity: "cached:current".to_string(),
-                message_type: "agent_text".to_string(),
+                message_type: "agent_message".to_string(),
                 message_id: "cached_message".to_string(),
-                message: NormalizedMessage::AgentText {
+                message: NormalizedMessage::AgentMessage {
                     id: "cached:current".to_string(),
-                    text: "Current cached history.".to_string(),
+                    role: AgentMessageRole::Agent,
+                    parts: vec![AgentMessagePart::Text {
+                        text: "Current cached history.".to_string(),
+                    }],
                     created_at: "2026-01-02T00:00:00.000Z".to_string(),
                 },
             },
@@ -2031,9 +2067,12 @@ fn open_keeps_adopted_task_cache_when_native_session_is_not_newer() {
             last_activity: Some("2026-01-01T00:00:00.000Z".to_string()),
             updated_at: Some("2026-01-01T00:00:00.000Z".to_string()),
         }]),
-        replayed_messages: Mutex::new(vec![NormalizedMessage::AgentText {
+        replayed_messages: Mutex::new(vec![NormalizedMessage::AgentMessage {
             id: "native:older".to_string(),
-            text: "Older native history.".to_string(),
+            role: AgentMessageRole::Agent,
+            parts: vec![AgentMessagePart::Text {
+                text: "Older native history.".to_string(),
+            }],
             created_at: "2026-01-01T00:00:00.000Z".to_string(),
         }]),
         ..Default::default()
@@ -2100,9 +2139,12 @@ fn open_keeps_adopted_task_cache_when_native_session_has_no_activity_time() {
             last_activity: None,
             updated_at: None,
         }]),
-        replayed_messages: Mutex::new(vec![NormalizedMessage::AgentText {
+        replayed_messages: Mutex::new(vec![NormalizedMessage::AgentMessage {
             id: "native:unordered".to_string(),
-            text: "History with no ordering timestamp.".to_string(),
+            role: AgentMessageRole::Agent,
+            parts: vec![AgentMessagePart::Text {
+                text: "History with no ordering timestamp.".to_string(),
+            }],
             created_at: "2026-01-01T00:00:00.000Z".to_string(),
         }]),
         ..Default::default()
@@ -3513,9 +3555,12 @@ fn cancel_stays_stopping_until_the_agent_prompt_settles() {
                     collapsed: true,
                     steps: Vec::new(),
                 })?;
-                ctx.append_message(NormalizedMessage::AgentText {
+                ctx.append_message(NormalizedMessage::AgentMessage {
                     id: "agent-stream".to_string(),
-                    text: "partial response".to_string(),
+                    role: AgentMessageRole::Agent,
+                    parts: vec![AgentMessagePart::Text {
+                        text: "partial response".to_string(),
+                    }],
                     created_at: "2026-01-01T00:00:00.000Z".to_string(),
                 })?;
                 let task = ctx.task_mut();
@@ -3559,7 +3604,13 @@ fn cancel_stays_stopping_until_the_agent_prompt_settles() {
         .iter()
         .any(|message| matches!(
             &message.chat.message,
-            NormalizedMessage::AgentText { text, .. } if text == "partial response"
+            NormalizedMessage::AgentMessage {
+                role: AgentMessageRole::Agent,
+                parts,
+                ..
+            } if parts == &vec![AgentMessagePart::Text {
+                text: "partial response".to_string(),
+            }]
         )));
     assert_eq!(
         snapshot.task.status,
@@ -4024,11 +4075,14 @@ fn task_open_republishes_controls_from_recovered_native_session() {
             ChatMessage {
                 cursor: "m:1".to_string(),
                 identity: "cached:controls".to_string(),
-                message_type: "agent_text".to_string(),
+                message_type: "agent_message".to_string(),
                 message_id: "cached-controls".to_string(),
-                message: NormalizedMessage::AgentText {
+                message: NormalizedMessage::AgentMessage {
                     id: "cached:controls".to_string(),
-                    text: "Cached history".to_string(),
+                    role: AgentMessageRole::Agent,
+                    parts: vec![AgentMessagePart::Text {
+                        text: "Cached history".to_string(),
+                    }],
                     created_at: "2025-12-31T00:00:00.000Z".to_string(),
                 },
             },

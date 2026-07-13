@@ -115,27 +115,35 @@ impl TaskMutationContext<'_> {
         Ok(upserted)
     }
 
-    pub(crate) fn append_text_chunk(
+    pub(crate) fn append_agent_message_part(
         &mut self,
         message: NormalizedMessage,
-    ) -> Result<crate::storage::message_store::TextChunkAppend, RuntimeError> {
+    ) -> Result<crate::storage::message_store::AgentMessageAppend, RuntimeError> {
         let text = match &message {
-            NormalizedMessage::AgentText { text, .. } | NormalizedMessage::Thought { text, .. } => {
-                text.clone()
-            }
-            _ => String::new(),
+            NormalizedMessage::AgentMessage { parts, .. } => match parts.as_slice() {
+                [crate::protocol::model::AgentMessagePart::Text { text }] => Some(text.clone()),
+                _ => None,
+            },
+            _ => None,
         };
-        let result = self.store.append_text_chunk(&self.task.task_id, message)?;
+        let result = self
+            .store
+            .append_agent_message_part(&self.task.task_id, message)?;
         match &result {
-            crate::storage::message_store::TextChunkAppend::Appended(stored) => {
+            crate::storage::message_store::AgentMessageAppend::Appended(stored) => {
                 self.chat_changes.push(CommittedChatChange::Append {
                     item: crate::snapshots::task_snapshot::project_chat_item(&stored.chat),
                 });
             }
-            crate::storage::message_store::TextChunkAppend::Updated(stored) => {
+            crate::storage::message_store::AgentMessageAppend::TextAppended(stored) => {
                 self.chat_changes.push(CommittedChatChange::AppendText {
                     message_id: stored.chat.message_id.clone().into(),
-                    text,
+                    text: text.expect("text append result requires one incoming text part"),
+                });
+            }
+            crate::storage::message_store::AgentMessageAppend::PartAppended(stored) => {
+                self.chat_changes.push(CommittedChatChange::Upsert {
+                    item: crate::snapshots::task_snapshot::project_chat_item(&stored.chat),
                 });
             }
         }

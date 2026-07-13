@@ -1,7 +1,9 @@
 use std::sync::{Arc, Mutex};
 
 use crate::protocol::errors::RuntimeError;
-use crate::protocol::model::{IsolationKind, NormalizedMessage, TaskStatus};
+use crate::protocol::model::{
+    AgentMessagePart, AgentMessageRole, IsolationKind, NormalizedMessage, TaskStatus,
+};
 use crate::storage::records::{TaskPreparationRecord, TaskRecord};
 use crate::storage::Store;
 use crate::task_events::{TaskUpdateNotifier, TaskUpdateReceiver};
@@ -184,9 +186,12 @@ fn rejected_commit_rolls_back_context_message_side_effects() {
             "task_reject_side_effect",
             TaskCommitOptions::metadata(),
             |ctx| {
-                ctx.append_message(NormalizedMessage::AgentText {
+                ctx.append_message(NormalizedMessage::AgentMessage {
                     id: "message_2".to_string(),
-                    text: "should roll back".to_string(),
+                    role: AgentMessageRole::Agent,
+                    parts: vec![AgentMessagePart::Text {
+                        text: "should roll back".to_string(),
+                    }],
                     created_at: "3".to_string(),
                 })?;
                 Ok(TaskMutationResult::Rejected)
@@ -219,9 +224,12 @@ fn invariant_failure_rolls_back_context_message_side_effects() {
             "task_invariant_side_effect",
             TaskCommitOptions::metadata(),
             |ctx| {
-                ctx.append_message(NormalizedMessage::AgentText {
+                ctx.append_message(NormalizedMessage::AgentMessage {
                     id: "message_1".to_string(),
-                    text: "should roll back".to_string(),
+                    role: AgentMessageRole::Agent,
+                    parts: vec![AgentMessagePart::Text {
+                        text: "should roll back".to_string(),
+                    }],
                     created_at: "3".to_string(),
                 })?;
                 ctx.task_mut().revision = 99;

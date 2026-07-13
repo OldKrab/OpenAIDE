@@ -5,8 +5,8 @@ use openaide_app_server_protocol::snapshot::{
 use std::sync::{Arc, Mutex};
 
 use crate::protocol::model::{
-    ActivityStatus, ActivityStep, ChatMessage, IsolationKind, NormalizedMessage,
-    PermissionDecision, PermissionOption, PermissionOptionKind, PermissionState,
+    ActivityStatus, ActivityStep, AgentMessagePart, AgentMessageRole, ChatMessage, IsolationKind,
+    NormalizedMessage, PermissionDecision, PermissionOption, PermissionOptionKind, PermissionState,
     PermissionToolCall, TaskStatus,
 };
 use crate::storage::records::{TaskPreparationRecord, TaskRecord};
@@ -157,9 +157,12 @@ fn open_projects_durable_chat_without_raw_attachment_paths() {
     store
         .append_message(
             "task-1",
-            chat_message(NormalizedMessage::AgentText {
+            chat_message(NormalizedMessage::AgentMessage {
                 id: "agent-1".to_string(),
-                text: "done".to_string(),
+                role: AgentMessageRole::Agent,
+                parts: vec![AgentMessagePart::Text {
+                    text: "done".to_string(),
+                }],
                 created_at: "2026-01-01T00:00:01.000Z".to_string(),
             }),
         )
@@ -206,9 +209,12 @@ fn open_retries_when_message_commit_interleaves_with_snapshot_read() {
         interleaving_store
             .append_message(
                 "task-1",
-                chat_message(NormalizedMessage::AgentText {
+                chat_message(NormalizedMessage::AgentMessage {
                     id: "agent-1".to_string(),
-                    text: "committed while reading".to_string(),
+                    role: AgentMessageRole::Agent,
+                    parts: vec![AgentMessagePart::Text {
+                        text: "committed while reading".to_string(),
+                    }],
                     created_at: "2026-01-01T00:00:01.000Z".to_string(),
                 }),
             )

@@ -10,29 +10,10 @@ pub fn normalize_events(events: Vec<AgentEvent>, created_at: &str) -> Vec<Normal
     events
         .into_iter()
         .filter_map(|event| match event {
-            AgentEvent::Text(text) | AgentEvent::TextChunk { text, .. } => {
-                Some(NormalizedMessage::AgentText {
-                    id: Uuid::new_v4().to_string(),
-                    text,
-                    created_at: created_at.to_string(),
-                })
-            }
-            AgentEvent::Thought(text) | AgentEvent::ThoughtChunk { text, .. } => {
-                Some(NormalizedMessage::Thought {
-                    id: Uuid::new_v4().to_string(),
-                    text,
-                    created_at: created_at.to_string(),
-                })
-            }
-            AgentEvent::Content {
-                role,
-                content,
-                source_message_id,
-            } => Some(NormalizedMessage::Content {
+            AgentEvent::MessageChunk { role, part, .. } => Some(NormalizedMessage::AgentMessage {
                 id: Uuid::new_v4().to_string(),
                 role,
-                content,
-                source_message_id,
+                parts: vec![part],
                 created_at: created_at.to_string(),
             }),
             AgentEvent::ToolCall(tool_call) => {

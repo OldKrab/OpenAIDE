@@ -57,7 +57,7 @@ impl AgentRuntime for CountingAgent {
             return Ok(openaide_app_server::agent::AgentPromptOutcome::Cancelled);
         }
         self.calls.fetch_add(1, Ordering::SeqCst);
-        sink.emit(AgentEvent::Text("counted response".to_string()))?;
+        sink.emit(agent_text_event("counted response"))?;
         Ok(openaide_app_server::agent::AgentPromptOutcome::EndTurn)
     }
 }
@@ -94,7 +94,7 @@ impl AgentRuntime for PassiveSnapshotAgent {
         while !state.released {
             state = changed.wait(state).unwrap();
         }
-        sink.emit(AgentEvent::Text("counted response".to_string()))?;
+        sink.emit(agent_text_event("counted response"))?;
         Ok(openaide_app_server::agent::AgentPromptOutcome::EndTurn)
     }
 }
@@ -122,7 +122,7 @@ impl AgentRuntime for WaitingAgent {
         if prompt.cancellation.is_cancelled() {
             self.cancelled.fetch_add(1, Ordering::SeqCst);
         }
-        sink.emit(AgentEvent::Text("should not be stored".to_string()))?;
+        sink.emit(agent_text_event("should not be stored"))?;
         Ok(openaide_app_server::agent::AgentPromptOutcome::Cancelled)
     }
 }
@@ -154,7 +154,7 @@ impl AgentRuntime for SessionTrackingAgent {
     ) -> Result<openaide_app_server::agent::AgentPromptOutcome, RuntimeError> {
         assert!(!prompt.session_id.is_empty());
         self.prompts.fetch_add(1, Ordering::SeqCst);
-        sink.emit(AgentEvent::Text("tracked response".to_string()))?;
+        sink.emit(agent_text_event("tracked response"))?;
         Ok(openaide_app_server::agent::AgentPromptOutcome::EndTurn)
     }
 }
@@ -200,11 +200,11 @@ impl AgentRuntime for LoadSessionAgent {
                     created_at: "2026-05-18T00:00:00Z".to_string(),
                     attachments: Vec::new(),
                 },
-                NormalizedMessage::AgentText {
-                    id: "replayed-agent".to_string(),
-                    text: "Prior agent answer".to_string(),
-                    created_at: "2026-05-18T00:00:01Z".to_string(),
-                },
+                normalized_agent_text(
+                    "replayed-agent",
+                    "Prior agent answer",
+                    "2026-05-18T00:00:01Z",
+                ),
             ],
         })
     }
@@ -228,7 +228,7 @@ impl AgentRuntime for LoadSessionAgent {
     ) -> Result<openaide_app_server::agent::AgentPromptOutcome, RuntimeError> {
         assert_eq!(prompt.session_id, "external-session");
         self.prompts.fetch_add(1, Ordering::SeqCst);
-        sink.emit(AgentEvent::Text("continued loaded session".to_string()))?;
+        sink.emit(agent_text_event("continued loaded session"))?;
         Ok(openaide_app_server::agent::AgentPromptOutcome::EndTurn)
     }
 }
@@ -295,7 +295,7 @@ impl AgentRuntime for DelayedAgent {
         sink: Arc<dyn AgentEventSink>,
     ) -> Result<openaide_app_server::agent::AgentPromptOutcome, RuntimeError> {
         thread::sleep(Duration::from_millis(80));
-        sink.emit(AgentEvent::Text("delayed response".to_string()))?;
+        sink.emit(agent_text_event("delayed response"))?;
         Ok(openaide_app_server::agent::AgentPromptOutcome::EndTurn)
     }
 }
@@ -314,7 +314,7 @@ impl AgentRuntime for OptionUpdateAgent {
         sink: Arc<dyn AgentEventSink>,
     ) -> Result<openaide_app_server::agent::AgentPromptOutcome, RuntimeError> {
         sink.emit(AgentEvent::ConfigOptionsChanged(model_catalog("gpt-5.5")))?;
-        sink.emit(AgentEvent::Text("updated".to_string()))?;
+        sink.emit(agent_text_event("updated"))?;
         Ok(openaide_app_server::agent::AgentPromptOutcome::EndTurn)
     }
 }
@@ -354,7 +354,7 @@ impl AgentRuntime for ToolCallUpdateAgent {
             output_preview: Some("Found configuration".to_string()),
             details: None,
         }))?;
-        sink.emit(AgentEvent::Text("done".to_string()))?;
+        sink.emit(agent_text_event("done"))?;
         Ok(openaide_app_server::agent::AgentPromptOutcome::EndTurn)
     }
 }
@@ -372,7 +372,7 @@ impl AgentRuntime for ChunkedTextAgent {
         sink: Arc<dyn AgentEventSink>,
     ) -> Result<openaide_app_server::agent::AgentPromptOutcome, RuntimeError> {
         for chunk in ["I will ", "run ", "`pwd`."] {
-            sink.emit(AgentEvent::Text(chunk.to_string()))?;
+            sink.emit(agent_text_event(chunk))?;
         }
         sink.emit(AgentEvent::ToolCall(AgentToolCall {
             tool_call_id: "tool_call_pwd".to_string(),
@@ -385,7 +385,7 @@ impl AgentRuntime for ChunkedTextAgent {
             details: None,
         }))?;
         for chunk in ["Called", " `", "pwd", "`:", " `/", "home", "/us", "er", "`"] {
-            sink.emit(AgentEvent::Text(chunk.to_string()))?;
+            sink.emit(agent_text_event(chunk))?;
         }
         Ok(openaide_app_server::agent::AgentPromptOutcome::EndTurn)
     }
@@ -406,10 +406,7 @@ impl AgentRuntime for MessageIdSpanningToolAgent {
         _prompt: AgentPrompt,
         sink: Arc<dyn AgentEventSink>,
     ) -> Result<openaide_app_server::agent::AgentPromptOutcome, RuntimeError> {
-        sink.emit(AgentEvent::TextChunk {
-            text: "Before ".to_string(),
-            source_message_id: Some("message-1".to_string()),
-        })?;
+        sink.emit(sourced_agent_text_event("Before ", "message-1"))?;
         sink.emit(AgentEvent::ToolCall(AgentToolCall {
             tool_call_id: "tool_between_chunks".to_string(),
             scope_id: None,
@@ -420,10 +417,7 @@ impl AgentRuntime for MessageIdSpanningToolAgent {
             output_preview: None,
             details: None,
         }))?;
-        sink.emit(AgentEvent::TextChunk {
-            text: "after.".to_string(),
-            source_message_id: Some("message-1".to_string()),
-        })?;
+        sink.emit(sourced_agent_text_event("after.", "message-1"))?;
         Ok(openaide_app_server::agent::AgentPromptOutcome::EndTurn)
     }
 }
@@ -446,7 +440,7 @@ impl AgentRuntime for AttachmentCapturingAgent {
         sink: Arc<dyn AgentEventSink>,
     ) -> Result<openaide_app_server::agent::AgentPromptOutcome, RuntimeError> {
         self.prompts.lock().unwrap().push(prompt.attachments);
-        sink.emit(AgentEvent::Text("captured attachments".to_string()))?;
+        sink.emit(agent_text_event("captured attachments"))?;
         Ok(openaide_app_server::agent::AgentPromptOutcome::EndTurn)
     }
 }
@@ -498,7 +492,7 @@ impl AgentRuntime for IdleOptionUpdateAgent {
         _prompt: AgentPrompt,
         sink: Arc<dyn AgentEventSink>,
     ) -> Result<openaide_app_server::agent::AgentPromptOutcome, RuntimeError> {
-        sink.emit(AgentEvent::Text("done".to_string()))?;
+        sink.emit(agent_text_event("done"))?;
         Ok(openaide_app_server::agent::AgentPromptOutcome::EndTurn)
     }
 }
@@ -520,7 +514,7 @@ impl AgentRuntime for ShutdownTrackingAgent {
         _prompt: AgentPrompt,
         sink: Arc<dyn AgentEventSink>,
     ) -> Result<openaide_app_server::agent::AgentPromptOutcome, RuntimeError> {
-        sink.emit(AgentEvent::Text("response".to_string()))?;
+        sink.emit(agent_text_event("response"))?;
         Ok(openaide_app_server::agent::AgentPromptOutcome::EndTurn)
     }
 
@@ -652,7 +646,7 @@ impl AgentRuntime for FollowupAttachFailingAgent {
         sink: Arc<dyn AgentEventSink>,
     ) -> Result<openaide_app_server::agent::AgentPromptOutcome, RuntimeError> {
         self.prompts.fetch_add(1, Ordering::SeqCst);
-        sink.emit(AgentEvent::Text("follow-up response".to_string()))?;
+        sink.emit(agent_text_event("follow-up response"))?;
         Ok(openaide_app_server::agent::AgentPromptOutcome::EndTurn)
     }
 

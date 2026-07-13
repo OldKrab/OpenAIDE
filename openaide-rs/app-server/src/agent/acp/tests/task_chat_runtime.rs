@@ -12,7 +12,7 @@ use openaide_app_server_protocol::task::{
 use crate::agent::acp::{AcpAgentConfig, AcpAgentRuntime};
 use crate::agent::registry::AgentRegistry;
 use crate::projects::{project_id_for_workspace, ConfiguredProjectRoots, StorageProjectResolver};
-use crate::protocol::model::{NormalizedMessage, TaskStatus};
+use crate::protocol::model::{AgentMessagePart, AgentMessageRole, NormalizedMessage, TaskStatus};
 use crate::server_requests::ServerRequestRuntime;
 use crate::storage::records::TaskPreparationRecord;
 use crate::storage::Store;
@@ -303,8 +303,18 @@ fn logical_text_messages(store: &Store, task_id: &TaskId) -> Vec<(&'static str, 
         .into_iter()
         .filter_map(|stored| match stored.chat.message {
             NormalizedMessage::User { text, .. } => Some(("user", text)),
-            NormalizedMessage::AgentText { text, .. } => Some(("agent", text)),
-            NormalizedMessage::Thought { text, .. } => Some(("thought", text)),
+            NormalizedMessage::AgentMessage { role, parts, .. } => {
+                parts.into_iter().find_map(|part| match part {
+                    AgentMessagePart::Text { text } => Some((
+                        match role {
+                            AgentMessageRole::Agent => "agent",
+                            AgentMessageRole::Thought => "thought",
+                        },
+                        text,
+                    )),
+                    _ => None,
+                })
+            }
             _ => None,
         })
         .collect()

@@ -359,7 +359,7 @@ Only Chat append/chunk and history state currently have committed Task deltas. A
 
 ## AP-025: One ACP message can split into colliding Chat rows by content kind
 
-**Status:** confirmed
+**Status:** resolved
 
 **Area:** ACP content identity and Chat composition
 
@@ -368,3 +368,5 @@ ACP defines chunks with the same `messageId` as parts of one logical message, bu
 **Impact:** A valid mixed-content Agent or Thought message can overwrite content, split unpredictably, or receive identities that differ between live updates and history replay.
 
 **Desired direction:** Represent one ACP `messageId` as one ordered logical Chat message containing typed parts. Live updates and replay must use the same message identity and part ordering. Do not solve this by inventing unrelated row identities for each content kind.
+
+**Resolution:** Replaced the separate Agent text, Thought text, and non-text storage variants with one `AgentMessage` containing an ordered list of typed parts. Live ACP chunks and replay now use the same Native Session plus ACP `messageId` identity, append consecutive text to the current text part, and append images, resources, unsupported content, and later text as ordered parts of that same Chat row. The old content-specific Agent events, normalized messages, and storage append path were removed completely.

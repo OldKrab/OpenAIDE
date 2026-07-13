@@ -29,8 +29,9 @@ use crate::agent::prompt_content::{
 use crate::agent::tool_details::tool_call_event;
 use crate::agent::{AgentMetadataField, AgentSessionMetadataUpdate};
 use crate::protocol::model::{
-    ActivityStatus, ActivityToolContent, ActivityToolValue, AgentCommandsCatalog, Attachment,
-    ConfigOption, ConfigOptionCategory, ConfigOptionValue, ConfigOptionsStatus, NormalizedMessage,
+    ActivityStatus, ActivityToolContent, ActivityToolValue, AgentCommandsCatalog, AgentMessagePart,
+    AgentMessageRole, Attachment, ConfigOption, ConfigOptionCategory, ConfigOptionValue,
+    ConfigOptionsStatus, NormalizedMessage,
 };
 use agent_client_protocol::schema::{
     AgentCapabilities, AudioContent, AuthMethod, AuthMethodAgent, AuthenticateRequest,
@@ -66,6 +67,20 @@ use std::time::{Duration, Instant};
 
 mod active_session_runtime;
 mod task_chat_runtime;
+
+fn agent_message_text(message: &NormalizedMessage, role: AgentMessageRole) -> Option<&str> {
+    match message {
+        NormalizedMessage::AgentMessage {
+            role: message_role,
+            parts,
+            ..
+        } if *message_role == role => match parts.as_slice() {
+            [AgentMessagePart::Text { text }] => Some(text),
+            _ => None,
+        },
+        _ => None,
+    }
+}
 
 #[derive(Default)]
 struct CapturingSessionSink {
@@ -841,12 +856,10 @@ fn replayed_session_updates_are_normalized_as_chat_history() {
         }
         other => panic!("expected user replay, got {other:?}"),
     }
-    match &messages[1] {
-        NormalizedMessage::Thought { text, .. } => {
-            assert_eq!(text, "private streamed thought");
-        }
-        other => panic!("expected thought replay, got {other:?}"),
-    }
+    assert_eq!(
+        agent_message_text(&messages[1], AgentMessageRole::Thought),
+        Some("private streamed thought")
+    );
     match &messages[2] {
         NormalizedMessage::Activity {
             title,
@@ -860,12 +873,10 @@ fn replayed_session_updates_are_normalized_as_chat_history() {
         }
         other => panic!("expected completed tool replay, got {other:?}"),
     }
-    match &messages[3] {
-        NormalizedMessage::AgentText { text, .. } => {
-            assert_eq!(text, "Prior agent answer");
-        }
-        other => panic!("expected agent replay, got {other:?}"),
-    }
+    assert_eq!(
+        agent_message_text(&messages[3], AgentMessageRole::Agent),
+        Some("Prior agent answer")
+    );
 }
 
 #[test]
@@ -908,13 +919,14 @@ fn replay_continues_a_sourced_message_across_tool_activity() {
     ]);
 
     assert_eq!(messages.len(), 2);
-    match &messages[0] {
-        NormalizedMessage::AgentText { id, text, .. } => {
-            assert_eq!(id, "acp:session-source-tool-source:message:agent-message-1");
-            assert_eq!(text, "Before after");
-        }
-        other => panic!("expected one sourced message, got {other:?}"),
-    }
+    assert_eq!(
+        messages[0].identity(),
+        "acp:session-source-tool-source:message:agent-message-1"
+    );
+    assert_eq!(
+        agent_message_text(&messages[0], AgentMessageRole::Agent),
+        Some("Before after")
+    );
     assert!(matches!(
         &messages[1],
         NormalizedMessage::Activity {
@@ -922,6 +934,46 @@ fn replay_continues_a_sourced_message_across_tool_activity() {
             ..
         }
     ));
+}
+
+#[test]
+fn replay_preserves_mixed_content_as_one_ordered_agent_message() {
+    let messages = ReplayProjection::new("session-mixed-content").project(vec![
+        SessionUpdate::AgentMessageChunk(
+            ContentChunk::new(ContentBlock::Text(TextContent::new("Before")))
+                .message_id("agent-message-1".to_string()),
+        ),
+        SessionUpdate::AgentMessageChunk(
+            ContentChunk::new(ContentBlock::Image(ImageContent::new(
+                "aW1hZ2U=",
+                "image/png",
+            )))
+            .message_id("agent-message-1".to_string()),
+        ),
+        SessionUpdate::AgentMessageChunk(
+            ContentChunk::new(ContentBlock::Text(TextContent::new("After")))
+                .message_id("agent-message-1".to_string()),
+        ),
+    ]);
+
+    assert_eq!(messages.len(), 1);
+    match &messages[0] {
+        NormalizedMessage::AgentMessage {
+            id, role, parts, ..
+        } => {
+            assert_eq!(id, "acp:session-mixed-content:message:agent-message-1");
+            assert_eq!(role, &crate::protocol::model::AgentMessageRole::Agent);
+            assert!(matches!(
+                parts.as_slice(),
+                [
+                    crate::protocol::model::AgentMessagePart::Text { text: before },
+                    crate::protocol::model::AgentMessagePart::Image { media_type, .. },
+                    crate::protocol::model::AgentMessagePart::Text { text: after },
+                ] if before == "Before" && media_type == "image/png" && after == "After"
+            ));
+        }
+        other => panic!("expected one mixed-content Agent message, got {other:?}"),
+    }
 }
 
 #[test]
@@ -942,29 +994,22 @@ fn replay_continues_each_sourced_message_across_interleaved_messages() {
     ]);
 
     assert_eq!(messages.len(), 2);
-    match messages.as_slice() {
-        [NormalizedMessage::AgentText {
-            id: first_id,
-            text: first_text,
-            ..
-        }, NormalizedMessage::AgentText {
-            id: second_id,
-            text: second_text,
-            ..
-        }] => {
-            assert_eq!(
-                first_id,
-                "acp:session-interleaved-sources:message:agent-message-a"
-            );
-            assert_eq!(first_text, "First continued");
-            assert_eq!(
-                second_id,
-                "acp:session-interleaved-sources:message:agent-message-b"
-            );
-            assert_eq!(second_text, "Second");
-        }
-        other => panic!("expected one row per sourced message, got {other:?}"),
-    }
+    assert_eq!(
+        messages[0].identity(),
+        "acp:session-interleaved-sources:message:agent-message-a"
+    );
+    assert_eq!(
+        agent_message_text(&messages[0], AgentMessageRole::Agent),
+        Some("First continued")
+    );
+    assert_eq!(
+        messages[1].identity(),
+        "acp:session-interleaved-sources:message:agent-message-b"
+    );
+    assert_eq!(
+        agent_message_text(&messages[1], AgentMessageRole::Agent),
+        Some("Second")
+    );
 }
 
 #[test]
@@ -989,12 +1034,12 @@ fn replay_ends_anonymous_text_at_tool_activity() {
     assert_eq!(messages.len(), 3);
     assert!(matches!(
         &messages[0],
-        NormalizedMessage::AgentText { text, .. } if text == "Before tool"
+        message if agent_message_text(message, AgentMessageRole::Agent) == Some("Before tool")
     ));
     assert!(matches!(&messages[1], NormalizedMessage::Activity { .. }));
     assert!(matches!(
         &messages[2],
-        NormalizedMessage::AgentText { text, .. } if text == "After tool"
+        message if agent_message_text(message, AgentMessageRole::Agent) == Some("After tool")
     ));
     assert_ne!(messages[0].identity(), messages[2].identity());
 }
@@ -1027,26 +1072,21 @@ fn replay_keeps_anonymous_text_distinct_when_the_next_chunk_has_a_source_id() {
             .map(NormalizedMessage::identity)
             .collect::<Vec<_>>()
     );
-    match first.as_slice() {
-        [NormalizedMessage::AgentText {
-            id: anonymous_id,
-            text: anonymous_text,
-            ..
-        }, NormalizedMessage::AgentText {
-            id: sourced_id,
-            text: sourced_text,
-            ..
-        }] => {
-            assert!(anonymous_id.starts_with("acp:session-identity-boundary:replay:agent:"));
-            assert_eq!(anonymous_text, "Anonymous message");
-            assert_eq!(
-                sourced_id,
-                "acp:session-identity-boundary:message:source-message-1"
-            );
-            assert_eq!(sourced_text, "Sourced message");
-        }
-        other => panic!("expected distinct anonymous and sourced messages, got {other:?}"),
-    }
+    assert!(first[0]
+        .identity()
+        .starts_with("acp:session-identity-boundary:replay:agent:"));
+    assert_eq!(
+        agent_message_text(&first[0], AgentMessageRole::Agent),
+        Some("Anonymous message")
+    );
+    assert_eq!(
+        first[1].identity(),
+        "acp:session-identity-boundary:message:source-message-1"
+    );
+    assert_eq!(
+        agent_message_text(&first[1], AgentMessageRole::Agent),
+        Some("Sourced message")
+    );
 }
 
 #[test]
@@ -1077,26 +1117,21 @@ fn replay_keeps_sourced_text_distinct_when_the_next_chunk_is_anonymous() {
             .map(NormalizedMessage::identity)
             .collect::<Vec<_>>()
     );
-    match first.as_slice() {
-        [NormalizedMessage::AgentText {
-            id: sourced_id,
-            text: sourced_text,
-            ..
-        }, NormalizedMessage::AgentText {
-            id: anonymous_id,
-            text: anonymous_text,
-            ..
-        }] => {
-            assert_eq!(
-                sourced_id,
-                "acp:session-reverse-identity-boundary:message:source-message-1"
-            );
-            assert_eq!(sourced_text, "Sourced message");
-            assert!(anonymous_id.starts_with("acp:session-reverse-identity-boundary:replay:agent:"));
-            assert_eq!(anonymous_text, "Anonymous message");
-        }
-        other => panic!("expected distinct sourced and anonymous messages, got {other:?}"),
-    }
+    assert_eq!(
+        first[0].identity(),
+        "acp:session-reverse-identity-boundary:message:source-message-1"
+    );
+    assert_eq!(
+        agent_message_text(&first[0], AgentMessageRole::Agent),
+        Some("Sourced message")
+    );
+    assert!(first[1]
+        .identity()
+        .starts_with("acp:session-reverse-identity-boundary:replay:agent:"));
+    assert_eq!(
+        agent_message_text(&first[1], AgentMessageRole::Agent),
+        Some("Anonymous message")
+    );
 }
 
 #[test]
@@ -1120,11 +1155,19 @@ fn live_agent_thought_chunks_emit_thought_events_not_tool_activity() {
     let events = capture.events();
     assert_eq!(events.len(), 2);
     match &events[0] {
-        AgentEvent::ThoughtChunk { text, .. } => assert_eq!(text, "one"),
+        AgentEvent::MessageChunk {
+            role: AgentMessageRole::Thought,
+            part: AgentMessagePart::Text { text },
+            ..
+        } => assert_eq!(text, "one"),
         other => panic!("expected thought event, got {other:?}"),
     }
     match &events[1] {
-        AgentEvent::ThoughtChunk { text, .. } => assert_eq!(text, " more"),
+        AgentEvent::MessageChunk {
+            role: AgentMessageRole::Thought,
+            part: AgentMessagePart::Text { text },
+            ..
+        } => assert_eq!(text, " more"),
         other => panic!("expected thought event, got {other:?}"),
     }
 }
@@ -1317,12 +1360,10 @@ fn load_active_session_captures_replayed_updates_before_response() {
                         }
                         other => panic!("expected replayed user message, got {other:?}"),
                     }
-                    match &replayed_messages[1] {
-                        NormalizedMessage::AgentText { text, .. } => {
-                            assert_eq!(text, "Prior agent answer");
-                        }
-                        other => panic!("expected replayed agent message, got {other:?}"),
-                    }
+                    assert_eq!(
+                        agent_message_text(&replayed_messages[1], AgentMessageRole::Agent),
+                        Some("Prior agent answer")
+                    );
                     Ok(())
                 },
             )

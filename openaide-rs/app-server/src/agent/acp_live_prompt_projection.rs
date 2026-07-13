@@ -1,14 +1,14 @@
 use std::sync::Arc;
 
 use agent_client_protocol::schema::{
-    ContentBlock, PermissionOptionKind, RequestPermissionOutcome, RequestPermissionRequest,
+    PermissionOptionKind, RequestPermissionOutcome, RequestPermissionRequest,
     RequestPermissionResponse, SelectedPermissionOutcome, SessionUpdate, ToolCall, ToolCallStatus,
     ToolCallUpdate,
 };
 use serde_json::json;
 
 use crate::agent::acp_config_projection::normalize_config_options;
-use crate::agent::acp_content_projection::non_text_content_event;
+use crate::agent::acp_content_projection::project_content_block;
 use crate::agent::acp_tool_call_projection::{
     merge_tool_call_update, remember_tool_call, ToolCallState,
 };
@@ -21,7 +21,7 @@ use crate::agent::tool_details::{tool_call_event, tool_kind_name};
 use crate::agent::{AgentEventSink, AgentSessionEventSink, TurnCancellation};
 use crate::logging;
 use crate::protocol::errors::RuntimeError;
-use crate::protocol::model::AgentContentRole;
+use crate::protocol::model::AgentMessageRole;
 
 #[derive(Clone)]
 pub(super) struct LivePromptProjection {
@@ -132,32 +132,20 @@ impl LivePromptProjection {
 
     pub(super) fn emit(&self, update: SessionUpdate) -> Result<(), RuntimeError> {
         match update {
-            SessionUpdate::AgentMessageChunk(chunk) => match chunk.content {
-                ContentBlock::Text(text) => self.sink.emit(AgentEvent::TextChunk {
-                    text: text.text,
+            SessionUpdate::AgentMessageChunk(chunk) => {
+                self.sink.emit(AgentEvent::MessageChunk {
+                    role: AgentMessageRole::Agent,
+                    part: project_content_block(chunk.content, AgentMessageRole::Agent),
                     source_message_id: chunk.message_id,
-                })?,
-                content => {
-                    if let Some(event) =
-                        non_text_content_event(content, AgentContentRole::Agent, chunk.message_id)
-                    {
-                        self.sink.emit(event)?;
-                    }
-                }
-            },
-            SessionUpdate::AgentThoughtChunk(chunk) => match chunk.content {
-                ContentBlock::Text(text) => self.sink.emit(AgentEvent::ThoughtChunk {
-                    text: text.text,
+                })?
+            }
+            SessionUpdate::AgentThoughtChunk(chunk) => {
+                self.sink.emit(AgentEvent::MessageChunk {
+                    role: AgentMessageRole::Thought,
+                    part: project_content_block(chunk.content, AgentMessageRole::Thought),
                     source_message_id: chunk.message_id,
-                })?,
-                content => {
-                    if let Some(event) =
-                        non_text_content_event(content, AgentContentRole::Thought, chunk.message_id)
-                    {
-                        self.sink.emit(event)?;
-                    }
-                }
-            },
+                })?
+            }
             SessionUpdate::ToolCall(tool_call) => {
                 self.remember_tool_call(tool_call.clone());
                 self.publish_tool_call(&tool_call)?;

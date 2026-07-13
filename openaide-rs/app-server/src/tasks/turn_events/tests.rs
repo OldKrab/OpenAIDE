@@ -11,8 +11,8 @@ use crate::agent::{
 };
 use crate::client_lifecycle::AppServerTime;
 use crate::protocol::model::{
-    ActivityStatus, ActivityToolDetails, ActivityToolOutput, IsolationKind, NormalizedMessage,
-    TaskStatus,
+    ActivityStatus, ActivityToolDetails, ActivityToolOutput, AgentMessagePart, AgentMessageRole,
+    IsolationKind, NormalizedMessage, TaskStatus,
 };
 use crate::server_requests::ServerRequestRuntime;
 use crate::server_requests::{ResponderScope, ServerRequestAnswer};
@@ -29,6 +29,40 @@ use openaide_app_server_protocol::server_requests::{
 };
 
 use super::{TaskEventSink, TaskSessionEventSink};
+
+fn agent_text_event(text: &str) -> AgentEvent {
+    AgentEvent::MessageChunk {
+        role: AgentMessageRole::Agent,
+        part: AgentMessagePart::Text {
+            text: text.to_string(),
+        },
+        source_message_id: None,
+    }
+}
+
+fn sourced_agent_text_event(text: &str, source_message_id: &str) -> AgentEvent {
+    AgentEvent::MessageChunk {
+        role: AgentMessageRole::Agent,
+        part: AgentMessagePart::Text {
+            text: text.to_string(),
+        },
+        source_message_id: Some(source_message_id.to_string()),
+    }
+}
+
+fn agent_message_text(message: &NormalizedMessage) -> Option<&str> {
+    match message {
+        NormalizedMessage::AgentMessage {
+            role: AgentMessageRole::Agent,
+            parts,
+            ..
+        } => match parts.as_slice() {
+            [AgentMessagePart::Text { text }] => Some(text),
+            _ => None,
+        },
+        _ => None,
+    }
+}
 
 #[test]
 fn agent_session_title_updates_set_and_clear_agent_owned_title() {
@@ -619,7 +653,7 @@ fn active_turn_agent_message_does_not_mark_task_unread() {
         TurnCancellation::new(),
     );
 
-    sink.emit(AgentEvent::Text("working".to_string())).unwrap();
+    sink.emit(agent_text_event("working")).unwrap();
 
     let stored = store.read_task("task_1").unwrap();
     assert!(!stored.unread);
@@ -639,7 +673,7 @@ fn active_turn_agent_message_does_not_refresh_last_activity() {
         TurnCancellation::new(),
     );
 
-    sink.emit(AgentEvent::Text("working".to_string())).unwrap();
+    sink.emit(agent_text_event("working")).unwrap();
 
     let stored = store.read_task("task_1").unwrap();
     assert_ne!(stored.updated_at, "1");
@@ -657,25 +691,19 @@ fn native_session_update_is_persisted_after_prompt_completion() {
         server_requests.clone(),
     );
 
-    sink.session_update(AgentEvent::TextChunk {
-        text: "before".to_string(),
-        source_message_id: Some("agent-message-1".to_string()),
-    })
-    .unwrap();
+    sink.session_update(sourced_agent_text_event("before", "agent-message-1"))
+        .unwrap();
     TaskTransitions::new(mutations, server_requests)
         .finish_turn("task_1", "turn_1", Ok(AgentPromptOutcome::EndTurn))
         .unwrap();
 
-    sink.session_update(AgentEvent::TextChunk {
-        text: " after".to_string(),
-        source_message_id: Some("agent-message-1".to_string()),
-    })
-    .unwrap();
+    sink.session_update(sourced_agent_text_event(" after", "agent-message-1"))
+        .unwrap();
 
     let messages = store.read_messages("task_1").unwrap();
     let message = messages
         .iter()
-        .find(|stored| matches!(stored.chat.message, NormalizedMessage::AgentText { .. }))
+        .find(|stored| agent_message_text(&stored.chat.message).is_some())
         .expect("Agent message is retained after prompt completion");
     assert_eq!(
         message.chat.identity,
@@ -684,8 +712,9 @@ fn native_session_update_is_persisted_after_prompt_completion() {
     assert_eq!(message.chat.message_id, message.chat.identity);
     assert!(matches!(
         &message.chat.message,
-        NormalizedMessage::AgentText { id, text, .. }
-            if id == &message.chat.identity && text == "before after"
+        NormalizedMessage::AgentMessage { id, parts, .. }
+            if id == &message.chat.identity
+                && matches!(parts.as_slice(), [AgentMessagePart::Text { text }] if text == "before after")
     ));
 }
 
@@ -925,7 +954,7 @@ fn agent_text_notifications_describe_only_durable_ordered_deltas() {
         TurnCancellation::new(),
     );
 
-    sink.emit(AgentEvent::Text("first".to_string())).unwrap();
+    sink.emit(agent_text_event("first")).unwrap();
     let appended = notifications.recv().unwrap();
     let message_id = match appended.kind {
         TaskUpdateKind::Changed(change) => match change.chat.as_slice() {
@@ -942,7 +971,7 @@ fn agent_text_notifications_describe_only_durable_ordered_deltas() {
     };
     assert_eq!(store.read_messages("task_1").unwrap().len(), 1);
 
-    sink.emit(AgentEvent::Text(" second".to_string())).unwrap();
+    sink.emit(agent_text_event(" second")).unwrap();
     let chunked = notifications.recv().unwrap();
     assert!(matches!(
         chunked.kind,
@@ -954,8 +983,7 @@ fn agent_text_notifications_describe_only_durable_ordered_deltas() {
     let stored = store.read_messages("task_1").unwrap();
     assert!(matches!(
         &stored[0].chat.message,
-        NormalizedMessage::AgentText { text, .. }
-            if text == "first second"
+        message if agent_message_text(message) == Some("first second")
     ));
 
     sink.emit(AgentEvent::Activity {
@@ -1081,22 +1109,60 @@ fn interleaved_source_message_ids_update_their_original_agent_messages() {
         ("message-a", "A2"),
         ("message-b", "B2"),
     ] {
-        sink.emit(AgentEvent::TextChunk {
-            text: text.to_string(),
-            source_message_id: Some(source_message_id.to_string()),
-        })
-        .unwrap();
+        sink.emit(sourced_agent_text_event(text, source_message_id))
+            .unwrap();
     }
 
     let messages = store.read_messages("task_1").unwrap();
     let agent_texts = messages
         .iter()
-        .filter_map(|stored| match &stored.chat.message {
-            NormalizedMessage::AgentText { text, .. } => Some(text.as_str()),
-            _ => None,
-        })
+        .filter_map(|stored| agent_message_text(&stored.chat.message))
         .collect::<Vec<_>>();
     assert_eq!(agent_texts, ["A1A2", "B1B2"]);
+}
+
+#[test]
+fn sourced_mixed_content_updates_one_ordered_chat_message() {
+    let (_dir, store, mutations, server_requests) = test_runtime();
+    store.write_task(&running_task("task_1")).unwrap();
+    let sink = TaskEventSink::new(
+        mutations,
+        "task_1".to_string(),
+        "turn_1".to_string(),
+        server_requests,
+        TurnCancellation::new(),
+    );
+
+    sink.emit(sourced_agent_text_event("Before", "message-1"))
+        .unwrap();
+    sink.emit(AgentEvent::MessageChunk {
+        role: AgentMessageRole::Agent,
+        part: AgentMessagePart::Resource {
+            uri: "file:///result.txt".to_string(),
+            name: Some("result.txt".to_string()),
+            title: None,
+            description: None,
+            media_type: Some("text/plain".to_string()),
+            size_bytes: None,
+            text: Some("Result".to_string()),
+        },
+        source_message_id: Some("message-1".to_string()),
+    })
+    .unwrap();
+    sink.emit(sourced_agent_text_event("After", "message-1"))
+        .unwrap();
+
+    let messages = store.read_messages("task_1").unwrap();
+    assert_eq!(messages.len(), 1);
+    assert!(matches!(
+        &messages[0].chat.message,
+        NormalizedMessage::AgentMessage { parts, .. }
+            if matches!(parts.as_slice(), [
+                AgentMessagePart::Text { text: before },
+                AgentMessagePart::Resource { uri, .. },
+                AgentMessagePart::Text { text: after },
+            ] if before == "Before" && uri == "file:///result.txt" && after == "After")
+    ));
 }
 
 #[test]
@@ -1119,12 +1185,11 @@ fn prompt_completion_does_not_change_session_owned_text() {
         TurnCancellation::new(),
     );
 
-    sink.emit(AgentEvent::Text("complete me".to_string()))
-        .unwrap();
+    sink.emit(agent_text_event("complete me")).unwrap();
     let _appended = notifications.recv().unwrap();
     assert!(matches!(
         &store.read_messages("task_1").unwrap()[0].chat.message,
-        NormalizedMessage::AgentText { .. }
+        NormalizedMessage::AgentMessage { .. }
     ));
 }
 
@@ -1141,8 +1206,7 @@ fn permission_request_splits_active_agent_text_run() {
         TurnCancellation::new(),
     ));
 
-    sink.emit(AgentEvent::Text("before permission".to_string()))
-        .unwrap();
+    sink.emit(agent_text_event("before permission")).unwrap();
     let permission_sink = sink.clone();
     let permission_thread = std::thread::spawn(move || {
         permission_sink.request_permission(permission_request("permission_1"))
@@ -1156,16 +1220,12 @@ fn permission_request_splits_active_agent_text_run() {
         .expect("permission thread joins")
         .unwrap();
 
-    sink.emit(AgentEvent::Text(" after permission".to_string()))
-        .unwrap();
+    sink.emit(agent_text_event(" after permission")).unwrap();
 
     let messages = store.read_messages("task_1").unwrap();
     let agent_text: Vec<_> = messages
         .iter()
-        .filter_map(|stored| match &stored.chat.message {
-            NormalizedMessage::AgentText { text, .. } => Some(text.as_str()),
-            _ => None,
-        })
+        .filter_map(|stored| agent_message_text(&stored.chat.message))
         .collect();
     assert_eq!(agent_text, vec!["before permission", " after permission"]);
 }
@@ -1194,7 +1254,7 @@ fn permission_wait_does_not_block_concurrent_agent_events() {
     let (emit_done_tx, emit_done_rx) = std::sync::mpsc::channel();
     let event_sink = sink.clone();
     let event_thread = std::thread::spawn(move || {
-        let result = event_sink.emit(AgentEvent::Text("while waiting".to_string()));
+        let result = event_sink.emit(agent_text_event("while waiting"));
         let _ = emit_done_tx.send(result);
     });
     let emitted_while_waiting = emit_done_rx
@@ -1215,7 +1275,7 @@ fn permission_wait_does_not_block_concurrent_agent_events() {
     assert!(store.read_messages("task_1").unwrap().iter().any(|stored| {
         matches!(
             &stored.chat.message,
-            NormalizedMessage::AgentText { text, .. } if text == "while waiting"
+            message if agent_message_text(message) == Some("while waiting")
         )
     }));
 }

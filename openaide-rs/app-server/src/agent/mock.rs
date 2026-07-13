@@ -76,9 +76,12 @@ impl AgentRuntime for MockAgent {
         }
         Ok(AgentLoadedSession {
             session: AgentSession::new(request.agent_id, request.session_id),
-            replayed_messages: vec![NormalizedMessage::AgentText {
+            replayed_messages: vec![NormalizedMessage::AgentMessage {
                 id: "mock-loaded-agent-message".to_string(),
-                text: "Mock loaded session.".to_string(),
+                role: crate::protocol::model::AgentMessageRole::Agent,
+                parts: vec![crate::protocol::model::AgentMessagePart::Text {
+                    text: "Mock loaded session.".to_string(),
+                }],
                 created_at: "2026-05-18T00:00:00Z".to_string(),
             }],
         })
@@ -122,7 +125,13 @@ impl AgentRuntime for MockAgent {
             }
         }
         let summary = first_words(&prompt.text, 9);
-        sink.emit(AgentEvent::Text(format!("I will work on: {summary}.")))?;
+        sink.emit(AgentEvent::MessageChunk {
+            role: crate::protocol::model::AgentMessageRole::Agent,
+            part: crate::protocol::model::AgentMessagePart::Text {
+                text: format!("I will work on: {summary}."),
+            },
+            source_message_id: None,
+        })?;
         sink.emit(AgentEvent::Activity {
             title: "Checked workspace context".to_string(),
             tool_name: "mock_context".to_string(),
