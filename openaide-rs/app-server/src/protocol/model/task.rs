@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 use crate::storage::records::{TaskLifecycle, TaskPreparationRecord, TaskTitle};
 
-use super::{AgentCommandsCatalog, ConfigOptionsCatalog, MessagePage, NormalizedMessage};
+use super::{AgentCommandsCatalog, ConfigOptionsCatalog, MessagePage};
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -47,7 +47,6 @@ pub struct TaskSnapshot {
     pub task: TaskSummary,
     pub lifecycle: TaskLifecycle,
     pub chat: MessagePage,
-    pub permissions: Vec<NormalizedMessage>,
     pub settings_summary: SettingsSummary,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub config_options_catalog: Option<ConfigOptionsCatalog>,

@@ -61,7 +61,7 @@ export type { AppServerReplicaTransition } from "./appServerReplicaLifecycle";
 export type AppControllerBackendConnection = Pick<
   BackendConnection,
   "initialize" | "request" | "respond" | "serverRequests" | "close"
-> & Partial<Pick<BackendConnection, "events" | "stateResets">>;
+> & Partial<Pick<BackendConnection, "events" | "eventStreamDisconnects" | "stateResets">>;
 
 export type BackendConnectionState =
   | { status: "connecting" }
@@ -139,7 +139,9 @@ export function useAppControllerBackendLifecycle({
     intent: SnapshotIntent,
   ) => operationOwner.acceptSnapshot(taskId, requestId, intent);
   const markSubscriptionError = (key: string, error: unknown) => {
-    const message = error instanceof Error ? error.message : "Unable to refresh App Server state.";
+    // Browser fetch errors vary by engine and are diagnostic detail, not product copy.
+    console.warn("App Server subscription refresh failed.", error);
+    const message = "App Server is temporarily unavailable.";
     failedSubscriptionBaselines.current.set(key, message);
     setBackendConnectionState({ status: "reconnecting", message });
   };
@@ -176,10 +178,27 @@ export function useAppControllerBackendLifecycle({
     const serverRequestBridge = backendConnection?.serverRequests
       ? startAppServerServerRequestBridge({
           backendConnection,
+          onTaskRequest: (request) => dispatchForCurrentReplica({
+            type: "taskRequest:opened",
+            request,
+          }),
           postHostMessage,
         })
       : undefined;
     const stopSubscriptions: Array<() => void> = [];
+    const stopEventStreamDisconnects = backendConnection?.eventStreamDisconnects?.(() => {
+      pendingGlobalSubscriptionBaselines.current = new Set([
+        "projects",
+        "agents",
+        "task-navigation",
+      ]);
+      setBackendReady(false);
+      taskRouteLifecycle.reset();
+      setBackendConnectionState({
+        status: "reconnecting",
+        message: "Connection interrupted. Reconnecting automatically.",
+      });
+    });
     const stopBackendStateResets = backendConnection?.stateResets?.((reset) => {
       const previousRootId = replicaIdentity.current?.stateRootId;
       establishReplica(reset);
@@ -267,6 +286,7 @@ export function useAppControllerBackendLifecycle({
             }
             if (backendConnection.events) {
               const subscriptionConnection = {
+                eventStreamDisconnects: backendConnection.eventStreamDisconnects,
                 events: backendConnection.events,
                 request: backendConnection.request,
                 stateResets: backendConnection.stateResets,
@@ -382,6 +402,7 @@ export function useAppControllerBackendLifecycle({
       setBackendReady(false);
       taskRouteLifecycle.reset();
       stateSubscriptionContext.current = undefined;
+      stopEventStreamDisconnects?.();
       stopBackendStateResets?.();
       for (const stop of stopSubscriptions) stop();
       serverRequestBridge?.dispose();

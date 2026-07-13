@@ -2,7 +2,7 @@ import type { ChatMessage, TaskSnapshot } from "@openaide/app-shell-contracts";
 import type { ChatPageState } from "./store";
 import { coalesceAdjacentActivities } from "./chatActivityCoalescing";
 import { visibleNormalizedChatItems } from "./chatItemNormalization";
-import { mergeMessageRows, mergePageState } from "./chatPageMerge";
+import { mergeMessageRowsPreferRight, mergePageState } from "./chatPageMerge";
 
 export { mergePageState };
 
@@ -17,7 +17,7 @@ export type RenderedChat = {
 export function renderedChat(snapshot: TaskSnapshot, pageState: ChatPageState | undefined): RenderedChat {
   const olderItems = pageState?.olderItems ?? [];
   const items = coalesceAdjacentActivities(
-    visibleNormalizedChatItems(mergeMessageRows(olderItems, snapshot.chat.items)),
+    visibleNormalizedChatItems(mergeMessageRowsPreferRight(olderItems, snapshot.chat.items)),
   );
   const hasBefore = pageState ? pageState.hasBefore : snapshot.chat.has_before;
   return {

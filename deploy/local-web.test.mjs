@@ -330,6 +330,18 @@ test("local web supports durable user systemd daemon mode", () => {
   assert.match(script, /systemctl --user status "\$systemd_unit\.service"/);
 });
 
+test("local web enables JavaScript source maps for background and systemd servers", () => {
+  const script = readFileSync(new URL("./local-web.sh", import.meta.url), "utf8");
+
+  assert.match(script, /node_options=.*NODE_OPTIONS/);
+  assert.match(script, /node_options=.*--enable-source-maps/);
+  assert.match(script, /setsid env[\s\S]*NODE_OPTIONS="\$node_options"[\s\S]*npm run web:dev/);
+  assert.match(
+    script,
+    /systemd-run --user[\s\S]*--setenv "NODE_OPTIONS=\$node_options"[\s\S]*"\$npm_bin" run web:dev/,
+  );
+});
+
 test("local web forwards ACP trace settings into background and systemd app servers", () => {
   const script = readFileSync(new URL("./local-web.sh", import.meta.url), "utf8");
 

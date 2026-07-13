@@ -104,7 +104,6 @@ export function sendTaskPromptIntent(
   });
   void dependencies.backendConnection.request(TASK_SEND, {
     taskId: taskId as TaskId,
-    taskRevision: snapshot.revision,
     message,
   })
     .then((result) => {

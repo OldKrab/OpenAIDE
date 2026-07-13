@@ -47,6 +47,7 @@ pub struct TaskTitle {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub enum TaskTitleSource {
+    Prompt,
     Agent,
     User,
 }

@@ -927,6 +927,21 @@ describe("app reducer composer state", () => {
     expect(state.tasks[0].title).toBe("New title");
   });
 
+  it("does not rebuild task navigation for a chat-only snapshot revision", () => {
+    let state = createInitialState();
+    state = appReducer(state, { type: "snapshot", intent: "open", snapshot: snapshot("task_1") });
+    const tasks = state.tasks;
+
+    state = appReducer(state, {
+      type: "snapshot",
+      intent: "refresh",
+      snapshot: snapshot("task_1", [], 2),
+    });
+
+    expect(state.tasks).toBe(tasks);
+    expect(state.snapshot?.revision).toBe(2);
+  });
+
   it("does not resurrect a task omitted by the authoritative navigation snapshot", () => {
     let state = createInitialState();
     state.tasks = [

@@ -6,7 +6,6 @@ import type {
   HostToWebviewMessage,
   SettingsTabId,
 } from "@openaide/app-shell-contracts";
-import { clientInstanceIdForBootstrap } from "./backendInitialization";
 import { frontendShell } from "./frontendShell";
 import type { PostHostMessage } from "../state/postHostMessage";
 
@@ -48,14 +47,19 @@ export function getBackendConnection() {
   if (bootstrap.surface !== "invalid" && bootstrap.appServerConnection?.kind === "localHttp") {
     return createLocalHttpBackendConnection({
       ...bootstrap.appServerConnection,
-      connectionId: clientInstanceIdForBootstrap(bootstrap),
+      connectionId: createTransportConnectionId(),
     });
   }
   if (bootstrap.surface !== "invalid" && bootstrap.appServerConnection?.kind === "webProxy") {
     return createWebProxyBackendConnection({
       endpointUrl: bootstrap.appServerConnection.endpointUrl,
-      connectionId: clientInstanceIdForBootstrap(bootstrap),
+      connectionId: createTransportConnectionId(),
     });
   }
   return undefined;
+}
+
+/** Transport identity is disposable and must never double as the logical App Shell client. */
+function createTransportConnectionId() {
+  return `frontend-connection-${globalThis.crypto.randomUUID()}`;
 }

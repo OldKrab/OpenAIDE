@@ -5,13 +5,13 @@ use openaide_app_server_protocol::ids::TurnId;
 
 use crate::agent::registry_handle::AgentRegistryHandle;
 use crate::agent::{
-    AgentSession, AgentSessionKey, AgentSessionLoad, AgentSessionResume, AgentSessionStart,
-    ConfigOptionPolicy, TurnCancellation,
+    AgentPrompt, AgentSession, AgentSessionKey, AgentSessionLoad, AgentSessionResume,
+    AgentSessionStart, ConfigOptionPolicy, TurnCancellation,
 };
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{AgentListedSession, Attachment, TaskSnapshot, TaskStatus};
 use crate::server_requests::ServerRequestRuntime;
-use crate::storage::records::{TaskLifecycle, TaskPreparationRecord, TaskRecord};
+use crate::storage::records::{TaskPreparationRecord, TaskRecord};
 use crate::tasks::mutation::{
     TaskCommitOptions, TaskCommitOutcome, TaskMutationResult, TaskMutations,
 };
@@ -38,6 +38,8 @@ pub(crate) struct NativeSessionService {
 
 pub(crate) struct PrimaryPromptRequest {
     pub(crate) task: TaskRecord,
+    /// A promoted New Task may replace its prepared empty session when the Agent lost it.
+    pub(crate) replace_missing_prepared_session: bool,
     pub(crate) turn_id: TurnId,
     pub(crate) text: String,
     pub(crate) attachments: Vec<Attachment>,
@@ -184,12 +186,13 @@ impl NativeSessionService {
     ) -> Result<(), RuntimeError> {
         let PrimaryPromptRequest {
             task,
+            replace_missing_prepared_session,
             turn_id,
             text,
             attachments,
         } = request;
         let task_id = task.task_id.clone();
-        let opened = self.acquire_for_prompt(&task)?;
+        let opened = self.acquire_for_prompt(&task, replace_missing_prepared_session)?;
         let session_id = opened.session().session_id.clone();
         let session_state = opened.task_state();
         let binding = self.mutations.commit_existing_task(
@@ -237,6 +240,28 @@ impl NativeSessionService {
             session_sink,
         );
         Ok(())
+    }
+
+    /// Sends steering to the already-working Native Session without creating
+    /// another App Server-owned work lifecycle or awaiting its response.
+    pub(crate) fn steer(
+        &self,
+        task: TaskRecord,
+        text: String,
+        attachments: Vec<Attachment>,
+    ) -> Result<(), RuntimeError> {
+        self.agent_registry.require(&task.agent_id)?;
+        let session_id = task.agent_session_id.ok_or_else(|| {
+            RuntimeError::NotReady("Working Task has no active Native Session".to_string())
+        })?;
+        self.turn_runner.steer_session(AgentPrompt {
+            agent_id: task.agent_id,
+            task_id: task.task_id,
+            session_id,
+            text,
+            attachments,
+            cancellation: TurnCancellation::new(),
+        })
     }
 
     /// Loads and replaces Chat only after the caller's cached clock comparison proves staleness.
@@ -364,6 +389,7 @@ impl NativeSessionService {
     fn acquire_for_prompt(
         &self,
         task: &TaskRecord,
+        replace_missing_prepared_session: bool,
     ) -> Result<OpenedNativeSession<'_>, RuntimeError> {
         self.agent_registry.require(&task.agent_id)?;
         let cancellation = TurnCancellation::new();
@@ -377,9 +403,7 @@ impl NativeSessionService {
                 cancellation: cancellation.clone(),
             }) {
                 Ok(session) => Ok(OpenedNativeSession::Resumed(session)),
-                Err(_) if matches!(task.lifecycle, TaskLifecycle::New { .. }) => {
-                    self.start_fresh(task, cancellation)
-                }
+                Err(_) if replace_missing_prepared_session => self.start_fresh(task, cancellation),
                 Err(error) if is_runtime_restart_resume_gap(&error) => self
                     .agent_gateway
                     .load_session(AgentSessionLoad {

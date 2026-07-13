@@ -14,6 +14,34 @@ import type {
 import { startAppServerStateSubscription } from "./appServerStateSubscriptions";
 
 describe("startAppServerStateSubscription", () => {
+  it("does not request an initial baseline while the event stream is disconnected", async () => {
+    const request = vi.fn();
+    const baselineLost = vi.fn();
+    const connection = {
+      request,
+      events: () => vi.fn(),
+      eventStreamDisconnects(listener: Parameters<BackendConnection["eventStreamDisconnects"]>[0]) {
+        listener();
+        return vi.fn();
+      },
+    } as Pick<BackendConnection, "eventStreamDisconnects" | "events" | "request">;
+
+    startAppServerStateSubscription({
+      backendConnection: connection,
+      context: {
+        stateRootId: "root_1" as StateRootId,
+        clientInstanceId: "client_1" as never,
+      },
+      dispatch: vi.fn(),
+      onBaselineLost: baselineLost,
+      scope: { kind: "task", taskId: "task_1" as TaskId },
+    });
+    await Promise.resolve();
+
+    expect(baselineLost).toHaveBeenCalledOnce();
+    expect(request).not.toHaveBeenCalled();
+  });
+
   it("retries an initial subscription failure until a snapshot is available", async () => {
     vi.useFakeTimers();
     try {
@@ -89,9 +117,11 @@ describe("startAppServerStateSubscription", () => {
     }
   });
 
-  it("refreshes its snapshot when the connection loses event continuity", async () => {
+  it("waits for the replacement stream before refreshing a lost subscription", async () => {
+    let disconnectListener: Parameters<BackendConnection["eventStreamDisconnects"]>[0] | undefined;
     let resetListener: Parameters<BackendConnection["stateResets"]>[0] | undefined;
     const dispatch = vi.fn();
+    const baselineLost = vi.fn();
     const request = vi.fn(async () => taskSubscription(
       request.mock.calls.length === 1 ? "cursor_1" : "cursor_5",
       "task_1",
@@ -101,11 +131,15 @@ describe("startAppServerStateSubscription", () => {
       events() {
         return vi.fn();
       },
+      eventStreamDisconnects(listener: Parameters<BackendConnection["eventStreamDisconnects"]>[0]) {
+        disconnectListener = listener;
+        return vi.fn();
+      },
       stateResets(listener: Parameters<BackendConnection["stateResets"]>[0]) {
         resetListener = listener;
         return vi.fn();
       },
-    } as Pick<BackendConnection, "events" | "request" | "stateResets">;
+    } as Pick<BackendConnection, "eventStreamDisconnects" | "events" | "request" | "stateResets">;
 
     startAppServerStateSubscription({
       backendConnection: connection,
@@ -114,15 +148,54 @@ describe("startAppServerStateSubscription", () => {
         clientInstanceId: "client_1" as never,
       },
       dispatch,
+      onBaselineLost: baselineLost,
       scope: { kind: "task", taskId: "task_1" as TaskId },
     });
     await Promise.resolve();
+
+    disconnectListener?.();
+    await Promise.resolve();
+    expect(baselineLost).toHaveBeenCalledOnce();
+    expect(request).toHaveBeenCalledOnce();
 
     resetListener?.({ serverId: "server_1" as never, stateRootId: "root_1" as StateRootId });
     await Promise.resolve();
 
     expect(request).toHaveBeenCalledTimes(2);
     expect(dispatch).toHaveBeenCalledTimes(2);
+  });
+
+  it("ignores a baseline failure from the disconnected stream generation", async () => {
+    let disconnectListener: Parameters<BackendConnection["eventStreamDisconnects"]>[0] | undefined;
+    const firstSubscribe = deferred<StateSubscribeResult>();
+    const baselineError = vi.fn();
+    const connection = {
+      request: vi.fn(() => firstSubscribe.promise),
+      events: () => vi.fn(),
+      eventStreamDisconnects(listener: Parameters<BackendConnection["eventStreamDisconnects"]>[0]) {
+        disconnectListener = listener;
+        return vi.fn();
+      },
+    } as Pick<BackendConnection, "eventStreamDisconnects" | "events" | "request">;
+
+    startAppServerStateSubscription({
+      backendConnection: connection,
+      context: {
+        stateRootId: "root_1" as StateRootId,
+        clientInstanceId: "client_1" as never,
+      },
+      dispatch: vi.fn(),
+      onBaselineError: baselineError,
+      scope: { kind: "task", taskId: "task_1" as TaskId },
+    });
+    await Promise.resolve();
+
+    disconnectListener?.();
+    firstSubscribe.reject(new Error("connection closed"));
+    await firstSubscribe.promise.catch(() => undefined);
+    await Promise.resolve();
+
+    expect(baselineError).not.toHaveBeenCalled();
   });
 
   it("does not replay events queued before a replica reset onto its replacement baseline", async () => {
@@ -159,13 +232,16 @@ describe("startAppServerStateSubscription", () => {
 
     eventListener?.(taskEvent("cursor_1", "cursor_2", "task_1"));
     resetListener?.({ serverId: "server_2" as never, stateRootId: "root_1" as StateRootId });
-    firstSubscribe.resolve(taskSubscription("cursor_1", "task_1"));
-    await firstSubscribe.promise;
     await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(2));
 
     secondSubscribe.resolve(taskSubscription("cursor_10", "task_1"));
     await secondSubscribe.promise;
     await vi.waitFor(() => expect(dispatch).toHaveBeenCalledOnce());
+    firstSubscribe.resolve(taskSubscription("cursor_1", "task_1"));
+    await firstSubscribe.promise;
+    await Promise.resolve();
+
+    expect(dispatch).toHaveBeenCalledOnce();
     expect(request).toHaveBeenCalledTimes(2);
   });
 
@@ -271,22 +347,21 @@ describe("startAppServerStateSubscription", () => {
       role: "agent",
       parts: [{ kind: "text", text: "One two" }],
     });
-    expect(dispatch.mock.calls.map(([action]) => action).filter((action) => action.type === "taskChat:liveText")).toEqual([
-      {
-        type: "taskChat:liveText",
-        taskId: "task_1",
+    expect(snapshots[1]).toMatchObject({
+      liveText: {
         messageId: "message_1",
         channel: "agent",
         eventCursor: "cursor_2",
       },
-      {
-        type: "taskChat:liveText",
-        taskId: "task_1",
+    });
+    expect(snapshots[2]).toMatchObject({
+      liveText: {
         messageId: "message_1",
         channel: "agent",
         eventCursor: "cursor_3",
       },
-    ]);
+    });
+    expect(dispatch.mock.calls.map(([action]) => action).filter((action) => action.type === "taskChat:liveText")).toEqual([]);
   });
 
   it("maps ordered App Server task navigation events into frontend task state", async () => {

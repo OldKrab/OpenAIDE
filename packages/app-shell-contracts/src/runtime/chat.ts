@@ -44,7 +44,7 @@ export type AgentMessagePart =
 export type ActivityStep =
   | { kind: "text"; text: string; level?: "info" | "warning" | "error" }
   | { kind: "thought"; message_id?: string; text: string; streaming?: boolean }
-  | { kind: "tool"; tool_call_id?: string; name: string; status: ActivityStatus; input_summary?: string; output_preview?: string; detail_artifact_id?: string; details?: ActivityToolDetails }
+  | { kind: "tool"; tool_call_id?: string; name: string; status: ActivityStatus; input_summary?: string; output_preview?: string; detail_artifact_id?: string; details?: ActivityToolDetails; permission_outcomes?: ToolPermissionOutcome[] }
   | { kind: "command"; command_label: string; status: ActivityStatus; exit_code?: number; output_preview?: string };
 
 export type ActivityToolDetails = {
@@ -52,6 +52,15 @@ export type ActivityToolDetails = {
   content: ActivityToolContent[];
   input?: ActivityToolInput;
   output?: ActivityToolOutput;
+};
+
+/** Durable authorization history for a tool, independent of its execution status. */
+export type ToolPermissionOutcome = {
+  request_id: string;
+  decision: "approved" | "rejected" | "cancelled";
+  option_id?: string;
+  option_label?: string;
+  resolved_at: string;
 };
 
 export type ActivityToolLocation = {

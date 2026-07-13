@@ -80,8 +80,10 @@ export function useTaskRouteLifecycle({
     let active = true;
     const stop = startAppServerStateSubscription({
       backendConnection: {
+        eventStreamDisconnects: backendConnection.eventStreamDisconnects,
         events: backendConnection.events,
         request: backendConnection.request,
+        stateResets: backendConnection.stateResets,
       },
       context,
       dispatch,

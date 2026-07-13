@@ -59,9 +59,9 @@ This mixes presentation fallback, lifecycle state, and title ownership. It also 
 
 **Impact:** Title changes can overwrite the wrong owner, lose provenance, or accidentally depend on UI wording. The persisted record does not directly express why the current displayed title exists.
 
-**Desired direction:** Store one optional current Task title together with explicit User or Agent provenance. Keep `"New task"` as a render-only fallback when no title exists. Do not derive a title from the first prompt. Define replacement precedence explicitly instead of encoding it through separate fields or magic strings.
+**Desired direction:** Store one optional current Task title with explicit Prompt, Agent, or User provenance. Keep `"New task"` as a render-only fallback before first Send. Promote the first user-message prefix to a provisional Prompt title, then let any Agent title value or clear supersede it while preserving future user-owned titles. Define replacement precedence explicitly instead of encoding it through separate fields or magic strings.
 
-**Implementation:** `TaskRecord` now stores one optional `TaskTitle { value, source }`. New Tasks and first Send leave it absent; `"New task"` and `"Untitled task"` are Frontend-only fallbacks. Agent metadata may replace or clear only an Agent-owned title and cannot overwrite a User-owned title. Native Session adoption records its supplied Agent title as Agent-owned. The protocol exposes the same optional nested value, and prompt-derived title invention, the magic lifecycle string, and Frontend title rewriting were removed without compatibility behavior.
+**Implementation:** `TaskRecord` stores one optional `TaskTitle { value, source }`. New Tasks leave it absent, while first Send stores a normalized 60-character Prompt prefix in the same commit that makes the Task visible. Agent metadata and reconciled `session/list` titles replace Prompt or Agent-owned titles, and an explicit Agent clear removes either; neither can overwrite a User-owned title. Native Session adoption records its supplied title as Agent-owned. `"New task"` and `"Untitled task"` remain Frontend-only fallbacks when no stored title exists.
 
 ## AP-004: The Frontend App Controller is an orchestration nexus
 
@@ -139,7 +139,7 @@ This conflates three different concepts: a client-local last-used selection, an 
 
 **Desired direction:** Let each live client remember its last-used Project and Agent and reuse them when they remain valid. Persist state-root-wide last-used Project and Agent values in App Server only as initial defaults for clients without retained selection, updating them as part of an already-required successful first send rather than through extra selection traffic. When neither client selection nor valid persisted default exists, apply one documented deterministic fallback after considering the shell Project hint.
 
-The accepted implementation design for `AP-003` and `AP-005` through `AP-008` is recorded in `docs/new-task-flow-plan.md`.
+The accepted product and architecture specification for `AP-003` and `AP-005` through `AP-008` is recorded in `docs/task-chat-flow.md`.
 
 **Resolution:** Project and Agent collection snapshots now contain only collections. `client/initialize` returns a separate state-root-wide `newTaskDefaults` value, while Frontend retains each client's selection locally and validates it through one priority function. A successful first Send from a New Task persists that Task's actual Project and Agent as the next-client defaults; selector changes create no App Server preference traffic.
 
@@ -283,11 +283,11 @@ App Server currently persists a pending Permission Chat row while also deliverin
 
 **Impact:** A request that exists only while the Agent is waiting becomes false durable history, and Frontend needs complicated synchronization to decide which copy to show. Reload and multi-client resolution behavior become harder to reason about.
 
-**Desired direction:** Keep a pending permission only as an active App Server request and set Task status to `waiting`. Redeliver that active request to reconnecting eligible clients and render it transiently after current Chat while session updates continue. After a user response or prompt cancellation, close it for all clients and persist exactly one resolved Permission Chat item beside its associated activity. Represent cancellation through the same resolution path with its own message.
+**Desired direction:** Keep a pending permission only as an active App Server request and set Task status to `waiting`. Redeliver that active request to reconnecting eligible clients and render it transiently after current Chat while session updates continue. After a user response or prompt cancellation, close it for all clients and durably record the outcome on its exact Tool without creating a Permission Chat row. Keep Tool execution status independent from authorization, and preserve multiple decisions for one Tool.
 
 The same problem and desired lifecycle apply to ACP form elicitation Questions, except that a resolved Question remains a standalone Chat row. Frontend field validation provides immediate feedback; App Server independently validates the response as the authoritative protocol boundary.
 
-**Resolution:** Pending Permissions and Questions now exist only in the App Server request broker and appear in Task snapshots through the transient `pendingRequests` projection; neither is written to Chat while awaiting a response. Opening one sets the Task to `waiting`, reconnecting eligible clients receive the same request again, and Agent session updates continue while the request waits. A response or cancellation removes the active request and appends exactly one terminal Chat item. Frontend renders active requests after durable Chat, retains only local response-in-flight presentation state, and places a terminal Permission beside its matching Tool activity. The duplicate direct request stores, legacy permission-response API, pending-history mutations, and their reconciliation paths were removed completely.
+**Resolution:** Pending Permissions and Questions now exist only in the App Server request broker and appear in Task snapshots through the transient `pendingRequests` projection; neither is written to Chat while awaiting a response. Opening one sets the Task to `waiting`, reconnecting eligible clients receive the same request again, and Agent session updates continue while the request waits. A Permission response or cancellation removes the active request and records an approved, rejected, or cancelled outcome on its exact Tool; later Tool updates preserve that history. Frontend renders active requests after durable Chat, shows an aggregate authorization summary on the collapsed Tool row, and shows individual decisions in Tool details. Resolved Questions still append one terminal Chat item. The duplicate direct request stores, legacy resolved Permission Chat protocol, pending-history mutations, and their reconciliation paths were removed completely.
 
 ## AP-019: ACP Plan updates are discarded
 
@@ -307,7 +307,7 @@ The same problem and desired lifecycle apply to ACP form elicitation Questions, 
 
 The live projection uses a catch-all branch for unhandled updates. This hides both intentional behavior and missing support: live `user_message_chunk` echoes are ignored to avoid duplicating App Server-owned user messages, while deprecated `current_mode_update`, deferred `plan`, and unstable `usage_update` also disappear without diagnostics. Replay uses text user-message chunks but discards supported non-text content.
 
-**Desired direction:** Replace the catch-all behavior with explicit handling or diagnostics for every known ACP update. Keep live user-message echoes intentionally ignored and documented while using them during history replay. Defer legacy Session Modes, Plan, and Usage UI as recorded in the implementation plan. Preserve supported non-text content when the broader ACP content projection is implemented.
+**Desired direction:** Replace the catch-all behavior with explicit handling or diagnostics for every known ACP update. Keep live user-message echoes intentionally ignored and documented while using them during history replay. Defer legacy Session Modes, Plan, and Usage UI as recorded in the Task Lifecycle and Chat specification. Preserve supported non-text content when the broader ACP content projection is implemented.
 
 ## AP-021: Prompt stop reasons are discarded and completion uses a drain timer
 

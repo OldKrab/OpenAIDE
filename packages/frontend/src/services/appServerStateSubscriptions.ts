@@ -19,14 +19,14 @@ import type { Dispatch } from "react";
 import type { AppAction } from "../state/appReducer";
 import { applyProtocolAgents } from "../state/appServerAgents";
 import {
+  createProtocolTaskSnapshotMapper,
   mapProtocolTaskNavigation,
-  mapProtocolTaskSnapshot,
 } from "../state/appServerProtocolMapping";
 import { mapProtocolToolDetail } from "../state/appServerProtocolChatMapping";
 import type { AgentOption } from "../state/composerOptions";
 
 type StateSubscriptionConnection = Pick<BackendConnection, "events" | "request">
-  & Partial<Pick<BackendConnection, "stateResets">>;
+  & Partial<Pick<BackendConnection, "eventStreamDisconnects" | "stateResets">>;
 const SUBSCRIPTION_RETRY_MS = 500;
 const MAX_SUBSCRIPTION_RETRY_MS = 5_000;
 const MAX_PENDING_EVENTS = 1_000;
@@ -75,17 +75,21 @@ export function startAppServerStateSubscription({
   setAgents?: (agents: AgentOption[]) => void;
   scope: SubscriptionScope;
 }) {
+  const mapTaskSnapshot = createProtocolTaskSnapshotMapper();
   const scopeLease = acquireSubscriptionLease(backendConnection.request, scope);
   let disposed = false;
   let state: SubscriptionIngestionState | undefined;
   let pendingEvents: AppServerEvent[] = [];
-  let unsubscribe = backendConnection.events(handleEvent);
-  const unsubscribeStateResets = backendConnection.stateResets?.(handleStateReset);
-  let subscribeInFlight = false;
-  let subscribeAgain = false;
+  let subscribeInFlightGeneration: number | undefined;
+  let subscribeAgainGeneration: number | undefined;
   let refreshing = true;
   let retryTimer: ReturnType<typeof setTimeout> | undefined;
   let retryDelay = SUBSCRIPTION_RETRY_MS;
+  let streamConnected = true;
+  let streamGeneration = 0;
+  const unsubscribe = backendConnection.events(handleEvent);
+  const unsubscribeEventStreamDisconnects = backendConnection.eventStreamDisconnects?.(handleEventStreamDisconnect);
+  const unsubscribeStateResets = backendConnection.stateResets?.(handleStateReset);
 
   void subscribe();
 
@@ -93,17 +97,23 @@ export function startAppServerStateSubscription({
     disposed = true;
     if (retryTimer !== undefined) clearTimeout(retryTimer);
     unsubscribe();
+    unsubscribeEventStreamDisconnects?.();
     unsubscribeStateResets?.();
     scopeLease.release(unsubscribeScope);
   };
 
   async function subscribe() {
-    if (subscribeInFlight) return;
+    if (!streamConnected) return;
+    const attemptGeneration = streamGeneration;
+    if (subscribeInFlightGeneration === attemptGeneration) {
+      subscribeAgainGeneration = attemptGeneration;
+      return;
+    }
+    subscribeInFlightGeneration = attemptGeneration;
     if (retryTimer !== undefined) clearTimeout(retryTimer);
     retryTimer = undefined;
     if (!refreshing) onBaselineLost?.();
     refreshing = true;
-    subscribeInFlight = true;
     try {
       const pendingCleanup = scopeLease.waitForCleanup();
       if (pendingCleanup) await pendingCleanup;
@@ -116,20 +126,23 @@ export function startAppServerStateSubscription({
         await scopeLease.cleanupAfterLateSubscribe(unsubscribeScope);
         return;
       }
-      if (subscribeAgain) return;
+      if (!streamConnected || attemptGeneration !== streamGeneration) return;
+      if (subscribeAgainGeneration === attemptGeneration) return;
       state = createSubscriptionIngestionState(result, context);
       refreshing = false;
       retryDelay = SUBSCRIPTION_RETRY_MS;
       applySnapshot(result.snapshot);
       replayPendingEvents();
-      if (!subscribeAgain) onBaselineReady?.();
+      if (subscribeAgainGeneration !== attemptGeneration) onBaselineReady?.();
     } catch (error) {
+      if (!streamConnected || attemptGeneration !== streamGeneration) return;
       onBaselineError?.(error);
       scheduleSubscribeRetry();
     } finally {
-      subscribeInFlight = false;
-      if (subscribeAgain && !disposed) {
-        subscribeAgain = false;
+      if (subscribeInFlightGeneration !== attemptGeneration) return;
+      subscribeInFlightGeneration = undefined;
+      if (subscribeAgainGeneration === attemptGeneration && !disposed) {
+        subscribeAgainGeneration = undefined;
         void subscribe();
       }
     }
@@ -143,18 +156,30 @@ export function startAppServerStateSubscription({
 
   function handleStateReset() {
     if (disposed) return;
+    streamConnected = true;
+    streamGeneration += 1;
+    subscribeAgainGeneration = undefined;
     // Events queued before continuity was re-established belong to the old
     // cursor/process generation and cannot be replayed onto the new baseline.
     pendingEvents = [];
-    if (subscribeInFlight) {
-      subscribeAgain = true;
-      return;
-    }
     void subscribe();
   }
 
+  function handleEventStreamDisconnect() {
+    if (disposed || !streamConnected) return;
+    streamConnected = false;
+    streamGeneration += 1;
+    state = undefined;
+    pendingEvents = [];
+    refreshing = true;
+    subscribeAgainGeneration = undefined;
+    if (retryTimer !== undefined) clearTimeout(retryTimer);
+    retryTimer = undefined;
+    onBaselineLost?.();
+  }
+
   function scheduleSubscribeRetry() {
-    if (disposed || retryTimer !== undefined) return;
+    if (disposed || !streamConnected || retryTimer !== undefined) return;
     const delay = retryDelay;
     retryDelay = Math.min(retryDelay * 2, MAX_SUBSCRIPTION_RETRY_MS);
     retryTimer = setTimeout(() => {
@@ -182,16 +207,18 @@ export function startAppServerStateSubscription({
       return true;
     }
     if (result.kind === "resyncRequired") {
-      if (subscribeInFlight) subscribeAgain = true;
-      else void subscribe();
+      void subscribe();
       return false;
     }
     state = result.state;
-    if (presentLive) {
-      const action = liveTextPresentationAction(event, result.state.snapshot);
-      if (action) dispatch(action);
+    const liveText = presentLive
+      ? liveTextPresentationAction(event, result.state.snapshot)
+      : undefined;
+    if (result.snapshotChanged) {
+      applySnapshot(result.state.snapshot, liveText);
+    } else if (liveText) {
+      dispatch(liveText);
     }
-    if (result.snapshotChanged) applySnapshot(result.state.snapshot);
     return true;
   }
 
@@ -217,18 +244,38 @@ export function startAppServerStateSubscription({
       // An unbounded queue cannot be reconciled safely. Drop the old generation
       // and require a snapshot taken after the overflow.
       pendingEvents = [];
-      if (subscribeInFlight) subscribeAgain = true;
+      if (subscribeInFlightGeneration === streamGeneration) {
+        subscribeAgainGeneration = streamGeneration;
+      }
     }
     pendingEvents.push(event);
   }
 
-  function applySnapshot(snapshot: SubscriptionSnapshot) {
+  function applySnapshot(
+    snapshot: SubscriptionSnapshot,
+    liveText?: Extract<AppAction, { type: "taskChat:liveText" }>,
+  ) {
     for (const action of actionsFromSubscriptionSnapshot(snapshot, context, {
       currentAgentId,
       dispatch,
       setAgents,
-    })) {
-      dispatch(action);
+    }, mapTaskSnapshot)) {
+      if (
+        action.type === "snapshot"
+        && liveText
+        && action.snapshot.task.task_id === liveText.taskId
+      ) {
+        dispatch({
+          ...action,
+          liveText: {
+            messageId: liveText.messageId,
+            channel: liveText.channel,
+            eventCursor: liveText.eventCursor,
+          },
+        });
+      } else {
+        dispatch(action);
+      }
     }
   }
 }
@@ -236,7 +283,7 @@ export function startAppServerStateSubscription({
 function liveTextPresentationAction(
   event: AppServerEvent,
   snapshot: SubscriptionSnapshot,
-): AppAction | undefined {
+): Extract<AppAction, { type: "taskChat:liveText" }> | undefined {
   if (snapshot.kind !== "task") return undefined;
   const payload = event.payload;
   if (payload.kind !== "taskChanged") return undefined;
@@ -338,6 +385,7 @@ function actionsFromSubscriptionSnapshot(
     dispatch: Dispatch<AppAction>;
     setAgents?: (agents: AgentOption[]) => void;
   },
+  mapTaskSnapshot = createProtocolTaskSnapshotMapper(),
 ): AppAction[] {
   switch (snapshot.kind) {
     case "projects":
@@ -360,7 +408,7 @@ function actionsFromSubscriptionSnapshot(
       return remappedTaskNavigationActions(context);
     }
     case "task": {
-      const mapped = mapProtocolTaskSnapshot(snapshot.task, context);
+      const mapped = mapTaskSnapshot(snapshot.task, context);
       return [{ type: "snapshot", snapshot: mapped.snapshot, intent: "refresh" }];
     }
     case "settings":

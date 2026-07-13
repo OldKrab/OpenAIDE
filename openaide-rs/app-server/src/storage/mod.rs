@@ -9,6 +9,7 @@ pub mod root;
 pub mod task_store;
 pub mod tool_artifacts;
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 #[cfg(test)]
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -30,10 +31,13 @@ struct StoreInner {
     recovery: RecoveryClassification,
     open_guard: StorageOpenGuard,
     settings_write_lock: Mutex<()>,
+    agent_message_cache: Mutex<HashMap<String, message_store::AgentMessageCache>>,
     #[cfg(test)]
     fail_next_task_write: AtomicBool,
     #[cfg(test)]
     message_file_write_count: AtomicUsize,
+    #[cfg(test)]
+    message_file_read_count: AtomicUsize,
     #[cfg(test)]
     after_next_task_snapshot_read: Mutex<Option<Box<dyn FnOnce() + Send>>>,
     #[cfg(test)]
@@ -60,10 +64,13 @@ impl Store {
                 recovery: open.recovery,
                 open_guard: open.guard,
                 settings_write_lock: Mutex::new(()),
+                agent_message_cache: Mutex::new(HashMap::new()),
                 #[cfg(test)]
                 fail_next_task_write: AtomicBool::new(false),
                 #[cfg(test)]
                 message_file_write_count: AtomicUsize::new(0),
+                #[cfg(test)]
+                message_file_read_count: AtomicUsize::new(0),
                 #[cfg(test)]
                 after_next_task_snapshot_read: Mutex::new(None),
                 #[cfg(test)]
@@ -126,6 +133,11 @@ impl Store {
     #[cfg(test)]
     pub(crate) fn message_file_write_count_for_test(&self) -> usize {
         self.inner.message_file_write_count.load(Ordering::SeqCst)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn message_file_read_count_for_test(&self) -> usize {
+        self.inner.message_file_read_count.load(Ordering::SeqCst)
     }
 
     #[cfg(test)]

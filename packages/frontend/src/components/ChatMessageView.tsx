@@ -9,6 +9,7 @@ import { ChatPermissionCard } from "./ChatPermissionCard";
 import { QuestionCard } from "./QuestionCard";
 import { SlashCommandText } from "./SlashCommandText";
 import { UserMessageAttachments } from "./UserMessageAttachments";
+import { useLiveMessagePresentation } from "./useLiveMessagePresentation";
 
 export { firstToolPath } from "../state/toolDetailsViewModel";
 
@@ -23,6 +24,8 @@ export const ChatRow = memo(function ChatRow({
   toolDetails,
   commandCatalog,
   showStreamingCaret = false,
+  liveTextEventCursor,
+  presentLiveText = false,
 }: {
   commandCatalog?: AgentCommandsCatalog;
   message: ChatMessage;
@@ -37,6 +40,8 @@ export const ChatRow = memo(function ChatRow({
   taskId: string;
   toolDetails?: Record<string, { loading: boolean; details?: ActivityToolDetails; error?: string }>;
   showStreamingCaret?: boolean;
+  liveTextEventCursor?: string;
+  presentLiveText?: boolean;
 }) {
   const [openImage, setOpenImage] = useState<AttachmentImagePreviewSource | undefined>();
   const body = message.message;
@@ -52,38 +57,16 @@ export const ChatRow = memo(function ChatRow({
     );
   }
   if (body.kind === "agent_message") {
-    const text = agentMessageText(body.parts);
-    const content = (
-      <AgentMessageParts
-        muted={body.role === "thought"}
-        onOpenImage={setOpenImage}
-        parts={body.parts}
-        streaming={showStreamingCaret}
-      />
-    );
-    if (body.role === "thought") {
-      return (
-        <>
-          <details aria-busy={showStreamingCaret || undefined} className="chat-thought-block">
-            <summary>
-              <ChevronRight className="chat-thought-disclosure" size={13} aria-hidden="true" />
-              <span>Thinking</span>
-            </summary>
-            {content}
-            {text ? <MessageCopyAction text={text} /> : null}
-          </details>
-          {openImage ? <AttachmentImagePreviewLightbox image={openImage} onClose={() => setOpenImage(undefined)} /> : null}
-        </>
-      );
-    }
     return (
-      <>
-        <div className="chat-agent-block" aria-busy={showStreamingCaret || undefined}>
-          {content}
-          {text ? <MessageCopyAction text={text} /> : null}
-        </div>
-        {openImage ? <AttachmentImagePreviewLightbox image={openImage} onClose={() => setOpenImage(undefined)} /> : null}
-      </>
+      <AgentMessageRow
+        body={body}
+        liveTextEventCursor={liveTextEventCursor}
+        onCloseImage={() => setOpenImage(undefined)}
+        onOpenImage={setOpenImage}
+        openImage={openImage}
+        presentLiveText={presentLiveText}
+        showStreamingCaret={showStreamingCaret}
+      />
     );
   }
   if (body.kind === "activity") {
@@ -109,6 +92,64 @@ export const ChatRow = memo(function ChatRow({
   }
   return null;
 });
+
+function AgentMessageRow({
+  body,
+  liveTextEventCursor,
+  onCloseImage,
+  onOpenImage,
+  openImage,
+  presentLiveText,
+  showStreamingCaret,
+}: {
+  body: Extract<ChatMessage["message"], { kind: "agent_message" }>;
+  liveTextEventCursor?: string;
+  onCloseImage: () => void;
+  onOpenImage: (image: AttachmentImagePreviewSource) => void;
+  openImage?: AttachmentImagePreviewSource;
+  presentLiveText: boolean;
+  showStreamingCaret: boolean;
+}) {
+  const presentation = useLiveMessagePresentation({
+    enabled: presentLiveText,
+    eventCursor: liveTextEventCursor,
+    parts: body.parts,
+  });
+  const streaming = showStreamingCaret || presentation.streaming;
+  const text = agentMessageText(presentation.parts);
+  const content = (
+    <AgentMessageParts
+      muted={body.role === "thought"}
+      onOpenImage={onOpenImage}
+      parts={presentation.parts}
+      streaming={streaming}
+    />
+  );
+  if (body.role === "thought") {
+    return (
+      <>
+        <details aria-busy={streaming || undefined} className="chat-thought-block">
+          <summary>
+            <ChevronRight className="chat-thought-disclosure" size={13} aria-hidden="true" />
+            <span>Thinking</span>
+          </summary>
+          {content}
+          {text ? <MessageCopyAction text={text} /> : null}
+        </details>
+        {openImage ? <AttachmentImagePreviewLightbox image={openImage} onClose={onCloseImage} /> : null}
+      </>
+    );
+  }
+  return (
+    <>
+      <div className="chat-agent-block" aria-busy={streaming || undefined}>
+        {content}
+        {text ? <MessageCopyAction text={text} /> : null}
+      </div>
+      {openImage ? <AttachmentImagePreviewLightbox image={openImage} onClose={onCloseImage} /> : null}
+    </>
+  );
+}
 
 function unavailableQuestionResponse() {}
 

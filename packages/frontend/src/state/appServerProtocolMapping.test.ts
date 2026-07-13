@@ -10,6 +10,7 @@ import type {
   TaskSnapshot as ProtocolTaskSnapshot,
 } from "@openaide/app-server-client";
 import {
+  createProtocolTaskSnapshotMapper,
   mapProtocolConfigOptions,
   mapProtocolAgentCommands,
   mapProtocolTaskNavigation,
@@ -157,6 +158,28 @@ describe("App Server Protocol state mapping", () => {
     expect(mapping.requiresNativeSurface).toBe(false);
   });
 
+  it("preserves unchanged Chat row identity across focused text updates", () => {
+    const mapSnapshot = createProtocolTaskSnapshotMapper();
+    const initial = protocolSnapshot();
+    const first = mapSnapshot(initial, mappingContext()).snapshot;
+    const updatedAgent = {
+      ...initial.chat.items[1]!,
+      parts: [{ kind: "text" as const, text: "world continued" }],
+    };
+    const second = mapSnapshot({
+      ...initial,
+      revision: initial.revision + 1,
+      chat: {
+        ...initial.chat,
+        items: [initial.chat.items[0]!, updatedAgent, initial.chat.items[2]!],
+      },
+    }, mappingContext()).snapshot;
+
+    expect(second.chat.items[0]).toBe(first.chat.items[0]);
+    expect(second.chat.items[1]).not.toBe(first.chat.items[1]);
+    expect(second.chat.items[2]).toBe(first.chat.items[2]);
+  });
+
   it("keeps the ACP tool title as the visible fallback when tool input is absent", () => {
     const mapping = mapProtocolTaskSnapshot(protocolSnapshot({
       chat: {
@@ -172,7 +195,7 @@ describe("App Server Protocol state mapping", () => {
                 kind: "activity",
                 title: "Search for 'activityLabels' in frontend",
                 status: "completed",
-                steps: [{ kind: "tool", name: "search", status: "completed" }],
+                steps: [{ kind: "tool", name: "search", status: "completed", permissionOutcomes: [] }],
               },
             ],
           },
@@ -519,28 +542,33 @@ describe("App Server Protocol state mapping", () => {
     expect(mapping.requiresNativeSurface).toBe(false);
   });
 
-  it("maps saved resolved permission message parts to permission history cards", () => {
+  it("maps saved permission outcomes onto their tool activity", () => {
     const mapping = mapProtocolTaskSnapshot(protocolSnapshot({
       chat: {
         hasMessages: true,
         items: [
           {
-            messageId: "permission-1" as MessageId,
+            messageId: "activity-1" as MessageId,
             role: "system",
             status: "complete",
             parts: [
               {
-                kind: "permission",
-                requestId: "agent-permission-1" as RequestId,
-                appServerRequestId: "server-request-1" as RequestId,
+                kind: "activity",
                 title: "Tool call",
-                toolCall: { id: "call-1", title: "Tool call", kind: "execute" },
-                state: "resolved",
-                options: [
-                  { optionId: "allow_once", name: "Allow Once", kind: "allow" },
-                  { optionId: "reject_once", name: "Reject", kind: "deny" },
-                ],
-                decision: "denied",
+                status: "completed",
+                steps: [{
+                  kind: "tool",
+                  toolCallId: "call-1",
+                  name: "execute",
+                  status: "completed",
+                  permissionOutcomes: [{
+                    requestId: "server-request-1" as RequestId,
+                    decision: "rejected",
+                    optionId: "reject_once",
+                    optionLabel: "Reject",
+                    resolvedAt: "2026-01-01T00:00:02.000Z",
+                  }],
+                }],
               },
             ],
           },
@@ -549,17 +577,20 @@ describe("App Server Protocol state mapping", () => {
     }));
 
     expect(mapping.snapshot.chat.items[0].message).toMatchObject({
-      kind: "permission",
-      request_id: "agent-permission-1",
-      app_server_request_id: "server-request-1",
+      kind: "activity",
       title: "Tool call",
-      tool_call: { id: "call-1", title: "Tool call", kind: "execute" },
-      state: "resolved",
-      decision: "denied",
-      options: [
-        { id: "allow_once", label: "Allow Once", kind: "allow" },
-        { id: "reject_once", label: "Reject", kind: "deny" },
-      ],
+      steps: [{
+        kind: "tool",
+        tool_call_id: "call-1",
+        status: "completed",
+        permission_outcomes: [{
+          request_id: "server-request-1",
+          decision: "rejected",
+          option_id: "reject_once",
+          option_label: "Reject",
+          resolved_at: "2026-01-01T00:00:02.000Z",
+        }],
+      }],
     });
   });
 
@@ -700,6 +731,25 @@ describe("App Server Protocol state mapping", () => {
       expect.arrayContaining([{ kind: "sendCapabilityNeedsNativeSurface", state: "blocked" }]),
     );
   });
+
+  it("does not render the normal starting-state send blocker in Chat", () => {
+    const mapping = mapProtocolTaskSnapshot(protocolSnapshot({
+      task: protocolSummary({ status: "starting" }),
+      sendCapability: { state: "blocked", blockers: [{ kind: "taskRunning", message: "Task is already running" }] },
+    }));
+
+    expect(mapping.snapshot.send_capability.blockers).toEqual([
+      { kind: "taskRunning", message: "Task is already running" },
+    ]);
+    expect(mapping.snapshot.chat.items.map((item) => item.message)).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: "interruption",
+          message: "Task is already running",
+        }),
+      ]),
+    );
+  });
 });
 
 function protocolSnapshot(overrides: Partial<ProtocolTaskSnapshot> = {}): ProtocolTaskSnapshot {
@@ -776,6 +826,7 @@ function protocolSnapshot(overrides: Partial<ProtocolTaskSnapshot> = {}): Protoc
                   status: "completed",
                   inputSummary: "Editing files",
                   detailArtifactId: "artifact_1",
+                  permissionOutcomes: [],
                 },
               ],
             },

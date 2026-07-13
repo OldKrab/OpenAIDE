@@ -1,4 +1,3 @@
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use openaide_app_server_protocol::ids::ClientInstanceId;
@@ -21,48 +20,24 @@ use super::{
 #[derive(Clone)]
 pub struct SharedRpcGateway {
     gateway: Arc<Mutex<RpcGateway>>,
-    native_catalog_refresh_in_flight: Arc<AtomicBool>,
 }
 
 impl SharedRpcGateway {
     pub fn new(gateway: RpcGateway) -> Self {
         Self {
             gateway: Arc::new(Mutex::new(gateway)),
-            native_catalog_refresh_in_flight: Arc::new(AtomicBool::new(false)),
         }
     }
 
-    /// Starts at most one slow Native Session catalog refresh without holding the gateway lock.
+    /// Delegates scheduling so timer and Send requests share one coalescing owner.
     pub fn request_native_session_catalog_refresh(&self) {
-        if self
-            .native_catalog_refresh_in_flight
-            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
-            .is_err()
-        {
-            return;
-        }
         let workflow = self
             .gateway
             .lock()
             .expect("protocol gateway lock poisoned")
             .agent_list_sessions
             .clone();
-        let in_flight = self.native_catalog_refresh_in_flight.clone();
-        std::thread::spawn(move || {
-            if let Err(error) = workflow.refresh_native_session_catalogs() {
-                crate::logging::warn(
-                    "native_session_catalog_refresh_failed",
-                    serde_json::json!({ "error": error.message }),
-                );
-            }
-            in_flight.store(false, Ordering::Release);
-        });
-    }
-
-    #[cfg(test)]
-    pub(crate) fn native_catalog_refresh_is_running_for_test(&self) -> bool {
-        self.native_catalog_refresh_in_flight
-            .load(Ordering::Acquire)
+        workflow.request_native_session_catalog_refresh();
     }
 
     pub fn handle_inbound(

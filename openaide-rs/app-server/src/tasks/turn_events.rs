@@ -20,6 +20,7 @@ use self::commands::{update_task_commands, CommandsUpdateTarget};
 use self::config::{update_task_config_options, ConfigUpdateTarget};
 use self::text_chunks::{TextChannel, TextChunkRoutes};
 use std::sync::{Arc, Mutex};
+use std::time::Instant;
 
 #[derive(Clone, Copy)]
 enum CatalogUpdateSource<'a> {
@@ -198,12 +199,17 @@ impl TaskSessionEventSink {
         part: crate::protocol::model::AgentMessagePart,
         now: &str,
     ) -> Result<(), RuntimeError> {
+        let text_bytes = match &part {
+            crate::protocol::model::AgentMessagePart::Text { text } => Some(text.len()),
+            _ => None,
+        };
         let message = NormalizedMessage::AgentMessage {
             id: message_id,
             role,
             parts: vec![part],
             created_at: now.to_string(),
         };
+        let started = Instant::now();
         self.mutations.commit_existing_task(
             &self.task_id,
             TaskCommitOptions {
@@ -219,6 +225,17 @@ impl TaskSessionEventSink {
                 Ok(TaskMutationResult::Changed)
             },
         )?;
+        let elapsed = started.elapsed();
+        if elapsed.as_millis() >= 50 {
+            crate::logging::warn(
+                "agent_message_part_commit_slow",
+                serde_json::json!({
+                    "task_id": self.task_id,
+                    "duration_ms": elapsed.as_millis(),
+                    "text_bytes": text_bytes,
+                }),
+            );
+        }
         Ok(())
     }
 

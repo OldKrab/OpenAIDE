@@ -8,6 +8,7 @@ import type {
 } from "@openaide/app-server-client";
 import type {
   AgentCommandsCatalog,
+  ChatMessage,
   ConfigOptionsCatalog,
   TaskSnapshot,
   TaskSummary,
@@ -48,6 +49,21 @@ export type ProtocolTaskSnapshotMapping = {
   requiresNativeSurface: boolean;
 };
 
+type ProtocolChatItem = ProtocolTaskSnapshot["chat"]["items"][number];
+type ChatItemProjectionCache = WeakMap<ProtocolChatItem, ChatMessage>;
+
+/**
+ * Maps a subscription's structurally shared protocol replica without changing
+ * the identity of historical Chat rows on every focused Task event.
+ */
+export function createProtocolTaskSnapshotMapper() {
+  const chatItems: ChatItemProjectionCache = new WeakMap();
+  return (
+    snapshot: ProtocolTaskSnapshot,
+    context: ProtocolMappingContext = {},
+  ) => mapProtocolTaskSnapshotWithCache(snapshot, context, chatItems);
+}
+
 export function mapProtocolTaskNavigation(
   snapshot: ProtocolTaskNavigationSnapshot,
   context: ProtocolMappingContext = {},
@@ -69,6 +85,14 @@ export function mapProtocolTaskSnapshot(
   snapshot: ProtocolTaskSnapshot,
   context: ProtocolMappingContext = {},
 ): ProtocolTaskSnapshotMapping {
+  return mapProtocolTaskSnapshotWithCache(snapshot, context);
+}
+
+function mapProtocolTaskSnapshotWithCache(
+  snapshot: ProtocolTaskSnapshot,
+  context: ProtocolMappingContext,
+  chatItemCache?: ChatItemProjectionCache,
+): ProtocolTaskSnapshotMapping {
   const mappedTask = mapProtocolTaskSummaryWithWarnings(
     snapshot.task,
     snapshot.revision,
@@ -76,7 +100,13 @@ export function mapProtocolTaskSnapshot(
     snapshot.lifecycle === "new" ? "New task" : "Untitled task",
   );
   const task = mappedTask.task;
-  const items = snapshot.chat.items.map((item) => mapProtocolChatItem(item, task.updated_at));
+  const items = snapshot.chat.items.map((item) => {
+    const cached = chatItemCache?.get(item);
+    if (cached) return cached;
+    const mapped = mapProtocolChatItem(item, task.updated_at);
+    chatItemCache?.set(item, mapped);
+    return mapped;
+  });
   const extraItems = [
     ...preparationItems(snapshot.preparation, task.updated_at),
     ...sendCapabilityItems(snapshot, task.updated_at),
@@ -242,7 +272,7 @@ function taskWithCapabilityStatus(task: TaskSummary, snapshot: ProtocolTaskSnaps
   if (snapshot.preparation.kind === "blocked" || snapshot.preparation.kind === "failed") {
     return { ...task, status: snapshot.preparation.kind === "failed" ? "failed" : "waiting" };
   }
-  if (sendCapabilityBlockedByActiveTurn(snapshot) || sendCapabilityBlockedByTaskPreparation(snapshot)) return task;
+  if (sendCapabilityBlockedByTaskWork(snapshot) || sendCapabilityBlockedByTaskPreparation(snapshot)) return task;
   if (snapshot.sendCapability.state !== "ready") return { ...task, status: "waiting" };
   return task;
 }
@@ -294,7 +324,7 @@ function preparationItems(snapshot: ProtocolTaskSnapshot["preparation"], created
 function sendCapabilityItems(snapshot: ProtocolTaskSnapshot, createdAt: string) {
   if (
     snapshot.sendCapability.state === "ready"
-    || sendCapabilityBlockedByActiveTurn(snapshot)
+    || sendCapabilityBlockedByTaskWork(snapshot)
     || sendCapabilityBlockedByTaskPreparation(snapshot)
   ) return [];
   const message = snapshot.sendCapability.blockers?.map((blocker) => blocker.message).join(" ") || "Sending is not available.";
@@ -333,7 +363,7 @@ function snapshotWarnings(snapshot: ProtocolTaskSnapshot): ProtocolMappingWarnin
   if (snapshot.preparation.kind !== "ready") {
     warnings.push({ kind: "preparationNeedsNativeSurface", state: snapshot.preparation.kind });
   }
-  if (snapshot.sendCapability.state !== "ready" && !sendCapabilityBlockedByActiveTurn(snapshot)) {
+  if (snapshot.sendCapability.state !== "ready" && !sendCapabilityBlockedByTaskWork(snapshot)) {
     warnings.push({ kind: "sendCapabilityNeedsNativeSurface", state: snapshot.sendCapability.state });
   }
   if (snapshot.agentCommands.state !== "ready") {
@@ -342,9 +372,8 @@ function snapshotWarnings(snapshot: ProtocolTaskSnapshot): ProtocolMappingWarnin
   return warnings;
 }
 
-function sendCapabilityBlockedByActiveTurn(snapshot: ProtocolTaskSnapshot) {
-  return snapshot.task.status === "running" &&
-    snapshot.sendCapability.state === "blocked" &&
+function sendCapabilityBlockedByTaskWork(snapshot: ProtocolTaskSnapshot) {
+  return snapshot.sendCapability.state === "blocked" &&
     snapshot.sendCapability.blockers?.some((blocker) => blocker.kind === "taskRunning") === true;
 }
 

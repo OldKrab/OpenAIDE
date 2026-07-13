@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent, PointerEvent, UIEvent, WheelEvent } from "react";
 import {
   scrollTopAfterPrependedContent,
@@ -205,7 +205,10 @@ export function useTaskChatScroll(options: UseTaskChatScrollOptions) {
           onResize();
         })
       : undefined;
-    mutationObserver?.observe(messageList, { childList: true, subtree: true });
+    // Direct row changes are enough to refresh observation. Intrinsic changes
+    // inside a row are reported by that row's ResizeObserver without walking
+    // every Markdown mutation in the full Chat subtree.
+    mutationObserver?.observe(messageList, { childList: true });
 
     return () => {
       active = false;
@@ -264,8 +267,10 @@ export function useTaskChatScroll(options: UseTaskChatScrollOptions) {
     reconcileViewport(messageList);
   }, [itemCount, pendingPrepend, prependRequestGeneration, reconcileViewport, refreshPendingPrependBaseline]);
 
-  // React updates are reconciled before paint; observers cover later intrinsic reflow.
+  // ResizeObserver owns browser layout reconciliation. The render fallback is
+  // retained only for test/legacy environments that do not provide it.
   useLayoutEffect(() => {
+    if (typeof ResizeObserver === "function") return;
     const messageList = messageListRef.current;
     if (messageList) reconcileViewport(messageList);
   });
@@ -393,7 +398,7 @@ export function useTaskChatScroll(options: UseTaskChatScrollOptions) {
     jumpAnimationFrameRef.current = requestAnimationFrame(animate);
   }, [cancelJumpAnimation]);
 
-  return {
+  return useMemo(() => ({
     capturePrependAnchor,
     jumpToLatest,
     messageListRef,
@@ -404,7 +409,16 @@ export function useTaskChatScroll(options: UseTaskChatScrollOptions) {
     onScroll,
     onWheel,
     showJumpToLatest,
-  };
+  }), [
+    capturePrependAnchor,
+    finishPointerGesture,
+    jumpToLatest,
+    onKeyDown,
+    onPointerDown,
+    onScroll,
+    onWheel,
+    showJumpToLatest,
+  ]);
 }
 
 function keyboardScrollDirection(key: string, shiftKey: boolean): ScrollIntent | undefined {

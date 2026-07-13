@@ -82,8 +82,15 @@ fn cancel_stops_pending_agent_turn() {
             task_id: snapshot.task.task_id.clone(),
         })
         .unwrap();
-    assert_eq!(stopped.task.status, TaskStatus::Stopping);
-    assert!(has_running_activity(&stopped));
+    // The Agent may acknowledge cancellation before cancel() reads its return snapshot.
+    assert!(matches!(
+        stopped.task.status,
+        TaskStatus::Stopping | TaskStatus::Inactive
+    ));
+    assert_eq!(
+        has_running_activity(&stopped),
+        stopped.task.status == TaskStatus::Stopping
+    );
     wait_until(|| {
         service
             .snapshot(TaskSnapshotParams {

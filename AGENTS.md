@@ -7,6 +7,7 @@ This file is the short operating guide for agents working in this repo. Keep det
 - Product language: `CONTEXT.md`.
 - Product purpose and UX principles: `PRODUCT.md`.
 - Visual system: `DESIGN.md`.
+- Task Lifecycle and Chat specification: `docs/task-chat-flow.md`; update it when this behavior changes in code, but do not change the accepted specification without first discussing the proposal with the user and receiving explicit agreement.
 - Other ADRs under `docs/adr/` when touching their area.
 
 ## Working Rules
@@ -18,9 +19,6 @@ This file is the short operating guide for agents working in this repo. Keep det
 - When Rust App Server Protocol change, regenerate TypeScript bindings with `npm run protocol:generate` and verify with `npm run protocol:check`.
 - For non-trivial architecture or API design, discuss the approach first and state the next planned step.
 - Treat simplicity as a primary constraint for every code and design change, including features, fixes, and refactors. Do not preserve existing complexity merely because it exists. Prefer one owner, one state representation, one ordering mechanism, one validation pass, and visible failure with explicit recovery. If implementation would expand an agreed design, stop and discuss it first.
-- During the current architecture replacement, provide no compatibility with superseded OpenAIDE implementation details, internal or App Server interfaces, protocol shapes, or persisted development-data formats. Remove old paths completely; do not add adapters, migrations, dual reads/writes, or fallback deserialization for them.
-
-
 ## Bugs And TDD
 
 - When the user reports a bug, use TDD: reproduce or add a failing regression test first, then fix, then rerun the test.

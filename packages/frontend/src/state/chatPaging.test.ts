@@ -36,6 +36,25 @@ describe("chatPaging", () => {
     expect(chat.error).toBe("Page failed");
   });
 
+  it("uses the live tail value when loaded history contains a stale copy of the same row", () => {
+    const chat = renderedChat(snapshot([
+      agentMessage("answer", "Complete response including the final chunk"),
+    ]), {
+      olderItems: [
+        agentMessage("older", "Earlier context"),
+        agentMessage("answer", "Complete response"),
+      ],
+      hasBefore: false,
+      pending: false,
+    });
+
+    expect(chat.items.map((item) => item.message_id)).toEqual(["older", "answer"]);
+    expect(chat.items[1]?.message).toMatchObject({
+      kind: "agent_message",
+      parts: [{ kind: "text", text: "Complete response including the final chunk" }],
+    });
+  });
+
   it("preserves distinct thought identities instead of guessing chunk boundaries from adjacency", () => {
     const chat = renderedChat(snapshot([thoughtMessage("m1", "Think"), thoughtMessage("m2", "ing")]), undefined);
 
@@ -97,6 +116,21 @@ describe("chatPaging", () => {
         ],
       },
     });
+  });
+
+  it("preserves an unchanged grouped activity row while later live text changes", () => {
+    const activities = [
+      activityMessage("m1", "Read file", "completed", true, [
+        { kind: "tool", name: "read", status: "completed", input_summary: "src/main.ts" },
+      ]),
+      activityMessage("m2", "Search files", "completed", true, [
+        { kind: "tool", name: "search", status: "completed", input_summary: "needle" },
+      ]),
+    ];
+    const first = renderedChat(snapshot([...activities, agentMessage("answer", "Partial")]), undefined);
+    const second = renderedChat(snapshot([...activities, agentMessage("answer", "Partial response")]), undefined);
+
+    expect(second.items[0]).toBe(first.items[0]);
   });
 
   it("labels grouped activity by the work represented in the run", () => {

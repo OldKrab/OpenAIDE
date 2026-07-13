@@ -1,7 +1,9 @@
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use crate::protocol::errors::RuntimeError;
-use crate::protocol::model::{ActivityStatus, NormalizedMessage, TaskSnapshot};
+use crate::protocol::model::{
+    ActivityStatus, NormalizedMessage, TaskSnapshot, ToolPermissionOutcome,
+};
 use crate::storage::records::TaskRecord;
 use crate::storage::Store;
 use crate::task_events::TaskUpdateNotifier;
@@ -99,6 +101,25 @@ impl TaskMutationContext<'_> {
         Ok(())
     }
 
+    pub(crate) fn record_tool_permission_outcome(
+        &mut self,
+        activity_identity: &str,
+        tool_call_id: &str,
+        outcome: ToolPermissionOutcome,
+    ) -> Result<bool, RuntimeError> {
+        let changed = self.store.record_tool_permission_outcome(
+            &self.task.task_id,
+            activity_identity,
+            tool_call_id,
+            outcome,
+        )?;
+        self.chat_changes
+            .extend(changed.iter().map(|stored| CommittedChatChange::Upsert {
+                item: crate::snapshots::task_snapshot::project_chat_item(&stored.chat),
+            }));
+        Ok(!changed.is_empty())
+    }
+
     pub(crate) fn upsert_message_with_details(
         &mut self,
         message: NormalizedMessage,
@@ -135,9 +156,9 @@ impl TaskMutationContext<'_> {
                     item: crate::snapshots::task_snapshot::project_chat_item(&stored.chat),
                 });
             }
-            crate::storage::message_store::AgentMessageAppend::TextAppended(stored) => {
+            crate::storage::message_store::AgentMessageAppend::TextAppended { message_id } => {
                 self.chat_changes.push(CommittedChatChange::AppendText {
-                    message_id: stored.chat.message_id.clone().into(),
+                    message_id: message_id.clone().into(),
                     text: text.expect("text append result requires one incoming text part"),
                 });
             }
@@ -219,6 +240,12 @@ impl TaskMutations {
         self.store_update_lock
             .lock()
             .expect("store update lock poisoned")
+    }
+
+    /// Compacts streamed Chat deltas only at an explicit workflow boundary.
+    pub(crate) fn compact_message_journal(&self, task_id: &str) -> Result<(), RuntimeError> {
+        let _guard = self.lock();
+        self.store.compact_message_journal(task_id)
     }
 
     #[cfg(test)]

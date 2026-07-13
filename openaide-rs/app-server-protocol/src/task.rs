@@ -45,7 +45,6 @@ pub struct TaskAdoptNativeSessionResult {
 #[serde(rename_all = "camelCase")]
 pub struct TaskSendParams {
     pub task_id: TaskId,
-    pub task_revision: u64,
     pub message: ComposerMessage,
 }
 

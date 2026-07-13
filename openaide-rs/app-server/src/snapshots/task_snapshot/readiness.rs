@@ -216,20 +216,21 @@ pub(super) fn send_capability_for_task(
         TaskPreparationRecord::Ready => {}
     }
     match status {
-        LegacyTaskStatus::Inactive | LegacyTaskStatus::Completed => TaskSendCapabilitySnapshot {
-            state: TaskSendCapabilityState::Ready,
-            blockers: Vec::new(),
-        },
-        LegacyTaskStatus::Starting
-        | LegacyTaskStatus::Active
-        | LegacyTaskStatus::Stopping
-        | LegacyTaskStatus::Waiting => TaskSendCapabilitySnapshot {
-            state: TaskSendCapabilityState::Blocked,
-            blockers: vec![TaskSendBlocker {
-                kind: TaskSendBlockerKind::TaskRunning,
-                message: "Task is already running".to_string(),
-            }],
-        },
+        LegacyTaskStatus::Inactive | LegacyTaskStatus::Completed | LegacyTaskStatus::Active => {
+            TaskSendCapabilitySnapshot {
+                state: TaskSendCapabilityState::Ready,
+                blockers: Vec::new(),
+            }
+        }
+        LegacyTaskStatus::Starting | LegacyTaskStatus::Stopping | LegacyTaskStatus::Waiting => {
+            TaskSendCapabilitySnapshot {
+                state: TaskSendCapabilityState::Blocked,
+                blockers: vec![TaskSendBlocker {
+                    kind: TaskSendBlockerKind::TaskRunning,
+                    message: "Task is already running".to_string(),
+                }],
+            }
+        }
         LegacyTaskStatus::Failed => TaskSendCapabilitySnapshot {
             state: TaskSendCapabilityState::Ready,
             blockers: Vec::new(),

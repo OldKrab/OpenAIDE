@@ -324,6 +324,16 @@ pub trait AgentRuntime: Send + Sync {
         sink: Arc<dyn AgentEventSink>,
     ) -> Result<AgentPromptOutcome, RuntimeError>;
 
+    /// Sends an additional prompt to a Native Session without owning Task status.
+    ///
+    /// The runtime must consume any eventual protocol response, but the response
+    /// cannot finish or otherwise change the primary prompt lifecycle.
+    fn steer(&self, _prompt: AgentPrompt) -> Result<(), RuntimeError> {
+        Err(RuntimeError::CapabilityMissing(
+            "agent_session_steering".to_string(),
+        ))
+    }
+
     fn cancel_session(&self, _session: &AgentSessionKey) -> Result<(), RuntimeError> {
         Ok(())
     }

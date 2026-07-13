@@ -15,6 +15,7 @@ import type {
   TaskSummary,
   ActivityToolDetails,
 } from "@openaide/app-shell-contracts";
+import type { PendingRequestSnapshot } from "@openaide/app-server-client";
 import {
   selectionWithProject,
   selectionWithWorkspace,
@@ -24,6 +25,7 @@ import {
 } from "./composerOptions";
 import { reduceNewTaskState } from "./newTaskReducer";
 import { applyAppServerReplica } from "./appServerReplicaState";
+import { pendingRequestItems } from "./appServerProtocolChatMapping";
 import { reduceSettingsState } from "./settingsReducer";
 import {
   reconcileBackgroundTaskSnapshot,
@@ -43,9 +45,15 @@ type AppActionPayload =
   | { type: "tasks:error"; message: string }
   | { type: "task:list:remove"; taskId: string }
   | { type: "task:promoted"; snapshot: TaskSnapshot; activate: boolean }
-  | { type: "snapshot"; snapshot: TaskSnapshot; intent: SnapshotIntent }
+  | {
+      type: "snapshot";
+      snapshot: TaskSnapshot;
+      intent: SnapshotIntent;
+      liveText?: { messageId: string; channel: "agent" | "thought"; eventCursor: string };
+    }
   | { type: "taskScroll:record"; taskId: string; scrollState: TaskChatScrollState }
   | { type: "taskChat:liveText"; taskId: string; messageId: string; channel: "agent" | "thought"; eventCursor: string }
+  | { type: "taskRequest:opened"; request: PendingRequestSnapshot }
   | { type: "prompt"; prompt: string }
   | { type: "projects"; projects: ProjectOption[]; initialProjectId?: string }
   | { type: "workspace:roots"; roots: WorkspaceRoot[] }
@@ -142,6 +150,7 @@ type GlobalAction = Extract<
   | { type: "snapshot" }
   | { type: "taskScroll:record" }
   | { type: "taskChat:liveText" }
+  | { type: "taskRequest:opened" }
   | { type: "projects" }
   | { type: "workspace:roots" }
   | { type: "search:set" }
@@ -176,6 +185,7 @@ function isGlobalAction(action: AppAction): action is GlobalAction {
     case "snapshot":
     case "taskScroll:record":
     case "taskChat:liveText":
+    case "taskRequest:opened":
     case "projects":
     case "workspace:roots":
     case "search:set":
@@ -270,10 +280,14 @@ function reduceGlobalState(state: AppState, action: GlobalAction): AppState {
       }
       const taskId = action.snapshot.task.task_id;
       const reconciliation = reconcileTaskSnapshotDependents(state, action.snapshot, replicaEpoch);
-      if (reconciliation.state === state) return state;
+      if (reconciliation.state === state) {
+        return action.liveText
+          ? applyTaskLiveTextPresentation(state, taskId, action.liveText)
+          : state;
+      }
       const { snapshot } = reconciliation;
       const tasks = upsertTaskSummary(state.tasks, snapshot.task);
-      return {
+      const nextState = {
         ...reconciliation.state,
         snapshot,
         showArchived: state.showArchived,
@@ -291,6 +305,9 @@ function reduceGlobalState(state: AppState, action: GlobalAction): AppState {
           configOptionsError: undefined,
         },
       };
+      return action.liveText
+        ? applyTaskLiveTextPresentation(nextState, taskId, action.liveText)
+        : nextState;
     }
     case "taskScroll:record":
       return {
@@ -301,19 +318,9 @@ function reduceGlobalState(state: AppState, action: GlobalAction): AppState {
         },
       };
     case "taskChat:liveText":
-      return {
-        ...state,
-        taskLiveTextPresentation: {
-          ...state.taskLiveTextPresentation,
-          [action.taskId]: {
-            ...state.taskLiveTextPresentation[action.taskId],
-            [action.channel]: {
-              messageId: action.messageId,
-              eventCursor: action.eventCursor,
-            },
-          },
-        },
-      };
+      return applyTaskLiveTextPresentation(state, action.taskId, action);
+    case "taskRequest:opened":
+      return applyOpenedTaskRequest(state, action.request);
     case "projects": {
       const selected = state.newTask.selection.projectId
         ? action.projects.find((project) => project.projectId === state.newTask.selection.projectId)
@@ -362,6 +369,52 @@ function reduceGlobalState(state: AppState, action: GlobalAction): AppState {
         newTask: abandonNativeSessionOpening(state.newTask),
       };
   }
+}
+
+function applyOpenedTaskRequest(
+  state: AppState,
+  request: PendingRequestSnapshot,
+): AppState {
+  if (request.scope.kind !== "task") return state;
+  const taskId = request.scope.taskId;
+  const current = state.taskSnapshots[taskId]
+    ?? (state.snapshot?.task.task_id === taskId ? state.snapshot : undefined);
+  if (!current) return state;
+  const item = pendingRequestItems([request], current.task.updated_at)[0];
+  if (!item) return state;
+  const existing = current.active_requests.findIndex((candidate) => candidate.identity === item.identity);
+  const activeRequests = existing === -1
+    ? [...current.active_requests, item]
+    : current.active_requests.map((candidate, index) => index === existing ? item : candidate);
+  const snapshot = { ...current, active_requests: activeRequests };
+  return {
+    ...state,
+    snapshot: state.snapshot?.task.task_id === taskId ? snapshot : state.snapshot,
+    taskSnapshots: {
+      ...state.taskSnapshots,
+      [taskId]: snapshot,
+    },
+  };
+}
+
+function applyTaskLiveTextPresentation(
+  state: AppState,
+  taskId: string,
+  signal: { messageId: string; channel: "agent" | "thought"; eventCursor: string },
+): AppState {
+  return {
+    ...state,
+    taskLiveTextPresentation: {
+      ...state.taskLiveTextPresentation,
+      [taskId]: {
+        ...state.taskLiveTextPresentation[taskId],
+        [signal.channel]: {
+          messageId: signal.messageId,
+          eventCursor: signal.eventCursor,
+        },
+      },
+    },
+  };
 }
 
 function abandonNativeSessionOpening(newTask: AppState["newTask"]): AppState["newTask"] {

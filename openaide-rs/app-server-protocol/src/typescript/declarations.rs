@@ -75,15 +75,15 @@ use crate::snapshot::{
     AttachmentKind, AttachmentSnapshot, ChatItem, ChatItemStatus, ChatRole, ChatSnapshot,
     ClientSnapshot, ClientSnapshotScope, LiveSessionDataState, MessagePart,
     NewTaskDefaultsSnapshot, PendingAgentConfigChange, PendingRequestKind, PendingRequestScope,
-    PendingRequestSnapshot, PermissionMessageDecision, PermissionMessageOption,
-    PermissionMessageOptionKind, PermissionMessageState, ProjectCollectionSnapshot, ProjectSummary,
-    ProtocolVersion, QuestionMessageAction, QuestionMessageState, RecoveryAction, RecoverySnapshot,
+    PendingRequestSnapshot, ProjectCollectionSnapshot, ProjectSummary, ProtocolVersion,
+    QuestionMessageAction, QuestionMessageState, RecoveryAction, RecoverySnapshot,
     ServerCapabilities, ServerSnapshot, SettingsSnapshot, StateRootSnapshot,
     TaskAgentCommandsSnapshot, TaskAgentConfigSnapshot, TaskHistorySyncSnapshot, TaskLifecycle,
     TaskNavigationSnapshot, TaskPreparationAction, TaskPreparationSnapshot, TaskPreparationStep,
     TaskPreparationStepKind, TaskPreparationStepStatus, TaskSendBlocker, TaskSendBlockerKind,
     TaskSendCapabilitySnapshot, TaskSendCapabilityState, TaskSetupBlocker, TaskSetupBlockerKind,
     TaskSnapshot, TaskStatus, TaskSummary, TaskTitle, TaskTitleSource,
+    ToolPermissionDecisionSnapshot, ToolPermissionOutcomeSnapshot,
 };
 use crate::state::{
     StateSubscribeParams, StateSubscribeResult, StateUnsubscribeParams, StateUnsubscribeResult,
@@ -370,14 +370,12 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<ChatRole>(output, config);
     push_decl::<ChatItemStatus>(output, config);
     push_decl::<MessagePart>(output, config);
-    push_decl::<PermissionMessageOption>(output, config);
-    push_decl::<PermissionMessageOptionKind>(output, config);
-    push_decl::<PermissionMessageState>(output, config);
-    push_decl::<PermissionMessageDecision>(output, config);
     push_decl::<QuestionMessageState>(output, config);
     push_decl::<QuestionMessageAction>(output, config);
     push_decl::<ActivityStatus>(output, config);
     push_decl::<ActivityStepSnapshot>(output, config);
+    push_decl::<ToolPermissionOutcomeSnapshot>(output, config);
+    push_decl::<ToolPermissionDecisionSnapshot>(output, config);
     push_decl::<AttachmentSnapshot>(output, config);
     push_decl::<AttachmentKind>(output, config);
     push_decl::<RecoverySnapshot>(output, config);

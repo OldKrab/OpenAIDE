@@ -187,7 +187,36 @@ describe("LocalHttpBackendConnection", () => {
     connection.close();
   });
 
-  it("invalidates subscribed state after event-stream continuity is lost", async () => {
+  it("backs off repeated event-stream reconnect failures", async () => {
+    vi.useFakeTimers();
+    try {
+      let streamAttempt = 0;
+      const fetch = vi.fn<LocalHttpFetch>(async (_input, init) => {
+        if (init.headers.Accept === "text/event-stream") {
+          streamAttempt += 1;
+          return streamAttempt < 3 ? closedEventStreamResponse() : eventStreamResponse([]);
+        }
+        const request = JSON.parse(init.body) as { id: string };
+        return fetchResponse([response(request.id, { result: initializeResult() })]);
+      });
+      const connection = createLocalHttpBackendConnection(connectionOptions(fetch));
+
+      await connection.initialize(initializeParams());
+      await Promise.resolve();
+      expect(streamAttempt).toBe(1);
+      await vi.advanceTimersByTimeAsync(500);
+      expect(streamAttempt).toBe(2);
+      await vi.advanceTimersByTimeAsync(999);
+      expect(streamAttempt).toBe(2);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(streamAttempt).toBe(3);
+      connection.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("invalidates subscribed state only after the replacement event stream connects", async () => {
     vi.useFakeTimers();
     try {
       let streamAttempt = 0;
@@ -201,17 +230,24 @@ describe("LocalHttpBackendConnection", () => {
       });
       const connection = createLocalHttpBackendConnection(connectionOptions(fetch));
       const resets: unknown[] = [];
+      const disconnected = vi.fn();
 
+      connection.eventStreamDisconnects(disconnected);
       connection.stateResets((reset) => resets.push(reset));
       await connection.initialize(initializeParams());
-      await vi.waitFor(() => expect(resets).toEqual([
-        { serverId: "server-1", stateRootId: "root-1" },
-      ]));
+      await vi.waitFor(() => expect(streamAttempt).toBe(1));
+      expect(disconnected).toHaveBeenCalledOnce();
+      const lateDisconnected = vi.fn();
+      connection.eventStreamDisconnects(lateDisconnected);
+      expect(lateDisconnected).toHaveBeenCalledOnce();
+      expect(resets).toEqual([]);
       expect(streamAttempt).toBe(1);
       await vi.advanceTimersByTimeAsync(500);
 
       expect(streamAttempt).toBe(2);
-      expect(resets).toHaveLength(1);
+      expect(resets).toEqual([
+        { serverId: "server-1", stateRootId: "root-1" },
+      ]);
       connection.close();
     } finally {
       vi.useRealTimers();
@@ -263,8 +299,6 @@ describe("LocalHttpBackendConnection", () => {
       [response("local-http-request-3", { result: initializeResult("server-2") })],
     ]);
     const connection = createLocalHttpBackendConnection(connectionOptions(fetch));
-    const reset = vi.fn();
-    connection.stateResets(reset);
 
     await connection.initialize(initializeParams());
     const error = await connection.request(STATE_SUBSCRIBE, { scope: { kind: "projects" } })
@@ -284,10 +318,6 @@ describe("LocalHttpBackendConnection", () => {
       CLIENT_INITIALIZE,
       STATE_SUBSCRIBE,
       CLIENT_INITIALIZE,
-    ]);
-    expect(reset.mock.calls.map(([identity]) => identity)).toEqual([
-      { serverId: "server-1", stateRootId: "root-1" },
-      { serverId: "server-2", stateRootId: "root-1" },
     ]);
     connection.close();
   });
@@ -386,7 +416,7 @@ describe("LocalHttpBackendConnection", () => {
     connection.close();
   });
 
-  it("invalidates subscribed state after reinitialize even when the replacement event stream stays down", async () => {
+  it("keeps subscribed state disconnected when reinitialize cannot restore the event stream", async () => {
     let subscribeAttempts = 0;
     let initializeAttempts = 0;
     let streamAttempts = 0;
@@ -421,7 +451,9 @@ describe("LocalHttpBackendConnection", () => {
       ]);
     });
     const connection = createLocalHttpBackendConnection(connectionOptions(fetch));
+    const disconnected = vi.fn();
     const reset = vi.fn();
+    connection.eventStreamDisconnects(disconnected);
     connection.stateResets(reset);
 
     await connection.initialize(initializeParams());
@@ -429,8 +461,8 @@ describe("LocalHttpBackendConnection", () => {
       .rejects.toBeInstanceOf(BackendReplicaChangedError);
 
     expect(streamAttempts).toBe(2);
-    expect(reset).toHaveBeenCalledOnce();
-    expect(reset).toHaveBeenCalledWith({ serverId: "server-2", stateRootId: "root-1" });
+    expect(disconnected).toHaveBeenCalledOnce();
+    expect(reset).not.toHaveBeenCalled();
 
     connection.close();
   });

@@ -1,9 +1,10 @@
 use std::fs;
-use std::io::Write;
+use std::io::{BufRead, Write};
+use std::time::Instant;
 
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{
-    ActivityStep, AgentMessagePart, AgentMessageRole, ChatMessage, MessagePage, NormalizedMessage,
+    ActivityStep, AgentMessageRole, ChatMessage, MessagePage, NormalizedMessage,
 };
 
 use super::atomic;
@@ -12,42 +13,24 @@ use super::records::{MessageMeta, StoredMessage};
 use super::tool_artifacts::{lightweight_detail_summary, should_replace_input_summary};
 use super::Store;
 
+mod agent_append;
+mod journal;
 mod mutations;
 mod replace;
+mod transaction;
 
-pub(crate) struct MessageFilesBackup {
-    messages: Option<Vec<u8>>,
-    meta: Option<Vec<u8>>,
-}
+pub(crate) use agent_append::AgentMessageAppend;
+pub(super) use agent_append::AgentMessageCache;
 
-pub(crate) enum AgentMessageAppend {
-    Appended(StoredMessage),
-    TextAppended(StoredMessage),
-    PartAppended(StoredMessage),
+const MESSAGE_BASE_RECORD: &str = "message_base";
+
+#[derive(serde::Deserialize, serde::Serialize)]
+struct MessageBaseHeader {
+    record_type: String,
+    journal_sequence: u64,
 }
 
 impl Store {
-    pub(crate) fn backup_message_files(
-        &self,
-        task_id: &str,
-    ) -> Result<MessageFilesBackup, RuntimeError> {
-        let task_dir = self.task_dir(task_id)?;
-        Ok(MessageFilesBackup {
-            messages: read_optional_bytes(&task_dir.join("messages.jsonl"))?,
-            meta: read_optional_bytes(&task_dir.join("message_meta.json"))?,
-        })
-    }
-
-    pub(crate) fn restore_message_files(
-        &self,
-        task_id: &str,
-        backup: &MessageFilesBackup,
-    ) -> Result<(), RuntimeError> {
-        let task_dir = self.task_dir(task_id)?;
-        restore_optional_bytes(&task_dir.join("messages.jsonl"), backup.messages.as_deref())?;
-        restore_optional_bytes(&task_dir.join("message_meta.json"), backup.meta.as_deref())
-    }
-
     pub fn append_message(
         &self,
         task_id: &str,
@@ -75,6 +58,9 @@ impl Store {
             .iter_mut()
             .find(|stored| stored.chat.identity == message.identity)
         {
+            message
+                .message
+                .preserve_tool_permission_outcomes_from(&stored.chat.message);
             message.cursor = stored.chat.cursor.clone();
             message.message_id = stored.chat.message_id.clone();
             message
@@ -99,46 +85,6 @@ impl Store {
         Ok(stored)
     }
 
-    /// Appends one ordered ACP content part using the message identity as correlation.
-    pub(crate) fn append_agent_message_part(
-        &self,
-        task_id: &str,
-        message: NormalizedMessage,
-    ) -> Result<AgentMessageAppend, RuntimeError> {
-        let identity = message.identity();
-        let mut messages = self.read_messages(task_id)?;
-        if let Some(stored) = messages
-            .iter_mut()
-            .find(|stored| stored.chat.identity == identity)
-        {
-            let text_appended = append_agent_part(&mut stored.chat.message, message)?;
-            let updated = stored.clone();
-            self.write_messages(task_id, &messages)?;
-            self.write_meta(task_id, &messages)?;
-            return Ok(if text_appended {
-                AgentMessageAppend::TextAppended(updated)
-            } else {
-                AgentMessageAppend::PartAppended(updated)
-            });
-        }
-
-        let sequence = messages.last().map(|item| item.sequence + 1).unwrap_or(1);
-        let stored = StoredMessage {
-            sequence,
-            chat: ChatMessage {
-                cursor: cursor::from_sequence(sequence),
-                identity: identity.clone(),
-                message_type: message.message_type().to_string(),
-                message_id: identity,
-                message,
-            },
-        };
-        messages.push(stored.clone());
-        self.write_messages(task_id, &messages)?;
-        self.write_meta(task_id, &messages)?;
-        Ok(AgentMessageAppend::Appended(stored))
-    }
-
     pub fn tail_page(&self, task_id: &str, limit: usize) -> Result<MessagePage, RuntimeError> {
         let limit = limit.clamp(1, 500);
         let messages = self.read_messages(task_id)?;
@@ -161,21 +107,82 @@ impl Store {
     }
 
     pub fn read_messages(&self, task_id: &str) -> Result<Vec<StoredMessage>, RuntimeError> {
-        let path = self.task_dir(task_id)?.join("messages.jsonl");
-        if !path.exists() {
-            return Ok(Vec::new());
-        }
-        let text = fs::read_to_string(path)?;
+        self.read_messages_with_journal_sequence(task_id)
+            .map(|(messages, _)| messages)
+    }
+
+    fn read_messages_with_journal_sequence(
+        &self,
+        task_id: &str,
+    ) -> Result<(Vec<StoredMessage>, u64), RuntimeError> {
+        #[cfg(test)]
+        self.inner
+            .message_file_read_count
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        let task_dir = self.task_dir(task_id)?;
+        let path = task_dir.join("messages.jsonl");
         let mut messages = Vec::new();
-        for line in text.lines().filter(|line| !line.trim().is_empty()) {
-            messages.push(serde_json::from_str(line)?);
+        let mut applied_journal_sequence = 0;
+        if path.exists() {
+            let text = fs::read_to_string(path)?;
+            for line in text.lines().filter(|line| !line.trim().is_empty()) {
+                let value: serde_json::Value = serde_json::from_str(line)?;
+                if value.get("record_type").and_then(|value| value.as_str())
+                    == Some(MESSAGE_BASE_RECORD)
+                {
+                    applied_journal_sequence =
+                        serde_json::from_value::<MessageBaseHeader>(value)?.journal_sequence;
+                } else {
+                    messages.push(serde_json::from_value(value)?);
+                }
+            }
         }
-        Ok(messages)
+        let journal_sequence = journal::replay(&task_dir, applied_journal_sequence, &mut messages)?;
+        Ok((messages, journal_sequence))
+    }
+
+    /// Materializes the append journal after a prompt boundary without delaying chunk commits.
+    pub(crate) fn compact_message_journal(&self, task_id: &str) -> Result<(), RuntimeError> {
+        let task_dir = self.task_dir(task_id)?;
+        let journal_path = journal::path(&task_dir);
+        if !journal_path.exists() {
+            return Ok(());
+        }
+        let started = Instant::now();
+        let journal_bytes = journal_path
+            .metadata()
+            .map(|metadata| metadata.len())
+            .unwrap_or_default();
+        let journal_sequence = journal::latest_sequence(&task_dir)?;
+        let applied_sequence = read_applied_journal_sequence(&task_dir.join("messages.jsonl"))?;
+        let message_count = if applied_sequence >= journal_sequence {
+            None
+        } else {
+            let messages = self.read_messages(task_id)?;
+            let message_count = messages.len();
+            self.write_messages(task_id, &messages)?;
+            Some(message_count)
+        };
+        journal::remove(&task_dir)?;
+        crate::logging::info(
+            "message_journal_compacted",
+            serde_json::json!({
+                "task_id": task_id,
+                "message_count": message_count,
+                "journal_bytes": journal_bytes,
+                "duration_ms": started.elapsed().as_millis(),
+            }),
+        );
+        Ok(())
     }
 
     pub fn message_history_version(&self, task_id: &str) -> Result<u64, RuntimeError> {
+        let meta_path = self.task_dir(task_id)?.join("message_meta.json");
+        if meta_path.exists() {
+            return self.read_message_version(task_id, 0);
+        }
         let messages = self.read_messages(task_id)?;
-        self.read_message_version(task_id, messages.len() as u64)
+        Ok(messages.len() as u64)
     }
 
     /// Timestamp of the latest durable Chat write, independent from Task metadata changes.
@@ -206,11 +213,25 @@ impl Store {
             .message_file_write_count
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let mut bytes = Vec::new();
+        let task_dir = self.task_dir(task_id)?;
+        let journal_sequence = journal::latest_sequence(&task_dir)?;
+        if journal_sequence > 0 {
+            serde_json::to_writer(
+                &mut bytes,
+                &MessageBaseHeader {
+                    record_type: MESSAGE_BASE_RECORD.to_string(),
+                    journal_sequence,
+                },
+            )?;
+            writeln!(&mut bytes).map_err(|error| RuntimeError::Storage(error.to_string()))?;
+        }
         for message in messages {
             serde_json::to_writer(&mut bytes, message)?;
             writeln!(&mut bytes).map_err(|error| RuntimeError::Storage(error.to_string()))?;
         }
-        atomic::write_bytes(&self.task_dir(task_id)?.join("messages.jsonl"), &bytes)
+        atomic::write_bytes(&task_dir.join("messages.jsonl"), &bytes)?;
+        self.invalidate_agent_message_cache(task_id);
+        Ok(())
     }
 
     fn write_meta(&self, task_id: &str, messages: &[StoredMessage]) -> Result<(), RuntimeError> {
@@ -317,36 +338,30 @@ impl Store {
             .map(|meta| meta.version)
             .map_err(RuntimeError::from)
     }
+
+    fn invalidate_agent_message_cache(&self, task_id: &str) {
+        self.inner
+            .agent_message_cache
+            .lock()
+            .expect("Agent message cache poisoned")
+            .remove(task_id);
+    }
 }
 
-fn append_agent_part(
-    existing: &mut NormalizedMessage,
-    incoming: NormalizedMessage,
-) -> Result<bool, RuntimeError> {
-    match (existing, incoming) {
-        (
-            NormalizedMessage::AgentMessage { role, parts, .. },
-            NormalizedMessage::AgentMessage {
-                role: incoming_role,
-                parts: incoming_parts,
-                ..
-            },
-        ) if *role == incoming_role && incoming_parts.len() == 1 => {
-            let part = incoming_parts.into_iter().next().expect("one checked part");
-            if let (Some(AgentMessagePart::Text { text }), AgentMessagePart::Text { text: chunk }) =
-                (parts.last_mut(), &part)
-            {
-                text.push_str(chunk);
-                Ok(true)
-            } else {
-                parts.push(part);
-                Ok(false)
-            }
-        }
-        _ => Err(RuntimeError::Conflict(
-            "ACP message id changed content channel".to_string(),
-        )),
+fn read_applied_journal_sequence(path: &std::path::Path) -> Result<u64, RuntimeError> {
+    if !path.exists() {
+        return Ok(0);
     }
+    let mut first_line = String::new();
+    std::io::BufReader::new(fs::File::open(path)?).read_line(&mut first_line)?;
+    if first_line.trim().is_empty() {
+        return Ok(0);
+    }
+    let value: serde_json::Value = serde_json::from_str(&first_line)?;
+    if value.get("record_type").and_then(|value| value.as_str()) != Some(MESSAGE_BASE_RECORD) {
+        return Ok(0);
+    }
+    Ok(serde_json::from_value::<MessageBaseHeader>(value)?.journal_sequence)
 }
 
 const TARGET_CHAT_TURNS: usize = 10;
@@ -428,26 +443,4 @@ fn page_before_index(
         .iter()
         .position(|message| message.chat.cursor == before_cursor)
         .ok_or_else(|| RuntimeError::InvalidParams("before_cursor".to_string()))
-}
-
-fn read_optional_bytes(path: &std::path::Path) -> Result<Option<Vec<u8>>, RuntimeError> {
-    if path.exists() {
-        Ok(Some(fs::read(path)?))
-    } else {
-        Ok(None)
-    }
-}
-
-fn restore_optional_bytes(
-    path: &std::path::Path,
-    bytes: Option<&[u8]>,
-) -> Result<(), RuntimeError> {
-    match bytes {
-        Some(bytes) => atomic::write_bytes(path, bytes),
-        None => match fs::remove_file(path) {
-            Ok(()) => Ok(()),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(error) => Err(RuntimeError::from(error)),
-        },
-    }
 }

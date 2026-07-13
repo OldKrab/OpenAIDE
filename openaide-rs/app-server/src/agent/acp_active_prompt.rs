@@ -151,6 +151,61 @@ fn send_prompt_request(
         .map_err(acp_error)
 }
 
+/// Sends steering on the same ACP method while deliberately discarding its
+/// eventual response. Session updates continue through the permanent listener.
+pub(super) fn send_steering_prompt_request(
+    active_session: &agent_client_protocol::ActiveSession<'static, Agent>,
+    prompt: AgentPrompt,
+    content_policy: PromptContentPolicy,
+    trace: Option<&AcpTraceSession>,
+) -> Result<(), RuntimeError> {
+    let task_id = prompt.task_id.clone();
+    let session_id = active_session.session_id().to_string();
+    let content = build_prompt_content_with_policy(prompt.text, prompt.attachments, content_policy)
+        .map_err(|error| RuntimeError::InvalidParams(error.to_string()))?;
+    let request = agent_client_protocol::schema::PromptRequest::new(
+        active_session.session_id().clone(),
+        content,
+    );
+    if let Some(trace) = trace {
+        trace.record("client_to_agent", "session/prompt.request", &request);
+    }
+    let result_trace = trace.cloned();
+    active_session
+        .connection()
+        .send_request_to(Agent, request)
+        .on_receiving_result(async move |result| {
+            match result {
+                Ok(response) => {
+                    if let Some(trace) = &result_trace {
+                        trace.record("agent_to_client", "session/prompt.response", &response);
+                    }
+                    crate::logging::info(
+                        "acp_steering_prompt_result",
+                        serde_json::json!({
+                            "task_id": task_id,
+                            "active_session_id": session_id,
+                            "result": "stop_reason",
+                        }),
+                    );
+                }
+                Err(error) => {
+                    crate::logging::warn(
+                        "acp_steering_prompt_result",
+                        serde_json::json!({
+                            "task_id": task_id,
+                            "active_session_id": session_id,
+                            "result": "error",
+                            "error": error.to_string(),
+                        }),
+                    );
+                }
+            }
+            Ok(())
+        })
+        .map_err(acp_error)
+}
+
 fn prompt_outcome(stop_reason: agent_client_protocol::schema::StopReason) -> AgentPromptOutcome {
     use agent_client_protocol::schema::StopReason;
 

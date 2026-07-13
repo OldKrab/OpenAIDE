@@ -1,6 +1,7 @@
 import {
   type BackendConnection,
   type BackendEventListener,
+  type BackendEventStreamDisconnectListener,
   type BackendServerRequestListener,
   type BackendStateReset,
   type BackendStateResetListener,
@@ -99,6 +100,7 @@ type HttpBackendConnectionOptions = (LocalHttpBackendConnectionOptions | WebProx
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 120_000;
 const EVENT_STREAM_RETRY_MS = 500;
+const MAX_EVENT_STREAM_RETRY_MS = 5_000;
 
 function createHttpBackendConnection(
   options: HttpBackendConnectionOptions,
@@ -107,6 +109,7 @@ function createHttpBackendConnection(
   if (!fetchImpl) throw new Error("LocalHttp BackendConnection requires fetch");
 
   const events = new Set<BackendEventListener>();
+  const eventStreamDisconnectListeners = new Set<BackendEventStreamDisconnectListener>();
   const stateResetListeners = new Set<BackendStateResetListener>();
   const serverRequests = new Set<BackendServerRequestListener>();
   let nextId = 1;
@@ -123,7 +126,9 @@ function createHttpBackendConnection(
   let eventStreamAbort: AbortController | undefined;
   let eventStreamReader: LocalHttpStreamReader | undefined;
   let eventStreamRetryTimer: ReturnType<typeof setTimeout> | undefined;
+  let eventStreamRetryDelay = EVENT_STREAM_RETRY_MS;
   let eventStreamContinuityLost = false;
+  let eventStreamDisconnected = false;
 
   const connection: BackendConnection = {
     async initialize(params: InitializeParams, meta?: RequestMeta) {
@@ -182,6 +187,11 @@ function createHttpBackendConnection(
       events.add(listener);
       return () => events.delete(listener);
     },
+    eventStreamDisconnects(listener: BackendEventStreamDisconnectListener): BackendUnsubscribe {
+      eventStreamDisconnectListeners.add(listener);
+      if (eventStreamDisconnected) listener();
+      return () => eventStreamDisconnectListeners.delete(listener);
+    },
     stateResets(listener: BackendStateResetListener): BackendUnsubscribe {
       stateResetListeners.add(listener);
       return () => stateResetListeners.delete(listener);
@@ -202,6 +212,7 @@ function createHttpBackendConnection(
       stopHeartbeat();
       stopEventStream();
       events.clear();
+      eventStreamDisconnectListeners.clear();
       stateResetListeners.clear();
       serverRequests.clear();
     },
@@ -298,6 +309,7 @@ function createHttpBackendConnection(
       // always invalidates every watched snapshot, regardless of which request
       // first discovered the restart.
       eventStreamContinuityLost = true;
+      notifyEventStreamDisconnected();
       // The event stream starts from initialize's success callback, so a very
       // fast 409 can race the promise's final cleanup. Let that generation settle
       // before replacing it.
@@ -305,7 +317,6 @@ function createHttpBackendConnection(
       initialized = false;
       initializeResult = undefined;
       await connection.initialize(params, meta);
-      notifyStateResetIfNeeded();
     })().finally(() => {
       reinitializePromise = undefined;
     });
@@ -403,6 +414,7 @@ function createHttpBackendConnection(
         return;
       }
       if (!response.ok || !response.body) return;
+      eventStreamDisconnected = false;
       notifyStateResetIfNeeded();
       reader = response.body.getReader();
       eventStreamReader = reader;
@@ -411,6 +423,7 @@ function createHttpBackendConnection(
       while (!closed && !signal.aborted) {
         const { done, value } = await reader.read();
         if (done) break;
+        eventStreamRetryDelay = EVENT_STREAM_RETRY_MS;
         buffered += decoder.decode(value, { stream: true });
         const frames = buffered.split(/\r?\n\r?\n/);
         buffered = frames.pop() ?? "";
@@ -426,10 +439,13 @@ function createHttpBackendConnection(
         // The server drains deliveries before writing them, so any broken stream
         // invalidates all subscription cursors even when no gap event follows.
         eventStreamContinuityLost = true;
-        // Gate consumers immediately; waiting for a successful reconnect leaves
-        // mutations enabled against snapshots whose event cursor is no longer safe.
-        notifyStateResetIfNeeded();
-        eventStreamRetryTimer = setTimeout(() => startEventStream(), EVENT_STREAM_RETRY_MS);
+        notifyEventStreamDisconnected();
+        // A reset means a replacement stream is ready for fresh baselines. Emitting
+        // it while disconnected makes every scope retry independently and can
+        // install snapshots that have no live event stream behind them.
+        const retryDelay = eventStreamRetryDelay;
+        eventStreamRetryDelay = Math.min(eventStreamRetryDelay * 2, MAX_EVENT_STREAM_RETRY_MS);
+        eventStreamRetryTimer = setTimeout(() => startEventStream(), retryDelay);
       }
     }
   }
@@ -446,6 +462,12 @@ function createHttpBackendConnection(
       stateRootId: snapshot.stateRoot.stateRootId,
     };
     for (const listener of stateResetListeners) listener(reset);
+  }
+
+  function notifyEventStreamDisconnected() {
+    if (eventStreamDisconnected) return;
+    eventStreamDisconnected = true;
+    for (const listener of eventStreamDisconnectListeners) listener();
   }
 
   function processEventStreamFrame(frame: string) {

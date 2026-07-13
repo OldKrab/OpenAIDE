@@ -8,7 +8,8 @@ import type { AppAction } from "../state/appReducer";
 import type { NewTaskController } from "./newTaskController";
 
 type NewTaskSubscriptionOptions = {
-  backendConnection?: Pick<BackendConnection, "request"> & Partial<Pick<BackendConnection, "events">>;
+  backendConnection?: Pick<BackendConnection, "request">
+    & Partial<Pick<BackendConnection, "events" | "eventStreamDisconnects" | "stateResets">>;
   backendInitialized: RefObject<boolean>;
   backendReady: boolean;
   backendStateGeneration: number;
@@ -35,8 +36,10 @@ export function useNewTaskSubscription({
     if (!mappingContext) return;
     return startAppServerStateSubscription({
       backendConnection: {
+        eventStreamDisconnects: backendConnection.eventStreamDisconnects,
         events: backendConnection.events,
         request: backendConnection.request,
+        stateResets: backendConnection.stateResets,
       },
       context: mappingContext,
       dispatch: (action) => {

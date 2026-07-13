@@ -188,6 +188,39 @@
   margin: 3px 0 0 16px;
 }
 
+.activity-reasoning-toggle {
+  width: 100%;
+  min-height: 29px;
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr) max-content;
+  align-items: center;
+  gap: 7px;
+  margin: 0 0 5px;
+  border: 0;
+  border-top: 1px solid color-mix(in oklch, var(--oa-border) 72%, transparent);
+  background: transparent;
+  color: var(--oa-muted);
+  padding: 5px 7px;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.activity-reasoning-toggle:hover,
+.activity-reasoning-toggle:focus-visible {
+  background: color-mix(in oklch, var(--oa-muted) 9%, transparent);
+  outline: none;
+}
+
+.activity-reasoning-toggle:focus-visible {
+  box-shadow: inset 0 0 0 1px var(--oa-focus);
+}
+
+.activity-reasoning-toggle-action {
+  color: var(--oa-text);
+}
+
 .activity-step {
   min-width: 0;
   display: grid;
@@ -267,6 +300,45 @@
   align-items: baseline;
   gap: 6px;
   justify-self: end;
+}
+
+.activity-step-approval {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.activity-step-approval.approved,
+.tool-permission-history li.approved {
+  color: var(--oa-success);
+}
+
+.activity-step-approval.rejected,
+.activity-step-approval.cancelled,
+.tool-permission-history li.rejected,
+.tool-permission-history li.cancelled {
+  color: var(--oa-danger);
+}
+
+.tool-permission-history {
+  display: grid;
+  gap: 5px;
+  margin: 4px 0 2px 18px;
+}
+
+.tool-permission-history ul {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tool-permission-history li {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
 }
 
 .activity-step-context {

@@ -440,7 +440,7 @@ export type TaskAdoptNativeSessionParams = { projectId: ProjectId, agentId: Agen
 
 export type TaskAdoptNativeSessionResult = { task: TaskSnapshot, };
 
-export type TaskSendParams = { taskId: TaskId, taskRevision: number, message: ComposerMessage, };
+export type TaskSendParams = { taskId: TaskId, message: ComposerMessage, };
 
 export type ComposerMessage = { text?: string | null, attachments?: Array<AttachmentHandleId>, };
 
@@ -544,7 +544,7 @@ export type TaskSummary = { taskId: TaskId, projectId: ProjectId, agentId: Agent
 
 export type TaskTitle = { value: string, source: TaskTitleSource, };
 
-export type TaskTitleSource = "agent" | "user";
+export type TaskTitleSource = "prompt" | "agent" | "user";
 
 export type TaskStatus = "preparing" | "starting" | "idle" | "running" | "stopping" | "waiting" | "interrupted" | "failed" | "completed";
 
@@ -602,15 +602,7 @@ export type ChatRole = "user" | "agent" | "system";
 
 export type ChatItemStatus = "complete" | "streaming" | "failed" | "interrupted";
 
-export type MessagePart = { "kind": "text", text: string, } | { "kind": "attachment", attachment: AttachmentSnapshot, } | { "kind": "image", mediaType: string, dataUrl: string, uri?: string | null, } | { "kind": "resource", uri: string, name?: string | null, title?: string | null, description?: string | null, mediaType?: string | null, sizeBytes?: number | null, text?: string | null, } | { "kind": "unsupported", contentType: string, mediaType?: string | null, uri?: string | null, } | { "kind": "activity", title: string, status: ActivityStatus, steps?: Array<ActivityStepSnapshot>, } | { "kind": "permission", requestId: RequestId, appServerRequestId?: RequestId | null, title: string, description?: string | null, scope?: string | null, risk?: string | null, toolCall: PermissionToolCallRef, state: PermissionMessageState, options: Array<PermissionMessageOption>, selectedOption?: string | null, decision?: PermissionMessageDecision | null, resolutionMessage?: string | null, } | { "kind": "question", requestId: RequestId, message: string, fields: Array<QuestionField>, state: QuestionMessageState, action?: QuestionMessageAction | null, content?: { [key in string]: QuestionValue } | null, error?: string | null, resolutionMessage?: string | null, };
-
-export type PermissionMessageOption = { optionId: string, name: string, kind?: PermissionMessageOptionKind | null, };
-
-export type PermissionMessageOptionKind = "allow" | "deny" | "other";
-
-export type PermissionMessageState = "pending" | "responding" | "resolved" | "cancelled";
-
-export type PermissionMessageDecision = "approved" | "denied";
+export type MessagePart = { "kind": "text", text: string, } | { "kind": "attachment", attachment: AttachmentSnapshot, } | { "kind": "image", mediaType: string, dataUrl: string, uri?: string | null, } | { "kind": "resource", uri: string, name?: string | null, title?: string | null, description?: string | null, mediaType?: string | null, sizeBytes?: number | null, text?: string | null, } | { "kind": "unsupported", contentType: string, mediaType?: string | null, uri?: string | null, } | { "kind": "activity", title: string, status: ActivityStatus, steps?: Array<ActivityStepSnapshot>, } | { "kind": "question", requestId: RequestId, message: string, fields: Array<QuestionField>, state: QuestionMessageState, action?: QuestionMessageAction | null, content?: { [key in string]: QuestionValue } | null, error?: string | null, resolutionMessage?: string | null, };
 
 export type QuestionMessageState = "pending" | "resolved" | "cancelled" | "error";
 
@@ -618,7 +610,11 @@ export type QuestionMessageAction = "submit" | "cancel";
 
 export type ActivityStatus = "running" | "completed" | "interrupted" | "failed";
 
-export type ActivityStepSnapshot = { "kind": "text", text: string, level?: string | null, } | { "kind": "tool", toolCallId?: string | null, name: string, status: ActivityStatus, inputSummary?: string | null, outputPreview?: string | null, detailArtifactId?: string | null, details?: ToolDetailSnapshot | null, } | { "kind": "command", commandLabel: string, status: ActivityStatus, exitCode?: number | null, outputPreview?: string | null, };
+export type ActivityStepSnapshot = { "kind": "text", text: string, level?: string | null, } | { "kind": "tool", toolCallId?: string | null, name: string, status: ActivityStatus, inputSummary?: string | null, outputPreview?: string | null, detailArtifactId?: string | null, details?: ToolDetailSnapshot | null, permissionOutcomes: Array<ToolPermissionOutcomeSnapshot>, } | { "kind": "command", commandLabel: string, status: ActivityStatus, exitCode?: number | null, outputPreview?: string | null, };
+
+export type ToolPermissionOutcomeSnapshot = { requestId: RequestId, decision: ToolPermissionDecisionSnapshot, optionId?: string | null, optionLabel?: string | null, resolvedAt: string, };
+
+export type ToolPermissionDecisionSnapshot = "approved" | "rejected" | "cancelled";
 
 export type AttachmentSnapshot = { attachmentId: AttachmentId, kind: AttachmentKind, label: string, mediaType?: string | null, sizeBytes?: number | null, previewUrl?: string | null, };
 

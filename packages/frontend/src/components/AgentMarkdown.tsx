@@ -1,4 +1,4 @@
-import { Fragment, type ReactNode } from "react";
+import { Fragment, memo, type ReactNode } from "react";
 import Markdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -8,7 +8,8 @@ type AgentMarkdownProps = {
   text: string;
 };
 
-export function AgentMarkdown({ className, streaming = false, text }: AgentMarkdownProps) {
+// Unrelated Task and composer updates must not re-enter the synchronous Markdown parser.
+export const AgentMarkdown = memo(function AgentMarkdown({ className, streaming = false, text }: AgentMarkdownProps) {
   const parts = splitDataImageMarkdown(text);
   return (
     <div className={className}>
@@ -26,7 +27,7 @@ export function AgentMarkdown({ className, streaming = false, text }: AgentMarkd
       ))}
     </div>
   );
-}
+});
 
 function MarkdownRenderer({ streaming, text }: { streaming: boolean; text: string }) {
   if (!text) return streaming ? <StreamingCaret /> : null;

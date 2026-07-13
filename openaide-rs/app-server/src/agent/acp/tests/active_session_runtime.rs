@@ -1895,6 +1895,79 @@ fn second_prompt_is_rejected_while_prior_prompt_is_running() {
 }
 
 #[test]
+fn steering_sends_an_additional_prompt_while_primary_prompt_is_running() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((_runtime, log_path)) = fixture_runtime(&temp, "steering-session") else {
+        return;
+    };
+    let script_path = temp.path().join("fixture_agent.py");
+    let runtime = Arc::new(AcpAgentRuntime::new(AcpAgentConfig {
+        agent_id: "codex".to_string(),
+        command: "python3".to_string(),
+        args: vec![script_path.to_string_lossy().to_string()],
+        env: vec![
+            (
+                "OPENAIDE_ACP_FIXTURE_LOG".to_string(),
+                log_path.to_string_lossy().to_string(),
+            ),
+            (
+                "OPENAIDE_ACP_FIXTURE_SESSION".to_string(),
+                "steering-session".to_string(),
+            ),
+            (
+                "OPENAIDE_ACP_FIXTURE_PROMPT_MODE".to_string(),
+                "wait_for_cancel".to_string(),
+            ),
+        ],
+        secret_env: Vec::new(),
+    }));
+    let session = runtime
+        .start_session(start_request("task-steering", cwd_string()))
+        .expect("start session");
+    let primary_session_id = session.session_id.clone();
+    let primary = std::thread::spawn({
+        let runtime = runtime.clone();
+        move || {
+            runtime.prompt(
+                AgentPrompt {
+                    agent_id: "codex".to_string(),
+                    task_id: "task-steering".to_string(),
+                    session_id: primary_session_id,
+                    text: "start work".to_string(),
+                    attachments: Vec::new(),
+                    cancellation: TurnCancellation::new(),
+                },
+                Arc::new(CapturingEventSink::default()),
+            )
+        }
+    });
+    wait_for_method_count(&log_path, "session/prompt", 1);
+
+    runtime
+        .steer(AgentPrompt {
+            agent_id: "codex".to_string(),
+            task_id: "task-steering".to_string(),
+            session_id: session.session_id.clone(),
+            text: "also inspect tests".to_string(),
+            attachments: Vec::new(),
+            cancellation: TurnCancellation::new(),
+        })
+        .expect("steering should be admitted without waiting for its response");
+    wait_for_method_count(&log_path, "session/prompt", 2);
+
+    runtime
+        .cancel_session(&session.key())
+        .expect("cancel primary prompt");
+    primary
+        .join()
+        .expect("primary prompt thread")
+        .expect("primary prompt should settle after cancellation");
+    runtime
+        .close_session(&session.key())
+        .expect("close session");
+}
+
+#[test]
 fn set_config_option_dispatches_while_prompt_is_running() {
     let temp = tempfile::TempDir::new().expect("temp dir");
     let Some((_runtime, log_path)) = fixture_runtime(&temp, "config-session") else {

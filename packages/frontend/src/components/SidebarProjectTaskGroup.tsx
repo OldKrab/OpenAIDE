@@ -20,7 +20,7 @@ type SidebarProjectTaskGroupProps = {
   nativeSessionsAdoptingSessionId?: string;
   nativeSessionsHaveMore: boolean;
   onArchiveTask: (taskId: string) => void;
-  onLoadMore: () => void;
+  onLoadMore: (visibleIncrement: number) => void;
   onOpenNativeSession: (session: AgentListedSession) => void;
   onOpenTask: (taskId: string) => void;
   onRestoreTask: (taskId: string) => void;
@@ -97,7 +97,11 @@ export function SidebarProjectTaskGroup({
         ),
       )}
       {!collapsed && (hiddenCount > 0 || nativeSessionsHaveMore) ? (
-        <button className="project-task-more" onClick={onLoadMore} type="button">
+        <button
+          className="project-task-more"
+          onClick={() => onLoadMore(hiddenCount > 0 ? Math.min(pageSize, hiddenCount) : pageSize)}
+          type="button"
+        >
           {hiddenCount > 0 ? `Load ${Math.min(pageSize, hiddenCount)} more tasks` : "Load more tasks"}
         </button>
       ) : null}

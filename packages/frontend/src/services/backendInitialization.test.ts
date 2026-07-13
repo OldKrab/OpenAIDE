@@ -114,6 +114,22 @@ describe("backend initialization", () => {
     vi.unstubAllGlobals();
   });
 
+  it("gives a duplicated browser tab its own logical client identity", () => {
+    const originalStorage = memoryStorage();
+    const originalTab = { name: "", navigationType: "navigate" as const };
+    const originalId = getClientInstanceId(originalStorage, originalTab);
+    const duplicatedStorage = copyStorage(originalStorage);
+    const duplicatedTab = { name: originalTab.name, navigationType: "navigate" as const };
+
+    const duplicatedId = getClientInstanceId(duplicatedStorage, duplicatedTab);
+
+    expect(duplicatedId).not.toBe(originalId);
+    expect(getClientInstanceId(duplicatedStorage, {
+      name: duplicatedTab.name,
+      navigationType: "reload",
+    })).toBe(duplicatedId);
+  });
+
   it("falls back to memory when storage is unavailable", () => {
     const storage = {
       getItem: () => { throw new Error("blocked"); },
@@ -140,4 +156,13 @@ function memoryStorage(): Storage {
     removeItem: (key) => items.delete(key),
     setItem: (key, value) => items.set(key, value),
   };
+}
+
+function copyStorage(source: Storage) {
+  const copy = memoryStorage();
+  for (let index = 0; index < source.length; index += 1) {
+    const key = source.key(index);
+    if (key) copy.setItem(key, source.getItem(key) ?? "");
+  }
+  return copy;
 }

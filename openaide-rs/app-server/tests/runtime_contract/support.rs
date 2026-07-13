@@ -52,7 +52,11 @@ impl AgentRuntime for CountingAgent {
         prompt: AgentPrompt,
         sink: Arc<dyn AgentEventSink>,
     ) -> Result<openaide_app_server::agent::AgentPromptOutcome, RuntimeError> {
-        thread::sleep(Duration::from_millis(50));
+        // Keep the prompt active until the cancellation path under test reaches it.
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !prompt.cancellation.is_cancelled() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(5));
+        }
         if prompt.cancellation.is_cancelled() {
             return Ok(openaide_app_server::agent::AgentPromptOutcome::Cancelled);
         }

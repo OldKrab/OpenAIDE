@@ -59,7 +59,7 @@ export class AppServerHostClient {
       }
       const connection = createLocalHttpBackendConnection({
         ...info,
-        connectionId: this.clientInstanceId,
+        connectionId: `vscode-connection-${randomUUID()}`,
       });
       const initializedWorkspaceRoots = cloneWorkspaceRoots(this.desiredWorkspaceRoots);
       await connection.initialize({

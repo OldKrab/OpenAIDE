@@ -1212,6 +1212,49 @@ describe("Sidebar", () => {
     expect(taskRows(tree)).toHaveLength(17);
     expect(onLoadNativeSessions).toHaveBeenCalledWith("cursor_2");
   });
+
+  it("reveals exactly the numeric task count when a prefetched page arrives", () => {
+    const onLoadNativeSessions = vi.fn();
+    const sessions = Array.from({ length: 31 }, (_, index) =>
+      nativeSession({
+        session_id: `session_${index + 1}`,
+        title: `Session ${index + 1}`,
+        updated_at: `2026-05-22T00:${String(index).padStart(2, "0")}:00.000Z`,
+      }),
+    );
+    const sidebar = (items: AgentListedSession[], nextCursor: string) => (
+      <Sidebar
+        {...sidebarCallbacks()}
+        groupByProject={true}
+        nativeSessionProjectId="project_1"
+        nativeSessions={nativeSessions({ items, nextCursor })}
+        onLoadNativeSessions={onLoadNativeSessions}
+        projects={[{ projectId: "project_1", label: "OpenAIDE" }]}
+        showArchived={false}
+        tasks={[
+          task({
+            task_id: "task_1",
+            project_id: "project_1",
+            project_label: "OpenAIDE",
+            title: "Recent task",
+            last_activity: "2026-05-22T00:40:00.000Z",
+          }),
+        ]}
+      />
+    );
+    const tree = render(sidebar(sessions.slice(0, 16), "cursor_2"));
+
+    expect(taskRows(tree)).toHaveLength(15);
+    expect(tree.root.findByProps({ className: "project-task-more" }).children.join(""))
+      .toBe("Load 2 more tasks");
+
+    act(() => tree.root.findByProps({ className: "project-task-more" }).props.onClick());
+    act(() => tree.update(sidebar(sessions, "cursor_3")));
+
+    expect(taskRows(tree)).toHaveLength(17);
+    expect(tree.root.findByProps({ className: "project-task-more" }).children.join(""))
+      .toBe("Load 15 more tasks");
+  });
 });
 
 function taskRows(tree: ReturnType<typeof render>) {

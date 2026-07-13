@@ -5,6 +5,7 @@ import {
   ATTACHMENT_CREATE_PASTED_IMAGE,
   ATTACHMENT_RELEASE,
   AppServerProtocolError,
+  PERMISSION_REQUEST,
   SETTINGS_GET_AGENT_DETAILS,
   SETTINGS_GET_MCP_SERVERS,
   SETTINGS_GET_SKILLS,
@@ -23,7 +24,9 @@ import {
   type ClientSnapshot,
   type InitializeParams,
   type InitializeResult,
+  type ServerRequestMethod,
   type TaskSnapshot as ProtocolTaskSnapshot,
+  type TypedServerRequest,
 } from "@openaide/app-server-client";
 import type { HostToWebviewMessage, TaskSnapshot } from "@openaide/app-shell-contracts";
 import { projectIdForWorkspaceRoot } from "../state/projectIdentity";
@@ -163,6 +166,96 @@ describe("app controller mounted lifecycle", () => {
       mounted.unmount();
     });
     expect(close).toHaveBeenCalledOnce();
+  });
+
+  it("fills the first VS Code project task page with native sessions", async () => {
+    bootstrap = navigationBootstrap({ projectId: "project_1" });
+    const request = vi.fn(async (method: string, params?: { cursor?: string | null }) => {
+      if (method !== AGENT_LIST_SESSIONS) throw new Error(method);
+      const start = params?.cursor ? 3 : 1;
+      const count = params?.cursor ? 12 : 2;
+      return {
+        agentId: "codex",
+        projectId: "project_1",
+        projectLabel: "OpenAIDE",
+        sessions: Array.from({ length: count }, (_, index) => ({
+          sessionId: `native_${start + index}`,
+          title: `Native ${start + index}`,
+        })),
+        nextCursor: params?.cursor ? null : "cursor_2",
+      };
+    });
+    const initializedSnapshot = clientSnapshot({ includeActiveTask: false });
+    initializedSnapshot.client.surface = { kind: "project", projectId: "project_1" as never };
+    initializedSnapshot.newTaskDefaults.projectId = "project_1" as never;
+    initializedSnapshot.projects = {
+      projects: [{ projectId: "project_1" as never, label: "OpenAIDE" }],
+    };
+    backendConnection = {
+      initialize: vi.fn(async () => ({ snapshot: initializedSnapshot })),
+      request: request as unknown as BackendConnection["request"],
+      respond: vi.fn(),
+      close: vi.fn(),
+    };
+
+    await act(async () => {
+      create(<ControllerProbe />);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(request.mock.calls.filter(([method]) => method === AGENT_LIST_SESSIONS)).toEqual([
+      [AGENT_LIST_SESSIONS, { agentId: "codex", projectId: "project_1", cursor: null }],
+      [AGENT_LIST_SESSIONS, { agentId: "codex", projectId: "project_1", cursor: "cursor_2" }],
+    ]);
+    expect(latestController?.state.newTask.nativeSessions.items).toHaveLength(14);
+  });
+
+  it("shows a live permission request without reloading the Task", async () => {
+    let serverRequestListener: ((request: TypedServerRequest<ServerRequestMethod>) => void) | undefined;
+    const request = vi.fn();
+    backendConnection = {
+      initialize: vi.fn(async () => ({ snapshot: clientSnapshot() })),
+      request: request as unknown as BackendConnection["request"],
+      serverRequests: vi.fn((listener) => {
+        serverRequestListener = listener;
+        return vi.fn();
+      }),
+      respond: vi.fn(),
+      close: vi.fn(),
+    };
+    bootstrap = taskBootstrap("task_1");
+
+    await act(async () => {
+      create(<ControllerProbe />);
+      await Promise.resolve();
+    });
+    request.mockClear();
+
+    act(() => {
+      serverRequestListener?.({
+        requestId: "server-request-1" as never,
+        scope: { kind: "task", taskId: "task_1" as never },
+        method: PERMISSION_REQUEST,
+        params: {
+          title: "Allow command?",
+          toolCall: { id: "tool-1", title: "Run tests", kind: "execute" },
+          options: [{ optionId: "allow-once", name: "Allow once", kind: "allowOnce" }],
+        },
+      });
+    });
+
+    expect(latestController?.state.snapshot?.active_requests).toEqual([
+      expect.objectContaining({
+        message: expect.objectContaining({
+          kind: "permission",
+          app_server_request_id: "server-request-1",
+          title: "Allow command?",
+        }),
+      }),
+    ]);
+    expect(request).not.toHaveBeenCalled();
   });
 
   it("settles an initialization failure as unavailable", async () => {
@@ -890,6 +983,7 @@ describe("app controller mounted lifecycle", () => {
   });
 
   it("keeps task mutations unavailable until the reset Task subscription has a baseline", async () => {
+    const eventStreamDisconnectListeners: Array<() => void> = [];
     const stateResetListeners: Array<(reset: BackendStateReset) => void> = [];
     const eventListeners: Array<(event: AppServerEvent) => void> = [];
     const recoveredTaskSubscription = deferredValue<ReturnType<typeof taskSubscriptionSnapshot>>();
@@ -938,6 +1032,13 @@ describe("app controller mounted lifecycle", () => {
           if (index >= 0) eventListeners.splice(index, 1);
         };
       },
+      eventStreamDisconnects: (listener) => {
+        eventStreamDisconnectListeners.push(listener);
+        return () => {
+          const index = eventStreamDisconnectListeners.indexOf(listener);
+          if (index >= 0) eventStreamDisconnectListeners.splice(index, 1);
+        };
+      },
       stateResets: (listener) => {
         stateResetListeners.push(listener);
         return () => {
@@ -957,6 +1058,14 @@ describe("app controller mounted lifecycle", () => {
       await Promise.resolve();
     });
     expect(latestController?.backendReady).toBe(true);
+
+    await act(async () => {
+      for (const listener of [...eventStreamDisconnectListeners]) listener();
+      await Promise.resolve();
+    });
+
+    expect(taskSubscriptionCount).toBe(1);
+    expect(latestController?.backendReady).toBe(false);
 
     await act(async () => {
       connectionGeneration = 1;
@@ -1139,6 +1248,7 @@ describe("app controller mounted lifecycle", () => {
   });
 
   it("reports automatic Task subscription recovery without discarding the draft", async () => {
+    const warning = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     let taskSubscriptionAttempts = 0;
     const request = vi.fn(async (
       method: string,
@@ -1153,7 +1263,7 @@ describe("app controller mounted lifecycle", () => {
         return nonTaskSubscriptionSnapshot(params?.scope, "cursor_1");
       }
       taskSubscriptionAttempts += 1;
-      if (taskSubscriptionAttempts === 1) throw new Error("Connection closed.");
+      if (taskSubscriptionAttempts === 1) throw new Error("NetworkError when attempting to fetch resource.");
       return taskSubscriptionSnapshot("cursor_2");
     });
     backendConnection = {
@@ -1174,8 +1284,12 @@ describe("app controller mounted lifecycle", () => {
 
     expect(latestController?.backendConnectionState).toEqual({
       status: "reconnecting",
-      message: "Connection closed.",
+      message: "App Server is temporarily unavailable.",
     });
+    expect(warning).toHaveBeenCalledWith(
+      "App Server subscription refresh failed.",
+      expect.objectContaining({ message: "NetworkError when attempting to fetch resource." }),
+    );
     expect(latestController?.backendReady).toBe(false);
 
     act(() => {
@@ -1707,7 +1821,6 @@ describe("app controller mounted lifecycle", () => {
     ))).toEqual([]);
     expect(request).toHaveBeenCalledWith(TASK_SEND, expect.objectContaining({
       taskId: "task_prepared",
-      taskRevision: 1,
       message: { text: "Send this" },
     }));
   });
@@ -1997,10 +2110,18 @@ describe("app controller mounted lifecycle", () => {
     expect(latestController?.state.taskInputs.task_1?.pending?.prompt).toBe("do the work");
   });
 
-  it("keeps a follow-up draft without issuing a second prompt during an active turn", async () => {
+  it("sends a steering message during active Agent work", async () => {
     const request = vi.fn(async (method: string) => {
       if (method === TASK_SEND) {
-        return { task: protocolTaskSnapshot("task_1", "Task", { hasMessages: true, status: "running" }) };
+        return {
+          task: protocolTaskSnapshot("task_1", "Task", {
+            hasMessages: true,
+            status: "running",
+            userText: "steer now",
+          }),
+          turnId: "turn-primary",
+          userMessageId: "message-steer",
+        };
       }
       throw new Error(method);
     });
@@ -2027,10 +2148,13 @@ describe("app controller mounted lifecycle", () => {
       await Promise.resolve();
     });
 
-    expect(request).not.toHaveBeenCalledWith(TASK_SEND, expect.anything());
+    expect(request).toHaveBeenCalledWith(TASK_SEND, {
+      taskId: "task_1",
+      message: { text: "steer now" },
+    });
     expect(latestController?.state.taskInputs.task_1).toMatchObject({
-      prompt: "steer now",
-      error: "Task is already running",
+      prompt: "",
+      context: [],
     });
   });
 
@@ -2885,15 +3009,18 @@ type TestBackendConnection = {
   initialize: (params: InitializeParams) => Promise<InitializeResult>;
   request: BackendConnection["request"];
   events?: BackendConnection["events"];
+  eventStreamDisconnects?: BackendConnection["eventStreamDisconnects"];
+  serverRequests?: BackendConnection["serverRequests"];
   stateResets?: BackendConnection["stateResets"];
   respond: () => void;
   close: () => void;
 };
 
-function navigationBootstrap(options: { archived?: boolean } = {}) {
+function navigationBootstrap(options: { archived?: boolean; projectId?: string } = {}) {
   return {
     surface: "navigation" as const,
     archived: options.archived,
+    projectId: options.projectId,
     agents: [],
     preferences: { composer_submit_shortcut: "mod_enter" as const },
   };
@@ -3058,7 +3185,7 @@ function protocolTaskSnapshot(
 ): ProtocolTaskSnapshot {
   const status = typeof options === "string" ? options : options.status ?? "idle";
   const hasMessages = typeof options === "string" ? true : options.hasMessages ?? true;
-  const sendReady = typeof options === "string" ? status !== "running" : options.sendReady ?? status !== "running";
+  const sendReady = typeof options === "string" ? true : options.sendReady ?? true;
   const userText = typeof options === "string" ? undefined : options.userText;
   return {
     task: protocolTaskSummary(taskId, title, status, hasMessages),

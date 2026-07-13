@@ -4,6 +4,7 @@ use std::sync::{mpsc, Arc, Mutex};
 use agent_client_protocol::{Agent, SessionMessage};
 use tokio::sync::mpsc as tokio_mpsc;
 
+use crate::agent::acp_active_prompt::send_steering_prompt_request;
 use crate::agent::acp_config_options_apply::set_task_config_option_after_prior_updates;
 use crate::agent::acp_prompt_runner::{
     dispatch_session_notification, run_prompt, PromptRunContext,
@@ -127,6 +128,19 @@ pub(super) async fn run_opened_acp_session(
                         )
                         .await;
                         let _ = done_tx.send(result);
+                    }
+                    AcpSessionCommand::Steer { prompt } => {
+                        if let Err(error) = send_steering_prompt_request(
+                            &active_session,
+                            prompt,
+                            content_policy,
+                            trace.as_ref(),
+                        ) {
+                            crate::logging::error(
+                                "acp_steering_prompt_start_failed",
+                                serde_json::json!({ "error": error.to_string() }),
+                            );
+                        }
                     }
                     AcpSessionCommand::Delete { reply_tx } => {
                         let connection = active_session.connection();

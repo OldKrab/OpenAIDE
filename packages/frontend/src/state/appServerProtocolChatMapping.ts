@@ -118,35 +118,6 @@ function mapProtocolMessage(item: ChatItem, createdAt: string): NormalizedMessag
     };
   }
 
-  const permission = firstPermissionPart(item.parts);
-  if (permission) {
-    return {
-      kind: "permission",
-      id: item.messageId,
-      request_id: permission.requestId,
-      app_server_request_id: permission.appServerRequestId ?? undefined,
-      title: permission.title,
-      description: permission.description ?? undefined,
-      scope: permission.scope ?? undefined,
-      risk: permission.risk ?? undefined,
-      tool_call: {
-        id: permission.toolCall.id,
-        title: permission.toolCall.title,
-        kind: permission.toolCall.kind ?? undefined,
-      },
-      state: permission.state,
-      created_at: createdAt,
-      options: permission.options.map((option) => ({
-        id: option.optionId,
-        label: option.name,
-        kind: option.kind ? permissionMessageOptionKind(option.kind) : undefined,
-      })),
-      selected_option: permission.selectedOption ?? undefined,
-      decision: permission.decision ?? undefined,
-      resolution_message: permission.resolutionMessage ?? undefined,
-    };
-  }
-
   const question = firstQuestionPart(item.parts);
   if (question) {
     return {
@@ -270,18 +241,8 @@ function agentMessageParts(parts: MessagePart[]): AgentMessagePart[] {
   });
 }
 
-function firstPermissionPart(parts: MessagePart[]) {
-  return parts.find((part): part is Extract<MessagePart, { kind: "permission" }> => part.kind === "permission");
-}
-
 function firstQuestionPart(parts: MessagePart[]) {
   return parts.find((part): part is Extract<MessagePart, { kind: "question" }> => part.kind === "question");
-}
-
-function permissionMessageOptionKind(kind: Extract<MessagePart, { kind: "permission" }>["options"][number]["kind"]) {
-  if (kind === "allow") return "allow";
-  if (kind === "deny") return "deny";
-  return "other";
 }
 
 function activitySteps(activity: Extract<MessagePart, { kind: "activity" }>): ActivityStep[] {
@@ -321,6 +282,13 @@ function activityStepFromProtocol(step: ActivityStepSnapshot, activityTitle: str
     output_preview: step.outputPreview ?? undefined,
     detail_artifact_id: step.detailArtifactId ?? undefined,
     details: step.details ? mapProtocolToolDetail(step.details) : undefined,
+    permission_outcomes: (step.permissionOutcomes ?? []).map((outcome) => ({
+      request_id: outcome.requestId,
+      decision: outcome.decision,
+      option_id: outcome.optionId ?? undefined,
+      option_label: outcome.optionLabel ?? undefined,
+      resolved_at: outcome.resolvedAt,
+    })),
   };
 }
 

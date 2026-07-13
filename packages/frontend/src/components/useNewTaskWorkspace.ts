@@ -8,6 +8,7 @@ import type { AsyncOperationOwner } from "../state/asyncOperationOwner";
 import { retainNewTaskContext } from "../state/newTaskSelectionDefaults";
 import { sendWebviewTelemetry } from "../state/hostMessageRouter";
 import { agentProjectRequestKey, shouldLoadNativeSessions } from "../state/surfaceRouting";
+import { TASK_NAVIGATION_PAGE_SIZE } from "../state/taskNavigationPolicy";
 import { postHostMessage } from "../services/hostBridge";
 import { useComposerAttachmentResources } from "./useComposerAttachmentResources";
 import { useNewTaskPreparation, type PendingNewTaskPreparation } from "./useNewTaskPreparation";
@@ -148,7 +149,14 @@ export function useNewTaskWorkspace({
     const key = `${replicaEpoch}:${agentProjectRequestKey(state.newTask.selection.agentId, projectId)}`;
     if (latestNavigationSessionKey.current === key) return;
     latestNavigationSessionKey.current = key;
-    requestNativeSessions();
+    const localTaskCount = state.tasks.filter((task) => task.project_id === projectId).length;
+    // Fill the shared project window on startup; pagination should not depend on
+    // how many usable sessions happen to be present in the Agent's first page.
+    requestNativeSessions(
+      undefined,
+      false,
+      Math.max(0, TASK_NAVIGATION_PAGE_SIZE - localTaskCount),
+    );
   }, [
     backendReady,
     bootstrap.surface,

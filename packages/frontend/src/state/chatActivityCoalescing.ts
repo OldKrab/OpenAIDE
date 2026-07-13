@@ -5,6 +5,11 @@ type ThoughtChatMessage = ChatMessage & {
   message: Extract<ChatMessage["message"], { kind: "agent_message" }> & { role: "thought" };
 };
 type ActivityRunMessage = ActivityChatMessage | ThoughtChatMessage;
+type ActivityRunProjection = { run: ActivityRunMessage[]; message: ChatMessage };
+
+// Protocol projection preserves source-row identity. Keying the derived group by
+// its first row lets React retain completed tool groups while only the live tail changes.
+const activityRunProjections = new WeakMap<ActivityRunMessage, ActivityRunProjection>();
 
 /** Presents each uninterrupted run of tool activity as one ordered disclosure group. */
 export function coalesceAdjacentActivities(items: ChatMessage[]) {
@@ -25,12 +30,23 @@ export function coalesceAdjacentActivities(items: ChatMessage[]) {
     }
 
     if (run.length > 1 && run.some((runItem) => runItem.message.kind === "activity")) {
-      merged.push(coalesceActivityRun(run));
+      merged.push(stableActivityRun(run));
     } else {
       merged.push(...run);
     }
   }
   return merged;
+}
+
+function stableActivityRun(run: ActivityRunMessage[]) {
+  const first = run[0];
+  const cached = activityRunProjections.get(first);
+  if (cached && cached.run.length === run.length && cached.run.every((item, index) => item === run[index])) {
+    return cached.message;
+  }
+  const message = coalesceActivityRun(run);
+  activityRunProjections.set(first, { run, message });
+  return message;
 }
 
 function coalesceActivityRun(run: ActivityRunMessage[]): ChatMessage {

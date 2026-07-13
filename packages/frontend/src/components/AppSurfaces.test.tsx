@@ -72,6 +72,25 @@ describe("AppSurfaces callback wiring", () => {
     );
   });
 
+  it("uses the shared project task group for VS Code navigation", () => {
+    const controller = controllerFor("navigation");
+    controller.state.projects = [{
+      projectId: "project_1",
+      label: "OpenAIDE",
+    }];
+
+    render(controller);
+
+    expect(surfaceMocks.sidebar).toHaveBeenCalledWith(
+      expect.objectContaining({
+        groupByProject: true,
+        maxTasksPerProject: 15,
+        projects: controller.state.projects,
+      }),
+      undefined,
+    );
+  });
+
   it("passes settings callbacks to settings view", () => {
     const controller = controllerFor("settings");
 

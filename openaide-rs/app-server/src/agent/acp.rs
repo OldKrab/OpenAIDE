@@ -119,6 +119,10 @@ impl AgentRuntime for AcpAgentRuntime {
         self.kernel.prompt(prompt, sink)
     }
 
+    fn steer(&self, prompt: AgentPrompt) -> Result<(), RuntimeError> {
+        self.kernel.steer(prompt)
+    }
+
     fn cancel_session(&self, session: &AgentSessionKey) -> Result<(), RuntimeError> {
         self.kernel.cancel_session(session)
     }

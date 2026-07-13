@@ -97,6 +97,28 @@ fn agent_session_title_updates_set_and_clear_agent_owned_title() {
 }
 
 #[test]
+fn agent_session_title_clear_overrides_prompt_title() {
+    let (_dir, store, mutations, _server_requests) = test_runtime();
+    let mut task = running_task("task_1");
+    task.title = TaskTitle::new("Prompt fallback", TaskTitleSource::Prompt);
+    store.write_task(&task).unwrap();
+    let sink = TaskSessionEventSink::new(
+        mutations,
+        "task_1".to_string(),
+        "session_1".to_string(),
+        ServerRequestRuntime::new(),
+    );
+
+    sink.metadata_changed(AgentSessionMetadataUpdate {
+        title: AgentMetadataField::Clear,
+        updated_at: AgentMetadataField::Unchanged,
+    })
+    .unwrap();
+
+    assert_eq!(store.read_task("task_1").unwrap().title, None);
+}
+
+#[test]
 fn blank_agent_session_title_value_does_not_clear_the_agent_owned_title() {
     let (_dir, store, mutations, _server_requests) = test_runtime();
     let mut task = running_task("task_1");
@@ -416,6 +438,17 @@ fn permission_is_transient_until_the_server_request_resolves() {
         server_requests.clone(),
         TurnCancellation::new(),
     );
+    sink.emit(AgentEvent::ToolCall(AgentToolCall {
+        tool_call_id: "tool_1".to_string(),
+        scope_id: None,
+        title: "Editing".to_string(),
+        kind: "edit".to_string(),
+        status: AgentToolCallStatus::Pending,
+        input_summary: None,
+        output_preview: None,
+        details: None,
+    }))
+    .unwrap();
 
     let thread =
         std::thread::spawn(move || sink.request_permission(permission_request("permission_1")));
@@ -425,7 +458,7 @@ fn permission_is_transient_until_the_server_request_resolves() {
     while store.read_task("task_1").unwrap().status != TaskStatus::Waiting {
         std::thread::yield_now();
     }
-    assert!(store.read_messages("task_1").unwrap().is_empty());
+    assert_eq!(store.read_messages("task_1").unwrap().len(), 1);
 
     let request = server_requests.pending_for_task(&TaskId::from("task_1"))[0].clone();
     assert!(matches!(
@@ -447,17 +480,70 @@ fn permission_is_transient_until_the_server_request_resolves() {
     assert_eq!(messages.len(), 1);
     assert!(matches!(
         &messages[0].chat.message,
-        NormalizedMessage::Permission {
-            app_server_request_id: Some(server_request_id),
-            state: crate::protocol::model::PermissionState::Resolved,
-            selected_option: Some(option_id),
-            ..
-        } if server_request_id == "server-request-1" && option_id == "allow"
+        NormalizedMessage::Activity { steps, .. }
+            if matches!(
+                steps.as_slice(),
+                [crate::protocol::model::ActivityStep::Tool { permission_outcomes, .. }]
+                    if matches!(permission_outcomes.as_slice(), [outcome]
+                        if outcome.request_id == "server-request-1"
+                            && outcome.decision == crate::protocol::model::ToolPermissionDecision::Approved
+                            && outcome.option_id.as_deref() == Some("allow")
+                            && outcome.option_label.as_deref() == Some("Allow"))
+            )
     ));
 }
 
 #[test]
-fn cancelling_a_waiting_permission_persists_one_cancelled_resolution() {
+fn multiple_permission_decisions_remain_linked_after_later_tool_updates() {
+    let (_dir, store, mutations, server_requests) = test_runtime();
+    register_permission_responder(&server_requests, "task_1");
+    store.write_task(&running_task("task_1")).unwrap();
+    let sink = Arc::new(TaskEventSink::new(
+        mutations,
+        "task_1".to_string(),
+        "turn_1".to_string(),
+        server_requests.clone(),
+        TurnCancellation::new(),
+    ));
+    sink.emit(tool_event(AgentToolCallStatus::Pending)).unwrap();
+
+    for (request_id, option_id) in [("permission_1", "allow"), ("permission_2", "reject")] {
+        let request_sink = Arc::clone(&sink);
+        let request_id = request_id.to_string();
+        let thread = std::thread::spawn(move || {
+            request_sink.request_permission(permission_request(&request_id))
+        });
+        while server_requests.pending_count() == 0 {
+            std::thread::yield_now();
+        }
+        answer_permission(&server_requests, "task_1", option_id);
+        thread.join().unwrap().unwrap();
+    }
+    sink.emit(tool_event(AgentToolCallStatus::Completed))
+        .unwrap();
+
+    let messages = store.read_messages("task_1").unwrap();
+    assert_eq!(messages.len(), 1);
+    assert!(matches!(
+        &messages[0].chat.message,
+        NormalizedMessage::Activity {
+            status: ActivityStatus::Completed,
+            steps,
+            ..
+        } if matches!(
+            steps.as_slice(),
+            [crate::protocol::model::ActivityStep::Tool { permission_outcomes, .. }]
+                if permission_outcomes.len() == 2
+                    && permission_outcomes[0].decision
+                        == crate::protocol::model::ToolPermissionDecision::Approved
+                    && permission_outcomes[1].decision
+                        == crate::protocol::model::ToolPermissionDecision::Rejected
+        )
+    ));
+}
+
+#[test]
+fn cancelling_a_waiting_permission_records_cancelled_outcome_on_the_tool() {
     let (_dir, store, mutations, server_requests) = test_runtime();
     register_permission_responder(&server_requests, "task_1");
     store.write_task(&running_task("task_1")).unwrap();
@@ -469,6 +555,7 @@ fn cancelling_a_waiting_permission_persists_one_cancelled_resolution() {
         server_requests.clone(),
         cancellation.clone(),
     );
+    sink.emit(tool_event(AgentToolCallStatus::Pending)).unwrap();
 
     let thread =
         std::thread::spawn(move || sink.request_permission(permission_request("permission_1")));
@@ -478,7 +565,7 @@ fn cancelling_a_waiting_permission_persists_one_cancelled_resolution() {
     while store.read_task("task_1").unwrap().status != TaskStatus::Waiting {
         std::thread::yield_now();
     }
-    assert!(store.read_messages("task_1").unwrap().is_empty());
+    assert_eq!(store.read_messages("task_1").unwrap().len(), 1);
     cancellation.cancel();
 
     assert!(matches!(
@@ -489,15 +576,15 @@ fn cancelling_a_waiting_permission_persists_one_cancelled_resolution() {
     assert_eq!(messages.len(), 1);
     assert!(matches!(
         &messages[0].chat.message,
-        NormalizedMessage::Permission {
-            app_server_request_id: Some(server_request_id),
-            state: crate::protocol::model::PermissionState::Cancelled,
-            selected_option: None,
-            decision: None,
-            resolution_message: Some(message),
-            ..
-        } if server_request_id == "server-request-1"
-            && message == "Task stopped while approval was pending."
+        NormalizedMessage::Activity { steps, .. }
+            if matches!(
+                steps.as_slice(),
+                [crate::protocol::model::ActivityStep::Tool { permission_outcomes, .. }]
+                    if matches!(permission_outcomes.as_slice(), [outcome]
+                        if outcome.request_id == "server-request-1"
+                            && outcome.decision
+                                == crate::protocol::model::ToolPermissionDecision::Cancelled)
+            )
     ));
 }
 
@@ -590,6 +677,7 @@ fn permission_waits_for_a_late_responder() {
         server_requests.clone(),
         TurnCancellation::new(),
     );
+    sink.emit(tool_event(AgentToolCallStatus::Pending)).unwrap();
 
     let thread =
         std::thread::spawn(move || sink.request_permission(permission_request("permission_1")));
@@ -1208,6 +1296,7 @@ fn permission_request_splits_active_agent_text_run() {
     ));
 
     sink.emit(agent_text_event("before permission")).unwrap();
+    sink.emit(tool_event(AgentToolCallStatus::Pending)).unwrap();
     let permission_sink = sink.clone();
     let permission_thread = std::thread::spawn(move || {
         permission_sink.request_permission(permission_request("permission_1"))
@@ -1244,6 +1333,7 @@ fn permission_wait_does_not_block_concurrent_agent_events() {
         TurnCancellation::new(),
     ));
 
+    sink.emit(tool_event(AgentToolCallStatus::Pending)).unwrap();
     let permission_sink = sink.clone();
     let permission_thread = std::thread::spawn(move || {
         permission_sink.request_permission(permission_request("permission_1"))
@@ -1309,12 +1399,32 @@ fn permission_request(request_id: &str) -> AgentPermissionRequest {
             title: "Tool".to_string(),
             kind: Some("edit".to_string()),
         },
-        options: vec![AgentPermissionOption {
-            option_id: "allow".to_string(),
-            name: "Allow".to_string(),
-            kind: AgentPermissionOptionKind::AllowOnce,
-        }],
+        options: vec![
+            AgentPermissionOption {
+                option_id: "allow".to_string(),
+                name: "Allow".to_string(),
+                kind: AgentPermissionOptionKind::AllowOnce,
+            },
+            AgentPermissionOption {
+                option_id: "reject".to_string(),
+                name: "Reject".to_string(),
+                kind: AgentPermissionOptionKind::RejectOnce,
+            },
+        ],
     }
+}
+
+fn tool_event(status: AgentToolCallStatus) -> AgentEvent {
+    AgentEvent::ToolCall(AgentToolCall {
+        tool_call_id: "tool_1".to_string(),
+        scope_id: None,
+        title: "Editing".to_string(),
+        kind: "edit".to_string(),
+        status,
+        input_summary: None,
+        output_preview: None,
+        details: None,
+    })
 }
 
 fn test_runtime() -> (

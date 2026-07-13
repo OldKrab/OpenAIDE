@@ -48,16 +48,6 @@ pub(crate) fn snapshot_from_record_and_chat(task: TaskRecord, chat: MessagePage)
         agent_commands_catalog: task.agent_commands_catalog.clone(),
         lifecycle: task.lifecycle.clone(),
         preparation: task.preparation.clone(),
-        permissions: chat
-            .items
-            .iter()
-            .filter_map(|item| match &item.message {
-                crate::protocol::model::NormalizedMessage::Permission { .. } => {
-                    Some(item.message.clone())
-                }
-                _ => None,
-            })
-            .collect(),
         revision: task.revision,
         task: task.summary(),
         chat,

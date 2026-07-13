@@ -1,4 +1,4 @@
-import { Brain, ChevronRight, Terminal, Wrench } from "lucide-react";
+import { Brain, ChevronRight, CircleX, Check, Terminal, Wrench } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import type { ActivityStep, ActivityToolDetails, NormalizedMessage } from "@openaide/app-shell-contracts";
 import { toolDetailCacheKey } from "../state/store";
@@ -29,6 +29,10 @@ export function ChatActivityView({
   taskId: string;
   toolDetails?: Record<string, { loading: boolean; details?: ActivityToolDetails; error?: string }>;
 }) {
+  // Longer reasoning runs stay recoverable without overwhelming the default activity scan.
+  const [showThoughts, setShowThoughts] = useState(false);
+  const thoughtCount = activity.steps.filter((step) => step.kind === "thought").length;
+  const thoughtsAreCollapsible = thoughtCount > 2;
   return (
     <AnimatedDisclosure
       className={`activity-group ${activity.status}`}
@@ -42,18 +46,37 @@ export function ChatActivityView({
       }
     >
       <div className="activity-step-list">
-        {activity.steps.map((step, index) => (
-          <ActivityStepRow
-            key={activityStepIdentity(step) ?? index}
-            onSubscribeToolDetail={onSubscribeToolDetail}
-            step={step}
-            taskId={taskId}
-            toolDetails={toolDetails}
-          />
-        ))}
+        {thoughtsAreCollapsible ? (
+          <button
+            aria-expanded={showThoughts}
+            className="activity-reasoning-toggle"
+            onClick={() => setShowThoughts((visible) => !visible)}
+            type="button"
+          >
+            <Brain className="activity-reasoning-toggle-icon" size={13} aria-hidden="true" />
+            <span>{showThoughts ? "Reasoning visible in chronological order" : thoughtCountLabel(thoughtCount)}</span>
+            <span className="activity-reasoning-toggle-action">{showThoughts ? "Hide" : "Show"}</span>
+          </button>
+        ) : null}
+        {activity.steps.map((step, index) => {
+          if (step.kind === "thought" && thoughtsAreCollapsible && !showThoughts) return null;
+          return (
+            <ActivityStepRow
+              key={activityStepIdentity(step) ?? index}
+              onSubscribeToolDetail={onSubscribeToolDetail}
+              step={step}
+              taskId={taskId}
+              toolDetails={toolDetails}
+            />
+          );
+        })}
       </div>
     </AnimatedDisclosure>
   );
+}
+
+function thoughtCountLabel(count: number) {
+  return `${count} ${count === 1 ? "Thought" : "Thoughts"} hidden`;
 }
 
 export function ActivityStepRow({
@@ -78,7 +101,16 @@ export function ActivityStepRow({
   const preview = activityStepPreview(displayStep);
   const status = activityStepStatus(displayStep);
   const context = activityStepContext(displayStep);
-  const metadata = <ActivityStepMetadata context={context === label ? undefined : context} status={status} />;
+  const permissionSummary = displayStep.kind === "tool"
+    ? toolPermissionSummary(displayStep.permission_outcomes ?? [])
+    : undefined;
+  const metadata = (
+    <ActivityStepMetadata
+      context={context === label ? undefined : context}
+      permissionSummary={permissionSummary}
+      status={status}
+    />
+  );
   const className = `activity-step ${displayStep.kind === "tool" ? `tool-${toolKindClass(displayStep.name)} ${displayStep.status}` : ""}`;
   const legacyCommandText = commandTextForExpandableLegacyStep(displayStep);
   if (step.kind === "thought") {
@@ -120,6 +152,7 @@ export function ActivityStepRow({
         <div className="activity-tool-details">
           <ToolCodeBlock text={commandText} />
           {outputPreview ? <ToolCodeBlock text={outputPreview} /> : null}
+          {displayStep.kind === "tool" ? <ToolPermissionOutcomes outcomes={displayStep.permission_outcomes ?? []} /> : null}
         </div>
       </AnimatedDisclosure>
     );
@@ -137,6 +170,22 @@ export function ActivityStepRow({
         preview={preview}
         step={displayStep}
       />
+    );
+  }
+  if (displayStep.kind === "tool" && displayStep.permission_outcomes?.length) {
+    return (
+      <AnimatedDisclosure
+        className={className}
+        stepId={displayStep.tool_call_id}
+        trigger={(
+          <>
+            <ActivityStepContent disclosure icon={activityStepIcon(displayStep)} label={label} />
+            {metadata}
+          </>
+        )}
+      >
+        <ToolPermissionOutcomes outcomes={displayStep.permission_outcomes} />
+      </AnimatedDisclosure>
     );
   }
   return (
@@ -201,6 +250,7 @@ function LiveToolDetailDisclosure({
         loading={artifactState?.loading}
         step={step}
       />
+      <ToolPermissionOutcomes outcomes={step.permission_outcomes ?? []} />
     </AnimatedDisclosure>
   );
 }
@@ -248,14 +298,76 @@ function CommandStepTitle({ command, status }: { command: string; status: "runni
   );
 }
 
-function ActivityStepMetadata({ context, status }: { context?: string; status?: string }) {
-  if (!context && !status) return null;
+function ActivityStepMetadata({
+  context,
+  permissionSummary,
+  status,
+}: {
+  context?: string;
+  permissionSummary?: { decision: "approved" | "rejected" | "cancelled"; label: string };
+  status?: string;
+}) {
+  if (!context && !permissionSummary && !status) return null;
   return (
     <span className="activity-step-meta">
       {context ? <small className="activity-step-context">{context}</small> : null}
+      {permissionSummary ? (
+        <small className={`activity-step-approval ${permissionSummary.decision}`}>
+          {permissionSummary.decision === "approved" ? <Check size={12} aria-hidden="true" /> : <CircleX size={12} aria-hidden="true" />}
+          {permissionSummary.label}
+        </small>
+      ) : null}
       {status ? <small className="activity-step-state">{status}</small> : null}
     </span>
   );
+}
+
+function ToolPermissionOutcomes({
+  outcomes,
+}: {
+  outcomes: NonNullable<Extract<ActivityStep, { kind: "tool" }>["permission_outcomes"]>;
+}) {
+  if (!outcomes.length) return null;
+  return (
+    <section className="tool-permission-history" aria-label="Permission decisions">
+      <span className="activity-tool-section-title">Permissions</span>
+      <ul>
+        {outcomes.map((outcome) => (
+          <li className={outcome.decision} key={outcome.request_id}>
+            {outcome.decision === "approved" ? <Check size={12} aria-hidden="true" /> : <CircleX size={12} aria-hidden="true" />}
+            <span>{outcome.option_label ?? permissionDecisionLabel(outcome.decision)}</span>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function toolPermissionSummary(
+  outcomes: NonNullable<Extract<ActivityStep, { kind: "tool" }>["permission_outcomes"]>,
+) {
+  const approved = outcomes.filter((outcome) => outcome.decision === "approved").length;
+  const rejected = outcomes.filter((outcome) => outcome.decision === "rejected").length;
+  const cancelled = outcomes.filter((outcome) => outcome.decision === "cancelled").length;
+  const labels = [
+    permissionCountLabel(approved, "Approved", "approvals"),
+    permissionCountLabel(rejected, "Rejected", "rejections"),
+    permissionCountLabel(cancelled, "Cancelled", "cancelled"),
+  ].filter((label): label is string => Boolean(label));
+  if (!labels.length) return undefined;
+  const decision = rejected ? "rejected" as const : cancelled && !approved ? "cancelled" as const : "approved" as const;
+  return { decision, label: labels.join(" · ") };
+}
+
+function permissionCountLabel(count: number, singular: string, plural: string) {
+  if (!count) return undefined;
+  return count === 1 ? singular : `${count} ${plural}`;
+}
+
+function permissionDecisionLabel(decision: "approved" | "rejected" | "cancelled") {
+  if (decision === "approved") return "Approved";
+  if (decision === "rejected") return "Rejected";
+  return "Cancelled";
 }
 
 function AnimatedDisclosure({

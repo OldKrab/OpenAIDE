@@ -1,10 +1,54 @@
 use crate::protocol::errors::RuntimeError;
-use crate::protocol::model::{ActivityStatus, ActivityStep, NormalizedMessage};
+use crate::protocol::model::{
+    ActivityStatus, ActivityStep, NormalizedMessage, ToolPermissionOutcome,
+};
 use crate::storage::records::StoredMessage;
 
 use super::Store;
 
 impl Store {
+    /// Appends or replaces one App Server-owned authorization decision on its exact tool row.
+    pub fn record_tool_permission_outcome(
+        &self,
+        task_id: &str,
+        activity_identity: &str,
+        tool_call_id: &str,
+        outcome: ToolPermissionOutcome,
+    ) -> Result<Vec<StoredMessage>, RuntimeError> {
+        let mut messages = self.read_messages(task_id)?;
+        let Some(stored) = messages
+            .iter_mut()
+            .find(|stored| stored.chat.identity == activity_identity)
+        else {
+            return Ok(Vec::new());
+        };
+        let NormalizedMessage::Activity { steps, .. } = &mut stored.chat.message else {
+            return Ok(Vec::new());
+        };
+        let Some(permission_outcomes) = steps.iter_mut().find_map(|step| match step {
+            ActivityStep::Tool {
+                tool_call_id: Some(id),
+                permission_outcomes,
+                ..
+            } if id == tool_call_id => Some(permission_outcomes),
+            _ => None,
+        }) else {
+            return Ok(Vec::new());
+        };
+        if let Some(existing) = permission_outcomes
+            .iter_mut()
+            .find(|existing| existing.request_id == outcome.request_id)
+        {
+            *existing = outcome;
+        } else {
+            permission_outcomes.push(outcome);
+        }
+        let updated = stored.clone();
+        self.write_messages(task_id, &messages)?;
+        self.write_meta(task_id, &messages)?;
+        Ok(vec![updated])
+    }
+
     pub fn finish_running_activities(
         &self,
         task_id: &str,

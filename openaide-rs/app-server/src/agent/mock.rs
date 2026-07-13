@@ -1,6 +1,7 @@
 use crate::agent::events::AgentEvent;
 use crate::agent::events::{
-    AgentPermissionOption, AgentPermissionOptionKind, AgentPermissionRequest, AgentToolCallRef,
+    AgentPermissionOption, AgentPermissionOptionKind, AgentPermissionRequest, AgentToolCall,
+    AgentToolCallRef, AgentToolCallStatus,
 };
 use crate::agent::{
     AgentAuthenticateRequest, AgentEventSink, AgentListSessionsRequest, AgentLoadedSession,
@@ -96,6 +97,19 @@ impl AgentRuntime for MockAgent {
             return Ok(AgentPromptOutcome::Cancelled);
         }
         if should_request_permission(&prompt.text) {
+            let tool_call_id = format!("call_{}", uuid::Uuid::new_v4());
+            // Match ACP's permission bridge: the linked tool must be projected before
+            // App Server opens the transient request or records its eventual outcome.
+            sink.emit(AgentEvent::ToolCall(AgentToolCall {
+                tool_call_id: tool_call_id.clone(),
+                scope_id: None,
+                title: "Edit workspace files".to_string(),
+                kind: "edit".to_string(),
+                status: AgentToolCallStatus::Pending,
+                input_summary: None,
+                output_preview: None,
+                details: None,
+            }))?;
             let _outcome = sink.request_permission(AgentPermissionRequest {
                 request_id: format!("perm_{}", uuid::Uuid::new_v4()),
                 title: "Allow workspace edit?".to_string(),
@@ -103,7 +117,7 @@ impl AgentRuntime for MockAgent {
                 scope: Some("Workspace".to_string()),
                 risk: Some("File content may change.".to_string()),
                 tool_call: AgentToolCallRef {
-                    tool_call_id: format!("call_{}", uuid::Uuid::new_v4()),
+                    tool_call_id,
                     title: "Edit workspace files".to_string(),
                     kind: Some("edit".to_string()),
                 },

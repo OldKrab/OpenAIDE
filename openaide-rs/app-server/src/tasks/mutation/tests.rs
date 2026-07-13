@@ -245,6 +245,139 @@ fn rejected_commit_rolls_back_context_message_side_effects() {
 }
 
 #[test]
+fn rejected_commit_rolls_back_durable_agent_text_chunk() {
+    let (_dir, store, mutations, notifications) = test_mutations(3);
+    let mut record = task_record("task_reject_agent_chunk");
+    record.revision = 3;
+    store.write_task(&record).unwrap();
+    mutations
+        .append_message(
+            "task_reject_agent_chunk",
+            NormalizedMessage::AgentMessage {
+                id: "agent-message".to_string(),
+                role: AgentMessageRole::Agent,
+                parts: vec![AgentMessagePart::Text {
+                    text: "original".to_string(),
+                }],
+                created_at: "2".to_string(),
+            },
+        )
+        .unwrap();
+
+    let result = mutations
+        .commit_existing_task(
+            "task_reject_agent_chunk",
+            TaskCommitOptions::metadata(),
+            |ctx| {
+                ctx.append_agent_message_part(NormalizedMessage::AgentMessage {
+                    id: "agent-message".to_string(),
+                    role: AgentMessageRole::Agent,
+                    parts: vec![AgentMessagePart::Text {
+                        text: " should roll back".to_string(),
+                    }],
+                    created_at: "3".to_string(),
+                })?;
+                Ok(TaskMutationResult::Rejected)
+            },
+        )
+        .unwrap();
+
+    assert_rejected_no_change(result.outcome);
+    let messages = store.read_messages("task_reject_agent_chunk").unwrap();
+    let NormalizedMessage::AgentMessage { parts, .. } = &messages[0].chat.message else {
+        panic!("expected Agent message");
+    };
+    assert_eq!(
+        parts,
+        &[AgentMessagePart::Text {
+            text: "original".to_string(),
+        }]
+    );
+    assert_eq!(
+        store.read_task("task_reject_agent_chunk").unwrap().revision,
+        3
+    );
+    assert_eq!(mutations.current_revision(), 3);
+    assert!(notifications.try_recv().is_err());
+}
+
+#[test]
+fn streamed_agent_text_materializes_large_history_only_once() {
+    let (_dir, store, mutations, _notifications) = test_mutations(0);
+    store.write_task(&task_record("task_stream_cache")).unwrap();
+    let mut history = (0..2_000)
+        .map(|index| NormalizedMessage::User {
+            id: format!("history-{index}"),
+            text: "x".repeat(600),
+            created_at: "1".to_string(),
+            attachments: Vec::new(),
+        })
+        .collect::<Vec<_>>();
+    history.push(NormalizedMessage::AgentMessage {
+        id: "agent-message".to_string(),
+        role: AgentMessageRole::Agent,
+        parts: vec![AgentMessagePart::Text {
+            text: "start".to_string(),
+        }],
+        created_at: "2".to_string(),
+    });
+    store
+        .replace_messages_with_normalized("task_stream_cache", history)
+        .unwrap();
+
+    for text in [" first", " second"] {
+        mutations
+            .commit_existing_task(
+                "task_stream_cache",
+                TaskCommitOptions {
+                    refresh_message_history: true,
+                    response_snapshot_tail_limit: None,
+                },
+                |ctx| {
+                    ctx.append_agent_message_part(NormalizedMessage::AgentMessage {
+                        id: "agent-message".to_string(),
+                        role: AgentMessageRole::Agent,
+                        parts: vec![AgentMessagePart::Text {
+                            text: text.to_string(),
+                        }],
+                        created_at: "3".to_string(),
+                    })?;
+                    Ok(TaskMutationResult::Changed)
+                },
+            )
+            .unwrap();
+        if text == " first" {
+            let reads_after_first_chunk = store.message_file_read_count_for_test();
+            assert!(reads_after_first_chunk > 0);
+        }
+    }
+
+    let reads_after_stream = store.message_file_read_count_for_test();
+    mutations
+        .commit_existing_task(
+            "task_stream_cache",
+            TaskCommitOptions {
+                refresh_message_history: true,
+                response_snapshot_tail_limit: None,
+            },
+            |ctx| {
+                ctx.append_agent_message_part(NormalizedMessage::AgentMessage {
+                    id: "agent-message".to_string(),
+                    role: AgentMessageRole::Agent,
+                    parts: vec![AgentMessagePart::Text {
+                        text: " third".to_string(),
+                    }],
+                    created_at: "4".to_string(),
+                })?;
+                Ok(TaskMutationResult::Changed)
+            },
+        )
+        .unwrap();
+
+    assert_eq!(store.message_file_read_count_for_test(), reads_after_stream);
+}
+
+#[test]
 fn invariant_failure_rolls_back_context_message_side_effects() {
     let (_dir, store, mutations, notifications) = test_mutations(4);
     let mut record = task_record("task_invariant_side_effect");

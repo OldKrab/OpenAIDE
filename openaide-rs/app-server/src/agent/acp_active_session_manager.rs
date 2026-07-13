@@ -151,6 +151,10 @@ impl AcpActiveSessionManager {
         self.sessions.prompt(prompt, sink)
     }
 
+    pub(super) fn steer(&self, prompt: AgentPrompt) -> Result<(), RuntimeError> {
+        self.sessions.steer(prompt)
+    }
+
     pub(super) fn cancel_session(&self, session: &AgentSessionKey) -> Result<(), RuntimeError> {
         self.sessions.cancel_session(session)
     }

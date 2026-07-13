@@ -66,6 +66,75 @@ describe("TaskView timeline presentation", () => {
     expect(settledTask).not.toContain("chat-streaming-caret");
   });
 
+  it("does not let a large received suffix build a visible presentation backlog", async () => {
+    const { TaskView } = await import("./TaskView");
+    const initial = snapshotWithAuthoritativeTail(true);
+    let tree!: ReactTestRenderer;
+    act(() => {
+      tree = create(<TaskView {...taskViewProps(initial)} />);
+    });
+
+    const updated = structuredClone(initial);
+    const latestAgent = updated.chat.items.find((item) => item.message_id === "agent-later");
+    if (latestAgent?.message.kind !== "agent_message" || latestAgent.message.parts[0]?.kind !== "text") {
+      throw new Error("expected latest Agent text");
+    }
+    latestAgent.message.parts[0].text += `${" streamed".repeat(1_000)} END-OF-CHUNK`;
+    act(() => {
+      tree.update(
+        <TaskView
+          {...taskViewProps(updated)}
+          liveTextPresentation={{
+            agent: { messageId: "agent-later", eventCursor: "cursor-large-chunk" },
+          }}
+        />,
+      );
+    });
+
+    expect(JSON.stringify(tree.toJSON())).not.toContain("END-OF-CHUNK");
+    for (let frame = 0; frame < 6; frame += 1) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(20);
+      });
+    }
+    expect(JSON.stringify(tree.toJSON())).toContain("END-OF-CHUNK");
+  });
+
+  it("shows authoritative text immediately while the document is hidden", async () => {
+    vi.stubGlobal("document", {
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      visibilityState: "hidden",
+    });
+    const { TaskView } = await import("./TaskView");
+    const initial = snapshotWithAuthoritativeTail(true);
+    let tree!: ReactTestRenderer;
+    act(() => {
+      tree = create(<TaskView {...taskViewProps(initial)} />);
+    });
+
+    const updated = structuredClone(initial);
+    const latestAgent = updated.chat.items.find((item) => item.message_id === "agent-later");
+    if (latestAgent?.message.kind !== "agent_message" || latestAgent.message.parts[0]?.kind !== "text") {
+      throw new Error("expected latest Agent text");
+    }
+    latestAgent.message.parts[0].text = "Latest update while hidden";
+    act(() => {
+      tree.update(
+        <TaskView
+          {...taskViewProps(updated)}
+          liveTextPresentation={{
+            agent: { messageId: "agent-later", eventCursor: "cursor-hidden" },
+          }}
+        />,
+      );
+    });
+
+    const rendered = JSON.stringify(tree.toJSON());
+    expect(rendered).toContain("Latest update while hidden");
+    expect(rendered).not.toContain("chat-streaming-caret");
+  });
+
   it("waits for the matching Chat update when its live signal is reduced first", async () => {
     const { TaskView } = await import("./TaskView");
     const initial = snapshotWithAuthoritativeTail(false);
@@ -304,13 +373,20 @@ describe("TaskView timeline presentation", () => {
       );
     });
 
-    const rendered = JSON.stringify(tree.toJSON());
-    expect(rendered).toContain("Reconnecting to App Server.");
-    expect(rendered).toContain("Connection closed.");
+    expect(JSON.stringify(tree.toJSON())).not.toContain("Reconnecting to App Server.");
     const editor = tree.root.findByProps({ role: "textbox", "aria-label": "Message" });
     expect(editor.props.contentEditable).toBe(true);
     expect(editor.props["aria-placeholder"]).toBe("Reconnecting. Draft is saved here.");
     expect(tree.root.findByProps({ "aria-label": "Send message" }).props.disabled).toBe(true);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+
+    const rendered = JSON.stringify(tree.toJSON());
+    expect(rendered).toContain("Reconnecting to App Server.");
+    expect(rendered).toContain("App Server is temporarily unavailable.");
+    expect(rendered).not.toContain("Connection closed.");
   });
 
   it("shows cached task history with an in-place retry when task refresh fails", async () => {

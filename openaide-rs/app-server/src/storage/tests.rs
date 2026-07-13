@@ -180,6 +180,7 @@ fn persisted_tool_artifacts_keep_a_lightweight_file_summary() {
                 input: None,
                 output: None,
             })),
+            permission_outcomes: Vec::new(),
         }],
     };
 
@@ -466,6 +467,7 @@ fn activity_message_with_edit_details(id: &str) -> ChatMessage {
                     input: None,
                     output: None,
                 })),
+                permission_outcomes: Vec::new(),
             }],
         },
     }
@@ -514,6 +516,204 @@ fn local_history_timestamp_advances_for_every_chat_write() {
     let second = store.local_history_updated_at(task_id).unwrap();
 
     assert!(second > first);
+}
+
+#[test]
+fn agent_text_chunk_is_durable_without_rewriting_existing_history() {
+    let temp = tempfile::tempdir().unwrap();
+    let task_id = "task-agent-text-journal";
+    let messages_path = temp
+        .path()
+        .join("tasks")
+        .join(task_id)
+        .join("messages.jsonl");
+    {
+        let store = Store::open(temp.path().to_path_buf()).unwrap();
+        store
+            .append_message(task_id, agent_chat_message("agent-message", "Hello"))
+            .unwrap();
+        let history_before_chunk = std::fs::read(&messages_path).unwrap();
+
+        store
+            .append_agent_message_part(
+                task_id,
+                NormalizedMessage::AgentMessage {
+                    id: "agent-message".to_string(),
+                    role: AgentMessageRole::Agent,
+                    parts: vec![AgentMessagePart::Text {
+                        text: " world".to_string(),
+                    }],
+                    created_at: "2026-07-01T00:00:01Z".to_string(),
+                },
+            )
+            .unwrap();
+
+        assert_eq!(std::fs::read(&messages_path).unwrap(), history_before_chunk);
+    }
+
+    let reopened = Store::open(temp.path().to_path_buf()).unwrap();
+    let page = reopened.tail_page(task_id, 10).unwrap();
+    let NormalizedMessage::AgentMessage { parts, .. } = &page.items[0].message else {
+        panic!("expected Agent message");
+    };
+    assert_eq!(
+        parts,
+        &[AgentMessagePart::Text {
+            text: "Hello world".to_string(),
+        }]
+    );
+}
+
+#[test]
+fn first_agent_text_chunk_appends_without_rewriting_existing_history() {
+    let temp = tempfile::tempdir().unwrap();
+    let task_id = "task-first-agent-text-journal";
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    store
+        .append_message(task_id, chat_message("user-message", "Prompt"))
+        .unwrap();
+    let messages_path = store.task_dir(task_id).unwrap().join("messages.jsonl");
+    let history_before_chunk = std::fs::read(&messages_path).unwrap();
+
+    let result = store
+        .append_agent_message_part(
+            task_id,
+            NormalizedMessage::AgentMessage {
+                id: "agent-message".to_string(),
+                role: AgentMessageRole::Agent,
+                parts: vec![AgentMessagePart::Text {
+                    text: "Answer".to_string(),
+                }],
+                created_at: "2026-07-01T00:00:01Z".to_string(),
+            },
+        )
+        .unwrap();
+
+    assert!(matches!(
+        result,
+        crate::storage::message_store::AgentMessageAppend::Appended(_)
+    ));
+    assert_eq!(std::fs::read(&messages_path).unwrap(), history_before_chunk);
+    assert_eq!(store.read_messages(task_id).unwrap().len(), 2);
+}
+
+#[test]
+fn compacted_agent_text_accepts_later_durable_chunks() {
+    let temp = tempfile::tempdir().unwrap();
+    let task_id = "task-agent-text-compaction";
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    store
+        .append_message(task_id, agent_chat_message("agent-message", "one"))
+        .unwrap();
+    for text in [" two", " three"] {
+        store
+            .append_agent_message_part(
+                task_id,
+                NormalizedMessage::AgentMessage {
+                    id: "agent-message".to_string(),
+                    role: AgentMessageRole::Agent,
+                    parts: vec![AgentMessagePart::Text {
+                        text: text.to_string(),
+                    }],
+                    created_at: "2026-07-01T00:00:01Z".to_string(),
+                },
+            )
+            .unwrap();
+    }
+
+    store.compact_message_journal(task_id).unwrap();
+    assert!(!store
+        .task_dir(task_id)
+        .unwrap()
+        .join("message_journal.jsonl")
+        .exists());
+    store
+        .append_agent_message_part(
+            task_id,
+            NormalizedMessage::AgentMessage {
+                id: "agent-message".to_string(),
+                role: AgentMessageRole::Agent,
+                parts: vec![AgentMessagePart::Text {
+                    text: " four".to_string(),
+                }],
+                created_at: "2026-07-01T00:00:02Z".to_string(),
+            },
+        )
+        .unwrap();
+    drop(store);
+
+    let reopened = Store::open(temp.path().to_path_buf()).unwrap();
+    let messages = reopened.read_messages(task_id).unwrap();
+    let NormalizedMessage::AgentMessage { parts, .. } = &messages[0].chat.message else {
+        panic!("expected Agent message");
+    };
+    assert_eq!(
+        parts,
+        &[AgentMessagePart::Text {
+            text: "one two three four".to_string(),
+        }]
+    );
+}
+
+#[test]
+fn incomplete_final_journal_record_does_not_poison_later_chunks() {
+    let temp = tempfile::tempdir().unwrap();
+    let task_id = "task-agent-text-partial-record";
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    store
+        .append_message(task_id, agent_chat_message("agent-message", "one"))
+        .unwrap();
+    store
+        .append_agent_message_part(
+            task_id,
+            NormalizedMessage::AgentMessage {
+                id: "agent-message".to_string(),
+                role: AgentMessageRole::Agent,
+                parts: vec![AgentMessagePart::Text {
+                    text: " two".to_string(),
+                }],
+                created_at: "2026-07-01T00:00:01Z".to_string(),
+            },
+        )
+        .unwrap();
+    let journal_path = store
+        .task_dir(task_id)
+        .unwrap()
+        .join("message_journal.jsonl");
+    use std::io::Write as _;
+    std::fs::OpenOptions::new()
+        .append(true)
+        .open(&journal_path)
+        .unwrap()
+        .write_all(br#"{"sequence":999"#)
+        .unwrap();
+
+    store
+        .append_agent_message_part(
+            task_id,
+            NormalizedMessage::AgentMessage {
+                id: "agent-message".to_string(),
+                role: AgentMessageRole::Agent,
+                parts: vec![AgentMessagePart::Text {
+                    text: " three".to_string(),
+                }],
+                created_at: "2026-07-01T00:00:02Z".to_string(),
+            },
+        )
+        .unwrap();
+    drop(store);
+
+    let reopened = Store::open(temp.path().to_path_buf()).unwrap();
+    let messages = reopened.read_messages(task_id).unwrap();
+    let NormalizedMessage::AgentMessage { parts, .. } = &messages[0].chat.message else {
+        panic!("expected Agent message");
+    };
+    assert_eq!(
+        parts,
+        &[AgentMessagePart::Text {
+            text: "one two three".to_string(),
+        }]
+    );
 }
 
 #[test]

@@ -145,7 +145,7 @@ describe("ChatRow", () => {
     expect(html).not.toContain('class="recovery-banner"');
   });
 
-  it("renders thought steps inside activity groups as collapsed thought rows", async () => {
+  it("shows a short Thought run inline without a reasoning control", async () => {
     const { ChatRow } = await import("./ChatMessageView");
     const html = renderToStaticMarkup(
       <ChatRow
@@ -170,8 +170,8 @@ describe("ChatRow", () => {
     );
 
     expect(html).toContain("Thought, read file");
+    expect(html).not.toContain('class="activity-reasoning-toggle"');
     expect(html).toContain("activity-thought-block");
-    expect(html).toContain('<span class="activity-step-title">Thought</span>');
     expect(html).toContain("Check current files first.");
   });
 

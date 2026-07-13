@@ -131,6 +131,11 @@ impl TurnRunner {
         });
     }
 
+    /// Forwards a steering prompt without registering another Task work lifecycle.
+    pub(crate) fn steer_session(&self, prompt: AgentPrompt) -> Result<(), RuntimeError> {
+        self.agent.steer(prompt)
+    }
+
     /// Starts one cancellation without finalizing Task state before the prompt settles.
     pub fn cancel_turn(&self, turn_id: &str) -> Result<bool, RuntimeError> {
         if let Some(active) = self

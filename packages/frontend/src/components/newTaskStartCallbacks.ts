@@ -186,10 +186,8 @@ async function submitNewTask({
       ? cachedSnapshot
       : undefined;
     let taskId: TaskId;
-    let taskRevision: number;
     if (cachedNewTask) {
       taskId = cachedNewTask.task.task_id as TaskId;
-      taskRevision = cachedNewTask.revision;
       newTaskLease = newTaskController.currentLease(taskId) ?? newTaskController.claim({
         attachmentResources,
         preparationKey,
@@ -208,7 +206,6 @@ async function submitNewTask({
         },
       );
       taskId = prepared.taskId;
-      taskRevision = prepared.task.revision;
       const snapshot = mapProtocolTaskSnapshot(prepared.task).snapshot;
       newTaskLease = newTaskController.retain({
         attachmentResources,
@@ -243,7 +240,6 @@ async function submitNewTask({
     sendStarted = true;
     const pendingSend = request(TASK_SEND, {
       taskId,
-      taskRevision,
       message,
     });
     newTaskController.protectSend(newTaskLease);

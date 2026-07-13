@@ -5,6 +5,7 @@ use uuid::Uuid;
 use crate::attachment_runtime::AttachmentRuntimeError;
 use crate::protocol::model::{ChatMessage, NormalizedMessage};
 use crate::storage::cursor;
+use crate::storage::records::{TaskTitle, TaskTitleSource};
 use crate::tasks::lifecycle::running_turn_message;
 
 use super::{validation_error, TaskProductApi};
@@ -80,6 +81,20 @@ impl TaskProductApi {
 
 pub(super) fn normalized_message_text(message: &ComposerMessage) -> String {
     message.text.as_deref().unwrap_or("").trim().to_string()
+}
+
+/// Creates the provisional single-line title shown until the Agent supplies its own title.
+pub(super) fn prompt_title(prompt: &str) -> Option<TaskTitle> {
+    const MAX_CHARS: usize = 60;
+
+    let prompt = prompt.split_whitespace().collect::<Vec<_>>().join(" ");
+    let prefix = prompt.chars().take(MAX_CHARS).collect::<String>();
+    let value = if prompt.chars().count() > MAX_CHARS {
+        format!("{prefix}...")
+    } else {
+        prefix
+    };
+    TaskTitle::new(value, TaskTitleSource::Prompt)
 }
 
 pub(super) fn protocol_error_from_attachment_runtime(

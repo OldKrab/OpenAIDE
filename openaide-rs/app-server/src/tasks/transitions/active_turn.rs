@@ -142,6 +142,17 @@ impl TaskTransitions {
                 }),
             );
         }
+        if committed {
+            if let Err(error) = self.mutations.compact_message_journal(task_id) {
+                crate::logging::warn(
+                    "message_journal_compaction_failed",
+                    serde_json::json!({
+                        "task_id": task_id,
+                        "error": error.to_string(),
+                    }),
+                );
+            }
+        }
         Ok(committed)
     }
 }

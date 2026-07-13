@@ -37,6 +37,7 @@ pub enum TaskLifecycle {
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskTitleSource {
+    Prompt,
     Agent,
     User,
 }
@@ -152,7 +153,7 @@ pub struct TaskRecord {
 }
 
 impl TaskRecord {
-    /// Applies an Agent title only while the Agent owns the title field.
+    /// Applies an Agent title over provisional or Agent-owned titles, preserving user ownership.
     pub fn set_agent_title(&mut self, value: &str) -> bool {
         if self
             .title
@@ -171,12 +172,12 @@ impl TaskRecord {
         true
     }
 
-    /// Clears an Agent title without erasing a future user-owned title.
+    /// Applies an Agent clear over provisional or Agent-owned titles, preserving user ownership.
     pub fn clear_agent_title(&mut self) -> bool {
-        if !self
+        if self
             .title
             .as_ref()
-            .is_some_and(|title| title.source() == TaskTitleSource::Agent)
+            .is_none_or(|title| title.source() == TaskTitleSource::User)
         {
             return false;
         }

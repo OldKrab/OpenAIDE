@@ -24,7 +24,7 @@ use openaide_app_server_protocol::state::{
 };
 use serde_json::json;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use crate::agent::product_api::{
@@ -439,19 +439,13 @@ fn agent_list_sessions_returns_typed_result_without_workspace_paths() {
 }
 
 #[test]
-fn background_native_catalog_refresh_coalesces_while_one_refresh_is_running() {
-    let workflow = Arc::new(BlockingCatalogRefresh::default());
+fn background_native_catalog_refresh_request_is_delegated() {
+    let workflow = Arc::new(RecordingCatalogRefresh::default());
     let gateway = SharedRpcGateway::new(gateway_with_agent_session_listing(workflow.clone()));
 
     gateway.request_native_session_catalog_refresh();
-    gateway.request_native_session_catalog_refresh();
-    wait_for(|| workflow.calls.load(Ordering::SeqCst) == 1);
-    assert_eq!(workflow.calls.load(Ordering::SeqCst), 1);
 
-    workflow.release.store(true, Ordering::SeqCst);
-    wait_for(|| !gateway.native_catalog_refresh_is_running_for_test());
-    gateway.request_native_session_catalog_refresh();
-    wait_for(|| workflow.calls.load(Ordering::SeqCst) == 2);
+    assert_eq!(workflow.requests.load(Ordering::SeqCst), 1);
 }
 
 #[test]
@@ -2062,12 +2056,11 @@ impl AgentListSessionsWorkflow for ListingAgentSessions {
 }
 
 #[derive(Default)]
-struct BlockingCatalogRefresh {
-    calls: AtomicUsize,
-    release: AtomicBool,
+struct RecordingCatalogRefresh {
+    requests: AtomicUsize,
 }
 
-impl AgentListSessionsWorkflow for BlockingCatalogRefresh {
+impl AgentListSessionsWorkflow for RecordingCatalogRefresh {
     fn list_agent_sessions(
         &self,
         _params: openaide_app_server_protocol::agent::AgentListSessionsParams,
@@ -2078,25 +2071,8 @@ impl AgentListSessionsWorkflow for BlockingCatalogRefresh {
         Err(test_unavailable("interactive listing is not used"))
     }
 
-    fn refresh_native_session_catalogs(
-        &self,
-    ) -> Result<(), openaide_app_server_protocol::errors::ProtocolError> {
-        self.calls.fetch_add(1, Ordering::SeqCst);
-        while !self.release.load(Ordering::SeqCst) {
-            std::thread::yield_now();
-        }
-        Ok(())
-    }
-}
-
-fn wait_for(condition: impl Fn() -> bool) {
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
-    while !condition() {
-        assert!(
-            std::time::Instant::now() < deadline,
-            "timed out waiting for asynchronous condition"
-        );
-        std::thread::sleep(std::time::Duration::from_millis(1));
+    fn request_native_session_catalog_refresh(&self) {
+        self.requests.fetch_add(1, Ordering::SeqCst);
     }
 }
 

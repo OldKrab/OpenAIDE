@@ -87,6 +87,7 @@ describe("useTaskChatScroll", () => {
     act(() => mutation.notify());
 
     expect(resize.instances[0]?.observe).toHaveBeenCalledWith(insertedRow);
+    expect(mutation.instances[0]?.observe).toHaveBeenCalledWith(messageList, { childList: true });
   });
 
   it("recovers a follower when permission layout contracts and grows before its scroll event", () => {
@@ -803,6 +804,7 @@ function installMutationObserver() {
   const observers: Array<{
     callback: MutationCallback;
     disconnect: ReturnType<typeof vi.fn>;
+    observe: ReturnType<typeof vi.fn>;
     observer: MutationObserver;
   }> = [];
   class MockMutationObserver implements MutationObserver {
@@ -813,7 +815,7 @@ function installMutationObserver() {
 
     constructor(callback: MutationCallback) {
       this.callback = callback;
-      observers.push({ callback, disconnect: this.disconnect, observer: this });
+      observers.push({ callback, disconnect: this.disconnect, observe: this.observe, observer: this });
     }
   }
   vi.stubGlobal("MutationObserver", MockMutationObserver);

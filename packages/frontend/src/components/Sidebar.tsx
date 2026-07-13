@@ -212,11 +212,11 @@ export const Sidebar = memo(function Sidebar({
                 nativeSessionsAdoptingSessionId={nativeSessions.adoptingSessionId}
                 nativeSessionsHaveMore={nativeSessions.nextCursor !== undefined}
                 onArchiveTask={onArchiveTask}
-                onLoadMore={() =>
+                onLoadMore={(visibleIncrement) =>
                   {
                     setProjectRowLimits((current) => {
                     const next = new Map(current);
-                    next.set(group.key, (current.get(group.key) ?? maxTasksPerProject) + maxTasksPerProject);
+                    next.set(group.key, (current.get(group.key) ?? maxTasksPerProject) + visibleIncrement);
                     return next;
                     });
                     if (nativeSessions.nextCursor && nativeSessionProjectId === group.key) {

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown } from "lucide-react";
 import type {
   AppPreferencesRecord,
@@ -18,7 +18,6 @@ import { scrollTopAfterPrependedContent } from "./TaskViewModel";
 import { taskWorkingStatusLabel, workspaceLabel } from "./taskSurfaceHelpers";
 import type { TaskFileBrowserCallbacks } from "./appControllerCallbackTypes";
 import {
-  chatItemsWithResolvedPermissions,
   permissionResponseForMessage,
   questionResponseForMessage,
 } from "./taskChatPresentation";
@@ -26,16 +25,16 @@ import { useTaskChatScroll } from "./useTaskChatScroll";
 import { appServerAttachmentHandles } from "../state/composerOptions";
 import { configOptionsMutable } from "../state/configOptionState";
 import type { BackendConnectionState } from "./appControllerBackendLifecycle";
-import { useLiveTextPresentation } from "./useLiveTextPresentation";
 
 export {
   scrollTopAfterPrependedContent,
 } from "./TaskViewModel";
 export {
-  chatItemsWithResolvedPermissions,
   permissionResponseForMessage,
   questionResponseForMessage,
 } from "./taskChatPresentation";
+
+const RECONNECT_NOTICE_DELAY_MS = 1_000;
 
 export type TaskViewIntents = {
   changePrompt: (prompt: string) => void;
@@ -132,16 +131,11 @@ export function TaskView({
   showWorkspaceContext?: boolean;
 }) {
   const inputPending = taskInput.pending?.state === "sending";
-  const chat = renderedChat(snapshot, chatPageState);
-  const chatItems = [
-    ...chatItemsWithResolvedPermissions(chat.items),
+  const chat = useMemo(() => renderedChat(snapshot, chatPageState), [chatPageState, snapshot]);
+  const chatItems = useMemo(() => [
+    ...chat.items,
     ...snapshot.active_requests,
-  ];
-  const livePresentation = useLiveTextPresentation(
-    snapshot.task.task_id,
-    chatItems,
-    liveTextPresentation,
-  );
+  ], [chat.items, snapshot.active_requests]);
   const turnBusy = snapshot.task.status === "active";
   const attachmentsSendable = taskInput.context.length === 0
     || appServerAttachmentHandles(taskInput.context) !== undefined;
@@ -162,7 +156,19 @@ export function TaskView({
   const canSubmit = composerCanSubmit(availability, taskInput.prompt, taskInput.context.length);
   const taskConfigOptions = startupConfigOptions ?? snapshot.agent_config;
   const [showHistoryUpdated, setShowHistoryUpdated] = useState(false);
+  const [showReconnectNotice, setShowReconnectNotice] = useState(false);
   const announcedHistoryUpdate = useRef<string | undefined>(undefined);
+  const reconnecting = backendConnectionState?.status === "reconnecting";
+  useEffect(() => {
+    if (!reconnecting) {
+      setShowReconnectNotice(false);
+      return undefined;
+    }
+    // Page unloads and brief stream replacement are normal. Keep Send blocked
+    // immediately, but do not turn a sub-second resynchronization into an error.
+    const timer = window.setTimeout(() => setShowReconnectNotice(true), RECONNECT_NOTICE_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [reconnecting]);
   useEffect(() => {
     if (snapshot.history_sync.state !== "updated") {
       setShowHistoryUpdated(false);
@@ -203,6 +209,15 @@ export function TaskView({
     savedScrollState,
     taskId: snapshot.task.task_id,
   });
+  const loadChatPage = useCurrentCallback(onLoadChatPage);
+  const subscribeToolDetail = useCurrentCallback(onSubscribeToolDetail);
+  const respondToPermission = useCurrentCallback(onPermissionRespond);
+  const respondToQuestion = useCurrentCallback((requestId: string, response: ElicitationResponse) => {
+    onQuestionRespond?.(requestId, response);
+  });
+  const restoreTask = useCurrentCallback((taskId: string) => {
+    onRestoreTask?.(taskId);
+  });
 
   const submit = (prompt: string) => {
     if (!canSubmit) return;
@@ -221,84 +236,34 @@ export function TaskView({
         showWorkspaceContext={showWorkspaceContext}
       />
       <div className="chat-column">
-        <div className="message-list-shell">
-          <div
-            className="message-list"
-            onKeyDown={chatScroll.onKeyDown}
-            onPointerCancel={chatScroll.onPointerCancel}
-            onPointerDown={chatScroll.onPointerDown}
-            onPointerUp={chatScroll.onPointerUp}
-            onScroll={chatScroll.onScroll}
-            onWheel={chatScroll.onWheel}
-            ref={chatScroll.messageListRef}
-          >
-          {archived ? (
-            <div className="archived-task-notice" role="status">
-              <span>Archived task. Restore it to send a follow-up.</span>
-              {onRestoreTask ? (
-                <button type="button" onClick={() => onRestoreTask(snapshot.task.task_id)}>
-                  Restore
-                </button>
-              ) : null}
-            </div>
-          ) : null}
-          {chat.hasBefore ? (
-            <div className="load-earlier-row">
-              <button
-                disabled={chat.pending || !chat.beforeCursor}
-                onClick={() => {
-                  if (!chat.beforeCursor || chat.pending) return;
-                  const requestGeneration = onLoadChatPage(chat.beforeCursor);
-                  if (requestGeneration !== undefined) {
-                    chatScroll.capturePrependAnchor(requestGeneration);
-                  }
-                }}
-                type="button"
-              >
-                {chat.pending ? "Loading earlier" : "Load earlier"}
-              </button>
-            </div>
-          ) : null}
-          {chat.error ? <p className="chat-system">{chat.error}</p> : null}
-          {livePresentation.items.map((message) => (
-            <ChatRow
-              key={chatRowKey(message)}
-              message={message}
-              showStreamingCaret={livePresentation.activeMessageIds.has(message.message_id)}
-              taskId={snapshot.task.task_id}
-              toolDetails={toolDetails}
-              onSubscribeToolDetail={onSubscribeToolDetail}
-              permissionResponse={permissionResponseForMessage(message.message, permissionResponses)}
-              onPermissionRespond={onPermissionRespond}
-              onQuestionRespond={onQuestionRespond}
-              questionResponse={questionResponseForMessage(message.message, questionResponses)}
-              commandCatalog={snapshot.agent_commands}
-            />
-          ))}
-            {workingLabel ? (
-              <WorkingStatus label={workingLabel} />
-            ) : null}
-          </div>
-          {chatScroll.showJumpToLatest ? (
-            <button
-              aria-label="Jump to latest message"
-              className="jump-to-latest"
-              onClick={chatScroll.jumpToLatest}
-              title="Jump to latest"
-              type="button"
-            >
-              <ArrowDown aria-hidden="true" size={14} />
-            </button>
-          ) : null}
-        </div>
-        {backendConnectionState?.status === "reconnecting" || backendConnectionState?.status === "unavailable" ? (
+        <TaskChatTimeline
+          archived={archived}
+          canRestoreTask={onRestoreTask !== undefined}
+          chat={chat}
+          chatScroll={chatScroll}
+          commandCatalog={snapshot.agent_commands}
+          items={chatItems}
+          liveTextPresentation={liveTextPresentation}
+          onLoadChatPage={loadChatPage}
+          onPermissionRespond={respondToPermission}
+          onQuestionRespond={respondToQuestion}
+          onRestoreTask={restoreTask}
+          onSubscribeToolDetail={subscribeToolDetail}
+          permissionResponses={permissionResponses}
+          questionResponses={questionResponses}
+          taskId={snapshot.task.task_id}
+          taskStatus={snapshot.task.status}
+          toolDetails={toolDetails}
+          workingLabel={workingLabel}
+        />
+        {(reconnecting && showReconnectNotice) || backendConnectionState?.status === "unavailable" ? (
           <div className="task-connection-notice" role="status" aria-live="polite">
             <span>
-              {backendConnectionState.status === "reconnecting"
+              {reconnecting
                 ? "Reconnecting to App Server."
                 : "Unable to refresh task."}
             </span>
-            <small>{backendConnectionState.message}</small>
+            <small>{reconnecting ? "App Server is temporarily unavailable." : backendConnectionState.message}</small>
             {backendConnectionState.status === "unavailable" && onRetryConnection ? (
               <button type="button" onClick={onRetryConnection}>Retry</button>
             ) : null}
@@ -338,12 +303,155 @@ export function TaskView({
   );
 }
 
-// Live App Server cards and their persisted Chat records have different message IDs.
-// Permission request identity keeps the same DOM row mounted across that handoff.
+type TaskChatTimelineProps = {
+  archived: boolean;
+  canRestoreTask: boolean;
+  chat: ReturnType<typeof renderedChat>;
+  chatScroll: ReturnType<typeof useTaskChatScroll>;
+  commandCatalog: TaskSnapshot["agent_commands"];
+  items: ChatMessage[];
+  liveTextPresentation?: TaskLiveTextPresentation;
+  onLoadChatPage: (beforeCursor: string) => number | undefined;
+  onPermissionRespond: (requestId: string, optionId: string) => void;
+  onQuestionRespond: (requestId: string, response: ElicitationResponse) => void;
+  onRestoreTask: (taskId: string) => void;
+  onSubscribeToolDetail: (artifactId: string) => () => void;
+  permissionResponses: AppState["permissionResponses"];
+  questionResponses: AppState["questionResponses"];
+  taskId: string;
+  taskStatus: TaskSnapshot["task"]["status"];
+  toolDetails: AppState["toolDetails"];
+  workingLabel?: string;
+};
+
+// Composer drafts update independently from authoritative Chat and must not invalidate its rows.
+const TaskChatTimeline = memo(function TaskChatTimeline({
+  archived,
+  canRestoreTask,
+  chat,
+  chatScroll,
+  commandCatalog,
+  items,
+  liveTextPresentation,
+  onLoadChatPage,
+  onPermissionRespond,
+  onQuestionRespond,
+  onRestoreTask,
+  onSubscribeToolDetail,
+  permissionResponses,
+  questionResponses,
+  taskId,
+  taskStatus,
+  toolDetails,
+  workingLabel,
+}: TaskChatTimelineProps) {
+  const latestTextMessageIds = latestTextMessageIdsByChannel(items);
+  return (
+    <div className="message-list-shell">
+      <div
+        className="message-list"
+        onKeyDown={chatScroll.onKeyDown}
+        onPointerCancel={chatScroll.onPointerCancel}
+        onPointerDown={chatScroll.onPointerDown}
+        onPointerUp={chatScroll.onPointerUp}
+        onScroll={chatScroll.onScroll}
+        onWheel={chatScroll.onWheel}
+        ref={chatScroll.messageListRef}
+      >
+        {archived ? (
+          <div className="archived-task-notice" role="status">
+            <span>Archived task. Restore it to send a follow-up.</span>
+            {canRestoreTask ? (
+              <button type="button" onClick={() => onRestoreTask(taskId)}>
+                Restore
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+        {chat.hasBefore ? (
+          <div className="load-earlier-row">
+            <button
+              disabled={chat.pending || !chat.beforeCursor}
+              onClick={() => {
+                if (!chat.beforeCursor || chat.pending) return;
+                const requestGeneration = onLoadChatPage(chat.beforeCursor);
+                if (requestGeneration !== undefined) {
+                  chatScroll.capturePrependAnchor(requestGeneration);
+                }
+              }}
+              type="button"
+            >
+              {chat.pending ? "Loading earlier" : "Load earlier"}
+            </button>
+          </div>
+        ) : null}
+        {chat.error ? <p className="chat-system">{chat.error}</p> : null}
+        {items.map((message) => (
+          <ChatRow
+            key={chatRowKey(message)}
+            message={message}
+            liveTextEventCursor={liveTextCursorForMessage(liveTextPresentation, latestTextMessageIds, message)}
+            presentLiveText={taskStatus === "active" || taskStatus === "waiting" || taskStatus === "stopping"}
+            taskId={taskId}
+            toolDetails={toolDetails}
+            onSubscribeToolDetail={onSubscribeToolDetail}
+            permissionResponse={permissionResponseForMessage(message.message, permissionResponses)}
+            onPermissionRespond={onPermissionRespond}
+            onQuestionRespond={onQuestionRespond}
+            questionResponse={questionResponseForMessage(message.message, questionResponses)}
+            commandCatalog={commandCatalog}
+          />
+        ))}
+        {workingLabel ? <WorkingStatus label={workingLabel} /> : null}
+      </div>
+      {chatScroll.showJumpToLatest ? (
+        <button
+          aria-label="Jump to latest message"
+          className="jump-to-latest"
+          onClick={chatScroll.jumpToLatest}
+          title="Jump to latest"
+          type="button"
+        >
+          <ArrowDown aria-hidden="true" size={14} />
+        </button>
+      ) : null}
+    </div>
+  );
+});
+
+function liveTextCursorForMessage(
+  presentation: TaskLiveTextPresentation | undefined,
+  latestMessageIds: Partial<Record<"agent" | "thought", string>>,
+  message: ChatMessage,
+) {
+  if (message.message.kind !== "agent_message") return undefined;
+  if (latestMessageIds[message.message.role] !== message.message_id) return undefined;
+  const signal = presentation?.[message.message.role];
+  return signal?.messageId === message.message_id ? signal.eventCursor : undefined;
+}
+
+function latestTextMessageIdsByChannel(items: ChatMessage[]) {
+  const latest: Partial<Record<"agent" | "thought", string>> = {};
+  for (let index = items.length - 1; index >= 0; index -= 1) {
+    const item = items[index];
+    if (item?.message.kind !== "agent_message") continue;
+    latest[item.message.role] ??= item.message_id;
+    if (latest.agent && latest.thought) break;
+  }
+  return latest;
+}
+
+/** Keeps a callback interface stable while routing calls to the latest controller closure. */
+function useCurrentCallback<Arguments extends unknown[], Result>(
+  callback: (...args: Arguments) => Result,
+) {
+  const callbackRef = useRef(callback);
+  callbackRef.current = callback;
+  return useCallback((...args: Arguments) => callbackRef.current(...args), []);
+}
+
 export function chatRowKey(message: ChatMessage) {
-  if (message.message.kind !== "permission") return message.message_id;
-  const requestId = message.message.app_server_request_id ?? message.message.request_id;
-  return `permission:${requestId}:${message.message.tool_call.id}`;
+  return message.message_id;
 }
 
 function WorkingStatus({ label, onRetry }: { label: string; onRetry?: () => void }) {

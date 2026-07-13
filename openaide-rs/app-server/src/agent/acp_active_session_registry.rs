@@ -72,6 +72,11 @@ impl AcpActiveSessionRegistry {
         self.require_session(&session)?.prompt(prompt, sink)
     }
 
+    pub(super) fn steer(&self, prompt: AgentPrompt) -> Result<(), RuntimeError> {
+        let session = prompt.session_key();
+        self.require_session(&session)?.steer(prompt)
+    }
+
     pub(super) fn cancel_session(&self, session: &AgentSessionKey) -> Result<(), RuntimeError> {
         if let Some(client) = self.get(session) {
             client.cancel()?;

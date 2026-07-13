@@ -21,7 +21,9 @@ use openaide_app_server_protocol::snapshot::PendingRequestScope;
 use openaide_app_server_protocol::state::{StateSubscribeParams, SubscriptionScope};
 
 use crate::projects::{project_id_for_workspace, ConfiguredProjectRoots};
-use crate::protocol::model::{IsolationKind, NormalizedMessage, PermissionDecision, TaskStatus};
+use crate::protocol::model::{
+    ActivityStep, IsolationKind, NormalizedMessage, TaskStatus, ToolPermissionDecision,
+};
 use crate::storage::records::{TaskPreparationRecord, TaskRecord};
 use crate::storage::Store;
 use crate::task_events::TaskUpdate;
@@ -297,7 +299,6 @@ fn attachment_handle_is_scoped_to_its_originating_client_at_protocol_boundary() 
             TASK_SEND,
             json!({
                 "taskId": "task-1",
-                "taskRevision": 1,
                 "message": { "text": "inspect", "attachments": [handle_id] },
             }),
         ),
@@ -1752,7 +1753,6 @@ fn task_send_commits_user_message_and_active_turn_after_initialize() {
             "method": TASK_SEND,
             "params": {
                 "taskId": task_id,
-                "taskRevision": 1,
                 "message": { "text": "hello from protocol edge" }
             }
         })
@@ -1827,7 +1827,6 @@ fn runtime_task_update_notification_emits_app_event_after_agent_completion() {
             "method": TASK_SEND,
             "params": {
                 "taskId": task_id,
-                "taskRevision": 1,
                 "message": { "text": "hello from protocol edge" }
             }
         })
@@ -1940,7 +1939,6 @@ fn runtime_permission_request_round_trips_over_server_request_stdio() {
             "method": TASK_SEND,
             "params": {
                 "taskId": "task-existing",
-                "taskRevision": 1,
                 "message": { "text": "please request permission" }
             }
         })
@@ -1980,18 +1978,22 @@ fn runtime_permission_request_round_trips_over_server_request_stdio() {
         .unwrap()
         .into_iter()
         .find_map(|message| match message.chat.message {
-            NormalizedMessage::Permission {
-                app_server_request_id,
-                selected_option,
-                decision,
-                ..
-            } => Some((app_server_request_id, selected_option, decision)),
+            NormalizedMessage::Activity { steps, .. } => steps.into_iter().find_map(|step| {
+                let ActivityStep::Tool {
+                    permission_outcomes,
+                    ..
+                } = step
+                else {
+                    return None;
+                };
+                permission_outcomes.into_iter().next()
+            }),
             _ => None,
         })
-        .expect("permission message");
-    assert_eq!(permission.0.as_deref(), Some("server-request-1"));
-    assert_eq!(permission.1, Some(option_id));
-    assert_eq!(permission.2, Some(PermissionDecision::Approved));
+        .expect("tool permission outcome");
+    assert_eq!(permission.request_id, "server-request-1");
+    assert_eq!(permission.option_id, Some(option_id));
+    assert_eq!(permission.decision, ToolPermissionDecision::Approved);
 }
 
 #[test]
@@ -2025,7 +2027,6 @@ fn runtime_permission_request_reject_option_persists_denied_decision() {
             "method": TASK_SEND,
             "params": {
                 "taskId": "task-existing",
-                "taskRevision": 1,
                 "message": { "text": "please request permission" }
             }
         })
@@ -2054,18 +2055,22 @@ fn runtime_permission_request_reject_option_persists_denied_decision() {
         .unwrap()
         .into_iter()
         .find_map(|message| match message.chat.message {
-            NormalizedMessage::Permission {
-                app_server_request_id,
-                selected_option,
-                decision,
-                ..
-            } => Some((app_server_request_id, selected_option, decision)),
+            NormalizedMessage::Activity { steps, .. } => steps.into_iter().find_map(|step| {
+                let ActivityStep::Tool {
+                    permission_outcomes,
+                    ..
+                } = step
+                else {
+                    return None;
+                };
+                permission_outcomes.into_iter().next()
+            }),
             _ => None,
         })
-        .expect("permission message");
-    assert_eq!(permission.0.as_deref(), Some("server-request-1"));
-    assert_eq!(permission.1, Some(option_id));
-    assert_eq!(permission.2, Some(PermissionDecision::Denied));
+        .expect("tool permission outcome");
+    assert_eq!(permission.request_id, "server-request-1");
+    assert_eq!(permission.option_id, Some(option_id));
+    assert_eq!(permission.decision, ToolPermissionDecision::Rejected);
 }
 
 #[test]
@@ -2153,7 +2158,6 @@ fn attachment_file_browser_creates_handle_used_by_task_send() {
             "method": TASK_SEND,
             "params": {
                 "taskId": task_id,
-                "taskRevision": 1,
                 "message": {
                     "text": "Use this context",
                     "attachments": [handle_id]

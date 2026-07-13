@@ -642,7 +642,7 @@ fn send_task(
     auth_token: &str,
     connection_id: &str,
     task_id: &str,
-    revision: u64,
+    _revision: u64,
     text: &str,
 ) -> Value {
     let response = post_local_http_json(
@@ -655,7 +655,6 @@ fn send_task(
             "method": "task/send",
             "params": {
                 "taskId": task_id,
-                "taskRevision": revision,
                 "message": { "text": text }
             }
         }),

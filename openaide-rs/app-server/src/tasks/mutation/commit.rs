@@ -62,6 +62,7 @@ pub(super) fn commit_existing_task(
                     return Err(error);
                 }
             };
+            target.store.discard_message_files_backup(&message_backup);
             notify_task_changed(target, &facts);
             TaskCommitOutcome::Committed(facts)
         }
@@ -111,6 +112,7 @@ pub(super) fn create_task_with_validation_and_writer(
             return Err(error);
         }
     };
+    target.store.discard_message_files_backup(&message_backup);
     notify_task_changed(target, &facts);
     let snapshot = match options.response_snapshot_tail_limit {
         Some(limit) => Some(build_snapshot(&target.store, &task_id, limit)?),
@@ -192,6 +194,7 @@ pub(super) fn resolve_or_create_new_task(
             return Err(error);
         }
     };
+    target.store.discard_message_files_backup(&message_backup);
     notify_task_changed(target, &facts);
     let response_snapshot = match options.response_snapshot_tail_limit {
         Some(limit) => Some(build_snapshot(&target.store, &task_id, limit)?),

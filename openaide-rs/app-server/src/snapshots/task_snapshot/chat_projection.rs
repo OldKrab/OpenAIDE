@@ -1,9 +1,8 @@
 use openaide_app_server_protocol::ids::MessageId;
 use openaide_app_server_protocol::snapshot::{
     ActivityStatus as ProtocolActivityStatus, ActivityStepSnapshot, AttachmentKind,
-    AttachmentSnapshot, ChatItem, ChatItemStatus, ChatRole, MessagePart, PermissionMessageDecision,
-    PermissionMessageOption, PermissionMessageOptionKind, PermissionMessageState,
-    QuestionMessageAction, QuestionMessageState,
+    AttachmentSnapshot, ChatItem, ChatItemStatus, ChatRole, MessagePart, QuestionMessageAction,
+    QuestionMessageState, ToolPermissionDecisionSnapshot, ToolPermissionOutcomeSnapshot,
 };
 use openaide_app_server_protocol::task::{
     ActivityToolContent as ProtocolActivityToolContent,
@@ -15,8 +14,7 @@ use openaide_app_server_protocol::task::{
 
 use crate::protocol::model::{
     ActivityStatus, ActivityStep, ActivityToolContent, ActivityToolDetails, ActivityToolValue,
-    AgentMessagePart, AgentMessageRole, Attachment, ChatMessage, NormalizedMessage,
-    PermissionDecision, PermissionOption, PermissionOptionKind, PermissionState, QuestionAction,
+    AgentMessagePart, AgentMessageRole, Attachment, ChatMessage, NormalizedMessage, QuestionAction,
     QuestionState,
 };
 
@@ -69,42 +67,6 @@ fn project_message(message: &NormalizedMessage) -> (ChatRole, ChatItemStatus, Ve
                 title: title.clone(),
                 status: project_activity_status(*status),
                 steps: steps.iter().map(project_activity_step).collect(),
-            }],
-        ),
-        NormalizedMessage::Permission {
-            request_id,
-            app_server_request_id,
-            title,
-            description,
-            scope,
-            risk,
-            tool_call,
-            state,
-            options,
-            selected_option,
-            decision,
-            resolution_message,
-            ..
-        } => (
-            ChatRole::System,
-            ChatItemStatus::Complete,
-            vec![MessagePart::Permission {
-                request_id: request_id.clone().into(),
-                app_server_request_id: app_server_request_id.clone().map(Into::into),
-                title: title.clone(),
-                description: description.clone(),
-                scope: scope.clone(),
-                risk: risk.clone(),
-                tool_call: openaide_app_server_protocol::server_requests::PermissionToolCallRef {
-                    id: tool_call.id.clone(),
-                    title: tool_call.title.clone(),
-                    kind: tool_call.kind.clone(),
-                },
-                state: project_permission_state(*state),
-                options: options.iter().map(project_permission_option).collect(),
-                selected_option: selected_option.clone(),
-                decision: decision.map(project_permission_decision),
-                resolution_message: resolution_message.clone(),
             }],
         ),
         NormalizedMessage::Question {
@@ -190,38 +152,6 @@ fn project_agent_message_part(content: &AgentMessagePart) -> MessagePart {
     }
 }
 
-fn project_permission_state(state: PermissionState) -> PermissionMessageState {
-    match state {
-        PermissionState::Pending => PermissionMessageState::Pending,
-        PermissionState::Responding => PermissionMessageState::Responding,
-        PermissionState::Resolved => PermissionMessageState::Resolved,
-        PermissionState::Cancelled => PermissionMessageState::Cancelled,
-    }
-}
-
-fn project_permission_decision(decision: PermissionDecision) -> PermissionMessageDecision {
-    match decision {
-        PermissionDecision::Approved => PermissionMessageDecision::Approved,
-        PermissionDecision::Denied => PermissionMessageDecision::Denied,
-    }
-}
-
-fn project_permission_option(option: &PermissionOption) -> PermissionMessageOption {
-    PermissionMessageOption {
-        option_id: option.id.clone(),
-        name: option.label.clone(),
-        kind: option.kind.map(project_permission_option_kind),
-    }
-}
-
-fn project_permission_option_kind(kind: PermissionOptionKind) -> PermissionMessageOptionKind {
-    match kind {
-        PermissionOptionKind::Allow => PermissionMessageOptionKind::Allow,
-        PermissionOptionKind::Deny => PermissionMessageOptionKind::Deny,
-        PermissionOptionKind::Other => PermissionMessageOptionKind::Other,
-    }
-}
-
 fn project_activity_step(step: &ActivityStep) -> ActivityStepSnapshot {
     match step {
         ActivityStep::Text { text, level } => ActivityStepSnapshot::Text {
@@ -236,6 +166,7 @@ fn project_activity_step(step: &ActivityStep) -> ActivityStepSnapshot {
             output_preview,
             detail_artifact_id,
             details,
+            permission_outcomes,
         } => ActivityStepSnapshot::Tool {
             tool_call_id: tool_call_id.clone(),
             name: name.clone(),
@@ -244,6 +175,26 @@ fn project_activity_step(step: &ActivityStep) -> ActivityStepSnapshot {
             output_preview: output_preview.clone(),
             detail_artifact_id: detail_artifact_id.clone(),
             details: details.as_deref().map(project_tool_details),
+            permission_outcomes: permission_outcomes
+                .iter()
+                .map(|outcome| ToolPermissionOutcomeSnapshot {
+                    request_id: outcome.request_id.clone().into(),
+                    decision: match outcome.decision {
+                        crate::protocol::model::ToolPermissionDecision::Approved => {
+                            ToolPermissionDecisionSnapshot::Approved
+                        }
+                        crate::protocol::model::ToolPermissionDecision::Rejected => {
+                            ToolPermissionDecisionSnapshot::Rejected
+                        }
+                        crate::protocol::model::ToolPermissionDecision::Cancelled => {
+                            ToolPermissionDecisionSnapshot::Cancelled
+                        }
+                    },
+                    option_id: outcome.option_id.clone(),
+                    option_label: outcome.option_label.clone(),
+                    resolved_at: outcome.resolved_at.clone(),
+                })
+                .collect(),
         },
         ActivityStep::Command {
             command_label,

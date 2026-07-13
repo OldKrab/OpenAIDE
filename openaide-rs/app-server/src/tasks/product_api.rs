@@ -65,6 +65,7 @@ pub(crate) struct TaskProductApi {
     // Keep that session reserved so external-session listing never leaks a New Task.
     preparing_session_ids: Arc<Mutex<HashSet<AgentSessionKey>>>,
     history_sync: crate::tasks::history_sync::HistorySyncCoordinator,
+    native_catalog_refresh: list_sessions::NativeCatalogRefreshCoordinator,
     #[allow(dead_code)]
     server_requests: ServerRequestRuntime,
     task_notifier: TaskUpdateNotifier,
@@ -91,10 +92,8 @@ pub(crate) trait AgentListSessionsWorkflow: Send + Sync {
         params: AgentListSessionsParams,
     ) -> Result<AgentListSessionsResult, ProtocolError>;
 
-    /// Refreshes the Native Session catalog used by fast Task-open freshness checks.
-    fn refresh_native_session_catalogs(&self) -> Result<(), ProtocolError> {
-        Ok(())
-    }
+    /// Requests coalesced background reconciliation without blocking the caller.
+    fn request_native_session_catalog_refresh(&self) {}
 }
 
 #[derive(Debug)]
@@ -235,6 +234,7 @@ impl TaskProductApi {
             config_operations: Default::default(),
             preparing_session_ids,
             history_sync: crate::tasks::history_sync::HistorySyncCoordinator::default(),
+            native_catalog_refresh: Default::default(),
             server_requests,
             task_notifier: notifier,
         };

@@ -1,10 +1,7 @@
 use uuid::Uuid;
 
-use crate::agent::events::{AgentEvent, AgentPermissionOptionKind, AgentToolCallStatus};
-use crate::protocol::model::{
-    ActivityStatus, ActivityStep, NormalizedMessage, PermissionOption, PermissionOptionKind,
-    PermissionState, PermissionToolCall,
-};
+use crate::agent::events::{AgentEvent, AgentToolCallStatus};
+use crate::protocol::model::{ActivityStatus, ActivityStep, NormalizedMessage};
 
 pub fn normalize_events(events: Vec<AgentEvent>, created_at: &str) -> Vec<NormalizedMessage> {
     events
@@ -36,6 +33,7 @@ pub fn normalize_events(events: Vec<AgentEvent>, created_at: &str) -> Vec<Normal
                         output_preview: tool_call.output_preview,
                         detail_artifact_id: None,
                         details: tool_call.details,
+                        permission_outcomes: Vec::new(),
                     }],
                 })
             }
@@ -57,53 +55,10 @@ pub fn normalize_events(events: Vec<AgentEvent>, created_at: &str) -> Vec<Normal
                     output_preview: Some(output_preview),
                     detail_artifact_id: None,
                     details: None,
+                    permission_outcomes: Vec::new(),
                 }],
             }),
-            AgentEvent::PermissionRequest(request) => Some(NormalizedMessage::Permission {
-                id: Uuid::new_v4().to_string(),
-                request_id: request.request_id,
-                app_server_request_id: None,
-                title: request.title,
-                description: request.description,
-                scope: request.scope,
-                risk: request.risk,
-                tool_call: PermissionToolCall {
-                    id: request.tool_call.tool_call_id,
-                    title: request.tool_call.title,
-                    kind: request.tool_call.kind,
-                },
-                state: PermissionState::Pending,
-                created_at: created_at.to_string(),
-                options: request
-                    .options
-                    .into_iter()
-                    .map(|option| PermissionOption {
-                        id: option.option_id,
-                        label: option.name,
-                        kind: Some(match option.kind {
-                            AgentPermissionOptionKind::AllowOnce
-                            | AgentPermissionOptionKind::AllowAlways => PermissionOptionKind::Allow,
-                            AgentPermissionOptionKind::RejectOnce
-                            | AgentPermissionOptionKind::RejectAlways => PermissionOptionKind::Deny,
-                        }),
-                        description: Some(match option.kind {
-                            AgentPermissionOptionKind::AllowOnce => "Only this request".to_string(),
-                            AgentPermissionOptionKind::AllowAlways => {
-                                "Remember this choice".to_string()
-                            }
-                            AgentPermissionOptionKind::RejectOnce => {
-                                "Deny this request".to_string()
-                            }
-                            AgentPermissionOptionKind::RejectAlways => {
-                                "Always deny this kind of request".to_string()
-                            }
-                        }),
-                    })
-                    .collect(),
-                selected_option: None,
-                decision: None,
-                resolution_message: None,
-            }),
+            AgentEvent::PermissionRequest(_) => None,
             AgentEvent::ConfigOptionsChanged(_) | AgentEvent::CommandsChanged(_) => None,
         })
         .collect()

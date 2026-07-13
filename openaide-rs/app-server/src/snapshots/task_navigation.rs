@@ -78,6 +78,7 @@ fn project_title(title: StoredTaskTitle) -> TaskTitle {
     TaskTitle {
         value: title.value().to_string(),
         source: match title.source() {
+            StoredTaskTitleSource::Prompt => TaskTitleSource::Prompt,
             StoredTaskTitleSource::Agent => TaskTitleSource::Agent,
             StoredTaskTitleSource::User => TaskTitleSource::User,
         },

@@ -63,7 +63,7 @@ describe("AppServerHostClient", () => {
       meta: { clientRequestId: "client-request-1" },
     });
     expect(rpcCalls[0]?.[1].headers["X-OpenAIDE-Connection-Id"])
-      .toBe("vscode-host-host-client-1");
+      .toBe("vscode-connection-host-client-1");
   });
 
   it("replaces the workspace roots reported by an initialized host client", async () => {

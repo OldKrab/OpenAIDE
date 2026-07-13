@@ -1,13 +1,12 @@
 use openaide_app_server_protocol::snapshot::{
-    MessagePart, PermissionMessageDecision, PermissionMessageState, TaskHistorySyncSnapshot,
-    TaskSendCapabilityState, TaskStatus as ProtocolTaskStatus,
+    ActivityStepSnapshot, MessagePart, TaskHistorySyncSnapshot, TaskSendCapabilityState,
+    TaskStatus as ProtocolTaskStatus, ToolPermissionDecisionSnapshot,
 };
 use std::sync::{Arc, Mutex};
 
 use crate::protocol::model::{
     ActivityStatus, ActivityStep, AgentMessagePart, AgentMessageRole, ChatMessage, IsolationKind,
-    NormalizedMessage, PermissionDecision, PermissionOption, PermissionOptionKind, PermissionState,
-    PermissionToolCall, TaskStatus,
+    NormalizedMessage, TaskStatus, ToolPermissionDecision, ToolPermissionOutcome,
 };
 use crate::storage::records::{TaskPreparationRecord, TaskRecord};
 use crate::storage::Store;
@@ -236,47 +235,30 @@ fn open_retries_when_message_commit_interleaves_with_snapshot_read() {
 }
 
 #[test]
-fn open_projects_durable_permission_history_as_permission_part() {
+fn open_projects_tool_permission_history_inside_activity_part() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store.write_task(&task_record("task-1")).unwrap();
+    let mut activity = activity_message("activity-1", "call-1");
+    let NormalizedMessage::Activity { steps, .. } = &mut activity else {
+        unreachable!("activity fixture must be an activity message");
+    };
+    let ActivityStep::Tool {
+        permission_outcomes,
+        ..
+    } = &mut steps[0]
+    else {
+        unreachable!("activity fixture must contain a tool step");
+    };
+    permission_outcomes.push(ToolPermissionOutcome {
+        request_id: "server-request-1".to_string(),
+        decision: ToolPermissionDecision::Rejected,
+        option_id: Some("reject_once".to_string()),
+        option_label: Some("Reject".to_string()),
+        resolved_at: "2026-01-01T00:00:02.000Z".to_string(),
+    });
     store
-        .append_message(
-            "task-1",
-            chat_message(NormalizedMessage::Permission {
-                id: "permission-1".to_string(),
-                request_id: "agent-permission-1".to_string(),
-                app_server_request_id: Some("server-request-1".to_string()),
-                title: "Tool call".to_string(),
-                description: None,
-                scope: None,
-                risk: None,
-                tool_call: PermissionToolCall {
-                    id: "call-1".to_string(),
-                    title: "Tool call".to_string(),
-                    kind: Some("execute".to_string()),
-                },
-                state: PermissionState::Resolved,
-                created_at: "2026-01-01T00:00:01.000Z".to_string(),
-                options: vec![
-                    PermissionOption {
-                        id: "allow_once".to_string(),
-                        label: "Allow Once".to_string(),
-                        kind: Some(PermissionOptionKind::Allow),
-                        description: None,
-                    },
-                    PermissionOption {
-                        id: "reject_once".to_string(),
-                        label: "Reject".to_string(),
-                        kind: Some(PermissionOptionKind::Deny),
-                        description: None,
-                    },
-                ],
-                selected_option: None,
-                decision: Some(PermissionDecision::Denied),
-                resolution_message: None,
-            }),
-        )
+        .append_message("task-1", chat_message(activity))
         .unwrap();
     sync_task_message_history_version(&store, "task-1");
 
@@ -284,90 +266,28 @@ fn open_projects_durable_permission_history_as_permission_part() {
         .open_internal(&TaskId::from("task-1"))
         .expect("open");
 
-    let [MessagePart::Permission {
-        request_id,
-        app_server_request_id,
-        title,
-        tool_call,
-        state,
-        options,
-        selected_option,
-        decision,
-        ..
-    }] = snapshot.chat.items[0].parts.as_slice()
-    else {
-        panic!("expected permission message part");
+    let [MessagePart::Activity { steps, .. }] = snapshot.chat.items[0].parts.as_slice() else {
+        panic!("expected activity message part");
     };
-    assert_eq!(request_id.as_str(), "agent-permission-1");
+    let [ActivityStepSnapshot::Tool {
+        permission_outcomes,
+        ..
+    }] = steps.as_slice()
+    else {
+        panic!("expected tool activity step");
+    };
+    assert_eq!(permission_outcomes.len(), 1);
     assert_eq!(
-        app_server_request_id.as_ref().map(|id| id.as_str()),
-        Some("server-request-1")
+        permission_outcomes[0].request_id.as_str(),
+        "server-request-1"
     );
-    assert_eq!(title, "Tool call");
-    assert_eq!(tool_call.kind.as_deref(), Some("execute"));
-    assert_eq!(*state, PermissionMessageState::Resolved);
-    assert_eq!(options[0].option_id, "allow_once");
-    assert_eq!(selected_option, &None);
-    assert_eq!(*decision, Some(PermissionMessageDecision::Denied));
-}
-
-#[test]
-fn cancelled_permission_history_projects_as_cancelled_not_denied() {
-    let temp = tempfile::tempdir().unwrap();
-    let store = Store::open(temp.path().to_path_buf()).unwrap();
-    store.write_task(&task_record("task-1")).unwrap();
-    store
-        .append_message(
-            "task-1",
-            chat_message(NormalizedMessage::Permission {
-                id: "permission-1".to_string(),
-                request_id: "agent-permission-1".to_string(),
-                app_server_request_id: Some("server-request-1".to_string()),
-                title: "Tool call".to_string(),
-                description: None,
-                scope: None,
-                risk: None,
-                tool_call: PermissionToolCall {
-                    id: "call-1".to_string(),
-                    title: "Tool call".to_string(),
-                    kind: Some("execute".to_string()),
-                },
-                state: PermissionState::Cancelled,
-                created_at: "2026-01-01T00:00:01.000Z".to_string(),
-                options: vec![PermissionOption {
-                    id: "allow_once".to_string(),
-                    label: "Allow Once".to_string(),
-                    kind: Some(PermissionOptionKind::Allow),
-                    description: None,
-                }],
-                selected_option: None,
-                decision: None,
-                resolution_message: Some("Task stopped while approval was pending.".to_string()),
-            }),
-        )
-        .unwrap();
-    sync_task_message_history_version(&store, "task-1");
-
-    let snapshot = TaskSnapshotStore::new(store)
-        .open_internal(&TaskId::from("task-1"))
-        .expect("open");
-
-    let [MessagePart::Permission {
-        state,
-        selected_option,
-        decision,
-        resolution_message,
-        ..
-    }] = snapshot.chat.items[0].parts.as_slice()
-    else {
-        panic!("expected permission message part");
-    };
-    assert_eq!(*state, PermissionMessageState::Cancelled);
-    assert_eq!(selected_option, &None);
-    assert_eq!(*decision, None);
     assert_eq!(
-        resolution_message.as_deref(),
-        Some("Task stopped while approval was pending.")
+        permission_outcomes[0].decision,
+        ToolPermissionDecisionSnapshot::Rejected
+    );
+    assert_eq!(
+        permission_outcomes[0].option_id.as_deref(),
+        Some("reject_once")
     );
 }
 
@@ -420,6 +340,30 @@ fn failed_task_with_ready_preparation_is_sendable_for_follow_up_recovery() {
         .expect("open");
 
     assert_eq!(snapshot.task.status, ProtocolTaskStatus::Failed);
+    assert_eq!(
+        snapshot.send_capability.state,
+        TaskSendCapabilityState::Ready
+    );
+    assert!(snapshot.send_capability.blockers.is_empty());
+}
+
+#[test]
+fn working_task_is_sendable_for_steering() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let mut task = task_record("task-1");
+    task.status = TaskStatus::Active;
+    task.lifecycle = crate::storage::records::TaskLifecycle::Visible;
+    task.agent_session_id = Some("session-1".to_string());
+    task.active_turn_id = Some("turn-primary".to_string());
+    task.preparation = TaskPreparationRecord::Ready;
+    store.write_task(&task).unwrap();
+
+    let snapshot = TaskSnapshotStore::new(store)
+        .open_internal(&TaskId::from("task-1"))
+        .expect("open");
+
+    assert_eq!(snapshot.task.status, ProtocolTaskStatus::Running);
     assert_eq!(
         snapshot.send_capability.state,
         TaskSendCapabilityState::Ready
@@ -514,6 +458,7 @@ fn activity_message(id: &str, tool_call_id: &str) -> NormalizedMessage {
             output_preview: None,
             detail_artifact_id: None,
             details: None,
+            permission_outcomes: Vec::new(),
         }],
     }
 }

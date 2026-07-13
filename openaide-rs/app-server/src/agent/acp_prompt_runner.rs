@@ -6,7 +6,9 @@ use agent_client_protocol::{Agent, Dispatch, SessionMessage};
 use serde_json::json;
 use tokio::sync::mpsc as tokio_mpsc;
 
-use crate::agent::acp_active_prompt::{cancel_active_prompt, ActivePrompt};
+use crate::agent::acp_active_prompt::{
+    cancel_active_prompt, send_steering_prompt_request, ActivePrompt,
+};
 use crate::agent::acp_config_options_apply::set_task_config_option_after_prior_updates;
 use crate::agent::acp_errors::acp_error;
 use crate::agent::acp_host_capabilities::AcpSessionPromptMap;
@@ -132,6 +134,19 @@ pub(super) async fn run_prompt(
                         let _ = done_tx.send(Err(RuntimeError::NotReady(
                             "ACP session already has an active prompt".to_string(),
                         )));
+                    }
+                    AcpSessionCommand::Steer { prompt } => {
+                        if let Err(error) = send_steering_prompt_request(
+                            active_session,
+                            prompt,
+                            context.content_policy,
+                            context.trace.as_ref(),
+                        ) {
+                            logging::error(
+                                "acp_steering_prompt_start_failed",
+                                json!({ "error": error.to_string() }),
+                            );
+                        }
                     }
                     AcpSessionCommand::Delete { reply_tx } => {
                         let connection = active_session.connection();

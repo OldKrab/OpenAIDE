@@ -115,7 +115,6 @@ describe("app controller callbacks", () => {
     });
     expect(request).toHaveBeenNthCalledWith(2, TASK_SEND, {
       taskId: "task_1",
-      taskRevision: 2,
       message: { text: "Build the thing" },
     });
     expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "snapshot", intent: "open" }));
@@ -672,7 +671,6 @@ describe("app controller callbacks", () => {
     expect(request).toHaveBeenCalledWith(TASK_OPEN, { taskId: "task_1" });
     expect(request).toHaveBeenCalledWith(TASK_SEND, {
       taskId: "task_1",
-      taskRevision: 2,
       message: {
         text: "Explain this image",
         attachments: ["attachment-handle-image"],
@@ -802,7 +800,6 @@ describe("app controller callbacks", () => {
 
     expect(request).toHaveBeenCalledWith(TASK_SEND, {
       taskId: "task_1",
-      taskRevision: 2,
       message: {
         text: "send the visible attachments",
         attachments: ["attachment-handle-1", "attachment-handle-2", "attachment-handle-3"],
@@ -1944,7 +1941,6 @@ describe("app controller callbacks", () => {
 
     expect(request).toHaveBeenCalledWith(TASK_SEND, {
       taskId: "task_1",
-      taskRevision: 1,
       message: { text: "Continue" },
     });
     expect(dispatch).toHaveBeenNthCalledWith(1, {
@@ -2013,7 +2009,6 @@ describe("app controller callbacks", () => {
 
     expect(request).toHaveBeenCalledWith(TASK_SEND, {
       taskId: "task_1",
-      taskRevision: 1,
       message: {
         text: "Continue",
         attachments: ["attachment-handle-1"],

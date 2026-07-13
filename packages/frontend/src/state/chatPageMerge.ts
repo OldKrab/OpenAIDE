@@ -43,3 +43,21 @@ export function mergeMessageRows(left: ChatMessage[], right: ChatMessage[]) {
   }
   return merged;
 }
+
+/** Preserves the loaded window's order while making the live tail authoritative on overlap. */
+export function mergeMessageRowsPreferRight(left: ChatMessage[], right: ChatMessage[]) {
+  const rightById = new Map(right.map((item) => [item.message_id, item]));
+  const seen = new Set<string>();
+  const merged: ChatMessage[] = [];
+  for (const item of left) {
+    if (seen.has(item.message_id)) continue;
+    seen.add(item.message_id);
+    merged.push(rightById.get(item.message_id) ?? item);
+  }
+  for (const item of right) {
+    if (seen.has(item.message_id)) continue;
+    seen.add(item.message_id);
+    merged.push(item);
+  }
+  return merged;
+}

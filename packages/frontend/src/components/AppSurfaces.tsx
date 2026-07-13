@@ -98,6 +98,8 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
       <main className="app-shell navigation-shell">
         <Sidebar
           activeTaskId={activeNavigationTaskId}
+          groupByProject
+          maxTasksPerProject={DEFAULT_MAX_TASKS_PER_PROJECT}
           nativeSessions={navigation.nativeSessions}
           nativeSessionAgentId={navigation.newTaskSelection.agentId}
           nativeSessionAgentName={navigation.newTaskSelection.agentLabel}
@@ -111,6 +113,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           onSearchChange={callbacks.navigation.changeSearch}
           onSettings={callbacks.navigation.openSettings}
           onToggleArchived={callbacks.navigation.toggleArchived}
+          projects={navigation.projects}
           searchQuery={navigation.searchQuery}
           showArchived={navigation.showArchived}
           taskListError={navigation.taskListError}

@@ -124,6 +124,10 @@ impl AcpRuntimeKernel {
         self.active_sessions.prompt(prompt, sink)
     }
 
+    pub(super) fn steer(&self, prompt: AgentPrompt) -> Result<(), RuntimeError> {
+        self.active_sessions.steer(prompt)
+    }
+
     pub(super) fn cancel_session(&self, session: &AgentSessionKey) -> Result<(), RuntimeError> {
         self.active_sessions.cancel_session(session)
     }

@@ -39,7 +39,7 @@ This document tracks three things:
 | terminal tool content | partial | tool content | Preserves terminal references and command output fields in expanded tool details. Embedded terminal replay remains in progress. |
 | plan updates | planned | session updates | Advisory plan state. |
 | slash commands | planned | `available_commands_update` | UI command discovery and invocation. |
-| session info update | supported | session updates | Agent titles and activity timestamps update the persisted Task projection; clearing a title restores its local fallback. |
+| session info update | supported | session updates | Agent titles and activity timestamps update the persisted Task projection; an explicit clear supersedes provisional Prompt or Agent-owned titles. |
 
 ## RFD / Draft Surfaces
 

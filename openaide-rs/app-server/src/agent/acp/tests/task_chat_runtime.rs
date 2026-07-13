@@ -42,13 +42,7 @@ fn live_acp_message_ids_create_separate_chat_messages() {
             Ok(TaskPreparationRecord::Ready)
         )
     });
-    let ready = api
-        .open_for_test(openaide_app_server_protocol::task::TaskOpenParams {
-            task_id: task_id.clone(),
-        })
-        .expect("open ready task");
-
-    api.send(send_params(&task_id, ready.revision, "respond twice"))
+    api.send(send_params(&task_id, "respond twice"))
         .expect("send prompt");
 
     wait_until(|| {
@@ -145,13 +139,7 @@ fn non_text_acp_output_is_visible_as_typed_chat_parts() {
             Ok(TaskPreparationRecord::Ready)
         )
     });
-    let ready = api
-        .open_for_test(openaide_app_server_protocol::task::TaskOpenParams {
-            task_id: task_id.clone(),
-        })
-        .expect("open ready task");
-
-    api.send(send_params(&task_id, ready.revision, "show rich output"))
+    api.send(send_params(&task_id, "show rich output"))
         .expect("send prompt");
     wait_until(|| {
         store
@@ -270,10 +258,9 @@ fn task_chat_fixture(
     Some((api, store, workspace_root))
 }
 
-fn send_params(task_id: &TaskId, revision: u64, text: &str) -> TaskSendParams {
+fn send_params(task_id: &TaskId, text: &str) -> TaskSendParams {
     TaskSendParams {
         task_id: task_id.clone(),
-        task_revision: revision,
         message: ComposerMessage {
             text: Some(text.to_string()),
             attachments: Vec::new(),

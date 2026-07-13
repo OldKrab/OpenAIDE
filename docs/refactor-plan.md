@@ -26,9 +26,9 @@ The plan is intentionally top-level. Module internals are grilled after this pla
 - No VS Code API dependency in Rust App Server crates.
 - No hidden local machine URLs, temporary domains, private paths, or conversation-specific setup in source, docs, package metadata, comments, or UI text.
 
-## Focused Implementation Plans
+## Focused Architecture Flows
 
-- [New Task flow](new-task-flow-plan.md): accepted client-private New Task lifecycle, defaults, persistence, protocol, Frontend ownership, first-send promotion, and verification plan.
+- [Task Lifecycle and Chat specification](task-chat-flow.md): accepted client-private New Task lifecycle, Send, Native Session work, Chat updates, permissions, history synchronization, and connection recovery.
 
 ## Top-Level Module Interface
 

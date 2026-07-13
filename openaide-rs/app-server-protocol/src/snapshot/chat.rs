@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::ids::{AttachmentId, MessageId, RequestId, TurnId};
-use crate::server_requests::{PermissionToolCallRef, QuestionField, QuestionValue};
+use crate::server_requests::{QuestionField, QuestionValue};
 use crate::task::ToolDetailSnapshot;
 use std::collections::BTreeMap;
 
@@ -94,27 +94,6 @@ pub enum MessagePart {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         steps: Vec<ActivityStepSnapshot>,
     },
-    Permission {
-        request_id: RequestId,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        app_server_request_id: Option<RequestId>,
-        title: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        description: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        scope: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        risk: Option<String>,
-        tool_call: PermissionToolCallRef,
-        state: PermissionMessageState,
-        options: Vec<PermissionMessageOption>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        selected_option: Option<String>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        decision: Option<PermissionMessageDecision>,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        resolution_message: Option<String>,
-    },
     Question {
         request_id: RequestId,
         message: String,
@@ -145,39 +124,6 @@ pub enum QuestionMessageState {
 pub enum QuestionMessageAction {
     Submit,
     Cancel,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct PermissionMessageOption {
-    pub option_id: String,
-    pub name: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub kind: Option<PermissionMessageOptionKind>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub enum PermissionMessageOptionKind {
-    Allow,
-    Deny,
-    Other,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub enum PermissionMessageState {
-    Pending,
-    Responding,
-    Resolved,
-    Cancelled,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub enum PermissionMessageDecision {
-    Approved,
-    Denied,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]
@@ -217,6 +163,7 @@ pub enum ActivityStepSnapshot {
         detail_artifact_id: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         details: Option<ToolDetailSnapshot>,
+        permission_outcomes: Vec<ToolPermissionOutcomeSnapshot>,
     },
     Command {
         command_label: String,
@@ -226,6 +173,27 @@ pub enum ActivityStepSnapshot {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         output_preview: Option<String>,
     },
+}
+
+/// One durable App Server permission decision projected inside its linked tool.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolPermissionOutcomeSnapshot {
+    pub request_id: RequestId,
+    pub decision: ToolPermissionDecisionSnapshot,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub option_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub option_label: Option<String>,
+    pub resolved_at: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum ToolPermissionDecisionSnapshot {
+    Approved,
+    Rejected,
+    Cancelled,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]

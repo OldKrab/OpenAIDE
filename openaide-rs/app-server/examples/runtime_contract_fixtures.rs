@@ -10,9 +10,8 @@ use openaide_app_server::protocol::model::{
     AgentAuthMethodSummary, AgentAuthenticateResult, AgentAuthenticateStatus,
     AgentListSessionsResult, AgentListedSession, AgentMessagePart, AgentMessageRole,
     AgentProbeCapabilities, AgentProbeResult, AgentProbeStatus, Attachment, ChatMessage,
-    InterruptionReason, IsolationKind, MessagePage, NormalizedMessage, PermissionDecision,
-    PermissionOption, PermissionOptionKind, PermissionState, PermissionToolCall, SettingsSummary,
-    TaskSnapshot, TaskStatus, TaskSummary,
+    InterruptionReason, IsolationKind, MessagePage, NormalizedMessage, SettingsSummary,
+    TaskSnapshot, TaskStatus, TaskSummary, ToolPermissionDecision, ToolPermissionOutcome,
 };
 use openaide_app_server::protocol::notifications::RuntimeNotification;
 use openaide_app_server::protocol::params::{
@@ -64,6 +63,13 @@ fn main() {
                         output_preview: Some("content".to_string()),
                         detail_artifact_id: Some("artifact_1".to_string()),
                         details: Some(Box::new(tool_details.clone())),
+                        permission_outcomes: vec![ToolPermissionOutcome {
+                            request_id: "request_1".to_string(),
+                            decision: ToolPermissionDecision::Approved,
+                            option_id: Some("allow_once".to_string()),
+                            option_label: Some("Allow once".to_string()),
+                            resolved_at: "2026-05-22T00:00:03Z".to_string(),
+                        }],
                     },
                     ActivityStep::Command {
                         command_label: "cargo test".to_string(),
@@ -72,31 +78,6 @@ fn main() {
                         output_preview: Some("failed".to_string()),
                     },
                 ],
-            }),
-            chat_message(NormalizedMessage::Permission {
-                id: "perm_1".to_string(),
-                request_id: "request_1".to_string(),
-                app_server_request_id: None,
-                title: "Allow edit".to_string(),
-                description: Some("Edit README.md".to_string()),
-                scope: Some("workspace".to_string()),
-                risk: Some("write".to_string()),
-                tool_call: PermissionToolCall {
-                    id: "tool_1".to_string(),
-                    title: "Edit file".to_string(),
-                    kind: Some("edit".to_string()),
-                },
-                state: PermissionState::Pending,
-                created_at: "2026-05-22T00:00:03Z".to_string(),
-                options: vec![PermissionOption {
-                    id: "allow_once".to_string(),
-                    label: "Allow once".to_string(),
-                    kind: Some(PermissionOptionKind::Allow),
-                    description: Some("Only this request".to_string()),
-                }],
-                selected_option: Some("allow_once".to_string()),
-                decision: Some(PermissionDecision::Approved),
-                resolution_message: None,
             }),
             chat_message(NormalizedMessage::Interruption {
                 id: "interrupt_1".to_string(),
@@ -107,7 +88,7 @@ fn main() {
             }),
         ],
         has_before: true,
-        total_count: 5,
+        total_count: 4,
         version: 6,
         start_cursor: Some("cursor_1".to_string()),
         end_cursor: Some("cursor_5".to_string()),
@@ -117,7 +98,6 @@ fn main() {
         task: task.clone(),
         lifecycle: openaide_app_server::storage::records::TaskLifecycle::Visible,
         chat: chat.clone(),
-        permissions: vec![chat.items[3].message.clone()],
         settings_summary: SettingsSummary {
             agent_id: "codex".to_string(),
             isolation: IsolationKind::Local,

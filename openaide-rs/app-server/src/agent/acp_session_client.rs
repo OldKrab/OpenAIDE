@@ -99,6 +99,19 @@ impl AcpSessionClient {
         }
     }
 
+    /// Queues a second ACP prompt without joining the primary prompt lifecycle.
+    pub(super) fn steer(&self, prompt: AgentPrompt) -> Result<(), RuntimeError> {
+        if prompt.cancellation.is_cancelled() {
+            return Ok(());
+        }
+        if self.has_terminal_error() {
+            return Err(self.worker_stopped_error());
+        }
+        self.command_tx
+            .send(AcpSessionCommand::Steer { prompt })
+            .map_err(|_| self.worker_stopped_error())
+    }
+
     pub(super) fn set_config_option(
         &self,
         agent_id: String,
@@ -233,6 +246,9 @@ pub(super) enum AcpSessionCommand {
         prompt: AgentPrompt,
         sink: Arc<dyn AgentEventSink>,
         done_tx: mpsc::Sender<Result<AgentPromptOutcome, RuntimeError>>,
+    },
+    Steer {
+        prompt: AgentPrompt,
     },
     Delete {
         reply_tx: mpsc::Sender<Result<(), RuntimeError>>,

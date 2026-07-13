@@ -7,6 +7,7 @@ mod task;
 pub use activity::{
     ActivityStatus, ActivityStep, ActivityToolContent, ActivityToolDetails, ActivityToolField,
     ActivityToolInput, ActivityToolLocation, ActivityToolOutput, ActivityToolValue,
+    ToolPermissionDecision, ToolPermissionOutcome,
 };
 pub use agent::{
     AgentAuthMethodSummary, AgentAuthenticateResult, AgentAuthenticateStatus, AgentCommand,

@@ -11,7 +11,7 @@ afterEach(() => {
 });
 
 describe("task mutation intents", () => {
-  it("issues one task/send without a recovery identity", async () => {
+  it("sends only the Task identity, message text, and attachments", async () => {
     const { sendTaskPromptIntent } = await import("./taskMutationIntents");
     const request = vi.fn().mockRejectedValue(new Error("connection closed"));
     const input = { prompt: "Do this once", context: [] };
@@ -32,7 +32,6 @@ describe("task mutation intents", () => {
     })));
     expect(request).toHaveBeenCalledWith(TASK_SEND, {
       taskId: "task-a",
-      taskRevision: 1,
       message: { text: "Do this once" },
     });
   });
@@ -64,7 +63,7 @@ describe("task mutation intents", () => {
     });
   });
 
-  it("does not retry task/send after a revision rejection", async () => {
+  it("does not retry a rejected task/send", async () => {
     const { sendTaskPromptIntent } = await import("./taskMutationIntents");
     const { AppServerProtocolError } = await import("@openaide/app-server-client");
     let sendCount = 0;
@@ -74,12 +73,8 @@ describe("task mutation intents", () => {
         throw new AppServerProtocolError({
           error: {
             code: "conflict",
-            message: sendCount === 1 ? "Revision changed" : "Task is active",
+            message: sendCount === 1 ? "Task is active" : "Unexpected retry",
             recoverable: true,
-            target: sendCount === 1 ? {
-              field: "taskRevision",
-              currentTask: { task: { taskId: "task-a" }, revision: 9 } as never,
-            } : undefined,
           },
         });
       }
@@ -98,7 +93,7 @@ describe("task mutation intents", () => {
 
     const sends = request.mock.calls.filter(([method]) => method === TASK_SEND);
     expect(request.mock.calls.map(([method]) => method)).toEqual([TASK_SEND]);
-    expect(sends[0]?.[1]).toMatchObject({ taskRevision: 1 });
+    expect(sends[0]?.[1]).toEqual({ taskId: "task-a", message: { text: "Follow up once" } });
   });
 
   it("releases every abandoned handle after an authoritative attachment rejection", async () => {

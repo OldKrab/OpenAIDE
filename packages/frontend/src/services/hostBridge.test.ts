@@ -56,7 +56,7 @@ describe("host bridge", () => {
       expect.objectContaining({
         headers: expect.objectContaining({
           Authorization: "Bearer token-1",
-          "X-OpenAIDE-Connection-Id": "client-local",
+          "X-OpenAIDE-Connection-Id": "frontend-connection-client-local",
         }),
       }),
     );
@@ -110,8 +110,9 @@ describe("host bridge", () => {
     const connectionIds = fetch.mock.calls.map(([, init]) =>
       (init as { headers: Record<string, string> }).headers["X-OpenAIDE-Connection-Id"]
     );
-    expect(connectionIds).toContain("task-panel-1");
-    expect(connectionIds).toContain("task-panel-2");
+    expect(new Set(connectionIds).size).toBe(2);
+    expect(connectionIds).not.toContain("task-panel-1");
+    expect(connectionIds).not.toContain("task-panel-2");
     expect(connectionIds).not.toContain("shared-origin-client");
   });
 
@@ -206,7 +207,7 @@ describe("host bridge", () => {
       expect.objectContaining({
         headers: {
           "Content-Type": "application/json",
-          "X-OpenAIDE-Connection-Id": "client-web",
+          "X-OpenAIDE-Connection-Id": "frontend-connection-client-web",
         },
       }),
     );

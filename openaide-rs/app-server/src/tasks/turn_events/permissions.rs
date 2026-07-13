@@ -1,7 +1,9 @@
-use crate::agent::events::{AgentEvent, AgentPermissionOutcome, AgentPermissionRequest};
+use crate::agent::events::{AgentPermissionOutcome, AgentPermissionRequest};
 use crate::logging;
 use crate::protocol::errors::RuntimeError;
-use crate::protocol::model::{NormalizedMessage, PermissionDecision, PermissionState, TaskStatus};
+use crate::protocol::model::{
+    PermissionDecision, TaskStatus, ToolPermissionDecision, ToolPermissionOutcome,
+};
 use crate::tasks::mutation::{TaskCommitOptions, TaskCommitOutcome, TaskMutationResult};
 use crate::time::now_string;
 use openaide_app_server_protocol::ids::TaskId;
@@ -133,34 +135,37 @@ impl TaskEventSink {
     ) -> Result<(), RuntimeError> {
         let now = now_string();
         let stopped = self.cancellation.is_cancelled();
-        let mut message =
-            crate::agent::normalizer::normalize_event(AgentEvent::PermissionRequest(request), &now);
-        let NormalizedMessage::Permission {
-            app_server_request_id,
-            state,
-            selected_option,
-            decision,
-            resolution_message,
-            ..
-        } = &mut message
-        else {
-            unreachable!("permission event must normalize to a Permission message");
+        let (option_id, option_label) = match outcome {
+            AgentPermissionOutcome::Selected { option_id } => (
+                Some(option_id.clone()),
+                request
+                    .options
+                    .iter()
+                    .find(|option| option.option_id == *option_id)
+                    .map(|option| option.name.clone()),
+            ),
+            AgentPermissionOutcome::Cancelled => (None, None),
         };
-        *app_server_request_id = Some(server_request_id.to_string());
-        match outcome {
-            AgentPermissionOutcome::Selected { option_id } => {
-                *state = PermissionState::Resolved;
-                *selected_option = Some(option_id.clone());
-                *decision = resolved_decision;
-            }
-            AgentPermissionOutcome::Cancelled => {
-                *state = PermissionState::Cancelled;
-                if stopped {
-                    *resolution_message =
-                        Some("Task stopped while approval was pending.".to_string());
-                }
-            }
-        }
+        let decision = match outcome {
+            AgentPermissionOutcome::Selected { .. } => match resolved_decision {
+                Some(PermissionDecision::Approved) => ToolPermissionDecision::Approved,
+                Some(PermissionDecision::Denied) => ToolPermissionDecision::Rejected,
+                None => ToolPermissionDecision::Cancelled,
+            },
+            AgentPermissionOutcome::Cancelled => ToolPermissionDecision::Cancelled,
+        };
+        let activity_identity = format!(
+            "acp_tool:{}:{}",
+            self.session_sink.session_id, request.tool_call.tool_call_id
+        );
+        let tool_call_id = request.tool_call.tool_call_id;
+        let permission_outcome = ToolPermissionOutcome {
+            request_id: server_request_id.to_string(),
+            decision,
+            option_id,
+            option_label,
+            resolved_at: now.clone(),
+        };
         self.mutations.commit_existing_task(
             &self.task_id,
             TaskCommitOptions {
@@ -168,7 +173,15 @@ impl TaskEventSink {
                 response_snapshot_tail_limit: None,
             },
             |ctx| {
-                ctx.append_message(message)?;
+                if !ctx.record_tool_permission_outcome(
+                    &activity_identity,
+                    &tool_call_id,
+                    permission_outcome,
+                )? {
+                    return Err(RuntimeError::Internal(format!(
+                        "permission request {server_request_id} has no linked tool {tool_call_id}"
+                    )));
+                }
                 // Read broker state inside the ordered Task mutation. A request that
                 // opens concurrently will mark the Task waiting after this commit.
                 let has_pending_request = self
