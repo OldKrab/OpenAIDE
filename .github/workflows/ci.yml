@@ -54,6 +54,28 @@ jobs:
       - run: npm run build:typescript-deps
       - run: npm run test --workspaces --if-present
 
+  smoke-tests:
+    name: Task Chat smoke tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: npm ci
+      - run: npx playwright install --with-deps chrome
+      - run: npm run test:smoke
+      - name: Upload smoke-test diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: task-chat-smoke-diagnostics
+          path: test-results/
+          if-no-files-found: ignore
+
   build:
     name: Production build
     runs-on: ubuntu-24.04
