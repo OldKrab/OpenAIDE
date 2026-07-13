@@ -261,8 +261,16 @@ describe("startAppServerStateSubscription", () => {
       .map(([action]) => action)
       .filter((action) => action.type === "snapshot");
     expect(snapshots).toHaveLength(3);
-    expect(snapshots[1].snapshot.chat.items[0].message).toMatchObject({ text: "One" });
-    expect(snapshots[2].snapshot.chat.items[0].message).toMatchObject({ text: "One two" });
+    expect(snapshots[1].snapshot.chat.items[0].message).toMatchObject({
+      kind: "agent_message",
+      role: "agent",
+      parts: [{ kind: "text", text: "One" }],
+    });
+    expect(snapshots[2].snapshot.chat.items[0].message).toMatchObject({
+      kind: "agent_message",
+      role: "agent",
+      parts: [{ kind: "text", text: "One two" }],
+    });
     expect(dispatch.mock.calls.map(([action]) => action).filter((action) => action.type === "taskChat:liveText")).toEqual([
       {
         type: "taskChat:liveText",
