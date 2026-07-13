@@ -212,16 +212,37 @@ describe("app controller mounted lifecycle", () => {
     expect(latestController?.state.newTask.nativeSessions.items).toHaveLength(14);
   });
 
-  it("shows a live permission request without reloading the Task", async () => {
-    let serverRequestListener: ((request: TypedServerRequest<ServerRequestMethod>) => void) | undefined;
-    const request = vi.fn();
+  it("keeps a live permission request visible across later Task updates", async () => {
+    const eventListeners: Array<(event: AppServerEvent) => void> = [];
+    const serverRequestListeners: Array<(request: TypedServerRequest<ServerRequestMethod>) => void> = [];
+    const initial = clientSnapshot({ activeTaskStatus: "running" });
+    const request = vi.fn(async (
+      method: string,
+      params?: { scope?: { kind: string; taskId?: string } },
+    ) => {
+      if (method === TASK_OPEN) return { task: initial.activeTask! };
+      if (method === STATE_UNSUBSCRIBE) return { scope: params?.scope };
+      if (method === STATE_SUBSCRIBE) {
+        return params?.scope?.kind === "task"
+          ? taskSubscriptionSnapshot("cursor-task-1", initial.activeTask!)
+          : nonTaskSubscriptionSnapshot(params?.scope, `cursor-${params?.scope?.kind}`);
+      }
+      throw new Error(method);
+    });
     backendConnection = {
-      initialize: vi.fn(async () => ({ snapshot: clientSnapshot() })),
+      initialize: vi.fn(async () => ({ snapshot: initial })),
       request: request as unknown as BackendConnection["request"],
-      serverRequests: vi.fn((listener) => {
-        serverRequestListener = listener;
-        return vi.fn();
-      }),
+      events: (listener) => {
+        eventListeners.push(listener);
+        return () => undefined;
+      },
+      serverRequests: (listener) => {
+        serverRequestListeners.push(listener);
+        return () => {
+          const index = serverRequestListeners.indexOf(listener);
+          if (index >= 0) serverRequestListeners.splice(index, 1);
+        };
+      },
       respond: vi.fn(),
       close: vi.fn(),
     };
@@ -230,20 +251,52 @@ describe("app controller mounted lifecycle", () => {
     await act(async () => {
       create(<ControllerProbe />);
       await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
     });
-    request.mockClear();
 
-    act(() => {
-      serverRequestListener?.({
-        requestId: "server-request-1" as never,
-        scope: { kind: "task", taskId: "task_1" as never },
-        method: PERMISSION_REQUEST,
-        params: {
-          title: "Allow command?",
-          toolCall: { id: "tool-1", title: "Run tests", kind: "execute" },
-          options: [{ optionId: "allow-once", name: "Allow once", kind: "allowOnce" }],
-        },
-      });
+    const taskEvent = (revision: number, previousCursor: string, cursor: string): AppServerEvent => ({
+      subscription: { kind: "task", taskId: "task_1" as never },
+      previousCursor: previousCursor as never,
+      cursor: cursor as never,
+      scope: {
+        kind: "task",
+        stateRootId: "state_root_1" as never,
+        taskId: "task_1" as never,
+      },
+      payload: {
+        kind: "taskChanged",
+        taskId: "task_1" as never,
+        revision,
+        changes: {},
+      },
+    });
+    await act(async () => {
+      for (const listener of eventListeners) {
+        listener(taskEvent(2, "cursor-task-1", "cursor-task-2"));
+      }
+      for (const listener of serverRequestListeners) {
+        listener({
+          requestId: "server-request-1" as never,
+          scope: { kind: "task", taskId: "task_1" as never },
+          method: PERMISSION_REQUEST,
+          params: {
+            title: "Allow command?",
+            toolCall: { id: "tool-1", title: "Run tests", kind: "execute" },
+            options: [{ optionId: "allow-once", name: "Allow once", kind: "allowOnce" }],
+          },
+        });
+      }
+      await Promise.resolve();
+    });
+    expect(latestController?.state.snapshot?.active_requests).toHaveLength(1);
+
+    await act(async () => {
+      // Agents may continue publishing progress while permission is pending.
+      for (const listener of eventListeners) {
+        listener(taskEvent(3, "cursor-task-2", "cursor-task-3"));
+      }
+      await Promise.resolve();
     });
 
     expect(latestController?.state.snapshot?.active_requests).toEqual([
@@ -251,11 +304,9 @@ describe("app controller mounted lifecycle", () => {
         message: expect.objectContaining({
           kind: "permission",
           app_server_request_id: "server-request-1",
-          title: "Allow command?",
         }),
       }),
     ]);
-    expect(request).not.toHaveBeenCalled();
   });
 
   it("settles an initialization failure as unavailable", async () => {

@@ -15,6 +15,7 @@ use agent_client_protocol::schema::{
 };
 use agent_client_protocol::Client;
 
+use crate::agent::acp_elicitation_wire::ElicitationCreateResponse;
 use crate::agent::acp_host_terminal_ownership::{AcpHostTerminalRegistry, AcpTerminalOwnerId};
 use crate::agent::acp_session_lifecycle::LoadReplayCapture;
 use crate::agent::acp_trace::AcpTraceState;
@@ -32,6 +33,11 @@ struct AllHostHandlersConnectionTestAgent {
 struct LoadReplayConnectionTestAgent;
 
 #[derive(Clone)]
+struct ElicitationConnectionTestAgent {
+    done_tx: mpsc::Sender<()>,
+}
+
+#[derive(Clone)]
 struct PermissionThenUpdateConnectionTestAgent {
     permission_finished: Arc<AtomicBool>,
 }
@@ -39,6 +45,24 @@ struct PermissionThenUpdateConnectionTestAgent {
 struct DelayedPermissionSink {
     requested_tx: mpsc::Sender<()>,
     release_rx: Mutex<mpsc::Receiver<()>>,
+}
+
+struct CancellingQuestionSink;
+
+impl crate::agent::AgentSessionEventSink for CancellingQuestionSink {
+    fn config_options_changed(
+        &self,
+        _catalog: crate::protocol::model::ConfigOptionsCatalog,
+    ) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+
+    fn commands_changed(
+        &self,
+        _catalog: crate::protocol::model::AgentCommandsCatalog,
+    ) -> Result<(), RuntimeError> {
+        Ok(())
+    }
 }
 
 impl AgentEventSink for DelayedPermissionSink {
@@ -149,6 +173,41 @@ impl agent_client_protocol::ConnectTo<Client> for AllHostHandlersConnectionTestA
                     .block_task()
                     .await?;
 
+                let _ = self.done_tx.send(());
+                Ok(())
+            })
+    }
+}
+
+impl agent_client_protocol::ConnectTo<Client> for ElicitationConnectionTestAgent {
+    fn connect_to(
+        self,
+        client: impl agent_client_protocol::ConnectTo<Agent>,
+    ) -> impl std::future::Future<Output = agent_client_protocol::Result<()>> + Send {
+        Agent
+            .builder()
+            .name("elicitation-connection-test-agent")
+            .connect_with(client, async move |connection| {
+                let request =
+                    serde_json::from_value::<ElicitationCreateRequest>(serde_json::json!({
+                        "sessionId": "session_1",
+                        "toolCallId": "question_1",
+                        "mode": "form",
+                        "message": "Choose a direction",
+                        "requestedSchema": {
+                            "type": "object",
+                            "properties": {
+                                "direction": {
+                                    "type": "string",
+                                    "enum": ["left", "right"]
+                                }
+                            },
+                            "required": ["direction"]
+                        }
+                    }))
+                    .expect("valid elicitation request");
+                let response = connection.send_request(request).block_task().await?;
+                assert!(matches!(response, ElicitationCreateResponse::Cancel));
                 let _ = self.done_tx.send(());
                 Ok(())
             })
@@ -272,6 +331,7 @@ fn connection_context_with_trace(
         load_replay,
         terminal_registry,
         session_event_sinks: Arc::default(),
+        session_traces: Arc::default(),
         elicitation_cancellations: Arc::default(),
     }
 }
@@ -508,6 +568,42 @@ fn connection_registers_all_agent_to_client_host_handlers() {
     })));
 
     handle.join().expect("connection thread").unwrap();
+}
+
+#[test]
+fn connection_traces_elicitation_request_and_response_to_owning_session() {
+    let temp = tempfile::TempDir::new().expect("trace temp dir");
+    let trace_state = AcpTraceState::disabled(temp.path());
+    trace_state.set_enabled(true).expect("enable ACP trace");
+    let trace = AcpTraceSession::new(trace_state, "task_1", "connection-test");
+    let mut context = connection_context(HostBridge::disabled(), Arc::default());
+    context.session_event_sinks = Arc::new(Mutex::new(HashMap::from([(
+        "session_1".to_string(),
+        Arc::new(CancellingQuestionSink) as Arc<dyn crate::agent::AgentSessionEventSink>,
+    )])));
+    context.session_traces = Arc::new(Mutex::new(HashMap::from([(
+        "session_1".to_string(),
+        trace,
+    )])));
+    let (done_tx, done_rx) = mpsc::channel();
+
+    tokio::runtime::Runtime::new().unwrap().block_on(async {
+        connect_acp_session_client(
+            ElicitationConnectionTestAgent { done_tx },
+            context,
+            async |_connection| wait_for_done(done_rx).await,
+        )
+        .await
+        .unwrap();
+    });
+
+    let trace_dir = temp.path().join("diagnostics").join("acp-traces");
+    let trace_content = wait_for_trace_content(&trace_dir);
+    assert!(trace_content.contains("\"event\":\"elicitation/create.request\""));
+    assert!(trace_content.contains("\"event\":\"elicitation/create.response\""));
+    assert!(trace_content.contains("\"sessionId\":\"session_1\""));
+    assert!(trace_content.contains("\"toolCallId\":\"question_1\""));
+    assert!(trace_content.contains("\"action\":\"cancel\""));
 }
 
 #[test]

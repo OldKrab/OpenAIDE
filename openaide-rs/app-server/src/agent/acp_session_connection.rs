@@ -21,6 +21,7 @@ pub(super) struct AcpSessionConnectionContext {
     pub(super) load_replay: LoadReplayCaptures,
     pub(super) terminal_registry: AcpHostTerminalRegistry,
     pub(super) session_event_sinks: crate::agent::acp_host_capabilities::AcpSessionEventSinkMap,
+    pub(super) session_traces: crate::agent::acp_host_capabilities::AcpSessionTraceMap,
     pub(super) elicitation_cancellations:
         crate::agent::acp_host_capabilities::AcpElicitationCancellationMap,
 }
@@ -39,6 +40,7 @@ where
         context.current_prompts,
         context.terminal_registry,
         context.session_event_sinks,
+        context.session_traces,
         context.elicitation_cancellations,
     );
     let notification_trace = context.trace;

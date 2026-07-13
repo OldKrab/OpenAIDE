@@ -22,6 +22,7 @@ pub(crate) mod acp_message_identity;
 pub(crate) mod acp_opened_session_worker;
 pub(crate) mod acp_prompt_runner;
 pub(crate) mod acp_replay_projection;
+pub(crate) mod acp_response_boundary;
 pub(crate) mod acp_runtime_kernel;
 pub(crate) mod acp_runtime_threading;
 pub(crate) mod acp_session_capabilities;

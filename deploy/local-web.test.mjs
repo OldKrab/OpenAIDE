@@ -105,14 +105,25 @@ test("local web preview env overrides deploy/local-web.env", () => {
   assert.match(result.stdout, /\.openaide-web-dev\/static-5599/);
 });
 
-test("local web role loads its role-specific env file", () => {
+test("local web role loads its role-specific env file", (t) => {
+  const fixtureRoot = mkdtempSync(join(tmpdir(), "openaide-local-web-role-status-"));
+  const fakeBin = join(fixtureRoot, "bin");
+  const fakeSystemctl = join(fakeBin, "systemctl");
+  mkdirSync(fakeBin);
+  writeFileSync(fakeSystemctl, `#!/usr/bin/env bash
+if [[ "$*" == *"--property MainPID --value"* ]]; then printf '4242\\n'; fi
+exit 0
+`);
+  chmodSync(fakeSystemctl, 0o755);
+  t.after(() => rmSync(fixtureRoot, { recursive: true, force: true }));
+
   const result = spawnSync("bash", ["deploy/local-web.sh", "status"], {
     cwd: new URL("..", import.meta.url),
     encoding: "utf8",
     env: {
       ...process.env,
+      PATH: `${fakeBin}:${process.env.PATH}`,
       OPENAIDE_WEB_ROLE: "target",
-      OPENAIDE_WEB_DAEMON: "background",
     },
   });
 

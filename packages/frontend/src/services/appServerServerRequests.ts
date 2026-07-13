@@ -1,13 +1,8 @@
 import {
-  PERMISSION_REQUEST,
-  QUESTION_REQUEST,
   SECRET_READ,
   SHELL_REVEAL_FILE,
   SHELL_SHOW_NOTIFICATION,
   type BackendConnection,
-  type PendingRequestSnapshot,
-  type PermissionRequestParams,
-  type QuestionRequestParams,
   type RequestId,
   type ServerRequestMethod,
   type ServerRequestResponseResultByMethod,
@@ -20,22 +15,15 @@ type ServerRequestConnection = Pick<BackendConnection, "serverRequests" | "respo
 
 type ServerRequestBridgeOptions = {
   backendConnection: ServerRequestConnection;
-  onTaskRequest: (request: PendingRequestSnapshot) => void;
   postHostMessage: PostHostMessage;
 };
 
 export function startAppServerServerRequestBridge({
   backendConnection,
-  onTaskRequest,
   postHostMessage,
 }: ServerRequestBridgeOptions) {
   const pending = new Map<string, ServerRequestMethod>();
   const stopServerRequests = backendConnection.serverRequests((request) => {
-    const taskRequest = taskPendingRequest(request);
-    if (taskRequest) {
-      onTaskRequest(taskRequest);
-      return;
-    }
     if (!isShellHandledRequest(request)) return;
     pending.set(request.requestId, request.method);
     postHostMessage({
@@ -66,34 +54,6 @@ export function startAppServerServerRequestBridge({
       stopServerRequests();
     },
   };
-}
-
-function taskPendingRequest(
-  request: TypedServerRequest<ServerRequestMethod>,
-): PendingRequestSnapshot | undefined {
-  if (request.scope.kind !== "task") return undefined;
-  // The backend connection validates params against the method before delivery.
-  if (request.method === PERMISSION_REQUEST) {
-    const permission = request.params as PermissionRequestParams;
-    return {
-      requestId: request.requestId,
-      scope: request.scope,
-      kind: "permission",
-      title: permission.title,
-      permission,
-    };
-  }
-  if (request.method === QUESTION_REQUEST) {
-    const question = request.params as QuestionRequestParams;
-    return {
-      requestId: request.requestId,
-      scope: request.scope,
-      kind: "question",
-      title: question.message,
-      question,
-    };
-  }
-  return undefined;
 }
 
 function isShellHandledRequest(request: TypedServerRequest<ServerRequestMethod>) {

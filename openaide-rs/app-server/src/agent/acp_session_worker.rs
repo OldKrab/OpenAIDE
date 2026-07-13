@@ -144,6 +144,7 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
     let active_session_ids: Arc<Mutex<HashSet<String>>> = Arc::default();
     let session_event_sinks: crate::agent::acp_host_capabilities::AcpSessionEventSinkMap =
         Arc::default();
+    let session_traces: crate::agent::acp_host_capabilities::AcpSessionTraceMap = Arc::default();
     let elicitation_cancellations: crate::agent::acp_host_capabilities::AcpElicitationCancellationMap =
         Arc::default();
     let first_started_tx = first_open.as_ref().map(|open| open.started_tx.clone());
@@ -172,6 +173,7 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
         load_replay: load_replay.clone(),
         terminal_registry: terminal_registry.clone(),
         session_event_sinks: session_event_sinks.clone(),
+        session_traces: session_traces.clone(),
         elicitation_cancellations,
     };
     let connection_terminal_registry = terminal_registry.clone();
@@ -196,6 +198,7 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
                     &active_session_ids,
                     &connection_terminal_registry,
                     &session_event_sinks,
+                    &session_traces,
                     first_open,
                 )
                 .await?;
@@ -213,6 +216,7 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
                             &active_session_ids,
                             &connection_terminal_registry,
                             &session_event_sinks,
+                            &session_traces,
                             open,
                         ).await {
                             logging::warn(
@@ -348,6 +352,7 @@ async fn open_on_shared_process(
     active_session_ids: &Arc<Mutex<HashSet<String>>>,
     terminal_registry: &AcpHostTerminalRegistry,
     session_event_sinks: &crate::agent::acp_host_capabilities::AcpSessionEventSinkMap,
+    session_traces: &crate::agent::acp_host_capabilities::AcpSessionTraceMap,
     open: AcpAgentProcessOpen,
 ) -> agent_client_protocol::Result<()> {
     let AcpAgentProcessOpen {
@@ -367,7 +372,7 @@ async fn open_on_shared_process(
     let start_error_tx = started_tx.clone();
     let opened = match open_acp_session(OpenAcpSessionContext {
         connection,
-        initialize: Some(initialize),
+        initialize: Some(initialize.clone()),
         request,
         request_agent_id: &request_agent_id,
         host_bridge,
@@ -408,9 +413,29 @@ async fn open_on_shared_process(
         let _ = started_tx.send(Err("agent_session_id already active".to_string()));
         return Ok(());
     }
+    if let Some(trace) = &trace {
+        // Shared Agent processes can initialize before any Task exists. Snapshot the
+        // negotiated boundary into each Task trace so capability failures stay diagnosable.
+        trace.record_value(
+            "runtime",
+            "initialize.snapshot",
+            serde_json::json!({
+                "sessionId": session_id,
+                "source": "shared_process",
+                "request": initialize_request(host_bridge),
+                "response": initialize,
+            }),
+        );
+        session_traces
+            .lock()
+            .expect("ACP session trace map lock poisoned")
+            .insert(session_id.clone(), trace.clone());
+    }
     let active_session_ids_for_task = active_session_ids.clone();
     let current_prompts_for_task = current_prompts.clone();
     let session_event_sinks_for_task = Arc::clone(session_event_sinks);
+    let session_traces_for_task = Arc::clone(session_traces);
+    let session_id_for_task = session_id.clone();
     tokio::spawn(async move {
         let result = run_opened_acp_session(AcpOpenedSessionWorkerInput {
             opened,
@@ -429,6 +454,10 @@ async fn open_on_shared_process(
             .lock()
             .expect("ACP active session id set poisoned")
             .remove(&session_id);
+        session_traces_for_task
+            .lock()
+            .expect("ACP session trace map lock poisoned")
+            .remove(&session_id_for_task);
         result
     });
     let _ = started_tx.send(Ok(AcpStartedSession {

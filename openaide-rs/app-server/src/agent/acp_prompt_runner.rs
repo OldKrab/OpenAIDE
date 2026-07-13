@@ -12,6 +12,7 @@ use crate::agent::acp_active_prompt::{
 use crate::agent::acp_config_options_apply::set_task_config_option_after_prior_updates;
 use crate::agent::acp_errors::acp_error;
 use crate::agent::acp_host_capabilities::AcpSessionPromptMap;
+use crate::agent::acp_response_boundary::take_preceding_session_updates;
 use crate::agent::acp_session_catalogs::{
     attach_session_event_sink_to_slot, deliver_session_commands_catalog,
     deliver_session_config_catalog, deliver_session_metadata_update, session_catalogs_from_update,
@@ -177,9 +178,23 @@ pub(super) async fn run_prompt(
                 .await?;
             }
             completion = active_prompt.next_completion() => {
-                let Some(result) = completion else {
+                let Some(completion) = completion else {
                     break Err(RuntimeError::NotReady("ACP prompt completion channel stopped".to_string()));
                 };
+                for update in take_preceding_session_updates(active_session).await? {
+                    if let Some(catalog) = apply_prompt_session_message(
+                        context.agent_id,
+                        active_prompt.task_id(),
+                        active_session_id.as_str(),
+                        update,
+                        session_projection.clone(),
+                        session_event_sink.clone(),
+                        pending_session_catalogs,
+                    ).await? {
+                        *config_catalog = catalog;
+                    }
+                }
+                let result = completion.finish();
                 let succeeded = result.is_ok();
                 logging::info(
                     "acp_prompt_result",
@@ -197,31 +212,18 @@ pub(super) async fn run_prompt(
                     Ok(update) => update,
                     Err(error) => break Err(error),
                 };
-                match update {
-                    SessionMessage::SessionMessage(dispatch) => {
-                        match dispatch_session_notification(
-                            context.agent_id,
-                            dispatch,
-                            session_projection.clone(),
-                            session_event_sink.clone(),
-                            pending_session_catalogs,
-                        ).await {
-                            Ok(Some(catalog)) => *config_catalog = catalog,
-                            Ok(None) => {}
-                            Err(error) => break Err(error),
-                        }
-                    }
-                    SessionMessage::StopReason(_) => {
-                        logging::info(
-                            "acp_prompt_update_stop_reason",
-                            json!({
-                                "agent_id": context.agent_id,
-                                "task_id": active_prompt.task_id(),
-                                "active_session_id": active_session_id.as_str(),
-                            }),
-                        );
-                    }
-                    _ => {}
+                match apply_prompt_session_message(
+                    context.agent_id,
+                    active_prompt.task_id(),
+                    active_session_id.as_str(),
+                    update,
+                    session_projection.clone(),
+                    session_event_sink.clone(),
+                    pending_session_catalogs,
+                ).await {
+                    Ok(Some(catalog)) => *config_catalog = catalog,
+                    Ok(None) => {}
+                    Err(error) => break Err(error),
                 }
             }
         }
@@ -237,6 +239,41 @@ pub(super) async fn run_prompt(
         }),
     );
     result
+}
+
+async fn apply_prompt_session_message(
+    agent_id: &str,
+    task_id: &str,
+    active_session_id: &str,
+    update: SessionMessage,
+    projection: Option<LivePromptProjection>,
+    session_event_sink: Option<Arc<dyn AgentSessionEventSink>>,
+    pending_session_catalogs: &mut PendingSessionCatalogs,
+) -> Result<Option<ConfigOptionsCatalog>, RuntimeError> {
+    match update {
+        SessionMessage::SessionMessage(dispatch) => {
+            dispatch_session_notification(
+                agent_id,
+                dispatch,
+                projection,
+                session_event_sink,
+                pending_session_catalogs,
+            )
+            .await
+        }
+        SessionMessage::StopReason(_) => {
+            logging::info(
+                "acp_prompt_update_stop_reason",
+                json!({
+                    "agent_id": agent_id,
+                    "task_id": task_id,
+                    "active_session_id": active_session_id,
+                }),
+            );
+            Ok(None)
+        }
+        _ => Ok(None),
+    }
 }
 
 fn runtime_result_name(result: &Result<AgentPromptOutcome, RuntimeError>) -> &'static str {

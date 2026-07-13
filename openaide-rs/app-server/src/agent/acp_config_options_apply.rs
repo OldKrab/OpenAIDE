@@ -1,11 +1,10 @@
-use std::collections::{HashMap, HashSet};
-use std::time::Duration;
-
 use agent_client_protocol::schema::{SessionConfigOption, SetSessionConfigOptionRequest};
 use agent_client_protocol::{Agent, ConnectionTo, SessionMessage};
 use serde_json::Value;
+use std::collections::{HashMap, HashSet};
 
 use crate::agent::acp_errors::acp_error;
+use crate::agent::acp_response_boundary::take_preceding_session_updates;
 use crate::agent::acp_update_projection::normalize_config_options;
 use crate::agent::{AgentSessionEventSink, ConfigOptionPolicy};
 use crate::protocol::errors::RuntimeError;
@@ -60,7 +59,7 @@ pub(super) async fn set_task_config_option_after_prior_updates(
     let result = response_rx
         .await
         .map_err(|_| RuntimeError::NotReady("ACP config response channel stopped".to_string()))?;
-    let prior_updates = take_queued_session_updates(active_session).await?;
+    let prior_updates = take_preceding_session_updates(active_session).await?;
     Ok(OrderedConfigOptionResponse {
         result: Some(result),
         prior_updates,
@@ -107,21 +106,6 @@ impl OrderedConfigOptionResponse {
 impl Drop for OrderedConfigOptionResponse {
     fn drop(&mut self) {
         self.release_boundary();
-    }
-}
-
-async fn take_queued_session_updates(
-    active_session: &mut agent_client_protocol::ActiveSession<'static, Agent>,
-) -> Result<Vec<SessionMessage>, RuntimeError> {
-    let mut updates = Vec::new();
-    loop {
-        // The response callback holds ACP dispatch, so every currently queued
-        // message preceded the response and a pending read means the queue is drained.
-        let Ok(update) = tokio::time::timeout(Duration::ZERO, active_session.read_update()).await
-        else {
-            return Ok(updates);
-        };
-        updates.push(update.map_err(acp_error)?);
     }
 }
 

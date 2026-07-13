@@ -178,10 +178,6 @@ export function useAppControllerBackendLifecycle({
     const serverRequestBridge = backendConnection?.serverRequests
       ? startAppServerServerRequestBridge({
           backendConnection,
-          onTaskRequest: (request) => dispatchForCurrentReplica({
-            type: "taskRequest:opened",
-            request,
-          }),
           postHostMessage,
         })
       : undefined;

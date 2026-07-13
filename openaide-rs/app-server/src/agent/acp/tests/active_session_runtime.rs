@@ -759,6 +759,44 @@ fn listing_then_starting_reuses_one_agent_process() {
 }
 
 #[test]
+fn task_trace_preserves_initialize_capabilities_after_process_warmup() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((runtime, _log_path)) = fixture_runtime(&temp, "trace-after-warmup-session") else {
+        return;
+    };
+    let trace_state = crate::agent::acp_trace::AcpTraceState::disabled(temp.path());
+    trace_state.set_enabled(true).expect("enable ACP trace");
+    let runtime = runtime.with_trace_state(trace_state);
+
+    runtime
+        .list_sessions(AgentListSessionsRequest {
+            agent_id: "codex".to_string(),
+            cwd: cwd_string(),
+            cursor: None,
+        })
+        .expect("warm shared Agent process");
+    let session = runtime
+        .start_session(start_request("task-trace-after-warmup", cwd_string()))
+        .expect("start traced session");
+    runtime
+        .close_session(&session.key())
+        .expect("close session");
+
+    let trace_dir = temp.path().join("diagnostics").join("acp-traces");
+    let trace_path = fs::read_dir(trace_dir)
+        .expect("trace directory")
+        .next()
+        .expect("task trace")
+        .expect("trace entry")
+        .path();
+    let trace = fs::read_to_string(trace_path).expect("trace content");
+    assert!(trace.contains("\"event\":\"initialize.snapshot\""));
+    assert!(trace.contains("\"sessionId\":\"trace-after-warmup-session\""));
+    assert!(trace.contains("\"elicitation\":{\"form\":{}}"));
+    assert!(trace.contains("\"source\":\"shared_process\""));
+}
+
+#[test]
 fn listing_sessions_reuses_the_active_agent_process() {
     let temp = tempfile::TempDir::new().expect("temp dir");
     let Some((runtime, log_path)) = fixture_runtime(&temp, "shared-list-session") else {

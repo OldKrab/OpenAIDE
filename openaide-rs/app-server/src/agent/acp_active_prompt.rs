@@ -18,7 +18,7 @@ use crate::agent::{AgentEventSink, AgentPrompt, AgentPromptOutcome, TurnCancella
 use crate::protocol::errors::RuntimeError;
 
 pub(super) struct ActivePrompt {
-    completion_rx: mpsc::UnboundedReceiver<Result<AgentPromptOutcome, RuntimeError>>,
+    completion_rx: mpsc::UnboundedReceiver<PromptCompletion>,
     // Holding the slot keeps host requests bound to this projection until the prompt exits.
     _projection_slot: CurrentPromptSlot,
     cancellation: TurnCancellation,
@@ -60,9 +60,7 @@ impl ActivePrompt {
         })
     }
 
-    pub(super) async fn next_completion(
-        &mut self,
-    ) -> Option<Result<AgentPromptOutcome, RuntimeError>> {
+    pub(super) async fn next_completion(&mut self) -> Option<PromptCompletion> {
         self.completion_rx.recv().await
     }
 
@@ -72,6 +70,35 @@ impl ActivePrompt {
 
     pub(super) fn task_id(&self) -> &str {
         &self.task_id
+    }
+}
+
+/// Holds the ACP response boundary until its preceding session updates are projected.
+pub(super) struct PromptCompletion {
+    result: Option<Result<AgentPromptOutcome, RuntimeError>>,
+    release: Option<tokio::sync::oneshot::Sender<()>>,
+}
+
+impl PromptCompletion {
+    pub(super) fn finish(mut self) -> Result<AgentPromptOutcome, RuntimeError> {
+        let result = self
+            .result
+            .take()
+            .expect("prompt completion is consumed once");
+        self.release_boundary();
+        result
+    }
+
+    fn release_boundary(&mut self) {
+        if let Some(release) = self.release.take() {
+            let _ = release.send(());
+        }
+    }
+}
+
+impl Drop for PromptCompletion {
+    fn drop(&mut self) {
+        self.release_boundary();
     }
 }
 
@@ -110,7 +137,7 @@ fn send_prompt_request(
     prompt: AgentPrompt,
     content_policy: PromptContentPolicy,
     trace: Option<&AcpTraceSession>,
-    completion_tx: mpsc::UnboundedSender<Result<AgentPromptOutcome, RuntimeError>>,
+    completion_tx: mpsc::UnboundedSender<PromptCompletion>,
 ) -> Result<(), RuntimeError> {
     let task_id = prompt.task_id.clone();
     let session_id = active_session.session_id().to_string();
@@ -124,6 +151,7 @@ fn send_prompt_request(
         trace.record("client_to_agent", "session/prompt.request", &request);
     }
     let result_trace = trace.cloned();
+    let (release_tx, release_rx) = tokio::sync::oneshot::channel();
     active_session
         .connection()
         .send_request_to(Agent, request)
@@ -137,7 +165,13 @@ fn send_prompt_request(
                 }
                 Err(error) => Err(acp_error(error)),
             };
-            if completion_tx.send(result).is_err() {
+            if completion_tx
+                .send(PromptCompletion {
+                    result: Some(result),
+                    release: Some(release_tx),
+                })
+                .is_err()
+            {
                 crate::logging::warn(
                     "acp_prompt_completion_receiver_dropped",
                     serde_json::json!({
@@ -145,7 +179,11 @@ fn send_prompt_request(
                         "active_session_id": session_id,
                     }),
                 );
+                return Ok(());
             }
+            // Holding the callback keeps later wire messages out of the session queue while
+            // the worker projects every update that preceded this prompt response.
+            let _ = release_rx.await;
             Ok(())
         })
         .map_err(acp_error)

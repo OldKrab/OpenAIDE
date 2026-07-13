@@ -83,6 +83,7 @@ export function useTaskRouteLifecycle({
         eventStreamDisconnects: backendConnection.eventStreamDisconnects,
         events: backendConnection.events,
         request: backendConnection.request,
+        serverRequests: backendConnection.serverRequests,
         stateResets: backendConnection.stateResets,
       },
       context,

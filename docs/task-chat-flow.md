@@ -220,6 +220,8 @@ During live work, App Server intentionally ignores ACP `user_message_chunk` beca
 
 App Server preserves the ACP `session/prompt` response and `stopReason`. The primary response changes Task status from `working` to idle but does not finalize Chat messages, Tool state, or the Native Session update consumer.
 
+Before publishing that idle transition, App Server projects every session update already received ahead of the prompt response through the same ordered Task revision stream. Session updates received after the response remain valid and continue through the session-lifetime update consumer.
+
 - `end_turn` adds no Chat item.
 - `max_tokens`, `max_turn_requests`, and `refusal` add an appropriate Live Activity explanation.
 - `cancelled` completes user-initiated cancellation without a duplicate result.

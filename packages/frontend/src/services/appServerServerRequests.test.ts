@@ -24,7 +24,7 @@ describe("App Server server-request bridge", () => {
       respond: vi.fn(),
     };
 
-    startAppServerServerRequestBridge({ backendConnection, onTaskRequest: vi.fn(), postHostMessage });
+    startAppServerServerRequestBridge({ backendConnection, postHostMessage });
     listener?.({
       requestId: "server-request-1" as RequestId,
       scope: { kind: "client", clientInstanceId: "client-1" as ClientInstanceId },
@@ -53,7 +53,7 @@ describe("App Server server-request bridge", () => {
       respond: vi.fn(),
     };
 
-    const bridge = startAppServerServerRequestBridge({ backendConnection, onTaskRequest: vi.fn(), postHostMessage });
+    const bridge = startAppServerServerRequestBridge({ backendConnection, postHostMessage });
     listener?.({
       requestId: "server-request-1" as RequestId,
       scope: { kind: "client", clientInstanceId: "client-1" as ClientInstanceId },
@@ -85,7 +85,7 @@ describe("App Server server-request bridge", () => {
       respond: vi.fn(),
     };
 
-    const bridge = startAppServerServerRequestBridge({ backendConnection, onTaskRequest: vi.fn(), postHostMessage });
+    const bridge = startAppServerServerRequestBridge({ backendConnection, postHostMessage });
     listener?.({
       requestId: "server-request-1" as RequestId,
       scope: { kind: "client", clientInstanceId: "client-1" as ClientInstanceId },

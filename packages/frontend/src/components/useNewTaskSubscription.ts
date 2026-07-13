@@ -9,7 +9,7 @@ import type { NewTaskController } from "./newTaskController";
 
 type NewTaskSubscriptionOptions = {
   backendConnection?: Pick<BackendConnection, "request">
-    & Partial<Pick<BackendConnection, "events" | "eventStreamDisconnects" | "stateResets">>;
+    & Partial<Pick<BackendConnection, "events" | "eventStreamDisconnects" | "serverRequests" | "stateResets">>;
   backendInitialized: RefObject<boolean>;
   backendReady: boolean;
   backendStateGeneration: number;
@@ -39,6 +39,7 @@ export function useNewTaskSubscription({
         eventStreamDisconnects: backendConnection.eventStreamDisconnects,
         events: backendConnection.events,
         request: backendConnection.request,
+        serverRequests: backendConnection.serverRequests,
         stateResets: backendConnection.stateResets,
       },
       context: mappingContext,

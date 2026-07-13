@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { STATE_SUBSCRIBE, STATE_UNSUBSCRIBE } from "@openaide/app-server-client";
+import { PERMISSION_REQUEST, STATE_SUBSCRIBE, STATE_UNSUBSCRIBE } from "@openaide/app-server-client";
 import type {
   AppServerEvent,
   BackendConnection,
@@ -8,12 +8,62 @@ import type {
   ProjectId,
   StateRootId,
   StateSubscribeResult,
+  ServerRequestMethod,
   TaskId,
   TaskSummary as ProtocolTaskSummary,
+  TypedServerRequest,
 } from "@openaide/app-server-client";
 import { startAppServerStateSubscription } from "./appServerStateSubscriptions";
 
 describe("startAppServerStateSubscription", () => {
+  it("includes a permission received while the Task baseline is loading", async () => {
+    const baseline = deferred<StateSubscribeResult>();
+    let serverRequestListener: ((request: TypedServerRequest<ServerRequestMethod>) => void) | undefined;
+    const dispatch = vi.fn();
+    const connection = {
+      request: vi.fn(() => baseline.promise),
+      events: () => vi.fn(),
+      serverRequests(listener: (request: TypedServerRequest<ServerRequestMethod>) => void) {
+        serverRequestListener = listener;
+        return vi.fn();
+      },
+    } as Pick<BackendConnection, "events" | "request" | "serverRequests">;
+
+    startAppServerStateSubscription({
+      backendConnection: connection,
+      context: {
+        stateRootId: "root_1" as StateRootId,
+        clientInstanceId: "client_1" as never,
+      },
+      dispatch,
+      scope: { kind: "task", taskId: "task_1" as TaskId },
+    });
+    serverRequestListener?.({
+      requestId: "server-request-1" as never,
+      scope: { kind: "task", taskId: "task_1" as TaskId },
+      method: PERMISSION_REQUEST,
+      params: {
+        title: "Allow command?",
+        toolCall: { id: "tool-1", title: "Run tests", kind: "execute" },
+        options: [{ optionId: "allow-once", name: "Allow once", kind: "allowOnce" }],
+      },
+    });
+    baseline.resolve(taskSubscription("cursor_1", "task_1"));
+    await Promise.resolve();
+
+    expect(dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
+      type: "snapshot",
+      snapshot: expect.objectContaining({
+        active_requests: [expect.objectContaining({
+          message: expect.objectContaining({
+            kind: "permission",
+            app_server_request_id: "server-request-1",
+          }),
+        })],
+      }),
+    }));
+  });
+
   it("does not request an initial baseline while the event stream is disconnected", async () => {
     const request = vi.fn();
     const baselineLost = vi.fn();

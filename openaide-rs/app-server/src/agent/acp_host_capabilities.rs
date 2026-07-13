@@ -29,6 +29,7 @@ use crate::protocol::host::HostBridge;
 
 pub(super) type AcpSessionEventSinkMap =
     Arc<Mutex<HashMap<String, Arc<dyn AgentSessionEventSink>>>>;
+pub(super) type AcpSessionTraceMap = Arc<Mutex<HashMap<String, AcpTraceSession>>>;
 pub(super) type AcpElicitationCancellationMap =
     Arc<Mutex<HashMap<WireRequestId, TurnCancellation>>>;
 
@@ -41,6 +42,7 @@ pub(super) struct AcpHostCapabilityHandlers {
     current_prompts: AcpSessionPromptMap,
     terminal_registry: AcpHostTerminalRegistry,
     session_event_sinks: AcpSessionEventSinkMap,
+    session_traces: AcpSessionTraceMap,
     elicitation_cancellations: AcpElicitationCancellationMap,
 }
 
@@ -51,6 +53,7 @@ impl AcpHostCapabilityHandlers {
         current_prompts: AcpSessionPromptMap,
         terminal_registry: AcpHostTerminalRegistry,
         session_event_sinks: AcpSessionEventSinkMap,
+        session_traces: AcpSessionTraceMap,
         elicitation_cancellations: AcpElicitationCancellationMap,
     ) -> Self {
         Self {
@@ -59,11 +62,64 @@ impl AcpHostCapabilityHandlers {
             current_prompts,
             terminal_registry,
             session_event_sinks,
+            session_traces,
             elicitation_cancellations,
         }
     }
 
     pub(super) async fn create_elicitation(
+        &self,
+        rpc_request_id: WireRequestId,
+        request: ElicitationCreateRequest,
+    ) -> agent_client_protocol::Result<ElicitationCreateResponse> {
+        let trace = request
+            .session_id
+            .as_ref()
+            .and_then(|session_id| {
+                self.session_traces
+                    .lock()
+                    .expect("ACP session trace map lock poisoned")
+                    .get(session_id)
+                    .cloned()
+            })
+            .or_else(|| self.trace.clone());
+        if let Some(trace) = &trace {
+            trace.record_value(
+                "agent_to_client",
+                "elicitation/create.request",
+                json!({
+                    "rpcRequestId": rpc_request_id,
+                    "request": request,
+                }),
+            );
+        }
+        let response = self
+            .create_elicitation_inner(rpc_request_id.clone(), request)
+            .await;
+        if let Some(trace) = &trace {
+            match &response {
+                Ok(response) => trace.record_value(
+                    "client_to_agent",
+                    "elicitation/create.response",
+                    json!({
+                        "rpcRequestId": rpc_request_id,
+                        "response": response,
+                    }),
+                ),
+                Err(error) => trace.record_value(
+                    "client_to_agent",
+                    "elicitation/create.error",
+                    json!({
+                        "rpcRequestId": rpc_request_id,
+                        "error": error.to_string(),
+                    }),
+                ),
+            }
+        }
+        response
+    }
+
+    async fn create_elicitation_inner(
         &self,
         rpc_request_id: WireRequestId,
         request: ElicitationCreateRequest,
