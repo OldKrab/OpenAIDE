@@ -934,6 +934,7 @@ function initializeResult(serverId = "server-1", stateRootId = "root-1"): Initia
 
 function appEvent(): AppServerEvent {
   return {
+    subscription: { kind: "projects" },
     previousCursor: "cursor-1",
     cursor: "cursor-2",
     scope: { kind: "stateRoot", stateRootId: "root-1" },

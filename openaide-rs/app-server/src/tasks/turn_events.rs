@@ -13,11 +13,8 @@ use crate::agent::{AgentEventSink, TurnCancellation};
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::NormalizedMessage;
 use crate::server_requests::ServerRequestRuntime;
-use crate::snapshots::task_snapshot::{project_chat_item, project_tool_details};
-use crate::task_events::{CommittedTaskDelta, ToolDetailUpdate};
 use crate::tasks::mutation::{TaskCommitOptions, TaskMutationResult, TaskMutations};
 use crate::time::now_string;
-use openaide_app_server_protocol::events::TextChunk;
 
 use self::commands::{update_task_commands, CommandsUpdateTarget};
 use self::config::{update_task_config_options, ConfigUpdateTarget};
@@ -224,7 +221,6 @@ impl TaskSessionEventSink {
         text: String,
         now: &str,
     ) -> Result<(), RuntimeError> {
-        let delta_text = text.clone();
         let message = match channel {
             TextChannel::Agent => NormalizedMessage::AgentText {
                 id: message_id,
@@ -247,20 +243,7 @@ impl TaskSessionEventSink {
                 if ctx.task().agent_session_id.as_deref() != Some(self.session_id.as_str()) {
                     return Ok(TaskMutationResult::Unchanged);
                 }
-                let delta = match ctx.append_text_chunk(message)? {
-                    crate::storage::message_store::TextChunkAppend::Appended(stored) => {
-                        CommittedTaskDelta::ChatItemAppended {
-                            item: project_chat_item(&stored.chat),
-                        }
-                    }
-                    crate::storage::message_store::TextChunkAppend::Updated(stored) => {
-                        CommittedTaskDelta::ChatItemChunk {
-                            message_id: stored.chat.message_id.clone().into(),
-                            chunk: TextChunk { text: delta_text },
-                        }
-                    }
-                };
-                ctx.set_committed_delta(delta);
+                ctx.append_text_chunk(message)?;
                 ctx.task_mut().updated_at = now.to_string();
                 Ok(TaskMutationResult::Changed)
             },
@@ -326,18 +309,7 @@ impl TaskSessionEventSink {
                 if ctx.task().agent_session_id.as_deref() != Some(self.session_id.as_str()) {
                     return Ok(TaskMutationResult::Unchanged);
                 }
-                let upserted = ctx.upsert_message_with_details(message)?;
-                ctx.set_committed_delta(CommittedTaskDelta::ChatItemUpserted {
-                    item: project_chat_item(&upserted.stored.chat),
-                    tool_details: upserted
-                        .tool_details
-                        .into_iter()
-                        .map(|detail| ToolDetailUpdate {
-                            artifact_id: detail.artifact_id,
-                            details: project_tool_details(&detail.details),
-                        })
-                        .collect(),
-                });
+                ctx.upsert_message_with_details(message)?;
                 ctx.task_mut().updated_at = now.to_string();
                 Ok(TaskMutationResult::Changed)
             },

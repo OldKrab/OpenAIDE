@@ -35,7 +35,7 @@ pub struct StateUnsubscribeResult {
     pub scope: SubscriptionScope,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, Serialize, TS)]
 #[serde(
     tag = "kind",
     rename_all = "camelCase",

@@ -48,7 +48,10 @@ use crate::snapshots::{
 };
 use crate::state_sync::StateStream;
 use crate::storage::Store;
-use crate::task_events::{CommittedTaskDelta, TaskUpdate, ToolDetailUpdate};
+use crate::task_events::{
+    CommittedChatChange, CommittedTaskChange, TaskFieldChanges, TaskNavigationChange, TaskUpdate,
+    TaskUpdateKind, ToolDetailUpdate,
+};
 use crate::tasks::product_api::{
     AgentListSessionsWorkflow, AttachmentFileBrowserWorkflow, TaskAdoptNativeSessionWorkflow,
     TaskArchiveWorkflow, TaskCancelWorkflow, TaskChatPageWorkflow, TaskCreateWorkflow,
@@ -699,10 +702,9 @@ fn initialize_after_event_uses_state_stream_cursor() {
         EventScope::StateRoot {
             state_root_id: StateRootId::from("root-1"),
         },
-        AppServerEventPayload::TaskNavigationUpdated {
-            navigation: openaide_app_server_protocol::snapshot::TaskNavigationSnapshot {
-                tasks: Vec::new(),
-                active_task_id: None,
+        AppServerEventPayload::TaskNavigationChanged {
+            change: openaide_app_server_protocol::events::TaskNavigationChange::Remove {
+                task_id: TaskId::from("absent"),
             },
         },
         |_| None,
@@ -807,10 +809,10 @@ fn tool_detail_subscription_receives_only_full_updates_for_its_artifact() {
         json!("details")
     );
 
-    let update = TaskUpdate::committed(
+    let update = committed_task_update(
         "task-1",
         2,
-        CommittedTaskDelta::ChatItemUpserted {
+        vec![CommittedChatChange::Upsert {
             item: ChatItem {
                 message_id: MessageId::from("tool-1"),
                 turn_id: None,
@@ -818,11 +820,12 @@ fn tool_detail_subscription_receives_only_full_updates_for_its_artifact() {
                 status: ChatItemStatus::Complete,
                 parts: Vec::new(),
             },
-            tool_details: vec![ToolDetailUpdate {
-                artifact_id: "artifact-1".to_string(),
-                details: fixed_tool_detail(),
-            }],
-        },
+        }],
+        vec![ToolDetailUpdate {
+            artifact_id: "artifact-1".to_string(),
+            details: fixed_tool_detail(),
+        }],
+        TaskNavigationChange::None,
     );
     let deliveries = gateway.publish_task_update(&update, AppServerTime(5));
 
@@ -934,11 +937,8 @@ fn task_request_opened_after_subscription_is_delivered_immediately() {
     assert_eq!(opened.deliveries[0].envelope.request_id, opened.request_id);
     assert_eq!(opened.deliveries[0].envelope.method, "secret/read");
 
-    let (_events, server_requests) = gateway.publish_task_update_for_connection(
-        &ConnectionId::new("conn-1"),
-        &TaskId::from("task-1"),
-        AppServerTime(4),
-    );
+    let server_requests = gateway
+        .drain_server_requests_for_connection(&ConnectionId::new("conn-1"), AppServerTime(4));
 
     assert!(server_requests.is_empty());
 }
@@ -1077,7 +1077,7 @@ fn unknown_client_response_returns_permission_error() {
 }
 
 #[test]
-fn heartbeat_drains_queued_async_task_events_for_connection() {
+fn heartbeat_drains_queued_navigation_change_for_connection() {
     let mut gateway = initialized_gateway("client-1", "local-http:client-1");
     gateway.handle_inbound(
         ConnectionId::new("local-http:client-1"),
@@ -1091,7 +1091,16 @@ fn heartbeat_drains_queued_async_task_events_for_connection() {
         AppServerTime(2),
     );
 
-    gateway.publish_task_update_by_id(&TaskId::from("task-1"), AppServerTime(3));
+    gateway.publish_task_update(
+        &committed_task_update(
+            "task-1",
+            2,
+            Vec::new(),
+            Vec::new(),
+            TaskNavigationChange::Upsert,
+        ),
+        AppServerTime(3),
+    );
 
     let outcome = gateway.handle_inbound(
         ConnectionId::new("local-http:client-1"),
@@ -1100,14 +1109,10 @@ fn heartbeat_drains_queued_async_task_events_for_connection() {
     );
 
     let events = response_events(outcome);
-    assert_eq!(events.len(), 2);
+    assert_eq!(events.len(), 1);
     assert!(matches!(
         events[0].event.payload,
-        AppServerEventPayload::ProjectCollectionUpdated { .. }
-    ));
-    assert!(matches!(
-        events[1].event.payload,
-        AppServerEventPayload::TaskNavigationUpdated { .. }
+        AppServerEventPayload::TaskNavigationChanged { .. }
     ));
 }
 
@@ -1152,13 +1157,22 @@ fn new_task_update_is_delivered_only_to_its_owner_task_subscription() {
         AppServerTime(4),
     ));
 
-    let events = gateway.publish_task_update_by_id(&TaskId::from("task-new"), AppServerTime(5));
+    let events = gateway.publish_task_update(
+        &committed_task_update(
+            "task-new",
+            1,
+            vec![CommittedChatChange::Replace],
+            Vec::new(),
+            TaskNavigationChange::None,
+        ),
+        AppServerTime(5),
+    );
 
     assert_eq!(events.len(), 1);
     assert_eq!(events[0].delivery.client_instance_id.as_str(), "client-1");
     assert!(matches!(
         events[0].event.payload,
-        AppServerEventPayload::TaskSnapshotUpdated { .. }
+        AppServerEventPayload::TaskChanged { .. }
     ));
 }
 
@@ -1172,7 +1186,6 @@ fn shared_gateway_distinguishes_initialized_event_stream_connections() {
 
 #[test]
 fn committed_agent_text_deltas_publish_append_and_chunk_in_order() {
-    use openaide_app_server_protocol::events::TextChunk;
     use openaide_app_server_protocol::ids::MessageId;
     use openaide_app_server_protocol::snapshot::{ChatItem, ChatItemStatus, ChatRole, MessagePart};
 
@@ -1200,38 +1213,47 @@ fn committed_agent_text_deltas_publish_append_and_chunk_in_order() {
         }],
     };
     let updates = [
-        TaskUpdate::committed("task-1", 2, CommittedTaskDelta::ChatItemAppended { item }),
-        TaskUpdate::committed(
+        committed_task_update(
+            "task-1",
+            2,
+            vec![CommittedChatChange::Append { item }],
+            Vec::new(),
+            TaskNavigationChange::None,
+        ),
+        committed_task_update(
             "task-1",
             3,
-            CommittedTaskDelta::ChatItemChunk {
+            vec![CommittedChatChange::AppendText {
                 message_id: MessageId::from("message-1"),
-                chunk: TextChunk {
-                    text: " second".to_string(),
-                },
-            },
+                text: " second".to_string(),
+            }],
+            Vec::new(),
+            TaskNavigationChange::None,
         ),
     ];
 
     let payloads = updates
         .iter()
         .flat_map(|update| gateway.publish_task_update(update, AppServerTime(update.revision)))
-        .filter_map(|delivery| match delivery.event.payload {
-            payload @ (AppServerEventPayload::ChatItemAppended { .. }
-            | AppServerEventPayload::ChatItemChunk { .. }) => Some(payload),
-            _ => None,
-        })
+        .map(|delivery| delivery.event.payload)
         .collect::<Vec<_>>();
 
-    assert!(matches!(
-        &payloads[0],
-        AppServerEventPayload::ChatItemAppended { revision, item, .. }
-            if *revision == 2 && item.status == ChatItemStatus::Complete
-    ));
+    assert!(
+        matches!(
+            &payloads[0],
+            AppServerEventPayload::TaskChanged { revision, changes, .. }
+                if *revision == 2 && matches!(changes.chat.as_slice(),
+                    [openaide_app_server_protocol::events::TaskChatChange::Append { item }]
+                        if item.status == ChatItemStatus::Complete)
+        ),
+        "payloads: {payloads:?}"
+    );
     assert!(matches!(
         &payloads[1],
-        AppServerEventPayload::ChatItemChunk { revision, chunk, .. }
-            if *revision == 3 && chunk.text == " second"
+        AppServerEventPayload::TaskChanged { revision, changes, .. }
+            if *revision == 3 && matches!(changes.chat.as_slice(),
+                [openaide_app_server_protocol::events::TaskChatChange::AppendText { text, .. }]
+                    if text == " second")
     ));
 }
 
@@ -1325,10 +1347,9 @@ fn reinitialized_client_receives_later_events_on_new_connection() {
         EventScope::StateRoot {
             state_root_id: StateRootId::from("root-1"),
         },
-        AppServerEventPayload::TaskNavigationUpdated {
-            navigation: openaide_app_server_protocol::snapshot::TaskNavigationSnapshot {
-                tasks: Vec::new(),
-                active_task_id: None,
+        AppServerEventPayload::TaskNavigationChanged {
+            change: openaide_app_server_protocol::events::TaskNavigationChange::Remove {
+                task_id: TaskId::from("absent"),
             },
         },
         |client_id| gateway.client_hub.delivery_for(client_id),
@@ -2900,6 +2921,25 @@ fn response_error(outcome: GatewayOutcome) -> ErrorEnvelope {
             ..
         } => *error,
         other => panic!("expected error response, got {other:?}"),
+    }
+}
+
+fn committed_task_update(
+    task_id: &str,
+    revision: u64,
+    chat: Vec<CommittedChatChange>,
+    tool_details: Vec<ToolDetailUpdate>,
+    navigation: TaskNavigationChange,
+) -> TaskUpdate {
+    TaskUpdate {
+        task_id: task_id.to_string(),
+        revision,
+        kind: TaskUpdateKind::Changed(CommittedTaskChange {
+            fields: TaskFieldChanges::default(),
+            chat,
+            tool_details,
+            navigation,
+        }),
     }
 }
 

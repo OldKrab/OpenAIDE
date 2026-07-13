@@ -238,10 +238,11 @@ function ActivityStepContent({
   );
 }
 
-function CommandStepTitle({ command, status }: { command: string; status: "running" | "completed" | "error" }) {
+function CommandStepTitle({ command, status }: { command: string; status: "running" | "completed" | "error" | "interrupted" }) {
+  const action = status === "running" ? "Running" : status === "interrupted" ? "Interrupted" : "Ran";
   return (
     <>
-      <span className="activity-step-action">{status === "running" ? "Running" : "Ran"}</span>
+      <span className="activity-step-action">{action}</span>
       <code className="activity-step-command">{command}</code>
     </>
   );

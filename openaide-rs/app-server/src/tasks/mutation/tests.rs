@@ -272,19 +272,53 @@ fn create_task_persists_initial_chat_and_returns_commit_facts() {
         panic!("create commit should be committed");
     };
     assert_eq!(facts.task_id, "task_create_commit");
-    assert_eq!(facts.revision, 11);
+    assert_eq!(facts.revision, 1);
     assert!(result.response_snapshot.is_some());
 
     let stored = store.read_task("task_create_commit").unwrap();
     assert_eq!(stored.task_version, 1);
-    assert_eq!(stored.revision, 11);
+    assert_eq!(stored.revision, 1);
     assert_eq!(stored.message_history_version, 1);
     assert_eq!(store.read_messages("task_create_commit").unwrap().len(), 1);
     assert_eq!(mutations.current_revision(), 11);
 
     let notification = notifications.try_recv().unwrap();
     assert_eq!(notification.task_id, "task_create_commit");
-    assert_eq!(notification.revision, 11);
+    assert_eq!(notification.revision, 1);
+}
+
+#[test]
+fn task_revisions_are_consecutive_across_interleaved_task_commits() {
+    let (_dir, store, mutations, notifications) = test_mutations(0);
+    store.write_task(&task_record("task-a")).unwrap();
+    store.write_task(&task_record("task-b")).unwrap();
+
+    for task_id in ["task-a", "task-b", "task-a"] {
+        mutations
+            .commit_existing_task(task_id, TaskCommitOptions::metadata(), |ctx| {
+                let unread = ctx.task().unread;
+                ctx.task_mut().unread = !unread;
+                Ok(TaskMutationResult::Changed)
+            })
+            .unwrap();
+    }
+
+    assert_eq!(store.read_task("task-a").unwrap().revision, 2);
+    assert_eq!(store.read_task("task-b").unwrap().revision, 1);
+    let revisions = [
+        notifications.recv().unwrap(),
+        notifications.recv().unwrap(),
+        notifications.recv().unwrap(),
+    ]
+    .map(|update| (update.task_id, update.revision));
+    assert_eq!(
+        revisions,
+        [
+            ("task-a".to_string(), 1),
+            ("task-b".to_string(), 1),
+            ("task-a".to_string(), 2),
+        ]
+    );
 }
 
 #[test]

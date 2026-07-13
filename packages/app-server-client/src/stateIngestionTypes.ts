@@ -2,7 +2,7 @@ import type { SubscriptionSnapshot } from "./generated/protocol.js";
 
 export type SnapshotUpdate =
   | { kind: "updated"; snapshot: SubscriptionSnapshot; changed: boolean }
-  | { kind: "resyncRequired"; reason: "missingChatItem" };
+  | { kind: "resyncRequired"; reason: "missingChatItem" | "taskRevisionGap" };
 
 export function changed(snapshot: SubscriptionSnapshot): SnapshotUpdate {
   return { kind: "updated", snapshot, changed: true };

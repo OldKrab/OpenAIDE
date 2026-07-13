@@ -496,13 +496,21 @@ export type SupportRecoverStuckSessionsParams = Record<symbol, never>;
 
 export type SupportRecoverStuckSessionsResult = { recoveredTasks: Array<TaskSnapshot>, };
 
-export type AppServerEvent = { previousCursor: EventCursor, cursor: EventCursor, scope: EventScope, payload: AppServerEventPayload, };
+export type AppServerEvent = {
+/**
+ * Identifies the independently ordered subscription stream carrying this event.
+ */
+subscription: SubscriptionScope, previousCursor: EventCursor, cursor: EventCursor, scope: EventScope, payload: AppServerEventPayload, };
 
 export type EventScope = { "kind": "stateRoot", stateRootId: StateRootId, } | { "kind": "client", stateRootId: StateRootId, clientInstanceId: ClientInstanceId, } | { "kind": "task", stateRootId: StateRootId, taskId: TaskId, };
 
-export type AppServerEventPayload = { "kind": "snapshotReplaced", snapshot: ClientSnapshot, } | { "kind": "taskUpdated", task: TaskSummary, } | { "kind": "taskSnapshotUpdated", task: TaskSnapshot, } | { "kind": "taskHistorySyncUpdated", taskId: TaskId, historySync: TaskHistorySyncSnapshot, } | { "kind": "taskNavigationUpdated", navigation: TaskNavigationSnapshot, } | { "kind": "projectCollectionUpdated", projects: ProjectCollectionSnapshot, } | { "kind": "chatItemAppended", taskId: TaskId, revision: number, item: ChatItem, } | { "kind": "chatItemChunk", taskId: TaskId, revision: number, messageId: MessageId, chunk: TextChunk, } | { "kind": "chatItemUpserted", taskId: TaskId, revision: number, item: ChatItem, } | { "kind": "toolDetailUpdated", taskId: TaskId, artifactId: string, details: ToolDetailSnapshot, } | { "kind": "requestUpdated", request: PendingRequestSnapshot, } | { "kind": "agentCollectionUpdated", agents: AgentCollectionSnapshot, };
+export type AppServerEventPayload = { "kind": "snapshotReplaced", snapshot: ClientSnapshot, } | { "kind": "taskChanged", taskId: TaskId, revision: number, changes: TaskChanges, } | { "kind": "taskHistorySyncUpdated", taskId: TaskId, historySync: TaskHistorySyncSnapshot, } | { "kind": "taskNavigationChanged", change: TaskNavigationChange, } | { "kind": "projectCollectionUpdated", projects: ProjectCollectionSnapshot, } | { "kind": "taskRequestsUpdated", taskId: TaskId, requests: Array<PendingRequestSnapshot>, } | { "kind": "toolDetailUpdated", taskId: TaskId, artifactId: string, details: ToolDetailSnapshot, } | { "kind": "requestUpdated", request: PendingRequestSnapshot, } | { "kind": "agentCollectionUpdated", agents: AgentCollectionSnapshot, };
 
-export type TextChunk = { text: string, };
+export type TaskChanges = { task?: TaskSummary | null, lifecycle?: TaskLifecycle | null, preparation?: TaskPreparationSnapshot | null, agentConfig?: TaskAgentConfigSnapshot | null, agentCommands?: TaskAgentCommandsSnapshot | null, sendCapability?: TaskSendCapabilitySnapshot | null, chat?: Array<TaskChatChange>, removed?: boolean, };
+
+export type TaskChatChange = { "kind": "append", item: ChatItem, } | { "kind": "upsert", item: ChatItem, } | { "kind": "appendText", messageId: MessageId, text: string, } | { "kind": "replace", chat: ChatSnapshot, };
+
+export type TaskNavigationChange = { "kind": "upsert", task: TaskSummary, } | { "kind": "remove", taskId: TaskId, };
 
 export type ClientSnapshot = { cursor: EventCursor, server: ServerSnapshot, stateRoot: StateRootSnapshot, client: ClientSnapshotScope, newTaskDefaults: NewTaskDefaultsSnapshot, projects?: ProjectCollectionSnapshot | null, agents?: AgentCollectionSnapshot | null, tasks?: TaskNavigationSnapshot | null, activeTask?: TaskSnapshot | null, settings?: SettingsSnapshot | null, pendingRequests?: Array<PendingRequestSnapshot>, };
 

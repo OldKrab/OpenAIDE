@@ -663,6 +663,7 @@ describe("app controller mounted lifecycle", () => {
       cursor: string,
       historySync: ProtocolTaskSnapshot["historySync"],
     ): AppServerEvent => ({
+      subscription: { kind: "task", taskId: "task_1" as never },
       previousCursor: previousCursor as never,
       cursor: cursor as never,
       scope: {
@@ -962,6 +963,7 @@ describe("app controller mounted lifecycle", () => {
       parts: [{ kind: "text", text: "Done without reload" }],
     });
     const completedEvent: AppServerEvent = {
+      subscription: { kind: "task", taskId: "task_1" as never },
       previousCursor: "cursor_task_2" as never,
       cursor: "cursor_task_3" as never,
       scope: {
@@ -969,7 +971,16 @@ describe("app controller mounted lifecycle", () => {
         stateRootId: "state_root_1" as never,
         taskId: "task_1" as never,
       },
-      payload: { kind: "taskSnapshotUpdated", task: completed },
+      payload: {
+        kind: "taskChanged",
+        taskId: "task_1" as never,
+        revision: 3,
+        changes: {
+          task: completed.task,
+          sendCapability: completed.sendCapability,
+          chat: [{ kind: "append", item: completed.chat.items.at(-1)! }],
+        },
+      },
     };
     await act(async () => {
       for (const listener of [...eventListeners]) listener(completedEvent);

@@ -120,7 +120,7 @@ pub enum RequestedSurface {
     },
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub enum SettingsSection {
     Agents,

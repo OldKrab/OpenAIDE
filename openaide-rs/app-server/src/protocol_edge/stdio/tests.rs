@@ -1850,7 +1850,7 @@ fn runtime_task_update_notification_emits_app_event_after_agent_completion() {
 }
 
 #[test]
-fn task_update_notification_emits_full_snapshot_for_task_subscribers() {
+fn task_update_notification_emits_focused_task_and_navigation_changes() {
     let temp = tempfile::TempDir::new().expect("temp dir");
     {
         let store = Store::open(temp.path().to_path_buf()).unwrap();
@@ -1885,16 +1885,22 @@ fn task_update_notification_emits_full_snapshot_for_task_subscribers() {
     let messages = dispatcher.handle_task_update(TaskUpdate {
         task_id: "task-existing".to_string(),
         revision: 2,
-        delta: None,
-        history_sync: None,
+        kind: crate::task_events::TaskUpdateKind::Changed(
+            crate::task_events::CommittedTaskChange {
+                fields: crate::task_events::TaskFieldChanges::default(),
+                chat: Vec::new(),
+                tool_details: Vec::new(),
+                navigation: crate::task_events::TaskNavigationChange::Upsert,
+            },
+        ),
     });
 
     assert!(messages
         .iter()
-        .any(|line| event_payload_kind(line, "taskUpdated")));
-    assert!(messages
+        .any(|line| event_payload_kind(line, "taskNavigationChanged")));
+    assert!(!messages
         .iter()
-        .any(|line| event_payload_kind(line, "taskSnapshotUpdated")));
+        .any(|line| event_payload_kind(line, "projectCollectionUpdated")));
 }
 
 #[test]

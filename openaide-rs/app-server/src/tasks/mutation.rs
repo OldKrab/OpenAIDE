@@ -4,8 +4,8 @@ use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{ActivityStatus, NormalizedMessage, TaskSnapshot};
 use crate::storage::records::TaskRecord;
 use crate::storage::Store;
-use crate::task_events::CommittedTaskDelta;
 use crate::task_events::TaskUpdateNotifier;
+use crate::task_events::{CommittedChatChange, CommittedTaskChange, ToolDetailUpdate};
 use crate::tasks::lifecycle::{append_normalized_to_store, upsert_normalized_to_store};
 use crate::tasks::runtime_state::RuntimeState;
 
@@ -42,7 +42,7 @@ pub(crate) struct TaskCommitFacts {
     pub task_id: String,
     pub revision: u64,
     pub committed_task: TaskRecord,
-    pub delta: Option<CommittedTaskDelta>,
+    pub change: CommittedTaskChange,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -75,7 +75,8 @@ pub(crate) enum TaskMutationResult {
 pub(crate) struct TaskMutationContext<'a> {
     store: &'a Store,
     task: &'a mut TaskRecord,
-    committed_delta: Option<CommittedTaskDelta>,
+    chat_changes: Vec<CommittedChatChange>,
+    tool_details: Vec<ToolDetailUpdate>,
 }
 
 impl TaskMutationContext<'_> {
@@ -87,30 +88,62 @@ impl TaskMutationContext<'_> {
         self.task
     }
 
-    pub(crate) fn append_message(&self, message: NormalizedMessage) -> Result<(), RuntimeError> {
-        append_normalized_to_store(self.store, &self.task.task_id, message).map(|_| ())
+    pub(crate) fn append_message(
+        &mut self,
+        message: NormalizedMessage,
+    ) -> Result<(), RuntimeError> {
+        let stored = append_normalized_to_store(self.store, &self.task.task_id, message)?;
+        self.chat_changes.push(CommittedChatChange::Append {
+            item: crate::snapshots::task_snapshot::project_chat_item(&stored.chat),
+        });
+        Ok(())
     }
 
     pub(crate) fn upsert_message_with_details(
-        &self,
+        &mut self,
         message: NormalizedMessage,
     ) -> Result<crate::tasks::lifecycle::UpsertedMessage, RuntimeError> {
-        upsert_normalized_to_store(self.store, &self.task.task_id, message)
+        let upserted = upsert_normalized_to_store(self.store, &self.task.task_id, message)?;
+        self.chat_changes.push(CommittedChatChange::Upsert {
+            item: crate::snapshots::task_snapshot::project_chat_item(&upserted.stored.chat),
+        });
+        self.tool_details
+            .extend(upserted.tool_details.iter().map(|detail| ToolDetailUpdate {
+                artifact_id: detail.artifact_id.clone(),
+                details: crate::snapshots::task_snapshot::project_tool_details(&detail.details),
+            }));
+        Ok(upserted)
     }
 
     pub(crate) fn append_text_chunk(
-        &self,
+        &mut self,
         message: NormalizedMessage,
     ) -> Result<crate::storage::message_store::TextChunkAppend, RuntimeError> {
-        self.store.append_text_chunk(&self.task.task_id, message)
-    }
-
-    pub(crate) fn set_committed_delta(&mut self, delta: CommittedTaskDelta) {
-        self.committed_delta = Some(delta);
+        let text = match &message {
+            NormalizedMessage::AgentText { text, .. } | NormalizedMessage::Thought { text, .. } => {
+                text.clone()
+            }
+            _ => String::new(),
+        };
+        let result = self.store.append_text_chunk(&self.task.task_id, message)?;
+        match &result {
+            crate::storage::message_store::TextChunkAppend::Appended(stored) => {
+                self.chat_changes.push(CommittedChatChange::Append {
+                    item: crate::snapshots::task_snapshot::project_chat_item(&stored.chat),
+                });
+            }
+            crate::storage::message_store::TextChunkAppend::Updated(stored) => {
+                self.chat_changes.push(CommittedChatChange::AppendText {
+                    message_id: stored.chat.message_id.clone().into(),
+                    text,
+                });
+            }
+        }
+        Ok(result)
     }
 
     pub(crate) fn replace_messages_from_native_session(
-        &self,
+        &mut self,
         messages: Vec<NormalizedMessage>,
         native_updated_at: u128,
     ) -> Result<(), RuntimeError> {
@@ -118,26 +151,40 @@ impl TaskMutationContext<'_> {
             &self.task.task_id,
             messages,
             native_updated_at,
-        )
+        )?;
+        self.chat_changes.push(CommittedChatChange::Replace);
+        Ok(())
     }
 
     pub(crate) fn finish_running_activities(
-        &self,
+        &mut self,
         status: ActivityStatus,
     ) -> Result<bool, RuntimeError> {
-        self.store
-            .finish_running_activities(&self.task.task_id, status)
+        let changed = self
+            .store
+            .finish_running_activities(&self.task.task_id, status)?;
+        self.chat_changes
+            .extend(changed.iter().map(|stored| CommittedChatChange::Upsert {
+                item: crate::snapshots::task_snapshot::project_chat_item(&stored.chat),
+            }));
+        Ok(!changed.is_empty())
     }
 
     /// Finishes only the App Server-owned working marker for this prompt.
     /// Agent tool activity remains session-owned and may receive later updates.
     pub(crate) fn finish_running_activity(
-        &self,
+        &mut self,
         identity: &str,
         status: ActivityStatus,
     ) -> Result<bool, RuntimeError> {
-        self.store
-            .finish_running_activity_by_identity(&self.task.task_id, identity, status)
+        let changed =
+            self.store
+                .finish_running_activity_by_identity(&self.task.task_id, identity, status)?;
+        self.chat_changes
+            .extend(changed.iter().map(|stored| CommittedChatChange::Upsert {
+                item: crate::snapshots::task_snapshot::project_chat_item(&stored.chat),
+            }));
+        Ok(!changed.is_empty())
     }
 }
 
@@ -201,11 +248,6 @@ impl TaskMutations {
         options: TaskCommitOptions,
     ) -> Result<TaskCommitResult, RuntimeError> {
         commit::resolve_or_create_new_task(self, task, initial_messages, options)
-    }
-
-    #[allow(dead_code)]
-    pub(crate) fn publish_current_task(&self, task_id: &str) -> Result<(), RuntimeError> {
-        commit::publish_current_task(self, task_id)
     }
 
     pub(crate) fn create_task_with_validation(

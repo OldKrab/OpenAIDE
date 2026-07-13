@@ -1,7 +1,9 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use openaide_app_server_protocol::ids::{ClientInstanceId, TaskId};
+use openaide_app_server_protocol::ids::ClientInstanceId;
+#[cfg(test)]
+use openaide_app_server_protocol::ids::TaskId;
 
 use crate::app_lifecycle::ShutdownCompletion;
 use crate::client_lifecycle::{AppServerTime, ClientExpiryOutcome, ConnectionId};
@@ -103,17 +105,6 @@ impl SharedRpcGateway {
             .observe_event_stream_activity(connection_id, now)
     }
 
-    pub fn publish_task_update_by_id(
-        &self,
-        task_id: &TaskId,
-        now: AppServerTime,
-    ) -> Vec<GatewayEventDelivery> {
-        self.gateway
-            .lock()
-            .expect("protocol gateway lock poisoned")
-            .publish_task_update_by_id(task_id, now)
-    }
-
     pub fn publish_committed_task_update(
         &self,
         update: &TaskUpdate,
@@ -123,18 +114,6 @@ impl SharedRpcGateway {
             .lock()
             .expect("protocol gateway lock poisoned")
             .publish_task_update(update, now)
-    }
-
-    pub fn publish_task_update_for_connection(
-        &self,
-        connection_id: &ConnectionId,
-        task_id: &TaskId,
-        now: AppServerTime,
-    ) -> (Vec<GatewayEventDelivery>, Vec<ServerRequestDelivery>) {
-        self.gateway
-            .lock()
-            .expect("protocol gateway lock poisoned")
-            .publish_task_update_for_connection(connection_id, task_id, now)
     }
 
     pub fn publish_committed_task_update_for_connection(

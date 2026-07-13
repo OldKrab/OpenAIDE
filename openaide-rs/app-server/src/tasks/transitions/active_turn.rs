@@ -147,7 +147,7 @@ impl TaskTransitions {
 }
 
 fn append_prompt_outcome_activity(
-    ctx: &crate::tasks::mutation::TaskMutationContext<'_>,
+    ctx: &mut crate::tasks::mutation::TaskMutationContext<'_>,
     outcome: &AgentPromptOutcome,
     created_at: String,
 ) -> Result<(), RuntimeError> {

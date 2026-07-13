@@ -1,5 +1,6 @@
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{ActivityStatus, ActivityStep, NormalizedMessage};
+use crate::storage::records::StoredMessage;
 
 use super::Store;
 
@@ -8,13 +9,15 @@ impl Store {
         &self,
         task_id: &str,
         status: ActivityStatus,
-    ) -> Result<bool, RuntimeError> {
+    ) -> Result<Vec<StoredMessage>, RuntimeError> {
         let mut messages = self.read_messages(task_id)?;
-        let mut changed = false;
+        let mut changed = Vec::new();
         for stored in messages.iter_mut().rev() {
-            changed |= finish_running_activity(&mut stored.chat.message, status);
+            if finish_running_activity(&mut stored.chat.message, status) {
+                changed.push(stored.clone());
+            }
         }
-        if changed {
+        if !changed.is_empty() {
             self.write_messages(task_id, &messages)?;
             self.write_meta(task_id, &messages)?;
         }
@@ -26,20 +29,21 @@ impl Store {
         task_id: &str,
         identity: &str,
         status: ActivityStatus,
-    ) -> Result<bool, RuntimeError> {
+    ) -> Result<Vec<StoredMessage>, RuntimeError> {
         let mut messages = self.read_messages(task_id)?;
         let Some(stored) = messages
             .iter_mut()
             .find(|stored| stored.chat.identity == identity)
         else {
-            return Ok(false);
+            return Ok(Vec::new());
         };
         let changed = finish_running_activity(&mut stored.chat.message, status);
+        let updated = changed.then(|| stored.clone()).into_iter().collect();
         if changed {
             self.write_messages(task_id, &messages)?;
             self.write_meta(task_id, &messages)?;
         }
-        Ok(changed)
+        Ok(updated)
     }
 }
 

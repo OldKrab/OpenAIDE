@@ -1,6 +1,7 @@
 import {
   applySubscriptionEvent,
   createSubscriptionIngestionState,
+  subscriptionScopesEqual,
   STATE_SUBSCRIBE,
   STATE_UNSUBSCRIBE,
   type AgentSummary,
@@ -177,8 +178,6 @@ export function startAppServerStateSubscription({
     if (!state || disposed) return false;
     const result = applySubscriptionEvent(state, event);
     if (result.kind === "ignored") {
-      // Every listener shares one connection stream. Even events owned by another
-      // subscription advance that stream's transport cursor.
       state = result.state;
       return true;
     }
@@ -198,10 +197,13 @@ export function startAppServerStateSubscription({
 
   function replayPendingEvents() {
     if (!state || pendingEvents.length === 0) return;
-    const snapshotCursorIndex = pendingEvents.findIndex((event) => event.cursor === state?.cursor);
+    const scopedEvents = pendingEvents.filter((event) => (
+      subscriptionScopesEqual(event.subscription, scope)
+    ));
+    const snapshotCursorIndex = scopedEvents.findIndex((event) => event.cursor === state?.cursor);
     const events = snapshotCursorIndex === -1
-      ? pendingEvents
-      : pendingEvents.slice(snapshotCursorIndex + 1);
+      ? scopedEvents
+      : scopedEvents.slice(snapshotCursorIndex + 1);
     pendingEvents = [];
     for (const [index, event] of events.entries()) {
       if (applyEvent(event, false)) continue;
@@ -237,25 +239,21 @@ function liveTextPresentationAction(
 ): AppAction | undefined {
   if (snapshot.kind !== "task") return undefined;
   const payload = event.payload;
-  if (payload.kind === "chatItemAppended") {
-    const channel = textChannel(payload.item);
-    if (!channel) return undefined;
-    return {
-      type: "taskChat:liveText",
-      taskId: payload.taskId,
-      messageId: payload.item.messageId,
-      channel,
-      eventCursor: event.cursor,
-    };
-  }
-  if (payload.kind !== "chatItemChunk") return undefined;
-  const item = snapshot.task.chat.items.find((candidate) => candidate.messageId === payload.messageId);
+  if (payload.kind !== "taskChanged") return undefined;
+  const liveChange = [...(payload.changes.chat ?? [])].reverse().find((change) => (
+    change.kind === "append" || change.kind === "appendText"
+  ));
+  if (!liveChange) return undefined;
+  const messageId = liveChange.kind === "append" ? liveChange.item.messageId : liveChange.messageId;
+  const item = liveChange.kind === "append"
+    ? liveChange.item
+    : snapshot.task.chat.items.find((candidate) => candidate.messageId === messageId);
   const channel = item && textChannel(item);
   if (!channel) return undefined;
   return {
     type: "taskChat:liveText",
     taskId: payload.taskId,
-    messageId: payload.messageId,
+    messageId,
     channel,
     eventCursor: event.cursor,
   };

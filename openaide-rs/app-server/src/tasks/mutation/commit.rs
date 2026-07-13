@@ -2,6 +2,10 @@ use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::NormalizedMessage;
 use crate::storage::records::{TaskLifecycle, TaskRecord};
 use crate::storage::Store;
+use crate::task_events::{
+    CommittedChatChange, CommittedTaskChange, TaskFieldChanges, TaskNavigationChange,
+    ToolDetailUpdate,
+};
 use crate::tasks::mutation::create_validation::TaskCreationValidationContext;
 use crate::tasks::snapshot::build_snapshot;
 
@@ -18,13 +22,15 @@ pub(super) fn commit_existing_task(
 ) -> Result<TaskCommitResult, RuntimeError> {
     let _guard = target.lock();
     let mut task = target.store.read_task(task_id)?;
+    let original_task = task.clone();
     let original_version_fields = VersionFields::from_task(&task);
     let message_backup = target.store.backup_message_files(task_id)?;
     let rollback = || target.store.restore_message_files(task_id, &message_backup);
     let mut ctx = TaskMutationContext {
         store: &target.store,
         task: &mut task,
-        committed_delta: None,
+        chat_changes: Vec::new(),
+        tool_details: Vec::new(),
     };
     let mutation_result = match mutation(&mut ctx) {
         Ok(result) => result,
@@ -33,7 +39,8 @@ pub(super) fn commit_existing_task(
             return Err(error);
         }
     };
-    let committed_delta = ctx.committed_delta.take();
+    let chat_changes = std::mem::take(&mut ctx.chat_changes);
+    let tool_details = std::mem::take(&mut ctx.tool_details);
     drop(ctx);
     let outcome = match mutation_result {
         TaskMutationResult::Changed => {
@@ -41,7 +48,14 @@ pub(super) fn commit_existing_task(
                 rollback()?;
                 return Err(error);
             }
-            let facts = match persist_changed_task(target, &mut task, options, committed_delta) {
+            let facts = match persist_changed_task(
+                target,
+                &original_task,
+                &mut task,
+                options,
+                chat_changes,
+                tool_details,
+            ) {
                 Ok(facts) => facts,
                 Err(error) => {
                     rollback()?;
@@ -189,42 +203,21 @@ pub(super) fn resolve_or_create_new_task(
     })
 }
 
-#[allow(dead_code)]
-pub(super) fn publish_current_task(
-    target: &TaskMutations,
-    task_id: &str,
-) -> Result<(), RuntimeError> {
-    let task = target.store.read_task(task_id)?;
-    notify_task_updated(
-        target,
-        &TaskCommitFacts {
-            task_id: task.task_id.clone(),
-            revision: task.revision,
-            committed_task: task,
-            delta: None,
-        },
-    );
-    Ok(())
-}
-
 pub(super) fn notify_task_updated(target: &TaskMutations, facts: &TaskCommitFacts) {
-    match facts.delta.clone() {
-        Some(delta) => {
-            target
-                .notifier
-                .task_updated_with_delta(&facts.task_id, facts.revision, delta)
-        }
-        None => target.notifier.task_updated(&facts.task_id, facts.revision),
-    }
+    target
+        .notifier
+        .task_changed(&facts.task_id, facts.revision, facts.change.clone());
 }
 
 fn persist_changed_task(
     target: &TaskMutations,
+    original: &TaskRecord,
     task: &mut TaskRecord,
     options: TaskCommitOptions,
-    delta: Option<crate::task_events::CommittedTaskDelta>,
+    mut chat: Vec<CommittedChatChange>,
+    tool_details: Vec<ToolDetailUpdate>,
 ) -> Result<TaskCommitFacts, RuntimeError> {
-    let revision = target
+    let runtime_revision = target
         .runtime_state
         .lock()
         .expect("runtime state poisoned")
@@ -233,18 +226,31 @@ fn persist_changed_task(
         task.message_history_version = target.store.message_history_version(&task.task_id)?;
     }
     task.task_version += 1;
-    task.revision = revision;
+    task.revision = original
+        .revision
+        .checked_add(1)
+        .ok_or_else(|| RuntimeError::Internal("Task revision overflow".to_string()))?;
+    if task.message_history_version != original.message_history_version && chat.is_empty() {
+        chat.push(CommittedChatChange::Replace);
+    }
     target.store.write_task(task)?;
     target
         .runtime_state
         .lock()
         .expect("runtime state poisoned")
-        .commit_revision(revision);
+        .commit_revision(runtime_revision);
+    let fields = changed_fields(original, task);
+    let navigation = navigation_change(original, task, fields.summary);
     Ok(TaskCommitFacts {
         task_id: task.task_id.clone(),
-        revision,
+        revision: task.revision,
         committed_task: task.clone(),
-        delta,
+        change: CommittedTaskChange {
+            fields,
+            chat,
+            tool_details,
+            navigation,
+        },
     })
 }
 
@@ -254,7 +260,7 @@ fn persist_new_task(
     initial_messages: Vec<NormalizedMessage>,
     write_task: impl FnOnce(&Store, &TaskRecord) -> Result<(), RuntimeError>,
 ) -> Result<TaskCommitFacts, RuntimeError> {
-    let revision = target
+    let runtime_revision = target
         .runtime_state
         .lock()
         .expect("runtime state poisoned")
@@ -263,19 +269,81 @@ fn persist_new_task(
         .store
         .replace_messages_with_normalized(&task.task_id, initial_messages)?;
     task.message_history_version = target.store.message_history_version(&task.task_id)?;
-    task.revision = revision;
+    task.revision = 1;
     write_task(&target.store, task)?;
     target
         .runtime_state
         .lock()
         .expect("runtime state poisoned")
-        .commit_revision(revision);
+        .commit_revision(runtime_revision);
+    let visible = navigation_member(task);
     Ok(TaskCommitFacts {
         task_id: task.task_id.clone(),
-        revision,
+        revision: task.revision,
         committed_task: task.clone(),
-        delta: None,
+        change: CommittedTaskChange {
+            fields: TaskFieldChanges {
+                summary: true,
+                lifecycle: true,
+                preparation: true,
+                agent_config: true,
+                agent_commands: true,
+                send_capability: true,
+                removed: task.tombstoned,
+            },
+            chat: vec![CommittedChatChange::Replace],
+            tool_details: Vec::new(),
+            navigation: if visible {
+                TaskNavigationChange::Upsert
+            } else {
+                TaskNavigationChange::None
+            },
+        },
     })
+}
+
+fn changed_fields(original: &TaskRecord, task: &TaskRecord) -> TaskFieldChanges {
+    let preparation = original.preparation != task.preparation;
+    let summary = original.title != task.title
+        || original.status != task.status
+        || original.unread != task.unread
+        || original.updated_at != task.updated_at
+        || original.last_activity != task.last_activity
+        || original.agent_id != task.agent_id
+        || original.workspace_root != task.workspace_root
+        || original.message_history_version != task.message_history_version
+        || preparation;
+    TaskFieldChanges {
+        summary,
+        lifecycle: original.lifecycle != task.lifecycle,
+        preparation,
+        agent_config: preparation
+            || original.config_options != task.config_options
+            || original.config_options_catalog != task.config_options_catalog
+            || original.config_mutation != task.config_mutation
+            || original.model_id != task.model_id,
+        agent_commands: preparation
+            || original.agent_commands_catalog != task.agent_commands_catalog,
+        send_capability: preparation || original.status != task.status,
+        removed: !original.tombstoned && task.tombstoned,
+    }
+}
+
+fn navigation_change(
+    original: &TaskRecord,
+    task: &TaskRecord,
+    summary_changed: bool,
+) -> TaskNavigationChange {
+    match (navigation_member(original), navigation_member(task)) {
+        (true, false) => TaskNavigationChange::Remove,
+        (false, true) => TaskNavigationChange::Upsert,
+        (true, true) if summary_changed => TaskNavigationChange::Upsert,
+        _ => TaskNavigationChange::None,
+    }
+}
+
+fn navigation_member(task: &TaskRecord) -> bool {
+    matches!(task.lifecycle, TaskLifecycle::Visible) && !task.archived && !task.tombstoned
 }
 
 struct VersionFields {

@@ -1659,8 +1659,8 @@ fn open_readopts_adopted_task_when_native_session_is_newer_than_cached_history()
         .recv_timeout(Duration::from_millis(250))
         .expect("stale cached history should start loading");
     assert!(matches!(
-        syncing.history_sync,
-        Some(TaskHistorySyncSnapshot::Syncing { .. })
+        syncing.kind,
+        crate::task_events::TaskUpdateKind::HistorySync(TaskHistorySyncSnapshot::Syncing { .. })
     ));
     wait_until(|| agent.loads.load(Ordering::SeqCst) == 1);
     assert_eq!(agent.loads.load(Ordering::SeqCst), 1);

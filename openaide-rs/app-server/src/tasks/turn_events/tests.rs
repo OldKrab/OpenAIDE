@@ -18,8 +18,8 @@ use crate::server_requests::ServerRequestRuntime;
 use crate::server_requests::{ResponderScope, ServerRequestAnswer};
 use crate::storage::records::{TaskPreparationRecord, TaskRecord, TaskTitle, TaskTitleSource};
 use crate::storage::Store;
-use crate::task_events::CommittedTaskDelta;
 use crate::task_events::TaskUpdateNotifier;
+use crate::task_events::{CommittedChatChange, TaskUpdateKind};
 use crate::tasks::mutation::TaskMutations;
 use crate::tasks::runtime_state::RuntimeState;
 use crate::tasks::transitions::TaskTransitions;
@@ -927,24 +927,29 @@ fn agent_text_notifications_describe_only_durable_ordered_deltas() {
 
     sink.emit(AgentEvent::Text("first".to_string())).unwrap();
     let appended = notifications.recv().unwrap();
-    let message_id = match appended.delta.unwrap() {
-        CommittedTaskDelta::ChatItemAppended { item } => {
-            assert_eq!(
-                item.status,
-                openaide_app_server_protocol::snapshot::ChatItemStatus::Complete
-            );
-            item.message_id
-        }
-        other => panic!("expected append, got {other:?}"),
+    let message_id = match appended.kind {
+        TaskUpdateKind::Changed(change) => match change.chat.as_slice() {
+            [CommittedChatChange::Append { item }] => {
+                assert_eq!(
+                    item.status,
+                    openaide_app_server_protocol::snapshot::ChatItemStatus::Complete
+                );
+                item.message_id.clone()
+            }
+            other => panic!("expected append, got {other:?}"),
+        },
+        other => panic!("expected Task change, got {other:?}"),
     };
     assert_eq!(store.read_messages("task_1").unwrap().len(), 1);
 
     sink.emit(AgentEvent::Text(" second".to_string())).unwrap();
     let chunked = notifications.recv().unwrap();
     assert!(matches!(
-        chunked.delta,
-        Some(CommittedTaskDelta::ChatItemChunk { message_id: id, chunk })
-            if id == message_id && chunk.text == " second"
+        chunked.kind,
+        TaskUpdateKind::Changed(change)
+            if matches!(change.chat.as_slice(),
+                [CommittedChatChange::AppendText { message_id: id, text }]
+                    if id == &message_id && text == " second")
     ));
     let stored = store.read_messages("task_1").unwrap();
     assert!(matches!(
@@ -960,7 +965,11 @@ fn agent_text_notifications_describe_only_durable_ordered_deltas() {
     })
     .unwrap();
     let activity_update = notifications.recv().unwrap();
-    assert!(activity_update.delta.is_none());
+    assert!(matches!(
+        activity_update.kind,
+        TaskUpdateKind::Changed(change)
+            if matches!(change.chat.as_slice(), [CommittedChatChange::Append { .. }])
+    ));
 }
 
 #[test]
@@ -1009,8 +1018,11 @@ fn every_tool_update_commits_one_lightweight_upsert_and_latest_detail() {
         .unwrap();
 
         let update = notifications.recv().unwrap();
-        match update.delta.expect("focused Tool delta") {
-            CommittedTaskDelta::ChatItemUpserted { item, tool_details } => {
+        match update.kind {
+            TaskUpdateKind::Changed(change) => {
+                let [CommittedChatChange::Upsert { item }] = change.chat.as_slice() else {
+                    panic!("expected focused Tool upsert: {:?}", change.chat);
+                };
                 assert_eq!(item.message_id.as_str(), "acp_tool:session_1:tool_1");
                 assert!(item.parts.iter().all(|part| !matches!(
                     part,
@@ -1022,10 +1034,13 @@ fn every_tool_update_commits_one_lightweight_upsert_and_latest_detail() {
                             }
                         ))
                 )));
-                assert_eq!(tool_details.len(), 1);
-                assert_eq!(tool_details[0].artifact_id, "acp_tool_session_1_tool_1_0");
+                assert_eq!(change.tool_details.len(), 1);
                 assert_eq!(
-                    tool_details[0]
+                    change.tool_details[0].artifact_id,
+                    "acp_tool_session_1_tool_1_0"
+                );
+                assert_eq!(
+                    change.tool_details[0]
                         .details
                         .output
                         .as_ref()
@@ -1033,7 +1048,7 @@ fn every_tool_update_commits_one_lightweight_upsert_and_latest_detail() {
                     Some(output)
                 );
             }
-            other => panic!("expected Tool upsert, got {other:?}"),
+            other => panic!("expected Task change, got {other:?}"),
         }
     }
 

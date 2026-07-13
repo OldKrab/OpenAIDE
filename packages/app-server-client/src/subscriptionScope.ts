@@ -3,7 +3,6 @@ import type {
   AppServerEventPayload,
   ClientInstanceId,
   EventScope,
-  ProjectId,
   StateRootId,
   SubscriptionScope,
 } from "./generated/protocol.js";
@@ -41,9 +40,8 @@ export function matchSubscriptionEvent(
   context: SubscriptionIngestionContext,
   event: AppServerEvent,
 ): SubscriptionEventMatch {
+  if (!subscriptionScopesEqual(scope, event.subscription)) return { kind: "subscriptionMismatch" };
   if (eventScopeStateRootId(event.scope) !== context.stateRootId) return { kind: "streamScopeMismatch" };
-
-  if (event.payload.kind === "projectCollectionUpdated") return { kind: "match" };
 
   const scopeMatch = eventScopeMatchesSubscriptionScope(scope, event.scope, context);
   if (scopeMatch.kind !== "match") return scopeMatch;
@@ -79,11 +77,9 @@ function eventScopeMatchesSubscriptionScope(
 }
 
 function payloadMatchesSubscriptionScope(scope: SubscriptionScope, payload: AppServerEventPayload): boolean {
-  if (payload.kind === "projectCollectionUpdated") return true;
-
   switch (scope.kind) {
     case "projects":
-      return payload.kind === "snapshotReplaced";
+      return payload.kind === "snapshotReplaced" || payload.kind === "projectCollectionUpdated";
     case "agents":
       return payload.kind === "snapshotReplaced" || payload.kind === "agentCollectionUpdated";
     case "settings":
@@ -91,18 +87,14 @@ function payloadMatchesSubscriptionScope(scope: SubscriptionScope, payload: AppS
     case "taskNavigation":
       return (
         payload.kind === "snapshotReplaced" ||
-        payload.kind === "taskNavigationUpdated" ||
-        (payload.kind === "taskUpdated" && taskMatchesProjectFilter(payload.task.projectId, scope.projectId))
+        payload.kind === "taskNavigationChanged"
       );
     case "task":
       return (
         payload.kind === "snapshotReplaced" ||
-        payload.kind === "taskUpdated" ||
-        payload.kind === "taskSnapshotUpdated" ||
+        payload.kind === "taskChanged" ||
         payload.kind === "taskHistorySyncUpdated" ||
-        payload.kind === "chatItemAppended" ||
-        payload.kind === "chatItemUpserted" ||
-        payload.kind === "chatItemChunk" ||
+        payload.kind === "taskRequestsUpdated" ||
         payload.kind === "requestUpdated"
       );
     case "toolDetail":
@@ -110,10 +102,6 @@ function payloadMatchesSubscriptionScope(scope: SubscriptionScope, payload: AppS
         && payload.taskId === scope.taskId
         && payload.artifactId === scope.artifactId;
   }
-}
-
-function taskMatchesProjectFilter(taskProjectId: ProjectId, filter: ProjectId | null | undefined): boolean {
-  return filter === null || filter === undefined || taskProjectId === filter;
 }
 
 function normalizeOptional(value: string | null | undefined): string | undefined {

@@ -33,7 +33,7 @@ export type SubscriptionEventApplyResult =
   | {
       kind: "resyncRequired";
       state: SubscriptionIngestionState;
-      reason: "cursorGap" | "cursorDidNotAdvance" | "missingChatItem" | "streamScopeMismatch";
+      reason: "cursorGap" | "cursorDidNotAdvance" | "missingChatItem" | "streamScopeMismatch" | "taskRevisionGap";
       event: AppServerEvent;
     };
 
@@ -58,6 +58,12 @@ export function applySubscriptionEvent(
     return { kind: "resyncRequired", state, reason: "streamScopeMismatch", event };
   }
 
+  // Every subscription owns its cursor. Events for another subscription are
+  // unrelated transport traffic and must not advance or invalidate this replica.
+  if (match.kind === "subscriptionMismatch") {
+    return { kind: "ignored", state, reason: "subscriptionMismatch", event };
+  }
+
   if (event.cursor === state.cursor) {
     return {
       kind: "ignored",
@@ -67,23 +73,8 @@ export function applySubscriptionEvent(
     };
   }
 
-  // Every event delivered to a client participates in one contiguous stream, even
-  // when it does not match this particular subscription. A gap can therefore hide
-  // an earlier in-scope mutation and must be repaired before advancing any replica.
   if (event.previousCursor !== state.cursor) {
     return { kind: "resyncRequired", state, reason: "cursorGap", event };
-  }
-
-  if (match.kind === "subscriptionMismatch") {
-    return {
-      kind: "ignored",
-      state: {
-        ...state,
-        cursor: event.cursor,
-      },
-      reason: "subscriptionMismatch",
-      event,
-    };
   }
 
   const update = updateSubscriptionSnapshot(state.scope, state.snapshot, event.payload);

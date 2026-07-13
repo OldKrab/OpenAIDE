@@ -297,17 +297,17 @@ impl RpcGateway {
         task_id: &TaskId,
         now: AppServerTime,
     ) -> Vec<GatewayEventDelivery> {
-        let Ok(task) = self.task_snapshots.open_internal(task_id) else {
-            return Vec::new();
-        };
-        let task = self.task_with_pending_requests(task);
+        let requests = self.server_requests.pending_for_task(task_id);
         let client_hub = self.client_hub.clone();
         event_deliveries(self.state_stream.publish_committed(
             EventScope::Task {
                 state_root_id: self.state_stream.state_root_id().clone(),
                 task_id: task_id.clone(),
             },
-            AppServerEventPayload::TaskSnapshotUpdated { task },
+            AppServerEventPayload::TaskRequestsUpdated {
+                task_id: task_id.clone(),
+                requests,
+            },
             |client_id| client_hub.delivery_for(client_id),
             now,
         ))

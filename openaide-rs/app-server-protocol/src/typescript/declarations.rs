@@ -40,7 +40,10 @@ use crate::envelopes::{
     ServerRequestEnvelope,
 };
 use crate::errors::{ErrorTarget, ProtocolError, ProtocolErrorCode};
-use crate::events::{AppServerEvent, AppServerEventPayload, EventScope, TextChunk};
+use crate::events::{
+    AppServerEvent, AppServerEventPayload, EventScope, TaskChanges, TaskChatChange,
+    TaskNavigationChange,
+};
 use crate::ids::{
     AgentConfigOptionId, AgentId, AttachmentCandidateId, AttachmentHandleId, AttachmentId,
     ClientInstanceId, ClientMutationId, ClientRequestId, EventCursor, FileBrowserEntryId,
@@ -317,7 +320,9 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<AppServerEvent>(output, config);
     push_decl::<EventScope>(output, config);
     push_decl::<AppServerEventPayload>(output, config);
-    push_decl::<TextChunk>(output, config);
+    push_decl::<TaskChanges>(output, config);
+    push_decl::<TaskChatChange>(output, config);
+    push_decl::<TaskNavigationChange>(output, config);
 
     push_decl::<ClientSnapshot>(output, config);
     push_decl::<ServerSnapshot>(output, config);

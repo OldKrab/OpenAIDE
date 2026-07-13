@@ -345,7 +345,7 @@ Prompt errors, Stop, and restart currently use separate Turn-based transitions w
 
 ## AP-024: Ordinary Task mutations fall back to broad snapshot publication
 
-**Status:** confirmed
+**Status:** resolved
 
 **Area:** App Server state subscriptions and Frontend replicas
 
@@ -354,6 +354,8 @@ Only Chat append/chunk and history state currently have committed Task deltas. A
 **Impact:** Small local changes create unnecessary reads, serialization, traffic, reducer work, and cursor-gap recovery. One atomic storage mutation is represented as several independently delivered views of state.
 
 **Desired direction:** Replace the fallback completely with one scope-local ordered stream. Initial subscribe/reconnect returns a full baseline; every durable Task transaction emits exactly one focused `taskChanged` event at the next Task revision. Apply its changed fields atomically. On a revision gap, discard the replica and obtain one fresh baseline. Publish Navigation summary only when Navigation-visible state actually changes.
+
+**Resolution:** Every state subscription now owns an independent cursor and every delivered event names its exact subscription. A durable Task transaction advances only that Task's consecutive revision and emits one atomic `taskChanged` payload containing its changed fields and ordered Chat operations; Frontend accepts only the exact next revision and replaces its replica from one fresh baseline on a gap. Tool details, transient requests, history state, and focused Navigation upsert/remove updates remain separate exact scopes. The broad Task snapshot, Project collection, and full Navigation fallback events and APIs were removed completely.
 
 ## AP-025: One ACP message can split into colliding Chat rows by content kind
 

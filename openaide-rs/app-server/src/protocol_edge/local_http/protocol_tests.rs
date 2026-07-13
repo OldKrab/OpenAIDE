@@ -341,6 +341,7 @@ fn client_snapshot() -> ClientSnapshot {
 
 fn app_event(previous_cursor: &str, cursor: &str) -> AppServerEvent {
     AppServerEvent {
+        subscription: openaide_app_server_protocol::state::SubscriptionScope::Projects,
         previous_cursor: previous_cursor.into(),
         cursor: cursor.into(),
         scope: EventScope::StateRoot {
