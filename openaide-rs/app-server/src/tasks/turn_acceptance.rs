@@ -15,9 +15,10 @@ pub(super) struct TurnAcceptanceCoordinator {
 }
 
 impl TurnAcceptanceCoordinator {
-    /// Linearizes acceptance for one Task from receipt lookup through durable commit.
-    /// Same-key retries therefore observe the first committed receipt before touching shared
-    /// attachment handles, while unrelated Tasks remain independent.
+    /// Serializes Send acceptance for one Task through its durable commit.
+    ///
+    /// This protects the Task revision and attachment reservation as one admission decision;
+    /// it does not retry requests or deduplicate them through a second request identity.
     pub(super) fn serialize<T>(&self, task_id: &str, operation: impl FnOnce() -> T) -> T {
         self.acceptance.serialize(task_id, operation)
     }

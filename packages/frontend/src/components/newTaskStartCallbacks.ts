@@ -42,7 +42,7 @@ type NewTaskStartDependencies = Pick<
   | "state"
 > & { newTaskController: NewTaskController };
 
-/** Owns the complete first-send lifecycle, including cancellation and ambiguous outcomes. */
+/** Owns the complete first-send lifecycle, including cancellation and failed requests. */
 export function createNewTaskStartCallbacks(
   dependencies: NewTaskStartDependencies,
 ): Pick<NewTaskCallbacks, "cancel" | "submit"> {

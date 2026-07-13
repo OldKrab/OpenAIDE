@@ -91,7 +91,7 @@ describe("composer attachment resource ownership", () => {
     expect(release).toHaveBeenCalledWith("task-1", ["handle-1", "handle-2"]);
   });
 
-  it("keeps an ambiguous send handle owned until same-client recovery is resolved", () => {
+  it("keeps an in-flight send handle owned until the request settles", () => {
     const release = vi.fn();
     let recoveryPending = true;
     const owner = new ComposerAttachmentResourceOwner({
@@ -108,7 +108,7 @@ describe("composer attachment resource ownership", () => {
     expect(release).toHaveBeenCalledWith("task-1", ["handle-1"]);
   });
 
-  it("does not let row removal release a handle owned by ambiguous send recovery", () => {
+  it("does not let row removal release a handle owned by an in-flight send", () => {
     const release = vi.fn();
     let recoveryPending = true;
     const owner = new ComposerAttachmentResourceOwner({

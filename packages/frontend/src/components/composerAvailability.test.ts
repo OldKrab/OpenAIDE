@@ -55,7 +55,7 @@ describe("composer availability", () => {
     });
   });
 
-  it("disables archived Tasks and permits only the existing exact-retry state", () => {
+  it("disables archived Tasks even when their send capability is otherwise present", () => {
     const base = {
       allowEditingWhileSendBlocked: true,
       attachmentsReady: true,

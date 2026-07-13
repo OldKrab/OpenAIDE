@@ -546,7 +546,7 @@ describe("AppSurfaces callback wiring", () => {
     expect(surfaceMocks.taskLoading).not.toHaveBeenCalled();
   });
 
-  it("keeps an ambiguous first-send draft visible on its adopted Task route", () => {
+  it("keeps a failed first-send draft visible on its adopted Task route", () => {
     const controller = controllerFor("task");
     controller.bootstrap = { surface: "task", taskId: "task_1" };
     controller.state.snapshot = snapshot("task_1", false);

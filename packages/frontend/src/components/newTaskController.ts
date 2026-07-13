@@ -32,7 +32,7 @@ export class NewTaskController {
   // promises can otherwise issue a second discard after the first one completes.
   private readonly disposals = new Map<TaskId, Promise<void>>();
   // Send protection is independent of the current controller lease. A newer New Task
-  // must not make an older in-flight or ambiguous send disposable.
+  // must not make an older in-flight Send disposable before its one request settles.
   private readonly sendProtections = new Set<TaskId>();
 
   getSnapshot = () => this.cachedSnapshot;
