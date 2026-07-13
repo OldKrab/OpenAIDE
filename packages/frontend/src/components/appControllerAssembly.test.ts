@@ -63,7 +63,7 @@ describe("deriveAppControllerState", () => {
     expect(visibleTasks(tasks, "   ").map((visible) => visible.task_id)).toEqual(["task_1"]);
   });
 
-  it("keeps the pending active empty task visible while the first send is in flight", () => {
+  it("keeps a private empty New Task out of navigation while first Send is in flight", () => {
     const state = createInitialState();
     state.activeTaskId = "task_2";
     state.newTask.submitting = true;
@@ -83,16 +83,10 @@ describe("deriveAppControllerState", () => {
 
     const derived = deriveAppControllerState(state);
 
-    expect(derived.visibleTasks.map((visible) => visible.task_id)).toEqual(["task_1", "task_2"]);
-    expect(derived.visibleTasks.map((visible) => visible.task_id)).not.toContain("__pending_new_task__");
-    expect(derived.visibleTasks[1]).toMatchObject({
-      has_messages: true,
-      status: "active",
-      title: "Build the thing",
-    });
+    expect(derived.visibleTasks.map((visible) => visible.task_id)).toEqual(["task_1"]);
   });
 
-  it("keeps a pending empty task visible after switching to another task", () => {
+  it("keeps a private empty New Task out of navigation after switching tasks", () => {
     const state = createInitialState();
     state.activeTaskId = "task_1";
     state.tasks = [
@@ -107,15 +101,10 @@ describe("deriveAppControllerState", () => {
 
     const derived = deriveAppControllerState(state);
 
-    expect(derived.visibleTasks.map((visible) => visible.task_id)).toEqual(["task_1", "task_2"]);
-    expect(derived.visibleTasks[1]).toMatchObject({
-      has_messages: true,
-      status: "active",
-      title: "Build the thing",
-    });
+    expect(derived.visibleTasks.map((visible) => visible.task_id)).toEqual(["task_1"]);
   });
 
-  it("shows a selected pending new task row before the Backend returns the created task", () => {
+  it("does not invent a sidebar row while the New Task remains private", () => {
     const state = createInitialState();
     state.tasks = [
       task({ task_id: "task_1", has_messages: true, title: "Previous task" }),
@@ -136,20 +125,11 @@ describe("deriveAppControllerState", () => {
 
     const derived = deriveAppControllerState(state);
 
-    expect(derived.activeNavigationTaskId).toBe("__pending_new_task__");
-    expect(derived.visibleTasks.map((visible) => visible.task_id)).toEqual(["__pending_new_task__", "task_1"]);
-    expect(derived.visibleTasks[0]).toMatchObject({
-      agent_id: "codex",
-      agent_name: "Codex",
-      has_messages: true,
-      project_id: "project_1",
-      project_label: "OpenAIDE",
-      status: "active",
-      title: "Fix the visible startup state",
-    });
+    expect(derived.activeNavigationTaskId).toBeUndefined();
+    expect(derived.visibleTasks.map((visible) => visible.task_id)).toEqual(["task_1"]);
   });
 
-  it("keeps a newly created task stable and in progress until its first send starts", () => {
+  it("does not promote a created New Task into navigation before Send is accepted", () => {
     const state = createInitialState();
     state.tasks = [
       task({ task_id: "task_1", has_messages: true, title: "Previous task" }),
@@ -182,17 +162,9 @@ describe("deriveAppControllerState", () => {
 
     const afterCreate = deriveAppControllerState(state);
 
-    expect(beforeCreate.visibleTasks.map((visible) => visible.title)).toEqual([
-      "Fix the visible startup state",
-      "Previous task",
-    ]);
-    expect(afterCreate.activeNavigationTaskId).toBe("task_new");
-    expect(afterCreate.visibleTasks.map((visible) => visible.task_id)).toEqual(["task_new", "task_1"]);
-    expect(afterCreate.visibleTasks[0]).toMatchObject({
-      has_messages: true,
-      status: "active",
-      title: "Fix the visible startup state",
-    });
+    expect(beforeCreate.visibleTasks.map((visible) => visible.title)).toEqual(["Previous task"]);
+    expect(afterCreate.activeNavigationTaskId).toBeUndefined();
+    expect(afterCreate.visibleTasks.map((visible) => visible.task_id)).toEqual(["task_1"]);
   });
 
   it("matches visible tasks by title, agent name, and status", () => {

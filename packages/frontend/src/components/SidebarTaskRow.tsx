@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Archive, MoreHorizontal, RotateCcw } from "lucide-react";
 import type { TaskStatus, TaskSummary } from "@openaide/app-shell-contracts";
-import { PENDING_NEW_TASK_ID } from "./appControllerDerivedState";
 import { AgentIcon } from "./AgentIcon";
 import { SidebarRowActionSlot } from "./SidebarRowParts";
 import { relativeTime } from "./taskSurfaceHelpers";
@@ -24,7 +23,6 @@ export function SidebarTaskRow({
   const [menuOpen, setMenuOpen] = useState(false);
   const actionSlotRef = useRef<HTMLDivElement>(null);
   const actionTriggerRef = useRef<HTMLButtonElement>(null);
-  const pendingNewTask = task.task_id === PENDING_NEW_TASK_ID;
   const title = task.title || "Untitled task";
   const actionLabel = showArchived ? "Restore task" : "Archive task";
   const runAction = () => {
@@ -58,7 +56,6 @@ export function SidebarTaskRow({
     <div className={`task-row task-product-row ${task.task_id === activeTaskId ? "selected" : ""}`} role="listitem">
       <button
         className="task-open"
-        disabled={pendingNewTask}
         onClick={() => onOpenTask(task.task_id)}
         type="button"
       >
@@ -75,19 +72,17 @@ export function SidebarTaskRow({
         </span>
       </button>
       <SidebarRowActionSlot containerRef={actionSlotRef}>
-        {pendingNewTask ? null : (
-          <button
-            ref={actionTriggerRef}
-            className="task-row-action"
-            onClick={() => setMenuOpen((open) => !open)}
-            title={menuOpen ? undefined : "Task actions"}
-            type="button"
-            aria-expanded={menuOpen}
-            aria-label={`Task actions for ${title}`}
-          >
-            <MoreHorizontal size={14} />
-          </button>
-        )}
+        <button
+          ref={actionTriggerRef}
+          className="task-row-action"
+          onClick={() => setMenuOpen((open) => !open)}
+          title={menuOpen ? undefined : "Task actions"}
+          type="button"
+          aria-expanded={menuOpen}
+          aria-label={`Task actions for ${title}`}
+        >
+          <MoreHorizontal size={14} />
+        </button>
         {menuOpen ? (
           <div className="task-row-menu" role="menu">
             <button onClick={runAction} type="button" role="menuitem">
