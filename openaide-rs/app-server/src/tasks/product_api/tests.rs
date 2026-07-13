@@ -1571,7 +1571,7 @@ fn background_native_catalog_refresh_treats_a_session_cursor_cycle_as_exhausted(
 }
 
 #[test]
-fn open_readopts_adopted_task_when_native_session_is_newer_than_cached_history() {
+fn open_reloads_adopted_task_when_native_session_is_newer_than_cached_history() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut task = task_record("task-existing", "/workspace/app");
@@ -1668,7 +1668,23 @@ fn open_readopts_adopted_task_when_native_session_is_newer_than_cached_history()
         syncing.kind,
         crate::task_events::TaskUpdateKind::HistorySync(TaskHistorySyncSnapshot::Syncing { .. })
     ));
-    wait_until(|| agent.loads.load(Ordering::SeqCst) == 1);
+    // Loading, attaching the permanent sink, and persisting replay happen in order
+    // on the background worker; observe the final durable boundary.
+    wait_until(|| {
+        agent.loads.load(Ordering::SeqCst) == 1
+            && agent.attaches.load(Ordering::SeqCst) == 1
+            && store.read_messages("task-existing").is_ok_and(|messages| {
+                matches!(
+                    messages.as_slice(),
+                    [message]
+                        if matches!(
+                            &message.chat.message,
+                            NormalizedMessage::AgentMessage { id, .. }
+                                if id == "native:fresh"
+                        )
+                )
+            })
+    });
     assert_eq!(agent.loads.load(Ordering::SeqCst), 1);
     assert_eq!(agent.attaches.load(Ordering::SeqCst), 1);
     let stored_messages = store.read_messages("task-existing").unwrap();
@@ -3722,17 +3738,14 @@ fn stale_cancel_cannot_retire_a_newer_accepted_send() {
             .unwrap_or(false)
     });
     let revision = store.read_task("task-existing").unwrap().revision;
-    let (second_started_tx, second_started_rx) = std::sync::mpsc::sync_channel(0);
-    let second_api = api.clone();
-    let second = std::thread::spawn(move || {
-        second_started_tx.send(()).unwrap();
-        second_api.send(send_params("task-existing", revision, "second"))
-    });
-    second_started_rx.recv().unwrap();
+    // Cancel is paused by the read hook before it enters Task serialization, so
+    // the second Send can deterministically replace the active prompt first.
+    let second = api
+        .send(send_params("task-existing", revision, "second"))
+        .unwrap();
 
     release_read_tx.send(()).unwrap();
     let stale_cancel = cancel.join().unwrap();
-    let second = second.join().unwrap().unwrap();
     wait_until(|| agent.prompts.load(Ordering::SeqCst) == 2);
 
     assert_eq!(stale_cancel.unwrap_err().code, ProtocolErrorCode::Conflict);
