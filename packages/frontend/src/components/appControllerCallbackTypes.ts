@@ -25,6 +25,7 @@ import type {
 } from "@openaide/app-server-client";
 import type { ComposerAttachmentResourceOwner } from "../services/attachmentResources";
 import type { NewTaskController, NewTaskLease } from "./newTaskController";
+import type { AsyncOperationOwner } from "../state/asyncOperationOwner";
 
 export type AppControllerCallbacks = {
   navigation: NavigationCallbacks;
@@ -63,7 +64,6 @@ export type NewTaskCallbacks = {
   cancel: () => void;
   fileBrowser?: TaskFileBrowserCallbacks;
   removeAttachment: (attachmentId: string) => void;
-  resetOptionsRequestKey: () => void;
   selectConfigOption: (configId: string, value: string) => void;
   submit: (draft?: NewTaskDraftInput) => void;
   workspaceBrowser?: WorkspaceBrowserCallbacks;
@@ -130,14 +130,10 @@ export type AppCallbacksDependencies = {
   attachmentResources?: ComposerAttachmentResourceOwner;
   backendConnection?: Pick<BackendConnection, "respond">
     & Partial<Pick<BackendConnection, "events" | "request">>;
-  beginNavigationChange: (archived?: boolean) => number;
+  asyncOperations: AsyncOperationOwner;
   clientInstanceId: ClientInstanceId | string;
-  createChatPageRequestGeneration: () => number;
   createSnapshotRequestId: SnapshotRequestIdFactory;
-  currentNavigationGeneration: () => number;
-  currentNewTaskPreparationKey: () => string | undefined;
   dispatch: Dispatch<AppAction>;
-  latestOptionsRequestKey: { current: string | undefined };
   newTaskStartAttempt: { current: NewTaskStartAttempt | undefined };
   pendingPreparedNewTask: (key: string) => Promise<PendingNewTaskPreparationResult> | undefined;
   newTaskController?: NewTaskController;

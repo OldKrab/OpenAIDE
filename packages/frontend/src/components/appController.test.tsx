@@ -954,6 +954,31 @@ describe("app controller mounted lifecycle", () => {
     });
     expect(latestController?.state.snapshot?.task.status).toBe("active");
 
+    const accepted = protocolTaskSnapshot("task_1", "Task", {
+      status: "running",
+      userText: "do the work",
+    });
+    accepted.revision = 2;
+    const acceptedEvent: AppServerEvent = {
+      subscription: { kind: "task", taskId: "task_1" as never },
+      previousCursor: "cursor_task_2" as never,
+      cursor: "cursor_task_3" as never,
+      scope: {
+        kind: "task",
+        stateRootId: "state_root_1" as never,
+        taskId: "task_1" as never,
+      },
+      payload: {
+        kind: "taskChanged",
+        taskId: "task_1" as never,
+        revision: 2,
+        changes: {
+          task: accepted.task,
+          sendCapability: accepted.sendCapability,
+          chat: [{ kind: "append", item: accepted.chat.items[0]! }],
+        },
+      },
+    };
     const completed = protocolTaskSnapshot("task_1", "Task");
     completed.revision = 3;
     completed.chat.items.push({
@@ -964,8 +989,8 @@ describe("app controller mounted lifecycle", () => {
     });
     const completedEvent: AppServerEvent = {
       subscription: { kind: "task", taskId: "task_1" as never },
-      previousCursor: "cursor_task_2" as never,
-      cursor: "cursor_task_3" as never,
+      previousCursor: "cursor_task_3" as never,
+      cursor: "cursor_task_4" as never,
       scope: {
         kind: "task",
         stateRootId: "state_root_1" as never,
@@ -983,17 +1008,19 @@ describe("app controller mounted lifecycle", () => {
       },
     };
     await act(async () => {
+      for (const listener of [...eventListeners]) listener(acceptedEvent);
       for (const listener of [...eventListeners]) listener(completedEvent);
       await Promise.resolve();
     });
 
+    expect(taskSubscriptionCount).toBe(2);
     expect(latestController?.state.snapshot?.task.status).toBe("inactive");
     expect(JSON.stringify(latestController?.state.snapshot?.chat.items)).toContain("Done without reload");
 
     const gapEvent = {
       ...completedEvent,
       previousCursor: "missing_cursor" as never,
-      cursor: "cursor_task_4" as never,
+      cursor: "cursor_task_5" as never,
     };
     await act(async () => {
       for (const listener of [...eventListeners]) listener(gapEvent);
@@ -1004,7 +1031,7 @@ describe("app controller mounted lifecycle", () => {
     expect(latestController?.backendReady).toBe(false);
 
     await act(async () => {
-      gapTaskSubscription.resolve(taskSubscriptionSnapshot("cursor_task_4", completed));
+      gapTaskSubscription.resolve(taskSubscriptionSnapshot("cursor_task_5", completed));
       await gapTaskSubscription.promise;
       await Promise.resolve();
     });

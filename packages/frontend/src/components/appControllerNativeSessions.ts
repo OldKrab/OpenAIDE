@@ -1,4 +1,4 @@
-import type { Dispatch, MutableRefObject } from "react";
+import type { Dispatch } from "react";
 import {
   AGENT_LIST_SESSIONS,
   AppServerProtocolError,
@@ -7,6 +7,7 @@ import {
   type ProjectId,
 } from "@openaide/app-server-client";
 import type { AppAction } from "../state/appReducer";
+import type { AsyncOperationOwner } from "../state/asyncOperationOwner";
 
 export type NativeSessionLoadFailure = {
   agentId: string;
@@ -25,9 +26,8 @@ export function requestControllerNativeSessions({
   backendConnection,
   dispatch,
   existingSessionIds = [],
-  latestSessionListRequestId,
+  asyncOperations,
   minimumSessionCount = 0,
-  nextSessionListRequestId,
   projectId,
   onFailure,
 }: {
@@ -37,15 +37,13 @@ export function requestControllerNativeSessions({
   backendConnection?: Pick<BackendConnection, "request">;
   dispatch: Dispatch<AppAction>;
   existingSessionIds?: Iterable<string>;
-  latestSessionListRequestId: MutableRefObject<number | undefined>;
+  asyncOperations: AsyncOperationOwner;
   minimumSessionCount?: number;
-  nextSessionListRequestId: MutableRefObject<number>;
   projectId?: string;
   onFailure?: (failure: NativeSessionLoadFailure) => void;
 }) {
-  const requestId = nextSessionListRequestId.current + 1;
-  nextSessionListRequestId.current = requestId;
-  latestSessionListRequestId.current = requestId;
+  const operation = asyncOperations.claim("native-session-list");
+  const requestId = operation.id;
   dispatch({ type: "newTask:nativeSessions:start", append });
   if (backendConnection) {
     if (!projectId) {
@@ -73,7 +71,7 @@ export function requestControllerNativeSessions({
           projectId: projectId as ProjectId,
           cursor: nextCursor ?? null,
         });
-        if (latestSessionListRequestId.current !== requestId) return;
+        if (!asyncOperations.owns(operation)) return;
         resultAgentId = result.agentId;
         for (const session of result.sessions) {
           if (existing.has(session.sessionId) || sessions.has(session.sessionId)) continue;
@@ -88,7 +86,7 @@ export function requestControllerNativeSessions({
         nextCursor = result.nextCursor ?? undefined;
       } while (nextCursor && sessions.size < minimumSessionCount);
 
-      if (latestSessionListRequestId.current !== requestId) return;
+      if (!asyncOperations.owns(operation)) return;
       dispatch({
         type: "newTask:nativeSessions:result",
         result: {
@@ -100,7 +98,7 @@ export function requestControllerNativeSessions({
       });
     };
     void loadPages().catch((error: unknown) => {
-      if (latestSessionListRequestId.current !== requestId) return;
+      if (!asyncOperations.owns(operation)) return;
       onFailure?.(nativeSessionLoadFailure(error, { agentId, projectId, requestId }));
       dispatch({ type: "newTask:nativeSessions:listError", message: "Unable to load Agent session history." });
     });
@@ -115,8 +113,7 @@ export function createRequestControllerNativeSessions({
   getAgentId,
   getExistingSessionIds,
   getProjectId,
-  latestSessionListRequestId,
-  nextSessionListRequestId,
+  asyncOperations,
   onFailure,
 }: {
   backendConnection?: Pick<BackendConnection, "request">;
@@ -124,8 +121,7 @@ export function createRequestControllerNativeSessions({
   getAgentId: () => string;
   getExistingSessionIds?: () => Iterable<string>;
   getProjectId: () => string | undefined;
-  latestSessionListRequestId: MutableRefObject<number | undefined>;
-  nextSessionListRequestId: MutableRefObject<number>;
+  asyncOperations: AsyncOperationOwner;
   onFailure?: (failure: NativeSessionLoadFailure) => void;
 }) {
   return (cursor?: string, append = false, minimumSessionCount = 0) => {
@@ -136,9 +132,8 @@ export function createRequestControllerNativeSessions({
       cursor,
       dispatch,
       existingSessionIds: append ? getExistingSessionIds?.() : undefined,
-      latestSessionListRequestId,
+      asyncOperations,
       minimumSessionCount,
-      nextSessionListRequestId,
       onFailure,
       projectId: getProjectId(),
     });

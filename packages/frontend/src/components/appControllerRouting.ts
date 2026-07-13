@@ -6,10 +6,14 @@ import type { AppAction } from "../state/appReducer";
 import type { AgentOption } from "../state/composerOptions";
 import type { WebviewBootstrap } from "../state/surfaceTypes";
 import type { AppState } from "../state/store";
+import {
+  navigationTargetForBootstrap,
+  type AsyncOperationOwner,
+} from "../state/asyncOperationOwner";
 
 export function useRoutedBootstrap(
   initialBootstrap: WebviewBootstrap,
-  beginNavigationChange: (archived?: boolean) => number,
+  asyncOperations: AsyncOperationOwner,
   dispatch: Dispatch<AppAction>,
 ) {
   const [bootstrap, setBootstrap] = useState(initialBootstrap);
@@ -18,10 +22,8 @@ export function useRoutedBootstrap(
 
   useEffect(() => {
     return subscribeSurfaceRouteChanges((nextBootstrap) => {
-      // Route events can originate outside Frontend callbacks (browser history,
-      // another shell owner, or a restored URL). They must supersede the same
-      // in-flight reads and mutations as an in-app navigation action.
-      beginNavigationChange(
+      asyncOperations.observeNavigation(
+        navigationTargetForBootstrap(nextBootstrap),
         nextBootstrap.surface === "navigation" ? nextBootstrap.archived === true : undefined,
       );
       setBootstrap(nextBootstrap);
@@ -37,7 +39,7 @@ export function useRoutedBootstrap(
       // explicit discard or context replacement may reset its composer state.
       dispatch({ type: "selection:clear" });
     });
-  }, [beginNavigationChange, dispatch]);
+  }, [asyncOperations, dispatch]);
 
   return { bootstrap, bootstrapRef };
 }

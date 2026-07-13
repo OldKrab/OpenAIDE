@@ -13,6 +13,7 @@ import type { PendingNewTaskPreparationResult } from "./appControllerCallbackTyp
 import type { NewTaskStartAttempt } from "./appControllerCallbackTypes";
 import { newTaskPreparationKey, taskCreateParams } from "../state/newTaskPreparationContext";
 import type { NewTaskController } from "./newTaskController";
+import type { AsyncOperationOwner } from "../state/asyncOperationOwner";
 
 export type PendingNewTaskPreparation = {
   key: string;
@@ -24,8 +25,8 @@ type NewTaskPreparationOptions = {
   backendReady: boolean;
   bootstrap: WebviewBootstrap;
   attachmentResources?: ComposerAttachmentResourceOwner;
+  asyncOperations: AsyncOperationOwner;
   dispatch: Dispatch<AppAction>;
-  latestOptionsRequestKey: MutableRefObject<string | undefined>;
   pendingPreparation: MutableRefObject<PendingNewTaskPreparation | undefined>;
   newTaskController: NewTaskController;
   replicaEpoch: number;
@@ -36,11 +37,11 @@ type NewTaskPreparationOptions = {
 /** Starts the Task/session boundary once the required new-task context exists. */
 export function useNewTaskPreparation({
   attachmentResources,
+  asyncOperations,
   backendConnection,
   backendReady,
   bootstrap,
   dispatch,
-  latestOptionsRequestKey,
   pendingPreparation,
   newTaskController,
   replicaEpoch,
@@ -48,17 +49,20 @@ export function useNewTaskPreparation({
   state,
 }: NewTaskPreparationOptions) {
   const preparationKey = newTaskPreparationKey(state);
+  const operation = asyncOperations.scope(
+    "new-task-preparation",
+    preparationKey ?? "unavailable",
+    "replica",
+  );
   const completedPreparationKey = useRef<string | undefined>(undefined);
-  const currentPreparationKey = useRef(preparationKey);
   const failedPreparationKey = useRef<string | undefined>(undefined);
-  const currentReplicaEpoch = useRef(replicaEpoch);
-  if (currentReplicaEpoch.current !== replicaEpoch) {
-    currentReplicaEpoch.current = replicaEpoch;
+  const currentOperationId = useRef(operation.id);
+  if (currentOperationId.current !== operation.id) {
+    currentOperationId.current = operation.id;
     pendingPreparation.current = undefined;
     completedPreparationKey.current = undefined;
     failedPreparationKey.current = undefined;
   }
-  currentPreparationKey.current = preparationKey;
   const isNewTaskRoute = bootstrap.surface === "task" && !bootstrap.taskId;
   const previousBootstrap = useRef(bootstrap);
   const enteredNewTaskRoute = isNewTaskRoute && previousBootstrap.current !== bootstrap;
@@ -95,7 +99,6 @@ export function useNewTaskPreparation({
     }
 
     const request = backendConnection.request;
-    const requestReplicaEpoch = replicaEpoch;
     const previousPreparation = pendingPreparation.current?.promise;
     const staleTaskId = retainedSnapshot && !preparedTaskMatches
       ? retainedSnapshot.task.task_id as TaskId
@@ -111,18 +114,18 @@ export function useNewTaskPreparation({
       ? previousPreparation.catch(() => undefined)
       : Promise.resolve()
     ).then(async () => {
-      if (currentReplicaEpoch.current !== requestReplicaEpoch) {
+      if (!asyncOperations.owns(operation)) {
         throw new SupersededPreparation();
       }
       if (staleTaskId) await discard(staleTaskId);
-      if (currentPreparationKey.current !== preparationKey) {
+      if (!asyncOperations.owns(operation)) {
         throw new SupersededPreparation();
       }
 
       const projectId = state.newTask.selection.projectId;
       if (!projectId) throw new SupersededPreparation();
       const task = (await request(TASK_CREATE, taskCreateParams(state, projectId))).task;
-      if (currentReplicaEpoch.current !== requestReplicaEpoch) {
+      if (!asyncOperations.owns(operation)) {
         throw new SupersededPreparation();
       }
       const taskId = task.task.taskId as TaskId;
@@ -133,7 +136,7 @@ export function useNewTaskPreparation({
         if (startAttempt.current === cancelledAttempt) startAttempt.current = undefined;
         return { taskId, task };
       }
-      if (currentPreparationKey.current !== preparationKey) {
+      if (!asyncOperations.owns(operation)) {
         await discard(taskId);
         throw new SupersededPreparation();
       }
@@ -147,7 +150,6 @@ export function useNewTaskPreparation({
       if (!lease) throw new SupersededPreparation();
       dispatch({ type: "newTask:prepared", taskId });
       completedPreparationKey.current = preparationKey;
-      latestOptionsRequestKey.current = undefined;
       failedPreparationKey.current = undefined;
       return { taskId, task };
     });
@@ -155,7 +157,7 @@ export function useNewTaskPreparation({
 
     void promise.catch((error) => {
       if (error instanceof SupersededPreparation) return;
-      if (currentReplicaEpoch.current !== requestReplicaEpoch) return;
+      if (!asyncOperations.owns(operation)) return;
       failedPreparationKey.current = preparationKey;
       dispatch({
         type: "submit:error",
@@ -173,10 +175,10 @@ export function useNewTaskPreparation({
     backendConnection,
     backendReady,
     attachmentResources,
+    asyncOperations,
     bootstrap.surface,
     bootstrap.taskId,
     dispatch,
-    latestOptionsRequestKey,
     pendingPreparation,
     preparationKey,
     newTaskController,

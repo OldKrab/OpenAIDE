@@ -43,7 +43,6 @@ import { useNewTaskPreparation, type PendingNewTaskPreparation } from "./useNewT
 import { useTaskAttentionReadReceipt } from "./useTaskAttentionReadReceipt";
 import { newTaskProjectIdForRequests } from "./newTaskRequestContext";
 import { useComposerAttachmentResources } from "./useComposerAttachmentResources";
-import { newTaskPreparationKey } from "../state/newTaskPreparationContext";
 import { NewTaskController } from "./newTaskController";
 export type AppController = {
   activeTask?: TaskSummary;
@@ -86,17 +85,11 @@ export function useAppController({ backendConnection }: AppControllerOptions = {
   const newTaskController = useMemo(() => new NewTaskController(), []);
   const newTaskSnapshot = useSyncExternalStore(newTaskController.subscribe, newTaskController.getSnapshot);
   const newTaskStartAttempt = useRef<NewTaskStartAttempt | undefined>(undefined);
-  const currentNewTaskPreparationKey = useRef<string | undefined>(undefined);
-  currentNewTaskPreparationKey.current = newTaskPreparationKey(state);
   const attachmentResourcesRef = useRef<ReturnType<typeof useComposerAttachmentResources> | undefined>(undefined);
   const controllerRefs = useAppControllerRefs();
   const {
-    latestNativeSessionSelection,
+    asyncOperations,
     latestNavigationSessionKey,
-    latestOptionsRequestKey,
-    latestSessionListRequestId,
-    nextChatPageRequestGeneration,
-    nextSessionListRequestId,
   } = controllerRefs;
   const handleReplicaChanged = useCallback((transition: AppServerReplicaTransition) => {
     if (!transition.previous) return;
@@ -114,10 +107,9 @@ export function useAppController({ backendConnection }: AppControllerOptions = {
     backendInitialized,
     backendConnectionState,
     backendReady,
-    beginNavigationChange,
     bootstrap,
     createSnapshotRequestId,
-    currentNavigationGeneration,
+    operationOwner,
     replicaEpoch,
     retryTaskOpen,
   } = useAppControllerBackendLifecycle({
@@ -179,11 +171,11 @@ export function useAppController({ backendConnection }: AppControllerOptions = {
   ]);
   useNewTaskPreparation({
     attachmentResources,
+    asyncOperations: asyncOperations.current,
     backendConnection: backendConnectionRef,
     backendReady,
     bootstrap,
     dispatch: newTaskDispatch,
-    latestOptionsRequestKey,
     pendingPreparation: pendingPreparedNewTask,
     newTaskController: newTaskController,
     replicaEpoch,
@@ -198,8 +190,7 @@ export function useAppController({ backendConnection }: AppControllerOptions = {
     getAgentId: () => state.newTask.selection.agentId,
     getExistingSessionIds: () => state.newTask.nativeSessions.items.map((session) => session.session_id),
     getProjectId: () => state.newTask.selection.projectId,
-    latestSessionListRequestId,
-    nextSessionListRequestId,
+    asyncOperations: asyncOperations.current,
     onFailure: (failure) => sendWebviewTelemetry(postHostMessage, "native_sessions_load_failed", {
       surface: bootstrap.surface,
       request: failure.request,
@@ -227,7 +218,6 @@ export function useAppController({ backendConnection }: AppControllerOptions = {
     const selected = agents.find((agent) => agent.id === state.newTask.selection.agentId);
     if (selected && selected.enabled !== false) return;
     const fallback = agents.find((agent) => agent.enabled !== false) ?? defaultAgent;
-    latestOptionsRequestKey.current = undefined;
     newTaskDispatch({ type: "newTask:agent", agentId: fallback.id, agentLabel: fallback.label });
   }, [agents, bootstrap.surface, bootstrap.taskId, state.newTask.selection.agentId]);
 
@@ -292,10 +282,6 @@ export function useAppController({ backendConnection }: AppControllerOptions = {
     const key = agentProjectRequestKey(state.newTask.selection.agentId, projectId);
     if (latestNavigationSessionKey.current === key) return;
     latestNavigationSessionKey.current = key;
-    latestNativeSessionSelection.current = {
-      agentId: state.newTask.selection.agentId,
-      workspaceRoot: state.newTask.selection.workspaceRoot,
-    };
     requestNativeSessions();
   }, [
     backendReady,
@@ -333,18 +319,11 @@ export function useAppController({ backendConnection }: AppControllerOptions = {
   const callbacks = createAppCallbacks({
     acceptTaskOpen: acceptSnapshotRequest,
     attachmentResources,
+    asyncOperations: operationOwner,
     backendConnection: backendConnectionRef,
-    beginNavigationChange,
     clientInstanceId,
-    createChatPageRequestGeneration: () => {
-      nextChatPageRequestGeneration.current += 1;
-      return nextChatPageRequestGeneration.current;
-    },
     createSnapshotRequestId,
-    currentNavigationGeneration,
-    currentNewTaskPreparationKey: () => currentNewTaskPreparationKey.current,
     dispatch: newTaskDispatch,
-    latestOptionsRequestKey,
     newTaskStartAttempt,
     pendingPreparedNewTask: pendingPreparedNewTaskForKey,
     newTaskController: newTaskController,

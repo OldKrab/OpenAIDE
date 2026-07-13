@@ -10,7 +10,7 @@ This is the living register of architectural and encapsulation problems found wh
 
 ## AP-001: Stale asynchronous result protection is fragmented
 
-**Status:** confirmed
+**Status:** resolved
 
 **Area:** Frontend navigation and asynchronous workflows
 
@@ -28,6 +28,8 @@ In the Web App, an in-app navigation intent can also invalidate the generation o
 **Impact:** A new asynchronous path can omit one guard, accept a late response, or apply a result to the wrong Task, route, preparation context, or App Server replica.
 
 **Desired direction:** Put operation currency and result acceptance behind a deeper navigation/async-operation module. Preserve specialized ordering where needed, but remove the need for individual workflows to coordinate several independent stale-response mechanisms.
+
+**Implementation:** `AsyncOperationOwner` is now the single Frontend authority for asynchronous-result ownership. Navigation, Native Session loading and adoption, New Task preparation, file browsing, configuration changes, chat pagination, startup reads, App Server replica replacement, and Task snapshot ordering all use its leases. Workflows choose only the real lifetime boundary: navigation-owned work expires on a surface change, while client-private New Task preparation survives navigation and expires when its context or App Server replica changes. Snapshot request ordering remains encapsulated inside the same module. A matching shell route consumes the pending Frontend navigation intent without invalidating work a second time; browser history and other external route changes invalidate it once. The independent generation counter, snapshot tracker, request-id refs, caller-combined generation checks, and dead option-reset plumbing were removed rather than retained as compatibility behavior.
 
 ## AP-002: Shared Frontend owns concrete App Shell routing
 

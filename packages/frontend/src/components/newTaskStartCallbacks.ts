@@ -29,13 +29,13 @@ import {
   submitErrorMessage,
 } from "./newTaskStartSupport";
 import type { NewTaskController, NewTaskLease } from "./newTaskController";
+import { newTaskNavigationTarget, taskNavigationTarget } from "../state/asyncOperationOwner";
 
 type NewTaskStartDependencies = Pick<
   AppCallbacksDependencies,
   | "attachmentResources"
   | "backendConnection"
-  | "beginNavigationChange"
-  | "currentNavigationGeneration"
+  | "asyncOperations"
   | "dispatch"
   | "newTaskStartAttempt"
   | "pendingPreparedNewTask"
@@ -57,7 +57,7 @@ export function createNewTaskStartCallbacks(
 function cancelNewTaskStart({
   attachmentResources,
   backendConnection,
-  beginNavigationChange,
+  asyncOperations,
   dispatch,
   newTaskStartAttempt,
   newTaskController,
@@ -66,7 +66,7 @@ function cancelNewTaskStart({
   const attempt = newTaskStartAttempt.current;
   const nativeSessionOpening = state.newTask.nativeSessions.adoptingSessionId !== undefined;
   if ((!attempt && !nativeSessionOpening) || attempt?.cancelled) return;
-  beginNavigationChange();
+  asyncOperations.beginNavigation(newTaskNavigationTarget(state.newTask.selection.projectId));
   if (attempt) attempt.cancelled = true;
   dispatch({ type: "submit:cancel" });
   postHostMessage(state.newTask.selection.projectId
@@ -105,7 +105,7 @@ type SubmitNewTaskDependencies = NewTaskStartDependencies & { draft?: NewTaskDra
 async function submitNewTask({
   attachmentResources,
   backendConnection,
-  currentNavigationGeneration,
+  asyncOperations,
   dispatch,
   draft,
   newTaskStartAttempt,
@@ -141,7 +141,7 @@ async function submitNewTask({
   dispatch(draft
     ? { type: "submit:start", prompt: draftInput.prompt, context: draftInput.context }
     : { type: "submit:start" });
-  const navigationGeneration = currentNavigationGeneration();
+  const operation = asyncOperations.claim("new-task-send");
   let createdTaskId: TaskId | undefined;
   let newTaskLease: NewTaskLease | undefined;
   let sendStarted = false;
@@ -206,7 +206,7 @@ async function submitNewTask({
           acceptPreparedTask: () => !attempt.cancelled,
           discardPreparedTask: discardNewTask,
           preparedTask: pendingTask,
-          snapshotIntent: currentNavigationGeneration() === navigationGeneration ? "open" : "refresh",
+          snapshotIntent: asyncOperations.owns(operation) ? "open" : "refresh",
         },
       );
       taskId = prepared.taskId;
@@ -257,14 +257,15 @@ async function submitNewTask({
     dispatch({
       type: "task:promoted",
       snapshot,
-      activate: currentNavigationGeneration() === navigationGeneration,
+      activate: asyncOperations.owns(operation),
     });
     dispatch({
       type: "taskSend:accepted",
       taskId,
       userMessageId: sent.userMessageId,
     });
-    if (currentNavigationGeneration() === navigationGeneration) {
+    if (asyncOperations.owns(operation)) {
+      asyncOperations.expectNavigation(taskNavigationTarget(taskId));
       postHostMessage({
         type: "surface.openTask",
         payload: {

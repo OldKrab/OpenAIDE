@@ -132,7 +132,6 @@ export function AppPrimaryTaskSurface({ controller, focusRequestKey, model }: Ap
       onSelectConfigOption={callbacks.newTask.selectConfigOption}
       onSubmitTask={callbacks.newTask.submit}
       projectContextMode={isWebShell ? "selectable" : "fixed"}
-      resetOptionsRequestKey={callbacks.newTask.resetOptionsRequestKey}
       state={newTaskState}
       submitShortcut={preferences.composer_submit_shortcut}
       workspaceBrowser={callbacks.newTask.workspaceBrowser}

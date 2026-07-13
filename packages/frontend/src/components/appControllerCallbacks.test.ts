@@ -45,6 +45,7 @@ import { projectIdForWorkspaceRoot } from "../state/projectIdentity";
 import { appReducer } from "../state/appReducer";
 import { createInitialState, type AppState } from "../state/store";
 import { newTaskPreparationKey } from "../state/newTaskPreparationContext";
+import { AsyncOperationOwner } from "../state/asyncOperationOwner";
 import { NewTaskController } from "./newTaskController";
 
 const postHostMessage = vi.fn();
@@ -504,17 +505,33 @@ describe("app controller callbacks", () => {
       return Promise.reject(new Error(method));
     });
     const state = preparedNewTaskState("task_1");
-    let currentPreparationKey = newTaskPreparationKey(state);
+    const asyncOperations = new AsyncOperationOwner();
+    const backendConnection = {
+      request: request as unknown as BackendConnection["request"],
+      respond: vi.fn(),
+    };
     const fileBrowser = callbacks({
       attachmentResources,
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
-      currentNewTaskPreparationKey: () => currentPreparationKey,
+      asyncOperations,
+      backendConnection,
       dispatch,
       state,
     }).newTask.fileBrowser;
 
     const attaching = fileBrowser?.attachFileReference("entry-1" as FileBrowserEntryId);
-    currentPreparationKey = "project_2\u0000\u0000other-agent";
+    await vi.waitFor(() => expect(request).toHaveBeenCalledWith(ATTACHMENT_CREATE_FILE_REFERENCE, {
+      taskId: "task_1",
+      entryId: "entry-1",
+    }));
+    const nextState = {
+      ...state,
+      newTask: {
+        ...state.newTask,
+        selection: { ...state.newTask.selection, projectId: "project_2", agentId: "other-agent" },
+      },
+    };
+    const newerFileBrowser = callbacks({ asyncOperations, backendConnection, dispatch, state: nextState }).newTask.fileBrowser;
+    expect(newerFileBrowser?.ownerKey).not.toBe(fileBrowser?.ownerKey);
     selected.resolve({ attachment: { handleId: "late-handle", label: "late.md" } });
 
     await expect(attaching).rejects.toThrow("New Task context changed");
@@ -534,17 +551,29 @@ describe("app controller callbacks", () => {
       return Promise.reject(new Error(method));
     });
     const state = preparedNewTaskState();
-    let currentPreparationKey = newTaskPreparationKey(state);
+    const asyncOperations = new AsyncOperationOwner();
+    const backendConnection = {
+      request: request as unknown as BackendConnection["request"],
+      respond: vi.fn(),
+    };
     const fileBrowser = callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
-      currentNewTaskPreparationKey: () => currentPreparationKey,
+      asyncOperations,
+      backendConnection,
       dispatch,
       state,
     }).newTask.fileBrowser;
 
     const listing = fileBrowser?.listRoots();
     await Promise.resolve();
-    currentPreparationKey = "project_2\u0000\u0000other-agent";
+    const nextState = {
+      ...state,
+      newTask: {
+        ...state.newTask,
+        selection: { ...state.newTask.selection, projectId: "project_2", agentId: "other-agent" },
+      },
+    };
+    const newerFileBrowser = callbacks({ asyncOperations, backendConnection, dispatch, state: nextState }).newTask.fileBrowser;
+    expect(newerFileBrowser?.ownerKey).not.toBe(fileBrowser?.ownerKey);
     created.resolve({ task: protocolTaskSnapshot("task_late", "Late task") });
 
     await expect(listing).rejects.toThrow("New Task context changed");
@@ -2785,12 +2814,7 @@ describe("app controller callbacks", () => {
     const request = vi.fn(() => new Promise<{ task: ReturnType<typeof protocolTaskSnapshot> }>((resolve) => {
       resolveRequest = resolve;
     }));
-    let generation = 0;
-    const beginNavigationChange = vi.fn(() => {
-      generation += 1;
-      return generation;
-    });
-    const currentNavigationGeneration = vi.fn(() => generation);
+    const asyncOperations = new AsyncOperationOwner();
     const state = createInitialState();
     state.newTask.selection = {
       ...state.newTask.selection,
@@ -2802,8 +2826,7 @@ describe("app controller callbacks", () => {
 
     callbacks({
       backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
-      beginNavigationChange,
-      currentNavigationGeneration,
+      asyncOperations,
       dispatch,
       state,
     }).navigation.openNativeSession({
@@ -2813,7 +2836,7 @@ describe("app controller callbacks", () => {
       updated_at: "2026-06-27T00:00:00Z",
     });
 
-    generation += 1;
+    asyncOperations.beginNavigation("settings:default");
     resolveRequest?.({ task: protocolTaskSnapshot("task_1", "Native Session") });
     await settlePromises();
 
@@ -2835,16 +2858,15 @@ describe("app controller callbacks", () => {
   it("cancels native-session opening without letting its late result hijack the New Task surface", async () => {
     const adopted = deferred<{ task: ReturnType<typeof protocolTaskSnapshot> }>();
     const dispatch = vi.fn();
-    let generation = 0;
-    const beginNavigationChange = vi.fn(() => ++generation);
+    const asyncOperations = new AsyncOperationOwner();
+    const beginNavigation = vi.spyOn(asyncOperations, "beginNavigation");
     const state = preparedNewTaskState();
     const controllerCallbacks = callbacks({
       backendConnection: {
         request: vi.fn(() => adopted.promise) as unknown as BackendConnection["request"],
         respond: vi.fn(),
       },
-      beginNavigationChange,
-      currentNavigationGeneration: () => generation,
+      asyncOperations,
       dispatch,
       state,
     });
@@ -2861,7 +2883,7 @@ describe("app controller callbacks", () => {
     adopted.resolve({ task: protocolTaskSnapshot("task_adopted", "Native Session") });
     await settlePromises();
 
-    expect(beginNavigationChange).toHaveBeenCalledTimes(2);
+    expect(beginNavigation).toHaveBeenCalledTimes(2);
     expect(dispatch).toHaveBeenCalledWith({ type: "submit:cancel" });
     expect(dispatch).toHaveBeenCalledWith({
       type: "newTask:nativeSessions:remove",
@@ -2873,7 +2895,7 @@ describe("app controller callbacks", () => {
 
   it("does not let a stale native-session result unlock a newer first send", async () => {
     const adopted = deferred<{ task: ReturnType<typeof protocolTaskSnapshot> }>();
-    let generation = 0;
+    const asyncOperations = new AsyncOperationOwner();
     let renderedState = preparedNewTaskState();
     const callbackState = renderedState;
     const dispatch = vi.fn((action) => {
@@ -2884,8 +2906,7 @@ describe("app controller callbacks", () => {
         request: vi.fn(() => adopted.promise) as unknown as BackendConnection["request"],
         respond: vi.fn(),
       },
-      beginNavigationChange: () => ++generation,
-      currentNavigationGeneration: () => generation,
+      asyncOperations,
       dispatch,
       state: callbackState,
     });
@@ -2918,7 +2939,7 @@ describe("app controller callbacks", () => {
     const request = vi.fn(() => new Promise((_, reject) => {
       rejectRequest = reject;
     }));
-    let generation = 0;
+    const asyncOperations = new AsyncOperationOwner();
     const state = createInitialState();
     state.newTask.selection = {
       ...state.newTask.selection,
@@ -2930,8 +2951,7 @@ describe("app controller callbacks", () => {
 
     callbacks({
       backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
-      beginNavigationChange: () => ++generation,
-      currentNavigationGeneration: () => generation,
+      asyncOperations,
       dispatch,
       state,
     }).navigation.openNativeSession({
@@ -2941,7 +2961,7 @@ describe("app controller callbacks", () => {
       updated_at: "2026-06-27T00:00:00Z",
     });
 
-    generation += 1;
+    asyncOperations.beginNavigation("settings:default");
     rejectRequest?.(new Error("Slow session load failed"));
     await settlePromises();
 
@@ -3087,7 +3107,6 @@ describe("app controller callbacks", () => {
 
     callbacks({
       backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
-      beginNavigationChange: vi.fn(),
       dispatch,
       state,
     }).navigation.restoreTask("task_1");
@@ -3180,13 +3199,14 @@ describe("app controller callbacks", () => {
   });
 
   it("toggles archive mode and reports an error when listing without BackendConnection", () => {
-    const beginNavigationChange = vi.fn();
+    const asyncOperations = new AsyncOperationOwner();
+    const beginNavigation = vi.spyOn(asyncOperations, "beginNavigation");
     const dispatch = vi.fn();
     const state = createInitialState();
 
-    callbacks({ beginNavigationChange, dispatch, state }).navigation.toggleArchived();
+    callbacks({ asyncOperations, dispatch, state }).navigation.toggleArchived();
 
-    expect(beginNavigationChange).toHaveBeenCalledWith(true);
+    expect(beginNavigation).toHaveBeenCalledWith("navigation:archived", true);
     expect(dispatch).toHaveBeenNthCalledWith(1, { type: "archive:set", showArchived: true });
     expect(postHostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "surface.openArchive" }));
     expect(postHostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "surface.openNewTask" }));
@@ -3195,11 +3215,12 @@ describe("app controller callbacks", () => {
       message: "App Server connection unavailable.",
     });
     expect(postHostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "task.list" }));
-    expectCalledBefore(beginNavigationChange, dispatch);
+    expectCalledBefore(beginNavigation, dispatch);
   });
 
   it("toggles archive mode through typed task list when BackendConnection is available", async () => {
-    const beginNavigationChange = vi.fn();
+    const asyncOperations = new AsyncOperationOwner();
+    const beginNavigation = vi.spyOn(asyncOperations, "beginNavigation");
     const dispatch = vi.fn();
     const request = vi.fn(async () => ({
       revision: 7,
@@ -3210,13 +3231,13 @@ describe("app controller callbacks", () => {
 
     callbacks({
       backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
-      beginNavigationChange,
+      asyncOperations,
       dispatch,
       state,
     }).navigation.toggleArchived();
     await settlePromises();
 
-    expect(beginNavigationChange).toHaveBeenCalledWith(true);
+    expect(beginNavigation).toHaveBeenCalledWith("navigation:archived", true);
     expect(dispatch).toHaveBeenNthCalledWith(1, { type: "archive:set", showArchived: true });
     expect(postHostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "surface.openArchive" }));
     expect(postHostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "surface.openNewTask" }));
@@ -3230,7 +3251,8 @@ describe("app controller callbacks", () => {
   });
 
   it("uses cached archive task list without requesting it again", async () => {
-    const beginNavigationChange = vi.fn();
+    const asyncOperations = new AsyncOperationOwner();
+    const beginNavigation = vi.spyOn(asyncOperations, "beginNavigation");
     const dispatch = vi.fn();
     const request = vi.fn(async () => ({
       revision: 7,
@@ -3241,20 +3263,19 @@ describe("app controller callbacks", () => {
 
     callbacks({
       backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
-      beginNavigationChange,
+      asyncOperations,
       dispatch,
       state,
     }).navigation.toggleArchived();
     await settlePromises();
 
-    expect(beginNavigationChange).toHaveBeenCalledWith(true);
+    expect(beginNavigation).toHaveBeenCalledWith("navigation:archived", true);
     expect(dispatch).toHaveBeenCalledWith({ type: "archive:set", showArchived: true });
     expect(request).not.toHaveBeenCalled();
   });
 
   it("reports an error for config option changes without BackendConnection", () => {
     const dispatch = vi.fn();
-    const latestOptionsRequestKey = { current: undefined as string | undefined };
     const state = createInitialState();
     state.newTask.selection = {
       ...state.newTask.selection,
@@ -3262,9 +3283,8 @@ describe("app controller callbacks", () => {
       projectId: "project-1",
     };
 
-    callbacks({ dispatch, latestOptionsRequestKey, state }).newTask.selectConfigOption("model", "gpt-5");
+    callbacks({ dispatch, state }).newTask.selectConfigOption("model", "gpt-5");
 
-    expect(latestOptionsRequestKey.current).toBeUndefined();
     expect(dispatch).toHaveBeenCalledWith({
       type: "newTask:configOptions:error",
       message: "Task session is not ready yet.",
@@ -3275,7 +3295,6 @@ describe("app controller callbacks", () => {
   it("uses the prepared Task Native Session for config option changes", async () => {
     const dispatch = vi.fn();
     const request = vi.fn(async () => ({ task: protocolTaskSnapshot("task-prepared", "New task") }));
-    const latestOptionsRequestKey = { current: undefined as string | undefined };
     const state = createInitialState();
     state.newTask.selection = {
       ...state.newTask.selection,
@@ -3290,7 +3309,6 @@ describe("app controller callbacks", () => {
     callbacks({
       backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
       dispatch,
-      latestOptionsRequestKey,
       state,
     }).newTask.selectConfigOption("model", "gpt-5");
     await settlePromises();
@@ -3342,7 +3360,7 @@ describe("app controller callbacks", () => {
 
   it("loads earlier chat pages through BackendConnection", async () => {
     const dispatch = vi.fn();
-    const createChatPageRequestGeneration = vi.fn(() => 37);
+    const asyncOperations = new AsyncOperationOwner();
     const request = vi.fn(async () => ({
       taskId: "task_1",
       items: [{
@@ -3362,17 +3380,17 @@ describe("app controller callbacks", () => {
 
     const requestGeneration = callbacks({
       backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
-      createChatPageRequestGeneration,
+      asyncOperations,
       dispatch,
       state,
     }).task.loadChatPage("cursor_1");
     await settlePromises();
 
-    expect(requestGeneration).toBe(37);
+    expect(requestGeneration).toEqual(expect.any(Number));
     expect(dispatch).toHaveBeenNthCalledWith(1, {
       type: "chatPage:start",
       taskId: "task_1",
-      requestGeneration: 37,
+      requestGeneration,
     });
     expect(request).toHaveBeenCalledWith(TASK_CHAT_PAGE, {
       taskId: "task_1",
@@ -3382,7 +3400,7 @@ describe("app controller callbacks", () => {
     expect(dispatch).toHaveBeenCalledWith({
       type: "chatPage:result",
       taskId: "task_1",
-      requestGeneration: 37,
+      requestGeneration,
       page: expect.objectContaining({
         task_id: "task_1",
         items: [expect.objectContaining({ message_id: "msg_1" })],
@@ -3465,14 +3483,10 @@ describe("app controller callbacks", () => {
 
 function callbacks({
   attachmentResources,
+  asyncOperations = new AsyncOperationOwner(),
   backendConnection,
-  beginNavigationChange = vi.fn(() => 1),
-  createChatPageRequestGeneration = vi.fn(() => 1),
-  currentNavigationGeneration = vi.fn(() => 1),
   state = createInitialState(),
-  currentNewTaskPreparationKey = () => newTaskPreparationKey(state),
   dispatch = vi.fn(),
-  latestOptionsRequestKey = { current: undefined as string | undefined },
   newTaskStartAttempt = { current: undefined },
   pendingPreparedNewTask = vi.fn(() => undefined),
   newTaskController,
@@ -3493,15 +3507,11 @@ function callbacks({
   }
   return createAppCallbacks({
     attachmentResources,
+    asyncOperations,
     backendConnection,
-    beginNavigationChange,
     clientInstanceId: "test-client",
-    createChatPageRequestGeneration,
     createSnapshotRequestId: vi.fn(() => 91),
-    currentNavigationGeneration,
-    currentNewTaskPreparationKey,
     dispatch,
-    latestOptionsRequestKey,
     newTaskStartAttempt,
     pendingPreparedNewTask,
     newTaskController: ownedNewTaskController,

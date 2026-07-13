@@ -1,7 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { HostToWebviewMessage } from "@openaide/app-shell-contracts";
 import { routeHostMessage } from "./hostMessageRouter";
-import { SnapshotRequestTracker } from "./snapshotRequests";
 import type { HostMessageRouterContext } from "./hostMessageRouterTypes";
 
 describe("host message router", () => {
@@ -72,12 +71,6 @@ function routerContextBase() {
     dispatch: vi.fn(),
     setAgents: vi.fn(),
     setPreferences: vi.fn(),
-    snapshotRequests: { current: new SnapshotRequestTracker() },
-    latestOptionsRequestKey: { current: undefined as string | undefined },
-    latestSessionListRequestId: { current: undefined as number | undefined },
-    nextSessionListRequestId: { current: 0 },
-    latestNativeSessionSelection: { current: { agentId: "codex", workspaceRoot: "/workspace/app" } },
-    createSnapshotRequestId: vi.fn(() => 1),
     postHostMessage: vi.fn(),
   };
 }

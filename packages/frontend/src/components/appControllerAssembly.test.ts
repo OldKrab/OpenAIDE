@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { TaskSummary } from "@openaide/app-shell-contracts";
 import { AppServerProtocolError } from "@openaide/app-server-client";
 import { createInitialState } from "../state/store";
+import { AsyncOperationOwner } from "../state/asyncOperationOwner";
 import { appControllerDerivedStateDeps, deriveAppControllerState, visibleTasks } from "./appControllerDerivedState";
 import { requestControllerNativeSessions } from "./appControllerNativeSessions";
 
@@ -234,11 +235,10 @@ describe("requestControllerNativeSessions", () => {
 
     requestControllerNativeSessions({
       agentId: "codex",
+      asyncOperations: new AsyncOperationOwner(),
       backendConnection: { request },
       dispatch,
-      latestSessionListRequestId: { current: undefined },
       minimumSessionCount: 3,
-      nextSessionListRequestId: { current: 0 },
       projectId: "project-1",
     });
     await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(2));
@@ -296,13 +296,12 @@ describe("requestControllerNativeSessions", () => {
     requestControllerNativeSessions({
       agentId: "codex",
       append: true,
+      asyncOperations: new AsyncOperationOwner(),
       backendConnection: { request },
       cursor: "cursor_2",
       dispatch,
       existingSessionIds: ["session_1"],
-      latestSessionListRequestId: { current: undefined },
       minimumSessionCount: 2,
-      nextSessionListRequestId: { current: 0 },
       projectId: "project-1",
     });
     await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(2));
@@ -336,13 +335,12 @@ describe("requestControllerNativeSessions", () => {
     requestControllerNativeSessions({
       agentId: "codex",
       append: true,
+      asyncOperations: new AsyncOperationOwner(),
       backendConnection: { request },
       cursor: "cursor_2",
       dispatch,
       existingSessionIds: ["session_1"],
-      latestSessionListRequestId: { current: undefined },
       minimumSessionCount: 2,
-      nextSessionListRequestId: { current: 0 },
       projectId: "project-1",
     });
     await vi.waitFor(() => expect(dispatch).toHaveBeenCalledTimes(2));
@@ -372,10 +370,9 @@ describe("requestControllerNativeSessions", () => {
 
     requestControllerNativeSessions({
       agentId: "codex",
+      asyncOperations: new AsyncOperationOwner(),
       backendConnection: { request },
       dispatch,
-      latestSessionListRequestId: { current: undefined },
-      nextSessionListRequestId: { current: 0 },
       onFailure,
       projectId: "project-current",
     });
@@ -397,22 +394,17 @@ describe("requestControllerNativeSessions", () => {
     });
   });
 
-  it("increments request ids and reports an error when listing sessions without BackendConnection", () => {
+  it("reports an error when listing sessions without BackendConnection", () => {
     const dispatch = vi.fn();
-    const latestSessionListRequestId = { current: undefined as number | undefined };
-    const nextSessionListRequestId = { current: 41 };
 
     requestControllerNativeSessions({
       agentId: "codex",
       append: true,
+      asyncOperations: new AsyncOperationOwner(),
       cursor: "cursor_2",
       dispatch,
-      latestSessionListRequestId,
-      nextSessionListRequestId,
     });
 
-    expect(nextSessionListRequestId.current).toBe(42);
-    expect(latestSessionListRequestId.current).toBe(42);
     expect(dispatch).toHaveBeenCalledWith({ type: "newTask:nativeSessions:start", append: true });
     expect(dispatch).toHaveBeenCalledWith({
       type: "newTask:nativeSessions:listError",
@@ -422,14 +414,11 @@ describe("requestControllerNativeSessions", () => {
 
   it("defaults append to false for fresh navigation loads", () => {
     const dispatch = vi.fn();
-    const latestSessionListRequestId = { current: undefined as number | undefined };
-    const nextSessionListRequestId = { current: 0 };
 
     requestControllerNativeSessions({
       agentId: "codex",
+      asyncOperations: new AsyncOperationOwner(),
       dispatch,
-      latestSessionListRequestId,
-      nextSessionListRequestId,
     });
 
     expect(dispatch).toHaveBeenCalledWith({ type: "newTask:nativeSessions:start", append: false });
@@ -454,15 +443,11 @@ describe("requestControllerNativeSessions", () => {
       }],
       nextCursor: "cursor_2",
     });
-    const latestSessionListRequestId = { current: undefined as number | undefined };
-    const nextSessionListRequestId = { current: 0 };
-
     requestControllerNativeSessions({
       agentId: "codex",
+      asyncOperations: new AsyncOperationOwner(),
       backendConnection: { request },
       dispatch,
-      latestSessionListRequestId,
-      nextSessionListRequestId,
       projectId: "project-1",
     });
 

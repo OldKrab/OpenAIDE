@@ -10,6 +10,12 @@ import { TASK_NAVIGATION_PAGE_SIZE } from "../state/taskNavigationPolicy";
 import { newTaskPreparationKey } from "../state/newTaskPreparationContext";
 import type { AppCallbacksDependencies, NavigationCallbacks } from "./appControllerCallbackTypes";
 import {
+  newTaskNavigationTarget,
+  settingsNavigationTarget,
+  taskListNavigationTarget,
+  taskNavigationTarget,
+} from "../state/asyncOperationOwner";
+import {
   disposableNewTaskControllerId,
   type NewTaskController,
 } from "./newTaskController";
@@ -19,9 +25,8 @@ type NavigationDependencies = Pick<
   | "acceptTaskOpen"
   | "attachmentResources"
   | "backendConnection"
-  | "beginNavigationChange"
+  | "asyncOperations"
   | "createSnapshotRequestId"
-  | "currentNavigationGeneration"
   | "dispatch"
   | "requestNativeSessions"
   | "state"
@@ -31,9 +36,8 @@ export function createNavigationCallbacks({
   acceptTaskOpen,
   attachmentResources,
   backendConnection,
-  beginNavigationChange,
+  asyncOperations,
   createSnapshotRequestId,
-  currentNavigationGeneration,
   dispatch,
   newTaskController,
   requestNativeSessions,
@@ -70,7 +74,8 @@ export function createNavigationCallbacks({
         dispatch({ type: "selection:clear" });
       }
       if (backendConnection?.request) {
-        if (archivingActiveTask) {
+      if (archivingActiveTask) {
+          asyncOperations.beginNavigation(newTaskNavigationTarget(archivedProjectId));
           postHostMessage(archivedProjectId
             ? { type: "surface.openNewTask", payload: { project_id: archivedProjectId } }
             : { type: "surface.openNewTask" });
@@ -123,7 +128,8 @@ export function createNavigationCallbacks({
     openNativeSession: (session) => {
       if (state.newTask.submitting) return;
       const newTaskDisposal = discardNewTask();
-      const navigationGeneration = beginNavigationChange();
+      asyncOperations.beginNavigation();
+      const operation = asyncOperations.claim("native-session-adoption");
       dispatch({ type: "newTask:nativeSessions:adopt", sessionId: session.session_id });
       if (backendConnection?.request) {
         const request = backendConnection.request;
@@ -144,13 +150,14 @@ export function createNavigationCallbacks({
         });
         const adoption = newTaskDisposal ? newTaskDisposal.then(adopt) : adopt();
         void adoption.then((result) => {
-          if (currentNavigationGeneration() !== navigationGeneration) {
+          if (!asyncOperations.owns(operation)) {
             dispatch({ type: "newTask:nativeSessions:remove", sessionId: session.session_id });
             return;
           }
           const snapshot = mapProtocolTaskSnapshot(result.task).snapshot;
           dispatch({ type: "snapshot", snapshot, intent: "open" });
           dispatch({ type: "newTask:nativeSessions:remove", sessionId: session.session_id });
+          asyncOperations.expectNavigation(taskNavigationTarget(snapshot.task.task_id));
           postHostMessage({
             type: "surface.openTask",
             payload: {
@@ -159,7 +166,7 @@ export function createNavigationCallbacks({
             },
           });
         }).catch((error) => {
-          if (currentNavigationGeneration() !== navigationGeneration) return;
+          if (!asyncOperations.owns(operation)) return;
           dispatch({
             type: "newTask:nativeSessions:error",
             sessionId: session.session_id,
@@ -175,17 +182,17 @@ export function createNavigationCallbacks({
       });
     },
     openNewTask: (projectId) => {
-      beginNavigationChange();
+      asyncOperations.beginNavigation(newTaskNavigationTarget(projectId));
       postHostMessage(projectId
         ? { type: "surface.openNewTask", payload: { project_id: projectId } }
         : { type: "surface.openNewTask" });
     },
     openSettings: () => {
-      beginNavigationChange();
+      asyncOperations.beginNavigation(settingsNavigationTarget());
       postHostMessage({ type: "surface.openSettings" });
     },
     openTask: (taskId) => {
-      beginNavigationChange();
+      asyncOperations.beginNavigation(taskNavigationTarget(taskId));
       const task = state.tasks.find((item) => item.task_id === taskId);
       dispatch({ type: "selection:set", taskId });
       postHostMessage({ type: "surface.openTask", payload: { task_id: taskId, title: task?.title } });
@@ -204,7 +211,7 @@ export function createNavigationCallbacks({
           ),
         ).then(() => {
           dispatch({ type: "taskInput:clear", taskId });
-          beginNavigationChange(false);
+          asyncOperations.beginNavigation(taskNavigationTarget(taskId), false);
           dispatch({ type: "archive:set", showArchived: false });
           postHostMessage({ type: "surface.openTask", payload: { task_id: taskId } });
         }).catch((error) => dispatch({
@@ -217,7 +224,7 @@ export function createNavigationCallbacks({
     },
     toggleArchived: () => {
       const showArchived = !state.showArchived;
-      beginNavigationChange(showArchived);
+      asyncOperations.beginNavigation(taskListNavigationTarget(showArchived), showArchived);
       dispatch({ type: "archive:set", showArchived });
       const cachedTasks = state.taskListCache[showArchived ? "archived" : "active"];
       if (cachedTasks !== undefined) return;

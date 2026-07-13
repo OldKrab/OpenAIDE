@@ -25,7 +25,6 @@ export function NewTaskView({
   onCancelTask,
   onRemoveAttachment,
   onSubmitTask,
-  resetOptionsRequestKey,
   agents,
   loadingProjects = false,
   submitShortcut,
@@ -45,7 +44,6 @@ export function NewTaskView({
   onCancelTask?: () => void;
   onRemoveAttachment: (attachmentId: string) => void;
   onSubmitTask: (draft: { prompt: string; context: AppState["newTask"]["context"] }) => void;
-  resetOptionsRequestKey: () => void;
   agents?: AgentOption[];
   submitShortcut: AppPreferencesRecord["composer_submit_shortcut"];
 }) {
@@ -119,7 +117,6 @@ export function NewTaskView({
   const selectWorkspacePath = (path: string, label = workspaceLabel(path)) => {
     const trimmedPath = path.trim();
     if (!trimmedPath) return;
-    resetOptionsRequestKey();
     dispatch({
       type: "newTask:workspace",
       workspace: {
@@ -166,7 +163,6 @@ export function NewTaskView({
       }
       onRemoveAttachment={onRemoveAttachment}
       onSelectAgent={(agentId) => {
-        resetOptionsRequestKey();
         dispatch({
           type: "newTask:agent",
           agentId,
@@ -232,7 +228,6 @@ export function NewTaskView({
                     key={project.projectId}
                     label={project.label}
                     onClick={() => selectContextAndClose(() => {
-                      resetOptionsRequestKey();
                       dispatch({ type: "newTask:project", project });
                     })}
                   />
@@ -301,7 +296,6 @@ export function NewTaskView({
                     label={agent.label}
                     onClick={() =>
                       selectContextAndClose(() => {
-                        resetOptionsRequestKey();
                         dispatch({
                           type: "newTask:agent",
                           agentId: agent.id,

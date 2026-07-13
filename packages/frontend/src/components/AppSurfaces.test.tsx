@@ -672,7 +672,6 @@ describe("AppSurfaces callback wiring", () => {
       expect.objectContaining({
         onSelectConfigOption: controller.callbacks.newTask.selectConfigOption,
         onSubmitTask: controller.callbacks.newTask.submit,
-        resetOptionsRequestKey: controller.callbacks.newTask.resetOptionsRequestKey,
       }),
       undefined,
     );
@@ -813,7 +812,6 @@ function controllerFor(surface: AppController["bootstrap"]["surface"]): AppContr
       newTask: {
         cancel: vi.fn(),
         removeAttachment: vi.fn(),
-        resetOptionsRequestKey: vi.fn(),
         selectConfigOption: vi.fn(),
         submit: vi.fn(),
       },

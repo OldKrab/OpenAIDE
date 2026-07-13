@@ -37,10 +37,8 @@ type NewTaskBrowserDependencies = Pick<
   AppCallbacksDependencies,
   | "attachmentResources"
   | "backendConnection"
-  | "currentNavigationGeneration"
-  | "currentNewTaskPreparationKey"
+  | "asyncOperations"
   | "dispatch"
-  | "latestOptionsRequestKey"
   | "pendingPreparedNewTask"
   | "state"
 > & { newTaskController: NewTaskController };
@@ -56,25 +54,32 @@ export function createNewTaskBrowserCallbacks(
 }
 
 function createWorkspaceBrowserCallbacks({
+  asyncOperations,
   backendConnection,
-  currentNavigationGeneration,
-}: Pick<NewTaskBrowserDependencies, "backendConnection" | "currentNavigationGeneration">) {
+}: Pick<NewTaskBrowserDependencies, "asyncOperations" | "backendConnection">) {
   const request = backendConnection?.request;
   if (!request) return undefined;
+  const operation = asyncOperations.scope("new-task-workspace-browser", "new-task");
   return {
-    ownerKey: `new-task-workspace:${currentNavigationGeneration()}`,
-    listRoots: async () => (await request(WORKSPACE_LIST_ROOTS, {})).roots,
-    listDirectory: async (path: string) => request(WORKSPACE_LIST_DIRECTORY, { path }),
+    ownerKey: `new-task-workspace:${operation.id}`,
+    listRoots: async () => {
+      const result = await request(WORKSPACE_LIST_ROOTS, {});
+      if (!asyncOperations.owns(operation)) throw new SupersededNewTaskFileBrowserOperation();
+      return result.roots;
+    },
+    listDirectory: async (path: string) => {
+      const result = await request(WORKSPACE_LIST_DIRECTORY, { path });
+      if (!asyncOperations.owns(operation)) throw new SupersededNewTaskFileBrowserOperation();
+      return result;
+    },
   };
 }
 
 function createFileBrowserCallbacks({
   attachmentResources,
+  asyncOperations,
   backendConnection,
-  currentNavigationGeneration,
-  currentNewTaskPreparationKey,
   dispatch,
-  latestOptionsRequestKey,
   pendingPreparedNewTask,
   newTaskController,
   state,
@@ -82,15 +87,18 @@ function createFileBrowserCallbacks({
   const request = backendConnection?.request;
   if (!request) return undefined;
   const preparationKey = newTaskPreparationKey(state);
+  const operation = asyncOperations.scope(
+    "new-task-file-browser",
+    preparationKey ?? "unavailable",
+  );
   let preparedTaskId = preparedSnapshotMatchesSelection(state)
     ? state.snapshot?.task.task_id as TaskId
     : undefined;
-  const operationIsCurrent = (navigationGeneration: number) =>
+  const operationIsCurrent = () =>
     preparationKey !== undefined
-    && currentNewTaskPreparationKey() === preparationKey
-    && currentNavigationGeneration() === navigationGeneration;
-  const assertOperationCurrent = (navigationGeneration: number) => {
-    if (!operationIsCurrent(navigationGeneration)) throw new SupersededNewTaskFileBrowserOperation();
+    && asyncOperations.owns(operation);
+  const assertOperationCurrent = () => {
+    if (!operationIsCurrent()) throw new SupersededNewTaskFileBrowserOperation();
   };
   const discardNewTask = (taskId: TaskId) => newTaskController.discard({
     attachmentResources,
@@ -100,8 +108,7 @@ function createFileBrowserCallbacks({
     taskId,
   });
   const ensureTaskId = async (draft?: NewTaskDraftInput) => {
-    const navigationGeneration = currentNavigationGeneration();
-    assertOperationCurrent(navigationGeneration);
+    assertOperationCurrent();
     const activePreparationKey = preparationKey as string;
     if (preparedTaskId) {
       newTaskController.claim({
@@ -109,13 +116,12 @@ function createFileBrowserCallbacks({
         preparationKey: activePreparationKey,
         taskId: preparedTaskId,
       });
-      return { navigationGeneration, taskId: preparedTaskId };
+      return { taskId: preparedTaskId };
     }
 
     const staleTaskId = disposableNewTaskControllerId(state, newTaskController);
     if (staleTaskId) await discardNewTask(staleTaskId);
-    assertOperationCurrent(navigationGeneration);
-    latestOptionsRequestKey.current = undefined;
+    assertOperationCurrent();
     const pending = pendingPreparedNewTask(activePreparationKey);
     const pendingResult = pending ? await pending : undefined;
     if (pendingResult?.task && !preparedProtocolTaskMatchesSelection(pendingResult.task, state)) {
@@ -126,7 +132,7 @@ function createFileBrowserCallbacks({
       { backendConnection, dispatch, state },
       {
         acceptPreparedTask: (task) =>
-          operationIsCurrent(navigationGeneration)
+          operationIsCurrent()
           && preparedProtocolTaskMatchesSelection(task, state),
         discardPreparedTask: discardNewTask,
         preparedTask: pendingResult?.task,
@@ -134,7 +140,7 @@ function createFileBrowserCallbacks({
       },
     );
     if (
-      !operationIsCurrent(navigationGeneration)
+      !operationIsCurrent()
       || !preparedProtocolTaskMatchesSelection(prepared.task, state)
     ) {
       await discardNewTask(prepared.taskId);
@@ -155,7 +161,7 @@ function createFileBrowserCallbacks({
     if (draft) {
       dispatch({ type: "taskInput:prompt", taskId: prepared.taskId, prompt: draft.prompt });
     }
-    return { navigationGeneration, taskId: preparedTaskId };
+    return { taskId: preparedTaskId };
   };
   const releaseLateHandle = (taskId: TaskId, handleId: AttachmentHandleId) => {
     if (attachmentResources) {
@@ -166,11 +172,11 @@ function createFileBrowserCallbacks({
   };
 
   return {
-    ownerKey: `new-task-files:${currentNavigationGeneration()}:${preparationKey ?? "unavailable"}`,
+    ownerKey: `new-task-files:${operation.id}`,
     listRoots: async () => {
       const lease = await ensureTaskId();
       const result = await request(ATTACHMENT_LIST_ROOTS, { taskId: lease.taskId });
-      assertOperationCurrent(lease.navigationGeneration);
+      assertOperationCurrent();
       return result.roots;
     },
     listDirectory: async (rootId: FileBrowserRootId, directoryId?: FileBrowserEntryId) => {
@@ -180,7 +186,7 @@ function createFileBrowserCallbacks({
         rootId,
         directoryId,
       });
-      assertOperationCurrent(lease.navigationGeneration);
+      assertOperationCurrent();
       return result;
     },
     attachFileReference: async (entryId: FileBrowserEntryId) => {
@@ -194,7 +200,7 @@ function createFileBrowserCallbacks({
       if (attachmentResources?.adopt({ taskId: lease.taskId, handleId: result.attachment.handleId }, adoption) === false) {
         throw new SupersededNewTaskFileBrowserOperation();
       }
-      if (!operationIsCurrent(lease.navigationGeneration)) {
+      if (!operationIsCurrent()) {
         releaseLateHandle(lease.taskId, result.attachment.handleId);
         throw new SupersededNewTaskFileBrowserOperation();
       }
@@ -219,7 +225,7 @@ function createFileBrowserCallbacks({
       if (attachmentResources?.adopt({ taskId: lease.taskId, handleId: result.attachment.handleId }, adoption) === false) {
         throw new SupersededNewTaskFileBrowserOperation();
       }
-      if (!operationIsCurrent(lease.navigationGeneration)) {
+      if (!operationIsCurrent()) {
         releaseLateHandle(lease.taskId, result.attachment.handleId);
         throw new SupersededNewTaskFileBrowserOperation();
       }
@@ -243,13 +249,13 @@ function createFileBrowserCallbacks({
             if (status === "replacedReplica") return "forget";
             if (status === "expired") return "release";
           }
-          return operationIsCurrent(lease.navigationGeneration) ? "current" : "release";
+          return operationIsCurrent() ? "current" : "release";
         },
       );
       if (attachmentResources?.adopt({ taskId: lease.taskId, handleId: attachment.handleId }, adoption) === false) {
         throw new SupersededNewTaskFileBrowserOperation();
       }
-      if (!operationIsCurrent(lease.navigationGeneration)) {
+      if (!operationIsCurrent()) {
         releaseLateHandle(lease.taskId, attachment.handleId);
         throw new SupersededNewTaskFileBrowserOperation();
       }

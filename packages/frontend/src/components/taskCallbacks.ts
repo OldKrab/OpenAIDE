@@ -35,9 +35,9 @@ import { refreshTaskSnapshotAfterMutationFailure } from "./taskSnapshotRefresh";
 type TaskDependencies = Pick<
   AppCallbacksDependencies,
   | "attachmentResources"
+  | "asyncOperations"
   | "backendConnection"
   | "clientInstanceId"
-  | "createChatPageRequestGeneration"
   | "createSnapshotRequestId"
   | "dispatch"
   | "state"
@@ -47,9 +47,9 @@ type TaskBackendConnection = Partial<Pick<BackendConnection, "events" | "request
 
 export function createTaskCallbacks({
   attachmentResources,
+  asyncOperations,
   backendConnection,
   clientInstanceId,
-  createChatPageRequestGeneration,
   createSnapshotRequestId,
   dispatch,
   state,
@@ -73,7 +73,8 @@ export function createTaskCallbacks({
     loadChatPage: (beforeCursor) => {
       if (!state.snapshot) return;
       const task = state.snapshot.task;
-      const requestGeneration = createChatPageRequestGeneration();
+      const operation = asyncOperations.claim(`chat-page:${task.task_id}`);
+      const requestGeneration = operation.id;
       dispatch({ type: "chatPage:start", taskId: task.task_id, requestGeneration });
       if (!backendConnection?.request) {
         dispatch({
@@ -90,6 +91,7 @@ export function createTaskCallbacks({
         limit: 50,
       })
         .then((page) => {
+          if (!asyncOperations.owns(operation)) return;
           dispatch({
             type: "chatPage:result",
             taskId: task.task_id,
@@ -97,12 +99,15 @@ export function createTaskCallbacks({
             page: mapProtocolChatPage(page, task.updated_at),
           });
         })
-        .catch((error) => dispatch({
-          type: "chatPage:error",
-          taskId: task.task_id,
-          requestGeneration,
-          message: safeErrorMessage(error),
-        }));
+        .catch((error) => {
+          if (!asyncOperations.owns(operation)) return;
+          dispatch({
+            type: "chatPage:error",
+            taskId: task.task_id,
+            requestGeneration,
+            message: safeErrorMessage(error),
+          });
+        });
       return requestGeneration;
     },
     subscribeToolDetail: (artifactId) => {

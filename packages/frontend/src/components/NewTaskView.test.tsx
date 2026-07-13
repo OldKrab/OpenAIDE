@@ -41,7 +41,6 @@ describe("NewTaskView", () => {
         onSelectConfigOption={vi.fn()}
         onSubmitTask={vi.fn()}
         projectContextMode="fixed"
-        resetOptionsRequestKey={vi.fn()}
         state={state}
         submitShortcut="mod_enter"
       />,
@@ -62,7 +61,6 @@ describe("NewTaskView", () => {
         onSelectConfigOption={vi.fn()}
         onSubmitTask={vi.fn()}
         projectContextMode="fixed"
-        resetOptionsRequestKey={vi.fn()}
         state={state}
         submitShortcut="mod_enter"
       />,
@@ -87,7 +85,6 @@ describe("NewTaskView", () => {
         dispatch={vi.fn()}
         onSelectConfigOption={vi.fn()}
         onSubmitTask={vi.fn()}
-        resetOptionsRequestKey={vi.fn()}
         state={state}
         submitShortcut="mod_enter"
       />,
@@ -134,7 +131,6 @@ describe("NewTaskView", () => {
         dispatch={vi.fn()}
         onSelectConfigOption={vi.fn()}
         onSubmitTask={vi.fn()}
-        resetOptionsRequestKey={vi.fn()}
         state={state}
         submitShortcut="mod_enter"
       />,
@@ -156,7 +152,6 @@ describe("NewTaskView", () => {
         loadingProjects
         onSelectConfigOption={vi.fn()}
         onSubmitTask={vi.fn()}
-        resetOptionsRequestKey={vi.fn()}
         state={state}
         submitShortcut="mod_enter"
       />,
@@ -176,7 +171,6 @@ describe("NewTaskView", () => {
         dispatch={dispatch}
         onSelectConfigOption={vi.fn()}
         onSubmitTask={vi.fn()}
-        resetOptionsRequestKey={vi.fn()}
         state={state}
         submitShortcut="mod_enter"
       />,
@@ -206,7 +200,6 @@ describe("NewTaskView", () => {
         dispatch={dispatch}
         onSelectConfigOption={vi.fn()}
         onSubmitTask={vi.fn()}
-        resetOptionsRequestKey={vi.fn()}
         state={state}
         submitShortcut="mod_enter"
         workspaceBrowser={workspaceBrowserCallbacks()}
@@ -256,7 +249,6 @@ describe("NewTaskView", () => {
         dispatch={vi.fn()}
         onSelectConfigOption={vi.fn()}
         onSubmitTask={onSubmitTask}
-        resetOptionsRequestKey={vi.fn()}
         state={state}
         submitShortcut="mod_enter"
       />,
@@ -282,7 +274,6 @@ describe("NewTaskView", () => {
         dispatch={vi.fn()}
         onSelectConfigOption={vi.fn()}
         onSubmitTask={vi.fn()}
-        resetOptionsRequestKey={vi.fn()}
         state={state}
         submitShortcut="mod_enter"
       />,
@@ -307,7 +298,6 @@ describe("NewTaskView", () => {
         loadingProjects
         onSelectConfigOption={vi.fn()}
         onSubmitTask={onSubmitTask}
-        resetOptionsRequestKey={vi.fn()}
         state={state}
         submitShortcut="mod_enter"
       />,
@@ -342,7 +332,6 @@ describe("NewTaskView", () => {
         dispatch={vi.fn()}
         onSelectConfigOption={vi.fn()}
         onSubmitTask={onSubmitTask}
-        resetOptionsRequestKey={vi.fn()}
         state={state}
         submitShortcut="mod_enter"
       />,
@@ -374,7 +363,6 @@ describe("NewTaskView", () => {
         dispatch={dispatch}
         onSelectConfigOption={vi.fn()}
         onSubmitTask={onSubmitTask}
-        resetOptionsRequestKey={vi.fn()}
         state={state}
         submitShortcut="mod_enter"
       />,
@@ -394,7 +382,6 @@ describe("NewTaskView", () => {
         dispatch={dispatch}
         onSelectConfigOption={vi.fn()}
         onSubmitTask={onSubmitTask}
-        resetOptionsRequestKey={vi.fn()}
         state={state}
         submitShortcut="mod_enter"
       />,
@@ -420,7 +407,6 @@ describe("NewTaskView", () => {
         loadingProjects
         onSelectConfigOption={vi.fn()}
         onSubmitTask={vi.fn()}
-        resetOptionsRequestKey={vi.fn()}
         state={state}
         submitShortcut="mod_enter"
       />,
@@ -444,7 +430,6 @@ describe("NewTaskView", () => {
         fileBrowser={fileBrowserCallbacks()}
         onSelectConfigOption={vi.fn()}
         onSubmitTask={vi.fn()}
-        resetOptionsRequestKey={vi.fn()}
         state={state}
         submitShortcut="mod_enter"
       />,
@@ -481,7 +466,6 @@ describe("NewTaskView", () => {
         dispatch={vi.fn()}
         onSelectConfigOption={vi.fn()}
         onSubmitTask={vi.fn()}
-        resetOptionsRequestKey={vi.fn()}
         state={state}
         submitShortcut="mod_enter"
       />,
@@ -512,7 +496,6 @@ describe("NewTaskView", () => {
         dispatch={vi.fn()}
         onSelectConfigOption={vi.fn()}
         onSubmitTask={vi.fn()}
-        resetOptionsRequestKey={vi.fn()}
         state={state}
         submitShortcut="mod_enter"
       />,
@@ -549,7 +532,6 @@ describe("NewTaskView", () => {
         dispatch={vi.fn()}
         onSelectConfigOption={vi.fn()}
         onSubmitTask={vi.fn()}
-        resetOptionsRequestKey={vi.fn()}
         state={state}
         submitShortcut="mod_enter"
       />,
@@ -584,7 +566,6 @@ describe("NewTaskView", () => {
         dispatch={vi.fn()}
         onSelectConfigOption={vi.fn()}
         onSubmitTask={onSubmitTask}
-        resetOptionsRequestKey={vi.fn()}
         state={state}
         submitShortcut="mod_enter"
       />,
@@ -613,7 +594,6 @@ describe("NewTaskView", () => {
         loadingProjects
         onSelectConfigOption={vi.fn()}
         onSubmitTask={vi.fn()}
-        resetOptionsRequestKey={vi.fn()}
         state={state}
         submitShortcut="enter"
       />,
@@ -628,7 +608,6 @@ describe("NewTaskView", () => {
           dispatch={vi.fn()}
           onSelectConfigOption={vi.fn()}
           onSubmitTask={vi.fn()}
-          resetOptionsRequestKey={vi.fn()}
           state={state}
           submitShortcut="enter"
         />,
@@ -667,7 +646,6 @@ describe("NewTaskView", () => {
         onSelectConfigOption={vi.fn()}
         onCancelTask={onCancelTask}
         onSubmitTask={vi.fn()}
-        resetOptionsRequestKey={vi.fn()}
         state={state}
         submitShortcut="mod_enter"
       />,
@@ -709,7 +687,6 @@ describe("NewTaskView", () => {
         dispatch={vi.fn()}
         onSelectConfigOption={vi.fn()}
         onSubmitTask={vi.fn()}
-        resetOptionsRequestKey={vi.fn()}
         state={state}
         submitShortcut="mod_enter"
       />,
@@ -735,7 +712,6 @@ describe("NewTaskView", () => {
         dispatch={vi.fn()}
         onSelectConfigOption={vi.fn()}
         onSubmitTask={vi.fn()}
-        resetOptionsRequestKey={vi.fn()}
         state={state}
         submitShortcut="mod_enter"
       />,
@@ -765,7 +741,6 @@ describe("NewTaskView", () => {
         dispatch={vi.fn()}
         onSelectConfigOption={vi.fn()}
         onSubmitTask={vi.fn()}
-        resetOptionsRequestKey={vi.fn()}
         state={state}
         submitShortcut="mod_enter"
       />,
@@ -872,7 +847,6 @@ describe("NewTaskView", () => {
         dispatch={vi.fn()}
         onSelectConfigOption={vi.fn()}
         onSubmitTask={vi.fn()}
-        resetOptionsRequestKey={vi.fn()}
         state={state}
         submitShortcut="mod_enter"
       />,
@@ -913,7 +887,6 @@ describe("NewTaskView", () => {
         dispatch={vi.fn()}
         onSelectConfigOption={vi.fn()}
         onSubmitTask={vi.fn()}
-        resetOptionsRequestKey={vi.fn()}
         state={state}
         submitShortcut="mod_enter"
       />,

@@ -20,12 +20,9 @@ type NewTaskDependencies = Pick<
   AppCallbacksDependencies,
   | "attachmentResources"
   | "backendConnection"
-  | "beginNavigationChange"
+  | "asyncOperations"
   | "clientInstanceId"
-  | "currentNavigationGeneration"
-  | "currentNewTaskPreparationKey"
   | "dispatch"
-  | "latestOptionsRequestKey"
   | "newTaskStartAttempt"
   | "pendingPreparedNewTask"
   | "state"
@@ -35,13 +32,13 @@ type NewTaskDependencies = Pick<
 export function createNewTaskCallbacks(dependencies: NewTaskDependencies): NewTaskCallbacks {
   const {
     attachmentResources,
+    asyncOperations,
     backendConnection,
-    currentNavigationGeneration,
-    currentNewTaskPreparationKey,
     dispatch,
-    latestOptionsRequestKey,
     state,
   } = dependencies;
+  const configContext = newTaskPreparationKey(state) ?? "unavailable";
+  asyncOperations.scope("new-task-config", configContext);
   return {
     ...createNewTaskStartCallbacks(dependencies),
     ...createNewTaskBrowserCallbacks(dependencies),
@@ -67,12 +64,8 @@ export function createNewTaskCallbacks(dependencies: NewTaskDependencies): NewTa
           : [],
       );
     },
-    resetOptionsRequestKey: () => {
-      latestOptionsRequestKey.current = undefined;
-    },
     selectConfigOption: (configId, value) => {
-      const mutationNavigationGeneration = currentNavigationGeneration();
-      const mutationPreparationKey = newTaskPreparationKey(state);
+      const operation = asyncOperations.claim("new-task-config", configContext);
       const taskId = state.snapshot && !state.snapshot.task.has_messages
         ? state.snapshot.task.task_id
         : undefined;
@@ -84,18 +77,17 @@ export function createNewTaskCallbacks(dependencies: NewTaskDependencies): NewTa
           value,
           clientMutationId: createNewTaskMutationId(configId),
         }).then((result) => {
+          if (!asyncOperations.owns(operation)) return;
           dispatch({ type: "snapshot", snapshot: mapProtocolTaskSnapshot(result.task).snapshot, intent: "refresh" });
         }).catch(() => {
+          if (!asyncOperations.owns(operation)) return;
           dispatch({ type: "newTask:configOptions:error", message: "Unable to update Agent option." });
           void refreshTaskSnapshotAfterMutationFailure({
             dispatch,
             request,
             taskId,
           }).then(() => {
-            if (
-              currentNavigationGeneration() !== mutationNavigationGeneration
-              || currentNewTaskPreparationKey() !== mutationPreparationKey
-            ) return;
+            if (!asyncOperations.owns(operation)) return;
             // Snapshot ingestion clears transient new-task errors. Reassert only
             // the failure that still owns this exact preparation context.
             dispatch({ type: "newTask:configOptions:error", message: "Unable to update Agent option." });
