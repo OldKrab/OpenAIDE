@@ -58,6 +58,7 @@ pub enum TaskStatus {
     Starting,
     Idle,
     Running,
+    Stopping,
     Waiting,
     Interrupted,
     Failed,

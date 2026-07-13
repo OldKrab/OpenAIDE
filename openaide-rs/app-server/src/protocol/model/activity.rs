@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 pub enum ActivityStatus {
     Running,
     Completed,
+    Interrupted,
     Error,
 }
 

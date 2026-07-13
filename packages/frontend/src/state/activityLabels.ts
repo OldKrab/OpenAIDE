@@ -29,6 +29,7 @@ function groupedActivitySummary(activity: ActivityMessage) {
 
 export function activityStatusLabel(status: ActivityMessage["status"]) {
   if (status === "running") return "Running";
+  if (status === "interrupted") return "Interrupted";
   return undefined;
 }
 
@@ -79,10 +80,12 @@ export function activityStepProgressLabel(step: ActivityStep, activityTitle?: st
 export function activityStepCompletedLabel(step: ActivityStep) {
   if (step.kind === "thought") return "Thought";
   if (step.kind === "command") {
+    if (step.status === "interrupted") return `Command interrupted: ${step.command_label}`;
     return step.status === "error" ? `Command failed: ${step.command_label}` : `Ran ${step.command_label}`;
   }
   if (step.kind === "text") return step.text;
   const subject = toolSubjectLabel(step);
+  if (step.status === "interrupted") return progressLabel("Interrupted", subject ?? humanizeToolName(step.name));
   if (step.status === "error") return progressLabel("Failed to use", subject ?? humanizeToolName(step.name));
   if (isExecuteTool(step)) return progressLabel("Ran", subject ?? "command");
   if (step.name === "think") return "Used reasoning tool";
@@ -124,6 +127,7 @@ export function activityStepStatus(step: ActivityStep) {
   if (step.kind === "text" || step.kind === "thought") return undefined;
   if (step.kind === "command" && step.exit_code !== undefined) return `exit ${step.exit_code}`;
   if (step.status === "running") return "Running";
+  if (step.status === "interrupted") return "Interrupted";
   if (step.status === "error") return "Failed";
   return undefined;
 }

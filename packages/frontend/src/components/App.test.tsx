@@ -134,6 +134,7 @@ describe("task working status label", () => {
     expect(taskWorkingStatusLabel([], "waiting", false)).toBe("Permission needed");
     expect(taskWorkingStatusLabel([systemMessage("app-server-preparation")], "waiting", false)).toBe("Preparing task");
     expect(taskWorkingStatusLabel([], "inactive", false)).toBeUndefined();
+    expect(taskWorkingStatusLabel([], "stopping", false)).toBe("Stopping");
   });
 
   it("uses the live activity row for conversation history synchronization", async () => {

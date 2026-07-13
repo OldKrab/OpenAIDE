@@ -23,7 +23,7 @@ impl TaskTransitions {
         turn_id: &str,
     ) -> Result<bool, RuntimeError> {
         let mut prompt_may_start = false;
-        let result = self.mutations.commit_existing_task(
+        self.mutations.commit_existing_task(
             task_id,
             crate::tasks::mutation::TaskCommitOptions::metadata(),
             |ctx| {
@@ -44,8 +44,34 @@ impl TaskTransitions {
                 Ok(TaskMutationResult::Changed)
             },
         )?;
-        let _ = result;
         Ok(prompt_may_start)
+    }
+
+    /// Records accepted Stop intent while retaining the active prompt identity.
+    pub(crate) fn mark_turn_stopping(
+        &self,
+        task_id: &str,
+        turn_id: &str,
+    ) -> Result<bool, RuntimeError> {
+        let mut stop_accepted = false;
+        self.mutations.commit_existing_task(
+            task_id,
+            crate::tasks::mutation::TaskCommitOptions::metadata(),
+            |ctx| {
+                if ctx.task().active_turn_id.as_deref() != Some(turn_id) {
+                    return Ok(TaskMutationResult::Unchanged);
+                }
+                stop_accepted = true;
+                if ctx.task().status == TaskStatus::Stopping {
+                    return Ok(TaskMutationResult::Unchanged);
+                }
+                let task = ctx.task_mut();
+                task.status = TaskStatus::Stopping;
+                task.updated_at = now_string();
+                Ok(TaskMutationResult::Changed)
+            },
+        )?;
+        Ok(stop_accepted)
     }
 
     pub(crate) fn cancel_running_task(
@@ -97,6 +123,10 @@ impl TaskTransitions {
                     }
 
                     let now = now_string();
+                    if ctx.task().status == TaskStatus::Stopping {
+                        finish_stopping_task(ctx, &result, now)?;
+                        return Ok(TaskMutationResult::Changed);
+                    }
                     match &result {
                         Ok(AgentPromptOutcome::EndTurn | AgentPromptOutcome::Cancelled) => {
                             ctx.finish_running_activity(
@@ -138,6 +168,43 @@ impl TaskTransitions {
                 })?;
         Ok(matches!(commit.outcome, TaskCommitOutcome::Committed(_)))
     }
+}
+
+fn finish_stopping_task(
+    ctx: &mut crate::tasks::mutation::TaskMutationContext<'_>,
+    result: &Result<AgentPromptOutcome, RuntimeError>,
+    now: String,
+) -> Result<(), RuntimeError> {
+    match result {
+        Ok(_) => {
+            ctx.finish_running_activities(ActivityStatus::Interrupted)?;
+            append_interruption(
+                ctx,
+                InterruptionReason::Canceled,
+                "Task was stopped.",
+                now.clone(),
+                true,
+            )?;
+            ctx.task_mut().status = TaskStatus::Inactive;
+        }
+        Err(error) => {
+            ctx.finish_running_activities(ActivityStatus::Error)?;
+            append_interruption(
+                ctx,
+                InterruptionReason::Failed,
+                &format!("Unable to stop the Agent: {error}"),
+                now.clone(),
+                true,
+            )?;
+            ctx.task_mut().status = TaskStatus::Failed;
+        }
+    }
+    let task = ctx.task_mut();
+    task.active_turn_id = None;
+    task.unread = true;
+    task.updated_at = now.clone();
+    task.last_activity = now;
+    Ok(())
 }
 
 fn append_prompt_outcome_activity(

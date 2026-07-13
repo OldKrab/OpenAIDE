@@ -317,7 +317,7 @@ The live projection uses a catch-all branch for unhandled updates. This hides bo
 
 ## AP-022: Cancellation reports completion before the Agent is cancelled
 
-**Status:** confirmed
+**Status:** resolved
 
 **Area:** Task Stop, ACP cancellation, and activity completion
 
@@ -326,6 +326,8 @@ The current `task/cancel` transaction marks running activities completed, persis
 **Impact:** The UI reports a completed cancellation before it has started at the protocol boundary, interrupted Tools look successful, and valid late updates can disappear.
 
 **Desired direction:** Replace the old path completely. Introduce `stopping`, cancel transient requests through their shared resolution path, send ACP cancellation, continue consuming updates, and become idle only when the primary prompt confirms cancellation. Mark unfinished activity interrupted rather than completed; surface definitive cancellation failure with explicit recovery.
+
+**Resolution:** Stop now records a durable `stopping` state while retaining the active prompt identity and all running Chat activity. The prompt runner cancels every Task-scoped transient request through one broker operation, signals the prompt cancellation token, and sends ACP cancellation. A live prompt response then atomically interrupts unfinished activity, appends one recoverable `Task was stopped` interruption, clears the active prompt, and returns the Task to idle. If no prompt started, the same final transition runs immediately; a definitive cancellation error instead produces one recoverable failure and failed Task state. Frontend and protocol status models expose `stopping` and `interrupted` directly, so Stop cannot appear as successful completion.
 
 ## AP-023: Active-work termination is split across incompatible cleanup paths
 

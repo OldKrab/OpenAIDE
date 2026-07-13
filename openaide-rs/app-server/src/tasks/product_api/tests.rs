@@ -38,6 +38,7 @@ use crate::snapshots::task_snapshot::project_stored_task_snapshot;
 use crate::storage::records::{TaskLifecycle, TaskPreparationRecord, TaskRecord};
 use crate::storage::Store;
 use crate::task_events::TaskUpdateNotifier;
+use crate::tasks::mutation::TaskMutationResult;
 
 use super::*;
 
@@ -3476,38 +3477,71 @@ fn send_rejects_a_selected_file_replaced_with_an_escaping_symlink_without_commit
 }
 
 #[test]
-fn cancel_clears_active_turn_and_appends_interruption() {
+fn cancel_stays_stopping_until_the_agent_prompt_settles() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut record = task_record("task-existing", "/workspace/app");
-    record.status = TaskStatus::Active;
-    record.active_turn_id = Some("turn-active".to_string());
-    store.write_task(&record).unwrap();
-    append_running_turn(&store, "task-existing", "turn-active");
     store
-        .append_message(
-            "task-existing",
-            ChatMessage {
-                cursor: "m:streaming".to_string(),
-                identity: "agent-stream".to_string(),
-                message_type: "agent_text".to_string(),
-                message_id: "message_streaming".to_string(),
-                message: NormalizedMessage::AgentText {
-                    id: "agent-stream".to_string(),
-                    text: "partial response".to_string(),
-                    created_at: "2026-01-01T00:00:00.000Z".to_string(),
-                },
-            },
-        )
+        .write_task(&task_record("task-existing", "/workspace/app"))
         .unwrap();
+    let agent = Arc::new(RecordingAgent {
+        block_prompt: true,
+        hold_cancelled_prompt: AtomicBool::new(true),
+        ..RecordingAgent::default()
+    });
     let api = TaskProductApi::new(
         store.clone(),
         Arc::new(StorageProjectResolver::new(store.clone())),
         AgentRegistry::default_built_ins(),
-        Arc::new(crate::agent::mock::MockAgent),
+        agent.clone(),
         TaskUpdateNotifier::disabled(),
     )
     .unwrap();
+
+    api.mutations
+        .commit_existing_task(
+            "task-existing",
+            TaskCommitOptions {
+                refresh_message_history: true,
+                response_snapshot_tail_limit: None,
+            },
+            |ctx| {
+                ctx.append_message(NormalizedMessage::Activity {
+                    id: "turn:turn-active".to_string(),
+                    title: "Working".to_string(),
+                    status: ActivityStatus::Running,
+                    created_at: "2026-01-01T00:00:00.000Z".to_string(),
+                    collapsed: true,
+                    steps: Vec::new(),
+                })?;
+                ctx.append_message(NormalizedMessage::AgentText {
+                    id: "agent-stream".to_string(),
+                    text: "partial response".to_string(),
+                    created_at: "2026-01-01T00:00:00.000Z".to_string(),
+                })?;
+                let task = ctx.task_mut();
+                task.status = TaskStatus::Active;
+                task.active_turn_id = Some("turn-active".to_string());
+                Ok(TaskMutationResult::Changed)
+            },
+        )
+        .unwrap();
+
+    // Register a real live prompt so Stop must wait for its terminal response.
+    let session = AgentSession::new("codex", "cancel-session");
+    api.turn_runner.spawn_agent_turn(
+        "task-existing".to_string(),
+        "hello".to_string(),
+        Vec::new(),
+        "turn-active".to_string(),
+        session,
+        Arc::new(crate::tasks::turn_events::TaskSessionEventSink::new(
+            api.mutations.clone(),
+            "task-existing".to_string(),
+            "cancel-session".to_string(),
+            api.server_requests.clone(),
+        )),
+    );
+    wait_until(|| agent.prompts.load(Ordering::SeqCst) == 1);
 
     let snapshot = api
         .cancel_for_test(TaskCancelParams {
@@ -3517,8 +3551,8 @@ fn cancel_clears_active_turn_and_appends_interruption() {
         .unwrap();
 
     let record = store.read_task("task-existing").unwrap();
-    assert_eq!(record.status, TaskStatus::Inactive);
-    assert_eq!(record.active_turn_id, None);
+    assert_eq!(record.status, TaskStatus::Stopping);
+    assert_eq!(record.active_turn_id.as_deref(), Some("turn-active"));
     assert!(store
         .read_messages("task-existing")
         .unwrap()
@@ -3529,16 +3563,33 @@ fn cancel_clears_active_turn_and_appends_interruption() {
         )));
     assert_eq!(
         snapshot.task.status,
-        openaide_app_server_protocol::snapshot::TaskStatus::Idle
+        openaide_app_server_protocol::snapshot::TaskStatus::Stopping
     );
-    assert!(
-        store
-            .read_messages("task-existing")
-            .unwrap()
-            .iter()
-            .any(|message| matches!(message.chat.message, NormalizedMessage::Interruption { .. })),
-        "cancel should append a durable interruption"
-    );
+    assert!(!store
+        .read_messages("task-existing")
+        .unwrap()
+        .iter()
+        .any(|message| matches!(message.chat.message, NormalizedMessage::Interruption { .. })));
+
+    agent.release_cancelled_prompt.store(true, Ordering::SeqCst);
+    wait_until(|| store.read_task("task-existing").unwrap().status == TaskStatus::Inactive);
+    let finished = store.read_task("task-existing").unwrap();
+    assert_eq!(finished.active_turn_id, None);
+    let messages = store.read_messages("task-existing").unwrap();
+    assert!(messages.iter().any(|message| matches!(
+        message.chat.message,
+        NormalizedMessage::Activity {
+            status: ActivityStatus::Interrupted,
+            ..
+        }
+    )));
+    assert!(messages.iter().any(|message| matches!(
+        message.chat.message,
+        NormalizedMessage::Interruption {
+            reason: InterruptionReason::Canceled,
+            ..
+        }
+    )));
 }
 
 #[test]
@@ -4998,6 +5049,8 @@ struct RecordingAgent {
     load_start_timeout: bool,
     loaded_session_id: Option<String>,
     block_prompt: bool,
+    hold_cancelled_prompt: AtomicBool,
+    release_cancelled_prompt: AtomicBool,
     release_prompt: AtomicBool,
     prompt_calls: Mutex<Vec<(String, String)>>,
     prompt_attachments: Mutex<Vec<Vec<Attachment>>>,
@@ -5198,7 +5251,18 @@ impl AgentRuntime for RecordingAgent {
             }
             std::thread::sleep(Duration::from_millis(10));
         }
-        Ok(crate::agent::AgentPromptOutcome::EndTurn)
+        let cancelled = prompt.cancellation.is_cancelled();
+        while cancelled
+            && self.hold_cancelled_prompt.load(Ordering::SeqCst)
+            && !self.release_cancelled_prompt.load(Ordering::SeqCst)
+        {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        Ok(if cancelled {
+            crate::agent::AgentPromptOutcome::Cancelled
+        } else {
+            crate::agent::AgentPromptOutcome::EndTurn
+        })
     }
 
     fn set_session_config_option(

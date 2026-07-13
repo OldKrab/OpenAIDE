@@ -12,6 +12,7 @@ use crate::server_requests::ServerRequestRuntime;
 use crate::tasks::mutation::TaskMutations;
 use crate::tasks::transitions::TaskTransitions;
 use crate::tasks::turn_events::{TaskEventSink, TaskSessionEventSink};
+use openaide_app_server_protocol::ids::TaskId;
 
 #[derive(Clone)]
 pub struct TurnRunner {
@@ -74,12 +75,31 @@ impl TurnRunner {
                 turn_id: turn_id.clone(),
                 active_turns: runner.active_turns.clone(),
             };
-            if cancellation.is_cancelled() || !runner.turn_is_active(&task_id, &turn_id) {
+            if cancellation.is_cancelled() {
+                if runner.turn_is_active(&task_id, &turn_id) {
+                    let _ = runner.transitions().finish_turn(
+                        &task_id,
+                        &turn_id,
+                        Ok(crate::agent::AgentPromptOutcome::Cancelled),
+                    );
+                }
+                return;
+            }
+            if !runner.turn_is_active(&task_id, &turn_id) {
                 return;
             }
             match runner.transitions().mark_turn_running(&task_id, &turn_id) {
                 Ok(true) => {}
-                Ok(false) => return,
+                Ok(false) => {
+                    if cancellation.is_cancelled() {
+                        let _ = runner.transitions().finish_turn(
+                            &task_id,
+                            &turn_id,
+                            Ok(crate::agent::AgentPromptOutcome::Cancelled),
+                        );
+                    }
+                    return;
+                }
                 Err(error) => {
                     let _ = runner
                         .transitions()
@@ -111,7 +131,8 @@ impl TurnRunner {
         });
     }
 
-    pub fn cancel_turn(&self, turn_id: &str) {
+    /// Starts one cancellation without finalizing Task state before the prompt settles.
+    pub fn cancel_turn(&self, turn_id: &str) -> Result<bool, RuntimeError> {
         if let Some(active) = self
             .active_turns
             .turns
@@ -121,8 +142,14 @@ impl TurnRunner {
             .cloned()
         {
             active.cancellation.cancel();
-            let _ = self.agent.cancel_session(&active.session);
+            self.server_requests.interrupt_task_requests(
+                &TaskId::from(active.task_id),
+                crate::client_lifecycle::AppServerTime::now(),
+            );
+            self.agent.cancel_session(&active.session)?;
+            return Ok(true);
         }
+        Ok(false)
     }
 
     pub(crate) fn detach_stuck_turn(&self, turn_id: &str) {

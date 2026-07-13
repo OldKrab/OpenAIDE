@@ -120,9 +120,10 @@ function TaskTrailingMeta({
 function TaskStateOrAge({ status, timestamp, unread }: { status: TaskStatus; timestamp?: string; unread: boolean }) {
   // Runtime state takes the age slot. Active work is live by definition, so stale
   // persisted unread data must never add a second indicator to the spinner.
-  if (status === "active") {
+  if (status === "active" || status === "stopping") {
+    const label = status === "stopping" ? "Stopping" : "In progress";
     return (
-      <span aria-label="In progress" className="task-trailing-indicator" role="img" title="In progress">
+      <span aria-label={label} className="task-trailing-indicator" role="img" title={label}>
         <span className="task-state-spinner" />
       </span>
     );

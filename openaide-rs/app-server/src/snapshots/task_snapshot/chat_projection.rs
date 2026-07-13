@@ -402,6 +402,7 @@ fn activity_item_status(status: ActivityStatus) -> ChatItemStatus {
     match status {
         ActivityStatus::Running => ChatItemStatus::Streaming,
         ActivityStatus::Completed => ChatItemStatus::Complete,
+        ActivityStatus::Interrupted => ChatItemStatus::Interrupted,
         ActivityStatus::Error => ChatItemStatus::Failed,
     }
 }
@@ -410,6 +411,7 @@ fn project_activity_status(status: ActivityStatus) -> ProtocolActivityStatus {
     match status {
         ActivityStatus::Running => ProtocolActivityStatus::Running,
         ActivityStatus::Completed => ProtocolActivityStatus::Completed,
+        ActivityStatus::Interrupted => ProtocolActivityStatus::Interrupted,
         ActivityStatus::Error => ProtocolActivityStatus::Failed,
     }
 }

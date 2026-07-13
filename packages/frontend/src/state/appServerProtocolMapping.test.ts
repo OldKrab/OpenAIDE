@@ -36,6 +36,12 @@ describe("App Server Protocol state mapping", () => {
     });
   });
 
+  it("keeps stopping distinct from running", () => {
+    expect(mapProtocolTaskSummary(protocolSummary({ status: "stopping" }))).toMatchObject({
+      status: "stopping",
+    });
+  });
+
   it("maps task list activity separately from the persistence update timestamp", () => {
     expect(mapProtocolTaskSummary(protocolSummary({
       updatedAt: "2026-06-27T12:00:05.000Z",

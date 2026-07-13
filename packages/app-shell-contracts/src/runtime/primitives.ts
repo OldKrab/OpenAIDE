@@ -1,6 +1,6 @@
-export type TaskStatus = "active" | "inactive" | "failed" | "completed" | "waiting";
+export type TaskStatus = "active" | "stopping" | "inactive" | "failed" | "completed" | "waiting";
 export type IsolationKind = "local" | "git_worktree" | "docker";
-export type ActivityStatus = "running" | "completed" | "error";
+export type ActivityStatus = "running" | "completed" | "interrupted" | "error";
 export type PermissionState = "pending" | "responding" | "resolved" | "cancelled";
 export type PermissionOptionKind = "allow" | "deny" | "other";
 export type PermissionDecision = "approved" | "denied";

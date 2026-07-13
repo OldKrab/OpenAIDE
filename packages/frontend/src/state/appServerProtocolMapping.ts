@@ -253,6 +253,8 @@ function taskSummaryStatusFromProtocol(status: ProtocolTaskStatus): TaskSummary[
     case "starting":
     case "preparing":
       return "active";
+    case "stopping":
+      return "stopping";
     case "waiting":
       return "waiting";
     case "failed":

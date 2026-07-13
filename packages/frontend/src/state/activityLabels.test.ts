@@ -1,14 +1,20 @@
 import { describe, expect, it } from "vitest";
 import type { NormalizedMessage } from "@openaide/app-shell-contracts";
 import {
+  activityStatusLabel,
   activityStepCompletedLabel,
   activityStepContext,
   activityStepLabel,
   activityStepProgressLabel,
+  activityStepStatus,
   activitySummary,
 } from "./activityLabels";
 
 describe("activity labels", () => {
+  it("presents interrupted work without calling it completed or failed", () => {
+    expect(activityStatusLabel("interrupted")).toBe("Interrupted");
+    expect(activityStepStatus({ kind: "tool", name: "edit", status: "interrupted" })).toBe("Interrupted");
+  });
   it("turns old generic exec tool rows into command labels", () => {
     expect(
       activitySummary(

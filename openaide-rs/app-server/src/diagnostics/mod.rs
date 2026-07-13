@@ -157,6 +157,7 @@ fn protocol_task_status(status: TaskStatus) -> ProtocolTaskStatus {
     match status {
         TaskStatus::Starting => ProtocolTaskStatus::Starting,
         TaskStatus::Active => ProtocolTaskStatus::Running,
+        TaskStatus::Stopping => ProtocolTaskStatus::Stopping,
         TaskStatus::Inactive => ProtocolTaskStatus::Idle,
         TaskStatus::Failed => ProtocolTaskStatus::Failed,
         TaskStatus::Completed => ProtocolTaskStatus::Completed,

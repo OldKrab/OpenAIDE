@@ -185,6 +185,7 @@ pub enum PermissionMessageDecision {
 pub enum ActivityStatus {
     Running,
     Completed,
+    Interrupted,
     Failed,
 }
 

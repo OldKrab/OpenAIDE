@@ -47,6 +47,35 @@ fn cancelled_permission_wait_clears_broker_pending_request() {
 }
 
 #[test]
+fn interrupting_task_requests_releases_permission_wait_as_cancelled() {
+    let runtime = ServerRequestRuntime::new();
+    let task_id = TaskId::from("task-1");
+    let request_id = runtime
+        .open_permission_request(
+            task_id.as_str(),
+            &permission_request("agent-request-1"),
+            vec![permission_delivery()],
+            AppServerTime(1),
+        )
+        .expect("open permission request")
+        .expect("capable permission responder");
+
+    assert_eq!(
+        runtime.interrupt_task_requests(&task_id, AppServerTime(2)),
+        1
+    );
+    let response = runtime
+        .wait_permission_response(&request_id, &TurnCancellation::new())
+        .expect("interrupted wait settles");
+
+    assert!(matches!(
+        response.outcome,
+        AgentPermissionOutcome::Cancelled
+    ));
+    assert!(runtime.pending_for_task(&task_id).is_empty());
+}
+
+#[test]
 fn waitable_client_request_returns_accepted_response() {
     let runtime = ServerRequestRuntime::new();
     let opened = runtime

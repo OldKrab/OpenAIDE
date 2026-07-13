@@ -10,6 +10,7 @@ use super::{AgentCommandsCatalog, ConfigOptionsCatalog, MessagePage, NormalizedM
 pub enum TaskStatus {
     Starting,
     Active,
+    Stopping,
     Inactive,
     Failed,
     Completed,

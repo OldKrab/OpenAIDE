@@ -1,18 +1,13 @@
 use openaide_app_server_protocol::errors::ProtocolError;
 use openaide_app_server_protocol::ids::ClientInstanceId;
 use openaide_app_server_protocol::task::TaskCancelParams;
-use uuid::Uuid;
 
-use crate::protocol::model::{
-    ActivityStatus, InterruptionReason, NormalizedMessage, TaskStatus as LegacyTaskStatus,
-};
-use crate::tasks::mutation::{TaskCommitOutcome, TaskMutationResult};
+use crate::agent::AgentPromptOutcome;
 use crate::tasks::snapshot::build_snapshot;
-use crate::time::now_string;
+use crate::tasks::transitions::TaskTransitions;
 
 use super::{
-    conflict_error, internal_error, protocol_error_from_runtime, runtime_error, storage_error,
-    TaskProductApi,
+    conflict_error, protocol_error_from_runtime, runtime_error, storage_error, TaskProductApi,
 };
 
 impl TaskProductApi {
@@ -43,45 +38,32 @@ impl TaskProductApi {
                 return Err(conflict_error("Task turn is not active"));
             }
         }
-        let now = now_string();
-        let result = self
-            .mutations
-            .commit_existing_task(&task_id, super::response_snapshot_options(), |ctx| {
-                if ctx.task().tombstoned {
-                    return Ok(TaskMutationResult::Rejected);
-                }
-                if ctx.task().active_turn_id.as_deref() != Some(active_turn_id.as_str()) {
-                    return Ok(TaskMutationResult::Rejected);
-                }
-                ctx.finish_running_activities(ActivityStatus::Completed)?;
-                ctx.append_message(NormalizedMessage::Interruption {
-                    id: Uuid::new_v4().to_string(),
-                    reason: InterruptionReason::Canceled,
-                    message: "Task was stopped.".to_string(),
-                    created_at: now.clone(),
-                    recoverable: true,
-                })?;
-
-                let task = ctx.task_mut();
-                task.status = LegacyTaskStatus::Inactive;
-                task.active_turn_id = None;
-                task.updated_at = now.clone();
-                task.last_activity = now;
-                Ok(TaskMutationResult::Changed)
-            })
-            .map_err(protocol_error_from_runtime)?;
-        if !matches!(result.outcome, TaskCommitOutcome::Committed(_)) {
+        let transitions = TaskTransitions::new(self.mutations.clone());
+        if !transitions
+            .mark_turn_stopping(&task_id, &active_turn_id)
+            .map_err(protocol_error_from_runtime)?
+        {
             return Err(conflict_error("Task turn is not active"));
         }
-        // Keep Task acceptance serialized through generation retirement. Failed persistence
-        // leaves the accepted Turn untouched, and a successful cancel cannot invalidate a newer
-        // send between its exact-Turn commit and startup cancellation.
-        self.turn_runner.cancel_turn(&active_turn_id);
+
+        // Stop closes Task-scoped requests before ACP cancellation. Task completion remains
+        // owned by the primary prompt response, except when no prompt was started.
+        match self.turn_runner.cancel_turn(&active_turn_id) {
+            Ok(true) => {}
+            Ok(false) => {
+                transitions
+                    .finish_turn(&task_id, &active_turn_id, Ok(AgentPromptOutcome::Cancelled))
+                    .map_err(protocol_error_from_runtime)?;
+            }
+            Err(error) => {
+                transitions
+                    .finish_turn(&task_id, &active_turn_id, Err(error))
+                    .map_err(protocol_error_from_runtime)?;
+            }
+        }
         self.turn_acceptance
             .retire_pending_turn(&task_id, &active_turn_id);
-        let snapshot = result
-            .response_snapshot
-            .ok_or_else(|| internal_error("missing task cancel snapshot"))?;
+        let snapshot = build_snapshot(&self.store, &task_id, 100).map_err(storage_error)?;
         self.project_task_snapshot(snapshot)
     }
 }

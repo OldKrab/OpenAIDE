@@ -538,7 +538,7 @@ export type TaskTitle = { value: string, source: TaskTitleSource, };
 
 export type TaskTitleSource = "agent" | "user";
 
-export type TaskStatus = "preparing" | "starting" | "idle" | "running" | "waiting" | "interrupted" | "failed" | "completed";
+export type TaskStatus = "preparing" | "starting" | "idle" | "running" | "stopping" | "waiting" | "interrupted" | "failed" | "completed";
 
 export type TaskLifecycle = "new" | "visible";
 
@@ -608,7 +608,7 @@ export type QuestionMessageState = "pending" | "resolved" | "cancelled" | "error
 
 export type QuestionMessageAction = "submit" | "cancel";
 
-export type ActivityStatus = "running" | "completed" | "failed";
+export type ActivityStatus = "running" | "completed" | "interrupted" | "failed";
 
 export type ActivityStepSnapshot = { "kind": "text", text: string, level?: string | null, } | { "kind": "tool", toolCallId?: string | null, name: string, status: ActivityStatus, inputSummary?: string | null, outputPreview?: string | null, detailArtifactId?: string | null, details?: ToolDetailSnapshot | null, } | { "kind": "command", commandLabel: string, status: ActivityStatus, exitCode?: number | null, outputPreview?: string | null, };
 

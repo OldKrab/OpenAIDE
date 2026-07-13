@@ -2,7 +2,9 @@ use std::sync::{Arc, Mutex};
 
 use crate::agent::gateway::AgentGateway;
 use crate::agent::registry::AgentRegistry;
-use crate::agent::{AgentSession, AgentSessionKey, AgentSessionResume, AgentSessionStart};
+use crate::agent::{
+    AgentPromptOutcome, AgentSession, AgentSessionKey, AgentSessionResume, AgentSessionStart,
+};
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::TaskSnapshot;
 use crate::protocol::params::{TaskCreateMode, TaskCreateParams, TaskIdParams};
@@ -54,14 +56,23 @@ impl TaskTurnLifecycle {
         let Some(turn_id) = self.transitions().active_turn_id(&params.task_id)? else {
             return self.snapshot(params.task_id);
         };
-        self.turn_runner.cancel_turn(&turn_id);
-
-        self.transitions().cancel_running_task(
-            &params.task_id,
-            Some(&turn_id),
-            "Task was stopped.",
-            false,
-        )?;
+        let transitions = self.transitions();
+        if !transitions.mark_turn_stopping(&params.task_id, &turn_id)? {
+            return self.snapshot(params.task_id);
+        }
+        match self.turn_runner.cancel_turn(&turn_id) {
+            Ok(true) => {}
+            Ok(false) => {
+                transitions.finish_turn(
+                    &params.task_id,
+                    &turn_id,
+                    Ok(AgentPromptOutcome::Cancelled),
+                )?;
+            }
+            Err(error) => {
+                transitions.finish_turn(&params.task_id, &turn_id, Err(error))?;
+            }
+        }
         self.snapshot(params.task_id)
     }
 

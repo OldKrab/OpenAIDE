@@ -193,10 +193,17 @@ fn cancel_signals_agent_after_turn_started() {
             task_id: snapshot.task.task_id.clone(),
         })
         .unwrap();
-    assert_eq!(stopped.task.status, TaskStatus::Inactive);
+    assert_eq!(stopped.task.status, TaskStatus::Stopping);
 
     wait_until(|| cancelled.load(Ordering::SeqCst) == 1);
-    thread::sleep(Duration::from_millis(40));
+    wait_until(|| {
+        service
+            .snapshot(TaskSnapshotParams {
+                task_id: snapshot.task.task_id.clone(),
+                tail_limit: 20,
+            })
+            .is_ok_and(|snapshot| snapshot.task.status == TaskStatus::Inactive)
+    });
     let passive = service
         .snapshot(TaskSnapshotParams {
             task_id: snapshot.task.task_id,

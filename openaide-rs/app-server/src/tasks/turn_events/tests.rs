@@ -809,6 +809,38 @@ fn agent_confirmed_cancellation_ends_work_without_adding_chat() {
 }
 
 #[test]
+fn cancellation_failure_marks_task_failed_with_explicit_recovery() {
+    let (_dir, store, mutations, _server_requests) = test_runtime();
+    store.write_task(&running_task("task_1")).unwrap();
+    let transitions = TaskTransitions::new(mutations);
+    assert!(transitions.mark_turn_stopping("task_1", "turn_1").unwrap());
+
+    transitions
+        .finish_turn(
+            "task_1",
+            "turn_1",
+            Err(crate::protocol::errors::RuntimeError::NotReady(
+                "cancel channel closed".to_string(),
+            )),
+        )
+        .unwrap();
+
+    let task = store.read_task("task_1").unwrap();
+    assert_eq!(task.status, TaskStatus::Failed);
+    assert_eq!(task.active_turn_id, None);
+    let messages = store.read_messages("task_1").unwrap();
+    assert!(messages.iter().any(|stored| matches!(
+        &stored.chat.message,
+        NormalizedMessage::Interruption {
+            reason: crate::protocol::model::InterruptionReason::Failed,
+            message,
+            recoverable: true,
+            ..
+        } if message.contains("Unable to stop the Agent")
+    )));
+}
+
+#[test]
 fn agent_text_notifications_describe_only_durable_ordered_deltas() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path().to_path_buf()).unwrap();

@@ -36,6 +36,7 @@ export function taskWorkingStatusLabel(
   // Pending Shell input remains in the frozen composer until App Server acceptance.
   // Chat activity only describes authoritative task state.
   if (inputPending) return undefined;
+  if (status === "stopping") return "Stopping";
   if (items.some((item) => (
     (item.message.kind === "permission" || item.message.kind === "elicitation")
     && item.message.state === "pending"
