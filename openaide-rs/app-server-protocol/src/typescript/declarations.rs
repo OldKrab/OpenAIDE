@@ -94,8 +94,7 @@ use crate::task::{
     TaskChatPageResult, TaskCreateParams, TaskCreateResult, TaskDiscardParams, TaskDiscardResult,
     TaskListParams, TaskListResult, TaskMarkReadParams, TaskMarkReadResult, TaskOpenParams,
     TaskOpenResult, TaskSendParams, TaskSendResult, TaskSetArchivedParams, TaskSetArchivedResult,
-    TaskSetConfigOptionParams, TaskSetConfigOptionResult, TaskToolDetailParams,
-    TaskToolDetailResult,
+    TaskSetConfigOptionParams, TaskSetConfigOptionResult, ToolDetailSnapshot,
 };
 use crate::workspace::{
     WorkspaceBrowserDirectory, WorkspaceBrowserEntry, WorkspaceBrowserRoot,
@@ -295,8 +294,7 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<TaskCancelResult>(output, config);
     push_decl::<TaskChatPageParams>(output, config);
     push_decl::<TaskChatPageResult>(output, config);
-    push_decl::<TaskToolDetailParams>(output, config);
-    push_decl::<TaskToolDetailResult>(output, config);
+    push_decl::<ToolDetailSnapshot>(output, config);
     push_decl::<ActivityToolLocation>(output, config);
     push_decl::<ActivityToolContent>(output, config);
     push_decl::<ActivityToolInput>(output, config);

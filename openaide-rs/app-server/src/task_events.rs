@@ -7,6 +7,13 @@ use std::sync::{Arc, Barrier};
 use openaide_app_server_protocol::events::TextChunk;
 use openaide_app_server_protocol::ids::MessageId;
 use openaide_app_server_protocol::snapshot::ChatItem;
+use openaide_app_server_protocol::task::ToolDetailSnapshot;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ToolDetailUpdate {
+    pub artifact_id: String,
+    pub details: ToolDetailSnapshot,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CommittedTaskDelta {
@@ -16,6 +23,10 @@ pub enum CommittedTaskDelta {
     ChatItemChunk {
         message_id: MessageId,
         chunk: TextChunk,
+    },
+    ChatItemUpserted {
+        item: ChatItem,
+        tool_details: Vec<ToolDetailUpdate>,
     },
 }
 

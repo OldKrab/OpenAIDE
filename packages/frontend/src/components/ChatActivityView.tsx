@@ -20,12 +20,12 @@ import { toolKindIcon } from "./chatToolIcons";
 
 export function ChatActivityView({
   activity,
-  onLoadToolDetail,
+  onSubscribeToolDetail,
   taskId,
   toolDetails,
 }: {
   activity: Extract<NormalizedMessage, { kind: "activity" }>;
-  onLoadToolDetail?: (artifactId: string, refresh?: boolean) => void;
+  onSubscribeToolDetail?: (artifactId: string) => () => void;
   taskId: string;
   toolDetails?: Record<string, { loading: boolean; details?: ActivityToolDetails; error?: string }>;
 }) {
@@ -45,7 +45,7 @@ export function ChatActivityView({
         {activity.steps.map((step, index) => (
           <ActivityStepRow
             key={index}
-            onLoadToolDetail={onLoadToolDetail}
+            onSubscribeToolDetail={onSubscribeToolDetail}
             step={step}
             taskId={taskId}
             toolDetails={toolDetails}
@@ -57,12 +57,12 @@ export function ChatActivityView({
 }
 
 export function ActivityStepRow({
-  onLoadToolDetail,
+  onSubscribeToolDetail,
   step,
   taskId,
   toolDetails,
 }: {
-  onLoadToolDetail?: (artifactId: string, refresh?: boolean) => void;
+  onSubscribeToolDetail?: (artifactId: string) => () => void;
   step: ActivityStep;
   taskId: string;
   toolDetails?: Record<string, { loading: boolean; details?: ActivityToolDetails; error?: string }>;
@@ -131,7 +131,7 @@ export function ActivityStepRow({
         className={className}
         details={details}
         metadata={metadata}
-        onLoadToolDetail={onLoadToolDetail}
+        onSubscribeToolDetail={onSubscribeToolDetail}
         preview={preview}
         step={displayStep}
       />
@@ -152,7 +152,7 @@ function LiveToolDetailDisclosure({
   className,
   details,
   metadata,
-  onLoadToolDetail,
+  onSubscribeToolDetail,
   preview,
   step,
 }: {
@@ -161,44 +161,24 @@ function LiveToolDetailDisclosure({
   className: string;
   details?: ActivityToolDetails;
   metadata: ReactNode;
-  onLoadToolDetail?: (artifactId: string, refresh?: boolean) => void;
+  onSubscribeToolDetail?: (artifactId: string) => () => void;
   preview?: string;
   step: Extract<ActivityStep, { kind: "tool" }>;
 }) {
   const [open, setOpen] = useState(false);
-  const loadToolDetailRef = useRef(onLoadToolDetail);
-  const previousRunning = useRef(step.status === "running");
-  loadToolDetailRef.current = onLoadToolDetail;
+  const subscribeToolDetailRef = useRef(onSubscribeToolDetail);
+  subscribeToolDetailRef.current = onSubscribeToolDetail;
   useEffect(() => {
-    if (!open || !artifactId || step.status !== "running") return undefined;
-    const interval = globalThis.setInterval(() => loadToolDetailRef.current?.(artifactId, true), 250);
-    return () => globalThis.clearInterval(interval);
-  }, [artifactId, open, step.status]);
-  useEffect(() => {
-    const running = step.status === "running";
-    if (open && artifactId && previousRunning.current && !running) {
-      loadToolDetailRef.current?.(artifactId, true);
-    }
-    previousRunning.current = running;
-  }, [artifactId, open, step.status]);
+    if (!open || !artifactId) return undefined;
+    return subscribeToolDetailRef.current?.(artifactId);
+  }, [artifactId, open]);
   const commandTitle = step.name === "execute"
     ? <CommandStepTitle command={activityStepLabel(step)} status={step.status} />
     : activityStepLabel(step);
   return (
     <AnimatedDisclosure
       className={className}
-      onOpenChange={(nextOpen) => {
-        setOpen(nextOpen);
-        if (shouldLoadToolDetail({
-          details,
-          error: artifactState?.error,
-          open: nextOpen,
-          artifactId,
-          loading: artifactState?.loading,
-        }) && artifactId) {
-          onLoadToolDetail?.(artifactId);
-        }
-      }}
+      onOpenChange={setOpen}
       trigger={(
         <>
           <ActivityStepContent
@@ -308,22 +288,6 @@ function AnimatedDisclosure({
       </div>
     </div>
   );
-}
-
-export function shouldLoadToolDetail({
-  artifactId,
-  details,
-  error,
-  loading,
-  open,
-}: {
-  artifactId?: string;
-  details?: ActivityToolDetails;
-  error?: string;
-  loading?: boolean;
-  open: boolean;
-}) {
-  return Boolean(open && artifactId && !details && !loading && !error);
 }
 
 export function activityStepIcon(step: ActivityStep) {

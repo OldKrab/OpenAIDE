@@ -143,14 +143,7 @@ pub struct TaskChatPageResult {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
-pub struct TaskToolDetailParams {
-    pub task_id: TaskId,
-    pub artifact_id: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct TaskToolDetailResult {
+pub struct ToolDetailSnapshot {
     pub locations: Vec<ActivityToolLocation>,
     pub content: Vec<ActivityToolContent>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

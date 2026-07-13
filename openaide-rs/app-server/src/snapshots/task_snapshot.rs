@@ -3,6 +3,7 @@ use openaide_app_server_protocol::ids::{ClientInstanceId, ProjectId, TaskId, Tas
 use openaide_app_server_protocol::snapshot::{
     ChatSnapshot, TaskHistorySyncSnapshot, TaskSnapshot, TaskSummary,
 };
+use openaide_app_server_protocol::task::ToolDetailSnapshot;
 use std::sync::Arc;
 
 use crate::chat_history::ChatHistoryPolicy;
@@ -10,7 +11,7 @@ use crate::protocol::model::TaskSnapshot as StoredTaskSnapshot;
 use crate::storage::Store;
 use crate::tasks::snapshot::build_snapshot;
 
-pub(crate) use chat_projection::project_chat_item;
+pub(crate) use chat_projection::{project_chat_item, project_tool_details};
 use readiness::{
     agent_commands_snapshot, agent_config_snapshot, preparation_snapshot, send_capability_for_task,
 };
@@ -40,6 +41,14 @@ pub trait TaskSnapshotSource: Send + Sync {
         client_instance_id: &ClientInstanceId,
         task_id: &TaskId,
     ) -> Result<TaskSnapshot, ProtocolError>;
+
+    /// Reads one expanded Tool detail after enforcing Task access for the client.
+    fn tool_detail_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        task_id: &TaskId,
+        artifact_id: &str,
+    ) -> Result<ToolDetailSnapshot, ProtocolError>;
 }
 
 /// Supplies process-local history reconciliation state for otherwise durable Task snapshots.
@@ -132,6 +141,25 @@ impl TaskSnapshotSource for TaskSnapshotStore {
         self.open_authorized(task_id, |task| {
             crate::tasks::access::require_client_task_access(task, client_instance_id)
         })
+    }
+
+    fn tool_detail_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        task_id: &TaskId,
+        artifact_id: &str,
+    ) -> Result<ToolDetailSnapshot, ProtocolError> {
+        let task = self
+            .store
+            .read_task(task_id.as_str())
+            .map_err(task_snapshot_error)?;
+        crate::tasks::access::require_client_task_access(&task, client_instance_id)
+            .map_err(task_snapshot_error)?;
+        let details = self
+            .store
+            .read_tool_artifact(task_id.as_str(), artifact_id)
+            .map_err(task_snapshot_error)?;
+        Ok(project_tool_details(&details))
     }
 }
 

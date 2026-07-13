@@ -19,7 +19,7 @@ use openaide_app_server::protocol::params::{
     ChatTailParams, DeleteMode, PermissionRespondParams, RuntimeAcpTraceSettingsPatch,
     RuntimeDeveloperSettingsPatch, RuntimeUpdateSettingsParams, SessionPromptParams,
     TaskCreateMode, TaskCreateParams, TaskDeleteParams, TaskIdParams, TaskListParams,
-    TaskSnapshotParams, ToolDetailParams,
+    TaskSnapshotParams,
 };
 use openaide_app_server::protocol::results::{HealthResult, TaskListResult};
 use openaide_app_server::storage::records::TaskPreparationRecord;
@@ -147,7 +147,6 @@ fn main() {
             "task_snapshot": to_value(TaskSnapshotParams { task_id: "task_1".to_string(), tail_limit: 50 }),
             "chat_tail": to_value(ChatTailParams { task_id: "task_1".to_string(), limit: 25 }),
             "chat_page": to_value(ChatPageParams { task_id: "task_1".to_string(), before_cursor: "cursor_10".to_string(), limit: 25 }),
-            "tool_detail": to_value(ToolDetailParams { task_id: "task_1".to_string(), artifact_id: "artifact_1".to_string() }),
             "session_prompt": to_value(SessionPromptParams {
                 task_id: "task_1".to_string(),
                 text: "Follow up".to_string(),

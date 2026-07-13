@@ -5,7 +5,6 @@ use openaide_app_server_protocol::task::{
     TaskDiscardResult, TaskListParams, TaskListResult, TaskMarkReadParams, TaskMarkReadResult,
     TaskOpenParams, TaskOpenResult, TaskSendParams, TaskSendResult, TaskSetArchivedParams,
     TaskSetArchivedResult, TaskSetConfigOptionParams, TaskSetConfigOptionResult,
-    TaskToolDetailParams, TaskToolDetailResult,
 };
 use serde_json::Value;
 
@@ -278,33 +277,6 @@ impl RpcGateway {
             Err(error) => return self.error(connection_id, id, meta, error),
         };
         self.result::<TaskChatPageResult>(connection_id, id, meta, page)
-    }
-
-    pub(super) fn handle_task_tool_detail(
-        &mut self,
-        connection_id: ConnectionId,
-        id: String,
-        params: Value,
-        meta: RequestMeta,
-    ) -> GatewayOutcome {
-        let params = match serde_json::from_value::<TaskToolDetailParams>(params) {
-            Ok(params) => params,
-            Err(error) => {
-                return self.error(connection_id, id, meta, responses::invalid_params(error))
-            }
-        };
-        let client = self
-            .client_hub
-            .context_for_connection(&connection_id)
-            .expect("routing requires an initialized client for Tool details");
-        let details = match self
-            .task_tool_detail
-            .tool_detail_for_client(&client.client_instance_id, params)
-        {
-            Ok(details) => details,
-            Err(error) => return self.error(connection_id, id, meta, error),
-        };
-        self.result::<TaskToolDetailResult>(connection_id, id, meta, details)
     }
 
     pub(super) fn handle_task_discard(

@@ -101,6 +101,26 @@ impl SnapshotBuilder {
         Self::with_task_navigation(server_id, state_root_id, Arc::new(EmptyTaskNavigation))
     }
 
+    #[cfg(test)]
+    pub(crate) fn with_task_snapshots(
+        server_id: ServerId,
+        state_root_id: StateRootId,
+        task_snapshots: Arc<dyn TaskSnapshotSource>,
+    ) -> Self {
+        Self::with_sources(
+            server_id,
+            state_root_id,
+            SnapshotSources::new(
+                Arc::new(EmptyNewTaskDefaults),
+                Arc::new(EmptyAgentCollection),
+                Arc::new(EmptyProjectCollection),
+                Arc::new(SettingsCatalog::default()),
+                Arc::new(EmptyTaskNavigation),
+                task_snapshots,
+            ),
+        )
+    }
+
     pub fn with_task_navigation(
         server_id: ServerId,
         state_root_id: StateRootId,
@@ -217,6 +237,18 @@ impl SnapshotProvider for SnapshotBuilder {
                     .task_snapshots
                     .open_for_client(&ctx.client_instance_id, task_id)?,
             },
+            SubscriptionScope::ToolDetail {
+                task_id,
+                artifact_id,
+            } => SubscriptionSnapshot::ToolDetail {
+                task_id: task_id.clone(),
+                artifact_id: artifact_id.clone(),
+                details: self.task_snapshots.tool_detail_for_client(
+                    &ctx.client_instance_id,
+                    task_id,
+                    artifact_id,
+                )?,
+            },
         })
     }
 }
@@ -292,6 +324,20 @@ impl TaskSnapshotSource for EmptyTaskSnapshots {
         task_id: &TaskId,
     ) -> Result<TaskSnapshot, ProtocolError> {
         Ok(unavailable_task_snapshot(task_id.clone()))
+    }
+
+    fn tool_detail_for_client(
+        &self,
+        _client_instance_id: &openaide_app_server_protocol::ids::ClientInstanceId,
+        _task_id: &TaskId,
+        _artifact_id: &str,
+    ) -> Result<openaide_app_server_protocol::task::ToolDetailSnapshot, ProtocolError> {
+        Err(ProtocolError {
+            code: ProtocolErrorCode::NotFound,
+            message: "Tool detail is unavailable".to_string(),
+            recoverable: false,
+            target: None,
+        })
     }
 }
 

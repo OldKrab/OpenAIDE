@@ -6,7 +6,7 @@ use crate::tasks::mutation::{TaskCommitOptions, TaskMutationResult};
 use crate::time::now_string;
 use serde_json::json;
 
-use super::{MessageWriteMode, TaskEventSink};
+use super::TaskEventSink;
 
 impl TaskEventSink {
     pub(super) fn handle_permission_request(
@@ -55,12 +55,7 @@ impl TaskEventSink {
         {
             *app_server_request_id = Some(server_request_id.as_str().to_string());
         }
-        if let Err(error) = self.append_agent_message(
-            message,
-            &now,
-            Some(TaskStatus::Blocked),
-            MessageWriteMode::Append,
-        ) {
+        if let Err(error) = self.append_agent_message(message, &now, Some(TaskStatus::Blocked)) {
             self.server_requests.interrupt_request(
                 &server_request_id,
                 crate::client_lifecycle::AppServerTime(0),

@@ -9,7 +9,7 @@ use openaide_app_server_protocol::task::{
     ActivityToolContent as ProtocolActivityToolContent,
     ActivityToolField as ProtocolActivityToolField, ActivityToolInput as ProtocolActivityToolInput,
     ActivityToolLocation as ProtocolActivityToolLocation,
-    ActivityToolOutput as ProtocolActivityToolOutput, TaskToolDetailResult,
+    ActivityToolOutput as ProtocolActivityToolOutput, ToolDetailSnapshot,
 };
 
 use crate::protocol::model::{
@@ -262,8 +262,8 @@ fn project_activity_step(step: &ActivityStep) -> ActivityStepSnapshot {
     }
 }
 
-fn project_tool_details(details: &ActivityToolDetails) -> TaskToolDetailResult {
-    TaskToolDetailResult {
+pub(crate) fn project_tool_details(details: &ActivityToolDetails) -> ToolDetailSnapshot {
+    ToolDetailSnapshot {
         locations: details
             .locations
             .iter()

@@ -3,7 +3,7 @@ use ts_rs::TS;
 
 use crate::ids::{AttachmentId, MessageId, RequestId, TurnId};
 use crate::server_requests::{PermissionToolCallRef, QuestionField, QuestionValue};
-use crate::task::TaskToolDetailResult;
+use crate::task::ToolDetailSnapshot;
 use std::collections::BTreeMap;
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
@@ -211,7 +211,7 @@ pub enum ActivityStepSnapshot {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         detail_artifact_id: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        details: Option<TaskToolDetailResult>,
+        details: Option<ToolDetailSnapshot>,
     },
     Command {
         command_label: String,

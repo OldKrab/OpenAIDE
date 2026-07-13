@@ -213,7 +213,7 @@ function taskViewProps(taskSnapshot: TaskSnapshot) {
     dispatch: vi.fn(),
     onCancel: vi.fn(),
     onLoadChatPage: vi.fn(),
-    onLoadToolDetail: vi.fn(),
+    onSubscribeToolDetail: vi.fn(() => vi.fn()),
     onPermissionRespond: vi.fn(),
     onRevealAttachment: vi.fn(),
     onRemoveAttachment: vi.fn(),

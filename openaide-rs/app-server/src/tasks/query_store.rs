@@ -1,6 +1,6 @@
 use crate::diagnostics::TaskDiagnostics;
 use crate::protocol::errors::RuntimeError;
-use crate::protocol::model::{ActivityToolDetails, MessagePage, TaskSnapshot, TaskSummary};
+use crate::protocol::model::{MessagePage, TaskSnapshot, TaskSummary};
 use crate::storage::Store;
 use crate::tasks::snapshot::build_snapshot;
 
@@ -58,13 +58,5 @@ impl TaskReadStore {
         limit: usize,
     ) -> Result<MessagePage, RuntimeError> {
         self.store.page_before(task_id, before_cursor, limit)
-    }
-
-    pub(crate) fn tool_detail(
-        &self,
-        task_id: &str,
-        artifact_id: &str,
-    ) -> Result<ActivityToolDetails, RuntimeError> {
-        self.store.read_tool_artifact(task_id, artifact_id)
     }
 }

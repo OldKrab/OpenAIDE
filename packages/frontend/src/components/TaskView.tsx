@@ -80,7 +80,7 @@ export function TaskView({
   onCancel,
   fileBrowser,
   onLoadChatPage,
-  onLoadToolDetail,
+  onSubscribeToolDetail,
   onPermissionRespond,
   onQuestionRespond,
   onRetryConnection,
@@ -111,7 +111,7 @@ export function TaskView({
   onCancel: () => void;
   fileBrowser?: TaskFileBrowserCallbacks;
   onLoadChatPage: (beforeCursor: string) => number | undefined;
-  onLoadToolDetail: (artifactId: string, refresh?: boolean) => void;
+  onSubscribeToolDetail: (artifactId: string) => () => void;
   onPermissionRespond: (
     requestId: string,
     optionId: string,
@@ -280,7 +280,7 @@ export function TaskView({
               showStreamingCaret={livePresentation.activeMessageIds.has(message.message_id)}
               taskId={snapshot.task.task_id}
               toolDetails={toolDetails}
-              onLoadToolDetail={onLoadToolDetail}
+              onSubscribeToolDetail={onSubscribeToolDetail}
               permissionResponse={permissionResponseForMessage(message.message, permissionResponses)}
               onPermissionRespond={onPermissionRespond}
               onQuestionRespond={onQuestionRespond}

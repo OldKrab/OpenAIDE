@@ -13,8 +13,8 @@ use crate::agent::{AgentEventSink, TurnCancellation};
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{NormalizedMessage, TaskStatus};
 use crate::server_requests::ServerRequestRuntime;
-use crate::snapshots::task_snapshot::project_chat_item;
-use crate::task_events::CommittedTaskDelta;
+use crate::snapshots::task_snapshot::{project_chat_item, project_tool_details};
+use crate::task_events::{CommittedTaskDelta, ToolDetailUpdate};
 use crate::tasks::mutation::{TaskCommitOptions, TaskMutationResult, TaskMutations};
 use crate::time::now_string;
 use openaide_app_server_protocol::events::TextChunk;
@@ -49,6 +49,35 @@ pub(crate) struct TaskEventSink {
 }
 
 impl TaskEventSink {
+    fn append_agent_message(
+        &self,
+        message: NormalizedMessage,
+        now: &str,
+        status: Option<TaskStatus>,
+    ) -> Result<(), RuntimeError> {
+        self.mutations.commit_existing_task(
+            &self.task_id,
+            TaskCommitOptions {
+                refresh_message_history: true,
+                response_snapshot_tail_limit: None,
+            },
+            |ctx| {
+                if ctx.task().active_turn_id.as_deref() != Some(self.turn_id.as_str())
+                    || self.cancellation.is_cancelled()
+                {
+                    return Ok(TaskMutationResult::Unchanged);
+                }
+                ctx.append_message(message)?;
+                if let Some(status) = status {
+                    ctx.task_mut().status = status;
+                }
+                ctx.task_mut().updated_at = now.to_string();
+                Ok(TaskMutationResult::Changed)
+            },
+        )?;
+        Ok(())
+    }
+
     pub(crate) fn with_session_sink(
         mutations: TaskMutations,
         task_id: String,
@@ -169,16 +198,13 @@ impl TaskSessionEventSink {
             return self.append_agent_thought_chunk(text, source_message_id, &now);
         }
         self.finish_anonymous_text_routes();
-        let write_mode = if let AgentEvent::ToolCall(tool_call) = &mut event {
+        if let AgentEvent::ToolCall(tool_call) = &mut event {
             tool_call
                 .scope_id
                 .get_or_insert_with(|| self.session_id.clone());
-            MessageWriteMode::UpsertByIdentity
-        } else {
-            MessageWriteMode::Append
-        };
-        let message = normalize_event(event, &now);
-        self.append_session_message(message, &now, write_mode)
+            return self.upsert_session_tool(normalize_event(event, &now), &now);
+        }
+        self.append_session_message(normalize_event(event, &now), &now)
     }
 
     fn append_agent_text_chunk(
@@ -293,7 +319,6 @@ impl TaskSessionEventSink {
         &self,
         message: NormalizedMessage,
         now: &str,
-        write_mode: MessageWriteMode,
     ) -> Result<(), RuntimeError> {
         self.mutations.commit_existing_task(
             &self.task_id,
@@ -306,12 +331,43 @@ impl TaskSessionEventSink {
                     return Ok(TaskMutationResult::Unchanged);
                 }
 
-                match write_mode {
-                    MessageWriteMode::Append => ctx.append_message(message)?,
-                    MessageWriteMode::UpsertByIdentity => ctx.upsert_message(message)?,
-                }
+                ctx.append_message(message)?;
                 let task = ctx.task_mut();
                 task.updated_at = now.to_string();
+                Ok(TaskMutationResult::Changed)
+            },
+        )?;
+        Ok(())
+    }
+
+    fn upsert_session_tool(
+        &self,
+        message: NormalizedMessage,
+        now: &str,
+    ) -> Result<(), RuntimeError> {
+        self.mutations.commit_existing_task(
+            &self.task_id,
+            TaskCommitOptions {
+                refresh_message_history: true,
+                response_snapshot_tail_limit: None,
+            },
+            |ctx| {
+                if ctx.task().agent_session_id.as_deref() != Some(self.session_id.as_str()) {
+                    return Ok(TaskMutationResult::Unchanged);
+                }
+                let upserted = ctx.upsert_message_with_details(message)?;
+                ctx.set_committed_delta(CommittedTaskDelta::ChatItemUpserted {
+                    item: project_chat_item(&upserted.stored.chat),
+                    tool_details: upserted
+                        .tool_details
+                        .into_iter()
+                        .map(|detail| ToolDetailUpdate {
+                            artifact_id: detail.artifact_id,
+                            details: project_tool_details(&detail.details),
+                        })
+                        .collect(),
+                });
+                ctx.task_mut().updated_at = now.to_string();
                 Ok(TaskMutationResult::Changed)
             },
         )?;
@@ -335,45 +391,4 @@ impl TaskSessionEventSink {
             },
         )
     }
-}
-
-impl TaskEventSink {
-    fn append_agent_message(
-        &self,
-        message: NormalizedMessage,
-        now: &str,
-        status: Option<TaskStatus>,
-        write_mode: MessageWriteMode,
-    ) -> Result<(), RuntimeError> {
-        self.mutations.commit_existing_task(
-            &self.task_id,
-            TaskCommitOptions {
-                refresh_message_history: true,
-                response_snapshot_tail_limit: None,
-            },
-            |ctx| {
-                if ctx.task().active_turn_id.as_deref() != Some(self.turn_id.as_str())
-                    || self.cancellation.is_cancelled()
-                {
-                    return Ok(TaskMutationResult::Unchanged);
-                }
-                match write_mode {
-                    MessageWriteMode::Append => ctx.append_message(message)?,
-                    MessageWriteMode::UpsertByIdentity => ctx.upsert_message(message)?,
-                }
-                if let Some(status) = status {
-                    ctx.task_mut().status = status;
-                }
-                ctx.task_mut().updated_at = now.to_string();
-                Ok(TaskMutationResult::Changed)
-            },
-        )?;
-        Ok(())
-    }
-}
-
-#[derive(Clone, Copy)]
-enum MessageWriteMode {
-    Append,
-    UpsertByIdentity,
 }

@@ -30,6 +30,12 @@ export function updateSubscriptionSnapshot(
       return updateTaskNavigationSnapshot(scope, snapshot, payload);
     case "task":
       return updateTaskSnapshot(snapshot, payload);
+    case "toolDetail":
+      return payload.kind === "toolDetailUpdated"
+        && payload.taskId === snapshot.taskId
+        && payload.artifactId === snapshot.artifactId
+        ? changed({ ...snapshot, details: payload.details })
+        : unchanged(snapshot);
   }
 }
 
@@ -53,6 +59,8 @@ function updateFromClientSnapshot(
       return clientSnapshot.activeTask && clientSnapshot.activeTask.task.taskId === snapshot.task.task.taskId
         ? changed({ kind: "task", task: clientSnapshot.activeTask })
         : unchanged(snapshot);
+    case "toolDetail":
+      return unchanged(snapshot);
   }
 }
 

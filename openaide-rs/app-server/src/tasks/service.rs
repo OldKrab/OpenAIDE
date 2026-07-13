@@ -7,13 +7,12 @@ use crate::agent::AgentRuntime;
 use crate::diagnostics::TaskDiagnostics;
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{
-    ActivityToolDetails, AgentAuthenticateResult, AgentListSessionsResult, AgentProbeResult,
-    MessagePage, TaskSnapshot,
+    AgentAuthenticateResult, AgentListSessionsResult, AgentProbeResult, MessagePage, TaskSnapshot,
 };
 use crate::protocol::params::{
     AgentAuthenticateParams, AgentListSessionsParams, AgentProbeParams, ChatPageParams,
     ChatTailParams, PermissionRespondParams, SessionPromptParams, TaskCreateParams,
-    TaskDeleteParams, TaskIdParams, TaskListParams, TaskSnapshotParams, ToolDetailParams,
+    TaskDeleteParams, TaskIdParams, TaskListParams, TaskSnapshotParams,
 };
 use crate::protocol::results::TaskListResult;
 use crate::storage::Store;
@@ -170,13 +169,6 @@ impl TaskService {
 
     pub fn page(&self, params: ChatPageParams) -> Result<MessagePage, RuntimeError> {
         self.queries.page(params)
-    }
-
-    pub fn tool_detail(
-        &self,
-        params: ToolDetailParams,
-    ) -> Result<ActivityToolDetails, RuntimeError> {
-        self.queries.tool_detail(params)
     }
 
     pub fn prompt(&self, params: SessionPromptParams) -> Result<TaskSnapshot, RuntimeError> {

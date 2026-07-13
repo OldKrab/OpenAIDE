@@ -21,6 +21,7 @@ import {
   mapProtocolTaskNavigation,
   mapProtocolTaskSnapshot,
 } from "../state/appServerProtocolMapping";
+import { mapProtocolToolDetail } from "../state/appServerProtocolChatMapping";
 import type { AgentOption } from "../state/composerOptions";
 
 type StateSubscriptionConnection = Pick<BackendConnection, "events" | "request">
@@ -326,6 +327,8 @@ function subscriptionScopeKey(scope: SubscriptionScope) {
       return `taskNavigation:${scope.projectId ?? ""}`;
     case "task":
       return `task:${scope.taskId}`;
+    case "toolDetail":
+      return `toolDetail:${scope.taskId}:${scope.artifactId}`;
   }
 }
 
@@ -364,6 +367,13 @@ function actionsFromSubscriptionSnapshot(
     }
     case "settings":
       return [];
+    case "toolDetail":
+      return [{
+        type: "toolDetail:result",
+        taskId: snapshot.taskId,
+        artifactId: snapshot.artifactId,
+        details: mapProtocolToolDetail(snapshot.details),
+      }];
   }
 }
 

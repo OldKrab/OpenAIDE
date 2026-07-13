@@ -1,6 +1,4 @@
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::sync::Arc;
 
 use agent_client_protocol::schema::{
     ContentBlock, PermissionOptionKind, RequestPermissionOutcome, RequestPermissionRequest,
@@ -17,7 +15,7 @@ use crate::agent::acp_tool_call_projection::{
 use crate::agent::acp_update_projection::normalize_available_commands;
 use crate::agent::events::{
     AgentEvent, AgentPermissionOption, AgentPermissionOptionKind, AgentPermissionOutcome,
-    AgentPermissionRequest, AgentToolCall, AgentToolCallRef, AgentToolCallStatus,
+    AgentPermissionRequest, AgentToolCallRef,
 };
 use crate::agent::tool_details::{tool_call_event, tool_kind_name};
 use crate::agent::{AgentEventSink, AgentSessionEventSink, TurnCancellation};
@@ -30,7 +28,6 @@ pub(super) struct LivePromptProjection {
     agent_id: String,
     sink: Arc<dyn AgentEventSink>,
     tool_calls: ToolCallState,
-    published_tools: Arc<Mutex<HashMap<String, PublishedTool>>>,
     cancellation: TurnCancellation,
 }
 
@@ -58,7 +55,6 @@ impl LivePromptProjection {
             tool_calls: session_projection
                 .map(|projection| projection.tool_calls.clone())
                 .unwrap_or_default(),
-            published_tools: Arc::default(),
             cancellation,
         }
     }
@@ -188,35 +184,6 @@ impl LivePromptProjection {
         let AgentEvent::ToolCall(event) = tool_call_event(tool_call) else {
             unreachable!("tool_call_event always returns a tool event");
         };
-        let presentation = ToolPresentation::from(&event);
-        let suppress = {
-            let mut published = self
-                .published_tools
-                .lock()
-                .expect("published tool presentation lock poisoned");
-            let now = Instant::now();
-            let unchanged_recently = published.get(&event.tool_call_id).is_some_and(|previous| {
-                previous.presentation.same_control_state(&presentation)
-                    && now.duration_since(previous.published_at) < TOOL_DETAIL_PUBLISH_INTERVAL
-            });
-            if !unchanged_recently {
-                published.insert(
-                    event.tool_call_id.clone(),
-                    PublishedTool {
-                        presentation,
-                        published_at: now,
-                    },
-                );
-            }
-            unchanged_recently
-                && matches!(
-                    event.status,
-                    AgentToolCallStatus::Pending | AgentToolCallStatus::InProgress
-                )
-        };
-        if suppress {
-            return Ok(());
-        }
         logging::info(
             "acp_tool_call_update_projected",
             json!({
@@ -251,43 +218,6 @@ impl AgentEventSink for SessionUpdateEventSink {
         _request: AgentPermissionRequest,
     ) -> Result<AgentPermissionOutcome, RuntimeError> {
         Ok(AgentPermissionOutcome::Cancelled)
-    }
-}
-
-const TOOL_DETAIL_PUBLISH_INTERVAL: Duration = Duration::from_millis(250);
-
-struct PublishedTool {
-    presentation: ToolPresentation,
-    published_at: Instant,
-}
-
-#[derive(PartialEq, Eq)]
-struct ToolPresentation {
-    title: String,
-    kind: String,
-    status: AgentToolCallStatus,
-    input_summary: Option<String>,
-    output_preview: Option<String>,
-}
-
-impl From<&AgentToolCall> for ToolPresentation {
-    fn from(tool_call: &AgentToolCall) -> Self {
-        Self {
-            title: tool_call.title.clone(),
-            kind: tool_call.kind.clone(),
-            status: tool_call.status,
-            input_summary: tool_call.input_summary.clone(),
-            output_preview: tool_call.output_preview.clone(),
-        }
-    }
-}
-
-impl ToolPresentation {
-    fn same_control_state(&self, other: &Self) -> bool {
-        self.title == other.title
-            && self.kind == other.kind
-            && self.status == other.status
-            && self.input_summary == other.input_summary
     }
 }
 

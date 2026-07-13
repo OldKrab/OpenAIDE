@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mapProtocolToolDetail } from "./taskReadMapping";
+import { mapProtocolToolDetail } from "./appServerProtocolChatMapping";
 
 describe("task read mapping", () => {
   it("preserves individual web-search queries from lazy tool details", () => {

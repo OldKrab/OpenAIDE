@@ -752,17 +752,12 @@ describe("ChatRow", () => {
     expect(html).not.toContain("&gt;_ external_directory");
   });
 
-  it("loads tool details only from the rendered activity step toggle path", async () => {
+  it("subscribes to tool details only while the rendered disclosure is open", async () => {
     vi.useFakeTimers();
-    const { ActivityStepRow, shouldLoadToolDetail } = await import("./ChatActivityView");
-    expect(shouldLoadToolDetail({ open: true, artifactId: "artifact_1" })).toBe(true);
-    expect(shouldLoadToolDetail({ open: false, artifactId: "artifact_1" })).toBe(false);
-    expect(shouldLoadToolDetail({ open: true })).toBe(false);
-    expect(shouldLoadToolDetail({ open: true, artifactId: "artifact_1", loading: true })).toBe(false);
-    expect(shouldLoadToolDetail({ open: true, artifactId: "artifact_1", error: "failed" })).toBe(false);
-    expect(shouldLoadToolDetail({ open: true, artifactId: "artifact_1", details: emptyToolDetails() })).toBe(false);
+    const { ActivityStepRow } = await import("./ChatActivityView");
 
-    const onLoadToolDetail = vi.fn();
+    const cleanup = vi.fn();
+    const onSubscribeToolDetail = vi.fn(() => cleanup);
     const step = {
       kind: "tool" as const,
       name: "read",
@@ -772,34 +767,23 @@ describe("ChatRow", () => {
     };
     let tree!: ReturnType<typeof create>;
     act(() => {
-      tree = create(<ActivityStepRow onLoadToolDetail={onLoadToolDetail} step={step} taskId="task_1" toolDetails={{}} />);
+      tree = create(<ActivityStepRow onSubscribeToolDetail={onSubscribeToolDetail} step={step} taskId="task_1" toolDetails={{}} />);
     });
     act(() => tree.root.findByProps({ className: "activity-disclosure-trigger" }).props.onClick());
-    expect(onLoadToolDetail).toHaveBeenCalledWith("artifact_1");
+    expect(onSubscribeToolDetail).toHaveBeenCalledOnce();
+    expect(onSubscribeToolDetail).toHaveBeenCalledWith("artifact_1");
     act(() => {
       vi.advanceTimersByTime(250);
     });
-    expect(onLoadToolDetail).toHaveBeenCalledWith("artifact_1", true);
+    expect(onSubscribeToolDetail).toHaveBeenCalledOnce();
 
-    act(() => tree.unmount());
-    act(() => {
-      tree = create(
-        <ActivityStepRow
-          onLoadToolDetail={onLoadToolDetail}
-          step={step}
-          taskId="task_1"
-          toolDetails={{ ["task_1\u0000artifact_1"]: { loading: true } }}
-        />,
-      );
-    });
-    onLoadToolDetail.mockClear();
     act(() => tree.root.findByProps({ className: "activity-disclosure-trigger" }).props.onClick());
-    expect(onLoadToolDetail).not.toHaveBeenCalled();
+    expect(cleanup).toHaveBeenCalledOnce();
     act(() => tree.unmount());
 
     const loadedHtml = renderToStaticMarkup(
       ActivityStepRow({
-        onLoadToolDetail,
+        onSubscribeToolDetail,
         step: { ...step, name: "edit", input_summary: undefined },
         taskId: "task_1",
         toolDetails: {

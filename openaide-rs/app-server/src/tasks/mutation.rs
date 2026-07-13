@@ -91,8 +91,11 @@ impl TaskMutationContext<'_> {
         append_normalized_to_store(self.store, &self.task.task_id, message).map(|_| ())
     }
 
-    pub(crate) fn upsert_message(&self, message: NormalizedMessage) -> Result<(), RuntimeError> {
-        upsert_normalized_to_store(self.store, &self.task.task_id, message).map(|_| ())
+    pub(crate) fn upsert_message_with_details(
+        &self,
+        message: NormalizedMessage,
+    ) -> Result<crate::tasks::lifecycle::UpsertedMessage, RuntimeError> {
+        upsert_normalized_to_store(self.store, &self.task.task_id, message)
     }
 
     pub(crate) fn append_text_chunk(

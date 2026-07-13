@@ -374,7 +374,7 @@ describe("AppSurfaces callback wiring", () => {
       expect.objectContaining({
         onCancel: controller.callbacks.task.cancel,
         onLoadChatPage: controller.callbacks.task.loadChatPage,
-        onLoadToolDetail: controller.callbacks.task.loadToolDetail,
+        onSubscribeToolDetail: controller.callbacks.task.subscribeToolDetail,
         onPermissionRespond: controller.callbacks.task.respondToPermission,
         onRevealAttachment: controller.callbacks.task.revealAttachment,
         onRemoveAttachment: controller.callbacks.task.removeAttachment,
@@ -833,7 +833,7 @@ function controllerFor(surface: AppController["bootstrap"]["surface"]): AppContr
       task: {
         cancel: vi.fn(),
         loadChatPage: vi.fn(),
-        loadToolDetail: vi.fn(),
+        subscribeToolDetail: vi.fn(() => vi.fn()),
         revealAttachment: vi.fn(),
         removeAttachment: vi.fn(),
         respondToPermission: vi.fn(),

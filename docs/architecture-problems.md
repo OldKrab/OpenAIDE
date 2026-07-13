@@ -239,7 +239,7 @@ For live output, App Server keeps an in-memory `StreamingRuns` map from optional
 
 ## AP-016: Tool updates republish broad state and use lossy suppression
 
-**Status:** confirmed
+**Status:** resolved
 
 **Area:** ACP tool projection, App Server publication, and Frontend detail refresh
 
@@ -248,6 +248,8 @@ A tool mutation currently persists an upserted Activity row without a committed 
 **Impact:** A local tool detail change causes broad state and network churn, while the attempted optimization can lose the newest persisted/displayed output. Polling duplicates the Agent update stream and scales with expanded clients.
 
 **Desired direction:** Persist every accepted tool update. Publish only a typed lightweight Chat-row upsert for shared summary/status changes. Keep full detail behind a per-client subscription created on expansion and removed on collapse; App Server pushes detail changes only to subscribed clients while retaining the latest detail for later reads. Remove Frontend polling and the lossy suppression. Add coalescing only after measurement and require a guaranteed trailing flush.
+
+**Resolution:** Every accepted ACP Tool update is now persisted and produces one lightweight `chatItemUpserted` event for Task subscribers. Full Tool content is delivered only through an exact `toolDetail` state subscription keyed by Task and artifact; the initial snapshot reads the latest persisted artifact and later updates are pushed only while a client holds that subscription. Expanding a Tool disclosure acquires the subscription and collapse or unmount releases it. The old `task/toolDetail` request, Frontend 250 ms polling, and App Server 250 ms lossy suppression were removed completely.
 
 ## AP-017: Tool projection and presentation are incomplete
 

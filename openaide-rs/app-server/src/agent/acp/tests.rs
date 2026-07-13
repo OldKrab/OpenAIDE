@@ -1473,7 +1473,7 @@ fn tool_call_update_keeps_partial_fields_from_existing_call() {
 }
 
 #[test]
-fn running_tool_output_bursts_publish_only_presentation_changes() {
+fn every_running_tool_output_update_reaches_the_session_sink() {
     let capture = Arc::new(CapturingEventSink::default());
     let sink: Arc<dyn AgentEventSink> = capture.clone();
     let projection =
@@ -1504,7 +1504,15 @@ fn running_tool_output_bursts_publish_only_presentation_changes() {
         .unwrap();
 
     let events = capture.events();
-    assert_eq!(events.len(), 2);
+    assert_eq!(events.len(), 102);
+    assert!(matches!(
+        &events[100],
+        AgentEvent::ToolCall(tool_call)
+            if tool_call.status == AgentToolCallStatus::InProgress
+                && tool_call.details.as_ref()
+                    .and_then(|details| details.output.as_ref())
+                    .and_then(|output| output.formatted_output.as_deref()) == Some("line 99")
+    ));
     assert!(matches!(
         events.last(),
         Some(AgentEvent::ToolCall(tool_call))

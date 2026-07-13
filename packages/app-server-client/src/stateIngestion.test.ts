@@ -494,6 +494,61 @@ describe("state ingestion", () => {
     ]);
   });
 
+  it("upserts a lightweight tool row without duplicating its chat position", () => {
+    const snapshot = taskSnapshot("task-1", [chatItem("tool-1", "Starting")]);
+    const state = createSubscriptionIngestionState(
+      subscribeResult(taskScope("task-1"), snapshot, "cursor-1"),
+      { stateRootId: stateRoot("root-1") },
+    );
+    const updated = chatItem("tool-1", "Finished");
+    const event = taskEvent("root-1", "task-1", "cursor-1", "cursor-2", {
+      kind: "chatItemUpserted",
+      taskId: taskId("task-1"),
+      revision: 2,
+      item: updated,
+    });
+
+    const result = applySubscriptionEvent(state, event);
+
+    expect(result.kind).toBe("applied");
+    if (result.kind !== "applied" || result.state.snapshot.kind !== "task") {
+      throw new Error("expected applied Tool row upsert");
+    }
+    expect(result.state.snapshot.task.chat.items).toEqual([updated]);
+    expect(result.state.snapshot.task.revision).toBe(2);
+  });
+
+  it("applies full Tool details only to the exact detail subscription", () => {
+    const scope: SubscriptionScope = {
+      kind: "toolDetail",
+      taskId: taskId("task-1"),
+      artifactId: "artifact-1",
+    };
+    const snapshot: SubscriptionSnapshot = {
+      ...scope,
+      details: { locations: [], content: [{ kind: "text", text: "starting" }] },
+    };
+    const state = createSubscriptionIngestionState(
+      subscribeResult(scope, snapshot, "cursor-1"),
+      { stateRootId: stateRoot("root-1") },
+    );
+    const event = taskEvent("root-1", "task-1", "cursor-1", "cursor-2", {
+      kind: "toolDetailUpdated",
+      taskId: taskId("task-1"),
+      artifactId: "artifact-1",
+      details: { locations: [], content: [{ kind: "text", text: "finished" }] },
+    });
+
+    const result = applySubscriptionEvent(state, event);
+
+    expect(result.kind).toBe("applied");
+    if (result.kind !== "applied" || result.state.snapshot.kind !== "toolDetail") {
+      throw new Error("expected applied Tool detail update");
+    }
+    expect(result.state.snapshot.details.content).toEqual([{ kind: "text", text: "finished" }]);
+    expect(subscriptionScopesEqual(scope, { ...scope, artifactId: "artifact-2" })).toBe(false);
+  });
+
   it("applies project collection updates to project subscriptions", () => {
     const state = createSubscriptionIngestionState(
       subscribeResult({ kind: "projects" }, { kind: "projects", projects: { projects: [] } }, "cursor-1"),

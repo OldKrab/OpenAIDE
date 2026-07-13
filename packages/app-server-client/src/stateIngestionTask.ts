@@ -32,6 +32,10 @@ export function updateTaskSnapshot(
       return payload.taskId === task.task.taskId && payload.revision > task.revision
         ? changed({ ...snapshot, task: appendChatItem(task, payload.revision, payload.item) })
         : unchanged(snapshot);
+    case "chatItemUpserted":
+      return payload.taskId === task.task.taskId && payload.revision > task.revision
+        ? changed({ ...snapshot, task: upsertChatItem(task, payload.revision, payload.item) })
+        : unchanged(snapshot);
     case "chatItemChunk":
       if (payload.taskId !== task.task.taskId) return unchanged(snapshot);
       if (payload.revision <= task.revision) return unchanged(snapshot);
@@ -52,6 +56,22 @@ function appendChatItem(task: TaskSnapshot, revision: number, item: ChatItem): T
     chat: {
       ...task.chat,
       items: [...task.chat.items, item],
+      hasMessages: true,
+    },
+  };
+}
+
+function upsertChatItem(task: TaskSnapshot, revision: number, item: ChatItem): TaskSnapshot {
+  const existing = task.chat.items.findIndex((candidate) => candidate.messageId === item.messageId);
+  const items = existing === -1
+    ? [...task.chat.items, item]
+    : task.chat.items.map((candidate, index) => index === existing ? item : candidate);
+  return {
+    ...task,
+    revision,
+    chat: {
+      ...task.chat,
+      items,
       hasMessages: true,
     },
   };

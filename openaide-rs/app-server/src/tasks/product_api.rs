@@ -48,7 +48,6 @@ pub(crate) mod send;
 mod session_cursor;
 mod set_config_option;
 mod support_recovery;
-mod tool_detail;
 
 #[derive(Clone)]
 pub(crate) struct TaskProductApi {
@@ -153,7 +152,6 @@ pub(crate) trait TaskArchiveWorkflow: Send + Sync {
 
 pub(crate) use attachments::AttachmentFileBrowserWorkflow;
 pub(crate) use chat_page::TaskChatPageWorkflow;
-pub(crate) use tool_detail::TaskToolDetailWorkflow;
 
 impl TaskProductApi {
     /// Reads a Task at a client intent boundary and hides another client's New Task.

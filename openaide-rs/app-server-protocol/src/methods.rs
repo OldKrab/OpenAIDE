@@ -41,7 +41,6 @@ use crate::task::{
     TaskDiscardResult, TaskListParams, TaskListResult, TaskMarkReadParams, TaskMarkReadResult,
     TaskOpenParams, TaskOpenResult, TaskSendParams, TaskSendResult, TaskSetArchivedParams,
     TaskSetArchivedResult, TaskSetConfigOptionParams, TaskSetConfigOptionResult,
-    TaskToolDetailParams, TaskToolDetailResult,
 };
 use crate::workspace::{
     WorkspaceListDirectoryParams, WorkspaceListDirectoryResult, WorkspaceListRootsParams,
@@ -319,12 +318,6 @@ protocol_method!(
     TASK_CHAT_PAGE,
     TaskChatPageParams,
     TaskChatPageResult
-);
-protocol_method!(
-    TaskToolDetail,
-    TASK_TOOL_DETAIL,
-    TaskToolDetailParams,
-    TaskToolDetailResult
 );
 protocol_method!(TaskList, TASK_LIST, TaskListParams, TaskListResult);
 protocol_method!(

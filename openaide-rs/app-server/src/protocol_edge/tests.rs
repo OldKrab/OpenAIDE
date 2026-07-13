@@ -12,7 +12,7 @@ use openaide_app_server_protocol::methods::{
     CLIENT_HEARTBEAT, CLIENT_INITIALIZE, DIAGNOSTICS_GET_RUNTIME, SETTINGS_GET_MCP_SERVERS,
     SETTINGS_GET_PREFERENCES, SETTINGS_GET_RUNTIME, SETTINGS_GET_SKILLS,
     SETTINGS_UPDATE_PREFERENCES, SETTINGS_UPDATE_RUNTIME, SHELL_RESOLVE_FILE_REVEAL,
-    STATE_SUBSCRIBE, STATE_UNSUBSCRIBE, TASK_CHAT_PAGE, TASK_TOOL_DETAIL,
+    STATE_SUBSCRIBE, STATE_UNSUBSCRIBE, TASK_CHAT_PAGE,
 };
 use openaide_app_server_protocol::settings::{
     AppPreferencesPatch, AppPreferencesUpdateParams, ComposerSubmitShortcut,
@@ -48,12 +48,12 @@ use crate::snapshots::{
 };
 use crate::state_sync::StateStream;
 use crate::storage::Store;
-use crate::task_events::{CommittedTaskDelta, TaskUpdate};
+use crate::task_events::{CommittedTaskDelta, TaskUpdate, ToolDetailUpdate};
 use crate::tasks::product_api::{
     AgentListSessionsWorkflow, AttachmentFileBrowserWorkflow, TaskAdoptNativeSessionWorkflow,
     TaskArchiveWorkflow, TaskCancelWorkflow, TaskChatPageWorkflow, TaskCreateWorkflow,
     TaskDiscardWorkflow, TaskOpenWorkflow, TaskSendAccepted, TaskSendWorkflow,
-    TaskSetConfigOptionWorkflow, TaskToolDetailWorkflow,
+    TaskSetConfigOptionWorkflow,
 };
 
 use super::*;
@@ -533,36 +533,6 @@ fn task_chat_page_returns_protocol_chat_items() {
 }
 
 #[test]
-fn task_tool_detail_returns_protocol_details() {
-    let mut gateway = gateway();
-    let connection_id = ConnectionId::new("conn-1");
-    initialize(&mut gateway, connection_id.clone());
-
-    let outcome = gateway.handle_inbound(
-        connection_id,
-        request(
-            "2",
-            TASK_TOOL_DETAIL,
-            serde_json::json!({
-                "taskId": "task-1",
-                "artifactId": "artifact-1",
-            }),
-        ),
-        AppServerTime(2),
-    );
-
-    let value = response_value(outcome);
-    assert_eq!(
-        value["result"]["locations"][0]["path"],
-        json!("src/main.rs")
-    );
-    assert_eq!(value["result"]["content"][0]["kind"], json!("text"));
-    assert_eq!(value["result"]["content"][0]["text"], json!("details"));
-    assert_eq!(value["result"]["input"]["command"][0], json!("cargo"));
-    assert_eq!(value["result"]["output"]["exitCode"], json!(0));
-}
-
-#[test]
 fn runtime_settings_get_and_update_use_app_server_protocol() {
     let mut gateway = gateway();
     let connection_id = ConnectionId::new("conn-1");
@@ -784,6 +754,87 @@ fn subscribe_after_initialize_returns_snapshot_and_stores_subscription() {
     assert_eq!(value["result"]["cursor"], json!("cursor-0"));
     assert_eq!(value["result"]["snapshot"]["kind"], json!("taskNavigation"));
     assert_eq!(gateway.state_stream.subscription_count(), 1);
+}
+
+#[test]
+fn tool_detail_subscription_receives_only_full_updates_for_its_artifact() {
+    use openaide_app_server_protocol::ids::MessageId;
+    use openaide_app_server_protocol::snapshot::{ChatItem, ChatItemStatus, ChatRole};
+
+    let mut gateway = initialized_gateway("client-1", "conn-1");
+    let task_snapshots = Arc::new(EmptyTaskSnapshots);
+    gateway.snapshots = SnapshotBuilder::with_task_snapshots(
+        "server-1".into(),
+        "root-1".into(),
+        task_snapshots.clone(),
+    );
+    gateway.task_snapshots = task_snapshots;
+    response_value(gateway.handle_inbound(
+        ConnectionId::new("conn-2"),
+        request("2", CLIENT_INITIALIZE, init_params("client-2")),
+        AppServerTime(2),
+    ));
+    response_value(gateway.handle_inbound(
+        ConnectionId::new("conn-1"),
+        request(
+            "3",
+            STATE_SUBSCRIBE,
+            StateSubscribeParams {
+                scope: SubscriptionScope::ToolDetail {
+                    task_id: TaskId::from("task-1"),
+                    artifact_id: "artifact-2".to_string(),
+                },
+            },
+        ),
+        AppServerTime(3),
+    ));
+    let baseline = response_value(gateway.handle_inbound(
+        ConnectionId::new("conn-2"),
+        request(
+            "4",
+            STATE_SUBSCRIBE,
+            StateSubscribeParams {
+                scope: SubscriptionScope::ToolDetail {
+                    task_id: TaskId::from("task-1"),
+                    artifact_id: "artifact-1".to_string(),
+                },
+            },
+        ),
+        AppServerTime(4),
+    ));
+    assert_eq!(
+        baseline["result"]["snapshot"]["details"]["content"][0]["text"],
+        json!("details")
+    );
+
+    let update = TaskUpdate::committed(
+        "task-1",
+        2,
+        CommittedTaskDelta::ChatItemUpserted {
+            item: ChatItem {
+                message_id: MessageId::from("tool-1"),
+                turn_id: None,
+                role: ChatRole::System,
+                status: ChatItemStatus::Complete,
+                parts: Vec::new(),
+            },
+            tool_details: vec![ToolDetailUpdate {
+                artifact_id: "artifact-1".to_string(),
+                details: fixed_tool_detail(),
+            }],
+        },
+    );
+    let deliveries = gateway.publish_task_update(&update, AppServerTime(5));
+
+    assert_eq!(deliveries.len(), 1);
+    assert_eq!(
+        deliveries[0].delivery.client_instance_id.as_str(),
+        "client-2"
+    );
+    assert!(matches!(
+        deliveries[0].event.payload,
+        AppServerEventPayload::ToolDetailUpdated { .. }
+    ));
 }
 
 #[test]
@@ -1673,7 +1724,6 @@ fn gateway_with_project_context_and_store() -> (RpcGateway, Store) {
         Arc::new(RejectingTaskCancel),
         Arc::new(RejectingTaskOpen),
         Arc::new(RejectingTaskChatPage),
-        Arc::new(RejectingTaskToolDetail),
         Arc::new(RejectingTaskSetConfigOption),
         Arc::new(RejectingTaskDiscard),
         Arc::new(RejectingTaskArchive),
@@ -1721,7 +1771,6 @@ fn gateway_with_attachments_and_shutdown(
         std::sync::Arc::new(RejectingTaskCancel),
         std::sync::Arc::new(RejectingTaskOpen),
         std::sync::Arc::new(FixedTaskChatPage),
-        std::sync::Arc::new(FixedTaskToolDetail),
         std::sync::Arc::new(RejectingTaskSetConfigOption),
         std::sync::Arc::new(RejectingTaskDiscard),
         std::sync::Arc::new(RejectingTaskArchive),
@@ -1800,7 +1849,6 @@ fn gateway_with_agent_session_listing(
         std::sync::Arc::new(RejectingTaskCancel),
         std::sync::Arc::new(RejectingTaskOpen),
         std::sync::Arc::new(RejectingTaskChatPage),
-        std::sync::Arc::new(RejectingTaskToolDetail),
         std::sync::Arc::new(RejectingTaskSetConfigOption),
         std::sync::Arc::new(RejectingTaskDiscard),
         std::sync::Arc::new(RejectingTaskArchive),
@@ -1838,7 +1886,6 @@ fn gateway_with_agent_authenticate(
         std::sync::Arc::new(RejectingTaskCancel),
         std::sync::Arc::new(RejectingTaskOpen),
         std::sync::Arc::new(RejectingTaskChatPage),
-        std::sync::Arc::new(RejectingTaskToolDetail),
         std::sync::Arc::new(RejectingTaskSetConfigOption),
         std::sync::Arc::new(RejectingTaskDiscard),
         std::sync::Arc::new(RejectingTaskArchive),
@@ -2426,6 +2473,18 @@ impl TaskSnapshotSource for EmptyTaskSnapshots {
     > {
         self.open_internal(task_id)
     }
+
+    fn tool_detail_for_client(
+        &self,
+        _client_instance_id: &ClientInstanceId,
+        _task_id: &TaskId,
+        _artifact_id: &str,
+    ) -> Result<
+        openaide_app_server_protocol::task::ToolDetailSnapshot,
+        openaide_app_server_protocol::errors::ProtocolError,
+    > {
+        Ok(fixed_tool_detail())
+    }
 }
 
 struct RejectingTaskCreate;
@@ -2608,69 +2667,38 @@ impl TaskChatPageWorkflow for RejectingTaskChatPage {
     }
 }
 
-struct FixedTaskToolDetail;
-
-impl TaskToolDetailWorkflow for FixedTaskToolDetail {
-    fn tool_detail_for_client(
-        &self,
-        _client_instance_id: &ClientInstanceId,
-        _params: openaide_app_server_protocol::task::TaskToolDetailParams,
-    ) -> Result<
-        openaide_app_server_protocol::task::TaskToolDetailResult,
-        openaide_app_server_protocol::errors::ProtocolError,
-    > {
-        Ok(openaide_app_server_protocol::task::TaskToolDetailResult {
-            locations: vec![openaide_app_server_protocol::task::ActivityToolLocation {
-                path: "src/main.rs".to_string(),
-                line: Some(12),
+fn fixed_tool_detail() -> openaide_app_server_protocol::task::ToolDetailSnapshot {
+    openaide_app_server_protocol::task::ToolDetailSnapshot {
+        locations: vec![openaide_app_server_protocol::task::ActivityToolLocation {
+            path: "src/main.rs".to_string(),
+            line: Some(12),
+        }],
+        content: vec![
+            openaide_app_server_protocol::task::ActivityToolContent::Text {
+                text: "details".to_string(),
+            },
+        ],
+        input: Some(openaide_app_server_protocol::task::ActivityToolInput {
+            command: vec!["cargo".to_string(), "test".to_string()],
+            cwd: Some("workspace".to_string()),
+            query: None,
+            queries: None,
+            url: None,
+            path: None,
+            fields: vec![openaide_app_server_protocol::task::ActivityToolField {
+                name: "mode".to_string(),
+                value: "check".to_string(),
             }],
-            content: vec![
-                openaide_app_server_protocol::task::ActivityToolContent::Text {
-                    text: "details".to_string(),
-                },
-            ],
-            input: Some(openaide_app_server_protocol::task::ActivityToolInput {
-                command: vec!["cargo".to_string(), "test".to_string()],
-                cwd: Some("workspace".to_string()),
-                query: None,
-                queries: None,
-                url: None,
-                path: None,
-                fields: vec![openaide_app_server_protocol::task::ActivityToolField {
-                    name: "mode".to_string(),
-                    value: "check".to_string(),
-                }],
-            }),
-            output: Some(openaide_app_server_protocol::task::ActivityToolOutput {
-                stdout: Some("ok".to_string()),
-                stderr: None,
-                formatted_output: None,
-                aggregated_output: None,
-                exit_code: Some(0),
-                success: Some(true),
-                fields: Vec::new(),
-            }),
-        })
-    }
-}
-
-struct RejectingTaskToolDetail;
-
-impl TaskToolDetailWorkflow for RejectingTaskToolDetail {
-    fn tool_detail_for_client(
-        &self,
-        _client_instance_id: &ClientInstanceId,
-        _params: openaide_app_server_protocol::task::TaskToolDetailParams,
-    ) -> Result<
-        openaide_app_server_protocol::task::TaskToolDetailResult,
-        openaide_app_server_protocol::errors::ProtocolError,
-    > {
-        Err(openaide_app_server_protocol::errors::ProtocolError {
-            code: openaide_app_server_protocol::errors::ProtocolErrorCode::Internal,
-            message: "task tool detail unavailable in test gateway".to_string(),
-            recoverable: true,
-            target: None,
-        })
+        }),
+        output: Some(openaide_app_server_protocol::task::ActivityToolOutput {
+            stdout: Some("ok".to_string()),
+            stderr: None,
+            formatted_output: None,
+            aggregated_output: None,
+            exit_code: Some(0),
+            success: Some(true),
+            fields: Vec::new(),
+        }),
     }
 }
 

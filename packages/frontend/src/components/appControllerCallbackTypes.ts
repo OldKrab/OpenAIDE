@@ -80,7 +80,8 @@ export type TaskCallbacks = {
   fileBrowser?: TaskFileBrowserCallbacks;
   /** Starts one earlier-page request and returns its viewport/reducer generation. */
   loadChatPage: (beforeCursor: string) => number | undefined;
-  loadToolDetail: (artifactId: string, refresh?: boolean) => void;
+  /** Keeps full Tool details current until the disclosure closes or unmounts. */
+  subscribeToolDetail: (artifactId: string) => () => void;
   revealAttachment: (attachmentId: string) => Promise<void>;
   removeAttachment: (attachmentId: string) => void;
   respondToPermission: (

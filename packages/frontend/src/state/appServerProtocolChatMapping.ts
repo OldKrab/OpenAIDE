@@ -6,7 +6,7 @@ import type {
   PendingRequestSnapshot,
   PermissionRequestOptionKind,
   PermissionRequestParams,
-  TaskToolDetailResult,
+  ToolDetailSnapshot,
   TaskSnapshot as ProtocolTaskSnapshot,
 } from "@openaide/app-server-client";
 import type {
@@ -341,7 +341,7 @@ function activityStepLevel(level: string | null | undefined): Extract<ActivitySt
   return undefined;
 }
 
-function mapProtocolToolDetail(details: TaskToolDetailResult): ActivityToolDetails {
+export function mapProtocolToolDetail(details: ToolDetailSnapshot): ActivityToolDetails {
   return {
     locations: details.locations.map((location) => ({
       path: location.path,

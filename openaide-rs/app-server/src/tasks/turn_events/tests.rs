@@ -3,14 +3,16 @@ use std::sync::{Arc, Mutex};
 
 use crate::agent::events::{
     AgentEvent, AgentPermissionOption, AgentPermissionOptionKind, AgentPermissionRequest,
-    AgentToolCallRef,
+    AgentToolCall, AgentToolCallRef, AgentToolCallStatus,
 };
 use crate::agent::{
     AgentEventSink, AgentMetadataField, AgentSessionEventSink, AgentSessionMetadataUpdate,
     TurnCancellation,
 };
 use crate::client_lifecycle::AppServerTime;
-use crate::protocol::model::{IsolationKind, NormalizedMessage, TaskStatus};
+use crate::protocol::model::{
+    ActivityToolDetails, ActivityToolOutput, IsolationKind, NormalizedMessage, TaskStatus,
+};
 use crate::server_requests::ServerRequestRuntime;
 use crate::server_requests::{ResponderScope, ServerRequestAnswer};
 use crate::storage::records::{TaskPreparationRecord, TaskRecord, TaskTitle, TaskTitleSource};
@@ -527,6 +529,91 @@ fn agent_text_notifications_describe_only_durable_ordered_deltas() {
     .unwrap();
     let activity_update = notifications.recv().unwrap();
     assert!(activity_update.delta.is_none());
+}
+
+#[test]
+fn every_tool_update_commits_one_lightweight_upsert_and_latest_detail() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().to_path_buf()).unwrap();
+    store.write_task(&running_task("task_1")).unwrap();
+    let (notifier, notifications) = TaskUpdateNotifier::channel();
+    let mutations = TaskMutations::new(
+        store.clone(),
+        Arc::new(Mutex::new(())),
+        Arc::new(Mutex::new(RuntimeState::with_revision(0))),
+        notifier,
+    );
+    let sink = TaskSessionEventSink::new(
+        mutations,
+        "task_1".to_string(),
+        "session_1".to_string(),
+        ServerRequestRuntime::new(),
+    );
+
+    for output in ["first", "latest"] {
+        sink.session_update(AgentEvent::ToolCall(AgentToolCall {
+            tool_call_id: "tool_1".to_string(),
+            scope_id: None,
+            title: "Run checks".to_string(),
+            kind: "execute".to_string(),
+            status: AgentToolCallStatus::InProgress,
+            input_summary: Some("cargo test".to_string()),
+            output_preview: Some(output.to_string()),
+            details: Some(Box::new(ActivityToolDetails {
+                locations: Vec::new(),
+                content: Vec::new(),
+                input: None,
+                output: Some(ActivityToolOutput {
+                    stdout: Some(output.to_string()),
+                    stderr: None,
+                    formatted_output: None,
+                    aggregated_output: None,
+                    exit_code: None,
+                    success: None,
+                    fields: Vec::new(),
+                }),
+            })),
+        }))
+        .unwrap();
+
+        let update = notifications.recv().unwrap();
+        match update.delta.expect("focused Tool delta") {
+            CommittedTaskDelta::ChatItemUpserted { item, tool_details } => {
+                assert_eq!(item.message_id.as_str(), "acp_tool:session_1:tool_1");
+                assert!(item.parts.iter().all(|part| !matches!(
+                    part,
+                    openaide_app_server_protocol::snapshot::MessagePart::Activity { steps, .. }
+                        if steps.iter().any(|step| matches!(
+                            step,
+                            openaide_app_server_protocol::snapshot::ActivityStepSnapshot::Tool {
+                                details: Some(_), ..
+                            }
+                        ))
+                )));
+                assert_eq!(tool_details.len(), 1);
+                assert_eq!(tool_details[0].artifact_id, "acp_tool_session_1_tool_1_0");
+                assert_eq!(
+                    tool_details[0]
+                        .details
+                        .output
+                        .as_ref()
+                        .and_then(|detail| detail.stdout.as_deref()),
+                    Some(output)
+                );
+            }
+            other => panic!("expected Tool upsert, got {other:?}"),
+        }
+    }
+
+    assert_eq!(store.read_messages("task_1").unwrap().len(), 1);
+    assert_eq!(
+        store
+            .read_tool_artifact("task_1", "acp_tool_session_1_tool_1_0")
+            .unwrap()
+            .output
+            .and_then(|detail| detail.stdout),
+        Some("latest".to_string())
+    );
 }
 
 #[test]

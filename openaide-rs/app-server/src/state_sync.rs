@@ -225,7 +225,12 @@ fn event_matches_subscription(
             task_id,
         } => {
             event_state_root == state_root_id
-                && matches!(subscription_scope, SubscriptionScope::Task { task_id: subscribed } if subscribed == task_id)
+                && matches!(
+                    subscription_scope,
+                    SubscriptionScope::Task { task_id: subscribed }
+                        | SubscriptionScope::ToolDetail { task_id: subscribed, .. }
+                        if subscribed == task_id
+                )
         }
     };
     scope_matches && payload_matches_subscription(payload, subscription_scope)
@@ -297,7 +302,19 @@ fn payload_matches_subscription(
                 | AppServerEventPayload::TaskHistorySyncUpdated { .. }
                 | AppServerEventPayload::ChatItemAppended { .. }
                 | AppServerEventPayload::ChatItemChunk { .. }
+                | AppServerEventPayload::ChatItemUpserted { .. }
                 | AppServerEventPayload::RequestUpdated { .. }
+        ),
+        SubscriptionScope::ToolDetail {
+            task_id,
+            artifact_id,
+        } => matches!(
+            payload,
+            AppServerEventPayload::ToolDetailUpdated {
+                task_id: updated_task_id,
+                artifact_id: updated_artifact_id,
+                ..
+            } if updated_task_id == task_id && updated_artifact_id == artifact_id
         ),
     }
 }

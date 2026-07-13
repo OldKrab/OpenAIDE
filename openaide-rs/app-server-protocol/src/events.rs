@@ -6,6 +6,7 @@ use crate::snapshot::{
     AgentCollectionSnapshot, ChatItem, ClientSnapshot, PendingRequestSnapshot,
     ProjectCollectionSnapshot, TaskNavigationSnapshot, TaskSnapshot, TaskSummary,
 };
+use crate::task::ToolDetailSnapshot;
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -76,6 +77,16 @@ pub enum AppServerEventPayload {
         revision: u64,
         message_id: MessageId,
         chunk: TextChunk,
+    },
+    ChatItemUpserted {
+        task_id: TaskId,
+        revision: u64,
+        item: ChatItem,
+    },
+    ToolDetailUpdated {
+        task_id: TaskId,
+        artifact_id: String,
+        details: ToolDetailSnapshot,
     },
     RequestUpdated {
         request: PendingRequestSnapshot,

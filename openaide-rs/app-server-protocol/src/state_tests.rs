@@ -28,3 +28,21 @@ fn task_navigation_scope_can_be_global_or_project_filtered() {
     assert!(global.get("projectId").is_none());
     assert_eq!(project["projectId"], json!("project-1"));
 }
+
+#[test]
+fn tool_detail_scope_identifies_one_task_artifact() {
+    let value = serde_json::to_value(SubscriptionScope::ToolDetail {
+        task_id: "task-1".into(),
+        artifact_id: "artifact-1".to_string(),
+    })
+    .unwrap();
+
+    assert_eq!(
+        value,
+        json!({
+            "kind": "toolDetail",
+            "taskId": "task-1",
+            "artifactId": "artifact-1",
+        })
+    );
+}

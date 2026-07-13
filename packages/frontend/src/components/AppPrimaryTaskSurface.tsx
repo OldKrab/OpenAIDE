@@ -84,7 +84,7 @@ export function AppPrimaryTaskSurface({ controller, focusRequestKey, model }: Ap
           ? callbacks.task.cancel
           : callbacks.newTask.cancel}
         onLoadChatPage={callbacks.task.loadChatPage}
-        onLoadToolDetail={callbacks.task.loadToolDetail}
+        onSubscribeToolDetail={callbacks.task.subscribeToolDetail}
         onPermissionRespond={callbacks.task.respondToPermission}
         onQuestionRespond={callbacks.task.respondToQuestion}
         onRetryConnection={retryTaskOpen}

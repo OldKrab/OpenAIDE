@@ -14,7 +14,7 @@ export { firstToolPath } from "../state/toolDetailsViewModel";
 
 export const ChatRow = memo(function ChatRow({
   message,
-  onLoadToolDetail,
+  onSubscribeToolDetail,
   onPermissionRespond,
   onQuestionRespond,
   permissionResponse,
@@ -26,7 +26,7 @@ export const ChatRow = memo(function ChatRow({
 }: {
   commandCatalog?: AgentCommandsCatalog;
   message: ChatMessage;
-  onLoadToolDetail?: (artifactId: string, refresh?: boolean) => void;
+  onSubscribeToolDetail?: (artifactId: string) => () => void;
   onPermissionRespond: (
     requestId: string,
     optionId: string,
@@ -78,7 +78,7 @@ export const ChatRow = memo(function ChatRow({
   }
   if (body.kind === "activity") {
     return (
-      <ChatActivityView activity={body} onLoadToolDetail={onLoadToolDetail} taskId={taskId} toolDetails={toolDetails} />
+      <ChatActivityView activity={body} onSubscribeToolDetail={onSubscribeToolDetail} taskId={taskId} toolDetails={toolDetails} />
     );
   }
   if (body.kind === "interruption") {

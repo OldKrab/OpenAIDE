@@ -63,12 +63,6 @@ pub struct ChatPageParams {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
-pub struct ToolDetailParams {
-    pub task_id: String,
-    pub artifact_id: String,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
 pub struct SessionPromptParams {
     pub task_id: String,
     pub text: String,

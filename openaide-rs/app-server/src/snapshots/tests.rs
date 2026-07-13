@@ -313,6 +313,23 @@ impl TaskSnapshotSource for StaticTaskSnapshots {
     ) -> Result<TaskSnapshot, openaide_app_server_protocol::errors::ProtocolError> {
         self.open_internal(task_id)
     }
+
+    fn tool_detail_for_client(
+        &self,
+        _client_instance_id: &openaide_app_server_protocol::ids::ClientInstanceId,
+        _task_id: &TaskId,
+        _artifact_id: &str,
+    ) -> Result<
+        openaide_app_server_protocol::task::ToolDetailSnapshot,
+        openaide_app_server_protocol::errors::ProtocolError,
+    > {
+        Err(openaide_app_server_protocol::errors::ProtocolError {
+            code: openaide_app_server_protocol::errors::ProtocolErrorCode::NotFound,
+            message: "tool detail is not available in this snapshot fixture".to_string(),
+            recoverable: false,
+            target: None,
+        })
+    }
 }
 
 fn ctx() -> ClientContext {

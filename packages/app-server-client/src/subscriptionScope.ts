@@ -29,6 +29,10 @@ export function subscriptionScopesEqual(left: SubscriptionScope, right: Subscrip
       return right.kind === "taskNavigation" && normalizeOptional(left.projectId) === normalizeOptional(right.projectId);
     case "task":
       return right.kind === "task" && left.taskId === right.taskId;
+    case "toolDetail":
+      return right.kind === "toolDetail"
+        && left.taskId === right.taskId
+        && left.artifactId === right.artifactId;
   }
 }
 
@@ -56,7 +60,7 @@ function eventScopeMatchesSubscriptionScope(
   eventScope: EventScope,
   context: SubscriptionIngestionContext,
 ): SubscriptionEventMatch {
-  if (scope.kind === "task") {
+  if (scope.kind === "task" || scope.kind === "toolDetail") {
     return eventScope.kind === "task" && eventScope.taskId === scope.taskId
       ? { kind: "match" }
       : { kind: "subscriptionMismatch" };
@@ -97,9 +101,14 @@ function payloadMatchesSubscriptionScope(scope: SubscriptionScope, payload: AppS
         payload.kind === "taskSnapshotUpdated" ||
         payload.kind === "taskHistorySyncUpdated" ||
         payload.kind === "chatItemAppended" ||
+        payload.kind === "chatItemUpserted" ||
         payload.kind === "chatItemChunk" ||
         payload.kind === "requestUpdated"
       );
+    case "toolDetail":
+      return payload.kind === "toolDetailUpdated"
+        && payload.taskId === scope.taskId
+        && payload.artifactId === scope.artifactId;
   }
 }
 

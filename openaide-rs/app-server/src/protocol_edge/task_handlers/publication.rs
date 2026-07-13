@@ -128,33 +128,53 @@ impl RpcGateway {
         let Some(delta) = update.delta.clone() else {
             return Vec::new();
         };
-        let payload = match delta {
+        let payloads = match delta {
             CommittedTaskDelta::ChatItemAppended { item } => {
-                AppServerEventPayload::ChatItemAppended {
+                vec![AppServerEventPayload::ChatItemAppended {
                     task_id: task_id.clone(),
                     revision: update.revision,
                     item,
-                }
+                }]
             }
             CommittedTaskDelta::ChatItemChunk { message_id, chunk } => {
-                AppServerEventPayload::ChatItemChunk {
+                vec![AppServerEventPayload::ChatItemChunk {
                     task_id: task_id.clone(),
                     revision: update.revision,
                     message_id,
                     chunk,
-                }
+                }]
+            }
+            CommittedTaskDelta::ChatItemUpserted { item, tool_details } => {
+                let mut payloads = vec![AppServerEventPayload::ChatItemUpserted {
+                    task_id: task_id.clone(),
+                    revision: update.revision,
+                    item,
+                }];
+                payloads.extend(tool_details.into_iter().map(|detail| {
+                    AppServerEventPayload::ToolDetailUpdated {
+                        task_id: task_id.clone(),
+                        artifact_id: detail.artifact_id,
+                        details: detail.details,
+                    }
+                }));
+                payloads
             }
         };
         let client_hub = self.client_hub.clone();
-        event_deliveries(self.state_stream.publish_committed(
-            EventScope::Task {
-                state_root_id: self.state_stream.state_root_id().clone(),
-                task_id: task_id.clone(),
-            },
-            payload,
-            |client_id| client_hub.delivery_for(client_id),
-            now,
-        ))
+        payloads
+            .into_iter()
+            .flat_map(|payload| {
+                event_deliveries(self.state_stream.publish_committed(
+                    EventScope::Task {
+                        state_root_id: self.state_stream.state_root_id().clone(),
+                        task_id: task_id.clone(),
+                    },
+                    payload,
+                    |client_id| client_hub.delivery_for(client_id),
+                    now,
+                ))
+            })
+            .collect()
     }
 
     pub(crate) fn publish_task_updates(

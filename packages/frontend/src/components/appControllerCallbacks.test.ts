@@ -21,6 +21,8 @@ import {
   SETTINGS_GET_SKILLS,
   SETTINGS_UPDATE_PREFERENCES,
   SETTINGS_UPDATE_RUNTIME,
+  STATE_SUBSCRIBE,
+  STATE_UNSUBSCRIBE,
   TASK_ADOPT_NATIVE_SESSION,
   TASK_CANCEL,
   TASK_CHAT_PAGE,
@@ -31,7 +33,6 @@ import {
   TASK_SEND,
   TASK_SET_ARCHIVED,
   TASK_SET_CONFIG_OPTION,
-  TASK_TOOL_DETAIL,
   type AttachmentHandleId,
   type BackendConnection,
   type FileBrowserEntryId,
@@ -42,7 +43,7 @@ import { createAppCallbacks } from "./appControllerCallbacks";
 import { ComposerAttachmentResourceOwner } from "../services/attachmentResources";
 import { projectIdForWorkspaceRoot } from "../state/projectIdentity";
 import { appReducer } from "../state/appReducer";
-import { createInitialState, toolDetailCacheKey, type AppState } from "../state/store";
+import { createInitialState, type AppState } from "../state/store";
 import { newTaskPreparationKey } from "../state/newTaskPreparationContext";
 import { NewTaskController } from "./newTaskController";
 
@@ -3383,30 +3384,6 @@ describe("app controller callbacks", () => {
     expect(renderedState.newTask.configOptionsError).toBe("Unable to update Agent option.");
   });
 
-  it("does not reload tool details that are already loading or loaded", () => {
-    const dispatch = vi.fn();
-    const loadingState = createInitialState();
-    loadingState.snapshot = snapshot("task_1");
-    loadingState.toolDetails[toolDetailCacheKey("task_1", "artifact_1")] = { loading: true };
-
-    callbacks({ dispatch, state: loadingState }).task.loadToolDetail("artifact_1");
-
-    expect(dispatch).not.toHaveBeenCalled();
-    expect(postHostMessage).not.toHaveBeenCalled();
-
-    const loadedState = createInitialState();
-    loadedState.snapshot = snapshot("task_1");
-    loadedState.toolDetails[toolDetailCacheKey("task_1", "artifact_1")] = {
-      details: { content: [], input: undefined, locations: [] },
-      loading: false,
-    };
-
-    callbacks({ dispatch, state: loadedState }).task.loadToolDetail("artifact_1");
-
-    expect(dispatch).not.toHaveBeenCalled();
-    expect(postHostMessage).not.toHaveBeenCalled();
-  });
-
   it("loads earlier chat pages through BackendConnection", async () => {
     const dispatch = vi.fn();
     const createChatPageRequestGeneration = vi.fn(() => 37);
@@ -3458,28 +3435,43 @@ describe("app controller callbacks", () => {
     expect(postHostMessage).not.toHaveBeenCalled();
   });
 
-  it("loads tool details through BackendConnection", async () => {
+  it("subscribes to tool details until the disclosure releases its lease", async () => {
     const dispatch = vi.fn();
-    const request = vi.fn(async () => ({
-      locations: [{ path: "src/main.rs", line: 7 }],
-      content: [{ kind: "text", text: "details" }],
-      input: null,
-      output: { exitCode: 0, success: true, fields: [] },
-    }));
+    const request = vi.fn(async (method: string) => {
+      if (method === STATE_SUBSCRIBE) {
+        return {
+          cursor: "cursor_1",
+          scope: { kind: "toolDetail", taskId: "task_1", artifactId: "artifact_1" },
+          snapshot: {
+            kind: "toolDetail",
+            taskId: "task_1",
+            artifactId: "artifact_1",
+            details: {
+              locations: [{ path: "src/main.rs", line: 7 }],
+              content: [{ kind: "text", text: "details" }],
+              input: null,
+              output: { exitCode: 0, success: true, fields: [] },
+            },
+          },
+        };
+      }
+      if (method === STATE_UNSUBSCRIBE) return { scope: { kind: "toolDetail", taskId: "task_1", artifactId: "artifact_1" } };
+      throw new Error(method);
+    });
+    const events = vi.fn(() => vi.fn());
     const state = createInitialState();
     state.snapshot = snapshot("task_1");
 
-    callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+    const cleanup = callbacks({
+      backendConnection: { events, request: request as unknown as BackendConnection["request"], respond: vi.fn() },
       dispatch,
       state,
-    }).task.loadToolDetail("artifact_1");
+    }).task.subscribeToolDetail("artifact_1");
     await settlePromises();
 
     expect(dispatch).toHaveBeenNthCalledWith(1, { type: "toolDetail:start", taskId: "task_1", artifactId: "artifact_1" });
-    expect(request).toHaveBeenCalledWith(TASK_TOOL_DETAIL, {
-      taskId: "task_1",
-      artifactId: "artifact_1",
+    expect(request).toHaveBeenCalledWith(STATE_SUBSCRIBE, {
+      scope: { kind: "toolDetail", taskId: "task_1", artifactId: "artifact_1" },
     });
     expect(dispatch).toHaveBeenCalledWith({
       type: "toolDetail:result",
@@ -3489,6 +3481,11 @@ describe("app controller callbacks", () => {
         locations: [{ path: "src/main.rs", line: 7 }],
         output: expect.objectContaining({ exit_code: 0 }),
       }),
+    });
+    cleanup();
+    await settlePromises();
+    expect(request).toHaveBeenCalledWith(STATE_UNSUBSCRIBE, {
+      scope: { kind: "toolDetail", taskId: "task_1", artifactId: "artifact_1" },
     });
     expect(postHostMessage).not.toHaveBeenCalled();
   });
@@ -3500,7 +3497,7 @@ describe("app controller callbacks", () => {
 
     task.cancel();
     task.loadChatPage("cursor_1");
-    task.loadToolDetail("artifact_1");
+    task.subscribeToolDetail("artifact_1");
     task.respondToPermission("permission_1", "allow_once", "approved");
     task.sendPrompt();
 

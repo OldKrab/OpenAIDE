@@ -7,6 +7,7 @@ use crate::snapshot::{
     AgentCollectionSnapshot, ProjectCollectionSnapshot, SettingsSnapshot, TaskNavigationSnapshot,
     TaskSnapshot,
 };
+use crate::task::ToolDetailSnapshot;
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -54,6 +55,10 @@ pub enum SubscriptionScope {
     Task {
         task_id: TaskId,
     },
+    ToolDetail {
+        task_id: TaskId,
+        artifact_id: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
@@ -66,11 +71,26 @@ pub enum SubscriptionScope {
     rename_all_fields = "camelCase"
 )]
 pub enum SubscriptionSnapshot {
-    Projects { projects: ProjectCollectionSnapshot },
-    Agents { agents: AgentCollectionSnapshot },
-    Settings { settings: SettingsSnapshot },
-    TaskNavigation { navigation: TaskNavigationSnapshot },
-    Task { task: TaskSnapshot },
+    Projects {
+        projects: ProjectCollectionSnapshot,
+    },
+    Agents {
+        agents: AgentCollectionSnapshot,
+    },
+    Settings {
+        settings: SettingsSnapshot,
+    },
+    TaskNavigation {
+        navigation: TaskNavigationSnapshot,
+    },
+    Task {
+        task: TaskSnapshot,
+    },
+    ToolDetail {
+        task_id: TaskId,
+        artifact_id: String,
+        details: ToolDetailSnapshot,
+    },
 }
 
 #[cfg(test)]

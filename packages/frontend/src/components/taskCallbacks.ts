@@ -6,16 +6,18 @@ import {
   ATTACHMENT_REVEAL,
   TASK_CHAT_PAGE,
   TASK_SET_CONFIG_OPTION,
-  TASK_TOOL_DETAIL,
   type AgentConfigOptionId,
   type BackendConnection,
   type ClientMutationId,
+  type ClientInstanceId,
   type FileBrowserEntryId,
   type MessageId,
+  type StateRootId,
   type FileBrowserRootId,
   type TaskId,
 } from "@openaide/app-server-client";
 import { postHostMessage } from "../services/hostBridge";
+import { startAppServerStateSubscription } from "../services/appServerStateSubscriptions";
 import {
   attachmentHandleResource,
   releaseAttachmentResources,
@@ -26,8 +28,7 @@ import { respondToPermissionIntent, respondToQuestionIntent } from "../intents/t
 import { appServerAttachment } from "../state/composerOptions";
 import { mapProtocolTaskSnapshot } from "../state/appServerProtocolMapping";
 import { configOptionsMutable } from "../state/configOptionState";
-import { mapProtocolChatPage, mapProtocolToolDetail } from "../state/taskReadMapping";
-import { toolDetailCacheKey } from "../state/store";
+import { mapProtocolChatPage } from "../state/taskReadMapping";
 import type { AppCallbacksDependencies, TaskCallbacks } from "./appControllerCallbackTypes";
 import { refreshTaskSnapshotAfterMutationFailure } from "./taskSnapshotRefresh";
 
@@ -104,27 +105,32 @@ export function createTaskCallbacks({
         }));
       return requestGeneration;
     },
-    loadToolDetail: (artifactId, refresh = false) => {
-      if (!state.snapshot) return;
+    subscribeToolDetail: (artifactId) => {
+      if (!state.snapshot) return () => undefined;
       const taskId = state.snapshot.task.task_id;
-      const current = state.toolDetails[toolDetailCacheKey(taskId, artifactId)];
-      if (current?.loading || (current?.details && !refresh)) return;
-      if (!backendConnection?.request) {
+      if (!backendConnection?.request || !backendConnection.events || !state.appServerStateRootId) {
         dispatch({ type: "toolDetail:error", taskId, artifactId, message: appServerRequiredMessage() });
-        return;
+        return () => undefined;
       }
       dispatch({ type: "toolDetail:start", taskId, artifactId });
-      void backendConnection.request(TASK_TOOL_DETAIL, {
-        taskId: taskId as TaskId,
-        artifactId,
-      })
-        .then((details) => dispatch({
-          type: "toolDetail:result",
+      return startAppServerStateSubscription({
+        backendConnection: {
+          events: backendConnection.events,
+          request: backendConnection.request,
+        },
+        context: {
+          stateRootId: state.appServerStateRootId as StateRootId,
+          clientInstanceId: clientInstanceId as ClientInstanceId,
+        },
+        dispatch,
+        onBaselineError: (error) => dispatch({
+          type: "toolDetail:error",
           taskId,
           artifactId,
-          details: mapProtocolToolDetail(details),
-        }))
-        .catch((error) => dispatch({ type: "toolDetail:error", taskId, artifactId, message: safeErrorMessage(error) }));
+          message: safeErrorMessage(error),
+        }),
+        scope: { kind: "toolDetail", taskId: taskId as TaskId, artifactId },
+      });
     },
     removeAttachment: (attachmentId) => {
       if (!state.snapshot) return;
