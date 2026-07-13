@@ -65,7 +65,7 @@ This mixes presentation fallback, lifecycle state, and title ownership. It also 
 
 ## AP-004: The Frontend App Controller is an orchestration nexus
 
-**Status:** confirmed
+**Status:** resolved
 
 **Area:** Shared Frontend composition and workflow ownership
 
@@ -76,6 +76,8 @@ The problem is not the line count alone. Many workflows meet through shared refs
 **Impact:** Workflow ownership and ordering are difficult to see locally. Changes can create hidden effect interactions, stale closure or ref dependencies, duplicate invalidation, and broad tests that must construct most of the application controller to verify one behavior.
 
 **Desired direction:** Keep a small Frontend composition root and move complete workflows behind deep, typed interfaces. Separate shell routing, App Server session/replica lifecycle, Task workspace state, New Task lifecycle, and send recovery so each owns its invariants and exposes user-intent operations plus render-ready state. Avoid a replacement catch-all controller split only by file; seams should follow behavior and ownership.
+
+**Implementation:** `useAppController` is now a 186-line composition root. It wires the reducer, App Server lifecycle, retained `NewTaskController`, New Task workspace, routed Task workspace, and user-intent callbacks without implementing those workflows itself. `useNewTaskWorkspace` owns preparation, attachment resources, retained selection, and Native Session discovery behind one render/callback-facing result. `useTaskWorkspace` owns visible Task projection, read receipts, empty-Task routing, and render telemetry. The App Server lifecycle delegates routed Task subscription, open readiness, failure, and retry to `useTaskRouteLifecycle`; the previous backend catch-all dropped from 571 to 434 lines. Existing workflow modules were retained only where they already owned a cohesive behavior, and the old in-controller implementations were removed rather than wrapped for compatibility.
 
 ## AP-005: Navigation discards New Tasks and their composer resources
 

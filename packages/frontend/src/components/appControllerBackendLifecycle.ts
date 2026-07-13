@@ -1,5 +1,4 @@
 import {
-  useCallback,
   useEffect,
   useRef,
   useState,
@@ -10,9 +9,8 @@ import {
 import type { AppPreferencesRecord } from "@openaide/app-shell-contracts";
 import type {
   BackendConnection,
-  TaskId,
 } from "@openaide/app-server-client";
-import { requestMissingInitialTaskList, requestTaskOpen } from "../intents/taskReadIntents";
+import { requestMissingInitialTaskList } from "../intents/taskReadIntents";
 import { refreshSettingsProjectionsThroughBackend } from "../intents/settingsProjectionIntents";
 import { startAppServerServerRequestBridge } from "../services/appServerServerRequests";
 import {
@@ -43,9 +41,11 @@ import type { AgentOption } from "../state/composerOptions";
 import { routeHostMessage } from "../state/hostMessageRouter";
 import type { WebviewBootstrap } from "../state/surfaceTypes";
 import type { AppState } from "../state/store";
-import { navigationTargetForBootstrap } from "../state/asyncOperationOwner";
+import {
+  navigationTargetForBootstrap,
+  type AsyncOperationOwner,
+} from "../state/asyncOperationOwner";
 import { postControllerStarted, postStartupRequests } from "./appControllerEffects";
-import type { AppControllerRefs } from "./appControllerRefs";
 import { dispatchStartupReadError, useRoutedBootstrap } from "./appControllerRouting";
 import {
   replicaIdentityFromSnapshot,
@@ -54,6 +54,7 @@ import {
 } from "./appServerReplicaLifecycle";
 import type { NewTaskController } from "./newTaskController";
 import { useNewTaskSubscription } from "./useNewTaskSubscription";
+import { useTaskRouteLifecycle } from "./useTaskRouteLifecycle";
 
 export type { AppServerReplicaTransition } from "./appServerReplicaLifecycle";
 
@@ -69,6 +70,7 @@ export type BackendConnectionState =
   | { status: "unavailable"; message: string };
 
 type BackendLifecycleOptions = {
+  asyncOperations: AsyncOperationOwner;
   backendConnection?: AppControllerBackendConnection;
   currentAgentId: RefObject<string>;
   currentNewTaskContext: RefObject<NewTaskContextIds>;
@@ -77,13 +79,13 @@ type BackendLifecycleOptions = {
   newTaskController: NewTaskController;
   newTaskId?: string;
   onReplicaChanged?: (transition: AppServerReplicaTransition) => void;
-  refs: AppControllerRefs;
   setAgents: Dispatch<SetStateAction<AgentOption[] | undefined>>;
   setPreferences: Dispatch<SetStateAction<AppPreferencesRecord>>;
   state: AppState;
 };
 
 export function useAppControllerBackendLifecycle({
+  asyncOperations,
   backendConnection,
   currentAgentId,
   currentNewTaskContext,
@@ -92,15 +94,11 @@ export function useAppControllerBackendLifecycle({
   newTaskController,
   newTaskId,
   onReplicaChanged,
-  refs,
   setAgents,
   setPreferences,
   state,
 }: BackendLifecycleOptions) {
-  const {
-    asyncOperations,
-  } = refs;
-  const operationOwner = asyncOperations.current;
+  const operationOwner = asyncOperations;
   const operationOwnerInitialized = useRef(false);
   if (!operationOwnerInitialized.current) {
     operationOwner.observeNavigation(
@@ -119,9 +117,6 @@ export function useAppControllerBackendLifecycle({
     status: "connecting",
   });
   const [backendStateGeneration, setBackendStateGeneration] = useState(0);
-  const [readyTaskSubscriptionKey, setReadyTaskSubscriptionKey] = useState<string | undefined>();
-  const [readyRouteOpenKey, setReadyRouteOpenKey] = useState<string | undefined>();
-  const [routeOpenSettlement, setRouteOpenSettlement] = useState(0);
   const {
     dispatchForCurrentReplica,
     establishReplica,
@@ -130,12 +125,6 @@ export function useAppControllerBackendLifecycle({
     replicaIdentity,
   } = useAppServerReplicaLifecycle(dispatch, onReplicaChanged);
   const backendInitialized = useRef(false);
-  const lastRequestedRouteTaskKey = useRef<string | undefined>(undefined);
-  const routeOpenInFlight = useRef<{
-    promise: Promise<void>;
-    requestKey: string;
-    taskId: string;
-  } | undefined>(undefined);
   const routeOpenError = useRef<string | undefined>(undefined);
   const stateSubscriptionContext = useRef<StateSubscriptionMappingContext | undefined>(undefined);
   const failedSubscriptionBaselines = useRef(new Map<string, string>());
@@ -213,9 +202,7 @@ export function useAppControllerBackendLifecycle({
         ]);
         setBackendReady(false);
       }
-      setReadyTaskSubscriptionKey(undefined);
-      setReadyRouteOpenKey(undefined);
-      routeOpenError.current = undefined;
+      taskRouteLifecycle.reset();
       setBackendConnectionState({
         status: "reconnecting",
         message: "Connection interrupted. Reconnecting automatically.",
@@ -228,8 +215,7 @@ export function useAppControllerBackendLifecycle({
     routeOpenError.current = undefined;
     setBackendReady(false);
     setBackendConnectionState({ status: "connecting" });
-    setReadyTaskSubscriptionKey(undefined);
-    setReadyRouteOpenKey(undefined);
+    taskRouteLifecycle.reset();
     if (initialBootstrap.surface === "navigation") {
       const archived = initialBootstrap.archived === true;
       dispatch({ type: "archive:set", showArchived: archived });
@@ -393,12 +379,8 @@ export function useAppControllerBackendLifecycle({
       backendInitialized.current = false;
       failedSubscriptionBaselines.current.clear();
       pendingGlobalSubscriptionBaselines.current.clear();
-      lastRequestedRouteTaskKey.current = undefined;
-      routeOpenInFlight.current = undefined;
-      routeOpenError.current = undefined;
       setBackendReady(false);
-      setReadyTaskSubscriptionKey(undefined);
-      setReadyRouteOpenKey(undefined);
+      taskRouteLifecycle.reset();
       stateSubscriptionContext.current = undefined;
       stopBackendStateResets?.();
       for (const stop of stopSubscriptions) stop();
@@ -418,154 +400,35 @@ export function useAppControllerBackendLifecycle({
     newTaskController,
     newTaskId,
   });
-
-  useEffect(() => {
-    if (!backendConnection?.events || !backendReady || !backendInitialized.current || !state.snapshot) return;
-    const context = stateSubscriptionContext.current;
-    if (!context) return;
-    const taskId = state.snapshot.task.task_id;
-    const subscriptionKey = `${backendStateGeneration}:${taskId}`;
-    let active = true;
-    const stop = startAppServerStateSubscription({
-      backendConnection: {
-        events: backendConnection.events,
-        request: backendConnection.request,
-      },
-      context,
-      dispatch: dispatchForCurrentReplica,
-      onBaselineLost: () => {
-        if (!active) return;
-        setBackendConnectionState({
-          status: "reconnecting",
-          message: "Connection interrupted. Reconnecting automatically.",
-        });
-        setReadyTaskSubscriptionKey((current) => (
-          current === subscriptionKey ? undefined : current
-        ));
-      },
-      onBaselineError: (error) => {
-        if (active) markSubscriptionError(subscriptionKey, error);
-      },
-      onBaselineReady: () => {
-        if (!active) return;
-        setReadyTaskSubscriptionKey(subscriptionKey);
-        markSubscriptionReady(subscriptionKey);
-      },
-      scope: { kind: "task", taskId: taskId as TaskId },
-    });
-    return () => {
-      active = false;
-      failedSubscriptionBaselines.current.delete(subscriptionKey);
-      stop();
-    };
-  }, [backendConnection, backendReady, backendStateGeneration, state.snapshot?.task.task_id]);
-
-  useEffect(() => {
-    if (bootstrap.surface !== "task" || !bootstrap.taskId) {
-      lastRequestedRouteTaskKey.current = undefined;
-      routeOpenInFlight.current = undefined;
-      routeOpenError.current = undefined;
-      if (backendInitialized.current && failedSubscriptionBaselines.current.size === 0) {
-        setBackendConnectionState({ status: "ready" });
-      }
-      return;
-    }
-    const taskId = bootstrap.taskId;
-    if (!backendConnection) {
-      dispatch({
-        type: "taskOpen:error",
-        taskId,
-        message: "App Server connection unavailable.",
-      });
-      return;
-    }
-    if (!backendInitialized.current) return;
-    const requestKey = `${backendStateGeneration}:${taskId}`;
-    if (lastRequestedRouteTaskKey.current === requestKey) return;
-    if (routeOpenInFlight.current?.requestKey === requestKey) return;
-    lastRequestedRouteTaskKey.current = requestKey;
-    const wasUnavailable = routeOpenError.current !== undefined;
-    routeOpenError.current = undefined;
-    if (wasUnavailable) setBackendConnectionState({ status: "connecting" });
-    const openOperation = operationOwner.claim("route-task-open", requestKey);
-    const requestReplicaEpoch = replicaEpochRef.current;
-    const requestDispatch = bindAppServerReplicaEpoch(dispatch, requestReplicaEpoch);
-    let openAccepted = false;
-
-    const openRequest = requestTaskOpen({
-      acceptTaskOpen: (openedTaskId, requestId, intent) => {
-        if (!operationOwner.owns(openOperation)) return false;
-        openAccepted = acceptSnapshotRequest(openedTaskId, requestId, intent);
-        return openAccepted;
-      },
-      backendConnection,
-      createTaskOpenRequestId: createSnapshotRequestId,
-      dispatch: requestDispatch,
-    }, taskId, "open")
-      .then(() => {
-        if (openAccepted && operationOwner.owns(openOperation)) {
-          setReadyRouteOpenKey(requestKey);
-          if (failedSubscriptionBaselines.current.size === 0) {
-            setBackendConnectionState({ status: "ready" });
-          }
-        }
-      })
-      .catch((error) => {
-        if (!operationOwner.owns(openOperation)) return;
-        const message = error instanceof Error ? error.message : "Unable to open task from App Server.";
-        routeOpenError.current = message;
-        setBackendConnectionState({ status: "unavailable", message });
-        requestDispatch({ type: "taskOpen:error", taskId, message });
-      });
-    routeOpenInFlight.current = { promise: openRequest, requestKey, taskId };
-    void openRequest.finally(() => {
-      if (routeOpenInFlight.current?.promise === openRequest) {
-        routeOpenInFlight.current = undefined;
-      }
-      // A reset can supersede an open already in flight. Re-run the effect after
-      // settlement so the current Backend generation receives its own task/open.
-      if (backendInitialized.current) {
-        setRouteOpenSettlement((settlement) => settlement + 1);
-      }
-    });
-  }, [
+  const taskRouteLifecycle = useTaskRouteLifecycle({
+    acceptSnapshotRequest,
     backendConnection,
+    backendInitialized,
     backendReady,
     backendStateGeneration,
-    bootstrap.surface,
-    bootstrap.taskId,
-    routeOpenSettlement,
-  ]);
-
-  const taskSubscriptionKey = state.snapshot
-    ? `${backendStateGeneration}:${state.snapshot.task.task_id}`
-    : undefined;
-  const taskSubscriptionReady = !backendConnection?.events
-    || taskSubscriptionKey === undefined
-    || readyTaskSubscriptionKey === taskSubscriptionKey;
-  const routeOpenKey = bootstrap.surface === "task" && bootstrap.taskId
-    ? `${backendStateGeneration}:${bootstrap.taskId}`
-    : undefined;
-  const routeOpenReady = routeOpenKey === undefined || readyRouteOpenKey === routeOpenKey;
-  const retryTaskOpen = useCallback(() => {
-    if (bootstrap.surface !== "task" || !bootstrap.taskId || !backendInitialized.current) return;
-    lastRequestedRouteTaskKey.current = undefined;
-    routeOpenError.current = undefined;
-    setReadyRouteOpenKey(undefined);
-    setBackendConnectionState({ status: "reconnecting", message: "Retrying task open." });
-    dispatch({ type: "taskOpen:start", taskId: bootstrap.taskId });
-    setRouteOpenSettlement((settlement) => settlement + 1);
-  }, [bootstrap.surface, bootstrap.taskId, dispatch]);
+    bootstrap,
+    createSnapshotRequestId,
+    dispatch,
+    failedSubscriptionBaselines,
+    markSubscriptionError,
+    markSubscriptionReady,
+    operationOwner,
+    replicaEpochRef,
+    routeOpenError,
+    setBackendConnectionState,
+    snapshot: state.snapshot,
+    stateSubscriptionContext,
+  });
 
   return {
     acceptSnapshotRequest,
     backendInitialized,
     backendConnectionState,
-    backendReady: backendReady && taskSubscriptionReady && routeOpenReady,
+    backendReady: backendReady && taskRouteLifecycle.ready,
     bootstrap,
     createSnapshotRequestId,
     operationOwner,
     replicaEpoch,
-    retryTaskOpen,
+    retryTaskOpen: taskRouteLifecycle.retryTaskOpen,
   };
 }
