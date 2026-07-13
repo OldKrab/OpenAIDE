@@ -253,7 +253,7 @@ A tool mutation currently persists an upserted Activity row without a committed 
 
 ## AP-017: Tool projection and presentation are incomplete
 
-**Status:** confirmed
+**Status:** resolved
 
 **Area:** ACP tool normalization and Frontend Activity UI
 
@@ -262,6 +262,8 @@ OpenAIDE recognizes every current ACP tool kind, but several defined kinds use a
 **Impact:** Distinct Agent actions look generic, supported output can disappear, and grouped Thought updates cannot retain stable presentation identity.
 
 **Desired direction:** Give every defined ACP kind except `other` a distinct appropriate icon, action label, grouped classification, and field-driven detail view. Represent `think` as a Thought-like tool step without confusing it with `agent_thought_chunk`. Normalize supported ACP content into typed safe detail parts and render unsupported valid content explicitly rather than silently discarding it. Preserve underlying Tool and Thought ids in every presentation group.
+
+**Resolution:** App Server now projects ACP Tool content once into typed text, diff, terminal, validated image/audio, resource, and explicit unsupported parts. Known input/output fields retain their semantic shapes, while every remaining nested non-secret value is preserved in a typed tree and credential fields are visibly redacted. Frontend gives every defined Tool kind its own icon, action wording, grouped classification, and field-driven disclosure; `think` remains an identified Tool with a distinct reasoning presentation rather than becoming an ACP Thought chunk. Activity coalescing carries Thought message ids alongside Tool call ids, and those identities now key their rendered rows.
 
 ## AP-018: Pending permissions are duplicated as workflow state and Chat history
 

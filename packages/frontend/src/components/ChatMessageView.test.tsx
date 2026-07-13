@@ -839,7 +839,7 @@ describe("ChatRow", () => {
                 "Saint Petersburg weather tomorrow",
                 "Санкт-Петербург погода завтра",
               ],
-              fields: [{ name: "type", value: "webSearch" }],
+              fields: [{ name: "type", value: { kind: "string", value: "webSearch" } }],
             },
           },
         },
@@ -870,7 +870,7 @@ describe("ChatRow", () => {
             content: [],
             input: {
               command: [],
-              fields: [{ name: "type", value: "webSearch" }],
+              fields: [{ name: "type", value: { kind: "string", value: "webSearch" } }],
             },
           },
         },
@@ -905,6 +905,77 @@ describe("ChatRow", () => {
     expect(thinkingHtml).toContain("lucide-brain activity-kind-icon");
     expect(skillHtml).toContain('class="activity-step-disclosure-placeholder"');
     expect(skillHtml).toContain("lucide-book-open activity-kind-icon");
+  });
+
+  it("renders think tools as identified thought-like tool disclosures", async () => {
+    const { ActivityStepRow } = await import("./ChatActivityView");
+    const html = renderToStaticMarkup(
+      ActivityStepRow({
+        step: {
+          kind: "tool",
+          tool_call_id: "tool-think-1",
+          name: "think",
+          status: "completed",
+          details: {
+            locations: [],
+            content: [{ kind: "text", text: "Compare the two architectures." }],
+          },
+        },
+        taskId: "task_1",
+      }),
+    );
+
+    expect(html).toContain('data-step-id="tool-think-1"');
+    expect(html).toContain("lucide-brain-circuit activity-kind-icon");
+    expect(html).toContain("Reasoning tool");
+    expect(html).toContain("Compare the two architectures.");
+    expect(html).not.toContain('class="activity-step activity-thought-block"');
+  });
+
+  it("renders typed image, audio, resource, and unsupported tool content", async () => {
+    const { ChatToolDetails } = await import("./ChatToolDetailsView");
+    const html = renderToStaticMarkup(
+      <ChatToolDetails
+        details={{
+          locations: [],
+          content: [
+            { kind: "image", media_type: "image/png", data_url: "data:image/png;base64,aW1hZ2U=", uri: "file:///preview.png" },
+            { kind: "audio", media_type: "audio/wav", data_url: "data:audio/wav;base64,YXVkaW8=" },
+            { kind: "resource", uri: "https://example.test/guide", name: "Guide", description: "Reference guide", media_type: "text/markdown", size_bytes: 42 },
+            { kind: "unsupported", content_type: "resource_blob", media_type: "application/octet-stream", uri: "file:///archive.bin" },
+          ],
+          input: {
+            command: [],
+            fields: [
+              {
+                name: "filters",
+                value: {
+                  kind: "object",
+                  fields: [{ name: "languages", value: { kind: "array", items: [
+                    { kind: "string", value: "rust" },
+                    { kind: "string", value: "typescript" },
+                  ] } }],
+                },
+              },
+              { name: "api_token", value: { kind: "redacted" } },
+            ],
+          },
+        }}
+        step={{ kind: "tool", name: "fetch", status: "completed" }}
+      />,
+    );
+
+    expect(html).toContain('<img alt="Tool output"');
+    expect(html).toContain("file:///preview.png");
+    expect(html).toContain('class="activity-tool-audio" controls=""');
+    expect(html).toContain("Guide");
+    expect(html).toContain("Reference guide");
+    expect(html).toContain("text/markdown · 42 bytes");
+    expect(html).toContain("Unsupported resource blob");
+    expect(html).toContain("application/octet-stream");
+    expect(html).toContain("languages");
+    expect(html).toContain("rust, typescript");
+    expect(html).toContain("[redacted]");
   });
 
   it("delays tool-detail loading UI and replaces it with content", async () => {

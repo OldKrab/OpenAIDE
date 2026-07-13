@@ -348,6 +348,7 @@ export function mapProtocolToolDetail(details: ToolDetailSnapshot): ActivityTool
       line: location.line ?? undefined,
     })),
     content: details.content.map((content) => {
+      if (content.kind === "text") return content;
       if (content.kind === "diff") {
         return {
           kind: "diff" as const,
@@ -357,7 +358,35 @@ export function mapProtocolToolDetail(details: ToolDetailSnapshot): ActivityTool
         };
       }
       if (content.kind === "terminal") return { kind: "terminal" as const, terminal_id: content.terminalId };
-      return content;
+      if (content.kind === "image") {
+        return {
+          kind: "image" as const,
+          media_type: content.mediaType,
+          data_url: content.dataUrl,
+          uri: content.uri ?? undefined,
+        };
+      }
+      if (content.kind === "audio") {
+        return { kind: "audio" as const, media_type: content.mediaType, data_url: content.dataUrl };
+      }
+      if (content.kind === "resource") {
+        return {
+          kind: "resource" as const,
+          uri: content.uri,
+          name: content.name ?? undefined,
+          title: content.title ?? undefined,
+          description: content.description ?? undefined,
+          media_type: content.mediaType ?? undefined,
+          size_bytes: content.sizeBytes ?? undefined,
+          text: content.text ?? undefined,
+        };
+      }
+      return {
+        kind: "unsupported" as const,
+        content_type: content.contentType,
+        media_type: content.mediaType ?? undefined,
+        uri: content.uri ?? undefined,
+      };
     }),
     input: details.input
       ? {

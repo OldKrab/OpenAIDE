@@ -79,6 +79,69 @@
   color: color-mix(in oklch, var(--oa-muted) 84%, var(--oa-text));
 }
 
+.activity-tool-detail-title {
+  margin: 0;
+  color: color-mix(in oklch, var(--oa-muted) 82%, var(--oa-text));
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.activity-tool-value-list {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.activity-tool-image {
+  max-width: min(100%, 520px);
+  max-height: var(--activity-tool-data-max-height);
+  border-radius: 4px;
+  object-fit: contain;
+}
+
+.activity-tool-media {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.activity-tool-media > small {
+  color: var(--oa-muted);
+}
+
+.activity-tool-media > code {
+  overflow-wrap: anywhere;
+}
+
+.activity-tool-audio {
+  width: min(100%, 420px);
+  height: 34px;
+}
+
+.activity-tool-resource {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.activity-tool-resource > p,
+.activity-tool-unsupported {
+  margin: 0;
+}
+
+.activity-tool-resource > code {
+  overflow-wrap: anywhere;
+  color: var(--oa-muted);
+}
+
+.activity-tool-resource > small,
+.activity-tool-unsupported > small,
+.activity-tool-unsupported > code {
+  margin-left: 6px;
+  color: var(--oa-muted);
+}
+
 .activity-tool-paths {
   min-width: 0;
   display: grid;

@@ -2687,7 +2687,9 @@ fn fixed_tool_detail() -> openaide_app_server_protocol::task::ToolDetailSnapshot
             path: None,
             fields: vec![openaide_app_server_protocol::task::ActivityToolField {
                 name: "mode".to_string(),
-                value: "check".to_string(),
+                value: openaide_app_server_protocol::task::ActivityToolValue::String {
+                    value: "check".to_string(),
+                },
             }],
         }),
         output: Some(openaide_app_server_protocol::task::ActivityToolOutput {

@@ -29,23 +29,25 @@ use crate::agent::prompt_content::{
 use crate::agent::tool_details::tool_call_event;
 use crate::agent::{AgentMetadataField, AgentSessionMetadataUpdate};
 use crate::protocol::model::{
-    ActivityStatus, ActivityToolContent, AgentCommandsCatalog, Attachment, ConfigOption,
-    ConfigOptionCategory, ConfigOptionValue, ConfigOptionsStatus, NormalizedMessage,
+    ActivityStatus, ActivityToolContent, ActivityToolValue, AgentCommandsCatalog, Attachment,
+    ConfigOption, ConfigOptionCategory, ConfigOptionValue, ConfigOptionsStatus, NormalizedMessage,
 };
 use agent_client_protocol::schema::{
-    AgentCapabilities, AuthMethod, AuthMethodAgent, AuthenticateRequest, AuthenticateResponse,
-    AvailableCommand, AvailableCommandInput, AvailableCommandsUpdate, ContentBlock, ContentChunk,
-    CreateTerminalRequest, CreateTerminalResponse, Diff, Implementation, InitializeRequest,
-    InitializeResponse, ListSessionsRequest, ListSessionsResponse, LoadSessionRequest,
-    LoadSessionResponse, McpCapabilities, NewSessionRequest, NewSessionResponse, PermissionOption,
-    PermissionOptionKind, PromptCapabilities, ProtocolVersion, ReadTextFileRequest,
-    RequestPermissionOutcome, RequestPermissionRequest, SessionCapabilities,
-    SessionCloseCapabilities, SessionConfigOption,
-    SessionConfigOptionCategory as AcpConfigOptionCategory, SessionConfigSelectOption,
-    SessionDeleteCapabilities, SessionInfo, SessionInfoUpdate, SessionListCapabilities,
-    SessionNotification, SessionUpdate, TextContent, ToolCall, ToolCallContent, ToolCallLocation,
-    ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, ToolKind, UnstructuredCommandInput,
-    WaitForTerminalExitRequest, WaitForTerminalExitResponse, WriteTextFileRequest,
+    AgentCapabilities, AudioContent, AuthMethod, AuthMethodAgent, AuthenticateRequest,
+    AuthenticateResponse, AvailableCommand, AvailableCommandInput, AvailableCommandsUpdate,
+    BlobResourceContents, ContentBlock, ContentChunk, CreateTerminalRequest,
+    CreateTerminalResponse, Diff, EmbeddedResource, EmbeddedResourceResource, ImageContent,
+    Implementation, InitializeRequest, InitializeResponse, ListSessionsRequest,
+    ListSessionsResponse, LoadSessionRequest, LoadSessionResponse, McpCapabilities,
+    NewSessionRequest, NewSessionResponse, PermissionOption, PermissionOptionKind,
+    PromptCapabilities, ProtocolVersion, ReadTextFileRequest, RequestPermissionOutcome,
+    RequestPermissionRequest, ResourceLink, SessionCapabilities, SessionCloseCapabilities,
+    SessionConfigOption, SessionConfigOptionCategory as AcpConfigOptionCategory,
+    SessionConfigSelectOption, SessionDeleteCapabilities, SessionInfo, SessionInfoUpdate,
+    SessionListCapabilities, SessionNotification, SessionUpdate, TextContent, TextResourceContents,
+    ToolCall, ToolCallContent, ToolCallLocation, ToolCallStatus, ToolCallUpdate,
+    ToolCallUpdateFields, ToolKind, UnstructuredCommandInput, WaitForTerminalExitRequest,
+    WaitForTerminalExitResponse, WriteTextFileRequest,
 };
 use agent_client_protocol::JsonRpcMessage;
 use agent_client_protocol::{Agent, Client, ConnectionTo, Handled};
@@ -1700,12 +1702,8 @@ fn tool_call_preview_does_not_expose_raw_fields_or_full_diff_paths() {
             let details = tool_call.details.expect("command details");
             let input = details.input.expect("command input");
             assert_eq!(
-                input
-                    .fields
-                    .iter()
-                    .find(|field| field.name == "cmd")
-                    .map(|field| field.value.as_str()),
-                Some("printf token=[redacted] .env")
+                input.command,
+                ["printf token=[redacted] /workspace/project/.env"]
             );
         }
         other => panic!("expected tool call event, got {other:?}"),
@@ -1725,6 +1723,31 @@ fn tool_call_preview_does_not_expose_raw_fields_or_full_diff_paths() {
                 tool_call.input_summary.as_deref(),
                 Some("find . -name 'index.md' -print")
             );
+        }
+        other => panic!("expected tool call event, got {other:?}"),
+    }
+
+    let secret_argument = tool_call_event(
+        &ToolCall::new("tool_call_secret_argument", "Authenticated request")
+            .kind(ToolKind::Execute)
+            .raw_input(serde_json::json!({
+                "command": ["curl", "--token", "secret", "/workspace/result.json"]
+            })),
+    );
+    match secret_argument {
+        AgentEvent::ToolCall(tool_call) => {
+            assert!(!tool_call
+                .input_summary
+                .as_deref()
+                .unwrap_or_default()
+                .contains("secret"));
+            let command = &tool_call
+                .details
+                .expect("command details")
+                .input
+                .expect("command input")
+                .command;
+            assert_eq!(command, &["curl --token [redacted] /workspace/result.json"]);
         }
         other => panic!("expected tool call event, got {other:?}"),
     }
@@ -1763,6 +1786,115 @@ fn tool_call_preview_does_not_expose_raw_fields_or_full_diff_paths() {
         }
         other => panic!("expected tool call event, got {other:?}"),
     }
+}
+
+#[test]
+fn tool_call_details_preserve_typed_acp_content_and_nested_safe_fields() {
+    let event = tool_call_event(
+        &ToolCall::new("tool_call_typed_content", "Fetch context")
+            .kind(ToolKind::Fetch)
+            .content(vec![
+                ToolCallContent::from(ContentBlock::Image(
+                    ImageContent::new("aW1hZ2U=", "image/png").uri("file:///preview.png"),
+                )),
+                ToolCallContent::from(ContentBlock::Audio(AudioContent::new(
+                    "YXVkaW8=",
+                    "audio/wav",
+                ))),
+                ToolCallContent::from(ContentBlock::ResourceLink(
+                    ResourceLink::new("Guide", "https://example.test/guide")
+                        .description("Reference guide")
+                        .mime_type("text/html")
+                        .size(42),
+                )),
+                ToolCallContent::from(ContentBlock::Resource(EmbeddedResource::new(
+                    EmbeddedResourceResource::TextResourceContents(
+                        TextResourceContents::new("embedded text", "file:///guide.txt")
+                            .mime_type("text/plain"),
+                    ),
+                ))),
+                ToolCallContent::from(ContentBlock::Resource(EmbeddedResource::new(
+                    EmbeddedResourceResource::BlobResourceContents(
+                        BlobResourceContents::new("YmxvYg==", "file:///archive.bin")
+                            .mime_type("application/octet-stream"),
+                    ),
+                ))),
+            ])
+            .raw_input(serde_json::json!({
+                "url": "https://example.test/guide",
+                "filters": {"languages": ["rust", "typescript"], "limit": 10},
+                "api_token": "do-not-project"
+            }))
+            .raw_output(serde_json::json!({
+                "result": {"cached": false, "pages": [1, 2]},
+                "authorization": "do-not-project"
+            })),
+    );
+
+    let AgentEvent::ToolCall(tool_call) = event else {
+        panic!("expected tool call event");
+    };
+    let details = tool_call.details.expect("typed details");
+    assert!(matches!(
+        &details.content[0],
+        ActivityToolContent::Image { media_type, data, uri }
+            if media_type == "image/png" && data == "aW1hZ2U=" && uri.as_deref() == Some("file:///preview.png")
+    ));
+    assert!(matches!(
+        &details.content[1],
+        ActivityToolContent::Audio { media_type, data }
+            if media_type == "audio/wav" && data == "YXVkaW8="
+    ));
+    assert!(matches!(
+        &details.content[2],
+        ActivityToolContent::Resource { uri, name, text, .. }
+            if uri == "https://example.test/guide" && name.as_deref() == Some("Guide") && text.is_none()
+    ));
+    assert!(matches!(
+        &details.content[3],
+        ActivityToolContent::Resource { uri, text, .. }
+            if uri == "file:///guide.txt" && text.as_deref() == Some("embedded text")
+    ));
+    assert!(matches!(
+        &details.content[4],
+        ActivityToolContent::Unsupported { content_type, media_type, uri }
+            if content_type == "resource_blob"
+                && media_type.as_deref() == Some("application/octet-stream")
+                && uri.as_deref() == Some("file:///archive.bin")
+    ));
+
+    let input = details.input.expect("nested input");
+    let filters = input
+        .fields
+        .iter()
+        .find(|field| field.name == "filters")
+        .expect("filters field");
+    assert!(matches!(filters.value, ActivityToolValue::Object { .. }));
+    assert!(matches!(
+        input
+            .fields
+            .iter()
+            .find(|field| field.name == "api_token")
+            .map(|field| &field.value),
+        Some(ActivityToolValue::Redacted)
+    ));
+    let output = details.output.expect("nested output");
+    assert!(matches!(
+        output
+            .fields
+            .iter()
+            .find(|field| field.name == "result")
+            .map(|field| &field.value),
+        Some(ActivityToolValue::Object { .. })
+    ));
+    assert!(matches!(
+        output
+            .fields
+            .iter()
+            .find(|field| field.name == "authorization")
+            .map(|field| &field.value),
+        Some(ActivityToolValue::Redacted)
+    ));
 }
 
 #[test]

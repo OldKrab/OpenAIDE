@@ -6,12 +6,12 @@ use openaide_app_server::protocol::host::HostRequest;
 use openaide_app_server::protocol::jsonrpc::RpcId;
 use openaide_app_server::protocol::model::{
     ActivityStatus, ActivityStep, ActivityToolContent, ActivityToolDetails, ActivityToolField,
-    ActivityToolInput, ActivityToolLocation, ActivityToolOutput, AgentAuthMethodSummary,
-    AgentAuthenticateResult, AgentAuthenticateStatus, AgentListSessionsResult, AgentListedSession,
-    AgentProbeCapabilities, AgentProbeResult, AgentProbeStatus, Attachment, ChatMessage,
-    InterruptionReason, IsolationKind, MessagePage, NormalizedMessage, PermissionDecision,
-    PermissionOption, PermissionOptionKind, PermissionState, PermissionToolCall, SettingsSummary,
-    TaskSnapshot, TaskStatus, TaskSummary,
+    ActivityToolInput, ActivityToolLocation, ActivityToolOutput, ActivityToolValue,
+    AgentAuthMethodSummary, AgentAuthenticateResult, AgentAuthenticateStatus,
+    AgentListSessionsResult, AgentListedSession, AgentProbeCapabilities, AgentProbeResult,
+    AgentProbeStatus, Attachment, ChatMessage, InterruptionReason, IsolationKind, MessagePage,
+    NormalizedMessage, PermissionDecision, PermissionOption, PermissionOptionKind, PermissionState,
+    PermissionToolCall, SettingsSummary, TaskSnapshot, TaskStatus, TaskSummary,
 };
 use openaide_app_server::protocol::notifications::RuntimeNotification;
 use openaide_app_server::protocol::params::{
@@ -317,8 +317,10 @@ fn tool_details() -> ActivityToolDetails {
             ActivityToolContent::Terminal {
                 terminal_id: "terminal_1".to_string(),
             },
-            ActivityToolContent::Other {
-                label: "extra".to_string(),
+            ActivityToolContent::Unsupported {
+                content_type: "extra".to_string(),
+                media_type: None,
+                uri: None,
             },
         ],
         input: Some(ActivityToolInput {
@@ -334,7 +336,9 @@ fn tool_details() -> ActivityToolDetails {
             path: Some("/workspace/app/README.md".to_string()),
             fields: vec![ActivityToolField {
                 name: "mode".to_string(),
-                value: "read".to_string(),
+                value: ActivityToolValue::String {
+                    value: "read".to_string(),
+                },
             }],
         }),
         output: Some(ActivityToolOutput {
@@ -346,7 +350,9 @@ fn tool_details() -> ActivityToolDetails {
             success: Some(true),
             fields: vec![ActivityToolField {
                 name: "bytes".to_string(),
-                value: "128".to_string(),
+                value: ActivityToolValue::Number {
+                    value: "128".to_string(),
+                },
             }],
         }),
     }

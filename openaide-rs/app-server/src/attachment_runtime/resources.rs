@@ -148,8 +148,8 @@ pub(super) fn validate_pasted_image(
     crate::media::validate_base64_image(mime_type, data, PASTED_IMAGE_MAX_BYTES as usize)
         .map(|size| size as u64)
         .map_err(|error| match error {
-            crate::media::ImageDataError::Invalid => AttachmentRuntimeError::InvalidImage,
-            crate::media::ImageDataError::TooLarge => AttachmentRuntimeError::TooLarge,
+            crate::media::MediaDataError::Invalid => AttachmentRuntimeError::InvalidImage,
+            crate::media::MediaDataError::TooLarge => AttachmentRuntimeError::TooLarge,
         })
 }
 

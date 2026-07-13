@@ -74,8 +74,37 @@ pub enum ActivityToolContent {
     Terminal {
         terminal_id: String,
     },
-    Other {
-        label: String,
+    Image {
+        media_type: String,
+        data: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        uri: Option<String>,
+    },
+    Audio {
+        media_type: String,
+        data: String,
+    },
+    Resource {
+        uri: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        description: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        media_type: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        size_bytes: Option<i64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        text: Option<String>,
+    },
+    Unsupported {
+        content_type: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        media_type: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        uri: Option<String>,
     },
 }
 
@@ -118,5 +147,18 @@ pub struct ActivityToolOutput {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ActivityToolField {
     pub name: String,
-    pub value: String,
+    pub value: ActivityToolValue,
+}
+
+/// Safe, typed projection of arbitrary ACP raw tool input and output.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ActivityToolValue {
+    Null,
+    Boolean { value: bool },
+    Number { value: String },
+    String { value: String },
+    Array { items: Vec<ActivityToolValue> },
+    Object { fields: Vec<ActivityToolField> },
+    Redacted,
 }

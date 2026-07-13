@@ -39,6 +39,14 @@ pub(super) fn tool_input_field_summary(key: &str, value: &Value) -> Option<Strin
 }
 
 pub(super) fn sanitize_command_summary(command: &str) -> String {
+    truncate_preview(sanitize_command(command, true))
+}
+
+pub(super) fn sanitize_command_detail(command: &str) -> String {
+    sanitize_command(command, false)
+}
+
+fn sanitize_command(command: &str, compact_paths: bool) -> String {
     let mut output = Vec::new();
     let mut redact_next = false;
     for part in command.split_whitespace() {
@@ -59,13 +67,13 @@ pub(super) fn sanitize_command_summary(command: &str) -> String {
             redact_next = true;
             continue;
         }
-        if looks_path_like(part) {
+        if compact_paths && looks_path_like(part) {
             output.push(path_leaf_summary(part));
         } else {
             output.push(part.to_string());
         }
     }
-    truncate_preview(output.join(" "))
+    output.join(" ")
 }
 
 pub(super) fn path_leaf_summary(value: &str) -> String {
@@ -80,6 +88,15 @@ pub(super) fn path_leaf_summary(value: &str) -> String {
 }
 
 pub(super) fn is_sensitive_key(key: &str) -> bool {
+    is_secret_key(key)
+        || matches!(
+            key.to_ascii_lowercase().as_str(),
+            "prompt" | "content" | "output"
+        )
+}
+
+/// Raw detail trees keep ordinary content while redacting credential-bearing fields.
+pub(super) fn is_secret_key(key: &str) -> bool {
     let lower = key.to_ascii_lowercase();
     lower.contains("secret")
         || lower.contains("token")
@@ -87,12 +104,9 @@ pub(super) fn is_sensitive_key(key: &str) -> bool {
         || lower.contains("api_key")
         || lower.contains("apikey")
         || lower.contains("authorization")
-        || lower.contains("auth")
+        || lower == "auth"
         || lower == "key"
-        || lower == "prompt"
         || lower == "env"
-        || lower == "content"
-        || lower == "output"
 }
 
 fn command_array_summary(command: &[Value]) -> Option<String> {

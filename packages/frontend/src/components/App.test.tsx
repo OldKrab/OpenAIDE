@@ -41,7 +41,7 @@ describe("tool detail rendering helpers", () => {
       },
       output: {
         exit_code: 0,
-        fields: [{ name: "status", value: "completed" }],
+        fields: [{ name: "status", value: { kind: "string", value: "completed" } }],
       },
     } as unknown as NonNullable<Extract<ActivityStep, { kind: "tool" }>["details"]>;
 

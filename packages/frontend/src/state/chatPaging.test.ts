@@ -65,11 +65,11 @@ describe("chatPaging", () => {
     const chat = renderedChat(
       snapshot([
         activityMessage("m1", "exec_command", "completed", false, [
-          { kind: "tool", name: "execute", status: "completed", input_summary: "git status" },
+          { kind: "tool", tool_call_id: "tool-1", name: "execute", status: "completed", input_summary: "git status" },
         ]),
         thoughtMessage("thought-1", "Check the test result"),
         activityMessage("m2", "exec_command", "running", true, [
-          { kind: "tool", name: "execute", status: "running", input_summary: "npm test" },
+          { kind: "tool", tool_call_id: "tool-2", name: "execute", status: "running", input_summary: "npm test" },
         ]),
         activityMessage("m3", "exec_command", "error", true, [
           { kind: "command", command_label: "cargo test", status: "error", exit_code: 1 },
@@ -87,9 +87,9 @@ describe("chatPaging", () => {
         title: "Commands",
         status: "completed",
         steps: [
-          { kind: "tool", input_summary: "git status" },
-          { kind: "thought", text: "Check the test result" },
-          { kind: "tool", input_summary: "npm test" },
+          { kind: "tool", tool_call_id: "tool-1", input_summary: "git status" },
+          { kind: "thought", message_id: "thought-1", text: "Check the test result" },
+          { kind: "tool", tool_call_id: "tool-2", input_summary: "npm test" },
           { kind: "command", command_label: "cargo test" },
         ],
       },

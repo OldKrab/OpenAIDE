@@ -9,12 +9,13 @@ use openaide_app_server_protocol::task::{
     ActivityToolContent as ProtocolActivityToolContent,
     ActivityToolField as ProtocolActivityToolField, ActivityToolInput as ProtocolActivityToolInput,
     ActivityToolLocation as ProtocolActivityToolLocation,
-    ActivityToolOutput as ProtocolActivityToolOutput, ToolDetailSnapshot,
+    ActivityToolOutput as ProtocolActivityToolOutput,
+    ActivityToolValue as ProtocolActivityToolValue, ToolDetailSnapshot,
 };
 
 use crate::protocol::model::{
-    ActivityStatus, ActivityStep, ActivityToolContent, ActivityToolDetails, AgentContent,
-    AgentContentRole, Attachment, ChatMessage, NormalizedMessage, PermissionDecision,
+    ActivityStatus, ActivityStep, ActivityToolContent, ActivityToolDetails, ActivityToolValue,
+    AgentContent, AgentContentRole, Attachment, ChatMessage, NormalizedMessage, PermissionDecision,
     PermissionOption, PermissionOptionKind, PermissionState, QuestionAction, QuestionState,
 };
 
@@ -317,8 +318,44 @@ fn project_tool_content(content: &ActivityToolContent) -> ProtocolActivityToolCo
         ActivityToolContent::Terminal { terminal_id } => ProtocolActivityToolContent::Terminal {
             terminal_id: terminal_id.clone(),
         },
-        ActivityToolContent::Other { label } => ProtocolActivityToolContent::Other {
-            label: label.clone(),
+        ActivityToolContent::Image {
+            media_type,
+            data,
+            uri,
+        } => ProtocolActivityToolContent::Image {
+            media_type: media_type.clone(),
+            data_url: format!("data:{media_type};base64,{data}"),
+            uri: uri.clone(),
+        },
+        ActivityToolContent::Audio { media_type, data } => ProtocolActivityToolContent::Audio {
+            media_type: media_type.clone(),
+            data_url: format!("data:{media_type};base64,{data}"),
+        },
+        ActivityToolContent::Resource {
+            uri,
+            name,
+            title,
+            description,
+            media_type,
+            size_bytes,
+            text,
+        } => ProtocolActivityToolContent::Resource {
+            uri: uri.clone(),
+            name: name.clone(),
+            title: title.clone(),
+            description: description.clone(),
+            media_type: media_type.clone(),
+            size_bytes: *size_bytes,
+            text: text.clone(),
+        },
+        ActivityToolContent::Unsupported {
+            content_type,
+            media_type,
+            uri,
+        } => ProtocolActivityToolContent::Unsupported {
+            content_type: content_type.clone(),
+            media_type: media_type.clone(),
+            uri: uri.clone(),
         },
     }
 }
@@ -330,9 +367,31 @@ fn project_tool_fields(
         .iter()
         .map(|field| ProtocolActivityToolField {
             name: field.name.clone(),
-            value: field.value.clone(),
+            value: project_tool_value(&field.value),
         })
         .collect()
+}
+
+fn project_tool_value(value: &ActivityToolValue) -> ProtocolActivityToolValue {
+    match value {
+        ActivityToolValue::Null => ProtocolActivityToolValue::Null,
+        ActivityToolValue::Boolean { value } => {
+            ProtocolActivityToolValue::Boolean { value: *value }
+        }
+        ActivityToolValue::Number { value } => ProtocolActivityToolValue::Number {
+            value: value.clone(),
+        },
+        ActivityToolValue::String { value } => ProtocolActivityToolValue::String {
+            value: value.clone(),
+        },
+        ActivityToolValue::Array { items } => ProtocolActivityToolValue::Array {
+            items: items.iter().map(project_tool_value).collect(),
+        },
+        ActivityToolValue::Object { fields } => ProtocolActivityToolValue::Object {
+            fields: project_tool_fields(fields),
+        },
+        ActivityToolValue::Redacted => ProtocolActivityToolValue::Redacted,
+    }
 }
 
 fn activity_item_status(status: ActivityStatus) -> ChatItemStatus {

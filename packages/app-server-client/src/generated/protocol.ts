@@ -462,13 +462,15 @@ export type ToolDetailSnapshot = { locations: Array<ActivityToolLocation>, conte
 
 export type ActivityToolLocation = { path: string, line?: number | null, };
 
-export type ActivityToolContent = { "kind": "text", text: string, } | { "kind": "diff", path: string, oldText?: string | null, newText: string, } | { "kind": "terminal", terminalId: string, } | { "kind": "other", label: string, };
+export type ActivityToolContent = { "kind": "text", text: string, } | { "kind": "diff", path: string, oldText?: string | null, newText: string, } | { "kind": "terminal", terminalId: string, } | { "kind": "image", mediaType: string, dataUrl: string, uri?: string | null, } | { "kind": "audio", mediaType: string, dataUrl: string, } | { "kind": "resource", uri: string, name?: string | null, title?: string | null, description?: string | null, mediaType?: string | null, sizeBytes?: number | null, text?: string | null, } | { "kind": "unsupported", contentType: string, mediaType?: string | null, uri?: string | null, };
 
 export type ActivityToolInput = { command: Array<string>, cwd?: string | null, query?: string | null, queries?: Array<string> | null, url?: string | null, path?: string | null, fields: Array<ActivityToolField>, };
 
 export type ActivityToolOutput = { stdout?: string | null, stderr?: string | null, formattedOutput?: string | null, aggregatedOutput?: string | null, exitCode?: number | null, success?: boolean | null, fields: Array<ActivityToolField>, };
 
-export type ActivityToolField = { name: string, value: string, };
+export type ActivityToolField = { name: string, value: ActivityToolValue, };
+
+export type ActivityToolValue = { "kind": "null" } | { "kind": "boolean", value: boolean, } | { "kind": "number", value: string, } | { "kind": "string", value: string, } | { "kind": "array", items: Array<ActivityToolValue>, } | { "kind": "object", fields: Array<ActivityToolField>, } | { "kind": "redacted" };
 
 export type TaskOpenParams = { taskId: TaskId, };
 

@@ -13,6 +13,7 @@ import {
   parseSearchResults,
   type SearchResult,
 } from "../state/toolDetailsViewModel";
+import { toolValueText } from "../state/toolDetailsShared";
 
 export type ToolOpenPathMessage = {
   type: "tool.openPath";
@@ -59,19 +60,33 @@ export function ToolFields({ fields }: { fields: ActivityToolField[] }) {
   return (
     <dl className="activity-tool-fields activity-tool-inline-fields">
       {fields.map((field) => (
-        <FragmentPair key={field.name} name={field.name} value={field.value} />
+        <FragmentPair key={field.name} name={field.name} value={<ToolValue value={field.value} />} />
       ))}
     </dl>
   );
 }
 
-function FragmentPair({ name, value }: { name: string; value: string }) {
+function FragmentPair({ name, value }: { name: string; value: ReactNode }) {
   return (
     <>
       <dt>{name}</dt>
       <dd>{value}</dd>
     </>
   );
+}
+
+function ToolValue({ value }: { value: ActivityToolField["value"] }) {
+  const compact = toolValueText(value);
+  if (compact !== undefined) return <>{compact}</>;
+  if (value.kind === "array") {
+    return (
+      <ol className="activity-tool-value-list">
+        {value.items.map((item, index) => <li key={index}><ToolValue value={item} /></li>)}
+      </ol>
+    );
+  }
+  if (value.kind === "object") return <ToolFields fields={value.fields} />;
+  return null;
 }
 
 export function ToolContentBlock({ content }: { content: ActivityToolContent }) {
@@ -85,7 +100,47 @@ export function ToolContentBlock({ content }: { content: ActivityToolContent }) 
     );
   }
   if (content.kind === "terminal") return <code>terminal {content.terminal_id}</code>;
-  return <span>{content.label}</span>;
+  if (content.kind === "image") {
+    return (
+      <section className="activity-tool-media">
+        <img alt="Tool output" className="activity-tool-image" src={content.data_url} />
+        <small>{content.media_type}</small>
+        {content.uri ? <code>{content.uri}</code> : null}
+      </section>
+    );
+  }
+  if (content.kind === "audio") {
+    return (
+      <section className="activity-tool-media">
+        <audio aria-label="Tool audio output" className="activity-tool-audio" controls src={content.data_url} />
+        <small>{content.media_type}</small>
+      </section>
+    );
+  }
+  if (content.kind === "resource") {
+    return (
+      <section className="activity-tool-resource">
+        <strong>{content.title ?? content.name ?? content.uri}</strong>
+        {content.title || content.name ? <code>{content.uri}</code> : null}
+        {content.description ? <p>{content.description}</p> : null}
+        {content.media_type || content.size_bytes !== undefined ? (
+          <small>{[content.media_type, content.size_bytes !== undefined ? formatByteCount(content.size_bytes) : undefined].filter(Boolean).join(" · ")}</small>
+        ) : null}
+        {content.text ? <ToolCodeBlock text={content.text} /> : null}
+      </section>
+    );
+  }
+  return (
+    <p className="activity-tool-unsupported">
+      Unsupported {content.content_type.replaceAll("_", " ")}
+      {content.media_type ? <small>{content.media_type}</small> : null}
+      {content.uri ? <code>{content.uri}</code> : null}
+    </p>
+  );
+}
+
+function formatByteCount(sizeBytes: number): string {
+  return `${sizeBytes.toLocaleString("en-US")} ${sizeBytes === 1 ? "byte" : "bytes"}`;
 }
 
 export function ToolPath({ className, label, line, path }: { className?: string; label?: string; line?: number; path: string }) {

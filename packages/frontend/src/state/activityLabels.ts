@@ -1,4 +1,5 @@
 import type { ActivityStep, NormalizedMessage } from "@openaide/app-shell-contracts";
+import { firstFieldValue } from "./toolDetailsShared";
 
 type ActivityMessage = Extract<NormalizedMessage, { kind: "activity" }>;
 
@@ -37,6 +38,8 @@ export function activityStepLabel(step: ActivityStep) {
   if (step.kind === "text") return step.text;
   const subject = toolSubjectLabel(step);
   if (isExecuteTool(step)) return subject ?? humanizeToolName(step.name);
+  if (step.name === "think") return "Reasoning tool";
+  if (step.name === "switch_mode") return subject ? `Switch mode to ${subject}` : "Switch mode";
   if (step.name === "search" && subject && searchTitleParts(step.input_summary)) return `Search: ${subject}`;
   if (step.name === "web_search" && subject) return `Web search: ${subject}`;
   const action = toolActionLabel(step.name);
@@ -56,6 +59,7 @@ export function activityStepProgressLabel(step: ActivityStep, activityTitle?: st
   if (collaborationLabel) return collaborationLabel;
   const subject = toolSubjectLabel(step);
   if (isExecuteTool(step)) return progressLabel("Running", subject ?? humanizeToolName(step.name));
+  if (step.name === "think") return "Using reasoning tool";
   if (step.name === "web_search") return progressLabel(subject ? "Searching the web for" : "Searching the web", subject ?? "");
   const actions: Record<string, string> = {
     skill: "Activating",
@@ -65,7 +69,8 @@ export function activityStepProgressLabel(step: ActivityStep, activityTitle?: st
     move: "Moving",
     search: "Searching",
     fetch: "Opening",
-    think: "Thinking",
+    think: "Using reasoning tool",
+    switch_mode: "Switching mode to",
   };
   return progressLabel(actions[step.name] ?? "Using", subject ?? humanizeToolName(step.name));
 }
@@ -80,6 +85,7 @@ export function activityStepCompletedLabel(step: ActivityStep) {
   const subject = toolSubjectLabel(step);
   if (step.status === "error") return progressLabel("Failed to use", subject ?? humanizeToolName(step.name));
   if (isExecuteTool(step)) return progressLabel("Ran", subject ?? "command");
+  if (step.name === "think") return "Used reasoning tool";
   if (step.name === "web_search") return progressLabel(subject ? "Searched the web for" : "Searched the web", subject ?? "");
   const actions: Record<string, string> = {
     skill: "Activated",
@@ -89,7 +95,8 @@ export function activityStepCompletedLabel(step: ActivityStep) {
     move: "Moved",
     search: "Searched",
     fetch: "Opened",
-    think: "Thought",
+    think: "Used reasoning tool",
+    switch_mode: "Switched mode to",
   };
   return progressLabel(actions[step.name] ?? "Used", subject ?? humanizeToolName(step.name));
 }
@@ -107,7 +114,7 @@ export function activityStepContext(step: ActivityStep) {
   if (step.kind !== "tool") return undefined;
   const input = step.details?.input;
   if (step.name === "search") {
-    const fieldScope = input?.fields?.find((field) => ["path", "file", "cwd"].includes(field.name.toLowerCase()))?.value;
+    const fieldScope = ["path", "file", "cwd"].map((name) => firstFieldValue(input?.fields, name)).find(Boolean);
     return input?.path ?? fieldScope ?? searchTitleParts(step.input_summary)?.scope ?? input?.cwd;
   }
   return input?.cwd;
@@ -140,9 +147,13 @@ type ActivitySummaryKind =
   | "skill"
   | "read"
   | "edit"
+  | "delete"
+  | "move"
   | "run"
   | "search"
   | "fetch"
+  | "thinkTool"
+  | "switchMode"
   | "terminalInput"
   | "collaboration"
   | "other";
@@ -156,6 +167,10 @@ function classifyStep(step: ActivityStep, title: string): ActivitySummaryKind {
   if (step.name === "skill") return "skill";
   if (collaborationAction(value)) return "collaboration";
   if (isExecuteTool(step)) return "run";
+  if (step.name === "delete") return "delete";
+  if (step.name === "move") return "move";
+  if (step.name === "think") return "thinkTool";
+  if (step.name === "switch_mode") return "switchMode";
   if (step.name === "read" || /\bread(?:ing)?\b|\bread file\b|\bopened file\b/.test(value)) return "read";
   if (step.name === "edit" || /\b(edit|edited|update|updated|write|wrote|create|created|patch|patched)\b/.test(value)) return "edit";
   if (step.name === "search" || step.name === "web_search" || /\b(search|searched|grep|rg|find)\b/.test(value)) return "search";
@@ -190,9 +205,13 @@ function countLabel(kind: ActivitySummaryKind, count: number, sentenceStart: boo
     skill: { verb: "activated", single: "skill", plural: "skills" },
     read: { verb: "read", single: "file", plural: "files" },
     edit: { verb: "updated", single: "file", plural: "files" },
+    delete: { verb: "deleted", single: "file", plural: "files" },
+    move: { verb: "moved", single: "file", plural: "files" },
     run: { verb: "ran", single: "command", plural: "commands" },
     search: { verb: "ran", single: "search", plural: "searches" },
-    fetch: { verb: "opened", single: "item", plural: "items" },
+    fetch: { verb: "fetched", single: "resource", plural: "resources" },
+    thinkTool: { verb: "used", single: "reasoning tool", plural: "reasoning tools" },
+    switchMode: { verb: "switched", single: "mode", plural: "modes" },
     terminalInput: { verb: "sent", single: "terminal input", plural: "terminal inputs" },
     collaboration: { verb: "coordinated", single: "subagent", plural: "subagents" },
     other: { verb: "called", single: "tool", plural: "tools" },
@@ -240,7 +259,7 @@ function collaborationAction(value: string) {
 function searchSubjectLabel(step: Extract<ActivityStep, { kind: "tool" }>) {
   const input = step.details?.input;
   if (input?.query) return input.query;
-  const queryField = input?.fields?.find((field) => ["query", "q", "pattern"].includes(field.name.toLowerCase()))?.value;
+  const queryField = ["query", "q", "pattern"].map((name) => firstFieldValue(input?.fields, name)).find(Boolean);
   if (queryField) return queryField;
   const command = commandLabel(input?.command);
   if (command && step.input_summary && isContextOnlySummary(step, step.input_summary)) return command;
@@ -294,7 +313,7 @@ function toolActionLabel(name: string) {
     web_search: "Web search",
     fetch: "Fetch",
     switch_mode: "Switch mode",
-    think: "Thought",
+    think: "Reasoning tool",
   };
   return labels[name];
 }

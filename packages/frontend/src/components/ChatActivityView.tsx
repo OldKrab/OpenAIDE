@@ -44,7 +44,7 @@ export function ChatActivityView({
       <div className="activity-step-list">
         {activity.steps.map((step, index) => (
           <ActivityStepRow
-            key={index}
+            key={activityStepIdentity(step) ?? index}
             onSubscribeToolDetail={onSubscribeToolDetail}
             step={step}
             taskId={taskId}
@@ -85,6 +85,7 @@ export function ActivityStepRow({
     return (
       <AnimatedDisclosure
         className="activity-step activity-thought-block"
+        stepId={step.message_id}
         trigger={<ActivityStepContent disclosure icon={activityStepIcon(step)} label="Thought" />}
       >
         <AgentMarkdown className="chat-thought" text={step.text} />
@@ -98,6 +99,7 @@ export function ActivityStepRow({
     return (
       <AnimatedDisclosure
         className={commandStepClassName(displayStep, className)}
+        stepId={displayStep.kind === "tool" ? displayStep.tool_call_id : undefined}
         trigger={
           <>
             <ActivityStepContent
@@ -138,7 +140,7 @@ export function ActivityStepRow({
     );
   }
   return (
-    <div className={className}>
+    <div className={className} data-step-id={displayStep.kind === "tool" ? displayStep.tool_call_id : undefined}>
       <ActivityStepContent icon={activityStepIcon(displayStep)} label={label} />
       {metadata}
       {preview ? <pre>{preview}</pre> : null}
@@ -179,6 +181,7 @@ function LiveToolDetailDisclosure({
     <AnimatedDisclosure
       className={className}
       onOpenChange={setOpen}
+      stepId={step.tool_call_id}
       trigger={(
         <>
           <ActivityStepContent
@@ -259,18 +262,20 @@ function AnimatedDisclosure({
   className,
   defaultOpen = false,
   onOpenChange,
+  stepId,
   trigger,
 }: {
   children: ReactNode;
   className: string;
   defaultOpen?: boolean;
   onOpenChange?: (open: boolean) => void;
+  stepId?: string;
   trigger: ReactNode;
 }) {
   const [open, setOpen] = useState(defaultOpen);
   const rootClassName = [className, open ? "open" : ""].filter(Boolean).join(" ");
   return (
-    <div className={rootClassName}>
+    <div className={rootClassName} data-step-id={stepId}>
       <button
         aria-expanded={open}
         className="activity-disclosure-trigger"
@@ -297,6 +302,12 @@ export function activityStepIcon(step: ActivityStep) {
   }
   if (step.kind === "tool") return toolKindIcon(step.name, 12, "activity-kind-icon");
   return <Wrench className="activity-kind-icon" size={12} />;
+}
+
+function activityStepIdentity(step: ActivityStep) {
+  if (step.kind === "thought") return step.message_id;
+  if (step.kind === "tool") return step.tool_call_id;
+  return undefined;
 }
 
 function commandStepClassName(step: ActivityStep, className: string) {

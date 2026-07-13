@@ -41,7 +41,7 @@ export type AgentContent =
 
 export type ActivityStep =
   | { kind: "text"; text: string; level?: "info" | "warning" | "error" }
-  | { kind: "thought"; text: string; streaming?: boolean }
+  | { kind: "thought"; message_id?: string; text: string; streaming?: boolean }
   | { kind: "tool"; tool_call_id?: string; name: string; status: ActivityStatus; input_summary?: string; output_preview?: string; detail_artifact_id?: string; details?: ActivityToolDetails }
   | { kind: "command"; command_label: string; status: ActivityStatus; exit_code?: number; output_preview?: string };
 
@@ -61,7 +61,10 @@ export type ActivityToolContent =
   | { kind: "text"; text: string }
   | { kind: "diff"; path: string; old_text?: string; new_text: string }
   | { kind: "terminal"; terminal_id: string }
-  | { kind: "other"; label: string };
+  | { kind: "image"; media_type: string; data_url: string; uri?: string }
+  | { kind: "audio"; media_type: string; data_url: string }
+  | { kind: "resource"; uri: string; name?: string; title?: string; description?: string; media_type?: string; size_bytes?: number; text?: string }
+  | { kind: "unsupported"; content_type: string; media_type?: string; uri?: string };
 
 export type ActivityToolInput = {
   command: string[];
@@ -85,8 +88,17 @@ export type ActivityToolOutput = {
 
 export type ActivityToolField = {
   name: string;
-  value: string;
+  value: ActivityToolValue;
 };
+
+export type ActivityToolValue =
+  | { kind: "null" }
+  | { kind: "boolean"; value: boolean }
+  | { kind: "number"; value: string }
+  | { kind: "string"; value: string }
+  | { kind: "array"; items: ActivityToolValue[] }
+  | { kind: "object"; fields: ActivityToolField[] }
+  | { kind: "redacted" };
 
 export type PermissionOption = {
   id: string;

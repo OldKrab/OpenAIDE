@@ -10,7 +10,7 @@ describe("task read mapping", () => {
         command: [],
         query: "combined query ...",
         queries: ["English weather query", "Русский запрос погоды"],
-        fields: [{ name: "type", value: "webSearch" }],
+        fields: [{ name: "type", value: { kind: "string", value: "webSearch" } }],
       },
     });
 

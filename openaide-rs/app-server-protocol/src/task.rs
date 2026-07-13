@@ -179,8 +179,37 @@ pub enum ActivityToolContent {
     Terminal {
         terminal_id: String,
     },
-    Other {
-        label: String,
+    Image {
+        media_type: String,
+        data_url: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        uri: Option<String>,
+    },
+    Audio {
+        media_type: String,
+        data_url: String,
+    },
+    Resource {
+        uri: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        description: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        media_type: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        size_bytes: Option<i64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        text: Option<String>,
+    },
+    Unsupported {
+        content_type: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        media_type: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        uri: Option<String>,
     },
 }
 
@@ -223,7 +252,23 @@ pub struct ActivityToolOutput {
 #[serde(rename_all = "camelCase")]
 pub struct ActivityToolField {
     pub name: String,
-    pub value: String,
+    pub value: ActivityToolValue,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum ActivityToolValue {
+    Null,
+    Boolean { value: bool },
+    Number { value: String },
+    String { value: String },
+    Array { items: Vec<ActivityToolValue> },
+    Object { fields: Vec<ActivityToolField> },
+    Redacted,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, TS)]

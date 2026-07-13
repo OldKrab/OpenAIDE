@@ -89,7 +89,7 @@ use crate::state::{
 use crate::support::{SupportRecoverStuckSessionsParams, SupportRecoverStuckSessionsResult};
 use crate::task::{
     ActivityToolContent, ActivityToolField, ActivityToolInput, ActivityToolLocation,
-    ActivityToolOutput, ComposerMessage, TaskAdoptNativeSessionParams,
+    ActivityToolOutput, ActivityToolValue, ComposerMessage, TaskAdoptNativeSessionParams,
     TaskAdoptNativeSessionResult, TaskCancelParams, TaskCancelResult, TaskChatPageParams,
     TaskChatPageResult, TaskCreateParams, TaskCreateResult, TaskDiscardParams, TaskDiscardResult,
     TaskListParams, TaskListResult, TaskMarkReadParams, TaskMarkReadResult, TaskOpenParams,
@@ -300,6 +300,7 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<ActivityToolInput>(output, config);
     push_decl::<ActivityToolOutput>(output, config);
     push_decl::<ActivityToolField>(output, config);
+    push_decl::<ActivityToolValue>(output, config);
     push_decl::<TaskOpenParams>(output, config);
     push_decl::<TaskOpenResult>(output, config);
     push_decl::<TaskMarkReadParams>(output, config);
