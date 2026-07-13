@@ -13,9 +13,9 @@ use openaide_app_server_protocol::task::{
 };
 
 use crate::protocol::model::{
-    ActivityStatus, ActivityStep, ActivityToolContent, ActivityToolDetails, Attachment,
-    ChatMessage, NormalizedMessage, PermissionDecision, PermissionOption, PermissionOptionKind,
-    PermissionState, QuestionAction, QuestionState,
+    ActivityStatus, ActivityStep, ActivityToolContent, ActivityToolDetails, AgentContent,
+    AgentContentRole, Attachment, ChatMessage, NormalizedMessage, PermissionDecision,
+    PermissionOption, PermissionOptionKind, PermissionState, QuestionAction, QuestionState,
 };
 
 pub(crate) fn project_chat_item(message: &ChatMessage) -> ChatItem {
@@ -57,6 +57,14 @@ fn project_message(message: &NormalizedMessage) -> (ChatRole, ChatItemStatus, Ve
                 ChatItemStatus::Complete
             },
             vec![MessagePart::Text { text: text.clone() }],
+        ),
+        NormalizedMessage::Content { role, content, .. } => (
+            match role {
+                AgentContentRole::Agent => ChatRole::Agent,
+                AgentContentRole::Thought => ChatRole::System,
+            },
+            ChatItemStatus::Complete,
+            vec![project_agent_content(content)],
         ),
         NormalizedMessage::Thought {
             text, streaming, ..
@@ -154,6 +162,46 @@ fn project_message(message: &NormalizedMessage) -> (ChatRole, ChatItemStatus, Ve
                 text: message.clone(),
             }],
         ),
+    }
+}
+
+fn project_agent_content(content: &AgentContent) -> MessagePart {
+    match content {
+        AgentContent::Image {
+            media_type,
+            data,
+            uri,
+        } => MessagePart::Image {
+            media_type: media_type.clone(),
+            data_url: format!("data:{media_type};base64,{data}"),
+            uri: uri.clone(),
+        },
+        AgentContent::Resource {
+            uri,
+            name,
+            title,
+            description,
+            media_type,
+            size_bytes,
+            text,
+        } => MessagePart::Resource {
+            uri: uri.clone(),
+            name: name.clone(),
+            title: title.clone(),
+            description: description.clone(),
+            media_type: media_type.clone(),
+            size_bytes: *size_bytes,
+            text: text.clone(),
+        },
+        AgentContent::Unsupported {
+            content_type,
+            media_type,
+            uri,
+        } => MessagePart::Unsupported {
+            content_type: content_type.clone(),
+            media_type: media_type.clone(),
+            uri: uri.clone(),
+        },
     }
 }
 

@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { isValidElement, type ReactElement, type ReactNode } from "react";
 import { act, create } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ActivityToolDetails, Attachment, ChatMessage, PermissionOption } from "@openaide/app-shell-contracts";
+import type { ActivityToolDetails, AgentContent, Attachment, ChatMessage, PermissionOption } from "@openaide/app-shell-contracts";
 
 describe("ChatRow", () => {
   beforeEach(() => {
@@ -370,6 +370,52 @@ describe("ChatRow", () => {
     expect(html).toContain('class="chat-attachment-chip"><svg');
     expect(html).toContain("notes.md");
     expect(html.indexOf("chat-image-grid")).toBeLessThan(html.indexOf("Inspect this"));
+  });
+
+  it("renders typed Agent images, resources, and unsupported content explicitly", async () => {
+    const { ChatRow } = await import("./ChatMessageView");
+    const imageHtml = renderToStaticMarkup(
+      <ChatRow
+        message={agentContentMessage("image", {
+          kind: "image",
+          media_type: "image/png",
+          data_url: "data:image/png;base64,aW1hZ2U=",
+          uri: "memory://diagram.png",
+        })}
+        onPermissionRespond={vi.fn()}
+        taskId="task_1"
+      />,
+    );
+    const resourceHtml = renderToStaticMarkup(
+      <ChatRow
+        message={agentContentMessage("resource", {
+          kind: "resource",
+          uri: "memory://notes.txt",
+          media_type: "text/plain",
+          text: "Embedded notes",
+        })}
+        onPermissionRespond={vi.fn()}
+        taskId="task_1"
+      />,
+    );
+    const unsupportedHtml = renderToStaticMarkup(
+      <ChatRow
+        message={agentContentMessage("audio", {
+          kind: "unsupported",
+          content_type: "audio",
+          media_type: "audio/wav",
+        })}
+        onPermissionRespond={vi.fn()}
+        taskId="task_1"
+      />,
+    );
+
+    expect(imageHtml).toContain('aria-label="Open diagram.png"');
+    expect(imageHtml).toContain('src="data:image/png;base64,aW1hZ2U="');
+    expect(resourceHtml).toContain("notes.txt");
+    expect(resourceHtml).toContain("Embedded notes");
+    expect(unsupportedHtml).toContain("Audio output is not previewable yet.");
+    expect(unsupportedHtml).toContain("audio/wav");
   });
 
   it("renders an attachment-only user message without empty text or copy controls", async () => {
@@ -1087,6 +1133,21 @@ function agentMessage(id: string, text: string, streaming?: boolean): ChatMessag
       text,
       created_at: "2026-05-23T00:00:00Z",
       streaming,
+    },
+  };
+}
+
+function agentContentMessage(id: string, content: AgentContent): ChatMessage {
+  return {
+    cursor: `cursor_${id}`,
+    identity: id,
+    message_type: "agent_content",
+    message_id: id,
+    message: {
+      kind: "agent_content",
+      id,
+      content,
+      created_at: "2026-05-23T00:00:00Z",
     },
   };
 }

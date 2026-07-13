@@ -3,12 +3,13 @@ use std::sync::{Arc, Mutex};
 
 use agent_client_protocol::schema::{ContentBlock, SessionUpdate};
 
+use crate::agent::acp_content_projection::non_text_content_event;
 use crate::agent::acp_tool_call_projection::{
     merge_tool_call_update, remember_tool_call, ToolCallState,
 };
 use crate::agent::normalizer::normalize_event;
 use crate::agent::tool_details::tool_call_event;
-use crate::protocol::model::NormalizedMessage;
+use crate::protocol::model::{AgentContentRole, NormalizedMessage};
 use crate::time::now_string;
 
 pub(super) struct ReplayProjection {
@@ -67,26 +68,34 @@ impl ReplayBuffer {
                     );
                 }
             }
-            SessionUpdate::AgentMessageChunk(chunk) => {
-                if let ContentBlock::Text(text) = chunk.content {
-                    self.push_text(
-                        ReplayTextKind::Agent,
-                        text.text,
-                        chunk.message_id,
-                        created_at,
-                    );
-                }
-            }
-            SessionUpdate::AgentThoughtChunk(chunk) => {
-                if let ContentBlock::Text(text) = chunk.content {
-                    self.push_text(
-                        ReplayTextKind::Thought,
-                        text.text,
-                        chunk.message_id,
-                        created_at,
-                    );
-                }
-            }
+            SessionUpdate::AgentMessageChunk(chunk) => match chunk.content {
+                ContentBlock::Text(text) => self.push_text(
+                    ReplayTextKind::Agent,
+                    text.text,
+                    chunk.message_id,
+                    created_at,
+                ),
+                content => self.push_content(
+                    content,
+                    AgentContentRole::Agent,
+                    chunk.message_id,
+                    created_at,
+                ),
+            },
+            SessionUpdate::AgentThoughtChunk(chunk) => match chunk.content {
+                ContentBlock::Text(text) => self.push_text(
+                    ReplayTextKind::Thought,
+                    text.text,
+                    chunk.message_id,
+                    created_at,
+                ),
+                content => self.push_content(
+                    content,
+                    AgentContentRole::Thought,
+                    chunk.message_id,
+                    created_at,
+                ),
+            },
             SessionUpdate::ToolCall(tool_call) => {
                 self.end_anonymous_text_run();
                 remember_tool_call(tool_calls, tool_call.clone());
@@ -98,6 +107,19 @@ impl ReplayBuffer {
                 self.upsert(normalize_event(tool_call_event(&tool_call), created_at));
             }
             _ => self.end_anonymous_text_run(),
+        }
+    }
+
+    fn push_content(
+        &mut self,
+        content: ContentBlock,
+        role: AgentContentRole,
+        source_message_id: Option<String>,
+        created_at: &str,
+    ) {
+        self.end_anonymous_text_run();
+        if let Some(event) = non_text_content_event(content, role, source_message_id) {
+            self.messages.push(normalize_event(event, created_at));
         }
     }
 

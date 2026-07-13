@@ -13,6 +13,7 @@ import type {
   ActivityStatus,
   ActivityStep,
   ActivityToolDetails,
+  AgentContent,
   Attachment,
   ChatMessage,
   NormalizedMessage,
@@ -159,6 +160,16 @@ function mapProtocolMessage(item: ChatItem, createdAt: string): NormalizedMessag
     };
   }
 
+  const content = firstAgentContentPart(item.parts);
+  if (content) {
+    return {
+      kind: item.role === "system" ? "thought_content" : "agent_content",
+      id: item.messageId,
+      content,
+      created_at: createdAt,
+    };
+  }
+
   const activity = firstActivityPart(item.parts);
   if (activity) {
     return {
@@ -232,6 +243,40 @@ function attachmentPayload(attachment: Extract<MessagePart, { kind: "attachment"
 
 function firstActivityPart(parts: MessagePart[]) {
   return parts.find((part): part is Extract<MessagePart, { kind: "activity" }> => part.kind === "activity");
+}
+
+function firstAgentContentPart(parts: MessagePart[]): AgentContent | undefined {
+  for (const part of parts) {
+    if (part.kind === "image") {
+      return {
+        kind: "image",
+        media_type: part.mediaType,
+        data_url: part.dataUrl,
+        uri: part.uri ?? undefined,
+      };
+    }
+    if (part.kind === "resource") {
+      return {
+        kind: "resource",
+        uri: part.uri,
+        name: part.name ?? undefined,
+        title: part.title ?? undefined,
+        description: part.description ?? undefined,
+        media_type: part.mediaType ?? undefined,
+        size_bytes: part.sizeBytes ?? undefined,
+        text: part.text ?? undefined,
+      };
+    }
+    if (part.kind === "unsupported") {
+      return {
+        kind: "unsupported",
+        content_type: part.contentType,
+        media_type: part.mediaType ?? undefined,
+        uri: part.uri ?? undefined,
+      };
+    }
+  }
+  return undefined;
 }
 
 function firstPermissionPart(parts: MessagePart[]) {

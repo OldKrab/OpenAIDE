@@ -1,4 +1,6 @@
-use crate::protocol::model::{ActivityToolDetails, AgentCommandsCatalog, ConfigOptionsCatalog};
+use crate::protocol::model::{
+    ActivityToolDetails, AgentCommandsCatalog, AgentContent, AgentContentRole, ConfigOptionsCatalog,
+};
 
 #[derive(Debug, Clone)]
 pub enum AgentEvent {
@@ -12,6 +14,11 @@ pub enum AgentEvent {
     ThoughtChunk {
         text: String,
         /// Agent correlation key used only to preserve streamed message boundaries.
+        source_message_id: Option<String>,
+    },
+    Content {
+        role: AgentContentRole,
+        content: AgentContent,
         source_message_id: Option<String>,
     },
     ToolCall(AgentToolCall),

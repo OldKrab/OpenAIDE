@@ -241,6 +241,70 @@ describe("App Server Protocol state mapping", () => {
     });
   });
 
+  it("maps typed Agent content without exposing protocol objects", () => {
+    const mapping = mapProtocolTaskSnapshot(protocolSnapshot({
+      chat: {
+        hasMoreBefore: false,
+        hasMessages: true,
+        items: [
+          {
+            messageId: "agent-image" as MessageId,
+            role: "agent",
+            status: "complete",
+            parts: [{
+              kind: "image",
+              mediaType: "image/png",
+              dataUrl: "data:image/png;base64,aW1hZ2U=",
+              uri: "memory://diagram.png",
+            }],
+          },
+          {
+            messageId: "agent-resource" as MessageId,
+            role: "agent",
+            status: "complete",
+            parts: [{
+              kind: "resource",
+              uri: "memory://notes.txt",
+              mediaType: "text/plain",
+              text: "Embedded notes",
+            }],
+          },
+          {
+            messageId: "agent-audio" as MessageId,
+            role: "agent",
+            status: "complete",
+            parts: [{ kind: "unsupported", contentType: "audio", mediaType: "audio/wav" }],
+          },
+        ],
+      },
+    }));
+
+    expect(mapping.snapshot.chat.items.map((item) => item.message)).toMatchObject([
+      {
+        kind: "agent_content",
+        content: {
+          kind: "image",
+          media_type: "image/png",
+          data_url: "data:image/png;base64,aW1hZ2U=",
+          uri: "memory://diagram.png",
+        },
+      },
+      {
+        kind: "agent_content",
+        content: {
+          kind: "resource",
+          uri: "memory://notes.txt",
+          media_type: "text/plain",
+          text: "Embedded notes",
+        },
+      },
+      {
+        kind: "agent_content",
+        content: { kind: "unsupported", content_type: "audio", media_type: "audio/wav" },
+      },
+    ]);
+  });
+
   it("maps task status and config options conservatively", () => {
     expect(mapProtocolTaskSummary(protocolSummary({ status: "idle" }))).toMatchObject({ status: "inactive" });
     expect(mapProtocolTaskSummary(protocolSummary({ status: "interrupted" }))).toMatchObject({ status: "failed" });

@@ -9,6 +9,7 @@ pub(crate) mod acp_auth_method_cache;
 pub(crate) mod acp_commands_projection;
 pub(crate) mod acp_config_options_apply;
 pub(crate) mod acp_config_projection;
+pub(crate) mod acp_content_projection;
 pub(crate) mod acp_elicitation_form;
 pub(crate) mod acp_elicitation_wire;
 pub(crate) mod acp_errors;

@@ -1,6 +1,6 @@
-import { ChevronRight } from "lucide-react";
+import { CircleAlert, ChevronRight, FileText } from "lucide-react";
 import { memo, useState } from "react";
-import type { ActivityToolDetails, AgentCommandsCatalog, Attachment, ChatMessage, ElicitationResponse } from "@openaide/app-shell-contracts";
+import type { ActivityToolDetails, AgentCommandsCatalog, AgentContent, Attachment, ChatMessage, ElicitationResponse } from "@openaide/app-shell-contracts";
 import { AgentMarkdown, splitDataImageMarkdown } from "./AgentMarkdown";
 import { AttachmentImagePreviewLightbox, chatImagePreview, type AttachmentImagePreviewSource } from "./AttachmentImagePreview";
 import { ChatActivityView } from "./ChatActivityView";
@@ -55,6 +55,14 @@ export const ChatRow = memo(function ChatRow({
   }
   if (body.kind === "agent_text") {
     return <AgentTextMessage streaming={body.streaming === true && showStreamingCaret} text={body.text} />;
+  }
+  if (body.kind === "agent_content" || body.kind === "thought_content") {
+    return (
+      <>
+        <AgentContentMessage content={body.content} muted={body.kind === "thought_content"} onOpenImage={setOpenImage} />
+        {openImage ? <AttachmentImagePreviewLightbox image={openImage} onClose={() => setOpenImage(undefined)} /> : null}
+      </>
+    );
   }
   if (body.kind === "thought") {
     return (
@@ -111,6 +119,78 @@ function UserAttachments({
       onOpenImage={onOpenImage}
     />
   );
+}
+
+function AgentContentMessage({
+  content,
+  muted,
+  onOpenImage,
+}: {
+  content: AgentContent;
+  muted: boolean;
+  onOpenImage: (image: AttachmentImagePreviewSource) => void;
+}) {
+  if (content.kind === "image") {
+    const label = content.uri ? resourceLabel(content.uri) : "Agent image";
+    return (
+      <button
+        aria-label={`Open ${label}`}
+        className="chat-agent-content-image"
+        onClick={() => onOpenImage({ label, url: content.data_url })}
+        type="button"
+      >
+        <img alt={label} src={content.data_url} />
+      </button>
+    );
+  }
+  if (content.kind === "resource") {
+    const label = content.title || content.name || resourceLabel(content.uri);
+    const metadata = [content.media_type, formatByteSize(content.size_bytes)].filter(Boolean).join(" · ");
+    const header = (
+      <>
+        <FileText aria-hidden="true" size={14} />
+        <span className="chat-agent-content-title">{label}</span>
+        {metadata ? <span className="chat-agent-content-meta">{metadata}</span> : null}
+      </>
+    );
+    if (content.text !== undefined) {
+      return (
+        <details className={`chat-agent-content-resource${muted ? " muted" : ""}`}>
+          <summary>{header}</summary>
+          {content.description ? <p>{content.description}</p> : null}
+          <pre>{content.text}</pre>
+        </details>
+      );
+    }
+    return (
+      <section className={`chat-agent-content-resource${muted ? " muted" : ""}`}>
+        <div className="chat-agent-content-resource-heading">{header}</div>
+        {content.description ? <p>{content.description}</p> : null}
+        <code>{content.uri}</code>
+      </section>
+    );
+  }
+  const label = content.content_type === "audio" ? "Audio output" : "Binary resource";
+  return (
+    <section className={`chat-agent-content-unsupported${muted ? " muted" : ""}`}>
+      <CircleAlert aria-hidden="true" size={14} />
+      <span>{label} is not previewable yet.</span>
+      {content.media_type ? <code>{content.media_type}</code> : null}
+    </section>
+  );
+}
+
+function resourceLabel(uri: string) {
+  const withoutQuery = uri.split(/[?#]/, 1)[0] ?? uri;
+  const segment = withoutQuery.split("/").filter(Boolean).at(-1);
+  return segment || "Agent resource";
+}
+
+function formatByteSize(size: number | undefined) {
+  if (size === undefined) return undefined;
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+  return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function AgentTextMessage({ streaming, text }: { streaming: boolean; text: string }) {

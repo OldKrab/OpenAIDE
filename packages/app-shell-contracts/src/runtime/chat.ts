@@ -18,6 +18,7 @@ export type ChatMessage = {
 export type NormalizedMessage =
   | { kind: "user"; id: string; text: string; created_at: string; attachments?: Attachment[] }
   | { kind: "agent_text"; id: string; text: string; created_at: string; streaming?: boolean }
+  | { kind: "agent_content" | "thought_content"; id: string; content: AgentContent; created_at: string }
   | { kind: "thought"; id: string; text: string; created_at: string; streaming?: boolean }
   | { kind: "activity"; id: string; title: string; status: ActivityStatus; created_at: string; collapsed: boolean; steps: ActivityStep[] }
   | { kind: "permission"; id: string; request_id: string; app_server_request_id?: string; title: string; description?: string; scope?: string; risk?: string; tool_call: PermissionToolCall; state: PermissionState; created_at: string; options: PermissionOption[]; selected_option?: string; decision?: PermissionDecision }
@@ -32,6 +33,11 @@ export type Attachment = {
   path?: string;
   payload?: unknown;
 };
+
+export type AgentContent =
+  | { kind: "image"; media_type: string; data_url: string; uri?: string }
+  | { kind: "resource"; uri: string; name?: string; title?: string; description?: string; media_type?: string; size_bytes?: number; text?: string }
+  | { kind: "unsupported"; content_type: string; media_type?: string; uri?: string };
 
 export type ActivityStep =
   | { kind: "text"; text: string; level?: "info" | "warning" | "error" }

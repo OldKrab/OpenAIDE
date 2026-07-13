@@ -98,13 +98,131 @@ fn replayed_acp_chunks_use_live_logical_message_grouping() {
             ("thought", "Work it out".to_string()),
         ]
     );
+    assert!(adopted.chat.items.iter().any(|item| {
+        matches!(
+            item.parts.as_slice(),
+            [MessagePart::Image { media_type, .. }] if media_type == "image/png"
+        )
+    }));
     let identities = store
         .read_messages(task_id.as_str())
         .expect("read replayed messages")
         .into_iter()
         .map(|stored| stored.chat.identity)
         .collect::<std::collections::HashSet<_>>();
-    assert_eq!(identities.len(), 4);
+    assert_eq!(identities.len(), 5);
+    api.shutdown().expect("shutdown task runtime");
+}
+
+#[test]
+fn non_text_acp_output_is_visible_as_typed_chat_parts() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((api, store, workspace_root)) = task_chat_fixture(&temp, "content_blocks") else {
+        return;
+    };
+    let created = api
+        .create_for_test(TaskCreateParams {
+            project_id: project_id_for_workspace(&workspace_root),
+            agent_id: AgentId::from("codex"),
+            workspace_root: None,
+            config_options: Default::default(),
+        })
+        .expect("create task");
+    let task_id = created.task.task_id;
+    wait_until(|| {
+        matches!(
+            store
+                .read_task(task_id.as_str())
+                .map(|task| task.preparation),
+            Ok(TaskPreparationRecord::Ready)
+        )
+    });
+    let ready = api
+        .open_for_test(openaide_app_server_protocol::task::TaskOpenParams {
+            task_id: task_id.clone(),
+        })
+        .expect("open ready task");
+
+    api.send(send_params(&task_id, ready.revision, "show rich output"))
+        .expect("send prompt");
+    wait_until(|| {
+        store
+            .read_task(task_id.as_str())
+            .map(|task| task.status == TaskStatus::Inactive)
+            .unwrap_or(false)
+    });
+    wait_until(|| {
+        api.open_for_test(openaide_app_server_protocol::task::TaskOpenParams {
+            task_id: task_id.clone(),
+        })
+        .map(|snapshot| {
+            snapshot
+                .chat
+                .items
+                .iter()
+                .filter(|item| item.role == ChatRole::Agent)
+                .count()
+                == 6
+        })
+        .unwrap_or(false)
+    });
+    let completed = api
+        .open_for_test(openaide_app_server_protocol::task::TaskOpenParams {
+            task_id: task_id.clone(),
+        })
+        .expect("open completed task");
+    let agent_parts = completed
+        .chat
+        .items
+        .iter()
+        .filter(|item| item.role == ChatRole::Agent)
+        .flat_map(|item| item.parts.iter())
+        .map(|part| serde_json::to_value(part).expect("serialize Chat part"))
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        agent_parts,
+        vec![
+            serde_json::json!({
+                "kind": "image",
+                "mediaType": "image/png",
+                "dataUrl": "data:image/png;base64,aW1hZ2U=",
+                "uri": "memory://diagram.png"
+            }),
+            serde_json::json!({
+                "kind": "resource",
+                "uri": "memory://notes.txt",
+                "mediaType": "text/plain",
+                "text": "Embedded notes"
+            }),
+            serde_json::json!({
+                "kind": "resource",
+                "uri": "https://example.test/report.pdf",
+                "name": "report.pdf",
+                "title": "Report",
+                "description": "Generated report",
+                "mediaType": "application/pdf",
+                "sizeBytes": 42
+            }),
+            serde_json::json!({
+                "kind": "unsupported",
+                "contentType": "audio",
+                "mediaType": "audio/wav"
+            }),
+            serde_json::json!({
+                "kind": "unsupported",
+                "contentType": "embedded_binary_resource",
+                "mediaType": "application/octet-stream",
+                "uri": "memory://archive.bin"
+            }),
+            serde_json::json!({
+                "kind": "unsupported",
+                "contentType": "image",
+                "mediaType": "text/html",
+                "uri": "memory://not-an-image"
+            }),
+        ]
+    );
     api.shutdown().expect("shutdown task runtime");
 }
 
@@ -217,6 +335,20 @@ def update_chunk(kind, text, message_id):
         },
     })
 
+def update_content(content, message_id):
+    write({
+        "jsonrpc": "2.0",
+        "method": "session/update",
+        "params": {
+            "sessionId": session_id,
+            "update": {
+                "sessionUpdate": "agent_message_chunk",
+                "messageId": message_id,
+                "content": content,
+            },
+        },
+    })
+
 for line in sys.stdin:
     message = json.loads(line)
     method = message.get("method")
@@ -241,12 +373,21 @@ for line in sys.stdin:
             update_chunk("agent_message_chunk", "answer", "55555555-5555-4555-8555-555555555555")
             update_chunk("agent_thought_chunk", "Work ", "66666666-6666-4666-8666-666666666666")
             update_chunk("agent_thought_chunk", "it out", "66666666-6666-4666-8666-666666666666")
+            update_content({"type": "image", "mimeType": "image/png", "data": "aW1hZ2U="}, "replayed-image")
         respond(message, {"configOptions": []})
     elif method == "session/prompt":
-        update_chunk("agent_message_chunk", "Commentary ", "11111111-1111-4111-8111-111111111111")
-        update_chunk("agent_message_chunk", "message", "11111111-1111-4111-8111-111111111111")
-        update_chunk("agent_message_chunk", "Final ", "22222222-2222-4222-8222-222222222222")
-        update_chunk("agent_message_chunk", "message", "22222222-2222-4222-8222-222222222222")
+        if mode == "content_blocks":
+            update_content({"type": "image", "mimeType": "image/png", "data": "aW1hZ2U=", "uri": "memory://diagram.png"}, "content-image")
+            update_content({"type": "resource", "resource": {"uri": "memory://notes.txt", "mimeType": "text/plain", "text": "Embedded notes"}}, "content-text-resource")
+            update_content({"type": "resource_link", "uri": "https://example.test/report.pdf", "name": "report.pdf", "title": "Report", "description": "Generated report", "mimeType": "application/pdf", "size": 42}, "content-resource-link")
+            update_content({"type": "audio", "mimeType": "audio/wav", "data": "YXVkaW8="}, "content-audio")
+            update_content({"type": "resource", "resource": {"uri": "memory://archive.bin", "mimeType": "application/octet-stream", "blob": "YmluYXJ5"}}, "content-binary-resource")
+            update_content({"type": "image", "mimeType": "text/html", "data": "PGh0bWw+", "uri": "memory://not-an-image"}, "content-invalid-image")
+        else:
+            update_chunk("agent_message_chunk", "Commentary ", "11111111-1111-4111-8111-111111111111")
+            update_chunk("agent_message_chunk", "message", "11111111-1111-4111-8111-111111111111")
+            update_chunk("agent_message_chunk", "Final ", "22222222-2222-4222-8222-222222222222")
+            update_chunk("agent_message_chunk", "message", "22222222-2222-4222-8222-222222222222")
         respond(message, {"stopReason": "end_turn"})
     elif method == "session/close":
         respond(message, {})

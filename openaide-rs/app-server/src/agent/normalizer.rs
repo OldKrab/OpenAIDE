@@ -26,6 +26,17 @@ pub fn normalize_events(events: Vec<AgentEvent>, created_at: &str) -> Vec<Normal
                     streaming: false,
                 })
             }
+            AgentEvent::Content {
+                role,
+                content,
+                source_message_id,
+            } => Some(NormalizedMessage::Content {
+                id: Uuid::new_v4().to_string(),
+                role,
+                content,
+                source_message_id,
+                created_at: created_at.to_string(),
+            }),
             AgentEvent::ToolCall(tool_call) => {
                 let status = tool_call_status(tool_call.status);
                 let id = match tool_call.scope_id {

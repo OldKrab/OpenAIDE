@@ -145,18 +145,12 @@ pub(super) fn validate_pasted_image(
     mime_type: &str,
     data: &str,
 ) -> Result<u64, AttachmentRuntimeError> {
-    if !mime_type.starts_with("image/") || mime_type.trim().len() != mime_type.len() {
-        return Err(AttachmentRuntimeError::InvalidImage);
-    }
-    let decoded = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, data)
-        .map_err(|_| AttachmentRuntimeError::InvalidImage)?;
-    if decoded.is_empty() {
-        return Err(AttachmentRuntimeError::InvalidImage);
-    }
-    if decoded.len() as u64 > PASTED_IMAGE_MAX_BYTES {
-        return Err(AttachmentRuntimeError::TooLarge);
-    }
-    Ok(decoded.len() as u64)
+    crate::media::validate_base64_image(mime_type, data, PASTED_IMAGE_MAX_BYTES as usize)
+        .map(|size| size as u64)
+        .map_err(|error| match error {
+            crate::media::ImageDataError::Invalid => AttachmentRuntimeError::InvalidImage,
+            crate::media::ImageDataError::TooLarge => AttachmentRuntimeError::TooLarge,
+        })
 }
 
 pub(super) fn safe_image_label(label: String) -> String {

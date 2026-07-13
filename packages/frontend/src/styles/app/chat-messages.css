@@ -23,6 +23,100 @@
   gap: 0;
 }
 
+.chat-agent-content-image {
+  width: min(320px, 100%);
+  border: 1px solid var(--oa-border);
+  border-radius: var(--oa-radius-md);
+  background: color-mix(in oklch, var(--oa-panel) 76%, var(--oa-bg));
+  cursor: pointer;
+  display: block;
+  padding: 4px;
+}
+
+.chat-agent-content-image img {
+  width: 100%;
+  max-height: 240px;
+  border-radius: var(--oa-radius-sm);
+  display: block;
+  object-fit: contain;
+}
+
+.chat-agent-content-image:hover {
+  border-color: color-mix(in oklch, var(--oa-focus) 48%, var(--oa-border));
+}
+
+.chat-agent-content-image:focus-visible {
+  outline: 1px solid var(--oa-focus);
+  outline-offset: 2px;
+}
+
+.chat-agent-content-resource,
+.chat-agent-content-unsupported {
+  width: min(520px, 100%);
+  border: 1px solid var(--oa-border);
+  border-radius: var(--oa-radius-md);
+  background: color-mix(in oklch, var(--oa-panel) 72%, var(--oa-bg));
+  color: var(--oa-text);
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+.chat-agent-content-resource.muted,
+.chat-agent-content-unsupported.muted {
+  color: var(--oa-muted);
+}
+
+.chat-agent-content-resource > summary,
+.chat-agent-content-resource-heading,
+.chat-agent-content-unsupported {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chat-agent-content-resource > summary {
+  cursor: pointer;
+}
+
+.chat-agent-content-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-agent-content-meta {
+  margin-inline-start: auto;
+  color: var(--oa-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.chat-agent-content-resource p {
+  margin: 7px 0 0;
+  color: var(--oa-muted);
+}
+
+.chat-agent-content-resource code,
+.chat-agent-content-unsupported code {
+  color: var(--oa-muted);
+  font-family: var(--oa-mono-font);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.chat-agent-content-resource > pre {
+  max-height: 260px;
+  margin: 8px 0 0;
+  overflow: auto;
+  border-radius: var(--oa-radius-sm);
+  background: color-mix(in oklch, var(--oa-bg) 72%, var(--oa-panel));
+  padding: 8px;
+  font-family: var(--oa-mono-font);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
 .chat-streaming-caret {
   display: inline-block;
   width: 1px;

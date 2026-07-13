@@ -211,7 +211,7 @@ ACP `session/update` notifications identify their Native Session, not the `sessi
 
 ## AP-014: Non-text Agent message content is silently discarded
 
-**Status:** confirmed
+**Status:** resolved
 
 **Area:** ACP live update projection
 
@@ -220,6 +220,8 @@ ACP `agent_message_chunk` carries a general `ContentBlock`, which can contain te
 **Impact:** Valid Agent output can disappear silently, leaving saved Chat and every connected client incomplete.
 
 **Desired direction:** Normalize supported ACP content blocks into typed App Server Chat parts at the permanent Native Session boundary. Preserve unsupported-but-valid output as an explicit safe Chat representation rather than silently dropping it. Frontend renders only the normalized App Server Protocol model and does not interpret raw ACP payloads.
+
+**Resolution:** Live and replayed ACP Agent message and Thought updates now normalize all five ACP content kinds at the Native Session boundary. Text retains its streaming path; valid bounded images, embedded text resources, and resource links persist as typed App Server Chat content and project through dedicated protocol parts. Audio, binary resources, and malformed images persist as explicit unsupported-content rows with safe metadata and diagnostic logging instead of disappearing. The shared Frontend renders image previews, compact resource disclosures, and clear unsupported-content status without receiving raw ACP objects or reserved metadata.
 
 ## AP-015: Agent message completion and identity depend on prompt-scoped memory
 

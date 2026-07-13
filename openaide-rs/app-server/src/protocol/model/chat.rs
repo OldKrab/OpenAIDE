@@ -47,6 +47,14 @@ pub enum NormalizedMessage {
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         streaming: bool,
     },
+    Content {
+        id: String,
+        role: AgentContentRole,
+        content: AgentContent,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        source_message_id: Option<String>,
+        created_at: String,
+    },
     Thought {
         id: String,
         text: String,
@@ -111,6 +119,14 @@ impl NormalizedMessage {
         match self {
             NormalizedMessage::User { .. } => "user",
             NormalizedMessage::AgentText { .. } => "agent_text",
+            NormalizedMessage::Content {
+                role: AgentContentRole::Agent,
+                ..
+            } => "agent_content",
+            NormalizedMessage::Content {
+                role: AgentContentRole::Thought,
+                ..
+            } => "thought_content",
             NormalizedMessage::Thought { .. } => "thought",
             NormalizedMessage::Activity { .. } => "activity",
             NormalizedMessage::Permission { .. } => "permission",
@@ -123,6 +139,7 @@ impl NormalizedMessage {
         match self {
             NormalizedMessage::User { id, .. }
             | NormalizedMessage::AgentText { id, .. }
+            | NormalizedMessage::Content { id, .. }
             | NormalizedMessage::Thought { id, .. }
             | NormalizedMessage::Activity { id, .. }
             | NormalizedMessage::Permission { id, .. }
@@ -135,6 +152,7 @@ impl NormalizedMessage {
         let existing_created_at = match existing {
             NormalizedMessage::User { created_at, .. }
             | NormalizedMessage::AgentText { created_at, .. }
+            | NormalizedMessage::Content { created_at, .. }
             | NormalizedMessage::Thought { created_at, .. }
             | NormalizedMessage::Activity { created_at, .. }
             | NormalizedMessage::Permission { created_at, .. }
@@ -144,6 +162,7 @@ impl NormalizedMessage {
         match self {
             NormalizedMessage::User { created_at, .. }
             | NormalizedMessage::AgentText { created_at, .. }
+            | NormalizedMessage::Content { created_at, .. }
             | NormalizedMessage::Thought { created_at, .. }
             | NormalizedMessage::Activity { created_at, .. }
             | NormalizedMessage::Permission { created_at, .. }
@@ -153,6 +172,48 @@ impl NormalizedMessage {
             }
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentContentRole {
+    Agent,
+    Thought,
+}
+
+/// App Server-owned representation of displayable ACP content.
+/// Reserved ACP metadata and annotations intentionally do not cross this boundary.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum AgentContent {
+    Image {
+        media_type: String,
+        data: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        uri: Option<String>,
+    },
+    Resource {
+        uri: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        name: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        description: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        media_type: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        size_bytes: Option<u64>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        text: Option<String>,
+    },
+    Unsupported {
+        content_type: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        media_type: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        uri: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
