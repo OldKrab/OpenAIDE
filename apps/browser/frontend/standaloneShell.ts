@@ -1,7 +1,8 @@
-import type { FrontendShell } from "../services/frontendShell";
-import { createStandaloneHost, standaloneBootstrap } from "../services/devHost";
-import { subscribeWindowMessages } from "./domBootstrap";
+import type { FrontendShell } from "../../../packages/frontend/src/services/frontendShell";
+import { createStandaloneHost, standaloneBootstrap } from "./standaloneHost";
+import { subscribeWindowMessages } from "../../../packages/frontend/src/shells/domBootstrap";
 
+/** Standalone preview adapter used when no Web or VS Code shell bootstraps the page. */
 export function createStandaloneShell(): FrontendShell {
   const host = createStandaloneHost();
   return {

@@ -1,5 +1,5 @@
 import type { HostToWebviewMessage, WebviewToHostMessage } from "@openaide/app-shell-contracts";
-import { createDevHostData } from "./devHostData";
+import { createStandaloneHostData } from "./standaloneHostData";
 
 export type StandaloneHostOutput = {
   navigate(path: string): void;
@@ -12,7 +12,7 @@ export function handleStandaloneHostMessage(message: unknown, output: Standalone
 }
 
 function routeStandaloneHostMessage(message: WebviewToHostMessage, output: StandaloneHostOutput) {
-  const data = createDevHostData();
+  const data = createStandaloneHostData();
   switch (message.type) {
     case "secret.transaction.apply":
     case "secret.transaction.commit":
@@ -40,7 +40,9 @@ function routeStandaloneHostMessage(message: WebviewToHostMessage, output: Stand
       output.navigate("/task");
       return;
     case "surface.openNewTask":
-      output.navigate(message.payload?.project_id ? `/new-task?projectId=${encodeURIComponent(message.payload.project_id)}` : "/new-task");
+      output.navigate(message.payload?.project_id
+        ? `/new-task?projectId=${encodeURIComponent(message.payload.project_id)}`
+        : "/new-task");
       return;
     case "surface.openSettings":
       output.navigate("/settings");
@@ -51,5 +53,7 @@ function routeStandaloneHostMessage(message: WebviewToHostMessage, output: Stand
 }
 
 function isWebviewMessage(message: unknown): message is WebviewToHostMessage {
-  return typeof message === "object" && message !== null && typeof (message as { type?: unknown }).type === "string";
+  return typeof message === "object"
+    && message !== null
+    && typeof (message as { type?: unknown }).type === "string";
 }

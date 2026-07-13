@@ -1,6 +1,6 @@
 import type { HostToWebviewMessage } from "@openaide/app-shell-contracts";
-import { standaloneBootstrapFrom } from "./devHostBootstrap";
-import { handleStandaloneHostMessage } from "./devHostRouter";
+import { standaloneBootstrapFrom } from "./standaloneHostBootstrap";
+import { handleStandaloneHostMessage } from "./standaloneHostRouter";
 
 export function standaloneBootstrap() {
   if (typeof window === "undefined" || typeof document === "undefined") return undefined;
@@ -13,10 +13,10 @@ export function standaloneBootstrap() {
 
 export function createStandaloneHost() {
   if (
-    typeof window === "undefined" ||
-    typeof document === "undefined" ||
-    window.acquireVsCodeApi ||
-    document.body.dataset.surface
+    typeof window === "undefined"
+    || typeof document === "undefined"
+    || window.acquireVsCodeApi
+    || document.body.dataset.surface
   ) return undefined;
   return {
     postMessage(message: unknown) {

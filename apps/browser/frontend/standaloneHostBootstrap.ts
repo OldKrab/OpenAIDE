@@ -1,5 +1,4 @@
 import type { WebviewBootstrap } from "@openaide/app-shell-contracts";
-import { createDevHostData } from "./devHostData";
 
 export type StandaloneBootstrapInput = {
   hasDatasetSurface: boolean;
@@ -9,7 +8,6 @@ export type StandaloneBootstrapInput = {
 
 export function standaloneBootstrapFrom(input: StandaloneBootstrapInput): WebviewBootstrap | undefined {
   if (input.hasVsCodeApi || input.hasDatasetSurface) return undefined;
-  const data = createDevHostData();
   const surface = surfaceFromPath(input.pathname);
   return {
     surface,

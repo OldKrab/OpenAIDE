@@ -424,7 +424,7 @@ describe("host bridge", () => {
 async function installedHostBridge() {
   const [{ installFrontendShell }, { createBrowserShell }, hostBridge] = await Promise.all([
     import("./frontendShell"),
-    import("../shells/browserShell"),
+    import("../../../../apps/browser/frontend/browserShell"),
     import("./hostBridge"),
   ]);
   installFrontendShell(createBrowserShell());

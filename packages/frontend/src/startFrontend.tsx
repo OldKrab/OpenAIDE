@@ -3,8 +3,7 @@ import { createRoot } from "react-dom/client";
 import type { WebviewSurfaceKind } from "@openaide/app-shell-contracts";
 import { App } from "./components/App";
 import { postHostMessage } from "./services/hostBridge";
-import { installFrontendShell } from "./services/frontendShell";
-import { createBrowserShell } from "./shells/browserShell";
+import { installFrontendShell, type FrontendShell } from "./services/frontendShell";
 import "@fontsource-variable/inter";
 import "./styles/tokens.css";
 import "./styles/app.css";
@@ -13,7 +12,17 @@ type ErrorBoundaryState = {
   error?: Error;
 };
 
-installFrontendShell(createBrowserShell());
+/** Mounts the shared Frontend after an App Shell composition root supplies its adapter. */
+export function startFrontend(shell: FrontendShell) {
+  installFrontendShell(shell);
+  window.addEventListener("error", reportWindowError);
+  window.addEventListener("unhandledrejection", reportUnhandledRejection);
+  createRoot(document.getElementById("root")!).render(
+    <WebviewErrorBoundary>
+      <App />
+    </WebviewErrorBoundary>,
+  );
+}
 
 class WebviewErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundaryState> {
   state: ErrorBoundaryState = {};
@@ -43,26 +52,20 @@ class WebviewErrorBoundary extends Component<{ children: ReactNode }, ErrorBound
   }
 }
 
-window.addEventListener("error", (event) => {
+function reportWindowError(event: ErrorEvent) {
   sendWebviewDiagnostics("window_error", {
     error_name: event.error instanceof Error ? event.error.name : "Error",
     error_message: event.error instanceof Error ? event.error.message : event.message,
   });
-});
+}
 
-window.addEventListener("unhandledrejection", (event) => {
+function reportUnhandledRejection(event: PromiseRejectionEvent) {
   const reason = event.reason;
   sendWebviewDiagnostics("unhandled_rejection", {
     error_name: reason instanceof Error ? reason.name : "Error",
     error_message: reason instanceof Error ? reason.message : String(reason),
   });
-});
-
-createRoot(document.getElementById("root")!).render(
-  <WebviewErrorBoundary>
-    <App />
-  </WebviewErrorBoundary>,
-);
+}
 
 function sendWebviewDiagnostics(event: string, fields: Record<string, unknown>) {
   postHostMessage({
