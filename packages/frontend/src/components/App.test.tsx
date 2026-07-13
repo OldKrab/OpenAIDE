@@ -260,12 +260,13 @@ function agentMessage(id: string, text: string): ChatMessage {
   return {
     cursor: `cursor_${id}`,
     identity: id,
-    message_type: "agent_text",
+    message_type: "agent_message",
     message_id: id,
     message: {
-      kind: "agent_text",
+      kind: "agent_message",
       id,
-      text,
+      role: "agent",
+      parts: [{ kind: "text", text }],
       created_at: "2026-05-17T00:00:01Z",
     },
   };
@@ -275,12 +276,13 @@ function thoughtMessage(id: string): ChatMessage {
   return {
     cursor: `cursor_${id}`,
     identity: id,
-    message_type: "thought",
+    message_type: "agent_message",
     message_id: id,
     message: {
-      kind: "thought",
+      kind: "agent_message",
       id,
-      text: "Check the current state.",
+      role: "thought",
+      parts: [{ kind: "text", text: "Check the current state." }],
       created_at: "2026-05-17T00:00:01Z",
     },
   };

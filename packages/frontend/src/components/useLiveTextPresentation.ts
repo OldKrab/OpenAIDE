@@ -123,12 +123,12 @@ export function useLiveTextPresentation(
   const presentedItems = useMemo(() => items.map((item) => {
     const reveal = revealForMessage(reveals, item.message_id);
     if (!reveal) return item;
-    if (item.message.kind !== "agent_text" && item.message.kind !== "thought") return item;
+    if (item.message.kind !== "agent_message") return item;
     return {
       ...item,
       message: {
         ...item.message,
-        text: reveal.text.slice(0, reveal.visibleLength),
+        parts: visibleAgentParts(item.message.parts, reveal.visibleLength),
       },
     } as ChatMessage;
   }), [items, reveals]);
@@ -143,7 +143,7 @@ function latestTextMessage(items: ChatMessage[], channel: TextChannel) {
   for (let index = items.length - 1; index >= 0; index -= 1) {
     const item = items[index];
     if (!item) continue;
-    if (channel === "agent" ? item.message.kind === "agent_text" : item.message.kind === "thought") {
+    if (item.message.kind === "agent_message" && item.message.role === channel && textOf(item) !== undefined) {
       return item;
     }
   }
@@ -158,9 +158,25 @@ function textByMessageId(items: ChatMessage[]) {
 }
 
 function textOf(item: ChatMessage) {
-  return item.message.kind === "agent_text" || item.message.kind === "thought"
-    ? item.message.text
-    : undefined;
+  if (item.message.kind !== "agent_message") return undefined;
+  const text = item.message.parts
+    .filter((part) => part.kind === "text")
+    .map((part) => part.text)
+    .join("");
+  return text || undefined;
+}
+
+function visibleAgentParts(
+  parts: Extract<ChatMessage["message"], { kind: "agent_message" }>["parts"],
+  visibleLength: number,
+) {
+  let remaining = visibleLength;
+  return parts.map((part) => {
+    if (part.kind !== "text") return part;
+    const text = part.text.slice(0, Math.max(0, remaining));
+    remaining -= part.text.length;
+    return { ...part, text };
+  });
 }
 
 function signalCursors(signals: TaskLiveTextPresentation | undefined) {

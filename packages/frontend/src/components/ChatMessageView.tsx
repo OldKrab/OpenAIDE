@@ -1,6 +1,6 @@
 import { CircleAlert, ChevronRight, FileText } from "lucide-react";
 import { memo, useState } from "react";
-import type { ActivityToolDetails, AgentCommandsCatalog, AgentContent, Attachment, ChatMessage, ElicitationResponse } from "@openaide/app-shell-contracts";
+import type { ActivityToolDetails, AgentCommandsCatalog, AgentMessagePart, Attachment, ChatMessage, ElicitationResponse } from "@openaide/app-shell-contracts";
 import { AgentMarkdown, splitDataImageMarkdown } from "./AgentMarkdown";
 import { AttachmentImagePreviewLightbox, chatImagePreview, type AttachmentImagePreviewSource } from "./AttachmentImagePreview";
 import { ChatActivityView } from "./ChatActivityView";
@@ -51,27 +51,39 @@ export const ChatRow = memo(function ChatRow({
       </div>
     );
   }
-  if (body.kind === "agent_text") {
-    return <AgentTextMessage streaming={showStreamingCaret} text={body.text} />;
-  }
-  if (body.kind === "agent_content" || body.kind === "thought_content") {
+  if (body.kind === "agent_message") {
+    const text = agentMessageText(body.parts);
+    const content = (
+      <AgentMessageParts
+        muted={body.role === "thought"}
+        onOpenImage={setOpenImage}
+        parts={body.parts}
+        streaming={showStreamingCaret}
+      />
+    );
+    if (body.role === "thought") {
+      return (
+        <>
+          <details aria-busy={showStreamingCaret || undefined} className="chat-thought-block">
+            <summary>
+              <ChevronRight className="chat-thought-disclosure" size={13} aria-hidden="true" />
+              <span>Thinking</span>
+            </summary>
+            {content}
+            {text ? <MessageCopyAction text={text} /> : null}
+          </details>
+          {openImage ? <AttachmentImagePreviewLightbox image={openImage} onClose={() => setOpenImage(undefined)} /> : null}
+        </>
+      );
+    }
     return (
       <>
-        <AgentContentMessage content={body.content} muted={body.kind === "thought_content"} onOpenImage={setOpenImage} />
+        <div className="chat-agent-block" aria-busy={showStreamingCaret || undefined}>
+          {content}
+          {text ? <MessageCopyAction text={text} /> : null}
+        </div>
         {openImage ? <AttachmentImagePreviewLightbox image={openImage} onClose={() => setOpenImage(undefined)} /> : null}
       </>
-    );
-  }
-  if (body.kind === "thought") {
-    return (
-      <details aria-busy={showStreamingCaret || undefined} className="chat-thought-block">
-        <summary>
-          <ChevronRight className="chat-thought-disclosure" size={13} aria-hidden="true" />
-          <span>Thinking</span>
-        </summary>
-        <AgentMarkdown className="chat-thought" streaming={showStreamingCaret} text={body.text} />
-        <MessageCopyAction text={body.text} />
-      </details>
     );
   }
   if (body.kind === "activity") {
@@ -119,12 +131,34 @@ function UserAttachments({
   );
 }
 
+function AgentMessageParts({
+  parts,
+  streaming,
+  ...contentProps
+}: {
+  parts: AgentMessagePart[];
+  streaming: boolean;
+  muted: boolean;
+  onOpenImage: (image: AttachmentImagePreviewSource) => void;
+}) {
+  return parts.map((part, index) => part.kind === "text" ? (
+    <AgentMarkdown
+      className={contentProps.muted ? "chat-thought" : "chat-agent"}
+      key={index}
+      streaming={streaming && index === parts.length - 1}
+      text={part.text}
+    />
+  ) : (
+    <AgentContentMessage content={part} key={index} {...contentProps} />
+  ));
+}
+
 function AgentContentMessage({
   content,
   muted,
   onOpenImage,
 }: {
-  content: AgentContent;
+  content: Exclude<AgentMessagePart, { kind: "text" }>;
   muted: boolean;
   onOpenImage: (image: AttachmentImagePreviewSource) => void;
 }) {
@@ -191,13 +225,11 @@ function formatByteSize(size: number | undefined) {
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function AgentTextMessage({ streaming, text }: { streaming: boolean; text: string }) {
-  return (
-    <div className="chat-agent-block" aria-busy={streaming || undefined}>
-      <AgentMarkdown className="chat-agent" streaming={streaming} text={text} />
-      <MessageCopyAction text={text} />
-    </div>
-  );
+function agentMessageText(parts: AgentMessagePart[]) {
+  return parts
+    .filter((part): part is Extract<AgentMessagePart, { kind: "text" }> => part.kind === "text")
+    .map((part) => part.text)
+    .join("");
 }
 
 function UserMessageText({

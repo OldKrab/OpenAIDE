@@ -126,7 +126,12 @@ describe("App Server Protocol state mapping", () => {
         created_at: "2026-06-27T12:00:00.000Z",
         attachments: [{ kind: "file", label: "README.md" }],
       },
-      { kind: "agent_text", text: "world", created_at: "2026-06-27T12:00:00.000Z" },
+      {
+        kind: "agent_message",
+        role: "agent",
+        parts: [{ kind: "text", text: "world" }],
+        created_at: "2026-06-27T12:00:00.000Z",
+      },
       {
         kind: "activity",
         title: "Running tests",
@@ -287,28 +292,73 @@ describe("App Server Protocol state mapping", () => {
 
     expect(mapping.snapshot.chat.items.map((item) => item.message)).toMatchObject([
       {
-        kind: "agent_content",
-        content: {
+        kind: "agent_message",
+        role: "agent",
+        parts: [{
           kind: "image",
           media_type: "image/png",
           data_url: "data:image/png;base64,aW1hZ2U=",
           uri: "memory://diagram.png",
-        },
+        }],
       },
       {
-        kind: "agent_content",
-        content: {
+        kind: "agent_message",
+        role: "agent",
+        parts: [{
           kind: "resource",
           uri: "memory://notes.txt",
           media_type: "text/plain",
           text: "Embedded notes",
-        },
+        }],
       },
       {
-        kind: "agent_content",
-        content: { kind: "unsupported", content_type: "audio", media_type: "audio/wav" },
+        kind: "agent_message",
+        role: "agent",
+        parts: [{ kind: "unsupported", content_type: "audio", media_type: "audio/wav" }],
       },
     ]);
+  });
+
+  it("keeps every ordered part of one mixed Agent message", () => {
+    const mapping = mapProtocolTaskSnapshot(protocolSnapshot({
+      chat: {
+        hasMoreBefore: false,
+        hasMessages: true,
+        items: [{
+          messageId: "agent-mixed" as MessageId,
+          role: "agent",
+          status: "complete",
+          parts: [
+            { kind: "text", text: "Before" },
+            { kind: "resource", uri: "memory://result.txt", text: "Result" },
+            { kind: "text", text: "After" },
+            { kind: "unsupported", contentType: "audio", mediaType: "audio/wav" },
+          ],
+        }],
+      },
+    }));
+
+    expect(mapping.snapshot.chat.items[0]?.message).toEqual({
+      kind: "agent_message",
+      id: "agent-mixed",
+      role: "agent",
+      parts: [
+        { kind: "text", text: "Before" },
+        {
+          kind: "resource",
+          uri: "memory://result.txt",
+          name: undefined,
+          title: undefined,
+          description: undefined,
+          media_type: undefined,
+          size_bytes: undefined,
+          text: "Result",
+        },
+        { kind: "text", text: "After" },
+        { kind: "unsupported", content_type: "audio", media_type: "audio/wav", uri: undefined },
+      ],
+      created_at: "2026-06-27T12:00:00.000Z",
+    });
   });
 
   it("maps task status and config options conservatively", () => {

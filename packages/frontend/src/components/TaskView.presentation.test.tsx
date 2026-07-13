@@ -30,8 +30,10 @@ describe("TaskView timeline presentation", () => {
 
     const updated = snapshotWithAuthoritativeTail(true);
     const latestAgent = updated.chat.items.find((item) => item.message_id === "agent-later");
-    if (latestAgent?.message.kind !== "agent_text") throw new Error("expected latest Agent text");
-    latestAgent.message.text = "Latest update received live";
+    if (latestAgent?.message.kind !== "agent_message" || latestAgent.message.parts[0]?.kind !== "text") {
+      throw new Error("expected latest Agent text");
+    }
+    latestAgent.message.parts[0].text = "Latest update received live";
     act(() => {
       tree.update(
         <TaskView
@@ -80,8 +82,10 @@ describe("TaskView timeline presentation", () => {
 
     const updated = snapshotWithAuthoritativeTail(true);
     const latestAgent = updated.chat.items.find((item) => item.message_id === "agent-later");
-    if (latestAgent?.message.kind !== "agent_text") throw new Error("expected latest Agent text");
-    latestAgent.message.text = "Latest update received after signal";
+    if (latestAgent?.message.kind !== "agent_message" || latestAgent.message.parts[0]?.kind !== "text") {
+      throw new Error("expected latest Agent text");
+    }
+    latestAgent.message.parts[0].text = "Latest update received after signal";
     act(() => {
       tree.update(<TaskView {...taskViewProps(updated)} liveTextPresentation={signal} />);
     });
@@ -106,8 +110,10 @@ describe("TaskView timeline presentation", () => {
 
     const lateOldThought = structuredClone(initial);
     const oldThought = lateOldThought.chat.items[0];
-    if (oldThought?.message.kind !== "thought") throw new Error("expected old Thought");
-    oldThought.message.text = "Old thought arrived late";
+    if (oldThought?.message.kind !== "agent_message" || oldThought.message.parts[0]?.kind !== "text") {
+      throw new Error("expected old Thought");
+    }
+    oldThought.message.parts[0].text = "Old thought arrived late";
     act(() => {
       tree.update(
         <TaskView
@@ -124,11 +130,12 @@ describe("TaskView timeline presentation", () => {
     const liveLatest = structuredClone(lateOldThought);
     const agent = liveLatest.chat.items[1];
     const thought = liveLatest.chat.items[2];
-    if (agent?.message.kind !== "agent_text" || thought?.message.kind !== "thought") {
+    if (agent?.message.kind !== "agent_message" || agent.message.parts[0]?.kind !== "text"
+      || thought?.message.kind !== "agent_message" || thought.message.parts[0]?.kind !== "text") {
       throw new Error("expected latest Agent and Thought text");
     }
-    agent.message.text = "Agent answer live";
-    thought.message.text = "Latest thought live";
+    agent.message.parts[0].text = "Agent answer live";
+    thought.message.parts[0].text = "Latest thought live";
     act(() => {
       tree.update(
         <TaskView
@@ -430,11 +437,12 @@ function agentText(messageId: string, text: string): ChatMessage {
     cursor: messageId,
     identity: messageId,
     message_id: messageId,
-    message_type: "agent_text",
+    message_type: "agent_message",
     message: {
-      kind: "agent_text",
+      kind: "agent_message",
       id: messageId,
-      text,
+      role: "agent",
+      parts: [{ kind: "text", text }],
       created_at: "2026-07-12T00:00:00Z",
     },
   };
@@ -445,11 +453,12 @@ function thoughtText(messageId: string, text: string): ChatMessage {
     cursor: messageId,
     identity: messageId,
     message_id: messageId,
-    message_type: "thought",
+    message_type: "agent_message",
     message: {
-      kind: "thought",
+      kind: "agent_message",
       id: messageId,
-      text,
+      role: "thought",
+      parts: [{ kind: "text", text }],
       created_at: "2026-07-12T00:00:00Z",
     },
   };

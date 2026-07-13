@@ -1,7 +1,9 @@
 import type { ChatMessage } from "@openaide/app-shell-contracts";
 
 type ActivityChatMessage = ChatMessage & { message: Extract<ChatMessage["message"], { kind: "activity" }> };
-type ThoughtChatMessage = ChatMessage & { message: Extract<ChatMessage["message"], { kind: "thought" }> };
+type ThoughtChatMessage = ChatMessage & {
+  message: Extract<ChatMessage["message"], { kind: "agent_message" }> & { role: "thought" };
+};
 type ActivityRunMessage = ActivityChatMessage | ThoughtChatMessage;
 
 /** Presents each uninterrupted run of tool activity as one ordered disclosure group. */
@@ -36,8 +38,8 @@ function coalesceActivityRun(run: ActivityRunMessage[]): ChatMessage {
   const last = run.at(-1) ?? first;
   const activities = run.flatMap((item) => (item.message.kind === "activity" ? [item.message] : []));
   const steps = run.flatMap((item) =>
-    item.message.kind === "thought"
-      ? [{ kind: "thought" as const, message_id: item.message.id, text: item.message.text, streaming: false }]
+    item.message.kind === "agent_message"
+      ? [{ kind: "thought" as const, message_id: item.message.id, text: thoughtText(item.message), streaming: false }]
       : item.message.steps,
   );
   // The latest activity owns the live state; individual steps preserve failures.
@@ -72,13 +74,19 @@ function activityRunTitle(activities: Extract<ChatMessage["message"], { kind: "a
 }
 
 function isActivityRunItem(item: ChatMessage): item is ActivityRunMessage {
-  if (item.message.kind === "thought") return true;
+  if (item.message.kind === "agent_message") {
+    return item.message.role === "thought" && item.message.parts.every((part) => part.kind === "text");
+  }
   if (item.message.kind !== "activity") return false;
   // Text-only outcome Activities describe the prompt itself, not a Tool. Keeping
   // them outside the adjacent Tool run prevents limits and refusals from being
   // relabelled as generic Tool activity.
   return item.message.steps.some((step) => step.kind !== "text")
     || isTerminalInputActivity(item.message);
+}
+
+function thoughtText(message: ThoughtChatMessage["message"]) {
+  return message.parts.map((part) => part.kind === "text" ? part.text : "").join("");
 }
 
 function isCommandActivity(activity: Extract<ChatMessage["message"], { kind: "activity" }>) {

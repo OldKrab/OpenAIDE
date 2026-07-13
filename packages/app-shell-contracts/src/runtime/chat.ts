@@ -17,9 +17,7 @@ export type ChatMessage = {
 
 export type NormalizedMessage =
   | { kind: "user"; id: string; text: string; created_at: string; attachments?: Attachment[] }
-  | { kind: "agent_text"; id: string; text: string; created_at: string }
-  | { kind: "agent_content" | "thought_content"; id: string; content: AgentContent; created_at: string }
-  | { kind: "thought"; id: string; text: string; created_at: string }
+  | { kind: "agent_message"; id: string; role: AgentMessageRole; parts: AgentMessagePart[]; created_at: string }
   | { kind: "activity"; id: string; title: string; status: ActivityStatus; created_at: string; collapsed: boolean; steps: ActivityStep[] }
   | { kind: "permission"; id: string; request_id: string; app_server_request_id?: string; title: string; description?: string; scope?: string; risk?: string; tool_call: PermissionToolCall; state: PermissionState; created_at: string; options: PermissionOption[]; selected_option?: string; decision?: PermissionDecision; resolution_message?: string }
   | ElicitationMessage
@@ -34,7 +32,11 @@ export type Attachment = {
   payload?: unknown;
 };
 
-export type AgentContent =
+export type AgentMessageRole = "agent" | "thought";
+
+/** Ordered App Server-owned content for one logical ACP Agent or Thought message. */
+export type AgentMessagePart =
+  | { kind: "text"; text: string }
   | { kind: "image"; media_type: string; data_url: string; uri?: string }
   | { kind: "resource"; uri: string; name?: string; title?: string; description?: string; media_type?: string; size_bytes?: number; text?: string }
   | { kind: "unsupported"; content_type: string; media_type?: string; uri?: string };

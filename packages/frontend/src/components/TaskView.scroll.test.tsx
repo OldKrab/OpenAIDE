@@ -268,12 +268,13 @@ function snapshotWithStreamingText(taskId: string, text: string): TaskSnapshot {
   taskSnapshot.chat.items = [{
     cursor: "message-1",
     identity: "message-1",
-    message_type: "agent_text",
+    message_type: "agent_message",
     message_id: "message-1",
     message: {
-      kind: "agent_text",
+      kind: "agent_message",
       id: "agent-1",
-      text,
+      role: "agent",
+      parts: [{ kind: "text", text }],
       created_at: "2026-07-10T00:00:00Z",
     },
   }];

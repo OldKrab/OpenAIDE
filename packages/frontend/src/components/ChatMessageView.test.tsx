@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { isValidElement, type ReactElement, type ReactNode } from "react";
 import { act, create } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ActivityToolDetails, AgentContent, Attachment, ChatMessage, PermissionOption } from "@openaide/app-shell-contracts";
+import type { ActivityToolDetails, AgentMessagePart, Attachment, ChatMessage, PermissionOption } from "@openaide/app-shell-contracts";
 
 describe("ChatRow", () => {
   beforeEach(() => {
@@ -418,6 +418,39 @@ describe("ChatRow", () => {
     expect(resourceHtml).toContain("Embedded notes");
     expect(unsupportedHtml).toContain("Audio output is not previewable yet.");
     expect(unsupportedHtml).toContain("audio/wav");
+  });
+
+  it("renders every mixed Agent message part in its original order", async () => {
+    const { ChatRow } = await import("./ChatMessageView");
+    const html = renderToStaticMarkup(
+      <ChatRow
+        message={{
+          cursor: "agent-mixed",
+          identity: "agent-mixed",
+          message_id: "agent-mixed",
+          message_type: "agent_message",
+          message: {
+            kind: "agent_message",
+            id: "agent-mixed",
+            role: "agent",
+            parts: [
+              { kind: "text", text: "Before content" },
+              { kind: "resource", uri: "memory://result.txt", text: "Resource content" },
+              { kind: "text", text: "After content" },
+              { kind: "unsupported", content_type: "audio", media_type: "audio/wav" },
+            ],
+            created_at: "2026-05-23T00:00:00Z",
+          },
+        }}
+        onPermissionRespond={vi.fn()}
+        taskId="task_1"
+      />,
+    );
+
+    const orderedText = ["Before content", "result.txt", "After content", "Audio output"];
+    const positions = orderedText.map((text) => html.indexOf(text));
+    expect(positions.every((position) => position >= 0)).toBe(true);
+    expect(positions).toEqual([...positions].sort((left, right) => left - right));
   });
 
   it("renders an attachment-only user message without empty text or copy controls", async () => {
@@ -1191,27 +1224,29 @@ function agentMessage(id: string, text: string): ChatMessage {
   return {
     cursor: `cursor_${id}`,
     identity: id,
-    message_type: "agent_text",
+    message_type: "agent_message",
     message_id: id,
     message: {
-      kind: "agent_text",
+      kind: "agent_message",
       id,
-      text,
+      role: "agent",
+      parts: [{ kind: "text", text }],
       created_at: "2026-05-23T00:00:00Z",
     },
   };
 }
 
-function agentContentMessage(id: string, content: AgentContent): ChatMessage {
+function agentContentMessage(id: string, content: Exclude<AgentMessagePart, { kind: "text" }>): ChatMessage {
   return {
     cursor: `cursor_${id}`,
     identity: id,
-    message_type: "agent_content",
+    message_type: "agent_message",
     message_id: id,
     message: {
-      kind: "agent_content",
+      kind: "agent_message",
       id,
-      content,
+      role: "agent",
+      parts: [content],
       created_at: "2026-05-23T00:00:00Z",
     },
   };
@@ -1221,12 +1256,13 @@ function thoughtMessage(id: string, text: string): ChatMessage {
   return {
     cursor: `cursor_${id}`,
     identity: id,
-    message_type: "thought",
+    message_type: "thought_message",
     message_id: id,
     message: {
-      kind: "thought",
+      kind: "agent_message",
       id,
-      text,
+      role: "thought",
+      parts: [{ kind: "text", text }],
       created_at: "2026-05-23T00:00:00Z",
     },
   };

@@ -1491,7 +1491,7 @@ describe("app controller mounted lifecycle", () => {
         return { task: protocolTaskSnapshot("task_replaced", "New task", { hasMessages: false }) };
       }
       if (method === TASK_DISCARD) {
-        return { discardedTaskId: params?.taskId, tasks: { tasks: [], activeTaskId: null } };
+        return { discardedTaskId: params?.taskId };
       }
       throw new Error(method);
     });
@@ -1694,7 +1694,7 @@ describe("app controller mounted lifecycle", () => {
         return { task: protocolTaskSnapshot("task_prepared", "New task", { hasMessages: false }) };
       }
       if (method === TASK_DISCARD) {
-        return { discardedTaskId: params?.taskId, tasks: { tasks: [], activeTaskId: null } };
+        return { discardedTaskId: params?.taskId };
       }
       throw new Error(method);
     });
@@ -1742,7 +1742,7 @@ describe("app controller mounted lifecycle", () => {
         };
       }
       if (method === TASK_DISCARD) {
-        return { discardedTaskId: params?.taskId, tasks: { tasks: [], activeTaskId: null } };
+        return { discardedTaskId: params?.taskId };
       }
       if (method === ATTACHMENT_RELEASE) {
         return { outcomes: [] };

@@ -55,13 +55,10 @@ export function taskWorkingStatusLabel(
   const reversedUserIndex = [...items].reverse().findIndex((item) => item.message.kind === "user");
   const currentTurnItems = reversedUserIndex === -1 ? items : items.slice(items.length - reversedUserIndex);
   const latestWork = [...currentTurnItems].reverse().find((item) => {
-    return item.message.kind === "activity" || item.message.kind === "agent_text" || item.message.kind === "thought";
+    return item.message.kind === "activity" || item.message.kind === "agent_message";
   });
-  if (latestWork?.message.kind === "thought") {
-    return activityStepProgressLabel(latestWork.message);
-  }
-  if (latestWork?.message.kind === "agent_text") {
-    return "Writing response";
+  if (latestWork?.message.kind === "agent_message") {
+    return latestWork.message.role === "thought" ? "Thinking" : "Writing response";
   }
   if (latestWork?.message.kind === "activity") {
     // The footer tracks the newest concrete action while the folded group keeps its broader title.

@@ -13,7 +13,7 @@ import type {
   ActivityStatus,
   ActivityStep,
   ActivityToolDetails,
-  AgentContent,
+  AgentMessagePart,
   Attachment,
   ChatMessage,
   NormalizedMessage,
@@ -155,12 +155,13 @@ function mapProtocolMessage(item: ChatItem, createdAt: string): NormalizedMessag
     };
   }
 
-  const content = firstAgentContentPart(item.parts);
-  if (content) {
+  const agentParts = agentMessageParts(item.parts);
+  if (agentParts.length > 0) {
     return {
-      kind: item.role === "system" ? "thought_content" : "agent_content",
+      kind: "agent_message",
       id: item.messageId,
-      content,
+      role: item.role === "system" ? "thought" : "agent",
+      parts: agentParts,
       created_at: createdAt,
     };
   }
@@ -178,12 +179,7 @@ function mapProtocolMessage(item: ChatItem, createdAt: string): NormalizedMessag
     };
   }
 
-  return {
-    kind: item.role === "system" ? "thought" : "agent_text",
-    id: item.messageId,
-    text,
-    created_at: createdAt,
-  };
+  return interruptionMessage(item.messageId, text || "Unsupported Chat message.", createdAt, false);
 }
 
 function interruptionMessage(id: string, message: string, createdAt: string, recoverable: boolean): NormalizedMessage {
@@ -239,18 +235,19 @@ function firstActivityPart(parts: MessagePart[]) {
   return parts.find((part): part is Extract<MessagePart, { kind: "activity" }> => part.kind === "activity");
 }
 
-function firstAgentContentPart(parts: MessagePart[]): AgentContent | undefined {
-  for (const part of parts) {
+function agentMessageParts(parts: MessagePart[]): AgentMessagePart[] {
+  return parts.flatMap((part): AgentMessagePart[] => {
+    if (part.kind === "text") return [{ kind: "text", text: part.text }];
     if (part.kind === "image") {
-      return {
+      return [{
         kind: "image",
         media_type: part.mediaType,
         data_url: part.dataUrl,
         uri: part.uri ?? undefined,
-      };
+      }];
     }
     if (part.kind === "resource") {
-      return {
+      return [{
         kind: "resource",
         uri: part.uri,
         name: part.name ?? undefined,
@@ -259,18 +256,18 @@ function firstAgentContentPart(parts: MessagePart[]): AgentContent | undefined {
         media_type: part.mediaType ?? undefined,
         size_bytes: part.sizeBytes ?? undefined,
         text: part.text ?? undefined,
-      };
+      }];
     }
     if (part.kind === "unsupported") {
-      return {
+      return [{
         kind: "unsupported",
         content_type: part.contentType,
         media_type: part.mediaType ?? undefined,
         uri: part.uri ?? undefined,
-      };
+      }];
     }
-  }
-  return undefined;
+    return [];
+  });
 }
 
 function firstPermissionPart(parts: MessagePart[]) {

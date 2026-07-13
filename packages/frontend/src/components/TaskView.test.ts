@@ -80,7 +80,13 @@ function agentText(id: string): ChatMessage {
     cursor: id,
     identity: id,
     message_id: id,
-    message_type: "agent_text",
-    message: { kind: "agent_text", id, text: "Done", created_at: "2026-07-13T00:00:02Z" },
+    message_type: "agent_message",
+    message: {
+      kind: "agent_message",
+      id,
+      role: "agent",
+      parts: [{ kind: "text", text: "Done" }],
+      created_at: "2026-07-13T00:00:02Z",
+    },
   };
 }

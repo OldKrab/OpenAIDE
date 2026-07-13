@@ -10,7 +10,10 @@ describe("chatPaging", () => {
     );
 
     expect(state.olderItems.map((item) => item.message_id)).toEqual(["m1", "m2", "m3"]);
-    expect((state.olderItems[1].message as Extract<ChatMessage["message"], { kind: "agent_text" }>).text).toBe("new m2");
+    expect((state.olderItems[1].message as Extract<ChatMessage["message"], { kind: "agent_message" }>).parts[0]).toEqual({
+      kind: "text",
+      text: "new m2",
+    });
     expect(state.hasBefore).toBe(false);
     expect(state.startCursor).toBe("cursor_m1");
     expect(state.pending).toBe(false);
@@ -38,8 +41,8 @@ describe("chatPaging", () => {
 
     expect(chat.items.map((item) => item.message_id)).toEqual(["m1", "m2"]);
     expect(chat.items.map((item) => item.message)).toMatchObject([
-      { kind: "thought", id: "m1", text: "Think" },
-      { kind: "thought", id: "m2", text: "ing" },
+      { kind: "agent_message", id: "m1", role: "thought", parts: [{ kind: "text", text: "Think" }] },
+      { kind: "agent_message", id: "m2", role: "thought", parts: [{ kind: "text", text: "ing" }] },
     ]);
   });
 
@@ -55,9 +58,9 @@ describe("chatPaging", () => {
 
     expect(chat.items.map((item) => item.message_id)).toEqual(["m1", "m2", "m3"]);
     expect(chat.items.map((item) => item.message)).toMatchObject([
-      { kind: "agent_text", id: "m1", text: "Run" },
-      { kind: "agent_text", id: "m2", text: " `" },
-      { kind: "agent_text", id: "m3", text: "pwd" },
+      { kind: "agent_message", id: "m1", role: "agent", parts: [{ kind: "text", text: "Run" }] },
+      { kind: "agent_message", id: "m2", role: "agent", parts: [{ kind: "text", text: " `" }] },
+      { kind: "agent_message", id: "m3", role: "agent", parts: [{ kind: "text", text: "pwd" }] },
     ]);
   });
 
@@ -210,12 +213,13 @@ function agentMessage(id: string, text: string): ChatMessage {
   return {
     cursor: `cursor_${id}`,
     identity: id,
-    message_type: "agent_text",
+    message_type: "agent_message",
     message_id: id,
     message: {
-      kind: "agent_text",
+      kind: "agent_message",
       id,
-      text,
+      role: "agent",
+      parts: [{ kind: "text", text }],
       created_at: "2026-05-17T00:00:00Z",
     },
   };
@@ -225,12 +229,13 @@ function thoughtMessage(id: string, text: string): ChatMessage {
   return {
     cursor: `cursor_${id}`,
     identity: id,
-    message_type: "thought",
+    message_type: "agent_message",
     message_id: id,
     message: {
-      kind: "thought",
+      kind: "agent_message",
       id,
-      text,
+      role: "thought",
+      parts: [{ kind: "text", text }],
       created_at: "2026-05-17T00:00:00Z",
     },
   };
