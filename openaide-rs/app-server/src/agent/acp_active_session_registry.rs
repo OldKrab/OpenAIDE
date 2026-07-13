@@ -120,7 +120,17 @@ impl AcpActiveSessionRegistry {
 
         // Dead handles must not make resume succeed. The next explicit Send can then
         // load the Native Session through the normal session service path.
-        sessions.remove(session);
+        let removed = sessions.remove(session).is_some();
+        drop(sessions);
+        if removed {
+            crate::logging::warn(
+                "acp_dead_session_handle_evicted",
+                serde_json::json!({
+                    "agent_id": session.agent_id(),
+                    "session_id": session.session_id(),
+                }),
+            );
+        }
         None
     }
 

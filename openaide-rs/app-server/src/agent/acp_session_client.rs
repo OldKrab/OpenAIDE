@@ -158,9 +158,12 @@ impl AcpSessionClient {
         worker_stopped_error(&self.terminal_error)
     }
 
-    /// A terminal Agent-process error makes this handle unusable even if its channels remain open.
+    /// A process error or a dropped per-session worker makes this handle unusable.
+    ///
+    /// Individual session workers share an Agent process, so their receiver can disappear
+    /// without setting the process-wide terminal error.
     pub(super) fn is_running(&self) -> bool {
-        !self.has_terminal_error()
+        !self.has_terminal_error() && !self.command_tx.is_closed()
     }
 
     fn has_terminal_error(&self) -> bool {
