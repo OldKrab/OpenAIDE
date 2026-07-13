@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use super::model::{Attachment, IsolationKind, PermissionDecision};
+use super::model::{Attachment, IsolationKind};
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct TaskCreateParams {
@@ -76,14 +76,6 @@ pub struct SessionPromptParams {
 pub struct TaskDeleteParams {
     pub task_id: String,
     pub mode: DeleteMode,
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-pub struct PermissionRespondParams {
-    pub task_id: String,
-    pub request_id: String,
-    pub decision: PermissionDecision,
-    pub option_id: String,
 }
 
 #[derive(Debug, Deserialize, Serialize, Default)]

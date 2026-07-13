@@ -26,27 +26,21 @@ export function mapProtocolChatItem(item: ChatItem, createdAt: string): ChatMess
 }
 
 export function pendingRequestItems(requests: PendingRequestSnapshot[], createdAt: string): ChatMessage[] {
-  return requests
-    .filter((request) => request.scope.kind === "task")
-    .map((request) => {
-      const permission = permissionRequestParams(request);
-      if (request.kind === "permission" && permission) {
-        return permissionMessageFromPendingRequest(request, permission, createdAt);
-      }
-      if (request.kind === "question" && request.question) {
-        const messageId = `pending-${request.requestId}`;
-        return chatMessageFromProtocol(messageId, {
-          ...mapPendingProtocolQuestion(request.requestId, request.question, createdAt),
-          id: messageId,
-        });
-      }
-      return systemInterruptionItem(
-        `pending-${request.requestId}`,
-        `${request.title} needs the App Server request surface.`,
-        createdAt,
-        true,
-      );
-    });
+  return requests.flatMap((request) => {
+    if (request.scope.kind !== "task") return [];
+    const permission = permissionRequestParams(request);
+    if (request.kind === "permission" && permission) {
+      return [permissionMessageFromPendingRequest(request, permission, createdAt)];
+    }
+    if (request.kind === "question" && request.question) {
+      const messageId = `pending-${request.requestId}`;
+      return [chatMessageFromProtocol(messageId, {
+        ...mapPendingProtocolQuestion(request.requestId, request.question, createdAt),
+        id: messageId,
+      })];
+    }
+    return [];
+  });
 }
 
 function permissionRequestParams(request: PendingRequestSnapshot): PermissionRequestParams | undefined {
@@ -149,6 +143,7 @@ function mapProtocolMessage(item: ChatItem, createdAt: string): NormalizedMessag
       })),
       selected_option: permission.selectedOption ?? undefined,
       decision: permission.decision ?? undefined,
+      resolution_message: permission.resolutionMessage ?? undefined,
     };
   }
 

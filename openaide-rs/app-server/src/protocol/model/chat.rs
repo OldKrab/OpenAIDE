@@ -86,6 +86,8 @@ pub enum NormalizedMessage {
         selected_option: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         decision: Option<PermissionDecision>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        resolution_message: Option<String>,
     },
     Question {
         id: String,
@@ -100,6 +102,8 @@ pub enum NormalizedMessage {
         content: Option<BTreeMap<String, QuestionValue>>,
         #[serde(skip_serializing_if = "Option::is_none")]
         error: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        resolution_message: Option<String>,
     },
     Interruption {
         id: String,

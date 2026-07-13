@@ -187,22 +187,6 @@ export function useAppControllerBackendLifecycle({
     const serverRequestBridge = backendConnection?.serverRequests
       ? startAppServerServerRequestBridge({
           backendConnection,
-          onPermissionRequest: (requestId, message, taskId) => {
-            dispatchForCurrentReplica({
-              type: "appServerPermission:received",
-              requestId,
-              message,
-              taskId,
-            });
-          },
-          onQuestionRequest: (requestId, message, taskId) => {
-            dispatchForCurrentReplica({
-              type: "appServerQuestion:received",
-              requestId,
-              message,
-              taskId,
-            });
-          },
           postHostMessage,
         })
       : undefined;

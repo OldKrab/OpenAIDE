@@ -252,6 +252,36 @@ describe("TaskView timeline presentation", () => {
     expect(configControl.props.disabled).toBe(true);
   });
 
+  it("renders an active request after the newest durable Chat row", async () => {
+    const { TaskView } = await import("./TaskView");
+    const current = snapshotWithAuthoritativeTail(true);
+    current.active_requests = [{
+      cursor: "pending-request-1",
+      identity: "pending-request-1",
+      message_id: "pending-request-1",
+      message_type: "permission",
+      message: {
+        kind: "permission",
+        id: "pending-request-1",
+        request_id: "request-1",
+        app_server_request_id: "request-1",
+        title: "Approve final command",
+        tool_call: { id: "tool-pending", title: "Final command", kind: "execute" },
+        state: "pending",
+        created_at: "2026-07-13T00:00:04Z",
+        options: [{ id: "allow", label: "Allow", kind: "allow" }],
+      },
+    }];
+
+    let tree!: ReactTestRenderer;
+    act(() => {
+      tree = create(<TaskView {...taskViewProps(current)} />);
+    });
+
+    const rendered = JSON.stringify(tree.toJSON());
+    expect(rendered.indexOf("Final command")).toBeGreaterThan(rendered.indexOf("Latest update"));
+  });
+
   it("keeps a draft editable while the Task subscription reconnects", async () => {
     const { TaskView } = await import("./TaskView");
     let tree!: ReactTestRenderer;
@@ -306,7 +336,6 @@ describe("TaskView timeline presentation", () => {
 
 function taskViewProps(snapshot: TaskSnapshot) {
   return {
-    appServerPermissionRequests: {},
     backendReady: true,
     chatPageState: undefined,
     dispatch: vi.fn(),
@@ -389,7 +418,7 @@ function snapshotWithAuthoritativeTail(includeTail: boolean): TaskSnapshot {
       total_count: items.length,
       version: revision,
     },
-    permissions: [],
+    active_requests: [],
     send_capability: { state: "ready" },
     settings_summary: { agent_id: "codex", isolation: "local" },
     revision,

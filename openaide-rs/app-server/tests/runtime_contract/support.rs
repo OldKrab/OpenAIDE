@@ -419,48 +419,6 @@ impl AgentRuntime for MessageIdSpanningToolAgent {
     }
 }
 
-struct PermissionBoundaryTextAgent;
-
-impl AgentRuntime for PermissionBoundaryTextAgent {
-    fn start_session(&self, request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
-        Ok(AgentSession::new(
-            request.agent_id,
-            "session_permission_boundary_text",
-        ))
-    }
-
-    fn prompt(
-        &self,
-        _prompt: AgentPrompt,
-        sink: Arc<dyn AgentEventSink>,
-    ) -> Result<(), RuntimeError> {
-        for chunk in ["Need ", "approval."] {
-            sink.emit(AgentEvent::Text(chunk.to_string()))?;
-        }
-        let _outcome = sink.request_permission(AgentPermissionRequest {
-            request_id: "permission_boundary".to_string(),
-            title: "Allow follow-up".to_string(),
-            description: Some("Continue after approval.".to_string()),
-            scope: Some("workspace".to_string()),
-            risk: None,
-            tool_call: AgentToolCallRef {
-                tool_call_id: "tool_permission_boundary".to_string(),
-                title: "Allow follow-up".to_string(),
-                kind: Some("edit".to_string()),
-            },
-            options: vec![AgentPermissionOption {
-                option_id: "allow".to_string(),
-                name: "Allow".to_string(),
-                kind: AgentPermissionOptionKind::AllowOnce,
-            }],
-        })?;
-        for chunk in ["After ", "approval."] {
-            sink.emit(AgentEvent::Text(chunk.to_string()))?;
-        }
-        Ok(())
-    }
-}
-
 struct AttachmentCapturingAgent {
     prompts: Arc<Mutex<Vec<Vec<Attachment>>>>,
 }

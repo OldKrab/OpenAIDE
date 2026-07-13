@@ -1,4 +1,4 @@
-import type { ActivityToolDetails, Attachment, ChatMessage, MessagePage } from "@openaide/app-shell-contracts";
+import type { ActivityToolDetails, Attachment, MessagePage } from "@openaide/app-shell-contracts";
 import { mergePageState } from "./chatPaging";
 import { invalidateAppServerAttachments, localAttachment } from "./composerOptions";
 import type { ComposerAttachment } from "./composerOptions";
@@ -27,12 +27,8 @@ type TaskInteractionAction =
   | { type: "toolDetail:error"; taskId: string; artifactId: string; message: string }
   | { type: "permission:responding"; requestId: string }
   | { type: "permission:error"; requestId: string; message: string }
-  | { type: "appServerPermission:received"; requestId: string; message: ChatMessage; taskId?: string }
-  | { type: "appServerPermission:resolved"; requestId: string }
   | { type: "question:responding"; requestId: string }
-  | { type: "question:error"; requestId: string; message: string }
-  | { type: "appServerQuestion:received"; requestId: string; message: ChatMessage; taskId?: string }
-  | { type: "appServerQuestion:resolved"; requestId: string };
+  | { type: "question:error"; requestId: string; message: string };
 
 export function reduceTaskInteractionState(state: AppState, action: AppAction): AppState | undefined {
   if (!isTaskInteractionAction(action)) return undefined;
@@ -301,17 +297,6 @@ export function reduceTaskInteractionState(state: AppState, action: AppAction): 
           [action.requestId]: { responding: false, error: action.message },
         },
       };
-    case "appServerPermission:received":
-      return {
-        ...state,
-        appServerPermissionRequests: {
-          ...state.appServerPermissionRequests,
-          [action.requestId]: { taskId: action.taskId, message: action.message },
-        },
-      };
-    case "appServerPermission:resolved": {
-      return state;
-    }
     case "question:responding":
       return {
         ...state,
@@ -328,16 +313,6 @@ export function reduceTaskInteractionState(state: AppState, action: AppAction): 
           [action.requestId]: { responding: false, error: action.message },
         },
       };
-    case "appServerQuestion:received":
-      return {
-        ...state,
-        appServerQuestionRequests: {
-          ...state.appServerQuestionRequests,
-          [action.requestId]: { taskId: action.taskId, message: action.message },
-        },
-      };
-    case "appServerQuestion:resolved":
-      return state;
   }
 }
 
@@ -355,9 +330,5 @@ function isTaskInteractionAction(action: AppAction): action is TaskInteractionAc
     || action.type.startsWith("chatPage:")
     || action.type.startsWith("toolDetail:")
     || action.type.startsWith("permission:")
-    || action.type === "appServerPermission:received"
-    || action.type === "appServerPermission:resolved"
-    || action.type.startsWith("question:")
-    || action.type === "appServerQuestion:received"
-    || action.type === "appServerQuestion:resolved";
+    || action.type.startsWith("question:");
 }

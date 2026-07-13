@@ -131,8 +131,8 @@ describe("task working status label", () => {
     const { taskWorkingStatusLabel } = await import("./App");
 
     expect(taskWorkingStatusLabel([], "inactive", true)).toBeUndefined();
-    expect(taskWorkingStatusLabel([], "blocked", false)).toBe("Permission needed");
-    expect(taskWorkingStatusLabel([systemMessage("app-server-preparation")], "blocked", false)).toBe("Preparing task");
+    expect(taskWorkingStatusLabel([], "waiting", false)).toBe("Permission needed");
+    expect(taskWorkingStatusLabel([systemMessage("app-server-preparation")], "waiting", false)).toBe("Preparing task");
     expect(taskWorkingStatusLabel([], "inactive", false)).toBeUndefined();
   });
 

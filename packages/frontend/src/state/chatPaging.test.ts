@@ -156,7 +156,7 @@ function snapshot(items: ChatMessage[]): TaskSnapshot {
       workspace_root: "/workspace",
     },
     chat: page(items, false),
-    permissions: [],
+    active_requests: [],
     history_sync: { state: "idle", generation: 0 },
     send_capability: { state: "ready" },
     settings_summary: { agent_id: "codex", isolation: "local" },

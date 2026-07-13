@@ -1095,7 +1095,7 @@ function taskSnapshot(taskId: string, hasMessages: boolean): TaskSnapshot {
       version: 1,
     },
     history_sync: { state: "idle", generation: 0 },
-    permissions: [],
+    active_requests: [],
     settings_summary: {
       agent_id: "codex",
       isolation: "local",

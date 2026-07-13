@@ -160,7 +160,7 @@ fn protocol_task_status(status: TaskStatus) -> ProtocolTaskStatus {
         TaskStatus::Inactive => ProtocolTaskStatus::Idle,
         TaskStatus::Failed => ProtocolTaskStatus::Failed,
         TaskStatus::Completed => ProtocolTaskStatus::Completed,
-        TaskStatus::Blocked => ProtocolTaskStatus::Blocked,
+        TaskStatus::Waiting => ProtocolTaskStatus::Waiting,
     }
 }
 

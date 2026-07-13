@@ -112,6 +112,8 @@ pub enum MessagePart {
         selected_option: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         decision: Option<PermissionMessageDecision>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        resolution_message: Option<String>,
     },
     Question {
         request_id: RequestId,
@@ -124,6 +126,8 @@ pub enum MessagePart {
         content: Option<BTreeMap<String, QuestionValue>>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         error: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        resolution_message: Option<String>,
     },
 }
 

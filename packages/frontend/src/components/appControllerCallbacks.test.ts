@@ -2456,22 +2456,6 @@ describe("app controller callbacks", () => {
     expect(postHostMessage).not.toHaveBeenCalled();
   });
 
-  it("rejects legacy Agent permission responses without bridge replay", () => {
-    const dispatch = vi.fn();
-    const state = createInitialState();
-    state.snapshot = snapshot("task_1");
-
-    callbacks({ dispatch, state }).task.respondToPermission("permission_1", "allow_once", "approved");
-
-    expect(dispatch).toHaveBeenNthCalledWith(1, { type: "permission:responding", requestId: "permission_1" });
-    expect(dispatch).toHaveBeenNthCalledWith(2, {
-      type: "permission:error",
-      requestId: "permission_1",
-      message: "Permission request is no longer answerable.",
-    });
-    expect(postHostMessage).not.toHaveBeenCalled();
-  });
-
   it("answers permissions through BackendConnection when available", async () => {
     const dispatch = vi.fn();
     const respond = vi.fn();
@@ -2481,8 +2465,6 @@ describe("app controller callbacks", () => {
     callbacks({ backendConnection: { respond }, dispatch, state }).task.respondToPermission(
       "server-request-1",
       "allow_once",
-      "approved",
-      "appServer",
     );
 
     expect(dispatch).toHaveBeenNthCalledWith(1, {
@@ -2493,7 +2475,7 @@ describe("app controller callbacks", () => {
     expect(postHostMessage).not.toHaveBeenCalled();
   });
 
-  it("clears App Server permission state after an accepted response", async () => {
+  it("waits for the authoritative Task snapshot after an accepted response", async () => {
     const dispatch = vi.fn();
     const state = createInitialState();
     state.snapshot = snapshot("task_1");
@@ -2502,38 +2484,14 @@ describe("app controller callbacks", () => {
       backendConnection: { respond: vi.fn(async () => undefined) },
       dispatch,
       state,
-    }).task.respondToPermission("server-request-1", "allow_once", "approved", "appServer");
+    }).task.respondToPermission("server-request-1", "allow_once");
     await settlePromises();
 
     expect(dispatch).toHaveBeenNthCalledWith(1, {
       type: "permission:responding",
       requestId: "server-request-1",
     });
-    expect(dispatch).toHaveBeenNthCalledWith(2, {
-      type: "appServerPermission:resolved",
-      requestId: "server-request-1",
-    });
-    expect(postHostMessage).not.toHaveBeenCalled();
-  });
-
-  it("does not answer server-shaped legacy Agent permission ids through BackendConnection", () => {
-    const dispatch = vi.fn();
-    const respond = vi.fn();
-    const state = createInitialState();
-    state.snapshot = snapshot("task_1");
-
-    callbacks({ backendConnection: { respond }, dispatch, state }).task.respondToPermission(
-      "server-request-shaped-agent-id",
-      "allow_once",
-      "approved",
-    );
-
-    expect(respond).not.toHaveBeenCalled();
-    expect(dispatch).toHaveBeenNthCalledWith(2, {
-      type: "permission:error",
-      requestId: "server-request-shaped-agent-id",
-      message: "Permission request is no longer answerable.",
-    });
+    expect(dispatch).toHaveBeenCalledTimes(1);
     expect(postHostMessage).not.toHaveBeenCalled();
   });
 
@@ -2546,7 +2504,7 @@ describe("app controller callbacks", () => {
       backendConnection: { respond: () => Promise.reject(new Error("connection closed")) },
       dispatch,
       state,
-    }).task.respondToPermission("server-request-1", "allow_once", "approved", "appServer");
+    }).task.respondToPermission("server-request-1", "allow_once");
     await Promise.resolve();
 
     expect(dispatch).toHaveBeenNthCalledWith(1, {
@@ -2569,8 +2527,6 @@ describe("app controller callbacks", () => {
     callbacks({ dispatch, state }).task.respondToPermission(
       "server-request-1",
       "allow_once",
-      "approved",
-      "appServer",
     );
 
     expect(dispatch).toHaveBeenNthCalledWith(1, {
@@ -2598,7 +2554,7 @@ describe("app controller callbacks", () => {
       },
       dispatch,
       state,
-    }).task.respondToPermission("server-request-1", "allow_once", "approved", "appServer");
+    }).task.respondToPermission("server-request-1", "allow_once");
 
     expect(dispatch).toHaveBeenNthCalledWith(1, {
       type: "permission:responding",
@@ -3498,7 +3454,7 @@ describe("app controller callbacks", () => {
     task.cancel();
     task.loadChatPage("cursor_1");
     task.subscribeToolDetail("artifact_1");
-    task.respondToPermission("permission_1", "allow_once", "approved");
+    task.respondToPermission("permission_1", "allow_once");
     task.sendPrompt();
 
     expect(dispatch).not.toHaveBeenCalled();
@@ -3616,7 +3572,7 @@ function snapshot(taskId: string): TaskSnapshot {
       total_count: 0,
       version: 1,
     },
-    permissions: [],
+    active_requests: [],
     send_capability: { state: "ready" },
     settings_summary: {
       agent_id: "codex",

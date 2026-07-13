@@ -207,7 +207,6 @@ function jumpButtons(tree: ReactTestRenderer) {
 
 function taskViewProps(taskSnapshot: TaskSnapshot) {
   return {
-    appServerPermissionRequests: {},
     backendReady: true,
     chatPageState: undefined,
     dispatch: vi.fn(),
@@ -255,7 +254,7 @@ function snapshot(status: TaskSnapshot["task"]["status"], revision = 1, taskId =
       total_count: revision,
       version: revision,
     },
-    permissions: [],
+    active_requests: [],
     send_capability: { state: "ready" },
     settings_summary: { agent_id: "codex", isolation: "local" },
     revision,

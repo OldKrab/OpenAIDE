@@ -708,6 +708,10 @@ describe("ChatRow", () => {
       "Denied, Reject",
     );
     expect(renderPermission({ state: "cancelled" })).toContain("Permission request cancelled");
+    expect(renderPermission({
+      state: "cancelled",
+      resolution_message: "Task stopped while approval was pending.",
+    })).toContain("Task stopped while approval was pending.");
   });
 
   it("uses command option text instead of the generic Tool call permission placeholder", async () => {
@@ -1077,8 +1081,8 @@ describe("ChatRow", () => {
     expect(buttons[1].props.disabled).toBe(true);
     buttons[0].props.onClick(permissionActionEvent());
     buttons[2].props.onClick(permissionActionEvent());
-    expect(onRespond).toHaveBeenNthCalledWith(1, "request_p1", "allow_once", "approved", "agent");
-    expect(onRespond).toHaveBeenNthCalledWith(2, "request_p1", "reject", "denied", "agent");
+    expect(onRespond).toHaveBeenNthCalledWith(1, "request_p1", "allow_once");
+    expect(onRespond).toHaveBeenNthCalledWith(2, "request_p1", "reject");
 
     const appServerPermission = {
       ...permission,
@@ -1086,7 +1090,7 @@ describe("ChatRow", () => {
     };
     findElements(ChatPermissionCard({ permission: appServerPermission, onRespond }), (candidate) => candidate.type === "button")[0]
       .props.onClick(permissionActionEvent());
-    expect(onRespond).toHaveBeenLastCalledWith("server-request-1", "allow_once", "approved", "appServer");
+    expect(onRespond).toHaveBeenLastCalledWith("server-request-1", "allow_once");
 
     const respondingElement = ChatPermissionCard({
       permission: permissionMessage("p1", "mkdir archive", [{ id: "allow_once", label: "Allow once", kind: "allow" }]).message as Extract<
@@ -1133,7 +1137,7 @@ describe("ChatRow", () => {
       role: "status",
     });
     expect(focus).toHaveBeenCalledWith({ preventScroll: true });
-    expect(onRespond).toHaveBeenCalledWith("request_p1", "allow_once", "approved", "agent");
+    expect(onRespond).toHaveBeenCalledWith("request_p1", "allow_once");
   });
 });
 

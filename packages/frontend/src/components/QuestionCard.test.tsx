@@ -91,6 +91,16 @@ describe("QuestionCard", () => {
     );
     expect(cancelled).toContain("Question closed");
     expect(cancelled).toContain("Closed without response");
+    expect(renderToStaticMarkup(
+      <QuestionCard
+        elicitation={{
+          ...pendingQuestion(),
+          state: "cancelled",
+          resolution_message: "Task stopped while a question was pending.",
+        }}
+        onRespond={vi.fn()}
+      />,
+    )).toContain("Task stopped while a question was pending.");
     expect(failed).toContain("Question unavailable");
   });
 });

@@ -11,8 +11,8 @@ use crate::protocol::model::{
 };
 use crate::protocol::params::{
     AgentAuthenticateParams, AgentListSessionsParams, AgentProbeParams, ChatPageParams,
-    ChatTailParams, PermissionRespondParams, SessionPromptParams, TaskCreateParams,
-    TaskDeleteParams, TaskIdParams, TaskListParams, TaskSnapshotParams,
+    ChatTailParams, SessionPromptParams, TaskCreateParams, TaskDeleteParams, TaskIdParams,
+    TaskListParams, TaskSnapshotParams,
 };
 use crate::protocol::results::TaskListResult;
 use crate::storage::Store;
@@ -177,13 +177,6 @@ impl TaskService {
 
     pub fn cancel(&self, params: TaskIdParams) -> Result<TaskSnapshot, RuntimeError> {
         self.turn_lifecycle().cancel(params)
-    }
-
-    pub fn respond_permission(
-        &self,
-        params: PermissionRespondParams,
-    ) -> Result<TaskSnapshot, RuntimeError> {
-        self.turn_lifecycle().respond_permission(params)
     }
 
     pub fn mark_read(&self, params: TaskIdParams) -> Result<TaskSnapshot, RuntimeError> {

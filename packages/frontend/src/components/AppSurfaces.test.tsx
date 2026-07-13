@@ -912,7 +912,7 @@ function snapshot(taskId: string, hasMessages = true): TaskSnapshot {
       total_count: hasMessages ? 1 : 0,
       version: 1,
     },
-    permissions: [],
+    active_requests: [],
     history_sync: { state: "idle", generation: 0 },
     send_capability: { state: "ready" },
     revision: 1,

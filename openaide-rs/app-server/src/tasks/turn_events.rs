@@ -11,7 +11,7 @@ use crate::agent::events::{AgentEvent, AgentPermissionOutcome, AgentPermissionRe
 use crate::agent::normalizer::normalize_event;
 use crate::agent::{AgentEventSink, TurnCancellation};
 use crate::protocol::errors::RuntimeError;
-use crate::protocol::model::{NormalizedMessage, TaskStatus};
+use crate::protocol::model::NormalizedMessage;
 use crate::server_requests::ServerRequestRuntime;
 use crate::snapshots::task_snapshot::{project_chat_item, project_tool_details};
 use crate::task_events::{CommittedTaskDelta, ToolDetailUpdate};
@@ -49,35 +49,6 @@ pub(crate) struct TaskEventSink {
 }
 
 impl TaskEventSink {
-    fn append_agent_message(
-        &self,
-        message: NormalizedMessage,
-        now: &str,
-        status: Option<TaskStatus>,
-    ) -> Result<(), RuntimeError> {
-        self.mutations.commit_existing_task(
-            &self.task_id,
-            TaskCommitOptions {
-                refresh_message_history: true,
-                response_snapshot_tail_limit: None,
-            },
-            |ctx| {
-                if ctx.task().active_turn_id.as_deref() != Some(self.turn_id.as_str())
-                    || self.cancellation.is_cancelled()
-                {
-                    return Ok(TaskMutationResult::Unchanged);
-                }
-                ctx.append_message(message)?;
-                if let Some(status) = status {
-                    ctx.task_mut().status = status;
-                }
-                ctx.task_mut().updated_at = now.to_string();
-                Ok(TaskMutationResult::Changed)
-            },
-        )?;
-        Ok(())
-    }
-
     pub(crate) fn with_session_sink(
         mutations: TaskMutations,
         task_id: String,

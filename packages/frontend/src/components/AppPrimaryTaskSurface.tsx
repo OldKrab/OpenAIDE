@@ -93,8 +93,6 @@ export function AppPrimaryTaskSurface({ controller, focusRequestKey, model }: Ap
         onRestoreTask={callbacks.navigation.restoreTask}
         onSelectConfigOption={callbacks.task.selectConfigOption}
         onSendPrompt={callbacks.task.sendPrompt}
-        appServerPermissionRequests={state.appServerPermissionRequests}
-        appServerQuestionRequests={state.appServerQuestionRequests}
         permissionResponses={state.permissionResponses}
         liveTextPresentation={state.taskLiveTextPresentation[renderableTaskSnapshot.task.task_id]}
         questionResponses={state.questionResponses}

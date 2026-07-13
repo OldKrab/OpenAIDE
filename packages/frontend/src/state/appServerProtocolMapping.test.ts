@@ -23,13 +23,13 @@ describe("App Server Protocol state mapping", () => {
       activeTaskId: "task-1" as TaskId,
       tasks: [
         protocolSummary({ taskId: "task-1" as TaskId, status: "running" }),
-        protocolSummary({ taskId: "task-2" as TaskId, status: "blocked", unread: true }),
+        protocolSummary({ taskId: "task-2" as TaskId, status: "waiting", unread: true }),
       ],
     }, mappingContext())).toMatchObject({
       activeTaskId: "task-1",
       tasks: [
         { task_id: "task-1", status: "active", agent_id: "codex", agent_name: "Codex", workspace_root: "" },
-        { task_id: "task-2", status: "blocked", unread: true },
+        { task_id: "task-2", status: "waiting", unread: true },
       ],
       warnings: [],
       requiresNativeSurface: false,
@@ -354,7 +354,7 @@ describe("App Server Protocol state mapping", () => {
       },
     }));
 
-    expect(mapping.snapshot.chat.items).toEqual([]);
+    expect(mapping.snapshot.chat.items.map((item) => item.message.kind)).not.toContain("permission");
     expect(mapping.snapshot.task.status).toBe("active");
     expect(mapping.snapshot.send_capability).toEqual({
       state: "loading",
@@ -384,17 +384,12 @@ describe("App Server Protocol state mapping", () => {
       ],
     }));
 
-    expect(mapping.snapshot.task.status).toBe("blocked");
+    expect(mapping.snapshot.task.status).toBe("waiting");
     expect(mapping.snapshot.chat.items.map((item) => item.message)).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           kind: "interruption",
           message: "Sign in",
-          recoverable: true,
-        }),
-        expect.objectContaining({
-          kind: "interruption",
-          message: "Allow command? needs the App Server request surface.",
           recoverable: true,
         }),
         expect.objectContaining({
@@ -405,6 +400,7 @@ describe("App Server Protocol state mapping", () => {
       ]),
     );
     expect(mapping.snapshot.chat.items.map((item) => item.message.kind)).not.toContain("permission");
+    expect(mapping.snapshot.active_requests).toEqual([]);
     expect(mapping.warnings).toEqual(
       expect.arrayContaining([
         { kind: "pendingRequestsNeedNativeSurface", requestIds: ["request-1"] },
@@ -440,7 +436,7 @@ describe("App Server Protocol state mapping", () => {
       ],
     }));
 
-    expect(mapping.snapshot.chat.items.map((item) => item.message)).toEqual(
+    expect(mapping.snapshot.active_requests.map((item) => item.message)).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           kind: "permission",
@@ -459,6 +455,7 @@ describe("App Server Protocol state mapping", () => {
         }),
       ]),
     );
+    expect(mapping.snapshot.chat.items.map((item) => item.message.kind)).not.toContain("permission");
     expect(mapping.snapshot.chat.items.map((item) => item.message.kind)).not.toContain("interruption");
     expect(mapping.warnings).not.toEqual(
       expect.arrayContaining([{ kind: "pendingRequestsNeedNativeSurface", requestIds: ["request-1"] }]),
@@ -543,17 +540,6 @@ describe("App Server Protocol state mapping", () => {
             action: "submit",
             content: { scope: "form" },
           }],
-        }, {
-          messageId: "question-pending-message" as MessageId,
-          role: "system",
-          status: "complete",
-          parts: [{
-            kind: "question",
-            requestId: "question-pending" as RequestId,
-            message: "Choose a scope.",
-            fields: [{ kind: "string", key: "name", title: "Name", required: true }],
-            state: "pending",
-          }],
         }],
       },
     }));
@@ -565,17 +551,19 @@ describe("App Server Protocol state mapping", () => {
         state: "resolved",
         answers: [{ field_id: "scope", label: "Scope", value: "Form only" }],
       }),
+    ]));
+    expect(mapping.snapshot.active_requests.map((item) => item.message)).toEqual([
       expect.objectContaining({
         kind: "elicitation",
         request_id: "question-pending",
         app_server_request_id: "question-pending",
         state: "pending",
       }),
-    ]));
+    ]);
     expect(mapping.warnings).not.toEqual(
       expect.arrayContaining([{ kind: "pendingRequestsNeedNativeSurface", requestIds: ["question-pending"] }]),
     );
-    expect(mapping.snapshot.chat.items.filter((item) => (
+    expect(mapping.snapshot.active_requests.filter((item) => (
       item.message.kind === "elicitation" && item.message.request_id === "question-pending"
     ))).toHaveLength(1);
   });

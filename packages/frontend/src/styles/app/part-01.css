@@ -100,7 +100,7 @@
   color: var(--oa-focus);
 }
 
-.task-header-status.blocked {
+.task-header-status.waiting {
   color: var(--oa-warning);
 }
 

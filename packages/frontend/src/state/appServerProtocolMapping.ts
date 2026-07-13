@@ -77,20 +77,9 @@ export function mapProtocolTaskSnapshot(
   );
   const task = mappedTask.task;
   const items = snapshot.chat.items.map((item) => mapProtocolChatItem(item, task.updated_at));
-  const representedQuestionRequestIds = new Set(items.flatMap((item) => (
-    item.message.kind === "elicitation"
-      ? [item.message.app_server_request_id ?? item.message.request_id]
-      : []
-  )));
-  const pendingRequests = (snapshot.pendingRequests ?? []).filter((request) => (
-    request.kind !== "question" || !representedQuestionRequestIds.has(request.requestId)
-  ));
   const extraItems = [
     ...preparationItems(snapshot.preparation, task.updated_at),
     ...sendCapabilityItems(snapshot, task.updated_at),
-    // A durable Question is authoritative once it reaches Chat; its pending request only carries
-    // the response channel and must not create a second visible row.
-    ...pendingRequestItems(pendingRequests, task.updated_at),
     ...recoveryItems(snapshot.recovery, task.updated_at),
   ];
   const allItems = [...items, ...extraItems];
@@ -114,7 +103,7 @@ export function mapProtocolTaskSnapshot(
         start_cursor: snapshot.chat.startCursor ?? allItems[0]?.cursor,
         end_cursor: snapshot.chat.endCursor ?? allItems.at(-1)?.cursor,
       },
-      permissions: [],
+      active_requests: pendingRequestItems(snapshot.pendingRequests ?? [], task.updated_at),
       settings_summary: {
         agent_id: task.agent_id,
         isolation: DEFAULT_LOCAL_ISOLATION,
@@ -251,10 +240,10 @@ function taskWithCapabilityStatus(task: TaskSummary, snapshot: ProtocolTaskSnaps
     return { ...task, status: "active" };
   }
   if (snapshot.preparation.kind === "blocked" || snapshot.preparation.kind === "failed") {
-    return { ...task, status: snapshot.preparation.kind === "failed" ? "failed" : "blocked" };
+    return { ...task, status: snapshot.preparation.kind === "failed" ? "failed" : "waiting" };
   }
   if (sendCapabilityBlockedByActiveTurn(snapshot) || sendCapabilityBlockedByTaskPreparation(snapshot)) return task;
-  if (snapshot.sendCapability.state !== "ready") return { ...task, status: "blocked" };
+  if (snapshot.sendCapability.state !== "ready") return { ...task, status: "waiting" };
   return task;
 }
 
@@ -264,8 +253,8 @@ function taskSummaryStatusFromProtocol(status: ProtocolTaskStatus): TaskSummary[
     case "starting":
     case "preparing":
       return "active";
-    case "blocked":
-      return "blocked";
+    case "waiting":
+      return "waiting";
     case "failed":
     case "interrupted":
       return "failed";

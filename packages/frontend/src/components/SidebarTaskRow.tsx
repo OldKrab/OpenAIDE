@@ -127,7 +127,7 @@ function TaskStateOrAge({ status, timestamp, unread }: { status: TaskStatus; tim
       </span>
     );
   }
-  if (status === "blocked") {
+  if (status === "waiting") {
     const label = unread ? "Waiting, unread" : "Waiting";
     return (
       <span aria-label={label} className="task-trailing-indicator" role="img" title={label}>

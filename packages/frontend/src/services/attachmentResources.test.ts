@@ -312,7 +312,7 @@ function taskSnapshot(taskId: string, hasMessages: boolean): NonNullable<AppStat
       total_count: 0,
       version: 1,
     },
-    permissions: [],
+    active_requests: [],
     send_capability: { state: "ready" },
     settings_summary: { agent_id: "codex", isolation: "local", config_options: {} },
     revision: 1,

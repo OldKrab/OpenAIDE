@@ -1,4 +1,4 @@
-export type TaskStatus = "active" | "inactive" | "failed" | "completed" | "blocked";
+export type TaskStatus = "active" | "inactive" | "failed" | "completed" | "waiting";
 export type IsolationKind = "local" | "git_worktree" | "docker";
 export type ActivityStatus = "running" | "completed" | "error";
 export type PermissionState = "pending" | "responding" | "resolved" | "cancelled";

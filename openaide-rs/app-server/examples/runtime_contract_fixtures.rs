@@ -16,10 +16,9 @@ use openaide_app_server::protocol::model::{
 use openaide_app_server::protocol::notifications::RuntimeNotification;
 use openaide_app_server::protocol::params::{
     AgentAuthenticateParams, AgentListSessionsParams, AgentProbeParams, ChatPageParams,
-    ChatTailParams, DeleteMode, PermissionRespondParams, RuntimeAcpTraceSettingsPatch,
-    RuntimeDeveloperSettingsPatch, RuntimeUpdateSettingsParams, SessionPromptParams,
-    TaskCreateMode, TaskCreateParams, TaskDeleteParams, TaskIdParams, TaskListParams,
-    TaskSnapshotParams,
+    ChatTailParams, DeleteMode, RuntimeAcpTraceSettingsPatch, RuntimeDeveloperSettingsPatch,
+    RuntimeUpdateSettingsParams, SessionPromptParams, TaskCreateMode, TaskCreateParams,
+    TaskDeleteParams, TaskIdParams, TaskListParams, TaskSnapshotParams,
 };
 use openaide_app_server::protocol::results::{HealthResult, TaskListResult};
 use openaide_app_server::storage::records::TaskPreparationRecord;
@@ -93,6 +92,7 @@ fn main() {
                 }],
                 selected_option: Some("allow_once".to_string()),
                 decision: Some(PermissionDecision::Approved),
+                resolution_message: None,
             }),
             chat_message(NormalizedMessage::Interruption {
                 id: "interrupt_1".to_string(),
@@ -154,12 +154,6 @@ fn main() {
                 message_id: Some("client_msg_1".to_string()),
             }),
             "task_delete": to_value(TaskDeleteParams { task_id: "task_1".to_string(), mode: DeleteMode::Delete }),
-            "permission_respond": to_value(PermissionRespondParams {
-                task_id: "task_1".to_string(),
-                request_id: "request_1".to_string(),
-                decision: PermissionDecision::Denied,
-                option_id: "deny_once".to_string(),
-            }),
             "runtime_update_settings": to_value(RuntimeUpdateSettingsParams {
                 developer: RuntimeDeveloperSettingsPatch {
                     acp_trace: RuntimeAcpTraceSettingsPatch { enabled: Some(true) },
@@ -266,7 +260,7 @@ fn task_summary() -> TaskSummary {
             "Update docs",
             openaide_app_server::storage::records::TaskTitleSource::User,
         ),
-        status: TaskStatus::Blocked,
+        status: TaskStatus::Waiting,
         task_version: 4,
         message_history_version: 6,
         unread: true,

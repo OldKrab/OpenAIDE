@@ -220,7 +220,7 @@ pub(super) fn send_capability_for_task(
             state: TaskSendCapabilityState::Ready,
             blockers: Vec::new(),
         },
-        LegacyTaskStatus::Starting | LegacyTaskStatus::Active | LegacyTaskStatus::Blocked => {
+        LegacyTaskStatus::Starting | LegacyTaskStatus::Active | LegacyTaskStatus::Waiting => {
             TaskSendCapabilitySnapshot {
                 state: TaskSendCapabilityState::Blocked,
                 blockers: vec![TaskSendBlocker {

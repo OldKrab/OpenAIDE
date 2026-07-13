@@ -3113,7 +3113,7 @@ fn send_rejects_a_second_prompt_while_active_turn_is_blocked_on_permission() {
     wait_until(|| agent.prompts.load(Ordering::SeqCst) == 1);
 
     let mut blocked = store.read_task("task-existing").unwrap();
-    blocked.status = TaskStatus::Blocked;
+    blocked.status = TaskStatus::Waiting;
     store.write_task(&blocked).unwrap();
     let blocked_revision = store.read_task("task-existing").unwrap().revision;
 
@@ -3128,7 +3128,7 @@ fn send_rejects_a_second_prompt_while_active_turn_is_blocked_on_permission() {
     assert_eq!(error.code, ProtocolErrorCode::Conflict);
     assert_eq!(agent.prompts.load(Ordering::SeqCst), 1);
     let record = store.read_task("task-existing").unwrap();
-    assert_eq!(record.status, TaskStatus::Blocked);
+    assert_eq!(record.status, TaskStatus::Waiting);
     assert_eq!(
         record.active_turn_id.as_deref(),
         Some(first.turn_id.as_str())

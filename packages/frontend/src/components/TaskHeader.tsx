@@ -5,7 +5,7 @@ import { workspaceLabel } from "./taskSurfaceHelpers";
 
 const STATUS_PRESENTATION = {
   active: { label: "Running", Icon: LoaderCircle },
-  blocked: { label: "Needs attention", Icon: CircleAlert },
+  waiting: { label: "Waiting", Icon: CircleAlert },
   failed: { label: "Failed", Icon: CircleX },
   completed: { label: "Completed", Icon: CircleCheck },
   inactive: { label: "Ready", Icon: Circle },

@@ -1,4 +1,4 @@
-import type { MessagePage, NormalizedMessage } from "./chat.js";
+import type { ChatMessage, MessagePage } from "./chat.js";
 import type { AgentCommandsCatalog, ConfigOptionsCatalog } from "./agent.js";
 import type { IsolationKind, TaskStatus } from "./primitives.js";
 
@@ -25,7 +25,8 @@ export type TaskSnapshot = {
   lifecycle: "new" | "visible";
   task: TaskSummary;
   chat: MessagePage;
-  permissions: NormalizedMessage[];
+  /** Active App Server requests render after durable Chat and never enter history. */
+  active_requests: ChatMessage[];
   settings_summary: {
     agent_id: string;
     isolation: IsolationKind;

@@ -121,6 +121,7 @@ pub fn normalize_events(events: Vec<AgentEvent>, created_at: &str) -> Vec<Normal
                     .collect(),
                 selected_option: None,
                 decision: None,
+                resolution_message: None,
             }),
             AgentEvent::ConfigOptionsChanged(_) | AgentEvent::CommandsChanged(_) => None,
         })

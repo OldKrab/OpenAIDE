@@ -183,7 +183,7 @@ fn repeated_identical_session_catalogs_do_not_churn_task_revision() {
 }
 
 #[test]
-fn question_without_a_capable_responder_is_cancelled_without_blocking_the_task() {
+fn question_waits_for_a_late_responder() {
     let (_dir, store, mutations, server_requests) = test_runtime();
     store.write_task(&running_task("task_1")).unwrap();
     let sink = TaskSessionEventSink::new(
@@ -193,18 +193,88 @@ fn question_without_a_capable_responder_is_cancelled_without_blocking_the_task()
         server_requests.clone(),
     );
 
-    let response = sink
-        .request_question(question_form(), TurnCancellation::new())
-        .unwrap();
+    let thread =
+        std::thread::spawn(move || sink.request_question(question_form(), TurnCancellation::new()));
+    while server_requests.pending_count() == 0 {
+        std::thread::yield_now();
+    }
+    while store.read_task("task_1").unwrap().status != TaskStatus::Waiting {
+        std::thread::yield_now();
+    }
+    assert_eq!(
+        store.read_task("task_1").unwrap().status,
+        TaskStatus::Waiting
+    );
+    register_question_responder(&server_requests, "task_1");
+    let request = server_requests.pending_for_task(&TaskId::from("task_1"))[0].clone();
+    assert!(matches!(
+        server_requests.handle_response_from_scopes(
+            ClientInstanceId::from("client-1"),
+            request.request_id,
+            ServerRequestAnswer::Result(
+                serde_json::to_value(QuestionRequestResponse::Cancel).unwrap(),
+            ),
+            &[ResponderScope::Task(TaskId::from("task_1"))],
+            AppServerTime(1),
+        ),
+        crate::server_requests::ResponseOutcome::Accepted { .. }
+    ));
+    assert_eq!(
+        thread.join().unwrap().unwrap(),
+        QuestionRequestResponse::Cancel
+    );
+}
 
-    assert_eq!(response, QuestionRequestResponse::Cancel);
+#[test]
+fn resolving_one_of_two_questions_keeps_task_waiting_for_the_other() {
+    let (_dir, store, mutations, server_requests) = test_runtime();
+    register_question_responder(&server_requests, "task_1");
+    store.write_task(&running_task("task_1")).unwrap();
+    let sink = Arc::new(TaskSessionEventSink::new(
+        mutations,
+        "task_1".to_string(),
+        "session_1".to_string(),
+        server_requests.clone(),
+    ));
+
+    let first_sink = Arc::clone(&sink);
+    let first = std::thread::spawn(move || {
+        first_sink.request_question(question_form(), TurnCancellation::new())
+    });
+    while server_requests.pending_count() != 1 {
+        std::thread::yield_now();
+    }
+    let second_sink = Arc::clone(&sink);
+    let second = std::thread::spawn(move || {
+        second_sink.request_question(question_form(), TurnCancellation::new())
+    });
+    while server_requests.pending_count() != 2 {
+        std::thread::yield_now();
+    }
+
+    let task_id = TaskId::from("task_1");
+    let requests = server_requests.pending_for_task(&task_id);
+    answer_question(&server_requests, &task_id, requests[0].request_id.clone());
+    assert_eq!(
+        first.join().unwrap().unwrap(),
+        QuestionRequestResponse::Cancel
+    );
+    assert_eq!(
+        store.read_task("task_1").unwrap().status,
+        TaskStatus::Waiting
+    );
+
+    let remaining = server_requests.pending_for_task(&task_id);
+    assert_eq!(remaining.len(), 1);
+    answer_question(&server_requests, &task_id, remaining[0].request_id.clone());
+    assert_eq!(
+        second.join().unwrap().unwrap(),
+        QuestionRequestResponse::Cancel
+    );
     assert_eq!(
         store.read_task("task_1").unwrap().status,
         TaskStatus::Active
     );
-    assert!(server_requests
-        .pending_for_task(&TaskId::from("task_1"))
-        .is_empty());
 }
 
 #[test]
@@ -226,6 +296,10 @@ fn session_question_round_trips_and_persists_submitted_history() {
     {
         std::thread::yield_now();
     }
+    while store.read_task("task_1").unwrap().status != TaskStatus::Waiting {
+        std::thread::yield_now();
+    }
+    assert!(store.read_messages("task_1").unwrap().is_empty());
     let request = server_requests.pending_for_task(&TaskId::from("task_1"))[0].clone();
     let result = serde_json::to_value(QuestionRequestResponse::Submit {
         content: BTreeMap::from([(
@@ -273,6 +347,10 @@ fn withdrawing_one_question_closes_only_its_own_waiter() {
     while server_requests.pending_count() == 0 {
         std::thread::yield_now();
     }
+    while store.read_task("task_1").unwrap().status != TaskStatus::Waiting {
+        std::thread::yield_now();
+    }
+    assert!(store.read_messages("task_1").unwrap().is_empty());
     cancellation.cancel();
 
     assert_eq!(
@@ -281,12 +359,110 @@ fn withdrawing_one_question_closes_only_its_own_waiter() {
     );
     let messages = store.read_messages("task_1").unwrap();
     assert!(messages.iter().any(|stored| matches!(
-        stored.chat.message,
+        &stored.chat.message,
         NormalizedMessage::Question {
             state: crate::protocol::model::QuestionState::Cancelled,
+            resolution_message: Some(message),
             ..
-        }
+        } if message == "Task stopped while a question was pending."
     )));
+}
+
+#[test]
+fn permission_is_transient_until_the_server_request_resolves() {
+    let (_dir, store, mutations, server_requests) = test_runtime();
+    register_permission_responder(&server_requests, "task_1");
+    store.write_task(&running_task("task_1")).unwrap();
+    let sink = TaskEventSink::new(
+        mutations,
+        "task_1".to_string(),
+        "turn_1".to_string(),
+        server_requests.clone(),
+        TurnCancellation::new(),
+    );
+
+    let thread =
+        std::thread::spawn(move || sink.request_permission(permission_request("permission_1")));
+    while server_requests.pending_count() == 0 {
+        std::thread::yield_now();
+    }
+    while store.read_task("task_1").unwrap().status != TaskStatus::Waiting {
+        std::thread::yield_now();
+    }
+    assert!(store.read_messages("task_1").unwrap().is_empty());
+
+    let request = server_requests.pending_for_task(&TaskId::from("task_1"))[0].clone();
+    assert!(matches!(
+        server_requests.handle_response_from_scopes(
+            ClientInstanceId::from("client-1"),
+            request.request_id,
+            ServerRequestAnswer::Result(serde_json::json!({ "optionId": "allow" })),
+            &[ResponderScope::Task(TaskId::from("task_1"))],
+            AppServerTime(1),
+        ),
+        crate::server_requests::ResponseOutcome::Accepted { .. }
+    ));
+    assert!(matches!(
+        thread.join().unwrap().unwrap(),
+        crate::agent::events::AgentPermissionOutcome::Selected { option_id } if option_id == "allow"
+    ));
+
+    let messages = store.read_messages("task_1").unwrap();
+    assert_eq!(messages.len(), 1);
+    assert!(matches!(
+        &messages[0].chat.message,
+        NormalizedMessage::Permission {
+            app_server_request_id: Some(server_request_id),
+            state: crate::protocol::model::PermissionState::Resolved,
+            selected_option: Some(option_id),
+            ..
+        } if server_request_id == "server-request-1" && option_id == "allow"
+    ));
+}
+
+#[test]
+fn cancelling_a_waiting_permission_persists_one_cancelled_resolution() {
+    let (_dir, store, mutations, server_requests) = test_runtime();
+    register_permission_responder(&server_requests, "task_1");
+    store.write_task(&running_task("task_1")).unwrap();
+    let cancellation = TurnCancellation::new();
+    let sink = TaskEventSink::new(
+        mutations,
+        "task_1".to_string(),
+        "turn_1".to_string(),
+        server_requests.clone(),
+        cancellation.clone(),
+    );
+
+    let thread =
+        std::thread::spawn(move || sink.request_permission(permission_request("permission_1")));
+    while server_requests.pending_count() == 0 {
+        std::thread::yield_now();
+    }
+    while store.read_task("task_1").unwrap().status != TaskStatus::Waiting {
+        std::thread::yield_now();
+    }
+    assert!(store.read_messages("task_1").unwrap().is_empty());
+    cancellation.cancel();
+
+    assert!(matches!(
+        thread.join().unwrap().unwrap(),
+        crate::agent::events::AgentPermissionOutcome::Cancelled
+    ));
+    let messages = store.read_messages("task_1").unwrap();
+    assert_eq!(messages.len(), 1);
+    assert!(matches!(
+        &messages[0].chat.message,
+        NormalizedMessage::Permission {
+            app_server_request_id: Some(server_request_id),
+            state: crate::protocol::model::PermissionState::Cancelled,
+            selected_option: None,
+            decision: None,
+            resolution_message: Some(message),
+            ..
+        } if server_request_id == "server-request-1"
+            && message == "Task stopped while approval was pending."
+    ));
 }
 
 fn question_form() -> QuestionRequestParams {
@@ -333,8 +509,42 @@ fn register_permission_responder(server_requests: &ServerRequestRuntime, task_id
     );
 }
 
+fn answer_permission(server_requests: &ServerRequestRuntime, task_id: &str, option_id: &str) {
+    let task_id = TaskId::from(task_id);
+    let request = server_requests.pending_for_task(&task_id)[0].clone();
+    assert!(matches!(
+        server_requests.handle_response_from_scopes(
+            ClientInstanceId::from("client-1"),
+            request.request_id,
+            ServerRequestAnswer::Result(serde_json::json!({ "optionId": option_id })),
+            &[ResponderScope::Task(task_id)],
+            AppServerTime(1),
+        ),
+        crate::server_requests::ResponseOutcome::Accepted { .. }
+    ));
+}
+
+fn answer_question(
+    server_requests: &ServerRequestRuntime,
+    task_id: &TaskId,
+    request_id: openaide_app_server_protocol::ids::RequestId,
+) {
+    assert!(matches!(
+        server_requests.handle_response_from_scopes(
+            ClientInstanceId::from("client-1"),
+            request_id,
+            ServerRequestAnswer::Result(
+                serde_json::to_value(QuestionRequestResponse::Cancel).unwrap(),
+            ),
+            &[ResponderScope::Task(task_id.clone())],
+            AppServerTime(1),
+        ),
+        crate::server_requests::ResponseOutcome::Accepted { .. }
+    ));
+}
+
 #[test]
-fn permission_without_a_capable_responder_is_cancelled_without_blocking_the_task() {
+fn permission_waits_for_a_late_responder() {
     let (_dir, store, mutations, server_requests) = test_runtime();
     store.write_task(&running_task("task_1")).unwrap();
     let sink = TaskEventSink::new(
@@ -345,19 +555,24 @@ fn permission_without_a_capable_responder_is_cancelled_without_blocking_the_task
         TurnCancellation::new(),
     );
 
-    let outcome = sink
-        .request_permission(permission_request("permission_1"))
-        .unwrap();
-
-    assert!(matches!(
-        outcome,
-        crate::agent::events::AgentPermissionOutcome::Cancelled
-    ));
+    let thread =
+        std::thread::spawn(move || sink.request_permission(permission_request("permission_1")));
+    while server_requests.pending_count() == 0 {
+        std::thread::yield_now();
+    }
+    while store.read_task("task_1").unwrap().status != TaskStatus::Waiting {
+        std::thread::yield_now();
+    }
     assert_eq!(
         store.read_task("task_1").unwrap().status,
-        TaskStatus::Active
+        TaskStatus::Waiting
     );
-    assert_eq!(server_requests.pending_count(), 0);
+    register_permission_responder(&server_requests, "task_1");
+    answer_permission(&server_requests, "task_1", "allow");
+    assert!(matches!(
+        thread.join().unwrap().unwrap(),
+        crate::agent::events::AgentPermissionOutcome::Selected { option_id } if option_id == "allow"
+    ));
 }
 
 #[test]
@@ -703,13 +918,7 @@ fn permission_request_splits_active_agent_text_run() {
     while server_requests.pending_count() == 0 {
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
-    server_requests
-        .route_agent_permission_response(
-            "permission_1",
-            "allow".to_string(),
-            |_| -> Result<(), crate::protocol::errors::RuntimeError> { Ok(()) },
-        )
-        .unwrap();
+    answer_permission(&server_requests, "task_1", "allow");
     permission_thread
         .join()
         .expect("permission thread joins")
@@ -760,13 +969,7 @@ fn permission_wait_does_not_block_concurrent_agent_events() {
         .recv_timeout(std::time::Duration::from_millis(250))
         .is_ok();
 
-    server_requests
-        .route_agent_permission_response(
-            "permission_1",
-            "allow".to_string(),
-            |_| -> Result<(), crate::protocol::errors::RuntimeError> { Ok(()) },
-        )
-        .unwrap();
+    answer_permission(&server_requests, "task_1", "allow");
     permission_thread
         .join()
         .expect("permission thread joins")

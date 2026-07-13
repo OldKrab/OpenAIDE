@@ -873,7 +873,7 @@ fn task_subscription_delivers_pending_server_request() {
 }
 
 #[test]
-fn task_request_is_unavailable_when_subscribed_client_lacks_response_capability() {
+fn task_request_waits_when_subscribed_client_lacks_response_capability() {
     let mut gateway = gateway();
     gateway.handle_inbound(
         ConnectionId::new("conn-1"),
@@ -900,7 +900,7 @@ fn task_request_is_unavailable_when_subscribed_client_lacks_response_capability(
 
     assert!(matches!(
         gateway.open_server_request(task_server_request("task-1"), AppServerTime(3)),
-        OpenRequestOutcome::Unavailable { .. }
+        OpenRequestOutcome::Opened { deliveries, .. } if deliveries.is_empty()
     ));
 }
 

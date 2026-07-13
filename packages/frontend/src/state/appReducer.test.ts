@@ -1486,14 +1486,6 @@ describe("app reducer composer state", () => {
         loaded: true,
       },
     };
-    state.appServerPermissionRequests.permission_1 = {
-      message: chatMessage("permission_1", "Allow?") as never,
-      taskId: "task_1",
-    };
-    state.appServerQuestionRequests.question_1 = {
-      message: chatMessage("question_1", "Choose?") as never,
-      taskId: "task_1",
-    };
     state.permissionResponses.permission_1 = { responding: true };
     state.questionResponses.question_1 = { responding: true };
     state.toolDetails["task_1\u0000artifact_1"] = { loading: false };
@@ -1505,8 +1497,6 @@ describe("app reducer composer state", () => {
     });
 
     expect(state.snapshot?.chat.items.map((item) => item.message_id)).toEqual(["tail"]);
-    expect(state.appServerPermissionRequests).toEqual({});
-    expect(state.appServerQuestionRequests).toEqual({});
     expect(state.permissionResponses).toEqual({});
     expect(state.questionResponses).toEqual({});
     expect(state.toolDetails).toEqual({});
@@ -1853,9 +1843,10 @@ describe("app reducer composer state", () => {
     });
   });
 
-  it("reconciles terminal overlays and obsolete paging for background Task snapshots", () => {
+  it("reconciles closed active requests and obsolete paging for background Task snapshots", () => {
     let state = createInitialState();
     const background = snapshot("task_background", [chatMessage("tail", "Old tail")]);
+    background.active_requests = [permissionMessage("permission-1"), questionMessage("question-1")];
     state = appReducer(state, { type: "snapshot", intent: "open", snapshot: background });
     state = appReducer(state, { type: "chatPage:start", taskId: "task_background", requestGeneration: 1 });
     state = appReducer(state, {
@@ -1864,19 +1855,7 @@ describe("app reducer composer state", () => {
       requestGeneration: 1,
       page: page("task_background", [chatMessage("page", "Old page")], false),
     });
-    state = appReducer(state, {
-      type: "appServerPermission:received",
-      requestId: "permission-1",
-      taskId: "task_background",
-      message: permissionMessage("permission-1"),
-    });
     state = appReducer(state, { type: "permission:responding", requestId: "permission-1" });
-    state = appReducer(state, {
-      type: "appServerQuestion:received",
-      requestId: "question-1",
-      taskId: "task_background",
-      message: questionMessage("question-1"),
-    });
     state = appReducer(state, { type: "question:responding", requestId: "question-1" });
     state = appReducer(state, { type: "snapshot", intent: "open", snapshot: snapshot("task_current") });
 
@@ -1905,9 +1884,7 @@ describe("app reducer composer state", () => {
     expect(state.activeTaskId).toBe("task_current");
     expect(state.taskSnapshots.task_background).toBe(reconciled);
     expect(state.chatPages.task_background).toBeUndefined();
-    expect(state.appServerPermissionRequests["permission-1"]).toBeUndefined();
     expect(state.permissionResponses["permission-1"]).toBeUndefined();
-    expect(state.appServerQuestionRequests["question-1"]).toBeUndefined();
     expect(state.questionResponses["question-1"]).toBeUndefined();
   });
 
@@ -1999,59 +1976,21 @@ describe("app reducer composer state", () => {
     });
   });
 
-  it("keeps acknowledged App Server permissions until the chat snapshot resolves them", () => {
+  it("keeps response state while a request is active and clears it when the request closes", () => {
     let state = createInitialState();
     const permission = permissionMessage("server-request-1");
-    state = appReducer(state, {
-      type: "appServerPermission:received",
-      requestId: "server-request-1",
-      taskId: "task_1",
-      message: permission,
-    });
+    const active = snapshot("task_1");
+    active.active_requests = [permission];
+    state = appReducer(state, { type: "snapshot", intent: "open", snapshot: active });
     state = appReducer(state, { type: "permission:responding", requestId: "server-request-1" });
-
-    state = appReducer(state, {
-      type: "appServerPermission:resolved",
-      requestId: "server-request-1",
-    });
-
-    expect(state.appServerPermissionRequests["server-request-1"]).toBeDefined();
     expect(state.permissionResponses["server-request-1"]).toEqual({ responding: true });
 
     state = appReducer(state, {
       type: "snapshot",
       intent: "open",
-      snapshot: snapshot("task_1", [permissionMessage("server-request-1")]),
+      snapshot: snapshot("task_1", [], 2),
     });
 
-    expect(state.appServerPermissionRequests["server-request-1"]).toBeDefined();
-    expect(state.permissionResponses["server-request-1"]).toEqual({ responding: true });
-  });
-
-  it("removes App Server permission response state after a durable terminal permission snapshot", () => {
-    let state = createInitialState();
-    state = appReducer(state, {
-      type: "appServerPermission:received",
-      requestId: "server-request-1",
-      taskId: "task_1",
-      message: permissionMessage("server-request-1"),
-    });
-    state = appReducer(state, { type: "permission:responding", requestId: "server-request-1" });
-
-    const resolvedPermission = permissionMessage("server-request-1");
-    resolvedPermission.message = {
-      ...resolvedPermission.message,
-      state: "resolved",
-      decision: "approved",
-      selected_option: "allow_once",
-    };
-    state = appReducer(state, {
-      type: "snapshot",
-      intent: "open",
-      snapshot: snapshot("task_1", [resolvedPermission]),
-    });
-
-    expect(state.appServerPermissionRequests["server-request-1"]).toBeUndefined();
     expect(state.permissionResponses["server-request-1"]).toBeUndefined();
   });
 });
@@ -2071,7 +2010,7 @@ function snapshot(taskId: string, items: ChatMessage[] = [], revision = 1): Task
       start_cursor: items[0]?.cursor,
       end_cursor: items.at(-1)?.cursor,
     },
-    permissions: [],
+    active_requests: [],
     history_sync: { state: "idle", generation: 0 },
     send_capability: { state: "ready" },
     settings_summary: {

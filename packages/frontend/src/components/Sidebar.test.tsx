@@ -95,9 +95,9 @@ describe("SidebarTaskRow", () => {
     expect(active.root.findAllByProps({ className: "task-state-unread-badge" })).toHaveLength(0);
     expect(active.root.findAllByProps({ className: "task-meta-age" })).toHaveLength(0);
 
-    const waiting = renderState("blocked");
+    const waiting = renderState("waiting");
     expect(waiting.root.findByProps({ "aria-label": "Waiting" })).toBeDefined();
-    const waitingUnread = renderState("blocked", true);
+    const waitingUnread = renderState("waiting", true);
     expect(waitingUnread.root.findByProps({ "aria-label": "Waiting, unread" })).toBeDefined();
     expect(waitingUnread.root.findAllByProps({ className: "task-state-unread-badge" })).toHaveLength(1);
 

@@ -89,6 +89,10 @@ impl LivePromptProjection {
         request: RequestPermissionRequest,
     ) -> Result<RequestPermissionResponse, RuntimeError> {
         let tool_call = self.merge_tool_call_update(request.tool_call.clone());
+        // ACP permission requests carry the authoritative tool-call update. Publish it
+        // before waiting so Chat shows the activity beside the transient request even
+        // when the Agent did not send a separate tool-call notification first.
+        self.publish_tool_call(&tool_call)?;
         let permission = permission_request_from_acp(request, &tool_call);
         logging::info(
             "acp_permission_bridge_wait_start",

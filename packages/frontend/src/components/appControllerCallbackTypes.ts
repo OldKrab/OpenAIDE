@@ -5,7 +5,6 @@ import type {
   CustomAgentCreateParams,
   CustomAgentMetadataUpdateParams,
   CustomAgentReplaceParams,
-  PermissionDecision,
   ElicitationResponse,
   SettingsTabId,
 } from "@openaide/app-shell-contracts";
@@ -87,8 +86,6 @@ export type TaskCallbacks = {
   respondToPermission: (
     requestId: string,
     optionId: string,
-    decision: PermissionDecision,
-    source?: "agent" | "appServer",
   ) => void;
   respondToQuestion: (requestId: string, response: ElicitationResponse) => void;
   sendPrompt: (prompt?: string) => void;

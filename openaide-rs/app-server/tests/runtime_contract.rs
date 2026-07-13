@@ -3,10 +3,7 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use openaide_app_server::agent::events::{
-    AgentEvent, AgentPermissionOption, AgentPermissionOptionKind, AgentPermissionRequest,
-    AgentToolCall, AgentToolCallRef, AgentToolCallStatus,
-};
+use openaide_app_server::agent::events::{AgentEvent, AgentToolCall, AgentToolCallStatus};
 use openaide_app_server::agent::mock::MockAgent;
 use openaide_app_server::agent::{
     AgentEventSink, AgentLoadedSession, AgentMetadataField, AgentPrompt, AgentRuntime,
@@ -18,12 +15,11 @@ use openaide_app_server::protocol::host::HostBridge;
 use openaide_app_server::protocol::model::{
     ActivityStatus, AgentCommand, AgentCommandsCatalog, Attachment, ConfigOption,
     ConfigOptionCategory, ConfigOptionValue, ConfigOptionsCatalog, ConfigOptionsStatus,
-    InterruptionReason, IsolationKind, NormalizedMessage, PermissionDecision, TaskSnapshot,
-    TaskStatus,
+    InterruptionReason, IsolationKind, NormalizedMessage, TaskSnapshot, TaskStatus,
 };
 use openaide_app_server::protocol::params::{
-    DeleteMode, PermissionRespondParams, SessionPromptParams, TaskCreateMode, TaskCreateParams,
-    TaskDeleteParams, TaskIdParams, TaskSnapshotParams,
+    DeleteMode, SessionPromptParams, TaskCreateMode, TaskCreateParams, TaskDeleteParams,
+    TaskIdParams, TaskSnapshotParams,
 };
 use openaide_app_server::storage::records::{TaskPreparationRecord, TaskRecord};
 use openaide_app_server::storage::Store;

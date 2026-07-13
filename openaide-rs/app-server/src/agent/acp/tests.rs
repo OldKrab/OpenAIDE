@@ -1597,6 +1597,13 @@ fn minimal_permission_uses_existing_tool_call_attribution() {
     assert_eq!(permissions[0].title, "Allow file write");
     assert_eq!(permissions[0].tool_call.title, "Allow file write");
     assert_eq!(permissions[0].tool_call.kind.as_deref(), Some("edit"));
+    assert!(matches!(
+        capture.events().as_slice(),
+        [AgentEvent::ToolCall(tool_call)]
+            if tool_call.title == "Allow file write"
+                && tool_call.kind == "edit"
+                && tool_call.status == AgentToolCallStatus::Pending
+    ));
 }
 
 #[test]

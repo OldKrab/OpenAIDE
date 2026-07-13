@@ -35,7 +35,6 @@ pub struct ServerRequestRuntime {
 struct ServerRequestRuntimeInner {
     broker: ServerRequestBroker,
     permission_waiters: HashMap<RequestId, PermissionWaiter>,
-    permission_by_agent_request: HashMap<String, RequestId>,
     waitable_requests: HashMap<RequestId, waitable::WaitableRequest>,
     question_waiters: HashMap<RequestId, questions::QuestionWaiter>,
 }
@@ -96,9 +95,6 @@ impl ServerRequestRuntime {
             }),
         );
         inner
-            .permission_by_agent_request
-            .insert(request.request_id.clone(), request_id.clone());
-        inner
             .permission_waiters
             .insert(request_id.clone(), PermissionWaiter::new(request));
         Ok(Some(request_id))
@@ -156,25 +152,6 @@ impl ServerRequestRuntime {
                 .expect("server request runtime poisoned");
             inner = next_inner;
         }
-    }
-
-    pub fn route_agent_permission_response<T>(
-        &self,
-        agent_request_id: &str,
-        option_id: String,
-        commit: impl FnOnce(bool) -> Result<T, RuntimeError>,
-    ) -> Result<T, RuntimeError> {
-        let request_id = self.reserve_legacy_permission_response(agent_request_id, &option_id)?;
-        let result = commit(request_id.is_some());
-        if result.is_ok() {
-            if let Some(request_id) = request_id {
-                self.resolve_legacy_permission_request(&request_id);
-            }
-            self.changed.notify_all();
-        } else if let Some(request_id) = request_id {
-            self.clear_permission_outcome(&request_id);
-        }
-        result
     }
 
     pub fn handle_response(
@@ -240,50 +217,15 @@ impl ServerRequestRuntime {
         outcome
     }
 
-    fn reserve_legacy_permission_response(
-        &self,
-        agent_request_id: &str,
-        option_id: &str,
-    ) -> Result<Option<RequestId>, RuntimeError> {
-        let mut inner = self.inner.lock().expect("server request runtime poisoned");
-        let request_id = inner
-            .permission_by_agent_request
-            .get(agent_request_id)
-            .cloned();
-        let Some(request_id) = request_id else {
-            return Ok(None);
-        };
-        if inner
-            .permission_waiters
-            .get(&request_id)
-            .is_some_and(|waiter| waiter.outcome.is_some())
-        {
-            return Err(RuntimeError::InvalidParams(
-                "permission already answered".to_string(),
-            ));
-        }
-        if !set_permission_outcome(
-            &mut inner.permission_waiters,
-            &request_id,
-            option_id.to_string(),
-        ) {
-            return Err(RuntimeError::InvalidParams("option_id".to_string()));
-        }
-        Ok(Some(request_id))
-    }
-
-    fn clear_permission_outcome(&self, request_id: &RequestId) {
-        let mut inner = self.inner.lock().expect("server request runtime poisoned");
-        if let Some(waiter) = inner.permission_waiters.get_mut(request_id) {
-            waiter.outcome = None;
-        }
-    }
-
-    fn resolve_legacy_permission_request(&self, request_id: &RequestId) {
-        let mut inner = self.inner.lock().expect("server request runtime poisoned");
-        inner
+    /// Task waiting state is derived from the active request set, not from Chat history.
+    pub fn has_pending_for_task(&self, task_id: &TaskId) -> bool {
+        !self
+            .inner
+            .lock()
+            .expect("server request runtime poisoned")
             .broker
-            .resolve_request_without_responder(request_id, AppServerTime(0));
+            .pending_for_task(task_id)
+            .is_empty()
     }
 }
 
@@ -338,11 +280,7 @@ fn waiter_allows_option(
 }
 
 fn remove_permission_waiter(inner: &mut ServerRequestRuntimeInner, request_id: &RequestId) {
-    if let Some(waiter) = inner.permission_waiters.remove(request_id) {
-        inner
-            .permission_by_agent_request
-            .remove(&waiter.agent_request_id);
-    }
+    inner.permission_waiters.remove(request_id);
 }
 
 #[cfg(test)]

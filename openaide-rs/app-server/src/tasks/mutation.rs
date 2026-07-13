@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use crate::protocol::errors::RuntimeError;
-use crate::protocol::model::{ActivityStatus, NormalizedMessage, PermissionDecision, TaskSnapshot};
+use crate::protocol::model::{ActivityStatus, NormalizedMessage, TaskSnapshot};
 use crate::storage::records::TaskRecord;
 use crate::storage::Store;
 use crate::task_events::CommittedTaskDelta;
@@ -127,33 +127,6 @@ impl TaskMutationContext<'_> {
     ) -> Result<bool, RuntimeError> {
         self.store
             .finish_running_activities(&self.task.task_id, status)
-    }
-
-    pub(crate) fn cancel_pending_permissions(&self) -> Result<bool, RuntimeError> {
-        self.store.cancel_pending_permissions(&self.task.task_id)
-    }
-
-    pub(crate) fn resolve_permission(
-        &self,
-        request_id: &str,
-        option_id: &str,
-        decision: PermissionDecision,
-    ) -> Result<(), RuntimeError> {
-        self.store
-            .resolve_permission(&self.task.task_id, request_id, option_id, decision)
-    }
-
-    pub(crate) fn resolve_question(
-        &self,
-        request_id: &str,
-        response: &openaide_app_server_protocol::server_requests::QuestionRequestResponse,
-    ) -> Result<bool, RuntimeError> {
-        self.store
-            .resolve_question(&self.task.task_id, request_id, response)
-    }
-
-    pub(crate) fn cancel_pending_questions(&self) -> Result<bool, RuntimeError> {
-        self.store.cancel_pending_questions(&self.task.task_id)
     }
 }
 

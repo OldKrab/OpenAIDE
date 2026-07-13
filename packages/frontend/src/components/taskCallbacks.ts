@@ -161,7 +161,7 @@ export function createTaskCallbacks({
         })
         .then(() => undefined);
     },
-    respondToPermission: (requestId, optionId, decision, source) => {
+    respondToPermission: (requestId, optionId) => {
       respondToPermissionIntent(
         {
           backendConnection,
@@ -170,8 +170,6 @@ export function createTaskCallbacks({
         },
         requestId,
         optionId,
-        decision,
-        source,
       );
     },
     respondToQuestion: (requestId, response) => {

@@ -63,7 +63,6 @@ impl ServerRequestBroker {
                 _ => {}
             }
         }
-        outcomes.extend(self.interrupt_orphaned_interactive_requests());
         outcomes
     }
 
@@ -105,7 +104,7 @@ impl ServerRequestBroker {
                 mark_responder_stale(record, client_instance_id);
             }
         }
-        self.interrupt_orphaned_interactive_requests()
+        Vec::new()
     }
 
     pub fn observe_capability_available(
@@ -133,7 +132,7 @@ impl ServerRequestBroker {
                 mark_responder_stale(record, client_instance_id);
             }
         }
-        self.interrupt_orphaned_interactive_requests()
+        Vec::new()
     }
 
     pub fn observe_responder_available(
@@ -254,44 +253,6 @@ impl ServerRequestBroker {
             .filter(|record| {
                 record.status == RequestStatus::Pending
                     && matches!(&record.snapshot.scope, PendingRequestScope::Task { task_id: target } if target == task_id)
-            })
-            .collect()
-    }
-
-    /// Interactive ACP requests cannot outlive the last client that can answer them.
-    fn interrupt_orphaned_interactive_requests(&mut self) -> Vec<RequestLifecycleOutcome> {
-        let orphaned = self
-            .records
-            .iter()
-            .filter_map(|(request_id, record)| {
-                let interactive = matches!(
-                    record.method.as_str(),
-                    openaide_app_server_protocol::server_requests::PERMISSION_REQUEST
-                        | openaide_app_server_protocol::server_requests::QUESTION_REQUEST
-                );
-                (record.status == RequestStatus::Pending
-                    && interactive
-                    && !self.available_responders.values().any(|responder| {
-                        responder.delivery.supports_method(&record.method)
-                            && record_matches_responder(
-                                record,
-                                &responder.delivery.client_instance_id,
-                                &responder.scopes,
-                            )
-                    }))
-                .then(|| request_id.clone())
-            })
-            .collect::<Vec<_>>();
-
-        orphaned
-            .into_iter()
-            .filter_map(|request_id| {
-                let record = self.records.get_mut(&request_id)?;
-                record.status = RequestStatus::Interrupted;
-                Some(RequestLifecycleOutcome::Interrupted {
-                    request_id,
-                    scope: record.snapshot.scope.clone(),
-                })
             })
             .collect()
     }

@@ -92,6 +92,7 @@ fn project_message(message: &NormalizedMessage) -> (ChatRole, ChatItemStatus, Ve
             options,
             selected_option,
             decision,
+            resolution_message,
             ..
         } => (
             ChatRole::System,
@@ -112,6 +113,7 @@ fn project_message(message: &NormalizedMessage) -> (ChatRole, ChatItemStatus, Ve
                 options: options.iter().map(project_permission_option).collect(),
                 selected_option: selected_option.clone(),
                 decision: decision.map(project_permission_decision),
+                resolution_message: resolution_message.clone(),
             }],
         ),
         NormalizedMessage::Question {
@@ -122,6 +124,7 @@ fn project_message(message: &NormalizedMessage) -> (ChatRole, ChatItemStatus, Ve
             action,
             content,
             error,
+            resolution_message,
             ..
         } => (
             ChatRole::System,
@@ -142,6 +145,7 @@ fn project_message(message: &NormalizedMessage) -> (ChatRole, ChatItemStatus, Ve
                 }),
                 content: content.clone(),
                 error: error.clone(),
+                resolution_message: resolution_message.clone(),
             }],
         ),
         NormalizedMessage::Interruption { message, .. } => (

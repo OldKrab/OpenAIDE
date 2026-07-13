@@ -538,7 +538,7 @@ export type TaskTitle = { value: string, source: TaskTitleSource, };
 
 export type TaskTitleSource = "agent" | "user";
 
-export type TaskStatus = "preparing" | "starting" | "idle" | "running" | "blocked" | "interrupted" | "failed" | "completed";
+export type TaskStatus = "preparing" | "starting" | "idle" | "running" | "waiting" | "interrupted" | "failed" | "completed";
 
 export type TaskLifecycle = "new" | "visible";
 
@@ -594,7 +594,7 @@ export type ChatRole = "user" | "agent" | "system";
 
 export type ChatItemStatus = "complete" | "streaming" | "failed" | "interrupted";
 
-export type MessagePart = { "kind": "text", text: string, } | { "kind": "attachment", attachment: AttachmentSnapshot, } | { "kind": "image", mediaType: string, dataUrl: string, uri?: string | null, } | { "kind": "resource", uri: string, name?: string | null, title?: string | null, description?: string | null, mediaType?: string | null, sizeBytes?: number | null, text?: string | null, } | { "kind": "unsupported", contentType: string, mediaType?: string | null, uri?: string | null, } | { "kind": "activity", title: string, status: ActivityStatus, steps?: Array<ActivityStepSnapshot>, } | { "kind": "permission", requestId: RequestId, appServerRequestId?: RequestId | null, title: string, description?: string | null, scope?: string | null, risk?: string | null, toolCall: PermissionToolCallRef, state: PermissionMessageState, options: Array<PermissionMessageOption>, selectedOption?: string | null, decision?: PermissionMessageDecision | null, } | { "kind": "question", requestId: RequestId, message: string, fields: Array<QuestionField>, state: QuestionMessageState, action?: QuestionMessageAction | null, content?: { [key in string]: QuestionValue } | null, error?: string | null, };
+export type MessagePart = { "kind": "text", text: string, } | { "kind": "attachment", attachment: AttachmentSnapshot, } | { "kind": "image", mediaType: string, dataUrl: string, uri?: string | null, } | { "kind": "resource", uri: string, name?: string | null, title?: string | null, description?: string | null, mediaType?: string | null, sizeBytes?: number | null, text?: string | null, } | { "kind": "unsupported", contentType: string, mediaType?: string | null, uri?: string | null, } | { "kind": "activity", title: string, status: ActivityStatus, steps?: Array<ActivityStepSnapshot>, } | { "kind": "permission", requestId: RequestId, appServerRequestId?: RequestId | null, title: string, description?: string | null, scope?: string | null, risk?: string | null, toolCall: PermissionToolCallRef, state: PermissionMessageState, options: Array<PermissionMessageOption>, selectedOption?: string | null, decision?: PermissionMessageDecision | null, resolutionMessage?: string | null, } | { "kind": "question", requestId: RequestId, message: string, fields: Array<QuestionField>, state: QuestionMessageState, action?: QuestionMessageAction | null, content?: { [key in string]: QuestionValue } | null, error?: string | null, resolutionMessage?: string | null, };
 
 export type PermissionMessageOption = { optionId: string, name: string, kind?: PermissionMessageOptionKind | null, };
 

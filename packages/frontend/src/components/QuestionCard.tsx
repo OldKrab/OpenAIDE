@@ -94,7 +94,9 @@ function ResolvedQuestion({ elicitation }: { elicitation: ElicitationMessage }) 
   const title = answered ? "Question answered" : failed ? "Question unavailable" : "Question closed";
   const detail = answered
     ? `${answers.length} ${answers.length === 1 ? "answer" : "answers"} submitted`
-    : failed ? (elicitation.error ?? "The question could not be answered") : "Closed without response";
+    : failed
+      ? (elicitation.error ?? "The question could not be answered")
+      : (elicitation.resolution_message ?? "Closed without response");
   return (
     <section aria-label={title} className={`question-card question-card-resolved ${elicitation.state}`}>
       <QuestionHeader icon={answered ? "answered" : failed ? "error" : "closed"} prompt={detail} status={title} />

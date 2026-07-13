@@ -6,7 +6,6 @@ import type {
   ChatMessage,
   ConfigOptionsCatalog,
   ElicitationResponse,
-  PermissionDecision,
   TaskSnapshot,
   TaskSummary,
 } from "@openaide/app-shell-contracts";
@@ -21,8 +20,7 @@ import { scrollTopAfterPrependedContent } from "./TaskViewModel";
 import { taskWorkingStatusLabel, workspaceLabel } from "./taskSurfaceHelpers";
 import type { TaskFileBrowserCallbacks } from "./appControllerCallbackTypes";
 import {
-  chatItemsWithAppServerPermissions,
-  chatItemsWithAppServerQuestions,
+  chatItemsWithResolvedPermissions,
   permissionResponseForMessage,
   questionResponseForMessage,
 } from "./taskChatPresentation";
@@ -36,8 +34,7 @@ export {
   scrollTopAfterPrependedContent,
 } from "./TaskViewModel";
 export {
-  chatItemsWithAppServerPermissions,
-  chatItemsWithAppServerQuestions,
+  chatItemsWithResolvedPermissions,
   permissionResponseForMessage,
   questionResponseForMessage,
 } from "./taskChatPresentation";
@@ -70,8 +67,6 @@ export function TaskLoadingView({ error, onRetry }: { error?: string; onRetry?: 
 
 export function TaskView({
   activeTask,
-  appServerPermissionRequests,
-  appServerQuestionRequests = {},
   archived = false,
   backendConnectionState,
   backendReady,
@@ -101,8 +96,6 @@ export function TaskView({
   showWorkspaceContext = true,
 }: {
   activeTask?: TaskSummary;
-  appServerPermissionRequests: AppState["appServerPermissionRequests"];
-  appServerQuestionRequests?: AppState["appServerQuestionRequests"];
   archived?: boolean;
   backendConnectionState?: BackendConnectionState;
   backendReady: boolean;
@@ -115,8 +108,6 @@ export function TaskView({
   onPermissionRespond: (
     requestId: string,
     optionId: string,
-    decision: PermissionDecision,
-    source?: "agent" | "appServer",
   ) => void;
   onQuestionRespond?: (requestId: string, response: ElicitationResponse) => void;
   onRetryConnection?: () => void;
@@ -138,15 +129,10 @@ export function TaskView({
 }) {
   const inputPending = taskInput.pending?.state === "sending";
   const chat = renderedChat(snapshot, chatPageState);
-  const chatItems = chatItemsWithAppServerQuestions(
-    chatItemsWithAppServerPermissions(
-      chat.items,
-      appServerPermissionRequests,
-      snapshot.task.task_id,
-    ),
-    appServerQuestionRequests,
-    snapshot.task.task_id,
-  );
+  const chatItems = [
+    ...chatItemsWithResolvedPermissions(chat.items),
+    ...snapshot.active_requests,
+  ];
   const livePresentation = useLiveTextPresentation(
     snapshot.task.task_id,
     chatItems,
@@ -159,7 +145,7 @@ export function TaskView({
     allowEditingWhileSendBlocked: true,
     archived,
     attachmentsReady: attachmentsSendable,
-    blockedPlaceholder: snapshot.task.status === "blocked"
+    blockedPlaceholder: snapshot.task.status === "waiting"
       ? "Draft follow-up while input is pending."
       : snapshot.task.status === "active" ? "Send a follow-up" : undefined,
     connectionStatus: backendReady ? "ready" : backendConnectionState?.status ?? "connecting",
@@ -209,7 +195,7 @@ export function TaskView({
   }, [dispatch, snapshot.task.task_id]);
   const chatScroll = useTaskChatScroll({
     historySyncState: snapshot.history_sync.state,
-    itemCount: chat.items.length,
+    itemCount: chatItems.length,
     onScrollState: recordTaskScroll,
     pendingPrepend: chat.pending,
     prependRequestGeneration: chatPageState?.requestGeneration ?? 0,

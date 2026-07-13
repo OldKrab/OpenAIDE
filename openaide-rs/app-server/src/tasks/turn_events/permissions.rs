@@ -1,9 +1,10 @@
 use crate::agent::events::{AgentEvent, AgentPermissionOutcome, AgentPermissionRequest};
 use crate::logging;
 use crate::protocol::errors::RuntimeError;
-use crate::protocol::model::{PermissionDecision, TaskStatus};
-use crate::tasks::mutation::{TaskCommitOptions, TaskMutationResult};
+use crate::protocol::model::{NormalizedMessage, PermissionDecision, PermissionState, TaskStatus};
+use crate::tasks::mutation::{TaskCommitOptions, TaskCommitOutcome, TaskMutationResult};
 use crate::time::now_string;
+use openaide_app_server_protocol::ids::TaskId;
 use serde_json::json;
 
 use super::TaskEventSink;
@@ -13,9 +14,9 @@ impl TaskEventSink {
         &self,
         request: AgentPermissionRequest,
     ) -> Result<AgentPermissionOutcome, RuntimeError> {
-        // Opening the request and persisting its Chat row form one ordered emission.
-        // The human wait below must not hold this lock: Agents can continue sending
-        // output and tool progress while a permission decision is pending.
+        // Opening the transient request and changing Task status form one ordered
+        // emission. The human wait below must not hold this lock: Agents can continue
+        // sending output and tool progress while a decision is pending.
         let emission_guard = self
             .session_sink
             .emission_lock
@@ -45,22 +46,22 @@ impl TaskEventSink {
             }),
         );
 
-        let now = now_string();
-        let mut message =
-            crate::agent::normalizer::normalize_event(AgentEvent::PermissionRequest(request), &now);
-        if let crate::protocol::model::NormalizedMessage::Permission {
-            app_server_request_id,
-            ..
-        } = &mut message
-        {
-            *app_server_request_id = Some(server_request_id.as_str().to_string());
-        }
-        if let Err(error) = self.append_agent_message(message, &now, Some(TaskStatus::Blocked)) {
-            self.server_requests.interrupt_request(
-                &server_request_id,
-                crate::client_lifecycle::AppServerTime(0),
-            );
-            return Err(error);
+        match self.mark_permission_waiting() {
+            Ok(true) => {}
+            Ok(false) => {
+                self.server_requests.interrupt_request(
+                    &server_request_id,
+                    crate::client_lifecycle::AppServerTime(0),
+                );
+                return Ok(AgentPermissionOutcome::Cancelled);
+            }
+            Err(error) => {
+                self.server_requests.interrupt_request(
+                    &server_request_id,
+                    crate::client_lifecycle::AppServerTime(0),
+                );
+                return Err(error);
+            }
         }
         drop(emission_guard);
 
@@ -87,31 +88,79 @@ impl TaskEventSink {
                 "has_decision": response.decision.is_some(),
             }),
         );
-        if let AgentPermissionOutcome::Selected { option_id } = &response.outcome {
-            let _guard = self
-                .session_sink
-                .emission_lock
-                .lock()
-                .expect("event sink lock poisoned");
-            if let Err(error) = self.resolve_permission(&request_id, option_id, response.decision) {
-                if !is_permission_already_resolved(&error) {
-                    return Err(error);
-                }
-            }
-        }
+        let _guard = self
+            .session_sink
+            .emission_lock
+            .lock()
+            .expect("event sink lock poisoned");
+        self.persist_permission_resolution(
+            request,
+            server_request_id.as_str(),
+            request_id.as_str(),
+            &response.outcome,
+            response.decision,
+        )?;
         Ok(response.outcome)
     }
 
-    fn resolve_permission(
+    fn mark_permission_waiting(&self) -> Result<bool, RuntimeError> {
+        let now = now_string();
+        let result = self.mutations.commit_existing_task(
+            &self.task_id,
+            TaskCommitOptions::metadata(),
+            |ctx| {
+                if ctx.task().active_turn_id.as_deref() != Some(self.turn_id.as_str())
+                    || self.cancellation.is_cancelled()
+                {
+                    return Ok(TaskMutationResult::Unchanged);
+                }
+                let task = ctx.task_mut();
+                task.status = TaskStatus::Waiting;
+                task.updated_at = now.clone();
+                Ok(TaskMutationResult::Changed)
+            },
+        )?;
+        Ok(matches!(result.outcome, TaskCommitOutcome::Committed(_)))
+    }
+
+    fn persist_permission_resolution(
         &self,
-        request_id: &str,
-        option_id: &str,
-        decision: Option<PermissionDecision>,
+        request: AgentPermissionRequest,
+        server_request_id: &str,
+        agent_request_id: &str,
+        outcome: &AgentPermissionOutcome,
+        resolved_decision: Option<PermissionDecision>,
     ) -> Result<(), RuntimeError> {
         let now = now_string();
-        let decision = decision.ok_or_else(|| {
-            RuntimeError::InvalidParams("missing permission decision".to_string())
-        })?;
+        let stopped = self.cancellation.is_cancelled();
+        let mut message =
+            crate::agent::normalizer::normalize_event(AgentEvent::PermissionRequest(request), &now);
+        let NormalizedMessage::Permission {
+            app_server_request_id,
+            state,
+            selected_option,
+            decision,
+            resolution_message,
+            ..
+        } = &mut message
+        else {
+            unreachable!("permission event must normalize to a Permission message");
+        };
+        *app_server_request_id = Some(server_request_id.to_string());
+        match outcome {
+            AgentPermissionOutcome::Selected { option_id } => {
+                *state = PermissionState::Resolved;
+                *selected_option = Some(option_id.clone());
+                *decision = resolved_decision;
+            }
+            AgentPermissionOutcome::Cancelled => {
+                *state = PermissionState::Cancelled;
+                if stopped {
+                    *resolution_message =
+                        Some("Task stopped while approval was pending.".to_string());
+                }
+            }
+        }
         self.mutations.commit_existing_task(
             &self.task_id,
             TaskCommitOptions {
@@ -119,8 +168,13 @@ impl TaskEventSink {
                 response_snapshot_tail_limit: None,
             },
             |ctx| {
-                ctx.resolve_permission(request_id, option_id, decision)?;
-                if ctx.task().status == TaskStatus::Blocked {
+                ctx.append_message(message)?;
+                // Read broker state inside the ordered Task mutation. A request that
+                // opens concurrently will mark the Task waiting after this commit.
+                let has_pending_request = self
+                    .server_requests
+                    .has_pending_for_task(&TaskId::from(self.task_id.clone()));
+                if !has_pending_request && !stopped && ctx.task().status == TaskStatus::Waiting {
                     ctx.task_mut().status = TaskStatus::Active;
                 }
                 let task = ctx.task_mut();
@@ -135,8 +189,8 @@ impl TaskEventSink {
             json!({
                 "task_id": self.task_id.as_str(),
                 "turn_id": self.turn_id.as_str(),
-                "agent_request_id": request_id,
-                "option_id": option_id,
+                "agent_request_id": agent_request_id,
+                "outcome": agent_permission_outcome_name(outcome),
             }),
         );
         Ok(())
@@ -148,8 +202,4 @@ fn agent_permission_outcome_name(outcome: &AgentPermissionOutcome) -> &'static s
         AgentPermissionOutcome::Selected { .. } => "selected",
         AgentPermissionOutcome::Cancelled => "cancelled",
     }
-}
-
-fn is_permission_already_resolved(error: &RuntimeError) -> bool {
-    matches!(error, RuntimeError::InvalidParams(message) if message == "permission already resolved")
 }

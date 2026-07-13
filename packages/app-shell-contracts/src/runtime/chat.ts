@@ -21,7 +21,7 @@ export type NormalizedMessage =
   | { kind: "agent_content" | "thought_content"; id: string; content: AgentContent; created_at: string }
   | { kind: "thought"; id: string; text: string; created_at: string }
   | { kind: "activity"; id: string; title: string; status: ActivityStatus; created_at: string; collapsed: boolean; steps: ActivityStep[] }
-  | { kind: "permission"; id: string; request_id: string; app_server_request_id?: string; title: string; description?: string; scope?: string; risk?: string; tool_call: PermissionToolCall; state: PermissionState; created_at: string; options: PermissionOption[]; selected_option?: string; decision?: PermissionDecision }
+  | { kind: "permission"; id: string; request_id: string; app_server_request_id?: string; title: string; description?: string; scope?: string; risk?: string; tool_call: PermissionToolCall; state: PermissionState; created_at: string; options: PermissionOption[]; selected_option?: string; decision?: PermissionDecision; resolution_message?: string }
   | ElicitationMessage
   | { kind: "interruption"; id: string; reason: InterruptionReason; message: string; created_at: string; recoverable: boolean };
 

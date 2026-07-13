@@ -267,7 +267,7 @@ OpenAIDE recognizes every current ACP tool kind, but several defined kinds use a
 
 ## AP-018: Pending permissions are duplicated as workflow state and Chat history
 
-**Status:** confirmed
+**Status:** resolved
 
 **Area:** ACP permission projection, App Server requests, and Frontend Chat presentation
 
@@ -278,6 +278,8 @@ App Server currently persists a pending Permission Chat row while also deliverin
 **Desired direction:** Keep a pending permission only as an active App Server request and set Task status to `waiting`. Redeliver that active request to reconnecting eligible clients and render it transiently after current Chat while session updates continue. After a user response or prompt cancellation, close it for all clients and persist exactly one resolved Permission Chat item beside its associated activity. Represent cancellation through the same resolution path with its own message.
 
 The same problem and desired lifecycle apply to ACP form elicitation Questions, except that a resolved Question remains a standalone Chat row. Frontend field validation provides immediate feedback; App Server independently validates the response as the authoritative protocol boundary.
+
+**Resolution:** Pending Permissions and Questions now exist only in the App Server request broker and appear in Task snapshots as transient `active_requests`; neither is written to Chat while awaiting a response. Opening one sets the Task to `waiting`, reconnecting eligible clients receive the same request again, and Agent session updates continue while the request waits. A response or cancellation removes the active request and appends exactly one terminal Chat item. Frontend renders active requests after durable Chat, retains only local response-in-flight presentation state, and places a terminal Permission beside its matching Tool activity. The duplicate direct request stores, legacy permission-response API, pending-history mutations, and their reconciliation paths were removed completely.
 
 ## AP-019: ACP Plan updates are discarded
 

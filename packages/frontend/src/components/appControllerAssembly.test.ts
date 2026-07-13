@@ -198,12 +198,12 @@ describe("deriveAppControllerState", () => {
     const tasks = [
       task({ task_id: "task_1", title: "Refactor plan", agent_name: "Codex", status: "inactive" }),
       task({ task_id: "task_2", title: "Other", agent_name: "OpenCode", status: "active" }),
-      task({ task_id: "task_3", title: "Archive", agent_name: "Other", status: "blocked" }),
+      task({ task_id: "task_3", title: "Archive", agent_name: "Other", status: "waiting" }),
     ];
 
     expect(visibleTasks(tasks, "plan").map((task) => task.task_id)).toEqual(["task_1"]);
     expect(visibleTasks(tasks, "opencode").map((task) => task.task_id)).toEqual(["task_2"]);
-    expect(visibleTasks(tasks, "BLOCKED").map((task) => task.task_id)).toEqual(["task_3"]);
+    expect(visibleTasks(tasks, "WAITING").map((task) => task.task_id)).toEqual(["task_3"]);
   });
 });
 

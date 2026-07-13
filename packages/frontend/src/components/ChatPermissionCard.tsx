@@ -13,8 +13,6 @@ export function ChatPermissionCard({
   onRespond: (
     requestId: string,
     optionId: string,
-    decision: "approved" | "denied",
-    source?: "agent" | "appServer",
   ) => void;
 }) {
   const selected = permission.options.find((option) => option.id === permission.selected_option);
@@ -38,8 +36,6 @@ export function ChatPermissionCard({
     onRespond(
       permission.app_server_request_id ?? permission.request_id,
       option.id,
-      decision,
-      permission.app_server_request_id ? "appServer" : "agent",
     );
   };
 
@@ -137,7 +133,7 @@ function permissionResolutionLabel(
       ? { status: `Denied, ${selected.label}` }
       : { status: "Denied" };
   }
-  return { status: "Permission request cancelled" };
+  return { status: permission.resolution_message ?? "Permission request cancelled" };
 }
 
 function permissionDisplay(permission: Extract<NormalizedMessage, { kind: "permission" }>) {

@@ -268,6 +268,7 @@ fn open_projects_durable_permission_history_as_permission_part() {
                 ],
                 selected_option: None,
                 decision: Some(PermissionDecision::Denied),
+                resolution_message: None,
             }),
         )
         .unwrap();
@@ -305,7 +306,7 @@ fn open_projects_durable_permission_history_as_permission_part() {
 }
 
 #[test]
-fn cancelled_pending_permission_projects_as_cancelled_not_denied() {
+fn cancelled_permission_history_projects_as_cancelled_not_denied() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store.write_task(&task_record("task-1")).unwrap();
@@ -325,7 +326,7 @@ fn cancelled_pending_permission_projects_as_cancelled_not_denied() {
                     title: "Tool call".to_string(),
                     kind: Some("execute".to_string()),
                 },
-                state: PermissionState::Pending,
+                state: PermissionState::Cancelled,
                 created_at: "2026-01-01T00:00:01.000Z".to_string(),
                 options: vec![PermissionOption {
                     id: "allow_once".to_string(),
@@ -335,10 +336,10 @@ fn cancelled_pending_permission_projects_as_cancelled_not_denied() {
                 }],
                 selected_option: None,
                 decision: None,
+                resolution_message: Some("Task stopped while approval was pending.".to_string()),
             }),
         )
         .unwrap();
-    store.cancel_pending_permissions("task-1").unwrap();
     sync_task_message_history_version(&store, "task-1");
 
     let snapshot = TaskSnapshotStore::new(store)
@@ -349,6 +350,7 @@ fn cancelled_pending_permission_projects_as_cancelled_not_denied() {
         state,
         selected_option,
         decision,
+        resolution_message,
         ..
     }] = snapshot.chat.items[0].parts.as_slice()
     else {
@@ -357,6 +359,10 @@ fn cancelled_pending_permission_projects_as_cancelled_not_denied() {
     assert_eq!(*state, PermissionMessageState::Cancelled);
     assert_eq!(selected_option, &None);
     assert_eq!(*decision, None);
+    assert_eq!(
+        resolution_message.as_deref(),
+        Some("Task stopped while approval was pending.")
+    );
 }
 
 #[test]

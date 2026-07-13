@@ -61,8 +61,6 @@ impl TaskTransitions {
 
                     let now = now_string();
                     ctx.finish_running_activities(ActivityStatus::Completed)?;
-                    ctx.cancel_pending_permissions()?;
-                    ctx.cancel_pending_questions()?;
                     append_interruption(
                         ctx,
                         InterruptionReason::Canceled,

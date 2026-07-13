@@ -74,8 +74,6 @@ impl TaskProductApi {
 
                     let now = now_string();
                     ctx.finish_running_activities(ActivityStatus::Completed)?;
-                    ctx.cancel_pending_permissions()?;
-                    ctx.cancel_pending_questions()?;
                     ctx.append_message(NormalizedMessage::Interruption {
                         id: Uuid::new_v4().to_string(),
                         reason: InterruptionReason::Canceled,

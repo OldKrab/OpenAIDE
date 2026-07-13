@@ -1,23 +1,16 @@
 use std::sync::{Arc, Mutex};
 
-use uuid::Uuid;
-
 use crate::agent::gateway::AgentGateway;
 use crate::agent::registry::AgentRegistry;
 use crate::agent::{AgentSession, AgentSessionKey, AgentSessionResume, AgentSessionStart};
 use crate::protocol::errors::RuntimeError;
-use crate::protocol::model::{
-    InterruptionReason, NormalizedMessage, PermissionDecision, TaskSnapshot, TaskStatus,
-};
-use crate::protocol::params::{
-    PermissionRespondParams, TaskCreateMode, TaskCreateParams, TaskIdParams,
-};
+use crate::protocol::model::TaskSnapshot;
+use crate::protocol::params::{TaskCreateMode, TaskCreateParams, TaskIdParams};
 use crate::storage::Store;
-use crate::tasks::mutation::{TaskCommitOptions, TaskMutationResult, TaskMutations};
+use crate::tasks::mutation::{TaskCommitOptions, TaskMutations};
 use crate::tasks::snapshot::build_snapshot;
 use crate::tasks::transitions::TaskTransitions;
 use crate::tasks::turns::TurnRunner;
-use crate::time::now_string;
 
 mod create;
 mod prompt;
@@ -70,56 +63,6 @@ impl TaskTurnLifecycle {
             false,
         )?;
         self.snapshot(params.task_id)
-    }
-
-    pub(crate) fn respond_permission(
-        &self,
-        params: PermissionRespondParams,
-    ) -> Result<TaskSnapshot, RuntimeError> {
-        let now = now_string();
-        let task_id = params.task_id.clone();
-        let request_id = params.request_id.clone();
-        let option_id = params.option_id.clone();
-        let decision = params.decision;
-        let result = self.turn_runner.route_permission_response(
-            &request_id,
-            option_id.clone(),
-            |live_turn_waiting| {
-                self.mutations.commit_existing_task(
-                    &task_id,
-                    snapshot_chat_commit_options(),
-                    |ctx| {
-                        ctx.resolve_permission(&request_id, &option_id, decision)?;
-                        if ctx.task().status == TaskStatus::Blocked {
-                            ctx.task_mut().status =
-                                if live_turn_waiting && ctx.task().active_turn_id.is_some() {
-                                    TaskStatus::Active
-                                } else {
-                                    TaskStatus::Inactive
-                                };
-                        }
-                        if !live_turn_waiting && decision == PermissionDecision::Denied {
-                            ctx.append_message(NormalizedMessage::Interruption {
-                                id: Uuid::new_v4().to_string(),
-                                reason: InterruptionReason::Canceled,
-                                message: "Permission denied.".to_string(),
-                                created_at: now.clone(),
-                                recoverable: true,
-                            })?;
-                        }
-                        let task = ctx.task_mut();
-                        task.unread = false;
-                        task.updated_at = now.clone();
-                        task.last_activity = now;
-                        Ok(TaskMutationResult::Changed)
-                    },
-                )
-            },
-        )?;
-        let snapshot = result
-            .response_snapshot
-            .ok_or_else(|| RuntimeError::Internal("missing permission snapshot".to_string()))?;
-        Ok(snapshot)
     }
 
     pub(crate) fn shutdown(&self) -> Result<(), RuntimeError> {

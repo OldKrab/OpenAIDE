@@ -7,9 +7,8 @@ use crate::agent::{
     AgentPrompt, AgentRuntime, AgentSession, AgentSessionEventSink, AgentSessionKey,
     TurnCancellation,
 };
-use crate::client_lifecycle::{AppServerTime, ConnectionId, Delivery, RequestCapability};
 use crate::protocol::errors::RuntimeError;
-use crate::server_requests::{ResponderScope, ServerRequestRuntime};
+use crate::server_requests::ServerRequestRuntime;
 use crate::tasks::mutation::TaskMutations;
 use crate::tasks::transitions::TaskTransitions;
 use crate::tasks::turn_events::{TaskEventSink, TaskSessionEventSink};
@@ -24,22 +23,7 @@ pub struct TurnRunner {
 
 impl TurnRunner {
     pub(crate) fn new(mutations: TaskMutations, agent: Arc<dyn AgentRuntime>) -> Self {
-        let server_requests = ServerRequestRuntime::new();
-        // TaskService is the legacy direct API and answers permissions through
-        // respond_permission instead of an initialized App Shell connection.
-        // Register that public response path as the eligible responder.
-        let client_instance_id =
-            openaide_app_server_protocol::ids::ClientInstanceId::from("legacy-task-service");
-        server_requests.observe_responder_available(
-            Delivery::new(
-                client_instance_id.clone(),
-                ConnectionId::new("legacy-task-service"),
-            )
-            .with_request_capabilities(vec![RequestCapability::Permission]),
-            &[ResponderScope::Client(client_instance_id)],
-            AppServerTime(0),
-        );
-        Self::new_with_server_requests(mutations, agent, server_requests)
+        Self::new_with_server_requests(mutations, agent, ServerRequestRuntime::new())
     }
 
     pub(crate) fn new_with_server_requests(
@@ -153,16 +137,6 @@ impl TurnRunner {
             active.cancellation.cancel();
             let _ = self.agent.cancel_session(&active.session);
         }
-    }
-
-    pub(crate) fn route_permission_response<T>(
-        &self,
-        request_id: &str,
-        option_id: String,
-        commit: impl FnOnce(bool) -> Result<T, RuntimeError>,
-    ) -> Result<T, RuntimeError> {
-        self.server_requests
-            .route_agent_permission_response(request_id, option_id, commit)
     }
 
     pub(crate) fn attach_session_events(

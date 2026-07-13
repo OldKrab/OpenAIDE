@@ -40,7 +40,7 @@ export function taskWorkingStatusLabel(
     (item.message.kind === "permission" || item.message.kind === "elicitation")
     && item.message.state === "pending"
   ))) return undefined;
-  if (status === "blocked") {
+  if (status === "waiting") {
     if (items.some((item) => item.message_id === "app-server-preparation")) {
       return "Preparing task";
     }

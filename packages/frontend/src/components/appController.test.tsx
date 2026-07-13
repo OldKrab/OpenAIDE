@@ -2899,7 +2899,7 @@ function snapshot(taskId: string, status: TaskSnapshot["task"]["status"], title 
       total_count: 0,
       version: 1,
     },
-    permissions: [],
+    active_requests: [],
     send_capability: { state: "ready" },
     settings_summary: {
       agent_id: "codex",

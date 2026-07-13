@@ -13,7 +13,7 @@ pub enum TaskStatus {
     Inactive,
     Failed,
     Completed,
-    Blocked,
+    Waiting,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]

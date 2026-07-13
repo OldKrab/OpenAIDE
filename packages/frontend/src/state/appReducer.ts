@@ -14,7 +14,6 @@ import type {
   TaskSnapshot,
   TaskSummary,
   ActivityToolDetails,
-  ChatMessage,
 } from "@openaide/app-shell-contracts";
 import {
   selectionWithProject,
@@ -93,12 +92,8 @@ type AppActionPayload =
   | { type: "toolDetail:error"; taskId: string; artifactId: string; message: string }
   | { type: "permission:responding"; requestId: string }
   | { type: "permission:error"; requestId: string; message: string }
-  | { type: "appServerPermission:received"; requestId: string; message: ChatMessage; taskId?: string }
-  | { type: "appServerPermission:resolved"; requestId: string }
   | { type: "question:responding"; requestId: string }
   | { type: "question:error"; requestId: string; message: string }
-  | { type: "appServerQuestion:received"; requestId: string; message: ChatMessage; taskId?: string }
-  | { type: "appServerQuestion:resolved"; requestId: string }
   | { type: "search:set"; query: string }
   | { type: "archive:set"; showArchived: boolean }
   | { type: "selection:set"; taskId: string }

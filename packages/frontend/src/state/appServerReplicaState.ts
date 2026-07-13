@@ -43,8 +43,6 @@ export function applyAppServerReplica(
     taskChatScrollStates: initial.taskChatScrollStates,
     taskLiveTextPresentation: initial.taskLiveTextPresentation,
     taskOpenError: undefined,
-    appServerPermissionRequests: initial.appServerPermissionRequests,
-    appServerQuestionRequests: initial.appServerQuestionRequests,
     permissionResponses: initial.permissionResponses,
     questionResponses: initial.questionResponses,
     projects: initial.projects,
@@ -81,8 +79,6 @@ function invalidateProcessOwnedState(state: AppState): AppState {
 
   return {
     ...state,
-    appServerPermissionRequests: {},
-    appServerQuestionRequests: {},
     permissionResponses: {},
     questionResponses: {},
     taskLiveTextPresentation: {},

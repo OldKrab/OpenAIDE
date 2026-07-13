@@ -15,18 +15,11 @@ impl TaskTransitions {
             self.mutations
                 .commit_existing_task(&task_id, chat_commit_options(), |ctx| {
                     let now = now_string();
-                    let questions_cancelled = ctx.cancel_pending_questions()?;
                     let Some(plan) = volatile_recovery_plan(ctx.task()) else {
-                        if questions_cancelled && ctx.task().status == TaskStatus::Blocked {
-                            ctx.task_mut().status = TaskStatus::Inactive;
-                            ctx.task_mut().updated_at = now;
-                            return Ok(TaskMutationResult::Changed);
-                        }
                         return Ok(TaskMutationResult::Unchanged);
                     };
                     if plan.interrupt_active_turn {
                         ctx.finish_running_activities(ActivityStatus::Completed)?;
-                        ctx.cancel_pending_permissions()?;
                         append_interruption(
                             ctx,
                             InterruptionReason::Canceled,

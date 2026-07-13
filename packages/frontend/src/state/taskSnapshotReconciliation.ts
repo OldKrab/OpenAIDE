@@ -42,8 +42,8 @@ export function reconcileTaskSnapshotDependents(
   const snapshot = reconcileTaskSnapshot(current, incoming);
   if (snapshot === current) return { state, snapshot };
 
-  const terminalPermissionIds = terminalAppServerPermissionIds(snapshot);
-  const terminalQuestionIds = terminalAppServerQuestionIds(snapshot);
+  const activePermissionIds = activeRequestIds(snapshot, "permission");
+  const activeQuestionIds = activeRequestIds(snapshot, "elicitation");
   const chatPage = retainedChatPage(
     state,
     taskId,
@@ -68,16 +68,8 @@ export function reconcileTaskSnapshotDependents(
       chatPages: chatPage
         ? { ...state.chatPages, [taskId]: chatPage }
         : omitKeys(state.chatPages, new Set([taskId])),
-      appServerPermissionRequests: omitKeys(
-        state.appServerPermissionRequests,
-        terminalPermissionIds,
-      ),
-      permissionResponses: omitKeys(state.permissionResponses, terminalPermissionIds),
-      appServerQuestionRequests: omitKeys(
-        state.appServerQuestionRequests,
-        terminalQuestionIds,
-      ),
-      questionResponses: omitKeys(state.questionResponses, terminalQuestionIds),
+      permissionResponses: retainKeys(state.permissionResponses, activePermissionIds),
+      questionResponses: retainKeys(state.questionResponses, activeQuestionIds),
     },
   };
 }
@@ -114,22 +106,11 @@ function retainedChatPage(
   return retainSnapshotWindow(state.chatPages[taskId], previousSnapshot.chat, snapshot.chat);
 }
 
-function terminalAppServerPermissionIds(snapshot: TaskSnapshot) {
+function activeRequestIds(snapshot: TaskSnapshot, kind: "permission" | "elicitation") {
   return new Set(
-    snapshot.chat.items.flatMap((item) => {
+    snapshot.active_requests.flatMap((item) => {
       const message = item.message;
-      if (message.kind !== "permission") return [];
-      if (message.state !== "resolved" && message.state !== "cancelled") return [];
-      return [message.app_server_request_id, message.request_id].filter((id): id is string => Boolean(id));
-    }),
-  );
-}
-
-function terminalAppServerQuestionIds(snapshot: TaskSnapshot) {
-  return new Set(
-    snapshot.chat.items.flatMap((item) => {
-      const message = item.message;
-      if (message.kind !== "elicitation" || message.state === "pending") return [];
+      if (message.kind !== kind) return [];
       return [message.app_server_request_id, message.request_id].filter((id): id is string => Boolean(id));
     }),
   );
@@ -147,6 +128,11 @@ function omitKeys<T>(record: Record<string, T>, keys: Set<string>) {
     next[key] = value;
   }
   return changed ? next : record;
+}
+
+function retainKeys<T>(record: Record<string, T>, keys: Set<string>) {
+  const next = Object.fromEntries(Object.entries(record).filter(([key]) => keys.has(key)));
+  return Object.keys(next).length === Object.keys(record).length ? record : next;
 }
 
 function shouldIgnoreStaleTaskSnapshot(current: TaskSnapshot | undefined, incoming: TaskSnapshot) {

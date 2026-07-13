@@ -9,7 +9,6 @@ use crate::agent::events::{
 use crate::protocol::model::PermissionDecision;
 
 pub(super) struct PermissionWaiter {
-    pub agent_request_id: String,
     options: HashMap<String, PermissionDecision>,
     pub outcome: Option<PermissionResponse>,
 }
@@ -17,7 +16,6 @@ pub(super) struct PermissionWaiter {
 impl PermissionWaiter {
     pub(super) fn new(request: &AgentPermissionRequest) -> Self {
         Self {
-            agent_request_id: request.request_id.clone(),
             options: request
                 .options
                 .iter()

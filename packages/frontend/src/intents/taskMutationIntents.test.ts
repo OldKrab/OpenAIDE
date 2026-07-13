@@ -185,7 +185,7 @@ function taskSnapshot(): TaskSnapshot {
       total_count: 0,
       version: 1,
     },
-    permissions: [],
+    active_requests: [],
     settings_summary: { agent_id: "codex", isolation: "local" },
     send_capability: { state: "ready" },
     revision: 1,

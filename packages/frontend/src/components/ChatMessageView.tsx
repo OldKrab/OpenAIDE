@@ -30,8 +30,6 @@ export const ChatRow = memo(function ChatRow({
   onPermissionRespond: (
     requestId: string,
     optionId: string,
-    decision: "approved" | "denied",
-    source?: "agent" | "appServer",
   ) => void;
   onQuestionRespond?: (requestId: string, response: ElicitationResponse) => void;
   permissionResponse?: { responding: boolean; error?: string };
