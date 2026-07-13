@@ -3,14 +3,17 @@ use serde_json::json;
 use super::AppServerEventPayload;
 
 #[test]
-fn chat_item_chunk_preserves_task_revision_on_the_wire() {
+fn task_chat_append_text_preserves_task_revision_on_the_wire() {
     let wire_payload = json!({
-        "kind": "chatItemChunk",
+        "kind": "taskChanged",
         "taskId": "task-1",
         "revision": 7,
-        "messageId": "message-1",
-        "chunk": {
-            "text": " world"
+        "changes": {
+            "chat": [{
+                "kind": "appendText",
+                "messageId": "message-1",
+                "text": " world"
+            }]
         }
     });
 
@@ -18,20 +21,25 @@ fn chat_item_chunk_preserves_task_revision_on_the_wire() {
     let encoded = serde_json::to_value(payload).unwrap();
 
     assert_eq!(encoded["revision"], json!(7));
-    assert_eq!(encoded["chunk"], json!({ "text": " world" }));
+    assert_eq!(encoded["changes"]["chat"][0]["text"], json!(" world"));
 }
 
 #[test]
 fn tool_summary_and_full_detail_are_distinct_event_shapes() {
     let summary: AppServerEventPayload = serde_json::from_value(json!({
-        "kind": "chatItemUpserted",
+        "kind": "taskChanged",
         "taskId": "task-1",
         "revision": 8,
-        "item": {
-            "messageId": "tool-1",
-            "role": "system",
-            "status": "complete",
-            "parts": []
+        "changes": {
+            "chat": [{
+                "kind": "upsert",
+                "item": {
+                    "messageId": "tool-1",
+                    "role": "system",
+                    "status": "complete",
+                    "parts": []
+                }
+            }]
         }
     }))
     .unwrap();
