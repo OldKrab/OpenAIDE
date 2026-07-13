@@ -10,27 +10,41 @@ const agentFixture = path.join(repoRoot, "tests/smoke/fixtures/test-acp-agent.mj
 
 /** Starts an isolated real Web, App Server, and deterministic ACP Agent stack. */
 export async function startFullStackHarness() {
-  await run("npm", ["run", "build:typescript-deps"]);
-  await run("cargo", ["build", "-p", "openaide-app-server"]);
-
   const root = await mkdtemp(path.join(os.tmpdir(), "openaide-smoke-"));
+  const staticRoot = path.join(root, "static");
+  try {
+    await run("npm", ["run", "build:typescript-deps"]);
+    await run("npm", [
+      "run",
+      "build",
+      "--workspace",
+      "openaide-frontend",
+      "--",
+      "--outDir",
+      staticRoot,
+      "--emptyOutDir",
+    ]);
+    await run("cargo", ["build", "-p", "openaide-app-server"]);
+  } catch (error) {
+    await rm(root, { recursive: true, force: true });
+    throw error;
+  }
+
   const webPort = await freePort();
-  let vitePort = await freePort();
-  while (vitePort === webPort) vitePort = await freePort();
   const baseUrl = `http://127.0.0.1:${webPort}`;
   const logs = [];
   const server = spawn(process.execPath, [path.join(repoRoot, "apps/web/src/dev-server.mjs")], {
     cwd: repoRoot,
     env: {
-      ...process.env,
+      ...environmentWithoutOpenAideState(),
       OPENAIDE_APP_SERVER_PATH: path.join(repoRoot, "target/debug/openaide-app-server"),
-      OPENAIDE_PROJECT_ROOTS: repoRoot,
       OPENAIDE_WEB_ALLOWED_HOSTS: "localhost,127.0.0.1",
       OPENAIDE_WEB_HOST: "127.0.0.1",
       OPENAIDE_WEB_PORT: String(webPort),
+      OPENAIDE_WEB_PROJECT_ROOTS: repoRoot,
       OPENAIDE_WEB_RUNTIME_ROOT: path.join(root, "runtime"),
       OPENAIDE_WEB_STATE_ROOT: path.join(root, "state"),
-      OPENAIDE_WEB_VITE_PORT: String(vitePort),
+      OPENAIDE_WEB_STATIC_ROOT: staticRoot,
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -76,6 +90,13 @@ export async function startFullStackHarness() {
   };
 }
 
+function environmentWithoutOpenAideState() {
+  // A smoke stack must never inherit Driver/Target roots, ports, auth, or presentation.
+  return Object.fromEntries(
+    Object.entries(process.env).filter(([name]) => !name.startsWith("OPENAIDE_")),
+  );
+}
+
 function createProbeClient(baseUrl, connectionId) {
   let nextId = 1;
   return {
@@ -104,7 +125,11 @@ function createProbeClient(baseUrl, connectionId) {
 }
 
 async function run(command, args) {
-  const child = spawn(command, args, { cwd: repoRoot, stdio: ["ignore", "pipe", "pipe"] });
+  const child = spawn(command, args, {
+    cwd: repoRoot,
+    env: environmentWithoutOpenAideState(),
+    stdio: ["ignore", "pipe", "pipe"],
+  });
   let output = "";
   child.stdout.on("data", (chunk) => { output += chunk; });
   child.stderr.on("data", (chunk) => { output += chunk; });

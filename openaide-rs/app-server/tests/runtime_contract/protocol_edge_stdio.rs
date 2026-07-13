@@ -1,3 +1,5 @@
+const PROCESS_TEST_AGENT_ID: &str = "custom.runtime-contract-agent";
+
 #[test]
 fn app_server_protocol_mode_initializes_over_stdio() {
     let storage = TempDir::new().expect("storage root");
@@ -194,7 +196,7 @@ fn app_server_handoff_user_can_create_new_task_and_send_first_prompt() {
             "method": "task/create",
             "params": {
                 "projectId": project_id,
-                "agentId": "codex"
+                "agentId": PROCESS_TEST_AGENT_ID
             }
         }),
     );
@@ -330,7 +332,7 @@ fn app_server_handoff_user_can_reopen_prepared_new_task_after_reload_and_send() 
             "method": "task/create",
             "params": {
                 "projectId": project_id,
-                "agentId": "codex"
+                "agentId": PROCESS_TEST_AGENT_ID
             }
         }),
     );
@@ -473,7 +475,7 @@ fn app_server_handoff_user_can_send_first_prompt_after_task_preparation() {
             "method": "task/create",
             "params": {
                 "projectId": project_id,
-                "agentId": "codex"
+                "agentId": PROCESS_TEST_AGENT_ID
             }
         }),
     );
@@ -556,12 +558,61 @@ fn read_handoff_connection(stdout: &mut impl std::io::BufRead) -> Value {
 }
 
 fn post_local_http_initialize(endpoint_url: &str, auth_token: &str, client_id: &str) -> Value {
-    post_local_http_initialize_surface(
+    let initialized = post_local_http_initialize_surface(
         endpoint_url,
         auth_token,
         client_id,
         json!({ "kind": "home" }),
-    )
+    );
+    ensure_process_test_agent(endpoint_url, auth_token, client_id, &initialized);
+    initialized
+}
+
+fn ensure_process_test_agent(
+    endpoint_url: &str,
+    auth_token: &str,
+    connection_id: &str,
+    initialized: &Value,
+) {
+    let agents = initialized[0]["result"]["result"]["snapshot"]["agents"]["agents"]
+        .as_array()
+        .expect("initialized Agent collection");
+    if agents
+        .iter()
+        .any(|agent| agent["agentId"] == PROCESS_TEST_AGENT_ID)
+    {
+        return;
+    }
+
+    let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/smoke/fixtures/test-acp-agent.mjs");
+    assert!(fixture.is_file(), "ACP process test fixture is missing: {fixture:?}");
+    let fixture = fixture.to_string_lossy().into_owned();
+    let created = post_local_http_json(
+        endpoint_url,
+        auth_token,
+        connection_id,
+        json!({
+            "jsonrpc": "2.0",
+            "id": "create-process-test-agent",
+            "method": "agent/createCustom",
+            "params": {
+                "agentId": PROCESS_TEST_AGENT_ID,
+                "label": "Runtime Contract Agent",
+                "icon": "terminal",
+                "commandLine": format!("node {fixture}"),
+                "command": "node",
+                "args": [fixture],
+                "env": {},
+                "secretEnv": [],
+                "enabled": true
+            }
+        }),
+    );
+    assert!(
+        created[0]["result"]["result"].is_object(),
+        "failed to create deterministic ACP process test Agent: {created:#?}"
+    );
 }
 
 fn post_local_http_initialize_surface(
@@ -630,7 +681,7 @@ fn create_task(
             "method": "task/create",
             "params": {
                 "projectId": project_id,
-                "agentId": "codex"
+                "agentId": PROCESS_TEST_AGENT_ID
             }
         }),
     );

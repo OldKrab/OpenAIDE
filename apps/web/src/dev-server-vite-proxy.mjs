@@ -20,7 +20,7 @@ export function createViteProxy({ port, transformResponse, unavailableMessage })
         throw error;
       }
 
-      const headers = responseHeaders(response);
+      let headers = responseHeaders(response);
       let body = Buffer.from(await response.arrayBuffer());
       if (transformResponse) {
         ({ body, headers } = await transformResponse({ body, headers, url }));
