@@ -26,6 +26,8 @@ describe("host bridge", () => {
     vi.stubGlobal("document", {
       body: {
         dataset: {
+          shell: "vscodeExtension",
+          navigationMode: "currentProject",
           surface: "navigation",
           appServerConnection: JSON.stringify({
             kind: "localHttp",
@@ -77,6 +79,8 @@ describe("host bridge", () => {
     const sharedStorage = memoryStorage();
     sharedStorage.setItem("openaide.clientInstanceId", "shared-origin-client");
     const dataset: Record<string, string> = {
+      shell: "vscodeExtension",
+      navigationMode: "currentProject",
       surface: "task",
       clientInstanceId: "task-panel-1",
       appServerConnection: JSON.stringify({
@@ -121,6 +125,8 @@ describe("host bridge", () => {
     vi.stubGlobal("document", {
       body: {
         dataset: {
+          shell: "vscodeExtension",
+          navigationMode: "currentProject",
           surface: "task",
           clientInstanceId: "task-panel-1",
           appServerConnection: JSON.stringify({
@@ -178,6 +184,8 @@ describe("host bridge", () => {
     vi.stubGlobal("document", {
       body: {
         dataset: {
+          shell: "web",
+          navigationMode: "project",
           surface: "navigation",
           appServerConnection: JSON.stringify({
             kind: "webProxy",
@@ -221,6 +229,7 @@ describe("host bridge", () => {
       body: {
         dataset: {
           shell: "web",
+          navigationMode: "project",
           surface: "task",
           appServerConnection: JSON.stringify({
             kind: "webProxy",
@@ -252,6 +261,7 @@ describe("host bridge", () => {
       body: {
         dataset: {
           shell: "web",
+          navigationMode: "project",
           surface: "task",
           appServerConnection: JSON.stringify({
             kind: "webProxy",
@@ -286,6 +296,7 @@ describe("host bridge", () => {
       body: {
         dataset: {
           shell: "web",
+          navigationMode: "project",
           surface: "task",
           appServerConnection: JSON.stringify({
             kind: "webProxy",
@@ -315,6 +326,7 @@ describe("host bridge", () => {
       body: {
         dataset: {
           shell: "web",
+          navigationMode: "project",
           surface: "task",
           archived: "true",
           appServerConnection: JSON.stringify({
@@ -347,6 +359,7 @@ describe("host bridge", () => {
       body: {
         dataset: {
           shell: "web",
+          navigationMode: "project",
           surface: "settings",
           appServerConnection: JSON.stringify({
             kind: "webProxy",
@@ -375,6 +388,7 @@ describe("host bridge", () => {
       body: {
         dataset: {
           shell: "web",
+          navigationMode: "project",
           surface: "settings",
         },
       },
@@ -402,6 +416,7 @@ describe("host bridge", () => {
       body: {
         dataset: {
           shell: "web",
+          navigationMode: "project",
         },
       },
     });
