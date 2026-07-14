@@ -7,6 +7,9 @@ import { createInitialState, type AppState } from "../state/store";
 
 type TestController = AppController & { state: AppState };
 
+const VSCODE_SHELL = { kind: "vscodeExtension", navigationMode: "currentProject" } as const;
+const WEB_SHELL = { kind: "web", navigationMode: "project" } as const;
+
 const surfaceMocks = vi.hoisted(() => ({
   newTask: vi.fn(() => null),
   settings: vi.fn(() => null),
@@ -72,8 +75,16 @@ describe("AppSurfaces callback wiring", () => {
     );
   });
 
-  it("uses the shared project task group for VS Code navigation", () => {
+  it("keeps VS Code Task Navigation flat inside its current Project Context", () => {
     const controller = controllerFor("navigation");
+    controller.bootstrap = {
+      surface: "navigation",
+      shell: { kind: "vscodeExtension", navigationMode: "currentProject" },
+      appServerConnection: {
+        kind: "webProxy",
+        endpointUrl: "/transport-must-not-control-navigation",
+      },
+    } as AppController["bootstrap"];
     controller.state.projects = [{
       projectId: "project_1",
       label: "OpenAIDE",
@@ -83,7 +94,7 @@ describe("AppSurfaces callback wiring", () => {
 
     expect(surfaceMocks.sidebar).toHaveBeenCalledWith(
       expect.objectContaining({
-        groupByProject: true,
+        groupByProject: false,
         maxTasksPerProject: 15,
         projects: controller.state.projects,
       }),
@@ -118,9 +129,11 @@ describe("AppSurfaces callback wiring", () => {
     const controller = controllerFor("settings");
     controller.bootstrap = {
       surface: "settings",
+      shell: WEB_SHELL,
       appServerConnection: {
-        kind: "webProxy",
-        endpointUrl: "/__openaide-app-server/probe",
+        kind: "localHttp",
+        endpointUrl: "http://127.0.0.1:43123",
+        authToken: "test-token",
       },
     };
 
@@ -408,7 +421,7 @@ describe("AppSurfaces callback wiring", () => {
 
   it("keeps cached task history visible with the in-place refresh retry", () => {
     const controller = controllerFor("task");
-    controller.bootstrap = { surface: "task", taskId: "task_1" };
+    controller.bootstrap = { surface: "task", shell: VSCODE_SHELL, taskId: "task_1" };
     controller.state.snapshot = snapshot("task_1", true);
     // A concurrent subscription snapshot can clear taskOpenError after task/open fails.
     controller.backendConnectionState = { status: "unavailable", message: "Connection closed." };
@@ -513,7 +526,7 @@ describe("AppSurfaces callback wiring", () => {
 
   it("renders pending empty task snapshots through the task view", () => {
     const controller = controllerFor("task");
-    controller.bootstrap = { surface: "task", taskId: "task_1" };
+    controller.bootstrap = { surface: "task", shell: VSCODE_SHELL, taskId: "task_1" };
     controller.state.snapshot = snapshot("task_1", false);
     controller.state.taskInputs.task_1 = {
       prompt: "",
@@ -551,7 +564,7 @@ describe("AppSurfaces callback wiring", () => {
 
   it("renders an active no-message Task with its Task-scoped Stop action", () => {
     const controller = controllerFor("task");
-    controller.bootstrap = { surface: "task", taskId: "task_1" };
+    controller.bootstrap = { surface: "task", shell: VSCODE_SHELL, taskId: "task_1" };
     controller.state.snapshot = snapshot("task_1", false);
     controller.state.snapshot.task.status = "active";
 
@@ -569,7 +582,7 @@ describe("AppSurfaces callback wiring", () => {
 
   it("keeps a failed first-send draft visible on its adopted Task route", () => {
     const controller = controllerFor("task");
-    controller.bootstrap = { surface: "task", taskId: "task_1" };
+    controller.bootstrap = { surface: "task", shell: VSCODE_SHELL, taskId: "task_1" };
     controller.state.snapshot = snapshot("task_1", false);
     controller.state.taskInputs.task_1 = {
       prompt: "Build the thing",
@@ -591,7 +604,7 @@ describe("AppSurfaces callback wiring", () => {
 
   it("keeps an authoritatively rejected first-send draft editable on its Task route", () => {
     const controller = controllerFor("task");
-    controller.bootstrap = { surface: "task", taskId: "task_1" };
+    controller.bootstrap = { surface: "task", shell: VSCODE_SHELL, taskId: "task_1" };
     controller.state.snapshot = snapshot("task_1", false);
     controller.state.taskInputs.task_1 = {
       prompt: "Inspect this file",
@@ -620,6 +633,7 @@ describe("AppSurfaces callback wiring", () => {
     const controller = webControllerFor("task");
     controller.bootstrap = {
       surface: "task",
+      shell: WEB_SHELL,
       taskId: "task_1",
       appServerConnection: {
         kind: "webProxy",
@@ -640,7 +654,7 @@ describe("AppSurfaces callback wiring", () => {
 
   it("offers the in-place retry after task opening fails", () => {
     const controller = controllerFor("task");
-    controller.bootstrap = { surface: "task", taskId: "task_1" };
+    controller.bootstrap = { surface: "task", shell: VSCODE_SHELL, taskId: "task_1" };
     controller.state.taskOpenError = { taskId: "task_1", message: "Connection closed." };
 
     render(controller);
@@ -775,6 +789,7 @@ describe("AppSurfaces callback wiring", () => {
     const controller = controllerFor("task");
     controller.bootstrap = {
       surface: "task",
+      shell: WEB_SHELL,
       appServerConnection: {
         kind: "webProxy",
         endpointUrl: "/__openaide-app-server/probe",
@@ -818,7 +833,7 @@ function controllerFor(surface: AppController["bootstrap"]["surface"]): TestCont
     agents: [],
     backendConnectionState: { status: "connecting" },
     backendReady: false,
-    bootstrap: { surface },
+    bootstrap: surface === "invalid" ? { surface } : { surface, shell: VSCODE_SHELL },
     callbacks: {
       navigation: {
         archiveTask: vi.fn(),
@@ -889,6 +904,7 @@ function webControllerFor(surface: "settings" | "task"): TestController {
   const controller = controllerFor(surface);
   controller.bootstrap = {
     surface,
+    shell: WEB_SHELL,
     appServerConnection: {
       kind: "webProxy",
       endpointUrl: "/__openaide-app-server/probe",

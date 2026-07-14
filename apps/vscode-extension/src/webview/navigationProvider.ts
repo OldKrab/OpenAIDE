@@ -9,7 +9,7 @@ import {
   webviewRoot,
 } from "./html";
 import { handleWebviewMessage } from "./messaging";
-import type { WebviewHost } from "./types";
+import { VSCODE_SHELL, type WebviewHost } from "./types";
 import { resolveWebviewAppServerConnection } from "./appServerConnection";
 import { currentWorkspaceRoot } from "../workspace/roots";
 
@@ -72,6 +72,7 @@ export class TaskViewProvider implements vscode.WebviewViewProvider {
   private bootstrap(clientInstanceId: string): Parameters<typeof renderWebviewHtml>[2] {
     return {
       surface: "navigation",
+      shell: VSCODE_SHELL,
       clientInstanceId,
       projectId: currentWorkspaceRoot()?.projectId,
     };

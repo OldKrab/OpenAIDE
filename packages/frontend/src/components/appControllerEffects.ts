@@ -1,9 +1,14 @@
 import { sendWebviewTelemetry } from "../state/hostMessageRouter";
 import type { PostHostMessage } from "../state/postHostMessage";
 import { shouldRequestWorkspaceRoots } from "../state/surfaceRouting";
-import type { WebviewBootstrap } from "../state/surfaceTypes";
+import type { WebviewSurface } from "../state/surfaceTypes";
 
-export function postControllerStarted(postHostMessage: PostHostMessage, bootstrap: WebviewBootstrap) {
+type StartupSurface = { surface: WebviewSurface; taskId?: string };
+
+export function postControllerStarted(
+  postHostMessage: PostHostMessage,
+  bootstrap: StartupSurface,
+) {
   sendWebviewTelemetry(postHostMessage, "started", {
     surface: bootstrap.surface,
     task_id: bootstrap.taskId,
@@ -20,7 +25,7 @@ export function postStartupRequests({
   skipSettingsReadRequests = false,
   postHostMessage,
 }: {
-  bootstrap: WebviewBootstrap;
+  bootstrap: StartupSurface;
   dispatchNavigationError: (message: string) => void;
   dispatchSettingsStart: () => void;
   dispatchSettingsError: (message: string) => void;

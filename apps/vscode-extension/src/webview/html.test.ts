@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { renderWebviewHtml } from "./html";
+import { VSCODE_SHELL } from "./types";
 
 vi.mock("vscode", () => ({
   Uri: {
@@ -11,14 +12,20 @@ vi.mock("vscode", () => ({
 
 describe("webview html", () => {
   it("allows bundled frontend fonts in the webview CSP", () => {
-    const html = renderWebviewHtml(context(), webview(), { surface: "navigation" });
+    const html = renderWebviewHtml(context(), webview(), {
+      surface: "navigation",
+      shell: VSCODE_SHELL,
+    });
 
     expect(html).toContain("font-src vscode-webview:;");
+    expect(html).toContain('data-shell="vscodeExtension"');
+    expect(html).toContain('data-navigation-mode="currentProject"');
   });
 
   it("embeds LocalHttp bootstrap info and allows that origin in CSP", () => {
     const html = renderWebviewHtml(context(), webview(), {
       surface: "navigation",
+      shell: VSCODE_SHELL,
       appServerConnection: {
         kind: "localHttp",
         endpointUrl: "http://127.0.0.1:4321/probe",

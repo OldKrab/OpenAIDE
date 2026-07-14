@@ -80,7 +80,11 @@ function postMessage(message: HostToWebviewMessage) {
 
 function webBootstrapForLocation(): WebviewBootstrap {
   const pathname = window.location.pathname;
-  const shared = { preferences: shellPreferences(), appServerConnection: appServerConnection() };
+  const shared = {
+    shell: { kind: "web", navigationMode: "project" } as const,
+    preferences: shellPreferences(),
+    appServerConnection: appServerConnection(),
+  };
   if (isSettingsPath(pathname)) {
     return { surface: "settings", settingsTab: settingsTabFromSearch(), ...shared };
   }
@@ -113,6 +117,12 @@ function newTaskPath(projectId?: string) {
 }
 
 function isWebviewBootstrap(value: unknown): value is WebviewBootstrap {
-  const surface = value && typeof value === "object" ? (value as { surface?: unknown }).surface : undefined;
-  return surface === "navigation" || surface === "task" || surface === "settings" || surface === "invalid";
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as { surface?: unknown; shell?: { kind?: unknown; navigationMode?: unknown } };
+  const validSurface = candidate.surface === "navigation"
+    || candidate.surface === "task"
+    || candidate.surface === "settings";
+  return validSurface
+    && candidate.shell?.kind === "web"
+    && candidate.shell.navigationMode === "project";
 }

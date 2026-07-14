@@ -67,7 +67,10 @@ function routerContext(overrides: Partial<HostMessageRouterContext> = {}) {
 
 function routerContextBase() {
   return {
-    bootstrap: { surface: "navigation" as const },
+    bootstrap: {
+      surface: "navigation" as const,
+      shell: { kind: "vscodeExtension" as const, navigationMode: "currentProject" as const },
+    },
     dispatch: vi.fn(),
     openNewTaskSurface: vi.fn(),
     openSettingsSurface: vi.fn(),

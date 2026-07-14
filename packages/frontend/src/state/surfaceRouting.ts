@@ -1,7 +1,9 @@
-import type { WebviewBootstrap } from "./surfaceTypes";
+import type { WebviewSurface } from "./surfaceTypes";
+
+type SurfaceState = { surface: WebviewSurface; taskId?: string };
 
 export function shouldLoadNewTaskConfigOptions(
-  bootstrap: WebviewBootstrap,
+  bootstrap: SurfaceState,
   hasSnapshot: boolean,
   projectId: string | undefined,
 ) {
@@ -15,13 +17,13 @@ export function shouldLoadNewTaskConfigOptions(
 }
 
 export function shouldLoadNativeSessions(
-  bootstrap: WebviewBootstrap,
+  bootstrap: SurfaceState,
   projectId: string | undefined,
 ) {
   return bootstrap.surface !== "invalid" && projectId !== undefined && projectId.trim().length > 0;
 }
 
-export function shouldRequestWorkspaceRoots(bootstrap: WebviewBootstrap) {
+export function shouldRequestWorkspaceRoots(bootstrap: SurfaceState) {
   return bootstrap.surface !== "invalid";
 }
 

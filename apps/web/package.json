@@ -1,6 +1,6 @@
 {
   "name": "openaide-web",
-  "version": "0.0.1-alpha.2",
+  "version": "0.0.1-alpha.3",
   "license": "AGPL-3.0-only",
   "private": true,
   "type": "module",
@@ -9,7 +9,7 @@
     "test": "node src/app-server-manager.test.mjs && node src/dev-server-auth.test.mjs && node src/dev-server-origin.test.mjs && node src/dev-server-prototype.test.mjs && node src/dev-server-routes.test.mjs && node src/dev-server-streams.test.mjs && node src/dev-server-vite-proxy.test.mjs"
   },
   "dependencies": {
-    "@openaide/app-server-client": "0.0.1-alpha.2",
+    "@openaide/app-server-client": "0.0.1-alpha.3",
     "vite": "^7.2.6"
   }
 }

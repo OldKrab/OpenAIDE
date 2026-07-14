@@ -3070,6 +3070,7 @@ type TestBackendConnection = {
 function navigationBootstrap(options: { archived?: boolean; projectId?: string } = {}) {
   return {
     surface: "navigation" as const,
+    shell: { kind: "vscodeExtension" as const, navigationMode: "currentProject" as const },
     archived: options.archived,
     projectId: options.projectId,
     agents: [],
@@ -3080,6 +3081,7 @@ function navigationBootstrap(options: { archived?: boolean; projectId?: string }
 function taskBootstrap(taskId: string) {
   return {
     surface: "task" as const,
+    shell: { kind: "vscodeExtension" as const, navigationMode: "currentProject" as const },
     taskId,
     agents: [],
     preferences: { composer_submit_shortcut: "mod_enter" as const },
@@ -3089,6 +3091,7 @@ function taskBootstrap(taskId: string) {
 function settingsBootstrap() {
   return {
     surface: "settings" as const,
+    shell: { kind: "vscodeExtension" as const, navigationMode: "currentProject" as const },
     agents: [],
     preferences: { composer_submit_shortcut: "mod_enter" as const },
   };
@@ -3097,6 +3100,7 @@ function settingsBootstrap() {
 function webTaskBootstrap(taskId?: string, projectId?: string) {
   return {
     surface: "task" as const,
+    shell: { kind: "web" as const, navigationMode: "project" as const },
     taskId,
     projectId,
     clientInstanceId: "client_1" as never,
@@ -3112,6 +3116,7 @@ function webTaskBootstrap(taskId?: string, projectId?: string) {
 function webSettingsBootstrap(settingsTab?: "agents" | "mcp" | "skills" | "common") {
   return {
     surface: "settings" as const,
+    shell: { kind: "web" as const, navigationMode: "project" as const },
     settingsTab,
     agents: [],
     preferences: { composer_submit_shortcut: "mod_enter" as const },

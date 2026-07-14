@@ -9,9 +9,11 @@ import {
   webviewRoot,
 } from "./html";
 import { handleWebviewMessage } from "./messaging";
-import type { WebviewBootstrap, WebviewHost } from "./types";
+import { VSCODE_SHELL, type WebviewBootstrap, type WebviewHost } from "./types";
 import { resolveWebviewAppServerConnection } from "./appServerConnection";
 import { currentWorkspaceRoot } from "../workspace/roots";
+
+type PanelBootstrap = Omit<WebviewBootstrap, "shell">;
 
 export class TaskEditorManager implements vscode.Disposable, WebviewHost {
   private readonly taskPanels = new Map<string, vscode.WebviewPanel>();
@@ -81,7 +83,7 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost {
     this.taskPanels.clear();
   }
 
-  private createPanel(viewType: string, title: string, bootstrap: WebviewBootstrap) {
+  private createPanel(viewType: string, title: string, bootstrap: PanelBootstrap) {
     // Panels of one view type share browser storage, so the host owns per-panel connection identity.
     const panelBootstrap = {
       ...bootstrap,
@@ -111,7 +113,7 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost {
 
   private async renderPanelWhenAppServerReady(
     panel: vscode.WebviewPanel,
-    bootstrap: WebviewBootstrap,
+    bootstrap: PanelBootstrap,
     generation: number,
   ) {
     try {
@@ -150,7 +152,7 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost {
     panel.title = title.trim() || "Task";
     const current = this.panelBootstraps.get(panel);
     this.panelBootstraps.set(panel, {
-      ...current,
+      ...(current ?? { surface: "task", shell: VSCODE_SHELL }),
       surface: "task",
       taskId,
       projectId: undefined,
@@ -181,7 +183,7 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost {
     return this.panelRenderGeneration.get(panel) === generation;
   }
 
-  private bootstrap(bootstrap: WebviewBootstrap): WebviewBootstrap {
-    return bootstrap;
+  private bootstrap(bootstrap: PanelBootstrap): WebviewBootstrap {
+    return { ...bootstrap, shell: VSCODE_SHELL };
   }
 }

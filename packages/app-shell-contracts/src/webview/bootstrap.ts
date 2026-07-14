@@ -3,6 +3,12 @@ import type { SettingsTabId } from "./preferences.js";
 
 export type WebviewSurfaceKind = "navigation" | "task" | "settings";
 
+export type AppShellBootstrap = {
+  kind: "web" | "vscodeExtension";
+  /** Selects Project Navigation or current-Project Task Navigation independently of transport. */
+  navigationMode: "project" | "currentProject";
+};
+
 export type WebviewAppServerConnection = {
   kind: "localHttp";
   endpointUrl: string;
@@ -14,6 +20,8 @@ export type WebviewAppServerConnection = {
 
 export type WebviewBootstrap = {
   surface: WebviewSurfaceKind;
+  /** App Shell-owned presentation and protocol identity. */
+  shell: AppShellBootstrap;
   /** Host-issued identity unique to this webview instance. */
   clientInstanceId?: string;
   taskId?: string;
