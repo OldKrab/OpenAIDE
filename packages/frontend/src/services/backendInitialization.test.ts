@@ -19,8 +19,6 @@ describe("backend initialization", () => {
           "requestResponses",
           "stableClientRequestIds",
           "resync",
-          "permissionResponses",
-          "questionResponses",
         ],
         shell: [
           "openExternal",

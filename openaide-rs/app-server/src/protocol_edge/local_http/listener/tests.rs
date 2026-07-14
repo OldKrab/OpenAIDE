@@ -114,6 +114,39 @@ fn streams_event_data_without_waiting_for_a_json_rpc_response() {
 }
 
 #[test]
+fn get_routes_to_reliable_session_receive_with_acknowledgement() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        handle_stream_with_routes(
+            &mut stream,
+            |_request| panic!("GET must not enter upload handling"),
+            |_stream, _request| panic!("GET must not enter event-stream handling"),
+            |_stream, request| {
+                assert_eq!(request.session_id.as_deref(), Some("session-1"));
+                assert_eq!(request.after_sequence, Some(7));
+                Ok(LocalHttpResponse {
+                    status: 200,
+                    body: r#"{"frames":[]}"#.to_string(),
+                })
+            },
+        )
+        .unwrap();
+    });
+
+    let response = send(
+        addr,
+        "GET /probe HTTP/1.1\r\nX-OpenAIDE-Session-Id: session-1\r\nX-OpenAIDE-After: 7\r\n\r\n",
+    );
+    server.join().unwrap();
+
+    assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(response.ends_with(r#"{"frames":[]}"#));
+}
+
+#[test]
 fn malformed_request_returns_400_without_delegating() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();
@@ -217,8 +250,8 @@ fn options_preflight_returns_cors_headers_without_delegating() {
 
     assert!(response.starts_with("HTTP/1.1 204 No Content\r\n"));
     assert!(response.contains("Access-Control-Allow-Origin: *\r\n"));
-    assert!(response.contains("Access-Control-Allow-Methods: POST, OPTIONS\r\n"));
-    assert!(response.contains("Authorization, Content-Type, X-OpenAIDE-Connection-Id"));
+    assert!(response.contains("Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"));
+    assert!(response.contains("Authorization, Content-Type, X-OpenAIDE-Connection-Id, X-OpenAIDE-Session-Id, X-OpenAIDE-After"));
     assert!(called_rx.try_recv().is_err());
 }
 

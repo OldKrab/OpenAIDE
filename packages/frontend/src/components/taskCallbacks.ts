@@ -43,7 +43,7 @@ type TaskDependencies = Pick<
   | "state"
 >;
 
-type TaskBackendConnection = Partial<Pick<BackendConnection, "events" | "request">>;
+type TaskBackendConnection = Partial<Pick<BackendConnection, "handleNotification" | "request">>;
 
 export function createTaskCallbacks({
   attachmentResources,
@@ -113,14 +113,14 @@ export function createTaskCallbacks({
     subscribeToolDetail: (artifactId) => {
       if (!state.snapshot) return () => undefined;
       const taskId = state.snapshot.task.task_id;
-      if (!backendConnection?.request || !backendConnection.events || !state.appServerStateRootId) {
+      if (!backendConnection?.request || !backendConnection.handleNotification || !state.appServerStateRootId) {
         dispatch({ type: "toolDetail:error", taskId, artifactId, message: appServerRequiredMessage() });
         return () => undefined;
       }
       dispatch({ type: "toolDetail:start", taskId, artifactId });
       return startAppServerStateSubscription({
         backendConnection: {
-          events: backendConnection.events,
+          handleNotification: backendConnection.handleNotification,
           request: backendConnection.request,
         },
         context: {
@@ -169,7 +169,9 @@ export function createTaskCallbacks({
     respondToPermission: (requestId, optionId) => {
       respondToPermissionIntent(
         {
-          backendConnection,
+          backendConnection: backendConnection?.request
+            ? { request: backendConnection.request }
+            : undefined,
           dispatch,
           state,
         },
@@ -178,7 +180,13 @@ export function createTaskCallbacks({
       );
     },
     respondToQuestion: (requestId, response) => {
-      respondToQuestionIntent({ backendConnection, dispatch, state }, requestId, response);
+      respondToQuestionIntent({
+        backendConnection: backendConnection?.request
+          ? { request: backendConnection.request }
+          : undefined,
+        dispatch,
+        state,
+      }, requestId, response);
     },
     sendPrompt: (prompt) => {
       if (!state.snapshot) return;

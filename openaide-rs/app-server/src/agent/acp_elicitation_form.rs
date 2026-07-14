@@ -89,6 +89,7 @@ fn normalize_field(
             default,
             enum_values,
             one_of,
+            meta: _,
         } => {
             if enum_values.is_some() && one_of.is_some() {
                 return invalid("string field cannot contain both enum and oneOf");
@@ -137,6 +138,7 @@ fn normalize_field(
             minimum,
             maximum,
             default,
+            meta: _,
         } => {
             if minimum
                 .into_iter()
@@ -163,6 +165,7 @@ fn normalize_field(
             minimum,
             maximum,
             default,
+            meta: _,
         } => {
             if minimum.zip(maximum).is_some_and(|(min, max)| min > max) {
                 return invalid("integer field minimum exceeds maximum");
@@ -181,6 +184,7 @@ fn normalize_field(
             title,
             description,
             default,
+            meta: _,
         } => QuestionField::Boolean {
             key,
             title: title.unwrap_or(fallback),
@@ -195,6 +199,7 @@ fn normalize_field(
             max_items,
             items,
             default,
+            meta: _,
         } => {
             if min_items.zip(max_items).is_some_and(|(min, max)| min > max) {
                 return invalid("multi-select minimum exceeds maximum");

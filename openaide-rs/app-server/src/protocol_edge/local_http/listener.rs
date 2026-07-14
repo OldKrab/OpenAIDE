@@ -87,6 +87,8 @@ pub(crate) struct LocalHttpRequest {
     pub method: String,
     pub authorization: Option<String>,
     pub connection_id: Option<String>,
+    pub session_id: Option<String>,
+    pub after_sequence: Option<u64>,
     pub accepts_event_stream: bool,
     pub body: String,
 }
@@ -95,7 +97,7 @@ pub fn handle_app_stream(
     stream: &mut TcpStream,
     handler: &LocalHttpAppHandler,
 ) -> Result<(), LocalHttpProbeListenerError> {
-    handle_stream_with_push(
+    handle_stream_with_routes(
         stream,
         |request| {
             handler.handle(
@@ -105,6 +107,7 @@ pub fn handle_app_stream(
             )
         },
         |stream, request| handle_event_stream(stream, handler, request),
+        |_stream, request| Ok(handle_session_poll(handler, request)),
     )
 }
 
@@ -120,11 +123,30 @@ fn handle_stream_with_push(
     handler: impl FnOnce(LocalHttpRequest) -> LocalHttpResponse,
     push: impl FnOnce(&mut TcpStream, LocalHttpRequest) -> Result<(), LocalHttpProbeListenerError>,
 ) -> Result<(), LocalHttpProbeListenerError> {
+    handle_stream_with_routes(stream, handler, push, |_stream, _request| {
+        Ok(LocalHttpResponse {
+            status: 405,
+            body: String::new(),
+        })
+    })
+}
+
+fn handle_stream_with_routes(
+    stream: &mut TcpStream,
+    handler: impl FnOnce(LocalHttpRequest) -> LocalHttpResponse,
+    push: impl FnOnce(&mut TcpStream, LocalHttpRequest) -> Result<(), LocalHttpProbeListenerError>,
+    receive: impl FnOnce(
+        &mut TcpStream,
+        LocalHttpRequest,
+    ) -> Result<LocalHttpResponse, LocalHttpProbeListenerError>,
+) -> Result<(), LocalHttpProbeListenerError> {
     let request = match read_http_request(stream) {
         Ok(request) => LocalHttpRequest {
             method: request.method,
             authorization: request.authorization,
             connection_id: request.connection_id,
+            session_id: request.session_id,
+            after_sequence: request.after_sequence,
             accepts_event_stream: request.accepts_event_stream,
             body: request.body,
         },
@@ -153,6 +175,20 @@ fn handle_stream_with_push(
             })?;
             return Ok(());
         }
+        if request.method == "GET" {
+            let method = request.method.clone();
+            let connection_id = request.connection_id.clone();
+            let response = receive(stream, request)?;
+            let status = response.status;
+            return write_http_response(stream, &response).map_err(|error| {
+                error.with_request_context(
+                    "write_response",
+                    Some(&method),
+                    connection_id.as_deref(),
+                    Some(status),
+                )
+            });
+        }
         write_http_response(
             stream,
             &LocalHttpResponse {
@@ -180,6 +216,32 @@ fn handle_stream_with_push(
             Some(status),
         )
     })
+}
+
+fn handle_session_poll(
+    handler: &LocalHttpAppHandler,
+    request: LocalHttpRequest,
+) -> LocalHttpResponse {
+    let (Some(session_id), Some(after)) = (request.session_id.as_deref(), request.after_sequence)
+    else {
+        return LocalHttpResponse {
+            status: 400,
+            body: String::new(),
+        };
+    };
+    let deadline = std::time::Instant::now() + Duration::from_secs(25);
+    loop {
+        let response = handler.poll_session(
+            request.authorization.as_deref(),
+            request.connection_id.as_deref(),
+            session_id,
+            after,
+        );
+        if response.status != 204 || std::time::Instant::now() >= deadline {
+            return response;
+        }
+        std::thread::sleep(Duration::from_millis(16));
+    }
 }
 
 fn handle_event_stream(

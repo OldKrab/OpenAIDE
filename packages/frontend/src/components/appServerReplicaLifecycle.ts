@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState, type Dispatch } from "react";
 import type {
-  BackendStateReset,
+  BackendReplicaIdentity,
   ClientSnapshot,
 } from "@openaide/app-server-client";
 import {
@@ -9,9 +9,9 @@ import {
 } from "../state/appReducer";
 
 export type AppServerReplicaTransition = {
-  current: BackendStateReset;
+  current: BackendReplicaIdentity;
   epoch: number;
-  previous?: BackendStateReset;
+  previous?: BackendReplicaIdentity;
   rootChanged: boolean;
 };
 
@@ -22,9 +22,9 @@ export function useAppServerReplicaLifecycle(
 ) {
   const [replicaEpoch, setReplicaEpoch] = useState(0);
   const replicaEpochRef = useRef(0);
-  const replicaIdentity = useRef<BackendStateReset | undefined>(undefined);
+  const replicaIdentity = useRef<BackendReplicaIdentity | undefined>(undefined);
 
-  const establishReplica = useCallback((identity: BackendStateReset) => {
+  const establishReplica = useCallback((identity: BackendReplicaIdentity) => {
     const previous = replicaIdentity.current;
     const changed = !previous
       || previous.serverId !== identity.serverId
@@ -57,7 +57,7 @@ export function useAppServerReplicaLifecycle(
   };
 }
 
-export function replicaIdentityFromSnapshot(snapshot: ClientSnapshot): BackendStateReset {
+export function replicaIdentityFromSnapshot(snapshot: ClientSnapshot): BackendReplicaIdentity {
   return {
     serverId: snapshot.server.serverId,
     stateRootId: snapshot.stateRoot.stateRootId,

@@ -51,6 +51,7 @@ use crate::ids::{
     TaskListCursor, TurnId,
 };
 use crate::server_requests::{
+    PendingRequestResolution, PendingRequestResolveParams, PendingRequestResolveResult,
     PermissionRequestOption, PermissionRequestOptionKind, PermissionRequestParams,
     PermissionRequestResponse, PermissionToolCallRef, QuestionField, QuestionOption,
     QuestionRequestParams, QuestionRequestResponse, QuestionStringFormat, QuestionValue,
@@ -263,6 +264,9 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<AttachmentCandidateErrorCode>(output, config);
 
     push_decl::<PermissionRequestParams>(output, config);
+    push_decl::<PendingRequestResolveParams>(output, config);
+    push_decl::<PendingRequestResolution>(output, config);
+    push_decl::<PendingRequestResolveResult>(output, config);
     push_decl::<PermissionToolCallRef>(output, config);
     push_decl::<PermissionRequestOption>(output, config);
     push_decl::<PermissionRequestOptionKind>(output, config);

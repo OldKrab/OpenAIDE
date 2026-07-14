@@ -75,12 +75,12 @@ export function initializeParamsForBootstrap(
     shell: { kind: shellKind },
     requestedSurface: requestedSurfaceForBootstrap(bootstrap),
     capabilities: {
+      // Permission and Question UI is replicated Task state. The browser
+      // resolves it with pendingRequest/resolve, not reverse-RPC responses.
       protocol: [
         "requestResponses",
         "stableClientRequestIds",
         "resync",
-        "permissionResponses",
-        "questionResponses",
       ],
       shell: [
         "openExternal",

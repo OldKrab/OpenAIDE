@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   CLIENT_CAPABILITIES_CHANGED,
-  createLocalHttpBackendConnection,
+  createReliableLocalHttpBackendConnection,
   type BackendConnection,
   type ClientInstanceId,
   type ClientWorkspaceRoot,
@@ -57,7 +57,7 @@ export class AppServerHostClient {
       if (info.kind !== "localHttp") {
         throw new Error("VS Code host App Server client requires a local HTTP connection.");
       }
-      const connection = createLocalHttpBackendConnection({
+      const connection = createReliableLocalHttpBackendConnection({
         ...info,
         connectionId: `vscode-connection-${randomUUID()}`,
       });

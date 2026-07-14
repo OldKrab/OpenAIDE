@@ -72,6 +72,16 @@ impl AcpHostCapabilityHandlers {
         rpc_request_id: WireRequestId,
         request: ElicitationCreateRequest,
     ) -> agent_client_protocol::Result<ElicitationCreateResponse> {
+        logging::info(
+            "acp_elicitation_request_received",
+            json!({
+                "session_id": request.session_id,
+                "request_id": request.request_id,
+                "rpc_request_id": rpc_request_id,
+                "tool_call_id": request.tool_call_id,
+                "mode": request.mode,
+            }),
+        );
         let trace = request
             .session_id
             .as_ref()
@@ -117,6 +127,43 @@ impl AcpHostCapabilityHandlers {
             }
         }
         response
+    }
+
+    pub(super) fn trace_elicitation_decode_error(
+        &self,
+        rpc_request_id: &WireRequestId,
+        request: &serde_json::Value,
+        error: &agent_client_protocol::Error,
+    ) {
+        let session_id = request.get("sessionId").and_then(serde_json::Value::as_str);
+        logging::warn(
+            "acp_elicitation_request_decode_failed",
+            json!({
+                "session_id": session_id,
+                "rpc_request_id": rpc_request_id,
+                "error": error.to_string(),
+            }),
+        );
+        let trace = session_id
+            .and_then(|session_id| {
+                self.session_traces
+                    .lock()
+                    .expect("ACP session trace map lock poisoned")
+                    .get(session_id)
+                    .cloned()
+            })
+            .or_else(|| self.trace.clone());
+        if let Some(trace) = trace {
+            trace.record_value(
+                "agent_to_client",
+                "elicitation/create.decode_error",
+                json!({
+                    "rpcRequestId": rpc_request_id,
+                    "request": request,
+                    "error": error.to_string(),
+                }),
+            );
+        }
     }
 
     async fn create_elicitation_inner(

@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { AgentMessagePart } from "@openaide/app-shell-contracts";
 
 type Reveal = {
-  startedAt: number;
+  deadlineAt: number;
   text: string;
   visibleLength: number;
   settleAt?: number;
@@ -37,7 +37,7 @@ export function useLiveMessagePresentation({
     && authoritativeText.startsWith(previousText.current)
     && authoritativeText.length > previousText.current.length
       ? {
-          startedAt: revealRef.current?.startedAt ?? Date.now(),
+          deadlineAt: Date.now() + MAX_PRESENTATION_LAG_MS,
           text: authoritativeText,
           visibleLength: Math.min(
             revealRef.current?.visibleLength ?? previousText.current.length,
@@ -66,7 +66,7 @@ export function useLiveMessagePresentation({
     consumedCursor.current = eventCursor;
     const visibleLength = Math.min(revealRef.current?.visibleLength ?? priorText.length, authoritativeText.length);
     const next = {
-      startedAt: revealRef.current?.startedAt ?? Date.now(),
+      deadlineAt: Date.now() + MAX_PRESENTATION_LAG_MS,
       text: authoritativeText,
       visibleLength,
     };
@@ -75,21 +75,26 @@ export function useLiveMessagePresentation({
     previousText.current = authoritativeText;
   }, [authoritativeText, eventCursor, shouldAnimate]);
 
+  const presenting = reveal !== undefined;
   useEffect(() => {
-    if (!reveal) return undefined;
-    const now = Date.now();
-    if (reveal.visibleLength < reveal.text.length) {
-      return scheduleFrame(() => {
-        const current = revealRef.current;
-        if (!current) return;
-        const tick = Date.now();
-        const elapsed = tick - current.startedAt;
+    if (!presenting) return undefined;
+    let cancelled = false;
+    let cancelFrame: (() => void) | undefined;
+
+    // Keep one frame loop alive for the whole presentation. Incoming chunks
+    // update the target and deadline through revealRef without restarting it.
+    const animate = () => {
+      if (cancelled) return;
+      const current = revealRef.current;
+      if (!current) return;
+      const tick = Date.now();
+      if (current.visibleLength < current.text.length) {
         const remaining = current.text.length - current.visibleLength;
         const framesRemaining = Math.max(
           1,
-          Math.ceil((MAX_PRESENTATION_LAG_MS - elapsed) / FRAME_MS),
+          Math.ceil((current.deadlineAt - tick) / FRAME_MS),
         );
-        const visibleLength = elapsed >= MAX_PRESENTATION_LAG_MS
+        const visibleLength = tick >= current.deadlineAt
           ? current.text.length
           : Math.min(current.text.length, current.visibleLength + Math.ceil(remaining / framesRemaining));
         const next = {
@@ -99,17 +104,24 @@ export function useLiveMessagePresentation({
         };
         revealRef.current = next;
         setReveal(next);
-      });
-    }
-    const delay = Math.max(0, (reveal.settleAt ?? now) - now);
-    const timer = window.setTimeout(() => {
-      const current = revealRef.current;
-      if (!current) return;
-      revealRef.current = undefined;
-      setReveal(undefined);
-    }, delay);
-    return () => window.clearTimeout(timer);
-  }, [reveal]);
+      } else if (current.settleAt === undefined) {
+        const next = { ...current, settleAt: tick + CARET_SETTLE_MS };
+        revealRef.current = next;
+        setReveal(next);
+      } else if (tick >= current.settleAt) {
+        revealRef.current = undefined;
+        setReveal(undefined);
+        return;
+      }
+      cancelFrame = scheduleFrame(animate);
+    };
+
+    cancelFrame = scheduleFrame(animate);
+    return () => {
+      cancelled = true;
+      cancelFrame?.();
+    };
+  }, [presenting]);
 
   const presentedReveal = pendingReveal ?? reveal;
   return useMemo(() => ({

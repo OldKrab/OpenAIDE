@@ -55,14 +55,36 @@ describe("chatPaging", () => {
     });
   });
 
-  it("preserves distinct thought identities instead of guessing chunk boundaries from adjacency", () => {
+  it("groups consecutive Thoughts while preserving their message identities", () => {
     const chat = renderedChat(snapshot([thoughtMessage("m1", "Think"), thoughtMessage("m2", "ing")]), undefined);
 
-    expect(chat.items.map((item) => item.message_id)).toEqual(["m1", "m2"]);
-    expect(chat.items.map((item) => item.message)).toMatchObject([
-      { kind: "agent_message", id: "m1", role: "thought", parts: [{ kind: "text", text: "Think" }] },
-      { kind: "agent_message", id: "m2", role: "thought", parts: [{ kind: "text", text: "ing" }] },
-    ]);
+    expect(chat.items).toHaveLength(1);
+    expect(chat.items[0]).toMatchObject({
+      message_id: "m1",
+      cursor: "cursor_m2",
+      message: {
+        kind: "activity",
+        steps: [
+          { kind: "thought", message_id: "m1", text: "Think" },
+          { kind: "thought", message_id: "m2", text: "ing" },
+        ],
+      },
+    });
+  });
+
+  it("keeps one Thought as a standalone Thinking disclosure", () => {
+    const chat = renderedChat(snapshot([thoughtMessage("m1", "Inspect the request")]), undefined);
+
+    expect(chat.items).toHaveLength(1);
+    expect(chat.items[0]).toMatchObject({
+      message_id: "m1",
+      message: {
+        kind: "agent_message",
+        id: "m1",
+        role: "thought",
+        parts: [{ kind: "text", text: "Inspect the request" }],
+      },
+    });
   });
 
   it("preserves distinct Agent message identities instead of joining short adjacent text", () => {

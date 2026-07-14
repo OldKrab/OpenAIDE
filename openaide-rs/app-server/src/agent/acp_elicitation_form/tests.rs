@@ -30,6 +30,7 @@ fn full_restricted_schema_normalizes_without_raw_acp_payloads() {
                     default: Some("project".to_string()),
                     enum_values: None,
                     one_of: None,
+                    meta: None,
                 },
             ),
             (
@@ -40,6 +41,7 @@ fn full_restricted_schema_normalizes_without_raw_acp_payloads() {
                     minimum: Some(0.0),
                     maximum: Some(1.0),
                     default: Some(0.5),
+                    meta: None,
                 },
             ),
             (
@@ -50,6 +52,7 @@ fn full_restricted_schema_normalizes_without_raw_acp_payloads() {
                     minimum: Some(1),
                     maximum: Some(10),
                     default: Some(2),
+                    meta: None,
                 },
             ),
             (
@@ -58,6 +61,7 @@ fn full_restricted_schema_normalizes_without_raw_acp_payloads() {
                     title: None,
                     description: None,
                     default: Some(true),
+                    meta: None,
                 },
             ),
             (
@@ -72,6 +76,7 @@ fn full_restricted_schema_normalizes_without_raw_acp_payloads() {
                     default: None,
                     enum_values: None,
                     one_of: None,
+                    meta: None,
                 },
             ),
         ]),
@@ -105,6 +110,7 @@ fn response_validation_rejects_wrong_types_unknown_fields_and_constraints() {
                 default: None,
                 enum_values: None,
                 one_of: None,
+                meta: None,
             },
         )]),
     };
@@ -139,6 +145,7 @@ fn schema_budgets_reject_oversized_forms() {
                     title: None,
                     description: None,
                     default: None,
+                    meta: None,
                 },
             )
         })

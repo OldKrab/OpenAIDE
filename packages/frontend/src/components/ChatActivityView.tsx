@@ -32,7 +32,10 @@ export function ChatActivityView({
   // Longer reasoning runs stay recoverable without overwhelming the default activity scan.
   const [showThoughts, setShowThoughts] = useState(false);
   const thoughtCount = activity.steps.filter((step) => step.kind === "thought").length;
-  const thoughtsAreCollapsible = thoughtCount > 2;
+  const hasNonThoughtStep = activity.steps.some((step) => step.kind !== "thought");
+  // A Thought-only group is itself the reasoning disclosure, so opening it must
+  // reveal the complete run without a second visibility control.
+  const thoughtsAreCollapsible = hasNonThoughtStep && thoughtCount > 2;
   return (
     <AnimatedDisclosure
       className={`activity-group ${activity.status}`}

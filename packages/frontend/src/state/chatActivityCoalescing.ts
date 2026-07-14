@@ -11,7 +11,7 @@ type ActivityRunProjection = { run: ActivityRunMessage[]; message: ChatMessage }
 // its first row lets React retain completed tool groups while only the live tail changes.
 const activityRunProjections = new WeakMap<ActivityRunMessage, ActivityRunProjection>();
 
-/** Presents each uninterrupted run of tool activity as one ordered disclosure group. */
+/** Presents each uninterrupted multi-row Thought/Tool run as one ordered disclosure group. */
 export function coalesceAdjacentActivities(items: ChatMessage[]) {
   const merged: ChatMessage[] = [];
   let index = 0;
@@ -29,7 +29,9 @@ export function coalesceAdjacentActivities(items: ChatMessage[]) {
       index += 1;
     }
 
-    if (run.length > 1 && run.some((runItem) => runItem.message.kind === "activity")) {
+    // A single Thought keeps its lightweight Thinking disclosure. Every larger
+    // run becomes one activity group; a single Tool is already an activity row.
+    if (run.length > 1) {
       merged.push(stableActivityRun(run));
     } else {
       merged.push(...run);

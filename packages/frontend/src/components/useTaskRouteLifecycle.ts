@@ -72,20 +72,14 @@ export function useTaskRouteLifecycle({
   }, [routeOpenError]);
 
   useEffect(() => {
-    if (!backendConnection?.events || !backendReady || !backendInitialized.current || !snapshot) return;
+    if (!backendConnection || !backendReady || !backendInitialized.current || !snapshot) return;
     const context = stateSubscriptionContext.current;
     if (!context) return;
     const taskId = snapshot.task.task_id;
     const subscriptionKey = `${backendStateGeneration}:${taskId}`;
     let active = true;
     const stop = startAppServerStateSubscription({
-      backendConnection: {
-        eventStreamDisconnects: backendConnection.eventStreamDisconnects,
-        events: backendConnection.events,
-        request: backendConnection.request,
-        serverRequests: backendConnection.serverRequests,
-        stateResets: backendConnection.stateResets,
-      },
+      backendConnection,
       context,
       dispatch,
       onBaselineLost: () => {
@@ -189,7 +183,7 @@ export function useTaskRouteLifecycle({
   const taskSubscriptionKey = snapshot
     ? `${backendStateGeneration}:${snapshot.task.task_id}`
     : undefined;
-  const taskSubscriptionReady = !backendConnection?.events
+  const taskSubscriptionReady = !backendConnection
     || taskSubscriptionKey === undefined
     || readyTaskSubscriptionKey === taskSubscriptionKey;
   const routeOpenKey = bootstrap.surface === "task" && bootstrap.taskId

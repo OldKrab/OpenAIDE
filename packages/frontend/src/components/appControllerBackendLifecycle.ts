@@ -39,6 +39,7 @@ import {
 } from "../state/appReducer";
 import type { AgentOption } from "../state/composerOptions";
 import { routeHostMessage } from "../state/hostMessageRouter";
+import { sendWebviewTelemetry } from "../state/hostMessageTelemetry";
 import type { WebviewBootstrap } from "../state/surfaceTypes";
 import type { AppState } from "../state/store";
 import {
@@ -60,8 +61,8 @@ export type { AppServerReplicaTransition } from "./appServerReplicaLifecycle";
 
 export type AppControllerBackendConnection = Pick<
   BackendConnection,
-  "initialize" | "request" | "respond" | "serverRequests" | "close"
-> & Partial<Pick<BackendConnection, "events" | "eventStreamDisconnects" | "stateResets">>;
+  "initialize" | "request" | "handleNotification" | "handleRequest" | "close"
+>;
 
 export type BackendConnectionState =
   | { status: "connecting" }
@@ -139,14 +140,20 @@ export function useAppControllerBackendLifecycle({
     intent: SnapshotIntent,
   ) => operationOwner.acceptSnapshot(taskId, requestId, intent);
   const markSubscriptionError = (key: string, error: unknown) => {
-    // Browser fetch errors vary by engine and are diagnostic detail, not product copy.
-    console.warn("App Server subscription refresh failed.", error);
+    sendWebviewTelemetry(postHostMessage, "app_server_subscription_failed", {
+      request: key,
+      error_name: errorName(error),
+    });
     const message = "App Server is temporarily unavailable.";
     failedSubscriptionBaselines.current.set(key, message);
     setBackendConnectionState({ status: "reconnecting", message });
   };
   const markGlobalSubscriptionLost = (key: string) => {
+    const alreadyPending = pendingGlobalSubscriptionBaselines.current.has(key);
     pendingGlobalSubscriptionBaselines.current.add(key);
+    if (!alreadyPending) {
+      sendWebviewTelemetry(postHostMessage, "app_server_subscription_lost", { request: key });
+    }
     setBackendReady(false);
     setBackendConnectionState({
       status: "reconnecting",
@@ -154,8 +161,13 @@ export function useAppControllerBackendLifecycle({
     });
   };
   const markSubscriptionReady = (key: string) => {
+    const recovered = failedSubscriptionBaselines.current.has(key)
+      || pendingGlobalSubscriptionBaselines.current.has(key);
     failedSubscriptionBaselines.current.delete(key);
     pendingGlobalSubscriptionBaselines.current.delete(key);
+    if (recovered) {
+      sendWebviewTelemetry(postHostMessage, "app_server_subscription_recovered", { request: key });
+    }
     const remainingMessage = [...failedSubscriptionBaselines.current.values()].at(-1);
     if (remainingMessage) {
       setBackendConnectionState({ status: "reconnecting", message: remainingMessage });
@@ -175,54 +187,13 @@ export function useAppControllerBackendLifecycle({
   useEffect(() => {
     if (initialBootstrap.surface === "invalid") return;
     let active = true;
-    const serverRequestBridge = backendConnection?.serverRequests
+    const serverRequestBridge = backendConnection?.handleRequest
       ? startAppServerServerRequestBridge({
-          backendConnection,
+          backendConnection: { handleRequest: backendConnection.handleRequest },
           postHostMessage,
         })
       : undefined;
     const stopSubscriptions: Array<() => void> = [];
-    const stopEventStreamDisconnects = backendConnection?.eventStreamDisconnects?.(() => {
-      pendingGlobalSubscriptionBaselines.current = new Set([
-        "projects",
-        "agents",
-        "task-navigation",
-      ]);
-      setBackendReady(false);
-      taskRouteLifecycle.reset();
-      setBackendConnectionState({
-        status: "reconnecting",
-        message: "Connection interrupted. Reconnecting automatically.",
-      });
-    });
-    const stopBackendStateResets = backendConnection?.stateResets?.((reset) => {
-      const previousRootId = replicaIdentity.current?.stateRootId;
-      establishReplica(reset);
-      if (reset && stateSubscriptionContext.current) {
-        stateSubscriptionContext.current.stateRootId = reset.stateRootId;
-        if (previousRootId !== undefined && previousRootId !== reset.stateRootId) {
-          // Labels from another root are not valid fallbacks while replacement
-          // project/agent baselines are racing one another.
-          stateSubscriptionContext.current.projects = undefined;
-          stateSubscriptionContext.current.agents = undefined;
-          stateSubscriptionContext.current.taskNavigation = undefined;
-        }
-      }
-      setBackendStateGeneration((generation) => generation + 1);
-      if (backendConnection?.events) {
-        pendingGlobalSubscriptionBaselines.current = new Set([
-          "projects",
-          "agents",
-          "task-navigation",
-        ]);
-        setBackendReady(false);
-      }
-      taskRouteLifecycle.reset();
-      setBackendConnectionState({
-        status: "reconnecting",
-        message: "Connection interrupted. Reconnecting automatically.",
-      });
-    });
     setBackendStateGeneration((generation) => generation + 1);
     backendInitialized.current = false;
     failedSubscriptionBaselines.current.clear();
@@ -280,12 +251,10 @@ export function useAppControllerBackendLifecycle({
             if (result.snapshot.agents) {
               setAgents(agentOptionsFromProtocol(result.snapshot.agents));
             }
-            if (backendConnection.events) {
+            if (backendConnection) {
               const subscriptionConnection = {
-                eventStreamDisconnects: backendConnection.eventStreamDisconnects,
-                events: backendConnection.events,
+                handleNotification: backendConnection.handleNotification,
                 request: backendConnection.request,
-                stateResets: backendConnection.stateResets,
               };
               stopSubscriptions.push(startAppServerStateSubscription({
                 backendConnection: subscriptionConnection,
@@ -351,6 +320,9 @@ export function useAppControllerBackendLifecycle({
             // Route opening also starts App Server recovery work, so the route effect must
             // own task/open even when initialize already supplied cached task state.
             backendInitialized.current = true;
+            sendWebviewTelemetry(postHostMessage, "app_server_initialize_completed", {
+              surface: initialBootstrap.surface,
+            });
             const globalBaselinesReady = pendingGlobalSubscriptionBaselines.current.size === 0;
             setBackendReady(globalBaselinesReady);
             if (failedSubscriptionBaselines.current.size === 0 && globalBaselinesReady) {
@@ -359,6 +331,10 @@ export function useAppControllerBackendLifecycle({
           })
           .catch((error) => {
             if (!active) return;
+            sendWebviewTelemetry(postHostMessage, "app_server_initialize_failed", {
+              surface: initialBootstrap.surface,
+              error_name: errorName(error),
+            });
             backendInitialized.current = false;
             setBackendReady(false);
             const message = error instanceof Error ? error.message : "Unable to connect to App Server.";
@@ -370,6 +346,10 @@ export function useAppControllerBackendLifecycle({
             dispatchStartupReadError(bootstrap, dispatch);
           });
       } else {
+        sendWebviewTelemetry(postHostMessage, "app_server_connection_unavailable", {
+          surface: initialBootstrap.surface,
+          reason: "missing_bootstrap_connection",
+        });
         setBackendConnectionState({
           status: "unavailable",
           message: "App Server connection unavailable.",
@@ -398,8 +378,6 @@ export function useAppControllerBackendLifecycle({
       setBackendReady(false);
       taskRouteLifecycle.reset();
       stateSubscriptionContext.current = undefined;
-      stopEventStreamDisconnects?.();
-      stopBackendStateResets?.();
       for (const stop of stopSubscriptions) stop();
       serverRequestBridge?.dispose();
       stopSession();
@@ -448,4 +426,8 @@ export function useAppControllerBackendLifecycle({
     replicaEpoch,
     retryTaskOpen: taskRouteLifecycle.retryTaskOpen,
   };
+}
+
+function errorName(error: unknown) {
+  return error instanceof Error && error.name ? error.name : typeof error;
 }

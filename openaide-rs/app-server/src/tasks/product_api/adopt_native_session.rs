@@ -35,6 +35,17 @@ impl TaskProductApi {
             .map_err(protocol_error_from_runtime)?;
 
         let now = now_string();
+        // Preserve the activity time shown in Native Session navigation when the row becomes a
+        // Task. Adoption time is persistence metadata, not new conversation activity.
+        let last_activity = self
+            .history_sync
+            .cached_session(
+                params.agent_id.as_str(),
+                &project.workspace_root,
+                &params.native_session_id,
+            )
+            .and_then(|session| session.last_activity.or(session.updated_at))
+            .unwrap_or_else(|| now.clone());
         let task_id = format!("task_{}", Uuid::new_v4());
         let loaded = self
             .agent_gateway
@@ -62,6 +73,7 @@ impl TaskProductApi {
             project.isolation,
             &task_id,
             &now,
+            &last_activity,
             title,
             &session_id,
             loaded,
@@ -101,6 +113,7 @@ impl TaskProductApi {
         isolation: IsolationKind,
         task_id: &str,
         now: &str,
+        last_activity: &str,
         title: Option<TaskTitle>,
         session_id: &str,
         loaded: AgentLoadedSession,
@@ -117,7 +130,7 @@ impl TaskProductApi {
             unread: false,
             created_at: now.to_string(),
             updated_at: now.to_string(),
-            last_activity: now.to_string(),
+            last_activity: last_activity.to_string(),
             agent_name: self
                 .agent_registry
                 .display_name(params.agent_id.as_str(), None)?,

@@ -1,10 +1,10 @@
-import { PERMISSION_REQUEST, QUESTION_REQUEST, type BackendConnection, type RequestId } from "@openaide/app-server-client";
+import { PENDING_REQUEST_RESOLVE, type BackendConnection, type RequestId } from "@openaide/app-server-client";
 import type { ElicitationResponse } from "@openaide/app-shell-contracts";
 import type { AppAction } from "../state/appReducer";
 import type { AppState } from "../state/store";
 
 export type TaskIntentDependencies = {
-  backendConnection?: Pick<BackendConnection, "respond">;
+  backendConnection?: Pick<BackendConnection, "request">;
   dispatch: (action: AppAction) => void;
   state: AppState;
 };
@@ -22,17 +22,17 @@ export function respondToPermissionIntent(
     dispatchPermissionError(dispatch, requestId, new Error("App Server connection unavailable"));
     return;
   }
-  let result: Promise<void> | void;
+  let result: Promise<unknown>;
   try {
-    result = backendConnection.respond<typeof PERMISSION_REQUEST>(requestId as RequestId, { optionId });
+    result = backendConnection.request(PENDING_REQUEST_RESOLVE, {
+      requestId: requestId as RequestId,
+      resolution: { kind: "permission", optionId },
+    });
   } catch (error) {
     dispatchPermissionError(dispatch, requestId, error);
     return;
   }
-  if (isPromiseLike(result)) {
-    void result.catch((error) => dispatchPermissionError(dispatch, requestId, error));
-    return;
-  }
+  void result.catch((error) => dispatchPermissionError(dispatch, requestId, error));
 }
 
 export function respondToQuestionIntent(
@@ -46,21 +46,17 @@ export function respondToQuestionIntent(
     dispatchQuestionError(dispatch, requestId, new Error("App Server connection unavailable"));
     return;
   }
-  let result: Promise<void> | void;
+  let result: Promise<unknown>;
   try {
-    result = backendConnection.respond<typeof QUESTION_REQUEST>(requestId as RequestId, response);
+    result = backendConnection.request(PENDING_REQUEST_RESOLVE, {
+      requestId: requestId as RequestId,
+      resolution: { kind: "question", response },
+    });
   } catch (error) {
     dispatchQuestionError(dispatch, requestId, error);
     return;
   }
-  if (isPromiseLike(result)) {
-    void result.catch((error) => dispatchQuestionError(dispatch, requestId, error));
-    return;
-  }
-}
-
-function isPromiseLike(value: void | Promise<void>): value is Promise<void> {
-  return Boolean(value && typeof value === "object" && "catch" in value);
+  void result.catch((error) => dispatchQuestionError(dispatch, requestId, error));
 }
 
 function dispatchPermissionError(

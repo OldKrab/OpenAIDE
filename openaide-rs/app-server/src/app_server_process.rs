@@ -176,7 +176,11 @@ pub fn publish_local_http_probe_endpoint(
     start_client_liveness_expirer(gateway.clone(), endpoint.clone());
     start_local_http_listener(
         listener,
-        LocalHttpAppHandler::new(gateway, endpoint.auth_token.clone()),
+        LocalHttpAppHandler::new(
+            gateway,
+            endpoint.auth_token.clone(),
+            endpoint.server_id.clone(),
+        ),
     );
     Ok(endpoint)
 }

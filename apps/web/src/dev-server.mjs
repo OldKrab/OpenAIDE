@@ -231,20 +231,16 @@ async function serveStaticFrontend(req, res, url) {
 }
 
 async function proxyAppServer(req, res, url) {
-  if (req.method !== "POST" && req.method !== "OPTIONS") {
+  if (req.method !== "GET" && req.method !== "POST" && req.method !== "OPTIONS") {
     writeText(res, 405, "Method not allowed");
     return;
   }
-  const body = await readRequestBody(req);
-  try {
-    await startAppServer();
-    await forwardAppServerRequest(req, res, url, body);
-  } catch (error) {
-    if (!isRestartableAppServerFailure(error)) throw error;
-    appServerManager.clearConnection();
-    await startAppServer();
-    await forwardAppServerRequest(req, res, url, body);
-  }
+  const body = req.method === "POST" ? await readRequestBody(req) : Buffer.alloc(0);
+  await startAppServer();
+  // An ambiguous proxy failure may happen after App Server acceptance. Only the
+  // sequenced client transport may retry the identical frame; the proxy must
+  // never manufacture a second application delivery.
+  await forwardAppServerRequest(req, res, url, body);
 }
 
 function forwardAppServerRequest(req, res, url, body) {
@@ -300,11 +296,6 @@ function spawnAppServer() {
     },
     stdio: ["pipe", "pipe", "inherit"],
   });
-}
-
-function isRestartableAppServerFailure(error) {
-  if (error instanceof Error && error.message === "App Server connection is not ready") return true;
-  return error && typeof error === "object" && ["ECONNREFUSED", "ECONNRESET", "EPIPE"].includes(error.code);
 }
 
 function readRequestBody(req) {
@@ -368,7 +359,6 @@ function isPrototypePath(pathname) {
 
 function writeFavicon(res) {
   const body = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <rect width="64" height="64" rx="14" fill="#252526"/>
   <g transform="translate(4 4) scale(2.333333)" color="#4d9cff">
     <path d="M12 2V7M12 17V22M2 12H7M17 12H22" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="square" stroke-linejoin="bevel"/>
     <path d="M4.2 4.2L7.8 7.8M16.2 7.8L19.8 4.2M16.2 16.2L19.8 19.8M7.8 16.2L4.2 19.8" fill="none" stroke="currentColor" stroke-width="2.75" stroke-linecap="square" stroke-linejoin="bevel"/>

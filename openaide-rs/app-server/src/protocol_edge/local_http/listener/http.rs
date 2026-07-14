@@ -12,6 +12,8 @@ pub(super) struct HttpRequest {
     pub method: String,
     pub authorization: Option<String>,
     pub connection_id: Option<String>,
+    pub session_id: Option<String>,
+    pub after_sequence: Option<u64>,
     pub accepts_event_stream: bool,
     pub body: String,
 }
@@ -27,6 +29,9 @@ pub(super) fn read_http_request(
     let method = request_method(&headers)?;
     let authorization = header_value(&headers, "authorization").map(str::to_string);
     let connection_id = header_value(&headers, "x-openaide-connection-id").map(str::to_string);
+    let session_id = header_value(&headers, "x-openaide-session-id").map(str::to_string);
+    let after_sequence =
+        header_value(&headers, "x-openaide-after").and_then(|value| value.parse::<u64>().ok());
     let accepts_event_stream = header_value(&headers, "accept").is_some_and(|value| {
         value
             .split(',')
@@ -55,6 +60,8 @@ pub(super) fn read_http_request(
         method,
         authorization,
         connection_id,
+        session_id,
+        after_sequence,
         accepts_event_stream,
         body,
     })
@@ -97,7 +104,7 @@ pub(super) fn write_http_response(
         "Content-Type: application/json\r\n".to_string()
     };
     let wire = format!(
-        "HTTP/1.1 {} {}\r\n{}Access-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: POST, OPTIONS\r\nAccess-Control-Allow-Headers: Authorization, Content-Type, X-OpenAIDE-Connection-Id\r\nAccess-Control-Max-Age: 600\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        "HTTP/1.1 {} {}\r\n{}Access-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Authorization, Content-Type, X-OpenAIDE-Connection-Id, X-OpenAIDE-Session-Id, X-OpenAIDE-After\r\nAccess-Control-Max-Age: 600\r\nCache-Control: no-store\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
         response.status,
         reason_phrase(response.status),
         content_type,
@@ -185,7 +192,7 @@ fn content_length(headers: &str, method: &str) -> Result<usize, LocalHttpProbeLi
     let Some(value) = header_value(headers, "content-length") else {
         // Browser CORS preflights have no body and are not required to carry a
         // Content-Length header. Protocol POST requests remain strictly framed.
-        return if method == "OPTIONS" {
+        return if method == "OPTIONS" || method == "GET" {
             Ok(0)
         } else {
             Err(LocalHttpProbeListenerError::MalformedRequest(

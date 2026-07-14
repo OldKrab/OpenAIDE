@@ -10,10 +10,11 @@ use crate::agent::acp_schema::{
     LoadSessionResponse, NewSessionRequest, NewSessionResponse, PermissionOption,
     PermissionOptionKind, ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest,
     RequestPermissionOutcome, RequestPermissionRequest, SessionUpdate, TerminalOutputRequest,
-    TextContent, ToolCallUpdate, ToolCallUpdateFields, WaitForTerminalExitRequest,
+    TextContent, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, WaitForTerminalExitRequest,
     WriteTextFileRequest,
 };
 use agent_client_protocol::Client;
+use serde::{Deserialize, Serialize};
 
 use crate::agent::acp_elicitation_wire::ElicitationCreateResponse;
 use crate::agent::acp_host_terminal_ownership::{AcpHostTerminalRegistry, AcpTerminalOwnerId};
@@ -35,6 +36,21 @@ struct LoadReplayConnectionTestAgent;
 #[derive(Clone)]
 struct ElicitationConnectionTestAgent {
     done_tx: mpsc::Sender<()>,
+}
+
+#[derive(Clone)]
+struct MalformedElicitationConnectionTestAgent {
+    done_tx: mpsc::Sender<()>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, agent_client_protocol::JsonRpcRequest)]
+#[request(method = "elicitation/create", response = ElicitationCreateResponse)]
+#[serde(rename_all = "camelCase")]
+struct MalformedElicitationRequest {
+    session_id: String,
+    mode: String,
+    message: String,
+    requested_schema: serde_json::Value,
 }
 
 #[derive(Clone)]
@@ -208,6 +224,39 @@ impl agent_client_protocol::ConnectTo<Client> for ElicitationConnectionTestAgent
                     .expect("valid elicitation request");
                 let response = connection.send_request(request).block_task().await?;
                 assert!(matches!(response, ElicitationCreateResponse::Cancel));
+                let _ = self.done_tx.send(());
+                Ok(())
+            })
+    }
+}
+
+impl agent_client_protocol::ConnectTo<Client> for MalformedElicitationConnectionTestAgent {
+    fn connect_to(
+        self,
+        client: impl agent_client_protocol::ConnectTo<Agent>,
+    ) -> impl std::future::Future<Output = agent_client_protocol::Result<()>> + Send {
+        Agent
+            .builder()
+            .name("malformed-elicitation-connection-test-agent")
+            .connect_with(client, async move |connection| {
+                let result = connection
+                    .send_request(MalformedElicitationRequest {
+                        session_id: "session_1".to_string(),
+                        mode: "form".to_string(),
+                        message: "Choose".to_string(),
+                        requested_schema: serde_json::json!({
+                            "type": "object",
+                            "properties": {
+                                "direction": {
+                                    "type": "string",
+                                    "unknownConstraint": true
+                                }
+                            }
+                        }),
+                    })
+                    .block_task()
+                    .await;
+                assert!(result.is_err());
                 let _ = self.done_tx.send(());
                 Ok(())
             })
@@ -607,21 +656,57 @@ fn connection_traces_elicitation_request_and_response_to_owning_session() {
 }
 
 #[test]
+fn connection_traces_elicitation_decode_errors_to_owning_session() {
+    let temp = tempfile::TempDir::new().expect("trace temp dir");
+    let trace_state = AcpTraceState::disabled(temp.path());
+    trace_state.set_enabled(true).expect("enable ACP trace");
+    let trace = AcpTraceSession::new(trace_state, "task_1", "connection-test");
+    let mut context = connection_context(HostBridge::disabled(), Arc::default());
+    context.session_traces = Arc::new(Mutex::new(HashMap::from([(
+        "session_1".to_string(),
+        trace,
+    )])));
+    let (done_tx, done_rx) = mpsc::channel();
+
+    tokio::runtime::Runtime::new().unwrap().block_on(async {
+        connect_acp_session_client(
+            MalformedElicitationConnectionTestAgent { done_tx },
+            context,
+            async |_connection| wait_for_done(done_rx).await,
+        )
+        .await
+        .unwrap();
+    });
+
+    let trace_dir = temp.path().join("diagnostics").join("acp-traces");
+    let trace_content = wait_for_trace_content(&trace_dir);
+    assert!(trace_content.contains("\"event\":\"elicitation/create.decode_error\""));
+    assert!(trace_content.contains("unknownConstraint"));
+    assert!(trace_content.contains("unknown field"));
+}
+
+#[test]
 fn notification_handler_traces_and_forwards_unmatched_updates_without_retry() {
     let temp = tempfile::TempDir::new().expect("trace temp dir");
     let trace_state = AcpTraceState::disabled(temp.path());
     trace_state.set_enabled(true).expect("enable ACP trace");
     let trace = AcpTraceSession::new(trace_state, "task_1", "connection-test");
+    let session_traces = Arc::new(Mutex::new(HashMap::from([(
+        "other_session".to_string(),
+        trace,
+    )])));
     let load_replay = Arc::new(Mutex::new(HashMap::new()));
     let notification = SessionNotification::new(
         "other_session",
-        SessionUpdate::UserMessageChunk(ContentChunk::new(ContentBlock::Text(TextContent::new(
-            "forwarded",
-        )))),
+        SessionUpdate::ToolCallUpdate(ToolCallUpdate::new(
+            "tool_terminal",
+            ToolCallUpdateFields::new().status(ToolCallStatus::Completed),
+        )),
     );
 
-    let forwarded = handle_session_update_notification(notification, &Some(trace), &load_replay)
-        .expect("unmatched update should be forwarded");
+    let forwarded =
+        handle_session_update_notification(notification, &None, &session_traces, &load_replay)
+            .expect("unmatched update should be forwarded");
     match unhandled_session_update(forwarded, ()) {
         Handled::No { retry, .. } => assert!(!retry),
         Handled::Yes => panic!("unmatched update should not be handled"),
@@ -631,4 +716,6 @@ fn notification_handler_traces_and_forwards_unmatched_updates_without_retry() {
     let trace_content = wait_for_trace_content(&trace_dir);
     assert!(trace_content.contains("\"event\":\"session/update\""));
     assert!(trace_content.contains("\"sessionId\":\"other_session\""));
+    assert!(trace_content.contains("\"toolCallId\":\"tool_terminal\""));
+    assert!(trace_content.contains("\"status\":\"completed\""));
 }

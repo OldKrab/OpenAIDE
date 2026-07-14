@@ -25,7 +25,10 @@ use crate::client::{
 };
 use crate::diagnostics::{RuntimeDiagnosticsParams, RuntimeDiagnosticsResult};
 use crate::envelopes::{ClientRequestEnvelope, RequestMeta, ResponseEnvelope, ResponseMeta};
-use crate::server_requests::{ShellResolveFileRevealParams, ShellResolveFileRevealResult};
+use crate::server_requests::{
+    PendingRequestResolveParams, PendingRequestResolveResult, ShellResolveFileRevealParams,
+    ShellResolveFileRevealResult,
+};
 use crate::settings::{
     AppPreferencesParams, AppPreferencesResult, AppPreferencesUpdateParams, RuntimeSettingsParams,
     RuntimeSettingsResult, RuntimeSettingsUpdateParams, SettingsMcpServersParams,
@@ -109,6 +112,12 @@ protocol_method!(
     CLIENT_HEARTBEAT,
     ClientHeartbeatParams,
     ClientHeartbeatResult
+);
+protocol_method!(
+    PendingRequestResolve,
+    PENDING_REQUEST_RESOLVE,
+    PendingRequestResolveParams,
+    PendingRequestResolveResult
 );
 protocol_method!(
     StateSubscribe,

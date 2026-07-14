@@ -15,6 +15,8 @@ import { currentWorkspaceRoot } from "../workspace/roots";
 
 type PanelBootstrap = Omit<WebviewBootstrap, "shell">;
 
+const MAX_TASK_PANEL_TITLE_LENGTH = 50;
+
 export class TaskEditorManager implements vscode.Disposable, WebviewHost {
   private readonly taskPanels = new Map<string, vscode.WebviewPanel>();
   private readonly panelBootstraps = new WeakMap<vscode.WebviewPanel, WebviewBootstrap>();
@@ -53,7 +55,7 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost {
       existing.reveal(vscode.ViewColumn.Active);
       return;
     }
-    const panel = this.createPanel("openaide.task", title, { surface: "task", taskId });
+    const panel = this.createPanel("openaide.task", taskPanelTitle(title), { surface: "task", taskId });
     this.taskPanels.set(taskId, panel);
     panel.onDidDispose(() => {
       this.nextPanelGeneration(panel);
@@ -149,7 +151,7 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost {
       existingTaskPanel.reveal(vscode.ViewColumn.Active);
       return;
     }
-    panel.title = title.trim() || "Task";
+    panel.title = taskPanelTitle(title);
     const current = this.panelBootstraps.get(panel);
     this.panelBootstraps.set(panel, {
       ...(current ?? { surface: "task", shell: VSCODE_SHELL }),
@@ -186,4 +188,11 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost {
   private bootstrap(bootstrap: PanelBootstrap): WebviewBootstrap {
     return { ...bootstrap, shell: VSCODE_SHELL };
   }
+}
+
+/** Keeps the native VS Code tab navigable while the Task retains its complete title. */
+function taskPanelTitle(title: string) {
+  const normalized = title.trim() || "Task";
+  if (normalized.length <= MAX_TASK_PANEL_TITLE_LENGTH) return normalized;
+  return `${normalized.slice(0, MAX_TASK_PANEL_TITLE_LENGTH - 1).trimEnd()}…`;
 }

@@ -972,6 +972,44 @@ fn task_permission_routes_to_all_connected_capable_clients_without_subscription_
 }
 
 #[test]
+fn opening_task_permission_publishes_pending_request_in_task_state_stream() {
+    let mut gateway = initialized_gateway("client-1", "conn-1");
+    gateway.handle_inbound(
+        ConnectionId::new("conn-1"),
+        request(
+            "2",
+            STATE_SUBSCRIBE,
+            StateSubscribeParams {
+                scope: SubscriptionScope::Task {
+                    task_id: TaskId::from("task-1"),
+                },
+            },
+        ),
+        AppServerTime(2),
+    );
+    gateway
+        .server_requests
+        .open(task_server_request("task-1"), Vec::new(), AppServerTime(3));
+
+    let deliveries = gateway.publish_task_update(
+        &committed_task_update(
+            "task-1",
+            2,
+            Vec::new(),
+            Vec::new(),
+            TestNavigationChange::None,
+        ),
+        AppServerTime(4),
+    );
+
+    assert!(deliveries.iter().any(|delivery| matches!(
+        &delivery.event.payload,
+        AppServerEventPayload::TaskRequestsUpdated { requests, .. }
+            if requests.iter().any(|request| request.request_id.as_str() == "server-request-1")
+    )));
+}
+
+#[test]
 fn current_task_subscriber_can_answer_before_server_request_delivery_drains() {
     let mut gateway = initialized_gateway("client-1", "conn-1");
     gateway.handle_inbound(

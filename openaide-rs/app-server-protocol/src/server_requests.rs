@@ -3,13 +3,37 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::ids::ClientInstanceId;
+use crate::ids::{ClientInstanceId, RequestId};
 
 pub const PERMISSION_REQUEST: &str = "permission/request";
 pub const QUESTION_REQUEST: &str = "question/request";
 pub const SECRET_READ: &str = "secret/read";
 pub const SHELL_SHOW_NOTIFICATION: &str = "shell/showNotification";
 pub const SHELL_REVEAL_FILE: &str = "shell/revealFile";
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingRequestResolveParams {
+    pub request_id: RequestId,
+    pub resolution: PendingRequestResolution,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, TS)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum PendingRequestResolution {
+    Permission { option_id: String },
+    Question { response: QuestionRequestResponse },
+}
+
+impl Eq for PendingRequestResolution {}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PendingRequestResolveResult {}
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]

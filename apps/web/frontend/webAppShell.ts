@@ -10,15 +10,23 @@ import {
   subscribeWindowMessages,
 } from "../../../packages/frontend/src/shells/domBootstrap";
 import type { HostChannelMessage } from "../../../packages/frontend/src/state/postHostMessage";
+import {
+  createRuntimeLogger,
+  safeWebviewTelemetryFields,
+} from "../src/runtime-logger.mjs";
 
 const WEB_ROUTE_EVENT = "openaide:webRoute";
 const settingsTabs = new Set<SettingsTabId>(["agents", "mcp", "skills", "common"]);
+const logger = createRuntimeLogger("openaide-webview");
 
 /** Browser-history adapter owned by the Web App composition boundary. */
 export function createWebAppShell(): FrontendShell {
   const bootstrap = () => webBootstrapForLocation();
   const post = (message: HostChannelMessage) => {
     switch (message.type) {
+      case "webview.telemetry":
+        logger.info("webview_telemetry", safeWebviewTelemetryFields(message.payload));
+        return;
       case "secret.transaction.apply":
       case "secret.transaction.commit":
       case "secret.transaction.rollback":

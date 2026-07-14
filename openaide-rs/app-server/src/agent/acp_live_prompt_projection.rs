@@ -1,16 +1,20 @@
 use std::sync::Arc;
 
+#[cfg(test)]
+use crate::agent::acp_schema::ToolCallUpdate;
 use crate::agent::acp_schema::{
     PermissionOptionKind, RequestPermissionOutcome, RequestPermissionRequest,
-    RequestPermissionResponse, SelectedPermissionOutcome, SessionUpdate, ToolCall, ToolCallStatus,
-    ToolCallUpdate,
+    RequestPermissionResponse, SelectedPermissionOutcome, SessionUpdate, ToolCall,
 };
 use serde_json::json;
 
 use crate::agent::acp_config_projection::normalize_config_options;
 use crate::agent::acp_content_projection::project_content_block;
+#[cfg(test)]
+use crate::agent::acp_tool_call_projection::{merge_tool_call_update, remember_tool_call};
 use crate::agent::acp_tool_call_projection::{
-    merge_tool_call_update, remember_tool_call, ToolCallState,
+    merge_tool_call_update_with_status_change, remember_tool_call_with_status_change,
+    tool_status_name, ToolCallState,
 };
 use crate::agent::acp_update_projection::normalize_available_commands;
 use crate::agent::events::{
@@ -76,10 +80,12 @@ impl LivePromptProjection {
         )
     }
 
+    #[cfg(test)]
     pub(super) fn remember_tool_call(&self, tool_call: ToolCall) {
         remember_tool_call(&self.tool_calls, tool_call);
     }
 
+    #[cfg(test)]
     pub(super) fn merge_tool_call_update(&self, update: ToolCallUpdate) -> ToolCall {
         merge_tool_call_update(&self.tool_calls, update)
     }
@@ -88,11 +94,12 @@ impl LivePromptProjection {
         self,
         request: RequestPermissionRequest,
     ) -> Result<RequestPermissionResponse, RuntimeError> {
-        let tool_call = self.merge_tool_call_update(request.tool_call.clone());
+        let (tool_call, status_changed) =
+            merge_tool_call_update_with_status_change(&self.tool_calls, request.tool_call.clone());
         // ACP permission requests carry the authoritative tool-call update. Publish it
         // before waiting so Chat shows the activity beside the transient request even
         // when the Agent did not send a separate tool-call notification first.
-        self.publish_tool_call(&tool_call)?;
+        self.publish_tool_call(&tool_call, status_changed)?;
         let permission = permission_request_from_acp(request, &tool_call);
         logging::info(
             "acp_permission_bridge_wait_start",
@@ -147,12 +154,14 @@ impl LivePromptProjection {
                 })?
             }
             SessionUpdate::ToolCall(tool_call) => {
-                self.remember_tool_call(tool_call.clone());
-                self.publish_tool_call(&tool_call)?;
+                let status_changed =
+                    remember_tool_call_with_status_change(&self.tool_calls, tool_call.clone());
+                self.publish_tool_call(&tool_call, status_changed)?;
             }
             SessionUpdate::ToolCallUpdate(update) => {
-                let tool_call = self.merge_tool_call_update(update);
-                self.publish_tool_call(&tool_call)?;
+                let (tool_call, status_changed) =
+                    merge_tool_call_update_with_status_change(&self.tool_calls, update);
+                self.publish_tool_call(&tool_call, status_changed)?;
             }
             SessionUpdate::ConfigOptionUpdate(update) => {
                 self.sink
@@ -172,19 +181,25 @@ impl LivePromptProjection {
         Ok(())
     }
 
-    fn publish_tool_call(&self, tool_call: &ToolCall) -> Result<(), RuntimeError> {
+    fn publish_tool_call(
+        &self,
+        tool_call: &ToolCall,
+        status_changed: bool,
+    ) -> Result<(), RuntimeError> {
         let AgentEvent::ToolCall(event) = tool_call_event(tool_call) else {
             unreachable!("tool_call_event always returns a tool event");
         };
-        logging::info(
-            "acp_tool_call_update_projected",
-            json!({
-                "agent_id": self.agent_id.as_str(),
-                "tool_call_id": tool_call.tool_call_id.to_string(),
-                "tool_kind": tool_kind_name(tool_call.kind),
-                "tool_status": tool_status_name(tool_call.status),
-            }),
-        );
+        if status_changed {
+            logging::info(
+                "acp_tool_call_status_projected",
+                json!({
+                    "agent_id": self.agent_id.as_str(),
+                    "tool_call_id": tool_call.tool_call_id.to_string(),
+                    "tool_kind": tool_kind_name(tool_call.kind),
+                    "tool_status": tool_status_name(&tool_call.status),
+                }),
+            );
+        }
         self.sink.emit(AgentEvent::ToolCall(event))
     }
 }
@@ -217,16 +232,6 @@ fn agent_permission_outcome_name(outcome: &AgentPermissionOutcome) -> &'static s
     match outcome {
         AgentPermissionOutcome::Selected { .. } => "selected",
         AgentPermissionOutcome::Cancelled => "cancelled",
-    }
-}
-
-fn tool_status_name(status: ToolCallStatus) -> &'static str {
-    match status {
-        ToolCallStatus::Pending => "pending",
-        ToolCallStatus::InProgress => "in_progress",
-        ToolCallStatus::Completed => "completed",
-        ToolCallStatus::Failed => "failed",
-        _ => "other",
     }
 }
 

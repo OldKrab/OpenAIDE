@@ -7,19 +7,7 @@ describe("host bridge", () => {
   });
 
   it("creates a direct LocalHttp BackendConnection from bootstrap endpoint info", async () => {
-    const fetch = vi.fn(async (_input: string, _init?: unknown) => ({
-      ok: true,
-      status: 200,
-      async text() {
-        return JSON.stringify([
-          {
-            jsonrpc: "2.0",
-            id: "local-http-request-1",
-            result: { result: initializeResult() },
-          },
-        ]);
-      },
-    }));
+    const fetch = reliableFetch();
     vi.stubGlobal("fetch", fetch);
     vi.stubGlobal("crypto", { randomUUID: () => "client-local" });
     vi.stubGlobal("sessionStorage", memoryStorage());
@@ -65,17 +53,7 @@ describe("host bridge", () => {
   });
 
   it("keeps LocalHttp connection identities distinct for task webviews sharing session storage", async () => {
-    const fetch = vi.fn(async (_input: string, _init?: unknown) => ({
-      ok: true,
-      status: 200,
-      async text() {
-        return JSON.stringify([{
-          jsonrpc: "2.0",
-          id: "local-http-request-1",
-          result: { result: initializeResult() },
-        }]);
-      },
-    }));
+    const fetch = reliableFetch();
     const sharedStorage = memoryStorage();
     sharedStorage.setItem("openaide.clientInstanceId", "shared-origin-client");
     const dataset: Record<string, string> = {
@@ -104,6 +82,7 @@ describe("host bridge", () => {
     const firstBootstrap = getBootstrap();
     const first = getBackendConnection();
     await first?.initialize(initializeParamsForBootstrap(firstBootstrap));
+    first?.close();
     dataset.clientInstanceId = "task-panel-2";
     const secondBootstrap = getBootstrap();
     const second = getBackendConnection();
@@ -165,19 +144,7 @@ describe("host bridge", () => {
   });
 
   it("creates a tokenless WebProxy BackendConnection from bootstrap endpoint info", async () => {
-    const fetch = vi.fn(async () => ({
-      ok: true,
-      status: 200,
-      async text() {
-        return JSON.stringify([
-          {
-            jsonrpc: "2.0",
-            id: "local-http-request-1",
-            result: { result: initializeResult() },
-          },
-        ]);
-      },
-    }));
+    const fetch = reliableFetch();
     vi.stubGlobal("fetch", fetch);
     vi.stubGlobal("crypto", { randomUUID: () => "client-web" });
     vi.stubGlobal("sessionStorage", memoryStorage());
@@ -459,6 +426,44 @@ function initializeResult() {
         surface: { kind: "home" },
       },
     },
+  };
+}
+
+function reliableFetch() {
+  const queued: unknown[] = [];
+  return vi.fn(async (_input: string, init?: { method?: string; body?: string }) => {
+    if (init?.method === "GET") {
+      const frames = queued.splice(0).map((message, index) => ({
+        sequence: index + 1,
+        message,
+      }));
+      return response(frames.length === 0 ? 204 : 200, frames.length === 0 ? "" : JSON.stringify({ frames }));
+    }
+    const body = init?.body ? JSON.parse(init.body) as Record<string, unknown> : {};
+    if (body.transport === "open") {
+      return response(200, JSON.stringify({
+        transportVersion: 1,
+        sessionId: "session-1",
+        serverId: "server-1",
+      }));
+    }
+    const message = body.message as { id?: string; method?: string } | undefined;
+    if (message?.id && message.method === "client/initialize") {
+      queued.push({
+        jsonrpc: "2.0",
+        id: message.id,
+        result: { result: initializeResult() },
+      });
+    }
+    return response(204, "");
+  });
+}
+
+function response(status: number, body: string) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    async text() { return body; },
   };
 }
 
