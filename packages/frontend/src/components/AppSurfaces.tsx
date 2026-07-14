@@ -17,8 +17,9 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
   const mobileNavigationButtonRef = useRef<HTMLButtonElement | null>(null);
   const webMainSurfaceRef = useRef<HTMLElement | null>(null);
   const usesProjectNavigation = bootstrap.surface !== "invalid" && bootstrap.shell.navigationMode === "project";
-  const isProjectWorkbench = usesProjectNavigation && (bootstrap.surface === "task" || bootstrap.surface === "settings");
-  const mobileNavigation = useMobileNavigation(isProjectWorkbench && mobileLayoutActive);
+  const isWebShell = bootstrap.surface !== "invalid" && bootstrap.shell.kind === "web";
+  const isWebWorkbench = isWebShell && (bootstrap.surface === "task" || bootstrap.surface === "settings");
+  const mobileNavigation = useMobileNavigation(isWebWorkbench && mobileLayoutActive);
   const mobileNavigationOpen = mobileNavigation.open;
   const taskSurfaceModel = primaryTaskSurfaceModel(controller);
   const { openingNativeSession, renderableTaskSnapshot } = taskSurfaceModel;
@@ -38,7 +39,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [mobileNavigationOpen]);
   useEffect(() => {
-    if (!isProjectWorkbench || typeof window === "undefined") return;
+    if (!isWebWorkbench || typeof window === "undefined") return;
     const mediaQuery = typeof window.matchMedia === "function"
       ? window.matchMedia("(max-width: 760px)")
       : undefined;
@@ -48,7 +49,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     syncMobileLayout();
     mediaQuery?.addEventListener?.("change", syncMobileLayout);
     return () => mediaQuery?.removeEventListener?.("change", syncMobileLayout);
-  }, [isProjectWorkbench]);
+  }, [isWebWorkbench]);
   useEffect(() => {
     const mainSurface = webMainSurfaceRef.current;
     if (!mainSurface) return;
@@ -123,7 +124,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     );
   }
 
-  if (appServerError && !usesProjectNavigation) {
+  if (appServerError && !isWebShell) {
     return (
       <main className="app-shell editor-shell">
         <AppServerErrorView message={appServerError} />
@@ -131,7 +132,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     );
   }
 
-  if (bootstrap.surface === "settings" && !usesProjectNavigation) {
+  if (bootstrap.surface === "settings" && !isWebShell) {
     return (
       <main className="app-shell editor-shell">
         <SettingsView
@@ -153,7 +154,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     );
   }
 
-  if (isProjectWorkbench) {
+  if (isWebWorkbench) {
     const routedActiveTask = bootstrap.taskId ? activeTask : undefined;
     const mobileTitle = bootstrap.surface === "settings"
       ? "Settings"
