@@ -4,6 +4,7 @@ import {
   datasetBootstrap,
   subscribeWindowMessages,
 } from "../../../packages/frontend/src/shells/domBootstrap";
+import { VSCODE_SHELL } from "../src/webview/types";
 
 declare global {
   interface Window {
@@ -53,7 +54,7 @@ function bootstrapForRouteMessage(message: unknown, current: WebviewBootstrap): 
     || !candidate.payload.task_id
   ) return undefined;
   return current.surface === "invalid"
-    ? { surface: "task", taskId: candidate.payload.task_id }
+    ? { surface: "task", shell: VSCODE_SHELL, taskId: candidate.payload.task_id }
     : {
         ...current,
         surface: "task",

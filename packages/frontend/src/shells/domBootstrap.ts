@@ -3,17 +3,29 @@ import type { WebviewBootstrap } from "../state/surfaceTypes";
 
 export function datasetBootstrap(): WebviewBootstrap {
   const surface = document.body.dataset.surface;
-  if (surface !== "navigation" && surface !== "settings" && surface !== "task") {
+  const shell = shellBootstrap();
+  if ((surface !== "navigation" && surface !== "settings" && surface !== "task") || !shell) {
     return { surface: "invalid" };
   }
   return {
     surface,
+    shell,
     clientInstanceId: document.body.dataset.clientInstanceId || undefined,
     taskId: document.body.dataset.taskId || undefined,
     projectId: document.body.dataset.projectId || undefined,
     preferences: shellPreferences(),
     appServerConnection: appServerConnection(),
   };
+}
+
+function shellBootstrap() {
+  const kind = document.body.dataset.shell;
+  const navigationMode = document.body.dataset.navigationMode;
+  if ((kind !== "web" && kind !== "vscodeExtension")
+    || (navigationMode !== "project" && navigationMode !== "currentProject")) {
+    return undefined;
+  }
+  return { kind, navigationMode } as const;
 }
 
 export function appServerConnection(): WebviewAppServerConnection | undefined {

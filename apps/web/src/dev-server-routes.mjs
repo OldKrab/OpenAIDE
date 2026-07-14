@@ -14,6 +14,7 @@ const webRoutes = [
 export function injectBootstrap(html, route, presentation = {}) {
   const attrs = [
     'data-shell="web"',
+    'data-navigation-mode="project"',
     `data-surface="${route.surface}"`,
     route.taskId ? `data-task-id="${escapeAttribute(route.taskId)}"` : undefined,
     route.archived ? 'data-archived="true"' : undefined,

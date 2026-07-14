@@ -21,7 +21,7 @@ export function renderWebviewHtml(
   <link rel="stylesheet" href="${styleUri}">
   <title>OpenAIDE</title>
 </head>
-<body data-surface="${escapeAttribute(bootstrap.surface)}" data-client-instance-id="${escapeAttribute(bootstrap.clientInstanceId ?? "")}" data-task-id="${escapeAttribute(bootstrap.taskId ?? "")}" data-project-id="${escapeAttribute(bootstrap.projectId ?? "")}" data-composer-submit-shortcut="${escapeAttribute(bootstrap.preferences?.composer_submit_shortcut ?? "enter")}" data-app-server-connection="${escapeAttribute(JSON.stringify(bootstrap.appServerConnection ?? null))}">
+<body data-shell="${escapeAttribute(bootstrap.shell.kind)}" data-navigation-mode="${escapeAttribute(bootstrap.shell.navigationMode)}" data-surface="${escapeAttribute(bootstrap.surface)}" data-client-instance-id="${escapeAttribute(bootstrap.clientInstanceId ?? "")}" data-task-id="${escapeAttribute(bootstrap.taskId ?? "")}" data-project-id="${escapeAttribute(bootstrap.projectId ?? "")}" data-composer-submit-shortcut="${escapeAttribute(bootstrap.preferences?.composer_submit_shortcut ?? "enter")}" data-app-server-connection="${escapeAttribute(JSON.stringify(bootstrap.appServerConnection ?? null))}">
   <div id="root"></div>
   <script nonce="${nonce}" type="module" src="${scriptUri}"></script>
 </body>

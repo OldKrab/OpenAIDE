@@ -20,7 +20,10 @@ test("injects web shell connection metadata into direct archive loads", () => {
   const html = '<html><body><div id="root"></div></body></html>';
   const injected = injectBootstrap(html, webRoute("/archive"));
 
-  assert.match(injected, /<body data-shell="web" data-surface="task" data-archived="true"/);
+  assert.match(
+    injected,
+    /<body data-shell="web" data-navigation-mode="project" data-surface="task" data-archived="true"/,
+  );
   assert.match(injected, /data-app-server-connection="[^"]*&quot;kind&quot;:&quot;webProxy&quot;/);
 });
 

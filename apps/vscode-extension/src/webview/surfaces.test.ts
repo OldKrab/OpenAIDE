@@ -70,6 +70,8 @@ describe("VS Code webview surfaces", () => {
     provider.resolveWebviewView(view as never);
 
     expect(view.webview.html).toContain('data-surface="navigation"');
+    expect(view.webview.html).toContain('data-shell="vscodeExtension"');
+    expect(view.webview.html).toContain('data-navigation-mode="currentProject"');
     expect(view.webview.html).toContain('data-task-id=""');
     expect(view.webview.html).toContain('data-project-id="project-current"');
     expect(view.webview.html).toContain('data-composer-submit-shortcut="enter"');

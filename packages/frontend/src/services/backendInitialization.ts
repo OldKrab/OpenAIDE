@@ -57,7 +57,7 @@ export function clientInstanceIdForBootstrap(bootstrap: WebviewBootstrap): Clien
 }
 
 export function taskNavigationScopeForBootstrap(bootstrap: WebviewBootstrap): SubscriptionScope {
-  const fixedProjectId = bootstrap.surface !== "invalid" && shellKindForBootstrap(bootstrap) === "vscodeExtension"
+  const fixedProjectId = bootstrap.surface !== "invalid" && bootstrap.shell.navigationMode === "currentProject"
     ? bootstrap.projectId
     : undefined;
   return fixedProjectId
@@ -69,7 +69,7 @@ export function initializeParamsForBootstrap(
   bootstrap: WebviewBootstrap,
   clientInstanceId = clientInstanceIdForBootstrap(bootstrap),
 ): InitializeParams {
-  const shellKind = shellKindForBootstrap(bootstrap);
+  const shellKind = bootstrap.surface === "invalid" ? "vscodeExtension" : bootstrap.shell.kind;
   return {
     clientInstanceId,
     shell: { kind: shellKind },
@@ -92,12 +92,6 @@ export function initializeParamsForBootstrap(
       ],
     },
   };
-}
-
-function shellKindForBootstrap(bootstrap: WebviewBootstrap) {
-  return bootstrap.surface !== "invalid" && bootstrap.appServerConnection?.kind === "webProxy"
-    ? "web"
-    : "vscodeExtension";
 }
 
 function requestedSurfaceForBootstrap(bootstrap: WebviewBootstrap): RequestedSurface {

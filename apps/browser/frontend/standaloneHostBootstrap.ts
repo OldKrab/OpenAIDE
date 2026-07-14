@@ -11,6 +11,7 @@ export function standaloneBootstrapFrom(input: StandaloneBootstrapInput): Webvie
   const surface = surfaceFromPath(input.pathname);
   return {
     surface,
+    shell: { kind: "web", navigationMode: "project" },
     taskId: surface === "task" && !isNewTaskPath(input.pathname) ? "demo_task" : undefined,
     preferences: { composer_submit_shortcut: "enter" },
   };

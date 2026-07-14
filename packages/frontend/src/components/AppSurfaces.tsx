@@ -16,9 +16,9 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
   const [newTaskFocusRequestKey, setNewTaskFocusRequestKey] = useState(0);
   const mobileNavigationButtonRef = useRef<HTMLButtonElement | null>(null);
   const webMainSurfaceRef = useRef<HTMLElement | null>(null);
-  const isWebShell = bootstrap.surface !== "invalid" && bootstrap.appServerConnection?.kind === "webProxy";
-  const isWebWorkbench = isWebShell && (bootstrap.surface === "task" || bootstrap.surface === "settings");
-  const mobileNavigation = useMobileNavigation(isWebWorkbench && mobileLayoutActive);
+  const usesProjectNavigation = bootstrap.surface !== "invalid" && bootstrap.shell.navigationMode === "project";
+  const isProjectWorkbench = usesProjectNavigation && (bootstrap.surface === "task" || bootstrap.surface === "settings");
+  const mobileNavigation = useMobileNavigation(isProjectWorkbench && mobileLayoutActive);
   const mobileNavigationOpen = mobileNavigation.open;
   const taskSurfaceModel = primaryTaskSurfaceModel(controller);
   const { openingNativeSession, renderableTaskSnapshot } = taskSurfaceModel;
@@ -38,7 +38,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [mobileNavigationOpen]);
   useEffect(() => {
-    if (!isWebWorkbench || typeof window === "undefined") return;
+    if (!isProjectWorkbench || typeof window === "undefined") return;
     const mediaQuery = typeof window.matchMedia === "function"
       ? window.matchMedia("(max-width: 760px)")
       : undefined;
@@ -48,7 +48,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     syncMobileLayout();
     mediaQuery?.addEventListener?.("change", syncMobileLayout);
     return () => mediaQuery?.removeEventListener?.("change", syncMobileLayout);
-  }, [isWebWorkbench]);
+  }, [isProjectWorkbench]);
   useEffect(() => {
     const mainSurface = webMainSurfaceRef.current;
     if (!mainSurface) return;
@@ -98,7 +98,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
       <main className="app-shell navigation-shell">
         <Sidebar
           activeTaskId={activeNavigationTaskId}
-          groupByProject={isWebShell}
+          groupByProject={usesProjectNavigation}
           maxTasksPerProject={DEFAULT_MAX_TASKS_PER_PROJECT}
           nativeSessions={navigation.nativeSessions}
           nativeSessionAgentId={navigation.newTaskSelection.agentId}
@@ -123,7 +123,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     );
   }
 
-  if (appServerError && !isWebShell) {
+  if (appServerError && !usesProjectNavigation) {
     return (
       <main className="app-shell editor-shell">
         <AppServerErrorView message={appServerError} />
@@ -131,7 +131,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     );
   }
 
-  if (bootstrap.surface === "settings" && !isWebShell) {
+  if (bootstrap.surface === "settings" && !usesProjectNavigation) {
     return (
       <main className="app-shell editor-shell">
         <SettingsView
@@ -153,7 +153,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     );
   }
 
-  if (isWebWorkbench) {
+  if (isProjectWorkbench) {
     const routedActiveTask = bootstrap.taskId ? activeTask : undefined;
     const mobileTitle = bootstrap.surface === "settings"
       ? "Settings"
@@ -248,7 +248,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         </section>
         <Sidebar
           activeTaskId={bootstrap.surface === "settings" ? undefined : activeNavigationTaskId}
-          groupByProject={isWebShell}
+          groupByProject={usesProjectNavigation}
           hiddenFromAccessibility={mobileLayoutActive && !mobileNavigation.active}
           maxTasksPerProject={DEFAULT_MAX_TASKS_PER_PROJECT}
           modal={mobileLayoutActive && mobileNavigation.active}

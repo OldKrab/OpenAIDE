@@ -2,10 +2,13 @@ import { describe, expect, it, vi } from "vitest";
 import type { ClientInstanceId } from "@openaide/app-server-client";
 import { getClientInstanceId, initializeParamsForBootstrap, taskNavigationScopeForBootstrap } from "./backendInitialization";
 
+const VSCODE_SHELL = { kind: "vscodeExtension", navigationMode: "currentProject" } as const;
+const WEB_SHELL = { kind: "web", navigationMode: "project" } as const;
+
 describe("backend initialization", () => {
   it("builds initialize params from the current shell surface", () => {
     expect(initializeParamsForBootstrap(
-      { surface: "navigation" },
+      { surface: "navigation", shell: VSCODE_SHELL },
       "client-1" as ClientInstanceId,
     )).toMatchObject({
       clientInstanceId: "client-1",
@@ -32,27 +35,27 @@ describe("backend initialization", () => {
     });
 
     expect(initializeParamsForBootstrap(
-      { surface: "navigation", projectId: "project-1" },
+      { surface: "navigation", shell: VSCODE_SHELL, projectId: "project-1" },
       "client-1" as ClientInstanceId,
     ).requestedSurface).toEqual({ kind: "project", projectId: "project-1" });
 
     expect(initializeParamsForBootstrap(
-      { surface: "task", taskId: "task-1" },
+      { surface: "task", shell: VSCODE_SHELL, taskId: "task-1" },
       "client-1" as ClientInstanceId,
     ).requestedSurface).toEqual({ kind: "task", taskId: "task-1" });
 
     expect(initializeParamsForBootstrap(
-      { surface: "task" },
+      { surface: "task", shell: VSCODE_SHELL },
       "client-1" as ClientInstanceId,
     ).requestedSurface).toEqual({ kind: "newTask" });
 
     expect(initializeParamsForBootstrap(
-      { surface: "task", projectId: "project-1" },
+      { surface: "task", shell: VSCODE_SHELL, projectId: "project-1" },
       "client-1" as ClientInstanceId,
     ).requestedSurface).toEqual({ kind: "newTask", projectId: "project-1" });
 
     expect(initializeParamsForBootstrap(
-      { surface: "settings" },
+      { surface: "settings", shell: VSCODE_SHELL },
       "client-1" as ClientInstanceId,
     ).requestedSurface).toEqual({ kind: "settings" });
   });
@@ -64,23 +67,27 @@ describe("backend initialization", () => {
 
     expect(initializeParamsForBootstrap({
       surface: "task",
+      shell: VSCODE_SHELL,
       clientInstanceId: "task-panel-1" as ClientInstanceId,
     }).clientInstanceId).toBe("task-panel-1");
     expect(initializeParamsForBootstrap({
       surface: "task",
+      shell: VSCODE_SHELL,
       clientInstanceId: "task-panel-2" as ClientInstanceId,
     }).clientInstanceId).toBe("task-panel-2");
 
     vi.unstubAllGlobals();
   });
 
-  it("identifies web proxy bootstrap as the web shell", () => {
+  it("uses explicit Web identity even with a local HTTP transport", () => {
     const initialized = initializeParamsForBootstrap(
       {
         surface: "task",
+        shell: WEB_SHELL,
         appServerConnection: {
-          kind: "webProxy",
-          endpointUrl: "/__openaide-app-server/probe",
+          kind: "localHttp",
+          endpointUrl: "http://127.0.0.1:43123",
+          authToken: "test-token",
         },
       },
       "client-web" as ClientInstanceId,
@@ -92,12 +99,18 @@ describe("backend initialization", () => {
   });
 
   it("scopes only the VS Code task list to its fixed Project Context", () => {
-    expect(taskNavigationScopeForBootstrap({ surface: "navigation", projectId: "project-1" })).toEqual({
+    expect(taskNavigationScopeForBootstrap({
+      surface: "navigation",
+      shell: VSCODE_SHELL,
+      projectId: "project-1",
+      appServerConnection: { kind: "webProxy", endpointUrl: "/transport-does-not-control-scope" },
+    })).toEqual({
       kind: "taskNavigation",
       projectId: "project-1",
     });
     expect(taskNavigationScopeForBootstrap({
       surface: "task",
+      shell: WEB_SHELL,
       projectId: "project-1",
       appServerConnection: { kind: "webProxy", endpointUrl: "/probe" },
     })).toEqual({ kind: "taskNavigation" });

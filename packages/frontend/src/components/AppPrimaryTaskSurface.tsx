@@ -67,7 +67,7 @@ export function AppPrimaryTaskSurface({ controller, focusRequestKey, model }: Ap
     startupConfigOptions,
     taskLoadingError,
   } = model;
-  const isWebShell = bootstrap.surface !== "invalid" && bootstrap.appServerConnection?.kind === "webProxy";
+  const usesProjectNavigation = bootstrap.surface !== "invalid" && bootstrap.shell.navigationMode === "project";
   const retryTaskOpen = taskLoadingError || controller.backendConnectionState.status === "unavailable"
     ? controller.retryTaskOpen
     : undefined;
@@ -104,7 +104,7 @@ export function AppPrimaryTaskSurface({ controller, focusRequestKey, model }: Ap
         submitShortcut={preferences.composer_submit_shortcut}
         taskInput={primaryTask.taskInput ?? { prompt: "", context: [] }}
         toolDetails={primaryTask.toolDetails}
-        showWorkspaceContext={isWebShell}
+        showWorkspaceContext={usesProjectNavigation}
       />
     );
   }
@@ -129,7 +129,7 @@ export function AppPrimaryTaskSurface({ controller, focusRequestKey, model }: Ap
       onRemoveAttachment={callbacks.newTask.removeAttachment}
       onSelectConfigOption={callbacks.newTask.selectConfigOption}
       onSubmitTask={callbacks.newTask.submit}
-      projectContextMode={isWebShell ? "selectable" : "fixed"}
+      projectContextMode={usesProjectNavigation ? "selectable" : "fixed"}
       state={primaryTask.newTask}
       submitShortcut={preferences.composer_submit_shortcut}
       workspaceBrowser={callbacks.newTask.workspaceBrowser}
