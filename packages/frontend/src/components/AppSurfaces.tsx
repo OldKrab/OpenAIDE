@@ -98,7 +98,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
       <main className="app-shell navigation-shell">
         <Sidebar
           activeTaskId={activeNavigationTaskId}
-          groupByProject
+          groupByProject={isWebShell}
           maxTasksPerProject={DEFAULT_MAX_TASKS_PER_PROJECT}
           nativeSessions={navigation.nativeSessions}
           nativeSessionAgentId={navigation.newTaskSelection.agentId}
@@ -248,7 +248,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         </section>
         <Sidebar
           activeTaskId={bootstrap.surface === "settings" ? undefined : activeNavigationTaskId}
-          groupByProject
+          groupByProject={isWebShell}
           hiddenFromAccessibility={mobileLayoutActive && !mobileNavigation.active}
           maxTasksPerProject={DEFAULT_MAX_TASKS_PER_PROJECT}
           modal={mobileLayoutActive && mobileNavigation.active}

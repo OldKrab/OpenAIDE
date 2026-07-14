@@ -72,7 +72,7 @@ describe("AppSurfaces callback wiring", () => {
     );
   });
 
-  it("uses the shared project task group for VS Code navigation", () => {
+  it("keeps VS Code Task Navigation flat inside its current Project Context", () => {
     const controller = controllerFor("navigation");
     controller.state.projects = [{
       projectId: "project_1",
@@ -83,7 +83,7 @@ describe("AppSurfaces callback wiring", () => {
 
     expect(surfaceMocks.sidebar).toHaveBeenCalledWith(
       expect.objectContaining({
-        groupByProject: true,
+        groupByProject: false,
         maxTasksPerProject: 15,
         projects: controller.state.projects,
       }),
