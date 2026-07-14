@@ -118,6 +118,36 @@ describe("VS Code webview surfaces", () => {
     expect(vscodeMocks.panels[2].webview.html).toContain('data-surface="settings"');
   });
 
+  it("keeps Task editor tab labels concise without changing the Task title", () => {
+    const manager = new TaskEditorManager(context(), runtime(), runtimeProcess(), logger());
+    const fullTitle = "Read-only bounded lookup in upstream OpenCode at /home/example/provider-support";
+
+    manager.openTask("task_1", fullTitle);
+
+    expect(vscodeMocks.createWebviewPanel).toHaveBeenCalledWith(
+      "openaide.task",
+      "Read-only bounded lookup in upstream OpenCode at…",
+      1,
+      expect.any(Object),
+    );
+  });
+
+  it("keeps the editor tab concise when a New Task becomes a Task", () => {
+    const manager = new TaskEditorManager(context(), runtime(), runtimeProcess(), logger());
+
+    manager.openNewTask();
+    const panel = vscodeMocks.panels[0];
+    triggerLastMessageHandler(panel, {
+      type: "surface.openTask",
+      payload: {
+        task_id: "created_task",
+        title: "Read-only bounded lookup in upstream OpenCode at /home/example/provider-support",
+      },
+    });
+
+    expect(panel.title).toBe("Read-only bounded lookup in upstream OpenCode at…");
+  });
+
   it("gives task webviews with the same VS Code origin distinct client identities", () => {
     const manager = new TaskEditorManager(context(), runtime(), runtimeProcess(), logger());
 

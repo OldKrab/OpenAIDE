@@ -3,6 +3,9 @@ use openaide_app_server_protocol::envelopes::{ErrorEnvelope, ResponseMeta};
 use openaide_app_server_protocol::errors::{ProtocolError, ProtocolErrorCode};
 use openaide_app_server_protocol::events::{AppServerEventPayload, EventScope};
 use openaide_app_server_protocol::ids::{RequestId, TaskId};
+use openaide_app_server_protocol::server_requests::{
+    PendingRequestResolution, PendingRequestResolveParams, PendingRequestResolveResult,
+};
 use openaide_app_server_protocol::snapshot::{PendingRequestScope, TaskSnapshot};
 use openaide_app_server_protocol::state::SubscriptionScope;
 
@@ -21,6 +24,63 @@ use crate::server_requests::{OpenRequestOutcome, ServerRequestDraft};
 use crate::server_requests::{ResponderScope, ResponseOutcome, ServerRequestAnswer};
 
 impl RpcGateway {
+    pub(super) fn handle_pending_request_resolve(
+        &mut self,
+        connection_id: ConnectionId,
+        id: String,
+        params: serde_json::Value,
+        meta: RequestMeta,
+        now: AppServerTime,
+    ) -> GatewayOutcome {
+        let params = match serde_json::from_value::<PendingRequestResolveParams>(params) {
+            Ok(params) => params,
+            Err(error) => {
+                return self.error(connection_id, id, meta, responses::invalid_params(error))
+            }
+        };
+        let Some(context) = self.client_hub.context_for_connection(&connection_id) else {
+            return self.error(
+                connection_id,
+                id,
+                meta,
+                responses::not_initialized(
+                    openaide_app_server_protocol::methods::PENDING_REQUEST_RESOLVE.to_string(),
+                ),
+            );
+        };
+        let answer = match params.resolution {
+            PendingRequestResolution::Permission { option_id } => {
+                ServerRequestAnswer::Result(serde_json::json!({ "optionId": option_id }))
+            }
+            PendingRequestResolution::Question { response } => ServerRequestAnswer::Result(
+                serde_json::to_value(response).expect("question resolution serializes"),
+            ),
+        };
+        let outcome = self.server_requests.handle_response_from_scopes(
+            context.client_instance_id.clone(),
+            params.request_id,
+            answer,
+            &self.responder_scopes(&context),
+            now,
+        );
+        let ResponseOutcome::Accepted { scope, .. } = outcome else {
+            return self.error(
+                connection_id,
+                id,
+                meta,
+                server_request_response_error(outcome),
+            );
+        };
+        let events = self.publish_request_resolution(&context, scope, now);
+        responses::result_with_events(
+            connection_id,
+            id,
+            meta,
+            PendingRequestResolveResult::default(),
+            events,
+        )
+    }
+
     pub fn shutdown(&mut self) -> Result<ShutdownCompletion, RuntimeError> {
         if matches!(
             self.lifecycle.request_shutdown(),

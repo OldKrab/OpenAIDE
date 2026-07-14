@@ -1,7 +1,6 @@
 import {
   ATTACHMENT_CONFIRM_EMBEDDED,
   ATTACHMENT_CREATE_EMBEDDED_CANDIDATE,
-  BackendReplicaChangedError,
   type BackendConnection,
   type FileBrowserEntryId,
   type TaskId,
@@ -41,10 +40,7 @@ export async function createConfirmedEmbeddedAttachment(
     if (!attachment) throw new Error("Embedded attachment was not confirmed.");
     return attachment;
   } catch (error) {
-    if (
-      !(error instanceof BackendReplicaChangedError)
-      && candidateDisposition() !== "forget"
-    ) {
+    if (candidateDisposition() !== "forget") {
       releaseAttachmentResources(backendConnection, taskId, [attachmentCandidateResource(candidateId)]);
     }
     throw error;

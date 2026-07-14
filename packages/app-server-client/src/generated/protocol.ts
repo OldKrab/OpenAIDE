@@ -6,6 +6,8 @@ export const CLIENT_INITIALIZE = "client/initialize" as const;
 export const CLIENT_CAPABILITIES_CHANGED = "client/capabilitiesChanged" as const;
 export const CLIENT_HEARTBEAT = "client/heartbeat" as const;
 
+export const PENDING_REQUEST_RESOLVE = "pendingRequest/resolve" as const;
+
 export const STATE_SUBSCRIBE = "state/subscribe" as const;
 export const STATE_UNSUBSCRIBE = "state/unsubscribe" as const;
 
@@ -392,6 +394,12 @@ export type AttachmentCandidateErrorCode = "unknownCandidate" | "wrongTask" | "n
 
 export type PermissionRequestParams = { title: string, description?: string | null, scope?: string | null, risk?: string | null, toolCall: PermissionToolCallRef, options: Array<PermissionRequestOption>, };
 
+export type PendingRequestResolveParams = { requestId: RequestId, resolution: PendingRequestResolution, };
+
+export type PendingRequestResolution = { "kind": "permission", optionId: string, } | { "kind": "question", response: QuestionRequestResponse, };
+
+export type PendingRequestResolveResult = Record<symbol, never>;
+
 export type PermissionToolCallRef = { id: string, title: string, kind?: string | null, };
 
 export type PermissionRequestOption = { optionId: string, name: string, kind: PermissionRequestOptionKind, };
@@ -632,12 +640,13 @@ export type PendingRequestScope = { "kind": "client", clientInstanceId: ClientIn
 
 export type PendingRequestKind = "permission" | "question" | "secret" | "shellCapability";
 
-export type ProtocolMethod = typeof CLIENT_PROBE | typeof CLIENT_INITIALIZE | typeof CLIENT_CAPABILITIES_CHANGED | typeof CLIENT_HEARTBEAT | typeof STATE_SUBSCRIBE | typeof STATE_UNSUBSCRIBE | typeof DIAGNOSTICS_GET_RUNTIME | typeof SUPPORT_RECOVER_STUCK_SESSIONS | typeof AGENT_PROBE | typeof AGENT_AUTHENTICATE | typeof AGENT_LIST_SESSIONS | typeof AGENT_CREATE_CUSTOM | typeof AGENT_UPDATE_CUSTOM_METADATA | typeof AGENT_REPLACE_CUSTOM | typeof AGENT_DELETE_CUSTOM | typeof AGENT_SET_ENABLED | typeof SETTINGS_GET_AGENT_DETAILS | typeof SETTINGS_GET_MCP_SERVERS | typeof SETTINGS_GET_SKILLS | typeof SETTINGS_GET_PREFERENCES | typeof SETTINGS_UPDATE_PREFERENCES | typeof SETTINGS_GET_RUNTIME | typeof SETTINGS_UPDATE_RUNTIME | typeof ATTACHMENT_LIST_ROOTS | typeof ATTACHMENT_LIST_DIRECTORY | typeof ATTACHMENT_CREATE_FILE_REFERENCE | typeof ATTACHMENT_CREATE_PASTED_IMAGE | typeof ATTACHMENT_CREATE_EMBEDDED_CANDIDATE | typeof ATTACHMENT_CONFIRM_EMBEDDED | typeof ATTACHMENT_REFRESH_HANDLES | typeof ATTACHMENT_RELEASE | typeof ATTACHMENT_REVEAL | typeof SHELL_RESOLVE_FILE_REVEAL | typeof WORKSPACE_LIST_ROOTS | typeof WORKSPACE_LIST_DIRECTORY | typeof TASK_CREATE | typeof TASK_ADOPT_NATIVE_SESSION | typeof TASK_SEND | typeof TASK_SET_CONFIG_OPTION | typeof TASK_CANCEL | typeof TASK_OPEN | typeof TASK_MARK_READ | typeof TASK_CHAT_PAGE | typeof TASK_LIST | typeof TASK_DISCARD | typeof TASK_SET_ARCHIVED;
+export type ProtocolMethod = typeof CLIENT_PROBE | typeof CLIENT_INITIALIZE | typeof CLIENT_CAPABILITIES_CHANGED | typeof CLIENT_HEARTBEAT | typeof PENDING_REQUEST_RESOLVE | typeof STATE_SUBSCRIBE | typeof STATE_UNSUBSCRIBE | typeof DIAGNOSTICS_GET_RUNTIME | typeof SUPPORT_RECOVER_STUCK_SESSIONS | typeof AGENT_PROBE | typeof AGENT_AUTHENTICATE | typeof AGENT_LIST_SESSIONS | typeof AGENT_CREATE_CUSTOM | typeof AGENT_UPDATE_CUSTOM_METADATA | typeof AGENT_REPLACE_CUSTOM | typeof AGENT_DELETE_CUSTOM | typeof AGENT_SET_ENABLED | typeof SETTINGS_GET_AGENT_DETAILS | typeof SETTINGS_GET_MCP_SERVERS | typeof SETTINGS_GET_SKILLS | typeof SETTINGS_GET_PREFERENCES | typeof SETTINGS_UPDATE_PREFERENCES | typeof SETTINGS_GET_RUNTIME | typeof SETTINGS_UPDATE_RUNTIME | typeof ATTACHMENT_LIST_ROOTS | typeof ATTACHMENT_LIST_DIRECTORY | typeof ATTACHMENT_CREATE_FILE_REFERENCE | typeof ATTACHMENT_CREATE_PASTED_IMAGE | typeof ATTACHMENT_CREATE_EMBEDDED_CANDIDATE | typeof ATTACHMENT_CONFIRM_EMBEDDED | typeof ATTACHMENT_REFRESH_HANDLES | typeof ATTACHMENT_RELEASE | typeof ATTACHMENT_REVEAL | typeof SHELL_RESOLVE_FILE_REVEAL | typeof WORKSPACE_LIST_ROOTS | typeof WORKSPACE_LIST_DIRECTORY | typeof TASK_CREATE | typeof TASK_ADOPT_NATIVE_SESSION | typeof TASK_SEND | typeof TASK_SET_CONFIG_OPTION | typeof TASK_CANCEL | typeof TASK_OPEN | typeof TASK_MARK_READ | typeof TASK_CHAT_PAGE | typeof TASK_LIST | typeof TASK_DISCARD | typeof TASK_SET_ARCHIVED;
 export type RequestParamsByMethod = {
   [CLIENT_PROBE]: ClientProbeParams;
   [CLIENT_INITIALIZE]: InitializeParams;
   [CLIENT_CAPABILITIES_CHANGED]: ClientCapabilitiesChangedParams;
   [CLIENT_HEARTBEAT]: ClientHeartbeatParams;
+  [PENDING_REQUEST_RESOLVE]: PendingRequestResolveParams;
   [STATE_SUBSCRIBE]: StateSubscribeParams;
   [STATE_UNSUBSCRIBE]: StateUnsubscribeParams;
   [DIAGNOSTICS_GET_RUNTIME]: RuntimeDiagnosticsParams;
@@ -687,6 +696,7 @@ export type ResponseResultByMethod = {
   [CLIENT_INITIALIZE]: InitializeResult;
   [CLIENT_CAPABILITIES_CHANGED]: ClientCapabilitiesChangedResult;
   [CLIENT_HEARTBEAT]: ClientHeartbeatResult;
+  [PENDING_REQUEST_RESOLVE]: PendingRequestResolveResult;
   [STATE_SUBSCRIBE]: StateSubscribeResult;
   [STATE_UNSUBSCRIBE]: StateUnsubscribeResult;
   [DIAGNOSTICS_GET_RUNTIME]: RuntimeDiagnosticsResult;

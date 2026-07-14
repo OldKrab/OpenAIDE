@@ -8,8 +8,7 @@ import type { AppAction } from "../state/appReducer";
 import type { NewTaskController } from "./newTaskController";
 
 type NewTaskSubscriptionOptions = {
-  backendConnection?: Pick<BackendConnection, "request">
-    & Partial<Pick<BackendConnection, "events" | "eventStreamDisconnects" | "serverRequests" | "stateResets">>;
+  backendConnection?: Pick<BackendConnection, "handleNotification" | "request">;
   backendInitialized: RefObject<boolean>;
   backendReady: boolean;
   backendStateGeneration: number;
@@ -31,17 +30,11 @@ export function useNewTaskSubscription({
   newTaskId,
 }: NewTaskSubscriptionOptions) {
   useEffect(() => {
-    if (!backendConnection?.events || !backendReady || !backendInitialized.current || !newTaskId) return;
+    if (!backendConnection || !backendReady || !backendInitialized.current || !newTaskId) return;
     const mappingContext = context.current;
     if (!mappingContext) return;
     return startAppServerStateSubscription({
-      backendConnection: {
-        eventStreamDisconnects: backendConnection.eventStreamDisconnects,
-        events: backendConnection.events,
-        request: backendConnection.request,
-        serverRequests: backendConnection.serverRequests,
-        stateResets: backendConnection.stateResets,
-      },
+      backendConnection,
       context: mappingContext,
       dispatch: (action) => {
         if (action.type === "snapshot" && action.snapshot.lifecycle === "new") {

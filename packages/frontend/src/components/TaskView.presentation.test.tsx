@@ -100,6 +100,66 @@ describe("TaskView timeline presentation", () => {
     expect(JSON.stringify(tree.toJSON())).toContain("END-OF-CHUNK");
   });
 
+  it("continues smoothing chunks after the first presentation deadline", async () => {
+    const { TaskView } = await import("./TaskView");
+    const initial = snapshotWithAuthoritativeTail(true);
+    let tree!: ReactTestRenderer;
+    act(() => {
+      tree = create(<TaskView {...taskViewProps(initial)} />);
+    });
+
+    const firstUpdate = structuredClone(initial);
+    const latestAgent = firstUpdate.chat.items.find((item) => item.message_id === "agent-later");
+    if (latestAgent?.message.kind !== "agent_message" || latestAgent.message.parts[0]?.kind !== "text") {
+      throw new Error("expected latest Agent text");
+    }
+    latestAgent.message.parts[0].text = "Latest update with the first streamed chunk";
+    act(() => {
+      tree.update(
+        <TaskView
+          {...taskViewProps(firstUpdate)}
+          liveTextPresentation={{
+            agent: { messageId: "agent-later", eventCursor: "cursor-continuous-1" },
+          }}
+        />,
+      );
+    });
+    for (let frame = 0; frame < 6; frame += 1) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(20);
+      });
+    }
+    expect(JSON.stringify(tree.toJSON())).toContain("Latest update with the first streamed chunk");
+
+    const secondUpdate = structuredClone(firstUpdate);
+    const continuingAgent = secondUpdate.chat.items.find((item) => item.message_id === "agent-later");
+    if (continuingAgent?.message.kind !== "agent_message" || continuingAgent.message.parts[0]?.kind !== "text") {
+      throw new Error("expected continuing Agent text");
+    }
+    continuingAgent.message.parts[0].text += " with a later substantial chunk";
+    act(() => {
+      tree.update(
+        <TaskView
+          {...taskViewProps(secondUpdate)}
+          liveTextPresentation={{
+            agent: { messageId: "agent-later", eventCursor: "cursor-continuous-2" },
+          }}
+        />,
+      );
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(20);
+    });
+
+    expect(JSON.stringify(tree.toJSON())).not.toContain("with a later substantial chunk");
+    for (let frame = 0; frame < 5; frame += 1) {
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(20);
+      });
+    }
+    expect(JSON.stringify(tree.toJSON())).toContain("with a later substantial chunk");
+  });
+
   it("shows authoritative text immediately while the document is hidden", async () => {
     vi.stubGlobal("document", {
       addEventListener: vi.fn(),

@@ -13,20 +13,20 @@ export class ExtensionLogger {
     this.logFile = logFile;
   }
 
-  info(message: string, fields: Record<string, unknown> = {}) {
-    this.write("info", message, fields);
+  info(event: string, fields: Record<string, unknown> = {}) {
+    this.write("info", event, fields);
   }
 
-  warn(message: string, fields: Record<string, unknown> = {}) {
-    this.write("warn", message, fields);
+  warn(event: string, fields: Record<string, unknown> = {}) {
+    this.write("warn", event, fields);
   }
 
-  error(message: string, fields: Record<string, unknown> = {}) {
-    this.write("error", message, fields);
+  error(event: string, fields: Record<string, unknown> = {}) {
+    this.write("error", event, fields);
   }
 
-  private write(level: string, message: string, fields: Record<string, unknown>) {
-    const line = this.format(level, message, fields);
+  private write(level: string, event: string, fields: Record<string, unknown>) {
+    const line = this.format(level, event, fields);
     if (level === "error") console.error(line);
     else if (level === "warn") console.warn(line);
     else console.info(line);
@@ -41,15 +41,23 @@ export class ExtensionLogger {
       });
   }
 
-  private format(level: string, message: string, fields: Record<string, unknown>) {
+  private format(level: string, event: string, fields: Record<string, unknown>) {
     return JSON.stringify({
       timestamp: new Date().toISOString(),
       scope: this.scope,
       level,
-      message,
+      event: normalizeEventName(event),
       fields: redactFields(fields),
     });
   }
+}
+
+function normalizeEventName(event: string) {
+  return event
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "") || "invalid_event";
 }
 
 export function sanitizeDiagnosticText(value: unknown) {
@@ -64,9 +72,13 @@ export function sanitizeDiagnosticText(value: unknown) {
 function redactFields(fields: Record<string, unknown>) {
   const redacted: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(fields)) {
-    redacted[key] = /prompt|secret|token|env|content|output|path|message|error/i.test(key)
-      ? sanitizeDiagnosticText(value)
-      : value;
+    redacted[key] = isSensitiveField(key) ? "[redacted]" : value;
   }
   return redacted;
+}
+
+function isSensitiveField(key: string) {
+  if (/^error_name$/i.test(key)) return false;
+  if (/_kind$|_code$|_count$|_bytes$|_status$/i.test(key)) return false;
+  return /prompt|secret|token|password|env|content|output|path|message|error|command|cwd/i.test(key);
 }

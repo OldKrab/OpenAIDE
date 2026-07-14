@@ -1,6 +1,6 @@
 import {
-  createLocalHttpBackendConnection,
-  createWebProxyBackendConnection,
+  createReliableLocalHttpBackendConnection,
+  createReliableWebProxyBackendConnection,
 } from "@openaide/app-server-client";
 import type {
   HostToWebviewMessage,
@@ -45,13 +45,13 @@ export function replaceSettingsTabRoute(tab: SettingsTabId) {
 export function getBackendConnection() {
   const bootstrap = getBootstrap();
   if (bootstrap.surface !== "invalid" && bootstrap.appServerConnection?.kind === "localHttp") {
-    return createLocalHttpBackendConnection({
+    return createReliableLocalHttpBackendConnection({
       ...bootstrap.appServerConnection,
       connectionId: createTransportConnectionId(),
     });
   }
   if (bootstrap.surface !== "invalid" && bootstrap.appServerConnection?.kind === "webProxy") {
-    return createWebProxyBackendConnection({
+    return createReliableWebProxyBackendConnection({
       endpointUrl: bootstrap.appServerConnection.endpointUrl,
       connectionId: createTransportConnectionId(),
     });

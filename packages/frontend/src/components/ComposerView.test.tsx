@@ -605,6 +605,37 @@ describe("Composer view behavior", () => {
     expect(configControlButtonsByText(renderer.root, "medium")).toHaveLength(0);
   });
 
+  it("uses semantic compact icons for reasoning and other configuration options", () => {
+    const renderer = renderComposer({
+      configOptions: {
+        agent_id: "codex",
+        options: [
+          {
+            category: "thought_level",
+            current_value: "medium",
+            id: "reasoning_effort",
+            label: "Reasoning effort",
+            values: [{ id: "medium", label: "Medium" }],
+          },
+          {
+            category: "other",
+            current_value: "on",
+            id: "fast-mode",
+            label: "Fast mode",
+            values: [{ id: "on", label: "On" }],
+          },
+        ],
+        status: "ready",
+      },
+    });
+
+    const reasoningIcons = configControlButtonsByText(renderer.root, "Medium")[0].findAllByType("svg");
+    const otherIcons = configControlButtonsByText(renderer.root, "Fast: On")[0].findAllByType("svg");
+
+    expect(reasoningIcons.filter((icon) => String(icon.props.className).includes("lucide-brain"))).toHaveLength(1);
+    expect(otherIcons.filter((icon) => String(icon.props.className).includes("lucide-sliders-horizontal"))).toHaveLength(1);
+  });
+
   it("can hide Agent and Isolation controls while keeping config option controls", () => {
     const onSelectConfigOption = vi.fn();
     const renderer = renderComposer({

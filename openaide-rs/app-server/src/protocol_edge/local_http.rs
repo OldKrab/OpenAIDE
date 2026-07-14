@@ -11,6 +11,7 @@ use super::{GatewayOutcome, GatewayResponse, InboundProtocolMessage, SharedRpcGa
 mod event_streams;
 pub mod listener;
 mod protocol;
+mod sessions;
 
 pub use protocol::LocalHttpProtocolHandler;
 
@@ -34,11 +35,15 @@ pub struct LocalHttpAppHandler {
 }
 
 impl LocalHttpAppHandler {
-    pub fn new(gateway: SharedRpcGateway, auth_token: impl Into<String>) -> Self {
+    pub fn new(
+        gateway: SharedRpcGateway,
+        auth_token: impl Into<String>,
+        server_id: impl Into<String>,
+    ) -> Self {
         let auth_token = auth_token.into();
         Self {
             probe: LocalHttpProbeHandler::new(gateway.clone(), auth_token.clone()),
-            protocol: LocalHttpProtocolHandler::new(gateway, auth_token),
+            protocol: LocalHttpProtocolHandler::new(gateway, auth_token, server_id),
         }
     }
 
@@ -63,6 +68,17 @@ impl LocalHttpAppHandler {
     ) -> Result<event_streams::EventStreamLease, LocalHttpResponse> {
         self.protocol
             .begin_event_stream(authorization, connection_id)
+    }
+
+    pub(crate) fn poll_session(
+        &self,
+        authorization: Option<&str>,
+        connection_id: Option<&str>,
+        session_id: &str,
+        after: u64,
+    ) -> LocalHttpResponse {
+        self.protocol
+            .poll_session(authorization, connection_id, session_id, after)
     }
 
     pub(crate) fn event_stream_is_current(&self, lease: &event_streams::EventStreamLease) -> bool {

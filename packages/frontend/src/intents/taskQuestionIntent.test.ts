@@ -4,20 +4,23 @@ import { respondToQuestionIntent } from "./taskIntents";
 import { createInitialState } from "../state/store";
 
 describe("respondToQuestionIntent", () => {
-  it("responds through the typed Question server-request method", async () => {
+  it("resolves a shared Question through a typed client request", async () => {
     const dispatch = vi.fn();
-    const respond = vi.fn(() => Promise.resolve());
+    const request = vi.fn(() => Promise.resolve({}));
 
     respondToQuestionIntent(
-      { backendConnection: { respond: respond as BackendConnection["respond"] }, dispatch, state: createInitialState() },
+      { backendConnection: { request: request as BackendConnection["request"] }, dispatch, state: createInitialState() },
       "question-1",
       { action: "submit", content: { scope: "form", count: 3 } },
     );
     await Promise.resolve();
 
-    expect(respond).toHaveBeenCalledWith("question-1", {
-      action: "submit",
-      content: { scope: "form", count: 3 },
+    expect(request).toHaveBeenCalledWith("pendingRequest/resolve", {
+      requestId: "question-1",
+      resolution: {
+        kind: "question",
+        response: { action: "submit", content: { scope: "form", count: 3 } },
+      },
     });
     expect(dispatch).toHaveBeenNthCalledWith(1, { type: "question:responding", requestId: "question-1" });
     expect(dispatch).toHaveBeenCalledTimes(1);
@@ -25,10 +28,10 @@ describe("respondToQuestionIntent", () => {
 
   it("keeps a rejected response recoverable", async () => {
     const dispatch = vi.fn();
-    const respond = vi.fn(() => Promise.reject(new Error("Already answered")));
+    const request = vi.fn(() => Promise.reject(new Error("Already answered")));
 
     respondToQuestionIntent(
-      { backendConnection: { respond: respond as BackendConnection["respond"] }, dispatch, state: createInitialState() },
+      { backendConnection: { request: request as BackendConnection["request"] }, dispatch, state: createInitialState() },
       "question-1",
       { action: "cancel" },
     );

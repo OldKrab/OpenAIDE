@@ -2,7 +2,7 @@
   "name": "openaide-vscode-extension",
   "displayName": "OpenAIDE",
   "description": "Run local ACP coding agents from an inspectable, recoverable task workbench.",
-  "version": "0.0.1-alpha.3",
+  "version": "0.0.1-alpha.4",
   "publisher": "openaide",
   "icon": "media/openaide.png",
   "license": "AGPL-3.0-only",
@@ -165,8 +165,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@openaide/app-server-client": "0.0.1-alpha.3",
-    "@openaide/app-shell-contracts": "0.0.1-alpha.3"
+    "@openaide/app-server-client": "0.0.1-alpha.4",
+    "@openaide/app-shell-contracts": "0.0.1-alpha.4"
   },
   "devDependencies": {
     "@types/node": "^25.0.0",

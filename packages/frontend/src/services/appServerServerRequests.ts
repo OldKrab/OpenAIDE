@@ -3,15 +3,15 @@ import {
   SHELL_REVEAL_FILE,
   SHELL_SHOW_NOTIFICATION,
   type BackendConnection,
-  type RequestId,
+  type BackendRequestContext,
   type ServerRequestMethod,
+  type ServerRequestParamsByMethod,
   type ServerRequestResponseResultByMethod,
-  type TypedServerRequest,
 } from "@openaide/app-server-client";
 import type { HostToWebviewMessage } from "@openaide/app-shell-contracts";
 import type { PostHostMessage } from "../state/postHostMessage";
 
-type ServerRequestConnection = Pick<BackendConnection, "serverRequests" | "respond">;
+type ServerRequestConnection = Pick<BackendConnection, "handleRequest">;
 
 type ServerRequestBridgeOptions = {
   backendConnection: ServerRequestConnection;
@@ -22,57 +22,56 @@ export function startAppServerServerRequestBridge({
   backendConnection,
   postHostMessage,
 }: ServerRequestBridgeOptions) {
-  const pending = new Map<string, ServerRequestMethod>();
-  const stopServerRequests = backendConnection.serverRequests((request) => {
-    if (!isShellHandledRequest(request)) return;
-    pending.set(request.requestId, request.method);
+  const pending = new Map<string, {
+    method: ServerRequestMethod;
+    resolve(result: ServerRequestResponseResultByMethod[ServerRequestMethod]): void;
+  }>();
+  const stops = shellHandledMethods().map((method) => backendConnection.handleRequest(
+    method,
+    (params, context) => forwardRequest(method, params, context) as never,
+  ));
+
+  function forwardRequest<M extends ServerRequestMethod>(
+    method: M,
+    params: ServerRequestParamsByMethod[M],
+    context: BackendRequestContext,
+  ) {
+    const result = new Promise<ServerRequestResponseResultByMethod[M]>((resolve) => {
+      pending.set(context.requestId, { method, resolve: resolve as never });
+    });
     postHostMessage({
       type: "appServer.serverRequest",
       payload: {
-        requestId: request.requestId,
-        method: request.method,
-        params: request.params,
+        requestId: context.requestId,
+        method,
+        params,
       },
     });
-  });
+    return result;
+  }
 
   return {
     handleHostMessage(message: HostToWebviewMessage) {
       if (message.type !== "appServer.serverRequest.result") return false;
       const requestId = message.payload.requestId;
-      const method = pending.get(requestId);
-      if (!method) return true;
+      const request = pending.get(requestId);
+      if (!request) return true;
       pending.delete(requestId);
-      if (message.payload.method !== method) return true;
-      const result = serverRequestResult(method, message.payload.result);
+      if (message.payload.method !== request.method) return true;
+      const result = serverRequestResult(request.method, message.payload.result);
       if (!result.valid) return true;
-      void respondToServerRequest(backendConnection, requestId, result.value);
+      request.resolve(result.value);
       return true;
     },
     dispose() {
       pending.clear();
-      stopServerRequests();
+      for (const stop of stops) stop();
     },
   };
 }
 
-function isShellHandledRequest(request: TypedServerRequest<ServerRequestMethod>) {
-  return (
-    request.method === SECRET_READ
-    || request.method === SHELL_SHOW_NOTIFICATION
-    || request.method === SHELL_REVEAL_FILE
-  );
-}
-
-async function respondToServerRequest(
-  backendConnection: ServerRequestConnection,
-  requestId: string,
-  result: ServerRequestResponseResultByMethod[ServerRequestMethod],
-) {
-  await backendConnection.respond(
-    requestId as RequestId,
-    result,
-  );
+function shellHandledMethods() {
+  return [SECRET_READ, SHELL_SHOW_NOTIFICATION, SHELL_REVEAL_FILE] as const;
 }
 
 function serverRequestResult(

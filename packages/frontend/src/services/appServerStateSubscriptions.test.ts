@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { PERMISSION_REQUEST, STATE_SUBSCRIBE, STATE_UNSUBSCRIBE } from "@openaide/app-server-client";
+import { STATE_SUBSCRIBE, STATE_UNSUBSCRIBE } from "@openaide/app-server-client";
 import type {
   AppServerEvent,
   BackendConnection,
@@ -8,90 +8,12 @@ import type {
   ProjectId,
   StateRootId,
   StateSubscribeResult,
-  ServerRequestMethod,
   TaskId,
   TaskSummary as ProtocolTaskSummary,
-  TypedServerRequest,
 } from "@openaide/app-server-client";
 import { startAppServerStateSubscription } from "./appServerStateSubscriptions";
 
 describe("startAppServerStateSubscription", () => {
-  it("includes a permission received while the Task baseline is loading", async () => {
-    const baseline = deferred<StateSubscribeResult>();
-    let serverRequestListener: ((request: TypedServerRequest<ServerRequestMethod>) => void) | undefined;
-    const dispatch = vi.fn();
-    const connection = {
-      request: vi.fn(() => baseline.promise),
-      events: () => vi.fn(),
-      serverRequests(listener: (request: TypedServerRequest<ServerRequestMethod>) => void) {
-        serverRequestListener = listener;
-        return vi.fn();
-      },
-    } as Pick<BackendConnection, "events" | "request" | "serverRequests">;
-
-    startAppServerStateSubscription({
-      backendConnection: connection,
-      context: {
-        stateRootId: "root_1" as StateRootId,
-        clientInstanceId: "client_1" as never,
-      },
-      dispatch,
-      scope: { kind: "task", taskId: "task_1" as TaskId },
-    });
-    serverRequestListener?.({
-      requestId: "server-request-1" as never,
-      scope: { kind: "task", taskId: "task_1" as TaskId },
-      method: PERMISSION_REQUEST,
-      params: {
-        title: "Allow command?",
-        toolCall: { id: "tool-1", title: "Run tests", kind: "execute" },
-        options: [{ optionId: "allow-once", name: "Allow once", kind: "allowOnce" }],
-      },
-    });
-    baseline.resolve(taskSubscription("cursor_1", "task_1"));
-    await Promise.resolve();
-
-    expect(dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
-      type: "snapshot",
-      snapshot: expect.objectContaining({
-        active_requests: [expect.objectContaining({
-          message: expect.objectContaining({
-            kind: "permission",
-            app_server_request_id: "server-request-1",
-          }),
-        })],
-      }),
-    }));
-  });
-
-  it("does not request an initial baseline while the event stream is disconnected", async () => {
-    const request = vi.fn();
-    const baselineLost = vi.fn();
-    const connection = {
-      request,
-      events: () => vi.fn(),
-      eventStreamDisconnects(listener: Parameters<BackendConnection["eventStreamDisconnects"]>[0]) {
-        listener();
-        return vi.fn();
-      },
-    } as Pick<BackendConnection, "eventStreamDisconnects" | "events" | "request">;
-
-    startAppServerStateSubscription({
-      backendConnection: connection,
-      context: {
-        stateRootId: "root_1" as StateRootId,
-        clientInstanceId: "client_1" as never,
-      },
-      dispatch: vi.fn(),
-      onBaselineLost: baselineLost,
-      scope: { kind: "task", taskId: "task_1" as TaskId },
-    });
-    await Promise.resolve();
-
-    expect(baselineLost).toHaveBeenCalledOnce();
-    expect(request).not.toHaveBeenCalled();
-  });
-
   it("retries an initial subscription failure until a snapshot is available", async () => {
     vi.useFakeTimers();
     try {
@@ -105,10 +27,10 @@ describe("startAppServerStateSubscription", () => {
       });
       const connection = {
         request,
-        events() {
+        handleNotification() {
           return vi.fn();
         },
-      } as Pick<BackendConnection, "request" | "events">;
+      } as Pick<BackendConnection, "request" | "handleNotification">;
 
       const stop = startAppServerStateSubscription({
         backendConnection: connection,
@@ -140,10 +62,10 @@ describe("startAppServerStateSubscription", () => {
       });
       const connection = {
         request,
-        events() {
+        handleNotification() {
           return vi.fn();
         },
-      } as Pick<BackendConnection, "request" | "events">;
+      } as Pick<BackendConnection, "request" | "handleNotification">;
 
       startAppServerStateSubscription({
         backendConnection: connection,
@@ -167,187 +89,16 @@ describe("startAppServerStateSubscription", () => {
     }
   });
 
-  it("waits for the replacement stream before refreshing a lost subscription", async () => {
-    let disconnectListener: Parameters<BackendConnection["eventStreamDisconnects"]>[0] | undefined;
-    let resetListener: Parameters<BackendConnection["stateResets"]>[0] | undefined;
-    const dispatch = vi.fn();
-    const baselineLost = vi.fn();
-    const request = vi.fn(async () => taskSubscription(
-      request.mock.calls.length === 1 ? "cursor_1" : "cursor_5",
-      "task_1",
-    ));
-    const connection = {
-      request,
-      events() {
-        return vi.fn();
-      },
-      eventStreamDisconnects(listener: Parameters<BackendConnection["eventStreamDisconnects"]>[0]) {
-        disconnectListener = listener;
-        return vi.fn();
-      },
-      stateResets(listener: Parameters<BackendConnection["stateResets"]>[0]) {
-        resetListener = listener;
-        return vi.fn();
-      },
-    } as Pick<BackendConnection, "eventStreamDisconnects" | "events" | "request" | "stateResets">;
-
-    startAppServerStateSubscription({
-      backendConnection: connection,
-      context: {
-        stateRootId: "root_1" as StateRootId,
-        clientInstanceId: "client_1" as never,
-      },
-      dispatch,
-      onBaselineLost: baselineLost,
-      scope: { kind: "task", taskId: "task_1" as TaskId },
-    });
-    await Promise.resolve();
-
-    disconnectListener?.();
-    await Promise.resolve();
-    expect(baselineLost).toHaveBeenCalledOnce();
-    expect(request).toHaveBeenCalledOnce();
-
-    resetListener?.({ serverId: "server_1" as never, stateRootId: "root_1" as StateRootId });
-    await Promise.resolve();
-
-    expect(request).toHaveBeenCalledTimes(2);
-    expect(dispatch).toHaveBeenCalledTimes(2);
-  });
-
-  it("ignores a baseline failure from the disconnected stream generation", async () => {
-    let disconnectListener: Parameters<BackendConnection["eventStreamDisconnects"]>[0] | undefined;
-    const firstSubscribe = deferred<StateSubscribeResult>();
-    const baselineError = vi.fn();
-    const connection = {
-      request: vi.fn(() => firstSubscribe.promise),
-      events: () => vi.fn(),
-      eventStreamDisconnects(listener: Parameters<BackendConnection["eventStreamDisconnects"]>[0]) {
-        disconnectListener = listener;
-        return vi.fn();
-      },
-    } as Pick<BackendConnection, "eventStreamDisconnects" | "events" | "request">;
-
-    startAppServerStateSubscription({
-      backendConnection: connection,
-      context: {
-        stateRootId: "root_1" as StateRootId,
-        clientInstanceId: "client_1" as never,
-      },
-      dispatch: vi.fn(),
-      onBaselineError: baselineError,
-      scope: { kind: "task", taskId: "task_1" as TaskId },
-    });
-    await Promise.resolve();
-
-    disconnectListener?.();
-    firstSubscribe.reject(new Error("connection closed"));
-    await firstSubscribe.promise.catch(() => undefined);
-    await Promise.resolve();
-
-    expect(baselineError).not.toHaveBeenCalled();
-  });
-
-  it("does not replay events queued before a replica reset onto its replacement baseline", async () => {
-    let eventListener: ((event: AppServerEvent) => void) | undefined;
-    let resetListener: Parameters<BackendConnection["stateResets"]>[0] | undefined;
-    const firstSubscribe = deferred<StateSubscribeResult>();
-    const secondSubscribe = deferred<StateSubscribeResult>();
-    const dispatch = vi.fn();
-    const request = vi.fn(() => (
-      request.mock.calls.length === 1 ? firstSubscribe.promise : secondSubscribe.promise
-    ));
-    const connection = {
-      request,
-      events(listener: (event: AppServerEvent) => void) {
-        eventListener = listener;
-        return vi.fn();
-      },
-      stateResets(listener: Parameters<BackendConnection["stateResets"]>[0]) {
-        resetListener = listener;
-        return vi.fn();
-      },
-    } as Pick<BackendConnection, "events" | "request" | "stateResets">;
-
-    startAppServerStateSubscription({
-      backendConnection: connection,
-      context: {
-        stateRootId: "root_1" as StateRootId,
-        clientInstanceId: "client_1" as never,
-      },
-      dispatch,
-      scope: { kind: "task", taskId: "task_1" as TaskId },
-    });
-    await Promise.resolve();
-
-    eventListener?.(taskEvent("cursor_1", "cursor_2", "task_1"));
-    resetListener?.({ serverId: "server_2" as never, stateRootId: "root_1" as StateRootId });
-    await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(2));
-
-    secondSubscribe.resolve(taskSubscription("cursor_10", "task_1"));
-    await secondSubscribe.promise;
-    await vi.waitFor(() => expect(dispatch).toHaveBeenCalledOnce());
-    firstSubscribe.resolve(taskSubscription("cursor_1", "task_1"));
-    await firstSubscribe.promise;
-    await Promise.resolve();
-
-    expect(dispatch).toHaveBeenCalledOnce();
-    expect(request).toHaveBeenCalledTimes(2);
-  });
-
-  it("uses the replacement state root for its reset baseline and live events", async () => {
-    let eventListener: ((event: AppServerEvent) => void) | undefined;
-    let resetListener: Parameters<BackendConnection["stateResets"]>[0] | undefined;
-    const dispatch = vi.fn();
-    const context = {
-      stateRootId: "root_1" as StateRootId,
-      clientInstanceId: "client_1" as never,
-    };
-    const request = vi.fn(async () => taskSubscription(
-      request.mock.calls.length === 1 ? "cursor_1" : "cursor_10",
-      "task_1",
-    ));
-    const connection = {
-      request,
-      events(listener: (event: AppServerEvent) => void) {
-        eventListener = listener;
-        return vi.fn();
-      },
-      stateResets(listener: Parameters<BackendConnection["stateResets"]>[0]) {
-        resetListener = listener;
-        return vi.fn();
-      },
-    } as Pick<BackendConnection, "events" | "request" | "stateResets">;
-
-    startAppServerStateSubscription({
-      backendConnection: connection,
-      context,
-      dispatch,
-      scope: { kind: "task", taskId: "task_1" as TaskId },
-    });
-    await vi.waitFor(() => expect(dispatch).toHaveBeenCalledOnce());
-
-    context.stateRootId = "root_2" as StateRootId;
-    resetListener?.({ serverId: "server_2" as never, stateRootId: context.stateRootId });
-    await vi.waitFor(() => expect(dispatch).toHaveBeenCalledTimes(2));
-
-    eventListener?.(taskEvent("cursor_10", "cursor_11", "task_1", "root_2"));
-    expect(dispatch).toHaveBeenCalledTimes(3);
-    eventListener?.(taskEvent("cursor_11", "cursor_12", "task_1", "root_1"));
-    expect(dispatch).toHaveBeenCalledTimes(3);
-    expect(request).toHaveBeenCalledTimes(3);
-  });
-
   it("dispatches presentation signals for ordered live Agent text deltas", async () => {
     let eventListener: ((event: AppServerEvent) => void) | undefined;
     const dispatch = vi.fn();
     const connection = {
       request: vi.fn(async () => taskSubscription("cursor_1", "task_1")),
-      events(listener: (event: AppServerEvent) => void) {
+      handleNotification(_method: "app/event", listener: (event: AppServerEvent) => void) {
         eventListener = listener;
         return vi.fn();
       },
-    } as Pick<BackendConnection, "request" | "events">;
+    } as Pick<BackendConnection, "request" | "handleNotification">;
     startAppServerStateSubscription({
       backendConnection: connection,
       context: {
@@ -414,6 +165,71 @@ describe("startAppServerStateSubscription", () => {
     expect(dispatch.mock.calls.map(([action]) => action).filter((action) => action.type === "taskChat:liveText")).toEqual([]);
   });
 
+  it("shows a permission card when the task stream publishes an opened request", async () => {
+    let eventListener: ((event: AppServerEvent) => void) | undefined;
+    const dispatch = vi.fn();
+    const connection = {
+      request: vi.fn(async () => taskSubscription("cursor_1", "task_1")),
+      handleNotification(_method: "app/event", listener: (event: AppServerEvent) => void) {
+        eventListener = listener;
+        return vi.fn();
+      },
+    } as Pick<BackendConnection, "request" | "handleNotification">;
+    startAppServerStateSubscription({
+      backendConnection: connection,
+      context: {
+        stateRootId: "root_1" as StateRootId,
+        clientInstanceId: "client_1" as never,
+      },
+      dispatch,
+      scope: { kind: "task", taskId: "task_1" as TaskId },
+    });
+    await Promise.resolve();
+
+    eventListener?.({
+      subscription: { kind: "task", taskId: "task_1" as TaskId },
+      previousCursor: "cursor_1" as EventCursor,
+      cursor: "cursor_2" as EventCursor,
+      scope: {
+        kind: "task",
+        stateRootId: "root_1" as StateRootId,
+        taskId: "task_1" as TaskId,
+      },
+      payload: {
+        kind: "taskRequestsUpdated",
+        taskId: "task_1" as TaskId,
+        requests: [{
+          requestId: "server-request-1" as never,
+          scope: { kind: "task", taskId: "task_1" as TaskId },
+          kind: "permission",
+          title: "Run command?",
+          permission: {
+            title: "Run command?",
+            toolCall: { id: "exec-1", title: "Run command", kind: "execute" },
+            options: [{
+              optionId: "allow-once",
+              name: "Allow once",
+              kind: "allowOnce",
+            }],
+          },
+        }],
+      },
+    });
+
+    expect(dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
+      type: "snapshot",
+      snapshot: expect.objectContaining({
+        active_requests: expect.arrayContaining([expect.objectContaining({
+          message_type: "permission",
+          message: expect.objectContaining({
+            app_server_request_id: "server-request-1",
+            state: "pending",
+          }),
+        })]),
+      }),
+    }));
+  });
+
   it("maps ordered App Server task navigation events into frontend task state", async () => {
     let eventListener: ((event: AppServerEvent) => void) | undefined;
     const dispatch = vi.fn();
@@ -423,11 +239,11 @@ describe("startAppServerStateSubscription", () => {
     });
     const connection = {
       request,
-      events(listener: (event: AppServerEvent) => void) {
+      handleNotification(_method: "app/event", listener: (event: AppServerEvent) => void) {
         eventListener = listener;
         return vi.fn();
       },
-    } as Pick<BackendConnection, "request" | "events">;
+    } as Pick<BackendConnection, "request" | "handleNotification">;
 
     startAppServerStateSubscription({
       backendConnection: connection,
@@ -494,10 +310,10 @@ describe("startAppServerStateSubscription", () => {
     });
     const connection = {
       request,
-      events() {
+      handleNotification() {
         return vi.fn();
       },
-    } as Pick<BackendConnection, "request" | "events">;
+    } as Pick<BackendConnection, "request" | "handleNotification">;
 
     startAppServerStateSubscription({
       backendConnection: connection,
@@ -552,10 +368,10 @@ describe("startAppServerStateSubscription", () => {
     });
     const connection = {
       request,
-      events() {
+      handleNotification() {
         return vi.fn();
       },
-    } as Pick<BackendConnection, "request" | "events">;
+    } as Pick<BackendConnection, "request" | "handleNotification">;
 
     startAppServerStateSubscription({
       backendConnection: connection,
@@ -591,11 +407,11 @@ describe("startAppServerStateSubscription", () => {
     });
     const connection = {
       request,
-      events(listener: (event: AppServerEvent) => void) {
+      handleNotification(_method: "app/event", listener: (event: AppServerEvent) => void) {
         eventListener = listener;
         return vi.fn();
       },
-    } as Pick<BackendConnection, "request" | "events">;
+    } as Pick<BackendConnection, "request" | "handleNotification">;
 
     startAppServerStateSubscription({
       backendConnection: connection,
@@ -645,11 +461,11 @@ describe("startAppServerStateSubscription", () => {
     ));
     const connection = {
       request,
-      events(listener: (event: AppServerEvent) => void) {
+      handleNotification(_method: "app/event", listener: (event: AppServerEvent) => void) {
         eventListener = listener;
         return vi.fn();
       },
-    } as Pick<BackendConnection, "request" | "events">;
+    } as Pick<BackendConnection, "request" | "handleNotification">;
 
     startAppServerStateSubscription({
       backendConnection: connection,
@@ -686,11 +502,11 @@ describe("startAppServerStateSubscription", () => {
     });
     const connection = {
       request,
-      events(listener: (event: AppServerEvent) => void) {
+      handleNotification(_method: "app/event", listener: (event: AppServerEvent) => void) {
         eventListener = listener;
         return vi.fn();
       },
-    } as Pick<BackendConnection, "request" | "events">;
+    } as Pick<BackendConnection, "request" | "handleNotification">;
 
     startAppServerStateSubscription({
       backendConnection: connection,
@@ -745,11 +561,11 @@ describe("startAppServerStateSubscription", () => {
     });
     const connection = {
       request,
-      events(listener: (event: AppServerEvent) => void) {
+      handleNotification(_method: "app/event", listener: (event: AppServerEvent) => void) {
         eventListener = listener;
         return vi.fn();
       },
-    } as Pick<BackendConnection, "request" | "events">;
+    } as Pick<BackendConnection, "request" | "handleNotification">;
 
     startAppServerStateSubscription({
       backendConnection: connection,
@@ -783,11 +599,11 @@ describe("startAppServerStateSubscription", () => {
     ));
     const connection = {
       request,
-      events(listener: (event: AppServerEvent) => void) {
+      handleNotification(_method: "app/event", listener: (event: AppServerEvent) => void) {
         eventListener = listener;
         return vi.fn();
       },
-    } as Pick<BackendConnection, "request" | "events">;
+    } as Pick<BackendConnection, "request" | "handleNotification">;
 
     startAppServerStateSubscription({
       backendConnection: connection,
@@ -824,11 +640,11 @@ describe("startAppServerStateSubscription", () => {
       });
       const connection = {
         request,
-        events(listener: (event: AppServerEvent) => void) {
+        handleNotification(_method: "app/event", listener: (event: AppServerEvent) => void) {
           eventListener = listener;
           return vi.fn();
         },
-      } as Pick<BackendConnection, "request" | "events">;
+      } as Pick<BackendConnection, "request" | "handleNotification">;
 
       startAppServerStateSubscription({
         backendConnection: connection,
@@ -863,11 +679,11 @@ describe("startAppServerStateSubscription", () => {
     const request = vi.fn(async () => taskSubscription("cursor_1", "task_1"));
     const connection = {
       request,
-      events(listener: (event: AppServerEvent) => void) {
+      handleNotification(_method: "app/event", listener: (event: AppServerEvent) => void) {
         eventListener = listener;
         return vi.fn();
       },
-    } as Pick<BackendConnection, "request" | "events">;
+    } as Pick<BackendConnection, "request" | "handleNotification">;
 
     startAppServerStateSubscription({
       backendConnection: connection,
@@ -901,11 +717,11 @@ describe("startAppServerStateSubscription", () => {
     const request = vi.fn(async () => subscribe.promise);
     const connection = {
       request,
-      events(listener: (event: AppServerEvent) => void) {
+      handleNotification(_method: "app/event", listener: (event: AppServerEvent) => void) {
         eventListener = listener;
         return vi.fn();
       },
-    } as Pick<BackendConnection, "request" | "events">;
+    } as Pick<BackendConnection, "request" | "handleNotification">;
 
     startAppServerStateSubscription({
       backendConnection: connection,
@@ -949,10 +765,10 @@ describe("startAppServerStateSubscription", () => {
     });
     const connection = {
       request,
-      events() {
+      handleNotification() {
         return stopEvents;
       },
-    } as Pick<BackendConnection, "request" | "events">;
+    } as Pick<BackendConnection, "request" | "handleNotification">;
 
     const stop = startAppServerStateSubscription({
       backendConnection: connection,
@@ -988,10 +804,10 @@ describe("startAppServerStateSubscription", () => {
     });
     const connection = {
       request,
-      events() {
+      handleNotification() {
         return vi.fn();
       },
-    } as Pick<BackendConnection, "request" | "events">;
+    } as Pick<BackendConnection, "request" | "handleNotification">;
 
     const stop = startAppServerStateSubscription({
       backendConnection: connection,
@@ -1029,10 +845,10 @@ describe("startAppServerStateSubscription", () => {
     });
     const connection = {
       request,
-      events() {
+      handleNotification() {
         return vi.fn();
       },
-    } as Pick<BackendConnection, "request" | "events">;
+    } as Pick<BackendConnection, "request" | "handleNotification">;
     const options = {
       backendConnection: connection,
       context: {
@@ -1073,10 +889,10 @@ describe("startAppServerStateSubscription", () => {
     });
     const connection = {
       request,
-      events() {
+      handleNotification() {
         return vi.fn();
       },
-    } as Pick<BackendConnection, "request" | "events">;
+    } as Pick<BackendConnection, "request" | "handleNotification">;
     const options = {
       backendConnection: connection,
       context: {

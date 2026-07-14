@@ -4,7 +4,8 @@ import {
   CLIENT_CAPABILITIES_CHANGED,
   CLIENT_INITIALIZE,
   TASK_OPEN,
-  type LocalHttpFetch,
+  type ReliableHttpFetch,
+  type RpcMessage,
 } from "@openaide/app-server-client";
 import { AppServerHostClient } from "./appServerHostClient";
 
@@ -28,8 +29,8 @@ describe("AppServerHostClient", () => {
 
   it("initializes a VS Code host client over LocalHttp before typed requests", async () => {
     const fetch = fetchSequence([
-      [response("local-http-request-1", { result: initializeResult() })],
-      [response("local-http-request-2", { result: { task: { taskId: "task-1" } } })],
+      [response("rpc-1", { result: initializeResult() })],
+      [response("rpc-2", { result: { task: { taskId: "task-1" } } })],
     ]);
     vi.stubGlobal("fetch", fetch);
     const provider = providerReturningConnection();
@@ -43,9 +44,9 @@ describe("AppServerHostClient", () => {
 
     const rpcCalls = jsonRpcCalls(fetch);
     expect(provider.startAppServerConnection).toHaveBeenCalledTimes(1);
-    expect(JSON.parse(String(rpcCalls[0]?.[1].body))).toEqual({
+    expect(rpcCalls[0]).toEqual({
       jsonrpc: "2.0",
-      id: "local-http-request-1",
+      id: "rpc-1",
       method: CLIENT_INITIALIZE,
       params: {
         clientInstanceId: "vscode-host-host-client-1",
@@ -55,21 +56,21 @@ describe("AppServerHostClient", () => {
         workspaceRoots: [{ path: "/workspace/app" }],
       },
     });
-    expect(JSON.parse(String(rpcCalls[1]?.[1].body))).toEqual({
+    expect(rpcCalls[1]).toEqual({
       jsonrpc: "2.0",
-      id: "local-http-request-2",
+      id: "rpc-2",
       method: TASK_OPEN,
       params: { taskId: "task-1" },
       meta: { clientRequestId: "client-request-1" },
     });
-    expect(rpcCalls[0]?.[1].headers["X-OpenAIDE-Connection-Id"])
+    expect(fetch.mock.calls[0]?.[1].headers["X-OpenAIDE-Connection-Id"])
       .toBe("vscode-connection-host-client-1");
   });
 
   it("replaces the workspace roots reported by an initialized host client", async () => {
     const fetch = fetchSequence([
-      [response("local-http-request-1", { result: initializeResult() })],
-      [response("local-http-request-2", { result: { projects: projectCollection() } })],
+      [response("rpc-1", { result: initializeResult() })],
+      [response("rpc-2", { result: { projects: projectCollection() } })],
     ]);
     vi.stubGlobal("fetch", fetch);
     client = new AppServerHostClient(providerReturningConnection());
@@ -77,9 +78,9 @@ describe("AppServerHostClient", () => {
     await client.syncWorkspaceRoots([{ path: "/workspace/app" }]);
     await client.syncWorkspaceRoots([{ path: "/workspace/web" }]);
 
-    expect(JSON.parse(String(jsonRpcCalls(fetch)[1]?.[1].body))).toEqual({
+    expect(jsonRpcCalls(fetch)[1]).toEqual({
       jsonrpc: "2.0",
-      id: "local-http-request-2",
+      id: "rpc-2",
       method: CLIENT_CAPABILITIES_CHANGED,
       params: { workspaceRoots: [{ path: "/workspace/web" }] },
     });
@@ -87,8 +88,8 @@ describe("AppServerHostClient", () => {
 
   it("reports an empty root list when the last VS Code workspace closes", async () => {
     const fetch = fetchSequence([
-      [response("local-http-request-1", { result: initializeResult() })],
-      [response("local-http-request-2", { result: { projects: projectCollection() } })],
+      [response("rpc-1", { result: initializeResult() })],
+      [response("rpc-2", { result: { projects: projectCollection() } })],
     ]);
     vi.stubGlobal("fetch", fetch);
     client = new AppServerHostClient(providerReturningConnection());
@@ -96,21 +97,18 @@ describe("AppServerHostClient", () => {
     await client.syncWorkspaceRoots([{ path: "/workspace/app" }]);
     await client.syncWorkspaceRoots([]);
 
-    expect(JSON.parse(String(jsonRpcCalls(fetch)[1]?.[1].body))).toMatchObject({
+    expect(jsonRpcCalls(fetch)[1]).toMatchObject({
       method: CLIENT_CAPABILITIES_CHANGED,
       params: { workspaceRoots: [] },
     });
   });
 
   it("serializes a workspace replacement that races host initialization", async () => {
-    const initializeResponse = deferred<ReturnType<typeof fetchResponse>>();
-    const fetch = vi.fn<LocalHttpFetch>(async (_input, init) => {
-      if (init.headers.Accept === "text/event-stream") return fetchResponse([]);
-      const request = JSON.parse(init.body) as { id: string; method: string };
+    const initializeResponse = deferred<RpcMessage[]>();
+    const fetch = reliableFetch(async (request) => {
+      if (!("method" in request) || !("id" in request)) return [];
       if (request.method === CLIENT_INITIALIZE) return initializeResponse.promise;
-      return fetchResponse([
-        response(request.id, { result: { projects: projectCollection() } }),
-      ]);
+      return [response(request.id, { result: { projects: projectCollection() } })];
     });
     vi.stubGlobal("fetch", fetch);
     client = new AppServerHostClient(providerReturningConnection());
@@ -118,12 +116,10 @@ describe("AppServerHostClient", () => {
     const initialSync = client.syncWorkspaceRoots([{ path: "/workspace/app" }]);
     await vi.waitFor(() => expect(jsonRpcCalls(fetch)).toHaveLength(1));
     const replacementSync = client.syncWorkspaceRoots([{ path: "/workspace/web" }]);
-    initializeResponse.resolve(fetchResponse([
-      response("local-http-request-1", { result: initializeResult() }),
-    ]));
+    initializeResponse.resolve([response("rpc-1", { result: initializeResult() })]);
 
     await Promise.all([initialSync, replacementSync]);
-    expect(jsonRpcCalls(fetch).map(([, init]) => JSON.parse(init.body))).toMatchObject([
+    expect(jsonRpcCalls(fetch)).toMatchObject([
       {
         method: CLIENT_INITIALIZE,
         params: { workspaceRoots: [{ path: "/workspace/app" }] },
@@ -137,9 +133,9 @@ describe("AppServerHostClient", () => {
 
   it("reuses one initialized LocalHttp connection for later typed requests", async () => {
     const fetch = fetchSequence([
-      [response("local-http-request-1", { result: initializeResult() })],
-      [response("local-http-request-2", { result: { task: { taskId: "task-1" } } })],
-      [response("local-http-request-3", { result: { task: { taskId: "task-2" } } })],
+      [response("rpc-1", { result: initializeResult() })],
+      [response("rpc-2", { result: { task: { taskId: "task-1" } } })],
+      [response("rpc-3", { result: { task: { taskId: "task-2" } } })],
     ]);
     vi.stubGlobal("fetch", fetch);
     const provider = providerReturningConnection();
@@ -154,10 +150,10 @@ describe("AppServerHostClient", () => {
 
   it("surfaces protocol errors from LocalHttp typed requests", async () => {
     const fetch = fetchSequence([
-      [response("local-http-request-1", { result: initializeResult() })],
+      [response("rpc-1", { result: initializeResult() })],
       [{
         jsonrpc: "2.0",
-        id: "local-http-request-2",
+        id: "rpc-2",
         error: {
           error: {
             code: "notFound",
@@ -192,48 +188,83 @@ function providerReturningConnection() {
   };
 }
 
-function fetchSequence(batches: unknown[][]) {
+function fetchSequence(batches: RpcMessage[][]) {
   let nextBatch = 0;
-  return vi.fn<LocalHttpFetch>(async (_input, init) => {
-    if (init.headers.Accept === "text/event-stream") {
-      return {
-        ok: true,
-        status: 200,
-        async text() {
-          return "";
-        },
-      };
-    }
+  return reliableFetch(async () => {
     const messages = batches[nextBatch] ?? [];
     nextBatch += 1;
-    return {
-      ok: true,
-      status: 200,
-      async text() {
-        return JSON.stringify(messages);
-      },
-    };
+    return messages;
   });
 }
 
-function jsonRpcCalls(fetch: ReturnType<typeof fetchSequence>) {
-  return fetch.mock.calls.filter(([, init]) => init.headers.Accept !== "text/event-stream");
+const uploadedMessages = new WeakMap<object, RpcMessage[]>();
+
+function reliableFetch(
+  respond: (message: RpcMessage) => Promise<RpcMessage[]> | RpcMessage[],
+) {
+  const uploaded: RpcMessage[] = [];
+  const frames: Array<{ sequence: number; message: RpcMessage }> = [];
+  const pendingPolls: Array<{
+    after: number;
+    resolve(response: ReturnType<typeof fetchResponse>): void;
+  }> = [];
+  const fetch = vi.fn<ReliableHttpFetch>(async (_input, init) => {
+    if (init.method === "GET") {
+      const after = Number(init.headers["X-OpenAIDE-After"] ?? "0");
+      const available = frames.filter((frame) => frame.sequence > after);
+      if (available.length > 0) return fetchResponse({ frames: available });
+      return new Promise((resolve) => pendingPolls.push({ after, resolve }));
+    }
+    const body = JSON.parse(init.body ?? "{}") as {
+      transport?: string;
+      message?: RpcMessage;
+    };
+    if (body.transport === "open") {
+      return fetchResponse({
+        transportVersion: 1,
+        sessionId: "session-1",
+        serverId: "server-1",
+      });
+    }
+    if (body.transport !== "send" || !body.message) {
+      return fetchResponse({}, 400);
+    }
+    uploaded.push(body.message);
+    for (const message of await respond(body.message)) {
+      frames.push({ sequence: frames.length + 1, message });
+    }
+    flushPolls();
+    return fetchResponse({}, 204);
+  });
+  uploadedMessages.set(fetch, uploaded);
+  return fetch;
+
+  function flushPolls() {
+    for (const poll of pendingPolls.splice(0)) {
+      const available = frames.filter((frame) => frame.sequence > poll.after);
+      poll.resolve(fetchResponse({ frames: available }));
+    }
+  }
 }
 
-function response(id: string, payload: unknown) {
+function jsonRpcCalls(fetch: ReturnType<typeof fetchSequence>) {
+  return uploadedMessages.get(fetch) ?? [];
+}
+
+function response(id: string | number, payload: unknown): RpcMessage {
   return {
     jsonrpc: "2.0",
     id,
-    ...payload as Record<string, unknown>,
+    result: payload,
   };
 }
 
-function fetchResponse(messages: unknown[]) {
+function fetchResponse(body: unknown, status = 200) {
   return {
-    ok: true,
-    status: 200,
+    ok: status >= 200 && status < 300,
+    status,
     async text() {
-      return JSON.stringify(messages);
+      return status === 204 ? "" : JSON.stringify(body);
     },
   };
 }

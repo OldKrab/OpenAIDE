@@ -1,16 +1,17 @@
 use crate::agent::acp_schema::{
     CreateTerminalRequest, KillTerminalRequest, ReadTextFileRequest, ReleaseTerminalRequest,
-    RequestPermissionRequest, SessionNotification, TerminalOutputRequest,
+    RequestPermissionRequest, SessionNotification, SessionUpdate, TerminalOutputRequest,
     WaitForTerminalExitRequest, WriteTextFileRequest,
 };
-use agent_client_protocol::{Agent, Client, ConnectTo, ConnectionTo, Handled};
+use agent_client_protocol::{Agent, Client, ConnectTo, ConnectionTo, Handled, JsonRpcMessage};
 
 use crate::agent::acp_elicitation_wire::{
-    CancelRequestNotification, ElicitationCreateRequest, WireRequestId,
+    CancelRequestNotification, ElicitationCreateRequest, RawElicitationCreateRequest, WireRequestId,
 };
 use crate::agent::acp_host_capabilities::AcpHostCapabilityHandlers;
 use crate::agent::acp_host_terminal_ownership::AcpHostTerminalRegistry;
 use crate::agent::acp_session_lifecycle::LoadReplayCaptures;
+use crate::agent::acp_tool_call_projection::tool_status_name;
 use crate::agent::acp_trace::AcpTraceSession;
 use crate::protocol::host::HostBridge;
 
@@ -34,6 +35,7 @@ pub(super) async fn connect_acp_session_client<R, AgentTransport>(
 where
     AgentTransport: ConnectTo<Client>,
 {
+    let notification_session_traces = context.session_traces.clone();
     let host_capabilities = AcpHostCapabilityHandlers::new(
         context.host_bridge,
         context.trace.clone(),
@@ -56,6 +58,7 @@ where
                 match handle_session_update_notification(
                     notification,
                     &notification_trace,
+                    &notification_session_traces,
                     &notification_load_replay,
                 ) {
                     Some(notification) => Ok(unhandled_session_update(notification, cx)),
@@ -67,9 +70,24 @@ where
         .on_receive_request(
             {
                 let host_capabilities = host_capabilities.clone();
-                async move |request: ElicitationCreateRequest, responder, connection| {
+                async move |request: RawElicitationCreateRequest, responder, connection| {
                     let request_id: WireRequestId = serde_json::from_value(responder.id())
                         .map_err(|_| agent_client_protocol::Error::invalid_request())?;
+                    let request = match ElicitationCreateRequest::parse_message(
+                        "elicitation/create",
+                        &request.0,
+                    ) {
+                        Ok(request) => request,
+                        Err(error) => {
+                            host_capabilities.trace_elicitation_decode_error(
+                                &request_id,
+                                &request.0,
+                                &error,
+                            );
+                            responder.respond_with_error(error)?;
+                            return Ok(Handled::Yes);
+                        }
+                    };
                     connection.spawn({
                         let host_capabilities = host_capabilities.clone();
                         async move {
@@ -233,9 +251,17 @@ where
 fn handle_session_update_notification(
     notification: SessionNotification,
     trace: &Option<AcpTraceSession>,
+    session_traces: &crate::agent::acp_host_capabilities::AcpSessionTraceMap,
     load_replay: &LoadReplayCaptures,
 ) -> Option<SessionNotification> {
-    if let Some(trace) = trace {
+    log_tool_call_status_received(&notification);
+    let owning_trace = session_traces
+        .lock()
+        .expect("ACP session trace map lock poisoned")
+        .get(&notification.session_id.to_string())
+        .cloned()
+        .or_else(|| trace.clone());
+    if let Some(trace) = owning_trace {
         trace.record("agent_to_client", "session/update", &notification);
     }
     let mut active = load_replay
@@ -248,6 +274,32 @@ fn handle_session_update_notification(
         }
     }
     Some(notification)
+}
+
+fn log_tool_call_status_received(notification: &SessionNotification) {
+    let status = match &notification.update {
+        SessionUpdate::ToolCall(tool_call) => Some((
+            tool_call.tool_call_id.to_string(),
+            tool_status_name(&tool_call.status),
+        )),
+        SessionUpdate::ToolCallUpdate(update) => update
+            .fields
+            .status
+            .as_ref()
+            .map(|status| (update.tool_call_id.to_string(), tool_status_name(status))),
+        _ => None,
+    };
+    let Some((tool_call_id, tool_status)) = status else {
+        return;
+    };
+    crate::logging::info(
+        "acp_tool_call_status_received",
+        serde_json::json!({
+            "session_id": notification.session_id.to_string(),
+            "tool_call_id": tool_call_id,
+            "tool_status": tool_status,
+        }),
+    );
 }
 
 fn unhandled_session_update<Cx>(

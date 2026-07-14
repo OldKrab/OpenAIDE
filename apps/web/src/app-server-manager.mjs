@@ -2,6 +2,7 @@ import {
   CLIENT_HEARTBEAT,
   CLIENT_INITIALIZE,
 } from "@openaide/app-server-client";
+import { createRuntimeLogger } from "./runtime-logger.mjs";
 
 const WEB_SHELL_CLIENT_ID = "web-app-shell";
 const WEB_SHELL_CONNECTION_ID = "web-app-shell";
@@ -11,6 +12,7 @@ export function createAppServerManager({
   connectionUrl = defaultConnectionUrl,
   readHandoffConnection,
   requestAppServer = defaultRequestAppServer,
+  logger = createRuntimeLogger(),
   shellHeartbeatIntervalMs = DEFAULT_SHELL_HEARTBEAT_INTERVAL_MS,
   spawnAppServer,
 }) {
@@ -18,6 +20,7 @@ export function createAppServerManager({
   let appServerConnection;
   let appServerUrl;
   let shellHeartbeat;
+  let heartbeatFailureActive = false;
   let startPromise;
 
   async function startAppServer() {
@@ -34,11 +37,16 @@ export function createAppServerManager({
   }
 
   async function startAppServerProcess() {
+    logger.info("app_server_handoff_started");
     const child = spawnAppServer();
     appServer = child;
     child.once("exit", () => {
       if (appServer === child) {
         appServer = undefined;
+        // The short-lived attach helper normally exits after yielding the live connection.
+        logger.info("app_server_handoff_process_exited", {
+          connection_status: appServerConnection ? "ready" : "pending",
+        });
       }
     });
 
@@ -47,8 +55,10 @@ export function createAppServerManager({
       await initializeShellClient(connection);
       appServerConnection = connection;
       appServerUrl = connectionUrl(connection);
+      logger.info("app_server_handoff_completed");
       return { appServer, appServerConnection, appServerUrl };
     } catch (error) {
+      logger.warn("app_server_handoff_failed", { error_kind: errorKind(error) });
       if (appServer === child) {
         stopShellClient();
         appServer = undefined;
@@ -72,10 +82,18 @@ export function createAppServerManager({
       },
     });
     shellHeartbeat = setInterval(() => {
-      void sendShellRequest(connection, CLIENT_HEARTBEAT, {}).catch(() => {
-        // Browser requests surface App Server failures. The shell heartbeat is
-        // only a lifetime keepalive and will retry on the next interval.
-      });
+      void sendShellRequest(connection, CLIENT_HEARTBEAT, {})
+        .then(() => {
+          if (!heartbeatFailureActive) return;
+          heartbeatFailureActive = false;
+          logger.info("app_server_heartbeat_recovered");
+        })
+        .catch((error) => {
+          // Log only the transition into failure; the interval itself is intentionally retrying.
+          if (heartbeatFailureActive) return;
+          heartbeatFailureActive = true;
+          logger.warn("app_server_heartbeat_failed", { error_kind: errorKind(error) });
+        });
     }, shellHeartbeatIntervalMs);
     shellHeartbeat.unref?.();
   }
@@ -85,6 +103,7 @@ export function createAppServerManager({
       clearInterval(shellHeartbeat);
       shellHeartbeat = undefined;
     }
+    heartbeatFailureActive = false;
   }
 
   function sendShellRequest(connection, method, params) {
@@ -108,6 +127,10 @@ export function createAppServerManager({
     currentUrl: () => appServerUrl,
     startAppServer,
   };
+}
+
+function errorKind(error) {
+  return error instanceof Error && error.name ? error.name : typeof error;
 }
 
 function defaultConnectionUrl(connection) {

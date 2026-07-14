@@ -11,20 +11,19 @@ import type {
   ServerRequestMethod,
   ServerRequestResponseResultByMethod,
   StateRootId,
-  TypedServerRequest,
 } from "./generated/protocol.js";
 
 export type BackendEventListener = (event: AppServerEvent) => void;
-export type BackendServerRequestListener = (
-  request: TypedServerRequest<ServerRequestMethod>,
-) => void;
 export type BackendUnsubscribe = () => void;
-export type BackendStateReset = {
+export type BackendReplicaIdentity = {
   serverId: ServerId;
   stateRootId: StateRootId;
 };
-export type BackendStateResetListener = (reset: BackendStateReset) => void;
-export type BackendEventStreamDisconnectListener = () => void;
+export type BackendRequestContext = {
+  requestId: RequestId;
+  scope?: unknown;
+  signal: AbortSignal;
+};
 
 export interface BackendConnection {
   initialize(params: InitializeParams, meta?: RequestMeta): Promise<InitializeResult>;
@@ -33,16 +32,16 @@ export interface BackendConnection {
     params: RequestParamsByMethod[M],
     meta?: RequestMeta,
   ): Promise<ResponseResultByMethod[M]>;
-  events(listener: BackendEventListener): BackendUnsubscribe;
-  /** Reports event-stream loss immediately, including when already disconnected at registration. */
-  eventStreamDisconnects(listener: BackendEventStreamDisconnectListener): BackendUnsubscribe;
-  /** Fires after the replacement event stream connects and fresh baselines may be requested. */
-  stateResets(listener: BackendStateResetListener): BackendUnsubscribe;
-  serverRequests(listener: BackendServerRequestListener): BackendUnsubscribe;
-  respond<M extends ServerRequestMethod>(
-    requestId: RequestId,
-    result: ServerRequestResponseResultByMethod[M],
-  ): Promise<void> | void;
+  /** Registers a typed inbound request handler; its return value is the protocol response. */
+  handleRequest<M extends ServerRequestMethod>(
+    method: M,
+    handler: (
+      params: import("./generated/protocol.js").ServerRequestParamsByMethod[M],
+      context: BackendRequestContext,
+    ) => Promise<ServerRequestResponseResultByMethod[M]> | ServerRequestResponseResultByMethod[M],
+  ): BackendUnsubscribe;
+  /** Registers a typed App Server event notification handler. */
+  handleNotification(method: "app/event", handler: BackendEventListener): BackendUnsubscribe;
   close(): Promise<void> | void;
 }
 

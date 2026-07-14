@@ -75,3 +75,21 @@ fn question_response_distinguishes_submit_from_cancel() {
         json!({ "action": "cancel" })
     );
 }
+
+#[test]
+fn pending_request_resolution_is_a_typed_client_request_payload() {
+    let permission = PendingRequestResolveParams {
+        request_id: crate::ids::RequestId::from("request-1"),
+        resolution: PendingRequestResolution::Permission {
+            option_id: "allow-once".to_string(),
+        },
+    };
+
+    assert_eq!(
+        serde_json::to_value(permission).unwrap(),
+        json!({
+            "requestId": "request-1",
+            "resolution": { "kind": "permission", "optionId": "allow-once" }
+        })
+    );
+}

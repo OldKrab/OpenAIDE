@@ -1,4 +1,4 @@
-import { ChevronLeft, Code2, Cpu, Image, Paperclip, Plus, Shield, SlidersHorizontal } from "lucide-react";
+import { Brain, ChevronLeft, Code2, Cpu, Image, Paperclip, Plus, Shield, SlidersHorizontal } from "lucide-react";
 import type { ConfigOption, ConfigOptionsCatalog, IsolationKind } from "@openaide/app-shell-contracts";
 import { useRef, type Dispatch, type SetStateAction } from "react";
 import {
@@ -330,7 +330,8 @@ function modelPrefixLabel(prefix: string) {
 }
 
 function configIcon(option: ConfigOption, size = 12) {
-  if (option.category === "model" || option.category === "thought_level") return <Cpu size={size} />;
+  if (option.category === "model") return <Cpu size={size} />;
+  if (option.category === "thought_level") return <Brain size={size} />;
   if (option.category === "mode") return <Code2 size={size} />;
-  return <Shield size={size} />;
+  return <SlidersHorizontal size={size} />;
 }

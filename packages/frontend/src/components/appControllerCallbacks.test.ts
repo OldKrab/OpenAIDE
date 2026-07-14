@@ -16,6 +16,7 @@ import {
   ATTACHMENT_RELEASE,
   ATTACHMENT_REVEAL,
   AppServerProtocolError,
+  PENDING_REQUEST_RESOLVE,
   SETTINGS_GET_AGENT_DETAILS,
   SETTINGS_GET_MCP_SERVERS,
   SETTINGS_GET_SKILLS,
@@ -99,7 +100,7 @@ describe("app controller callbacks", () => {
     };
 
     callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
       state,
     }).newTask.submit();
@@ -150,7 +151,7 @@ describe("app controller callbacks", () => {
     const newTaskStartAttempt = { current: attempt as typeof attempt | undefined };
 
     callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
       newTaskStartAttempt,
       state,
@@ -195,7 +196,7 @@ describe("app controller callbacks", () => {
     state.newTask.context = [attachment];
     const newTask = callbacks({
       attachmentResources,
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
       pendingPreparedNewTask: () => prepared.promise,
       state,
@@ -233,7 +234,7 @@ describe("app controller callbacks", () => {
     };
 
     callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
       newTaskStartAttempt,
       state,
@@ -267,7 +268,7 @@ describe("app controller callbacks", () => {
     };
 
     callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
       state,
     }).newTask.submit();
@@ -310,7 +311,7 @@ describe("app controller callbacks", () => {
     };
 
     callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
       state,
     }).newTask.submit();
@@ -361,7 +362,7 @@ describe("app controller callbacks", () => {
 
     await callbacks({
       attachmentResources,
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
       state,
     }).newTask.fileBrowser?.attachPastedImage(
@@ -436,7 +437,7 @@ describe("app controller callbacks", () => {
 
     await expect(callbacks({
       attachmentResources,
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
       state,
     }).newTask.fileBrowser?.attachPastedImage(
@@ -480,7 +481,7 @@ describe("app controller callbacks", () => {
     };
 
     void callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
       state,
     }).newTask.fileBrowser?.attachPastedImage(new File([new Uint8Array([1, 2, 3])], "pasted.png", { type: "image/png" }));
@@ -516,7 +517,6 @@ describe("app controller callbacks", () => {
     const asyncOperations = new AsyncOperationOwner();
     const backendConnection = {
       request: request as unknown as BackendConnection["request"],
-      respond: vi.fn(),
     };
     const fileBrowser = callbacks({
       attachmentResources,
@@ -562,7 +562,6 @@ describe("app controller callbacks", () => {
     const asyncOperations = new AsyncOperationOwner();
     const backendConnection = {
       request: request as unknown as BackendConnection["request"],
-      respond: vi.fn(),
     };
     const fileBrowser = callbacks({
       asyncOperations,
@@ -606,7 +605,7 @@ describe("app controller callbacks", () => {
     const state = preparedNewTaskState();
     state.newTask.prompt = "prompt captured before Task preparation";
     const fileBrowser = callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
       state,
     }).newTask.fileBrowser;
@@ -662,7 +661,7 @@ describe("app controller callbacks", () => {
     };
 
     callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
       state,
     }).newTask.submit();
@@ -723,7 +722,7 @@ describe("app controller callbacks", () => {
     };
 
     callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
       state,
     }).newTask.submit();
@@ -770,7 +769,7 @@ describe("app controller callbacks", () => {
     };
 
     callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
       state,
     }).newTask.submit({
@@ -831,7 +830,7 @@ describe("app controller callbacks", () => {
     };
 
     callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
       state,
     }).newTask.submit();
@@ -911,7 +910,7 @@ describe("app controller callbacks", () => {
     };
     const newTaskStartAttempt = { current: undefined };
     const newTask = callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
       newTaskStartAttempt,
       state,
@@ -958,7 +957,7 @@ describe("app controller callbacks", () => {
     state.taskInputs.task_a = { prompt: "Send A", context: [] };
     const newTaskController = new NewTaskController();
     const newTask = callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       newTaskController,
       state,
     }).newTask;
@@ -1006,7 +1005,7 @@ describe("app controller callbacks", () => {
     }];
 
     callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
       state,
     }).navigation.openTask("task_1");
@@ -1038,7 +1037,7 @@ describe("app controller callbacks", () => {
     ];
 
     callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
       requestNativeSessions,
       state,
@@ -1086,7 +1085,7 @@ describe("app controller callbacks", () => {
       };
 
       callbacks({
-        backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+        backendConnection: { request: request as unknown as BackendConnection["request"] },
         dispatch,
         state,
       }).newTask.submit();
@@ -1132,7 +1131,7 @@ describe("app controller callbacks", () => {
     };
 
     callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
       state,
     }).newTask.submit();
@@ -1180,7 +1179,7 @@ describe("app controller callbacks", () => {
       };
 
       callbacks({
-        backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+        backendConnection: { request: request as unknown as BackendConnection["request"] },
         dispatch,
         state,
       }).newTask.submit();
@@ -1218,7 +1217,7 @@ describe("app controller callbacks", () => {
     state.snapshot.agent_config = editableConfigOptions();
 
     callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
       state,
     }).task.selectConfigOption("model", "gpt-5");
@@ -1242,9 +1241,8 @@ describe("app controller callbacks", () => {
       throw new Error(method);
     });
     const backendConnection = {
-      events: vi.fn(),
+      handleNotification: vi.fn(),
       request: request as unknown as BackendConnection["request"],
-      respond: vi.fn(),
     };
     const state = createInitialState();
     state.snapshot = snapshot("task_1");
@@ -1276,7 +1274,7 @@ describe("app controller callbacks", () => {
     };
 
     callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
       state,
     }).task.selectConfigOption("model", "gpt-5");
@@ -1309,7 +1307,7 @@ describe("app controller callbacks", () => {
     state.snapshot.agent_config = editableConfigOptions();
 
     callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
       state,
     }).task.selectConfigOption("model", "gpt-5");
@@ -1342,7 +1340,7 @@ describe("app controller callbacks", () => {
       renderedState = appReducer(renderedState, action);
     });
     const task = callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
       state: callbackState,
     }).task;
@@ -1389,7 +1387,7 @@ describe("app controller callbacks", () => {
     };
 
     callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
       state,
     }).newTask.submit();
@@ -1410,7 +1408,7 @@ describe("app controller callbacks", () => {
     }));
 
     callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
       setPreferences,
     }).settings.setComposerSubmitShortcut("enter");
@@ -1448,7 +1446,7 @@ describe("app controller callbacks", () => {
     }));
 
     callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
     }).settings.setAcpTrace(true);
     await settlePromises();
@@ -1486,7 +1484,7 @@ describe("app controller callbacks", () => {
     }));
 
     callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
       setAgents,
     }).settings.createCustomAgent({
@@ -1542,7 +1540,7 @@ describe("app controller callbacks", () => {
     beginAgentSecretTransaction.mockRejectedValueOnce(new Error("Secure storage is unavailable in the Web App."));
 
     callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
     }).settings.createCustomAgent({
       label: "Local Agent",
@@ -1593,7 +1591,7 @@ describe("app controller callbacks", () => {
     });
 
     callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
     }).settings.refreshSettings();
     await settlePromises();
@@ -1673,7 +1671,7 @@ describe("app controller callbacks", () => {
     });
 
     callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
     }).settings.authenticateAgent("codex", "codex-login");
     await settlePromises();
@@ -1717,7 +1715,7 @@ describe("app controller callbacks", () => {
     state.settings.agentDetails = [customSettingsAgent("custom.local")];
 
     callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       state,
     }).settings.updateCustomAgentMetadata({
       agent_id: "custom.local",
@@ -1756,7 +1754,7 @@ describe("app controller callbacks", () => {
     ];
 
     callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
       state,
     }).settings.replaceCustomAgent({
@@ -1843,7 +1841,7 @@ describe("app controller callbacks", () => {
     state.settings.agentDetails[0].env = [{ name: "TOKEN", secret: true }];
 
     callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
       setAgents,
       state,
@@ -1871,7 +1869,7 @@ describe("app controller callbacks", () => {
     const state = createInitialState();
 
     callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
       setAgents,
       state,
@@ -1893,7 +1891,6 @@ describe("app controller callbacks", () => {
     callbacks({
       backendConnection: {
         request: vi.fn(async () => { throw new Error("duplicate Agent"); }) as unknown as BackendConnection["request"],
-        respond: vi.fn(),
       },
       dispatch,
     }).settings.createCustomAgent({
@@ -1933,7 +1930,7 @@ describe("app controller callbacks", () => {
     state.taskInputs.task_1 = { prompt: "Continue", context: [] };
 
     callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
       state,
     }).task.sendPrompt();
@@ -1966,7 +1963,7 @@ describe("app controller callbacks", () => {
     state.taskInputs.task_1 = { prompt: "Follow up next", context: [] };
 
     callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
       state,
     }).task.sendPrompt();
@@ -2001,7 +1998,7 @@ describe("app controller callbacks", () => {
     };
 
     callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
       state,
     }).task.sendPrompt();
@@ -2028,7 +2025,7 @@ describe("app controller callbacks", () => {
     };
 
     callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
       state,
     }).task.sendPrompt();
@@ -2060,7 +2057,7 @@ describe("app controller callbacks", () => {
     };
 
     callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
       state,
     }).task.removeAttachment("ctx_1");
@@ -2098,7 +2095,7 @@ describe("app controller callbacks", () => {
     };
 
     callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
       state,
     }).newTask.removeAttachment("ctx_1");
@@ -2132,7 +2129,7 @@ describe("app controller callbacks", () => {
     };
 
     callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       state,
     }).task.revealAttachment("ctx_1");
     await settlePromises();
@@ -2157,7 +2154,7 @@ describe("app controller callbacks", () => {
     const state = createInitialState();
     state.snapshot = snapshot("task_1");
     const task = callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       state,
     }).task;
 
@@ -2184,7 +2181,7 @@ describe("app controller callbacks", () => {
     state.snapshot = snapshot("task_1");
 
     await callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
       state,
     }).task.fileBrowser?.attachFileReference("entry-1" as FileBrowserEntryId);
@@ -2223,7 +2220,7 @@ describe("app controller callbacks", () => {
 
     const attaching = callbacks({
       attachmentResources,
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
       state,
     }).task.fileBrowser?.attachFileReference("entry-1" as FileBrowserEntryId);
@@ -2272,7 +2269,7 @@ describe("app controller callbacks", () => {
     state.taskInputs.task_1 = { prompt: "Start now", context: [] };
     const task = callbacks({
       attachmentResources,
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
       state,
     }).task;
@@ -2313,7 +2310,7 @@ describe("app controller callbacks", () => {
     state.snapshot = snapshot("task_1");
 
     await callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
       state,
     }).task.fileBrowser?.attachEmbedded("entry-1" as FileBrowserEntryId);
@@ -2359,7 +2356,7 @@ describe("app controller callbacks", () => {
     const state = createInitialState();
     state.snapshot = snapshot("task_1");
     const task = callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       state,
     }).task;
 
@@ -2382,7 +2379,7 @@ describe("app controller callbacks", () => {
     state.snapshot = snapshot("task_1");
 
     await callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
       state,
     }).task.fileBrowser?.attachPastedImage(new File(["image"], "pasted.png", { type: "image/png" }));
@@ -2412,7 +2409,7 @@ describe("app controller callbacks", () => {
     state.snapshot = snapshot("task_1");
 
     callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
       state,
     }).task.cancel();
@@ -2451,7 +2448,6 @@ describe("app controller callbacks", () => {
             error: { code: "conflict", message: "Task is running", recoverable: true },
           });
         }) as unknown as BackendConnection["request"],
-        respond: vi.fn(),
       },
       dispatch,
       state,
@@ -2474,7 +2470,6 @@ describe("app controller callbacks", () => {
     callbacks({
       backendConnection: {
         request: vi.fn(async () => { throw new Error("not running"); }) as unknown as BackendConnection["request"],
-        respond: vi.fn(),
       },
       dispatch,
       state,
@@ -2491,11 +2486,11 @@ describe("app controller callbacks", () => {
 
   it("answers permissions through BackendConnection when available", async () => {
     const dispatch = vi.fn();
-    const respond = vi.fn();
+    const request = vi.fn(async () => ({}));
     const state = createInitialState();
     state.snapshot = snapshot("task_1");
 
-    callbacks({ backendConnection: { respond }, dispatch, state }).task.respondToPermission(
+    callbacks({ backendConnection: { request: request as never }, dispatch, state }).task.respondToPermission(
       "server-request-1",
       "allow_once",
     );
@@ -2504,7 +2499,10 @@ describe("app controller callbacks", () => {
       type: "permission:responding",
       requestId: "server-request-1",
     });
-    expect(respond).toHaveBeenCalledWith("server-request-1", { optionId: "allow_once" });
+    expect(request).toHaveBeenCalledWith(PENDING_REQUEST_RESOLVE, {
+      requestId: "server-request-1",
+      resolution: { kind: "permission", optionId: "allow_once" },
+    });
     expect(postHostMessage).not.toHaveBeenCalled();
   });
 
@@ -2514,7 +2512,7 @@ describe("app controller callbacks", () => {
     state.snapshot = snapshot("task_1");
 
     callbacks({
-      backendConnection: { respond: vi.fn(async () => undefined) },
+      backendConnection: { request: vi.fn(async () => ({})) as never },
       dispatch,
       state,
     }).task.respondToPermission("server-request-1", "allow_once");
@@ -2528,13 +2526,15 @@ describe("app controller callbacks", () => {
     expect(postHostMessage).not.toHaveBeenCalled();
   });
 
-  it("shows a recoverable permission error when BackendConnection respond fails", async () => {
+  it("shows a recoverable permission error when BackendConnection request fails", async () => {
     const dispatch = vi.fn();
     const state = createInitialState();
     state.snapshot = snapshot("task_1");
 
     callbacks({
-      backendConnection: { respond: () => Promise.reject(new Error("connection closed")) },
+      backendConnection: {
+        request: vi.fn(() => Promise.reject(new Error("connection closed"))) as never,
+      },
       dispatch,
       state,
     }).task.respondToPermission("server-request-1", "allow_once");
@@ -2574,16 +2574,16 @@ describe("app controller callbacks", () => {
     expect(postHostMessage).not.toHaveBeenCalled();
   });
 
-  it("shows a recoverable permission error when BackendConnection respond throws", () => {
+  it("shows a recoverable permission error when BackendConnection request throws", () => {
     const dispatch = vi.fn();
     const state = createInitialState();
     state.snapshot = snapshot("task_1");
 
     callbacks({
       backendConnection: {
-        respond: () => {
+        request: (() => {
           throw new Error("connection unavailable");
-        },
+        }) as never,
       },
       dispatch,
       state,
@@ -2643,7 +2643,7 @@ describe("app controller callbacks", () => {
     };
 
     callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
       state,
     }).navigation.openNativeSession({
@@ -2687,7 +2687,7 @@ describe("app controller callbacks", () => {
     const state = preparedNewTaskState("task_prepared");
     const navigation = callbacks({
       attachmentResources,
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
       state,
     }).navigation;
@@ -2709,7 +2709,7 @@ describe("app controller callbacks", () => {
     const state = preparedNewTaskState("task_prepared");
     const navigation = callbacks({
       attachmentResources,
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
       state,
     }).navigation;
@@ -2735,7 +2735,7 @@ describe("app controller callbacks", () => {
     const state = preparedNewTaskState("task_prepared");
 
     callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
       state,
     }).navigation.openNativeSession({
@@ -2771,7 +2771,7 @@ describe("app controller callbacks", () => {
     newTaskController.protectSend(lease);
 
     callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
       newTaskController,
       newTaskStartAttempt: {
@@ -2802,7 +2802,7 @@ describe("app controller callbacks", () => {
     });
 
     callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       newTaskController,
       state,
     }).navigation.openSettings();
@@ -2829,7 +2829,7 @@ describe("app controller callbacks", () => {
     };
 
     callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       asyncOperations,
       dispatch,
       state,
@@ -2868,7 +2868,6 @@ describe("app controller callbacks", () => {
     const controllerCallbacks = callbacks({
       backendConnection: {
         request: vi.fn(() => adopted.promise) as unknown as BackendConnection["request"],
-        respond: vi.fn(),
       },
       asyncOperations,
       dispatch,
@@ -2908,7 +2907,6 @@ describe("app controller callbacks", () => {
     const controllerCallbacks = callbacks({
       backendConnection: {
         request: vi.fn(() => adopted.promise) as unknown as BackendConnection["request"],
-        respond: vi.fn(),
       },
       asyncOperations,
       dispatch,
@@ -2954,7 +2952,7 @@ describe("app controller callbacks", () => {
     };
 
     callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       asyncOperations,
       dispatch,
       state,
@@ -3023,7 +3021,7 @@ describe("app controller callbacks", () => {
     }];
 
     callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
       state,
     }).navigation.archiveTask("task_1");
@@ -3055,7 +3053,7 @@ describe("app controller callbacks", () => {
     state.activeTaskId = undefined;
     state.snapshot = undefined;
     callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
       state,
     }).navigation.restoreTask("task_1");
@@ -3090,7 +3088,7 @@ describe("app controller callbacks", () => {
     state.taskInputs.task_1 = { prompt: "testing archived composer", context: [] };
 
     callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
       state,
     }).navigation.restoreTask("task_1");
@@ -3124,7 +3122,7 @@ describe("app controller callbacks", () => {
     state.tasks = [state.snapshot.task];
 
     callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
       state,
     }).navigation.archiveTask("task_1");
@@ -3168,7 +3166,7 @@ describe("app controller callbacks", () => {
     }];
 
     callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
       state,
     }).navigation.archiveTask("task_1");
@@ -3211,7 +3209,7 @@ describe("app controller callbacks", () => {
     const state = createInitialState();
 
     callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       asyncOperations,
       dispatch,
       state,
@@ -3243,7 +3241,7 @@ describe("app controller callbacks", () => {
     state.taskListCache.archived = [snapshot("task_archived_cached").task];
 
     callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       asyncOperations,
       dispatch,
       state,
@@ -3288,7 +3286,7 @@ describe("app controller callbacks", () => {
     state.snapshot.chat.has_messages = false;
 
     callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
       state,
     }).newTask.selectConfigOption("model", "gpt-5");
@@ -3324,7 +3322,7 @@ describe("app controller callbacks", () => {
     const state = renderedState;
 
     callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
       state,
     }).newTask.selectConfigOption("model", "gpt-5");
@@ -3360,7 +3358,7 @@ describe("app controller callbacks", () => {
     state.snapshot = snapshot("task_1");
 
     const requestGeneration = callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
       asyncOperations,
       dispatch,
       state,
@@ -3413,12 +3411,12 @@ describe("app controller callbacks", () => {
       if (method === STATE_UNSUBSCRIBE) return { scope: { kind: "toolDetail", taskId: "task_1", artifactId: "artifact_1" } };
       throw new Error(method);
     });
-    const events = vi.fn(() => vi.fn());
+    const handleNotification = vi.fn(() => vi.fn());
     const state = createInitialState();
     state.snapshot = snapshot("task_1");
 
     const cleanup = callbacks({
-      backendConnection: { events, request: request as unknown as BackendConnection["request"], respond: vi.fn() },
+      backendConnection: { handleNotification, request: request as unknown as BackendConnection["request"] },
       dispatch,
       state,
     }).task.subscribeToolDetail("artifact_1");

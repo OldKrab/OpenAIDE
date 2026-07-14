@@ -6,7 +6,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::{json, Value};
 
-static LOGGER: OnceLock<Mutex<Option<File>>> = OnceLock::new();
+struct LoggerState {
+    file: Option<File>,
+    write_failure_reported: bool,
+}
+
+static LOGGER: OnceLock<Mutex<LoggerState>> = OnceLock::new();
 
 pub fn init_file_logger(storage_root: &Path) {
     let path = storage_root
@@ -15,8 +20,19 @@ pub fn init_file_logger(storage_root: &Path) {
         .join("openaide-app-server.jsonl");
     let file = fs::create_dir_all(path.parent().unwrap_or(storage_root))
         .and_then(|_| OpenOptions::new().create(true).append(true).open(path));
-    let logger = LOGGER.get_or_init(|| Mutex::new(None));
-    *logger.lock().expect("app server logger lock poisoned") = file.ok();
+    if file.is_err() {
+        write_fallback("app_server_log_open_failed");
+    }
+    let logger = LOGGER.get_or_init(|| {
+        Mutex::new(LoggerState {
+            file: None,
+            write_failure_reported: false,
+        })
+    });
+    *logger.lock().expect("app server logger lock poisoned") = LoggerState {
+        file: file.ok(),
+        write_failure_reported: false,
+    };
 }
 
 pub fn info(event: &str, fields: Value) {
@@ -46,10 +62,27 @@ fn write(level: &str, event: &str, fields: Value) {
         return;
     };
     let mut guard = logger.lock().expect("runtime logger lock poisoned");
-    if let Some(file) = guard.as_mut() {
-        let _ = writeln!(file, "{text}");
-        let _ = file.flush();
+    if let Some(file) = guard.file.as_mut() {
+        let result = writeln!(file, "{text}").and_then(|_| file.flush());
+        if result.is_err() && !guard.write_failure_reported {
+            guard.write_failure_reported = true;
+            write_fallback("app_server_log_write_failed");
+        }
     }
+}
+
+fn write_fallback(event: &str) {
+    // stderr is the last-resort diagnostic path and carries no runtime payload.
+    eprintln!(
+        "{}",
+        json!({
+            "timestamp_ms": timestamp_ms(),
+            "scope": "openaide-app-server",
+            "level": "error",
+            "event": event,
+            "fields": {},
+        })
+    );
 }
 
 fn timestamp_ms() -> u128 {
@@ -68,7 +101,9 @@ fn sanitize_value(value: Value) -> Value {
                 .into_iter()
                 .map(|(key, value)| {
                     if is_sensitive_key(&key) {
-                        (key, Value::String(sanitize_text(&value_to_text(&value))))
+                        // Free-form diagnostic values cannot be made safe with keyword
+                        // replacement: arbitrary user text may contain no recognizable marker.
+                        (key, Value::String("[redacted]".to_string()))
                     } else {
                         (key, sanitize_value(value))
                     }
@@ -79,17 +114,27 @@ fn sanitize_value(value: Value) -> Value {
     }
 }
 
-fn value_to_text(value: &Value) -> String {
-    match value {
-        Value::String(text) => text.clone(),
-        other => other.to_string(),
-    }
-}
-
 fn is_sensitive_key(key: &str) -> bool {
     let key = key.to_ascii_lowercase();
+    if ["_kind", "_code", "_count", "_bytes", "_status"]
+        .iter()
+        .any(|suffix| key.ends_with(suffix))
+    {
+        return false;
+    }
     [
-        "prompt", "secret", "token", "password", "content", "output", "path", "message", "error",
+        "prompt",
+        "secret",
+        "token",
+        "password",
+        "content",
+        "output",
+        "path",
+        "message",
+        "error",
+        "command",
+        "cwd",
+        "environment",
     ]
     .iter()
     .any(|needle| key.contains(needle))

@@ -17,7 +17,7 @@ impl RpcGateway {
         now: AppServerTime,
     ) -> Vec<GatewayEventDelivery> {
         let task_id = TaskId::from(update.task_id.clone());
-        let events = match &update.kind {
+        let mut events = match &update.kind {
             TaskUpdateKind::HistorySync(history_sync) => {
                 self.publish_history_sync(&task_id, history_sync.clone(), now)
             }
@@ -25,6 +25,20 @@ impl RpcGateway {
                 self.publish_committed_task_change(&task_id, update.revision, change, now)
             }
         };
+        let pending_requests = self.server_requests.pending_for_task(&task_id);
+        if !pending_requests.is_empty() {
+            // Permission/question opening precedes the Task mutation that marks
+            // it waiting. Publish broker state through the same ordered Task
+            // stream so live clients do not depend on reverse-RPC delivery.
+            events.extend(self.publish_task_payload(
+                &task_id,
+                AppServerEventPayload::TaskRequestsUpdated {
+                    task_id: task_id.clone(),
+                    requests: pending_requests,
+                },
+                now,
+            ));
+        }
         self.pending_event_deliveries.extend(events.clone());
         events
     }

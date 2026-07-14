@@ -179,7 +179,8 @@ fn product_transport_returns_error_when_client_response_is_rejected() {
 }
 
 #[test]
-fn product_transport_returns_queued_events_with_client_response() {
+fn product_transport_leaves_queued_events_for_the_push_channel_after_client_response() {
+    let mut drained_events = false;
     let response = handle_local_http_protocol(
         Some("Bearer token"),
         "token",
@@ -195,6 +196,7 @@ fn product_transport_returns_queued_events_with_client_response() {
             GatewayOutcome::Noop
         },
         |connection_id| {
+            drained_events = true;
             vec![crate::protocol_edge::GatewayEventDelivery {
                 delivery: crate::client_lifecycle::Delivery {
                     client_instance_id: "client-1".into(),
@@ -208,15 +210,12 @@ fn product_transport_returns_queued_events_with_client_response() {
 
     assert_eq!(response.status, 200);
     let body: Value = serde_json::from_str(&response.body).unwrap();
-    assert_eq!(body[0]["method"], "app/event");
-    assert_eq!(
-        body[0]["params"]["payload"]["kind"],
-        "projectCollectionUpdated"
-    );
+    assert_eq!(body, json!([]));
+    assert!(!drained_events);
 }
 
 #[test]
-fn product_transport_returns_queued_events_before_client_response_events() {
+fn product_transport_returns_only_events_caused_by_a_client_response() {
     let response = handle_local_http_protocol(
         Some("Bearer token"),
         "token",
@@ -250,8 +249,8 @@ fn product_transport_returns_queued_events_before_client_response_events() {
 
     assert_eq!(response.status, 200);
     let body: Value = serde_json::from_str(&response.body).unwrap();
-    assert_eq!(body[0]["params"]["cursor"], "cursor-2");
-    assert_eq!(body[1]["params"]["cursor"], "cursor-3");
+    assert_eq!(body.as_array().unwrap().len(), 1);
+    assert_eq!(body[0]["params"]["cursor"], "cursor-3");
 }
 
 #[test]
@@ -300,6 +299,65 @@ fn product_transport_rejects_client_response_with_result_and_error() {
         .as_str()
         .unwrap()
         .contains("method is required"));
+}
+
+#[test]
+fn reliable_upload_returns_no_rpc_messages_and_poll_delivers_the_response() {
+    let sessions = ReliableSessionRegistry::new("server-1");
+    let opened =
+        handle_reliable_session_open(Some("Bearer token"), "token", Some("client-1"), &sessions);
+    let handshake: Value = serde_json::from_str(&opened.body).unwrap();
+    let session_id = handshake["sessionId"].as_str().unwrap();
+
+    let upload = handle_reliable_session_upload(
+        Some("Bearer token"),
+        "token",
+        Some("client-1"),
+        &json!({
+            "sessionId": session_id,
+            "sequence": 1,
+            "message": {
+                "jsonrpc": "2.0",
+                "id": "request-1",
+                "method": "task/list",
+                "params": {}
+            }
+        })
+        .to_string(),
+        &sessions,
+        |connection_id, message| {
+            assert!(matches!(
+                message,
+                InboundProtocolMessage::ClientRequest { .. }
+            ));
+            GatewayOutcome::Respond {
+                connection_id,
+                id: "request-1".to_string(),
+                response: GatewayResponse::Result(json!({"result": {"tasks": []}})),
+                events: Vec::new(),
+                server_requests: Vec::new(),
+            }
+        },
+    );
+    let poll = handle_reliable_session_poll(
+        Some("Bearer token"),
+        "token",
+        Some("client-1"),
+        session_id,
+        0,
+        &sessions,
+        || (Vec::new(), Vec::new()),
+    );
+
+    assert_eq!(upload.status, 204);
+    assert!(upload.body.is_empty());
+    let batch: Value = serde_json::from_str(&poll.body).unwrap();
+    assert_eq!(batch["frames"][0]["sequence"], 1);
+    assert_eq!(batch["frames"][0]["message"]["id"], "request-1");
+    assert_eq!(
+        batch["frames"][0]["message"]["result"]["result"]["tasks"],
+        json!([])
+    );
 }
 
 fn request(id: &str, method: &str, params: Value) -> String {

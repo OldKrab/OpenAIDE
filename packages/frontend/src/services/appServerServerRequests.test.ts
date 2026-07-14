@@ -4,33 +4,25 @@ import {
   QUESTION_REQUEST,
   SECRET_READ,
   SHELL_SHOW_NOTIFICATION,
-  type ClientInstanceId,
-  type RequestId,
   type ServerRequestMethod,
-  type TaskId,
-  type TypedServerRequest,
 } from "@openaide/app-server-client";
 import { startAppServerServerRequestBridge } from "./appServerServerRequests";
 
 describe("App Server server-request bridge", () => {
   it("forwards shell-owned server requests to the App Shell", () => {
     const postHostMessage = vi.fn();
-    let listener: ((request: TypedServerRequest<ServerRequestMethod>) => void) | undefined;
+    const handlers = new Map<ServerRequestMethod, (params: never, context: never) => Promise<unknown>>();
     const backendConnection = {
-      serverRequests: vi.fn((nextListener) => {
-        listener = nextListener as never;
+      handleRequest: vi.fn((method, handler) => {
+        handlers.set(method, handler);
         return vi.fn();
       }),
-      respond: vi.fn(),
     };
 
     startAppServerServerRequestBridge({ backendConnection, postHostMessage });
-    listener?.({
-      requestId: "server-request-1" as RequestId,
-      scope: { kind: "client", clientInstanceId: "client-1" as ClientInstanceId },
-      method: SECRET_READ,
-      params: { key: "agent.secret" },
-    });
+    void handlers.get(SECRET_READ)?.({ key: "agent.secret" } as never, {
+      requestId: "server-request-1", signal: new AbortController().signal,
+    } as never);
 
     expect(postHostMessage).toHaveBeenCalledWith({
       type: "appServer.serverRequest",
@@ -42,24 +34,21 @@ describe("App Server server-request bridge", () => {
     });
   });
 
-  it("responds to Backend when the App Shell returns a result", () => {
+  it("responds to Backend when the App Shell returns a result", async () => {
     const postHostMessage = vi.fn();
-    let listener: ((request: TypedServerRequest<ServerRequestMethod>) => void) | undefined;
+    const handlers = new Map<ServerRequestMethod, (params: never, context: never) => Promise<unknown>>();
     const backendConnection = {
-      serverRequests: vi.fn((nextListener) => {
-        listener = nextListener as never;
+      handleRequest: vi.fn((method, handler) => {
+        handlers.set(method, handler);
         return vi.fn();
       }),
-      respond: vi.fn(),
     };
 
     const bridge = startAppServerServerRequestBridge({ backendConnection, postHostMessage });
-    listener?.({
-      requestId: "server-request-1" as RequestId,
-      scope: { kind: "client", clientInstanceId: "client-1" as ClientInstanceId },
-      method: SHELL_SHOW_NOTIFICATION,
-      params: { level: "info", message: "Saved" },
-    });
+    const response = handlers.get(SHELL_SHOW_NOTIFICATION)?.(
+      { level: "info", message: "Saved" } as never,
+      { requestId: "server-request-1", signal: new AbortController().signal } as never,
+    );
 
     expect(
       bridge.handleHostMessage({
@@ -71,27 +60,23 @@ describe("App Server server-request bridge", () => {
         },
       }),
     ).toBe(true);
-    expect(backendConnection.respond).toHaveBeenCalledWith("server-request-1", { actionId: null });
+    await expect(response).resolves.toEqual({ actionId: null });
   });
 
   it("does not respond when the App Shell result method does not match the pending request", () => {
     const postHostMessage = vi.fn();
-    let listener: ((request: TypedServerRequest<ServerRequestMethod>) => void) | undefined;
+    const handlers = new Map<ServerRequestMethod, (params: never, context: never) => Promise<unknown>>();
     const backendConnection = {
-      serverRequests: vi.fn((nextListener) => {
-        listener = nextListener as never;
+      handleRequest: vi.fn((method, handler) => {
+        handlers.set(method, handler);
         return vi.fn();
       }),
-      respond: vi.fn(),
     };
 
     const bridge = startAppServerServerRequestBridge({ backendConnection, postHostMessage });
-    listener?.({
-      requestId: "server-request-1" as RequestId,
-      scope: { kind: "client", clientInstanceId: "client-1" as ClientInstanceId },
-      method: SECRET_READ,
-      params: { key: "agent.secret" },
-    });
+    void handlers.get(SECRET_READ)?.({ key: "agent.secret" } as never, {
+      requestId: "server-request-1", signal: new AbortController().signal,
+    } as never);
 
     expect(
       bridge.handleHostMessage({
@@ -103,7 +88,7 @@ describe("App Server server-request bridge", () => {
         },
       }),
     ).toBe(true);
-    expect(backendConnection.respond).not.toHaveBeenCalled();
+    expect(postHostMessage).toHaveBeenCalledOnce();
   });
 
 });

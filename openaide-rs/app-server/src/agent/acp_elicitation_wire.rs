@@ -5,6 +5,8 @@ use std::collections::BTreeMap;
 use agent_client_protocol::{JsonRpcNotification, JsonRpcRequest, JsonRpcResponse};
 use serde::{Deserialize, Serialize};
 
+type AcpMeta = Option<serde_json::Map<String, serde_json::Value>>;
+
 #[cfg(test)]
 #[path = "acp_elicitation_wire_tests.rs"]
 mod tests;
@@ -26,6 +28,13 @@ pub(super) struct ElicitationCreateRequest {
     #[serde(default, rename = "_meta")]
     pub(super) meta: Option<serde_json::Map<String, serde_json::Value>>,
 }
+
+/// Captures the request before strict schema decoding so malformed preview payloads remain
+/// observable and can be correlated with the owning Task trace.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonRpcRequest)]
+#[request(method = "elicitation/create", response = ElicitationCreateResponse)]
+#[serde(transparent)]
+pub(super) struct RawElicitationCreateRequest(pub(super) serde_json::Value);
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, Hash)]
 #[serde(untagged)]
@@ -84,6 +93,8 @@ pub(super) enum PropertySchema {
         enum_values: Option<Vec<String>>,
         #[serde(default, rename = "oneOf")]
         one_of: Option<Vec<EnumOption>>,
+        #[serde(default, rename = "_meta")]
+        meta: AcpMeta,
     },
     Number {
         #[serde(default)]
@@ -96,6 +107,8 @@ pub(super) enum PropertySchema {
         maximum: Option<f64>,
         #[serde(default)]
         default: Option<f64>,
+        #[serde(default, rename = "_meta")]
+        meta: AcpMeta,
     },
     Integer {
         #[serde(default)]
@@ -108,6 +121,8 @@ pub(super) enum PropertySchema {
         maximum: Option<i64>,
         #[serde(default)]
         default: Option<i64>,
+        #[serde(default, rename = "_meta")]
+        meta: AcpMeta,
     },
     Boolean {
         #[serde(default)]
@@ -116,6 +131,8 @@ pub(super) enum PropertySchema {
         description: Option<String>,
         #[serde(default)]
         default: Option<bool>,
+        #[serde(default, rename = "_meta")]
+        meta: AcpMeta,
     },
     Array {
         #[serde(default)]
@@ -129,6 +146,8 @@ pub(super) enum PropertySchema {
         items: MultiSelectItems,
         #[serde(default)]
         default: Vec<String>,
+        #[serde(default, rename = "_meta")]
+        meta: AcpMeta,
     },
 }
 

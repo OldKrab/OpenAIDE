@@ -11,12 +11,22 @@ use crate::protocol_edge::{
 };
 
 use super::event_streams::{EventStreamLease, EventStreamRegistry};
+use super::sessions::{AcceptClientFrame, PollError, ReliableSessionRegistry};
 use super::{auth_status, empty_response, json_response, AuthStatus, LocalHttpResponse};
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReliableUpload {
+    session_id: String,
+    sequence: u64,
+    message: Value,
+}
 
 pub struct LocalHttpProtocolHandler {
     gateway: SharedRpcGateway,
     auth_token: String,
     event_streams: EventStreamRegistry,
+    sessions: ReliableSessionRegistry,
 }
 
 impl Clone for LocalHttpProtocolHandler {
@@ -25,16 +35,22 @@ impl Clone for LocalHttpProtocolHandler {
             gateway: self.gateway.clone(),
             auth_token: self.auth_token.clone(),
             event_streams: self.event_streams.clone(),
+            sessions: self.sessions.clone(),
         }
     }
 }
 
 impl LocalHttpProtocolHandler {
-    pub fn new(gateway: SharedRpcGateway, auth_token: impl Into<String>) -> Self {
+    pub fn new(
+        gateway: SharedRpcGateway,
+        auth_token: impl Into<String>,
+        server_id: impl Into<String>,
+    ) -> Self {
         Self {
             gateway,
             auth_token: auth_token.into(),
             event_streams: EventStreamRegistry::default(),
+            sessions: ReliableSessionRegistry::new(server_id),
         }
     }
 
@@ -44,6 +60,46 @@ impl LocalHttpProtocolHandler {
         connection_id: Option<&str>,
         body: &str,
     ) -> LocalHttpResponse {
+        if serde_json::from_str::<Value>(body)
+            .ok()
+            .and_then(|value| {
+                value
+                    .get("transport")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            })
+            .as_deref()
+            == Some("open")
+        {
+            return handle_reliable_session_open(
+                authorization,
+                &self.auth_token,
+                connection_id,
+                &self.sessions,
+            );
+        }
+        if serde_json::from_str::<Value>(body)
+            .ok()
+            .and_then(|value| {
+                value
+                    .get("transport")
+                    .and_then(Value::as_str)
+                    .map(str::to_string)
+            })
+            .as_deref()
+            == Some("send")
+        {
+            let now = AppServerTime::now();
+            let gateway = self.gateway.clone();
+            return handle_reliable_session_upload(
+                authorization,
+                &self.auth_token,
+                connection_id,
+                body,
+                &self.sessions,
+                |connection_id, message| gateway.handle_inbound(connection_id, message, now),
+            );
+        }
         let now = AppServerTime::now();
         let gateway = self.gateway.clone();
         handle_local_http_protocol(
@@ -59,6 +115,35 @@ impl LocalHttpProtocolHandler {
                     self.gateway
                         .drain_event_deliveries_for_connection(connection_id)
                 }
+            },
+        )
+    }
+
+    pub fn poll_session(
+        &self,
+        authorization: Option<&str>,
+        connection_id: Option<&str>,
+        session_id: &str,
+        after: u64,
+    ) -> LocalHttpResponse {
+        let connection = valid_connection_id(connection_id);
+        handle_reliable_session_poll(
+            authorization,
+            &self.auth_token,
+            connection_id,
+            session_id,
+            after,
+            &self.sessions,
+            || {
+                let Some(connection_id) = connection else {
+                    return (Vec::new(), Vec::new());
+                };
+                (
+                    self.gateway
+                        .drain_event_deliveries_for_connection(&connection_id),
+                    self.gateway
+                        .drain_server_requests_for_connection(&connection_id, AppServerTime::now()),
+                )
             },
         )
     }
@@ -137,7 +222,8 @@ fn handle_local_http_protocol(
         AuthStatus::Missing => return empty_response(401),
         AuthStatus::Invalid => return empty_response(403),
     }
-    let Some(connection_id) = valid_connection_id(connection_id) else {
+    let raw_connection_id = connection_id;
+    let Some(connection_id) = valid_connection_id(raw_connection_id) else {
         return json_response(
             400,
             wire_value(wire_invalid_request(
@@ -155,7 +241,6 @@ fn handle_local_http_protocol(
             unreachable!("client_response only returns client responses");
         };
         let request_id = request_id.clone();
-        let queued_events = drain_events(&connection_id);
         return match dispatch(connection_id.clone(), response) {
             GatewayOutcome::Respond {
                 connection_id,
@@ -171,7 +256,7 @@ fn handle_local_http_protocol(
                             Value::String(request_id),
                             connection_id,
                             response,
-                            queued_events.into_iter().chain(events).collect(),
+                            events,
                             server_requests,
                         ))
                         .expect("wire messages serialize"),
@@ -179,12 +264,12 @@ fn handle_local_http_protocol(
                 }
                 json_response(
                     200,
-                    side_effect_messages(&connection_id, queued_events, server_requests, events),
+                    side_effect_messages(&connection_id, Vec::new(), server_requests, events),
                 )
             }
             GatewayOutcome::Noop => json_response(
                 200,
-                side_effect_messages(&connection_id, queued_events, Vec::new(), Vec::new()),
+                side_effect_messages(&connection_id, Vec::new(), Vec::new(), Vec::new()),
             ),
         };
     }
@@ -261,6 +346,149 @@ fn handle_local_http_protocol(
                 "request produced no response".into(),
             )),
         ),
+    }
+}
+
+fn handle_reliable_session_open(
+    authorization: Option<&str>,
+    expected_token: &str,
+    connection_id: Option<&str>,
+    sessions: &ReliableSessionRegistry,
+) -> LocalHttpResponse {
+    match auth_status(authorization, expected_token) {
+        AuthStatus::Authorized => {}
+        AuthStatus::Missing => return empty_response(401),
+        AuthStatus::Invalid => return empty_response(403),
+    }
+    let raw_connection_id = connection_id;
+    let Some(connection_id) = valid_connection_id(raw_connection_id) else {
+        return empty_response(400);
+    };
+    let opened = sessions.open(connection_id);
+    json_response(
+        200,
+        json!({
+            "transportVersion": 1,
+            "sessionId": opened.session_id,
+            "serverId": opened.server_id,
+        }),
+    )
+}
+
+fn handle_reliable_session_upload(
+    authorization: Option<&str>,
+    expected_token: &str,
+    connection_id: Option<&str>,
+    body: &str,
+    sessions: &ReliableSessionRegistry,
+    dispatch: impl FnOnce(ConnectionId, InboundProtocolMessage) -> GatewayOutcome,
+) -> LocalHttpResponse {
+    match auth_status(authorization, expected_token) {
+        AuthStatus::Authorized => {}
+        AuthStatus::Missing => return empty_response(401),
+        AuthStatus::Invalid => return empty_response(403),
+    }
+    let raw_connection_id = connection_id;
+    let Some(connection_id) = valid_connection_id(raw_connection_id) else {
+        return empty_response(400);
+    };
+    let upload = match serde_json::from_str::<ReliableUpload>(body) {
+        Ok(upload) => upload,
+        Err(_) => return empty_response(400),
+    };
+    let session_id = upload.session_id.clone();
+    let mut dispatched = None;
+    let accepted = sessions.accept_client_frame(
+        &session_id,
+        &connection_id,
+        upload.sequence,
+        upload.message,
+        |message| {
+            dispatched = Some(handle_local_http_protocol(
+                authorization,
+                expected_token,
+                raw_connection_id,
+                &message.to_string(),
+                dispatch,
+                |_| Vec::new(),
+            ));
+        },
+    );
+    match accepted {
+        AcceptClientFrame::Duplicate => return empty_response(204),
+        AcceptClientFrame::Gap { expected } => {
+            return json_response(409, json!({ "expectedSequence": expected }))
+        }
+        AcceptClientFrame::UnknownSession => return empty_response(410),
+        AcceptClientFrame::WrongConnection => return empty_response(403),
+        AcceptClientFrame::Accepted => {}
+    }
+    let Some(response) = dispatched else {
+        return empty_response(500);
+    };
+    if response.status != 200 {
+        return response;
+    }
+    if let Ok(value) = serde_json::from_str::<Value>(&response.body) {
+        for message in value.as_array().cloned().unwrap_or_else(|| vec![value]) {
+            sessions.enqueue_server_message(&session_id, message);
+        }
+    }
+    empty_response(204)
+}
+
+fn handle_reliable_session_poll(
+    authorization: Option<&str>,
+    expected_token: &str,
+    connection_id: Option<&str>,
+    session_id: &str,
+    after: u64,
+    sessions: &ReliableSessionRegistry,
+    drain: impl FnOnce() -> (
+        Vec<crate::protocol_edge::GatewayEventDelivery>,
+        Vec<crate::server_requests::ServerRequestDelivery>,
+    ),
+) -> LocalHttpResponse {
+    match auth_status(authorization, expected_token) {
+        AuthStatus::Authorized => {}
+        AuthStatus::Missing => return empty_response(401),
+        AuthStatus::Invalid => return empty_response(403),
+    }
+    let Some(connection_id) = valid_connection_id(connection_id) else {
+        return empty_response(400);
+    };
+    if sessions.connection_id(session_id).as_ref() != Some(&connection_id) {
+        return empty_response(410);
+    }
+    let (events, mut server_requests) = drain();
+    // Task-scoped permissions and questions are shared product state. Their
+    // snapshots/events fan out to every eligible client; only client-targeted
+    // capabilities remain reverse RPC requests.
+    server_requests.retain(|request| {
+        !matches!(
+            request.envelope.method.as_str(),
+            openaide_app_server_protocol::server_requests::PERMISSION_REQUEST
+                | openaide_app_server_protocol::server_requests::QUESTION_REQUEST
+        )
+    });
+    for message in event_wire_messages(connection_id.clone(), events)
+        .into_iter()
+        .chain(server_request_wire_messages(connection_id, server_requests))
+    {
+        sessions.enqueue_server_message(
+            session_id,
+            serde_json::to_value(message).expect("wire message serializes"),
+        );
+    }
+    match sessions.poll(session_id, after) {
+        Ok(batch) if batch.frames.is_empty() => empty_response(204),
+        Ok(batch) => json_response(
+            200,
+            serde_json::to_value(batch).expect("session batch serializes"),
+        ),
+        Err(PollError::UnknownSession) => empty_response(410),
+        Err(PollError::InvalidAcknowledgement) => empty_response(409),
+        Err(PollError::ReplayExpired) => json_response(409, json!({ "resyncRequired": true })),
     }
 }
 

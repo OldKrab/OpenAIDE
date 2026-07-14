@@ -49,6 +49,22 @@ describe("ChatActivityView", () => {
     expect(rendered.indexOf("Read notes.md")).toBeLessThan(rendered.indexOf("Verify after reading"));
   });
 
+  it("shows every Thought in a Thought-only group without a reasoning toggle", () => {
+    const activity = mixedActivity();
+    activity.steps = activity.steps.filter((step) => step.kind === "thought");
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<ChatActivityView activity={activity} taskId="task_1" />);
+    });
+
+    const groupTrigger = tree.root.findAllByProps({ className: "activity-disclosure-trigger" })[0];
+    act(() => groupTrigger.props.onClick());
+
+    const stepList = tree.root.findByProps({ className: "activity-step-list" });
+    expect(stepList.findAllByProps({ className: "activity-reasoning-toggle" })).toHaveLength(0);
+    expect(renderedThoughtRows(tree)).toHaveLength(3);
+  });
+
   it("shows aggregate tool approval with individual decisions in details", () => {
     const activity = mixedActivity();
     const tool = activity.steps[1];

@@ -8,19 +8,12 @@ import {
   type AppServerEvent,
   type BackendConnection,
   type ClientSnapshot,
-  type PendingRequestSnapshot,
-  type PermissionRequestParams,
   type ProjectSummary,
-  type QuestionRequestParams,
-  type ServerRequestMethod,
   type SubscriptionIngestionContext,
   type SubscriptionIngestionState,
   type SubscriptionScope,
   type SubscriptionSnapshot,
   type TaskNavigationSnapshot,
-  type TypedServerRequest,
-  PERMISSION_REQUEST,
-  QUESTION_REQUEST,
 } from "@openaide/app-server-client";
 import type { Dispatch } from "react";
 import type { AppAction } from "../state/appReducer";
@@ -32,8 +25,7 @@ import {
 import { mapProtocolToolDetail } from "../state/appServerProtocolChatMapping";
 import type { AgentOption } from "../state/composerOptions";
 
-type StateSubscriptionConnection = Pick<BackendConnection, "events" | "request">
-  & Partial<Pick<BackendConnection, "eventStreamDisconnects" | "serverRequests" | "stateResets">>;
+type StateSubscriptionConnection = Pick<BackendConnection, "handleNotification" | "request">;
 const SUBSCRIPTION_RETRY_MS = 500;
 const MAX_SUBSCRIPTION_RETRY_MS = 5_000;
 const MAX_PENDING_EVENTS = 1_000;
@@ -87,20 +79,12 @@ export function startAppServerStateSubscription({
   let disposed = false;
   let state: SubscriptionIngestionState | undefined;
   let pendingEvents: AppServerEvent[] = [];
-  let pendingTaskRequests: PendingRequestSnapshot[] = [];
-  let subscribeInFlightGeneration: number | undefined;
-  let subscribeAgainGeneration: number | undefined;
+  let subscribeInFlight = false;
+  let subscribeAgain = false;
   let refreshing = true;
   let retryTimer: ReturnType<typeof setTimeout> | undefined;
   let retryDelay = SUBSCRIPTION_RETRY_MS;
-  let streamConnected = true;
-  let streamGeneration = 0;
-  const unsubscribe = backendConnection.events(handleEvent);
-  const unsubscribeEventStreamDisconnects = backendConnection.eventStreamDisconnects?.(handleEventStreamDisconnect);
-  const unsubscribeServerRequests = scope.kind === "task"
-    ? backendConnection.serverRequests?.(handleServerRequest)
-    : undefined;
-  const unsubscribeStateResets = backendConnection.stateResets?.(handleStateReset);
+  const unsubscribe = backendConnection.handleNotification("app/event", handleEvent);
 
   void subscribe();
 
@@ -108,20 +92,15 @@ export function startAppServerStateSubscription({
     disposed = true;
     if (retryTimer !== undefined) clearTimeout(retryTimer);
     unsubscribe();
-    unsubscribeEventStreamDisconnects?.();
-    unsubscribeServerRequests?.();
-    unsubscribeStateResets?.();
     scopeLease.release(unsubscribeScope);
   };
 
   async function subscribe() {
-    if (!streamConnected) return;
-    const attemptGeneration = streamGeneration;
-    if (subscribeInFlightGeneration === attemptGeneration) {
-      subscribeAgainGeneration = attemptGeneration;
+    if (subscribeInFlight) {
+      subscribeAgain = true;
       return;
     }
-    subscribeInFlightGeneration = attemptGeneration;
+    subscribeInFlight = true;
     if (retryTimer !== undefined) clearTimeout(retryTimer);
     retryTimer = undefined;
     if (!refreshing) onBaselineLost?.();
@@ -138,24 +117,20 @@ export function startAppServerStateSubscription({
         await scopeLease.cleanupAfterLateSubscribe(unsubscribeScope);
         return;
       }
-      if (!streamConnected || attemptGeneration !== streamGeneration) return;
-      if (subscribeAgainGeneration === attemptGeneration) return;
+      if (subscribeAgain) return;
       state = createSubscriptionIngestionState(result, context);
-      applyPendingTaskRequests();
       refreshing = false;
       retryDelay = SUBSCRIPTION_RETRY_MS;
       applySnapshot(state.snapshot);
       replayPendingEvents();
-      if (subscribeAgainGeneration !== attemptGeneration) onBaselineReady?.();
+      if (!subscribeAgain) onBaselineReady?.();
     } catch (error) {
-      if (!streamConnected || attemptGeneration !== streamGeneration) return;
       onBaselineError?.(error);
       scheduleSubscribeRetry();
     } finally {
-      if (subscribeInFlightGeneration !== attemptGeneration) return;
-      subscribeInFlightGeneration = undefined;
-      if (subscribeAgainGeneration === attemptGeneration && !disposed) {
-        subscribeAgainGeneration = undefined;
+      subscribeInFlight = false;
+      if (subscribeAgain && !disposed) {
+        subscribeAgain = false;
         void subscribe();
       }
     }
@@ -167,34 +142,8 @@ export function startAppServerStateSubscription({
     });
   }
 
-  function handleStateReset() {
-    if (disposed) return;
-    streamConnected = true;
-    streamGeneration += 1;
-    subscribeAgainGeneration = undefined;
-    // Events queued before continuity was re-established belong to the old
-    // cursor/process generation and cannot be replayed onto the new baseline.
-    pendingEvents = [];
-    pendingTaskRequests = [];
-    void subscribe();
-  }
-
-  function handleEventStreamDisconnect() {
-    if (disposed || !streamConnected) return;
-    streamConnected = false;
-    streamGeneration += 1;
-    state = undefined;
-    pendingEvents = [];
-    pendingTaskRequests = [];
-    refreshing = true;
-    subscribeAgainGeneration = undefined;
-    if (retryTimer !== undefined) clearTimeout(retryTimer);
-    retryTimer = undefined;
-    onBaselineLost?.();
-  }
-
   function scheduleSubscribeRetry() {
-    if (disposed || !streamConnected || retryTimer !== undefined) return;
+    if (disposed || retryTimer !== undefined) return;
     const delay = retryDelay;
     retryDelay = Math.min(retryDelay * 2, MAX_SUBSCRIPTION_RETRY_MS);
     retryTimer = setTimeout(() => {
@@ -212,25 +161,6 @@ export function startAppServerStateSubscription({
       return;
     }
     applyEvent(event, true);
-  }
-
-  function handleServerRequest(request: TypedServerRequest<ServerRequestMethod>) {
-    if (disposed || scope.kind !== "task") return;
-    const pendingRequest = pendingTaskRequest(request);
-    if (!pendingRequest || pendingRequest.scope.kind !== "task") return;
-    if (pendingRequest.scope.taskId !== scope.taskId) return;
-    if (!state || refreshing) {
-      pendingTaskRequests = upsertPendingRequest(pendingTaskRequests, pendingRequest);
-      return;
-    }
-    state = withPendingTaskRequest(state, pendingRequest);
-    applySnapshot(state.snapshot);
-  }
-
-  function applyPendingTaskRequests() {
-    if (!state || pendingTaskRequests.length === 0) return;
-    for (const request of pendingTaskRequests) state = withPendingTaskRequest(state, request);
-    pendingTaskRequests = [];
   }
 
   function applyEvent(event: AppServerEvent, presentLive: boolean) {
@@ -278,9 +208,7 @@ export function startAppServerStateSubscription({
       // An unbounded queue cannot be reconciled safely. Drop the old generation
       // and require a snapshot taken after the overflow.
       pendingEvents = [];
-      if (subscribeInFlightGeneration === streamGeneration) {
-        subscribeAgainGeneration = streamGeneration;
-      }
+      if (subscribeInFlight) subscribeAgain = true;
     }
     pendingEvents.push(event);
   }
@@ -312,61 +240,6 @@ export function startAppServerStateSubscription({
       }
     }
   }
-}
-
-function pendingTaskRequest(
-  request: TypedServerRequest<ServerRequestMethod>,
-): PendingRequestSnapshot | undefined {
-  if (request.scope.kind !== "task") return undefined;
-  // BackendConnection validates params against the request method before delivery.
-  if (request.method === PERMISSION_REQUEST) {
-    const permission = request.params as PermissionRequestParams;
-    return {
-      requestId: request.requestId,
-      scope: request.scope,
-      kind: "permission",
-      title: permission.title,
-      permission,
-    };
-  }
-  if (request.method === QUESTION_REQUEST) {
-    const question = request.params as QuestionRequestParams;
-    return {
-      requestId: request.requestId,
-      scope: request.scope,
-      kind: "question",
-      title: question.message,
-      question,
-    };
-  }
-  return undefined;
-}
-
-function withPendingTaskRequest(
-  state: SubscriptionIngestionState,
-  request: PendingRequestSnapshot,
-): SubscriptionIngestionState {
-  if (state.snapshot.kind !== "task") return state;
-  return {
-    ...state,
-    snapshot: {
-      ...state.snapshot,
-      task: {
-        ...state.snapshot.task,
-        pendingRequests: upsertPendingRequest(state.snapshot.task.pendingRequests ?? [], request),
-      },
-    },
-  };
-}
-
-function upsertPendingRequest(
-  requests: PendingRequestSnapshot[],
-  request: PendingRequestSnapshot,
-) {
-  const existing = requests.findIndex((candidate) => candidate.requestId === request.requestId);
-  return existing === -1
-    ? [...requests, request]
-    : requests.map((candidate, index) => index === existing ? request : candidate);
 }
 
 function liveTextPresentationAction(

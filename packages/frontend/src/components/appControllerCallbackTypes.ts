@@ -128,8 +128,7 @@ export type NewTaskStartAttempt = {
 export type AppCallbacksDependencies = {
   acceptTaskOpen?: (taskId: string, requestId: number | undefined, intent: SnapshotIntent) => boolean;
   attachmentResources?: ComposerAttachmentResourceOwner;
-  backendConnection?: Pick<BackendConnection, "respond">
-    & Partial<Pick<BackendConnection, "events" | "request">>;
+  backendConnection?: Partial<Pick<BackendConnection, "handleNotification" | "request">>;
   asyncOperations: AsyncOperationOwner;
   clientInstanceId: ClientInstanceId | string;
   createSnapshotRequestId: SnapshotRequestIdFactory;

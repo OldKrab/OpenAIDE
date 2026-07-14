@@ -46,12 +46,10 @@ Send and catalog refresh never check or initiate synchronization. A newer Native
 
 ## Connection Authority
 
-The event stream is connection authority. Stream failure immediately moves Frontend to `disconnected`, blocks Send, and leaves the Task, Chat replica, and Composer visible. A short presentation grace suppresses warnings for immediate recovery. A warning belongs to the failed connection generation and cannot reappear after a later navigation, unmount, reload, or successful generation.
+The resumable RPC session defined by [ADR 0026](0026-resumable-http-rpc-session.md) is connection authority. A completed empty poll and a retried upload are healthy transport behavior and do not invalidate Frontend state or show an App Server reconnect warning.
 
-While disconnected, Frontend retries only the read-only event stream with backoff. It does not call `state/subscribe` repeatedly, reload Task or Navigation snapshots, replay `task/send`, or start independent recovery loops for each scope.
+Temporary network failure is recovered inside the transport using sequence acknowledgement, replay, and duplicate suppression. Product mutations are never redispatched merely because an HTTP acknowledgement was lost. A lost session or changed App Server generation invalidates the replica and enters `resynchronizing`; non-idempotent requests with unknown outcomes are not replayed into the replacement process.
 
-When a replacement event stream connects, Frontend enters `resynchronizing` and assigns a new connection generation. It requests exactly one baseline for every still-active scope: normally Task Navigation and the open Task, plus each Tool detail that remains expanded. A baseline is accepted only while that generation remains connected. Failure during resynchronization invalidates incomplete and late results from that generation and returns Frontend to `disconnected`.
-
-Frontend becomes `ready` and enables Send only after every active scope has installed its authoritative baseline under the still-connected generation. A successful request or late baseline from an obsolete generation cannot clear reconnect state.
+After generation replacement, Frontend requests exactly one authoritative baseline for every active scope. It becomes `ready` only after those baselines are installed for the current generation. Late messages or baselines from an obsolete generation cannot clear recovery state.
 
 While the same Frontend process remains alive, local Composer state survives disconnect and resynchronization. The new baseline determines whether a New Task became visible with the accepted message or remains private and unsent. Full Frontend reload never replays pending mutations; accepted work comes from App Server state, while unaccepted memory-only drafts may be lost as an explicit product trade-off.

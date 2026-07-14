@@ -1505,6 +1505,50 @@ fn native_session_adoption_is_scoped_by_agent_not_workspace() {
 }
 
 #[test]
+fn adopting_native_session_preserves_its_listed_activity_time() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    store
+        .write_task(&task_record("project-task", "/workspace/app"))
+        .unwrap();
+    let agent = Arc::new(RecordingAgent {
+        listed_sessions: Mutex::new(vec![AgentListedSession {
+            session_id: "native-session".to_string(),
+            cwd: "/workspace/app".to_string(),
+            title: Some("Existing session".to_string()),
+            last_activity: None,
+            updated_at: Some("2026-01-02T03:04:05.000Z".to_string()),
+        }]),
+        ..RecordingAgent::default()
+    });
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store)),
+        AgentRegistry::default_built_ins(),
+        agent,
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+
+    api.list_agent_sessions(AgentListSessionsParams {
+        agent_id: AgentId::from("codex"),
+        project_id: project_id_for_workspace("/workspace/app"),
+        cursor: None,
+    })
+    .unwrap();
+    let adopted = api
+        .adopt_native_session(TaskAdoptNativeSessionParams {
+            project_id: project_id_for_workspace("/workspace/app"),
+            agent_id: AgentId::from("codex"),
+            native_session_id: "native-session".to_string(),
+            title: Some("Existing session".to_string()),
+        })
+        .unwrap();
+
+    assert_eq!(adopted.task.last_activity, "2026-01-02T03:04:05.000Z");
+}
+
+#[test]
 fn list_agent_sessions_hides_a_native_session_while_draft_ownership_is_committing() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();

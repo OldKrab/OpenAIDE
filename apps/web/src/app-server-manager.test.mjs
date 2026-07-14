@@ -159,6 +159,40 @@ test("web shell heartbeat keeps App Server alive while the web process runs", as
   assert.equal(heartbeat.connectionId, "web-app-shell");
 });
 
+test("heartbeat diagnostics report one failure transition and one recovery", async () => {
+  const events = [];
+  let heartbeatAttempts = 0;
+  const manager = createAppServerManager({
+    connectionUrl: (connection) => new URL(connection.endpointUrl),
+    logger: recordingLogger(events),
+    readHandoffConnection: async () => ({
+      authToken: "token",
+      endpointUrl: "http://127.0.0.1:1234/probe",
+    }),
+    requestAppServer: async (_connection, _connectionId, body) => {
+      if (body.method !== "client/heartbeat") return {};
+      heartbeatAttempts += 1;
+      if (heartbeatAttempts < 3) throw new TypeError("private transport detail");
+      return {};
+    },
+    shellHeartbeatIntervalMs: 5,
+    spawnAppServer: childProcess,
+  });
+
+  await manager.startAppServer();
+  await waitFor(() => events.some(({ event }) => event === "app_server_heartbeat_recovered"));
+  manager.clearConnection();
+
+  assert.deepEqual(
+    events.filter(({ event }) => event.startsWith("app_server_heartbeat_")),
+    [
+      { level: "warn", event: "app_server_heartbeat_failed", fields: { error_kind: "TypeError" } },
+      { level: "info", event: "app_server_heartbeat_recovered", fields: {} },
+    ],
+  );
+  assert.doesNotMatch(JSON.stringify(events), /private transport detail/);
+});
+
 function childProcess() {
   const child = new EventEmitter();
   child.killed = false;
@@ -177,6 +211,13 @@ function deferred() {
     reject = rejectPromise;
   });
   return { promise, reject, resolve };
+}
+
+function recordingLogger(events) {
+  return Object.fromEntries(["info", "warn", "error"].map((level) => [
+    level,
+    (event, fields = {}) => events.push({ level, event, fields }),
+  ]));
 }
 
 function waitFor(predicate) {
