@@ -2,7 +2,8 @@ use std::path::PathBuf;
 
 use crate::agent::acp_schema::{
     AuthenticateRequest, ErrorCode, InitializeResponse, ListSessionsRequest, ListSessionsResponse,
-    LoadSessionRequest, LoadSessionResponse, NewSessionRequest, NewSessionResponse, SessionId,
+    LoadSessionRequest, LoadSessionResponse, NewSessionRequest, NewSessionResponse,
+    ResumeSessionRequest, ResumeSessionResponse, SessionId,
 };
 use agent_client_protocol::{Agent, ConnectionTo};
 
@@ -39,6 +40,24 @@ pub(super) async fn request_load_session(
         Err(error) if error.code == ErrorCode::AuthRequired => {
             authenticate_for_retry(connection, initialize, preferred_auth_method_id, error).await?;
             send_load_session_request(connection, session_id, cwd, trace).await
+        }
+        Err(error) => Err(error),
+    }
+}
+
+pub(super) async fn request_resume_session(
+    connection: &ConnectionTo<Agent>,
+    session_id: SessionId,
+    cwd: PathBuf,
+    initialize: &InitializeResponse,
+    preferred_auth_method_id: Option<&str>,
+    trace: Option<&AcpTraceSession>,
+) -> Result<ResumeSessionResponse, agent_client_protocol::Error> {
+    match send_resume_session_request(connection, session_id.clone(), cwd.clone(), trace).await {
+        Ok(response) => Ok(response),
+        Err(error) if error.code == ErrorCode::AuthRequired => {
+            authenticate_for_retry(connection, initialize, preferred_auth_method_id, error).await?;
+            send_resume_session_request(connection, session_id, cwd, trace).await
         }
         Err(error) => Err(error),
     }
@@ -107,6 +126,23 @@ async fn send_load_session_request(
     let response = connection.send_request(request).block_task().await?;
     if let Some(trace) = trace {
         trace.record("agent_to_client", "session/load.response", &response);
+    }
+    Ok(response)
+}
+
+async fn send_resume_session_request(
+    connection: &ConnectionTo<Agent>,
+    session_id: SessionId,
+    cwd: PathBuf,
+    trace: Option<&AcpTraceSession>,
+) -> Result<ResumeSessionResponse, agent_client_protocol::Error> {
+    let request = ResumeSessionRequest::new(session_id, cwd);
+    if let Some(trace) = trace {
+        trace.record("client_to_agent", "session/resume.request", &request);
+    }
+    let response = connection.send_request(request).block_task().await?;
+    if let Some(trace) = trace {
+        trace.record("agent_to_client", "session/resume.response", &response);
     }
     Ok(response)
 }

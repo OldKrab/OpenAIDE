@@ -1,6 +1,8 @@
 use crate::agent::AgentPromptOutcome;
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{ActivityStatus, ActivityStep, NormalizedMessage, TaskStatus};
+use crate::storage::records::TaskAttentionReason;
+use crate::tasks::attention::fresh_attention;
 use crate::tasks::mutation::{TaskCommitOutcome, TaskMutationResult};
 use crate::time::now_string;
 
@@ -127,6 +129,20 @@ impl TaskTransitions {
                     let task = ctx.task_mut();
                     task.active_turn_id = None;
                     task.unread = true;
+                    task.attention = Some(fresh_attention(
+                        match &result {
+                            Ok(AgentPromptOutcome::EndTurn) => TaskAttentionReason::Finished,
+                            Ok(
+                                AgentPromptOutcome::Cancelled
+                                | AgentPromptOutcome::MaxTokens
+                                | AgentPromptOutcome::MaxTurnRequests
+                                | AgentPromptOutcome::Refusal
+                                | AgentPromptOutcome::Other(_),
+                            ) => TaskAttentionReason::Stopped,
+                            Err(_) => TaskAttentionReason::Failed,
+                        },
+                        now.clone(),
+                    ));
                     task.updated_at = now.clone();
                     task.last_activity = now;
                     Ok(TaskMutationResult::Changed)

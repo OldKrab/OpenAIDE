@@ -12,6 +12,7 @@ export type TaskSummary = {
   message_history_version: number;
   has_messages: boolean;
   unread: boolean;
+  attention?: TaskAttentionEvent;
   created_at: string;
   updated_at: string;
   last_activity: string;
@@ -19,6 +20,12 @@ export type TaskSummary = {
   agent_name: string;
   isolation: IsolationKind;
   workspace_root: string;
+};
+
+export type TaskAttentionEvent = {
+  event_id: string;
+  reason: "finished" | "needsPermission" | "needsAnswer" | "stopped" | "failed";
+  occurred_at: string;
 };
 
 export type TaskSnapshot = {

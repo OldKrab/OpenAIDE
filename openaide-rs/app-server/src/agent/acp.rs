@@ -63,6 +63,12 @@ impl AcpAgentRuntime {
     ) -> Result<AgentProbeResult, RuntimeError> {
         self.kernel.probe_with_timeout(request, timeout)
     }
+
+    #[cfg(test)]
+    fn with_session_idle_timeout(mut self, timeout: std::time::Duration) -> Self {
+        self.kernel.with_session_idle_timeout(timeout);
+        self
+    }
 }
 
 impl AgentRuntime for AcpAgentRuntime {

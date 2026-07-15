@@ -63,6 +63,7 @@ impl TaskTurnLifecycle {
                     cwd,
                     model_id,
                     cancellation: TurnCancellation::new(),
+                    secret_resolver: None,
                 })?,
                 false,
             ),

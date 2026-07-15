@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use thiserror::Error;
 
-#[derive(Debug, Error)]
+#[derive(Clone, Debug, Error)]
 pub enum RuntimeError {
     #[error("invalid params: {0}")]
     InvalidParams(String),

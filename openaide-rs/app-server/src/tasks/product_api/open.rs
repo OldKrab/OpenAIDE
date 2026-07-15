@@ -12,6 +12,7 @@ use crate::protocol::model::{
 use crate::storage::records::{TaskLifecycle, TaskRecord};
 use crate::tasks::mutation::TaskMutationResult;
 use crate::tasks::native_session_service::HistoryRefreshRequest;
+use crate::tasks::native_session_service::OpenSessionResumeOutcome;
 
 use super::{internal_error, protocol_error_from_runtime, TaskProductApi};
 
@@ -44,10 +45,12 @@ impl TaskProductApi {
                 if ctx.task().tombstoned {
                     return Err(RuntimeError::TaskNotFound(task_id.clone()));
                 }
-                if !ctx.task().unread {
+                if !ctx.task().unread && ctx.task().attention.is_none() {
                     return Ok(TaskMutationResult::Unchanged);
                 }
-                ctx.task_mut().unread = false;
+                let task = ctx.task_mut();
+                task.unread = false;
+                task.attention = None;
                 Ok(TaskMutationResult::Changed)
             })
             .map_err(protocol_error_from_runtime)?;
@@ -71,10 +74,12 @@ impl TaskProductApi {
                 if ctx.task().tombstoned {
                     return Err(RuntimeError::TaskNotFound(task_id.clone()));
                 }
-                if !ctx.task().unread {
+                if !ctx.task().unread && ctx.task().attention.is_none() {
                     return Ok(TaskMutationResult::Unchanged);
                 }
-                ctx.task_mut().unread = false;
+                let task = ctx.task_mut();
+                task.unread = false;
+                task.attention = None;
                 Ok(TaskMutationResult::Changed)
             })
             .map_err(protocol_error_from_runtime)?;
@@ -85,8 +90,8 @@ impl TaskProductApi {
         self.project_task_snapshot(snapshot)
     }
 
-    /// Task opening consults only the background Native Session catalog. Slow Agent work starts
-    /// after the cached clock proves that Chat is stale.
+    /// Task opening returns cached state first, then recovers the Native Session without
+    /// synchronously listing Agent sessions. The cached clock selects resume or history replay.
     fn spawn_adopted_task_refresh(&self, task: TaskRecord) {
         if matches!(task.lifecycle, TaskLifecycle::New { .. })
             || matches!(
@@ -100,20 +105,25 @@ impl TaskProductApi {
         let Some(stored_session_id) = task.agent_session_id.clone() else {
             return;
         };
-        let Some(native_session) = self.history_sync.cached_session(
+        let native_session = self.history_sync.cached_session(
             &task.agent_id,
             &task.workspace_root,
             &stored_session_id,
-        ) else {
+        );
+        if native_session.is_none() {
+            self.spawn_adopted_task_resume(task, stored_session_id, None);
             return;
-        };
+        }
+        let native_session = native_session.expect("checked above");
         let Ok(local_history_updated_at) = self.store.local_history_updated_at(&task.task_id)
         else {
+            self.spawn_adopted_task_resume(task, stored_session_id, Some(native_session));
             return;
         };
         let Some((native_updated_at, refreshed_at)) =
             newer_native_activity(&native_session, &local_history_updated_at)
         else {
+            self.spawn_adopted_task_resume(task, stored_session_id, Some(native_session));
             return;
         };
         let Some(generation) = self.history_sync.begin_passive(&task.task_id) else {
@@ -189,6 +199,108 @@ impl TaskProductApi {
                         }),
                     );
                 }
+            }
+        });
+    }
+
+    /// Session recovery is independent from history replay. A fresh or unordered
+    /// Chat still needs its Agent connection and live catalogs restored.
+    fn spawn_adopted_task_resume(
+        &self,
+        task: TaskRecord,
+        stored_session_id: String,
+        native_session: Option<AgentListedSession>,
+    ) {
+        let Some(generation) = self.history_sync.begin_passive(&task.task_id) else {
+            return;
+        };
+        let api = self.clone();
+        std::thread::spawn(move || {
+            let load_started = std::cell::Cell::new(false);
+            let result = api.history_sync.run_passive(&task.task_id, generation, || {
+                match api
+                    .native_sessions
+                    .resume_for_open(&task, &stored_session_id)
+                    .map_err(protocol_error_from_runtime)?
+                {
+                    OpenSessionResumeOutcome::Resumed => Ok(None),
+                    OpenSessionResumeOutcome::Unsupported => {
+                        load_started.set(true);
+                        api.publish_history_sync(
+                            &task.task_id,
+                            openaide_app_server_protocol::snapshot::TaskHistorySyncSnapshot::Syncing {
+                                generation: generation.value(),
+                            },
+                        );
+                        let refreshed_at = crate::time::now_string();
+                        let native_updated_at = refreshed_at.parse::<u128>().map_err(|_| {
+                            protocol_error_from_runtime(RuntimeError::Internal(
+                                "current history recovery timestamp is invalid".to_string(),
+                            ))
+                        })?;
+                        let native_session = native_session.unwrap_or_else(|| AgentListedSession {
+                            session_id: stored_session_id.clone(),
+                            cwd: task.workspace_root.clone(),
+                            title: None,
+                            last_activity: None,
+                            updated_at: None,
+                        });
+                        api.native_sessions
+                            .refresh_history(HistoryRefreshRequest {
+                                task: task.clone(),
+                                stored_session_id: stored_session_id.clone(),
+                                native_session,
+                                native_updated_at,
+                                refreshed_at,
+                            })
+                            .map_err(protocol_error_from_runtime)
+                    }
+                }
+            });
+            if !api.history_sync.is_current(&task.task_id, generation) {
+                return;
+            }
+            match (load_started.get(), result) {
+                (true, Some(Ok(Some(_)))) => api.publish_history_sync(
+                    &task.task_id,
+                    openaide_app_server_protocol::snapshot::TaskHistorySyncSnapshot::Updated {
+                        generation: generation.value(),
+                    },
+                ),
+                (true, Some(Ok(None))) | (true, None) => api.publish_history_sync(
+                    &task.task_id,
+                    openaide_app_server_protocol::snapshot::TaskHistorySyncSnapshot::Idle {
+                        generation: generation.value(),
+                    },
+                ),
+                (true, Some(Err(error))) => {
+                    if let Err(persist_error) =
+                        api.record_history_update_failure(&task.task_id, &error.message)
+                    {
+                        logging::warn(
+                            "history_update_failure_activity_persist_failed",
+                            serde_json::json!({
+                                "task_id": task.task_id,
+                                "error": persist_error.to_string(),
+                            }),
+                        );
+                    }
+                    api.publish_history_sync(
+                        &task.task_id,
+                        openaide_app_server_protocol::snapshot::TaskHistorySyncSnapshot::Idle {
+                            generation: generation.value(),
+                        },
+                    );
+                }
+                (false, Some(Err(error))) => logging::warn(
+                    "adopted_task_background_resume_failed",
+                    serde_json::json!({
+                        "task_id": task.task_id,
+                        "agent_id": task.agent_id,
+                        "error": error.message,
+                    }),
+                ),
+                (false, _) => {}
             }
         });
     }

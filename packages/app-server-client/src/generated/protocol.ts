@@ -548,7 +548,11 @@ export type AgentCapabilities = { resumeTasks?: boolean, deleteNativeSessions?: 
 
 export type TaskNavigationSnapshot = { tasks: Array<TaskSummary>, activeTaskId?: TaskId | null, };
 
-export type TaskSummary = { taskId: TaskId, projectId: ProjectId, agentId: AgentId, title: TaskTitle | null, status: TaskStatus, updatedAt: string, lastActivity: string, unread: boolean, hasMessages: boolean, };
+export type TaskSummary = { taskId: TaskId, projectId: ProjectId, agentId: AgentId, title: TaskTitle | null, status: TaskStatus, updatedAt: string, lastActivity: string, unread: boolean, attention?: TaskAttentionEvent | null, hasMessages: boolean, };
+
+export type TaskAttentionEvent = { eventId: string, reason: TaskAttentionReason, occurredAt: string, };
+
+export type TaskAttentionReason = "finished" | "needsPermission" | "needsAnswer" | "stopped" | "failed";
 
 export type TaskTitle = { value: string, source: TaskTitleSource, };
 

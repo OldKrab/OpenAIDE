@@ -157,6 +157,11 @@ impl AcpRuntimeKernel {
         self.active_sessions.probe(&request.agent_id, timeout)
     }
 
+    #[cfg(test)]
+    pub(super) fn with_session_idle_timeout(&mut self, timeout: Duration) {
+        self.active_sessions.with_session_idle_timeout(timeout);
+    }
+
     fn lock_agent_process_operations(&self) -> Result<std::sync::MutexGuard<'_, ()>, RuntimeError> {
         self.agent_process_operations
             .lock()

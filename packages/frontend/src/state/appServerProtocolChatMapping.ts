@@ -104,6 +104,18 @@ export function systemInterruptionItem(
 
 function mapProtocolMessage(item: ChatItem, createdAt: string): NormalizedMessage {
   const text = textFromParts(item.parts);
+  const activity = firstActivityPart(item.parts);
+  if (activity) {
+    return {
+      kind: "activity",
+      id: item.messageId,
+      title: activity.title,
+      status: activityStatusFromProtocol(activity.status),
+      created_at: createdAt,
+      collapsed: activity.status !== "running",
+      steps: activitySteps(activity),
+    };
+  }
   if (item.status === "interrupted") {
     return interruptionMessage(item.messageId, text || "Task was interrupted.", createdAt, true);
   }
@@ -134,19 +146,6 @@ function mapProtocolMessage(item: ChatItem, createdAt: string): NormalizedMessag
       role: item.role === "system" ? "thought" : "agent",
       parts: agentParts,
       created_at: createdAt,
-    };
-  }
-
-  const activity = firstActivityPart(item.parts);
-  if (activity) {
-    return {
-      kind: "activity",
-      id: item.messageId,
-      title: activity.title,
-      status: activityStatusFromProtocol(activity.status),
-      created_at: createdAt,
-      collapsed: activity.status !== "running",
-      steps: activitySteps(activity),
     };
   }
 

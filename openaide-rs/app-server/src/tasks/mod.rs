@@ -1,5 +1,6 @@
 pub(crate) mod access;
 pub(crate) mod agent_service;
+pub(crate) mod attention;
 #[cfg(test)]
 mod boundary_tests;
 pub mod commands;

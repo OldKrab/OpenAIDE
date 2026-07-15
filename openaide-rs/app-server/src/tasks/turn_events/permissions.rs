@@ -4,6 +4,8 @@ use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{
     PermissionDecision, TaskStatus, ToolPermissionDecision, ToolPermissionOutcome,
 };
+use crate::storage::records::TaskAttentionReason;
+use crate::tasks::attention::{current_request_attention, request_attention};
 use crate::tasks::mutation::{TaskCommitOptions, TaskCommitOutcome, TaskMutationResult};
 use crate::time::now_string;
 use openaide_app_server_protocol::ids::TaskId;
@@ -48,7 +50,7 @@ impl TaskEventSink {
             }),
         );
 
-        match self.mark_permission_waiting() {
+        match self.mark_permission_waiting(server_request_id.as_str()) {
             Ok(true) => {}
             Ok(false) => {
                 self.server_requests.interrupt_request(
@@ -105,7 +107,7 @@ impl TaskEventSink {
         Ok(response.outcome)
     }
 
-    fn mark_permission_waiting(&self) -> Result<bool, RuntimeError> {
+    fn mark_permission_waiting(&self, server_request_id: &str) -> Result<bool, RuntimeError> {
         let now = now_string();
         let result = self.mutations.commit_existing_task(
             &self.task_id,
@@ -118,6 +120,12 @@ impl TaskEventSink {
                 }
                 let task = ctx.task_mut();
                 task.status = TaskStatus::Waiting;
+                task.unread = true;
+                task.attention = Some(request_attention(
+                    server_request_id,
+                    TaskAttentionReason::NeedsPermission,
+                    now.clone(),
+                ));
                 task.updated_at = now.clone();
                 Ok(TaskMutationResult::Changed)
             },
@@ -191,7 +199,13 @@ impl TaskEventSink {
                     ctx.task_mut().status = TaskStatus::Active;
                 }
                 let task = ctx.task_mut();
-                task.unread = false;
+                task.attention = current_request_attention(
+                    &self.server_requests,
+                    &self.task_id,
+                    task.attention.as_ref(),
+                    now.clone(),
+                );
+                task.unread = task.attention.is_some();
                 task.updated_at = now.clone();
                 task.last_activity = now.clone();
                 Ok(TaskMutationResult::Changed)

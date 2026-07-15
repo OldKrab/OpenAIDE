@@ -128,6 +128,7 @@ impl TaskProductApi {
             task_version: 1,
             message_history_version: 0,
             unread: false,
+            attention: None,
             created_at: now.to_string(),
             updated_at: now.to_string(),
             last_activity: last_activity.to_string(),

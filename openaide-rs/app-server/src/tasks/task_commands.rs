@@ -30,10 +30,12 @@ impl TaskCommands {
                 ..TaskCommitOptions::metadata()
             },
             |ctx| {
-                if !ctx.task().unread {
+                if !ctx.task().unread && ctx.task().attention.is_none() {
                     return Ok(TaskMutationResult::Unchanged);
                 }
-                ctx.task_mut().unread = false;
+                let task = ctx.task_mut();
+                task.unread = false;
+                task.attention = None;
                 Ok(TaskMutationResult::Changed)
             },
         )?;

@@ -113,6 +113,39 @@ pub struct PendingTaskConfigChange {
     pub requested_value: String,
 }
 
+/// The latest product-level reason a Task needs user attention.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskAttentionReason {
+    Finished,
+    NeedsPermission,
+    NeedsAnswer,
+    Stopped,
+    Failed,
+}
+
+/// Durable identity lets App Shells deduplicate an attention event across reconnects.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct TaskAttentionEvent {
+    pub event_id: String,
+    pub reason: TaskAttentionReason,
+    pub occurred_at: String,
+}
+
+impl TaskAttentionEvent {
+    pub fn new(
+        event_id: impl Into<String>,
+        reason: TaskAttentionReason,
+        occurred_at: impl Into<String>,
+    ) -> Self {
+        Self {
+            event_id: event_id.into(),
+            reason,
+            occurred_at: occurred_at.into(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TaskRecord {
     pub task_id: String,
@@ -121,6 +154,8 @@ pub struct TaskRecord {
     pub task_version: u64,
     pub message_history_version: u64,
     pub unread: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attention: Option<TaskAttentionEvent>,
     pub created_at: String,
     pub updated_at: String,
     pub last_activity: String,
@@ -193,6 +228,7 @@ impl TaskRecord {
             task_version: self.task_version,
             message_history_version: self.message_history_version,
             unread: self.unread,
+            attention: self.attention.clone(),
             created_at: self.created_at.clone(),
             updated_at: self.updated_at.clone(),
             last_activity: self.last_activity.clone(),

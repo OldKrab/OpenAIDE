@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::storage::records::{TaskLifecycle, TaskPreparationRecord, TaskTitle};
+use crate::storage::records::{
+    TaskAttentionEvent, TaskLifecycle, TaskPreparationRecord, TaskTitle,
+};
 
 use super::{AgentCommandsCatalog, ConfigOptionsCatalog, MessagePage};
 
@@ -33,6 +35,7 @@ pub struct TaskSummary {
     pub task_version: u64,
     pub message_history_version: u64,
     pub unread: bool,
+    pub attention: Option<TaskAttentionEvent>,
     pub created_at: String,
     pub updated_at: String,
     pub last_activity: String,

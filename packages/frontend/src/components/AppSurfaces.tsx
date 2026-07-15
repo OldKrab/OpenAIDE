@@ -7,9 +7,11 @@ import { taskStatusLabel } from "./TaskHeader";
 import type { AppController } from "./appController";
 import { useMobileNavigation } from "./useMobileNavigation";
 import { useInputModality } from "./useInputModality";
+import { useWebTaskNotifications } from "./useWebTaskNotifications";
 
 export function AppSurfaces({ controller }: { controller: AppController }) {
   useInputModality();
+  const taskNotifications = useWebTaskNotifications(controller);
   const { activeNavigationTaskId, activeTask, backendReady, bootstrap, callbacks, preferences, view, visibleTasks } = controller;
   const { appServerError, navigation, settings } = view;
   const [mobileLayoutActive, setMobileLayoutActive] = useState(() => isMobileWebViewport());
@@ -225,12 +227,14 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
             <AppServerErrorView message={appServerError} />
           ) : bootstrap.surface === "settings" ? (
             <SettingsView
+              desktopNotifications={taskNotifications?.settings}
               onAuthenticate={callbacks.settings.authenticateAgent}
               onCreateCustomAgent={callbacks.settings.createCustomAgent}
               onDeleteCustomAgent={callbacks.settings.deleteCustomAgent}
               onRefresh={callbacks.settings.refreshSettings}
               onReplaceCustomAgent={callbacks.settings.replaceCustomAgent}
               onSelectTab={callbacks.settings.selectSettingsTab}
+              onSetDesktopNotifications={taskNotifications?.setEnabled}
               onSetAcpTrace={callbacks.settings.setAcpTrace}
               onSetAgentEnabled={callbacks.settings.setAgentEnabled}
               onSetComposerSubmitShortcut={callbacks.settings.setComposerSubmitShortcut}

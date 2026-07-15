@@ -184,6 +184,8 @@ fn generated_bindings_include_protocol_method_maps() {
         "subscription: SubscriptionScope, previousCursor: EventCursor, cursor: EventCursor, scope: EventScope, payload: AppServerEventPayload, };",
         "export type ClientSnapshot =",
         "export type TaskSnapshot =",
+        "export type TaskAttentionEvent =",
+        "export type TaskAttentionReason = \"finished\" | \"needsPermission\" | \"needsAnswer\" | \"stopped\" | \"failed\";",
         "pendingRequests?: Array<PendingRequestSnapshot>",
         "export type TaskPreparationSnapshot =",
         "export type TaskAgentConfigSnapshot =",

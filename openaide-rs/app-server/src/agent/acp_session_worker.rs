@@ -16,7 +16,7 @@ use crate::agent::acp_session_runner::{acp_start_error, initialize_agent_connect
 use crate::agent::acp_trace::AcpTraceSession;
 use crate::agent::{
     AgentAuthenticateRequest, AgentListSessionsRequest, AgentSecretResolver, AgentSession,
-    AgentSessionLoad, AgentSessionStart, TurnCancellation,
+    AgentSessionLoad, AgentSessionResume, AgentSessionStart, TurnCancellation,
 };
 use crate::logging;
 use crate::protocol::errors::RuntimeError;
@@ -43,6 +43,7 @@ use crate::agent::acp_update_projection::LivePromptProjection;
 pub(super) enum AcpSessionOpenRequest {
     Start(AgentSessionStart),
     Load(AgentSessionLoad),
+    Resume(AgentSessionResume),
 }
 
 impl AcpSessionOpenRequest {
@@ -50,6 +51,7 @@ impl AcpSessionOpenRequest {
         match self {
             Self::Start(request) => &request.agent_id,
             Self::Load(request) => &request.agent_id,
+            Self::Resume(request) => &request.agent_id,
         }
     }
 
@@ -57,6 +59,7 @@ impl AcpSessionOpenRequest {
         match self {
             Self::Start(request) => &request.task_id,
             Self::Load(request) => &request.task_id,
+            Self::Resume(request) => &request.task_id,
         }
     }
 
@@ -64,6 +67,7 @@ impl AcpSessionOpenRequest {
         match self {
             Self::Start(_) => "session-start",
             Self::Load(_) => "session-load",
+            Self::Resume(_) => "session-resume",
         }
     }
 
@@ -71,6 +75,7 @@ impl AcpSessionOpenRequest {
         match self {
             Self::Start(request) => request.secret_resolver.as_deref(),
             Self::Load(request) => request.secret_resolver.as_deref(),
+            Self::Resume(request) => request.secret_resolver.as_deref(),
         }
     }
 
@@ -78,6 +83,7 @@ impl AcpSessionOpenRequest {
         match self {
             Self::Start(request) => request.cancellation.clone(),
             Self::Load(request) => request.cancellation.clone(),
+            Self::Resume(request) => request.cancellation.clone(),
         }
     }
 }
@@ -93,10 +99,12 @@ pub(super) struct AcpAgentProcessOpen {
     pub(super) config_rx: tokio_mpsc::UnboundedReceiver<AcpSessionConfigCommand>,
     pub(super) cancel_rx: tokio_mpsc::UnboundedReceiver<()>,
     pub(super) close_rx: tokio_mpsc::UnboundedReceiver<mpsc::Sender<Result<(), RuntimeError>>>,
-    pub(super) started_tx: mpsc::Sender<Result<AcpStartedSession, String>>,
+    pub(super) started_tx: mpsc::Sender<Result<AcpStartedSession, RuntimeError>>,
     pub(super) auth_method_id: Option<String>,
     pub(super) trace: Option<AcpTraceSession>,
     pub(super) terminal_owner_id: AcpTerminalOwnerId,
+    /// Releases inactive Agent resources without coupling lifetime to Task pages.
+    pub(super) session_idle_timeout: std::time::Duration,
 }
 
 pub(super) struct AcpAgentProcessInput {
@@ -161,7 +169,7 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
         Ok(agent) => agent,
         Err(error) => {
             if let Some(open) = &first_open {
-                let _ = open.started_tx.send(Err(error.to_string()));
+                let _ = open.started_tx.send(Err(error.clone()));
             }
             return Err(error);
         }
@@ -257,7 +265,7 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
         _ = shutdown_rx.changed() => Ok(()),
     };
     if let (Err(error), Some(first_started_tx)) = (&result, first_started_tx) {
-        let _ = first_started_tx.send(Err(format!("ACP error: {error}")));
+        let _ = first_started_tx.send(Err(RuntimeError::Internal(format!("ACP error: {error}"))));
     }
     tokio::task::spawn_blocking(move || terminal_registry.close_all())
         .await
@@ -334,7 +342,7 @@ async fn initialize_shared_process_connection(
             &first_open.started_tx,
         ) => result,
         error = wait_for_shared_startup_cancellation(cancellation.clone()) => {
-            let _ = first_open.started_tx.send(Err(error.to_string()));
+            let _ = first_open.started_tx.send(Err(error.clone()));
             Err(acp_start_error(error))
         }
     }
@@ -365,6 +373,7 @@ async fn open_on_shared_process(
         auth_method_id,
         trace,
         terminal_owner_id,
+        session_idle_timeout,
     } = open;
     terminal_registry.begin_open(terminal_owner_id);
     let terminal_owner = terminal_registry.owner(terminal_owner_id);
@@ -410,7 +419,9 @@ async fn open_on_shared_process(
         // rejected binding would close that shared Agent-owned session as well.
         let owner = terminal_owner.clone();
         let _ = tokio::task::spawn_blocking(move || owner.close()).await;
-        let _ = started_tx.send(Err("agent_session_id already active".to_string()));
+        let _ = started_tx.send(Err(RuntimeError::InvalidParams(
+            "agent_session_id already active".to_string(),
+        )));
         return Ok(());
     }
     if let Some(trace) = &trace {
@@ -447,6 +458,7 @@ async fn open_on_shared_process(
             current_prompts: current_prompts_for_task,
             trace,
             session_event_sinks: session_event_sinks_for_task,
+            session_idle_timeout,
         })
         .await;
         let _ = tokio::task::spawn_blocking(move || terminal_owner.close()).await;

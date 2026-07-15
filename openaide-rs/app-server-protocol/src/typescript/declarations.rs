@@ -79,12 +79,13 @@ use crate::snapshot::{
     PendingRequestSnapshot, ProjectCollectionSnapshot, ProjectSummary, ProtocolVersion,
     QuestionMessageAction, QuestionMessageState, RecoveryAction, RecoverySnapshot,
     ServerCapabilities, ServerSnapshot, SettingsSnapshot, StateRootSnapshot,
-    TaskAgentCommandsSnapshot, TaskAgentConfigSnapshot, TaskHistorySyncSnapshot, TaskLifecycle,
-    TaskNavigationSnapshot, TaskPreparationAction, TaskPreparationSnapshot, TaskPreparationStep,
-    TaskPreparationStepKind, TaskPreparationStepStatus, TaskSendBlocker, TaskSendBlockerKind,
-    TaskSendCapabilitySnapshot, TaskSendCapabilityState, TaskSetupBlocker, TaskSetupBlockerKind,
-    TaskSnapshot, TaskStatus, TaskSummary, TaskTitle, TaskTitleSource,
-    ToolPermissionDecisionSnapshot, ToolPermissionOutcomeSnapshot,
+    TaskAgentCommandsSnapshot, TaskAgentConfigSnapshot, TaskAttentionEvent, TaskAttentionReason,
+    TaskHistorySyncSnapshot, TaskLifecycle, TaskNavigationSnapshot, TaskPreparationAction,
+    TaskPreparationSnapshot, TaskPreparationStep, TaskPreparationStepKind,
+    TaskPreparationStepStatus, TaskSendBlocker, TaskSendBlockerKind, TaskSendCapabilitySnapshot,
+    TaskSendCapabilityState, TaskSetupBlocker, TaskSetupBlockerKind, TaskSnapshot, TaskStatus,
+    TaskSummary, TaskTitle, TaskTitleSource, ToolPermissionDecisionSnapshot,
+    ToolPermissionOutcomeSnapshot,
 };
 use crate::state::{
     StateSubscribeParams, StateSubscribeResult, StateUnsubscribeParams, StateUnsubscribeResult,
@@ -343,6 +344,8 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<AgentCapabilities>(output, config);
     push_decl::<TaskNavigationSnapshot>(output, config);
     push_decl::<TaskSummary>(output, config);
+    push_decl::<TaskAttentionEvent>(output, config);
+    push_decl::<TaskAttentionReason>(output, config);
     push_decl::<TaskTitle>(output, config);
     push_decl::<TaskTitleSource>(output, config);
     push_decl::<TaskStatus>(output, config);

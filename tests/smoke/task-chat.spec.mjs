@@ -25,6 +25,34 @@ test.afterEach(async ({}, testInfo) => {
   }
 });
 
+test("keeps the New Task form stable across constrained editor heights", async ({ page }) => {
+  await page.setViewportSize({ width: 1_000, height: 525 });
+  await openPreparedNewTask(page);
+
+  const heading = page.getByRole("heading", { name: "What are we working on?" });
+  const tallerTop = (await heading.boundingBox())?.y;
+  await page.setViewportSize({ width: 1_000, height: 520 });
+  const shorterTop = (await heading.boundingBox())?.y;
+
+  expect(tallerTop).toBeDefined();
+  expect(shorterTop).toBeDefined();
+  expect(Math.abs(shorterTop - tallerTop)).toBeLessThanOrEqual(10);
+
+  const surface = page.getByLabel("New task");
+  await expect(surface).toHaveJSProperty("scrollTop", 0);
+  await page.setViewportSize({ width: 1_000, height: 180 });
+  const constrainedGeometry = await surface.evaluate((element) => ({
+    clientWidth: element.clientWidth,
+    scrollWidth: element.scrollWidth,
+    clientHeight: element.clientHeight,
+    scrollHeight: element.scrollHeight,
+  }));
+  expect(constrainedGeometry.scrollWidth).toBe(constrainedGeometry.clientWidth);
+  expect(constrainedGeometry.scrollHeight).toBeGreaterThan(constrainedGeometry.clientHeight);
+  await surface.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+  expect(await surface.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+});
+
 test("creates a New Task, sends once, streams Chat, tools, and Agent title", async ({ page }) => {
   await openPreparedNewTask(page);
   await send(page, "smoke:basic");

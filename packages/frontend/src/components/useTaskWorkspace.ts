@@ -21,7 +21,9 @@ export function useTaskWorkspace({ backendConnection, bootstrap, dispatch, state
     backendConnection,
     dispatch,
     revision: state.snapshot?.revision,
-    taskId: bootstrap.surface === "task" ? state.snapshot?.task.task_id : undefined,
+    taskId: bootstrap.surface === "task" && state.snapshot && bootstrap.taskId === state.snapshot.task.task_id
+      ? state.snapshot.task.task_id
+      : undefined,
     unread: state.snapshot?.task.unread === true,
   });
 

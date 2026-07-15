@@ -29,7 +29,8 @@ pub(super) struct OpenAcpSessionContext<'a> {
     pub(super) auth_method_id: Option<&'a str>,
     pub(super) trace: Option<&'a AcpTraceSession>,
     pub(super) load_replay: &'a LoadReplayCaptures,
-    pub(super) start_error_tx: &'a mpsc::Sender<Result<AcpStartedSession, String>>,
+    pub(super) start_error_tx:
+        &'a mpsc::Sender<Result<AcpStartedSession, crate::protocol::errors::RuntimeError>>,
 }
 
 pub(super) struct OpenedAcpSession {
@@ -60,7 +61,7 @@ pub(super) async fn open_acp_session<'a>(
                     context.start_error_tx,
                 ) => result?,
                 error = wait_for_startup_cancellation(cancellation.clone()) => {
-                    let _ = context.start_error_tx.send(Err(error.to_string()));
+                    let _ = context.start_error_tx.send(Err(error.clone()));
                     return Err(acp_start_error(error));
                 }
             }
@@ -78,7 +79,9 @@ pub(super) async fn open_acp_session<'a>(
 
     if let AcpSessionOpenRequest::Start(request) = &context.request {
         if let Err(error) = validate_prompt_attachments(&request.context, content_policy) {
-            let _ = context.start_error_tx.send(Err(error.to_string()));
+            let _ = context.start_error_tx.send(Err(
+                crate::protocol::errors::RuntimeError::InvalidParams(error.to_string()),
+            ));
             return Err(agent_client_protocol::util::internal_error(
                 error.to_string(),
             ));
@@ -93,7 +96,7 @@ pub(super) async fn open_acp_session<'a>(
             let start_result = tokio::select! {
                 result = runner.start(session_cwd) => result,
                 error = wait_for_startup_cancellation(request.cancellation.clone()) => {
-                    let _ = context.start_error_tx.send(Err(error.to_string()));
+                    let _ = context.start_error_tx.send(Err(error.clone()));
                     return Err(acp_start_error(error));
                 }
             };
@@ -102,7 +105,7 @@ pub(super) async fn open_acp_session<'a>(
                 Err(error) => {
                     let _ = context
                         .start_error_tx
-                        .send(Err(format!("ACP error: {error}")));
+                        .send(Err(crate::agent::acp_errors::acp_error(&error)));
                     return Err(error);
                 }
             };
@@ -119,11 +122,11 @@ pub(super) async fn open_acp_session<'a>(
                 Ok(catalog) => catalog,
                 Err(error) => {
                     runner.close(active_session.session_id().clone()).await;
-                    let _ = context.start_error_tx.send(Err(error.to_string()));
+                    let _ = context.start_error_tx.send(Err(error.clone()));
                     return Err(acp_start_error(error));
                 }
             };
-            (active_session, applied_options, None, Vec::new())
+            (active_session, Some(applied_options), None, Vec::new())
         }
         AcpSessionOpenRequest::Load(request) => {
             let session_cwd = normalized_session_cwd(&request.cwd);
@@ -132,9 +135,25 @@ pub(super) async fn open_acp_session<'a>(
                 error = wait_for_startup_cancellation(request.cancellation.clone()) => Err(error),
             };
             match load_result {
-                Ok(session) => session,
+                Ok((active_session, catalog, commands, messages)) => {
+                    (active_session, Some(catalog), commands, messages)
+                }
                 Err(error) => {
-                    let _ = context.start_error_tx.send(Err(error.to_string()));
+                    let _ = context.start_error_tx.send(Err(error.clone()));
+                    return Err(acp_start_error(error));
+                }
+            }
+        }
+        AcpSessionOpenRequest::Resume(request) => {
+            let session_cwd = normalized_session_cwd(&request.cwd);
+            let resume_result = tokio::select! {
+                result = runner.resume(request.session_id, session_cwd) => result,
+                error = wait_for_startup_cancellation(request.cancellation.clone()) => Err(error),
+            };
+            match resume_result {
+                Ok((active_session, catalog)) => (active_session, catalog, None, Vec::new()),
+                Err(error) => {
+                    let _ = context.start_error_tx.send(Err(error.clone()));
                     return Err(acp_start_error(error));
                 }
             }
@@ -142,14 +161,17 @@ pub(super) async fn open_acp_session<'a>(
     };
 
     let session_id = active_session.session_id().to_string();
+    let mut started_session = AgentSession::new(context.request_agent_id, session_id)
+        .with_commands_catalog(replayed_commands);
+    if let Some(applied_options) = applied_options {
+        started_session = started_session.with_config_options(&applied_options);
+    }
     Ok(OpenedAcpSession {
         active_session,
         supports_session_close,
         supports_session_delete: runner.supports_session_delete(),
         content_policy,
-        started_session: AgentSession::new(context.request_agent_id, session_id)
-            .with_config_options(&applied_options)
-            .with_commands_catalog(replayed_commands),
+        started_session,
         replayed_messages,
     })
 }

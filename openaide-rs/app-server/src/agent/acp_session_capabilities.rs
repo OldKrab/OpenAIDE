@@ -92,6 +92,23 @@ pub(super) fn validate_load_session_capability(
     }
 }
 
+pub(super) fn validate_resume_session_capability(
+    initialize: &InitializeResponse,
+) -> Result<(), RuntimeError> {
+    if initialize
+        .agent_capabilities
+        .session_capabilities
+        .resume
+        .is_some()
+    {
+        Ok(())
+    } else {
+        Err(RuntimeError::CapabilityMissing(
+            "agent session resume is not available".to_string(),
+        ))
+    }
+}
+
 pub(super) fn auth_method_for_session_retry(
     initialize: &InitializeResponse,
     preferred_auth_method_id: Option<&str>,

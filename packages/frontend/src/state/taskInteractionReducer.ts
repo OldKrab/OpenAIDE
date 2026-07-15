@@ -3,6 +3,7 @@ import { mergePageState } from "./chatPaging";
 import { invalidateAppServerAttachments, localAttachment } from "./composerOptions";
 import type { ComposerAttachment } from "./composerOptions";
 import type { AppAction } from "./appReducer";
+import { configOptionsCatalogKey } from "./configOptionState";
 import { toolDetailCacheKey, type AppState } from "./store";
 
 type TaskInteractionAction =
@@ -15,6 +16,14 @@ type TaskInteractionAction =
   | { type: "taskInput:sendError"; taskId: string; message?: string }
   | { type: "taskSend:accepted"; taskId: string; userMessageId: import("@openaide/app-server-client").MessageId }
   | { type: "taskInput:error"; taskId: string; message?: string }
+  | {
+      type: "taskInput:configError";
+      taskId: string;
+      mutationId: string;
+      message: string;
+      catalog?: import("@openaide/app-shell-contracts").ConfigOptionsCatalog;
+    }
+  | { type: "taskInput:configError:clear"; taskId: string; mutationId: string }
   | { type: "taskInput:cancelError"; taskId: string; message: string }
   | { type: "taskInput:attachments:invalidate"; taskId: string; message: string }
   | { type: "taskOpen:start"; taskId: string }
@@ -175,6 +184,34 @@ export function reduceTaskInteractionState(state: AppState, action: AppAction): 
             ...(input ?? { prompt: "", context: [] }),
             error: action.message,
           },
+        },
+      };
+    }
+    case "taskInput:configError": {
+      const input = state.taskInputs[action.taskId] ?? { prompt: "", context: [] };
+      return {
+        ...state,
+        taskInputs: {
+          ...state.taskInputs,
+          [action.taskId]: {
+            ...input,
+            configError: {
+              mutationId: action.mutationId,
+              message: action.message,
+              catalogKey: configOptionsCatalogKey(action.catalog),
+            },
+          },
+        },
+      };
+    }
+    case "taskInput:configError:clear": {
+      const input = state.taskInputs[action.taskId];
+      if (!input?.configError || input.configError.mutationId !== action.mutationId) return state;
+      return {
+        ...state,
+        taskInputs: {
+          ...state.taskInputs,
+          [action.taskId]: { ...input, configError: undefined },
         },
       };
     }

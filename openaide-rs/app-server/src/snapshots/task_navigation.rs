@@ -1,14 +1,16 @@
 use openaide_app_server_protocol::errors::{ProtocolError, ProtocolErrorCode};
 use openaide_app_server_protocol::ids::{AgentId, ProjectId, TaskId};
 use openaide_app_server_protocol::snapshot::{
-    TaskNavigationSnapshot, TaskStatus as ProtocolTaskStatus, TaskSummary, TaskTitle,
-    TaskTitleSource,
+    TaskAttentionEvent, TaskAttentionReason, TaskNavigationSnapshot,
+    TaskStatus as ProtocolTaskStatus, TaskSummary, TaskTitle, TaskTitleSource,
 };
 
 use crate::projects::ProjectIdentity;
 use crate::protocol::model::{TaskStatus, TaskSummary as LegacyTaskSummary};
 use crate::storage::records::{
-    TaskRecord, TaskTitle as StoredTaskTitle, TaskTitleSource as StoredTaskTitleSource,
+    TaskAttentionEvent as StoredTaskAttentionEvent,
+    TaskAttentionReason as StoredTaskAttentionReason, TaskRecord, TaskTitle as StoredTaskTitle,
+    TaskTitleSource as StoredTaskTitleSource,
 };
 use crate::storage::Store;
 
@@ -70,6 +72,7 @@ pub(crate) fn project_task_summary_with_has_messages(
         updated_at: record.updated_at,
         last_activity: record.last_activity,
         unread: record.unread,
+        attention: record.attention.map(project_attention),
         has_messages,
     }
 }
@@ -112,7 +115,22 @@ pub(crate) fn project_legacy_task_summary(
         updated_at: summary.updated_at,
         last_activity: summary.last_activity,
         unread: summary.unread,
+        attention: summary.attention.map(project_attention),
         has_messages,
+    }
+}
+
+fn project_attention(attention: StoredTaskAttentionEvent) -> TaskAttentionEvent {
+    TaskAttentionEvent {
+        event_id: attention.event_id,
+        reason: match attention.reason {
+            StoredTaskAttentionReason::Finished => TaskAttentionReason::Finished,
+            StoredTaskAttentionReason::NeedsPermission => TaskAttentionReason::NeedsPermission,
+            StoredTaskAttentionReason::NeedsAnswer => TaskAttentionReason::NeedsAnswer,
+            StoredTaskAttentionReason::Stopped => TaskAttentionReason::Stopped,
+            StoredTaskAttentionReason::Failed => TaskAttentionReason::Failed,
+        },
+        occurred_at: attention.occurred_at,
     }
 }
 

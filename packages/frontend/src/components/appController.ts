@@ -91,6 +91,10 @@ export type AppController = {
   };
   preferences: AppPreferencesRecord;
   retryTaskOpen: () => void;
+  taskNotifications?: {
+    stateRootId?: string;
+    tasks: TaskSummary[];
+  };
   view: AppControllerView;
   visibleTasks: AppState["tasks"];
 };
@@ -244,6 +248,10 @@ export function useAppController(options: AppControllerOptions = {}): AppControl
 
   return {
     ...renderState,
+    taskNotifications: {
+      stateRootId: state.appServerStateRootId,
+      tasks: state.taskListCache.active ?? (state.showArchived ? [] : state.tasks),
+    },
     intents: {
       newTask: {
         changePrompt: (prompt) => dispatch(preparedTaskId

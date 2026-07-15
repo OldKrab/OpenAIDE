@@ -135,6 +135,7 @@ pub struct AgentSessionResume {
     pub cwd: String,
     pub model_id: Option<String>,
     pub cancellation: TurnCancellation,
+    pub secret_resolver: Option<Arc<dyn AgentSecretResolver>>,
 }
 
 impl AgentSessionResume {
@@ -307,7 +308,10 @@ pub trait AgentRuntime: Send + Sync {
     }
 
     fn resume_session(&self, request: AgentSessionResume) -> Result<AgentSession, RuntimeError> {
-        Ok(AgentSession::new(request.agent_id, request.session_id))
+        Err(RuntimeError::CapabilityMissing(format!(
+            "agent_resume_session:{}:{}",
+            request.task_id, request.session_id
+        )))
     }
 
     fn attach_session_event_sink(

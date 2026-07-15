@@ -2,6 +2,8 @@ use openaide_app_server_protocol::ids::TaskId;
 
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{ActivityStatus, InterruptionReason, TaskStatus};
+use crate::storage::records::TaskAttentionReason;
+use crate::tasks::attention::fresh_attention;
 use crate::tasks::mutation::{TaskCommitOutcome, TaskMutationContext, TaskMutationResult};
 use crate::time::now_string;
 
@@ -73,6 +75,9 @@ pub(super) fn apply_active_work_end(
         task.agent_session_id = None;
     }
     task.unread = true;
+    task.attention = cause
+        .attention_reason()
+        .map(|reason| fresh_attention(reason, now.clone()));
     task.updated_at = now.clone();
     task.last_activity = now;
     Ok(())
@@ -137,5 +142,17 @@ impl ActiveWorkEnd {
 
     fn clears_session(&self) -> bool {
         matches!(self, Self::AgentStartFailed(_))
+    }
+
+    fn attention_reason(&self) -> Option<TaskAttentionReason> {
+        match self {
+            Self::UserStopped => None,
+            Self::AgentFailed(_)
+            | Self::AgentStartFailed(_)
+            | Self::CancellationFailed(_)
+            | Self::Restarted
+            | Self::Shutdown
+            | Self::SupportRecovery => Some(TaskAttentionReason::Failed),
+        }
     }
 }

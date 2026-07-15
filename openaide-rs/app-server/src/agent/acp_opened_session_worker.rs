@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::{mpsc, Arc, Mutex};
+use std::time::Duration;
 
 use agent_client_protocol::{Agent, SessionMessage};
 use tokio::sync::mpsc as tokio_mpsc;
@@ -21,6 +22,8 @@ use crate::agent::{AgentSession, AgentSessionEventSink};
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{ConfigOptionsCatalog, ConfigOptionsStatus};
 
+const IDLE_SESSION_CLOSE_TIMEOUT: Duration = Duration::from_secs(2);
+
 pub(super) struct AcpOpenedSessionWorkerInput {
     pub(super) opened: OpenedAcpSession,
     pub(super) request_agent_id: String,
@@ -31,6 +34,7 @@ pub(super) struct AcpOpenedSessionWorkerInput {
     pub(super) current_prompts: Arc<Mutex<HashMap<String, LivePromptProjection>>>,
     pub(super) trace: Option<AcpTraceSession>,
     pub(super) session_event_sinks: crate::agent::acp_host_capabilities::AcpSessionEventSinkMap,
+    pub(super) session_idle_timeout: Duration,
 }
 
 pub(super) async fn run_opened_acp_session(
@@ -46,6 +50,7 @@ pub(super) async fn run_opened_acp_session(
         current_prompts,
         trace,
         session_event_sinks,
+        session_idle_timeout,
     } = input;
     let OpenedAcpSession {
         mut active_session,
@@ -64,9 +69,12 @@ pub(super) async fn run_opened_acp_session(
         session_id,
         sinks: session_event_sinks,
     };
+    let idle_deadline = tokio::time::sleep(session_idle_timeout);
+    tokio::pin!(idle_deadline);
 
     loop {
         tokio::select! {
+            biased;
             close = close_rx.recv() => {
                 let Some(reply_tx) = close else {
                     break;
@@ -184,7 +192,44 @@ pub(super) async fn run_opened_acp_session(
                 .await
                 .map_err(|error| agent_client_protocol::util::internal_error(error.to_string()))?;
             }
+            () = &mut idle_deadline, if supports_session_close => {
+                let idle_session_id = active_session.session_id().clone();
+                crate::logging::info(
+                    "acp_session_idle_timeout",
+                    serde_json::json!({
+                        "agent_id": request_agent_id,
+                        "session_id": idle_session_id.to_string(),
+                        "idle_timeout_ms": session_idle_timeout.as_millis(),
+                    }),
+                );
+                let connection = active_session.connection();
+                if tokio::time::timeout(
+                    IDLE_SESSION_CLOSE_TIMEOUT,
+                    close_active_session(
+                        &connection,
+                        idle_session_id.clone(),
+                        supports_session_close,
+                        trace.as_ref(),
+                    ),
+                )
+                .await
+                .is_err()
+                {
+                    crate::logging::warn(
+                        "acp_session_idle_close_timed_out",
+                        serde_json::json!({
+                            "agent_id": request_agent_id,
+                            "session_id": idle_session_id.to_string(),
+                            "close_timeout_ms": IDLE_SESSION_CLOSE_TIMEOUT.as_millis(),
+                        }),
+                    );
+                }
+                break;
+            }
         }
+        idle_deadline
+            .as_mut()
+            .reset(tokio::time::Instant::now() + session_idle_timeout);
     }
 
     Ok(())

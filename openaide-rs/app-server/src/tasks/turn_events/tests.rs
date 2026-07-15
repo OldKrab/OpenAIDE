@@ -16,7 +16,9 @@ use crate::protocol::model::{
 };
 use crate::server_requests::ServerRequestRuntime;
 use crate::server_requests::{ResponderScope, ServerRequestAnswer};
-use crate::storage::records::{TaskPreparationRecord, TaskRecord, TaskTitle, TaskTitleSource};
+use crate::storage::records::{
+    TaskAttentionReason, TaskPreparationRecord, TaskRecord, TaskTitle, TaskTitleSource,
+};
 use crate::storage::Store;
 use crate::task_events::TaskUpdateKind;
 use crate::task_events::TaskUpdateNotifier;
@@ -263,8 +265,16 @@ fn question_waits_for_a_late_responder() {
         store.read_task("task_1").unwrap().status,
         TaskStatus::Waiting
     );
+    let waiting = store.read_task("task_1").unwrap();
+    assert_eq!(
+        waiting.attention.as_ref().map(|event| event.reason),
+        Some(TaskAttentionReason::NeedsAnswer)
+    );
     register_question_responder(&server_requests, "task_1");
     let request = server_requests.pending_for_task(&TaskId::from("task_1"))[0].clone();
+    assert!(waiting.attention.as_ref().is_some_and(|event| event
+        .event_id
+        .starts_with(&format!("request:{}:", request.request_id.as_str()))));
     assert!(matches!(
         server_requests.handle_response_from_scopes(
             ClientInstanceId::from("client-1"),
@@ -324,6 +334,14 @@ fn resolving_one_of_two_questions_keeps_task_waiting_for_the_other() {
 
     let remaining = server_requests.pending_for_task(&task_id);
     assert_eq!(remaining.len(), 1);
+    assert!(store
+        .read_task("task_1")
+        .unwrap()
+        .attention
+        .as_ref()
+        .is_some_and(|event| event
+            .event_id
+            .starts_with(&format!("request:{}:", remaining[0].request_id.as_str()))));
     answer_question(&server_requests, &task_id, remaining[0].request_id.clone());
     assert_eq!(
         second.join().unwrap().unwrap(),
@@ -333,6 +351,7 @@ fn resolving_one_of_two_questions_keeps_task_waiting_for_the_other() {
         store.read_task("task_1").unwrap().status,
         TaskStatus::Active
     );
+    assert!(store.read_task("task_1").unwrap().attention.is_none());
 }
 
 #[test]
@@ -691,12 +710,22 @@ fn permission_waits_for_a_late_responder() {
         store.read_task("task_1").unwrap().status,
         TaskStatus::Waiting
     );
+    let request = server_requests.pending_for_task(&TaskId::from("task_1"))[0].clone();
+    let waiting = store.read_task("task_1").unwrap();
+    assert_eq!(
+        waiting.attention.as_ref().map(|event| event.reason),
+        Some(TaskAttentionReason::NeedsPermission)
+    );
+    assert!(waiting.attention.as_ref().is_some_and(|event| event
+        .event_id
+        .starts_with(&format!("request:{}:", request.request_id.as_str()))));
     register_permission_responder(&server_requests, "task_1");
     answer_permission(&server_requests, "task_1", "allow");
     assert!(matches!(
         thread.join().unwrap().unwrap(),
         crate::agent::events::AgentPermissionOutcome::Selected { option_id } if option_id == "allow"
     ));
+    assert!(store.read_task("task_1").unwrap().attention.is_none());
 }
 
 #[test]
@@ -844,6 +873,10 @@ fn prompt_completion_leaves_running_agent_activity_open_for_later_session_update
     let task = store.read_task("task_1").unwrap();
     assert_eq!(task.status, TaskStatus::Inactive);
     assert_eq!(task.active_turn_id, None);
+    assert_eq!(
+        task.attention.as_ref().map(|event| event.reason),
+        Some(TaskAttentionReason::Finished)
+    );
 }
 
 #[test]
@@ -909,6 +942,10 @@ fn prompt_limit_appends_one_failed_activity_without_closing_agent_activity() {
     let task = store.read_task("task_1").unwrap();
     assert_eq!(task.status, TaskStatus::Inactive);
     assert_eq!(task.active_turn_id, None);
+    assert_eq!(
+        task.attention.as_ref().map(|event| event.reason),
+        Some(TaskAttentionReason::Stopped)
+    );
 }
 
 #[test]
@@ -924,6 +961,26 @@ fn agent_confirmed_cancellation_ends_work_without_adding_chat() {
     let task = store.read_task("task_1").unwrap();
     assert_eq!(task.status, TaskStatus::Inactive);
     assert_eq!(task.active_turn_id, None);
+    assert_eq!(
+        task.attention.as_ref().map(|event| event.reason),
+        Some(TaskAttentionReason::Stopped)
+    );
+}
+
+#[test]
+fn user_stopped_turn_does_not_create_attention_event() {
+    let (_dir, store, mutations, server_requests) = test_runtime();
+    store.write_task(&running_task("task_1")).unwrap();
+    let transitions = TaskTransitions::new(mutations, server_requests);
+    assert!(transitions.mark_turn_stopping("task_1", "turn_1").unwrap());
+
+    transitions
+        .finish_turn("task_1", "turn_1", Ok(AgentPromptOutcome::Cancelled))
+        .unwrap();
+
+    let task = store.read_task("task_1").unwrap();
+    assert_eq!(task.status, TaskStatus::Inactive);
+    assert!(task.attention.is_none());
 }
 
 #[test]
@@ -954,6 +1011,10 @@ fn cancellation_failure_returns_task_to_idle_and_closes_transient_requests() {
     let task = store.read_task("task_1").unwrap();
     assert_eq!(task.status, TaskStatus::Inactive);
     assert_eq!(task.active_turn_id, None);
+    assert_eq!(
+        task.attention.as_ref().map(|event| event.reason),
+        Some(TaskAttentionReason::Failed)
+    );
     let messages = store.read_messages("task_1").unwrap();
     assert!(messages.iter().any(|stored| matches!(
         &stored.chat.message,
@@ -1004,6 +1065,10 @@ fn agent_failure_interrupts_running_tools_and_returns_task_to_idle() {
     let task = store.read_task("task_1").unwrap();
     assert_eq!(task.status, TaskStatus::Inactive);
     assert_eq!(task.active_turn_id, None);
+    assert_eq!(
+        task.attention.as_ref().map(|event| event.reason),
+        Some(TaskAttentionReason::Failed)
+    );
     let messages = store.read_messages("task_1").unwrap();
     assert!(messages.iter().any(|stored| matches!(
         stored.chat.message,
@@ -1383,6 +1448,12 @@ fn finishing_active_turn_marks_task_unread_for_user_attention() {
 
     let stored = store.read_task("task_1").unwrap();
     assert!(stored.unread);
+    assert_eq!(
+        stored.attention.as_ref().map(|event| event.reason),
+        Some(TaskAttentionReason::Finished)
+    );
+    assert!(!stored.attention.as_ref().unwrap().event_id.is_empty());
+    assert!(!stored.attention.as_ref().unwrap().occurred_at.is_empty());
     assert_eq!(stored.active_turn_id, None);
     assert_eq!(stored.status, TaskStatus::Inactive);
 }
@@ -1453,6 +1524,7 @@ fn running_task(task_id: &str) -> TaskRecord {
         task_version: 0,
         message_history_version: 0,
         unread: false,
+        attention: None,
         created_at: "1".to_string(),
         updated_at: "1".to_string(),
         last_activity: "1".to_string(),

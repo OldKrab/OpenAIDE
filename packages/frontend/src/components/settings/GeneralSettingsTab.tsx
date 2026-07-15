@@ -6,17 +6,22 @@ import type {
   ComposerSubmitShortcut,
   RuntimeSettingsResult,
 } from "@openaide/app-shell-contracts";
+import type { DesktopNotificationSettings } from "../../shells/webTaskNotifications";
 
 export function GeneralSettingsTab({
   developerSettingsUnlocked = false,
+  desktopNotifications,
   onSetAcpTrace,
   onSetComposerSubmitShortcut,
+  onSetDesktopNotifications,
   preferences,
   runtimeSettings,
 }: {
   developerSettingsUnlocked?: boolean;
+  desktopNotifications?: DesktopNotificationSettings;
   onSetAcpTrace: (enabled: boolean) => void;
   onSetComposerSubmitShortcut: (shortcut: ComposerSubmitShortcut) => void;
+  onSetDesktopNotifications?: (enabled: boolean) => void | Promise<void>;
   preferences: AppPreferencesRecord;
   runtimeSettings?: RuntimeSettingsResult;
 }) {
@@ -55,6 +60,31 @@ export function GeneralSettingsTab({
       ],
     },
   ];
+
+  if (desktopNotifications && onSetDesktopNotifications) {
+    groups.push({
+      id: "notifications",
+      label: "Notifications",
+      rows: [{
+        id: "desktop-notifications",
+        label: "Desktop notifications",
+        detail: desktopNotificationDetail(desktopNotifications.status),
+        searchText: `desktop notifications operating system ${desktopNotifications.status}`,
+        value: (
+          <label className="settings-switch" aria-label="Desktop notifications">
+            <input
+              aria-label="Desktop notifications"
+              checked={desktopNotifications.status === "enabled" || desktopNotifications.status === "blocked"}
+              disabled={desktopNotifications.status === "unsupported"}
+              onChange={(event) => { void onSetDesktopNotifications(event.currentTarget.checked); }}
+              type="checkbox"
+            />
+            <span className="settings-switch-track" aria-hidden="true" />
+          </label>
+        ),
+      }],
+    });
+  }
 
   if (developerSettings && developerSettingsUnlocked) {
     groups.push({
@@ -148,6 +178,19 @@ export function GeneralSettingsTab({
       </div>
     </div>
   );
+}
+
+function desktopNotificationDetail(status: DesktopNotificationSettings["status"]) {
+  switch (status) {
+    case "enabled":
+      return "Show OS notifications when OpenAIDE is not focused.";
+    case "blocked":
+      return "Blocked by the browser or OS. Allow notifications in site settings.";
+    case "unsupported":
+      return "This browser does not support desktop notifications.";
+    case "off":
+      return "Show OS notifications when OpenAIDE is not focused.";
+  }
 }
 
 type GeneralSettingsGroup = {

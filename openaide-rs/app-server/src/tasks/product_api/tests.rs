@@ -1873,6 +1873,7 @@ fn open_reloads_adopted_task_when_native_session_is_newer_than_cached_history() 
             })
     });
     assert_eq!(agent.loads.load(Ordering::SeqCst), 1);
+    assert_eq!(agent.resumes.load(Ordering::SeqCst), 0);
     assert_eq!(agent.attaches.load(Ordering::SeqCst), 1);
     let stored_messages = store.read_messages("task-existing").unwrap();
     assert_eq!(stored_messages.len(), 1);
@@ -1938,13 +1939,15 @@ fn open_returns_cached_task_while_native_session_refresh_is_blocked() {
 }
 
 #[test]
-fn open_without_a_cached_native_catalog_does_not_contact_the_agent() {
+fn open_without_a_cached_native_catalog_recovers_the_native_session() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut task = task_record("task-existing", "/workspace/app");
     task.agent_session_id = Some("native-session".to_string());
     store.write_task(&task).unwrap();
     let agent = Arc::new(RecordingAgent {
+        resume_config_catalog: Some(config_catalog("gpt-5.5")),
+        resume_commands_catalog: Some(command_catalog()),
         listed_sessions: Mutex::new(vec![AgentListedSession {
             session_id: "native-session".to_string(),
             cwd: "/workspace/app".to_string(),
@@ -1956,7 +1959,7 @@ fn open_without_a_cached_native_catalog_does_not_contact_the_agent() {
     });
     let api = TaskProductApi::new(
         store.clone(),
-        Arc::new(StorageProjectResolver::new(store)),
+        Arc::new(StorageProjectResolver::new(store.clone())),
         AgentRegistry::default_built_ins(),
         agent.clone(),
         TaskUpdateNotifier::disabled(),
@@ -1967,11 +1970,25 @@ fn open_without_a_cached_native_catalog_does_not_contact_the_agent() {
         task_id: "task-existing".into(),
     })
     .unwrap();
-    std::thread::sleep(Duration::from_millis(25));
+    wait_until(|| {
+        agent.resumes.load(Ordering::SeqCst) == 1
+            && agent.attaches.load(Ordering::SeqCst) == 1
+            && store
+                .read_task("task-existing")
+                .is_ok_and(|task| task.config_options_catalog.is_some())
+    });
+    let recovered = api
+        .open_for_test(TaskOpenParams {
+            task_id: "task-existing".into(),
+        })
+        .unwrap();
 
-    assert_eq!(agent.resumes.load(Ordering::SeqCst), 0);
+    assert!(agent.resumes.load(Ordering::SeqCst) >= 1);
     assert_eq!(agent.list_calls.load(Ordering::SeqCst), 0);
     assert_eq!(agent.loads.load(Ordering::SeqCst), 0);
+    assert_eq!(recovered.agent_config.state, LiveSessionDataState::Ready);
+    assert_eq!(recovered.agent_config.options[0].current_value, "gpt-5.5");
+    assert_eq!(recovered.agent_commands.state, LiveSessionDataState::Ready);
 }
 
 #[test]
@@ -2230,7 +2247,7 @@ fn history_load_failure_adds_activity_and_leaves_task_sendable() {
 }
 
 #[test]
-fn open_keeps_adopted_task_cache_when_native_session_is_not_newer() {
+fn open_resumes_native_session_when_cached_history_is_fresh() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut task = task_record("task-existing", "/workspace/app");
@@ -2262,7 +2279,8 @@ fn open_keeps_adopted_task_cache_when_native_session_is_not_newer() {
     task.message_history_version = store.message_history_version("task-existing").unwrap();
     store.write_task(&task).unwrap();
     let agent = Arc::new(RecordingAgent {
-        resume_after_restart_unavailable: true,
+        resume_config_catalog: Some(config_catalog("gpt-5.5")),
+        resume_commands_catalog: Some(command_catalog()),
         listed_sessions: Mutex::new(vec![AgentListedSession {
             session_id: "native-session".to_string(),
             cwd: "/workspace/app".to_string(),
@@ -2301,12 +2319,17 @@ fn open_keeps_adopted_task_cache_when_native_session_is_not_newer() {
         })
         .unwrap();
 
+    wait_until(|| {
+        agent.resumes.load(Ordering::SeqCst) == 1 && agent.attaches.load(Ordering::SeqCst) == 1
+    });
+
     assert!(matches!(
         snapshot.history_sync,
         TaskHistorySyncSnapshot::Idle { .. }
     ));
     assert_eq!(agent.loads.load(Ordering::SeqCst), 0);
-    assert_eq!(agent.attaches.load(Ordering::SeqCst), 0);
+    assert_eq!(agent.resumes.load(Ordering::SeqCst), 1);
+    assert_eq!(agent.attaches.load(Ordering::SeqCst), 1);
     assert_eq!(
         snapshot
             .task
@@ -2325,7 +2348,7 @@ fn open_keeps_adopted_task_cache_when_native_session_is_not_newer() {
 }
 
 #[test]
-fn open_keeps_adopted_task_cache_when_native_session_has_no_activity_time() {
+fn open_loads_native_session_when_history_is_unordered_and_resume_is_unsupported() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut task = task_record("task-existing", "/workspace/app");
@@ -2377,11 +2400,25 @@ fn open_keeps_adopted_task_cache_when_native_session_has_no_activity_time() {
         snapshot.history_sync,
         TaskHistorySyncSnapshot::Idle { .. }
     ));
-    assert_eq!(agent.loads.load(Ordering::SeqCst), 0);
-    assert_eq!(
-        store.read_task("task-existing").unwrap().last_activity,
-        "2026-01-02T00:00:00.000Z"
-    );
+    wait_until(|| {
+        agent.resumes.load(Ordering::SeqCst) == 1
+            && agent.loads.load(Ordering::SeqCst) == 1
+            && agent.attaches.load(Ordering::SeqCst) == 1
+            && store.read_messages("task-existing").is_ok_and(|messages| {
+                matches!(
+                    messages.as_slice(),
+                    [message]
+                        if matches!(
+                            &message.chat.message,
+                            NormalizedMessage::AgentMessage { id, .. }
+                                if id == "native:unordered"
+                        )
+                )
+            })
+    });
+    assert_eq!(agent.resumes.load(Ordering::SeqCst), 1);
+    assert_eq!(agent.loads.load(Ordering::SeqCst), 1);
+    assert_eq!(agent.attaches.load(Ordering::SeqCst), 1);
 }
 
 #[test]
@@ -2390,6 +2427,11 @@ fn mark_read_clears_unread_without_refreshing_native_session_history() {
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut task = task_record("task-existing", "/workspace/app");
     task.unread = true;
+    task.attention = Some(crate::storage::records::TaskAttentionEvent::new(
+        "attention-1",
+        crate::storage::records::TaskAttentionReason::Finished,
+        "2026-01-02T00:00:00Z",
+    ));
     task.agent_session_id = Some("native-session".to_string());
     store.write_task(&task).unwrap();
     let agent = Arc::new(RecordingAgent::default());
@@ -2409,8 +2451,61 @@ fn mark_read_clears_unread_without_refreshing_native_session_history() {
         .unwrap();
 
     assert!(!snapshot.task.unread);
+    assert!(snapshot.task.attention.is_none());
     assert!(!store.read_task("task-existing").unwrap().unread);
+    assert!(store
+        .read_task("task-existing")
+        .unwrap()
+        .attention
+        .is_none());
     assert_eq!(agent.loads.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn opening_second_finished_task_keeps_first_inactive_and_unread() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    for (task_id, attention_id) in [
+        ("task-first", "attention-first"),
+        ("task-second", "attention-second"),
+    ] {
+        let mut task = task_record(task_id, "/workspace/app");
+        task.status = TaskStatus::Inactive;
+        task.unread = true;
+        task.attention = Some(crate::storage::records::TaskAttentionEvent::new(
+            attention_id,
+            crate::storage::records::TaskAttentionReason::Finished,
+            "2026-01-02T00:00:00Z",
+        ));
+        store.write_task(&task).unwrap();
+    }
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        Arc::new(crate::agent::mock::MockAgent),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+
+    let opened = api
+        .open_for_test(TaskOpenParams {
+            task_id: "task-second".into(),
+        })
+        .unwrap();
+
+    assert!(!opened.task.unread);
+    assert!(opened.task.attention.is_none());
+    let first = store.read_task("task-first").unwrap();
+    assert_eq!(first.status, TaskStatus::Inactive);
+    assert!(first.unread);
+    assert_eq!(
+        first
+            .attention
+            .as_ref()
+            .map(|event| event.event_id.as_str()),
+        Some("attention-first")
+    );
 }
 
 #[test]
@@ -4183,6 +4278,80 @@ fn set_config_option_persists_for_idle_task() {
 }
 
 #[test]
+fn set_config_option_recovers_an_inactive_native_session_before_agent_io() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let mut task = task_record("task-existing", "/workspace/app");
+    task.agent_session_id = Some("native-session".to_string());
+    task.config_options = config_catalog("gpt-5").current_values();
+    task.config_options_catalog = Some(config_catalog("gpt-5"));
+    store.write_task(&task).unwrap();
+    let agent = Arc::new(RecordingAgent {
+        resume_config_catalog: Some(config_catalog("gpt-5")),
+        config_requires_active_session: true,
+        ..Default::default()
+    });
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store)),
+        AgentRegistry::default_built_ins(),
+        agent.clone(),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+
+    let snapshot = api
+        .set_config_option_for_test(TaskSetConfigOptionParams {
+            task_id: "task-existing".into(),
+            config_id: "model".into(),
+            value: "gpt-5.5".to_string(),
+            client_mutation_id: "mutation-after-idle-close".into(),
+        })
+        .unwrap();
+
+    assert_eq!(agent.resumes.load(Ordering::SeqCst), 1);
+    assert_eq!(agent.attaches.load(Ordering::SeqCst), 1);
+    assert_eq!(snapshot.agent_config.options[0].current_value, "gpt-5.5");
+}
+
+#[test]
+fn config_recovery_loads_when_the_agent_does_not_support_resume() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let mut task = task_record("task-existing", "/workspace/app");
+    task.agent_session_id = Some("native-session".to_string());
+    task.config_options = config_catalog("gpt-5").current_values();
+    task.config_options_catalog = Some(config_catalog("gpt-5"));
+    store.write_task(&task).unwrap();
+    let agent = Arc::new(RecordingAgent {
+        resume_after_restart_unavailable: true,
+        config_catalog: Some(config_catalog("gpt-5")),
+        config_requires_active_session: true,
+        ..Default::default()
+    });
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store)),
+        AgentRegistry::default_built_ins(),
+        agent.clone(),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+
+    api.set_config_option_for_test(TaskSetConfigOptionParams {
+        task_id: "task-existing".into(),
+        config_id: "model".into(),
+        value: "gpt-5.5".to_string(),
+        client_mutation_id: "mutation-load-fallback".into(),
+    })
+    .unwrap();
+
+    assert_eq!(agent.resumes.load(Ordering::SeqCst), 1);
+    assert_eq!(agent.loads.load(Ordering::SeqCst), 1);
+    assert_eq!(agent.attaches.load(Ordering::SeqCst), 1);
+}
+
+#[test]
 fn restart_hides_persisted_agent_controls_until_native_session_recovery() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
@@ -5219,6 +5388,7 @@ fn task_record(task_id: &str, workspace_root: &str) -> TaskRecord {
         task_version: 1,
         message_history_version: 0,
         unread: false,
+        attention: None,
         created_at: "2026-01-01T00:00:00.000Z".to_string(),
         updated_at: "2026-01-01T00:00:00.000Z".to_string(),
         last_activity: "2026-01-01T00:00:00.000Z".to_string(),
@@ -5341,8 +5511,12 @@ struct RecordingAgent {
     block_close: AtomicBool,
     block_resume: AtomicBool,
     block_set_config: AtomicBool,
+    config_requires_active_session: bool,
+    resumed_session_active: AtomicBool,
     config_catalog: Option<ConfigOptionsCatalog>,
     commands_catalog: Option<AgentCommandsCatalog>,
+    resume_config_catalog: Option<ConfigOptionsCatalog>,
+    resume_commands_catalog: Option<AgentCommandsCatalog>,
     suppress_commands_on_attach: bool,
     listed_sessions: Mutex<Vec<AgentListedSession>>,
     replayed_messages: Mutex<Vec<NormalizedMessage>>,
@@ -5502,7 +5676,16 @@ impl AgentRuntime for RecordingAgent {
                 "acp_session_resume_after_runtime_restart".to_string(),
             ));
         }
-        Ok(AgentSession::new(request.agent_id, request.session_id))
+        self.resumed_session_active.store(true, Ordering::SeqCst);
+        let session = AgentSession::new(request.agent_id, request.session_id);
+        let session = match &self.resume_config_catalog {
+            Some(catalog) => session.with_config_options(catalog),
+            None => session,
+        };
+        Ok(match &self.resume_commands_catalog {
+            Some(catalog) => session.with_commands_catalog(Some(catalog.clone())),
+            None => session,
+        })
     }
 
     fn load_session(&self, request: AgentSessionLoad) -> Result<AgentLoadedSession, RuntimeError> {
@@ -5587,6 +5770,14 @@ impl AgentRuntime for RecordingAgent {
         &self,
         request: AgentSessionSetConfigOptionRequest,
     ) -> Result<ConfigOptionsCatalog, RuntimeError> {
+        if self.config_requires_active_session
+            && !self.resumed_session_active.load(Ordering::SeqCst)
+            && !self.active_after_load.load(Ordering::SeqCst)
+        {
+            return Err(RuntimeError::NotReady(
+                "ACP session is not active".to_string(),
+            ));
+        }
         self.session_config_updates.lock().unwrap().push((
             request.session_id,
             request.config_id,

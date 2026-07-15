@@ -1,4 +1,4 @@
-import { Check, ChevronDown } from "lucide-react";
+import { Check, ChevronDown, LoaderCircle } from "lucide-react";
 import { forwardRef, type ReactNode } from "react";
 
 export function Selector({
@@ -9,6 +9,7 @@ export function Selector({
   locked,
   menuOpen,
   onClick,
+  pending = false,
 }: {
   className?: string;
   disabled: boolean;
@@ -17,13 +18,20 @@ export function Selector({
   locked: boolean;
   menuOpen: boolean;
   onClick: () => void;
+  pending?: boolean;
 }) {
   const classes = ["composer-pill", className].filter(Boolean).join(" ");
   if (locked) {
     return (
-      <span className={`${classes} locked`} title="Locked after task start">
+      <span
+        aria-busy={pending || undefined}
+        aria-label={pending ? `${label}, updating Agent option` : undefined}
+        className={`${classes} locked${pending ? " pending" : ""}`}
+        title={pending ? "Updating Agent option" : "Locked after task start"}
+      >
         {icon}
         {label}
+        {pending ? <LoaderCircle aria-hidden="true" className="composer-config-pending" size={12} /> : null}
       </span>
     );
   }

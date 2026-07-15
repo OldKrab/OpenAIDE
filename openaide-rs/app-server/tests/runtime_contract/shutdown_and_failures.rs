@@ -134,6 +134,7 @@ fn runtime_startup_recovers_stale_active_turn_and_session_binding() {
             task_version: 1,
             message_history_version: 0,
             unread: false,
+            attention: None,
             created_at: "1".to_string(),
             updated_at: "1".to_string(),
             last_activity: "1".to_string(),

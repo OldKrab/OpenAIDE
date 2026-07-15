@@ -33,7 +33,27 @@ pub struct TaskSummary {
     pub updated_at: String,
     pub last_activity: String,
     pub unread: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attention: Option<TaskAttentionEvent>,
     pub has_messages: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskAttentionEvent {
+    pub event_id: String,
+    pub reason: TaskAttentionReason,
+    pub occurred_at: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum TaskAttentionReason {
+    Finished,
+    NeedsPermission,
+    NeedsAnswer,
+    Stopped,
+    Failed,
 }
 
 /// A Task title together with the authority that most recently set it.

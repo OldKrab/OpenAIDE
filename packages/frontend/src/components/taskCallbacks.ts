@@ -210,6 +210,7 @@ export function createTaskCallbacks({
     selectConfigOption: (configId, value) => {
       if (!state.snapshot) return;
       const taskId = state.snapshot.task.task_id;
+      const catalog = state.snapshot.agent_config;
       if (!configOptionsMutable(state.snapshot.agent_config)) {
         dispatch({
           type: "taskInput:error",
@@ -223,11 +224,12 @@ export function createTaskCallbacks({
         dispatch({ type: "taskInput:error", taskId, message: appServerRequiredMessage() });
         return;
       }
+      const mutationId = createTaskConfigMutationId(configId);
       void request(TASK_SET_CONFIG_OPTION, {
         taskId: taskId as TaskId,
         configId: configId as AgentConfigOptionId,
         value,
-        clientMutationId: createTaskConfigMutationId(configId),
+        clientMutationId: mutationId,
       })
         .then((result) => {
           // The request result remains authoritative if the event stream is interrupted.
@@ -235,7 +237,16 @@ export function createTaskCallbacks({
           dispatch({ type: "snapshot", snapshot: mapProtocolTaskSnapshot(result.task).snapshot, intent: "refresh" });
         })
         .catch((error) => {
-          dispatch({ type: "taskInput:error", taskId, message: safeErrorMessage(error) });
+          dispatch({
+            type: "taskInput:configError",
+            taskId,
+            mutationId,
+            message: safeErrorMessage(error),
+            catalog,
+          });
+          globalThis.setTimeout(() => {
+            dispatch({ type: "taskInput:configError:clear", taskId, mutationId });
+          }, 10_000);
           void refreshTaskSnapshotAfterMutationFailure({
             dispatch,
             request,

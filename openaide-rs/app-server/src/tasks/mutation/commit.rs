@@ -333,6 +333,7 @@ fn changed_fields(original: &TaskRecord, task: &TaskRecord) -> ChangedFields {
     let summary = original.title != task.title
         || original.status != task.status
         || original.unread != task.unread
+        || original.attention != task.attention
         || original.updated_at != task.updated_at
         || original.last_activity != task.last_activity
         || original.agent_id != task.agent_id

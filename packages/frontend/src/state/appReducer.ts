@@ -85,6 +85,14 @@ type AppActionPayload =
   | { type: "taskInput:sendError"; taskId: string; message?: string }
   | { type: "taskSend:accepted"; taskId: string; userMessageId: import("@openaide/app-server-client").MessageId }
   | { type: "taskInput:error"; taskId: string; message?: string }
+  | {
+      type: "taskInput:configError";
+      taskId: string;
+      mutationId: string;
+      message: string;
+      catalog?: ConfigOptionsCatalog;
+    }
+  | { type: "taskInput:configError:clear"; taskId: string; mutationId: string }
   | { type: "taskInput:cancelError"; taskId: string; message: string }
   | { type: "taskInput:attachments:invalidate"; taskId: string; message: string }
   | { type: "taskOpen:start"; taskId: string }

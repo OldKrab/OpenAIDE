@@ -48,12 +48,14 @@ export function getBackendConnection() {
     return createReliableLocalHttpBackendConnection({
       ...bootstrap.appServerConnection,
       connectionId: createTransportConnectionId(),
+      subscribeToWake: subscribeToBrowserWake,
     });
   }
   if (bootstrap.surface !== "invalid" && bootstrap.appServerConnection?.kind === "webProxy") {
     return createReliableWebProxyBackendConnection({
       endpointUrl: bootstrap.appServerConnection.endpointUrl,
       connectionId: createTransportConnectionId(),
+      subscribeToWake: subscribeToBrowserWake,
     });
   }
   return undefined;
@@ -62,4 +64,24 @@ export function getBackendConnection() {
 /** Transport identity is disposable and must never double as the logical App Shell client. */
 function createTransportConnectionId() {
   return `frontend-connection-${globalThis.crypto.randomUUID()}`;
+}
+
+/** Converts browser lifecycle restoration into a replayable transport receive wake-up. */
+function subscribeToBrowserWake(wake: () => void) {
+  let wasHidden = document.visibilityState === "hidden";
+  const handleVisibilityChange = () => {
+    const hidden = document.visibilityState === "hidden";
+    if (wasHidden && !hidden) wake();
+    wasHidden = hidden;
+  };
+  const handlePageShow = () => wake();
+  const handleOnline = () => wake();
+  document.addEventListener?.("visibilitychange", handleVisibilityChange);
+  window.addEventListener?.("pageshow", handlePageShow);
+  window.addEventListener?.("online", handleOnline);
+  return () => {
+    document.removeEventListener?.("visibilitychange", handleVisibilityChange);
+    window.removeEventListener?.("pageshow", handlePageShow);
+    window.removeEventListener?.("online", handleOnline);
+  };
 }

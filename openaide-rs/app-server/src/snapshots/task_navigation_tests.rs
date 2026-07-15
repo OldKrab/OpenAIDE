@@ -3,7 +3,10 @@ use openaide_app_server_protocol::ids::ProjectId;
 
 use crate::projects::project_id_for_workspace;
 use crate::protocol::model::{IsolationKind, TaskStatus};
-use crate::storage::records::{TaskPreparationRecord, TaskRecord};
+use crate::storage::records::{
+    TaskAttentionEvent as StoredTaskAttentionEvent,
+    TaskAttentionReason as StoredTaskAttentionReason, TaskPreparationRecord, TaskRecord,
+};
 use crate::storage::Store;
 
 use super::*;
@@ -29,6 +32,27 @@ fn preparing_task_projects_preparing_status() {
     let summary = project_task_summary_with_has_messages(record, false);
 
     assert_eq!(summary.status, ProtocolTaskStatus::Preparing);
+}
+
+#[test]
+fn projects_durable_task_attention_into_navigation() {
+    let mut record = task_record("task-attention", "Task", "2026-01-01T00:00:00.000Z");
+    record.attention = Some(StoredTaskAttentionEvent::new(
+        "attention-1",
+        StoredTaskAttentionReason::NeedsPermission,
+        "2026-01-01T00:01:00.000Z",
+    ));
+
+    let summary = project_task_summary_with_has_messages(record, true);
+
+    assert!(matches!(
+        summary.attention,
+        Some(TaskAttentionEvent {
+            event_id,
+            reason: TaskAttentionReason::NeedsPermission,
+            occurred_at,
+        }) if event_id == "attention-1" && occurred_at == "2026-01-01T00:01:00.000Z"
+    ));
 }
 
 #[test]
@@ -183,6 +207,7 @@ fn task_record(task_id: &str, title: &str, updated_at: &str) -> TaskRecord {
         task_version: 1,
         message_history_version: 0,
         unread: false,
+        attention: None,
         created_at: "2026-01-01T00:00:00.000Z".to_string(),
         updated_at: updated_at.to_string(),
         last_activity: updated_at.to_string(),

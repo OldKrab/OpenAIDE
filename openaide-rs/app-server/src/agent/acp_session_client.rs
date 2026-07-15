@@ -127,8 +127,10 @@ impl AcpSessionClient {
                 reply_tx,
             })
             .map_err(|_| self.worker_stopped_error())?;
+        // Some Agents serialize configuration behind an active tool call. Keep
+        // the request alive while the Frontend presents that pending state.
         reply_rx
-            .recv_timeout(Duration::from_secs(5))
+            .recv_timeout(Duration::from_secs(60))
             .map_err(|error| {
                 RuntimeError::NotReady(format!("ACP config update timed out: {error}"))
             })?

@@ -658,6 +658,7 @@ fn task_record(task_id: &str) -> TaskRecord {
         task_version: 0,
         message_history_version: 0,
         unread: true,
+        attention: None,
         created_at: "1".to_string(),
         updated_at: "1".to_string(),
         last_activity: "1".to_string(),

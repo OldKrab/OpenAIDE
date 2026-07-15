@@ -280,7 +280,7 @@ describe("task list row styles", () => {
   });
 
   it("gives the shared new-task screen a restrained but clear visual hierarchy", () => {
-    expect(appCss).toMatch(/\.new-task-center\s*{[^}]*align-content:\s*center;[^}]*gap:\s*12px;[^}]*padding:\s*clamp\(12px,\s*3vh,\s*24px\) clamp\(18px,\s*8vw,\s*84px\) clamp\(16px,\s*6vh,\s*42px\);/);
+    expect(appCss).toMatch(/\.new-task-center\s*{[^}]*align-content:\s*safe center;[^}]*gap:\s*12px;[^}]*padding:\s*clamp\(12px,\s*3vh,\s*24px\) clamp\(18px,\s*8vw,\s*84px\) clamp\(16px,\s*6vh,\s*42px\);/);
     expect(appCss).toMatch(/\.new-task-center h1\s*{[^}]*font-size:\s*20px;[^}]*font-weight:\s*500;/);
   });
 

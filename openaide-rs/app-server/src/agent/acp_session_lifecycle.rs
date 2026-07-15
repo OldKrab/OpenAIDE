@@ -12,9 +12,12 @@ use crate::agent::acp_errors::acp_error;
 pub(super) use crate::agent::acp_session_capabilities::{
     auth_method_kind, initialize_supports_session_close, initialize_supports_session_delete,
     validate_initialize_protocol, validate_load_session_capability,
+    validate_resume_session_capability,
 };
 pub(super) use crate::agent::acp_session_requests::request_session_list;
-use crate::agent::acp_session_requests::{request_load_session, request_new_session};
+use crate::agent::acp_session_requests::{
+    request_load_session, request_new_session, request_resume_session,
+};
 use crate::agent::acp_trace::AcpTraceSession;
 use crate::agent::acp_update_projection::{
     normalize_available_commands, normalize_config_options, ReplayProjection,
@@ -127,6 +130,47 @@ pub(super) async fn load_active_session(
         replayed_command_catalog,
         replayed_messages,
     ))
+}
+
+pub(super) async fn resume_active_session(
+    agent_id: &str,
+    connection: &ConnectionTo<Agent>,
+    initialize: &InitializeResponse,
+    session_id: String,
+    cwd: PathBuf,
+    preferred_auth_method_id: Option<&str>,
+    trace: Option<&AcpTraceSession>,
+) -> Result<
+    (
+        agent_client_protocol::ActiveSession<'static, Agent>,
+        Option<ConfigOptionsCatalog>,
+    ),
+    RuntimeError,
+> {
+    validate_resume_session_capability(initialize)?;
+    let session_id = SessionId::new(session_id);
+    let response = request_resume_session(
+        connection,
+        session_id.clone(),
+        cwd,
+        initialize,
+        preferred_auth_method_id,
+        trace,
+    )
+    .await
+    .map_err(acp_error)?;
+    let config_catalog = response
+        .config_options
+        .clone()
+        .map(|options| normalize_config_options(agent_id, options));
+    let active_response = NewSessionResponse::new(session_id)
+        .modes(response.modes)
+        .config_options(response.config_options)
+        .meta(response.meta);
+    let active_session = connection
+        .attach_session(active_response, Vec::new())
+        .map_err(acp_error)?;
+    Ok((active_session, config_catalog))
 }
 
 fn latest_command_catalog(updates: &[SessionUpdate]) -> Option<AgentCommandsCatalog> {

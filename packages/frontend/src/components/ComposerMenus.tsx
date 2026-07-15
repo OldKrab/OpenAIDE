@@ -57,9 +57,15 @@ export function ComposerControls({
   const controlsLocked = disabled || agentLocked;
   const configControlsLocked = disabled || configLocked;
   const optionControls = configOptions?.options ?? [];
+  const pendingChange = configOptions?.pending_change;
   const mobileOptionsLocked = (optionControls.length === 0 || configControlsLocked)
     && (!showIsolationSelector || controlsLocked);
-  const mobileOptionsLabel = compactRunOptionsLabel(optionControls, selection.isolation, showIsolationSelector);
+  const mobileOptionsLabel = compactRunOptionsLabel(
+    optionControls,
+    selection.isolation,
+    showIsolationSelector,
+    pendingChange,
+  );
   const imageUploadRef = useRef<HTMLInputElement | null>(null);
   const uploadImages = (files: File[], input: HTMLInputElement) => {
     input.value = "";
@@ -147,16 +153,18 @@ export function ComposerControls({
       ) : null}
       {optionControls.map((option) => {
         const menuId = configMenuId(option.id);
+        const pending = pendingChange?.option_id === option.id;
         return (
           <div className="composer-option-anchor composer-config-control-anchor" key={option.id}>
             <Selector
               className="composer-config-control"
               disabled={configControlsLocked}
               icon={configIcon(option)}
-              label={configOptionLabel(option)}
+              label={configOptionLabel(option, pending ? pendingChange.requested_value : undefined)}
               locked={configControlsLocked}
               menuOpen={openMenu === menuId}
               onClick={() => toggleMenu(menuId)}
+              pending={pending}
             />
             {openMenu === menuId ? (
               <Popover className="composer-model-menu" label={option.label}>
@@ -225,6 +233,7 @@ export function ComposerControls({
             locked={mobileOptionsLocked}
             menuOpen={openMenu === "options"}
             onClick={() => toggleMenu("options")}
+            pending={pendingChange !== undefined}
           />
           {openMenu === "options" ? (
             <Popover label="Run options">
@@ -263,9 +272,20 @@ function compactRunOptionsLabel(
   options: ConfigOption[],
   isolation: IsolationKind,
   showIsolation: boolean,
+  pendingChange?: NonNullable<ConfigOptionsCatalog["pending_change"]>,
 ) {
-  const primaryOption = options.find((option) => option.category === "model" || option.id === "model") ?? options[0];
-  const selectedValue = primaryOption ? configOptionLabel(primaryOption) : undefined;
+  const pendingOption = pendingChange
+    ? options.find((option) => option.id === pendingChange.option_id)
+    : undefined;
+  const primaryOption = pendingOption
+    ?? options.find((option) => option.category === "model" || option.id === "model")
+    ?? options[0];
+  const selectedValue = primaryOption
+    ? configOptionLabel(
+        primaryOption,
+        primaryOption === pendingOption ? pendingChange?.requested_value : undefined,
+      )
+    : undefined;
   const detail = selectedValue || (showIsolation ? isolationLabel(isolation) : undefined);
   return detail ? `Options · ${detail}` : "Options";
 }
@@ -274,9 +294,9 @@ function configMenuId(optionId: string): ComposerMenu {
   return `config:${optionId}`;
 }
 
-function configOptionLabel(option: ConfigOption) {
-  const selected = option.values.find((value) => value.id === option.current_value);
-  const valueLabel = normalizedConfigValueLabel(selected?.label) ?? humanizeConfigValue(option.current_value) ?? option.label;
+function configOptionLabel(option: ConfigOption, displayedValue = option.current_value) {
+  const selected = option.values.find((value) => value.id === displayedValue);
+  const valueLabel = normalizedConfigValueLabel(selected?.label) ?? humanizeConfigValue(displayedValue) ?? option.label;
   const prefix = configOptionPrefix(option);
   if (!prefix) return valueLabel;
   return `${prefix}: ${valueLabel}`;

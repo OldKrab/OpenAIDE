@@ -1,6 +1,7 @@
 import type { TaskSnapshot, TaskSummary } from "@openaide/app-shell-contracts";
 import { retainSnapshotWindow } from "./chatPageMerge";
 import type { AppState } from "./store";
+import { configOptionsCatalogKey, configOptionsSettled } from "./configOptionState";
 
 export function reconcileBackgroundTaskSnapshot(
   state: AppState,
@@ -52,6 +53,7 @@ export function reconcileTaskSnapshotDependents(
     previousReplicaEpoch,
     replicaEpoch,
   );
+  const taskInputs = clearConfigErrorAfterCatalogChange(state, taskId, snapshot);
   return {
     snapshot,
     state: {
@@ -68,9 +70,26 @@ export function reconcileTaskSnapshotDependents(
       chatPages: chatPage
         ? { ...state.chatPages, [taskId]: chatPage }
         : omitKeys(state.chatPages, new Set([taskId])),
+      taskInputs,
       permissionResponses: retainKeys(state.permissionResponses, activePermissionIds),
       questionResponses: retainKeys(state.questionResponses, activeQuestionIds),
     },
+  };
+}
+
+function clearConfigErrorAfterCatalogChange(
+  state: AppState,
+  taskId: string,
+  snapshot: TaskSnapshot,
+) {
+  const input = state.taskInputs[taskId];
+  const error = input?.configError;
+  if (!input || !error) return state.taskInputs;
+  if (!configOptionsSettled(snapshot.agent_config)) return state.taskInputs;
+  if (configOptionsCatalogKey(snapshot.agent_config) === error.catalogKey) return state.taskInputs;
+  return {
+    ...state.taskInputs,
+    [taskId]: { ...input, configError: undefined },
   };
 }
 

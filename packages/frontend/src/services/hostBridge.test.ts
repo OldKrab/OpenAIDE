@@ -188,6 +188,67 @@ describe("host bridge", () => {
     );
   });
 
+  it("replays queued App Server events when a suspended browser page becomes visible", async () => {
+    const documentListeners = new Map<string, () => void>();
+    const windowListeners = new Map<string, () => void>();
+    const transport = wakeableReliableFetch();
+    const documentState = {
+      visibilityState: "visible",
+      body: {
+        dataset: {
+          shell: "web",
+          navigationMode: "project",
+          surface: "navigation",
+          appServerConnection: JSON.stringify({
+            kind: "webProxy",
+            endpointUrl: "/__openaide-app-server/probe",
+          }),
+        },
+      },
+      addEventListener: vi.fn((type: string, listener: () => void) => {
+        documentListeners.set(type, listener);
+      }),
+      removeEventListener: vi.fn(),
+    };
+    vi.stubGlobal("fetch", transport.fetch);
+    vi.stubGlobal("crypto", { randomUUID: () => "client-web" });
+    vi.stubGlobal("sessionStorage", memoryStorage());
+    vi.stubGlobal("document", documentState);
+    vi.stubGlobal("window", {
+      acquireVsCodeApi: undefined,
+      location: { pathname: "/" },
+      addEventListener: vi.fn((type: string, listener: () => void) => {
+        windowListeners.set(type, listener);
+      }),
+      removeEventListener: vi.fn(),
+    });
+    const { getBackendConnection } = await installedHostBridge();
+    const connection = getBackendConnection();
+    const onEvent = vi.fn();
+    connection?.handleNotification("app/event", onEvent);
+    await connection?.initialize({
+      clientInstanceId: "client-web" as never,
+      shell: { kind: "web" },
+      requestedSurface: { kind: "home" },
+    });
+    transport.freezeNextPoll();
+    await vi.waitFor(() => expect(transport.frozenPolls()).toBe(1));
+    transport.enqueue({
+      jsonrpc: "2.0",
+      method: "app/event",
+      params: { cursor: "cursor-2" },
+    });
+
+    documentState.visibilityState = "hidden";
+    documentListeners.get("visibilitychange")?.();
+    documentState.visibilityState = "visible";
+    documentListeners.get("visibilitychange")?.();
+
+    await vi.waitFor(() => expect(onEvent).toHaveBeenCalledWith({ cursor: "cursor-2" }));
+    expect(windowListeners.has("pageshow")).toBe(true);
+    connection?.close();
+  });
+
   it("routes web shell surface navigation through browser history without reloading", async () => {
     const pushState = vi.fn();
     const reload = vi.fn();
@@ -459,12 +520,71 @@ function reliableFetch() {
   });
 }
 
+function wakeableReliableFetch() {
+  const queued: unknown[] = [];
+  let freezeNext = false;
+  let frozen = 0;
+  return {
+    fetch: vi.fn(async (_input: string, init?: {
+      method?: string;
+      body?: string;
+      headers?: Record<string, string>;
+      signal?: AbortSignal;
+    }) => {
+      if (init?.method === "GET") {
+        if (freezeNext) {
+          freezeNext = false;
+          frozen += 1;
+          return new Promise((_resolve, reject) => {
+            init.signal?.addEventListener("abort", () => reject(abortError()), { once: true });
+          });
+        }
+        const after = Number(init.headers?.["X-OpenAIDE-After"] ?? "0");
+        const frames = queued
+          .map((message, index) => ({ sequence: index + 1, message }))
+          .filter((frame) => frame.sequence > after);
+        return response(frames.length === 0 ? 204 : 200, frames.length === 0 ? "" : JSON.stringify({ frames }));
+      }
+      const body = init?.body ? JSON.parse(init.body) as Record<string, unknown> : {};
+      if (body.transport === "open") {
+        return response(200, JSON.stringify({
+          transportVersion: 1,
+          sessionId: "session-1",
+          serverId: "server-1",
+        }));
+      }
+      const message = body.message as { id?: string; method?: string } | undefined;
+      if (message?.id && message.method === "client/initialize") {
+        queued.push({
+          jsonrpc: "2.0",
+          id: message.id,
+          result: { result: initializeResult() },
+        });
+      }
+      return response(204, "");
+    }),
+    enqueue(message: unknown) {
+      queued.push(message);
+    },
+    freezeNextPoll() {
+      freezeNext = true;
+    },
+    frozenPolls: () => frozen,
+  };
+}
+
 function response(status: number, body: string) {
   return {
     ok: status >= 200 && status < 300,
     status,
     async text() { return body; },
   };
+}
+
+function abortError() {
+  const error = new Error("aborted");
+  error.name = "AbortError";
+  return error;
 }
 
 function memoryStorage(): Storage {

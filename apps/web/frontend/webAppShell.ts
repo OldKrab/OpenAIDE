@@ -3,6 +3,11 @@ import type {
   SettingsTabId,
 } from "@openaide/app-shell-contracts";
 import type { FrontendShell } from "../../../packages/frontend/src/services/frontendShell";
+import openAideIconUrl from "../../vscode-extension/media/openaide.png";
+import {
+  createWebTaskNotificationManager,
+  type WebTaskNotificationEnvironment,
+} from "../../../packages/frontend/src/shells/webTaskNotifications";
 import type { WebviewBootstrap } from "../../../packages/frontend/src/state/surfaceTypes";
 import {
   appServerConnection,
@@ -51,6 +56,9 @@ export function createWebAppShell(): FrontendShell {
   const publishRoute = () => {
     window.dispatchEvent(new CustomEvent(WEB_ROUTE_EVENT, { detail: bootstrap() }));
   };
+  const taskNotifications = createWebTaskNotificationManager(
+    webTaskNotificationEnvironment((taskId) => navigate(`/task/${encodeURIComponent(taskId)}`)),
+  );
   return {
     bootstrap,
     messages: { post, subscribe: subscribeWindowMessages },
@@ -78,6 +86,106 @@ export function createWebAppShell(): FrontendShell {
           window.removeEventListener("popstate", onPopState);
         };
       },
+    },
+    taskNotifications,
+  };
+}
+
+/** Adapts browser-profile storage, focus, permissions, and cross-tab messaging. */
+function webTaskNotificationEnvironment(openTask: (taskId: string) => void): WebTaskNotificationEnvironment {
+  const coordination = crossTabNotificationCoordination();
+  return {
+    storage: window.localStorage,
+    notificationIconUrl: openAideIconUrl,
+    now: () => Date.now(),
+    isFocused: () => document.visibilityState === "visible"
+      && typeof document.hasFocus === "function"
+      && document.hasFocus(),
+    notificationsSupported: () => typeof window.Notification === "function",
+    notificationPermission: () => window.Notification?.permission ?? "default",
+    requestNotificationPermission: () => window.Notification.requestPermission(),
+    showNotification(title, options, onClick) {
+      try {
+        const notification = new window.Notification(title, options);
+        notification.addEventListener("click", onClick);
+        return { close: () => notification.close() };
+      } catch (error) {
+        logger.warn("desktop_notification_failed", {
+          error_name: error instanceof Error ? error.name : "Error",
+        });
+        return { close: () => undefined };
+      }
+    },
+    focusWindow: () => window.focus(),
+    openTask: (taskId) => openTask(taskId),
+    subscribeFocus(listener) {
+      const heartbeat = typeof window.setInterval === "function"
+        ? window.setInterval(listener, 10_000)
+        : undefined;
+      window.addEventListener("focus", listener);
+      window.addEventListener("blur", listener);
+      window.addEventListener("pagehide", listener);
+      document.addEventListener?.("visibilitychange", listener);
+      return () => {
+        if (heartbeat !== undefined) window.clearInterval(heartbeat);
+        window.removeEventListener("focus", listener);
+        window.removeEventListener("blur", listener);
+        window.removeEventListener("pagehide", listener);
+        document.removeEventListener?.("visibilitychange", listener);
+      };
+    },
+    publish: coordination.publish,
+    subscribeMessages: coordination.subscribe,
+  };
+}
+
+function crossTabNotificationCoordination() {
+  const channel = typeof window.BroadcastChannel === "function"
+    ? new window.BroadcastChannel("openaide.taskNotifications")
+    : undefined;
+  const storageKey = "openaide.desktopNotifications.message";
+  const listeners = new Set<(message: unknown) => void>();
+  const onMessage = (event: MessageEvent) => {
+    for (const listener of listeners) listener(event.data);
+  };
+  const onStorage = (event: StorageEvent) => {
+    if (event.key !== storageKey || !event.newValue) return;
+    try {
+      const envelope = JSON.parse(event.newValue) as { message?: unknown };
+      for (const listener of listeners) listener(envelope.message);
+    } catch {
+      logger.warn("desktop_notification_coordination_invalid");
+    }
+  };
+  channel?.addEventListener("message", onMessage);
+  if (!channel) window.addEventListener("storage", onStorage);
+
+  return {
+    publish(message: unknown) {
+      if (channel) {
+        channel.postMessage(message);
+        return;
+      }
+      try {
+        window.localStorage.setItem(storageKey, JSON.stringify({
+          nonce: `${Date.now()}-${Math.random()}`,
+          message,
+        }));
+      } catch (error) {
+        logger.warn("desktop_notification_coordination_failed", {
+          error_name: error instanceof Error ? error.name : "Error",
+        });
+      }
+    },
+    subscribe(listener: (message: unknown) => void) {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+        if (listeners.size > 0) return;
+        channel?.removeEventListener("message", onMessage);
+        channel?.close();
+        if (!channel) window.removeEventListener("storage", onStorage);
+      };
     },
   };
 }

@@ -60,6 +60,11 @@ export type TaskComposerInput = {
   /** Changes only when task/send accepts this Task's exact pending attempt. */
   acceptedUserMessageId?: MessageId;
   error?: string;
+  configError?: {
+    mutationId: string;
+    message: string;
+    catalogKey?: string;
+  };
   pending?: PendingComposerSend;
 };
 

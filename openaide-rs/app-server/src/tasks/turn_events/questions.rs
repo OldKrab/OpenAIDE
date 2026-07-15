@@ -8,6 +8,8 @@ use openaide_app_server_protocol::server_requests::{
 use crate::agent::TurnCancellation;
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{NormalizedMessage, QuestionAction, QuestionState, TaskStatus};
+use crate::storage::records::TaskAttentionReason;
+use crate::tasks::attention::{current_request_attention, request_attention};
 use crate::tasks::mutation::{TaskCommitOptions, TaskMutationResult};
 use crate::time::now_string;
 
@@ -59,7 +61,13 @@ impl TaskSessionEventSink {
                 let task = ctx.task_mut();
                 task.status = TaskStatus::Waiting;
                 task.unread = true;
-                task.updated_at = now_string();
+                let now = now_string();
+                task.attention = Some(request_attention(
+                    request_id.as_str(),
+                    TaskAttentionReason::NeedsAnswer,
+                    now.clone(),
+                ));
+                task.updated_at = now;
                 Ok(TaskMutationResult::Changed)
             },
         );
@@ -112,6 +120,12 @@ impl TaskSessionEventSink {
                     };
                 }
                 let task = ctx.task_mut();
+                task.attention = current_request_attention(
+                    &self.server_requests,
+                    &self.task_id,
+                    task.attention.as_ref(),
+                    now.clone(),
+                );
                 task.updated_at = now.clone();
                 task.last_activity = now.clone();
                 Ok(TaskMutationResult::Changed)

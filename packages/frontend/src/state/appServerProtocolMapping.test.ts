@@ -17,6 +17,7 @@ import {
   mapProtocolTaskSnapshot,
   mapProtocolTaskSummary,
 } from "./appServerProtocolMapping";
+import { renderedChat } from "./chatPaging";
 
 describe("App Server Protocol state mapping", () => {
   it("maps task navigation summaries into current frontend task summaries", () => {
@@ -51,6 +52,25 @@ describe("App Server Protocol state mapping", () => {
       updated_at: "2026-06-27T12:00:05.000Z",
       last_activity: "2026-06-27T12:00:00.000Z",
     });
+  });
+
+  it("maps explicit Task Attention without inferring it from status or unread", () => {
+    expect(mapProtocolTaskSummary(protocolSummary({
+      status: "waiting",
+      unread: true,
+      attention: {
+        eventId: "attention-1",
+        reason: "needsPermission",
+        occurredAt: "2026-06-27T12:00:04.000Z",
+      },
+    }))).toMatchObject({
+      attention: {
+        event_id: "attention-1",
+        reason: "needsPermission",
+        occurred_at: "2026-06-27T12:00:04.000Z",
+      },
+    });
+    expect(mapProtocolTaskSummary(protocolSummary({ status: "waiting", unread: true })).attention).toBeUndefined();
   });
 
   it("falls back to the update timestamp when task navigation omits last activity", () => {
@@ -675,6 +695,37 @@ describe("App Server Protocol state mapping", () => {
       message: "Stopped while running.",
       recoverable: true,
     });
+  });
+
+  it("hides interrupted Working boilerplate after protocol mapping", () => {
+    const mapping = mapProtocolTaskSnapshot(protocolSnapshot({
+      chat: {
+        hasMessages: true,
+        items: [
+          {
+            messageId: "working" as MessageId,
+            role: "system",
+            status: "interrupted",
+            parts: [{
+              kind: "activity",
+              title: "Working",
+              status: "interrupted",
+              steps: [{ kind: "text", text: "Started", level: "info" }],
+            }],
+          },
+          {
+            messageId: "stopped" as MessageId,
+            role: "system",
+            status: "interrupted",
+            parts: [{ kind: "text", text: "Task was stopped." }],
+          },
+        ],
+      },
+    }));
+
+    expect(renderedChat(mapping.snapshot, undefined).items.map((item) => item.message)).toEqual([
+      expect.objectContaining({ kind: "interruption", message: "Task was stopped." }),
+    ]);
   });
 
   it("requires native surface for pending requests even without other blockers", () => {

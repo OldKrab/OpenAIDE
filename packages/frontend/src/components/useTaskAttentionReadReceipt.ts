@@ -12,7 +12,7 @@ type TaskAttentionReadReceiptOptions = {
   unread: boolean;
 };
 
-/** Acknowledges output only after post-completion user activity, never from passive visibility. */
+/** Acknowledges output only after user activity that still belongs to this Task. */
 export function useTaskAttentionReadReceipt({
   backendConnection,
   dispatch,
@@ -26,9 +26,15 @@ export function useTaskAttentionReadReceipt({
     if (!backendConnection?.request || !taskId || !unread || typeof window === "undefined") return;
     const receiptKey = `${taskId}:${revision ?? "unknown"}`;
     const ownerDocument = typeof document === "undefined" ? undefined : document;
+    const ownerPath = typeof window.location?.pathname === "string"
+      ? window.location.pathname
+      : undefined;
     let cancelled = false;
+    let deferredReceipt: ReturnType<typeof setTimeout> | undefined;
 
     const acknowledge = () => {
+      if (cancelled) return;
+      if (ownerPath !== undefined && window.location.pathname !== ownerPath) return;
       if (ownerDocument?.visibilityState === "hidden") return;
       if (pendingReceipt.current === receiptKey) return;
       pendingReceipt.current = receiptKey;
@@ -46,16 +52,27 @@ export function useTaskAttentionReadReceipt({
       });
     };
 
-    window.addEventListener("focus", acknowledge);
+    const deferAcknowledge = () => {
+      if (deferredReceipt !== undefined) return;
+      // Notification activation focuses the old route before its click opens the new Task.
+      // Deferring lets route cleanup cancel a receipt that no longer belongs to this Task.
+      deferredReceipt = setTimeout(() => {
+        deferredReceipt = undefined;
+        acknowledge();
+      }, 0);
+    };
+
+    window.addEventListener("focus", deferAcknowledge);
     window.addEventListener("pointerdown", acknowledge, true);
     window.addEventListener("keydown", acknowledge, true);
-    ownerDocument?.addEventListener("visibilitychange", acknowledge);
+    ownerDocument?.addEventListener("visibilitychange", deferAcknowledge);
     return () => {
       cancelled = true;
-      window.removeEventListener("focus", acknowledge);
+      if (deferredReceipt !== undefined) clearTimeout(deferredReceipt);
+      window.removeEventListener("focus", deferAcknowledge);
       window.removeEventListener("pointerdown", acknowledge, true);
       window.removeEventListener("keydown", acknowledge, true);
-      ownerDocument?.removeEventListener("visibilitychange", acknowledge);
+      ownerDocument?.removeEventListener("visibilitychange", deferAcknowledge);
     };
   }, [backendConnection, dispatch, revision, taskId, unread]);
 }

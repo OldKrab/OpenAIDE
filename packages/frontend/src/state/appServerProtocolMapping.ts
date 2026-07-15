@@ -242,6 +242,11 @@ function mapProtocolTaskSummaryWithWarnings(
       message_history_version: revision,
       has_messages: summary.hasMessages,
       unread: summary.unread,
+      attention: summary.attention ? {
+        event_id: summary.attention.eventId,
+        reason: summary.attention.reason,
+        occurred_at: summary.attention.occurredAt,
+      } : undefined,
       created_at: summary.updatedAt,
       updated_at: summary.updatedAt,
       last_activity: lastActivity,

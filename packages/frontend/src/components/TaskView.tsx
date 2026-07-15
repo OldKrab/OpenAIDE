@@ -277,7 +277,7 @@ export function TaskView({
           configLocked={!backendReady || !configOptionsMutable(taskConfigOptions)}
           configOptions={taskConfigOptions}
           commandCatalog={snapshot.agent_commands}
-          error={taskInput.error ?? taskConfigOptions?.error}
+          error={taskInput.error ?? taskInput.configError?.message ?? taskConfigOptions?.error}
           fileBrowser={fileBrowser}
           focusRequestKey={snapshot.task.task_id}
           onCancel={

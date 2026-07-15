@@ -231,3 +231,7 @@
   font-size: 12px;
   margin: 0;
 }
+
+.composer-config-update-status {
+  gap: 6px;
+}

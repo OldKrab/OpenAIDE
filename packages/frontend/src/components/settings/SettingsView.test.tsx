@@ -118,6 +118,35 @@ describe("SettingsView custom Agent acknowledgements", () => {
     expect(tree.root.findAllByType("code").some((code) => code.props.title === "/runtime/traces")).toBe(false);
   });
 
+  it("renders browser-local desktop notification state and forwards opt-in", () => {
+    const onSetDesktopNotifications = vi.fn();
+    const tree = render(
+      <SettingsView
+        desktopNotifications={{ status: "blocked" }}
+        onAuthenticate={() => undefined}
+        onCreateCustomAgent={() => undefined}
+        onDeleteCustomAgent={() => undefined}
+        onRefresh={() => undefined}
+        onReplaceCustomAgent={() => undefined}
+        onSelectTab={() => undefined}
+        onSetAcpTrace={() => undefined}
+        onSetAgentEnabled={() => undefined}
+        onSetComposerSubmitShortcut={() => undefined}
+        onSetDesktopNotifications={onSetDesktopNotifications}
+        onUpdateCustomAgentMetadata={() => undefined}
+        onUnlockDeveloperSettings={() => undefined}
+        preferences={{ composer_submit_shortcut: "mod_enter" }}
+        state={{ activeTab: "common", loading: false }}
+      />,
+    );
+
+    const toggle = tree.root.findByProps({ "aria-label": "Desktop notifications", type: "checkbox" });
+    expect(toggle.props.checked).toBe(true);
+    expect(JSON.stringify(tree.toJSON())).toContain("Blocked by the browser or OS");
+    act(() => toggle.props.onChange({ currentTarget: { checked: false } }));
+    expect(onSetDesktopNotifications).toHaveBeenCalledWith(false);
+  });
+
   it("reveals developer runtime settings after the hidden unlock gesture", () => {
     const onUnlockDeveloperSettings = vi.fn();
     const tree = render(

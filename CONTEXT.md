@@ -36,6 +36,10 @@ _Avoid_: Using IDE workspace navigation as the global app model
 The Project associated with a Task.
 _Avoid_: Treating workspace as the Task owner
 
+**Task Workspace**:
+The filesystem work area in which a Task's Agent operates. It may be the Project's checkout or a dedicated worktree while the Task remains associated with the same Project Context.
+_Avoid_: Treating every Task worktree as a separate Project
+
 **Project**:
 A lightweight OpenAIDE record for a user work area, such as a folder, workspace, or repository.
 _Avoid_: Git remote or shell-specific workspace identity as the primary identity
@@ -88,6 +92,10 @@ _Avoid_: Representing Agent setup problems as failed Tasks
 The application form OpenAIDE runs in, such as the Web App, Desktop App, Mobile App, or VS Code Extension.
 _Avoid_: Host as a product term
 
+**Unattended App Shell**:
+An App Shell that is open but does not currently have user focus. When one App Shell has multiple views, it is unattended only when none has focus; Task-level navigation within a focused App Shell does not make it unattended.
+_Avoid_: Hidden Task, inactive Task Page
+
 **App Server**:
 A local server process that owns product state, task lifecycle, runtime integrations, capability decisions, persistence access, and the protocol used by OpenAIDE App Shells.
 _Avoid_: Putting product workflow decisions in Frontend state
@@ -112,6 +120,10 @@ _Avoid_: Static hard-coded model or mode controls
 A Task whose primary Agent prompt is active, owned by one App Server process and its Agent Native Session, and which may still need permissions, files, terminals, or user input.
 _Avoid_: Blocking all existing Tasks as if they were running
 
+**Task Attention Event**:
+A Task state change the user should notice: a turn finished normally, work is waiting for a response, the Agent stopped because it could not continue, or work failed unexpectedly. A user-initiated Stop is not a Task Attention Event.
+_Avoid_: Treating every unread update or status change as an alert
+
 ## Relationships
 
 - **OpenAIDE** presents agent work as **Tasks**, **Chat**, permissions, and settings through an **App Shell**.
@@ -132,6 +144,9 @@ _Avoid_: Blocking all existing Tasks as if they were running
 - A **New Task** becomes a visible **Task** when App Server durably accepts its first user message and starting Task state.
 - A **Task** belongs to the OpenAIDE task list and has **Project Context**.
 - **Project Context** is always a **Project**.
+- A **Task** has one **Task Workspace**.
+- A dedicated worktree used as a **Task Workspace** remains associated with the originating **Project Context**.
+- When the originating **Project** is a subdirectory of a repository, its dedicated-worktree **Task Workspace** preserves that repository-relative scope.
 - A **Task** is created only after the user selects the required start context.
 - Web App and Desktop App can show task history across Project Contexts.
 - VS Code Extension defaults Task Navigation to the current Project Context.
@@ -156,6 +171,7 @@ _Avoid_: Blocking all existing Tasks as if they were running
 - Live interaction with a **Native Session** is owned by one **App Server** process at a time.
 - A **Native Session** can expose **Configuration Options**.
 - A **Running Task** is owned by one **App Server** process and its **Native Session** while its primary prompt is active.
+- A **Task Attention Event** may alert an **Unattended App Shell** while remaining an in-product indicator in a focused App Shell.
 - The App Shell client that started a **Running Task** is only the origin for client-scoped capabilities.
 - Subscribed App Shell clients can observe a **Running Task**. Connected App Shell clients that advertised the required response capability can answer Task-scoped requests independently of state subscriptions.
 - Closing the last **App Shell** client lets **App Server** shut down gracefully; closing a **Task Page** or losing a **Frontend** view is not cancellation.

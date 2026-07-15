@@ -328,6 +328,17 @@ fn wait_for_method_count(log_path: &Path, method: &str, expected_count: usize) {
     panic!("timed out waiting for {expected_count} fixture calls to {method}");
 }
 
+fn wait_until(mut predicate: impl FnMut() -> bool) {
+    let started = Instant::now();
+    while started.elapsed() < Duration::from_secs(2) {
+        if predicate() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    panic!("timed out waiting for fixture condition");
+}
+
 #[derive(Debug)]
 struct ObservedTerminalHostRequest {
     method: String,
@@ -402,7 +413,10 @@ import time
 log_path = os.environ["OPENAIDE_ACP_FIXTURE_LOG"]
 session_id = os.environ.get("OPENAIDE_ACP_FIXTURE_SESSION", "fixture-session")
 prompt_mode = os.environ.get("OPENAIDE_ACP_FIXTURE_PROMPT_MODE", "")
+supports_resume = os.environ.get("OPENAIDE_ACP_FIXTURE_RESUME", "1") == "1"
+supports_close = os.environ.get("OPENAIDE_ACP_FIXTURE_CLOSE", "1") == "1"
 with_config_options = os.environ.get("OPENAIDE_ACP_FIXTURE_CONFIG_OPTIONS", "") == "1"
+config_response_delay = float(os.environ.get("OPENAIDE_ACP_FIXTURE_CONFIG_RESPONSE_DELAY", "0"))
 fixture_title = os.environ.get("OPENAIDE_ACP_FIXTURE_TITLE", "")
 log_details = os.environ.get("OPENAIDE_ACP_FIXTURE_LOG_DETAILS", "") == "1"
 pending_prompt_ids = []
@@ -470,15 +484,19 @@ def request_terminal(request_id):
     sys.stdout.flush()
 
 def initialize_result():
+    session_capabilities = {
+        "delete": {},
+        "list": {},
+    }
+    if supports_close:
+        session_capabilities["close"] = {}
+    if supports_resume:
+        session_capabilities["resume"] = {}
     return {
         "protocolVersion": 1,
         "agentCapabilities": {
             "loadSession": True,
-            "sessionCapabilities": {
-                "close": {},
-                "delete": {},
-                "list": {},
-            },
+            "sessionCapabilities": session_capabilities,
         },
         "authMethods": [{"id": "test-auth", "name": "Test auth"}],
     }
@@ -534,6 +552,21 @@ for line in sys.stdin:
                 notify_title(fixture_title)
     elif method == "session/load":
         respond(message, {"configOptions": []})
+    elif method == "session/resume":
+        respond(message, {
+            "configOptions": [{
+                "id": "model",
+                "name": "Model",
+                "type": "select",
+                "currentValue": "gpt-5.6-sol",
+                "options": [
+                    {"value": "gpt-5.6-sol", "name": "GPT-5.6-Sol"},
+                    {"value": "gpt-5.5", "name": "GPT-5.5"},
+                ],
+            }],
+        })
+        if session_id == "idle-session":
+            notify_title("Title after idle resume")
     elif method == "session/list":
         respond(message, {"sessions": []})
     elif method == "authenticate":
@@ -568,6 +601,8 @@ for line in sys.stdin:
         params = message.get("params", {})
         if log_details:
             log("config:" + json.dumps(params, sort_keys=True))
+        if config_response_delay > 0:
+            time.sleep(config_response_delay)
         config_id = params.get("configId", "model")
         value = params.get("value", "gpt-5")
         if prompt_mode == "config_update_before_config_response":
@@ -625,7 +660,11 @@ for line in sys.stdin:
             respond_id(pending_prompt_ids.pop(0), {"stopReason": "cancelled"})
     elif method == "session/close":
         respond(message, {})
-        if session_id == "__counter__":
+        if session_id == "idle-session":
+            closed_session_count += 1
+            if closed_session_count >= 2:
+                break
+        elif session_id == "__counter__":
             closed_session_count += 1
             if closed_session_count >= 2 and closed_session_count >= next_session_number:
                 break
@@ -728,6 +767,176 @@ fn listing_sessions_does_not_create_a_native_session() {
     assert_eq!(
         read_fixture_methods(&log_path),
         ["initialize", "session/list"]
+    );
+}
+
+#[test]
+fn inactive_native_session_is_closed_after_the_idle_timeout() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((runtime, log_path)) = fixture_runtime(&temp, "idle-session") else {
+        return;
+    };
+    let runtime = runtime.with_session_idle_timeout(Duration::from_millis(50));
+
+    let session = runtime
+        .start_session(start_request("task-idle-session", cwd_string()))
+        .expect("start session");
+    let session_sink = Arc::new(CapturingSessionSink::default());
+    runtime
+        .attach_session_event_sink(&session.key(), session_sink.clone())
+        .expect("attach session sink");
+
+    wait_for_method(&log_path, "session/close");
+    wait_until(|| {
+        runtime
+            .attach_session_event_sink(&session.key(), Arc::new(CapturingSessionSink::default()))
+            .is_err()
+    });
+    let resumed = runtime
+        .resume_session(AgentSessionResume {
+            agent_id: "codex".to_string(),
+            task_id: "task-idle-session".to_string(),
+            session_id: session.session_id,
+            cwd: cwd_string(),
+            model_id: None,
+            cancellation: TurnCancellation::new(),
+            secret_resolver: None,
+        })
+        .expect("resume expired session");
+    wait_until(|| !session_sink.metadata_updates().is_empty());
+    assert_eq!(
+        session_sink.metadata_updates(),
+        vec![AgentSessionMetadataUpdate {
+            title: AgentMetadataField::Value("Title after idle resume".to_string()),
+            updated_at: AgentMetadataField::Unchanged,
+        }]
+    );
+    runtime
+        .close_session(&resumed.key())
+        .expect("close resumed session");
+    assert_eq!(
+        read_fixture_methods(&log_path),
+        [
+            "initialize",
+            "session/new",
+            "session/close",
+            "session/resume",
+            "session/close"
+        ]
+    );
+}
+
+#[test]
+fn active_prompt_suspends_native_session_idle_expiration() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    if !python3_available() {
+        return;
+    }
+    let script_path = temp.path().join("fixture_agent.py");
+    let log_path = temp.path().join("fixture.log");
+    fs::write(&script_path, fixture_agent_script()).expect("fixture agent script");
+    let runtime = Arc::new(
+        AcpAgentRuntime::new(AcpAgentConfig {
+            agent_id: "codex".to_string(),
+            command: "python3".to_string(),
+            args: vec![script_path.to_string_lossy().to_string()],
+            env: vec![
+                (
+                    "OPENAIDE_ACP_FIXTURE_LOG".to_string(),
+                    log_path.to_string_lossy().to_string(),
+                ),
+                (
+                    "OPENAIDE_ACP_FIXTURE_SESSION".to_string(),
+                    "idle-running-prompt".to_string(),
+                ),
+                (
+                    "OPENAIDE_ACP_FIXTURE_PROMPT_MODE".to_string(),
+                    "wait_for_cancel".to_string(),
+                ),
+            ],
+            secret_env: Vec::new(),
+        })
+        .with_session_idle_timeout(Duration::from_millis(50)),
+    );
+    let session = runtime
+        .start_session(start_request("task-idle-running", cwd_string()))
+        .expect("start session");
+    let prompt_session_id = session.session_id.clone();
+    let prompt_handle = std::thread::spawn({
+        let runtime = runtime.clone();
+        move || {
+            runtime.prompt(
+                AgentPrompt {
+                    agent_id: "codex".to_string(),
+                    task_id: "task-idle-running".to_string(),
+                    session_id: prompt_session_id,
+                    text: "keep working".to_string(),
+                    attachments: Vec::new(),
+                    cancellation: TurnCancellation::new(),
+                },
+                Arc::new(CapturingEventSink::default()),
+            )
+        }
+    });
+    wait_for_method(&log_path, "session/prompt");
+
+    std::thread::sleep(Duration::from_millis(100));
+    assert!(!read_fixture_methods(&log_path)
+        .iter()
+        .any(|method| method == "session/close"));
+
+    runtime
+        .cancel_session(&session.key())
+        .expect("cancel prompt");
+    assert_eq!(
+        prompt_handle.join().expect("prompt thread").unwrap(),
+        AgentPromptOutcome::Cancelled
+    );
+    wait_for_method(&log_path, "session/close");
+}
+
+#[test]
+fn idle_timeout_does_not_close_when_the_agent_lacks_close_capability() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    if !python3_available() {
+        return;
+    }
+    let script_path = temp.path().join("fixture_agent.py");
+    let log_path = temp.path().join("fixture.log");
+    fs::write(&script_path, fixture_agent_script()).expect("fixture agent script");
+    let runtime = AcpAgentRuntime::new(AcpAgentConfig {
+        agent_id: "codex".to_string(),
+        command: "python3".to_string(),
+        args: vec![script_path.to_string_lossy().to_string()],
+        env: vec![
+            (
+                "OPENAIDE_ACP_FIXTURE_LOG".to_string(),
+                log_path.to_string_lossy().to_string(),
+            ),
+            (
+                "OPENAIDE_ACP_FIXTURE_SESSION".to_string(),
+                "idle-without-close".to_string(),
+            ),
+            ("OPENAIDE_ACP_FIXTURE_CLOSE".to_string(), "0".to_string()),
+        ],
+        secret_env: Vec::new(),
+    })
+    .with_session_idle_timeout(Duration::from_millis(50));
+    let session = runtime
+        .start_session(start_request("task-idle-without-close", cwd_string()))
+        .expect("start session");
+
+    std::thread::sleep(Duration::from_millis(100));
+    assert_eq!(
+        read_fixture_methods(&log_path),
+        ["initialize", "session/new"]
+    );
+    runtime
+        .close_session(&session.key())
+        .expect("release local session worker");
+    assert_eq!(
+        read_fixture_methods(&log_path),
+        ["initialize", "session/new"]
     );
 }
 
@@ -985,6 +1194,7 @@ fn resume_and_attach_session_event_sink_use_active_session_registry() {
             cwd: cwd_string(),
             model_id: None,
             cancellation: TurnCancellation::new(),
+            secret_resolver: None,
         })
         .expect("resume active session");
     assert_eq!(resumed.session_id, session.session_id);
@@ -1000,6 +1210,83 @@ fn resume_and_attach_session_event_sink_use_active_session_registry() {
         read_fixture_methods(&log_path),
         ["initialize", "session/new", "session/close"]
     );
+}
+
+#[test]
+fn resume_after_runtime_restart_dispatches_to_the_agent() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((runtime, log_path)) = fixture_runtime(&temp, "resumed-session") else {
+        return;
+    };
+
+    let resumed = runtime
+        .resume_session(AgentSessionResume {
+            agent_id: "codex".to_string(),
+            task_id: "task-resume-after-restart".to_string(),
+            session_id: "resumed-session".to_string(),
+            cwd: cwd_string(),
+            model_id: None,
+            cancellation: TurnCancellation::new(),
+            secret_resolver: None,
+        })
+        .expect("resume inactive session");
+
+    assert_eq!(resumed.session_id, "resumed-session");
+    assert_eq!(
+        resumed.config_options.get("model").map(String::as_str),
+        Some("gpt-5.6-sol")
+    );
+    runtime
+        .close_session(&resumed.key())
+        .expect("close session");
+    assert_eq!(
+        read_fixture_methods(&log_path),
+        ["initialize", "session/resume", "session/close"]
+    );
+}
+
+#[test]
+fn resume_without_agent_capability_returns_typed_capability_error() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    if !python3_available() {
+        return;
+    }
+    let script_path = temp.path().join("fixture_agent.py");
+    let log_path = temp.path().join("fixture.log");
+    fs::write(&script_path, fixture_agent_script()).expect("fixture agent script");
+    let runtime = AcpAgentRuntime::new(AcpAgentConfig {
+        agent_id: "codex".to_string(),
+        command: "python3".to_string(),
+        args: vec![script_path.to_string_lossy().to_string()],
+        env: vec![
+            (
+                "OPENAIDE_ACP_FIXTURE_LOG".to_string(),
+                log_path.to_string_lossy().to_string(),
+            ),
+            (
+                "OPENAIDE_ACP_FIXTURE_SESSION".to_string(),
+                "unsupported-resume-session".to_string(),
+            ),
+            ("OPENAIDE_ACP_FIXTURE_RESUME".to_string(), "0".to_string()),
+        ],
+        secret_env: Vec::new(),
+    });
+
+    let error = match runtime.resume_session(AgentSessionResume {
+        agent_id: "codex".to_string(),
+        task_id: "task-unsupported-resume".to_string(),
+        session_id: "unsupported-resume-session".to_string(),
+        cwd: cwd_string(),
+        model_id: None,
+        cancellation: TurnCancellation::new(),
+        secret_resolver: None,
+    }) {
+        Ok(session) => panic!("unexpectedly resumed {}", session.session_id),
+        Err(error) => error,
+    };
+
+    assert!(matches!(error, RuntimeError::CapabilityMissing(_)));
+    assert_eq!(read_fixture_methods(&log_path), ["initialize"]);
 }
 
 #[test]
@@ -1155,6 +1442,7 @@ fn different_agents_may_own_the_same_native_session_id() {
                 cwd: cwd_string(),
                 model_id: None,
                 cancellation: TurnCancellation::new(),
+                secret_resolver: None,
             })
             .expect("resume the matching Agent session");
         assert_eq!(resumed.agent_id, agent_id);
@@ -1300,6 +1588,7 @@ fn different_agents_may_own_the_same_native_session_id() {
         cwd: cwd_string(),
         model_id: None,
         cancellation: TurnCancellation::new(),
+        secret_resolver: None,
     });
     assert!(agent_a_resume.is_err());
     runtime
@@ -1310,6 +1599,7 @@ fn different_agents_may_own_the_same_native_session_id() {
             cwd: cwd_string(),
             model_id: None,
             cancellation: TurnCancellation::new(),
+            secret_resolver: None,
         })
         .expect("Agent B remains active after Agent A closes");
     runtime
@@ -1416,28 +1706,9 @@ fn session_title_update_during_prompt_is_delivered_to_session_sink() {
 }
 
 #[test]
-fn inactive_session_registry_reports_stable_missing_session_errors() {
+fn inactive_session_registry_reports_stable_binding_errors() {
     let runtime = inactive_runtime();
     let missing_session = AgentSessionKey::new("codex", "missing-session");
-
-    let resume_error = match runtime.resume_session(AgentSessionResume {
-        agent_id: "codex".to_string(),
-        task_id: "task-missing-resume".to_string(),
-        session_id: "missing-session".to_string(),
-        cwd: cwd_string(),
-        model_id: None,
-        cancellation: TurnCancellation::new(),
-    }) {
-        Ok(session) => panic!(
-            "missing resume unexpectedly succeeded: {}",
-            session.session_id
-        ),
-        Err(error) => error.to_string(),
-    };
-    assert_eq!(
-        resume_error,
-        "capability missing: acp_session_resume_after_runtime_restart"
-    );
 
     let attach_error = runtime
         .attach_session_event_sink(&missing_session, Arc::new(CapturingSessionSink::default()))
@@ -2082,6 +2353,58 @@ fn set_config_option_dispatches_while_prompt_is_running() {
     assert!(read_fixture_methods(&log_path)
         .iter()
         .any(|method| method == "session/set_config_option"));
+}
+
+#[test]
+fn set_config_option_allows_an_agent_response_after_five_seconds() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    if !python3_available() {
+        eprintln!("skipping ACP active-session runtime fixture: python3 not found");
+        return;
+    }
+    let script_path = temp.path().join("fixture_agent.py");
+    let log_path = temp.path().join("fixture.log");
+    fs::write(&script_path, fixture_agent_script()).expect("fixture agent script");
+    let runtime = AcpAgentRuntime::new(AcpAgentConfig {
+        agent_id: "codex".to_string(),
+        command: "python3".to_string(),
+        args: vec![script_path.to_string_lossy().to_string()],
+        env: vec![
+            (
+                "OPENAIDE_ACP_FIXTURE_LOG".to_string(),
+                log_path.to_string_lossy().to_string(),
+            ),
+            (
+                "OPENAIDE_ACP_FIXTURE_SESSION".to_string(),
+                "slow-config-session".to_string(),
+            ),
+            (
+                "OPENAIDE_ACP_FIXTURE_CONFIG_RESPONSE_DELAY".to_string(),
+                "5.2".to_string(),
+            ),
+        ],
+        secret_env: Vec::new(),
+    });
+
+    let session = runtime
+        .start_session(start_request("task-slow-config", cwd_string()))
+        .expect("start session");
+    let catalog = runtime
+        .set_session_config_option(AgentSessionSetConfigOptionRequest {
+            agent_id: "codex".to_string(),
+            session_id: session.session_id.clone(),
+            config_id: "model".to_string(),
+            value: "gpt-5.5".to_string(),
+        })
+        .expect("slow config response should remain within the user-visible deadline");
+
+    assert_eq!(
+        catalog.current_values().get("model"),
+        Some(&"gpt-5.5".to_string())
+    );
+    runtime
+        .close_session(&session.key())
+        .expect("close session");
 }
 
 #[test]

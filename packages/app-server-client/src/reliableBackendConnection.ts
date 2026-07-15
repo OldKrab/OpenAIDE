@@ -67,6 +67,7 @@ export type ReliableLocalHttpBackendConnectionOptions = {
   fetch?: ReliableHttpFetch;
   heartbeatIntervalMs?: number;
   retryDelayMs?: number;
+  subscribeToWake?: (wake: () => void) => () => void;
 };
 
 export type ReliableWebProxyBackendConnectionOptions = Omit<
@@ -177,6 +178,7 @@ function createReliableHttpBackendConnection(
       ...("authToken" in options ? { authToken: options.authToken } : {}),
       ...(options.fetch ? { fetch: options.fetch } : {}),
       ...(options.retryDelayMs === undefined ? {} : { retryDelayMs: options.retryDelayMs }),
+      ...(options.subscribeToWake ? { subscribeToWake: options.subscribeToWake } : {}),
     });
     let generation: HttpConnectionGeneration;
     const connection = createInternalReliableBackendConnection({

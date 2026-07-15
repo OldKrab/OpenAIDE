@@ -10,7 +10,8 @@ The detailed architecture decisions supporting this specification are:
 
 - [Task state publication and replica recovery](adr/0023-task-state-publication-and-replica-recovery.md);
 - [Task Chat persistence](adr/0024-task-chat-persistence.md);
-- [Task Frontend boundaries](adr/0025-task-frontend-boundaries.md).
+- [Task Frontend boundaries](adr/0025-task-frontend-boundaries.md);
+- [Task Attention state and shell-local notifications](adr/0027-task-attention-and-shell-local-notifications.md).
 
 ## Design Constraints
 
@@ -137,7 +138,7 @@ Frontend issues each `task/send` mutation once and never automatically replays i
 
 ### First Send
 
-Frontend moves the Composer draft into Task-scoped pending state and marks the New Task as submitting. Invoking New Task while Send is pending reopens that same cached submitting instance. If cache loss requires App Server resolution, client-scoped create semantics return that instance while it remains private. After authoritative acceptance makes the Task visible, a later New Task action requests the next instance. Rejection keeps the same New Task and recoverable draft. Transport loss enters connection-lost presentation and resynchronizes without replay.
+Frontend moves the Composer draft into Task-scoped pending state and marks the New Task as submitting. Invoking New Task while Send is pending reopens that same cached submitting instance. If cache loss requires App Server resolution, client-scoped create semantics return that instance while it remains private. After authoritative acceptance makes the Task visible, a later New Task action requests the next instance. Rejection keeps the same New Task and recoverable draft. Transport loss enters connection-lost presentation and resynchronizes without replay. Returning from browser suspension restarts the replayable receive poll from the last applied server sequence, so accepted Task events catch up without requiring a page reload or replaying Send.
 
 The durable first-Send transaction:
 
@@ -235,6 +236,38 @@ User Stop, Native Session failure during `starting`, `working`, or `waiting`, an
 
 Accepted prompts are never replayed automatically after termination. Their User messages remain durable. A later explicit Send may load or resume the Native Session, but it never resends the failed prompt. Unexpected Native Session loss while idle only marks the opaque handle unavailable; the next explicit Send may recover it without alarming Chat activity.
 
+### Idle Native Session release
+
+App Server releases an inactive Native Session after 30 minutes without session activity when the Agent advertises ACP `sessionCapabilities.close`. Activity is measured by the Native Session worker, not Task Page visibility or subscription count. Session setup, outbound session operations, and inbound `session/update` notifications restart the deadline. A prompt, Configuration Option mutation, permission, question, or other in-flight session operation suspends expiration until that operation settles.
+
+Expiration sends `session/close`, ends the local worker, and releases its live resources without changing Task status, Chat, cached Configuration Options, or the durable Native Session id. The next Send or Configuration Option mutation restores the binding through `session/resume`, falling back to `session/load` when resume is unsupported, and reattaches the Task's permanent update sink. Recovery never replays an accepted prompt.
+
+Agents that do not advertise `sessionCapabilities.close` are not idle-expired because ACP forbids Clients from sending `session/close`; those sessions retain process-lifetime cleanup. Ordinary navigation never closes a Native Session directly.
+
+## Task Attention And Web Notifications
+
+App Server owns one latest outstanding Task Attention Event for each Task. The event has a stable identity, reason, and occurrence time and is included in authoritative Task snapshots and ordered Task changes. It is distinct from generic Task status and `unread`: clients never infer notification-worthy work from a `waiting`, idle, failed, or unread transition alone.
+
+App Server creates or selects the current event using these product reasons:
+
+- `finished` when a primary prompt ends normally;
+- `needsPermission` while at least one permission request needs a response;
+- `needsAnswer` while at least one Agent Question needs a response;
+- `stopped` when the Agent cannot continue because of a token or request limit, refusal, or another non-user stop reason;
+- `failed` when active work ends through an unexpected runtime, protocol, connection, cancellation, restart, or recovery failure.
+
+A user-initiated Stop creates no Task Attention Event. When several transient requests are pending, the current event represents the newest outstanding request; resolving it selects the next still-outstanding request without changing that request's stable event identity. Resolving the final request clears the waiting event immediately, even when another client responded. A later finish, stop, or failure creates a new event. Explicit Task-attention acknowledgement clears the current event and `unread`; passive rendering or background visibility does not acknowledge it.
+
+The Web App may present a Task Attention Event as an OS notification only while at least one Web App page remains open. Closed-app delivery, background App Server lifetime, Web Push, and installed-PWA delivery are outside this specification. All visible Tasks in the connected state root qualify regardless of Project or which client started the turn.
+
+Notification enablement is local to one browser profile and origin. Common Settings exposes one Desktop notifications control for all reasons and requests browser permission only from that explicit user action. The control distinguishes off, enabled, browser- or OS-blocked, and unsupported states; it never presents a synchronized App Server preference as proof of local permission. Notification sound follows browser and OS defaults.
+
+Tabs for the same browser profile coordinate attention and delivery. The Web App is unattended only when none of its tabs has focus. Notification eligibility is decided at the event occurrence time: an event that occurs while any tab is focused remains an in-product indicator and does not become eligible merely because the user leaves later. A reconnect may deliver a missed event only when notifications were already enabled at occurrence, the profile was unattended, the event remains current, and the profile has no delivery receipt for its stable identity. Initial startup never turns an existing unread backlog into OS notifications.
+
+The browser profile presents at most one current OS notification per Task, replacing an older notification for that Task. It shows the Task title and the short product reason only; Chat, Agent response, Tool, permission, and question content remain private. Clicking anywhere on the notification focuses or opens OpenAIDE and routes directly to the Task. The notification closes when clicked, when that Task is actively acknowledged, when its waiting request is no longer current, or when a newer event replaces it. Merely focusing another OpenAIDE Task does not clear it.
+
+App Server owns Task Attention meaning, identity, persistence, ordering, and clearing through product mutations. The Web App shell owns local opt-in, browser permission, focus observation, cross-tab coordination, delivery receipts, OS notification presentation, replacement, closing, and Task routing. Shared Frontend may carry the authoritative event to the shell through a narrow presentation seam, but it does not infer attention policy or call browser notification APIs directly. The existing client-scoped `shell/showNotification` request remains available for explicit App Server-to-shell messages and is not the Task Attention lifecycle.
+
 ### ACP update scope
 
 - ACP `plan` updates are ignored until Plan presentation and persistence are deliberately specified.
@@ -243,7 +276,7 @@ Accepted prompts are never replayed automatically after termination. Their User 
 
 ## History Synchronization
 
-Opening an existing Task is the only automatic history-synchronization trigger. It compares the cached Agent-provided Native Session timestamp with the Task's durable `localHistoryUpdatedAt`; neither Send nor catalog refresh initiates synchronization. Exact catalog, tolerance, replacement, failure, and publication behavior is defined by [ADR-0023](adr/0023-task-state-publication-and-replica-recovery.md), while timestamp persistence is defined by [ADR-0024](adr/0024-task-chat-persistence.md).
+Opening an existing Task is the only automatic Native Session recovery and history-synchronization trigger. App Server returns stored Task state immediately, then uses `session/resume` when Chat is not proven stale, falls back to `session/load` when resume is unsupported, and calls `session/load` directly when the cached Agent timestamp proves Chat is stale. Opening does not issue `session/list`; neither Send nor catalog refresh initiates history synchronization. Exact catalog, tolerance, replacement, failure, and publication behavior is defined by [ADR-0023](adr/0023-task-state-publication-and-replica-recovery.md), while timestamp persistence is defined by [ADR-0024](adr/0024-task-chat-persistence.md).
 
 When synchronization is required, Frontend keeps the stored Chat visible, shows `historySync: syncing`, and disables Send. A successful `session/load` atomically replaces Chat with exactly the rendered replay. Failure keeps existing Chat, appends `History update failed` Live Activity, ends syncing, and enables Send.
 
@@ -283,6 +316,10 @@ Option changes follow one ordering model:
 5. A user request superseded by newer Agent state resolves to the newest catalog without a race-only user error.
 6. Visible errors are reserved for genuine transport, setup, authorization, unsupported-operation, or Agent failures.
 
+While an option mutation is pending, Frontend renders the requested value in that control with a busy indicator and locks every configuration selector. The existing Task's Agent remains locked, while drafting and attachment actions remain usable. If the mutation is still pending after five seconds, Frontend adds the quiet status text `Agent is still updating options…` without replacing the Composer or reporting an error.
+
+App Server allows up to 60 seconds for the Agent to answer the option request. A failed or timed-out mutation clears pending state, restoring the last Agent-confirmed catalog, and Frontend presents the mutation error. That error clears after ten seconds or earlier when a later complete Agent catalog changes. A late catalog that confirms the requested value renders normally through the same authoritative catalog path.
+
 Slash-command catalogs use the same snapshot and event ordering. They provide Composer assistance and add no state to `task/send` or Chat.
 
 ## Conformance Invariants
@@ -296,3 +333,6 @@ An implementation conforms to this specification only when all of these are true
 5. One durable Task transaction produces one ordered Task revision; a revision gap installs one new baseline.
 6. Connection recovery retries only the event stream, then installs exactly one baseline for each active scope before Send is enabled.
 7. Durable Chat, transient requests, Tool details, and Frontend-only presentation each have one explicit owner and do not masquerade as one another.
+8. Every notification-worthy Task transition creates one explicit Task Attention Event; no client infers it from status or `unread`.
+9. A browser profile emits at most one OS notification for one eligible Task Attention Event and never emits an old unread backlog on startup.
+10. App Server owns Task Attention state while each App Shell owns its local attention and notification capabilities.

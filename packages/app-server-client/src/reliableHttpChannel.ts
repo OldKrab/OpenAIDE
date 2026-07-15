@@ -26,6 +26,9 @@ export type ReliableHttpMessageChannelOptions = {
   authToken?: string;
   fetch?: ReliableHttpFetch;
   retryDelayMs?: number;
+  receiveTimeoutMs?: number;
+  /** Restarts only the replayable receive poll when a suspended runtime wakes. */
+  subscribeToWake?: (wake: () => void) => () => void;
 };
 
 type SessionHandshake = {
@@ -53,11 +56,18 @@ export function createReliableHttpMessageChannel(
   const uploads: Array<{ sequence: number; message: RpcMessage; body: string }> = [];
   const abort = new AbortController();
   const retryDelayMs = options.retryDelayMs ?? 250;
+  const receiveTimeoutMs = options.receiveTimeoutMs ?? 35_000;
+  let receiveAbort: AbortController | undefined;
   let nextClientSequence = 1;
   let lastServerSequence = 0;
   let pumping = false;
   let closed = false;
   let terminalError: unknown;
+  const unsubscribeWake = options.subscribeToWake?.(() => {
+    if (!receiveAbort || receiveAbort.signal.aborted) return;
+    console.info("[OpenAIDE] Browser wake restarted the reliable HTTP receive poll");
+    receiveAbort.abort();
+  });
   const session = openSession().catch((error) => {
     fail(error);
     throw error;
@@ -97,7 +107,9 @@ export function createReliableHttpMessageChannel(
     close() {
       if (closed) return;
       closed = true;
+      unsubscribeWake?.();
       abort.abort();
+      receiveAbort?.abort();
       listeners.clear();
       errorListeners.clear();
     },
@@ -161,6 +173,13 @@ export function createReliableHttpMessageChannel(
       return;
     }
     while (!closed) {
+      const pollAbort = new AbortController();
+      receiveAbort = pollAbort;
+      const receiveTimeout = setTimeout(() => {
+        if (closed || receiveAbort !== pollAbort || pollAbort.signal.aborted) return;
+        console.info("[OpenAIDE] Reliable HTTP receive poll exceeded its deadline; restarting");
+        pollAbort.abort();
+      }, receiveTimeoutMs);
       try {
         const response = await fetchImpl(options.endpointUrl, {
           method: "GET",
@@ -169,7 +188,7 @@ export function createReliableHttpMessageChannel(
             "X-OpenAIDE-Session-Id": opened.sessionId,
             "X-OpenAIDE-After": String(lastServerSequence),
           },
-          signal: abort.signal,
+          signal: pollAbort.signal,
         });
         const text = await response.text();
         if (response.status === 204) {
@@ -189,12 +208,16 @@ export function createReliableHttpMessageChannel(
           lastServerSequence = frame.sequence;
         }
       } catch (error) {
-        if (closed || isAbort(error)) return;
+        if (closed) return;
+        if (isAbort(error)) continue;
         if (isTerminalHttpError(error)) {
           fail(error);
           return;
         }
         await retryDelay();
+      } finally {
+        clearTimeout(receiveTimeout);
+        if (receiveAbort === pollAbort) receiveAbort = undefined;
       }
     }
   }

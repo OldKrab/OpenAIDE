@@ -11,12 +11,15 @@ use crate::protocol::model::ConfigOptionsCatalog;
 
 pub(super) struct AcpActiveSessionRegistry {
     sessions: Mutex<HashMap<AgentSessionKey, AcpSessionClient>>,
+    /// Task sinks outlive one active worker so resume can restore live updates.
+    session_event_sinks: Mutex<HashMap<AgentSessionKey, Arc<dyn AgentSessionEventSink>>>,
 }
 
 impl AcpActiveSessionRegistry {
     pub(super) fn new() -> Self {
         Self {
             sessions: Mutex::new(HashMap::new()),
+            session_event_sinks: Mutex::new(HashMap::new()),
         }
     }
 
@@ -30,12 +33,29 @@ impl AcpActiveSessionRegistry {
         session_client: AcpSessionClient,
     ) -> Result<(), RuntimeError> {
         let mut sessions = self.sessions.lock().expect("ACP session registry poisoned");
+        // Idle workers close their receivers independently. Pruning before every
+        // insertion keeps dead client handles from accumulating as Tasks are opened.
+        sessions.retain(|_, client| client.is_running());
         if sessions.contains_key(&session) {
             drop(sessions);
             let _ = session_client.close();
             return Err(RuntimeError::InvalidParams(
                 "agent_session_id already active".to_string(),
             ));
+        }
+
+        let retained_sink = self
+            .session_event_sinks
+            .lock()
+            .expect("ACP session sink registry poisoned")
+            .get(&session)
+            .cloned();
+        if let Some(sink) = retained_sink {
+            if let Err(error) = session_client.set_event_sink(sink) {
+                drop(sessions);
+                let _ = session_client.close();
+                return Err(error);
+            }
         }
 
         sessions.insert(session, session_client);
@@ -47,7 +67,13 @@ impl AcpActiveSessionRegistry {
         session: &AgentSessionKey,
         sink: Arc<dyn AgentSessionEventSink>,
     ) -> Result<(), RuntimeError> {
-        self.require_session(session)?.set_event_sink(sink)
+        self.require_session(session)?
+            .set_event_sink(sink.clone())?;
+        self.session_event_sinks
+            .lock()
+            .expect("ACP session sink registry poisoned")
+            .insert(session.clone(), sink);
+        Ok(())
     }
 
     pub(super) fn set_config_option(
@@ -85,6 +111,7 @@ impl AcpActiveSessionRegistry {
     }
 
     pub(super) fn close_session(&self, session: &AgentSessionKey) -> Result<(), RuntimeError> {
+        self.remove_event_sink(session);
         if let Some(client) = self.remove(session) {
             client.close()?;
         }
@@ -93,11 +120,16 @@ impl AcpActiveSessionRegistry {
 
     pub(super) fn delete_session(&self, request: AgentSessionDelete) -> Result<(), RuntimeError> {
         let key = request.session_key();
+        self.remove_event_sink(&key);
         let client = self.remove(&key).ok_or_else(not_ready)?;
         client.delete()
     }
 
     pub(super) fn take_shutdown_close_tasks(&self) -> Vec<Box<dyn FnOnce() + Send + 'static>> {
+        self.session_event_sinks
+            .lock()
+            .expect("ACP session sink registry poisoned")
+            .clear();
         let sessions =
             std::mem::take(&mut *self.sessions.lock().expect("ACP session registry poisoned"));
         sessions
@@ -144,6 +176,13 @@ impl AcpActiveSessionRegistry {
             .lock()
             .expect("ACP session registry poisoned")
             .remove(session)
+    }
+
+    fn remove_event_sink(&self, session: &AgentSessionKey) {
+        self.session_event_sinks
+            .lock()
+            .expect("ACP session sink registry poisoned")
+            .remove(session);
     }
 }
 

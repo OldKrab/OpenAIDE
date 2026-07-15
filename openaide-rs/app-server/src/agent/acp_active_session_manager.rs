@@ -26,11 +26,13 @@ use crate::protocol::model::{
 };
 
 const DEFAULT_START_TIMEOUT: Duration = Duration::from_secs(30);
+const DEFAULT_SESSION_IDLE_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
 pub(super) struct AcpActiveSessionManager {
     auth_method_cache: AcpAuthMethodCache,
     trace_state: AcpTraceState,
     start_timeout: Duration,
+    session_idle_timeout: Duration,
     sessions: AcpActiveSessionRegistry,
     processes: AcpAgentProcessPool,
 }
@@ -46,6 +48,7 @@ impl AcpActiveSessionManager {
             auth_method_cache,
             trace_state: AcpTraceState::disabled(std::path::Path::new(".")),
             start_timeout: DEFAULT_START_TIMEOUT,
+            session_idle_timeout: DEFAULT_SESSION_IDLE_TIMEOUT,
             sessions: AcpActiveSessionRegistry::new(),
             processes: AcpAgentProcessPool::new(registry, host_bridge),
         }
@@ -58,6 +61,11 @@ impl AcpActiveSessionManager {
     #[cfg(test)]
     pub(super) fn with_start_timeout(&mut self, start_timeout: Duration) {
         self.start_timeout = start_timeout;
+    }
+
+    #[cfg(test)]
+    pub(super) fn with_session_idle_timeout(&mut self, session_idle_timeout: Duration) {
+        self.session_idle_timeout = session_idle_timeout;
     }
 
     pub(super) fn start_session(
@@ -121,9 +129,11 @@ impl AcpActiveSessionManager {
         if self.sessions.contains(&session) {
             return Ok(AgentSession::new(request.agent_id, request.session_id));
         }
-        Err(RuntimeError::CapabilityMissing(
-            "acp_session_resume_after_runtime_restart".to_string(),
-        ))
+        if request.cancellation.is_cancelled() {
+            return Err(RuntimeError::InvalidParams("session cancelled".to_string()));
+        }
+        let started = self.open_session(AcpSessionOpenRequest::Resume(request))?;
+        Ok(started.session)
     }
 
     pub(super) fn attach_session_event_sink(
@@ -198,11 +208,12 @@ impl AcpActiveSessionManager {
             auth_method_id,
             trace,
             terminal_owner_id: AcpTerminalOwnerId::next(),
+            session_idle_timeout: self.session_idle_timeout,
         };
         let process_session = self.processes.open_session(&agent_id, process_open)?;
 
         let started_result = match started_rx.recv_timeout(self.start_timeout) {
-            Ok(result) => result.map_err(startup_open_error),
+            Ok(result) => result.map_err(normalize_startup_error),
             Err(mpsc::RecvTimeoutError::Timeout) => {
                 startup_cancellation.cancel();
                 let _ = process_session.terminal_owner.close();
@@ -238,11 +249,10 @@ impl AcpActiveSessionManager {
     }
 }
 
-fn startup_open_error(message: String) -> RuntimeError {
-    if message == "agent_session_id already active" {
-        RuntimeError::InvalidParams(message)
-    } else {
-        RuntimeError::NotReady(message)
+fn normalize_startup_error(error: RuntimeError) -> RuntimeError {
+    match error {
+        RuntimeError::Internal(message) => RuntimeError::NotReady(message),
+        error => error,
     }
 }
 

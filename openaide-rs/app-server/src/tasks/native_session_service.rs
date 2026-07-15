@@ -9,7 +9,7 @@ use crate::agent::{
     AgentSessionStart, ConfigOptionPolicy, TurnCancellation,
 };
 use crate::protocol::errors::RuntimeError;
-use crate::protocol::model::{AgentListedSession, Attachment, TaskSnapshot, TaskStatus};
+use crate::protocol::model::{Attachment, TaskStatus};
 use crate::server_requests::ServerRequestRuntime;
 use crate::storage::records::{TaskPreparationRecord, TaskRecord};
 use crate::tasks::mutation::{
@@ -22,6 +22,9 @@ use crate::tasks::turns::TurnRunner;
 use crate::time::now_string;
 
 use crate::agent::gateway::AgentGateway;
+
+mod open_recovery;
+pub(crate) use open_recovery::{HistoryRefreshRequest, OpenSessionResumeOutcome};
 
 /// Owns Native Session acquisition, binding, update subscription, and prompt startup.
 /// Product workflows provide intent; they do not choose ACP start/load/resume paths.
@@ -43,14 +46,6 @@ pub(crate) struct PrimaryPromptRequest {
     pub(crate) turn_id: TurnId,
     pub(crate) text: String,
     pub(crate) attachments: Vec<Attachment>,
-}
-
-pub(crate) struct HistoryRefreshRequest {
-    pub(crate) task: TaskRecord,
-    pub(crate) stored_session_id: String,
-    pub(crate) native_session: AgentListedSession,
-    pub(crate) native_updated_at: u128,
-    pub(crate) refreshed_at: String,
 }
 
 impl NativeSessionService {
@@ -99,6 +94,7 @@ impl NativeSessionService {
                     cwd: task.workspace_root.clone(),
                     model_id: task.model_id.clone(),
                     cancellation: cancellation.clone(),
+                    secret_resolver: Some(self.secret_resolver(&task.task_id)),
                 })
                 .or_else(|_| start())?,
             None => start()?,
@@ -242,6 +238,42 @@ impl NativeSessionService {
         Ok(())
     }
 
+    /// Restores an existing Task binding before session-scoped interactions such as
+    /// Configuration Option changes. Recovery stays behind this module so product
+    /// workflows do not need to choose between ACP resume and load.
+    pub(crate) fn ensure_active_for_interaction(
+        &self,
+        task: &TaskRecord,
+    ) -> Result<AgentSessionKey, RuntimeError> {
+        let expected_session_id = task.agent_session_id.as_deref().ok_or_else(|| {
+            RuntimeError::NotReady("Task has no Native Session to recover".to_string())
+        })?;
+        let opened = self.acquire_for_prompt(task, false)?;
+        let session_key = opened.session().key();
+        let session_state = opened.task_state();
+        let binding = self.mutations.commit_existing_task(
+            &task.task_id,
+            TaskCommitOptions::metadata(),
+            |ctx| {
+                if ctx.task().tombstoned
+                    || ctx.task().agent_session_id.as_deref() != Some(expected_session_id)
+                {
+                    return Ok(TaskMutationResult::Rejected);
+                }
+                session_state.apply_to(ctx.task_mut());
+                Ok(TaskMutationResult::Changed)
+            },
+        )?;
+        if !matches!(binding.outcome, TaskCommitOutcome::Committed(_)) {
+            return Err(RuntimeError::NotReady(
+                "Native Session changed during recovery".to_string(),
+            ));
+        }
+        self.ensure_update_subscription(&task.task_id, &session_key)?;
+        opened.commit();
+        Ok(session_key)
+    }
+
     /// Sends steering to the already-working Native Session without creating
     /// another App Server-owned work lifecycle or awaiting its response.
     pub(crate) fn steer(
@@ -262,121 +294,6 @@ impl NativeSessionService {
             attachments,
             cancellation: TurnCancellation::new(),
         })
-    }
-
-    /// Loads and replaces Chat only after the caller's cached clock comparison proves staleness.
-    pub(crate) fn refresh_history(
-        &self,
-        request: HistoryRefreshRequest,
-    ) -> Result<Option<TaskSnapshot>, RuntimeError> {
-        let HistoryRefreshRequest {
-            task,
-            stored_session_id,
-            native_session,
-            native_updated_at,
-            refreshed_at,
-        } = request;
-        let current_task = self.mutations.store().read_task(&task.task_id)?;
-        if current_task.agent_session_id.as_deref() != Some(stored_session_id.as_str())
-            || matches!(
-                current_task.status,
-                TaskStatus::Starting | TaskStatus::Active
-            )
-            || current_task.active_turn_id.is_some()
-        {
-            return Ok(None);
-        }
-        match self.agent_gateway.resume_session(AgentSessionResume {
-            agent_id: task.agent_id.clone(),
-            task_id: task.task_id.clone(),
-            session_id: stored_session_id.clone(),
-            cwd: task.workspace_root.clone(),
-            model_id: task.model_id.clone(),
-            cancellation: TurnCancellation::new(),
-        }) {
-            Ok(_) => return Ok(None),
-            Err(error) if is_runtime_restart_resume_gap(&error) => {}
-            Err(error) => return Err(error),
-        }
-
-        let load_started = std::time::Instant::now();
-        let loaded = self.agent_gateway.load_session(AgentSessionLoad {
-            agent_id: task.agent_id.clone(),
-            task_id: task.task_id.clone(),
-            cwd: task.workspace_root.clone(),
-            model_id: task.model_id.clone(),
-            session_id: stored_session_id.clone(),
-            cancellation: TurnCancellation::new(),
-            secret_resolver: Some(self.secret_resolver(&task.task_id)),
-        })?;
-        let load_ms = load_started.elapsed().as_millis();
-        let session_start = TaskSessionStartGuard::new(&self.agent_gateway, loaded.session);
-        let loaded_session_id = session_start.session_id().to_string();
-        let refreshed_title = native_session
-            .title
-            .as_deref()
-            .map(str::trim)
-            .filter(|title| !title.is_empty())
-            .map(str::to_string);
-        let session_state = OpenedSessionTaskState {
-            session: session_start.session().clone(),
-            metadata_is_authoritative: true,
-        };
-        let replayed_messages = loaded.replayed_messages;
-        let replayed_message_count = replayed_messages.len();
-
-        let commit_started = std::time::Instant::now();
-        let result = self.mutations.commit_existing_task(
-            &task.task_id,
-            TaskCommitOptions {
-                refresh_message_history: true,
-                response_snapshot_tail_limit: Some(100),
-            },
-            |ctx| {
-                if ctx.task().agent_session_id.as_deref() != Some(stored_session_id.as_str())
-                    || matches!(ctx.task().status, TaskStatus::Starting | TaskStatus::Active)
-                    || ctx.task().active_turn_id.is_some()
-                {
-                    return Ok(TaskMutationResult::Unchanged);
-                }
-                ctx.replace_messages_from_native_session(replayed_messages, native_updated_at)?;
-                session_state.apply_to(ctx.task_mut());
-                let task = ctx.task_mut();
-                if let Some(title) = refreshed_title {
-                    task.set_agent_title(&title);
-                }
-                task.status = TaskStatus::Inactive;
-                task.unread = false;
-                task.agent_session_id = Some(loaded_session_id.clone());
-                task.updated_at = refreshed_at.clone();
-                task.last_activity = refreshed_at.clone();
-                Ok(TaskMutationResult::Changed)
-            },
-        )?;
-        let commit_ms = commit_started.elapsed().as_millis();
-        let snapshot = match result.outcome {
-            TaskCommitOutcome::Committed(_) => result.response_snapshot.ok_or_else(|| {
-                RuntimeError::Internal("missing refreshed Task snapshot".to_string())
-            })?,
-            TaskCommitOutcome::Rejected(_) => return Ok(None),
-        };
-
-        let attach_started = std::time::Instant::now();
-        self.ensure_update_subscription(&task.task_id, &session_start.session().key())?;
-        let attach_ms = attach_started.elapsed().as_millis();
-        session_start.commit();
-        crate::logging::info(
-            "native_session_history_refresh_timing",
-            serde_json::json!({
-                "task_id": task.task_id,
-                "agent_id": task.agent_id,
-                "message_count": replayed_message_count,
-                "load_ms": load_ms,
-                "commit_ms": commit_ms,
-                "attach_ms": attach_ms,
-            }),
-        );
-        Ok(Some(snapshot))
     }
 
     pub(crate) fn secret_resolver(
@@ -401,10 +318,11 @@ impl NativeSessionService {
                 cwd: task.workspace_root.clone(),
                 model_id: task.model_id.clone(),
                 cancellation: cancellation.clone(),
+                secret_resolver: Some(self.secret_resolver(&task.task_id)),
             }) {
                 Ok(session) => Ok(OpenedNativeSession::Resumed(session)),
                 Err(_) if replace_missing_prepared_session => self.start_fresh(task, cancellation),
-                Err(error) if is_runtime_restart_resume_gap(&error) => self
+                Err(error) if is_session_resume_unsupported(&error) => self
                     .agent_gateway
                     .load_session(AgentSessionLoad {
                         agent_id: task.agent_id.clone(),
@@ -595,12 +513,8 @@ impl Drop for PreparingSessionOwnership {
     }
 }
 
-fn is_runtime_restart_resume_gap(error: &RuntimeError) -> bool {
-    matches!(
-        error,
-        RuntimeError::CapabilityMissing(capability)
-            if capability == "acp_session_resume_after_runtime_restart"
-    )
+fn is_session_resume_unsupported(error: &RuntimeError) -> bool {
+    matches!(error, RuntimeError::CapabilityMissing(_))
 }
 
 fn is_restart_load_start_gap(error: &RuntimeError) -> bool {

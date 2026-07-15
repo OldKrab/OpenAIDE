@@ -4,6 +4,7 @@ import type {
 } from "@openaide/app-shell-contracts";
 import type { WebviewBootstrap } from "../state/surfaceTypes";
 import type { PostHostMessage } from "../state/postHostMessage";
+import type { WebTaskNotificationManager } from "../shells/webTaskNotifications";
 
 export type FrontendShell = {
   bootstrap(): WebviewBootstrap;
@@ -18,6 +19,8 @@ export type FrontendShell = {
     replaceSettingsTab(tab: SettingsTabId): void;
     subscribe(listener: (bootstrap: WebviewBootstrap) => void): () => void;
   };
+  /** Browser-profile notification integration; omitted by non-Web shells. */
+  taskNotifications?: WebTaskNotificationManager;
 };
 
 let installedShell: FrontendShell | undefined;
@@ -29,5 +32,10 @@ export function installFrontendShell(shell: FrontendShell): void {
 
 export function frontendShell(): FrontendShell {
   if (!installedShell) throw new Error("Frontend App Shell was not installed.");
+  return installedShell;
+}
+
+/** Returns the installed shell when optional shell capabilities are being probed. */
+export function currentFrontendShell(): FrontendShell | undefined {
   return installedShell;
 }

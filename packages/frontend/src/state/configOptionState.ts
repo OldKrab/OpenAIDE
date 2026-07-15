@@ -8,3 +8,13 @@ export function configOptionsSettled(catalog: ConfigOptionsCatalog | undefined) 
 export function configOptionsMutable(catalog: ConfigOptionsCatalog | undefined) {
   return configOptionsSettled(catalog) && catalog?.pending_change === undefined;
 }
+
+/** Identifies the complete Agent-owned catalog while excluding transient mutation presentation. */
+export function configOptionsCatalogKey(catalog: ConfigOptionsCatalog | undefined) {
+  if (!catalog) return undefined;
+  return JSON.stringify({
+    agent_id: catalog.agent_id,
+    status: catalog.status,
+    options: catalog.options,
+  });
+}

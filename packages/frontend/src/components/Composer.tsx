@@ -96,12 +96,21 @@ export function Composer({
   const lastPromptRef = useRef(prompt);
   const submittedDraftRef = useRef<string | undefined>(undefined);
   const commandCatalogRevision = commandCatalogKey(commandCatalog);
+  const configMutationId = configOptions?.pending_change?.mutation_id;
+  const [showSlowConfigUpdate, setShowSlowConfigUpdate] = useState(false);
   const lastCommandCatalogKey = useRef(commandCatalogRevision);
   const lastSubmissionSettlementKey = useRef(submissionSettlementKey);
   const hasDraftContent = hasComposerContent(editorText, attachments.length);
   const canSubmit = composerCanSubmit(availability, editorText, attachments.length);
 
   useComposerAutoFocus({ autoFocus, disabled, editorRef, focusRequestKey });
+
+  useEffect(() => {
+    setShowSlowConfigUpdate(false);
+    if (!configMutationId) return undefined;
+    const timer = globalThis.setTimeout(() => setShowSlowConfigUpdate(true), 5_000);
+    return () => globalThis.clearTimeout(timer);
+  }, [configMutationId]);
 
   useEffect(() => {
     if (!openMenu || typeof document === "undefined") return undefined;
@@ -352,6 +361,12 @@ export function Composer({
         />
       ) : null}
       {error ? <p className="inline-error">{error}</p> : null}
+      {showSlowConfigUpdate && configMutationId ? (
+        <p aria-live="polite" className="inline-status composer-config-update-status">
+          <LoaderCircle aria-hidden="true" className="composer-config-pending" size={13} />
+          <span>Agent is still updating options…</span>
+        </p>
+      ) : null}
       <div className="composer-footer">
         <ComposerControls
           agentLocked={agentLocked}

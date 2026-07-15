@@ -468,6 +468,44 @@ describe("Composer view behavior", () => {
     expect(compactAnchor.findByType("span").props.className).toContain("locked");
   });
 
+  it("shows the requested option as pending before explaining a slow Agent update", () => {
+    vi.useFakeTimers();
+    const renderer = renderComposer({
+      configLocked: true,
+      configOptions: {
+        agent_id: "codex",
+        pending_change: {
+          mutation_id: "mutation-1",
+          option_id: "fast-mode",
+          requested_value: "on",
+        },
+        options: [{
+          current_value: "off",
+          id: "fast-mode",
+          label: "Fast mode",
+          values: [
+            { id: "off", label: "Off" },
+            { id: "on", label: "On" },
+          ],
+        }],
+        status: "ready",
+      },
+      showIsolationSelector: false,
+    });
+
+    expect(text(renderer.root)).toContain("Fast: On");
+    expect(text(renderer.root)).not.toContain("Fast: Off");
+    expect(renderer.root.findAllByProps({ "aria-busy": true })).toHaveLength(2);
+    expect(text(renderer.root)).not.toContain("Agent is still updating options");
+
+    act(() => {
+      vi.advanceTimersByTime(5_000);
+    });
+
+    expect(text(renderer.root)).toContain("Agent is still updating options");
+    vi.useRealTimers();
+  });
+
   it("labels mode config controls with the compact selected value", () => {
     const renderer = renderComposer({
       configOptions: {

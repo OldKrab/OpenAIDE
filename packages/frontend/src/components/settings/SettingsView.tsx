@@ -16,6 +16,7 @@ import { AgentSettingsTab } from "./AgentSettingsTab";
 import { GeneralSettingsTab } from "./GeneralSettingsTab";
 import { McpSettingsTab, SkillsSettingsTab } from "./NonAgentSettingsTabs";
 import { SettingsSkeleton } from "./settingsPresentation";
+import type { DesktopNotificationSettings } from "../../shells/webTaskNotifications";
 
 const tabs: Array<{ id: SettingsTabId; label: string }> = [
   { id: "agents", label: "Agents" },
@@ -25,6 +26,7 @@ const tabs: Array<{ id: SettingsTabId; label: string }> = [
 ];
 
 export function SettingsView({
+  desktopNotifications,
   onAuthenticate,
   onCreateCustomAgent,
   onDeleteCustomAgent,
@@ -36,9 +38,11 @@ export function SettingsView({
   onSetAcpTrace,
   onSetComposerSubmitShortcut,
   onSelectTab,
+  onSetDesktopNotifications,
   preferences,
   state,
 }: {
+  desktopNotifications?: DesktopNotificationSettings;
   onAuthenticate: (agentId: string, methodId: string) => void;
   onCreateCustomAgent: (params: CustomAgentCreateParams) => void;
   onDeleteCustomAgent: (agentId: string) => void;
@@ -50,6 +54,7 @@ export function SettingsView({
   onSetAcpTrace: (enabled: boolean) => void;
   onSetComposerSubmitShortcut: (shortcut: ComposerSubmitShortcut) => void;
   onSelectTab: (tab: SettingsTabId) => void;
+  onSetDesktopNotifications?: (enabled: boolean) => void | Promise<void>;
   preferences: AppPreferencesRecord;
   state: SettingsState;
 }) {
@@ -140,6 +145,7 @@ export function SettingsView({
             <SettingsSkeleton />
           ) : (
             <SettingsTabContent
+              desktopNotifications={desktopNotifications}
               agents={state.agentDetails ?? []}
               authPending={state.loading}
               deletedAgentId={state.deletedAgentId}
@@ -151,6 +157,7 @@ export function SettingsView({
               onSetAgentEnabled={onSetAgentEnabled}
               onUpdateCustomAgentMetadata={onUpdateCustomAgentMetadata}
               onSetComposerSubmitShortcut={onSetComposerSubmitShortcut}
+              onSetDesktopNotifications={onSetDesktopNotifications}
               preferences={preferences}
               developerSettingsUnlocked={developerSettingsUnlocked}
               savedAgentId={state.savedAgentId}
@@ -166,6 +173,7 @@ export function SettingsView({
 }
 
 function SettingsTabContent({
+  desktopNotifications,
   onAuthenticate,
   onCreateCustomAgent,
   onDeleteCustomAgent,
@@ -173,6 +181,7 @@ function SettingsTabContent({
   onSetAgentEnabled,
   onSetAcpTrace,
   onSetComposerSubmitShortcut,
+  onSetDesktopNotifications,
   onUpdateCustomAgentMetadata,
   authPending,
   agents,
@@ -184,6 +193,7 @@ function SettingsTabContent({
   settingsState,
   tab,
 }: {
+  desktopNotifications?: DesktopNotificationSettings;
   authPending: boolean;
   agents: AgentSettingsRecord[];
   onAuthenticate: (agentId: string, methodId: string) => void;
@@ -193,6 +203,7 @@ function SettingsTabContent({
   onSetAgentEnabled: (agentId: string, enabled: boolean) => void;
   onSetAcpTrace: (enabled: boolean) => void;
   onSetComposerSubmitShortcut: (shortcut: ComposerSubmitShortcut) => void;
+  onSetDesktopNotifications?: (enabled: boolean) => void | Promise<void>;
   onUpdateCustomAgentMetadata: (params: CustomAgentMetadataUpdateParams) => void;
   deletedAgentId?: string;
   developerSettingsUnlocked: boolean;
@@ -226,8 +237,10 @@ function SettingsTabContent({
       {tab === "common" ? (
         <GeneralSettingsTab
           developerSettingsUnlocked={developerSettingsUnlocked}
+          desktopNotifications={desktopNotifications}
           onSetAcpTrace={onSetAcpTrace}
           onSetComposerSubmitShortcut={onSetComposerSubmitShortcut}
+          onSetDesktopNotifications={onSetDesktopNotifications}
           preferences={preferences}
           runtimeSettings={runtimeSettings}
         />

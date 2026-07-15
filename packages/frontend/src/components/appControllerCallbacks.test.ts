@@ -1067,7 +1067,7 @@ describe("app controller callbacks", () => {
     vi.useFakeTimers();
     try {
       const dispatch = vi.fn();
-      const request = vi.fn(async (method: string, _params?: unknown) => {
+      const request = vi.fn(async (method: string) => {
         if (method === TASK_CREATE) return { task: protocolPreparingTaskSnapshot("task_1", "New task") };
         if (method === TASK_OPEN) return { task: protocolTaskSnapshot("task_1", "New task") };
         if (method === TASK_SEND) return { task: { ...protocolTaskSnapshot("task_1", "New task"), revision: 3 } };
@@ -1151,7 +1151,7 @@ describe("app controller callbacks", () => {
     vi.useFakeTimers();
     try {
       const dispatch = vi.fn();
-      const request = vi.fn(async (method: string) => {
+      const request = vi.fn(async (method: string, _params?: unknown) => {
         if (method === TASK_CREATE) {
           return { task: protocolPreparingTaskSnapshot("task_1", "New task") };
         }
@@ -1289,37 +1289,53 @@ describe("app controller callbacks", () => {
   });
 
   it("refreshes an existing Task after a config mutation error clears backend pending state", async () => {
-    const dispatch = vi.fn();
-    const request = vi.fn(async (method: string) => {
-      if (method === TASK_SET_CONFIG_OPTION) {
-        throw new AppServerProtocolError({
-          error: { code: "internal", message: "Agent rejected the option", recoverable: true },
-        });
-      }
-      if (method === TASK_OPEN) {
-        return { task: { ...protocolTaskSnapshot("task_1", "Task"), revision: 4 } };
-      }
-      throw new Error(method);
-    });
-    const state = createInitialState();
-    state.activeTaskId = "task_1";
-    state.snapshot = snapshot("task_1");
-    state.snapshot.agent_config = editableConfigOptions();
+    vi.useFakeTimers();
+    try {
+      const dispatch = vi.fn();
+      const request = vi.fn(async (method: string, _params?: unknown) => {
+        if (method === TASK_SET_CONFIG_OPTION) {
+          throw new AppServerProtocolError({
+            error: { code: "internal", message: "Agent rejected the option", recoverable: true },
+          });
+        }
+        if (method === TASK_OPEN) {
+          return { task: { ...protocolTaskSnapshot("task_1", "Task"), revision: 4 } };
+        }
+        throw new Error(method);
+      });
+      const state = createInitialState();
+      state.activeTaskId = "task_1";
+      state.snapshot = snapshot("task_1");
+      state.snapshot.agent_config = editableConfigOptions();
 
-    callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"] },
-      dispatch,
-      state,
-    }).task.selectConfigOption("model", "gpt-5");
-    await settlePromises();
+      callbacks({
+        backendConnection: { request: request as unknown as BackendConnection["request"] },
+        dispatch,
+        state,
+      }).task.selectConfigOption("model", "gpt-5");
+      for (let index = 0; index < 8; index += 1) await Promise.resolve();
 
-    expect(request).toHaveBeenCalledWith(TASK_OPEN, { taskId: "task_1" });
-    expect(dispatch).toHaveBeenCalledWith({
-      type: "taskInput:error",
-      taskId: "task_1",
-      message: "Agent rejected the option",
-    });
-    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "snapshot", intent: "refresh" }));
+      const configRequest = request.mock.calls.find(([method]) => method === TASK_SET_CONFIG_OPTION);
+      const mutationId = (configRequest?.[1] as { clientMutationId?: string } | undefined)?.clientMutationId;
+      expect(request).toHaveBeenCalledWith(TASK_OPEN, { taskId: "task_1" });
+      expect(dispatch).toHaveBeenCalledWith({
+        type: "taskInput:configError",
+        taskId: "task_1",
+        mutationId,
+        message: "Agent rejected the option",
+        catalog: editableConfigOptions(),
+      });
+      expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "snapshot", intent: "refresh" }));
+
+      vi.advanceTimersByTime(10_000);
+      expect(dispatch).toHaveBeenCalledWith({
+        type: "taskInput:configError:clear",
+        taskId: "task_1",
+        mutationId,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("keeps an exact send pending when an older config mutation fails", async () => {
@@ -1358,7 +1374,7 @@ describe("app controller callbacks", () => {
       prompt: "Send exactly once",
       state: "sending",
     });
-    expect(renderedState.taskInputs.task_1.error).toBe("Agent rejected the option");
+    expect(renderedState.taskInputs.task_1.configError?.message).toBe("Agent rejected the option");
   });
 
   it("surfaces a new-task error when typed create prerequisites are missing", () => {

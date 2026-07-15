@@ -4,6 +4,7 @@ import {
   createReliableBackendConnection,
   createReliableWebProxyBackendConnection,
 } from "./reliableBackendConnection";
+import type { ReliableHttpFetch } from "./reliableHttpChannel";
 import {
   CLIENT_HEARTBEAT,
   CLIENT_INITIALIZE,
@@ -148,6 +149,41 @@ describe("ReliableBackendConnection", () => {
     await vi.waitFor(() => expect(permissionHandler).toHaveBeenCalledOnce());
     connection.close();
   });
+
+  it("recovers an expired mobile client when wake restarts a frozen receive poll", async () => {
+    let wake: (() => void) | undefined;
+    const transport = createExpiringSessionTransport("client", "heartbeat");
+    const connection = createReliableWebProxyBackendConnection({
+      endpointUrl: "http://app-server.test/rpc",
+      connectionId: "connection-1",
+      fetch: transport.fetch,
+      retryDelayMs: 1,
+      heartbeatIntervalMs: 5,
+      subscribeToWake(listener) {
+        wake = listener;
+        return () => {
+          wake = undefined;
+        };
+      },
+    });
+    await connection.initialize({
+      clientInstanceId: "client-1" as ClientInstanceId,
+      shell: { kind: "web" },
+      requestedSurface: { kind: "home" },
+      capabilities: { protocol: [], shell: [] },
+    });
+    transport.freezeNextReceive();
+    await vi.waitFor(() => expect(transport.frozenPolls()).toBe(1));
+    await vi.waitFor(() => expect(transport.heartbeatSessions()).toContain("session-1"));
+
+    wake?.();
+
+    await vi.waitFor(() => expect(transport.initializedSessions()).toEqual([
+      "session-1",
+      "session-2",
+    ]));
+    connection.close();
+  });
 });
 
 function createExpiringSessionTransport(
@@ -158,15 +194,21 @@ function createExpiringSessionTransport(
   const initialized: string[] = [];
   const taskLists: string[] = [];
   const permissionResponses: string[] = [];
+  const heartbeats: string[] = [];
+  let freezeNextReceive = false;
+  let frozenPollCount = 0;
   let opened = 0;
 
   return {
-    fetch: vi.fn(async (_input: string, init: {
-      method: "GET" | "POST";
-      headers: Record<string, string>;
-      body?: string;
-    }) => {
+    fetch: vi.fn<ReliableHttpFetch>(async (_input, init) => {
       if (init.method === "GET") {
+        if (freezeNextReceive) {
+          freezeNextReceive = false;
+          frozenPollCount += 1;
+          return new Promise((_resolve, reject) => {
+            init.signal?.addEventListener("abort", () => reject(abortError()), { once: true });
+          });
+        }
         const sessionId = init.headers["X-OpenAIDE-Session-Id"] ?? "";
         const after = Number(init.headers["X-OpenAIDE-After"] ?? "0");
         const available = (frames.get(sessionId) ?? []).filter((frame) => frame.sequence > after);
@@ -207,6 +249,7 @@ function createExpiringSessionTransport(
         return response(204, "");
       }
       if (message.method === CLIENT_HEARTBEAT) {
+        heartbeats.push(sessionId);
         if (sessionId === "session-1" && trigger === "heartbeat") {
           enqueueNotInitialized(sessionId, message.id);
         } else {
@@ -235,9 +278,14 @@ function createExpiringSessionTransport(
       throw new Error(`Unexpected test request: ${message.method}`);
     }),
     openedSessions: () => opened,
+    frozenPolls: () => frozenPollCount,
+    heartbeatSessions: () => heartbeats,
     initializedSessions: () => initialized,
     taskListSessions: () => taskLists,
     permissionResponseSessions: () => permissionResponses,
+    freezeNextReceive() {
+      freezeNextReceive = true;
+    },
     sendPermissionRequest(sessionId: string) {
       enqueue(sessionId, {
         jsonrpc: "2.0",
@@ -279,6 +327,12 @@ function response(status: number, body: unknown) {
     status,
     text: async () => text,
   };
+}
+
+function abortError() {
+  const error = new Error("aborted");
+  error.name = "AbortError";
+  return error;
 }
 
 function initializeResult() {

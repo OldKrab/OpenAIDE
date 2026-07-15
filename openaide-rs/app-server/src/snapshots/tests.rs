@@ -273,6 +273,7 @@ impl TaskSnapshotSource for StaticTaskSnapshots {
                 updated_at: "2026-06-28T00:00:00.000Z".to_string(),
                 last_activity: "2026-06-28T00:00:00.000Z".to_string(),
                 unread: false,
+                attention: None,
                 has_messages: false,
             },
             lifecycle: openaide_app_server_protocol::snapshot::TaskLifecycle::Visible,

@@ -280,6 +280,15 @@
   color: color-mix(in oklch, var(--oa-muted) 88%, var(--oa-text));
 }
 
+.composer-pill.locked.pending {
+  background: color-mix(in oklch, var(--oa-focus) 9%, transparent);
+  color: var(--oa-text);
+}
+
+.composer-config-pending {
+  animation: oa-spin 0.9s linear infinite;
+}
+
 .composer-icon-button,
 .composer-submit-pending {
   width: 28px;
@@ -340,6 +349,12 @@
 @keyframes oa-spin {
   to {
     transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .composer-config-pending {
+    animation: none;
   }
 }
 

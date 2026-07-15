@@ -63,7 +63,7 @@ impl TaskProductApi {
             return self
                 .set_stored_config_option_without_session(task_id, &config_id, &value, &now);
         };
-        let Some(mutation) = self.begin_live_config_mutation(
+        let Some(mut mutation) = self.begin_live_config_mutation(
             task_id,
             expected_session_id.as_deref(),
             client_mutation_id,
@@ -76,21 +76,44 @@ impl TaskProductApi {
                 build_snapshot(&self.store, task_id, 100).map_err(super::storage_error)?;
             return self.project_task_snapshot(snapshot);
         };
-        let live_catalog =
-            match self
-                .agent_gateway
-                .set_session_config_option(AgentSessionSetConfigOptionRequest {
-                    agent_id: task.agent_id.clone(),
-                    session_id,
-                    config_id,
-                    value,
-                }) {
-                Ok(catalog) => catalog,
-                Err(error) => {
-                    self.clear_failed_live_config_mutation(task_id, &mutation.token)?;
-                    return Err(protocol_error_from_runtime(error));
-                }
-            };
+        let request = AgentSessionSetConfigOptionRequest {
+            agent_id: task.agent_id.clone(),
+            session_id,
+            config_id: config_id.clone(),
+            value: value.clone(),
+        };
+        let first_attempt = self.agent_gateway.set_session_config_option(request);
+        let live_result = match first_attempt {
+            Err(error) if inactive_session_can_recover(&error) => {
+                let session = self.native_sessions.ensure_active_for_interaction(&task);
+                session.and_then(|session| {
+                    let recovered_task = self.store.read_task(task_id)?;
+                    if !mutation.token.is_current_for(&recovered_task) {
+                        return Err(crate::protocol::errors::RuntimeError::NotReady(
+                            "Configuration Option changed during Native Session recovery"
+                                .to_string(),
+                        ));
+                    }
+                    mutation.rebase(&recovered_task);
+                    self.agent_gateway.set_session_config_option(
+                        AgentSessionSetConfigOptionRequest {
+                            agent_id: session.agent_id().to_string(),
+                            session_id: session.session_id().to_string(),
+                            config_id,
+                            value,
+                        },
+                    )
+                })
+            }
+            result => result,
+        };
+        let live_catalog = match live_result {
+            Ok(catalog) => catalog,
+            Err(error) => {
+                self.clear_failed_live_config_mutation(task_id, &mutation.token)?;
+                return Err(protocol_error_from_runtime(error));
+            }
+        };
         self.finish_live_config_mutation(
             task_id,
             expected_session_id.as_deref(),
@@ -264,6 +287,15 @@ impl TaskProductApi {
     }
 }
 
+fn inactive_session_can_recover(error: &crate::protocol::errors::RuntimeError) -> bool {
+    matches!(
+        error,
+        crate::protocol::errors::RuntimeError::NotReady(message)
+            if message == "ACP session is not active"
+                || message == "ACP session worker stopped"
+    )
+}
+
 enum LiveConfigMutationAdmission {
     Missing,
     Started(LiveConfigMutation),
@@ -280,6 +312,15 @@ struct LiveConfigMutation {
     // direct response commit.
     admitted_config_options: std::collections::HashMap<String, String>,
     admitted_catalog: Option<crate::protocol::model::ConfigOptionsCatalog>,
+}
+
+impl LiveConfigMutation {
+    /// Recovery can refresh the Agent-owned catalog before the original request is retried.
+    /// Treat that refresh as the retry baseline while preserving later update ordering.
+    fn rebase(&mut self, task: &crate::storage::records::TaskRecord) {
+        self.admitted_config_options = task.config_options.clone();
+        self.admitted_catalog = task.config_options_catalog.clone();
+    }
 }
 
 fn live_config_target_is_current(

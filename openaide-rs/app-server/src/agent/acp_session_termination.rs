@@ -18,7 +18,7 @@ pub(super) async fn close_active_session(
     if !supports_session_close {
         return;
     }
-    let request = CloseSessionRequest::new(session_id);
+    let request = CloseSessionRequest::new(session_id.clone());
     if let Some(trace) = trace {
         trace.record("client_to_agent", "session/close.request", &request);
     }
@@ -27,6 +27,10 @@ pub(super) async fn close_active_session(
             if let Some(trace) = trace {
                 trace.record("agent_to_client", "session/close.response", &response);
             }
+            crate::logging::info(
+                "acp_session_close_completed",
+                serde_json::json!({ "session_id": session_id.to_string() }),
+            );
         }
         Err(error) => {
             if let Some(trace) = trace {
@@ -36,6 +40,13 @@ pub(super) async fn close_active_session(
                     serde_json::json!({ "error": error.to_string() }),
                 );
             }
+            crate::logging::warn(
+                "acp_session_close_failed",
+                serde_json::json!({
+                    "session_id": session_id.to_string(),
+                    "error": error.to_string(),
+                }),
+            );
         }
     }
 }

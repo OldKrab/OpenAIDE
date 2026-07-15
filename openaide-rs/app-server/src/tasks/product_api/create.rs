@@ -33,6 +33,7 @@ impl TaskProductApi {
             task_version: 1,
             message_history_version: 0,
             unread: false,
+            attention: None,
             created_at: now.clone(),
             updated_at: now.clone(),
             last_activity: now,

@@ -9,6 +9,41 @@ type PermissionChatMessage = ChatMessage & {
 };
 
 describe("app reducer composer state", () => {
+  it("keeps a config error until its timer or a changed Agent catalog clears it", () => {
+    const initial = snapshot("task_1");
+    initial.agent_config = configCatalog("off");
+    let state = appReducer(createInitialState(), { type: "snapshot", intent: "open", snapshot: initial });
+    state = appReducer(state, {
+      type: "taskInput:configError",
+      taskId: "task_1",
+      mutationId: "mutation-1",
+      message: "Agent option update timed out.",
+      catalog: initial.agent_config,
+    });
+
+    const unchanged = snapshot("task_1", [], 2);
+    unchanged.agent_config = configCatalog("off");
+    state = appReducer(state, { type: "snapshot", intent: "refresh", snapshot: unchanged });
+    expect(state.taskInputs.task_1.configError?.message).toBe("Agent option update timed out.");
+
+    const loading = snapshot("task_1", [], 3);
+    loading.agent_config = { ...configCatalog("off"), status: "loading", options: [] };
+    state = appReducer(state, { type: "snapshot", intent: "refresh", snapshot: loading });
+    expect(state.taskInputs.task_1.configError?.message).toBe("Agent option update timed out.");
+
+    state = appReducer(state, {
+      type: "taskInput:configError:clear",
+      taskId: "task_1",
+      mutationId: "another-mutation",
+    });
+    expect(state.taskInputs.task_1.configError?.message).toBe("Agent option update timed out.");
+
+    const changed = snapshot("task_1", [], 4);
+    changed.agent_config = configCatalog("on");
+    state = appReducer(state, { type: "snapshot", intent: "refresh", snapshot: changed });
+    expect(state.taskInputs.task_1.configError).toBeUndefined();
+  });
+
   it("tracks custom Agent save/delete acknowledgements and clears them on refresh", () => {
     let state = createInitialState();
 
@@ -2034,6 +2069,22 @@ function snapshot(taskId: string, items: ChatMessage[] = [], revision = 1): Task
       isolation: "local",
     },
     revision,
+  };
+}
+
+function configCatalog(currentValue: string) {
+  return {
+    agent_id: "codex",
+    status: "ready" as const,
+    options: [{
+      current_value: currentValue,
+      id: "fast-mode",
+      label: "Fast mode",
+      values: [
+        { id: "off", label: "Off" },
+        { id: "on", label: "On" },
+      ],
+    }],
   };
 }
 

@@ -235,17 +235,6 @@ textarea:focus-visible,
   }
 }
 
-@media (max-height: 520px) {
-  .new-task-center {
-    align-content: start;
-    padding-block: 18px;
-  }
-
-  .new-task-center {
-    padding-bottom: 18px;
-  }
-}
-
 @media (max-height: 180px) {
   .new-task-center > .composer {
     margin-top: 34px;

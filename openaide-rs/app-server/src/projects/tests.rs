@@ -127,6 +127,7 @@ fn task_record(task_id: &str, workspace_root: &str) -> TaskRecord {
         task_version: 1,
         message_history_version: 0,
         unread: false,
+        attention: None,
         created_at: "2026-01-01T00:00:00.000Z".to_string(),
         updated_at: "2026-01-01T00:00:00.000Z".to_string(),
         last_activity: "2026-01-01T00:00:00.000Z".to_string(),
