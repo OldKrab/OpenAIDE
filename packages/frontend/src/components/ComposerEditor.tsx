@@ -2,6 +2,7 @@ import { forwardRef, memo, useImperativeHandle, useLayoutEffect, useRef } from "
 import type { ClipboardEvent, KeyboardEvent, MutableRefObject } from "react";
 import type { AgentCommandsCatalog } from "@openaide/app-shell-contracts";
 import { exactSlashCommandMatches } from "./commandSearch";
+import { fileMentionRanges } from "./ComposerFileMentions";
 import {
   captureFocusedEditorSelection,
   restoreEditorSelection,
@@ -160,19 +161,29 @@ function sameEditorSurfaceProps(previous: ComposerEditorSurfaceProps, next: Comp
 }
 
 export function renderEditorHtml(text: string, commandCatalog: AgentCommandsCatalog | undefined) {
-  const matches = exactSlashCommandMatches(text, commandCatalog?.commands);
+  const commandMatches = exactSlashCommandMatches(text, commandCatalog?.commands).map((match) => ({
+    end: match.token.end,
+    html: () => {
+      const label = text.slice(match.token.start, match.token.end);
+      const hint = match.command.input_hint ? ` Argument: ${match.command.input_hint}.` : "";
+      return `<span class="composer-command-token" title="${escapeHtml(`${label}: ${match.command.description}${hint}`)}">${escapeHtml(label)}</span>`;
+    },
+    start: match.token.start,
+  }));
+  const fileMatches = fileMentionRanges(text).map((range) => ({
+    ...range,
+    html: () => `<span class="composer-file-token" title="Workspace file">${escapeHtml(text.slice(range.start, range.end))}</span>`,
+  }));
+  const matches = [...commandMatches, ...fileMatches].sort((left, right) => left.start - right.start);
   if (!matches.length) return renderPlainTextHtml(text);
 
   const nodes: string[] = [];
   let cursor = 0;
   for (const match of matches) {
-    if (match.token.start > cursor) nodes.push(renderPlainTextHtml(text.slice(cursor, match.token.start)));
-    const label = text.slice(match.token.start, match.token.end);
-    const hint = match.command.input_hint ? ` Argument: ${match.command.input_hint}.` : "";
-    nodes.push(
-      `<span class="composer-command-token" title="${escapeHtml(`${label}: ${match.command.description}${hint}`)}">${escapeHtml(label)}</span>`,
-    );
-    cursor = match.token.end;
+    if (match.start < cursor) continue;
+    if (match.start > cursor) nodes.push(renderPlainTextHtml(text.slice(cursor, match.start)));
+    nodes.push(match.html());
+    cursor = match.end;
   }
   if (cursor < text.length) nodes.push(renderPlainTextHtml(text.slice(cursor)));
   return nodes.join("");

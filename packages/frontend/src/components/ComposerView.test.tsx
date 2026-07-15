@@ -142,77 +142,17 @@ describe("Composer view behavior", () => {
     );
   });
 
-  it("offers only project files and device uploads in the add-context menu", () => {
+  it("removes workspace attachments and keeps device image upload", () => {
     const renderer = renderComposer({ selection: selection({ workspaceRoot: "", workspaceLabel: "Workspace" }) });
 
     click(buttonByLabel(renderer.root, "Add context"));
 
     const menu = menuByLabel(renderer.root, "Add context");
-    expect(menu.findAllByProps({ role: "menuitem" })).toHaveLength(2);
-    expect(text(menuButtonByStrongLabel(renderer.root, "Workspace files"))).toContain("Browse files and images in this workspace.");
+    expect(menu.findAllByProps({ role: "menuitem" })).toHaveLength(1);
+    expect(renderer.root.findAllByType("strong").some((node) => node.children.join("") === "Workspace files")).toBe(false);
     expect(text(menuButtonByStrongLabel(renderer.root, "Upload or photo"))).toContain("Choose images from this device.");
-    expect(menuButtonByStrongLabel(renderer.root, "Workspace files").props.disabled).toBe(true);
     expect(menuButtonByStrongLabel(renderer.root, "Upload or photo").props.disabled).toBe(true);
     expect(renderer.root.findAllByProps({ type: "file" })[0].props.disabled).toBe(true);
-  });
-
-  it("browses project files and attaches either a live reference or a snapshot", async () => {
-    const fileBrowser = fileBrowserCallbacks();
-    const renderer = renderComposer({ fileBrowser });
-
-    click(buttonByLabel(renderer.root, "Add context"));
-    click(menuButtonByStrongLabel(renderer.root, "Workspace files"));
-    await settleRenderer();
-
-    expect(fileBrowser.listRoots).toHaveBeenCalledTimes(1);
-    expect(fileBrowser.listDirectory).toHaveBeenCalledWith("root-1");
-    expect(text(menuByLabel(renderer.root, "Workspace files"))).toContain("notes.md");
-    expect(text(menuByLabel(renderer.root, "Workspace files"))).toContain("diagram.png");
-
-    click(buttonByText(renderer.root, "Reference"));
-    await settleRenderer();
-
-    expect(fileBrowser.attachFileReference).toHaveBeenCalledWith("entry-notes");
-    expect(menusByLabel(renderer.root, "Workspace files")).toHaveLength(0);
-
-    click(buttonByLabel(renderer.root, "Add context"));
-    click(menuButtonByStrongLabel(renderer.root, "Workspace files"));
-    await settleRenderer();
-    const diagramRow = renderer.root
-      .findAllByProps({ className: "composer-file-row file" })
-      .find((row) => text(row).includes("diagram.png"));
-    expect(diagramRow).toBeTruthy();
-    click(buttonByText(diagramRow!, "Embed"));
-    await settleRenderer();
-
-    expect(fileBrowser.attachEmbedded).toHaveBeenCalledWith("entry-diagram");
-    expect(menusByLabel(renderer.root, "Workspace files")).toHaveLength(0);
-  });
-
-  it("closes the project file picker on Escape and click-away inside the composer", async () => {
-    const fileBrowser = fileBrowserCallbacks();
-    const renderer = renderComposer({ fileBrowser });
-
-    click(buttonByLabel(renderer.root, "Add context"));
-    click(menuButtonByStrongLabel(renderer.root, "Workspace files"));
-    await settleRenderer();
-
-    expect(menuByLabel(renderer.root, "Workspace files")).toBeTruthy();
-
-    act(() => {
-      renderer.root.findByType("section").props.onKeyDown({ key: "Escape" });
-    });
-    expect(menusByLabel(renderer.root, "Workspace files")).toHaveLength(0);
-
-    click(buttonByLabel(renderer.root, "Add context"));
-    click(menuButtonByStrongLabel(renderer.root, "Workspace files"));
-    await settleRenderer();
-    expect(menuByLabel(renderer.root, "Workspace files")).toBeTruthy();
-
-    act(() => {
-      textarea(renderer.root).props.onPointerDown();
-    });
-    expect(menusByLabel(renderer.root, "Workspace files")).toHaveLength(0);
   });
 
   it("closes attachment popovers and locks add controls when Send starts", async () => {
@@ -220,9 +160,7 @@ describe("Composer view behavior", () => {
     const renderer = renderComposer({ fileBrowser });
 
     click(buttonByLabel(renderer.root, "Add context"));
-    click(menuButtonByStrongLabel(renderer.root, "Workspace files"));
-    await settleRenderer();
-    expect(menuByLabel(renderer.root, "Workspace files")).toBeTruthy();
+    expect(menuByLabel(renderer.root, "Add context")).toBeTruthy();
 
     act(() => {
       renderer.update(composerElement({
@@ -234,7 +172,6 @@ describe("Composer view behavior", () => {
       }));
     });
 
-    expect(menusByLabel(renderer.root, "Workspace files")).toHaveLength(0);
     expect(menusByLabel(renderer.root, "Add context")).toHaveLength(0);
     expect(buttonByLabel(renderer.root, "Add context").props.disabled).toBe(true);
   });
@@ -1064,6 +1001,33 @@ describe("Composer view behavior", () => {
     expect(onChange).toHaveBeenCalledWith("/$doomsday-review ");
   });
 
+  it("searches workspace files after @ and inserts the selected path as text", async () => {
+    vi.useFakeTimers();
+    try {
+      const onChange = vi.fn();
+      const fileBrowser = fileBrowserCallbacks();
+      vi.mocked(fileBrowser.searchFiles).mockResolvedValue({
+        taskId: "task-1" as never,
+        state: "ready",
+        paths: ["src/main.rs", "docs/team deck.pptx"],
+      });
+      const renderer = renderComposer({ fileBrowser, onChange });
+
+      inputText(textarea(renderer.root), "Read @ma", 8);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(80);
+      });
+
+      expect(fileBrowser.searchFiles).toHaveBeenCalledWith("ma");
+      const picker = renderer.root.findByProps({ role: "listbox", "aria-label": "Workspace files" });
+      expect(text(picker)).toContain("src/main.rs");
+      click(buttonByText(renderer.root, "src/main.rs"));
+      expect(onChange).toHaveBeenLastCalledWith("Read @src/main.rs ");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("opens command picker from slash alone and filters skills after dollar", () => {
     const renderer = renderComposer({ commandCatalog: commandCatalog() });
     const input = textarea(renderer.root);
@@ -1443,6 +1407,7 @@ function fileBrowserCallbacks(): TaskFileBrowserCallbacks {
     attachEmbedded: vi.fn(async () => undefined),
     attachFileReference: vi.fn(async () => undefined),
     attachPastedImage: vi.fn(async () => undefined),
+    searchFiles: vi.fn(async () => ({ taskId: "task-1" as never, state: "ready" as const, paths: [] })),
     listDirectory: vi.fn(async (_rootId: FileBrowserRootId) => ({
       directory: { label: "Workspace", rootId: "root-1" as FileBrowserRootId },
       entries: [

@@ -24,6 +24,7 @@ pub(crate) mod task_recovery;
 pub mod tasks;
 pub mod time;
 pub mod transport;
+pub(crate) mod workspace_file_index;
 
 use std::path::PathBuf;
 use std::sync::mpsc;

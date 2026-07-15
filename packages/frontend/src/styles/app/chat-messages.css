@@ -294,7 +294,8 @@
   padding: 0;
 }
 
-.slash-command-token {
+.slash-command-token,
+.file-mention-token {
   border: 1px solid color-mix(in oklch, var(--oa-focus) 24%, var(--oa-border));
   border-radius: var(--oa-radius-sm);
   background: color-mix(in oklch, var(--oa-focus) 10%, transparent);
@@ -303,6 +304,11 @@
   font-size: 0.94em;
   padding: 0 3px;
   white-space: nowrap;
+}
+
+.file-mention-token {
+  border-color: color-mix(in oklch, var(--oa-accent) 22%, var(--oa-border));
+  background: color-mix(in oklch, var(--oa-accent) 8%, transparent);
 }
 
 .chat-user-image-link {

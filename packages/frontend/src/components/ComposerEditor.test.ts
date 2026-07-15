@@ -24,6 +24,12 @@ describe("ComposerEditor markup", () => {
     );
   });
 
+  it("renders workspace file mentions as syntax-only tokens", () => {
+    expect(renderEditorHtml('Read @src/main.rs and @"docs/team deck.pptx"', undefined)).toBe(
+      'Read <span class="composer-file-token" title="Workspace file">@src/main.rs</span> and <span class="composer-file-token" title="Workspace file">@&quot;docs/team deck.pptx&quot;</span>',
+    );
+  });
+
   it("restores the focused editor selection after refreshed markup is committed", () => {
     const textNode = { textContent: "keep cursor stable" };
     const range = {

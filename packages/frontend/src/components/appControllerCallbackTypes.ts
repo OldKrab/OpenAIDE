@@ -20,6 +20,7 @@ import type {
   BackendConnection,
   TaskSnapshot as ProtocolTaskSnapshot,
   TaskId,
+  TaskSearchFilesResult,
   WorkspaceBrowserRoot,
   WorkspaceListDirectoryResult,
 } from "@openaide/app-server-client";
@@ -100,6 +101,8 @@ export type TaskFileBrowserCallbacks = {
   attachPastedImage: (file: File, draft?: NewTaskDraftInput) => Promise<void>;
   listDirectory: (rootId: FileBrowserRootId, directoryId?: FileBrowserEntryId) => Promise<AttachmentListDirectoryResult>;
   listRoots: () => Promise<FileBrowserRoot[]>;
+  /** Searches the current Task Workspace and returns protocol-relative paths. */
+  searchFiles: (query: string) => Promise<TaskSearchFilesResult>;
 };
 
 export type WorkspaceBrowserCallbacks = {

@@ -3,6 +3,7 @@ import {
   ATTACHMENT_CREATE_PASTED_IMAGE,
   ATTACHMENT_LIST_DIRECTORY,
   ATTACHMENT_LIST_ROOTS,
+  TASK_SEARCH_FILES,
   WORKSPACE_LIST_DIRECTORY,
   WORKSPACE_LIST_ROOTS,
   type AttachmentHandleId,
@@ -173,6 +174,12 @@ function createFileBrowserCallbacks({
 
   return {
     ownerKey: `new-task-files:${operation.id}`,
+    searchFiles: async (query: string) => {
+      const lease = await ensureTaskId();
+      const result = await request(TASK_SEARCH_FILES, { taskId: lease.taskId, query });
+      assertOperationCurrent();
+      return result;
+    },
     listRoots: async () => {
       const lease = await ensureTaskId();
       const result = await request(ATTACHMENT_LIST_ROOTS, { taskId: lease.taskId });

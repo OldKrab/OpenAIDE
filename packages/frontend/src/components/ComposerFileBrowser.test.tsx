@@ -124,6 +124,7 @@ function fileBrowserCallbacks(
     attachPastedImage: vi.fn(async () => undefined),
     listDirectory: vi.fn(async () => directoryListing(directoryLabel)),
     listRoots: vi.fn(async () => [{ label: "Workspace", rootId: "root-1" as FileBrowserRootId }]),
+    searchFiles: vi.fn(async () => ({ taskId: "task-1" as never, state: "ready" as const, paths: [] })),
   };
 }
 

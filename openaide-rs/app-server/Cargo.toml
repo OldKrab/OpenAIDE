@@ -17,6 +17,9 @@ thiserror.workspace = true
 tokio.workspace = true
 uuid.workspace = true
 fs2.workspace = true
+ignore.workspace = true
+notify.workspace = true
+nucleo-matcher.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

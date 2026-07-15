@@ -37,7 +37,7 @@ OpenAIDE keeps at most one client-private New Task for each stable `clientInstan
 - Ordinary navigation, view unmount, and switching to Settings or an existing Task retain the New Task and its Native Session. Only explicit discard removes it before first Send.
 - The first durably accepted User message atomically makes the same Task visible through normal Task queries and events.
 - App Server owns Task identity, Native Session state, options, commands, readiness, capabilities, attachment resolver resources, first-Send promotion, and durable Chat.
-- Frontend owns unsent text, visible attachment-row presentation, and ephemeral streaming presentation.
+- Frontend owns unsent text, `@file` mention text, visible image-row presentation, and ephemeral streaming presentation.
 - **Native Session update consumer** is the canonical name for the one session-lifetime listener that projects `session/update` notifications into Task state.
 - **Baseline** is a complete authoritative snapshot for one subscribed scope at one scope-local revision.
 
@@ -292,9 +292,9 @@ A Task stores one optional title with Prompt, Agent, or User provenance. New Tas
 - Explicitly internal cleanup and support diagnostics may inspect New Tasks.
 - After promotion, normal visible-Task authorization and subscription rules apply.
 
-## Attachments
+## Images And Workspace File Mentions
 
-Frontend owns visible row order and presentation metadata. App Server owns opaque resolver resources, safe file validation, allowed-root enforcement, delivery conversion, single-use consumption, and client and Task authorization.
+Image attachments use opaque resolver resources. Frontend owns visible row order and presentation metadata. App Server owns safe validation, delivery conversion, single-use consumption, and client and Task authorization.
 
 - Attachment creation requires the real Task id and owning client connection.
 - Frontend caches safe row metadata plus opaque handle ids; paths and file bytes are never authoritative Frontend state.
@@ -302,6 +302,10 @@ Frontend owns visible row order and presentation metadata. App Server owns opaqu
 - `task/send` submits handle ids only.
 - Successful Send consumes handles; failed validation keeps them usable; row removal or New Task discard releases them.
 - Unsent attachment rows are not reconstructed after full reload. Handles are not reload-durable unless a separate specification introduces a client-private attachment manifest.
+
+Workspace files are not attachments. Typing `@` at the start of the prompt or after whitespace opens completion for the current Task Workspace. The App Server searches a bounded, watched index of tracked and non-ignored untracked files using effective Git ignore rules. Selecting a result inserts ordinary text as `@relative/path`, or `@"relative/path with spaces"` when quoting is required. The text remains with the Frontend draft across Agent, Project, and prepared-Task changes.
+
+The composer and persisted User messages style this syntax without adding click behavior or claiming the path still exists. `task/send` and ACP `session/prompt` receive unchanged text: this slice creates no attachment handle, structured mention, ACP `resource_link`, or embedded `resource`. The add-context menu offers image input only; workspace-file selection is exclusively the `@` completion flow.
 
 ## Options And Slash Commands
 
@@ -320,7 +324,7 @@ While an option mutation is pending, Frontend renders the requested value in tha
 
 App Server allows up to 60 seconds for the Agent to answer the option request. A failed or timed-out mutation clears pending state, restoring the last Agent-confirmed catalog, and Frontend presents the mutation error. That error clears after ten seconds or earlier when a later complete Agent catalog changes. A late catalog that confirms the requested value renders normally through the same authoritative catalog path.
 
-Slash-command catalogs use the same snapshot and event ordering. They provide Composer assistance and add no state to `task/send` or Chat.
+Slash-command catalogs use the same snapshot and event ordering. Slash commands and `@file` completion provide Composer assistance and add no structured state to `task/send` or Chat.
 
 ## Conformance Invariants
 

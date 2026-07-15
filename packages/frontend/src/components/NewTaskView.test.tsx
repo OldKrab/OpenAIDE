@@ -452,7 +452,7 @@ describe("NewTaskView", () => {
     expect(tree.root.findByProps({ "aria-label": "Add context" }).props.disabled).toBe(true);
   });
 
-  it("enables only App Server-backed attachment actions when project context is ready", () => {
+  it("enables image upload without exposing workspace attachments when project context is ready", () => {
     const state = createInitialState();
     const project = { projectId: "project_1", label: "OpenAIDE" };
     state.projects = [project];
@@ -474,7 +474,7 @@ describe("NewTaskView", () => {
 
     act(() => tree.root.findByProps({ "aria-label": "Add context" }).props.onClick());
 
-    expect(menuButtonByStrongLabel(tree, "Workspace files").props.disabled).toBeFalsy();
+    expect(tree.root.findAllByType("strong").some((node) => node.children.join("") === "Workspace files")).toBe(false);
     expect(menuButtonByStrongLabel(tree, "Upload or photo").props.disabled).toBeFalsy();
     expect(tree.root.findAllByProps({ type: "file" })[0].props.disabled).toBeFalsy();
   });
@@ -1051,6 +1051,7 @@ function fileBrowserCallbacks(): TaskFileBrowserCallbacks {
     attachEmbedded: vi.fn(async () => undefined),
     attachFileReference: vi.fn(async () => undefined),
     attachPastedImage: vi.fn(async () => undefined),
+    searchFiles: vi.fn(async () => ({ taskId: "task-1" as never, state: "ready" as const, paths: [] })),
     listDirectory: vi.fn(async () => ({ directory: { label: "Workspace", rootId: "root-1" as never }, entries: [] })),
     listRoots: vi.fn(async () => [{ label: "Workspace", rootId: "root-1" as never }]),
   };

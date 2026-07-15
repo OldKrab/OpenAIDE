@@ -3,8 +3,9 @@ use openaide_app_server_protocol::task::{
     TaskAdoptNativeSessionParams, TaskAdoptNativeSessionResult, TaskCancelParams, TaskCancelResult,
     TaskChatPageParams, TaskChatPageResult, TaskCreateParams, TaskCreateResult, TaskDiscardParams,
     TaskDiscardResult, TaskListParams, TaskListResult, TaskMarkReadParams, TaskMarkReadResult,
-    TaskOpenParams, TaskOpenResult, TaskSendParams, TaskSendResult, TaskSetArchivedParams,
-    TaskSetArchivedResult, TaskSetConfigOptionParams, TaskSetConfigOptionResult,
+    TaskOpenParams, TaskOpenResult, TaskSearchFilesParams, TaskSearchFilesResult, TaskSendParams,
+    TaskSendResult, TaskSetArchivedParams, TaskSetArchivedResult, TaskSetConfigOptionParams,
+    TaskSetConfigOptionResult,
 };
 use serde_json::Value;
 
@@ -69,6 +70,33 @@ impl RpcGateway {
             Err(error) => return self.error(connection_id, id, meta, error),
         };
         self.result::<TaskCreateResult>(connection_id, id, meta, TaskCreateResult { task })
+    }
+
+    pub(super) fn handle_task_search_files(
+        &mut self,
+        connection_id: ConnectionId,
+        id: String,
+        params: Value,
+        meta: RequestMeta,
+    ) -> GatewayOutcome {
+        let params = match serde_json::from_value::<TaskSearchFilesParams>(params) {
+            Ok(params) => params,
+            Err(error) => {
+                return self.error(connection_id, id, meta, responses::invalid_params(error))
+            }
+        };
+        let client = self
+            .client_hub
+            .context_for_connection(&connection_id)
+            .expect("routing requires an initialized client for file search");
+        let result = match self
+            .task_file_search
+            .search_files_for_client(&client.client_instance_id, params)
+        {
+            Ok(result) => result,
+            Err(error) => return self.error(connection_id, id, meta, error),
+        };
+        self.result::<TaskSearchFilesResult>(connection_id, id, meta, result)
     }
 
     pub(super) fn handle_task_adopt_native_session(

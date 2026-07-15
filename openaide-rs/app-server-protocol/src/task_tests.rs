@@ -3,6 +3,33 @@ use serde_json::json;
 use super::*;
 
 #[test]
+fn task_file_search_is_scoped_and_uses_relative_paths() {
+    let params = TaskSearchFilesParams {
+        task_id: TaskId::new("task-1"),
+        query: "main".to_string(),
+    };
+    assert_eq!(
+        serde_json::to_value(params).unwrap(),
+        serde_json::json!({ "taskId": "task-1", "query": "main" })
+    );
+
+    let result = TaskSearchFilesResult {
+        task_id: TaskId::new("task-1"),
+        state: WorkspaceFileSearchState::Ready,
+        paths: vec!["src/main.rs".to_string()],
+        notice: None,
+    };
+    assert_eq!(
+        serde_json::to_value(result).unwrap(),
+        serde_json::json!({
+            "taskId": "task-1",
+            "state": "ready",
+            "paths": ["src/main.rs"]
+        })
+    );
+}
+
+#[test]
 fn task_send_message_is_text_plus_ordered_attachment_handles() {
     let params = TaskSendParams {
         task_id: "task-1".into(),
