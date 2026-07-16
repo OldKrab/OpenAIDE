@@ -14,7 +14,7 @@ import {
   setSelectionOffsets,
   type EditorSelection,
 } from "./composerEditorSelection";
-import { ComposerReferenceHoverLayer } from "./ComposerReferenceHover";
+import { ReferenceHoverLayer } from "./ComposerReferenceHover";
 
 export { captureFocusedEditorSelection, restoreEditorSelection } from "./composerEditorSelection";
 
@@ -154,9 +154,9 @@ const ComposerEditorSurface = memo(forwardRef<ComposerEditorHandle, ComposerEdit
         role="textbox"
         suppressContentEditableWarning
       />
-      <ComposerReferenceHoverLayer
+      <ReferenceHoverLayer
         contentKey={`${renderRevision}:${html}`}
-        editorRef={editorRef}
+        rootRef={editorRef}
       />
     </>
   );

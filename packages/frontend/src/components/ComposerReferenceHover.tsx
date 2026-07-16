@@ -58,18 +58,18 @@ type HoverTarget = {
   model: ComposerReferenceHoverModel;
 };
 
-type ComposerReferenceHoverLayerProps = {
-  contentKey: string;
-  editorRef: RefObject<HTMLDivElement | null>;
+type ReferenceHoverLayerProps = {
+  contentKey?: string;
+  rootRef: RefObject<HTMLElement | null>;
 };
 
 const OPEN_DELAY_MS = 300;
 
-/** Owns hover state outside the editor so quick info never rerenders the contenteditable surface. */
-export function ComposerReferenceHoverLayer({
+/** Delegates reference hover without adding state to the text surface that owns the tokens. */
+export function ReferenceHoverLayer({
   contentKey,
-  editorRef,
-}: ComposerReferenceHoverLayerProps) {
+  rootRef,
+}: ReferenceHoverLayerProps) {
   const [target, setTarget] = useState<HoverTarget>();
   const activeTargetRef = useRef<HoverTarget | undefined>(undefined);
   const pendingAnchorRef = useRef<HTMLElement | undefined>(undefined);
@@ -87,14 +87,14 @@ export function ComposerReferenceHoverLayer({
   }, [contentKey]);
 
   useEffect(() => {
-    const editor = editorRef.current;
-    // Renderer tests use a minimal editor ref; quick info only exists in a browser DOM.
-    if (!editor || typeof editor.addEventListener !== "function") return;
+    const root = rootRef.current;
+    // Renderer tests use minimal element refs; quick info only exists in a browser DOM.
+    if (!root || typeof root.addEventListener !== "function") return;
 
     const referenceFromEventTarget = (eventTarget: EventTarget | null) => {
       if (!(eventTarget instanceof Element)) return undefined;
       const reference = eventTarget.closest<HTMLElement>("[data-reference-kind]");
-      return reference && editor.contains(reference) ? reference : undefined;
+      return reference && root.contains(reference) ? reference : undefined;
     };
     const clearPendingOpen = () => {
       clearTimeout(openTimerRef.current);
@@ -133,16 +133,16 @@ export function ComposerReferenceHoverLayer({
     };
     const handlePointerLeave = () => closeReference(undefined);
 
-    editor.addEventListener("pointerover", handlePointerOver);
-    editor.addEventListener("pointerout", handlePointerOut);
-    editor.addEventListener("pointerleave", handlePointerLeave);
+    root.addEventListener("pointerover", handlePointerOver);
+    root.addEventListener("pointerout", handlePointerOut);
+    root.addEventListener("pointerleave", handlePointerLeave);
     return () => {
       clearPendingOpen();
-      editor.removeEventListener("pointerover", handlePointerOver);
-      editor.removeEventListener("pointerout", handlePointerOut);
-      editor.removeEventListener("pointerleave", handlePointerLeave);
+      root.removeEventListener("pointerover", handlePointerOver);
+      root.removeEventListener("pointerout", handlePointerOut);
+      root.removeEventListener("pointerleave", handlePointerLeave);
     };
-  }, [editorRef]);
+  }, [rootRef]);
 
   return target ? <ComposerReferenceHover target={target} /> : null;
 }
