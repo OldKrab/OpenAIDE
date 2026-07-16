@@ -17,7 +17,7 @@ export function SlashCommandText({ text, commands }: SlashCommandTextProps) {
         key={`command-${match.token.start}-${match.token.end}`}
         title={`${slashCommandDisplayName(match.command)}${match.command.input_hint ? ` ${match.command.input_hint}` : ""}: ${match.command.description}`}
       >
-        <ReferenceToken value={text.slice(match.token.start, match.token.end)} />
+        {text.slice(match.token.start, match.token.end)}
       </span>
     ),
     start: match.token.start,
@@ -26,7 +26,7 @@ export function SlashCommandText({ text, commands }: SlashCommandTextProps) {
     end: range.end,
     node: (
       <span className="file-mention-token reference-token" key={`file-${range.start}-${range.end}`}>
-        <ReferenceToken value={text.slice(range.start, range.end)} />
+        {text.slice(range.start, range.end)}
       </span>
     ),
     start: range.start,
@@ -44,13 +44,4 @@ export function SlashCommandText({ text, commands }: SlashCommandTextProps) {
   }
   if (cursor < text.length) nodes.push(text.slice(cursor));
   return <>{nodes}</>;
-}
-
-function ReferenceToken({ value }: { value: string }) {
-  return (
-    <>
-      <span className="reference-token-sigil">{value.slice(0, 1)}</span>
-      <span className="reference-token-label">{value.slice(1)}</span>
-    </>
-  );
 }

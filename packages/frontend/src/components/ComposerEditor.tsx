@@ -190,8 +190,7 @@ export function renderEditorHtml(text: string, commandCatalog: AgentCommandsCata
 }
 
 function renderReferenceToken(kind: "command" | "file", value: string, title: string) {
-  const [sigil, ...label] = value;
-  return `<span class="composer-reference-token composer-${kind}-token" spellcheck="false" title="${escapeHtml(title)}"><span class="composer-reference-sigil">${escapeHtml(sigil ?? "")}</span><span class="composer-reference-label">${escapeHtml(label.join(""))}</span></span>`;
+  return `<span class="composer-reference-token composer-${kind}-token" spellcheck="false" title="${escapeHtml(title)}">${escapeHtml(value)}</span>`;
 }
 
 function renderPlainTextHtml(text: string) {

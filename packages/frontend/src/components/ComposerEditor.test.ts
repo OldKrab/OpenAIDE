@@ -20,13 +20,13 @@ describe("ComposerEditor markup", () => {
     };
 
     expect(renderEditorHtml("/ship ", commandCatalog)).toBe(
-      "<span class=\"composer-reference-token composer-command-token\" spellcheck=\"false\" title=\"/ship: Use &lt;fast&gt; &amp; safe mode Argument: &quot;note&quot;.\"><span class=\"composer-reference-sigil\">/</span><span class=\"composer-reference-label\">ship</span></span> ",
+      "<span class=\"composer-reference-token composer-command-token\" spellcheck=\"false\" title=\"/ship: Use &lt;fast&gt; &amp; safe mode Argument: &quot;note&quot;.\">/ship</span> ",
     );
   });
 
   it("renders workspace file mentions as syntax-only tokens", () => {
     expect(renderEditorHtml('Read @src/main.rs and @"docs/team deck.pptx"', undefined)).toBe(
-      'Read <span class="composer-reference-token composer-file-token" spellcheck="false" title="Workspace file"><span class="composer-reference-sigil">@</span><span class="composer-reference-label">src/main.rs</span></span> and <span class="composer-reference-token composer-file-token" spellcheck="false" title="Workspace file"><span class="composer-reference-sigil">@</span><span class="composer-reference-label">&quot;docs/team deck.pptx&quot;</span></span>',
+      'Read <span class="composer-reference-token composer-file-token" spellcheck="false" title="Workspace file">@src/main.rs</span> and <span class="composer-reference-token composer-file-token" spellcheck="false" title="Workspace file">@&quot;docs/team deck.pptx&quot;</span>',
     );
   });
 

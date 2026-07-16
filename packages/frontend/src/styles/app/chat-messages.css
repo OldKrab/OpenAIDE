@@ -295,41 +295,14 @@
 }
 
 .reference-token {
-  border: 1px solid color-mix(in oklch, var(--oa-focus) 24%, var(--oa-border));
-  border-radius: var(--oa-radius-xs);
-  background: color-mix(in oklch, var(--oa-focus) 7%, var(--oa-panel));
-  color: var(--oa-text);
-  display: inline-block;
-  font-family: var(--vscode-editor-font-family, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
-  font-size: 0.94em;
-  line-height: 1.35;
-  overflow: hidden;
-  vertical-align: -0.1em;
+  color: var(--oa-reference-file);
+  font: inherit;
+  font-weight: 520;
   white-space: nowrap;
 }
 
-.file-mention-token {
-  border-color: color-mix(in oklch, var(--oa-accent) 22%, var(--oa-border));
-  background: color-mix(in oklch, var(--oa-accent) 6%, var(--oa-panel));
-}
-
-.reference-token-sigil,
-.reference-token-label {
-  display: inline-block;
-  padding: 0 3px;
-}
-
-.reference-token-sigil {
-  border-right: 1px solid color-mix(in oklch, var(--oa-focus) 20%, var(--oa-border));
-  background: color-mix(in oklch, var(--oa-focus) 12%, transparent);
-  color: var(--oa-focus);
-  font-weight: 650;
-}
-
-.file-mention-token .reference-token-sigil {
-  border-right-color: color-mix(in oklch, var(--oa-accent) 18%, var(--oa-border));
-  background: color-mix(in oklch, var(--oa-accent) 10%, transparent);
-  color: var(--oa-accent);
+.slash-command-token {
+  color: var(--oa-reference-command);
 }
 
 .chat-user-image-link {

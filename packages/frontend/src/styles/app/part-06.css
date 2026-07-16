@@ -63,49 +63,15 @@
 }
 
 .composer-reference-token {
-  border: 1px solid color-mix(in oklch, var(--oa-focus) 27%, var(--oa-border));
-  border-radius: var(--oa-radius-xs);
-  background: color-mix(in oklch, var(--oa-focus) 7%, var(--oa-panel));
-  color: var(--oa-text);
+  color: var(--oa-reference-file);
   cursor: text;
-  display: inline-block;
-  font-family: var(--vscode-editor-font-family, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
-  line-height: 1.35;
-  overflow: hidden;
-  vertical-align: -0.12em;
+  font: inherit;
+  font-weight: 520;
   white-space: nowrap;
 }
 
-.composer-file-token {
-  border-color: color-mix(in oklch, var(--oa-accent) 25%, var(--oa-border));
-  background: color-mix(in oklch, var(--oa-accent) 6%, var(--oa-panel));
-}
-
-.composer-reference-sigil,
-.composer-reference-label {
-  display: inline-block;
-  padding: 0 3px;
-}
-
-.composer-reference-sigil {
-  border-right: 1px solid color-mix(in oklch, var(--oa-focus) 22%, var(--oa-border));
-  background: color-mix(in oklch, var(--oa-focus) 13%, transparent);
-  color: var(--oa-focus);
-  font-weight: 650;
-}
-
-.composer-file-token .composer-reference-sigil {
-  border-right-color: color-mix(in oklch, var(--oa-accent) 20%, var(--oa-border));
-  background: color-mix(in oklch, var(--oa-accent) 11%, transparent);
-  color: var(--oa-accent);
-}
-
-.composer-reference-token:hover {
-  border-color: color-mix(in oklch, var(--oa-focus) 42%, var(--oa-border));
-}
-
-.composer-file-token:hover {
-  border-color: color-mix(in oklch, var(--oa-accent) 38%, var(--oa-border));
+.composer-command-token {
+  color: var(--oa-reference-command);
 }
 
 .composer-file-popover {
