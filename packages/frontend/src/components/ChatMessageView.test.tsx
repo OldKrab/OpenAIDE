@@ -32,6 +32,28 @@ describe("ChatRow", () => {
     expect(agentHtml).toContain('aria-label="Copy message"');
   });
 
+  it("keeps command and file quick-info metadata in a sent user message", async () => {
+    const { ChatRow } = await import("./ChatMessageView");
+    const html = renderToStaticMarkup(
+      <ChatRow
+        commandCatalog={{
+          agent_id: "codex",
+          commands: [{ name: "$review", description: "Review the current changes." }],
+          status: "ready",
+        }}
+        message={userMessage("u1", "/$review this @src/App.tsx")}
+        onPermissionRespond={vi.fn()}
+        taskId="task_1"
+      />,
+    );
+
+    expect(html).toContain('data-reference-description="Review the current changes."');
+    expect(html).toContain('data-reference-label="/$review"');
+    expect(html).toContain('data-reference-description="TypeScript React · src"');
+    expect(html).toContain('data-reference-label="App.tsx"');
+    expect(html).not.toContain('title="/$review');
+  });
+
   it("shows a caret only when live Frontend presentation requests it", async () => {
     const { ChatRow } = await import("./ChatMessageView");
     const streamingHtml = renderToStaticMarkup(

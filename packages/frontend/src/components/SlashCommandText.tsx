@@ -1,7 +1,11 @@
 import type { ReactNode } from "react";
 import type { AgentCommandsCatalog } from "@openaide/app-shell-contracts";
-import { exactSlashCommandMatches, slashCommandDisplayName } from "./commandSearch";
-import { fileMentionRanges } from "./ComposerFileMentions";
+import { exactSlashCommandMatches } from "./commandSearch";
+import {
+  fileMentionPath,
+  fileMentionRanges,
+  fileReferenceDetails,
+} from "./ComposerFileMentions";
 
 type SlashCommandTextProps = {
   text: string;
@@ -9,28 +13,47 @@ type SlashCommandTextProps = {
 };
 
 export function SlashCommandText({ text, commands }: SlashCommandTextProps) {
-  const commandMatches = exactSlashCommandMatches(text, commands?.commands).map((match) => ({
-    end: match.token.end,
-    node: (
-      <span
-        className="slash-command-token reference-token"
-        key={`command-${match.token.start}-${match.token.end}`}
-        title={`${slashCommandDisplayName(match.command)}${match.command.input_hint ? ` ${match.command.input_hint}` : ""}: ${match.command.description}`}
-      >
-        {text.slice(match.token.start, match.token.end)}
-      </span>
-    ),
-    start: match.token.start,
-  }));
-  const fileMatches = fileMentionRanges(text).map((range) => ({
-    end: range.end,
-    node: (
-      <span className="file-mention-token reference-token" key={`file-${range.start}-${range.end}`}>
-        {text.slice(range.start, range.end)}
-      </span>
-    ),
-    start: range.start,
-  }));
+  const commandMatches = exactSlashCommandMatches(text, commands?.commands).map((match) => {
+    const label = text.slice(match.token.start, match.token.end);
+    return {
+      end: match.token.end,
+      node: (
+        <span
+          className="slash-command-token reference-token"
+          data-reference-description={match.command.description}
+          data-reference-kind="command"
+          data-reference-label={label}
+          data-reference-type="Skill"
+          key={`command-${match.token.start}-${match.token.end}`}
+        >
+          {label}
+        </span>
+      ),
+      start: match.token.start,
+    };
+  });
+  const fileMatches = fileMentionRanges(text).map((range) => {
+    const mention = text.slice(range.start, range.end);
+    const file = fileReferenceDetails(fileMentionPath(mention));
+    return {
+      end: range.end,
+      node: (
+        <span
+          className="file-mention-token reference-token"
+          data-reference-description={`${file.type} · ${file.location}`}
+          data-reference-file-kind={file.kind}
+          data-reference-kind="file"
+          data-reference-label={file.name}
+          data-reference-path={file.path}
+          data-reference-type="Workspace file"
+          key={`file-${range.start}-${range.end}`}
+        >
+          {mention}
+        </span>
+      ),
+      start: range.start,
+    };
+  });
   const matches = [...commandMatches, ...fileMatches].sort((left, right) => left.start - right.start);
   if (!matches.length) return <>{text}</>;
 

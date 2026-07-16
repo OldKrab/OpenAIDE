@@ -1,11 +1,12 @@
 import { CircleAlert, ChevronRight, FileText } from "lucide-react";
-import { memo, useState } from "react";
+import { memo, useRef, useState } from "react";
 import type { ActivityToolDetails, AgentCommandsCatalog, AgentMessagePart, Attachment, ChatMessage, ElicitationResponse } from "@openaide/app-shell-contracts";
 import { AgentMarkdown, splitDataImageMarkdown } from "./AgentMarkdown";
 import { AttachmentImagePreviewLightbox, chatImagePreview, type AttachmentImagePreviewSource } from "./AttachmentImagePreview";
 import { ChatActivityView } from "./ChatActivityView";
 import { MessageCopyAction } from "./chatMessageActions";
 import { ChatPermissionCard } from "./ChatPermissionCard";
+import { ReferenceHoverLayer } from "./ComposerReferenceHover";
 import { QuestionCard } from "./QuestionCard";
 import { SlashCommandText } from "./SlashCommandText";
 import { UserMessageAttachments } from "./UserMessageAttachments";
@@ -44,14 +45,16 @@ export const ChatRow = memo(function ChatRow({
   presentLiveText?: boolean;
 }) {
   const [openImage, setOpenImage] = useState<AttachmentImagePreviewSource | undefined>();
+  const referenceRootRef = useRef<HTMLDivElement | null>(null);
   const body = message.message;
   if (body.kind === "user") {
     const hasText = body.text.trim().length > 0;
     return (
-      <div className="chat-user-block">
+      <div className="chat-user-block" ref={referenceRootRef}>
         {body.attachments?.length ? <UserAttachments attachments={body.attachments} onOpenImage={setOpenImage} /> : null}
         {hasText ? <UserMessageText commandCatalog={commandCatalog} onOpenImage={setOpenImage} text={body.text} /> : null}
         {hasText ? <MessageCopyAction align="end" text={body.text} /> : null}
+        <ReferenceHoverLayer contentKey={body.text} rootRef={referenceRootRef} />
         {openImage ? <AttachmentImagePreviewLightbox image={openImage} onClose={() => setOpenImage(undefined)} /> : null}
       </div>
     );
