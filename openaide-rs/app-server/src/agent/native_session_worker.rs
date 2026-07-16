@@ -10,23 +10,33 @@ use crate::agent::acp_config_options_apply::set_task_config_option_after_prior_u
 use crate::agent::acp_prompt_runner::{
     dispatch_session_notification, run_prompt, PromptRunContext,
 };
+use crate::agent::acp_schema::InitializeResponse;
 use crate::agent::acp_session_catalogs::{
     attach_session_event_sink_to_slot, PendingSessionCatalogs,
 };
 use crate::agent::acp_session_client::{AcpSessionCommand, AcpSessionConfigCommand};
+use crate::agent::acp_session_lifecycle::LoadReplayCaptures;
 use crate::agent::acp_session_opening::OpenedAcpSession;
+use crate::agent::acp_session_paths::normalized_session_cwd;
+use crate::agent::acp_session_runner::AcpSessionRunner;
 use crate::agent::acp_session_termination::{close_active_session, delete_active_session};
 use crate::agent::acp_trace::AcpTraceSession;
 use crate::agent::acp_update_projection::LivePromptProjection;
-use crate::agent::{AgentSession, AgentSessionEventSink};
+use crate::agent::{
+    AgentLoadedSession, AgentPromptCapabilities, AgentSession, AgentSessionEventSink,
+};
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{ConfigOptionsCatalog, ConfigOptionsStatus};
 
 const IDLE_SESSION_CLOSE_TIMEOUT: Duration = Duration::from_secs(2);
 
-pub(super) struct AcpOpenedSessionWorkerInput {
+/// Long-running owner of one live Agent Native Session and its ACP event loop.
+pub(super) struct NativeSessionWorker {
     pub(super) opened: OpenedAcpSession,
     pub(super) request_agent_id: String,
+    pub(super) initialize: InitializeResponse,
+    pub(super) auth_method_id: Option<String>,
+    pub(super) load_replay: LoadReplayCaptures,
     pub(super) command_rx: tokio_mpsc::UnboundedReceiver<AcpSessionCommand>,
     pub(super) config_rx: tokio_mpsc::UnboundedReceiver<AcpSessionConfigCommand>,
     pub(super) cancel_rx: tokio_mpsc::UnboundedReceiver<()>,
@@ -37,12 +47,15 @@ pub(super) struct AcpOpenedSessionWorkerInput {
     pub(super) session_idle_timeout: Duration,
 }
 
-pub(super) async fn run_opened_acp_session(
-    input: AcpOpenedSessionWorkerInput,
+pub(super) async fn run_native_session_worker(
+    worker: NativeSessionWorker,
 ) -> agent_client_protocol::Result<()> {
-    let AcpOpenedSessionWorkerInput {
+    let NativeSessionWorker {
         opened,
         request_agent_id,
+        initialize,
+        auth_method_id,
+        load_replay,
         mut command_rx,
         mut config_rx,
         mut cancel_rx,
@@ -51,7 +64,7 @@ pub(super) async fn run_opened_acp_session(
         trace,
         session_event_sinks,
         session_idle_timeout,
-    } = input;
+    } = worker;
     let OpenedAcpSession {
         mut active_session,
         supports_session_close,
@@ -107,6 +120,42 @@ pub(super) async fn run_opened_acp_session(
                             request_agent_id.clone(),
                             sink,
                         ));
+                    }
+                    AcpSessionCommand::Load { request, reply_tx } => {
+                        let connection = active_session.connection();
+                        let runner = AcpSessionRunner::new(
+                            &request_agent_id,
+                            &connection,
+                            initialize.clone(),
+                            auth_method_id.as_deref(),
+                            trace.as_ref(),
+                        );
+                        let result = runner
+                            .load(
+                                request.session_id,
+                                normalized_session_cwd(&request.cwd),
+                                &load_replay,
+                            )
+                            .await
+                            .map(|(reloaded, catalog, commands, replayed_messages)| {
+                                let session_id = reloaded.session_id().to_string();
+                                active_session = reloaded;
+                                config_catalog = catalog.clone();
+                                let session = AgentSession::new(
+                                    request_agent_id.clone(),
+                                    session_id,
+                                )
+                                .with_commands_catalog(commands)
+                                .with_prompt_capabilities(AgentPromptCapabilities {
+                                    image: content_policy.capabilities.image,
+                                })
+                                .with_config_options(&catalog);
+                                AgentLoadedSession {
+                                    session,
+                                    replayed_messages,
+                                }
+                            });
+                        let _ = reply_tx.send(result);
                     }
                     AcpSessionCommand::Prompt {
                         prompt,

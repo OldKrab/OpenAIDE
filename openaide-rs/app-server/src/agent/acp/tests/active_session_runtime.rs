@@ -551,6 +551,8 @@ for line in sys.stdin:
             elif fixture_title:
                 notify_title(fixture_title)
     elif method == "session/load":
+        if prompt_mode == "load_replay":
+            notify_text_chunk("replayed through active worker")
         respond(message, {"configOptions": []})
     elif method == "session/resume":
         respond(message, {
@@ -2741,6 +2743,70 @@ fn start_and_load_sessions_reuse_agent_process_for_same_agent() {
             "session/new",
             "session/load",
             "session/close",
+            "session/close"
+        ]
+    );
+}
+
+#[test]
+fn load_session_reuses_the_native_session_worker() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((runtime, log_path)) =
+        fixture_runtime_with_prompt_mode(&temp, "active-load-session", "load_replay")
+    else {
+        return;
+    };
+    let cwd = cwd_string();
+
+    let started = runtime
+        .start_session(start_request("task-active-load", cwd.clone()))
+        .expect("start session");
+    let loaded = runtime
+        .load_session(AgentSessionLoad {
+            agent_id: "codex".to_string(),
+            task_id: "task-active-load".to_string(),
+            session_id: started.session_id.clone(),
+            cwd,
+            model_id: None,
+            cancellation: TurnCancellation::new(),
+            secret_resolver: None,
+        })
+        .expect("reload history through active session worker");
+
+    assert_eq!(loaded.session.session_id, started.session_id);
+    assert!(matches!(
+        &loaded.replayed_messages[..],
+        [crate::protocol::model::NormalizedMessage::AgentMessage { parts, .. }]
+            if matches!(
+                &parts[..],
+                [crate::protocol::model::AgentMessagePart::Text { text }]
+                    if text == "replayed through active worker"
+            )
+    ));
+    runtime
+        .prompt(
+            AgentPrompt {
+                agent_id: "codex".to_string(),
+                task_id: "task-active-load".to_string(),
+                session_id: started.session_id.clone(),
+                text: "continue after history reload".to_string(),
+                attachments: Vec::new(),
+                cancellation: TurnCancellation::new(),
+            },
+            Arc::new(CapturingEventSink::default()),
+        )
+        .expect("prompt after history reload");
+    runtime
+        .close_session(&started.key())
+        .expect("close reloaded session");
+
+    assert_eq!(
+        read_fixture_methods(&log_path),
+        [
+            "initialize",
+            "session/new",
+            "session/load",
+            "session/prompt",
             "session/close"
         ]
     );

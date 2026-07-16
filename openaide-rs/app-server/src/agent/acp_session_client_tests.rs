@@ -52,7 +52,7 @@ fn worker_stopped_error_keeps_generic_fallback_without_terminal_error() {
 
     assert_eq!(
         error.to_string(),
-        "runtime not ready: ACP session worker stopped"
+        "runtime not ready: Native Session worker stopped"
     );
 }
 
