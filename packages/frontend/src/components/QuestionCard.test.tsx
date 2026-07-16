@@ -74,6 +74,12 @@ describe("QuestionCard", () => {
     act(() => { tree = create(<QuestionCard elicitation={resolvedQuestion()} onRespond={vi.fn()} />); });
     const compact = JSON.stringify(tree!.toJSON());
     expect(compact).toContain("Question answered");
+    expect(tree!.root.findByProps({ children: "4 answers" })).toBeDefined();
+    expect(compact).not.toContain("submitted");
+    expect(tree!.root.findByProps({ "aria-label": "Question answered" }).findByType("header")).toBeDefined();
+    expect(tree!.root.findByType("dl").children.map((child) => (
+      typeof child === "string" ? child : child.type
+    ))).toEqual(["dt", "dd", "dt", "dd", "dt", "dd"]);
     expect(compact).toContain("Form only");
     expect(compact).not.toContain("No confirmation");
 

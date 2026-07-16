@@ -290,7 +290,7 @@ App Server owns Task Attention meaning, identity, persistence, ordering, and cle
 
 Opening an existing Task is the only automatic Native Session recovery and history-synchronization trigger. App Server returns stored Task state immediately, then uses `session/resume` when Chat is not proven stale, falls back to `session/load` when resume is unsupported, and calls `session/load` directly when the cached Agent timestamp proves Chat is stale. Opening does not issue `session/list`; neither Send nor catalog refresh initiates history synchronization. Exact catalog, tolerance, replacement, failure, and publication behavior is defined by [ADR-0023](adr/0023-task-state-publication-and-replica-recovery.md), while timestamp persistence is defined by [ADR-0024](adr/0024-task-chat-persistence.md).
 
-When synchronization is required, Frontend keeps the stored Chat visible, shows `historySync: syncing`, and disables Send. A successful `session/load` atomically replaces Chat with exactly the rendered replay. Failure keeps existing Chat, appends `History update failed` Live Activity, ends syncing, and enables Send.
+When synchronization is required, Frontend keeps the stored Chat visible, shows `historySync: syncing` as ongoing progress, and disables Send. A successful `session/load` atomically replaces Chat with exactly the rendered replay, then briefly shows `History updated` as a static completion notice without animation or elapsed time. The completion notice is presentation state, not durable Chat history. Failure keeps existing Chat, appends `History update failed` Live Activity, ends syncing, and enables Send.
 
 ## Task Titles
 

@@ -53,7 +53,6 @@
   .composer textarea,
   .composer-editor {
     min-height: 36px;
-    max-height: 96px;
   }
 
   .composer-footer {

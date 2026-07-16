@@ -45,8 +45,12 @@ export function taskWorkingStatusLabel(
     if (items.some((item) => item.message_id === "app-server-preparation")) {
       return "Preparing task";
     }
-    if (items.some((item) => item.message_id === "app-server-send-capability")) {
-      return "Sending is not available";
+    if (items.some((item) => (
+      item.message_id === "app-server-send-capability"
+      || item.message_id.startsWith("app-server-preparation-")
+    ))) {
+      // Chat already renders these authoritative interruptions and their recovery actions.
+      return undefined;
     }
     return "Permission needed";
   }
@@ -110,7 +114,8 @@ export function workspaceLabel(root: string) {
   return label || "Workspace";
 }
 
-function timestampMillis(value: string) {
+/** Parses both persisted Unix-millisecond strings and ISO timestamps from App Server data. */
+export function timestampMillis(value: string) {
   const trimmed = value.trim();
   if (/^\d+$/.test(trimmed)) return Number(trimmed);
   return Date.parse(trimmed);

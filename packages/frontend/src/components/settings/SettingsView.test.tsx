@@ -1,15 +1,33 @@
 import { act, create } from "react-test-renderer";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentSettingsRecord } from "@openaide/app-shell-contracts";
 import { shouldConsumeAgentDeleteAck, shouldConsumeAgentSaveAck } from "./AgentSettingsTab";
-import { compactPathForSettings } from "./GeneralSettingsTab";
+import { compactPathForSettings, GeneralSettingsTab } from "./GeneralSettingsTab";
 import { SettingsView } from "./SettingsView";
 
 beforeEach(() => {
   (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 });
 
+afterEach(() => vi.unstubAllGlobals());
+
 describe("SettingsView custom Agent acknowledgements", () => {
+  it("hides desktop composer shortcut settings on a mobile pointer", () => {
+    vi.stubGlobal("window", {
+      matchMedia: vi.fn(() => ({ matches: true })),
+    });
+    const tree = render(
+      <GeneralSettingsTab
+        onSetAcpTrace={() => undefined}
+        onSetComposerSubmitShortcut={() => undefined}
+        preferences={{ composer_submit_shortcut: "enter" }}
+      />,
+    );
+
+    expect(tree.root.findAllByType("input").some((input) => input.props["aria-label"] === "Enter sends message")).toBe(false);
+    expect(tree.root.findAllByType("strong").some((item) => item.children.includes("New line shortcut"))).toBe(false);
+  });
+
   it("consumes save acknowledgements only for the draft that initiated the save", () => {
     expect(
       shouldConsumeAgentSaveAck({

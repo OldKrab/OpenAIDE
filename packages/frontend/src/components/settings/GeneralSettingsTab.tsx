@@ -7,6 +7,7 @@ import type {
   RuntimeSettingsResult,
 } from "@openaide/app-shell-contracts";
 import type { DesktopNotificationSettings } from "../../shells/webTaskNotifications";
+import { usesMobileComposerBehavior } from "../mobileComposerBehavior";
 
 export function GeneralSettingsTab({
   developerSettingsUnlocked = false,
@@ -26,10 +27,11 @@ export function GeneralSettingsTab({
   runtimeSettings?: RuntimeSettingsResult;
 }) {
   const [query, setQuery] = useState("");
+  const mobileComposerBehavior = usesMobileComposerBehavior();
   const enterSends = preferences.composer_submit_shortcut === "enter";
   const newLineShortcut = enterSends ? "Ctrl/Cmd+Enter" : "Enter";
   const developerSettings = runtimeSettings?.developer;
-  const groups: GeneralSettingsGroup[] = [
+  const groups: GeneralSettingsGroup[] = mobileComposerBehavior ? [] : [
     {
       id: "composer",
       label: "Composer",
@@ -138,7 +140,9 @@ export function GeneralSettingsTab({
         <SlidersHorizontal size={15} />
         <span>
           <strong>General</strong>
-          <small>{developerSettingsUnlocked ? "Composer behavior and developer diagnostics." : "Composer behavior."}</small>
+          <small>{mobileComposerBehavior
+            ? "App behavior."
+            : developerSettingsUnlocked ? "Composer behavior and developer diagnostics." : "Composer behavior."}</small>
         </span>
       </div>
       <label className="settings-filter">

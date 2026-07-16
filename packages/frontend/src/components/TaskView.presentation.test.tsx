@@ -299,16 +299,20 @@ describe("TaskView timeline presentation", () => {
     expect(retry).toHaveBeenCalledOnce();
   });
 
-  it("announces each completed history generation only once", async () => {
+  it("announces each completed history generation once as a settled notice", async () => {
     const { TaskView } = await import("./TaskView");
     const updated = snapshotWithAuthoritativeTail(true);
     updated.history_sync = { state: "updated", generation: 3 };
+    updated.active_turn_started_at = String(Date.now() - 60_000);
     let tree!: ReactTestRenderer;
 
     act(() => {
       tree = create(<TaskView {...taskViewProps(updated)} />);
     });
     expect(JSON.stringify(tree.toJSON())).toContain("History updated");
+    expect(tree.root.findAllByProps({ className: "working-status working-status-notice" })).toHaveLength(1);
+    expect(tree.root.findAllByProps({ className: "working-status-dots" })).toHaveLength(0);
+    expect(tree.root.findAllByProps({ className: "working-status-duration" })).toHaveLength(0);
 
     act(() => {
       vi.advanceTimersByTime(2_000);
@@ -325,6 +329,66 @@ describe("TaskView timeline presentation", () => {
     });
 
     expect(JSON.stringify(tree.toJSON())).not.toContain("History updated");
+  });
+
+  it("presents a bare waiting fallback as blocked instead of working", async () => {
+    const { TaskView } = await import("./TaskView");
+    const waiting = snapshotWithAuthoritativeTail(true);
+    waiting.task.status = "waiting";
+    waiting.active_turn_started_at = String(Date.now() - 60_000);
+    let tree!: ReactTestRenderer;
+
+    act(() => {
+      tree = create(<TaskView {...taskViewProps(waiting)} />);
+    });
+
+    expect(JSON.stringify(tree.toJSON())).toContain("Permission needed");
+    expect(tree.root.findAllByProps({ className: "working-status working-status-blocked" })).toHaveLength(1);
+    expect(tree.root.findAllByProps({ className: "working-status-dots" })).toHaveLength(0);
+    expect(tree.root.findAllByProps({ className: "working-status-duration" })).toHaveLength(0);
+  });
+
+  it("does not duplicate a send-capability interruption in the status footer", async () => {
+    const { TaskView } = await import("./TaskView");
+    const blocked = snapshotWithAuthoritativeTail(true);
+    blocked.task.status = "waiting";
+    blocked.chat.items.push(interruptionMessage(
+      "app-server-send-capability",
+      "Sending is not available.",
+    ));
+    let tree!: ReactTestRenderer;
+
+    act(() => {
+      tree = create(<TaskView {...taskViewProps(blocked)} />);
+    });
+
+    expect(JSON.stringify(tree.toJSON())).toContain("Sending is not available.");
+    expect(tree.root.findAll((node) => (
+      typeof node.props.className === "string"
+      && node.props.className.split(" ").includes("working-status")
+    ))).toHaveLength(0);
+  });
+
+  it("does not label a preparation interruption as permission work", async () => {
+    const { TaskView } = await import("./TaskView");
+    const blocked = snapshotWithAuthoritativeTail(true);
+    blocked.task.status = "waiting";
+    blocked.chat.items.push(interruptionMessage(
+      "app-server-preparation-blocked",
+      "Choose a workspace to continue.",
+    ));
+    let tree!: ReactTestRenderer;
+
+    act(() => {
+      tree = create(<TaskView {...taskViewProps(blocked)} />);
+    });
+
+    expect(JSON.stringify(tree.toJSON())).toContain("Choose a workspace to continue.");
+    expect(JSON.stringify(tree.toJSON())).not.toContain("Permission needed");
+    expect(tree.root.findAll((node) => (
+      typeof node.props.className === "string"
+      && node.props.className.split(" ").includes("working-status")
+    ))).toHaveLength(0);
   });
 
   it("locks Agent configuration while the Task subscription is unavailable", async () => {
@@ -630,6 +694,23 @@ function thoughtText(messageId: string, text: string): ChatMessage {
       role: "thought",
       parts: [{ kind: "text", text }],
       created_at: "2026-07-12T00:00:00Z",
+    },
+  };
+}
+
+function interruptionMessage(messageId: string, message: string): ChatMessage {
+  return {
+    cursor: messageId,
+    identity: messageId,
+    message_id: messageId,
+    message_type: "interruption",
+    message: {
+      kind: "interruption",
+      id: messageId,
+      reason: "backend_unavailable",
+      message,
+      created_at: "2026-07-12T00:00:00Z",
+      recoverable: true,
     },
   };
 }

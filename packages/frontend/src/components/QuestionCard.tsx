@@ -1,5 +1,5 @@
 import { AlertCircle, Check, CircleX, LoaderCircle } from "lucide-react";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import type {
   ElicitationMessage,
   ElicitationResponse,
@@ -91,32 +91,39 @@ function ResolvedQuestion({ elicitation }: { elicitation: ElicitationMessage }) 
   const failed = elicitation.state === "error";
   const answers = elicitation.answers ?? [];
   const shownAnswers = expanded ? answers : answers.slice(0, 3);
-  const title = answered ? "Question answered" : failed ? "Question unavailable" : "Question closed";
-  const detail = answered
-    ? `${answers.length} ${answers.length === 1 ? "answer" : "answers"} submitted`
-    : failed
-      ? (elicitation.error ?? "The question could not be answered")
-      : (elicitation.resolution_message ?? "Closed without response");
+  const answerCount = `${answers.length} ${answers.length === 1 ? "answer" : "answers"}`;
+  if (answered) {
+    return (
+      <section aria-label="Question answered" className="question-card question-card-resolved resolved">
+        <QuestionHeader icon="answered" prompt={answerCount} status="Question answered" />
+        {shownAnswers.length ? (
+          <div className="question-answer-preview">
+            <dl>
+              {shownAnswers.map((answer) => (
+                <Fragment key={answer.field_id}>
+                  <dt>{answer.label}</dt>
+                  <dd>{displayAnswer(answer.value)}</dd>
+                </Fragment>
+              ))}
+            </dl>
+            {answers.length > 3 ? (
+              <button onClick={() => setExpanded((current) => !current)} type="button">
+                {expanded ? "Show less" : "Show all"}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+      </section>
+    );
+  }
+
+  const title = failed ? "Question unavailable" : "Question closed";
+  const detail = failed
+    ? (elicitation.error ?? "The question could not be answered")
+    : (elicitation.resolution_message ?? "Closed without response");
   return (
     <section aria-label={title} className={`question-card question-card-resolved ${elicitation.state}`}>
-      <QuestionHeader icon={answered ? "answered" : failed ? "error" : "closed"} prompt={detail} status={title} />
-      {answered && shownAnswers.length ? (
-        <div className="question-answer-preview">
-          <dl>
-            {shownAnswers.map((answer) => (
-              <div key={answer.field_id}>
-                <dt>{answer.label}</dt>
-                <dd>{displayAnswer(answer.value)}</dd>
-              </div>
-            ))}
-          </dl>
-          {answers.length > 3 ? (
-            <button onClick={() => setExpanded((current) => !current)} type="button">
-              {expanded ? "Show less" : "Show all"}
-            </button>
-          ) : null}
-        </div>
-      ) : null}
+      <QuestionHeader icon={failed ? "error" : "closed"} prompt={detail} status={title} />
     </section>
   );
 }
@@ -132,15 +139,21 @@ function QuestionHeader({
 }) {
   return (
     <header className="question-heading">
-      <span className={`question-symbol ${icon}`} aria-hidden="true">
-        {icon === "answered" ? <Check size={13} /> : icon === "closed" ? <CircleX size={13} /> : icon === "error" ? <AlertCircle size={13} /> : "?"}
-      </span>
+      <QuestionSymbol icon={icon} />
       <span className="question-heading-copy">
         <strong>{status === "Waiting" || status === "Responding" ? "Question" : status}</strong>
         <small>{prompt}</small>
       </span>
       {(status === "Waiting" || status === "Responding") ? <span className="question-state">{status}</span> : null}
     </header>
+  );
+}
+
+function QuestionSymbol({ icon }: { icon: "pending" | "answered" | "closed" | "error" }) {
+  return (
+    <span className={`question-symbol ${icon}`} aria-hidden="true">
+      {icon === "answered" ? <Check size={13} /> : icon === "closed" ? <CircleX size={13} /> : icon === "error" ? <AlertCircle size={13} /> : "?"}
+    </span>
   );
 }
 

@@ -137,6 +137,8 @@ describe("task list row styles", () => {
     expect(appCss).toMatch(/\.message-list > \.activity-group \+ \.working-status\s*{[^}]*margin-top:\s*28px;/);
     expect(appCss).toMatch(/\.working-status\s*{[^}]*color:\s*var\(--oa-muted\);[^}]*display:\s*inline-flex;/);
     expect(appCss).toMatch(/\.working-status-dots span\s*{[^}]*animation:\s*working-dot-pulse 1\.2s ease-in-out infinite;/);
+    expect(appCss).toMatch(/\.working-status-duration-separator\s*{[^}]*width:\s*1px;[^}]*height:\s*12px;[^}]*background:\s*var\(--oa-border\);/);
+    expect(appCss).toMatch(/\.working-status-duration\s*{[^}]*font-variant-numeric:\s*tabular-nums;[^}]*white-space:\s*nowrap;/);
     expect(appCss).toMatch(/@media \(prefers-reduced-motion:\s*reduce\)\s*{[^}]*\.working-status-dots span,\s*\.composer-submit-pending svg\s*{\s*animation:\s*none;/);
   });
 
@@ -265,6 +267,9 @@ describe("task list row styles", () => {
     expect(appCss).toMatch(/\.composer-send-button\s*{[^}]*width:\s*32px;[^}]*height:\s*32px;[^}]*border-radius:\s*999px;/);
     expect(appCss).not.toMatch(/body\[data-shell="web"\] \.composer\s*{[^}]*width:\s*min\(760px, 100%\)/);
     expect(appCss).not.toMatch(/body\[data-shell="web"\] \.new-task-context-controls\s*{[^}]*width:\s*fit-content/);
+    expect(appCss).toMatch(/\.task-surface:not\(\.new-task-surface\) \.composer\s*{\s*max-height:\s*50dvh;/);
+    expect(appCss).toMatch(/\.composer textarea,\s*\.composer-editor\s*{[^}]*min-height:\s*40px;[^}]*max-height:\s*calc\(50dvh - 72px\);/);
+    expect(appCss).toMatch(/\.new-task-surface \.composer textarea,\s*\.new-task-surface \.composer-editor\s*{\s*max-height:\s*min\(480px,\s*65dvh\);/);
   });
 
   it("keeps shared composer send and stop hover states specific", () => {
