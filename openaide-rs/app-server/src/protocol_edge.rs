@@ -49,12 +49,12 @@ use crate::shell_file_handles::ShellFileRevealRegistry;
 use crate::snapshots::{SnapshotBuilder, TaskSnapshotSource};
 use crate::state_sync::StateStream;
 use crate::tasks::product_api::{
-    AgentListSessionsWorkflow, AttachmentFileBrowserWorkflow, TaskDiscardWorkflow,
-    TaskFileSearchWorkflow, TaskOpenWorkflow, TaskSetConfigOptionWorkflow,
+    AgentListSessionsWorkflow, AttachmentFileBrowserWorkflow, TaskFileSearchWorkflow,
+    TaskOpenWorkflow, TaskReleaseWorkflow, TaskSetConfigOptionWorkflow,
 };
 use crate::tasks::product_api::{
-    TaskAdoptNativeSessionWorkflow, TaskArchiveWorkflow, TaskCancelWorkflow, TaskChatPageWorkflow,
-    TaskCreateWorkflow, TaskSendWorkflow,
+    TaskAcquireWorkflow, TaskAdoptNativeSessionWorkflow, TaskArchiveWorkflow, TaskCancelWorkflow,
+    TaskChatPageWorkflow, TaskSendWorkflow,
 };
 
 pub struct RpcGateway {
@@ -79,7 +79,7 @@ pub struct RpcGateway {
     runtime_settings: Arc<dyn RuntimeSettingsWorkflow>,
     agent_list_sessions: Arc<dyn AgentListSessionsWorkflow>,
     attachments: Arc<dyn AttachmentFileBrowserWorkflow>,
-    task_create: Arc<dyn TaskCreateWorkflow>,
+    task_acquire: Arc<dyn TaskAcquireWorkflow>,
     task_file_search: Arc<dyn TaskFileSearchWorkflow>,
     task_adopt_native_session: Arc<dyn TaskAdoptNativeSessionWorkflow>,
     task_send: Arc<dyn TaskSendWorkflow>,
@@ -87,7 +87,7 @@ pub struct RpcGateway {
     task_open: Arc<dyn TaskOpenWorkflow>,
     task_chat_page: Arc<dyn TaskChatPageWorkflow>,
     task_set_config_option: Arc<dyn TaskSetConfigOptionWorkflow>,
-    task_discard: Arc<dyn TaskDiscardWorkflow>,
+    task_release: Arc<dyn TaskReleaseWorkflow>,
     task_archive: Arc<dyn TaskArchiveWorkflow>,
     shutdown: Arc<dyn AppServerShutdownWorkflow>,
 }
@@ -160,7 +160,7 @@ impl RpcGateway {
         runtime_settings: Arc<dyn RuntimeSettingsWorkflow>,
         agent_list_sessions: Arc<dyn AgentListSessionsWorkflow>,
         attachments: Arc<dyn AttachmentFileBrowserWorkflow>,
-        task_create: Arc<dyn TaskCreateWorkflow>,
+        task_acquire: Arc<dyn TaskAcquireWorkflow>,
         task_file_search: Arc<dyn TaskFileSearchWorkflow>,
         task_adopt_native_session: Arc<dyn TaskAdoptNativeSessionWorkflow>,
         task_send: Arc<dyn TaskSendWorkflow>,
@@ -168,7 +168,7 @@ impl RpcGateway {
         task_open: Arc<dyn TaskOpenWorkflow>,
         task_chat_page: Arc<dyn TaskChatPageWorkflow>,
         task_set_config_option: Arc<dyn TaskSetConfigOptionWorkflow>,
-        task_discard: Arc<dyn TaskDiscardWorkflow>,
+        task_release: Arc<dyn TaskReleaseWorkflow>,
         task_archive: Arc<dyn TaskArchiveWorkflow>,
         shutdown: Arc<dyn AppServerShutdownWorkflow>,
     ) -> Self {
@@ -194,7 +194,7 @@ impl RpcGateway {
             runtime_settings,
             agent_list_sessions,
             attachments,
-            task_create,
+            task_acquire,
             task_file_search,
             task_adopt_native_session,
             task_send,
@@ -202,7 +202,7 @@ impl RpcGateway {
             task_open,
             task_chat_page,
             task_set_config_option,
-            task_discard,
+            task_release,
             task_archive,
             shutdown,
         }

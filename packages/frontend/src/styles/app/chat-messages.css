@@ -278,22 +278,6 @@
   white-space: pre-wrap;
 }
 
-.chat-user-rich-text {
-  display: grid;
-  gap: 6px;
-}
-
-.chat-user-rich-text p {
-  margin: 0;
-  white-space: pre-wrap;
-}
-
-.chat-user-rich-text:has(> .chat-user-image-link:only-child) {
-  border: 0;
-  background: transparent;
-  padding: 0;
-}
-
 .reference-token {
   color: var(--oa-reference-file);
   font: inherit;
@@ -303,35 +287,6 @@
 
 .slash-command-token {
   color: var(--oa-reference-command);
-}
-
-.chat-user-image-link {
-  width: min(320px, 100%);
-  border: 1px solid color-mix(in oklch, var(--oa-focus) 28%, var(--oa-border));
-  border-radius: var(--oa-radius-md);
-  background: color-mix(in oklch, var(--oa-panel) 76%, var(--oa-bg));
-  color: var(--oa-muted);
-  cursor: pointer;
-  display: inline-grid;
-  justify-self: end;
-  padding: 4px;
-}
-
-.chat-user-image-link img {
-  width: 100%;
-  max-height: 220px;
-  border-radius: var(--oa-radius-sm);
-  display: block;
-  object-fit: contain;
-}
-
-.chat-user-image-link:hover {
-  border-color: color-mix(in oklch, var(--oa-focus) 52%, var(--oa-border));
-}
-
-.chat-user-image-link:focus-visible {
-  outline: 1px solid var(--oa-focus);
-  outline-offset: 2px;
 }
 
 .chat-message-actions {

@@ -475,6 +475,36 @@ describe("TaskView timeline presentation", () => {
     act(() => retryButton.props.onClick());
     expect(retry).toHaveBeenCalledOnce();
   });
+
+  it("blocks new Images and explains an existing Image draft when the Agent lacks capability", async () => {
+    const { TaskView } = await import("./TaskView");
+    const snapshot = snapshotWithAuthoritativeTail(true);
+    snapshot.task.status = "inactive";
+    snapshot.input_capabilities = { image: false };
+    let tree!: ReactTestRenderer;
+
+    act(() => {
+      tree = create(
+        <TaskView
+          {...taskViewProps(snapshot)}
+          taskInput={{
+            prompt: "what about now?",
+            context: [{
+              kind: "image",
+              label: "screenshot.png",
+              local_id: "image-1",
+              preview_url: "data:image/png;base64,aW1hZ2U=",
+              payload: { data: "aW1hZ2U=", mimeType: "image/png" },
+            }],
+          }}
+        />,
+      );
+    });
+
+    expect(JSON.stringify(tree.toJSON())).toContain("This Agent does not accept images.");
+    expect(tree.root.findByProps({ "aria-label": "Add context" }).props.disabled).toBe(true);
+    expect(tree.root.findByProps({ "aria-label": "Send message" }).props.disabled).toBe(true);
+  });
 });
 
 function taskViewProps(snapshot: TaskSnapshot) {

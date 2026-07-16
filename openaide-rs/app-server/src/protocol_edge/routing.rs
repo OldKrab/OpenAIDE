@@ -8,9 +8,9 @@ use openaide_app_server_protocol::methods::{
     DIAGNOSTICS_GET_RUNTIME, PENDING_REQUEST_RESOLVE, SETTINGS_GET_AGENT_DETAILS,
     SETTINGS_GET_MCP_SERVERS, SETTINGS_GET_PREFERENCES, SETTINGS_GET_RUNTIME, SETTINGS_GET_SKILLS,
     SETTINGS_UPDATE_PREFERENCES, SETTINGS_UPDATE_RUNTIME, SHELL_RESOLVE_FILE_REVEAL,
-    STATE_SUBSCRIBE, STATE_UNSUBSCRIBE, SUPPORT_RECOVER_STUCK_SESSIONS, TASK_ADOPT_NATIVE_SESSION,
-    TASK_CANCEL, TASK_CHAT_PAGE, TASK_CREATE, TASK_DISCARD, TASK_LIST, TASK_MARK_READ, TASK_OPEN,
-    TASK_SEARCH_FILES, TASK_SEND, TASK_SET_ARCHIVED, TASK_SET_CONFIG_OPTION,
+    STATE_SUBSCRIBE, STATE_UNSUBSCRIBE, SUPPORT_RECOVER_STUCK_SESSIONS, TASK_ACQUIRE,
+    TASK_ADOPT_NATIVE_SESSION, TASK_CANCEL, TASK_CHAT_PAGE, TASK_LIST, TASK_MARK_READ, TASK_OPEN,
+    TASK_RELEASE, TASK_SEARCH_FILES, TASK_SEND, TASK_SET_ARCHIVED, TASK_SET_CONFIG_OPTION,
     WORKSPACE_LIST_DIRECTORY, WORKSPACE_LIST_ROOTS,
 };
 
@@ -144,7 +144,7 @@ impl RpcGateway {
             WORKSPACE_LIST_DIRECTORY => {
                 self.handle_workspace_list_directory(connection_id, id, params, meta)
             }
-            TASK_CREATE => self.handle_task_create(connection_id, id, params, meta, now),
+            TASK_ACQUIRE => self.handle_task_acquire(connection_id, id, params, meta, now),
             TASK_SEARCH_FILES => self.handle_task_search_files(connection_id, id, params, meta),
             TASK_ADOPT_NATIVE_SESSION => {
                 self.handle_task_adopt_native_session(connection_id, id, params, meta, now)
@@ -155,7 +155,7 @@ impl RpcGateway {
             TASK_SET_CONFIG_OPTION => {
                 self.handle_task_set_config_option(connection_id, id, params, meta, now)
             }
-            TASK_DISCARD => self.handle_task_discard(connection_id, id, params, meta, now),
+            TASK_RELEASE => self.handle_task_release(connection_id, id, params, meta, now),
             TASK_SET_ARCHIVED => {
                 self.handle_task_set_archived(connection_id, id, params, meta, now)
             }

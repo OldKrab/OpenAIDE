@@ -21,7 +21,7 @@ describe("workspace file mention picker", () => {
     const browser: TaskFileBrowserCallbacks = {
       attachEmbedded: vi.fn<TaskFileBrowserCallbacks["attachEmbedded"]>(),
       attachFileReference: vi.fn<TaskFileBrowserCallbacks["attachFileReference"]>(),
-      attachPastedImage: vi.fn<TaskFileBrowserCallbacks["attachPastedImage"]>(),
+      attachImage: vi.fn<TaskFileBrowserCallbacks["attachImage"]>(),
       listDirectory: vi.fn<TaskFileBrowserCallbacks["listDirectory"]>(),
       listRoots: vi.fn<TaskFileBrowserCallbacks["listRoots"]>(),
       ownerKey: "task:test",

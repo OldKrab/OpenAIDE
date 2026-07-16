@@ -51,7 +51,7 @@ export const SHELL_RESOLVE_FILE_REVEAL = "shell/resolveFileReveal" as const;
 export const WORKSPACE_LIST_ROOTS = "workspace/listRoots" as const;
 export const WORKSPACE_LIST_DIRECTORY = "workspace/listDirectory" as const;
 
-export const TASK_CREATE = "task/create" as const;
+export const TASK_ACQUIRE = "task/acquire" as const;
 export const TASK_SEARCH_FILES = "task/searchFiles" as const;
 export const TASK_ADOPT_NATIVE_SESSION = "task/adoptNativeSession" as const;
 export const TASK_SEND = "task/send" as const;
@@ -61,7 +61,7 @@ export const TASK_OPEN = "task/open" as const;
 export const TASK_MARK_READ = "task/markRead" as const;
 export const TASK_CHAT_PAGE = "task/chatPage" as const;
 export const TASK_LIST = "task/list" as const;
-export const TASK_DISCARD = "task/discard" as const;
+export const TASK_RELEASE = "task/release" as const;
 
 export const TASK_SET_ARCHIVED = "task/setArchived" as const;
 
@@ -441,9 +441,9 @@ export type ShellResolveFileRevealParams = { originatingClientInstanceId: Client
 
 export type ShellResolveFileRevealResult = { path: string, label: string, };
 
-export type TaskCreateParams = { projectId: ProjectId, agentId: AgentId, workspaceRoot?: string | null, configOptions?: { [key in string]: string }, };
+export type TaskAcquireParams = { projectId: ProjectId, agentId: AgentId, workspaceRoot?: string | null, configOptions?: { [key in string]: string }, };
 
-export type TaskCreateResult = { task: TaskSnapshot, };
+export type TaskAcquireResult = { task: TaskSnapshot, };
 
 export type TaskSearchFilesParams = { taskId: TaskId, query: string, };
 
@@ -457,7 +457,9 @@ export type TaskAdoptNativeSessionResult = { task: TaskSnapshot, };
 
 export type TaskSendParams = { taskId: TaskId, message: ComposerMessage, };
 
-export type ComposerMessage = { text?: string | null, attachments?: Array<AttachmentHandleId>, };
+export type ComposerMessage = { text?: string | null, images?: Array<ComposerImage>, };
+
+export type ComposerImage = { label: string, mimeType: string, data: string, };
 
 export type TaskSendResult = { task: TaskSnapshot, turnId: TurnId, userMessageId: MessageId, };
 
@@ -499,9 +501,9 @@ export type TaskListParams = { archived: boolean, projectId?: ProjectId | null, 
 
 export type TaskListResult = { tasks: Array<TaskSummary>, revision: number, nextCursor?: TaskListCursor | null, };
 
-export type TaskDiscardParams = { taskId: TaskId, };
+export type TaskReleaseParams = { taskId: TaskId, };
 
-export type TaskDiscardResult = { discardedTaskId: TaskId, };
+export type TaskReleaseResult = { taskId: TaskId, };
 
 export type TaskSetArchivedParams = { taskId: TaskId, archived: boolean, };
 
@@ -521,7 +523,11 @@ export type EventScope = { "kind": "stateRoot", stateRootId: StateRootId, } | { 
 
 export type AppServerEventPayload = { "kind": "snapshotReplaced", snapshot: ClientSnapshot, } | { "kind": "taskChanged", taskId: TaskId, revision: number, changes: TaskChanges, } | { "kind": "taskHistorySyncUpdated", taskId: TaskId, historySync: TaskHistorySyncSnapshot, } | { "kind": "taskNavigationChanged", change: TaskNavigationChange, } | { "kind": "projectCollectionUpdated", projects: ProjectCollectionSnapshot, } | { "kind": "taskRequestsUpdated", taskId: TaskId, requests: Array<PendingRequestSnapshot>, } | { "kind": "toolDetailUpdated", taskId: TaskId, artifactId: string, details: ToolDetailSnapshot, } | { "kind": "requestUpdated", request: PendingRequestSnapshot, } | { "kind": "agentCollectionUpdated", agents: AgentCollectionSnapshot, };
 
-export type TaskChanges = { task?: TaskSummary | null, lifecycle?: TaskLifecycle | null, preparation?: TaskPreparationSnapshot | null, agentConfig?: TaskAgentConfigSnapshot | null, agentCommands?: TaskAgentCommandsSnapshot | null, sendCapability?: TaskSendCapabilitySnapshot | null, chat?: Array<TaskChatChange>, removed?: boolean, };
+export type TaskChanges = { task?: TaskSummary | null,
+/**
+ * Present when the active-turn clock changes; inner `None` clears it.
+ */
+activeTurnStartedAt?: string | null | null, lifecycle?: TaskLifecycle | null, preparation?: TaskPreparationSnapshot | null, agentConfig?: TaskAgentConfigSnapshot | null, agentCommands?: TaskAgentCommandsSnapshot | null, sendCapability?: TaskSendCapabilitySnapshot | null, inputCapabilities?: TaskInputCapabilities | null, chat?: Array<TaskChatChange>, removed?: boolean, };
 
 export type TaskChatChange = { "kind": "append", item: ChatItem, } | { "kind": "upsert", item: ChatItem, } | { "kind": "appendText", messageId: MessageId, text: string, } | { "kind": "replace", chat: ChatSnapshot, };
 
@@ -569,7 +575,13 @@ export type TaskStatus = "preparing" | "starting" | "idle" | "running" | "stoppi
 
 export type TaskLifecycle = "new" | "visible";
 
-export type TaskSnapshot = { task: TaskSummary, lifecycle: TaskLifecycle, revision: number, preparation: TaskPreparationSnapshot, agentConfig: TaskAgentConfigSnapshot, agentCommands: TaskAgentCommandsSnapshot, sendCapability: TaskSendCapabilitySnapshot, chat: ChatSnapshot, historySync: TaskHistorySyncSnapshot, pendingRequests?: Array<PendingRequestSnapshot>, recovery?: RecoverySnapshot | null, };
+export type TaskSnapshot = { task: TaskSummary,
+/**
+ * App Server-authored start of the active turn; absent when no turn is running.
+ */
+activeTurnStartedAt?: string | null, lifecycle: TaskLifecycle, revision: number, preparation: TaskPreparationSnapshot, agentConfig: TaskAgentConfigSnapshot, agentCommands: TaskAgentCommandsSnapshot, sendCapability: TaskSendCapabilitySnapshot, inputCapabilities?: TaskInputCapabilities | null, chat: ChatSnapshot, historySync: TaskHistorySyncSnapshot, pendingRequests?: Array<PendingRequestSnapshot>, recovery?: RecoverySnapshot | null, };
+
+export type TaskInputCapabilities = { image: boolean, };
 
 export type TaskHistorySyncSnapshot = { "state": "idle", generation: number, } | { "state": "syncing", generation: number, } | { "state": "updated", generation: number, };
 
@@ -651,7 +663,7 @@ export type PendingRequestScope = { "kind": "client", clientInstanceId: ClientIn
 
 export type PendingRequestKind = "permission" | "question" | "secret" | "shellCapability";
 
-export type ProtocolMethod = typeof CLIENT_PROBE | typeof CLIENT_INITIALIZE | typeof CLIENT_CAPABILITIES_CHANGED | typeof CLIENT_HEARTBEAT | typeof PENDING_REQUEST_RESOLVE | typeof STATE_SUBSCRIBE | typeof STATE_UNSUBSCRIBE | typeof DIAGNOSTICS_GET_RUNTIME | typeof SUPPORT_RECOVER_STUCK_SESSIONS | typeof AGENT_PROBE | typeof AGENT_AUTHENTICATE | typeof AGENT_LIST_SESSIONS | typeof AGENT_CREATE_CUSTOM | typeof AGENT_UPDATE_CUSTOM_METADATA | typeof AGENT_REPLACE_CUSTOM | typeof AGENT_DELETE_CUSTOM | typeof AGENT_SET_ENABLED | typeof SETTINGS_GET_AGENT_DETAILS | typeof SETTINGS_GET_MCP_SERVERS | typeof SETTINGS_GET_SKILLS | typeof SETTINGS_GET_PREFERENCES | typeof SETTINGS_UPDATE_PREFERENCES | typeof SETTINGS_GET_RUNTIME | typeof SETTINGS_UPDATE_RUNTIME | typeof ATTACHMENT_LIST_ROOTS | typeof ATTACHMENT_LIST_DIRECTORY | typeof ATTACHMENT_CREATE_FILE_REFERENCE | typeof ATTACHMENT_CREATE_PASTED_IMAGE | typeof ATTACHMENT_CREATE_EMBEDDED_CANDIDATE | typeof ATTACHMENT_CONFIRM_EMBEDDED | typeof ATTACHMENT_REFRESH_HANDLES | typeof ATTACHMENT_RELEASE | typeof ATTACHMENT_REVEAL | typeof SHELL_RESOLVE_FILE_REVEAL | typeof WORKSPACE_LIST_ROOTS | typeof WORKSPACE_LIST_DIRECTORY | typeof TASK_CREATE | typeof TASK_SEARCH_FILES | typeof TASK_ADOPT_NATIVE_SESSION | typeof TASK_SEND | typeof TASK_SET_CONFIG_OPTION | typeof TASK_CANCEL | typeof TASK_OPEN | typeof TASK_MARK_READ | typeof TASK_CHAT_PAGE | typeof TASK_LIST | typeof TASK_DISCARD | typeof TASK_SET_ARCHIVED;
+export type ProtocolMethod = typeof CLIENT_PROBE | typeof CLIENT_INITIALIZE | typeof CLIENT_CAPABILITIES_CHANGED | typeof CLIENT_HEARTBEAT | typeof PENDING_REQUEST_RESOLVE | typeof STATE_SUBSCRIBE | typeof STATE_UNSUBSCRIBE | typeof DIAGNOSTICS_GET_RUNTIME | typeof SUPPORT_RECOVER_STUCK_SESSIONS | typeof AGENT_PROBE | typeof AGENT_AUTHENTICATE | typeof AGENT_LIST_SESSIONS | typeof AGENT_CREATE_CUSTOM | typeof AGENT_UPDATE_CUSTOM_METADATA | typeof AGENT_REPLACE_CUSTOM | typeof AGENT_DELETE_CUSTOM | typeof AGENT_SET_ENABLED | typeof SETTINGS_GET_AGENT_DETAILS | typeof SETTINGS_GET_MCP_SERVERS | typeof SETTINGS_GET_SKILLS | typeof SETTINGS_GET_PREFERENCES | typeof SETTINGS_UPDATE_PREFERENCES | typeof SETTINGS_GET_RUNTIME | typeof SETTINGS_UPDATE_RUNTIME | typeof ATTACHMENT_LIST_ROOTS | typeof ATTACHMENT_LIST_DIRECTORY | typeof ATTACHMENT_CREATE_FILE_REFERENCE | typeof ATTACHMENT_CREATE_PASTED_IMAGE | typeof ATTACHMENT_CREATE_EMBEDDED_CANDIDATE | typeof ATTACHMENT_CONFIRM_EMBEDDED | typeof ATTACHMENT_REFRESH_HANDLES | typeof ATTACHMENT_RELEASE | typeof ATTACHMENT_REVEAL | typeof SHELL_RESOLVE_FILE_REVEAL | typeof WORKSPACE_LIST_ROOTS | typeof WORKSPACE_LIST_DIRECTORY | typeof TASK_ACQUIRE | typeof TASK_SEARCH_FILES | typeof TASK_ADOPT_NATIVE_SESSION | typeof TASK_SEND | typeof TASK_SET_CONFIG_OPTION | typeof TASK_CANCEL | typeof TASK_OPEN | typeof TASK_MARK_READ | typeof TASK_CHAT_PAGE | typeof TASK_LIST | typeof TASK_RELEASE | typeof TASK_SET_ARCHIVED;
 export type RequestParamsByMethod = {
   [CLIENT_PROBE]: ClientProbeParams;
   [CLIENT_INITIALIZE]: InitializeParams;
@@ -689,7 +701,7 @@ export type RequestParamsByMethod = {
   [SHELL_RESOLVE_FILE_REVEAL]: ShellResolveFileRevealParams;
   [WORKSPACE_LIST_ROOTS]: WorkspaceListRootsParams;
   [WORKSPACE_LIST_DIRECTORY]: WorkspaceListDirectoryParams;
-  [TASK_CREATE]: TaskCreateParams;
+  [TASK_ACQUIRE]: TaskAcquireParams;
   [TASK_SEARCH_FILES]: TaskSearchFilesParams;
   [TASK_ADOPT_NATIVE_SESSION]: TaskAdoptNativeSessionParams;
   [TASK_SEND]: TaskSendParams;
@@ -699,7 +711,7 @@ export type RequestParamsByMethod = {
   [TASK_MARK_READ]: TaskMarkReadParams;
   [TASK_CHAT_PAGE]: TaskChatPageParams;
   [TASK_LIST]: TaskListParams;
-  [TASK_DISCARD]: TaskDiscardParams;
+  [TASK_RELEASE]: TaskReleaseParams;
   [TASK_SET_ARCHIVED]: TaskSetArchivedParams;
 };
 
@@ -740,7 +752,7 @@ export type ResponseResultByMethod = {
   [SHELL_RESOLVE_FILE_REVEAL]: ShellResolveFileRevealResult;
   [WORKSPACE_LIST_ROOTS]: WorkspaceListRootsResult;
   [WORKSPACE_LIST_DIRECTORY]: WorkspaceListDirectoryResult;
-  [TASK_CREATE]: TaskCreateResult;
+  [TASK_ACQUIRE]: TaskAcquireResult;
   [TASK_SEARCH_FILES]: TaskSearchFilesResult;
   [TASK_ADOPT_NATIVE_SESSION]: TaskAdoptNativeSessionResult;
   [TASK_SEND]: TaskSendResult;
@@ -750,7 +762,7 @@ export type ResponseResultByMethod = {
   [TASK_MARK_READ]: TaskMarkReadResult;
   [TASK_CHAT_PAGE]: TaskChatPageResult;
   [TASK_LIST]: TaskListResult;
-  [TASK_DISCARD]: TaskDiscardResult;
+  [TASK_RELEASE]: TaskReleaseResult;
   [TASK_SET_ARCHIVED]: TaskSetArchivedResult;
 };
 
@@ -798,7 +810,7 @@ export type AttachmentReleaseResponse = ResponseEnvelope<AttachmentReleaseResult
 export type AttachmentRevealResponse = ResponseEnvelope<AttachmentRevealResult>;
 export type WorkspaceListRootsResponse = ResponseEnvelope<WorkspaceListRootsResult>;
 export type WorkspaceListDirectoryResponse = ResponseEnvelope<WorkspaceListDirectoryResult>;
-export type TaskCreateResponse = ResponseEnvelope<TaskCreateResult>;
+export type TaskAcquireResponse = ResponseEnvelope<TaskAcquireResult>;
 export type TaskSearchFilesResponse = ResponseEnvelope<TaskSearchFilesResult>;
 export type TaskAdoptNativeSessionResponse = ResponseEnvelope<TaskAdoptNativeSessionResult>;
 export type TaskSendResponse = ResponseEnvelope<TaskSendResult>;
@@ -807,7 +819,7 @@ export type TaskCancelResponse = ResponseEnvelope<TaskCancelResult>;
 export type TaskOpenResponse = ResponseEnvelope<TaskOpenResult>;
 export type TaskChatPageResponse = ResponseEnvelope<TaskChatPageResult>;
 export type TaskListResponse = ResponseEnvelope<TaskListResult>;
-export type TaskDiscardResponse = ResponseEnvelope<TaskDiscardResult>;
+export type TaskReleaseResponse = ResponseEnvelope<TaskReleaseResult>;
 export type TaskSetArchivedResponse = ResponseEnvelope<TaskSetArchivedResult>;
 
 export type ServerRequestMethod = typeof PERMISSION_REQUEST | typeof QUESTION_REQUEST | typeof SECRET_READ | typeof SHELL_SHOW_NOTIFICATION | typeof SHELL_REVEAL_FILE;

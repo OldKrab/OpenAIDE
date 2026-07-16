@@ -30,12 +30,16 @@ fn task_file_search_is_scoped_and_uses_relative_paths() {
 }
 
 #[test]
-fn task_send_message_is_text_plus_ordered_attachment_handles() {
+fn task_send_message_is_text_plus_inline_ordered_images() {
     let params = TaskSendParams {
         task_id: "task-1".into(),
         message: ComposerMessage {
             text: Some("/plan implement this".to_string()),
-            attachments: vec!["handle-1".into(), "handle-2".into()],
+            images: vec![ComposerImage {
+                label: "diagram.png".to_string(),
+                mime_type: "image/png".to_string(),
+                data: "iVBORw0KGgo=".to_string(),
+            }],
         },
     };
 
@@ -45,10 +49,12 @@ fn task_send_message_is_text_plus_ordered_attachment_handles() {
     assert!(value.get("taskRevision").is_none());
     assert!(value.get("idempotencyKey").is_none());
     assert_eq!(value["message"]["text"], json!("/plan implement this"));
+    assert_eq!(value["message"]["images"][0]["label"], json!("diagram.png"));
     assert_eq!(
-        value["message"]["attachments"],
-        json!(["handle-1", "handle-2"])
+        value["message"]["images"][0]["mimeType"],
+        json!("image/png")
     );
+    assert_eq!(value["message"]["images"][0]["data"], json!("iVBORw0KGgo="));
 }
 
 #[test]

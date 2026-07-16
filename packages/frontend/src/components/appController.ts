@@ -254,9 +254,7 @@ export function useAppController(options: AppControllerOptions = {}): AppControl
     },
     intents: {
       newTask: {
-        changePrompt: (prompt) => dispatch(preparedTaskId
-          ? { type: "taskInput:prompt", taskId: preparedTaskId, prompt }
-          : { type: "prompt", prompt }),
+        changePrompt: (prompt) => dispatch({ type: "prompt", prompt }),
         reportAttachmentError: (message) => dispatch({
           type: "submit:error",
           message: message ?? "Images can be attached after the Task is open.",

@@ -68,7 +68,7 @@ fn attachment_methods_use_attachment_namespace() {
 
 #[test]
 fn task_methods_use_task_namespace() {
-    assert_eq!(TaskCreate::METHOD, "task/create");
+    assert_eq!(TaskAcquire::METHOD, "task/acquire");
     assert_eq!(TaskAdoptNativeSession::METHOD, "task/adoptNativeSession");
     assert_eq!(TaskSend::METHOD, "task/send");
     assert_eq!(TaskSetConfigOption::METHOD, "task/setConfigOption");
@@ -76,6 +76,6 @@ fn task_methods_use_task_namespace() {
     assert_eq!(TaskOpen::METHOD, "task/open");
     assert_eq!(TaskMarkRead::METHOD, "task/markRead");
     assert_eq!(TaskList::METHOD, "task/list");
-    assert_eq!(TaskDiscard::METHOD, "task/discard");
+    assert_eq!(TaskRelease::METHOD, "task/release");
     assert_eq!(TaskSetArchived::METHOD, "task/setArchived");
 }

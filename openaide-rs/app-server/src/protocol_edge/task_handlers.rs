@@ -1,11 +1,11 @@
 use openaide_app_server_protocol::envelopes::RequestMeta;
 use openaide_app_server_protocol::task::{
-    TaskAdoptNativeSessionParams, TaskAdoptNativeSessionResult, TaskCancelParams, TaskCancelResult,
-    TaskChatPageParams, TaskChatPageResult, TaskCreateParams, TaskCreateResult, TaskDiscardParams,
-    TaskDiscardResult, TaskListParams, TaskListResult, TaskMarkReadParams, TaskMarkReadResult,
-    TaskOpenParams, TaskOpenResult, TaskSearchFilesParams, TaskSearchFilesResult, TaskSendParams,
-    TaskSendResult, TaskSetArchivedParams, TaskSetArchivedResult, TaskSetConfigOptionParams,
-    TaskSetConfigOptionResult,
+    TaskAcquireParams, TaskAcquireResult, TaskAdoptNativeSessionParams,
+    TaskAdoptNativeSessionResult, TaskCancelParams, TaskCancelResult, TaskChatPageParams,
+    TaskChatPageResult, TaskListParams, TaskListResult, TaskMarkReadParams, TaskMarkReadResult,
+    TaskOpenParams, TaskOpenResult, TaskReleaseParams, TaskReleaseResult, TaskSearchFilesParams,
+    TaskSearchFilesResult, TaskSendParams, TaskSendResult, TaskSetArchivedParams,
+    TaskSetArchivedResult, TaskSetConfigOptionParams, TaskSetConfigOptionResult,
 };
 use serde_json::Value;
 
@@ -44,7 +44,7 @@ impl RpcGateway {
         self.result::<TaskListResult>(connection_id, id, meta, result)
     }
 
-    pub(super) fn handle_task_create(
+    pub(super) fn handle_task_acquire(
         &mut self,
         connection_id: ConnectionId,
         id: String,
@@ -52,7 +52,7 @@ impl RpcGateway {
         meta: RequestMeta,
         _now: AppServerTime,
     ) -> GatewayOutcome {
-        let params = match serde_json::from_value::<TaskCreateParams>(params) {
+        let params = match serde_json::from_value::<TaskAcquireParams>(params) {
             Ok(params) => params,
             Err(error) => {
                 return self.error(connection_id, id, meta, responses::invalid_params(error))
@@ -61,15 +61,15 @@ impl RpcGateway {
         let client = self
             .client_hub
             .context_for_connection(&connection_id)
-            .expect("routing requires an initialized client for task create");
+            .expect("routing requires an initialized client for task acquire");
         let task = match self
-            .task_create
-            .create_for_client(&client.client_instance_id, params)
+            .task_acquire
+            .acquire_for_client(&client.client_instance_id, params)
         {
             Ok(task) => task,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
-        self.result::<TaskCreateResult>(connection_id, id, meta, TaskCreateResult { task })
+        self.result::<TaskAcquireResult>(connection_id, id, meta, TaskAcquireResult { task })
     }
 
     pub(super) fn handle_task_search_files(
@@ -307,37 +307,41 @@ impl RpcGateway {
         self.result::<TaskChatPageResult>(connection_id, id, meta, page)
     }
 
-    pub(super) fn handle_task_discard(
+    pub(super) fn handle_task_release(
         &mut self,
         connection_id: ConnectionId,
         id: String,
         params: Value,
         meta: RequestMeta,
-        _now: AppServerTime,
+        now: AppServerTime,
     ) -> GatewayOutcome {
-        let params = match serde_json::from_value::<TaskDiscardParams>(params) {
+        let params = match serde_json::from_value::<TaskReleaseParams>(params) {
             Ok(params) => params,
             Err(error) => {
                 return self.error(connection_id, id, meta, responses::invalid_params(error))
             }
         };
-        let discarded_task_id = params.task_id.clone();
+        let task_id = params.task_id.clone();
         let client = self
             .client_hub
             .context_for_connection(&connection_id)
-            .expect("routing requires an initialized client for task discard");
+            .expect("routing requires an initialized client for task release");
         if let Err(error) = self
-            .task_discard
-            .discard_for_client(&client.client_instance_id, params)
+            .task_release
+            .release_for_client(&client.client_instance_id, params)
         {
             return self.error(connection_id, id, meta, error);
         }
-        self.result::<TaskDiscardResult>(
-            connection_id,
-            id,
-            meta,
-            TaskDiscardResult { discarded_task_id },
-        )
+        let scope = openaide_app_server_protocol::state::SubscriptionScope::Task {
+            task_id: task_id.clone(),
+        };
+        self.state_stream.unsubscribe(&client, scope, now);
+        self.server_requests.observe_subscription_removed(
+            &client.client_instance_id,
+            &task_id,
+            now,
+        );
+        self.result::<TaskReleaseResult>(connection_id, id, meta, TaskReleaseResult { task_id })
     }
 
     pub(super) fn handle_task_set_archived(

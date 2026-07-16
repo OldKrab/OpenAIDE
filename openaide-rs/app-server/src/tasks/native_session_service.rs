@@ -68,6 +68,14 @@ impl NativeSessionService {
         }
     }
 
+    /// Reports whether this process still owns the Prepared Task's live update subscription.
+    pub(crate) fn is_live(&self, task_id: &str) -> bool {
+        self.subscriptions
+            .lock()
+            .expect("native session subscriptions poisoned")
+            .contains_key(task_id)
+    }
+
     /// Acquires and binds the empty New Task's Native Session before Composer becomes sendable.
     pub(crate) fn prepare_task(&self, task: &TaskRecord) -> Result<(), RuntimeError> {
         let cancellation = TurnCancellation::new();
@@ -109,6 +117,7 @@ impl NativeSessionService {
         let config_catalog = session_start.session().config_catalog.clone();
         let commands_catalog = session_start.session().commands_catalog.clone();
         let model_id = session_start.session().model_id.clone();
+        let supports_image_input = session_start.session().prompt_capabilities.image;
         let now = now_string();
 
         let binding = self.mutations.commit_existing_task(
@@ -123,6 +132,7 @@ impl NativeSessionService {
                 }
                 let task = ctx.task_mut();
                 task.agent_session_id = Some(session_id.clone());
+                task.supports_image_input = supports_image_input;
                 if config_catalog.is_some() {
                     task.config_options = config_options.clone();
                     task.config_options_catalog = config_catalog.clone();
@@ -462,9 +472,14 @@ impl OpenedSessionTaskState {
             config_catalog,
             commands_catalog,
             model_id,
+            prompt_capabilities,
+            prompt_capabilities_authoritative,
             ..
         } = self.session;
         task.agent_session_id = Some(session_id);
+        if prompt_capabilities_authoritative {
+            task.supports_image_input = prompt_capabilities.image;
+        }
         if self.metadata_is_authoritative {
             task.config_options = config_options;
             task.config_options_catalog = config_catalog;

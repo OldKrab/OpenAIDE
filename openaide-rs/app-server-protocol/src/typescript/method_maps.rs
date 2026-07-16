@@ -1,5 +1,5 @@
 pub(super) fn push_method_maps(output: &mut String) {
-    output.push_str("export type ProtocolMethod = typeof CLIENT_PROBE | typeof CLIENT_INITIALIZE | typeof CLIENT_CAPABILITIES_CHANGED | typeof CLIENT_HEARTBEAT | typeof PENDING_REQUEST_RESOLVE | typeof STATE_SUBSCRIBE | typeof STATE_UNSUBSCRIBE | typeof DIAGNOSTICS_GET_RUNTIME | typeof SUPPORT_RECOVER_STUCK_SESSIONS | typeof AGENT_PROBE | typeof AGENT_AUTHENTICATE | typeof AGENT_LIST_SESSIONS | typeof AGENT_CREATE_CUSTOM | typeof AGENT_UPDATE_CUSTOM_METADATA | typeof AGENT_REPLACE_CUSTOM | typeof AGENT_DELETE_CUSTOM | typeof AGENT_SET_ENABLED | typeof SETTINGS_GET_AGENT_DETAILS | typeof SETTINGS_GET_MCP_SERVERS | typeof SETTINGS_GET_SKILLS | typeof SETTINGS_GET_PREFERENCES | typeof SETTINGS_UPDATE_PREFERENCES | typeof SETTINGS_GET_RUNTIME | typeof SETTINGS_UPDATE_RUNTIME | typeof ATTACHMENT_LIST_ROOTS | typeof ATTACHMENT_LIST_DIRECTORY | typeof ATTACHMENT_CREATE_FILE_REFERENCE | typeof ATTACHMENT_CREATE_PASTED_IMAGE | typeof ATTACHMENT_CREATE_EMBEDDED_CANDIDATE | typeof ATTACHMENT_CONFIRM_EMBEDDED | typeof ATTACHMENT_REFRESH_HANDLES | typeof ATTACHMENT_RELEASE | typeof ATTACHMENT_REVEAL | typeof SHELL_RESOLVE_FILE_REVEAL | typeof WORKSPACE_LIST_ROOTS | typeof WORKSPACE_LIST_DIRECTORY | typeof TASK_CREATE | typeof TASK_SEARCH_FILES | typeof TASK_ADOPT_NATIVE_SESSION | typeof TASK_SEND | typeof TASK_SET_CONFIG_OPTION | typeof TASK_CANCEL | typeof TASK_OPEN | typeof TASK_MARK_READ | typeof TASK_CHAT_PAGE | typeof TASK_LIST | typeof TASK_DISCARD | typeof TASK_SET_ARCHIVED;\n");
+    output.push_str("export type ProtocolMethod = typeof CLIENT_PROBE | typeof CLIENT_INITIALIZE | typeof CLIENT_CAPABILITIES_CHANGED | typeof CLIENT_HEARTBEAT | typeof PENDING_REQUEST_RESOLVE | typeof STATE_SUBSCRIBE | typeof STATE_UNSUBSCRIBE | typeof DIAGNOSTICS_GET_RUNTIME | typeof SUPPORT_RECOVER_STUCK_SESSIONS | typeof AGENT_PROBE | typeof AGENT_AUTHENTICATE | typeof AGENT_LIST_SESSIONS | typeof AGENT_CREATE_CUSTOM | typeof AGENT_UPDATE_CUSTOM_METADATA | typeof AGENT_REPLACE_CUSTOM | typeof AGENT_DELETE_CUSTOM | typeof AGENT_SET_ENABLED | typeof SETTINGS_GET_AGENT_DETAILS | typeof SETTINGS_GET_MCP_SERVERS | typeof SETTINGS_GET_SKILLS | typeof SETTINGS_GET_PREFERENCES | typeof SETTINGS_UPDATE_PREFERENCES | typeof SETTINGS_GET_RUNTIME | typeof SETTINGS_UPDATE_RUNTIME | typeof ATTACHMENT_LIST_ROOTS | typeof ATTACHMENT_LIST_DIRECTORY | typeof ATTACHMENT_CREATE_FILE_REFERENCE | typeof ATTACHMENT_CREATE_PASTED_IMAGE | typeof ATTACHMENT_CREATE_EMBEDDED_CANDIDATE | typeof ATTACHMENT_CONFIRM_EMBEDDED | typeof ATTACHMENT_REFRESH_HANDLES | typeof ATTACHMENT_RELEASE | typeof ATTACHMENT_REVEAL | typeof SHELL_RESOLVE_FILE_REVEAL | typeof WORKSPACE_LIST_ROOTS | typeof WORKSPACE_LIST_DIRECTORY | typeof TASK_ACQUIRE | typeof TASK_SEARCH_FILES | typeof TASK_ADOPT_NATIVE_SESSION | typeof TASK_SEND | typeof TASK_SET_CONFIG_OPTION | typeof TASK_CANCEL | typeof TASK_OPEN | typeof TASK_MARK_READ | typeof TASK_CHAT_PAGE | typeof TASK_LIST | typeof TASK_RELEASE | typeof TASK_SET_ARCHIVED;\n");
     output.push_str("export type RequestParamsByMethod = {\n");
     output.push_str("  [CLIENT_PROBE]: ClientProbeParams;\n");
     output.push_str("  [CLIENT_INITIALIZE]: InitializeParams;\n");
@@ -39,7 +39,7 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [SHELL_RESOLVE_FILE_REVEAL]: ShellResolveFileRevealParams;\n");
     output.push_str("  [WORKSPACE_LIST_ROOTS]: WorkspaceListRootsParams;\n");
     output.push_str("  [WORKSPACE_LIST_DIRECTORY]: WorkspaceListDirectoryParams;\n");
-    output.push_str("  [TASK_CREATE]: TaskCreateParams;\n");
+    output.push_str("  [TASK_ACQUIRE]: TaskAcquireParams;\n");
     output.push_str("  [TASK_SEARCH_FILES]: TaskSearchFilesParams;\n");
     output.push_str("  [TASK_ADOPT_NATIVE_SESSION]: TaskAdoptNativeSessionParams;\n");
     output.push_str("  [TASK_SEND]: TaskSendParams;\n");
@@ -49,7 +49,7 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [TASK_MARK_READ]: TaskMarkReadParams;\n");
     output.push_str("  [TASK_CHAT_PAGE]: TaskChatPageParams;\n");
     output.push_str("  [TASK_LIST]: TaskListParams;\n");
-    output.push_str("  [TASK_DISCARD]: TaskDiscardParams;\n");
+    output.push_str("  [TASK_RELEASE]: TaskReleaseParams;\n");
     output.push_str("  [TASK_SET_ARCHIVED]: TaskSetArchivedParams;\n");
     output.push_str("};\n\n");
     output.push_str("export type ResponseResultByMethod = {\n");
@@ -91,7 +91,7 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [SHELL_RESOLVE_FILE_REVEAL]: ShellResolveFileRevealResult;\n");
     output.push_str("  [WORKSPACE_LIST_ROOTS]: WorkspaceListRootsResult;\n");
     output.push_str("  [WORKSPACE_LIST_DIRECTORY]: WorkspaceListDirectoryResult;\n");
-    output.push_str("  [TASK_CREATE]: TaskCreateResult;\n");
+    output.push_str("  [TASK_ACQUIRE]: TaskAcquireResult;\n");
     output.push_str("  [TASK_SEARCH_FILES]: TaskSearchFilesResult;\n");
     output.push_str("  [TASK_ADOPT_NATIVE_SESSION]: TaskAdoptNativeSessionResult;\n");
     output.push_str("  [TASK_SEND]: TaskSendResult;\n");
@@ -101,7 +101,7 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [TASK_MARK_READ]: TaskMarkReadResult;\n");
     output.push_str("  [TASK_CHAT_PAGE]: TaskChatPageResult;\n");
     output.push_str("  [TASK_LIST]: TaskListResult;\n");
-    output.push_str("  [TASK_DISCARD]: TaskDiscardResult;\n");
+    output.push_str("  [TASK_RELEASE]: TaskReleaseResult;\n");
     output.push_str("  [TASK_SET_ARCHIVED]: TaskSetArchivedResult;\n");
     output.push_str("};\n\n");
     output.push_str("export type TypedClientRequest<M extends ProtocolMethod> = ClientRequestEnvelope<RequestParamsByMethod[M]> & {\n");
@@ -213,7 +213,7 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str(
         "export type WorkspaceListDirectoryResponse = ResponseEnvelope<WorkspaceListDirectoryResult>;\n",
     );
-    output.push_str("export type TaskCreateResponse = ResponseEnvelope<TaskCreateResult>;\n");
+    output.push_str("export type TaskAcquireResponse = ResponseEnvelope<TaskAcquireResult>;\n");
     output.push_str(
         "export type TaskSearchFilesResponse = ResponseEnvelope<TaskSearchFilesResult>;\n",
     );
@@ -228,7 +228,7 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("export type TaskOpenResponse = ResponseEnvelope<TaskOpenResult>;\n");
     output.push_str("export type TaskChatPageResponse = ResponseEnvelope<TaskChatPageResult>;\n");
     output.push_str("export type TaskListResponse = ResponseEnvelope<TaskListResult>;\n");
-    output.push_str("export type TaskDiscardResponse = ResponseEnvelope<TaskDiscardResult>;\n");
+    output.push_str("export type TaskReleaseResponse = ResponseEnvelope<TaskReleaseResult>;\n");
     output.push_str(
         "export type TaskSetArchivedResponse = ResponseEnvelope<TaskSetArchivedResult>;\n",
     );

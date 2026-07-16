@@ -1,9 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TaskSnapshot } from "@openaide/app-shell-contracts";
 import {
-  ATTACHMENT_RELEASE,
   TASK_SEND,
-  type AttachmentHandleId,
 } from "@openaide/app-server-client";
 
 afterEach(() => {
@@ -63,6 +61,38 @@ describe("task mutation intents", () => {
     });
   });
 
+  it("sends client-owned Images inline without creating an attachment resource", async () => {
+    const { sendTaskPromptIntent } = await import("./taskMutationIntents");
+    const request = vi.fn().mockRejectedValue(new Error("connection closed"));
+    const input = {
+      prompt: "Explain this",
+      context: [{
+        kind: "image" as const,
+        label: "pasted.png",
+        local_id: "image-1",
+        preview_url: "data:image/png;base64,AQID",
+        payload: { data: "AQID", mimeType: "image/png" },
+      }],
+    };
+
+    sendTaskPromptIntent({
+      backendConnection: { request },
+      clientInstanceId: "client-a",
+      createSnapshotRequestId: vi.fn(() => 1),
+      dispatch: vi.fn(),
+      postHostMessage: vi.fn(),
+      stateRootId: "root-a",
+    }, taskSnapshot(), input);
+
+    await vi.waitFor(() => expect(request).toHaveBeenCalledWith(TASK_SEND, {
+      taskId: "task-a",
+      message: {
+        text: "Explain this",
+        images: [{ label: "pasted.png", mimeType: "image/png", data: "AQID" }],
+      },
+    }));
+  });
+
   it("does not retry a rejected task/send", async () => {
     const { sendTaskPromptIntent } = await import("./taskMutationIntents");
     const { AppServerProtocolError } = await import("@openaide/app-server-client");
@@ -96,58 +126,6 @@ describe("task mutation intents", () => {
     expect(sends[0]?.[1]).toEqual({ taskId: "task-a", message: { text: "Follow up once" } });
   });
 
-  it("releases every abandoned handle after an authoritative attachment rejection", async () => {
-    vi.resetModules();
-    const { sendTaskPromptIntent } = await import("./taskMutationIntents");
-    const { AppServerProtocolError } = await import("@openaide/app-server-client");
-    const request = vi.fn(async (method: string) => {
-      if (method === TASK_SEND) {
-        throw new AppServerProtocolError({
-          error: {
-            code: "attachmentHandleInvalid",
-            message: "Attachment is no longer available.",
-            recoverable: true,
-            target: { field: "attachments" },
-          },
-        });
-      }
-      if (method === ATTACHMENT_RELEASE) {
-        return { outcomes: [] };
-      }
-      throw new Error(method);
-    });
-    const input = {
-      prompt: "Inspect these",
-      context: ["handle-1", "handle-2"].map((handleId) => ({
-        kind: "file" as const,
-        label: `${handleId}.txt`,
-        local_id: `local-${handleId}`,
-        app_server_handle_id: handleId as AttachmentHandleId,
-      })),
-    };
-    const dispatch = vi.fn();
-
-    sendTaskPromptIntent({
-      backendConnection: { request: request as never },
-      clientInstanceId: "client-a",
-      createSnapshotRequestId: vi.fn(() => 1),
-      dispatch,
-      postHostMessage: vi.fn(),
-      stateRootId: "root-a",
-    }, taskSnapshot(), input);
-    await vi.waitFor(() => expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
-      type: "taskInput:attachments:invalidate",
-    })));
-    expect(request).toHaveBeenCalledTimes(2);
-
-    expect(request).toHaveBeenLastCalledWith(ATTACHMENT_RELEASE, {
-      taskId: "task-a",
-      resources: [
-        { kind: "handle", id: "handle-1" },
-        { kind: "handle", id: "handle-2" },
-      ],
-    });
-  });
 
 
 });

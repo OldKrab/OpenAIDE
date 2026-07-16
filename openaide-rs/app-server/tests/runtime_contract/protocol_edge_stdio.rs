@@ -193,7 +193,7 @@ fn app_server_handoff_user_can_create_new_task_and_send_first_prompt() {
         json!({
             "jsonrpc": "2.0",
             "id": "create",
-            "method": "task/create",
+            "method": "task/acquire",
             "params": {
                 "projectId": project_id,
                 "agentId": PROCESS_TEST_AGENT_ID
@@ -329,7 +329,7 @@ fn app_server_handoff_user_can_reopen_prepared_new_task_after_reload_and_send() 
         json!({
             "jsonrpc": "2.0",
             "id": "create",
-            "method": "task/create",
+            "method": "task/acquire",
             "params": {
                 "projectId": project_id,
                 "agentId": PROCESS_TEST_AGENT_ID
@@ -472,7 +472,7 @@ fn app_server_handoff_user_can_send_first_prompt_after_task_preparation() {
         json!({
             "jsonrpc": "2.0",
             "id": "create",
-            "method": "task/create",
+            "method": "task/acquire",
             "params": {
                 "projectId": project_id,
                 "agentId": PROCESS_TEST_AGENT_ID
@@ -678,7 +678,7 @@ fn create_task(
         json!({
             "jsonrpc": "2.0",
             "id": "create",
-            "method": "task/create",
+            "method": "task/acquire",
             "params": {
                 "projectId": project_id,
                 "agentId": PROCESS_TEST_AGENT_ID

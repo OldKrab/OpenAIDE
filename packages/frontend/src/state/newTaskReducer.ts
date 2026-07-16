@@ -135,19 +135,7 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
         },
       };
     case "newTask:prepared": {
-      const currentInput = state.taskInputs[action.taskId];
-      return {
-        ...state,
-        taskInputs: {
-          ...state.taskInputs,
-          [action.taskId]: {
-            prompt: currentInput?.prompt ?? state.newTask.pending?.prompt ?? state.newTask.prompt,
-            context: currentInput?.context ?? state.newTask.pending?.context ?? state.newTask.context,
-            error: currentInput?.error,
-            pending: currentInput?.pending,
-          },
-        },
-      };
+      return state;
     }
     case "newTask:agent":
       return replacePreparedDraftOnContextChange(state, {
@@ -335,7 +323,7 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
   }
 }
 
-/** Moves only text across prepared-Task ownership; App Server handles cannot transfer Tasks. */
+/** Moves the whole Frontend-owned draft across Prepared-Task lease changes. */
 function replacePreparedDraftOnContextChange(
   state: AppState,
   nextNewTask: AppState["newTask"],
@@ -353,7 +341,7 @@ function replacePreparedDraftOnContextChange(
     newTask: {
       ...nextNewTask,
       prompt: preparedInput?.prompt ?? nextNewTask.prompt,
-      context: [],
+      context: preparedInput?.context ?? nextNewTask.context,
     },
     taskInputs,
   };

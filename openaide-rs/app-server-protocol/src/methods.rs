@@ -39,12 +39,12 @@ use crate::state::{
 };
 use crate::support::{SupportRecoverStuckSessionsParams, SupportRecoverStuckSessionsResult};
 use crate::task::{
-    TaskAdoptNativeSessionParams, TaskAdoptNativeSessionResult, TaskCancelParams, TaskCancelResult,
-    TaskChatPageParams, TaskChatPageResult, TaskCreateParams, TaskCreateResult, TaskDiscardParams,
-    TaskDiscardResult, TaskListParams, TaskListResult, TaskMarkReadParams, TaskMarkReadResult,
-    TaskOpenParams, TaskOpenResult, TaskSearchFilesParams, TaskSearchFilesResult, TaskSendParams,
-    TaskSendResult, TaskSetArchivedParams, TaskSetArchivedResult, TaskSetConfigOptionParams,
-    TaskSetConfigOptionResult,
+    TaskAcquireParams, TaskAcquireResult, TaskAdoptNativeSessionParams,
+    TaskAdoptNativeSessionResult, TaskCancelParams, TaskCancelResult, TaskChatPageParams,
+    TaskChatPageResult, TaskListParams, TaskListResult, TaskMarkReadParams, TaskMarkReadResult,
+    TaskOpenParams, TaskOpenResult, TaskReleaseParams, TaskReleaseResult, TaskSearchFilesParams,
+    TaskSearchFilesResult, TaskSendParams, TaskSendResult, TaskSetArchivedParams,
+    TaskSetArchivedResult, TaskSetConfigOptionParams, TaskSetConfigOptionResult,
 };
 use crate::workspace::{
     WorkspaceListDirectoryParams, WorkspaceListDirectoryResult, WorkspaceListRootsParams,
@@ -301,7 +301,12 @@ protocol_method!(
     ShellResolveFileRevealParams,
     ShellResolveFileRevealResult
 );
-protocol_method!(TaskCreate, TASK_CREATE, TaskCreateParams, TaskCreateResult);
+protocol_method!(
+    TaskAcquire,
+    TASK_ACQUIRE,
+    TaskAcquireParams,
+    TaskAcquireResult
+);
 protocol_method!(
     TaskSearchFiles,
     TASK_SEARCH_FILES,
@@ -337,10 +342,10 @@ protocol_method!(
 );
 protocol_method!(TaskList, TASK_LIST, TaskListParams, TaskListResult);
 protocol_method!(
-    TaskDiscard,
-    TASK_DISCARD,
-    TaskDiscardParams,
-    TaskDiscardResult
+    TaskRelease,
+    TASK_RELEASE,
+    TaskReleaseParams,
+    TaskReleaseResult
 );
 protocol_method!(
     TaskSetArchived,

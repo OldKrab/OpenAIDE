@@ -128,6 +128,7 @@ impl TaskTransitions {
 
                     let task = ctx.task_mut();
                     task.active_turn_id = None;
+                    task.active_turn_started_at = None;
                     task.unread = true;
                     task.attention = Some(fresh_attention(
                         match &result {

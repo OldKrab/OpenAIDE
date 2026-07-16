@@ -119,7 +119,9 @@ describe("App Server Protocol state mapping", () => {
   });
 
   it("maps task snapshots into current frontend task snapshots", () => {
-    const mapping = mapProtocolTaskSnapshot(protocolSnapshot(), mappingContext());
+    const mapping = mapProtocolTaskSnapshot(protocolSnapshot({
+      activeTurnStartedAt: "2026-07-13T00:00:00Z",
+    }), mappingContext());
     const snapshot = mapping.snapshot;
 
     expect(snapshot.task).toMatchObject({
@@ -140,6 +142,7 @@ describe("App Server Protocol state mapping", () => {
       start_cursor: "m:1",
       end_cursor: "m:3",
     });
+    expect(snapshot.active_turn_started_at).toBe("2026-07-13T00:00:00Z");
     expect(snapshot.chat.items.map((item) => item.message)).toMatchObject([
       {
         kind: "user",
@@ -289,6 +292,45 @@ describe("App Server Protocol state mapping", () => {
             previewUrl: "data:image/png;base64,aW1hZ2U=",
             mimeType: "image/png",
             sizeBytes: 5,
+          },
+        },
+      ],
+    });
+  });
+
+  it("maps inline user images into renderable chat attachments", () => {
+    const mapping = mapProtocolTaskSnapshot(protocolSnapshot({
+      chat: {
+        hasMoreBefore: false,
+        hasMessages: true,
+        items: [
+          {
+            messageId: "user-inline-image" as MessageId,
+            role: "user",
+            status: "complete",
+            parts: [
+              { kind: "text", text: "what do you see?" },
+              {
+                kind: "image",
+                mediaType: "image/png",
+                dataUrl: "data:image/png;base64,aW1hZ2U=",
+              },
+            ],
+          },
+        ],
+      },
+    }));
+
+    expect(mapping.snapshot.chat.items[0].message).toMatchObject({
+      kind: "user",
+      text: "what do you see?",
+      attachments: [
+        {
+          kind: "image",
+          label: "Image",
+          payload: {
+            previewUrl: "data:image/png;base64,aW1hZ2U=",
+            mimeType: "image/png",
           },
         },
       ],

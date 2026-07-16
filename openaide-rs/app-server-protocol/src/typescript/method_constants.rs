@@ -8,9 +8,9 @@ use crate::methods::{
     DIAGNOSTICS_GET_RUNTIME, PENDING_REQUEST_RESOLVE, SETTINGS_GET_AGENT_DETAILS,
     SETTINGS_GET_MCP_SERVERS, SETTINGS_GET_PREFERENCES, SETTINGS_GET_RUNTIME, SETTINGS_GET_SKILLS,
     SETTINGS_UPDATE_PREFERENCES, SETTINGS_UPDATE_RUNTIME, SHELL_RESOLVE_FILE_REVEAL,
-    STATE_SUBSCRIBE, STATE_UNSUBSCRIBE, SUPPORT_RECOVER_STUCK_SESSIONS, TASK_ADOPT_NATIVE_SESSION,
-    TASK_CANCEL, TASK_CHAT_PAGE, TASK_CREATE, TASK_DISCARD, TASK_LIST, TASK_MARK_READ, TASK_OPEN,
-    TASK_SEARCH_FILES, TASK_SEND, TASK_SET_ARCHIVED, TASK_SET_CONFIG_OPTION,
+    STATE_SUBSCRIBE, STATE_UNSUBSCRIBE, SUPPORT_RECOVER_STUCK_SESSIONS, TASK_ACQUIRE,
+    TASK_ADOPT_NATIVE_SESSION, TASK_CANCEL, TASK_CHAT_PAGE, TASK_LIST, TASK_MARK_READ, TASK_OPEN,
+    TASK_RELEASE, TASK_SEARCH_FILES, TASK_SEND, TASK_SET_ARCHIVED, TASK_SET_CONFIG_OPTION,
     WORKSPACE_LIST_DIRECTORY, WORKSPACE_LIST_ROOTS,
 };
 use crate::server_requests::{
@@ -163,8 +163,8 @@ pub(super) fn push_method_constants(output: &mut String) {
         WORKSPACE_LIST_DIRECTORY
     ));
     output.push_str(&format!(
-        "export const TASK_CREATE = {:?} as const;\n",
-        TASK_CREATE
+        "export const TASK_ACQUIRE = {:?} as const;\n",
+        TASK_ACQUIRE
     ));
     output.push_str(&format!(
         "export const TASK_SEARCH_FILES = {:?} as const;\n",
@@ -203,8 +203,8 @@ pub(super) fn push_method_constants(output: &mut String) {
         TASK_LIST
     ));
     output.push_str(&format!(
-        "export const TASK_DISCARD = {:?} as const;\n\n",
-        TASK_DISCARD
+        "export const TASK_RELEASE = {:?} as const;\n\n",
+        TASK_RELEASE
     ));
     output.push_str(&format!(
         "export const TASK_SET_ARCHIVED = {:?} as const;\n\n",

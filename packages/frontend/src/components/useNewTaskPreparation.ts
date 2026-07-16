@@ -1,6 +1,6 @@
 import { useEffect, useRef, type Dispatch, type MutableRefObject } from "react";
 import {
-  TASK_CREATE,
+  TASK_ACQUIRE,
   type TaskId,
 } from "@openaide/app-server-client";
 import type { AppAction } from "../state/appReducer";
@@ -124,7 +124,7 @@ export function useNewTaskPreparation({
 
       const projectId = state.newTask.selection.projectId;
       if (!projectId) throw new SupersededPreparation();
-      const task = (await request(TASK_CREATE, taskCreateParams(state, projectId))).task;
+      const task = (await request(TASK_ACQUIRE, taskCreateParams(state, projectId))).task;
       if (!asyncOperations.owns(operation)) {
         throw new SupersededPreparation();
       }

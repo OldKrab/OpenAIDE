@@ -25,6 +25,8 @@ describe("scope-local state ingestion", () => {
       revision: 5,
       changes: {
         task: { ...taskSummary("task-1"), status: "running", unread: true },
+        activeTurnStartedAt: "2026-07-13T00:00:00Z",
+        inputCapabilities: { image: true },
         sendCapability: { state: "blocked", blockers: [] },
         chat: [{ kind: "append", item }],
       },
@@ -35,6 +37,8 @@ describe("scope-local state ingestion", () => {
     expect(result.state.snapshot.task).toMatchObject({
       revision: 5,
       task: { status: "running", unread: true },
+      activeTurnStartedAt: "2026-07-13T00:00:00Z",
+      inputCapabilities: { image: true },
       sendCapability: { state: "blocked" },
     });
     expect(result.state.snapshot.task.chat.items).toEqual([item]);

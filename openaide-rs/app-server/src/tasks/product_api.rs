@@ -9,10 +9,10 @@ use openaide_app_server_protocol::support::{
     SupportRecoverStuckSessionsParams, SupportRecoverStuckSessionsResult,
 };
 use openaide_app_server_protocol::task::{
-    TaskAdoptNativeSessionParams, TaskCancelParams, TaskCreateParams, TaskSearchFilesParams,
+    TaskAcquireParams, TaskAdoptNativeSessionParams, TaskCancelParams, TaskSearchFilesParams,
     TaskSearchFilesResult, TaskSendParams, TaskSetArchivedParams,
 };
-use openaide_app_server_protocol::task::{TaskDiscardParams, TaskSetConfigOptionParams};
+use openaide_app_server_protocol::task::{TaskReleaseParams, TaskSetConfigOptionParams};
 
 use crate::agent::gateway::AgentGateway;
 use crate::agent::registry_handle::AgentRegistryHandle;
@@ -73,11 +73,11 @@ pub(crate) struct TaskProductApi {
     task_notifier: TaskUpdateNotifier,
 }
 
-pub(crate) trait TaskCreateWorkflow: Send + Sync {
-    fn create_for_client(
+pub(crate) trait TaskAcquireWorkflow: Send + Sync {
+    fn acquire_for_client(
         &self,
         client_instance_id: &ClientInstanceId,
-        params: TaskCreateParams,
+        params: TaskAcquireParams,
     ) -> Result<TaskSnapshot, ProtocolError>;
 }
 
@@ -143,12 +143,19 @@ pub(crate) trait TaskSetConfigOptionWorkflow: Send + Sync {
     ) -> Result<TaskSnapshot, ProtocolError>;
 }
 
-pub(crate) trait TaskDiscardWorkflow: Send + Sync {
-    fn discard_for_client(
+pub(crate) trait TaskReleaseWorkflow: Send + Sync {
+    fn release_for_client(
         &self,
         client_instance_id: &ClientInstanceId,
-        params: TaskDiscardParams,
+        params: TaskReleaseParams,
     ) -> Result<(), ProtocolError>;
+
+    fn release_expired_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+    ) -> Result<(), ProtocolError>;
+
+    fn dispose_prepared_tasks_for_agent(&self, agent_id: &str) -> Result<(), ProtocolError>;
 }
 
 pub(crate) trait TaskArchiveWorkflow: Send + Sync {
@@ -252,6 +259,9 @@ impl TaskProductApi {
         TaskTransitions::new(api.mutations.clone(), api.server_requests.clone())
             .recover_volatile_runtime_state()?;
         api.recover_abandoned_preparations()?;
+        // A process epoch never inherits client ownership. Rebuild the bounded free pool
+        // directly from durable zero-message Tasks before accepting protocol requests.
+        api.mutations.reconcile_prepared_task_pool(true)?;
         Ok(api)
     }
 
@@ -305,11 +315,11 @@ impl AppServerShutdownWorkflow for TaskProductApi {
     }
 }
 
-impl TaskCreateWorkflow for TaskProductApi {
-    fn create_for_client(
+impl TaskAcquireWorkflow for TaskProductApi {
+    fn acquire_for_client(
         &self,
         client_instance_id: &ClientInstanceId,
-        params: TaskCreateParams,
+        params: TaskAcquireParams,
     ) -> Result<TaskSnapshot, ProtocolError> {
         self.create_task(client_instance_id, params)
     }
@@ -338,7 +348,7 @@ impl TaskSendWorkflow for TaskProductApi {
 impl TaskProductApi {
     pub(crate) fn create_for_test(
         &self,
-        params: TaskCreateParams,
+        params: TaskAcquireParams,
     ) -> Result<TaskSnapshot, ProtocolError> {
         self.create_task(
             &crate::attachment_runtime::AttachmentOwner::test_client_instance_id(),
@@ -376,8 +386,8 @@ impl TaskProductApi {
         )
     }
 
-    pub(crate) fn discard_for_test(&self, params: TaskDiscardParams) -> Result<(), ProtocolError> {
-        self.discard_task(
+    pub(crate) fn release_for_test(&self, params: TaskReleaseParams) -> Result<(), ProtocolError> {
+        self.release_task(
             &crate::attachment_runtime::AttachmentOwner::test_client_instance_id(),
             params,
         )
@@ -438,13 +448,49 @@ impl TaskSetConfigOptionWorkflow for TaskProductApi {
     }
 }
 
-impl TaskDiscardWorkflow for TaskProductApi {
-    fn discard_for_client(
+impl TaskReleaseWorkflow for TaskProductApi {
+    fn release_for_client(
         &self,
         client_instance_id: &ClientInstanceId,
-        params: TaskDiscardParams,
+        params: TaskReleaseParams,
     ) -> Result<(), ProtocolError> {
-        self.discard_task(client_instance_id, params)
+        self.release_task(client_instance_id, params)
+    }
+
+    fn release_expired_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+    ) -> Result<(), ProtocolError> {
+        let leased = self
+            .store
+            .list_all_task_records_strict()
+            .map_err(protocol_error_from_runtime)?
+            .into_iter()
+            .find(|task| {
+                matches!(
+                    &task.lifecycle,
+                    crate::storage::records::TaskLifecycle::New { lease: Some(lessee) }
+                        if lessee == client_instance_id
+                )
+            });
+        if let Some(task) = leased {
+            self.release_task(
+                client_instance_id,
+                TaskReleaseParams {
+                    task_id: task.task_id.into(),
+                },
+            )?;
+        }
+        Ok(())
+    }
+
+    fn dispose_prepared_tasks_for_agent(&self, agent_id: &str) -> Result<(), ProtocolError> {
+        let disposed = self
+            .mutations
+            .dispose_prepared_tasks_for_agent(agent_id)
+            .map_err(protocol_error_from_runtime)?;
+        self.close_disposed_prepared_tasks(disposed);
+        Ok(())
     }
 }
 

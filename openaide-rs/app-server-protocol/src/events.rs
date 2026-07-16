@@ -5,8 +5,8 @@ use crate::ids::{ClientInstanceId, EventCursor, MessageId, StateRootId, TaskId};
 use crate::snapshot::{
     AgentCollectionSnapshot, ChatItem, ChatSnapshot, ClientSnapshot, PendingRequestSnapshot,
     ProjectCollectionSnapshot, TaskAgentCommandsSnapshot, TaskAgentConfigSnapshot,
-    TaskHistorySyncSnapshot, TaskLifecycle, TaskPreparationSnapshot, TaskSendCapabilitySnapshot,
-    TaskSummary,
+    TaskHistorySyncSnapshot, TaskInputCapabilities, TaskLifecycle, TaskPreparationSnapshot,
+    TaskSendCapabilitySnapshot, TaskSummary,
 };
 use crate::state::SubscriptionScope;
 use crate::task::ToolDetailSnapshot;
@@ -92,6 +92,9 @@ pub enum AppServerEventPayload {
 pub struct TaskChanges {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub task: Option<TaskSummary>,
+    /// Present when the active-turn clock changes; inner `None` clears it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_turn_started_at: Option<Option<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lifecycle: Option<TaskLifecycle>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -102,6 +105,8 @@ pub struct TaskChanges {
     pub agent_commands: Option<TaskAgentCommandsSnapshot>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub send_capability: Option<TaskSendCapabilitySnapshot>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_capabilities: Option<TaskInputCapabilities>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub chat: Vec<TaskChatChange>,
     #[serde(default, skip_serializing_if = "is_false")]
@@ -111,11 +116,13 @@ pub struct TaskChanges {
 impl TaskChanges {
     pub fn is_empty(&self) -> bool {
         self.task.is_none()
+            && self.active_turn_started_at.is_none()
             && self.lifecycle.is_none()
             && self.preparation.is_none()
             && self.agent_config.is_none()
             && self.agent_commands.is_none()
             && self.send_capability.is_none()
+            && self.input_capabilities.is_none()
             && self.chat.is_empty()
             && !self.removed
     }

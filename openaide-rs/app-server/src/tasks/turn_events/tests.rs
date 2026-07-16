@@ -1535,6 +1535,7 @@ fn running_task(task_id: &str) -> TaskRecord {
         lifecycle: crate::storage::records::TaskLifecycle::Visible,
         agent_session_id: Some("session_1".to_string()),
         active_turn_id: Some("turn_1".to_string()),
+        active_turn_started_at: None,
         archived: false,
         tombstoned: false,
         revision: 0,
@@ -1543,6 +1544,7 @@ fn running_task(task_id: &str) -> TaskRecord {
         config_mutation: Default::default(),
         agent_commands_catalog: None,
         model_id: None,
+        supports_image_input: false,
         preparation: TaskPreparationRecord::Ready,
     }
 }

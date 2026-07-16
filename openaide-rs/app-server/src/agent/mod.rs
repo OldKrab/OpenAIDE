@@ -61,8 +61,9 @@ mod tool_details_sanitizer;
 pub use acp_trace::{AcpTraceStatus, RuntimeDeveloperSettings, RuntimeSettings};
 pub use runtime::{
     AgentAuthenticateRequest, AgentEventSink, AgentListSessionsRequest, AgentLoadedSession,
-    AgentMetadataField, AgentProbeRequest, AgentPrompt, AgentPromptOutcome, AgentRuntime,
-    AgentSecretResolver, AgentSession, AgentSessionDelete, AgentSessionEventSink, AgentSessionKey,
-    AgentSessionLoad, AgentSessionMetadataUpdate, AgentSessionResume,
-    AgentSessionSetConfigOptionRequest, AgentSessionStart, ConfigOptionPolicy, TurnCancellation,
+    AgentMetadataField, AgentProbeRequest, AgentPrompt, AgentPromptCapabilities,
+    AgentPromptOutcome, AgentRuntime, AgentSecretResolver, AgentSession, AgentSessionDelete,
+    AgentSessionEventSink, AgentSessionKey, AgentSessionLoad, AgentSessionMetadataUpdate,
+    AgentSessionResume, AgentSessionSetConfigOptionRequest, AgentSessionStart, ConfigOptionPolicy,
+    TurnCancellation,
 };

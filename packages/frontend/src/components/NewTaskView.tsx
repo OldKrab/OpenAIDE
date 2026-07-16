@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import type { AppPreferencesRecord } from "@openaide/app-shell-contracts";
 import {
   agentOptions,
-  appServerAttachmentHandles,
+  appServerComposerImages,
   type AgentOption,
   type ComposerSelection,
   type ProjectOption,
@@ -78,7 +78,6 @@ export function NewTaskView({
   const selectedProject = projectChoices.find((project) => project.projectId === state.newTask.selection.projectId);
   const enteredWorkspacePath = workspacePath.trim();
   const preparedTaskId = state.snapshot && !state.snapshot.task.has_messages ? state.snapshot.task.task_id : undefined;
-  const preparedTaskInput = preparedTaskId ? state.preparedTaskInput : undefined;
   const preparedConfigOptions = preparedTaskId ? state.snapshot?.agent_config : undefined;
   const currentConfigOptions = preparedTaskId ? preparedConfigOptions : state.newTask.configOptions;
   const composerConfigOptions = currentConfigOptions && (
@@ -88,11 +87,11 @@ export function NewTaskView({
     ? currentConfigOptions.error
     : preparedTaskId ? undefined : state.newTask.configOptionsError;
   const composerAttachments = state.newTask.submitting
-    ? state.newTask.pending?.context ?? preparedTaskInput?.pending?.context ?? []
-    : preparedTaskInput?.context ?? state.newTask.context;
+    ? state.newTask.pending?.context ?? []
+    : state.newTask.context;
   const externalPrompt = state.newTask.submitting
-    ? state.newTask.pending?.prompt ?? preparedTaskInput?.pending?.prompt ?? ""
-    : preparedTaskInput?.prompt ?? state.newTask.prompt;
+    ? state.newTask.pending?.prompt ?? ""
+    : state.newTask.prompt;
   const composerPrompt = externalPrompt;
   const needsProject = !state.newTask.selection.projectId;
   const fixedProjectContext = projectContextMode === "fixed";
@@ -109,10 +108,18 @@ export function NewTaskView({
     openingNativeSession,
     submitting: state.newTask.submitting,
   });
+  // Keep local drafting available while capability discovery is pending; block only
+  // when the selected prepared Task explicitly reports that Images are unsupported.
+  const imageAttachmentsAllowed = state.snapshot?.input_capabilities?.image !== false;
+  const attachmentsReady = (composerAttachments.length === 0
+    || appServerComposerImages(composerAttachments) !== undefined)
+    && (composerAttachments.length === 0 || imageAttachmentsAllowed);
   const availability = composerAvailability({
     allowEditingWhileSendBlocked: false,
-    attachmentsReady: composerAttachments.length === 0
-      || appServerAttachmentHandles(composerAttachments) !== undefined,
+    attachmentsReady,
+    attachmentsBlockedMessage: composerAttachments.length > 0 && !imageAttachmentsAllowed
+      ? "This Agent does not accept images."
+      : "Attached context is not ready to send.",
     connectionStatus: loadingProjects ? "connecting" : "ready",
     contextPlaceholder: waitStatus ?? "Preparing task.",
     contextReady: !needsProject && !needsWorkspace && !loadingProjects && !composerConfigOptionsError,
@@ -167,6 +174,7 @@ export function NewTaskView({
       commandCatalog={preparedTaskId ? state.snapshot?.agent_commands : undefined}
       error={undefined}
       fileBrowser={composerFileBrowser}
+      imageAttachmentsAllowed={imageAttachmentsAllowed}
       focusRequestKey={composerFocusKey}
       onCancel={state.newTask.submitting ? onCancelTask : undefined}
       onChange={intents.changePrompt}

@@ -4,7 +4,7 @@ use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{
     AgentMessagePart, AgentMessageRole, IsolationKind, NormalizedMessage, TaskStatus,
 };
-use crate::storage::records::{TaskPreparationRecord, TaskRecord};
+use crate::storage::records::{TaskLifecycle, TaskPreparationRecord, TaskRecord};
 use crate::storage::Store;
 use crate::task_events::{TaskUpdateNotifier, TaskUpdateReceiver};
 use crate::tasks::mutation::{
@@ -632,6 +632,122 @@ fn task_turn_lifecycle_has_no_direct_commit_bypasses() {
     );
 }
 
+#[test]
+fn stale_release_from_an_old_client_does_not_unlock_a_newer_lease() {
+    let (_dir, store, mutations, _notifications) = test_mutations(0);
+    let current_client = openaide_app_server_protocol::ids::ClientInstanceId::from("client-new");
+    let mut task = task_record("task-prepared");
+    task.lifecycle = TaskLifecycle::New {
+        lease: Some(current_client.clone()),
+    };
+    store.write_task(&task).unwrap();
+
+    let disposed = mutations
+        .release_prepared_task(
+            &openaide_app_server_protocol::ids::ClientInstanceId::from("client-old"),
+            "task-prepared",
+            "2",
+        )
+        .unwrap();
+
+    assert!(disposed.is_empty());
+    assert_eq!(
+        store.read_task("task-prepared").unwrap().lifecycle,
+        TaskLifecycle::New {
+            lease: Some(current_client)
+        }
+    );
+}
+
+#[test]
+fn releasing_a_second_task_for_the_same_key_disposes_the_extra() {
+    let (_dir, store, mutations, _notifications) = test_mutations(0);
+    for (task_id, client_id) in [("task-a", "client-a"), ("task-b", "client-b")] {
+        let mut task = task_record(task_id);
+        task.lifecycle = TaskLifecycle::New {
+            lease: Some(client_id.into()),
+        };
+        store.write_task(&task).unwrap();
+    }
+
+    assert!(mutations
+        .release_prepared_task(&"client-a".into(), "task-a", "2")
+        .unwrap()
+        .is_empty());
+    let disposed = mutations
+        .release_prepared_task(&"client-b".into(), "task-b", "3")
+        .unwrap();
+
+    assert_eq!(disposed.len(), 1);
+    assert_eq!(disposed[0].task_id, "task-b");
+    assert!(!store.read_task("task-a").unwrap().tombstoned);
+    assert!(store.read_task("task-b").unwrap().tombstoned);
+}
+
+#[test]
+fn free_pool_evicts_the_oldest_entry_after_the_global_cap() {
+    let (_dir, store, mutations, _notifications) = test_mutations(0);
+    for index in 0..=8 {
+        let mut task = task_record(&format!("task-{index}"));
+        task.workspace_root = format!("/tmp/workspace-{index}");
+        task.lifecycle = TaskLifecycle::New {
+            lease: Some(format!("client-{index}").into()),
+        };
+        store.write_task(&task).unwrap();
+        mutations
+            .release_prepared_task(
+                &format!("client-{index}").into(),
+                &format!("task-{index}"),
+                &format!("{index:02}"),
+            )
+            .unwrap();
+    }
+
+    assert!(store.read_task("task-0").unwrap().tombstoned);
+    for index in 1..=8 {
+        assert!(
+            !store
+                .read_task(&format!("task-{index}"))
+                .unwrap()
+                .tombstoned
+        );
+    }
+}
+
+#[test]
+fn disabling_an_agent_disposes_its_leased_and_free_prepared_tasks_only() {
+    let (_dir, store, mutations, _notifications) = test_mutations(0);
+    for (task_id, lifecycle, agent_id) in [
+        (
+            "leased",
+            TaskLifecycle::New {
+                lease: Some("client-a".into()),
+            },
+            "codex",
+        ),
+        ("free", TaskLifecycle::New { lease: None }, "codex"),
+        ("visible", TaskLifecycle::Visible, "codex"),
+        (
+            "other-agent",
+            TaskLifecycle::New { lease: None },
+            "opencode",
+        ),
+    ] {
+        let mut task = task_record(task_id);
+        task.lifecycle = lifecycle;
+        task.agent_id = agent_id.to_string();
+        store.write_task(&task).unwrap();
+    }
+
+    let disposed = mutations.dispose_prepared_tasks_for_agent("codex").unwrap();
+
+    assert_eq!(disposed.len(), 2);
+    assert!(store.read_task("leased").unwrap().tombstoned);
+    assert!(store.read_task("free").unwrap().tombstoned);
+    assert!(!store.read_task("visible").unwrap().tombstoned);
+    assert!(!store.read_task("other-agent").unwrap().tombstoned);
+}
+
 fn test_mutations(
     initial_revision: u64,
 ) -> (tempfile::TempDir, Store, TaskMutations, TaskUpdateReceiver) {
@@ -669,6 +785,7 @@ fn task_record(task_id: &str) -> TaskRecord {
         lifecycle: crate::storage::records::TaskLifecycle::Visible,
         agent_session_id: None,
         active_turn_id: None,
+        active_turn_started_at: None,
         archived: false,
         tombstoned: false,
         revision: 0,
@@ -677,6 +794,7 @@ fn task_record(task_id: &str) -> TaskRecord {
         config_mutation: Default::default(),
         agent_commands_catalog: None,
         model_id: None,
+        supports_image_input: false,
         preparation: TaskPreparationRecord::Ready,
     }
 }

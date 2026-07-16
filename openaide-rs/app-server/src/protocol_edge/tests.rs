@@ -52,9 +52,9 @@ use crate::task_events::{
     CommittedChatChange, CommittedTaskChange, TaskUpdate, TaskUpdateKind, ToolDetailUpdate,
 };
 use crate::tasks::product_api::{
-    AgentListSessionsWorkflow, AttachmentFileBrowserWorkflow, TaskAdoptNativeSessionWorkflow,
-    TaskArchiveWorkflow, TaskCancelWorkflow, TaskChatPageWorkflow, TaskCreateWorkflow,
-    TaskDiscardWorkflow, TaskFileSearchWorkflow, TaskOpenWorkflow, TaskSendAccepted,
+    AgentListSessionsWorkflow, AttachmentFileBrowserWorkflow, TaskAcquireWorkflow,
+    TaskAdoptNativeSessionWorkflow, TaskArchiveWorkflow, TaskCancelWorkflow, TaskChatPageWorkflow,
+    TaskFileSearchWorkflow, TaskOpenWorkflow, TaskReleaseWorkflow, TaskSendAccepted,
     TaskSendWorkflow, TaskSetConfigOptionWorkflow,
 };
 
@@ -1787,7 +1787,7 @@ fn gateway_with_project_context_and_store() -> (RpcGateway, Store) {
         runtime_settings(),
         Arc::new(RejectingAgentListSessions),
         Arc::new(RejectingAttachments),
-        Arc::new(RejectingTaskCreate),
+        Arc::new(RejectingTaskAcquire),
         Arc::new(RejectingTaskFileSearch),
         Arc::new(RejectingTaskAdoptNativeSession),
         Arc::new(RejectingTaskSend),
@@ -1795,7 +1795,7 @@ fn gateway_with_project_context_and_store() -> (RpcGateway, Store) {
         Arc::new(RejectingTaskOpen),
         Arc::new(RejectingTaskChatPage),
         Arc::new(RejectingTaskSetConfigOption),
-        Arc::new(RejectingTaskDiscard),
+        Arc::new(RejectingTaskRelease),
         Arc::new(RejectingTaskArchive),
         Arc::new(FixedShutdown),
     );
@@ -1835,7 +1835,7 @@ fn gateway_with_attachments_and_shutdown(
         runtime_settings(),
         std::sync::Arc::new(RejectingAgentListSessions),
         attachments,
-        std::sync::Arc::new(RejectingTaskCreate),
+        std::sync::Arc::new(RejectingTaskAcquire),
         std::sync::Arc::new(RejectingTaskFileSearch),
         std::sync::Arc::new(RejectingTaskAdoptNativeSession),
         std::sync::Arc::new(RejectingTaskSend),
@@ -1843,7 +1843,7 @@ fn gateway_with_attachments_and_shutdown(
         std::sync::Arc::new(RejectingTaskOpen),
         std::sync::Arc::new(FixedTaskChatPage),
         std::sync::Arc::new(RejectingTaskSetConfigOption),
-        std::sync::Arc::new(RejectingTaskDiscard),
+        std::sync::Arc::new(RejectingTaskRelease),
         std::sync::Arc::new(RejectingTaskArchive),
         shutdown,
     )
@@ -1914,7 +1914,7 @@ fn gateway_with_agent_session_listing(
         runtime_settings(),
         agent_list_sessions,
         Arc::new(RejectingAttachments),
-        std::sync::Arc::new(RejectingTaskCreate),
+        std::sync::Arc::new(RejectingTaskAcquire),
         std::sync::Arc::new(RejectingTaskFileSearch),
         std::sync::Arc::new(RejectingTaskAdoptNativeSession),
         std::sync::Arc::new(RejectingTaskSend),
@@ -1922,7 +1922,7 @@ fn gateway_with_agent_session_listing(
         std::sync::Arc::new(RejectingTaskOpen),
         std::sync::Arc::new(RejectingTaskChatPage),
         std::sync::Arc::new(RejectingTaskSetConfigOption),
-        std::sync::Arc::new(RejectingTaskDiscard),
+        std::sync::Arc::new(RejectingTaskRelease),
         std::sync::Arc::new(RejectingTaskArchive),
         Arc::new(FixedShutdown),
     )
@@ -1952,7 +1952,7 @@ fn gateway_with_agent_authenticate(
         runtime_settings(),
         Arc::new(RejectingAgentListSessions),
         Arc::new(RejectingAttachments),
-        std::sync::Arc::new(RejectingTaskCreate),
+        std::sync::Arc::new(RejectingTaskAcquire),
         std::sync::Arc::new(RejectingTaskFileSearch),
         std::sync::Arc::new(RejectingTaskAdoptNativeSession),
         std::sync::Arc::new(RejectingTaskSend),
@@ -1960,7 +1960,7 @@ fn gateway_with_agent_authenticate(
         std::sync::Arc::new(RejectingTaskOpen),
         std::sync::Arc::new(RejectingTaskChatPage),
         std::sync::Arc::new(RejectingTaskSetConfigOption),
-        std::sync::Arc::new(RejectingTaskDiscard),
+        std::sync::Arc::new(RejectingTaskRelease),
         std::sync::Arc::new(RejectingTaskArchive),
         Arc::new(FixedShutdown),
     )
@@ -2542,20 +2542,20 @@ impl TaskSnapshotSource for EmptyTaskSnapshots {
     }
 }
 
-struct RejectingTaskCreate;
+struct RejectingTaskAcquire;
 
-impl TaskCreateWorkflow for RejectingTaskCreate {
-    fn create_for_client(
+impl TaskAcquireWorkflow for RejectingTaskAcquire {
+    fn acquire_for_client(
         &self,
         _client_instance_id: &ClientInstanceId,
-        _params: openaide_app_server_protocol::task::TaskCreateParams,
+        _params: openaide_app_server_protocol::task::TaskAcquireParams,
     ) -> Result<
         openaide_app_server_protocol::snapshot::TaskSnapshot,
         openaide_app_server_protocol::errors::ProtocolError,
     > {
         Err(openaide_app_server_protocol::errors::ProtocolError {
             code: openaide_app_server_protocol::errors::ProtocolErrorCode::Internal,
-            message: "task create unavailable in test gateway".to_string(),
+            message: "task acquire unavailable in test gateway".to_string(),
             recoverable: true,
             target: None,
         })
@@ -2797,20 +2797,34 @@ impl TaskSetConfigOptionWorkflow for RejectingTaskSetConfigOption {
     }
 }
 
-struct RejectingTaskDiscard;
+struct RejectingTaskRelease;
 
-impl TaskDiscardWorkflow for RejectingTaskDiscard {
-    fn discard_for_client(
+impl TaskReleaseWorkflow for RejectingTaskRelease {
+    fn release_for_client(
         &self,
         _client_instance_id: &ClientInstanceId,
-        _params: openaide_app_server_protocol::task::TaskDiscardParams,
+        _params: openaide_app_server_protocol::task::TaskReleaseParams,
     ) -> Result<(), openaide_app_server_protocol::errors::ProtocolError> {
         Err(openaide_app_server_protocol::errors::ProtocolError {
             code: openaide_app_server_protocol::errors::ProtocolErrorCode::Internal,
-            message: "task discard unavailable in test gateway".to_string(),
+            message: "task release unavailable in test gateway".to_string(),
             recoverable: true,
             target: None,
         })
+    }
+
+    fn release_expired_client(
+        &self,
+        _client_instance_id: &ClientInstanceId,
+    ) -> Result<(), openaide_app_server_protocol::errors::ProtocolError> {
+        Ok(())
+    }
+
+    fn dispose_prepared_tasks_for_agent(
+        &self,
+        _agent_id: &str,
+    ) -> Result<(), openaide_app_server_protocol::errors::ProtocolError> {
+        Ok(())
     }
 }
 
@@ -2861,10 +2875,11 @@ fn client_new_task_record(
         isolation: crate::protocol::model::IsolationKind::Local,
         workspace_root: "/workspace/app".to_string(),
         lifecycle: crate::storage::records::TaskLifecycle::New {
-            owner_client_instance_id: ClientInstanceId::from(owner_client_instance_id),
+            lease: Some(ClientInstanceId::from(owner_client_instance_id)),
         },
         agent_session_id: None,
         active_turn_id: None,
+        active_turn_started_at: None,
         archived: false,
         tombstoned: false,
         revision: 1,
@@ -2873,6 +2888,7 @@ fn client_new_task_record(
         config_mutation: Default::default(),
         agent_commands_catalog: None,
         model_id: None,
+        supports_image_input: false,
         preparation: crate::storage::records::TaskPreparationRecord::Ready,
     }
 }

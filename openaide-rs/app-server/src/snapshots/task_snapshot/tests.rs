@@ -60,9 +60,9 @@ fn list_revision_ignores_client_private_new_tasks() {
     let mut new_task = task_record("task-new");
     new_task.revision = 99;
     new_task.lifecycle = crate::storage::records::TaskLifecycle::New {
-        owner_client_instance_id: openaide_app_server_protocol::ids::ClientInstanceId::from(
+        lease: Some(openaide_app_server_protocol::ids::ClientInstanceId::from(
             "client-a",
-        ),
+        )),
     };
     store.write_task(&new_task).unwrap();
 
@@ -356,6 +356,7 @@ fn working_task_is_sendable_for_steering() {
     task.lifecycle = crate::storage::records::TaskLifecycle::Visible;
     task.agent_session_id = Some("session-1".to_string());
     task.active_turn_id = Some("turn-primary".to_string());
+    task.active_turn_started_at = Some("2026-07-13T00:00:00Z".to_string());
     task.preparation = TaskPreparationRecord::Ready;
     store.write_task(&task).unwrap();
 
@@ -364,6 +365,10 @@ fn working_task_is_sendable_for_steering() {
         .expect("open");
 
     assert_eq!(snapshot.task.status, ProtocolTaskStatus::Running);
+    assert_eq!(
+        snapshot.active_turn_started_at.as_deref(),
+        Some("2026-07-13T00:00:00Z")
+    );
     assert_eq!(
         snapshot.send_capability.state,
         TaskSendCapabilityState::Ready
@@ -390,9 +395,9 @@ fn client_snapshot_read_hides_another_clients_new_task() {
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut task = task_record("task-new");
     task.lifecycle = crate::storage::records::TaskLifecycle::New {
-        owner_client_instance_id: openaide_app_server_protocol::ids::ClientInstanceId::from(
+        lease: Some(openaide_app_server_protocol::ids::ClientInstanceId::from(
             "test-client",
-        ),
+        )),
     };
     store.write_task(&task).unwrap();
     let snapshots = TaskSnapshotStore::new(store);
@@ -498,6 +503,7 @@ fn task_record(task_id: &str) -> TaskRecord {
         lifecycle: crate::storage::records::TaskLifecycle::Visible,
         agent_session_id: None,
         active_turn_id: None,
+        active_turn_started_at: None,
         archived: false,
         tombstoned: false,
         revision: 7,
@@ -506,6 +512,7 @@ fn task_record(task_id: &str) -> TaskRecord {
         config_mutation: Default::default(),
         agent_commands_catalog: None,
         model_id: None,
+        supports_image_input: false,
         preparation: TaskPreparationRecord::Ready,
     }
 }

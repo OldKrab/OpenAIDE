@@ -1,8 +1,4 @@
-#[cfg(test)]
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
-#[cfg(test)]
-use std::sync::{Arc, Barrier};
 
 use openaide_app_server_protocol::events::{TaskChanges, TaskNavigationChange};
 use openaide_app_server_protocol::ids::MessageId;
@@ -48,19 +44,13 @@ pub struct TaskUpdate {
 #[derive(Clone, Default)]
 pub struct TaskUpdateNotifier {
     sender: Option<mpsc::Sender<TaskUpdate>>,
-    #[cfg(test)]
-    blocking_once: Option<Arc<BlockingTaskUpdateInner>>,
 }
 
 pub type TaskUpdateReceiver = mpsc::Receiver<TaskUpdate>;
 
 impl TaskUpdateNotifier {
     pub fn disabled() -> Self {
-        Self {
-            sender: None,
-            #[cfg(test)]
-            blocking_once: None,
-        }
+        Self { sender: None }
     }
 
     pub fn channel() -> (Self, TaskUpdateReceiver) {
@@ -68,8 +58,6 @@ impl TaskUpdateNotifier {
         (
             Self {
                 sender: Some(sender),
-                #[cfg(test)]
-                blocking_once: None,
             },
             receiver,
         )
@@ -100,51 +88,5 @@ impl TaskUpdateNotifier {
         if let Some(sender) = &self.sender {
             let _ = sender.send(update);
         }
-        #[cfg(test)]
-        if let Some(blocking) = &self.blocking_once {
-            if blocking.armed.swap(false, Ordering::SeqCst) {
-                blocking.reached.wait();
-                blocking.release.wait();
-            }
-        }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn blocking_once_for_test() -> (Self, BlockingTaskUpdate) {
-        let inner = Arc::new(BlockingTaskUpdateInner {
-            armed: AtomicBool::new(true),
-            reached: Barrier::new(2),
-            release: Barrier::new(2),
-        });
-        (
-            Self {
-                sender: None,
-                blocking_once: Some(inner.clone()),
-            },
-            BlockingTaskUpdate { inner },
-        )
-    }
-}
-
-#[cfg(test)]
-struct BlockingTaskUpdateInner {
-    armed: AtomicBool,
-    reached: Barrier,
-    release: Barrier,
-}
-
-#[cfg(test)]
-pub(crate) struct BlockingTaskUpdate {
-    inner: Arc<BlockingTaskUpdateInner>,
-}
-
-#[cfg(test)]
-impl BlockingTaskUpdate {
-    pub(crate) fn wait_until_blocked(&self) {
-        self.inner.reached.wait();
-    }
-
-    pub(crate) fn release(&self) {
-        self.inner.release.wait();
     }
 }

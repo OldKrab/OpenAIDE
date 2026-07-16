@@ -1,7 +1,7 @@
 use openaide_app_server_protocol::errors::ProtocolError;
 use openaide_app_server_protocol::ids::ClientInstanceId;
 use openaide_app_server_protocol::snapshot::TaskSnapshot;
-use openaide_app_server_protocol::task::TaskCreateParams;
+use openaide_app_server_protocol::task::TaskAcquireParams;
 use uuid::Uuid;
 
 use crate::projects::{resolve_project_context, ProjectTaskContext};
@@ -19,7 +19,7 @@ impl TaskProductApi {
     pub(super) fn create_task(
         &self,
         client_instance_id: &ClientInstanceId,
-        params: TaskCreateParams,
+        params: TaskAcquireParams,
     ) -> Result<TaskSnapshot, ProtocolError> {
         let project = self.resolve_create_project_context(&params)?;
         self.agent_registry
@@ -45,10 +45,11 @@ impl TaskProductApi {
             isolation: project.isolation,
             workspace_root: project.workspace_root,
             lifecycle: TaskLifecycle::New {
-                owner_client_instance_id: client_instance_id.clone(),
+                lease: Some(client_instance_id.clone()),
             },
             agent_session_id: None,
             active_turn_id: None,
+            active_turn_started_at: None,
             archived: false,
             tombstoned: false,
             revision: 0,
@@ -61,19 +62,30 @@ impl TaskProductApi {
             config_mutation: Default::default(),
             agent_commands_catalog: None,
             model_id: None,
+            supports_image_input: false,
             preparation: TaskPreparationRecord::Preparing,
         };
         let result = self
             .mutations
-            .resolve_or_create_new_task(record.clone(), Vec::new(), response_snapshot_options())
+            .acquire_prepared_task(record.clone(), Vec::new(), response_snapshot_options())
             .map_err(protocol_error_from_runtime)?;
         let snapshot = result
             .response_snapshot
             .ok_or_else(super::prepare::missing_prepared_task_snapshot)?;
-        if matches!(result.outcome, TaskCommitOutcome::Committed(_)) {
-            let snapshot = self.project_task_snapshot(snapshot)?;
-            self.spawn_task_preparation(record);
-            return Ok(snapshot);
+        if let TaskCommitOutcome::Committed(facts) = &result.outcome {
+            if facts.task_id == record.task_id {
+                let snapshot = self.project_task_snapshot(snapshot)?;
+                self.spawn_task_preparation(record);
+                return Ok(snapshot);
+            }
+            let reused = self
+                .store
+                .read_task(&facts.task_id)
+                .map_err(protocol_error_from_runtime)?;
+            if self.native_sessions.is_live(&facts.task_id) {
+                return self.project_task_snapshot(snapshot);
+            }
+            return self.reopen_new_task(reused);
         }
         let existing = self
             .store
@@ -118,7 +130,7 @@ impl TaskProductApi {
 
     fn resolve_create_project_context(
         &self,
-        params: &TaskCreateParams,
+        params: &TaskAcquireParams,
     ) -> Result<ProjectTaskContext, ProtocolError> {
         resolve_project_context(
             self.project_resolver.as_ref(),

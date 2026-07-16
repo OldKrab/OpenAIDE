@@ -1,5 +1,5 @@
 import {
-  TASK_DISCARD,
+  TASK_RELEASE,
   type BackendConnection,
   type TaskId,
 } from "@openaide/app-server-client";
@@ -182,7 +182,7 @@ export class NewTaskController {
     dispatch({ type: "task:list:remove", taskId });
     const disposal = (async () => {
       try {
-        await request?.(TASK_DISCARD, { taskId });
+        await request?.(TASK_RELEASE, { taskId });
       } catch {
         // Explicit discard already ended local ownership; remote cleanup is best effort.
       }

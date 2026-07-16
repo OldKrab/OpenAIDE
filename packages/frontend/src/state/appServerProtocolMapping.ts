@@ -133,6 +133,7 @@ function mapProtocolTaskSnapshotWithCache(
         start_cursor: snapshot.chat.startCursor ?? allItems[0]?.cursor,
         end_cursor: snapshot.chat.endCursor ?? allItems.at(-1)?.cursor,
       },
+      active_turn_started_at: snapshot.activeTurnStartedAt ?? undefined,
       active_requests: pendingRequestItems(snapshot.pendingRequests ?? [], task.updated_at),
       settings_summary: {
         agent_id: task.agent_id,
@@ -146,6 +147,9 @@ function mapProtocolTaskSnapshotWithCache(
         ...(sendBlockers.length > 0
           ? { blockers: sendBlockers.map((blocker) => ({ ...blocker })) }
           : {}),
+      },
+      input_capabilities: {
+        image: snapshot.inputCapabilities?.image ?? false,
       },
       revision: snapshot.revision,
       history_sync: mapHistorySync(snapshot.historySync ?? { state: "idle", generation: 0 }),

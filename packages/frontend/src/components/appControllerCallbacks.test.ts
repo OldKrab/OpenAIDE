@@ -27,8 +27,8 @@ import {
   TASK_ADOPT_NATIVE_SESSION,
   TASK_CANCEL,
   TASK_CHAT_PAGE,
-  TASK_CREATE,
-  TASK_DISCARD,
+  TASK_ACQUIRE,
+  TASK_RELEASE,
   TASK_LIST,
   TASK_OPEN,
   TASK_SEND,
@@ -82,7 +82,7 @@ describe("app controller callbacks", () => {
   it("submits selected config atomically with New Task creation before Send", async () => {
     const dispatch = vi.fn();
     const request = vi.fn(async (method: string) => {
-      if (method === TASK_CREATE) return { task: protocolTaskSnapshot("task_1", "New task") };
+      if (method === TASK_ACQUIRE) return { task: protocolTaskSnapshot("task_1", "New task") };
       if (method === TASK_SET_CONFIG_OPTION) return { task: { ...protocolTaskSnapshot("task_1", "New task"), revision: 3 } };
       if (method === TASK_SEND) return { task: { ...protocolTaskSnapshot("task_1", "New task"), revision: 4 } };
       throw new Error(method);
@@ -109,7 +109,7 @@ describe("app controller callbacks", () => {
     expect(dispatch).toHaveBeenNthCalledWith(1, expect.objectContaining({
       type: "submit:start",
     }));
-    expect(request).toHaveBeenNthCalledWith(1, TASK_CREATE, {
+    expect(request).toHaveBeenNthCalledWith(1, TASK_ACQUIRE, {
       projectId: "project_1",
       agentId: "codex",
       configOptions: { model: "gpt" },
@@ -136,7 +136,7 @@ describe("app controller callbacks", () => {
   it("stops a pre-send startup by discarding its prepared Task", async () => {
     const dispatch = vi.fn();
     const request = vi.fn(async (method: string) => {
-      if (method === TASK_DISCARD) return { discardedTaskId: "task_1" };
+      if (method === TASK_RELEASE) return { discardedTaskId: "task_1" };
       throw new Error(method);
     });
     const state = createInitialState();
@@ -161,64 +161,18 @@ describe("app controller callbacks", () => {
     expect(attempt.cancelled).toBe(true);
     expect(newTaskStartAttempt.current).toBeUndefined();
     expect(dispatch).toHaveBeenCalledWith({ type: "submit:cancel" });
-    expect(request).toHaveBeenCalledWith(TASK_DISCARD, { taskId: "task_1" });
+    expect(request).toHaveBeenCalledWith(TASK_RELEASE, { taskId: "task_1" });
     expect(postHostMessage).toHaveBeenCalledWith({
       type: "surface.openNewTask",
       payload: { project_id: "project_1" },
     });
   });
 
-  it("cleans the prepared Task and its attachments when cancellation wins preparation", async () => {
-    const prepared = deferred<{ taskId: never; task: ReturnType<typeof protocolTaskSnapshot> }>();
-    const dispatch = vi.fn();
-    const release = vi.fn();
-    const attachmentResources = new ComposerAttachmentResourceOwner({ release });
-    const attachment = {
-      kind: "file" as const,
-      label: "notes.md",
-      local_id: "attachment-1",
-      app_server_handle_id: "handle-1" as AttachmentHandleId,
-    };
-    attachmentResources.reconcile({
-      acceptedUserMessageIds: new Map(),
-      acceptsAdoptions: true,
-      retained: [{ taskId: "task_1", handleId: attachment.app_server_handle_id }],
-      mountedTaskId: "task_1",
-      protected: new Set(),
-      taskSurfaceMounted: true,
-    });
-    const request = vi.fn(async (method: string) => {
-      if (method === TASK_DISCARD) return { discarded: true };
-      throw new Error(method);
-    });
-    const state = preparedNewTaskState();
-    state.newTask.prompt = "Build";
-    state.newTask.context = [attachment];
-    const newTask = callbacks({
-      attachmentResources,
-      backendConnection: { request: request as unknown as BackendConnection["request"] },
-      dispatch,
-      pendingPreparedNewTask: () => prepared.promise,
-      state,
-    }).newTask;
-
-    newTask.submit();
-    newTask.cancel();
-    prepared.resolve({ taskId: "task_1" as never, task: protocolTaskSnapshot("task_1", "New task") });
-    await settlePromises();
-
-    expect(request.mock.calls.filter(([method]) => method === TASK_DISCARD)).toEqual([
-      [TASK_DISCARD, { taskId: "task_1" }],
-    ]);
-    expect(request).not.toHaveBeenCalledWith(TASK_SEND, expect.anything());
-    expect(release).toHaveBeenCalledWith("task_1", ["handle-1"]);
-    expect(dispatch).toHaveBeenCalledWith({ type: "taskInput:clear", taskId: "task_1" });
-  });
 
   it("surfaces ambiguous prepared-Task cleanup without issuing a no-op cancel", async () => {
     const dispatch = vi.fn();
     const request = vi.fn(async (method: string) => {
-      if (method === TASK_DISCARD) throw new Error("connection closed");
+      if (method === TASK_RELEASE) throw new Error("connection closed");
       if (method === TASK_CANCEL) return { cancelled: true };
       throw new Error(method);
     });
@@ -252,7 +206,7 @@ describe("app controller callbacks", () => {
   it("includes a new workspace root when creating a task for an unseen project", async () => {
     const dispatch = vi.fn();
     const request = vi.fn(async (method: string) => {
-      if (method === TASK_CREATE) return { task: protocolTaskSnapshot("task_1", "New task") };
+      if (method === TASK_ACQUIRE) return { task: protocolTaskSnapshot("task_1", "New task") };
       if (method === TASK_SEND) return { task: { ...protocolTaskSnapshot("task_1", "New task"), revision: 2 } };
       throw new Error(method);
     });
@@ -274,7 +228,7 @@ describe("app controller callbacks", () => {
     }).newTask.submit();
     await settlePromises();
 
-    expect(request).toHaveBeenNthCalledWith(1, TASK_CREATE, {
+    expect(request).toHaveBeenNthCalledWith(1, TASK_ACQUIRE, {
       projectId: "project-fe42cc83da346a18",
       agentId: "codex",
       workspaceRoot: "/workspace/new-app",
@@ -284,8 +238,8 @@ describe("app controller callbacks", () => {
   it("does not send through an empty prepared Task after its Agent and Project selection changed", async () => {
     const dispatch = vi.fn();
     const request = vi.fn(async (method: string) => {
-      if (method === TASK_DISCARD) return { discarded: true };
-      if (method === TASK_CREATE) {
+      if (method === TASK_RELEASE) return { discarded: true };
+      if (method === TASK_ACQUIRE) {
         return { task: protocolTaskSnapshotForContext("task_new", "project_2", "mock") };
       }
       if (method === TASK_SEND) {
@@ -317,10 +271,10 @@ describe("app controller callbacks", () => {
     }).newTask.submit();
     await settlePromises();
 
-    expect(request).toHaveBeenCalledWith(TASK_DISCARD, { taskId: "task_old" });
+    expect(request).toHaveBeenCalledWith(TASK_RELEASE, { taskId: "task_old" });
     expect(dispatch).toHaveBeenCalledWith({ type: "taskInput:clear", taskId: "task_old" });
     expect(request).not.toHaveBeenCalledWith(TASK_OPEN, { taskId: "task_old" });
-    expect(request).toHaveBeenCalledWith(TASK_CREATE, {
+    expect(request).toHaveBeenCalledWith(TASK_ACQUIRE, {
       projectId: "project_2",
       agentId: "mock",
     });
@@ -330,171 +284,8 @@ describe("app controller callbacks", () => {
     }));
   });
 
-  it("attaches a pasted image from the new-task composer by preparing the Task first", async () => {
-    const dispatch = vi.fn();
-    const release = vi.fn();
-    const attachmentResources = new ComposerAttachmentResourceOwner({ release });
-    attachmentResources.reconcile({
-      acceptedUserMessageIds: new Map(),
-      acceptsAdoptions: true,
-      retained: [],
-      mountedTaskId: undefined,
-      protected: new Set(),
-      taskSurfaceMounted: true,
-    });
-    const request = vi.fn(async (method: string) => {
-      if (method === TASK_CREATE) return { task: protocolTaskSnapshot("task_1", "New task") };
-      if (method === ATTACHMENT_CREATE_PASTED_IMAGE) {
-        return { attachment: { handleId: "attachment-handle-image", label: "pasted.png" } };
-      }
-      throw new Error(method);
-    });
-    const state = createInitialState();
-    state.newTask.prompt = "";
-    state.newTask.selection = {
-      ...state.newTask.selection,
-      agentId: "codex",
-      agentLabel: "Codex",
-      projectId: "project_1",
-      workspaceRoot: "/workspace",
-      workspaceLabel: "workspace",
-    };
 
-    await callbacks({
-      attachmentResources,
-      backendConnection: { request: request as unknown as BackendConnection["request"] },
-      dispatch,
-      state,
-    }).newTask.fileBrowser?.attachPastedImage(
-      new File([new Uint8Array([1, 2, 3])], "pasted.png", { type: "image/png" }),
-      { prompt: "Explain this", context: [] },
-    );
 
-    expect(request).toHaveBeenNthCalledWith(1, TASK_CREATE, {
-      projectId: "project_1",
-      agentId: "codex",
-    });
-    expect(request).toHaveBeenNthCalledWith(2, ATTACHMENT_CREATE_PASTED_IMAGE, {
-      taskId: "task_1",
-      label: "pasted.png",
-      mimeType: "image/png",
-      data: "AQID",
-    });
-    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "snapshot", intent: "open" }));
-    expect(dispatch).toHaveBeenCalledWith({ type: "taskInput:prompt", taskId: "task_1", prompt: "Explain this" });
-    expect(dispatch).toHaveBeenCalledWith({
-      type: "taskInput:attachment:addAppServer",
-      taskId: "task_1",
-      attachment: expect.objectContaining({
-        app_server_handle_id: "attachment-handle-image",
-        label: "pasted.png",
-        preview_url: "data:image/png;base64,AQID",
-      }),
-    });
-    expect(request).not.toHaveBeenCalledWith(TASK_SEND, expect.anything());
-    expect(release).not.toHaveBeenCalled();
-    expect(postHostMessage).not.toHaveBeenCalled();
-  });
-
-  it("hands a direct paste from a superseded prepared Task to its replacement", async () => {
-    const dispatch = vi.fn();
-    const release = vi.fn();
-    const attachmentResources = new ComposerAttachmentResourceOwner({ release });
-    const staleAttachment = {
-      kind: "file" as const,
-      label: "old.md",
-      local_id: "old-attachment",
-      app_server_handle_id: "old-handle" as AttachmentHandleId,
-    };
-    attachmentResources.reconcile({
-      acceptedUserMessageIds: new Map(),
-      acceptsAdoptions: true,
-      retained: [{ taskId: "task_old", handleId: staleAttachment.app_server_handle_id }],
-      mountedTaskId: "task_old",
-      protected: new Set(),
-      taskSurfaceMounted: true,
-    });
-    const request = vi.fn(async (method: string) => {
-      if (method === TASK_DISCARD) return { discarded: true };
-      if (method === TASK_CREATE) {
-        return { task: protocolTaskSnapshotForContext("task_new", "project_2", "mock") };
-      }
-      if (method === ATTACHMENT_CREATE_PASTED_IMAGE) {
-        return { attachment: { handleId: "new-handle", label: "pasted.png" } };
-      }
-      throw new Error(method);
-    });
-    const state = preparedNewTaskState("task_old");
-    state.taskInputs.task_old = { prompt: "Old draft", context: [staleAttachment] };
-    state.newTask.selection = {
-      ...state.newTask.selection,
-      agentId: "mock",
-      agentLabel: "Mock",
-      projectId: "project_2",
-      workspaceRoot: "",
-      workspaceLabel: "Project 2",
-    };
-
-    await expect(callbacks({
-      attachmentResources,
-      backendConnection: { request: request as unknown as BackendConnection["request"] },
-      dispatch,
-      state,
-    }).newTask.fileBrowser?.attachPastedImage(
-      new File([new Uint8Array([1, 2, 3])], "pasted.png", { type: "image/png" }),
-      { prompt: "Explain the new image", context: [] },
-    )).resolves.toBeUndefined();
-
-    expect(request.mock.calls.filter(([method]) => method === TASK_DISCARD)).toEqual([
-      [TASK_DISCARD, { taskId: "task_old" }],
-    ]);
-    expect(release).toHaveBeenCalledWith("task_old", ["old-handle"]);
-    expect(request).toHaveBeenCalledWith(ATTACHMENT_CREATE_PASTED_IMAGE, expect.objectContaining({
-      taskId: "task_new",
-    }));
-    expect(dispatch).toHaveBeenCalledWith({
-      type: "taskInput:attachment:addAppServer",
-      taskId: "task_new",
-      attachment: expect.objectContaining({ app_server_handle_id: "new-handle" }),
-    });
-  });
-
-  it("does not wait for send readiness before attaching a pasted image to a prepared new Task", async () => {
-    const dispatch = vi.fn();
-    const neverReady = deferred<{ task: ReturnType<typeof protocolPreparingTaskSnapshot> }>();
-    const request = vi.fn(async (method: string) => {
-      if (method === TASK_CREATE) return { task: protocolPreparingTaskSnapshot("task_1", "New task") };
-      if (method === TASK_OPEN) return neverReady.promise;
-      if (method === ATTACHMENT_CREATE_PASTED_IMAGE) {
-        return { attachment: { handleId: "attachment-handle-image", label: "pasted.png" } };
-      }
-      throw new Error(method);
-    });
-    const state = createInitialState();
-    state.newTask.selection = {
-      ...state.newTask.selection,
-      agentId: "codex",
-      agentLabel: "Codex",
-      projectId: "project_1",
-      workspaceRoot: "/workspace",
-      workspaceLabel: "workspace",
-    };
-
-    void callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"] },
-      dispatch,
-      state,
-    }).newTask.fileBrowser?.attachPastedImage(new File([new Uint8Array([1, 2, 3])], "pasted.png", { type: "image/png" }));
-    await settlePromises();
-    await settlePromises();
-
-    expect(request).toHaveBeenCalledWith(ATTACHMENT_CREATE_PASTED_IMAGE, {
-      taskId: "task_1",
-      label: "pasted.png",
-      mimeType: "image/png",
-      data: "AQID",
-    });
-  });
 
   it("releases a file selection that returns after its prepared Task context is superseded", async () => {
     const selected = deferred<{ attachment: { handleId: string; label: string } }>();
@@ -553,8 +344,8 @@ describe("app controller callbacks", () => {
     const created = deferred<{ task: ReturnType<typeof protocolTaskSnapshot> }>();
     const dispatch = vi.fn();
     const request = vi.fn((method: string) => {
-      if (method === TASK_CREATE) return created.promise;
-      if (method === TASK_DISCARD) return Promise.resolve({ discarded: true });
+      if (method === TASK_ACQUIRE) return created.promise;
+      if (method === TASK_RELEASE) return Promise.resolve({ discarded: true });
       if (method === ATTACHMENT_LIST_ROOTS) return Promise.resolve({ roots: [] });
       return Promise.reject(new Error(method));
     });
@@ -584,7 +375,7 @@ describe("app controller callbacks", () => {
     created.resolve({ task: protocolTaskSnapshot("task_late", "Late task") });
 
     await expect(listing).rejects.toThrow("New Task context changed");
-    expect(request).toHaveBeenCalledWith(TASK_DISCARD, { taskId: "task_late" });
+    expect(request).toHaveBeenCalledWith(TASK_RELEASE, { taskId: "task_late" });
     expect(request).not.toHaveBeenCalledWith(ATTACHMENT_LIST_ROOTS, expect.anything());
     expect(dispatch).toHaveBeenCalledWith({ type: "taskInput:clear", taskId: "task_late" });
     expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: "snapshot" }));
@@ -598,7 +389,7 @@ describe("app controller callbacks", () => {
     const created = deferred<{ task: ReturnType<typeof protocolTaskSnapshot> }>();
     const dispatch = vi.fn();
     const request = vi.fn((method: string) => {
-      if (method === TASK_CREATE) return created.promise;
+      if (method === TASK_ACQUIRE) return created.promise;
       if (method === ATTACHMENT_LIST_ROOTS) return Promise.resolve({ roots: [] });
       return Promise.reject(new Error(method));
     });
@@ -629,182 +420,8 @@ describe("app controller callbacks", () => {
     });
   });
 
-  it("sends pasted image attachments from a prepared new Task", async () => {
-    const dispatch = vi.fn();
-    const request = vi.fn(async (method: string) => {
-      if (method === TASK_OPEN) return { task: protocolTaskSnapshot("task_1", "New task") };
-      if (method === TASK_SEND) return { task: { ...protocolTaskSnapshot("task_1", "New task"), revision: 2 } };
-      throw new Error(method);
-    });
-    const state = createInitialState();
-    state.snapshot = snapshot("task_1");
-    state.snapshot.task.has_messages = false;
-    state.snapshot.task.project_id = "project_1";
-    state.newTask.prompt = "stale text";
-    state.newTask.selection = {
-      ...state.newTask.selection,
-      agentId: "codex",
-      agentLabel: "Codex",
-      projectId: "project_1",
-      workspaceRoot: "/workspace",
-      workspaceLabel: "workspace",
-    };
-    state.taskInputs.task_1 = {
-      prompt: "Explain this image",
-      context: [{
-        kind: "file",
-        label: "pasted.png",
-        local_id: "attachment_1",
-        app_server_handle_id: "attachment-handle-image" as never,
-        preview_url: "data:image/png;base64,AQID",
-      }],
-    };
 
-    callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"] },
-      dispatch,
-      state,
-    }).newTask.submit();
-    await settlePromises();
 
-    expect(request).toHaveBeenCalledWith(TASK_OPEN, { taskId: "task_1" });
-    expect(request).toHaveBeenCalledWith(TASK_SEND, {
-      taskId: "task_1",
-      message: {
-        text: "Explain this image",
-        attachments: ["attachment-handle-image"],
-      },
-    });
-    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
-      type: "taskInput:submit",
-      taskId: "task_1",
-      input: state.taskInputs.task_1,
-    }));
-  });
-
-  it("invalidates prepared new-task attachments when App Server continuity is lost", async () => {
-    const dispatch = vi.fn();
-    const request = vi.fn(async (method: string) => {
-      if (method === TASK_OPEN) return { task: protocolTaskSnapshot("task_1", "New task") };
-      if (method === TASK_SEND) {
-        throw new AppServerProtocolError({
-          error: {
-            code: "attachmentHandleInvalid",
-            message: "Attachment is no longer available. Reselect it and try again.",
-            recoverable: true,
-            target: { field: "attachments" },
-          },
-        });
-      }
-      if (method === ATTACHMENT_RELEASE) {
-        return { outcomes: [] };
-      }
-      throw new Error(method);
-    });
-    const state = createInitialState();
-    state.snapshot = snapshot("task_1");
-    state.snapshot.task.has_messages = false;
-    state.snapshot.task.project_id = "project_1";
-    state.newTask.selection = {
-      ...state.newTask.selection,
-      agentId: "codex",
-      projectId: "project_1",
-      workspaceRoot: "/workspace",
-    };
-    state.taskInputs.task_1 = {
-      prompt: "Explain this image",
-      context: [{
-        kind: "file",
-        label: "pasted.png",
-        local_id: "attachment_1",
-        app_server_handle_id: "attachment-handle-image" as AttachmentHandleId,
-      }],
-    };
-
-    callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"] },
-      dispatch,
-      state,
-    }).newTask.submit();
-    await settlePromises();
-
-    expect(dispatch).toHaveBeenCalledWith({
-      type: "submit:attachments:invalidate",
-      taskId: "task_1",
-      message: "Attachment is no longer available. Reselect it and try again.",
-    });
-    expect(request).toHaveBeenCalledWith(ATTACHMENT_RELEASE, {
-      taskId: "task_1",
-      resources: [{ kind: "handle", id: "attachment-handle-image" }],
-    });
-  });
-
-  it("sends every visible draft attachment from a prepared new Task", async () => {
-    const dispatch = vi.fn();
-    const request = vi.fn(async (method: string) => {
-      if (method === TASK_OPEN) return { task: protocolTaskSnapshot("task_1", "New task") };
-      if (method === TASK_SEND) return { task: { ...protocolTaskSnapshot("task_1", "New task"), revision: 2 } };
-      throw new Error(method);
-    });
-    const state = createInitialState();
-    state.snapshot = snapshot("task_1");
-    state.snapshot.task.has_messages = false;
-    state.snapshot.task.project_id = "project_1";
-    state.newTask.selection = {
-      ...state.newTask.selection,
-      agentId: "codex",
-      agentLabel: "Codex",
-      projectId: "project_1",
-      workspaceRoot: "/workspace",
-      workspaceLabel: "workspace",
-    };
-    state.taskInputs.task_1 = {
-      prompt: "stale prepared input",
-      context: [{
-        kind: "file",
-        label: "first.png",
-        local_id: "attachment_1",
-        app_server_handle_id: "attachment-handle-1" as AttachmentHandleId,
-      }],
-    };
-
-    callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"] },
-      dispatch,
-      state,
-    }).newTask.submit({
-      prompt: "send the visible attachments",
-      context: [
-        {
-          kind: "file",
-          label: "first.png",
-          local_id: "attachment_1",
-          app_server_handle_id: "attachment-handle-1" as AttachmentHandleId,
-        },
-        {
-          kind: "file",
-          label: "second.png",
-          local_id: "attachment_2",
-          app_server_handle_id: "attachment-handle-2" as AttachmentHandleId,
-        },
-        {
-          kind: "file",
-          label: "third.png",
-          local_id: "attachment_3",
-          app_server_handle_id: "attachment-handle-3" as AttachmentHandleId,
-        },
-      ],
-    });
-    await settlePromises();
-
-    expect(request).toHaveBeenCalledWith(TASK_SEND, {
-      taskId: "task_1",
-      message: {
-        text: "send the visible attachments",
-        attachments: ["attachment-handle-1", "attachment-handle-2", "attachment-handle-3"],
-      },
-    });
-  });
 
   it("keeps New Task routed until Send is accepted, then adopts the accepted Task", async () => {
     const dispatch = vi.fn();
@@ -814,7 +431,7 @@ describe("app controller callbacks", () => {
       userMessageId: string;
     }>();
     const request = vi.fn((method: string) => {
-      if (method === TASK_CREATE) return Promise.resolve({ task: protocolTaskSnapshot("task_1", "New task") });
+      if (method === TASK_ACQUIRE) return Promise.resolve({ task: protocolTaskSnapshot("task_1", "New task") });
       if (method === TASK_SEND) return pendingSend.promise;
       return Promise.reject(new Error(method));
     });
@@ -892,9 +509,9 @@ describe("app controller callbacks", () => {
     }>();
     const dispatch = vi.fn();
     const request = vi.fn((method: string) => {
-      if (method === TASK_CREATE) return Promise.resolve({ task: protocolTaskSnapshot("task_1", "New task") });
+      if (method === TASK_ACQUIRE) return Promise.resolve({ task: protocolTaskSnapshot("task_1", "New task") });
       if (method === TASK_SEND) return pendingSend.promise;
-      if (method === TASK_DISCARD) return Promise.reject(new Error("Task already has an active turn."));
+      if (method === TASK_RELEASE) return Promise.reject(new Error("Task already has an active turn."));
       if (method === TASK_CANCEL) return Promise.resolve({});
       return Promise.reject(new Error(method));
     });
@@ -1068,7 +685,7 @@ describe("app controller callbacks", () => {
     try {
       const dispatch = vi.fn();
       const request = vi.fn(async (method: string) => {
-        if (method === TASK_CREATE) return { task: protocolPreparingTaskSnapshot("task_1", "New task") };
+        if (method === TASK_ACQUIRE) return { task: protocolPreparingTaskSnapshot("task_1", "New task") };
         if (method === TASK_OPEN) return { task: protocolTaskSnapshot("task_1", "New task") };
         if (method === TASK_SEND) return { task: { ...protocolTaskSnapshot("task_1", "New task"), revision: 3 } };
         throw new Error(method);
@@ -1091,7 +708,7 @@ describe("app controller callbacks", () => {
       }).newTask.submit();
       for (let index = 0; index < 8; index += 1) await Promise.resolve();
 
-      expect(request).toHaveBeenNthCalledWith(1, TASK_CREATE, {
+      expect(request).toHaveBeenNthCalledWith(1, TASK_ACQUIRE, {
         projectId: "project_1",
         agentId: "codex",
       });
@@ -1115,7 +732,7 @@ describe("app controller callbacks", () => {
   it("keeps the prepared Task route and restores its draft when first send fails", async () => {
     const dispatch = vi.fn();
     const request = vi.fn(async (method: string) => {
-      if (method === TASK_CREATE) return { task: protocolTaskSnapshot("task_1", "New task") };
+      if (method === TASK_ACQUIRE) return { task: protocolTaskSnapshot("task_1", "New task") };
       if (method === TASK_SEND) throw new Error("send failed");
       throw new Error(method);
     });
@@ -1152,7 +769,7 @@ describe("app controller callbacks", () => {
     try {
       const dispatch = vi.fn();
       const request = vi.fn(async (method: string, _params?: unknown) => {
-        if (method === TASK_CREATE) {
+        if (method === TASK_ACQUIRE) {
           return { task: protocolPreparingTaskSnapshot("task_1", "New task") };
         }
         if (method === TASK_OPEN) {
@@ -1186,7 +803,7 @@ describe("app controller callbacks", () => {
       await Promise.resolve();
       await Promise.resolve();
 
-      expect(request).toHaveBeenNthCalledWith(1, TASK_CREATE, {
+      expect(request).toHaveBeenNthCalledWith(1, TASK_ACQUIRE, {
         projectId: "project_1",
         agentId: "codex",
         configOptions: { mode: "agent" },
@@ -1996,39 +1613,6 @@ describe("app controller callbacks", () => {
     expect(postHostMessage).not.toHaveBeenCalled();
   });
 
-  it("sends App Server handle-backed attachments through BackendConnection", async () => {
-    const dispatch = vi.fn();
-    const request = vi.fn(async () => ({ task: protocolTaskSnapshot("task_1", "Sent") }));
-    const state = createInitialState();
-    state.snapshot = snapshot("task_1");
-    state.taskInputs.task_1 = {
-      prompt: "Continue",
-      context: [
-        {
-          local_id: "ctx_1",
-          kind: "file",
-          label: "notes.md",
-          app_server_handle_id: "attachment-handle-1" as AttachmentHandleId,
-        },
-      ],
-    };
-
-    callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"] },
-      dispatch,
-      state,
-    }).task.sendPrompt();
-    await settlePromises();
-
-    expect(request).toHaveBeenCalledWith(TASK_SEND, {
-      taskId: "task_1",
-      message: {
-        text: "Continue",
-        attachments: ["attachment-handle-1"],
-      },
-    });
-    expect(postHostMessage).not.toHaveBeenCalled();
-  });
 
   it("rejects raw attachment prompt sends without legacy replay", () => {
     const dispatch = vi.fn();
@@ -2090,43 +1674,6 @@ describe("app controller callbacks", () => {
     });
   });
 
-  it("releases prepared new-task attachment handles when their composer rows are removed", async () => {
-    const dispatch = vi.fn();
-    const request = vi.fn(async () => ({ outcomes: [] }));
-    const state = createInitialState();
-    state.snapshot = {
-      ...snapshot("task_1"),
-      task: { ...snapshot("task_1").task, has_messages: false },
-    };
-    state.taskInputs.task_1 = {
-      prompt: "Draft",
-      context: [
-        {
-          local_id: "ctx_1",
-          kind: "file",
-          label: "notes.md",
-          app_server_handle_id: "attachment-handle-1" as AttachmentHandleId,
-        },
-      ],
-    };
-
-    callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"] },
-      dispatch,
-      state,
-    }).newTask.removeAttachment("ctx_1");
-    await settlePromises();
-
-    expect(dispatch).toHaveBeenCalledWith({
-      type: "taskInput:attachment:remove",
-      taskId: "task_1",
-      attachmentId: "ctx_1",
-    });
-    expect(request).toHaveBeenCalledWith(ATTACHMENT_RELEASE, {
-      taskId: "task_1",
-      resources: [{ kind: "handle", id: "attachment-handle-1" }],
-    });
-  });
 
   it("reveals App Server attachment handles through BackendConnection", async () => {
     const request = vi.fn(async () => ({ requested: true }));
@@ -2386,37 +1933,6 @@ describe("app controller callbacks", () => {
     });
   });
 
-  it("adds pasted image attachments through BackendConnection", async () => {
-    const dispatch = vi.fn();
-    const request = vi.fn(async () => ({
-      attachment: { handleId: "attachment-handle-image", label: "pasted.png" },
-    }));
-    const state = createInitialState();
-    state.snapshot = snapshot("task_1");
-
-    await callbacks({
-      backendConnection: { request: request as unknown as BackendConnection["request"] },
-      dispatch,
-      state,
-    }).task.fileBrowser?.attachPastedImage(new File(["image"], "pasted.png", { type: "image/png" }));
-
-    expect(request).toHaveBeenCalledWith(ATTACHMENT_CREATE_PASTED_IMAGE, {
-      taskId: "task_1",
-      label: "pasted.png",
-      mimeType: "image/png",
-      data: "aW1hZ2U=",
-    });
-    expect(dispatch).toHaveBeenCalledWith({
-      type: "taskInput:attachment:addAppServer",
-      taskId: "task_1",
-      attachment: expect.objectContaining({
-        kind: "file",
-        label: "pasted.png",
-        app_server_handle_id: "attachment-handle-image",
-        preview_url: "data:image/png;base64,aW1hZ2U=",
-      }),
-    });
-  });
 
   it("cancels tasks through BackendConnection when available", async () => {
     const dispatch = vi.fn();
@@ -2711,7 +2227,7 @@ describe("app controller callbacks", () => {
     navigation.openTask("task_existing");
     await settlePromises();
 
-    expect(request).not.toHaveBeenCalledWith(TASK_DISCARD, expect.anything());
+    expect(request).not.toHaveBeenCalledWith(TASK_RELEASE, expect.anything());
     expect(release).not.toHaveBeenCalled();
     expect(dispatch).not.toHaveBeenCalledWith({ type: "taskInput:clear", taskId: "task_prepared" });
     expect(dispatch).not.toHaveBeenCalledWith({ type: "task:list:remove", taskId: "task_prepared" });
@@ -2733,7 +2249,7 @@ describe("app controller callbacks", () => {
     navigation.openSettings();
     await settlePromises();
 
-    expect(request).not.toHaveBeenCalledWith(TASK_DISCARD, expect.anything());
+    expect(request).not.toHaveBeenCalledWith(TASK_RELEASE, expect.anything());
     expect(release).not.toHaveBeenCalled();
     expect(dispatch).not.toHaveBeenCalledWith({ type: "taskInput:clear", taskId: "task_prepared" });
     expect(dispatch).not.toHaveBeenCalledWith({ type: "task:list:remove", taskId: "task_prepared" });
@@ -2742,7 +2258,7 @@ describe("app controller callbacks", () => {
   it("discards the prepared Task before adopting a Native Session", async () => {
     const dispatch = vi.fn();
     const request = vi.fn(async (method: string) => {
-      if (method === TASK_DISCARD) return { discarded: true };
+      if (method === TASK_RELEASE) return { discarded: true };
       if (method === TASK_ADOPT_NATIVE_SESSION) {
         return { task: protocolTaskSnapshot("task_adopted", "Native Session") };
       }
@@ -2762,10 +2278,10 @@ describe("app controller callbacks", () => {
     });
     await settlePromises();
 
-    expect(request.mock.calls.filter(([method]) => method === TASK_DISCARD)).toEqual([
-      [TASK_DISCARD, { taskId: "task_prepared" }],
+    expect(request.mock.calls.filter(([method]) => method === TASK_RELEASE)).toEqual([
+      [TASK_RELEASE, { taskId: "task_prepared" }],
     ]);
-    expect(request.mock.calls.findIndex(([method]) => method === TASK_DISCARD))
+    expect(request.mock.calls.findIndex(([method]) => method === TASK_RELEASE))
       .toBeLessThan(request.mock.calls.findIndex(([method]) => method === TASK_ADOPT_NATIVE_SESSION));
     expect(request).toHaveBeenCalledWith(TASK_ADOPT_NATIVE_SESSION, expect.objectContaining({
       nativeSessionId: "native_1",
@@ -2775,7 +2291,7 @@ describe("app controller callbacks", () => {
   it("does not discard a prepared Task after its first send has started", async () => {
     const dispatch = vi.fn();
     const request = vi.fn(async (method: string) => {
-      if (method === TASK_DISCARD) return { discarded: true };
+      if (method === TASK_RELEASE) return { discarded: true };
       throw new Error(method);
     });
     const state = preparedNewTaskState("task_prepared");
@@ -2802,12 +2318,12 @@ describe("app controller callbacks", () => {
     }).navigation.openSettings();
     await settlePromises();
 
-    expect(request).not.toHaveBeenCalledWith(TASK_DISCARD, expect.anything());
+    expect(request).not.toHaveBeenCalledWith(TASK_RELEASE, expect.anything());
   });
 
   it("does not let a stale prepared snapshot replace a newer ownership lease", async () => {
     const request = vi.fn(async (method: string) => {
-      if (method === TASK_DISCARD) return { discarded: true };
+      if (method === TASK_RELEASE) return { discarded: true };
       throw new Error(method);
     });
     const state = preparedNewTaskState("task_stale");
@@ -2824,7 +2340,7 @@ describe("app controller callbacks", () => {
     }).navigation.openSettings();
     await settlePromises();
 
-    expect(request).not.toHaveBeenCalledWith(TASK_DISCARD, expect.anything());
+    expect(request).not.toHaveBeenCalledWith(TASK_RELEASE, expect.anything());
     expect(newTaskController.currentLease()).toBe(currentLease);
   });
 

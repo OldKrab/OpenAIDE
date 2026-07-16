@@ -261,7 +261,7 @@ fn prompt_outcome(stop_reason: crate::agent::acp_schema::StopReason) -> AgentPro
 pub(super) async fn cancel_active_prompt(
     active_session: &agent_client_protocol::ActiveSession<'static, Agent>,
     trace: Option<&AcpTraceSession>,
-) {
+) -> Result<(), RuntimeError> {
     let notification = CancelNotification::new(active_session.session_id().clone());
     if let Some(trace) = trace {
         trace.record(
@@ -270,5 +270,8 @@ pub(super) async fn cancel_active_prompt(
             &notification,
         );
     }
-    let _ = active_session.connection().send_notification(notification);
+    active_session
+        .connection()
+        .send_notification(notification)
+        .map_err(acp_error)
 }

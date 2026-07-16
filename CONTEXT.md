@@ -13,8 +13,24 @@ A visible unit of agent work in OpenAIDE's task list that has status, Project Co
 _Avoid_: Chat, conversation
 
 **New Task**:
-A client-private, reusable pre-history Task instance with an App Server-owned identity, selected Project Context and Agent, and a Native Session that is being acquired or retained. It is not visible in Task Navigation, Task lists, Archive, or other clients. App Server promotes it to a visible Task when it durably accepts the first user message. Ordinary navigation does not discard it.
-_Avoid_: Draft Task, slot, temporary Frontend-only task, visible empty Task
+The pre-history work surface where a user selects Task context, configures an Agent, and composes the first message. It is backed by an exclusively leased Prepared Task but is not visible in Task Navigation, Task lists, or Archive.
+_Avoid_: Draft Task, slot, visible empty Task
+
+**Prepared Task**:
+A durable zero-message New Task with its own Agent-owned Native Session. It may be free for reuse or exclusively leased to one client and becomes a visible Task when its first user message is durably accepted.
+_Avoid_: Bare Native Session, temporary Frontend-only task
+
+**Prepared-Task Lease**:
+Exclusive use of one Prepared Task by one client while that client's New Task composer uses its context and Native Session.
+_Avoid_: Shared session, draft ownership map
+
+**Free Prepared Task**:
+An unleased, ready Prepared Task eligible for reuse by a client selecting the same Agent and Task Workspace.
+_Avoid_: Orphan Task, idle visible Task
+
+**Image**:
+Visual content added to a message through paste, drag and drop, or a picker; those input methods do not create different content kinds.
+_Avoid_: PastedImage, treating Image as a workspace-file attachment
 
 **Chat**:
 The user-facing message surface inside a Task where the user and agent exchange messages and folded tool activity.
@@ -137,11 +153,11 @@ _Avoid_: Treating every unread update or status change as an alert
 - Web App, Desktop App, and Mobile App share as much **Frontend** composition as their shell constraints allow.
 - VS Code Extension composes the same **Frontend** surfaces into VS Code-specific locations.
 - A **Task** can be moved to the **Archive**.
-- A **New Task** is private to one App Shell client and is never reused by another client.
-- A **New Task** is reused by its owning client until its first message is durably accepted or the user explicitly discards it.
-- While the first send is unresolved and App Server still identifies the instance as the client's **New Task**, invoking New Task simply reopens that same instance in its submitting state. A later New Task action creates another instance only after first-send acceptance has made the previous one a visible **Task**.
-- Closing or leaving the **New Task** surface does not discard it or close its **Native Session**.
-- A **New Task** becomes a visible **Task** when App Server durably accepts its first user message and starting Task state.
+- One client holds at most one **Prepared-Task Lease**, and one **Prepared Task** is leased to at most one client.
+- A **Free Prepared Task** may be reused by another client selecting the same Agent and Task Workspace.
+- Changing Project Context, Agent, or Task Workspace releases the current **Prepared-Task Lease** while leaving the Frontend-owned composer unchanged.
+- Closing or leaving the **New Task** surface for ordinary navigation retains its **Prepared-Task Lease**.
+- The leased **Prepared Task** becomes a visible **Task** when its first user message is durably accepted.
 - A **Task** belongs to the OpenAIDE task list and has **Project Context**.
 - **Project Context** is always a **Project**.
 - A **Task** has one **Task Workspace**.
@@ -182,7 +198,7 @@ _Avoid_: Treating every unread update or status change as an alert
 > **Domain expert:** "No. A **Task** starts only after the user chooses the required Project Context and Agent. OpenAIDE starts the Agent-owned **Native Session** for that Task, but Agent work starts only when the user sends the first message."
 
 > **Dev:** "What happens if the user leaves New Task before sending?"
-> **Domain expert:** "The client-private **New Task** remains. Returning reopens the same instance and reuses, resumes, loads, or safely replaces its empty **Native Session** behind the App Server seam."
+> **Domain expert:** "Ordinary navigation retains the client's **Prepared-Task Lease**. Returning reopens the composer with the same leased **Prepared Task**, unless a context change or confirmed client expiry released it."
 
 > **Dev:** "Should old chats appear under Recent?"
 > **Domain expert:** "Use **Task**, not chat. Old tasks stay in the default list until the user moves them to the **Archive**."
@@ -255,6 +271,8 @@ _Avoid_: Treating every unread update or status change as an alert
 - Agent setup failures were discussed as failed Tasks; resolved: unavailable Agents are handled in Agent settings/status before work starts.
 - "VS Code extension" was used as if it were the whole product shell; resolved: use **App Shell** for Web App, Desktop App, Mobile App, and VS Code Extension.
 - "session" was used ambiguously between ACP and product UI; resolved: **Native Session** is Agent-owned identity, while **Task** remains user-facing work.
+- "New Task" was used to conflate the user-facing composer, a durable zero-message Task, and client ownership; resolved: **New Task** is the pre-history work surface, **Prepared Task** is the durable zero-message Task, and **Prepared-Task Lease** is temporary exclusive client use.
+- Paste, drag and drop, and picker input were discussed as different attachment kinds; resolved: they all add the same **Image** content kind.
 - "options" was used as if it meant static controls; resolved: **Configuration Options** are Agent-provided and may appear, disappear, or change after Agent updates.
 - "default options" was used for saved agent preferences; resolved: do not cache Configuration Option values in v1.
 - Cross-App Shell and cross-App Server blocking applies to live **Native Session** interaction, not to observing persisted Task history or answering Task-scoped requests from a subscribed App Shell client.

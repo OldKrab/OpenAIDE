@@ -13,9 +13,9 @@ use openaide_app_server_protocol::methods::{
     ATTACHMENT_CREATE_EMBEDDED_CANDIDATE, ATTACHMENT_CREATE_FILE_REFERENCE,
     ATTACHMENT_CREATE_PASTED_IMAGE, ATTACHMENT_LIST_DIRECTORY, ATTACHMENT_LIST_ROOTS,
     ATTACHMENT_REFRESH_HANDLES, ATTACHMENT_RELEASE, ATTACHMENT_REVEAL, CLIENT_HEARTBEAT,
-    CLIENT_INITIALIZE, SETTINGS_GET_AGENT_DETAILS, STATE_SUBSCRIBE, TASK_ADOPT_NATIVE_SESSION,
-    TASK_CANCEL, TASK_CREATE, TASK_DISCARD, TASK_LIST, TASK_MARK_READ, TASK_OPEN, TASK_SEND,
-    TASK_SET_ARCHIVED, TASK_SET_CONFIG_OPTION,
+    CLIENT_INITIALIZE, SETTINGS_GET_AGENT_DETAILS, STATE_SUBSCRIBE, TASK_ACQUIRE,
+    TASK_ADOPT_NATIVE_SESSION, TASK_CANCEL, TASK_LIST, TASK_MARK_READ, TASK_OPEN, TASK_RELEASE,
+    TASK_SEND, TASK_SET_ARCHIVED, TASK_SET_CONFIG_OPTION,
 };
 use openaide_app_server_protocol::snapshot::PendingRequestScope;
 use openaide_app_server_protocol::state::{StateSubscribeParams, SubscriptionScope};
@@ -196,135 +196,6 @@ fn initialize_exposes_one_stable_server_id_per_gateway_process_epoch() {
     assert_eq!(repeated_server_id, first_server_id);
     assert!(!second_server_id.is_empty());
     assert_ne!(second_server_id, first_server_id);
-}
-
-#[test]
-fn attachment_handle_is_scoped_to_its_originating_client_at_protocol_boundary() {
-    let temp = tempfile::TempDir::new().expect("temp dir");
-    let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut task = task_record("task-1");
-    task.workspace_root = temp.path().to_string_lossy().to_string();
-    store.write_task(&task).unwrap();
-    drop(store);
-    let state_root = StateRoot::resolve(temp.path()).expect("state root");
-    let dispatcher = ProtocolEdgeStdioDispatcher::new_for_test(state_root);
-    let gateway = dispatcher.shared_gateway();
-    let owner_connection = ConnectionId::new("conn-owner");
-    let other_connection = ConnectionId::new("conn-other");
-    gateway_result(gateway.handle_inbound(
-        owner_connection.clone(),
-        gateway_request(
-            "initialize-owner",
-            CLIENT_INITIALIZE,
-            serde_json::to_value(initialize_params("client-owner")).unwrap(),
-        ),
-        AppServerTime(1),
-    ));
-    gateway_result(gateway.handle_inbound(
-        other_connection.clone(),
-        gateway_request(
-            "initialize-other",
-            CLIENT_INITIALIZE,
-            serde_json::to_value(initialize_params("client-other")).unwrap(),
-        ),
-        AppServerTime(2),
-    ));
-
-    let created = gateway_result(gateway.handle_inbound(
-        owner_connection.clone(),
-        gateway_request(
-            "create",
-            ATTACHMENT_CREATE_PASTED_IMAGE,
-            json!({
-                "taskId": "task-1",
-                "label": "image.png",
-                "mimeType": "image/png",
-                "data": "aW1hZ2U=",
-            }),
-        ),
-        AppServerTime(3),
-    ));
-    let handle_id = created["attachment"]["handleId"]
-        .as_str()
-        .expect("attachment handle")
-        .to_string();
-
-    let refresh_error = gateway_error(gateway.handle_inbound(
-        other_connection.clone(),
-        gateway_request(
-            "refresh-other",
-            ATTACHMENT_REFRESH_HANDLES,
-            json!({ "taskId": "task-1", "handles": [handle_id] }),
-        ),
-        AppServerTime(4),
-    ));
-    assert_eq!(
-        refresh_error.error.code,
-        ProtocolErrorCode::ValidationFailed
-    );
-
-    let released = gateway_result(gateway.handle_inbound(
-        other_connection.clone(),
-        gateway_request(
-            "release-other",
-            ATTACHMENT_RELEASE,
-            json!({
-                "taskId": "task-1",
-                "resources": [
-                    { "kind": "handle", "id": handle_id },
-                    { "kind": "handle", "id": "missing-handle" }
-                ]
-            }),
-        ),
-        AppServerTime(5),
-    ));
-    assert_eq!(
-        released["outcomes"],
-        json!([
-            {
-                "resource": { "kind": "handle", "id": handle_id },
-                "status": "forbidden"
-            },
-            {
-                "resource": { "kind": "handle", "id": "missing-handle" },
-                "status": "noOp"
-            }
-        ])
-    );
-
-    let send_error = gateway_error(gateway.handle_inbound(
-        other_connection.clone(),
-        gateway_request(
-            "send-other",
-            TASK_SEND,
-            json!({
-                "taskId": "task-1",
-                "message": { "text": "inspect", "attachments": [handle_id] },
-            }),
-        ),
-        AppServerTime(6),
-    ));
-    assert_eq!(
-        send_error.error.code,
-        ProtocolErrorCode::AttachmentHandleInvalid
-    );
-
-    let refreshed = gateway_result(gateway.handle_inbound(
-        owner_connection,
-        gateway_request(
-            "refresh-owner",
-            ATTACHMENT_REFRESH_HANDLES,
-            json!({ "taskId": "task-1", "handles": [handle_id] }),
-        ),
-        AppServerTime(7),
-    ));
-    assert_eq!(refreshed["attachments"][0]["handleId"], handle_id);
-    drop(gateway);
-    drop(dispatcher);
-    assert!(open_store_after_dispatcher_drop(temp.path())
-        .read_messages("task-1")
-        .unwrap()
-        .is_empty());
 }
 
 #[test]
@@ -876,7 +747,7 @@ fn agent_custom_create_updates_live_registry_and_emits_agent_event() {
         &json!({
             "jsonrpc": "2.0",
             "id": "create-custom-task",
-            "method": TASK_CREATE,
+            "method": TASK_ACQUIRE,
             "params": {
                 "agentId": custom_agent_id,
                 "projectId": project_id_for_workspace("/workspace/a"),
@@ -1584,7 +1455,7 @@ fn task_create_persists_idle_task_without_prompt_after_initialize() {
         &json!({
             "jsonrpc": "2.0",
             "id": "2",
-            "method": TASK_CREATE,
+            "method": TASK_ACQUIRE,
             "params": {
                 "projectId": project_id_for_workspace("/workspace/a"),
                 "agentId": "codex"
@@ -1621,9 +1492,9 @@ fn task_create_persists_idle_task_without_prompt_after_initialize() {
     assert_eq!(
         record.lifecycle,
         crate::storage::records::TaskLifecycle::New {
-            owner_client_instance_id: openaide_app_server_protocol::ids::ClientInstanceId::from(
+            lease: Some(openaide_app_server_protocol::ids::ClientInstanceId::from(
                 "client-1"
-            ),
+            )),
         }
     );
     assert_eq!(record.active_turn_id, None);
@@ -1654,7 +1525,7 @@ fn task_create_does_not_publish_private_new_task_to_project_subscribers() {
         &json!({
             "jsonrpc": "2.0",
             "id": "2",
-            "method": TASK_CREATE,
+            "method": TASK_ACQUIRE,
             "params": {
                 "projectId": project_id_for_workspace("/workspace/a"),
                 "agentId": "codex"
@@ -2074,126 +1945,6 @@ fn runtime_permission_request_reject_option_persists_denied_decision() {
 }
 
 #[test]
-fn attachment_file_browser_creates_handle_used_by_task_send() {
-    let temp = tempfile::TempDir::new().expect("temp dir");
-    let workspace = temp.path().join("workspace");
-    std::fs::create_dir_all(&workspace).unwrap();
-    std::fs::write(workspace.join("notes.md"), "hello").unwrap();
-    let task_id = {
-        let store = Store::open(temp.path().to_path_buf()).unwrap();
-        let mut task = task_record("task-existing");
-        task.workspace_root = workspace.to_string_lossy().to_string();
-        store.write_task(&task).unwrap();
-        "task-existing".to_string()
-    };
-    let state_root = StateRoot::resolve(temp.path()).expect("state root");
-    let mut dispatcher = ProtocolEdgeStdioDispatcher::new_for_test(state_root);
-    dispatcher.handle_line(&init_request("1", "client-1"));
-
-    let roots = dispatcher.handle_line(
-        &json!({
-            "jsonrpc": "2.0",
-            "id": "roots",
-            "method": ATTACHMENT_LIST_ROOTS,
-            "params": { "taskId": task_id }
-        })
-        .to_string(),
-    );
-    let root_id = response(&roots[0])["result"]["result"]["roots"][0]["rootId"]
-        .as_str()
-        .unwrap()
-        .to_string();
-
-    let listing = dispatcher.handle_line(
-        &json!({
-            "jsonrpc": "2.0",
-            "id": "list",
-            "method": ATTACHMENT_LIST_DIRECTORY,
-            "params": { "taskId": task_id, "rootId": root_id }
-        })
-        .to_string(),
-    );
-    let list_response = response(&listing[0]);
-    let entry = list_response["result"]["result"]["entries"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|entry| entry["label"] == "notes.md")
-        .expect("notes entry");
-    let entry_id = entry["entryId"].as_str().unwrap().to_string();
-    assert_eq!(entry["selectable"], true);
-
-    let created = dispatcher.handle_line(
-        &json!({
-            "jsonrpc": "2.0",
-            "id": "create-attachment",
-            "method": ATTACHMENT_CREATE_FILE_REFERENCE,
-            "params": { "taskId": task_id, "entryId": entry_id }
-        })
-        .to_string(),
-    );
-    let handle_id = response(&created[0])["result"]["result"]["attachment"]["handleId"]
-        .as_str()
-        .unwrap()
-        .to_string();
-
-    let refreshed = dispatcher.handle_line(
-        &json!({
-            "jsonrpc": "2.0",
-            "id": "refresh-attachment",
-            "method": ATTACHMENT_REFRESH_HANDLES,
-            "params": { "taskId": task_id, "handles": [handle_id] }
-        })
-        .to_string(),
-    );
-    assert_eq!(
-        response(&refreshed[0])["result"]["result"]["attachments"][0]["label"],
-        "notes.md"
-    );
-
-    let sent = dispatcher.handle_line(
-        &json!({
-            "jsonrpc": "2.0",
-            "id": "send",
-            "method": TASK_SEND,
-            "params": {
-                "taskId": task_id,
-                "message": {
-                    "text": "Use this context",
-                    "attachments": [handle_id]
-                }
-            }
-        })
-        .to_string(),
-    );
-
-    let send_response = response(&sent[0]);
-    let parts = send_response["result"]["result"]["task"]["chat"]["items"][0]["parts"]
-        .as_array()
-        .unwrap();
-    assert_eq!(parts[1]["kind"], "attachment");
-    assert_eq!(parts[1]["attachment"]["label"], "notes.md");
-    assert!(parts[1]["attachment"].get("path").is_none());
-
-    let released = dispatcher.handle_line(
-        &json!({
-            "jsonrpc": "2.0",
-            "id": "release-attachment",
-            "method": ATTACHMENT_RELEASE,
-            "params": {
-                "taskId": task_id,
-                "resources": [{ "kind": "handle", "id": handle_id }]
-            }
-        })
-        .to_string(),
-    );
-    assert_eq!(
-        response(&released[0])["result"]["result"]["outcomes"][0]["status"],
-        "noOp"
-    );
-}
-
-#[test]
 fn task_cancel_clears_active_turn_after_initialize() {
     let temp = tempfile::TempDir::new().expect("temp dir");
     {
@@ -2348,15 +2099,15 @@ fn unsupported_mutating_task_methods_do_not_fall_through_to_legacy_dispatch() {
 }
 
 #[test]
-fn task_discard_hides_empty_pre_send_task_after_initialize() {
+fn task_release_is_idempotent_after_restart_clears_the_lease() {
     let temp = tempfile::TempDir::new().expect("temp dir");
     {
         let store = Store::open(temp.path().to_path_buf()).unwrap();
         let mut draft = task_record("task-draft");
         draft.lifecycle = crate::storage::records::TaskLifecycle::New {
-            owner_client_instance_id: openaide_app_server_protocol::ids::ClientInstanceId::from(
+            lease: Some(openaide_app_server_protocol::ids::ClientInstanceId::from(
                 "client-1",
-            ),
+            )),
         };
         store.write_task(&draft).unwrap();
         let mut existing = task_record("task-existing");
@@ -2365,7 +2116,6 @@ fn task_discard_hides_empty_pre_send_task_after_initialize() {
     }
     let state_root = StateRoot::resolve(temp.path()).expect("state root");
     let mut dispatcher = ProtocolEdgeStdioDispatcher::new_for_test(state_root);
-    let notifications = dispatcher.take_task_updates().expect("task updates");
     dispatcher.handle_line(&init_request("1", "client-1"));
     dispatcher.handle_line(
         &json!({
@@ -2383,27 +2133,21 @@ fn task_discard_hides_empty_pre_send_task_after_initialize() {
         &json!({
             "jsonrpc": "2.0",
             "id": "2",
-            "method": TASK_DISCARD,
+            "method": TASK_RELEASE,
             "params": { "taskId": "task-draft" }
         })
         .to_string(),
     );
 
     let response = response(&responses[0]);
-    assert_eq!(
-        response["result"]["result"]["discardedTaskId"],
-        "task-draft"
-    );
-    assert!(response["result"]["result"].get("tasks").is_none());
+    assert_eq!(response["result"]["result"]["taskId"], "task-draft");
     assert_eq!(responses.len(), 1);
-    let committed = notifications
-        .recv_timeout(Duration::from_secs(1))
-        .expect("task discard notification");
-    // New Tasks are private and were never present in Task Navigation.
-    assert!(dispatcher.handle_task_update(committed).is_empty());
     drop(dispatcher);
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    assert!(store.read_task("task-draft").unwrap().tombstoned);
+    assert_eq!(
+        store.read_task("task-draft").unwrap().lifecycle,
+        crate::storage::records::TaskLifecycle::New { lease: None }
+    );
 }
 
 #[test]
@@ -2473,9 +2217,9 @@ fn task_discard_keeps_the_configured_project_after_its_last_task() {
         let mut draft = task_record("task-draft");
         draft.workspace_root = workspace_root.to_string();
         draft.lifecycle = crate::storage::records::TaskLifecycle::New {
-            owner_client_instance_id: openaide_app_server_protocol::ids::ClientInstanceId::from(
+            lease: Some(openaide_app_server_protocol::ids::ClientInstanceId::from(
                 "client-1",
-            ),
+            )),
         };
         store.write_task(&draft).unwrap();
     }
@@ -2510,7 +2254,7 @@ fn task_discard_keeps_the_configured_project_after_its_last_task() {
         &json!({
             "jsonrpc": "2.0",
             "id": "2",
-            "method": TASK_DISCARD,
+            "method": TASK_RELEASE,
             "params": { "taskId": "task-draft" }
         })
         .to_string(),
@@ -2673,6 +2417,7 @@ fn task_record(task_id: &str) -> TaskRecord {
         lifecycle: crate::storage::records::TaskLifecycle::Visible,
         agent_session_id: None,
         active_turn_id: None,
+        active_turn_started_at: None,
         archived: false,
         tombstoned: false,
         revision: 1,
@@ -2681,6 +2426,7 @@ fn task_record(task_id: &str) -> TaskRecord {
         config_mutation: Default::default(),
         agent_commands_catalog: None,
         model_id: None,
+        supports_image_input: false,
         preparation: TaskPreparationRecord::Ready,
     }
 }

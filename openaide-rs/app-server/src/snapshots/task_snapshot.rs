@@ -242,12 +242,18 @@ pub(crate) fn project_stored_task_snapshot_with_history_sync(
     task.status = projected_status;
     Ok(TaskSnapshot {
         task,
+        active_turn_started_at: snapshot.active_turn_started_at,
         lifecycle,
         revision: snapshot.revision,
         preparation: preparation_snapshot(&snapshot.preparation),
         agent_config,
         agent_commands,
         send_capability,
+        input_capabilities: Some(
+            openaide_app_server_protocol::snapshot::TaskInputCapabilities {
+                image: snapshot.supports_image_input,
+            },
+        ),
         chat: project_chat_page(snapshot.chat),
         history_sync,
         pending_requests: Vec::new(),

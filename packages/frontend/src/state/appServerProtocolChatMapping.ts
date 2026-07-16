@@ -181,14 +181,27 @@ function textFromParts(parts: MessagePart[]) {
 }
 
 function attachmentsFromParts(parts: MessagePart[]): Attachment[] | undefined {
-  const attachments = parts
-    .filter((part): part is Extract<MessagePart, { kind: "attachment" }> => part.kind === "attachment")
-    .map((part) => ({
-      id: part.attachment.attachmentId,
-      kind: "file" as const,
-      label: part.attachment.label,
-      payload: attachmentPayload(part.attachment),
-    }));
+  const attachments = parts.flatMap((part): Attachment[] => {
+    if (part.kind === "attachment") {
+      return [{
+        id: part.attachment.attachmentId,
+        kind: "file",
+        label: part.attachment.label,
+        payload: attachmentPayload(part.attachment),
+      }];
+    }
+    if (part.kind === "image") {
+      return [{
+        kind: "image",
+        label: "Image",
+        payload: {
+          previewUrl: part.dataUrl,
+          mimeType: part.mediaType,
+        },
+      }];
+    }
+    return [];
+  });
   return attachments.length ? attachments : undefined;
 }
 

@@ -480,9 +480,9 @@ fn visible_task_queries_exclude_client_private_new_tasks() {
     let visible = task_record("task-visible", TaskStatus::Inactive, "1");
     let mut new_task = task_record("task-new", TaskStatus::Inactive, "2");
     new_task.lifecycle = super::records::TaskLifecycle::New {
-        owner_client_instance_id: openaide_app_server_protocol::ids::ClientInstanceId::from(
+        lease: Some(openaide_app_server_protocol::ids::ClientInstanceId::from(
             "client-a",
-        ),
+        )),
     };
     store.write_task(&visible).unwrap();
     store.write_task(&new_task).unwrap();
@@ -766,6 +766,7 @@ fn task_record(task_id: &str, status: TaskStatus, created_at: &str) -> TaskRecor
         lifecycle: super::records::TaskLifecycle::Visible,
         agent_session_id: None,
         active_turn_id: None,
+        active_turn_started_at: None,
         archived: false,
         tombstoned: false,
         revision: 1,
@@ -774,6 +775,7 @@ fn task_record(task_id: &str, status: TaskStatus, created_at: &str) -> TaskRecor
         config_mutation: Default::default(),
         agent_commands_catalog: None,
         model_id: None,
+        supports_image_input: false,
         preparation: TaskPreparationRecord::Ready,
     }
 }

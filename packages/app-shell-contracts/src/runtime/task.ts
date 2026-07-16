@@ -31,6 +31,8 @@ export type TaskAttentionEvent = {
 export type TaskSnapshot = {
   lifecycle: "new" | "visible";
   task: TaskSummary;
+  /** App Server-authored start of the active turn; absent when no turn is running. */
+  active_turn_started_at?: string;
   chat: MessagePage;
   /** Active App Server requests render after durable Chat and never enter history. */
   active_requests: ChatMessage[];
@@ -56,6 +58,9 @@ export type TaskSnapshot = {
         | "failedValidation";
       message: string;
     }>;
+  };
+  input_capabilities?: {
+    image: boolean;
   };
   revision: number;
   history_sync: HistorySyncState;

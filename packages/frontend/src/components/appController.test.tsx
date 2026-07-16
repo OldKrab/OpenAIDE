@@ -11,8 +11,8 @@ import {
   SETTINGS_GET_SKILLS,
   STATE_SUBSCRIBE,
   STATE_UNSUBSCRIBE,
-  TASK_CREATE,
-  TASK_DISCARD,
+  TASK_ACQUIRE,
+  TASK_RELEASE,
   TASK_LIST,
   TASK_MARK_READ,
   TASK_OPEN,
@@ -997,7 +997,7 @@ describe("app controller mounted lifecycle", () => {
       if (method === AGENT_LIST_SESSIONS) {
         return { agentId: "codex", projectLabel: "OpenAIDE", sessions: [], nextCursor: null };
       }
-      if (method === TASK_CREATE) {
+      if (method === TASK_ACQUIRE) {
         return {
           task: {
             ...protocolTaskSnapshot("task_new", "New task", { hasMessages: false }),
@@ -1026,11 +1026,11 @@ describe("app controller mounted lifecycle", () => {
     });
 
     expect({
-      createCalls: request.mock.calls.filter(([method]) => method === TASK_CREATE),
+      createCalls: request.mock.calls.filter(([method]) => method === TASK_ACQUIRE),
       sendCalls: request.mock.calls.filter(([method]) => method === TASK_SEND),
       snapshot: latestController?.newTaskSnapshot,
     }).toEqual({
-      createCalls: [[TASK_CREATE, { projectId: "project_1", agentId: "codex" }]],
+      createCalls: [[TASK_ACQUIRE, { projectId: "project_1", agentId: "codex" }]],
       sendCalls: [],
       snapshot: expect.objectContaining({
         task: expect.objectContaining({ task_id: "task_new", has_messages: false }),
@@ -1066,7 +1066,7 @@ describe("app controller mounted lifecycle", () => {
       if (method === AGENT_LIST_SESSIONS) {
         return { agentId: "codex", projectLabel: "OpenAIDE", sessions: [], nextCursor: null };
       }
-      if (method === TASK_CREATE) return { task: loadingTask };
+      if (method === TASK_ACQUIRE) return { task: loadingTask };
       if (method === STATE_SUBSCRIBE) {
         const scope = params?.scope;
         if (scope?.kind === "projects") {
@@ -1159,13 +1159,13 @@ describe("app controller mounted lifecycle", () => {
       if (method === AGENT_LIST_SESSIONS) {
         return { agentId: "codex", projectLabel: "OpenAIDE", sessions: [], nextCursor: null };
       }
-      if (method === TASK_CREATE) {
-        if (request.mock.calls.filter(([calledMethod]) => calledMethod === TASK_CREATE).length === 1) {
+      if (method === TASK_ACQUIRE) {
+        if (request.mock.calls.filter(([calledMethod]) => calledMethod === TASK_ACQUIRE).length === 1) {
           return created.promise;
         }
         return { task: protocolTaskSnapshot("task_replaced", "New task", { hasMessages: false }) };
       }
-      if (method === TASK_DISCARD) {
+      if (method === TASK_RELEASE) {
         return { discardedTaskId: params?.taskId };
       }
       throw new Error(method);
@@ -1183,7 +1183,7 @@ describe("app controller mounted lifecycle", () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(request.mock.calls.filter(([method]) => method === TASK_CREATE)).toHaveLength(1);
+    expect(request.mock.calls.filter(([method]) => method === TASK_ACQUIRE)).toHaveLength(1);
 
     act(() => {
       latestController?.dispatch({
@@ -1209,10 +1209,10 @@ describe("app controller mounted lifecycle", () => {
       await Promise.resolve();
     });
 
-    expect(request.mock.calls.filter(([method]) => method === TASK_CREATE)).toEqual([
-      [TASK_CREATE, { projectId: "project_1", agentId: "codex" }],
+    expect(request.mock.calls.filter(([method]) => method === TASK_ACQUIRE)).toEqual([
+      [TASK_ACQUIRE, { projectId: "project_1", agentId: "codex" }],
     ]);
-    expect(request.mock.calls.filter(([method]) => method === TASK_DISCARD)).toEqual([]);
+    expect(request.mock.calls.filter(([method]) => method === TASK_RELEASE)).toEqual([]);
     expect(request.mock.calls.filter(([method]) => method === TASK_SEND)).toEqual([]);
     expect(latestController?.newTaskSnapshot?.task.task_id).toBe("task_prepared");
   });
@@ -1222,7 +1222,7 @@ describe("app controller mounted lifecycle", () => {
       if (method === AGENT_LIST_SESSIONS) {
         return { agentId: "codex", projectLabel: "OpenAIDE", sessions: [], nextCursor: null };
       }
-      if (method === TASK_CREATE) {
+      if (method === TASK_ACQUIRE) {
         return {
           task: {
             ...protocolTaskSnapshot("task_prepared", "New task", { hasMessages: false }),
@@ -1282,8 +1282,8 @@ describe("app controller mounted lifecycle", () => {
       await Promise.resolve();
     });
 
-    expect(request.mock.calls.filter(([method]) => method === TASK_CREATE)).toHaveLength(1);
-    expect(request.mock.calls.filter(([method]) => method === TASK_DISCARD)).toEqual([]);
+    expect(request.mock.calls.filter(([method]) => method === TASK_ACQUIRE)).toHaveLength(1);
+    expect(request.mock.calls.filter(([method]) => method === TASK_RELEASE)).toEqual([]);
     expect(latestController?.newTaskSnapshot?.task.task_id).toBe("task_prepared");
     expect(latestController?.state.taskInputs.task_prepared).toMatchObject({
       prompt: "Keep this",
@@ -1297,7 +1297,7 @@ describe("app controller mounted lifecycle", () => {
       if (method === AGENT_LIST_SESSIONS) {
         return { agentId: "codex", projectLabel: "OpenAIDE", sessions: [], nextCursor: null };
       }
-      if (method === TASK_CREATE) {
+      if (method === TASK_ACQUIRE) {
         return { task: protocolTaskSnapshot("task_prepared", "New task", { hasMessages: false }) };
       }
       if (method === TASK_OPEN && params?.taskId === "task_existing") {
@@ -1346,7 +1346,7 @@ describe("app controller mounted lifecycle", () => {
       await Promise.resolve();
     });
 
-    expect(request.mock.calls.filter(([method]) => method === TASK_CREATE)).toHaveLength(1);
+    expect(request.mock.calls.filter(([method]) => method === TASK_ACQUIRE)).toHaveLength(1);
     expect(request.mock.calls.filter(([method, params]) => (
       method === TASK_OPEN && (params as { taskId?: string }).taskId === "task_prepared"
     ))).toEqual([]);
@@ -1361,10 +1361,10 @@ describe("app controller mounted lifecycle", () => {
       if (method === AGENT_LIST_SESSIONS) {
         return { agentId: "codex", projectLabel: "OpenAIDE", sessions: [], nextCursor: null };
       }
-      if (method === TASK_CREATE) {
+      if (method === TASK_ACQUIRE) {
         return { task: protocolTaskSnapshot("task_prepared", "New task", { hasMessages: false }) };
       }
-      if (method === TASK_DISCARD) {
+      if (method === TASK_RELEASE) {
         return { discardedTaskId: params?.taskId };
       }
       throw new Error(method);
@@ -1390,7 +1390,7 @@ describe("app controller mounted lifecycle", () => {
       await Promise.resolve();
     });
 
-    expect(request.mock.calls.filter(([method]) => method === TASK_DISCARD)).toEqual([]);
+    expect(request.mock.calls.filter(([method]) => method === TASK_RELEASE)).toEqual([]);
   });
 
   it("replaces the prepared empty Task when the selected Agent changes", async () => {
@@ -1399,7 +1399,7 @@ describe("app controller mounted lifecycle", () => {
       if (method === AGENT_LIST_SESSIONS) {
         return { agentId: params?.agentId, projectLabel: "OpenAIDE", sessions: [], nextCursor: null };
       }
-      if (method === TASK_CREATE) {
+      if (method === TASK_ACQUIRE) {
         const agentId = params?.agentId ?? "codex";
         const prepared = protocolTaskSnapshot(`task_${agentId}`, "New task", { hasMessages: false });
         return {
@@ -1411,7 +1411,7 @@ describe("app controller mounted lifecycle", () => {
           },
         };
       }
-      if (method === TASK_DISCARD) {
+      if (method === TASK_RELEASE) {
         return { discardedTaskId: params?.taskId };
       }
       if (method === ATTACHMENT_RELEASE) {
@@ -1447,15 +1447,13 @@ describe("app controller mounted lifecycle", () => {
       has_messages: false,
     });
     await act(async () => {
-      latestController?.dispatch({ type: "taskInput:prompt", taskId: "task_codex", prompt: "keep this draft" });
+      latestController?.dispatch({ type: "prompt", prompt: "keep this draft" });
       latestController?.dispatch({
-        type: "taskInput:attachment:addAppServer",
-        taskId: "task_codex",
+        type: "newTask:attachment:add",
         attachment: {
-          kind: "file",
-          label: "old.txt",
-          local_id: "attachment-old",
-          app_server_handle_id: "handle-old" as never,
+          kind: "image",
+          label: "old.png",
+          payload: { data: "AQID", mimeType: "image/png" },
         },
       });
       await Promise.resolve();
@@ -1469,21 +1467,18 @@ describe("app controller mounted lifecycle", () => {
       await Promise.resolve();
     });
 
-    expect(request.mock.calls.filter(([method]) => method === TASK_DISCARD)).toEqual([
-      [TASK_DISCARD, { taskId: "task_codex" }],
+    expect(request.mock.calls.filter(([method]) => method === TASK_RELEASE)).toEqual([
+      [TASK_RELEASE, { taskId: "task_codex" }],
     ]);
-    expect(request.mock.calls.filter(([method]) => method === TASK_CREATE)).toEqual([
-      [TASK_CREATE, { projectId: "project_1", agentId: "opencode" }],
+    expect(request.mock.calls.filter(([method]) => method === TASK_ACQUIRE)).toEqual([
+      [TASK_ACQUIRE, { projectId: "project_1", agentId: "opencode" }],
     ]);
     expect(request.mock.calls.filter(([method]) => method === TASK_SEND)).toEqual([]);
-    expect(request).toHaveBeenCalledWith(ATTACHMENT_RELEASE, {
-      taskId: "task_codex",
-      resources: [{ kind: "handle", id: "handle-old" }],
-    });
+    expect(request).not.toHaveBeenCalledWith(ATTACHMENT_RELEASE, expect.anything());
     expect(latestController?.state.taskInputs.task_codex).toBeUndefined();
-    expect(latestController?.state.taskInputs.task_opencode).toMatchObject({
+    expect(latestController?.state.newTask).toMatchObject({
       prompt: "keep this draft",
-      context: [],
+      context: [{ label: "old.png", kind: "image" }],
     });
     expect(latestController?.newTaskSnapshot?.task).toMatchObject({
       task_id: "task_opencode",
@@ -1494,7 +1489,7 @@ describe("app controller mounted lifecycle", () => {
 
   it("does not show task-start submitting state while new-task options load", async () => {
     const request = vi.fn(async (method: string) => {
-      if (method === TASK_CREATE) {
+      if (method === TASK_ACQUIRE) {
         return { task: protocolTaskSnapshot("task_prepared", "New task", { hasMessages: false }) };
       }
       throw new Error(method);
@@ -1512,7 +1507,7 @@ describe("app controller mounted lifecycle", () => {
       await Promise.resolve();
     });
 
-    expect(request).toHaveBeenCalledWith(TASK_CREATE, {
+    expect(request).toHaveBeenCalledWith(TASK_ACQUIRE, {
       projectId: "project_1",
       agentId: "codex",
     });
@@ -1557,7 +1552,7 @@ describe("app controller mounted lifecycle", () => {
 
   it("opens the created Task route after sending from new-task", async () => {
     const request = vi.fn(async (method: string) => {
-      if (method === TASK_CREATE) return { task: protocolTaskSnapshot("task_new", "New task", { hasMessages: false }) };
+      if (method === TASK_ACQUIRE) return { task: protocolTaskSnapshot("task_new", "New task", { hasMessages: false }) };
       if (method === TASK_OPEN) return { task: protocolTaskSnapshot("task_new", "New task", { hasMessages: false }) };
       if (method === TASK_SEND) return { task: protocolTaskSnapshot("task_new", "Sent task", { hasMessages: true }) };
       throw new Error(method);
@@ -1693,7 +1688,7 @@ describe("app controller mounted lifecycle", () => {
       if (method === AGENT_LIST_SESSIONS) {
         return Promise.resolve({ agentId: "codex", projectLabel: "OpenAIDE", sessions: [], nextCursor: null });
       }
-      if (method === TASK_CREATE) {
+      if (method === TASK_ACQUIRE) {
         return Promise.resolve({ task: protocolTaskSnapshot("task_new", "New task", { hasMessages: false }) });
       }
       if (method === TASK_OPEN) return routeOpen.promise;
@@ -1767,7 +1762,7 @@ describe("app controller mounted lifecycle", () => {
       if (method === AGENT_LIST_SESSIONS) {
         return Promise.resolve({ agentId: "codex", projectLabel: "OpenAIDE", sessions: [], nextCursor: null });
       }
-      if (method === TASK_CREATE) {
+      if (method === TASK_ACQUIRE) {
         return Promise.resolve({ task: protocolTaskSnapshot("task_new", "New task", { hasMessages: false }) });
       }
       if (method === TASK_OPEN && params?.taskId === "task_1") {
@@ -1829,13 +1824,13 @@ describe("app controller mounted lifecycle", () => {
     expect(latestController?.state.taskInputs.task_new?.pending).toBeUndefined();
   });
 
-  it("retains a late task/create result without replacing the visible Task", async () => {
+  it("retains a late task/acquire result without replacing the visible Task", async () => {
     const created = deferredValue<{ task: ReturnType<typeof protocolTaskSnapshot> }>();
     const request = vi.fn((method: string, params?: { taskId?: string }) => {
       if (method === AGENT_LIST_SESSIONS) {
         return Promise.resolve({ agentId: "codex", projectLabel: "OpenAIDE", sessions: [], nextCursor: null });
       }
-      if (method === TASK_CREATE) return created.promise;
+      if (method === TASK_ACQUIRE) return created.promise;
       if (method === TASK_OPEN && params?.taskId === "task_1") {
         return Promise.resolve({ task: protocolTaskSnapshot("task_1", "Destination task") });
       }
@@ -1882,7 +1877,7 @@ describe("app controller mounted lifecycle", () => {
 
     expect(latestController?.state.activeTaskId).toBe("task_1");
     expect(latestController?.state.snapshot?.task.title).toBe("Destination task");
-    expect(request.mock.calls.filter(([method]) => method === TASK_DISCARD)).toEqual([]);
+    expect(request.mock.calls.filter(([method]) => method === TASK_RELEASE)).toEqual([]);
     expect(latestController?.newTaskSnapshot?.task.task_id).toBe("task_new");
     expect(latestController?.state.tasks.map((task) => task.task_id)).not.toContain("task_new");
     expect(postHostMessage).not.toHaveBeenCalledWith(expect.objectContaining({
@@ -1898,7 +1893,7 @@ describe("app controller mounted lifecycle", () => {
       if (method === AGENT_LIST_SESSIONS) {
         return Promise.resolve({ agentId: "codex", projectLabel: "OpenAIDE", sessions: [], nextCursor: null });
       }
-      if (method === TASK_CREATE) {
+      if (method === TASK_ACQUIRE) {
         createCount += 1;
         const taskId = createCount === 1 ? "task_new" : "task_fresh";
         return Promise.resolve({ task: protocolTaskSnapshot(taskId, "New task", { hasMessages: false }) });
@@ -1970,7 +1965,7 @@ describe("app controller mounted lifecycle", () => {
       if (method === AGENT_LIST_SESSIONS) {
         return { agentId: "codex", projectLabel: "OpenAIDE", sessions: [], nextCursor: null };
       }
-      if (method === TASK_CREATE) {
+      if (method === TASK_ACQUIRE) {
         createCount += 1;
         const task = protocolTaskSnapshot(`task_${createCount}`, "New task", { hasMessages: false });
         if (createCount === 2) {
@@ -2035,7 +2030,7 @@ describe("app controller mounted lifecycle", () => {
       for (let index = 0; index < 8; index += 1) await Promise.resolve();
     });
 
-    expect(request.mock.calls.filter(([method]) => method === TASK_CREATE)).toHaveLength(2);
+    expect(request.mock.calls.filter(([method]) => method === TASK_ACQUIRE)).toHaveLength(2);
     expect(latestController?.newTaskSnapshot).toMatchObject({
       task: { task_id: "task_2", has_messages: false },
       agent_config: {
@@ -2049,11 +2044,8 @@ describe("app controller mounted lifecycle", () => {
   it("ignores stale Agent option failures after pasted image preparation opens the new Task", async () => {
     const options = deferredValue<unknown>();
     const request = vi.fn(async (method: string) => {
-      if (method === TASK_CREATE) {
+      if (method === TASK_ACQUIRE) {
         return { task: protocolTaskSnapshot("task_new", "New task", { hasMessages: false }) };
-      }
-      if (method === ATTACHMENT_CREATE_PASTED_IMAGE) {
-        return { attachment: { handleId: "attachment-handle-image", label: "pasted.png" } };
       }
       throw new Error(method);
     });
@@ -2071,7 +2063,7 @@ describe("app controller mounted lifecycle", () => {
     });
 
     await act(async () => {
-      await latestController?.callbacks.newTask.fileBrowser?.attachPastedImage(
+      await latestController?.callbacks.newTask.fileBrowser?.attachImage(
         new File([new Uint8Array([1, 2, 3])], "pasted.png", { type: "image/png" }),
       );
     });
@@ -2082,20 +2074,18 @@ describe("app controller mounted lifecycle", () => {
 
     expect(latestController?.newTaskSnapshot?.task.task_id).toBe("task_new");
     expect(latestController?.state.newTask.configOptionsError).toBeUndefined();
-    expect(latestController?.state.taskInputs.task_new?.context[0]).toMatchObject({
+    expect(latestController?.state.newTask.context[0]).toMatchObject({
       label: "pasted.png",
-      app_server_handle_id: "attachment-handle-image",
+      kind: "image",
+      payload: { data: "AQID", mimeType: "image/png" },
     });
   });
 
-  it("reuses the in-flight prepared Task when uploading an image", async () => {
+  it("keeps an Image local while prepared-Task acquisition is in flight", async () => {
     const created = deferredValue<{ task: ReturnType<typeof protocolTaskSnapshot> }>();
     const request = vi.fn(async (method: string) => {
-      if (method === TASK_CREATE) return created.promise;
+      if (method === TASK_ACQUIRE) return created.promise;
       if (method === TASK_OPEN) return { task: protocolTaskSnapshot("task_new", "New task", { hasMessages: false, sendReady: false }) };
-      if (method === ATTACHMENT_CREATE_PASTED_IMAGE) {
-        return { attachment: { handleId: "attachment-handle-image", label: "pasted.png" } };
-      }
       throw new Error(method);
     });
     backendConnection = {
@@ -2111,16 +2101,16 @@ describe("app controller mounted lifecycle", () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(request.mock.calls.filter(([method]) => method === TASK_CREATE)).toHaveLength(1);
+    expect(request.mock.calls.filter(([method]) => method === TASK_ACQUIRE)).toHaveLength(1);
 
-    const upload = latestController?.callbacks.newTask.fileBrowser?.attachPastedImage(
+    const upload = latestController?.callbacks.newTask.fileBrowser?.attachImage(
       new File([new Uint8Array([1, 2, 3])], "pasted.png", { type: "image/png" }),
     );
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(request.mock.calls.filter(([method]) => method === TASK_CREATE)).toHaveLength(1);
+    expect(request.mock.calls.filter(([method]) => method === TASK_ACQUIRE)).toHaveLength(1);
 
     await act(async () => {
       created.resolve({ task: protocolTaskSnapshot("task_new", "New task", { hasMessages: false, sendReady: false }) });
@@ -2128,18 +2118,13 @@ describe("app controller mounted lifecycle", () => {
       await upload;
     });
 
-    expect(request.mock.calls.filter(([method]) => method === TASK_CREATE)).toHaveLength(1);
-    expect(request).toHaveBeenCalledWith(ATTACHMENT_CREATE_PASTED_IMAGE, expect.objectContaining({
-      taskId: "task_new",
-    }));
-    expect(latestController?.state.taskInputs.task_new?.context).toHaveLength(1);
+    expect(request.mock.calls.filter(([method]) => method === TASK_ACQUIRE)).toHaveLength(1);
+    expect(request).not.toHaveBeenCalledWith(ATTACHMENT_CREATE_PASTED_IMAGE, expect.anything());
+    expect(latestController?.state.newTask.context).toHaveLength(1);
   });
 
   it("keeps the draft and marks attachments for reselection when their handles are lost", async () => {
     const request = vi.fn(async (method: string) => {
-      if (method === ATTACHMENT_CREATE_PASTED_IMAGE) {
-        return { attachment: { handleId: "attachment-handle-image", label: "pasted.png" } };
-      }
       if (method === TASK_SEND) {
         throw new AppServerProtocolError({
           error: {
@@ -2164,7 +2149,7 @@ describe("app controller mounted lifecycle", () => {
       await Promise.resolve();
     });
     await act(async () => {
-      await latestController?.callbacks.task.fileBrowser?.attachPastedImage(
+      await latestController?.callbacks.task.fileBrowser?.attachImage(
         new File([new Uint8Array([1, 2, 3])], "pasted.png", { type: "image/png" }),
       );
     });
@@ -2177,11 +2162,11 @@ describe("app controller mounted lifecycle", () => {
     expect(latestController?.state.taskInputs.task_1).toEqual({
       prompt: "Keep this draft",
       context: [{
-        kind: "file",
+        kind: "image",
         label: "pasted.png",
         local_id: expect.any(String),
         preview_url: "data:image/png;base64,AQID",
-        validation_error: "Attachment is no longer available. Reselect it and try again.",
+        payload: { data: "AQID", mimeType: "image/png" },
       }],
       error: "Attachment is no longer available. Reselect it and try again.",
     });

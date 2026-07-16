@@ -26,18 +26,19 @@ OpenAIDE provides no compatibility guarantee for superseded development-only sta
 
 ## Outcome
 
-OpenAIDE keeps at most one client-private New Task for each stable `clientInstanceId`. The New Task has a real Task id and acquires a real Agent Native Session, but remains invisible outside its owning client until App Server durably accepts its first User message. Navigation retains it. While first Send is unresolved, invoking New Task reopens the same submitting instance. The first accepted Send promotes the same Task identity into normal visible Task state; a later New Task action creates the next instance.
+OpenAIDE maintains a bounded pool of durable zero-message Prepared Tasks keyed by `(Agent, canonical Task Workspace folder)`. A client acquires an exclusive lease on one matching Prepared Task while using New Task. Ordinary navigation retains that lease; changing Project, Agent, or Task Workspace releases it while preserving the Frontend-owned composer. The first accepted Send promotes the same Prepared Task and Native Session into normal visible Task state.
 
 ## Vocabulary And Ownership
 
 - **New Task** is the canonical term. `Draft Task`, `Established Task`, and `slot` are not product or interface terms.
-- A New Task is private to one `clientInstanceId`, and one client owns at most one New Task.
-- Project Context and Agent are selected before New Task creation and become immutable when its Native Session is created.
-- A New Task and a Task with first Send in flight are excluded from Task Navigation, active and archived Task lists, normal history and session discovery, search, and other clients' snapshots and events.
-- Ordinary navigation, view unmount, and switching to Settings or an existing Task retain the New Task and its Native Session. Only explicit discard removes it before first Send.
-- The first durably accepted User message atomically makes the same Task visible through normal Task queries and events.
-- App Server owns Task identity, Native Session state, options, commands, readiness, capabilities, attachment resolver resources, first-Send promotion, and durable Chat.
-- Frontend owns unsent text, `@file` mention text, visible image-row presentation, and ephemeral streaming presentation.
+- **Prepared Task** is a durable zero-message New Task with its own Task id and Agent Native Session. It remains excluded from Task Navigation, active and archived Task lists, normal history and session discovery, and search until first Send is accepted.
+- **Prepared-Task lease** is exclusive use of one Prepared Task by one initialized `clientInstanceId`. One client holds at most one lease, and one Prepared Task is leased to at most one client.
+- **Free Prepared Task** is a ready, unleased, zero-message Prepared Task eligible for reuse by a matching pool key.
+- Project Context, Agent, and Task Workspace form the selected New Task context. Changing any member releases the previous lease before acquiring the new context.
+- Ordinary navigation, view unmount, and switching to Settings or an existing Task retain the lease and Native Session.
+- The first durably accepted User message atomically makes the same Prepared Task visible through normal Task queries and events.
+- App Server owns Task identity, Prepared-Task leases, pool policy, Native Session state, options, commands, readiness, capabilities, first-Send promotion, and durable Chat.
+- Frontend owns the unsent composer: prompt text, `@file` mention text, Image bytes and previews, and ephemeral streaming presentation.
 - **Native Session update consumer** is the canonical name for the one session-lifetime listener that projects `session/update` notifications into Task state.
 - **Baseline** is a complete authoritative snapshot for one subscribed scope at one scope-local revision.
 
@@ -49,7 +50,7 @@ Frontend supplies `clientInstanceId` only through `client/initialize`. Transport
 - VS Code and other native shells issue a stable identity for the shell client or webview lifecycle.
 - Reconnect sends the same `clientInstanceId` through `client/initialize`.
 - Every transport connection receives a fresh connection-local `connectionId`; transport identity never reuses `clientInstanceId`.
-- A client that loses its stable identity becomes a new client and cannot recover another client's New Task.
+- A client that loses its stable identity becomes a new client and cannot use another client's Prepared-Task lease.
 
 ## Default Project And Agent
 
@@ -75,50 +76,59 @@ App Server returns the global defaults in the initialized client snapshot. Front
 
 - Project and Agent collections;
 - persisted New Task defaults;
-- the owning client's existing New Task snapshot, when one exists;
 - event-stream and baseline information required to establish subscriptions.
 
-Initialization never creates a New Task or launches an Agent. It may return an already persisted New Task.
+Initialization never acquires a Prepared Task or launches an Agent. The Prepared-Task pool adds no initialization field and does not use `requestedSurface` as an ownership or recovery input.
 
 ### Opening a cached New Task
 
-Frontend renders the cached New Task immediately. Clicking New Task, returning through browser history, or switching back from another Task performs no product request while the cache and event subscription remain continuous.
+Frontend renders its cached leased Prepared Task immediately. Clicking New Task, returning through browser history, or switching back from another Task performs no product request while the cache and event subscription remain continuous.
 
-### Creating a New Task
+### Acquiring a Prepared Task
 
-When no New Task exists, Frontend renders the New Task surface in `creating` state and calls typed `task/create` with the selected `projectId` and `agentId`. The protocol gateway supplies the initialized client identity from the connection context.
+When its live New Task composer needs a Prepared Task, Frontend renders the preparation state and calls typed `task/acquire` with the selected Project, Agent, and Task Workspace identity. App Server derives the canonical workspace and pool key; Frontend never supplies a canonical pool key. The protocol gateway supplies initialized client identity from the trusted connection context.
 
-App Server performs one atomic mutation that:
+App Server serializes acquisition and:
 
-1. returns the existing client-owned New Task when a concurrent duplicate request already created it;
-2. otherwise validates Project and Agent availability;
-3. creates a Task with private New Task lifecycle state and owner;
-4. persists the Task identity before slow Agent work starts;
-5. returns a snapshot with `preparation: preparing`;
-6. starts Native Session acquisition asynchronously.
+1. returns the same Prepared Task when that client already leases the requested key;
+2. rejects acquisition of a different key until the client's previous release is acknowledged;
+3. validates Project, Agent, and Task Workspace availability;
+4. atomically leases the ready free Prepared Task for that key when one exists;
+5. otherwise persists and leases a new zero-message Task before slow Agent work starts;
+6. returns its ordinary Task snapshot, with `preparation: preparing` when Native Session acquisition is still running.
 
-Two concurrent create requests for one client return the same Task id. An existing New Task with different immutable context is a conflict; changing Project or Agent requires explicit discard followed by create.
+Concurrent duplicate acquisition requests for one client and key return the same Task id. Only ready, unleased, zero-message Tasks are reusable; a missing free entry creates and prepares another Task.
+
+### Free-pool retention and recovery
+
+Releasing a ready Prepared Task retains it only when its key has no other free entry. A second released entry for the same key is disposed and its Native Session is closed. Retained free entries are bounded by one internal global cap. A retained release becomes the newest free entry; when the cap is exceeded, App Server evicts the free entry that has waited longest, using Task id only to break equal-time ties.
+
+Free entries, pool keys, counts, recency, and eviction decisions are App Server-internal. Normal diagnostics record Task id, lifecycle outcome, reason, and aggregate counts without workspace paths, client ids, prompts, or Agent configuration values.
+
+App Server restart clears all leases before accepting requests. Durable Prepared Tasks remain; ready zero-message records rebuild the free pool, and their Native Sessions are restored lazily only when leased. Existing legacy zero-message New Tasks are adopted as free candidates with owners cleared; App Server keeps the newest eligible entry per key, applies the global cap, and closes extras. It never restores a pre-restart lease.
+
+Disabling or deleting an Agent disposes its free and leased zero-message Prepared Tasks. Releasing a failed Prepared Task also disposes it because failed entries are never free-pool candidates.
 
 ### Agent preparation
 
-App Server sends owner-scoped Task events as Native Session preparation changes. The projection may update:
+App Server sends lessee-scoped Task events as Native Session preparation changes. The projection may update:
 
 - Native Session preparation and readiness;
 - the configuration-option catalog and pending option mutation state;
 - the slash-command catalog;
-- attachment and message capabilities;
+- Image and message capabilities;
 - Send readiness;
 - recoverable preparation errors.
 
 Frontend applies only contiguous, monotonically newer Task revisions. The page remains rendered throughout preparation, and Composer controls show honest disabled or preparing states until their required capability is ready.
 
-App Server Send capability contains authoritative readiness and blockers. Frontend combines it with local draft content and attachment-handle validity through one shared Composer availability model. ACP has no text-required prompt capability: a completely empty message is invalid, while attachment-only input is valid when every attachment resolves to an Agent-supported ACP content block.
+App Server Send capability contains authoritative readiness and blockers. Frontend combines it with local draft content and Image compatibility through one shared Composer availability model. ACP has no text-required prompt capability: a completely empty message is invalid, while Image-only input is valid when the selected Agent accepts Image content.
 
-### Navigation and discard
+### Navigation and release
 
-Navigation changes only presentation. The client retains the New Task snapshot, Task-scoped composer entry, live attachment resources, and Native Session. Returning renders cached state immediately and does not call `task/create` or `task/open` merely to prove that the Task still exists. A reconnect or revision gap installs a replacement owner-scoped baseline according to [ADR-0023](adr/0023-task-state-publication-and-replica-recovery.md).
+Navigation changes only presentation. The client retains the leased Prepared Task snapshot, Frontend-owned composer, and Native Session. Returning renders cached state immediately and does not call `task/acquire` or `task/open` merely to prove that the Task still exists. A reconnect or revision gap installs a replacement client-scoped baseline according to [ADR-0023](adr/0023-task-state-publication-and-replica-recovery.md).
 
-Explicit discard validates the owning client, closes or releases the empty Native Session safely, releases resolver resources, removes private New Task persistence, and clears only the matching local Composer state after acknowledgement or an explicitly designed idempotent cleanup result.
+Changing Project, Agent, or Task Workspace calls typed `task/release` and waits for acknowledgement before acquiring another key. Release clears only the authoritative lease; it never clears the Frontend composer. Releasing without a current lease is an idempotent no-op. App Server alone decides whether the released Prepared Task is retained or disposed. The old public `task/discard` operation is removed rather than given release semantics.
 
 ## Send
 
@@ -129,31 +139,31 @@ Explicit discard validates the owning client, closes or releases the empty Nativ
 ```text
 taskId
 message.text
-message.attachmentHandleIds
+message.images[] { label, mimeType, data }
 ```
 
-The request does not resend Project, Agent, configuration values or catalogs, or the slash-command catalog. Those already belong to the Task and Native Session.
+Each Image is encoded inline from the Frontend-owned draft only when Send is invoked. The request does not resend Project, Agent, configuration values or catalogs, or the slash-command catalog. Those already belong to the Task and Native Session.
 
 Frontend issues each `task/send` mutation once and never automatically replays it after timeout, disconnect, reconnect, reload, or an unknown transport outcome. An ordinary `clientRequestId` may correlate the request and response and record accepted-message provenance, but it is not a retry instruction and is not persisted across reload for replay. Frontend retries only the read-only event stream as defined by [ADR-0023](adr/0023-task-state-publication-and-replica-recovery.md).
 
 ### First Send
 
-Frontend moves the Composer draft into Task-scoped pending state and marks the New Task as submitting. Invoking New Task while Send is pending reopens that same cached submitting instance. If cache loss requires App Server resolution, client-scoped create semantics return that instance while it remains private. After authoritative acceptance makes the Task visible, a later New Task action requests the next instance. Rejection keeps the same New Task and recoverable draft. Transport loss enters connection-lost presentation and resynchronizes without replay. Returning from browser suspension restarts the replayable receive poll from the last applied server sequence, so accepted Task events catch up without requiring a page reload or replaying Send.
+Frontend marks the acquired Prepared Task as submitting while retaining the Composer draft until the authoritative result is known. Invoking New Task while Send is pending reopens that same cached submitting instance. If cache loss requires App Server resolution, acquiring the same key returns that instance while it remains leased and private. After authoritative acceptance makes the Task visible, a later New Task action acquires another Prepared Task. Rejection keeps the same lease and recoverable draft. Transport loss enters connection-lost presentation and resynchronizes without replay. Returning from browser suspension restarts the replayable receive poll from the last applied server sequence, so accepted Task events catch up without requiring a page reload or replaying Send.
 
 The durable first-Send transaction:
 
 1. acquires the per-Task command lock shared by every Send-relevant Task mutation;
-2. reads Task state and validates client ownership, readiness, message shape, and attachment handles once under that lock;
+2. reads Task state and validates the exact client lease, readiness, message shape, inline Images, aggregate limits, and Agent capability once under that lock;
 3. durably appends the User message and sets Task state to `starting`;
-4. changes New Task lifecycle from client-private to visible;
+4. changes New Task lifecycle from leased Prepared Task to visible, consuming the lease;
 5. updates state-root last-used Project and Agent defaults;
 6. publishes the visible Task into Task Navigation and normal Task subscriptions;
 7. releases the command lock;
 8. returns the authoritative Task snapshot containing the accepted User message.
 
-Promotion and message acceptance are atomic for query readers. Failed validation keeps the same New Task private and preserves its Composer. App Server performs no ACP I/O while holding the Task command lock.
+Promotion and message acceptance are atomic for query readers. A stale Send after release or any other failed validation changes no durable Task state and leaves the Frontend draft untouched. App Server performs no ACP I/O while holding the Task command lock.
 
-App Server materializes the acceptance response from durable state before ACP prompt work. The accepted Task is `starting`, because the Agent has not received the prompt. After commit, App Server gives the Task's opaque Native Session handle, prompt, and attachments to `NativeSessionService.startPrompt` in background execution. The service owns whether the underlying ACP session is live or must be loaded, resumed, or recreated. When prompt execution actually begins, the Task becomes `working`. A definitive service or Agent failure after durable acceptance becomes a Task state transition; it does not retroactively reject the accepted User message.
+App Server materializes the acceptance response from durable state before ACP prompt work. The accepted Task is `starting`, because the Agent has not received the prompt. After commit, App Server gives the Task's opaque Native Session handle and accepted message content to `NativeSessionService.startPrompt` in background execution. The service converts each accepted Image to ACP Image content and owns whether the underlying ACP session is live or must be loaded, resumed, or recreated. When prompt execution actually begins, the Task becomes `working`. A definitive service or Agent failure after durable acceptance becomes a Task state transition; it does not retroactively reject the accepted User message or restore the Frontend draft.
 
 Frontend remains on the New Task surface in submitting state until it reconciles acceptance. Because the UI permits only one in-flight Send per Task, success clears that Task's Composer directly and asks the App Shell to route to the now-visible Task id. It does not compare message text, message id, idempotency key, or a settlement key to clear the acknowledged Composer. Rejection leaves the Composer unchanged and does not route to the Task page.
 
@@ -161,7 +171,7 @@ First Send performs no history synchronization because the New Task has no Agent
 
 ### Steering messages
 
-A Send accepted while the Task is `working` is a steering message. App Server durably appends it to Chat and returns authoritative Task state, then asks `NativeSessionService.steer` to forward it to the same Native Session as another `session/prompt` request. The workflow does not wait for the steering response, and that response never controls Task status. The transport consumes or safely discards any eventual JSON-RPC response.
+A Send accepted while the Task is `working` is a steering message. App Server durably appends its text and Images to Chat and returns authoritative Task state, then asks `NativeSessionService.steer` to forward that accepted content to the same Native Session as another `session/prompt` request. The workflow does not wait for the steering response, and that response never controls Task status. The transport consumes or safely discards any eventual JSON-RPC response.
 
 ## Native Session Updates And Chat
 
@@ -178,6 +188,8 @@ Smooth streaming is Frontend-only ephemeral presentation layered over immediatel
 Only live Chat append or chunk events received while the Task is open may advance a presenter. Agent text animates only for the latest Agent text message; Thought text independently animates only for the latest Thought message. “Latest” within a channel does not mean the final row in the mixed timeline. When a newer message appears in one channel, Frontend flushes the previous message in that channel and moves its presenter and caret to the newer message. Background Task events update authoritative cached state without animation.
 
 Animation never gates, hides, delays, or reorders later Chat rows. Frame-driven presenters catch up within 96 ms of the newest update regardless of chunk size. Only the selected latest message in each channel shows its caret. The live-event signal and authoritative Task change enter the reducer as one action so one server event causes one root state transition.
+
+While an active turn has a live status footer, Frontend shows its elapsed wall time from the App Server-authored running-turn timestamp. The timer appears after five seconds, updates locally once per second, and never changes authoritative Task state or rerenders unchanged Chat rows. It remains a single trailing item separated from the truncating status label by a quiet vertical hairline. Completed and inactive turns show no live timer.
 
 Protocol-to-view mapping preserves object identity for unchanged Chat items and derived uninterrupted Tool and Thought groups. Task Navigation changes only when a navigation-visible summary field changes. The Chat viewport observes direct row insertion and row size changes; row-level `ResizeObserver`s handle later Markdown, image, request, and Tool-detail reflow.
 
@@ -287,21 +299,23 @@ A Task stores one optional title with Prompt, Agent, or User provenance. New Tas
 ## Query And Authorization
 
 - Task lists, Task Navigation, Archive, search, ordinary support-facing Task counts, and cross-client subscriptions exclude New Tasks.
-- Owner-scoped initialization and Task subscription may return the owner's New Task.
-- Non-owner open, Send, configure, attach, reveal, discard, and subscribe intents return one stable authorization or not-found error without revealing existence.
+- Only the leasing client may receive or subscribe to its acquired Prepared Task. Free Prepared Tasks and the internal pool inventory are never exposed through client snapshots.
+- Non-lessee open, Send, configure, reveal, release, and subscribe intents return one stable authorization or not-found error without revealing existence.
 - Explicitly internal cleanup and support diagnostics may inspect New Tasks.
 - After promotion, normal visible-Task authorization and subscription rules apply.
 
 ## Images And Workspace File Mentions
 
-Image attachments use opaque resolver resources. Frontend owns visible row order and presentation metadata. App Server owns safe validation, delivery conversion, single-use consumption, and client and Task authorization.
+An unsent Image is part of the Frontend-owned Composer draft, not a Task resource. Paste, drag/drop, and the image picker are only input methods for the same Image content kind.
 
-- Attachment creation requires the real Task id and owning client connection.
-- Frontend caches safe row metadata plus opaque handle ids; paths and file bytes are never authoritative Frontend state.
-- Same-client live navigation retains rows and resolver resources.
-- `task/send` submits handle ids only.
-- Successful Send consumes handles; failed validation keeps them usable; row removal or New Task discard releases them.
-- Unsent attachment rows are not reconstructed after full reload. Handles are not reload-durable unless a separate specification introduces a client-private attachment manifest.
+- Frontend retains Image bytes, safe preview URLs, display labels, and row order for the lifetime of the live page.
+- Navigation, reconnect, App Server restart, and Project, Agent, Task Workspace, or Prepared-Task lease changes leave the whole Composer draft untouched while that page remains alive.
+- Full page reload, tab close, or explicit row removal may release the local bytes and preview. The App Server has no unused resource to clean up.
+- On Send, Frontend encodes the current Images inline in `task/send`. App Server validates supported MIME types, encoding, individual and aggregate limits, message shape, and Agent Image capability in the same acceptance transaction.
+- If the selected Agent lacks Image capability, Frontend retains the Images and blocks Send with an actionable explanation. App Server repeats the capability validation authoritatively.
+- Failed validation or unknown transport outcome leaves the local draft intact. Durable acceptance stores the Images with the User message; later ACP delivery failure is Task failure and does not restore or consume a second copy of the draft.
+- There are no pre-Send upload calls, attachment handles, Draft resources, Task-scoped image authorization rules, cross-tab handles, or unused server-side image cleanup.
+- Arbitrary device-file attachment is a follow-up feature. It must reuse this client-owned unsent-draft boundary and define its ACP representation and limits rather than revive Task-scoped pre-Send uploads.
 
 Workspace files are not attachments. Typing `@` at the start of the prompt or after whitespace opens completion for the current Task Workspace. The App Server searches a bounded, watched index of tracked and non-ignored untracked files using effective Git ignore rules. Selecting a result inserts ordinary text as `@relative/path`, or `@"relative/path with spaces"` when quoting is required. The text remains with the Frontend draft across Agent, Project, and prepared-Task changes.
 
@@ -320,7 +334,7 @@ Option changes follow one ordering model:
 5. A user request superseded by newer Agent state resolves to the newest catalog without a race-only user error.
 6. Visible errors are reserved for genuine transport, setup, authorization, unsupported-operation, or Agent failures.
 
-While an option mutation is pending, Frontend renders the requested value in that control with a busy indicator and locks every configuration selector. The existing Task's Agent remains locked, while drafting and attachment actions remain usable. If the mutation is still pending after five seconds, Frontend adds the quiet status text `Agent is still updating options…` without replacing the Composer or reporting an error.
+While an option mutation is pending, Frontend renders the requested value in that control with a busy indicator and locks every configuration selector. The existing Task's Agent remains locked, while drafting and Image actions remain usable. If the mutation is still pending after five seconds, Frontend adds the quiet status text `Agent is still updating options…` without replacing the Composer or reporting an error.
 
 App Server allows up to 60 seconds for the Agent to answer the option request. A failed or timed-out mutation clears pending state, restoring the last Agent-confirmed catalog, and Frontend presents the mutation error. That error clears after ten seconds or earlier when a later complete Agent catalog changes. A late catalog that confirms the requested value renders normally through the same authoritative catalog path.
 
@@ -330,8 +344,8 @@ Slash-command catalogs use the same snapshot and event ordering. Slash commands 
 
 An implementation conforms to this specification only when all of these are true:
 
-1. One stable client owns at most one private New Task, and ordinary navigation retains it.
-2. First-Send message acceptance and New Task promotion are one durable atomic mutation.
+1. One stable client leases at most one Prepared Task, one Prepared Task is leased to at most one client, and only a ready matching free entry is reused.
+2. First-Send message acceptance, lease consumption, and Prepared-Task promotion are one durable atomic mutation.
 3. Each Send mutation is issued once and is never automatically replayed.
 4. One Native Session update consumer survives prompt completion and accepts later updates until session close or replacement.
 5. One durable Task transaction produces one ordered Task revision; a revision gap installs one new baseline.
@@ -340,3 +354,4 @@ An implementation conforms to this specification only when all of these are true
 8. Every notification-worthy Task transition creates one explicit Task Attention Event; no client infers it from status or `unread`.
 9. A browser profile emits at most one OS notification for one eligible Task Attention Event and never emits an old unread backlog on startup.
 10. App Server owns Task Attention state while each App Shell owns its local attention and notification capabilities.
+11. Unsent Composer text and Images have one Frontend owner and remain unchanged by Project, Agent, Task Workspace, navigation, reconnect, or Prepared-Task lease changes while the page remains alive.
