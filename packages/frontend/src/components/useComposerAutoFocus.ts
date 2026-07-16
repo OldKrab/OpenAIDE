@@ -1,5 +1,6 @@
 import { useEffect, type RefObject } from "react";
 import type { ComposerEditorHandle } from "./ComposerEditor";
+import { usesMobileComposerBehavior } from "./mobileComposerBehavior";
 
 type ComposerAutoFocusOptions = {
   autoFocus: boolean;
@@ -16,13 +17,7 @@ export function useComposerAutoFocus({
   focusRequestKey,
 }: ComposerAutoFocusOptions) {
   useEffect(() => {
-    if (!autoFocus || disabled || hasCoarsePointer()) return;
+    if (!autoFocus || disabled || usesMobileComposerBehavior()) return;
     editorRef.current?.focus();
   }, [autoFocus, disabled, editorRef, focusRequestKey]);
-}
-
-function hasCoarsePointer() {
-  return typeof window !== "undefined"
-    && typeof window.matchMedia === "function"
-    && window.matchMedia("(hover: none) and (pointer: coarse)").matches;
 }

@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDown } from "lucide-react";
+import { ArrowDown, Check, CircleAlert } from "lucide-react";
 import type {
   AppPreferencesRecord,
   ChatMessage,
@@ -15,7 +15,7 @@ import { Composer } from "./Composer";
 import { composerAvailability, composerCanSubmit } from "./composerAvailability";
 import { TaskHeader } from "./TaskHeader";
 import { scrollTopAfterPrependedContent } from "./TaskViewModel";
-import { taskWorkingStatusLabel, workspaceLabel } from "./taskSurfaceHelpers";
+import { taskWorkingStatusLabel, timestampMillis, workspaceLabel } from "./taskSurfaceHelpers";
 import type { TaskFileBrowserCallbacks } from "./appControllerCallbackTypes";
 import {
   permissionResponseForMessage,
@@ -189,7 +189,7 @@ export function TaskView({
     const timer = window.setTimeout(() => setShowHistoryUpdated(false), 2_000);
     return () => window.clearTimeout(timer);
   }, [snapshot.history_sync.generation, snapshot.history_sync.state, snapshot.task.task_id]);
-  const workingLabel = taskWorkingStatusLabel(
+  const timelineStatusLabel = taskWorkingStatusLabel(
     chatItems,
     snapshot.task.status,
     inputPending,
@@ -197,6 +197,12 @@ export function TaskView({
       ? { state: "idle", generation: snapshot.history_sync.generation }
       : snapshot.history_sync,
   );
+  const timelineStatusKind = showHistoryUpdated && snapshot.history_sync.state === "updated"
+    ? "notice"
+    : snapshot.task.status === "waiting"
+      ? "blocked"
+    : "progress";
+  const workingStartedAt = snapshot.active_turn_started_at;
   const taskSelection = {
     agentId: snapshot.task.agent_id,
     agentLabel: activeTask?.agent_name ?? snapshot.task.agent_name,
@@ -259,7 +265,9 @@ export function TaskView({
           taskId={snapshot.task.task_id}
           taskStatus={snapshot.task.status}
           toolDetails={toolDetails}
-          workingLabel={workingLabel}
+          timelineStatusKind={timelineStatusKind}
+          timelineStatusLabel={timelineStatusLabel}
+          workingStartedAt={workingStartedAt}
         />
         {(reconnecting && showReconnectNotice) || backendConnectionState?.status === "unavailable" ? (
           <div className="task-connection-notice" role="status" aria-live="polite">
@@ -327,7 +335,9 @@ type TaskChatTimelineProps = {
   taskId: string;
   taskStatus: TaskSnapshot["task"]["status"];
   toolDetails: AppState["toolDetails"];
-  workingLabel?: string;
+  timelineStatusKind: "blocked" | "notice" | "progress";
+  timelineStatusLabel?: string;
+  workingStartedAt?: string;
 };
 
 // Composer drafts update independently from authoritative Chat and must not invalidate its rows.
@@ -349,7 +359,9 @@ const TaskChatTimeline = memo(function TaskChatTimeline({
   taskId,
   taskStatus,
   toolDetails,
-  workingLabel,
+  timelineStatusKind,
+  timelineStatusLabel,
+  workingStartedAt,
 }: TaskChatTimelineProps) {
   const latestTextMessageIds = latestTextMessageIdsByChannel(items);
   return (
@@ -408,7 +420,9 @@ const TaskChatTimeline = memo(function TaskChatTimeline({
             commandCatalog={commandCatalog}
           />
         ))}
-        {workingLabel ? <WorkingStatus label={workingLabel} /> : null}
+        {timelineStatusLabel ? (
+          <TimelineStatus kind={timelineStatusKind} label={timelineStatusLabel} startedAt={workingStartedAt} />
+        ) : null}
       </div>
       {chatScroll.showJumpToLatest ? (
         <button
@@ -460,16 +474,79 @@ export function chatRowKey(message: ChatMessage) {
   return message.message_id;
 }
 
-function WorkingStatus({ label, onRetry }: { label: string; onRetry?: () => void }) {
+function TimelineStatus({
+  kind,
+  label,
+  onRetry,
+  startedAt,
+}: {
+  kind: "blocked" | "notice" | "progress";
+  label: string;
+  onRetry?: () => void;
+  startedAt?: string;
+}) {
+  const elapsedSeconds = useElapsedSeconds(kind === "progress" ? startedAt : undefined);
+  const visibleElapsed = elapsedSeconds !== undefined && elapsedSeconds >= 5
+    ? formatElapsedDuration(elapsedSeconds)
+    : undefined;
   return (
-    <div className="working-status" role="status" aria-live="polite">
-      <span className="working-status-dots" aria-hidden="true">
-        <span />
-        <span />
-        <span />
-      </span>
-      <span>{label}</span>
+    <div className={`working-status working-status-${kind}`}>
+      {kind === "progress" ? (
+        <span className="working-status-dots" aria-hidden="true">
+          <span />
+          <span />
+          <span />
+        </span>
+      ) : kind === "notice" ? (
+        <Check aria-hidden="true" className="working-status-notice-icon" size={14} />
+      ) : <CircleAlert aria-hidden="true" className="working-status-blocked-icon" size={14} />}
+      <span className="working-status-label" role="status" aria-live="polite">{label}</span>
+      {visibleElapsed && elapsedSeconds !== undefined ? (
+        <>
+          <span className="working-status-duration-separator" aria-hidden="true" />
+          <time
+            aria-label={`Elapsed time ${elapsedDurationLabel(elapsedSeconds)}`}
+            className="working-status-duration"
+            dateTime={`PT${elapsedSeconds}S`}
+          >
+            {visibleElapsed}
+          </time>
+        </>
+      ) : null}
       {onRetry ? <button type="button" onClick={onRetry}>Retry</button> : null}
     </div>
   );
+}
+
+/** Keeps clock ticks inside the live footer so the surrounding Chat timeline stays stable. */
+function useElapsedSeconds(startedAt?: string) {
+  const startedAtMs = startedAt ? timestampMillis(startedAt) : Number.NaN;
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    setNow(Date.now());
+    if (Number.isNaN(startedAtMs)) return undefined;
+    const timer = globalThis.setInterval(() => setNow(Date.now()), 1_000);
+    return () => globalThis.clearInterval(timer);
+  }, [startedAtMs]);
+  if (Number.isNaN(startedAtMs)) return undefined;
+  return Math.max(0, Math.floor((now - startedAtMs) / 1_000));
+}
+
+export function formatElapsedDuration(totalSeconds: number) {
+  const hours = Math.floor(totalSeconds / 3_600);
+  const minutes = Math.floor((totalSeconds % 3_600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) return `${hours}h ${String(minutes).padStart(2, "0")}m`;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+}
+
+function elapsedDurationLabel(totalSeconds: number) {
+  const hours = Math.floor(totalSeconds / 3_600);
+  const minutes = Math.floor((totalSeconds % 3_600) / 60);
+  const seconds = totalSeconds % 60;
+  return [
+    hours ? `${hours} hour${hours === 1 ? "" : "s"}` : undefined,
+    minutes ? `${minutes} minute${minutes === 1 ? "" : "s"}` : undefined,
+    `${seconds} second${seconds === 1 ? "" : "s"}`,
+  ].filter(Boolean).join(" ");
 }

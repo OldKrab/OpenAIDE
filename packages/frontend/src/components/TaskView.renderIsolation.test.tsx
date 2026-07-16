@@ -94,6 +94,48 @@ describe("TaskView render isolation", () => {
 
     expect(chatRowRender).toHaveBeenCalledTimes(rendersAfterAuthoritativeUpdate);
   });
+
+  it("updates elapsed turn time without rendering unchanged Chat rows", async () => {
+    vi.setSystemTime(new Date("2026-07-13T00:01:24Z"));
+    const snapshot = taskSnapshot();
+    snapshot.task.status = "active";
+    snapshot.active_turn_started_at = String(new Date("2026-07-13T00:00:00Z").getTime());
+    let tree!: ReactTestRenderer;
+
+    act(() => {
+      tree = create(<TaskView {...taskViewProps(snapshot)} />);
+    });
+
+    expect(tree.root.findByProps({ className: "working-status-duration" }).children).toContain("1:24");
+    expect(tree.root.findAllByProps({ className: "working-status-duration-separator" })).toHaveLength(1);
+    const rendersBeforeTick = chatRowRender.mock.calls.length;
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+
+    expect(tree.root.findByProps({ className: "working-status-duration" }).children).toContain("1:25");
+    expect(chatRowRender).toHaveBeenCalledTimes(rendersBeforeTick);
+  });
+
+  it("keeps the elapsed timer quiet for the first five seconds", async () => {
+    vi.setSystemTime(new Date("2026-07-13T00:00:04Z"));
+    const snapshot = taskSnapshot();
+    snapshot.task.status = "active";
+    snapshot.active_turn_started_at = "2026-07-13T00:00:00Z";
+    let tree!: ReactTestRenderer;
+
+    act(() => {
+      tree = create(<TaskView {...taskViewProps(snapshot)} />);
+    });
+    expect(tree.root.findAllByProps({ className: "working-status-duration" })).toHaveLength(0);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+
+    expect(tree.root.findByProps({ className: "working-status-duration" }).children).toContain("0:05");
+  });
 });
 
 function taskViewProps(snapshot: TaskSnapshot) {

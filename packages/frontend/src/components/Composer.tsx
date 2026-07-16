@@ -24,6 +24,7 @@ import {
 import { attachEveryImage } from "./imageAttachmentBatch";
 import { useComposerAutoFocus } from "./useComposerAutoFocus";
 import { useComposerKeyboardFocus } from "./useComposerKeyboardFocus";
+import { usesMobileComposerBehavior } from "./mobileComposerBehavior";
 import {
   FileMentionPicker,
   fileMentionTokenAtCursor,
@@ -398,7 +399,8 @@ export function Composer({
               return;
             }
           }
-          if (shouldSubmitComposerKey(event, submitShortcut) && canSubmit) {
+          const mobileComposerBehavior = usesMobileComposerBehavior();
+          if (!mobileComposerBehavior && shouldSubmitComposerKey(event, submitShortcut) && canSubmit) {
             event.preventDefault();
             submitDraft();
             return;

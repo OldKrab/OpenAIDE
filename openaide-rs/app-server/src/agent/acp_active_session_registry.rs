@@ -3,8 +3,8 @@ use std::sync::{Arc, Mutex};
 
 use crate::agent::acp_session_client::AcpSessionClient;
 use crate::agent::{
-    AgentEventSink, AgentPrompt, AgentPromptOutcome, AgentSessionDelete, AgentSessionEventSink,
-    AgentSessionKey,
+    AgentEventSink, AgentLoadedSession, AgentPrompt, AgentPromptOutcome, AgentSessionDelete,
+    AgentSessionEventSink, AgentSessionKey, AgentSessionLoad,
 };
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::ConfigOptionsCatalog;
@@ -74,6 +74,14 @@ impl AcpActiveSessionRegistry {
             .expect("ACP session sink registry poisoned")
             .insert(session.clone(), sink);
         Ok(())
+    }
+
+    pub(super) fn load_session(
+        &self,
+        session: &AgentSessionKey,
+        request: AgentSessionLoad,
+    ) -> Result<AgentLoadedSession, RuntimeError> {
+        self.require_session(session)?.load_session(request)
     }
 
     pub(super) fn set_config_option(

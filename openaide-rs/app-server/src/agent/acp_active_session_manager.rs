@@ -114,6 +114,11 @@ impl AcpActiveSessionManager {
             return Err(RuntimeError::InvalidParams("session cancelled".to_string()));
         }
 
+        let session = request.session_key();
+        if self.sessions.contains(&session) {
+            return self.sessions.load_session(&session, request);
+        }
+
         let started = self.open_session(AcpSessionOpenRequest::Load(request))?;
         Ok(AgentLoadedSession {
             session: started.session,

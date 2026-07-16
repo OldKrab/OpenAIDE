@@ -5,7 +5,8 @@ use tokio::sync::mpsc as tokio_mpsc;
 
 use crate::agent::acp_host_terminal_ownership::AcpTerminalOwner;
 use crate::agent::{
-    AgentEventSink, AgentPrompt, AgentPromptOutcome, AgentSessionEventSink, TurnCancellation,
+    AgentEventSink, AgentLoadedSession, AgentPrompt, AgentPromptOutcome, AgentSessionEventSink,
+    AgentSessionLoad, TurnCancellation,
 };
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::ConfigOptionsCatalog;
@@ -48,6 +49,39 @@ impl AcpSessionClient {
         self.command_tx
             .send(AcpSessionCommand::SetEventSink { sink })
             .map_err(|_| self.worker_stopped_error())
+    }
+
+    /// Replays history through the binding that already owns this Native Session.
+    pub(super) fn load_session(
+        &self,
+        request: AgentSessionLoad,
+    ) -> Result<AgentLoadedSession, RuntimeError> {
+        if request.cancellation.is_cancelled() {
+            return Err(RuntimeError::InvalidParams("session cancelled".to_string()));
+        }
+        if self.has_terminal_error() {
+            return Err(self.worker_stopped_error());
+        }
+        // Loading replaces the worker's attached ACP session, so it must not overlap
+        // a prompt that is using the same binding.
+        let _settlement = self.prompt_lifecycle.admit(&request.cancellation)?;
+        let (reply_tx, reply_rx) = mpsc::channel();
+        self.command_tx
+            .send(AcpSessionCommand::Load { request, reply_tx })
+            .map_err(|_| self.worker_stopped_error())?;
+        loop {
+            match reply_rx.recv_timeout(Duration::from_millis(100)) {
+                Ok(result) => return result,
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    return Err(self.worker_stopped_error());
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    if self.has_terminal_error() {
+                        return Err(self.worker_stopped_error());
+                    }
+                }
+            }
+        }
     }
 
     pub(super) fn prompt(
@@ -244,6 +278,10 @@ pub(super) enum AcpSessionCommand {
     SetEventSink {
         sink: Arc<dyn AgentSessionEventSink>,
     },
+    Load {
+        request: AgentSessionLoad,
+        reply_tx: mpsc::Sender<Result<AgentLoadedSession, RuntimeError>>,
+    },
     Prompt {
         prompt: AgentPrompt,
         sink: Arc<dyn AgentEventSink>,
@@ -281,7 +319,7 @@ fn worker_stopped_error(terminal_error: &Arc<Mutex<Option<String>>>) -> RuntimeE
         .lock()
         .expect("ACP terminal error lock poisoned")
         .clone()
-        .unwrap_or_else(|| "ACP session worker stopped".to_string());
+        .unwrap_or_else(|| "Native Session worker stopped".to_string());
     RuntimeError::NotReady(message)
 }
 

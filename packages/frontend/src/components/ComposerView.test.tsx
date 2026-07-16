@@ -916,6 +916,49 @@ describe("Composer view behavior", () => {
     expect(editorDom.innerHTML).toBe("line1<br><br>");
   });
 
+  it("uses Return for a new line instead of submitting on a mobile pointer", () => {
+    vi.stubGlobal("window", {
+      matchMedia: vi.fn(() => ({ matches: true })),
+    });
+    const onChange = vi.fn();
+    const onSubmit = vi.fn();
+    const { editorDom, renderer } = renderComposerWithEditorDom({
+      onChange,
+      onSubmit,
+      prompt: "line1",
+      submitShortcut: "enter",
+    });
+
+    keyDown(textarea(renderer.root), {
+      currentTarget: {
+        selectionEnd: 5,
+        selectionStart: 5,
+        setRangeText: vi.fn(),
+        value: "line1\n",
+      },
+    });
+
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(onChange).toHaveBeenCalledWith("line1\n");
+    expect(editorDom.innerHTML).toBe("line1<br><br>");
+  });
+
+  it("keeps mobile sending on the visible button when Return has a modifier", () => {
+    vi.stubGlobal("window", {
+      matchMedia: vi.fn(() => ({ matches: true })),
+    });
+    const onSubmit = vi.fn();
+    const { renderer } = renderComposerWithEditorDom({
+      onSubmit,
+      prompt: "line1",
+      submitShortcut: "enter",
+    });
+
+    keyDown(textarea(renderer.root), { ctrlKey: true });
+
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+
   it("renders disabled composer inputs and controls as disabled", () => {
     const renderer = renderComposer({ attachments: [attachment("attachment_1", "notes.md")], canEdit: false });
 

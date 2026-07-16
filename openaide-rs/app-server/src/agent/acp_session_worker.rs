@@ -27,9 +27,6 @@ use crate::protocol::model::{
 };
 
 use crate::agent::acp_errors::acp_error;
-use crate::agent::acp_opened_session_worker::{
-    run_opened_acp_session, AcpOpenedSessionWorkerInput,
-};
 use crate::agent::acp_session_client::{AcpSessionCommand, AcpSessionConfigCommand};
 use crate::agent::acp_session_connection::{
     connect_acp_session_client, AcpSessionConnectionContext,
@@ -39,6 +36,7 @@ use crate::agent::acp_session_lifecycle::{
 };
 use crate::agent::acp_session_opening::{open_acp_session, OpenAcpSessionContext};
 use crate::agent::acp_update_projection::LivePromptProjection;
+use crate::agent::native_session_worker::{run_native_session_worker, NativeSessionWorker};
 
 pub(super) enum AcpSessionOpenRequest {
     Start(AgentSessionStart),
@@ -444,13 +442,17 @@ async fn open_on_shared_process(
     }
     let active_session_ids_for_task = active_session_ids.clone();
     let current_prompts_for_task = current_prompts.clone();
+    let load_replay_for_task = Arc::clone(load_replay);
     let session_event_sinks_for_task = Arc::clone(session_event_sinks);
     let session_traces_for_task = Arc::clone(session_traces);
     let session_id_for_task = session_id.clone();
     tokio::spawn(async move {
-        let result = run_opened_acp_session(AcpOpenedSessionWorkerInput {
+        let result = run_native_session_worker(NativeSessionWorker {
             opened,
             request_agent_id,
+            initialize,
+            auth_method_id,
+            load_replay: load_replay_for_task,
             command_rx,
             config_rx,
             cancel_rx,

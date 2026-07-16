@@ -18,6 +18,10 @@
   padding: 12px 13px 10px;
 }
 
+.task-surface:not(.new-task-surface) .composer {
+  max-height: 50dvh;
+}
+
 .composer[data-keyboard-focus="true"]:focus-within {
   border-color: color-mix(in oklch, var(--oa-focus) 42%, var(--oa-border));
   box-shadow: none;
@@ -27,7 +31,7 @@
 .composer-editor {
   width: 100%;
   min-height: 40px;
-  max-height: 116px;
+  max-height: calc(50dvh - 72px);
   border: 0;
   outline: 0;
   resize: none;
@@ -38,6 +42,11 @@
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+.new-task-surface .composer textarea,
+.new-task-surface .composer-editor {
+  max-height: min(480px, 65dvh);
 }
 
 .composer-editor {

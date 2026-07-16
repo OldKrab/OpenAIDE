@@ -154,6 +154,11 @@ pub(super) async fn run_prompt(
                             LivePromptProjection::for_session(context.agent_id, sink.clone())
                         });
                     }
+                    AcpSessionCommand::Load { reply_tx, .. } => {
+                        let _ = reply_tx.send(Err(RuntimeError::NotReady(
+                            "ACP session already has an active prompt".to_string(),
+                        )));
+                    }
                     AcpSessionCommand::Prompt { done_tx, .. } => {
                         let _ = done_tx.send(Err(RuntimeError::NotReady(
                             "ACP session already has an active prompt".to_string(),
