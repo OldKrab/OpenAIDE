@@ -157,7 +157,7 @@ test("sends an attachment-only first message through the real resolver boundary"
   await expect(page.getByLabel("Send message")).toBeEnabled();
   await page.getByLabel("Send message").click();
   await expect(page).toHaveURL(/\/task\/task_/);
-  await expect(page.getByLabel("Task chat").getByLabel("Open pixel.png")).toBeVisible();
+  await expect(page.getByLabel("Task chat").getByLabel("Open Image")).toBeVisible();
   await expect(page.getByLabel("Task status: Ready")).toBeVisible();
 });
 
