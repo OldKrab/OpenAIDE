@@ -27,6 +27,31 @@ pub struct TaskCreateResult {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
+pub struct TaskSearchFilesParams {
+    pub task_id: TaskId,
+    pub query: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskSearchFilesResult {
+    pub task_id: TaskId,
+    pub state: WorkspaceFileSearchState,
+    pub paths: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub notice: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum WorkspaceFileSearchState {
+    Ready,
+    Refreshing,
+    Unavailable,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
 pub struct TaskAdoptNativeSessionParams {
     pub project_id: ProjectId,
     pub agent_id: AgentId,

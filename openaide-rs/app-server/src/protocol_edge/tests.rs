@@ -54,8 +54,8 @@ use crate::task_events::{
 use crate::tasks::product_api::{
     AgentListSessionsWorkflow, AttachmentFileBrowserWorkflow, TaskAdoptNativeSessionWorkflow,
     TaskArchiveWorkflow, TaskCancelWorkflow, TaskChatPageWorkflow, TaskCreateWorkflow,
-    TaskDiscardWorkflow, TaskOpenWorkflow, TaskSendAccepted, TaskSendWorkflow,
-    TaskSetConfigOptionWorkflow,
+    TaskDiscardWorkflow, TaskFileSearchWorkflow, TaskOpenWorkflow, TaskSendAccepted,
+    TaskSendWorkflow, TaskSetConfigOptionWorkflow,
 };
 
 use super::*;
@@ -1788,6 +1788,7 @@ fn gateway_with_project_context_and_store() -> (RpcGateway, Store) {
         Arc::new(RejectingAgentListSessions),
         Arc::new(RejectingAttachments),
         Arc::new(RejectingTaskCreate),
+        Arc::new(RejectingTaskFileSearch),
         Arc::new(RejectingTaskAdoptNativeSession),
         Arc::new(RejectingTaskSend),
         Arc::new(RejectingTaskCancel),
@@ -1835,6 +1836,7 @@ fn gateway_with_attachments_and_shutdown(
         std::sync::Arc::new(RejectingAgentListSessions),
         attachments,
         std::sync::Arc::new(RejectingTaskCreate),
+        std::sync::Arc::new(RejectingTaskFileSearch),
         std::sync::Arc::new(RejectingTaskAdoptNativeSession),
         std::sync::Arc::new(RejectingTaskSend),
         std::sync::Arc::new(RejectingTaskCancel),
@@ -1913,6 +1915,7 @@ fn gateway_with_agent_session_listing(
         agent_list_sessions,
         Arc::new(RejectingAttachments),
         std::sync::Arc::new(RejectingTaskCreate),
+        std::sync::Arc::new(RejectingTaskFileSearch),
         std::sync::Arc::new(RejectingTaskAdoptNativeSession),
         std::sync::Arc::new(RejectingTaskSend),
         std::sync::Arc::new(RejectingTaskCancel),
@@ -1950,6 +1953,7 @@ fn gateway_with_agent_authenticate(
         Arc::new(RejectingAgentListSessions),
         Arc::new(RejectingAttachments),
         std::sync::Arc::new(RejectingTaskCreate),
+        std::sync::Arc::new(RejectingTaskFileSearch),
         std::sync::Arc::new(RejectingTaskAdoptNativeSession),
         std::sync::Arc::new(RejectingTaskSend),
         std::sync::Arc::new(RejectingTaskCancel),
@@ -2552,6 +2556,26 @@ impl TaskCreateWorkflow for RejectingTaskCreate {
         Err(openaide_app_server_protocol::errors::ProtocolError {
             code: openaide_app_server_protocol::errors::ProtocolErrorCode::Internal,
             message: "task create unavailable in test gateway".to_string(),
+            recoverable: true,
+            target: None,
+        })
+    }
+}
+
+struct RejectingTaskFileSearch;
+
+impl TaskFileSearchWorkflow for RejectingTaskFileSearch {
+    fn search_files_for_client(
+        &self,
+        _client_instance_id: &ClientInstanceId,
+        _params: openaide_app_server_protocol::task::TaskSearchFilesParams,
+    ) -> Result<
+        openaide_app_server_protocol::task::TaskSearchFilesResult,
+        openaide_app_server_protocol::errors::ProtocolError,
+    > {
+        Err(openaide_app_server_protocol::errors::ProtocolError {
+            code: openaide_app_server_protocol::errors::ProtocolErrorCode::Internal,
+            message: "task file search unavailable in test gateway".to_string(),
             recoverable: true,
             target: None,
         })

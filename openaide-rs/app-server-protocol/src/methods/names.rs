@@ -35,6 +35,7 @@ pub const SHELL_RESOLVE_FILE_REVEAL: &str = "shell/resolveFileReveal";
 pub const WORKSPACE_LIST_ROOTS: &str = "workspace/listRoots";
 pub const WORKSPACE_LIST_DIRECTORY: &str = "workspace/listDirectory";
 pub const TASK_CREATE: &str = "task/create";
+pub const TASK_SEARCH_FILES: &str = "task/searchFiles";
 pub const TASK_ADOPT_NATIVE_SESSION: &str = "task/adoptNativeSession";
 pub const TASK_SEND: &str = "task/send";
 pub const TASK_SET_CONFIG_OPTION: &str = "task/setConfigOption";
@@ -84,6 +85,7 @@ pub const CLIENT_METHODS: &[&str] = &[
     WORKSPACE_LIST_ROOTS,
     WORKSPACE_LIST_DIRECTORY,
     TASK_CREATE,
+    TASK_SEARCH_FILES,
     TASK_ADOPT_NATIVE_SESSION,
     TASK_SEND,
     TASK_SET_CONFIG_OPTION,

@@ -20,3 +20,6 @@ agent-client-protocol-schema = { version = "=1.4.0", features = ["unstable_elici
 tokio = { version = "1.48", features = ["macros", "rt-multi-thread", "sync", "time"] }
 fs2 = "0.4"
 base64 = "0.22"
+ignore = "0.4.27"
+notify = "8.2.0"
+nucleo-matcher = "0.3.1"

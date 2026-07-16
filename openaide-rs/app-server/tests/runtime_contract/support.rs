@@ -333,6 +333,11 @@ impl AgentRuntime for ToolCallUpdateAgent {
         ))
     }
 
+    fn resume_session(&self, request: AgentSessionResume) -> Result<AgentSession, RuntimeError> {
+        assert_eq!(request.session_id, "session_tool_call_update");
+        Ok(AgentSession::new(request.agent_id, request.session_id))
+    }
+
     fn prompt(
         &self,
         _prompt: AgentPrompt,
@@ -436,6 +441,11 @@ impl AgentRuntime for AttachmentCapturingAgent {
             request.agent_id,
             "session_attachment_capture",
         ))
+    }
+
+    fn resume_session(&self, request: AgentSessionResume) -> Result<AgentSession, RuntimeError> {
+        assert_eq!(request.session_id, "session_attachment_capture");
+        Ok(AgentSession::new(request.agent_id, request.session_id))
     }
 
     fn prompt(

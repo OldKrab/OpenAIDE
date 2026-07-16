@@ -50,7 +50,7 @@ use crate::snapshots::{SnapshotBuilder, TaskSnapshotSource};
 use crate::state_sync::StateStream;
 use crate::tasks::product_api::{
     AgentListSessionsWorkflow, AttachmentFileBrowserWorkflow, TaskDiscardWorkflow,
-    TaskOpenWorkflow, TaskSetConfigOptionWorkflow,
+    TaskFileSearchWorkflow, TaskOpenWorkflow, TaskSetConfigOptionWorkflow,
 };
 use crate::tasks::product_api::{
     TaskAdoptNativeSessionWorkflow, TaskArchiveWorkflow, TaskCancelWorkflow, TaskChatPageWorkflow,
@@ -80,6 +80,7 @@ pub struct RpcGateway {
     agent_list_sessions: Arc<dyn AgentListSessionsWorkflow>,
     attachments: Arc<dyn AttachmentFileBrowserWorkflow>,
     task_create: Arc<dyn TaskCreateWorkflow>,
+    task_file_search: Arc<dyn TaskFileSearchWorkflow>,
     task_adopt_native_session: Arc<dyn TaskAdoptNativeSessionWorkflow>,
     task_send: Arc<dyn TaskSendWorkflow>,
     task_cancel: Arc<dyn TaskCancelWorkflow>,
@@ -160,6 +161,7 @@ impl RpcGateway {
         agent_list_sessions: Arc<dyn AgentListSessionsWorkflow>,
         attachments: Arc<dyn AttachmentFileBrowserWorkflow>,
         task_create: Arc<dyn TaskCreateWorkflow>,
+        task_file_search: Arc<dyn TaskFileSearchWorkflow>,
         task_adopt_native_session: Arc<dyn TaskAdoptNativeSessionWorkflow>,
         task_send: Arc<dyn TaskSendWorkflow>,
         task_cancel: Arc<dyn TaskCancelWorkflow>,
@@ -193,6 +195,7 @@ impl RpcGateway {
             agent_list_sessions,
             attachments,
             task_create,
+            task_file_search,
             task_adopt_native_session,
             task_send,
             task_cancel,

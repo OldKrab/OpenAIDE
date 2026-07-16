@@ -12,16 +12,28 @@ describe("ComposerEditor markup", () => {
     expect(renderEditorHtml("line one\n", undefined)).toBe("line one<br><br>");
   });
 
-  it("escapes slash command labels and titles", () => {
+  it("renders escaped slash-command hover metadata without a native title", () => {
     const commandCatalog: AgentCommandsCatalog = {
       agent_id: "codex",
       commands: [{ name: "ship", description: "Use <fast> & safe mode", input_hint: "\"note\"" }],
       status: "ready",
     };
 
-    expect(renderEditorHtml("/ship ", commandCatalog)).toBe(
-      "<span class=\"composer-command-token\" title=\"/ship: Use &lt;fast&gt; &amp; safe mode Argument: &quot;note&quot;.\">/ship</span> ",
+    const html = renderEditorHtml("/ship ", commandCatalog);
+
+    expect(html).toBe(
+      "<span class=\"composer-reference-token composer-command-token\" data-reference-description=\"Use &lt;fast&gt; &amp; safe mode\" data-reference-kind=\"command\" data-reference-label=\"/ship\" data-reference-type=\"Skill\" spellcheck=\"false\">/ship</span> ",
     );
+    expect(html).not.toContain("title=");
+  });
+
+  it("renders path-derived file hover metadata without a native title", () => {
+    const html = renderEditorHtml('Read @src/main.rs and @"docs/team deck.pptx"', undefined);
+
+    expect(html).toBe(
+      'Read <span class="composer-reference-token composer-file-token" data-reference-description="Rust · src" data-reference-file-kind="rust" data-reference-kind="file" data-reference-label="main.rs" data-reference-path="src/main.rs" data-reference-type="Workspace file" spellcheck="false">@src/main.rs</span> and <span class="composer-reference-token composer-file-token" data-reference-description="PowerPoint · docs" data-reference-file-kind="file" data-reference-kind="file" data-reference-label="team deck.pptx" data-reference-path="docs/team deck.pptx" data-reference-type="Workspace file" spellcheck="false">@&quot;docs/team deck.pptx&quot;</span>',
+    );
+    expect(html).not.toContain("title=");
   });
 
   it("restores the focused editor selection after refreshed markup is committed", () => {

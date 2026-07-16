@@ -5,6 +5,7 @@ import {
   ATTACHMENT_LIST_ROOTS,
   ATTACHMENT_REVEAL,
   TASK_CHAT_PAGE,
+  TASK_SEARCH_FILES,
   TASK_SET_CONFIG_OPTION,
   type AgentConfigOptionId,
   type BackendConnection,
@@ -268,6 +269,10 @@ function createTaskFileBrowserCallbacks(
   if (!request || !taskId) return undefined;
   return {
     ownerKey: `task:${taskId}`,
+    searchFiles: (query: string) => request(TASK_SEARCH_FILES, {
+      taskId: taskId as TaskId,
+      query,
+    }),
     listRoots: async () => {
       const result = await request(ATTACHMENT_LIST_ROOTS, { taskId: taskId as TaskId });
       return result.roots;

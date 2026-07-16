@@ -10,8 +10,8 @@ use crate::methods::{
     SETTINGS_UPDATE_PREFERENCES, SETTINGS_UPDATE_RUNTIME, SHELL_RESOLVE_FILE_REVEAL,
     STATE_SUBSCRIBE, STATE_UNSUBSCRIBE, SUPPORT_RECOVER_STUCK_SESSIONS, TASK_ADOPT_NATIVE_SESSION,
     TASK_CANCEL, TASK_CHAT_PAGE, TASK_CREATE, TASK_DISCARD, TASK_LIST, TASK_MARK_READ, TASK_OPEN,
-    TASK_SEND, TASK_SET_ARCHIVED, TASK_SET_CONFIG_OPTION, WORKSPACE_LIST_DIRECTORY,
-    WORKSPACE_LIST_ROOTS,
+    TASK_SEARCH_FILES, TASK_SEND, TASK_SET_ARCHIVED, TASK_SET_CONFIG_OPTION,
+    WORKSPACE_LIST_DIRECTORY, WORKSPACE_LIST_ROOTS,
 };
 use crate::server_requests::{
     PERMISSION_REQUEST, QUESTION_REQUEST, SECRET_READ, SHELL_REVEAL_FILE, SHELL_SHOW_NOTIFICATION,
@@ -165,6 +165,10 @@ pub(super) fn push_method_constants(output: &mut String) {
     output.push_str(&format!(
         "export const TASK_CREATE = {:?} as const;\n",
         TASK_CREATE
+    ));
+    output.push_str(&format!(
+        "export const TASK_SEARCH_FILES = {:?} as const;\n",
+        TASK_SEARCH_FILES
     ));
     output.push_str(&format!(
         "export const TASK_ADOPT_NATIVE_SESSION = {:?} as const;\n",

@@ -10,8 +10,8 @@ use openaide_app_server_protocol::methods::{
     SETTINGS_UPDATE_PREFERENCES, SETTINGS_UPDATE_RUNTIME, SHELL_RESOLVE_FILE_REVEAL,
     STATE_SUBSCRIBE, STATE_UNSUBSCRIBE, SUPPORT_RECOVER_STUCK_SESSIONS, TASK_ADOPT_NATIVE_SESSION,
     TASK_CANCEL, TASK_CHAT_PAGE, TASK_CREATE, TASK_DISCARD, TASK_LIST, TASK_MARK_READ, TASK_OPEN,
-    TASK_SEND, TASK_SET_ARCHIVED, TASK_SET_CONFIG_OPTION, WORKSPACE_LIST_DIRECTORY,
-    WORKSPACE_LIST_ROOTS,
+    TASK_SEARCH_FILES, TASK_SEND, TASK_SET_ARCHIVED, TASK_SET_CONFIG_OPTION,
+    WORKSPACE_LIST_DIRECTORY, WORKSPACE_LIST_ROOTS,
 };
 
 use crate::client_lifecycle::{AppServerTime, ConnectionId};
@@ -145,6 +145,7 @@ impl RpcGateway {
                 self.handle_workspace_list_directory(connection_id, id, params, meta)
             }
             TASK_CREATE => self.handle_task_create(connection_id, id, params, meta, now),
+            TASK_SEARCH_FILES => self.handle_task_search_files(connection_id, id, params, meta),
             TASK_ADOPT_NATIVE_SESSION => {
                 self.handle_task_adopt_native_session(connection_id, id, params, meta, now)
             }

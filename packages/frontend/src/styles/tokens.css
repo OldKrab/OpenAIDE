@@ -11,6 +11,9 @@
   --oa-warning: var(--vscode-problemsWarningIcon-foreground, #d7ba7d);
   --oa-danger: var(--vscode-errorForeground, #f48771);
   --oa-success: var(--vscode-testing-iconPassed, #89d185);
+  /* References are syntax, not links or focus state, so they own theme-aware semantic colors. */
+  --oa-reference-command: oklch(79% 0.11 275);
+  --oa-reference-file: oklch(79% 0.1 210);
   --oa-radius-sm: 4px;
   --oa-radius-md: 6px;
   --oa-radius-lg: 8px;
@@ -19,4 +22,17 @@
   --oa-mono-font: var(--vscode-editor-font-family, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
   font-family: var(--oa-ui-font);
   font-size: 14px;
+}
+
+body[data-shell="web"],
+body.vscode-light,
+body.vscode-high-contrast-light {
+  --oa-reference-command: oklch(52% 0.15 275);
+  --oa-reference-file: oklch(50% 0.13 210);
+}
+
+body.vscode-high-contrast,
+body.vscode-high-contrast-light {
+  --oa-reference-command: var(--oa-focus);
+  --oa-reference-file: var(--oa-focus);
 }

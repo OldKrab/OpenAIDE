@@ -1972,7 +1972,7 @@ fn runtime_permission_request_round_trips_over_server_request_stdio() {
 
     wait_for_protocol_task_status(&mut dispatcher, &notifications, "task-existing", "idle");
     drop(dispatcher);
-    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let store = open_store_after_dispatcher_drop(temp.path());
     let permission = store
         .read_messages("task-existing")
         .unwrap()
@@ -2049,7 +2049,7 @@ fn runtime_permission_request_reject_option_persists_denied_decision() {
 
     wait_for_protocol_task_status(&mut dispatcher, &notifications, "task-existing", "idle");
     drop(dispatcher);
-    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let store = open_store_after_dispatcher_drop(temp.path());
     let permission = store
         .read_messages("task-existing")
         .unwrap()
@@ -2764,22 +2764,22 @@ fn wait_for_protocol_task_status(
 ) {
     let deadline = Instant::now() + Duration::from_secs(1);
     while Instant::now() < deadline {
-        while let Ok(notification) = notifications.try_recv() {
-            let _ = dispatcher.handle_task_update(notification);
+        let notification = match notifications.recv_timeout(Duration::from_millis(50)) {
+            Ok(notification) => notification,
+            Err(mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(error) => panic!("task update channel closed: {error}"),
+        };
+        for line in dispatcher.handle_task_update(notification) {
+            let value = response(&line);
+            let payload = &value["params"]["payload"];
+            if value["method"] == "app/event"
+                && payload["kind"] == "taskChanged"
+                && payload["taskId"] == task_id
+                && payload["changes"]["task"]["status"] == status
+            {
+                return;
+            }
         }
-        let responses = dispatcher.handle_line(
-            &json!({
-                "jsonrpc": "2.0",
-                "id": "poll-task",
-                "method": TASK_OPEN,
-                "params": { "taskId": task_id }
-            })
-            .to_string(),
-        );
-        if response(&responses[0])["result"]["result"]["task"]["task"]["status"] == status {
-            return;
-        }
-        std::thread::sleep(Duration::from_millis(25));
     }
     panic!("task {task_id} did not reach {status}");
 }

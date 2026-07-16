@@ -9,8 +9,8 @@ use openaide_app_server_protocol::support::{
     SupportRecoverStuckSessionsParams, SupportRecoverStuckSessionsResult,
 };
 use openaide_app_server_protocol::task::{
-    TaskAdoptNativeSessionParams, TaskCancelParams, TaskCreateParams, TaskSendParams,
-    TaskSetArchivedParams,
+    TaskAdoptNativeSessionParams, TaskCancelParams, TaskCreateParams, TaskSearchFilesParams,
+    TaskSearchFilesResult, TaskSendParams, TaskSetArchivedParams,
 };
 use openaide_app_server_protocol::task::{TaskDiscardParams, TaskSetConfigOptionParams};
 
@@ -40,6 +40,7 @@ mod cancel;
 mod chat_page;
 mod create;
 mod discard;
+mod file_search;
 mod list_sessions;
 mod open;
 mod prepare;
@@ -57,6 +58,7 @@ pub(crate) struct TaskProductApi {
     mutations: TaskMutations,
     agent_gateway: AgentGateway,
     attachments: AttachmentRuntime,
+    workspace_files: crate::workspace_file_index::WorkspaceFileIndex,
     turn_runner: TurnRunner,
     native_sessions: crate::tasks::native_session_service::NativeSessionService,
     turn_acceptance: crate::tasks::turn_acceptance::TurnAcceptanceCoordinator,
@@ -109,6 +111,14 @@ pub(crate) trait TaskSendWorkflow: Send + Sync {
         client_instance_id: &ClientInstanceId,
         params: TaskSendParams,
     ) -> Result<TaskSendAccepted, ProtocolError>;
+}
+
+pub(crate) trait TaskFileSearchWorkflow: Send + Sync {
+    fn search_files_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        params: TaskSearchFilesParams,
+    ) -> Result<TaskSearchFilesResult, ProtocolError>;
 }
 
 pub(crate) trait TaskCancelWorkflow: Send + Sync {
@@ -228,6 +238,7 @@ impl TaskProductApi {
             mutations,
             agent_gateway,
             attachments,
+            workspace_files: Default::default(),
             turn_runner,
             native_sessions,
             turn_acceptance: Default::default(),

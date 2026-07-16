@@ -52,6 +52,7 @@ export const WORKSPACE_LIST_ROOTS = "workspace/listRoots" as const;
 export const WORKSPACE_LIST_DIRECTORY = "workspace/listDirectory" as const;
 
 export const TASK_CREATE = "task/create" as const;
+export const TASK_SEARCH_FILES = "task/searchFiles" as const;
 export const TASK_ADOPT_NATIVE_SESSION = "task/adoptNativeSession" as const;
 export const TASK_SEND = "task/send" as const;
 export const TASK_SET_CONFIG_OPTION = "task/setConfigOption" as const;
@@ -444,6 +445,12 @@ export type TaskCreateParams = { projectId: ProjectId, agentId: AgentId, workspa
 
 export type TaskCreateResult = { task: TaskSnapshot, };
 
+export type TaskSearchFilesParams = { taskId: TaskId, query: string, };
+
+export type TaskSearchFilesResult = { taskId: TaskId, state: WorkspaceFileSearchState, paths: Array<string>, notice?: string | null, };
+
+export type WorkspaceFileSearchState = "ready" | "refreshing" | "unavailable";
+
 export type TaskAdoptNativeSessionParams = { projectId: ProjectId, agentId: AgentId, nativeSessionId: string, title?: string | null, };
 
 export type TaskAdoptNativeSessionResult = { task: TaskSnapshot, };
@@ -644,7 +651,7 @@ export type PendingRequestScope = { "kind": "client", clientInstanceId: ClientIn
 
 export type PendingRequestKind = "permission" | "question" | "secret" | "shellCapability";
 
-export type ProtocolMethod = typeof CLIENT_PROBE | typeof CLIENT_INITIALIZE | typeof CLIENT_CAPABILITIES_CHANGED | typeof CLIENT_HEARTBEAT | typeof PENDING_REQUEST_RESOLVE | typeof STATE_SUBSCRIBE | typeof STATE_UNSUBSCRIBE | typeof DIAGNOSTICS_GET_RUNTIME | typeof SUPPORT_RECOVER_STUCK_SESSIONS | typeof AGENT_PROBE | typeof AGENT_AUTHENTICATE | typeof AGENT_LIST_SESSIONS | typeof AGENT_CREATE_CUSTOM | typeof AGENT_UPDATE_CUSTOM_METADATA | typeof AGENT_REPLACE_CUSTOM | typeof AGENT_DELETE_CUSTOM | typeof AGENT_SET_ENABLED | typeof SETTINGS_GET_AGENT_DETAILS | typeof SETTINGS_GET_MCP_SERVERS | typeof SETTINGS_GET_SKILLS | typeof SETTINGS_GET_PREFERENCES | typeof SETTINGS_UPDATE_PREFERENCES | typeof SETTINGS_GET_RUNTIME | typeof SETTINGS_UPDATE_RUNTIME | typeof ATTACHMENT_LIST_ROOTS | typeof ATTACHMENT_LIST_DIRECTORY | typeof ATTACHMENT_CREATE_FILE_REFERENCE | typeof ATTACHMENT_CREATE_PASTED_IMAGE | typeof ATTACHMENT_CREATE_EMBEDDED_CANDIDATE | typeof ATTACHMENT_CONFIRM_EMBEDDED | typeof ATTACHMENT_REFRESH_HANDLES | typeof ATTACHMENT_RELEASE | typeof ATTACHMENT_REVEAL | typeof SHELL_RESOLVE_FILE_REVEAL | typeof WORKSPACE_LIST_ROOTS | typeof WORKSPACE_LIST_DIRECTORY | typeof TASK_CREATE | typeof TASK_ADOPT_NATIVE_SESSION | typeof TASK_SEND | typeof TASK_SET_CONFIG_OPTION | typeof TASK_CANCEL | typeof TASK_OPEN | typeof TASK_MARK_READ | typeof TASK_CHAT_PAGE | typeof TASK_LIST | typeof TASK_DISCARD | typeof TASK_SET_ARCHIVED;
+export type ProtocolMethod = typeof CLIENT_PROBE | typeof CLIENT_INITIALIZE | typeof CLIENT_CAPABILITIES_CHANGED | typeof CLIENT_HEARTBEAT | typeof PENDING_REQUEST_RESOLVE | typeof STATE_SUBSCRIBE | typeof STATE_UNSUBSCRIBE | typeof DIAGNOSTICS_GET_RUNTIME | typeof SUPPORT_RECOVER_STUCK_SESSIONS | typeof AGENT_PROBE | typeof AGENT_AUTHENTICATE | typeof AGENT_LIST_SESSIONS | typeof AGENT_CREATE_CUSTOM | typeof AGENT_UPDATE_CUSTOM_METADATA | typeof AGENT_REPLACE_CUSTOM | typeof AGENT_DELETE_CUSTOM | typeof AGENT_SET_ENABLED | typeof SETTINGS_GET_AGENT_DETAILS | typeof SETTINGS_GET_MCP_SERVERS | typeof SETTINGS_GET_SKILLS | typeof SETTINGS_GET_PREFERENCES | typeof SETTINGS_UPDATE_PREFERENCES | typeof SETTINGS_GET_RUNTIME | typeof SETTINGS_UPDATE_RUNTIME | typeof ATTACHMENT_LIST_ROOTS | typeof ATTACHMENT_LIST_DIRECTORY | typeof ATTACHMENT_CREATE_FILE_REFERENCE | typeof ATTACHMENT_CREATE_PASTED_IMAGE | typeof ATTACHMENT_CREATE_EMBEDDED_CANDIDATE | typeof ATTACHMENT_CONFIRM_EMBEDDED | typeof ATTACHMENT_REFRESH_HANDLES | typeof ATTACHMENT_RELEASE | typeof ATTACHMENT_REVEAL | typeof SHELL_RESOLVE_FILE_REVEAL | typeof WORKSPACE_LIST_ROOTS | typeof WORKSPACE_LIST_DIRECTORY | typeof TASK_CREATE | typeof TASK_SEARCH_FILES | typeof TASK_ADOPT_NATIVE_SESSION | typeof TASK_SEND | typeof TASK_SET_CONFIG_OPTION | typeof TASK_CANCEL | typeof TASK_OPEN | typeof TASK_MARK_READ | typeof TASK_CHAT_PAGE | typeof TASK_LIST | typeof TASK_DISCARD | typeof TASK_SET_ARCHIVED;
 export type RequestParamsByMethod = {
   [CLIENT_PROBE]: ClientProbeParams;
   [CLIENT_INITIALIZE]: InitializeParams;
@@ -683,6 +690,7 @@ export type RequestParamsByMethod = {
   [WORKSPACE_LIST_ROOTS]: WorkspaceListRootsParams;
   [WORKSPACE_LIST_DIRECTORY]: WorkspaceListDirectoryParams;
   [TASK_CREATE]: TaskCreateParams;
+  [TASK_SEARCH_FILES]: TaskSearchFilesParams;
   [TASK_ADOPT_NATIVE_SESSION]: TaskAdoptNativeSessionParams;
   [TASK_SEND]: TaskSendParams;
   [TASK_SET_CONFIG_OPTION]: TaskSetConfigOptionParams;
@@ -733,6 +741,7 @@ export type ResponseResultByMethod = {
   [WORKSPACE_LIST_ROOTS]: WorkspaceListRootsResult;
   [WORKSPACE_LIST_DIRECTORY]: WorkspaceListDirectoryResult;
   [TASK_CREATE]: TaskCreateResult;
+  [TASK_SEARCH_FILES]: TaskSearchFilesResult;
   [TASK_ADOPT_NATIVE_SESSION]: TaskAdoptNativeSessionResult;
   [TASK_SEND]: TaskSendResult;
   [TASK_SET_CONFIG_OPTION]: TaskSetConfigOptionResult;
@@ -790,6 +799,7 @@ export type AttachmentRevealResponse = ResponseEnvelope<AttachmentRevealResult>;
 export type WorkspaceListRootsResponse = ResponseEnvelope<WorkspaceListRootsResult>;
 export type WorkspaceListDirectoryResponse = ResponseEnvelope<WorkspaceListDirectoryResult>;
 export type TaskCreateResponse = ResponseEnvelope<TaskCreateResult>;
+export type TaskSearchFilesResponse = ResponseEnvelope<TaskSearchFilesResult>;
 export type TaskAdoptNativeSessionResponse = ResponseEnvelope<TaskAdoptNativeSessionResult>;
 export type TaskSendResponse = ResponseEnvelope<TaskSendResult>;
 export type TaskSetConfigOptionResponse = ResponseEnvelope<TaskSetConfigOptionResult>;

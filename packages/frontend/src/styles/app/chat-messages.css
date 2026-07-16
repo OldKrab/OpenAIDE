@@ -294,15 +294,15 @@
   padding: 0;
 }
 
-.slash-command-token {
-  border: 1px solid color-mix(in oklch, var(--oa-focus) 24%, var(--oa-border));
-  border-radius: var(--oa-radius-sm);
-  background: color-mix(in oklch, var(--oa-focus) 10%, transparent);
-  color: var(--oa-text);
-  font-family: var(--vscode-editor-font-family, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
-  font-size: 0.94em;
-  padding: 0 3px;
+.reference-token {
+  color: var(--oa-reference-file);
+  font: inherit;
+  font-weight: 520;
   white-space: nowrap;
+}
+
+.slash-command-token {
+  color: var(--oa-reference-command);
 }
 
 .chat-user-image-link {

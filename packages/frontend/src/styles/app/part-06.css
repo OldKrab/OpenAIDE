@@ -62,14 +62,163 @@
   pointer-events: none;
 }
 
+.composer-reference-token {
+  color: var(--oa-reference-file);
+  cursor: text;
+  font: inherit;
+  font-weight: 520;
+  white-space: nowrap;
+}
+
 .composer-command-token {
-  border-radius: var(--oa-radius-xs);
-  background: color-mix(in oklch, var(--oa-focus) 12%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--oa-focus) 24%, transparent);
+  color: var(--oa-reference-command);
+}
+
+.composer-reference-hover {
+  box-sizing: border-box;
+  width: min(370px, calc(100vw - 24px));
+  border: 1px solid var(--oa-border);
+  border-radius: var(--oa-radius-md);
+  background: color-mix(in oklch, var(--oa-panel) 94%, var(--oa-bg));
+  box-shadow: 0 10px 26px color-mix(in oklch, var(--oa-bg) 70%, transparent);
   color: var(--oa-text);
-  cursor: help;
+  display: flex;
+  gap: 9px;
+  padding: 9px 10px;
+  pointer-events: none;
+  position: fixed;
+  z-index: 100;
+}
+
+.composer-reference-hover-icon {
+  color: var(--oa-reference-file);
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.composer-reference-hover[data-reference-kind="command"] .composer-reference-hover-icon {
+  color: var(--oa-reference-command);
+}
+
+.composer-reference-hover-content {
+  min-width: 0;
+}
+
+.composer-reference-hover-heading {
+  align-items: baseline;
+  display: flex;
+  gap: 7px;
+  min-width: 0;
+}
+
+.composer-reference-hover-heading strong {
+  font-size: 13px;
+  font-weight: 620;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-reference-hover-heading span {
+  color: var(--oa-muted);
+  flex: 0 0 auto;
+  font-size: 10px;
+  letter-spacing: 0.02em;
+}
+
+.composer-reference-hover p {
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  color: var(--oa-muted);
+  display: -webkit-box;
+  font-size: 11px;
+  line-height: 1.4;
+  margin: 2px 0 0;
+  overflow: hidden;
+}
+
+.composer-file-popover {
+  width: min(520px, calc(100vw - 32px));
+  max-height: 240px;
+  border: 1px solid var(--oa-border);
+  border-radius: var(--oa-radius-md);
+  background: var(--oa-panel);
+  box-shadow: 0 8px 24px color-mix(in oklch, var(--oa-bg) 72%, transparent);
+  display: grid;
+  gap: 1px;
+  padding: 4px;
+  position: absolute;
+  left: 9px;
+  bottom: calc(100% + 6px);
+  z-index: 11;
+  overflow: auto;
+}
+
+.composer-file-option {
+  min-width: 0;
+  min-height: 30px;
+  border: 0;
+  border-radius: var(--oa-radius-sm);
+  background: transparent;
+  color: var(--oa-text);
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  padding: 4px 7px;
+  text-align: left;
+}
+
+.composer-file-option:hover,
+.composer-file-option[aria-selected="true"] {
+  background: var(--oa-raised);
+}
+
+.composer-file-option span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-family: var(--vscode-editor-font-family, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
-  padding: 0 2px;
+  font-size: 12px;
+}
+
+.composer-file-option .composer-file-kind-icon {
+  width: 16px;
+  flex: 0 0 16px;
+  color: var(--oa-muted);
+  display: inline-grid;
+  place-items: center;
+}
+
+.composer-file-kind-icon[data-file-kind="typescript"] { color: oklch(58% 0.14 246); }
+.composer-file-kind-icon[data-file-kind="javascript"] { color: oklch(72% 0.14 90); }
+.composer-file-kind-icon[data-file-kind="rust"] { color: oklch(64% 0.14 45); }
+.composer-file-kind-icon[data-file-kind="python"] { color: oklch(62% 0.12 245); }
+.composer-file-kind-icon[data-file-kind="web"] { color: oklch(62% 0.16 40); }
+.composer-file-kind-icon[data-file-kind="json"] { color: oklch(70% 0.12 100); }
+.composer-file-kind-icon[data-file-kind="markdown"] { color: oklch(65% 0.11 235); }
+.composer-file-kind-icon[data-file-kind="image"] { color: oklch(66% 0.13 305); }
+.composer-file-kind-icon[data-file-kind="archive"] { color: oklch(68% 0.12 70); }
+.composer-file-kind-icon[data-file-kind="database"] { color: oklch(65% 0.1 195); }
+.composer-file-kind-icon[data-file-kind="config"] { color: oklch(64% 0.04 240); }
+
+.composer-file-status {
+  color: var(--oa-muted);
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  min-height: 30px;
+  padding: 4px 7px;
+  font-size: 12px;
+}
+
+.composer-file-status svg {
+  animation: composer-config-spin 900ms linear infinite;
+}
+
+.composer-file-error {
+  color: var(--oa-danger);
 }
 
 .composer-slash-popover {
@@ -171,6 +320,11 @@
   }
 
   .new-task-surface .composer-slash-popover {
+    bottom: auto;
+    top: calc(100% + 6px);
+  }
+
+  .new-task-surface .composer-file-popover {
     bottom: auto;
     top: calc(100% + 6px);
   }

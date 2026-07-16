@@ -98,8 +98,9 @@ use crate::task::{
     TaskAdoptNativeSessionResult, TaskCancelParams, TaskCancelResult, TaskChatPageParams,
     TaskChatPageResult, TaskCreateParams, TaskCreateResult, TaskDiscardParams, TaskDiscardResult,
     TaskListParams, TaskListResult, TaskMarkReadParams, TaskMarkReadResult, TaskOpenParams,
-    TaskOpenResult, TaskSendParams, TaskSendResult, TaskSetArchivedParams, TaskSetArchivedResult,
-    TaskSetConfigOptionParams, TaskSetConfigOptionResult, ToolDetailSnapshot,
+    TaskOpenResult, TaskSearchFilesParams, TaskSearchFilesResult, TaskSendParams, TaskSendResult,
+    TaskSetArchivedParams, TaskSetArchivedResult, TaskSetConfigOptionParams,
+    TaskSetConfigOptionResult, ToolDetailSnapshot, WorkspaceFileSearchState,
 };
 use crate::workspace::{
     WorkspaceBrowserDirectory, WorkspaceBrowserEntry, WorkspaceBrowserRoot,
@@ -291,6 +292,9 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
 
     push_decl::<TaskCreateParams>(output, config);
     push_decl::<TaskCreateResult>(output, config);
+    push_decl::<TaskSearchFilesParams>(output, config);
+    push_decl::<TaskSearchFilesResult>(output, config);
+    push_decl::<WorkspaceFileSearchState>(output, config);
     push_decl::<TaskAdoptNativeSessionParams>(output, config);
     push_decl::<TaskAdoptNativeSessionResult>(output, config);
     push_decl::<TaskSendParams>(output, config);

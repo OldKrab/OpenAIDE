@@ -1,4 +1,4 @@
-import { Brain, ChevronLeft, Code2, Cpu, Image, Paperclip, Plus, Shield, SlidersHorizontal } from "lucide-react";
+import { Brain, ChevronLeft, Code2, Cpu, Image, Plus, Shield, SlidersHorizontal } from "lucide-react";
 import type { ConfigOption, ConfigOptionsCatalog, IsolationKind } from "@openaide/app-shell-contracts";
 import { useRef, type Dispatch, type SetStateAction } from "react";
 import {
@@ -8,12 +8,11 @@ import {
   type ComposerSelection,
 } from "../state/composerOptions";
 import { AgentIcon } from "./AgentIcon";
-import { ComposerFileBrowser } from "./ComposerFileBrowser";
 import { IconButton, MenuButton, Popover, PopoverBackButton, Selector } from "./ComposerPrimitives";
 import type { TaskFileBrowserCallbacks } from "./appControllerCallbackTypes";
 import { attachEveryImage } from "./imageAttachmentBatch";
 
-export type ComposerMenu = "add" | "files" | "agent" | "options" | "isolation" | `config:${string}`;
+export type ComposerMenu = "add" | "agent" | "options" | "isolation" | `config:${string}`;
 
 type ComposerControlsProps = {
   agentLocked: boolean;
@@ -89,15 +88,6 @@ export function ComposerControls({
         {openMenu === "add" ? (
           <Popover label="Add context">
             <MenuButton
-              description="Browse files and images in this workspace."
-              disabled={disabled || !fileBrowser}
-              icon={<Paperclip size={13} />}
-              label="Workspace files"
-              onClick={() => {
-                if (fileBrowser) setOpenMenu("files");
-              }}
-            />
-            <MenuButton
               description="Choose images from this device."
               disabled={disabled || !fileBrowser}
               icon={<Image size={13} />}
@@ -112,15 +102,6 @@ export function ComposerControls({
               ref={imageUploadRef}
               style={{ display: "none" }}
               type="file"
-            />
-          </Popover>
-        ) : null}
-        {openMenu === "files" && fileBrowser ? (
-          <Popover className="composer-file-browser-popover" label="Workspace files">
-            <ComposerFileBrowser
-              browser={fileBrowser}
-              key={fileBrowser.ownerKey}
-              onAttached={() => setOpenMenu(undefined)}
             />
           </Popover>
         ) : null}

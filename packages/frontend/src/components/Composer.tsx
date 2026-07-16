@@ -24,6 +24,13 @@ import {
 import { attachEveryImage } from "./imageAttachmentBatch";
 import { useComposerAutoFocus } from "./useComposerAutoFocus";
 import { useComposerKeyboardFocus } from "./useComposerKeyboardFocus";
+import {
+  FileMentionPicker,
+  fileMentionTokenAtCursor,
+  replaceFileMention,
+  useFileMentionPicker,
+  type FileMentionToken,
+} from "./ComposerFileMentions";
 
 export { shouldInsertComposerNewline, shouldSubmitComposerKey } from "./composerKeymap";
 
@@ -87,6 +94,7 @@ export function Composer({
   const disabled = !availability.canEdit;
   const [openMenu, setOpenMenu] = useState<ComposerMenu | undefined>();
   const [slashPicker, setSlashPicker] = useState<SlashPickerState | undefined>();
+  const [fileMentionToken, setFileMentionToken] = useState<FileMentionToken | undefined>();
   const [editorText, setEditorText] = useState(prompt);
   const [editorRenderRevision, setEditorRenderRevision] = useState(0);
   const { keyboardFocus, onKeyboardNavigation, onPointerInteraction } = useComposerKeyboardFocus();
@@ -98,6 +106,7 @@ export function Composer({
   const commandCatalogRevision = commandCatalogKey(commandCatalog);
   const configMutationId = configOptions?.pending_change?.mutation_id;
   const [showSlowConfigUpdate, setShowSlowConfigUpdate] = useState(false);
+  const [filePicker, setFilePicker] = useFileMentionPicker(fileBrowser, fileMentionToken);
   const lastCommandCatalogKey = useRef(commandCatalogRevision);
   const lastSubmissionSettlementKey = useRef(submissionSettlementKey);
   const hasDraftContent = hasComposerContent(editorText, attachments.length);
@@ -145,6 +154,7 @@ export function Composer({
     // command flow that could otherwise complete after the request begins.
     setOpenMenu(undefined);
     setSlashPicker(undefined);
+    setFileMentionToken(undefined);
   }, [disabled]);
 
   useEffect(() => {
@@ -207,6 +217,16 @@ export function Composer({
     if (picker) setOpenMenu(undefined);
   };
 
+  const updateCompletionPickers = (value: string, cursor: number) => {
+    updateSlashPicker(value, cursor);
+    const token = fileMentionTokenAtCursor(value, cursor);
+    setFileMentionToken(token);
+    if (token) {
+      setSlashPicker(undefined);
+      setOpenMenu(undefined);
+    }
+  };
+
   const showStopAction = Boolean(onCancel && (!hasDraftContent || !canSubmit));
   const showSendAction = !onCancel || (hasDraftContent && canSubmit);
 
@@ -224,6 +244,15 @@ export function Composer({
     syncDraft(next.text, { renderEditor: true });
     onChange(next.text);
     setSlashPicker(undefined);
+    queueEditorSelection(next.cursor);
+  };
+
+  const selectFileMention = (path: string) => {
+    if (!filePicker) return;
+    const next = replaceFileMention(draftRef.current, filePicker.token, path);
+    syncDraft(next.text, { renderEditor: true });
+    onChange(next.text);
+    setFileMentionToken(undefined);
     queueEditorSelection(next.cursor);
   };
 
@@ -263,6 +292,8 @@ export function Composer({
       onKeyDown={(event) => {
         if (event.key === "Escape") {
           setOpenMenu(undefined);
+          setSlashPicker(undefined);
+          setFileMentionToken(undefined);
         }
       }}
     >
@@ -279,11 +310,12 @@ export function Composer({
         onInputText={(value, cursor) => {
           syncDraft(value);
           onChange(value);
-          updateSlashPicker(value, cursor);
+          updateCompletionPickers(value, cursor);
         }}
         onPointerDown={() => {
           setOpenMenu(undefined);
           setSlashPicker(undefined);
+          setFileMentionToken(undefined);
         }}
         onPaste={(event) => {
           if (disabled) return;
@@ -306,6 +338,33 @@ export function Composer({
           insertEditorText(text);
         }}
         onKeyDown={(event) => {
+          if (filePicker) {
+            if (event.key === "ArrowDown" && filePicker.paths.length > 0) {
+              event.preventDefault();
+              setFilePicker((current) => current ? {
+                ...current,
+                activeIndex: (current.activeIndex + 1) % current.paths.length,
+              } : current);
+              return;
+            }
+            if (event.key === "ArrowUp" && filePicker.paths.length > 0) {
+              event.preventDefault();
+              setFilePicker((current) => current ? {
+                ...current,
+                activeIndex: (current.activeIndex - 1 + current.paths.length) % current.paths.length,
+              } : current);
+              return;
+            }
+            if ((event.key === "Tab" || event.key === "Enter") && filePicker.paths.length > 0) {
+              event.preventDefault();
+              selectFileMention(filePicker.paths[filePicker.activeIndex]);
+              return;
+            }
+            if (event.key === "Escape") {
+              setFileMentionToken(undefined);
+              return;
+            }
+          }
           if (slashPicker) {
             if (event.key === "ArrowDown") {
               event.preventDefault();
@@ -360,6 +419,7 @@ export function Composer({
           onSelect={selectSlashCommand}
         />
       ) : null}
+      {filePicker ? <FileMentionPicker onSelect={selectFileMention} state={filePicker} /> : null}
       {error ? <p className="inline-error">{error}</p> : null}
       {showSlowConfigUpdate && configMutationId ? (
         <p aria-live="polite" className="inline-status composer-config-update-status">
