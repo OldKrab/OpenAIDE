@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   fileMentionRanges,
+  fileMentionPath,
   fileMentionTokenAtCursor,
   fileIconKind,
+  fileReferenceDetails,
   replaceFileMention,
 } from "./ComposerFileMentions";
 
@@ -42,5 +44,24 @@ describe("workspace file mentions", () => {
     expect(fileIconKind("archive.tar.gz")).toBe("archive");
     expect(fileIconKind("LICENSE")).toBe("text");
     expect(fileIconKind("unknown.data")).toBe("file");
+  });
+
+  it("derives hover metadata only from the selected relative path", () => {
+    expect(fileMentionPath("@AGENTS.md")).toBe("AGENTS.md");
+    expect(fileMentionPath('@"docs/team deck.pptx"')).toBe("docs/team deck.pptx");
+    expect(fileReferenceDetails("AGENTS.md")).toEqual({
+      kind: "markdown",
+      location: "Workspace root",
+      name: "AGENTS.md",
+      path: "AGENTS.md",
+      type: "Markdown",
+    });
+    expect(fileReferenceDetails("src/App.tsx")).toEqual({
+      kind: "typescript",
+      location: "src",
+      name: "App.tsx",
+      path: "src/App.tsx",
+      type: "TypeScript React",
+    });
   });
 });

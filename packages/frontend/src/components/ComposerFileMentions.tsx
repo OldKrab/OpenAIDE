@@ -57,6 +57,11 @@ export function fileMentionRanges(text: string): Array<{ start: number; end: num
   return ranges;
 }
 
+export function fileMentionPath(mention: string) {
+  if (mention.startsWith('@"') && mention.endsWith('"')) return mention.slice(2, -1);
+  return mention.startsWith("@") ? mention.slice(1) : mention;
+}
+
 export function replaceFileMention(text: string, token: FileMentionToken, path: string) {
   const mention = /\s/.test(path) ? `@"${path}"` : `@${path}`;
   const tail = text.slice(token.end);
@@ -85,6 +90,50 @@ export function fileIconKind(path: string): FileIconKind {
   if (["toml", "yaml", "yml", "ini", "env", "conf", "config", "xml"].includes(extension)) return "config";
   if (["txt", "log", "csv"].includes(extension)) return "text";
   return "file";
+}
+
+export function fileReferenceDetails(path: string) {
+  const segments = path.split("/");
+  const name = segments.at(-1) ?? path;
+  const extension = name.includes(".") ? name.split(".").at(-1)?.toLowerCase() : undefined;
+  const kind = fileIconKind(path);
+  const extensionTypes: Record<string, string> = {
+    css: "CSS",
+    js: "JavaScript",
+    json: "JSON",
+    jsx: "JavaScript React",
+    md: "Markdown",
+    ppt: "PowerPoint",
+    pptx: "PowerPoint",
+    py: "Python",
+    rs: "Rust",
+    ts: "TypeScript",
+    tsx: "TypeScript React",
+    yaml: "YAML",
+    yml: "YAML",
+  };
+  const kindTypes: Record<FileIconKind, string> = {
+    archive: "Archive",
+    config: "Configuration",
+    database: "Database",
+    file: "File",
+    image: "Image",
+    javascript: "JavaScript",
+    json: "JSON",
+    markdown: "Markdown",
+    python: "Python",
+    rust: "Rust",
+    text: "Text",
+    typescript: "TypeScript",
+    web: "Web source",
+  };
+  return {
+    kind,
+    location: segments.length === 1 ? "Workspace root" : segments.slice(0, -1).join("/"),
+    name,
+    path,
+    type: extension ? extensionTypes[extension] ?? kindTypes[kind] : kindTypes[kind],
+  };
 }
 
 export function useFileMentionPicker(

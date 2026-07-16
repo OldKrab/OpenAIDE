@@ -2,7 +2,11 @@ import { forwardRef, memo, useImperativeHandle, useLayoutEffect, useRef } from "
 import type { ClipboardEvent, KeyboardEvent, MutableRefObject } from "react";
 import type { AgentCommandsCatalog } from "@openaide/app-shell-contracts";
 import { exactSlashCommandMatches } from "./commandSearch";
-import { fileMentionRanges } from "./ComposerFileMentions";
+import {
+  fileMentionPath,
+  fileMentionRanges,
+  fileReferenceDetails,
+} from "./ComposerFileMentions";
 import {
   captureFocusedEditorSelection,
   restoreEditorSelection,
@@ -10,6 +14,7 @@ import {
   setSelectionOffsets,
   type EditorSelection,
 } from "./composerEditorSelection";
+import { ComposerReferenceHoverLayer } from "./ComposerReferenceHover";
 
 export { captureFocusedEditorSelection, restoreEditorSelection } from "./composerEditorSelection";
 
@@ -126,28 +131,34 @@ const ComposerEditorSurface = memo(forwardRef<ComposerEditorHandle, ComposerEdit
   });
 
   return (
-    <div
-      aria-disabled={disabled}
-      aria-label={ariaLabel}
-      aria-placeholder={placeholder}
-      className="composer-editor"
-      contentEditable={!disabled}
-      data-empty={valueLength === 0 ? true : undefined}
-      data-placeholder={placeholder}
-      onInput={(event) => {
-        const nextValue = editableText(event.currentTarget);
-        event.currentTarget.toggleAttribute("data-empty", nextValue.length === 0);
-        const cursor = selectionOffsets(event.currentTarget).end;
-        restoreSelectionRef.current = { start: cursor, end: cursor };
-        handlersRef.current.onInputText(nextValue, cursor);
-      }}
-      onKeyDown={(event) => handlersRef.current.onKeyDown(event)}
-      onPaste={(event) => handlersRef.current.onPaste(event)}
-      onPointerDown={() => handlersRef.current.onPointerDown()}
-      ref={editorRef}
-      role="textbox"
-      suppressContentEditableWarning
-    />
+    <>
+      <div
+        aria-disabled={disabled}
+        aria-label={ariaLabel}
+        aria-placeholder={placeholder}
+        className="composer-editor"
+        contentEditable={!disabled}
+        data-empty={valueLength === 0 ? true : undefined}
+        data-placeholder={placeholder}
+        onInput={(event) => {
+          const nextValue = editableText(event.currentTarget);
+          event.currentTarget.toggleAttribute("data-empty", nextValue.length === 0);
+          const cursor = selectionOffsets(event.currentTarget).end;
+          restoreSelectionRef.current = { start: cursor, end: cursor };
+          handlersRef.current.onInputText(nextValue, cursor);
+        }}
+        onKeyDown={(event) => handlersRef.current.onKeyDown(event)}
+        onPaste={(event) => handlersRef.current.onPaste(event)}
+        onPointerDown={() => handlersRef.current.onPointerDown()}
+        ref={editorRef}
+        role="textbox"
+        suppressContentEditableWarning
+      />
+      <ComposerReferenceHoverLayer
+        contentKey={`${renderRevision}:${html}`}
+        editorRef={editorRef}
+      />
+    </>
   );
 }), sameEditorSurfaceProps);
 
@@ -165,14 +176,27 @@ export function renderEditorHtml(text: string, commandCatalog: AgentCommandsCata
     end: match.token.end,
     html: () => {
       const label = text.slice(match.token.start, match.token.end);
-      const hint = match.command.input_hint ? ` Argument: ${match.command.input_hint}.` : "";
-      return renderReferenceToken("command", label, `${label}: ${match.command.description}${hint}`);
+      return renderReferenceToken("command", label, {
+        description: match.command.description,
+        label,
+        type: "Skill",
+      });
     },
     start: match.token.start,
   }));
   const fileMatches = fileMentionRanges(text).map((range) => ({
     ...range,
-    html: () => renderReferenceToken("file", text.slice(range.start, range.end), "Workspace file"),
+    html: () => {
+      const mention = text.slice(range.start, range.end);
+      const file = fileReferenceDetails(fileMentionPath(mention));
+      return renderReferenceToken("file", mention, {
+        description: `${file.type} · ${file.location}`,
+        fileKind: file.kind,
+        label: file.name,
+        path: file.path,
+        type: "Workspace file",
+      });
+    },
   }));
   const matches = [...commandMatches, ...fileMatches].sort((left, right) => left.start - right.start);
   if (!matches.length) return renderPlainTextHtml(text);
@@ -189,8 +213,23 @@ export function renderEditorHtml(text: string, commandCatalog: AgentCommandsCata
   return nodes.join("");
 }
 
-function renderReferenceToken(kind: "command" | "file", value: string, title: string) {
-  return `<span class="composer-reference-token composer-${kind}-token" spellcheck="false" title="${escapeHtml(title)}">${escapeHtml(value)}</span>`;
+function renderReferenceToken(kind: "command" | "file", value: string, metadata: {
+  description: string;
+  fileKind?: string;
+  label: string;
+  path?: string;
+  type: string;
+}) {
+  const attributes = [
+    `data-reference-description="${escapeHtml(metadata.description)}"`,
+    ...(metadata.fileKind ? [`data-reference-file-kind="${escapeHtml(metadata.fileKind)}"`] : []),
+    `data-reference-kind="${kind}"`,
+    `data-reference-label="${escapeHtml(metadata.label)}"`,
+    ...(metadata.path ? [`data-reference-path="${escapeHtml(metadata.path)}"`] : []),
+    `data-reference-type="${escapeHtml(metadata.type)}"`,
+    'spellcheck="false"',
+  ];
+  return `<span class="composer-reference-token composer-${kind}-token" ${attributes.join(" ")}>${escapeHtml(value)}</span>`;
 }
 
 function renderPlainTextHtml(text: string) {

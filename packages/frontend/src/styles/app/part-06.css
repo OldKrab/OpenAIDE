@@ -74,6 +74,70 @@
   color: var(--oa-reference-command);
 }
 
+.composer-reference-hover {
+  box-sizing: border-box;
+  width: min(370px, calc(100vw - 24px));
+  border: 1px solid var(--oa-border);
+  border-radius: var(--oa-radius-md);
+  background: color-mix(in oklch, var(--oa-panel) 94%, var(--oa-bg));
+  box-shadow: 0 10px 26px color-mix(in oklch, var(--oa-bg) 70%, transparent);
+  color: var(--oa-text);
+  display: flex;
+  gap: 9px;
+  padding: 9px 10px;
+  pointer-events: none;
+  position: fixed;
+  z-index: 100;
+}
+
+.composer-reference-hover-icon {
+  color: var(--oa-reference-file);
+  flex: 0 0 auto;
+  margin-top: 1px;
+}
+
+.composer-reference-hover[data-reference-kind="command"] .composer-reference-hover-icon {
+  color: var(--oa-reference-command);
+}
+
+.composer-reference-hover-content {
+  min-width: 0;
+}
+
+.composer-reference-hover-heading {
+  align-items: baseline;
+  display: flex;
+  gap: 7px;
+  min-width: 0;
+}
+
+.composer-reference-hover-heading strong {
+  font-size: 13px;
+  font-weight: 620;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composer-reference-hover-heading span {
+  color: var(--oa-muted);
+  flex: 0 0 auto;
+  font-size: 10px;
+  letter-spacing: 0.02em;
+}
+
+.composer-reference-hover p {
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  color: var(--oa-muted);
+  display: -webkit-box;
+  font-size: 11px;
+  line-height: 1.4;
+  margin: 2px 0 0;
+  overflow: hidden;
+}
+
 .composer-file-popover {
   width: min(520px, calc(100vw - 32px));
   max-height: 240px;
