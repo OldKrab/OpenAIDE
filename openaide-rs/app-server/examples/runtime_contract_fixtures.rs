@@ -96,6 +96,7 @@ fn main() {
 
     let snapshot = TaskSnapshot {
         task: task.clone(),
+        active_turn_started_at: None,
         lifecycle: openaide_app_server::storage::records::TaskLifecycle::Visible,
         chat: chat.clone(),
         settings_summary: SettingsSummary {
@@ -108,6 +109,7 @@ fn main() {
         pending_config_change: None,
         agent_commands_catalog: None,
         preparation: TaskPreparationRecord::Ready,
+        supports_image_input: false,
         revision: 9,
     };
 

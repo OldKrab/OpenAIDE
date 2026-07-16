@@ -20,16 +20,21 @@ pub enum TaskPreparationRecord {
     },
 }
 
-/// Controls whether a Task belongs to normal product history or to one client's New Task surface.
+/// Controls whether a Task belongs to normal product history or the Prepared-Task pool.
 ///
-/// New Tasks already have durable App Server and Native Session identities, but they stay private
-/// until the first user message is accepted. The owner is persistence-only authorization data and
-/// is never exposed in client snapshots.
+/// A New Task is visible only to its optional lessee until the first user message is accepted.
+/// `owner_client_instance_id` is accepted as a migration alias for records written before #17;
+/// process startup clears every persisted lease before serving clients.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum TaskLifecycle {
     New {
-        owner_client_instance_id: ClientInstanceId,
+        #[serde(
+            default,
+            alias = "owner_client_instance_id",
+            skip_serializing_if = "Option::is_none"
+        )]
+        lease: Option<ClientInstanceId>,
     },
     Visible,
 }
@@ -168,6 +173,9 @@ pub struct TaskRecord {
     pub agent_session_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_turn_id: Option<String>,
+    /// Durable wall-clock origin for active-turn elapsed-time presentation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_turn_started_at: Option<String>,
     #[serde(default)]
     pub archived: bool,
     #[serde(default)]
@@ -183,6 +191,9 @@ pub struct TaskRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_commands_catalog: Option<AgentCommandsCatalog>,
     pub model_id: Option<String>,
+    /// Native Session prompt capabilities captured during preparation.
+    #[serde(default)]
+    pub supports_image_input: bool,
     #[serde(default, skip_serializing_if = "is_default_preparation")]
     pub preparation: TaskPreparationRecord,
 }

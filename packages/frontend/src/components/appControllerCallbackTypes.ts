@@ -98,7 +98,7 @@ export type TaskFileBrowserCallbacks = {
   ownerKey: string;
   attachEmbedded: (entryId: FileBrowserEntryId) => Promise<void>;
   attachFileReference: (entryId: FileBrowserEntryId) => Promise<void>;
-  attachPastedImage: (file: File, draft?: NewTaskDraftInput) => Promise<void>;
+  attachImage: (file: File, draft?: NewTaskDraftInput) => Promise<void>;
   listDirectory: (rootId: FileBrowserRootId, directoryId?: FileBrowserEntryId) => Promise<AttachmentListDirectoryResult>;
   listRoots: () => Promise<FileBrowserRoot[]>;
   /** Searches the current Task Workspace and returns protocol-relative paths. */

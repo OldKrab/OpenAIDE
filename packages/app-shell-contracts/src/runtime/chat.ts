@@ -26,7 +26,7 @@ export type NormalizedMessage =
 export type Attachment = {
   /** Stable identity from the App Server projection; labels are not unique. */
   id?: string;
-  kind: "file" | "context" | "text";
+  kind: "file" | "context" | "text" | "image";
   label: string;
   path?: string;
   payload?: unknown;

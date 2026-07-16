@@ -1,7 +1,7 @@
 import { CircleAlert, ChevronRight, FileText } from "lucide-react";
 import { memo, useRef, useState } from "react";
 import type { ActivityToolDetails, AgentCommandsCatalog, AgentMessagePart, Attachment, ChatMessage, ElicitationResponse } from "@openaide/app-shell-contracts";
-import { AgentMarkdown, splitDataImageMarkdown } from "./AgentMarkdown";
+import { AgentMarkdown } from "./AgentMarkdown";
 import { AttachmentImagePreviewLightbox, chatImagePreview, type AttachmentImagePreviewSource } from "./AttachmentImagePreview";
 import { ChatActivityView } from "./ChatActivityView";
 import { MessageCopyAction } from "./chatMessageActions";
@@ -52,7 +52,7 @@ export const ChatRow = memo(function ChatRow({
     return (
       <div className="chat-user-block" ref={referenceRootRef}>
         {body.attachments?.length ? <UserAttachments attachments={body.attachments} onOpenImage={setOpenImage} /> : null}
-        {hasText ? <UserMessageText commandCatalog={commandCatalog} onOpenImage={setOpenImage} text={body.text} /> : null}
+        {hasText ? <UserMessageText commandCatalog={commandCatalog} text={body.text} /> : null}
         {hasText ? <MessageCopyAction align="end" text={body.text} /> : null}
         <ReferenceHoverLayer contentKey={body.text} rootRef={referenceRootRef} />
         {openImage ? <AttachmentImagePreviewLightbox image={openImage} onClose={() => setOpenImage(undefined)} /> : null}
@@ -278,34 +278,10 @@ function agentMessageText(parts: AgentMessagePart[]) {
 
 function UserMessageText({
   commandCatalog,
-  onOpenImage,
   text,
 }: {
   commandCatalog?: AgentCommandsCatalog;
-  onOpenImage: (image: AttachmentImagePreviewSource) => void;
   text: string;
 }) {
-  const parts = splitDataImageMarkdown(text);
-  if (parts.length === 1 && parts[0]?.kind === "markdown") {
-    return <p className="chat-user"><SlashCommandText commands={commandCatalog} text={text} /></p>;
-  }
-  return (
-    <div className="chat-user chat-user-rich-text">
-      {parts.map((part, index) => (
-        part.kind === "image" ? (
-          <button
-            aria-label={`Open ${part.label}`}
-            className="chat-user-image-link"
-            key={index}
-            onClick={() => onOpenImage({ label: part.label, url: part.url })}
-            type="button"
-          >
-            <img alt={part.label} src={part.url} />
-          </button>
-        ) : part.text.trim() ? (
-          <p key={index}><SlashCommandText commands={commandCatalog} text={part.text} /></p>
-        ) : null
-      ))}
-    </div>
-  );
+  return <p className="chat-user"><SlashCommandText commands={commandCatalog} text={text} /></p>;
 }

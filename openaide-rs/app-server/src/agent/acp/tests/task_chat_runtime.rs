@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use openaide_app_server_protocol::ids::{AgentId, TaskId};
 use openaide_app_server_protocol::snapshot::{ChatItem, ChatItemStatus, ChatRole, MessagePart};
 use openaide_app_server_protocol::task::{
-    ComposerMessage, TaskAdoptNativeSessionParams, TaskCreateParams, TaskSendParams,
+    ComposerMessage, TaskAcquireParams, TaskAdoptNativeSessionParams, TaskSendParams,
 };
 
 use crate::agent::acp::{AcpAgentConfig, AcpAgentRuntime};
@@ -26,7 +26,7 @@ fn live_acp_message_ids_create_separate_chat_messages() {
         return;
     };
     let created = api
-        .create_for_test(TaskCreateParams {
+        .create_for_test(TaskAcquireParams {
             project_id: project_id_for_workspace(&workspace_root),
             agent_id: AgentId::from("codex"),
             workspace_root: None,
@@ -123,7 +123,7 @@ fn non_text_acp_output_is_visible_as_typed_chat_parts() {
         return;
     };
     let created = api
-        .create_for_test(TaskCreateParams {
+        .create_for_test(TaskAcquireParams {
             project_id: project_id_for_workspace(&workspace_root),
             agent_id: AgentId::from("codex"),
             workspace_root: None,
@@ -263,7 +263,7 @@ fn send_params(task_id: &TaskId, text: &str) -> TaskSendParams {
         task_id: task_id.clone(),
         message: ComposerMessage {
             text: Some(text.to_string()),
-            attachments: Vec::new(),
+            images: Vec::new(),
         },
     }
 }

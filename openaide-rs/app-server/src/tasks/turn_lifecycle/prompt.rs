@@ -93,6 +93,7 @@ impl TaskTurnLifecycle {
                     let task = ctx.task_mut();
                     task.status = TaskStatus::Active;
                     task.active_turn_id = Some(turn_id.clone());
+                    task.active_turn_started_at = Some(now.clone());
                     task.agent_session_id = Some(session.session_id.clone());
                     task.updated_at = now.clone();
                     task.last_activity = now;

@@ -1,6 +1,6 @@
 import type { AgentIconId, Attachment, ConfigOptionsCatalog, IsolationKind } from "@openaide/app-shell-contracts";
 import { projectIdForWorkspaceRoot } from "@openaide/app-shell-contracts";
-import type { AttachmentHandleId, PreSendAttachment } from "@openaide/app-server-client";
+import type { AttachmentHandleId, ComposerImage, PreSendAttachment } from "@openaide/app-server-client";
 import { agentCatalogEntry, builtInAgents, defaultAgent } from "@openaide/app-shell-contracts";
 
 export type AgentOption = {
@@ -148,6 +148,42 @@ export function protocolAttachments(attachments: ComposerAttachment[]): Attachme
 export function appServerAttachmentHandles(attachments: ComposerAttachment[]): AttachmentHandleId[] | undefined {
   const handles = attachments.map((attachment) => attachment.app_server_handle_id);
   return handles.every((handle): handle is AttachmentHandleId => Boolean(handle)) ? handles : undefined;
+}
+
+type ComposerImagePayload = {
+  data: string;
+  mimeType: string;
+};
+
+/** Creates one client-owned Image; no Task or App Server resource exists before Send. */
+export function localImageAttachment(file: File, data: string): ComposerAttachment {
+  const mimeType = file.type || "image/png";
+  return {
+    kind: "image",
+    label: file.name || "Image",
+    local_id: `image_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    preview_url: `data:${mimeType};base64,${data}`,
+    payload: { data, mimeType } satisfies ComposerImagePayload,
+  };
+}
+
+/** Converts only valid client-owned Images into the inline task/send representation. */
+export function appServerComposerImages(attachments: ComposerAttachment[]): ComposerImage[] | undefined {
+  const images = attachments.map((attachment) => {
+    if (attachment.kind !== "image" || !isComposerImagePayload(attachment.payload)) return undefined;
+    return {
+      label: attachment.label,
+      mimeType: attachment.payload.mimeType,
+      data: attachment.payload.data,
+    } satisfies ComposerImage;
+  });
+  return images.every((image): image is ComposerImage => image !== undefined) ? images : undefined;
+}
+
+function isComposerImagePayload(payload: unknown): payload is ComposerImagePayload {
+  if (!payload || typeof payload !== "object") return false;
+  const candidate = payload as Partial<ComposerImagePayload>;
+  return typeof candidate.data === "string" && typeof candidate.mimeType === "string";
 }
 
 /** Preserves the visible draft while removing resolver ids the App Server no longer recognizes. */

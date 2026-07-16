@@ -15,6 +15,13 @@ impl TaskProductApi {
             if let Err(error) = api.native_sessions.prepare_task(&task) {
                 let _ = api.persist_preparation_failure(&task.task_id, &error);
             }
+            match api.mutations.reconcile_prepared_task_pool(false) {
+                Ok(disposed) => api.close_disposed_prepared_tasks(disposed),
+                Err(error) => crate::logging::error(
+                    "prepared_task_pool_reconcile_failed",
+                    serde_json::json!({ "task_id": task.task_id, "error": error.to_string() }),
+                ),
+            }
         });
     }
 

@@ -43,26 +43,7 @@ export function createNewTaskCallbacks(dependencies: NewTaskDependencies): NewTa
     ...createNewTaskStartCallbacks(dependencies),
     ...createNewTaskBrowserCallbacks(dependencies),
     removeAttachment: (attachmentId) => {
-      const taskId = state.snapshot && !state.snapshot.task.has_messages
-        ? state.snapshot.task.task_id
-        : undefined;
-      if (!taskId) {
-        dispatch({ type: "newTask:attachment:remove", attachmentId });
-        return;
-      }
-      const attachment = state.taskInputs[taskId]?.context.find((item) => item.local_id === attachmentId);
-      dispatch({ type: "taskInput:attachment:remove", taskId, attachmentId });
-      if (attachment?.app_server_handle_id && attachmentResources) {
-        attachmentResources.release({ taskId, handleId: attachment.app_server_handle_id });
-        return;
-      }
-      releaseAttachmentResources(
-        backendConnection,
-        taskId,
-        attachment?.app_server_handle_id
-          ? [attachmentHandleResource(attachment.app_server_handle_id)]
-          : [],
-      );
+      dispatch({ type: "newTask:attachment:remove", attachmentId });
     },
     selectConfigOption: (configId, value) => {
       const operation = asyncOperations.claim("new-task-config", configContext);

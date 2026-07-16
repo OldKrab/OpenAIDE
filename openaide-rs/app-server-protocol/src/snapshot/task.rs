@@ -98,18 +98,29 @@ pub enum TaskLifecycle {
 #[serde(rename_all = "camelCase")]
 pub struct TaskSnapshot {
     pub task: TaskSummary,
+    /// App Server-authored start of the active turn; absent when no turn is running.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub active_turn_started_at: Option<String>,
     pub lifecycle: TaskLifecycle,
     pub revision: u64,
     pub preparation: TaskPreparationSnapshot,
     pub agent_config: TaskAgentConfigSnapshot,
     pub agent_commands: TaskAgentCommandsSnapshot,
     pub send_capability: TaskSendCapabilitySnapshot,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_capabilities: Option<TaskInputCapabilities>,
     pub chat: ChatSnapshot,
     pub history_sync: TaskHistorySyncSnapshot,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending_requests: Vec<PendingRequestSnapshot>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recovery: Option<RecoverySnapshot>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskInputCapabilities {
+    pub image: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]

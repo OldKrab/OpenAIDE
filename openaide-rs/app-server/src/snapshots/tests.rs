@@ -276,6 +276,7 @@ impl TaskSnapshotSource for StaticTaskSnapshots {
                 attention: None,
                 has_messages: false,
             },
+            active_turn_started_at: None,
             lifecycle: openaide_app_server_protocol::snapshot::TaskLifecycle::Visible,
             revision: 7,
             preparation: TaskPreparationSnapshot::Ready,
@@ -294,6 +295,7 @@ impl TaskSnapshotSource for StaticTaskSnapshots {
                 state: TaskSendCapabilityState::Blocked,
                 blockers: Vec::new(),
             },
+            input_capabilities: None,
             chat: ChatSnapshot {
                 items: Vec::new(),
                 has_more_before: false,

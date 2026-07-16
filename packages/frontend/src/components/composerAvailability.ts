@@ -9,6 +9,7 @@ type SendCapability = {
 export type ComposerAvailability = {
   canEdit: boolean;
   submissionAllowed: boolean;
+  submissionBlockedMessage?: string;
   placeholder: string;
   submitting: boolean;
   submitActionLabel: string;
@@ -20,6 +21,7 @@ export function composerAvailability({
   allowEditingWhileSendBlocked,
   archived = false,
   attachmentsReady,
+  attachmentsBlockedMessage,
   blockedPlaceholder,
   connectionStatus,
   contextPlaceholder = "Preparing task.",
@@ -33,6 +35,7 @@ export function composerAvailability({
   allowEditingWhileSendBlocked: boolean;
   archived?: boolean;
   attachmentsReady: boolean;
+  attachmentsBlockedMessage?: string;
   blockedPlaceholder?: string;
   connectionStatus: "connecting" | "ready" | "reconnecting" | "unavailable";
   contextPlaceholder?: string;
@@ -79,6 +82,7 @@ export function composerAvailability({
   return {
     canEdit: true,
     submissionAllowed: attachmentsReady,
+    submissionBlockedMessage: attachmentsReady ? undefined : attachmentsBlockedMessage,
     placeholder: readyPlaceholder,
     submitting: false,
     submitActionLabel,
@@ -89,6 +93,7 @@ export function composerAvailability({
     return {
       canEdit: false,
       submissionAllowed: false,
+      submissionBlockedMessage: placeholder,
       placeholder,
       submitting: false,
       submitActionLabel,

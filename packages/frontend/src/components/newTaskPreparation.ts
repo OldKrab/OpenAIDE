@@ -1,6 +1,6 @@
 import {
-  TASK_CREATE,
-  TASK_DISCARD,
+  TASK_ACQUIRE,
+  TASK_RELEASE,
   TASK_OPEN,
   type BackendConnection,
   type TaskId,
@@ -45,7 +45,7 @@ export async function prepareNewTask(
       return;
     }
     try {
-      await request(TASK_DISCARD, { taskId });
+      await request(TASK_RELEASE, { taskId });
     } catch {
       // The replacement Task must not keep rendering the stale local Draft.
     }
@@ -70,7 +70,7 @@ export async function prepareNewTask(
       await discardPreparedTask(staleOrReusableTaskId);
     }
   }
-  preparedTask ??= (await request(TASK_CREATE, taskCreateParams(state, projectId))).task;
+  preparedTask ??= (await request(TASK_ACQUIRE, taskCreateParams(state, projectId))).task;
   if (!preparedProtocolTaskMatchesSelection(preparedTask, state)) {
     await discardPreparedTask(preparedTask.task.taskId as TaskId);
     throw new Error("Prepared Task does not match the current New Task context.");

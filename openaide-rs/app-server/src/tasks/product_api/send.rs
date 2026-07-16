@@ -4,9 +4,7 @@ use openaide_app_server_protocol::snapshot::NewTaskDefaultsSnapshot;
 use openaide_app_server_protocol::task::TaskSendParams;
 use uuid::Uuid;
 
-use crate::attachment_runtime::{
-    AttachmentOwner, AttachmentSendReservation, ResolvedSendAttachments,
-};
+use crate::attachment_runtime::ResolvedSendAttachments;
 use crate::projects::ProjectIdentity;
 use crate::protocol::model::TaskStatus as LegacyTaskStatus;
 use crate::storage::records::{TaskLifecycle, TaskRecord};
@@ -64,19 +62,20 @@ impl TaskProductApi {
         if existing_task.active_turn_id.is_some() && steering_turn_id.is_none() {
             return Err(conflict_error("Task is not ready to accept steering"));
         }
-        let attachment_owner = AttachmentOwner::new(client_instance_id, &params.task_id);
-        let attachment_reservation = self
-            .attachments
-            .reserve_for_send(&attachment_owner, &params.message.attachments)
+        let attachments = ResolvedSendAttachments::from_inline_images(&params.message.images)
             .map_err(protocol_error_from_attachment_runtime)?;
         let prompt_text = normalized_message_text(&params.message);
-        if prompt_text.is_empty()
-            && attachment_reservation
-                .attachments()
-                .fingerprint_handles()
-                .is_empty()
-        {
+        if prompt_text.is_empty() && params.message.images.is_empty() {
             return Err(validation_error("message.text", "Message text is required"));
+        }
+        if !params.message.images.is_empty() && !existing_task.supports_image_input {
+            return Err(ProtocolError {
+                code:
+                    openaide_app_server_protocol::errors::ProtocolErrorCode::CapabilityUnavailable,
+                message: "The selected Agent does not accept Images".to_string(),
+                recoverable: true,
+                target: None,
+            });
         }
         self.agent_registry
             .require(&existing_task.agent_id)
@@ -90,7 +89,7 @@ impl TaskProductApi {
                 TurnId::from(turn_id),
                 user_message_id,
                 prompt_text,
-                attachment_reservation,
+                attachments,
                 now,
             );
         }
@@ -127,7 +126,7 @@ impl TaskProductApi {
                         &format!("user:{}", user_message_id.as_str()),
                         user_message_id.as_str(),
                         prompt_text.clone(),
-                        attachment_reservation.attachments().chat_attachments(),
+                        attachments.chat_attachments(),
                         &now,
                     )?;
                     self.append_running_turn(&task_id, turn_id.as_str(), &now)?;
@@ -141,6 +140,7 @@ impl TaskProductApi {
                         task.title = prompt_title(&prompt_text);
                     }
                     task.active_turn_id = Some(turn_id.as_str().to_string());
+                    task.active_turn_started_at = Some(now.clone());
                     task.updated_at = now.clone();
                     task.last_activity = now;
                     Ok(TaskMutationResult::Changed)
@@ -178,7 +178,6 @@ impl TaskProductApi {
                 );
             }
         }
-        let attachments = attachment_reservation.commit();
         let committed_send =
             CommittedSend::new(task_id.clone(), turn_id.clone(), user_message_id.clone());
         // Materialize the authoritative acceptance response before ACP work can
@@ -213,7 +212,7 @@ impl TaskProductApi {
         active_turn_id: TurnId,
         user_message_id: MessageId,
         prompt_text: String,
-        attachment_reservation: AttachmentSendReservation,
+        attachments: ResolvedSendAttachments,
         now: String,
     ) -> Result<TaskSendAccepted, ProtocolError> {
         let task_id = existing_task.task_id.clone();
@@ -236,7 +235,7 @@ impl TaskProductApi {
                     &format!("user:{}", user_message_id.as_str()),
                     user_message_id.as_str(),
                     prompt_text.clone(),
-                    attachment_reservation.attachments().chat_attachments(),
+                    attachments.chat_attachments(),
                     &now,
                 )?;
                 let task = ctx.task_mut();
@@ -251,7 +250,6 @@ impl TaskProductApi {
                 return Err(conflict_error("Task is no longer accepting steering"));
             }
         };
-        let attachments = attachment_reservation.commit();
         let snapshot = crate::tasks::snapshot::build_snapshot(&self.store, &task_id, 100)
             .map_err(storage_error)?;
         let accepted = TaskSendAccepted {

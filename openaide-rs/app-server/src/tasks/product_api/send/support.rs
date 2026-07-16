@@ -109,14 +109,18 @@ pub(super) fn protocol_error_from_attachment_runtime(
             "attachments",
             "Duplicate attachment handles are not allowed",
         ),
+        AttachmentRuntimeError::InvalidImage => {
+            validation_error("message.images", "Image data is invalid")
+        }
+        AttachmentRuntimeError::TooLarge => {
+            validation_error("message.images", "Image data is too large")
+        }
         AttachmentRuntimeError::InvalidRoot
         | AttachmentRuntimeError::OutsideAllowedRoot
         | AttachmentRuntimeError::UnknownEntry
         | AttachmentRuntimeError::NotDirectory
         | AttachmentRuntimeError::NotFile
         | AttachmentRuntimeError::NotText
-        | AttachmentRuntimeError::InvalidImage
-        | AttachmentRuntimeError::TooLarge
         | AttachmentRuntimeError::ReadFailed(_) => {
             validation_error("attachments", "Attachment handle is not sendable")
         }

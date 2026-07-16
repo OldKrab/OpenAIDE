@@ -8,9 +8,11 @@ use openaide_app_server_protocol::attachment::{
 use openaide_app_server_protocol::ids::AttachmentHandleId;
 
 use super::{
-    AttachmentOwner, AttachmentRuntime, AttachmentRuntimeError, AttachmentSendReservation,
-    AttachmentTarget, ResolvedRevealAttachment, ResolvedSendAttachments,
+    AttachmentOwner, AttachmentRuntime, AttachmentRuntimeError, AttachmentTarget,
+    ResolvedRevealAttachment,
 };
+#[cfg(test)]
+use super::{AttachmentSendReservation, ResolvedSendAttachments};
 
 impl AttachmentRuntime {
     pub(crate) fn refresh_handles(
@@ -185,6 +187,7 @@ impl AttachmentRuntime {
         })
     }
 
+    #[cfg(test)]
     pub(crate) fn reserve_for_send(
         &self,
         owner: impl Into<AttachmentOwner>,

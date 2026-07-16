@@ -492,7 +492,7 @@ describe("ChatRow", () => {
     expect(html).not.toContain('aria-label="Copy message"');
   });
 
-  it("renders image markdown embedded in user message text as an openable preview without a visible filename", async () => {
+  it("does not keep a second legacy Image renderer inside user message text", async () => {
     const { ChatRow } = await import("./ChatMessageView");
     const payload = "aW1hZ2U=".repeat(600);
     const html = renderToStaticMarkup(
@@ -503,11 +503,10 @@ describe("ChatRow", () => {
       />,
     );
 
-    expect(html).toContain('aria-label="Open @image"');
-    expect(html).toContain('class="chat-user-image-link"');
-    expect(html).toContain(`src="data:image/png;base64,${payload}"`);
-    expect(html).not.toContain("[@image]");
-    expect(html).not.toContain("<span>@image</span>");
+    expect(html).not.toContain('aria-label="Open @image"');
+    expect(html).not.toContain('class="chat-user-image-link"');
+    expect(html).not.toContain(`<img`);
+    expect(html).toContain("@image");
   });
 
   it("derives chat image preview sources from safe attachment payloads", async () => {

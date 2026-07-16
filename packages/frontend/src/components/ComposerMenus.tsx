@@ -21,6 +21,7 @@ type ComposerControlsProps = {
   configOptions?: ConfigOptionsCatalog;
   disabled: boolean;
   fileBrowser?: TaskFileBrowserCallbacks;
+  imageAttachmentsAllowed: boolean;
   onUnsupportedImageAttachment?: (message?: string) => void;
   onSelectAgent?: (agentId: string) => void;
   onSelectConfigOption?: (configId: string, value: string) => void;
@@ -41,6 +42,7 @@ export function ComposerControls({
   configOptions,
   disabled,
   fileBrowser,
+  imageAttachmentsAllowed,
   onUnsupportedImageAttachment,
   onSelectAgent,
   onSelectConfigOption,
@@ -68,8 +70,8 @@ export function ComposerControls({
   const imageUploadRef = useRef<HTMLInputElement | null>(null);
   const uploadImages = (files: File[], input: HTMLInputElement) => {
     input.value = "";
-    if (disabled || files.length === 0 || !fileBrowser?.attachPastedImage) return;
-    void attachEveryImage(files, (file) => fileBrowser.attachPastedImage(file)).then(
+    if (disabled || !imageAttachmentsAllowed || files.length === 0 || !fileBrowser?.attachImage) return;
+    void attachEveryImage(files, (file) => fileBrowser.attachImage(file)).then(
       () => setOpenMenu(undefined),
       (error: unknown) => onUnsupportedImageAttachment?.(errorMessage(error, "Unable to upload image.")),
     );
@@ -80,7 +82,7 @@ export function ComposerControls({
       <div className="composer-menu-anchor">
         <IconButton
           ariaLabel="Add context"
-          disabled={disabled}
+          disabled={disabled || !imageAttachmentsAllowed}
           icon={<Plus size={14} />}
           onClick={() => toggleMenu("add")}
           pressed={openMenu === "add"}
@@ -89,14 +91,14 @@ export function ComposerControls({
           <Popover label="Add context">
             <MenuButton
               description="Choose images from this device."
-              disabled={disabled || !fileBrowser}
+              disabled={disabled || !imageAttachmentsAllowed || !fileBrowser}
               icon={<Image size={13} />}
               label="Upload or photo"
               onClick={() => imageUploadRef.current?.click()}
             />
             <input
               accept="image/*"
-              disabled={disabled || !fileBrowser}
+              disabled={disabled || !imageAttachmentsAllowed || !fileBrowser}
               multiple
               onChange={(event) => uploadImages(Array.from(event.target.files ?? []), event.currentTarget)}
               ref={imageUploadRef}

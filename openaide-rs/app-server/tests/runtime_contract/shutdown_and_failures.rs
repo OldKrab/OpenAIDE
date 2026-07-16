@@ -145,6 +145,7 @@ fn runtime_startup_recovers_stale_active_turn_and_session_binding() {
             lifecycle: openaide_app_server::storage::records::TaskLifecycle::Visible,
             agent_session_id: Some("session_stale_boot".to_string()),
             active_turn_id: Some("turn_stale_boot".to_string()),
+            active_turn_started_at: None,
             archived: false,
             tombstoned: false,
             revision: 1,
@@ -153,6 +154,7 @@ fn runtime_startup_recovers_stale_active_turn_and_session_binding() {
             config_mutation: Default::default(),
             agent_commands_catalog: None,
             model_id: None,
+            supports_image_input: false,
             preparation: TaskPreparationRecord::Ready,
         })
         .unwrap();

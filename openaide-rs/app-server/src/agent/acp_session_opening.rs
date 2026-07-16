@@ -162,7 +162,10 @@ pub(super) async fn open_acp_session<'a>(
 
     let session_id = active_session.session_id().to_string();
     let mut started_session = AgentSession::new(context.request_agent_id, session_id)
-        .with_commands_catalog(replayed_commands);
+        .with_commands_catalog(replayed_commands)
+        .with_prompt_capabilities(crate::agent::AgentPromptCapabilities {
+            image: content_policy.capabilities.image,
+        });
     if let Some(applied_options) = applied_options {
         started_session = started_session.with_config_options(&applied_options);
     }

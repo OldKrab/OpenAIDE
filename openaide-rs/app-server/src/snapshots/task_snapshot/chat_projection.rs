@@ -11,6 +11,8 @@ use openaide_app_server_protocol::task::{
     ActivityToolOutput as ProtocolActivityToolOutput,
     ActivityToolValue as ProtocolActivityToolValue, ToolDetailSnapshot,
 };
+use regex::Regex;
+use std::sync::LazyLock;
 
 use crate::protocol::model::{
     ActivityStatus, ActivityStep, ActivityToolContent, ActivityToolDetails, ActivityToolValue,
@@ -38,13 +40,14 @@ fn project_message(message: &NormalizedMessage) -> (ChatRole, ChatItemStatus, Ve
             let mut parts =
                 Vec::with_capacity(usize::from(!text.trim().is_empty()) + attachments.len());
             if !text.trim().is_empty() {
-                parts.push(MessagePart::Text { text: text.clone() });
+                parts.extend(project_legacy_user_text(text));
             }
-            parts.extend(attachments.iter().enumerate().map(|(index, attachment)| {
-                MessagePart::Attachment {
-                    attachment: attachment_snapshot(index, attachment),
-                }
-            }));
+            parts.extend(
+                attachments
+                    .iter()
+                    .enumerate()
+                    .map(|(index, attachment)| project_user_attachment(index, attachment)),
+            );
             (ChatRole::User, ChatItemStatus::Complete, parts)
         }
         NormalizedMessage::AgentMessage { role, parts, .. } => (
@@ -108,6 +111,80 @@ fn project_message(message: &NormalizedMessage) -> (ChatRole, ChatItemStatus, Ve
                 text: message.clone(),
             }],
         ),
+    }
+}
+
+/// Converts the retired inline data-Image syntax at the App Server boundary so
+/// every frontend receives the same typed Image representation.
+fn project_legacy_user_text(text: &str) -> Vec<MessagePart> {
+    static DATA_IMAGE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r"(?i)\[@image\]\((data:(image/[a-z0-9.+-]+);base64,[a-z0-9+/=\s]+)\)")
+            .expect("legacy data Image regex must compile")
+    });
+
+    let mut parts = Vec::new();
+    let mut end = 0;
+    for captures in DATA_IMAGE.captures_iter(text) {
+        let Some(matched) = captures.get(0) else {
+            continue;
+        };
+        if matched.start() > end {
+            parts.push(MessagePart::Text {
+                text: text[end..matched.start()].to_string(),
+            });
+        }
+        let Some(data_url) = captures.get(1) else {
+            continue;
+        };
+        let Some(media_type) = captures.get(2) else {
+            continue;
+        };
+        parts.push(MessagePart::Image {
+            media_type: media_type.as_str().to_ascii_lowercase(),
+            data_url: data_url
+                .as_str()
+                .chars()
+                .filter(|character| !character.is_whitespace())
+                .collect(),
+            uri: None,
+        });
+        end = matched.end();
+    }
+    if end < text.len() {
+        parts.push(MessagePart::Text {
+            text: text[end..].to_string(),
+        });
+    }
+    if parts.is_empty() {
+        parts.push(MessagePart::Text {
+            text: text.to_string(),
+        });
+    }
+    parts
+}
+
+fn project_user_attachment(index: usize, attachment: &Attachment) -> MessagePart {
+    if attachment.kind == "image" {
+        let media_type = attachment
+            .payload
+            .as_ref()
+            .and_then(|payload| payload.get("mimeType"))
+            .and_then(serde_json::Value::as_str);
+        let data = attachment
+            .payload
+            .as_ref()
+            .and_then(|payload| payload.get("data"))
+            .and_then(serde_json::Value::as_str);
+        if let (Some(media_type), Some(data)) = (media_type, data) {
+            return MessagePart::Image {
+                media_type: media_type.to_string(),
+                data_url: format!("data:{media_type};base64,{data}"),
+                uri: None,
+            };
+        }
+    }
+    MessagePart::Attachment {
+        attachment: attachment_snapshot(index, attachment),
     }
 }
 

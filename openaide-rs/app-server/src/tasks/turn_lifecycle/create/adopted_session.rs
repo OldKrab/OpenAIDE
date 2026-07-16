@@ -69,6 +69,7 @@ impl TaskTurnLifecycle {
                 lifecycle: TaskLifecycle::Visible,
                 agent_session_id: Some(session.session_id.clone()),
                 active_turn_id: None,
+                active_turn_started_at: None,
                 archived: false,
                 tombstoned: false,
                 revision: 0,
@@ -77,6 +78,7 @@ impl TaskTurnLifecycle {
                 config_mutation: Default::default(),
                 agent_commands_catalog: session.commands_catalog.clone(),
                 model_id: params.model_id.or(session.model_id.clone()),
+                supports_image_input: session.prompt_capabilities.image,
                 preparation: TaskPreparationRecord::Ready,
             };
 

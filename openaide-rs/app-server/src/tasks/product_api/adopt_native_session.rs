@@ -141,6 +141,7 @@ impl TaskProductApi {
             lifecycle: TaskLifecycle::Visible,
             agent_session_id: Some(session_id.clone()),
             active_turn_id: None,
+            active_turn_started_at: None,
             archived: false,
             tombstoned: false,
             revision: 0,
@@ -149,6 +150,7 @@ impl TaskProductApi {
             config_mutation: Default::default(),
             agent_commands_catalog: loaded.session.commands_catalog.clone(),
             model_id: loaded.session.model_id.clone(),
+            supports_image_input: loaded.session.prompt_capabilities.image,
             preparation: TaskPreparationRecord::Ready,
         };
         let result = self.mutations.create_task_with_validation(

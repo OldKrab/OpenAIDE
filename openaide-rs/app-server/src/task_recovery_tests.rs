@@ -81,12 +81,13 @@ fn task_record() -> TaskRecord {
         isolation: IsolationKind::Local,
         workspace_root: "/workspace".to_string(),
         lifecycle: crate::storage::records::TaskLifecycle::New {
-            owner_client_instance_id: openaide_app_server_protocol::ids::ClientInstanceId::from(
+            lease: Some(openaide_app_server_protocol::ids::ClientInstanceId::from(
                 "test-client",
-            ),
+            )),
         },
         agent_session_id: None,
         active_turn_id: None,
+        active_turn_started_at: None,
         archived: false,
         tombstoned: false,
         revision: 0,
@@ -95,6 +96,7 @@ fn task_record() -> TaskRecord {
         config_mutation: Default::default(),
         agent_commands_catalog: None,
         model_id: None,
+        supports_image_input: false,
         preparation: TaskPreparationRecord::Ready,
     }
 }

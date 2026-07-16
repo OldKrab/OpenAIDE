@@ -356,6 +356,7 @@ fn unavailable_task_snapshot(task_id: TaskId) -> TaskSnapshot {
             attention: None,
             has_messages: false,
         },
+        active_turn_started_at: None,
         lifecycle: TaskLifecycle::Visible,
         revision: 0,
         preparation: TaskPreparationSnapshot::Blocked {
@@ -389,6 +390,7 @@ fn unavailable_task_snapshot(task_id: TaskId) -> TaskSnapshot {
                 message: "Task workflow is not available".to_string(),
             }],
         },
+        input_capabilities: None,
         chat: ChatSnapshot {
             items: Vec::new(),
             has_more_before: false,

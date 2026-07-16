@@ -35,8 +35,12 @@ describe("composer availability", () => {
     expect(composerAvailability({
       ...base,
       attachmentsReady: false,
+      attachmentsBlockedMessage: "This Agent does not accept images.",
       sendCapability: { state: "ready" as const },
-    }).submissionAllowed).toBe(false);
+    })).toMatchObject({
+      submissionAllowed: false,
+      submissionBlockedMessage: "This Agent does not accept images.",
+    });
   });
 
   it("keeps an existing Task draft editable while authoritative sending is blocked", () => {

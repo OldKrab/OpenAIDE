@@ -45,6 +45,7 @@ type ComposerProps = {
   error?: string;
   fileBrowser?: TaskFileBrowserCallbacks;
   focusRequestKey?: number | string;
+  imageAttachmentsAllowed?: boolean;
   agents?: AgentOption[];
   onCancel?: () => void;
   onChange: (prompt: string) => void;
@@ -74,6 +75,7 @@ export function Composer({
   error,
   fileBrowser,
   focusRequestKey,
+  imageAttachmentsAllowed = true,
   agents = agentOptions,
   onCancel,
   onChange,
@@ -322,12 +324,16 @@ export function Composer({
           const images = pastedImageFiles(event.clipboardData);
           if (images.length > 0) {
             event.preventDefault();
-            if (!fileBrowser?.attachPastedImage) {
+            if (!imageAttachmentsAllowed) {
+              onUnsupportedImageAttachment?.("This Agent does not accept images.");
+              return;
+            }
+            if (!fileBrowser?.attachImage) {
               onUnsupportedImageAttachment?.("Images can be attached after the Task is open.");
               return;
             }
             const draft = { prompt: draftRef.current, context: attachments };
-            void attachEveryImage(images, (image) => fileBrowser.attachPastedImage(image, draft)).catch((error: unknown) => {
+            void attachEveryImage(images, (image) => fileBrowser.attachImage(image, draft)).catch((error: unknown) => {
               onUnsupportedImageAttachment?.(composerErrorMessage(error, "Unable to attach image."));
             });
             return;
@@ -421,6 +427,11 @@ export function Composer({
       ) : null}
       {filePicker ? <FileMentionPicker onSelect={selectFileMention} state={filePicker} /> : null}
       {error ? <p className="inline-error">{error}</p> : null}
+      {hasDraftContent && !canSubmit && availability.submissionBlockedMessage ? (
+        <p aria-live="polite" className="inline-status composer-submission-blocker">
+          {availability.submissionBlockedMessage}
+        </p>
+      ) : null}
       {showSlowConfigUpdate && configMutationId ? (
         <p aria-live="polite" className="inline-status composer-config-update-status">
           <LoaderCircle aria-hidden="true" className="composer-config-pending" size={13} />
@@ -435,6 +446,7 @@ export function Composer({
           configOptions={configOptions}
           disabled={disabled}
           fileBrowser={fileBrowser}
+          imageAttachmentsAllowed={imageAttachmentsAllowed}
           onUnsupportedImageAttachment={onUnsupportedImageAttachment}
           onSelectAgent={onSelectAgent}
           onSelectConfigOption={onSelectConfigOption}

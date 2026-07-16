@@ -169,6 +169,7 @@ fn task_record(task_id: &str, workspace_root: &str, updated_at: &str) -> TaskRec
         lifecycle: crate::storage::records::TaskLifecycle::Visible,
         agent_session_id: None,
         active_turn_id: None,
+        active_turn_started_at: None,
         archived: false,
         tombstoned: false,
         revision: 1,
@@ -177,6 +178,7 @@ fn task_record(task_id: &str, workspace_root: &str, updated_at: &str) -> TaskRec
         config_mutation: Default::default(),
         agent_commands_catalog: None,
         model_id: None,
+        supports_image_input: false,
         preparation: TaskPreparationRecord::Ready,
     }
 }

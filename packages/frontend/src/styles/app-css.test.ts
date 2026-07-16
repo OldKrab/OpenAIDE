@@ -520,7 +520,6 @@ describe("task list row styles", () => {
   });
 
   it("shows attachment images at intrinsic size in a dismissible lightbox", () => {
-    expect(appCss).toMatch(/\.chat-user-rich-text:has\(> \.chat-user-image-link:only-child\)\s*{[^}]*border:\s*0;[^}]*background:\s*transparent;[^}]*padding:\s*0;/);
     expect(appCss).toMatch(/\.attachment-preview-backdrop\s*{[^}]*position:\s*fixed;[^}]*inset:\s*0;[^}]*background:/);
     expect(appCss).toMatch(/\.attachment-preview-stage img\s*{[^}]*width:\s*auto;[^}]*height:\s*auto;[^}]*max-width:\s*calc\(100vw - 48px\);[^}]*max-height:\s*calc\(100vh - 48px\);/);
     expect(appCss).toMatch(/\.attachment-preview-close\s*{[^}]*position:\s*fixed;[^}]*width:\s*40px;[^}]*height:\s*40px;/);

@@ -3,6 +3,7 @@ use std::time::Instant;
 
 use openaide_app_server_protocol::ids::FileBrowserRootId;
 
+#[cfg(test)]
 use crate::protocol::model::Attachment;
 
 use super::path_validation::AllowedRoot;
@@ -55,6 +56,7 @@ pub(crate) struct FileBrowserEntryHandle {
 }
 
 impl PreSendAttachmentHandle {
+    #[cfg(test)]
     pub(super) fn chat_attachment(&self) -> Attachment {
         if let AttachmentTarget::PastedImage {
             mime_type,
@@ -82,6 +84,7 @@ impl PreSendAttachmentHandle {
         }
     }
 
+    #[cfg(test)]
     pub(super) fn agent_attachment(&self) -> Result<Attachment, AttachmentRuntimeError> {
         match &self.target {
             AttachmentTarget::FileReference { path, allowed_root } => {
@@ -130,6 +133,7 @@ impl PreSendAttachmentHandle {
         }
     }
 
+    #[cfg(test)]
     fn kind_name(&self) -> &'static str {
         match &self.target {
             AttachmentTarget::FileReference { .. } => "file_reference",

@@ -48,6 +48,8 @@ pub struct TaskSummary {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct TaskSnapshot {
     pub task: TaskSummary,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub active_turn_started_at: Option<String>,
     pub lifecycle: TaskLifecycle,
     pub chat: MessagePage,
     pub settings_summary: SettingsSummary,
@@ -58,6 +60,7 @@ pub struct TaskSnapshot {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_commands_catalog: Option<AgentCommandsCatalog>,
     pub preparation: TaskPreparationRecord,
+    pub supports_image_input: bool,
     pub revision: u64,
 }
 

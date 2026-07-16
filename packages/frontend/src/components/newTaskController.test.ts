@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { TaskSnapshot } from "@openaide/app-shell-contracts";
-import { TASK_DISCARD, type BackendConnection } from "@openaide/app-server-client";
+import { TASK_RELEASE, type BackendConnection } from "@openaide/app-server-client";
 import { createInitialState } from "../state/store";
 import { disposableNewTaskControllerId, NewTaskController } from "./newTaskController";
 
@@ -16,8 +16,8 @@ describe("New Task controller", () => {
     await controller.discard({ dispatch, lease: leaseA, request, taskId: "task_a" as never });
     await controller.discard({ dispatch, lease: leaseB, request, taskId: "task_b" as never });
 
-    expect(request).not.toHaveBeenCalledWith(TASK_DISCARD, { taskId: "task_a" });
-    expect(request).toHaveBeenCalledWith(TASK_DISCARD, { taskId: "task_b" });
+    expect(request).not.toHaveBeenCalledWith(TASK_RELEASE, { taskId: "task_a" });
+    expect(request).toHaveBeenCalledWith(TASK_RELEASE, { taskId: "task_b" });
   });
 
   it("does not let an older rejected send reclaim a newer New Task lease", () => {
@@ -45,7 +45,7 @@ describe("New Task controller", () => {
     expect(controller.isDisposable("task_1")).toBe(true);
     const newLease = controller.claim({ preparationKey: "root-b", taskId: "task_1" as never });
     await controller.discard({ dispatch, lease: newLease, request, taskId: "task_1" as never });
-    expect(request).toHaveBeenCalledWith(TASK_DISCARD, { taskId: "task_1" });
+    expect(request).toHaveBeenCalledWith(TASK_RELEASE, { taskId: "task_1" });
   });
 
   it("publishes cache removal when a state-root replacement clears the New Task", () => {

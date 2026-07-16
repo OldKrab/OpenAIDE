@@ -46,6 +46,15 @@ pub struct AgentSession {
     pub config_catalog: Option<ConfigOptionsCatalog>,
     pub commands_catalog: Option<AgentCommandsCatalog>,
     pub model_id: Option<String>,
+    pub prompt_capabilities: AgentPromptCapabilities,
+    /// False for identity-only handles returned when an ACP session is already active.
+    /// Callers must not replace persisted capability state from such a handle.
+    pub prompt_capabilities_authoritative: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct AgentPromptCapabilities {
+    pub image: bool,
 }
 
 impl AgentSession {
@@ -57,6 +66,8 @@ impl AgentSession {
             config_catalog: None,
             commands_catalog: None,
             model_id: None,
+            prompt_capabilities: AgentPromptCapabilities::default(),
+            prompt_capabilities_authoritative: false,
         }
     }
 
@@ -73,6 +84,12 @@ impl AgentSession {
 
     pub fn with_commands_catalog(mut self, catalog: Option<AgentCommandsCatalog>) -> Self {
         self.commands_catalog = catalog;
+        self
+    }
+
+    pub fn with_prompt_capabilities(mut self, capabilities: AgentPromptCapabilities) -> Self {
+        self.prompt_capabilities = capabilities;
+        self.prompt_capabilities_authoritative = true;
         self
     }
 }

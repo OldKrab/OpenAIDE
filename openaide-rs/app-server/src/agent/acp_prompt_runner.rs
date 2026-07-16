@@ -74,7 +74,15 @@ pub(super) async fn run_prompt(
     let mut cancel_sent = false;
     let result = loop {
         if active_prompt.cancellation().is_cancelled() && !cancel_sent {
-            cancel_active_prompt(active_session, context.trace.as_ref()).await;
+            if let Err(error) = cancel_active_prompt(active_session, context.trace.as_ref()).await {
+                log_cancel_send_failed(
+                    context.agent_id,
+                    active_prompt.task_id(),
+                    active_session_id.as_str(),
+                    &error,
+                );
+                break Err(error);
+            }
             cancel_sent = true;
         }
         tokio::select! {
@@ -87,7 +95,15 @@ pub(super) async fn run_prompt(
                         "active_session_id": active_session_id.as_str(),
                     }),
                 );
-                cancel_active_prompt(active_session, context.trace.as_ref()).await;
+                if let Err(error) = cancel_active_prompt(active_session, context.trace.as_ref()).await {
+                    log_cancel_send_failed(
+                        context.agent_id,
+                        active_prompt.task_id(),
+                        active_session_id.as_str(),
+                        &error,
+                    );
+                    break Err(error);
+                }
                 cancel_sent = true;
             }
             close = close_rx.recv() => {
@@ -95,7 +111,14 @@ pub(super) async fn run_prompt(
                     break Err(RuntimeError::NotReady("ACP close channel stopped".to_string()));
                 };
                 if !context.supports_session_close && !cancel_sent {
-                    cancel_active_prompt(active_session, context.trace.as_ref()).await;
+                    if let Err(error) = cancel_active_prompt(active_session, context.trace.as_ref()).await {
+                        log_cancel_send_failed(
+                            context.agent_id,
+                            active_prompt.task_id(),
+                            active_session_id.as_str(),
+                            &error,
+                        );
+                    }
                 }
                 let connection = active_session.connection();
                 close_active_session(
@@ -239,6 +262,24 @@ pub(super) async fn run_prompt(
         }),
     );
     result
+}
+
+fn log_cancel_send_failed(
+    agent_id: &str,
+    task_id: &str,
+    active_session_id: &str,
+    error: &RuntimeError,
+) {
+    logging::error(
+        "acp_prompt_cancel_send_failed",
+        json!({
+            "agent_id": agent_id,
+            "task_id": task_id,
+            "active_session_id": active_session_id,
+            "error_code": error.code(),
+            "error_kind": error.reason(),
+        }),
+    );
 }
 
 async fn apply_prompt_session_message(

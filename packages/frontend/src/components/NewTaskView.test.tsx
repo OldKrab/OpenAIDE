@@ -31,9 +31,7 @@ function NewTaskView({ dispatch, onRemoveAttachment, state, ...props }: TestNewT
     <ProductionNewTaskView
       {...props}
       intents={{
-        changePrompt: (prompt) => dispatch(preparedTaskId
-          ? { type: "taskInput:prompt", taskId: preparedTaskId, prompt }
-          : { type: "prompt", prompt }),
+        changePrompt: (prompt) => dispatch({ type: "prompt", prompt }),
         reportAttachmentError: (message) => dispatch({
           type: "submit:error",
           message: message ?? "Images can be attached after the Task is open.",
@@ -407,11 +405,8 @@ describe("NewTaskView", () => {
 
     act(() => tree.root.findByType(Composer).props.onChange("Fix the typing lag"));
 
-    expect(dispatch).toHaveBeenCalledWith({
-      type: "taskInput:prompt",
-      taskId: "task_1",
-      prompt: "Fix the typing lag",
-    });
+    expect(dispatch).toHaveBeenCalledWith({ type: "prompt", prompt: "Fix the typing lag" });
+    state.newTask.prompt = "Fix the typing lag";
 
     act(() => tree.update(
       <NewTaskView
@@ -486,16 +481,14 @@ describe("NewTaskView", () => {
     state.newTask.selection = selectionWithProject(state.newTask.selection, project);
     state.newTask.configOptions = { agent_id: "codex", options: [], status: "ready" };
     state.snapshot = taskSnapshot("task_1", false);
-    state.taskInputs.task_1 = {
-      prompt: "Explain this",
-      context: [{
-        kind: "file",
+    state.newTask.prompt = "Explain this";
+    state.newTask.context = [{
+        kind: "image",
         label: "pasted.png",
         local_id: "attachment_1",
-        app_server_handle_id: "attachment-handle-image" as never,
         preview_url: "data:image/png;base64,AQID",
-      }],
-    };
+        payload: { data: "AQID", mimeType: "image/png" },
+      }];
 
     const tree = render(
       <NewTaskView
@@ -513,19 +506,20 @@ describe("NewTaskView", () => {
     expect(editorHtml(tree)).toBe("Explain this");
   });
 
-  it("allows a prepared New Task to send a valid attachment without text", () => {
+  it("allows a prepared New Task to send a valid Image without text", () => {
     const state = createInitialState();
     const project = { projectId: "project_1", label: "OpenAIDE" };
     state.projects = [project];
     state.newTask.selection = selectionWithProject(state.newTask.selection, project);
     state.newTask.configOptions = { agent_id: "codex", options: [], status: "ready" };
     state.newTask.context = [{
-      kind: "file",
-      label: "README.md",
+      kind: "image",
+      label: "pasted.png",
       local_id: "attachment_1",
-      app_server_handle_id: "attachment-handle-readme" as never,
+      preview_url: "data:image/png;base64,AQID",
+      payload: { data: "AQID", mimeType: "image/png" },
     }];
-    state.snapshot = taskSnapshot("task_1", false);
+    state.snapshot = { ...taskSnapshot("task_1", false), input_capabilities: { image: true } };
 
     const tree = render(
       <NewTaskView
@@ -548,16 +542,13 @@ describe("NewTaskView", () => {
     state.projects = [project];
     state.newTask.selection = selectionWithProject(state.newTask.selection, project);
     state.newTask.configOptions = { agent_id: "codex", options: [], status: "ready" };
-    state.taskInputs.task_1 = {
-      context: [{
-        kind: "file",
+    state.newTask.context = [{
+        kind: "image",
         label: "pasted.png",
         local_id: "attachment_1",
-        app_server_handle_id: "attachment-handle-image" as never,
         preview_url: "data:image/png;base64,AQID",
-      }],
-      prompt: "",
-    };
+        payload: { data: "AQID", mimeType: "image/png" },
+      }];
     state.snapshot = {
       ...taskSnapshot("task_1", false),
       send_capability: { state: "loading" },
@@ -585,15 +576,16 @@ describe("NewTaskView", () => {
     state.newTask.selection = selectionWithProject(state.newTask.selection, project);
     state.newTask.configOptions = { agent_id: "codex", options: [], status: "ready" };
     state.newTask.context = [{
-      kind: "file",
+      kind: "image",
       label: "pasted.png",
       local_id: "attachment_1",
-      app_server_handle_id: "attachment-handle-image" as never,
       preview_url: "data:image/png;base64,AQID",
+      payload: { data: "AQID", mimeType: "image/png" },
     }];
     state.snapshot = {
       ...taskSnapshot("task_1", false),
       send_capability: { state: "ready" },
+      input_capabilities: { image: true },
     };
     const onSubmitTask = vi.fn();
 
@@ -1050,7 +1042,7 @@ function fileBrowserCallbacks(): TaskFileBrowserCallbacks {
     ownerKey: "new-task-files:test",
     attachEmbedded: vi.fn(async () => undefined),
     attachFileReference: vi.fn(async () => undefined),
-    attachPastedImage: vi.fn(async () => undefined),
+    attachImage: vi.fn(async () => undefined),
     searchFiles: vi.fn(async () => ({ taskId: "task-1" as never, state: "ready" as const, paths: [] })),
     listDirectory: vi.fn(async () => ({ directory: { label: "Workspace", rootId: "root-1" as never }, entries: [] })),
     listRoots: vi.fn(async () => [{ label: "Workspace", rootId: "root-1" as never }]),

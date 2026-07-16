@@ -9,6 +9,7 @@ use openaide_app_server_protocol::attachment::{
     AttachmentCreatePastedImageResult, PreSendAttachment,
 };
 use openaide_app_server_protocol::ids::{AttachmentHandleId, ClientInstanceId};
+use openaide_app_server_protocol::task::ComposerImage;
 
 use crate::protocol::model::Attachment;
 
@@ -17,10 +18,12 @@ mod file_browser;
 mod handles;
 mod ownership;
 mod path_validation;
+#[cfg(test)]
 mod reservation;
 mod resources;
 
 pub(crate) use ownership::AttachmentOwner;
+#[cfg(test)]
 pub(crate) use reservation::AttachmentSendReservation;
 
 use resources::{
@@ -93,6 +96,7 @@ pub(crate) struct RegisteredAttachmentHandle {
 pub(crate) struct ResolvedSendAttachments {
     chat_attachments: Vec<Attachment>,
     agent_attachments: Vec<Attachment>,
+    #[cfg(test)]
     fingerprint_handles: Vec<String>,
 }
 
@@ -370,6 +374,47 @@ impl Default for AttachmentRuntime {
 }
 
 impl ResolvedSendAttachments {
+    /// Validates and materializes client-owned Images at the Send boundary.
+    pub(crate) fn from_inline_images(
+        images: &[ComposerImage],
+    ) -> Result<Self, AttachmentRuntimeError> {
+        const IMAGE_MAX_BYTES: usize = 5 * 1024 * 1024;
+        const MESSAGE_IMAGE_MAX_BYTES: usize = 8 * 1024 * 1024;
+
+        let mut total = 0usize;
+        let mut attachments = Vec::with_capacity(images.len());
+        for image in images {
+            let size =
+                crate::media::validate_base64_image(&image.mime_type, &image.data, IMAGE_MAX_BYTES)
+                    .map_err(|error| match error {
+                        crate::media::MediaDataError::Invalid => {
+                            AttachmentRuntimeError::InvalidImage
+                        }
+                        crate::media::MediaDataError::TooLarge => AttachmentRuntimeError::TooLarge,
+                    })?;
+            total = total
+                .checked_add(size)
+                .filter(|total| *total <= MESSAGE_IMAGE_MAX_BYTES)
+                .ok_or(AttachmentRuntimeError::TooLarge)?;
+            attachments.push(Attachment {
+                kind: "image".to_string(),
+                label: resources::safe_image_label(image.label.clone()),
+                path: None,
+                payload: Some(serde_json::json!({
+                    "data": image.data,
+                    "mimeType": image.mime_type,
+                    "sizeBytes": size,
+                })),
+            });
+        }
+        Ok(Self {
+            chat_attachments: attachments.clone(),
+            agent_attachments: attachments,
+            #[cfg(test)]
+            fingerprint_handles: Vec::new(),
+        })
+    }
+
     pub(crate) fn chat_attachments(&self) -> Vec<Attachment> {
         self.chat_attachments.clone()
     }
@@ -378,6 +423,7 @@ impl ResolvedSendAttachments {
         self.agent_attachments.clone()
     }
 
+    #[cfg(test)]
     pub(crate) fn fingerprint_handles(&self) -> Vec<String> {
         self.fingerprint_handles.clone()
     }

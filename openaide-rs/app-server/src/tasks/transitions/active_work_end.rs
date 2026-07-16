@@ -71,6 +71,7 @@ pub(super) fn apply_active_work_end(
     let task = ctx.task_mut();
     task.status = TaskStatus::Inactive;
     task.active_turn_id = None;
+    task.active_turn_started_at = None;
     if cause.clears_session() {
         task.agent_session_id = None;
     }

@@ -22,7 +22,7 @@ import {
   questionResponseForMessage,
 } from "./taskChatPresentation";
 import { useTaskChatScroll } from "./useTaskChatScroll";
-import { appServerAttachmentHandles } from "../state/composerOptions";
+import { appServerComposerImages } from "../state/composerOptions";
 import { configOptionsMutable } from "../state/configOptionState";
 import type { BackendConnectionState } from "./appControllerBackendLifecycle";
 
@@ -137,12 +137,17 @@ export function TaskView({
     ...snapshot.active_requests,
   ], [chat.items, snapshot.active_requests]);
   const turnBusy = snapshot.task.status === "active";
+  const imageAttachmentsAllowed = snapshot.input_capabilities?.image === true;
   const attachmentsSendable = taskInput.context.length === 0
-    || appServerAttachmentHandles(taskInput.context) !== undefined;
+    || (appServerComposerImages(taskInput.context) !== undefined
+      && imageAttachmentsAllowed);
   const availability = composerAvailability({
     allowEditingWhileSendBlocked: true,
     archived,
     attachmentsReady: attachmentsSendable,
+    attachmentsBlockedMessage: taskInput.context.length > 0 && !imageAttachmentsAllowed
+      ? "This Agent does not accept images."
+      : "Attached context is not ready to send.",
     blockedPlaceholder: snapshot.task.status === "waiting"
       ? "Draft follow-up while input is pending."
       : snapshot.task.status === "active" ? "Send a follow-up" : undefined,
@@ -279,6 +284,7 @@ export function TaskView({
           commandCatalog={snapshot.agent_commands}
           error={taskInput.error ?? taskInput.configError?.message ?? taskConfigOptions?.error}
           fileBrowser={fileBrowser}
+          imageAttachmentsAllowed={imageAttachmentsAllowed}
           focusRequestKey={snapshot.task.task_id}
           onCancel={
             backendReady && (turnBusy || inputPending)

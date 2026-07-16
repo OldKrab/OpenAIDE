@@ -80,8 +80,8 @@ use crate::snapshot::{
     QuestionMessageAction, QuestionMessageState, RecoveryAction, RecoverySnapshot,
     ServerCapabilities, ServerSnapshot, SettingsSnapshot, StateRootSnapshot,
     TaskAgentCommandsSnapshot, TaskAgentConfigSnapshot, TaskAttentionEvent, TaskAttentionReason,
-    TaskHistorySyncSnapshot, TaskLifecycle, TaskNavigationSnapshot, TaskPreparationAction,
-    TaskPreparationSnapshot, TaskPreparationStep, TaskPreparationStepKind,
+    TaskHistorySyncSnapshot, TaskInputCapabilities, TaskLifecycle, TaskNavigationSnapshot,
+    TaskPreparationAction, TaskPreparationSnapshot, TaskPreparationStep, TaskPreparationStepKind,
     TaskPreparationStepStatus, TaskSendBlocker, TaskSendBlockerKind, TaskSendCapabilitySnapshot,
     TaskSendCapabilityState, TaskSetupBlocker, TaskSetupBlockerKind, TaskSnapshot, TaskStatus,
     TaskSummary, TaskTitle, TaskTitleSource, ToolPermissionDecisionSnapshot,
@@ -94,13 +94,14 @@ use crate::state::{
 use crate::support::{SupportRecoverStuckSessionsParams, SupportRecoverStuckSessionsResult};
 use crate::task::{
     ActivityToolContent, ActivityToolField, ActivityToolInput, ActivityToolLocation,
-    ActivityToolOutput, ActivityToolValue, ComposerMessage, TaskAdoptNativeSessionParams,
-    TaskAdoptNativeSessionResult, TaskCancelParams, TaskCancelResult, TaskChatPageParams,
-    TaskChatPageResult, TaskCreateParams, TaskCreateResult, TaskDiscardParams, TaskDiscardResult,
-    TaskListParams, TaskListResult, TaskMarkReadParams, TaskMarkReadResult, TaskOpenParams,
-    TaskOpenResult, TaskSearchFilesParams, TaskSearchFilesResult, TaskSendParams, TaskSendResult,
-    TaskSetArchivedParams, TaskSetArchivedResult, TaskSetConfigOptionParams,
-    TaskSetConfigOptionResult, ToolDetailSnapshot, WorkspaceFileSearchState,
+    ActivityToolOutput, ActivityToolValue, ComposerImage, ComposerMessage, TaskAcquireParams,
+    TaskAcquireResult, TaskAdoptNativeSessionParams, TaskAdoptNativeSessionResult,
+    TaskCancelParams, TaskCancelResult, TaskChatPageParams, TaskChatPageResult, TaskListParams,
+    TaskListResult, TaskMarkReadParams, TaskMarkReadResult, TaskOpenParams, TaskOpenResult,
+    TaskReleaseParams, TaskReleaseResult, TaskSearchFilesParams, TaskSearchFilesResult,
+    TaskSendParams, TaskSendResult, TaskSetArchivedParams, TaskSetArchivedResult,
+    TaskSetConfigOptionParams, TaskSetConfigOptionResult, ToolDetailSnapshot,
+    WorkspaceFileSearchState,
 };
 use crate::workspace::{
     WorkspaceBrowserDirectory, WorkspaceBrowserEntry, WorkspaceBrowserRoot,
@@ -290,8 +291,8 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<ShellResolveFileRevealParams>(output, config);
     push_decl::<ShellResolveFileRevealResult>(output, config);
 
-    push_decl::<TaskCreateParams>(output, config);
-    push_decl::<TaskCreateResult>(output, config);
+    push_decl::<TaskAcquireParams>(output, config);
+    push_decl::<TaskAcquireResult>(output, config);
     push_decl::<TaskSearchFilesParams>(output, config);
     push_decl::<TaskSearchFilesResult>(output, config);
     push_decl::<WorkspaceFileSearchState>(output, config);
@@ -299,6 +300,7 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<TaskAdoptNativeSessionResult>(output, config);
     push_decl::<TaskSendParams>(output, config);
     push_decl::<ComposerMessage>(output, config);
+    push_decl::<ComposerImage>(output, config);
     push_decl::<TaskSendResult>(output, config);
     push_decl::<TaskSetConfigOptionParams>(output, config);
     push_decl::<TaskSetConfigOptionResult>(output, config);
@@ -319,8 +321,8 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<TaskMarkReadResult>(output, config);
     push_decl::<TaskListParams>(output, config);
     push_decl::<TaskListResult>(output, config);
-    push_decl::<TaskDiscardParams>(output, config);
-    push_decl::<TaskDiscardResult>(output, config);
+    push_decl::<TaskReleaseParams>(output, config);
+    push_decl::<TaskReleaseResult>(output, config);
     push_decl::<TaskSetArchivedParams>(output, config);
     push_decl::<TaskSetArchivedResult>(output, config);
     push_decl::<SupportRecoverStuckSessionsParams>(output, config);
@@ -355,6 +357,7 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<TaskStatus>(output, config);
     push_decl::<TaskLifecycle>(output, config);
     push_decl::<TaskSnapshot>(output, config);
+    push_decl::<TaskInputCapabilities>(output, config);
     push_decl::<TaskHistorySyncSnapshot>(output, config);
     push_decl::<TaskPreparationSnapshot>(output, config);
     push_decl::<TaskPreparationStep>(output, config);

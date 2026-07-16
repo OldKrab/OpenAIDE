@@ -49,11 +49,15 @@ function applyTaskChanges(
     ...snapshot.task,
     revision,
     task: changes.task ?? snapshot.task.task,
+    activeTurnStartedAt: changes.activeTurnStartedAt === undefined
+      ? snapshot.task.activeTurnStartedAt
+      : changes.activeTurnStartedAt,
     lifecycle: changes.lifecycle ?? snapshot.task.lifecycle,
     preparation: changes.preparation ?? snapshot.task.preparation,
     agentConfig: changes.agentConfig ?? snapshot.task.agentConfig,
     agentCommands: changes.agentCommands ?? snapshot.task.agentCommands,
     sendCapability: changes.sendCapability ?? snapshot.task.sendCapability,
+    inputCapabilities: changes.inputCapabilities ?? snapshot.task.inputCapabilities,
   };
 
   for (const chatChange of changes.chat ?? []) {

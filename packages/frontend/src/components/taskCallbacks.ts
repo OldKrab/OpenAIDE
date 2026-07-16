@@ -1,6 +1,5 @@
 import {
   ATTACHMENT_CREATE_FILE_REFERENCE,
-  ATTACHMENT_CREATE_PASTED_IMAGE,
   ATTACHMENT_LIST_DIRECTORY,
   ATTACHMENT_LIST_ROOTS,
   ATTACHMENT_REVEAL,
@@ -26,7 +25,7 @@ import {
 import { createConfirmedEmbeddedAttachment } from "../services/embeddedAttachmentSelection";
 import { cancelTaskIntent, sendTaskPromptIntent } from "../intents/taskMutationIntents";
 import { respondToPermissionIntent, respondToQuestionIntent } from "../intents/taskIntents";
-import { appServerAttachment } from "../state/composerOptions";
+import { appServerAttachment, localImageAttachment } from "../state/composerOptions";
 import { mapProtocolTaskSnapshot } from "../state/appServerProtocolMapping";
 import { configOptionsMutable } from "../state/configOptionState";
 import { mapProtocolChatPage } from "../state/taskReadMapping";
@@ -297,22 +296,12 @@ function createTaskFileBrowserCallbacks(
         attachment: appServerAttachment(result.attachment),
       });
     },
-    attachPastedImage: async (file: File) => {
-      const adoption = attachmentResources?.beginAdoption(taskId);
-      if (attachmentResources && !adoption) return;
+    attachImage: async (file: File) => {
       const data = await fileToBase64(file);
-      const previewUrl = `data:${file.type || "image/png"};base64,${data}`;
-      const result = await request(ATTACHMENT_CREATE_PASTED_IMAGE, {
-        taskId: taskId as TaskId,
-        label: file.name || "Pasted image",
-        mimeType: file.type || "image/png",
-        data,
-      });
-      if (attachmentResources?.adopt({ taskId, handleId: result.attachment.handleId }, adoption) === false) return;
       dispatch({
         type: "taskInput:attachment:addAppServer",
         taskId,
-        attachment: appServerAttachment(result.attachment, { previewUrl }),
+        attachment: localImageAttachment(file, data),
       });
     },
     attachEmbedded: async (entryId: FileBrowserEntryId) => {

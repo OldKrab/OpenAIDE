@@ -1,4 +1,6 @@
 use openaide_app_server_protocol::events::{TaskChanges, TaskChatChange, TaskNavigationChange};
+use openaide_app_server_protocol::ids::ClientInstanceId;
+use std::collections::HashSet;
 
 use crate::chat_history::ChatHistoryPolicy;
 use crate::protocol::errors::RuntimeError;
@@ -124,7 +126,7 @@ pub(super) fn create_task_with_validation_and_writer(
     })
 }
 
-pub(super) fn resolve_or_create_new_task(
+pub(super) fn acquire_prepared_task(
     target: &TaskMutations,
     task: TaskRecord,
     initial_messages: Vec<NormalizedMessage>,
@@ -132,37 +134,28 @@ pub(super) fn resolve_or_create_new_task(
 ) -> Result<TaskCommitResult, RuntimeError> {
     let _guard = target.lock();
     let TaskLifecycle::New {
-        owner_client_instance_id,
+        lease: Some(requesting_client),
     } = &task.lifecycle
     else {
         return Err(RuntimeError::InvalidParams("task.lifecycle".to_string()));
     };
-    let existing = target
-        .store
-        .list_all_task_records_strict()?
-        .into_iter()
-        .find(|candidate| {
-            !candidate.tombstoned
-                && matches!(
-                    &candidate.lifecycle,
-                    TaskLifecycle::New {
-                        owner_client_instance_id: candidate_owner
-                    } if candidate_owner == owner_client_instance_id
-                )
-        });
-    if let Some(existing) = existing {
+    let records = target.store.list_all_task_records_strict()?;
+    if let Some(existing) = records.iter().find(|candidate| {
+        !candidate.tombstoned
+            && matches!(
+                &candidate.lifecycle,
+                TaskLifecycle::New { lease: Some(lessee) } if lessee == requesting_client
+            )
+    }) {
         if existing.archived {
             return Err(RuntimeError::Conflict(
-                "Client-owned New Task is archived, which violates its lifecycle invariant"
+                "Leased Prepared Task is archived, which violates its lifecycle invariant"
                     .to_string(),
             ));
         }
-        if existing.agent_id != task.agent_id
-            || existing.workspace_root != task.workspace_root
-            || existing.isolation != task.isolation
-        {
+        if existing.agent_id != task.agent_id || existing.workspace_root != task.workspace_root {
             return Err(RuntimeError::Conflict(
-                "New Task already exists with different Project Context or Agent".to_string(),
+                "Release the current Prepared Task before acquiring another context".to_string(),
             ));
         }
         let response_snapshot = match options.response_snapshot_tail_limit {
@@ -171,6 +164,35 @@ pub(super) fn resolve_or_create_new_task(
         };
         return Ok(TaskCommitResult {
             outcome: TaskCommitOutcome::Rejected(TaskCommitRejection::NoChange),
+            response_snapshot,
+        });
+    }
+
+    if let Some(existing) = records.into_iter().find(|candidate| {
+        is_reusable_prepared_task(target, candidate)
+            && candidate.agent_id == task.agent_id
+            && candidate.workspace_root == task.workspace_root
+    }) {
+        let original = existing.clone();
+        let mut leased = existing;
+        leased.lifecycle = TaskLifecycle::New {
+            lease: Some(requesting_client.clone()),
+        };
+        let facts = persist_changed_task(
+            target,
+            &original,
+            &mut leased,
+            options,
+            Vec::new(),
+            Vec::new(),
+        )?;
+        notify_task_changed(target, &facts);
+        let response_snapshot = match options.response_snapshot_tail_limit {
+            Some(limit) => Some(build_snapshot(&target.store, &leased.task_id, limit)?),
+            None => None,
+        };
+        return Ok(TaskCommitResult {
+            outcome: TaskCommitOutcome::Committed(facts),
             response_snapshot,
         });
     }
@@ -204,6 +226,270 @@ pub(super) fn resolve_or_create_new_task(
         outcome: TaskCommitOutcome::Committed(facts),
         response_snapshot,
     })
+}
+
+fn is_reusable_prepared_task(target: &TaskMutations, task: &TaskRecord) -> bool {
+    !task.tombstoned
+        && !task.archived
+        && matches!(task.lifecycle, TaskLifecycle::New { lease: None })
+        && matches!(
+            task.preparation,
+            crate::storage::records::TaskPreparationRecord::Ready
+        )
+        && task.status == crate::protocol::model::TaskStatus::Inactive
+        && task.active_turn_id.is_none()
+        && target
+            .store
+            .read_messages(&task.task_id)
+            .is_ok_and(|messages| messages.is_empty())
+}
+
+const FREE_PREPARED_TASK_CAP: usize = 8;
+
+pub(super) fn release_prepared_task(
+    target: &TaskMutations,
+    client_instance_id: &ClientInstanceId,
+    task_id: &str,
+    now: &str,
+) -> Result<Vec<TaskRecord>, RuntimeError> {
+    let _guard = target.lock();
+    let mut task = match target.store.read_task(task_id) {
+        Ok(task) => task,
+        Err(RuntimeError::TaskNotFound(_)) => return Ok(Vec::new()),
+        Err(error) => return Err(error),
+    };
+    let leased_by_client = matches!(
+        &task.lifecycle,
+        TaskLifecycle::New { lease: Some(lessee) } if lessee == client_instance_id
+    );
+    if !leased_by_client {
+        return Ok(Vec::new());
+    }
+    if task.status != crate::protocol::model::TaskStatus::Inactive
+        || task.active_turn_id.is_some()
+        || !target.store.read_messages(task_id)?.is_empty()
+    {
+        return Err(RuntimeError::Conflict(
+            "Only an empty inactive Prepared Task can be released".to_string(),
+        ));
+    }
+
+    let original = task.clone();
+    task.lifecycle = TaskLifecycle::New { lease: None };
+    task.updated_at = now.to_string();
+    task.last_activity = now.to_string();
+    let same_key_already_free =
+        target
+            .store
+            .list_all_task_records_strict()?
+            .iter()
+            .any(|candidate| {
+                candidate.task_id != task.task_id
+                    && candidate.agent_id == task.agent_id
+                    && candidate.workspace_root == task.workspace_root
+                    && is_reusable_prepared_task(target, candidate)
+            });
+    let failed = matches!(
+        task.preparation,
+        crate::storage::records::TaskPreparationRecord::Failed { .. }
+    );
+    if failed || same_key_already_free {
+        task.tombstoned = true;
+    }
+    let facts = persist_changed_task(
+        target,
+        &original,
+        &mut task,
+        TaskCommitOptions::metadata(),
+        Vec::new(),
+        Vec::new(),
+    )?;
+    notify_task_changed(target, &facts);
+    let released_task_id = task.task_id.clone();
+    let release_outcome = if task.tombstoned {
+        "disposed"
+    } else {
+        "retained"
+    };
+    let release_reason = if failed {
+        "preparation_failed"
+    } else if same_key_already_free {
+        "duplicate_pool_key"
+    } else {
+        "free_pool_entry"
+    };
+    let mut disposed = task
+        .tombstoned
+        .then_some(task)
+        .into_iter()
+        .collect::<Vec<_>>();
+
+    let mut free = target
+        .store
+        .list_all_task_records_strict()?
+        .into_iter()
+        .filter(|candidate| is_reusable_prepared_task(target, candidate))
+        .collect::<Vec<_>>();
+    free.sort_by(|left, right| {
+        left.updated_at
+            .cmp(&right.updated_at)
+            .then_with(|| left.task_id.cmp(&right.task_id))
+    });
+    let free_count = free.len();
+    let overflow = free_count.saturating_sub(FREE_PREPARED_TASK_CAP);
+    for mut evicted in free.into_iter().take(overflow) {
+        let original = evicted.clone();
+        evicted.tombstoned = true;
+        let facts = persist_changed_task(
+            target,
+            &original,
+            &mut evicted,
+            TaskCommitOptions::metadata(),
+            Vec::new(),
+            Vec::new(),
+        )?;
+        notify_task_changed(target, &facts);
+        crate::logging::info(
+            "prepared_task_evicted",
+            serde_json::json!({
+                "task_id": evicted.task_id,
+                "reason": "global_free_lru_cap",
+                "free_count_before": free_count,
+            }),
+        );
+        disposed.push(evicted);
+    }
+    crate::logging::info(
+        "prepared_task_released",
+        serde_json::json!({
+            "task_id": released_task_id,
+            "outcome": release_outcome,
+            "reason": release_reason,
+            "free_count_after": free_count - overflow,
+        }),
+    );
+    Ok(disposed)
+}
+
+pub(super) fn reconcile_prepared_task_pool(
+    target: &TaskMutations,
+    clear_leases: bool,
+) -> Result<Vec<TaskRecord>, RuntimeError> {
+    let _guard = target.lock();
+    let mut disposed = Vec::new();
+    for mut task in target.store.list_all_task_records_strict()? {
+        let TaskLifecycle::New { lease } = &task.lifecycle else {
+            continue;
+        };
+        if task.tombstoned {
+            continue;
+        }
+        let original = task.clone();
+        let invalid = task.archived
+            || task.status != crate::protocol::model::TaskStatus::Inactive
+            || task.active_turn_id.is_some()
+            || !target.store.read_messages(&task.task_id)?.is_empty();
+        let failed_and_free = (lease.is_none() || clear_leases)
+            && matches!(
+                task.preparation,
+                crate::storage::records::TaskPreparationRecord::Failed { .. }
+            );
+        if clear_leases {
+            task.lifecycle = TaskLifecycle::New { lease: None };
+        }
+        if invalid || failed_and_free {
+            task.tombstoned = true;
+        }
+        if task.lifecycle == original.lifecycle && task.tombstoned == original.tombstoned {
+            continue;
+        }
+        let facts = persist_changed_task(
+            target,
+            &original,
+            &mut task,
+            TaskCommitOptions::metadata(),
+            Vec::new(),
+            Vec::new(),
+        )?;
+        notify_task_changed(target, &facts);
+        if task.tombstoned {
+            disposed.push(task);
+        }
+    }
+
+    let mut free = target
+        .store
+        .list_all_task_records_strict()?
+        .into_iter()
+        .filter(|candidate| is_reusable_prepared_task(target, candidate))
+        .collect::<Vec<_>>();
+    free.sort_by(|left, right| {
+        right
+            .updated_at
+            .cmp(&left.updated_at)
+            .then_with(|| right.task_id.cmp(&left.task_id))
+    });
+    let mut kept_keys = HashSet::new();
+    let mut kept_count = 0usize;
+    for mut candidate in free {
+        let key = (candidate.agent_id.clone(), candidate.workspace_root.clone());
+        let duplicate_key = kept_keys.contains(&key);
+        if kept_count < FREE_PREPARED_TASK_CAP && !duplicate_key {
+            kept_keys.insert(key);
+            kept_count += 1;
+            continue;
+        }
+        let original = candidate.clone();
+        candidate.tombstoned = true;
+        let facts = persist_changed_task(
+            target,
+            &original,
+            &mut candidate,
+            TaskCommitOptions::metadata(),
+            Vec::new(),
+            Vec::new(),
+        )?;
+        notify_task_changed(target, &facts);
+        crate::logging::info(
+            "prepared_task_evicted",
+            serde_json::json!({
+                "task_id": candidate.task_id,
+                "reason": if duplicate_key { "duplicate_pool_key" } else { "global_free_lru_cap" },
+            }),
+        );
+        disposed.push(candidate);
+    }
+    Ok(disposed)
+}
+
+pub(super) fn dispose_prepared_tasks_for_agent(
+    target: &TaskMutations,
+    agent_id: &str,
+) -> Result<Vec<TaskRecord>, RuntimeError> {
+    let _guard = target.lock();
+    let mut disposed = Vec::new();
+    for mut task in target.store.list_all_task_records_strict()? {
+        if task.tombstoned
+            || task.agent_id != agent_id
+            || !matches!(task.lifecycle, TaskLifecycle::New { .. })
+        {
+            continue;
+        }
+        let original = task.clone();
+        task.lifecycle = TaskLifecycle::New { lease: None };
+        task.tombstoned = true;
+        let facts = persist_changed_task(
+            target,
+            &original,
+            &mut task,
+            TaskCommitOptions::metadata(),
+            Vec::new(),
+            Vec::new(),
+        )?;
+        notify_task_changed(target, &facts);
+        disposed.push(task);
+    }
+    Ok(disposed)
 }
 
 pub(super) fn notify_task_changed(target: &TaskMutations, facts: &TaskCommitFacts) {
@@ -288,6 +574,7 @@ fn persist_new_task(
         agent_config: true,
         agent_commands: true,
         send_capability: true,
+        input_capabilities: true,
         removed: task.tombstoned,
     };
     let changes = project_committed_changes(
@@ -325,6 +612,7 @@ struct ChangedFields {
     agent_config: bool,
     agent_commands: bool,
     send_capability: bool,
+    input_capabilities: bool,
     removed: bool,
 }
 
@@ -352,6 +640,7 @@ fn changed_fields(original: &TaskRecord, task: &TaskRecord) -> ChangedFields {
         agent_commands: preparation
             || original.agent_commands_catalog != task.agent_commands_catalog,
         send_capability: preparation || original.status != task.status,
+        input_capabilities: original.supports_image_input != task.supports_image_input,
         removed: !original.tombstoned && task.tombstoned,
     }
 }
@@ -403,11 +692,16 @@ fn project_committed_changes(
     }
     Ok(TaskChanges {
         task: fields.summary.then(|| task.task.clone()),
+        active_turn_started_at: fields.summary.then(|| task.active_turn_started_at.clone()),
         lifecycle: fields.lifecycle.then_some(task.lifecycle),
         preparation: fields.preparation.then(|| task.preparation.clone()),
         agent_config: fields.agent_config.then(|| task.agent_config.clone()),
         agent_commands: fields.agent_commands.then(|| task.agent_commands.clone()),
         send_capability: fields.send_capability.then(|| task.send_capability.clone()),
+        input_capabilities: fields
+            .input_capabilities
+            .then_some(task.input_capabilities)
+            .flatten(),
         chat: projected_chat,
         removed: fields.removed,
     })

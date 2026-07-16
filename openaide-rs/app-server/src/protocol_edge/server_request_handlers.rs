@@ -135,6 +135,12 @@ impl RpcGateway {
         if let ClientExpiryOutcome::Expired { last_client, .. } = &outcome {
             self.server_requests
                 .observe_client_expired(client_instance_id, now);
+            if let Err(error) = self.task_release.release_expired_client(client_instance_id) {
+                crate::logging::error(
+                    "prepared_task_lease_expiry_release_failed",
+                    serde_json::json!({ "error": error.message }),
+                );
+            }
             self.remove_expired_client_workspace_roots(client_instance_id, now);
             if *last_client {
                 self.lifecycle.observe_last_client_expired();
@@ -149,6 +155,12 @@ impl RpcGateway {
         for client_instance_id in &batch.expired {
             self.server_requests
                 .observe_client_expired(client_instance_id, now);
+            if let Err(error) = self.task_release.release_expired_client(client_instance_id) {
+                crate::logging::error(
+                    "prepared_task_lease_expiry_release_failed",
+                    serde_json::json!({ "error": error.message }),
+                );
+            }
             projects_changed |= self
                 .project_roots
                 .remove_client_workspace_roots(client_instance_id);

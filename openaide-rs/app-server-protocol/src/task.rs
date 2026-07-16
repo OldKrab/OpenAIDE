@@ -3,14 +3,14 @@ use std::collections::BTreeMap;
 use ts_rs::TS;
 
 use crate::ids::{
-    AgentConfigOptionId, AgentId, AttachmentHandleId, ClientMutationId, MessageId, ProjectId,
-    TaskId, TaskListCursor, TurnId,
+    AgentConfigOptionId, AgentId, ClientMutationId, MessageId, ProjectId, TaskId, TaskListCursor,
+    TurnId,
 };
 use crate::snapshot::{ChatItem, TaskSnapshot, TaskSummary};
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
-pub struct TaskCreateParams {
+pub struct TaskAcquireParams {
     pub project_id: ProjectId,
     pub agent_id: AgentId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -21,7 +21,7 @@ pub struct TaskCreateParams {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
-pub struct TaskCreateResult {
+pub struct TaskAcquireResult {
     pub task: TaskSnapshot,
 }
 
@@ -79,7 +79,16 @@ pub struct ComposerMessage {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub attachments: Vec<AttachmentHandleId>,
+    pub images: Vec<ComposerImage>,
+}
+
+/// One Frontend-owned Image encoded only as part of the Send mutation.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ComposerImage {
+    pub label: String,
+    pub mime_type: String,
+    pub data: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
@@ -317,14 +326,14 @@ pub struct TaskListResult {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
-pub struct TaskDiscardParams {
+pub struct TaskReleaseParams {
     pub task_id: TaskId,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
-pub struct TaskDiscardResult {
-    pub discarded_task_id: TaskId,
+pub struct TaskReleaseResult {
+    pub task_id: TaskId,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]

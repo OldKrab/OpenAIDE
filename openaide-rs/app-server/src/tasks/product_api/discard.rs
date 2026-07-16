@@ -1,89 +1,49 @@
 use openaide_app_server_protocol::errors::ProtocolError;
 use openaide_app_server_protocol::ids::ClientInstanceId;
-use openaide_app_server_protocol::task::TaskDiscardParams;
+use openaide_app_server_protocol::task::TaskReleaseParams;
 
 use crate::agent::AgentSessionKey;
-use crate::protocol::errors::RuntimeError;
-use crate::protocol::model::TaskStatus as LegacyTaskStatus;
-use crate::storage::records::{TaskLifecycle, TaskRecord};
-use crate::tasks::mutation::{TaskCommitOptions, TaskCommitOutcome, TaskMutationResult};
 use crate::time::now_string;
 
-use super::{conflict_error, protocol_error_from_runtime, runtime_error, TaskProductApi};
+use super::{protocol_error_from_runtime, TaskProductApi};
 
 impl TaskProductApi {
-    pub(super) fn discard_task(
+    pub(super) fn release_task(
         &self,
         client_instance_id: &ClientInstanceId,
-        params: TaskDiscardParams,
+        params: TaskReleaseParams,
     ) -> Result<(), ProtocolError> {
-        let task_id = params.task_id.as_str().to_string();
-        let task = self.read_task_for_client(&task_id, client_instance_id)?;
-        self.require_discard_eligible(&task)?;
-
-        if task.tombstoned {
-            return Ok(());
-        }
+        let task_id = params.task_id.as_str();
         let now = now_string();
-        let mut session_to_close = None;
-        let result = self
+        let disposed = self
             .mutations
-            .commit_existing_task(&task_id, TaskCommitOptions::metadata(), |ctx| {
-                if !self.is_discard_eligible(ctx.task())? {
-                    return Ok(TaskMutationResult::Rejected);
-                }
-                let task = ctx.task_mut();
-                session_to_close = task.agent_session_id.take();
-                task.tombstoned = true;
-                task.updated_at = now.clone();
-                task.last_activity = now;
-                Ok(TaskMutationResult::Changed)
-            })
+            .release_prepared_task(client_instance_id, task_id, &now)
             .map_err(protocol_error_from_runtime)?;
-        if !matches!(result.outcome, TaskCommitOutcome::Committed(_)) {
-            return Err(conflict_error("Only empty pre-send Tasks can be discarded"));
-        }
-        // A discarded New Task cannot have a live composer again. Remove every
-        // resolver owned by that Task, including resources from disconnected clients.
+        // Legacy pre-Send resources must never cross a lease boundary. The client-owned
+        // Image design does not create any new resource here.
         self.attachments.discard_resources_for_task(&params.task_id);
-        // Persist ownership release before Agent I/O so a failed close cannot
-        // leave the discarded New Task hiding the external Native Session.
-        if let Some(session_id) = session_to_close {
+        self.close_disposed_prepared_tasks(disposed);
+        Ok(())
+    }
+
+    pub(super) fn close_disposed_prepared_tasks(
+        &self,
+        disposed: Vec<crate::storage::records::TaskRecord>,
+    ) {
+        for task in disposed {
+            let Some(session_id) = task.agent_session_id else {
+                continue;
+            };
             let session = AgentSessionKey::new(task.agent_id, session_id.clone());
             if let Err(error) = self.agent_gateway.close_session(&session) {
                 crate::logging::warn(
-                    "discarded_draft_native_session_close_failed",
+                    "prepared_task_native_session_close_failed",
                     serde_json::json!({
-                        "task_id": task_id,
-                        "agent_session_id": session_id,
+                        "task_id": task.task_id,
                         "error": error.to_string(),
                     }),
                 );
             }
         }
-        Ok(())
-    }
-
-    fn require_discard_eligible(&self, task: &TaskRecord) -> Result<(), ProtocolError> {
-        if self.is_discard_eligible(task).map_err(runtime_error)? {
-            return Ok(());
-        }
-        Err(conflict_error(discard_ineligible_message(task)))
-    }
-
-    fn is_discard_eligible(&self, task: &TaskRecord) -> Result<bool, RuntimeError> {
-        if task.status == LegacyTaskStatus::Active || task.active_turn_id.is_some() {
-            return Ok(false);
-        }
-        Ok(matches!(task.lifecycle, TaskLifecycle::New { .. })
-            && self.store.read_messages(&task.task_id)?.is_empty())
-    }
-}
-
-fn discard_ineligible_message(task: &TaskRecord) -> &'static str {
-    if task.status == LegacyTaskStatus::Active || task.active_turn_id.is_some() {
-        "Running Tasks cannot be discarded"
-    } else {
-        "Only empty pre-send Tasks can be discarded"
     }
 }

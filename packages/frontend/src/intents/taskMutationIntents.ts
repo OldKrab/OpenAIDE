@@ -10,7 +10,7 @@ import {
 } from "@openaide/app-server-client";
 import type { TaskSnapshot } from "@openaide/app-shell-contracts";
 import type { AppAction, SnapshotIntent } from "../state/appReducer";
-import { appServerAttachmentHandles } from "../state/composerOptions";
+import { appServerComposerImages } from "../state/composerOptions";
 import type { TaskComposerInput } from "../state/store";
 import { mapProtocolTaskSnapshot } from "../state/appServerProtocolMapping";
 import type { PostHostMessage } from "../state/postHostMessage";
@@ -142,9 +142,9 @@ export function sendTaskPromptIntent(
 }
 
 function appServerComposerMessage(input: TaskComposerInput): ComposerMessage | undefined {
-  const attachments = appServerAttachmentHandles(input.context);
-  if (input.context.length > 0 && !attachments) return undefined;
-  return attachments?.length ? { text: input.prompt, attachments } : { text: input.prompt };
+  const images = appServerComposerImages(input.context);
+  if (input.context.length > 0 && !images) return undefined;
+  return images?.length ? { text: input.prompt, images } : { text: input.prompt };
 }
 
 function taskSendErrorMessage(error: unknown) {

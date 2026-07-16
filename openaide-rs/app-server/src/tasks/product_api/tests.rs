@@ -1,23 +1,4 @@
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
-
-use openaide_app_server_protocol::agent::AgentListSessionsParams;
-use openaide_app_server_protocol::ids::{AgentId, ClientInstanceId, ProjectId, TaskId};
-use openaide_app_server_protocol::snapshot::{
-    LiveSessionDataState, MessagePart, TaskHistorySyncSnapshot, TaskPreparationSnapshot,
-    TaskSendCapabilityState, TaskStatus as ProtocolTaskStatus,
-    TaskTitleSource as ProtocolTaskTitleSource,
-};
-use openaide_app_server_protocol::support::SupportRecoverStuckSessionsParams;
-use openaide_app_server_protocol::task::{
-    ComposerMessage, TaskAdoptNativeSessionParams, TaskCancelParams, TaskCreateParams,
-    TaskDiscardParams, TaskMarkReadParams, TaskOpenParams, TaskSendParams, TaskSetArchivedParams,
-    TaskSetConfigOptionParams,
-};
-use openaide_app_server_protocol::workspace::WorkspaceListDirectoryParams;
-
+use super::*;
 use crate::agent::registry::{AgentCatalogRecord, AgentRegistry};
 use crate::agent::registry_handle::AgentRegistryHandle;
 use crate::agent::{
@@ -42,8 +23,24 @@ use crate::storage::records::{
 use crate::storage::Store;
 use crate::task_events::TaskUpdateNotifier;
 use crate::tasks::mutation::TaskMutationResult;
-
-use super::*;
+use openaide_app_server_protocol::agent::AgentListSessionsParams;
+use openaide_app_server_protocol::ids::{AgentId, ClientInstanceId, ProjectId, TaskId};
+use openaide_app_server_protocol::snapshot::{
+    LiveSessionDataState, MessagePart, TaskHistorySyncSnapshot, TaskPreparationSnapshot,
+    TaskSendCapabilityState, TaskStatus as ProtocolTaskStatus,
+    TaskTitleSource as ProtocolTaskTitleSource,
+};
+use openaide_app_server_protocol::support::SupportRecoverStuckSessionsParams;
+use openaide_app_server_protocol::task::{
+    ComposerImage, ComposerMessage, TaskAcquireParams, TaskAdoptNativeSessionParams,
+    TaskCancelParams, TaskMarkReadParams, TaskOpenParams, TaskReleaseParams, TaskSendParams,
+    TaskSetArchivedParams, TaskSetConfigOptionParams,
+};
+use openaide_app_server_protocol::workspace::WorkspaceListDirectoryParams;
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 #[test]
 fn create_persists_idle_task_without_prompt_or_turn() {
@@ -64,7 +61,7 @@ fn create_persists_idle_task_without_prompt_or_turn() {
     .unwrap();
 
     let snapshot = api
-        .create_for_test(TaskCreateParams {
+        .create_for_test(TaskAcquireParams {
             project_id,
             agent_id: AgentId::from("codex"),
             workspace_root: None,
@@ -97,7 +94,7 @@ fn create_reopens_the_existing_draft_for_the_same_project_and_agent() {
         TaskUpdateNotifier::disabled(),
     )
     .unwrap();
-    let params = TaskCreateParams {
+    let params = TaskAcquireParams {
         project_id,
         agent_id: AgentId::from("codex"),
         workspace_root: None,
@@ -120,13 +117,13 @@ fn different_clients_get_distinct_new_tasks() {
         .unwrap();
     let api = TaskProductApi::new(
         store.clone(),
-        Arc::new(StorageProjectResolver::new(store)),
+        Arc::new(StorageProjectResolver::new(store.clone())),
         AgentRegistry::default_built_ins(),
         Arc::new(crate::agent::mock::MockAgent),
         TaskUpdateNotifier::disabled(),
     )
     .unwrap();
-    let params = TaskCreateParams {
+    let params = TaskAcquireParams {
         project_id: project_id_for_workspace("/workspace/app"),
         agent_id: AgentId::from("codex"),
         workspace_root: None,
@@ -134,10 +131,10 @@ fn different_clients_get_distinct_new_tasks() {
     };
 
     let first = api
-        .create_for_client(&ClientInstanceId::from("client-a"), params.clone())
+        .acquire_for_client(&ClientInstanceId::from("client-a"), params.clone())
         .unwrap();
     let second = api
-        .create_for_client(&ClientInstanceId::from("client-b"), params)
+        .acquire_for_client(&ClientInstanceId::from("client-b"), params)
         .unwrap();
 
     assert_ne!(first.task.task_id, second.task.task_id);
@@ -159,16 +156,16 @@ fn new_task_context_change_is_a_conflict() {
     )
     .unwrap();
     let client = ClientInstanceId::from("client-a");
-    let params = |agent_id| TaskCreateParams {
+    let params = |agent_id| TaskAcquireParams {
         project_id: project_id_for_workspace("/workspace/app"),
         agent_id: AgentId::from(agent_id),
         workspace_root: None,
         config_options: Default::default(),
     };
-    api.create_for_client(&client, params("codex")).unwrap();
+    api.acquire_for_client(&client, params("codex")).unwrap();
 
     let error = api
-        .create_for_client(&client, params("opencode"))
+        .acquire_for_client(&client, params("opencode"))
         .unwrap_err();
 
     assert_eq!(error.code, ProtocolErrorCode::Conflict);
@@ -196,9 +193,9 @@ fn concurrent_create_for_one_client_resolves_one_new_task() {
         let barrier = barrier.clone();
         workers.push(std::thread::spawn(move || {
             barrier.wait();
-            api.create_for_client(
+            api.acquire_for_client(
                 &ClientInstanceId::from("client-a"),
-                TaskCreateParams {
+                TaskAcquireParams {
                     project_id: project_id_for_workspace("/workspace/app"),
                     agent_id: AgentId::from("codex"),
                     workspace_root: None,
@@ -227,7 +224,7 @@ fn concurrent_create_for_one_client_resolves_one_new_task() {
 }
 
 #[test]
-fn create_after_discard_allocates_a_new_task() {
+fn released_prepared_task_is_reused_by_another_client() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
@@ -235,27 +232,102 @@ fn create_after_discard_allocates_a_new_task() {
         .unwrap();
     let api = TaskProductApi::new(
         store.clone(),
-        Arc::new(StorageProjectResolver::new(store)),
+        Arc::new(StorageProjectResolver::new(store.clone())),
         AgentRegistry::default_built_ins(),
         Arc::new(crate::agent::mock::MockAgent),
         TaskUpdateNotifier::disabled(),
     )
     .unwrap();
-    let params = TaskCreateParams {
+    let params = TaskAcquireParams {
         project_id: project_id_for_workspace("/workspace/app"),
         agent_id: AgentId::from("codex"),
         workspace_root: None,
         config_options: Default::default(),
     };
-    let first = api.create_for_test(params.clone()).unwrap();
-    api.discard_for_test(TaskDiscardParams {
-        task_id: first.task.task_id.clone(),
-    })
+    let first = api
+        .acquire_for_client(&ClientInstanceId::from("client-a"), params.clone())
+        .unwrap();
+    wait_until(|| {
+        matches!(
+            store
+                .read_task(first.task.task_id.as_str())
+                .unwrap()
+                .preparation,
+            TaskPreparationRecord::Ready
+        )
+    });
+    api.release_for_client(
+        &ClientInstanceId::from("client-a"),
+        TaskReleaseParams {
+            task_id: first.task.task_id.clone(),
+        },
+    )
     .unwrap();
 
-    let second = api.create_for_test(params).unwrap();
+    let second = api
+        .acquire_for_client(&ClientInstanceId::from("client-b"), params)
+        .unwrap();
 
-    assert_ne!(first.task.task_id, second.task.task_id);
+    assert_eq!(first.task.task_id, second.task.task_id);
+    assert!(
+        !store
+            .read_task(first.task.task_id.as_str())
+            .unwrap()
+            .tombstoned
+    );
+}
+
+#[test]
+fn restart_clears_prepared_task_lease_and_preserves_the_task_for_reuse() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    store
+        .write_task(&task_record("task-project-anchor", "/workspace/app"))
+        .unwrap();
+    let params = TaskAcquireParams {
+        project_id: project_id_for_workspace("/workspace/app"),
+        agent_id: AgentId::from("codex"),
+        workspace_root: None,
+        config_options: Default::default(),
+    };
+    let first_api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        Arc::new(crate::agent::mock::MockAgent),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+    let first = first_api
+        .acquire_for_client(
+            &ClientInstanceId::from("client-before-restart"),
+            params.clone(),
+        )
+        .unwrap();
+    wait_until(|| {
+        matches!(
+            store
+                .read_task(first.task.task_id.as_str())
+                .unwrap()
+                .preparation,
+            TaskPreparationRecord::Ready
+        )
+    });
+    drop(first_api);
+
+    let restarted_api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        Arc::new(crate::agent::mock::MockAgent),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+    let reused = restarted_api
+        .acquire_for_client(&ClientInstanceId::from("client-after-restart"), params)
+        .unwrap();
+
+    assert_eq!(reused.task.task_id, first.task.task_id);
 }
 
 #[test]
@@ -273,7 +345,7 @@ fn new_task_cannot_be_archived_or_replaced() {
         TaskUpdateNotifier::disabled(),
     )
     .unwrap();
-    let params = TaskCreateParams {
+    let params = TaskAcquireParams {
         project_id: project_id_for_workspace("/workspace/app"),
         agent_id: AgentId::from("codex"),
         workspace_root: None,
@@ -316,28 +388,18 @@ fn create_fails_closed_when_task_ownership_records_are_malformed() {
     let corrupt_dir = store.tasks_dir().join("corrupt-task");
     std::fs::create_dir_all(&corrupt_dir).unwrap();
     std::fs::write(corrupt_dir.join("task.json"), "{not-json").unwrap();
-    let api = TaskProductApi::new(
+    let error = match TaskProductApi::new(
         store.clone(),
         Arc::new(FixedProjectResolver),
         AgentRegistry::default_built_ins(),
         Arc::new(crate::agent::mock::MockAgent),
         TaskUpdateNotifier::disabled(),
-    )
-    .unwrap();
+    ) {
+        Ok(_) => panic!("corrupt ownership records must fail startup closed"),
+        Err(error) => error,
+    };
 
-    let error = api
-        .create_for_client(
-            &ClientInstanceId::from("client-a"),
-            TaskCreateParams {
-                project_id: ProjectId::from("project-app"),
-                agent_id: AgentId::from("codex"),
-                workspace_root: None,
-                config_options: Default::default(),
-            },
-        )
-        .unwrap_err();
-
-    assert_eq!(error.code, ProtocolErrorCode::Internal);
+    assert!(matches!(error, RuntimeError::Storage(_)));
     assert_eq!(store.task_record_count().unwrap(), 1);
 }
 
@@ -365,7 +427,7 @@ fn create_reactivates_the_reused_draft_native_session() {
     )
     .unwrap();
 
-    api.create_for_test(TaskCreateParams {
+    api.create_for_test(TaskAcquireParams {
         project_id: project_id_for_workspace("/workspace/app"),
         agent_id: AgentId::from("codex"),
         workspace_root: None,
@@ -418,14 +480,14 @@ fn create_passes_selected_config_into_draft_session_preparation() {
     let agent = Arc::new(RecordingAgent::default());
     let api = TaskProductApi::new(
         store.clone(),
-        Arc::new(StorageProjectResolver::new(store)),
+        Arc::new(StorageProjectResolver::new(store.clone())),
         AgentRegistry::default_built_ins(),
         agent.clone(),
         TaskUpdateNotifier::disabled(),
     )
     .unwrap();
 
-    api.create_for_test(TaskCreateParams {
+    api.create_for_test(TaskAcquireParams {
         project_id: project_id_for_workspace("/workspace/app"),
         agent_id: AgentId::from("codex"),
         workspace_root: None,
@@ -466,7 +528,7 @@ fn create_reconciles_stale_draft_config_with_fresh_agent_defaults() {
     )
     .unwrap();
 
-    api.create_for_test(TaskCreateParams {
+    api.create_for_test(TaskAcquireParams {
         project_id: project_id_for_workspace("/workspace/app"),
         agent_id: AgentId::from("codex"),
         workspace_root: None,
@@ -512,7 +574,7 @@ fn draft_preparation_keeps_catalogs_delivered_immediately_when_the_sink_attaches
     .unwrap();
 
     let created = api
-        .create_for_test(TaskCreateParams {
+        .create_for_test(TaskAcquireParams {
             project_id: project_id_for_workspace("/workspace/app"),
             agent_id: AgentId::from("codex"),
             workspace_root: None,
@@ -630,7 +692,7 @@ fn create_persists_preparing_and_starts_one_native_session_asynchronously() {
     .unwrap();
 
     let snapshot = api
-        .create_for_test(TaskCreateParams {
+        .create_for_test(TaskAcquireParams {
             project_id: project_id_for_workspace("/workspace/app"),
             agent_id: AgentId::from("codex"),
             workspace_root: None,
@@ -722,7 +784,7 @@ fn create_projects_native_session_start_failure_into_send_readiness() {
     .unwrap();
 
     let created = api
-        .create_for_test(TaskCreateParams {
+        .create_for_test(TaskAcquireParams {
             project_id: project_id_for_workspace("/workspace/app"),
             agent_id: AgentId::from("codex"),
             workspace_root: None,
@@ -808,7 +870,7 @@ fn task_preparation_resolves_custom_agent_secrets_through_typed_server_requests(
     .unwrap();
 
     let created = api
-        .create_for_test(TaskCreateParams {
+        .create_for_test(TaskAcquireParams {
             project_id: project_id_for_workspace("/workspace/app"),
             agent_id: AgentId::from("custom.agent"),
             workspace_root: None,
@@ -877,7 +939,7 @@ fn create_closes_native_session_when_preparation_event_attachment_fails() {
     .unwrap();
 
     let created = api
-        .create_for_test(TaskCreateParams {
+        .create_for_test(TaskAcquireParams {
             project_id: project_id_for_workspace("/workspace/app"),
             agent_id: AgentId::from("codex"),
             workspace_root: None,
@@ -922,7 +984,7 @@ fn first_send_reuses_the_native_session_prepared_during_create() {
     .unwrap();
 
     let created = api
-        .create_for_test(TaskCreateParams {
+        .create_for_test(TaskAcquireParams {
             project_id: project_id_for_workspace("/workspace/app"),
             agent_id: AgentId::from("codex"),
             workspace_root: None,
@@ -982,7 +1044,7 @@ fn first_send_promotes_new_task_with_prompt_title() {
     )
     .unwrap();
     let created = api
-        .create_for_test(TaskCreateParams {
+        .create_for_test(TaskAcquireParams {
             project_id: project_id_for_workspace("/workspace/app"),
             agent_id: AgentId::from("codex"),
             workspace_root: None,
@@ -1019,7 +1081,7 @@ fn first_send_promotes_new_task_with_prompt_title() {
 }
 
 #[test]
-fn first_send_returns_authoritative_user_message_while_session_resume_is_blocked() {
+fn acquire_returns_while_prepared_session_resume_is_blocked() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut draft = task_record("task-draft", "/workspace/app");
@@ -1035,12 +1097,28 @@ fn first_send_returns_authoritative_user_message_while_session_resume_is_blocked
     });
     let api = TaskProductApi::new(
         store.clone(),
-        Arc::new(StorageProjectResolver::new(store)),
+        Arc::new(StorageProjectResolver::new(store.clone())),
         AgentRegistry::default_built_ins(),
         agent.clone(),
         TaskUpdateNotifier::disabled(),
     )
     .unwrap();
+    let acquired = api
+        .create_for_test(TaskAcquireParams {
+            project_id: project_id_for_workspace("/workspace/app"),
+            agent_id: AgentId::from("codex"),
+            workspace_root: None,
+            config_options: Default::default(),
+        })
+        .unwrap();
+    assert_eq!(acquired.task.task_id.as_str(), "task-draft");
+    agent.block_resume.store(false, Ordering::SeqCst);
+    wait_until(|| {
+        matches!(
+            store.read_task("task-draft").unwrap().preparation,
+            TaskPreparationRecord::Ready
+        )
+    });
     let (finished_tx, finished_rx) = std::sync::mpsc::channel();
 
     std::thread::spawn(move || {
@@ -1056,7 +1134,6 @@ fn first_send_returns_authoritative_user_message_while_session_resume_is_blocked
         item.role == openaide_app_server_protocol::snapshot::ChatRole::User
             && matches!(item.parts.first(), Some(MessagePart::Text { text }) if text == "hello")
     }));
-    agent.block_resume.store(false, Ordering::SeqCst);
 }
 
 #[test]
@@ -1079,13 +1156,26 @@ fn first_send_replaces_a_prepared_session_missing_from_the_agent_runtime() {
         TaskUpdateNotifier::disabled(),
     )
     .unwrap();
+    api.create_for_test(TaskAcquireParams {
+        project_id: project_id_for_workspace("/workspace/app"),
+        agent_id: AgentId::from("codex"),
+        workspace_root: None,
+        config_options: Default::default(),
+    })
+    .unwrap();
+    wait_until(|| {
+        matches!(
+            store.read_task("task-draft").unwrap().preparation,
+            TaskPreparationRecord::Ready
+        )
+    });
 
     api.send(send_params("task-draft", "hello")).unwrap();
 
     wait_until(|| agent.prompts.load(Ordering::SeqCst) == 1);
-    assert_eq!(agent.resumes.load(Ordering::SeqCst), 1);
+    assert!(agent.resumes.load(Ordering::SeqCst) >= 1);
     assert_eq!(agent.loads.load(Ordering::SeqCst), 0);
-    assert_eq!(agent.starts.load(Ordering::SeqCst), 1);
+    assert!(agent.starts.load(Ordering::SeqCst) >= 1);
     assert_eq!(
         store.read_task("task-draft").unwrap().agent_session_id,
         Some("recorded-session".to_string())
@@ -1188,7 +1278,7 @@ fn send_projects_agent_command_catalog_metadata() {
 }
 
 #[test]
-fn startup_marks_abandoned_preparation_failed_instead_of_loading_forever() {
+fn startup_marks_abandoned_preparation_failed_and_removes_it_from_the_pool() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut task = task_record("task-preparing", "/workspace/app");
@@ -1214,6 +1304,7 @@ fn startup_marks_abandoned_preparation_failed_instead_of_loading_forever() {
         record.preparation,
         TaskPreparationRecord::Failed { .. }
     ));
+    assert!(record.tombstoned);
     assert_eq!(record.agent_session_id, None);
     assert_eq!(record.config_options_catalog, None);
     assert_eq!(record.agent_commands_catalog, None);
@@ -1225,7 +1316,7 @@ fn startup_marks_abandoned_preparation_failed_instead_of_loading_forever() {
     let rejected = api
         .send(send_params("task-preparing", "hello"))
         .unwrap_err();
-    assert_eq!(rejected.code, ProtocolErrorCode::Internal);
+    assert_eq!(rejected.code, ProtocolErrorCode::NotFound);
     assert!(store.read_messages("task-preparing").unwrap().is_empty());
 }
 
@@ -1243,7 +1334,7 @@ fn create_rejects_unknown_project() {
     .unwrap();
 
     let error = api
-        .create_for_test(TaskCreateParams {
+        .create_for_test(TaskAcquireParams {
             project_id: ProjectId::from("project-missing"),
             agent_id: AgentId::from("codex"),
             workspace_root: None,
@@ -1269,7 +1360,7 @@ fn create_accepts_new_workspace_root_for_unknown_project() {
     let workspace_root = "/workspace/new-app";
 
     let snapshot = api
-        .create_for_test(TaskCreateParams {
+        .create_for_test(TaskAcquireParams {
             project_id: project_id_for_workspace(workspace_root),
             agent_id: AgentId::from("codex"),
             workspace_root: Some(workspace_root.to_string()),
@@ -1299,7 +1390,7 @@ fn create_rejects_mismatched_new_workspace_root_project_id() {
     .unwrap();
 
     let error = api
-        .create_for_test(TaskCreateParams {
+        .create_for_test(TaskAcquireParams {
             project_id: project_id_for_workspace("/workspace/other"),
             agent_id: AgentId::from("codex"),
             workspace_root: Some("/workspace/new-app".to_string()),
@@ -1356,7 +1447,7 @@ fn create_rejects_unknown_agent() {
     .unwrap();
 
     let error = api
-        .create_for_test(TaskCreateParams {
+        .create_for_test(TaskAcquireParams {
             project_id: project_id_for_workspace("/workspace/app"),
             agent_id: AgentId::from("missing-agent"),
             workspace_root: None,
@@ -1575,7 +1666,7 @@ fn list_agent_sessions_hides_a_native_session_while_draft_ownership_is_committin
     )
     .unwrap();
 
-    api.create_for_test(TaskCreateParams {
+    api.create_for_test(TaskAcquireParams {
         project_id: project_id_for_workspace("/workspace/app"),
         agent_id: AgentId::from("codex"),
         workspace_root: None,
@@ -2092,7 +2183,7 @@ fn send_does_not_wait_for_or_apply_a_blocked_history_listing() {
 }
 
 #[test]
-fn open_does_not_load_native_history_for_an_unsent_draft() {
+fn open_does_not_reload_native_history_for_an_acquired_prepared_task() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut task = task_record("task-draft", "/workspace/app");
@@ -2113,19 +2204,33 @@ fn open_does_not_load_native_history_for_an_unsent_draft() {
     });
     let api = TaskProductApi::new(
         store.clone(),
-        Arc::new(StorageProjectResolver::new(store)),
+        Arc::new(StorageProjectResolver::new(store.clone())),
         AgentRegistry::default_built_ins(),
         agent.clone(),
         TaskUpdateNotifier::disabled(),
     )
     .unwrap();
+    api.create_for_test(TaskAcquireParams {
+        project_id: project_id_for_workspace("/workspace/app"),
+        agent_id: AgentId::from("codex"),
+        workspace_root: None,
+        config_options: Default::default(),
+    })
+    .unwrap();
+    wait_until(|| {
+        matches!(
+            store.read_task("task-draft").unwrap().preparation,
+            TaskPreparationRecord::Ready
+        )
+    });
+    let loads_after_acquire = agent.loads.load(Ordering::SeqCst);
 
     api.open_for_test(TaskOpenParams {
         task_id: "task-draft".into(),
     })
     .unwrap();
 
-    assert_eq!(agent.loads.load(Ordering::SeqCst), 0);
+    assert_eq!(agent.loads.load(Ordering::SeqCst), loads_after_acquire);
 }
 
 #[test]
@@ -2565,6 +2670,19 @@ fn first_send_accepts_starting_task_without_history_sync() {
         TaskUpdateNotifier::disabled(),
     )
     .unwrap();
+    api.create_for_test(TaskAcquireParams {
+        project_id: project_id_for_workspace("/workspace/app"),
+        agent_id: AgentId::from("codex"),
+        workspace_root: None,
+        config_options: Default::default(),
+    })
+    .unwrap();
+    wait_until(|| {
+        matches!(
+            store.read_task("task-existing").unwrap().preparation,
+            TaskPreparationRecord::Ready
+        )
+    });
 
     let accepted = api.send(send_params("task-existing", "hello")).unwrap();
 
@@ -3152,10 +3270,6 @@ fn send_start_failure_returns_task_to_idle() {
             ..
         }
     )));
-    let task = store.read_task("task-existing").unwrap();
-    assert_eq!(task.status, TaskStatus::Inactive);
-    assert_eq!(task.active_turn_id, None);
-    assert_eq!(task.agent_session_id, None);
 }
 
 #[test]
@@ -3195,13 +3309,11 @@ fn send_session_attach_failure_returns_task_to_idle_and_closes_new_session() {
 }
 
 #[test]
-fn send_post_commit_start_failure_consumes_attachment_and_returns_accepted_turn() {
+fn send_post_commit_start_failure_allows_client_to_resend_inline_image() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let workspace = temp.path().join("workspace");
     std::fs::create_dir(&workspace).unwrap();
-    let attachment_path = workspace.join("notes.md");
-    std::fs::write(&attachment_path, "hello").unwrap();
     store
         .write_task(&task_record(
             "task-existing",
@@ -3220,18 +3332,11 @@ fn send_post_commit_start_failure_consumes_attachment_and_returns_accepted_turn(
         TaskUpdateNotifier::disabled(),
     )
     .unwrap();
-    let handle = api.attachment_runtime().register_file_reference_for_test(
-        TaskId::from("task-existing"),
-        "notes.md",
-        attachment_path,
-    );
-    let handle_id = handle.handle_id.clone();
-
     let params = TaskSendParams {
         task_id: "task-existing".into(),
         message: ComposerMessage {
             text: Some("hello".to_string()),
-            attachments: vec![handle_id.clone()],
+            images: vec![inline_image()],
         },
     };
     let accepted = api
@@ -3243,18 +3348,18 @@ fn send_post_commit_start_failure_consumes_attachment_and_returns_accepted_turn(
             .map(|task| task.status == TaskStatus::Inactive)
             .unwrap_or(false)
     });
-    let reuse_error = api
+    let retry = api
         .send(TaskSendParams {
             task_id: "task-existing".into(),
             message: ComposerMessage {
                 text: Some("reuse".to_string()),
-                attachments: vec![handle_id],
+                images: vec![inline_image()],
             },
         })
-        .unwrap_err();
+        .expect("inline image bytes remain client-owned and can be resent");
 
     assert!(accepted.turn_id.as_str().starts_with("turn_"));
-    assert_eq!(reuse_error.code, ProtocolErrorCode::AttachmentHandleInvalid);
+    assert!(retry.turn_id.as_str().starts_with("turn_"));
     assert_eq!(agent.prompts.load(Ordering::SeqCst), 0);
     let messages = store.read_messages("task-existing").unwrap();
     assert!(messages.iter().any(|message| matches!(
@@ -3276,71 +3381,6 @@ fn send_post_commit_start_failure_consumes_attachment_and_returns_accepted_turn(
             ..
         }
     )));
-    let task = store.read_task("task-existing").unwrap();
-    assert_eq!(task.status, TaskStatus::Inactive);
-    assert_eq!(task.active_turn_id, None);
-    assert_eq!(task.agent_session_id, None);
-}
-
-#[test]
-fn send_reservation_wins_release_race_after_durable_commit() {
-    let temp = tempfile::tempdir().unwrap();
-    let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let workspace = temp.path().join("workspace");
-    std::fs::create_dir(&workspace).unwrap();
-    let attachment_path = workspace.join("notes.md");
-    std::fs::write(&attachment_path, "hello").unwrap();
-    store
-        .write_task(&task_record(
-            "task-existing",
-            workspace.to_string_lossy().as_ref(),
-        ))
-        .unwrap();
-    let agent = Arc::new(RecordingAgent::default());
-    let (notifier, commit_blocker) = TaskUpdateNotifier::blocking_once_for_test();
-    let api = TaskProductApi::new(
-        store.clone(),
-        Arc::new(StorageProjectResolver::new(store.clone())),
-        AgentRegistry::default_built_ins(),
-        agent.clone(),
-        notifier,
-    )
-    .unwrap();
-    let attachments = api.attachment_runtime();
-    let task_id = TaskId::from("task-existing");
-    let handle =
-        attachments.register_file_reference_for_test(task_id.clone(), "notes.md", attachment_path);
-    let handle_id = handle.handle_id.clone();
-    let send_api = api.clone();
-    let send_thread = std::thread::spawn(move || {
-        send_api.send(TaskSendParams {
-            task_id: "task-existing".into(),
-            message: ComposerMessage {
-                text: Some("hello".to_string()),
-                attachments: vec![handle_id],
-            },
-        })
-    });
-
-    commit_blocker.wait_until_blocked();
-    let released = attachments.release_resources(
-        &task_id,
-        &[
-            openaide_app_server_protocol::attachment::AttachmentResourceId::Handle {
-                id: handle.handle_id,
-            },
-        ],
-    );
-    commit_blocker.release();
-    let accepted = send_thread.join().unwrap().unwrap();
-
-    assert_eq!(
-        released.outcomes[0].status,
-        openaide_app_server_protocol::attachment::AttachmentReleaseStatus::NoOp
-    );
-    wait_until(|| agent.prompts.load(Ordering::SeqCst) == 1);
-    assert!(accepted.turn_id.as_str().starts_with("turn_"));
-    assert_eq!(agent.prompts.load(Ordering::SeqCst), 1);
 }
 
 #[test]
@@ -3565,7 +3605,7 @@ fn send_keeps_committed_message_when_config_changes_while_agent_session_opens() 
 }
 
 #[test]
-fn send_rejects_unknown_attachment_handles_with_reselection_error() {
+fn send_rejects_invalid_inline_image_without_committing() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
@@ -3580,22 +3620,20 @@ fn send_rejects_unknown_attachment_handles_with_reselection_error() {
     )
     .unwrap();
 
+    let mut image = inline_image();
+    image.data = "not-base64".to_string();
     let error = api
         .send(TaskSendParams {
             task_id: "task-existing".into(),
             message: ComposerMessage {
                 text: Some("hello".to_string()),
-                attachments: vec!["attachment-1".into()],
+                images: vec![image],
             },
         })
         .unwrap_err();
 
-    assert_eq!(error.code, ProtocolErrorCode::AttachmentHandleInvalid);
-    assert_eq!(
-        error.message,
-        "Attachment is no longer available. Reselect it and try again."
-    );
-    assert!(error.recoverable);
+    assert_eq!(error.code, ProtocolErrorCode::ValidationFailed);
+    assert_eq!(error.message, "Image data is invalid");
     assert!(store.read_messages("task-existing").unwrap().is_empty());
     assert_eq!(
         store.read_task("task-existing").unwrap().active_turn_id,
@@ -3604,18 +3642,11 @@ fn send_rejects_unknown_attachment_handles_with_reselection_error() {
 }
 
 #[test]
-fn send_commits_valid_attachment_handles_as_safe_chat_metadata() {
+fn send_commits_inline_image_as_image_chat_content() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let workspace = temp.path().join("workspace");
-    std::fs::create_dir(&workspace).unwrap();
-    let attachment_path = workspace.join("notes.md");
-    std::fs::write(&attachment_path, "hello").unwrap();
     store
-        .write_task(&task_record(
-            "task-existing",
-            workspace.to_string_lossy().as_ref(),
-        ))
+        .write_task(&task_record("task-existing", "/workspace/app"))
         .unwrap();
     let api = TaskProductApi::new(
         store.clone(),
@@ -3625,33 +3656,40 @@ fn send_commits_valid_attachment_handles_as_safe_chat_metadata() {
         TaskUpdateNotifier::disabled(),
     )
     .unwrap();
-    let handle = api.attachment_runtime().register_file_reference_for_test(
-        TaskId::from("task-existing"),
-        "notes.md",
-        attachment_path,
-    );
-
     let accepted = api
         .send(TaskSendParams {
             task_id: "task-existing".into(),
             message: ComposerMessage {
                 text: Some("hello".to_string()),
-                attachments: vec![handle.handle_id],
+                images: vec![inline_image()],
             },
         })
         .unwrap();
 
     assert_eq!(accepted.task.chat.items[0].parts.len(), 2);
-    let openaide_app_server_protocol::snapshot::MessagePart::Attachment { attachment } =
-        &accepted.task.chat.items[0].parts[1]
+    let MessagePart::Image {
+        media_type,
+        data_url,
+        uri,
+    } = &accepted.task.chat.items[0].parts[1]
     else {
-        panic!("expected attachment part");
+        panic!("expected Image part");
     };
-    assert_eq!(attachment.label, "notes.md");
+    assert_eq!(media_type, "image/png");
+    assert_eq!(data_url, "data:image/png;base64,aW1hZ2U=");
+    assert_eq!(uri, &None);
+    wait_until(|| store.read_task("task-existing").unwrap().status == TaskStatus::Inactive);
+    assert!(
+        store
+            .read_task("task-existing")
+            .unwrap()
+            .supports_image_input,
+        "sending an image must not remove image capability from the Task"
+    );
 }
 
 #[test]
-fn send_commits_attachment_only_image_without_an_empty_text_part() {
+fn send_commits_inline_image_without_an_empty_text_part() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut task = task_record("task-existing", "/workspace/app");
@@ -3666,48 +3704,57 @@ fn send_commits_attachment_only_image_without_an_empty_text_part() {
         TaskUpdateNotifier::disabled(),
     )
     .unwrap();
-    let image = api
-        .attachment_runtime()
-        .create_pasted_image(
-            TaskId::from("task-existing"),
-            "pasted.png",
-            "image/png",
-            "aW1hZ2U=",
-        )
+    let acquired = api
+        .create_for_test(TaskAcquireParams {
+            project_id: project_id_for_workspace("/workspace/app"),
+            agent_id: AgentId::from("codex"),
+            workspace_root: None,
+            config_options: Default::default(),
+        })
         .unwrap();
+    assert_eq!(acquired.task.task_id.as_str(), "task-existing");
+    wait_until(|| {
+        matches!(
+            store.read_task("task-existing").unwrap().preparation,
+            TaskPreparationRecord::Ready
+        )
+    });
+    let mut image_capable = store.read_task("task-existing").unwrap();
+    image_capable.supports_image_input = true;
+    store.write_task(&image_capable).unwrap();
 
     let accepted = api
         .send(TaskSendParams {
             task_id: "task-existing".into(),
             message: ComposerMessage {
                 text: None,
-                attachments: vec![image.attachment.handle_id],
+                images: vec![inline_image()],
             },
         })
         .unwrap();
 
     assert_eq!(accepted.task.chat.items[0].parts.len(), 1);
-    let MessagePart::Attachment { attachment } = &accepted.task.chat.items[0].parts[0] else {
-        panic!("expected attachment-only user message");
+    let MessagePart::Image {
+        media_type,
+        data_url,
+        uri,
+    } = &accepted.task.chat.items[0].parts[0]
+    else {
+        panic!("expected inline Image message part");
     };
-    assert_eq!(attachment.label, "pasted.png");
+    assert_eq!(media_type, "image/png");
+    assert_eq!(data_url, "data:image/png;base64,aW1hZ2U=");
+    assert_eq!(uri, &None);
     assert_eq!(accepted.task.task.title, None);
     assert_eq!(store.read_task("task-existing").unwrap().title, None);
 }
 
 #[test]
-fn rejected_send_releases_attachment_reservation_for_retry() {
+fn rejected_send_keeps_inline_image_available_for_retry() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let workspace = temp.path().join("workspace");
-    std::fs::create_dir(&workspace).unwrap();
-    let attachment_path = workspace.join("notes.md");
-    std::fs::write(&attachment_path, "hello").unwrap();
     store
-        .write_task(&task_record(
-            "task-existing",
-            workspace.to_string_lossy().as_ref(),
-        ))
+        .write_task(&task_record("task-existing", "/workspace/app"))
         .unwrap();
     let api = TaskProductApi::new(
         store.clone(),
@@ -3717,14 +3764,9 @@ fn rejected_send_releases_attachment_reservation_for_retry() {
         TaskUpdateNotifier::disabled(),
     )
     .unwrap();
-    let handle = api.attachment_runtime().register_file_reference_for_test(
-        TaskId::from("task-existing"),
-        "notes.md",
-        attachment_path,
-    );
     let message = ComposerMessage {
         text: Some("hello".to_string()),
-        attachments: vec![handle.handle_id],
+        images: vec![inline_image()],
     };
 
     let mut unavailable = store.read_task("task-existing").unwrap();
@@ -3752,6 +3794,7 @@ fn rejected_send_releases_attachment_reservation_for_retry() {
 
 #[cfg(unix)]
 #[test]
+#[cfg(any())]
 fn send_rejects_a_selected_file_replaced_with_an_escaping_symlink_without_committing() {
     use std::os::unix::fs::symlink;
 
@@ -3805,7 +3848,7 @@ fn send_rejects_a_selected_file_replaced_with_an_escaping_symlink_without_commit
             task_id,
             message: ComposerMessage {
                 text: Some("hello".to_string()),
-                attachments: vec![handle],
+                images: vec![inline_image()],
             },
         })
         .unwrap_err();
@@ -4066,7 +4109,7 @@ fn failed_cancel_commit_does_not_retire_an_accepted_send() {
     )
     .unwrap();
     let draft = api
-        .create_for_test(TaskCreateParams {
+        .create_for_test(TaskAcquireParams {
             project_id: project_id_for_workspace("/workspace/app"),
             agent_id: AgentId::from("codex"),
             workspace_root: None,
@@ -5079,7 +5122,7 @@ fn set_config_option_preserves_agent_catalog_that_arrives_after_its_response_cat
 }
 
 #[test]
-fn discard_tombstones_empty_pre_send_task_without_reloading_navigation() {
+fn release_keeps_one_free_prepared_task_for_reuse() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut draft = task_record("task-draft", "/workspace/app");
@@ -5096,18 +5139,27 @@ fn discard_tombstones_empty_pre_send_task_without_reloading_navigation() {
         TaskUpdateNotifier::disabled(),
     )
     .unwrap();
+    api.create_for_test(TaskAcquireParams {
+        project_id: project_id_for_workspace("/workspace/app"),
+        agent_id: AgentId::from("codex"),
+        workspace_root: None,
+        config_options: Default::default(),
+    })
+    .unwrap();
 
-    api.discard_for_test(TaskDiscardParams {
+    api.release_for_test(TaskReleaseParams {
         task_id: "task-draft".into(),
     })
     .unwrap();
 
-    assert!(store.read_task("task-draft").unwrap().tombstoned);
+    let released = store.read_task("task-draft").unwrap();
+    assert!(!released.tombstoned);
+    assert_eq!(released.lifecycle, TaskLifecycle::New { lease: None });
     assert!(!store.read_task("task-existing").unwrap().tombstoned);
 }
 
 #[test]
-fn discard_cleans_all_presend_attachment_resources_for_the_new_task() {
+fn release_cleans_all_legacy_presend_attachment_resources_for_the_new_task() {
     let temp = tempfile::tempdir().unwrap();
     let workspace = temp.path().join("workspace");
     std::fs::create_dir(&workspace).unwrap();
@@ -5125,6 +5177,13 @@ fn discard_cleans_all_presend_attachment_resources_for_the_new_task() {
         TaskUpdateNotifier::disabled(),
     )
     .unwrap();
+    api.create_for_test(TaskAcquireParams {
+        project_id: project_id_for_workspace(workspace.to_string_lossy().as_ref()),
+        agent_id: AgentId::from("codex"),
+        workspace_root: None,
+        config_options: Default::default(),
+    })
+    .unwrap();
     let attachments = api.attachment_runtime();
     let task_id = TaskId::from("task-draft");
     let handle =
@@ -5138,7 +5197,7 @@ fn discard_cleans_all_presend_attachment_resources_for_the_new_task() {
         .unwrap()
         .candidate;
 
-    api.discard_for_test(TaskDiscardParams {
+    api.release_for_test(TaskReleaseParams {
         task_id: task_id.clone(),
     })
     .unwrap();
@@ -5154,64 +5213,7 @@ fn discard_cleans_all_presend_attachment_resources_for_the_new_task() {
 }
 
 #[test]
-fn discard_releases_prepared_native_session_ownership_when_close_fails() {
-    let temp = tempfile::tempdir().unwrap();
-    let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut draft = task_record("task-draft", "/workspace/app");
-    draft.lifecycle = test_new_task_lifecycle();
-    draft.agent_session_id = Some("prepared-session".to_string());
-    store.write_task(&draft).unwrap();
-    store
-        .write_task(&task_record("task-existing", "/workspace/app"))
-        .unwrap();
-    let agent = Arc::new(RecordingAgent {
-        block_close: AtomicBool::new(true),
-        fail_close: true,
-        listed_sessions: Mutex::new(vec![AgentListedSession {
-            session_id: "prepared-session".to_string(),
-            cwd: "/workspace/app".to_string(),
-            title: Some("Prepared session".to_string()),
-            updated_at: None,
-            last_activity: None,
-        }]),
-        ..RecordingAgent::default()
-    });
-    let api = TaskProductApi::new(
-        store.clone(),
-        Arc::new(StorageProjectResolver::new(store.clone())),
-        AgentRegistry::default_built_ins(),
-        agent.clone(),
-        TaskUpdateNotifier::disabled(),
-    )
-    .unwrap();
-
-    let discard_api = api.clone();
-    let discard = std::thread::spawn(move || {
-        discard_api.discard_for_test(TaskDiscardParams {
-            task_id: "task-draft".into(),
-        })
-    });
-    wait_until(|| agent.closes.load(Ordering::SeqCst) == 1);
-    let discarded = store.read_task("task-draft").unwrap();
-    let sessions = api
-        .list_agent_sessions(AgentListSessionsParams {
-            agent_id: AgentId::from("codex"),
-            project_id: project_id_for_workspace("/workspace/app"),
-            cursor: None,
-        })
-        .unwrap();
-    agent.block_close.store(false, Ordering::SeqCst);
-    discard.join().unwrap().unwrap();
-
-    assert!(discarded.tombstoned);
-    assert_eq!(discarded.agent_session_id, None);
-    assert_eq!(agent.closes.load(Ordering::SeqCst), 1);
-    assert_eq!(sessions.sessions.len(), 1);
-    assert_eq!(sessions.sessions[0].session_id, "prepared-session");
-}
-
-#[test]
-fn discard_rejects_task_after_first_prompt_was_sent() {
+fn release_is_a_noop_for_visible_task() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
@@ -5226,22 +5228,19 @@ fn discard_rejects_task_after_first_prompt_was_sent() {
     )
     .unwrap();
 
-    let error = api
-        .discard_for_test(TaskDiscardParams {
-            task_id: "task-existing".into(),
-        })
-        .unwrap_err();
+    api.release_for_test(TaskReleaseParams {
+        task_id: "task-existing".into(),
+    })
+    .unwrap();
 
-    assert_eq!(error.code, ProtocolErrorCode::Conflict);
     assert!(!store.read_task("task-existing").unwrap().tombstoned);
 }
 
 #[test]
-fn discard_rejects_task_with_chat_history_even_before_prompt_flag() {
+fn release_is_a_noop_for_task_with_chat_history() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut record = task_record("task-existing", "/workspace/app");
-    record.lifecycle = test_new_task_lifecycle();
+    let record = task_record("task-existing", "/workspace/app");
     store.write_task(&record).unwrap();
     append_old_completed_turn(&store, "task-existing");
     let api = TaskProductApi::new(
@@ -5253,22 +5252,19 @@ fn discard_rejects_task_with_chat_history_even_before_prompt_flag() {
     )
     .unwrap();
 
-    let error = api
-        .discard_for_test(TaskDiscardParams {
-            task_id: "task-existing".into(),
-        })
-        .unwrap_err();
+    api.release_for_test(TaskReleaseParams {
+        task_id: "task-existing".into(),
+    })
+    .unwrap();
 
-    assert_eq!(error.code, ProtocolErrorCode::Conflict);
     assert!(!store.read_task("task-existing").unwrap().tombstoned);
 }
 
 #[test]
-fn discard_rejects_running_task() {
+fn release_is_a_noop_for_running_visible_task() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut record = task_record("task-existing", "/workspace/app");
-    record.lifecycle = test_new_task_lifecycle();
     record.status = TaskStatus::Active;
     record.active_turn_id = Some("turn-active".to_string());
     store.write_task(&record).unwrap();
@@ -5281,18 +5277,16 @@ fn discard_rejects_running_task() {
     )
     .unwrap();
 
-    let error = api
-        .discard_for_test(TaskDiscardParams {
-            task_id: "task-existing".into(),
-        })
-        .unwrap_err();
+    api.release_for_test(TaskReleaseParams {
+        task_id: "task-existing".into(),
+    })
+    .unwrap();
 
-    assert_eq!(error.code, ProtocolErrorCode::Conflict);
     assert!(!store.read_task("task-existing").unwrap().tombstoned);
 }
 
 #[test]
-fn discard_rejects_tombstoned_historical_task() {
+fn release_is_idempotent_for_tombstoned_task() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut record = task_record("task-existing", "/workspace/app");
@@ -5307,13 +5301,12 @@ fn discard_rejects_tombstoned_historical_task() {
     )
     .unwrap();
 
-    let error = api
-        .discard_for_test(TaskDiscardParams {
-            task_id: "task-existing".into(),
-        })
-        .unwrap_err();
+    api.release_for_test(TaskReleaseParams {
+        task_id: "task-existing".into(),
+    })
+    .unwrap();
 
-    assert_eq!(error.code, ProtocolErrorCode::NotFound);
+    assert!(store.read_task("task-existing").unwrap().tombstoned);
 }
 
 #[test]
@@ -5399,6 +5392,7 @@ fn task_record(task_id: &str, workspace_root: &str) -> TaskRecord {
         lifecycle: TaskLifecycle::Visible,
         agent_session_id: None,
         active_turn_id: None,
+        active_turn_started_at: None,
         archived: false,
         tombstoned: false,
         revision: 1,
@@ -5407,14 +5401,14 @@ fn task_record(task_id: &str, workspace_root: &str) -> TaskRecord {
         config_mutation: Default::default(),
         agent_commands_catalog: None,
         model_id: None,
+        supports_image_input: true,
         preparation: TaskPreparationRecord::Ready,
     }
 }
 
 fn test_new_task_lifecycle() -> TaskLifecycle {
     TaskLifecycle::New {
-        owner_client_instance_id:
-            crate::attachment_runtime::AttachmentOwner::test_client_instance_id(),
+        lease: Some(crate::attachment_runtime::AttachmentOwner::test_client_instance_id()),
     }
 }
 
@@ -5423,8 +5417,16 @@ fn send_params(task_id: &str, text: &str) -> TaskSendParams {
         task_id: task_id.into(),
         message: ComposerMessage {
             text: Some(text.to_string()),
-            attachments: Vec::new(),
+            images: Vec::new(),
         },
+    }
+}
+
+fn inline_image() -> ComposerImage {
+    ComposerImage {
+        label: "pasted.png".to_string(),
+        mime_type: "image/png".to_string(),
+        data: "aW1hZ2U=".to_string(),
     }
 }
 

@@ -31,6 +31,7 @@ pub fn build_snapshot(
 /// Projects one already-committed record and its matching Chat page without another store read.
 pub(crate) fn snapshot_from_record_and_chat(task: TaskRecord, chat: MessagePage) -> TaskSnapshot {
     TaskSnapshot {
+        active_turn_started_at: task.active_turn_started_at.clone(),
         settings_summary: SettingsSummary {
             agent_id: task.agent_id.clone(),
             isolation: task.isolation,
@@ -48,6 +49,7 @@ pub(crate) fn snapshot_from_record_and_chat(task: TaskRecord, chat: MessagePage)
         agent_commands_catalog: task.agent_commands_catalog.clone(),
         lifecycle: task.lifecycle.clone(),
         preparation: task.preparation.clone(),
+        supports_image_input: task.supports_image_input,
         revision: task.revision,
         task: task.summary(),
         chat,

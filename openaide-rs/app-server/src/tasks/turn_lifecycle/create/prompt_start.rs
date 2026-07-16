@@ -66,6 +66,7 @@ impl TaskTurnLifecycle {
                 lifecycle: TaskLifecycle::Visible,
                 agent_session_id: Some(session.session_id.clone()),
                 active_turn_id: Some(turn_id.clone()),
+                active_turn_started_at: Some(now.clone()),
                 archived: false,
                 tombstoned: false,
                 revision: 0,
@@ -74,6 +75,7 @@ impl TaskTurnLifecycle {
                 config_mutation: Default::default(),
                 agent_commands_catalog: None,
                 model_id: params.model_id.or(session.model_id.clone()),
+                supports_image_input: session.prompt_capabilities.image,
                 preparation: TaskPreparationRecord::Ready,
             };
             let result = self.mutations.create_task(

@@ -1,6 +1,5 @@
 import {
   ATTACHMENT_CREATE_FILE_REFERENCE,
-  ATTACHMENT_CREATE_PASTED_IMAGE,
   ATTACHMENT_LIST_DIRECTORY,
   ATTACHMENT_LIST_ROOTS,
   TASK_SEARCH_FILES,
@@ -16,7 +15,7 @@ import {
   releaseAttachmentResources,
 } from "../services/attachmentResources";
 import { createConfirmedEmbeddedAttachment } from "../services/embeddedAttachmentSelection";
-import { appServerAttachment } from "../state/composerOptions";
+import { appServerAttachment, localImageAttachment } from "../state/composerOptions";
 import { mapProtocolTaskSnapshot } from "../state/appServerProtocolMapping";
 import { newTaskPreparationKey } from "../state/newTaskPreparationContext";
 import type {
@@ -217,29 +216,11 @@ function createFileBrowserCallbacks({
         attachment: appServerAttachment(result.attachment),
       });
     },
-    attachPastedImage: async (file: File, draft?: NewTaskDraftInput) => {
-      const lease = await ensureTaskId(draft);
-      const adoption = attachmentResources?.beginAdoption(lease.taskId);
-      if (attachmentResources && !adoption) throw new SupersededNewTaskFileBrowserOperation();
+    attachImage: async (file: File, draft?: NewTaskDraftInput) => {
       const data = await fileToBase64(file);
-      const previewUrl = `data:${file.type || "image/png"};base64,${data}`;
-      const result = await request(ATTACHMENT_CREATE_PASTED_IMAGE, {
-        taskId: lease.taskId,
-        label: file.name || "Pasted image",
-        mimeType: file.type || "image/png",
-        data,
-      });
-      if (attachmentResources?.adopt({ taskId: lease.taskId, handleId: result.attachment.handleId }, adoption) === false) {
-        throw new SupersededNewTaskFileBrowserOperation();
-      }
-      if (!operationIsCurrent()) {
-        releaseLateHandle(lease.taskId, result.attachment.handleId);
-        throw new SupersededNewTaskFileBrowserOperation();
-      }
       dispatch({
-        type: "taskInput:attachment:addAppServer",
-        taskId: lease.taskId,
-        attachment: appServerAttachment(result.attachment, { previewUrl }),
+        type: "newTask:attachment:add",
+        attachment: localImageAttachment(file, data),
       });
     },
     attachEmbedded: async (entryId: FileBrowserEntryId) => {

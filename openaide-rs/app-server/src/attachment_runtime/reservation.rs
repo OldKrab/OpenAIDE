@@ -21,12 +21,6 @@ impl AttachmentSendReservation {
         }
     }
 
-    pub(crate) fn attachments(&self) -> &ResolvedSendAttachments {
-        self.attachments
-            .as_ref()
-            .expect("attachment reservation has not been committed")
-    }
-
     pub(crate) fn commit(mut self) -> ResolvedSendAttachments {
         {
             let mut state = self

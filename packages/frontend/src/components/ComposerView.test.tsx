@@ -176,6 +176,21 @@ describe("Composer view behavior", () => {
     expect(buttonByLabel(renderer.root, "Add context").props.disabled).toBe(true);
   });
 
+  it("blocks image selection and explains why a populated draft cannot send", () => {
+    const renderer = renderComposer({
+      imageAttachmentsAllowed: false,
+      prompt: "what about now?",
+      submissionAllowed: false,
+      submissionBlockedMessage: "This Agent does not accept images.",
+    });
+
+    expect(buttonByLabel(renderer.root, "Add context").props.disabled).toBe(true);
+    const blocker = renderer.root.find((node) => node.props.className?.includes("composer-submission-blocker"));
+    expect(text(blocker)).toBe(
+      "This Agent does not accept images.",
+    );
+  });
+
   it("uploads every selected image through the App Server attachment callback", async () => {
     const first = new File(["first"], "first.png", { type: "image/png" });
     const second = new File(["second"], "second.png", { type: "image/png" });
@@ -196,8 +211,8 @@ describe("Composer view behavior", () => {
     });
     await settleRenderer();
 
-    expect(fileBrowser.attachPastedImage).toHaveBeenNthCalledWith(1, first);
-    expect(fileBrowser.attachPastedImage).toHaveBeenNthCalledWith(2, second);
+    expect(fileBrowser.attachImage).toHaveBeenNthCalledWith(1, first);
+    expect(fileBrowser.attachImage).toHaveBeenNthCalledWith(2, second);
     expect(menusByLabel(renderer.root, "Add context")).toHaveLength(0);
   });
 
@@ -225,11 +240,11 @@ describe("Composer view behavior", () => {
 
     expect(preventDefault).toHaveBeenCalledTimes(1);
     expect(onChange).toHaveBeenCalledWith("Explain this screenshot");
-    expect(fileBrowser.attachPastedImage).toHaveBeenNthCalledWith(1, first, {
+    expect(fileBrowser.attachImage).toHaveBeenNthCalledWith(1, first, {
       prompt: "Explain this screenshot",
       context: [],
     });
-    expect(fileBrowser.attachPastedImage).toHaveBeenNthCalledWith(2, second, {
+    expect(fileBrowser.attachImage).toHaveBeenNthCalledWith(2, second, {
       prompt: "Explain this screenshot",
       context: [],
     });
@@ -239,7 +254,7 @@ describe("Composer view behavior", () => {
     const first = new File(["first"], "first.png", { type: "image/png" });
     const second = new File(["second"], "second.png", { type: "image/png" });
     const fileBrowser = fileBrowserCallbacks();
-    fileBrowser.attachPastedImage = vi.fn(async (file) => {
+    fileBrowser.attachImage = vi.fn(async (file) => {
       if (file === first) throw new Error("First image is too large.");
     });
     const onUnsupportedImagePaste = vi.fn();
@@ -256,8 +271,8 @@ describe("Composer view behavior", () => {
     });
     await settleRenderer();
 
-    expect(fileBrowser.attachPastedImage).toHaveBeenNthCalledWith(1, first, { prompt: "", context: [] });
-    expect(fileBrowser.attachPastedImage).toHaveBeenNthCalledWith(2, second, { prompt: "", context: [] });
+    expect(fileBrowser.attachImage).toHaveBeenNthCalledWith(1, first, { prompt: "", context: [] });
+    expect(fileBrowser.attachImage).toHaveBeenNthCalledWith(2, second, { prompt: "", context: [] });
     expect(onUnsupportedImagePaste).toHaveBeenCalledWith("First image is too large.");
   });
 
@@ -276,7 +291,7 @@ describe("Composer view behavior", () => {
     });
 
     expect(preventDefault).toHaveBeenCalledTimes(1);
-    expect(fileBrowser.attachPastedImage).toHaveBeenCalledWith(file, {
+    expect(fileBrowser.attachImage).toHaveBeenCalledWith(file, {
       prompt: "",
       context: [],
     });
@@ -1162,12 +1177,15 @@ function composerElement(overrides: Partial<ComposerTestProps> = {}) {
         ...availability,
         canEdit: overrides.canEdit ?? availability.canEdit,
         submissionAllowed: overrides.submissionAllowed ?? availability.submissionAllowed,
+        submissionBlockedMessage: overrides.submissionBlockedMessage
+          ?? availability.submissionBlockedMessage,
       }}
       commandCatalog={overrides.commandCatalog}
       configLocked={overrides.configLocked}
       configOptions={overrides.configOptions}
       error={overrides.error}
       fileBrowser={overrides.fileBrowser}
+      imageAttachmentsAllowed={overrides.imageAttachmentsAllowed}
       onCancel={overrides.onCancel}
       onChange={overrides.onChange ?? vi.fn()}
       onUnsupportedImageAttachment={overrides.onUnsupportedImagePaste ?? vi.fn()}
@@ -1198,6 +1216,7 @@ type ComposerTestProps = {
   canEdit: boolean;
   error: string;
   fileBrowser: TaskFileBrowserCallbacks;
+  imageAttachmentsAllowed: boolean;
   onCancel: () => void;
   onChange: (prompt: string) => void;
   onUnsupportedImagePaste: (message?: string) => void;
@@ -1213,6 +1232,7 @@ type ComposerTestProps = {
   showAgentSelector: boolean;
   showIsolationSelector: boolean;
   submissionAllowed: boolean;
+  submissionBlockedMessage: string;
   submitting: boolean;
   submissionSettlementKey: number | string;
   submitShortcut: ComposerSubmitShortcut;
@@ -1443,7 +1463,7 @@ function fileBrowserCallbacks(): TaskFileBrowserCallbacks {
     ownerKey: "task:test",
     attachEmbedded: vi.fn(async () => undefined),
     attachFileReference: vi.fn(async () => undefined),
-    attachPastedImage: vi.fn(async () => undefined),
+    attachImage: vi.fn(async () => undefined),
     searchFiles: vi.fn(async () => ({ taskId: "task-1" as never, state: "ready" as const, paths: [] })),
     listDirectory: vi.fn(async (_rootId: FileBrowserRootId) => ({
       directory: { label: "Workspace", rootId: "root-1" as FileBrowserRootId },

@@ -274,15 +274,40 @@ impl TaskMutations {
         self.create_task_with_validation(task, initial_messages, options, |_| Ok(()))
     }
 
-    /// Resolves one client-owned New Task or creates it while holding the same storage lock.
-    /// This keeps lookup and creation atomic without adding a second ownership index.
-    pub(crate) fn resolve_or_create_new_task(
+    /// Leases a matching free Prepared Task or creates one under the same storage lock.
+    /// Task lifecycle records remain the only authoritative ownership representation.
+    pub(crate) fn acquire_prepared_task(
         &self,
         task: TaskRecord,
         initial_messages: Vec<NormalizedMessage>,
         options: TaskCommitOptions,
     ) -> Result<TaskCommitResult, RuntimeError> {
-        commit::resolve_or_create_new_task(self, task, initial_messages, options)
+        commit::acquire_prepared_task(self, task, initial_messages, options)
+    }
+
+    /// Releases only the named lease and applies free-pool retention atomically.
+    pub(crate) fn release_prepared_task(
+        &self,
+        client_instance_id: &openaide_app_server_protocol::ids::ClientInstanceId,
+        task_id: &str,
+        now: &str,
+    ) -> Result<Vec<TaskRecord>, RuntimeError> {
+        commit::release_prepared_task(self, client_instance_id, task_id, now)
+    }
+
+    /// Repairs the derived free pool from durable Task records.
+    pub(crate) fn reconcile_prepared_task_pool(
+        &self,
+        clear_leases: bool,
+    ) -> Result<Vec<TaskRecord>, RuntimeError> {
+        commit::reconcile_prepared_task_pool(self, clear_leases)
+    }
+
+    pub(crate) fn dispose_prepared_tasks_for_agent(
+        &self,
+        agent_id: &str,
+    ) -> Result<Vec<TaskRecord>, RuntimeError> {
+        commit::dispose_prepared_tasks_for_agent(self, agent_id)
     }
 
     pub(crate) fn create_task_with_validation(

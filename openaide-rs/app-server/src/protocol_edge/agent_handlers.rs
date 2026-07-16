@@ -164,10 +164,17 @@ impl RpcGateway {
                 return self.error(connection_id, id, meta, responses::invalid_params(error));
             }
         };
+        let deleted_agent_id = params.agent_id.clone();
         let result = match self.agent_catalog_mutations.delete_custom(params) {
             Ok(result) => result,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
+        if let Err(error) = self
+            .task_release
+            .dispose_prepared_tasks_for_agent(deleted_agent_id.as_str())
+        {
+            return self.error(connection_id, id, meta, error);
+        }
         let events = self.publish_agent_collection_update(result.agents.clone(), now);
         self.result_with_events::<AgentDeleteCustomResult>(connection_id, id, meta, result, events)
     }
@@ -186,10 +193,19 @@ impl RpcGateway {
                 return self.error(connection_id, id, meta, responses::invalid_params(error));
             }
         };
+        let disabled_agent_id = (!params.enabled).then(|| params.agent_id.clone());
         let result = match self.agent_catalog_mutations.set_enabled(params) {
             Ok(result) => result,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
+        if let Some(agent_id) = disabled_agent_id {
+            if let Err(error) = self
+                .task_release
+                .dispose_prepared_tasks_for_agent(agent_id.as_str())
+            {
+                return self.error(connection_id, id, meta, error);
+            }
+        }
         let events = self.publish_agent_collection_update(result.agents.clone(), now);
         self.result_with_events::<AgentSetEnabledResult>(connection_id, id, meta, result, events)
     }

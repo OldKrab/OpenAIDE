@@ -1,7 +1,7 @@
 import {
   AppServerProtocolError,
   TASK_CANCEL,
-  TASK_DISCARD,
+  TASK_RELEASE,
   type BackendConnection,
   type TaskId,
 } from "@openaide/app-server-client";
@@ -15,7 +15,7 @@ export async function discardOrCancelStartedTask(
   taskId: TaskId,
 ) {
   try {
-    await request(TASK_DISCARD, { taskId });
+    await request(TASK_RELEASE, { taskId });
     return "discarded" as const;
   } catch (error) {
     if (!(error instanceof AppServerProtocolError) || error.protocolError.code !== "conflict") {
