@@ -76,7 +76,7 @@ The App Server provides file completion through a dedicated workspace file-index
 
 App Server shares one index per canonical Task Workspace folder across clients, Prepared Tasks, and visible Tasks; a Prepared-Task lease selects the workspace to query but does not own the index or watcher. Indexes and watchers are created lazily on first search, retained while recently used, and evicted only while idle under a global LRU cap. Initial idle duration, cache cap, and search-result cap are implementation constants to tune from measurements.
 
-Watcher overflow, event loss, and effective-ignore-rule changes mark an index stale and trigger a full rebuild. Searches may return last-known matches with a quiet refreshing state during that rebuild. Completion becomes unavailable only when the rebuild fails; failures are logged and surfaced in the picker rather than silently leaving the index permanently stale.
+Watcher overflow, event loss, and effective-ignore-rule changes mark an index stale and trigger a full rebuild. Searches may return last-known matches while that rebuild runs. Refresh remains quiet: it neither clears visible results nor adds a persistent refreshing footer. Completion becomes unavailable only when the rebuild fails; failures are logged and surfaced in the picker rather than silently leaving the index permanently stale.
 
 The module's external interface exposes search by canonical workspace and explicit forgetting of a removed workspace. Watcher start/stop, event application, rebuild, ranking, cache generations, and eviction remain internal. Task and lease authorization resolve the canonical workspace before crossing this seam; explicit worktree removal calls the forgetting operation.
 
@@ -87,7 +87,7 @@ App Server Protocol file-search requests identify the current leased Prepared Ta
 
 - File completion becomes available as soon as a Prepared Task lease establishes an authoritative Task id and Task Workspace. It does not wait for Native Session readiness or Agent prompt capabilities. A context change closes the open picker, preserves prompt text, and invalidates outstanding search responses from the previous composer-context generation.
 
-The first search for an uncached workspace keeps the picker open in an `Indexing files…` state until one complete index is ready; partial results are not streamed. Internally, the module begins observing changes before the initial scan, reconciles queued events before publishing readiness, and falls back to a full rebuild if event continuity is lost.
+The first search for an uncached workspace keeps the picker open in an `Indexing files…` state until one complete index is ready; partial results are not streamed. Later query changes keep the prior ranked results visible while the next in-memory ranking request settles. Internally, the module begins observing changes before the initial scan, discards watcher setup noise already covered by that scan, ignores `.git` metadata activity, and falls back to a full rebuild if event continuity is lost. The picker derives compact IDE-style icons from the returned path's filename and extension, with a generic fallback.
 
 Watcher events update the shared index without publishing picker subscriptions. An already-open picker receives changed results only when its search query next changes; the first version neither pushes nor polls file-search results.
 

@@ -1008,7 +1008,7 @@ describe("Composer view behavior", () => {
       const fileBrowser = fileBrowserCallbacks();
       vi.mocked(fileBrowser.searchFiles).mockResolvedValue({
         taskId: "task-1" as never,
-        state: "ready",
+        state: "refreshing",
         paths: ["src/main.rs", "docs/team deck.pptx"],
       });
       const renderer = renderComposer({ fileBrowser, onChange });
@@ -1021,8 +1021,45 @@ describe("Composer view behavior", () => {
       expect(fileBrowser.searchFiles).toHaveBeenCalledWith("ma");
       const picker = renderer.root.findByProps({ role: "listbox", "aria-label": "Workspace files" });
       expect(text(picker)).toContain("src/main.rs");
+      expect(text(picker)).not.toContain("Refreshing files");
+      expect(picker.findByProps({ "data-file-kind": "rust" })).toBeTruthy();
       click(buttonByText(renderer.root, "src/main.rs"));
       expect(onChange).toHaveBeenLastCalledWith("Read @src/main.rs ");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps prior file results visible while a narrower query is pending", async () => {
+    vi.useFakeTimers();
+    try {
+      const fileBrowser = fileBrowserCallbacks();
+      let resolveNarrowSearch: (() => void) | undefined;
+      vi.mocked(fileBrowser.searchFiles).mockImplementation(async (query) => {
+        if (query === "main") {
+          await new Promise<void>((resolve) => {
+            resolveNarrowSearch = resolve;
+          });
+        }
+        return { taskId: "task-1" as never, state: "ready", paths: ["src/main.rs"] };
+      });
+      const renderer = renderComposer({ fileBrowser });
+
+      inputText(textarea(renderer.root), "@ma", 3);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(40);
+      });
+      expect(text(renderer.root.findByProps({ "aria-label": "Workspace files" }))).toContain("src/main.rs");
+
+      inputText(textarea(renderer.root), "@main", 5);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(40);
+      });
+      const pendingPicker = renderer.root.findByProps({ "aria-label": "Workspace files" });
+      expect(text(pendingPicker)).toContain("src/main.rs");
+      expect(text(pendingPicker)).not.toContain("Indexing files");
+
+      await act(async () => resolveNarrowSearch?.());
     } finally {
       vi.useRealTimers();
     }

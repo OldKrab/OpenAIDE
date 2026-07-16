@@ -167,21 +167,39 @@ impl WorkspaceFileIndex {
 fn build_entry(root: PathBuf) -> Result<RegistryEntry, String> {
     let dirty = Arc::new(AtomicBool::new(false));
     let callback_dirty = dirty.clone();
-    let mut watcher = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
-        callback_dirty.store(true, Ordering::Release);
-        if let Err(error) = event {
-            crate::logging::warn(
-                "workspace_file_watch_event_failed",
-                serde_json::json!({ "error": error.to_string() }),
-            );
-        }
-    })
-    .map_err(|error| error.to_string())?;
+    let watcher_armed = Arc::new(AtomicBool::new(false));
+    let callback_armed = watcher_armed.clone();
+    let callback_root = root.clone();
+    let mut watcher =
+        notify::recommended_watcher(move |event: notify::Result<notify::Event>| match event {
+            Ok(event) => {
+                if callback_armed.load(Ordering::Acquire)
+                    && event
+                        .paths
+                        .iter()
+                        .any(|path| !is_git_metadata_path(&callback_root, path))
+                {
+                    callback_dirty.store(true, Ordering::Release);
+                }
+            }
+            Err(error) => {
+                crate::logging::warn(
+                    "workspace_file_watch_event_failed",
+                    serde_json::json!({ "error": error.to_string() }),
+                );
+            }
+        })
+        .map_err(|error| error.to_string())?;
     watcher
         .watch(&root, RecursiveMode::Recursive)
         .map_err(|error| error.to_string())?;
 
     let paths = consistent_scan(&root, &dirty)?;
+    // Watch registration and the initial walk can produce filesystem events of
+    // their own. The completed snapshot already includes them, so only arm
+    // invalidation after that snapshot is installed.
+    dirty.store(false, Ordering::Release);
+    watcher_armed.store(true, Ordering::Release);
     Ok(RegistryEntry {
         runtime: Arc::new(IndexRuntime {
             root,
@@ -192,6 +210,11 @@ fn build_entry(root: PathBuf) -> Result<RegistryEntry, String> {
         _watcher: watcher,
         last_used: Instant::now(),
     })
+}
+
+fn is_git_metadata_path(root: &Path, path: &Path) -> bool {
+    path.strip_prefix(root)
+        .is_ok_and(|relative| relative.components().any(|part| part.as_os_str() == ".git"))
 }
 
 fn consistent_scan(root: &Path, dirty: &AtomicBool) -> Result<Vec<String>, String> {

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   fileMentionRanges,
   fileMentionTokenAtCursor,
+  fileIconKind,
   replaceFileMention,
 } from "./ComposerFileMentions";
 
@@ -30,5 +31,16 @@ describe("workspace file mentions", () => {
       { start: 5, end: 17 },
       { start: 22, end: 44 },
     ]);
+  });
+
+  it("classifies common workspace files for IDE-style icons", () => {
+    expect(fileIconKind("src/main.rs")).toBe("rust");
+    expect(fileIconKind("src/App.tsx")).toBe("typescript");
+    expect(fileIconKind("package.json")).toBe("json");
+    expect(fileIconKind("docs/design.md")).toBe("markdown");
+    expect(fileIconKind("assets/logo.png")).toBe("image");
+    expect(fileIconKind("archive.tar.gz")).toBe("archive");
+    expect(fileIconKind("LICENSE")).toBe("text");
+    expect(fileIconKind("unknown.data")).toBe("file");
   });
 });

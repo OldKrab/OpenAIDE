@@ -19,7 +19,7 @@ fn indexes_effective_git_files_and_ranks_paths() {
 
     let index = WorkspaceFileIndex::new(2, Duration::from_secs(60));
     let empty = index.search(workspace.path(), "");
-    assert_ne!(empty.state, WorkspaceFileIndexState::Unavailable);
+    assert_eq!(empty.state, WorkspaceFileIndexState::Ready);
     assert!(
         empty.paths.iter().position(|path| path == "README.md")
             < empty.paths.iter().position(|path| path == "src/main.rs")
@@ -37,6 +37,25 @@ fn indexes_effective_git_files_and_ranks_paths() {
         .search(workspace.path(), "file search")
         .paths
         .contains(&"src/file search.rs".to_string()));
+}
+
+#[test]
+fn git_metadata_changes_do_not_refresh_workspace_results() {
+    let workspace = git_workspace();
+    write(workspace.path(), "README.md");
+    let index = WorkspaceFileIndex::new(2, Duration::from_secs(60));
+    assert_eq!(
+        index.search(workspace.path(), "readme").state,
+        WorkspaceFileIndexState::Ready
+    );
+
+    write(workspace.path(), ".git/HEAD");
+    std::thread::sleep(Duration::from_millis(50));
+
+    assert_eq!(
+        index.search(workspace.path(), "readme").state,
+        WorkspaceFileIndexState::Ready
+    );
 }
 
 #[test]

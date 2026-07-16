@@ -166,13 +166,13 @@ export function renderEditorHtml(text: string, commandCatalog: AgentCommandsCata
     html: () => {
       const label = text.slice(match.token.start, match.token.end);
       const hint = match.command.input_hint ? ` Argument: ${match.command.input_hint}.` : "";
-      return `<span class="composer-command-token" title="${escapeHtml(`${label}: ${match.command.description}${hint}`)}">${escapeHtml(label)}</span>`;
+      return renderReferenceToken("command", label, `${label}: ${match.command.description}${hint}`);
     },
     start: match.token.start,
   }));
   const fileMatches = fileMentionRanges(text).map((range) => ({
     ...range,
-    html: () => `<span class="composer-file-token" title="Workspace file">${escapeHtml(text.slice(range.start, range.end))}</span>`,
+    html: () => renderReferenceToken("file", text.slice(range.start, range.end), "Workspace file"),
   }));
   const matches = [...commandMatches, ...fileMatches].sort((left, right) => left.start - right.start);
   if (!matches.length) return renderPlainTextHtml(text);
@@ -187,6 +187,11 @@ export function renderEditorHtml(text: string, commandCatalog: AgentCommandsCata
   }
   if (cursor < text.length) nodes.push(renderPlainTextHtml(text.slice(cursor)));
   return nodes.join("");
+}
+
+function renderReferenceToken(kind: "command" | "file", value: string, title: string) {
+  const [sigil, ...label] = value;
+  return `<span class="composer-reference-token composer-${kind}-token" spellcheck="false" title="${escapeHtml(title)}"><span class="composer-reference-sigil">${escapeHtml(sigil ?? "")}</span><span class="composer-reference-label">${escapeHtml(label.join(""))}</span></span>`;
 }
 
 function renderPlainTextHtml(text: string) {

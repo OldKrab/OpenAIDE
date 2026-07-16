@@ -62,20 +62,50 @@
   pointer-events: none;
 }
 
-.composer-command-token,
-.composer-file-token {
+.composer-reference-token {
+  border: 1px solid color-mix(in oklch, var(--oa-focus) 27%, var(--oa-border));
   border-radius: var(--oa-radius-xs);
-  background: color-mix(in oklch, var(--oa-focus) 12%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--oa-focus) 24%, transparent);
+  background: color-mix(in oklch, var(--oa-focus) 7%, var(--oa-panel));
   color: var(--oa-text);
-  cursor: help;
+  cursor: text;
+  display: inline-block;
   font-family: var(--vscode-editor-font-family, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace);
-  padding: 0 2px;
+  line-height: 1.35;
+  overflow: hidden;
+  vertical-align: -0.12em;
+  white-space: nowrap;
 }
 
 .composer-file-token {
-  background: color-mix(in oklch, var(--oa-accent) 10%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--oa-accent) 22%, transparent);
+  border-color: color-mix(in oklch, var(--oa-accent) 25%, var(--oa-border));
+  background: color-mix(in oklch, var(--oa-accent) 6%, var(--oa-panel));
+}
+
+.composer-reference-sigil,
+.composer-reference-label {
+  display: inline-block;
+  padding: 0 3px;
+}
+
+.composer-reference-sigil {
+  border-right: 1px solid color-mix(in oklch, var(--oa-focus) 22%, var(--oa-border));
+  background: color-mix(in oklch, var(--oa-focus) 13%, transparent);
+  color: var(--oa-focus);
+  font-weight: 650;
+}
+
+.composer-file-token .composer-reference-sigil {
+  border-right-color: color-mix(in oklch, var(--oa-accent) 20%, var(--oa-border));
+  background: color-mix(in oklch, var(--oa-accent) 11%, transparent);
+  color: var(--oa-accent);
+}
+
+.composer-reference-token:hover {
+  border-color: color-mix(in oklch, var(--oa-focus) 42%, var(--oa-border));
+}
+
+.composer-file-token:hover {
+  border-color: color-mix(in oklch, var(--oa-accent) 38%, var(--oa-border));
 }
 
 .composer-file-popover {
@@ -123,8 +153,27 @@
   font-size: 12px;
 }
 
-.composer-file-status,
-.composer-file-refresh {
+.composer-file-option .composer-file-kind-icon {
+  width: 16px;
+  flex: 0 0 16px;
+  color: var(--oa-muted);
+  display: inline-grid;
+  place-items: center;
+}
+
+.composer-file-kind-icon[data-file-kind="typescript"] { color: oklch(58% 0.14 246); }
+.composer-file-kind-icon[data-file-kind="javascript"] { color: oklch(72% 0.14 90); }
+.composer-file-kind-icon[data-file-kind="rust"] { color: oklch(64% 0.14 45); }
+.composer-file-kind-icon[data-file-kind="python"] { color: oklch(62% 0.12 245); }
+.composer-file-kind-icon[data-file-kind="web"] { color: oklch(62% 0.16 40); }
+.composer-file-kind-icon[data-file-kind="json"] { color: oklch(70% 0.12 100); }
+.composer-file-kind-icon[data-file-kind="markdown"] { color: oklch(65% 0.11 235); }
+.composer-file-kind-icon[data-file-kind="image"] { color: oklch(66% 0.13 305); }
+.composer-file-kind-icon[data-file-kind="archive"] { color: oklch(68% 0.12 70); }
+.composer-file-kind-icon[data-file-kind="database"] { color: oklch(65% 0.1 195); }
+.composer-file-kind-icon[data-file-kind="config"] { color: oklch(64% 0.04 240); }
+
+.composer-file-status {
   color: var(--oa-muted);
   display: flex;
   gap: 7px;
@@ -140,12 +189,6 @@
 
 .composer-file-error {
   color: var(--oa-danger);
-}
-
-.composer-file-refresh {
-  min-height: 24px;
-  border-top: 1px solid color-mix(in oklch, var(--oa-border) 72%, transparent);
-  font-size: 11px;
 }
 
 .composer-slash-popover {
