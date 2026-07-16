@@ -140,7 +140,10 @@ export function useFileMentionPicker(
       globalThis.clearTimeout(timer);
     };
   }, [browser?.ownerKey, token?.start, token?.end, token?.query]);
-  return [state, setState] as const;
+  // Effects clear stale search state after paint. Mask it synchronously so a
+  // picker can never flash after the caret leaves @ or its workspace changes.
+  const visibleState = browser && token && state?.ownerKey === browser.ownerKey ? state : undefined;
+  return [visibleState, setState] as const;
 }
 
 export function FileMentionPicker({ state, onSelect }: {
