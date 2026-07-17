@@ -42,7 +42,10 @@ export function requestControllerNativeSessions({
   projectId?: string;
   onFailure?: (failure: NativeSessionLoadFailure) => void;
 }) {
-  const operation = asyncOperations.claim("native-session-list");
+  // Native Session discovery feeds shared Task Navigation, so changing the
+  // visible route must not orphan its loading state. A replaced App Server
+  // replica or a newer list request still invalidates this operation.
+  const operation = asyncOperations.claim("native-session-list", undefined, "replica");
   const requestId = operation.id;
   dispatch({ type: "newTask:nativeSessions:start", append });
   if (backendConnection) {

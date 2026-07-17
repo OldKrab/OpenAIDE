@@ -1,18 +1,18 @@
-import { Brain, ChevronLeft, Code2, Cpu, Image, Plus, Shield, SlidersHorizontal } from "lucide-react";
-import type { ConfigOption, ConfigOptionsCatalog, IsolationKind } from "@openaide/app-shell-contracts";
+import { Code2, Image, Plus } from "lucide-react";
+import type { ConfigOptionsCatalog, IsolationKind } from "@openaide/app-shell-contracts";
 import { useRef, type Dispatch, type SetStateAction } from "react";
 import {
   agentOptions,
-  isolationOptions,
   type AgentOption,
   type ComposerSelection,
 } from "../state/composerOptions";
 import { AgentIcon } from "./AgentIcon";
-import { IconButton, MenuButton, Popover, PopoverBackButton, Selector } from "./ComposerPrimitives";
+import { IconButton, MenuButton, Popover, Selector } from "./ComposerPrimitives";
+import { ComposerRunOptions, type ComposerRunMenu } from "./ComposerRunOptions";
 import type { TaskFileBrowserCallbacks } from "./appControllerCallbackTypes";
 import { attachEveryImage } from "./imageAttachmentBatch";
 
-export type ComposerMenu = "add" | "agent" | "options" | "isolation" | `config:${string}`;
+export type ComposerMenu = "add" | "agent" | ComposerRunMenu;
 
 type ComposerControlsProps = {
   agentLocked: boolean;
@@ -57,16 +57,6 @@ export function ComposerControls({
 }: ComposerControlsProps) {
   const controlsLocked = disabled || agentLocked;
   const configControlsLocked = disabled || configLocked;
-  const optionControls = configOptions?.options ?? [];
-  const pendingChange = configOptions?.pending_change;
-  const mobileOptionsLocked = (optionControls.length === 0 || configControlsLocked)
-    && (!showIsolationSelector || controlsLocked);
-  const mobileOptionsLabel = compactRunOptionsLabel(
-    optionControls,
-    selection.isolation,
-    showIsolationSelector,
-    pendingChange,
-  );
   const imageUploadRef = useRef<HTMLInputElement | null>(null);
   const uploadImages = (files: File[], input: HTMLInputElement) => {
     input.value = "";
@@ -134,207 +124,24 @@ export function ComposerControls({
           ) : null}
         </div>
       ) : null}
-      {optionControls.map((option) => {
-        const menuId = configMenuId(option.id);
-        const pending = pendingChange?.option_id === option.id;
-        return (
-          <div className="composer-option-anchor composer-config-control-anchor" key={option.id}>
-            <Selector
-              className="composer-config-control"
-              disabled={configControlsLocked}
-              icon={configIcon(option)}
-              label={configOptionLabel(option, pending ? pendingChange.requested_value : undefined)}
-              locked={configControlsLocked}
-              menuOpen={openMenu === menuId}
-              onClick={() => toggleMenu(menuId)}
-              pending={pending}
-            />
-            {openMenu === menuId ? (
-              <Popover className="composer-model-menu" label={option.label}>
-                <PopoverBackButton
-                  ariaLabel="Back to options"
-                  icon={<ChevronLeft size={13} />}
-                  label={option.label}
-                  onClick={() => setOpenMenu("options")}
-                />
-                {option.values.map((value) => (
-                  <MenuButton
-                    active={option.current_value === value.id}
-                    description={value.description ?? value.group_label ?? option.description ?? ""}
-                    disabled={configControlsLocked}
-                    icon={configIcon(option, 13)}
-                    key={value.id}
-                    label={value.label}
-                    onClick={() => selectAndClose(() => onSelectConfigOption?.(option.id, value.id))}
-                  />
-                ))}
-              </Popover>
-            ) : null}
-          </div>
-        );
-      })}
-      {showIsolationSelector ? (
-        <div className="composer-option-anchor composer-isolation-control-anchor">
-          <Selector
-            className="composer-isolation-control"
-            disabled={controlsLocked}
-            icon={<Shield size={12} />}
-            label={isolationLabel(selection.isolation)}
-            locked={agentLocked}
-            menuOpen={openMenu === "isolation"}
-            onClick={() => toggleMenu("isolation")}
-          />
-          {openMenu === "isolation" ? (
-            <Popover label="Isolation">
-              <PopoverBackButton
-                ariaLabel="Back to options"
-                icon={<ChevronLeft size={13} />}
-                label="Isolation"
-                onClick={() => setOpenMenu("options")}
-              />
-              {isolationOptions.map((isolation) => (
-                <MenuButton
-                  active={selection.isolation === isolation.id}
-                  description={isolation.description}
-                  disabled={controlsLocked}
-                  icon={<Shield size={13} />}
-                  key={isolation.id}
-                  label={isolation.label}
-                  onClick={() => selectAndClose(() => onSelectIsolation?.(isolation.id))}
-                />
-              ))}
-            </Popover>
-          ) : null}
-        </div>
-      ) : null}
-      {optionControls.length > 0 || showIsolationSelector ? (
-        <div className="composer-mobile-options-anchor">
-          <Selector
-            disabled={disabled || mobileOptionsLocked}
-            icon={<SlidersHorizontal size={12} />}
-            label={mobileOptionsLabel}
-            locked={mobileOptionsLocked}
-            menuOpen={openMenu === "options"}
-            onClick={() => toggleMenu("options")}
-            pending={pendingChange !== undefined}
-          />
-          {openMenu === "options" ? (
-            <Popover label="Run options">
-              {optionControls.map((option) => (
-                <MenuButton
-                  description={runOptionDescription(option)}
-                  disabled={configControlsLocked}
-                  icon={configIcon(option, 13)}
-                  key={option.id}
-                  label={runOptionLabel(option)}
-                  onClick={() => setOpenMenu(configMenuId(option.id))}
-                />
-              ))}
-              {showIsolationSelector ? (
-                <MenuButton
-                  description={`Current: ${isolationLabel(selection.isolation)}`}
-                  disabled={controlsLocked}
-                  icon={<Shield size={13} />}
-                  label="Isolation"
-                  onClick={() => setOpenMenu("isolation")}
-                />
-              ) : null}
-            </Popover>
-          ) : null}
-        </div>
-      ) : null}
+      <ComposerRunOptions
+        configLocked={configControlsLocked}
+        configOptions={configOptions}
+        controlsLocked={controlsLocked}
+        disabled={disabled}
+        onSelectConfigOption={onSelectConfigOption}
+        onSelectIsolation={onSelectIsolation}
+        openMenu={openMenu}
+        selectAndClose={selectAndClose}
+        selection={selection}
+        setOpenMenu={setOpenMenu}
+        showIsolationSelector={showIsolationSelector}
+        toggleMenu={toggleMenu}
+      />
     </div>
   );
 }
 
-function isolationLabel(isolation: IsolationKind) {
-  return isolationOptions.find((option) => option.id === isolation)?.label ?? isolation;
-}
-
-function compactRunOptionsLabel(
-  options: ConfigOption[],
-  isolation: IsolationKind,
-  showIsolation: boolean,
-  pendingChange?: NonNullable<ConfigOptionsCatalog["pending_change"]>,
-) {
-  const pendingOption = pendingChange
-    ? options.find((option) => option.id === pendingChange.option_id)
-    : undefined;
-  const primaryOption = pendingOption
-    ?? options.find((option) => option.category === "model" || option.id === "model")
-    ?? options[0];
-  const selectedValue = primaryOption
-    ? configOptionLabel(
-        primaryOption,
-        primaryOption === pendingOption ? pendingChange?.requested_value : undefined,
-      )
-    : undefined;
-  const detail = selectedValue || (showIsolation ? isolationLabel(isolation) : undefined);
-  return detail ? `Options · ${detail}` : "Options";
-}
-
-function configMenuId(optionId: string): ComposerMenu {
-  return `config:${optionId}`;
-}
-
-function configOptionLabel(option: ConfigOption, displayedValue = option.current_value) {
-  const selected = option.values.find((value) => value.id === displayedValue);
-  const valueLabel = normalizedConfigValueLabel(selected?.label) ?? humanizeConfigValue(displayedValue) ?? option.label;
-  const prefix = configOptionPrefix(option);
-  if (!prefix) return valueLabel;
-  return `${prefix}: ${valueLabel}`;
-}
-
-function runOptionLabel(option: ConfigOption) {
-  if (option.category === "model") return "Model";
-  if (option.category === "thought_level") return "Reasoning";
-  return option.label.trim() || humanizeConfigValue(option.id) || "Option";
-}
-
-function runOptionDescription(option: ConfigOption) {
-  const selected = option.values.find((value) => value.id === option.current_value);
-  return `Current: ${normalizedConfigValueLabel(selected?.label) ?? humanizeConfigValue(option.current_value) ?? option.current_value}`;
-}
-
 function errorMessage(error: unknown, fallback: string) {
   return error instanceof Error ? error.message : fallback;
-}
-
-function normalizedConfigValueLabel(label: string | undefined) {
-  if (!label?.trim()) return undefined;
-  const trimmed = label.trim();
-  return trimmed === trimmed.toLowerCase() ? humanizeConfigValue(trimmed) ?? trimmed : trimmed;
-}
-
-function configOptionPrefix(option: ConfigOption) {
-  if (option.category === "model") return undefined;
-  const label = option.label.trim();
-  if (!label) return undefined;
-  if (option.category === "mode" || option.category === "thought_level") return undefined;
-  return label.replace(/\s+mode$/i, "");
-}
-
-function humanizeConfigValue(value: string | undefined) {
-  if (!value?.trim()) return undefined;
-  const trimmed = value.trim();
-  const modelMatch = /^(gpt|o|claude|gemini|llama|mistral|qwen|deepseek)([-_].+)$/i.exec(trimmed);
-  if (modelMatch) {
-    return `${modelPrefixLabel(modelMatch[1])}${modelMatch[2].replaceAll("_", "-")}`;
-  }
-  return trimmed
-    .split(/[_-]/)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(" ");
-}
-
-function modelPrefixLabel(prefix: string) {
-  return prefix.length <= 3 ? prefix.toUpperCase() : prefix.charAt(0).toUpperCase() + prefix.slice(1);
-}
-
-function configIcon(option: ConfigOption, size = 12) {
-  if (option.category === "model") return <Cpu size={size} />;
-  if (option.category === "thought_level") return <Brain size={size} />;
-  if (option.category === "mode") return <Code2 size={size} />;
-  return <SlidersHorizontal size={size} />;
 }
