@@ -1,28 +1,39 @@
 # OpenAIDE
 
-OpenAIDE is a local task workbench for running coding agents without losing sight
-of what they are doing. It keeps Chat, permission requests, tool and terminal
-activity, Task state, and Agent setup visible in one place.
+OpenAIDE is an
+[Agent Client Protocol (ACP)](https://agentclientprotocol.com/)-native Agentic
+Development Environment for running Codex, OpenCode, and Custom ACP-compatible
+Agents locally as durable, inspectable Tasks.
+
+OpenAIDE treats Agent work as a recoverable Task, not a disposable chat tab. Each
+Task keeps its Agent-owned session, streamed Chat, permission decisions, tool and
+terminal activity, configuration, and recovery state visible and attributable.
+A local Rust App Server owns Task lifecycle and persistence instead of leaving
+that state inside a transient UI.
 
 The packaged alpha runs inside VS Code. A local Web App is available when
 building from source. Both use the same Rust App Server and shared Frontend;
 Desktop and Mobile App Shells are planned, not included today.
 
-OpenAIDE connects to coding agents through the
-[Agent Client Protocol (ACP)](https://agentclientprotocol.com/), the open protocol
-that lets editor-like clients communicate with agents. Built-in integrations
-currently include Codex and OpenCode, and you can configure a Custom stdio ACP
-Agent in Settings.
+ACP is the open protocol that lets editor-like clients communicate with coding
+Agents. OpenAIDE uses real ACP sessions and capabilities rather than substituting
+a mock Agent or reducing every integration to the same hard-coded feature set.
 
-## What you can do
+## Why OpenAIDE
 
-- Run Agent work as persistent Tasks instead of disposable chat windows.
-- Follow responses, folded tool activity, terminal output, and permission
-  requests while work is running.
-- Return to saved Task history and inspect failures or interrupted work.
-- Check Agent availability and configuration before starting a Task.
-- Use Codex, OpenCode, or a Custom ACP-compatible Agent without replacing the
-  real Agent with a mock.
+- **ACP-native Agents:** use the built-in Codex and OpenCode integrations or add
+  a Custom stdio ACP Agent in Settings. OpenAIDE discovers Agent capabilities and
+  exposes supported session configuration instead of assuming one provider.
+- **Durable Tasks:** keep accepted Chat and Agent activity in local Task history
+  that can be reopened, inspected, and archived.
+- **Agent-owned session continuity:** discover and adopt existing Agent sessions
+  when the Agent supports it, while keeping their activity inspectable as Tasks.
+- **Inspectable execution:** follow streamed responses, folded tool details,
+  terminal output, permission requests, and failures in their Chat order.
+- **Explicit recovery:** keep interrupted work visible, stop running Tasks, and
+  recover locally stalled sessions without silently resending Agent work.
+- **Local-first state ownership:** keep Task workflow and history in the local App
+  Server rather than making a transient Frontend the only owner of Agent work.
 
 Agent capabilities vary. OpenAIDE shows unsupported operations in the interface
 when the connected Agent does not provide them.

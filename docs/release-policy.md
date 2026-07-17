@@ -11,7 +11,8 @@ promoted to production.
 
 ## Merge requirements
 
-- Changes reach `main` through reviewed pull requests.
+- Product changes reach `main` through reviewed pull requests. The automated
+  release-version commit is the only direct-push exception.
 - The `TypeScript and protocol checks`, `Rust format, lint, and tests`,
   `JavaScript and TypeScript tests`, and `Production build` checks are required.
 - Generated App Server Protocol bindings must be committed and current.
@@ -19,21 +20,38 @@ promoted to production.
 - Do not put credentials in repository or workflow files. Use GitHub environments
   and repository or organization secrets.
 
-Configure the `main` ruleset in GitHub after the first CI run, when the required
-check names become selectable.
+The `main` ruleset must require the repository's CI checks for pull requests and
+allow the release GitHub App to push the automated version commit and tag. The
+`Version Bump` workflow requires `RELEASE_APP_ID` and
+`RELEASE_APP_PRIVATE_KEY`. Stable Marketplace releases also require `VSCE_PAT`.
 
 ## Creating a release
 
-1. Update every public package version represented by the release and commit the
-   change through a pull request. The root `package.json` version is authoritative
-   for the release tag.
-2. Create and push an annotated SemVer tag from the merged `main` commit, such as
-   `v0.0.1-alpha.1` for a prerelease or `v0.0.1` for a stable release.
-3. The release workflow validates the release version, repeats tests, builds
-   Linux x64, Windows x64, and macOS Apple Silicon VSIX packages, and creates a
-   GitHub Release. Prerelease tags create GitHub prereleases. Stable tags also
-   publish all platform packages to the VS Code Marketplace.
-4. Install and smoke-test each published VSIX before promoting the release.
+1. Confirm that `main` contains exactly the changes to release and that its CI is
+   green. Choose a new exact SemVer without a `v` prefix, such as
+   `0.0.1-alpha.10` or `0.0.1`.
+2. In GitHub Actions, run the `Version Bump` workflow on `main` and enter that
+   version. Do not edit package manifests or create the release tag manually.
+   The same workflow can be dispatched with GitHub CLI:
+
+   ```sh
+   gh workflow run version-bump.yml --ref main -f version=0.0.1-alpha.10
+   ```
+
+3. The workflow validates the version, runs `npm version` to update the canonical
+   root version and lockfile, creates the `Release vVERSION` commit and
+   `vVERSION` tag, then pushes both to `main`.
+4. The tag starts the `Release` workflow. It repeats the release checks, stamps
+   the exact version into packaged manifests, builds Linux x64, Windows x64, and
+   macOS Apple Silicon VSIX packages, and creates the GitHub Release. Prerelease
+   versions create GitHub prereleases; stable versions also publish all platform
+   packages to the VS Code Marketplace.
+5. Confirm that the Release workflow completed successfully, then install and
+   smoke-test each published VSIX before promoting the release.
+
+The root `package.json` is the release-version source of truth. Package manifests
+that are stamped only during artifact creation stay at their neutral source
+version and must not be updated by hand.
 
 Releases are never rebuilt in place. Correct a bad release with a new patch
 or prerelease version. For example, replace a bad `0.0.1-alpha.1` build with
