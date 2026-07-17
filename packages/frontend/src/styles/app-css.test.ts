@@ -423,8 +423,9 @@ describe("task list row styles", () => {
     expect(appCss).toMatch(/\.sidebar\s*{[^}]*min-height:\s*0;[^}]*height:\s*100vh;[^}]*grid-template-rows:\s*auto auto auto minmax\(0, 1fr\) auto;[^}]*overflow:\s*hidden;/);
     expect(appCss).toMatch(/\.task-list\s*{[^}]*min-height:\s*0;[^}]*overflow:\s*auto;[^}]*scrollbar-gutter:\s*stable;[^}]*padding-right:\s*10px;[^}]*padding-bottom:\s*24px;/);
     expect(appCss).toMatch(/\.task-list\s*{[^}]*scroll-padding-bottom:\s*24px;/);
+    expect(appCss).toMatch(/body\[data-shell="vscodeExtension"\] \.task-list\s*{[^}]*padding-right:\s*0;/);
     expect(appCss).toMatch(/body\[data-shell="web"\] \.task-list\s*{[^}]*margin-right:\s*-8px;[^}]*padding-right:\s*4px;/);
-    expect(appCss).toMatch(/\.sidebar-footer\s*{[^}]*border-top:\s*1px solid color-mix\(in oklch, var\(--oa-border\) 64%, transparent\);[^}]*padding-top:\s*6px;/);
+    expect(appCss).toMatch(/\.sidebar-footer\s*{[^}]*border-top:\s*1px solid var\(--oa-border-subtle\);[^}]*padding-top:\s*6px;/);
     expect(appCss).toMatch(/\.settings-button\s*{\s*width:\s*100%;/);
     expect(appCss).toMatch(/\.task-trailing-meta\s*{[^}]*display:\s*inline-flex;[^}]*gap:\s*4px;[^}]*font-size:\s*11px;/);
     expect(appCss).not.toMatch(/\.task-trailing-agent-name\s*{/);
