@@ -120,7 +120,10 @@ test("release publishing produces every supported platform VSIX package", () => 
   assert.match(release, /cd apps\/vscode-extension/);
   assert.match(release, /@vscode\/vsce@3\.6\.0 package/);
   assert.match(release, /--no-dependencies/);
-  assert.match(release, /node scripts\/set-release-artifact-version\.mjs "\$RELEASE_VERSION"/);
+  assert.match(
+    release,
+    /- name: Set release artifact versions\n\s+shell: bash\n\s+env:[\s\S]*?node scripts\/set-release-artifact-version\.mjs "\$RELEASE_VERSION"/,
+  );
   assert.doesNotMatch(release, /extension_version=/);
   assert.doesNotMatch(release, /--cwd/);
   assert.match(extensionPackage.scripts.build, /esbuild/);
