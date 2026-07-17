@@ -1,42 +1,36 @@
 # OpenAIDE
 
-OpenAIDE is an
-[Agent Client Protocol (ACP)](https://agentclientprotocol.com/)-native Agentic
-Development Environment for running Codex, OpenCode, and Custom ACP-compatible
-Agents locally as durable, inspectable Tasks.
+OpenAIDE runs coding Agents that support the
+[Agent Client Protocol (ACP)](https://agentclientprotocol.com/) and keeps each run
+as a Task you can inspect, stop, and return to.
 
-OpenAIDE treats Agent work as a recoverable Task, not a disposable chat tab. Each
-Task keeps its Agent-owned session, streamed Chat, permission decisions, tool and
-terminal activity, configuration, and recovery state visible and attributable.
-A local Rust App Server owns Task lifecycle and persistence instead of leaving
-that state inside a transient UI.
+A Task keeps the Agent's responses, tool calls, terminal output, permission
+requests, session configuration, and errors together. Work stays visible when a
+run fails or is interrupted, and OpenAIDE does not silently retry actions that
+may have changed your files.
 
 The packaged alpha runs inside VS Code. A local Web App is available when
 building from source. Both use the same Rust App Server and shared Frontend;
 Desktop and Mobile App Shells are planned, not included today.
 
-ACP is the open protocol that lets editor-like clients communicate with coding
-Agents. OpenAIDE uses real ACP sessions and capabilities rather than substituting
-a mock Agent or reducing every integration to the same hard-coded feature set.
+## Agents
 
-## Why OpenAIDE
+Codex and OpenCode are built in. You can also add any ACP Agent that can be
+launched over stdio as a Custom Agent in Settings. The official ACP site keeps a
+[list of Agents that support ACP](https://agentclientprotocol.com/get-started/agents).
 
-- **ACP-native Agents:** use the built-in Codex and OpenCode integrations or add
-  a Custom stdio ACP Agent in Settings. OpenAIDE discovers Agent capabilities and
-  exposes supported session configuration instead of assuming one provider.
-- **Durable Tasks:** keep accepted Chat and Agent activity in local Task history
-  that can be reopened, inspected, and archived.
-- **Agent-owned session continuity:** discover and adopt existing Agent sessions
-  when the Agent supports it, while keeping their activity inspectable as Tasks.
-- **Inspectable execution:** follow streamed responses, folded tool details,
-  terminal output, permission requests, and failures in their Chat order.
-- **Explicit recovery:** keep interrupted work visible, stop running Tasks, and
-  recover locally stalled sessions without silently resending Agent work.
-- **Local-first state ownership:** keep Task workflow and history in the local App
-  Server rather than making a transient Frontend the only owner of Agent work.
+OpenAIDE checks an Agent's capabilities before using optional features and marks
+unavailable operations as unsupported. For example, an Agent must support
+session discovery before OpenAIDE can find and adopt its existing sessions.
 
-Agent capabilities vary. OpenAIDE shows unsupported operations in the interface
-when the connected Agent does not provide them.
+## What it does
+
+- Saves accepted Chat and Agent activity in local Task history.
+- Shows streamed responses, folded tool details, terminal output, permission
+  requests, and failures in their Chat order.
+- Reopens saved Tasks and archives Tasks you no longer need in the main list.
+- Finds and adopts existing Agent sessions when the Agent supports it.
+- Stops running Tasks and can recover sessions left stuck after a crash.
 
 ## Alpha status
 
