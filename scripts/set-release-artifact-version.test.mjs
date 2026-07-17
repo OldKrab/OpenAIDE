@@ -19,6 +19,17 @@ test("stamps the exact release version into every packaged artifact manifest", (
   }
 });
 
+test("stamps Cargo manifests checked out with Windows line endings", () => {
+  const repoRoot = fixtureRepo("\r\n");
+
+  setReleaseArtifactVersion(repoRoot, "0.0.1-alpha.11");
+
+  assert.equal(
+    readFileSync(path.join(repoRoot, "openaide-rs/app-server/Cargo.toml"), "utf8"),
+    `[package]\r\nname = "app-server"\r\nversion = "0.0.1-alpha.11"\r\n`,
+  );
+});
+
 test("rejects invalid versions and non-neutral source manifests", () => {
   assert.throws(() => setReleaseArtifactVersion(fixtureRepo(), "v0.0.1"), /must be SemVer/);
 
@@ -28,15 +39,23 @@ test("rejects invalid versions and non-neutral source manifests", () => {
   assert.throws(() => setReleaseArtifactVersion(repoRoot, "0.0.2"), /must use neutral source version/);
 });
 
-function fixtureRepo() {
+function fixtureRepo(lineEnding = "\n") {
   const repoRoot = mkdtempSync(path.join(os.tmpdir(), "openaide-release-version-"));
   writeFixture(repoRoot, "apps/vscode-extension/package.json", {
     name: "test-extension",
     private: true,
     version: "0.0.0",
   });
-  writeFixture(repoRoot, "openaide-rs/app-server/Cargo.toml", `[package]\nname = "app-server"\nversion = "0.0.0"\n`);
-  writeFixture(repoRoot, "openaide-rs/app-server-protocol/Cargo.toml", `[package]\nname = "protocol"\nversion = "0.0.0"\n`);
+  writeFixture(
+    repoRoot,
+    "openaide-rs/app-server/Cargo.toml",
+    ["[package]", 'name = "app-server"', 'version = "0.0.0"', ""].join(lineEnding),
+  );
+  writeFixture(
+    repoRoot,
+    "openaide-rs/app-server-protocol/Cargo.toml",
+    ["[package]", 'name = "protocol"', 'version = "0.0.0"', ""].join(lineEnding),
+  );
   return repoRoot;
 }
 

@@ -35,10 +35,21 @@ function setJsonVersion(filePath, version) {
 function setCargoVersion(filePath, version) {
   const manifest = readFileSync(filePath, "utf8");
   const neutralVersionLine = `version = "${NEUTRAL_VERSION}"`;
-  if (!manifest.startsWith(`[package]\n`) || !manifest.includes(`${neutralVersionLine}\n`)) {
+  const lineEnding = manifest.includes("\r\n") ? "\r\n" : "\n";
+  const lines = manifest.split(/\r?\n/);
+  const nextSectionIndex = lines.findIndex((line, index) => index > 0 && line.startsWith("["));
+  const packageSectionEnd = nextSectionIndex === -1 ? lines.length : nextSectionIndex;
+  const versionLineIndex = lines.findIndex(
+    (line, index) => index > 0 && index < packageSectionEnd && line === neutralVersionLine,
+  );
+
+  if (lines[0] !== "[package]" || versionLineIndex === -1) {
     throw new Error(`${filePath} must use neutral package version ${NEUTRAL_VERSION}`);
   }
-  writeFileSync(filePath, manifest.replace(neutralVersionLine, `version = "${version}"`));
+
+  // Git may check manifests out as CRLF on Windows, so preserve the checkout's line endings.
+  lines[versionLineIndex] = `version = "${version}"`;
+  writeFileSync(filePath, lines.join(lineEnding));
 }
 
 const invokedPath = process.argv[1] ? path.resolve(process.argv[1]) : undefined;
