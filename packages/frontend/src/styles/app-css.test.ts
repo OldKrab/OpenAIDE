@@ -466,17 +466,20 @@ describe("task list row styles", () => {
     expect(appCss).toMatch(/\.composer-footer\s*{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\) auto;[^}]*align-items:\s*center;[^}]*gap:\s*8px;/);
     expect(appCss).toMatch(/\.composer-footer > \.composer-icon-button,[^{]+\.composer-footer > \.composer-submit-pending\s*{[^}]*grid-column:\s*2;[^}]*justify-self:\s*end;/);
     expect(appCss).toMatch(/\.composer-controls\s*{[^}]*display:\s*flex;[^}]*flex-wrap:\s*nowrap;[^}]*overflow-x:\s*visible;/);
-    expect(appCss).toMatch(/\.composer-controls:has\(\.composer-popover\)\s*{[^}]*flex-wrap:\s*wrap;[^}]*overflow-x:\s*visible;/);
-    expect(appCss).toMatch(/\.composer-controls \.composer-menu-anchor,[^{]+\.composer-controls \.composer-option-anchor\s*{[^}]*display:\s*contents;[^}]*position:\s*static;/);
-    expect(appCss).toMatch(/\.composer-config-control,[^{]+\.composer-isolation-control\s*{\s*display:\s*none;/);
-    expect(appCss).toMatch(/\.composer-mobile-options-anchor\s*{[^}]*display:\s*contents;/);
-    expect(appCss).toMatch(/\.composer-mobile-options-anchor > \.composer-pill\s*{[^}]*order:\s*1;/);
-    expect(appCss).toMatch(/\.composer-config-control-anchor > \.composer-popover,[^{]+\.composer-isolation-control-anchor > \.composer-popover\s*{[^}]*order:\s*2;/);
+    expect(appCss).toMatch(/\.composer-adaptive-options\s*{[^}]*min-width:\s*0;[^}]*display:\s*flex;[^}]*flex:\s*1 1 auto;[^}]*gap:\s*4px;/);
+    expect(appCss).toMatch(/\.composer-controls\s*{[^}]*position:\s*relative;/);
+    expect(appCss).toMatch(/\.composer-adaptive-options\s*{[^}]*position:\s*static;/);
+    expect(appCss).toMatch(/\.composer-overflow-options-anchor\s*{[^}]*position:\s*static;/);
+    expect(appCss).toMatch(/\.composer-options-measurement\s*{[^}]*position:\s*fixed;[^}]*visibility:\s*hidden;[^}]*pointer-events:\s*none;/);
+    expect(appCss).toMatch(/\.composer-overflow-options-anchor > \.composer-popover\s*{[^}]*left:\s*auto;[^}]*right:\s*0;/);
+    expect(appCss).not.toMatch(/\.composer-config-control,[^{]+\.composer-isolation-control\s*{\s*display:\s*none;/);
+    expect(appCss).not.toMatch(/\.composer-mobile-options-anchor\s*{/);
     expect(appCss).toMatch(/\.composer-controls \.composer-pill\s*{[^}]*width:\s*fit-content;[^}]*max-width:\s*min\(260px,\s*100%\);[^}]*flex:\s*0 1 auto;/);
+    expect(appCss).toMatch(/\.composer-pill:not\(:disabled\),[^{]+\.composer-popover button:not\(:disabled\)\s*{[^}]*cursor:\s*pointer;/);
+    expect(appCss).toMatch(/\.composer-overflow-menu-row:hover:not\(:disabled\) small,[^{]+{[^}]*color:\s*var\(--oa-text\);/);
     expect(appCss).toMatch(/@media \(hover:\s*none\)\s*{[^}]*\.composer \.composer-pill:hover:not\(:disabled\)\s*{[^}]*background:\s*transparent;/);
     expect(appCss).not.toMatch(/\.composer-menu-anchor > \.composer-popover:not\(\.composer-file-browser-popover\)\s*{[^}]*position:\s*static;/);
     expect(appCss).not.toMatch(/\.composer-option-anchor > \.composer-popover:not\(\.composer-file-browser-popover\)\s*{[^}]*position:\s*static;/);
-    expect(appCss).not.toMatch(/\.composer-mobile-options-anchor > \.composer-popover:not\(\.composer-file-browser-popover\)\s*{[^}]*position:\s*static;/);
     expect(appCss).not.toMatch(/body\[data-shell="web"\] \.composer-pill\s*{\s*max-width:\s*128px;/);
   });
 

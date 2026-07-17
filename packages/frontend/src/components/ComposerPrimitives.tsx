@@ -91,15 +91,19 @@ export function Popover({
 
 export function MenuButton({
   active,
+  className,
   description,
   disabled,
+  endIcon,
   icon,
   label,
   onClick,
 }: {
   active?: boolean;
+  className?: string;
   description?: string;
   disabled?: boolean;
+  endIcon?: ReactNode;
   icon: ReactNode;
   label: string;
   onClick: () => void;
@@ -109,7 +113,9 @@ export function MenuButton({
     <button
       aria-checked={active}
       className={[
+        className,
         active === undefined ? undefined : "composer-menu-choice",
+        endIcon ? "composer-menu-choice-with-end" : undefined,
         description ? undefined : "composer-menu-choice-compact",
       ].filter(Boolean).join(" ") || undefined}
       disabled={disabled}
@@ -122,7 +128,7 @@ export function MenuButton({
         <strong>{label}</strong>
         {description ? <small>{description}</small> : null}
       </span>
-      {active === undefined ? null : (
+      {endIcon ? <span aria-hidden="true" className="composer-menu-end-icon">{endIcon}</span> : active === undefined ? null : (
         <span aria-hidden="true" className="composer-menu-selection">
           {active ? <Check size={13} /> : null}
         </span>

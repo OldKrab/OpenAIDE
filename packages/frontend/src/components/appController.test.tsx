@@ -235,6 +235,60 @@ describe("app controller mounted lifecycle", () => {
     expect(latestController?.state.newTask.nativeSessions.items).toHaveLength(14);
   });
 
+  it("finishes refreshing native sessions after opening a task", async () => {
+    bootstrap = navigationBootstrap({ projectId: "project_1" });
+    const sessionList = deferredValue<{
+      agentId: string;
+      projectId: string;
+      projectLabel: string;
+      sessions: Array<{ sessionId: string; title: string }>;
+      nextCursor: null;
+    }>();
+    const request = vi.fn(async (method: string) => {
+      if (method === AGENT_LIST_SESSIONS) return sessionList.promise;
+      if (method === TASK_OPEN) return { task: protocolTaskSnapshot("task_1", "Opened Task") };
+      throw new Error(method);
+    });
+    const initializedSnapshot = clientSnapshot({ includeActiveTask: false });
+    initializedSnapshot.client.surface = { kind: "project", projectId: "project_1" as never };
+    initializedSnapshot.newTaskDefaults.projectId = "project_1" as never;
+    initializedSnapshot.projects = {
+      projects: [{ projectId: "project_1" as never, label: "OpenAIDE" }],
+    };
+    backendConnection = {
+      initialize: vi.fn(async () => ({ snapshot: initializedSnapshot })),
+      request: request as unknown as BackendConnection["request"],
+      close: vi.fn(),
+    };
+
+    await act(async () => {
+      create(<ControllerProbe />);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(latestController?.state.newTask.nativeSessions.loading).toBe(true);
+
+    await act(async () => {
+      latestController?.callbacks.navigation.openTask("task_1");
+      webRouteListeners.forEach((listener) => listener(taskBootstrap("task_1")));
+      await Promise.resolve();
+      sessionList.resolve({
+        agentId: "codex",
+        projectId: "project_1",
+        projectLabel: "OpenAIDE",
+        sessions: [{ sessionId: "native_1", title: "Native session" }],
+        nextCursor: null,
+      });
+      await sessionList.promise;
+      await Promise.resolve();
+    });
+
+    expect(latestController?.state.newTask.nativeSessions).toMatchObject({
+      loading: false,
+      items: [{ session_id: "native_1", title: "Native session" }],
+    });
+  });
+
   it("settles an initialization failure as unavailable", async () => {
     backendConnection = {
       initialize: vi.fn(async () => {

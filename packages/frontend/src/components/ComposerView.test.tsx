@@ -357,51 +357,55 @@ describe("Composer view behavior", () => {
     expect(onSelectIsolation).toHaveBeenCalledWith("docker");
   });
 
-  it("offers run configuration through the compact Options menu", () => {
-    const configOptionsWithModel: ConfigOptionsCatalog = {
-      agent_id: "codex",
-      options: [
-        {
-          category: "model",
-          current_value: "gpt-5.5",
-          id: "model",
-          label: "Model",
-          values: [{ id: "gpt-5.5", label: "GPT-5.5" }],
-        },
-        ...configOptions().options,
-      ],
-      status: "ready",
-    };
+  it("groups a trailing option suffix and keeps grouped values selectable", () => {
+    vi.stubGlobal("ResizeObserver", class {
+      disconnect() {}
+      observe() {}
+      unobserve() {}
+    });
+    const onSelectConfigOption = vi.fn();
     const renderer = renderComposer({
-      configOptions: configOptionsWithModel,
+      configOptions: {
+        agent_id: "codex",
+        options: [
+          {
+            category: "model",
+            current_value: "gpt-5.6",
+            id: "model",
+            label: "Model",
+            values: [{ id: "gpt-5.6", label: "GPT-5.6" }],
+          },
+          ...configOptions().options,
+        ],
+        status: "ready",
+      },
+      onSelectConfigOption,
       selection: selection({ isolation: "git_worktree" }),
     });
 
-    click(buttonByText(renderer.root, "Options · GPT-5.5"));
-
-    expect(text(menuByLabel(renderer.root, "Run options"))).toContain("Model");
-    expect(text(menuByLabel(renderer.root, "Run options"))).toContain("Reasoning");
-    expect(text(menuByLabel(renderer.root, "Run options"))).toContain("Isolation");
+    click(buttonByText(renderer.root, "More · 3"));
+    expect(text(menuByLabel(renderer.root, "More options"))).toContain("Current: Balanced");
 
     click(menuButtonByStrongLabel(renderer.root, "Reasoning"));
-
     expect(text(menuByLabel(renderer.root, "Reasoning"))).toContain("Higher accuracy.");
-    const backButton = renderer.root.findByProps({ className: "composer-popover-back" });
-    expect(backButton.props["aria-label"]).toBe("Back to options");
-    expect(text(backButton)).toBe("Reasoning");
+    click(menuButtonByStrongLabel(renderer.root, "High"));
 
-    click(backButton);
-
-    expect(text(menuByLabel(renderer.root, "Run options"))).toContain("Model");
+    expect(onSelectConfigOption).toHaveBeenCalledWith("reasoning", "high");
+    expect(text(menuByLabel(renderer.root, "More options"))).toContain("Reasoning");
   });
 
-  it("keeps compact Configuration Options locked while leaving mutable Isolation available", () => {
+  it("keeps grouped Configuration Options locked while leaving mutable Isolation available", () => {
+    vi.stubGlobal("ResizeObserver", class {
+      disconnect() {}
+      observe() {}
+      unobserve() {}
+    });
     const renderer = renderComposer({
       configLocked: true,
       configOptions: configOptions(),
       showIsolationSelector: true,
     });
-    const compactAnchor = renderer.root.findByProps({ className: "composer-mobile-options-anchor" });
+    const compactAnchor = renderer.root.findByProps({ className: "composer-option-anchor composer-overflow-options-anchor" });
 
     click(compactAnchor.findByType("button"));
 
@@ -409,13 +413,18 @@ describe("Composer view behavior", () => {
     expect(menuButtonByStrongLabel(renderer.root, "Isolation").props.disabled).toBe(false);
   });
 
-  it("disables compact Options when every contained control is locked", () => {
+  it("disables More when every grouped control is locked", () => {
+    vi.stubGlobal("ResizeObserver", class {
+      disconnect() {}
+      observe() {}
+      unobserve() {}
+    });
     const renderer = renderComposer({
       configLocked: true,
       configOptions: configOptions(),
       showIsolationSelector: false,
     });
-    const compactAnchor = renderer.root.findByProps({ className: "composer-mobile-options-anchor" });
+    const compactAnchor = renderer.root.findByProps({ className: "composer-option-anchor composer-overflow-options-anchor" });
 
     expect(compactAnchor.findByType("span").props.className).toContain("locked");
   });
@@ -447,7 +456,7 @@ describe("Composer view behavior", () => {
 
     expect(text(renderer.root)).toContain("Fast: On");
     expect(text(renderer.root)).not.toContain("Fast: Off");
-    expect(renderer.root.findAllByProps({ "aria-busy": true })).toHaveLength(2);
+    expect(renderer.root.findAllByProps({ "aria-busy": true })).toHaveLength(1);
     expect(text(renderer.root)).not.toContain("Agent is still updating options");
 
     act(() => {
@@ -569,7 +578,7 @@ describe("Composer view behavior", () => {
 
     click(configControlButtonsByText(renderer.root, "Fast: Off")[0]);
 
-    const menuAnchor = menuByLabel(renderer.root, "Fast mode").parent?.parent;
+    const menuAnchor = ancestorWithClass(menuByLabel(renderer.root, "Fast mode"), "composer-option-anchor");
     expect(menuAnchor?.props.className).toContain("composer-option-anchor");
     expect(text(menuAnchor as ReactTestInstance)).toContain("Fast: Off");
   });
@@ -676,7 +685,7 @@ describe("Composer view behavior", () => {
       typeof node.props.className === "string" &&
       node.props.className.split(/\s+/).includes("composer-pill") &&
       node.props.className.split(/\s+/).includes("locked"),
-    )).toHaveLength(4);
+    )).toHaveLength(3);
     expect(buttonsByLabel(lockedRenderer.root, "Send message")).toHaveLength(0);
     expect(buttonsByLabel(lockedRenderer.root, "Stop task")).toHaveLength(1);
     click(buttonByLabel(lockedRenderer.root, "Stop task"));
@@ -1429,6 +1438,15 @@ function menuButtonByStrongLabel(root: ReactTestInstance, label: string) {
   return root.findAll((candidate) =>
     candidate.type === "button" && candidate.findAll((child) => child.type === "strong" && text(child) === label).length > 0,
   )[0] ?? missing(label);
+}
+
+function ancestorWithClass(instance: ReactTestInstance, className: string) {
+  let ancestor = instance.parent;
+  while (ancestor) {
+    if (String(ancestor.props.className ?? "").split(/\s+/).includes(className)) return ancestor;
+    ancestor = ancestor.parent;
+  }
+  throw new Error(`Could not find ancestor .${className}`);
 }
 
 function menuButtonsByStrongLabel(root: ReactTestInstance, label: string) {

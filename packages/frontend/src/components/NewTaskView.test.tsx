@@ -886,7 +886,6 @@ describe("NewTaskView", () => {
       "Agent",
       "Medium",
       "GPT-5.5",
-      "Options · GPT-5.5",
     ]);
   });
 
