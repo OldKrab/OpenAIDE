@@ -3986,6 +3986,66 @@ fn cancel_stays_stopping_until_the_agent_prompt_settles() {
 }
 
 #[test]
+fn cancel_timeout_discards_the_session_and_ends_the_turn() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    store
+        .write_task(&task_record("task-existing", "/workspace/app"))
+        .unwrap();
+    let agent = Arc::new(RecordingAgent {
+        block_prompt: true,
+        hold_cancelled_prompt: AtomicBool::new(true),
+        ..RecordingAgent::default()
+    });
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        agent.clone(),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+    api.turn_runner
+        .set_cancel_grace_period_for_test(Duration::from_millis(20));
+
+    let sent = api.send(send_params("task-existing", "hello")).unwrap();
+    wait_until(|| agent.prompts.load(Ordering::SeqCst) == 1);
+
+    api.cancel_for_test(TaskCancelParams {
+        task_id: "task-existing".into(),
+        turn_id: Some(sent.turn_id),
+    })
+    .unwrap();
+
+    wait_until(|| {
+        store.read_task("task-existing").unwrap().status == TaskStatus::Inactive
+            && agent.closes.load(Ordering::SeqCst) == 1
+    });
+    let task = store.read_task("task-existing").unwrap();
+    assert_eq!(task.active_turn_id, None);
+    assert_eq!(task.agent_session_id, None);
+    assert_eq!(agent.closes.load(Ordering::SeqCst), 1);
+    assert!(store
+        .read_messages("task-existing")
+        .unwrap()
+        .iter()
+        .any(|message| matches!(
+            message.chat.message,
+            NormalizedMessage::Activity {
+                status: ActivityStatus::Interrupted,
+                ..
+            }
+        )));
+
+    agent.release_cancelled_prompt.store(true, Ordering::SeqCst);
+    wait_until(|| agent.prompt_completions.load(Ordering::SeqCst) == 1);
+    let task_after_late_prompt = store.read_task("task-existing").unwrap();
+    assert_eq!(task_after_late_prompt.status, TaskStatus::Inactive);
+    assert_eq!(task_after_late_prompt.active_turn_id, None);
+    assert_eq!(task_after_late_prompt.agent_session_id, None);
+}
+
+#[test]
 fn cancel_signals_live_agent_turn_started_by_task_send() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
@@ -5500,6 +5560,7 @@ struct RecordingAgent {
     loads: AtomicUsize,
     resumes: AtomicUsize,
     prompts: AtomicUsize,
+    prompt_completions: AtomicUsize,
     steers: AtomicUsize,
     attaches: AtomicUsize,
     cancels: AtomicUsize,
@@ -5752,11 +5813,13 @@ impl AgentRuntime for RecordingAgent {
         {
             std::thread::sleep(Duration::from_millis(10));
         }
-        Ok(if cancelled {
+        let outcome = if cancelled {
             crate::agent::AgentPromptOutcome::Cancelled
         } else {
             crate::agent::AgentPromptOutcome::EndTurn
-        })
+        };
+        self.prompt_completions.fetch_add(1, Ordering::SeqCst);
+        Ok(outcome)
     }
 
     fn steer(&self, prompt: AgentPrompt) -> Result<(), RuntimeError> {

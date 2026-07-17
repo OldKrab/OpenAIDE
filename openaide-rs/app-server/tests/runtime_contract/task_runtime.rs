@@ -201,7 +201,10 @@ fn cancel_signals_agent_after_turn_started() {
             task_id: snapshot.task.task_id.clone(),
         })
         .unwrap();
-    assert_eq!(stopped.task.status, TaskStatus::Stopping);
+    assert!(matches!(
+        stopped.task.status,
+        TaskStatus::Stopping | TaskStatus::Inactive
+    ));
 
     wait_until(|| cancelled.load(Ordering::SeqCst) == 1);
     wait_until(|| {

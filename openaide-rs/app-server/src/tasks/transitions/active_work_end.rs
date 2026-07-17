@@ -142,7 +142,10 @@ impl ActiveWorkEnd {
     }
 
     fn clears_session(&self) -> bool {
-        matches!(self, Self::AgentStartFailed(_))
+        matches!(
+            self,
+            Self::AgentStartFailed(_) | Self::CancellationFailed(_)
+        )
     }
 
     fn attention_reason(&self) -> Option<TaskAttentionReason> {
