@@ -20,7 +20,7 @@
     "check": "npm run check:source-size && cargo check --workspace && npm run protocol:check && npm run build:typescript-deps && npm run check --workspaces --if-present && node scripts/check-app-server-client-dist-import.mjs",
     "check:source-size": "node scripts/check-production-source-size.mjs",
     "test": "npm run test:gate && npm run backend:test && npm run build:typescript-deps && npm run test --workspaces --if-present",
-    "test:gate": "node --test --test-concurrency=1 deploy/local-web.test.mjs scripts/local-web.test.mjs scripts/production-source-policy.test.mjs scripts/redeploy-web-dev.test.mjs scripts/sync-frontend-assets.test.mjs scripts/test-workspace-gate.test.mjs",
+    "test:gate": "node --test --test-concurrency=1 deploy/local-web.test.mjs scripts/local-web.test.mjs scripts/production-source-policy.test.mjs scripts/redeploy-web-dev.test.mjs scripts/set-release-artifact-version.test.mjs scripts/sync-frontend-assets.test.mjs scripts/test-workspace-gate.test.mjs",
     "test:smoke": "node --test tests/smoke/test-acp-agent.test.mjs && playwright test",
     "protocol:generate": "node scripts/generate-app-server-protocol.mjs",
     "protocol:check": "node scripts/check-app-server-protocol-generated.mjs",

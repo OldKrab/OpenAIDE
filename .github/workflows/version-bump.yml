@@ -1,0 +1,53 @@
+name: Version Bump
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Exact SemVer to release, without the v prefix (for example 0.0.1-alpha.9)"
+        type: string
+        required: true
+
+permissions: {}
+
+jobs:
+  bump:
+    name: Commit and tag release version
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Generate release token
+        id: release-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
+      # The App token lets the pushed tag trigger the separate Release workflow.
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          token: ${{ steps.release-token.outputs.token }}
+
+      - name: Validate version
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          if [[ ! "$RELEASE_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$ ]]; then
+            echo "Version must be SemVer without a v prefix, such as 0.0.1 or 0.0.1-alpha.9" >&2
+            exit 1
+          fi
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      # npm owns the canonical root version, lockfile update, release commit, and tag.
+      - name: Commit version and tag
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: npm version "$RELEASE_VERSION" --allow-same-version=false -m "Release v%s"
+
+      - name: Push commit and tag
+        run: git push --follow-tags origin main

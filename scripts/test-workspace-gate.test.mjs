@@ -69,16 +69,59 @@ test("the local CI command runs every required validation class", () => {
   assert.match(ci, /npm run build/);
 });
 
-test("release publishing produces only Linux and Windows VSIX packages", () => {
+test("the root package is the only source of the release version", () => {
+  assert.notEqual(rootPackage.version, "0.0.0");
+
+  for (const workspacePath of rootPackage.workspaces) {
+    const workspace = packageJson(`${workspacePath}/package.json`);
+    assert.equal(workspace.version, "0.0.0", `${workspace.name} must not duplicate the release version`);
+
+    for (const dependencies of [workspace.dependencies, workspace.devDependencies]) {
+      for (const [name, version] of Object.entries(dependencies ?? {})) {
+        if (name.startsWith("@openaide/")) {
+          assert.equal(version, "*", `${workspace.name} must link local workspace ${name} without a release pin`);
+        }
+      }
+    }
+  }
+
+  for (const relativePath of [
+    "openaide-rs/app-server/Cargo.toml",
+    "openaide-rs/app-server-protocol/Cargo.toml",
+  ]) {
+    const manifest = readFileSync(path.join(repoRoot, relativePath), "utf8");
+    assert.match(manifest, /^version = "0\.0\.0"$/m, `${relativePath} must not duplicate the release version`);
+  }
+});
+
+test("a manual workflow commits and tags an exact release version", () => {
+  const versionBump = readFileSync(path.join(repoRoot, ".github/workflows/version-bump.yml"), "utf8");
+
+  assert.match(versionBump, /workflow_dispatch:/);
+  assert.match(versionBump, /version:/);
+  assert.match(versionBump, /type: string/);
+  assert.match(versionBump, /actions\/create-github-app-token@v3/);
+  assert.match(versionBump, /RELEASE_APP_ID/);
+  assert.match(versionBump, /RELEASE_APP_PRIVATE_KEY/);
+  assert.match(versionBump, /npm version "\$RELEASE_VERSION"/);
+  assert.match(versionBump, /Release v%s/);
+  assert.match(versionBump, /git push --follow-tags origin main/);
+  assert.doesNotMatch(versionBump, /inputs\.bump|options:\s*\n\s*- patch/);
+});
+
+test("release publishing produces every supported platform VSIX package", () => {
   const release = readFileSync(path.join(repoRoot, ".github/workflows/release.yml"), "utf8");
   const extensionPackage = packageJson("apps/vscode-extension/package.json");
 
   assert.match(release, /target: linux-x64/);
   assert.match(release, /target: win32-x64/);
+  assert.match(release, /target: darwin-arm64/);
   assert.match(release, /cp LICENSE apps\/vscode-extension\/LICENSE/);
   assert.match(release, /cd apps\/vscode-extension/);
   assert.match(release, /@vscode\/vsce@3\.6\.0 package/);
   assert.match(release, /--no-dependencies/);
+  assert.match(release, /node scripts\/set-release-artifact-version\.mjs "\$RELEASE_VERSION"/);
+  assert.doesNotMatch(release, /extension_version=/);
   assert.doesNotMatch(release, /--cwd/);
   assert.match(extensionPackage.scripts.build, /esbuild/);
   assert.match(extensionPackage.scripts.build, /--external:vscode/);
