@@ -77,35 +77,6 @@
     scrollbar-width: none;
   }
 
-  .composer-controls:has(.composer-popover) {
-    flex-wrap: wrap;
-    overflow-x: visible;
-  }
-
-  .composer-controls .composer-menu-anchor,
-  .composer-controls .composer-option-anchor {
-    display: contents;
-    position: static;
-  }
-
-  .composer-config-control,
-  .composer-isolation-control {
-    display: none;
-  }
-
-  .composer-mobile-options-anchor {
-    display: contents;
-  }
-
-  .composer-mobile-options-anchor > .composer-pill {
-    order: 1;
-  }
-
-  .composer-config-control-anchor > .composer-popover,
-  .composer-isolation-control-anchor > .composer-popover {
-    order: 2;
-  }
-
   .composer-controls .composer-pill {
     min-width: 0;
     width: fit-content;

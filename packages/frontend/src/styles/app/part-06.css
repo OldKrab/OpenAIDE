@@ -364,16 +364,14 @@
 }
 
 .composer-controls {
+  flex: 1 1 auto;
   gap: 4px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow: visible;
 }
 
 .composer-menu-anchor {
   display: contents;
-}
-
-.composer-mobile-options-anchor {
-  display: none;
 }
 
 .composer-pill,

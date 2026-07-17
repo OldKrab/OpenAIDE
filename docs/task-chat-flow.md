@@ -336,6 +336,8 @@ Option changes follow one ordering model:
 
 While an option mutation is pending, Frontend renders the requested value in that control with a busy indicator and locks every configuration selector. The existing Task's Agent remains locked, while drafting and Image actions remain usable. If the mutation is still pending after five seconds, Frontend adds the quiet status text `Agent is still updating options…` without replacing the Composer or reporting an error.
 
+Frontend preserves the Agent catalog order in the Composer. It renders the largest leading set of Configuration Options that fits the measured control row and moves only the trailing suffix into a `More · N` menu; Isolation participates as the final run control when available. Narrower App Shells progressively move more controls into that menu instead of replacing the catalog at a fixed breakpoint. Clicking a grouped row opens its value selector in place, while hover only supplies visual affordance. Direct and grouped selectors send the same option-change intent, and a control disappears whenever the next authoritative Agent catalog no longer exposes it.
+
 App Server allows up to 60 seconds for the Agent to answer the option request. A failed or timed-out mutation clears pending state, restoring the last Agent-confirmed catalog, and Frontend presents the mutation error. That error clears after ten seconds or earlier when a later complete Agent catalog changes. A late catalog that confirms the requested value renders normally through the same authoritative catalog path.
 
 Slash-command catalogs use the same snapshot and event ordering. Slash commands and `@file` completion provide Composer assistance and add no structured state to `task/send` or Chat.
