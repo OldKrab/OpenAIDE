@@ -99,12 +99,15 @@ test("a manual workflow commits and tags an exact release version", () => {
 
   assert.match(versionBump, /workflow_dispatch:/);
   assert.match(versionBump, /version:/);
+  assert.match(versionBump, /release_notes:/);
   assert.match(versionBump, /type: string/);
   assert.match(versionBump, /actions\/create-github-app-token@v3/);
   assert.match(versionBump, /RELEASE_APP_ID/);
   assert.match(versionBump, /RELEASE_APP_PRIVATE_KEY/);
-  assert.match(versionBump, /npm version "\$RELEASE_VERSION"/);
-  assert.match(versionBump, /Release v%s/);
+  assert.match(versionBump, /npm version "\$RELEASE_VERSION".*--no-git-tag-version/);
+  assert.match(versionBump, /git commit --file "\$notes_path"/);
+  assert.match(versionBump, /git tag --annotate "v\$RELEASE_VERSION"/);
+  assert.match(versionBump, /## Changelog/);
   assert.match(versionBump, /git push --follow-tags origin main/);
   assert.doesNotMatch(versionBump, /inputs\.bump|options:\s*\n\s*- patch/);
 });
@@ -129,6 +132,9 @@ test("release publishing produces every supported platform VSIX package", () => 
   assert.match(extensionPackage.scripts.build, /esbuild/);
   assert.match(extensionPackage.scripts.build, /--external:vscode/);
   assert.match(release, /@vscode\/vsce@3\.6\.0 publish/);
+  assert.match(release, /Read release notes from version commit/);
+  assert.match(release, /body_path: \$\{\{ steps\.release-notes\.outputs\.path \}\}/);
+  assert.doesNotMatch(release, /generate_release_notes: true/);
   assert.match(release, /if: \$\{\{ !contains\(github\.ref_name, '-'\) \}\}/);
   assert.match(release, /VSCE_PAT: \$\{\{ secrets\.VSCE_PAT \}\}/);
   assert.doesNotMatch(release, /openaide-web-assets|docker\/build-push-action|openaide-app-server-linux/);

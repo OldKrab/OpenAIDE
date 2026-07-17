@@ -7,6 +7,10 @@ on:
         description: "Exact SemVer to release, without the v prefix (for example 0.0.1-alpha.9)"
         type: string
         required: true
+      release_notes:
+        description: "User-facing Markdown (for example, ## Features and ## Bug Fixes); the changelog link is added automatically"
+        type: string
+        required: true
 
 permissions: {}
 
@@ -25,16 +29,22 @@ jobs:
       # The App token lets the pushed tag trigger the separate Release workflow.
       - uses: actions/checkout@v7
         with:
+          fetch-depth: 0
           ref: main
           token: ${{ steps.release-token.outputs.token }}
 
       - name: Validate version
         env:
+          RELEASE_NOTES: ${{ inputs.release_notes }}
           RELEASE_VERSION: ${{ inputs.version }}
         shell: bash
         run: |
           if [[ ! "$RELEASE_VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z]+(\.[0-9A-Za-z]+)*)?$ ]]; then
             echo "Version must be SemVer without a v prefix, such as 0.0.1 or 0.0.1-alpha.9" >&2
+            exit 1
+          fi
+          if [[ -z "${RELEASE_NOTES//[[:space:]]/}" ]]; then
+            echo "Release notes must contain user-facing Markdown" >&2
             exit 1
           fi
 
@@ -43,11 +53,26 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      # npm owns the canonical root version, lockfile update, release commit, and tag.
+      # The version commit doubles as the GitHub Release body, matching the Codex release flow.
       - name: Commit version and tag
+        shell: bash
         env:
+          RELEASE_NOTES: ${{ inputs.release_notes }}
           RELEASE_VERSION: ${{ inputs.version }}
-        run: npm version "$RELEASE_VERSION" --allow-same-version=false -m "Release v%s"
+        run: |
+          previous_tag="$(git describe --tags --abbrev=0 --match 'v[0-9]*' HEAD 2>/dev/null || true)"
+          notes_path="$RUNNER_TEMP/release-notes.md"
+
+          printf '%s\n' "$RELEASE_NOTES" > "$notes_path"
+          if [[ -n "$previous_tag" ]]; then
+            printf '\n## Changelog\n\n**Full Changelog**: %s/%s/compare/%s...v%s\n' \
+              "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$previous_tag" "$RELEASE_VERSION" >> "$notes_path"
+          fi
+
+          npm version "$RELEASE_VERSION" --allow-same-version=false --no-git-tag-version
+          git add package.json package-lock.json
+          git commit --file "$notes_path"
+          git tag --annotate "v$RELEASE_VERSION" --message "Release v$RELEASE_VERSION"
 
       - name: Push commit and tag
         run: git push --follow-tags origin main
