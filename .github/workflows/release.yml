@@ -76,6 +76,7 @@ jobs:
       - run: npm ci
       # Source manifests stay version-neutral; packaged artifacts receive the canonical tag version.
       - name: Set release artifact versions
+        shell: bash
         env:
           RELEASE_VERSION: ${{ needs.validate.outputs.version }}
         run: node scripts/set-release-artifact-version.mjs "$RELEASE_VERSION"
