@@ -29,10 +29,10 @@ check names become selectable.
    for the release tag.
 2. Create and push an annotated SemVer tag from the merged `main` commit, such as
    `v0.0.1-alpha.1` for a prerelease or `v0.0.1` for a stable release.
-3. The release workflow validates the root and VS Code extension versions,
-   repeats tests, builds Linux x64 and Windows x64 VSIX packages, and creates a
+3. The release workflow validates the release version, repeats tests, builds
+   Linux x64, Windows x64, and macOS Apple Silicon VSIX packages, and creates a
    GitHub Release. Prerelease tags create GitHub prereleases. Stable tags also
-   publish both platform packages to the VS Code Marketplace.
+   publish all platform packages to the VS Code Marketplace.
 4. Install and smoke-test each published VSIX before promoting the release.
 
 Releases are never rebuilt in place. Correct a bad release with a new patch
