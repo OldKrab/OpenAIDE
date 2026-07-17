@@ -30,23 +30,35 @@ allow the release GitHub App to push the automated version commit and tag. The
 1. Confirm that `main` contains exactly the changes to release and that its CI is
    green. Choose a new exact SemVer without a `v` prefix, such as
    `0.0.1-alpha.10` or `0.0.1`.
-2. In GitHub Actions, run the `Version Bump` workflow on `main` and enter that
-   version. Do not edit package manifests or create the release tag manually.
-   The same workflow can be dispatched with GitHub CLI:
+2. Write concise user-facing Markdown in a local file such as
+   `release-notes.md`. The file is release input and does not need to be
+   committed. Prefer sections such as `## Features`, `## Bug Fixes`, and
+   `## Chores`; describe user impact rather than copying commit messages. Do
+   not add a changelog section because the workflow appends the comparison
+   link.
+3. In GitHub Actions, run the `Version Bump` workflow on `main` and enter the
+   version and release notes. Do not edit package manifests or create the
+   release tag manually. The same workflow can be dispatched with GitHub CLI:
 
    ```sh
-   gh workflow run version-bump.yml --ref main -f version=0.0.1-alpha.10
+   gh workflow run version-bump.yml --ref main \
+     -f version=0.0.1-alpha.10 \
+     -F release_notes=@release-notes.md
    ```
 
-3. The workflow validates the version, runs `npm version` to update the canonical
-   root version and lockfile, creates the `Release vVERSION` commit and
-   `vVERSION` tag, then pushes both to `main`.
-4. The tag starts the `Release` workflow. It repeats the release checks, stamps
+   GitHub's web workflow form has only a single-line string field, so use the
+   CLI file input for normal multi-section release notes.
+
+4. The workflow validates both inputs, runs `npm version` to update the canonical
+   root version and lockfile, appends the full changelog link to the notes, uses
+   those notes as the version commit message, creates the `vVERSION` tag, and
+   pushes both to `main`.
+5. The tag starts the `Release` workflow. It repeats the release checks, stamps
    the exact version into packaged manifests, builds Linux x64, Windows x64, and
-   macOS Apple Silicon VSIX packages, and creates the GitHub Release. Prerelease
-   versions create GitHub prereleases; stable versions also publish all platform
-   packages to the VS Code Marketplace.
-5. Confirm that the Release workflow completed successfully, then install and
+   macOS Apple Silicon VSIX packages, and creates the GitHub Release from the
+   version commit message. Prerelease versions create GitHub prereleases; stable
+   versions also publish all platform packages to the VS Code Marketplace.
+6. Confirm that the Release workflow completed successfully, then install and
    smoke-test each published VSIX before promoting the release.
 
 The root `package.json` is the release-version source of truth. Package manifests

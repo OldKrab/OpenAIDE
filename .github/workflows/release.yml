@@ -130,6 +130,16 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v7
+      - name: Read release notes from version commit
+        id: release-notes
+        shell: bash
+        run: |
+          commit="$(git rev-parse "${GITHUB_SHA}^{commit}")"
+          notes_path="$RUNNER_TEMP/release-notes.md"
+          git log -1 --format=%B "$commit" > "$notes_path"
+          printf '\n' >> "$notes_path"
+          echo "path=$notes_path" >> "$GITHUB_OUTPUT"
       - uses: actions/download-artifact@v8
         with:
           pattern: release-*
@@ -137,7 +147,7 @@ jobs:
           merge-multiple: true
       - uses: softprops/action-gh-release@v3
         with:
-          generate_release_notes: true
+          body_path: ${{ steps.release-notes.outputs.path }}
           prerelease: ${{ contains(github.ref_name, '-') }}
           fail_on_unmatched_files: true
           files: release/*
