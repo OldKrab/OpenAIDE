@@ -14,12 +14,15 @@ use crate::tasks::transitions::TaskTransitions;
 use crate::tasks::turn_events::{TaskEventSink, TaskSessionEventSink};
 use openaide_app_server_protocol::ids::TaskId;
 
+const DEFAULT_CANCEL_GRACE_PERIOD: Duration = Duration::from_secs(10);
+
 #[derive(Clone)]
 pub struct TurnRunner {
     agent: Arc<dyn AgentRuntime>,
     mutations: TaskMutations,
     active_turns: Arc<ActiveTurnRegistry>,
     server_requests: ServerRequestRuntime,
+    cancel_grace_period: Arc<Mutex<Duration>>,
 }
 
 impl TurnRunner {
@@ -37,7 +40,16 @@ impl TurnRunner {
             mutations,
             active_turns: Arc::new(ActiveTurnRegistry::default()),
             server_requests,
+            cancel_grace_period: Arc::new(Mutex::new(DEFAULT_CANCEL_GRACE_PERIOD)),
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_cancel_grace_period_for_test(&self, grace_period: Duration) {
+        *self
+            .cancel_grace_period
+            .lock()
+            .expect("cancel grace period poisoned") = grace_period;
     }
 
     pub(crate) fn active_turn_is_live(&self, task_id: &str, turn_id: &str) -> bool {
@@ -147,6 +159,7 @@ impl TurnRunner {
             .cloned()
         {
             active.cancellation.cancel();
+            self.spawn_cancel_watchdog(turn_id.to_string(), active.clone());
             self.server_requests.interrupt_task_requests(
                 &TaskId::from(active.task_id),
                 crate::client_lifecycle::AppServerTime::now(),
@@ -155,6 +168,107 @@ impl TurnRunner {
             return Ok(true);
         }
         Ok(false)
+    }
+
+    /// Gives a compliant Agent time to settle the prompt, then severs a session that no
+    /// longer has a trustworthy lifecycle. The watchdog is independent of the cancel RPC so
+    /// a blocked Agent adapter cannot leave the durable Task in `stopping` forever.
+    fn spawn_cancel_watchdog(&self, turn_id: String, active: ActiveTurn) {
+        let grace_period = *self
+            .cancel_grace_period
+            .lock()
+            .expect("cancel grace period poisoned");
+        let runner = self.clone();
+        thread::spawn(move || {
+            if runner.wait_for_turn_exit(&turn_id, grace_period) {
+                return;
+            }
+            runner.force_end_timed_out_cancel(&turn_id, &active, grace_period);
+        });
+    }
+
+    /// Returns true when the prompt settled before the cancellation deadline.
+    fn wait_for_turn_exit(&self, turn_id: &str, timeout: Duration) -> bool {
+        let turns = self
+            .active_turns
+            .turns
+            .lock()
+            .expect("active turn registry poisoned");
+        let (turns, _) = self
+            .active_turns
+            .changed
+            .wait_timeout_while(turns, timeout, |turns| turns.contains_key(turn_id))
+            .expect("active turn registry wait poisoned");
+        !turns.contains_key(turn_id)
+    }
+
+    fn force_end_timed_out_cancel(
+        &self,
+        turn_id: &str,
+        expected: &ActiveTurn,
+        grace_period: Duration,
+    ) {
+        let removed = {
+            let mut turns = self
+                .active_turns
+                .turns
+                .lock()
+                .expect("active turn registry poisoned");
+            let matches = turns.get(turn_id).is_some_and(|active| {
+                active.task_id == expected.task_id && active.session == expected.session
+            });
+            if matches {
+                turns.remove(turn_id)
+            } else {
+                None
+            }
+        };
+        let Some(active) = removed else {
+            return;
+        };
+        self.active_turns.changed.notify_all();
+
+        crate::logging::warn(
+            "task_cancel_timed_out",
+            serde_json::json!({
+                "task_id": active.task_id,
+                "turn_id": turn_id,
+                "agent_id": active.session.agent_id(),
+                "session_id": active.session.session_id(),
+                "grace_period_ms": grace_period.as_millis(),
+            }),
+        );
+        if let Err(error) = self.transitions().end_active_work(
+            &active.task_id,
+            Some(turn_id),
+            crate::tasks::transitions::ActiveWorkEnd::CancellationFailed(format!(
+                "Agent did not confirm cancellation within {} ms; its Native Session was discarded",
+                grace_period.as_millis()
+            )),
+        ) {
+            crate::logging::error(
+                "task_cancel_timeout_transition_failed",
+                serde_json::json!({
+                    "task_id": active.task_id,
+                    "turn_id": turn_id,
+                    "error": error.to_string(),
+                }),
+            );
+        }
+        // Durable invalidation comes first so even a broken runtime adapter cannot keep the
+        // Task in `stopping`. The ACP implementation still bounds close internally.
+        if let Err(error) = self.agent.close_session(&active.session) {
+            crate::logging::error(
+                "task_cancel_timeout_session_close_failed",
+                serde_json::json!({
+                    "task_id": active.task_id,
+                    "turn_id": turn_id,
+                    "agent_id": active.session.agent_id(),
+                    "session_id": active.session.session_id(),
+                    "error": error.to_string(),
+                }),
+            );
+        }
     }
 
     pub(crate) fn detach_stuck_turn(&self, turn_id: &str) {
