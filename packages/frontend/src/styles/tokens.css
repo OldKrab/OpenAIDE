@@ -6,7 +6,10 @@
   --oa-selected: var(--vscode-list-activeSelectionBackground, #37373d);
   --oa-text: var(--vscode-foreground, #cccccc);
   --oa-muted: var(--vscode-descriptionForeground, #9da1a6);
-  --oa-border: var(--vscode-widget-border, #3c3c3c);
+  /* Borders stay quieter than content; focus and semantic states carry interaction emphasis. */
+  --oa-border-strong: var(--vscode-widget-border, #3c3c3c);
+  --oa-border: color-mix(in oklch, var(--oa-border-strong) 52%, transparent);
+  --oa-border-subtle: color-mix(in oklch, var(--oa-border-strong) 28%, transparent);
   --oa-focus: var(--vscode-focusBorder, #4d9cff);
   --oa-warning: var(--vscode-problemsWarningIcon-foreground, #d7ba7d);
   --oa-danger: var(--vscode-errorForeground, #f48771);
@@ -33,6 +36,8 @@ body.vscode-high-contrast-light {
 
 body.vscode-high-contrast,
 body.vscode-high-contrast-light {
+  --oa-border: var(--oa-border-strong);
+  --oa-border-subtle: var(--oa-border-strong);
   --oa-reference-command: var(--oa-focus);
   --oa-reference-file: var(--oa-focus);
 }

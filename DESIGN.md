@@ -8,7 +8,9 @@ colors:
   selected-bg: "#37373d"
   text-primary: "#cccccc"
   text-secondary: "#9da1a6"
-  border-soft: "#3c3c3c"
+  border-strong: "#3c3c3c"
+  border-soft: "color-mix(in oklch, {colors.border-strong} 52%, transparent)"
+  border-subtle: "color-mix(in oklch, {colors.border-strong} 28%, transparent)"
   accent: "#4d9cff"
   warning: "#d7ba7d"
   danger: "#f48771"
@@ -111,7 +113,9 @@ The palette is restrained and host-native: VS Code tokens are canonical in imple
 - **Selected Ground** (`#37373d`): selected task rows and active navigation states.
 - **Primary Text** (`#cccccc`): labels, authored content, and readable prose.
 - **Secondary Text** (`#9da1a6`): metadata, timestamps, descriptions, and low-priority counters.
-- **Soft Border** (`#3c3c3c`): quiet separation between dense areas.
+- **Strong Border** (`#3c3c3c` fallback): host-provided boundary color retained for high-contrast themes.
+- **Soft Border** (52% of Strong Border): controls and surfaces that need a visible boundary at rest.
+- **Subtle Border** (28% of Strong Border): structural dividers and low-priority separators.
 
 ### Status
 - **Warning** (`#d7ba7d`): permission requests, blocked states, and caution copy.
@@ -123,6 +127,8 @@ The palette is restrained and host-native: VS Code tokens are canonical in imple
 **The Accent Rarity Rule.** The accent is signal, not decoration; keep it under 10% of any screen.
 
 **The Host Token Rule.** Prefer VS Code tokens in implementation. Fallback values exist only to keep standalone development legible.
+
+**The Border Hierarchy Rule.** Structural separation uses the subtle border or tonal background changes. Controls and popovers may use the soft border. Focus and semantic states use their dedicated colors. High-contrast themes retain the host border without attenuation.
 
 ## 3. Typography
 

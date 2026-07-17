@@ -25,6 +25,22 @@ test.afterEach(async ({}, testInfo) => {
   }
 });
 
+test("keeps shared typography when an App Shell supplies body defaults", async ({ page }) => {
+  await openPreparedNewTask(page);
+
+  const body = page.locator("body");
+  await expect(body).toHaveCSS("font-family", /Inter Variable/);
+  await expect(body).toHaveCSS("font-size", "14px");
+
+  // VS Code supplies lower-priority body typography; OpenAIDE must own the final App Shell result.
+  await page.addStyleTag({
+    content: ':where(body) { font-family: "Segoe UI", sans-serif; font-size: 13px; }',
+  });
+
+  await expect(body).toHaveCSS("font-family", /Inter Variable/);
+  await expect(body).toHaveCSS("font-size", "14px");
+});
+
 test("keeps the New Task form stable across constrained editor heights", async ({ page }) => {
   await page.setViewportSize({ width: 1_000, height: 525 });
   await openPreparedNewTask(page);

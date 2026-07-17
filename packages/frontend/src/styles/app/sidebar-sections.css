@@ -114,6 +114,12 @@
   scroll-padding-bottom: 24px;
 }
 
+/* VS Code already reserves the stable scrollbar gutter; extra row padding
+   would leave a second empty strip beside every Task. */
+body[data-shell="vscodeExtension"] .task-list {
+  padding-right: 0;
+}
+
 body[data-shell="web"] .task-list {
   margin-right: -8px;
   padding-right: 4px;
