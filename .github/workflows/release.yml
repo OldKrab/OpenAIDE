@@ -28,11 +28,6 @@ jobs:
             echo "Tag version $version does not match package.json version $package_version" >&2
             exit 1
           fi
-          extension_version="$(node -p "require('./apps/vscode-extension/package.json').version")"
-          if [[ "$version" != "$extension_version" ]]; then
-            echo "Release version $version does not match VSIX version $extension_version" >&2
-            exit 1
-          fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
   checks:
@@ -79,6 +74,11 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - run: npm ci
+      # Source manifests stay version-neutral; packaged artifacts receive the canonical tag version.
+      - name: Set release artifact versions
+        env:
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+        run: node scripts/set-release-artifact-version.mjs "$RELEASE_VERSION"
       - run: cargo build --release -p openaide-app-server
       - run: npm run build:frontend
       - name: Add extension license
