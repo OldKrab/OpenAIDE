@@ -136,7 +136,7 @@ describe("SidebarTaskRow", () => {
     expect(read.root.findAllByProps({ className: "task-meta-age" })).toHaveLength(1);
   });
 
-  it("opens selected tasks and keeps the row actions menu limited to Archive", () => {
+  it("opens selected tasks and exposes Archive beside the mobile Task details action", () => {
     const onOpenTask = vi.fn();
     const onArchiveTask = vi.fn();
     const tree = render(
@@ -157,12 +157,38 @@ describe("SidebarTaskRow", () => {
     act(() => buttons[0].props.onClick());
     act(() => tree.root.findByProps({ "aria-label": "Task actions for Task" }).props.onClick());
     const menuItems = tree.root.findAllByProps({ role: "menuitem" });
-    expect(menuItems).toHaveLength(1);
-    expect(menuItems[0].children).toContain("Archive task");
-    act(() => menuItems[0].props.onClick());
+    expect(menuItems).toHaveLength(2);
+    expect(menuItems[0].props.className).toBe("task-row-mobile-details-action");
+    expect(menuItems[1].children).toContain("Archive task");
+    act(() => menuItems[1].props.onClick());
 
     expect(onOpenTask).toHaveBeenCalledWith("task_1");
     expect(onArchiveTask).toHaveBeenCalledWith("task_1");
+  });
+
+  it("opens Task details through the mobile-only row action", () => {
+    const tree = render(
+      <SidebarTaskRow
+        onArchiveTask={vi.fn()}
+        onOpenTask={vi.fn()}
+        onRestoreTask={vi.fn()}
+        showArchived={false}
+        task={task({
+          project_label: "OpenAIDE",
+          worktree_id: "worktree_1",
+          worktree_name: "Sidebar scrolling",
+          git_ref: "fix/sidebar-scroll",
+        })}
+      />,
+    );
+
+    act(() => tree.root.findByProps({ "aria-label": "Task actions for Task" }).props.onClick());
+    act(() => tree.root.findByProps({ className: "task-row-mobile-details-action" }).props.onClick());
+
+    const details = tree.root.findByProps({ className: "task-row-details" });
+    const detailRows = details.findAllByType("span");
+    expect(detailRows.some((row) => row.children.includes("OpenAIDE"))).toBe(true);
+    expect(detailRows.some((row) => row.children.includes("Sidebar scrolling"))).toBe(true);
   });
 
   it("dismisses the task actions menu on outside click and Escape", () => {
@@ -213,7 +239,7 @@ describe("SidebarTaskRow", () => {
     );
 
     act(() => tree.root.findByProps({ "aria-label": "Task actions for Archived task" }).props.onClick());
-    act(() => tree.root.findAllByProps({ role: "menuitem" })[0].props.onClick());
+    act(() => tree.root.findAllByProps({ role: "menuitem" })[1].props.onClick());
 
     expect(onRestoreTask).toHaveBeenCalledWith("task_2");
   });

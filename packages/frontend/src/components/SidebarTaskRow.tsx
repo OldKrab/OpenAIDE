@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Archive, GitBranch, MoreHorizontal, RotateCcw } from "lucide-react";
+import { Archive, ArrowLeft, FolderRoot, GitBranch, Info, MoreHorizontal, RotateCcw } from "lucide-react";
 import type { TaskStatus, TaskSummary } from "@openaide/app-shell-contracts";
 import { AgentIcon } from "./AgentIcon";
 import { SidebarRowActionSlot } from "./SidebarRowParts";
@@ -22,6 +22,7 @@ export function SidebarTaskRow({
   task: TaskSummary;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const rowRef = useRef<HTMLDivElement>(null);
   const preview = useSidebarTaskPreview();
   const actionSlotRef = useRef<HTMLDivElement>(null);
@@ -30,6 +31,7 @@ export function SidebarTaskRow({
   const actionLabel = showArchived ? "Restore task" : "Archive task";
   const runAction = () => {
     setMenuOpen(false);
+    setDetailsOpen(false);
     if (showArchived) {
       onRestoreTask(task.task_id);
     } else {
@@ -41,11 +43,13 @@ export function SidebarTaskRow({
     const dismissOnPointerDown = (event: PointerEvent) => {
       if (actionSlotRef.current?.contains(event.target as Node | null)) return;
       setMenuOpen(false);
+      setDetailsOpen(false);
     };
     const dismissOnEscape = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       event.preventDefault();
       setMenuOpen(false);
+      setDetailsOpen(false);
       actionTriggerRef.current?.focus();
     };
     document.addEventListener("pointerdown", dismissOnPointerDown);
@@ -91,7 +95,10 @@ export function SidebarTaskRow({
         <button
           ref={actionTriggerRef}
           className="task-row-action"
-          onClick={() => setMenuOpen((open) => !open)}
+          onClick={() => setMenuOpen((open) => {
+            if (open) setDetailsOpen(false);
+            return !open;
+          })}
           title={menuOpen ? undefined : "Task actions"}
           type="button"
           aria-expanded={menuOpen}
@@ -101,10 +108,19 @@ export function SidebarTaskRow({
         </button>
         {menuOpen ? (
           <div className="task-row-menu" role="menu">
-            <button onClick={runAction} type="button" role="menuitem">
-              {showArchived ? <RotateCcw size={13} /> : <Archive size={13} />}
-              {actionLabel}
-            </button>
+            {detailsOpen ? <>
+              <button onClick={() => setDetailsOpen(false)} type="button" role="menuitem"><ArrowLeft size={13} />Task actions</button>
+              <div className="task-row-details">
+                <span><FolderRoot size={13} />{task.project_label ?? "Project"}</span>
+                <span>{task.worktree_id ? <GitBranch size={13} /> : <FolderRoot size={13} />}{task.worktree_name ?? "Project root"}{task.git_ref ? <small>{task.git_ref}</small> : null}</span>
+              </div>
+            </> : <>
+              <button className="task-row-mobile-details-action" onClick={() => setDetailsOpen(true)} type="button" role="menuitem"><Info size={13} />Task details</button>
+              <button onClick={runAction} type="button" role="menuitem">
+                {showArchived ? <RotateCcw size={13} /> : <Archive size={13} />}
+                {actionLabel}
+              </button>
+            </>}
           </div>
         ) : null}
       </SidebarRowActionSlot>
