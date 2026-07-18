@@ -30,7 +30,7 @@ export function Selector({
         title={pending ? "Updating Agent option" : "Locked after task start"}
       >
         {icon}
-        {label}
+        <span className="composer-pill-label">{label}</span>
         {pending ? <LoaderCircle aria-hidden="true" className="composer-config-pending" size={12} /> : null}
       </span>
     );
@@ -44,7 +44,7 @@ export function Selector({
       type="button"
     >
       {icon}
-      {label}
+      <span className="composer-pill-label">{label}</span>
       <ChevronDown size={11} />
     </button>
   );

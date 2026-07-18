@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::ids::{ClientInstanceId, EventCursor, MessageId, StateRootId, TaskId};
+use crate::ids::{
+    ClientInstanceId, EventCursor, MessageId, StateRootId, TaskId, WorktreeRepositoryId,
+};
 use crate::snapshot::{
     AgentCollectionSnapshot, ChatItem, ChatSnapshot, ClientSnapshot, PendingRequestSnapshot,
     ProjectCollectionSnapshot, TaskAgentCommandsSnapshot, TaskAgentConfigSnapshot,
@@ -10,6 +12,7 @@ use crate::snapshot::{
 };
 use crate::state::SubscriptionScope;
 use crate::task::ToolDetailSnapshot;
+use crate::worktree::WorktreeRepositorySnapshot;
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -85,6 +88,10 @@ pub enum AppServerEventPayload {
     AgentCollectionUpdated {
         agents: AgentCollectionSnapshot,
     },
+    WorktreeRepositoryUpdated {
+        repository_id: WorktreeRepositoryId,
+        repository: WorktreeRepositorySnapshot,
+    },
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, TS)]
@@ -148,7 +155,7 @@ pub enum TaskChatChange {
     rename_all_fields = "camelCase"
 )]
 pub enum TaskNavigationChange {
-    Upsert { task: TaskSummary },
+    Upsert { task: Box<TaskSummary> },
     Remove { task_id: TaskId },
 }
 

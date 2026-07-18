@@ -9,6 +9,7 @@ import { SidebarProjectTaskGroup } from "./SidebarProjectTaskGroup";
 import { SidebarTaskRow } from "./SidebarTaskRow";
 import { groupedTasks, projectGroupRows, recentVisibleGroups, taskMatchesSearch } from "./sidebarProjectModel";
 import { sidebarViewModel } from "./sidebarViewModel";
+import { SidebarTaskPreviewProvider } from "./SidebarTaskPreview";
 
 type SidebarProps = {
   activeTaskId?: string;
@@ -17,6 +18,7 @@ type SidebarProps = {
   nativeSessionAgentName: string;
   nativeSessionProjectId?: string;
   onLoadNativeSessions: (cursor?: string) => void;
+  onManageWorktrees?: (projectId: string) => void;
   onNewTask: (projectId?: string) => void;
   onOpenNativeSession: (session: AgentListedSession) => void;
   onOpenTask: (taskId: string) => void;
@@ -49,6 +51,7 @@ export const Sidebar = memo(function Sidebar({
   nativeSessionAgentName,
   nativeSessionProjectId,
   onLoadNativeSessions,
+  onManageWorktrees,
   onNewTask,
   onOpenNativeSession,
   onOpenTask,
@@ -184,7 +187,7 @@ export const Sidebar = memo(function Sidebar({
           Archived
         </button>
       </div>
-      <div className="task-list" role="list" aria-label={showArchived ? "Archived tasks" : "Tasks"}>
+      <SidebarTaskPreviewProvider><div className="task-list" role="list" aria-label={showArchived ? "Archived tasks" : "Tasks"}>
         {taskListError ? <p className="empty-list">{taskListError}</p> : null}
         {showEmptyState || (loadingTasks && !taskListError && !showArchived)
           ? <p className="empty-list">{viewModel.emptyMessage}</p>
@@ -211,6 +214,7 @@ export const Sidebar = memo(function Sidebar({
                 }
                 nativeSessionsAdoptingSessionId={nativeSessions.adoptingSessionId}
                 nativeSessionsHaveMore={nativeSessions.nextCursor !== undefined}
+                canManageWorktrees={Boolean(projects.find((project) => project.projectId === group.key)?.worktreeRepositoryId)}
                 onArchiveTask={onArchiveTask}
                 onLoadMore={(visibleIncrement) =>
                   {
@@ -224,6 +228,8 @@ export const Sidebar = memo(function Sidebar({
                     }
                   }
                 }
+                onManageWorktrees={onManageWorktrees ? () => onManageWorktrees(group.key) : undefined}
+                onNewTask={() => onNewTask(group.key)}
                 onOpenNativeSession={onOpenNativeSession}
                 onOpenTask={onOpenTask}
                 onRestoreTask={onRestoreTask}
@@ -288,7 +294,7 @@ export const Sidebar = memo(function Sidebar({
             Show {Math.min(maxVisibleProjects, hiddenProjectCount)} more workspaces
           </button>
         ) : null}
-      </div>
+      </div></SidebarTaskPreviewProvider>
       <div className="sidebar-footer">
         <button
           aria-current={settingsActive ? "page" : undefined}

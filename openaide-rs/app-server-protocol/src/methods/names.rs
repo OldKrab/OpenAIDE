@@ -34,6 +34,15 @@ pub const ATTACHMENT_REVEAL: &str = "attachment/reveal";
 pub const SHELL_RESOLVE_FILE_REVEAL: &str = "shell/resolveFileReveal";
 pub const WORKSPACE_LIST_ROOTS: &str = "workspace/listRoots";
 pub const WORKSPACE_LIST_DIRECTORY: &str = "workspace/listDirectory";
+pub const WORKTREE_REFRESH: &str = "worktree/refresh";
+pub const WORKTREE_CREATE: &str = "worktree/create";
+pub const WORKTREE_RECREATE: &str = "worktree/recreate";
+pub const WORKTREE_REMOVAL_PREFLIGHT: &str = "worktree/removalPreflight";
+pub const WORKTREE_REMOVE: &str = "worktree/remove";
+pub const WORKTREE_RENAME: &str = "worktree/rename";
+pub const WORKTREE_RESOLVE_FOLDER: &str = "worktree/resolveFolder";
+pub const WORKTREE_LINKED_TASKS: &str = "worktree/linkedTasks";
+pub const TASK_ACQUIRE_IN_WORKTREE: &str = "task/acquireInWorktree";
 pub const TASK_ACQUIRE: &str = "task/acquire";
 pub const TASK_SEARCH_FILES: &str = "task/searchFiles";
 pub const TASK_ADOPT_NATIVE_SESSION: &str = "task/adoptNativeSession";
@@ -84,6 +93,15 @@ pub const CLIENT_METHODS: &[&str] = &[
     SHELL_RESOLVE_FILE_REVEAL,
     WORKSPACE_LIST_ROOTS,
     WORKSPACE_LIST_DIRECTORY,
+    WORKTREE_REFRESH,
+    WORKTREE_CREATE,
+    WORKTREE_RECREATE,
+    WORKTREE_REMOVAL_PREFLIGHT,
+    WORKTREE_REMOVE,
+    WORKTREE_RENAME,
+    WORKTREE_RESOLVE_FOLDER,
+    WORKTREE_LINKED_TASKS,
+    TASK_ACQUIRE_IN_WORKTREE,
     TASK_ACQUIRE,
     TASK_SEARCH_FILES,
     TASK_ADOPT_NATIVE_SESSION,

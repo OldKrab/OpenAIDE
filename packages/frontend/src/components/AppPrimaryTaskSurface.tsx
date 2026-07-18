@@ -55,9 +55,14 @@ type AppPrimaryTaskSurfaceProps = {
   controller: AppController;
   focusRequestKey: number;
   model: ReturnType<typeof primaryTaskSurfaceModel>;
+  workspaceRecovery?: {
+    manageWorktrees: (projectId: string) => void;
+    openProjectSettings: () => void;
+    reconnectProject: (projectId: string) => void;
+  };
 };
 
-export function AppPrimaryTaskSurface({ controller, focusRequestKey, model }: AppPrimaryTaskSurfaceProps) {
+export function AppPrimaryTaskSurface({ controller, focusRequestKey, model, workspaceRecovery }: AppPrimaryTaskSurfaceProps) {
   const { activeTask, agents, backendReady, bootstrap, callbacks, intents, preferences, view } = controller;
   const { primaryTask } = view;
   const {
@@ -86,9 +91,12 @@ export function AppPrimaryTaskSurface({ controller, focusRequestKey, model }: Ap
           ? callbacks.task.cancel
           : callbacks.newTask.cancel}
         onLoadChatPage={callbacks.task.loadChatPage}
+        onManageWorktrees={workspaceRecovery?.manageWorktrees}
+        onOpenProjectSettings={workspaceRecovery?.openProjectSettings}
         onSubscribeToolDetail={callbacks.task.subscribeToolDetail}
         onPermissionRespond={callbacks.task.respondToPermission}
         onQuestionRespond={callbacks.task.respondToQuestion}
+        onReconnectProject={workspaceRecovery?.reconnectProject}
         onRetryConnection={retryTaskOpen}
         onRevealAttachment={callbacks.task.revealAttachment}
         onRemoveAttachment={callbacks.task.removeAttachment}

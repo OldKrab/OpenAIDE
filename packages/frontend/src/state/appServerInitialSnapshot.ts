@@ -41,6 +41,11 @@ export function actionsFromInitialSnapshot(
   const projects = snapshot.projects?.projects.map((project) => ({
     projectId: project.projectId,
     label: project.label,
+    workspaceRoot: project.workspaceRoot,
+    available: project.available,
+    worktreeRepositoryId: project.worktreeRepositoryId ?? undefined,
+    projectWorktreeId: project.projectWorktreeId ?? undefined,
+    worktreeError: project.worktreeError ?? undefined,
   })) ?? [];
   const shellProjectId = snapshot.client.surface.kind === "newTask"
     ? snapshot.client.surface.projectId ?? undefined

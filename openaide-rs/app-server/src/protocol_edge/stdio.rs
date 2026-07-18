@@ -14,6 +14,7 @@ use crate::protocol_edge::{GatewayOutcome, InboundProtocolMessage, SharedRpcGate
 use crate::storage::Store;
 use crate::storage_runtime::StateRoot;
 use crate::task_events::{TaskUpdate, TaskUpdateReceiver};
+use crate::worktree_events::WorktreeUpdateReceiver;
 
 mod factory;
 #[cfg(test)]
@@ -39,6 +40,7 @@ pub struct ProtocolEdgeStdioDispatcher {
     connection_id: ConnectionId,
     next_tick: u64,
     task_updates: Option<TaskUpdateReceiver>,
+    worktree_updates: Option<WorktreeUpdateReceiver>,
     host_bridge: HostBridge,
     host_requests: Option<mpsc::Receiver<HostRequest>>,
 }
@@ -131,6 +133,7 @@ impl ProtocolEdgeStdioDispatcher {
             connection_id: ConnectionId::new("stdio"),
             next_tick: 1,
             task_updates: Some(output.task_updates),
+            worktree_updates: Some(output.worktree_updates),
             host_bridge,
             host_requests,
         })
@@ -138,6 +141,24 @@ impl ProtocolEdgeStdioDispatcher {
 
     pub fn take_task_updates(&mut self) -> Option<TaskUpdateReceiver> {
         self.task_updates.take()
+    }
+
+    pub fn take_worktree_updates(&mut self) -> Option<WorktreeUpdateReceiver> {
+        self.worktree_updates.take()
+    }
+
+    pub fn handle_worktree_update(
+        &mut self,
+        repository: openaide_app_server_protocol::worktree::WorktreeRepositorySnapshot,
+    ) -> Vec<String> {
+        let now = self.next_time();
+        let events = self
+            .gateway
+            .publish_worktree_repository_update(repository, now);
+        event_wire_messages(self.connection_id.clone(), events)
+            .into_iter()
+            .map(serialize_message)
+            .collect()
     }
 
     pub fn take_host_requests(&mut self) -> Option<mpsc::Receiver<HostRequest>> {

@@ -38,6 +38,7 @@ const RECONNECT_NOTICE_DELAY_MS = 1_000;
 
 export type TaskViewIntents = {
   changePrompt: (prompt: string) => void;
+  refreshWorkspace: () => Promise<void>;
   recordScroll: (scrollState: TaskChatScrollState) => void;
   reportAttachmentError: (message?: string) => void;
 };
@@ -78,9 +79,12 @@ export function TaskView({
   onCancel,
   fileBrowser,
   onLoadChatPage,
+  onManageWorktrees,
+  onOpenProjectSettings,
   onSubscribeToolDetail,
   onPermissionRespond,
   onQuestionRespond,
+  onReconnectProject,
   onRetryConnection,
   onRevealAttachment,
   onRemoveAttachment,
@@ -107,12 +111,15 @@ export function TaskView({
   onCancel: () => void;
   fileBrowser?: TaskFileBrowserCallbacks;
   onLoadChatPage: (beforeCursor: string) => number | undefined;
+  onManageWorktrees?: (projectId: string) => void;
+  onOpenProjectSettings?: () => void;
   onSubscribeToolDetail: (artifactId: string) => () => void;
   onPermissionRespond: (
     requestId: string,
     optionId: string,
   ) => void;
   onQuestionRespond?: (requestId: string, response: ElicitationResponse) => void;
+  onReconnectProject?: (projectId: string) => void;
   onRetryConnection?: () => void;
   onRevealAttachment: (attachmentId: string) => Promise<void> | void;
   onRemoveAttachment: (attachmentId: string) => void;
@@ -137,6 +144,7 @@ export function TaskView({
     ...snapshot.active_requests,
   ], [chat.items, snapshot.active_requests]);
   const turnBusy = snapshot.task.status === "active";
+  const workspaceAvailable = snapshot.task.workspace_available !== false;
   const imageAttachmentsAllowed = snapshot.input_capabilities?.image === true;
   const attachmentsSendable = taskInput.context.length === 0
     || (appServerComposerImages(taskInput.context) !== undefined
@@ -152,7 +160,8 @@ export function TaskView({
       ? "Draft follow-up while input is pending."
       : snapshot.task.status === "active" ? "Send a follow-up" : undefined,
     connectionStatus: backendReady ? "ready" : backendConnectionState?.status ?? "connecting",
-    contextReady: true,
+    contextReady: workspaceAvailable,
+    contextPlaceholder: "Task workspace is unavailable. Restore it before sending.",
     readyPlaceholder: "Send follow-up",
     sendCapability: snapshot.send_capability,
     submitPendingLabel: "Sending message",
@@ -244,6 +253,8 @@ export function TaskView({
         status={snapshot.task.status}
         title={activeTask?.title ?? snapshot.task.title}
         workspaceRoot={snapshot.task.workspace_root}
+        worktreeName={snapshot.task.worktree_name}
+        gitRef={snapshot.task.git_ref}
         showWorkspaceContext={showWorkspaceContext}
       />
       <div className="chat-column">
@@ -282,6 +293,19 @@ export function TaskView({
             ) : null}
           </div>
         ) : null}
+        {!workspaceAvailable ? <div className="task-workspace-unavailable" role="status">
+          <CircleAlert size={15} />
+          <span><strong>Task workspace unavailable</strong><small>History is still available. Restore the folder before sending.</small></span>
+          <div className="task-workspace-recovery-actions">
+            {snapshot.task.worktree_id ? <>
+              <button onClick={() => void intents.refreshWorkspace()} type="button">Refresh</button>
+              {onManageWorktrees && snapshot.task.project_id ? <button onClick={() => onManageWorktrees(snapshot.task.project_id!)} type="button">Manage worktrees</button> : null}
+            </> : <>
+              {onOpenProjectSettings ? <button onClick={onOpenProjectSettings} type="button">Project settings</button> : null}
+              {onReconnectProject && snapshot.task.project_id ? <button onClick={() => onReconnectProject(snapshot.task.project_id!)} type="button">Reconnect folder</button> : null}
+            </>}
+          </div>
+        </div> : null}
         <Composer
           agentLocked
           attachments={taskInput.context}

@@ -25,6 +25,8 @@ pub mod tasks;
 pub mod time;
 pub mod transport;
 pub(crate) mod workspace_file_index;
+pub mod worktree_events;
+pub mod worktrees;
 
 use std::path::PathBuf;
 use std::sync::mpsc;

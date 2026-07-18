@@ -2,7 +2,10 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::client::{RequestedSurface, ShellKind};
-use crate::ids::{AgentId, ClientInstanceId, EventCursor, ProjectId, ServerId, StateRootId};
+use crate::ids::{
+    AgentId, ClientInstanceId, EventCursor, ProjectId, ServerId, StateRootId, WorktreeId,
+    WorktreeRepositoryId,
+};
 
 pub(crate) mod chat;
 pub(crate) mod pending_request;
@@ -110,6 +113,14 @@ pub struct ProjectCollectionSnapshot {
 pub struct ProjectSummary {
     pub project_id: ProjectId,
     pub label: String,
+    pub workspace_root: String,
+    pub available: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worktree_repository_id: Option<WorktreeRepositoryId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_worktree_id: Option<WorktreeId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worktree_error: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]

@@ -79,6 +79,29 @@ describe("SidebarTaskRow", () => {
     expect(tree.root.findByProps({ className: "task-agent-icon" }).props["aria-label"]).toBe("Agent: OpenCode");
   });
 
+  it("uses a worktree marker without adding a second task line", () => {
+    const tree = render(
+      <SidebarTaskRow
+        onArchiveTask={vi.fn()}
+        onOpenTask={vi.fn()}
+        onRestoreTask={vi.fn()}
+        showArchived={false}
+        task={task({
+          worktree_id: "worktree_1",
+          worktree_name: "Sidebar scrolling",
+          git_ref: "fix/sidebar-scroll",
+        })}
+      />,
+    );
+
+    expect(tree.root.findByProps({ className: "task-agent-icon" }).props["aria-label"])
+      .toBe("Agent: Codex");
+    expect(tree.root.findByProps({ className: "task-worktree-marker" }).props["aria-label"])
+      .toBe("Worktree: Sidebar scrolling");
+    expect(tree.root.findAllByProps({ className: "task-title" })).toHaveLength(1);
+    expect(tree.root.findAllByProps({ className: "task-subtitle" })).toHaveLength(0);
+  });
+
   it("renders live, waiting, failed, unread, and age states in one trailing slot", () => {
     const renderState = (status: TaskSummary["status"], unread = false) => render(
       <SidebarTaskRow
@@ -133,7 +156,7 @@ describe("SidebarTaskRow", () => {
 
     act(() => buttons[0].props.onClick());
     act(() => tree.root.findByProps({ "aria-label": "Task actions for Task" }).props.onClick());
-    act(() => tree.root.findByProps({ role: "menuitem" }).props.onClick());
+    act(() => tree.root.findAllByProps({ role: "menuitem" })[1].props.onClick());
 
     expect(onOpenTask).toHaveBeenCalledWith("task_1");
     expect(onArchiveTask).toHaveBeenCalledWith("task_1");
@@ -187,7 +210,7 @@ describe("SidebarTaskRow", () => {
     );
 
     act(() => tree.root.findByProps({ "aria-label": "Task actions for Archived task" }).props.onClick());
-    act(() => tree.root.findByProps({ role: "menuitem" }).props.onClick());
+    act(() => tree.root.findAllByProps({ role: "menuitem" })[1].props.onClick());
 
     expect(onRestoreTask).toHaveBeenCalledWith("task_2");
   });

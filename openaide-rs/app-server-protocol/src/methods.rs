@@ -39,16 +39,25 @@ use crate::state::{
 };
 use crate::support::{SupportRecoverStuckSessionsParams, SupportRecoverStuckSessionsResult};
 use crate::task::{
-    TaskAcquireParams, TaskAcquireResult, TaskAdoptNativeSessionParams,
-    TaskAdoptNativeSessionResult, TaskCancelParams, TaskCancelResult, TaskChatPageParams,
-    TaskChatPageResult, TaskListParams, TaskListResult, TaskMarkReadParams, TaskMarkReadResult,
-    TaskOpenParams, TaskOpenResult, TaskReleaseParams, TaskReleaseResult, TaskSearchFilesParams,
-    TaskSearchFilesResult, TaskSendParams, TaskSendResult, TaskSetArchivedParams,
-    TaskSetArchivedResult, TaskSetConfigOptionParams, TaskSetConfigOptionResult,
+    TaskAcquireInWorktreeParams, TaskAcquireInWorktreeResult, TaskAcquireParams, TaskAcquireResult,
+    TaskAdoptNativeSessionParams, TaskAdoptNativeSessionResult, TaskCancelParams, TaskCancelResult,
+    TaskChatPageParams, TaskChatPageResult, TaskListParams, TaskListResult, TaskMarkReadParams,
+    TaskMarkReadResult, TaskOpenParams, TaskOpenResult, TaskReleaseParams, TaskReleaseResult,
+    TaskSearchFilesParams, TaskSearchFilesResult, TaskSendParams, TaskSendResult,
+    TaskSetArchivedParams, TaskSetArchivedResult, TaskSetConfigOptionParams,
+    TaskSetConfigOptionResult,
 };
 use crate::workspace::{
     WorkspaceListDirectoryParams, WorkspaceListDirectoryResult, WorkspaceListRootsParams,
     WorkspaceListRootsResult,
+};
+use crate::worktree::{
+    WorktreeCreateParams, WorktreeCreateResult, WorktreeLinkedTasksParams,
+    WorktreeLinkedTasksResult, WorktreeRecreateParams, WorktreeRecreateResult,
+    WorktreeRefreshParams, WorktreeRefreshResult, WorktreeRemovalPreflightParams,
+    WorktreeRemovalPreflightResult, WorktreeRemoveParams, WorktreeRemoveResult,
+    WorktreeRenameParams, WorktreeRenameResult, WorktreeResolveFolderParams,
+    WorktreeResolveFolderResult,
 };
 
 mod names;
@@ -242,6 +251,54 @@ protocol_method!(
     WorkspaceListDirectoryResult
 );
 protocol_method!(
+    WorktreeRefresh,
+    WORKTREE_REFRESH,
+    WorktreeRefreshParams,
+    WorktreeRefreshResult
+);
+protocol_method!(
+    WorktreeCreate,
+    WORKTREE_CREATE,
+    WorktreeCreateParams,
+    WorktreeCreateResult
+);
+protocol_method!(
+    WorktreeRecreate,
+    WORKTREE_RECREATE,
+    WorktreeRecreateParams,
+    WorktreeRecreateResult
+);
+protocol_method!(
+    WorktreeRemovalPreflight,
+    WORKTREE_REMOVAL_PREFLIGHT,
+    WorktreeRemovalPreflightParams,
+    WorktreeRemovalPreflightResult
+);
+protocol_method!(
+    WorktreeRemove,
+    WORKTREE_REMOVE,
+    WorktreeRemoveParams,
+    WorktreeRemoveResult
+);
+protocol_method!(
+    WorktreeRename,
+    WORKTREE_RENAME,
+    WorktreeRenameParams,
+    WorktreeRenameResult
+);
+protocol_method!(
+    WorktreeResolveFolder,
+    WORKTREE_RESOLVE_FOLDER,
+    WorktreeResolveFolderParams,
+    WorktreeResolveFolderResult
+);
+protocol_method!(
+    WorktreeLinkedTasks,
+    WORKTREE_LINKED_TASKS,
+    WorktreeLinkedTasksParams,
+    WorktreeLinkedTasksResult
+);
+protocol_method!(
     AttachmentListRoots,
     ATTACHMENT_LIST_ROOTS,
     AttachmentListRootsParams,
@@ -306,6 +363,12 @@ protocol_method!(
     TASK_ACQUIRE,
     TaskAcquireParams,
     TaskAcquireResult
+);
+protocol_method!(
+    TaskAcquireInWorktree,
+    TASK_ACQUIRE_IN_WORKTREE,
+    TaskAcquireInWorktreeParams,
+    TaskAcquireInWorktreeResult
 );
 protocol_method!(
     TaskSearchFiles,

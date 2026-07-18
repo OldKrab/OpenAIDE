@@ -53,6 +53,7 @@ type AppActionPayload =
   | { type: "taskChat:liveText"; taskId: string; messageId: string; channel: "agent" | "thought"; eventCursor: string }
   | { type: "prompt"; prompt: string }
   | { type: "projects"; projects: ProjectOption[]; initialProjectId?: string }
+  | { type: "worktreeRepository"; repository: import("@openaide/app-server-client").WorktreeRepositorySnapshot }
   | { type: "workspace:roots"; roots: WorkspaceRoot[] }
   | { type: "submit:start"; prompt?: string; context?: ComposerAttachment[] }
   | { type: "submit:cancel" }
@@ -74,6 +75,7 @@ type AppActionPayload =
   | { type: "newTask:nativeSessions:adopt"; sessionId: string }
   | { type: "newTask:nativeSessions:remove"; sessionId: string }
   | { type: "newTask:workspace"; workspace: WorkspaceRoot; newTaskId?: string }
+  | { type: "newTask:worktree"; worktreeId?: string; label: string; path: string; newTaskId?: string }
   | { type: "newTask:attachment:add"; attachment: Attachment }
   | { type: "newTask:attachment:remove"; attachmentId: string }
   | { type: "taskInput:prompt"; taskId: string; prompt: string }
@@ -156,6 +158,7 @@ type GlobalAction = Extract<
   | { type: "taskScroll:record" }
   | { type: "taskChat:liveText" }
   | { type: "projects" }
+  | { type: "worktreeRepository" }
   | { type: "workspace:roots" }
   | { type: "search:set" }
   | { type: "archive:set" }
@@ -190,6 +193,7 @@ function isGlobalAction(action: AppAction): action is GlobalAction {
     case "taskScroll:record":
     case "taskChat:liveText":
     case "projects":
+    case "worktreeRepository":
     case "workspace:roots":
     case "search:set":
     case "archive:set":
@@ -335,6 +339,14 @@ function reduceGlobalState(state: AppState, action: GlobalAction): AppState {
         newTask: { ...state.newTask, selection },
       };
     }
+    case "worktreeRepository":
+      return {
+        ...state,
+        worktreeRepositories: {
+          ...state.worktreeRepositories,
+          [action.repository.repositoryId]: action.repository,
+        },
+      };
     case "workspace:roots": {
       const firstRoot = action.roots[0];
       const selection =

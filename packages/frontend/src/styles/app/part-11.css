@@ -281,7 +281,12 @@ body[data-input-modality="pointer"] button:focus-visible {
   body[data-shell="web"] .project-task-group-header {
     min-height: 44px;
     height: auto;
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  body[data-shell="web"] .project-task-group-actions > button {
+    width: 44px;
+    height: 44px;
   }
 
   body[data-shell="web"] .project-task-group-toggle {

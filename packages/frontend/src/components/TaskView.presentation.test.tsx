@@ -578,6 +578,7 @@ function taskViewProps(snapshot: TaskSnapshot) {
     intents: {
       changePrompt: vi.fn(),
       recordScroll: vi.fn(),
+      refreshWorkspace: vi.fn(),
       reportAttachmentError: vi.fn(),
     },
     onCancel: vi.fn(),

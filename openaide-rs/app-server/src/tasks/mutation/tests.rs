@@ -748,6 +748,48 @@ fn disabling_an_agent_disposes_its_leased_and_free_prepared_tasks_only() {
     assert!(!store.read_task("other-agent").unwrap().tombstoned);
 }
 
+#[test]
+fn removing_a_worktree_disposes_its_leased_and_free_prepared_tasks_only() {
+    let (_dir, store, mutations, _notifications) = test_mutations(0);
+    for (task_id, lifecycle, worktree_id) in [
+        (
+            "leased",
+            TaskLifecycle::New {
+                lease: Some("client-a".into()),
+            },
+            Some("worktree-a"),
+        ),
+        (
+            "free",
+            TaskLifecycle::New { lease: None },
+            Some("worktree-a"),
+        ),
+        ("visible", TaskLifecycle::Visible, Some("worktree-a")),
+        (
+            "other-worktree",
+            TaskLifecycle::New { lease: None },
+            Some("worktree-b"),
+        ),
+        ("project-root", TaskLifecycle::New { lease: None }, None),
+    ] {
+        let mut task = task_record(task_id);
+        task.lifecycle = lifecycle;
+        task.worktree_id = worktree_id.map(str::to_string);
+        store.write_task(&task).unwrap();
+    }
+
+    let disposed = mutations
+        .dispose_prepared_tasks_for_worktree("worktree-a")
+        .unwrap();
+
+    assert_eq!(disposed.len(), 2);
+    assert!(store.read_task("leased").unwrap().tombstoned);
+    assert!(store.read_task("free").unwrap().tombstoned);
+    assert!(!store.read_task("visible").unwrap().tombstoned);
+    assert!(!store.read_task("other-worktree").unwrap().tombstoned);
+    assert!(!store.read_task("project-root").unwrap().tombstoned);
+}
+
 fn test_mutations(
     initial_revision: u64,
 ) -> (tempfile::TempDir, Store, TaskMutations, TaskUpdateReceiver) {
@@ -782,6 +824,8 @@ fn task_record(task_id: &str) -> TaskRecord {
         agent_id: "codex".to_string(),
         isolation: IsolationKind::Local,
         workspace_root: "/tmp/workspace".to_string(),
+        project_root: None,
+        worktree_id: None,
         lifecycle: crate::storage::records::TaskLifecycle::Visible,
         agent_session_id: None,
         active_turn_id: None,

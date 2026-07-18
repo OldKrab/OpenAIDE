@@ -54,6 +54,7 @@ mod support_recovery;
 pub(crate) struct TaskProductApi {
     store: Store,
     project_resolver: Arc<dyn ProjectResolver>,
+    worktrees: crate::worktrees::WorktreeManager,
     agent_registry: AgentRegistryHandle,
     mutations: TaskMutations,
     agent_gateway: AgentGateway,
@@ -79,6 +80,19 @@ pub(crate) trait TaskAcquireWorkflow: Send + Sync {
         client_instance_id: &ClientInstanceId,
         params: TaskAcquireParams,
     ) -> Result<TaskSnapshot, ProtocolError>;
+
+    fn acquire_in_worktree_for_client(
+        &self,
+        _client_instance_id: &ClientInstanceId,
+        _params: openaide_app_server_protocol::task::TaskAcquireInWorktreeParams,
+    ) -> Result<TaskSnapshot, ProtocolError> {
+        Err(ProtocolError {
+            code: ProtocolErrorCode::CapabilityUnavailable,
+            message: "Worktree Task acquisition is unavailable".to_string(),
+            recoverable: false,
+            target: None,
+        })
+    }
 }
 
 pub(crate) trait TaskAdoptNativeSessionWorkflow: Send + Sync {
@@ -239,6 +253,7 @@ impl TaskProductApi {
             preparing_session_ids.clone(),
         );
         let api = Self {
+            worktrees: crate::worktrees::WorktreeManager::new(store.clone()),
             store,
             project_resolver,
             agent_registry,
@@ -300,6 +315,19 @@ impl TaskProductApi {
     }
 }
 
+impl crate::worktrees::WorktreeTaskCleanup for TaskProductApi {
+    fn dispose_prepared_tasks_for_worktree(
+        &self,
+        worktree_id: &openaide_app_server_protocol::ids::WorktreeId,
+    ) -> Result<(), RuntimeError> {
+        let disposed = self
+            .mutations
+            .dispose_prepared_tasks_for_worktree(worktree_id.as_str())?;
+        self.close_disposed_prepared_tasks(disposed);
+        Ok(())
+    }
+}
+
 impl AppServerShutdownWorkflow for TaskProductApi {
     fn shutdown(&self) -> Result<(), RuntimeError> {
         TaskProductApi::shutdown(self)
@@ -322,6 +350,24 @@ impl TaskAcquireWorkflow for TaskProductApi {
         params: TaskAcquireParams,
     ) -> Result<TaskSnapshot, ProtocolError> {
         self.create_task(client_instance_id, params)
+    }
+
+    fn acquire_in_worktree_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        params: openaide_app_server_protocol::task::TaskAcquireInWorktreeParams,
+    ) -> Result<TaskSnapshot, ProtocolError> {
+        let worktree_id = params.worktree_id;
+        self.create_task_in_workspace(
+            client_instance_id,
+            TaskAcquireParams {
+                project_id: params.project_id,
+                agent_id: params.agent_id,
+                workspace_root: None,
+                config_options: params.config_options,
+            },
+            Some(&worktree_id),
+        )
     }
 }
 

@@ -56,6 +56,26 @@ _Avoid_: Treating workspace as the Task owner
 The filesystem work area in which a Task's Agent operates. It may be the Project's checkout or a dedicated worktree while the Task remains associated with the same Project Context.
 _Avoid_: Treating every Task worktree as a separate Project
 
+**Project root**:
+The selected Project's configured filesystem root when used directly as a Task Workspace. It is a stable product choice, not the browser, shell process, or editor's ambient current directory.
+_Avoid_: Current folder
+
+**Worktree Repository**:
+The Git repository that owns a shared inventory of registered worktrees. Worktree support applies only when the Project folder itself is a Git top-level checkout or linked-worktree root.
+_Avoid_: Walking up from a Project subdirectory to infer worktree support
+
+**Unavailable Worktree**:
+A worktree Git still registers but whose filesystem work area cannot currently be used. It is inventory state, not a failed Task or a special failed-creation record.
+_Avoid_: Failed Worktree
+
+**Managed Worktree**:
+A worktree stored under OpenAIDE-managed storage, with a durable OpenAIDE identity independent of its branch or display label.
+_Avoid_: Inferring management from which tool last created it
+
+**External Worktree**:
+A registered worktree located outside OpenAIDE-managed storage, even when OpenAIDE explicitly recreates it at its recorded path.
+_Avoid_: Treating every worktree OpenAIDE can operate on as Managed
+
 **Project**:
 A lightweight OpenAIDE record for a user work area, such as a folder, workspace, or repository.
 _Avoid_: Git remote or shell-specific workspace identity as the primary identity
@@ -156,13 +176,18 @@ _Avoid_: Treating every unread update or status change as an alert
 - One client holds at most one **Prepared-Task Lease**, and one **Prepared Task** is leased to at most one client.
 - A **Free Prepared Task** may be reused by another client selecting the same Agent and Task Workspace.
 - Changing Project Context, Agent, or Task Workspace releases the current **Prepared-Task Lease** while leaving the Frontend-owned composer unchanged.
+- Removing a worktree releases every **Prepared-Task Lease** for that Task Workspace while leaving affected Frontend-owned composers unchanged.
 - Closing or leaving the **New Task** surface for ordinary navigation retains its **Prepared-Task Lease**.
 - The leased **Prepared Task** becomes a visible **Task** when its first user message is durably accepted.
 - A **Task** belongs to the OpenAIDE task list and has **Project Context**.
 - **Project Context** is always a **Project**.
 - A **Task** has one **Task Workspace**.
+- Project folders that are top-level checkouts of the same **Worktree Repository** share its worktree inventory and management surface.
+- An **Unavailable Worktree** remains visible while Git continues to register it, but it cannot be selected as a **Task Workspace**.
+- **Managed Worktrees** and **External Worktrees** may both be selected as Task Workspaces when available.
+- Tasks using the same worktree share one durable worktree identity rather than copying its mutable workspace facts into each Task.
 - A dedicated worktree used as a **Task Workspace** remains associated with the originating **Project Context**.
-- When the originating **Project** is a subdirectory of a repository, its dedicated-worktree **Task Workspace** preserves that repository-relative scope.
+- A Project folder below a repository root does not receive worktree creation, selection, or management support; it retains **Project root** as its only Task Workspace.
 - A **Task** is created only after the user selects the required start context.
 - Web App and Desktop App can show task history across Project Contexts.
 - VS Code Extension defaults Task Navigation to the current Project Context.

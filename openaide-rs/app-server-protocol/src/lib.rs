@@ -17,3 +17,4 @@ pub mod support;
 pub mod task;
 pub mod typescript;
 pub mod workspace;
+pub mod worktree;

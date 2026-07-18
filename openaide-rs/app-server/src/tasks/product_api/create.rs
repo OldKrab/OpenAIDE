@@ -21,7 +21,20 @@ impl TaskProductApi {
         client_instance_id: &ClientInstanceId,
         params: TaskAcquireParams,
     ) -> Result<TaskSnapshot, ProtocolError> {
+        self.create_task_in_workspace(client_instance_id, params, None)
+    }
+
+    pub(super) fn create_task_in_workspace(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        params: TaskAcquireParams,
+        worktree_id: Option<&openaide_app_server_protocol::ids::WorktreeId>,
+    ) -> Result<TaskSnapshot, ProtocolError> {
         let project = self.resolve_create_project_context(&params)?;
+        let workspace = self
+            .worktrees
+            .resolve_task_workspace(std::path::Path::new(&project.workspace_root), worktree_id)
+            .map_err(protocol_error_from_runtime)?;
         self.agent_registry
             .require(params.agent_id.as_str())
             .map_err(protocol_error_from_runtime)?;
@@ -42,8 +55,10 @@ impl TaskProductApi {
                 .display_name(params.agent_id.as_str(), None)
                 .map_err(protocol_error_from_runtime)?,
             agent_id: params.agent_id.into_string(),
-            isolation: project.isolation,
-            workspace_root: project.workspace_root,
+            isolation: workspace.isolation,
+            workspace_root: workspace.path.to_string_lossy().to_string(),
+            project_root: Some(project.workspace_root),
+            worktree_id: workspace.worktree_id.map(|id| id.into_string()),
             lifecycle: TaskLifecycle::New {
                 lease: Some(client_instance_id.clone()),
             },

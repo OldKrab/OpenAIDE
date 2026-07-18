@@ -43,6 +43,10 @@ pub struct TaskSummary {
     pub agent_name: String,
     pub isolation: IsolationKind,
     pub workspace_root: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_root: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worktree_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

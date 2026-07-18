@@ -1,5 +1,6 @@
 import type { AgentListedSession } from "@openaide/app-shell-contracts";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight, GitBranch, MoreHorizontal, Plus } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { SidebarNativeSessionRow } from "./SidebarNativeSessionRow";
 import { SidebarTaskRow } from "./SidebarTaskRow";
 import {
@@ -19,8 +20,11 @@ type SidebarProjectTaskGroupProps = {
   nativeSessions: AgentListedSession[];
   nativeSessionsAdoptingSessionId?: string;
   nativeSessionsHaveMore: boolean;
+  canManageWorktrees: boolean;
   onArchiveTask: (taskId: string) => void;
   onLoadMore: (visibleIncrement: number) => void;
+  onManageWorktrees?: () => void;
+  onNewTask: () => void;
   onOpenNativeSession: (session: AgentListedSession) => void;
   onOpenTask: (taskId: string) => void;
   onRestoreTask: (taskId: string) => void;
@@ -39,14 +43,27 @@ export function SidebarProjectTaskGroup({
   nativeSessions,
   nativeSessionsAdoptingSessionId,
   nativeSessionsHaveMore,
+  canManageWorktrees,
   onArchiveTask,
   onLoadMore,
+  onManageWorktrees,
+  onNewTask,
   onOpenNativeSession,
   onOpenTask,
   onRestoreTask,
   onToggleCollapse,
   showArchived,
 }: SidebarProjectTaskGroupProps) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const actionsRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!menuOpen) return undefined;
+    const dismiss = (event: PointerEvent) => {
+      if (!actionsRef.current?.contains(event.target as Node)) setMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", dismiss);
+    return () => document.removeEventListener("pointerdown", dismiss);
+  }, [menuOpen]);
   const activeTask = group.tasks.find((task) => task.task_id === activeTaskId);
   const taskRows = projectGroupRows(group.tasks, []);
   const allRows = projectGroupRows(group.tasks, nativeSessions);
@@ -73,6 +90,13 @@ export function SidebarProjectTaskGroup({
             {countSummary ? <small className="project-task-group-counts">{countSummary}</small> : null}
           </span>
         </button>
+        <div className="project-task-group-actions" ref={actionsRef}>
+          <button aria-expanded={menuOpen} aria-label={`${group.label} actions`} onClick={() => setMenuOpen((open) => !open)} type="button"><MoreHorizontal size={14} /></button>
+          {menuOpen ? <div className="project-task-group-menu" role="menu">
+            <button onClick={() => { setMenuOpen(false); onNewTask(); }} role="menuitem" type="button"><Plus size={13} />New task</button>
+            {canManageWorktrees && onManageWorktrees ? <button onClick={() => { setMenuOpen(false); onManageWorktrees(); }} role="menuitem" type="button"><GitBranch size={13} />Manage worktrees</button> : null}
+          </div> : null}
+        </div>
       </div>
       {renderedRows.map((row) =>
         row.kind === "task" ? (

@@ -258,6 +258,8 @@ function mapProtocolTaskSummaryWithWarnings(
       agent_name: agentLabel,
       isolation: DEFAULT_LOCAL_ISOLATION,
       workspace_root: "",
+      worktree_id: summary.worktreeId ?? undefined,
+      workspace_available: summary.workspaceAvailable,
     },
     warnings,
   };

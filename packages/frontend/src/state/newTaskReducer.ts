@@ -41,6 +41,7 @@ type NewTaskAction =
   | { type: "newTask:nativeSessions:adopt"; sessionId: string }
   | { type: "newTask:nativeSessions:remove"; sessionId: string }
   | { type: "newTask:workspace"; workspace: WorkspaceRoot; newTaskId?: string }
+  | { type: "newTask:worktree"; worktreeId?: string; label: string; path: string; newTaskId?: string }
   | { type: "newTask:attachment:add"; attachment: Attachment }
   | { type: "newTask:attachment:remove"; attachmentId: string };
 
@@ -303,6 +304,21 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
           configOptionsLoading: false,
           configOptionsError: undefined,
           nativeSessions: emptyNativeSessions(),
+      }, action.newTaskId);
+    case "newTask:worktree":
+      return replacePreparedDraftOnContextChange(state, {
+        ...state.newTask,
+        selection: {
+          ...state.newTask.selection,
+          worktreeId: action.worktreeId,
+          workspaceLabel: action.label,
+          workspaceRoot: action.path,
+          isolation: action.worktreeId ? "git_worktree" : "local",
+          configOptions: {},
+        },
+        configOptions: undefined,
+        configOptionsLoading: false,
+        configOptionsError: undefined,
       }, action.newTaskId);
     case "newTask:attachment:add":
       return {

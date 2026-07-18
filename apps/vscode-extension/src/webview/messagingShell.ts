@@ -1,14 +1,18 @@
+import * as nodePath from "node:path";
 import * as vscode from "vscode";
 import {
   SECRET_READ,
   SHELL_REVEAL_FILE,
   SHELL_RESOLVE_FILE_REVEAL,
   SHELL_SHOW_NOTIFICATION,
+  WORKTREE_RESOLVE_FOLDER,
   type SecretReadParams,
   type ShellNotificationAction,
   type ShellNotificationLevel,
   type ShellRevealFileParams,
   type ShellShowNotificationParams,
+  type WorktreeId,
+  type WorktreeRepositoryId,
 } from "@openaide/app-server-client";
 import type { WebviewToHostMessage } from "@openaide/app-shell-contracts";
 import { validatedWorkspacePath } from "../runtime/workspaceBoundary";
@@ -55,6 +59,18 @@ export async function routeHostCapabilityCommand(message: WebviewToHostMessage, 
     await context.post({ type: "workspace.roots.result", payload: { roots: workspaceRoots() } });
     return true;
   }
+  if (message.type === "worktree.openFolder" && isObject(message.payload)) {
+    const repositoryId = requiredString(message.payload, "repository_id") as WorktreeRepositoryId;
+    const worktreeId = requiredString(message.payload, "worktree_id") as WorktreeId;
+    const result = await context.runtime.appServerRequest(WORKTREE_RESOLVE_FOLDER, {
+      repositoryId,
+      worktreeId,
+    });
+    const folder = vscode.Uri.file(result.path);
+    const inWorkspace = vscode.workspace.workspaceFolders?.some(({ uri }) => pathContains(uri.fsPath, result.path)) ?? false;
+    await vscode.commands.executeCommand(inWorkspace ? "revealInExplorer" : "revealFileInOS", folder);
+    return true;
+  }
   if (message.type === "tool.openPath" && isObject(message.payload)) {
     const path = typeof message.payload.path === "string" ? message.payload.path : "";
     const line = typeof message.payload.line === "number" && message.payload.line > 0 ? message.payload.line : undefined;
@@ -66,6 +82,11 @@ export async function routeHostCapabilityCommand(message: WebviewToHostMessage, 
     return true;
   }
   return false;
+}
+
+function pathContains(root: string, candidate: string) {
+  const relative = nodePath.relative(root, candidate);
+  return relative === "" || (!relative.startsWith(`..${nodePath.sep}`) && relative !== ".." && !nodePath.isAbsolute(relative));
 }
 
 async function routeAppServerServerRequest(

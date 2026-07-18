@@ -3199,6 +3199,7 @@ function protocolTaskSummary(taskId: string, title: string) {
     unread: false,
     updatedAt: "2026-05-22T00:00:00.000Z",
     lastActivity: "2026-05-22T00:00:00.000Z",
+    workspaceAvailable: true,
   };
 }
 

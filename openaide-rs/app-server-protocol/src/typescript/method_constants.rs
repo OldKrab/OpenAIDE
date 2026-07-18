@@ -9,9 +9,11 @@ use crate::methods::{
     SETTINGS_GET_MCP_SERVERS, SETTINGS_GET_PREFERENCES, SETTINGS_GET_RUNTIME, SETTINGS_GET_SKILLS,
     SETTINGS_UPDATE_PREFERENCES, SETTINGS_UPDATE_RUNTIME, SHELL_RESOLVE_FILE_REVEAL,
     STATE_SUBSCRIBE, STATE_UNSUBSCRIBE, SUPPORT_RECOVER_STUCK_SESSIONS, TASK_ACQUIRE,
-    TASK_ADOPT_NATIVE_SESSION, TASK_CANCEL, TASK_CHAT_PAGE, TASK_LIST, TASK_MARK_READ, TASK_OPEN,
-    TASK_RELEASE, TASK_SEARCH_FILES, TASK_SEND, TASK_SET_ARCHIVED, TASK_SET_CONFIG_OPTION,
-    WORKSPACE_LIST_DIRECTORY, WORKSPACE_LIST_ROOTS,
+    TASK_ACQUIRE_IN_WORKTREE, TASK_ADOPT_NATIVE_SESSION, TASK_CANCEL, TASK_CHAT_PAGE, TASK_LIST,
+    TASK_MARK_READ, TASK_OPEN, TASK_RELEASE, TASK_SEARCH_FILES, TASK_SEND, TASK_SET_ARCHIVED,
+    TASK_SET_CONFIG_OPTION, WORKSPACE_LIST_DIRECTORY, WORKSPACE_LIST_ROOTS, WORKTREE_CREATE,
+    WORKTREE_LINKED_TASKS, WORKTREE_RECREATE, WORKTREE_REFRESH, WORKTREE_REMOVAL_PREFLIGHT,
+    WORKTREE_REMOVE, WORKTREE_RENAME, WORKTREE_RESOLVE_FOLDER,
 };
 use crate::server_requests::{
     PERMISSION_REQUEST, QUESTION_REQUEST, SECRET_READ, SHELL_REVEAL_FILE, SHELL_SHOW_NOTIFICATION,
@@ -163,8 +165,44 @@ pub(super) fn push_method_constants(output: &mut String) {
         WORKSPACE_LIST_DIRECTORY
     ));
     output.push_str(&format!(
+        "export const WORKTREE_REFRESH = {:?} as const;\n",
+        WORKTREE_REFRESH
+    ));
+    output.push_str(&format!(
+        "export const WORKTREE_CREATE = {:?} as const;\n",
+        WORKTREE_CREATE
+    ));
+    output.push_str(&format!(
+        "export const WORKTREE_RECREATE = {:?} as const;\n",
+        WORKTREE_RECREATE
+    ));
+    output.push_str(&format!(
+        "export const WORKTREE_REMOVAL_PREFLIGHT = {:?} as const;\n",
+        WORKTREE_REMOVAL_PREFLIGHT
+    ));
+    output.push_str(&format!(
+        "export const WORKTREE_REMOVE = {:?} as const;\n",
+        WORKTREE_REMOVE
+    ));
+    output.push_str(&format!(
+        "export const WORKTREE_RENAME = {:?} as const;\n",
+        WORKTREE_RENAME
+    ));
+    output.push_str(&format!(
+        "export const WORKTREE_RESOLVE_FOLDER = {:?} as const;\n",
+        WORKTREE_RESOLVE_FOLDER
+    ));
+    output.push_str(&format!(
+        "export const WORKTREE_LINKED_TASKS = {:?} as const;\n\n",
+        WORKTREE_LINKED_TASKS
+    ));
+    output.push_str(&format!(
         "export const TASK_ACQUIRE = {:?} as const;\n",
         TASK_ACQUIRE
+    ));
+    output.push_str(&format!(
+        "export const TASK_ACQUIRE_IN_WORKTREE = {:?} as const;\n",
+        TASK_ACQUIRE_IN_WORKTREE
     ));
     output.push_str(&format!(
         "export const TASK_SEARCH_FILES = {:?} as const;\n",

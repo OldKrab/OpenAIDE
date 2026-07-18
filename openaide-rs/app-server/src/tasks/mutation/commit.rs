@@ -466,11 +466,27 @@ pub(super) fn dispose_prepared_tasks_for_agent(
     target: &TaskMutations,
     agent_id: &str,
 ) -> Result<Vec<TaskRecord>, RuntimeError> {
+    dispose_prepared_tasks_matching(target, |task| task.agent_id == agent_id)
+}
+
+pub(super) fn dispose_prepared_tasks_for_worktree(
+    target: &TaskMutations,
+    worktree_id: &str,
+) -> Result<Vec<TaskRecord>, RuntimeError> {
+    dispose_prepared_tasks_matching(target, |task| {
+        task.worktree_id.as_deref() == Some(worktree_id)
+    })
+}
+
+fn dispose_prepared_tasks_matching(
+    target: &TaskMutations,
+    matches: impl Fn(&TaskRecord) -> bool,
+) -> Result<Vec<TaskRecord>, RuntimeError> {
     let _guard = target.lock();
     let mut disposed = Vec::new();
     for mut task in target.store.list_all_task_records_strict()? {
         if task.tombstoned
-            || task.agent_id != agent_id
+            || !matches(&task)
             || !matches!(task.lifecycle, TaskLifecycle::New { .. })
         {
             continue;
@@ -584,7 +600,7 @@ fn persist_new_task(
         vec![CommittedChatChange::Replace],
     )?;
     let navigation = navigation_member(task).then(|| TaskNavigationChange::Upsert {
-        task: projected.task.clone(),
+        task: Box::new(projected.task.clone()),
     });
     write_task(&target.store, task)?;
     target
@@ -656,10 +672,10 @@ fn navigation_change(
             task_id: task.task_id.clone().into(),
         }),
         (false, true) => Some(TaskNavigationChange::Upsert {
-            task: summary.clone(),
+            task: Box::new(summary.clone()),
         }),
         (true, true) if summary_changed => Some(TaskNavigationChange::Upsert {
-            task: summary.clone(),
+            task: Box::new(summary.clone()),
         }),
         _ => None,
     }

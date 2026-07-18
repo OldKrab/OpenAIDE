@@ -1,4 +1,4 @@
-import { Circle, CircleAlert, CircleCheck, CircleX, LoaderCircle } from "lucide-react";
+import { Circle, CircleAlert, CircleCheck, CircleX, FolderRoot, GitBranch, LoaderCircle } from "lucide-react";
 import type { TaskStatus } from "@openaide/app-shell-contracts";
 import { AgentIcon } from "./AgentIcon";
 import { workspaceLabel } from "./taskSurfaceHelpers";
@@ -24,6 +24,8 @@ export function TaskHeader({
   title,
   workspaceRoot,
   showWorkspaceContext = true,
+  worktreeName,
+  gitRef,
 }: {
   agentId: string;
   agentName: string;
@@ -32,6 +34,8 @@ export function TaskHeader({
   title: string;
   workspaceRoot: string;
   showWorkspaceContext?: boolean;
+  worktreeName?: string;
+  gitRef?: string;
 }) {
   const statusPresentation = STATUS_PRESENTATION[status];
   const visibleStatusLabel = statusLabel ?? statusPresentation.label;
@@ -56,7 +60,10 @@ export function TaskHeader({
           </span>
         </span>
       </span>
-      {showWorkspaceContext && projectLabel ? <span className="task-header-workspace" title={workspaceRoot}>{projectLabel}</span> : null}
+      {showWorkspaceContext && (worktreeName || projectLabel) ? <span className="task-header-workspace" title={[workspaceRoot, gitRef].filter(Boolean).join("\n")}>
+        {worktreeName ? <GitBranch size={12} /> : <FolderRoot size={12} />}
+        {worktreeName ?? "Project root"}
+      </span> : null}
     </header>
   );
 }

@@ -12,6 +12,7 @@ mod tests;
 
 pub(super) fn run_stdio(mut dispatcher: ProtocolEdgeStdioDispatcher) {
     let task_updates = dispatcher.take_task_updates();
+    let worktree_updates = dispatcher.take_worktree_updates();
     let host_requests = dispatcher.take_host_requests();
     let dispatcher = Arc::new(Mutex::new(dispatcher));
     let stdin = io::stdin();
@@ -25,6 +26,25 @@ pub(super) fn run_stdio(mut dispatcher: ProtocolEdgeStdioDispatcher) {
                     .lock()
                     .expect("protocol edge dispatcher lock poisoned")
                     .handle_task_update(update);
+                for message in messages {
+                    let mut stdout = stdout.lock().expect("stdout lock poisoned");
+                    if writeln!(stdout, "{message}").is_err() {
+                        return;
+                    }
+                    let _ = stdout.flush();
+                }
+            }
+        });
+    }
+    if let Some(worktree_updates) = worktree_updates {
+        let dispatcher = dispatcher.clone();
+        let stdout = stdout.clone();
+        thread::spawn(move || {
+            for repository in worktree_updates {
+                let messages = dispatcher
+                    .lock()
+                    .expect("protocol edge dispatcher lock poisoned")
+                    .handle_worktree_update(repository);
                 for message in messages {
                     let mut stdout = stdout.lock().expect("stdout lock poisoned");
                     if writeln!(stdout, "{message}").is_err() {
@@ -80,6 +100,14 @@ pub(super) fn run_local_http_handoff(mut dispatcher: ProtocolEdgeStdioDispatcher
             forward_local_http_task_updates(task_updates, |update| {
                 gateway.publish_committed_task_update(&update, AppServerTime::now());
             });
+        });
+    }
+    if let Some(worktree_updates) = dispatcher.take_worktree_updates() {
+        let gateway = dispatcher.shared_gateway();
+        thread::spawn(move || {
+            for repository in worktree_updates {
+                gateway.publish_worktree_repository_update(repository, AppServerTime::now());
+            }
         });
     }
 

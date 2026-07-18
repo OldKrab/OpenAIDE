@@ -43,14 +43,129 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 #[test]
+fn acquire_in_worktree_persists_workspace_identity_without_splitting_project() {
+    let temp = tempfile::tempdir().unwrap();
+    let project_root = temp.path().join("project");
+    std::fs::create_dir(&project_root).unwrap();
+    git(&project_root, &["init", "-b", "main"]);
+    git(&project_root, &["config", "user.name", "OpenAIDE Test"]);
+    git(
+        &project_root,
+        &["config", "user.email", "test@example.invalid"],
+    );
+    std::fs::write(project_root.join("README.md"), "test\n").unwrap();
+    git(&project_root, &["add", "README.md"]);
+    git(&project_root, &["commit", "-m", "initial"]);
+
+    let store = Store::open(temp.path().join("state")).unwrap();
+    let project_root_text = project_root.to_string_lossy().to_string();
+    store
+        .write_task(&task_record("task-project-anchor", &project_root_text))
+        .unwrap();
+    let manager = crate::worktrees::WorktreeManager::new(store.clone());
+    let repository = manager.refresh_project(&project_root).unwrap().unwrap();
+    let created = manager
+        .create(crate::worktrees::CreateWorktree {
+            repository_id: repository.repository.repository_id,
+            source_project_root: project_root.clone(),
+            name: "Sidebar scrolling".to_string(),
+            base: crate::worktrees::WorktreeBase::CurrentHead,
+            branch: None,
+        })
+        .unwrap();
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        Arc::new(crate::agent::mock::MockAgent),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+
+    let snapshot = api
+        .acquire_in_worktree_for_client(
+            &crate::attachment_runtime::AttachmentOwner::test_client_instance_id(),
+            openaide_app_server_protocol::task::TaskAcquireInWorktreeParams {
+                project_id: project_id_for_workspace(&project_root_text),
+                agent_id: AgentId::from("codex"),
+                worktree_id: created.worktree_id.clone(),
+                config_options: Default::default(),
+            },
+        )
+        .unwrap();
+
+    assert_eq!(snapshot.task.worktree_id, Some(created.worktree_id.clone()));
+    assert_eq!(
+        snapshot.task.project_id,
+        project_id_for_workspace(&project_root_text)
+    );
+    let record = store.read_task(snapshot.task.task_id.as_str()).unwrap();
+    assert_eq!(
+        record.worktree_id.as_deref(),
+        Some(created.worktree_id.as_str())
+    );
+    assert_ne!(record.workspace_root, project_root_text);
+    assert_eq!(
+        record.project_root.as_deref(),
+        Some(project_root_text.as_str())
+    );
+}
+
+#[test]
+fn send_rejects_a_task_after_its_worktree_folder_disappears() {
+    let temp = tempfile::tempdir().unwrap();
+    let workspace = temp.path().join("missing-worktree");
+    let workspace_text = workspace.to_string_lossy().to_string();
+    let mut record = task_record("task-missing-worktree", &workspace_text);
+    record.worktree_id = Some("worktree_missing".to_string());
+    record.project_root = Some(temp.path().to_string_lossy().to_string());
+    std::fs::remove_dir_all(&workspace).unwrap();
+    let store = Store::open(temp.path().join("state")).unwrap();
+    store.write_task(&record).unwrap();
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        Arc::new(crate::agent::mock::MockAgent),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+
+    let error = api
+        .send(send_params(&record.task_id, "continue"))
+        .unwrap_err();
+
+    assert_eq!(error.code, ProtocolErrorCode::Conflict);
+    assert_eq!(
+        error.message,
+        "Task workspace is unavailable. Restore it before sending."
+    );
+    assert!(!store.read_task(&record.task_id).unwrap().tombstoned);
+}
+
+fn git(cwd: &std::path::Path, args: &[&str]) {
+    let output = std::process::Command::new("git")
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "git {:?}: {}",
+        args,
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+#[test]
 fn create_persists_idle_task_without_prompt_or_turn() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut record = task_record("task-existing", "/workspace/app");
+    let mut record = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
     record.title = None;
     record.lifecycle = test_new_task_lifecycle();
     store.write_task(&record).unwrap();
-    let project_id = project_id_for_workspace("/workspace/app");
+    let project_id = project_id_for_workspace("/tmp/openaide-unit-workspace/app");
     let api = TaskProductApi::new(
         store.clone(),
         Arc::new(StorageProjectResolver::new(store.clone())),
@@ -82,10 +197,10 @@ fn create_persists_idle_task_without_prompt_or_turn() {
 fn create_reopens_the_existing_draft_for_the_same_project_and_agent() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut project_anchor = task_record("task-project-anchor", "/workspace/app");
+    let mut project_anchor = task_record("task-project-anchor", "/tmp/openaide-unit-workspace/app");
     project_anchor.lifecycle = TaskLifecycle::Visible;
     store.write_task(&project_anchor).unwrap();
-    let project_id = project_id_for_workspace("/workspace/app");
+    let project_id = project_id_for_workspace("/tmp/openaide-unit-workspace/app");
     let api = TaskProductApi::new(
         store.clone(),
         Arc::new(StorageProjectResolver::new(store.clone())),
@@ -113,7 +228,10 @@ fn different_clients_get_distinct_new_tasks() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
-        .write_task(&task_record("task-project-anchor", "/workspace/app"))
+        .write_task(&task_record(
+            "task-project-anchor",
+            "/tmp/openaide-unit-workspace/app",
+        ))
         .unwrap();
     let api = TaskProductApi::new(
         store.clone(),
@@ -124,7 +242,7 @@ fn different_clients_get_distinct_new_tasks() {
     )
     .unwrap();
     let params = TaskAcquireParams {
-        project_id: project_id_for_workspace("/workspace/app"),
+        project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
         agent_id: AgentId::from("codex"),
         workspace_root: None,
         config_options: Default::default(),
@@ -145,7 +263,10 @@ fn new_task_context_change_is_a_conflict() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
-        .write_task(&task_record("task-project-anchor", "/workspace/app"))
+        .write_task(&task_record(
+            "task-project-anchor",
+            "/tmp/openaide-unit-workspace/app",
+        ))
         .unwrap();
     let api = TaskProductApi::new(
         store.clone(),
@@ -157,7 +278,7 @@ fn new_task_context_change_is_a_conflict() {
     .unwrap();
     let client = ClientInstanceId::from("client-a");
     let params = |agent_id| TaskAcquireParams {
-        project_id: project_id_for_workspace("/workspace/app"),
+        project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
         agent_id: AgentId::from(agent_id),
         workspace_root: None,
         config_options: Default::default(),
@@ -176,7 +297,10 @@ fn concurrent_create_for_one_client_resolves_one_new_task() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
-        .write_task(&task_record("task-project-anchor", "/workspace/app"))
+        .write_task(&task_record(
+            "task-project-anchor",
+            "/tmp/openaide-unit-workspace/app",
+        ))
         .unwrap();
     let api = TaskProductApi::new(
         store.clone(),
@@ -196,7 +320,7 @@ fn concurrent_create_for_one_client_resolves_one_new_task() {
             api.acquire_for_client(
                 &ClientInstanceId::from("client-a"),
                 TaskAcquireParams {
-                    project_id: project_id_for_workspace("/workspace/app"),
+                    project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
                     agent_id: AgentId::from("codex"),
                     workspace_root: None,
                     config_options: Default::default(),
@@ -228,7 +352,10 @@ fn released_prepared_task_is_reused_by_another_client() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
-        .write_task(&task_record("task-project-anchor", "/workspace/app"))
+        .write_task(&task_record(
+            "task-project-anchor",
+            "/tmp/openaide-unit-workspace/app",
+        ))
         .unwrap();
     let api = TaskProductApi::new(
         store.clone(),
@@ -239,7 +366,7 @@ fn released_prepared_task_is_reused_by_another_client() {
     )
     .unwrap();
     let params = TaskAcquireParams {
-        project_id: project_id_for_workspace("/workspace/app"),
+        project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
         agent_id: AgentId::from("codex"),
         workspace_root: None,
         config_options: Default::default(),
@@ -282,10 +409,13 @@ fn restart_clears_prepared_task_lease_and_preserves_the_task_for_reuse() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
-        .write_task(&task_record("task-project-anchor", "/workspace/app"))
+        .write_task(&task_record(
+            "task-project-anchor",
+            "/tmp/openaide-unit-workspace/app",
+        ))
         .unwrap();
     let params = TaskAcquireParams {
-        project_id: project_id_for_workspace("/workspace/app"),
+        project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
         agent_id: AgentId::from("codex"),
         workspace_root: None,
         config_options: Default::default(),
@@ -335,7 +465,10 @@ fn new_task_cannot_be_archived_or_replaced() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
-        .write_task(&task_record("task-project-anchor", "/workspace/app"))
+        .write_task(&task_record(
+            "task-project-anchor",
+            "/tmp/openaide-unit-workspace/app",
+        ))
         .unwrap();
     let api = TaskProductApi::new(
         store.clone(),
@@ -346,7 +479,7 @@ fn new_task_cannot_be_archived_or_replaced() {
     )
     .unwrap();
     let params = TaskAcquireParams {
-        project_id: project_id_for_workspace("/workspace/app"),
+        project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
         agent_id: AgentId::from("codex"),
         workspace_root: None,
         config_options: Default::default(),
@@ -376,7 +509,7 @@ fn create_fails_closed_when_task_ownership_records_are_malformed() {
         ) -> Result<ProjectTaskContext, ProtocolError> {
             Ok(ProjectTaskContext {
                 project_id: project_id.clone(),
-                workspace_root: "/workspace/app".to_string(),
+                workspace_root: "/tmp/openaide-unit-workspace/app".to_string(),
                 label: "app".to_string(),
                 isolation: IsolationKind::Local,
             })
@@ -407,7 +540,7 @@ fn create_fails_closed_when_task_ownership_records_are_malformed() {
 fn create_reactivates_the_reused_draft_native_session() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut draft = task_record("task-draft", "/workspace/app");
+    let mut draft = task_record("task-draft", "/tmp/openaide-unit-workspace/app");
     draft.lifecycle = test_new_task_lifecycle();
     draft.agent_session_id = Some("session-draft".to_string());
     draft.preparation = TaskPreparationRecord::Ready;
@@ -428,7 +561,7 @@ fn create_reactivates_the_reused_draft_native_session() {
     .unwrap();
 
     api.create_for_test(TaskAcquireParams {
-        project_id: project_id_for_workspace("/workspace/app"),
+        project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
         agent_id: AgentId::from("codex"),
         workspace_root: None,
         config_options: Default::default(),
@@ -475,7 +608,10 @@ fn create_passes_selected_config_into_draft_session_preparation() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
-        .write_task(&task_record("task-existing", "/workspace/app"))
+        .write_task(&task_record(
+            "task-existing",
+            "/tmp/openaide-unit-workspace/app",
+        ))
         .unwrap();
     let agent = Arc::new(RecordingAgent::default());
     let api = TaskProductApi::new(
@@ -488,7 +624,7 @@ fn create_passes_selected_config_into_draft_session_preparation() {
     .unwrap();
 
     api.create_for_test(TaskAcquireParams {
-        project_id: project_id_for_workspace("/workspace/app"),
+        project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
         agent_id: AgentId::from("codex"),
         workspace_root: None,
         config_options: [("model".to_string(), "gpt-5".to_string())]
@@ -508,7 +644,7 @@ fn create_passes_selected_config_into_draft_session_preparation() {
 fn create_reconciles_stale_draft_config_with_fresh_agent_defaults() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut draft = task_record("task-draft", "/workspace/app");
+    let mut draft = task_record("task-draft", "/tmp/openaide-unit-workspace/app");
     draft.lifecycle = test_new_task_lifecycle();
     draft.config_options = [("mode".to_string(), "full-access".to_string())]
         .into_iter()
@@ -529,7 +665,7 @@ fn create_reconciles_stale_draft_config_with_fresh_agent_defaults() {
     .unwrap();
 
     api.create_for_test(TaskAcquireParams {
-        project_id: project_id_for_workspace("/workspace/app"),
+        project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
         agent_id: AgentId::from("codex"),
         workspace_root: None,
         config_options: Default::default(),
@@ -562,7 +698,10 @@ fn draft_preparation_keeps_catalogs_delivered_immediately_when_the_sink_attaches
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
-        .write_task(&task_record("task-project-anchor", "/workspace/app"))
+        .write_task(&task_record(
+            "task-project-anchor",
+            "/tmp/openaide-unit-workspace/app",
+        ))
         .unwrap();
     let api = TaskProductApi::new(
         store.clone(),
@@ -575,7 +714,7 @@ fn draft_preparation_keeps_catalogs_delivered_immediately_when_the_sink_attaches
 
     let created = api
         .create_for_test(TaskAcquireParams {
-            project_id: project_id_for_workspace("/workspace/app"),
+            project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
             agent_id: AgentId::from("codex"),
             workspace_root: None,
             config_options: Default::default(),
@@ -626,7 +765,7 @@ fn shutdown_marks_storage_clean_after_task_runtime_shutdown() {
 fn startup_recovers_active_turn_left_by_previous_product_api_runtime() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut record = task_record("task-stale-turn", "/workspace/app");
+    let mut record = task_record("task-stale-turn", "/tmp/openaide-unit-workspace/app");
     record.status = TaskStatus::Active;
     record.active_turn_id = Some("turn-stale".to_string());
     record.agent_session_id = Some("session-stale".to_string());
@@ -674,7 +813,10 @@ fn create_persists_preparing_and_starts_one_native_session_asynchronously() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
-        .write_task(&task_record("task-existing", "/workspace/app"))
+        .write_task(&task_record(
+            "task-existing",
+            "/tmp/openaide-unit-workspace/app",
+        ))
         .unwrap();
     let agent = Arc::new(RecordingAgent {
         config_catalog: Some(config_catalog("gpt-5")),
@@ -693,7 +835,7 @@ fn create_persists_preparing_and_starts_one_native_session_asynchronously() {
 
     let snapshot = api
         .create_for_test(TaskAcquireParams {
-            project_id: project_id_for_workspace("/workspace/app"),
+            project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
             agent_id: AgentId::from("codex"),
             workspace_root: None,
             config_options: Default::default(),
@@ -768,7 +910,10 @@ fn create_projects_native_session_start_failure_into_send_readiness() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
-        .write_task(&task_record("task-existing", "/workspace/app"))
+        .write_task(&task_record(
+            "task-existing",
+            "/tmp/openaide-unit-workspace/app",
+        ))
         .unwrap();
     let agent = Arc::new(RecordingAgent {
         fail_start: true,
@@ -785,7 +930,7 @@ fn create_projects_native_session_start_failure_into_send_readiness() {
 
     let created = api
         .create_for_test(TaskAcquireParams {
-            project_id: project_id_for_workspace("/workspace/app"),
+            project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
             agent_id: AgentId::from("codex"),
             workspace_root: None,
             config_options: Default::default(),
@@ -840,7 +985,10 @@ fn task_preparation_resolves_custom_agent_secrets_through_typed_server_requests(
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
-        .write_task(&task_record("task-existing", "/workspace/app"))
+        .write_task(&task_record(
+            "task-existing",
+            "/tmp/openaide-unit-workspace/app",
+        ))
         .unwrap();
     let resolved = Arc::new(Mutex::new(None));
     let agent = Arc::new(SecretResolvingAgent {
@@ -871,7 +1019,7 @@ fn task_preparation_resolves_custom_agent_secrets_through_typed_server_requests(
 
     let created = api
         .create_for_test(TaskAcquireParams {
-            project_id: project_id_for_workspace("/workspace/app"),
+            project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
             agent_id: AgentId::from("custom.agent"),
             workspace_root: None,
             config_options: Default::default(),
@@ -922,7 +1070,10 @@ fn create_closes_native_session_when_preparation_event_attachment_fails() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
-        .write_task(&task_record("task-existing", "/workspace/app"))
+        .write_task(&task_record(
+            "task-existing",
+            "/tmp/openaide-unit-workspace/app",
+        ))
         .unwrap();
     let agent = Arc::new(RecordingAgent {
         fail_attach: true,
@@ -940,7 +1091,7 @@ fn create_closes_native_session_when_preparation_event_attachment_fails() {
 
     let created = api
         .create_for_test(TaskAcquireParams {
-            project_id: project_id_for_workspace("/workspace/app"),
+            project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
             agent_id: AgentId::from("codex"),
             workspace_root: None,
             config_options: Default::default(),
@@ -971,7 +1122,10 @@ fn first_send_reuses_the_native_session_prepared_during_create() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
-        .write_task(&task_record("task-existing", "/workspace/app"))
+        .write_task(&task_record(
+            "task-existing",
+            "/tmp/openaide-unit-workspace/app",
+        ))
         .unwrap();
     let agent = Arc::new(RecordingAgent::default());
     let api = TaskProductApi::new(
@@ -985,7 +1139,7 @@ fn first_send_reuses_the_native_session_prepared_during_create() {
 
     let created = api
         .create_for_test(TaskAcquireParams {
-            project_id: project_id_for_workspace("/workspace/app"),
+            project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
             agent_id: AgentId::from("codex"),
             workspace_root: None,
             config_options: Default::default(),
@@ -1033,7 +1187,10 @@ fn first_send_promotes_new_task_with_prompt_title() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
-        .write_task(&task_record("task-existing", "/workspace/app"))
+        .write_task(&task_record(
+            "task-existing",
+            "/tmp/openaide-unit-workspace/app",
+        ))
         .unwrap();
     let api = TaskProductApi::new(
         store.clone(),
@@ -1045,7 +1202,7 @@ fn first_send_promotes_new_task_with_prompt_title() {
     .unwrap();
     let created = api
         .create_for_test(TaskAcquireParams {
-            project_id: project_id_for_workspace("/workspace/app"),
+            project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
             agent_id: AgentId::from("codex"),
             workspace_root: None,
             config_options: Default::default(),
@@ -1084,12 +1241,15 @@ fn first_send_promotes_new_task_with_prompt_title() {
 fn acquire_returns_while_prepared_session_resume_is_blocked() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut draft = task_record("task-draft", "/workspace/app");
+    let mut draft = task_record("task-draft", "/tmp/openaide-unit-workspace/app");
     draft.lifecycle = test_new_task_lifecycle();
     draft.agent_session_id = Some("prepared-session".to_string());
     store.write_task(&draft).unwrap();
     store
-        .write_task(&task_record("task-existing", "/workspace/app"))
+        .write_task(&task_record(
+            "task-existing",
+            "/tmp/openaide-unit-workspace/app",
+        ))
         .unwrap();
     let agent = Arc::new(RecordingAgent {
         block_resume: AtomicBool::new(true),
@@ -1105,7 +1265,7 @@ fn acquire_returns_while_prepared_session_resume_is_blocked() {
     .unwrap();
     let acquired = api
         .create_for_test(TaskAcquireParams {
-            project_id: project_id_for_workspace("/workspace/app"),
+            project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
             agent_id: AgentId::from("codex"),
             workspace_root: None,
             config_options: Default::default(),
@@ -1140,7 +1300,7 @@ fn acquire_returns_while_prepared_session_resume_is_blocked() {
 fn first_send_replaces_a_prepared_session_missing_from_the_agent_runtime() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut draft = task_record("task-draft", "/workspace/app");
+    let mut draft = task_record("task-draft", "/tmp/openaide-unit-workspace/app");
     draft.lifecycle = test_new_task_lifecycle();
     draft.agent_session_id = Some("missing-session".to_string());
     store.write_task(&draft).unwrap();
@@ -1157,7 +1317,7 @@ fn first_send_replaces_a_prepared_session_missing_from_the_agent_runtime() {
     )
     .unwrap();
     api.create_for_test(TaskAcquireParams {
-        project_id: project_id_for_workspace("/workspace/app"),
+        project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
         agent_id: AgentId::from("codex"),
         workspace_root: None,
         config_options: Default::default(),
@@ -1187,7 +1347,10 @@ fn send_projects_agent_config_catalog_metadata() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
-        .write_task(&task_record("task-existing", "/workspace/app"))
+        .write_task(&task_record(
+            "task-existing",
+            "/tmp/openaide-unit-workspace/app",
+        ))
         .unwrap();
     let agent = Arc::new(RecordingAgent {
         config_catalog: Some(config_catalog("gpt-5")),
@@ -1235,7 +1398,10 @@ fn send_projects_agent_command_catalog_metadata() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
-        .write_task(&task_record("task-existing", "/workspace/app"))
+        .write_task(&task_record(
+            "task-existing",
+            "/tmp/openaide-unit-workspace/app",
+        ))
         .unwrap();
     let agent = Arc::new(RecordingAgent {
         commands_catalog: Some(command_catalog()),
@@ -1281,7 +1447,7 @@ fn send_projects_agent_command_catalog_metadata() {
 fn startup_marks_abandoned_preparation_failed_and_removes_it_from_the_pool() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut task = task_record("task-preparing", "/workspace/app");
+    let mut task = task_record("task-preparing", "/tmp/openaide-unit-workspace/app");
     task.lifecycle = test_new_task_lifecycle();
     task.preparation = TaskPreparationRecord::Preparing;
     task.agent_session_id = Some("bound-before-attach".to_string());
@@ -1357,7 +1523,8 @@ fn create_accepts_new_workspace_root_for_unknown_project() {
         TaskUpdateNotifier::disabled(),
     )
     .unwrap();
-    let workspace_root = "/workspace/new-app";
+    let workspace_root = "/tmp/openaide-unit-workspace/new-app";
+    std::fs::create_dir_all(workspace_root).unwrap();
 
     let snapshot = api
         .create_for_test(TaskAcquireParams {
@@ -1391,9 +1558,9 @@ fn create_rejects_mismatched_new_workspace_root_project_id() {
 
     let error = api
         .create_for_test(TaskAcquireParams {
-            project_id: project_id_for_workspace("/workspace/other"),
+            project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/other"),
             agent_id: AgentId::from("codex"),
-            workspace_root: Some("/workspace/new-app".to_string()),
+            workspace_root: Some("/tmp/openaide-unit-workspace/new-app".to_string()),
             config_options: Default::default(),
         })
         .unwrap_err();
@@ -1435,7 +1602,10 @@ fn create_rejects_unknown_agent() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
-        .write_task(&task_record("task-existing", "/workspace/app"))
+        .write_task(&task_record(
+            "task-existing",
+            "/tmp/openaide-unit-workspace/app",
+        ))
         .unwrap();
     let api = TaskProductApi::new(
         store.clone(),
@@ -1448,7 +1618,7 @@ fn create_rejects_unknown_agent() {
 
     let error = api
         .create_for_test(TaskAcquireParams {
-            project_id: project_id_for_workspace("/workspace/app"),
+            project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
             agent_id: AgentId::from("missing-agent"),
             workspace_root: None,
             config_options: Default::default(),
@@ -1462,7 +1632,7 @@ fn create_rejects_unknown_agent() {
 fn list_agent_sessions_filters_already_adopted_native_sessions() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut task = task_record("task-existing", "/workspace/app");
+    let mut task = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
     task.agent_session_id = Some("mock-session".to_string());
     store.write_task(&task).unwrap();
     let api = TaskProductApi::new(
@@ -1477,7 +1647,7 @@ fn list_agent_sessions_filters_already_adopted_native_sessions() {
     let result = api
         .list_agent_sessions(AgentListSessionsParams {
             agent_id: AgentId::from("codex"),
-            project_id: project_id_for_workspace("/workspace/app"),
+            project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
             cursor: None,
         })
         .unwrap();
@@ -1489,14 +1659,14 @@ fn list_agent_sessions_filters_already_adopted_native_sessions() {
 fn list_agent_sessions_reconciles_title_before_filtering_owned_session() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut task = task_record("task-existing", "/workspace/app");
+    let mut task = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
     task.agent_session_id = Some("native-session".to_string());
     task.title = TaskTitle::new("Prompt fallback", TaskTitleSource::Prompt);
     store.write_task(&task).unwrap();
     let agent = Arc::new(RecordingAgent {
         listed_sessions: Mutex::new(vec![AgentListedSession {
             session_id: "native-session".to_string(),
-            cwd: "/workspace/app".to_string(),
+            cwd: "/tmp/openaide-unit-workspace/app".to_string(),
             title: Some("Agent catalog title".to_string()),
             last_activity: None,
             updated_at: None,
@@ -1515,7 +1685,7 @@ fn list_agent_sessions_reconciles_title_before_filtering_owned_session() {
     let result = api
         .list_agent_sessions(AgentListSessionsParams {
             agent_id: AgentId::from("codex"),
-            project_id: project_id_for_workspace("/workspace/app"),
+            project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
             cursor: None,
         })
         .unwrap();
@@ -1532,15 +1702,21 @@ fn native_session_adoption_is_scoped_by_agent_not_workspace() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
-        .write_task(&task_record("project-a-task", "/workspace/a"))
+        .write_task(&task_record(
+            "project-a-task",
+            "/tmp/openaide-unit-workspace/a",
+        ))
         .unwrap();
     store
-        .write_task(&task_record("project-b-task", "/workspace/b"))
+        .write_task(&task_record(
+            "project-b-task",
+            "/tmp/openaide-unit-workspace/b",
+        ))
         .unwrap();
     let agent = Arc::new(RecordingAgent {
         listed_sessions: Mutex::new(vec![AgentListedSession {
             session_id: "shared-native-session".to_string(),
-            cwd: "/workspace/b".to_string(),
+            cwd: "/tmp/openaide-unit-workspace/b".to_string(),
             title: Some("Shared session".to_string()),
             updated_at: None,
             last_activity: None,
@@ -1563,7 +1739,7 @@ fn native_session_adoption_is_scoped_by_agent_not_workspace() {
     };
 
     let adopted = api
-        .adopt_native_session(params("/workspace/a", "codex"))
+        .adopt_native_session(params("/tmp/openaide-unit-workspace/a", "codex"))
         .expect("first Agent session owner");
     assert_eq!(
         adopted.lifecycle,
@@ -1579,7 +1755,7 @@ fn native_session_adoption_is_scoped_by_agent_not_workspace() {
     let listed = api
         .list_agent_sessions(AgentListSessionsParams {
             agent_id: AgentId::from("codex"),
-            project_id: project_id_for_workspace("/workspace/b"),
+            project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/b"),
             cursor: None,
         })
         .expect("list Agent sessions in another workspace");
@@ -1588,10 +1764,10 @@ fn native_session_adoption_is_scoped_by_agent_not_workspace() {
         "an Agent session owned in another workspace must not be offered for adoption"
     );
     let duplicate = api
-        .adopt_native_session(params("/workspace/b", "codex"))
+        .adopt_native_session(params("/tmp/openaide-unit-workspace/b", "codex"))
         .expect_err("one Agent session cannot be owned in another workspace");
     assert_eq!(duplicate.code, ProtocolErrorCode::ValidationFailed);
-    api.adopt_native_session(params("/workspace/b", "opencode"))
+    api.adopt_native_session(params("/tmp/openaide-unit-workspace/b", "opencode"))
         .expect("another Agent may reuse the same native session id");
 }
 
@@ -1600,12 +1776,15 @@ fn adopting_native_session_preserves_its_listed_activity_time() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
-        .write_task(&task_record("project-task", "/workspace/app"))
+        .write_task(&task_record(
+            "project-task",
+            "/tmp/openaide-unit-workspace/app",
+        ))
         .unwrap();
     let agent = Arc::new(RecordingAgent {
         listed_sessions: Mutex::new(vec![AgentListedSession {
             session_id: "native-session".to_string(),
-            cwd: "/workspace/app".to_string(),
+            cwd: "/tmp/openaide-unit-workspace/app".to_string(),
             title: Some("Existing session".to_string()),
             last_activity: None,
             updated_at: Some("2026-01-02T03:04:05.000Z".to_string()),
@@ -1623,13 +1802,13 @@ fn adopting_native_session_preserves_its_listed_activity_time() {
 
     api.list_agent_sessions(AgentListSessionsParams {
         agent_id: AgentId::from("codex"),
-        project_id: project_id_for_workspace("/workspace/app"),
+        project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
         cursor: None,
     })
     .unwrap();
     let adopted = api
         .adopt_native_session(TaskAdoptNativeSessionParams {
-            project_id: project_id_for_workspace("/workspace/app"),
+            project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
             agent_id: AgentId::from("codex"),
             native_session_id: "native-session".to_string(),
             title: Some("Existing session".to_string()),
@@ -1644,13 +1823,16 @@ fn list_agent_sessions_hides_a_native_session_while_draft_ownership_is_committin
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
-        .write_task(&task_record("task-existing", "/workspace/app"))
+        .write_task(&task_record(
+            "task-existing",
+            "/tmp/openaide-unit-workspace/app",
+        ))
         .unwrap();
     let agent = Arc::new(RecordingAgent {
         block_attach: AtomicBool::new(true),
         listed_sessions: Mutex::new(vec![AgentListedSession {
             session_id: "recorded-session".to_string(),
-            cwd: "/workspace/app".to_string(),
+            cwd: "/tmp/openaide-unit-workspace/app".to_string(),
             title: Some("New task".to_string()),
             updated_at: None,
             last_activity: None,
@@ -1667,7 +1849,7 @@ fn list_agent_sessions_hides_a_native_session_while_draft_ownership_is_committin
     .unwrap();
 
     api.create_for_test(TaskAcquireParams {
-        project_id: project_id_for_workspace("/workspace/app"),
+        project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
         agent_id: AgentId::from("codex"),
         workspace_root: None,
         config_options: Default::default(),
@@ -1678,7 +1860,7 @@ fn list_agent_sessions_hides_a_native_session_while_draft_ownership_is_committin
     let result = api
         .list_agent_sessions(AgentListSessionsParams {
             agent_id: AgentId::from("codex"),
-            project_id: project_id_for_workspace("/workspace/app"),
+            project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
             cursor: None,
         })
         .unwrap();
@@ -1692,7 +1874,10 @@ fn list_agent_sessions_skips_filtered_empty_pages() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
-        .write_task(&task_record("task-existing", "/workspace/app"))
+        .write_task(&task_record(
+            "task-existing",
+            "/tmp/openaide-unit-workspace/app",
+        ))
         .unwrap();
     let agent = Arc::new(PagedSessionAgent::default());
     let api = TaskProductApi::new(
@@ -1707,7 +1892,7 @@ fn list_agent_sessions_skips_filtered_empty_pages() {
     let result = api
         .list_agent_sessions(AgentListSessionsParams {
             agent_id: AgentId::from("codex"),
-            project_id: project_id_for_workspace("/workspace/app"),
+            project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
             cursor: None,
         })
         .unwrap();
@@ -1732,7 +1917,10 @@ fn list_agent_sessions_stops_when_empty_pages_cycle_between_cursors() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
-        .write_task(&task_record("task-existing", "/workspace/app"))
+        .write_task(&task_record(
+            "task-existing",
+            "/tmp/openaide-unit-workspace/app",
+        ))
         .unwrap();
     let agent = Arc::new(CyclingEmptySessionAgent::default());
     let api = TaskProductApi::new(
@@ -1747,7 +1935,7 @@ fn list_agent_sessions_stops_when_empty_pages_cycle_between_cursors() {
     let result = api
         .list_agent_sessions(AgentListSessionsParams {
             agent_id: AgentId::from("codex"),
-            project_id: project_id_for_workspace("/workspace/app"),
+            project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
             cursor: None,
         })
         .expect("a cursor cycle is treated as exhausted history");
@@ -1764,7 +1952,7 @@ fn list_agent_sessions_stops_when_empty_pages_cycle_between_cursors() {
 fn background_native_catalog_refresh_treats_a_session_cursor_cycle_as_exhausted() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut task = task_record("task-existing", "/workspace/app");
+    let mut task = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
     task.agent_session_id = Some("missing-native-session".to_string());
     store.write_task(&task).unwrap();
     let agent = Arc::new(CyclingEmptySessionAgent::default());
@@ -1788,14 +1976,14 @@ fn background_native_catalog_refresh_treats_a_session_cursor_cycle_as_exhausted(
 fn background_native_catalog_refresh_updates_agent_owned_task_title() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut task = task_record("task-existing", "/workspace/app");
+    let mut task = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
     task.agent_session_id = Some("native-session".to_string());
     task.title = TaskTitle::new("Prompt fallback", TaskTitleSource::Prompt);
     store.write_task(&task).unwrap();
     let agent = Arc::new(RecordingAgent {
         listed_sessions: Mutex::new(vec![AgentListedSession {
             session_id: "native-session".to_string(),
-            cwd: "/workspace/app".to_string(),
+            cwd: "/tmp/openaide-unit-workspace/app".to_string(),
             title: Some("Agent catalog title".to_string()),
             last_activity: None,
             updated_at: None,
@@ -1823,7 +2011,7 @@ fn background_native_catalog_refresh_updates_agent_owned_task_title() {
 fn native_catalog_refresh_requests_coalesce_with_one_trailing_run() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut task = task_record("task-existing", "/workspace/app");
+    let mut task = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
     task.agent_session_id = Some("native-session".to_string());
     store.write_task(&task).unwrap();
     let agent = Arc::new(RecordingAgent {
@@ -1852,7 +2040,7 @@ fn native_catalog_refresh_requests_coalesce_with_one_trailing_run() {
 fn open_reloads_adopted_task_when_native_session_is_newer_than_cached_history() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut task = task_record("task-existing", "/workspace/app");
+    let mut task = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
     task.agent_session_id = Some("native-session".to_string());
     task.updated_at = "2026-01-01T00:00:00.000Z".to_string();
     task.last_activity = "2026-01-01T00:00:00.000Z".to_string();
@@ -1889,7 +2077,7 @@ fn open_reloads_adopted_task_when_native_session_is_newer_than_cached_history() 
         resume_after_restart_unavailable: true,
         listed_sessions: Mutex::new(vec![AgentListedSession {
             session_id: "native-session".to_string(),
-            cwd: "/workspace/app".to_string(),
+            cwd: "/tmp/openaide-unit-workspace/app".to_string(),
             title: Some("Native title".to_string()),
             last_activity: Some(native_updated_at.to_string()),
             updated_at: Some(native_updated_at.to_string()),
@@ -1915,7 +2103,7 @@ fn open_reloads_adopted_task_when_native_session_is_newer_than_cached_history() 
     .unwrap();
     api.list_agent_sessions(AgentListSessionsParams {
         agent_id: AgentId::from("codex"),
-        project_id: project_id_for_workspace("/workspace/app"),
+        project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
         cursor: None,
     })
     .unwrap();
@@ -1997,7 +2185,7 @@ fn open_reloads_adopted_task_when_native_session_is_newer_than_cached_history() 
 fn open_returns_cached_task_while_native_session_refresh_is_blocked() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut task = task_record("task-existing", "/workspace/app");
+    let mut task = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
     task.agent_session_id = Some("native-session".to_string());
     store.write_task(&task).unwrap();
     let agent = Arc::new(RecordingAgent {
@@ -2033,7 +2221,7 @@ fn open_returns_cached_task_while_native_session_refresh_is_blocked() {
 fn open_without_a_cached_native_catalog_recovers_the_native_session() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut task = task_record("task-existing", "/workspace/app");
+    let mut task = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
     task.agent_session_id = Some("native-session".to_string());
     store.write_task(&task).unwrap();
     let agent = Arc::new(RecordingAgent {
@@ -2041,7 +2229,7 @@ fn open_without_a_cached_native_catalog_recovers_the_native_session() {
         resume_commands_catalog: Some(command_catalog()),
         listed_sessions: Mutex::new(vec![AgentListedSession {
             session_id: "native-session".to_string(),
-            cwd: "/workspace/app".to_string(),
+            cwd: "/tmp/openaide-unit-workspace/app".to_string(),
             title: None,
             last_activity: Some("9999999999999".to_string()),
             updated_at: Some("9999999999999".to_string()),
@@ -2086,7 +2274,7 @@ fn open_without_a_cached_native_catalog_recovers_the_native_session() {
 fn failed_native_session_listing_is_not_cached() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut task = task_record("task-existing", "/workspace/app");
+    let mut task = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
     task.agent_session_id = Some("native-session".to_string());
     store.write_task(&task).unwrap();
     let agent = Arc::new(RecordingAgent {
@@ -2115,7 +2303,7 @@ fn failed_native_session_listing_is_not_cached() {
 fn send_does_not_wait_for_or_apply_a_blocked_history_listing() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut task = task_record("task-existing", "/workspace/app");
+    let mut task = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
     task.agent_session_id = Some("native-session".to_string());
     task.updated_at = "2026-01-01T00:00:00.000Z".to_string();
     task.last_activity = task.updated_at.clone();
@@ -2126,7 +2314,7 @@ fn send_does_not_wait_for_or_apply_a_blocked_history_listing() {
         loaded_session_id: Some("native-session".to_string()),
         listed_sessions: Mutex::new(vec![AgentListedSession {
             session_id: "native-session".to_string(),
-            cwd: "/workspace/app".to_string(),
+            cwd: "/tmp/openaide-unit-workspace/app".to_string(),
             title: None,
             last_activity: Some("2026-01-02T00:00:00.000Z".to_string()),
             updated_at: Some("2026-01-02T00:00:00.000Z".to_string()),
@@ -2186,7 +2374,7 @@ fn send_does_not_wait_for_or_apply_a_blocked_history_listing() {
 fn open_does_not_reload_native_history_for_an_acquired_prepared_task() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut task = task_record("task-draft", "/workspace/app");
+    let mut task = task_record("task-draft", "/tmp/openaide-unit-workspace/app");
     task.lifecycle = test_new_task_lifecycle();
     task.agent_session_id = Some("prepared-session".to_string());
     task.updated_at = "2026-01-01T00:00:00.000Z".to_string();
@@ -2195,7 +2383,7 @@ fn open_does_not_reload_native_history_for_an_acquired_prepared_task() {
         resume_after_restart_unavailable: true,
         listed_sessions: Mutex::new(vec![AgentListedSession {
             session_id: "prepared-session".to_string(),
-            cwd: "/workspace/app".to_string(),
+            cwd: "/tmp/openaide-unit-workspace/app".to_string(),
             title: None,
             last_activity: Some("2026-01-02T00:00:00.000Z".to_string()),
             updated_at: Some("2026-01-02T00:00:00.000Z".to_string()),
@@ -2211,7 +2399,7 @@ fn open_does_not_reload_native_history_for_an_acquired_prepared_task() {
     )
     .unwrap();
     api.create_for_test(TaskAcquireParams {
-        project_id: project_id_for_workspace("/workspace/app"),
+        project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
         agent_id: AgentId::from("codex"),
         workspace_root: None,
         config_options: Default::default(),
@@ -2237,7 +2425,7 @@ fn open_does_not_reload_native_history_for_an_acquired_prepared_task() {
 fn history_load_failure_adds_activity_and_leaves_task_sendable() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut task = task_record("task-existing", "/workspace/app");
+    let mut task = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
     task.agent_session_id = Some("native-session".to_string());
     task.updated_at = "2026-01-01T00:00:00.000Z".to_string();
     task.last_activity = "2026-01-01T00:00:00.000Z".to_string();
@@ -2274,7 +2462,7 @@ fn history_load_failure_adds_activity_and_leaves_task_sendable() {
         resume_after_restart_unavailable: true,
         listed_sessions: Mutex::new(vec![AgentListedSession {
             session_id: "native-session".to_string(),
-            cwd: "/workspace/app".to_string(),
+            cwd: "/tmp/openaide-unit-workspace/app".to_string(),
             title: Some("Native title".to_string()),
             last_activity: Some(native_updated_at.to_string()),
             updated_at: Some(native_updated_at.to_string()),
@@ -2300,7 +2488,7 @@ fn history_load_failure_adds_activity_and_leaves_task_sendable() {
     .unwrap();
     api.list_agent_sessions(AgentListSessionsParams {
         agent_id: AgentId::from("codex"),
-        project_id: project_id_for_workspace("/workspace/app"),
+        project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
         cursor: None,
     })
     .unwrap();
@@ -2355,7 +2543,7 @@ fn history_load_failure_adds_activity_and_leaves_task_sendable() {
 fn open_resumes_native_session_when_cached_history_is_fresh() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut task = task_record("task-existing", "/workspace/app");
+    let mut task = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
     task.agent_session_id = Some("native-session".to_string());
     task.unread = true;
     task.updated_at = "2026-01-02T00:00:00.000Z".to_string();
@@ -2388,7 +2576,7 @@ fn open_resumes_native_session_when_cached_history_is_fresh() {
         resume_commands_catalog: Some(command_catalog()),
         listed_sessions: Mutex::new(vec![AgentListedSession {
             session_id: "native-session".to_string(),
-            cwd: "/workspace/app".to_string(),
+            cwd: "/tmp/openaide-unit-workspace/app".to_string(),
             title: Some("Older native title".to_string()),
             last_activity: Some("2026-01-01T00:00:00.000Z".to_string()),
             updated_at: Some("2026-01-01T00:00:00.000Z".to_string()),
@@ -2413,7 +2601,7 @@ fn open_resumes_native_session_when_cached_history_is_fresh() {
     .unwrap();
     api.list_agent_sessions(AgentListSessionsParams {
         agent_id: AgentId::from("codex"),
-        project_id: project_id_for_workspace("/workspace/app"),
+        project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
         cursor: None,
     })
     .unwrap();
@@ -2456,7 +2644,7 @@ fn open_resumes_native_session_when_cached_history_is_fresh() {
 fn open_loads_native_session_when_history_is_unordered_and_resume_is_unsupported() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut task = task_record("task-existing", "/workspace/app");
+    let mut task = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
     task.agent_session_id = Some("native-session".to_string());
     task.updated_at = "2026-01-02T00:00:00.000Z".to_string();
     task.last_activity = "2026-01-02T00:00:00.000Z".to_string();
@@ -2465,7 +2653,7 @@ fn open_loads_native_session_when_history_is_unordered_and_resume_is_unsupported
         resume_after_restart_unavailable: true,
         listed_sessions: Mutex::new(vec![AgentListedSession {
             session_id: "native-session".to_string(),
-            cwd: "/workspace/app".to_string(),
+            cwd: "/tmp/openaide-unit-workspace/app".to_string(),
             title: Some("Unordered native session".to_string()),
             last_activity: None,
             updated_at: None,
@@ -2490,7 +2678,7 @@ fn open_loads_native_session_when_history_is_unordered_and_resume_is_unsupported
     .unwrap();
     api.list_agent_sessions(AgentListSessionsParams {
         agent_id: AgentId::from("codex"),
-        project_id: project_id_for_workspace("/workspace/app"),
+        project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
         cursor: None,
     })
     .unwrap();
@@ -2530,7 +2718,7 @@ fn open_loads_native_session_when_history_is_unordered_and_resume_is_unsupported
 fn mark_read_clears_unread_without_refreshing_native_session_history() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut task = task_record("task-existing", "/workspace/app");
+    let mut task = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
     task.unread = true;
     task.attention = Some(crate::storage::records::TaskAttentionEvent::new(
         "attention-1",
@@ -2574,7 +2762,7 @@ fn opening_second_finished_task_keeps_first_inactive_and_unread() {
         ("task-first", "attention-first"),
         ("task-second", "attention-second"),
     ] {
-        let mut task = task_record(task_id, "/workspace/app");
+        let mut task = task_record(task_id, "/tmp/openaide-unit-workspace/app");
         task.status = TaskStatus::Inactive;
         task.unread = true;
         task.attention = Some(crate::storage::records::TaskAttentionEvent::new(
@@ -2617,7 +2805,7 @@ fn opening_second_finished_task_keeps_first_inactive_and_unread() {
 fn unrelated_task_responses_preserve_current_history_sync_state() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut task = task_record("task-existing", "/workspace/app");
+    let mut task = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
     task.unread = true;
     store.write_task(&task).unwrap();
     let api = TaskProductApi::new(
@@ -2659,7 +2847,7 @@ fn unrelated_task_responses_preserve_current_history_sync_state() {
 fn first_send_accepts_starting_task_without_history_sync() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut new_task = task_record("task-existing", "/workspace/app");
+    let mut new_task = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
     new_task.lifecycle = test_new_task_lifecycle();
     store.write_task(&new_task).unwrap();
     let api = TaskProductApi::new(
@@ -2671,7 +2859,7 @@ fn first_send_accepts_starting_task_without_history_sync() {
     )
     .unwrap();
     api.create_for_test(TaskAcquireParams {
-        project_id: project_id_for_workspace("/workspace/app"),
+        project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
         agent_id: AgentId::from("codex"),
         workspace_root: None,
         config_options: Default::default(),
@@ -2711,7 +2899,7 @@ fn first_send_accepts_starting_task_without_history_sync() {
     let defaults = store.read_new_task_defaults().unwrap();
     assert_eq!(
         defaults.project_id,
-        Some(project_id_for_workspace("/workspace/app"))
+        Some(project_id_for_workspace("/tmp/openaide-unit-workspace/app"))
     );
     assert_eq!(defaults.agent_id, Some(AgentId::from("codex")));
 }
@@ -2721,7 +2909,10 @@ fn send_returns_after_durable_acceptance_without_waiting_for_session_start() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
-        .write_task(&task_record("task-existing", "/workspace/app"))
+        .write_task(&task_record(
+            "task-existing",
+            "/tmp/openaide-unit-workspace/app",
+        ))
         .unwrap();
     let agent = Arc::new(RecordingAgent::default());
     agent.block_start.store(true, Ordering::SeqCst);
@@ -2761,7 +2952,10 @@ fn accepted_task_becomes_running_only_when_agent_prompt_starts() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
-        .write_task(&task_record("task-existing", "/workspace/app"))
+        .write_task(&task_record(
+            "task-existing",
+            "/tmp/openaide-unit-workspace/app",
+        ))
         .unwrap();
     let agent = Arc::new(RecordingAgent {
         block_prompt: true,
@@ -2792,7 +2986,10 @@ fn send_while_working_accepts_a_steering_message_without_replacing_primary_work(
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
-        .write_task(&task_record("task-existing", "/workspace/app"))
+        .write_task(&task_record(
+            "task-existing",
+            "/tmp/openaide-unit-workspace/app",
+        ))
         .unwrap();
     let agent = Arc::new(RecordingAgent {
         block_prompt: true,
@@ -2845,7 +3042,10 @@ fn send_starts_agent_session_and_prompts_after_commit() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
-        .write_task(&task_record("task-existing", "/workspace/app"))
+        .write_task(&task_record(
+            "task-existing",
+            "/tmp/openaide-unit-workspace/app",
+        ))
         .unwrap();
     let agent = Arc::new(RecordingAgent::default());
     let api = TaskProductApi::new(
@@ -2878,7 +3078,10 @@ fn send_requests_native_catalog_refresh_after_prompt_start() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
-        .write_task(&task_record("task-existing", "/workspace/app"))
+        .write_task(&task_record(
+            "task-existing",
+            "/tmp/openaide-unit-workspace/app",
+        ))
         .unwrap();
     let agent = Arc::new(RecordingAgent::default());
     let api = TaskProductApi::new(
@@ -2901,7 +3104,10 @@ fn send_recovers_stale_active_turn_and_starts_current_prompt() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
-        .write_task(&task_record("task-existing", "/workspace/app"))
+        .write_task(&task_record(
+            "task-existing",
+            "/tmp/openaide-unit-workspace/app",
+        ))
         .unwrap();
     let agent = Arc::new(RecordingAgent::default());
     let api = TaskProductApi::new(
@@ -2968,7 +3174,7 @@ fn send_recovers_stale_active_turn_and_starts_current_prompt() {
 fn send_loads_stored_agent_session_when_live_resume_is_unavailable() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut task = task_record("task-existing", "/workspace/app");
+    let mut task = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
     task.agent_session_id = Some("stored-session".to_string());
     store.write_task(&task).unwrap();
     let agent = Arc::new(RecordingAgent {
@@ -3001,7 +3207,7 @@ fn send_loads_stored_agent_session_when_live_resume_is_unavailable() {
 fn send_after_restart_hydrates_loaded_native_session_state_authoritatively() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut task = task_record("task-existing", "/workspace/app");
+    let mut task = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
     task.agent_session_id = Some("stored-session".to_string());
     task.config_options = config_catalog("gpt-5").current_values();
     task.config_options_catalog = Some(config_catalog("gpt-5"));
@@ -3065,7 +3271,10 @@ fn send_preserves_hydrated_session_state_when_resume_returns_identity_only() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
-        .write_task(&task_record("task-existing", "/workspace/app"))
+        .write_task(&task_record(
+            "task-existing",
+            "/tmp/openaide-unit-workspace/app",
+        ))
         .unwrap();
     let agent = Arc::new(RecordingAgent::default());
     let api = TaskProductApi::new(
@@ -3111,7 +3320,7 @@ fn send_preserves_hydrated_session_state_when_resume_returns_identity_only() {
 fn send_after_restart_starts_fresh_session_when_stored_session_load_times_out() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut task = task_record("task-existing", "/workspace/app");
+    let mut task = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
     task.agent_session_id = Some("stored-session".to_string());
     store.write_task(&task).unwrap();
     let agent = Arc::new(RecordingAgent {
@@ -3148,7 +3357,7 @@ fn send_after_restart_starts_fresh_session_when_stored_session_load_times_out() 
 fn send_rejects_task_when_current_agent_registry_no_longer_has_agent() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut task = task_record("task-existing", "/workspace/app");
+    let mut task = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
     task.agent_session_id = Some("recorded-session".to_string());
     store.write_task(&task).unwrap();
     let registry = AgentRegistryHandle::new(AgentRegistry::default_built_ins());
@@ -3180,7 +3389,10 @@ fn send_tolerates_attach_time_command_catalog_revision_bump() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
-        .write_task(&task_record("task-existing", "/workspace/app"))
+        .write_task(&task_record(
+            "task-existing",
+            "/tmp/openaide-unit-workspace/app",
+        ))
         .unwrap();
     let agent = Arc::new(RecordingAgent {
         commands_catalog: Some(command_catalog()),
@@ -3223,7 +3435,10 @@ fn send_start_failure_returns_task_to_idle() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
-        .write_task(&task_record("task-existing", "/workspace/app"))
+        .write_task(&task_record(
+            "task-existing",
+            "/tmp/openaide-unit-workspace/app",
+        ))
         .unwrap();
     let agent = Arc::new(RecordingAgent {
         fail_start: true,
@@ -3277,7 +3492,10 @@ fn send_session_attach_failure_returns_task_to_idle_and_closes_new_session() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
-        .write_task(&task_record("task-existing", "/workspace/app"))
+        .write_task(&task_record(
+            "task-existing",
+            "/tmp/openaide-unit-workspace/app",
+        ))
         .unwrap();
     let agent = Arc::new(RecordingAgent {
         fail_attach: true,
@@ -3388,10 +3606,16 @@ fn send_start_failure_does_not_poison_later_task_start() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
-        .write_task(&task_record("task-first", "/workspace/app"))
+        .write_task(&task_record(
+            "task-first",
+            "/tmp/openaide-unit-workspace/app",
+        ))
         .unwrap();
     store
-        .write_task(&task_record("task-second", "/workspace/app"))
+        .write_task(&task_record(
+            "task-second",
+            "/tmp/openaide-unit-workspace/app",
+        ))
         .unwrap();
     let agent = Arc::new(RecordingAgent {
         fail_start_once: AtomicBool::new(true),
@@ -3443,7 +3667,10 @@ fn send_trims_surrounding_whitespace_from_prompt_text() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
-        .write_task(&task_record("task-existing", "/workspace/app"))
+        .write_task(&task_record(
+            "task-existing",
+            "/tmp/openaide-unit-workspace/app",
+        ))
         .unwrap();
     let api = TaskProductApi::new(
         store.clone(),
@@ -3474,7 +3701,10 @@ fn send_rejects_a_second_prompt_while_active_turn_is_blocked_on_permission() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
-        .write_task(&task_record("task-existing", "/workspace/app"))
+        .write_task(&task_record(
+            "task-existing",
+            "/tmp/openaide-unit-workspace/app",
+        ))
         .unwrap();
     let agent = Arc::new(RecordingAgent {
         block_prompt: true,
@@ -3529,7 +3759,10 @@ fn send_accepts_the_current_task_after_an_unrelated_revision_change() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
-        .write_task(&task_record("task-existing", "/workspace/app"))
+        .write_task(&task_record(
+            "task-existing",
+            "/tmp/openaide-unit-workspace/app",
+        ))
         .unwrap();
     let api = TaskProductApi::new(
         store.clone(),
@@ -3565,7 +3798,10 @@ fn send_keeps_committed_message_when_config_changes_while_agent_session_opens() 
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
-        .write_task(&task_record("task-existing", "/workspace/app"))
+        .write_task(&task_record(
+            "task-existing",
+            "/tmp/openaide-unit-workspace/app",
+        ))
         .unwrap();
     let agent = Arc::new(ConfigMutatingStartAgent {
         store: store.clone(),
@@ -3609,7 +3845,10 @@ fn send_rejects_invalid_inline_image_without_committing() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
-        .write_task(&task_record("task-existing", "/workspace/app"))
+        .write_task(&task_record(
+            "task-existing",
+            "/tmp/openaide-unit-workspace/app",
+        ))
         .unwrap();
     let api = TaskProductApi::new(
         store.clone(),
@@ -3646,7 +3885,10 @@ fn send_commits_inline_image_as_image_chat_content() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
-        .write_task(&task_record("task-existing", "/workspace/app"))
+        .write_task(&task_record(
+            "task-existing",
+            "/tmp/openaide-unit-workspace/app",
+        ))
         .unwrap();
     let api = TaskProductApi::new(
         store.clone(),
@@ -3692,7 +3934,7 @@ fn send_commits_inline_image_as_image_chat_content() {
 fn send_commits_inline_image_without_an_empty_text_part() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut task = task_record("task-existing", "/workspace/app");
+    let mut task = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
     task.title = None;
     task.lifecycle = test_new_task_lifecycle();
     store.write_task(&task).unwrap();
@@ -3706,7 +3948,7 @@ fn send_commits_inline_image_without_an_empty_text_part() {
     .unwrap();
     let acquired = api
         .create_for_test(TaskAcquireParams {
-            project_id: project_id_for_workspace("/workspace/app"),
+            project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
             agent_id: AgentId::from("codex"),
             workspace_root: None,
             config_options: Default::default(),
@@ -3754,7 +3996,10 @@ fn rejected_send_keeps_inline_image_available_for_retry() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
-        .write_task(&task_record("task-existing", "/workspace/app"))
+        .write_task(&task_record(
+            "task-existing",
+            "/tmp/openaide-unit-workspace/app",
+        ))
         .unwrap();
     let api = TaskProductApi::new(
         store.clone(),
@@ -3865,7 +4110,10 @@ fn cancel_stays_stopping_until_the_agent_prompt_settles() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
-        .write_task(&task_record("task-existing", "/workspace/app"))
+        .write_task(&task_record(
+            "task-existing",
+            "/tmp/openaide-unit-workspace/app",
+        ))
         .unwrap();
     let agent = Arc::new(RecordingAgent {
         block_prompt: true,
@@ -3990,7 +4238,10 @@ fn cancel_timeout_discards_the_session_and_ends_the_turn() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
-        .write_task(&task_record("task-existing", "/workspace/app"))
+        .write_task(&task_record(
+            "task-existing",
+            "/tmp/openaide-unit-workspace/app",
+        ))
         .unwrap();
     let agent = Arc::new(RecordingAgent {
         block_prompt: true,
@@ -4050,7 +4301,10 @@ fn cancel_signals_live_agent_turn_started_by_task_send() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
-        .write_task(&task_record("task-existing", "/workspace/app"))
+        .write_task(&task_record(
+            "task-existing",
+            "/tmp/openaide-unit-workspace/app",
+        ))
         .unwrap();
     let agent = Arc::new(RecordingAgent {
         block_prompt: true,
@@ -4082,7 +4336,10 @@ fn stale_cancel_cannot_retire_a_newer_accepted_send() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
-        .write_task(&task_record("task-existing", "/workspace/app"))
+        .write_task(&task_record(
+            "task-existing",
+            "/tmp/openaide-unit-workspace/app",
+        ))
         .unwrap();
     let agent = Arc::new(RecordingAgent {
         block_prompt: true,
@@ -4152,7 +4409,7 @@ fn stale_cancel_cannot_retire_a_newer_accepted_send() {
 fn failed_cancel_commit_does_not_retire_an_accepted_send() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut project_anchor = task_record("task-project-anchor", "/workspace/app");
+    let mut project_anchor = task_record("task-project-anchor", "/tmp/openaide-unit-workspace/app");
     project_anchor.lifecycle = TaskLifecycle::Visible;
     store.write_task(&project_anchor).unwrap();
     let agent = Arc::new(RecordingAgent {
@@ -4170,7 +4427,7 @@ fn failed_cancel_commit_does_not_retire_an_accepted_send() {
     .unwrap();
     let draft = api
         .create_for_test(TaskAcquireParams {
-            project_id: project_id_for_workspace("/workspace/app"),
+            project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
             agent_id: AgentId::from("codex"),
             workspace_root: None,
             config_options: Default::default(),
@@ -4222,7 +4479,10 @@ fn support_recovery_clears_live_stuck_turn_without_waiting_for_agent() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
-        .write_task(&task_record("task-existing", "/workspace/app"))
+        .write_task(&task_record(
+            "task-existing",
+            "/tmp/openaide-unit-workspace/app",
+        ))
         .unwrap();
     let agent = Arc::new(RecordingAgent {
         block_prompt: true,
@@ -4272,7 +4532,7 @@ fn support_recovery_clears_live_stuck_turn_without_waiting_for_agent() {
 fn support_recovery_retires_an_accepted_turn_still_starting_its_session() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut task = task_record("task-existing", "/workspace/app");
+    let mut task = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
     task.agent_session_id = Some("native-session".to_string());
     store.write_task(&task).unwrap();
     let agent = Arc::new(RecordingAgent {
@@ -4314,7 +4574,10 @@ fn cancel_rejects_mismatched_turn_id() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
-        .write_task(&task_record("task-existing", "/workspace/app"))
+        .write_task(&task_record(
+            "task-existing",
+            "/tmp/openaide-unit-workspace/app",
+        ))
         .unwrap();
     let api = TaskProductApi::new(
         store.clone(),
@@ -4346,7 +4609,10 @@ fn set_config_option_persists_for_idle_task() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
-        .write_task(&task_record("task-existing", "/workspace/app"))
+        .write_task(&task_record(
+            "task-existing",
+            "/tmp/openaide-unit-workspace/app",
+        ))
         .unwrap();
     let api = TaskProductApi::new(
         store.clone(),
@@ -4384,7 +4650,7 @@ fn set_config_option_persists_for_idle_task() {
 fn set_config_option_recovers_an_inactive_native_session_before_agent_io() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut task = task_record("task-existing", "/workspace/app");
+    let mut task = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
     task.agent_session_id = Some("native-session".to_string());
     task.config_options = config_catalog("gpt-5").current_values();
     task.config_options_catalog = Some(config_catalog("gpt-5"));
@@ -4421,7 +4687,7 @@ fn set_config_option_recovers_an_inactive_native_session_before_agent_io() {
 fn config_recovery_loads_when_the_agent_does_not_support_resume() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut task = task_record("task-existing", "/workspace/app");
+    let mut task = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
     task.agent_session_id = Some("native-session".to_string());
     task.config_options = config_catalog("gpt-5").current_values();
     task.config_options_catalog = Some(config_catalog("gpt-5"));
@@ -4458,7 +4724,7 @@ fn config_recovery_loads_when_the_agent_does_not_support_resume() {
 fn restart_hides_persisted_agent_controls_until_native_session_recovery() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut record = task_record("task-existing", "/workspace/app");
+    let mut record = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
     record.agent_session_id = Some("persisted-session".to_string());
     record.config_options = config_catalog("gpt-5").current_values();
     record.config_options_catalog = Some(config_catalog("gpt-5"));
@@ -4496,7 +4762,7 @@ fn restart_hides_persisted_agent_controls_until_native_session_recovery() {
 fn restart_clears_a_config_mutation_interrupted_during_agent_io() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut record = task_record("task-existing", "/workspace/app");
+    let mut record = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
     record.agent_session_id = Some("persisted-session".to_string());
     crate::tasks::config_options::begin_task_config_mutation(
         &mut record,
@@ -4531,7 +4797,7 @@ fn restart_clears_a_config_mutation_interrupted_during_agent_io() {
 fn task_open_republishes_controls_from_recovered_native_session() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut record = task_record("task-existing", "/workspace/app");
+    let mut record = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
     record.agent_session_id = Some("persisted-session".to_string());
     record.config_options = config_catalog("gpt-5").current_values();
     record.config_options_catalog = Some(config_catalog("gpt-5"));
@@ -4574,7 +4840,7 @@ fn task_open_republishes_controls_from_recovered_native_session() {
         resume_after_restart_unavailable: true,
         listed_sessions: Mutex::new(vec![AgentListedSession {
             session_id: "persisted-session".to_string(),
-            cwd: "/workspace/app".to_string(),
+            cwd: "/tmp/openaide-unit-workspace/app".to_string(),
             title: None,
             last_activity: Some(native_updated_at.to_string()),
             updated_at: Some(native_updated_at.to_string()),
@@ -4622,7 +4888,7 @@ fn task_open_republishes_controls_from_recovered_native_session() {
 fn set_config_option_without_native_session_does_not_project_persisted_catalog() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut record = task_record("task-existing", "/workspace/app");
+    let mut record = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
     let catalog = config_catalog("gpt-5");
     record.config_options = catalog.current_values();
     record.config_options_catalog = Some(catalog);
@@ -4658,7 +4924,7 @@ fn set_config_option_without_native_session_does_not_project_persisted_catalog()
 fn set_config_option_without_native_session_does_not_project_unsupported_fallback() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut record = task_record("task-existing", "/workspace/app");
+    let mut record = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
     record.config_options = config_catalog("gpt-5").current_values();
     record.config_options_catalog = Some(config_catalog("gpt-5"));
     store.write_task(&record).unwrap();
@@ -4691,7 +4957,7 @@ fn set_config_option_without_native_session_does_not_project_unsupported_fallbac
 fn set_config_option_applies_to_running_task_live_session() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut record = task_record("task-existing", "/workspace/app");
+    let mut record = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
     record.config_options = config_catalog("gpt-5").current_values();
     record.config_options_catalog = Some(config_catalog("gpt-5"));
     store.write_task(&record).unwrap();
@@ -4742,7 +5008,7 @@ fn set_config_option_applies_to_running_task_live_session() {
 fn set_config_option_applies_to_prepared_task_native_session() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut record = task_record("task-prepared", "/workspace/app");
+    let mut record = task_record("task-prepared", "/tmp/openaide-unit-workspace/app");
     record.agent_session_id = Some("session-prepared".to_string());
     record.config_options = config_catalog("gpt-5").current_values();
     record.config_options_catalog = Some(config_catalog("gpt-5"));
@@ -4779,7 +5045,7 @@ fn set_config_option_applies_to_prepared_task_native_session() {
 fn set_config_option_projects_the_pending_client_mutation_during_agent_io() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut record = task_record("task-existing", "/workspace/app");
+    let mut record = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
     record.agent_session_id = Some("session-a".to_string());
     record.config_options = config_catalog("gpt-5").current_values();
     record.config_options_catalog = Some(config_catalog("gpt-5"));
@@ -4841,7 +5107,7 @@ fn set_config_option_projects_the_pending_client_mutation_during_agent_io() {
 fn same_task_config_changes_reach_agent_and_storage_in_admission_order() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut record = task_record("task-existing", "/workspace/app");
+    let mut record = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
     record.agent_session_id = Some("session-a".to_string());
     record.config_options = config_catalog("gpt-5").current_values();
     record.config_options_catalog = Some(config_catalog("gpt-5"));
@@ -4918,12 +5184,13 @@ fn same_task_config_changes_reach_agent_and_storage_in_admission_order() {
 fn blocked_config_change_does_not_stall_an_unrelated_task() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut blocked_task = task_record("task-blocked", "/workspace/blocked");
+    let mut blocked_task = task_record("task-blocked", "/tmp/openaide-unit-workspace/blocked");
     blocked_task.agent_session_id = Some("session-blocked".to_string());
     blocked_task.config_options = config_catalog("gpt-5").current_values();
     blocked_task.config_options_catalog = Some(config_catalog("gpt-5"));
     store.write_task(&blocked_task).unwrap();
-    let mut unrelated_task = task_record("task-unrelated", "/workspace/unrelated");
+    let mut unrelated_task =
+        task_record("task-unrelated", "/tmp/openaide-unit-workspace/unrelated");
     unrelated_task.agent_session_id = Some("session-unrelated".to_string());
     unrelated_task.config_options = config_catalog("gpt-5").current_values();
     unrelated_task.config_options_catalog = Some(config_catalog("gpt-5"));
@@ -5000,7 +5267,7 @@ fn blocked_config_change_does_not_stall_an_unrelated_task() {
 fn set_config_option_reconciles_without_error_after_task_binds_a_newer_session() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut record = task_record("task-existing", "/workspace/app");
+    let mut record = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
     record.agent_session_id = Some("session-a".to_string());
     record.config_options = config_catalog("gpt-5").current_values();
     record.config_options_catalog = Some(config_catalog("gpt-5"));
@@ -5063,7 +5330,7 @@ fn set_config_option_reconciles_without_error_after_task_binds_a_newer_session()
 fn set_config_option_is_a_noop_when_same_session_event_already_persisted_catalog() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut record = task_record("task-existing", "/workspace/app");
+    let mut record = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
     record.agent_session_id = Some("session-a".to_string());
     record.config_options = config_catalog("gpt-5").current_values();
     record.config_options_catalog = Some(config_catalog("gpt-5"));
@@ -5123,7 +5390,7 @@ fn set_config_option_is_a_noop_when_same_session_event_already_persisted_catalog
 fn set_config_option_preserves_agent_catalog_that_arrives_after_its_response_catalog() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut record = task_record("task-existing", "/workspace/app");
+    let mut record = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
     record.agent_session_id = Some("session-a".to_string());
     record.config_options = config_catalog("gpt-5").current_values();
     record.config_options_catalog = Some(config_catalog("gpt-5"));
@@ -5185,11 +5452,14 @@ fn set_config_option_preserves_agent_catalog_that_arrives_after_its_response_cat
 fn release_keeps_one_free_prepared_task_for_reuse() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut draft = task_record("task-draft", "/workspace/app");
+    let mut draft = task_record("task-draft", "/tmp/openaide-unit-workspace/app");
     draft.lifecycle = test_new_task_lifecycle();
     store.write_task(&draft).unwrap();
     store
-        .write_task(&task_record("task-existing", "/workspace/app"))
+        .write_task(&task_record(
+            "task-existing",
+            "/tmp/openaide-unit-workspace/app",
+        ))
         .unwrap();
     let api = TaskProductApi::new(
         store.clone(),
@@ -5200,7 +5470,7 @@ fn release_keeps_one_free_prepared_task_for_reuse() {
     )
     .unwrap();
     api.create_for_test(TaskAcquireParams {
-        project_id: project_id_for_workspace("/workspace/app"),
+        project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
         agent_id: AgentId::from("codex"),
         workspace_root: None,
         config_options: Default::default(),
@@ -5277,7 +5547,10 @@ fn release_is_a_noop_for_visible_task() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
-        .write_task(&task_record("task-existing", "/workspace/app"))
+        .write_task(&task_record(
+            "task-existing",
+            "/tmp/openaide-unit-workspace/app",
+        ))
         .unwrap();
     let api = TaskProductApi::new(
         store.clone(),
@@ -5300,7 +5573,7 @@ fn release_is_a_noop_for_visible_task() {
 fn release_is_a_noop_for_task_with_chat_history() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let record = task_record("task-existing", "/workspace/app");
+    let record = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
     store.write_task(&record).unwrap();
     append_old_completed_turn(&store, "task-existing");
     let api = TaskProductApi::new(
@@ -5324,7 +5597,7 @@ fn release_is_a_noop_for_task_with_chat_history() {
 fn release_is_a_noop_for_running_visible_task() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut record = task_record("task-existing", "/workspace/app");
+    let mut record = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
     record.status = TaskStatus::Active;
     record.active_turn_id = Some("turn-active".to_string());
     store.write_task(&record).unwrap();
@@ -5349,7 +5622,7 @@ fn release_is_a_noop_for_running_visible_task() {
 fn release_is_idempotent_for_tombstoned_task() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut record = task_record("task-existing", "/workspace/app");
+    let mut record = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
     record.tombstoned = true;
     store.write_task(&record).unwrap();
     let api = TaskProductApi::new(
@@ -5373,7 +5646,7 @@ fn release_is_idempotent_for_tombstoned_task() {
 fn send_rejects_tombstoned_task() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut record = task_record("task-existing", "/workspace/app");
+    let mut record = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
     record.lifecycle = test_new_task_lifecycle();
     record.tombstoned = true;
     store.write_task(&record).unwrap();
@@ -5396,10 +5669,10 @@ fn send_rejects_tombstoned_task() {
 fn archiving_task_does_not_refresh_last_activity() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let mut older = task_record("task-old", "/workspace/app");
+    let mut older = task_record("task-old", "/tmp/openaide-unit-workspace/app");
     older.last_activity = "2026-01-01T00:00:00.000Z".to_string();
     older.updated_at = older.last_activity.clone();
-    let mut newer_archived = task_record("task-newer-archived", "/workspace/app");
+    let mut newer_archived = task_record("task-newer-archived", "/tmp/openaide-unit-workspace/app");
     newer_archived.last_activity = "2026-02-01T00:00:00.000Z".to_string();
     newer_archived.updated_at = newer_archived.last_activity.clone();
     newer_archived.archived = true;
@@ -5431,6 +5704,9 @@ fn archiving_task_does_not_refresh_last_activity() {
 }
 
 fn task_record(task_id: &str, workspace_root: &str) -> TaskRecord {
+    // Product API tests use stable logical roots so Project ids remain readable.
+    // Materialize them because production now rejects unavailable workspaces.
+    std::fs::create_dir_all(workspace_root).unwrap();
     TaskRecord {
         task_id: task_id.to_string(),
         title: crate::storage::records::TaskTitle::new(
@@ -5449,6 +5725,8 @@ fn task_record(task_id: &str, workspace_root: &str) -> TaskRecord {
         agent_name: "Codex".to_string(),
         isolation: IsolationKind::Local,
         workspace_root: workspace_root.to_string(),
+        project_root: None,
+        worktree_id: None,
         lifecycle: TaskLifecycle::Visible,
         agent_session_id: None,
         active_turn_id: None,

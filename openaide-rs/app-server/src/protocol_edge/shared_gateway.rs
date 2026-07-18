@@ -11,6 +11,7 @@ use crate::server_requests::ServerRequestDelivery;
 #[cfg(test)]
 use crate::server_requests::{OpenRequestOutcome, ServerRequestDraft};
 use crate::task_events::TaskUpdate;
+use openaide_app_server_protocol::worktree::WorktreeRepositorySnapshot;
 
 use super::{
     AppServerProbeFacts, GatewayEventDelivery, GatewayOutcome, IdleShutdownDecision,
@@ -89,6 +90,17 @@ impl SharedRpcGateway {
             .lock()
             .expect("protocol gateway lock poisoned")
             .publish_task_update(update, now)
+    }
+
+    pub fn publish_worktree_repository_update(
+        &self,
+        repository: WorktreeRepositorySnapshot,
+        now: AppServerTime,
+    ) -> Vec<GatewayEventDelivery> {
+        self.gateway
+            .lock()
+            .expect("protocol gateway lock poisoned")
+            .publish_background_worktree_repository_update(repository, now)
     }
 
     pub fn publish_committed_task_update_for_connection(

@@ -1,10 +1,10 @@
 # Prepared Task Pool and Worktree Tasks
 
-Status: working design note
+Status: accepted implementation design
 
 Related ticket: [#17, Create Tasks in dedicated Git worktrees](https://github.com/OldKrab/OpenAIDE/issues/17)
 
-This note records decisions reached while grilling the worktree proposal. It is not yet the accepted Task Chat specification. The work is deliberately split so the prepared-Task lifecycle can be designed and implemented before worktree behavior depends on it.
+This note records the accepted worktree design. Parts 1 and 2 are implemented and must remain consistent with the accepted Task Lifecycle and Chat specification.
 
 ## Delivery split
 
@@ -12,11 +12,11 @@ This note records decisions reached while grilling the worktree proposal. It is 
 
 Replace the current one-New-Task-per-client model with reusable zero-turn prepared Tasks.
 
-This is the current design focus. Finish its lifecycle, ownership, recovery, protocol, and UX decisions before designing its implementation.
+Implemented and merged before worktree behavior depends on it.
 
 ### 2. Worktree Task Workspaces
 
-After the pool is complete, implement worktree discovery, creation, selection, Task binding, and management. Worktree Tasks will reuse the prepared-Task leasing mechanism rather than introduce another provisional-session lifecycle.
+Implement worktree discovery, creation, selection, Task binding, and management. Worktree Tasks reuse the prepared-Task leasing mechanism rather than introduce another provisional-session lifecycle.
 
 ## Shared vocabulary
 
@@ -133,42 +133,113 @@ An empty query immediately returns a bounded shallow-first list: root files befo
 
 The current invariant is one client-private New Task per `clientInstanceId`. Changing Project, Agent, or workspace discards that Task and closes its Native Session. The pool replaces that uniqueness rule; the existing `(Project, workspace, Agent)` frontend preparation key is not already a server-side cache.
 
-### Part 1 remaining work
+### Part 1 status
 
-- Update the accepted Task Lifecycle and Chat specification and the project glossary after explicit agreement that this working design is complete.
-- Derive the implementation and regression-test plan from that accepted specification; do not begin Part 2 worktree implementation until the pool is complete.
+The leased prepared-Task pool is implemented. The remaining decisions in this note concern Part 2.
 
 ## Part 2: Worktree Task Workspaces
 
+### Repository identity and scope
+
+- A Worktree Repository is identified locally by its canonical Git common-directory path, obtained through Git rather than inferred from a remote URL or branch checkout path.
+- The identity is shared by the primary checkout and all linked worktrees. It does not attempt to unify separate local clones of the same remote.
+- Moving or repairing a repository may change or restore this local identity; cross-location identity recovery is not part of the first worktree slice.
+- Managed worktrees live below the App Server state root at `worktrees/<repository-id>/<worktree-id>`. Both path components are collision-resistant opaque identifiers; prompt text, repository labels, and branch names do not become storage path components.
+- A Managed Worktree has durable OpenAIDE metadata keyed by its opaque worktree identity. Its user-facing repository label, branch, ownership, and current Git state are projections rather than filesystem identity.
+- Every Task backed by a worktree stores a `WorktreeId` reference. Tasks sharing a worktree reference one durable Worktree record, which owns repository identity, canonical worktree-root path, Managed/External class, availability, and last observed Git projection.
+- Worktree support requires the Project folder itself to be Git's reported top-level working tree. The check accepts both a primary checkout's `.git` directory and a linked worktree's `.git` file by comparing the canonical Project root with `git rev-parse --show-toplevel`; it does not infer support by walking up from a nested Project folder.
+- A worktree-backed Task retains its Project Context and resolves the Agent cwd directly to the selected worktree root. It does not copy the Worktree record's mutable fields.
+- Every successful Git discovery synchronizes a durable Worktree record for each listed primary or linked worktree, even before a Task uses it. Management and Task Workspace selectors therefore operate on stable `WorktreeId` values rather than raw paths or transient candidate handles.
+- A failed discovery does not mutate existing Worktree records or infer that previously known worktrees disappeared.
+- After a successful refresh, a previously known Worktree record absent from Git is deleted immediately when no visible, idle, archived, or Prepared Task references it. Referenced records remain durable and become unavailable for Task history and recreation.
+- App Server owns one command queue per Worktree Repository. Create, recreate, remove, and explicit refresh operations serialize through that queue; operations for different repositories may run concurrently.
+- Each mutation performs its final Git discovery and durable Worktree-record synchronization before the next command begins. Git's own locks remain a safety layer, not OpenAIDE's product-ordering mechanism.
+- V1 does not poll worktrees or keep filesystem watchers for external worktree changes. Discovery refreshes when the Task Workspace selector or management surface opens, before a worktree is used, after a worktree mutation, and on explicit Refresh.
+- When a worktree-backed turn becomes terminal, App Server cheaply checks whether its workspace root still exists. A missing root triggers repository discovery and the ordinary unavailable-workspace behavior; OpenAIDE does not try to interpret unstructured Agent error text as filesystem state.
+
 ### Task creation UX
 
-- Isolation belongs in the existing **Task start context** row with Project and Agent. It does not belong inside the composer.
+- **Task Workspace** is the authoritative filesystem choice in the existing Task start context row with Project and Agent. The existing user-selected `IsolationKind` and composer isolation menu are removed rather than moved.
 - Intended control order is Project, Task Workspace, Agent.
 - Task Workspace choices are the current checkout, an existing repository worktree, or a new worktree.
+- A fresh New Task defaults to **Project root**. OpenAIDE does not remember the last selected worktree or open New worktree automatically; isolation remains an explicit choice for each Task.
+- **Project root** is visually distinct from linked worktrees through its folder icon and name. It means the selected Project's configured root, not the browser's current directory or an ambient process directory.
+- For a Project outside Git, or one nested below a repository root without being its own Git top level, the control remains visible with **Project root** as its sole value. New worktree and Manage worktrees are hidden, and ordinary local Tasks remain available.
+- A Git discovery failure for an otherwise usable Project does not block Project root. The worktree choices become unavailable with an inline error and explicit refresh.
+- Local/worktree presentation is derived from the selected Task Workspace and is not separately stored or accepted as user input. Legacy `local` Tasks migrate to their existing stored workspace path.
+- `docker` is removed from this model. A future container execution environment requires its own design and does not masquerade as a filesystem Task Workspace.
 - The composer retains prompt text while Task Workspace preparation changes. The final worktree Native Session exists before the user starts the Task, so its Agent options and slash commands are authoritative before Send.
 - Creating a worktree is explicit preparation before Send. The Agent is never started against an empty placeholder folder.
+- Selecting **New worktree** opens a compact form anchored to the Task Workspace control, not a modal and not composer content. It shows Base = current committed `HEAD`, Create branch = off, and an explicit **Create** action; accepting the defaults takes one confirmation click.
+- During creation, Project and Task Workspace controls are locked to the operation's repository context. Agent selection, prompt and Image editing, and ordinary navigation remain available.
+- The currently selected workspace's Prepared Task remains leased while filesystem preparation runs, so its Agent options and slash commands stay available. Only successful worktree preparation changes Task Workspace: App Server then releases the old lease and acquires the new `(Agent, worktree)` key. Failure leaves the existing lease and selection unchanged; one client never keeps both leases.
+- Worktree creation is App Server-owned and continues when the user navigates away. Returning to New Task renders its latest progress; completion applies the new Task Workspace to that retained context and uses the latest selected Agent when acquiring its Prepared Task.
+- A full Frontend reload or disconnect does not reattach that client to its in-flight creation operation, even when the stable client id reconnects. The App Server lets the operation finish, but it no longer auto-selects the result for that client's New Task context; the resulting worktree is available through ordinary discovery and manual selection.
+- While such an operation remains active, its target is ephemeral repository operation state and cannot be selected or removed. This prevents a reloaded or second client from using a Git-registered worktree before checkout and `.worktreeinclude` preparation finish; terminal success or failure returns it to the ordinary discovery rules without persisting a separate failed-worktree lifecycle.
+- An App Server restart drops in-memory worktree progress, queued operations, and live-client result application. Startup performs ordinary Git discovery; any listed worktree is projected normally, with no resumed copy, automatic selection, rollback, or persisted incomplete state.
+- After Create, the compact form closes. The Task Workspace control shows a busy state, while the existing quiet New Task status line reports stages and measurable copy progress such as checkout creation, local-file copy counts/bytes, and Agent preparation.
 - Worktree Tasks remain grouped under the originating Project Context.
-- If the Project is a repository subdirectory, the Task Workspace preserves that repository-relative scope inside the worktree.
+
+### Approved Task Workspace UI
+
+- The production implementation follows `packages/frontend/prototypes/worktree-ux-directions`, variant A, for the Task Workspace chooser, anchored creation form, progress, failure, Task header context, and worktree management surface.
+- The chooser is titled **Task workspace** and explains that it selects where the Task runs. It is a compact popover anchored to the Project, Task Workspace, Agent context row rather than composer content or a modal.
+- The selected row is communicated by its quiet selected background; it does not add a leading checkmark or extra indentation. The Project root and worktrees share one list rather than being split into separate visual panels.
+- A long repository list scrolls within the chooser, keeps search and footer actions stable, and uses a subtle bottom fade to indicate more results. Footer actions are **New worktree** and **Manage worktrees**.
+- The creation view replaces the chooser body in the same anchored surface. A back action returns to selection. Its fields use the same typography and controls as the management-page creation view.
+- On mobile, the anchored surface becomes a closeable, viewport-contained sheet without adding a second line to compact Task rows or headers.
+- Prompt text and Images remain unchanged while the user opens, closes, creates, or changes Task Workspace.
 
 ### Worktree creation
 
 - Default base revision is the source checkout's committed `HEAD`.
-- Uncommitted and untracked source-checkout files are not applied to the new worktree. The UI states this when the source is dirty.
-- Branch name is derived from the prompt, editable before creation, and validated with Git branch-name rules.
-- The creation form lists existing branches and disables creation for a collision. It revalidates during `git worktree add` to handle races and never silently adopts an existing branch.
-- An empty or unusable prompt receives a generated fallback branch name.
-- OpenAIDE-created worktrees live under managed app storage, organized by repository and worktree identity.
-- OpenAIDE honors repository `.worktreeinclude` patterns. Only Git-ignored files may be copied; paths must remain inside the source and destination roots; tracked files cannot be copied through this mechanism.
-- Any failed creation or later preparation step produces an error notification identifying the failed step.
+- The v1 base picker offers that committed `HEAD` plus local branches only. It does not fetch, list remote-tracking branches or tags, or accept arbitrary commit expressions.
+- Uncommitted and untracked source-checkout files are not applied to the new worktree. The creation view explains that worktrees start from committed files only; it does not pretend to show a live clean/dirty state.
+- New Managed Worktrees default to detached `HEAD` at the selected base commit. Creating a branch is optional and off by default.
+- With Create branch off, the form relies on its visible detached-`HEAD` value and adds no separate warning copy. The removal preflight remains responsible for blocking deletion when detached commits have not been preserved.
+- Worktree creation leaves Git submodules uninitialized. OpenAIDE does not automatically run `git submodule update --init --recursive`; the user or Agent may initialize submodules explicitly after creation when the Task needs them.
+- Enabling **Create branch** reveals a branch-name field pre-filled with a readable plain slug derived from the worktree name. It adds no mandatory OpenAIDE prefix, and the entire branch name remains editable before creation.
+- The suggestion continues to follow worktree-name edits until the user manually edits the branch field. After that first manual branch edit, later worktree-name changes never rewrite it.
+- Suggestion generation preserves Unicode letters and numbers from every script, converts whitespace and punctuation runs to single hyphens, and trims separators. It does not transliterate to ASCII.
+- The generated slug is limited to 48 user-perceived characters before any collision suffix. A manually edited branch may be longer when Git accepts it.
+- The initial suggestion receives a short uniqueness suffix only when that unsuffixed suggestion already collides with an existing local branch. The visible field always shows the exact branch that will be created.
+- The final edited value is validated with Git branch-name rules.
+- The base picker lists existing local branches. When Create branch is enabled, a branch-name collision disables creation; OpenAIDE revalidates during `git worktree add` to handle races and never silently adopts the colliding branch.
+- A normalization-empty worktree name blocks creation. If Create branch is enabled and no usable branch slug exists, the branch field remains empty and creation is blocked until the user enters a valid name; OpenAIDE does not generate an opaque fallback.
+- Managed Worktrees live under the App Server state root, organized by opaque repository and worktree identity.
+- OpenAIDE behaviorally follows `satococoa/git-worktreeinclude`, implemented as a focused Rust module rather than a dependency on a generic recursive-copy crate or the Go binary.
+- The current Project checkout supplies `.worktreeinclude` and the ignored source files, even when it is itself a linked worktree. OpenAIDE does not default to the repository's primary checkout or expose another source picker.
+- Eligibility is the intersection of NUL-delimited paths Git reports as ignored by effective repository rules and paths Git reports through the Git-ignore-compatible `.worktreeinclude` patterns. Tracked files never enter the copy plan, and a missing source `.worktreeinclude` is a successful no-op.
+- Paths must remain within the source and destination roots. Only regular files are copied; symbolic links and other non-regular entries are skipped rather than followed or recreated.
+- Each file is copied through a temporary sibling and atomic rename, preserving ordinary permission bits. Existing equal files are skipped; differing destinations are conflicts rather than overwritten.
+- Copy atomicity is per file, not for the full operation. Processing collects per-path outcomes, and any copy errors fail worktree preparation after the plan has run; already copied files remain because the worktree workflow has no rollback subsystem.
+- `.worktreeinclude` is an explicit repository instruction to copy ignored local content, including files that may contain secrets. OpenAIDE does not infer, inspect, or log file contents.
+- The copy plan has no OpenAIDE byte limit, file-count limit, or large-copy confirmation. Files are streamed rather than buffered as a complete payload.
+- The copy stage reports measurable file and byte progress but is not user-cancellable in v1.
+- A partial copy error reports filesystem preparation failure and refreshes Git discovery. If Git lists the worktree, it immediately becomes an ordinary selectable worktree with its location-derived Managed/External class, no persisted incomplete state, and no special retry action; copied files remain in place.
+- A failure after Git registration does not select the resulting worktree for New Task. The previous Task Workspace remains selected; the error identifies the failed stage, and the discovered Git-valid worktree is available for later explicit selection or management.
+- Any failed creation or later filesystem-preparation step produces an error notification identifying the failed step.
 - There is no automatic rollback subsystem and no special persisted failed-worktree state.
-- After an error, OpenAIDE refreshes Git discovery. Any worktree Git recognizes appears normally in the worktree list and can be inspected, selected, retried, or removed through ordinary management.
+- After an error, OpenAIDE refreshes Git discovery. Any worktree Git recognizes appears normally in the worktree list and can be inspected, selected, or removed through ordinary management.
+- Once checkout and `.worktreeinclude` preparation succeed, the new Task Workspace remains selected even if its independently acquired Prepared Task later fails to initialize the Agent. That failure uses the ordinary recoverable Task-preparation state and does not revert or remove the valid worktree.
+- Recreating an unavailable Task Workspace reuses this same creation flow. The recorded destination path is fixed. A recorded branch enables the branch field and pre-fills it; a formerly detached workspace leaves branch creation off. Base selection, validation, Git creation, `.worktreeinclude`, progress, and errors otherwise use the ordinary rules.
+- In recreation, an available prefilled existing local branch is checked out explicitly. The user may instead disable the branch field for detached creation or replace it with a new branch name, in which case the ordinary base picker applies. OpenAIDE stores no separate recovery-base or failed-recreation model.
+- Recreate workspace applies equally to Managed and External Worktrees with no extra confirmation. Management class is determined by whether the recorded path is under OpenAIDE-managed storage, not by which tool performs recreation.
+- Recreate adds no special handling for a stale Git worktree registration whose folder is missing. OpenAIDE does not force, prune, or repair it; the ordinary Git error is surfaced and repository repair remains external.
 
 ### Existing worktrees and Tasks
 
-- Discover all worktrees returned for the repository, including worktrees created by other tools.
-- Label worktrees as OpenAIDE-created or external by merging Git discovery with OpenAIDE metadata.
+- Discover all worktrees returned by Git's stable NUL-delimited porcelain listing, including worktrees created by other tools and registrations whose folders are unavailable.
+- Projects whose roots are separate top-level worktrees of the same repository share one repository-scoped inventory and management surface.
+- Label worktrees as **Managed Worktree** or **External Worktree** by merging Git discovery with OpenAIDE metadata.
 - Any valid worktree may be selected as a Task Workspace.
+- A locked worktree remains selectable when its folder is available, but its locked state and optional Git-provided reason are visible and removal is disabled.
+- A prunable or otherwise missing registration remains visible as an **Unavailable Worktree** with Git's reason. Use is disabled; management offers Refresh, Recreate, and **Forget worktree**. Forget removes the stale entry from active worktree inventory without touching Git or Task history.
+- OpenAIDE does not add a special failed-worktree lifecycle or persisted recovery state for unavailable registrations.
+- If successful discovery marks a running Task's worktree unavailable because of an external change, OpenAIDE immediately shows the unavailable state and rejects new Sends but does not cancel the active turn. That turn may complete, fail naturally, or be cancelled by the user.
+- After that turn becomes terminal, OpenAIDE closes its Native Session while the workspace remains unavailable. Task history is preserved; the session is loaded or recreated only after explicit Recreate restores the recorded path.
 - Multiple Tasks may use the same worktree concurrently. Reusing a worktree does not mean those Tasks are isolated from each other, and the UI must expose linked and running Task counts.
+- Selecting a worktree already used by a running Task is allowed immediately. OpenAIDE relies on the visible running-Task count and does not add a confirmation or serialize Agent access to the shared files.
 - Selecting a worktree that already has Tasks creates or leases a separate zero-turn Prepared Task and Native Session. It never clears or reuses a visible Task's conversation.
 
 ### Worktree management UX
@@ -176,31 +247,57 @@ The current invariant is one client-private New Task per `clientInstanceId`. Cha
 - Worktree deletion is not part of creating a New Task.
 - The primary entry is **Manage worktrees** in the Project actions menu in Task Navigation.
 - A secondary **Manage worktrees** shortcut appears in the New Task Workspace selector.
+- An unavailable Project that retains a durable Worktree Repository association keeps its Project action entry to management so the recorded root can be inspected or recreated.
 - Management opens a repository-scoped central surface, not a modal and not a permanent sidebar section.
-- The panel lists the primary checkout and every linked worktree with path, branch or detached `HEAD`, Git status, linked Task count, running or leased activity, last use, and OpenAIDE/external ownership.
+- The panel lists the primary checkout and every linked worktree with path, branch or detached `HEAD`, availability or lock state, linked Task count, running or leased activity, last use, and Managed/External ownership. It does not continuously compute clean/dirty filesystem status.
 - The primary checkout is visible context but cannot be removed.
-- Worktree actions are: **Use for New Task**, **Open folder** when supported, **View linked Tasks**, **Refresh status**, and **Remove worktree**.
-- OpenAIDE may remove both OpenAIDE-created and external worktrees after the same safety preflight. External removal explicitly identifies the path and that another tool created it.
-- Worktree management does not initially create standalone worktrees, rename or delete branches, merge, rebase, create pull requests, or automatically clean up after Task Archive.
+- A linked worktree that contains a configured Project root may be removed after the ordinary safeguards. OpenAIDE retains that Project and its Task groups but marks the Project unavailable; it cannot start New Tasks in Project root or another worktree until its recorded Project folder is recreated. Existing Tasks whose own Task Workspaces remain available may continue.
+- Supporting that outcome requires explicit Project availability in the App Server-owned Project projection; the current id-and-label-only Project summary is insufficient. The unavailable Project remains visible for history and recovery, and a later refresh restores availability when the recorded Project root exists again.
+- Worktree actions are: **Use for New Task**, **Open folder** when supported, **View linked Tasks**, **Refresh**, **Remove worktree**, and **Forget worktree** for an unavailable entry.
+- **Use for New Task** returns to the live New Task surface, preserves its text and Images unchanged, selects the chosen Task Workspace, and performs the ordinary Prepared-Task release/acquire transition. When management was opened outside New Task, the action opens New Task with that context and retains any still-live Frontend-owned composer.
+- **Open folder** is capability-gated App Shell behavior distinct from opening a file. VS Code focuses the folder in its Explorer when it belongs to the current VS Code workspace; otherwise it opens the directory in the OS file manager. Desktop opens it in the OS file manager. Web hides the action because it cannot reliably open arbitrary local directories.
+- Folder opening uses a dedicated shell capability and directory-path authorization. It does not reuse the current text-document opening path, whose authorization is intentionally limited to files inside the active VS Code workspace.
+- OpenAIDE may remove both Managed and External Worktrees after the same safety preflight. External removal explicitly identifies the path and that another tool created it.
+- Worktree management may create a standalone Managed Worktree through the same creation view used by New Task. It does not automatically select that worktree for a Task when management was opened independently.
+- Worktree management does not rename or delete branches, merge, rebase, create pull requests, or automatically clean up after Task Archive.
 - Task **Archive** already provides the product's close/history lifecycle. Do not add a second Close state solely for worktrees.
+
+### Approved Worktree Management UI
+
+- The production implementation follows the approved management scene in `packages/frontend/prototypes/worktree-ux-directions`, variant A.
+- Management is a central repository-scoped page. Desktop uses a compact worktree list beside one detail surface; it is neither a full-width sparse table nor a stack of bordered cards. Narrow screens show the same list and detail content as sequential views with an explicit back/close affordance.
+- The list header keeps **New worktree** and Refresh together on the left. Refresh is a quiet icon action with an accessible label and tooltip, not a distant floating control or a one-item overflow menu.
+- Worktree rows stay compact and use stable identity, state, activity, and action slots. The selected worktree uses one quiet highlight. Paths and detailed metadata belong in the detail surface rather than every row.
+- The detail surface shows the real filesystem path, visually truncated when necessary, with capability-gated Copy and Open folder actions. It never substitutes product copy such as “OpenAIDE storage” for the path.
+- **New task here** is the primary worktree action and sits with the worktree identity before lower-priority metadata. Linked Tasks are a visually distinct, internally scrollable list that reuses the compact Task-navigation row language and supports filtering for large histories.
+- Worktree display-name editing changes only OpenAIDE metadata. Git branch and folder names remain unchanged.
+
+### App Server Protocol boundary
+
+- Worktree inventory and repository-operation state use one authoritative repository-scoped state subscription. Projects whose roots are separate worktrees of the same Worktree Repository consume the same subscription rather than owning duplicated worktree snapshots.
+- The subscription snapshot contains the durable Worktree records visible for that repository plus active and queued create, recreate, remove, or refresh operations. Mutation responses acknowledge or return their direct result, while the ordered subscription remains authoritative for subsequent shared state.
+- Detailed progress remains available to the connected client that initiated creation through the shared operation projection and its New Task status line. Other subscribed clients may show the same repository operation as preparing or busy; the operation is not stored in a Task snapshot or composer draft.
+- Frontend protocol values identify repositories and worktrees with opaque App Server ids. Frontend never supplies a filesystem destination for Managed Worktree creation or a raw path in place of a `WorktreeId`.
+- Project projection exposes an optional opaque Worktree Repository id only when the Project root itself is a supported Git top level. Frontend uses that id to subscribe and invoke repository operations; App Server remains responsible for resolving and authorizing every filesystem path.
+- Part 2 replaces `task/acquire.workspaceRoot` with a tagged Task Workspace identity: Project root is derived from the selected Project, while a linked worktree is identified by `WorktreeId`. App Server validates that both belong to the same Worktree Repository before resolving the canonical pool folder.
+- Worktree mutations are `worktree/create`, `worktree/recreate`, `worktree/remove`, and `worktree/refresh`. Long operations return an accepted operation id promptly; their repository subscription projection is the single source for queued, running, progress, success, and failure state.
+- `worktree/create` carries the selected base identity and the exact optional branch name. Frontend derives the editable branch suggestion locally from the worktree display name; prompt text and Images are never sent in a worktree request before `task/send`. App Server independently validates the base, branch, repository, destination, and current Git state.
 
 ### Removal safeguards
 
 - A linked running Task blocks removal.
-- Modified or untracked files block removal. The user must commit, stash, move, or clean them outside the removal flow.
+- Clicking **Remove worktree** performs a fresh safety preflight. The panel does not rely on a previously displayed clean/dirty result, which would be expensive to maintain and immediately stale.
+- An unavailable worktree can be forgotten when no linked Task is running. Because its folder and Git registration are already absent, dirty-file, submodule, lock, and detached-commit checks do not apply.
+- Prepared-Task leases do not block confirmed removal. App Server atomically releases and disposes every zero-turn Prepared Task for that worktree, closes their Native Sessions, notifies affected clients, and then proceeds. Each affected Frontend preserves its prompt and Images and falls back to the available Project root; if Project root is unavailable, Send remains blocked until the user chooses another Task Workspace.
+- Staged, unstaged, unmerged, and non-ignored untracked files block removal. The user must commit, stash, move, or clean them outside the removal flow.
+- The removal preflight explicitly requests all untracked entries and does not let user `status.showUntrackedFiles` or similar presentation configuration hide changes from the safety decision.
+- Git-ignored files do not block removal. Confirmation states that ignored and generated content inside the worktree will also be deleted; OpenAIDE does not recursively inventory or size ignored content merely to remove the worktree.
 - A clean detached-HEAD worktree with commits not reachable from another branch or tag blocks removal until the commits are preserved.
+- When detached commits block removal, OpenAIDE explains that the user can ask the Agent or use external Git to create a branch or tag. V1 adds no branch-management recovery action and never offers forced deletion of those commits.
+- A worktree containing initialized submodules cannot be removed through OpenAIDE in v1. The removal surface explains that the user must deinitialize or remove the submodules with external Git tooling first; OpenAIDE does not bypass Git's safeguard with `git worktree remove --force`.
 - Removing a worktree never deletes its branch.
 - Idle and archived linked Tasks keep their history after removal and become **Workspace unavailable**.
-- A Task with an unavailable workspace cannot continue until the user explicitly recreates its worktree at the recorded path and branch.
+- Removed or forgotten worktrees disappear from Task Workspace selection and management. App Server retains a hidden historical record with the former name, path, and Git reference so linked Tasks remain attributable. If the same path later returns through Git discovery, it receives a new worktree identity and does not silently reconnect old Tasks.
+- Confirmation identifies the exact folder, states how many linked Tasks remain readable, and states that the branch is kept.
+- A Task with an unavailable workspace cannot continue until the user successfully recreates the recorded path. After **Forget worktree**, linked Tasks remain history-only; continuing work starts a new Task in another Task Workspace.
 - Free Prepared Tasks for a removed folder are discarded and their Native Sessions are closed.
-
-### Questions still to grill for Part 2
-
-- Leased-draft removal: whether the initiating client can release its own lease while another live client's lease blocks removal, or removal may invalidate every live zero-turn lease for that folder.
-- Exact branch fallback and prompt-to-branch normalization, including non-Latin prompts and maximum length.
-- Exact managed path layout and collision strategy across repositories with the same directory name.
-- `.worktreeinclude` symlink, size, permissions, secret-copy, partial-copy, and retry rules.
-- Base revision picker scope: local branches, remote branches, tags, and arbitrary commits.
-- Worktree recreation semantics for Tasks marked **Workspace unavailable**.
-- Git discovery and refresh behavior for prunable or missing worktree registrations.
-- Cross-shell behavior for opening folders and returning from Worktree management to a preserved New Task draft.

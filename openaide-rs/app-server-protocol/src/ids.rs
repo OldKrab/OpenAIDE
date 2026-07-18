@@ -108,3 +108,15 @@ id_type!(
     "string & { readonly __openaideBrand: \"TaskListCursor\" }"
 );
 id_type!(TurnId, "string & { readonly __openaideBrand: \"TurnId\" }");
+id_type!(
+    WorktreeId,
+    "string & { readonly __openaideBrand: \"WorktreeId\" }"
+);
+id_type!(
+    WorktreeOperationId,
+    "string & { readonly __openaideBrand: \"WorktreeOperationId\" }"
+);
+id_type!(
+    WorktreeRepositoryId,
+    "string & { readonly __openaideBrand: \"WorktreeRepositoryId\" }"
+);

@@ -74,8 +74,8 @@ describe("App Server initial snapshot ingestion", () => {
       },
       projects: {
         projects: [
-          { projectId: "project-1" as ProjectId, label: "API" },
-          { projectId: "project-2" as ProjectId, label: "App" },
+          { projectId: "project-1" as ProjectId, label: "API", workspaceRoot: "/workspace/API", available: true },
+          { projectId: "project-2" as ProjectId, label: "App", workspaceRoot: "/workspace/App", available: true },
         ],
       },
       agents: {
@@ -98,8 +98,24 @@ describe("App Server initial snapshot ingestion", () => {
       type: "projects",
       initialProjectId: "project-2",
       projects: [
-        { projectId: "project-1", label: "API" },
-        { projectId: "project-2", label: "App" },
+        {
+          projectId: "project-1",
+          label: "API",
+          workspaceRoot: "/workspace/API",
+          available: true,
+          projectWorktreeId: undefined,
+          worktreeError: undefined,
+          worktreeRepositoryId: undefined,
+        },
+        {
+          projectId: "project-2",
+          label: "App",
+          workspaceRoot: "/workspace/App",
+          available: true,
+          projectWorktreeId: undefined,
+          worktreeError: undefined,
+          worktreeRepositoryId: undefined,
+        },
       ],
     });
     expect(ingestion.actions[1]).toEqual({
@@ -125,7 +141,7 @@ function clientSnapshot(overrides: Partial<ClientSnapshot> = {}): ClientSnapshot
     },
     newTaskDefaults: {},
     projects: {
-      projects: [{ projectId: "project-1" as ProjectId, label: "Project" }],
+      projects: [{ projectId: "project-1" as ProjectId, label: "Project", workspaceRoot: "/workspace/Project", available: true }],
     },
     agents: {
       agents: [{ agentId: "codex" as AgentId, label: "Codex", status: "connected" }],
@@ -160,5 +176,6 @@ function taskSummary() {
     lastActivity: "2026-06-27T12:00:00.000Z",
     unread: false,
     hasMessages: true,
+    workspaceAvailable: true,
   };
 }

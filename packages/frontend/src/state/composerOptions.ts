@@ -26,6 +26,11 @@ export type WorkspaceRoot = {
 export type ProjectOption = {
   projectId: string;
   label: string;
+  workspaceRoot?: string;
+  available?: boolean;
+  worktreeRepositoryId?: string;
+  projectWorktreeId?: string;
+  worktreeError?: string;
 };
 
 export type ComposerAttachment = Attachment & {
@@ -43,6 +48,7 @@ export type ComposerSelection = {
   projectId?: string;
   workspaceRoot: string;
   workspaceLabel: string;
+  worktreeId?: string;
 };
 
 export const agentOptions: AgentOption[] = [
@@ -108,6 +114,8 @@ export function selectionWithProject(selection: ComposerSelection, project: Proj
     ...selection,
     projectId: project.projectId,
     workspaceLabel: project.label,
+    workspaceRoot: project.workspaceRoot ?? selection.workspaceRoot,
+    worktreeId: undefined,
   };
 }
 

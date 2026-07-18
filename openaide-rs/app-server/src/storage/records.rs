@@ -168,6 +168,12 @@ pub struct TaskRecord {
     pub agent_name: String,
     pub isolation: IsolationKind,
     pub workspace_root: String,
+    /// Stable Project identity root; differs from `workspace_root` for Worktree Tasks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_root: Option<String>,
+    /// Durable Task Workspace identity. Legacy Project-root Tasks omit it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worktree_id: Option<String>,
     pub lifecycle: TaskLifecycle,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_session_id: Option<String>,
@@ -247,6 +253,8 @@ impl TaskRecord {
             agent_name: self.agent_name.clone(),
             isolation: self.isolation,
             workspace_root: self.workspace_root.clone(),
+            project_root: self.project_root.clone(),
+            worktree_id: self.worktree_id.clone(),
         }
     }
 }

@@ -31,6 +31,7 @@ struct StoreInner {
     recovery: RecoveryClassification,
     open_guard: StorageOpenGuard,
     settings_write_lock: Mutex<()>,
+    worktree_write_lock: Mutex<()>,
     agent_message_cache: Mutex<HashMap<String, message_store::AgentMessageCache>>,
     #[cfg(test)]
     fail_next_task_write: AtomicBool,
@@ -57,6 +58,7 @@ impl Store {
         std::fs::create_dir_all(root.join("diagnostics"))?;
         std::fs::create_dir_all(root.join("agents"))?;
         std::fs::create_dir_all(root.join("settings"))?;
+        std::fs::create_dir_all(root.join("worktrees"))?;
 
         Ok(Self {
             inner: Arc::new(StoreInner {
@@ -64,6 +66,7 @@ impl Store {
                 recovery: open.recovery,
                 open_guard: open.guard,
                 settings_write_lock: Mutex::new(()),
+                worktree_write_lock: Mutex::new(()),
                 agent_message_cache: Mutex::new(HashMap::new()),
                 #[cfg(test)]
                 fail_next_task_write: AtomicBool::new(false),
@@ -104,11 +107,22 @@ impl Store {
         self.inner.root.join("settings")
     }
 
+    pub fn worktrees_dir(&self) -> PathBuf {
+        self.inner.root.join("worktrees")
+    }
+
     pub(crate) fn lock_settings_write(&self) -> std::sync::MutexGuard<'_, ()> {
         self.inner
             .settings_write_lock
             .lock()
             .expect("settings write lock poisoned")
+    }
+
+    pub(crate) fn lock_worktree_write(&self) -> std::sync::MutexGuard<'_, ()> {
+        self.inner
+            .worktree_write_lock
+            .lock()
+            .expect("worktree catalog lock poisoned")
     }
 
     pub fn task_dir(&self, task_id: &str) -> Result<PathBuf, RuntimeError> {

@@ -20,6 +20,10 @@ export type TaskSummary = {
   agent_name: string;
   isolation: IsolationKind;
   workspace_root: string;
+  worktree_id?: string;
+  workspace_available?: boolean;
+  worktree_name?: string;
+  git_ref?: string;
 };
 
 export type TaskAttentionEvent = {

@@ -251,7 +251,7 @@ describe("startAppServerStateSubscription", () => {
         stateRootId: "root_1" as StateRootId,
         clientInstanceId: "client_1" as never,
         agents: [{ agentId: "codex" as never, label: "Codex", status: "connected" }],
-        projects: [{ projectId: "project_1" as ProjectId, label: "OpenAIDE" }],
+        projects: [{ projectId: "project_1" as ProjectId, label: "OpenAIDE", workspaceRoot: "/workspace/OpenAIDE", available: true }],
       },
       dispatch,
       scope: { kind: "taskNavigation" },
@@ -275,6 +275,7 @@ describe("startAppServerStateSubscription", () => {
             lastActivity: "2026-06-28T00:00:00.000Z",
             unread: false,
             hasMessages: true,
+            workspaceAvailable: true,
           } },
       },
     });
@@ -336,7 +337,7 @@ describe("startAppServerStateSubscription", () => {
       snapshot: {
         kind: "projects",
         projects: {
-          projects: [{ projectId: "project_1" as ProjectId, label: "OpenAIDE" }],
+          projects: [{ projectId: "project_1" as ProjectId, label: "OpenAIDE", workspaceRoot: "/workspace/OpenAIDE", available: true }],
         },
       },
     });
@@ -419,7 +420,7 @@ describe("startAppServerStateSubscription", () => {
         stateRootId: "root_1" as StateRootId,
         clientInstanceId: "client_1" as never,
         agents: [{ agentId: "codex" as never, label: "Codex", status: "connected" }],
-        projects: [{ projectId: "project_1" as ProjectId, label: "OpenAIDE" }],
+        projects: [{ projectId: "project_1" as ProjectId, label: "OpenAIDE", workspaceRoot: "/workspace/OpenAIDE", available: true }],
       },
       dispatch,
       scope: { kind: "taskNavigation" },
@@ -1025,6 +1026,7 @@ function taskSummary(taskIdValue: string, title: string, status: ProtocolTaskSum
     lastActivity: "2026-06-28T00:00:00.000Z",
     unread: false,
     hasMessages: true,
+    workspaceAvailable: true,
   };
 }
 
