@@ -34,6 +34,22 @@ Sensitive field names are fully redacted. Do not rely on pattern replacement ins
 
 ACP traces are an explicitly enabled diagnostic artifact and may contain protocol payloads. They must be routed to the owning Native Session or Task, clearly marked sensitive, excluded from ordinary logs, and handled by support export redaction.
 
+## Support Export
+
+The VS Code Support Export is the user-shareable diagnostic boundary. It writes
+one ZIP with the allowlisted runtime snapshot, minimal platform/version facts,
+and the newest complete records from the last 24 hours of Extension and App
+Server logs, capped at 2 MB per source. Missing or malformed sources are noted
+without preventing a partial export.
+
+Export processing applies a second strict allowlist instead of copying local
+logs directly. Custom Agent identifiers are replaced with export-local tokens;
+arbitrary fields and error text are discarded; known failures may receive a
+controlled product-authored summary. Prompts, Chat, file contents and paths,
+terminal output, environment variables, secrets, raw protocol payloads, and ACP
+traces are never included. The command saves locally and only opens a GitHub
+issue after explicit user action; it does not upload diagnostics itself.
+
 ## Levels
 
 - `info`: meaningful lifecycle or ownership transition.
