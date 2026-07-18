@@ -161,6 +161,45 @@ impl NormalizedMessage {
             *permission_outcomes = existing_outcomes.clone();
         }
     }
+
+    /// Interrupted execution is terminal App Server state. Late ACP updates may
+    /// add output, but cannot rewrite a stopped row as successfully completed.
+    pub fn preserve_interrupted_activity_from(&mut self, existing: &NormalizedMessage) {
+        let (
+            NormalizedMessage::Activity { status, steps, .. },
+            NormalizedMessage::Activity {
+                status: existing_status,
+                steps: existing_steps,
+                ..
+            },
+        ) = (self, existing)
+        else {
+            return;
+        };
+        if *existing_status != ActivityStatus::Interrupted {
+            return;
+        }
+        *status = ActivityStatus::Interrupted;
+        for (step, existing_step) in steps.iter_mut().zip(existing_steps) {
+            match (step, existing_step) {
+                (
+                    super::ActivityStep::Tool { status, .. },
+                    super::ActivityStep::Tool {
+                        status: ActivityStatus::Interrupted,
+                        ..
+                    },
+                )
+                | (
+                    super::ActivityStep::Command { status, .. },
+                    super::ActivityStep::Command {
+                        status: ActivityStatus::Interrupted,
+                        ..
+                    },
+                ) => *status = ActivityStatus::Interrupted,
+                _ => {}
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
