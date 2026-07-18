@@ -9,6 +9,8 @@ type PreviewContext = {
   leave: () => void;
 };
 
+const INITIAL_PREVIEW_DELAY_MS = 1_000;
+
 const Context = createContext<PreviewContext | undefined>(undefined);
 
 export function SidebarTaskPreviewProvider({ children }: { children: ReactNode }) {
@@ -37,7 +39,7 @@ export function SidebarTaskPreviewProvider({ children }: { children: ReactNode }
       });
     };
     if (immediate || previewOpen.current) open();
-    else showTimer.current = setTimeout(open, 550);
+    else showTimer.current = setTimeout(open, INITIAL_PREVIEW_DELAY_MS);
   };
   const leave = () => {
     clearTimeout(showTimer.current);
