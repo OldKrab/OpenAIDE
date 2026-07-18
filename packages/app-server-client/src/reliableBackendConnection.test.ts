@@ -9,6 +9,7 @@ import {
   CLIENT_HEARTBEAT,
   CLIENT_INITIALIZE,
   PERMISSION_REQUEST,
+  STATE_SUBSCRIBE,
   TASK_LIST,
   type ClientInstanceId,
 } from "./generated/protocol";
@@ -75,11 +76,20 @@ describe("ReliableBackendConnection", () => {
   });
 
   it.each([
-    { expiry: "transport" as const, failure: "HTTP 410" },
-    { expiry: "client" as const, failure: "client/initialize must succeed" },
+    {
+      expiry: "transport" as const,
+      failure: "HTTP 410",
+      invalidationReason: "httpSessionExpired",
+    },
+    {
+      expiry: "client" as const,
+      failure: "client/initialize must succeed",
+      invalidationReason: "clientLivenessExpired",
+    },
   ])("reinitializes after $expiry expiry with safe replay semantics", async ({
     expiry,
     failure,
+    invalidationReason,
   }) => {
     const transport = createExpiringSessionTransport(expiry);
     const connection = createReliableWebProxyBackendConnection({
@@ -89,6 +99,8 @@ describe("ReliableBackendConnection", () => {
       retryDelayMs: 1,
       heartbeatIntervalMs: 60_000,
     });
+    const invalidations: string[] = [];
+    connection.handleGenerationInvalidated(({ reason }) => invalidations.push(reason));
     const permissionHandler = vi.fn(async () => ({ optionId: "allow-once" }));
     connection.handleRequest(PERMISSION_REQUEST, permissionHandler);
     await connection.initialize({
@@ -120,6 +132,7 @@ describe("ReliableBackendConnection", () => {
     await vi.waitFor(() => expect(permissionHandler).toHaveBeenCalledOnce());
     await vi.waitFor(() => expect(transport.permissionResponseSessions()).toEqual(["session-2"]));
     expect(transport.taskListSessions()).toEqual(["session-1", "session-2"]);
+    expect(invalidations).toEqual([invalidationReason]);
     connection.close();
   });
 
@@ -147,6 +160,35 @@ describe("ReliableBackendConnection", () => {
     ]));
     transport.sendPermissionRequest("session-2");
     await vi.waitFor(() => expect(permissionHandler).toHaveBeenCalledOnce());
+    connection.close();
+  });
+
+  it("publishes the replacement initialization baseline after client liveness expires", async () => {
+    const transport = createExpiringSessionTransport("client");
+    const connection = createReliableWebProxyBackendConnection({
+      endpointUrl: "http://app-server.test/rpc",
+      connectionId: "connection-1",
+      fetch: transport.fetch,
+      retryDelayMs: 1,
+      heartbeatIntervalMs: 60_000,
+    });
+    const baselines: Array<{ reason: string; cursor: string }> = [];
+    connection.handleRecoveryBaseline(({ reason, result }) => {
+      baselines.push({ reason, cursor: result.snapshot.cursor });
+    });
+    await connection.initialize({
+      clientInstanceId: "client-1" as ClientInstanceId,
+      shell: { kind: "web" },
+      requestedSurface: { kind: "home" },
+      capabilities: { protocol: [], shell: [] },
+    });
+
+    await connection.request(TASK_LIST, { archived: false });
+
+    await vi.waitFor(() => expect(baselines).toEqual([{
+      reason: "clientLivenessExpired",
+      cursor: "cursor-2",
+    }]));
     connection.close();
   });
 
@@ -184,6 +226,133 @@ describe("ReliableBackendConnection", () => {
     ]));
     connection.close();
   });
+
+  it("invalidates stale state and reinitializes after server replay history expires", async () => {
+    const transport = createExpiringSessionTransport("transport");
+    const connection = createReliableWebProxyBackendConnection({
+      endpointUrl: "http://app-server.test/rpc",
+      connectionId: "connection-1",
+      fetch: transport.fetch,
+      retryDelayMs: 1,
+      heartbeatIntervalMs: 60_000,
+    });
+    const invalidations: string[] = [];
+    connection.handleGenerationInvalidated(({ reason }) => invalidations.push(reason));
+    await connection.initialize({
+      clientInstanceId: "client-1" as ClientInstanceId,
+      shell: { kind: "web" },
+      requestedSurface: { kind: "home" },
+      capabilities: { protocol: [], shell: [] },
+    });
+
+    transport.expireReplayOnNextReceive();
+
+    await vi.waitFor(() => expect(transport.initializedSessions()).toEqual([
+      "session-1",
+      "session-2",
+    ]));
+    expect(invalidations).toEqual(["serverReplayExpired"]);
+    connection.close();
+  });
+
+  it("keeps requests behind the recovery barrier until every active scope has a baseline", async () => {
+    const transport = createExpiringSessionTransport("transport");
+    const connection = createReliableWebProxyBackendConnection({
+      endpointUrl: "http://app-server.test/rpc",
+      connectionId: "connection-1",
+      fetch: transport.fetch,
+      retryDelayMs: 1,
+      heartbeatIntervalMs: 60_000,
+    });
+    const statuses: string[] = [];
+    connection.handleSessionStatus(({ status }) => statuses.push(status));
+    await connection.initialize({
+      clientInstanceId: "client-1" as ClientInstanceId,
+      shell: { kind: "web" },
+      requestedSurface: { kind: "home" },
+      capabilities: { protocol: [], shell: [] },
+    });
+    const projects = vi.fn();
+    const agents = vi.fn();
+    connection.subscribeState({ kind: "projects" }, { onSnapshot: projects });
+    connection.subscribeState({ kind: "agents" }, { onSnapshot: agents });
+    await vi.waitFor(() => expect(projects).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(agents).toHaveBeenCalledOnce());
+    transport.holdNextSubscription("agents");
+
+    transport.expireReplayOnNextReceive();
+    await vi.waitFor(() => expect(statuses).toContain("recovering"));
+    await vi.waitFor(() => expect(transport.subscriptionSessions()).toEqual([
+      "session-1:projects",
+      "session-1:agents",
+      "session-2:projects",
+      "session-2:agents",
+    ]));
+    const followUp = connection.request(TASK_LIST, { archived: false });
+    await Promise.resolve();
+    expect(transport.taskListSessions()).not.toContain("session-2");
+
+    transport.resolveHeldSubscription();
+
+    await expect(followUp).resolves.toEqual({ tasks: [], revision: 2 });
+    expect(statuses.at(-1)).toBe("ready");
+    connection.close();
+  });
+
+  it("settles the recovery barrier as unavailable when replacement initialization fails", async () => {
+    const transport = createExpiringSessionTransport("transport");
+    const connection = createReliableWebProxyBackendConnection({
+      endpointUrl: "http://app-server.test/rpc",
+      connectionId: "connection-1",
+      fetch: transport.fetch,
+      retryDelayMs: 1,
+      heartbeatIntervalMs: 60_000,
+    });
+    const statuses: string[] = [];
+    connection.handleSessionStatus(({ status }) => statuses.push(status));
+    await connection.initialize({
+      clientInstanceId: "client-1" as ClientInstanceId,
+      shell: { kind: "web" },
+      requestedSurface: { kind: "home" },
+      capabilities: { protocol: [], shell: [] },
+    });
+    transport.failNextReplacementInitialization();
+
+    transport.expireReplayOnNextReceive();
+    await vi.waitFor(() => expect(statuses).toContain("recovering"));
+    const queuedRequest = connection.request(TASK_LIST, { archived: false });
+
+    await vi.waitFor(() => expect(statuses.at(-1)).toBe("unavailable"));
+    await expect(queuedRequest).rejects.toThrow("replacement initialization failed");
+    connection.close();
+  });
+
+  it("keeps an unrelated HTTP 409 terminal instead of discarding state", async () => {
+    const transport = createExpiringSessionTransport("transport");
+    const connection = createReliableWebProxyBackendConnection({
+      endpointUrl: "http://app-server.test/rpc",
+      connectionId: "connection-1",
+      fetch: transport.fetch,
+      retryDelayMs: 1,
+      heartbeatIntervalMs: 60_000,
+    });
+    const invalidations = vi.fn();
+    connection.handleGenerationInvalidated(invalidations);
+    await connection.initialize({
+      clientInstanceId: "client-1" as ClientInstanceId,
+      shell: { kind: "web" },
+      requestedSurface: { kind: "home" },
+      capabilities: { protocol: [], shell: [] },
+    });
+
+    transport.rejectAcknowledgementOnNextReceive();
+    await vi.waitFor(() => expect(transport.rejectedAcknowledgements()).toBe(1));
+
+    await expect(connection.request(TASK_LIST, { archived: false })).rejects.toThrow("HTTP 409");
+    expect(transport.openedSessions()).toBe(1);
+    expect(invalidations).not.toHaveBeenCalled();
+    connection.close();
+  });
 });
 
 function createExpiringSessionTransport(
@@ -195,13 +364,30 @@ function createExpiringSessionTransport(
   const taskLists: string[] = [];
   const permissionResponses: string[] = [];
   const heartbeats: string[] = [];
+  const subscriptions: string[] = [];
   let freezeNextReceive = false;
+  let expireReplayOnNextReceive = false;
+  let rejectAcknowledgementOnNextReceive = false;
+  let failNextReplacementInitialization = false;
+  let rejectedAcknowledgementCount = 0;
   let frozenPollCount = 0;
   let opened = 0;
+  let heldSubscriptionKind: "agents" | "projects" | undefined;
+  let heldSubscription: { id: string | number; sessionId: string; scope: { kind: "agents" | "projects" } }
+    | undefined;
 
   return {
     fetch: vi.fn<ReliableHttpFetch>(async (_input, init) => {
       if (init.method === "GET") {
+        if (rejectAcknowledgementOnNextReceive) {
+          rejectAcknowledgementOnNextReceive = false;
+          rejectedAcknowledgementCount += 1;
+          return response(409, "invalid acknowledgement");
+        }
+        if (expireReplayOnNextReceive) {
+          expireReplayOnNextReceive = false;
+          return response(409, { resyncRequired: true });
+        }
         if (freezeNextReceive) {
           freezeNextReceive = false;
           frozenPollCount += 1;
@@ -241,10 +427,24 @@ function createExpiringSessionTransport(
       }
       if (message.method === CLIENT_INITIALIZE) {
         initialized.push(sessionId);
+        if (sessionId !== "session-1" && failNextReplacementInitialization) {
+          failNextReplacementInitialization = false;
+          enqueue(sessionId, {
+            jsonrpc: "2.0",
+            id: message.id,
+            error: {
+              error: {
+                code: "internal",
+                message: "replacement initialization failed",
+              },
+            },
+          });
+          return response(204, "");
+        }
         enqueue(sessionId, {
           jsonrpc: "2.0",
           id: message.id,
-          result: { result: initializeResult() },
+          result: { result: initializeResult(sessionId === "session-1" ? "cursor-1" : "cursor-2") },
         });
         return response(204, "");
       }
@@ -275,6 +475,17 @@ function createExpiringSessionTransport(
         });
         return response(204, "");
       }
+      if (message.method === STATE_SUBSCRIBE) {
+        const scope = (message.params as { scope: { kind: "agents" | "projects" } }).scope;
+        subscriptions.push(`${sessionId}:${scope.kind}`);
+        if (sessionId === "session-2" && heldSubscriptionKind === scope.kind) {
+          heldSubscriptionKind = undefined;
+          heldSubscription = { id: message.id, sessionId, scope };
+          return response(204, "");
+        }
+        enqueueSubscription(sessionId, message.id, scope);
+        return response(204, "");
+      }
       throw new Error(`Unexpected test request: ${message.method}`);
     }),
     openedSessions: () => opened,
@@ -282,9 +493,28 @@ function createExpiringSessionTransport(
     heartbeatSessions: () => heartbeats,
     initializedSessions: () => initialized,
     taskListSessions: () => taskLists,
+    subscriptionSessions: () => subscriptions,
     permissionResponseSessions: () => permissionResponses,
     freezeNextReceive() {
       freezeNextReceive = true;
+    },
+    expireReplayOnNextReceive() {
+      expireReplayOnNextReceive = true;
+    },
+    rejectAcknowledgementOnNextReceive() {
+      rejectAcknowledgementOnNextReceive = true;
+    },
+    failNextReplacementInitialization() {
+      failNextReplacementInitialization = true;
+    },
+    rejectedAcknowledgements: () => rejectedAcknowledgementCount,
+    holdNextSubscription(kind: "agents" | "projects") {
+      heldSubscriptionKind = kind;
+    },
+    resolveHeldSubscription() {
+      if (!heldSubscription) throw new Error("No held subscription");
+      enqueueSubscription(heldSubscription.sessionId, heldSubscription.id, heldSubscription.scope);
+      heldSubscription = undefined;
     },
     sendPermissionRequest(sessionId: string) {
       enqueue(sessionId, {
@@ -318,6 +548,22 @@ function createExpiringSessionTransport(
       },
     });
   }
+
+  function enqueueSubscription(
+    sessionId: string,
+    id: string | number,
+    scope: { kind: "agents" | "projects" },
+  ) {
+    enqueue(sessionId, {
+      jsonrpc: "2.0",
+      id,
+      result: {
+        result: scope.kind === "projects"
+          ? { cursor: `cursor-${sessionId}`, scope, snapshot: { kind: "projects", projects: { projects: [] } } }
+          : { cursor: `cursor-${sessionId}`, scope, snapshot: { kind: "agents", agents: { agents: [] } } },
+      },
+    });
+  }
 }
 
 function response(status: number, body: unknown) {
@@ -335,10 +581,10 @@ function abortError() {
   return error;
 }
 
-function initializeResult() {
+function initializeResult(cursor = "cursor-1") {
   return {
     snapshot: {
-      cursor: "cursor-1",
+      cursor,
       server: { serverId: "server-1", protocolVersion: "v1", capabilities: {} },
       stateRoot: { stateRootId: "root-1" },
       client: {

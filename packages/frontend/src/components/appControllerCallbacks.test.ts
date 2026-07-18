@@ -2922,42 +2922,36 @@ describe("app controller callbacks", () => {
 
   it("subscribes to tool details until the disclosure releases its lease", async () => {
     const dispatch = vi.fn();
-    const request = vi.fn(async (method: string) => {
-      if (method === STATE_SUBSCRIBE) {
-        return {
-          cursor: "cursor_1",
-          scope: { kind: "toolDetail", taskId: "task_1", artifactId: "artifact_1" },
-          snapshot: {
-            kind: "toolDetail",
-            taskId: "task_1",
-            artifactId: "artifact_1",
-            details: {
-              locations: [{ path: "src/main.rs", line: 7 }],
-              content: [{ kind: "text", text: "details" }],
-              input: null,
-              output: { exitCode: 0, success: true, fields: [] },
-            },
-          },
-        };
-      }
-      if (method === STATE_UNSUBSCRIBE) return { scope: { kind: "toolDetail", taskId: "task_1", artifactId: "artifact_1" } };
-      throw new Error(method);
+    const stopSubscription = vi.fn();
+    const subscribeState = vi.fn((_scope, observer) => {
+      observer.onSnapshot({
+        kind: "toolDetail",
+        taskId: "task_1",
+        artifactId: "artifact_1",
+        details: {
+          locations: [{ path: "src/main.rs", line: 7 }],
+          content: [{ kind: "text", text: "details" }],
+          input: null,
+          output: { exitCode: 0, success: true, fields: [] },
+        },
+      });
+      return stopSubscription;
     });
-    const handleNotification = vi.fn(() => vi.fn());
     const state = createInitialState();
     state.snapshot = snapshot("task_1");
 
     const cleanup = callbacks({
-      backendConnection: { handleNotification, request: request as unknown as BackendConnection["request"] },
+      backendConnection: { subscribeState },
       dispatch,
       state,
     }).task.subscribeToolDetail("artifact_1");
     await settlePromises();
 
     expect(dispatch).toHaveBeenNthCalledWith(1, { type: "toolDetail:start", taskId: "task_1", artifactId: "artifact_1" });
-    expect(request).toHaveBeenCalledWith(STATE_SUBSCRIBE, {
-      scope: { kind: "toolDetail", taskId: "task_1", artifactId: "artifact_1" },
-    });
+    expect(subscribeState).toHaveBeenCalledWith(
+      { kind: "toolDetail", taskId: "task_1", artifactId: "artifact_1" },
+      expect.objectContaining({ onSnapshot: expect.any(Function) }),
+    );
     expect(dispatch).toHaveBeenCalledWith({
       type: "toolDetail:result",
       taskId: "task_1",
@@ -2968,10 +2962,7 @@ describe("app controller callbacks", () => {
       }),
     });
     cleanup();
-    await settlePromises();
-    expect(request).toHaveBeenCalledWith(STATE_UNSUBSCRIBE, {
-      scope: { kind: "toolDetail", taskId: "task_1", artifactId: "artifact_1" },
-    });
+    expect(stopSubscription).toHaveBeenCalledOnce();
     expect(postHostMessage).not.toHaveBeenCalled();
   });
 

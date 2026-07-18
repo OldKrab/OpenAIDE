@@ -1,5 +1,5 @@
 import { useEffect, type Dispatch, type RefObject } from "react";
-import type { BackendConnection, TaskId } from "@openaide/app-server-client";
+import type { AppServerSession, TaskId } from "@openaide/app-server-client";
 import {
   startAppServerStateSubscription,
   type StateSubscriptionMappingContext,
@@ -8,7 +8,7 @@ import type { AppAction } from "../state/appReducer";
 import type { NewTaskController } from "./newTaskController";
 
 type NewTaskSubscriptionOptions = {
-  backendConnection?: Pick<BackendConnection, "handleNotification" | "request">;
+  backendConnection?: Pick<AppServerSession, "subscribeState">;
   backendInitialized: RefObject<boolean>;
   backendReady: boolean;
   backendStateGeneration: number;
