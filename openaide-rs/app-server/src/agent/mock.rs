@@ -30,6 +30,7 @@ impl AgentRuntime for MockAgent {
             capabilities: vec!["Test turns".to_string()],
             typed_capabilities: AgentProbeCapabilities::default(),
             auth_methods: Vec::new(),
+            logout_supported: false,
         })
     }
 

@@ -15,7 +15,10 @@ use crate::agent::runtime::{
 };
 use crate::agent::status_cache::{AgentStatusCache, AgentStatusSnapshot};
 use crate::protocol::errors::RuntimeError;
-use crate::protocol::model::{AgentProbeCapabilities, AgentProbeResult, AgentProbeStatus};
+use crate::protocol::model::{
+    AgentAuthMethodSummary, AgentAuthVariableSummary, AgentProbeCapabilities, AgentProbeResult,
+    AgentProbeStatus,
+};
 use crate::storage::Store;
 
 #[test]
@@ -45,6 +48,10 @@ fn agent_settings_details_include_disabled_builtins_and_custom_launch_details() 
         AgentStatusSnapshot {
             status: AgentStatus::Connected,
             capabilities: AgentCapabilities::default(),
+            auth_methods: Vec::new(),
+            logout_supported: false,
+            authenticating_method_id: None,
+            status_before_authentication: None,
         },
     );
     let api = AgentProductApi::new(
@@ -86,6 +93,18 @@ fn agent_settings_details_include_disabled_builtins_and_custom_launch_details() 
         .find(|agent| agent.agent_id.as_str() == "opencode")
         .unwrap();
     assert_eq!(opencode.status, AgentSettingsStatus::Connected);
+    assert!(opencode.logout_supported);
+    assert_eq!(opencode.auth_methods.len(), 1);
+    let method = &opencode.auth_methods[0];
+    assert_eq!(method.id, "api-key");
+    assert_eq!(method.kind, "env_var");
+    assert_eq!(method.link.as_deref(), Some("https://example.com/keys"));
+    assert_eq!(method.variables.len(), 2);
+    assert_eq!(method.variables[0].name, "API_KEY");
+    assert!(method.variables[0].secret);
+    assert!(!method.variables[0].optional);
+    assert_eq!(method.variables[1].label.as_deref(), Some("Endpoint"));
+    assert!(!method.variables[1].secret);
 }
 
 struct ProbeReadyAgentRuntime;
@@ -100,7 +119,30 @@ impl AgentRuntime for ProbeReadyAgentRuntime {
             implementation_version: None,
             capabilities: Vec::new(),
             typed_capabilities: AgentProbeCapabilities::default(),
-            auth_methods: Vec::new(),
+            auth_methods: vec![AgentAuthMethodSummary {
+                id: "api-key".to_string(),
+                label: "API key".to_string(),
+                kind: "env_var".to_string(),
+                description: Some("Authenticate with environment variables".to_string()),
+                variables: vec![
+                    AgentAuthVariableSummary {
+                        name: "API_KEY".to_string(),
+                        label: None,
+                        secret: true,
+                        optional: false,
+                    },
+                    AgentAuthVariableSummary {
+                        name: "ENDPOINT".to_string(),
+                        label: Some("Endpoint".to_string()),
+                        secret: false,
+                        optional: true,
+                    },
+                ],
+                link: Some("https://example.com/keys".to_string()),
+                terminal_args: Vec::new(),
+                terminal_env: HashMap::new(),
+            }],
+            logout_supported: true,
         })
     }
 

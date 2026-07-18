@@ -40,13 +40,12 @@ pub(super) fn validate_auth_method(
         .iter()
         .find(|method| method.id().0.as_ref() == method_id)
         .ok_or_else(|| RuntimeError::InvalidParams("method_id".to_string()))?;
-    let kind = auth_method_kind(method);
-    if kind == "agent" {
-        Ok(())
-    } else {
-        Err(RuntimeError::CapabilityMissing(format!(
-            "auth method {kind} is not available yet"
-        )))
+    match method {
+        AuthMethod::Agent(_) | AuthMethod::EnvVar(_) | AuthMethod::Terminal(_) => Ok(()),
+        _ => Err(RuntimeError::CapabilityMissing(format!(
+            "auth method {} is not supported",
+            auth_method_kind(method)
+        ))),
     }
 }
 
@@ -107,24 +106,4 @@ pub(super) fn validate_resume_session_capability(
             "agent session resume is not available".to_string(),
         ))
     }
-}
-
-pub(super) fn auth_method_for_session_retry(
-    initialize: &InitializeResponse,
-    preferred_auth_method_id: Option<&str>,
-) -> Option<String> {
-    if let Some(method_id) = preferred_auth_method_id {
-        if validate_auth_method(initialize, method_id).is_ok() {
-            return Some(method_id.to_string());
-        }
-    }
-    let mut agent_methods = initialize
-        .auth_methods
-        .iter()
-        .filter(|method| auth_method_kind(method) == "agent");
-    let method = agent_methods.next()?;
-    if agent_methods.next().is_some() {
-        return None;
-    }
-    Some(method.id().0.as_ref().to_string())
 }

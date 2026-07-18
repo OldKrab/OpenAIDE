@@ -43,7 +43,7 @@ export function SettingsView({
   state,
 }: {
   desktopNotifications?: DesktopNotificationSettings;
-  onAuthenticate: (agentId: string, methodId: string) => void;
+  onAuthenticate: (agentId: string, methodId: string, values?: Record<string, string>) => void;
   onCreateCustomAgent: (params: CustomAgentCreateParams) => void;
   onDeleteCustomAgent: (agentId: string) => void;
   onReplaceCustomAgent: (params: CustomAgentReplaceParams) => void;
@@ -196,7 +196,7 @@ function SettingsTabContent({
   desktopNotifications?: DesktopNotificationSettings;
   authPending: boolean;
   agents: AgentSettingsRecord[];
-  onAuthenticate: (agentId: string, methodId: string) => void;
+  onAuthenticate: (agentId: string, methodId: string, values?: Record<string, string>) => void;
   onCreateCustomAgent: (params: CustomAgentCreateParams) => void;
   onDeleteCustomAgent: (agentId: string) => void;
   onReplaceCustomAgent: (params: CustomAgentReplaceParams) => void;

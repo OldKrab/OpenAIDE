@@ -91,13 +91,25 @@ pub enum AgentProbeStatus {
     Ready,
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct AgentAuthMethodSummary {
     pub id: String,
     pub label: String,
     pub kind: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    pub variables: Vec<AgentAuthVariableSummary>,
+    pub link: Option<String>,
+    pub terminal_args: Vec<String>,
+    pub terminal_env: HashMap<String, String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+pub struct AgentAuthVariableSummary {
+    pub name: String,
+    pub label: Option<String>,
+    pub secret: bool,
+    pub optional: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -113,6 +125,7 @@ pub struct AgentProbeResult {
     #[serde(default)]
     pub typed_capabilities: AgentProbeCapabilities,
     pub auth_methods: Vec<AgentAuthMethodSummary>,
+    pub logout_supported: bool,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -125,6 +138,7 @@ pub struct AgentProbeCapabilities {
 #[serde(rename_all = "snake_case")]
 pub enum AgentAuthenticateStatus {
     Authenticated,
+    AwaitingUser,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

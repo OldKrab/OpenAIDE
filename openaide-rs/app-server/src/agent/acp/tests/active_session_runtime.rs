@@ -14,6 +14,7 @@ use crate::agent::AgentPromptOutcome;
 use crate::agent::{AgentSecretResolver, AgentSessionSetConfigOptionRequest, TurnCancellation};
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::host::HostBridge;
+use crate::protocol::model::AgentAuthenticateStatus;
 
 fn fixture_runtime(
     temp: &tempfile::TempDir,
@@ -419,6 +420,7 @@ with_config_options = os.environ.get("OPENAIDE_ACP_FIXTURE_CONFIG_OPTIONS", "") 
 config_response_delay = float(os.environ.get("OPENAIDE_ACP_FIXTURE_CONFIG_RESPONSE_DELAY", "0"))
 fixture_title = os.environ.get("OPENAIDE_ACP_FIXTURE_TITLE", "")
 log_details = os.environ.get("OPENAIDE_ACP_FIXTURE_LOG_DETAILS", "") == "1"
+auth_method = os.environ.get("OPENAIDE_ACP_FIXTURE_AUTH_METHOD", "agent")
 pending_prompt_ids = []
 prompt_request_count = 0
 next_session_number = 0
@@ -492,13 +494,22 @@ def initialize_result():
         session_capabilities["close"] = {}
     if supports_resume:
         session_capabilities["resume"] = {}
+    advertised_auth = {"id": "test-auth", "name": "Test auth"}
+    if auth_method == "terminal":
+        advertised_auth = {
+            "id": "test-auth",
+            "name": "Terminal auth",
+            "type": "terminal",
+            "args": ["login"],
+            "env": {"LOGIN_MODE": "1"},
+        }
     return {
         "protocolVersion": 1,
         "agentCapabilities": {
             "loadSession": True,
             "sessionCapabilities": session_capabilities,
         },
-        "authMethods": [{"id": "test-auth", "name": "Test auth"}],
+        "authMethods": [advertised_auth],
     }
 
 for line in sys.stdin:
@@ -1073,6 +1084,10 @@ fn authentication_reuses_the_active_agent_process() {
         .authenticate(crate::agent::AgentAuthenticateRequest {
             agent_id: "codex".to_string(),
             method_id: "test-auth".to_string(),
+            env: HashMap::new(),
+            secret_env: Vec::new(),
+            secret_storage_agent_id: None,
+            terminal_confirmed: false,
         })
         .expect("authenticate agent");
     runtime
@@ -1082,6 +1097,152 @@ fn authentication_reuses_the_active_agent_process() {
     assert_eq!(
         read_fixture_methods(&log_path),
         ["initialize", "session/new", "authenticate", "session/close"]
+    );
+}
+
+#[test]
+fn env_var_authentication_relaunches_with_secure_host_values() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    if !python3_available() {
+        return;
+    }
+    let script_path = temp.path().join("fixture_agent.py");
+    let log_path = temp.path().join("fixture.log");
+    fs::write(&script_path, fixture_agent_script()).expect("fixture agent script");
+    let (host_bridge, requests) = HostBridge::channel_with_timeout(Duration::from_secs(2));
+    let response_bridge = host_bridge.clone();
+    let host = std::thread::spawn(move || {
+        let request = requests
+            .recv_timeout(Duration::from_secs(2))
+            .expect("secret host request");
+        assert_eq!(request.method, "agent/secret_env");
+        let params = request.params.as_ref().expect("secret params");
+        assert_eq!(params["agent_id"], "codex.auth.6170692d6b6579");
+        assert_eq!(params["names"], serde_json::json!(["OPENAIDE_SECRET_TEST"]));
+        assert!(response_bridge.try_handle_response(&serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": request.id,
+            "result": { "env": { "OPENAIDE_SECRET_TEST": "secure-token" } },
+        })));
+    });
+    let runtime = AcpAgentRuntime::new_with_host(
+        AcpAgentConfig {
+            agent_id: "codex".to_string(),
+            command: "python3".to_string(),
+            args: vec![script_path.to_string_lossy().to_string()],
+            env: vec![
+                (
+                    "OPENAIDE_ACP_FIXTURE_LOG".to_string(),
+                    log_path.to_string_lossy().to_string(),
+                ),
+                (
+                    "OPENAIDE_ACP_FIXTURE_SESSION".to_string(),
+                    "env-auth".to_string(),
+                ),
+            ],
+            secret_env: Vec::new(),
+        },
+        host_bridge,
+    );
+
+    runtime
+        .authenticate(crate::agent::AgentAuthenticateRequest {
+            agent_id: "codex".to_string(),
+            method_id: "test-auth".to_string(),
+            env: HashMap::new(),
+            secret_env: vec!["OPENAIDE_SECRET_TEST".to_string()],
+            secret_storage_agent_id: Some("codex.auth.6170692d6b6579".to_string()),
+            terminal_confirmed: false,
+        })
+        .expect("authenticate with env var");
+    host.join().expect("secret host");
+
+    assert_eq!(
+        read_fixture_methods(&log_path),
+        ["secret:secure-token", "initialize", "authenticate"]
+    );
+}
+
+#[test]
+fn terminal_authentication_waits_for_user_confirmation_before_acp_authenticate() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    if !python3_available() {
+        return;
+    }
+    let script_path = temp.path().join("fixture_agent.py");
+    let log_path = temp.path().join("fixture.log");
+    fs::write(&script_path, fixture_agent_script()).expect("fixture agent script");
+    let (host_bridge, requests) = HostBridge::channel_with_timeout(Duration::from_secs(2));
+    let response_bridge = host_bridge.clone();
+    let host = std::thread::spawn(move || {
+        let request = requests
+            .recv_timeout(Duration::from_secs(2))
+            .expect("visible terminal request");
+        assert_eq!(request.method, "agent/auth_terminal");
+        let params = request.params.as_ref().expect("terminal params");
+        assert_eq!(params["command"], "python3");
+        assert_eq!(params["args"].as_array().unwrap().last().unwrap(), "login");
+        assert_eq!(params["env"]["LOGIN_MODE"], "1");
+        assert!(response_bridge.try_handle_response(&serde_json::json!({
+            "jsonrpc": "2.0",
+            "id": request.id,
+            "result": {},
+        })));
+    });
+    let runtime = AcpAgentRuntime::new_with_host(
+        AcpAgentConfig {
+            agent_id: "codex".to_string(),
+            command: "python3".to_string(),
+            args: vec![script_path.to_string_lossy().to_string()],
+            env: vec![
+                (
+                    "OPENAIDE_ACP_FIXTURE_LOG".to_string(),
+                    log_path.to_string_lossy().to_string(),
+                ),
+                (
+                    "OPENAIDE_ACP_FIXTURE_SESSION".to_string(),
+                    "terminal-auth".to_string(),
+                ),
+                (
+                    "OPENAIDE_ACP_FIXTURE_AUTH_METHOD".to_string(),
+                    "terminal".to_string(),
+                ),
+            ],
+            secret_env: Vec::new(),
+        },
+        host_bridge,
+    );
+
+    let awaiting = runtime
+        .authenticate(crate::agent::AgentAuthenticateRequest {
+            agent_id: "codex".to_string(),
+            method_id: "test-auth".to_string(),
+            env: HashMap::new(),
+            secret_env: Vec::new(),
+            secret_storage_agent_id: None,
+            terminal_confirmed: false,
+        })
+        .expect("open terminal auth");
+    assert!(matches!(
+        awaiting.status,
+        AgentAuthenticateStatus::AwaitingUser
+    ));
+    assert_eq!(read_fixture_methods(&log_path), ["initialize"]);
+    host.join().expect("visible terminal host");
+
+    runtime
+        .authenticate(crate::agent::AgentAuthenticateRequest {
+            agent_id: "codex".to_string(),
+            method_id: "test-auth".to_string(),
+            env: HashMap::new(),
+            secret_env: Vec::new(),
+            secret_storage_agent_id: None,
+            terminal_confirmed: true,
+        })
+        .expect("confirm terminal auth");
+    assert_eq!(
+        read_fixture_methods(&log_path),
+        ["initialize", "authenticate"]
     );
 }
 
@@ -2532,7 +2693,7 @@ fn duplicate_active_session_id_keeps_original_session_active() {
 }
 
 #[test]
-fn shared_process_open_failure_reports_without_start_timeout() {
+fn auth_required_session_open_waits_for_explicit_user_authentication() {
     let temp = tempfile::TempDir::new().expect("temp dir");
     let Some((mut manager, log_path)) = fixture_manager(&temp, "__second_new_error__") else {
         return;
@@ -2555,7 +2716,7 @@ fn shared_process_open_failure_reports_without_start_timeout() {
     assert!(started.elapsed() < Duration::from_millis(500), "{error}");
     assert_eq!(
         error,
-        "runtime not ready: ACP error: second session rejected"
+        "agent authentication required: Authentication required. Open Settings and authenticate this Agent before starting a Task."
     );
 
     manager
@@ -2563,14 +2724,7 @@ fn shared_process_open_failure_reports_without_start_timeout() {
         .expect("close first session");
     assert_eq!(
         read_fixture_methods(&log_path),
-        [
-            "initialize",
-            "session/new",
-            "session/new",
-            "authenticate",
-            "session/new",
-            "session/close"
-        ]
+        ["initialize", "session/new", "session/new", "session/close"]
     );
 }
 

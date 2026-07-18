@@ -59,6 +59,7 @@ impl AgentRuntime for ReadyAgent {
                 delete_sessions: false,
             },
             auth_methods: Vec::new(),
+            logout_supported: false,
         })
     }
 

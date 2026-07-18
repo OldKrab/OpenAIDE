@@ -4,6 +4,7 @@ import { ExtensionLogger } from "./logging/logger";
 import { RuntimeProcess } from "./runtime/process";
 import { registerFileSystemHostHandlers } from "./runtime/hostFileSystem";
 import { registerAgentSecretHandlers } from "./runtime/hostAgentSecrets";
+import { registerAgentAuthTerminalHandler } from "./runtime/hostAgentAuthTerminal";
 import { registerTerminalHostHandlers } from "./runtime/hostTerminal";
 import { RuntimeClient } from "./runtime/rpcClient";
 import { TaskEditorManager } from "./webview/editorManager";
@@ -17,6 +18,7 @@ export async function activate(context: vscode.ExtensionContext) {
   const taskEditors = new TaskEditorManager(context, runtime, runtimeProcess, logger);
   const fileSystemHostHandlers = registerFileSystemHostHandlers(runtime);
   const agentSecretHandlers = registerAgentSecretHandlers(runtime, context.secrets);
+  const agentAuthTerminalHandler = registerAgentAuthTerminalHandler(runtime);
   const terminalHostHandlers = registerTerminalHostHandlers(runtime);
   const workspaceProjectSync = registerWorkspaceProjectSync(runtime, logger);
   await workspaceProjectSync.ready;
@@ -26,6 +28,7 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(runtimeProcess);
   context.subscriptions.push(fileSystemHostHandlers);
   context.subscriptions.push(agentSecretHandlers);
+  context.subscriptions.push(agentAuthTerminalHandler);
   context.subscriptions.push(terminalHostHandlers);
   context.subscriptions.push(workspaceProjectSync);
   context.subscriptions.push(taskEditors);

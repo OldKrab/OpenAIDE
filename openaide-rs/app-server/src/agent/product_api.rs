@@ -119,13 +119,30 @@ impl AgentAuthenticateWorkflow for AgentProductApi {
                 "method_id".to_string(),
             )));
         }
-        let result = self
-            .gateway
-            .authenticate(AgentAuthenticateRequest {
-                agent_id: params.agent_id.as_str().to_string(),
-                method_id: params.method_id.clone(),
-            })
+        let agent_id = params.agent_id.as_str().to_string();
+        self.statuses
+            .begin_authentication(&agent_id, &params.method_id, params.terminal_confirmed)
             .map_err(protocol_error_from_runtime)?;
+        let result = self.gateway.authenticate(AgentAuthenticateRequest {
+            agent_id: params.agent_id.as_str().to_string(),
+            method_id: params.method_id.clone(),
+            env: params.env.into_iter().collect(),
+            secret_env: params.secret_env,
+            secret_storage_agent_id: params.secret_storage_agent_id,
+            terminal_confirmed: params.terminal_confirmed,
+        });
+        let result = match result {
+            Ok(result) => {
+                if matches!(result.status, AgentAuthenticateStatus::Authenticated) {
+                    self.statuses.record_authentication_success(&agent_id);
+                }
+                result
+            }
+            Err(error) => {
+                self.statuses.record_authentication_error(&agent_id, &error);
+                return Err(protocol_authentication_error(error));
+            }
+        };
         Ok(protocol_authenticate_result(result))
     }
 }
@@ -140,8 +157,17 @@ fn protocol_authenticate_result(
             AgentAuthenticateStatus::Authenticated => {
                 ProtocolAgentAuthenticateStatus::Authenticated
             }
+            AgentAuthenticateStatus::AwaitingUser => ProtocolAgentAuthenticateStatus::AwaitingUser,
         },
     }
+}
+
+/// Authentication errors cross a user-facing trust boundary; Agent details stay server-side.
+fn protocol_authentication_error(error: RuntimeError) -> ProtocolError {
+    let mut protocol_error = protocol_error_from_runtime(error);
+    protocol_error.message =
+        "Authentication failed. Check the Agent's requirements and try again.".to_string();
+    protocol_error
 }
 
 fn expected_probe_status_error(error: &RuntimeError) -> bool {

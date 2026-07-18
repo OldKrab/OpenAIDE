@@ -1,9 +1,10 @@
+import { useState } from "react";
 import { FileText, LockKeyhole, Repeat2, Save, Trash2, X } from "lucide-react";
 import type { AgentSettingsRecord } from "@openaide/app-shell-contracts";
 import { AgentIcon } from "../AgentIcon";
 import { AgentEnvEditor, AgentIconPicker } from "./AgentCustomFields";
 import type { AgentDraft } from "./agentSettingsModel";
-import { agentStatusCopy, primaryAgentAuthMethod, type AgentAuthMethod } from "./agentSettingsModel";
+import { agentStatusCopy, type AgentAuthMethod } from "./agentSettingsModel";
 import { InlineFailure, InlineNotice, StatusBadge } from "./settingsPresentation";
 
 export function AgentSettingsDetail({
@@ -28,7 +29,7 @@ export function AgentSettingsDetail({
   confirmReplaceAgentId?: string;
   isCreating: boolean;
   isCustom: boolean;
-  onAuthenticate: (agentId: string, methodId: string) => void;
+  onAuthenticate: (agentId: string, methodId: string, values?: Record<string, string>) => void;
   onCancelDraft?: () => void;
   onDeleteClick: () => void;
   onSaveDraft: () => void;
@@ -37,7 +38,6 @@ export function AgentSettingsDetail({
   onUpdateDraft: (patch: Partial<AgentDraft>) => void;
   selected?: AgentSettingsRecord;
 }) {
-  const selectedAuth = selected ? primaryAgentAuthMethod(selected) : undefined;
   const showReplaceConfirmation = Boolean(activeDraft.agent_id && confirmReplaceAgentId === activeDraft.agent_id);
   return (
     <section className="agent-detail-pane" aria-label="Agent details">
@@ -54,24 +54,15 @@ export function AgentSettingsDetail({
             <small>{isCustom ? "Custom ACP stdio Agent" : selected?.description}</small>
           </span>
         </div>
-        {selected && selectedAuth ? (
-          <button
-            className="agent-primary-action"
-            disabled={authPending || selectedAuth.kind !== "agent"}
-            type="button"
-            onClick={() => onAuthenticate(selected.id, selectedAuth.id)}
-          >
-            <LockKeyhole size={13} />
-            {authPending ? "Authenticating" : "Authenticate"}
-          </button>
-        ) : null}
       </header>
       {selected ? (
-        <AgentStatusPanel
+        <AgentStatusPanel agent={selected} authPending={authPending} />
+      ) : null}
+      {selected?.auth_methods.length ? (
+        <AgentAuthenticationSection
           agent={selected}
           authPending={authPending}
           onAuthenticate={onAuthenticate}
-          primaryAuth={selectedAuth}
         />
       ) : null}
       <section className="agent-detail-section">
@@ -189,24 +180,96 @@ function AgentAvailabilitySection({
 function AgentStatusPanel({
   agent,
   authPending,
-  onAuthenticate,
-  primaryAuth,
 }: {
   agent: AgentSettingsRecord;
   authPending: boolean;
-  onAuthenticate: (agentId: string, methodId: string) => void;
-  primaryAuth?: AgentAuthMethod;
 }) {
   return (
     <section className={`agent-status-panel ${agent.status}`}>
       <StatusBadge status={agent.status} />
       <span>{authPending ? "Authentication is running. Follow any prompt opened by the Agent." : agentStatusCopy(agent)}</span>
-      {primaryAuth ? (
-        <button disabled={authPending || primaryAuth.kind !== "agent"} type="button" onClick={() => onAuthenticate(agent.id, primaryAuth.id)}>
-          {authPending ? "Authenticating" : "Authenticate"}
-        </button>
-      ) : null}
       {agent.last_error_summary ? <InlineFailure message={agent.last_error_summary} /> : null}
     </section>
+  );
+}
+
+function AgentAuthenticationSection({
+  agent,
+  authPending,
+  onAuthenticate,
+}: {
+  agent: AgentSettingsRecord;
+  authPending: boolean;
+  onAuthenticate: (agentId: string, methodId: string, values?: Record<string, string>) => void;
+}) {
+  return (
+    <section className="agent-detail-section agent-auth-methods">
+      <div className="settings-section-title">
+        <strong>Authentication</strong>
+      </div>
+      {agent.auth_methods.map((method) => (
+        <AgentAuthenticationMethod
+          key={method.id}
+          agentId={agent.id}
+          agentStatus={agent.status}
+          authenticatingMethodId={agent.authenticating_method_id}
+          authPending={authPending}
+          method={method}
+          onAuthenticate={onAuthenticate}
+        />
+      ))}
+    </section>
+  );
+}
+
+function AgentAuthenticationMethod({
+  agentId,
+  agentStatus,
+  authenticatingMethodId,
+  authPending,
+  method,
+  onAuthenticate,
+}: {
+  agentId: string;
+  agentStatus: AgentSettingsRecord["status"];
+  authenticatingMethodId?: string;
+  authPending: boolean;
+  method: AgentAuthMethod;
+  onAuthenticate: (agentId: string, methodId: string, values?: Record<string, string>) => void;
+}) {
+  const [values, setValues] = useState<Record<string, string>>({});
+  const variables = method.variables ?? [];
+  const missingRequired = variables.some((variable) => !variable.optional && !(values[variable.name] ?? "").trim());
+  const awaitingThisTerminal = method.kind === "terminal"
+    && agentStatus === "authenticating"
+    && authenticatingMethodId === method.id;
+  const anotherMethodIsAuthenticating = agentStatus === "authenticating" && !awaitingThisTerminal;
+  return (
+    <div className={`agent-auth-method ${method.kind}`}>
+      <div>
+        <strong>{method.label}</strong>
+        {method.description ? <small>{method.description}</small> : null}
+      </div>
+      {variables.map((variable) => (
+        <label className="agent-field" key={variable.name}>
+          <span>{variable.label ?? variable.name}{variable.optional ? " (optional)" : ""}</span>
+          <input
+            aria-label={variable.label ?? variable.name}
+            autoComplete="off"
+            type={variable.secret ? "password" : "text"}
+            value={values[variable.name] ?? ""}
+            onChange={(event) => setValues((current) => ({ ...current, [variable.name]: event.currentTarget.value }))}
+          />
+        </label>
+      ))}
+      <button
+        disabled={authPending || anotherMethodIsAuthenticating || (method.kind === "env_var" && missingRequired)}
+        type="button"
+        onClick={() => onAuthenticate(agentId, method.id, method.kind === "env_var" ? values : undefined)}
+      >
+        <LockKeyhole size={13} />
+        {awaitingThisTerminal ? "I've finished signing in" : method.label}
+      </button>
+    </div>
   );
 }

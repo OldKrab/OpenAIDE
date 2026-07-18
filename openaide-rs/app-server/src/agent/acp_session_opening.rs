@@ -105,7 +105,7 @@ pub(super) async fn open_acp_session<'a>(
                 Err(error) => {
                     let _ = context
                         .start_error_tx
-                        .send(Err(crate::agent::acp_errors::acp_error(&error)));
+                        .send(Err(crate::agent::acp_errors::acp_request_error(&error)));
                     return Err(error);
                 }
             };

@@ -32,7 +32,7 @@ export function AgentSettingsTab({
 }: {
   agents: AgentSettingsRecord[];
   authPending: boolean;
-  onAuthenticate: (agentId: string, methodId: string) => void;
+  onAuthenticate: (agentId: string, methodId: string, values?: Record<string, string>) => void;
   onCreateCustomAgent: (params: CustomAgentCreateParams) => void;
   onDeleteCustomAgent: (agentId: string) => void;
   onReplaceCustomAgent: (params: CustomAgentReplaceParams) => void;

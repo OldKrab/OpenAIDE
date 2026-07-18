@@ -10,10 +10,10 @@ pub use activity::{
     ToolPermissionDecision, ToolPermissionOutcome,
 };
 pub use agent::{
-    AgentAuthMethodSummary, AgentAuthenticateResult, AgentAuthenticateStatus, AgentCommand,
-    AgentCommandsCatalog, AgentListSessionsResult, AgentListedSession, AgentProbeCapabilities,
-    AgentProbeResult, AgentProbeStatus, ConfigOption, ConfigOptionCategory, ConfigOptionValue,
-    ConfigOptionsCatalog, ConfigOptionsStatus,
+    AgentAuthMethodSummary, AgentAuthVariableSummary, AgentAuthenticateResult,
+    AgentAuthenticateStatus, AgentCommand, AgentCommandsCatalog, AgentListSessionsResult,
+    AgentListedSession, AgentProbeCapabilities, AgentProbeResult, AgentProbeStatus, ConfigOption,
+    ConfigOptionCategory, ConfigOptionValue, ConfigOptionsCatalog, ConfigOptionsStatus,
 };
 pub use chat::{
     AgentMessagePart, AgentMessageRole, Attachment, ChatMessage, InterruptionReason, MessagePage,

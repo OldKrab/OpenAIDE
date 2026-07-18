@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::agent::gateway::AgentGateway;
 use crate::agent::registry::AgentRegistry;
 use crate::agent::status_cache::AgentStatusCache;
@@ -50,6 +52,10 @@ impl AgentService {
         self.gateway.authenticate(AgentAuthenticateRequest {
             agent_id: params.agent_id,
             method_id: params.method_id,
+            env: HashMap::new(),
+            secret_env: Vec::new(),
+            secret_storage_agent_id: None,
+            terminal_confirmed: false,
         })
     }
 

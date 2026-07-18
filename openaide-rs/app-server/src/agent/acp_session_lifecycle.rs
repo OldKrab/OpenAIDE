@@ -8,7 +8,7 @@ use crate::agent::acp_schema::{
 };
 use agent_client_protocol::{Agent, ConnectionTo};
 
-use crate::agent::acp_errors::acp_error;
+use crate::agent::acp_errors::acp_request_error;
 pub(super) use crate::agent::acp_session_capabilities::{
     auth_method_kind, initialize_supports_session_close, initialize_supports_session_delete,
     validate_initialize_protocol, validate_load_session_capability,
@@ -106,7 +106,7 @@ pub(super) async fn load_active_session(
         trace,
     )
     .await
-    .map_err(acp_error);
+    .map_err(|error| acp_request_error(&error));
     let replayed_updates = load_replay
         .lock()
         .expect("ACP load replay capture lock poisoned")
@@ -121,7 +121,7 @@ pub(super) async fn load_active_session(
         .meta(response.meta);
     let active_session = connection
         .attach_session(active_response, Vec::new())
-        .map_err(acp_error)?;
+        .map_err(|error| acp_request_error(&error))?;
     let replayed_command_catalog = latest_command_catalog(&replayed_updates);
     let replayed_messages = ReplayProjection::new(session_id.to_string()).project(replayed_updates);
     Ok((
@@ -158,7 +158,7 @@ pub(super) async fn resume_active_session(
         trace,
     )
     .await
-    .map_err(acp_error)?;
+    .map_err(|error| acp_request_error(&error))?;
     let config_catalog = response
         .config_options
         .clone()
@@ -169,7 +169,7 @@ pub(super) async fn resume_active_session(
         .meta(response.meta);
     let active_session = connection
         .attach_session(active_response, Vec::new())
-        .map_err(acp_error)?;
+        .map_err(|error| acp_request_error(&error))?;
     Ok((active_session, config_catalog))
 }
 

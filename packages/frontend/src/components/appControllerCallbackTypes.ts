@@ -48,7 +48,7 @@ export type NavigationCallbacks = {
 };
 
 export type SettingsCallbacks = {
-  authenticateAgent: (agentId: string, methodId: string) => void;
+  authenticateAgent: (agentId: string, methodId: string, values?: Record<string, string>) => void;
   createCustomAgent: (payload: CustomAgentCreateParams) => void;
   deleteCustomAgent: (agentId: string) => void;
   replaceCustomAgent: (payload: CustomAgentReplaceParams) => void;

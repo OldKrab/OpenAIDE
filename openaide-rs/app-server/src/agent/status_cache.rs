@@ -4,12 +4,16 @@ use std::sync::{Arc, Mutex};
 use openaide_app_server_protocol::snapshot::{AgentCapabilities, AgentStatus};
 
 use crate::protocol::errors::RuntimeError;
-use crate::protocol::model::AgentProbeResult;
+use crate::protocol::model::{AgentAuthMethodSummary, AgentProbeResult};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AgentStatusSnapshot {
     pub(crate) status: AgentStatus,
     pub(crate) capabilities: AgentCapabilities,
+    pub(crate) auth_methods: Vec<AgentAuthMethodSummary>,
+    pub(crate) logout_supported: bool,
+    pub(crate) authenticating_method_id: Option<String>,
+    pub(crate) status_before_authentication: Option<AgentStatus>,
 }
 
 impl Default for AgentStatusSnapshot {
@@ -17,6 +21,10 @@ impl Default for AgentStatusSnapshot {
         Self {
             status: AgentStatus::Disconnected,
             capabilities: AgentCapabilities::default(),
+            auth_methods: Vec::new(),
+            logout_supported: false,
+            authenticating_method_id: None,
+            status_before_authentication: None,
         }
     }
 }
@@ -33,6 +41,10 @@ impl AgentStatusCache {
             AgentStatusSnapshot {
                 status: AgentStatus::Connected,
                 capabilities: capabilities_from_probe(result),
+                auth_methods: result.auth_methods.clone(),
+                logout_supported: result.logout_supported,
+                authenticating_method_id: None,
+                status_before_authentication: None,
             },
         );
     }
@@ -43,6 +55,10 @@ impl AgentStatusCache {
             AgentStatusSnapshot {
                 status: status_from_probe_error(error),
                 capabilities: AgentCapabilities::default(),
+                auth_methods: Vec::new(),
+                logout_supported: false,
+                authenticating_method_id: None,
+                status_before_authentication: None,
             },
         );
     }
@@ -54,6 +70,42 @@ impl AgentStatusCache {
             .get(agent_id)
             .cloned()
             .unwrap_or_default()
+    }
+
+    pub(crate) fn begin_authentication(
+        &self,
+        agent_id: &str,
+        method_id: &str,
+        continuing: bool,
+    ) -> Result<(), RuntimeError> {
+        let mut entries = self.entries.lock().expect("agent status cache poisoned");
+        let snapshot = entries.entry(agent_id.to_string()).or_default();
+        if snapshot.status == AgentStatus::Authenticating {
+            if continuing && snapshot.authenticating_method_id.as_deref() == Some(method_id) {
+                return Ok(());
+            }
+            return Err(RuntimeError::Conflict(format!(
+                "Authentication is already in progress for Agent {agent_id}"
+            )));
+        }
+        snapshot.status_before_authentication = Some(snapshot.status.clone());
+        snapshot.status = AgentStatus::Authenticating;
+        snapshot.authenticating_method_id = Some(method_id.to_string());
+        Ok(())
+    }
+
+    pub(crate) fn record_authentication_success(&self, agent_id: &str) {
+        self.update_authentication_result(agent_id, AgentStatus::Connected);
+    }
+
+    pub(crate) fn record_authentication_error(&self, agent_id: &str, error: &RuntimeError) {
+        let mut entries = self.entries.lock().expect("agent status cache poisoned");
+        let snapshot = entries.entry(agent_id.to_string()).or_default();
+        snapshot.status = snapshot
+            .status_before_authentication
+            .take()
+            .unwrap_or_else(|| status_from_probe_error(error));
+        snapshot.authenticating_method_id = None;
     }
 
     pub(crate) fn clear(&self, agent_id: &str) -> bool {
@@ -69,6 +121,14 @@ impl AgentStatusCache {
             .lock()
             .expect("agent status cache poisoned")
             .insert(agent_id, snapshot);
+    }
+
+    fn update_authentication_result(&self, agent_id: &str, status: AgentStatus) {
+        let mut entries = self.entries.lock().expect("agent status cache poisoned");
+        let snapshot = entries.entry(agent_id.to_string()).or_default();
+        snapshot.status = status;
+        snapshot.authenticating_method_id = None;
+        snapshot.status_before_authentication = None;
     }
 
     #[cfg(test)]

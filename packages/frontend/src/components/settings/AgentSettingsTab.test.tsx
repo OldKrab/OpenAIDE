@@ -231,6 +231,56 @@ describe("AgentSettingsTab interactions", () => {
     expect(textContent(view.root)).not.toContain("Status has not been checked.");
   });
 
+  it("renders every ACP authentication method in advertised order", () => {
+    const onAuthenticate = vi.fn();
+    const view = renderAgentSettings({
+      agents: [builtInAgent("codex", {
+        auth_methods: [
+          { id: "browser", label: "Browser login", kind: "agent" },
+          {
+            id: "api-key",
+            label: "API key",
+            kind: "env_var",
+            link: "https://example.com/keys",
+            variables: [
+              { name: "API_KEY", label: "API key", secret: true, optional: false },
+              { name: "ENDPOINT", label: "Endpoint", secret: false, optional: true },
+            ],
+          },
+          { id: "terminal", label: "Terminal login", kind: "terminal", terminal_args: ["login"] },
+        ],
+      })],
+      onAuthenticate,
+    });
+
+    expect(textContent(view.root)).toContain("Browser login");
+    expect(textContent(view.root)).toContain("API key");
+    expect(textContent(view.root)).toContain("Terminal login");
+    expect(view.root.findByProps({ "aria-label": "API key" }).props.type).toBe("password");
+    expect(view.root.findByProps({ "aria-label": "Endpoint" }).props.type).toBe("text");
+
+    act(() => {
+      buttonByText(view.root, "Browser login").props.onClick();
+    });
+    expect(onAuthenticate).toHaveBeenCalledWith("codex", "browser", undefined);
+  });
+
+  it("shows confirmation only for the terminal method awaiting the user", () => {
+    const agent = builtInAgent("codex", {
+      status: "authenticating",
+      authenticating_method_id: "terminal-login",
+      auth_methods: [
+        { id: "terminal-login", label: "Sign in in terminal", kind: "terminal" },
+        { id: "browser-login", label: "Sign in with browser", kind: "agent" },
+      ],
+    });
+
+    const view = renderAgentSettings({ agents: [agent] });
+
+    expect(buttonByText(view.root, "I've finished signing in").props.disabled).toBe(false);
+    expect(buttonByText(view.root, "Sign in with browser").props.disabled).toBe(true);
+  });
+
   it("preserves the empty Agent list header text from the original tab", () => {
     const view = renderAgentSettings({ agents: [] });
     const details = view.root.findByProps({ className: "agent-detail-identity" });
@@ -246,6 +296,7 @@ function renderAgentSettings({
   onReplaceCustomAgent = vi.fn(),
   onSetAgentEnabled = vi.fn(),
   onUpdateCustomAgentMetadata = vi.fn(),
+  onAuthenticate = vi.fn(),
 }: {
   agents: AgentSettingsRecord[];
   onCreateCustomAgent?: Parameters<typeof AgentSettingsTab>[0]["onCreateCustomAgent"];
@@ -253,6 +304,7 @@ function renderAgentSettings({
   onReplaceCustomAgent?: Parameters<typeof AgentSettingsTab>[0]["onReplaceCustomAgent"];
   onSetAgentEnabled?: (agentId: string, enabled: boolean) => void;
   onUpdateCustomAgentMetadata?: Parameters<typeof AgentSettingsTab>[0]["onUpdateCustomAgentMetadata"];
+  onAuthenticate?: Parameters<typeof AgentSettingsTab>[0]["onAuthenticate"];
 }) {
   let view: ReactTestRenderer | undefined;
   act(() => {
@@ -260,7 +312,7 @@ function renderAgentSettings({
       <AgentSettingsTab
         agents={agents}
         authPending={false}
-        onAuthenticate={vi.fn()}
+        onAuthenticate={onAuthenticate}
         onCreateCustomAgent={onCreateCustomAgent}
         onDeleteCustomAgent={onDeleteCustomAgent}
         onReplaceCustomAgent={onReplaceCustomAgent}

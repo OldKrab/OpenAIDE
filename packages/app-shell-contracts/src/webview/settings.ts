@@ -32,7 +32,7 @@ export type AgentSettingsRecord = {
   source_kind: "built_in" | "custom";
   icon: AgentIconId;
   transport: "stdio";
-  status: "unprobed" | "ready" | "failed" | "disabled" | "setup_required" | "auth_required" | "unsupported" | "launching" | "connected" | "disconnected";
+  status: "unprobed" | "ready" | "failed" | "disabled" | "setup_required" | "auth_required" | "authenticating" | "unsupported" | "launching" | "connected" | "disconnected";
   launch_label: string;
   command_line?: string;
   env?: CustomAgentEnvRecord[];
@@ -40,7 +40,18 @@ export type AgentSettingsRecord = {
   capabilities: string[];
   protocol_version?: string;
   implementation_version?: string;
-  auth_methods: Array<{ id: string; label: string; kind: string; description?: string }>;
+  auth_methods: Array<{
+    id: string;
+    label: string;
+    kind: string;
+    description?: string;
+    variables?: Array<{ name: string; label?: string; secret: boolean; optional: boolean }>;
+    link?: string;
+    terminal_args?: string[];
+    terminal_env?: Record<string, string>;
+  }>;
+  logout_supported?: boolean;
+  authenticating_method_id?: string;
   last_checked_at?: string;
   last_error_summary?: string;
 };
