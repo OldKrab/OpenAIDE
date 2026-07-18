@@ -353,14 +353,15 @@ describe("SidebarNativeSessionRow", () => {
     const rowNode = {
       getBoundingClientRect: () => ({ bottom: 72, height: 32, left: 8, right: 296, top: 40, width: 288, x: 8, y: 40 }),
     } as HTMLElement;
+    const onOpenNativeSession = vi.fn();
+    const session = nativeSession({ cwd: "/workspace/OpenAIDE", title: "Existing session" });
     const tree = render(
       <SidebarTaskPreviewProvider>
         <SidebarNativeSessionRow
           nativeSessionAgentId="codex"
           nativeSessionAgentName="Codex"
-          onOpenNativeSession={vi.fn()}
-          projectLabel="OpenAIDE"
-          session={nativeSession({ cwd: "/workspace/OpenAIDE", title: "Existing session" })}
+          onOpenNativeSession={onOpenNativeSession}
+          session={session}
         />
       </SidebarTaskPreviewProvider>,
       { createNodeMock: (element) => (element.props as { className?: string }).className === "task-row external-session-row" ? rowNode : null },
@@ -374,11 +375,10 @@ describe("SidebarNativeSessionRow", () => {
 
     const preview = tree.root.findByProps({ role: "dialog" });
     expect(preview.findByType("header").findByType("strong").children.join("")).toBe("Existing session");
-    expect(preview.findAllByType("strong").map((item) => item.children.join(""))).toEqual([
-      "Existing session",
-      "OpenAIDE",
-      "/workspace/OpenAIDE",
-    ]);
+    expect(preview.findAllByType("strong").map((item) => item.children.join(""))).toEqual(["Existing session", "/workspace/OpenAIDE"]);
+    expect(preview.findByProps({ className: "task-preview-source" }).children.join(""))
+      .toBe("From Codex · Open to load");
+    expect(onOpenNativeSession).not.toHaveBeenCalled();
     vi.useRealTimers();
     vi.unstubAllGlobals();
   });

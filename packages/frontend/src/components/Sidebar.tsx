@@ -265,7 +265,6 @@ export const Sidebar = memo(function Sidebar({
                   nativeSessionAgentName={nativeSessionAgentName}
                   nativeSessionsAdoptingSessionId={nativeSessions.adoptingSessionId}
                   onOpenNativeSession={onOpenNativeSession}
-                  projectLabel={projects.find((project) => project.projectId === nativeSessionProjectId)?.label}
                   session={row.session}
                 />
               ),

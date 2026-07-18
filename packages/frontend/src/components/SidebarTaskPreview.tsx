@@ -1,17 +1,27 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
-import { ExternalLink, FolderRoot, GitBranch } from "lucide-react";
+import { FolderRoot, GitBranch } from "lucide-react";
 import type { TaskSummary } from "@openaide/app-shell-contracts";
 import { relativeTime } from "./taskSurfaceHelpers";
 
-export type SidebarPreviewContent = {
-  gitRef?: string;
-  projectLabel: string;
+type PreviewContentBase = {
   state: string;
   title: string;
-  unavailable?: boolean;
-  workspaceKind: "location" | "native_session" | "worktree";
   workspaceLabel: string;
 };
+
+export type SidebarPreviewContent = PreviewContentBase & (
+  | {
+      gitRef?: string;
+      kind: "task";
+      projectLabel: string;
+      unavailable?: boolean;
+      workspaceKind: "location" | "worktree";
+    }
+  | {
+      agentName: string;
+      kind: "agent_history";
+    }
+);
 
 type Preview = { content: SidebarPreviewContent; left: number; top: number };
 type PreviewContext = {
@@ -75,11 +85,16 @@ export function SidebarTaskPreviewProvider({ children }: { children: ReactNode }
     {children}
     {preview ? <div className="task-preview-popover" onPointerEnter={() => clearTimeout(hideTimer.current)} onPointerLeave={leave} ref={previewRef} role="dialog" style={{ left: preview.left, top: preview.top }}>
       <header><strong>{preview.content.title}</strong><span>{preview.content.state}</span></header>
-      <div><FolderRoot size={15} /><span><small>Project</small><strong>{preview.content.projectLabel}</strong></span></div>
-      <div className={preview.content.unavailable ? "unavailable" : ""}>
-        {preview.content.workspaceKind === "worktree" ? <GitBranch size={15} /> : preview.content.workspaceKind === "native_session" ? <ExternalLink size={15} /> : <FolderRoot size={15} />}
-        <span><small>{preview.content.workspaceKind === "worktree" ? "Worktree" : "Location"}</small><strong>{preview.content.workspaceLabel}</strong>{preview.content.gitRef ? <em>{preview.content.gitRef}</em> : null}</span>
-      </div>
+      {preview.content.kind === "task" ? <>
+        <div><FolderRoot size={15} /><span><small>Project</small><strong>{preview.content.projectLabel}</strong></span></div>
+        <div className={preview.content.unavailable ? "unavailable" : ""}>
+          {preview.content.workspaceKind === "worktree" ? <GitBranch size={15} /> : <FolderRoot size={15} />}
+          <span><small>{preview.content.workspaceKind === "worktree" ? "Worktree" : "Location"}</small><strong>{preview.content.workspaceLabel}</strong>{preview.content.gitRef ? <em>{preview.content.gitRef}</em> : null}</span>
+        </div>
+      </> : <>
+        <p className="task-preview-source">From {preview.content.agentName} · Open to load</p>
+        <div><FolderRoot size={15} /><span><small>Folder</small><strong>{preview.content.workspaceLabel}</strong></span></div>
+      </>}
     </div> : null}
   </Context.Provider>;
 }
@@ -90,6 +105,7 @@ export function useSidebarTaskPreview() { return useContext(Context); }
 export function taskPreviewContent(task: TaskSummary): SidebarPreviewContent {
   return {
     gitRef: task.git_ref,
+    kind: "task",
     projectLabel: task.project_label ?? "Project",
     state: taskState(task),
     title: task.title,

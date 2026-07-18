@@ -11,14 +11,12 @@ export function SidebarNativeSessionRow({
   nativeSessionAgentName,
   nativeSessionsAdoptingSessionId,
   onOpenNativeSession,
-  projectLabel = "Project",
   session,
 }: {
   nativeSessionAgentId: string;
   nativeSessionAgentName: string;
   nativeSessionsAdoptingSessionId?: string;
   onOpenNativeSession: (session: AgentListedSession) => void;
-  projectLabel?: string;
   session: AgentListedSession;
 }) {
   const rowRef = useRef<HTMLDivElement>(null);
@@ -80,10 +78,10 @@ export function SidebarNativeSessionRow({
 
   function previewContent() {
     return {
-      projectLabel,
+      agentName: nativeSessionAgentName,
+      kind: "agent_history" as const,
       state: age,
       title,
-      workspaceKind: "native_session" as const,
       workspaceLabel: session.cwd,
     };
   }
