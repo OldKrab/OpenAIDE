@@ -153,6 +153,8 @@
   font-size: 11px;
 }
 
+.task-worktree-marker { width: 14px; height: 14px; display: inline-grid; flex: 0 0 14px; place-items: center; }
+
 .task-trailing-indicator {
   position: relative;
   width: 14px;

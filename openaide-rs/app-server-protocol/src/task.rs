@@ -4,7 +4,7 @@ use ts_rs::TS;
 
 use crate::ids::{
     AgentConfigOptionId, AgentId, ClientMutationId, MessageId, ProjectId, TaskId, TaskListCursor,
-    TurnId,
+    TurnId, WorktreeId,
 };
 use crate::snapshot::{ChatItem, TaskSnapshot, TaskSummary};
 
@@ -13,10 +13,28 @@ use crate::snapshot::{ChatItem, TaskSnapshot, TaskSummary};
 pub struct TaskAcquireParams {
     pub project_id: ProjectId,
     pub agent_id: AgentId,
+    /// Legacy bootstrap fallback for Projects not yet present in the App Server catalog.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace_root: Option<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub config_options: BTreeMap<String, String>,
+}
+
+/// Acquires from the same prepared pool as `task/acquire`, resolving an opaque Worktree first.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskAcquireInWorktreeParams {
+    pub project_id: ProjectId,
+    pub agent_id: AgentId,
+    pub worktree_id: WorktreeId,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub config_options: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskAcquireInWorktreeResult {
+    pub task: TaskSnapshot,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]

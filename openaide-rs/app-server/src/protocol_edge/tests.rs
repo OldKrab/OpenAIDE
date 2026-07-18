@@ -1761,6 +1761,7 @@ fn gateway_with_project_context_and_store() -> (RpcGateway, Store) {
                 store.clone(),
                 project_roots.clone(),
             )),
+            Arc::new(crate::worktrees::WorktreeManager::new(store.clone())),
             Arc::new(SettingsCatalog::default()),
             Arc::new(TaskNavigationStore::new(store.clone())),
             task_snapshots.clone(),
@@ -1797,6 +1798,7 @@ fn gateway_with_project_context_and_store() -> (RpcGateway, Store) {
         Arc::new(RejectingTaskSetConfigOption),
         Arc::new(RejectingTaskRelease),
         Arc::new(RejectingTaskArchive),
+        Arc::new(crate::worktrees::WorktreeManager::new(store.clone())),
         Arc::new(FixedShutdown),
     );
     (gateway, store)
@@ -1845,6 +1847,7 @@ fn gateway_with_attachments_and_shutdown(
         std::sync::Arc::new(RejectingTaskSetConfigOption),
         std::sync::Arc::new(RejectingTaskRelease),
         std::sync::Arc::new(RejectingTaskArchive),
+        test_worktrees(),
         shutdown,
     )
 }
@@ -1859,6 +1862,13 @@ fn app_preferences() -> Arc<AppPreferencesService> {
     let dir = tempfile::tempdir().unwrap().keep();
     let store = crate::storage::Store::open(dir).unwrap();
     Arc::new(AppPreferencesService::new(store))
+}
+
+fn test_worktrees() -> Arc<crate::worktrees::WorktreeManager> {
+    let dir = tempfile::tempdir().unwrap().keep();
+    Arc::new(crate::worktrees::WorktreeManager::new(
+        crate::storage::Store::open(dir).unwrap(),
+    ))
 }
 
 fn runtime_diagnostics() -> Arc<FixedRuntimeDiagnostics> {
@@ -1924,6 +1934,7 @@ fn gateway_with_agent_session_listing(
         std::sync::Arc::new(RejectingTaskSetConfigOption),
         std::sync::Arc::new(RejectingTaskRelease),
         std::sync::Arc::new(RejectingTaskArchive),
+        test_worktrees(),
         Arc::new(FixedShutdown),
     )
 }
@@ -1962,6 +1973,7 @@ fn gateway_with_agent_authenticate(
         std::sync::Arc::new(RejectingTaskSetConfigOption),
         std::sync::Arc::new(RejectingTaskRelease),
         std::sync::Arc::new(RejectingTaskArchive),
+        test_worktrees(),
         Arc::new(FixedShutdown),
     )
 }
@@ -2874,6 +2886,8 @@ fn client_new_task_record(
         agent_name: "Codex".to_string(),
         isolation: crate::protocol::model::IsolationKind::Local,
         workspace_root: "/workspace/app".to_string(),
+        project_root: None,
+        worktree_id: None,
         lifecycle: crate::storage::records::TaskLifecycle::New {
             lease: Some(ClientInstanceId::from(owner_client_instance_id)),
         },
@@ -3021,7 +3035,7 @@ fn committed_task_update(
     let navigation = match navigation {
         TestNavigationChange::None => None,
         TestNavigationChange::Upsert => Some(TaskNavigationChange::Upsert {
-            task: TaskSummary {
+            task: Box::new(TaskSummary {
                 task_id: task_id.into(),
                 project_id: "project-1".into(),
                 agent_id: "codex".into(),
@@ -3032,7 +3046,9 @@ fn committed_task_update(
                 unread: false,
                 attention: None,
                 has_messages: true,
-            },
+                worktree_id: None,
+                workspace_available: true,
+            }),
         }),
     };
     TaskUpdate {

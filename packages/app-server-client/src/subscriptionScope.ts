@@ -32,6 +32,8 @@ export function subscriptionScopesEqual(left: SubscriptionScope, right: Subscrip
       return right.kind === "toolDetail"
         && left.taskId === right.taskId
         && left.artifactId === right.artifactId;
+    case "worktreeRepository":
+      return right.kind === "worktreeRepository" && left.repositoryId === right.repositoryId;
   }
 }
 
@@ -101,6 +103,9 @@ function payloadMatchesSubscriptionScope(scope: SubscriptionScope, payload: AppS
       return payload.kind === "toolDetailUpdated"
         && payload.taskId === scope.taskId
         && payload.artifactId === scope.artifactId;
+    case "worktreeRepository":
+      return payload.kind === "worktreeRepositoryUpdated"
+        && payload.repositoryId === scope.repositoryId;
   }
 }
 

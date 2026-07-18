@@ -1,5 +1,6 @@
 import {
   TASK_ACQUIRE,
+  TASK_ACQUIRE_IN_WORKTREE,
   TASK_RELEASE,
   TASK_OPEN,
   type BackendConnection,
@@ -10,7 +11,8 @@ import { mapProtocolTaskSnapshot } from "../state/appServerProtocolMapping";
 import type { AppAction } from "../state/appReducer";
 import {
   preparedTaskMatchesNewTaskContext,
-  taskCreateParams,
+  taskAcquireInWorktreeParams,
+  taskAcquireParams,
 } from "../state/newTaskPreparationContext";
 import type { AppState } from "../state/store";
 
@@ -70,7 +72,9 @@ export async function prepareNewTask(
       await discardPreparedTask(staleOrReusableTaskId);
     }
   }
-  preparedTask ??= (await request(TASK_ACQUIRE, taskCreateParams(state, projectId))).task;
+  preparedTask ??= state.newTask.selection.worktreeId
+    ? (await request(TASK_ACQUIRE_IN_WORKTREE, taskAcquireInWorktreeParams(state, projectId))).task
+    : (await request(TASK_ACQUIRE, taskAcquireParams(state, projectId))).task;
   if (!preparedProtocolTaskMatchesSelection(preparedTask, state)) {
     await discardPreparedTask(preparedTask.task.taskId as TaskId);
     throw new Error("Prepared Task does not match the current New Task context.");
@@ -98,6 +102,7 @@ export function preparedSnapshotMatchesSelection(state: AppState) {
       agentId: task.agent_id,
       projectId: task.project_id,
       workspaceRoot: task.workspace_root,
+      worktreeId: task.worktree_id,
     }),
   );
 }
@@ -109,5 +114,6 @@ export function preparedProtocolTaskMatchesSelection(
   return preparedTaskMatchesNewTaskContext(state, {
     agentId: task.task.agentId,
     projectId: task.task.projectId,
+    worktreeId: task.task.worktreeId ?? undefined,
   });
 }

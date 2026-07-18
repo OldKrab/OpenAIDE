@@ -22,6 +22,7 @@ mod agent_collection;
 mod project_collection;
 mod task_navigation;
 pub(crate) mod task_snapshot;
+mod worktree_repository;
 
 pub use agent_collection::{AgentCollectionSnapshotSource, AgentRegistrySnapshotSource};
 pub use project_collection::{ProjectCollectionSnapshotSource, ProjectCollectionStore};
@@ -29,6 +30,7 @@ pub use project_collection::{ProjectCollectionSnapshotSource, ProjectCollectionS
 pub(crate) use task_navigation::project_task_summary;
 pub use task_navigation::{TaskNavigationSnapshotSource, TaskNavigationStore};
 pub use task_snapshot::{TaskListSnapshot, TaskSnapshotSource, TaskSnapshotStore};
+pub use worktree_repository::WorktreeRepositorySnapshotSource;
 
 pub trait SnapshotProvider {
     fn snapshot(
@@ -62,6 +64,7 @@ pub struct SnapshotBuilder {
     new_task_defaults: Arc<dyn NewTaskDefaultsSnapshotSource>,
     agents: Arc<dyn AgentCollectionSnapshotSource>,
     projects: Arc<dyn ProjectCollectionSnapshotSource>,
+    worktrees: Arc<dyn WorktreeRepositorySnapshotSource>,
     settings: Arc<dyn SettingsSnapshotSource>,
     task_navigation: Arc<dyn TaskNavigationSnapshotSource>,
     task_snapshots: Arc<dyn TaskSnapshotSource>,
@@ -72,6 +75,7 @@ pub struct SnapshotSources {
     new_task_defaults: Arc<dyn NewTaskDefaultsSnapshotSource>,
     agents: Arc<dyn AgentCollectionSnapshotSource>,
     projects: Arc<dyn ProjectCollectionSnapshotSource>,
+    worktrees: Arc<dyn WorktreeRepositorySnapshotSource>,
     settings: Arc<dyn SettingsSnapshotSource>,
     task_navigation: Arc<dyn TaskNavigationSnapshotSource>,
     task_snapshots: Arc<dyn TaskSnapshotSource>,
@@ -82,6 +86,7 @@ impl SnapshotSources {
         new_task_defaults: Arc<dyn NewTaskDefaultsSnapshotSource>,
         agents: Arc<dyn AgentCollectionSnapshotSource>,
         projects: Arc<dyn ProjectCollectionSnapshotSource>,
+        worktrees: Arc<dyn WorktreeRepositorySnapshotSource>,
         settings: Arc<dyn SettingsSnapshotSource>,
         task_navigation: Arc<dyn TaskNavigationSnapshotSource>,
         task_snapshots: Arc<dyn TaskSnapshotSource>,
@@ -90,6 +95,7 @@ impl SnapshotSources {
             new_task_defaults,
             agents,
             projects,
+            worktrees,
             settings,
             task_navigation,
             task_snapshots,
@@ -115,6 +121,7 @@ impl SnapshotBuilder {
                 Arc::new(EmptyNewTaskDefaults),
                 Arc::new(EmptyAgentCollection),
                 Arc::new(EmptyProjectCollection),
+                Arc::new(EmptyWorktreeRepositories),
                 Arc::new(SettingsCatalog::default()),
                 Arc::new(EmptyTaskNavigation),
                 task_snapshots,
@@ -134,6 +141,7 @@ impl SnapshotBuilder {
                 Arc::new(EmptyNewTaskDefaults),
                 Arc::new(EmptyAgentCollection),
                 Arc::new(EmptyProjectCollection),
+                Arc::new(EmptyWorktreeRepositories),
                 Arc::new(SettingsCatalog::default()),
                 task_navigation,
                 Arc::new(EmptyTaskSnapshots),
@@ -152,6 +160,7 @@ impl SnapshotBuilder {
             new_task_defaults: sources.new_task_defaults,
             agents: sources.agents,
             projects: sources.projects,
+            worktrees: sources.worktrees,
             settings: sources.settings,
             task_navigation: sources.task_navigation,
             task_snapshots: sources.task_snapshots,
@@ -250,6 +259,11 @@ impl SnapshotProvider for SnapshotBuilder {
                     artifact_id,
                 )?,
             },
+            SubscriptionScope::WorktreeRepository { repository_id } => {
+                SubscriptionSnapshot::WorktreeRepository {
+                    repository: self.worktrees.snapshot(repository_id)?,
+                }
+            }
         })
     }
 }
@@ -279,6 +293,24 @@ impl ProjectCollectionSnapshotSource for EmptyProjectCollection {
     fn snapshot(&self) -> Result<ProjectCollectionSnapshot, ProtocolError> {
         Ok(ProjectCollectionSnapshot {
             projects: Vec::new(),
+        })
+    }
+}
+
+#[derive(Debug)]
+struct EmptyWorktreeRepositories;
+
+impl WorktreeRepositorySnapshotSource for EmptyWorktreeRepositories {
+    fn snapshot(
+        &self,
+        _repository_id: &openaide_app_server_protocol::ids::WorktreeRepositoryId,
+    ) -> Result<openaide_app_server_protocol::worktree::WorktreeRepositorySnapshot, ProtocolError>
+    {
+        Err(ProtocolError {
+            code: ProtocolErrorCode::NotFound,
+            message: "Worktree Repository is unavailable".to_string(),
+            recoverable: true,
+            target: None,
         })
     }
 }
@@ -355,6 +387,8 @@ fn unavailable_task_snapshot(task_id: TaskId) -> TaskSnapshot {
             unread: false,
             attention: None,
             has_messages: false,
+            worktree_id: None,
+            workspace_available: false,
         },
         active_turn_started_at: None,
         lifecycle: TaskLifecycle::Visible,

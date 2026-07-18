@@ -137,10 +137,18 @@ body[data-shell="web"] .task-list {
   height: 24px;
   margin-bottom: 4px;
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 2px;
 }
+
+.project-task-group-actions { position: relative; }
+.project-task-group-actions > button { width: 24px; height: 24px; display: grid; place-items: center; border: 0; border-radius: var(--oa-radius-sm); background: transparent; color: var(--oa-muted); }
+.project-task-group-actions > button:hover,
+.project-task-group-actions > button[aria-expanded="true"] { background: var(--oa-raised); color: var(--oa-text); }
+.project-task-group-menu { min-width: 164px; position: absolute; z-index: 50; top: calc(100% + 3px); right: 0; border: 1px solid var(--oa-border-subtle); border-radius: var(--oa-radius-md); background: var(--oa-panel); box-shadow: 0 9px 24px color-mix(in oklch, var(--oa-text) 16%, transparent); padding: 4px; }
+.project-task-group-menu button { width: 100%; min-height: 30px; display: flex; align-items: center; gap: 7px; border: 0; border-radius: var(--oa-radius-sm); background: transparent; color: var(--oa-text); padding: 5px 7px; text-align: left; }
+.project-task-group-menu button:hover { background: var(--oa-raised); }
 
 .project-task-group-toggle {
   height: 24px;

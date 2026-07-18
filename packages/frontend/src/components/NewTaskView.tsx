@@ -1,4 +1,4 @@
-import { Check, FolderOpen } from "lucide-react";
+import { Check, FolderOpen, FolderRoot, GitBranch } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { AppPreferencesRecord } from "@openaide/app-shell-contracts";
 import {
@@ -19,14 +19,17 @@ import type { TaskFileBrowserCallbacks, WorkspaceBrowserCallbacks } from "./appC
 import { NewWorkspacePicker } from "./NewWorkspacePicker";
 import { NewTaskStartingView } from "./NewTaskStartingView";
 import { newTaskStatusLabel } from "./taskSurfaceHelpers";
+import { TaskWorkspacePicker } from "./TaskWorkspacePicker";
 
-type NewTaskContextMenu = "project" | "agent";
+type NewTaskContextMenu = "project" | "workspace" | "agent";
 export type ProjectContextMode = "fixed" | "selectable";
 
 export type NewTaskViewState = {
   newTask: NewTaskState;
   preparedTaskInput?: TaskComposerInput;
   projects: AppState["projects"];
+  tasks: AppState["tasks"];
+  worktreeRepositories: AppState["worktreeRepositories"];
   snapshot?: AppState["snapshot"];
   workspaceRootsLoaded: boolean;
 };
@@ -38,6 +41,16 @@ export type NewTaskViewIntents = {
   selectIsolation: (isolation: ComposerSelection["isolation"]) => void;
   selectProject: (project: ProjectOption) => void;
   selectWorkspace: (workspace: { path: string; label: string; projectId: string }) => void;
+  selectWorktree: (worktree: { worktreeId?: string; label: string; path: string }) => void;
+  refreshWorktrees: (project: ProjectOption) => Promise<void>;
+  createWorktree: (project: ProjectOption, draft: { name: string; base: import("@openaide/app-server-client").WorktreeBaseSelection; branch?: string }, onProgress?: (operation: import("@openaide/app-server-client").WorktreeOperationSnapshot) => void) => Promise<import("@openaide/app-server-client").WorktreeSummary>;
+  recreateWorktree: (project: ProjectOption, worktreeId: string, draft: { base: import("@openaide/app-server-client").WorktreeBaseSelection; branch?: string }, onProgress?: (operation: import("@openaide/app-server-client").WorktreeOperationSnapshot) => void) => Promise<import("@openaide/app-server-client").WorktreeSummary>;
+  removeWorktree: (repositoryId: string, worktreeId: string) => Promise<void>;
+  removalPreflight: (repositoryId: string, worktreeId: string) => Promise<import("@openaide/app-server-client").WorktreeRemovalPreflight>;
+  renameWorktree: (repositoryId: string, worktreeId: string, name: string) => Promise<void>;
+  openFolder?: (repositoryId: string, worktreeId: string) => void;
+  loadProjectTasks?: (projectId: string) => Promise<import("@openaide/app-shell-contracts").TaskSummary[]>;
+  openTask: (taskId: string) => void;
 };
 
 export function NewTaskView({
@@ -76,6 +89,17 @@ export function NewTaskView({
   const selectedAgent = agentChoices.find((agent) => agent.id === state.newTask.selection.agentId);
   const projectChoices = state.projects;
   const selectedProject = projectChoices.find((project) => project.projectId === state.newTask.selection.projectId);
+  const selectedRepository = selectedProject?.worktreeRepositoryId
+    ? state.worktreeRepositories[selectedProject.worktreeRepositoryId]
+    : undefined;
+  const selectedWorktree = selectedRepository?.worktrees.find((worktree) => worktree.worktreeId === state.newTask.selection.worktreeId);
+  const worktreeSelected = Boolean(state.newTask.selection.worktreeId);
+  const worktreeLoading = worktreeSelected && !selectedRepository;
+  const worktreeUnavailable = Boolean(worktreeSelected && selectedRepository
+    && (!selectedWorktree || selectedWorktree.availability === "unavailable"));
+  const taskWorkspaceLabel = worktreeSelected
+    ? selectedWorktree?.name ?? state.newTask.selection.workspaceLabel ?? "Workspace unavailable"
+    : "Project root";
   const enteredWorkspacePath = workspacePath.trim();
   const preparedTaskId = state.snapshot && !state.snapshot.task.has_messages ? state.snapshot.task.task_id : undefined;
   const preparedConfigOptions = preparedTaskId ? state.snapshot?.agent_config : undefined;
@@ -99,6 +123,7 @@ export function NewTaskView({
   const projectSelectorLabel = selectedProject?.label
     ?? (state.newTask.selection.projectId ? state.newTask.selection.workspaceLabel : loadingProjects ? "Loading" : "Choose workspace");
   const needsWorkspace = state.workspaceRootsLoaded && state.projects.length === 0 && state.newTask.selection.workspaceRoot.trim().length === 0;
+  const projectUnavailable = selectedProject?.available === false;
   const waitStatus = newTaskStatusLabel({
     agentLabel: state.newTask.selection.agentLabel,
     configOptionsError: composerConfigOptionsError,
@@ -121,8 +146,13 @@ export function NewTaskView({
       ? "This Agent does not accept images."
       : "Attached context is not ready to send.",
     connectionStatus: loadingProjects ? "connecting" : "ready",
-    contextPlaceholder: waitStatus ?? "Preparing task.",
-    contextReady: !needsProject && !needsWorkspace && !loadingProjects && !composerConfigOptionsError,
+    contextPlaceholder: projectUnavailable
+      ? "Project folder unavailable."
+      : worktreeUnavailable
+        ? "Workspace unavailable. Choose another workspace."
+        : worktreeLoading ? "Loading workspace." : waitStatus ?? "Preparing task.",
+    contextReady: !needsProject && !needsWorkspace && !projectUnavailable && !worktreeUnavailable
+      && !worktreeLoading && !loadingProjects && !composerConfigOptionsError,
     readyPlaceholder: "Describe the task.",
     sendCapability: preparedTaskId ? state.snapshot?.send_capability : undefined,
     submitPendingLabel: "Task starting",
@@ -130,7 +160,8 @@ export function NewTaskView({
   });
   const canSubmit = composerCanSubmit(availability, composerPrompt, composerAttachments.length);
   const composerFocusKey = `${focusRequestKey ?? 0}:${canSubmit ? "ready" : "waiting"}`;
-  const composerFileBrowser = needsProject || needsWorkspace || loadingProjects ? undefined : fileBrowser;
+  const composerFileBrowser = needsProject || needsWorkspace || projectUnavailable
+    || worktreeUnavailable || worktreeLoading || loadingProjects ? undefined : fileBrowser;
 
   const submit = (prompt: string) => {
     if (!canSubmit) return;
@@ -283,6 +314,26 @@ export function NewTaskView({
               </Popover>
             ) : null}
           </div> : null}
+          {selectedProject?.worktreeRepositoryId ? <div className={`new-task-context-anchor new-task-context-anchor-workspace ${openContextMenu === "workspace" ? "context-menu-open" : ""}`}>
+            <Selector
+              disabled={state.newTask.submitting}
+              icon={state.newTask.selection.worktreeId ? <GitBranch size={12} /> : <FolderRoot size={12} />}
+              label={taskWorkspaceLabel}
+              locked={false}
+              menuOpen={openContextMenu === "workspace"}
+              onClick={() => toggleContextMenu("workspace")}
+            />
+            {openContextMenu === "workspace" ? (
+              <TaskWorkspacePicker
+                intents={intents}
+                onClose={() => setOpenContextMenu(undefined)}
+                project={selectedProject}
+                repository={selectedRepository}
+                selectedWorktreeId={state.newTask.selection.worktreeId}
+                tasks={state.tasks}
+              />
+            ) : null}
+          </div> : null}
           <div className={`new-task-context-anchor new-task-context-anchor-agent ${openContextMenu === "agent" ? "context-menu-open" : ""}`}>
             <Selector
               disabled={state.newTask.submitting}
@@ -336,6 +387,8 @@ export function NewTaskView({
         ) : null}
         {!fixedProjectContext && needsProject ? <p className="inline-hint">{loadingProjects ? "Loading workspaces." : "Choose or enter a workspace to start a task."}</p> : null}
         {!fixedProjectContext && needsWorkspace ? <p className="inline-hint">Enter a workspace path to start a task.</p> : null}
+        {projectUnavailable ? <p className="inline-hint error">This Project folder is unavailable. Restore it before starting a task.</p> : null}
+        {worktreeUnavailable ? <p className="inline-hint error">Workspace unavailable. Choose another workspace to keep this draft.</p> : null}
         {composerConfigOptionsError ? <p className="inline-error">{composerConfigOptionsError}</p> : null}
         {state.newTask.error ? <p className="inline-error">{state.newTask.error}</p> : null}
       </div>

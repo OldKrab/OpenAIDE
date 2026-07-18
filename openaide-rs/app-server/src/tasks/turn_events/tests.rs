@@ -1532,6 +1532,8 @@ fn running_task(task_id: &str) -> TaskRecord {
         agent_id: "codex".to_string(),
         isolation: IsolationKind::Local,
         workspace_root: "/tmp/workspace".to_string(),
+        project_root: None,
+        worktree_id: None,
         lifecycle: crate::storage::records::TaskLifecycle::Visible,
         agent_session_id: Some("session_1".to_string()),
         active_turn_id: Some("turn_1".to_string()),

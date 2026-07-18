@@ -258,6 +258,8 @@ fn task_summary() -> TaskSummary {
         agent_name: "Codex".to_string(),
         isolation: IsolationKind::Local,
         workspace_root: "/workspace/app".to_string(),
+        project_root: None,
+        worktree_id: None,
     }
 }
 

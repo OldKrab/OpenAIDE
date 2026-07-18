@@ -79,6 +79,11 @@ describe("task list row styles", () => {
     expect(appCss).not.toMatch(/\.task-row\s*{[^}]*overflow:\s*hidden;/);
   });
 
+  it("exposes Task details in the row menu only on mobile", () => {
+    expect(appCss).toMatch(/button\.task-row-mobile-details-action\s*{\s*display:\s*none;/);
+    expect(appCss).toMatch(/@media \(max-width:\s*760px\)\s*{[\s\S]*button\.task-row-mobile-details-action\s*{\s*display:\s*flex;/);
+  });
+
   it("lets agent markdown use the full readable chat lane", () => {
     expect(appCss).toMatch(/\.chat-agent\s*{[^}]*width:\s*100%;[^}]*max-width:\s*100%;[^}]*min-width:\s*0;[^}]*font-family:\s*var\(--oa-chat-font\);[^}]*font-size:\s*15px;[^}]*line-height:\s*1\.5;/);
     expect(appCss).toMatch(/\.chat-agent a\s*{\s*color:\s*var\(--oa-focus\);/);
@@ -313,6 +318,13 @@ describe("task list row styles", () => {
     expect(appCss).toMatch(/\.new-task-context-controls \.composer-pill\[aria-expanded="true"\]\s*{[^}]*background:\s*color-mix\(in oklch, var\(--oa-text\) 9%, transparent\);[^}]*color:\s*var\(--oa-text\);/);
   });
 
+  it("keeps all mobile task context labels on one row while workspace absorbs overflow", () => {
+    expect(appCss).toMatch(/@media \(max-width:\s*430px\)[\s\S]*?\.new-task-context-controls\s*{[^}]*grid-template-columns:\s*fit-content\(36%\) minmax\(0,\s*1fr\) max-content;[^}]*align-items:\s*center;/);
+    expect(appCss).toMatch(/\.new-task-context-anchor-workspace \.composer-pill\s*{[^}]*width:\s*100%;/);
+    expect(appCss).not.toMatch(/\.new-task-agent-selector \.composer-pill-label,[^{]+\.new-task-agent-selector > svg:last-child\s*{[^}]*display:\s*none;/);
+    expect(appCss).not.toMatch(/grid-template-areas:\s*\n\s*"project agent"\s*\n\s*"workspace workspace"/);
+  });
+
   it("gives project and agent menus enough room for readable option details", () => {
     expect(appCss).toMatch(/\.new-task-context-menu\s*{[^}]*width:\s*min\(320px,\s*calc\(100vw - 32px\)\);[^}]*border-radius:\s*10px;[^}]*box-shadow:\s*0 12px 30px color-mix\(in oklch, var\(--oa-text\) 12%, transparent\);/);
     expect(appCss).toMatch(/\.new-task-context-anchor-project \.new-task-context-menu\s*{[^}]*width:\s*min\(360px,\s*calc\(100vw - 32px\)\);/);
@@ -452,7 +464,7 @@ describe("task list row styles", () => {
     expect(appCss).toMatch(/body\[data-shell="web"\] \.web-main-surface \.task-surface:not\(\.task-loading\)\s*{\s*grid-template-rows:\s*minmax\(0,\s*1fr\);/);
     expect(appCss).toMatch(/body\[data-shell="web"\] \.chat-column\s*{[^}]*height:\s*100%;[^}]*grid-template-rows:\s*minmax\(0,\s*1fr\) auto;/);
     expect(appCss).toMatch(/body\[data-shell="web"\] \.sidebar-search input\s*{[^}]*min-height:\s*44px;[^}]*font-size:\s*16px;/);
-    expect(appCss).toMatch(/body\[data-shell="web"\] \.project-task-group-header\s*{[^}]*min-height:\s*44px;[^}]*height:\s*auto;[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);/);
+    expect(appCss).toMatch(/body\[data-shell="web"\] \.project-task-group-header\s*{[^}]*min-height:\s*44px;[^}]*height:\s*auto;[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\) auto;/);
     expect(appCss).toMatch(/body\[data-shell="web"\] \.project-task-group-toggle\s*{[^}]*min-height:\s*44px;[^}]*height:\s*44px;/);
     expect(appCss).toMatch(/body\[data-shell="web"\] \.composer-popover button\s*{[^}]*min-height:\s*44px;/);
     expect(appCss).toMatch(/body\[data-shell="web"\] \.settings-header button\s*{[^}]*min-height:\s*44px;/);

@@ -5,6 +5,7 @@ import type { NativeSessionsState } from "../state/store";
 import { Sidebar } from "./Sidebar";
 import { SidebarNativeSessionRow } from "./SidebarNativeSessionRow";
 import { SidebarTaskRow } from "./SidebarTaskRow";
+import { SidebarTaskPreviewProvider } from "./SidebarTaskPreview";
 import { sidebarViewModel } from "./sidebarViewModel";
 
 beforeEach(() => {
@@ -79,6 +80,29 @@ describe("SidebarTaskRow", () => {
     expect(tree.root.findByProps({ className: "task-agent-icon" }).props["aria-label"]).toBe("Agent: OpenCode");
   });
 
+  it("uses a worktree marker without adding a second task line", () => {
+    const tree = render(
+      <SidebarTaskRow
+        onArchiveTask={vi.fn()}
+        onOpenTask={vi.fn()}
+        onRestoreTask={vi.fn()}
+        showArchived={false}
+        task={task({
+          worktree_id: "worktree_1",
+          worktree_name: "Sidebar scrolling",
+          git_ref: "fix/sidebar-scroll",
+        })}
+      />,
+    );
+
+    expect(tree.root.findByProps({ className: "task-agent-icon" }).props["aria-label"])
+      .toBe("Agent: Codex");
+    expect(tree.root.findByProps({ className: "task-worktree-marker" }).props["aria-label"])
+      .toBe("Worktree: Sidebar scrolling");
+    expect(tree.root.findAllByProps({ className: "task-title" })).toHaveLength(1);
+    expect(tree.root.findAllByProps({ className: "task-subtitle" })).toHaveLength(0);
+  });
+
   it("renders live, waiting, failed, unread, and age states in one trailing slot", () => {
     const renderState = (status: TaskSummary["status"], unread = false) => render(
       <SidebarTaskRow
@@ -113,7 +137,7 @@ describe("SidebarTaskRow", () => {
     expect(read.root.findAllByProps({ className: "task-meta-age" })).toHaveLength(1);
   });
 
-  it("opens selected tasks and exposes archive through the row actions menu", () => {
+  it("opens selected tasks and exposes Archive beside the mobile Task details action", () => {
     const onOpenTask = vi.fn();
     const onArchiveTask = vi.fn();
     const tree = render(
@@ -133,10 +157,39 @@ describe("SidebarTaskRow", () => {
 
     act(() => buttons[0].props.onClick());
     act(() => tree.root.findByProps({ "aria-label": "Task actions for Task" }).props.onClick());
-    act(() => tree.root.findByProps({ role: "menuitem" }).props.onClick());
+    const menuItems = tree.root.findAllByProps({ role: "menuitem" });
+    expect(menuItems).toHaveLength(2);
+    expect(menuItems[0].props.className).toBe("task-row-mobile-details-action");
+    expect(menuItems[1].children).toContain("Archive task");
+    act(() => menuItems[1].props.onClick());
 
     expect(onOpenTask).toHaveBeenCalledWith("task_1");
     expect(onArchiveTask).toHaveBeenCalledWith("task_1");
+  });
+
+  it("opens Task details through the mobile-only row action", () => {
+    const tree = render(
+      <SidebarTaskRow
+        onArchiveTask={vi.fn()}
+        onOpenTask={vi.fn()}
+        onRestoreTask={vi.fn()}
+        showArchived={false}
+        task={task({
+          project_label: "OpenAIDE",
+          worktree_id: "worktree_1",
+          worktree_name: "Sidebar scrolling",
+          git_ref: "fix/sidebar-scroll",
+        })}
+      />,
+    );
+
+    act(() => tree.root.findByProps({ "aria-label": "Task actions for Task" }).props.onClick());
+    act(() => tree.root.findByProps({ className: "task-row-mobile-details-action" }).props.onClick());
+
+    const details = tree.root.findByProps({ className: "task-row-details" });
+    const detailRows = details.findAllByType("span");
+    expect(detailRows.some((row) => row.children.includes("OpenAIDE"))).toBe(true);
+    expect(detailRows.some((row) => row.children.includes("Sidebar scrolling"))).toBe(true);
   });
 
   it("dismisses the task actions menu on outside click and Escape", () => {
@@ -187,7 +240,7 @@ describe("SidebarTaskRow", () => {
     );
 
     act(() => tree.root.findByProps({ "aria-label": "Task actions for Archived task" }).props.onClick());
-    act(() => tree.root.findByProps({ role: "menuitem" }).props.onClick());
+    act(() => tree.root.findAllByProps({ role: "menuitem" })[1].props.onClick());
 
     expect(onRestoreTask).toHaveBeenCalledWith("task_2");
   });
@@ -205,14 +258,14 @@ describe("SidebarTaskRow", () => {
 
     expect(tree.root.findByProps({ className: "task-title" }).children.join(""))
       .toBe("QA reload recovery 1782881988");
-    expect(tree.root.findByProps({ className: "task-title" }).props.title).toBe("QA reload recovery 1782881988");
+    expect(tree.root.findByProps({ className: "task-title" }).props.title).toBeUndefined();
     expect(tree.root.findByProps({ className: "task-meta-age" }).props.title).toBe(
       "Last activity: 2026-05-22T00:00:00.000Z",
     );
     expect(tree.root.findAllByProps({ className: "task-meta-reference" })).toHaveLength(0);
   });
 
-  it("preserves the full task title as a hover tooltip", () => {
+  it("does not duplicate the rich preview with a native title tooltip", () => {
     const fullTitle = "A long task title that is trimmed by the sidebar width";
     const tree = render(
       <SidebarTaskRow
@@ -224,7 +277,7 @@ describe("SidebarTaskRow", () => {
       />,
     );
 
-    expect(tree.root.findByProps({ className: "task-title" }).props.title).toBe(fullTitle);
+    expect(tree.root.findByProps({ className: "task-title" }).props.title).toBeUndefined();
   });
 
   it("renders the full Agent title when it contains machine-looking text", () => {
@@ -240,7 +293,7 @@ describe("SidebarTaskRow", () => {
 
     expect(tree.root.findByProps({ className: "task-title" }).children.join(""))
       .toBe("QA multitab long 1782881214972: retry run");
-    expect(tree.root.findByProps({ className: "task-title" }).props.title).toBe("QA multitab long 1782881214972: retry run");
+    expect(tree.root.findByProps({ className: "task-title" }).props.title).toBeUndefined();
     expect(tree.root.findAllByProps({ className: "task-meta-reference" })).toHaveLength(0);
   });
 });
@@ -279,11 +332,66 @@ describe("SidebarNativeSessionRow", () => {
     expect(buttons[1].props.title).toBe("Open task");
     expect(tree.root.findByProps({ className: "task-agent-icon" }).props["aria-label"]).toBe("Agent: Codex");
     expect(tree.root.findByProps({ className: "task-meta-age" })).toBeDefined();
-    expect(tree.root.findByProps({ className: "task-title" }).props.title).toBe("Existing session");
+    expect(tree.root.findByProps({ className: "task-title" }).props.title).toBeUndefined();
 
     act(() => buttons[0].props.onClick());
 
     expect(onOpenNativeSession).toHaveBeenCalledWith(session);
+  });
+
+  it("shows the delayed rich preview for a Native Session that is not yet adopted", () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("window", {
+      innerHeight: 800,
+      innerWidth: 1200,
+      matchMedia: () => ({ matches: false }),
+    });
+    vi.stubGlobal("document", {
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    });
+    const rowNode = {
+      getBoundingClientRect: () => ({ bottom: 72, height: 32, left: 8, right: 296, top: 40, width: 288, x: 8, y: 40 }),
+    } as HTMLElement;
+    const onOpenNativeSession = vi.fn();
+    const session = nativeSession({ cwd: "/workspace/OpenAIDE", title: "Existing session" });
+    const tree = render(
+      <SidebarTaskPreviewProvider>
+        <SidebarNativeSessionRow
+          nativeSessionAgentId="codex"
+          nativeSessionAgentName="Codex"
+          onOpenNativeSession={onOpenNativeSession}
+          session={session}
+        />
+      </SidebarTaskPreviewProvider>,
+      { createNodeMock: (element) => (element.props as { className?: string }).className === "task-row external-session-row" ? rowNode : null },
+    );
+    const row = tree.root.findByProps({ className: "task-row external-session-row" });
+
+    act(() => row.props.onPointerEnter());
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+    });
+
+    const preview = tree.root.findByProps({ role: "dialog" });
+    expect(preview.findByType("header").findByType("strong").children.join("")).toBe("Existing session");
+    expect(preview.findAllByType("strong").map((item) => item.children.join(""))).toEqual(["Existing session", "/workspace/OpenAIDE"]);
+    expect(onOpenNativeSession).not.toHaveBeenCalled();
+
+    const helpTrigger = preview.findByProps({ "aria-label": "What loading from Codex means" });
+    expect(helpTrigger.children.join("")).toBe("From Codex");
+    expect(preview.findByProps({ className: "task-preview-source-action" }).children.join(""))
+      .toBe("· Open to load");
+    act(() => helpTrigger.props.onPointerEnter());
+    expect(preview.findByProps({ role: "tooltip" }).children.join(" ")).toContain(
+      "Opening it creates an OpenAIDE task and loads its message history.",
+    );
+
+    act(() => tree.root.findAllByProps({ "aria-label": "Open Existing session" })[0].props.onClick());
+    expect(tree.root.findAllByProps({ role: "dialog" })).toHaveLength(0);
+    expect(onOpenNativeSession).toHaveBeenCalledWith(session);
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
   });
 
   it("disables listed session actions while adoption is pending", () => {
@@ -1273,10 +1381,10 @@ function rowTitles(tree: ReturnType<typeof render>) {
   return taskRows(tree).map((row) => row.findByProps({ className: "task-title" }).children.join(""));
 }
 
-function render(element: React.ReactElement) {
+function render(element: React.ReactElement, options?: Parameters<typeof create>[1]) {
   let tree: ReturnType<typeof create> | undefined;
   act(() => {
-    tree = create(element);
+    tree = create(element, options);
   });
   return tree!;
 }

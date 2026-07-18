@@ -163,7 +163,7 @@
   border-radius: 999px;
   background: color-mix(in oklch, var(--oa-panel) 72%, transparent);
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, max-content));
+  grid-template-columns: repeat(3, minmax(0, max-content));
   justify-content: center;
   align-items: start;
   gap: 2px;

@@ -318,6 +318,16 @@ fn payload_matches_subscription(
                 ..
             } if updated_task_id == task_id && updated_artifact_id == artifact_id
         ),
+        SubscriptionScope::WorktreeRepository { repository_id } => {
+            matches!(payload, AppServerEventPayload::SnapshotReplaced { .. })
+                || matches!(
+                    payload,
+                    AppServerEventPayload::WorktreeRepositoryUpdated {
+                        repository_id: updated_repository_id,
+                        ..
+                    } if updated_repository_id == repository_id
+                )
+        }
     }
 }
 

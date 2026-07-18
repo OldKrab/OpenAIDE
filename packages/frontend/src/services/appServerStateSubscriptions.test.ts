@@ -21,14 +21,53 @@ describe("startAppServerStateSubscription", () => {
     subscription.observer().onSnapshot({
       kind: "projects",
       projects: {
-        projects: [{ projectId: "project_1" as never, label: "OpenAIDE" }],
+        projects: [{
+          projectId: "project_1" as never,
+          label: "OpenAIDE",
+          workspaceRoot: "/workspace/OpenAIDE",
+          available: true,
+          worktreeRepositoryId: "repository_1" as never,
+          projectWorktreeId: "worktree_root" as never,
+          worktreeError: null,
+        }],
       },
     });
 
     expect(dispatch).toHaveBeenCalledWith({
       type: "projects",
-      projects: [{ projectId: "project_1", label: "OpenAIDE" }],
+      projects: [{
+        projectId: "project_1",
+        label: "OpenAIDE",
+        workspaceRoot: "/workspace/OpenAIDE",
+        available: true,
+        worktreeRepositoryId: "repository_1",
+        projectWorktreeId: "worktree_root",
+        worktreeError: undefined,
+      }],
     });
+  });
+
+  it("maps a session-owned Worktree Repository baseline into Frontend state", () => {
+    const subscription = fakeSubscription();
+    const dispatch = vi.fn();
+    const repository = {
+      repositoryId: "repository_1",
+      revision: 3,
+      worktrees: [],
+    };
+
+    startAppServerStateSubscription({
+      backendConnection: subscription.connection,
+      context: { stateRootId: "root_1" as StateRootId },
+      dispatch,
+      scope: { kind: "worktreeRepository", repositoryId: "repository_1" as never },
+    });
+    subscription.observer().onSnapshot({
+      kind: "worktreeRepository",
+      repository,
+    } as never);
+
+    expect(dispatch).toHaveBeenCalledWith({ type: "worktreeRepository", repository });
   });
 
   it("remaps task navigation when session-owned Project metadata arrives", () => {

@@ -750,7 +750,7 @@ fn agent_custom_create_updates_live_registry_and_emits_agent_event() {
             "method": TASK_ACQUIRE,
             "params": {
                 "agentId": custom_agent_id,
-                "projectId": project_id_for_workspace("/workspace/a"),
+                "projectId": project_id_for_workspace("/tmp/openaide-stdio-workspace/a"),
                 "title": "Custom task"
             }
         })
@@ -1457,7 +1457,7 @@ fn task_create_persists_idle_task_without_prompt_after_initialize() {
             "id": "2",
             "method": TASK_ACQUIRE,
             "params": {
-                "projectId": project_id_for_workspace("/workspace/a"),
+                "projectId": project_id_for_workspace("/tmp/openaide-stdio-workspace/a"),
                 "agentId": "codex"
             }
         })
@@ -1527,7 +1527,7 @@ fn task_create_does_not_publish_private_new_task_to_project_subscribers() {
             "id": "2",
             "method": TASK_ACQUIRE,
             "params": {
-                "projectId": project_id_for_workspace("/workspace/a"),
+                "projectId": project_id_for_workspace("/tmp/openaide-stdio-workspace/a"),
                 "agentId": "codex"
             }
         })
@@ -1559,7 +1559,7 @@ fn task_adopt_native_session_loads_agent_session_after_initialize() {
             "id": "adopt",
             "method": TASK_ADOPT_NATIVE_SESSION,
             "params": {
-                "projectId": project_id_for_workspace("/workspace/a"),
+                "projectId": project_id_for_workspace("/tmp/openaide-stdio-workspace/a"),
                 "agentId": "codex",
                 "nativeSessionId": "native-session-1",
                 "title": "Imported native session"
@@ -1764,7 +1764,7 @@ fn task_update_notification_emits_focused_task_and_navigation_changes() {
                 tool_details: Vec::new(),
                 navigation: Some(
                     openaide_app_server_protocol::events::TaskNavigationChange::Upsert {
-                        task: navigation_task,
+                        task: Box::new(navigation_task),
                     },
                 ),
             },
@@ -2210,7 +2210,8 @@ fn task_set_archived_moves_task_between_navigation_lists() {
 
 #[test]
 fn task_discard_keeps_the_configured_project_after_its_last_task() {
-    let workspace_root = "/workspace/configured-project";
+    let workspace_root = "/tmp/openaide-stdio-workspace/configured-project";
+    std::fs::create_dir_all(workspace_root).unwrap();
     let temp = tempfile::TempDir::new().expect("temp dir");
     {
         let store = Store::open(temp.path().to_path_buf()).unwrap();
@@ -2247,6 +2248,8 @@ fn task_discard_keeps_the_configured_project_after_its_last_task() {
         json!([{
             "projectId": project_id_for_workspace(workspace_root),
             "label": "configured-project",
+            "workspaceRoot": workspace_root,
+            "available": true,
         }])
     );
 
@@ -2396,6 +2399,8 @@ fn notifications_do_not_emit_responses() {
 }
 
 fn task_record(task_id: &str) -> TaskRecord {
+    let workspace_root = "/tmp/openaide-stdio-workspace/a";
+    std::fs::create_dir_all(workspace_root).unwrap();
     TaskRecord {
         task_id: task_id.to_string(),
         title: crate::storage::records::TaskTitle::new(
@@ -2413,7 +2418,9 @@ fn task_record(task_id: &str) -> TaskRecord {
         agent_id: "codex".to_string(),
         agent_name: "Codex".to_string(),
         isolation: IsolationKind::Local,
-        workspace_root: "/workspace/a".to_string(),
+        workspace_root: workspace_root.to_string(),
+        project_root: None,
+        worktree_id: None,
         lifecycle: crate::storage::records::TaskLifecycle::Visible,
         agent_session_id: None,
         active_turn_id: None,

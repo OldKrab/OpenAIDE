@@ -8,6 +8,7 @@ import type { AppController } from "./appController";
 import { useMobileNavigation } from "./useMobileNavigation";
 import { useInputModality } from "./useInputModality";
 import { useWebTaskNotifications } from "./useWebTaskNotifications";
+import { TaskWorkspacePicker } from "./TaskWorkspacePicker";
 
 export function AppSurfaces({ controller }: { controller: AppController }) {
   useInputModality();
@@ -16,6 +17,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
   const { appServerError, navigation, settings } = view;
   const [mobileLayoutActive, setMobileLayoutActive] = useState(() => isMobileWebViewport());
   const [newTaskFocusRequestKey, setNewTaskFocusRequestKey] = useState(0);
+  const [managedProjectId, setManagedProjectId] = useState<string>();
   const mobileNavigationButtonRef = useRef<HTMLButtonElement | null>(null);
   const webMainSurfaceRef = useRef<HTMLElement | null>(null);
   const usesProjectNavigation = bootstrap.surface !== "invalid" && bootstrap.shell.navigationMode === "project";
@@ -25,6 +27,23 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
   const mobileNavigationOpen = mobileNavigation.open;
   const taskSurfaceModel = primaryTaskSurfaceModel(controller);
   const { openingNativeSession, renderableTaskSnapshot } = taskSurfaceModel;
+  const managedProject = navigation.projects.find((project) => project.projectId === managedProjectId);
+  const managedRepository = managedProject?.worktreeRepositoryId
+    ? view.primaryTask.newTask.worktreeRepositories[managedProject.worktreeRepositoryId]
+    : undefined;
+  const managementSurface = managedProject ? (
+    <TaskWorkspacePicker
+      initialMode="manage"
+      intents={controller.intents.newTask}
+      managementOnly
+      onClose={() => setManagedProjectId(undefined)}
+      onUseForNewTask={() => callbacks.navigation.openNewTask(managedProject.projectId)}
+      project={managedProject}
+      repository={managedRepository}
+      selectedWorktreeId={view.primaryTask.newTask.newTask.selection.worktreeId}
+      tasks={view.primaryTask.newTask.tasks}
+    />
+  ) : null;
   const closeMobileNavigation = ({ restoreFocus = true }: { restoreFocus?: boolean } = {}) => {
     mobileNavigation.setOpen(false);
     if (restoreFocus && typeof window !== "undefined") {
@@ -109,6 +128,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           nativeSessionProjectId={navigation.newTaskSelection.projectId}
           onArchiveTask={callbacks.navigation.archiveTask}
           onLoadNativeSessions={callbacks.navigation.loadNativeSessions}
+          onManageWorktrees={setManagedProjectId}
           onNewTask={callbacks.navigation.openNewTask}
           onOpenNativeSession={callbacks.navigation.openNativeSession}
           onOpenTask={callbacks.navigation.openTask}
@@ -122,6 +142,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           taskListError={navigation.taskListError}
           tasks={visibleTasks}
         />
+        {managementSurface}
       </main>
     );
   }
@@ -248,6 +269,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
               controller={controller}
               focusRequestKey={newTaskFocusRequestKey}
               model={taskSurfaceModel}
+              workspaceRecovery={{ manageWorktrees: setManagedProjectId, openProjectSettings: callbacks.navigation.openSettings, reconnectProject: callbacks.navigation.openNewTask }}
             />
           )}
         </section>
@@ -264,6 +286,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           nativeSessionProjectId={navigation.newTaskSelection.projectId}
           onArchiveTask={callbacks.navigation.archiveTask}
           onLoadNativeSessions={callbacks.navigation.loadNativeSessions}
+          onManageWorktrees={(projectId) => { closeMobileNavigation({ restoreFocus: false }); setManagedProjectId(projectId); }}
           onNewTask={openNewTaskFromNavigation}
           onOpenNativeSession={closeAfter(callbacks.navigation.openNativeSession)}
           onOpenTask={closeAfter(callbacks.navigation.openTask)}
@@ -278,6 +301,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           taskListError={navigation.taskListError}
           tasks={visibleTasks}
         />
+        {managementSurface}
       </main>
     );
   }
@@ -288,7 +312,9 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         controller={controller}
         focusRequestKey={newTaskFocusRequestKey}
         model={taskSurfaceModel}
+        workspaceRecovery={{ manageWorktrees: setManagedProjectId, openProjectSettings: callbacks.navigation.openSettings, reconnectProject: callbacks.navigation.openNewTask }}
       />
+      {managementSurface}
     </main>
   );
 }

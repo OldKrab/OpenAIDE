@@ -2,12 +2,13 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::client::SettingsSection;
-use crate::ids::{EventCursor, ProjectId, TaskId};
+use crate::ids::{EventCursor, ProjectId, TaskId, WorktreeRepositoryId};
 use crate::snapshot::{
     AgentCollectionSnapshot, ProjectCollectionSnapshot, SettingsSnapshot, TaskNavigationSnapshot,
     TaskSnapshot,
 };
 use crate::task::ToolDetailSnapshot;
+use crate::worktree::WorktreeRepositorySnapshot;
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -59,6 +60,9 @@ pub enum SubscriptionScope {
         task_id: TaskId,
         artifact_id: String,
     },
+    WorktreeRepository {
+        repository_id: WorktreeRepositoryId,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
@@ -90,6 +94,9 @@ pub enum SubscriptionSnapshot {
         task_id: TaskId,
         artifact_id: String,
         details: ToolDetailSnapshot,
+    },
+    WorktreeRepository {
+        repository: WorktreeRepositorySnapshot,
     },
 }
 

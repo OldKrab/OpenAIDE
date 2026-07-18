@@ -9,9 +9,11 @@ use openaide_app_server_protocol::methods::{
     SETTINGS_GET_MCP_SERVERS, SETTINGS_GET_PREFERENCES, SETTINGS_GET_RUNTIME, SETTINGS_GET_SKILLS,
     SETTINGS_UPDATE_PREFERENCES, SETTINGS_UPDATE_RUNTIME, SHELL_RESOLVE_FILE_REVEAL,
     STATE_SUBSCRIBE, STATE_UNSUBSCRIBE, SUPPORT_RECOVER_STUCK_SESSIONS, TASK_ACQUIRE,
-    TASK_ADOPT_NATIVE_SESSION, TASK_CANCEL, TASK_CHAT_PAGE, TASK_LIST, TASK_MARK_READ, TASK_OPEN,
-    TASK_RELEASE, TASK_SEARCH_FILES, TASK_SEND, TASK_SET_ARCHIVED, TASK_SET_CONFIG_OPTION,
-    WORKSPACE_LIST_DIRECTORY, WORKSPACE_LIST_ROOTS,
+    TASK_ACQUIRE_IN_WORKTREE, TASK_ADOPT_NATIVE_SESSION, TASK_CANCEL, TASK_CHAT_PAGE, TASK_LIST,
+    TASK_MARK_READ, TASK_OPEN, TASK_RELEASE, TASK_SEARCH_FILES, TASK_SEND, TASK_SET_ARCHIVED,
+    TASK_SET_CONFIG_OPTION, WORKSPACE_LIST_DIRECTORY, WORKSPACE_LIST_ROOTS, WORKTREE_CREATE,
+    WORKTREE_LINKED_TASKS, WORKTREE_RECREATE, WORKTREE_REFRESH, WORKTREE_REMOVAL_PREFLIGHT,
+    WORKTREE_REMOVE, WORKTREE_RENAME, WORKTREE_RESOLVE_FOLDER,
 };
 
 use crate::client_lifecycle::{AppServerTime, ConnectionId};
@@ -145,6 +147,25 @@ impl RpcGateway {
                 self.handle_workspace_list_directory(connection_id, id, params, meta)
             }
             TASK_ACQUIRE => self.handle_task_acquire(connection_id, id, params, meta, now),
+            TASK_ACQUIRE_IN_WORKTREE => {
+                self.handle_task_acquire_in_worktree(connection_id, id, params, meta)
+            }
+            WORKTREE_REFRESH => self.handle_worktree_refresh(connection_id, id, params, meta, now),
+            WORKTREE_CREATE => self.handle_worktree_create(connection_id, id, params, meta, now),
+            WORKTREE_RECREATE => {
+                self.handle_worktree_recreate(connection_id, id, params, meta, now)
+            }
+            WORKTREE_REMOVAL_PREFLIGHT => {
+                self.handle_worktree_removal_preflight(connection_id, id, params, meta)
+            }
+            WORKTREE_REMOVE => self.handle_worktree_remove(connection_id, id, params, meta, now),
+            WORKTREE_RENAME => self.handle_worktree_rename(connection_id, id, params, meta, now),
+            WORKTREE_RESOLVE_FOLDER => {
+                self.handle_worktree_resolve_folder(connection_id, id, params, meta)
+            }
+            WORKTREE_LINKED_TASKS => {
+                self.handle_worktree_linked_tasks(connection_id, id, params, meta)
+            }
             TASK_SEARCH_FILES => self.handle_task_search_files(connection_id, id, params, meta),
             TASK_ADOPT_NATIVE_SESSION => {
                 self.handle_task_adopt_native_session(connection_id, id, params, meta, now)

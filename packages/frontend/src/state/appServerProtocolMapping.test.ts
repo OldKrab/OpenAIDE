@@ -942,6 +942,7 @@ function protocolSummary(overrides: Partial<ProtocolTaskSummary> = {}): Protocol
     lastActivity: "2026-06-27T12:00:00.000Z",
     unread: false,
     hasMessages: true,
+    workspaceAvailable: true,
     ...overrides,
   };
 }
@@ -949,6 +950,6 @@ function protocolSummary(overrides: Partial<ProtocolTaskSummary> = {}): Protocol
 function mappingContext() {
   return {
     agents: [{ agentId: "codex" as AgentId, label: "Codex", status: "connected" as const }],
-    projects: [{ projectId: "project-1" as ProjectId, label: "App" }],
+    projects: [{ projectId: "project-1" as ProjectId, label: "App", workspaceRoot: "/workspace/App", available: true }],
   };
 }

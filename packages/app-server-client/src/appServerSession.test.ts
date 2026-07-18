@@ -9,6 +9,7 @@ import type {
   InitializeResult,
   StateSubscribeResult,
   TaskId,
+  WorktreeRepositoryId,
 } from "./index";
 import { STATE_SUBSCRIBE, STATE_UNSUBSCRIBE } from "./generated/protocol";
 import { createAppServerSession } from "./appServerSession";
@@ -78,10 +79,41 @@ describe("AppServerSession", () => {
     await vi.waitFor(() => expect(requests).toEqual([STATE_SUBSCRIBE, STATE_UNSUBSCRIBE]));
     session.close();
   });
+
+  it("maintains an independent replica for each Worktree Repository", async () => {
+    const subscribedRepositories: string[] = [];
+    const raw = fakeConnection(async (method, params) => {
+      if (method !== STATE_SUBSCRIBE) throw new Error(`Unexpected request: ${method}`);
+      const scope = (params as { scope: { kind: "worktreeRepository"; repositoryId: WorktreeRepositoryId } }).scope;
+      subscribedRepositories.push(scope.repositoryId);
+      return {
+        cursor: `cursor_${subscribedRepositories.length}` as EventCursor,
+        scope,
+        snapshot: {
+          kind: "worktreeRepository",
+          repository: { repositoryId: scope.repositoryId, revision: 1, worktrees: [] },
+        },
+      } as unknown as StateSubscribeResult;
+    });
+    const session = createAppServerSession(raw.connection);
+    await session.initialize(initializeParams());
+
+    session.subscribeState(
+      { kind: "worktreeRepository", repositoryId: "repository_1" as WorktreeRepositoryId },
+      { onSnapshot: vi.fn() },
+    );
+    session.subscribeState(
+      { kind: "worktreeRepository", repositoryId: "repository_2" as WorktreeRepositoryId },
+      { onSnapshot: vi.fn() },
+    );
+
+    await vi.waitFor(() => expect(subscribedRepositories).toEqual(["repository_1", "repository_2"]));
+    session.close();
+  });
 });
 
 function fakeConnection(
-  requestImplementation: (method: string) => Promise<unknown>,
+  requestImplementation: (method: string, params: unknown) => Promise<unknown>,
 ) {
   const eventListeners = new Set<(event: AppServerEvent) => void>();
   const invalidationListeners = new Set<(event: BackendGenerationInvalidation) => void>();
@@ -169,6 +201,7 @@ function taskSummary() {
     lastActivity: "2026-07-18T00:00:00.000Z",
     unread: false,
     hasMessages: true,
+    workspaceAvailable: true,
   };
 }
 

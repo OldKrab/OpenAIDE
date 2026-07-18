@@ -155,6 +155,26 @@ describe("app controller mounted lifecycle", () => {
     expect(latestPublicController?.view.primaryTask.newTask.newTask.prompt).toBe("Describe the work");
   });
 
+  it("keeps the default backend connection stable across public controller renders", () => {
+    const initialize = vi.fn(() => new Promise<InitializeResult>(() => undefined));
+    const close = vi.fn();
+    backendConnection = { initialize, request: vi.fn(), close };
+    bootstrap = navigationBootstrap();
+    let mounted!: ReturnType<typeof create>;
+
+    act(() => {
+      mounted = create(<PublicControllerProbe />);
+    });
+    act(() => {
+      latestPublicController?.intents.newTask.changePrompt("Trigger a render");
+    });
+
+    expect(initialize).toHaveBeenCalledOnce();
+    expect(close).not.toHaveBeenCalled();
+    act(() => mounted.unmount());
+    expect(close).toHaveBeenCalledOnce();
+  });
+
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
@@ -221,7 +241,7 @@ describe("app controller mounted lifecycle", () => {
     initializedSnapshot.client.surface = { kind: "project", projectId: "project_1" as never };
     initializedSnapshot.newTaskDefaults.projectId = "project_1" as never;
     initializedSnapshot.projects = {
-      projects: [{ projectId: "project_1" as never, label: "OpenAIDE" }],
+      projects: [{ projectId: "project_1" as never, label: "OpenAIDE", workspaceRoot: "/workspace/OpenAIDE", available: true }],
     };
     backendConnection = {
       initialize: vi.fn(async () => ({ snapshot: initializedSnapshot })),
@@ -261,7 +281,7 @@ describe("app controller mounted lifecycle", () => {
     initializedSnapshot.client.surface = { kind: "project", projectId: "project_1" as never };
     initializedSnapshot.newTaskDefaults.projectId = "project_1" as never;
     initializedSnapshot.projects = {
-      projects: [{ projectId: "project_1" as never, label: "OpenAIDE" }],
+      projects: [{ projectId: "project_1" as never, label: "OpenAIDE", workspaceRoot: "/workspace/OpenAIDE", available: true }],
     };
     backendConnection = {
       initialize: vi.fn(async () => ({ snapshot: initializedSnapshot })),
@@ -2803,6 +2823,7 @@ function protocolTaskSummary(taskId: string, title: string, status: "idle" | "ru
     lastActivity: "2026-05-22T00:00:00.000Z",
     unread: false,
     hasMessages,
+    workspaceAvailable: true,
   };
 }
 

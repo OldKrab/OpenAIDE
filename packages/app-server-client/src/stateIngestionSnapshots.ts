@@ -36,6 +36,11 @@ export function updateSubscriptionSnapshot(
         && payload.artifactId === snapshot.artifactId
         ? changed({ ...snapshot, details: payload.details })
         : unchanged(snapshot);
+    case "worktreeRepository":
+      return payload.kind === "worktreeRepositoryUpdated"
+        && payload.repositoryId === snapshot.repository.repositoryId
+        ? changed({ kind: "worktreeRepository", repository: payload.repository })
+        : unchanged(snapshot);
   }
 }
 
@@ -60,6 +65,7 @@ function updateFromClientSnapshot(
         ? changed({ kind: "task", task: clientSnapshot.activeTask })
         : unchanged(snapshot);
     case "toolDetail":
+    case "worktreeRepository":
       return unchanged(snapshot);
   }
 }

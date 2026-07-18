@@ -146,6 +146,11 @@ function actionsFromSubscriptionSnapshot(
         projects: snapshot.projects.projects.map((project) => ({
           projectId: project.projectId,
           label: project.label,
+          workspaceRoot: project.workspaceRoot,
+          available: project.available,
+          worktreeRepositoryId: project.worktreeRepositoryId ?? undefined,
+          projectWorktreeId: project.projectWorktreeId ?? undefined,
+          worktreeError: project.worktreeError ?? undefined,
         })),
       }, ...remappedTaskNavigationActions(context)];
     case "agents":
@@ -170,6 +175,8 @@ function actionsFromSubscriptionSnapshot(
         artifactId: snapshot.artifactId,
         details: mapProtocolToolDetail(snapshot.details),
       }];
+    case "worktreeRepository":
+      return [{ type: "worktreeRepository", repository: snapshot.repository }];
   }
 }
 

@@ -136,8 +136,39 @@
     gap: 5px;
   }
 
+  .new-task-context-controls {
+    width: 100%;
+    grid-template-columns: fit-content(36%) minmax(0, 1fr) max-content;
+    justify-content: stretch;
+    align-items: center;
+  }
+
+  .new-task-context-anchor-workspace {
+    width: 100%;
+    justify-items: stretch;
+  }
+
   .new-task-context-controls .composer-pill {
-    max-width: min(180px, 42vw);
+    max-width: 100%;
+  }
+
+  .new-task-context-anchor-workspace .composer-pill {
+    width: 100%;
+  }
+
+  .new-task-context-controls:not(:has(.new-task-context-anchor-project)) {
+    grid-template-columns: minmax(0, 1fr) max-content;
+  }
+
+  .new-task-context-controls:not(:has(.new-task-context-anchor-workspace)) {
+    width: fit-content;
+    max-width: 100%;
+    grid-template-columns: fit-content(65vw) max-content;
+  }
+
+  .new-task-context-controls:not(:has(.new-task-context-anchor-project)):not(:has(.new-task-context-anchor-workspace)) {
+    width: fit-content;
+    grid-template-columns: max-content;
   }
 }
 

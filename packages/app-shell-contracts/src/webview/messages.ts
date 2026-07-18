@@ -50,6 +50,7 @@ export type WebviewToHostMessage =
   | { type: "surface.openArchive" }
   | { type: "surface.openSettings" }
   | { type: "surface.openTask"; payload: { task_id: string; title?: string } }
+  | { type: "worktree.openFolder"; payload: { repository_id: string; worktree_id: string } }
   | { type: "tool.openPath"; payload: { path: string; line?: number } };
 
 export type HostToWebviewMessage =

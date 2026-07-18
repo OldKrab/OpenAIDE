@@ -51,7 +51,17 @@ export const SHELL_RESOLVE_FILE_REVEAL = "shell/resolveFileReveal" as const;
 export const WORKSPACE_LIST_ROOTS = "workspace/listRoots" as const;
 export const WORKSPACE_LIST_DIRECTORY = "workspace/listDirectory" as const;
 
+export const WORKTREE_REFRESH = "worktree/refresh" as const;
+export const WORKTREE_CREATE = "worktree/create" as const;
+export const WORKTREE_RECREATE = "worktree/recreate" as const;
+export const WORKTREE_REMOVAL_PREFLIGHT = "worktree/removalPreflight" as const;
+export const WORKTREE_REMOVE = "worktree/remove" as const;
+export const WORKTREE_RENAME = "worktree/rename" as const;
+export const WORKTREE_RESOLVE_FOLDER = "worktree/resolveFolder" as const;
+export const WORKTREE_LINKED_TASKS = "worktree/linkedTasks" as const;
+
 export const TASK_ACQUIRE = "task/acquire" as const;
+export const TASK_ACQUIRE_IN_WORKTREE = "task/acquireInWorktree" as const;
 export const TASK_SEARCH_FILES = "task/searchFiles" as const;
 export const TASK_ADOPT_NATIVE_SESSION = "task/adoptNativeSession" as const;
 export const TASK_SEND = "task/send" as const;
@@ -110,6 +120,12 @@ export type TaskId = string & { readonly __openaideBrand: "TaskId" };
 export type TaskListCursor = string & { readonly __openaideBrand: "TaskListCursor" };
 
 export type TurnId = string & { readonly __openaideBrand: "TurnId" };
+
+export type WorktreeId = string & { readonly __openaideBrand: "WorktreeId" };
+
+export type WorktreeOperationId = string & { readonly __openaideBrand: "WorktreeOperationId" };
+
+export type WorktreeRepositoryId = string & { readonly __openaideBrand: "WorktreeRepositoryId" };
 
 export type ClientRequestEnvelope<P> = { method: string, params: P, meta?: RequestMeta, };
 
@@ -187,9 +203,9 @@ export type StateUnsubscribeParams = { scope: SubscriptionScope, };
 
 export type StateUnsubscribeResult = { scope: SubscriptionScope, };
 
-export type SubscriptionScope = { "kind": "projects" } | { "kind": "agents" } | { "kind": "settings", section?: SettingsSection | null, } | { "kind": "taskNavigation", projectId?: ProjectId | null, } | { "kind": "task", taskId: TaskId, } | { "kind": "toolDetail", taskId: TaskId, artifactId: string, };
+export type SubscriptionScope = { "kind": "projects" } | { "kind": "agents" } | { "kind": "settings", section?: SettingsSection | null, } | { "kind": "taskNavigation", projectId?: ProjectId | null, } | { "kind": "task", taskId: TaskId, } | { "kind": "toolDetail", taskId: TaskId, artifactId: string, } | { "kind": "worktreeRepository", repositoryId: WorktreeRepositoryId, };
 
-export type SubscriptionSnapshot = { "kind": "projects", projects: ProjectCollectionSnapshot, } | { "kind": "agents", agents: AgentCollectionSnapshot, } | { "kind": "settings", settings: SettingsSnapshot, } | { "kind": "taskNavigation", navigation: TaskNavigationSnapshot, } | { "kind": "task", task: TaskSnapshot, } | { "kind": "toolDetail", taskId: TaskId, artifactId: string, details: ToolDetailSnapshot, };
+export type SubscriptionSnapshot = { "kind": "projects", projects: ProjectCollectionSnapshot, } | { "kind": "agents", agents: AgentCollectionSnapshot, } | { "kind": "settings", settings: SettingsSnapshot, } | { "kind": "taskNavigation", navigation: TaskNavigationSnapshot, } | { "kind": "task", task: TaskSnapshot, } | { "kind": "toolDetail", taskId: TaskId, artifactId: string, details: ToolDetailSnapshot, } | { "kind": "worktreeRepository", repository: WorktreeRepositorySnapshot, };
 
 export type RuntimeDiagnosticsParams = Record<symbol, never>;
 
@@ -327,6 +343,68 @@ export type WorkspaceBrowserDirectory = { label: string, path: string, parentPat
 
 export type WorkspaceBrowserEntry = { label: string, path: string, };
 
+export type WorktreeRepositorySnapshot = { repositoryId: WorktreeRepositoryId, revision: number, worktrees: Array<WorktreeSummary>, bases?: Array<WorktreeBaseSnapshot>, operations?: Array<WorktreeOperationSnapshot>, };
+
+export type WorktreeSummary = { worktreeId: WorktreeId, name: string, path: string,
+/**
+ * Historical metadata retained for linked Task history after the worktree is removed.
+ */
+forgotten: boolean, ownership: WorktreeOwnership, isMain: boolean, head: WorktreeHead, availability: WorktreeAvailability, availabilityReason?: string | null, lockedReason?: string | null, prunableReason?: string | null, projectIds?: Array<ProjectId>, linkedTaskCount: number, runningTaskCount: number, lastUsedAt?: string | null, };
+
+export type WorktreeOwnership = "managed" | "external";
+
+export type WorktreeAvailability = "available" | "unavailable";
+
+export type WorktreeHead = { "kind": "branch", name: string, commit: string, } | { "kind": "detached", commit: string, };
+
+export type WorktreeBaseSnapshot = { "kind": "head", commit: string, label: string, } | { "kind": "localBranch", name: string, commit: string, };
+
+export type WorktreeBaseSelection = { "kind": "currentHead" } | { "kind": "localBranch", name: string, };
+
+export type WorktreeOperationKind = "create" | "recreate" | "remove" | "refresh";
+
+export type WorktreeOperationState = "queued" | "running" | "succeeded" | "failed";
+
+export type WorktreeOperationSnapshot = { operationId: WorktreeOperationId, kind: WorktreeOperationKind, state: WorktreeOperationState, worktreeId?: WorktreeId | null, stage?: string | null, completedFiles?: number | null, totalFiles?: number | null, completedBytes?: number | null, totalBytes?: number | null, error?: string | null, };
+
+export type WorktreeRefreshParams = { projectId: ProjectId, repositoryId: WorktreeRepositoryId, };
+
+export type WorktreeRefreshResult = { repository: WorktreeRepositorySnapshot, };
+
+export type WorktreeCreateParams = { projectId: ProjectId, repositoryId: WorktreeRepositoryId, name: string, base: WorktreeBaseSelection, branch?: string | null, };
+
+export type WorktreeCreateResult = { operationId: WorktreeOperationId, repository: WorktreeRepositorySnapshot, };
+
+export type WorktreeRecreateParams = { projectId: ProjectId, repositoryId: WorktreeRepositoryId, worktreeId: WorktreeId, base: WorktreeBaseSelection, branch?: string | null, };
+
+export type WorktreeRecreateResult = { operationId: WorktreeOperationId, repository: WorktreeRepositorySnapshot, };
+
+export type WorktreeRemovalPreflightParams = { repositoryId: WorktreeRepositoryId, worktreeId: WorktreeId, };
+
+export type WorktreeRemovalPreflightResult = { preflight: WorktreeRemovalPreflight, };
+
+export type WorktreeRemovalPreflight = { status: WorktreeRemovalStatus, blockers: Array<WorktreeRemovalBlocker>, ownership: WorktreeOwnership, path: string, ignoredFilesWillBeRemoved: boolean, };
+
+export type WorktreeRemovalStatus = "safe" | "blocked";
+
+export type WorktreeRemovalBlocker = "primaryWorktree" | "runningTasks" | "locked" | "unavailable" | "workingTreeChanges" | "detachedCommits" | "initializedSubmodules";
+
+export type WorktreeRemoveParams = { repositoryId: WorktreeRepositoryId, worktreeId: WorktreeId, };
+
+export type WorktreeRemoveResult = { operationId: WorktreeOperationId, repository: WorktreeRepositorySnapshot, };
+
+export type WorktreeRenameParams = { repositoryId: WorktreeRepositoryId, worktreeId: WorktreeId, name: string, };
+
+export type WorktreeRenameResult = { repository: WorktreeRepositorySnapshot, };
+
+export type WorktreeResolveFolderParams = { repositoryId: WorktreeRepositoryId, worktreeId: WorktreeId, };
+
+export type WorktreeResolveFolderResult = { path: string, };
+
+export type WorktreeLinkedTasksParams = { repositoryId: WorktreeRepositoryId, worktreeId: WorktreeId, };
+
+export type WorktreeLinkedTasksResult = { taskIds: Array<TaskId>, };
+
 export type AttachmentListRootsParams = { taskId: TaskId, };
 
 export type AttachmentListRootsResult = { roots: Array<FileBrowserRoot>, };
@@ -441,9 +519,17 @@ export type ShellResolveFileRevealParams = { originatingClientInstanceId: Client
 
 export type ShellResolveFileRevealResult = { path: string, label: string, };
 
-export type TaskAcquireParams = { projectId: ProjectId, agentId: AgentId, workspaceRoot?: string | null, configOptions?: { [key in string]: string }, };
+export type TaskAcquireParams = { projectId: ProjectId, agentId: AgentId,
+/**
+ * Legacy bootstrap fallback for Projects not yet present in the App Server catalog.
+ */
+workspaceRoot?: string | null, configOptions?: { [key in string]: string }, };
 
 export type TaskAcquireResult = { task: TaskSnapshot, };
+
+export type TaskAcquireInWorktreeParams = { projectId: ProjectId, agentId: AgentId, worktreeId: WorktreeId, configOptions?: { [key in string]: string }, };
+
+export type TaskAcquireInWorktreeResult = { task: TaskSnapshot, };
 
 export type TaskSearchFilesParams = { taskId: TaskId, query: string, };
 
@@ -521,7 +607,7 @@ subscription: SubscriptionScope, previousCursor: EventCursor, cursor: EventCurso
 
 export type EventScope = { "kind": "stateRoot", stateRootId: StateRootId, } | { "kind": "client", stateRootId: StateRootId, clientInstanceId: ClientInstanceId, } | { "kind": "task", stateRootId: StateRootId, taskId: TaskId, };
 
-export type AppServerEventPayload = { "kind": "snapshotReplaced", snapshot: ClientSnapshot, } | { "kind": "taskChanged", taskId: TaskId, revision: number, changes: TaskChanges, } | { "kind": "taskHistorySyncUpdated", taskId: TaskId, historySync: TaskHistorySyncSnapshot, } | { "kind": "taskNavigationChanged", change: TaskNavigationChange, } | { "kind": "projectCollectionUpdated", projects: ProjectCollectionSnapshot, } | { "kind": "taskRequestsUpdated", taskId: TaskId, requests: Array<PendingRequestSnapshot>, } | { "kind": "toolDetailUpdated", taskId: TaskId, artifactId: string, details: ToolDetailSnapshot, } | { "kind": "requestUpdated", request: PendingRequestSnapshot, } | { "kind": "agentCollectionUpdated", agents: AgentCollectionSnapshot, };
+export type AppServerEventPayload = { "kind": "snapshotReplaced", snapshot: ClientSnapshot, } | { "kind": "taskChanged", taskId: TaskId, revision: number, changes: TaskChanges, } | { "kind": "taskHistorySyncUpdated", taskId: TaskId, historySync: TaskHistorySyncSnapshot, } | { "kind": "taskNavigationChanged", change: TaskNavigationChange, } | { "kind": "projectCollectionUpdated", projects: ProjectCollectionSnapshot, } | { "kind": "taskRequestsUpdated", taskId: TaskId, requests: Array<PendingRequestSnapshot>, } | { "kind": "toolDetailUpdated", taskId: TaskId, artifactId: string, details: ToolDetailSnapshot, } | { "kind": "requestUpdated", request: PendingRequestSnapshot, } | { "kind": "agentCollectionUpdated", agents: AgentCollectionSnapshot, } | { "kind": "worktreeRepositoryUpdated", repositoryId: WorktreeRepositoryId, repository: WorktreeRepositorySnapshot, };
 
 export type TaskChanges = { task?: TaskSummary | null,
 /**
@@ -549,7 +635,7 @@ export type NewTaskDefaultsSnapshot = { projectId?: ProjectId | null, agentId?: 
 
 export type ProjectCollectionSnapshot = { projects: Array<ProjectSummary>, };
 
-export type ProjectSummary = { projectId: ProjectId, label: string, };
+export type ProjectSummary = { projectId: ProjectId, label: string, workspaceRoot: string, available: boolean, worktreeRepositoryId?: WorktreeRepositoryId | null, projectWorktreeId?: WorktreeId | null, worktreeError?: string | null, };
 
 export type AgentCollectionSnapshot = { agents: Array<AgentSummary>, };
 
@@ -561,7 +647,11 @@ export type AgentCapabilities = { resumeTasks?: boolean, deleteNativeSessions?: 
 
 export type TaskNavigationSnapshot = { tasks: Array<TaskSummary>, activeTaskId?: TaskId | null, };
 
-export type TaskSummary = { taskId: TaskId, projectId: ProjectId, agentId: AgentId, title: TaskTitle | null, status: TaskStatus, updatedAt: string, lastActivity: string, unread: boolean, attention?: TaskAttentionEvent | null, hasMessages: boolean, };
+export type TaskSummary = { taskId: TaskId, projectId: ProjectId, agentId: AgentId, title: TaskTitle | null, status: TaskStatus, updatedAt: string, lastActivity: string, unread: boolean, attention?: TaskAttentionEvent | null, hasMessages: boolean, worktreeId?: WorktreeId | null,
+/**
+ * Availability is independent of Task runtime status so history remains readable.
+ */
+workspaceAvailable: boolean, };
 
 export type TaskAttentionEvent = { eventId: string, reason: TaskAttentionReason, occurredAt: string, };
 
@@ -663,7 +753,7 @@ export type PendingRequestScope = { "kind": "client", clientInstanceId: ClientIn
 
 export type PendingRequestKind = "permission" | "question" | "secret" | "shellCapability";
 
-export type ProtocolMethod = typeof CLIENT_PROBE | typeof CLIENT_INITIALIZE | typeof CLIENT_CAPABILITIES_CHANGED | typeof CLIENT_HEARTBEAT | typeof PENDING_REQUEST_RESOLVE | typeof STATE_SUBSCRIBE | typeof STATE_UNSUBSCRIBE | typeof DIAGNOSTICS_GET_RUNTIME | typeof SUPPORT_RECOVER_STUCK_SESSIONS | typeof AGENT_PROBE | typeof AGENT_AUTHENTICATE | typeof AGENT_LIST_SESSIONS | typeof AGENT_CREATE_CUSTOM | typeof AGENT_UPDATE_CUSTOM_METADATA | typeof AGENT_REPLACE_CUSTOM | typeof AGENT_DELETE_CUSTOM | typeof AGENT_SET_ENABLED | typeof SETTINGS_GET_AGENT_DETAILS | typeof SETTINGS_GET_MCP_SERVERS | typeof SETTINGS_GET_SKILLS | typeof SETTINGS_GET_PREFERENCES | typeof SETTINGS_UPDATE_PREFERENCES | typeof SETTINGS_GET_RUNTIME | typeof SETTINGS_UPDATE_RUNTIME | typeof ATTACHMENT_LIST_ROOTS | typeof ATTACHMENT_LIST_DIRECTORY | typeof ATTACHMENT_CREATE_FILE_REFERENCE | typeof ATTACHMENT_CREATE_PASTED_IMAGE | typeof ATTACHMENT_CREATE_EMBEDDED_CANDIDATE | typeof ATTACHMENT_CONFIRM_EMBEDDED | typeof ATTACHMENT_REFRESH_HANDLES | typeof ATTACHMENT_RELEASE | typeof ATTACHMENT_REVEAL | typeof SHELL_RESOLVE_FILE_REVEAL | typeof WORKSPACE_LIST_ROOTS | typeof WORKSPACE_LIST_DIRECTORY | typeof TASK_ACQUIRE | typeof TASK_SEARCH_FILES | typeof TASK_ADOPT_NATIVE_SESSION | typeof TASK_SEND | typeof TASK_SET_CONFIG_OPTION | typeof TASK_CANCEL | typeof TASK_OPEN | typeof TASK_MARK_READ | typeof TASK_CHAT_PAGE | typeof TASK_LIST | typeof TASK_RELEASE | typeof TASK_SET_ARCHIVED;
+export type ProtocolMethod = typeof CLIENT_PROBE | typeof CLIENT_INITIALIZE | typeof CLIENT_CAPABILITIES_CHANGED | typeof CLIENT_HEARTBEAT | typeof PENDING_REQUEST_RESOLVE | typeof STATE_SUBSCRIBE | typeof STATE_UNSUBSCRIBE | typeof DIAGNOSTICS_GET_RUNTIME | typeof SUPPORT_RECOVER_STUCK_SESSIONS | typeof AGENT_PROBE | typeof AGENT_AUTHENTICATE | typeof AGENT_LIST_SESSIONS | typeof AGENT_CREATE_CUSTOM | typeof AGENT_UPDATE_CUSTOM_METADATA | typeof AGENT_REPLACE_CUSTOM | typeof AGENT_DELETE_CUSTOM | typeof AGENT_SET_ENABLED | typeof SETTINGS_GET_AGENT_DETAILS | typeof SETTINGS_GET_MCP_SERVERS | typeof SETTINGS_GET_SKILLS | typeof SETTINGS_GET_PREFERENCES | typeof SETTINGS_UPDATE_PREFERENCES | typeof SETTINGS_GET_RUNTIME | typeof SETTINGS_UPDATE_RUNTIME | typeof ATTACHMENT_LIST_ROOTS | typeof ATTACHMENT_LIST_DIRECTORY | typeof ATTACHMENT_CREATE_FILE_REFERENCE | typeof ATTACHMENT_CREATE_PASTED_IMAGE | typeof ATTACHMENT_CREATE_EMBEDDED_CANDIDATE | typeof ATTACHMENT_CONFIRM_EMBEDDED | typeof ATTACHMENT_REFRESH_HANDLES | typeof ATTACHMENT_RELEASE | typeof ATTACHMENT_REVEAL | typeof SHELL_RESOLVE_FILE_REVEAL | typeof WORKSPACE_LIST_ROOTS | typeof WORKSPACE_LIST_DIRECTORY | typeof WORKTREE_REFRESH | typeof WORKTREE_CREATE | typeof WORKTREE_RECREATE | typeof WORKTREE_REMOVAL_PREFLIGHT | typeof WORKTREE_REMOVE | typeof WORKTREE_RENAME | typeof WORKTREE_RESOLVE_FOLDER | typeof WORKTREE_LINKED_TASKS | typeof TASK_ACQUIRE | typeof TASK_ACQUIRE_IN_WORKTREE | typeof TASK_SEARCH_FILES | typeof TASK_ADOPT_NATIVE_SESSION | typeof TASK_SEND | typeof TASK_SET_CONFIG_OPTION | typeof TASK_CANCEL | typeof TASK_OPEN | typeof TASK_MARK_READ | typeof TASK_CHAT_PAGE | typeof TASK_LIST | typeof TASK_RELEASE | typeof TASK_SET_ARCHIVED;
 export type RequestParamsByMethod = {
   [CLIENT_PROBE]: ClientProbeParams;
   [CLIENT_INITIALIZE]: InitializeParams;
@@ -701,7 +791,16 @@ export type RequestParamsByMethod = {
   [SHELL_RESOLVE_FILE_REVEAL]: ShellResolveFileRevealParams;
   [WORKSPACE_LIST_ROOTS]: WorkspaceListRootsParams;
   [WORKSPACE_LIST_DIRECTORY]: WorkspaceListDirectoryParams;
+  [WORKTREE_REFRESH]: WorktreeRefreshParams;
+  [WORKTREE_CREATE]: WorktreeCreateParams;
+  [WORKTREE_RECREATE]: WorktreeRecreateParams;
+  [WORKTREE_REMOVAL_PREFLIGHT]: WorktreeRemovalPreflightParams;
+  [WORKTREE_REMOVE]: WorktreeRemoveParams;
+  [WORKTREE_RENAME]: WorktreeRenameParams;
+  [WORKTREE_RESOLVE_FOLDER]: WorktreeResolveFolderParams;
+  [WORKTREE_LINKED_TASKS]: WorktreeLinkedTasksParams;
   [TASK_ACQUIRE]: TaskAcquireParams;
+  [TASK_ACQUIRE_IN_WORKTREE]: TaskAcquireInWorktreeParams;
   [TASK_SEARCH_FILES]: TaskSearchFilesParams;
   [TASK_ADOPT_NATIVE_SESSION]: TaskAdoptNativeSessionParams;
   [TASK_SEND]: TaskSendParams;
@@ -752,7 +851,16 @@ export type ResponseResultByMethod = {
   [SHELL_RESOLVE_FILE_REVEAL]: ShellResolveFileRevealResult;
   [WORKSPACE_LIST_ROOTS]: WorkspaceListRootsResult;
   [WORKSPACE_LIST_DIRECTORY]: WorkspaceListDirectoryResult;
+  [WORKTREE_REFRESH]: WorktreeRefreshResult;
+  [WORKTREE_CREATE]: WorktreeCreateResult;
+  [WORKTREE_RECREATE]: WorktreeRecreateResult;
+  [WORKTREE_REMOVAL_PREFLIGHT]: WorktreeRemovalPreflightResult;
+  [WORKTREE_REMOVE]: WorktreeRemoveResult;
+  [WORKTREE_RENAME]: WorktreeRenameResult;
+  [WORKTREE_RESOLVE_FOLDER]: WorktreeResolveFolderResult;
+  [WORKTREE_LINKED_TASKS]: WorktreeLinkedTasksResult;
   [TASK_ACQUIRE]: TaskAcquireResult;
+  [TASK_ACQUIRE_IN_WORKTREE]: TaskAcquireInWorktreeResult;
   [TASK_SEARCH_FILES]: TaskSearchFilesResult;
   [TASK_ADOPT_NATIVE_SESSION]: TaskAdoptNativeSessionResult;
   [TASK_SEND]: TaskSendResult;

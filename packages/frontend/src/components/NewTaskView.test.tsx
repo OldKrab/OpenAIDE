@@ -40,12 +40,23 @@ function NewTaskView({ dispatch, onRemoveAttachment, state, ...props }: TestNewT
         selectIsolation: (isolation) => dispatch({ type: "newTask:isolation", isolation }),
         selectProject: (project) => dispatch({ type: "newTask:project", project }),
         selectWorkspace: (workspace) => dispatch({ type: "newTask:workspace", workspace }),
+        selectWorktree: vi.fn(),
+        refreshWorktrees: vi.fn(),
+        createWorktree: vi.fn(),
+        recreateWorktree: vi.fn(),
+        removeWorktree: vi.fn(),
+        removalPreflight: vi.fn(),
+        renameWorktree: vi.fn(),
+        openFolder: vi.fn(),
+        openTask: vi.fn(),
       }}
       onRemoveAttachment={onRemoveAttachment ?? vi.fn()}
       state={{
         newTask: state.newTask,
         preparedTaskInput: preparedTaskId ? state.taskInputs[preparedTaskId] : undefined,
         projects: state.projects,
+        tasks: state.tasks,
+        worktreeRepositories: state.worktreeRepositories,
         snapshot: state.snapshot,
         workspaceRootsLoaded: state.workspaceRootsLoaded,
       }}
@@ -344,6 +355,50 @@ describe("NewTaskView", () => {
     act(() => send.props.onClick());
 
     expect(onSubmitTask).not.toHaveBeenCalled();
+  });
+
+  it("preserves the draft but blocks submit when the selected worktree disappears", () => {
+    const state = createInitialState();
+    const project = {
+      projectId: "project_1",
+      label: "OpenAIDE",
+      workspaceRoot: "/workspace/OpenAIDE",
+      available: true,
+      worktreeRepositoryId: "repository_1",
+      projectWorktreeId: "worktree_root",
+    };
+    state.projects = [project];
+    state.newTask.selection = {
+      ...selectionWithProject(state.newTask.selection, project),
+      worktreeId: "worktree_removed",
+      workspaceLabel: "Sidebar scrolling",
+      workspaceRoot: "/workspace/OpenAIDE-sidebar",
+      isolation: "git_worktree",
+    };
+    state.worktreeRepositories.repository_1 = {
+      repositoryId: "repository_1" as never,
+      revision: 2,
+      bases: [],
+      worktrees: [],
+    };
+    state.newTask.prompt = "Keep this draft";
+    state.newTask.configOptions = { agent_id: "codex", options: [], status: "ready" };
+    const onSubmitTask = vi.fn();
+
+    const tree = render(
+      <NewTaskView
+        agents={[]}
+        dispatch={vi.fn()}
+        onSelectConfigOption={vi.fn()}
+        onSubmitTask={onSubmitTask}
+        state={state}
+        submitShortcut="mod_enter"
+      />,
+    );
+
+    expect(textContent(tree)).toContain("Workspace unavailable");
+    expect(editorHtml(tree)).toBe("Keep this draft");
+    expect(tree.root.findByProps({ "aria-label": "Send message" }).props.disabled).toBe(true);
   });
 
   it("blocks a typed task while authoritative Agent preparation is loading", () => {

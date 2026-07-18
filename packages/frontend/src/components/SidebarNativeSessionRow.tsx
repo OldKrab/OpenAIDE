@@ -1,8 +1,10 @@
 import { ExternalLink } from "lucide-react";
+import { useRef } from "react";
 import type { AgentListedSession } from "@openaide/app-shell-contracts";
 import { AgentIcon } from "./AgentIcon";
 import { SidebarRowActionSlot } from "./SidebarRowParts";
 import { nativeSessionTitle, relativeTime } from "./taskSurfaceHelpers";
+import { useSidebarTaskPreview } from "./SidebarTaskPreview";
 
 export function SidebarNativeSessionRow({
   nativeSessionAgentId,
@@ -17,18 +19,31 @@ export function SidebarNativeSessionRow({
   onOpenNativeSession: (session: AgentListedSession) => void;
   session: AgentListedSession;
 }) {
+  const rowRef = useRef<HTMLDivElement>(null);
+  const preview = useSidebarTaskPreview();
   const adopting = nativeSessionsAdoptingSessionId === session.session_id;
   const disabled = nativeSessionsAdoptingSessionId !== undefined || adopting;
   const title = nativeSessionTitle(session);
   const timestamp = session.last_activity ?? session.updated_at;
   const age = timestamp ? relativeTime(timestamp) : "";
+  const openSession = () => {
+    preview?.dismiss();
+    onOpenNativeSession(session);
+  };
 
   return (
-    <div className="task-row external-session-row" role="listitem">
+    <div
+      className="task-row external-session-row"
+      onFocus={() => rowRef.current && preview?.enter(previewContent(), rowRef.current, true)}
+      onPointerEnter={() => rowRef.current && preview?.enter(previewContent(), rowRef.current)}
+      onPointerLeave={() => preview?.leave()}
+      ref={rowRef}
+      role="listitem"
+    >
       <button
         className="task-open"
         disabled={disabled}
-        onClick={() => onOpenNativeSession(session)}
+        onClick={openSession}
         type="button"
         aria-label={`Open ${title}`}
       >
@@ -36,7 +51,7 @@ export function SidebarNativeSessionRow({
           <AgentIcon agentId={nativeSessionAgentId} agentName={nativeSessionAgentName} size={12} />
         </span>
         <span className="task-row-body">
-          <span className="task-title" title={title}>{title}</span>
+          <span className="task-title">{title}</span>
           <span className="task-trailing-meta">
             {adopting ? (
               <span aria-label="Opening task" className="task-trailing-indicator" role="img" title="Opening task">
@@ -54,7 +69,7 @@ export function SidebarNativeSessionRow({
         <button
           className="task-row-action"
           disabled={disabled}
-          onClick={() => onOpenNativeSession(session)}
+          onClick={openSession}
           title={adopting ? "Opening task" : "Open task"}
           type="button"
           aria-label={`Open ${title}`}
@@ -64,4 +79,14 @@ export function SidebarNativeSessionRow({
       </SidebarRowActionSlot>
     </div>
   );
+
+  function previewContent() {
+    return {
+      agentName: nativeSessionAgentName,
+      kind: "agent_history" as const,
+      state: age,
+      title,
+      workspaceLabel: session.cwd,
+    };
+  }
 }

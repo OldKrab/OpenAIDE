@@ -28,6 +28,8 @@ OpenAIDE provides no compatibility guarantee for superseded development-only sta
 
 OpenAIDE maintains a bounded pool of durable zero-message Prepared Tasks keyed by `(Agent, canonical Task Workspace folder)`. A client acquires an exclusive lease on one matching Prepared Task while using New Task. Ordinary navigation retains that lease; changing Project, Agent, or Task Workspace releases it while preserving the Frontend-owned composer. The first accepted Send promotes the same Prepared Task and Native Session into normal visible Task state.
 
+A Task Workspace is either the selected Project root or one durable worktree identity from the same Git Worktree Repository. App Server owns repository discovery, filesystem resolution, creation, removal, availability, and operation ordering. Frontend selects opaque identities and renders the authoritative inventory without treating worktrees as separate Projects.
+
 ## Vocabulary And Ownership
 
 - **New Task** is the canonical term. `Draft Task`, `Established Task`, and `slot` are not product or interface terms.
@@ -98,6 +100,22 @@ App Server serializes acquisition and:
 6. returns its ordinary Task snapshot, with `preparation: preparing` when Native Session acquisition is still running.
 
 Concurrent duplicate acquisition requests for one client and key return the same Task id. Only ready, unleased, zero-message Tasks are reusable; a missing free entry creates and prepares another Task.
+
+### Worktree repositories and Task Workspaces
+
+When a Project root is itself Git's reported top-level working tree, App Server resolves its canonical Git common directory and exposes one Worktree Repository identity shared by the primary checkout and linked worktrees. OpenAIDE does not walk upward from a nested Project folder and does not unify separate clones by remote URL.
+
+The Project collection reports root availability and the optional Worktree Repository identity. The repository subscription is the single authoritative projection for durable worktree records and active or queued create, recreate, remove, and refresh operations. Worktree records own opaque identity, canonical path, Managed or External classification, branch or detached revision, Git lock/prunable information, availability, linked and running Task counts, and last use. Tasks store a worktree identity reference and resolve mutable workspace facts through that record.
+
+`task/acquire` accepts a tagged Task Workspace identity. `projectRoot` derives its folder from the selected Project. `worktree` carries only an opaque Worktree id, which App Server validates against the Project's Worktree Repository before resolving the canonical pool key. An unavailable Project root or worktree rejects acquisition without changing the Frontend draft.
+
+Opening the Task Workspace chooser or management page refreshes discovery. App Server also refreshes before use, after mutations, and when a terminal worktree-backed turn detects that its root is missing. V1 does not poll or watch Git worktree registrations.
+
+Creating or recreating a worktree is explicit preparation before Send. Repository mutations serialize through one App Server queue per Worktree Repository and publish ordered progress. Frontend retains its current Prepared-Task lease until creation succeeds, then releases it and acquires the selected worktree key. Failure leaves the previous selection and lease unchanged. Navigation does not cancel creation; a client reload does not reattach the result to its New Task selection.
+
+Removing a worktree performs a fresh safety preflight. Running linked Tasks, staged/unstaged/unmerged/non-ignored-untracked changes, unpreserved detached commits, or initialized submodules block removal. Prepared-Task leases do not block confirmed removal; App Server releases and disposes them before Git removal. Removing a worktree never deletes its branch. Historical Tasks remain readable and become workspace-unavailable.
+
+A workspace-unavailable Task retains its actual runtime status. Saved Chat remains readable, but new Send is rejected and Composer editing is blocked until explicit recreation restores the recorded path. A running turn is not cancelled merely because discovery reports the workspace unavailable; it may finish, fail naturally, or be cancelled by the user.
 
 ### Free-pool retention and recovery
 
@@ -338,7 +356,7 @@ Option changes follow one ordering model:
 
 While an option mutation is pending, Frontend renders the requested value in that control with a busy indicator and locks every configuration selector. The existing Task's Agent remains locked, while drafting and Image actions remain usable. If the mutation is still pending after five seconds, Frontend adds the quiet status text `Agent is still updating options…` without replacing the Composer or reporting an error.
 
-Frontend preserves the Agent catalog order in the Composer. It renders the largest leading set of Configuration Options that fits the measured control row and moves only the trailing suffix into a `More · N` menu; Isolation participates as the final run control when available. Narrower App Shells progressively move more controls into that menu instead of replacing the catalog at a fixed breakpoint. Clicking a grouped row opens its value selector in place, while hover only supplies visual affordance. Direct and grouped selectors send the same option-change intent, and a control disappears whenever the next authoritative Agent catalog no longer exposes it.
+Frontend preserves the Agent catalog order in the Composer. It renders the largest leading set of Configuration Options that fits the measured control row and moves only the trailing suffix into a `More · N` menu. Task Workspace is selected in the start-context row with Project and Agent; the old user-selected Isolation control is removed. Narrower App Shells progressively move more Agent controls into the menu instead of replacing the catalog at a fixed breakpoint. Clicking a grouped row opens its value selector in place, while hover only supplies visual affordance. Direct and grouped selectors send the same option-change intent, and a control disappears whenever the next authoritative Agent catalog no longer exposes it.
 
 App Server allows up to 60 seconds for the Agent to answer the option request. A failed or timed-out mutation clears pending state, restoring the last Agent-confirmed catalog, and Frontend presents the mutation error. That error clears after ten seconds or earlier when a later complete Agent catalog changes. A late catalog that confirms the requested value renders normally through the same authoritative catalog path.
 

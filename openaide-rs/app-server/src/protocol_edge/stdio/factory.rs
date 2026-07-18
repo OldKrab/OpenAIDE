@@ -25,12 +25,14 @@ use crate::storage::Store;
 use crate::storage_runtime::StateRoot;
 use crate::task_events::{TaskUpdateNotifier, TaskUpdateReceiver};
 use crate::tasks::product_api::TaskProductApi;
+use crate::worktree_events::{WorktreeUpdateNotifier, WorktreeUpdateReceiver};
 
 use super::ProtocolEdgeStdioStartError;
 
 pub(super) struct GatewayFactoryOutput {
     pub gateway: RpcGateway,
     pub task_updates: TaskUpdateReceiver,
+    pub worktree_updates: WorktreeUpdateReceiver,
     #[cfg(test)]
     pub attachment_runtime: crate::attachment_runtime::AttachmentRuntime,
 }
@@ -82,6 +84,15 @@ pub(super) fn gateway(
         store.clone(),
         task_product_api.history_sync_snapshots(),
     ));
+    let (worktree_notifier, worktree_updates) = WorktreeUpdateNotifier::channel();
+    let worktrees = Arc::new(
+        crate::worktrees::WorktreeManager::with_notifier_and_cleanup(
+            store.clone(),
+            worktree_notifier,
+            task_product_api.clone(),
+            configured_projects.clone(),
+        ),
+    );
     #[cfg(test)]
     let attachment_runtime = task_product_api.attachment_runtime();
     let state_root_id = state_root.fingerprint().as_str().to_string();
@@ -101,6 +112,7 @@ pub(super) fn gateway(
                 Arc::new(store.clone()),
                 Arc::new(agent_snapshots),
                 Arc::new(projects),
+                worktrees.clone(),
                 Arc::new(SettingsCatalog::with_backend_settings(
                     app_preferences.clone(),
                     runtime_settings.clone(),
@@ -133,11 +145,13 @@ pub(super) fn gateway(
         task_product_api.clone(),
         task_product_api.clone(),
         task_product_api.clone(),
+        worktrees,
         task_product_api,
     );
     Ok(GatewayFactoryOutput {
         gateway,
         task_updates,
+        worktree_updates,
         #[cfg(test)]
         attachment_runtime,
     })

@@ -19,6 +19,7 @@ mod shell_handlers;
 pub mod stdio;
 mod support_handlers;
 mod task_handlers;
+mod worktree_handlers;
 
 pub(crate) use messages::event_deliveries;
 pub use messages::{GatewayEventDelivery, GatewayOutcome, GatewayResponse, InboundProtocolMessage};
@@ -89,6 +90,7 @@ pub struct RpcGateway {
     task_set_config_option: Arc<dyn TaskSetConfigOptionWorkflow>,
     task_release: Arc<dyn TaskReleaseWorkflow>,
     task_archive: Arc<dyn TaskArchiveWorkflow>,
+    worktrees: Arc<crate::worktrees::WorktreeManager>,
     shutdown: Arc<dyn AppServerShutdownWorkflow>,
 }
 
@@ -170,6 +172,7 @@ impl RpcGateway {
         task_set_config_option: Arc<dyn TaskSetConfigOptionWorkflow>,
         task_release: Arc<dyn TaskReleaseWorkflow>,
         task_archive: Arc<dyn TaskArchiveWorkflow>,
+        worktrees: Arc<crate::worktrees::WorktreeManager>,
         shutdown: Arc<dyn AppServerShutdownWorkflow>,
     ) -> Self {
         Self {
@@ -204,6 +207,7 @@ impl RpcGateway {
             task_set_config_option,
             task_release,
             task_archive,
+            worktrees,
             shutdown,
         }
     }

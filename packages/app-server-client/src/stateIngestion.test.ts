@@ -255,6 +255,7 @@ function taskSummary(id: string): TaskSummary {
     lastActivity: "1",
     unread: false,
     hasMessages: false,
+    workspaceAvailable: true,
   };
 }
 

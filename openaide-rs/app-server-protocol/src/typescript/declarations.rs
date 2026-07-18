@@ -48,7 +48,7 @@ use crate::ids::{
     AgentConfigOptionId, AgentId, AttachmentCandidateId, AttachmentHandleId, AttachmentId,
     ClientInstanceId, ClientMutationId, ClientRequestId, EventCursor, FileBrowserEntryId,
     FileBrowserRootId, MessageId, ProjectId, RequestId, ServerId, StateRootId, TaskId,
-    TaskListCursor, TurnId,
+    TaskListCursor, TurnId, WorktreeId, WorktreeOperationId, WorktreeRepositoryId,
 };
 use crate::server_requests::{
     PendingRequestResolution, PendingRequestResolveParams, PendingRequestResolveResult,
@@ -94,19 +94,29 @@ use crate::state::{
 use crate::support::{SupportRecoverStuckSessionsParams, SupportRecoverStuckSessionsResult};
 use crate::task::{
     ActivityToolContent, ActivityToolField, ActivityToolInput, ActivityToolLocation,
-    ActivityToolOutput, ActivityToolValue, ComposerImage, ComposerMessage, TaskAcquireParams,
-    TaskAcquireResult, TaskAdoptNativeSessionParams, TaskAdoptNativeSessionResult,
-    TaskCancelParams, TaskCancelResult, TaskChatPageParams, TaskChatPageResult, TaskListParams,
-    TaskListResult, TaskMarkReadParams, TaskMarkReadResult, TaskOpenParams, TaskOpenResult,
-    TaskReleaseParams, TaskReleaseResult, TaskSearchFilesParams, TaskSearchFilesResult,
-    TaskSendParams, TaskSendResult, TaskSetArchivedParams, TaskSetArchivedResult,
-    TaskSetConfigOptionParams, TaskSetConfigOptionResult, ToolDetailSnapshot,
-    WorkspaceFileSearchState,
+    ActivityToolOutput, ActivityToolValue, ComposerImage, ComposerMessage,
+    TaskAcquireInWorktreeParams, TaskAcquireInWorktreeResult, TaskAcquireParams, TaskAcquireResult,
+    TaskAdoptNativeSessionParams, TaskAdoptNativeSessionResult, TaskCancelParams, TaskCancelResult,
+    TaskChatPageParams, TaskChatPageResult, TaskListParams, TaskListResult, TaskMarkReadParams,
+    TaskMarkReadResult, TaskOpenParams, TaskOpenResult, TaskReleaseParams, TaskReleaseResult,
+    TaskSearchFilesParams, TaskSearchFilesResult, TaskSendParams, TaskSendResult,
+    TaskSetArchivedParams, TaskSetArchivedResult, TaskSetConfigOptionParams,
+    TaskSetConfigOptionResult, ToolDetailSnapshot, WorkspaceFileSearchState,
 };
 use crate::workspace::{
     WorkspaceBrowserDirectory, WorkspaceBrowserEntry, WorkspaceBrowserRoot,
     WorkspaceListDirectoryParams, WorkspaceListDirectoryResult, WorkspaceListRootsParams,
     WorkspaceListRootsResult,
+};
+use crate::worktree::{
+    WorktreeAvailability, WorktreeBaseSelection, WorktreeBaseSnapshot, WorktreeCreateParams,
+    WorktreeCreateResult, WorktreeHead, WorktreeLinkedTasksParams, WorktreeLinkedTasksResult,
+    WorktreeOperationKind, WorktreeOperationSnapshot, WorktreeOperationState, WorktreeOwnership,
+    WorktreeRecreateParams, WorktreeRecreateResult, WorktreeRefreshParams, WorktreeRefreshResult,
+    WorktreeRemovalBlocker, WorktreeRemovalPreflight, WorktreeRemovalPreflightParams,
+    WorktreeRemovalPreflightResult, WorktreeRemovalStatus, WorktreeRemoveParams,
+    WorktreeRemoveResult, WorktreeRenameParams, WorktreeRenameResult, WorktreeRepositorySnapshot,
+    WorktreeResolveFolderParams, WorktreeResolveFolderResult, WorktreeSummary,
 };
 
 pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
@@ -129,6 +139,9 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<TaskId>(output, config);
     push_decl::<TaskListCursor>(output, config);
     push_decl::<TurnId>(output, config);
+    push_decl::<WorktreeId>(output, config);
+    push_decl::<WorktreeOperationId>(output, config);
+    push_decl::<WorktreeRepositoryId>(output, config);
 
     push_decl::<ClientRequestEnvelope<Dummy>>(output, config);
     push_decl::<ResponseEnvelope<Dummy>>(output, config);
@@ -235,6 +248,35 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<WorkspaceListDirectoryResult>(output, config);
     push_decl::<WorkspaceBrowserDirectory>(output, config);
     push_decl::<WorkspaceBrowserEntry>(output, config);
+    push_decl::<WorktreeRepositorySnapshot>(output, config);
+    push_decl::<WorktreeSummary>(output, config);
+    push_decl::<WorktreeOwnership>(output, config);
+    push_decl::<WorktreeAvailability>(output, config);
+    push_decl::<WorktreeHead>(output, config);
+    push_decl::<WorktreeBaseSnapshot>(output, config);
+    push_decl::<WorktreeBaseSelection>(output, config);
+    push_decl::<WorktreeOperationKind>(output, config);
+    push_decl::<WorktreeOperationState>(output, config);
+    push_decl::<WorktreeOperationSnapshot>(output, config);
+    push_decl::<WorktreeRefreshParams>(output, config);
+    push_decl::<WorktreeRefreshResult>(output, config);
+    push_decl::<WorktreeCreateParams>(output, config);
+    push_decl::<WorktreeCreateResult>(output, config);
+    push_decl::<WorktreeRecreateParams>(output, config);
+    push_decl::<WorktreeRecreateResult>(output, config);
+    push_decl::<WorktreeRemovalPreflightParams>(output, config);
+    push_decl::<WorktreeRemovalPreflightResult>(output, config);
+    push_decl::<WorktreeRemovalPreflight>(output, config);
+    push_decl::<WorktreeRemovalStatus>(output, config);
+    push_decl::<WorktreeRemovalBlocker>(output, config);
+    push_decl::<WorktreeRemoveParams>(output, config);
+    push_decl::<WorktreeRemoveResult>(output, config);
+    push_decl::<WorktreeRenameParams>(output, config);
+    push_decl::<WorktreeRenameResult>(output, config);
+    push_decl::<WorktreeResolveFolderParams>(output, config);
+    push_decl::<WorktreeResolveFolderResult>(output, config);
+    push_decl::<WorktreeLinkedTasksParams>(output, config);
+    push_decl::<WorktreeLinkedTasksResult>(output, config);
 
     push_decl::<AttachmentListRootsParams>(output, config);
     push_decl::<AttachmentListRootsResult>(output, config);
@@ -293,6 +335,8 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
 
     push_decl::<TaskAcquireParams>(output, config);
     push_decl::<TaskAcquireResult>(output, config);
+    push_decl::<TaskAcquireInWorktreeParams>(output, config);
+    push_decl::<TaskAcquireInWorktreeResult>(output, config);
     push_decl::<TaskSearchFilesParams>(output, config);
     push_decl::<TaskSearchFilesResult>(output, config);
     push_decl::<WorkspaceFileSearchState>(output, config);

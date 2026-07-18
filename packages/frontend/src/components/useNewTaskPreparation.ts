@@ -1,6 +1,7 @@
 import { useEffect, useRef, type Dispatch, type MutableRefObject } from "react";
 import {
   TASK_ACQUIRE,
+  TASK_ACQUIRE_IN_WORKTREE,
   type TaskId,
 } from "@openaide/app-server-client";
 import type { AppAction } from "../state/appReducer";
@@ -11,7 +12,11 @@ import type { WebviewBootstrap } from "../state/surfaceTypes";
 import type { AppControllerBackendConnection } from "./appControllerBackendLifecycle";
 import type { PendingNewTaskPreparationResult } from "./appControllerCallbackTypes";
 import type { NewTaskStartAttempt } from "./appControllerCallbackTypes";
-import { newTaskPreparationKey, taskCreateParams } from "../state/newTaskPreparationContext";
+import {
+  newTaskPreparationKey,
+  taskAcquireInWorktreeParams,
+  taskAcquireParams,
+} from "../state/newTaskPreparationContext";
 import type { NewTaskController } from "./newTaskController";
 import type { AsyncOperationOwner } from "../state/asyncOperationOwner";
 
@@ -81,7 +86,8 @@ export function useNewTaskPreparation({
     retainedSnapshot
       && retainedSnapshot.lifecycle === "new"
       && retainedSnapshot.task.project_id === state.newTask.selection.projectId
-      && retainedSnapshot.task.agent_id === state.newTask.selection.agentId,
+      && retainedSnapshot.task.agent_id === state.newTask.selection.agentId
+      && retainedSnapshot.task.worktree_id === state.newTask.selection.worktreeId,
   );
   if (isNewTaskRoute && preparedTaskMatches && preparationKey) {
     completedPreparationKey.current = preparationKey;
@@ -131,7 +137,9 @@ export function useNewTaskPreparation({
 
       const projectId = state.newTask.selection.projectId;
       if (!projectId) throw new SupersededPreparation();
-      const task = (await request(TASK_ACQUIRE, taskCreateParams(state, projectId))).task;
+      const task = state.newTask.selection.worktreeId
+        ? (await request(TASK_ACQUIRE_IN_WORKTREE, taskAcquireInWorktreeParams(state, projectId))).task
+        : (await request(TASK_ACQUIRE, taskAcquireParams(state, projectId))).task;
       if (!asyncOperations.owns(operation)) {
         throw new SupersededPreparation();
       }

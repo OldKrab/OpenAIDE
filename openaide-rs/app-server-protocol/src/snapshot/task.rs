@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
-use crate::ids::{AgentId, ProjectId, TaskId};
+use crate::ids::{AgentId, ProjectId, TaskId, WorktreeId};
 
 use super::chat::{ChatSnapshot, RecoverySnapshot};
 use super::pending_request::PendingRequestSnapshot;
@@ -36,6 +36,10 @@ pub struct TaskSummary {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attention: Option<TaskAttentionEvent>,
     pub has_messages: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worktree_id: Option<WorktreeId>,
+    /// Availability is independent of Task runtime status so history remains readable.
+    pub workspace_available: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]

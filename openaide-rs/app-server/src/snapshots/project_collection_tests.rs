@@ -1,4 +1,5 @@
 use openaide_app_server_protocol::errors::ProtocolErrorCode;
+use std::process::Command;
 
 use crate::projects::project_id_for_workspace;
 use crate::protocol::model::{IsolationKind, TaskStatus};
@@ -25,6 +26,35 @@ fn includes_configured_roots_without_task_history() {
         snapshot.projects[0].project_id,
         project_id_for_workspace("/workspace/app")
     );
+    assert!(!snapshot.projects[0].available);
+    assert_eq!(snapshot.projects[0].workspace_root, "/workspace/app");
+    assert!(snapshot.projects[0].worktree_repository_id.is_none());
+}
+
+#[test]
+fn configured_git_root_projects_worktree_repository_identity() {
+    let temp = tempfile::tempdir().unwrap();
+    let project = temp.path().join("project");
+    std::fs::create_dir_all(&project).unwrap();
+    git(&project, &["init", "-b", "main"]);
+    git(&project, &["config", "user.name", "OpenAIDE Test"]);
+    git(&project, &["config", "user.email", "test@openaide.invalid"]);
+    std::fs::write(project.join("README.md"), "fixture\n").unwrap();
+    git(&project, &["add", "README.md"]);
+    git(&project, &["commit", "-m", "fixture"]);
+    let state = tempfile::tempdir().unwrap();
+    let store = Store::open(state.path().to_path_buf()).unwrap();
+
+    let snapshot = ProjectCollectionStore::new_with_configured_roots(
+        store,
+        ConfiguredProjectRoots::from_workspace_roots(vec![project.to_string_lossy().to_string()]),
+    )
+    .snapshot()
+    .unwrap();
+
+    assert!(snapshot.projects[0].available);
+    assert!(snapshot.projects[0].worktree_repository_id.is_some());
+    assert!(snapshot.projects[0].project_worktree_id.is_some());
 }
 
 #[test]
@@ -166,6 +196,8 @@ fn task_record(task_id: &str, workspace_root: &str, updated_at: &str) -> TaskRec
         agent_name: "Agent A".to_string(),
         isolation: IsolationKind::Local,
         workspace_root: workspace_root.to_string(),
+        project_root: None,
+        worktree_id: None,
         lifecycle: crate::storage::records::TaskLifecycle::Visible,
         agent_session_id: None,
         active_turn_id: None,
@@ -181,4 +213,17 @@ fn task_record(task_id: &str, workspace_root: &str, updated_at: &str) -> TaskRec
         supports_image_input: false,
         preparation: TaskPreparationRecord::Ready,
     }
+}
+
+fn git(cwd: &std::path::Path, args: &[&str]) {
+    let output = Command::new("git")
+        .args(args)
+        .current_dir(cwd)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "git {args:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }

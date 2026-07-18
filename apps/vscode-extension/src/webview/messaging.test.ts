@@ -44,6 +44,9 @@ vi.mock("node:fs/promises", () => ({
 }));
 
 vi.mock("vscode", () => ({
+  commands: {
+    executeCommand: vi.fn(),
+  },
   Range: class {
     endCharacter: number;
     endLine: number;
@@ -77,6 +80,7 @@ vi.mock("vscode", () => ({
 
 describe("webview messaging composer routes", () => {
   beforeEach(() => {
+    vi.mocked(vscode.commands.executeCommand).mockClear();
     vi.mocked(vscode.workspace.openTextDocument).mockClear();
     vi.mocked(vscode.window.showTextDocument).mockClear();
     vi.mocked(vscode.window.showInformationMessage).mockClear();
@@ -479,6 +483,31 @@ describe("webview messaging composer routes", () => {
       type: "runtime.error",
       payload: { action: "tool.openPath" },
     });
+  });
+
+  it("resolves worktree folders through the App Server before revealing them", async () => {
+    const runtime = {
+      appServerRequest: vi.fn().mockResolvedValue({ path: "/workspace/app/.worktrees/sidebar" }),
+    };
+    const posted: unknown[] = [];
+
+    await handleWebviewMessage(
+      {
+        type: "worktree.openFolder",
+        payload: { repository_id: "repository-1", worktree_id: "worktree-1" },
+      },
+      context(runtime, posted),
+    );
+
+    expect(runtime.appServerRequest).toHaveBeenCalledWith("worktree/resolveFolder", {
+      repositoryId: "repository-1",
+      worktreeId: "worktree-1",
+    });
+    expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
+      "revealInExplorer",
+      { fsPath: "/workspace/app/.worktrees/sidebar" },
+    );
+    expect(posted).toEqual([]);
   });
 
   it("returns workspace roots to the webview", async () => {

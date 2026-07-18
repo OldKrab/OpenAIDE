@@ -19,7 +19,7 @@ import {
   type ProjectOption,
   type WorkspaceRoot,
 } from "./composerOptions";
-import type { MessageId } from "@openaide/app-server-client";
+import type { MessageId, WorktreeRepositorySnapshot } from "@openaide/app-server-client";
 
 export type PendingComposerSend = {
   prompt: string;
@@ -147,6 +147,7 @@ export type AppState = {
   searchQuery: string;
   showArchived: boolean;
   projects: ProjectOption[];
+  worktreeRepositories: Record<string, WorktreeRepositorySnapshot>;
   workspaceRoots: WorkspaceRoot[];
   workspaceRootsLoaded: boolean;
   taskInputs: Record<string, TaskComposerInput>;
@@ -178,6 +179,7 @@ export function createInitialState(): AppState {
     searchQuery: "",
     showArchived: false,
     projects: [],
+    worktreeRepositories: {},
     workspaceRoots: [],
     workspaceRootsLoaded: false,
     taskInputs: {},

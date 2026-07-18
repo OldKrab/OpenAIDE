@@ -213,7 +213,12 @@ impl ProjectResolver for StorageProjectResolver {
             .into_iter()
             .filter(|record| !record.tombstoned)
             .filter_map(|record| {
-                let identity = ProjectIdentity::from_workspace_root(&record.workspace_root);
+                let identity = ProjectIdentity::from_workspace_root(
+                    record
+                        .project_root
+                        .as_deref()
+                        .unwrap_or(&record.workspace_root),
+                );
                 (identity.project_id == *project_id).then_some(ProjectTaskCandidate {
                     project_id: identity.project_id,
                     label: identity.label,

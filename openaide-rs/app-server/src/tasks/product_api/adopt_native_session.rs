@@ -138,6 +138,8 @@ impl TaskProductApi {
             agent_id: selected_agent_id.clone(),
             isolation,
             workspace_root: workspace_root.clone(),
+            project_root: Some(workspace_root.clone()),
+            worktree_id: None,
             lifecycle: TaskLifecycle::Visible,
             agent_session_id: Some(session_id.clone()),
             active_turn_id: None,

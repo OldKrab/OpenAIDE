@@ -1,11 +1,12 @@
 use openaide_app_server_protocol::envelopes::RequestMeta;
 use openaide_app_server_protocol::task::{
-    TaskAcquireParams, TaskAcquireResult, TaskAdoptNativeSessionParams,
-    TaskAdoptNativeSessionResult, TaskCancelParams, TaskCancelResult, TaskChatPageParams,
-    TaskChatPageResult, TaskListParams, TaskListResult, TaskMarkReadParams, TaskMarkReadResult,
-    TaskOpenParams, TaskOpenResult, TaskReleaseParams, TaskReleaseResult, TaskSearchFilesParams,
-    TaskSearchFilesResult, TaskSendParams, TaskSendResult, TaskSetArchivedParams,
-    TaskSetArchivedResult, TaskSetConfigOptionParams, TaskSetConfigOptionResult,
+    TaskAcquireInWorktreeParams, TaskAcquireInWorktreeResult, TaskAcquireParams, TaskAcquireResult,
+    TaskAdoptNativeSessionParams, TaskAdoptNativeSessionResult, TaskCancelParams, TaskCancelResult,
+    TaskChatPageParams, TaskChatPageResult, TaskListParams, TaskListResult, TaskMarkReadParams,
+    TaskMarkReadResult, TaskOpenParams, TaskOpenResult, TaskReleaseParams, TaskReleaseResult,
+    TaskSearchFilesParams, TaskSearchFilesResult, TaskSendParams, TaskSendResult,
+    TaskSetArchivedParams, TaskSetArchivedResult, TaskSetConfigOptionParams,
+    TaskSetConfigOptionResult,
 };
 use serde_json::Value;
 
@@ -16,6 +17,37 @@ use super::{responses, GatewayEventDelivery, GatewayOutcome, GatewayResponse, Rp
 mod publication;
 
 impl RpcGateway {
+    pub(super) fn handle_task_acquire_in_worktree(
+        &mut self,
+        connection_id: ConnectionId,
+        id: String,
+        params: Value,
+        meta: RequestMeta,
+    ) -> GatewayOutcome {
+        let params = match serde_json::from_value::<TaskAcquireInWorktreeParams>(params) {
+            Ok(params) => params,
+            Err(error) => {
+                return self.error(connection_id, id, meta, responses::invalid_params(error))
+            }
+        };
+        let client = self
+            .client_hub
+            .context_for_connection(&connection_id)
+            .expect("routing requires an initialized client for task acquire");
+        match self
+            .task_acquire
+            .acquire_in_worktree_for_client(&client.client_instance_id, params)
+        {
+            Ok(task) => self.result::<TaskAcquireInWorktreeResult>(
+                connection_id,
+                id,
+                meta,
+                TaskAcquireInWorktreeResult { task },
+            ),
+            Err(error) => self.error(connection_id, id, meta, error),
+        }
+    }
+
     pub(super) fn handle_task_list(
         &mut self,
         connection_id: ConnectionId,

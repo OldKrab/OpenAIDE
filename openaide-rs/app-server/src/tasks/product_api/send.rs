@@ -42,6 +42,11 @@ impl TaskProductApi {
     ) -> Result<TaskSendAccepted, ProtocolError> {
         let task_id = params.task_id.as_str().to_string();
         let mut existing_task = self.read_task_for_client(&task_id, client_instance_id)?;
+        if !std::path::Path::new(&existing_task.workspace_root).is_dir() {
+            return Err(conflict_error(
+                "Task workspace is unavailable. Restore it before sending.",
+            ));
+        }
         super::prepare::reject_if_preparation_not_ready(&existing_task)?;
         if let Some(active_turn_id) = existing_task.active_turn_id.clone() {
             let active_turn_is_live = self

@@ -3,17 +3,19 @@ use std::sync::Arc;
 use openaide_app_server_protocol::client::{
     ClientCapabilities, RequestedSurface, SettingsSection, ShellDescriptor, ShellKind,
 };
-use openaide_app_server_protocol::ids::{AgentId, ClientInstanceId, TaskId};
+use openaide_app_server_protocol::ids::{AgentId, ClientInstanceId, TaskId, WorktreeRepositoryId};
 use openaide_app_server_protocol::snapshot::{
     AgentStatus, ChatSnapshot, LiveSessionDataState, ProjectCollectionSnapshot, ProjectSummary,
     TaskAgentCommandsSnapshot, TaskAgentConfigSnapshot, TaskPreparationSnapshot,
     TaskSendCapabilitySnapshot, TaskSendCapabilityState, TaskSnapshot, TaskStatus, TaskSummary,
 };
 use openaide_app_server_protocol::state::{SubscriptionScope, SubscriptionSnapshot};
+use openaide_app_server_protocol::worktree::WorktreeRepositorySnapshot;
 
 use super::{
     AgentRegistrySnapshotSource, EmptyTaskNavigation, ProjectCollectionSnapshotSource,
     SnapshotBuilder, SnapshotProvider, SnapshotSources, TaskListSnapshot, TaskSnapshotSource,
+    WorktreeRepositorySnapshotSource,
 };
 use crate::agent::registry::{AgentRegistry, CODEX_AGENT_ID};
 use crate::client_lifecycle::{ClientContext, ConnectionId};
@@ -103,6 +105,25 @@ fn project_subscription_uses_backend_owned_project_collection() {
 
     assert_eq!(projects.projects[0].project_id.as_str(), "project-1");
     assert_eq!(projects.projects[0].label, "Project");
+}
+
+#[test]
+fn worktree_subscription_uses_repository_scoped_inventory() {
+    let repository_id = WorktreeRepositoryId::from("repository-1");
+    let SubscriptionSnapshot::WorktreeRepository { repository } = builder()
+        .snapshot(
+            &ctx(),
+            &SubscriptionScope::WorktreeRepository {
+                repository_id: repository_id.clone(),
+            },
+            &CursorSequencer::new().read_token(),
+        )
+        .unwrap()
+    else {
+        panic!("expected worktree repository snapshot");
+    };
+
+    assert_eq!(repository.repository_id, repository_id);
 }
 
 #[test]
@@ -196,11 +217,31 @@ fn builder() -> SnapshotBuilder {
                 AgentRegistry::default_built_ins(),
             )),
             Arc::new(StaticProjectCollection),
+            Arc::new(StaticWorktreeRepositories),
             Arc::new(SettingsCatalog::default()),
             Arc::new(EmptyTaskNavigation),
             Arc::new(StaticTaskSnapshots),
         ),
     )
+}
+
+#[derive(Debug)]
+struct StaticWorktreeRepositories;
+
+impl WorktreeRepositorySnapshotSource for StaticWorktreeRepositories {
+    fn snapshot(
+        &self,
+        repository_id: &WorktreeRepositoryId,
+    ) -> Result<WorktreeRepositorySnapshot, openaide_app_server_protocol::errors::ProtocolError>
+    {
+        Ok(WorktreeRepositorySnapshot {
+            repository_id: repository_id.clone(),
+            revision: 1,
+            worktrees: Vec::new(),
+            bases: Vec::new(),
+            operations: Vec::new(),
+        })
+    }
 }
 
 #[derive(Debug)]
@@ -215,6 +256,11 @@ impl ProjectCollectionSnapshotSource for StaticProjectCollection {
             projects: vec![ProjectSummary {
                 project_id: "project-1".into(),
                 label: "Project".to_string(),
+                workspace_root: "/workspace/project".to_string(),
+                available: true,
+                worktree_repository_id: None,
+                project_worktree_id: None,
+                worktree_error: None,
             }],
         })
     }
@@ -275,6 +321,8 @@ impl TaskSnapshotSource for StaticTaskSnapshots {
                 unread: false,
                 attention: None,
                 has_messages: false,
+                worktree_id: None,
+                workspace_available: true,
             },
             active_turn_started_at: None,
             lifecycle: openaide_app_server_protocol::snapshot::TaskLifecycle::Visible,

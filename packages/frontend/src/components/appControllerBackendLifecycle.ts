@@ -347,6 +347,18 @@ export function useAppControllerBackendLifecycle({
                 onBaselineReady: () => markSubscriptionReady("task-navigation"),
                 scope: taskNavigationScopeForBootstrap(initialBootstrap),
               }));
+              for (const project of result.snapshot.projects?.projects ?? []) {
+                if (!project.worktreeRepositoryId) continue;
+                stopSubscriptions.push(startAppServerStateSubscription({
+                  backendConnection: subscriptionConnection,
+                  context: subscriptionContext,
+                  dispatch: dispatchForCurrentReplica,
+                  scope: {
+                    kind: "worktreeRepository",
+                    repositoryId: project.worktreeRepositoryId,
+                  },
+                }));
+              }
             }
             if (initialBootstrap.surface === "settings") {
               if (initialBootstrap.settingsTab) {

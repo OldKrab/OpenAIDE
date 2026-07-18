@@ -1,5 +1,5 @@
 use openaide_app_server_protocol::errors::{ProtocolError, ProtocolErrorCode};
-use openaide_app_server_protocol::ids::{AgentId, ProjectId, TaskId};
+use openaide_app_server_protocol::ids::{AgentId, ProjectId, TaskId, WorktreeId};
 use openaide_app_server_protocol::snapshot::{
     TaskAttentionEvent, TaskAttentionReason, TaskNavigationSnapshot,
     TaskStatus as ProtocolTaskStatus, TaskSummary, TaskTitle, TaskTitleSource,
@@ -63,9 +63,16 @@ pub(crate) fn project_task_summary_with_has_messages(
 ) -> TaskSummary {
     let title = record.title.map(project_title);
     let status = project_status_with_preparation(record.status, &record.preparation);
+    let workspace_available = std::path::Path::new(&record.workspace_root).is_dir();
     TaskSummary {
         task_id: TaskId::from(record.task_id),
-        project_id: ProjectIdentity::from_workspace_root(&record.workspace_root).project_id,
+        project_id: ProjectIdentity::from_workspace_root(
+            record
+                .project_root
+                .as_deref()
+                .unwrap_or(&record.workspace_root),
+        )
+        .project_id,
         agent_id: AgentId::from(record.agent_id),
         title,
         status,
@@ -74,6 +81,8 @@ pub(crate) fn project_task_summary_with_has_messages(
         unread: record.unread,
         attention: record.attention.map(project_attention),
         has_messages,
+        worktree_id: record.worktree_id.map(WorktreeId::from),
+        workspace_available,
     }
 }
 
@@ -106,9 +115,16 @@ pub(crate) fn project_legacy_task_summary(
     summary: LegacyTaskSummary,
     has_messages: bool,
 ) -> TaskSummary {
+    let workspace_available = std::path::Path::new(&summary.workspace_root).is_dir();
     TaskSummary {
         task_id: TaskId::from(summary.task_id),
-        project_id: ProjectIdentity::from_workspace_root(&summary.workspace_root).project_id,
+        project_id: ProjectIdentity::from_workspace_root(
+            summary
+                .project_root
+                .as_deref()
+                .unwrap_or(&summary.workspace_root),
+        )
+        .project_id,
         agent_id: AgentId::from(summary.agent_id),
         title: summary.title.map(project_title),
         status: project_status(summary.status),
@@ -117,6 +133,8 @@ pub(crate) fn project_legacy_task_summary(
         unread: summary.unread,
         attention: summary.attention.map(project_attention),
         has_messages,
+        worktree_id: summary.worktree_id.map(WorktreeId::from),
+        workspace_available,
     }
 }
 

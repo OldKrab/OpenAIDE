@@ -310,6 +310,8 @@ function scopeKey(scope: SubscriptionScope) {
       return `task:${scope.taskId}`;
     case "toolDetail":
       return `toolDetail:${scope.taskId}:${scope.artifactId}`;
+    case "worktreeRepository":
+      return `worktreeRepository:${scope.repositoryId}`;
   }
 }
 
