@@ -136,14 +136,20 @@ export class RuntimeProcess implements vscode.Disposable {
     running: boolean;
     runtime_source_kind: RuntimeSourceKind;
     storage_root_kind: StorageRootKind;
-    diagnostics_log_directory: string;
   } {
     const storageRoot = this.resolveStorageRoot();
     return {
       running: Boolean(this.child && !this.child.killed),
       runtime_source_kind: this.resolveRuntimePath().kind,
       storage_root_kind: storageRoot.kind,
-      diagnostics_log_directory: path.join(storageRoot.path, "diagnostics", "logs"),
+    };
+  }
+
+  /** Returns shell-private inputs used to build a Support Export, never snapshot fields. */
+  describeSupportHost() {
+    return {
+      diagnostics_log_directory: path.join(this.resolveStorageRoot().path, "diagnostics", "logs"),
+      extension_version: safePackageVersion(this.context.extension.packageJSON.version),
     };
   }
 
@@ -208,6 +214,10 @@ export class RuntimeProcess implements vscode.Disposable {
       throw error;
     }
   }
+}
+
+function safePackageVersion(value: unknown) {
+  return typeof value === "string" ? value : "unknown";
 }
 
 function readFirstStdoutLine(child: ChildProcessWithoutNullStreams): Promise<string> {

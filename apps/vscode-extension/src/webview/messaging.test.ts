@@ -16,7 +16,7 @@ const settingsMocks = vi.hoisted(() => ({
 }));
 const diagnosticsMocks = vi.hoisted(() => ({
   collectDiagnostics: vi.fn(),
-  openDiagnosticsDocument: vi.fn(),
+  exportSupportDiagnostics: vi.fn(),
 }));
 const fsMocks = vi.hoisted(() => ({
   realpath: vi.fn(async (path: string) => path),
@@ -36,7 +36,7 @@ vi.mock("../diagnostics/snapshot", () => ({
 }));
 
 vi.mock("../diagnostics/export", () => ({
-  openDiagnosticsDocument: diagnosticsMocks.openDiagnosticsDocument,
+  exportSupportDiagnostics: diagnosticsMocks.exportSupportDiagnostics,
 }));
 
 vi.mock("node:fs/promises", () => ({
@@ -96,7 +96,7 @@ describe("webview messaging composer routes", () => {
       notices: [],
       process: { running: true },
     });
-    diagnosticsMocks.openDiagnosticsDocument.mockReset();
+    diagnosticsMocks.exportSupportDiagnostics.mockReset();
   });
 
   it("logs webview action lifecycle with safe diagnostic fields", async () => {
@@ -446,7 +446,7 @@ describe("webview messaging composer routes", () => {
     await handleWebviewMessage({ type: "diagnostics.export" }, context(runtime, posted, undefined, undefined, undefined, { runtimeProcess }));
 
     expect(diagnosticsMocks.collectDiagnostics).toHaveBeenCalledWith(runtime, runtimeProcess);
-    expect(diagnosticsMocks.openDiagnosticsDocument).toHaveBeenCalledWith(runtime, runtimeProcess);
+    expect(diagnosticsMocks.exportSupportDiagnostics).toHaveBeenCalledWith(runtime, runtimeProcess);
     expect(posted[0]).toMatchObject({ type: "diagnostics.snapshot.result", payload: { runtime: { status: "ready" } } });
   });
 

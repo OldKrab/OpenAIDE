@@ -1,5 +1,5 @@
 import { collectDiagnostics } from "../diagnostics/snapshot";
-import { openDiagnosticsDocument } from "../diagnostics/export";
+import { exportSupportDiagnostics } from "../diagnostics/export";
 import { collectRuntimeSettings } from "../settings/runtimeSettings";
 import { unlockDeveloperSettings } from "../settings/snapshot";
 import type { MessageContext } from "./messagingContext";
@@ -14,7 +14,7 @@ export async function routeDiagnosticsCommand(message: WebviewToHostMessage, con
     return true;
   }
   if (message.type === "diagnostics.export") {
-    await openDiagnosticsDocument(context.runtime, context.runtimeProcess);
+    await exportSupportDiagnostics(context.runtime, context.runtimeProcess);
     return true;
   }
   return false;
