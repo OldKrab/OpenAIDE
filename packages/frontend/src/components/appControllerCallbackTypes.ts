@@ -17,6 +17,7 @@ import type {
   FileBrowserEntryId,
   FileBrowserRoot,
   FileBrowserRootId,
+  AppServerSession,
   BackendConnection,
   TaskSnapshot as ProtocolTaskSnapshot,
   TaskId,
@@ -131,7 +132,10 @@ export type NewTaskStartAttempt = {
 export type AppCallbacksDependencies = {
   acceptTaskOpen?: (taskId: string, requestId: number | undefined, intent: SnapshotIntent) => boolean;
   attachmentResources?: ComposerAttachmentResourceOwner;
-  backendConnection?: Partial<Pick<BackendConnection, "handleNotification" | "request">>;
+  backendConnection?: Partial<Pick<
+    AppServerSession,
+    "request" | "subscribeState"
+  >>;
   asyncOperations: AsyncOperationOwner;
   clientInstanceId: ClientInstanceId | string;
   createSnapshotRequestId: SnapshotRequestIdFactory;

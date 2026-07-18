@@ -61,6 +61,7 @@ type AppActionPayload =
   | { type: "submit:attachments:invalidate"; taskId: string; message: string }
   | { type: "newTask:reset" }
   | { type: "newTask:prepared"; taskId: string }
+  | { type: "newTask:leaseExpired"; taskId: string; message: string }
   | { type: "newTask:agent"; agentId: string; agentLabel?: string; newTaskId?: string }
   | { type: "newTask:project"; project: ProjectOption; newTaskId?: string }
   | { type: "newTask:projectId"; projectId: string; newTaskId?: string }

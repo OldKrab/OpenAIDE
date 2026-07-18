@@ -6,6 +6,7 @@ import {
   TASK_CHAT_PAGE,
   TASK_SEARCH_FILES,
   TASK_SET_CONFIG_OPTION,
+  type AppServerSession,
   type AgentConfigOptionId,
   type BackendConnection,
   type ClientMutationId,
@@ -43,7 +44,10 @@ type TaskDependencies = Pick<
   | "state"
 >;
 
-type TaskBackendConnection = Partial<Pick<BackendConnection, "handleNotification" | "request">>;
+type TaskBackendConnection = Partial<Pick<
+  AppServerSession,
+  "request" | "subscribeState"
+>>;
 
 export function createTaskCallbacks({
   attachmentResources,
@@ -113,15 +117,14 @@ export function createTaskCallbacks({
     subscribeToolDetail: (artifactId) => {
       if (!state.snapshot) return () => undefined;
       const taskId = state.snapshot.task.task_id;
-      if (!backendConnection?.request || !backendConnection.handleNotification || !state.appServerStateRootId) {
+      if (!backendConnection?.subscribeState || !state.appServerStateRootId) {
         dispatch({ type: "toolDetail:error", taskId, artifactId, message: appServerRequiredMessage() });
         return () => undefined;
       }
       dispatch({ type: "toolDetail:start", taskId, artifactId });
       return startAppServerStateSubscription({
         backendConnection: {
-          handleNotification: backendConnection.handleNotification,
-          request: backendConnection.request,
+          subscribeState: backendConnection.subscribeState,
         },
         context: {
           stateRootId: state.appServerStateRootId as StateRootId,

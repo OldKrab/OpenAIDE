@@ -7,9 +7,7 @@ import {
   type SetStateAction,
 } from "react";
 import type { AppPreferencesRecord } from "@openaide/app-shell-contracts";
-import type {
-  BackendConnection,
-} from "@openaide/app-server-client";
+import type { AppServerSession } from "@openaide/app-server-client";
 import { requestMissingInitialTaskList } from "../intents/taskReadIntents";
 import { refreshSettingsProjectionsThroughBackend } from "../intents/settingsProjectionIntents";
 import { startAppServerServerRequestBridge } from "../services/appServerServerRequests";
@@ -60,8 +58,15 @@ import { useTaskRouteLifecycle } from "./useTaskRouteLifecycle";
 export type { AppServerReplicaTransition } from "./appServerReplicaLifecycle";
 
 export type AppControllerBackendConnection = Pick<
-  BackendConnection,
-  "initialize" | "request" | "handleNotification" | "handleRequest" | "close"
+  AppServerSession,
+  | "initialize"
+  | "request"
+  | "handleNotification"
+  | "handleRecoveryBaseline"
+  | "handleSessionStatus"
+  | "subscribeState"
+  | "handleRequest"
+  | "close"
 >;
 
 export type BackendConnectionState =
@@ -193,6 +198,66 @@ export function useAppControllerBackendLifecycle({
           postHostMessage,
         })
       : undefined;
+    const stopRecoveryBaselines = backendConnection?.handleRecoveryBaseline((baseline) => {
+      if (!active) return;
+      const recoveredSnapshot = baseline.result.snapshot;
+      const recoveredReplicaEpoch = establishReplica(replicaIdentityFromSnapshot(recoveredSnapshot));
+      const recoveredDispatch = bindAppServerReplicaEpoch(dispatch, recoveredReplicaEpoch);
+      const recoveredContext = mappingContextFromClientSnapshot(recoveredSnapshot);
+      const currentContext = stateSubscriptionContext.current;
+      if (currentContext) Object.assign(currentContext, recoveredContext);
+      else stateSubscriptionContext.current = recoveredContext;
+
+      if (baseline.reason === "clientLivenessExpired") {
+        const expiredTaskId = newTaskController.expireClientLease();
+        if (expiredTaskId) {
+          recoveredDispatch({
+            type: "newTask:leaseExpired",
+            taskId: expiredTaskId,
+            message: "Attachment must be reselected after the client session expired.",
+          });
+        }
+      }
+
+      const ingestion = actionsFromInitialSnapshot(recoveredSnapshot, {
+        includeTaskNavigation: true,
+        includeActiveTask: initialBootstrap.surface === "task" && Boolean(initialBootstrap.taskId),
+        retainedNewTaskContext: retainedNewTaskContextForInitialization(
+          recoveredSnapshot,
+          currentNewTaskContext.current,
+        ),
+      });
+      for (const action of ingestion.actions) {
+        if (action.type === "settings:preferences") setPreferences(action.preferences);
+        recoveredDispatch(action);
+      }
+      if (recoveredSnapshot.agents) setAgents(agentOptionsFromProtocol(recoveredSnapshot.agents));
+      setBackendStateGeneration((current) => current + 1);
+    });
+    const stopSessionStatus = backendConnection?.handleSessionStatus((next) => {
+      if (!active) return;
+      if (next.status === "recovering") {
+        setBackendReady(false);
+        setBackendConnectionState({
+          status: "reconnecting",
+          message: "Connection interrupted. Reconnecting automatically.",
+        });
+      } else if (next.status === "unavailable") {
+        setBackendReady(false);
+        setBackendConnectionState({
+          status: "unavailable",
+          message: next.error instanceof Error ? next.error.message : "Unable to restore App Server session.",
+        });
+      } else if (
+        next.status === "ready"
+        && backendInitialized.current
+        && pendingGlobalSubscriptionBaselines.current.size === 0
+        && failedSubscriptionBaselines.current.size === 0
+      ) {
+        setBackendReady(true);
+        setBackendConnectionState({ status: "ready" });
+      }
+    });
     const stopSubscriptions: Array<() => void> = [];
     setBackendStateGeneration((generation) => generation + 1);
     backendInitialized.current = false;
@@ -252,10 +317,7 @@ export function useAppControllerBackendLifecycle({
               setAgents(agentOptionsFromProtocol(result.snapshot.agents));
             }
             if (backendConnection) {
-              const subscriptionConnection = {
-                handleNotification: backendConnection.handleNotification,
-                request: backendConnection.request,
-              };
+              const subscriptionConnection = { subscribeState: backendConnection.subscribeState };
               stopSubscriptions.push(startAppServerStateSubscription({
                 backendConnection: subscriptionConnection,
                 context: subscriptionContext,
@@ -391,6 +453,8 @@ export function useAppControllerBackendLifecycle({
       taskRouteLifecycle.reset();
       stateSubscriptionContext.current = undefined;
       for (const stop of stopSubscriptions) stop();
+      stopRecoveryBaselines?.();
+      stopSessionStatus?.();
       serverRequestBridge?.dispose();
       stopSession();
       backendConnection?.close();

@@ -248,7 +248,7 @@ function httpError(operation: string, status: number, body: string) {
 }
 
 class ReliableHttpError extends Error {
-  constructor(operation: string, readonly status: number, body: string) {
+  constructor(operation: string, readonly status: number, readonly body: string) {
     super(`App Server reliable-session ${operation} failed with HTTP ${status}: ${body}`);
   }
 }
@@ -256,6 +256,17 @@ class ReliableHttpError extends Error {
 /** A gone session is safe to replace, but the interrupted RPC is still ambiguous. */
 export function isReliableHttpSessionExpired(error: unknown) {
   return error instanceof ReliableHttpError && error.status === 410;
+}
+
+/** A bounded receive replay gap requires fresh product-state subscription baselines. */
+export function isReliableHttpReplayExpired(error: unknown) {
+  if (!(error instanceof ReliableHttpError) || error.status !== 409) return false;
+  try {
+    const payload = JSON.parse(error.body) as { resyncRequired?: unknown };
+    return payload.resyncRequired === true;
+  } catch {
+    return false;
+  }
 }
 
 function isTerminalHttpError(error: unknown) {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
   CircleAlert,
@@ -55,6 +55,7 @@ export function TaskWorkspacePicker({
   );
   const [recreateTarget, setRecreateTarget] = useState<WorktreeSummary>();
   const [query, setQuery] = useState("");
+  const [explainedUnavailableId, setExplainedUnavailableId] = useState<string>();
   const [managementTasks, setManagementTasks] = useState(tasks);
   const [managementTasksError, setManagementTasksError] = useState<string>();
   // Forgotten entries stay in the projection only to decorate historical Tasks.
@@ -145,23 +146,35 @@ export function TaskWorkspacePicker({
             const root = isProjectRoot(worktree, project);
             const selected = root ? !selectedWorktreeId : selectedWorktreeId === worktree.worktreeId;
             const available = worktree.availability === "available";
+            const reasonOpen = !available && explainedUnavailableId === worktree.worktreeId;
+            const reasonId = `worktree-unavailable-${worktree.worktreeId}`;
             return (
-              <button
-                aria-selected={selected}
-                className={selected ? "selected" : ""}
-                disabled={!available}
-                key={worktree.worktreeId}
-                onClick={() => {
-                  selectWorkspace(intents, project, worktree);
-                  onClose();
-                }}
-                role="option"
-                title={worktree.availabilityReason ?? undefined}
-                type="button"
-              >
-                {root ? <FolderRoot size={14} /> : <GitBranch size={14} />}
-                <span><strong>{root ? "Project root" : worktree.name}</strong><small>{chooserMeta(worktree)}</small></span>
-              </button>
+              <Fragment key={worktree.worktreeId}>
+                <button
+                  aria-controls={!available ? reasonId : undefined}
+                  aria-expanded={!available ? reasonOpen : undefined}
+                  aria-label={!available ? `${root ? "Project root" : worktree.name}, unavailable. Show reason` : undefined}
+                  aria-selected={selected}
+                  className={`${selected ? "selected " : ""}${!available ? "unavailable" : ""}`.trim()}
+                  onClick={() => {
+                    if (!available) {
+                      setExplainedUnavailableId((current) => current === worktree.worktreeId ? undefined : worktree.worktreeId);
+                      return;
+                    }
+                    selectWorkspace(intents, project, worktree);
+                    onClose();
+                  }}
+                  role="option"
+                  type="button"
+                >
+                  {root ? <FolderRoot size={14} /> : <GitBranch size={14} />}
+                  <span><strong>{root ? "Project root" : worktree.name}</strong><small>{chooserMeta(worktree)}</small></span>
+                </button>
+                {reasonOpen ? <p className="task-workspace-option-reason" id={reasonId} role="status">
+                  <CircleAlert size={13} />
+                  <span><strong>Unavailable</strong><small>{worktree.availabilityReason ?? "This worktree cannot currently be used."}</small></span>
+                </p> : null}
+              </Fragment>
             );
           })}
           {!filtered.length ? <p className="task-workspace-empty">No matching worktrees.</p> : null}

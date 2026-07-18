@@ -46,6 +46,38 @@ describe("TaskWorkspacePicker", () => {
     });
   });
 
+  it("reveals an unavailable worktree reason when its row is activated", () => {
+    const intents = testIntents();
+    const repo = repository();
+    repo.worktrees[1] = worktree({
+      ...repo.worktrees[1],
+      availability: "unavailable",
+      availabilityReason: "The worktree folder is missing.",
+    });
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(
+        <TaskWorkspacePicker
+          intents={intents}
+          onClose={vi.fn()}
+          project={{ projectId: "project_1", label: "OpenAIDE", workspaceRoot: "/workspace/OpenAIDE", worktreeRepositoryId: "repository_1", projectWorktreeId: "worktree_root" }}
+          repository={repo}
+          tasks={[]}
+        />,
+      );
+    });
+
+    const option = tree.root.findAllByProps({ role: "option" }).find((item) => text(item).includes("Sidebar scrolling"));
+    expect(option?.props.disabled).toBeUndefined();
+    expect(option?.props["aria-disabled"]).toBeUndefined();
+    expect(option?.props["aria-label"]).toBe("Sidebar scrolling, unavailable. Show reason");
+    act(() => option?.props.onClick());
+
+    expect(text(tree.root.findByProps({ className: "task-workspace-option-reason" })))
+      .toContain("The worktree folder is missing.");
+    expect(intents.selectWorktree).not.toHaveBeenCalled();
+  });
+
   it("uses the configured Project worktree as Project root even when Git primary is elsewhere", () => {
     const intents = testIntents();
     const repo = repository();

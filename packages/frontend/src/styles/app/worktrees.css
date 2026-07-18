@@ -53,13 +53,14 @@
   width: 100%; min-height: 44px; display: grid; grid-template-columns: 18px minmax(0, 1fr); align-items: center; gap: 5px;
   border-radius: var(--oa-radius-sm); padding: 5px 7px; text-align: left;
 }
-.task-workspace-list > button:hover:not(:disabled), .task-workspace-list > button.selected { background: var(--oa-raised); }
-.task-workspace-list > button:disabled { opacity: .58; }
+.task-workspace-list > button:hover, .task-workspace-list > button.selected { background: var(--oa-raised); }
+.task-workspace-list > button.unavailable { opacity: .68; cursor: help; }
 .task-workspace-list > button > svg { color: var(--oa-muted); }
 .task-workspace-list > button > span { min-width: 0; display: grid; gap: 1px; }
 .task-workspace-list strong, .task-workspace-list small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .task-workspace-list strong { font-size: 12px; font-weight: 570; }
 .task-workspace-list small { color: var(--oa-muted); font-size: 10.5px; }
+.task-workspace-option-reason { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 5px; align-items: start; margin: -1px 7px 5px 25px; color: var(--oa-danger); font-size: 10.5px; }.task-workspace-option-reason span { min-width: 0; display: grid; gap: 1px; }.task-workspace-option-reason small { overflow: visible; color: var(--oa-muted); white-space: normal; }
 .task-workspace-empty { margin: 0; padding: 16px 9px; color: var(--oa-muted); font-size: 11px; text-align: center; }
 
 .task-workspace-actions { border-top: 1px solid var(--oa-border-subtle); margin-top: 3px; padding: 5px 2px 1px; }
@@ -144,9 +145,16 @@
   padding: 8px;
 }
 .task-preview-popover header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; padding: 4px 5px; }.task-preview-popover header strong { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.task-preview-popover header span { color: var(--oa-muted); font-size: 11px; }
+.task-preview-source-wrap { position: relative; margin: 0 5px 3px; }
+.task-preview-source { display: flex; align-items: center; gap: 4px; margin: 0; color: var(--oa-muted); font-size: 11px; }
+.task-preview-source button { border: 0; border-bottom: 1px dotted currentColor; border-radius: 0; background: transparent; color: inherit; font: inherit; padding: 0; cursor: help; }.task-preview-source button:hover { color: var(--oa-text); }.task-preview-source button:focus-visible { border-bottom-color: transparent; outline: 1px solid var(--oa-focus); outline-offset: 2px; }
+.task-preview-explanation { position: absolute; z-index: 2; top: calc(100% + 5px); left: -5px; width: 268px; border: 1px solid var(--oa-border-subtle); border-radius: var(--oa-radius-sm); background: var(--oa-panel); box-shadow: 0 8px 20px color-mix(in oklch, var(--oa-text) 14%, transparent); color: var(--oa-text); font-size: 11px; line-height: 1.45; padding: 8px 9px; }
 .task-preview-popover > div { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 4px; align-items: start; border-radius: var(--oa-radius-sm); padding: 6px 5px; }.task-preview-popover > div > svg { color: var(--oa-muted); }.task-preview-popover > div > span { min-width: 0; display: grid; gap: 1px; }.task-preview-popover small { color: var(--oa-muted); font-size: 9.5px; text-transform: uppercase; letter-spacing: .03em; }.task-preview-popover em { overflow: hidden; color: var(--oa-muted); font-size: 10px; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }.task-preview-popover .unavailable { color: var(--oa-danger); }
+button.task-row-mobile-details-action { display: none; }
+.task-row-details { display: grid; gap: 7px; margin: 2px 4px 5px; padding: 7px; border-radius: var(--oa-radius-sm); background: var(--oa-raised); }.task-row-details span { min-width: 0; display: flex; align-items: center; gap: 6px; }.task-row-details small { margin-left: auto; overflow: hidden; color: var(--oa-muted); text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 760px) {
   .task-preview-popover { display: none; }
+  button.task-row-mobile-details-action { display: flex; }
   .task-row-menu {
     position: fixed;
     z-index: 90;

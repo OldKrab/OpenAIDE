@@ -79,6 +79,11 @@ describe("task list row styles", () => {
     expect(appCss).not.toMatch(/\.task-row\s*{[^}]*overflow:\s*hidden;/);
   });
 
+  it("exposes Task details in the row menu only on mobile", () => {
+    expect(appCss).toMatch(/button\.task-row-mobile-details-action\s*{\s*display:\s*none;/);
+    expect(appCss).toMatch(/@media \(max-width:\s*760px\)\s*{[\s\S]*button\.task-row-mobile-details-action\s*{\s*display:\s*flex;/);
+  });
+
   it("lets agent markdown use the full readable chat lane", () => {
     expect(appCss).toMatch(/\.chat-agent\s*{[^}]*width:\s*100%;[^}]*max-width:\s*100%;[^}]*min-width:\s*0;[^}]*font-family:\s*var\(--oa-chat-font\);[^}]*font-size:\s*15px;[^}]*line-height:\s*1\.5;/);
     expect(appCss).toMatch(/\.chat-agent a\s*{\s*color:\s*var\(--oa-focus\);/);
