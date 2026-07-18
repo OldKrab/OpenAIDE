@@ -248,7 +248,13 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
                                 let _ = reply_tx.send(Ok(agent_probe_result_from_initialize(agent_id, &initialize)));
                             }
                             AcpAgentProcessControl::Authenticate { request, reply_tx } => {
-                                let result = authenticate_on_shared_process(&connection, &initialize, request).await;
+                                let result = authenticate_on_shared_process(
+                                    &connection,
+                                    &initialize,
+                                    &config,
+                                    &host_bridge,
+                                    request,
+                                ).await;
                                 let _ = reply_tx.send(result);
                             }
                         }
@@ -274,9 +280,26 @@ pub(super) async fn run_acp_agent_process(input: AcpAgentProcessInput) -> Result
 async fn authenticate_on_shared_process(
     connection: &ConnectionTo<Agent>,
     initialize: &InitializeResponse,
+    config: &AcpAgentConfig,
+    host_bridge: &HostBridge,
     request: AgentAuthenticateRequest,
 ) -> Result<AgentAuthenticateResult, RuntimeError> {
     validate_auth_method(initialize, &request.method_id)?;
+    let method = initialize
+        .auth_methods
+        .iter()
+        .find(|method| method.id().0.as_ref() == request.method_id)
+        .ok_or_else(|| RuntimeError::InvalidParams("method_id".to_string()))?;
+    if let crate::agent::acp_schema::AuthMethod::Terminal(method) = method {
+        if !request.terminal_confirmed {
+            open_visible_auth_terminal(config, method, host_bridge).await?;
+            return Ok(AgentAuthenticateResult {
+                agent_id: request.agent_id,
+                method_id: request.method_id,
+                status: AgentAuthenticateStatus::AwaitingUser,
+            });
+        }
+    }
     connection
         .send_request(AuthenticateRequest::new(request.method_id.clone()))
         .block_task()
@@ -287,6 +310,37 @@ async fn authenticate_on_shared_process(
         method_id: request.method_id,
         status: AgentAuthenticateStatus::Authenticated,
     })
+}
+
+async fn open_visible_auth_terminal(
+    config: &AcpAgentConfig,
+    method: &crate::agent::acp_schema::AuthMethodTerminal,
+    host_bridge: &HostBridge,
+) -> Result<(), RuntimeError> {
+    let command = config.command.clone();
+    let args = config
+        .args
+        .iter()
+        .cloned()
+        .chain(method.args.iter().cloned())
+        .collect::<Vec<_>>();
+    let mut env = config.env.iter().cloned().collect::<HashMap<_, _>>();
+    env.extend(method.env.clone());
+    let host_bridge = host_bridge.clone();
+    tokio::task::spawn_blocking(move || {
+        host_bridge.request_with_timeout(
+            "agent/auth_terminal",
+            Some(serde_json::json!({
+                "command": command,
+                "args": args,
+                "env": env,
+            })),
+            None,
+        )
+    })
+    .await
+    .map_err(|error| RuntimeError::Internal(error.to_string()))??;
+    Ok(())
 }
 
 async fn list_sessions_on_shared_process(

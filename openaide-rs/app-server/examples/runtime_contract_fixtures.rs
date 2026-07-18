@@ -179,7 +179,12 @@ fn main() {
                     label: "Codex login".to_string(),
                     kind: "agent".to_string(),
                     description: Some("Sign in".to_string()),
+                    variables: Vec::new(),
+                    link: None,
+                    terminal_args: Vec::new(),
+                    terminal_env: Default::default(),
                 }],
+                logout_supported: true,
             }),
             "agent_authenticate": to_value(AgentAuthenticateResult {
                 agent_id: "codex".to_string(),

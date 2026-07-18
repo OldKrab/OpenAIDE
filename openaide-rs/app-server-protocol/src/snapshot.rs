@@ -147,6 +147,7 @@ pub enum AgentStatus {
     Connected,
     SetupRequired,
     AuthRequired,
+    Authenticating,
     Unsupported,
     Failed,
 }

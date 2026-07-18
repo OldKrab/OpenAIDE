@@ -1,12 +1,12 @@
 use std::time::Duration;
 
 use crate::agent::acp_schema::{
-    ClientCapabilities, CreateTerminalRequest, CreateTerminalResponse, ElicitationCapabilities,
-    ElicitationFormCapabilities, FileSystemCapabilities, InitializeRequest, KillTerminalRequest,
-    KillTerminalResponse, ProtocolVersion, ReadTextFileRequest, ReadTextFileResponse,
-    ReleaseTerminalRequest, ReleaseTerminalResponse, TerminalOutputRequest, TerminalOutputResponse,
-    WaitForTerminalExitRequest, WaitForTerminalExitResponse, WriteTextFileRequest,
-    WriteTextFileResponse,
+    AuthCapabilities, ClientCapabilities, CreateTerminalRequest, CreateTerminalResponse,
+    ElicitationCapabilities, ElicitationFormCapabilities, FileSystemCapabilities,
+    InitializeRequest, KillTerminalRequest, KillTerminalResponse, ProtocolVersion,
+    ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse,
+    TerminalOutputRequest, TerminalOutputResponse, WaitForTerminalExitRequest,
+    WaitForTerminalExitResponse, WriteTextFileRequest, WriteTextFileResponse,
 };
 
 use crate::agent::acp_trace::AcpTraceSession;
@@ -28,6 +28,7 @@ pub(crate) fn initialize_request(host_bridge: &HostBridge) -> InitializeRequest 
 
     InitializeRequest::new(ProtocolVersion::V1).client_capabilities(
         capabilities
+            .auth(AuthCapabilities::new().terminal(true))
             .fs(FileSystemCapabilities::new()
                 .read_text_file(true)
                 .write_text_file(true))

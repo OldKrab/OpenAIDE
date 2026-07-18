@@ -8,6 +8,10 @@ use crate::agent::AgentSecretResolver;
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::host::HostBridge;
 
+#[cfg(test)]
+#[path = "acp_agent_config_tests.rs"]
+mod tests;
+
 #[derive(Debug, Clone)]
 pub struct AcpAgentConfig {
     pub agent_id: String,
@@ -28,16 +32,21 @@ impl AcpAgentConfig {
                 secret_env: Vec::new(),
             }
         } else {
-            Self {
-                agent_id: "codex".to_string(),
-                command: "npx".to_string(),
-                args: vec![
-                    "-y".to_string(),
-                    "@agentclientprotocol/codex-acp".to_string(),
-                ],
-                env: Vec::new(),
-                secret_env: Vec::new(),
-            }
+            Self::codex_npx_fallback()
+        }
+    }
+
+    /// The fallback is versioned with OpenAIDE so unchanged builds remain reproducible.
+    pub(crate) fn codex_npx_fallback() -> Self {
+        Self {
+            agent_id: "codex".to_string(),
+            command: "npx".to_string(),
+            args: vec![
+                "-y".to_string(),
+                "@agentclientprotocol/codex-acp@1.0.1".to_string(),
+            ],
+            env: Vec::new(),
+            secret_env: Vec::new(),
         }
     }
 

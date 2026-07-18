@@ -1,17 +1,18 @@
 use super::*;
 use crate::agent::acp_agent_status::agent_probe_result_from_initialize;
+use crate::agent::acp_errors::acp_request_error;
 use crate::agent::acp_host::{
     host_request, initialize_request, read_text_file_from_host, write_text_file_from_host,
 };
 use crate::agent::acp_runtime_threading::close_in_parallel;
 use crate::agent::acp_schema::{
-    AgentCapabilities, AudioContent, AuthMethod, AuthMethodAgent, AuthenticateRequest,
-    AuthenticateResponse, AvailableCommand, AvailableCommandInput, AvailableCommandsUpdate,
-    BlobResourceContents, ContentBlock, ContentChunk, CreateTerminalRequest,
-    CreateTerminalResponse, Diff, EmbeddedResource, EmbeddedResourceResource, ImageContent,
-    Implementation, InitializeRequest, InitializeResponse, ListSessionsRequest,
-    ListSessionsResponse, LoadSessionRequest, LoadSessionResponse, McpCapabilities,
-    NewSessionRequest, NewSessionResponse, PermissionOption, PermissionOptionKind,
+    AgentCapabilities, AudioContent, AuthEnvVar, AuthMethod, AuthMethodAgent, AuthMethodEnvVar,
+    AuthMethodTerminal, AuthenticateRequest, AuthenticateResponse, AvailableCommand,
+    AvailableCommandInput, AvailableCommandsUpdate, BlobResourceContents, ContentBlock,
+    ContentChunk, CreateTerminalRequest, CreateTerminalResponse, Diff, EmbeddedResource,
+    EmbeddedResourceResource, ImageContent, Implementation, InitializeRequest, InitializeResponse,
+    ListSessionsRequest, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse,
+    McpCapabilities, NewSessionRequest, NewSessionResponse, PermissionOption, PermissionOptionKind,
     PromptCapabilities, ProtocolVersion, ReadTextFileRequest, RequestPermissionOutcome,
     RequestPermissionRequest, ResourceLink, SessionCapabilities, SessionCloseCapabilities,
     SessionConfigOption, SessionConfigOptionCategory as AcpConfigOptionCategory,
@@ -778,13 +779,20 @@ fn probe_result_normalizes_initialize_without_raw_payloads() {
 }
 
 #[test]
-fn validate_auth_method_accepts_agent_methods_only() {
-    let initialize =
-        InitializeResponse::new(ProtocolVersion::V1).auth_methods(vec![AuthMethod::Agent(
-            AuthMethodAgent::new("codex-login", "Codex login"),
-        )]);
+fn validate_auth_method_accepts_every_acp_v1_method_type() {
+    let initialize = InitializeResponse::new(ProtocolVersion::V1).auth_methods(vec![
+        AuthMethod::Agent(AuthMethodAgent::new("codex-login", "Codex login")),
+        AuthMethod::EnvVar(AuthMethodEnvVar::new(
+            "api-key",
+            "API key",
+            vec![AuthEnvVar::new("API_KEY")],
+        )),
+        AuthMethod::Terminal(AuthMethodTerminal::new("terminal-login", "Terminal login")),
+    ]);
 
     validate_auth_method(&initialize, "codex-login").unwrap();
+    validate_auth_method(&initialize, "api-key").unwrap();
+    validate_auth_method(&initialize, "terminal-login").unwrap();
     assert!(matches!(
         validate_auth_method(&initialize, "missing").unwrap_err(),
         RuntimeError::InvalidParams(_)
@@ -1209,7 +1217,7 @@ fn session_list_result_is_workspace_scoped_and_normalized() {
 }
 
 #[test]
-fn start_active_session_retries_auth_required_on_same_connection() {
+fn start_active_session_does_not_implicitly_authenticate_or_retry() {
     let authenticated = Arc::new(AtomicBool::new(false));
     let authenticate_count = Arc::new(AtomicUsize::new(0));
     let new_session_count = Arc::new(AtomicUsize::new(0));
@@ -1227,28 +1235,32 @@ fn start_active_session_retries_auth_required_on_same_connection() {
                     .send_request(InitializeRequest::new(ProtocolVersion::V1))
                     .block_task()
                     .await?;
-                let (session, _options) = start_active_session(
+                let result = start_active_session(
                     &connection,
                     env::current_dir().unwrap_or_else(|_| PathBuf::from("/")),
                     &initialize,
                     Some("codex-login"),
                     None,
                 )
-                .await?;
+                .await;
 
-                assert_eq!(session.session_id().to_string(), "session-authenticated");
+                assert!(matches!(
+                    result,
+                    Err(ref error)
+                        if matches!(acp_request_error(error), RuntimeError::AuthRequired(_))
+                ));
                 Ok(())
             })
             .await
             .unwrap();
     });
 
-    assert_eq!(authenticate_count.load(Ordering::SeqCst), 1);
-    assert_eq!(new_session_count.load(Ordering::SeqCst), 2);
+    assert_eq!(authenticate_count.load(Ordering::SeqCst), 0);
+    assert_eq!(new_session_count.load(Ordering::SeqCst), 1);
 }
 
 #[test]
-fn session_list_retries_auth_required_on_same_connection() {
+fn session_list_does_not_implicitly_authenticate_or_retry() {
     let authenticated = Arc::new(AtomicBool::new(false));
     let authenticate_count = Arc::new(AtomicUsize::new(0));
     let list_count = Arc::new(AtomicUsize::new(0));
@@ -1267,30 +1279,28 @@ fn session_list_retries_auth_required_on_same_connection() {
                     .send_request(InitializeRequest::new(ProtocolVersion::V1))
                     .block_task()
                     .await?;
-                let response = request_session_list(
+                let result = request_session_list(
                     &connection,
                     requested_cwd.clone(),
                     None,
                     &initialize,
                     Some("codex-login"),
                 )
-                .await?;
+                .await;
 
-                let result = agent_list_sessions_result_from_response(
-                    "codex".to_string(),
-                    response,
-                    &requested_cwd,
-                    None,
-                );
-                assert_eq!(result.sessions[0].session_id, "session-listed");
+                assert!(matches!(
+                    result,
+                    Err(ref error)
+                        if matches!(acp_request_error(error), RuntimeError::AuthRequired(_))
+                ));
                 Ok(())
             })
             .await
             .unwrap();
     });
 
-    assert_eq!(authenticate_count.load(Ordering::SeqCst), 1);
-    assert_eq!(list_count.load(Ordering::SeqCst), 2);
+    assert_eq!(authenticate_count.load(Ordering::SeqCst), 0);
+    assert_eq!(list_count.load(Ordering::SeqCst), 1);
 }
 
 #[test]

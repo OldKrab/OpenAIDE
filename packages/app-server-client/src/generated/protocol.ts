@@ -223,11 +223,11 @@ export type AgentProbeParams = { agentId: AgentId, };
 
 export type AgentProbeResult = { agents: AgentCollectionSnapshot, };
 
-export type AgentAuthenticateParams = { agentId: AgentId, methodId: string, };
+export type AgentAuthenticateParams = { agentId: AgentId, methodId: string, env?: { [key in string]: string }, secretEnv?: Array<string>, secretStorageAgentId?: string | null, terminalConfirmed?: boolean, };
 
 export type AgentAuthenticateResult = { agentId: AgentId, methodId: string, status: AgentAuthenticateStatus, };
 
-export type AgentAuthenticateStatus = "authenticated";
+export type AgentAuthenticateStatus = "authenticated" | "awaiting_user";
 
 export type AgentListSessionsParams = { agentId: AgentId, projectId: ProjectId, cursor: string | null, };
 
@@ -265,17 +265,19 @@ export type AgentSettingsDetailsParams = Record<symbol, never>;
 
 export type AgentSettingsDetailsResult = { generatedAt: string, agents: Array<AgentSettingsDetail>, };
 
-export type AgentSettingsDetail = { agentId: AgentId, label: string, enabled: boolean, sourceKind: AgentSettingsSourceKind, icon: string, transport: AgentSettingsTransport, status: AgentSettingsStatus, launchLabel: string, commandLine?: string | null, env?: Array<AgentSettingsEnvRow>, description: string, capabilities?: Array<string>, authMethods?: Array<AgentSettingsAuthMethod>, };
+export type AgentSettingsDetail = { agentId: AgentId, label: string, enabled: boolean, sourceKind: AgentSettingsSourceKind, icon: string, transport: AgentSettingsTransport, status: AgentSettingsStatus, launchLabel: string, commandLine?: string | null, env?: Array<AgentSettingsEnvRow>, description: string, capabilities?: Array<string>, authMethods?: Array<AgentSettingsAuthMethod>, logoutSupported?: boolean, authenticatingMethodId?: string | null, };
 
 export type AgentSettingsSourceKind = "builtIn" | "custom";
 
 export type AgentSettingsTransport = "stdio";
 
-export type AgentSettingsStatus = "disconnected" | "launching" | "connected" | "setupRequired" | "authRequired" | "unsupported" | "failed" | "disabled";
+export type AgentSettingsStatus = "disconnected" | "launching" | "connected" | "setupRequired" | "authRequired" | "authenticating" | "unsupported" | "failed" | "disabled";
 
 export type AgentSettingsEnvRow = { name: string, value?: string | null, secret: boolean, };
 
-export type AgentSettingsAuthMethod = { id: string, label: string, kind: string, description?: string | null, };
+export type AgentSettingsAuthMethod = { id: string, label: string, kind: string, description?: string | null, variables?: Array<AgentSettingsAuthVariable>, link?: string | null, terminalArgs?: Array<string>, terminalEnv?: { [key in string]: string }, };
+
+export type AgentSettingsAuthVariable = { name: string, label?: string | null, secret: boolean, optional: boolean, };
 
 export type SettingsMcpServersParams = Record<symbol, never>;
 
@@ -641,7 +643,7 @@ export type AgentCollectionSnapshot = { agents: Array<AgentSummary>, };
 
 export type AgentSummary = { agentId: AgentId, label: string, status: AgentStatus, capabilities?: AgentCapabilities, };
 
-export type AgentStatus = "disconnected" | "launching" | "connected" | "setupRequired" | "authRequired" | "unsupported" | "failed";
+export type AgentStatus = "disconnected" | "launching" | "connected" | "setupRequired" | "authRequired" | "authenticating" | "unsupported" | "failed";
 
 export type AgentCapabilities = { resumeTasks?: boolean, deleteNativeSessions?: boolean, };
 

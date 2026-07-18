@@ -38,15 +38,12 @@ export function draftChangesLaunch(agent: AgentSettingsRecord, draft: AgentDraft
 export function agentStatusCopy(agent: AgentSettingsRecord) {
   if (agent.status === "connected" || agent.status === "ready") return "Ready for new tasks.";
   if (agent.status === "auth_required") return "Authentication is required before this agent can start work.";
+  if (agent.status === "authenticating") return "Authentication is in progress.";
   if (agent.status === "setup_required") return "Setup is incomplete.";
   if (agent.status === "unsupported") return "This process launched, but did not satisfy OpenAIDE's ACP requirements.";
   if (agent.status === "disabled") return "Disabled in settings.";
   if (agent.status === "failed") return "Connection check failed.";
   return "Status check needed. Refresh to verify this agent.";
-}
-
-export function primaryAgentAuthMethod(agent: AgentSettingsRecord): AgentAuthMethod | undefined {
-  return agent.auth_methods.find((method) => method.kind === "agent") ?? agent.auth_methods[0];
 }
 
 export function shouldConsumeAgentSaveAck({

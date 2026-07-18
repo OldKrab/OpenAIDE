@@ -1276,6 +1276,11 @@ describe("app controller callbacks", () => {
 
   it("authenticates Agents through BackendConnection and refreshes Settings", async () => {
     const dispatch = vi.fn();
+    const state = createInitialState();
+    state.settings.agentDetails = [{
+      ...customSettingsAgent("codex"),
+      auth_methods: [{ id: "codex-login", label: "Codex login", kind: "agent" }],
+    }];
     const request = vi.fn(async (method: string) => {
       if (method === AGENT_AUTHENTICATE) {
         return { agentId: "codex", methodId: "codex-login", status: "authenticated" };
@@ -1306,6 +1311,7 @@ describe("app controller callbacks", () => {
     callbacks({
       backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
+      state,
     }).settings.authenticateAgent("codex", "codex-login");
     await settlePromises();
 
@@ -1337,6 +1343,31 @@ describe("app controller callbacks", () => {
       type: "agent.authenticate",
       payload: { agent_id: "codex", method_id: "codex-login" },
     });
+  });
+
+  it("does not render backend authentication error details", async () => {
+    const dispatch = vi.fn();
+    const state = createInitialState();
+    state.settings.agentDetails = [{ ...customSettingsAgent("codex"),
+      auth_methods: [{ id: "api-key", label: "API Key", kind: "agent" }],
+    }];
+
+    callbacks({
+      backendConnection: {
+        request: vi.fn(async () => {
+          throw new Error("internal error: CODEX_API_KEY is not set: { vendor metadata }");
+        }) as unknown as BackendConnection["request"],
+      },
+      dispatch,
+      state,
+    }).settings.authenticateAgent("codex", "api-key");
+    await settlePromises();
+
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "settings:error",
+      message: "Authentication failed. Check the Agent's requirements and try again.",
+    });
+    expect(JSON.stringify(dispatch.mock.calls)).not.toContain("CODEX_API_KEY");
   });
 
   it("updates custom Agent metadata through BackendConnection when launch fields are unchanged", async () => {

@@ -34,13 +34,13 @@ export function createSettingsCallbacks({
     state,
   });
   return {
-    authenticateAgent: (agentId, methodId) => {
+    authenticateAgent: (agentId, methodId, values) => {
       dispatch({ type: "settings:start" });
-      void authenticateAgentThroughBackend(agentSettingsContext(), agentId, methodId)
+      void authenticateAgentThroughBackend(agentSettingsContext(), agentId, methodId, values)
         .then((handled) => {
           if (!handled) dispatch({ type: "settings:error", message: appServerRequiredMessage() });
         })
-        .catch((error) => dispatch({ type: "settings:error", message: safeErrorMessage(error) }));
+        .catch(() => dispatch({ type: "settings:error", message: authenticationFailedMessage() }));
     },
     createCustomAgent: (payload) => {
       dispatch({ type: "settings:start" });
@@ -137,6 +137,10 @@ function safeErrorMessage(error: unknown) {
 
 function appServerRequiredMessage() {
   return "Agent catalog changes require the App Server.";
+}
+
+function authenticationFailedMessage() {
+  return "Authentication failed. Check the Agent's requirements and try again.";
 }
 
 function settingsReadRequiredMessage() {

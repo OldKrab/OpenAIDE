@@ -21,6 +21,14 @@ pub(super) struct AcpAgentProcessPool {
     registry: AgentRegistryHandle,
     host_bridge: HostBridge,
     processes: Mutex<HashMap<String, AcpAgentProcessClient>>,
+    auth_environments: Mutex<HashMap<String, AcpAuthEnvironment>>,
+}
+
+#[derive(Clone)]
+struct AcpAuthEnvironment {
+    env: HashMap<String, String>,
+    secret_env: Vec<String>,
+    secret_storage_agent_id: String,
 }
 
 #[derive(Clone)]
@@ -44,6 +52,7 @@ impl AcpAgentProcessPool {
             registry,
             host_bridge,
             processes: Mutex::new(HashMap::new()),
+            auth_environments: Mutex::new(HashMap::new()),
         }
     }
 
@@ -132,7 +141,39 @@ impl AcpAgentProcessPool {
         &self,
         request: AgentAuthenticateRequest,
     ) -> Result<crate::protocol::model::AgentAuthenticateResult, RuntimeError> {
-        let process = self.get_or_launch_process(&request.agent_id)?;
+        let agent_id = request.agent_id.clone();
+        let has_auth_environment = request.secret_storage_agent_id.is_some();
+        let auth_environment =
+            request
+                .secret_storage_agent_id
+                .clone()
+                .map(|storage_id| AcpAuthEnvironment {
+                    env: request.env.clone(),
+                    secret_env: request.secret_env.clone(),
+                    secret_storage_agent_id: storage_id,
+                });
+        let previous_environment = if let Some(environment) = auth_environment {
+            let previous = self
+                .auth_environments
+                .lock()
+                .expect("ACP auth environment registry poisoned")
+                .insert(agent_id.clone(), environment);
+            if let Some(process) = self.existing_process(&agent_id) {
+                self.stop_process(&agent_id, &process);
+            }
+            previous
+        } else {
+            None
+        };
+        let process = match self.get_or_launch_process(&request.agent_id) {
+            Ok(process) => process,
+            Err(error) => {
+                if has_auth_environment {
+                    self.restore_auth_environment(&agent_id, previous_environment);
+                }
+                return Err(error);
+            }
+        };
         let (reply_tx, reply_rx) = std::sync::mpsc::channel();
         process
             .control_tx
@@ -140,9 +181,31 @@ impl AcpAgentProcessPool {
             .map_err(|_| {
                 RuntimeError::NotReady("ACP agent process ended before authentication".to_string())
             })?;
-        reply_rx
-            .recv_timeout(std::time::Duration::from_secs(120))
-            .map_err(|_| RuntimeError::NotReady("ACP authentication timed out".to_string()))?
+        let result = reply_rx.recv().map_err(|_| {
+            RuntimeError::NotReady("ACP agent process ended during authentication".to_string())
+        })?;
+        if result.is_err() && has_auth_environment {
+            self.restore_auth_environment(&agent_id, previous_environment);
+            if let Some(process) = self.existing_process(&agent_id) {
+                self.stop_process(&agent_id, &process);
+            }
+        }
+        result
+    }
+
+    fn restore_auth_environment(&self, agent_id: &str, previous: Option<AcpAuthEnvironment>) {
+        let mut environments = self
+            .auth_environments
+            .lock()
+            .expect("ACP auth environment registry poisoned");
+        match previous {
+            Some(previous) => {
+                environments.insert(agent_id.to_string(), previous);
+            }
+            None => {
+                environments.remove(agent_id);
+            }
+        }
     }
 
     fn existing_process(&self, agent_id: &str) -> Option<AcpAgentProcessClient> {
@@ -177,7 +240,20 @@ impl AcpAgentProcessPool {
         agent_id: &str,
         first_open: Option<AcpAgentProcessOpen>,
     ) -> Result<AcpAgentProcessClient, RuntimeError> {
-        let config = self.registry.require_acp_config(agent_id)?;
+        let mut config = self.registry.require_acp_config(agent_id)?;
+        if let Some(auth) = self
+            .auth_environments
+            .lock()
+            .expect("ACP auth environment registry poisoned")
+            .get(agent_id)
+            .cloned()
+        {
+            config.env.extend(auth.env);
+            config.secret_env = auth.secret_env;
+            // Secret storage is namespaced by Agent identity and auth method. The
+            // launch identity remains the process-pool key, not this lookup key.
+            config.agent_id = auth.secret_storage_agent_id;
+        }
         config.ensure_command_available()?;
         let host_bridge = self.host_bridge.clone();
         let terminal_registry = AcpHostTerminalRegistry::new(host_bridge.clone());

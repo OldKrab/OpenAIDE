@@ -117,12 +117,32 @@ An Agent configured by the user when it is not one of OpenAIDE's built-in Agent 
 _Avoid_: Treating custom configuration as the primary path for common Agents
 
 **Connected Agent**:
-An Agent that has successfully launched, initialized, completed any required setup, and supports the required OpenAIDE ACP capabilities.
+An Agent that has successfully launched and initialized, supports the required OpenAIDE ACP capabilities, and has not reported a setup or authentication blocker. A later Agent operation may reveal expired or newly required authentication.
 _Avoid_: Letting users start work with an unavailable Agent
 
 **Agent Status**:
-The user-facing availability state of an Agent: disconnected, launching, connected, setup required, auth required, unsupported, or failed.
+The user-facing availability state of an Agent: disconnected, launching, connected, setup required, auth required, authenticating, unsupported, or failed.
 _Avoid_: Representing Agent setup problems as failed Tasks
+
+**Setup Required Agent**:
+An enabled Agent that cannot begin launch or ACP initialization until the user completes an external prerequisite.
+_Avoid_: Treating automatic Agent bootstrap as setup, failed Task
+
+**Failed Agent**:
+An Agent whose launch or ACP initialization was attempted and ended unsuccessfully without a known unmet external prerequisite.
+_Avoid_: Setup Required Agent, failed Task
+
+**Authentication Method**:
+An Agent-advertised way for a user to establish the credentials required for Agent work.
+_Avoid_: Provider-specific hard-coded login action, treating an available method as proof that authentication is required
+
+**Authentication Required Agent**:
+An initialized Agent that refused an authentication-gated operation until the user completes one of its advertised Authentication Methods.
+_Avoid_: Inferring authentication state from available Authentication Methods, starting authentication without user choice
+
+**Authenticating Agent**:
+An Agent for which the App Server is running one explicit user-selected Authentication Method.
+_Avoid_: Treating available Authentication Methods as active authentication, allowing concurrent auth flows for one Agent
 
 **App Shell**:
 The application form OpenAIDE runs in, such as the Web App, Desktop App, Mobile App, or VS Code Extension.

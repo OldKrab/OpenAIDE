@@ -2,7 +2,8 @@ use crate::agent::acp_schema::{AuthMethod, InitializeResponse};
 
 use crate::agent::acp_session_lifecycle::auth_method_kind;
 use crate::protocol::model::{
-    AgentAuthMethodSummary, AgentProbeCapabilities, AgentProbeResult, AgentProbeStatus,
+    AgentAuthMethodSummary, AgentAuthVariableSummary, AgentProbeCapabilities, AgentProbeResult,
+    AgentProbeStatus,
 };
 
 pub(super) fn agent_probe_result_from_initialize(
@@ -31,6 +32,7 @@ pub(super) fn agent_probe_result_from_initialize(
             .iter()
             .map(auth_method_summary)
             .collect(),
+        logout_supported: initialize.agent_capabilities.auth.logout.is_some(),
     }
 }
 
@@ -79,10 +81,34 @@ fn capability_labels(initialize: &InitializeResponse) -> Vec<String> {
 }
 
 fn auth_method_summary(method: &AuthMethod) -> AgentAuthMethodSummary {
+    let (variables, link, terminal_args, terminal_env) = match method {
+        AuthMethod::Agent(_) => (Vec::new(), None, Vec::new(), Default::default()),
+        AuthMethod::EnvVar(method) => (
+            method
+                .vars
+                .iter()
+                .map(|variable| AgentAuthVariableSummary {
+                    name: variable.name.clone(),
+                    label: variable.label.clone(),
+                    secret: variable.secret,
+                    optional: variable.optional,
+                })
+                .collect(),
+            method.link.clone(),
+            Vec::new(),
+            Default::default(),
+        ),
+        AuthMethod::Terminal(method) => (Vec::new(), None, method.args.clone(), method.env.clone()),
+        _ => (Vec::new(), None, Vec::new(), Default::default()),
+    };
     AgentAuthMethodSummary {
         id: method.id().0.as_ref().to_string(),
         label: method.name().to_string(),
         kind: auth_method_kind(method),
         description: method.description().map(ToString::to_string),
+        variables,
+        link,
+        terminal_args,
+        terminal_env,
     }
 }

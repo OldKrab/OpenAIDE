@@ -23,6 +23,14 @@ pub struct AgentProbeResult {
 pub struct AgentAuthenticateParams {
     pub agent_id: AgentId,
     pub method_id: String,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub env: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub secret_env: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub secret_storage_agent_id: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub terminal_confirmed: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
@@ -37,6 +45,7 @@ pub struct AgentAuthenticateResult {
 #[serde(rename_all = "snake_case")]
 pub enum AgentAuthenticateStatus {
     Authenticated,
+    AwaitingUser,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
@@ -235,6 +244,10 @@ pub struct AgentSettingsDetail {
     pub capabilities: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub auth_methods: Vec<AgentSettingsAuthMethod>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub logout_supported: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authenticating_method_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
@@ -258,6 +271,7 @@ pub enum AgentSettingsStatus {
     Connected,
     SetupRequired,
     AuthRequired,
+    Authenticating,
     Unsupported,
     Failed,
     Disabled,
@@ -280,6 +294,24 @@ pub struct AgentSettingsAuthMethod {
     pub kind: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub variables: Vec<AgentSettingsAuthVariable>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub link: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub terminal_args: Vec<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub terminal_env: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentSettingsAuthVariable {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    pub secret: bool,
+    pub optional: bool,
 }
 
 fn default_enabled() -> bool {

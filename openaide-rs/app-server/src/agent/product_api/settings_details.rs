@@ -2,8 +2,9 @@ use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use openaide_app_server_protocol::agent::{
-    AgentSettingsDetail, AgentSettingsDetailsParams, AgentSettingsDetailsResult,
-    AgentSettingsEnvRow, AgentSettingsSourceKind, AgentSettingsStatus, AgentSettingsTransport,
+    AgentSettingsAuthMethod, AgentSettingsAuthVariable, AgentSettingsDetail,
+    AgentSettingsDetailsParams, AgentSettingsDetailsResult, AgentSettingsEnvRow,
+    AgentSettingsSourceKind, AgentSettingsStatus, AgentSettingsTransport,
 };
 use openaide_app_server_protocol::errors::ProtocolError;
 use openaide_app_server_protocol::ids::AgentId;
@@ -121,7 +122,9 @@ fn built_in_detail(
         env: Vec::new(),
         description: metadata.description.to_string(),
         capabilities: base_capabilities(),
-        auth_methods: Vec::new(),
+        auth_methods: auth_methods_for(metadata.id, api),
+        logout_supported: api.statuses.snapshot(metadata.id).logout_supported,
+        authenticating_method_id: api.statuses.snapshot(metadata.id).authenticating_method_id,
     }
 }
 
@@ -151,8 +154,37 @@ fn custom_detail(
         env: env_rows(record),
         description: "Custom ACP stdio Agent".to_string(),
         capabilities: base_capabilities(),
-        auth_methods: Vec::new(),
+        auth_methods: auth_methods_for(&id, api),
+        logout_supported: api.statuses.snapshot(&id).logout_supported,
+        authenticating_method_id: api.statuses.snapshot(&id).authenticating_method_id,
     })
+}
+
+fn auth_methods_for(agent_id: &str, api: &AgentProductApi) -> Vec<AgentSettingsAuthMethod> {
+    api.statuses
+        .snapshot(agent_id)
+        .auth_methods
+        .into_iter()
+        .map(|method| AgentSettingsAuthMethod {
+            id: method.id,
+            label: method.label,
+            kind: method.kind,
+            description: method.description,
+            variables: method
+                .variables
+                .into_iter()
+                .map(|variable| AgentSettingsAuthVariable {
+                    name: variable.name,
+                    label: variable.label,
+                    secret: variable.secret,
+                    optional: variable.optional,
+                })
+                .collect(),
+            link: method.link,
+            terminal_args: method.terminal_args,
+            terminal_env: method.terminal_env.into_iter().collect(),
+        })
+        .collect()
 }
 
 fn status_for(agent_id: &str, enabled: bool, api: &AgentProductApi) -> AgentSettingsStatus {
@@ -165,6 +197,7 @@ fn status_for(agent_id: &str, enabled: bool, api: &AgentProductApi) -> AgentSett
         AgentStatus::Connected => AgentSettingsStatus::Connected,
         AgentStatus::SetupRequired => AgentSettingsStatus::SetupRequired,
         AgentStatus::AuthRequired => AgentSettingsStatus::AuthRequired,
+        AgentStatus::Authenticating => AgentSettingsStatus::Authenticating,
         AgentStatus::Unsupported => AgentSettingsStatus::Unsupported,
         AgentStatus::Failed => AgentSettingsStatus::Failed,
     }

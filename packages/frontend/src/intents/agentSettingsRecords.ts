@@ -34,7 +34,18 @@ export function agentSettingsRecordFromProtocol(agent: AgentSettingsDetail): Age
       label: method.label,
       kind: method.kind,
       description: method.description ?? undefined,
+      variables: method.variables?.map((variable) => ({
+        name: variable.name,
+        label: variable.label ?? undefined,
+        secret: variable.secret,
+        optional: variable.optional,
+      })),
+      link: method.link ?? undefined,
+      terminal_args: method.terminalArgs,
+      terminal_env: method.terminalEnv,
     })) ?? [],
+    logout_supported: agent.logoutSupported,
+    authenticating_method_id: agent.authenticatingMethodId ?? undefined,
   };
 }
 
@@ -59,6 +70,8 @@ export function settingsRecordFromCustomPayload(
     description: "Custom ACP stdio Agent",
     capabilities: [],
     auth_methods: [],
+    logout_supported: false,
+    authenticating_method_id: undefined,
   };
 }
 
@@ -105,6 +118,8 @@ export function settingsRecordWithEnabled(
     description: known?.description ?? "Agent available from App Server.",
     capabilities: [],
     auth_methods: [],
+    logout_supported: false,
+    authenticating_method_id: undefined,
   };
 }
 
@@ -114,6 +129,8 @@ function agentSettingsStatusFromProtocol(status: AgentSettingsDetail["status"]):
       return "setup_required";
     case "authRequired":
       return "auth_required";
+    case "authenticating":
+      return "authenticating";
     default:
       return status;
   }

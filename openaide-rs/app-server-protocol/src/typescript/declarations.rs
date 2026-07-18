@@ -6,10 +6,10 @@ use crate::agent::{
     AgentDeleteCustomResult, AgentListSessionsParams, AgentListSessionsResult, AgentListedSession,
     AgentProbeParams, AgentProbeResult, AgentReplaceCustomCleanup, AgentReplaceCustomConfirmation,
     AgentReplaceCustomHistoryPolicy, AgentReplaceCustomParams, AgentReplaceCustomResult,
-    AgentSetEnabledParams, AgentSetEnabledResult, AgentSettingsAuthMethod, AgentSettingsDetail,
-    AgentSettingsDetailsParams, AgentSettingsDetailsResult, AgentSettingsEnvRow,
-    AgentSettingsSourceKind, AgentSettingsStatus, AgentSettingsTransport,
-    AgentUpdateCustomMetadataParams, AgentUpdateCustomMetadataResult,
+    AgentSetEnabledParams, AgentSetEnabledResult, AgentSettingsAuthMethod,
+    AgentSettingsAuthVariable, AgentSettingsDetail, AgentSettingsDetailsParams,
+    AgentSettingsDetailsResult, AgentSettingsEnvRow, AgentSettingsSourceKind, AgentSettingsStatus,
+    AgentSettingsTransport, AgentUpdateCustomMetadataParams, AgentUpdateCustomMetadataResult,
 };
 use crate::attachment::{
     AttachmentCandidateError, AttachmentCandidateErrorCode, AttachmentConfirmEmbeddedParams,
@@ -214,6 +214,7 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<AgentSettingsStatus>(output, config);
     push_decl::<AgentSettingsEnvRow>(output, config);
     push_decl::<AgentSettingsAuthMethod>(output, config);
+    push_decl::<AgentSettingsAuthVariable>(output, config);
     push_decl::<SettingsMcpServersParams>(output, config);
     push_decl::<SettingsMcpServersResult>(output, config);
     push_decl::<SettingsProjectionAvailability>(output, config);

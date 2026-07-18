@@ -140,6 +140,8 @@ App Server sends lessee-scoped Task events as Native Session preparation changes
 
 Frontend applies only contiguous, monotonically newer Task revisions. The page remains rendered throughout preparation, and Composer controls show honest disabled or preparing states until their required capability is ready.
 
+If Native Session preparation returns ACP `auth_required`, App Server keeps the New Task private and unready, publishes Auth Required Agent Status with the Agent-advertised Authentication Methods, and waits for an explicit user choice in Agent Settings. New Task shows the blocker and opens the affected Agent Settings entry without duplicating authentication controls. Successful authentication reconnects and retries the blocked session lifecycle operation. It never automatically replays an accepted prompt, steering message, or other work-producing operation; those failures remain visible and require explicit recovery.
+
 App Server Send capability contains authoritative readiness and blockers. Frontend combines it with local draft content and Image compatibility through one shared Composer availability model. ACP has no text-required prompt capability: a completely empty message is invalid, while Image-only input is valid when the selected Agent accepts Image content.
 
 ### Navigation and release

@@ -217,6 +217,10 @@ pub struct AgentProbeRequest {
 pub struct AgentAuthenticateRequest {
     pub agent_id: String,
     pub method_id: String,
+    pub env: HashMap<String, String>,
+    pub secret_env: Vec<String>,
+    pub secret_storage_agent_id: Option<String>,
+    pub terminal_confirmed: bool,
 }
 
 #[derive(Clone)]

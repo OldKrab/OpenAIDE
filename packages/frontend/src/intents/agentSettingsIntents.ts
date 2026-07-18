@@ -90,15 +90,51 @@ export async function authenticateAgentThroughBackend(
   context: AgentSettingsIntentContext,
   agentId: string,
   methodId: string,
+  values?: Record<string, string>,
 ) {
   const backendConnection = context.backendConnection;
   if (!backendConnection) return false;
-  await backendConnection.request(AGENT_AUTHENTICATE, {
+  const agent = context.state.settings.agentDetails?.find((candidate) => candidate.id === agentId);
+  const method = agent?.auth_methods.find((candidate) => candidate.id === methodId);
+  if (!agent || !method) throw new Error("Refresh Agent settings before authenticating.");
+  const storageAgentId = authSecretStorageAgentId(agentId, methodId);
+  const variables = method.variables ?? [];
+  const secretVariables = variables.filter((variable) => variable.secret);
+  const plainVariables = variables.filter((variable) => !variable.secret);
+  const secretWrites = secretVariables.flatMap((variable) => {
+    const value = values?.[variable.name];
+    return value
+      ? [{ target: { kind: "agentEnvironment" as const, agentId: storageAgentId, name: variable.name }, value }]
+      : [];
+  });
+  const secretTransaction = secretWrites.length
+    ? await beginAgentSecretTransaction({ writes: secretWrites, deletes: [] })
+    : undefined;
+  await requestWithSecretRollback(secretTransaction, () => backendConnection.request(AGENT_AUTHENTICATE, {
     agentId: agentId as AgentId,
     methodId,
-  });
+    ...(method.kind === "env_var" ? {
+      env: Object.fromEntries(plainVariables.flatMap((variable) => {
+        const value = values?.[variable.name];
+        return value ? [[variable.name, value]] : [];
+      })),
+      secretEnv: secretVariables.map((variable) => variable.name),
+      secretStorageAgentId: storageAgentId,
+    } : {}),
+    ...(method.kind === "terminal" ? {
+      terminalConfirmed: agent.authenticating_method_id === methodId,
+    } : {}),
+  }));
+  await secretTransaction?.commit();
   await refreshAgentSettingsThroughBackend(context);
   return true;
+}
+
+function authSecretStorageAgentId(agentId: string, methodId: string) {
+  const encodedMethod = [...methodId]
+    .map((character) => character.codePointAt(0)!.toString(16))
+    .join("-");
+  return `${agentId}.auth.${encodedMethod}`;
 }
 
 export async function updateCustomAgentMetadataThroughBackend(

@@ -4,6 +4,7 @@ use crate::agent::{AgentEventSink, AgentPrompt, AgentRuntime, AgentSession, Agen
 use crate::protocol::model::{AgentProbeCapabilities, AgentProbeStatus};
 use crate::storage::Store;
 use openaide_app_server_protocol::agent::{
+    AgentAuthenticateParams, AgentAuthenticateStatus as ProtocolAgentAuthenticateStatus,
     AgentCreateCustomParams, AgentDeleteCustomParams, AgentReplaceCustomConfirmation,
     AgentReplaceCustomHistoryPolicy, AgentReplaceCustomParams,
 };
@@ -82,6 +83,67 @@ fn internal_probe_failure_updates_cache_and_returns_protocol_error() {
         openaide_app_server_protocol::errors::ProtocolErrorCode::Internal
     );
     assert_eq!(statuses.snapshot("codex").status, AgentStatus::Failed);
+}
+
+#[test]
+fn explicit_authentication_clears_auth_required_status() {
+    let statuses = AgentStatusCache::default();
+    statuses.record_probe_error(
+        "codex",
+        &RuntimeError::AuthRequired("Authentication required".to_string()),
+    );
+    let api = AgentProductApi::new(
+        AgentRegistry::default_built_ins(),
+        test_catalog_store(),
+        Arc::new(ExplicitAuthAgent),
+        statuses.clone(),
+    );
+
+    let result = api
+        .authenticate(AgentAuthenticateParams {
+            agent_id: AgentId::from("codex"),
+            method_id: "browser-login".to_string(),
+            env: BTreeMap::new(),
+            secret_env: Vec::new(),
+            secret_storage_agent_id: None,
+            terminal_confirmed: false,
+        })
+        .unwrap();
+
+    assert_eq!(
+        result.status,
+        ProtocolAgentAuthenticateStatus::Authenticated
+    );
+    assert_eq!(statuses.snapshot("codex").status, AgentStatus::Connected);
+}
+
+#[test]
+fn authentication_failure_does_not_expose_agent_error_details() {
+    let statuses = AgentStatusCache::default();
+    let api = AgentProductApi::new(
+        AgentRegistry::default_built_ins(),
+        test_catalog_store(),
+        Arc::new(FailingAuthAgent),
+        statuses.clone(),
+    );
+
+    let error = api
+        .authenticate(AgentAuthenticateParams {
+            agent_id: AgentId::from("codex"),
+            method_id: "api-key".to_string(),
+            env: BTreeMap::new(),
+            secret_env: Vec::new(),
+            secret_storage_agent_id: None,
+            terminal_confirmed: false,
+        })
+        .unwrap_err();
+
+    assert_eq!(
+        error.message,
+        "Authentication failed. Check the Agent's requirements and try again."
+    );
+    assert!(!error.message.contains("CODEX_API_KEY"));
+    assert_eq!(statuses.snapshot("codex").status, AgentStatus::Disconnected);
 }
 
 #[test]
@@ -177,6 +239,7 @@ impl AgentRuntime for ReadyAgent {
                 delete_sessions: false,
             },
             auth_methods: Vec::new(),
+            logout_supported: false,
         })
     }
 
@@ -194,6 +257,58 @@ impl AgentRuntime for ReadyAgent {
 }
 
 struct AuthRequiredAgent;
+
+struct ExplicitAuthAgent;
+
+struct FailingAuthAgent;
+
+impl AgentRuntime for FailingAuthAgent {
+    fn authenticate(
+        &self,
+        _request: AgentAuthenticateRequest,
+    ) -> Result<AgentAuthenticateResult, RuntimeError> {
+        Err(RuntimeError::Internal(
+            "CODEX_API_KEY is not set: { secret vendor metadata }".to_string(),
+        ))
+    }
+
+    fn start_session(&self, _request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
+        unreachable!("authentication must not start a session")
+    }
+
+    fn prompt(
+        &self,
+        _prompt: AgentPrompt,
+        _sink: Arc<dyn AgentEventSink>,
+    ) -> Result<crate::agent::AgentPromptOutcome, RuntimeError> {
+        unreachable!("authentication must not prompt")
+    }
+}
+
+impl AgentRuntime for ExplicitAuthAgent {
+    fn authenticate(
+        &self,
+        request: AgentAuthenticateRequest,
+    ) -> Result<AgentAuthenticateResult, RuntimeError> {
+        Ok(AgentAuthenticateResult {
+            agent_id: request.agent_id,
+            method_id: request.method_id,
+            status: crate::protocol::model::AgentAuthenticateStatus::Authenticated,
+        })
+    }
+
+    fn start_session(&self, _request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
+        unreachable!("authentication must not start a session")
+    }
+
+    fn prompt(
+        &self,
+        _prompt: AgentPrompt,
+        _sink: Arc<dyn AgentEventSink>,
+    ) -> Result<crate::agent::AgentPromptOutcome, RuntimeError> {
+        unreachable!("authentication must not prompt")
+    }
+}
 
 impl AgentRuntime for AuthRequiredAgent {
     fn probe(&self, _request: AgentProbeRequest) -> Result<AgentProbeResult, RuntimeError> {
