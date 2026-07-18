@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-test("App Server proxy accepts only the exact browser origin", { timeout: 5_000 }, async (t) => {
+test("configured public host serves SPA routes and exact-origin App Server traffic", { timeout: 5_000 }, async (t) => {
   const fixtureRoot = mkdtempSync(path.join(tmpdir(), "openaide-web-origin-"));
   const staticRoot = path.join(fixtureRoot, "static");
   const fakeAppServerPath = path.join(fixtureRoot, "fake-app-server.mjs");
@@ -21,7 +21,7 @@ test("App Server proxy accepts only the exact browser origin", { timeout: 5_000 
     env: {
       ...process.env,
       OPENAIDE_APP_SERVER_PATH: fakeAppServerPath,
-      OPENAIDE_WEB_ALLOWED_HOSTS: "localhost,127.0.0.1",
+      OPENAIDE_WEB_ALLOWED_HOSTS: "target.example.test,localhost,127.0.0.1",
       OPENAIDE_WEB_HOST: "127.0.0.1",
       OPENAIDE_WEB_PORT: String(port),
       OPENAIDE_WEB_RUNTIME_ROOT: path.join(fixtureRoot, "runtime"),
@@ -44,6 +44,29 @@ test("App Server proxy accepts only the exact browser origin", { timeout: 5_000 
   assert.equal(rejected.status, 403);
   assert.equal(await rejected.text(), "Origin not allowed");
   assert.equal(accepted.status, 200);
+
+  for (const route of ["/", "/new-task?projectId=project-1", "/archive", "/settings", "/task/task-1"]) {
+    const response = await rawRequest(port, route, {
+      host: "TARGET.EXAMPLE.TEST.:443",
+      "x-forwarded-proto": "https",
+    });
+    assert.equal(response.status, 200, route);
+    assert.match(response.body, /OpenAIDE/, route);
+  }
+
+  const reliableSession = await rawRequest(port, "/__openaide-app-server/probe", {
+    host: "target.example.test:443",
+    origin: "https://target.example.test",
+    "x-forwarded-proto": "https",
+    "content-type": "application/json",
+  }, JSON.stringify({ jsonrpc: "2.0", id: "public-host", method: "client/probe", params: {} }));
+  assert.equal(reliableSession.status, 200);
+
+  const rejectionLogged = waitForOutput(webServer, '"event":"web_request_rejected"');
+  const unknownHost = await rawRequest(port, "/settings", { host: "unknown.example.test" });
+  assert.equal(unknownHost.status, 403);
+  assert.equal(unknownHost.body, "Host not allowed");
+  await rejectionLogged;
 });
 
 function proxyRequest(endpoint, origin, id) {
@@ -54,6 +77,27 @@ function proxyRequest(endpoint, origin, id) {
       origin,
     },
     body: JSON.stringify({ jsonrpc: "2.0", id, method: "client/probe", params: {} }),
+  });
+}
+
+function rawRequest(port, requestPath, headers, body) {
+  return new Promise((resolve, reject) => {
+    const request = http.request({
+      hostname: "127.0.0.1",
+      port,
+      path: requestPath,
+      method: body === undefined ? "GET" : "POST",
+      headers: body === undefined ? headers : { ...headers, "content-length": Buffer.byteLength(body) },
+    }, (response) => {
+      const chunks = [];
+      response.on("data", (chunk) => chunks.push(chunk));
+      response.on("end", () => resolve({
+        status: response.statusCode,
+        body: Buffer.concat(chunks).toString("utf8"),
+      }));
+    });
+    request.once("error", reject);
+    request.end(body);
   });
 }
 
@@ -83,6 +127,7 @@ function waitForOutput(child, expected) {
     });
     child.stderr.on("data", (chunk) => {
       stderr += chunk;
+      if (stderr.includes(expected)) resolve();
     });
     child.once("error", reject);
     child.once("exit", (code) => reject(new Error(`Web server exited with ${code}: ${stderr}`)));

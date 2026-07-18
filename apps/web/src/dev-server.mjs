@@ -18,6 +18,7 @@ import {
 import { injectBootstrap, webRoute } from "./dev-server-routes.mjs";
 import { pipeProxyResponse, watchPendingProxyResponse } from "./dev-server-streams.mjs";
 import { createViteProxy } from "./dev-server-vite-proxy.mjs";
+import { createRuntimeLogger } from "./runtime-logger.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const host = process.env.OPENAIDE_WEB_HOST ?? "127.0.0.1";
@@ -37,6 +38,11 @@ const appServerPath = path.resolve(
     ?? path.join(repoRoot, "target", "debug", "openaide-app-server"),
 );
 const allowedHosts = allowedHostNamesFromEnv(process.env.OPENAIDE_WEB_ALLOWED_HOSTS);
+const configuredHostEntryCount = (process.env.OPENAIDE_WEB_ALLOWED_HOSTS ?? "")
+  .split(",")
+  .filter((entry) => entry.trim()).length;
+const invalidAllowedHostCount = configuredHostEntryCount - allowedHosts.length;
+const logger = createRuntimeLogger("openaide-web-server");
 const authConfig = authConfigFromEnv();
 const instanceLabel = process.env.OPENAIDE_WEB_INSTANCE_LABEL?.trim();
 const webPresentation = {
@@ -94,10 +100,22 @@ await startAppServer();
 const server = http.createServer(async (req, res) => {
   try {
     if (!isAllowedHost(req.headers.host, allowedHosts)) {
+      logger.warn("web_request_rejected", {
+        reason: "host_not_allowed",
+        request_host: req.headers.host ?? "missing",
+        request_method: req.method ?? "unknown",
+        allowed_host_count: allowedHosts.length,
+      });
       writeText(res, 403, "Host not allowed");
       return;
     }
     if (!isAllowedBrowserOrigin(req.headers.origin, req.headers)) {
+      logger.warn("web_request_rejected", {
+        reason: "origin_not_allowed",
+        request_host: req.headers.host ?? "missing",
+        request_method: req.method ?? "unknown",
+        has_origin: Boolean(req.headers.origin),
+      });
       writeText(res, 403, "Origin not allowed");
       return;
     }
@@ -163,6 +181,16 @@ server.on("upgrade", (req, socket, head) => {
 });
 
 server.listen(port, host, () => {
+  if (invalidAllowedHostCount > 0) {
+    logger.warn("web_host_policy_invalid_config", {
+      invalid_allowed_host_count: invalidAllowedHostCount,
+    });
+  }
+  logger.info("web_host_policy_configured", {
+    listen_host: host,
+    allowed_hosts: allowedHosts,
+    allowed_host_count: allowedHosts.length,
+  });
   console.log(`OpenAIDE Web dev shell listening on http://${host}:${port}`);
   if (authConfig.enabled) {
     console.log("OpenAIDE Web authentication is enabled.");

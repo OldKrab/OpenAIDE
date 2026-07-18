@@ -1,11 +1,24 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  allowedHostNamesFromEnv,
   authConfigFromEnv,
   isAllowedBrowserOrigin,
+  isAllowedHost,
   isAuthorized,
   writeUnauthorized,
 } from "./dev-server-auth.mjs";
+
+test("normalizes configured and request hostnames without broadening the allowlist", () => {
+  const allowedHosts = allowedHostNamesFromEnv(" Target.Example.Test. , [::1], bad host ");
+
+  assert.deepEqual(allowedHosts, ["target.example.test", "::1"]);
+  assert.equal(isAllowedHost("TARGET.EXAMPLE.TEST.:443", allowedHosts), true);
+  assert.equal(isAllowedHost("[::1]:5574", allowedHosts), true);
+  assert.equal(isAllowedHost("target.example.test.attacker.invalid", allowedHosts), false);
+  assert.equal(isAllowedHost("target.example.test, attacker.invalid", allowedHosts), false);
+  assert.equal(isAllowedHost("target.example.test:invalid", allowedHosts), false);
+});
 
 test("accepts only the exact configured browser origin tuple", () => {
   const requestHeaders = {

@@ -3,7 +3,7 @@ import { timingSafeEqual } from "node:crypto";
 export function allowedHostNamesFromEnv(value) {
   return (value ?? "")
     .split(",")
-    .map((item) => item.trim().toLowerCase())
+    .map((item) => normalizedHostName(item.trim()))
     .filter(Boolean);
 }
 
@@ -41,8 +41,27 @@ export function isAllowedBrowserOrigin(origin, headers) {
 }
 
 export function isAllowedHost(header, allowedHosts) {
-  const hostname = hostName(header);
+  const hostname = normalizedHostName(header);
   return hostname === "127.0.0.1" || hostname === "localhost" || allowedHosts.includes(hostname);
+}
+
+/** Parses one HTTP authority and returns its canonical hostname for exact allowlist matching. */
+export function normalizedHostName(authority) {
+  if (typeof authority !== "string" || !authority || authority.trim() !== authority) return undefined;
+  let parsed;
+  try {
+    parsed = new URL(`http://${authority}`);
+  } catch {
+    return undefined;
+  }
+  if (parsed.username || parsed.password || parsed.pathname !== "/" || parsed.search || parsed.hash) {
+    return undefined;
+  }
+  const hostname = parsed.hostname
+    .replace(/^\[|\]$/g, "")
+    .replace(/\.$/, "")
+    .toLowerCase();
+  return hostname || undefined;
 }
 
 export function appServerHeaders(headers, hostHeader, authToken, contentLength) {
@@ -107,11 +126,6 @@ function expectedBrowserOrigin(headers) {
 
 function firstHeaderValue(value) {
   return Array.isArray(value) ? value[0] : value;
-}
-
-function hostName(header) {
-  if (!header) return "";
-  return header.split(":")[0]?.toLowerCase() ?? "";
 }
 
 function secureEqual(left, right) {
