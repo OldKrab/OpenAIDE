@@ -26,6 +26,10 @@ export function SidebarNativeSessionRow({
   const title = nativeSessionTitle(session);
   const timestamp = session.last_activity ?? session.updated_at;
   const age = timestamp ? relativeTime(timestamp) : "";
+  const openSession = () => {
+    preview?.dismiss();
+    onOpenNativeSession(session);
+  };
 
   return (
     <div
@@ -39,7 +43,7 @@ export function SidebarNativeSessionRow({
       <button
         className="task-open"
         disabled={disabled}
-        onClick={() => onOpenNativeSession(session)}
+        onClick={openSession}
         type="button"
         aria-label={`Open ${title}`}
       >
@@ -65,7 +69,7 @@ export function SidebarNativeSessionRow({
         <button
           className="task-row-action"
           disabled={disabled}
-          onClick={() => onOpenNativeSession(session)}
+          onClick={openSession}
           title={adopting ? "Opening task" : "Open task"}
           type="button"
           aria-label={`Open ${title}`}

@@ -29,6 +29,10 @@ export function SidebarTaskRow({
   const actionTriggerRef = useRef<HTMLButtonElement>(null);
   const title = task.title || "Untitled task";
   const actionLabel = showArchived ? "Restore task" : "Archive task";
+  const openTask = () => {
+    preview?.dismiss();
+    onOpenTask(task.task_id);
+  };
   const runAction = () => {
     setMenuOpen(false);
     setDetailsOpen(false);
@@ -70,7 +74,7 @@ export function SidebarTaskRow({
     >
       <button
         className="task-open"
-        onClick={() => onOpenTask(task.task_id)}
+        onClick={openTask}
         type="button"
       >
         <span

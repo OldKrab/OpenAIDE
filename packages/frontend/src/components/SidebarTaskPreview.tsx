@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { FolderRoot, GitBranch } from "lucide-react";
 import type { TaskSummary } from "@openaide/app-shell-contracts";
 import { relativeTime } from "./taskSurfaceHelpers";
@@ -25,6 +25,7 @@ export type SidebarPreviewContent = PreviewContentBase & (
 
 type Preview = { content: SidebarPreviewContent; left: number; top: number };
 type PreviewContext = {
+  dismiss: () => void;
   enter: (content: SidebarPreviewContent, row: HTMLElement, immediate?: boolean) => void;
   leave: () => void;
 };
@@ -35,6 +36,8 @@ const Context = createContext<PreviewContext | undefined>(undefined);
 
 export function SidebarTaskPreviewProvider({ children }: { children: ReactNode }) {
   const [preview, setPreview] = useState<Preview>();
+  const [helpOpen, setHelpOpen] = useState(false);
+  const helpId = useId();
   const previewRef = useRef<HTMLDivElement>(null);
   const showTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -50,6 +53,7 @@ export function SidebarTaskPreviewProvider({ children }: { children: ReactNode }
     if (typeof window !== "undefined" && window.matchMedia("(max-width: 760px)").matches) return;
     clearTimeout(showTimer.current);
     clearTimeout(hideTimer.current);
+    setHelpOpen(false);
     const open = () => {
       const bounds = row.getBoundingClientRect();
       setPreview({
@@ -66,6 +70,12 @@ export function SidebarTaskPreviewProvider({ children }: { children: ReactNode }
     clearTimeout(hideTimer.current);
     hideTimer.current = setTimeout(() => setPreview(undefined), 140);
   };
+  const dismiss = () => {
+    clearTimeout(showTimer.current);
+    clearTimeout(hideTimer.current);
+    setHelpOpen(false);
+    setPreview(undefined);
+  };
 
   useEffect(() => {
     if (!preview) return;
@@ -81,7 +91,7 @@ export function SidebarTaskPreviewProvider({ children }: { children: ReactNode }
     return () => { document.removeEventListener("pointerdown", dismiss); document.removeEventListener("keydown", escape); };
   }, [preview]);
 
-  return <Context.Provider value={{ enter, leave }}>
+  return <Context.Provider value={{ dismiss, enter, leave }}>
     {children}
     {preview ? <div className="task-preview-popover" onPointerEnter={() => clearTimeout(hideTimer.current)} onPointerLeave={leave} ref={previewRef} role="dialog" style={{ left: preview.left, top: preview.top }}>
       <header><strong>{preview.content.title}</strong><span>{preview.content.state}</span></header>
@@ -92,7 +102,29 @@ export function SidebarTaskPreviewProvider({ children }: { children: ReactNode }
           <span><small>{preview.content.workspaceKind === "worktree" ? "Worktree" : "Location"}</small><strong>{preview.content.workspaceLabel}</strong>{preview.content.gitRef ? <em>{preview.content.gitRef}</em> : null}</span>
         </div>
       </> : <>
-        <p className="task-preview-source">From {preview.content.agentName} · Open to load</p>
+        <section
+          className="task-preview-source-wrap"
+          onBlur={(event) => {
+            if (!event.currentTarget.contains(event.relatedTarget)) setHelpOpen(false);
+          }}
+          onPointerLeave={() => setHelpOpen(false)}
+        >
+          <p className="task-preview-source">
+            <button
+              aria-describedby={helpOpen ? helpId : undefined}
+              aria-expanded={helpOpen}
+              aria-label={`What loading from ${preview.content.agentName} means`}
+              onClick={() => setHelpOpen((open) => !open)}
+              onFocus={() => setHelpOpen(true)}
+              onPointerEnter={() => setHelpOpen(true)}
+              type="button"
+            >From {preview.content.agentName}</button>
+            <span className="task-preview-source-action">· Open to load</span>
+          </p>
+          {helpOpen ? <div className="task-preview-explanation" id={helpId} role="tooltip">
+            This conversation exists in {preview.content.agentName} but has not been added to OpenAIDE. Opening it creates an OpenAIDE task and loads its message history. After that, it behaves like your other tasks.
+          </div> : null}
+        </section>
         <div><FolderRoot size={15} /><span><small>Folder</small><strong>{preview.content.workspaceLabel}</strong></span></div>
       </>}
     </div> : null}

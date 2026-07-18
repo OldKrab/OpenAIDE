@@ -376,9 +376,20 @@ describe("SidebarNativeSessionRow", () => {
     const preview = tree.root.findByProps({ role: "dialog" });
     expect(preview.findByType("header").findByType("strong").children.join("")).toBe("Existing session");
     expect(preview.findAllByType("strong").map((item) => item.children.join(""))).toEqual(["Existing session", "/workspace/OpenAIDE"]);
-    expect(preview.findByProps({ className: "task-preview-source" }).children.join(""))
-      .toBe("From Codex · Open to load");
     expect(onOpenNativeSession).not.toHaveBeenCalled();
+
+    const helpTrigger = preview.findByProps({ "aria-label": "What loading from Codex means" });
+    expect(helpTrigger.children.join("")).toBe("From Codex");
+    expect(preview.findByProps({ className: "task-preview-source-action" }).children.join(""))
+      .toBe("· Open to load");
+    act(() => helpTrigger.props.onPointerEnter());
+    expect(preview.findByProps({ role: "tooltip" }).children.join(" ")).toContain(
+      "Opening it creates an OpenAIDE task and loads its message history.",
+    );
+
+    act(() => tree.root.findAllByProps({ "aria-label": "Open Existing session" })[0].props.onClick());
+    expect(tree.root.findAllByProps({ role: "dialog" })).toHaveLength(0);
+    expect(onOpenNativeSession).toHaveBeenCalledWith(session);
     vi.useRealTimers();
     vi.unstubAllGlobals();
   });
