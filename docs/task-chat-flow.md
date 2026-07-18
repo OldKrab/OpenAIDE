@@ -126,7 +126,7 @@ App Server Send capability contains authoritative readiness and blockers. Fronte
 
 ### Navigation and release
 
-Navigation changes only presentation. The client retains the leased Prepared Task snapshot, Frontend-owned composer, and Native Session. Returning renders cached state immediately and does not call `task/acquire` or `task/open` merely to prove that the Task still exists. A reconnect or revision gap installs a replacement client-scoped baseline according to [ADR-0023](adr/0023-task-state-publication-and-replica-recovery.md).
+Navigation changes only presentation. The client retains the leased Prepared Task snapshot, Frontend-owned composer, and Native Session. Returning renders cached state immediately and does not call `task/acquire` or `task/open` merely to prove that the Task still exists. A reconnect or revision gap installs a replacement client-scoped baseline according to [ADR-0023](adr/0023-task-state-publication-and-replica-recovery.md). When reconnect reveals that product-client liveness expired, Frontend preserves the Composer, invalidates client-scoped attachment handles, forgets the former Prepared-Task lease, and reacquires only after the logical session has installed all active baselines.
 
 Changing Project, Agent, or Task Workspace calls typed `task/release` and waits for acknowledgement before acquiring another key. Release clears only the authoritative lease; it never clears the Frontend composer. Releasing without a current lease is an idempotent no-op. App Server alone decides whether the released Prepared Task is retained or disposed. The old public `task/discard` operation is removed rather than given release semantics.
 
@@ -351,7 +351,7 @@ An implementation conforms to this specification only when all of these are true
 3. Each Send mutation is issued once and is never automatically replayed.
 4. One Native Session update consumer survives prompt completion and accepts later updates until session close or replacement.
 5. One durable Task transaction produces one ordered Task revision; a revision gap installs one new baseline.
-6. Connection recovery retries only the event stream, then installs exactly one baseline for each active scope before Send is enabled.
+6. One logical App Server session owns connection recovery, retries only replayable reads, and installs the replacement initialization result plus exactly one baseline for each active scope before product requests and Send are enabled.
 7. Durable Chat, transient requests, Tool details, and Frontend-only presentation each have one explicit owner and do not masquerade as one another.
 8. Every notification-worthy Task transition creates one explicit Task Attention Event; no client infers it from status or `unread`.
 9. A browser profile emits at most one OS notification for one eligible Task Attention Event and never emits an old unread backlog on startup.

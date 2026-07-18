@@ -5,6 +5,7 @@ import {
   ATTACHMENT_CREATE_PASTED_IMAGE,
   ATTACHMENT_RELEASE,
   AppServerProtocolError,
+  createAppServerSession,
   PERMISSION_REQUEST,
   SETTINGS_GET_AGENT_DETAILS,
   SETTINGS_GET_MCP_SERVERS,
@@ -20,6 +21,7 @@ import {
   TASK_SET_CONFIG_OPTION,
   type AppServerEvent,
   type BackendConnection,
+  type BackendRecoveryBaseline,
   type ClientSnapshot,
   type InitializeParams,
   type InitializeResult,
@@ -46,6 +48,9 @@ let latestController: AppControllerTestHarness | undefined;
 let latestPublicController: AppController | undefined;
 const defaultHandleNotification: BackendConnection["handleNotification"] = () => () => undefined;
 const defaultHandleRequest: BackendConnection["handleRequest"] = () => () => undefined;
+const defaultHandleGenerationInvalidated: BackendConnection["handleGenerationInvalidated"] = () => () => undefined;
+const defaultHandleRecoveryBaseline: BackendConnection["handleRecoveryBaseline"] = () => () => undefined;
+const defaultHandleRecoveryFailed: BackendConnection["handleRecoveryFailed"] = () => () => undefined;
 
 vi.mock("../services/hostBridge", () => ({
   getBackendConnection: () => {
@@ -54,9 +59,8 @@ vi.mock("../services/hostBridge", () => ({
     const request = connection.handleNotification
       ? connection.request
       : ((method, params, meta) => {
-          // Most controller fixtures predate state subscriptions and are not
-          // subscription tests. Keep their background scopes inert so their
-          // request assertions remain focused on the behavior under test.
+          // Most controller fixtures predate state subscriptions and keep their
+          // background scopes inert so behavior-specific request spies stay focused.
           if (method === STATE_SUBSCRIBE) return new Promise(() => undefined);
           if (method === STATE_UNSUBSCRIBE) {
             return Promise.resolve({ scope: (params as { scope: unknown }).scope });
@@ -65,12 +69,16 @@ vi.mock("../services/hostBridge", () => ({
             ? connection.request(method, params)
             : connection.request(method, params, meta);
         }) as BackendConnection["request"];
-    return {
+    return createAppServerSession({
       ...connection,
       request,
       handleNotification: connection.handleNotification ?? defaultHandleNotification,
       handleRequest: defaultHandleRequest,
-    };
+      handleGenerationInvalidated: connection.handleGenerationInvalidated
+        ?? defaultHandleGenerationInvalidated,
+      handleRecoveryBaseline: connection.handleRecoveryBaseline ?? defaultHandleRecoveryBaseline,
+      handleRecoveryFailed: defaultHandleRecoveryFailed,
+    });
   },
   getBootstrap: () => bootstrap,
   openNewTaskSurface: (projectId?: string) => postHostMessage(projectId
@@ -1346,6 +1354,83 @@ describe("app controller mounted lifecycle", () => {
     expect(latestController?.state.tasks.map((task) => task.task_id)).not.toContain("task_prepared");
   });
 
+  it("reacquires an expired Prepared Task while preserving the Composer draft", async () => {
+    let publishRecoveryBaseline: ((baseline: BackendRecoveryBaseline) => void) | undefined;
+    let publishInvalidation: Parameters<BackendConnection["handleGenerationInvalidated"]>[0] | undefined;
+    let acquireCount = 0;
+    const request = vi.fn(async (method: string, params?: { scope?: { kind: string; taskId?: string } }) => {
+      if (method === STATE_SUBSCRIBE && params?.scope) {
+        if (params.scope.kind === "task" && params.scope.taskId) {
+          return taskSubscriptionSnapshot(
+            `cursor_${params.scope.taskId}`,
+            protocolTaskSnapshot(params.scope.taskId, "New task", { hasMessages: false }),
+          );
+        }
+        return nonTaskSubscriptionSnapshot(params.scope);
+      }
+      if (method === AGENT_LIST_SESSIONS) {
+        return { agentId: "codex", projectLabel: "OpenAIDE", sessions: [], nextCursor: null };
+      }
+      if (method === TASK_ACQUIRE) {
+        acquireCount += 1;
+        return {
+          task: protocolTaskSnapshot(
+            acquireCount === 1 ? "task_expired" : "task_reacquired",
+            "New task",
+            { hasMessages: false },
+          ),
+        };
+      }
+      throw new Error(method);
+    });
+    backendConnection = {
+      initialize: vi.fn(async () => ({ snapshot: clientSnapshot({ includeActiveTask: false }) })),
+      request: request as unknown as BackendConnection["request"],
+      handleNotification: defaultHandleNotification,
+      handleGenerationInvalidated(handler) {
+        publishInvalidation = handler;
+        return () => {
+          publishInvalidation = undefined;
+        };
+      },
+      handleRecoveryBaseline(handler) {
+        publishRecoveryBaseline = handler;
+        return () => {
+          publishRecoveryBaseline = undefined;
+        };
+      },
+      close: vi.fn(),
+    };
+    bootstrap = webTaskBootstrap(undefined, "project_1");
+
+    await act(async () => {
+      create(<ControllerProbe />);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    act(() => {
+      latestController?.dispatch({ type: "prompt", prompt: "Keep this draft" });
+    });
+    expect(publishInvalidation).toBeTypeOf("function");
+    expect(publishRecoveryBaseline).toBeTypeOf("function");
+
+    await act(async () => {
+      publishInvalidation?.({ reason: "clientLivenessExpired" });
+      publishRecoveryBaseline?.({
+        reason: "clientLivenessExpired",
+        result: { snapshot: clientSnapshot({ includeActiveTask: false }) },
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(latestController?.newTaskSnapshot?.task.task_id).toBe("task_reacquired");
+    expect(request.mock.calls.filter(([method]) => method === TASK_ACQUIRE)).toHaveLength(2);
+    expect(latestController?.state.newTask.prompt).toBe("Keep this draft");
+  });
+
   it("sends through the cached New Task after visiting an existing Task without reopening it", async () => {
     const request = vi.fn(async (method: string, params?: { taskId?: string }) => {
       if (method === AGENT_LIST_SESSIONS) {
@@ -2554,6 +2639,8 @@ type TestBackendConnection = {
   initialize: (params: InitializeParams) => Promise<InitializeResult>;
   request: BackendConnection["request"];
   handleNotification?: BackendConnection["handleNotification"];
+  handleGenerationInvalidated?: BackendConnection["handleGenerationInvalidated"];
+  handleRecoveryBaseline?: BackendConnection["handleRecoveryBaseline"];
   close: () => void;
 };
 

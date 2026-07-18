@@ -67,6 +67,22 @@ describe("New Task controller", () => {
     expect(listener).toHaveBeenCalledOnce();
   });
 
+  it("ignores the expired lease's stale baseline until the Task is acquired again", () => {
+    const controller = new NewTaskController();
+    const snapshot = {
+      lifecycle: "new",
+      task: { task_id: "task_1" },
+    } as TaskSnapshot;
+    controller.retain({ preparationKey: "context-a", snapshot });
+
+    expect(controller.expireClientLease()).toBe("task_1");
+    expect(controller.updateSnapshot(snapshot)).toBe(false);
+    expect(controller.getSnapshot()).toBeUndefined();
+
+    expect(controller.retain({ preparationKey: "context-a", snapshot })).toBeDefined();
+    expect(controller.getSnapshot()).toBe(snapshot);
+  });
+
   it("never treats a visible zero-message Task as disposable New Task state", () => {
     const controller = new NewTaskController();
     const state = createInitialState();
