@@ -78,6 +78,10 @@ export function useNewTaskPreparation({
     completedPreparationKey.current = undefined;
   }
   const retainedSnapshot = newTaskController.getSnapshot();
+  const preparationResetKey = newTaskController.preparationResetKey();
+  const previousPreparationResetKey = useRef(preparationResetKey);
+  const preparationWasReset = previousPreparationResetKey.current !== preparationResetKey;
+  previousPreparationResetKey.current = preparationResetKey;
   const preparedTaskMatches = Boolean(
     retainedSnapshot
       && retainedSnapshot.lifecycle === "new"
@@ -87,6 +91,9 @@ export function useNewTaskPreparation({
   );
   if (isNewTaskRoute && preparedTaskMatches && preparationKey) {
     completedPreparationKey.current = preparationKey;
+  } else if (preparationWasReset) {
+    completedPreparationKey.current = undefined;
+    if (pendingPreparation.current?.key === preparationKey) pendingPreparation.current = undefined;
   }
 
   useEffect(() => {

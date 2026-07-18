@@ -26,7 +26,9 @@ type NewTaskDisposal = {
 export class NewTaskController {
   private current?: NewTaskLease;
   private cachedSnapshot?: TaskSnapshot;
+  private expiredLeaseTaskId?: TaskId;
   private generation = 0;
+  private preparationReset = 0;
   private readonly listeners = new Set<() => void>();
   // Settled IDs stay for this controller's lifetime: late creation/browser
   // promises can otherwise issue a second discard after the first one completes.
@@ -47,6 +49,9 @@ export class NewTaskController {
   /** Installs a newer snapshot only for this controller's current New Task identity. */
   updateSnapshot(snapshot: TaskSnapshot) {
     if (snapshot.lifecycle !== "new") return false;
+    if (!this.current && !this.cachedSnapshot && this.expiredLeaseTaskId === snapshot.task.task_id) {
+      return false;
+    }
     const taskId = this.cachedSnapshot?.task.task_id ?? this.current?.taskId;
     if (taskId !== undefined && taskId !== snapshot.task.task_id) return false;
     if (this.cachedSnapshot === snapshot) return true;
@@ -64,6 +69,7 @@ export class NewTaskController {
     preparationKey: string;
     snapshot: TaskSnapshot;
   }) {
+    if (this.expiredLeaseTaskId === snapshot.task.task_id) this.expiredLeaseTaskId = undefined;
     if (!this.updateSnapshot(snapshot)) return undefined;
     return this.claim({ attachmentResources, preparationKey, taskId: snapshot.task.task_id as TaskId });
   }
@@ -83,6 +89,7 @@ export class NewTaskController {
     }
     const lease = { generation: ++this.generation, preparationKey, taskId };
     this.current = lease;
+    if (this.expiredLeaseTaskId === taskId) this.expiredLeaseTaskId = undefined;
     attachmentResources?.claimNewTaskController(taskId);
     return lease;
   }
@@ -98,6 +105,10 @@ export class NewTaskController {
 
   ownsPreparation(preparationKey: string) {
     return this.current?.preparationKey === preparationKey;
+  }
+
+  preparationResetKey() {
+    return this.preparationReset;
   }
 
   isCurrent(lease: NewTaskLease) {
@@ -159,10 +170,24 @@ export class NewTaskController {
     const hadSnapshot = this.cachedSnapshot !== undefined;
     this.generation += 1;
     this.current = undefined;
+    this.expiredLeaseTaskId = undefined;
     this.cachedSnapshot = undefined;
     this.disposals.clear();
     this.sendProtections.clear();
     if (hadSnapshot) this.emit();
+  }
+
+  /** Forgets only a still-leased Prepared Task after the App Server expires this client. */
+  expireClientLease() {
+    const lease = this.current;
+    if (!lease) return undefined;
+    this.generation += 1;
+    this.preparationReset += 1;
+    this.current = undefined;
+    this.expiredLeaseTaskId = lease.taskId;
+    if (this.cachedSnapshot?.task.task_id === lease.taskId) this.cachedSnapshot = undefined;
+    this.emit();
+    return lease.taskId;
   }
 
   /** Discards an empty Task at most once and only for its current lease. */
