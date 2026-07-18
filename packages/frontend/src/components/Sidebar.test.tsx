@@ -136,7 +136,7 @@ describe("SidebarTaskRow", () => {
     expect(read.root.findAllByProps({ className: "task-meta-age" })).toHaveLength(1);
   });
 
-  it("opens selected tasks and exposes archive through the row actions menu", () => {
+  it("opens selected tasks and keeps the row actions menu limited to Archive", () => {
     const onOpenTask = vi.fn();
     const onArchiveTask = vi.fn();
     const tree = render(
@@ -156,7 +156,10 @@ describe("SidebarTaskRow", () => {
 
     act(() => buttons[0].props.onClick());
     act(() => tree.root.findByProps({ "aria-label": "Task actions for Task" }).props.onClick());
-    act(() => tree.root.findAllByProps({ role: "menuitem" })[1].props.onClick());
+    const menuItems = tree.root.findAllByProps({ role: "menuitem" });
+    expect(menuItems).toHaveLength(1);
+    expect(menuItems[0].children).toContain("Archive task");
+    act(() => menuItems[0].props.onClick());
 
     expect(onOpenTask).toHaveBeenCalledWith("task_1");
     expect(onArchiveTask).toHaveBeenCalledWith("task_1");
@@ -210,7 +213,7 @@ describe("SidebarTaskRow", () => {
     );
 
     act(() => tree.root.findByProps({ "aria-label": "Task actions for Archived task" }).props.onClick());
-    act(() => tree.root.findAllByProps({ role: "menuitem" })[1].props.onClick());
+    act(() => tree.root.findAllByProps({ role: "menuitem" })[0].props.onClick());
 
     expect(onRestoreTask).toHaveBeenCalledWith("task_2");
   });
