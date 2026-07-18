@@ -43,7 +43,10 @@ type TaskDependencies = Pick<
   | "state"
 >;
 
-type TaskBackendConnection = Partial<Pick<BackendConnection, "handleNotification" | "request">>;
+type TaskBackendConnection = Partial<Pick<
+  BackendConnection,
+  "handleGenerationInvalidated" | "handleNotification" | "request"
+>>;
 
 export function createTaskCallbacks({
   attachmentResources,
@@ -120,6 +123,9 @@ export function createTaskCallbacks({
       dispatch({ type: "toolDetail:start", taskId, artifactId });
       return startAppServerStateSubscription({
         backendConnection: {
+          ...(backendConnection.handleGenerationInvalidated
+            ? { handleGenerationInvalidated: backendConnection.handleGenerationInvalidated }
+            : {}),
           handleNotification: backendConnection.handleNotification,
           request: backendConnection.request,
         },

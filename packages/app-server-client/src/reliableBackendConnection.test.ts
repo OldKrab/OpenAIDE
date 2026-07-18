@@ -75,11 +75,20 @@ describe("ReliableBackendConnection", () => {
   });
 
   it.each([
-    { expiry: "transport" as const, failure: "HTTP 410" },
-    { expiry: "client" as const, failure: "client/initialize must succeed" },
+    {
+      expiry: "transport" as const,
+      failure: "HTTP 410",
+      invalidationReason: "httpSessionExpired",
+    },
+    {
+      expiry: "client" as const,
+      failure: "client/initialize must succeed",
+      invalidationReason: "clientLivenessExpired",
+    },
   ])("reinitializes after $expiry expiry with safe replay semantics", async ({
     expiry,
     failure,
+    invalidationReason,
   }) => {
     const transport = createExpiringSessionTransport(expiry);
     const connection = createReliableWebProxyBackendConnection({
@@ -89,6 +98,8 @@ describe("ReliableBackendConnection", () => {
       retryDelayMs: 1,
       heartbeatIntervalMs: 60_000,
     });
+    const invalidations: string[] = [];
+    connection.handleGenerationInvalidated(({ reason }) => invalidations.push(reason));
     const permissionHandler = vi.fn(async () => ({ optionId: "allow-once" }));
     connection.handleRequest(PERMISSION_REQUEST, permissionHandler);
     await connection.initialize({
@@ -120,6 +131,7 @@ describe("ReliableBackendConnection", () => {
     await vi.waitFor(() => expect(permissionHandler).toHaveBeenCalledOnce());
     await vi.waitFor(() => expect(transport.permissionResponseSessions()).toEqual(["session-2"]));
     expect(transport.taskListSessions()).toEqual(["session-1", "session-2"]);
+    expect(invalidations).toEqual([invalidationReason]);
     connection.close();
   });
 
@@ -184,6 +196,61 @@ describe("ReliableBackendConnection", () => {
     ]));
     connection.close();
   });
+
+  it("invalidates stale state and reinitializes after server replay history expires", async () => {
+    const transport = createExpiringSessionTransport("transport");
+    const connection = createReliableWebProxyBackendConnection({
+      endpointUrl: "http://app-server.test/rpc",
+      connectionId: "connection-1",
+      fetch: transport.fetch,
+      retryDelayMs: 1,
+      heartbeatIntervalMs: 60_000,
+    });
+    const invalidations: string[] = [];
+    connection.handleGenerationInvalidated(({ reason }) => invalidations.push(reason));
+    await connection.initialize({
+      clientInstanceId: "client-1" as ClientInstanceId,
+      shell: { kind: "web" },
+      requestedSurface: { kind: "home" },
+      capabilities: { protocol: [], shell: [] },
+    });
+
+    transport.expireReplayOnNextReceive();
+
+    await vi.waitFor(() => expect(transport.initializedSessions()).toEqual([
+      "session-1",
+      "session-2",
+    ]));
+    expect(invalidations).toEqual(["serverReplayExpired"]);
+    connection.close();
+  });
+
+  it("keeps an unrelated HTTP 409 terminal instead of discarding state", async () => {
+    const transport = createExpiringSessionTransport("transport");
+    const connection = createReliableWebProxyBackendConnection({
+      endpointUrl: "http://app-server.test/rpc",
+      connectionId: "connection-1",
+      fetch: transport.fetch,
+      retryDelayMs: 1,
+      heartbeatIntervalMs: 60_000,
+    });
+    const invalidations = vi.fn();
+    connection.handleGenerationInvalidated(invalidations);
+    await connection.initialize({
+      clientInstanceId: "client-1" as ClientInstanceId,
+      shell: { kind: "web" },
+      requestedSurface: { kind: "home" },
+      capabilities: { protocol: [], shell: [] },
+    });
+
+    transport.rejectAcknowledgementOnNextReceive();
+    await vi.waitFor(() => expect(transport.rejectedAcknowledgements()).toBe(1));
+
+    await expect(connection.request(TASK_LIST, { archived: false })).rejects.toThrow("HTTP 409");
+    expect(transport.openedSessions()).toBe(1);
+    expect(invalidations).not.toHaveBeenCalled();
+    connection.close();
+  });
 });
 
 function createExpiringSessionTransport(
@@ -196,12 +263,24 @@ function createExpiringSessionTransport(
   const permissionResponses: string[] = [];
   const heartbeats: string[] = [];
   let freezeNextReceive = false;
+  let expireReplayOnNextReceive = false;
+  let rejectAcknowledgementOnNextReceive = false;
+  let rejectedAcknowledgementCount = 0;
   let frozenPollCount = 0;
   let opened = 0;
 
   return {
     fetch: vi.fn<ReliableHttpFetch>(async (_input, init) => {
       if (init.method === "GET") {
+        if (rejectAcknowledgementOnNextReceive) {
+          rejectAcknowledgementOnNextReceive = false;
+          rejectedAcknowledgementCount += 1;
+          return response(409, "invalid acknowledgement");
+        }
+        if (expireReplayOnNextReceive) {
+          expireReplayOnNextReceive = false;
+          return response(409, { resyncRequired: true });
+        }
         if (freezeNextReceive) {
           freezeNextReceive = false;
           frozenPollCount += 1;
@@ -286,6 +365,13 @@ function createExpiringSessionTransport(
     freezeNextReceive() {
       freezeNextReceive = true;
     },
+    expireReplayOnNextReceive() {
+      expireReplayOnNextReceive = true;
+    },
+    rejectAcknowledgementOnNextReceive() {
+      rejectAcknowledgementOnNextReceive = true;
+    },
+    rejectedAcknowledgements: () => rejectedAcknowledgementCount,
     sendPermissionRequest(sessionId: string) {
       enqueue(sessionId, {
         jsonrpc: "2.0",

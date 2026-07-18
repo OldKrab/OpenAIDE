@@ -25,7 +25,8 @@ import {
 import { mapProtocolToolDetail } from "../state/appServerProtocolChatMapping";
 import type { AgentOption } from "../state/composerOptions";
 
-type StateSubscriptionConnection = Pick<BackendConnection, "handleNotification" | "request">;
+type StateSubscriptionConnection = Pick<BackendConnection, "handleNotification" | "request">
+  & Partial<Pick<BackendConnection, "handleGenerationInvalidated">>;
 const SUBSCRIPTION_RETRY_MS = 500;
 const MAX_SUBSCRIPTION_RETRY_MS = 5_000;
 const MAX_PENDING_EVENTS = 1_000;
@@ -85,6 +86,12 @@ export function startAppServerStateSubscription({
   let retryTimer: ReturnType<typeof setTimeout> | undefined;
   let retryDelay = SUBSCRIPTION_RETRY_MS;
   const unsubscribe = backendConnection.handleNotification("app/event", handleEvent);
+  const unsubscribeInvalidation = backendConnection.handleGenerationInvalidated?.(() => {
+    // Events buffered for an obsolete transport generation cannot be reconciled
+    // with the next authoritative subscription cursor.
+    pendingEvents = [];
+    void subscribe();
+  });
 
   void subscribe();
 
@@ -92,6 +99,7 @@ export function startAppServerStateSubscription({
     disposed = true;
     if (retryTimer !== undefined) clearTimeout(retryTimer);
     unsubscribe();
+    unsubscribeInvalidation?.();
     scopeLease.release(unsubscribeScope);
   };
 

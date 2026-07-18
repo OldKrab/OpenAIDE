@@ -1,6 +1,7 @@
 import type {
   BackendConnection,
   BackendEventListener,
+  BackendGenerationInvalidation,
   BackendUnsubscribe,
 } from "./backendConnection.js";
 import {
@@ -28,6 +29,7 @@ import {
 } from "./rpcPeer.js";
 import {
   createReliableHttpMessageChannel,
+  isReliableHttpReplayExpired,
   isReliableHttpSessionExpired,
   type ReliableHttpFetch,
   type ReliableHttpMessageChannel,
@@ -91,6 +93,9 @@ function createReliableHttpBackendConnection(
   options: ReliableLocalHttpBackendConnectionOptions | ReliableWebProxyBackendConnectionOptions,
 ): BackendConnection {
   const eventListeners = new Set<BackendEventListener>();
+  const generationInvalidationListeners = new Set<
+    (event: BackendGenerationInvalidation) => void
+  >();
   const requestRegistrations = new Set<{
     bind(connection: BackendConnection): void;
     dispose(): void;
@@ -161,6 +166,10 @@ function createReliableHttpBackendConnection(
       eventListeners.add(handler);
       return () => eventListeners.delete(handler);
     },
+    handleGenerationInvalidated(handler) {
+      generationInvalidationListeners.add(handler);
+      return () => generationInvalidationListeners.delete(handler);
+    },
     close() {
       if (closed) return;
       closed = true;
@@ -168,6 +177,7 @@ function createReliableHttpBackendConnection(
       generations.clear();
       requestRegistrations.clear();
       eventListeners.clear();
+      generationInvalidationListeners.clear();
     },
   };
 
@@ -218,11 +228,22 @@ function createReliableHttpBackendConnection(
 
   function handleGenerationError(generation: HttpConnectionGeneration, error: unknown) {
     if (closed || generation !== active) return;
-    if (!isReliableHttpSessionExpired(error) || !initializeParams) {
+    const invalidation = isReliableHttpSessionExpired(error)
+      ? {
+          reason: "httpSessionExpired" as const,
+          message: "HTTP RPC session expired",
+        }
+      : isReliableHttpReplayExpired(error)
+        ? {
+            reason: "serverReplayExpired" as const,
+            message: "HTTP RPC server replay history expired",
+          }
+        : undefined;
+    if (!invalidation || !initializeParams) {
       terminalError = error;
       return;
     }
-    beginRecovery(generation, "HTTP RPC session expired");
+    beginRecovery(generation, invalidation);
   }
 
   function handleGenerationRequestError(
@@ -236,14 +257,23 @@ function createReliableHttpBackendConnection(
       || error.protocolError.code !== "notInitialized"
       || !initializeParams
     ) return;
-    beginRecovery(generation, "App Server client liveness expired");
+    beginRecovery(generation, {
+      reason: "clientLivenessExpired",
+      message: "App Server client liveness expired",
+    });
   }
 
-  function beginRecovery(generation: HttpConnectionGeneration, reason: string) {
+  function beginRecovery(
+    generation: HttpConnectionGeneration,
+    invalidation: BackendGenerationInvalidation & { message: string },
+  ) {
     if (recoveryPromise) return;
-    console.info(`[OpenAIDE] ${reason}; reinitializing the connection`);
+    console.info(`[OpenAIDE] ${invalidation.message}; reinitializing the connection`);
     const attempt = recoverGeneration(generation);
     recoveryPromise = attempt;
+    for (const listener of generationInvalidationListeners) {
+      listener({ reason: invalidation.reason });
+    }
     void attempt.then(
       () => {
         if (recoveryPromise === attempt) recoveryPromise = undefined;
@@ -307,6 +337,9 @@ function createInternalReliableBackendConnection(
     ServerNotifications
   >(options.channel);
   const eventListeners = new Set<BackendEventListener>();
+  const generationInvalidationListeners = new Set<
+    (event: BackendGenerationInvalidation) => void
+  >();
   let initialized = false;
   let initializePromise: Promise<InitializeResult> | undefined;
   let heartbeat: ReturnType<typeof setInterval> | undefined;
@@ -342,6 +375,10 @@ function createInternalReliableBackendConnection(
       eventListeners.add(handler);
       return () => eventListeners.delete(handler);
     },
+    handleGenerationInvalidated(handler) {
+      generationInvalidationListeners.add(handler);
+      return () => generationInvalidationListeners.delete(handler);
+    },
     close() {
       if (heartbeat) clearInterval(heartbeat);
       heartbeat = undefined;
@@ -349,6 +386,7 @@ function createInternalReliableBackendConnection(
       peer.close();
       options.channel.close?.();
       eventListeners.clear();
+      generationInvalidationListeners.clear();
     },
   };
   return connection;

@@ -588,6 +588,60 @@ describe("startAppServerStateSubscription", () => {
     await secondSubscribe.promise;
   });
 
+  it("replaces stale Task Chat after the backend connection generation is invalidated", async () => {
+    let invalidateGeneration: Parameters<BackendConnection["handleGenerationInvalidated"]>[0]
+      | undefined;
+    const dispatch = vi.fn();
+    const onBaselineLost = vi.fn();
+    const onBaselineReady = vi.fn();
+    const request = vi.fn(async () => (
+      request.mock.calls.length === 1
+        ? taskSubscriptionWithAgentText("cursor_1", "Working before background")
+        : taskSubscriptionWithAgentText("cursor_9", "Finished while hidden")
+    ));
+    const connection = {
+      request,
+      handleNotification() {
+        return vi.fn();
+      },
+      handleGenerationInvalidated(listener: Parameters<BackendConnection["handleGenerationInvalidated"]>[0]) {
+        invalidateGeneration = listener;
+        return vi.fn();
+      },
+    } as Pick<BackendConnection, "request" | "handleNotification" | "handleGenerationInvalidated">;
+
+    startAppServerStateSubscription({
+      backendConnection: connection,
+      context: {
+        stateRootId: "root_1" as StateRootId,
+        clientInstanceId: "client_1" as never,
+      },
+      dispatch,
+      onBaselineLost,
+      onBaselineReady,
+      scope: { kind: "task", taskId: "task_1" as TaskId },
+    });
+    await vi.waitFor(() => expect(dispatch).toHaveBeenCalledTimes(1));
+
+    invalidateGeneration?.({ reason: "serverReplayExpired" });
+
+    await vi.waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+    expect(onBaselineLost).toHaveBeenCalledOnce();
+    expect(onBaselineReady).toHaveBeenCalledTimes(2);
+    expect(dispatch).toHaveBeenLastCalledWith(expect.objectContaining({
+      type: "snapshot",
+      snapshot: expect.objectContaining({
+        chat: expect.objectContaining({
+          items: [expect.objectContaining({
+            message: expect.objectContaining({
+              parts: [{ kind: "text", text: "Finished while hidden" }],
+            }),
+          })],
+        }),
+      }),
+    }));
+  });
+
   it("replays events that arrive while a resync snapshot is in flight", async () => {
     let eventListener: ((event: AppServerEvent) => void) | undefined;
     const dispatch = vi.fn();
@@ -949,6 +1003,21 @@ function taskSubscription(cursor: string, taskIdValue: string): StateSubscribeRe
       task: protocolTaskSnapshot(taskIdValue),
     },
   };
+}
+
+function taskSubscriptionWithAgentText(cursor: string, text: string): StateSubscribeResult {
+  const result = taskSubscription(cursor, "task_1");
+  if (result.snapshot.kind !== "task") throw new Error("expected Task subscription");
+  result.snapshot.task.chat = {
+    hasMessages: true,
+    items: [{
+      messageId: "message_1" as MessageId,
+      role: "agent",
+      status: "complete",
+      parts: [{ kind: "text", text }],
+    }],
+  };
+  return result;
 }
 
 function taskEvent(

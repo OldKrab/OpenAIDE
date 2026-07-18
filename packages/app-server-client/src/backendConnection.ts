@@ -15,6 +15,9 @@ import type {
 
 export type BackendEventListener = (event: AppServerEvent) => void;
 export type BackendUnsubscribe = () => void;
+export type BackendGenerationInvalidation = {
+  reason: "httpSessionExpired" | "clientLivenessExpired" | "serverReplayExpired";
+};
 export type BackendReplicaIdentity = {
   serverId: ServerId;
   stateRootId: StateRootId;
@@ -42,6 +45,10 @@ export interface BackendConnection {
   ): BackendUnsubscribe;
   /** Registers a typed App Server event notification handler. */
   handleNotification(method: "app/event", handler: BackendEventListener): BackendUnsubscribe;
+  /** Signals that active state subscriptions must install fresh authoritative baselines. */
+  handleGenerationInvalidated(
+    handler: (event: BackendGenerationInvalidation) => void,
+  ): BackendUnsubscribe;
   close(): Promise<void> | void;
 }
 

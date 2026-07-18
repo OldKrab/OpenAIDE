@@ -61,7 +61,12 @@ export type { AppServerReplicaTransition } from "./appServerReplicaLifecycle";
 
 export type AppControllerBackendConnection = Pick<
   BackendConnection,
-  "initialize" | "request" | "handleNotification" | "handleRequest" | "close"
+  | "initialize"
+  | "request"
+  | "handleNotification"
+  | "handleGenerationInvalidated"
+  | "handleRequest"
+  | "close"
 >;
 
 export type BackendConnectionState =
@@ -253,6 +258,7 @@ export function useAppControllerBackendLifecycle({
             }
             if (backendConnection) {
               const subscriptionConnection = {
+                handleGenerationInvalidated: backendConnection.handleGenerationInvalidated,
                 handleNotification: backendConnection.handleNotification,
                 request: backendConnection.request,
               };

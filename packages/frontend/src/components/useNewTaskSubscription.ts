@@ -8,7 +8,10 @@ import type { AppAction } from "../state/appReducer";
 import type { NewTaskController } from "./newTaskController";
 
 type NewTaskSubscriptionOptions = {
-  backendConnection?: Pick<BackendConnection, "handleNotification" | "request">;
+  backendConnection?: Pick<
+    BackendConnection,
+    "handleGenerationInvalidated" | "handleNotification" | "request"
+  >;
   backendInitialized: RefObject<boolean>;
   backendReady: boolean;
   backendStateGeneration: number;
