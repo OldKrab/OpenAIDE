@@ -5,6 +5,7 @@ import type { NativeSessionsState } from "../state/store";
 import { Sidebar } from "./Sidebar";
 import { SidebarNativeSessionRow } from "./SidebarNativeSessionRow";
 import { SidebarTaskRow } from "./SidebarTaskRow";
+import { SidebarTaskPreviewProvider } from "./SidebarTaskPreview";
 import { sidebarViewModel } from "./sidebarViewModel";
 
 beforeEach(() => {
@@ -257,14 +258,14 @@ describe("SidebarTaskRow", () => {
 
     expect(tree.root.findByProps({ className: "task-title" }).children.join(""))
       .toBe("QA reload recovery 1782881988");
-    expect(tree.root.findByProps({ className: "task-title" }).props.title).toBe("QA reload recovery 1782881988");
+    expect(tree.root.findByProps({ className: "task-title" }).props.title).toBeUndefined();
     expect(tree.root.findByProps({ className: "task-meta-age" }).props.title).toBe(
       "Last activity: 2026-05-22T00:00:00.000Z",
     );
     expect(tree.root.findAllByProps({ className: "task-meta-reference" })).toHaveLength(0);
   });
 
-  it("preserves the full task title as a hover tooltip", () => {
+  it("does not duplicate the rich preview with a native title tooltip", () => {
     const fullTitle = "A long task title that is trimmed by the sidebar width";
     const tree = render(
       <SidebarTaskRow
@@ -276,7 +277,7 @@ describe("SidebarTaskRow", () => {
       />,
     );
 
-    expect(tree.root.findByProps({ className: "task-title" }).props.title).toBe(fullTitle);
+    expect(tree.root.findByProps({ className: "task-title" }).props.title).toBeUndefined();
   });
 
   it("renders the full Agent title when it contains machine-looking text", () => {
@@ -292,7 +293,7 @@ describe("SidebarTaskRow", () => {
 
     expect(tree.root.findByProps({ className: "task-title" }).children.join(""))
       .toBe("QA multitab long 1782881214972: retry run");
-    expect(tree.root.findByProps({ className: "task-title" }).props.title).toBe("QA multitab long 1782881214972: retry run");
+    expect(tree.root.findByProps({ className: "task-title" }).props.title).toBeUndefined();
     expect(tree.root.findAllByProps({ className: "task-meta-reference" })).toHaveLength(0);
   });
 });
@@ -331,11 +332,55 @@ describe("SidebarNativeSessionRow", () => {
     expect(buttons[1].props.title).toBe("Open task");
     expect(tree.root.findByProps({ className: "task-agent-icon" }).props["aria-label"]).toBe("Agent: Codex");
     expect(tree.root.findByProps({ className: "task-meta-age" })).toBeDefined();
-    expect(tree.root.findByProps({ className: "task-title" }).props.title).toBe("Existing session");
+    expect(tree.root.findByProps({ className: "task-title" }).props.title).toBeUndefined();
 
     act(() => buttons[0].props.onClick());
 
     expect(onOpenNativeSession).toHaveBeenCalledWith(session);
+  });
+
+  it("shows the delayed rich preview for a Native Session that is not yet adopted", () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("window", {
+      innerHeight: 800,
+      innerWidth: 1200,
+      matchMedia: () => ({ matches: false }),
+    });
+    vi.stubGlobal("document", {
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    });
+    const rowNode = {
+      getBoundingClientRect: () => ({ bottom: 72, height: 32, left: 8, right: 296, top: 40, width: 288, x: 8, y: 40 }),
+    } as HTMLElement;
+    const tree = render(
+      <SidebarTaskPreviewProvider>
+        <SidebarNativeSessionRow
+          nativeSessionAgentId="codex"
+          nativeSessionAgentName="Codex"
+          onOpenNativeSession={vi.fn()}
+          projectLabel="OpenAIDE"
+          session={nativeSession({ cwd: "/workspace/OpenAIDE", title: "Existing session" })}
+        />
+      </SidebarTaskPreviewProvider>,
+      { createNodeMock: (element) => (element.props as { className?: string }).className === "task-row external-session-row" ? rowNode : null },
+    );
+    const row = tree.root.findByProps({ className: "task-row external-session-row" });
+
+    act(() => row.props.onPointerEnter());
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+    });
+
+    const preview = tree.root.findByProps({ role: "dialog" });
+    expect(preview.findByType("header").findByType("strong").children.join("")).toBe("Existing session");
+    expect(preview.findAllByType("strong").map((item) => item.children.join(""))).toEqual([
+      "Existing session",
+      "OpenAIDE",
+      "/workspace/OpenAIDE",
+    ]);
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
   });
 
   it("disables listed session actions while adoption is pending", () => {
@@ -1325,10 +1370,10 @@ function rowTitles(tree: ReturnType<typeof render>) {
   return taskRows(tree).map((row) => row.findByProps({ className: "task-title" }).children.join(""));
 }
 
-function render(element: React.ReactElement) {
+function render(element: React.ReactElement, options?: Parameters<typeof create>[1]) {
   let tree: ReturnType<typeof create> | undefined;
   act(() => {
-    tree = create(element);
+    tree = create(element, options);
   });
   return tree!;
 }

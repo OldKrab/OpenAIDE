@@ -4,7 +4,7 @@ import type { TaskStatus, TaskSummary } from "@openaide/app-shell-contracts";
 import { AgentIcon } from "./AgentIcon";
 import { SidebarRowActionSlot } from "./SidebarRowParts";
 import { relativeTime } from "./taskSurfaceHelpers";
-import { useSidebarTaskPreview } from "./SidebarTaskPreview";
+import { taskPreviewContent, useSidebarTaskPreview } from "./SidebarTaskPreview";
 
 export function SidebarTaskRow({
   activeTaskId,
@@ -62,8 +62,8 @@ export function SidebarTaskRow({
   return (
     <div
       className={`task-row task-product-row ${task.task_id === activeTaskId ? "selected" : ""}`}
-      onFocus={() => rowRef.current && preview?.enter(task, rowRef.current, true)}
-      onPointerEnter={() => rowRef.current && preview?.enter(task, rowRef.current)}
+      onFocus={() => rowRef.current && preview?.enter(taskPreviewContent(task), rowRef.current, true)}
+      onPointerEnter={() => rowRef.current && preview?.enter(taskPreviewContent(task), rowRef.current)}
       onPointerLeave={() => preview?.leave()}
       ref={rowRef}
       role="listitem"
@@ -82,7 +82,7 @@ export function SidebarTaskRow({
           <AgentIcon agentId={task.agent_id} agentName={task.agent_name} size={12} />
         </span>
         <span className="task-row-body">
-          <span className="task-title" title={title}>{title}</span>
+          <span className="task-title">{title}</span>
           <TaskTrailingMeta
             status={task.status}
             timestamp={task.last_activity}

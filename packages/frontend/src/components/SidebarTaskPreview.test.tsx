@@ -1,7 +1,7 @@
 import { act, create } from "react-test-renderer";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TaskSummary } from "@openaide/app-shell-contracts";
-import { SidebarTaskPreviewProvider, useSidebarTaskPreview } from "./SidebarTaskPreview";
+import { SidebarTaskPreviewProvider, taskPreviewContent, useSidebarTaskPreview } from "./SidebarTaskPreview";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -45,7 +45,7 @@ describe("SidebarTaskPreview", () => {
 
 function HoverTarget({ row }: { row: HTMLElement }) {
   const preview = useSidebarTaskPreview();
-  return <button onPointerEnter={() => preview?.enter(task(), row)} type="button">Task</button>;
+  return <button onPointerEnter={() => preview?.enter(taskPreviewContent(task()), row)} type="button">Task</button>;
 }
 
 function task(): TaskSummary {

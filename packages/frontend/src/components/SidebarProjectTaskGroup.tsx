@@ -116,6 +116,7 @@ export function SidebarProjectTaskGroup({
             nativeSessionAgentName={nativeSessionAgentName}
             nativeSessionsAdoptingSessionId={nativeSessionsAdoptingSessionId}
             onOpenNativeSession={onOpenNativeSession}
+            projectLabel={group.label}
             session={row.session}
           />
         ),

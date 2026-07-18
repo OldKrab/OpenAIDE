@@ -1,22 +1,28 @@
 import { ExternalLink } from "lucide-react";
+import { useRef } from "react";
 import type { AgentListedSession } from "@openaide/app-shell-contracts";
 import { AgentIcon } from "./AgentIcon";
 import { SidebarRowActionSlot } from "./SidebarRowParts";
 import { nativeSessionTitle, relativeTime } from "./taskSurfaceHelpers";
+import { useSidebarTaskPreview } from "./SidebarTaskPreview";
 
 export function SidebarNativeSessionRow({
   nativeSessionAgentId,
   nativeSessionAgentName,
   nativeSessionsAdoptingSessionId,
   onOpenNativeSession,
+  projectLabel = "Project",
   session,
 }: {
   nativeSessionAgentId: string;
   nativeSessionAgentName: string;
   nativeSessionsAdoptingSessionId?: string;
   onOpenNativeSession: (session: AgentListedSession) => void;
+  projectLabel?: string;
   session: AgentListedSession;
 }) {
+  const rowRef = useRef<HTMLDivElement>(null);
+  const preview = useSidebarTaskPreview();
   const adopting = nativeSessionsAdoptingSessionId === session.session_id;
   const disabled = nativeSessionsAdoptingSessionId !== undefined || adopting;
   const title = nativeSessionTitle(session);
@@ -24,7 +30,14 @@ export function SidebarNativeSessionRow({
   const age = timestamp ? relativeTime(timestamp) : "";
 
   return (
-    <div className="task-row external-session-row" role="listitem">
+    <div
+      className="task-row external-session-row"
+      onFocus={() => rowRef.current && preview?.enter(previewContent(), rowRef.current, true)}
+      onPointerEnter={() => rowRef.current && preview?.enter(previewContent(), rowRef.current)}
+      onPointerLeave={() => preview?.leave()}
+      ref={rowRef}
+      role="listitem"
+    >
       <button
         className="task-open"
         disabled={disabled}
@@ -36,7 +49,7 @@ export function SidebarNativeSessionRow({
           <AgentIcon agentId={nativeSessionAgentId} agentName={nativeSessionAgentName} size={12} />
         </span>
         <span className="task-row-body">
-          <span className="task-title" title={title}>{title}</span>
+          <span className="task-title">{title}</span>
           <span className="task-trailing-meta">
             {adopting ? (
               <span aria-label="Opening task" className="task-trailing-indicator" role="img" title="Opening task">
@@ -64,4 +77,14 @@ export function SidebarNativeSessionRow({
       </SidebarRowActionSlot>
     </div>
   );
+
+  function previewContent() {
+    return {
+      projectLabel,
+      state: age,
+      title,
+      workspaceKind: "native_session" as const,
+      workspaceLabel: session.cwd,
+    };
+  }
 }
