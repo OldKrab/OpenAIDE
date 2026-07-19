@@ -51,31 +51,22 @@ describe("Web Task notifications", () => {
     }
   });
 
-  it("opens the notified Task before focus recovery can mark the prior Task read", () => {
-    vi.useFakeTimers();
-    try {
-      let routedTaskId = "task-first";
-      let pendingTaskId: string | undefined;
-      let focusedTaskId: string | undefined;
-      const environment = testEnvironment({
-        focused: false,
-        permission: "granted",
-        enabled: true,
-        focusWindow: () => { focusedTaskId = routedTaskId; },
-        openTask: (taskId) => { pendingTaskId = taskId; },
-      });
-      const manager = createWebTaskNotificationManager(environment);
-      manager.reconcile("root-1", []);
-      manager.reconcile("root-1", [task("attention-second", "finished")]);
+  it("routes the notified Task before synchronously focusing the browser", () => {
+    const activation: string[] = [];
+    const environment = testEnvironment({
+      focused: false,
+      permission: "granted",
+      enabled: true,
+      focusWindow: () => { activation.push("focus"); },
+      openTask: (taskId) => { activation.push(`open:${taskId}`); },
+    });
+    const manager = createWebTaskNotificationManager(environment);
+    manager.reconcile("root-1", []);
+    manager.reconcile("root-1", [task("attention-second", "finished")]);
 
-      environment.notifications[0].click();
-      routedTaskId = pendingTaskId ?? routedTaskId;
-      vi.runAllTimers();
+    environment.notifications[0].click();
 
-      expect(focusedTaskId).toBe("task-1");
-    } finally {
-      vi.useRealTimers();
-    }
+    expect(activation).toEqual(["open:task-1", "focus"]);
   });
 
   it("delivers App Server millisecond-epoch attention timestamps", () => {
