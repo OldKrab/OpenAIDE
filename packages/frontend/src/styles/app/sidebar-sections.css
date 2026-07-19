@@ -251,3 +251,25 @@ body[data-shell="web"] .task-list {
   background: color-mix(in oklch, var(--oa-selected) 36%, transparent);
   box-shadow: none;
 }
+.native-session-recovery {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 4px 8px;
+  border: 1px solid var(--oa-border);
+  border-radius: var(--oa-radius-sm);
+  background: var(--oa-panel);
+  padding: 7px 8px;
+  color: var(--oa-muted);
+  font-size: 12px;
+}
+
+.native-session-recovery button {
+  flex: none;
+  border: 0;
+  background: transparent;
+  color: var(--oa-accent);
+  padding: 2px 3px;
+  font-size: 12px;
+}

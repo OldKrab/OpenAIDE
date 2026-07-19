@@ -462,19 +462,25 @@ describe("Sidebar", () => {
   });
 
   it("renders native-session errors without hiding valid rows", () => {
+    const onRecoverNativeSessions = vi.fn();
     const tree = render(
       <Sidebar
         nativeSessions={nativeSessions({
-          error: "Could not load more sessions.",
+          error: "Codex history unavailable",
+          recoveryKind: "nodeJsRequired",
           items: [nativeSession({ session_id: "session_1", title: "Existing" })],
         })}
+        onRecoverNativeSessions={onRecoverNativeSessions}
         showArchived={false}
         tasks={[]}
         {...sidebarCallbacks()}
       />,
     );
 
-    expect(tree.root.findByProps({ className: "empty-list" }).children).toEqual(["Could not load more sessions."]);
+    expect(tree.root.findByProps({ className: "native-session-recovery" }).findByType("span").children)
+      .toEqual(["Codex history unavailable"]);
+    act(() => tree.root.findByProps({ className: "native-session-recovery" }).findByType("button").props.onClick());
+    expect(onRecoverNativeSessions).toHaveBeenCalledWith("nodeJsRequired");
     expect(tree.root.findAllByProps({ className: "task-row external-session-row" })).toHaveLength(1);
   });
 

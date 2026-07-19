@@ -168,6 +168,10 @@ _Avoid_: Owning task lifecycle, settings truth, runtime routing, or stale respon
 An Agent-owned session identity that OpenAIDE binds to a Task for live work and Chat loading.
 _Avoid_: User-facing replacement for Task, treating OpenAIDE's local Chat projection as the Agent's source of truth
 
+**Native Session Discovery**:
+The optional listing of Agent-owned sessions that a user may adopt as OpenAIDE Tasks. Its availability does not determine whether saved OpenAIDE Tasks loaded successfully.
+_Avoid_: Agent session history as a synonym for Task history, replacing Task Navigation errors with Agent errors
+
 **Configuration Option**:
 An Agent-provided setting for a Native Session whose available choices and current value can change as the Agent state changes.
 _Avoid_: Static hard-coded model or mode controls

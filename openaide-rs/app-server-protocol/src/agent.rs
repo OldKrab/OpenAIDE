@@ -39,6 +39,7 @@ pub struct AgentAuthenticateResult {
     pub agent_id: AgentId,
     pub method_id: String,
     pub status: AgentAuthenticateStatus,
+    pub agents: AgentCollectionSnapshot,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]

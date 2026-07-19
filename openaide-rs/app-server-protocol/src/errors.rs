@@ -25,6 +25,7 @@ pub enum ProtocolErrorCode {
     ValidationFailed,
     AttachmentHandleInvalid,
     CapabilityUnavailable,
+    NodeJsRequired,
     RequestAlreadyResolved,
     ServerStopping,
     StaleCursor,

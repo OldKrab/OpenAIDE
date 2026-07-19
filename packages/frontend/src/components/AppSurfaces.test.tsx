@@ -109,7 +109,7 @@ describe("AppSurfaces callback wiring", () => {
 
     expect(surfaceMocks.settings).toHaveBeenCalledWith(
       expect.objectContaining({
-        onAuthenticate: controller.callbacks.settings.authenticateAgent,
+        onAuthenticate: expect.any(Function),
         onCreateCustomAgent: controller.callbacks.settings.createCustomAgent,
         onDeleteCustomAgent: controller.callbacks.settings.deleteCustomAgent,
         onRefresh: controller.callbacks.settings.refreshSettings,
@@ -123,6 +123,29 @@ describe("AppSurfaces callback wiring", () => {
       }),
       undefined,
     );
+  });
+
+  it("returns successful recovery authentication to the preserved New Task", async () => {
+    const controller = controllerFor("settings");
+    controller.bootstrap = {
+      surface: "settings",
+      shell: VSCODE_SHELL,
+      projectId: "project_1",
+      returnToNewTask: true,
+      settingsAgentId: "codex",
+    };
+    vi.mocked(controller.callbacks.settings.authenticateAgent).mockResolvedValue(true);
+    render(controller);
+    const lastCall = surfaceMocks.settings.mock.calls.at(-1) as unknown as [{
+      onAuthenticate: (agentId: string, methodId: string) => Promise<boolean>;
+    }] | undefined;
+    const props = lastCall?.[0];
+
+    await act(async () => {
+      await props!.onAuthenticate("codex", "codex-login");
+    });
+
+    expect(controller.callbacks.navigation.openNewTask).toHaveBeenCalledWith("project_1");
   });
 
   it("renders web settings inside the web workbench sidebar shell", () => {
@@ -842,6 +865,7 @@ function controllerFor(surface: AppController["bootstrap"]["surface"]): TestCont
         openNativeSession: vi.fn(),
         openNewTask: vi.fn(),
         openSettings: vi.fn(),
+        retryAgent: vi.fn(async () => true),
         openTask: vi.fn(),
         restoreTask: vi.fn(),
         toggleArchived: vi.fn(),

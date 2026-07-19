@@ -14,10 +14,16 @@ export type FrontendShell = {
   };
   navigation: {
     openNewTask(projectId?: string): void;
-    openSettings(): void;
+    openSettings(agentId?: string, returnToNewTask?: boolean, projectId?: string): void;
     openTask(taskId: string, title?: string): void;
     replaceSettingsTab(tab: SettingsTabId): void;
     subscribe(listener: (bootstrap: WebviewBootstrap) => void): () => void;
+  };
+  recovery: {
+    /** Opens a trusted product-owned recovery URL outside the embedded surface. */
+    openExternal(url: string): void;
+    /** Reloads the owning shell when it exposes that recovery capability. */
+    reload?: () => void;
   };
   /** Browser-profile notification integration; omitted by non-Web shells. */
   taskNotifications?: WebTaskNotificationManager;

@@ -72,9 +72,9 @@ use crate::settings::{
 use crate::snapshot::{
     ActivityStatus, ActivityStepSnapshot, AgentCapabilities, AgentCollectionSnapshot,
     AgentConfigOptionKind, AgentConfigOptionSnapshot, AgentConfigOptionValueSnapshot,
-    AgentSlashCommandInputSnapshot, AgentSlashCommandSnapshot, AgentStatus, AgentSummary,
-    AttachmentKind, AttachmentSnapshot, ChatItem, ChatItemStatus, ChatRole, ChatSnapshot,
-    ClientSnapshot, ClientSnapshotScope, LiveSessionDataState, MessagePart,
+    AgentSetupReason, AgentSlashCommandInputSnapshot, AgentSlashCommandSnapshot, AgentStatus,
+    AgentSummary, AttachmentKind, AttachmentSnapshot, ChatItem, ChatItemStatus, ChatRole,
+    ChatSnapshot, ClientSnapshot, ClientSnapshotScope, LiveSessionDataState, MessagePart,
     NewTaskDefaultsSnapshot, PendingAgentConfigChange, PendingRequestKind, PendingRequestScope,
     PendingRequestSnapshot, ProjectCollectionSnapshot, ProjectSummary, ProtocolVersion,
     QuestionMessageAction, QuestionMessageState, RecoveryAction, RecoverySnapshot,
@@ -392,6 +392,7 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<AgentCollectionSnapshot>(output, config);
     push_decl::<AgentSummary>(output, config);
     push_decl::<AgentStatus>(output, config);
+    push_decl::<AgentSetupReason>(output, config);
     push_decl::<AgentCapabilities>(output, config);
     push_decl::<TaskNavigationSnapshot>(output, config);
     push_decl::<TaskSummary>(output, config);

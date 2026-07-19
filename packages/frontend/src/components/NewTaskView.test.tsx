@@ -71,6 +71,40 @@ function createInitialState() {
 }
 
 describe("NewTaskView", () => {
+  it("replaces the unavailable composer while preserving the New Task surface", () => {
+    const state = createInitialState();
+    state.workspaceRootsLoaded = true;
+    const selectedProject = { projectId: "project_1", label: "OpenAIDE" };
+    state.projects = [selectedProject];
+    state.newTask.selection = selectionWithProject(state.newTask.selection, selectedProject);
+    const tree = render(
+      <NewTaskView
+        agentRecoveryActions={{
+          onOpenAgentSettings: vi.fn(),
+          onOpenExternal: vi.fn(),
+          onRetry: vi.fn(async () => false),
+        }}
+        agents={[{
+          id: "codex",
+          label: "Codex",
+          description: "Code agent",
+          icon: "openai",
+          status: "setupRequired",
+          setupReason: "nodeJsRequired",
+        }]}
+        dispatch={vi.fn()}
+        onSelectConfigOption={vi.fn()}
+        onSubmitTask={vi.fn()}
+        state={state}
+        submitShortcut="mod_enter"
+      />,
+    );
+
+    expect(textContent(tree)).toContain("Codex needs Node.js");
+    expect(tree.root.findAllByType(Composer)).toHaveLength(0);
+    expect(tree.root.findByProps({ "aria-label": "New task" })).toBeDefined();
+  });
+
   it("uses fixed VS Code workspace context without rendering project selection", () => {
     const state = createInitialState();
     state.workspaceRootsLoaded = true;

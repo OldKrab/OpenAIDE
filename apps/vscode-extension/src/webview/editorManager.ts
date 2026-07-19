@@ -63,12 +63,25 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost {
     });
   }
 
-  openSettings() {
+  openSettings(agentId?: string, returnToNewTask?: boolean, projectId?: string) {
     if (this.settingsPanel) {
       this.settingsPanel.reveal(vscode.ViewColumn.Active);
+      void this.settingsPanel.webview.postMessage({
+        type: "surface.settingsChanged",
+        payload: {
+          ...(agentId ? { agent_id: agentId } : {}),
+          ...(returnToNewTask ? { return_to_new_task: true } : {}),
+          ...(projectId ? { project_id: projectId } : {}),
+        },
+      });
       return;
     }
-    const panel = this.createPanel("openaide.settings", "Settings", { surface: "settings" });
+    const panel = this.createPanel("openaide.settings", "Settings", {
+      surface: "settings",
+      settingsAgentId: agentId,
+      returnToNewTask,
+      projectId,
+    });
     this.settingsPanel = panel;
     panel.onDidDispose(() => {
       this.nextPanelGeneration(panel);

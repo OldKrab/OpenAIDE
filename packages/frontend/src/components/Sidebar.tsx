@@ -22,6 +22,7 @@ type SidebarProps = {
   onNewTask: (projectId?: string) => void;
   onOpenNativeSession: (session: AgentListedSession) => void;
   onOpenTask: (taskId: string) => void;
+  onRecoverNativeSessions?: (kind: NonNullable<AppState["newTask"]["nativeSessions"]["recoveryKind"]>) => void;
   onArchiveTask: (taskId: string) => void;
   onRestoreTask: (taskId: string) => void;
   onSearchChange: (query: string) => void;
@@ -55,6 +56,7 @@ export const Sidebar = memo(function Sidebar({
   onNewTask,
   onOpenNativeSession,
   onOpenTask,
+  onRecoverNativeSessions,
   onArchiveTask,
   onRestoreTask,
   onSearchChange,
@@ -195,7 +197,18 @@ export const Sidebar = memo(function Sidebar({
         {activeTaskShownOutsideSearch ? (
           <p className="search-context-note">Selected task is shown outside the search results.</p>
         ) : null}
-        {!showArchived && showNativeSessions && nativeSessions.error ? <p className="empty-list">{nativeSessions.error}</p> : null}
+        {!showArchived && showNativeSessions && nativeSessions.error ? (
+          <div className="native-session-recovery" role="status">
+            <span>{nativeSessions.error}</span>
+            {nativeSessions.recoveryKind && onRecoverNativeSessions ? (
+              <button type="button" onClick={() => onRecoverNativeSessions(nativeSessions.recoveryKind!)}>
+                {nativeSessions.recoveryKind === "authRequired"
+                  ? "Sign in"
+                  : nativeSessions.recoveryKind === "launchFailed" ? "Try again" : "Set up Codex"}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
         {groupByProject
           ? visibleGroups.map((group) => (
               <SidebarProjectTaskGroup

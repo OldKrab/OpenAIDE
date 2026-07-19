@@ -141,7 +141,7 @@ export type ResponseMeta = { clientRequestId?: ClientRequestId | null, };
 
 export type ProtocolError = { code: ProtocolErrorCode, message: string, recoverable?: boolean, target?: ErrorTarget | null, };
 
-export type ProtocolErrorCode = "invalidRequest" | "notInitialized" | "unauthorized" | "notFound" | "conflict" | "validationFailed" | "attachmentHandleInvalid" | "capabilityUnavailable" | "requestAlreadyResolved" | "serverStopping" | "staleCursor" | "internal";
+export type ProtocolErrorCode = "invalidRequest" | "notInitialized" | "unauthorized" | "notFound" | "conflict" | "validationFailed" | "attachmentHandleInvalid" | "capabilityUnavailable" | "nodeJsRequired" | "requestAlreadyResolved" | "serverStopping" | "staleCursor" | "internal";
 
 export type ErrorTarget = { method?: string | null, field?: string | null,
 /**
@@ -225,7 +225,7 @@ export type AgentProbeResult = { agents: AgentCollectionSnapshot, };
 
 export type AgentAuthenticateParams = { agentId: AgentId, methodId: string, env?: { [key in string]: string }, secretEnv?: Array<string>, secretStorageAgentId?: string | null, terminalConfirmed?: boolean, };
 
-export type AgentAuthenticateResult = { agentId: AgentId, methodId: string, status: AgentAuthenticateStatus, };
+export type AgentAuthenticateResult = { agentId: AgentId, methodId: string, status: AgentAuthenticateStatus, agents: AgentCollectionSnapshot, };
 
 export type AgentAuthenticateStatus = "authenticated" | "awaiting_user";
 
@@ -641,9 +641,11 @@ export type ProjectSummary = { projectId: ProjectId, label: string, workspaceRoo
 
 export type AgentCollectionSnapshot = { agents: Array<AgentSummary>, };
 
-export type AgentSummary = { agentId: AgentId, label: string, status: AgentStatus, capabilities?: AgentCapabilities, };
+export type AgentSummary = { agentId: AgentId, label: string, status: AgentStatus, setupReason?: AgentSetupReason | null, capabilities?: AgentCapabilities, };
 
 export type AgentStatus = "disconnected" | "launching" | "connected" | "setupRequired" | "authRequired" | "authenticating" | "unsupported" | "failed";
+
+export type AgentSetupReason = "nodeJsRequired";
 
 export type AgentCapabilities = { resumeTasks?: boolean, deleteNativeSessions?: boolean, };
 
@@ -687,7 +689,7 @@ export type TaskPreparationStepStatus = "pending" | "running" | "done" | "blocke
 
 export type TaskSetupBlocker = { kind: TaskSetupBlockerKind, message: string, };
 
-export type TaskSetupBlockerKind = "authRequired" | "setupRequired" | "capabilityUnavailable" | "nativeSessionUnavailable";
+export type TaskSetupBlockerKind = "authRequired" | "setupRequired" | "nodeJsRequired" | "capabilityUnavailable" | "nativeSessionUnavailable";
 
 export type TaskPreparationAction = "retry" | "changeAgent" | "discard" | "openAgentSettings" | "authenticate";
 

@@ -2145,6 +2145,9 @@ impl AgentAuthenticateWorkflow for AuthenticatingAgent {
                 agent_id: params.agent_id,
                 method_id: params.method_id,
                 status: openaide_app_server_protocol::agent::AgentAuthenticateStatus::Authenticated,
+                agents: openaide_app_server_protocol::snapshot::AgentCollectionSnapshot {
+                    agents: Vec::new(),
+                },
             },
         )
     }

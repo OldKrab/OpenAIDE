@@ -108,7 +108,6 @@ function mapProtocolTaskSnapshotWithCache(
     return mapped;
   });
   const extraItems = [
-    ...preparationItems(snapshot.preparation, task.updated_at),
     ...sendCapabilityItems(snapshot, task.updated_at),
     ...recoveryItems(snapshot.recovery, task.updated_at),
   ];
@@ -142,6 +141,7 @@ function mapProtocolTaskSnapshotWithCache(
       },
       agent_config: mapProtocolConfigOptions(snapshot.agentConfig, task.agent_id),
       agent_commands: mapProtocolAgentCommands(snapshot.agentCommands, task.agent_id),
+      preparation: mapTaskPreparation(snapshot.preparation),
       send_capability: {
         state: snapshot.sendCapability.state,
         ...(sendBlockers.length > 0
@@ -157,6 +157,21 @@ function mapProtocolTaskSnapshotWithCache(
     warnings,
     requiresNativeSurface: warnings.some(requiresNativeSurface),
   };
+}
+
+function mapTaskPreparation(
+  preparation: ProtocolTaskSnapshot["preparation"],
+): NonNullable<TaskSnapshot["preparation"]> {
+  switch (preparation.kind) {
+    case "blocked":
+      return { kind: "blocked", blocker: { kind: preparation.blocker.kind } };
+    case "failed":
+      return { kind: "failed" };
+    case "preparing":
+      return { kind: "preparing" };
+    case "ready":
+      return { kind: "ready" };
+  }
 }
 
 function mapHistorySync(sync: ProtocolTaskSnapshot["historySync"]): NonNullable<TaskSnapshot["history_sync"]> {
@@ -311,25 +326,6 @@ function taskSummaryStatusFromProtocol(status: ProtocolTaskStatus): TaskSummary[
 function configOptionValues(snapshot: ProtocolTaskSnapshot["agentConfig"]) {
   if (!snapshot.options?.length) return undefined;
   return Object.fromEntries(snapshot.options.map((option) => [option.configId, option.currentValue]));
-}
-
-function preparationItems(snapshot: ProtocolTaskSnapshot["preparation"], createdAt: string) {
-  switch (snapshot.kind) {
-    case "blocked":
-      return [
-        systemInterruptionItem("app-server-preparation-blocked", snapshot.blocker.message, createdAt, snapshot.actions.length > 0),
-      ];
-    case "failed":
-      return [
-        systemInterruptionItem("app-server-preparation-failed", snapshot.error.message, createdAt, snapshot.actions.length > 0),
-      ];
-    case "preparing":
-      // Routine startup is operational state, not conversation history. Task status and composer
-      // availability already keep it visible without flashing synthetic messages into Chat.
-      return [];
-    case "ready":
-      return [];
-  }
 }
 
 function sendCapabilityItems(snapshot: ProtocolTaskSnapshot, createdAt: string) {

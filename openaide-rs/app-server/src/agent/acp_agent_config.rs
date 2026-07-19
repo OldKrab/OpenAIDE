@@ -102,14 +102,14 @@ impl AcpAgentConfig {
         if command_has_path_separator(&self.command) {
             let path = Path::new(&self.command);
             if !path.is_file() {
-                return Err(command_not_found_error(&self.command));
+                return Err(command_not_found_error(&self.agent_id, &self.command));
             }
             return Ok(());
         }
         if command_in_path(&self.command) {
             Ok(())
         } else {
-            Err(command_not_found_error(&self.command))
+            Err(command_not_found_error(&self.agent_id, &self.command))
         }
     }
 
@@ -175,12 +175,17 @@ fn command_has_path_separator(command: &str) -> bool {
     command.contains('/') || command.contains('\\')
 }
 
-fn command_not_found_error(command: &str) -> RuntimeError {
+fn command_not_found_error(agent_id: &str, command: &str) -> RuntimeError {
     let executable = Path::new(command)
         .file_name()
         .and_then(|name| name.to_str())
         .filter(|name| !name.trim().is_empty())
         .unwrap_or(command);
+    if agent_id == "codex" && executable.eq_ignore_ascii_case("npx") {
+        return RuntimeError::NodeJsRequired(
+            "Codex needs Node.js before it can start.".to_string(),
+        );
+    }
     RuntimeError::SetupRequired(format!(
         "Agent command not found: {executable}. Check the Agent command or install it so it is available on PATH."
     ))

@@ -20,6 +20,7 @@ import { NewWorkspacePicker } from "./NewWorkspacePicker";
 import { NewTaskStartingView } from "./NewTaskStartingView";
 import { newTaskStatusLabel } from "./taskSurfaceHelpers";
 import { TaskWorkspacePicker } from "./TaskWorkspacePicker";
+import { AgentRecoveryPanel, agentRecoveryKind, type AgentRecoveryActions } from "./AgentRecovery";
 
 type NewTaskContextMenu = "project" | "workspace" | "agent";
 export type ProjectContextMode = "fixed" | "selectable";
@@ -61,6 +62,7 @@ export function NewTaskView({
   onRemoveAttachment,
   onSubmitTask,
   agents,
+  agentRecoveryActions,
   loadingProjects = false,
   submitShortcut,
   fileBrowser,
@@ -80,6 +82,7 @@ export function NewTaskView({
   onRemoveAttachment: (attachmentId: string) => void;
   onSubmitTask: (draft: { prompt: string; context: AppState["newTask"]["context"] }) => void;
   agents?: AgentOption[];
+  agentRecoveryActions?: AgentRecoveryActions;
   submitShortcut: AppPreferencesRecord["composer_submit_shortcut"];
 }) {
   const [openContextMenu, setOpenContextMenu] = useState<NewTaskContextMenu | undefined>();
@@ -87,6 +90,7 @@ export function NewTaskView({
   const contextControlsRef = useRef<HTMLDivElement | null>(null);
   const agentChoices = agents?.length ? agents : agentOptions;
   const selectedAgent = agentChoices.find((agent) => agent.id === state.newTask.selection.agentId);
+  const recoveryKind = agentRecoveryKind(selectedAgent, state.snapshot?.preparation);
   const projectChoices = state.projects;
   const selectedProject = projectChoices.find((project) => project.projectId === state.newTask.selection.projectId);
   const selectedRepository = selectedProject?.worktreeRepositoryId
@@ -370,8 +374,15 @@ export function NewTaskView({
             ) : null}
           </div>
         </div>
-        {composer}
-        {waitStatus && !state.newTask.submitting ? (
+        {recoveryKind && selectedAgent && agentRecoveryActions ? (
+          <AgentRecoveryPanel
+            actions={agentRecoveryActions}
+            agent={selectedAgent}
+            kind={recoveryKind}
+            returnToNewTask
+          />
+        ) : composer}
+        {!recoveryKind && waitStatus && !state.newTask.submitting ? (
           <div className="inline-status" role="status" aria-live="polite">
             <span className="working-status-dots" aria-hidden="true">
               <span />

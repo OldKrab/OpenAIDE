@@ -103,11 +103,24 @@ export function requestControllerNativeSessions({
     void loadPages().catch((error: unknown) => {
       if (!asyncOperations.owns(operation)) return;
       onFailure?.(nativeSessionLoadFailure(error, { agentId, projectId, requestId }));
-      dispatch({ type: "newTask:nativeSessions:listError", message: "Unable to load Agent session history." });
+      dispatch({
+        type: "newTask:nativeSessions:listError",
+        message: "Codex history unavailable",
+        recoveryKind: nativeSessionRecoveryKind(error),
+      });
     });
     return;
   }
   dispatch({ type: "newTask:nativeSessions:listError", message: "App Server connection unavailable." });
+}
+
+/** Converts protocol-owned setup failures into one compact navigation recovery. */
+export function nativeSessionRecoveryKind(error: unknown) {
+  if (!(error instanceof AppServerProtocolError)) return "launchFailed" as const;
+  if (error.protocolError.code === "nodeJsRequired") return "nodeJsRequired" as const;
+  if (error.protocolError.code === "unauthorized") return "authRequired" as const;
+  if (error.protocolError.code === "capabilityUnavailable") return "setupRequired" as const;
+  return "launchFailed" as const;
 }
 
 export function createRequestControllerNativeSessions({

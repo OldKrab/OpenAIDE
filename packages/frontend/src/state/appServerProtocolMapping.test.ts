@@ -530,16 +530,15 @@ describe("App Server Protocol state mapping", () => {
       expect.arrayContaining([
         expect.objectContaining({
           kind: "interruption",
-          message: "Sign in",
-          recoverable: true,
-        }),
-        expect.objectContaining({
-          kind: "interruption",
           message: "Task detached",
           recoverable: true,
         }),
       ]),
     );
+    expect(mapping.snapshot.preparation).toEqual({
+      kind: "blocked",
+      blocker: { kind: "authRequired" },
+    });
     expect(mapping.snapshot.chat.items.map((item) => item.message.kind)).not.toContain("permission");
     expect(mapping.snapshot.active_requests).toEqual([]);
     expect(mapping.warnings).toEqual(
@@ -552,6 +551,9 @@ describe("App Server Protocol state mapping", () => {
       ]),
     );
     expect(mapping.requiresNativeSurface).toBe(true);
+    expect(mapping.snapshot.chat.items).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ message_id: "app-server-preparation-blocked" }),
+    ]));
   });
 
   it("maps task-scoped App Server permission snapshots to answerable permission cards", () => {

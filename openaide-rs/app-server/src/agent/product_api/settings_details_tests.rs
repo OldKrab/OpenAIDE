@@ -47,6 +47,7 @@ fn agent_settings_details_include_disabled_builtins_and_custom_launch_details() 
         "custom.local".to_string(),
         AgentStatusSnapshot {
             status: AgentStatus::Connected,
+            setup_reason: None,
             capabilities: AgentCapabilities::default(),
             auth_methods: Vec::new(),
             logout_supported: false,

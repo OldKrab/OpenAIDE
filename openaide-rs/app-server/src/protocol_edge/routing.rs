@@ -76,7 +76,9 @@ impl RpcGateway {
                 self.handle_support_recover_stuck_sessions(connection_id, id, params, meta, now)
             }
             AGENT_PROBE => self.handle_agent_probe(connection_id, id, params, meta, now),
-            AGENT_AUTHENTICATE => self.handle_agent_authenticate(connection_id, id, params, meta),
+            AGENT_AUTHENTICATE => {
+                self.handle_agent_authenticate(connection_id, id, params, meta, now)
+            }
             AGENT_LIST_SESSIONS => self.handle_agent_list_sessions(connection_id, id, params, meta),
             AGENT_CREATE_CUSTOM => {
                 self.handle_agent_create_custom(connection_id, id, params, meta, now)

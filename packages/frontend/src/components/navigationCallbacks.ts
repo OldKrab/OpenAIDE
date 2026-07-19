@@ -4,10 +4,12 @@ import {
   openTaskSurface,
 } from "../services/hostBridge";
 import {
+  AGENT_PROBE,
   TASK_ADOPT_NATIVE_SESSION,
   type AgentId,
   type ProjectId,
 } from "@openaide/app-server-client";
+import { applyProtocolAgents } from "../state/appServerAgents";
 import { requestTaskList, requestTaskOpen, requestTaskSetArchived } from "../intents/taskReadIntents";
 import { mapProtocolTaskSnapshot } from "../state/appServerProtocolMapping";
 import { TASK_NAVIGATION_PAGE_SIZE } from "../state/taskNavigationPolicy";
@@ -33,6 +35,7 @@ type NavigationDependencies = Pick<
   | "createSnapshotRequestId"
   | "dispatch"
   | "requestNativeSessions"
+  | "setAgents"
   | "state"
 > & { newTaskController: NewTaskController };
 
@@ -45,6 +48,7 @@ export function createNavigationCallbacks({
   dispatch,
   newTaskController,
   requestNativeSessions,
+  setAgents,
   state,
 }: NavigationDependencies): NavigationCallbacks {
   const discardNewTask = () => {
@@ -175,9 +179,32 @@ export function createNavigationCallbacks({
       asyncOperations.beginNavigation(newTaskNavigationTarget(projectId));
       openNewTaskSurface(projectId);
     },
-    openSettings: () => {
+    openSettings: (agentId, returnToNewTask, projectId) => {
       asyncOperations.beginNavigation(settingsNavigationTarget());
-      openSettingsSurface();
+      openSettingsSurface(agentId, returnToNewTask, projectId);
+    },
+    retryAgent: async (agentId) => {
+      if (!backendConnection?.request) return false;
+      try {
+        const result = await backendConnection.request(AGENT_PROBE, { agentId: agentId as AgentId });
+        applyProtocolAgents(result.agents, state.newTask.selection.agentId, setAgents ?? (() => undefined), dispatch);
+        const ready = result.agents.agents.some((agent) => agent.agentId === agentId && agent.status === "connected");
+        if (!ready) return false;
+        const taskId = newTaskController.currentTaskId();
+        if (taskId) {
+          await newTaskController.discard({
+            attachmentResources,
+            dispatch,
+            lease: newTaskController.currentLease(taskId),
+            request: backendConnection.request,
+            taskId,
+          });
+        }
+        newTaskController.retryPreparation();
+        return true;
+      } catch {
+        return false;
+      }
     },
     openTask: (taskId) => {
       asyncOperations.beginNavigation(taskNavigationTarget(taskId));

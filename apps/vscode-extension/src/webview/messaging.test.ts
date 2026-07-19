@@ -47,6 +47,7 @@ vi.mock("vscode", () => ({
   commands: {
     executeCommand: vi.fn(),
   },
+  env: { openExternal: vi.fn() },
   Range: class {
     endCharacter: number;
     endLine: number;
@@ -65,6 +66,7 @@ vi.mock("vscode", () => ({
     joinPath: (...parts: Array<{ fsPath?: string } | string>) => ({
       fsPath: parts.map((part) => (typeof part === "string" ? part : (part.fsPath ?? ""))).join("/"),
     }),
+    parse: (value: string) => ({ value }),
   },
   window: {
     showErrorMessage: vi.fn(),
@@ -81,6 +83,7 @@ vi.mock("vscode", () => ({
 describe("webview messaging composer routes", () => {
   beforeEach(() => {
     vi.mocked(vscode.commands.executeCommand).mockClear();
+    vi.mocked(vscode.env.openExternal).mockClear();
     vi.mocked(vscode.workspace.openTextDocument).mockClear();
     vi.mocked(vscode.window.showTextDocument).mockClear();
     vi.mocked(vscode.window.showInformationMessage).mockClear();
@@ -576,6 +579,18 @@ describe("webview messaging composer routes", () => {
     expect(surfaces.openTask).toHaveBeenCalledWith("task_1", "Fix ACP");
     expect(calls).toEqual(["adopt", "open"]);
     expect(posted).toEqual([]);
+  });
+
+  it("routes explicit recovery capabilities through VS Code", async () => {
+    const posted: unknown[] = [];
+    await handleWebviewMessage(
+      { type: "shell.openExternal", payload: { url: "https://nodejs.org/en/download" } },
+      context({}, posted),
+    );
+    await handleWebviewMessage({ type: "shell.reload" }, context({}, posted));
+
+    expect(vscode.env.openExternal).toHaveBeenCalledWith({ value: "https://nodejs.org/en/download" });
+    expect(vscode.commands.executeCommand).toHaveBeenCalledWith("workbench.action.reloadWindow");
   });
 });
 

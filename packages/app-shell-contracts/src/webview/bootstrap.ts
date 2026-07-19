@@ -27,6 +27,9 @@ export type WebviewBootstrap = {
   taskId?: string;
   projectId?: string;
   settingsTab?: SettingsTabId;
+  /** Agent detail and return intent supplied by a recovery entry point. */
+  settingsAgentId?: string;
+  returnToNewTask?: boolean;
   preferences?: AppPreferencesRecord;
   appServerConnection?: WebviewAppServerConnection;
 };

@@ -15,13 +15,24 @@ export function createStandaloneShell(): FrontendShell {
       openNewTask: (projectId) => host?.postMessage(projectId
         ? { type: "surface.openNewTask", payload: { project_id: projectId } }
         : { type: "surface.openNewTask" }),
-      openSettings: () => host?.postMessage({ type: "surface.openSettings" }),
+      openSettings: (agentId, returnToNewTask, projectId) => host?.postMessage({
+        type: "surface.openSettings",
+        payload: {
+          ...(agentId ? { agent_id: agentId } : {}),
+          ...(returnToNewTask ? { return_to_new_task: true } : {}),
+          ...(projectId ? { project_id: projectId } : {}),
+        },
+      }),
       openTask: (taskId, title) => host?.postMessage({
         type: "surface.openTask",
         payload: { task_id: taskId, ...(title ? { title } : {}) },
       }),
       replaceSettingsTab: () => undefined,
       subscribe: () => () => undefined,
+    },
+    recovery: {
+      openExternal: (url) => window.open(url, "_blank", "noopener,noreferrer"),
+      reload: () => window.location.reload(),
     },
   };
 }

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState, useSyncExternalStore } from "react";
 import type { Dispatch } from "react";
 import type { AppPreferencesRecord, TaskSnapshot, TaskSummary } from "@openaide/app-shell-contracts";
 import {
@@ -235,6 +235,18 @@ function useAppControllerCore({ backendConnection }: AppControllerOptions = {}):
     setPreferences,
     state: callbackState,
   });
+  const automaticAuthRetry = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const preparation = newTaskSnapshot?.preparation;
+    const selectedAgent = agents?.find((agent) => agent.id === state.newTask.selection.agentId);
+    const retryKey = preparation?.kind === "blocked" && preparation.blocker.kind === "authRequired"
+      && selectedAgent?.status === "connected"
+      ? `${newTaskSnapshot?.task.task_id}:${selectedAgent.id}`
+      : undefined;
+    if (!retryKey || !selectedAgent || automaticAuthRetry.current === retryKey) return;
+    automaticAuthRetry.current = retryKey;
+    void callbacks.navigation.retryAgent(selectedAgent.id);
+  }, [agents, callbacks.navigation, newTaskSnapshot, state.newTask.selection.agentId]);
 
   return {
     activeNavigationTaskId,

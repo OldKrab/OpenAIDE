@@ -362,7 +362,8 @@ describe("requestControllerNativeSessions", () => {
     });
     expect(dispatch).toHaveBeenCalledWith({
       type: "newTask:nativeSessions:listError",
-      message: "Unable to load Agent session history.",
+      message: "Codex history unavailable",
+      recoveryKind: "launchFailed",
     });
   });
 

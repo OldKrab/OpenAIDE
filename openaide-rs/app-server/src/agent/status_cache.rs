@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use openaide_app_server_protocol::snapshot::{AgentCapabilities, AgentStatus};
+use openaide_app_server_protocol::snapshot::{AgentCapabilities, AgentSetupReason, AgentStatus};
 
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{AgentAuthMethodSummary, AgentProbeResult};
@@ -9,6 +9,7 @@ use crate::protocol::model::{AgentAuthMethodSummary, AgentProbeResult};
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct AgentStatusSnapshot {
     pub(crate) status: AgentStatus,
+    pub(crate) setup_reason: Option<AgentSetupReason>,
     pub(crate) capabilities: AgentCapabilities,
     pub(crate) auth_methods: Vec<AgentAuthMethodSummary>,
     pub(crate) logout_supported: bool,
@@ -20,6 +21,7 @@ impl Default for AgentStatusSnapshot {
     fn default() -> Self {
         Self {
             status: AgentStatus::Disconnected,
+            setup_reason: None,
             capabilities: AgentCapabilities::default(),
             auth_methods: Vec::new(),
             logout_supported: false,
@@ -40,6 +42,7 @@ impl AgentStatusCache {
             result.agent_id.clone(),
             AgentStatusSnapshot {
                 status: AgentStatus::Connected,
+                setup_reason: None,
                 capabilities: capabilities_from_probe(result),
                 auth_methods: result.auth_methods.clone(),
                 logout_supported: result.logout_supported,
@@ -54,6 +57,7 @@ impl AgentStatusCache {
             agent_id.to_string(),
             AgentStatusSnapshot {
                 status: status_from_probe_error(error),
+                setup_reason: setup_reason_from_probe_error(error),
                 capabilities: AgentCapabilities::default(),
                 auth_methods: Vec::new(),
                 logout_supported: false,
@@ -127,6 +131,7 @@ impl AgentStatusCache {
         let mut entries = self.entries.lock().expect("agent status cache poisoned");
         let snapshot = entries.entry(agent_id.to_string()).or_default();
         snapshot.status = status;
+        snapshot.setup_reason = None;
         snapshot.authenticating_method_id = None;
         snapshot.status_before_authentication = None;
     }
@@ -147,7 +152,9 @@ fn capabilities_from_probe(result: &AgentProbeResult) -> AgentCapabilities {
 fn status_from_probe_error(error: &RuntimeError) -> AgentStatus {
     match error {
         RuntimeError::AuthRequired(_) => AgentStatus::AuthRequired,
-        RuntimeError::SetupRequired(_) => AgentStatus::SetupRequired,
+        RuntimeError::SetupRequired(_) | RuntimeError::NodeJsRequired(_) => {
+            AgentStatus::SetupRequired
+        }
         RuntimeError::Unsupported(_) => AgentStatus::Unsupported,
         RuntimeError::CapabilityMissing(_) | RuntimeError::MethodNotFound(_) => {
             AgentStatus::Unsupported
@@ -159,6 +166,10 @@ fn status_from_probe_error(error: &RuntimeError) -> AgentStatus {
         | RuntimeError::Storage(_)
         | RuntimeError::Conflict(_) => AgentStatus::Failed,
     }
+}
+
+fn setup_reason_from_probe_error(error: &RuntimeError) -> Option<AgentSetupReason> {
+    matches!(error, RuntimeError::NodeJsRequired(_)).then_some(AgentSetupReason::NodeJsRequired)
 }
 
 #[cfg(test)]

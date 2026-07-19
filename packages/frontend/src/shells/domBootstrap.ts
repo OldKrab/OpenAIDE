@@ -13,6 +13,8 @@ export function datasetBootstrap(): WebviewBootstrap {
     clientInstanceId: document.body.dataset.clientInstanceId || undefined,
     taskId: document.body.dataset.taskId || undefined,
     projectId: document.body.dataset.projectId || undefined,
+    settingsAgentId: document.body.dataset.settingsAgentId || undefined,
+    returnToNewTask: document.body.dataset.returnToNewTask === "true",
     preferences: shellPreferences(),
     appServerConnection: appServerConnection(),
   };

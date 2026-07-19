@@ -558,6 +558,24 @@ pub(super) fn protocol_error_from_runtime(error: RuntimeError) -> ProtocolError 
             recoverable: true,
             target: None,
         },
+        RuntimeError::AuthRequired(message) => ProtocolError {
+            code: ProtocolErrorCode::Unauthorized,
+            message,
+            recoverable: true,
+            target: None,
+        },
+        RuntimeError::NodeJsRequired(message) => ProtocolError {
+            code: ProtocolErrorCode::NodeJsRequired,
+            message,
+            recoverable: true,
+            target: None,
+        },
+        RuntimeError::SetupRequired(message) => ProtocolError {
+            code: ProtocolErrorCode::CapabilityUnavailable,
+            message,
+            recoverable: true,
+            target: None,
+        },
         RuntimeError::InvalidParams(field) => ProtocolError {
             code: ProtocolErrorCode::ValidationFailed,
             message: format!("Invalid field: {field}"),

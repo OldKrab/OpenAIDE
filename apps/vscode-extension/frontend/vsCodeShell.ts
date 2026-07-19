@@ -26,7 +26,14 @@ export function createVsCodeShell(): FrontendShell {
       openNewTask: (projectId) => vscode?.postMessage(projectId
         ? { type: "surface.openNewTask", payload: { project_id: projectId } }
         : { type: "surface.openNewTask" }),
-      openSettings: () => vscode?.postMessage({ type: "surface.openSettings" }),
+      openSettings: (agentId, returnToNewTask, projectId) => vscode?.postMessage({
+        type: "surface.openSettings",
+        payload: {
+          ...(agentId ? { agent_id: agentId } : {}),
+          ...(returnToNewTask ? { return_to_new_task: true } : {}),
+          ...(projectId ? { project_id: projectId } : {}),
+        },
+      }),
       openTask: (taskId, title) => vscode?.postMessage({
         type: "surface.openTask",
         payload: { task_id: taskId, ...(title ? { title } : {}) },
@@ -41,12 +48,26 @@ export function createVsCodeShell(): FrontendShell {
         return () => window.removeEventListener("message", onMessage);
       },
     },
+    recovery: {
+      openExternal: (url) => vscode?.postMessage({ type: "shell.openExternal", payload: { url } }),
+      reload: () => vscode?.postMessage({ type: "shell.reload" }),
+    },
   };
 }
 
 function bootstrapForRouteMessage(message: unknown, current: WebviewBootstrap): WebviewBootstrap | undefined {
   if (!message || typeof message !== "object") return undefined;
-  const candidate = message as { type?: unknown; payload?: { surface?: unknown; task_id?: unknown } };
+  const candidate = message as { type?: unknown; payload?: { surface?: unknown; task_id?: unknown; agent_id?: unknown; return_to_new_task?: unknown; project_id?: unknown } };
+  if (candidate.type === "surface.settingsChanged") {
+    return current.surface === "invalid" ? undefined : {
+      ...current,
+      surface: "settings",
+      settingsAgentId: typeof candidate.payload?.agent_id === "string" ? candidate.payload.agent_id : undefined,
+      returnToNewTask: candidate.payload?.return_to_new_task === true,
+      projectId: typeof candidate.payload?.project_id === "string" ? candidate.payload.project_id : undefined,
+      taskId: undefined,
+    };
+  }
   if (
     candidate.type !== "surface.routeChanged"
     || candidate.payload?.surface !== "task"

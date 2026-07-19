@@ -110,7 +110,7 @@ export async function authenticateAgentThroughBackend(
   const secretTransaction = secretWrites.length
     ? await beginAgentSecretTransaction({ writes: secretWrites, deletes: [] })
     : undefined;
-  await requestWithSecretRollback(secretTransaction, () => backendConnection.request(AGENT_AUTHENTICATE, {
+  const result = await requestWithSecretRollback(secretTransaction, () => backendConnection.request(AGENT_AUTHENTICATE, {
     agentId: agentId as AgentId,
     methodId,
     ...(method.kind === "env_var" ? {
@@ -127,7 +127,7 @@ export async function authenticateAgentThroughBackend(
   }));
   await secretTransaction?.commit();
   await refreshAgentSettingsThroughBackend(context);
-  return true;
+  return result.status === "authenticated" ? "authenticated" as const : "awaitingUser" as const;
 }
 
 function authSecretStorageAgentId(agentId: string, methodId: string) {

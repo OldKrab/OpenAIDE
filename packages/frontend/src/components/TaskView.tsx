@@ -25,6 +25,8 @@ import { useTaskChatScroll } from "./useTaskChatScroll";
 import { appServerComposerImages } from "../state/composerOptions";
 import { configOptionsMutable } from "../state/configOptionState";
 import type { BackendConnectionState } from "./appControllerBackendLifecycle";
+import type { AgentOption } from "../state/composerOptions";
+import { AgentRecoveryPanel, taskAgentRecovery, type AgentRecoveryActions } from "./AgentRecovery";
 
 export {
   scrollTopAfterPrependedContent,
@@ -71,6 +73,8 @@ export function TaskLoadingView({ error, onRetry }: { error?: string; onRetry?: 
 
 export function TaskView({
   activeTask,
+  agents,
+  agentRecoveryActions,
   archived = false,
   backendConnectionState,
   backendReady,
@@ -103,6 +107,8 @@ export function TaskView({
   showWorkspaceContext = true,
 }: {
   activeTask?: TaskSummary;
+  agents?: AgentOption[];
+  agentRecoveryActions?: AgentRecoveryActions;
   archived?: boolean;
   backendConnectionState?: BackendConnectionState;
   backendReady: boolean;
@@ -138,6 +144,12 @@ export function TaskView({
   showWorkspaceContext?: boolean;
 }) {
   const inputPending = taskInput.pending?.state === "sending";
+  const recovery = taskAgentRecovery(
+    snapshot.task.agent_id,
+    activeTask?.agent_name ?? snapshot.task.agent_name,
+    agents,
+    snapshot.preparation,
+  );
   const chat = useMemo(() => renderedChat(snapshot, chatPageState), [chatPageState, snapshot]);
   const chatItems = useMemo(() => [
     ...chat.items,
@@ -306,7 +318,11 @@ export function TaskView({
             </>}
           </div>
         </div> : null}
-        <Composer
+        {recovery && agentRecoveryActions ? <AgentRecoveryPanel
+          actions={agentRecoveryActions}
+          agent={recovery.agent}
+          kind={recovery.kind}
+        /> : <Composer
           agentLocked
           attachments={taskInput.context}
           autoFocus
@@ -335,7 +351,7 @@ export function TaskView({
           submissionSettlementKey={taskInput.acceptedUserMessageId}
           showAgentSelector={false}
           showIsolationSelector={false}
-        />
+        />}
       </div>
     </section>
   );

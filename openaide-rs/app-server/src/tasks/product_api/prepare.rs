@@ -2,7 +2,9 @@ use openaide_app_server_protocol::errors::{ProtocolError, ProtocolErrorCode};
 
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::TaskStatus as LegacyTaskStatus;
-use crate::storage::records::{TaskLifecycle, TaskPreparationRecord, TaskRecord};
+use crate::storage::records::{
+    TaskLifecycle, TaskPreparationBlockerRecord, TaskPreparationRecord, TaskRecord,
+};
 use crate::tasks::mutation::{TaskCommitOptions, TaskMutationResult};
 use crate::time::now_string;
 
@@ -13,6 +15,14 @@ impl TaskProductApi {
         let api = self.clone();
         std::thread::spawn(move || {
             if let Err(error) = api.native_sessions.prepare_task(&task) {
+                crate::logging::warn(
+                    "task_agent_preparation_failed",
+                    serde_json::json!({
+                        "task_id": task.task_id,
+                        "agent_id": task.agent_id,
+                        "error": error.to_string(),
+                    }),
+                );
                 let _ = api.persist_preparation_failure(&task.task_id, &error);
             }
             match api.mutations.reconcile_prepared_task_pool(false) {
@@ -30,7 +40,7 @@ impl TaskProductApi {
         task_id: &str,
         error: &RuntimeError,
     ) -> Result<(), RuntimeError> {
-        let message = error.to_string();
+        let preparation = preparation_failure_record(error);
         let now = now_string();
         self.mutations.commit_existing_task(
             task_id,
@@ -47,7 +57,7 @@ impl TaskProductApi {
                 // failed, no closed session may remain the source of visible controls.
                 task.config_options_catalog = None;
                 task.agent_commands_catalog = None;
-                task.preparation = TaskPreparationRecord::Failed { message };
+                task.preparation = preparation;
                 task.updated_at = now;
                 Ok(TaskMutationResult::Changed)
             },
@@ -93,12 +103,48 @@ pub(super) fn reject_if_preparation_not_ready(task: &TaskRecord) -> Result<(), P
             recoverable: true,
             target: None,
         }),
+        TaskPreparationRecord::Blocked { reason, message } => Err(ProtocolError {
+            code: match reason {
+                TaskPreparationBlockerRecord::AuthRequired => ProtocolErrorCode::Unauthorized,
+                TaskPreparationBlockerRecord::SetupRequired => {
+                    ProtocolErrorCode::CapabilityUnavailable
+                }
+                TaskPreparationBlockerRecord::NodeJsRequired => ProtocolErrorCode::NodeJsRequired,
+            },
+            message: message.clone(),
+            recoverable: true,
+            target: None,
+        }),
         TaskPreparationRecord::Failed { message } => Err(ProtocolError {
             code: ProtocolErrorCode::Internal,
             message: format!("Task Agent preparation failed: {message}"),
             recoverable: true,
             target: None,
         }),
+    }
+}
+
+fn preparation_failure_record(error: &RuntimeError) -> TaskPreparationRecord {
+    let blocked = match error {
+        RuntimeError::AuthRequired(_) => Some((
+            TaskPreparationBlockerRecord::AuthRequired,
+            "Agent authentication is required.".to_string(),
+        )),
+        RuntimeError::SetupRequired(_) => Some((
+            TaskPreparationBlockerRecord::SetupRequired,
+            "Agent setup is required.".to_string(),
+        )),
+        RuntimeError::NodeJsRequired(_) => Some((
+            TaskPreparationBlockerRecord::NodeJsRequired,
+            "Node.js tools are unavailable to OpenAIDE.".to_string(),
+        )),
+        _ => None,
+    };
+    match blocked {
+        Some((reason, message)) => TaskPreparationRecord::Blocked { reason, message },
+        None => TaskPreparationRecord::Failed {
+            message: error.to_string(),
+        },
     }
 }
 

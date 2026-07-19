@@ -16,6 +16,8 @@ pub enum RuntimeError {
     AuthRequired(String),
     #[error("agent setup required: {0}")]
     SetupRequired(String),
+    #[error("Node.js required: {0}")]
+    NodeJsRequired(String),
     #[error("agent unsupported: {0}")]
     Unsupported(String),
     #[error("capability missing: {0}")]
@@ -36,7 +38,8 @@ impl RuntimeError {
             RuntimeError::Conflict(_) => -32009,
             RuntimeError::NotReady(_)
             | RuntimeError::AuthRequired(_)
-            | RuntimeError::SetupRequired(_) => -32002,
+            | RuntimeError::SetupRequired(_)
+            | RuntimeError::NodeJsRequired(_) => -32002,
             RuntimeError::CapabilityMissing(_) | RuntimeError::Unsupported(_) => -32004,
             RuntimeError::MethodNotFound(_) => -32601,
             RuntimeError::Storage(_) | RuntimeError::Internal(_) => -32603,
@@ -51,6 +54,7 @@ impl RuntimeError {
             RuntimeError::Conflict(_) => "conflict",
             RuntimeError::AuthRequired(_) => "auth_required",
             RuntimeError::SetupRequired(_) => "setup_required",
+            RuntimeError::NodeJsRequired(_) => "node_js_required",
             RuntimeError::Unsupported(_) => "unsupported",
             RuntimeError::CapabilityMissing(_) => "capability_missing",
             RuntimeError::MethodNotFound(_) => "method_not_found",

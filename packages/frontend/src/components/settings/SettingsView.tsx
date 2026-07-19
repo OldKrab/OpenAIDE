@@ -40,10 +40,11 @@ export function SettingsView({
   onSelectTab,
   onSetDesktopNotifications,
   preferences,
+  preferredAgentId,
   state,
 }: {
   desktopNotifications?: DesktopNotificationSettings;
-  onAuthenticate: (agentId: string, methodId: string, values?: Record<string, string>) => void;
+  onAuthenticate: (agentId: string, methodId: string, values?: Record<string, string>) => void | Promise<boolean>;
   onCreateCustomAgent: (params: CustomAgentCreateParams) => void;
   onDeleteCustomAgent: (agentId: string) => void;
   onReplaceCustomAgent: (params: CustomAgentReplaceParams) => void;
@@ -56,6 +57,7 @@ export function SettingsView({
   onSelectTab: (tab: SettingsTabId) => void;
   onSetDesktopNotifications?: (enabled: boolean) => void | Promise<void>;
   preferences: AppPreferencesRecord;
+  preferredAgentId?: string;
   state: SettingsState;
 }) {
   const visibleTabs = tabs.filter((tab) => (state.availableTabs ?? ["agents", "common"]).includes(tab.id));
@@ -159,6 +161,7 @@ export function SettingsView({
               onSetComposerSubmitShortcut={onSetComposerSubmitShortcut}
               onSetDesktopNotifications={onSetDesktopNotifications}
               preferences={preferences}
+              preferredAgentId={preferredAgentId}
               developerSettingsUnlocked={developerSettingsUnlocked}
               savedAgentId={state.savedAgentId}
               runtimeSettings={state.runtimeSettings}
@@ -187,6 +190,7 @@ function SettingsTabContent({
   agents,
   developerSettingsUnlocked,
   preferences,
+  preferredAgentId,
   savedAgentId,
   deletedAgentId,
   runtimeSettings,
@@ -196,7 +200,7 @@ function SettingsTabContent({
   desktopNotifications?: DesktopNotificationSettings;
   authPending: boolean;
   agents: AgentSettingsRecord[];
-  onAuthenticate: (agentId: string, methodId: string, values?: Record<string, string>) => void;
+  onAuthenticate: (agentId: string, methodId: string, values?: Record<string, string>) => void | Promise<boolean>;
   onCreateCustomAgent: (params: CustomAgentCreateParams) => void;
   onDeleteCustomAgent: (agentId: string) => void;
   onReplaceCustomAgent: (params: CustomAgentReplaceParams) => void;
@@ -208,6 +212,7 @@ function SettingsTabContent({
   deletedAgentId?: string;
   developerSettingsUnlocked: boolean;
   preferences: AppPreferencesRecord;
+  preferredAgentId?: string;
   savedAgentId?: string;
   runtimeSettings?: RuntimeSettingsResult;
   settingsState: SettingsState;
@@ -226,6 +231,7 @@ function SettingsTabContent({
           authPending={authPending}
           deletedAgentId={deletedAgentId}
           onAuthenticate={onAuthenticate}
+          preferredAgentId={preferredAgentId}
           onCreateCustomAgent={onCreateCustomAgent}
           onDeleteCustomAgent={onDeleteCustomAgent}
           onReplaceCustomAgent={onReplaceCustomAgent}

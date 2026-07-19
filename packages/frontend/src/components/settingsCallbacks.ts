@@ -36,11 +36,15 @@ export function createSettingsCallbacks({
   return {
     authenticateAgent: (agentId, methodId, values) => {
       dispatch({ type: "settings:start" });
-      void authenticateAgentThroughBackend(agentSettingsContext(), agentId, methodId, values)
-        .then((handled) => {
-          if (!handled) dispatch({ type: "settings:error", message: appServerRequiredMessage() });
+      return authenticateAgentThroughBackend(agentSettingsContext(), agentId, methodId, values)
+        .then((outcome) => {
+          if (!outcome) dispatch({ type: "settings:error", message: appServerRequiredMessage() });
+          return outcome === "authenticated";
         })
-        .catch(() => dispatch({ type: "settings:error", message: authenticationFailedMessage() }));
+        .catch(() => {
+          dispatch({ type: "settings:error", message: authenticationFailedMessage() });
+          return false;
+        });
     },
     createCustomAgent: (payload) => {
       dispatch({ type: "settings:start" });

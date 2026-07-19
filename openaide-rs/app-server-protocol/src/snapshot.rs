@@ -135,8 +135,16 @@ pub struct AgentSummary {
     pub agent_id: AgentId,
     pub label: String,
     pub status: AgentStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub setup_reason: Option<AgentSetupReason>,
     #[serde(default, skip_serializing_if = "AgentCapabilities::is_empty")]
     pub capabilities: AgentCapabilities,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum AgentSetupReason {
+    NodeJsRequired,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]

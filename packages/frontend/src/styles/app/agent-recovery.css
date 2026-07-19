@@ -1,0 +1,42 @@
+.agent-recovery-panel {
+  display: flex;
+  width: min(100%, 680px);
+  align-items: flex-start;
+  gap: 9px;
+  border: 1px solid color-mix(in oklch, var(--oa-danger) 28%, var(--oa-border));
+  border-radius: var(--oa-radius-md);
+  background: color-mix(in oklch, var(--oa-danger) 5%, var(--oa-panel));
+  color: var(--oa-danger);
+  padding: 11px 12px;
+}
+
+.agent-recovery-copy {
+  display: grid;
+  min-width: 0;
+  flex: 1;
+  gap: 3px;
+}
+
+.agent-recovery-copy strong { color: var(--oa-text); font-size: 13px; font-weight: 600; }
+.agent-recovery-copy small { color: var(--oa-muted); line-height: 1.4; }
+
+.agent-recovery-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 7px;
+}
+
+.agent-recovery-actions button {
+  min-height: 26px;
+  border: 1px solid var(--oa-border);
+  border-radius: var(--oa-radius-sm);
+  background: var(--oa-panel-raised);
+  color: var(--oa-text);
+  padding: 3px 9px;
+  font-size: 12px;
+}
+
+.agent-recovery-actions button:hover:not(:disabled) { border-color: var(--oa-accent); }
+.new-task-center > .agent-recovery-panel { margin-top: 2px; }
+.chat-column > .agent-recovery-panel { margin: 6px 0 0; }
