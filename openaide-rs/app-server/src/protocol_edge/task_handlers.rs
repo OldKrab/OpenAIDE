@@ -247,6 +247,7 @@ impl RpcGateway {
             Ok(task) => task,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
+        let task = self.task_with_pending_requests(task);
         self.result::<TaskSetConfigOptionResult>(
             connection_id,
             id,

@@ -12,7 +12,7 @@ use openaide_app_server_protocol::methods::{
     CLIENT_HEARTBEAT, CLIENT_INITIALIZE, DIAGNOSTICS_GET_RUNTIME, SETTINGS_GET_MCP_SERVERS,
     SETTINGS_GET_PREFERENCES, SETTINGS_GET_RUNTIME, SETTINGS_GET_SKILLS,
     SETTINGS_UPDATE_PREFERENCES, SETTINGS_UPDATE_RUNTIME, SHELL_RESOLVE_FILE_REVEAL,
-    STATE_SUBSCRIBE, STATE_UNSUBSCRIBE, TASK_CHAT_PAGE,
+    STATE_SUBSCRIBE, STATE_UNSUBSCRIBE, TASK_CHAT_PAGE, TASK_SET_CONFIG_OPTION,
 };
 use openaide_app_server_protocol::settings::{
     AppPreferencesPatch, AppPreferencesUpdateParams, ComposerSubmitShortcut,
@@ -866,6 +866,72 @@ fn task_subscription_delivers_pending_server_request() {
     );
     assert_eq!(server_requests.len(), 1);
     assert_eq!(server_requests[0].envelope.method, "secret/read");
+}
+
+#[test]
+fn config_change_response_preserves_pending_question() {
+    let workflow = Arc::new(FixedTaskSetConfigOption {
+        task: fixed_task_snapshot("task-1"),
+    });
+    let mut gateway = gateway_with_task_set_config_option(workflow);
+    gateway.handle_inbound(
+        ConnectionId::new("conn-1"),
+        request("1", CLIENT_INITIALIZE, init_params("client-1")),
+        AppServerTime(1),
+    );
+    assert!(matches!(
+        gateway.open_server_request(task_question_request("task-1"), AppServerTime(2)),
+        OpenRequestOutcome::Opened { .. }
+    ));
+
+    let value = response_value(gateway.handle_inbound(
+        ConnectionId::new("conn-1"),
+        request(
+            "3",
+            TASK_SET_CONFIG_OPTION,
+            openaide_app_server_protocol::task::TaskSetConfigOptionParams {
+                task_id: TaskId::from("task-1"),
+                config_id: "model".into(),
+                value: "gpt-5.6".to_string(),
+                client_mutation_id: "mutation-1".into(),
+            },
+        ),
+        AppServerTime(3),
+    ));
+
+    assert_eq!(
+        value["result"]["task"]["pendingRequests"][0]["kind"],
+        json!("question")
+    );
+    assert_eq!(
+        value["result"]["task"]["pendingRequests"][0]["question"]["message"],
+        json!("Choose a strategy")
+    );
+}
+
+#[test]
+fn task_resubscription_reconstructs_pending_question() {
+    let mut gateway = initialized_gateway("client-1", "conn-1");
+    gateway.open_server_request(task_question_request("task-1"), AppServerTime(2));
+
+    let value = response_value(gateway.handle_inbound(
+        ConnectionId::new("conn-1"),
+        request(
+            "3",
+            STATE_SUBSCRIBE,
+            StateSubscribeParams {
+                scope: SubscriptionScope::Task {
+                    task_id: TaskId::from("task-1"),
+                },
+            },
+        ),
+        AppServerTime(3),
+    ));
+
+    assert_eq!(
+        value["result"]["snapshot"]["task"]["pendingRequests"][0]["question"]["fields"][0]["key"],
+        json!("strategy")
+    );
 }
 
 #[test]
@@ -1816,6 +1882,28 @@ fn gateway_with_attachments_and_shutdown(
     attachments: Arc<dyn AttachmentFileBrowserWorkflow>,
     shutdown: Arc<dyn AppServerShutdownWorkflow>,
 ) -> RpcGateway {
+    gateway_with_components(
+        attachments,
+        shutdown,
+        Arc::new(RejectingTaskSetConfigOption),
+    )
+}
+
+fn gateway_with_task_set_config_option(
+    task_set_config_option: Arc<dyn TaskSetConfigOptionWorkflow>,
+) -> RpcGateway {
+    gateway_with_components(
+        Arc::new(RejectingAttachments),
+        Arc::new(FixedShutdown),
+        task_set_config_option,
+    )
+}
+
+fn gateway_with_components(
+    attachments: Arc<dyn AttachmentFileBrowserWorkflow>,
+    shutdown: Arc<dyn AppServerShutdownWorkflow>,
+    task_set_config_option: Arc<dyn TaskSetConfigOptionWorkflow>,
+) -> RpcGateway {
     RpcGateway::new(
         ClientHub::new(10),
         AppLifecycle::new(),
@@ -1844,7 +1932,7 @@ fn gateway_with_attachments_and_shutdown(
         std::sync::Arc::new(RejectingTaskCancel),
         std::sync::Arc::new(RejectingTaskOpen),
         std::sync::Arc::new(FixedTaskChatPage),
-        std::sync::Arc::new(RejectingTaskSetConfigOption),
+        task_set_config_option,
         std::sync::Arc::new(RejectingTaskRelease),
         std::sync::Arc::new(RejectingTaskArchive),
         test_worktrees(),
@@ -2734,6 +2822,23 @@ impl TaskChatPageWorkflow for FixedTaskChatPage {
 
 struct RejectingTaskSetConfigOption;
 
+struct FixedTaskSetConfigOption {
+    task: openaide_app_server_protocol::snapshot::TaskSnapshot,
+}
+
+impl TaskSetConfigOptionWorkflow for FixedTaskSetConfigOption {
+    fn set_config_option_for_client(
+        &self,
+        _client_instance_id: &ClientInstanceId,
+        _params: openaide_app_server_protocol::task::TaskSetConfigOptionParams,
+    ) -> Result<
+        openaide_app_server_protocol::snapshot::TaskSnapshot,
+        openaide_app_server_protocol::errors::ProtocolError,
+    > {
+        Ok(self.task.clone())
+    }
+}
+
 struct RejectingTaskChatPage;
 
 impl TaskChatPageWorkflow for RejectingTaskChatPage {
@@ -2865,6 +2970,17 @@ fn initialized_gateway(client_id: &str, connection_id: &str) -> RpcGateway {
         AppServerTime(1),
     );
     gateway
+}
+
+fn fixed_task_snapshot(task_id: &str) -> openaide_app_server_protocol::snapshot::TaskSnapshot {
+    let root = tempfile::tempdir().unwrap().keep();
+    let store = Store::open(root).unwrap();
+    let mut task = client_new_task_record(task_id, "client-1");
+    task.lifecycle = crate::storage::records::TaskLifecycle::Visible;
+    store.write_task(&task).unwrap();
+    TaskSnapshotStore::new(store)
+        .open_internal(&TaskId::from(task_id))
+        .expect("fixed Task snapshot")
 }
 
 fn client_new_task_record(
@@ -3089,6 +3205,27 @@ fn task_secret_request(task_id: &str) -> ServerRequestDraft {
         method: "secret/read".to_string(),
         title: "Secret needed".to_string(),
         params: json!({ "key": "agent.secret" }),
+    }
+}
+
+fn task_question_request(task_id: &str) -> ServerRequestDraft {
+    ServerRequestDraft {
+        scope: PendingRequestScope::Task {
+            task_id: TaskId::from(task_id),
+        },
+        method: openaide_app_server_protocol::server_requests::QUESTION_REQUEST.to_string(),
+        title: "Question".to_string(),
+        params: json!({
+            "message": "Choose a strategy",
+            "fields": [{
+                "kind": "singleSelect",
+                "key": "strategy",
+                "title": "Strategy",
+                "required": true,
+                "default": "safe",
+                "options": [{ "value": "safe", "label": "Safe" }]
+            }]
+        }),
     }
 }
 

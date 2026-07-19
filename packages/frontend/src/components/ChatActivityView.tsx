@@ -46,7 +46,7 @@ export function ChatActivityView({
           <ChevronRight className="activity-disclosure-icon" size={13} aria-hidden="true" />
           <span className="activity-status-mark" aria-hidden="true" />
           <span>{activitySummary(activity)}</span>
-          <small>{activityStatusLabel(activity.status)}</small>
+          {activity.status === "completed" ? null : <small>{activityStatusLabel(activity.status)}</small>}
         </>
       }
     >

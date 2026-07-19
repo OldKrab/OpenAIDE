@@ -4,7 +4,7 @@ import { displayCommand } from "./toolCommandViewModel";
 import { firstFieldValue } from "./toolDetailsShared";
 
 export type ExecuteOutput = {
-  label: "stdout" | "stderr" | "aggregate" | "formatted" | "preview";
+  label: "stdout" | "stderr" | "Combined output" | "preview";
   text: string;
   tone: "stdout" | "stderr";
 };
@@ -21,12 +21,14 @@ export function executeDetailInfo(
   const aggregated = details.output?.aggregated_output;
   const exitCode = details.output?.exit_code;
   const mode = activityPresentationStatus(step.status);
-  const outputs = distinctOutputs([
-    { label: "stdout", text: stdout, tone: "stdout" },
-    { label: "stderr", text: stderr, tone: "stderr" },
-    { label: "aggregate", text: aggregated, tone: "stdout" },
-    { label: "formatted", text: formatted, tone: "stdout" },
-  ]);
+  const outputs: ExecuteOutput[] = [];
+  if (stdout) outputs.push({ label: "stdout", text: stdout, tone: "stdout" });
+  if (stderr) outputs.push({ label: "stderr", text: stderr, tone: "stderr" });
+  if (outputs.length === 0) {
+    // These fields are alternate merged representations, not extra streams.
+    const combined = aggregated || formatted;
+    if (combined) outputs.push({ label: "Combined output", text: combined, tone: "stdout" });
+  }
   if (outputs.length === 0 && fallbackPreview) {
     outputs.push({ label: "preview", text: fallbackPreview, tone: "stdout" });
   }
@@ -39,15 +41,4 @@ export function executeDetailInfo(
     outputs,
     resultLabel: activityPresentationLabel(step.status),
   };
-}
-
-function distinctOutputs(candidates: Array<Omit<ExecuteOutput, "text"> & { text?: string }>): ExecuteOutput[] {
-  const seen = new Set<string>();
-  return candidates.flatMap((candidate) => {
-    if (!candidate.text) return [];
-    const isAlias = candidate.label === "aggregate" || candidate.label === "formatted";
-    if (isAlias && seen.has(candidate.text)) return [];
-    seen.add(candidate.text);
-    return [{ ...candidate, text: candidate.text }];
-  });
 }

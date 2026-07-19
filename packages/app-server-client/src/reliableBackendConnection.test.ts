@@ -295,6 +295,50 @@ describe("ReliableBackendConnection", () => {
     connection.close();
   });
 
+  it("discovers expired idle client liveness by renewing baselines on wake", async () => {
+    let wake: (() => void) | undefined;
+    const transport = createExpiringSessionTransport("client", "subscription");
+    const connection = createReliableWebProxyBackendConnection({
+      endpointUrl: "http://app-server.test/rpc",
+      connectionId: "connection-1",
+      fetch: transport.fetch,
+      retryDelayMs: 1,
+      heartbeatIntervalMs: 60_000,
+      subscribeToWake(listener) {
+        wake = listener;
+        return () => {
+          wake = undefined;
+        };
+      },
+    });
+    const statuses: string[] = [];
+    connection.handleSessionStatus(({ status }) => statuses.push(status));
+    await connection.initialize({
+      clientInstanceId: "client-1" as ClientInstanceId,
+      shell: { kind: "web" },
+      requestedSurface: { kind: "home" },
+      capabilities: { protocol: [], shell: [] },
+    });
+    connection.subscribeState({ kind: "projects" }, { onSnapshot: vi.fn() });
+    await vi.waitFor(() => expect(transport.subscriptionSessions()).toEqual([
+      "session-1:projects",
+    ]));
+
+    wake?.();
+
+    await vi.waitFor(() => expect(transport.initializedSessions()).toEqual([
+      "session-1",
+      "session-2",
+    ]));
+    await vi.waitFor(() => expect(transport.subscriptionSessions()).toContain(
+      "session-2:projects",
+    ));
+    expect(statuses).toContain("recovering");
+    expect(statuses.at(-1)).toBe("ready");
+    expect(statuses.filter((status) => status === "ready")).toHaveLength(2);
+    connection.close();
+  });
+
   it("invalidates stale state and reinitializes after server replay history expires", async () => {
     const transport = createExpiringSessionTransport("transport");
     const connection = createReliableWebProxyBackendConnection({
@@ -425,7 +469,7 @@ describe("ReliableBackendConnection", () => {
 
 function createExpiringSessionTransport(
   expiry: "transport" | "client",
-  trigger: "task" | "heartbeat" = "task",
+  trigger: "task" | "heartbeat" | "subscription" = "task",
   options: { expireEveryTask?: boolean; halfOpenClose?: boolean } = {},
 ) {
   const frames = new Map<string, Array<{ sequence: number; message: RpcMessage }>>();
@@ -568,6 +612,10 @@ function createExpiringSessionTransport(
       if (message.method === STATE_SUBSCRIBE) {
         const scope = (message.params as { scope: { kind: "agents" | "projects" } }).scope;
         subscriptions.push(`${sessionId}:${scope.kind}`);
+        if (sessionId === "session-1" && trigger === "subscription" && subscriptions.length > 1) {
+          enqueueNotInitialized(sessionId, message.id);
+          return response(204, "");
+        }
         if (sessionId === "session-2" && heldSubscriptionKind === scope.kind) {
           heldSubscriptionKind = undefined;
           heldSubscription = { id: message.id, sessionId, scope };

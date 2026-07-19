@@ -31,6 +31,8 @@ export type ReliableHttpMessageChannelOptions = {
   closeTimeoutMs?: number;
   /** Restarts only the replayable receive poll when a suspended runtime wakes. */
   subscribeToWake?: (wake: () => void) => () => void;
+  /** Publishes every wake to logical-session recovery, including between receive polls. */
+  onWake?: () => void;
 };
 
 type SessionHandshake = {
@@ -67,9 +69,11 @@ export function createReliableHttpMessageChannel(
   let closed = false;
   let terminalError: unknown;
   const unsubscribeWake = options.subscribeToWake?.(() => {
-    if (!receiveAbort || receiveAbort.signal.aborted) return;
-    console.info("[OpenAIDE] Browser wake restarted the reliable HTTP receive poll");
-    receiveAbort.abort();
+    options.onWake?.();
+    if (receiveAbort && !receiveAbort.signal.aborted) {
+      console.info("[OpenAIDE] Browser wake restarted the reliable HTTP receive poll");
+      receiveAbort.abort();
+    }
   });
   const session = openSession().catch((error) => {
     fail(error);

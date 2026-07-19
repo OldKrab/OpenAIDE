@@ -11,10 +11,144 @@ import type {
   TaskId,
   WorktreeRepositoryId,
 } from "./index";
-import { STATE_SUBSCRIBE, STATE_UNSUBSCRIBE } from "./generated/protocol";
+import {
+  CLIENT_HEARTBEAT,
+  STATE_SUBSCRIBE,
+  STATE_UNSUBSCRIBE,
+  TASK_LIST,
+} from "./generated/protocol";
 import { createAppServerSession } from "./appServerSession";
 
 describe("AppServerSession", () => {
+  it("authoritatively refreshes an idle scope when the browser returns to the foreground", async () => {
+    let subscribeCount = 0;
+    const raw = fakeConnection(async (method) => {
+      if (method === CLIENT_HEARTBEAT) return {};
+      if (method !== STATE_SUBSCRIBE) throw new Error(`Unexpected request: ${method}`);
+      subscribeCount += 1;
+      return taskSubscription(`cursor_${subscribeCount}`, subscribeCount);
+    });
+    const session = createAppServerSession(raw.connection);
+    await session.initialize(initializeParams());
+    const snapshots: number[] = [];
+    const baselineLost = vi.fn();
+    session.subscribeState({ kind: "task", taskId: "task_1" as TaskId }, {
+      onBaselineLost: baselineLost,
+      onSnapshot(snapshot) {
+        if (snapshot.kind === "task") snapshots.push(snapshot.task.revision);
+      },
+    });
+    await vi.waitFor(() => expect(snapshots).toEqual([1]));
+
+    for (let index = 0; index < 20; index += 1) raw.wake();
+
+    await vi.waitFor(() => expect(snapshots).toEqual([1, 2]));
+    expect(baselineLost).toHaveBeenCalledOnce();
+    expect(subscribeCount).toBe(2);
+    session.close();
+  });
+
+  it("exhausts one bounded wake recovery window and recovers on a later wake without a retry storm", async () => {
+    vi.useFakeTimers();
+    try {
+      let recovering = false;
+      let subscribeCount = 0;
+      let taskListCount = 0;
+      const raw = fakeConnection(async (method) => {
+        if (method === CLIENT_HEARTBEAT) return {};
+        if (method === TASK_LIST) {
+          taskListCount += 1;
+          return { tasks: [], revision: 1 };
+        }
+        if (method !== STATE_SUBSCRIBE) throw new Error(`Unexpected request: ${method}`);
+        subscribeCount += 1;
+        if (subscribeCount === 1 || !recovering) {
+          return taskSubscription(`cursor_${subscribeCount}`, subscribeCount);
+        }
+        throw new Error("baseline unavailable");
+      });
+      const session = createAppServerSession(raw.connection);
+      const statuses: string[] = [];
+      session.handleSessionStatus(({ status }) => statuses.push(status));
+      await session.initialize(initializeParams());
+      const snapshots: number[] = [];
+      session.subscribeState({ kind: "task", taskId: "task_1" as TaskId }, {
+        onSnapshot(snapshot) {
+          if (snapshot.kind === "task") snapshots.push(snapshot.task.revision);
+        },
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(snapshots).toEqual([1]);
+
+      recovering = true;
+      raw.wake();
+      await vi.advanceTimersByTimeAsync(30_000);
+
+      expect(statuses.at(-1)).toBe("unavailable");
+      expect(subscribeCount).toBe(6);
+      for (let index = 0; index < 20; index += 1) {
+        raw.emit(taskEvent("cursor_1", `queued_${index}`, index + 2));
+      }
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(subscribeCount).toBe(6);
+      await expect(session.request(TASK_LIST, { archived: false })).rejects.toThrow(
+        "baseline unavailable",
+      );
+      expect(taskListCount).toBe(0);
+
+      recovering = false;
+      raw.wake();
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(statuses.at(-1)).toBe("ready");
+      expect(snapshots).toEqual([1, 7]);
+      expect(subscribeCount).toBe(7);
+      await expect(session.request(TASK_LIST, { archived: false })).resolves.toEqual({
+        tasks: [],
+        revision: 1,
+      });
+      expect(taskListCount).toBe(1);
+      session.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("proves idle liveness once and gates requests when wake has no active stream", async () => {
+    const heartbeat = deferred<Record<symbol, never>>();
+    let heartbeatCount = 0;
+    let taskListCount = 0;
+    const raw = fakeConnection(async (method) => {
+      if (method === CLIENT_HEARTBEAT) {
+        heartbeatCount += 1;
+        return heartbeat.promise;
+      }
+      if (method === TASK_LIST) {
+        taskListCount += 1;
+        return { tasks: [], revision: 1 };
+      }
+      throw new Error(`Unexpected request: ${method}`);
+    });
+    const session = createAppServerSession(raw.connection);
+    const statuses: string[] = [];
+    session.handleSessionStatus(({ status }) => statuses.push(status));
+    await session.initialize(initializeParams());
+
+    for (let index = 0; index < 20; index += 1) raw.wake();
+    const taskList = session.request(TASK_LIST, { archived: false });
+    await Promise.resolve();
+
+    expect(heartbeatCount).toBe(1);
+    expect(taskListCount).toBe(0);
+    expect(statuses.at(-1)).toBe("recovering");
+
+    heartbeat.resolve({});
+    await expect(taskList).resolves.toEqual({ tasks: [], revision: 1 });
+    expect(taskListCount).toBe(1);
+    expect(statuses.at(-1)).toBe("ready");
+    session.close();
+  });
+
   it("refreshes once for a cursor gap and replays events received behind the new baseline", async () => {
     const replacement = deferred<StateSubscribeResult>();
     let subscribeCount = 0;
@@ -320,8 +454,8 @@ describe("AppServerSession", () => {
       await vi.advanceTimersByTimeAsync(4_000);
       expect(requestCount).toBe(5);
       await vi.advanceTimersByTimeAsync(10_000);
-      expect(requestCount).toBe(7);
-      expect(errors).toHaveBeenCalledTimes(7);
+      expect(requestCount).toBe(5);
+      expect(errors).toHaveBeenCalledTimes(5);
       session.close();
     } finally {
       vi.useRealTimers();
@@ -336,7 +470,8 @@ function fakeConnection(
   const invalidationListeners = new Set<(event: BackendGenerationInvalidation) => void>();
   const baselineListeners = new Set<(event: BackendRecoveryBaseline) => void>();
   const failureListeners = new Set<(event: BackendRecoveryFailure) => void>();
-  const connection: BackendConnection = {
+  const wakeListeners = new Set<() => void>();
+  const connection = {
     async initialize() {
       return initializeResult();
     },
@@ -360,12 +495,19 @@ function fakeConnection(
       failureListeners.add(handler);
       return () => failureListeners.delete(handler);
     },
+    handleWake(handler: () => void) {
+      wakeListeners.add(handler);
+      return () => wakeListeners.delete(handler);
+    },
     close() {},
-  };
+  } as BackendConnection;
   return {
     connection,
     emit(event: AppServerEvent) {
       for (const listener of eventListeners) listener(event);
+    },
+    wake() {
+      for (const listener of wakeListeners) listener();
     },
   };
 }

@@ -90,8 +90,6 @@ describe("toolDetailsViewModel", () => {
     expect(failed.outputs).toEqual([
       { label: "stdout", text: "stdout", tone: "stdout" },
       { label: "stderr", text: "permission denied", tone: "stderr" },
-      { label: "aggregate", text: "aggregate", tone: "stdout" },
-      { label: "formatted", text: "formatted", tone: "stdout" },
     ]);
   });
 
@@ -103,12 +101,27 @@ describe("toolDetailsViewModel", () => {
       { label: "stdout", text: "out", tone: "stdout" },
       { label: "stderr", text: "err", tone: "stderr" },
     ]],
-    ["aggregate only", { aggregated_output: "all" }, [
-      { label: "aggregate", text: "all", tone: "stdout" },
-    ]],
-    ["duplicate aggregate", { stdout: "same", stderr: "err", aggregated_output: "same" }, [
+    ["identical channels", { stdout: "same", stderr: "same" }, [
       { label: "stdout", text: "same", tone: "stdout" },
+      { label: "stderr", text: "same", tone: "stderr" },
+    ]],
+    ["aggregate only", { aggregated_output: "all" }, [
+      { label: "Combined output", text: "all", tone: "stdout" },
+    ]],
+    ["formatted merged only", { formatted_output: "formatted" }, [
+      { label: "Combined output", text: "formatted", tone: "stdout" },
+    ]],
+    ["aggregate aliases", {
+      stdout: "out",
+      stderr: "err",
+      aggregated_output: "out\nerr",
+      formatted_output: "formatted alias",
+    }, [
+      { label: "stdout", text: "out", tone: "stdout" },
       { label: "stderr", text: "err", tone: "stderr" },
+    ]],
+    ["two merged aliases", { aggregated_output: "aggregate", formatted_output: "formatted" }, [
+      { label: "Combined output", text: "aggregate", tone: "stdout" },
     ]],
   ])("preserves deterministic execute output for %s", (_name, outputFields, expected) => {
     const info = executeDetailInfo(

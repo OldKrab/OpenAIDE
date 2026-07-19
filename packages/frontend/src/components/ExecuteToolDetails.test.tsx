@@ -21,6 +21,24 @@ describe("ExecuteToolDetails", () => {
     expect(html.match(/same output/g)).toHaveLength(2);
   });
 
+  it("labels a deliberately merged stream as Combined output", () => {
+    const html = renderToStaticMarkup(
+      <ExecuteToolDetails
+        details={{
+          locations: [],
+          content: [],
+          input: { command: ["check"], fields: [] },
+          output: { aggregated_output: "merged bytes", fields: [] },
+        }}
+        step={{ kind: "tool", name: "execute", status: "completed" }}
+      />,
+    );
+
+    expect(html).toContain("<span>Combined output</span><pre>merged bytes</pre>");
+    expect(html).not.toContain("<span>stdout</span>");
+    expect(html).not.toContain("<span>stderr</span>");
+  });
+
   it.each([
     ["running", "Running", "lucide-loader-circle"],
     ["completed", "Completed", "lucide-check"],
