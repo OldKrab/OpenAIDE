@@ -32,6 +32,7 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(terminalHostHandlers);
   context.subscriptions.push(workspaceProjectSync);
   context.subscriptions.push(taskEditors);
+  context.subscriptions.push(taskViewProvider);
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider(TaskViewProvider.viewType, taskViewProvider, {
       webviewOptions: { retainContextWhenHidden: true },

@@ -8,24 +8,36 @@ export type AppControllerDerivedState = {
   visibleTasks: AppState["tasks"];
 };
 
-export function appControllerDerivedStateDeps(state: AppState) {
+export function appControllerDerivedStateDeps(
+  state: AppState,
+  navigationFocusedTaskId?: string | null,
+) {
   return [
     state.activeTaskId,
     state.searchQuery,
     state.tasks,
+    navigationFocusedTaskId,
   ] as const;
 }
 
-export function deriveAppControllerState(state: AppState): AppControllerDerivedState {
+export function deriveAppControllerState(
+  state: AppState,
+  navigationFocusedTaskId?: string | null,
+): AppControllerDerivedState {
   const activeTask = state.tasks.find((task) => task.task_id === state.activeTaskId);
   const filteredTasks = visibleTasks(state.tasks, state.searchQuery);
-  const activeTaskShouldStayVisible = activeTask?.has_messages === true;
+  const navigationTask = navigationFocusedTaskId === undefined
+    ? activeTask
+    : navigationFocusedTaskId === null
+      ? undefined
+      : state.tasks.find((task) => task.task_id === navigationFocusedTaskId);
+  const navigationTaskShouldStayVisible = navigationTask?.has_messages === true;
   return {
     activeTask,
-    activeNavigationTaskId: activeTaskShouldStayVisible ? activeTask.task_id : undefined,
+    activeNavigationTaskId: navigationTaskShouldStayVisible ? navigationTask.task_id : undefined,
     hasActiveTask: activeTask !== undefined,
-    visibleTasks: activeTaskShouldStayVisible && !filteredTasks.some((task) => task.task_id === activeTask.task_id)
-      ? [...filteredTasks, activeTask]
+    visibleTasks: navigationTaskShouldStayVisible && !filteredTasks.some((task) => task.task_id === navigationTask.task_id)
+      ? [...filteredTasks, navigationTask]
       : filteredTasks,
   };
 }

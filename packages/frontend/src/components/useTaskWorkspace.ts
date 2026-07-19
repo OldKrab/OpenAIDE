@@ -12,11 +12,18 @@ type TaskWorkspaceOptions = {
   backendConnection?: Pick<BackendConnection, "request">;
   bootstrap: WebviewBootstrap;
   dispatch: Dispatch<AppAction>;
+  navigationFocusedTaskId?: string | null;
   state: AppState;
 };
 
 /** Projects visible Task workspace state and owns route-level Task presentation effects. */
-export function useTaskWorkspace({ backendConnection, bootstrap, dispatch, state }: TaskWorkspaceOptions) {
+export function useTaskWorkspace({
+  backendConnection,
+  bootstrap,
+  dispatch,
+  navigationFocusedTaskId,
+  state,
+}: TaskWorkspaceOptions) {
   useTaskAttentionReadReceipt({
     backendConnection,
     dispatch,
@@ -51,8 +58,11 @@ export function useTaskWorkspace({ backendConnection, bootstrap, dispatch, state
     state.snapshot ? state.taskInputs[state.snapshot.task.task_id]?.pending : undefined,
   ]);
 
-  const derivedStateDeps = appControllerDerivedStateDeps(state);
-  const derived = useMemo(() => deriveAppControllerState(state), derivedStateDeps);
+  const derivedStateDeps = appControllerDerivedStateDeps(state, navigationFocusedTaskId);
+  const derived = useMemo(
+    () => deriveAppControllerState(state, navigationFocusedTaskId),
+    derivedStateDeps,
+  );
 
   useEffect(() => {
     if (!state.snapshot) return;

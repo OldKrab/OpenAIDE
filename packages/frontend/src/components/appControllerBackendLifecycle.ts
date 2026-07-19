@@ -87,6 +87,7 @@ type BackendLifecycleOptions = {
   newTaskId?: string;
   onReplicaChanged?: (transition: AppServerReplicaTransition) => void;
   setAgents: Dispatch<SetStateAction<AgentOption[] | undefined>>;
+  setNavigationFocusedTaskId: Dispatch<SetStateAction<string | null | undefined>>;
   setPreferences: Dispatch<SetStateAction<AppPreferencesRecord>>;
   state: AppState;
 };
@@ -102,6 +103,7 @@ export function useAppControllerBackendLifecycle({
   newTaskId,
   onReplicaChanged,
   setAgents,
+  setNavigationFocusedTaskId,
   setPreferences,
   state,
 }: BackendLifecycleOptions) {
@@ -282,6 +284,7 @@ export function useAppControllerBackendLifecycle({
         openNewTaskSurface,
         openSettingsSurface,
         setAgents,
+        setNavigationFocusedTaskId,
         setPreferences,
         postHostMessage,
       });

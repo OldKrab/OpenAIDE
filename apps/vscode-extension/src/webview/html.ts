@@ -20,7 +20,7 @@ export function renderWebviewHtml(
   <link rel="stylesheet" href="${styleUri}">
   <title>OpenAIDE</title>
 </head>
-<body data-shell="${escapeAttribute(bootstrap.shell.kind)}" data-navigation-mode="${escapeAttribute(bootstrap.shell.navigationMode)}" data-surface="${escapeAttribute(bootstrap.surface)}" data-task-id="${escapeAttribute(bootstrap.taskId ?? "")}" data-project-id="${escapeAttribute(bootstrap.projectId ?? "")}" data-settings-agent-id="${escapeAttribute(bootstrap.settingsAgentId ?? "")}" data-return-to-new-task="${bootstrap.returnToNewTask === true ? "true" : "false"}" data-composer-submit-shortcut="${escapeAttribute(bootstrap.preferences?.composer_submit_shortcut ?? "enter")}">
+<body data-shell="${escapeAttribute(bootstrap.shell.kind)}" data-navigation-mode="${escapeAttribute(bootstrap.shell.navigationMode)}" data-surface="${escapeAttribute(bootstrap.surface)}" data-focused-task-id="${escapeAttribute(bootstrap.focusedTaskId === undefined ? "" : JSON.stringify(bootstrap.focusedTaskId))}" data-task-id="${escapeAttribute(bootstrap.taskId ?? "")}" data-project-id="${escapeAttribute(bootstrap.projectId ?? "")}" data-settings-agent-id="${escapeAttribute(bootstrap.settingsAgentId ?? "")}" data-return-to-new-task="${bootstrap.returnToNewTask === true ? "true" : "false"}" data-composer-submit-shortcut="${escapeAttribute(bootstrap.preferences?.composer_submit_shortcut ?? "enter")}">
   <div id="root"></div>
   <script nonce="${nonce}" type="module" src="${scriptUri}"></script>
 </body>
