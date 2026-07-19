@@ -9,22 +9,36 @@ import {
   webviewRoot,
 } from "./html";
 import { handleWebviewMessage } from "./messaging";
-import { VSCODE_SHELL, type WebviewHost } from "./types";
+import { VSCODE_SHELL, type TaskFocusSource, type WebviewHost } from "./types";
 import { resolveWebviewAppServerConnection } from "./appServerConnection";
 import { currentWorkspaceRoot } from "../workspace/roots";
 
-export class TaskViewProvider implements vscode.WebviewViewProvider {
+export class TaskViewProvider implements vscode.WebviewViewProvider, vscode.Disposable {
   static readonly viewType = "openaide.tasks";
   private view: vscode.WebviewView | undefined;
   private renderGeneration = 0;
+  private readonly focusedTaskSubscription: { dispose: () => void };
+  private focusedTaskId: string | undefined;
 
   constructor(
     private readonly context: vscode.ExtensionContext,
     private readonly runtime: RuntimeClient,
     private readonly runtimeProcess: RuntimeProcess,
     private readonly logger: ExtensionLogger,
-    private readonly surfaces: WebviewHost,
-  ) {}
+    private readonly surfaces: WebviewHost & TaskFocusSource,
+  ) {
+    this.focusedTaskId = surfaces.currentFocusedTaskId();
+    this.focusedTaskSubscription = surfaces.onDidChangeFocusedTask((taskId) => {
+      this.focusedTaskId = taskId;
+      void this.publishFocusedTask(taskId);
+    });
+  }
+
+  dispose() {
+    this.nextRenderGeneration();
+    this.view = undefined;
+    this.focusedTaskSubscription.dispose();
+  }
 
   resolveWebviewView(view: vscode.WebviewView) {
     const clientInstanceId = createWebviewClientInstanceId();
@@ -69,11 +83,27 @@ export class TaskViewProvider implements vscode.WebviewViewProvider {
     }
   }
 
+  private async publishFocusedTask(taskId: string | undefined) {
+    const view = this.view;
+    if (!view) return;
+    try {
+      await view.webview.postMessage({
+        type: "surface.focusChanged",
+        payload: taskId ? { task_id: taskId } : {},
+      });
+    } catch (error) {
+      this.logger.warn("failed to publish focused Task to task navigation", {
+        error: String(error),
+      });
+    }
+  }
+
   private bootstrap(clientInstanceId: string): Parameters<typeof renderWebviewHtml>[2] {
     return {
       surface: "navigation",
       shell: VSCODE_SHELL,
       clientInstanceId,
+      focusedTaskId: this.focusedTaskId ?? null,
       projectId: currentWorkspaceRoot()?.projectId,
     };
   }

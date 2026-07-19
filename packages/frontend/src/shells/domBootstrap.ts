@@ -11,11 +11,23 @@ export function datasetBootstrap(): WebviewBootstrap {
     surface,
     shell,
     clientInstanceId: document.body.dataset.clientInstanceId || undefined,
+    focusedTaskId: focusedTaskId(),
     taskId: document.body.dataset.taskId || undefined,
     projectId: document.body.dataset.projectId || undefined,
     preferences: shellPreferences(),
     appServerConnection: appServerConnection(),
   };
+}
+
+function focusedTaskId(): string | null | undefined {
+  const value = document.body.dataset.focusedTaskId;
+  if (!value) return undefined;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return typeof parsed === "string" || parsed === null ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function shellBootstrap() {

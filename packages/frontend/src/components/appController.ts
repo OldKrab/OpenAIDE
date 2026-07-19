@@ -126,6 +126,9 @@ function useAppControllerCore({ backendConnection }: AppControllerOptions = {}):
   const [state, dispatch] = useReducer(appReducer, undefined, createInitialState);
   const [preferences, setPreferences] = useState<AppPreferencesRecord>(initialBootstrap.preferences ?? { composer_submit_shortcut: "enter" });
   const [agents, setAgents] = useState<AgentOption[] | undefined>(undefined);
+  const [navigationFocusedTaskId, setNavigationFocusedTaskId] = useState<string | null | undefined>(
+    initialBootstrap.surface === "invalid" ? undefined : initialBootstrap.focusedTaskId,
+  );
   const currentAgentId = useRef(state.newTask.selection.agentId);
   currentAgentId.current = state.newTask.selection.agentId;
   const currentNewTaskContext = useRef({
@@ -174,6 +177,7 @@ function useAppControllerCore({ backendConnection }: AppControllerOptions = {}):
     newTaskId: newTaskSnapshot?.task.task_id,
     onReplicaChanged: handleReplicaChanged,
     setAgents,
+    setNavigationFocusedTaskId,
     setPreferences,
     state,
   });
@@ -212,6 +216,7 @@ function useAppControllerCore({ backendConnection }: AppControllerOptions = {}):
     backendConnection: backendConnectionRef,
     bootstrap,
     dispatch: newTaskDispatch,
+    navigationFocusedTaskId,
     state,
   });
 

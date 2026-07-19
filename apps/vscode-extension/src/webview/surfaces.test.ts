@@ -308,6 +308,39 @@ describe("VS Code webview surfaces", () => {
     expect(vscodeMocks.panels[2].reveal).toHaveBeenCalledWith(1);
   });
 
+  it("keeps task navigation focused on the active Task editor tab", () => {
+    const manager = new TaskEditorManager(context(), runtime(), runtimeProcess(), logger());
+    const view = createViewMock();
+    const provider = new TaskViewProvider(context(), runtime(), runtimeProcess(), logger(), manager);
+    provider.resolveWebviewView(view as never);
+
+    manager.openTask("task_1", "First task");
+    manager.openTask("task_2", "Second task");
+    triggerViewState(vscodeMocks.panels[0], true);
+
+    expect(view.webview.postMessage).toHaveBeenLastCalledWith({
+      type: "surface.focusChanged",
+      payload: { task_id: "task_1" },
+    });
+
+    triggerViewState(vscodeMocks.panels[0], false);
+    expect(view.webview.postMessage).toHaveBeenLastCalledWith({
+      type: "surface.focusChanged",
+      payload: {},
+    });
+  });
+
+  it("bootstraps task navigation with the already-focused Task editor", () => {
+    const manager = new TaskEditorManager(context(), runtime(), runtimeProcess(), logger());
+    manager.openTask("task_1", "Focused task");
+    const view = createViewMock();
+    const provider = new TaskViewProvider(context(), runtime(), runtimeProcess(), logger(), manager);
+
+    provider.resolveWebviewView(view as never);
+
+    expect(view.webview.html).toContain('data-focused-task-id="&quot;task_1&quot;"');
+  });
+
   it("reuses the registered Task panel when a New Task routes to the same Task", () => {
     const manager = new TaskEditorManager(context(), runtime(), runtimeProcess(), logger());
 
@@ -412,6 +445,8 @@ function logger() {
 
 function surfaces() {
   return {
+    currentFocusedTaskId: vi.fn(() => undefined),
+    onDidChangeFocusedTask: vi.fn(() => ({ dispose: vi.fn() })),
     openNewTask: vi.fn(),
     openSettings: vi.fn(),
     openTask: vi.fn(),
@@ -426,8 +461,10 @@ function createViewMock() {
 
 function createPanelMock() {
   return {
+    active: true,
     title: "",
     webview: createWebviewMock(),
+    onDidChangeViewState: vi.fn(),
     onDidDispose: vi.fn(),
     reveal: vi.fn(),
     dispose: vi.fn(),
@@ -463,6 +500,13 @@ function triggerFirstDisposeHandler(panel: ReturnType<typeof createPanelMock>) {
   const handler = panel.onDidDispose.mock.calls[0]?.[0];
   if (!handler) throw new Error("missing dispose handler");
   handler();
+}
+
+function triggerViewState(panel: ReturnType<typeof createPanelMock>, active: boolean) {
+  panel.active = active;
+  const handler = panel.onDidChangeViewState.mock.calls[0]?.[0];
+  if (!handler) throw new Error("missing view-state handler");
+  handler({ webviewPanel: panel });
 }
 
 function deferredConnection() {

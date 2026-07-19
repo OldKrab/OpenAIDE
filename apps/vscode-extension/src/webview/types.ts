@@ -13,3 +13,11 @@ export type WebviewHost = {
   openSettings: () => void;
   openTask: (taskId: string, title?: string) => void;
 };
+
+/** Exposes shell-local editor focus without promoting it into App Server product state. */
+export type TaskFocusSource = {
+  currentFocusedTaskId: () => string | undefined;
+  onDidChangeFocusedTask: (
+    listener: (taskId: string | undefined) => void,
+  ) => { dispose: () => void };
+};

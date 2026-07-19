@@ -54,6 +54,22 @@ describe("deriveAppControllerState", () => {
     expect(derived.visibleTasks.map((item) => item.task_id)).toEqual(["task_1", "task_2"]);
   });
 
+  it("uses shell editor focus for Task Navigation without changing active product state", () => {
+    const state = createInitialState();
+    state.activeTaskId = "task_1";
+    state.tasks = [
+      task({ task_id: "task_1", title: "Previously selected" }),
+      task({ task_id: "task_2", title: "Focused editor" }),
+    ];
+
+    const focused = deriveAppControllerState(state, "task_2");
+    const cleared = deriveAppControllerState(state, null);
+
+    expect(focused.activeNavigationTaskId).toBe("task_2");
+    expect(focused.activeTask?.task_id).toBe("task_1");
+    expect(cleared.activeNavigationTaskId).toBeUndefined();
+  });
+
   it("keeps message-bearing tasks and hides empty placeholder tasks when the search query is blank", () => {
     const tasks = [
       task({ task_id: "task_1", has_messages: true }),

@@ -24,6 +24,8 @@ export type WebviewBootstrap = {
   shell: AppShellBootstrap;
   /** Host-issued identity unique to this webview instance. */
   clientInstanceId?: string;
+  /** App Shell-owned editor focus used only to highlight Task Navigation. */
+  focusedTaskId?: string | null;
   taskId?: string;
   projectId?: string;
   settingsTab?: SettingsTabId;
