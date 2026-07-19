@@ -316,6 +316,39 @@ describe("app reducer composer state", () => {
     expect(state.newTask.nativeSessions.loaded).toBe(false);
   });
 
+  it("defaults the next new task to the selected project root after a successful send", () => {
+    let state = createInitialState();
+    state = appReducer(state, {
+      type: "projects",
+      projects: [{
+        projectId: "project-1",
+        label: "OpenAIDE",
+        workspaceRoot: "/workspace/OpenAIDE",
+      }],
+      initialProjectId: "project-1",
+    });
+    state = appReducer(state, {
+      type: "newTask:worktree",
+      worktreeId: "worktree-1",
+      label: "Feature worktree",
+      path: "/worktrees/feature",
+    });
+    state = appReducer(state, { type: "submit:start", prompt: "Build it", context: [] });
+    state = appReducer(state, {
+      type: "taskSend:accepted",
+      taskId: "task-1",
+      userMessageId: "message-1" as never,
+    });
+
+    expect(state.newTask.selection).toMatchObject({
+      projectId: "project-1",
+      workspaceRoot: "/workspace/OpenAIDE",
+      workspaceLabel: "OpenAIDE",
+      isolation: "local",
+    });
+    expect(state.newTask.selection.worktreeId).toBeUndefined();
+  });
+
   it("stores previous native sessions and merges loaded pages", () => {
     let state = createInitialState();
 

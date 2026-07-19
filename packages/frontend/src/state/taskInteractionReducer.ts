@@ -1,6 +1,6 @@
 import type { ActivityToolDetails, Attachment, MessagePage } from "@openaide/app-shell-contracts";
 import { mergePageState } from "./chatPaging";
-import { invalidateAppServerAttachments, localAttachment } from "./composerOptions";
+import { invalidateAppServerAttachments, localAttachment, selectionWithProject } from "./composerOptions";
 import type { ComposerAttachment } from "./composerOptions";
 import type { AppAction } from "./appReducer";
 import { configOptionsCatalogKey } from "./configOptionState";
@@ -149,6 +149,9 @@ export function reduceTaskInteractionState(state: AppState, action: AppAction): 
       const acceptedTaskInput = input?.pending !== undefined && hasAcceptedMessage;
       const acceptedNewTask = state.newTask.pending !== undefined && hasAcceptedMessage;
       if (!acceptedTaskInput && !acceptedNewTask) return state;
+      const selectedProject = state.projects.find(
+        (project) => project.projectId === state.newTask.selection.projectId,
+      );
       return {
         ...state,
         taskInputs: acceptedTaskInput
@@ -169,6 +172,18 @@ export function reduceTaskInteractionState(state: AppState, action: AppAction): 
               pending: undefined,
               submitting: false,
               error: undefined,
+              configOptions: undefined,
+              configOptionsLoading: false,
+              configOptionsError: undefined,
+              // The accepted worktree belongs to the promoted Task. A fresh New Task
+              // starts from its Project root while retaining the Project and Agent.
+              selection: selectedProject
+                ? {
+                    ...selectionWithProject(state.newTask.selection, selectedProject),
+                    isolation: "local",
+                    configOptions: {},
+                  }
+                : state.newTask.selection,
             }
           : state.newTask,
       };
