@@ -292,7 +292,7 @@ Expiration sends `session/close`, ends the local worker, and releases its live r
 
 Agents that do not advertise `sessionCapabilities.close` are not idle-expired because ACP forbids Clients from sending `session/close`; those sessions retain process-lifetime cleanup. Ordinary navigation never closes a Native Session directly.
 
-## Task Attention And Web Notifications
+## Task Attention And Shell Notifications
 
 App Server owns one latest outstanding Task Attention Event for each Task. The event has a stable identity, reason, and occurrence time and is included in authoritative Task snapshots and ordered Task changes. It is distinct from generic Task status and `unread`: clients never infer notification-worthy work from a `waiting`, idle, failed, or unread transition alone.
 
@@ -314,7 +314,9 @@ Tabs for the same browser profile coordinate attention and delivery. The Web App
 
 The browser profile presents at most one current OS notification per Task, replacing an older notification for that Task. It shows the Task title and the short product reason only; Chat, Agent response, Tool, permission, and question content remain private. Clicking anywhere on the notification focuses or opens OpenAIDE and routes directly to the Task. The notification closes when clicked, when that Task is actively acknowledged, when its waiting request is no longer current, or when a newer event replaces it. Merely focusing another OpenAIDE Task does not clear it.
 
-App Server owns Task Attention meaning, identity, persistence, ordering, and clearing through product mutations. The Web App shell owns local opt-in, browser permission, focus observation, cross-tab coordination, delivery receipts, OS notification presentation, replacement, closing, and Task routing. Shared Frontend may carry the authoritative event to the shell through a narrow presentation seam, but it does not infer attention policy or call browser notification APIs directly. The existing client-scoped `shell/showNotification` request remains available for explicit App Server-to-shell messages and is not the Task Attention lifecycle.
+The VS Code Extension may present a Task Attention Event through VS Code's workbench Notification Center while its extension host is active. An event is eligible when its Task was not the focused Task at the event occurrence time, including while another Task, source file, or workbench surface was focused or the VS Code window was unfocused. Its first Task-navigation snapshot establishes a baseline and never turns existing attention into a notification backlog. Extension-global delivery receipts suppress replay across restart, and VS Code's own per-extension notification filter and Do Not Disturb controls provide local enablement. The notification contains only the short product reason and Task title; selecting its **Open Task** action routes to the Task. VS Code extension notifications remain inside the VS Code workbench and are not macOS, Windows, or Linux system notifications.
+
+App Server owns Task Attention meaning, identity, persistence, ordering, and clearing through product mutations. The Web App shell owns local opt-in, browser permission, focus observation, cross-tab coordination, delivery receipts, OS notification presentation, replacement, closing, and Task routing. The VS Code shell owns workbench focus observation, extension-global delivery receipts, workbench notification presentation, and Task routing. Shared Frontend may carry the authoritative event to a shell through a narrow presentation seam, but it does not infer attention policy or call notification APIs directly. The existing client-scoped `shell/showNotification` request remains available for explicit App Server-to-shell messages and is not the Task Attention lifecycle.
 
 ### ACP update scope
 
@@ -391,6 +393,7 @@ An implementation conforms to this specification only when all of these are true
 7. Durable Chat, transient requests, Tool details, and Frontend-only presentation each have one explicit owner and do not masquerade as one another.
 8. Every notification-worthy Task transition creates one explicit Task Attention Event; no client infers it from status or `unread`.
 9. A browser profile emits at most one OS notification for one eligible Task Attention Event and never emits an old unread backlog on startup.
-10. App Server owns Task Attention state while each App Shell owns its local attention and notification capabilities.
-11. Unsent Composer text and Images have one Frontend owner and remain unchanged by Project, Agent, Task Workspace, navigation, reconnect, or Prepared-Task lease changes while the page remains alive.
-12. Product-client inactivity may expire client-scoped state but never determines App Server process lifetime; a changed process endpoint recovers through the same logical-session baseline barrier without mutation replay.
+10. A VS Code extension host emits at most one workbench notification for one eligible Task Attention Event and never emits an old attention backlog on startup.
+11. App Server owns Task Attention state while each App Shell owns its local attention and notification capabilities.
+12. Unsent Composer text and Images have one Frontend owner and remain unchanged by Project, Agent, Task Workspace, navigation, reconnect, or Prepared-Task lease changes while the page remains alive.
+13. Product-client inactivity may expire client-scoped state but never determines App Server process lifetime; a changed process endpoint recovers through the same logical-session baseline barrier without mutation replay.

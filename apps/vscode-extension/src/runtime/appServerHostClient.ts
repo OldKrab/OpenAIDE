@@ -8,6 +8,7 @@ import {
   type AppServerSession,
   type AppServerSessionHostMessage,
   type AppServerSessionStatus,
+  type AppServerStateObserver,
   type AppServerSessionViewMessage,
   type BackendRequestContext,
   type BackendUnsubscribe,
@@ -20,6 +21,7 @@ import {
   type ResponseResultByMethod,
   type ServerRequestMethod,
   type ServerRequestResponseResultByMethod,
+  type SubscriptionScope,
 } from "@openaide/app-server-client";
 import type { WebviewAppServerConnection } from "@openaide/app-shell-contracts";
 
@@ -80,6 +82,13 @@ export class AppServerHostClient {
   async syncWorkspaceRoots(roots: ClientWorkspaceRoot[]): Promise<void> {
     this.desiredWorkspaceRoots = normalizedWorkspaceRoots(roots);
     await this.flushWorkspaceRoots();
+  }
+
+  /** Adds extension-host state consumers without creating another logical client. */
+  async subscribeState(scope: SubscriptionScope, observer: AppServerStateObserver) {
+    await this.flushWorkspaceRoots();
+    const connection = await this.ensureInitialized();
+    return connection.subscribeState(scope, observer);
   }
 
   /** Registers one render surface behind the extension host's single logical client. */
