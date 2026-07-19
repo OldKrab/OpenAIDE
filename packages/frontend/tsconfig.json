@@ -3,6 +3,7 @@
   "compilerOptions": {
     "jsx": "react-jsx",
     "outDir": "dist",
+    "rootDir": "../..",
     "types": ["vite/client"]
   },
   "include": ["src", "../../apps/browser/frontend", "vite.config.ts"]

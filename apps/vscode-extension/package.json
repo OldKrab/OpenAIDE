@@ -172,6 +172,6 @@
     "@types/node": "^26.1.1",
     "@types/vscode": "^1.100.0",
     "esbuild": "^0.28.1",
-    "typescript": "^5.9.3"
+    "typescript": "^7.0.2"
   }
 }
