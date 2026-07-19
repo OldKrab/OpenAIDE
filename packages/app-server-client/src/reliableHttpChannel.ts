@@ -1,5 +1,7 @@
 import type { RpcMessage, RpcMessageChannel } from "./rpcPeer.js";
 
+const MAX_NETWORK_RETRY_DELAY_MS = 5_000;
+
 export type ReliableHttpFetch = (
   input: string,
   init: {
@@ -60,8 +62,12 @@ export function createReliableHttpMessageChannel(
   const uploads: Array<{ sequence: number; message: RpcMessage; body: string }> = [];
   const abort = new AbortController();
   const retryDelayMs = options.retryDelayMs ?? 250;
+  const maxRetryDelayMs = Math.max(retryDelayMs, MAX_NETWORK_RETRY_DELAY_MS);
   const receiveTimeoutMs = options.receiveTimeoutMs ?? 35_000;
   const closeTimeoutMs = options.closeTimeoutMs ?? 5_000;
+  const retryWaiters = new Set<() => void>();
+  let uploadRetryDelayMs = retryDelayMs;
+  let receiveRetryDelayMs = retryDelayMs;
   let receiveAbort: AbortController | undefined;
   let nextClientSequence = 1;
   let lastServerSequence = 0;
@@ -69,6 +75,9 @@ export function createReliableHttpMessageChannel(
   let closed = false;
   let terminalError: unknown;
   const unsubscribeWake = options.subscribeToWake?.(() => {
+    resetRetryDelay("upload");
+    resetRetryDelay("receive");
+    releaseRetryWaiters();
     options.onWake?.();
     if (receiveAbort && !receiveAbort.signal.aborted) {
       console.info("[OpenAIDE] Browser wake restarted the reliable HTTP receive poll");
@@ -117,6 +126,7 @@ export function createReliableHttpMessageChannel(
       unsubscribeWake?.();
       abort.abort();
       receiveAbort?.abort();
+      releaseRetryWaiters();
       listeners.clear();
       errorListeners.clear();
       void closeSession();
@@ -185,13 +195,14 @@ export function createReliableHttpMessageChannel(
           const text = await response.text();
           if (!response.ok) throw httpError("upload", response.status, text);
           uploads.shift();
+          resetRetryDelay("upload");
         } catch (error) {
           if (closed || isAbort(error)) return;
           if (isTerminalHttpError(error)) {
             fail(error);
             return;
           }
-          await retryDelay();
+          await retryDelay("upload");
         }
       }
     } finally {
@@ -229,10 +240,12 @@ export function createReliableHttpMessageChannel(
         if (response.status === 204) {
           // Real polls are held by the server. Yield here as well so a test
           // double or intermediary returning immediately cannot spin the UI.
-          await retryDelay();
+          resetRetryDelay("receive");
+          await retryDelay("receive", false);
           continue;
         }
         if (!response.ok) throw httpError("receive", response.status, text);
+        resetRetryDelay("receive");
         const batch = JSON.parse(text) as ServerBatch;
         for (const frame of batch.frames) {
           if (frame.sequence <= lastServerSequence) continue;
@@ -249,7 +262,7 @@ export function createReliableHttpMessageChannel(
           fail(error);
           return;
         }
-        await retryDelay();
+        await retryDelay("receive");
       } finally {
         clearTimeout(receiveTimeout);
         if (receiveAbort === pollAbort) receiveAbort = undefined;
@@ -265,9 +278,32 @@ export function createReliableHttpMessageChannel(
     };
   }
 
-  function retryDelay() {
-    if (retryDelayMs === 0) return Promise.resolve();
-    return new Promise<void>((resolve) => setTimeout(resolve, retryDelayMs));
+  function retryDelay(direction: "upload" | "receive", backoff = true) {
+    const delay = direction === "upload" ? uploadRetryDelayMs : receiveRetryDelayMs;
+    if (backoff && retryDelayMs > 0) {
+      const nextDelay = Math.min(delay * 2, maxRetryDelayMs);
+      if (direction === "upload") uploadRetryDelayMs = nextDelay;
+      else receiveRetryDelayMs = nextDelay;
+    }
+    if (delay === 0) return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      const finish = () => {
+        clearTimeout(timer);
+        retryWaiters.delete(finish);
+        resolve();
+      };
+      const timer = setTimeout(finish, delay);
+      retryWaiters.add(finish);
+    });
+  }
+
+  function resetRetryDelay(direction: "upload" | "receive") {
+    if (direction === "upload") uploadRetryDelayMs = retryDelayMs;
+    else receiveRetryDelayMs = retryDelayMs;
+  }
+
+  function releaseRetryWaiters() {
+    for (const finish of [...retryWaiters]) finish();
   }
 
   function fail(error: unknown) {
