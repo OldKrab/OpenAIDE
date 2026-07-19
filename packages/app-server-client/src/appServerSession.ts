@@ -46,6 +46,11 @@ type RecoveryGate = {
   resolve(): void;
 };
 
+type ReplicaRefreshCycle = {
+  generation: number;
+  promise: Promise<void>;
+};
+
 /** Deep session module: transport replacement and scope replicas commit behind one readiness gate. */
 export function createAppServerSession(connection: BackendConnection): AppServerSession {
   const replicas = new Map<string, ScopeReplica>();
@@ -58,6 +63,7 @@ export function createAppServerSession(connection: BackendConnection): AppServer
   let closed = false;
   let recoveryGate: RecoveryGate | undefined;
   let wakeRecoveryPromise: Promise<void> | undefined;
+  let replicaRefreshCycle: ReplicaRefreshCycle | undefined;
   let status: AppServerSessionStatus = { status: "connecting", generation };
   let initialization: InitializeResult | undefined;
 
@@ -222,6 +228,14 @@ export function createAppServerSession(connection: BackendConnection): AppServer
   async function renewAfterWake() {
     // Prove client liveness even when no state scope is currently observed. The
     // reliable connection will replace an expired physical session if needed.
+    const activeRecovery = recoveryGate;
+    if (activeRecovery) {
+      // The replacement initialization already renews every active scope. A
+      // concurrent wake joins that authority instead of starting a second pass.
+      await activeRecovery.promise;
+      if (status.status === "unavailable") throw status.error;
+      return;
+    }
     await connection.request(CLIENT_HEARTBEAT, {});
     await refreshCurrentReplicas();
   }
@@ -234,13 +248,33 @@ export function createAppServerSession(connection: BackendConnection): AppServer
     }
   }
 
-  async function refreshCurrentReplicas() {
-    while (!closed) {
+  function refreshCurrentReplicas() {
+    const targetGeneration = generation;
+    if (replicaRefreshCycle?.generation === targetGeneration) {
+      return replicaRefreshCycle.promise;
+    }
+    const promise = runReplicaRefreshCycle(targetGeneration);
+    const cycle = { generation: targetGeneration, promise };
+    replicaRefreshCycle = cycle;
+    void promise.then(
+      () => {
+        if (replicaRefreshCycle === cycle) replicaRefreshCycle = undefined;
+      },
+      () => {
+        if (replicaRefreshCycle === cycle) replicaRefreshCycle = undefined;
+      },
+    );
+    return promise;
+  }
+
+  async function runReplicaRefreshCycle(targetGeneration: number) {
+    while (!closed && generation === targetGeneration) {
       const current = [...replicas.values()].filter((replica) => replica.observers.size > 0);
-      await Promise.all(current.map((replica) => refreshReplica(replica, generation)));
+      await Promise.all(current.map((replica) => refreshReplica(replica, targetGeneration)));
+      if (closed || generation !== targetGeneration) return;
       const active = [...replicas.values()].filter((replica) => replica.observers.size > 0);
       if (active.every((replica) => (
-        replica.refreshGeneration === generation
+        replica.refreshGeneration === targetGeneration
         && !replica.refreshing
       ))) return;
     }

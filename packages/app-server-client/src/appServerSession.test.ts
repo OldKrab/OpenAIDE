@@ -149,6 +149,62 @@ describe("AppServerSession", () => {
     session.close();
   });
 
+  it("coalesces a foreground refresh with an overlapping physical-generation baseline", async () => {
+    const recovery = new Map([
+      ["task_1", deferred<StateSubscribeResult>()],
+      ["task_2", deferred<StateSubscribeResult>()],
+    ]);
+    const repeated = new Map([
+      ["task_1", deferred<StateSubscribeResult>()],
+      ["task_2", deferred<StateSubscribeResult>()],
+    ]);
+    const subscribeCounts = new Map<string, number>();
+    const raw = fakeConnection(async (method, params) => {
+      if (method === CLIENT_HEARTBEAT) return {};
+      if (method !== STATE_SUBSCRIBE) throw new Error(`Unexpected request: ${method}`);
+      const scope = (params as { scope: { kind: "task"; taskId: TaskId } }).scope;
+      const taskId = scope.taskId;
+      const count = (subscribeCounts.get(taskId) ?? 0) + 1;
+      subscribeCounts.set(taskId, count);
+      if (count === 1) return taskSubscription(`cursor_${taskId}_1`, 1, taskId);
+      const pending = (count === 2 ? recovery : repeated).get(taskId);
+      if (!pending) throw new Error(`Unexpected Task subscription: ${taskId}`);
+      return pending.promise;
+    });
+    const session = createAppServerSession(raw.connection);
+    const statuses: string[] = [];
+    session.handleSessionStatus(({ status }) => statuses.push(status));
+    await session.initialize(initializeParams());
+    const firstReady = vi.fn();
+    const secondReady = vi.fn();
+    session.subscribeState(
+      { kind: "task", taskId: "task_1" as TaskId },
+      { onBaselineReady: firstReady, onSnapshot: vi.fn() },
+    );
+    session.subscribeState(
+      { kind: "task", taskId: "task_2" as TaskId },
+      { onBaselineReady: secondReady, onSnapshot: vi.fn() },
+    );
+    await vi.waitFor(() => expect([...subscribeCounts.values()]).toEqual([1, 1]));
+
+    raw.invalidate({ reason: "clientLivenessExpired" });
+    raw.recover({ reason: "clientLivenessExpired", result: initializeResult() });
+    await vi.waitFor(() => expect([...subscribeCounts.values()]).toEqual([2, 2]));
+    recovery.get("task_1")?.resolve(taskSubscription("cursor_task_1_2", 2, "task_1" as TaskId));
+    await vi.waitFor(() => expect(firstReady).toHaveBeenCalledTimes(2));
+
+    raw.wake();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect([...subscribeCounts.values()]).toEqual([2, 2]);
+    recovery.get("task_2")?.resolve(taskSubscription("cursor_task_2_2", 2, "task_2" as TaskId));
+    await vi.waitFor(() => expect(statuses.at(-1)).toBe("ready"));
+    expect(firstReady).toHaveBeenCalledTimes(2);
+    expect(secondReady).toHaveBeenCalledTimes(2);
+    expect([...subscribeCounts.values()]).toEqual([2, 2]);
+    session.close();
+  });
+
   it("refreshes once for a cursor gap and replays events received behind the new baseline", async () => {
     const replacement = deferred<StateSubscribeResult>();
     let subscribeCount = 0;
@@ -509,17 +565,27 @@ function fakeConnection(
     wake() {
       for (const listener of wakeListeners) listener();
     },
+    invalidate(event: BackendGenerationInvalidation) {
+      for (const listener of invalidationListeners) listener(event);
+    },
+    recover(event: BackendRecoveryBaseline) {
+      for (const listener of baselineListeners) listener(event);
+    },
   };
 }
 
-function taskSubscription(cursor: string, revision: number): StateSubscribeResult {
+function taskSubscription(
+  cursor: string,
+  revision: number,
+  taskId = "task_1" as TaskId,
+): StateSubscribeResult {
   return {
     cursor: cursor as EventCursor,
-    scope: { kind: "task", taskId: "task_1" as TaskId },
+    scope: { kind: "task", taskId },
     snapshot: {
       kind: "task",
       task: {
-        task: taskSummary(),
+        task: taskSummary(taskId),
         lifecycle: "visible",
         revision,
         preparation: { kind: "ready" },
@@ -549,9 +615,9 @@ function taskEvent(previousCursor: string, cursor: string, revision: number): Ap
   };
 }
 
-function taskSummary() {
+function taskSummary(taskId = "task_1" as TaskId) {
   return {
-    taskId: "task_1" as TaskId,
+    taskId,
     projectId: "project_1" as never,
     agentId: "codex" as never,
     title: { value: "Recovered Task", source: "user" as const },
