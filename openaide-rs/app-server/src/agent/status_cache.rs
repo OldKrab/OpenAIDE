@@ -157,7 +157,8 @@ fn status_from_probe_error(error: &RuntimeError) -> AgentStatus {
         | RuntimeError::InvalidParams(_)
         | RuntimeError::TaskNotFound(_)
         | RuntimeError::Storage(_)
-        | RuntimeError::Conflict(_) => AgentStatus::Failed,
+        | RuntimeError::Conflict(_)
+        | RuntimeError::PreparedTaskContextConflict { .. } => AgentStatus::Failed,
     }
 }
 

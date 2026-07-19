@@ -37,10 +37,19 @@ describe("QuestionCard", () => {
     expect(html).not.toMatch(/question-number|>1\.<|>2\.</);
   });
 
-  it("submits typed values together and cancels without confirmation", () => {
+  it("restores both answer and cancel actions after the pending question is reconstructed", () => {
     const onRespond = vi.fn();
     let tree: ReturnType<typeof create>;
     act(() => { tree = create(<QuestionCard elicitation={pendingQuestion()} onRespond={onRespond} />); });
+    const reconstructed = pendingQuestion();
+    act(() => {
+      tree.update(
+        <QuestionCard
+          elicitation={{ ...reconstructed, fields: reconstructed.fields.map((field) => ({ ...field })) }}
+          onRespond={onRespond}
+        />,
+      );
+    });
     const root = tree!.root;
 
     act(() => root.findByProps({ "aria-label": "Count" }).props.onChange({ currentTarget: { value: "2" } }));

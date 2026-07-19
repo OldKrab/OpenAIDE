@@ -867,9 +867,12 @@ version = "0.0.0"
 dependencies = [
  "agent-client-protocol",
  "agent-client-protocol-schema",
+ "async-process",
  "base64",
  "fs2",
+ "futures",
  "ignore",
+ "libc",
  "notify",
  "nucleo-matcher",
  "openaide-app-server-protocol",

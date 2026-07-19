@@ -15,6 +15,7 @@ import {
   taskAcquireParams,
 } from "../state/newTaskPreparationContext";
 import type { AppState } from "../state/store";
+import { acquirePreparedTaskWithConflictRetry } from "./newTaskLeaseRecovery";
 
 type PrepareNewTaskOptions = {
   acceptPreparedTask?: (task: ProtocolTaskSnapshot) => boolean;
@@ -72,9 +73,11 @@ export async function prepareNewTask(
       await discardPreparedTask(staleOrReusableTaskId);
     }
   }
-  preparedTask ??= state.newTask.selection.worktreeId
-    ? (await request(TASK_ACQUIRE_IN_WORKTREE, taskAcquireInWorktreeParams(state, projectId))).task
-    : (await request(TASK_ACQUIRE, taskAcquireParams(state, projectId))).task;
+  preparedTask ??= (await acquirePreparedTaskWithConflictRetry(request, () => (
+    state.newTask.selection.worktreeId
+      ? request(TASK_ACQUIRE_IN_WORKTREE, taskAcquireInWorktreeParams(state, projectId))
+      : request(TASK_ACQUIRE, taskAcquireParams(state, projectId))
+  ))).task;
   if (!preparedProtocolTaskMatchesSelection(preparedTask, state)) {
     await discardPreparedTask(preparedTask.task.taskId as TaskId);
     throw new Error("Prepared Task does not match the current New Task context.");

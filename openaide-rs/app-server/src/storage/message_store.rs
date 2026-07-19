@@ -61,6 +61,9 @@ impl Store {
             message
                 .message
                 .preserve_tool_permission_outcomes_from(&stored.chat.message);
+            message
+                .message
+                .preserve_interrupted_activity_from(&stored.chat.message);
             message.cursor = stored.chat.cursor.clone();
             message.message_id = stored.chat.message_id.clone();
             message

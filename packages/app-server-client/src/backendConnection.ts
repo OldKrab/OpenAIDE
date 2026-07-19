@@ -29,7 +29,11 @@ export type BackendRecoveryFailure = BackendGenerationInvalidation & {
 export type AppServerSessionStatus =
   | { status: "connecting"; generation: number }
   | { status: "ready"; generation: number }
-  | { status: "recovering"; generation: number; reason: BackendGenerationInvalidation["reason"] }
+  | {
+      status: "recovering";
+      generation: number;
+      reason: BackendGenerationInvalidation["reason"] | "foregroundWake";
+    }
   | { status: "unavailable"; generation: number; error: unknown };
 export type AppServerStateObserver = {
   onSnapshot(snapshot: SubscriptionSnapshot, event?: AppServerEvent, snapshotChanged?: boolean): void;
@@ -76,6 +80,8 @@ export interface BackendConnection {
   handleRecoveryFailed(
     handler: (event: BackendRecoveryFailure) => void,
   ): BackendUnsubscribe;
+  /** Reports a browser/runtime wake even when no receive poll is currently active. */
+  handleWake?(handler: () => void): BackendUnsubscribe;
   close(): Promise<void> | void;
 }
 

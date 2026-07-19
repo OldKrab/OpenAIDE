@@ -401,6 +401,38 @@ describe("NewTaskView", () => {
     expect(tree.root.findByProps({ "aria-label": "Send message" }).props.disabled).toBe(true);
   });
 
+  it("shows an explicit unavailable route instead of Project root when its Project is missing", () => {
+    const state = createInitialState();
+    state.newTask.selection = {
+      ...state.newTask.selection,
+      projectId: "project_missing",
+      worktreeId: "worktree_missing",
+      workspaceLabel: "Workspace unavailable",
+      workspaceRoot: "",
+      isolation: "git_worktree",
+    };
+    state.newTask.workspaceResolution = "unavailable";
+    state.newTask.prompt = "Keep this draft";
+    state.newTask.configOptions = { agent_id: "codex", options: [], status: "ready" };
+
+    const tree = render(
+      <NewTaskView
+        agents={[]}
+        dispatch={vi.fn()}
+        onSelectConfigOption={vi.fn()}
+        onSubmitTask={vi.fn()}
+        state={state}
+        submitShortcut="mod_enter"
+      />,
+    );
+
+    expect(textContent(tree)).toContain("Workspace unavailable");
+    expect(textContent(tree)).not.toContain("Project root");
+    expect(tree.root.findByType(Composer).props.availability.placeholder)
+      .toBe("Project folder unavailable.");
+    expect(tree.root.findByProps({ "aria-label": "Send message" }).props.disabled).toBe(true);
+  });
+
   it("blocks a typed task while authoritative Agent preparation is loading", () => {
     const state = createInitialState();
     const project = { projectId: "project_1", label: "OpenAIDE" };

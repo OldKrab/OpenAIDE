@@ -11,6 +11,15 @@ use crate::agent::{
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::ConfigOptionsCatalog;
 
+const CANCEL_PROCESS_GRACE: Duration = Duration::from_millis(250);
+
+pub(super) struct AcpSessionProcessHandle {
+    pub(super) shutdown: tokio::sync::watch::Sender<bool>,
+    pub(super) keepalive: Option<crate::agent::acp_agent_process_pool::AcpAgentProcessKeepalive>,
+    pub(super) agent_id: String,
+    pub(super) session_id: String,
+}
+
 #[derive(Clone)]
 pub(super) struct AcpSessionClient {
     command_tx: tokio_mpsc::UnboundedSender<AcpSessionCommand>,
@@ -19,10 +28,15 @@ pub(super) struct AcpSessionClient {
     close_tx: tokio_mpsc::UnboundedSender<mpsc::Sender<Result<(), RuntimeError>>>,
     terminal_error: Arc<Mutex<Option<String>>>,
     terminal_owner: AcpTerminalOwner,
+    process_shutdown: tokio::sync::watch::Sender<bool>,
+    _process_keepalive: Option<crate::agent::acp_agent_process_pool::AcpAgentProcessKeepalive>,
+    agent_id: String,
+    session_id: String,
     prompt_lifecycle: Arc<PromptLifecycle>,
 }
 
 impl AcpSessionClient {
+    #[cfg(test)]
     pub(super) fn new(
         command_tx: tokio_mpsc::UnboundedSender<AcpSessionCommand>,
         config_tx: tokio_mpsc::UnboundedSender<AcpSessionConfigCommand>,
@@ -31,6 +45,32 @@ impl AcpSessionClient {
         terminal_error: Arc<Mutex<Option<String>>>,
         terminal_owner: AcpTerminalOwner,
     ) -> Self {
+        let (process_shutdown, _shutdown_rx) = tokio::sync::watch::channel(false);
+        Self::new_managed(
+            command_tx,
+            config_tx,
+            cancel_tx,
+            close_tx,
+            terminal_error,
+            terminal_owner,
+            AcpSessionProcessHandle {
+                shutdown: process_shutdown,
+                keepalive: None,
+                agent_id: "unknown".to_string(),
+                session_id: "unknown".to_string(),
+            },
+        )
+    }
+
+    pub(super) fn new_managed(
+        command_tx: tokio_mpsc::UnboundedSender<AcpSessionCommand>,
+        config_tx: tokio_mpsc::UnboundedSender<AcpSessionConfigCommand>,
+        cancel_tx: tokio_mpsc::UnboundedSender<()>,
+        close_tx: tokio_mpsc::UnboundedSender<mpsc::Sender<Result<(), RuntimeError>>>,
+        terminal_error: Arc<Mutex<Option<String>>>,
+        terminal_owner: AcpTerminalOwner,
+        process: AcpSessionProcessHandle,
+    ) -> Self {
         Self {
             command_tx,
             config_tx,
@@ -38,6 +78,10 @@ impl AcpSessionClient {
             close_tx,
             terminal_error,
             terminal_owner,
+            process_shutdown: process.shutdown,
+            _process_keepalive: process.keepalive,
+            agent_id: process.agent_id,
+            session_id: process.session_id,
             prompt_lifecycle: Arc::default(),
         }
     }
@@ -120,12 +164,21 @@ impl AcpSessionClient {
             .map_err(|_| self.worker_stopped_error())?;
         loop {
             match done_rx.recv_timeout(Duration::from_millis(100)) {
+                Ok(Err(_)) if cancellation.is_cancelled() => {
+                    return Ok(AgentPromptOutcome::Cancelled);
+                }
                 Ok(result) => return result,
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    if cancellation.is_cancelled() {
+                        return Ok(AgentPromptOutcome::Cancelled);
+                    }
                     return Err(self.worker_stopped_error());
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {
                     if self.has_terminal_error() {
+                        if cancellation.is_cancelled() {
+                            return Ok(AgentPromptOutcome::Cancelled);
+                        }
                         return Err(self.worker_stopped_error());
                     }
                 }
@@ -176,6 +229,23 @@ impl AcpSessionClient {
             .send(())
             .map_err(|_| self.worker_stopped_error());
         let cleanup_result = self.terminal_owner.cancel();
+        if cancel_result.is_ok() {
+            let shutdown = self.process_shutdown.clone();
+            let agent_id = self.agent_id.clone();
+            let session_id = self.session_id.clone();
+            std::thread::spawn(move || {
+                std::thread::sleep(CANCEL_PROCESS_GRACE);
+                let process_was_active = shutdown.send(true).is_ok();
+                crate::logging::info(
+                    "acp_cancel_process_group_termination_requested",
+                    serde_json::json!({
+                        "agent_id": agent_id,
+                        "session_id": session_id,
+                        "process_was_active": process_was_active,
+                    }),
+                );
+            });
+        }
         cancel_result.and(cleanup_result)
     }
 

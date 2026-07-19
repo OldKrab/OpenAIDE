@@ -1,0 +1,3 @@
+# Native Sessions own isolated Agent process lifetimes
+
+Each active Native Session uses its own Agent OS process. On Linux, including the Target runtime, that process starts an isolated process group. User Stop first sends ACP `session/cancel`, then retires only that session's process lifetime after a short grace period; Linux group termination prevents Agent-owned commands and descendants from outliving the stopped Task or affecting unrelated Tasks. This trades Agent-process reuse for enforceable cancellation; listing, probing, and authentication may still use a separate control process, and later explicit work restores the durable Native Session through resume or load.

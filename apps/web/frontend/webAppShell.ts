@@ -63,7 +63,7 @@ export function createWebAppShell(): FrontendShell {
     bootstrap,
     messages: { post, subscribe: subscribeWindowMessages },
     navigation: {
-      openNewTask: (projectId) => navigate(newTaskPath(projectId)),
+      openNewTask: (projectId, worktreeId) => navigate(newTaskPath(projectId, worktreeId)),
       openSettings: () => navigate("/settings"),
       openTask: (taskId) => navigate(`/task/${encodeURIComponent(taskId)}`),
       replaceSettingsTab(tab) {
@@ -213,6 +213,7 @@ function webBootstrapForLocation(): WebviewBootstrap {
     return {
       surface: "task",
       projectId: new URLSearchParams(window.location.search).get("projectId") ?? undefined,
+      worktreeId: new URLSearchParams(window.location.search).get("worktreeId") ?? undefined,
       ...shared,
     };
   }
@@ -228,8 +229,11 @@ function settingsTabFromSearch() {
   return typeof tab === "string" && settingsTabs.has(tab as SettingsTabId) ? tab as SettingsTabId : undefined;
 }
 
-function newTaskPath(projectId?: string) {
-  return projectId ? `/new-task?projectId=${encodeURIComponent(projectId)}` : "/new-task";
+function newTaskPath(projectId?: string, worktreeId?: string) {
+  const query = new URLSearchParams();
+  if (projectId) query.set("projectId", projectId);
+  if (worktreeId) query.set("worktreeId", worktreeId);
+  return query.size > 0 ? `/new-task?${query}` : "/new-task";
 }
 
 function isWebviewBootstrap(value: unknown): value is WebviewBootstrap {

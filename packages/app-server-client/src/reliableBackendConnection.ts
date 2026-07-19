@@ -73,6 +73,7 @@ export type ReliableLocalHttpBackendConnectionOptions = {
   fetch?: ReliableHttpFetch;
   heartbeatIntervalMs?: number;
   retryDelayMs?: number;
+  closeTimeoutMs?: number;
   subscribeToWake?: (wake: () => void) => () => void;
 };
 
@@ -102,11 +103,13 @@ function createReliableHttpBackendConnection(
   >();
   const recoveryBaselineListeners = new Set<(event: BackendRecoveryBaseline) => void>();
   const recoveryFailureListeners = new Set<(event: BackendRecoveryFailure) => void>();
+  const wakeListeners = new Set<() => void>();
   const requestRegistrations = new Set<{
     bind(connection: BackendConnection): void;
     dispose(): void;
   }>();
   const generations = new Set<HttpConnectionGeneration>();
+  let nextTransportGeneration = 0;
   let active = createGeneration();
   let initializedServerId: string | undefined;
   let initializeParams: InitializeParams | undefined;
@@ -184,6 +187,10 @@ function createReliableHttpBackendConnection(
       recoveryFailureListeners.add(handler);
       return () => recoveryFailureListeners.delete(handler);
     },
+    handleWake(handler) {
+      wakeListeners.add(handler);
+      return () => wakeListeners.delete(handler);
+    },
     close() {
       if (closed) return;
       closed = true;
@@ -194,26 +201,36 @@ function createReliableHttpBackendConnection(
       generationInvalidationListeners.clear();
       recoveryBaselineListeners.clear();
       recoveryFailureListeners.clear();
+      wakeListeners.clear();
     },
   };
 
   function createGeneration(): HttpConnectionGeneration {
+    // The stable clientInstanceId is sent in initialize; each physical transport
+    // generation needs its own ownership key so an old poll cannot drain its replacement.
+    const connectionId = `${options.connectionId}:generation-${++nextTransportGeneration}`;
+    let generation: HttpConnectionGeneration | undefined;
     const channel = createReliableHttpMessageChannel({
       endpointUrl: options.endpointUrl,
-      connectionId: options.connectionId,
+      connectionId,
       ...("authToken" in options ? { authToken: options.authToken } : {}),
       ...(options.fetch ? { fetch: options.fetch } : {}),
       ...(options.retryDelayMs === undefined ? {} : { retryDelayMs: options.retryDelayMs }),
+      ...(options.closeTimeoutMs === undefined ? {} : { closeTimeoutMs: options.closeTimeoutMs }),
       ...(options.subscribeToWake ? { subscribeToWake: options.subscribeToWake } : {}),
+      onWake() {
+        if (generation) handleGenerationWake(generation);
+      },
     });
-    let generation: HttpConnectionGeneration;
     const connection = createInternalReliableBackendConnection({
       channel,
       ...(options.heartbeatIntervalMs === undefined
         ? {}
         : { heartbeatIntervalMs: options.heartbeatIntervalMs }),
       onRequestError(error, method) {
-        if (method !== CLIENT_INITIALIZE) handleGenerationRequestError(generation, error);
+        if (generation && method !== CLIENT_INITIALIZE) {
+          handleGenerationRequestError(generation, error);
+        }
       },
     });
     generation = { channel, connection };
@@ -222,6 +239,11 @@ function createReliableHttpBackendConnection(
       handleGenerationError(generation, error);
     });
     return generation;
+  }
+
+  function handleGenerationWake(generation: HttpConnectionGeneration) {
+    if (closed || generation !== active) return;
+    for (const listener of wakeListeners) notifyListener(listener);
   }
 
   function bindGeneration(generation: HttpConnectionGeneration) {
@@ -467,5 +489,13 @@ function notifyListeners<T>(listeners: Iterable<(event: T) => void>, event: T) {
       // Recovery ownership must not depend on the health of an independent observer.
       console.error("[OpenAIDE] Backend lifecycle listener failed", error);
     }
+  }
+}
+
+function notifyListener(listener: () => void) {
+  try {
+    listener();
+  } catch (error) {
+    console.error("[OpenAIDE] Backend wake listener failed", error);
   }
 }

@@ -379,7 +379,9 @@ fn protocol_error(error: RuntimeError) -> ProtocolError {
     let code = match &error {
         RuntimeError::InvalidParams(_) => ProtocolErrorCode::InvalidRequest,
         RuntimeError::TaskNotFound(_) => ProtocolErrorCode::NotFound,
-        RuntimeError::Conflict(_) => ProtocolErrorCode::Conflict,
+        RuntimeError::Conflict(_) | RuntimeError::PreparedTaskContextConflict { .. } => {
+            ProtocolErrorCode::Conflict
+        }
         RuntimeError::CapabilityMissing(_) | RuntimeError::Unsupported(_) => {
             ProtocolErrorCode::CapabilityUnavailable
         }

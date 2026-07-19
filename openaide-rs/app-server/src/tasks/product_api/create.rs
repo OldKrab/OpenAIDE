@@ -1,4 +1,4 @@
-use openaide_app_server_protocol::errors::ProtocolError;
+use openaide_app_server_protocol::errors::{ErrorTarget, ProtocolError, ProtocolErrorCode};
 use openaide_app_server_protocol::ids::ClientInstanceId;
 use openaide_app_server_protocol::snapshot::TaskSnapshot;
 use openaide_app_server_protocol::task::TaskAcquireParams;
@@ -83,7 +83,7 @@ impl TaskProductApi {
         let result = self
             .mutations
             .acquire_prepared_task(record.clone(), Vec::new(), response_snapshot_options())
-            .map_err(protocol_error_from_runtime)?;
+            .map_err(|error| self.acquire_error(error))?;
         let snapshot = result
             .response_snapshot
             .ok_or_else(super::prepare::missing_prepared_task_snapshot)?;
@@ -141,6 +141,31 @@ impl TaskProductApi {
             self.spawn_task_preparation(prepared);
         }
         self.project_task_snapshot(snapshot)
+    }
+
+    /// Identifies the exact lease that must be acknowledged before a context retry.
+    fn acquire_error(&self, error: crate::protocol::errors::RuntimeError) -> ProtocolError {
+        let crate::protocol::errors::RuntimeError::PreparedTaskContextConflict { message, task_id } =
+            error
+        else {
+            return protocol_error_from_runtime(error);
+        };
+        let current_task = build_snapshot(&self.store, &task_id, 100)
+            .map_err(storage_error)
+            .and_then(|snapshot| self.project_task_snapshot(snapshot));
+        match current_task {
+            Ok(current_task) => ProtocolError {
+                code: ProtocolErrorCode::Conflict,
+                message,
+                recoverable: true,
+                target: Some(ErrorTarget {
+                    method: None,
+                    field: None,
+                    current_task: Some(Box::new(current_task)),
+                }),
+            },
+            Err(error) => error,
+        }
     }
 
     fn resolve_create_project_context(

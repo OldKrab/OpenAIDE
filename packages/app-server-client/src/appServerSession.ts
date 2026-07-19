@@ -5,6 +5,7 @@ import {
 } from "./stateIngestion.js";
 import { subscriptionScopesEqual } from "./subscriptionScope.js";
 import {
+  CLIENT_HEARTBEAT,
   STATE_SUBSCRIBE,
   STATE_UNSUBSCRIBE,
   type AppServerEvent,
@@ -24,6 +25,7 @@ import type {
 
 const SUBSCRIPTION_RETRY_MS = 500;
 const MAX_SUBSCRIPTION_RETRY_MS = 5_000;
+const MAX_SUBSCRIPTION_ATTEMPTS = 5;
 const MAX_PENDING_EVENTS = 1_000;
 
 type ScopeReplica = {
@@ -35,12 +37,18 @@ type ScopeReplica = {
   refreshGeneration?: number;
   refreshPromise?: Promise<void>;
   retryDelay: number;
+  cancelRetry?: () => void;
 };
 
 type RecoveryGate = {
   generation: number;
   promise: Promise<void>;
   resolve(): void;
+};
+
+type ReplicaRefreshCycle = {
+  generation: number;
+  promise: Promise<void>;
 };
 
 /** Deep session module: transport replacement and scope replicas commit behind one readiness gate. */
@@ -54,6 +62,8 @@ export function createAppServerSession(connection: BackendConnection): AppServer
   let initialized = false;
   let closed = false;
   let recoveryGate: RecoveryGate | undefined;
+  let wakeRecoveryPromise: Promise<void> | undefined;
+  let replicaRefreshCycle: ReplicaRefreshCycle | undefined;
   let status: AppServerSessionStatus = { status: "connecting", generation };
   let initialization: InitializeResult | undefined;
 
@@ -65,6 +75,7 @@ export function createAppServerSession(connection: BackendConnection): AppServer
   const stopRecoveryFailure = connection.handleRecoveryFailed((failure) => {
     failRecovery(failure);
   });
+  const stopWake = connection.handleWake?.(recoverReplicasAfterWake) ?? (() => undefined);
 
   const session: AppServerSession = {
     async initialize(params, meta) {
@@ -78,8 +89,8 @@ export function createAppServerSession(connection: BackendConnection): AppServer
       return result;
     },
     async request(method, params, meta) {
-      const gate = recoveryGate;
-      if (gate) await gate.promise;
+      if (recoveryGate || wakeRecoveryPromise) await waitUntilReady();
+      if (status.status === "unavailable") throw status.error;
       return meta === undefined
         ? connection.request(method, params)
         : connection.request(method, params, meta);
@@ -120,7 +131,9 @@ export function createAppServerSession(connection: BackendConnection): AppServer
         notifyObserver(observer, "onSnapshot", replica.state.snapshot);
         notifyObserver(observer, "onBaselineReady");
       } else if (initialized && status.status !== "recovering") {
-        void refreshReplica(replica, generation);
+        void refreshReplica(replica, generation).catch((error) => {
+          if (!closed) updateStatus({ status: "unavailable", generation, error });
+        });
       }
       return () => releaseReplica(key, replica!, observer);
     },
@@ -138,6 +151,8 @@ export function createAppServerSession(connection: BackendConnection): AppServer
       stopInvalidation();
       stopRecoveryBaseline();
       stopRecoveryFailure();
+      stopWake();
+      for (const replica of replicas.values()) replica.cancelRetry?.();
       replicas.clear();
       statusListeners.clear();
       invalidationListeners.clear();
@@ -163,11 +178,18 @@ export function createAppServerSession(connection: BackendConnection): AppServer
     if (!gate || gate.generation !== generation || closed) return;
     initialization = baseline.result;
     notifyListeners(recoveryBaselineListeners, baseline);
-    await refreshCurrentReplicas();
+    try {
+      await refreshCurrentReplicas();
+    } catch (error) {
+      failRecovery({ reason: baseline.reason, error });
+      return;
+    }
     if (closed || recoveryGate !== gate) return;
     recoveryGate = undefined;
     gate.resolve();
-    updateStatus({ status: "ready", generation });
+    // A wake-triggered liveness request can cause this transport replacement.
+    // Keep presentation gated until that wake also renews every active scope.
+    if (!wakeRecoveryPromise) updateStatus({ status: "ready", generation });
   }
 
   function failRecovery(failure: BackendRecoveryFailure) {
@@ -179,13 +201,91 @@ export function createAppServerSession(connection: BackendConnection): AppServer
     updateStatus({ status: "unavailable", generation, error: failure.error });
   }
 
-  async function refreshCurrentReplicas() {
+  function recoverReplicasAfterWake() {
+    if (closed || !initialized || wakeRecoveryPromise) return;
+    console.info("[OpenAIDE] Browser wake is renewing authoritative state baselines");
+    updateStatus({ status: "recovering", generation, reason: "foregroundWake" });
+    const attempt = renewAfterWake();
+    wakeRecoveryPromise = attempt;
+    void attempt.then(
+      () => {
+        if (wakeRecoveryPromise !== attempt || closed) return;
+        wakeRecoveryPromise = undefined;
+        if (!recoveryGate) {
+          console.info("[OpenAIDE] Browser wake renewed authoritative state baselines");
+          updateStatus({ status: "ready", generation });
+        }
+      },
+      (error) => {
+        if (wakeRecoveryPromise !== attempt || closed) return;
+        wakeRecoveryPromise = undefined;
+        console.warn("[OpenAIDE] Browser wake exhausted state baseline recovery", error);
+        updateStatus({ status: "unavailable", generation, error });
+      },
+    );
+  }
+
+  async function renewAfterWake() {
+    // Prove client liveness even when no state scope is currently observed. The
+    // reliable connection will replace an expired physical session if needed.
+    const activeRecovery = recoveryGate;
+    if (activeRecovery) {
+      // The replacement initialization already renews every active scope. A
+      // concurrent wake joins that authority instead of starting a second pass.
+      await activeRecovery.promise;
+      if (status.status === "unavailable") throw status.error;
+      return;
+    }
+    const wakeGeneration = generation;
+    try {
+      await connection.request(CLIENT_HEARTBEAT, {});
+    } catch (error) {
+      // Replacing the expired physical peer can reject its in-flight probe.
+      // The new generation, not that obsolete request, owns the wake outcome.
+      if (generation === wakeGeneration) throw error;
+      const replacement = recoveryGate;
+      if (replacement) await replacement.promise;
+      if (status.status === "unavailable") throw status.error;
+      return;
+    }
+    await refreshCurrentReplicas();
+  }
+
+  async function waitUntilReady() {
     while (!closed) {
+      const pendingRecovery = recoveryGate?.promise ?? wakeRecoveryPromise;
+      if (!pendingRecovery) return;
+      await pendingRecovery;
+    }
+  }
+
+  function refreshCurrentReplicas() {
+    const targetGeneration = generation;
+    if (replicaRefreshCycle?.generation === targetGeneration) {
+      return replicaRefreshCycle.promise;
+    }
+    const promise = runReplicaRefreshCycle(targetGeneration);
+    const cycle = { generation: targetGeneration, promise };
+    replicaRefreshCycle = cycle;
+    void promise.then(
+      () => {
+        if (replicaRefreshCycle === cycle) replicaRefreshCycle = undefined;
+      },
+      () => {
+        if (replicaRefreshCycle === cycle) replicaRefreshCycle = undefined;
+      },
+    );
+    return promise;
+  }
+
+  async function runReplicaRefreshCycle(targetGeneration: number) {
+    while (!closed && generation === targetGeneration) {
       const current = [...replicas.values()].filter((replica) => replica.observers.size > 0);
-      await Promise.all(current.map((replica) => refreshReplica(replica, generation)));
+      await Promise.all(current.map((replica) => refreshReplica(replica, targetGeneration)));
+      if (closed || generation !== targetGeneration) return;
       const active = [...replicas.values()].filter((replica) => replica.observers.size > 0);
       if (active.every((replica) => (
-        replica.refreshGeneration === generation
+        replica.refreshGeneration === targetGeneration
         && !replica.refreshing
       ))) return;
     }
@@ -195,18 +295,26 @@ export function createAppServerSession(connection: BackendConnection): AppServer
     if (replica.refreshPromise && replica.refreshGeneration === targetGeneration) {
       return replica.refreshPromise;
     }
+    replica.retryDelay = SUBSCRIPTION_RETRY_MS;
     invalidateReplica(replica);
     const refresh = refreshReplicaUntilReady(replica, targetGeneration);
     replica.refreshGeneration = targetGeneration;
     replica.refreshPromise = refresh;
-    void refresh.finally(() => {
-      if (replica.refreshPromise === refresh) replica.refreshPromise = undefined;
-    });
+    void refresh.then(
+      () => {
+        if (replica.refreshPromise === refresh) replica.refreshPromise = undefined;
+      },
+      () => {
+        if (replica.refreshPromise === refresh) replica.refreshPromise = undefined;
+      },
+    );
     return refresh;
   }
 
   async function refreshReplicaUntilReady(replica: ScopeReplica, targetGeneration: number) {
+    let attempt = 0;
     while (!closed && replica.observers.size > 0 && generation === targetGeneration) {
+      attempt += 1;
       try {
         const result = await connection.request(STATE_SUBSCRIBE, { scope: replica.scope });
         if (closed || replica.observers.size === 0 || generation !== targetGeneration) return;
@@ -216,23 +324,33 @@ export function createAppServerSession(connection: BackendConnection): AppServer
           stateRootId: snapshot.stateRoot.stateRootId,
           clientInstanceId: snapshot.client.clientInstanceId,
         });
+        if (!replayPendingEvents(replica)) {
+          // A gap discovered behind this baseline cannot start a concurrent refresh:
+          // keep the scope gated and retry at a bounded rate in this same loop.
+          replica.state = undefined;
+          if (attempt >= MAX_SUBSCRIPTION_ATTEMPTS) {
+            throw new Error("Authoritative state baseline remained behind live events");
+          }
+          await waitForReplicaRetry(replica);
+          continue;
+        }
         replica.refreshing = false;
         replica.retryDelay = SUBSCRIPTION_RETRY_MS;
         notifyReplica(replica, "onSnapshot", replica.state.snapshot);
-        replayPendingEvents(replica);
         notifyReplica(replica, "onBaselineReady");
         return;
       } catch (error) {
         if (closed || generation !== targetGeneration) return;
         notifyReplica(replica, "onBaselineError", error);
-        const delay = replica.retryDelay;
-        replica.retryDelay = Math.min(replica.retryDelay * 2, MAX_SUBSCRIPTION_RETRY_MS);
-        await wait(delay);
+        if (attempt >= MAX_SUBSCRIPTION_ATTEMPTS) throw error;
+        await waitForReplicaRetry(replica);
       }
     }
   }
 
   function invalidateReplica(replica: ScopeReplica) {
+    replica.cancelRetry?.();
+    replica.cancelRetry = undefined;
     replica.pendingEvents = [];
     if (!replica.refreshing) notifyReplica(replica, "onBaselineLost");
     replica.refreshing = true;
@@ -251,7 +369,7 @@ export function createAppServerSession(connection: BackendConnection): AppServer
     }
   }
 
-  function applyEvent(replica: ScopeReplica, event: AppServerEvent) {
+  function applyEvent(replica: ScopeReplica, event: AppServerEvent, publish = true) {
     if (!replica.state) return false;
     const result = applySubscriptionEvent(replica.state, event);
     if (result.kind === "ignored") {
@@ -259,24 +377,33 @@ export function createAppServerSession(connection: BackendConnection): AppServer
       return true;
     }
     if (result.kind === "resyncRequired") {
-      void refreshReplica(replica, generation);
+      const refresh = refreshReplica(replica, generation);
+      // Refresh invalidation clears obsolete pending events, so retain the live
+      // gap only after the replacement subscription has started.
+      if (publish) queuePendingEvent(replica, event);
+      void refresh.catch((error) => {
+        if (!closed) updateStatus({ status: "unavailable", generation, error });
+      });
       return false;
     }
     replica.state = result.state;
-    notifyReplica(replica, "onSnapshot", result.state.snapshot, event, result.snapshotChanged);
+    if (publish) {
+      notifyReplica(replica, "onSnapshot", result.state.snapshot, event, result.snapshotChanged);
+    }
     return true;
   }
 
   function replayPendingEvents(replica: ScopeReplica) {
-    if (!replica.state || replica.pendingEvents.length === 0) return;
+    if (!replica.state || replica.pendingEvents.length === 0) return true;
     const cursorIndex = replica.pendingEvents.findIndex((event) => event.cursor === replica.state?.cursor);
     const events = cursorIndex === -1 ? replica.pendingEvents : replica.pendingEvents.slice(cursorIndex + 1);
     replica.pendingEvents = [];
     for (const [index, event] of events.entries()) {
-      if (applyEvent(replica, event)) continue;
-      for (const pending of events.slice(index + 1)) queuePendingEvent(replica, pending);
-      break;
+      if (applyEvent(replica, event, false)) continue;
+      for (const pending of events.slice(index)) queuePendingEvent(replica, pending);
+      return false;
     }
+    return true;
   }
 
   function queuePendingEvent(replica: ScopeReplica, event: AppServerEvent) {
@@ -287,6 +414,7 @@ export function createAppServerSession(connection: BackendConnection): AppServer
   function releaseReplica(key: string, replica: ScopeReplica, observer: AppServerStateObserver) {
     replica.observers.delete(observer);
     if (replica.observers.size > 0 || replicas.get(key) !== replica) return;
+    replica.cancelRetry?.();
     replicas.delete(key);
     void connection.request(STATE_UNSUBSCRIBE, { scope: replica.scope }).catch(() => undefined);
   }
@@ -294,6 +422,23 @@ export function createAppServerSession(connection: BackendConnection): AppServer
   function updateStatus(next: AppServerSessionStatus) {
     status = next;
     notifyListeners(statusListeners, next);
+  }
+
+  function waitForReplicaRetry(replica: ScopeReplica) {
+    const delay = replica.retryDelay;
+    replica.retryDelay = Math.min(replica.retryDelay * 2, MAX_SUBSCRIPTION_RETRY_MS);
+    return new Promise<void>((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (replica.cancelRetry === finish) replica.cancelRetry = undefined;
+        resolve();
+      };
+      const timer = setTimeout(finish, delay);
+      replica.cancelRetry = finish;
+    });
   }
 }
 
@@ -321,10 +466,6 @@ function deferredGate(generation: number): RecoveryGate {
     resolve = done;
   });
   return { generation, promise, resolve };
-}
-
-function wait(delay: number) {
-  return new Promise<void>((resolve) => setTimeout(resolve, delay));
 }
 
 function notifyReplica<K extends keyof AppServerStateObserver>(

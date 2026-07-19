@@ -7,7 +7,7 @@ use crate::agent::acp_active_session_registry::AcpActiveSessionRegistry;
 use crate::agent::acp_agent_process_pool::AcpAgentProcessPool;
 use crate::agent::acp_auth_method_cache::AcpAuthMethodCache;
 use crate::agent::acp_host_terminal_ownership::AcpTerminalOwnerId;
-use crate::agent::acp_session_client::AcpSessionClient;
+use crate::agent::acp_session_client::{AcpSessionClient, AcpSessionProcessHandle};
 use crate::agent::acp_session_worker::{
     AcpAgentProcessOpen, AcpSessionOpenRequest, AcpStartedSession,
 };
@@ -239,16 +239,23 @@ impl AcpActiveSessionManager {
             }
         };
 
-        let session_client = AcpSessionClient::new(
+        let session_key = started.session.key();
+        let session_client = AcpSessionClient::new_managed(
             command_tx,
             config_tx,
             cancel_tx,
             close_tx,
             process_session.terminal_error,
             process_session.terminal_owner,
+            AcpSessionProcessHandle {
+                shutdown: process_session.shutdown_tx,
+                keepalive: Some(process_session.keepalive),
+                agent_id: session_key.agent_id().to_string(),
+                session_id: session_key.session_id().to_string(),
+            },
         );
         self.sessions
-            .insert_started_session(started.session.key(), session_client)?;
+            .insert_started_session(session_key, session_client)?;
 
         Ok(started)
     }

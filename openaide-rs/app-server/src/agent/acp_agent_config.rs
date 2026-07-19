@@ -3,6 +3,7 @@ use std::path::Path;
 
 use agent_client_protocol::AcpAgent;
 
+use crate::agent::acp_managed_agent::ManagedAcpAgent;
 use crate::agent::acp_trace::AcpTraceSession;
 use crate::agent::AgentSecretResolver;
 use crate::protocol::errors::RuntimeError;
@@ -79,22 +80,29 @@ impl AcpAgentConfig {
         trace: Option<AcpTraceSession>,
         host_bridge: &HostBridge,
         secret_resolver: Option<&dyn AgentSecretResolver>,
-    ) -> Result<AcpAgent, RuntimeError> {
+    ) -> Result<ManagedAcpAgent, RuntimeError> {
         self.ensure_command_available()?;
+        #[cfg(target_os = "linux")]
+        if !command_in_path("setsid") {
+            return Err(RuntimeError::SetupRequired(
+                "Agent process isolation requires setsid on this platform".to_string(),
+            ));
+        }
         let mut env = self.env.clone();
         env.extend(self.secret_env_values(host_bridge, secret_resolver)?);
         let args = env
             .iter()
             .map(|(name, value)| format!("{name}={value}"))
+            .chain(isolated_agent_command())
             .chain(std::iter::once(self.command.clone()))
             .chain(self.args.clone())
             .collect::<Vec<_>>();
         let agent = AcpAgent::from_args(args).map_err(super::acp_errors::acp_error)?;
         Ok(match trace {
-            Some(trace) => agent.with_debug(move |line, direction| {
+            Some(trace) => ManagedAcpAgent::new(agent).with_debug(move |line, direction| {
                 trace.record_line(line, direction);
             }),
-            None => agent,
+            None => ManagedAcpAgent::new(agent),
         })
     }
 
@@ -135,6 +143,16 @@ impl AcpAgentConfig {
             })
             .collect::<Result<Vec<_>, _>>()
     }
+}
+
+#[cfg(target_os = "linux")]
+fn isolated_agent_command() -> std::iter::Once<String> {
+    std::iter::once("setsid".to_string())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn isolated_agent_command() -> std::iter::Empty<String> {
+    std::iter::empty()
 }
 
 fn legacy_host_secret_env(

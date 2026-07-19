@@ -8,9 +8,9 @@ export function activitySummary(activity: ActivityMessage) {
   const first = activity.steps[0];
   if (first?.kind === "text") {
     const kind = classifyStep(first, activity.title);
-    if (kind !== "other") return countLabel(kind, 1, true) ?? humanizeToolName(activity.title);
+    if (kind !== "other") return countLabel(kind, 1, true, activity.status) ?? humanizeToolName(activity.title);
   }
-  if (first && first.kind !== "text") return countLabel(classifyStep(first, activity.title), 1, true) ?? humanizeToolName(activity.title);
+  if (first && first.kind !== "text") return countLabel(classifyStep(first, activity.title), 1, true, activity.status) ?? humanizeToolName(activity.title);
   return humanizeToolName(activity.title);
 }
 
@@ -20,7 +20,7 @@ function groupedActivitySummary(activity: ActivityMessage) {
     const kind = classifyStep(step, activity.title);
     counts.set(kind, (counts.get(kind) ?? 0) + 1);
   }
-  const parts = Array.from(counts, ([kind, count], index) => countLabel(kind, count, index === 0)).filter(
+  const parts = Array.from(counts, ([kind, count], index) => countLabel(kind, count, index === 0, activity.status)).filter(
     (part): part is string => part !== undefined,
   );
 
@@ -28,9 +28,31 @@ function groupedActivitySummary(activity: ActivityMessage) {
 }
 
 export function activityStatusLabel(status: ActivityMessage["status"]) {
-  if (status === "running") return "Running";
-  if (status === "interrupted") return "Interrupted";
-  return undefined;
+  return activityPresentationLabel(status);
+}
+
+export type ActivityPresentationStatus = "running" | "completed" | "interrupted" | "failed" | "unknown";
+
+/** Keeps every activity surface driven by the protocol status, including conservative handling for future values. */
+export function activityPresentationStatus(status: string): ActivityPresentationStatus {
+  if (status === "running" || status === "completed" || status === "interrupted") return status;
+  if (status === "error") return "failed";
+  return "unknown";
+}
+
+export function activityPresentationLabel(status: string) {
+  const presentation = activityPresentationStatus(status);
+  if (presentation === "running") return "Running";
+  if (presentation === "completed") return "Completed";
+  if (presentation === "interrupted") return "Interrupted";
+  if (presentation === "failed") return "Failed";
+  return "Unknown";
+}
+
+export function activityCommandActionLabel(status: string) {
+  const presentation = activityPresentationStatus(status);
+  if (presentation === "completed") return "Ran";
+  return activityPresentationLabel(status);
 }
 
 export function activityStepLabel(step: ActivityStep) {
@@ -80,14 +102,15 @@ export function activityStepProgressLabel(step: ActivityStep, activityTitle?: st
 export function activityStepCompletedLabel(step: ActivityStep) {
   if (step.kind === "thought") return "Thought";
   if (step.kind === "command") {
-    if (step.status === "interrupted") return `Command interrupted: ${step.command_label}`;
-    return step.status === "error" ? `Command failed: ${step.command_label}` : `Ran ${step.command_label}`;
+    return `${activityCommandActionLabel(step.status)} ${step.command_label}`;
   }
   if (step.kind === "text") return step.text;
   const subject = toolSubjectLabel(step);
+  if (isExecuteTool(step)) {
+    return progressLabel(activityCommandActionLabel(step.status), subject ?? "command");
+  }
   if (step.status === "interrupted") return progressLabel("Interrupted", subject ?? humanizeToolName(step.name));
   if (step.status === "error") return progressLabel("Failed to use", subject ?? humanizeToolName(step.name));
-  if (isExecuteTool(step)) return progressLabel("Ran", subject ?? "command");
   if (step.name === "think") return "Used reasoning tool";
   if (step.name === "web_search") return progressLabel(subject ? "Searched the web for" : "Searched the web", subject ?? "");
   const actions: Record<string, string> = {
@@ -125,11 +148,9 @@ export function activityStepContext(step: ActivityStep) {
 
 export function activityStepStatus(step: ActivityStep) {
   if (step.kind === "text" || step.kind === "thought") return undefined;
-  if (step.kind === "command" && step.exit_code !== undefined) return `exit ${step.exit_code}`;
-  if (step.status === "running") return "Running";
-  if (step.status === "interrupted") return "Interrupted";
-  if (step.status === "error") return "Failed";
-  return undefined;
+  const status = activityPresentationLabel(step.status);
+  if (step.kind === "command" && step.exit_code !== undefined) return `${status} · exit ${step.exit_code}`;
+  return status;
 }
 
 export function activityStepPreview(step: ActivityStep) {
@@ -202,7 +223,7 @@ function stepSearchText(step: Extract<ActivityStep, { kind: "tool" }>, title: st
   return `${step.name} ${title} ${step.input_summary ?? ""} ${detailsLabel ?? ""}`.toLowerCase();
 }
 
-function countLabel(kind: ActivitySummaryKind, count: number, sentenceStart: boolean) {
+function countLabel(kind: ActivitySummaryKind, count: number, sentenceStart: boolean, status: string) {
   if (count === 0) return undefined;
   const labels: Record<ActivitySummaryKind, { verb?: string; single: string; plural: string }> = {
     thought: { single: "thought", plural: "thoughts" },
@@ -226,8 +247,19 @@ function countLabel(kind: ActivitySummaryKind, count: number, sentenceStart: boo
     return sentenceStart ? capitalize(phrase) : phrase;
   }
   const noun = count === 1 ? label.single : label.plural;
-  const phrase = count === 1 ? `${label.verb} ${noun}` : `${label.verb} ${count} ${noun}`;
+  const phrase = kind === "run"
+    ? commandCountLabel(count, noun, status)
+    : count === 1 ? `${label.verb} ${noun}` : `${label.verb} ${count} ${noun}`;
   return sentenceStart ? capitalize(phrase) : phrase;
+}
+
+function commandCountLabel(count: number, noun: string, status: string) {
+  const presentation = activityPresentationStatus(status);
+  if (presentation === "unknown") {
+    return count === 1 ? "command status unknown" : `status unknown for ${count} ${noun}`;
+  }
+  const verb = presentation === "completed" ? "ran" : presentation;
+  return count === 1 ? `${verb} ${noun}` : `${verb} ${count} ${noun}`;
 }
 
 function toolSubjectLabel(step: Extract<ActivityStep, { kind: "tool" }>) {

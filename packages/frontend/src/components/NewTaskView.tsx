@@ -41,7 +41,7 @@ export type NewTaskViewIntents = {
   selectIsolation: (isolation: ComposerSelection["isolation"]) => void;
   selectProject: (project: ProjectOption) => void;
   selectWorkspace: (workspace: { path: string; label: string; projectId: string }) => void;
-  selectWorktree: (worktree: { worktreeId?: string; label: string; path: string }) => void;
+  selectWorktree: (worktree: { projectId: string; worktreeId?: string; label: string; path: string }) => void;
   refreshWorktrees: (project: ProjectOption) => Promise<void>;
   createWorktree: (project: ProjectOption, draft: { name: string; base: import("@openaide/app-server-client").WorktreeBaseSelection; branch?: string }, onProgress?: (operation: import("@openaide/app-server-client").WorktreeOperationSnapshot) => void) => Promise<import("@openaide/app-server-client").WorktreeSummary>;
   recreateWorktree: (project: ProjectOption, worktreeId: string, draft: { base: import("@openaide/app-server-client").WorktreeBaseSelection; branch?: string }, onProgress?: (operation: import("@openaide/app-server-client").WorktreeOperationSnapshot) => void) => Promise<import("@openaide/app-server-client").WorktreeSummary>;
@@ -94,9 +94,11 @@ export function NewTaskView({
     : undefined;
   const selectedWorktree = selectedRepository?.worktrees.find((worktree) => worktree.worktreeId === state.newTask.selection.worktreeId);
   const worktreeSelected = Boolean(state.newTask.selection.worktreeId);
-  const worktreeLoading = worktreeSelected && !selectedRepository;
-  const worktreeUnavailable = Boolean(worktreeSelected && selectedRepository
-    && (!selectedWorktree || selectedWorktree.availability === "unavailable"));
+  const worktreeLoading = state.newTask.workspaceResolution === "loading"
+    || Boolean(worktreeSelected && !selectedRepository && !state.newTask.workspaceResolution);
+  const worktreeUnavailable = state.newTask.workspaceResolution === "unavailable"
+    || Boolean(worktreeSelected && selectedRepository
+      && (!selectedWorktree || selectedWorktree.availability === "unavailable"));
   const taskWorkspaceLabel = worktreeSelected
     ? selectedWorktree?.name ?? state.newTask.selection.workspaceLabel ?? "Workspace unavailable"
     : "Project root";
@@ -120,10 +122,13 @@ export function NewTaskView({
   const needsProject = !state.newTask.selection.projectId;
   const fixedProjectContext = projectContextMode === "fixed";
   const openingNativeSession = state.newTask.nativeSessions.adoptingSessionId !== undefined;
-  const projectSelectorLabel = selectedProject?.label
+  const projectSelectorLabel = state.newTask.workspaceResolution === "unavailable"
+    ? "Workspace unavailable"
+    : selectedProject?.label
     ?? (state.newTask.selection.projectId ? state.newTask.selection.workspaceLabel : loadingProjects ? "Loading" : "Choose workspace");
   const needsWorkspace = state.workspaceRootsLoaded && state.projects.length === 0 && state.newTask.selection.workspaceRoot.trim().length === 0;
-  const projectUnavailable = selectedProject?.available === false;
+  const projectUnavailable = state.newTask.workspaceResolution === "unavailable"
+    || selectedProject?.available === false;
   const waitStatus = newTaskStatusLabel({
     agentLabel: state.newTask.selection.agentLabel,
     configOptionsError: composerConfigOptionsError,

@@ -51,7 +51,7 @@ Frontend supplies `clientInstanceId` only through `client/initialize`. Transport
 - Every browser tab owns a distinct `clientInstanceId` and retains it across reload through session-scoped storage with memory fallback. A newly opened or duplicated tab receives a distinct identity even if browser storage was copied.
 - VS Code and other native shells issue a stable identity for the shell client or webview lifecycle.
 - Reconnect sends the same `clientInstanceId` through `client/initialize`.
-- Every transport connection receives a fresh connection-local `connectionId`; transport identity never reuses `clientInstanceId`.
+- Every physical transport generation, including a replacement generation inside one logical reconnecting session, receives a fresh connection-local `connectionId`; transport identity never reuses `clientInstanceId`.
 - A client that loses its stable identity becomes a new client and cannot use another client's Prepared-Task lease.
 
 ## Default Project And Agent
@@ -86,6 +86,8 @@ Initialization never acquires a Prepared Task or launches an Agent. The Prepared
 
 Frontend renders its cached leased Prepared Task immediately. Clicking New Task, returning through browser history, or switching back from another Task performs no product request while the cache and event subscription remain continuous.
 
+The Web App New Task URL carries the selected Project id and optional opaque Worktree id. A worktree route is valid only when the URL explicitly carries both identities. Reload and Back/Forward represent that routed identity immediately, show a workspace-loading state until the authoritative Project and Worktree Repository collections validate it, and block acquisition during that interval. A missing or unavailable routed identity remains explicitly unavailable; Frontend neither borrows retained context nor acquires or displays Project root as a fallback. Returning through history to `/` clears routed worktree context before Project-root preparation can resume. This URL persistence is Web-only; selecting Project, workspace, or worktree context does not ask a native App Shell to open or reveal another surface.
+
 ### Acquiring a Prepared Task
 
 When its live New Task composer needs a Prepared Task, Frontend renders the preparation state and calls typed `task/acquire` with the selected Project, Agent, and Task Workspace identity. App Server derives the canonical workspace and pool key; Frontend never supplies a canonical pool key. The protocol gateway supplies initialized client identity from the trusted connection context.
@@ -100,6 +102,8 @@ App Server serializes acquisition and:
 6. returns its ordinary Task snapshot, with `preparation: preparing` when Native Session acquisition is still running.
 
 Concurrent duplicate acquisition requests for one client and key return the same Task id. Only ready, unleased, zero-message Tasks are reusable; a missing free entry creates and prepares another Task.
+
+When acquisition reports that the same client still leases a different key, the conflict identifies that exact Prepared Task snapshot. Frontend releases only that Task, awaits acknowledgement, and retries the requested acquisition once. A missing target or a second conflict remains a visible failure; Frontend never guesses, steals another client's lease, or falls back to Project root.
 
 ### Worktree repositories and Task Workspaces
 
@@ -168,7 +172,7 @@ Frontend issues each `task/send` mutation once and never automatically replays i
 
 ### First Send
 
-Frontend marks the acquired Prepared Task as submitting while retaining the Composer draft until the authoritative result is known. Invoking New Task while Send is pending reopens that same cached submitting instance. If cache loss requires App Server resolution, acquiring the same key returns that instance while it remains leased and private. After authoritative acceptance makes the Task visible, a later New Task action acquires another Prepared Task. Rejection keeps the same lease and recoverable draft. Transport loss enters connection-lost presentation and resynchronizes without replay. Returning from browser suspension restarts the replayable receive poll from the last applied server sequence, so accepted Task events catch up without requiring a page reload or replaying Send.
+Frontend marks the acquired Prepared Task as submitting while retaining the Composer draft until the authoritative result is known. Invoking New Task while Send is pending reopens that same cached submitting instance. If cache loss requires App Server resolution, acquiring the same key returns that instance while it remains leased and private. After authoritative acceptance makes the Task visible, a later New Task action acquires another Prepared Task. Rejection keeps the same lease and recoverable draft. Transport loss enters connection-lost presentation and resynchronizes without replay. Returning from browser suspension restarts the replayable receive poll and renews authoritative baselines for every active scope, including an idle Task with no incoming Agent updates. Baseline renewal uses one bounded retry window; exhaustion becomes explicitly unavailable without continued request traffic, and a later browser wake starts a fresh recovery window. Composer drafts remain Frontend-owned throughout this recovery.
 
 The durable first-Send transaction:
 
@@ -225,9 +229,11 @@ The Native Session update consumer owns tool state by Native Session id plus Age
 
 Tool detail delivery is event-driven and does not poll. Publication is not coalesced unless measured volume requires it; any future coalescer guarantees a trailing flush of the newest state.
 
+Nested terminal and result labels are presentation derived from the authoritative Tool step status. When Tool details supply real stdout and stderr, Frontend renders them as separate labeled streams in that order, even when their bytes are identical. Aggregate and formatted fields are alternate merged representations: they are suppressed when either real stream exists and otherwise collapse to one `Combined output` section. Exit metadata remains visible but cannot override running, completed, interrupted, failed, or unknown status. These labels do not infer or mutate App Server lifecycle state.
+
 Every defined ACP Tool kind except `other` has a distinct appropriate icon, action label, grouped-summary classification, and detail presentation based only on Agent-supplied fields. ACP `think` is a reasoning or planning Tool call, distinct from `agent_thought_chunk`; it uses Thought-like visuals inside an activity group while retaining Tool identity, status, input, output, and updates. `other` uses the generic presentation.
 
-Frontend identifies each uninterrupted run of Tool and Thought rows. One Thought remains a standalone `Thinking` disclosure. Every other run becomes one activity disclosure, including a single Tool, multiple Thoughts, or any Tool/Thought combination. Adjacent groupable rows extend the group while preserving its open state. User, Agent, Permission, Question, and Live Activity rows end the group. The group preserves every underlying message id and chronological order.
+Frontend identifies each uninterrupted run of Tool and Thought rows. One Thought remains a standalone `Thinking` disclosure. Every other run becomes one activity disclosure, including a single Tool, multiple Thoughts, or any Tool/Thought combination. Adjacent groupable rows extend the group while preserving its open state. User, Agent, Permission, Question, and Live Activity rows end the group. The group preserves every underlying message id and chronological order. Successful completion is implicit in the completed-action title and adds no `Completed` group suffix; Running, Interrupted, Failed, and unknown outcomes remain explicit.
 
 Expanded mixed Tool/Thought groups may hide Thought rows by default and expose one leading control with the hidden count. Showing reasoning restores Thoughts at their original positions among Tools. Thought-only groups always show every Thought when expanded, regardless of the mixed-group visibility default. This presentation does not affect `think` Tool calls.
 
@@ -241,7 +247,7 @@ Prompt cancellation uses this same resolution path with the ACP `cancelled` outc
 
 ### Agent questions
 
-ACP form elicitation uses the same transient-request lifecycle. A pending Question is memory-owned workflow state: Task status becomes `waiting`, eligible clients receive or receive again the request, and clients pin it after current Chat while continuing to apply session updates. Pending Questions are absent from durable Chat.
+ACP form elicitation uses the same transient-request lifecycle. A pending Question is memory-owned workflow state: Task status becomes `waiting`, eligible clients receive or receive again the request, and clients pin it after current Chat while continuing to apply session updates. Every authoritative Task response and subscription baseline reconstructs the complete pending Question from the App Server request broker, so option changes, reconnect, and page reload preserve its fields plus answer and Cancel actions while that App Server process remains alive. Pending Questions are absent from durable Chat.
 
 Submit, user Cancel, and prompt cancellation close the request for every client. App Server authoritatively validates submitted values, returns the ACP accept or cancel response, and then persists one resolved standalone Question Chat item. Frontend validation provides immediate field feedback only. The Agent response channel is signaled directly rather than polled.
 
@@ -262,9 +268,11 @@ Before publishing that idle transition, App Server projects every session update
 
 ### User cancellation and termination
 
-`task/cancel` changes a working Task to `stopping`, publishes that status, and disables Send. App Server resolves every active transient Permission and Question through its normal cancellation path, sends ACP `session/cancel` through the Native Session service, and continues accepting late session updates. The primary prompt's `cancelled` response changes the Task to idle and persists exactly one `Task stopped` Live Activity. Running Tool activity becomes interrupted or cancelled, never successfully completed merely because Stop was requested.
+`task/cancel` changes a working Task to `stopping`, publishes that status, and disables Send. App Server resolves every active transient Permission and Question through its normal cancellation path, sends ACP `session/cancel` through the Native Session service, and continues accepting late session updates. Because ACP does not require an Agent to cascade cancellation into Agent-owned command processes, each active Native Session owns an isolated Agent process. On Linux, including the Target runtime, that process owns a process group. After a short response grace period, User Stop terminates that session's process lifetime; Linux group termination also stops its descendants without affecting another Native Session. The next explicit Send restores the durable Native Session through the normal resume-or-load path.
 
-ACP cancellation is a notification, so App Server gives the Agent ten seconds to settle the original prompt response. If it does not settle within that grace period, App Server removes and closes the untrustworthy Native Session, clears its durable binding, interrupts unfinished activity, and ends the Task as an idle cancellation failure. Late prompt completion or session updates from the discarded binding cannot revive or mutate the ended turn. A synchronous cancellation-send failure uses the same failed-cancellation termination path rather than leaving the Task in `stopping`.
+The primary prompt's `cancelled` response, or expected transport closure caused by that scoped termination, changes the Task to idle and persists exactly one `Task stopped` Live Activity. Output received before termination remains durable. Running Tool activity becomes interrupted or cancelled; later session updates may add already-received output but cannot rewrite interrupted activity as successfully completed.
+
+ACP cancellation is a notification. App Server still keeps the ten-second Task watchdog as a failure bound around the cancellation pipeline, but command termination does not depend on the Agent settling the prompt: the session-owned process group is retired after its shorter process grace period. If cancellation still does not settle, App Server removes and closes the untrustworthy Native Session, clears its durable binding, interrupts unfinished activity, and ends the Task as an idle cancellation failure. Late prompt completion or session updates from the discarded binding cannot revive or mutate the ended turn. A synchronous cancellation-send failure uses the same failed-cancellation termination path rather than leaving the Task in `stopping`.
 
 User Stop, Native Session failure during `starting`, `working`, or `waiting`, and App Server restart during active work share one termination pipeline. It closes transient requests, persists cause-specific resolved request messages, marks unfinished Tool activity interrupted, ends active work, publishes idle state, and appends exactly one cause-specific Live Activity. Protocol behavior still differs by cause: user Stop sends `session/cancel` and normally waits for `cancelled`; Agent disconnection terminates immediately; restart records that OpenAIDE restarted.
 
@@ -358,6 +366,8 @@ Option changes follow one ordering model:
 
 While an option mutation is pending, Frontend renders the requested value in that control with a busy indicator and locks every configuration selector. The existing Task's Agent remains locked, while drafting and Image actions remain usable. If the mutation is still pending after five seconds, Frontend adds the quiet status text `Agent is still updating options…` without replacing the Composer or reporting an error.
 
+ACP permits Configuration Options to change while the Agent is generating, so a waiting Question does not lock model, reasoning, fast, or other Agent-provided controls. The option mutation response preserves the same broker-owned pending interaction instead of replacing it with an incomplete Task projection.
+
 Frontend preserves the Agent catalog order in the Composer. It renders the largest leading set of Configuration Options that fits the measured control row and moves only the trailing suffix into a `More · N` menu. Task Workspace is selected in the start-context row with Project and Agent; the old user-selected Isolation control is removed. Narrower App Shells progressively move more Agent controls into the menu instead of replacing the catalog at a fixed breakpoint. Clicking a grouped row opens its value selector in place, while hover only supplies visual affordance. Direct and grouped selectors send the same option-change intent, and a control disappears whenever the next authoritative Agent catalog no longer exposes it.
 
 App Server allows up to 60 seconds for the Agent to answer the option request. A failed or timed-out mutation clears pending state, restoring the last Agent-confirmed catalog, and Frontend presents the mutation error. That error clears after ten seconds or earlier when a later complete Agent catalog changes. A late catalog that confirms the requested value renders normally through the same authoritative catalog path.
@@ -373,7 +383,7 @@ An implementation conforms to this specification only when all of these are true
 3. Each Send mutation is issued once and is never automatically replayed.
 4. One Native Session update consumer survives prompt completion and accepts later updates until session close or replacement.
 5. One durable Task transaction produces one ordered Task revision; a revision gap installs one new baseline.
-6. One logical App Server session owns connection recovery, retries only replayable reads, and installs the replacement initialization result plus exactly one baseline for each active scope before product requests and Send are enabled.
+6. One logical App Server session owns connection recovery, retries only replayable reads, and installs the replacement initialization result plus one reconciled baseline for each active scope before product requests and Send are enabled. Cursor-gap refreshes serialize behind bounded retry delays; discarded baselines are not published. Each physical reliable-HTTP generation has an isolated connection id and replay session, with a deadline-bounded acknowledged close plus time-driven idle expiry and capacity cleanup on the server. Network failures back off both reliable transport directions exponentially to a fixed ceiling; a browser wake resets that delay and immediately releases any pending retry wait.
 7. Durable Chat, transient requests, Tool details, and Frontend-only presentation each have one explicit owner and do not masquerade as one another.
 8. Every notification-worthy Task transition creates one explicit Task Attention Event; no client infers it from status or `unread`.
 9. A browser profile emits at most one OS notification for one eligible Task Attention Event and never emits an old unread backlog on startup.

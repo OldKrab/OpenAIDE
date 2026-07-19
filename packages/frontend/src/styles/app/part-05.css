@@ -346,6 +346,11 @@
   color: var(--oa-success);
 }
 
+.execute-result.running,
+.execute-result.running svg {
+  color: var(--oa-focus);
+}
+
 .execute-result.failed,
 .execute-result.failed svg {
   color: var(--oa-danger);

@@ -13,7 +13,7 @@ export type FrontendShell = {
     subscribe(listener: (message: HostToWebviewMessage) => void): () => void;
   };
   navigation: {
-    openNewTask(projectId?: string): void;
+    openNewTask(projectId?: string, worktreeId?: string): void;
     openSettings(): void;
     openTask(taskId: string, title?: string): void;
     replaceSettingsTab(tab: SettingsTabId): void;

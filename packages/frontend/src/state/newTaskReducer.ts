@@ -42,7 +42,7 @@ type NewTaskAction =
   | { type: "newTask:nativeSessions:adopt"; sessionId: string }
   | { type: "newTask:nativeSessions:remove"; sessionId: string }
   | { type: "newTask:workspace"; workspace: WorkspaceRoot; newTaskId?: string }
-  | { type: "newTask:worktree"; worktreeId?: string; label: string; path: string; newTaskId?: string }
+  | { type: "newTask:worktree"; projectId?: string | null; worktreeId?: string; label: string; path: string; resolution?: "loading" | "unavailable"; newTaskId?: string }
   | { type: "newTask:attachment:add"; attachment: Attachment }
   | { type: "newTask:attachment:remove"; attachmentId: string };
 
@@ -171,6 +171,7 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
       return replacePreparedDraftOnContextChange(state, {
           ...state.newTask,
           selection: { ...selectionWithProject(state.newTask.selection, action.project), configOptions: {} },
+          workspaceResolution: undefined,
           configOptions: undefined,
           configOptionsLoading: false,
           configOptionsError: undefined,
@@ -320,16 +321,22 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
       return replacePreparedDraftOnContextChange(state, {
           ...state.newTask,
           selection: { ...selectionWithWorkspace(state.newTask.selection, action.workspace), configOptions: {} },
+          workspaceResolution: undefined,
           configOptions: undefined,
           configOptionsLoading: false,
           configOptionsError: undefined,
           nativeSessions: emptyNativeSessions(),
       }, action.newTaskId);
-    case "newTask:worktree":
+    case "newTask:worktree": {
+      const projectId = action.projectId === null
+        ? undefined
+        : action.projectId ?? state.newTask.selection.projectId;
+      const projectChanged = projectId !== state.newTask.selection.projectId;
       return replacePreparedDraftOnContextChange(state, {
         ...state.newTask,
         selection: {
           ...state.newTask.selection,
+          projectId,
           worktreeId: action.worktreeId,
           workspaceLabel: action.label,
           workspaceRoot: action.path,
@@ -339,7 +346,10 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
         configOptions: undefined,
         configOptionsLoading: false,
         configOptionsError: undefined,
+        nativeSessions: projectChanged ? emptyNativeSessions() : state.newTask.nativeSessions,
+        workspaceResolution: action.resolution,
       }, action.newTaskId);
+    }
     case "newTask:attachment:add":
       return {
         ...state,

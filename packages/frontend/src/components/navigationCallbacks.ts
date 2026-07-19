@@ -172,8 +172,12 @@ export function createNavigationCallbacks({
       });
     },
     openNewTask: (projectId) => {
-      asyncOperations.beginNavigation(newTaskNavigationTarget(projectId));
-      openNewTaskSurface(projectId);
+      const selectedProjectId = projectId ?? state.newTask.selection.projectId;
+      const selectedWorktreeId = !projectId || projectId === state.newTask.selection.projectId
+        ? state.newTask.selection.worktreeId
+        : undefined;
+      asyncOperations.beginNavigation(newTaskNavigationTarget(selectedProjectId));
+      openNewTaskSurface(selectedProjectId, selectedWorktreeId);
     },
     openSettings: () => {
       asyncOperations.beginNavigation(settingsNavigationTarget());

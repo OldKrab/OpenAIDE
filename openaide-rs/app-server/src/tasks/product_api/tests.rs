@@ -82,17 +82,21 @@ fn acquire_in_worktree_persists_workspace_identity_without_splitting_project() {
     )
     .unwrap();
 
+    let client = ClientInstanceId::from("client-worktree");
+    let params = openaide_app_server_protocol::task::TaskAcquireInWorktreeParams {
+        project_id: project_id_for_workspace(&project_root_text),
+        agent_id: AgentId::from("codex"),
+        worktree_id: created.worktree_id.clone(),
+        config_options: Default::default(),
+    };
     let snapshot = api
-        .acquire_in_worktree_for_client(
-            &crate::attachment_runtime::AttachmentOwner::test_client_instance_id(),
-            openaide_app_server_protocol::task::TaskAcquireInWorktreeParams {
-                project_id: project_id_for_workspace(&project_root_text),
-                agent_id: AgentId::from("codex"),
-                worktree_id: created.worktree_id.clone(),
-                config_options: Default::default(),
-            },
-        )
+        .acquire_in_worktree_for_client(&client, params.clone())
         .unwrap();
+
+    let same_context = api
+        .acquire_in_worktree_for_client(&client, params.clone())
+        .unwrap();
+    assert_eq!(same_context.task.task_id, snapshot.task.task_id);
 
     assert_eq!(snapshot.task.worktree_id, Some(created.worktree_id.clone()));
     assert_eq!(
@@ -109,6 +113,30 @@ fn acquire_in_worktree_persists_workspace_identity_without_splitting_project() {
         record.project_root.as_deref(),
         Some(project_root_text.as_str())
     );
+
+    wait_until(|| {
+        matches!(
+            store
+                .read_task(snapshot.task.task_id.as_str())
+                .unwrap()
+                .preparation,
+            TaskPreparationRecord::Ready
+        )
+    });
+    drop(api);
+    let restarted_api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store)),
+        AgentRegistry::default_built_ins(),
+        Arc::new(crate::agent::mock::MockAgent),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+    let after_restart = restarted_api
+        .acquire_in_worktree_for_client(&client, params)
+        .unwrap();
+    assert_eq!(after_restart.task.task_id, snapshot.task.task_id);
+    assert_eq!(after_restart.task.worktree_id, Some(created.worktree_id));
 }
 
 #[test]
@@ -283,13 +311,20 @@ fn new_task_context_change_is_a_conflict() {
         workspace_root: None,
         config_options: Default::default(),
     };
-    api.acquire_for_client(&client, params("codex")).unwrap();
+    let leased = api.acquire_for_client(&client, params("codex")).unwrap();
 
     let error = api
         .acquire_for_client(&client, params("opencode"))
         .unwrap_err();
 
     assert_eq!(error.code, ProtocolErrorCode::Conflict);
+    assert_eq!(
+        error
+            .target
+            .and_then(|target| target.current_task)
+            .map(|task| task.task.task_id),
+        Some(leased.task.task_id),
+    );
 }
 
 #[test]

@@ -26,8 +26,8 @@ export function subscribeSurfaceRouteChanges(listener: Parameters<ReturnType<typ
   return frontendShell().navigation.subscribe(listener);
 }
 
-export function openNewTaskSurface(projectId?: string) {
-  frontendShell().navigation.openNewTask(projectId);
+export function openNewTaskSurface(projectId?: string, worktreeId?: string) {
+  frontendShell().navigation.openNewTask(projectId, worktreeId);
 }
 
 export function openSettingsSurface() {

@@ -19,6 +19,9 @@ agent-client-protocol = { version = "1.2.0", features = ["unstable"] }
 agent-client-protocol-schema = { version = "=1.4.0", features = ["unstable_elicitation"] }
 tokio = { version = "1.48", features = ["macros", "rt-multi-thread", "sync", "time"] }
 fs2 = "0.4"
+async-process = "2.5"
+futures = "0.3"
+libc = "0.2"
 base64 = "0.22"
 ignore = "0.4.27"
 notify = "8.2.0"

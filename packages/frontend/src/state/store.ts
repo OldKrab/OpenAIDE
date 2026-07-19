@@ -51,6 +51,8 @@ export type NewTaskState = {
   configOptionsLoading?: boolean;
   configOptionsError?: string;
   nativeSessions: NativeSessionsState;
+  /** Route-only validation state; authoritative inventory clears it when identity resolves. */
+  workspaceResolution?: "loading" | "unavailable";
   error?: string;
 };
 
@@ -147,6 +149,7 @@ export type AppState = {
   searchQuery: string;
   showArchived: boolean;
   projects: ProjectOption[];
+  projectsLoaded: boolean;
   worktreeRepositories: Record<string, WorktreeRepositorySnapshot>;
   workspaceRoots: WorkspaceRoot[];
   workspaceRootsLoaded: boolean;
@@ -179,6 +182,7 @@ export function createInitialState(): AppState {
     searchQuery: "",
     showArchived: false,
     projects: [],
+    projectsLoaded: false,
     worktreeRepositories: {},
     workspaceRoots: [],
     workspaceRootsLoaded: false,

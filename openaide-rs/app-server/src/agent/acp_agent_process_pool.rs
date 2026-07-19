@@ -44,6 +44,15 @@ struct AcpAgentProcessClient {
 pub(super) struct AcpAgentProcessSession {
     pub(super) terminal_error: Arc<Mutex<Option<String>>>,
     pub(super) terminal_owner: AcpTerminalOwner,
+    pub(super) shutdown_tx: tokio::sync::watch::Sender<bool>,
+    pub(super) keepalive: AcpAgentProcessKeepalive,
+}
+
+#[derive(Clone)]
+pub(super) struct AcpAgentProcessKeepalive {
+    _open_tx: tokio_mpsc::UnboundedSender<AcpAgentProcessOpen>,
+    _list_tx: tokio_mpsc::UnboundedSender<AcpAgentProcessList>,
+    _control_tx: tokio_mpsc::UnboundedSender<AcpAgentProcessControl>,
 }
 
 impl AcpAgentProcessPool {
@@ -59,29 +68,21 @@ impl AcpAgentProcessPool {
     pub(super) fn open_session(
         &self,
         agent_id: &str,
-        mut open: AcpAgentProcessOpen,
+        open: AcpAgentProcessOpen,
     ) -> Result<AcpAgentProcessSession, RuntimeError> {
-        if let Some(process) = self.existing_process(agent_id) {
-            let owner_id = open.terminal_owner_id;
-            match process.open_tx.send(open) {
-                Ok(()) => {
-                    return Ok(AcpAgentProcessSession {
-                        terminal_error: process.terminal_error.clone(),
-                        terminal_owner: process.terminal_registry.owner(owner_id),
-                    });
-                }
-                Err(error) => {
-                    open = error.0;
-                }
-            }
-            self.remove_process(agent_id);
-        }
-
+        // A Native Session is the kill boundary. Sharing this process with another
+        // session would make descendant termination capable of stopping unrelated work.
         let owner_id = open.terminal_owner_id;
         let process = self.launch_process(agent_id, Some(open))?;
         Ok(AcpAgentProcessSession {
             terminal_error: process.terminal_error.clone(),
             terminal_owner: process.terminal_registry.owner(owner_id),
+            shutdown_tx: process.shutdown_tx,
+            keepalive: AcpAgentProcessKeepalive {
+                _open_tx: process.open_tx,
+                _list_tx: process.list_tx,
+                _control_tx: process.control_tx,
+            },
         })
     }
 
@@ -231,7 +232,14 @@ impl AcpAgentProcessPool {
     fn get_or_launch_process(&self, agent_id: &str) -> Result<AcpAgentProcessClient, RuntimeError> {
         match self.existing_process(agent_id) {
             Some(process) => Ok(process),
-            None => self.launch_process(agent_id, None),
+            None => {
+                let process = self.launch_process(agent_id, None)?;
+                self.processes
+                    .lock()
+                    .expect("ACP process registry poisoned")
+                    .insert(agent_id.to_string(), process.clone());
+                Ok(process)
+            }
         }
     }
 
@@ -270,11 +278,6 @@ impl AcpAgentProcessPool {
             terminal_registry: terminal_registry.clone(),
             shutdown_tx,
         };
-        self.processes
-            .lock()
-            .expect("ACP process registry poisoned")
-            .insert(agent_id.to_string(), process.clone());
-
         let worker_agent_id = agent_id.to_string();
         let worker_terminal_error = terminal_error.clone();
         thread::spawn(move || {

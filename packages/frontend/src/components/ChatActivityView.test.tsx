@@ -101,12 +101,111 @@ describe("ChatActivityView", () => {
     expect(rendered).toContain("Allow once");
     expect(rendered).toContain("Reject");
   });
+
+  it.each([
+    ["command", {
+      kind: "command" as const,
+      command_label: "npm test",
+      status: "completed" as const,
+      exit_code: 0,
+    }, "Ran command"],
+    ["thought", {
+      kind: "thought" as const,
+      message_id: "thought-clean",
+      text: "Check the result",
+    }, "Thought"],
+  ])("keeps successful %s group titles free of a redundant Completed label", (_kind, step, summary) => {
+    const activity: ActivityMessage = {
+      kind: "activity",
+      id: "activity_clean",
+      title: "Activity",
+      status: "completed",
+      created_at: "2026-07-13T00:00:00Z",
+      collapsed: true,
+      steps: [step],
+    };
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<ChatActivityView activity={activity} taskId="task_1" />);
+    });
+    const trigger = tree.root.findAllByProps({ className: "activity-disclosure-trigger" })[0];
+
+    expect(renderedText(trigger)).toContain(summary);
+    expect(trigger.findAllByType("small")).toHaveLength(0);
+  });
+
+  it.each([
+    ["interrupted", "Interrupted"],
+    ["error", "Failed"],
+  ])("keeps %s group outcomes explicit", (status, label) => {
+    const activity: ActivityMessage = {
+      kind: "activity",
+      id: `activity_${status}`,
+      title: "Command",
+      status: status as never,
+      created_at: "2026-07-13T00:00:00Z",
+      collapsed: true,
+      steps: [{ kind: "command", command_label: "npm test", status: status as never, exit_code: 1 }],
+    };
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<ChatActivityView activity={activity} taskId="task_1" />);
+    });
+    const trigger = tree.root.findAllByProps({ className: "activity-disclosure-trigger" })[0];
+
+    expect(trigger.findByType("small").children).toEqual([label]);
+  });
+
+  it.each([
+    ["running", "Running", "Running"],
+    ["completed", "Completed", "Ran"],
+    ["interrupted", "Interrupted", "Interrupted"],
+    ["error", "Failed", "Failed"],
+    ["future_status", "Unknown", "Unknown"],
+  ])("renders authoritative %s outer and command labels", (status, outer, command) => {
+    const activity: ActivityMessage = {
+      kind: "activity",
+      id: "activity_status",
+      title: "Command",
+      status: status as never,
+      created_at: "2026-07-13T00:00:00Z",
+      collapsed: false,
+      steps: [{
+        kind: "command",
+        command_label: "npm test",
+        status: status as never,
+        exit_code: status === "error" ? 0 : 9,
+      }],
+    };
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<ChatActivityView activity={activity} taskId="task_1" />);
+    });
+    const rendered = JSON.stringify(tree.toJSON());
+
+    expect(rendered).toContain(outer);
+    expect(rendered).toContain(command);
+    expect(rendered).toContain(status === "error" ? "exit 0" : "exit 9");
+    expect(tree.root.findByProps({
+      className: `activity-group ${status === "error" ? "failed" : status === "future_status" ? "unknown" : status}`,
+    })).toBeDefined();
+    if (status !== "completed") {
+      expect(rendered).not.toContain("Ran command");
+      expect(rendered).not.toContain(">Ran<");
+    }
+  });
 });
 
 function renderedThoughtRows(tree: ReturnType<typeof create>) {
   return tree.root.findAll(
     (node) => node.type === "div" && node.props.className === "activity-step activity-thought-block",
   );
+}
+
+function renderedText(root: ReturnType<typeof create>["root"]) {
+  return root.findAll(() => true).flatMap((node) => (
+    node.children.filter((child): child is string => typeof child === "string")
+  )).join(" ");
 }
 
 function mixedActivity(): ActivityMessage {

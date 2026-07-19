@@ -329,6 +329,14 @@ fn wait_for_method_count(log_path: &Path, method: &str, expected_count: usize) {
     panic!("timed out waiting for {expected_count} fixture calls to {method}");
 }
 
+fn file_line_count(path: &Path) -> usize {
+    fs::read_to_string(path).unwrap_or_default().lines().count()
+}
+
+fn wait_for_file_lines(path: &Path, expected_count: usize) {
+    wait_until(|| file_line_count(path) >= expected_count);
+}
+
 fn wait_until(mut predicate: impl FnMut() -> bool) {
     let started = Instant::now();
     while started.elapsed() < Duration::from_secs(2) {
@@ -408,12 +416,14 @@ fn expect_terminal_host_request(
 fn fixture_agent_script() -> &'static str {
     r#"import json
 import os
+import subprocess
 import sys
 import time
 
 log_path = os.environ["OPENAIDE_ACP_FIXTURE_LOG"]
 session_id = os.environ.get("OPENAIDE_ACP_FIXTURE_SESSION", "fixture-session")
 prompt_mode = os.environ.get("OPENAIDE_ACP_FIXTURE_PROMPT_MODE", "")
+child_log_path = os.environ.get("OPENAIDE_ACP_FIXTURE_CHILD_LOG", "")
 supports_resume = os.environ.get("OPENAIDE_ACP_FIXTURE_RESUME", "1") == "1"
 supports_close = os.environ.get("OPENAIDE_ACP_FIXTURE_CLOSE", "1") == "1"
 with_config_options = os.environ.get("OPENAIDE_ACP_FIXTURE_CONFIG_OPTIONS", "") == "1"
@@ -425,6 +435,20 @@ pending_prompt_ids = []
 prompt_request_count = 0
 next_session_number = 0
 closed_session_count = 0
+
+def next_fixture_session_number():
+    counter_path = log_path + ".counter"
+    try:
+        with open(counter_path, "r", encoding="utf-8") as file:
+            value = int(file.read()) + 1
+    except (FileNotFoundError, ValueError):
+        value = 1
+    with open(counter_path, "w", encoding="utf-8") as file:
+        file.write(str(value))
+    return value
+
+def next_fixture_session_id():
+    return f"counter-session-{next_fixture_session_number()}"
 
 def log(method):
     with open(log_path, "a", encoding="utf-8") as file:
@@ -526,14 +550,17 @@ for line in sys.stdin:
         if prompt_mode == "host_terminal_during_new_hang":
             request_terminal("startup-terminal-create")
         elif session_id == "__counter__":
-            respond(message, {"sessionId": f"counter-session-{next_session_number}"})
-        elif session_id == "__second_new_error__" and next_session_number >= 2:
-            sys.stdout.write(json.dumps({
-                "jsonrpc": "2.0",
-                "id": message.get("id"),
-                "error": {"code": -32000, "message": "second session rejected"},
-            }) + "\n")
-            sys.stdout.flush()
+            respond(message, {"sessionId": next_fixture_session_id()})
+        elif session_id == "__second_new_error__":
+            if next_fixture_session_number() >= 2:
+                sys.stdout.write(json.dumps({
+                    "jsonrpc": "2.0",
+                    "id": message.get("id"),
+                    "error": {"code": -32000, "message": "second session rejected"},
+                }) + "\n")
+                sys.stdout.flush()
+            else:
+                respond(message, {"sessionId": "auth-required-session"})
         else:
             result = {"sessionId": session_id}
             if with_config_options:
@@ -596,6 +623,14 @@ for line in sys.stdin:
             prompt_mode == "delay_first_cancel_response" and prompt_request_count == 1
         ):
             pending_prompt_ids.append(message.get("id"))
+        elif prompt_mode == "spawn_child_wait_for_cancel":
+            pending_prompt_ids.append(message.get("id"))
+            subprocess.Popen([
+                sys.executable,
+                "-c",
+                "import sys,time\nfor index in range(40):\n open(sys.argv[1], 'a').write(str(index) + '\\n')\n time.sleep(0.05)",
+                child_log_path,
+            ])
         elif prompt_mode == "late_text_after_response":
             respond(message, {"stopReason": "end_turn"})
             notify_text_chunk("late response text")
@@ -833,6 +868,7 @@ fn inactive_native_session_is_closed_after_the_idle_timeout() {
             "initialize",
             "session/new",
             "session/close",
+            "initialize",
             "session/resume",
             "session/close"
         ]
@@ -954,7 +990,7 @@ fn idle_timeout_does_not_close_when_the_agent_lacks_close_capability() {
 }
 
 #[test]
-fn listing_then_starting_reuses_one_agent_process() {
+fn listing_and_session_execution_use_separate_agent_processes() {
     let temp = tempfile::TempDir::new().expect("temp dir");
     let Some((runtime, log_path)) = fixture_runtime(&temp, "list-before-start-session") else {
         return;
@@ -976,7 +1012,13 @@ fn listing_then_starting_reuses_one_agent_process() {
 
     assert_eq!(
         read_fixture_methods(&log_path),
-        ["initialize", "session/list", "session/new", "session/close"]
+        [
+            "initialize",
+            "session/list",
+            "initialize",
+            "session/new",
+            "session/close"
+        ]
     );
 }
 
@@ -1019,7 +1061,7 @@ fn task_trace_preserves_initialize_capabilities_after_process_warmup() {
 }
 
 #[test]
-fn listing_sessions_reuses_the_active_agent_process() {
+fn listing_sessions_does_not_join_an_active_session_process_group() {
     let temp = tempfile::TempDir::new().expect("temp dir");
     let Some((runtime, log_path)) = fixture_runtime(&temp, "shared-list-session") else {
         return;
@@ -1041,12 +1083,18 @@ fn listing_sessions_reuses_the_active_agent_process() {
 
     assert_eq!(
         read_fixture_methods(&log_path),
-        ["initialize", "session/new", "session/list", "session/close"]
+        [
+            "initialize",
+            "session/new",
+            "initialize",
+            "session/list",
+            "session/close"
+        ]
     );
 }
 
 #[test]
-fn probing_reuses_the_active_agent_process() {
+fn probing_does_not_join_an_active_session_process_group() {
     let temp = tempfile::TempDir::new().expect("temp dir");
     let Some((runtime, log_path)) = fixture_runtime(&temp, "shared-probe-session") else {
         return;
@@ -1066,12 +1114,12 @@ fn probing_reuses_the_active_agent_process() {
 
     assert_eq!(
         read_fixture_methods(&log_path),
-        ["initialize", "session/new", "session/close"]
+        ["initialize", "session/new", "initialize", "session/close"]
     );
 }
 
 #[test]
-fn authentication_reuses_the_active_agent_process() {
+fn authentication_does_not_join_an_active_session_process_group() {
     let temp = tempfile::TempDir::new().expect("temp dir");
     let Some((runtime, log_path)) = fixture_runtime(&temp, "shared-auth-session") else {
         return;
@@ -1096,7 +1144,13 @@ fn authentication_reuses_the_active_agent_process() {
 
     assert_eq!(
         read_fixture_methods(&log_path),
-        ["initialize", "session/new", "authenticate", "session/close"]
+        [
+            "initialize",
+            "session/new",
+            "initialize",
+            "authenticate",
+            "session/close"
+        ]
     );
 }
 
@@ -1744,16 +1798,17 @@ fn different_agents_may_own_the_same_native_session_id() {
     runtime
         .close_session(&agent_a.key())
         .expect("close Agent A session");
-    let agent_a_resume = runtime.resume_session(AgentSessionResume {
-        agent_id: "agent-a".to_string(),
-        task_id: "task-agent-a".to_string(),
-        session_id: agent_a.session_id.clone(),
-        cwd: cwd_string(),
-        model_id: None,
-        cancellation: TurnCancellation::new(),
-        secret_resolver: None,
-    });
-    assert!(agent_a_resume.is_err());
+    let agent_a_resumed = runtime
+        .resume_session(AgentSessionResume {
+            agent_id: "agent-a".to_string(),
+            task_id: "task-agent-a".to_string(),
+            session_id: agent_a.session_id.clone(),
+            cwd: cwd_string(),
+            model_id: None,
+            cancellation: TurnCancellation::new(),
+            secret_resolver: None,
+        })
+        .expect("Agent A resumes through a fresh isolated process");
     runtime
         .resume_session(AgentSessionResume {
             agent_id: "agent-b".to_string(),
@@ -1765,6 +1820,9 @@ fn different_agents_may_own_the_same_native_session_id() {
             secret_resolver: None,
         })
         .expect("Agent B remains active after Agent A closes");
+    runtime
+        .close_session(&agent_a_resumed.key())
+        .expect("close resumed Agent A session");
     runtime
         .close_session(&agent_b.key())
         .expect("close Agent B session");
@@ -1990,8 +2048,80 @@ fn cancel_session_dispatches_to_active_prompt() {
     );
 }
 
+#[cfg(target_os = "linux")]
 #[test]
-fn cancelled_prompt_settles_before_session_accepts_next_prompt() {
+fn cancel_session_terminates_agent_owned_child_process_group() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    if !python3_available() {
+        return;
+    }
+    let script_path = temp.path().join("fixture_agent.py");
+    let log_path = temp.path().join("fixture.log");
+    let child_log_path = temp.path().join("child.log");
+    fs::write(&script_path, fixture_agent_script()).expect("fixture agent script");
+    let runtime = Arc::new(AcpAgentRuntime::new(AcpAgentConfig {
+        agent_id: "codex".to_string(),
+        command: "python3".to_string(),
+        args: vec![script_path.to_string_lossy().to_string()],
+        env: vec![
+            (
+                "OPENAIDE_ACP_FIXTURE_LOG".to_string(),
+                log_path.to_string_lossy().to_string(),
+            ),
+            (
+                "OPENAIDE_ACP_FIXTURE_SESSION".to_string(),
+                "child-process-session".to_string(),
+            ),
+            (
+                "OPENAIDE_ACP_FIXTURE_PROMPT_MODE".to_string(),
+                "spawn_child_wait_for_cancel".to_string(),
+            ),
+            (
+                "OPENAIDE_ACP_FIXTURE_CHILD_LOG".to_string(),
+                child_log_path.to_string_lossy().to_string(),
+            ),
+        ],
+        secret_env: Vec::new(),
+    }));
+    let session = runtime
+        .start_session(start_request("task-child-process", cwd_string()))
+        .expect("start session");
+    let prompt_session_id = session.session_id.clone();
+    let prompt = std::thread::spawn({
+        let runtime = runtime.clone();
+        move || {
+            runtime.prompt(
+                AgentPrompt {
+                    agent_id: "codex".to_string(),
+                    task_id: "task-child-process".to_string(),
+                    session_id: prompt_session_id,
+                    text: "run child".to_string(),
+                    attachments: Vec::new(),
+                    cancellation: TurnCancellation::new(),
+                },
+                Arc::new(CapturingEventSink::default()),
+            )
+        }
+    });
+
+    wait_for_file_lines(&child_log_path, 3);
+    runtime
+        .cancel_session(&session.key())
+        .expect("cancel session");
+    prompt
+        .join()
+        .expect("prompt thread")
+        .expect("prompt cancellation response");
+    std::thread::sleep(Duration::from_millis(300));
+    let settled_line_count = file_line_count(&child_log_path);
+    std::thread::sleep(Duration::from_millis(300));
+
+    assert_eq!(file_line_count(&child_log_path), settled_line_count);
+    assert!(settled_line_count < 40, "child command ran to completion");
+}
+
+#[test]
+fn cancelled_prompt_requires_a_fresh_process_before_resuming_the_native_session() {
     let temp = tempfile::TempDir::new().expect("temp dir");
     let Some((runtime, log_path)) = fixture_runtime_with_prompt_mode(
         &temp,
@@ -2029,34 +2159,24 @@ fn cancelled_prompt_settles_before_session_accepts_next_prompt() {
     runtime
         .cancel_session(&session.key())
         .expect("cancel first prompt");
-    let second_session_id = session.session_id.clone();
-    let second_prompt = std::thread::spawn({
-        let runtime = runtime.clone();
-        move || {
-            runtime.prompt(
-                AgentPrompt {
-                    agent_id: "codex".to_string(),
-                    task_id: "task-cancel-then-send".to_string(),
-                    session_id: second_session_id,
-                    text: "continue after cancel".to_string(),
-                    attachments: Vec::new(),
-                    cancellation: TurnCancellation::new(),
-                },
-                Arc::new(CapturingEventSink::default()),
-            )
-        }
-    });
-
     first_prompt
         .join()
         .expect("first prompt thread")
         .expect("cancelled prompt should settle cleanly");
-    second_prompt
-        .join()
-        .expect("second prompt thread")
-        .expect("next prompt should start after cancellation settles");
+    std::thread::sleep(Duration::from_millis(400));
+    let resumed = runtime
+        .resume_session(AgentSessionResume {
+            agent_id: "codex".to_string(),
+            task_id: "task-cancel-then-send".to_string(),
+            session_id: session.session_id.clone(),
+            cwd: cwd_string(),
+            model_id: None,
+            cancellation: TurnCancellation::new(),
+            secret_resolver: None,
+        })
+        .expect("resume cancelled Native Session through a fresh process");
     runtime
-        .close_session(&session.key())
+        .close_session(&resumed.key())
         .expect("close session");
 
     assert_eq!(
@@ -2066,7 +2186,8 @@ fn cancelled_prompt_settles_before_session_accepts_next_prompt() {
             "session/new",
             "session/prompt",
             "session/cancel",
-            "session/prompt",
+            "initialize",
+            "session/resume",
             "session/close"
         ]
     );
@@ -2685,7 +2806,9 @@ fn duplicate_active_session_id_keeps_original_session_active() {
         [
             "initialize",
             "session/new",
+            "initialize",
             "session/new",
+            "session/close",
             "session/prompt",
             "session/close"
         ]
@@ -2724,12 +2847,18 @@ fn auth_required_session_open_waits_for_explicit_user_authentication() {
         .expect("close first session");
     assert_eq!(
         read_fixture_methods(&log_path),
-        ["initialize", "session/new", "session/new", "session/close"]
+        [
+            "initialize",
+            "session/new",
+            "initialize",
+            "session/new",
+            "session/close"
+        ]
     );
 }
 
 #[test]
-fn start_sessions_reuses_agent_process_for_same_agent() {
+fn start_sessions_isolates_processes_for_same_agent() {
     let temp = tempfile::TempDir::new().expect("temp dir");
     let Some((runtime, log_path)) = fixture_runtime(&temp, "__counter__") else {
         return;
@@ -2757,6 +2886,7 @@ fn start_sessions_reuses_agent_process_for_same_agent() {
         [
             "initialize",
             "session/new",
+            "initialize",
             "session/new",
             "session/close",
             "session/close"
@@ -2765,7 +2895,7 @@ fn start_sessions_reuses_agent_process_for_same_agent() {
 }
 
 #[test]
-fn start_session_while_existing_prompt_is_running_reuses_agent_process() {
+fn cancelling_one_native_session_process_group_does_not_stop_another() {
     let temp = tempfile::TempDir::new().expect("temp dir");
     let Some((_runtime, log_path)) = fixture_runtime(&temp, "running-prompt-session") else {
         return;
@@ -2803,7 +2933,7 @@ fn start_session_while_existing_prompt_is_running_reuses_agent_process() {
         .start_session(start_request("task-running-one", cwd.clone()))
         .expect("first start");
     let first_session_id = first.session_id.clone();
-    let prompt_handle = std::thread::spawn({
+    let first_prompt = std::thread::spawn({
         let runtime = runtime.clone();
         move || {
             runtime.prompt(
@@ -2830,36 +2960,67 @@ fn start_session_while_existing_prompt_is_running_reuses_agent_process() {
     assert_eq!(first.session_id, "counter-session-1");
     assert_eq!(second.session_id, "counter-session-2");
 
+    let second_session_id = second.session_id.clone();
+    let (second_result_tx, second_result_rx) = mpsc::channel();
+    let second_prompt = std::thread::spawn({
+        let runtime = runtime.clone();
+        move || {
+            let result = runtime.prompt(
+                AgentPrompt {
+                    agent_id: "codex".to_string(),
+                    task_id: "task-running-two".to_string(),
+                    session_id: second_session_id,
+                    text: "keep the unrelated task running".to_string(),
+                    attachments: Vec::new(),
+                    cancellation: TurnCancellation::new(),
+                },
+                Arc::new(CapturingEventSink::default()),
+            );
+            let _ = second_result_tx.send(result);
+        }
+    });
+    wait_for_method_count(&log_path, "session/prompt", 2);
+
     runtime
         .cancel_session(&first.key())
         .expect("cancel first prompt");
-    prompt_handle
+    first_prompt
         .join()
         .expect("prompt thread")
         .expect("prompt cancelled cleanly");
+    std::thread::sleep(Duration::from_millis(400));
+    assert!(matches!(
+        second_result_rx.recv_timeout(Duration::from_millis(100)),
+        Err(mpsc::RecvTimeoutError::Timeout)
+    ));
     runtime
-        .close_session(&first.key())
-        .expect("close first session");
-    runtime
-        .close_session(&second.key())
-        .expect("close second session");
+        .cancel_session(&second.key())
+        .expect("cancel unrelated prompt");
+    second_result_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("unrelated prompt returned after its own cancellation")
+        .expect("unrelated prompt cancelled cleanly");
+    second_prompt.join().expect("second prompt thread");
 
+    let methods = read_fixture_methods(&log_path);
     assert_eq!(
-        read_fixture_methods(&log_path),
-        [
-            "initialize",
-            "session/new",
-            "session/prompt",
-            "session/new",
-            "session/cancel",
-            "session/close",
-            "session/close"
-        ]
+        methods
+            .iter()
+            .filter(|method| *method == "initialize")
+            .count(),
+        2
+    );
+    assert_eq!(
+        methods
+            .iter()
+            .filter(|method| *method == "session/cancel")
+            .count(),
+        2
     );
 }
 
 #[test]
-fn start_and_load_sessions_reuse_agent_process_for_same_agent() {
+fn start_and_load_sessions_use_isolated_agent_processes() {
     let temp = tempfile::TempDir::new().expect("temp dir");
     let Some((runtime, log_path)) = fixture_runtime(&temp, "__counter__") else {
         return;
@@ -2895,6 +3056,7 @@ fn start_and_load_sessions_reuse_agent_process_for_same_agent() {
         [
             "initialize",
             "session/new",
+            "initialize",
             "session/load",
             "session/close",
             "session/close"
@@ -2967,7 +3129,7 @@ fn load_session_reuses_the_native_session_worker() {
 }
 
 #[test]
-fn closed_agent_process_is_reused_for_later_session() {
+fn closed_agent_process_is_not_reused_for_later_session() {
     let temp = tempfile::TempDir::new().expect("temp dir");
     let Some((runtime, log_path)) = fixture_runtime(&temp, "__counter__") else {
         return;
@@ -2995,6 +3157,7 @@ fn closed_agent_process_is_reused_for_later_session() {
             "initialize",
             "session/new",
             "session/close",
+            "initialize",
             "session/new",
             "session/close"
         ]

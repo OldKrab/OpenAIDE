@@ -968,6 +968,67 @@ fn agent_confirmed_cancellation_ends_work_without_adding_chat() {
 }
 
 #[test]
+fn late_tool_completion_after_cancellation_preserves_output_without_reopening_activity() {
+    let (_dir, store, mutations, server_requests) = test_runtime();
+    store.write_task(&running_task("task_1")).unwrap();
+    let sink = TaskSessionEventSink::new(
+        mutations.clone(),
+        "task_1".to_string(),
+        "session_1".to_string(),
+        server_requests.clone(),
+    );
+    sink.session_update(AgentEvent::ToolCall(AgentToolCall {
+        tool_call_id: "tool_1".to_string(),
+        scope_id: None,
+        title: "Running command".to_string(),
+        kind: "execute".to_string(),
+        status: AgentToolCallStatus::InProgress,
+        input_summary: Some("slow command".to_string()),
+        output_preview: Some("tick 1".to_string()),
+        details: None,
+    }))
+    .unwrap();
+
+    let transitions = TaskTransitions::new(mutations, server_requests);
+    assert!(transitions.mark_turn_stopping("task_1", "turn_1").unwrap());
+    transitions
+        .finish_turn("task_1", "turn_1", Ok(AgentPromptOutcome::Cancelled))
+        .unwrap();
+
+    sink.session_update(AgentEvent::ToolCall(AgentToolCall {
+        tool_call_id: "tool_1".to_string(),
+        scope_id: None,
+        title: "Running command".to_string(),
+        kind: "execute".to_string(),
+        status: AgentToolCallStatus::Completed,
+        input_summary: Some("slow command".to_string()),
+        output_preview: Some("tick 1\ntick 2".to_string()),
+        details: None,
+    }))
+    .unwrap();
+
+    let activity = store
+        .read_messages("task_1")
+        .unwrap()
+        .into_iter()
+        .find_map(|stored| match stored.chat.message {
+            NormalizedMessage::Activity { status, steps, .. } => {
+                let output = steps.into_iter().find_map(|step| match step {
+                    crate::protocol::model::ActivityStep::Tool { output_preview, .. } => {
+                        output_preview
+                    }
+                    _ => None,
+                });
+                Some((status, output))
+            }
+            _ => None,
+        })
+        .expect("tool activity");
+    assert_eq!(activity.0, ActivityStatus::Interrupted);
+    assert_eq!(activity.1.as_deref(), Some("tick 1\ntick 2"));
+}
+
+#[test]
 fn user_stopped_turn_does_not_create_attention_event() {
     let (_dir, store, mutations, server_requests) = test_runtime();
     store.write_task(&running_task("task_1")).unwrap();

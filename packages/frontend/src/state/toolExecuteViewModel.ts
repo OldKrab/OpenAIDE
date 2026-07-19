@@ -1,6 +1,13 @@
 import type { ActivityStep, ActivityToolDetails } from "@openaide/app-shell-contracts";
+import { activityPresentationLabel, activityPresentationStatus } from "./activityLabels";
 import { displayCommand } from "./toolCommandViewModel";
 import { firstFieldValue } from "./toolDetailsShared";
+
+export type ExecuteOutput = {
+  label: "stdout" | "stderr" | "Combined output" | "preview";
+  text: string;
+  tone: "stdout" | "stderr";
+};
 
 export function executeDetailInfo(
   details: ActivityToolDetails,
@@ -13,17 +20,25 @@ export function executeDetailInfo(
   const formatted = details.output?.formatted_output;
   const aggregated = details.output?.aggregated_output;
   const exitCode = details.output?.exit_code;
-  const running = step.status === "running";
-  const failed = step.status === "error" || details.output?.success === false || (exitCode !== undefined && exitCode !== 0);
-  const outputText = failed ? stderr || aggregated || formatted || stdout || fallbackPreview : stdout || formatted || aggregated || fallbackPreview;
+  const mode = activityPresentationStatus(step.status);
+  const outputs: ExecuteOutput[] = [];
+  if (stdout) outputs.push({ label: "stdout", text: stdout, tone: "stdout" });
+  if (stderr) outputs.push({ label: "stderr", text: stderr, tone: "stderr" });
+  if (outputs.length === 0) {
+    // These fields are alternate merged representations, not extra streams.
+    const combined = aggregated || formatted;
+    if (combined) outputs.push({ label: "Combined output", text: combined, tone: "stdout" });
+  }
+  if (outputs.length === 0 && fallbackPreview) {
+    outputs.push({ label: "preview", text: fallbackPreview, tone: "stdout" });
+  }
   return {
     command,
     duration: firstFieldValue(details.output?.fields, "duration"),
     exitCode,
-    failed,
-    mode: running ? "running" : failed ? "failed" : "completed",
-    outputLabel: failed && stderr ? "stderr" : "stdout",
-    outputText,
-    outputTone: failed && stderr ? "stderr" : "stdout",
+    failed: mode === "failed",
+    mode,
+    outputs,
+    resultLabel: activityPresentationLabel(step.status),
   };
 }

@@ -6,6 +6,88 @@ import {
 } from "./reliableHttpChannel";
 
 describe("ReliableHttpMessageChannel", () => {
+  it("bounds every detached close against a half-open endpoint across repeated replacements", async () => {
+    vi.useFakeTimers();
+    let opened = 0;
+    let pendingCloses = 0;
+    let abortedCloses = 0;
+    const fetch = vi.fn<ReliableHttpFetch>(async (_input, init) => {
+      if (init.method === "POST" && init.body?.includes('"transport":"open"')) {
+        opened += 1;
+        return response(200, JSON.stringify({
+          transportVersion: 1,
+          sessionId: `session-${opened}`,
+          serverId: "server-1",
+        }));
+      }
+      if (init.method === "POST" && init.body?.includes('"transport":"close"')) {
+        pendingCloses += 1;
+        return new Promise((_resolve, reject) => {
+          init.signal?.addEventListener("abort", () => {
+            pendingCloses -= 1;
+            abortedCloses += 1;
+            reject(abortError());
+          }, { once: true });
+        });
+      }
+      return new Promise((_resolve, reject) => {
+        init.signal?.addEventListener("abort", () => reject(abortError()), { once: true });
+      });
+    });
+
+    try {
+      for (let generation = 0; generation < 12; generation += 1) {
+        const channel = createReliableHttpMessageChannel({
+          endpointUrl: "http://127.0.0.1:4321",
+          connectionId: `generation-${generation}`,
+          closeTimeoutMs: 25,
+          fetch,
+        });
+        await channel.ready();
+        channel.close();
+        await Promise.resolve();
+        expect(pendingCloses).toBeLessThanOrEqual(1);
+        await vi.advanceTimersByTimeAsync(25);
+        expect(pendingCloses).toBe(0);
+      }
+      expect(abortedCloses).toBe(12);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("acknowledges explicit reliable-session close after aborting its receive poll", async () => {
+    const closeBodies: string[] = [];
+    const fetch = vi.fn<ReliableHttpFetch>(async (_input, init) => {
+      if (init.method === "POST" && init.body?.includes('"transport":"open"')) {
+        return response(200, JSON.stringify({
+          transportVersion: 1,
+          sessionId: "session-1",
+          serverId: "server-1",
+        }));
+      }
+      if (init.method === "POST" && init.body?.includes('"transport":"close"')) {
+        closeBodies.push(init.body);
+        return response(200, JSON.stringify({ sessionId: "session-1" }));
+      }
+      return new Promise((_resolve, reject) => {
+        init.signal?.addEventListener("abort", () => reject(abortError()), { once: true });
+      });
+    });
+    const channel = createReliableHttpMessageChannel({
+      endpointUrl: "http://127.0.0.1:4321",
+      connectionId: "generation-1",
+      fetch,
+    });
+    await channel.ready();
+
+    channel.close();
+
+    await vi.waitFor(() => expect(closeBodies).toEqual([
+      JSON.stringify({ transport: "close", sessionId: "session-1" }),
+    ]));
+  });
+
   it("retries the identical sequenced upload and receives the response through polling", async () => {
     const uploadBodies: string[] = [];
     let uploadAttempt = 0;
@@ -17,6 +99,9 @@ describe("ReliableHttpMessageChannel", () => {
           sessionId: "session-1",
           serverId: "server-1",
         }));
+      }
+      if (init.method === "POST" && init.body?.includes('"transport":"close"')) {
+        return response(200, JSON.stringify({ sessionId: "session-1" }));
       }
       if (init.method === "POST") {
         uploadBodies.push(init.body ?? "");
@@ -60,8 +145,80 @@ describe("ReliableHttpMessageChannel", () => {
     channel.close();
   });
 
+  it("backs off both transport directions while offline and wakes them immediately on recovery", async () => {
+    vi.useFakeTimers();
+    let wake: (() => void) | undefined;
+    let offline = true;
+    let receiveAttempts = 0;
+    let uploadAttempts = 0;
+    let uploaded = false;
+    let delivered = false;
+    const fetch = vi.fn<ReliableHttpFetch>(async (_input, init) => {
+      if (init.method === "POST" && init.body?.includes('"transport":"open"')) {
+        return response(200, JSON.stringify({
+          transportVersion: 1,
+          sessionId: "session-1",
+          serverId: "server-1",
+        }));
+      }
+      if (init.method === "POST" && init.body?.includes('"transport":"close"')) {
+        return response(200, JSON.stringify({ sessionId: "session-1" }));
+      }
+      if (init.method === "POST") uploadAttempts += 1;
+      else receiveAttempts += 1;
+      if (offline) throw new TypeError("network offline");
+      if (init.method === "POST") {
+        uploaded = true;
+        return response(204, "");
+      }
+      if (!delivered) {
+        delivered = true;
+        return response(200, JSON.stringify({
+          frames: [{
+            sequence: 1,
+            message: { jsonrpc: "2.0", id: "rpc-1", result: 42 },
+          }],
+        }));
+      }
+      return new Promise(() => undefined);
+    });
+    const channel = createReliableHttpMessageChannel({
+      endpointUrl: "http://127.0.0.1:4321",
+      connectionId: "client-1",
+      fetch,
+      retryDelayMs: 250,
+      subscribeToWake(listener) {
+        wake = listener;
+        return () => {
+          wake = undefined;
+        };
+      },
+    });
+    const received: RpcMessage[] = [];
+    channel.subscribe((message) => received.push(message));
+    await channel.ready();
+
+    channel.send({ jsonrpc: "2.0", id: "rpc-1", method: "math/add", params: {} });
+    await vi.advanceTimersByTimeAsync(13_000);
+
+    expect(receiveAttempts).toBeGreaterThan(1);
+    expect(receiveAttempts).toBeLessThanOrEqual(7);
+    expect(uploadAttempts).toBeGreaterThan(1);
+    expect(uploadAttempts).toBeLessThanOrEqual(7);
+    offline = false;
+    wake?.();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(received).toEqual([{ jsonrpc: "2.0", id: "rpc-1", result: 42 }]);
+    expect(uploaded).toBe(true);
+    channel.close();
+    vi.useRealTimers();
+  });
+
   it("reports authoritative session loss instead of retrying it forever", async () => {
     const fetch = vi.fn<ReliableHttpFetch>(async (_input, init) => {
+      if (init.method === "POST" && init.body?.includes('"transport":"close"')) {
+        return response(200, JSON.stringify({ sessionId: "session-1" }));
+      }
       if (init.method === "POST") {
         return response(200, JSON.stringify({
           transportVersion: 1,
@@ -91,6 +248,9 @@ describe("ReliableHttpMessageChannel", () => {
     let pollAttempt = 0;
     const pollAfter: string[] = [];
     const fetch = vi.fn<ReliableHttpFetch>(async (_input, init) => {
+      if (init.method === "POST" && init.body?.includes('"transport":"close"')) {
+        return response(200, JSON.stringify({ sessionId: "session-1" }));
+      }
       if (init.method === "POST") {
         return response(200, JSON.stringify({
           transportVersion: 1,
@@ -131,18 +291,22 @@ describe("ReliableHttpMessageChannel", () => {
     channel.subscribe((message) => received.push(message));
     await vi.waitFor(() => expect(pollAttempt).toBe(1));
 
-    wake?.();
+    for (let index = 0; index < 20; index += 1) wake?.();
 
     await vi.waitFor(() => expect(received).toEqual([
       { jsonrpc: "2.0", id: "rpc-1", result: 42 },
     ]));
     expect(pollAfter.slice(0, 2)).toEqual(["0", "0"]);
+    expect(pollAttempt).toBeLessThanOrEqual(3);
     channel.close();
   });
 
   it("restarts a receive poll that outlives the server hold deadline", async () => {
     let pollAttempt = 0;
     const fetch = vi.fn<ReliableHttpFetch>(async (_input, init) => {
+      if (init.method === "POST" && init.body?.includes('"transport":"close"')) {
+        return response(200, JSON.stringify({ sessionId: "session-1" }));
+      }
       if (init.method === "POST") {
         return response(200, JSON.stringify({
           transportVersion: 1,

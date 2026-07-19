@@ -76,7 +76,7 @@ type AppActionPayload =
   | { type: "newTask:nativeSessions:adopt"; sessionId: string }
   | { type: "newTask:nativeSessions:remove"; sessionId: string }
   | { type: "newTask:workspace"; workspace: WorkspaceRoot; newTaskId?: string }
-  | { type: "newTask:worktree"; worktreeId?: string; label: string; path: string; newTaskId?: string }
+  | { type: "newTask:worktree"; projectId?: string | null; worktreeId?: string; label: string; path: string; resolution?: "loading" | "unavailable"; newTaskId?: string }
   | { type: "newTask:attachment:add"; attachment: Attachment }
   | { type: "newTask:attachment:remove"; attachmentId: string }
   | { type: "taskInput:prompt"; taskId: string; prompt: string }
@@ -337,6 +337,7 @@ function reduceGlobalState(state: AppState, action: GlobalAction): AppState {
       return {
         ...state,
         projects: action.projects,
+        projectsLoaded: true,
         newTask: { ...state.newTask, selection },
       };
     }

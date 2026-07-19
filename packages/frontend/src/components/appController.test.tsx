@@ -13,6 +13,7 @@ import {
   STATE_SUBSCRIBE,
   STATE_UNSUBSCRIBE,
   TASK_ACQUIRE,
+  TASK_ACQUIRE_IN_WORKTREE,
   TASK_RELEASE,
   TASK_LIST,
   TASK_MARK_READ,
@@ -81,8 +82,8 @@ vi.mock("../services/hostBridge", () => ({
     });
   },
   getBootstrap: () => bootstrap,
-  openNewTaskSurface: (projectId?: string) => postHostMessage(projectId
-    ? { type: "surface.openNewTask", payload: { project_id: projectId } }
+  openNewTaskSurface: (projectId?: string, worktreeId?: string) => postHostMessage(projectId
+    ? { type: "surface.openNewTask", payload: { project_id: projectId, ...(worktreeId ? { worktree_id: worktreeId } : {}) } }
     : { type: "surface.openNewTask" }),
   openSettingsSurface: () => postHostMessage({ type: "surface.openSettings" }),
   openTaskSurface: (taskId: string, title?: string) => postHostMessage({
@@ -153,6 +154,69 @@ describe("app controller mounted lifecycle", () => {
       latestPublicController?.intents.newTask.changePrompt("Describe the work");
     });
     expect(latestPublicController?.view.primaryTask.newTask.newTask.prompt).toBe("Describe the work");
+  });
+
+  it("keeps native Project and workspace selections inside the current App Shell surface", () => {
+    bootstrap = taskBootstrap("task_1");
+    act(() => {
+      create(<PublicControllerProbe />);
+    });
+    postHostMessage.mockClear();
+
+    act(() => {
+      latestPublicController?.intents.newTask.selectProject({
+        projectId: "project_2",
+        label: "Second Project",
+        workspaceRoot: "/workspace/second",
+      });
+      latestPublicController?.intents.newTask.selectWorkspace({
+        projectId: "project_2",
+        label: "Second Project",
+        path: "/workspace/second",
+      });
+      latestPublicController?.intents.newTask.selectWorktree({
+        projectId: "project_2",
+        worktreeId: "worktree_2",
+        label: "Second worktree",
+        path: "/workspace/second-worktree",
+      });
+    });
+
+    expect(postHostMessage).not.toHaveBeenCalledWith(expect.objectContaining({
+      type: "surface.openNewTask",
+    }));
+  });
+
+  it("routes a Web worktree selection once with its newly selected Project identity", () => {
+    bootstrap = webTaskBootstrap(undefined, "project_old");
+    act(() => {
+      create(<PublicControllerProbe />);
+    });
+    postHostMessage.mockClear();
+
+    act(() => {
+      latestPublicController?.intents.newTask.selectWorktree({
+        projectId: "project_new",
+        worktreeId: "worktree_new",
+        label: "New worktree",
+        path: "/workspace/new-worktree",
+      });
+      webRouteListeners.forEach((listener) => listener(webTaskBootstrap(
+        undefined,
+        "project_new",
+        "worktree_new",
+      )));
+    });
+
+    expect(postHostMessage).toHaveBeenCalledOnce();
+    expect(postHostMessage).toHaveBeenCalledWith({
+      type: "surface.openNewTask",
+      payload: { project_id: "project_new", worktree_id: "worktree_new" },
+    });
+    expect(latestPublicController?.view.primaryTask.newTask.newTask.selection).toMatchObject({
+      projectId: "project_new",
+      worktreeId: "worktree_new",
+    });
   });
 
   it("keeps the default backend connection stable across public controller renders", () => {
@@ -574,6 +638,199 @@ describe("app controller mounted lifecycle", () => {
     expect(latestController?.state.snapshot).toBeUndefined();
     expect(initialize).toHaveBeenCalledTimes(1);
     expect(close).not.toHaveBeenCalled();
+  });
+
+  it("reconciles prepared leases and worktree context across root Back and Forward routes", async () => {
+    let rootAcquisitions = 0;
+    let worktreeAcquisitions = 0;
+    const request = vi.fn(async (method: string, params?: { taskId?: string; worktreeId?: string }) => {
+      if (method === AGENT_LIST_SESSIONS) {
+        return { agentId: "codex", projectLabel: "OpenAIDE", sessions: [], nextCursor: null };
+      }
+      if (method === TASK_ACQUIRE) {
+        rootAcquisitions += 1;
+        return { task: protocolTaskSnapshot(`task_root_${rootAcquisitions}`, "New task", { hasMessages: false }) };
+      }
+      if (method === TASK_ACQUIRE_IN_WORKTREE) {
+        worktreeAcquisitions += 1;
+        const task = protocolTaskSnapshot(`task_worktree_${worktreeAcquisitions}`, "New task", { hasMessages: false });
+        return { task: { ...task, task: { ...task.task, worktreeId: params?.worktreeId as never } } };
+      }
+      if (method === TASK_RELEASE) return { taskId: params?.taskId };
+      throw new Error(method);
+    });
+    backendConnection = {
+      initialize: vi.fn(async () => ({ snapshot: clientSnapshot({ includeActiveTask: false }) })),
+      request: request as unknown as BackendConnection["request"],
+      close: vi.fn(),
+    };
+    bootstrap = webTaskBootstrap(undefined, "project_1");
+
+    await act(async () => {
+      create(<ControllerProbe />);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    act(() => {
+      latestController?.dispatch({
+        type: "projects",
+        projects: [{
+          projectId: "project_1",
+          label: "OpenAIDE",
+          workspaceRoot: "/workspace",
+          worktreeRepositoryId: "repository_1",
+        }],
+      });
+      latestController?.dispatch({
+        type: "worktreeRepository",
+        repository: {
+          repositoryId: "repository_1" as never,
+          revision: 1,
+          worktrees: [{
+            worktreeId: "worktree_1" as never,
+            name: "QA fixes",
+            path: "/workspace/qa-fixes",
+            ownership: "managed",
+            isMain: false,
+            availability: "available",
+            forgotten: false,
+            head: { kind: "branch", name: "qa/fixes", commit: "abc123" },
+            linkedTaskCount: 0,
+            runningTaskCount: 0,
+          }],
+          operations: [],
+        },
+      });
+    });
+
+    await act(async () => {
+      webRouteListeners[0]?.(webTaskBootstrap(undefined, "project_1", "worktree_1"));
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(latestController?.state.newTask.selection).toMatchObject({
+      projectId: "project_1",
+      worktreeId: "worktree_1",
+      workspaceLabel: "QA fixes",
+    });
+    expect(latestController?.newTaskSnapshot?.task.task_id).toBe("task_worktree_1");
+
+    await act(async () => {
+      webRouteListeners[0]?.(webTaskBootstrap());
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(latestController?.state.newTask.selection.worktreeId).toBeUndefined();
+    expect(latestController?.state.newTask.selection.workspaceLabel).toBe("Project root");
+    expect(latestController?.newTaskSnapshot?.task.task_id).toBe("task_root_2");
+
+    await act(async () => {
+      webRouteListeners[0]?.(webTaskBootstrap(undefined, "project_1", "worktree_1"));
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(latestController?.state.newTask.selection.worktreeId).toBe("worktree_1");
+    expect(latestController?.newTaskSnapshot?.task.task_id).toBe("task_worktree_2");
+    expect(request.mock.calls.filter(([method]) => method === TASK_RELEASE)).toEqual([
+      [TASK_RELEASE, { taskId: "task_root_1" }],
+      [TASK_RELEASE, { taskId: "task_worktree_1" }],
+      [TASK_RELEASE, { taskId: "task_root_2" }],
+    ]);
+  });
+
+  it("never acquires a routed worktree until its URL supplies the exact Project identity", async () => {
+    const initialized = clientSnapshot({ includeActiveTask: false });
+    initialized.newTaskDefaults.projectId = "project_1" as never;
+    initialized.projects = {
+      projects: [{
+        projectId: "project_1" as never,
+        label: "OpenAIDE",
+        workspaceRoot: "/workspace",
+        available: true,
+        worktreeRepositoryId: "repository_1" as never,
+      }],
+    };
+    const acquire = vi.fn(async () => {
+      const task = protocolTaskSnapshot("task_worktree", "New task", { hasMessages: false });
+      return { task: { ...task, task: { ...task.task, worktreeId: "worktree_1" as never } } };
+    });
+    const request = vi.fn(async (method: string, params?: { scope?: { kind: string; repositoryId?: string } }) => {
+      if (method === STATE_SUBSCRIBE && params?.scope?.kind === "worktreeRepository") {
+        return {
+          cursor: "cursor_repository" as never,
+          scope: params.scope,
+          snapshot: {
+            kind: "worktreeRepository" as const,
+            repository: {
+              repositoryId: "repository_1" as never,
+              revision: 1,
+              worktrees: [{
+                worktreeId: "worktree_1" as never,
+                name: "QA fixes",
+                path: "/workspace/qa-fixes",
+                ownership: "managed" as const,
+                isMain: false,
+                availability: "available" as const,
+                forgotten: false,
+                head: { kind: "branch" as const, name: "qa/fixes", commit: "abc123" },
+                projectIds: ["project_1" as never],
+                linkedTaskCount: 0,
+                runningTaskCount: 0,
+              }],
+              operations: [],
+              bases: [],
+            },
+          },
+        };
+      }
+      if (method === STATE_SUBSCRIBE && params?.scope) {
+        const baseline = nonTaskSubscriptionSnapshot(params.scope);
+        if (params.scope.kind === "projects" && baseline.snapshot.kind === "projects") {
+          baseline.snapshot.projects = initialized.projects as never;
+        }
+        return baseline;
+      }
+      if (method === AGENT_LIST_SESSIONS) {
+        return { agentId: "codex", projectLabel: "OpenAIDE", sessions: [], nextCursor: null };
+      }
+      if (method === TASK_ACQUIRE_IN_WORKTREE) return acquire();
+      throw new Error(method);
+    });
+    backendConnection = {
+      initialize: vi.fn(async () => ({ snapshot: initialized })),
+      request: request as unknown as BackendConnection["request"],
+      handleNotification: defaultHandleNotification,
+      close: vi.fn(),
+    };
+    bootstrap = webTaskBootstrap(undefined, undefined, "worktree_1");
+
+    await act(async () => {
+      create(<ControllerProbe />);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(latestController?.state.newTask.selection).toMatchObject({
+      projectId: undefined,
+      worktreeId: "worktree_1",
+    });
+    expect(latestController?.state.newTask.workspaceResolution).toBe("unavailable");
+    expect(acquire).not.toHaveBeenCalled();
+
+    await act(async () => {
+      webRouteListeners[0]?.(webTaskBootstrap(undefined, "project_1", "worktree_1"));
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(acquire).toHaveBeenCalledOnce();
+    expect(latestController?.state.newTask.workspaceResolution).toBeUndefined();
   });
 
   it("loads new-task Agent options after a project route change even when an old task snapshot remains", async () => {
@@ -1386,7 +1643,16 @@ describe("app controller mounted lifecycle", () => {
             protocolTaskSnapshot(params.scope.taskId, "New task", { hasMessages: false }),
           );
         }
-        return nonTaskSubscriptionSnapshot(params.scope);
+        const baseline = nonTaskSubscriptionSnapshot(params.scope);
+        if (params.scope.kind === "projects" && baseline.snapshot.kind === "projects") {
+          baseline.snapshot.projects.projects = [{
+            projectId: "project_1" as never,
+            label: "OpenAIDE",
+            workspaceRoot: "/workspace",
+            available: true,
+          }] as never;
+        }
+        return baseline;
       }
       if (method === AGENT_LIST_SESSIONS) {
         return { agentId: "codex", projectLabel: "OpenAIDE", sessions: [], nextCursor: null };
@@ -2694,12 +2960,13 @@ function settingsBootstrap() {
   };
 }
 
-function webTaskBootstrap(taskId?: string, projectId?: string) {
+function webTaskBootstrap(taskId?: string, projectId?: string, worktreeId?: string) {
   return {
     surface: "task" as const,
     shell: { kind: "web" as const, navigationMode: "project" as const },
     taskId,
     projectId,
+    worktreeId,
     clientInstanceId: "client_1" as never,
     agents: [],
     preferences: { composer_submit_shortcut: "mod_enter" as const },
