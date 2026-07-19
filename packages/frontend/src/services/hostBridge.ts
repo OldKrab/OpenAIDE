@@ -51,6 +51,8 @@ export function reloadRecoveryShell() {
 }
 
 export function getBackendConnection() {
+  const shellConnection = frontendShell().backendConnection?.();
+  if (shellConnection) return shellConnection;
   const bootstrap = getBootstrap();
   if (bootstrap.surface !== "invalid" && bootstrap.appServerConnection?.kind === "localHttp") {
     return createReliableLocalHttpBackendConnection({

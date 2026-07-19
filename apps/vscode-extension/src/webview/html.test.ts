@@ -22,7 +22,7 @@ describe("webview html", () => {
     expect(html).toContain('data-navigation-mode="currentProject"');
   });
 
-  it("embeds LocalHttp bootstrap info and allows that origin in CSP", () => {
+  it("never exposes App Server endpoint or token material to a VS Code webview", () => {
     const html = renderWebviewHtml(context(), webview(), {
       surface: "navigation",
       shell: VSCODE_SHELL,
@@ -33,10 +33,9 @@ describe("webview html", () => {
       },
     });
 
-    expect(html).toContain("connect-src http://127.0.0.1:4321;");
-    expect(html).toContain("data-app-server-connection=");
-    expect(html).toContain("&quot;kind&quot;:&quot;localHttp&quot;");
-    expect(html).toContain("&quot;authToken&quot;:&quot;token-1&quot;");
+    expect(html).not.toContain("connect-src http://127.0.0.1:4321;");
+    expect(html).not.toContain("data-app-server-connection=");
+    expect(html).not.toContain("token-1");
   });
 });
 

@@ -5,9 +5,12 @@ import type {
 import type { WebviewBootstrap } from "../state/surfaceTypes";
 import type { PostHostMessage } from "../state/postHostMessage";
 import type { WebTaskNotificationManager } from "../shells/webTaskNotifications";
+import type { AppServerSession } from "@openaide/app-server-client";
 
 export type FrontendShell = {
   bootstrap(): WebviewBootstrap;
+  /** Supplies a shell-owned logical session when the renderer must not own transport. */
+  backendConnection?: () => AppServerSession;
   messages: {
     post: PostHostMessage;
     subscribe(listener: (message: HostToWebviewMessage) => void): () => void;

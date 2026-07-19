@@ -1,22 +1,21 @@
 import * as vscode from "vscode";
+import { randomUUID } from "node:crypto";
+import { isAppServerSessionViewMessage } from "@openaide/app-server-client";
 import { ExtensionLogger } from "../logging/logger";
 import { RuntimeProcess } from "../runtime/process";
 import { RuntimeClient } from "../runtime/rpcClient";
 import {
-  createWebviewClientInstanceId,
   renderWebviewHtml,
-  renderWebviewPreparingHtml,
   webviewRoot,
 } from "./html";
 import { handleWebviewMessage } from "./messaging";
 import { VSCODE_SHELL, type WebviewHost } from "./types";
-import { resolveWebviewAppServerConnection } from "./appServerConnection";
 import { currentWorkspaceRoot } from "../workspace/roots";
 
 export class TaskViewProvider implements vscode.WebviewViewProvider {
   static readonly viewType = "openaide.tasks";
   private view: vscode.WebviewView | undefined;
-  private renderGeneration = 0;
+  private detachAppServerView: (() => void) | undefined;
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -27,16 +26,31 @@ export class TaskViewProvider implements vscode.WebviewViewProvider {
   ) {}
 
   resolveWebviewView(view: vscode.WebviewView) {
-    const clientInstanceId = createWebviewClientInstanceId();
+    this.detachAppServerView?.();
     this.view = view;
     view.webview.options = {
       enableScripts: true,
       localResourceRoots: [webviewRoot(this.context)],
     };
-    view.webview.html = renderWebviewPreparingHtml(this.context, view.webview);
-    void this.renderWhenAppServerReady(view, clientInstanceId, this.nextRenderGeneration());
-    view.webview.onDidReceiveMessage((message) =>
-      handleWebviewMessage(message, {
+    const viewId = `navigation-${randomUUID()}`;
+    const detachAppServerView = this.runtime.attachAppServerView(viewId, (message) => {
+      void view.webview.postMessage(message);
+    });
+    this.detachAppServerView = detachAppServerView;
+    view.onDidDispose(() => {
+      if (this.detachAppServerView === detachAppServerView) {
+        detachAppServerView();
+        this.detachAppServerView = undefined;
+      }
+      if (this.view === view) this.view = undefined;
+    });
+    view.webview.html = renderWebviewHtml(this.context, view.webview, this.bootstrap());
+    view.webview.onDidReceiveMessage((message) => {
+      if (isAppServerSessionViewMessage(message)) {
+        void this.runtime.handleAppServerViewMessage(viewId, message);
+        return;
+      }
+      void handleWebviewMessage(message, {
         runtime: this.runtime,
         runtimeProcess: this.runtimeProcess,
         post: (payload) => view.webview.postMessage(payload),
@@ -44,46 +58,15 @@ export class TaskViewProvider implements vscode.WebviewViewProvider {
         developerSettingsStore: this.context.globalState,
         agentSecretStore: this.context.secrets,
         surfaces: this.surfaces,
-      }),
-    );
-  }
-
-  private async renderWhenAppServerReady(
-    view: vscode.WebviewView,
-    clientInstanceId: string,
-    generation: number,
-  ) {
-    try {
-      const connection = await resolveWebviewAppServerConnection(
-        await this.runtimeProcess.startAppServerConnection(),
-      );
-      if (!this.isRenderGenerationCurrent(generation) || this.view !== view) return;
-      view.webview.html = renderWebviewHtml(this.context, view.webview, {
-        ...this.bootstrap(clientInstanceId),
-        appServerConnection: connection,
       });
-    } catch (error) {
-      if (!this.isRenderGenerationCurrent(generation) || this.view !== view) return;
-      this.logger.warn("app server handoff failed; rendering without app server connection", { error: String(error) });
-      view.webview.html = renderWebviewHtml(this.context, view.webview, this.bootstrap(clientInstanceId));
-    }
+    });
   }
 
-  private bootstrap(clientInstanceId: string): Parameters<typeof renderWebviewHtml>[2] {
+  private bootstrap(): Parameters<typeof renderWebviewHtml>[2] {
     return {
       surface: "navigation",
       shell: VSCODE_SHELL,
-      clientInstanceId,
       projectId: currentWorkspaceRoot()?.projectId,
     };
-  }
-
-  private nextRenderGeneration() {
-    this.renderGeneration += 1;
-    return this.renderGeneration;
-  }
-
-  private isRenderGenerationCurrent(generation: number) {
-    return this.renderGeneration === generation;
   }
 }

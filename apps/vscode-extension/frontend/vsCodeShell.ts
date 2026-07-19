@@ -1,4 +1,8 @@
 import type { FrontendShell } from "../../../packages/frontend/src/services/frontendShell";
+import {
+  createBridgedAppServerSession,
+  isAppServerSessionHostMessage,
+} from "@openaide/app-server-client";
 import type { WebviewBootstrap } from "../../../packages/frontend/src/state/surfaceTypes";
 import {
   datasetBootstrap,
@@ -16,8 +20,21 @@ declare global {
 export function createVsCodeShell(): FrontendShell {
   const vscode = window.acquireVsCodeApi?.();
   const bootstrap = datasetBootstrap;
+  const backendConnection = vscode && typeof window.addEventListener === "function"
+    ? createBridgedAppServerSession({
+        post: (message) => vscode.postMessage(message),
+        subscribe(listener) {
+          const onMessage = (event: MessageEvent) => {
+            if (isAppServerSessionHostMessage(event.data)) listener(event.data);
+          };
+          window.addEventListener("message", onMessage);
+          return () => window.removeEventListener("message", onMessage);
+        },
+      })
+    : undefined;
   return {
     bootstrap,
+    ...(backendConnection ? { backendConnection: () => backendConnection } : {}),
     messages: {
       post: (message) => vscode?.postMessage(message),
       subscribe: subscribeWindowMessages,

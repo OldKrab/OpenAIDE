@@ -1,6 +1,7 @@
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import * as vscode from "vscode";
 import type {
+  AppServerSessionHostMessage,
   ClientWorkspaceRoot,
   ProtocolMethod,
   RequestMeta,
@@ -41,7 +42,7 @@ export class RuntimeClient implements vscode.Disposable {
     private readonly runtimeProcess: RuntimeProcess,
     private readonly logger: ExtensionLogger,
   ) {
-    this.appServerHostClient = new AppServerHostClient(runtimeProcess);
+    this.appServerHostClient = new AppServerHostClient(runtimeProcess, logger);
     this.runtimeProcess.onExit(() => {
       this.started = false;
       this.starting = undefined;
@@ -64,6 +65,14 @@ export class RuntimeClient implements vscode.Disposable {
 
   async syncWorkspaceRoots(roots: ClientWorkspaceRoot[]) {
     await this.appServerHostClient.syncWorkspaceRoots(roots);
+  }
+
+  attachAppServerView(viewId: string, post: (message: AppServerSessionHostMessage) => void) {
+    return this.appServerHostClient.attachView(viewId, post);
+  }
+
+  handleAppServerViewMessage(viewId: string, message: unknown) {
+    return this.appServerHostClient.handleViewMessage(viewId, message);
   }
 
   dispose() {

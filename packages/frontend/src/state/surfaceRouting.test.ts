@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   agentProjectRequestKey,
   configOptionsRequestKey,
+  shouldLoadTaskNavigation,
   shouldLoadNativeSessions,
   shouldLoadNewTaskConfigOptions,
   shouldRequestWorkspaceRoots,
@@ -31,13 +32,21 @@ describe("webview surface routing", () => {
     expect(shouldRequestWorkspaceRoots({ surface: "invalid" })).toBe(false);
   });
 
-  it("loads native sessions for usable surfaces when a project is available", () => {
-    expect(shouldLoadNativeSessions({ surface: "navigation" }, "project_1")).toBe(true);
-    expect(shouldLoadNativeSessions({ surface: "task" }, "project_1")).toBe(true);
-    expect(shouldLoadNativeSessions({ surface: "settings" }, "project_1")).toBe(true);
+  it("loads native sessions only where Task Navigation is rendered", () => {
+    expect(shouldLoadNativeSessions({ surface: "navigation", shell: { kind: "vscodeExtension" } }, "project_1")).toBe(true);
+    expect(shouldLoadNativeSessions({ surface: "task", shell: { kind: "vscodeExtension" } }, "project_1")).toBe(false);
+    expect(shouldLoadNativeSessions({ surface: "settings", shell: { kind: "vscodeExtension" } }, "project_1")).toBe(false);
+    expect(shouldLoadNativeSessions({ surface: "task", shell: { kind: "web" } }, "project_1")).toBe(true);
     expect(shouldLoadNativeSessions({ surface: "task" }, undefined)).toBe(false);
     expect(shouldLoadNativeSessions({ surface: "task" }, "")).toBe(false);
     expect(shouldLoadNativeSessions({ surface: "invalid" }, "project_1")).toBe(false);
+  });
+
+  it("subscribes Task Navigation only for a rendered navigation region", () => {
+    expect(shouldLoadTaskNavigation({ surface: "navigation", shell: { kind: "vscodeExtension" } })).toBe(true);
+    expect(shouldLoadTaskNavigation({ surface: "task", shell: { kind: "vscodeExtension" } })).toBe(false);
+    expect(shouldLoadTaskNavigation({ surface: "settings", shell: { kind: "vscodeExtension" } })).toBe(false);
+    expect(shouldLoadTaskNavigation({ surface: "task", shell: { kind: "web" } })).toBe(true);
   });
 
   it("keys prepared options by agent and project", () => {
