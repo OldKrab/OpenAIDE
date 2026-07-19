@@ -88,7 +88,7 @@ impl AgentStatusCache {
                 "Authentication is already in progress for Agent {agent_id}"
             )));
         }
-        snapshot.status_before_authentication = Some(snapshot.status.clone());
+        snapshot.status_before_authentication = Some(snapshot.status);
         snapshot.status = AgentStatus::Authenticating;
         snapshot.authenticating_method_id = Some(method_id.to_string());
         Ok(())
