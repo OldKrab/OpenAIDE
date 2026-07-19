@@ -35,16 +35,19 @@ export default defineConfig({
     outDir: "dist",
     minify: !debugBuild,
     sourcemap: true,
-    rollupOptions: {
+    rolldownOptions: {
       output: {
         entryFileNames: "assets/[name].js",
         chunkFileNames: "assets/[name].js",
         assetFileNames: "assets/[name][extname]",
-        manualChunks: {
-          icons: ["lucide-react"],
-          markdown: ["react-markdown", "remark-gfm"],
-          react: ["react", "react-dom"],
-          search: ["fuzzysort"],
+        // Preserve stable vendor boundaries with Rolldown's supported code-splitting API.
+        codeSplitting: {
+          groups: [
+            { name: "icons", test: /node_modules[\\/]lucide-react[\\/]/ },
+            { name: "markdown", test: /node_modules[\\/](?:react-markdown|remark-gfm)[\\/]/ },
+            { name: "react", test: /node_modules[\\/](?:react|react-dom)[\\/]/ },
+            { name: "search", test: /node_modules[\\/]fuzzysort[\\/]/ },
+          ],
         },
       }
     }
