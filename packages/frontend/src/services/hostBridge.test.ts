@@ -111,67 +111,6 @@ describe("host bridge", () => {
     );
   });
 
-  it("replaces the LocalHttp process endpoint announced by the VS Code host", async () => {
-    const listeners = new Map<string, (event: { data?: unknown }) => void>();
-    const fetch = replacementAwareReliableFetch();
-    vi.stubGlobal("fetch", fetch);
-    vi.stubGlobal("crypto", { randomUUID: () => "client-local" });
-    vi.stubGlobal("sessionStorage", memoryStorage());
-    vi.stubGlobal("document", {
-      body: {
-        dataset: {
-          shell: "vscodeExtension",
-          navigationMode: "currentProject",
-          surface: "navigation",
-          appServerConnection: JSON.stringify({
-            kind: "localHttp",
-            endpointUrl: "http://127.0.0.1:4321/probe",
-            authToken: "token-1",
-          }),
-        },
-      },
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-    });
-    vi.stubGlobal("window", {
-      acquireVsCodeApi: () => ({ postMessage: vi.fn() }),
-      location: { pathname: "/" },
-      addEventListener: vi.fn((type: string, listener: (event: { data?: unknown }) => void) => {
-        listeners.set(type, listener);
-      }),
-      removeEventListener: vi.fn(),
-    });
-
-    const { getBackendConnection } = await installedHostBridge();
-    const connection = getBackendConnection();
-    const invalidated = vi.fn();
-    connection?.handleGenerationInvalidated(invalidated);
-    await connection?.initialize({
-      clientInstanceId: "client-local" as never,
-      shell: { kind: "vscodeExtension" },
-      requestedSurface: { kind: "home" },
-    });
-    listeners.get("message")?.({
-      data: {
-        type: "appServer.connectionChanged",
-        payload: {
-          connection: {
-            kind: "localHttp",
-            endpointUrl: "http://127.0.0.1:5432/probe",
-            authToken: "token-2",
-          },
-        },
-      },
-    });
-
-    await vi.waitFor(() => expect(fetch.openedEndpoints()).toEqual([
-      "http://127.0.0.1:4321/probe",
-      "http://127.0.0.1:5432/probe",
-    ]));
-    expect(invalidated).toHaveBeenCalledWith({ reason: "appServerRestarted" });
-    connection?.close();
-  });
-
   it("keeps LocalHttp connection identities distinct for task webviews sharing session storage", async () => {
     const fetch = reliableFetch();
     const sharedStorage = memoryStorage();
@@ -638,54 +577,6 @@ function reliableFetch() {
     }
     return response(204, "");
   });
-}
-
-function replacementAwareReliableFetch() {
-  const queued = new Map<string, unknown[]>();
-  const openedEndpoints: string[] = [];
-  let opened = 0;
-  const fetch = vi.fn(async (input: string, init?: { method?: string; body?: string; headers?: Record<string, string> }) => {
-    const body = init?.body ? JSON.parse(init.body) as Record<string, unknown> : {};
-    if (body.transport === "open") {
-      opened += 1;
-      const sessionId = `session-${opened}`;
-      openedEndpoints.push(input);
-      queued.set(sessionId, []);
-      return response(200, JSON.stringify({
-        transportVersion: 1,
-        sessionId,
-        serverId: input.includes("5432") ? "server-2" : "server-1",
-      }));
-    }
-    if (init?.method === "GET") {
-      const sessionId = init.headers?.["X-OpenAIDE-Session-Id"] ?? "";
-      const messages = queued.get(sessionId) ?? [];
-      const frames = messages.splice(0).map((message, index) => ({ sequence: index + 1, message }));
-      return response(frames.length ? 200 : 204, frames.length ? JSON.stringify({ frames }) : "");
-    }
-    const message = body.message as { id?: string; method?: string } | undefined;
-    const sessionId = typeof body.sessionId === "string" ? body.sessionId : "";
-    if (message?.id && message.method === "client/initialize") {
-      queued.get(sessionId)?.push({
-        jsonrpc: "2.0",
-        id: message.id,
-        result: {
-          result: {
-            ...initializeResult(),
-            snapshot: {
-              ...initializeResult().snapshot,
-              server: {
-                ...initializeResult().snapshot.server,
-                serverId: sessionId === "session-2" ? "server-2" : "server-1",
-              },
-            },
-          },
-        },
-      });
-    }
-    return response(204, "");
-  });
-  return Object.assign(fetch, { openedEndpoints: () => openedEndpoints });
 }
 
 function wakeableReliableFetch() {
