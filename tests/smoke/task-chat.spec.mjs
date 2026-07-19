@@ -84,6 +84,29 @@ test("creates a New Task, sends once, streams Chat, tools, and Agent title", asy
   await expect(page.getByRole("textbox", { name: "Message" })).toHaveText("");
 });
 
+test("recovers an open Task composer once after client liveness expires", async ({ page }) => {
+  await openPreparedNewTask(page);
+  await send(page, "smoke:basic");
+
+  const editor = page.getByRole("textbox", { name: "Message" });
+  await expect(page.getByLabel("Task status: Ready")).toBeVisible();
+  await editor.fill("draft survives recovery");
+  await startComposerPlaceholderTrace(page);
+  const stopExpiryFault = await reportClientLivenessExpiredOnNextHeartbeat(page);
+  try {
+    await page.waitForTimeout(2_000);
+    const transitions = await composerPlaceholderTrace(page);
+    expect(transitions).toEqual([
+      "Send follow-up",
+      "Reconnecting. Draft is saved here.",
+      "Send follow-up",
+    ]);
+    await expect(editor).toHaveText("draft survives recovery");
+  } finally {
+    await stopExpiryFault();
+  }
+});
+
 test("keeps a live permission visible while later ACP updates arrive and resolves it", async ({ page }) => {
   await openPreparedNewTask(page);
   await send(page, "smoke:permission");
@@ -228,4 +251,107 @@ async function send(page, text) {
   const editor = page.getByRole("textbox", { name: "Message" });
   await editor.fill(text);
   await page.getByLabel("Send message").click();
+}
+
+async function startComposerPlaceholderTrace(page) {
+  await page.evaluate(() => {
+    const transitions = [];
+    const sample = () => {
+      const editor = document.querySelector('[role="textbox"][aria-label="Message"]');
+      const value = editor instanceof HTMLElement
+        ? editor.getAttribute("data-placeholder") ?? "missing"
+        : "missing";
+      if (transitions.at(-1) !== value) transitions.push(value);
+    };
+    sample();
+    const interval = window.setInterval(sample, 25);
+    window.__openaideComposerPlaceholderTrace = { interval, transitions };
+  });
+}
+
+async function composerPlaceholderTrace(page) {
+  return page.evaluate(() => window.__openaideComposerPlaceholderTrace?.transitions ?? []);
+}
+
+async function reportClientLivenessExpiredOnNextHeartbeat(page) {
+  const probePattern = "**/__openaide-app-server/probe";
+  let pendingError;
+  let expiredSessionId;
+  let resolveHeartbeat;
+  let resolveInjected;
+  const observed = [];
+  const heartbeat = new Promise((resolve) => { resolveHeartbeat = resolve; });
+  const injected = new Promise((resolve) => { resolveInjected = resolve; });
+  const injectExpiry = async (route) => {
+    const request = route.request();
+    if (request.method() === "POST") {
+      const body = request.postDataJSON();
+      observed.push(`POST:${body?.transport ?? "unknown"}:${body?.message?.method ?? "no-method"}`);
+      if (
+        !expiredSessionId
+        && body?.transport === "send"
+        && body.message?.method === "client/heartbeat"
+      ) {
+        // Reproduce the App Server's real liveness-expiry response at the web proxy boundary.
+        expiredSessionId = body.sessionId;
+        pendingError = {
+          jsonrpc: "2.0",
+          id: body.message.id,
+          error: {
+            error: {
+              code: "notInitialized",
+              message: "client/initialize must succeed before product requests",
+            },
+          },
+        };
+        await route.fulfill({ status: 204, body: "" });
+        resolveHeartbeat();
+        return;
+      }
+      if (body?.sessionId === expiredSessionId) {
+        // The synthetic response did not reach the real server, so quarantine this obsolete session.
+        await route.fulfill({ status: 204, body: "" });
+        return;
+      }
+    }
+    if (request.method() === "GET" && pendingError) {
+      observed.push("GET:inject");
+      const after = Number(request.headers()["x-openaide-after"] ?? "0");
+      const message = pendingError;
+      pendingError = undefined;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ frames: [{ sequence: after + 1, message }] }),
+      });
+      resolveInjected();
+      return;
+    }
+    if (
+      request.method() === "GET"
+      && request.headers()["x-openaide-session-id"] === expiredSessionId
+    ) {
+      await route.fulfill({ status: 204, body: "" });
+      return;
+    }
+    await route.continue();
+  };
+  await page.route(probePattern, injectExpiry);
+  try {
+    await Promise.race([
+      heartbeat,
+      new Promise((_, reject) => setTimeout(() => reject(new Error("Heartbeat was not observed")), 10_000)),
+    ]);
+    await page.evaluate(() => window.dispatchEvent(new Event("online")));
+    await Promise.race([
+      injected,
+      new Promise((_, reject) => setTimeout(() => reject(new Error(
+        `Heartbeat expiry was not injected: ${observed.slice(-20).join(", ")}`,
+      )), 10_000)),
+    ]);
+    return () => page.unroute(probePattern, injectExpiry);
+  } catch (error) {
+    await page.unroute(probePattern, injectExpiry);
+    throw error;
+  }
 }
