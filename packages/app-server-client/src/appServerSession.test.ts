@@ -205,6 +205,42 @@ describe("AppServerSession", () => {
     session.close();
   });
 
+  it("joins physical recovery when the wake heartbeat is closed by generation replacement", async () => {
+    const heartbeat = deferred<Record<symbol, never>>();
+    const replacement = deferred<StateSubscribeResult>();
+    let subscribeCount = 0;
+    const raw = fakeConnection(async (method) => {
+      if (method === CLIENT_HEARTBEAT) return heartbeat.promise;
+      if (method !== STATE_SUBSCRIBE) throw new Error(`Unexpected request: ${method}`);
+      subscribeCount += 1;
+      return subscribeCount === 1
+        ? taskSubscription("cursor_1", 1)
+        : replacement.promise;
+    });
+    const session = createAppServerSession(raw.connection);
+    const statuses: string[] = [];
+    session.handleSessionStatus(({ status }) => statuses.push(status));
+    await session.initialize(initializeParams());
+    session.subscribeState(
+      { kind: "task", taskId: "task_1" as TaskId },
+      { onSnapshot: vi.fn() },
+    );
+    await vi.waitFor(() => expect(subscribeCount).toBe(1));
+
+    raw.wake();
+    raw.invalidate({ reason: "clientLivenessExpired" });
+    heartbeat.reject(new Error("RPC peer is closed"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(statuses).not.toContain("unavailable");
+    raw.recover({ reason: "clientLivenessExpired", result: initializeResult() });
+    await vi.waitFor(() => expect(subscribeCount).toBe(2));
+    replacement.resolve(taskSubscription("cursor_2", 2));
+    await vi.waitFor(() => expect(statuses.at(-1)).toBe("ready"));
+    expect(statuses).not.toContain("unavailable");
+    session.close();
+  });
+
   it("refreshes once for a cursor gap and replays events received behind the new baseline", async () => {
     const replacement = deferred<StateSubscribeResult>();
     let subscribeCount = 0;
@@ -654,8 +690,10 @@ function initializeResult(): InitializeResult {
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((done) => {
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((done, fail) => {
     resolve = done;
+    reject = fail;
   });
-  return { promise, resolve };
+  return { promise, reject, resolve };
 }

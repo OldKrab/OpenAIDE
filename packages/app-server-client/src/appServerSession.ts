@@ -236,7 +236,18 @@ export function createAppServerSession(connection: BackendConnection): AppServer
       if (status.status === "unavailable") throw status.error;
       return;
     }
-    await connection.request(CLIENT_HEARTBEAT, {});
+    const wakeGeneration = generation;
+    try {
+      await connection.request(CLIENT_HEARTBEAT, {});
+    } catch (error) {
+      // Replacing the expired physical peer can reject its in-flight probe.
+      // The new generation, not that obsolete request, owns the wake outcome.
+      if (generation === wakeGeneration) throw error;
+      const replacement = recoveryGate;
+      if (replacement) await replacement.promise;
+      if (status.status === "unavailable") throw status.error;
+      return;
+    }
     await refreshCurrentReplicas();
   }
 
