@@ -9,6 +9,9 @@
       "args": [
         "--extensionDevelopmentPath=${workspaceFolder}/apps/vscode-extension"
       ],
+      "env": {
+        "OPENAIDE_STORAGE_ROOT": "${workspaceFolder}/.vscode-test/openaide-storage"
+      },
       "outFiles": [
         "${workspaceFolder}/apps/vscode-extension/dist/**/*.js"
       ]

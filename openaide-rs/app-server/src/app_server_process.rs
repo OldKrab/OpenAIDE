@@ -3,10 +3,10 @@ use std::path::Path;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::client_lifecycle::{AppServerTime, ClientExpiryOutcome};
+use crate::client_lifecycle::AppServerTime;
 use crate::protocol_edge::local_http::listener::{handle_app_stream, LocalHttpProbeListener};
 use crate::protocol_edge::local_http::LocalHttpAppHandler;
-use crate::protocol_edge::{IdleShutdownDecision, SharedRpcGateway, ShutdownBlockers};
+use crate::protocol_edge::SharedRpcGateway;
 use crate::storage_runtime::{
     EndpointRecordStore, RuntimeEndpoint, RuntimeEndpointRecord, RuntimeEndpointRecordStatus,
     StateRoot, StateRootFingerprint, TransportKind,
@@ -15,85 +15,6 @@ use thiserror::Error;
 use uuid::Uuid;
 
 const LOCAL_HTTP_ACCEPT_ERROR_BACKOFF: Duration = Duration::from_millis(25);
-
-/// Remembers that the last client expired until task work settles or a client reconnects.
-/// Client expiry is an edge-triggered event, while task/request settlement is not, so the
-/// process loop must retain this state and re-evaluate shutdown on later ticks.
-#[derive(Debug, Default)]
-struct IdleShutdownMonitor {
-    pending: bool,
-    deferred_reported: bool,
-    check_failure_reported: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum IdleShutdownMonitorAction {
-    ShutdownNow,
-    Deferred {
-        blockers: ShutdownBlockers,
-        should_log: bool,
-    },
-    AbortedByClient,
-}
-
-impl IdleShutdownMonitor {
-    fn observe_expirations(&mut self, outcomes: &[ClientExpiryOutcome]) {
-        if outcomes.iter().any(|outcome| {
-            matches!(
-                outcome,
-                ClientExpiryOutcome::Expired {
-                    last_client: true,
-                    ..
-                }
-            )
-        }) {
-            self.pending = true;
-            self.deferred_reported = false;
-            self.check_failure_reported = false;
-        }
-    }
-
-    fn should_check(&self) -> bool {
-        self.pending
-    }
-
-    fn observe_decision(&mut self, decision: IdleShutdownDecision) -> IdleShutdownMonitorAction {
-        self.check_failure_reported = false;
-        match decision {
-            IdleShutdownDecision::ShutdownNow => {
-                // Shutdown changes the gateway to Stopping even if persistence fails. Do not
-                // issue a second request and mistake AlreadyStopping for a clean release.
-                self.pending = false;
-                IdleShutdownMonitorAction::ShutdownNow
-            }
-            IdleShutdownDecision::KeepRunning {
-                initialized_clients: true,
-                ..
-            } => {
-                self.pending = false;
-                self.deferred_reported = false;
-                IdleShutdownMonitorAction::AbortedByClient
-            }
-            IdleShutdownDecision::KeepRunning {
-                initialized_clients: false,
-                blockers,
-            } => {
-                let should_log = !self.deferred_reported;
-                self.deferred_reported = true;
-                IdleShutdownMonitorAction::Deferred {
-                    blockers,
-                    should_log,
-                }
-            }
-        }
-    }
-
-    fn observe_check_failure(&mut self) -> bool {
-        let should_log = !self.check_failure_reported;
-        self.check_failure_reported = true;
-        should_log
-    }
-}
 
 #[derive(Clone)]
 pub struct PublishedAppServerEndpoint {
@@ -173,7 +94,7 @@ pub fn publish_local_http_probe_endpoint(
         server_id,
         auth_token,
     };
-    start_client_liveness_expirer(gateway.clone(), endpoint.clone());
+    start_client_liveness_expirer(gateway.clone());
     start_local_http_listener(
         listener,
         LocalHttpAppHandler::new(
@@ -232,9 +153,10 @@ fn local_http_error_fields(
     fields
 }
 
-fn start_client_liveness_expirer(gateway: SharedRpcGateway, endpoint: PublishedAppServerEndpoint) {
+/// Expires abandoned product clients without treating UI inactivity as process lifetime.
+/// The App Shell owns the handoff process through its stdio lifetime and explicit shutdown.
+fn start_client_liveness_expirer(gateway: SharedRpcGateway) {
     thread::spawn(move || {
-        let mut shutdown_monitor = IdleShutdownMonitor::default();
         gateway.request_native_session_catalog_refresh();
         let mut last_native_catalog_refresh = Instant::now();
         loop {
@@ -249,64 +171,6 @@ fn start_client_liveness_expirer(gateway: SharedRpcGateway, endpoint: PublishedA
                     "local_http_clients_expired",
                     serde_json::json!({ "count": expired.len() }),
                 );
-            }
-            shutdown_monitor.observe_expirations(&expired);
-            if !shutdown_monitor.should_check() {
-                continue;
-            }
-
-            match gateway.idle_shutdown_decision() {
-                Ok(decision) => match shutdown_monitor.observe_decision(decision) {
-                    IdleShutdownMonitorAction::ShutdownNow => match gateway.shutdown() {
-                        Ok(crate::app_lifecycle::ShutdownCompletion::CleanRelease) => {
-                            endpoint.remove_if_current();
-                            crate::logging::info(
-                                "local_http_shutdown_clean",
-                                serde_json::json!({}),
-                            );
-                            std::process::exit(0);
-                        }
-                        Ok(
-                            crate::app_lifecycle::ShutdownCompletion::UncleanLeaseExpiryRequired,
-                        ) => {
-                            crate::logging::error(
-                                "local_http_shutdown_unclean",
-                                serde_json::json!({ "error": "shutdown persistence was not coherent" }),
-                            );
-                        }
-                        Err(error) => {
-                            crate::logging::error(
-                                "local_http_shutdown_failed",
-                                serde_json::json!({ "error": error.to_string() }),
-                            );
-                        }
-                    },
-                    IdleShutdownMonitorAction::Deferred {
-                        blockers,
-                        should_log: true,
-                    } => {
-                        crate::logging::info(
-                            "local_http_shutdown_deferred",
-                            serde_json::json!({
-                                "initialized_clients": false,
-                                "active_turns": blockers.active_turns,
-                                "pending_task_requests": blockers.pending_task_requests,
-                            }),
-                        );
-                    }
-                    IdleShutdownMonitorAction::Deferred {
-                        should_log: false, ..
-                    }
-                    | IdleShutdownMonitorAction::AbortedByClient => {}
-                },
-                Err(error) => {
-                    if shutdown_monitor.observe_check_failure() {
-                        crate::logging::error(
-                            "local_http_shutdown_check_failed",
-                            serde_json::json!({ "error": error.to_string() }),
-                        );
-                    }
-                }
             }
         }
     });

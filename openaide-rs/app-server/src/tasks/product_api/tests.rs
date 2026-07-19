@@ -895,7 +895,7 @@ fn create_persists_preparing_and_starts_one_native_session_asynchronously() {
     assert!(accepted.turn_id.as_str().starts_with("turn_"));
     wait_until(|| agent.prompts.load(Ordering::SeqCst) == 1);
     assert_eq!(agent.starts.load(Ordering::SeqCst), 1);
-    assert_eq!(agent.attaches.load(Ordering::SeqCst), 1);
+    assert_eq!(agent.attaches.load(Ordering::SeqCst), 2);
     assert_eq!(
         store
             .read_task(snapshot.task.task_id.as_str())
@@ -1109,7 +1109,7 @@ fn create_closes_native_session_when_preparation_event_attachment_fails() {
     });
     let failed = store.read_task(created.task.task_id.as_str()).unwrap();
 
-    assert_eq!(failed.agent_session_id, None);
+    assert_eq!(failed.agent_session_id.as_deref(), Some("recorded-session"));
     assert_eq!(failed.config_options_catalog, None);
     assert_eq!(failed.agent_commands_catalog, None);
     assert_eq!(agent.starts.load(Ordering::SeqCst), 1);
@@ -1160,7 +1160,7 @@ fn first_send_reuses_the_native_session_prepared_during_create() {
 
     wait_until(|| agent.prompts.load(Ordering::SeqCst) == 1);
     assert_eq!(agent.starts.load(Ordering::SeqCst), 1);
-    assert_eq!(agent.attaches.load(Ordering::SeqCst), 1);
+    assert_eq!(agent.attaches.load(Ordering::SeqCst), 2);
     assert_eq!(
         agent.prompt_calls.lock().unwrap().as_slice(),
         &[("recorded-session".to_string(), "hello".to_string())]
@@ -1297,7 +1297,7 @@ fn acquire_returns_while_prepared_session_resume_is_blocked() {
 }
 
 #[test]
-fn first_send_replaces_a_prepared_session_missing_from_the_agent_runtime() {
+fn missing_prepared_session_fails_without_replacing_the_task_binding() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut draft = task_record("task-draft", "/tmp/openaide-unit-workspace/app");
@@ -1326,19 +1326,19 @@ fn first_send_replaces_a_prepared_session_missing_from_the_agent_runtime() {
     wait_until(|| {
         matches!(
             store.read_task("task-draft").unwrap().preparation,
-            TaskPreparationRecord::Ready
+            TaskPreparationRecord::Failed { .. }
         )
     });
 
-    api.send(send_params("task-draft", "hello")).unwrap();
-
-    wait_until(|| agent.prompts.load(Ordering::SeqCst) == 1);
+    let error = api.send(send_params("task-draft", "hello")).unwrap_err();
+    assert_eq!(error.code, ProtocolErrorCode::Internal);
     assert!(agent.resumes.load(Ordering::SeqCst) >= 1);
     assert_eq!(agent.loads.load(Ordering::SeqCst), 0);
-    assert!(agent.starts.load(Ordering::SeqCst) >= 1);
+    assert_eq!(agent.starts.load(Ordering::SeqCst), 0);
+    assert_eq!(agent.prompts.load(Ordering::SeqCst), 0);
     assert_eq!(
         store.read_task("task-draft").unwrap().agent_session_id,
-        Some("recorded-session".to_string())
+        Some("missing-session".to_string())
     );
 }
 
@@ -1471,7 +1471,10 @@ fn startup_marks_abandoned_preparation_failed_and_removes_it_from_the_pool() {
         TaskPreparationRecord::Failed { .. }
     ));
     assert!(record.tombstoned);
-    assert_eq!(record.agent_session_id, None);
+    assert_eq!(
+        record.agent_session_id.as_deref(),
+        Some("bound-before-attach")
+    );
     assert_eq!(record.config_options_catalog, None);
     assert_eq!(record.agent_commands_catalog, None);
     assert_eq!(
@@ -3317,7 +3320,7 @@ fn send_preserves_hydrated_session_state_when_resume_returns_identity_only() {
 }
 
 #[test]
-fn send_after_restart_starts_fresh_session_when_stored_session_load_times_out() {
+fn send_after_restart_does_not_replace_session_when_stored_session_load_times_out() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut task = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
@@ -3339,17 +3342,14 @@ fn send_after_restart_starts_fresh_session_when_stored_session_load_times_out() 
 
     api.send(send_params("task-existing", "hello")).unwrap();
 
-    wait_until(|| agent.prompts.load(Ordering::SeqCst) == 1);
+    wait_until(|| store.read_task("task-existing").unwrap().status == TaskStatus::Inactive);
     assert_eq!(agent.resumes.load(Ordering::SeqCst), 1);
     assert_eq!(agent.loads.load(Ordering::SeqCst), 1);
-    assert_eq!(agent.starts.load(Ordering::SeqCst), 1);
-    assert_eq!(
-        agent.prompt_calls.lock().unwrap().as_slice(),
-        &[("recorded-session".to_string(), "hello".to_string())]
-    );
+    assert_eq!(agent.starts.load(Ordering::SeqCst), 0);
+    assert_eq!(agent.prompts.load(Ordering::SeqCst), 0);
     assert_eq!(
         store.read_task("task-existing").unwrap().agent_session_id,
-        Some("recorded-session".to_string())
+        Some("stored-session".to_string())
     );
 }
 
@@ -3513,7 +3513,7 @@ fn send_session_attach_failure_returns_task_to_idle_and_closes_new_session() {
         .send(send_params("task-existing", "hello"))
         .expect("a durably committed send must remain accepted");
 
-    wait_until(|| agent.closes.load(Ordering::SeqCst) == 1);
+    wait_until(|| store.read_task("task-existing").unwrap().status == TaskStatus::Inactive);
 
     assert!(accepted.turn_id.as_str().starts_with("turn_"));
     assert_eq!(agent.starts.load(Ordering::SeqCst), 1);
@@ -3523,7 +3523,7 @@ fn send_session_attach_failure_returns_task_to_idle_and_closes_new_session() {
     let task = store.read_task("task-existing").unwrap();
     assert_eq!(task.status, TaskStatus::Inactive);
     assert_eq!(task.active_turn_id, None);
-    assert_eq!(task.agent_session_id, None);
+    assert_eq!(task.agent_session_id.as_deref(), Some("recorded-session"));
 }
 
 #[test]
@@ -4234,7 +4234,7 @@ fn cancel_stays_stopping_until_the_agent_prompt_settles() {
 }
 
 #[test]
-fn cancel_timeout_discards_the_session_and_ends_the_turn() {
+fn cancel_timeout_closes_live_session_but_preserves_task_binding_for_resume() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
@@ -4274,7 +4274,7 @@ fn cancel_timeout_discards_the_session_and_ends_the_turn() {
     });
     let task = store.read_task("task-existing").unwrap();
     assert_eq!(task.active_turn_id, None);
-    assert_eq!(task.agent_session_id, None);
+    assert_eq!(task.agent_session_id.as_deref(), Some("recorded-session"));
     assert_eq!(agent.closes.load(Ordering::SeqCst), 1);
     assert!(store
         .read_messages("task-existing")
@@ -4293,7 +4293,20 @@ fn cancel_timeout_discards_the_session_and_ends_the_turn() {
     let task_after_late_prompt = store.read_task("task-existing").unwrap();
     assert_eq!(task_after_late_prompt.status, TaskStatus::Inactive);
     assert_eq!(task_after_late_prompt.active_turn_id, None);
-    assert_eq!(task_after_late_prompt.agent_session_id, None);
+    assert_eq!(
+        task_after_late_prompt.agent_session_id.as_deref(),
+        Some("recorded-session")
+    );
+
+    agent.release_prompt.store(true, Ordering::SeqCst);
+    api.send(send_params("task-existing", "continue")).unwrap();
+    wait_until(|| agent.prompts.load(Ordering::SeqCst) == 2);
+    assert_eq!(agent.starts.load(Ordering::SeqCst), 1);
+    assert_eq!(agent.resumes.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        agent.prompt_calls.lock().unwrap().last(),
+        Some(&("recorded-session".to_string(), "continue".to_string()))
+    );
 }
 
 #[test]
@@ -5264,7 +5277,7 @@ fn blocked_config_change_does_not_stall_an_unrelated_task() {
 }
 
 #[test]
-fn set_config_option_reconciles_without_error_after_task_binds_a_newer_session() {
+fn set_config_option_continues_after_concurrent_session_replacement_is_rejected() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut record = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
@@ -5300,7 +5313,8 @@ fn set_config_option_reconciles_without_error_after_task_binds_a_newer_session()
             .unwrap();
     });
     wait_until(|| agent.session_config_updates.lock().unwrap().len() == 1);
-    api.mutations
+    let replacement_error = api
+        .mutations
         .commit_existing_task("task-existing", TaskCommitOptions::metadata(), |ctx| {
             let task = ctx.task_mut();
             task.agent_session_id = Some("session-b".to_string());
@@ -5308,7 +5322,11 @@ fn set_config_option_reconciles_without_error_after_task_binds_a_newer_session()
             task.config_options_catalog = Some(config_catalog("gpt-5"));
             Ok(crate::tasks::mutation::TaskMutationResult::Changed)
         })
-        .unwrap();
+        .unwrap_err();
+    assert!(
+        matches!(replacement_error, RuntimeError::Internal(message) if
+        message == "task mutation changed bound Native Session identity")
+    );
     agent.block_set_config.store(false, Ordering::SeqCst);
 
     let snapshot = result_rx
@@ -5317,12 +5335,12 @@ fn set_config_option_reconciles_without_error_after_task_binds_a_newer_session()
         .unwrap();
     let stored = store.read_task("task-existing").unwrap();
 
-    assert_eq!(stored.agent_session_id.as_deref(), Some("session-b"));
+    assert_eq!(stored.agent_session_id.as_deref(), Some("session-a"));
     assert_eq!(
         stored.config_options.get("model").map(String::as_str),
-        Some("gpt-5")
+        Some("gpt-5.5")
     );
-    assert_eq!(snapshot.agent_config.options[0].current_value, "gpt-5");
+    assert_eq!(snapshot.agent_config.options[0].current_value, "gpt-5.5");
     assert_eq!(snapshot.agent_config.pending_change, None);
 }
 

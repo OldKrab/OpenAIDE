@@ -29,6 +29,9 @@ impl TaskTransitions {
         let result = self
             .mutations
             .commit_existing_task(task_id, chat_commit_options(), |ctx| {
+                if ctx.task().agent_session_id.as_deref() != Some(session_id) {
+                    return Ok(TaskMutationResult::Unchanged);
+                }
                 let now = now_string();
                 append_interruption(
                     ctx,
@@ -40,9 +43,6 @@ impl TaskTransitions {
 
                 let task = ctx.task_mut();
                 task.status = TaskStatus::Failed;
-                if task.agent_session_id.as_deref() == Some(session_id) {
-                    task.agent_session_id = None;
-                }
                 task.unread = true;
                 task.updated_at = now.clone();
                 task.last_activity = now;

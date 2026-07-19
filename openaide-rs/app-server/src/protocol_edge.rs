@@ -96,28 +96,15 @@ pub struct RpcGateway {
 
 pub(crate) trait AppServerShutdownWorkflow: Send + Sync {
     fn shutdown(&self) -> Result<(), RuntimeError>;
+    #[cfg(test)]
     fn shutdown_blockers(&self) -> Result<ShutdownBlockers, RuntimeError>;
 }
 
+#[cfg(test)]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct ShutdownBlockers {
     pub active_turns: usize,
     pub pending_task_requests: usize,
-}
-
-impl ShutdownBlockers {
-    pub(crate) fn is_empty(&self) -> bool {
-        self.active_turns == 0 && self.pending_task_requests == 0
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum IdleShutdownDecision {
-    ShutdownNow,
-    KeepRunning {
-        initialized_clients: bool,
-        blockers: ShutdownBlockers,
-    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

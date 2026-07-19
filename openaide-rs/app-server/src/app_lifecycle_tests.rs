@@ -25,21 +25,6 @@ fn initialize_during_stopping_is_rejected() {
 }
 
 #[test]
-fn last_client_expiry_starts_draining_once() {
-    let mut lifecycle = AppLifecycle::new();
-
-    assert_eq!(
-        lifecycle.observe_last_client_expired(),
-        ClientLifecycleEffect::BeginDraining
-    );
-    assert_eq!(lifecycle.state(), LifecycleState::Draining);
-    assert_eq!(
-        lifecycle.observe_last_client_expired(),
-        ClientLifecycleEffect::Noop
-    );
-}
-
-#[test]
 fn shutdown_request_returns_ordered_plan() {
     let mut lifecycle = AppLifecycle::new();
 

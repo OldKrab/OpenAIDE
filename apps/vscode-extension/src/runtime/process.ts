@@ -8,6 +8,9 @@ import { resolveRuntimePath, type RuntimeSourceKind, type StorageRootKind } from
 export const RUNTIME_SHUTDOWN_GRACE_MS = 10_000;
 const APP_SERVER_HANDOFF_TIMEOUT_MS = 5_000;
 const APP_SERVER_HANDOFF_MAX_LINE_BYTES = 8 * 1024;
+const APP_SERVER_HEALTH_INTERVAL_MS = 5_000;
+const APP_SERVER_HEALTH_TIMEOUT_MS = 3_000;
+const APP_SERVER_HEALTH_FAILURE_THRESHOLD = 2;
 const SHELL_CONTROL_STDIO_PROTOCOL = "shell-control-stdio";
 
 type RuntimeShutdownChild = Pick<ChildProcessWithoutNullStreams, "killed" | "kill" | "once" | "stdin">;
@@ -53,9 +56,16 @@ export function requestRuntimeShutdown(
 
 export class RuntimeProcess implements vscode.Disposable {
   private child: ChildProcessWithoutNullStreams | undefined;
-  private appServerChild: ChildProcessWithoutNullStreams | undefined;
+  private readonly appServerChildren = new Set<ChildProcessWithoutNullStreams>();
   private appServerConnection: Promise<WebviewAppServerConnection> | undefined;
+  private currentAppServerConnection: WebviewAppServerConnection | undefined;
+  private appServerRecovery: Promise<void> | undefined;
+  private appServerHealthTimer: NodeJS.Timeout | undefined;
+  private appServerHealthCheckInFlight = false;
+  private appServerHealthFailures = 0;
+  private disposed = false;
   private readonly exitListeners = new Set<(event: { code: number | null; signal: NodeJS.Signals | null }) => void>();
+  private readonly appServerConnectionListeners = new Set<(connection: WebviewAppServerConnection) => void>();
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -104,31 +114,53 @@ export class RuntimeProcess implements vscode.Disposable {
   }
 
   async startAppServerConnection(): Promise<WebviewAppServerConnection> {
+    if (this.disposed) throw new Error("Runtime process is disposed");
+    if (this.currentAppServerConnection) return this.currentAppServerConnection;
     if (this.appServerConnection) return this.appServerConnection;
 
-    this.appServerConnection = this.launchAppServerConnection().catch((error) => {
-      this.appServerConnection = undefined;
-      throw error;
-    });
+    const launch = this.launchAppServerConnection()
+      .then((connection) => {
+        if (this.disposed) throw new Error("Runtime process was disposed during App Server handoff");
+        this.currentAppServerConnection = connection;
+        this.startAppServerHealthMonitor();
+        return connection;
+      })
+      .finally(() => {
+        if (this.appServerConnection === launch) this.appServerConnection = undefined;
+      });
+    this.appServerConnection = launch;
     return this.appServerConnection;
   }
 
   dispose() {
+    this.disposed = true;
+    if (this.appServerHealthTimer) clearInterval(this.appServerHealthTimer);
+    this.appServerHealthTimer = undefined;
     if (this.child && !this.child.killed) {
       requestRuntimeShutdown(this.child);
     }
-    if (this.appServerChild && !this.appServerChild.killed) {
-      requestRuntimeShutdown(this.appServerChild);
+    for (const child of this.appServerChildren) {
+      if (!child.killed) requestRuntimeShutdown(child);
     }
+    this.appServerChildren.clear();
     this.child = undefined;
-    this.appServerChild = undefined;
     this.appServerConnection = undefined;
+    this.currentAppServerConnection = undefined;
+    this.appServerConnectionListeners.clear();
   }
 
   onExit(listener: (event: { code: number | null; signal: NodeJS.Signals | null }) => void) {
     this.exitListeners.add(listener);
     return {
       dispose: () => this.exitListeners.delete(listener),
+    };
+  }
+
+  /** Publishes only physical endpoint generations; the Frontend keeps one logical session. */
+  onAppServerConnectionChanged(listener: (connection: WebviewAppServerConnection) => void) {
+    this.appServerConnectionListeners.add(listener);
+    return {
+      dispose: () => this.appServerConnectionListeners.delete(listener),
     };
   }
 
@@ -167,6 +199,9 @@ export class RuntimeProcess implements vscode.Disposable {
     const configured = vscode.workspace.getConfiguration("openaide").get<string>("storage.root");
     if (configured) return { kind: "configured", path: configured };
 
+    const environment = process.env.OPENAIDE_STORAGE_ROOT;
+    if (environment) return { kind: "environment", path: environment };
+
     return {
       kind: "extension-storage",
       path: path.join(this.context.globalStorageUri.fsPath, "runtime"),
@@ -188,23 +223,17 @@ export class RuntimeProcess implements vscode.Disposable {
       },
       stdio: "pipe",
     });
-    this.appServerChild = child;
+    this.appServerChildren.add(child);
     child.stderr.on("data", (chunk: Buffer) => {
       this.logger.warn("app server handoff stderr", { byteLength: chunk.byteLength });
     });
     child.once("exit", (code, signal) => {
       this.logger.warn("app server handoff exited", { code, signal });
-      if (this.appServerChild === child) {
-        this.appServerChild = undefined;
-        this.appServerConnection = undefined;
-      }
+      this.appServerChildren.delete(child);
     });
     child.once("error", (error) => {
       this.logger.error("app server handoff spawn failed", { error: error.message });
-      if (this.appServerChild === child) {
-        this.appServerChild = undefined;
-        this.appServerConnection = undefined;
-      }
+      this.appServerChildren.delete(child);
     });
 
     try {
@@ -214,6 +243,101 @@ export class RuntimeProcess implements vscode.Disposable {
       throw error;
     }
   }
+
+  /** Health is shell-owned and intentionally independent from product-client heartbeats. */
+  private startAppServerHealthMonitor() {
+    if (this.appServerHealthTimer || this.disposed) return;
+    this.appServerHealthTimer = setInterval(() => {
+      void this.checkAppServerHealth();
+    }, APP_SERVER_HEALTH_INTERVAL_MS);
+    this.appServerHealthTimer.unref?.();
+  }
+
+  private async checkAppServerHealth() {
+    const connection = this.currentAppServerConnection;
+    if (
+      !connection
+      || connection.kind !== "localHttp"
+      || this.disposed
+      || this.appServerHealthCheckInFlight
+      || this.appServerRecovery
+    ) return;
+    this.appServerHealthCheckInFlight = true;
+    try {
+      await probeAppServer(connection);
+      this.appServerHealthFailures = 0;
+    } catch (error) {
+      this.appServerHealthFailures += 1;
+      this.logger.warn("app server health probe failed", {
+        consecutiveFailures: this.appServerHealthFailures,
+        error: String(error),
+      });
+      if (this.appServerHealthFailures >= APP_SERVER_HEALTH_FAILURE_THRESHOLD) {
+        await this.recoverAppServerConnection(connection);
+      }
+    } finally {
+      this.appServerHealthCheckInFlight = false;
+    }
+  }
+
+  private async recoverAppServerConnection(previous: WebviewAppServerConnection) {
+    if (this.appServerRecovery || this.disposed) return this.appServerRecovery;
+    this.logger.warn("app server endpoint unavailable; starting handoff recovery");
+    const recovery = this.launchAppServerConnection()
+      .then((replacement) => {
+        if (this.disposed) return;
+        this.currentAppServerConnection = replacement;
+        this.appServerHealthFailures = 0;
+        if (sameAppServerConnection(previous, replacement)) {
+          this.logger.info("app server handoff recovered the existing endpoint");
+          return;
+        }
+        this.logger.info("app server replacement endpoint ready");
+        for (const listener of this.appServerConnectionListeners) listener(replacement);
+      })
+      .catch((error) => {
+        this.logger.error("app server handoff recovery failed", { error: String(error) });
+      })
+      .finally(() => {
+        if (this.appServerRecovery === recovery) this.appServerRecovery = undefined;
+      });
+    this.appServerRecovery = recovery;
+    return recovery;
+  }
+}
+
+async function probeAppServer(connection: Extract<WebviewAppServerConnection, { kind: "localHttp" }>) {
+  const abort = new AbortController();
+  const timeout = setTimeout(() => abort.abort(), APP_SERVER_HEALTH_TIMEOUT_MS);
+  timeout.unref?.();
+  try {
+    const response = await fetch(connection.endpointUrl, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${connection.authToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        jsonrpc: "2.0",
+        id: "vscode-host-health",
+        method: "client/probe",
+        params: {},
+      }),
+      signal: abort.signal,
+    });
+    if (!response.ok) throw new Error(`health probe returned HTTP ${response.status}`);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function sameAppServerConnection(
+  left: WebviewAppServerConnection,
+  right: WebviewAppServerConnection,
+) {
+  return left.kind === right.kind
+    && left.endpointUrl === right.endpointUrl
+    && (left.kind !== "localHttp" || (right.kind === "localHttp" && left.authToken === right.authToken));
 }
 
 function safePackageVersion(value: unknown) {

@@ -18,7 +18,11 @@ import type {
 export type BackendEventListener = (event: AppServerEvent) => void;
 export type BackendUnsubscribe = () => void;
 export type BackendGenerationInvalidation = {
-  reason: "httpSessionExpired" | "clientLivenessExpired" | "serverReplayExpired";
+  reason:
+    | "httpSessionExpired"
+    | "clientLivenessExpired"
+    | "serverReplayExpired"
+    | "appServerRestarted";
 };
 export type BackendRecoveryBaseline = BackendGenerationInvalidation & {
   result: InitializeResult;

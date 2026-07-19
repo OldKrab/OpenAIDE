@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import type { WebviewAppServerConnection } from "@openaide/app-shell-contracts";
 import { ExtensionLogger } from "../logging/logger";
 import { RuntimeProcess } from "../runtime/process";
 import { RuntimeClient } from "../runtime/rpcClient";
@@ -31,13 +32,18 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost, TaskFo
   private focusedTaskId: string | undefined;
   private settingsPanel: vscode.WebviewPanel | undefined;
   private newTaskPanel: vscode.WebviewPanel | undefined;
+  private readonly appServerConnectionSubscription: vscode.Disposable;
 
   constructor(
     private readonly context: vscode.ExtensionContext,
     private readonly runtime: RuntimeClient,
     private readonly runtimeProcess: RuntimeProcess,
     private readonly logger: ExtensionLogger,
-  ) {}
+  ) {
+    this.appServerConnectionSubscription = this.runtimeProcess.onAppServerConnectionChanged(
+      (connection) => void this.publishAppServerConnection(connection),
+    );
+  }
 
   openNewTask(projectId?: string) {
     if (this.newTaskPanel) {
@@ -94,6 +100,7 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost, TaskFo
   }
 
   dispose() {
+    this.appServerConnectionSubscription.dispose();
     this.newTaskPanel?.dispose();
     this.settingsPanel?.dispose();
     for (const panel of this.taskPanels.values()) {
@@ -110,6 +117,26 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost, TaskFo
   onDidChangeFocusedTask(listener: (taskId: string | undefined) => void) {
     this.focusedTaskListeners.add(listener);
     return { dispose: () => this.focusedTaskListeners.delete(listener) };
+  }
+
+  private async publishAppServerConnection(connection: WebviewAppServerConnection) {
+    try {
+      const resolved = await resolveWebviewAppServerConnection(connection);
+      const message = {
+        type: "appServer.connectionChanged" as const,
+        payload: { connection: resolved },
+      };
+      const panels = [
+        this.newTaskPanel,
+        this.settingsPanel,
+        ...this.taskPanels.values(),
+      ].filter((panel): panel is vscode.WebviewPanel => panel !== undefined);
+      await Promise.all(panels.map((panel) => panel.webview.postMessage(message)));
+    } catch (error) {
+      this.logger.warn("failed to publish App Server replacement to editor webviews", {
+        error: String(error),
+      });
+    }
   }
 
   private createPanel(viewType: string, title: string, bootstrap: PanelBootstrap) {

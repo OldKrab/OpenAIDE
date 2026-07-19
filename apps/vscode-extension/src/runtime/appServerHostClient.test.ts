@@ -44,6 +44,7 @@ describe("AppServerHostClient", () => {
 
     const rpcCalls = jsonRpcCalls(fetch);
     expect(provider.startAppServerConnection).toHaveBeenCalledTimes(1);
+    expect(provider.onAppServerConnectionChanged).toHaveBeenCalledOnce();
     expect(rpcCalls[0]).toEqual({
       jsonrpc: "2.0",
       id: "rpc-1",
@@ -185,6 +186,7 @@ function providerReturningConnection() {
       endpointUrl: "http://127.0.0.1:4321/probe",
       authToken: "token-1",
     })),
+    onAppServerConnectionChanged: vi.fn(() => ({ dispose: vi.fn() })),
   };
 }
 

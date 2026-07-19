@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import type { WebviewAppServerConnection } from "@openaide/app-shell-contracts";
 import { ExtensionLogger } from "../logging/logger";
 import { RuntimeProcess } from "../runtime/process";
 import { RuntimeClient } from "../runtime/rpcClient";
@@ -17,6 +18,7 @@ export class TaskViewProvider implements vscode.WebviewViewProvider, vscode.Disp
   static readonly viewType = "openaide.tasks";
   private view: vscode.WebviewView | undefined;
   private renderGeneration = 0;
+  private readonly appServerConnectionSubscription: vscode.Disposable;
   private readonly focusedTaskSubscription: { dispose: () => void };
   private focusedTaskId: string | undefined;
 
@@ -32,11 +34,15 @@ export class TaskViewProvider implements vscode.WebviewViewProvider, vscode.Disp
       this.focusedTaskId = taskId;
       void this.publishFocusedTask(taskId);
     });
+    this.appServerConnectionSubscription = this.runtimeProcess.onAppServerConnectionChanged(
+      (connection) => void this.publishAppServerConnection(connection),
+    );
   }
 
   dispose() {
     this.nextRenderGeneration();
     this.view = undefined;
+    this.appServerConnectionSubscription.dispose();
     this.focusedTaskSubscription.dispose();
   }
 
@@ -80,6 +86,25 @@ export class TaskViewProvider implements vscode.WebviewViewProvider, vscode.Disp
       if (!this.isRenderGenerationCurrent(generation) || this.view !== view) return;
       this.logger.warn("app server handoff failed; rendering without app server connection", { error: String(error) });
       view.webview.html = renderWebviewHtml(this.context, view.webview, this.bootstrap(clientInstanceId));
+    }
+  }
+
+  private async publishAppServerConnection(
+    connection: WebviewAppServerConnection,
+  ) {
+    const view = this.view;
+    if (!view) return;
+    try {
+      const resolved = await resolveWebviewAppServerConnection(connection);
+      if (this.view !== view) return;
+      await view.webview.postMessage({
+        type: "appServer.connectionChanged",
+        payload: { connection: resolved },
+      });
+    } catch (error) {
+      this.logger.warn("failed to publish App Server replacement to task navigation", {
+        error: String(error),
+      });
     }
   }
 

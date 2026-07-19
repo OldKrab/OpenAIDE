@@ -25,7 +25,7 @@ RUN npm run build --workspace @openaide/app-server-client \
 FROM node:24-bookworm-slim
 
 WORKDIR /app
-RUN npm install --global @agentclientprotocol/codex-acp@1.0.1 \
+RUN npm install --global @agentclientprotocol/codex-acp@1.1.4 \
   && groupadd --gid 10001 nodeapp \
   && useradd --uid 10001 --gid 10001 --create-home --home-dir /home/node --shell /bin/false nodeapp
 

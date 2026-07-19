@@ -42,7 +42,6 @@ impl TaskProductApi {
                     return Ok(TaskMutationResult::Unchanged);
                 }
                 let task = ctx.task_mut();
-                task.agent_session_id = None;
                 // Catalogs are live Native Session data. If attachment or finalization
                 // failed, no closed session may remain the source of visible controls.
                 task.config_options_catalog = None;
@@ -69,10 +68,8 @@ impl TaskProductApi {
                         return Ok(TaskMutationResult::Unchanged);
                     }
                     let task = ctx.task_mut();
-                    // A crash may happen after session binding but before sink attachment or
-                    // readiness. The process-local Native Session is gone, so keep only the
-                    // user's selected values for retry and discard every live-session claim.
-                    task.agent_session_id = None;
+                    // A crash may happen after binding but before sink attachment or readiness.
+                    // Preserve the durable Native Session identity so retry can resume it.
                     task.config_options_catalog = None;
                     task.agent_commands_catalog = None;
                     task.preparation = TaskPreparationRecord::Failed { message };

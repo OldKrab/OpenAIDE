@@ -74,11 +74,15 @@ export type ReliableLocalHttpBackendConnectionOptions = {
   heartbeatIntervalMs?: number;
   retryDelayMs?: number;
   subscribeToWake?: (wake: () => void) => () => void;
+  /** Supplies a replacement endpoint when the App Shell starts a new App Server process. */
+  subscribeToReplacement?: (
+    replace: (endpoint: { endpointUrl: string; authToken: string }) => void,
+  ) => () => void;
 };
 
 export type ReliableWebProxyBackendConnectionOptions = Omit<
   ReliableLocalHttpBackendConnectionOptions,
-  "authToken"
+  "authToken" | "subscribeToReplacement"
 >;
 
 export function createReliableLocalHttpBackendConnection(
@@ -107,15 +111,24 @@ function createReliableHttpBackendConnection(
     dispose(): void;
   }>();
   const generations = new Set<HttpConnectionGeneration>();
+  let endpoint: { endpointUrl: string; authToken?: string } = {
+    endpointUrl: options.endpointUrl,
+    ...("authToken" in options ? { authToken: options.authToken } : {}),
+  };
+  let endpointRevision = 0;
   let active = createGeneration();
   let initializedServerId: string | undefined;
   let initializeParams: InitializeParams | undefined;
   let initializeMeta: RequestMeta | undefined;
   let initializePromise: Promise<InitializeResult> | undefined;
   let recoveryPromise: Promise<InitializeResult> | undefined;
+  let recoveringGeneration: HttpConnectionGeneration | undefined;
   let terminalError: unknown;
   let closed = false;
   bindGeneration(active);
+  const stopReplacement = "subscribeToReplacement" in options
+    ? options.subscribeToReplacement?.(replaceEndpoint)
+    : undefined;
 
   return {
     initialize(params, meta) {
@@ -187,6 +200,7 @@ function createReliableHttpBackendConnection(
     close() {
       if (closed) return;
       closed = true;
+      stopReplacement?.();
       for (const generation of generations) closeGeneration(generation);
       generations.clear();
       requestRegistrations.clear();
@@ -198,10 +212,11 @@ function createReliableHttpBackendConnection(
   };
 
   function createGeneration(): HttpConnectionGeneration {
+    const generationEndpointRevision = endpointRevision;
     const channel = createReliableHttpMessageChannel({
-      endpointUrl: options.endpointUrl,
+      endpointUrl: endpoint.endpointUrl,
       connectionId: options.connectionId,
-      ...("authToken" in options ? { authToken: options.authToken } : {}),
+      ...(endpoint.authToken ? { authToken: endpoint.authToken } : {}),
       ...(options.fetch ? { fetch: options.fetch } : {}),
       ...(options.retryDelayMs === undefined ? {} : { retryDelayMs: options.retryDelayMs }),
       ...(options.subscribeToWake ? { subscribeToWake: options.subscribeToWake } : {}),
@@ -216,7 +231,7 @@ function createReliableHttpBackendConnection(
         if (method !== CLIENT_INITIALIZE) handleGenerationRequestError(generation, error);
       },
     });
-    generation = { channel, connection };
+    generation = { channel, connection, endpointRevision: generationEndpointRevision };
     generations.add(generation);
     generation.unsubscribeError = channel.subscribeErrors?.((error) => {
       handleGenerationError(generation, error);
@@ -231,15 +246,46 @@ function createReliableHttpBackendConnection(
     for (const registration of requestRegistrations) registration.bind(generation.connection);
   }
 
-  async function initializeGeneration(generation: HttpConnectionGeneration) {
+  async function initializeGeneration(
+    generation: HttpConnectionGeneration,
+    allowServerChange = false,
+  ) {
     const params = initializeParams;
     if (!params) throw new Error("Backend connection is not initialized");
     const identity = await generation.channel.ready();
-    if (initializedServerId && identity.serverId !== initializedServerId) {
+    if (initializedServerId && identity.serverId !== initializedServerId && !allowServerChange) {
       throw new Error("App Server instance changed while replacing an expired HTTP session");
     }
     initializedServerId = identity.serverId;
     return generation.connection.initialize(params, initializeMeta);
+  }
+
+  function replaceEndpoint(next: { endpointUrl: string; authToken: string }) {
+    if (closed || (
+      endpoint.endpointUrl === next.endpointUrl
+      && endpoint.authToken === next.authToken
+    )) return;
+    endpoint = next;
+    endpointRevision += 1;
+    if (recoveryPromise) {
+      // Abort an obsolete in-flight open so a newly published process endpoint
+      // does not wait behind the operating system's connection timeout.
+      if (recoveringGeneration && recoveringGeneration.endpointRevision !== endpointRevision) {
+        closeGeneration(recoveringGeneration);
+      }
+      return;
+    }
+    if (!initializeParams) {
+      const previous = active;
+      active = createGeneration();
+      bindGeneration(active);
+      closeGeneration(previous);
+      return;
+    }
+    beginRecovery(active, {
+      reason: "appServerRestarted",
+      message: "App Server process restarted",
+    }, true);
   }
 
   function handleGenerationError(generation: HttpConnectionGeneration, error: unknown) {
@@ -282,10 +328,12 @@ function createReliableHttpBackendConnection(
   function beginRecovery(
     generation: HttpConnectionGeneration,
     invalidation: BackendGenerationInvalidation & { message: string },
+    allowServerChange = false,
   ) {
     if (recoveryPromise) return;
+    terminalError = undefined;
     console.info(`[OpenAIDE] ${invalidation.message}; reinitializing the connection`);
-    const attempt = recoverGeneration(generation);
+    const attempt = recoverGeneration(generation, allowServerChange);
     recoveryPromise = attempt;
     void attempt.then(
       (result) => {
@@ -306,21 +354,37 @@ function createReliableHttpBackendConnection(
     notifyListeners(generationInvalidationListeners, { reason: invalidation.reason });
   }
 
-  async function recoverGeneration(previous: HttpConnectionGeneration) {
-    const replacement = createGeneration();
-    try {
-      const identity = await replacement.channel.ready();
-      if (initializedServerId && identity.serverId !== initializedServerId) {
-        throw new Error("App Server instance changed while replacing an expired HTTP session");
+  async function recoverGeneration(
+    previous: HttpConnectionGeneration,
+    allowServerChange: boolean,
+  ) {
+    let permitsChangedServer = allowServerChange;
+    while (!closed) {
+      const replacement = createGeneration();
+      recoveringGeneration = replacement;
+      try {
+        const result = await initializeGeneration(replacement, permitsChangedServer);
+        if (replacement.endpointRevision !== endpointRevision) {
+          closeGeneration(replacement);
+          permitsChangedServer = true;
+          continue;
+        }
+        active = replacement;
+        bindGeneration(replacement);
+        closeGeneration(previous);
+        return result;
+      } catch (error) {
+        closeGeneration(replacement);
+        if (replacement.endpointRevision !== endpointRevision) {
+          permitsChangedServer = true;
+          continue;
+        }
+        throw error;
+      } finally {
+        if (recoveringGeneration === replacement) recoveringGeneration = undefined;
       }
-      active = replacement;
-      bindGeneration(replacement);
-      closeGeneration(previous);
-      return await initializeGeneration(replacement);
-    } catch (error) {
-      closeGeneration(replacement);
-      throw error;
     }
+    throw new Error("Backend connection is closed");
   }
 
   function closeGeneration(generation: HttpConnectionGeneration) {
@@ -335,6 +399,7 @@ function createReliableHttpBackendConnection(
 type HttpConnectionGeneration = {
   channel: ReliableHttpMessageChannel;
   connection: BackendConnection;
+  endpointRevision: number;
   unsubscribeError?: BackendUnsubscribe;
   unsubscribeEvent?: BackendUnsubscribe;
 };

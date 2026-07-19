@@ -235,6 +235,69 @@ describe("VS Code webview surfaces", () => {
     );
   });
 
+  it("publishes a replacement App Server endpoint to every open editor surface", async () => {
+    const process = runtimeProcess(Promise.resolve({
+      kind: "localHttp",
+      endpointUrl: "http://127.0.0.1:1234/probe",
+      authToken: "token-1",
+    }));
+    const manager = new TaskEditorManager(context(), runtime(), process, logger());
+    manager.openNewTask();
+    manager.openTask("task_1", "Task");
+    manager.openSettings();
+    await settle();
+
+    process.publishReplacement({
+      kind: "localHttp",
+      endpointUrl: "http://127.0.0.1:5678/probe",
+      authToken: "token-2",
+    });
+    await settle();
+
+    for (const panel of vscodeMocks.panels) {
+      expect(panel.webview.postMessage).toHaveBeenCalledWith({
+        type: "appServer.connectionChanged",
+        payload: {
+          connection: {
+            kind: "localHttp",
+            endpointUrl: "http://127.0.0.1:5678/probe",
+            authToken: "token-2",
+          },
+        },
+      });
+    }
+  });
+
+  it("publishes a replacement App Server endpoint to task navigation", async () => {
+    const process = runtimeProcess(Promise.resolve({
+      kind: "localHttp",
+      endpointUrl: "http://127.0.0.1:1234/probe",
+      authToken: "token-1",
+    }));
+    const view = createViewMock();
+    const provider = new TaskViewProvider(context(), runtime(), process, logger(), surfaces());
+    provider.resolveWebviewView(view as never);
+    await settle();
+
+    process.publishReplacement({
+      kind: "localHttp",
+      endpointUrl: "http://127.0.0.1:5678/probe",
+      authToken: "token-2",
+    });
+    await settle();
+
+    expect(view.webview.postMessage).toHaveBeenCalledWith({
+      type: "appServer.connectionChanged",
+      payload: {
+        connection: {
+          kind: "localHttp",
+          endpointUrl: "http://127.0.0.1:5678/probe",
+          authToken: "token-2",
+        },
+      },
+    });
+  });
+
   it("renders without App Server connection when handoff fails", async () => {
     const manager = new TaskEditorManager(
       context(),
@@ -434,8 +497,14 @@ function runtime() {
 }
 
 function runtimeProcess(connection?: Promise<unknown>) {
+  let replacementListener: ((connection: unknown) => void) | undefined;
   return {
     startAppServerConnection: connection ? vi.fn(() => connection) : undefined,
+    onAppServerConnectionChanged: vi.fn((listener: (connection: unknown) => void) => {
+      replacementListener = listener;
+      return { dispose: () => { replacementListener = undefined; } };
+    }),
+    publishReplacement: (replacement: unknown) => replacementListener?.(replacement),
   } as never;
 }
 

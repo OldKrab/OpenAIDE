@@ -14,7 +14,7 @@ export type DiagnosticsSnapshot = {
   process: {
     running: boolean;
     runtime_source_kind: "configured" | "environment" | "bundled" | "development";
-    storage_root_kind: "configured" | "extension-storage";
+    storage_root_kind: "configured" | "environment" | "extension-storage";
   };
 };
 

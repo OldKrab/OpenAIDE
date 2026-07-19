@@ -731,6 +731,7 @@ struct VersionFields {
     task_version: u64,
     message_history_version: u64,
     revision: u64,
+    bound_native_session_id: Option<String>,
 }
 
 impl VersionFields {
@@ -739,6 +740,7 @@ impl VersionFields {
             task_version: task.task_version,
             message_history_version: task.message_history_version,
             revision: task.revision,
+            bound_native_session_id: task.agent_session_id.clone(),
         }
     }
 }
@@ -759,6 +761,13 @@ fn validate_task_invariants(
     {
         return Err(RuntimeError::Internal(
             "task mutation changed commit-managed version fields".to_string(),
+        ));
+    }
+    if original.bound_native_session_id.is_some()
+        && task.agent_session_id != original.bound_native_session_id
+    {
+        return Err(RuntimeError::Internal(
+            "task mutation changed bound Native Session identity".to_string(),
         ));
     }
     Ok(())
