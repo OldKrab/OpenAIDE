@@ -15,8 +15,7 @@ use crate::client_lifecycle::Delivery;
 use crate::client_lifecycle::{AppServerTime, ClientContext, ClientExpiryOutcome, ConnectionId};
 use crate::protocol::errors::RuntimeError;
 use crate::protocol_edge::{
-    event_deliveries, responses, GatewayEventDelivery, GatewayOutcome, GatewayResponse,
-    IdleShutdownDecision, RpcGateway,
+    event_deliveries, responses, GatewayEventDelivery, GatewayOutcome, GatewayResponse, RpcGateway,
 };
 use crate::server_requests::ServerRequestDelivery;
 #[cfg(test)]
@@ -97,18 +96,6 @@ impl RpcGateway {
         }
     }
 
-    pub(crate) fn idle_shutdown_decision(&self) -> Result<IdleShutdownDecision, RuntimeError> {
-        let initialized_clients = self.client_hub.has_initialized_clients();
-        let blockers = self.shutdown.shutdown_blockers()?;
-        if !initialized_clients && blockers.is_empty() {
-            return Ok(IdleShutdownDecision::ShutdownNow);
-        }
-        Ok(IdleShutdownDecision::KeepRunning {
-            initialized_clients,
-            blockers,
-        })
-    }
-
     pub fn handle_transport_closed(
         &mut self,
         connection_id: &ConnectionId,
@@ -132,7 +119,7 @@ impl RpcGateway {
         now: AppServerTime,
     ) -> ClientExpiryOutcome {
         let outcome = self.client_hub.expire_after_grace(client_instance_id, now);
-        if let ClientExpiryOutcome::Expired { last_client, .. } = &outcome {
+        if let ClientExpiryOutcome::Expired { .. } = &outcome {
             self.server_requests
                 .observe_client_expired(client_instance_id, now);
             if let Err(error) = self.task_release.release_expired_client(client_instance_id) {
@@ -142,9 +129,6 @@ impl RpcGateway {
                 );
             }
             self.remove_expired_client_workspace_roots(client_instance_id, now);
-            if *last_client {
-                self.lifecycle.observe_last_client_expired();
-            }
         }
         outcome
     }
@@ -167,9 +151,6 @@ impl RpcGateway {
         }
         if projects_changed {
             self.queue_project_collection_update(now);
-        }
-        if batch.last_client_expired {
-            self.lifecycle.observe_last_client_expired();
         }
         let last_expired_index = batch
             .last_client_expired

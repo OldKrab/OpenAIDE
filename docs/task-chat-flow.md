@@ -33,7 +33,7 @@ A Task Workspace is either the selected Project root or one durable worktree ide
 ## Vocabulary And Ownership
 
 - **New Task** is the canonical term. `Draft Task`, `Established Task`, and `slot` are not product or interface terms.
-- **Prepared Task** is a durable zero-message New Task with its own Task id and Agent Native Session. It remains excluded from Task Navigation, active and archived Task lists, normal history and session discovery, and search until first Send is accepted.
+- **Prepared Task** is a durable zero-message New Task with its own Task id and Agent Native Session. It remains excluded from Task Navigation, active and archived Task lists, normal history and session discovery, search, and ordinary Task counts until first Send is accepted, including while setup or authentication blocks preparation.
 - **Prepared-Task lease** is exclusive use of one Prepared Task by one initialized `clientInstanceId`. One client holds at most one lease, and one Prepared Task is leased to at most one client.
 - **Free Prepared Task** is a ready, unleased, zero-message Prepared Task eligible for reuse by a matching pool key.
 - Project Context, Agent, and Task Workspace form the selected New Task context. Changing any member releases the previous lease before acquiring the new context.
@@ -53,6 +53,12 @@ Frontend supplies `clientInstanceId` only through `client/initialize`. Transport
 - Reconnect sends the same `clientInstanceId` through `client/initialize`.
 - Every transport connection receives a fresh connection-local `connectionId`; transport identity never reuses `clientInstanceId`.
 - A client that loses its stable identity becomes a new client and cannot use another client's Prepared-Task lease.
+
+### App Server process lifetime
+
+Product-client liveness and App Server process lifetime are separate. Missing client heartbeats may expire that client's connection context, cancel its client-scoped requests, release its Prepared-Task lease, and remove its workspace roots, but the last product client expiring never stops the App Server process. Leaving an App Shell idle, unfocused, suspended, or otherwise unable to schedule heartbeats is not a process-lifetime event.
+
+The native App Shell owns the process generation through its handoff process lifetime and explicit shutdown. It probes the published endpoint independently from product-client heartbeats. When the endpoint is no longer healthy, the shell performs a new handoff and publishes a replacement endpoint to every live client surface. Those surfaces retain one logical App Server session, preserve the Frontend-owned Composer, invalidate and reinstall authoritative scope baselines, and never replay a Send or another mutation whose outcome is unknown.
 
 ## Default Project And Agent
 
@@ -140,7 +146,15 @@ App Server sends lessee-scoped Task events as Native Session preparation changes
 
 Frontend applies only contiguous, monotonically newer Task revisions. The page remains rendered throughout preparation, and Composer controls show honest disabled or preparing states until their required capability is ready.
 
-If Native Session preparation returns ACP `auth_required`, App Server keeps the New Task private and unready, publishes Auth Required Agent Status with the Agent-advertised Authentication Methods, and waits for an explicit user choice in Agent Settings. New Task shows the blocker and opens the affected Agent Settings entry without duplicating authentication controls. Successful authentication reconnects and retries the blocked session lifecycle operation. It never automatically replays an accepted prompt, steering message, or other work-producing operation; those failures remain visible and require explicit recovery.
+When the selected Agent has a known setup blocker, New Task replaces the unavailable Composer with a product explanation and the next useful cause-specific action. When built-in Codex cannot launch its required Node.js tools, the surface says **Codex needs Node.js** and **OpenAIDE can't access the Node.js tools required to start Codex.** It offers **Install Node.js**, **Check again**, and **Setup help** without exposing command names, `PATH`, or raw process errors. **Install Node.js** opens the official Node.js download page; **Setup help** opens the OpenAIDE-maintained [Codex setup guide](codex-setup.md). Authentication blockers explain why work cannot start and open the selected Agent's Authentication Methods in Settings rather than duplicating credential controls in New Task.
+
+When Node.js tools are available but Codex package download, process launch, or ACP initialization fails, New Task says **Couldn't start Codex** and offers **Try again** and **Open Agent settings**. It does not guess that network access is the cause or expose raw technical details; diagnostics retain the classified failure for support.
+
+An existing saved Task remains openable and its stored Chat remains readable when its Agent has a setup or authentication blocker. The Task page preserves Chat and replaces only the unavailable Composer area with the same cause-specific setup, sign-in, or retry recovery; it never routes away from or hides the Task merely because new Agent work cannot start.
+
+If Native Session preparation returns ACP `auth_required`, App Server keeps the New Task private and unready, publishes Auth Required Agent Status with the Agent-advertised Authentication Methods, and waits for an explicit user choice in Agent Settings. New Task says **Sign in to use Codex**, explains that Codex needs authentication before it can start the Task, and offers **Choose sign-in method** to open the affected Agent Settings entry without duplicating authentication controls. When authentication was launched from New Task, success automatically returns to that preserved New Task, reconnects, and retries the blocked session lifecycle operation; the Composer appears only after the Agent becomes ready. It never automatically replays an accepted prompt, steering message, or other work-producing operation; those failures remain visible and require explicit recovery.
+
+Task Navigation keeps saved Tasks and its ordinary empty state authoritative when optional Native Session Discovery fails. It renders a separate, non-blocking **Codex history unavailable** notice with exactly one cause-specific action: **Set up Codex**, **Sign in**, or **Try again**. **Set up Codex** and **Sign in** open the Codex Agent Settings detail without changing the retained New Task context; **Try again** reruns Native Session Discovery. Task Navigation never duplicates setup or authentication controls and never presents Native Session Discovery failure as an inability to load saved OpenAIDE Tasks.
 
 App Server Send capability contains authoritative readiness and blockers. Frontend combines it with local draft content and Image compatibility through one shared Composer availability model. ACP has no text-required prompt capability: a completely empty message is invalid, while Image-only input is valid when the selected Agent accepts Image content.
 
@@ -264,11 +278,11 @@ Before publishing that idle transition, App Server projects every session update
 
 `task/cancel` changes a working Task to `stopping`, publishes that status, and disables Send. App Server resolves every active transient Permission and Question through its normal cancellation path, sends ACP `session/cancel` through the Native Session service, and continues accepting late session updates. The primary prompt's `cancelled` response changes the Task to idle and persists exactly one `Task stopped` Live Activity. Running Tool activity becomes interrupted or cancelled, never successfully completed merely because Stop was requested.
 
-ACP cancellation is a notification, so App Server gives the Agent ten seconds to settle the original prompt response. If it does not settle within that grace period, App Server removes and closes the untrustworthy Native Session, clears its durable binding, interrupts unfinished activity, and ends the Task as an idle cancellation failure. Late prompt completion or session updates from the discarded binding cannot revive or mutate the ended turn. A synchronous cancellation-send failure uses the same failed-cancellation termination path rather than leaving the Task in `stopping`.
+ACP cancellation is a notification, so App Server gives the Agent ten seconds to settle the original prompt response. If it does not settle within that grace period, App Server removes and closes the untrustworthy live Native Session handle, preserves the Task's durable Native Session identity, interrupts unfinished activity, and ends the Task as an idle cancellation failure. Late prompt completion or session updates from the closed runtime generation cannot revive or mutate the ended turn. A later explicit Send reconnects to the same Native Session through `session/resume`, falling back to `session/load` when resume is unsupported; it never binds the Task to a replacement Native Session. A synchronous cancellation-send failure uses the same failed-cancellation termination path rather than leaving the Task in `stopping`.
 
 User Stop, Native Session failure during `starting`, `working`, or `waiting`, and App Server restart during active work share one termination pipeline. It closes transient requests, persists cause-specific resolved request messages, marks unfinished Tool activity interrupted, ends active work, publishes idle state, and appends exactly one cause-specific Live Activity. Protocol behavior still differs by cause: user Stop sends `session/cancel` and normally waits for `cancelled`; Agent disconnection terminates immediately; restart records that OpenAIDE restarted.
 
-Accepted prompts are never replayed automatically after termination. Their User messages remain durable. A later explicit Send may load or resume the Native Session, but it never resends the failed prompt. Unexpected Native Session loss while idle only marks the opaque handle unavailable; the next explicit Send may recover it without alarming Chat activity.
+Accepted prompts are never replayed automatically after termination. Their User messages remain durable. A later explicit Send may load or resume the same Native Session, but it never resends the failed prompt. Once a Task has a Native Session identity, that binding is immutable for the Task's lifetime. Recovery failure is visible and never falls back to `session/new` or another Native Session identity. Unexpected Native Session loss while idle only marks the opaque handle unavailable; the next explicit Send may recover it without alarming Chat activity.
 
 ### Idle Native Session release
 
@@ -379,3 +393,4 @@ An implementation conforms to this specification only when all of these are true
 9. A browser profile emits at most one OS notification for one eligible Task Attention Event and never emits an old unread backlog on startup.
 10. App Server owns Task Attention state while each App Shell owns its local attention and notification capabilities.
 11. Unsent Composer text and Images have one Frontend owner and remain unchanged by Project, Agent, Task Workspace, navigation, reconnect, or Prepared-Task lease changes while the page remains alive.
+12. Product-client inactivity may expire client-scoped state but never determines App Server process lifetime; a changed process endpoint recovers through the same logical-session baseline barrier without mutation replay.

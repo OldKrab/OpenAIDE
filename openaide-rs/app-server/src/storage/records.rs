@@ -15,9 +15,22 @@ pub enum TaskPreparationRecord {
     Preparing,
     #[default]
     Ready,
+    Blocked {
+        reason: TaskPreparationBlockerRecord,
+        message: String,
+    },
     Failed {
         message: String,
     },
+}
+
+/// Stable task-level preparation failures that can be resolved by the user.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskPreparationBlockerRecord {
+    AuthRequired,
+    SetupRequired,
+    NodeJsRequired,
 }
 
 /// Controls whether a Task belongs to normal product history or the Prepared-Task pool.

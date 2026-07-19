@@ -1,6 +1,8 @@
 import { NewTaskView } from "./NewTaskView";
 import { TaskLoadingView, TaskView } from "./TaskView";
 import type { AppController } from "./appController";
+import { openRecoveryUrl, reloadRecoveryShell } from "../services/hostBridge";
+import type { AgentRecoveryActions } from "./AgentRecovery";
 
 export function primaryTaskSurfaceModel(controller: AppController) {
   const { activeTask, bootstrap, view } = controller;
@@ -76,11 +78,14 @@ export function AppPrimaryTaskSurface({ controller, focusRequestKey, model, work
   const retryTaskOpen = taskLoadingError || controller.backendConnectionState.status === "unavailable"
     ? controller.retryTaskOpen
     : undefined;
+  const recoveryActions = createAgentRecoveryActions(controller);
 
   if (renderableTaskSnapshot && !openingNativeSession) {
     return (
       <TaskView
         activeTask={activeTask}
+        agents={agents}
+        agentRecoveryActions={recoveryActions}
         archived={renderableTaskArchived}
         backendConnectionState={controller.backendConnectionState}
         chatPageState={primaryTask.chatPageState}
@@ -129,6 +134,7 @@ export function AppPrimaryTaskSurface({ controller, focusRequestKey, model, work
   return (
     <NewTaskView
       agents={agents}
+      agentRecoveryActions={recoveryActions}
       fileBrowser={callbacks.newTask.fileBrowser}
       focusRequestKey={focusRequestKey}
       intents={intents.newTask}
@@ -143,4 +149,19 @@ export function AppPrimaryTaskSurface({ controller, focusRequestKey, model, work
       workspaceBrowser={callbacks.newTask.workspaceBrowser}
     />
   );
+}
+
+/** Creates recovery actions shared by Task and Settings surfaces. */
+export function createAgentRecoveryActions(controller: AppController): AgentRecoveryActions {
+  const { callbacks, view } = controller;
+  return {
+    onOpenAgentSettings: (agentId, returnToNewTask) => callbacks.navigation.openSettings(
+      agentId,
+      returnToNewTask,
+      view.primaryTask.newTask.newTask.selection.projectId,
+    ),
+    onOpenExternal: openRecoveryUrl,
+    onReload: reloadRecoveryShell,
+    onRetry: callbacks.navigation.retryAgent,
+  };
 }

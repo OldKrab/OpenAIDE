@@ -8,7 +8,7 @@ use openaide_app_server_protocol::agent::{
 };
 use openaide_app_server_protocol::errors::ProtocolError;
 use openaide_app_server_protocol::ids::AgentId;
-use openaide_app_server_protocol::snapshot::AgentStatus;
+use openaide_app_server_protocol::snapshot::{AgentSetupReason, AgentStatus};
 
 use crate::agent::registry::AgentCatalogRecord;
 use crate::agent::registry_builtin::{BuiltInAgentMetadata, BUILT_IN_AGENT_METADATA};
@@ -117,6 +117,7 @@ fn built_in_detail(
         icon: metadata.icon.to_string(),
         transport: AgentSettingsTransport::Stdio,
         status: status_for(metadata.id, enabled, api),
+        setup_reason: setup_reason_for(metadata.id, enabled, api),
         launch_label: "Built-in stdio launch policy".to_string(),
         command_line: None,
         env: Vec::new(),
@@ -149,6 +150,7 @@ fn custom_detail(
         icon: custom_icon(record.icon()),
         transport: AgentSettingsTransport::Stdio,
         status: status_for(&id, record.enabled(), api),
+        setup_reason: setup_reason_for(&id, record.enabled(), api),
         launch_label: record.command().to_string(),
         command_line: Some(command_line),
         env: env_rows(record),
@@ -201,6 +203,16 @@ fn status_for(agent_id: &str, enabled: bool, api: &AgentProductApi) -> AgentSett
         AgentStatus::Unsupported => AgentSettingsStatus::Unsupported,
         AgentStatus::Failed => AgentSettingsStatus::Failed,
     }
+}
+
+fn setup_reason_for(
+    agent_id: &str,
+    enabled: bool,
+    api: &AgentProductApi,
+) -> Option<AgentSetupReason> {
+    enabled
+        .then(|| api.statuses.snapshot(agent_id).setup_reason)
+        .flatten()
 }
 
 fn env_rows(record: &AgentCatalogRecord) -> Vec<AgentSettingsEnvRow> {

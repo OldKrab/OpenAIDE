@@ -14,8 +14,7 @@ use crate::task_events::TaskUpdate;
 use openaide_app_server_protocol::worktree::WorktreeRepositorySnapshot;
 
 use super::{
-    AppServerProbeFacts, GatewayEventDelivery, GatewayOutcome, IdleShutdownDecision,
-    InboundProtocolMessage, RpcGateway,
+    AppServerProbeFacts, GatewayEventDelivery, GatewayOutcome, InboundProtocolMessage, RpcGateway,
 };
 
 #[derive(Clone)]
@@ -159,13 +158,6 @@ impl SharedRpcGateway {
             .lock()
             .expect("protocol gateway lock poisoned")
             .shutdown()
-    }
-
-    pub(crate) fn idle_shutdown_decision(&self) -> Result<IdleShutdownDecision, RuntimeError> {
-        self.gateway
-            .lock()
-            .expect("protocol gateway lock poisoned")
-            .idle_shutdown_decision()
     }
 
     #[cfg(test)]

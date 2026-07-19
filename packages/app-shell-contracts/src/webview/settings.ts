@@ -14,7 +14,7 @@ export type DiagnosticsSnapshot = {
   process: {
     running: boolean;
     runtime_source_kind: "configured" | "environment" | "bundled" | "development";
-    storage_root_kind: "configured" | "extension-storage";
+    storage_root_kind: "configured" | "environment" | "extension-storage";
   };
 };
 
@@ -33,6 +33,7 @@ export type AgentSettingsRecord = {
   icon: AgentIconId;
   transport: "stdio";
   status: "unprobed" | "ready" | "failed" | "disabled" | "setup_required" | "auth_required" | "authenticating" | "unsupported" | "launching" | "connected" | "disconnected";
+  setup_reason?: "nodeJsRequired";
   launch_label: string;
   command_line?: string;
   env?: CustomAgentEnvRecord[];

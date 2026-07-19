@@ -44,6 +44,7 @@ describe("AppServerHostClient", () => {
 
     const rpcCalls = jsonRpcCalls(fetch);
     expect(provider.startAppServerConnection).toHaveBeenCalledTimes(1);
+    expect(provider.onAppServerConnectionChanged).toHaveBeenCalledOnce();
     expect(rpcCalls[0]).toEqual({
       jsonrpc: "2.0",
       id: "rpc-1",
@@ -52,7 +53,19 @@ describe("AppServerHostClient", () => {
         clientInstanceId: "vscode-host-host-client-1",
         shell: { kind: "vscodeExtension", name: "OpenAIDE" },
         requestedSurface: { kind: "home" },
-        capabilities: { shell: ["resolveFileReveal"] },
+        capabilities: {
+          protocol: ["requestResponses", "stableClientRequestIds", "resync"],
+          shell: [
+            "openExternal",
+            "revealFile",
+            "resolveFileReveal",
+            "pickLocalFile",
+            "openTerminal",
+            "readSecret",
+            "writeSecret",
+            "showNotification",
+          ],
+        },
         workspaceRoots: [{ path: "/workspace/app" }],
       },
     });
@@ -148,6 +161,50 @@ describe("AppServerHostClient", () => {
     expect(jsonRpcCalls(fetch)).toHaveLength(3);
   });
 
+  it("attaches many webview views to one initialized App Server client", async () => {
+    const fetch = fetchSequence([
+      [response("rpc-1", { result: initializeResult() })],
+    ]);
+    vi.stubGlobal("fetch", fetch);
+    const provider = providerReturningConnection();
+    client = new AppServerHostClient(provider);
+    const navigationMessages: unknown[] = [];
+    const taskMessages: unknown[] = [];
+    const stopNavigation = client.attachView("navigation", (message) => {
+      navigationMessages.push(message);
+    });
+    const stopTask = client.attachView("task-1", (message) => {
+      taskMessages.push(message);
+    });
+
+    await client.handleViewMessage("navigation", {
+      type: "appServer.session.initialize",
+      requestId: "navigation-initialize",
+    });
+    await client.handleViewMessage("task-1", {
+      type: "appServer.session.initialize",
+      requestId: "task-initialize",
+    });
+
+    expect(provider.startAppServerConnection).toHaveBeenCalledTimes(1);
+    expect(jsonRpcCalls(fetch).filter((message) => (
+      "method" in message && message.method === CLIENT_INITIALIZE
+    ))).toHaveLength(1);
+    expect(navigationMessages).toContainEqual({
+      type: "appServer.session.response",
+      requestId: "navigation-initialize",
+      result: initializeResult(),
+    });
+    expect(taskMessages).toContainEqual({
+      type: "appServer.session.response",
+      requestId: "task-initialize",
+      result: initializeResult(),
+    });
+
+    stopNavigation();
+    stopTask();
+  });
+
   it("surfaces protocol errors from LocalHttp typed requests", async () => {
     const fetch = fetchSequence([
       [response("rpc-1", { result: initializeResult() })],
@@ -185,6 +242,7 @@ function providerReturningConnection() {
       endpointUrl: "http://127.0.0.1:4321/probe",
       authToken: "token-1",
     })),
+    onAppServerConnectionChanged: vi.fn(() => ({ dispose: vi.fn() })),
   };
 }
 

@@ -63,7 +63,7 @@ fn expected_probe_failure_returns_updated_agent_collection() {
 }
 
 #[test]
-fn internal_probe_failure_updates_cache_and_returns_protocol_error() {
+fn internal_probe_failure_returns_failed_agent_status_for_explicit_retry() {
     let statuses = AgentStatusCache::default();
     let api = AgentProductApi::new(
         AgentRegistry::default_built_ins(),
@@ -72,16 +72,19 @@ fn internal_probe_failure_updates_cache_and_returns_protocol_error() {
         statuses.clone(),
     );
 
-    let error = api
+    let result = api
         .probe(ProtocolAgentProbeParams {
             agent_id: AgentId::from("codex"),
         })
-        .unwrap_err();
+        .unwrap();
 
-    assert_eq!(
-        error.code,
-        openaide_app_server_protocol::errors::ProtocolErrorCode::Internal
-    );
+    let codex = result
+        .agents
+        .agents
+        .iter()
+        .find(|agent| agent.agent_id.as_str() == "codex")
+        .unwrap();
+    assert_eq!(codex.status, AgentStatus::Failed);
     assert_eq!(statuses.snapshot("codex").status, AgentStatus::Failed);
 }
 

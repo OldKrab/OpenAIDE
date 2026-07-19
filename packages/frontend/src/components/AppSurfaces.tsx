@@ -1,6 +1,6 @@
 import { Menu, X } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from "react";
-import { AppPrimaryTaskSurface, primaryTaskSurfaceModel } from "./AppPrimaryTaskSurface";
+import { AppPrimaryTaskSurface, createAgentRecoveryActions, primaryTaskSurfaceModel } from "./AppPrimaryTaskSurface";
 import { DEFAULT_MAX_TASKS_PER_PROJECT, Sidebar } from "./Sidebar";
 import { SettingsView } from "./settings/SettingsView";
 import { taskStatusLabel } from "./TaskHeader";
@@ -26,6 +26,22 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
   const mobileNavigation = useMobileNavigation(isWebWorkbench && mobileLayoutActive);
   const mobileNavigationOpen = mobileNavigation.open;
   const taskSurfaceModel = primaryTaskSurfaceModel(controller);
+  const taskRecoveryActions = createAgentRecoveryActions(controller);
+  const settingsRecoveryActions = {
+    ...taskRecoveryActions,
+    onRetry: async (agentId: string) => {
+      const ready = await taskRecoveryActions.onRetry(agentId);
+      callbacks.settings.refreshSettings();
+      return ready;
+    },
+  };
+  const authenticateAndReturn = async (agentId: string, methodId: string, values?: Record<string, string>) => {
+    const authenticated = await callbacks.settings.authenticateAgent(agentId, methodId, values);
+    if (authenticated && bootstrap.surface !== "invalid" && bootstrap.returnToNewTask) {
+      callbacks.navigation.openNewTask(bootstrap.projectId);
+    }
+    return authenticated;
+  };
   const { openingNativeSession, renderableTaskSnapshot } = taskSurfaceModel;
   const managedProject = navigation.projects.find((project) => project.projectId === managedProjectId);
   const managedRepository = managedProject?.worktreeRepositoryId
@@ -132,6 +148,9 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           onNewTask={callbacks.navigation.openNewTask}
           onOpenNativeSession={callbacks.navigation.openNativeSession}
           onOpenTask={callbacks.navigation.openTask}
+          onRecoverNativeSessions={(kind) => kind === "launchFailed"
+            ? callbacks.navigation.loadNativeSessions()
+            : callbacks.navigation.openSettings()}
           onRestoreTask={callbacks.navigation.restoreTask}
           onSearchChange={callbacks.navigation.changeSearch}
           onSettings={callbacks.navigation.openSettings}
@@ -159,7 +178,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     return (
       <main className="app-shell editor-shell">
         <SettingsView
-          onAuthenticate={callbacks.settings.authenticateAgent}
+          onAuthenticate={authenticateAndReturn}
           onCreateCustomAgent={callbacks.settings.createCustomAgent}
           onDeleteCustomAgent={callbacks.settings.deleteCustomAgent}
           onRefresh={callbacks.settings.refreshSettings}
@@ -171,6 +190,8 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           onUpdateCustomAgentMetadata={callbacks.settings.updateCustomAgentMetadata}
           onUnlockDeveloperSettings={callbacks.settings.unlockDeveloperSettings}
           preferences={preferences}
+          preferredAgentId={bootstrap.settingsAgentId}
+          recoveryActions={settingsRecoveryActions}
           state={settings}
         />
       </main>
@@ -249,7 +270,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           ) : bootstrap.surface === "settings" ? (
             <SettingsView
               desktopNotifications={taskNotifications?.settings}
-              onAuthenticate={callbacks.settings.authenticateAgent}
+              onAuthenticate={authenticateAndReturn}
               onCreateCustomAgent={callbacks.settings.createCustomAgent}
               onDeleteCustomAgent={callbacks.settings.deleteCustomAgent}
               onRefresh={callbacks.settings.refreshSettings}
@@ -262,6 +283,8 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
               onUpdateCustomAgentMetadata={callbacks.settings.updateCustomAgentMetadata}
               onUnlockDeveloperSettings={callbacks.settings.unlockDeveloperSettings}
               preferences={preferences}
+              preferredAgentId={bootstrap.settingsAgentId}
+              recoveryActions={settingsRecoveryActions}
               state={settings}
             />
           ) : (
@@ -290,6 +313,9 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           onNewTask={openNewTaskFromNavigation}
           onOpenNativeSession={closeAfter(callbacks.navigation.openNativeSession)}
           onOpenTask={closeAfter(callbacks.navigation.openTask)}
+          onRecoverNativeSessions={(kind) => kind === "launchFailed"
+            ? callbacks.navigation.loadNativeSessions()
+            : callbacks.navigation.openSettings()}
           onRestoreTask={callbacks.navigation.restoreTask}
           onSearchChange={callbacks.navigation.changeSearch}
           onSettings={closeAfter(callbacks.navigation.openSettings)}

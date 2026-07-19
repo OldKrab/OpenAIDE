@@ -72,9 +72,6 @@ pub(super) fn apply_active_work_end(
     task.status = TaskStatus::Inactive;
     task.active_turn_id = None;
     task.active_turn_started_at = None;
-    if cause.clears_session() {
-        task.agent_session_id = None;
-    }
     task.unread = true;
     task.attention = cause
         .attention_reason()
@@ -139,13 +136,6 @@ impl ActiveWorkEnd {
                     .to_string()
             }
         }
-    }
-
-    fn clears_session(&self) -> bool {
-        matches!(
-            self,
-            Self::AgentStartFailed(_) | Self::CancellationFailed(_)
-        )
     }
 
     fn attention_reason(&self) -> Option<TaskAttentionReason> {

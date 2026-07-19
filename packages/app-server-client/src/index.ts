@@ -1,5 +1,6 @@
 export * from "./backendConnection.js";
 export * from "./appServerSession.js";
+export * from "./appServerSessionBridge.js";
 export * from "./appServerHandoff.js";
 export * from "./generated/protocol.js";
 export * from "./protocolError.js";

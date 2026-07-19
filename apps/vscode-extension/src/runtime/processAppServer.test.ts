@@ -6,7 +6,7 @@ import { RuntimeProcess } from "./process";
 const mocks = vi.hoisted(() => ({
   spawn: vi.fn(),
   appServerPath: "/app-server/openaide-app-server",
-  storageRoot: "/storage/openaide",
+  storageRoot: "/storage/openaide" as string | undefined,
 }));
 
 vi.mock("node:child_process", () => ({
@@ -44,12 +44,23 @@ class FakeRuntimeChild extends EventEmitter {
 }
 
 describe("RuntimeProcess App Server handoff", () => {
+  let originalStorageRoot: string | undefined;
+
   beforeEach(() => {
     mocks.spawn.mockReset();
+    mocks.storageRoot = "/storage/openaide";
+    originalStorageRoot = process.env.OPENAIDE_STORAGE_ROOT;
+    delete process.env.OPENAIDE_STORAGE_ROOT;
   });
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.unstubAllGlobals();
+    if (originalStorageRoot === undefined) {
+      delete process.env.OPENAIDE_STORAGE_ROOT;
+    } else {
+      process.env.OPENAIDE_STORAGE_ROOT = originalStorageRoot;
+    }
   });
 
   it("starts app server handoff mode and returns LocalHttp connection info", async () => {
@@ -102,6 +113,29 @@ describe("RuntimeProcess App Server handoff", () => {
     );
   });
 
+  it("uses an environment storage root when settings do not configure one", async () => {
+    mocks.storageRoot = undefined;
+    process.env.OPENAIDE_STORAGE_ROOT = "/storage/development";
+    const child = new FakeRuntimeChild();
+    mocks.spawn.mockReturnValue(child);
+    const runtime = new RuntimeProcess(context(), logger());
+
+    const connectionPromise = runtime.startAppServerConnection();
+    child.stdout.write(connectionLine("1003"));
+    await connectionPromise;
+
+    expect(mocks.spawn).toHaveBeenCalledWith(
+      "/app-server/openaide-app-server",
+      [],
+      expect.objectContaining({
+        env: expect.objectContaining({
+          OPENAIDE_STORAGE_ROOT: "/storage/development",
+        }),
+      }),
+    );
+    expect(runtime.describe().storage_root_kind).toBe("environment");
+  });
+
   it("kills the handoff child when connection info is invalid", async () => {
     const child = new FakeRuntimeChild();
     mocks.spawn.mockReturnValue(child);
@@ -114,23 +148,44 @@ describe("RuntimeProcess App Server handoff", () => {
     expect(child.kill).toHaveBeenCalledOnce();
   });
 
-  it("re-handoffs after the App Server child exits", async () => {
+  it("does not treat a successful attach helper exit as App Server death", async () => {
     const first = new FakeRuntimeChild();
-    const second = new FakeRuntimeChild();
-    mocks.spawn.mockReturnValueOnce(first).mockReturnValueOnce(second);
+    mocks.spawn.mockReturnValue(first);
     const runtime = new RuntimeProcess(context(), logger());
 
     const firstConnection = runtime.startAppServerConnection();
     first.stdout.write(connectionLine("1001"));
-    await firstConnection;
+    const connection = await firstConnection;
     first.emit("exit", 0, null);
 
-    const secondConnection = runtime.startAppServerConnection();
-    second.stdout.write(connectionLine("1002"));
+    await expect(runtime.startAppServerConnection()).resolves.toEqual(connection);
+    expect(mocks.spawn).toHaveBeenCalledOnce();
+  });
 
-    await expect(secondConnection).resolves.toMatchObject({
+  it("re-handoffs and publishes a replacement after the App Server stops responding", async () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("fetch", vi.fn(async () => {
+      throw new Error("connection refused");
+    }));
+    const first = new FakeRuntimeChild();
+    const second = new FakeRuntimeChild();
+    mocks.spawn.mockReturnValueOnce(first).mockReturnValueOnce(second);
+    const runtime = new RuntimeProcess(context(), logger());
+    const replacements = vi.fn();
+    runtime.onAppServerConnectionChanged(replacements);
+
+    const firstConnection = runtime.startAppServerConnection();
+    first.stdout.write(connectionLine("1001"));
+    await firstConnection;
+    await vi.advanceTimersByTimeAsync(10_000);
+    second.stdout.write(connectionLine("1002"));
+    await vi.runAllTicks();
+
+    await vi.waitFor(() => expect(replacements).toHaveBeenCalledWith({
+      kind: "localHttp",
       endpointUrl: "http://127.0.0.1:1002/probe",
-    });
+      authToken: "token-1002",
+    }));
     expect(mocks.spawn).toHaveBeenCalledTimes(2);
   });
 

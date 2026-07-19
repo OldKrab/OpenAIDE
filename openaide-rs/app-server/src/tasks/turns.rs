@@ -1,4 +1,6 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+#[cfg(test)]
+use std::collections::HashSet;
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -242,7 +244,7 @@ impl TurnRunner {
             &active.task_id,
             Some(turn_id),
             crate::tasks::transitions::ActiveWorkEnd::CancellationFailed(format!(
-                "Agent did not confirm cancellation within {} ms; its Native Session was discarded",
+                "Agent did not confirm cancellation within {} ms; its live Native Session handle was closed while the Task binding was preserved",
                 grace_period.as_millis()
             )),
         ) {
@@ -301,6 +303,16 @@ impl TurnRunner {
         Ok(sink)
     }
 
+    /// Reattaches the Task-owned sink after a Native Session worker was closed and resumed.
+    pub(crate) fn reattach_session_events(
+        &self,
+        session: &AgentSessionKey,
+        sink: &Arc<TaskSessionEventSink>,
+    ) -> Result<(), RuntimeError> {
+        self.agent
+            .attach_session_event_sink(session, sink.clone() as Arc<dyn AgentSessionEventSink>)
+    }
+
     pub fn shutdown(&self) -> Result<(), RuntimeError> {
         let active_turns = self
             .active_turns
@@ -332,6 +344,7 @@ impl TurnRunner {
         first_error.map_or(Ok(()), Err)
     }
 
+    #[cfg(test)]
     pub(crate) fn active_turns(&self) -> HashSet<(String, String)> {
         self.active_turns
             .turns

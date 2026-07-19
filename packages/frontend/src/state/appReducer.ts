@@ -31,7 +31,7 @@ import {
   upsertTaskSummary,
 } from "./taskSnapshotReconciliation";
 import { reduceTaskInteractionState } from "./taskInteractionReducer";
-import type { AppState, TaskChatScrollState } from "./store";
+import type { AppState, NativeSessionsState, TaskChatScrollState } from "./store";
 
 export type SnapshotIntent = "open" | "refresh";
 
@@ -71,7 +71,7 @@ type AppActionPayload =
   | { type: "newTask:configOptions:error"; message: string }
   | { type: "newTask:nativeSessions:start"; append: boolean }
   | { type: "newTask:nativeSessions:result"; result: AgentListSessionsResult; append: boolean }
-  | { type: "newTask:nativeSessions:listError"; message: string }
+  | { type: "newTask:nativeSessions:listError"; message: string; recoveryKind?: NativeSessionsState["recoveryKind"] }
   | { type: "newTask:nativeSessions:error"; sessionId: string; message: string }
   | { type: "newTask:nativeSessions:adopt"; sessionId: string }
   | { type: "newTask:nativeSessions:remove"; sessionId: string }

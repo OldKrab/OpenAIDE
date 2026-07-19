@@ -111,6 +111,12 @@ export class NewTaskController {
     return this.preparationReset;
   }
 
+  /** Requests the retained New Task context be prepared again after recovery. */
+  retryPreparation() {
+    this.preparationReset += 1;
+    this.emit();
+  }
+
   isCurrent(lease: NewTaskLease) {
     return this.current?.generation === lease.generation;
   }

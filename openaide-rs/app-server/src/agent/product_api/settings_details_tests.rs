@@ -4,7 +4,7 @@ use std::sync::Arc;
 use openaide_app_server_protocol::agent::{
     AgentSettingsDetailsParams, AgentSettingsSourceKind, AgentSettingsStatus,
 };
-use openaide_app_server_protocol::snapshot::{AgentCapabilities, AgentStatus};
+use openaide_app_server_protocol::snapshot::{AgentCapabilities, AgentSetupReason, AgentStatus};
 
 use crate::agent::catalog_store::AgentCatalogStore;
 use crate::agent::product_api::{AgentProductApi, AgentSettingsDetailsWorkflow};
@@ -20,6 +20,31 @@ use crate::protocol::model::{
     AgentProbeStatus,
 };
 use crate::storage::Store;
+
+#[test]
+fn agent_settings_details_expose_the_structured_setup_reason() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().to_path_buf()).unwrap();
+    let statuses = AgentStatusCache::default();
+    let api = AgentProductApi::new(
+        AgentRegistryHandle::new(AgentRegistry::default_built_ins()),
+        AgentCatalogStore::new(store),
+        Arc::new(ProbeNodeJsRequiredRuntime),
+        statuses,
+    );
+
+    let result = api
+        .agent_settings_details(AgentSettingsDetailsParams {})
+        .unwrap();
+    let codex = result
+        .agents
+        .iter()
+        .find(|agent| agent.agent_id.as_str() == CODEX_AGENT_ID)
+        .unwrap();
+
+    assert_eq!(codex.status, AgentSettingsStatus::SetupRequired);
+    assert_eq!(codex.setup_reason, Some(AgentSetupReason::NodeJsRequired));
+}
 
 #[test]
 fn agent_settings_details_include_disabled_builtins_and_custom_launch_details() {
@@ -47,6 +72,7 @@ fn agent_settings_details_include_disabled_builtins_and_custom_launch_details() 
         "custom.local".to_string(),
         AgentStatusSnapshot {
             status: AgentStatus::Connected,
+            setup_reason: None,
             capabilities: AgentCapabilities::default(),
             auth_methods: Vec::new(),
             logout_supported: false,
@@ -108,6 +134,28 @@ fn agent_settings_details_include_disabled_builtins_and_custom_launch_details() 
 }
 
 struct ProbeReadyAgentRuntime;
+
+struct ProbeNodeJsRequiredRuntime;
+
+impl AgentRuntime for ProbeNodeJsRequiredRuntime {
+    fn probe(&self, _request: AgentProbeRequest) -> Result<AgentProbeResult, RuntimeError> {
+        Err(RuntimeError::NodeJsRequired(
+            "npx is unavailable".to_string(),
+        ))
+    }
+
+    fn start_session(&self, _request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
+        unreachable!("settings details must not start agent sessions")
+    }
+
+    fn prompt(
+        &self,
+        _prompt: AgentPrompt,
+        _sink: Arc<dyn AgentEventSink>,
+    ) -> Result<crate::agent::AgentPromptOutcome, RuntimeError> {
+        unreachable!("settings details must not prompt agents")
+    }
+}
 
 impl AgentRuntime for ProbeReadyAgentRuntime {
     fn probe(&self, request: AgentProbeRequest) -> Result<AgentProbeResult, RuntimeError> {

@@ -67,6 +67,7 @@ pub struct TaskSetupBlocker {
 pub enum TaskSetupBlockerKind {
     AuthRequired,
     SetupRequired,
+    NodeJsRequired,
     CapabilityUnavailable,
     NativeSessionUnavailable,
 }

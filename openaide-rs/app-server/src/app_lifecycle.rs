@@ -17,12 +17,6 @@ pub enum InitializeAdmission {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ClientLifecycleEffect {
-    Noop,
-    BeginDraining,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ShutdownRequestOutcome {
     AlreadyStopping,
     ShutdownPlanned(ShutdownPlan),
@@ -77,16 +71,6 @@ impl AppLifecycle {
     pub fn begin_draining(&mut self) {
         if self.state == LifecycleState::Running {
             self.state = LifecycleState::Draining;
-        }
-    }
-
-    pub fn observe_last_client_expired(&mut self) -> ClientLifecycleEffect {
-        match self.state {
-            LifecycleState::Running => {
-                self.state = LifecycleState::Draining;
-                ClientLifecycleEffect::BeginDraining
-            }
-            LifecycleState::Draining | LifecycleState::Stopping => ClientLifecycleEffect::Noop,
         }
     }
 

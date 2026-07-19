@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import * as path from "node:path";
 
 export type RuntimeSourceKind = "configured" | "environment" | "bundled" | "development";
-export type StorageRootKind = "configured" | "extension-storage";
+export type StorageRootKind = "configured" | "environment" | "extension-storage";
 
 export type RuntimePathInput = {
   extensionRoot: string;

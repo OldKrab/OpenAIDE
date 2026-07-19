@@ -24,6 +24,8 @@ export function agentOptionsFromProtocol(snapshot: AgentCollectionSnapshot): Age
       description: known?.description ?? "Agent available from App Server.",
       icon: known?.icon ?? "bot",
       enabled: true,
+      status: agent.status,
+      setupReason: agent.setupReason ?? undefined,
     };
   });
 }

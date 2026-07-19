@@ -10,6 +10,23 @@ describe("App Server Agent state mapping", () => {
     ]);
   });
 
+  it("preserves structured status for recovery presentation", () => {
+    expect(agentOptionsFromProtocol(agentCollection({
+      agents: [{
+        agentId: "codex" as never,
+        label: "Codex",
+        status: "setupRequired",
+        setupReason: "nodeJsRequired",
+      }],
+    }))).toEqual([
+      expect.objectContaining({
+        id: "codex",
+        status: "setupRequired",
+        setupReason: "nodeJsRequired",
+      }),
+    ]);
+  });
+
   it("uses the first deterministic fallback when the selected Agent disappears", () => {
     expect(fallbackAgentActionFromProtocol(agentCollection(), "codex")).toEqual({
       type: "newTask:agent",

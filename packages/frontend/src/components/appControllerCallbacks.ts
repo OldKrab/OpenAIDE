@@ -39,6 +39,7 @@ export function createAppCallbacks({
       dispatch,
       newTaskController,
       requestNativeSessions,
+      setAgents,
       state,
     }),
     newTask: createNewTaskCallbacks({

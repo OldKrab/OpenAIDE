@@ -79,6 +79,27 @@ describe("VS Code webview surfaces", () => {
     expect(view.webview.html).not.toContain('data-surface="settings"');
   });
 
+  it("does not let disposal of a replaced navigation view detach its replacement", () => {
+    const broker = runtime();
+    const firstStop = vi.fn();
+    const secondStop = vi.fn();
+    broker.attachAppServerView
+      .mockReturnValueOnce(firstStop)
+      .mockReturnValueOnce(secondStop);
+    const provider = new TaskViewProvider(context(), broker, runtimeProcess(), logger(), surfaces());
+    const first = createViewMock();
+    const second = createViewMock();
+
+    provider.resolveWebviewView(first as never);
+    provider.resolveWebviewView(second as never);
+    triggerViewDispose(first);
+
+    expect(firstStop).toHaveBeenCalledOnce();
+    expect(secondStop).not.toHaveBeenCalled();
+    triggerViewDispose(second);
+    expect(secondStop).toHaveBeenCalledOnce();
+  });
+
   it("opens new task, existing task, and settings as editor webview panels", () => {
     const manager = new TaskEditorManager(context(), runtime(), runtimeProcess(), logger());
 
@@ -148,148 +169,37 @@ describe("VS Code webview surfaces", () => {
     expect(panel.title).toBe("Read-only bounded lookup in upstream OpenCode at…");
   });
 
-  it("gives task webviews with the same VS Code origin distinct client identities", () => {
-    const manager = new TaskEditorManager(context(), runtime(), runtimeProcess(), logger());
+  it("attaches task webviews to the host broker without exposing client credentials", () => {
+    const broker = runtime();
+    const manager = new TaskEditorManager(context(), broker, runtimeProcess(), logger());
 
     manager.openNewTask();
     manager.openTask("task_1", "Fix ACP");
 
-    const newTaskClientId = dataAttribute(vscodeMocks.panels[0].webview.html, "client-instance-id");
-    const taskClientId = dataAttribute(vscodeMocks.panels[1].webview.html, "client-instance-id");
-    expect(newTaskClientId).toBeTruthy();
-    expect(taskClientId).toBeTruthy();
-    expect(taskClientId).not.toBe(newTaskClientId);
+    expect(broker.attachAppServerView).toHaveBeenCalledTimes(2);
+    for (const panel of vscodeMocks.panels) {
+      expect(panel.webview.html).not.toContain("data-client-instance-id");
+      expect(panel.webview.html).not.toContain("data-app-server-connection");
+      expect(panel.webview.html).not.toContain("authToken");
+    }
   });
 
-  it("renders a preparing shell until App Server handoff supplies bootstrap connection info", async () => {
-    const handoff = deferredConnection();
-    const manager = new TaskEditorManager(context(), runtime(), runtimeProcess(handoff.promise), logger());
+  it("routes typed App Server session messages through the extension host client", () => {
+    const broker = runtime();
+    const manager = new TaskEditorManager(context(), broker, runtimeProcess(), logger());
 
     manager.openNewTask();
     const panel = vscodeMocks.panels[0];
-
-    expect(panel.webview.html).toContain("Preparing OpenAIDE");
-    handoff.resolve({
-      kind: "localHttp",
-      endpointUrl: "http://127.0.0.1:1234/probe",
-      authToken: "token-1",
-    });
-    await settle();
-
-    expect(panel.webview.html).toContain('data-surface="task"');
-    expect(panel.webview.html).toContain("&quot;endpointUrl&quot;:&quot;http://127.0.0.1:1234/probe&quot;");
-    expect(panel.webview.html).toContain("&quot;authToken&quot;:&quot;token-1&quot;");
-  });
-
-  it("forwards the remote App Server endpoint before bootstrapping an editor webview", async () => {
-    vscodeMocks.asExternalUri.mockResolvedValue({
-      toString: () => "http://127.0.0.1:54321/probe",
-    });
-    const manager = new TaskEditorManager(
-      context(),
-      runtime(),
-      runtimeProcess(Promise.resolve({
-        kind: "localHttp",
-        endpointUrl: "http://127.0.0.1:1234/probe",
-        authToken: "token-1",
-      })),
-      logger(),
-    );
-
-    manager.openNewTask();
-    await settle();
-
-    expect(vscodeMocks.asExternalUri).toHaveBeenCalledWith(
-      expect.objectContaining({ toString: expect.any(Function) }),
-    );
-    expect(vscodeMocks.panels[0].webview.html).toContain(
-      "&quot;endpointUrl&quot;:&quot;http://127.0.0.1:54321/probe&quot;",
-    );
-    expect(vscodeMocks.panels[0].webview.html).not.toContain(
-      "&quot;endpointUrl&quot;:&quot;http://127.0.0.1:1234/probe&quot;",
-    );
-  });
-
-  it("forwards the remote App Server endpoint before bootstrapping task navigation", async () => {
-    vscodeMocks.asExternalUri.mockResolvedValue({
-      toString: () => "http://127.0.0.1:54321/probe",
-    });
-    const view = createViewMock();
-    const provider = new TaskViewProvider(
-      context(),
-      runtime(),
-      runtimeProcess(Promise.resolve({
-        kind: "localHttp",
-        endpointUrl: "http://127.0.0.1:1234/probe",
-        authToken: "token-1",
-      })),
-      logger(),
-      surfaces(),
-    );
-
-    provider.resolveWebviewView(view as never);
-    await settle();
-
-    expect(view.webview.html).toContain(
-      "&quot;endpointUrl&quot;:&quot;http://127.0.0.1:54321/probe&quot;",
-    );
-  });
-
-  it("renders without App Server connection when handoff fails", async () => {
-    const manager = new TaskEditorManager(
-      context(),
-      runtime(),
-      runtimeProcess(Promise.reject(new Error("handoff failed"))),
-      logger(),
-    );
-
-    manager.openNewTask();
-    await settle();
-
-    expect(vscodeMocks.panels[0].webview.html).toContain('data-surface="task"');
-    expect(vscodeMocks.panels[0].webview.html).toContain('data-app-server-connection="null"');
-  });
-
-  it("does not render into a disposed panel after handoff resolves", async () => {
-    const handoff = deferredConnection();
-    const manager = new TaskEditorManager(context(), runtime(), runtimeProcess(handoff.promise), logger());
-
-    manager.openNewTask();
-    const panel = vscodeMocks.panels[0];
-    const preparingHtml = panel.webview.html;
-    triggerFirstDisposeHandler(panel);
-    handoff.resolve({
-      kind: "localHttp",
-      endpointUrl: "http://127.0.0.1:1234/probe",
-      authToken: "token-1",
-    });
-    await settle();
-
-    expect(panel.webview.html).toBe(preparingHtml);
-  });
-
-  it("preserves LocalHttp bootstrap when adopting a New Task panel", async () => {
-    const handoff = deferredConnection();
-    const manager = new TaskEditorManager(context(), runtime(), runtimeProcess(handoff.promise), logger());
-
-    manager.openNewTask();
-    const panel = vscodeMocks.panels[0];
-    handoff.resolve({
-      kind: "localHttp",
-      endpointUrl: "http://127.0.0.1:1234/probe",
-      authToken: "token-1",
-    });
-    await settle();
-    const originalHtml = panel.webview.html;
-
     triggerLastMessageHandler(panel, {
-      type: "surface.openTask",
-      payload: { task_id: "created_task", title: "Created task" },
+      type: "appServer.session.initialize",
+      requestId: "initialize-1",
     });
 
-    expect(panel.title).toBe("Created task");
-    expect(panel.webview.html).toBe(originalHtml);
-    expect(panel.webview.html).toContain("&quot;endpointUrl&quot;:&quot;http://127.0.0.1:1234/probe&quot;");
+    expect(broker.handleAppServerViewMessage).toHaveBeenCalledWith(
+      expect.stringMatching(/^panel-/),
+      { type: "appServer.session.initialize", requestId: "initialize-1" },
+    );
+    expect(handleWebviewMessage).not.toHaveBeenCalled();
   });
 
   it("reveals existing editor tabs instead of creating duplicate panels", () => {
@@ -306,6 +216,39 @@ describe("VS Code webview surfaces", () => {
     expect(vscodeMocks.panels[0].reveal).toHaveBeenCalledWith(1);
     expect(vscodeMocks.panels[1].reveal).toHaveBeenCalledWith(1);
     expect(vscodeMocks.panels[2].reveal).toHaveBeenCalledWith(1);
+  });
+
+  it("keeps task navigation focused on the active Task editor tab", () => {
+    const manager = new TaskEditorManager(context(), runtime(), runtimeProcess(), logger());
+    const view = createViewMock();
+    const provider = new TaskViewProvider(context(), runtime(), runtimeProcess(), logger(), manager);
+    provider.resolveWebviewView(view as never);
+
+    manager.openTask("task_1", "First task");
+    manager.openTask("task_2", "Second task");
+    triggerViewState(vscodeMocks.panels[0], true);
+
+    expect(view.webview.postMessage).toHaveBeenLastCalledWith({
+      type: "surface.focusChanged",
+      payload: { task_id: "task_1" },
+    });
+
+    triggerViewState(vscodeMocks.panels[0], false);
+    expect(view.webview.postMessage).toHaveBeenLastCalledWith({
+      type: "surface.focusChanged",
+      payload: {},
+    });
+  });
+
+  it("bootstraps task navigation with the already-focused Task editor", () => {
+    const manager = new TaskEditorManager(context(), runtime(), runtimeProcess(), logger());
+    manager.openTask("task_1", "Focused task");
+    const view = createViewMock();
+    const provider = new TaskViewProvider(context(), runtime(), runtimeProcess(), logger(), manager);
+
+    provider.resolveWebviewView(view as never);
+
+    expect(view.webview.html).toContain('data-focused-task-id="&quot;task_1&quot;"');
   });
 
   it("reuses the registered Task panel when a New Task routes to the same Task", () => {
@@ -391,6 +334,8 @@ function context() {
 
 function runtime() {
   return {
+    attachAppServerView: vi.fn(() => vi.fn()),
+    handleAppServerViewMessage: vi.fn(async () => true),
     createTask: vi.fn().mockResolvedValue({
       task: {
         task_id: "created_task",
@@ -401,8 +346,14 @@ function runtime() {
 }
 
 function runtimeProcess(connection?: Promise<unknown>) {
+  let replacementListener: ((connection: unknown) => void) | undefined;
   return {
     startAppServerConnection: connection ? vi.fn(() => connection) : undefined,
+    onAppServerConnectionChanged: vi.fn((listener: (connection: unknown) => void) => {
+      replacementListener = listener;
+      return { dispose: () => { replacementListener = undefined; } };
+    }),
+    publishReplacement: (replacement: unknown) => replacementListener?.(replacement),
   } as never;
 }
 
@@ -412,6 +363,8 @@ function logger() {
 
 function surfaces() {
   return {
+    currentFocusedTaskId: vi.fn(() => undefined),
+    onDidChangeFocusedTask: vi.fn(() => ({ dispose: vi.fn() })),
     openNewTask: vi.fn(),
     openSettings: vi.fn(),
     openTask: vi.fn(),
@@ -421,13 +374,16 @@ function surfaces() {
 function createViewMock() {
   return {
     webview: createWebviewMock(),
+    onDidDispose: vi.fn(),
   };
 }
 
 function createPanelMock() {
   return {
+    active: true,
     title: "",
     webview: createWebviewMock(),
+    onDidChangeViewState: vi.fn(),
     onDidDispose: vi.fn(),
     reveal: vi.fn(),
     dispose: vi.fn(),
@@ -449,10 +405,6 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
-function dataAttribute(html: string, name: string) {
-  return new RegExp(`data-${name}="([^"]*)"`).exec(html)?.[1];
-}
-
 function triggerLastMessageHandler(panel: ReturnType<typeof createPanelMock>, message: unknown) {
   const handler = panel.webview.onDidReceiveMessage.mock.calls.at(-1)?.[0];
   if (!handler) throw new Error("missing message handler");
@@ -465,23 +417,15 @@ function triggerFirstDisposeHandler(panel: ReturnType<typeof createPanelMock>) {
   handler();
 }
 
-function deferredConnection() {
-  let resolve!: (value: {
-    kind: "localHttp";
-    endpointUrl: string;
-    authToken: string;
-  }) => void;
-  const promise = new Promise<{
-    kind: "localHttp";
-    endpointUrl: string;
-    authToken: string;
-  }>((next) => {
-    resolve = next;
-  });
-  return { promise, resolve };
+function triggerViewDispose(view: ReturnType<typeof createViewMock>) {
+  const handler = view.onDidDispose.mock.calls[0]?.[0];
+  if (!handler) throw new Error("missing view dispose handler");
+  handler();
 }
 
-async function settle() {
-  await Promise.resolve();
-  await Promise.resolve();
+function triggerViewState(panel: ReturnType<typeof createPanelMock>, active: boolean) {
+  panel.active = active;
+  const handler = panel.onDidChangeViewState.mock.calls[0]?.[0];
+  if (!handler) throw new Error("missing view-state handler");
+  handler({ webviewPanel: panel });
 }

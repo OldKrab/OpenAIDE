@@ -6,14 +6,14 @@ use openaide_app_server_protocol::snapshot::{
     PendingAgentConfigChange, TaskAgentCommandsSnapshot, TaskAgentConfigSnapshot,
     TaskPreparationAction, TaskPreparationSnapshot, TaskPreparationStep, TaskPreparationStepKind,
     TaskPreparationStepStatus, TaskSendBlocker, TaskSendBlockerKind, TaskSendCapabilitySnapshot,
-    TaskSendCapabilityState,
+    TaskSendCapabilityState, TaskSetupBlocker, TaskSetupBlockerKind,
 };
 
 use crate::protocol::model::{
     AgentCommand, ConfigOption, ConfigOptionCategory, ConfigOptionValue,
     TaskSnapshot as StoredTaskSnapshot, TaskStatus as LegacyTaskStatus,
 };
-use crate::storage::records::TaskPreparationRecord;
+use crate::storage::records::{TaskPreparationBlockerRecord, TaskPreparationRecord};
 
 pub(super) fn preparation_snapshot(preparation: &TaskPreparationRecord) -> TaskPreparationSnapshot {
     match preparation {
@@ -34,6 +34,13 @@ pub(super) fn preparation_snapshot(preparation: &TaskPreparationRecord) -> TaskP
             }
         }
         TaskPreparationRecord::Ready => TaskPreparationSnapshot::Ready,
+        TaskPreparationRecord::Blocked { reason, message } => TaskPreparationSnapshot::Blocked {
+            blocker: TaskSetupBlocker {
+                kind: setup_blocker_kind(*reason),
+                message: message.clone(),
+            },
+            actions: setup_blocker_actions(*reason),
+        },
         TaskPreparationRecord::Failed { message } => TaskPreparationSnapshot::Failed {
             error: preparation_error(message),
             actions: vec![TaskPreparationAction::Retry, TaskPreparationAction::Discard],
@@ -64,6 +71,12 @@ pub(super) fn agent_config_snapshot(snapshot: &StoredTaskSnapshot) -> TaskAgentC
                 pending_change: pending_config_change(snapshot),
                 error: None,
             },
+        },
+        TaskPreparationRecord::Blocked { reason, message } => TaskAgentConfigSnapshot {
+            state: LiveSessionDataState::Unavailable,
+            options: Vec::new(),
+            pending_change: None,
+            error: Some(setup_blocker_error(*reason, message)),
         },
         TaskPreparationRecord::Failed { message } => TaskAgentConfigSnapshot {
             state: LiveSessionDataState::Failed,
@@ -171,6 +184,11 @@ pub(super) fn agent_commands_snapshot(snapshot: &StoredTaskSnapshot) -> TaskAgen
                 .unwrap_or_default(),
             error: None,
         },
+        TaskPreparationRecord::Blocked { reason, message } => TaskAgentCommandsSnapshot {
+            state: LiveSessionDataState::Unavailable,
+            commands: Vec::new(),
+            error: Some(setup_blocker_error(*reason, message)),
+        },
         TaskPreparationRecord::Failed { message } => TaskAgentCommandsSnapshot {
             state: LiveSessionDataState::Failed,
             commands: Vec::new(),
@@ -213,6 +231,15 @@ pub(super) fn send_capability_for_task(
                 }],
             };
         }
+        TaskPreparationRecord::Blocked { message, .. } => {
+            return TaskSendCapabilitySnapshot {
+                state: TaskSendCapabilityState::Blocked,
+                blockers: vec![TaskSendBlocker {
+                    kind: TaskSendBlockerKind::FailedValidation,
+                    message: message.clone(),
+                }],
+            };
+        }
         TaskPreparationRecord::Ready => {}
     }
     match status {
@@ -241,6 +268,41 @@ pub(super) fn send_capability_for_task(
 fn preparation_error(message: &str) -> ProtocolError {
     ProtocolError {
         code: ProtocolErrorCode::Internal,
+        message: message.to_string(),
+        recoverable: true,
+        target: None,
+    }
+}
+
+fn setup_blocker_kind(reason: TaskPreparationBlockerRecord) -> TaskSetupBlockerKind {
+    match reason {
+        TaskPreparationBlockerRecord::AuthRequired => TaskSetupBlockerKind::AuthRequired,
+        TaskPreparationBlockerRecord::SetupRequired => TaskSetupBlockerKind::SetupRequired,
+        TaskPreparationBlockerRecord::NodeJsRequired => TaskSetupBlockerKind::NodeJsRequired,
+    }
+}
+
+fn setup_blocker_actions(reason: TaskPreparationBlockerRecord) -> Vec<TaskPreparationAction> {
+    match reason {
+        TaskPreparationBlockerRecord::AuthRequired => vec![
+            TaskPreparationAction::Authenticate,
+            TaskPreparationAction::OpenAgentSettings,
+        ],
+        TaskPreparationBlockerRecord::SetupRequired
+        | TaskPreparationBlockerRecord::NodeJsRequired => vec![
+            TaskPreparationAction::Retry,
+            TaskPreparationAction::OpenAgentSettings,
+        ],
+    }
+}
+
+fn setup_blocker_error(reason: TaskPreparationBlockerRecord, message: &str) -> ProtocolError {
+    ProtocolError {
+        code: match reason {
+            TaskPreparationBlockerRecord::AuthRequired => ProtocolErrorCode::Unauthorized,
+            TaskPreparationBlockerRecord::SetupRequired => ProtocolErrorCode::CapabilityUnavailable,
+            TaskPreparationBlockerRecord::NodeJsRequired => ProtocolErrorCode::NodeJsRequired,
+        },
         message: message.to_string(),
         recoverable: true,
         target: None,

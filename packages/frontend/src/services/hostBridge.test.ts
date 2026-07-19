@@ -6,6 +6,65 @@ describe("host bridge", () => {
     vi.unstubAllGlobals();
   });
 
+  it("uses an App Shell-owned session instead of creating a browser transport", async () => {
+    const session = { initialize: vi.fn() };
+    const [{ installFrontendShell }, { getBackendConnection }] = await Promise.all([
+      import("./frontendShell"),
+      import("./hostBridge"),
+    ]);
+    installFrontendShell({
+      backendConnection: () => session,
+      bootstrap: () => ({ surface: "invalid" }),
+    } as never);
+
+    expect(getBackendConnection()).toBe(session);
+  });
+
+  it("adapts the VS Code message bridge as the Frontend AppServerSession", async () => {
+    const posted: unknown[] = [];
+    const listeners = new Map<string, (event: { data: unknown }) => void>();
+    vi.stubGlobal("document", {
+      body: {
+        dataset: {
+          shell: "vscodeExtension",
+          navigationMode: "currentProject",
+          surface: "navigation",
+        },
+      },
+    });
+    vi.stubGlobal("window", {
+      acquireVsCodeApi: () => ({ postMessage: (message: unknown) => posted.push(message) }),
+      addEventListener: (type: string, listener: (event: { data: unknown }) => void) => listeners.set(type, listener),
+      removeEventListener: (type: string) => listeners.delete(type),
+    });
+    const [{ installFrontendShell }, { createVsCodeShell }, { getBackendConnection }] = await Promise.all([
+      import("./frontendShell"),
+      import("../../../../apps/vscode-extension/frontend/vsCodeShell"),
+      import("./hostBridge"),
+    ]);
+    installFrontendShell(createVsCodeShell());
+
+    const initialized = getBackendConnection()?.initialize({
+      clientInstanceId: "renderer-id" as never,
+      shell: { kind: "vscodeExtension" },
+      requestedSurface: { kind: "home" },
+    });
+    expect(posted).toContainEqual(expect.objectContaining({
+      type: "appServer.session.initialize",
+      requestId: "request-1",
+    }));
+    listeners.get("message")?.({
+      data: {
+        type: "appServer.session.response",
+        requestId: "request-1",
+        result: initializeResult(),
+      },
+    });
+
+    await expect(initialized).resolves.toEqual(initializeResult());
+    expect(vi.isMockFunction(globalThis.fetch)).toBe(false);
+  });
+
   it("creates a direct LocalHttp BackendConnection from bootstrap endpoint info", async () => {
     const fetch = reliableFetch();
     vi.stubGlobal("fetch", fetch);

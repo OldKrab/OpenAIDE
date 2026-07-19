@@ -259,10 +259,11 @@ contracts:
      second product protocol.
    - Current gap: `main.rs` now defaults to App Server Protocol stdio, while
      `OPENAIDE_RUNTIME_PROTOCOL=shell-control-stdio` is reserved for the
-     shell-control runtime surface. VS Code webviews receive direct LocalHttp
-     App Server connection info from handoff bootstrap; the broken
-     webview-to-stdio App Server Protocol proxy has been removed, and VS Code
-     host-side typed App Server requests now use a LocalHttp host client.
+     shell-control runtime surface. The VS Code extension host owns one
+     initialized LocalHttp App Server session and brokers typed session traffic
+     for all of its webview surfaces. Webviews do not receive endpoint or token
+     material and do not initialize independent product clients. The broken
+     webview-to-stdio App Server Protocol proxy has also been removed.
      `transport/shell_control` exists only for explicit shell-local leftovers
      such as health, shutdown, and private shell helper requests.
      Legacy `runtime.health` advertises only those shell-local methods. Dotted
@@ -2291,17 +2292,42 @@ concrete current gap.
   broken child cannot freeze App Server connection setup indefinitely.
 - If the launched handoff child exits, VS Code clears its cached connection so
   the next request performs a fresh handoff.
-- Shared Frontend now creates a BackendConnection only from direct LocalHttp
-  bootstrap connection info; it no longer falls back to proxying App Server
-  Protocol requests through VS Code webview messages and the shell-control stdio
-  runtime.
+- Shared Frontend accepts an App Shell-owned `AppServerSession`. The VS Code App
+  Shell supplies a typed webview bridge to the extension host's single reliable
+  LocalHttp session; browser App Shells retain direct browser-safe transports.
+- VS Code webviews no longer receive LocalHttp endpoint URLs or process tokens,
+  and their CSP no longer allows direct App Server connections.
 - Shell-control stdio `runtime.health` advertises only `runtime.health` and
   `runtime.shutdown`; product and raw-path resolver methods are no longer
   presented through the legacy transport.
 - Runtime contract tests prove handoff launch serves real LocalHttp
   `client/initialize` and a second handoff reuses the existing endpoint.
 
-## Completed Slice Contract: A7 Shell Bootstrap LocalHttp Connection Contract
+## Completed Slice Contract: VS Code Single App Server Client
+
+- One VS Code extension host/window owns one stable `clientInstanceId`, one
+  initialized reliable LocalHttp session, and one physical receive loop.
+- Navigation, Task, New Task, and Settings webviews are render views behind the
+  host session. Their typed adapters preserve requests, state subscriptions,
+  recovery/status events, and Backend-initiated requests without exposing
+  transport credentials.
+- View attachment ids are extension-local routing identities, not App Server
+  client identities. Closing a view releases only that view's observers; the
+  host session closes with the extension runtime.
+- Equal subscription scopes share the host session's existing replica and
+  underlying App Server subscription.
+- Native VS Code Task and Settings panels do not load Task Navigation or Agent
+  native-session history because they do not render the sidebar. The Navigation
+  view remains the owner of that work; the Web workbench retains it on routes
+  where its integrated sidebar is rendered.
+- Conformance tests prove multiple webviews initialize one client and that VS
+  Code webview HTML contains no endpoint or token material.
+
+## Superseded Slice Contract: A7 Shell Bootstrap LocalHttp Connection Contract
+
+The following records the earlier direct-webview transport and is superseded for
+VS Code by the single-client contract above. Browser App Shells still use the
+direct bootstrap pattern where applicable.
 
 - App Shell bootstrap records can carry optional ephemeral LocalHttp App Server
   connection info: endpoint URL and process token.

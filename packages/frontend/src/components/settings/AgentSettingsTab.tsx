@@ -7,6 +7,7 @@ import type {
 } from "@openaide/app-shell-contracts";
 import { AgentSettingsDetail } from "./AgentSettingsDetail";
 import { AgentSettingsList } from "./AgentSettingsList";
+import type { AgentRecoveryActions } from "../AgentRecovery";
 import {
   draftFromAgent,
   newAgentDraft,
@@ -29,10 +30,12 @@ export function AgentSettingsTab({
   onUpdateCustomAgentMetadata,
   deletedAgentId,
   savedAgentId,
+  preferredAgentId,
+  recoveryActions,
 }: {
   agents: AgentSettingsRecord[];
   authPending: boolean;
-  onAuthenticate: (agentId: string, methodId: string, values?: Record<string, string>) => void;
+  onAuthenticate: (agentId: string, methodId: string, values?: Record<string, string>) => void | Promise<boolean>;
   onCreateCustomAgent: (params: CustomAgentCreateParams) => void;
   onDeleteCustomAgent: (agentId: string) => void;
   onReplaceCustomAgent: (params: CustomAgentReplaceParams) => void;
@@ -40,6 +43,8 @@ export function AgentSettingsTab({
   onUpdateCustomAgentMetadata: (params: CustomAgentMetadataUpdateParams) => void;
   deletedAgentId?: string;
   savedAgentId?: string;
+  preferredAgentId?: string;
+  recoveryActions?: AgentRecoveryActions;
 }) {
   const [selectedId, setSelectedId] = useState(agents[0]?.id);
   const [confirmDeleteAgentId, setConfirmDeleteAgentId] = useState<string | undefined>();
@@ -53,6 +58,12 @@ export function AgentSettingsTab({
   const isCustom = draft !== undefined || selected?.source_kind === "custom";
   const isCreating = draft?.agent_id === undefined;
   const missingRequiredLaunchFields = isCustom && (!activeDraft.label.trim() || !activeDraft.command_line.trim());
+
+  useEffect(() => {
+    if (preferredAgentId && agents.some((agent) => agent.id === preferredAgentId)) {
+      setSelectedId(preferredAgentId);
+    }
+  }, [agents, preferredAgentId]);
 
   useEffect(() => {
     if (!shouldConsumeAgentSaveAck({ savedAgentId, pendingSaveAgentId, hasDraft: draft !== undefined })) return;
@@ -149,6 +160,7 @@ export function AgentSettingsTab({
           saveBlockedMessage={missingRequiredLaunchFields ? "Name and command are required." : undefined}
           onSetAgentEnabled={onSetAgentEnabled}
           onUpdateDraft={updateDraft}
+          recoveryActions={recoveryActions}
           selected={selected}
         />
       </div>

@@ -1,26 +1,29 @@
 import * as vscode from "vscode";
+import { randomUUID } from "node:crypto";
+import { isAppServerSessionViewMessage } from "@openaide/app-server-client";
 import { ExtensionLogger } from "../logging/logger";
 import { RuntimeProcess } from "../runtime/process";
 import { RuntimeClient } from "../runtime/rpcClient";
-import {
-  createWebviewClientInstanceId,
-  renderWebviewHtml,
-  renderWebviewPreparingHtml,
-  webviewRoot,
-} from "./html";
+import { renderWebviewHtml, webviewRoot } from "./html";
 import { handleWebviewMessage } from "./messaging";
-import { VSCODE_SHELL, type WebviewBootstrap, type WebviewHost } from "./types";
-import { resolveWebviewAppServerConnection } from "./appServerConnection";
+import {
+  VSCODE_SHELL,
+  type TaskFocusSource,
+  type WebviewBootstrap,
+  type WebviewHost,
+} from "./types";
 import { currentWorkspaceRoot } from "../workspace/roots";
 
 type PanelBootstrap = Omit<WebviewBootstrap, "shell">;
 
 const MAX_TASK_PANEL_TITLE_LENGTH = 50;
 
-export class TaskEditorManager implements vscode.Disposable, WebviewHost {
+export class TaskEditorManager implements vscode.Disposable, WebviewHost, TaskFocusSource {
   private readonly taskPanels = new Map<string, vscode.WebviewPanel>();
   private readonly panelBootstraps = new WeakMap<vscode.WebviewPanel, WebviewBootstrap>();
-  private readonly panelRenderGeneration = new WeakMap<vscode.WebviewPanel, number>();
+  private readonly focusedTaskListeners = new Set<(taskId: string | undefined) => void>();
+  private focusedPanel: vscode.WebviewPanel | undefined;
+  private focusedTaskId: string | undefined;
   private settingsPanel: vscode.WebviewPanel | undefined;
   private newTaskPanel: vscode.WebviewPanel | undefined;
 
@@ -34,6 +37,7 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost {
   openNewTask(projectId?: string) {
     if (this.newTaskPanel) {
       this.newTaskPanel.reveal(vscode.ViewColumn.Active);
+      this.focusPanel(this.newTaskPanel);
       return;
     }
     const panel = this.createPanel("openaide.task", "New task", {
@@ -41,8 +45,9 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost {
       projectId: projectId ?? currentWorkspaceRoot()?.projectId,
     });
     this.newTaskPanel = panel;
+    this.focusPanel(panel);
     panel.onDidDispose(() => {
-      this.nextPanelGeneration(panel);
+      this.releaseFocusedPanel(panel);
       if (this.newTaskPanel === panel) {
         this.newTaskPanel = undefined;
       }
@@ -53,25 +58,42 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost {
     const existing = this.taskPanels.get(taskId);
     if (existing) {
       existing.reveal(vscode.ViewColumn.Active);
+      this.focusPanel(existing);
       return;
     }
     const panel = this.createPanel("openaide.task", taskPanelTitle(title), { surface: "task", taskId });
     this.taskPanels.set(taskId, panel);
+    this.focusPanel(panel);
     panel.onDidDispose(() => {
-      this.nextPanelGeneration(panel);
+      this.releaseFocusedPanel(panel);
       this.taskPanels.delete(taskId);
     });
   }
 
-  openSettings() {
+  openSettings(agentId?: string, returnToNewTask?: boolean, projectId?: string) {
     if (this.settingsPanel) {
       this.settingsPanel.reveal(vscode.ViewColumn.Active);
+      this.focusPanel(this.settingsPanel);
+      void this.settingsPanel.webview.postMessage({
+        type: "surface.settingsChanged",
+        payload: {
+          ...(agentId ? { agent_id: agentId } : {}),
+          ...(returnToNewTask ? { return_to_new_task: true } : {}),
+          ...(projectId ? { project_id: projectId } : {}),
+        },
+      });
       return;
     }
-    const panel = this.createPanel("openaide.settings", "Settings", { surface: "settings" });
+    const panel = this.createPanel("openaide.settings", "Settings", {
+      surface: "settings",
+      settingsAgentId: agentId,
+      returnToNewTask,
+      projectId,
+    });
     this.settingsPanel = panel;
+    this.focusPanel(panel);
     panel.onDidDispose(() => {
-      this.nextPanelGeneration(panel);
+      this.releaseFocusedPanel(panel);
       this.settingsPanel = undefined;
     });
   }
@@ -83,23 +105,43 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost {
       panel.dispose();
     }
     this.taskPanels.clear();
+    this.focusedTaskListeners.clear();
+  }
+
+  currentFocusedTaskId() {
+    return this.focusedTaskId;
+  }
+
+  onDidChangeFocusedTask(listener: (taskId: string | undefined) => void) {
+    this.focusedTaskListeners.add(listener);
+    return { dispose: () => this.focusedTaskListeners.delete(listener) };
   }
 
   private createPanel(viewType: string, title: string, bootstrap: PanelBootstrap) {
-    // Panels of one view type share browser storage, so the host owns per-panel connection identity.
-    const panelBootstrap = {
-      ...bootstrap,
-      clientInstanceId: createWebviewClientInstanceId(),
-    };
     const panel = vscode.window.createWebviewPanel(viewType, title, vscode.ViewColumn.Active, {
       enableScripts: true,
       localResourceRoots: [webviewRoot(this.context)],
       retainContextWhenHidden: true,
     });
-    panel.webview.html = renderWebviewPreparingHtml(this.context, panel.webview);
-    void this.renderPanelWhenAppServerReady(panel, panelBootstrap, this.nextPanelGeneration(panel));
-    panel.webview.onDidReceiveMessage((message) =>
-      handleWebviewMessage(message, {
+    panel.onDidChangeViewState(({ webviewPanel }) => {
+      if (webviewPanel.active) {
+        this.focusPanel(panel);
+      } else {
+        this.releaseFocusedPanel(panel);
+      }
+    });
+    const viewId = `panel-${randomUUID()}`;
+    const detachAppServerView = this.runtime.attachAppServerView(viewId, (message) => {
+      void panel.webview.postMessage(message);
+    });
+    panel.onDidDispose(detachAppServerView);
+    this.renderPanel(panel, this.bootstrap(bootstrap));
+    panel.webview.onDidReceiveMessage((message) => {
+      if (isAppServerSessionViewMessage(message)) {
+        void this.runtime.handleAppServerViewMessage(viewId, message);
+        return;
+      }
+      void handleWebviewMessage(message, {
         runtime: this.runtime,
         runtimeProcess: this.runtimeProcess,
         post: (payload) => panel.webview.postMessage(payload),
@@ -108,30 +150,9 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost {
         agentSecretStore: this.context.secrets,
         adoptTask: (taskId, taskTitle) => this.adoptTaskPanel(panel, taskId, taskTitle),
         surfaces: this,
-      }),
-    );
-    return panel;
-  }
-
-  private async renderPanelWhenAppServerReady(
-    panel: vscode.WebviewPanel,
-    bootstrap: PanelBootstrap,
-    generation: number,
-  ) {
-    try {
-      const connection = await resolveWebviewAppServerConnection(
-        await this.runtimeProcess.startAppServerConnection(),
-      );
-      if (!this.isPanelGenerationCurrent(panel, generation)) return;
-      this.renderPanel(panel, {
-        ...this.bootstrap(bootstrap),
-        appServerConnection: connection,
       });
-    } catch (error) {
-      if (!this.isPanelGenerationCurrent(panel, generation)) return;
-      this.logger.warn("app server handoff failed; rendering without app server connection", { error: String(error) });
-      this.renderPanel(panel, this.bootstrap(bootstrap));
-    }
+    });
+    return panel;
   }
 
   private renderPanel(panel: vscode.WebviewPanel, bootstrap: WebviewBootstrap) {
@@ -145,10 +166,9 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost {
     const existingTaskPanel = this.taskPanels.get(taskId);
     if (existingTaskPanel && existingTaskPanel !== panel) {
       this.newTaskPanel = undefined;
-      // Invalidate pending bootstrap work before closing its superseded Backend client.
-      this.nextPanelGeneration(panel);
       panel.dispose();
       existingTaskPanel.reveal(vscode.ViewColumn.Active);
+      this.focusPanel(existingTaskPanel);
       return;
     }
     panel.title = taskPanelTitle(title);
@@ -159,11 +179,11 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost {
       taskId,
       projectId: undefined,
     });
+    if (panel.active) this.focusPanel(panel);
     this.newTaskPanel = undefined;
     if (!this.taskPanels.has(taskId)) {
       this.taskPanels.set(taskId, panel);
       panel.onDidDispose(() => {
-        this.nextPanelGeneration(panel);
         if (this.taskPanels.get(taskId) === panel) {
           this.taskPanels.delete(taskId);
         }
@@ -175,14 +195,23 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost {
     });
   }
 
-  private nextPanelGeneration(panel: vscode.WebviewPanel) {
-    const next = (this.panelRenderGeneration.get(panel) ?? 0) + 1;
-    this.panelRenderGeneration.set(panel, next);
-    return next;
+  /** Publishes editor focus only when the shell-visible Task identity changes. */
+  private focusPanel(panel: vscode.WebviewPanel) {
+    this.focusedPanel = panel;
+    const bootstrap = this.panelBootstraps.get(panel);
+    this.publishFocusedTask(bootstrap?.surface === "task" ? bootstrap.taskId : undefined);
   }
 
-  private isPanelGenerationCurrent(panel: vscode.WebviewPanel, generation: number) {
-    return this.panelRenderGeneration.get(panel) === generation;
+  private releaseFocusedPanel(panel: vscode.WebviewPanel) {
+    if (this.focusedPanel !== panel) return;
+    this.focusedPanel = undefined;
+    this.publishFocusedTask(undefined);
+  }
+
+  private publishFocusedTask(taskId: string | undefined) {
+    if (this.focusedTaskId === taskId) return;
+    this.focusedTaskId = taskId;
+    for (const listener of this.focusedTaskListeners) listener(taskId);
   }
 
   private bootstrap(bootstrap: PanelBootstrap): WebviewBootstrap {

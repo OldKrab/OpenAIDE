@@ -275,7 +275,7 @@ fn shutdown_stops_active_turn_without_failed_task_state() {
 }
 
 #[test]
-fn task_create_attach_failure_finalizes_created_task() {
+fn task_create_attach_failure_finalizes_task_without_clearing_native_session() {
     let tmp = TempDir::new().unwrap();
     let store = Store::open(tmp.path().join("store")).unwrap();
     let prompts = Arc::new(AtomicUsize::new(0));
@@ -311,7 +311,10 @@ fn task_create_attach_failure_finalizes_created_task() {
     assert_eq!(records.len(), 1);
     assert_eq!(records[0].status, TaskStatus::Inactive);
     assert!(records[0].active_turn_id.is_none());
-    assert!(records[0].agent_session_id.is_none());
+    assert_eq!(
+        records[0].agent_session_id.as_deref(),
+        Some("session_attach_failing")
+    );
 
     let snapshot = service
         .snapshot(TaskSnapshotParams {

@@ -1329,6 +1329,27 @@ describe("app controller callbacks", () => {
     expect(postHostMessage).not.toHaveBeenCalled();
   });
 
+  it("keeps terminal authentication in Settings while user confirmation is pending", async () => {
+    const dispatch = vi.fn();
+    const state = createInitialState();
+    state.settings.agentDetails = [{
+      ...customSettingsAgent("codex"),
+      auth_methods: [{ id: "codex-login", label: "Codex login", kind: "terminal" }],
+    }];
+    const request = vi.fn(async (method: string) => method === AGENT_AUTHENTICATE
+      ? { agentId: "codex", methodId: "codex-login", status: "awaiting_user" }
+      : { generatedAt: "during-auth", agents: [] });
+
+    const authenticated = await callbacks({
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
+      dispatch,
+      state,
+    }).settings.authenticateAgent("codex", "codex-login");
+
+    expect(authenticated).toBe(false);
+    expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: "settings:error" }));
+  });
+
   it("reports an error for Settings authentication when BackendConnection requests are unavailable", async () => {
     const dispatch = vi.fn();
 

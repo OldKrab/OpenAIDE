@@ -30,8 +30,8 @@ export function openNewTaskSurface(projectId?: string) {
   frontendShell().navigation.openNewTask(projectId);
 }
 
-export function openSettingsSurface() {
-  frontendShell().navigation.openSettings();
+export function openSettingsSurface(agentId?: string, returnToNewTask?: boolean, projectId?: string) {
+  frontendShell().navigation.openSettings(agentId, returnToNewTask, projectId);
 }
 
 export function openTaskSurface(taskId: string, title?: string) {
@@ -42,7 +42,17 @@ export function replaceSettingsTabRoute(tab: SettingsTabId) {
   frontendShell().navigation.replaceSettingsTab(tab);
 }
 
+export function openRecoveryUrl(url: string) {
+  frontendShell().recovery.openExternal(url);
+}
+
+export function reloadRecoveryShell() {
+  frontendShell().recovery.reload?.();
+}
+
 export function getBackendConnection() {
+  const shellConnection = frontendShell().backendConnection?.();
+  if (shellConnection) return shellConnection;
   const bootstrap = getBootstrap();
   if (bootstrap.surface !== "invalid" && bootstrap.appServerConnection?.kind === "localHttp") {
     return createReliableLocalHttpBackendConnection({

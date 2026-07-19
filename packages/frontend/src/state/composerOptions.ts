@@ -9,6 +9,8 @@ export type AgentOption = {
   description: string;
   icon: AgentIconId;
   enabled?: boolean;
+  status?: import("@openaide/app-server-client").AgentStatus;
+  setupReason?: import("@openaide/app-server-client").AgentSetupReason;
 };
 
 export type IsolationOption = {

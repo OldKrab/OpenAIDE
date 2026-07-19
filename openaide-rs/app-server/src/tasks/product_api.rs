@@ -20,7 +20,9 @@ use crate::agent::{AgentRuntime, AgentSessionKey};
 use crate::attachment_runtime::AttachmentRuntime;
 use crate::projects::ProjectResolver;
 use crate::protocol::errors::RuntimeError;
-use crate::protocol_edge::{AppServerShutdownWorkflow, ShutdownBlockers};
+use crate::protocol_edge::AppServerShutdownWorkflow;
+#[cfg(test)]
+use crate::protocol_edge::ShutdownBlockers;
 use crate::server_requests::ServerRequestRuntime;
 use crate::snapshots::task_snapshot::{
     project_stored_task_snapshot_with_history_sync, TaskHistorySyncSnapshotSource,
@@ -333,6 +335,7 @@ impl AppServerShutdownWorkflow for TaskProductApi {
         TaskProductApi::shutdown(self)
     }
 
+    #[cfg(test)]
     fn shutdown_blockers(&self) -> Result<ShutdownBlockers, RuntimeError> {
         let mut owned_turns = self.turn_acceptance.owned_turns();
         owned_turns.extend(self.turn_runner.active_turns());
@@ -553,6 +556,24 @@ impl TaskArchiveWorkflow for TaskProductApi {
 pub(super) fn protocol_error_from_runtime(error: RuntimeError) -> ProtocolError {
     match error {
         RuntimeError::CapabilityMissing(message) => ProtocolError {
+            code: ProtocolErrorCode::CapabilityUnavailable,
+            message,
+            recoverable: true,
+            target: None,
+        },
+        RuntimeError::AuthRequired(message) => ProtocolError {
+            code: ProtocolErrorCode::Unauthorized,
+            message,
+            recoverable: true,
+            target: None,
+        },
+        RuntimeError::NodeJsRequired(message) => ProtocolError {
+            code: ProtocolErrorCode::NodeJsRequired,
+            message,
+            recoverable: true,
+            target: None,
+        },
+        RuntimeError::SetupRequired(message) => ProtocolError {
             code: ProtocolErrorCode::CapabilityUnavailable,
             message,
             recoverable: true,

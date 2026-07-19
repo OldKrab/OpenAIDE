@@ -64,7 +64,7 @@ export function createWebAppShell(): FrontendShell {
     messages: { post, subscribe: subscribeWindowMessages },
     navigation: {
       openNewTask: (projectId) => navigate(newTaskPath(projectId)),
-      openSettings: () => navigate("/settings"),
+      openSettings: (agentId, returnToNewTask, projectId) => navigate(settingsPath(agentId, returnToNewTask, projectId)),
       openTask: (taskId) => navigate(`/task/${encodeURIComponent(taskId)}`),
       replaceSettingsTab(tab) {
         if (!isSettingsPath(window.location.pathname)) return;
@@ -86,6 +86,10 @@ export function createWebAppShell(): FrontendShell {
           window.removeEventListener("popstate", onPopState);
         };
       },
+    },
+    recovery: {
+      openExternal: (url) => window.open(url, "_blank", "noopener,noreferrer"),
+      reload: () => window.location.reload(),
     },
     taskNotifications,
   };
@@ -202,7 +206,15 @@ function webBootstrapForLocation(): WebviewBootstrap {
     appServerConnection: appServerConnection(),
   };
   if (isSettingsPath(pathname)) {
-    return { surface: "settings", settingsTab: settingsTabFromSearch(), ...shared };
+    const search = new URLSearchParams(window.location.search);
+    return {
+      surface: "settings",
+      settingsTab: settingsTabFromSearch(),
+      settingsAgentId: search.get("agentId") ?? undefined,
+      returnToNewTask: search.get("returnToNewTask") === "true",
+      projectId: search.get("projectId") ?? undefined,
+      ...shared,
+    };
   }
   if (pathname === "/archive" || pathname.startsWith("/archive/")) {
     return { surface: "navigation", archived: true, ...shared };
@@ -230,6 +242,15 @@ function settingsTabFromSearch() {
 
 function newTaskPath(projectId?: string) {
   return projectId ? `/new-task?projectId=${encodeURIComponent(projectId)}` : "/new-task";
+}
+
+function settingsPath(agentId?: string, returnToNewTask?: boolean, projectId?: string) {
+  const search = new URLSearchParams();
+  if (agentId) search.set("agentId", agentId);
+  if (returnToNewTask) search.set("returnToNewTask", "true");
+  if (projectId) search.set("projectId", projectId);
+  const query = search.toString();
+  return query ? `/settings?${query}` : "/settings";
 }
 
 function isWebviewBootstrap(value: unknown): value is WebviewBootstrap {

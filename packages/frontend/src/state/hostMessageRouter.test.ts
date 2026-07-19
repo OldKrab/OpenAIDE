@@ -42,6 +42,17 @@ describe("host message router", () => {
     expect(context.openSettingsSurface).toHaveBeenCalledOnce();
   });
 
+  it("routes VS Code editor focus into Task Navigation presentation state", () => {
+    const context = routerContext();
+
+    routeHostMessage({
+      type: "surface.focusChanged",
+      payload: { task_id: "task_2" },
+    }, context);
+
+    expect(context.setNavigationFocusedTaskId).toHaveBeenCalledWith("task_2");
+  });
+
   it("routes secret storage failures back to Agent Settings", () => {
     const context = routerContext();
 
@@ -75,6 +86,7 @@ function routerContextBase() {
     openNewTaskSurface: vi.fn(),
     openSettingsSurface: vi.fn(),
     setAgents: vi.fn(),
+    setNavigationFocusedTaskId: vi.fn(),
     setPreferences: vi.fn(),
     postHostMessage: vi.fn(),
   };

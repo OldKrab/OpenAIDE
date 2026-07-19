@@ -193,13 +193,9 @@ impl TaskProductApi {
         let api = self.clone();
         let background_send = committed_send.clone();
         std::thread::spawn(move || {
-            if let Err(error) = api.start_committed_send(
-                committed_task,
-                promoted_new_task,
-                prompt_text,
-                attachments,
-                background_send,
-            ) {
+            if let Err(error) =
+                api.start_committed_send(committed_task, prompt_text, attachments, background_send)
+            {
                 crate::logging::error(
                     "task_committed_send_start_failed",
                     serde_json::json!({ "error": error.message }),
@@ -280,7 +276,6 @@ impl TaskProductApi {
     pub(super) fn start_committed_send(
         &self,
         existing_task: TaskRecord,
-        replace_missing_prepared_session: bool,
         prompt_text: String,
         attachments: ResolvedSendAttachments,
         committed_send: CommittedSend,
@@ -291,7 +286,6 @@ impl TaskProductApi {
             .native_sessions
             .start_primary_prompt(PrimaryPromptRequest {
                 task: existing_task,
-                replace_missing_prepared_session,
                 turn_id: turn_id.clone(),
                 text: prompt_text,
                 attachments: attachments.agent_attachments(),

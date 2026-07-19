@@ -64,6 +64,7 @@ impl RpcGateway {
         id: String,
         params: Value,
         meta: RequestMeta,
+        now: AppServerTime,
     ) -> GatewayOutcome {
         let params = match serde_json::from_value::<AgentAuthenticateParams>(params) {
             Ok(params) => params,
@@ -75,7 +76,8 @@ impl RpcGateway {
             Ok(result) => result,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
-        self.result::<AgentAuthenticateResult>(connection_id, id, meta, result)
+        let events = self.publish_agent_collection_update(result.agents.clone(), now);
+        self.result_with_events::<AgentAuthenticateResult>(connection_id, id, meta, result, events)
     }
 
     pub(super) fn handle_agent_create_custom(

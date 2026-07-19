@@ -188,6 +188,11 @@
   font-weight: 600;
 }
 
+.agent-status-panel > .agent-recovery-actions {
+  grid-column: 1 / -1;
+  margin-top: 0;
+}
+
 .agent-status-panel.connected,
 .agent-status-panel.ready,
 .agent-status-panel.valid,

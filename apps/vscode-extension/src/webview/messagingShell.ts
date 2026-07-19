@@ -27,7 +27,11 @@ export async function routeSurfaceCommand(message: WebviewToHostMessage, context
     return true;
   }
   if (message.type === "surface.openSettings") {
-    context.surfaces?.openSettings();
+    context.surfaces?.openSettings(
+      message.payload?.agent_id,
+      message.payload?.return_to_new_task,
+      message.payload?.project_id,
+    );
     return true;
   }
   if (message.type === "surface.openTask" && isObject(message.payload)) {
@@ -43,6 +47,17 @@ export async function routeSurfaceCommand(message: WebviewToHostMessage, context
 }
 
 export async function routeHostCapabilityCommand(message: WebviewToHostMessage, context: MessageContext) {
+  if (message.type === "shell.openExternal" && isObject(message.payload)) {
+    const rawUrl = requiredString(message.payload, "url");
+    const url = new URL(rawUrl);
+    if (url.protocol !== "https:") throw new Error("Recovery links must use HTTPS.");
+    await vscode.env.openExternal(vscode.Uri.parse(url.toString()));
+    return true;
+  }
+  if (message.type === "shell.reload") {
+    await vscode.commands.executeCommand("workbench.action.reloadWindow");
+    return true;
+  }
   if (
     message.type === "secret.transaction.apply" ||
     message.type === "secret.transaction.commit" ||

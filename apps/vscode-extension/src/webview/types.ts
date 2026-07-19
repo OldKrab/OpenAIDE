@@ -10,6 +10,14 @@ export const VSCODE_SHELL = {
 
 export type WebviewHost = {
   openNewTask: (projectId?: string) => void;
-  openSettings: () => void;
+  openSettings: (agentId?: string, returnToNewTask?: boolean, projectId?: string) => void;
   openTask: (taskId: string, title?: string) => void;
+};
+
+/** Exposes shell-local editor focus without promoting it into App Server product state. */
+export type TaskFocusSource = {
+  currentFocusedTaskId: () => string | undefined;
+  onDidChangeFocusedTask: (
+    listener: (taskId: string | undefined) => void,
+  ) => { dispose: () => void };
 };

@@ -40,6 +40,7 @@ import { routeHostMessage } from "../state/hostMessageRouter";
 import { sendWebviewTelemetry } from "../state/hostMessageTelemetry";
 import type { WebviewBootstrap } from "../state/surfaceTypes";
 import type { AppState } from "../state/store";
+import { shouldLoadTaskNavigation } from "../state/surfaceRouting";
 import {
   navigationTargetForBootstrap,
   type AsyncOperationOwner,
@@ -86,6 +87,7 @@ type BackendLifecycleOptions = {
   newTaskId?: string;
   onReplicaChanged?: (transition: AppServerReplicaTransition) => void;
   setAgents: Dispatch<SetStateAction<AgentOption[] | undefined>>;
+  setNavigationFocusedTaskId: Dispatch<SetStateAction<string | null | undefined>>;
   setPreferences: Dispatch<SetStateAction<AppPreferencesRecord>>;
   state: AppState;
 };
@@ -101,6 +103,7 @@ export function useAppControllerBackendLifecycle({
   newTaskId,
   onReplicaChanged,
   setAgents,
+  setNavigationFocusedTaskId,
   setPreferences,
   state,
 }: BackendLifecycleOptions) {
@@ -281,6 +284,7 @@ export function useAppControllerBackendLifecycle({
         openNewTaskSurface,
         openSettingsSurface,
         setAgents,
+        setNavigationFocusedTaskId,
         setPreferences,
         postHostMessage,
       });
@@ -338,15 +342,17 @@ export function useAppControllerBackendLifecycle({
                 scope: { kind: "agents" },
                 setAgents,
               }));
-              stopSubscriptions.push(startAppServerStateSubscription({
-                backendConnection: subscriptionConnection,
-                context: subscriptionContext,
-                dispatch: dispatchForCurrentReplica,
-                onBaselineLost: () => markGlobalSubscriptionLost("task-navigation"),
-                onBaselineError: (error) => markSubscriptionError("task-navigation", error),
-                onBaselineReady: () => markSubscriptionReady("task-navigation"),
-                scope: taskNavigationScopeForBootstrap(initialBootstrap),
-              }));
+              if (shouldLoadTaskNavigation(initialBootstrap)) {
+                stopSubscriptions.push(startAppServerStateSubscription({
+                  backendConnection: subscriptionConnection,
+                  context: subscriptionContext,
+                  dispatch: dispatchForCurrentReplica,
+                  onBaselineLost: () => markGlobalSubscriptionLost("task-navigation"),
+                  onBaselineError: (error) => markSubscriptionError("task-navigation", error),
+                  onBaselineReady: () => markSubscriptionReady("task-navigation"),
+                  scope: taskNavigationScopeForBootstrap(initialBootstrap),
+                }));
+              }
               for (const project of result.snapshot.projects?.projects ?? []) {
                 if (!project.worktreeRepositoryId) continue;
                 stopSubscriptions.push(startAppServerStateSubscription({

@@ -42,14 +42,15 @@ export type NavigationCallbacks = {
   loadNativeSessions: (cursor?: string) => void;
   openNativeSession: (session: AgentListedSession) => void;
   openNewTask: (projectId?: string) => void;
-  openSettings: () => void;
+  openSettings: (agentId?: string, returnToNewTask?: boolean, projectId?: string) => void;
   openTask: (taskId: string) => void;
+  retryAgent: (agentId: string) => Promise<boolean>;
   restoreTask: (taskId: string) => void;
   toggleArchived: () => void;
 };
 
 export type SettingsCallbacks = {
-  authenticateAgent: (agentId: string, methodId: string, values?: Record<string, string>) => void;
+  authenticateAgent: (agentId: string, methodId: string, values?: Record<string, string>) => Promise<boolean>;
   createCustomAgent: (payload: CustomAgentCreateParams) => void;
   deleteCustomAgent: (agentId: string) => void;
   replaceCustomAgent: (payload: CustomAgentReplaceParams) => void;

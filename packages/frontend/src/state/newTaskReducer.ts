@@ -232,6 +232,7 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
             ...state.newTask.nativeSessions,
             loading: true,
             error: undefined,
+            recoveryKind: undefined,
           },
         },
       };
@@ -266,6 +267,7 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
             loading: false,
             loaded: true,
             error: action.message,
+            recoveryKind: action.recoveryKind,
           },
         },
       };

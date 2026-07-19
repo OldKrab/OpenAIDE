@@ -15,7 +15,7 @@ export type MessageContext = {
   adoptTask?: (taskId: string, title?: string) => void;
   surfaces?: {
     openNewTask: (projectId?: string) => void;
-    openSettings: () => void;
+    openSettings: (agentId?: string, returnToNewTask?: boolean, projectId?: string) => void;
     openTask: (taskId: string, title?: string) => void;
   };
 };

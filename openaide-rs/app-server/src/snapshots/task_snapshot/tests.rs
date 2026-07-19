@@ -1,6 +1,7 @@
 use openaide_app_server_protocol::snapshot::{
-    ActivityStepSnapshot, MessagePart, TaskHistorySyncSnapshot, TaskSendCapabilityState,
-    TaskStatus as ProtocolTaskStatus, ToolPermissionDecisionSnapshot,
+    ActivityStepSnapshot, MessagePart, TaskHistorySyncSnapshot, TaskPreparationSnapshot,
+    TaskSendCapabilityState, TaskSetupBlockerKind, TaskStatus as ProtocolTaskStatus,
+    ToolPermissionDecisionSnapshot,
 };
 use std::sync::{Arc, Mutex};
 
@@ -8,7 +9,7 @@ use crate::protocol::model::{
     ActivityStatus, ActivityStep, AgentMessagePart, AgentMessageRole, ChatMessage, IsolationKind,
     NormalizedMessage, TaskStatus, ToolPermissionDecision, ToolPermissionOutcome,
 };
-use crate::storage::records::{TaskPreparationRecord, TaskRecord};
+use crate::storage::records::{TaskPreparationBlockerRecord, TaskPreparationRecord, TaskRecord};
 use crate::storage::Store;
 
 use super::*;
@@ -86,6 +87,29 @@ fn open_projects_preparing_task_status() {
         .expect("open");
 
     assert_eq!(snapshot.task.status, ProtocolTaskStatus::Preparing);
+}
+
+#[test]
+fn open_projects_node_js_setup_as_a_recoverable_blocker() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let mut task = task_record("task-1");
+    task.preparation = TaskPreparationRecord::Blocked {
+        reason: TaskPreparationBlockerRecord::NodeJsRequired,
+        message: "Node.js tools are unavailable".to_string(),
+    };
+    store.write_task(&task).unwrap();
+
+    let snapshot = TaskSnapshotStore::new(store)
+        .open_internal(&TaskId::from("task-1"))
+        .expect("open");
+
+    let TaskPreparationSnapshot::Blocked { blocker, actions } = snapshot.preparation else {
+        panic!("expected blocked preparation");
+    };
+    assert_eq!(blocker.kind, TaskSetupBlockerKind::NodeJsRequired);
+    assert_eq!(blocker.message, "Node.js tools are unavailable");
+    assert!(actions.contains(&openaide_app_server_protocol::snapshot::TaskPreparationAction::Retry));
 }
 
 #[test]

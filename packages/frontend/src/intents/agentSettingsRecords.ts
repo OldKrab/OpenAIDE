@@ -22,6 +22,7 @@ export function agentSettingsRecordFromProtocol(agent: AgentSettingsDetail): Age
     icon: normalizedAgentIcon(agent.icon) ?? "bot",
     transport: "stdio",
     status: agentSettingsStatusFromProtocol(agent.status),
+    setup_reason: agent.setupReason ?? undefined,
     launch_label: agent.launchLabel,
     command_line: agent.commandLine ?? undefined,
     env: agent.env?.map((row) => row.secret

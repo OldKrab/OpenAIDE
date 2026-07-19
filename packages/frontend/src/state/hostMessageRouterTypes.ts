@@ -10,6 +10,7 @@ export type HostMessageRouterContext = {
   dispatch: Dispatch<AppAction>;
   openNewTaskSurface: (projectId?: string) => void;
   openSettingsSurface: () => void;
+  setNavigationFocusedTaskId: (taskId: string | null) => void;
   setAgents: (agents: AgentOption[]) => void;
   setPreferences: (preferences: AppPreferencesRecord) => void;
   postHostMessage: PostHostMessage;

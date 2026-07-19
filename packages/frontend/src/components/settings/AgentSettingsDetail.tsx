@@ -2,6 +2,7 @@ import { useState } from "react";
 import { FileText, LockKeyhole, Repeat2, Save, Trash2, X } from "lucide-react";
 import type { AgentSettingsRecord } from "@openaide/app-shell-contracts";
 import { AgentIcon } from "../AgentIcon";
+import { AgentRecoveryButtons, type AgentRecoveryActions, type AgentRecoveryKind } from "../AgentRecovery";
 import { AgentEnvEditor, AgentIconPicker } from "./AgentCustomFields";
 import type { AgentDraft } from "./agentSettingsModel";
 import { agentStatusCopy, type AgentAuthMethod } from "./agentSettingsModel";
@@ -21,6 +22,7 @@ export function AgentSettingsDetail({
   saveBlockedMessage,
   onSetAgentEnabled,
   onUpdateDraft,
+  recoveryActions,
   selected,
 }: {
   activeDraft: AgentDraft;
@@ -36,6 +38,7 @@ export function AgentSettingsDetail({
   saveBlockedMessage?: string;
   onSetAgentEnabled: (agentId: string, enabled: boolean) => void;
   onUpdateDraft: (patch: Partial<AgentDraft>) => void;
+  recoveryActions?: AgentRecoveryActions;
   selected?: AgentSettingsRecord;
 }) {
   const showReplaceConfirmation = Boolean(activeDraft.agent_id && confirmReplaceAgentId === activeDraft.agent_id);
@@ -56,7 +59,7 @@ export function AgentSettingsDetail({
         </div>
       </header>
       {selected ? (
-        <AgentStatusPanel agent={selected} authPending={authPending} />
+        <AgentStatusPanel agent={selected} authPending={authPending} recoveryActions={recoveryActions} />
       ) : null}
       {selected?.auth_methods.length ? (
         <AgentAuthenticationSection
@@ -129,6 +132,14 @@ export function AgentSettingsDetail({
   );
 }
 
+function agentSettingsRecoveryKind(agent: AgentSettingsRecord): AgentRecoveryKind | undefined {
+  if (agent.status === "setup_required") {
+    return agent.setup_reason === "nodeJsRequired" ? "nodeJsRequired" : "setupRequired";
+  }
+  if (agent.status === "failed") return "launchFailed";
+  return undefined;
+}
+
 function AgentReadonlyRows({ selected }: { selected?: AgentSettingsRecord }) {
   return (
     <div className="agent-readonly-rows">
@@ -180,15 +191,28 @@ function AgentAvailabilitySection({
 function AgentStatusPanel({
   agent,
   authPending,
+  recoveryActions,
 }: {
   agent: AgentSettingsRecord;
   authPending: boolean;
+  recoveryActions?: AgentRecoveryActions;
 }) {
+  const recoveryKind = agentSettingsRecoveryKind(agent);
   return (
     <section className={`agent-status-panel ${agent.status}`}>
       <StatusBadge status={agent.status} />
-      <span>{authPending ? "Authentication is running. Follow any prompt opened by the Agent." : agentStatusCopy(agent)}</span>
+      <span>{authPending && agent.status === "authenticating"
+        ? "Authentication is running. Follow any prompt opened by the Agent."
+        : agentStatusCopy(agent)}</span>
       {agent.last_error_summary ? <InlineFailure message={agent.last_error_summary} /> : null}
+      {recoveryActions && recoveryKind ? (
+        <AgentRecoveryButtons
+          actions={recoveryActions}
+          agent={agent}
+          kind={recoveryKind}
+          surface="settings"
+        />
+      ) : null}
     </section>
   );
 }

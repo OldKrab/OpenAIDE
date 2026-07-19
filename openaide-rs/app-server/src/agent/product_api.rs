@@ -143,12 +143,13 @@ impl AgentAuthenticateWorkflow for AgentProductApi {
                 return Err(protocol_authentication_error(error));
             }
         };
-        Ok(protocol_authenticate_result(result))
+        Ok(protocol_authenticate_result(result, self.snapshot()?))
     }
 }
 
 fn protocol_authenticate_result(
     result: AgentAuthenticateResult,
+    agents: AgentCollectionSnapshot,
 ) -> ProtocolAgentAuthenticateResult {
     ProtocolAgentAuthenticateResult {
         agent_id: result.agent_id.into(),
@@ -159,6 +160,7 @@ fn protocol_authenticate_result(
             }
             AgentAuthenticateStatus::AwaitingUser => ProtocolAgentAuthenticateStatus::AwaitingUser,
         },
+        agents,
     }
 }
 
@@ -177,6 +179,9 @@ fn expected_probe_status_error(error: &RuntimeError) -> bool {
             | RuntimeError::MethodNotFound(_)
             | RuntimeError::AuthRequired(_)
             | RuntimeError::SetupRequired(_)
+            | RuntimeError::NodeJsRequired(_)
+            | RuntimeError::NotReady(_)
+            | RuntimeError::Internal(_)
             | RuntimeError::Unsupported(_)
     )
 }
@@ -189,14 +194,26 @@ pub(super) fn protocol_error_from_runtime(error: RuntimeError) -> ProtocolError 
             recoverable: true,
             target: None,
         },
-        RuntimeError::AuthRequired(message)
-        | RuntimeError::SetupRequired(message)
-        | RuntimeError::Unsupported(message) => ProtocolError {
-            code: ProtocolErrorCode::CapabilityUnavailable,
+        RuntimeError::AuthRequired(message) => ProtocolError {
+            code: ProtocolErrorCode::Unauthorized,
             message,
             recoverable: true,
             target: None,
         },
+        RuntimeError::NodeJsRequired(message) => ProtocolError {
+            code: ProtocolErrorCode::NodeJsRequired,
+            message,
+            recoverable: true,
+            target: None,
+        },
+        RuntimeError::SetupRequired(message) | RuntimeError::Unsupported(message) => {
+            ProtocolError {
+                code: ProtocolErrorCode::CapabilityUnavailable,
+                message,
+                recoverable: true,
+                target: None,
+            }
+        }
         RuntimeError::InvalidParams(field) => ProtocolError {
             code: ProtocolErrorCode::ValidationFailed,
             message: format!("Invalid field: {field}"),

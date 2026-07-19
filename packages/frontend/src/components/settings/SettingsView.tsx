@@ -17,6 +17,7 @@ import { GeneralSettingsTab } from "./GeneralSettingsTab";
 import { McpSettingsTab, SkillsSettingsTab } from "./NonAgentSettingsTabs";
 import { SettingsSkeleton } from "./settingsPresentation";
 import type { DesktopNotificationSettings } from "../../shells/webTaskNotifications";
+import type { AgentRecoveryActions } from "../AgentRecovery";
 
 const tabs: Array<{ id: SettingsTabId; label: string }> = [
   { id: "agents", label: "Agents" },
@@ -40,10 +41,12 @@ export function SettingsView({
   onSelectTab,
   onSetDesktopNotifications,
   preferences,
+  preferredAgentId,
+  recoveryActions,
   state,
 }: {
   desktopNotifications?: DesktopNotificationSettings;
-  onAuthenticate: (agentId: string, methodId: string, values?: Record<string, string>) => void;
+  onAuthenticate: (agentId: string, methodId: string, values?: Record<string, string>) => void | Promise<boolean>;
   onCreateCustomAgent: (params: CustomAgentCreateParams) => void;
   onDeleteCustomAgent: (agentId: string) => void;
   onReplaceCustomAgent: (params: CustomAgentReplaceParams) => void;
@@ -56,6 +59,8 @@ export function SettingsView({
   onSelectTab: (tab: SettingsTabId) => void;
   onSetDesktopNotifications?: (enabled: boolean) => void | Promise<void>;
   preferences: AppPreferencesRecord;
+  preferredAgentId?: string;
+  recoveryActions?: AgentRecoveryActions;
   state: SettingsState;
 }) {
   const visibleTabs = tabs.filter((tab) => (state.availableTabs ?? ["agents", "common"]).includes(tab.id));
@@ -159,6 +164,8 @@ export function SettingsView({
               onSetComposerSubmitShortcut={onSetComposerSubmitShortcut}
               onSetDesktopNotifications={onSetDesktopNotifications}
               preferences={preferences}
+              preferredAgentId={preferredAgentId}
+              recoveryActions={recoveryActions}
               developerSettingsUnlocked={developerSettingsUnlocked}
               savedAgentId={state.savedAgentId}
               runtimeSettings={state.runtimeSettings}
@@ -187,6 +194,8 @@ function SettingsTabContent({
   agents,
   developerSettingsUnlocked,
   preferences,
+  preferredAgentId,
+  recoveryActions,
   savedAgentId,
   deletedAgentId,
   runtimeSettings,
@@ -196,7 +205,7 @@ function SettingsTabContent({
   desktopNotifications?: DesktopNotificationSettings;
   authPending: boolean;
   agents: AgentSettingsRecord[];
-  onAuthenticate: (agentId: string, methodId: string, values?: Record<string, string>) => void;
+  onAuthenticate: (agentId: string, methodId: string, values?: Record<string, string>) => void | Promise<boolean>;
   onCreateCustomAgent: (params: CustomAgentCreateParams) => void;
   onDeleteCustomAgent: (agentId: string) => void;
   onReplaceCustomAgent: (params: CustomAgentReplaceParams) => void;
@@ -208,6 +217,8 @@ function SettingsTabContent({
   deletedAgentId?: string;
   developerSettingsUnlocked: boolean;
   preferences: AppPreferencesRecord;
+  preferredAgentId?: string;
+  recoveryActions?: AgentRecoveryActions;
   savedAgentId?: string;
   runtimeSettings?: RuntimeSettingsResult;
   settingsState: SettingsState;
@@ -226,6 +237,8 @@ function SettingsTabContent({
           authPending={authPending}
           deletedAgentId={deletedAgentId}
           onAuthenticate={onAuthenticate}
+          preferredAgentId={preferredAgentId}
+          recoveryActions={recoveryActions}
           onCreateCustomAgent={onCreateCustomAgent}
           onDeleteCustomAgent={onDeleteCustomAgent}
           onReplaceCustomAgent={onReplaceCustomAgent}

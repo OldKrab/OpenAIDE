@@ -48,6 +48,16 @@ export type TaskSnapshot = {
   };
   agent_config?: ConfigOptionsCatalog;
   agent_commands?: AgentCommandsCatalog;
+  preparation?:
+    | { kind: "preparing" }
+    | { kind: "ready" }
+    | {
+        kind: "blocked";
+        blocker: {
+          kind: "authRequired" | "setupRequired" | "nodeJsRequired" | "capabilityUnavailable" | "nativeSessionUnavailable";
+        };
+      }
+    | { kind: "failed" };
   send_capability: {
     state: "loading" | "ready" | "blocked" | "failed";
     blockers?: Array<{

@@ -384,7 +384,9 @@ fn protocol_error(error: RuntimeError) -> ProtocolError {
             ProtocolErrorCode::CapabilityUnavailable
         }
         RuntimeError::AuthRequired(_) => ProtocolErrorCode::Unauthorized,
-        RuntimeError::NotReady(_) | RuntimeError::SetupRequired(_) => ProtocolErrorCode::Conflict,
+        RuntimeError::NotReady(_)
+        | RuntimeError::SetupRequired(_)
+        | RuntimeError::NodeJsRequired(_) => ProtocolErrorCode::Conflict,
         RuntimeError::MethodNotFound(_) | RuntimeError::Storage(_) | RuntimeError::Internal(_) => {
             ProtocolErrorCode::Internal
         }
