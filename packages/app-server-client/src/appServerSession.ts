@@ -181,8 +181,13 @@ export function createAppServerSession(connection: BackendConnection): AppServer
 
   async function refreshCurrentReplicas() {
     while (!closed) {
-      const current = [...replicas.values()].filter((replica) => replica.observers.size > 0);
-      await Promise.all(current.map((replica) => refreshReplica(replica, generation)));
+      // Frontend effects may replace an observed scope while recovery baselines arrive.
+      // Converge only stale replicas so a newly observed scope cannot invalidate ready peers.
+      const stale = [...replicas.values()].filter((replica) => (
+        replica.observers.size > 0
+        && (replica.refreshGeneration !== generation || replica.refreshing)
+      ));
+      await Promise.all(stale.map((replica) => refreshReplica(replica, generation)));
       const active = [...replicas.values()].filter((replica) => replica.observers.size > 0);
       if (active.every((replica) => (
         replica.refreshGeneration === generation
