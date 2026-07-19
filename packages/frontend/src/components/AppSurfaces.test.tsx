@@ -125,6 +125,21 @@ describe("AppSurfaces callback wiring", () => {
     );
   });
 
+  it("refreshes Agent Settings after retrying setup", async () => {
+    const controller = controllerFor("settings");
+    render(controller);
+    const lastCall = surfaceMocks.settings.mock.calls.at(-1) as unknown as [{
+      recoveryActions: { onRetry: (agentId: string) => Promise<boolean> };
+    }] | undefined;
+
+    await act(async () => {
+      await lastCall![0].recoveryActions.onRetry("codex");
+    });
+
+    expect(controller.callbacks.navigation.retryAgent).toHaveBeenCalledWith("codex");
+    expect(controller.callbacks.settings.refreshSettings).toHaveBeenCalledOnce();
+  });
+
   it("returns successful recovery authentication to the preserved New Task", async () => {
     const controller = controllerFor("settings");
     controller.bootstrap = {

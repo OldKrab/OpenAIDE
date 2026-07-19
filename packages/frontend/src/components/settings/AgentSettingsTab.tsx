@@ -7,6 +7,7 @@ import type {
 } from "@openaide/app-shell-contracts";
 import { AgentSettingsDetail } from "./AgentSettingsDetail";
 import { AgentSettingsList } from "./AgentSettingsList";
+import type { AgentRecoveryActions } from "../AgentRecovery";
 import {
   draftFromAgent,
   newAgentDraft,
@@ -30,6 +31,7 @@ export function AgentSettingsTab({
   deletedAgentId,
   savedAgentId,
   preferredAgentId,
+  recoveryActions,
 }: {
   agents: AgentSettingsRecord[];
   authPending: boolean;
@@ -42,6 +44,7 @@ export function AgentSettingsTab({
   deletedAgentId?: string;
   savedAgentId?: string;
   preferredAgentId?: string;
+  recoveryActions?: AgentRecoveryActions;
 }) {
   const [selectedId, setSelectedId] = useState(agents[0]?.id);
   const [confirmDeleteAgentId, setConfirmDeleteAgentId] = useState<string | undefined>();
@@ -157,6 +160,7 @@ export function AgentSettingsTab({
           saveBlockedMessage={missingRequiredLaunchFields ? "Name and command are required." : undefined}
           onSetAgentEnabled={onSetAgentEnabled}
           onUpdateDraft={updateDraft}
+          recoveryActions={recoveryActions}
           selected={selected}
         />
       </div>

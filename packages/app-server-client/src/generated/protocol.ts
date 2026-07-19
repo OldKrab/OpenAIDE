@@ -265,7 +265,7 @@ export type AgentSettingsDetailsParams = Record<symbol, never>;
 
 export type AgentSettingsDetailsResult = { generatedAt: string, agents: Array<AgentSettingsDetail>, };
 
-export type AgentSettingsDetail = { agentId: AgentId, label: string, enabled: boolean, sourceKind: AgentSettingsSourceKind, icon: string, transport: AgentSettingsTransport, status: AgentSettingsStatus, launchLabel: string, commandLine?: string | null, env?: Array<AgentSettingsEnvRow>, description: string, capabilities?: Array<string>, authMethods?: Array<AgentSettingsAuthMethod>, logoutSupported?: boolean, authenticatingMethodId?: string | null, };
+export type AgentSettingsDetail = { agentId: AgentId, label: string, enabled: boolean, sourceKind: AgentSettingsSourceKind, icon: string, transport: AgentSettingsTransport, status: AgentSettingsStatus, setupReason?: AgentSetupReason | null, launchLabel: string, commandLine?: string | null, env?: Array<AgentSettingsEnvRow>, description: string, capabilities?: Array<string>, authMethods?: Array<AgentSettingsAuthMethod>, logoutSupported?: boolean, authenticatingMethodId?: string | null, };
 
 export type AgentSettingsSourceKind = "builtIn" | "custom";
 

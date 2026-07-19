@@ -2,6 +2,7 @@ import { act, create, type ReactTestInstance } from "react-test-renderer";
 import type { ReactTestRenderer } from "react-test-renderer";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentSettingsRecord } from "@openaide/app-shell-contracts";
+import type { AgentRecoveryActions } from "../AgentRecovery";
 import { AgentSettingsTab } from "./AgentSettingsTab";
 
 describe("AgentSettingsTab interactions", () => {
@@ -231,6 +232,48 @@ describe("AgentSettingsTab interactions", () => {
     expect(textContent(view.root)).not.toContain("Status has not been checked.");
   });
 
+  it("offers recovery when the selected Agent requires setup", () => {
+    const onRetry = vi.fn(async () => true);
+    const view = renderAgentSettings({
+      agents: [builtInAgent("codex", { status: "setup_required" })],
+      recoveryActions: recoveryActions({ onRetry }),
+    });
+
+    act(() => {
+      buttonByText(view.root, "Try again").props.onClick();
+    });
+
+    expect(onRetry).toHaveBeenCalledWith("codex");
+  });
+
+  it("offers Node.js recovery when Settings receives the structured setup reason", () => {
+    const onOpenExternal = vi.fn();
+    const view = renderAgentSettings({
+      agents: [{
+        ...builtInAgent("codex", { status: "setup_required" }),
+        setup_reason: "nodeJsRequired",
+      }],
+      recoveryActions: recoveryActions({ onOpenExternal }),
+    });
+
+    act(() => {
+      buttonByText(view.root, "Install Node.js").props.onClick();
+    });
+
+    expect(onOpenExternal).toHaveBeenCalledWith("https://nodejs.org/en/download");
+  });
+
+  it("keeps setup status copy while a recovery refresh is pending", () => {
+    const view = renderAgentSettings({
+      agents: [builtInAgent("codex", { status: "setup_required" })],
+      authPending: true,
+      recoveryActions: recoveryActions(),
+    });
+
+    expect(textContent(view.root)).toContain("Setup is incomplete.");
+    expect(textContent(view.root)).not.toContain("Authentication is running.");
+  });
+
   it("renders every ACP authentication method in advertised order", () => {
     const onAuthenticate = vi.fn();
     const view = renderAgentSettings({
@@ -291,37 +334,51 @@ describe("AgentSettingsTab interactions", () => {
 
 function renderAgentSettings({
   agents,
+  authPending = false,
   onCreateCustomAgent = vi.fn(),
   onDeleteCustomAgent = vi.fn(),
   onReplaceCustomAgent = vi.fn(),
   onSetAgentEnabled = vi.fn(),
   onUpdateCustomAgentMetadata = vi.fn(),
   onAuthenticate = vi.fn(),
+  recoveryActions,
 }: {
   agents: AgentSettingsRecord[];
+  authPending?: boolean;
   onCreateCustomAgent?: Parameters<typeof AgentSettingsTab>[0]["onCreateCustomAgent"];
   onDeleteCustomAgent?: (agentId: string) => void;
   onReplaceCustomAgent?: Parameters<typeof AgentSettingsTab>[0]["onReplaceCustomAgent"];
   onSetAgentEnabled?: (agentId: string, enabled: boolean) => void;
   onUpdateCustomAgentMetadata?: Parameters<typeof AgentSettingsTab>[0]["onUpdateCustomAgentMetadata"];
   onAuthenticate?: Parameters<typeof AgentSettingsTab>[0]["onAuthenticate"];
+  recoveryActions?: AgentRecoveryActions;
 }) {
   let view: ReactTestRenderer | undefined;
   act(() => {
     view = create(
       <AgentSettingsTab
         agents={agents}
-        authPending={false}
+        authPending={authPending}
         onAuthenticate={onAuthenticate}
         onCreateCustomAgent={onCreateCustomAgent}
         onDeleteCustomAgent={onDeleteCustomAgent}
         onReplaceCustomAgent={onReplaceCustomAgent}
         onSetAgentEnabled={onSetAgentEnabled}
         onUpdateCustomAgentMetadata={onUpdateCustomAgentMetadata}
+        recoveryActions={recoveryActions}
       />,
     );
   });
   return view!;
+}
+
+function recoveryActions(overrides: Partial<AgentRecoveryActions> = {}): AgentRecoveryActions {
+  return {
+    onOpenAgentSettings: vi.fn(),
+    onOpenExternal: vi.fn(),
+    onRetry: vi.fn(async () => true),
+    ...overrides,
+  };
 }
 
 function buttonByText(root: ReactTestInstance, text: string) {

@@ -61,6 +61,38 @@ export function AgentRecoveryPanel({
   kind: AgentRecoveryKind;
   returnToNewTask?: boolean;
 }) {
+  const content = recoveryContent(kind, agent.label);
+  return (
+    <section className={`agent-recovery-panel ${kind}`} aria-label={content.title} role="status">
+      <CircleAlert aria-hidden="true" size={16} />
+      <div className="agent-recovery-copy">
+        <strong>{content.title}</strong>
+        <small>{content.description}</small>
+        <AgentRecoveryButtons
+          actions={actions}
+          agent={agent}
+          kind={kind}
+          returnToNewTask={returnToNewTask}
+        />
+      </div>
+    </section>
+  );
+}
+
+/** Renders shared recovery controls without imposing a surrounding surface. */
+export function AgentRecoveryButtons({
+  actions,
+  agent,
+  kind,
+  returnToNewTask = false,
+  surface = "task",
+}: {
+  actions: AgentRecoveryActions;
+  agent: Pick<AgentOption, "id" | "label">;
+  kind: AgentRecoveryKind;
+  returnToNewTask?: boolean;
+  surface?: "settings" | "task";
+}) {
   const [checking, setChecking] = useState(false);
   const [showReload, setShowReload] = useState(false);
   const retry = async () => {
@@ -72,33 +104,28 @@ export function AgentRecoveryPanel({
       setChecking(false);
     }
   };
-
-  const content = recoveryContent(kind, agent.label);
   return (
-    <section className={`agent-recovery-panel ${kind}`} aria-label={content.title} role="status">
-      <CircleAlert aria-hidden="true" size={16} />
-      <div className="agent-recovery-copy">
-        <strong>{content.title}</strong>
-        <small>{content.description}</small>
-        <div className="agent-recovery-actions">
-          {kind === "nodeJsRequired" ? (
-            <>
-              <button type="button" onClick={() => actions.onOpenExternal(NODE_JS_DOWNLOAD_URL)}>Install Node.js</button>
-              <button disabled={checking} type="button" onClick={() => void retry()}>{checking ? "Checking" : "Check again"}</button>
-              <button type="button" onClick={() => actions.onOpenExternal(CODEX_SETUP_HELP_URL)}>Setup help</button>
-              {showReload && actions.onReload ? <button type="button" onClick={actions.onReload}>Reload VS Code</button> : null}
-            </>
-          ) : kind === "authRequired" ? (
-            <button type="button" onClick={() => actions.onOpenAgentSettings(agent.id, returnToNewTask)}>Choose sign-in method</button>
-          ) : (
-            <>
-              <button disabled={checking} type="button" onClick={() => void retry()}>{checking ? "Trying again" : "Try again"}</button>
-              <button type="button" onClick={() => actions.onOpenAgentSettings(agent.id, returnToNewTask)}>Open Agent settings</button>
-            </>
-          )}
-        </div>
-      </div>
-    </section>
+    <div className="agent-recovery-actions">
+      {kind === "nodeJsRequired" ? (
+        <>
+          <button type="button" onClick={() => actions.onOpenExternal(NODE_JS_DOWNLOAD_URL)}>Install Node.js</button>
+          <button disabled={checking} type="button" onClick={() => void retry()}>{checking ? "Checking" : "Check again"}</button>
+          <button type="button" onClick={() => actions.onOpenExternal(CODEX_SETUP_HELP_URL)}>Setup help</button>
+          {showReload && actions.onReload ? <button type="button" onClick={actions.onReload}>Reload VS Code</button> : null}
+        </>
+      ) : kind === "authRequired" ? (
+        <button type="button" onClick={() => actions.onOpenAgentSettings(agent.id, returnToNewTask)}>Choose sign-in method</button>
+      ) : (
+        <>
+          <button disabled={checking} type="button" onClick={() => void retry()}>{checking ? "Trying again" : "Try again"}</button>
+          {surface === "settings" && agent.id === "codex" ? (
+            <button type="button" onClick={() => actions.onOpenExternal(CODEX_SETUP_HELP_URL)}>Setup help</button>
+          ) : surface === "task" ? (
+            <button type="button" onClick={() => actions.onOpenAgentSettings(agent.id, returnToNewTask)}>Open Agent settings</button>
+          ) : null}
+        </>
+      )}
+    </div>
   );
 }
 

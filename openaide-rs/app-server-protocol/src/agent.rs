@@ -4,7 +4,7 @@ use ts_rs::TS;
 use std::collections::BTreeMap;
 
 use crate::ids::{AgentId, ProjectId};
-use crate::snapshot::AgentCollectionSnapshot;
+use crate::snapshot::{AgentCollectionSnapshot, AgentSetupReason};
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -235,6 +235,8 @@ pub struct AgentSettingsDetail {
     pub icon: String,
     pub transport: AgentSettingsTransport,
     pub status: AgentSettingsStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub setup_reason: Option<AgentSetupReason>,
     pub launch_label: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub command_line: Option<String>,

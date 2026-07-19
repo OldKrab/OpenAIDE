@@ -17,6 +17,7 @@ import { GeneralSettingsTab } from "./GeneralSettingsTab";
 import { McpSettingsTab, SkillsSettingsTab } from "./NonAgentSettingsTabs";
 import { SettingsSkeleton } from "./settingsPresentation";
 import type { DesktopNotificationSettings } from "../../shells/webTaskNotifications";
+import type { AgentRecoveryActions } from "../AgentRecovery";
 
 const tabs: Array<{ id: SettingsTabId; label: string }> = [
   { id: "agents", label: "Agents" },
@@ -41,6 +42,7 @@ export function SettingsView({
   onSetDesktopNotifications,
   preferences,
   preferredAgentId,
+  recoveryActions,
   state,
 }: {
   desktopNotifications?: DesktopNotificationSettings;
@@ -58,6 +60,7 @@ export function SettingsView({
   onSetDesktopNotifications?: (enabled: boolean) => void | Promise<void>;
   preferences: AppPreferencesRecord;
   preferredAgentId?: string;
+  recoveryActions?: AgentRecoveryActions;
   state: SettingsState;
 }) {
   const visibleTabs = tabs.filter((tab) => (state.availableTabs ?? ["agents", "common"]).includes(tab.id));
@@ -162,6 +165,7 @@ export function SettingsView({
               onSetDesktopNotifications={onSetDesktopNotifications}
               preferences={preferences}
               preferredAgentId={preferredAgentId}
+              recoveryActions={recoveryActions}
               developerSettingsUnlocked={developerSettingsUnlocked}
               savedAgentId={state.savedAgentId}
               runtimeSettings={state.runtimeSettings}
@@ -191,6 +195,7 @@ function SettingsTabContent({
   developerSettingsUnlocked,
   preferences,
   preferredAgentId,
+  recoveryActions,
   savedAgentId,
   deletedAgentId,
   runtimeSettings,
@@ -213,6 +218,7 @@ function SettingsTabContent({
   developerSettingsUnlocked: boolean;
   preferences: AppPreferencesRecord;
   preferredAgentId?: string;
+  recoveryActions?: AgentRecoveryActions;
   savedAgentId?: string;
   runtimeSettings?: RuntimeSettingsResult;
   settingsState: SettingsState;
@@ -232,6 +238,7 @@ function SettingsTabContent({
           deletedAgentId={deletedAgentId}
           onAuthenticate={onAuthenticate}
           preferredAgentId={preferredAgentId}
+          recoveryActions={recoveryActions}
           onCreateCustomAgent={onCreateCustomAgent}
           onDeleteCustomAgent={onDeleteCustomAgent}
           onReplaceCustomAgent={onReplaceCustomAgent}

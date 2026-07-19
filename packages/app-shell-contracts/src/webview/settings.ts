@@ -33,6 +33,7 @@ export type AgentSettingsRecord = {
   icon: AgentIconId;
   transport: "stdio";
   status: "unprobed" | "ready" | "failed" | "disabled" | "setup_required" | "auth_required" | "authenticating" | "unsupported" | "launching" | "connected" | "disconnected";
+  setup_reason?: "nodeJsRequired";
   launch_label: string;
   command_line?: string;
   env?: CustomAgentEnvRecord[];

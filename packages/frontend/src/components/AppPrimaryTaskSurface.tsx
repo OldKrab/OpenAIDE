@@ -78,16 +78,7 @@ export function AppPrimaryTaskSurface({ controller, focusRequestKey, model, work
   const retryTaskOpen = taskLoadingError || controller.backendConnectionState.status === "unavailable"
     ? controller.retryTaskOpen
     : undefined;
-  const recoveryActions: AgentRecoveryActions = {
-    onOpenAgentSettings: (agentId, returnToNewTask) => callbacks.navigation.openSettings(
-      agentId,
-      returnToNewTask,
-      primaryTask.newTask.newTask.selection.projectId,
-    ),
-    onOpenExternal: openRecoveryUrl,
-    onReload: reloadRecoveryShell,
-    onRetry: callbacks.navigation.retryAgent,
-  };
+  const recoveryActions = createAgentRecoveryActions(controller);
 
   if (renderableTaskSnapshot && !openingNativeSession) {
     return (
@@ -158,4 +149,19 @@ export function AppPrimaryTaskSurface({ controller, focusRequestKey, model, work
       workspaceBrowser={callbacks.newTask.workspaceBrowser}
     />
   );
+}
+
+/** Creates recovery actions shared by Task and Settings surfaces. */
+export function createAgentRecoveryActions(controller: AppController): AgentRecoveryActions {
+  const { callbacks, view } = controller;
+  return {
+    onOpenAgentSettings: (agentId, returnToNewTask) => callbacks.navigation.openSettings(
+      agentId,
+      returnToNewTask,
+      view.primaryTask.newTask.newTask.selection.projectId,
+    ),
+    onOpenExternal: openRecoveryUrl,
+    onReload: reloadRecoveryShell,
+    onRetry: callbacks.navigation.retryAgent,
+  };
 }
