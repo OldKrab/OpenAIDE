@@ -217,11 +217,9 @@ export function createWebTaskNotificationManager(
         notification?.close();
         active.delete(task.task_id);
         environment.openTask(task.task_id, task.title);
-        // React commits the new route on the next turn. Focusing earlier lets the
-        // previous Task's focus receipt mark that Task read before it unmounts.
-        setTimeout(() => {
-          if (!disposed) environment.focusWindow();
-        }, 0);
+        // Browsers may reject focus after notification activation has yielded.
+        // The read-receipt boundary defers acknowledgement until routing settles.
+        if (!disposed) environment.focusWindow();
       },
     );
     active.set(task.task_id, { eventId: event.event_id, notification });
