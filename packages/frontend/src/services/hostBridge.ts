@@ -59,6 +59,16 @@ export function getBackendConnection() {
       ...bootstrap.appServerConnection,
       connectionId: createTransportConnectionId(),
       subscribeToWake: subscribeToBrowserWake,
+      subscribeToReplacement(listener) {
+        return subscribeHostMessages((message) => {
+          if (
+            message.type === "appServer.connectionChanged"
+            && message.payload.connection.kind === "localHttp"
+          ) {
+            listener(message.payload.connection);
+          }
+        });
+      },
     });
   }
   if (bootstrap.surface !== "invalid" && bootstrap.appServerConnection?.kind === "webProxy") {

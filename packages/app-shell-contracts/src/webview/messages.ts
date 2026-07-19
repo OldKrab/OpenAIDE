@@ -7,6 +7,7 @@ import type {
   DiagnosticsSnapshot,
   WorkspaceRootSummary,
 } from "./settings.js";
+import type { WebviewAppServerConnection } from "./bootstrap.js";
 import type { WebviewTelemetryPayload } from "./telemetry.js";
 
 export type RuntimeErrorPayload = {
@@ -58,6 +59,7 @@ export type WebviewToHostMessage =
 export type HostToWebviewMessage =
   | AppServerServerRequestResultMessage
   | SecretTransactionResultMessage
+  | { type: "appServer.connectionChanged"; payload: { connection: WebviewAppServerConnection } }
   | { type: "surface.focusChanged"; payload: { task_id?: string } }
   | { type: "surface.routeChanged"; payload: { surface: "task"; task_id: string } }
   | { type: "surface.settingsChanged"; payload: { agent_id?: string; return_to_new_task?: boolean; project_id?: string } }

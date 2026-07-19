@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { RpcMessage, RpcMessageChannel } from "./rpcPeer";
 import {
   createReliableBackendConnection,
+  createReliableLocalHttpBackendConnection,
   createReliableWebProxyBackendConnection,
 } from "./reliableBackendConnection";
 import type { ReliableHttpFetch } from "./reliableHttpChannel";
@@ -327,6 +328,107 @@ describe("ReliableBackendConnection", () => {
     connection.close();
   });
 
+  it("replaces the App Server process endpoint behind one logical session", async () => {
+    const transport = createExpiringSessionTransport("transport", "task", true);
+    let replaceEndpoint: ((endpoint: {
+      endpointUrl: string;
+      authToken: string;
+    }) => void) | undefined;
+    const connection = createReliableLocalHttpBackendConnection({
+      endpointUrl: "http://app-server-one.test/rpc",
+      authToken: "token-1",
+      connectionId: "connection-1",
+      fetch: transport.fetch,
+      retryDelayMs: 1,
+      heartbeatIntervalMs: 60_000,
+      subscribeToReplacement(listener) {
+        replaceEndpoint = listener;
+        return () => {
+          replaceEndpoint = undefined;
+        };
+      },
+    });
+    const invalidations: string[] = [];
+    const statuses: string[] = [];
+    const projectSnapshots = vi.fn();
+    connection.handleGenerationInvalidated(({ reason }) => invalidations.push(reason));
+    connection.handleSessionStatus(({ status }) => statuses.push(status));
+    await connection.initialize({
+      clientInstanceId: "client-1" as ClientInstanceId,
+      shell: { kind: "web" },
+      requestedSurface: { kind: "home" },
+      capabilities: { protocol: [], shell: [] },
+    });
+    connection.subscribeState({ kind: "projects" }, { onSnapshot: projectSnapshots });
+    await vi.waitFor(() => expect(projectSnapshots).toHaveBeenCalledOnce());
+
+    replaceEndpoint?.({
+      endpointUrl: "http://app-server-two.test/rpc",
+      authToken: "token-2",
+    });
+
+    await vi.waitFor(() => expect(transport.initializedSessions()).toEqual([
+      "session-1",
+      "session-2",
+    ]));
+    await vi.waitFor(() => expect(projectSnapshots).toHaveBeenCalledTimes(2));
+    expect(transport.openedEndpoints()).toEqual([
+      "http://app-server-one.test/rpc",
+      "http://app-server-two.test/rpc",
+    ]);
+    expect(invalidations).toEqual(["appServerRestarted"]);
+    expect(statuses.at(-1)).toBe("ready");
+    connection.close();
+  });
+
+  it("applies a process replacement announced during expired-session recovery", async () => {
+    const transport = createExpiringSessionTransport("transport", "task", true);
+    let replaceEndpoint: ((endpoint: { endpointUrl: string; authToken: string }) => void) | undefined;
+    const connection = createReliableLocalHttpBackendConnection({
+      endpointUrl: "http://app-server-one.test/rpc",
+      authToken: "token-1",
+      connectionId: "connection-1",
+      fetch: transport.fetch,
+      retryDelayMs: 1,
+      heartbeatIntervalMs: 60_000,
+      subscribeToReplacement(listener) {
+        replaceEndpoint = listener;
+        return () => { replaceEndpoint = undefined; };
+      },
+    });
+    const invalidations: string[] = [];
+    connection.handleGenerationInvalidated(({ reason }) => invalidations.push(reason));
+    await connection.initialize({
+      clientInstanceId: "client-1" as ClientInstanceId,
+      shell: { kind: "web" },
+      requestedSurface: { kind: "home" },
+      capabilities: { protocol: [], shell: [] },
+    });
+    transport.holdNextSessionOpen();
+
+    const interrupted = connection.request(TASK_LIST, { archived: false });
+    void interrupted.catch(() => undefined);
+    await vi.waitFor(() => expect(transport.openedSessions()).toBe(2));
+    replaceEndpoint?.({
+      endpointUrl: "http://app-server-two.test/rpc",
+      authToken: "token-2",
+    });
+    transport.resolveHeldSessionOpen();
+
+    await vi.waitFor(() => expect(transport.openedEndpoints()).toEqual([
+      "http://app-server-one.test/rpc",
+      "http://app-server-one.test/rpc",
+      "http://app-server-two.test/rpc",
+    ]));
+    await vi.waitFor(() => expect(transport.initializedSessions()).toEqual([
+      "session-1",
+      "session-3",
+    ]));
+    expect(invalidations).toEqual(["httpSessionExpired"]);
+    await expect(interrupted).rejects.toThrow();
+    connection.close();
+  });
+
   it("keeps an unrelated HTTP 409 terminal instead of discarding state", async () => {
     const transport = createExpiringSessionTransport("transport");
     const connection = createReliableWebProxyBackendConnection({
@@ -358,6 +460,7 @@ describe("ReliableBackendConnection", () => {
 function createExpiringSessionTransport(
   expiry: "transport" | "client",
   trigger: "task" | "heartbeat" = "task",
+  serverByEndpoint = false,
 ) {
   const frames = new Map<string, Array<{ sequence: number; message: RpcMessage }>>();
   const initialized: string[] = [];
@@ -365,6 +468,8 @@ function createExpiringSessionTransport(
   const permissionResponses: string[] = [];
   const heartbeats: string[] = [];
   const subscriptions: string[] = [];
+  const openedEndpoints: string[] = [];
+  const sessionServers = new Map<string, string>();
   let freezeNextReceive = false;
   let expireReplayOnNextReceive = false;
   let rejectAcknowledgementOnNextReceive = false;
@@ -372,12 +477,15 @@ function createExpiringSessionTransport(
   let rejectedAcknowledgementCount = 0;
   let frozenPollCount = 0;
   let opened = 0;
+  let holdNextSessionOpen = false;
+  let heldSessionOpen: { resolve: (value: ReturnType<typeof response>) => void; value: ReturnType<typeof response> }
+    | undefined;
   let heldSubscriptionKind: "agents" | "projects" | undefined;
   let heldSubscription: { id: string | number; sessionId: string; scope: { kind: "agents" | "projects" } }
     | undefined;
 
   return {
-    fetch: vi.fn<ReliableHttpFetch>(async (_input, init) => {
+    fetch: vi.fn<ReliableHttpFetch>(async (input, init) => {
       if (init.method === "GET") {
         if (rejectAcknowledgementOnNextReceive) {
           rejectAcknowledgementOnNextReceive = false;
@@ -409,11 +517,25 @@ function createExpiringSessionTransport(
       };
       if (body.transport === "open") {
         opened += 1;
-        return response(200, {
+        const endpoint = String(input);
+        openedEndpoints.push(endpoint);
+        const serverId = serverByEndpoint && endpoint.includes("server-two")
+          ? "server-2"
+          : "server-1";
+        const sessionId = `session-${opened}`;
+        sessionServers.set(sessionId, serverId);
+        const openedResponse = response(200, {
           transportVersion: 1,
-          sessionId: `session-${opened}`,
-          serverId: "server-1",
+          sessionId,
+          serverId,
         });
+        if (holdNextSessionOpen) {
+          holdNextSessionOpen = false;
+          return new Promise((resolve) => {
+            heldSessionOpen = { resolve, value: openedResponse };
+          });
+        }
+        return openedResponse;
       }
 
       const sessionId = body.sessionId ?? "";
@@ -444,7 +566,12 @@ function createExpiringSessionTransport(
         enqueue(sessionId, {
           jsonrpc: "2.0",
           id: message.id,
-          result: { result: initializeResult(sessionId === "session-1" ? "cursor-1" : "cursor-2") },
+          result: {
+            result: initializeResult(
+              sessionId === "session-1" ? "cursor-1" : "cursor-2",
+              sessionServers.get(sessionId) ?? "server-1",
+            ),
+          },
         });
         return response(204, "");
       }
@@ -489,6 +616,7 @@ function createExpiringSessionTransport(
       throw new Error(`Unexpected test request: ${message.method}`);
     }),
     openedSessions: () => opened,
+    openedEndpoints: () => openedEndpoints,
     frozenPolls: () => frozenPollCount,
     heartbeatSessions: () => heartbeats,
     initializedSessions: () => initialized,
@@ -508,6 +636,14 @@ function createExpiringSessionTransport(
       failNextReplacementInitialization = true;
     },
     rejectedAcknowledgements: () => rejectedAcknowledgementCount,
+    holdNextSessionOpen() {
+      holdNextSessionOpen = true;
+    },
+    resolveHeldSessionOpen() {
+      if (!heldSessionOpen) throw new Error("No held session open");
+      heldSessionOpen.resolve(heldSessionOpen.value);
+      heldSessionOpen = undefined;
+    },
     holdNextSubscription(kind: "agents" | "projects") {
       heldSubscriptionKind = kind;
     },
@@ -581,11 +717,11 @@ function abortError() {
   return error;
 }
 
-function initializeResult(cursor = "cursor-1") {
+function initializeResult(cursor = "cursor-1", serverId = "server-1") {
   return {
     snapshot: {
       cursor,
-      server: { serverId: "server-1", protocolVersion: "v1", capabilities: {} },
+      server: { serverId, protocolVersion: "v1", capabilities: {} },
       stateRoot: { stateRootId: "root-1" },
       client: {
         clientInstanceId: "client-1",

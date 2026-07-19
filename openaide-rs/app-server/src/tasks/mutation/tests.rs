@@ -43,6 +43,31 @@ fn metadata_commit_assigns_revision_once_and_returns_publication_facts() {
 }
 
 #[test]
+fn commit_rejects_clearing_or_replacing_a_bound_native_session() {
+    let (_dir, store, mutations, notifications) = test_mutations(0);
+    for (task_id, replacement) in [
+        ("task_clear_session", None),
+        ("task_replace_session", Some("session-2".to_string())),
+    ] {
+        let mut record = task_record(task_id);
+        record.agent_session_id = Some("session-1".to_string());
+        store.write_task(&record).unwrap();
+
+        let error = mutations
+            .commit_existing_task(task_id, TaskCommitOptions::metadata(), |ctx| {
+                ctx.task_mut().agent_session_id = replacement;
+                Ok(TaskMutationResult::Changed)
+            })
+            .unwrap_err();
+
+        assert!(matches!(error, RuntimeError::Internal(message) if
+            message == "task mutation changed bound Native Session identity"));
+        assert_task_unchanged(&store.read_task(task_id).unwrap(), &record);
+    }
+    assert!(notifications.try_recv().is_err());
+}
+
+#[test]
 fn queued_updates_keep_values_from_their_own_committed_revision() {
     let (_dir, store, mutations, notifications) = test_mutations(0);
     store.write_task(&task_record("task_ordered")).unwrap();

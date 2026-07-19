@@ -346,8 +346,14 @@ function runtime() {
 }
 
 function runtimeProcess(connection?: Promise<unknown>) {
+  let replacementListener: ((connection: unknown) => void) | undefined;
   return {
     startAppServerConnection: connection ? vi.fn(() => connection) : undefined,
+    onAppServerConnectionChanged: vi.fn((listener: (connection: unknown) => void) => {
+      replacementListener = listener;
+      return { dispose: () => { replacementListener = undefined; } };
+    }),
+    publishReplacement: (replacement: unknown) => replacementListener?.(replacement),
   } as never;
 }
 

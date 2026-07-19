@@ -2,94 +2,16 @@ use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::time::{Duration, Instant};
 
-use openaide_app_server_protocol::ids::ClientInstanceId;
 use serde_json::{json, Value};
 
 use crate::app_server_client::runner::{
     AttachOrLaunchRequirements, AttachOrLaunchRunResult, AttachOrLaunchRunner,
 };
 use crate::app_server_client::StorageWriterState;
-use crate::client_lifecycle::ClientExpiryOutcome;
 use crate::protocol_edge::stdio::ProtocolEdgeStdioDispatcher;
-use crate::protocol_edge::{IdleShutdownDecision, ShutdownBlockers};
 use crate::storage_runtime::{EndpointRecordStore, StateRoot};
 
-use super::{publish_local_http_probe_endpoint, IdleShutdownMonitor, IdleShutdownMonitorAction};
-
-#[test]
-fn idle_shutdown_is_rechecked_after_deferred_work_settles_without_another_expiry() {
-    let mut monitor = IdleShutdownMonitor::default();
-    monitor.observe_expirations(&[ClientExpiryOutcome::Expired {
-        client_instance_id: ClientInstanceId::from("client-1"),
-        last_client: true,
-    }]);
-
-    assert!(monitor.should_check());
-    assert_eq!(
-        monitor.observe_decision(IdleShutdownDecision::KeepRunning {
-            initialized_clients: false,
-            blockers: ShutdownBlockers {
-                active_turns: 1,
-                pending_task_requests: 0,
-            },
-        }),
-        IdleShutdownMonitorAction::Deferred {
-            blockers: ShutdownBlockers {
-                active_turns: 1,
-                pending_task_requests: 0,
-            },
-            should_log: true,
-        }
-    );
-
-    monitor.observe_expirations(&[]);
-    assert!(
-        monitor.should_check(),
-        "settling work does not emit another client-expiry event"
-    );
-    assert_eq!(
-        monitor.observe_decision(IdleShutdownDecision::ShutdownNow),
-        IdleShutdownMonitorAction::ShutdownNow
-    );
-    assert!(!monitor.should_check());
-}
-
-#[test]
-fn unchanged_idle_shutdown_blockers_are_not_reported_every_tick() {
-    let mut monitor = IdleShutdownMonitor::default();
-    monitor.observe_expirations(&[ClientExpiryOutcome::Expired {
-        client_instance_id: ClientInstanceId::from("client-1"),
-        last_client: true,
-    }]);
-    let deferred = IdleShutdownDecision::KeepRunning {
-        initialized_clients: false,
-        blockers: ShutdownBlockers {
-            active_turns: 1,
-            pending_task_requests: 0,
-        },
-    };
-
-    assert_eq!(
-        monitor.observe_decision(deferred.clone()),
-        IdleShutdownMonitorAction::Deferred {
-            blockers: ShutdownBlockers {
-                active_turns: 1,
-                pending_task_requests: 0,
-            },
-            should_log: true,
-        }
-    );
-    assert_eq!(
-        monitor.observe_decision(deferred),
-        IdleShutdownMonitorAction::Deferred {
-            blockers: ShutdownBlockers {
-                active_turns: 1,
-                pending_task_requests: 0,
-            },
-            should_log: false,
-        }
-    );
-}
+use super::publish_local_http_probe_endpoint;
 
 #[test]
 fn published_local_http_endpoint_is_reused_by_attach_or_launch() {

@@ -41,8 +41,6 @@ pub(crate) struct NativeSessionService {
 
 pub(crate) struct PrimaryPromptRequest {
     pub(crate) task: TaskRecord,
-    /// A promoted New Task may replace its prepared empty session when the Agent lost it.
-    pub(crate) replace_missing_prepared_session: bool,
     pub(crate) turn_id: TurnId,
     pub(crate) text: String,
     pub(crate) attachments: Vec<Attachment>,
@@ -79,19 +77,6 @@ impl NativeSessionService {
     /// Acquires and binds the empty New Task's Native Session before Composer becomes sendable.
     pub(crate) fn prepare_task(&self, task: &TaskRecord) -> Result<(), RuntimeError> {
         let cancellation = TurnCancellation::new();
-        let start = || {
-            self.agent_gateway.start_session(AgentSessionStart {
-                agent_id: task.agent_id.clone(),
-                task_id: task.task_id.clone(),
-                cwd: task.workspace_root.clone(),
-                model_id: task.model_id.clone(),
-                config_options: config_options_payload(task),
-                config_option_policy: ConfigOptionPolicy::ReconcileWithAgentDefaults,
-                context: Vec::new(),
-                cancellation: cancellation.clone(),
-                secret_resolver: Some(self.secret_resolver(&task.task_id)),
-            })
-        };
         let session = match &task.agent_session_id {
             Some(session_id) => self
                 .agent_gateway
@@ -104,8 +89,33 @@ impl NativeSessionService {
                     cancellation: cancellation.clone(),
                     secret_resolver: Some(self.secret_resolver(&task.task_id)),
                 })
-                .or_else(|_| start())?,
-            None => start()?,
+                .or_else(|error| {
+                    if !is_session_resume_unsupported(&error) {
+                        return Err(error);
+                    }
+                    self.agent_gateway
+                        .load_session(AgentSessionLoad {
+                            agent_id: task.agent_id.clone(),
+                            task_id: task.task_id.clone(),
+                            session_id: session_id.clone(),
+                            cwd: task.workspace_root.clone(),
+                            model_id: task.model_id.clone(),
+                            cancellation: cancellation.clone(),
+                            secret_resolver: Some(self.secret_resolver(&task.task_id)),
+                        })
+                        .map(|loaded| loaded.session)
+                })?,
+            None => self.agent_gateway.start_session(AgentSessionStart {
+                agent_id: task.agent_id.clone(),
+                task_id: task.task_id.clone(),
+                cwd: task.workspace_root.clone(),
+                model_id: task.model_id.clone(),
+                config_options: config_options_payload(task),
+                config_option_policy: ConfigOptionPolicy::ReconcileWithAgentDefaults,
+                context: Vec::new(),
+                cancellation: cancellation.clone(),
+                secret_resolver: Some(self.secret_resolver(&task.task_id)),
+            })?,
         };
         let session_start = TaskSessionStartGuard::new(&self.agent_gateway, session);
         let _ownership = PreparingSessionOwnership::reserve(
@@ -192,14 +202,12 @@ impl NativeSessionService {
     ) -> Result<(), RuntimeError> {
         let PrimaryPromptRequest {
             task,
-            replace_missing_prepared_session,
             turn_id,
             text,
             attachments,
         } = request;
         let task_id = task.task_id.clone();
-        let opened = self.acquire_for_prompt(&task, replace_missing_prepared_session)?;
-        let session_id = opened.session().session_id.clone();
+        let opened = self.acquire_for_prompt(&task)?;
         let session_state = opened.task_state();
         let binding = self.mutations.commit_existing_task(
             &task_id,
@@ -218,24 +226,7 @@ impl NativeSessionService {
             ));
         }
 
-        let session_sink = match self.ensure_update_subscription(&task_id, &opened.session().key())
-        {
-            Ok(sink) => sink,
-            Err(error) => {
-                self.mutations.commit_existing_task(
-                    &task_id,
-                    TaskCommitOptions::metadata(),
-                    |ctx| {
-                        if ctx.task().agent_session_id.as_deref() != Some(session_id.as_str()) {
-                            return Ok(TaskMutationResult::Unchanged);
-                        }
-                        ctx.task_mut().agent_session_id = None;
-                        Ok(TaskMutationResult::Changed)
-                    },
-                )?;
-                return Err(error);
-            }
-        };
+        let session_sink = self.ensure_update_subscription(&task_id, &opened.session().key())?;
         let session = opened.commit();
         self.turn_runner.spawn_agent_turn(
             task_id,
@@ -258,7 +249,7 @@ impl NativeSessionService {
         let expected_session_id = task.agent_session_id.as_deref().ok_or_else(|| {
             RuntimeError::NotReady("Task has no Native Session to recover".to_string())
         })?;
-        let opened = self.acquire_for_prompt(task, false)?;
+        let opened = self.acquire_for_prompt(task)?;
         let session_key = opened.session().key();
         let session_state = opened.task_state();
         let binding = self.mutations.commit_existing_task(
@@ -316,7 +307,6 @@ impl NativeSessionService {
     fn acquire_for_prompt(
         &self,
         task: &TaskRecord,
-        replace_missing_prepared_session: bool,
     ) -> Result<OpenedNativeSession<'_>, RuntimeError> {
         self.agent_registry.require(&task.agent_id)?;
         let cancellation = TurnCancellation::new();
@@ -331,7 +321,6 @@ impl NativeSessionService {
                 secret_resolver: Some(self.secret_resolver(&task.task_id)),
             }) {
                 Ok(session) => Ok(OpenedNativeSession::Resumed(session)),
-                Err(_) if replace_missing_prepared_session => self.start_fresh(task, cancellation),
                 Err(error) if is_session_resume_unsupported(&error) => self
                     .agent_gateway
                     .load_session(AgentSessionLoad {
@@ -348,13 +337,6 @@ impl NativeSessionService {
                             &self.agent_gateway,
                             loaded.session,
                         ))
-                    })
-                    .or_else(|error| {
-                        if is_restart_load_start_gap(&error) {
-                            self.start_fresh(task, cancellation)
-                        } else {
-                            Err(error)
-                        }
                     }),
                 Err(error) => Err(error),
             },
@@ -397,6 +379,8 @@ impl NativeSessionService {
         })?;
         if let Some(subscription) = subscriptions.get(task_id) {
             if &subscription.session == session {
+                self.turn_runner
+                    .reattach_session_events(session, &subscription.sink)?;
                 return Ok(subscription.sink.clone());
             }
         }
@@ -530,10 +514,6 @@ impl Drop for PreparingSessionOwnership {
 
 fn is_session_resume_unsupported(error: &RuntimeError) -> bool {
     matches!(error, RuntimeError::CapabilityMissing(_))
-}
-
-fn is_restart_load_start_gap(error: &RuntimeError) -> bool {
-    matches!(error, RuntimeError::NotReady(message) if message == "ACP session start timed out")
 }
 
 fn config_options_payload(task: &TaskRecord) -> Option<serde_json::Value> {

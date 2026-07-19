@@ -1,4 +1,6 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+#[cfg(test)]
+use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
 use crate::tasks::task_operation::TaskOperationCoordinator;
@@ -7,7 +9,7 @@ use crate::tasks::task_operation::TaskOperationCoordinator;
 ///
 /// Persistence makes a Task established, but startup may still be waiting on Task preparation,
 /// Native Session opening, or event attachment. This registry closes that lifecycle gap so an
-/// accepted Turn is never mistaken for abandoned work and remains an idle-shutdown blocker.
+/// accepted Turn is never mistaken for abandoned work during explicit shutdown or recovery.
 #[derive(Clone, Default)]
 pub(super) struct TurnAcceptanceCoordinator {
     acceptance: TaskOperationCoordinator,
@@ -58,6 +60,7 @@ impl TurnAcceptanceCoordinator {
         }
     }
 
+    #[cfg(test)]
     pub(super) fn owned_turns(&self) -> HashSet<(String, String)> {
         self.pending_turns
             .lock()

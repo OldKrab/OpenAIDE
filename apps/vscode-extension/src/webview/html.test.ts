@@ -22,6 +22,15 @@ describe("webview html", () => {
     expect(html).toContain('data-navigation-mode="currentProject"');
   });
 
+  it("allows inline image previews in the webview CSP", () => {
+    const html = renderWebviewHtml(context(), webview(), {
+      surface: "task",
+      shell: VSCODE_SHELL,
+    });
+
+    expect(html).toContain("img-src data:;");
+  });
+
   it("never exposes App Server endpoint or token material to a VS Code webview", () => {
     const html = renderWebviewHtml(context(), webview(), {
       surface: "navigation",

@@ -54,6 +54,12 @@ Frontend supplies `clientInstanceId` only through `client/initialize`. Transport
 - Every transport connection receives a fresh connection-local `connectionId`; transport identity never reuses `clientInstanceId`.
 - A client that loses its stable identity becomes a new client and cannot use another client's Prepared-Task lease.
 
+### App Server process lifetime
+
+Product-client liveness and App Server process lifetime are separate. Missing client heartbeats may expire that client's connection context, cancel its client-scoped requests, release its Prepared-Task lease, and remove its workspace roots, but the last product client expiring never stops the App Server process. Leaving an App Shell idle, unfocused, suspended, or otherwise unable to schedule heartbeats is not a process-lifetime event.
+
+The native App Shell owns the process generation through its handoff process lifetime and explicit shutdown. It probes the published endpoint independently from product-client heartbeats. When the endpoint is no longer healthy, the shell performs a new handoff and publishes a replacement endpoint to every live client surface. Those surfaces retain one logical App Server session, preserve the Frontend-owned Composer, invalidate and reinstall authoritative scope baselines, and never replay a Send or another mutation whose outcome is unknown.
+
 ## Default Project And Agent
 
 There are two selection owners:
@@ -272,11 +278,11 @@ Before publishing that idle transition, App Server projects every session update
 
 `task/cancel` changes a working Task to `stopping`, publishes that status, and disables Send. App Server resolves every active transient Permission and Question through its normal cancellation path, sends ACP `session/cancel` through the Native Session service, and continues accepting late session updates. The primary prompt's `cancelled` response changes the Task to idle and persists exactly one `Task stopped` Live Activity. Running Tool activity becomes interrupted or cancelled, never successfully completed merely because Stop was requested.
 
-ACP cancellation is a notification, so App Server gives the Agent ten seconds to settle the original prompt response. If it does not settle within that grace period, App Server removes and closes the untrustworthy Native Session, clears its durable binding, interrupts unfinished activity, and ends the Task as an idle cancellation failure. Late prompt completion or session updates from the discarded binding cannot revive or mutate the ended turn. A synchronous cancellation-send failure uses the same failed-cancellation termination path rather than leaving the Task in `stopping`.
+ACP cancellation is a notification, so App Server gives the Agent ten seconds to settle the original prompt response. If it does not settle within that grace period, App Server removes and closes the untrustworthy live Native Session handle, preserves the Task's durable Native Session identity, interrupts unfinished activity, and ends the Task as an idle cancellation failure. Late prompt completion or session updates from the closed runtime generation cannot revive or mutate the ended turn. A later explicit Send reconnects to the same Native Session through `session/resume`, falling back to `session/load` when resume is unsupported; it never binds the Task to a replacement Native Session. A synchronous cancellation-send failure uses the same failed-cancellation termination path rather than leaving the Task in `stopping`.
 
 User Stop, Native Session failure during `starting`, `working`, or `waiting`, and App Server restart during active work share one termination pipeline. It closes transient requests, persists cause-specific resolved request messages, marks unfinished Tool activity interrupted, ends active work, publishes idle state, and appends exactly one cause-specific Live Activity. Protocol behavior still differs by cause: user Stop sends `session/cancel` and normally waits for `cancelled`; Agent disconnection terminates immediately; restart records that OpenAIDE restarted.
 
-Accepted prompts are never replayed automatically after termination. Their User messages remain durable. A later explicit Send may load or resume the Native Session, but it never resends the failed prompt. Unexpected Native Session loss while idle only marks the opaque handle unavailable; the next explicit Send may recover it without alarming Chat activity.
+Accepted prompts are never replayed automatically after termination. Their User messages remain durable. A later explicit Send may load or resume the same Native Session, but it never resends the failed prompt. Once a Task has a Native Session identity, that binding is immutable for the Task's lifetime. Recovery failure is visible and never falls back to `session/new` or another Native Session identity. Unexpected Native Session loss while idle only marks the opaque handle unavailable; the next explicit Send may recover it without alarming Chat activity.
 
 ### Idle Native Session release
 
@@ -387,3 +393,4 @@ An implementation conforms to this specification only when all of these are true
 9. A browser profile emits at most one OS notification for one eligible Task Attention Event and never emits an old unread backlog on startup.
 10. App Server owns Task Attention state while each App Shell owns its local attention and notification capabilities.
 11. Unsent Composer text and Images have one Frontend owner and remain unchanged by Project, Agent, Task Workspace, navigation, reconnect, or Prepared-Task lease changes while the page remains alive.
+12. Product-client inactivity may expire client-scoped state but never determines App Server process lifetime; a changed process endpoint recovers through the same logical-session baseline barrier without mutation replay.

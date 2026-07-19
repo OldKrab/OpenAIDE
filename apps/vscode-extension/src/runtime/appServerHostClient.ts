@@ -25,6 +25,9 @@ import type { WebviewAppServerConnection } from "@openaide/app-shell-contracts";
 
 type ConnectionProvider = {
   startAppServerConnection(): Promise<WebviewAppServerConnection>;
+  onAppServerConnectionChanged(
+    listener: (connection: WebviewAppServerConnection) => void,
+  ): { dispose(): void };
 };
 
 type HostClientLogger = {
@@ -227,6 +230,12 @@ export class AppServerHostClient {
       const connection = createReliableLocalHttpBackendConnection({
         ...info,
         connectionId: `vscode-connection-${randomUUID()}`,
+        subscribeToReplacement: (listener) => {
+          const subscription = this.provider.onAppServerConnectionChanged((replacement) => {
+            if (replacement.kind === "localHttp") listener(replacement);
+          });
+          return () => subscription.dispose();
+        },
       });
       this.bindSessionEvents(connection);
       const initializedWorkspaceRoots = cloneWorkspaceRoots(this.desiredWorkspaceRoots);
