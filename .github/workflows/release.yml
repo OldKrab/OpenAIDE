@@ -49,57 +49,10 @@ jobs:
       - run: npm run test --workspaces --if-present
 
   artifacts:
-    name: Build ${{ matrix.target }} VSIX
     needs: [validate, checks]
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-24.04
-            target: linux-x64
-            binary: openaide-app-server
-          - os: windows-2025
-            target: win32-x64
-            binary: openaide-app-server.exe
-          - os: macos-15
-            target: darwin-arm64
-            binary: openaide-app-server
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
-        with:
-          node-version: 24
-          cache: npm
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - run: npm ci
-      # Source manifests stay version-neutral; packaged artifacts receive the canonical tag version.
-      - name: Set release artifact versions
-        shell: bash
-        env:
-          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
-        run: node scripts/set-release-artifact-version.mjs "$RELEASE_VERSION"
-      - run: cargo build --release -p openaide-app-server
-      - run: npm run build:frontend
-      - name: Add extension license
-        shell: bash
-        run: cp LICENSE apps/vscode-extension/LICENSE
-      - name: Package platform VSIX
-        shell: bash
-        run: |
-          mkdir -p release apps/vscode-extension/dist/app-server
-          cp "target/release/${{ matrix.binary }}" apps/vscode-extension/dist/app-server/
-          cd apps/vscode-extension
-          npx --yes @vscode/vsce@3.6.0 package \
-            --target "${{ matrix.target }}" \
-            --no-dependencies \
-            --out "../../release/openaide-vscode-${{ matrix.target }}-${{ needs.validate.outputs.version }}.vsix"
-      - uses: actions/upload-artifact@v7
-        with:
-          name: release-${{ matrix.target }}
-          path: release/
-          if-no-files-found: error
+    uses: ./.github/workflows/build-vsix.yml
+    with:
+      version: ${{ needs.validate.outputs.version }}
 
   marketplace:
     name: Publish VS Code Marketplace packages
@@ -112,7 +65,7 @@ jobs:
           node-version: 24
       - uses: actions/download-artifact@v8
         with:
-          pattern: release-*
+          pattern: vsix-*
           path: release
           merge-multiple: true
       - name: Publish platform packages
@@ -142,7 +95,7 @@ jobs:
           echo "path=$notes_path" >> "$GITHUB_OUTPUT"
       - uses: actions/download-artifact@v8
         with:
-          pattern: release-*
+          pattern: vsix-*
           path: release
           merge-multiple: true
       - uses: softprops/action-gh-release@v3
