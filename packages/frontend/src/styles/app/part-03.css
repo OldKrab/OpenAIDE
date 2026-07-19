@@ -168,7 +168,7 @@
   opacity: 0.7;
 }
 
-.activity-group.error .activity-status-mark {
+.activity-group.failed .activity-status-mark {
   border-radius: 2px;
   background: var(--oa-danger);
   opacity: 0.9;
@@ -177,6 +177,14 @@
 .activity-group.interrupted .activity-status-mark {
   border-radius: 2px;
   background: var(--oa-muted);
+  opacity: 0.8;
+}
+
+.activity-group.unknown .activity-status-mark {
+  box-sizing: border-box;
+  border: 1px solid currentColor;
+  border-radius: 2px;
+  background: transparent;
   opacity: 0.8;
 }
 

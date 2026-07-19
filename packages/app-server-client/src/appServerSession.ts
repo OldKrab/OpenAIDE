@@ -35,6 +35,7 @@ type ScopeReplica = {
   refreshGeneration?: number;
   refreshPromise?: Promise<void>;
   retryDelay: number;
+  cancelRetry?: () => void;
 };
 
 type RecoveryGate = {
@@ -138,6 +139,7 @@ export function createAppServerSession(connection: BackendConnection): AppServer
       stopInvalidation();
       stopRecoveryBaseline();
       stopRecoveryFailure();
+      for (const replica of replicas.values()) replica.cancelRetry?.();
       replicas.clear();
       statusListeners.clear();
       invalidationListeners.clear();
@@ -216,23 +218,29 @@ export function createAppServerSession(connection: BackendConnection): AppServer
           stateRootId: snapshot.stateRoot.stateRootId,
           clientInstanceId: snapshot.client.clientInstanceId,
         });
+        if (!replayPendingEvents(replica)) {
+          // A gap discovered behind this baseline cannot start a concurrent refresh:
+          // keep the scope gated and retry at a bounded rate in this same loop.
+          replica.state = undefined;
+          await waitForReplicaRetry(replica);
+          continue;
+        }
         replica.refreshing = false;
         replica.retryDelay = SUBSCRIPTION_RETRY_MS;
         notifyReplica(replica, "onSnapshot", replica.state.snapshot);
-        replayPendingEvents(replica);
         notifyReplica(replica, "onBaselineReady");
         return;
       } catch (error) {
         if (closed || generation !== targetGeneration) return;
         notifyReplica(replica, "onBaselineError", error);
-        const delay = replica.retryDelay;
-        replica.retryDelay = Math.min(replica.retryDelay * 2, MAX_SUBSCRIPTION_RETRY_MS);
-        await wait(delay);
+        await waitForReplicaRetry(replica);
       }
     }
   }
 
   function invalidateReplica(replica: ScopeReplica) {
+    replica.cancelRetry?.();
+    replica.cancelRetry = undefined;
     replica.pendingEvents = [];
     if (!replica.refreshing) notifyReplica(replica, "onBaselineLost");
     replica.refreshing = true;
@@ -251,7 +259,7 @@ export function createAppServerSession(connection: BackendConnection): AppServer
     }
   }
 
-  function applyEvent(replica: ScopeReplica, event: AppServerEvent) {
+  function applyEvent(replica: ScopeReplica, event: AppServerEvent, publish = true) {
     if (!replica.state) return false;
     const result = applySubscriptionEvent(replica.state, event);
     if (result.kind === "ignored") {
@@ -259,24 +267,31 @@ export function createAppServerSession(connection: BackendConnection): AppServer
       return true;
     }
     if (result.kind === "resyncRequired") {
-      void refreshReplica(replica, generation);
+      const refresh = refreshReplica(replica, generation);
+      // Refresh invalidation clears obsolete pending events, so retain the live
+      // gap only after the replacement subscription has started.
+      if (publish) queuePendingEvent(replica, event);
+      void refresh;
       return false;
     }
     replica.state = result.state;
-    notifyReplica(replica, "onSnapshot", result.state.snapshot, event, result.snapshotChanged);
+    if (publish) {
+      notifyReplica(replica, "onSnapshot", result.state.snapshot, event, result.snapshotChanged);
+    }
     return true;
   }
 
   function replayPendingEvents(replica: ScopeReplica) {
-    if (!replica.state || replica.pendingEvents.length === 0) return;
+    if (!replica.state || replica.pendingEvents.length === 0) return true;
     const cursorIndex = replica.pendingEvents.findIndex((event) => event.cursor === replica.state?.cursor);
     const events = cursorIndex === -1 ? replica.pendingEvents : replica.pendingEvents.slice(cursorIndex + 1);
     replica.pendingEvents = [];
     for (const [index, event] of events.entries()) {
-      if (applyEvent(replica, event)) continue;
-      for (const pending of events.slice(index + 1)) queuePendingEvent(replica, pending);
-      break;
+      if (applyEvent(replica, event, false)) continue;
+      for (const pending of events.slice(index)) queuePendingEvent(replica, pending);
+      return false;
     }
+    return true;
   }
 
   function queuePendingEvent(replica: ScopeReplica, event: AppServerEvent) {
@@ -287,6 +302,7 @@ export function createAppServerSession(connection: BackendConnection): AppServer
   function releaseReplica(key: string, replica: ScopeReplica, observer: AppServerStateObserver) {
     replica.observers.delete(observer);
     if (replica.observers.size > 0 || replicas.get(key) !== replica) return;
+    replica.cancelRetry?.();
     replicas.delete(key);
     void connection.request(STATE_UNSUBSCRIBE, { scope: replica.scope }).catch(() => undefined);
   }
@@ -294,6 +310,23 @@ export function createAppServerSession(connection: BackendConnection): AppServer
   function updateStatus(next: AppServerSessionStatus) {
     status = next;
     notifyListeners(statusListeners, next);
+  }
+
+  function waitForReplicaRetry(replica: ScopeReplica) {
+    const delay = replica.retryDelay;
+    replica.retryDelay = Math.min(replica.retryDelay * 2, MAX_SUBSCRIPTION_RETRY_MS);
+    return new Promise<void>((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        if (replica.cancelRetry === finish) replica.cancelRetry = undefined;
+        resolve();
+      };
+      const timer = setTimeout(finish, delay);
+      replica.cancelRetry = finish;
+    });
   }
 }
 
@@ -321,10 +354,6 @@ function deferredGate(generation: number): RecoveryGate {
     resolve = done;
   });
   return { generation, promise, resolve };
-}
-
-function wait(delay: number) {
-  return new Promise<void>((resolve) => setTimeout(resolve, delay));
 }
 
 function notifyReplica<K extends keyof AppServerStateObserver>(

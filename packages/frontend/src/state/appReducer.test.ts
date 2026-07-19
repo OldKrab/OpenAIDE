@@ -1666,6 +1666,7 @@ describe("app reducer composer state", () => {
     expect(state).toMatchObject({
       activeTaskId: undefined,
       projects: [],
+      projectsLoaded: false,
       tasks: [],
       taskListCache: {},
       taskInputs: {},

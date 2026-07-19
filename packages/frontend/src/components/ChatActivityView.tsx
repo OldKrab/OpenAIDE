@@ -6,6 +6,8 @@ import { AgentMarkdown } from "./AgentMarkdown";
 import { MessageCopyAction } from "./chatMessageActions";
 import {
   activityStatusLabel,
+  activityPresentationStatus,
+  activityCommandActionLabel,
   activityStepContext,
   activityStepLabel,
   activityStepPreview,
@@ -38,7 +40,7 @@ export function ChatActivityView({
   const thoughtsAreCollapsible = hasNonThoughtStep && thoughtCount > 2;
   return (
     <AnimatedDisclosure
-      className={`activity-group ${activity.status}`}
+      className={`activity-group ${activityPresentationStatus(activity.status)}`}
       trigger={
         <>
           <ChevronRight className="activity-disclosure-icon" size={13} aria-hidden="true" />
@@ -292,7 +294,7 @@ function ActivityStepContent({
 }
 
 function CommandStepTitle({ command, status }: { command: string; status: "running" | "completed" | "error" | "interrupted" }) {
-  const action = status === "running" ? "Running" : status === "interrupted" ? "Interrupted" : "Ran";
+  const action = activityCommandActionLabel(status);
   return (
     <>
       <span className="activity-step-action">{action}</span>

@@ -73,6 +73,7 @@ export type ReliableLocalHttpBackendConnectionOptions = {
   fetch?: ReliableHttpFetch;
   heartbeatIntervalMs?: number;
   retryDelayMs?: number;
+  closeTimeoutMs?: number;
   subscribeToWake?: (wake: () => void) => () => void;
 };
 
@@ -107,6 +108,7 @@ function createReliableHttpBackendConnection(
     dispose(): void;
   }>();
   const generations = new Set<HttpConnectionGeneration>();
+  let nextTransportGeneration = 0;
   let active = createGeneration();
   let initializedServerId: string | undefined;
   let initializeParams: InitializeParams | undefined;
@@ -198,12 +200,16 @@ function createReliableHttpBackendConnection(
   };
 
   function createGeneration(): HttpConnectionGeneration {
+    // The stable clientInstanceId is sent in initialize; each physical transport
+    // generation needs its own ownership key so an old poll cannot drain its replacement.
+    const connectionId = `${options.connectionId}:generation-${++nextTransportGeneration}`;
     const channel = createReliableHttpMessageChannel({
       endpointUrl: options.endpointUrl,
-      connectionId: options.connectionId,
+      connectionId,
       ...("authToken" in options ? { authToken: options.authToken } : {}),
       ...(options.fetch ? { fetch: options.fetch } : {}),
       ...(options.retryDelayMs === undefined ? {} : { retryDelayMs: options.retryDelayMs }),
+      ...(options.closeTimeoutMs === undefined ? {} : { closeTimeoutMs: options.closeTimeoutMs }),
       ...(options.subscribeToWake ? { subscribeToWake: options.subscribeToWake } : {}),
     });
     let generation: HttpConnectionGeneration;

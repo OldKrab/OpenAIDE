@@ -26,6 +26,8 @@ export type WebviewBootstrap = {
   clientInstanceId?: string;
   taskId?: string;
   projectId?: string;
+  /** Stable Task Workspace identity for a worktree-scoped New Task route. */
+  worktreeId?: string;
   settingsTab?: SettingsTabId;
   preferences?: AppPreferencesRecord;
   appServerConnection?: WebviewAppServerConnection;

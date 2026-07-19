@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, type Dispatch, type MutableRefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, type Dispatch, type MutableRefObject } from "react";
 import { defaultAgent } from "@openaide/app-shell-contracts";
 import type { AgentOption } from "../state/composerOptions";
 import type { AppAction } from "../state/appReducer";
@@ -6,6 +6,10 @@ import type { AppState } from "../state/store";
 import type { WebviewBootstrap } from "../state/surfaceTypes";
 import type { AsyncOperationOwner } from "../state/asyncOperationOwner";
 import { retainNewTaskContext } from "../state/newTaskSelectionDefaults";
+import {
+  newTaskRouteWorkspaceReady,
+  newTaskWorkspaceActionForRoute,
+} from "../state/newTaskRouteContext";
 import { sendWebviewTelemetry } from "../state/hostMessageRouter";
 import { agentProjectRequestKey, shouldLoadNativeSessions } from "../state/surfaceRouting";
 import { TASK_NAVIGATION_PAGE_SIZE } from "../state/taskNavigationPolicy";
@@ -96,7 +100,7 @@ export function useNewTaskWorkspace({
     attachmentResources,
     asyncOperations,
     backendConnection,
-    backendReady,
+    backendReady: backendReady && newTaskRouteWorkspaceReady(bootstrap, state, backendReady),
     bootstrap,
     dispatch: newTaskDispatch,
     pendingPreparation,
@@ -136,35 +140,10 @@ export function useNewTaskWorkspace({
     }
   }, [bootstrap.surface, bootstrap.taskId, newTaskBootstrapProjectId, state.newTask.selection.projectId]);
 
-  useEffect(() => {
-    const selectedWorktreeId = state.newTask.selection.worktreeId;
-    if (!selectedWorktreeId) return;
-    const project = state.projects.find((candidate) => candidate.projectId === state.newTask.selection.projectId);
-    const repository = project?.worktreeRepositoryId
-      ? state.worktreeRepositories[project.worktreeRepositoryId]
-      : undefined;
-    const selected = repository?.worktrees.find((worktree) => worktree.worktreeId === selectedWorktreeId);
-    if (!selected?.forgotten) return;
-    const projectRoot = repository?.worktrees.find((worktree) => (
-      !worktree.forgotten
-      && worktree.worktreeId === project?.projectWorktreeId
-      && worktree.availability === "available"
-    ));
-    if (!projectRoot) return;
-    // Repository updates reach every client; move any retained New Task draft off the removed path.
-    newTaskDispatch({
-      type: "newTask:worktree",
-      worktreeId: undefined,
-      label: "Project root",
-      path: projectRoot.path,
-    });
-  }, [
-    newTaskDispatch,
-    state.newTask.selection.projectId,
-    state.newTask.selection.worktreeId,
-    state.projects,
-    state.worktreeRepositories,
-  ]);
+  useLayoutEffect(() => {
+    const action = newTaskWorkspaceActionForRoute(bootstrap, state, backendReady);
+    if (action) newTaskDispatch(action);
+  }, [backendReady, bootstrap, newTaskDispatch, state]);
 
   useEffect(() => {
     if (bootstrap.surface !== "task" || bootstrap.taskId || !agents?.length) return;

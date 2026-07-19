@@ -360,6 +360,34 @@ fn reliable_upload_returns_no_rpc_messages_and_poll_delivers_the_response() {
     );
 }
 
+#[test]
+fn reliable_close_acknowledges_and_removes_the_exact_session() {
+    let sessions = ReliableSessionRegistry::new("server-1");
+    let opened = handle_reliable_session_open(
+        Some("Bearer token"),
+        "token",
+        Some("generation-1"),
+        &sessions,
+    );
+    let handshake: Value = serde_json::from_str(&opened.body).unwrap();
+    let session_id = handshake["sessionId"].as_str().unwrap();
+
+    let closed = handle_reliable_session_close(
+        Some("Bearer token"),
+        "token",
+        Some("generation-1"),
+        &json!({ "transport": "close", "sessionId": session_id }).to_string(),
+        &sessions,
+    );
+
+    assert_eq!(closed.status, 200);
+    assert_eq!(
+        serde_json::from_str::<Value>(&closed.body).unwrap()["sessionId"],
+        session_id
+    );
+    assert_eq!(sessions.poll(session_id, 0), Err(PollError::UnknownSession));
+}
+
 fn request(id: &str, method: &str, params: Value) -> String {
     json!({
         "jsonrpc": "2.0",

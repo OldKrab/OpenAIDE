@@ -40,6 +40,7 @@ describe("TaskWorkspacePicker", () => {
     act(() => options.find((option) => text(option).includes("Sidebar scrolling"))?.props.onClick());
 
     expect(intents.selectWorktree).toHaveBeenCalledWith({
+      projectId: "project_1",
       worktreeId: "worktree_sidebar",
       label: "Sidebar scrolling",
       path: "/workspace/OpenAIDE-sidebar",
@@ -116,6 +117,7 @@ describe("TaskWorkspacePicker", () => {
     expect(primary).toBeDefined();
     act(() => primary?.props.onClick());
     expect(intents.selectWorktree).toHaveBeenLastCalledWith({
+      projectId: "project_1",
       worktreeId: "worktree_primary",
       label: "Primary checkout",
       path: "/workspace/OpenAIDE-primary",
@@ -250,10 +252,42 @@ describe("TaskWorkspacePicker", () => {
 
     expect(intents.removeWorktree).toHaveBeenCalledWith("repository_1", "worktree_sidebar");
     expect(intents.selectWorktree).toHaveBeenCalledWith({
+      projectId: "project_1",
       worktreeId: undefined,
       label: "Project root",
       path: "/workspace/OpenAIDE",
     });
+  });
+
+  it("starts a managed worktree task through one selection callback with exact identities", () => {
+    const intents = testIntents();
+    const onClose = vi.fn();
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(
+        <TaskWorkspacePicker
+          initialMode="manage"
+          intents={intents}
+          managementOnly
+          onClose={onClose}
+          project={{ projectId: "project_new", label: "OpenAIDE", workspaceRoot: "/workspace/OpenAIDE", worktreeRepositoryId: "repository_1", projectWorktreeId: "worktree_root" }}
+          repository={repository()}
+          tasks={[]}
+        />,
+      );
+    });
+
+    act(() => tree.root.findAllByType("button").find((button) => text(button).includes("Sidebar scrolling"))?.props.onClick());
+    act(() => tree.root.findAllByType("button").find((button) => hasText(button, "New task here"))?.props.onClick());
+
+    expect(intents.selectWorktree).toHaveBeenCalledOnce();
+    expect(intents.selectWorktree).toHaveBeenCalledWith({
+      projectId: "project_new",
+      worktreeId: "worktree_sidebar",
+      label: "Sidebar scrolling",
+      path: "/workspace/OpenAIDE-sidebar",
+    });
+    expect(onClose).toHaveBeenCalledOnce();
   });
 });
 

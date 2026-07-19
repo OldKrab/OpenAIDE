@@ -46,7 +46,7 @@ describe("host bridge", () => {
       expect.objectContaining({
         headers: expect.objectContaining({
           Authorization: "Bearer token-1",
-          "X-OpenAIDE-Connection-Id": "frontend-connection-client-local",
+          "X-OpenAIDE-Connection-Id": "frontend-connection-client-local:generation-1",
         }),
       }),
     );
@@ -182,7 +182,7 @@ describe("host bridge", () => {
       expect.objectContaining({
         headers: {
           "Content-Type": "application/json",
-          "X-OpenAIDE-Connection-Id": "frontend-connection-client-web",
+          "X-OpenAIDE-Connection-Id": "frontend-connection-client-web:generation-1",
         },
       }),
     );
@@ -283,8 +283,13 @@ describe("host bridge", () => {
     expect(dispatchEvent).toHaveBeenCalledWith(expect.objectContaining({ type: "openaide:webRoute" }));
   });
 
-  it("routes web shell project-scoped new task navigation through browser history", async () => {
-    const pushState = vi.fn();
+  it("persists project and worktree identity in New Task browser history", async () => {
+    const location = { pathname: "/task/task_1", search: "" };
+    const pushState = vi.fn((_state: unknown, _title: string, path: string) => {
+      const next = new URL(path, "http://localhost");
+      location.pathname = next.pathname;
+      location.search = next.search;
+    });
     vi.stubGlobal("document", {
       body: {
         dataset: {
@@ -301,16 +306,95 @@ describe("host bridge", () => {
     vi.stubGlobal("window", {
       acquireVsCodeApi: undefined,
       history: { pushState },
-      location: { pathname: "/task/task_1", search: "" },
+      location,
       addEventListener: vi.fn(),
       dispatchEvent: vi.fn(),
       removeEventListener: vi.fn(),
     });
 
-    const { openNewTaskSurface } = await installedHostBridge();
-    openNewTaskSurface("project/1");
+    const { getBootstrap, openNewTaskSurface } = await installedHostBridge();
+    openNewTaskSurface("project/1", "worktree/1");
 
-    expect(pushState).toHaveBeenCalledWith(null, "", "/new-task?projectId=project%2F1");
+    expect(pushState).toHaveBeenCalledWith(
+      null,
+      "",
+      "/new-task?projectId=project%2F1&worktreeId=worktree%2F1",
+    );
+    expect(getBootstrap()).toMatchObject({
+      surface: "task",
+      projectId: "project/1",
+      worktreeId: "worktree/1",
+    });
+  });
+
+  it("reconstructs root and worktree routes across browser Back and Forward", async () => {
+    const listeners = new Map<string, () => void>();
+    const location = { pathname: "/", search: "" };
+    const entries = ["/"];
+    let entryIndex = 0;
+    const applyPath = (path: string) => {
+      const next = new URL(path, "http://localhost");
+      location.pathname = next.pathname;
+      location.search = next.search;
+    };
+    const history = {
+      pushState: vi.fn((_state: unknown, _title: string, path: string) => {
+        entries.splice(entryIndex + 1, entries.length, path);
+        entryIndex += 1;
+        applyPath(path);
+      }),
+      back() {
+        entryIndex = Math.max(0, entryIndex - 1);
+        applyPath(entries[entryIndex] ?? "/");
+        listeners.get("popstate")?.();
+      },
+      forward() {
+        entryIndex = Math.min(entries.length - 1, entryIndex + 1);
+        applyPath(entries[entryIndex] ?? "/");
+        listeners.get("popstate")?.();
+      },
+    };
+    vi.stubGlobal("document", {
+      body: {
+        dataset: {
+          shell: "web",
+          navigationMode: "project",
+          surface: "task",
+          appServerConnection: JSON.stringify({
+            kind: "webProxy",
+            endpointUrl: "/__openaide-app-server/probe",
+          }),
+        },
+      },
+    });
+    vi.stubGlobal("window", {
+      acquireVsCodeApi: undefined,
+      history,
+      location,
+      addEventListener: vi.fn((type: string, listener: () => void) => listeners.set(type, listener)),
+      dispatchEvent: vi.fn(),
+      removeEventListener: vi.fn((type: string) => listeners.delete(type)),
+    });
+
+    const {
+      getBootstrap,
+      openNewTaskSurface,
+      subscribeSurfaceRouteChanges,
+    } = await installedHostBridge();
+    const routed: unknown[] = [];
+    const stop = subscribeSurfaceRouteChanges((route) => routed.push(route));
+    openNewTaskSurface("project_1", "worktree_1");
+    expect(getBootstrap()).toMatchObject({ projectId: "project_1", worktreeId: "worktree_1" });
+
+    history.back();
+    expect(getBootstrap()).toMatchObject({ surface: "task" });
+    expect(getBootstrap()).not.toHaveProperty("worktreeId");
+    expect(routed.at(-1)).not.toHaveProperty("worktreeId");
+
+    history.forward();
+    expect(getBootstrap()).toMatchObject({ projectId: "project_1", worktreeId: "worktree_1" });
+    expect(routed.at(-1)).toMatchObject({ projectId: "project_1", worktreeId: "worktree_1" });
+    stop();
   });
 
   it("reads archive navigation from browser history", async () => {
@@ -508,6 +592,9 @@ function reliableFetch() {
         serverId: "server-1",
       }));
     }
+    if (body.transport === "close") {
+      return response(200, JSON.stringify({ sessionId: body.sessionId }));
+    }
     const message = body.message as { id?: string; method?: string } | undefined;
     if (message?.id && message.method === "client/initialize") {
       queued.push({
@@ -552,6 +639,9 @@ function wakeableReliableFetch() {
           sessionId: "session-1",
           serverId: "server-1",
         }));
+      }
+      if (body.transport === "close") {
+        return response(200, JSON.stringify({ sessionId: body.sessionId }));
       }
       const message = body.message as { id?: string; method?: string } | undefined;
       if (message?.id && message.method === "client/initialize") {

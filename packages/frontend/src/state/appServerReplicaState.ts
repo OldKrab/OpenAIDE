@@ -46,6 +46,7 @@ export function applyAppServerReplica(
     permissionResponses: initial.permissionResponses,
     questionResponses: initial.questionResponses,
     projects: initial.projects,
+    projectsLoaded: initial.projectsLoaded,
     taskInputs: initial.taskInputs,
     chatPages: initial.chatPages,
     toolDetails: initial.toolDetails,

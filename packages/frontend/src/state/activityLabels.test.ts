@@ -11,6 +11,66 @@ import {
 } from "./activityLabels";
 
 describe("activity labels", () => {
+  it.each([
+    ["running", "Running", "Running", "Running · exit 9"],
+    ["completed", "Completed", "Ran", "Completed · exit 9"],
+    ["interrupted", "Interrupted", "Interrupted", "Interrupted · exit 9"],
+    ["error", "Failed", "Failed", "Failed · exit 9"],
+    ["future_status", "Unknown", "Unknown", "Unknown · exit 9"],
+  ])("keeps outer, command, and metadata labels authoritative for %s", (
+    status,
+    outer,
+    command,
+    metadata,
+  ) => {
+    expect(activityStatusLabel(status as never)).toBe(outer);
+    expect(activityStepCompletedLabel({
+      kind: "command",
+      command_label: "npm test",
+      status: status as never,
+      exit_code: 9,
+    })).toBe(`${command} npm test`);
+    expect(activityStepStatus({
+      kind: "command",
+      command_label: "npm test",
+      status: status as never,
+      exit_code: 9,
+    })).toBe(metadata);
+  });
+
+  it.each([
+    ["running", "Running command"],
+    ["completed", "Ran command"],
+    ["interrupted", "Interrupted command"],
+    ["error", "Failed command"],
+    ["future_status", "Command status unknown"],
+  ])("keeps the command group summary authoritative for %s", (status, expected) => {
+    const message = activity("exec_command", status as never, [{
+      kind: "command",
+      command_label: "npm test",
+      status: status as never,
+      exit_code: status === "completed" ? 0 : 9,
+    }]);
+
+    expect(activitySummary(message)).toBe(expected);
+    if (status !== "completed") expect(activitySummary(message)).not.toContain("Ran");
+  });
+
+  it.each([
+    ["running", "Running npm test"],
+    ["completed", "Ran npm test"],
+    ["interrupted", "Interrupted npm test"],
+    ["error", "Failed npm test"],
+    ["future_status", "Unknown npm test"],
+  ])("keeps execute-tool footer presentation authoritative for %s", (status, expected) => {
+    expect(activityStepCompletedLabel({
+      kind: "tool",
+      name: "execute",
+      status: status as never,
+      input_summary: "npm test",
+    })).toBe(expected);
+  });
+
   it("presents interrupted work without calling it completed or failed", () => {
     expect(activityStatusLabel("interrupted")).toBe("Interrupted");
     expect(activityStepStatus({ kind: "tool", name: "edit", status: "interrupted" })).toBe("Interrupted");

@@ -154,9 +154,11 @@ pub(super) fn acquire_prepared_task(
             ));
         }
         if existing.agent_id != task.agent_id || existing.workspace_root != task.workspace_root {
-            return Err(RuntimeError::Conflict(
-                "Release the current Prepared Task before acquiring another context".to_string(),
-            ));
+            return Err(RuntimeError::PreparedTaskContextConflict {
+                message: "Release the current Prepared Task before acquiring another context"
+                    .to_string(),
+                task_id: existing.task_id.clone(),
+            });
         }
         let response_snapshot = match options.response_snapshot_tail_limit {
             Some(limit) => Some(build_snapshot(&target.store, &existing.task_id, limit)?),

@@ -41,9 +41,190 @@ describe("AppServerSession", () => {
     await vi.waitFor(() => expect(subscribeCount).toBe(2));
     replacement.resolve(taskSubscription("cursor_2", 2));
 
-    await vi.waitFor(() => expect(snapshots).toEqual([1, 2, 3, 4]));
+    await vi.waitFor(() => expect(snapshots).toEqual([1, 4]));
     expect(subscribeCount).toBe(2);
     session.close();
+  });
+
+  it("serializes and reruns refresh when pending events still have a cursor gap", async () => {
+    const second = deferred<StateSubscribeResult>();
+    const third = deferred<StateSubscribeResult>();
+    let subscribeCount = 0;
+    const raw = fakeConnection(async (method) => {
+      if (method !== STATE_SUBSCRIBE) throw new Error(`Unexpected request: ${method}`);
+      subscribeCount += 1;
+      if (subscribeCount === 1) return taskSubscription("cursor_1", 1);
+      if (subscribeCount === 2) return second.promise;
+      return third.promise;
+    });
+    const session = createAppServerSession(raw.connection);
+    await session.initialize(initializeParams());
+    const snapshots: number[] = [];
+    const ready = vi.fn();
+    session.subscribeState({ kind: "task", taskId: "task_1" as TaskId }, {
+      onBaselineReady: ready,
+      onSnapshot(snapshot) {
+        if (snapshot.kind === "task") snapshots.push(snapshot.task.revision);
+      },
+    });
+    await vi.waitFor(() => expect(snapshots).toEqual([1]));
+
+    raw.emit(taskEvent("missing_cursor", "cursor_3", 3));
+    await vi.waitFor(() => expect(subscribeCount).toBe(2));
+    raw.emit(taskEvent("cursor_3", "cursor_4", 4));
+    second.resolve(taskSubscription("cursor_2", 2));
+
+    await vi.waitFor(() => expect(subscribeCount).toBe(3));
+    expect(ready).toHaveBeenCalledTimes(1);
+    third.resolve(taskSubscription("cursor_4", 4));
+
+    await vi.waitFor(() => expect(ready).toHaveBeenCalledTimes(2));
+    expect(snapshots).toEqual([1, 4]);
+    session.close();
+  });
+
+  it("retains a live gap across stale baselines until the replica reconciles", async () => {
+    vi.useFakeTimers();
+    try {
+      const refreshes = [
+        deferred<StateSubscribeResult>(),
+        deferred<StateSubscribeResult>(),
+        deferred<StateSubscribeResult>(),
+      ];
+      let subscribeCount = 0;
+      const raw = fakeConnection(async (method) => {
+        if (method !== STATE_SUBSCRIBE) throw new Error(`Unexpected request: ${method}`);
+        subscribeCount += 1;
+        if (subscribeCount === 1) return taskSubscription("cursor_1", 1);
+        const refresh = refreshes[subscribeCount - 2];
+        if (!refresh) throw new Error("Unexpected subscription retry");
+        return refresh.promise;
+      });
+      const session = createAppServerSession(raw.connection);
+      await session.initialize(initializeParams());
+      const snapshots: number[] = [];
+      session.subscribeState({ kind: "task", taskId: "task_1" as TaskId }, {
+        onSnapshot(snapshot) {
+          if (snapshot.kind === "task") snapshots.push(snapshot.task.revision);
+        },
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(snapshots).toEqual([1]);
+
+      raw.emit(taskEvent("cursor_2", "cursor_3", 3));
+      raw.emit(taskEvent("cursor_3", "cursor_4", 4));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(subscribeCount).toBe(2);
+
+      refreshes[0]?.resolve(taskSubscription("cursor_1", 2));
+      await vi.advanceTimersByTimeAsync(500);
+      expect(subscribeCount).toBe(3);
+      expect(snapshots).toEqual([1]);
+
+      refreshes[1]?.resolve(taskSubscription("cursor_1", 2));
+      await vi.advanceTimersByTimeAsync(999);
+      expect(subscribeCount).toBe(3);
+      expect(snapshots).toEqual([1]);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(subscribeCount).toBe(4);
+
+      refreshes[2]?.resolve(taskSubscription("cursor_2", 2));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(snapshots).toEqual([1, 4]);
+      expect(subscribeCount).toBe(4);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(subscribeCount).toBe(4);
+      session.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("backs repeated cursor-gap refreshes off and later publishes only the reconciled baseline", async () => {
+    vi.useFakeTimers();
+    try {
+      const refreshes = [deferred<StateSubscribeResult>(), deferred<StateSubscribeResult>()];
+      let subscribeCount = 0;
+      const raw = fakeConnection(async (method) => {
+        if (method !== STATE_SUBSCRIBE) throw new Error(`Unexpected request: ${method}`);
+        subscribeCount += 1;
+        if (subscribeCount === 1) return taskSubscription("cursor_1", 1);
+        const refresh = refreshes[subscribeCount - 2];
+        if (!refresh) return taskSubscription("cursor_6", 6);
+        return refresh.promise;
+      });
+      const session = createAppServerSession(raw.connection);
+      await session.initialize(initializeParams());
+      const snapshots: number[] = [];
+      session.subscribeState({ kind: "task", taskId: "task_1" as TaskId }, {
+        onSnapshot(snapshot) {
+          if (snapshot.kind === "task") snapshots.push(snapshot.task.revision);
+        },
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(snapshots).toEqual([1]);
+
+      raw.emit(taskEvent("missing_cursor", "cursor_3", 3));
+      await vi.advanceTimersByTimeAsync(0);
+      raw.emit(taskEvent("cursor_3", "cursor_4", 4));
+      refreshes[0]?.resolve(taskSubscription("cursor_2", 2));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(subscribeCount).toBe(2);
+      expect(snapshots).toEqual([1]);
+
+      await vi.advanceTimersByTimeAsync(499);
+      expect(subscribeCount).toBe(2);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(subscribeCount).toBe(3);
+      raw.emit(taskEvent("cursor_5", "cursor_6", 6));
+      refreshes[1]?.resolve(taskSubscription("cursor_4", 4));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(subscribeCount).toBe(3);
+      expect(snapshots).toEqual([1]);
+
+      await vi.advanceTimersByTimeAsync(999);
+      expect(subscribeCount).toBe(3);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(subscribeCount).toBe(4);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(snapshots).toEqual([1, 6]);
+      session.close();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("cancels a cursor-gap retry when its last observer closes", async () => {
+    vi.useFakeTimers();
+    try {
+      const replacement = deferred<StateSubscribeResult>();
+      let subscribeCount = 0;
+      const raw = fakeConnection(async (method) => {
+        if (method !== STATE_SUBSCRIBE) throw new Error(`Unexpected request: ${method}`);
+        subscribeCount += 1;
+        return subscribeCount === 1 ? taskSubscription("cursor_1", 1) : replacement.promise;
+      });
+      const session = createAppServerSession(raw.connection);
+      await session.initialize(initializeParams());
+      const stop = session.subscribeState(
+        { kind: "task", taskId: "task_1" as TaskId },
+        { onSnapshot: vi.fn() },
+      );
+      await vi.advanceTimersByTimeAsync(0);
+      raw.emit(taskEvent("missing_cursor", "cursor_3", 3));
+      await vi.advanceTimersByTimeAsync(0);
+      raw.emit(taskEvent("cursor_3", "cursor_4", 4));
+      replacement.resolve(taskSubscription("cursor_2", 2));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(subscribeCount).toBe(2);
+
+      stop();
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(subscribeCount).toBe(2);
+      session.close();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("shares one scope replica and unsubscribes only after its last observer leaves", async () => {
@@ -109,6 +290,42 @@ describe("AppServerSession", () => {
 
     await vi.waitFor(() => expect(subscribedRepositories).toEqual(["repository_1", "repository_2"]));
     session.close();
+  });
+
+  it("backs failed subscription refreshes off to a bounded request rate", async () => {
+    vi.useFakeTimers();
+    try {
+      let requestCount = 0;
+      const raw = fakeConnection(async (method) => {
+        if (method !== STATE_SUBSCRIBE) throw new Error(`Unexpected request: ${method}`);
+        requestCount += 1;
+        throw new Error("temporarily unavailable");
+      });
+      const session = createAppServerSession(raw.connection);
+      await session.initialize(initializeParams());
+      const errors = vi.fn();
+      session.subscribeState(
+        { kind: "task", taskId: "task_1" as TaskId },
+        { onBaselineError: errors, onSnapshot: vi.fn() },
+      );
+
+      await vi.advanceTimersByTimeAsync(0);
+      expect(requestCount).toBe(1);
+      await vi.advanceTimersByTimeAsync(499);
+      expect(requestCount).toBe(1);
+      await vi.advanceTimersByTimeAsync(1_001);
+      expect(requestCount).toBe(3);
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(requestCount).toBe(4);
+      await vi.advanceTimersByTimeAsync(4_000);
+      expect(requestCount).toBe(5);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(requestCount).toBe(7);
+      expect(errors).toHaveBeenCalledTimes(7);
+      session.close();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

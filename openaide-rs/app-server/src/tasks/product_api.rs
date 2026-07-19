@@ -564,7 +564,8 @@ pub(super) fn protocol_error_from_runtime(error: RuntimeError) -> ProtocolError 
             recoverable: false,
             target: None,
         },
-        RuntimeError::Conflict(message) => conflict_error(&message),
+        RuntimeError::Conflict(message)
+        | RuntimeError::PreparedTaskContextConflict { message, .. } => conflict_error(&message),
         other => ProtocolError {
             code: ProtocolErrorCode::Internal,
             message: other.to_string(),

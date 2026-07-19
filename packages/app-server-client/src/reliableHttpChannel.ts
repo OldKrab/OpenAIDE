@@ -27,6 +27,8 @@ export type ReliableHttpMessageChannelOptions = {
   fetch?: ReliableHttpFetch;
   retryDelayMs?: number;
   receiveTimeoutMs?: number;
+  /** Bounds detached close acknowledgement work after the channel is no longer owned. */
+  closeTimeoutMs?: number;
   /** Restarts only the replayable receive poll when a suspended runtime wakes. */
   subscribeToWake?: (wake: () => void) => () => void;
 };
@@ -57,6 +59,7 @@ export function createReliableHttpMessageChannel(
   const abort = new AbortController();
   const retryDelayMs = options.retryDelayMs ?? 250;
   const receiveTimeoutMs = options.receiveTimeoutMs ?? 35_000;
+  const closeTimeoutMs = options.closeTimeoutMs ?? 5_000;
   let receiveAbort: AbortController | undefined;
   let nextClientSequence = 1;
   let lastServerSequence = 0;
@@ -112,6 +115,7 @@ export function createReliableHttpMessageChannel(
       receiveAbort?.abort();
       listeners.clear();
       errorListeners.clear();
+      void closeSession();
     },
   };
 
@@ -129,6 +133,33 @@ export function createReliableHttpMessageChannel(
       throw new Error("App Server returned an invalid reliable-session handshake");
     }
     return handshake;
+  }
+
+  async function closeSession() {
+    try {
+      const opened = await session;
+      const closeAbort = new AbortController();
+      const closeTimeout = setTimeout(() => closeAbort.abort(), closeTimeoutMs);
+      try {
+        const response = await fetchImpl(options.endpointUrl, {
+          method: "POST",
+          headers: baseHeaders(),
+          body: JSON.stringify({ transport: "close", sessionId: opened.sessionId }),
+          signal: closeAbort.signal,
+        });
+        const text = await response.text();
+        if (!response.ok) throw httpError("close", response.status, text);
+        const acknowledgement = JSON.parse(text) as { sessionId?: unknown };
+        if (acknowledgement.sessionId !== opened.sessionId) {
+          throw new Error("App Server acknowledged a different reliable session close");
+        }
+      } finally {
+        clearTimeout(closeTimeout);
+      }
+    } catch (error) {
+      // Expiry is the fallback for process loss or a close acknowledgement lost in transit.
+      console.warn("[OpenAIDE] Reliable HTTP session close was not acknowledged", error);
+    }
   }
 
   async function pumpUploads() {

@@ -132,8 +132,76 @@ describe("ReliableBackendConnection", () => {
     await vi.waitFor(() => expect(permissionHandler).toHaveBeenCalledOnce());
     await vi.waitFor(() => expect(transport.permissionResponseSessions()).toEqual(["session-2"]));
     expect(transport.taskListSessions()).toEqual(["session-1", "session-2"]);
+    expect(new Set(transport.connectionIds()).size).toBe(2);
+    expect(transport.clientInstanceIds()).toEqual(["client-1", "client-1"]);
     expect(invalidations).toEqual([invalidationReason]);
     connection.close();
+  });
+
+  it("prevents a stale old poll from draining replacement-generation deliveries", async () => {
+    const transport = createConnectionDeliveryTransport();
+    const connection = createReliableWebProxyBackendConnection({
+      endpointUrl: "http://app-server.test/rpc",
+      connectionId: "connection-1",
+      fetch: transport.fetch,
+      retryDelayMs: 0,
+      heartbeatIntervalMs: 60_000,
+    });
+    const received = vi.fn();
+    connection.handleNotification("app/event", received);
+    await connection.initialize({
+      clientInstanceId: "client-1" as ClientInstanceId,
+      shell: { kind: "web" },
+      requestedSurface: { kind: "home" },
+      capabilities: { protocol: [], shell: [] },
+    });
+
+    await expect(connection.request(TASK_LIST, { archived: false })).rejects.toThrow("HTTP 410");
+    await vi.waitFor(() => expect(transport.initializedSessions()).toEqual(["session-1", "session-2"]));
+    transport.enqueueReplacementEvent();
+
+    transport.releasePoll("session-1");
+    await Promise.resolve();
+    expect(received).not.toHaveBeenCalled();
+    expect(transport.pendingDeliveryCount()).toBe(1);
+
+    transport.releasePoll("session-2");
+    await vi.waitFor(() => expect(received).toHaveBeenCalledOnce());
+    expect(transport.deliveryConsumers()).toEqual(["session-2"]);
+    connection.close();
+  });
+
+  it("bounds half-open close requests across repeated transport replacements", async () => {
+    const transport = createExpiringSessionTransport("transport", "task", {
+      expireEveryTask: true,
+      halfOpenClose: true,
+    });
+    const connection = createReliableWebProxyBackendConnection({
+      endpointUrl: "http://app-server.test/rpc",
+      connectionId: "connection-1",
+      fetch: transport.fetch,
+      closeTimeoutMs: 5,
+      retryDelayMs: 1,
+      heartbeatIntervalMs: 60_000,
+    });
+    await connection.initialize({
+      clientInstanceId: "client-1" as ClientInstanceId,
+      shell: { kind: "web" },
+      requestedSurface: { kind: "home" },
+      capabilities: { protocol: [], shell: [] },
+    });
+
+    for (let replacement = 0; replacement < 8; replacement += 1) {
+      await expect(connection.request(TASK_LIST, { archived: false })).rejects.toThrow("HTTP 410");
+      await vi.waitFor(() => expect(transport.initializedSessions()).toHaveLength(replacement + 2));
+      await vi.waitFor(() => expect(transport.abortedCloseRequests()).toBe(replacement + 1));
+      expect(transport.pendingCloseRequests()).toBe(0);
+    }
+
+    expect(transport.maximumPendingCloseRequests()).toBeLessThanOrEqual(1);
+    connection.close();
+    await vi.waitFor(() => expect(transport.abortedCloseRequests()).toBe(9));
+    expect(transport.pendingCloseRequests()).toBe(0);
   });
 
   it("recovers an expired mobile client from the resumed heartbeat", async () => {
@@ -358,6 +426,7 @@ describe("ReliableBackendConnection", () => {
 function createExpiringSessionTransport(
   expiry: "transport" | "client",
   trigger: "task" | "heartbeat" = "task",
+  options: { expireEveryTask?: boolean; halfOpenClose?: boolean } = {},
 ) {
   const frames = new Map<string, Array<{ sequence: number; message: RpcMessage }>>();
   const initialized: string[] = [];
@@ -365,6 +434,8 @@ function createExpiringSessionTransport(
   const permissionResponses: string[] = [];
   const heartbeats: string[] = [];
   const subscriptions: string[] = [];
+  const connectionIds: string[] = [];
+  const clientInstanceIds: string[] = [];
   let freezeNextReceive = false;
   let expireReplayOnNextReceive = false;
   let rejectAcknowledgementOnNextReceive = false;
@@ -372,6 +443,9 @@ function createExpiringSessionTransport(
   let rejectedAcknowledgementCount = 0;
   let frozenPollCount = 0;
   let opened = 0;
+  let pendingCloseRequests = 0;
+  let maximumPendingCloseRequests = 0;
+  let abortedCloseRequests = 0;
   let heldSubscriptionKind: "agents" | "projects" | undefined;
   let heldSubscription: { id: string | number; sessionId: string; scope: { kind: "agents" | "projects" } }
     | undefined;
@@ -409,11 +483,26 @@ function createExpiringSessionTransport(
       };
       if (body.transport === "open") {
         opened += 1;
+        connectionIds.push(init.headers["X-OpenAIDE-Connection-Id"] ?? "");
         return response(200, {
           transportVersion: 1,
           sessionId: `session-${opened}`,
           serverId: "server-1",
         });
+      }
+      if (body.transport === "close") {
+        if (options.halfOpenClose) {
+          pendingCloseRequests += 1;
+          maximumPendingCloseRequests = Math.max(maximumPendingCloseRequests, pendingCloseRequests);
+          return new Promise((_resolve, reject) => {
+            init.signal?.addEventListener("abort", () => {
+              pendingCloseRequests -= 1;
+              abortedCloseRequests += 1;
+              reject(abortError());
+            }, { once: true });
+          });
+        }
+        return response(200, { sessionId: body.sessionId });
       }
 
       const sessionId = body.sessionId ?? "";
@@ -427,6 +516,7 @@ function createExpiringSessionTransport(
       }
       if (message.method === CLIENT_INITIALIZE) {
         initialized.push(sessionId);
+        clientInstanceIds.push((message.params as { clientInstanceId: string }).clientInstanceId);
         if (sessionId !== "session-1" && failNextReplacementInitialization) {
           failNextReplacementInitialization = false;
           enqueue(sessionId, {
@@ -463,7 +553,7 @@ function createExpiringSessionTransport(
       }
       if (message.method === TASK_LIST) {
         taskLists.push(sessionId);
-        if (sessionId === "session-1") {
+        if (options.expireEveryTask || sessionId === "session-1") {
           if (expiry === "transport") return response(410, "session expired");
           enqueueNotInitialized(sessionId, message.id);
           return response(204, "");
@@ -489,6 +579,11 @@ function createExpiringSessionTransport(
       throw new Error(`Unexpected test request: ${message.method}`);
     }),
     openedSessions: () => opened,
+    connectionIds: () => connectionIds,
+    clientInstanceIds: () => clientInstanceIds,
+    pendingCloseRequests: () => pendingCloseRequests,
+    maximumPendingCloseRequests: () => maximumPendingCloseRequests,
+    abortedCloseRequests: () => abortedCloseRequests,
     frozenPolls: () => frozenPollCount,
     heartbeatSessions: () => heartbeats,
     initializedSessions: () => initialized,
@@ -563,6 +658,100 @@ function createExpiringSessionTransport(
           : { cursor: `cursor-${sessionId}`, scope, snapshot: { kind: "agents", agents: { agents: [] } } },
       },
     });
+  }
+}
+
+/** Models the server delivery queue at its real connection-id ownership boundary. */
+function createConnectionDeliveryTransport() {
+  const sessions = new Map<string, string>();
+  const frames = new Map<string, Array<{ sequence: number; message: RpcMessage }>>();
+  const pendingPolls = new Map<string, { after: number; resolve(value: ReturnType<typeof response>): void }>();
+  const deliveries = new Map<string, RpcMessage[]>();
+  const initialized: string[] = [];
+  const consumers: string[] = [];
+  let opened = 0;
+
+  const fetch = vi.fn<ReliableHttpFetch>(async (_input, init) => {
+    if (init.method === "GET") {
+      const sessionId = init.headers["X-OpenAIDE-Session-Id"] ?? "";
+      const after = Number(init.headers["X-OpenAIDE-After"] ?? "0");
+      return new Promise((resolve) => {
+        pendingPolls.set(sessionId, { after, resolve });
+        flushSessionFrames(sessionId);
+      });
+    }
+
+    const body = JSON.parse(init.body ?? "{}") as {
+      transport?: string;
+      sessionId?: string;
+      message?: RpcMessage;
+    };
+    if (body.transport === "open") {
+      opened += 1;
+      const sessionId = `session-${opened}`;
+      sessions.set(sessionId, init.headers["X-OpenAIDE-Connection-Id"] ?? "");
+      return response(200, { transportVersion: 1, sessionId, serverId: "server-1" });
+    }
+    if (body.transport === "close") {
+      return response(200, { sessionId: body.sessionId });
+    }
+    const sessionId = body.sessionId ?? "";
+    const message = body.message;
+    if (!message || !("id" in message) || !("method" in message)) return response(204, "");
+    if (message.method === CLIENT_INITIALIZE) {
+      initialized.push(sessionId);
+      enqueueFrame(sessionId, {
+        jsonrpc: "2.0",
+        id: message.id,
+        result: { result: initializeResult(sessionId === "session-1" ? "cursor-1" : "cursor-2") },
+      });
+      return response(204, "");
+    }
+    if (message.method === TASK_LIST && sessionId === "session-1") {
+      return response(410, "expired");
+    }
+    throw new Error(`Unexpected test request: ${message.method}`);
+  });
+
+  return {
+    fetch,
+    initializedSessions: () => initialized,
+    enqueueReplacementEvent() {
+      const connectionId = sessions.get("session-2") ?? "";
+      deliveries.set(connectionId, [{
+        jsonrpc: "2.0",
+        method: "app/event",
+        params: { cursor: "replacement-event" },
+      } as RpcMessage]);
+    },
+    releasePoll(sessionId: string) {
+      const connectionId = sessions.get(sessionId) ?? "";
+      const queued = deliveries.get(connectionId) ?? [];
+      if (queued.length > 0) {
+        consumers.push(sessionId);
+        deliveries.delete(connectionId);
+        for (const message of queued) enqueueFrame(sessionId, message, false);
+      }
+      flushSessionFrames(sessionId, true);
+    },
+    pendingDeliveryCount: () => [...deliveries.values()].reduce((count, queued) => count + queued.length, 0),
+    deliveryConsumers: () => consumers,
+  };
+
+  function enqueueFrame(sessionId: string, message: RpcMessage, flush = true) {
+    const queued = frames.get(sessionId) ?? [];
+    queued.push({ sequence: queued.length + 1, message });
+    frames.set(sessionId, queued);
+    if (flush) flushSessionFrames(sessionId);
+  }
+
+  function flushSessionFrames(sessionId: string, emptyWhenMissing = false) {
+    const pending = pendingPolls.get(sessionId);
+    if (!pending) return;
+    const available = (frames.get(sessionId) ?? []).filter((frame) => frame.sequence > pending.after);
+    if (available.length === 0 && !emptyWhenMissing) return;
+    pendingPolls.delete(sessionId);
+    pending.resolve(response(available.length > 0 ? 200 : 204, available.length > 0 ? { frames: available } : ""));
   }
 }
 

@@ -22,6 +22,12 @@ struct ReliableUpload {
     message: Value,
 }
 
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReliableClose {
+    session_id: String,
+}
+
 pub struct LocalHttpProtocolHandler {
     gateway: SharedRpcGateway,
     auth_token: String,
@@ -60,17 +66,13 @@ impl LocalHttpProtocolHandler {
         connection_id: Option<&str>,
         body: &str,
     ) -> LocalHttpResponse {
-        if serde_json::from_str::<Value>(body)
-            .ok()
-            .and_then(|value| {
-                value
-                    .get("transport")
-                    .and_then(Value::as_str)
-                    .map(str::to_string)
-            })
-            .as_deref()
-            == Some("open")
-        {
+        let reliable_transport = serde_json::from_str::<Value>(body).ok().and_then(|value| {
+            value
+                .get("transport")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+        });
+        if reliable_transport.as_deref() == Some("open") {
             return handle_reliable_session_open(
                 authorization,
                 &self.auth_token,
@@ -78,17 +80,16 @@ impl LocalHttpProtocolHandler {
                 &self.sessions,
             );
         }
-        if serde_json::from_str::<Value>(body)
-            .ok()
-            .and_then(|value| {
-                value
-                    .get("transport")
-                    .and_then(Value::as_str)
-                    .map(str::to_string)
-            })
-            .as_deref()
-            == Some("send")
-        {
+        if reliable_transport.as_deref() == Some("close") {
+            return handle_reliable_session_close(
+                authorization,
+                &self.auth_token,
+                connection_id,
+                body,
+                &self.sessions,
+            );
+        }
+        if reliable_transport.as_deref() == Some("send") {
             let now = AppServerTime::now();
             let gateway = self.gateway.clone();
             return handle_reliable_session_upload(
@@ -373,6 +374,31 @@ fn handle_reliable_session_open(
             "serverId": opened.server_id,
         }),
     )
+}
+
+fn handle_reliable_session_close(
+    authorization: Option<&str>,
+    expected_token: &str,
+    connection_id: Option<&str>,
+    body: &str,
+    sessions: &ReliableSessionRegistry,
+) -> LocalHttpResponse {
+    match auth_status(authorization, expected_token) {
+        AuthStatus::Authorized => {}
+        AuthStatus::Missing => return empty_response(401),
+        AuthStatus::Invalid => return empty_response(403),
+    }
+    let Some(connection_id) = valid_connection_id(connection_id) else {
+        return empty_response(400);
+    };
+    let close = match serde_json::from_str::<ReliableClose>(body) {
+        Ok(close) => close,
+        Err(_) => return empty_response(400),
+    };
+    if !sessions.close(&close.session_id, &connection_id) {
+        return empty_response(410);
+    }
+    json_response(200, json!({ "sessionId": close.session_id }))
 }
 
 fn handle_reliable_session_upload(

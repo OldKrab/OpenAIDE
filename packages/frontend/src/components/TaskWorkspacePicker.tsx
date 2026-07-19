@@ -33,7 +33,6 @@ export function TaskWorkspacePicker({
   intents,
   managementOnly = false,
   onClose,
-  onUseForNewTask,
   project,
   repository,
   selectedWorktreeId,
@@ -43,7 +42,6 @@ export function TaskWorkspacePicker({
   intents: NewTaskViewIntents;
   managementOnly?: boolean;
   onClose: () => void;
-  onUseForNewTask?: () => void;
   project: ProjectOption;
   repository?: WorktreeRepositorySnapshot;
   selectedWorktreeId?: string;
@@ -112,7 +110,6 @@ export function TaskWorkspacePicker({
         onBack={() => managementOnly ? onClose() : setMode("choose")}
         onCreate={() => { setRecreateTarget(undefined); setCreateOrigin("manage"); setMode("create"); }}
         onRecreate={(worktree) => { setRecreateTarget(worktree); setCreateOrigin("manage"); setMode("create"); }}
-        onUseForNewTask={onUseForNewTask}
         project={project}
         repository={repository}
         selected={selectedManagement}
@@ -270,13 +267,12 @@ function formatBytes(bytes: number) {
   return `${Math.round(bytes / (1024 * 102.4)) / 10} MB`;
 }
 
-function WorktreeManagement({ compact, intents, onBack, onCreate, onRecreate, onUseForNewTask, project, repository, selected, selectedTaskWorktreeId, select, tasks, tasksError }: {
+function WorktreeManagement({ compact, intents, onBack, onCreate, onRecreate, project, repository, selected, selectedTaskWorktreeId, select, tasks, tasksError }: {
   compact: boolean;
   intents: NewTaskViewIntents;
   onBack: () => void;
   onCreate: () => void;
   onRecreate: (worktree: WorktreeSummary) => void;
-  onUseForNewTask?: () => void;
   project: ProjectOption;
   repository?: WorktreeRepositorySnapshot;
   selected?: WorktreeSummary;
@@ -339,7 +335,7 @@ function WorktreeManagement({ compact, intents, onBack, onCreate, onRecreate, on
             if (event.key === "Enter") void saveName();
           }} value={nameDraft} /><button aria-label="Save worktree name" disabled={renaming || !nameDraft.trim()} onClick={() => void saveName()} type="button"><CheckIcon /></button><button aria-label="Cancel rename" disabled={renaming} onClick={() => { setEditingName(false); setNameDraft(selected.name); }} type="button"><X size={14} /></button></div> : <><span><strong>{isProjectRoot(selected, project) ? "Project root" : selected.name}</strong><small>{headLabel(selected)}</small></span>{isProjectRoot(selected, project) ? null : <button aria-label="Rename worktree" onClick={() => setEditingName(true)} type="button"><Pencil size={14} /></button>}</>}</header>
           {selected.availability === "unavailable" || selected.lockedReason ? <div className={`worktree-state-notice ${selected.availability}`}><CircleAlert size={14} /><span><strong>{selected.availability === "unavailable" ? "Workspace unavailable" : "Locked"}</strong><small>{selected.availabilityReason ?? selected.lockedReason}</small></span><button onClick={() => void intents.refreshWorktrees(project)} type="button"><RefreshCw size={13} />Refresh</button>{selected.availability === "unavailable" ? <button onClick={() => onRecreate(selected)} type="button">Recreate</button> : null}</div> : null}
-          {selected.availability === "available" ? <button className="worktree-new-task" onClick={() => { selectWorkspace(intents, project, selected); onUseForNewTask?.(); onBack(); }} type="button"><Plus size={14} />New task here</button> : null}
+          {selected.availability === "available" ? <button className="worktree-new-task" onClick={() => { selectWorkspace(intents, project, selected); onBack(); }} type="button"><Plus size={14} />New task here</button> : null}
           <dl>
             <div><dt>Location</dt><dd title={selected.path}>{selected.path}<button aria-label="Copy path" onClick={() => void navigator.clipboard.writeText(selected.path)} type="button"><Copy size={13} /></button>{intents.openFolder && repository ? <button aria-label="Open folder" disabled={selected.availability === "unavailable"} onClick={() => intents.openFolder?.(repository.repositoryId, selected.worktreeId)} type="button"><FolderOpen size={13} /></button> : null}</dd></div>
             <div><dt>Type</dt><dd>{isProjectRoot(selected, project) ? "Project root" : selected.isMain ? "Primary Git worktree" : `${capitalize(selected.ownership)} worktree`}</dd></div>
@@ -414,7 +410,7 @@ function RemovalConfirmation({ linkedTaskCount, onCancel, onConfirm, preflight, 
 
 function selectWorkspace(intents: NewTaskViewIntents, project: ProjectOption, worktree: WorktreeSummary) {
   const root = isProjectRoot(worktree, project);
-  intents.selectWorktree({ worktreeId: root ? undefined : worktree.worktreeId, label: root ? "Project root" : worktree.name, path: worktree.path });
+  intents.selectWorktree({ projectId: project.projectId, worktreeId: root ? undefined : worktree.worktreeId, label: root ? "Project root" : worktree.name, path: worktree.path });
 }
 
 function isProjectRoot(worktree: WorktreeSummary, project: ProjectOption) {

@@ -4,6 +4,7 @@ import type { AppPreferencesRecord, TaskSnapshot, TaskSummary } from "@openaide/
 import {
   getBackendConnection,
   getBootstrap,
+  openNewTaskSurface,
   postHostMessage,
 } from "../services/hostBridge";
 import { clientInstanceIdForBootstrap } from "../services/backendInitialization";
@@ -311,6 +312,8 @@ export function useAppController(options: AppControllerOptions = {}): AppControl
     });
     dispatch({ type: "worktreeRepository", repository: result.repository });
   };
+  const persistWebNewTaskRoute = renderState.bootstrap.surface !== "invalid"
+    && renderState.bootstrap.shell.kind === "web";
 
   return {
     ...renderState,
@@ -329,9 +332,18 @@ export function useAppController(options: AppControllerOptions = {}): AppControl
         }),
         selectAgent: (agentId, agentLabel) => dispatch({ type: "newTask:agent", agentId, agentLabel }),
         selectIsolation: (isolation) => dispatch({ type: "newTask:isolation", isolation }),
-        selectProject: (project) => dispatch({ type: "newTask:project", project }),
-        selectWorkspace: (workspace) => dispatch({ type: "newTask:workspace", workspace }),
-        selectWorktree: (worktree) => dispatch({ type: "newTask:worktree", ...worktree }),
+        selectProject: (project) => {
+          dispatch({ type: "newTask:project", project });
+          if (persistWebNewTaskRoute) openNewTaskSurface(project.projectId);
+        },
+        selectWorkspace: (workspace) => {
+          dispatch({ type: "newTask:workspace", workspace });
+          if (persistWebNewTaskRoute) openNewTaskSurface(workspace.projectId);
+        },
+        selectWorktree: (worktree) => {
+          dispatch({ type: "newTask:worktree", ...worktree });
+          if (persistWebNewTaskRoute) openNewTaskSurface(worktree.projectId, worktree.worktreeId);
+        },
         refreshWorktrees,
         createWorktree: async (project, draft, onProgress) => {
           if (!project.worktreeRepositoryId) throw new Error("This Project does not support worktrees.");

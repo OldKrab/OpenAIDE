@@ -37,7 +37,6 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
       intents={controller.intents.newTask}
       managementOnly
       onClose={() => setManagedProjectId(undefined)}
-      onUseForNewTask={() => callbacks.navigation.openNewTask(managedProject.projectId)}
       project={managedProject}
       repository={managedRepository}
       selectedWorktreeId={view.primaryTask.newTask.newTask.selection.worktreeId}

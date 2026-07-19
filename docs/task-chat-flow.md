@@ -51,7 +51,7 @@ Frontend supplies `clientInstanceId` only through `client/initialize`. Transport
 - Every browser tab owns a distinct `clientInstanceId` and retains it across reload through session-scoped storage with memory fallback. A newly opened or duplicated tab receives a distinct identity even if browser storage was copied.
 - VS Code and other native shells issue a stable identity for the shell client or webview lifecycle.
 - Reconnect sends the same `clientInstanceId` through `client/initialize`.
-- Every transport connection receives a fresh connection-local `connectionId`; transport identity never reuses `clientInstanceId`.
+- Every physical transport generation, including a replacement generation inside one logical reconnecting session, receives a fresh connection-local `connectionId`; transport identity never reuses `clientInstanceId`.
 - A client that loses its stable identity becomes a new client and cannot use another client's Prepared-Task lease.
 
 ## Default Project And Agent
@@ -86,6 +86,8 @@ Initialization never acquires a Prepared Task or launches an Agent. The Prepared
 
 Frontend renders its cached leased Prepared Task immediately. Clicking New Task, returning through browser history, or switching back from another Task performs no product request while the cache and event subscription remain continuous.
 
+The Web App New Task URL carries the selected Project id and optional opaque Worktree id. A worktree route is valid only when the URL explicitly carries both identities. Reload and Back/Forward represent that routed identity immediately, show a workspace-loading state until the authoritative Project and Worktree Repository collections validate it, and block acquisition during that interval. A missing or unavailable routed identity remains explicitly unavailable; Frontend neither borrows retained context nor acquires or displays Project root as a fallback. Returning through history to `/` clears routed worktree context before Project-root preparation can resume. This URL persistence is Web-only; selecting Project, workspace, or worktree context does not ask a native App Shell to open or reveal another surface.
+
 ### Acquiring a Prepared Task
 
 When its live New Task composer needs a Prepared Task, Frontend renders the preparation state and calls typed `task/acquire` with the selected Project, Agent, and Task Workspace identity. App Server derives the canonical workspace and pool key; Frontend never supplies a canonical pool key. The protocol gateway supplies initialized client identity from the trusted connection context.
@@ -100,6 +102,8 @@ App Server serializes acquisition and:
 6. returns its ordinary Task snapshot, with `preparation: preparing` when Native Session acquisition is still running.
 
 Concurrent duplicate acquisition requests for one client and key return the same Task id. Only ready, unleased, zero-message Tasks are reusable; a missing free entry creates and prepares another Task.
+
+When acquisition reports that the same client still leases a different key, the conflict identifies that exact Prepared Task snapshot. Frontend releases only that Task, awaits acknowledgement, and retries the requested acquisition once. A missing target or a second conflict remains a visible failure; Frontend never guesses, steals another client's lease, or falls back to Project root.
 
 ### Worktree repositories and Task Workspaces
 
@@ -224,6 +228,8 @@ The Native Session update consumer owns tool state by Native Session id plus Age
 - App Server persists detail changes without subscribers so later expansion receives complete content.
 
 Tool detail delivery is event-driven and does not poll. Publication is not coalesced unless measured volume requires it; any future coalescer guarantees a trailing flush of the newest state.
+
+Nested terminal and result labels are presentation derived from the authoritative Tool step status. Running, completed, interrupted, and failed presentation preserves distinct stdout, stderr, aggregate, and formatted output in deterministic order; identical content is rendered once. Exit metadata remains visible but cannot override status, and unknown future status values never render as completed. These labels do not infer or mutate App Server lifecycle state.
 
 Every defined ACP Tool kind except `other` has a distinct appropriate icon, action label, grouped-summary classification, and detail presentation based only on Agent-supplied fields. ACP `think` is a reasoning or planning Tool call, distinct from `agent_thought_chunk`; it uses Thought-like visuals inside an activity group while retaining Tool identity, status, input, output, and updates. `other` uses the generic presentation.
 
@@ -375,7 +381,7 @@ An implementation conforms to this specification only when all of these are true
 3. Each Send mutation is issued once and is never automatically replayed.
 4. One Native Session update consumer survives prompt completion and accepts later updates until session close or replacement.
 5. One durable Task transaction produces one ordered Task revision; a revision gap installs one new baseline.
-6. One logical App Server session owns connection recovery, retries only replayable reads, and installs the replacement initialization result plus exactly one baseline for each active scope before product requests and Send are enabled.
+6. One logical App Server session owns connection recovery, retries only replayable reads, and installs the replacement initialization result plus one reconciled baseline for each active scope before product requests and Send are enabled. Cursor-gap refreshes serialize behind bounded retry delays; discarded baselines are not published. Each physical reliable-HTTP generation has an isolated connection id and replay session, with a deadline-bounded acknowledged close plus time-driven idle expiry and capacity cleanup on the server.
 7. Durable Chat, transient requests, Tool details, and Frontend-only presentation each have one explicit owner and do not masquerade as one another.
 8. Every notification-worthy Task transition creates one explicit Task Attention Event; no client infers it from status or `unread`.
 9. A browser profile emits at most one OS notification for one eligible Task Attention Event and never emits an old unread backlog on startup.

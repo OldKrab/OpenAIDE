@@ -101,6 +101,45 @@ describe("ChatActivityView", () => {
     expect(rendered).toContain("Allow once");
     expect(rendered).toContain("Reject");
   });
+
+  it.each([
+    ["running", "Running", "Running"],
+    ["completed", "Completed", "Ran"],
+    ["interrupted", "Interrupted", "Interrupted"],
+    ["error", "Failed", "Failed"],
+    ["future_status", "Unknown", "Unknown"],
+  ])("renders authoritative %s outer and command labels", (status, outer, command) => {
+    const activity: ActivityMessage = {
+      kind: "activity",
+      id: "activity_status",
+      title: "Command",
+      status: status as never,
+      created_at: "2026-07-13T00:00:00Z",
+      collapsed: false,
+      steps: [{
+        kind: "command",
+        command_label: "npm test",
+        status: status as never,
+        exit_code: status === "error" ? 0 : 9,
+      }],
+    };
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<ChatActivityView activity={activity} taskId="task_1" />);
+    });
+    const rendered = JSON.stringify(tree.toJSON());
+
+    expect(rendered).toContain(outer);
+    expect(rendered).toContain(command);
+    expect(rendered).toContain(status === "error" ? "exit 0" : "exit 9");
+    expect(tree.root.findByProps({
+      className: `activity-group ${status === "error" ? "failed" : status === "future_status" ? "unknown" : status}`,
+    })).toBeDefined();
+    if (status !== "completed") {
+      expect(rendered).not.toContain("Ran command");
+      expect(rendered).not.toContain(">Ran<");
+    }
+  });
 });
 
 function renderedThoughtRows(tree: ReturnType<typeof create>) {

@@ -36,8 +36,33 @@ describe("toolDetailsViewModel", () => {
     expect(openablePath("src/a.ts", "/workspace")).toBe("/workspace/src/a.ts");
   });
 
-  it("classifies failed execute output using stderr before other output", () => {
-    const info = executeDetailInfo(
+  it("derives every nested execute result state from the authoritative tool step", () => {
+    const misleadingOutput = details({
+      output: output({
+        stderr: "permission denied",
+        aggregated_output: "aggregate",
+        formatted_output: "formatted",
+        stdout: "stdout",
+        success: false,
+        exit_code: 1,
+      }),
+    });
+    const completed = executeDetailInfo(
+      misleadingOutput,
+      toolStep({ name: "execute", status: "completed" }),
+      "fallback",
+    );
+    const running = executeDetailInfo(
+      misleadingOutput,
+      toolStep({ name: "execute", status: "running" }),
+      "fallback",
+    );
+    const interrupted = executeDetailInfo(
+      misleadingOutput,
+      toolStep({ name: "execute", status: "interrupted" }),
+      "fallback",
+    );
+    const failed = executeDetailInfo(
       details({
         output: output({
           stderr: "permission denied",
@@ -47,13 +72,51 @@ describe("toolDetailsViewModel", () => {
           exit_code: 1,
         }),
       }),
-      toolStep({ name: "execute", status: "completed" }),
+      toolStep({ name: "execute", status: "error" }),
+      "fallback",
+    );
+    const unknown = executeDetailInfo(
+      misleadingOutput,
+      toolStep({ name: "execute", status: "future_status" as never }),
       "fallback",
     );
 
-    expect(info.mode).toBe("failed");
-    expect(info.outputLabel).toBe("stderr");
-    expect(info.outputText).toBe("permission denied");
+    expect(completed.mode).toBe("completed");
+    expect(running.mode).toBe("running");
+    expect(interrupted.mode).toBe("interrupted");
+    expect(failed.mode).toBe("failed");
+    expect(unknown.mode).toBe("unknown");
+    expect(unknown.resultLabel).toBe("Unknown");
+    expect(failed.outputs).toEqual([
+      { label: "stdout", text: "stdout", tone: "stdout" },
+      { label: "stderr", text: "permission denied", tone: "stderr" },
+      { label: "aggregate", text: "aggregate", tone: "stdout" },
+      { label: "formatted", text: "formatted", tone: "stdout" },
+    ]);
+  });
+
+  it.each([
+    ["empty", {}, []],
+    ["stdout", { stdout: "out" }, [{ label: "stdout", text: "out", tone: "stdout" }]],
+    ["stderr", { stderr: "err" }, [{ label: "stderr", text: "err", tone: "stderr" }]],
+    ["both channels", { stdout: "out", stderr: "err" }, [
+      { label: "stdout", text: "out", tone: "stdout" },
+      { label: "stderr", text: "err", tone: "stderr" },
+    ]],
+    ["aggregate only", { aggregated_output: "all" }, [
+      { label: "aggregate", text: "all", tone: "stdout" },
+    ]],
+    ["duplicate aggregate", { stdout: "same", stderr: "err", aggregated_output: "same" }, [
+      { label: "stdout", text: "same", tone: "stdout" },
+      { label: "stderr", text: "err", tone: "stderr" },
+    ]],
+  ])("preserves deterministic execute output for %s", (_name, outputFields, expected) => {
+    const info = executeDetailInfo(
+      details({ output: output(outputFields) }),
+      toolStep({ name: "execute", status: "interrupted" }),
+    );
+
+    expect(info.outputs).toEqual(expected);
   });
 
   it("preserves edit result text for created, updated, and failed edits", () => {

@@ -53,8 +53,11 @@ const postHostMessage = vi.fn();
 const beginAgentSecretTransaction = vi.fn();
 
 vi.mock("../services/hostBridge", () => ({
-  openNewTaskSurface: (projectId?: string) => postHostMessage(projectId
-    ? { type: "surface.openNewTask", payload: { project_id: projectId } }
+  openNewTaskSurface: (projectId?: string, worktreeId?: string) => postHostMessage(projectId
+    ? {
+        type: "surface.openNewTask",
+        payload: { project_id: projectId, ...(worktreeId ? { worktree_id: worktreeId } : {}) },
+      }
     : { type: "surface.openNewTask" }),
   openSettingsSurface: () => postHostMessage({ type: "surface.openSettings" }),
   openTaskSurface: (taskId: string, title?: string) => postHostMessage({
@@ -76,6 +79,19 @@ describe("app controller callbacks", () => {
     beginAgentSecretTransaction.mockResolvedValue({
       commit: vi.fn(async () => undefined),
       rollback: vi.fn(async () => undefined),
+    });
+  });
+
+  it("retains the selected worktree identity when reopening New Task", () => {
+    const state = createInitialState();
+    state.newTask.selection.projectId = "project_1";
+    state.newTask.selection.worktreeId = "worktree_1";
+
+    callbacks({ state }).navigation.openNewTask();
+
+    expect(postHostMessage).toHaveBeenCalledWith({
+      type: "surface.openNewTask",
+      payload: { project_id: "project_1", worktree_id: "worktree_1" },
     });
   });
 
@@ -800,6 +816,7 @@ describe("app controller callbacks", () => {
         dispatch,
         state,
       }).newTask.submit();
+      await Promise.resolve();
       await Promise.resolve();
       await Promise.resolve();
 

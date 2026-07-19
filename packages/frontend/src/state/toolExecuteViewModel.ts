@@ -1,6 +1,13 @@
 import type { ActivityStep, ActivityToolDetails } from "@openaide/app-shell-contracts";
+import { activityPresentationLabel, activityPresentationStatus } from "./activityLabels";
 import { displayCommand } from "./toolCommandViewModel";
 import { firstFieldValue } from "./toolDetailsShared";
+
+export type ExecuteOutput = {
+  label: "stdout" | "stderr" | "aggregate" | "formatted" | "preview";
+  text: string;
+  tone: "stdout" | "stderr";
+};
 
 export function executeDetailInfo(
   details: ActivityToolDetails,
@@ -13,17 +20,34 @@ export function executeDetailInfo(
   const formatted = details.output?.formatted_output;
   const aggregated = details.output?.aggregated_output;
   const exitCode = details.output?.exit_code;
-  const running = step.status === "running";
-  const failed = step.status === "error" || details.output?.success === false || (exitCode !== undefined && exitCode !== 0);
-  const outputText = failed ? stderr || aggregated || formatted || stdout || fallbackPreview : stdout || formatted || aggregated || fallbackPreview;
+  const mode = activityPresentationStatus(step.status);
+  const outputs = distinctOutputs([
+    { label: "stdout", text: stdout, tone: "stdout" },
+    { label: "stderr", text: stderr, tone: "stderr" },
+    { label: "aggregate", text: aggregated, tone: "stdout" },
+    { label: "formatted", text: formatted, tone: "stdout" },
+  ]);
+  if (outputs.length === 0 && fallbackPreview) {
+    outputs.push({ label: "preview", text: fallbackPreview, tone: "stdout" });
+  }
   return {
     command,
     duration: firstFieldValue(details.output?.fields, "duration"),
     exitCode,
-    failed,
-    mode: running ? "running" : failed ? "failed" : "completed",
-    outputLabel: failed && stderr ? "stderr" : "stdout",
-    outputText,
-    outputTone: failed && stderr ? "stderr" : "stdout",
+    failed: mode === "failed",
+    mode,
+    outputs,
+    resultLabel: activityPresentationLabel(step.status),
   };
+}
+
+function distinctOutputs(candidates: Array<Omit<ExecuteOutput, "text"> & { text?: string }>): ExecuteOutput[] {
+  const seen = new Set<string>();
+  return candidates.flatMap((candidate) => {
+    if (!candidate.text) return [];
+    const isAlias = candidate.label === "aggregate" || candidate.label === "formatted";
+    if (isAlias && seen.has(candidate.text)) return [];
+    seen.add(candidate.text);
+    return [{ ...candidate, text: candidate.text }];
+  });
 }

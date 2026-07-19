@@ -19,6 +19,7 @@ import {
 } from "../state/newTaskPreparationContext";
 import type { NewTaskController } from "./newTaskController";
 import type { AsyncOperationOwner } from "../state/asyncOperationOwner";
+import { acquirePreparedTaskWithConflictRetry } from "./newTaskLeaseRecovery";
 
 export type PendingNewTaskPreparation = {
   key: string;
@@ -137,9 +138,12 @@ export function useNewTaskPreparation({
 
       const projectId = state.newTask.selection.projectId;
       if (!projectId) throw new SupersededPreparation();
-      const task = state.newTask.selection.worktreeId
-        ? (await request(TASK_ACQUIRE_IN_WORKTREE, taskAcquireInWorktreeParams(state, projectId))).task
-        : (await request(TASK_ACQUIRE, taskAcquireParams(state, projectId))).task;
+      const acquired = await acquirePreparedTaskWithConflictRetry(request, () => (
+        state.newTask.selection.worktreeId
+          ? request(TASK_ACQUIRE_IN_WORKTREE, taskAcquireInWorktreeParams(state, projectId))
+          : request(TASK_ACQUIRE, taskAcquireParams(state, projectId))
+      ));
+      const task = acquired.task;
       if (!asyncOperations.owns(operation)) {
         throw new SupersededPreparation();
       }
