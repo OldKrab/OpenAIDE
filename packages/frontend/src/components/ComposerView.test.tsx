@@ -402,6 +402,39 @@ describe("Composer view behavior", () => {
     expect(text(menuByLabel(renderer.root, "More options"))).toContain("Reasoning");
   });
 
+  it("closes a grouped option submenu when More is pressed again", () => {
+    vi.stubGlobal("ResizeObserver", class {
+      disconnect() {}
+      observe() {}
+      unobserve() {}
+    });
+    const renderer = renderComposer({
+      configOptions: {
+        agent_id: "codex",
+        options: [
+          {
+            category: "model",
+            kind: "select", current_value: { type: "id", value: "gpt-5.6" },
+            id: "model",
+            label: "Model",
+            values: [{ id: "gpt-5.6", label: "GPT-5.6" }],
+          },
+          ...configOptions().options,
+        ],
+        status: "ready",
+      },
+    });
+
+    click(buttonByText(renderer.root, "More · 3"));
+    click(menuButtonByStrongLabel(renderer.root, "Reasoning"));
+    expect(menuByLabel(renderer.root, "Reasoning")).toBeTruthy();
+
+    click(buttonByText(renderer.root, "More · 3"));
+
+    expect(menusByLabel(renderer.root, "Reasoning")).toHaveLength(0);
+    expect(menusByLabel(renderer.root, "More options")).toHaveLength(0);
+  });
+
   it("keeps grouped Configuration Options locked while leaving mutable Isolation available", () => {
     vi.stubGlobal("ResizeObserver", class {
       disconnect() {}

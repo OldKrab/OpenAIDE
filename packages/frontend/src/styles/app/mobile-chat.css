@@ -77,6 +77,12 @@
     scrollbar-width: none;
   }
 
+  /* Overflow menus belong above the whole mobile Task composer, not over its
+     editor. Direct option anchors keep their own local positioning context. */
+  .task-surface:not(.new-task-surface) .composer-controls {
+    position: static;
+  }
+
   .composer-controls .composer-pill {
     min-width: 0;
     width: fit-content;

@@ -52,7 +52,9 @@ export function ComposerRunOptions({
   const packing = useComposerOptionPacking(controls.length, measurementKey);
   const visibleControls = controls.slice(0, packing.visibleCount);
   const hiddenControls = controls.slice(packing.visibleCount);
-  const hiddenMenuControl = hiddenControls.find((control) => menuForControl(control) === openMenu);
+  const hiddenMenuControl = openMenu
+    ? hiddenControls.find((control) => menuForControl(control) === openMenu)
+    : undefined;
   const overflowLocked = hiddenControls.length > 0 && hiddenControls.every((control) =>
     control.kind === "config" ? configLocked : controlsLocked);
 
@@ -87,7 +89,12 @@ export function ComposerRunOptions({
             label={`More · ${hiddenControls.length}`}
             locked={overflowLocked}
             menuOpen={openMenu === "options" || hiddenMenuControl !== undefined}
-            onClick={() => toggleMenu("options")}
+            onClick={() => {
+              // The overflow trigger owns both its list and a nested option menu.
+              // Pressing the visibly expanded trigger must close either state.
+              if (openMenu === "options" || hiddenMenuControl) setOpenMenu(undefined);
+              else toggleMenu("options");
+            }}
             pending={hiddenControls.some((control) =>
               control.kind === "config" && pendingChange?.option_id === control.option.id)}
           />
