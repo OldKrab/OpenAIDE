@@ -7,7 +7,10 @@ import {
 
 describe("VS Code Task notifications", () => {
   it("suppresses the startup backlog and shows a new unattended event", async () => {
-    const test = environment(false, Date.parse("2026-07-20T12:00:00.000Z"));
+    const test = environment(
+      Date.parse("2026-07-20T12:00:00.000Z"),
+      "task-2",
+    );
     const manager = createTaskNotificationManager(test.environment);
 
     manager.reconcile([task("old-event", "finished", "2026-07-20T11:59:00.000Z")]);
@@ -23,14 +26,24 @@ describe("VS Code Task notifications", () => {
     expect(test.openTask).toHaveBeenCalledWith("task-1", "Review the implementation");
   });
 
-  it("does not notify later for an event that occurred while VS Code was focused", () => {
+  it("does not notify for the active Task editor after VS Code loses focus", () => {
+    const test = environment(Date.parse("2026-07-20T12:00:00.000Z"));
+    const manager = createTaskNotificationManager(test.environment);
+
+    manager.reconcile([]);
+    manager.reconcile([task("active-task-event", "finished", "2026-07-20T12:00:02.000Z")]);
+
+    expect(test.notifications).toEqual([]);
+  });
+
+  it("does not notify later for an event that occurred while its Task was active", () => {
     const occurredAt = Date.parse("2026-07-20T12:00:01.000Z");
-    const test = environment(true, Date.parse("2026-07-20T12:00:00.000Z"));
+    const test = environment(Date.parse("2026-07-20T12:00:00.000Z"));
     const manager = createTaskNotificationManager(test.environment);
 
     manager.reconcile([]);
     test.setNow(Date.parse("2026-07-20T12:00:02.000Z"));
-    test.setFocused(false);
+    test.setFocusedTask("task-2");
     manager.reconcile([task("focused-event", "finished", new Date(occurredAt).toISOString())]);
 
     expect(test.notifications).toEqual([]);
@@ -38,7 +51,6 @@ describe("VS Code Task notifications", () => {
 
   it("notifies when another Task was focused at the event occurrence time", () => {
     const test = environment(
-      true,
       Date.parse("2026-07-20T12:00:00.000Z"),
       "task-2",
     );
@@ -51,7 +63,7 @@ describe("VS Code Task notifications", () => {
   });
 
   it("accepts App Server epoch-millisecond attention timestamps", () => {
-    const test = environment(false, 1_784_505_208_000);
+    const test = environment(1_784_505_208_000, "task-2");
     const manager = createTaskNotificationManager(test.environment);
 
     manager.reconcile([]);
@@ -60,22 +72,20 @@ describe("VS Code Task notifications", () => {
     expect(test.notifications[0]?.message).toBe("Task finished: Review the implementation");
   });
 
-  it("delivers an event that occurred while unfocused even if VS Code refocused first", () => {
-    const test = environment(true, Date.parse("2026-07-20T12:00:00.000Z"));
+  it("delivers an event that occurred on another surface even if its Task becomes active first", () => {
+    const test = environment(Date.parse("2026-07-20T12:00:00.000Z"), "task-2");
     const manager = createTaskNotificationManager(test.environment);
 
     manager.reconcile([]);
-    test.setNow(Date.parse("2026-07-20T12:00:01.000Z"));
-    test.setFocused(false);
     test.setNow(Date.parse("2026-07-20T12:00:03.000Z"));
-    test.setFocused(true);
+    test.setFocusedTask("task-1");
     manager.reconcile([task("unfocused-event", "failed", "2026-07-20T12:00:02.000Z")]);
 
     expect(test.notifications[0]?.message).toBe("Task failed: Review the implementation");
   });
 
   it("persists delivery receipts so another manager does not duplicate an event", () => {
-    const test = environment(false, Date.parse("2026-07-20T12:00:00.000Z"));
+    const test = environment(Date.parse("2026-07-20T12:00:00.000Z"), "task-2");
     const first = createTaskNotificationManager(test.environment);
     first.reconcile([]);
     first.reconcile([task("handled-event", "stopped", "2026-07-20T12:00:01.000Z")]);
@@ -109,22 +119,18 @@ function task(
 }
 
 function environment(
-  initiallyFocused: boolean,
   initialNow: number,
   initialFocusedTaskId: string | undefined = "task-1",
 ) {
-  let focused = initiallyFocused;
   let focusedTaskId = initialFocusedTaskId;
   let now = initialNow;
   let resolveNotification: (selection: string | undefined) => void = () => undefined;
-  const focusListeners = new Set<(focused: boolean) => void>();
   const focusedTaskListeners = new Set<(taskId: string | undefined) => void>();
   const handled = new Set<string>();
   const notifications: Array<{ message: string; action: string }> = [];
   const openTask = vi.fn();
   const environment: TaskNotificationEnvironment = {
     now: () => now,
-    isFocused: () => focused,
     focusedTaskId: () => focusedTaskId,
     readHandledEventIds: () => [...handled],
     rememberHandledEventIds: (eventIds) => {
@@ -138,10 +144,6 @@ function environment(
       });
     },
     openTask,
-    subscribeFocus(listener) {
-      focusListeners.add(listener);
-      return () => focusListeners.delete(listener);
-    },
     subscribeFocusedTask(listener) {
       focusedTaskListeners.add(listener);
       return () => focusedTaskListeners.delete(listener);
@@ -152,10 +154,6 @@ function environment(
     notifications,
     openTask,
     resolveNotification: (selection: string | undefined) => resolveNotification(selection),
-    setFocused(next: boolean) {
-      focused = next;
-      for (const listener of focusListeners) listener(focused);
-    },
     setNow(next: number) {
       now = next;
     },

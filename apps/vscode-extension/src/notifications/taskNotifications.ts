@@ -37,7 +37,6 @@ export async function registerTaskNotifications(
 ): Promise<vscode.Disposable> {
   const manager = createTaskNotificationManager({
     now: () => Date.now(),
-    isFocused: () => vscode.window.state.focused,
     focusedTaskId: () => surfaces.currentFocusedTaskId(),
     readHandledEventIds: () => globalState.get<string[]>(HANDLED_EVENTS_KEY, []),
     rememberHandledEventIds: (eventIds) => {
@@ -52,10 +51,6 @@ export async function registerTaskNotifications(
       return vscode.window.showInformationMessage(message, action);
     },
     openTask: (taskId, title) => surfaces.openTask(taskId, title),
-    subscribeFocus(listener) {
-      const subscription = vscode.window.onDidChangeWindowState((state) => listener(state.focused));
-      return () => subscription.dispose();
-    },
     subscribeFocusedTask(listener) {
       const subscription = surfaces.onDidChangeFocusedTask(listener);
       return () => subscription.dispose();
