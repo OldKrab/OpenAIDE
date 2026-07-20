@@ -4,6 +4,7 @@
 //! request and one update projection alive until the Agent returns its response.
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use crate::agent::acp_schema::CancelNotification;
 use agent_client_protocol::Agent;
@@ -262,16 +263,48 @@ pub(super) async fn cancel_active_prompt(
     active_session: &agent_client_protocol::ActiveSession<'static, Agent>,
     trace: Option<&AcpTraceSession>,
 ) -> Result<(), RuntimeError> {
+    let dispatch_started = Instant::now();
     let notification = CancelNotification::new(active_session.session_id().clone());
     if let Some(trace) = trace {
+        trace.record_value(
+            "runtime",
+            "session/cancel.dispatch_started",
+            serde_json::json!({ "sessionId": active_session.session_id() }),
+        );
         trace.record(
             "client_to_agent",
             "session/cancel.notification",
             &notification,
         );
     }
-    active_session
+    // ACP notifications have no response. Completion here only proves that the
+    // connection accepted the notification for transport, not that the Agent acted on it.
+    let result = active_session
         .connection()
         .send_notification(notification)
-        .map_err(acp_error)
+        .map_err(acp_error);
+    if let Some(trace) = trace {
+        let elapsed_ms = dispatch_started.elapsed().as_millis();
+        match &result {
+            Ok(()) => trace.record_value(
+                "runtime",
+                "session/cancel.dispatch_completed",
+                serde_json::json!({
+                    "sessionId": active_session.session_id(),
+                    "elapsed_ms": elapsed_ms,
+                }),
+            ),
+            Err(error) => trace.record_value(
+                "runtime",
+                "session/cancel.dispatch_failed",
+                serde_json::json!({
+                    "sessionId": active_session.session_id(),
+                    "elapsed_ms": elapsed_ms,
+                    "error_code": error.code(),
+                    "error_kind": error.reason(),
+                }),
+            ),
+        }
+    }
+    result
 }

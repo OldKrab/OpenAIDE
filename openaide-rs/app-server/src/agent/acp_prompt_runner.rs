@@ -1,4 +1,5 @@
 use std::sync::{mpsc, Arc, Mutex};
+use std::time::Instant;
 
 use crate::agent::acp_schema::SessionNotification;
 use agent_client_protocol::util::MatchDispatch;
@@ -72,37 +73,38 @@ pub(super) async fn run_prompt(
     )?;
 
     let mut cancel_sent = false;
+    let mut cancel_requested_at = None;
     let result = loop {
         if active_prompt.cancellation().is_cancelled() && !cancel_sent {
-            if let Err(error) = cancel_active_prompt(active_session, context.trace.as_ref()).await {
-                log_cancel_send_failed(
-                    context.agent_id,
-                    active_prompt.task_id(),
-                    active_session_id.as_str(),
-                    &error,
-                );
-                break Err(error);
+            match dispatch_prompt_cancel(
+                active_session,
+                context.trace.as_ref(),
+                context.agent_id,
+                active_prompt.task_id(),
+                active_session_id.as_str(),
+                "turn_token",
+            )
+            .await
+            {
+                Ok(requested_at) => cancel_requested_at = Some(requested_at),
+                Err(error) => break Err(error),
             }
             cancel_sent = true;
         }
         tokio::select! {
             Some(()) = cancel_rx.recv(), if !cancel_sent => {
-                logging::warn(
-                    "acp_prompt_cancel_requested",
-                    json!({
-                        "agent_id": context.agent_id,
-                        "task_id": active_prompt.task_id(),
-                        "active_session_id": active_session_id.as_str(),
-                    }),
-                );
-                if let Err(error) = cancel_active_prompt(active_session, context.trace.as_ref()).await {
-                    log_cancel_send_failed(
-                        context.agent_id,
-                        active_prompt.task_id(),
-                        active_session_id.as_str(),
-                        &error,
-                    );
-                    break Err(error);
+                match dispatch_prompt_cancel(
+                    active_session,
+                    context.trace.as_ref(),
+                    context.agent_id,
+                    active_prompt.task_id(),
+                    active_session_id.as_str(),
+                    "session_channel",
+                ).await {
+                    Ok(requested_at) => cancel_requested_at = Some(requested_at),
+                    Err(error) => {
+                        break Err(error);
+                    }
                 }
                 cancel_sent = true;
             }
@@ -111,14 +113,14 @@ pub(super) async fn run_prompt(
                     break Err(RuntimeError::NotReady("ACP close channel stopped".to_string()));
                 };
                 if !context.supports_session_close && !cancel_sent {
-                    if let Err(error) = cancel_active_prompt(active_session, context.trace.as_ref()).await {
-                        log_cancel_send_failed(
-                            context.agent_id,
-                            active_prompt.task_id(),
-                            active_session_id.as_str(),
-                            &error,
-                        );
-                    }
+                    let _ = dispatch_prompt_cancel(
+                        active_session,
+                        context.trace.as_ref(),
+                        context.agent_id,
+                        active_prompt.task_id(),
+                        active_session_id.as_str(),
+                        "session_close_fallback",
+                    ).await;
                 }
                 let connection = active_session.connection();
                 close_active_session(
@@ -257,6 +259,18 @@ pub(super) async fn run_prompt(
         }
     };
 
+    if let (Some(trace), Some(requested_at)) = (context.trace.as_ref(), cancel_requested_at) {
+        trace.record_value(
+            "runtime",
+            "session/cancel.prompt_settled",
+            json!({
+                "taskId": active_prompt.task_id(),
+                "sessionId": active_session_id.as_str(),
+                "elapsed_ms": requested_at.elapsed().as_millis(),
+                "result": runtime_result_name(&result),
+            }),
+        );
+    }
     logging::info(
         "acp_prompt_finish",
         json!({
@@ -264,27 +278,72 @@ pub(super) async fn run_prompt(
             "task_id": active_prompt.task_id(),
             "active_session_id": active_session_id.as_str(),
             "result": runtime_result_name(&result),
+            "cancel_to_settlement_ms": cancel_requested_at
+                .map(|started: Instant| started.elapsed().as_millis()),
         }),
     );
     result
 }
 
-fn log_cancel_send_failed(
+async fn dispatch_prompt_cancel(
+    active_session: &agent_client_protocol::ActiveSession<'static, Agent>,
+    trace: Option<&AcpTraceSession>,
     agent_id: &str,
     task_id: &str,
     active_session_id: &str,
-    error: &RuntimeError,
-) {
-    logging::error(
-        "acp_prompt_cancel_send_failed",
+    source: &str,
+) -> Result<Instant, RuntimeError> {
+    let requested_at = Instant::now();
+    if let Some(trace) = trace {
+        trace.record_value(
+            "runtime",
+            "session/cancel.worker_received",
+            json!({
+                "taskId": task_id,
+                "sessionId": active_session_id,
+                "source": source,
+            }),
+        );
+    }
+    logging::warn(
+        "acp_prompt_cancel_requested",
         json!({
             "agent_id": agent_id,
             "task_id": task_id,
             "active_session_id": active_session_id,
-            "error_code": error.code(),
-            "error_kind": error.reason(),
+            "source": source,
+            "boundary": "native_session_worker",
         }),
     );
+    let result = cancel_active_prompt(active_session, trace).await;
+    let dispatch_ms = requested_at.elapsed().as_millis();
+    match &result {
+        Ok(()) => logging::info(
+            "acp_prompt_cancel_dispatch_completed",
+            json!({
+                "agent_id": agent_id,
+                "task_id": task_id,
+                "active_session_id": active_session_id,
+                "source": source,
+                "boundary": "acp_connection",
+                "dispatch_ms": dispatch_ms,
+            }),
+        ),
+        Err(error) => logging::error(
+            "acp_prompt_cancel_send_failed",
+            json!({
+                "agent_id": agent_id,
+                "task_id": task_id,
+                "active_session_id": active_session_id,
+                "source": source,
+                "boundary": "acp_connection",
+                "dispatch_ms": dispatch_ms,
+                "error_code": error.code(),
+                "error_kind": error.reason(),
+            }),
+        ),
+    }
+    result.map(|()| requested_at)
 }
 
 async fn apply_prompt_session_message(

@@ -160,13 +160,50 @@ impl TurnRunner {
             .get(turn_id)
             .cloned()
         {
+            let dispatch_started = Instant::now();
+            crate::logging::info(
+                "task_cancel_accepted",
+                serde_json::json!({
+                    "task_id": active.task_id.as_str(),
+                    "turn_id": turn_id,
+                    "agent_id": active.session.agent_id(),
+                    "session_id": active.session.session_id(),
+                    "boundary": "turn_runner",
+                }),
+            );
             active.cancellation.cancel();
             self.spawn_cancel_watchdog(turn_id.to_string(), active.clone());
             self.server_requests.interrupt_task_requests(
-                &TaskId::from(active.task_id),
+                &TaskId::from(active.task_id.clone()),
                 crate::client_lifecycle::AppServerTime::now(),
             );
-            self.agent.cancel_session(&active.session)?;
+            if let Err(error) = self.agent.cancel_session(&active.session) {
+                crate::logging::error(
+                    "task_cancel_runtime_dispatch_failed",
+                    serde_json::json!({
+                        "task_id": active.task_id.as_str(),
+                        "turn_id": turn_id,
+                        "agent_id": active.session.agent_id(),
+                        "session_id": active.session.session_id(),
+                        "boundary": "agent_runtime",
+                        "dispatch_ms": dispatch_started.elapsed().as_millis(),
+                        "error_code": error.code(),
+                        "error_kind": error.reason(),
+                    }),
+                );
+                return Err(error);
+            }
+            crate::logging::info(
+                "task_cancel_runtime_dispatch_completed",
+                serde_json::json!({
+                    "task_id": active.task_id.as_str(),
+                    "turn_id": turn_id,
+                    "agent_id": active.session.agent_id(),
+                    "session_id": active.session.session_id(),
+                    "boundary": "agent_runtime",
+                    "dispatch_ms": dispatch_started.elapsed().as_millis(),
+                }),
+            );
             return Ok(true);
         }
         Ok(false)
@@ -233,7 +270,7 @@ impl TurnRunner {
         crate::logging::warn(
             "task_cancel_timed_out",
             serde_json::json!({
-                "task_id": active.task_id,
+                "task_id": active.task_id.as_str(),
                 "turn_id": turn_id,
                 "agent_id": active.session.agent_id(),
                 "session_id": active.session.session_id(),
@@ -251,7 +288,7 @@ impl TurnRunner {
             crate::logging::error(
                 "task_cancel_timeout_transition_failed",
                 serde_json::json!({
-                    "task_id": active.task_id,
+                    "task_id": active.task_id.as_str(),
                     "turn_id": turn_id,
                     "error": error.to_string(),
                 }),
@@ -259,17 +296,40 @@ impl TurnRunner {
         }
         // Durable invalidation comes first so even a broken runtime adapter cannot keep the
         // Task in `stopping`. The ACP implementation still bounds close internally.
-        if let Err(error) = self.agent.close_session(&active.session) {
-            crate::logging::error(
-                "task_cancel_timeout_session_close_failed",
+        let close_started = Instant::now();
+        crate::logging::warn(
+            "task_cancel_force_close_started",
+            serde_json::json!({
+                "task_id": active.task_id.as_str(),
+                "turn_id": turn_id,
+                "agent_id": active.session.agent_id(),
+                "session_id": active.session.session_id(),
+                "grace_period_ms": grace_period.as_millis(),
+            }),
+        );
+        match self.agent.close_session(&active.session) {
+            Ok(()) => crate::logging::info(
+                "task_cancel_force_close_completed",
                 serde_json::json!({
-                    "task_id": active.task_id,
+                    "task_id": active.task_id.as_str(),
                     "turn_id": turn_id,
                     "agent_id": active.session.agent_id(),
                     "session_id": active.session.session_id(),
-                    "error": error.to_string(),
+                    "close_ms": close_started.elapsed().as_millis(),
                 }),
-            );
+            ),
+            Err(error) => crate::logging::error(
+                "task_cancel_timeout_session_close_failed",
+                serde_json::json!({
+                    "task_id": active.task_id.as_str(),
+                    "turn_id": turn_id,
+                    "agent_id": active.session.agent_id(),
+                    "session_id": active.session.session_id(),
+                    "close_ms": close_started.elapsed().as_millis(),
+                    "error_code": error.code(),
+                    "error_kind": error.reason(),
+                }),
+            ),
         }
     }
 

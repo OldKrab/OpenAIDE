@@ -1904,6 +1904,8 @@ fn cancel_session_dispatches_to_active_prompt() {
         return;
     };
     let script_path = temp.path().join("fixture_agent.py");
+    let trace_state = crate::agent::acp_trace::AcpTraceState::disabled(temp.path());
+    trace_state.set_enabled(true).expect("enable ACP trace");
     let runtime = AcpAgentRuntime::new(AcpAgentConfig {
         agent_id: "codex".to_string(),
         command: "python3".to_string(),
@@ -1923,7 +1925,8 @@ fn cancel_session_dispatches_to_active_prompt() {
             ),
         ],
         secret_env: Vec::new(),
-    });
+    })
+    .with_trace_state(trace_state);
 
     let runtime = Arc::new(runtime);
     let session = runtime
@@ -1967,6 +1970,20 @@ fn cancel_session_dispatches_to_active_prompt() {
             "session/close"
         ]
     );
+
+    let trace_dir = temp.path().join("diagnostics").join("acp-traces");
+    let trace_path = fs::read_dir(trace_dir)
+        .expect("trace directory")
+        .next()
+        .expect("task trace")
+        .expect("trace entry")
+        .path();
+    let trace = fs::read_to_string(trace_path).expect("trace content");
+    assert!(trace.contains("\"event\":\"session/cancel.worker_received\""));
+    assert!(trace.contains("\"event\":\"session/cancel.dispatch_started\""));
+    assert!(trace.contains("\"event\":\"session/cancel.dispatch_completed\""));
+    assert!(trace.contains("\"event\":\"session/cancel.prompt_settled\""));
+    assert!(trace.contains("\"elapsed_ms\":"));
 }
 
 #[test]
