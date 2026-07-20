@@ -8,9 +8,9 @@ use openaide_app_server_protocol::errors::ProtocolErrorCode;
 use openaide_app_server_protocol::events::{AppServerEventPayload, EventScope};
 use openaide_app_server_protocol::ids::{ClientInstanceId, ClientRequestId, StateRootId, TaskId};
 use openaide_app_server_protocol::methods::{
-    AGENT_AUTHENTICATE, AGENT_LIST_SESSIONS, ATTACHMENT_REVEAL, CLIENT_CAPABILITIES_CHANGED,
-    CLIENT_HEARTBEAT, CLIENT_INITIALIZE, DIAGNOSTICS_GET_RUNTIME, SETTINGS_GET_MCP_SERVERS,
-    SETTINGS_GET_PREFERENCES, SETTINGS_GET_RUNTIME, SETTINGS_GET_SKILLS,
+    AGENT_AUTHENTICATE, AGENT_LIST_SESSIONS, ATTACHMENT_REVEAL, ATTACHMENT_REVEAL_SENT,
+    CLIENT_CAPABILITIES_CHANGED, CLIENT_HEARTBEAT, CLIENT_INITIALIZE, DIAGNOSTICS_GET_RUNTIME,
+    SETTINGS_GET_MCP_SERVERS, SETTINGS_GET_PREFERENCES, SETTINGS_GET_RUNTIME, SETTINGS_GET_SKILLS,
     SETTINGS_UPDATE_PREFERENCES, SETTINGS_UPDATE_RUNTIME, SHELL_RESOLVE_FILE_REVEAL,
     STATE_SUBSCRIBE, STATE_UNSUBSCRIBE, TASK_CHAT_PAGE,
 };
@@ -52,10 +52,10 @@ use crate::task_events::{
     CommittedChatChange, CommittedTaskChange, TaskUpdate, TaskUpdateKind, ToolDetailUpdate,
 };
 use crate::tasks::product_api::{
-    AgentListSessionsWorkflow, AttachmentFileBrowserWorkflow, TaskAcquireWorkflow,
-    TaskAdoptNativeSessionWorkflow, TaskArchiveWorkflow, TaskCancelWorkflow, TaskChatPageWorkflow,
-    TaskFileSearchWorkflow, TaskOpenWorkflow, TaskReleaseWorkflow, TaskSendAccepted,
-    TaskSendWorkflow, TaskSetConfigOptionWorkflow,
+    AgentListSessionsWorkflow, AttachmentFileBrowserWorkflow, ResolvedSentFile,
+    TaskAcquireWorkflow, TaskAdoptNativeSessionWorkflow, TaskArchiveWorkflow, TaskCancelWorkflow,
+    TaskChatPageWorkflow, TaskFileSearchWorkflow, TaskOpenWorkflow, TaskReleaseWorkflow,
+    TaskSendAccepted, TaskSendWorkflow, TaskSetConfigOptionWorkflow,
 };
 
 use super::*;
@@ -1566,6 +1566,36 @@ fn attachment_reveal_opens_same_client_shell_reveal_request_with_opaque_handle()
 }
 
 #[test]
+fn sent_attachment_reveal_resolves_the_durable_message_before_opening_the_shell_request() {
+    let mut gateway = gateway_with_attachments(Arc::new(RevealAttachments));
+    gateway.handle_inbound(
+        ConnectionId::new("conn-1"),
+        request("1", CLIENT_INITIALIZE, init_params("client-1")),
+        AppServerTime(1),
+    );
+
+    let outcome = gateway.handle_inbound(
+        ConnectionId::new("conn-1"),
+        request(
+            "2",
+            ATTACHMENT_REVEAL_SENT,
+            openaide_app_server_protocol::attachment::AttachmentRevealSentParams {
+                task_id: TaskId::from("task-1"),
+                message_id: "message-1".to_string(),
+                attachment_index: 0,
+            },
+        ),
+        AppServerTime(2),
+    );
+
+    let (value, server_requests) = response_value_and_server_requests(outcome);
+    assert_eq!(value["result"]["requested"], json!(true));
+    assert_eq!(server_requests[0].envelope.method, "shell/revealFile");
+    assert_eq!(server_requests[0].envelope.params["label"], "notes.md");
+    assert!(server_requests[0].envelope.params.get("path").is_none());
+}
+
+#[test]
 fn native_shell_resolves_only_the_originating_clients_reveal_handle_once() {
     let mut gateway = gateway_with_attachments(Arc::new(RevealAttachments));
     let origin_connection = ConnectionId::new("origin-connection");
@@ -2203,6 +2233,19 @@ impl AttachmentFileBrowserWorkflow for RevealAttachments {
 
     fn discard_resources_for_client(&self, client_instance_id: &ClientInstanceId) {
         RejectingAttachments.discard_resources_for_client(client_instance_id);
+    }
+
+    fn resolve_sent_file(
+        &self,
+        _client_instance_id: &ClientInstanceId,
+        _task_id: &TaskId,
+        _message_id: &str,
+        _attachment_index: usize,
+    ) -> Result<ResolvedSentFile, openaide_app_server_protocol::errors::ProtocolError> {
+        Ok(ResolvedSentFile {
+            path: PathBuf::from("/workspace/app/notes.md"),
+            label: "notes.md".to_string(),
+        })
     }
 
     fn list_roots(

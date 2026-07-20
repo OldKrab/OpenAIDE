@@ -10,11 +10,17 @@ const MAX_BODY_BYTES: usize = 10 * 1024 * 1024;
 
 pub(super) struct HttpRequest {
     pub method: String,
+    pub target: String,
     pub authorization: Option<String>,
     pub connection_id: Option<String>,
+    pub client_instance_id: Option<String>,
+    pub task_id: Option<String>,
+    pub file_name: Option<String>,
     pub session_id: Option<String>,
     pub after_sequence: Option<u64>,
     pub accepts_event_stream: bool,
+    pub content_length: usize,
+    pub initial_body: Vec<u8>,
     pub body: String,
 }
 
@@ -27,8 +33,13 @@ pub(super) fn read_http_request(
         .map_err(|_| LocalHttpProbeListenerError::MalformedRequest("headers are not UTF-8"))?
         .to_string();
     let method = request_method(&headers)?;
+    let target = request_target(&headers)?;
     let authorization = header_value(&headers, "authorization").map(str::to_string);
     let connection_id = header_value(&headers, "x-openaide-connection-id").map(str::to_string);
+    let client_instance_id =
+        header_value(&headers, "x-openaide-client-instance-id").map(str::to_string);
+    let task_id = header_value(&headers, "x-openaide-task-id").map(str::to_string);
+    let file_name = header_value(&headers, "x-openaide-file-name").map(percent_decode);
     let session_id = header_value(&headers, "x-openaide-session-id").map(str::to_string);
     let after_sequence =
         header_value(&headers, "x-openaide-after").and_then(|value| value.parse::<u64>().ok());
@@ -38,31 +49,48 @@ pub(super) fn read_http_request(
             .any(|item| item.trim() == "text/event-stream")
     });
     let content_length = content_length(&headers, &method)?;
-    if content_length > MAX_BODY_BYTES {
+    let is_upload = target
+        .split('?')
+        .next()
+        .is_some_and(|path| path.ends_with("/upload"));
+    if !is_upload && content_length > MAX_BODY_BYTES {
         return Err(LocalHttpProbeListenerError::MalformedRequest(
             "body is too large",
         ));
     }
     let body_start = header_end + 4;
-    read_body(
-        stream,
-        &mut bytes,
-        body_start,
-        content_length,
-        &method,
-        connection_id.as_deref(),
-    )?;
-    let body_end = body_start + content_length;
-    let body = std::str::from_utf8(&bytes[body_start..body_end])
-        .map_err(|_| LocalHttpProbeListenerError::MalformedRequest("body is not UTF-8"))?
-        .to_string();
+    if !is_upload {
+        read_body(
+            stream,
+            &mut bytes,
+            body_start,
+            content_length,
+            &method,
+            connection_id.as_deref(),
+        )?;
+    }
+    let available_body_end = bytes.len().min(body_start.saturating_add(content_length));
+    let initial_body = bytes[body_start..available_body_end].to_vec();
+    let body = if is_upload {
+        String::new()
+    } else {
+        std::str::from_utf8(&initial_body)
+            .map_err(|_| LocalHttpProbeListenerError::MalformedRequest("body is not UTF-8"))?
+            .to_string()
+    };
     Ok(HttpRequest {
         method,
+        target,
         authorization,
         connection_id,
+        client_instance_id,
+        task_id,
+        file_name,
         session_id,
         after_sequence,
         accepts_event_stream,
+        content_length,
+        initial_body,
         body,
     })
 }
@@ -104,7 +132,7 @@ pub(super) fn write_http_response(
         "Content-Type: application/json\r\n".to_string()
     };
     let wire = format!(
-        "HTTP/1.1 {} {}\r\n{}Access-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Authorization, Content-Type, X-OpenAIDE-Connection-Id, X-OpenAIDE-Session-Id, X-OpenAIDE-After\r\nAccess-Control-Max-Age: 600\r\nCache-Control: no-store\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        "HTTP/1.1 {} {}\r\n{}Access-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Authorization, Content-Type, X-OpenAIDE-Connection-Id, X-OpenAIDE-Client-Instance-Id, X-OpenAIDE-Session-Id, X-OpenAIDE-After, X-OpenAIDE-Task-Id, X-OpenAIDE-File-Name\r\nAccess-Control-Max-Age: 600\r\nCache-Control: no-store\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
         response.status,
         reason_phrase(response.status),
         content_type,
@@ -112,6 +140,29 @@ pub(super) fn write_http_response(
         response.body
     );
     stream.write_all(wire.as_bytes())?;
+    Ok(())
+}
+
+pub(super) fn write_file_download(
+    stream: &mut TcpStream,
+    path: &std::path::Path,
+    label: &str,
+) -> Result<(), LocalHttpProbeListenerError> {
+    let mut file = std::fs::File::open(path)?;
+    let size = file.metadata()?.len();
+    let safe_label = label
+        .chars()
+        .map(|character| match character {
+            '\r' | '\n' | '"' | '\\' => '_',
+            other if other.is_control() => '_',
+            other => other,
+        })
+        .collect::<String>();
+    write!(
+        stream,
+        "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Disposition: attachment; filename=\"{safe_label}\"\r\nCache-Control: no-store\r\nContent-Length: {size}\r\nConnection: close\r\n\r\n"
+    )?;
+    std::io::copy(&mut file, stream)?;
     Ok(())
 }
 
@@ -188,6 +239,46 @@ fn request_method(headers: &str) -> Result<String, LocalHttpProbeListenerError> 
     Ok(method.to_string())
 }
 
+fn request_target(headers: &str) -> Result<String, LocalHttpProbeListenerError> {
+    headers
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .map(str::to_string)
+        .ok_or(LocalHttpProbeListenerError::MalformedRequest(
+            "missing request target",
+        ))
+}
+
+fn percent_decode(value: &str) -> String {
+    let mut decoded = Vec::with_capacity(value.len());
+    let bytes = value.as_bytes();
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' && index + 2 < bytes.len() {
+            if let (Some(high), Some(low)) =
+                (hex_value(bytes[index + 1]), hex_value(bytes[index + 2]))
+            {
+                decoded.push(high * 16 + low);
+                index += 3;
+                continue;
+            }
+        }
+        decoded.push(bytes[index]);
+        index += 1;
+    }
+    String::from_utf8_lossy(&decoded).into_owned()
+}
+
+fn hex_value(value: u8) -> Option<u8> {
+    match value {
+        b'0'..=b'9' => Some(value - b'0'),
+        b'a'..=b'f' => Some(value - b'a' + 10),
+        b'A'..=b'F' => Some(value - b'A' + 10),
+        _ => None,
+    }
+}
+
 fn content_length(headers: &str, method: &str) -> Result<usize, LocalHttpProbeListenerError> {
     let Some(value) = header_value(headers, "content-length") else {
         // Browser CORS preflights have no body and are not required to carry a
@@ -226,6 +317,7 @@ fn reason_phrase(status: u16) -> &'static str {
         401 => "Unauthorized",
         403 => "Forbidden",
         405 => "Method Not Allowed",
+        409 => "Conflict",
         500 => "Internal Server Error",
         _ => "Status",
     }

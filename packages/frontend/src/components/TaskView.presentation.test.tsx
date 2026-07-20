@@ -569,6 +569,35 @@ describe("TaskView timeline presentation", () => {
     expect(tree.root.findByProps({ "aria-label": "Add context" }).props.disabled).toBe(true);
     expect(tree.root.findByProps({ "aria-label": "Send message" }).props.disabled).toBe(true);
   });
+
+  it("allows a file-only follow-up when the Agent does not accept Images", async () => {
+    const { TaskView } = await import("./TaskView");
+    const snapshot = snapshotWithAuthoritativeTail(true);
+    snapshot.task.status = "inactive";
+    snapshot.input_capabilities = { image: false };
+    let tree!: ReactTestRenderer;
+
+    act(() => {
+      tree = create(
+        <TaskView
+          {...taskViewProps(snapshot)}
+          taskInput={{
+            prompt: "",
+            context: [{
+              kind: "file",
+              label: "model.bin",
+              local_id: "file-1",
+              app_server_handle_id: "attachment-handle-1" as never,
+            }],
+          }}
+        />,
+      );
+    });
+
+    expect(JSON.stringify(tree.toJSON())).not.toContain("does not accept images");
+    expect(JSON.stringify(tree.toJSON())).not.toContain("Attached context is not ready");
+    expect(tree.root.findByProps({ "aria-label": "Send message" }).props.disabled).toBe(false);
+  });
 });
 
 function taskViewProps(snapshot: TaskSnapshot) {

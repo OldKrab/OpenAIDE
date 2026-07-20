@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { once } from "node:events";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
@@ -33,8 +34,11 @@ test("refresh reuses the owned listener when its wrapper pid is dead", async (t)
     },
     stdio: ["ignore", "pipe", "pipe"],
   });
-  t.after(() => {
-    listener.kill("SIGTERM");
+  t.after(async () => {
+    if (listener.exitCode === null) {
+      listener.kill("SIGTERM");
+      await once(listener, "close");
+    }
     rmSync(fixtureRoot, { recursive: true, force: true });
   });
   const port = await firstOutputLine(listener);
@@ -340,6 +344,58 @@ test("local web supports durable user systemd daemon mode", () => {
   assert.match(script, /systemd-run --user/);
   assert.match(script, /Restart=always/);
   assert.match(script, /systemctl --user status "\$systemd_unit\.service"/);
+});
+
+test("systemd app server receives an explicit OS temp directory", (t) => {
+  const fixtureRoot = mkdtempSync(join(tmpdir(), "openaide-local-web-tmpdir-"));
+  const fakeBin = join(fixtureRoot, "bin");
+  const staticRoot = join(fixtureRoot, "static");
+  const systemdRunLog = join(fixtureRoot, "systemd-run.log");
+  mkdirSync(fakeBin);
+  mkdirSync(staticRoot);
+  writeFileSync(join(staticRoot, "index.html"), "ready\n");
+  writeFileSync(join(fakeBin, "systemctl"), `#!/usr/bin/env bash
+if [[ "$*" == *"show-environment"* ]]; then exit 0; fi
+if [[ "$*" == *"is-active"* ]]; then exit 0; fi
+if [[ "$*" == *"--property MainPID --value"* ]]; then printf '4242\\n'; fi
+exit 0
+`);
+  writeFileSync(join(fakeBin, "systemd-run"), `#!/usr/bin/env bash
+printf '%s\n' "$*" >> "$OPENAIDE_TEST_SYSTEMD_RUN_LOG"
+exit 0
+`);
+  // Startup intentionally waits for systemd in production; the fixture's
+  // fake service is immediately ready and must not slow the repository gate.
+  writeFileSync(join(fakeBin, "sleep"), "#!/usr/bin/env bash\nexit 0\n");
+  chmodSync(join(fakeBin, "systemctl"), 0o755);
+  chmodSync(join(fakeBin, "systemd-run"), 0o755);
+  chmodSync(join(fakeBin, "sleep"), 0o755);
+  t.after(() => rmSync(fixtureRoot, { recursive: true, force: true }));
+
+  const result = spawnSync("bash", ["deploy/local-web.sh", "start"], {
+    cwd: new URL("..", import.meta.url),
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      PATH: `${fakeBin}:${process.env.PATH}`,
+      TMPDIR: "/var/tmp/openaide-test",
+      OPENAIDE_TEST_SYSTEMD_RUN_LOG: systemdRunLog,
+      OPENAIDE_WEB_ROLE: "",
+      OPENAIDE_WEB_ALLOWED_HOSTS: "localhost,127.0.0.1",
+      OPENAIDE_WEB_DAEMON: "systemd",
+      OPENAIDE_WEB_SYSTEMD_UNIT: "openaide-web-test",
+      OPENAIDE_WEB_STATIC_ROOT: staticRoot,
+      OPENAIDE_WEB_STATE_ROOT: join(fixtureRoot, "state"),
+      OPENAIDE_WEB_RUNTIME_ROOT: join(fixtureRoot, "runtime"),
+      OPENAIDE_WEB_PID_FILE: join(fixtureRoot, "web.pid"),
+      OPENAIDE_WEB_LOG_FILE: join(fixtureRoot, "web.log"),
+      OPENAIDE_WEB_BUILD: "0",
+      OPENAIDE_WEB_SKIP_BUILD: "1",
+    },
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(readFileSync(systemdRunLog, "utf8"), /--setenv TMPDIR=\/var\/tmp\/openaide-test/);
 });
 
 test("local web enables JavaScript source maps for background and systemd servers", () => {

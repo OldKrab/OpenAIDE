@@ -7,6 +7,20 @@ use crate::ids::{
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
+pub struct AttachmentCreateLocalFileReferencesParams {
+    pub task_id: TaskId,
+    /// Trusted App Shell paths. Shared Frontend code must never populate this field.
+    pub paths: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachmentCreateLocalFileReferencesResult {
+    pub attachments: Vec<PreSendAttachment>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
 pub struct AttachmentListRootsParams {
     pub task_id: TaskId,
 }
@@ -185,6 +199,20 @@ pub struct AttachmentRevealParams {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct AttachmentRevealResult {
+    pub requested: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachmentRevealSentParams {
+    pub task_id: TaskId,
+    pub message_id: String,
+    pub attachment_index: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AttachmentRevealSentResult {
     pub requested: bool,
 }
 

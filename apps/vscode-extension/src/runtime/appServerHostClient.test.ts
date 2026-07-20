@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   AppServerProtocolError,
+  ATTACHMENT_CREATE_LOCAL_FILE_REFERENCES,
   CLIENT_CAPABILITIES_CHANGED,
   CLIENT_INITIALIZE,
   TASK_OPEN,
@@ -203,6 +204,27 @@ describe("AppServerHostClient", () => {
 
     stopNavigation();
     stopTask();
+  });
+
+  it("keeps trusted local path registration behind the extension-host boundary", async () => {
+    const provider = providerReturningConnection();
+    client = new AppServerHostClient(provider);
+    const messages: unknown[] = [];
+    client.attachView("task-1", (message) => messages.push(message));
+
+    await client.handleViewMessage("task-1", {
+      type: "appServer.session.request",
+      requestId: "register-local-path",
+      method: ATTACHMENT_CREATE_LOCAL_FILE_REFERENCES,
+      params: { taskId: "task-1", paths: ["/outside/private.bin"] },
+    });
+
+    expect(provider.startAppServerConnection).not.toHaveBeenCalled();
+    expect(messages).toEqual([{
+      type: "appServer.session.response",
+      requestId: "register-local-path",
+      error: expect.objectContaining({ message: "This App Server method is available only to the extension host." }),
+    }]);
   });
 
   it("surfaces protocol errors from LocalHttp typed requests", async () => {

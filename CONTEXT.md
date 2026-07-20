@@ -29,8 +29,12 @@ An unleased, ready Prepared Task eligible for reuse by a client selecting the sa
 _Avoid_: Orphan Task, idle visible Task
 
 **Image**:
-Visual content added to a message through paste, drag and drop, or a picker; those input methods do not create different content kinds.
+Visual content added to a message through paste, drag and drop, or the image picker; those input methods do not create different content kinds.
 _Avoid_: PastedImage, treating Image as a workspace-file attachment
+
+**File Attachment**:
+A general file explicitly linked to one unsent message through **Attach files**. It is distinct from an Image and from an `@file` mention.
+_Avoid_: Upload when the App Shell references an original local path, treating `@file` text as attached content
 
 **Chat**:
 The user-facing message surface inside a Task where the user and agent exchange messages and folded tool activity.
@@ -321,7 +325,7 @@ _Avoid_: Treating every unread update or status change as an alert
 - "VS Code extension" was used as if it were the whole product shell; resolved: use **App Shell** for Web App, Desktop App, Mobile App, and VS Code Extension.
 - "session" was used ambiguously between ACP and product UI; resolved: **Native Session** is Agent-owned identity, while **Task** remains user-facing work.
 - "New Task" was used to conflate the user-facing composer, a durable zero-message Task, and client ownership; resolved: **New Task** is the pre-history work surface, **Prepared Task** is the durable zero-message Task, and **Prepared-Task Lease** is temporary exclusive client use.
-- Paste, drag and drop, and picker input were discussed as different attachment kinds; resolved: they all add the same **Image** content kind.
+- Paste, drag and drop, and image-picker input were discussed as different attachment kinds; resolved: they all add the same **Image** content kind. **File Attachment** remains a distinct general-file content kind.
 - "options" was used as if it meant static controls; resolved: **Configuration Options** are Agent-provided and may appear, disappear, or change after Agent updates.
 - "default options" was used for saved agent preferences; resolved: do not cache Configuration Option values in v1.
 - Cross-App Shell and cross-App Server blocking applies to live **Native Session** interaction, not to observing persisted Task history or answering Task-scoped requests from a subscribed App Shell client.

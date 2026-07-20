@@ -6,8 +6,11 @@ import {
   FileArchive,
   FileCog,
   FileImage,
+  FileSpreadsheet,
   FileText,
+  FileType2,
   LoaderCircle,
+  Presentation,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { TaskFileBrowserCallbacks } from "./appControllerCallbackTypes";
@@ -28,8 +31,9 @@ export type FileMentionPickerState = {
 };
 
 export type FileIconKind =
-  | "archive" | "config" | "database" | "file" | "image" | "javascript"
-  | "json" | "markdown" | "python" | "rust" | "text" | "typescript" | "web";
+  | "archive" | "config" | "database" | "document" | "file" | "image" | "javascript"
+  | "json" | "markdown" | "pdf" | "presentation" | "python" | "rust" | "spreadsheet"
+  | "text" | "typescript" | "web";
 
 /** Finds an active @ token only at prompt boundaries where completion is unambiguous. */
 export function fileMentionTokenAtCursor(text: string, cursor: number): FileMentionToken | undefined {
@@ -84,8 +88,12 @@ export function fileIconKind(path: string): FileIconKind {
   if (["html", "htm", "css", "scss", "sass", "less", "vue", "svelte"].includes(extension)) return "web";
   if (["json", "jsonc", "json5"].includes(extension)) return "json";
   if (["md", "mdx", "markdown"].includes(extension)) return "markdown";
+  if (extension === "pdf") return "pdf";
+  if (["doc", "docx", "odt", "rtf"].includes(extension)) return "document";
+  if (["xls", "xlsx", "ods"].includes(extension)) return "spreadsheet";
+  if (["ppt", "pptx", "odp"].includes(extension)) return "presentation";
   if (["png", "jpg", "jpeg", "gif", "webp", "svg", "ico", "avif"].includes(extension)) return "image";
-  if (["zip", "gz", "tgz", "bz2", "xz", "7z", "rar", "tar"].includes(extension)) return "archive";
+  if (["zip", "gz", "tgz", "bz2", "xz", "7z", "rar", "tar", "vsix"].includes(extension)) return "archive";
   if (["sql", "db", "sqlite", "sqlite3"].includes(extension)) return "database";
   if (["toml", "yaml", "yml", "ini", "env", "conf", "config", "xml"].includes(extension)) return "config";
   if (["txt", "log", "csv"].includes(extension)) return "text";
@@ -116,13 +124,17 @@ export function fileReferenceDetails(path: string) {
     archive: "Archive",
     config: "Configuration",
     database: "Database",
+    document: "Document",
     file: "File",
     image: "Image",
     javascript: "JavaScript",
     json: "JSON",
     markdown: "Markdown",
+    pdf: "PDF",
+    presentation: "Presentation",
     python: "Python",
     rust: "Rust",
+    spreadsheet: "Spreadsheet",
     text: "Text",
     typescript: "TypeScript",
     web: "Web source",
@@ -227,17 +239,29 @@ export function FileMentionPicker({ state, onSelect }: {
   );
 }
 
-function FileKindIcon({ path }: { path: string }) {
+/** Renders the shared default icon used anywhere a file has no visual thumbnail. */
+export function FileKindIcon({
+  className = "composer-file-kind-icon",
+  path,
+  size = 14,
+}: {
+  className?: string;
+  path: string;
+  size?: number;
+}) {
   const kind = fileIconKind(path);
-  const props = { "aria-hidden": true, size: 14 } as const;
+  const props = { "aria-hidden": true, size } as const;
   const icon = kind === "archive" ? <FileArchive {...props} />
     : kind === "config" ? <FileCog {...props} />
       : kind === "database" ? <Database {...props} />
         : kind === "image" ? <FileImage {...props} />
           : kind === "json" ? <Braces {...props} />
-            : kind === "markdown" || kind === "text" ? <FileText {...props} />
-              : ["javascript", "python", "rust", "typescript", "web"].includes(kind)
-                ? <Code2 {...props} />
-                : <File {...props} />;
-  return <span className="composer-file-kind-icon" data-file-kind={kind}>{icon}</span>;
+            : kind === "pdf" ? <FileType2 {...props} />
+              : kind === "spreadsheet" ? <FileSpreadsheet {...props} />
+                : kind === "presentation" ? <Presentation {...props} />
+                  : ["document", "markdown", "text"].includes(kind) ? <FileText {...props} />
+                    : ["javascript", "python", "rust", "typescript", "web"].includes(kind)
+                      ? <Code2 {...props} />
+                      : <File {...props} />;
+  return <span className={`file-kind-icon ${className}`} data-file-kind={kind}>{icon}</span>;
 }

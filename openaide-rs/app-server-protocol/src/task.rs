@@ -2,8 +2,8 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::ids::{
-    AgentConfigOptionId, AgentId, ClientMutationId, MessageId, ProjectId, TaskId, TaskListCursor,
-    TurnId, WorktreeId,
+    AgentConfigOptionId, AgentId, AttachmentHandleId, ClientMutationId, MessageId, ProjectId,
+    TaskId, TaskListCursor, TurnId, WorktreeId,
 };
 use crate::snapshot::AgentConfigOptionCurrentValue;
 use crate::snapshot::{ChatItem, TaskSnapshot, TaskSummary};
@@ -94,6 +94,9 @@ pub struct ComposerMessage {
     pub text: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub images: Vec<ComposerImage>,
+    /// Ordered App Server-owned resources selected before Send.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<AttachmentHandleId>,
 }
 
 /// One Frontend-owned Image encoded only as part of the Send mutation.

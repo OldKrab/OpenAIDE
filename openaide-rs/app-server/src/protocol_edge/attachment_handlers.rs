@@ -2,12 +2,14 @@ use openaide_app_server_protocol::attachment::{
     AttachmentConfirmEmbeddedParams, AttachmentConfirmEmbeddedResult,
     AttachmentCreateEmbeddedCandidateParams, AttachmentCreateEmbeddedCandidateResult,
     AttachmentCreateFileReferenceParams, AttachmentCreateFileReferenceResult,
+    AttachmentCreateLocalFileReferencesParams, AttachmentCreateLocalFileReferencesResult,
     AttachmentCreatePastedImageParams, AttachmentCreatePastedImageResult,
     AttachmentListDirectoryParams, AttachmentListDirectoryResult, AttachmentListRootsParams,
     AttachmentListRootsResult, AttachmentRefreshHandlesParams, AttachmentRefreshHandlesResult,
     AttachmentReleaseParams, AttachmentReleaseResult, AttachmentRevealParams,
-    AttachmentRevealResult,
+    AttachmentRevealResult, AttachmentRevealSentParams,
 };
+use openaide_app_server_protocol::client::ShellCapability;
 use openaide_app_server_protocol::envelopes::RequestMeta;
 use openaide_app_server_protocol::errors::{ProtocolError, ProtocolErrorCode};
 use openaide_app_server_protocol::server_requests::{ShellRevealFileParams, SHELL_REVEAL_FILE};
@@ -104,6 +106,51 @@ impl RpcGateway {
             Err(error) => return self.error(connection_id, id, meta, error),
         };
         self.result::<AttachmentCreateFileReferenceResult>(connection_id, id, meta, result)
+    }
+
+    pub(super) fn handle_attachment_create_local_file_references(
+        &self,
+        connection_id: ConnectionId,
+        id: String,
+        params: Value,
+        meta: RequestMeta,
+    ) -> GatewayOutcome {
+        let params =
+            match serde_json::from_value::<AttachmentCreateLocalFileReferencesParams>(params) {
+                Ok(params) => params,
+                Err(error) => {
+                    return self.error(connection_id, id, meta, responses::invalid_params(error))
+                }
+            };
+        let client = self
+            .client_hub
+            .context_for_connection(&connection_id)
+            .expect("routing requires an initialized client for local attachment creation");
+        if !client
+            .capabilities
+            .shell
+            .contains(&ShellCapability::PickLocalFile)
+        {
+            return self.error(
+                connection_id,
+                id,
+                meta,
+                ProtocolError {
+                    code: ProtocolErrorCode::CapabilityUnavailable,
+                    message: "client cannot broker native file selection".to_string(),
+                    recoverable: true,
+                    target: None,
+                },
+            );
+        }
+        let result = match self
+            .attachments
+            .create_local_file_references(&client.client_instance_id, params)
+        {
+            Ok(result) => result,
+            Err(error) => return self.error(connection_id, id, meta, error),
+        };
+        self.result::<AttachmentCreateLocalFileReferencesResult>(connection_id, id, meta, result)
     }
 
     pub(super) fn handle_attachment_create_pasted_image(
@@ -264,6 +311,68 @@ impl RpcGateway {
                 reveal_unavailable("client is unavailable"),
             );
         };
+        let target = match self
+            .attachments
+            .resolve_reveal_target(&client.client_instance_id, params)
+        {
+            Ok(target) => target,
+            Err(error) => return self.error(connection_id, id, meta, error),
+        };
+        self.request_file_reveal(connection_id, id, meta, now, target.path, target.label)
+    }
+
+    pub(super) fn handle_attachment_reveal_sent(
+        &self,
+        connection_id: ConnectionId,
+        id: String,
+        params: Value,
+        meta: RequestMeta,
+        now: crate::client_lifecycle::AppServerTime,
+    ) -> GatewayOutcome {
+        let params = match serde_json::from_value::<AttachmentRevealSentParams>(params) {
+            Ok(params) => params,
+            Err(error) => {
+                return self.error(connection_id, id, meta, responses::invalid_params(error))
+            }
+        };
+        let Some(client) = self.client_hub.context_for_connection(&connection_id) else {
+            return self.error(
+                connection_id,
+                id,
+                meta,
+                reveal_unavailable("client is unavailable"),
+            );
+        };
+        let target = match self.attachments.resolve_sent_file(
+            &client.client_instance_id,
+            &params.task_id,
+            &params.message_id,
+            params.attachment_index as usize,
+        ) {
+            Ok(target) => target,
+            Err(error) => return self.error(connection_id, id, meta, error),
+        };
+        self.request_file_reveal(connection_id, id, meta, now, target.path, target.label)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn request_file_reveal(
+        &self,
+        connection_id: ConnectionId,
+        id: String,
+        meta: RequestMeta,
+        now: crate::client_lifecycle::AppServerTime,
+        path: std::path::PathBuf,
+        label: String,
+    ) -> GatewayOutcome {
+        let Some(client) = self.client_hub.context_for_connection(&connection_id) else {
+            return self.error(
+                connection_id,
+                id,
+                meta,
+                reveal_unavailable("client is unavailable"),
+            );
+        };
         let Some(delivery) = self.client_hub.delivery_for(&client.client_instance_id) else {
             return self.error(
                 client.connection_id,
@@ -272,17 +381,10 @@ impl RpcGateway {
                 reveal_unavailable("client is unavailable"),
             );
         };
-        let target = match self
-            .attachments
-            .resolve_reveal_target(&client.client_instance_id, params)
-        {
-            Ok(target) => target,
-            Err(error) => return self.error(connection_id, id, meta, error),
-        };
         let reveal_handle = match self.shell_file_reveals.register_local_file_for_client(
             client.client_instance_id.clone(),
-            target.path,
-            Some(target.label.clone()),
+            path,
+            Some(label),
         ) {
             Ok(handle) => handle,
             Err(error) => return self.error(connection_id, id, meta, reveal_runtime_error(error)),

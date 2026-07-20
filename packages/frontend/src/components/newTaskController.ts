@@ -6,7 +6,7 @@ import {
 import type { ComposerAttachmentResourceOwner } from "../services/attachmentResources";
 import type { AppAction } from "../state/appReducer";
 import type { AppState } from "../state/store";
-import type { TaskSnapshot } from "@openaide/app-shell-contracts";
+import type { ConfigOptionsCatalog, TaskSnapshot } from "@openaide/app-shell-contracts";
 
 export type NewTaskLease = Readonly<{
   generation: number;
@@ -26,6 +26,7 @@ type NewTaskDisposal = {
 export class NewTaskController {
   private current?: NewTaskLease;
   private cachedSnapshot?: TaskSnapshot;
+  private settledConfigOptions?: ConfigOptionsCatalog;
   private expiredLeaseTaskId?: TaskId;
   private generation = 0;
   private preparationReset = 0;
@@ -54,6 +55,22 @@ export class NewTaskController {
     }
     const taskId = this.cachedSnapshot?.task.task_id ?? this.current?.taskId;
     if (taskId !== undefined && taskId !== snapshot.task.task_id) return false;
+    // Async preparation, subscriptions, and attachment work can settle out of
+    // order. A delayed acquire result must never roll a ready composer back to
+    // an older "preparing" revision.
+    if (
+      this.cachedSnapshot
+      && snapshot.revision < this.cachedSnapshot.revision
+    ) return true;
+    if (settledConfigOptions(snapshot.agent_config)) {
+      this.settledConfigOptions = snapshot.agent_config;
+    } else if (
+      (!snapshot.agent_config || snapshot.agent_config.status === "loading")
+      && this.settledConfigOptions
+      && this.settledConfigOptions.agent_id === snapshot.task.agent_id
+    ) {
+      snapshot = { ...snapshot, agent_config: this.settledConfigOptions };
+    }
     if (this.cachedSnapshot === snapshot) return true;
     this.cachedSnapshot = snapshot;
     this.emit();
@@ -83,7 +100,9 @@ export class NewTaskController {
     preparationKey: string;
     taskId: TaskId;
   }): NewTaskLease {
-    if (this.current?.taskId === taskId && this.current.preparationKey === preparationKey) {
+    if (this.current?.taskId === taskId) {
+      // Prepared Task identity owns the lease. Render-key churn cannot change
+      // that Task's immutable context and must not invalidate in-flight work.
       attachmentResources?.claimNewTaskController(taskId);
       return this.current;
     }
@@ -177,6 +196,7 @@ export class NewTaskController {
     this.generation += 1;
     this.current = undefined;
     this.expiredLeaseTaskId = undefined;
+    this.settledConfigOptions = undefined;
     this.cachedSnapshot = undefined;
     this.disposals.clear();
     this.sendProtections.clear();
@@ -225,6 +245,10 @@ export class NewTaskController {
   private emit() {
     for (const listener of this.listeners) listener();
   }
+}
+
+function settledConfigOptions(catalog: ConfigOptionsCatalog | undefined) {
+  return catalog?.status === "ready" || catalog?.status === "empty";
 }
 
 /** Returns only a genuinely disposable New Task snapshot, never a protected send. */

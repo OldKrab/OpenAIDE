@@ -66,7 +66,9 @@ export function composerAttachmentResourceFrame(
       acceptedUserMessageIds,
       acceptsAdoptions: taskSurfaceMounted && !state.newTask.submitting,
       retained: [...retainedResources.values()],
-      mountedTaskId: undefined,
+      // The controller cache is the stable New Task identity while replica
+      // ingestion may temporarily omit the same snapshot from reducer state.
+      mountedTaskId: taskSurfaceMounted ? newTaskId : undefined,
       protected: protectedResources,
       taskSurfaceMounted,
     };
@@ -127,7 +129,16 @@ export class ComposerAttachmentResourceOwner {
   }
 
   beginAdoption(taskId: string): ComposerAttachmentAdoption | undefined {
-    if (this.disposed || this.adoptionsLocked || this.mountedTaskId !== taskId) return undefined;
+    if (this.disposed || this.adoptionsLocked || this.mountedTaskId !== taskId) {
+      console.warn("[OpenAIDE] Composer attachment adoption unavailable", {
+        adoptionsLocked: this.adoptionsLocked,
+        disposed: this.disposed,
+        mountedTaskId: this.mountedTaskId,
+        requestedTaskId: taskId,
+        taskSurfaceMounted: this.taskSurfaceMounted,
+      });
+      return undefined;
+    }
     return {
       generation: this.adoptionGeneration,
       stateRootGeneration: this.stateRootGeneration,

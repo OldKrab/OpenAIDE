@@ -262,6 +262,7 @@ fn send_params(task_id: &TaskId, text: &str) -> TaskSendParams {
         message: ComposerMessage {
             text: Some(text.to_string()),
             images: Vec::new(),
+            attachments: Vec::new(),
         },
     }
 }

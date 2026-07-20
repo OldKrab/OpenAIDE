@@ -15,6 +15,8 @@ import {
   subscribeWindowMessages,
 } from "../../../packages/frontend/src/shells/domBootstrap";
 import type { HostChannelMessage } from "../../../packages/frontend/src/state/postHostMessage";
+import type { PreSendAttachment } from "@openaide/app-server-client";
+import { clientInstanceIdForBootstrap } from "../../../packages/frontend/src/services/backendInitialization";
 import {
   createRuntimeLogger,
   safeWebviewTelemetryFields,
@@ -61,6 +63,26 @@ export function createWebAppShell(): FrontendShell {
   );
   return {
     bootstrap,
+    sentFiles: {
+      sentFileAction: "download",
+      openSentFile({ attachmentIndex, label, messageId, taskId }) {
+        const search = new URLSearchParams({
+          attachmentIndex: String(attachmentIndex),
+          clientInstanceId: clientInstanceIdForBootstrap(bootstrap()),
+          messageId,
+          taskId,
+        });
+        const link = document.createElement("a");
+        link.href = `/__openaide-app-server/download?${search}`;
+        link.download = label;
+        link.click();
+      },
+    },
+    files: {
+      kind: "webUpload",
+      upload: (taskId, file, onProgress, signal) =>
+        uploadFile(taskId, file, clientInstanceIdForBootstrap(bootstrap()), onProgress, signal),
+    },
     messages: { post, subscribe: subscribeWindowMessages },
     navigation: {
       openNewTask: (projectId) => navigate(newTaskPath(projectId)),
@@ -93,6 +115,62 @@ export function createWebAppShell(): FrontendShell {
     },
     taskNotifications,
   };
+}
+
+function uploadFile(
+  taskId: string,
+  file: File,
+  clientInstanceId: string,
+  onProgress: (progress: { loaded: number; total: number }) => void,
+  signal: AbortSignal,
+): Promise<PreSendAttachment> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(new DOMException("Upload cancelled", "AbortError"));
+      return;
+    }
+    const request = new XMLHttpRequest();
+    const abort = () => request.abort();
+    const finish = (settle: () => void) => {
+      signal.removeEventListener("abort", abort);
+      settle();
+    };
+    signal.addEventListener("abort", abort, { once: true });
+    request.open("POST", "/__openaide-app-server/upload");
+    request.setRequestHeader("Content-Type", "application/octet-stream");
+    request.setRequestHeader("X-OpenAIDE-Client-Instance-Id", clientInstanceId);
+    request.setRequestHeader("X-OpenAIDE-Task-Id", taskId);
+    request.setRequestHeader("X-OpenAIDE-File-Name", encodeURIComponent(file.name || "Attached file"));
+    request.upload.addEventListener("progress", (event) => {
+      onProgress({ loaded: event.loaded, total: event.lengthComputable ? event.total : file.size });
+    });
+    request.addEventListener("load", () => {
+      if (request.status !== 200) {
+        finish(() => reject(new Error(uploadErrorMessage(request.responseText))));
+        return;
+      }
+      try {
+        const value = JSON.parse(request.responseText) as { attachment?: PreSendAttachment };
+        if (!value.attachment) throw new Error("Upload response did not include an attachment.");
+        const attachment = value.attachment;
+        finish(() => resolve(attachment));
+      } catch (error) {
+        finish(() => reject(error));
+      }
+    });
+    request.addEventListener("error", () => finish(() => reject(new Error("File upload failed."))));
+    request.addEventListener("abort", () => finish(() => reject(new DOMException("Upload cancelled", "AbortError"))));
+    request.send(file);
+  });
+}
+
+function uploadErrorMessage(responseText: string) {
+  try {
+    const value = JSON.parse(responseText) as { error?: { message?: string } };
+    return value.error?.message || "File upload failed.";
+  } catch {
+    return "File upload failed.";
+  }
 }
 
 /** Adapts browser-profile storage, focus, permissions, and cross-tab messaging. */

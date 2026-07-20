@@ -25,12 +25,14 @@ pub const SETTINGS_UPDATE_RUNTIME: &str = "settings/updateRuntime";
 pub const ATTACHMENT_LIST_ROOTS: &str = "attachment/listRoots";
 pub const ATTACHMENT_LIST_DIRECTORY: &str = "attachment/listDirectory";
 pub const ATTACHMENT_CREATE_FILE_REFERENCE: &str = "attachment/createFileReference";
+pub const ATTACHMENT_CREATE_LOCAL_FILE_REFERENCES: &str = "attachment/createLocalFileReferences";
 pub const ATTACHMENT_CREATE_PASTED_IMAGE: &str = "attachment/createPastedImage";
 pub const ATTACHMENT_CREATE_EMBEDDED_CANDIDATE: &str = "attachment/createEmbeddedCandidate";
 pub const ATTACHMENT_CONFIRM_EMBEDDED: &str = "attachment/confirmEmbedded";
 pub const ATTACHMENT_REFRESH_HANDLES: &str = "attachment/refreshHandles";
 pub const ATTACHMENT_RELEASE: &str = "attachment/release";
 pub const ATTACHMENT_REVEAL: &str = "attachment/reveal";
+pub const ATTACHMENT_REVEAL_SENT: &str = "attachment/revealSent";
 pub const SHELL_RESOLVE_FILE_REVEAL: &str = "shell/resolveFileReveal";
 pub const WORKSPACE_LIST_ROOTS: &str = "workspace/listRoots";
 pub const WORKSPACE_LIST_DIRECTORY: &str = "workspace/listDirectory";
@@ -84,12 +86,14 @@ pub const CLIENT_METHODS: &[&str] = &[
     ATTACHMENT_LIST_ROOTS,
     ATTACHMENT_LIST_DIRECTORY,
     ATTACHMENT_CREATE_FILE_REFERENCE,
+    ATTACHMENT_CREATE_LOCAL_FILE_REFERENCES,
     ATTACHMENT_CREATE_PASTED_IMAGE,
     ATTACHMENT_CREATE_EMBEDDED_CANDIDATE,
     ATTACHMENT_CONFIRM_EMBEDDED,
     ATTACHMENT_REFRESH_HANDLES,
     ATTACHMENT_RELEASE,
     ATTACHMENT_REVEAL,
+    ATTACHMENT_REVEAL_SENT,
     SHELL_RESOLVE_FILE_REVEAL,
     WORKSPACE_LIST_ROOTS,
     WORKSPACE_LIST_DIRECTORY,

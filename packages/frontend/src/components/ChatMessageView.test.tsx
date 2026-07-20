@@ -373,13 +373,14 @@ describe("ChatRow", () => {
     expect(toolHtml).toContain("git status --short");
   });
 
-  it("renders a single image attachment as prominent media before user text", async () => {
+  it("renders mixed user attachments as equal type-aware tiles before user text", async () => {
     const { ChatRow } = await import("./ChatMessageView");
     const html = renderToStaticMarkup(
       <ChatRow
         message={userMessage("u1", "Inspect this", [
           { kind: "file", label: "diagram.png", payload: { data: "aW1hZ2U=", mimeType: "image/png" } },
           { kind: "file", label: "notes.md" },
+          { kind: "file", label: "release.zip" },
         ])}
         onPermissionRespond={vi.fn()}
         taskId="task_1"
@@ -387,13 +388,16 @@ describe("ChatRow", () => {
     );
 
     expect(html).toContain('aria-label="Open diagram.png"');
-    expect(html).toContain('class="chat-image-grid" data-layout="single"');
+    expect(html).toContain('class="chat-attachment-list" data-layout="many"');
     expect(html).toContain('class="chat-image-preview"');
     expect(html).not.toContain('class="context-token-label">diagram.png</span>');
     expect(html).toContain('src="data:image/png;base64,aW1hZ2U="');
-    expect(html).toContain('class="chat-attachment-chip"><svg');
+    expect(html).toContain('class="file-kind-icon chat-file-kind-icon" data-file-kind="markdown"');
+    expect(html).toContain('class="file-kind-icon chat-file-kind-icon" data-file-kind="archive"');
+    expect(html).toContain('class="chat-attachment-label">notes.md</span>');
+    expect(html).toContain('class="chat-attachment-chip" title="notes.md"');
     expect(html).toContain("notes.md");
-    expect(html.indexOf("chat-image-grid")).toBeLessThan(html.indexOf("Inspect this"));
+    expect(html.indexOf("chat-attachment-list")).toBeLessThan(html.indexOf("Inspect this"));
   });
 
   it("renders typed Agent images, resources, and unsupported content explicitly", async () => {
@@ -538,7 +542,7 @@ describe("ChatRow", () => {
     );
 
     expect(html.match(/aria-label="Open image\.png"/g)).toHaveLength(3);
-    expect(html).toContain('class="chat-image-grid" data-layout="many"');
+    expect(html).toContain('class="chat-attachment-list" data-layout="many"');
     expect(html.indexOf("Zmlyc3Q=")).toBeLessThan(html.indexOf("c2Vjb25k"));
     expect(html.indexOf("c2Vjb25k")).toBeLessThan(html.indexOf("dGhpcmQ="));
   });
@@ -1098,6 +1102,72 @@ describe("ChatRow", () => {
     const button = ToolPath({ line: 12, path: "/workspace/notes.md" });
     button.props.onClick({ preventDefault: vi.fn(), stopPropagation: vi.fn() });
     expect(posted).toEqual([{ type: "tool.openPath", payload: { line: 12, path: "/workspace/notes.md" } }]);
+  });
+
+  it("routes sent files through the shell while Images retain preview actions", async () => {
+    const openSentFile = vi.fn();
+    const [{ installFrontendShell }, { ChatRow }] = await Promise.all([
+      import("../services/frontendShell"),
+      import("./ChatMessageView"),
+    ]);
+    installFrontendShell({
+      bootstrap: () => ({ surface: "invalid" }),
+      messages: { post: vi.fn(), subscribe: () => () => undefined },
+      navigation: {
+        openNewTask: vi.fn(),
+        openSettings: vi.fn(),
+        openTask: vi.fn(),
+        replaceSettingsTab: vi.fn(),
+        subscribe: () => () => undefined,
+      },
+      recovery: { openExternal: vi.fn() },
+      sentFiles: { sentFileAction: "reveal", openSentFile },
+    });
+    let tree: ReturnType<typeof create>;
+    act(() => {
+      tree = create(
+        <ChatRow
+          message={userMessage("u1", "Inspect", [
+            { kind: "image", label: "diagram.png", payload: { previewUrl: "data:image/png;base64,AQID" } },
+            { kind: "file", label: "notes.md" },
+          ])}
+          onPermissionRespond={vi.fn()}
+          taskId="task_1"
+        />,
+      );
+    });
+
+    expect(tree!.root.findByProps({ "aria-label": "Open diagram.png" })).toBeTruthy();
+    expect(tree!.root.findByProps({ "data-attachment-action": "preview" })).toBeTruthy();
+    expect(tree!.root.findByProps({ "data-attachment-action": "reveal" })).toBeTruthy();
+    act(() => tree!.root.findByProps({ "aria-label": "Reveal notes.md" }).props.onClick());
+    expect(openSentFile).toHaveBeenCalledWith({
+      taskId: "task_1",
+      messageId: "u1",
+      attachmentIndex: 1,
+      label: "notes.md",
+    });
+  });
+
+  it("labels web file attachments as downloads while Images remain previews", async () => {
+    const { UserMessageAttachments } = await import("./UserMessageAttachments");
+    const html = renderToStaticMarkup(
+      <UserMessageAttachments
+        attachments={[
+          { id: "image", image: { label: "diagram.png", url: "data:image/png;base64,AQID" }, label: "diagram.png" },
+          { id: "file", label: "release.zip" },
+        ]}
+        fileAction="download"
+        onOpenFile={vi.fn()}
+        onOpenImage={vi.fn()}
+      />,
+    );
+
+    expect(html).toContain('data-attachment-action="preview"');
+    expect(html).toContain('data-attachment-action="download"');
+    expect(html).toContain('data-attachment-tooltip="diagram.png"');
+    expect(html).toContain('data-attachment-tooltip="release.zip"');
+    expect(html).not.toContain("chat-attachment-action-cue");
   });
 
   it("normalizes file-list search paths before rendering openable tool paths", async () => {

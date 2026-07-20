@@ -132,6 +132,8 @@ fn get_routes_to_reliable_session_receive_with_acknowledgement() {
                     body: r#"{"frames":[]}"#.to_string(),
                 })
             },
+            |_stream, _request| panic!("GET must not enter file upload handling"),
+            |_stream, _request| panic!("session GET must not enter file download handling"),
         )
         .unwrap();
     });
@@ -200,6 +202,44 @@ fn oversized_body_returns_400_without_delegating() {
 }
 
 #[test]
+fn upload_route_does_not_apply_the_json_body_limit_or_buffer_the_file() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        handle_stream_with_routes(
+            &mut stream,
+            |_request| panic!("upload must not enter JSON-RPC handling"),
+            |_stream, _request| panic!("upload must not enter event-stream handling"),
+            |_stream, _request| panic!("upload must not enter session polling"),
+            |stream, request| {
+                assert_eq!(request.content_length, 10 * 1024 * 1024 + 1);
+                assert_eq!(request.initial_body, b"binary-prefix");
+                assert_eq!(request.file_name.as_deref(), Some("large data.bin"));
+                write_http_response(
+                    stream,
+                    &LocalHttpResponse {
+                        status: 200,
+                        body: "{}".to_string(),
+                    },
+                )
+            },
+            |_stream, _request| panic!("upload must not enter file download handling"),
+        )
+        .unwrap();
+    });
+
+    let response = send(
+        addr,
+        "POST /upload HTTP/1.1\r\nX-OpenAIDE-File-Name: large%20data.bin\r\nContent-Length: 10485761\r\n\r\nbinary-prefix",
+    );
+    server.join().unwrap();
+
+    assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
+}
+
+#[test]
 fn non_post_returns_405_without_delegating() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();
@@ -251,7 +291,7 @@ fn options_preflight_returns_cors_headers_without_delegating() {
     assert!(response.starts_with("HTTP/1.1 204 No Content\r\n"));
     assert!(response.contains("Access-Control-Allow-Origin: *\r\n"));
     assert!(response.contains("Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n"));
-    assert!(response.contains("Authorization, Content-Type, X-OpenAIDE-Connection-Id, X-OpenAIDE-Session-Id, X-OpenAIDE-After"));
+    assert!(response.contains("Authorization, Content-Type, X-OpenAIDE-Connection-Id, X-OpenAIDE-Client-Instance-Id, X-OpenAIDE-Session-Id, X-OpenAIDE-After, X-OpenAIDE-Task-Id, X-OpenAIDE-File-Name"));
     assert!(called_rx.try_recv().is_err());
 }
 

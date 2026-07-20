@@ -102,7 +102,7 @@ describe("task list row styles", () => {
     expect(appCss).toMatch(/\.chat-user\s*{[^}]*border:\s*0;[^}]*border-radius:\s*10px;[^}]*background:\s*color-mix\(in oklch, var\(--oa-focus\) 14%, var\(--oa-bg\)\);/);
     expect(appCss).toMatch(/\.chat-user\s*{[^}]*box-shadow:\s*none;[^}]*padding:\s*8px 11px;[^}]*overflow-wrap:\s*anywhere;/);
     expect(appCss).toMatch(/\.chat-user\s*{[^}]*white-space:\s*pre-wrap;/);
-    expect(appCss).toMatch(/\.chat-image-grid \+ \.chat-user,\s*\.chat-file-attachments \+ \.chat-user\s*{\s*margin-top:\s*6px;/);
+    expect(appCss).toMatch(/\.chat-attachment-list \+ \.chat-user\s*{\s*margin-top:\s*6px;/);
   });
 
   it("keeps copy actions in a compact row below their messages", () => {
@@ -533,11 +533,19 @@ describe("task list row styles", () => {
   });
 
   it("uses count-aware image layouts with overlaid composer removal controls", () => {
-    expect(appCss).toMatch(/\.composer-image-grid\[data-layout="single"\] \.composer-image-attachment\s*{[^}]*width:\s*min\(144px,\s*100%\);[^}]*height:\s*104px;/);
-    expect(appCss).toMatch(/\.composer-image-grid\[data-layout="pair"\] \.composer-image-attachment\s*{[^}]*width:\s*104px;[^}]*height:\s*80px;/);
-    expect(appCss).toMatch(/\.composer-image-grid\[data-layout="many"\] \.composer-image-attachment\s*{[^}]*width:\s*76px;[^}]*height:\s*64px;/);
+    expect(appCss).toMatch(/\.composer-attachment-list\[data-layout="single"\] \.composer-attachment-tile\s*{[^}]*width:\s*min\(144px,\s*100%\);[^}]*height:\s*104px;/);
+    expect(appCss).toMatch(/\.composer-attachment-list\[data-layout="pair"\] \.composer-attachment-tile\s*{[^}]*width:\s*104px;[^}]*height:\s*80px;/);
+    expect(appCss).toMatch(/\.composer-attachment-list\[data-layout="many"\] \.composer-attachment-tile\s*{[^}]*width:\s*76px;[^}]*height:\s*64px;/);
     expect(appCss).toMatch(/\.composer-image-remove\s*{[^}]*position:\s*absolute;[^}]*top:\s*4px;[^}]*right:\s*4px;/);
-    expect(appCss).toMatch(/\.chat-image-grid\[data-layout="single"\] \.chat-image-attachment\s*{[^}]*width:\s*min\(320px,\s*100%\);/);
+    expect(appCss).toMatch(/\.chat-attachment-list\[data-layout="single"\] \.chat-image-attachment\s*{[^}]*width:\s*min\(320px,\s*100%\);/);
+    expect(appCss).toMatch(/\.chat-attachment-list\[data-layout="single"\] \.chat-attachment-chip\s*{[^}]*width:\s*min\(220px,\s*100%\);[^}]*height:\s*116px;[^}]*flex-direction:\s*column;/);
+    expect(appCss).toMatch(/\.chat-attachment-list\[data-layout="pair"\] \.chat-attachment-chip\s*{[^}]*width:\s*min\(156px,\s*calc\(50% - 3px\)\);[^}]*height:\s*116px;/);
+    expect(appCss).toMatch(/\.chat-attachment-list\[data-layout="many"\] \.chat-attachment-chip\s*{[^}]*width:\s*128px;[^}]*height:\s*96px;/);
+    expect(appCss).toMatch(/\.chat-attachment-label\s*{[^}]*max-width:\s*100%;[^}]*overflow:\s*hidden;[^}]*text-overflow:\s*ellipsis;/);
+    expect(appCss).toMatch(/\.chat-attachment-action-overlay\s*{[^}]*position:\s*absolute;[^}]*inset:\s*0;[^}]*opacity:\s*0;/);
+    expect(appCss).toMatch(/\.chat-attachment-interactive:is\(:hover,\s*:focus-visible\) \.chat-attachment-action-overlay\s*{[^}]*opacity:\s*1;/);
+    expect(appCss).toMatch(/\.chat-attachment-interactive::after\s*{[^}]*content:\s*attr\(data-attachment-tooltip\);[^}]*position:\s*absolute;/);
+    expect(appCss).not.toContain(".chat-attachment-action-cue");
     expect(appCss).toMatch(/\.chat-image-preview\s*{[^}]*max-height:\s*240px;[^}]*object-fit:\s*contain;/);
   });
 

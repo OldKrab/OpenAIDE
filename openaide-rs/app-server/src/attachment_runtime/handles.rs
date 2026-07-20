@@ -11,7 +11,6 @@ use super::{
     AttachmentOwner, AttachmentRuntime, AttachmentRuntimeError, AttachmentTarget,
     ResolvedRevealAttachment,
 };
-#[cfg(test)]
 use super::{AttachmentSendReservation, ResolvedSendAttachments};
 
 impl AttachmentRuntime {
@@ -187,7 +186,6 @@ impl AttachmentRuntime {
         })
     }
 
-    #[cfg(test)]
     pub(crate) fn reserve_for_send(
         &self,
         owner: impl Into<AttachmentOwner>,
@@ -238,6 +236,7 @@ impl AttachmentRuntime {
         let attachments = ResolvedSendAttachments {
             chat_attachments,
             agent_attachments,
+            #[cfg(test)]
             fingerprint_handles,
         };
         drop(state);

@@ -3,10 +3,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { TaskFileBrowserCallbacks } from "./appControllerCallbackTypes";
 import {
   type FileMentionToken,
+  fileIconKind,
   useFileMentionPicker,
 } from "./ComposerFileMentions";
 
 describe("workspace file mention picker", () => {
+  it("classifies popular attachment formats for recognizable default icons", () => {
+    expect(fileIconKind("report.pdf")).toBe("pdf");
+    expect(fileIconKind("budget.xlsx")).toBe("spreadsheet");
+    expect(fileIconKind("deck.pptx")).toBe("presentation");
+    expect(fileIconKind("release.zip")).toBe("archive");
+    expect(fileIconKind("extension.vsix")).toBe("archive");
+    expect(fileIconKind("main.ts")).toBe("typescript");
+    expect(fileIconKind("unknown.bin")).toBe("file");
+  });
+
   beforeEach(() => {
     (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   });

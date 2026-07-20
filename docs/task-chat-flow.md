@@ -40,7 +40,7 @@ A Task Workspace is either the selected Project root or one durable worktree ide
 - Ordinary navigation, view unmount, and switching to Settings or an existing Task retain the lease and Native Session.
 - The first durably accepted User message atomically makes the same Prepared Task visible through normal Task queries and events.
 - App Server owns Task identity, Prepared-Task leases, pool policy, Native Session state, options, commands, readiness, capabilities, first-Send promotion, and durable Chat.
-- Frontend owns the unsent composer: prompt text, `@file` mention text, Image bytes and previews, and ephemeral streaming presentation.
+- Frontend owns the unsent composer: prompt text, `@file` mention text, Image bytes and previews, opaque file-attachment handles with safe labels, and ephemeral streaming/upload presentation. Raw local paths never enter Frontend state.
 - **Native Session update consumer** is the canonical name for the one session-lifetime listener that projects `session/update` notifications into Task state.
 - **Baseline** is a complete authoritative snapshot for one subscribed scope at one scope-local revision.
 
@@ -156,7 +156,7 @@ If Native Session preparation returns ACP `auth_required`, App Server keeps the 
 
 Task Navigation keeps saved Tasks and its ordinary empty state authoritative when optional Native Session Discovery fails. It renders a separate, non-blocking **Codex history unavailable** notice with exactly one cause-specific action: **Set up Codex**, **Sign in**, or **Try again**. **Set up Codex** and **Sign in** open the Codex Agent Settings detail without changing the retained New Task context; **Try again** reruns Native Session Discovery. Task Navigation never duplicates setup or authentication controls and never presents Native Session Discovery failure as an inability to load saved OpenAIDE Tasks.
 
-App Server Send capability contains authoritative readiness and blockers. Frontend combines it with local draft content and Image compatibility through one shared Composer availability model. ACP has no text-required prompt capability: a completely empty message is invalid, while Image-only input is valid when the selected Agent accepts Image content.
+App Server Send capability contains authoritative readiness and blockers. Frontend combines it with local draft content, pending uploads, and Image compatibility through one shared Composer availability model. ACP has no text-required prompt capability: a completely empty message is invalid, while Image-only and file-only input are valid.
 
 ### Navigation and release
 
@@ -176,7 +176,7 @@ message.text
 message.images[] { label, mimeType, data }
 ```
 
-Each Image is encoded inline from the Frontend-owned draft only when Send is invoked. The request does not resend Project, Agent, configuration values or catalogs, or the slash-command catalog. Those already belong to the Task and Native Session.
+Each Image is encoded inline from the Frontend-owned draft only when Send is invoked. General files are represented by ordered opaque attachment handles. The request does not resend Project, Agent, local paths, configuration values or catalogs, or the slash-command catalog. Those already belong to the Task, Native Session, or App Server attachment runtime.
 
 Frontend issues each `task/send` mutation once and never automatically replays it after timeout, disconnect, reconnect, reload, or an unknown transport outcome. An ordinary `clientRequestId` may correlate the request and response and record accepted-message provenance, but it is not a retry instruction and is not persisted across reload for replay. Frontend retries only the read-only event stream as defined by [ADR-0023](adr/0023-task-state-publication-and-replica-recovery.md).
 
@@ -187,7 +187,7 @@ Frontend marks the acquired Prepared Task as submitting while retaining the Comp
 The durable first-Send transaction:
 
 1. acquires the per-Task command lock shared by every Send-relevant Task mutation;
-2. reads Task state and validates the exact client lease, readiness, message shape, inline Images, aggregate limits, and Agent capability once under that lock;
+2. reads Task state and validates the exact client lease, readiness, message shape, attachment ownership/count, inline Images, aggregate Image limits, and Agent capability once under that lock;
 3. durably appends the User message and sets Task state to `starting`;
 4. changes New Task lifecycle from leased Prepared Task to visible, consuming the lease;
 5. updates state-root last-used Project and Agent defaults;
@@ -197,7 +197,7 @@ The durable first-Send transaction:
 
 Promotion and message acceptance are atomic for query readers. A stale Send after release or any other failed validation changes no durable Task state and leaves the Frontend draft untouched. App Server performs no ACP I/O while holding the Task command lock.
 
-App Server materializes the acceptance response from durable state before ACP prompt work. The accepted Task is `starting`, because the Agent has not received the prompt. After commit, App Server gives the Task's opaque Native Session handle and accepted message content to `NativeSessionService.startPrompt` in background execution. The service converts each accepted Image to ACP Image content and owns whether the underlying ACP session is live or must be loaded, resumed, or recreated. When prompt execution actually begins, the Task becomes `working`. A definitive service or Agent failure after durable acceptance becomes a Task state transition; it does not retroactively reject the accepted User message or restore the Frontend draft.
+App Server materializes the acceptance response from durable state before ACP prompt work. The accepted Task is `starting`, because the Agent has not received the prompt. After commit, App Server gives the Task's opaque Native Session handle and accepted message content to `NativeSessionService.startPrompt` in background execution. The service converts each accepted Image to ACP Image content and each general file to ACP `resource_link` content, and owns whether the underlying ACP session is live or must be loaded, resumed, or recreated. When prompt execution actually begins, the Task becomes `working`. A definitive service or Agent failure after durable acceptance becomes a Task state transition; it does not retroactively reject the accepted User message or restore the Frontend draft.
 
 Frontend remains on the New Task surface in submitting state until it reconciles acceptance. Because the UI permits only one in-flight Send per Task, success clears that Task's Composer directly and asks the App Shell to route to the now-visible Task id. It does not compare message text, message id, idempotency key, or a settlement key to clear the acknowledged Composer. Rejection leaves the Composer unchanged and does not route to the Task page.
 
@@ -205,7 +205,7 @@ First Send performs no history synchronization because the New Task has no Agent
 
 ### Steering messages
 
-A Send accepted while the Task is `working` is a steering message. App Server durably appends its text and Images to Chat and returns authoritative Task state, then asks `NativeSessionService.steer` to forward that accepted content to the same Native Session as another `session/prompt` request. The workflow does not wait for the steering response, and that response never controls Task status. The transport consumes or safely discards any eventual JSON-RPC response.
+A Send accepted while the Task is `working` is a steering message. App Server durably appends its text, Images, and file attachments to Chat and returns authoritative Task state, then asks `NativeSessionService.steer` to forward that accepted content to the same Native Session as another `session/prompt` request. The workflow does not wait for the steering response, and that response never controls Task status. The transport consumes or safely discards any eventual JSON-RPC response.
 
 ## Native Session Updates And Chat
 
@@ -342,7 +342,7 @@ A Task stores one optional title with Prompt, Agent, or User provenance. New Tas
 - Explicitly internal cleanup and support diagnostics may inspect New Tasks.
 - After promotion, normal visible-Task authorization and subscription rules apply.
 
-## Images And Workspace File Mentions
+## Images, File Attachments, And Workspace File Mentions
 
 An unsent Image is part of the Frontend-owned Composer draft, not a Task resource. Paste, drag/drop, and the image picker are only input methods for the same Image content kind.
 
@@ -352,12 +352,20 @@ An unsent Image is part of the Frontend-owned Composer draft, not a Task resourc
 - On Send, Frontend encodes the current Images inline in `task/send`. App Server validates supported MIME types, encoding, individual and aggregate limits, message shape, and Agent Image capability in the same acceptance transaction.
 - If the selected Agent lacks Image capability, Frontend retains the Images and blocks Send with an actionable explanation. App Server repeats the capability validation authoritatively.
 - Failed validation or unknown transport outcome leaves the local draft intact. Durable acceptance stores the Images with the User message; later ACP delivery failure is Task failure and does not restore or consume a second copy of the draft.
-- There are no pre-Send upload calls, attachment handles, Draft resources, Task-scoped image authorization rules, cross-tab handles, or unused server-side image cleanup.
-- Arbitrary device-file attachment is a follow-up feature. It must reuse this client-owned unsent-draft boundary and define its ACP representation and limits rather than revive Task-scoped pre-Send uploads.
+- Images have no pre-Send upload calls or attachment handles. General files use App Server-owned, client-and-Task-scoped pre-Send handles and safe display labels.
+
+The add-context menu also offers **Attach files**. At most 20 general files may be linked to one draft; OpenAIDE imposes no file-size limit.
+
+- The Web App streams each selected file through its authenticated same-origin App Server endpoint directly into a unique OS temp file. It runs at most two uploads concurrently, renders per-file progress and cancellation, deletes known partial/failed files best-effort, and blocks Send until every selected upload settles. Completed files remain under OS temp lifetime management. A sent-file click streams the still-available file back through an authenticated Task-and-message-scoped download route.
+- Native shells such as VS Code use a shell-owned picker. The trusted host gives the App Server exact selected paths; App Server grants access only to those files and references the originals without copying, including files outside the Task Workspace. A sent-file click asks the App Server to resolve that durable message attachment, then the trusted shell reveals it in VS Code Explorer or the operating-system file manager. Raw paths remain App Server and trusted-shell state; they are absent from Frontend state, protocol snapshots, diagnostics, and exports.
+- Composer Images and general files render in one ordered wrapping attachment list. Images retain preview behavior; file actions follow the current App Shell as described above.
+- Removing a draft attachment releases its opaque handle. Completed Web temp files remain OS-owned; cancellation or a failed upload removes a known partial file best-effort. Uploads are not resumable.
+- Dropped Images remain Image content. Other dropped files follow the same general-file upload/native-reference path.
+- On Send, App Server keeps handles reserved while validating and committing. Rejection releases the reservation so the user may retry; durable acceptance consumes the handles exactly once.
 
 Workspace files are not attachments. Typing `@` at the start of the prompt or after whitespace opens completion for the current Task Workspace. The App Server searches a bounded, watched index of tracked and non-ignored untracked files using effective Git ignore rules. Selecting a result inserts ordinary text as `@relative/path`, or `@"relative/path with spaces"` when quoting is required. The text remains with the Frontend draft across Agent, Project, and prepared-Task changes.
 
-The composer and persisted User messages style this syntax without adding click behavior or claiming the path still exists. `task/send` and ACP `session/prompt` receive unchanged text: this slice creates no attachment handle, structured mention, ACP `resource_link`, or embedded `resource`. The add-context menu offers image input only; workspace-file selection is exclusively the `@` completion flow.
+The composer and persisted User messages style this syntax without adding click behavior or claiming the path still exists. `task/send` and ACP `session/prompt` receive unchanged mention text: a mention creates no attachment handle, structured mention, ACP `resource_link`, or embedded `resource`. Workspace-file selection through `@` remains distinct from **Attach files**.
 
 ## Options And Slash Commands
 
@@ -395,5 +403,5 @@ An implementation conforms to this specification only when all of these are true
 9. A browser profile emits at most one OS notification for one eligible Task Attention Event and never emits an old unread backlog on startup.
 10. A VS Code extension host emits at most one workbench notification for one eligible Task Attention Event and never emits an old attention backlog on startup.
 11. App Server owns Task Attention state while each App Shell owns its local attention and notification capabilities.
-12. Unsent Composer text and Images have one Frontend owner and remain unchanged by Project, Agent, Task Workspace, navigation, reconnect, or Prepared-Task lease changes while the page remains alive.
+12. Unsent Composer text, Images, and safe attachment labels/handles have one Frontend owner and remain unchanged by Project, Agent, Task Workspace, navigation, reconnect, or Prepared-Task lease changes while the page remains alive; raw attachment paths remain trusted-shell/App Server-only and never enter Frontend state or snapshots.
 13. Product-client inactivity may expire client-scoped state but never determines App Server process lifetime; a changed process endpoint recovers through the same logical-session baseline barrier without mutation replay.

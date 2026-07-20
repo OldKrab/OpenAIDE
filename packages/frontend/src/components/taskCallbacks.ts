@@ -32,6 +32,7 @@ import { configOptionsMutable } from "../state/configOptionState";
 import { mapProtocolChatPage } from "../state/taskReadMapping";
 import type { AppCallbacksDependencies, TaskCallbacks } from "./appControllerCallbackTypes";
 import { refreshTaskSnapshotAfterMutationFailure } from "./taskSnapshotRefresh";
+import { currentFrontendShell } from "../services/frontendShell";
 
 type TaskDependencies = Pick<
   AppCallbacksDependencies,
@@ -268,9 +269,45 @@ function createTaskFileBrowserCallbacks(
 ) {
   const request = backendConnection?.request;
   const taskId = state.snapshot?.task.task_id;
+  const files = currentFrontendShell()?.files;
   if (!request || !taskId) return undefined;
   return {
     ownerKey: `task:${taskId}`,
+    ...(files ? { attachmentMode: files.kind, attachFiles: async (
+      selectedFiles: File[],
+      options: { onProgress: (progress: { loaded: number; total: number }) => void; signal: AbortSignal; maxFiles: number },
+    ) => {
+      const attachments = files.kind === "nativePicker"
+        ? await files.pick(taskId)
+        : selectedFiles.length === 1
+          ? [await files.upload(taskId, selectedFiles[0], options.onProgress, options.signal)]
+          : [];
+      const release = (attachment: (typeof attachments)[number]) => {
+        if (attachmentResources) {
+          attachmentResources.release({ taskId, handleId: attachment.handleId });
+          return;
+        }
+        releaseAttachmentResources(
+          backendConnection,
+          taskId,
+          [attachmentHandleResource(attachment.handleId)],
+        );
+      };
+      const adoption = attachmentResources?.beginAdoption(taskId);
+      if (attachmentResources && !adoption) {
+        attachments.forEach(release);
+        return;
+      }
+      for (const attachment of attachments.slice(0, options.maxFiles)) {
+        if (attachmentResources?.adopt({ taskId, handleId: attachment.handleId }, adoption) === false) return;
+        dispatch({
+          type: "taskInput:attachment:addAppServer",
+          taskId,
+          attachment: appServerAttachment(attachment),
+        });
+      }
+      attachments.slice(options.maxFiles).forEach(release);
+    } } : {}),
     searchFiles: (query: string) => request(TASK_SEARCH_FILES, {
       taskId: taskId as TaskId,
       query,

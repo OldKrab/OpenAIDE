@@ -184,7 +184,7 @@ test("sends an attachment-only first message through the real resolver boundary"
   await page.getByLabel("Add context").click();
   const chooser = page.waitForEvent("filechooser");
   await page.getByRole("menu", { name: "Add context" })
-    .getByRole("menuitem", { name: /Upload or photo/ })
+    .getByRole("menuitem", { name: /Attach images/ })
     .click();
   await (await chooser).setFiles({
     name: "pixel.png",
@@ -198,6 +198,66 @@ test("sends an attachment-only first message through the real resolver boundary"
   await expect(page).toHaveURL(/\/task\/task_/);
   await expect(page.getByLabel("Task chat").getByLabel("Open Image")).toBeVisible();
   await expect(page.getByLabel("Task status: Ready")).toBeVisible();
+});
+
+test("uploads a 2 MiB file and sends it with the first New Task message", async ({ page }) => {
+  await openPreparedNewTask(page);
+  await page.getByLabel("Add context").click();
+  const chooser = page.waitForEvent("filechooser");
+  await page.getByRole("menu", { name: "Add context" })
+    .getByRole("menuitem", { name: /Attach files/ })
+    .click();
+  await (await chooser).setFiles({
+    name: "two-megabytes.bin",
+    mimeType: "application/octet-stream",
+    buffer: Buffer.alloc(2 * 1024 * 1024, 7),
+  });
+
+  const attached = page.getByLabel("Attached context");
+  await expect(attached.getByText("two-megabytes.bin", { exact: true })).toBeVisible();
+  await page.getByRole("textbox", { name: "Message" }).fill("smoke:file attachment");
+  await page.getByLabel("Send message").click();
+
+  await expect(page).toHaveURL(/\/task\/task_/);
+  await expect(page.getByLabel("Task chat").locator("p.chat-user")).toHaveText("smoke:file attachment");
+  await expect(page.getByText("Reselect attachments from the file browser before sending.")).toHaveCount(0);
+  await expect(page.getByLabel("Task status: Ready")).toBeVisible();
+
+  const downloadPromise = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Download two-megabytes.bin" }).click();
+  const download = await downloadPromise;
+  expect(download.suggestedFilename()).toBe("two-megabytes.bin");
+  const stream = await download.createReadStream();
+  let downloadedBytes = 0;
+  for await (const chunk of stream) downloadedBytes += chunk.length;
+  expect(downloadedBytes).toBe(2 * 1024 * 1024);
+});
+
+test("keeps Images and files in one composer attachment list", async ({ page }) => {
+  await openPreparedNewTask(page);
+  await page.getByLabel("Add context").click();
+  let chooser = page.waitForEvent("filechooser");
+  await page.getByRole("menuitem", { name: /Attach images/ }).click();
+  await (await chooser).setFiles({
+    name: "pixel.png",
+    mimeType: "image/png",
+    buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64"),
+  });
+  await page.getByLabel("Add context").click();
+  chooser = page.waitForEvent("filechooser");
+  await page.getByRole("menuitem", { name: /Attach files/ }).click();
+  await (await chooser).setFiles({
+    name: "notes.md",
+    mimeType: "text/markdown",
+    buffer: Buffer.from("attachment list"),
+  });
+
+  const list = page.getByLabel("Attached context").locator(".composer-attachment-list");
+  await expect(list).toHaveCount(1);
+  await expect(list.locator(".composer-attachment-tile")).toHaveCount(2);
+  const tops = await list.locator(".composer-attachment-tile").evaluateAll((tiles) =>
+    tiles.map((tile) => Math.round(tile.getBoundingClientRect().top)));
+  expect(new Set(tops).size).toBe(1);
 });
 
 test("closes one permission for every client when either client answers", async ({ page, context }) => {

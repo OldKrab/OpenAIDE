@@ -164,7 +164,10 @@ fn creates_file_reference_handle_from_file_entry() {
         .unwrap();
 
     assert_eq!(created.attachment.label, "notes.md");
-    assert_eq!(resolved.chat_attachments()[0].path, None);
+    assert_eq!(
+        resolved.chat_attachments()[0].path.as_deref(),
+        Some(temp.path().join("notes.md").to_string_lossy().as_ref())
+    );
     assert_eq!(
         resolved.agent_attachments()[0].path.as_deref(),
         Some(temp.path().join("notes.md").to_string_lossy().as_ref())
@@ -325,7 +328,10 @@ fn confirms_embedded_candidate_into_sendable_text_handle() {
         .resolve_for_send(&task_id, &[confirmed.attachments[0].handle_id.clone()])
         .unwrap();
     assert_eq!(confirmed.attachments[0].label, "notes.txt");
-    assert_eq!(resolved.chat_attachments()[0].path, None);
+    assert_eq!(
+        resolved.chat_attachments()[0].path.as_deref(),
+        Some(temp.path().join("notes.txt").to_string_lossy().as_ref())
+    );
     assert_eq!(
         resolved.agent_attachments()[0].payload.as_ref().unwrap()["text"],
         "hello embedded"
@@ -870,7 +876,10 @@ fn resolves_file_reference_handles_for_matching_task() {
 
     let chat = resolved.chat_attachments();
     assert_eq!(chat[0].label, "notes.md");
-    assert_eq!(chat[0].path, None);
+    assert_eq!(
+        chat[0].path.as_deref(),
+        Some(files.path().join("notes.md").to_string_lossy().as_ref())
+    );
     let agent = resolved.agent_attachments();
     assert_eq!(
         agent[0].path.as_deref(),

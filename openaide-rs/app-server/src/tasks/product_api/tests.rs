@@ -1537,7 +1537,7 @@ fn workspace_directory_lists_child_directories_for_picker() {
     std::fs::write(workspace_parent.join("README.md"), "readme").unwrap();
     let api = TaskProductApi::new(
         store.clone(),
-        Arc::new(StorageProjectResolver::new(store)),
+        Arc::new(StorageProjectResolver::new(store.clone())),
         AgentRegistry::default_built_ins(),
         Arc::new(crate::agent::mock::MockAgent),
         TaskUpdateNotifier::disabled(),
@@ -3507,6 +3507,7 @@ fn send_post_commit_start_failure_allows_client_to_resend_inline_image() {
         message: ComposerMessage {
             text: Some("hello".to_string()),
             images: vec![inline_image()],
+            attachments: Vec::new(),
         },
     };
     let accepted = api
@@ -3524,6 +3525,7 @@ fn send_post_commit_start_failure_allows_client_to_resend_inline_image() {
             message: ComposerMessage {
                 text: Some("reuse".to_string()),
                 images: vec![inline_image()],
+                attachments: Vec::new(),
             },
         })
         .expect("inline image bytes remain client-owned and can be resent");
@@ -3551,6 +3553,82 @@ fn send_post_commit_start_failure_allows_client_to_resend_inline_image() {
             ..
         }
     )));
+}
+
+#[test]
+fn send_accepts_a_file_only_message_and_forwards_the_original_path() {
+    let temp = tempfile::tempdir().unwrap();
+    let workspace = temp.path().join("workspace");
+    std::fs::create_dir(&workspace).unwrap();
+    let selected = workspace.join("large-model.bin");
+    std::fs::write(&selected, b"model bytes").unwrap();
+    let store = Store::open(temp.path().join("state")).unwrap();
+    store
+        .write_task(&task_record(
+            "task-existing",
+            workspace.to_string_lossy().as_ref(),
+        ))
+        .unwrap();
+    let agent = Arc::new(RecordingAgent::default());
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        agent.clone(),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+    let task_id = openaide_app_server_protocol::ids::TaskId::from("task-existing");
+    let attachment = api
+        .attachment_runtime()
+        .create_local_file_reference(
+            crate::attachment_runtime::AttachmentOwner::new(
+                &crate::attachment_runtime::AttachmentOwner::test_client_instance_id(),
+                &task_id,
+            ),
+            &selected,
+            None,
+        )
+        .unwrap();
+
+    api.send(TaskSendParams {
+        task_id,
+        message: ComposerMessage {
+            text: None,
+            images: Vec::new(),
+            attachments: vec![attachment.handle_id],
+        },
+    })
+    .unwrap();
+    wait_until(|| agent.prompts.load(Ordering::SeqCst) == 1);
+
+    let prompts = agent.prompt_attachments.lock().unwrap();
+    assert_eq!(prompts[0][0].kind, "file_reference");
+    assert_eq!(
+        prompts[0][0].path.as_deref(),
+        Some(selected.to_string_lossy().as_ref())
+    );
+    let messages = store.read_messages("task-existing").unwrap();
+    assert!(messages.iter().any(|message| matches!(
+        &message.chat.message,
+        NormalizedMessage::User { attachments, .. }
+            if attachments.first().and_then(|attachment| attachment.path.as_deref())
+                == Some(selected.to_string_lossy().as_ref())
+    )));
+    let user_message = messages
+        .iter()
+        .find(|message| matches!(message.chat.message, NormalizedMessage::User { .. }))
+        .unwrap();
+    let resolved = api
+        .resolve_sent_file(
+            &crate::attachment_runtime::AttachmentOwner::test_client_instance_id(),
+            &TaskId::from("task-existing"),
+            &user_message.chat.message_id,
+            0,
+        )
+        .unwrap();
+    assert_eq!(resolved.path, selected);
+    assert_eq!(resolved.label, "large-model.bin");
 }
 
 #[test]
@@ -3816,6 +3894,7 @@ fn send_rejects_invalid_inline_image_without_committing() {
             message: ComposerMessage {
                 text: Some("hello".to_string()),
                 images: vec![image],
+                attachments: Vec::new(),
             },
         })
         .unwrap_err();
@@ -3853,6 +3932,7 @@ fn send_commits_inline_image_as_image_chat_content() {
             message: ComposerMessage {
                 text: Some("hello".to_string()),
                 images: vec![inline_image()],
+                attachments: Vec::new(),
             },
         })
         .unwrap();
@@ -3919,6 +3999,7 @@ fn send_commits_inline_image_without_an_empty_text_part() {
             message: ComposerMessage {
                 text: None,
                 images: vec![inline_image()],
+                attachments: Vec::new(),
             },
         })
         .unwrap();
@@ -3960,6 +4041,7 @@ fn rejected_send_keeps_inline_image_available_for_retry() {
     let message = ComposerMessage {
         text: Some("hello".to_string()),
         images: vec![inline_image()],
+        attachments: Vec::new(),
     };
 
     let mut unavailable = store.read_task("task-existing").unwrap();
@@ -4042,6 +4124,7 @@ fn send_rejects_a_selected_file_replaced_with_an_escaping_symlink_without_commit
             message: ComposerMessage {
                 text: Some("hello".to_string()),
                 images: vec![inline_image()],
+                attachments: Vec::new(),
             },
         })
         .unwrap_err();
@@ -5757,6 +5840,7 @@ fn send_params(task_id: &str, text: &str) -> TaskSendParams {
         message: ComposerMessage {
             text: Some(text.to_string()),
             images: Vec::new(),
+            attachments: Vec::new(),
         },
     }
 }

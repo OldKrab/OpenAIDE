@@ -182,7 +182,7 @@ pub(crate) trait TaskArchiveWorkflow: Send + Sync {
     ) -> Result<(), ProtocolError>;
 }
 
-pub(crate) use attachments::AttachmentFileBrowserWorkflow;
+pub(crate) use attachments::{AttachmentFileBrowserWorkflow, ResolvedSentFile};
 pub(crate) use chat_page::TaskChatPageWorkflow;
 
 impl TaskProductApi {

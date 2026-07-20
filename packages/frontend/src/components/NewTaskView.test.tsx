@@ -469,6 +469,44 @@ describe("NewTaskView", () => {
     expect(onSubmitTask).not.toHaveBeenCalled();
   });
 
+  it("keeps settled Agent controls visible while a replacement Prepared Task catches up", () => {
+    const state = createInitialState();
+    const project = { projectId: "project_1", label: "OpenAIDE" };
+    state.projects = [project];
+    state.newTask.selection = selectionWithProject(state.newTask.selection, project);
+    state.newTask.configOptions = {
+      agent_id: "codex",
+      options: [{
+        category: "model",
+        kind: "select",
+        current_value: { type: "id", value: "preserved-model" },
+        id: "model",
+        label: "Model",
+        values: [{ id: "preserved-model", label: "Preserved model" }],
+      }],
+      status: "ready",
+    };
+    state.snapshot = {
+      ...taskSnapshot("task_replacement", false),
+      agent_config: { agent_id: "codex", options: [], status: "loading" },
+      send_capability: { state: "loading" },
+    };
+
+    const tree = render(
+      <NewTaskView
+        agents={[]}
+        dispatch={vi.fn()}
+        onSelectConfigOption={vi.fn()}
+        onSubmitTask={vi.fn()}
+        state={state}
+        submitShortcut="mod_enter"
+      />,
+    );
+
+    expect(composerControlLabels(tree)).toContain("Preserved model");
+    expect(textContent(tree)).not.toContain("Preparing Codex options");
+  });
+
   it("preserves typed new-task text after the New Task is prepared", () => {
     let state = createInitialState();
     const project = { projectId: "project_1", label: "OpenAIDE" };
@@ -559,8 +597,8 @@ describe("NewTaskView", () => {
     act(() => tree.root.findByProps({ "aria-label": "Add context" }).props.onClick());
 
     expect(tree.root.findAllByType("strong").some((node) => node.children.join("") === "Workspace files")).toBe(false);
-    expect(menuButtonByStrongLabel(tree, "Upload or photo").props.disabled).toBeFalsy();
-    expect(tree.root.findAllByProps({ type: "file" })[0].props.disabled).toBeFalsy();
+    expect(menuButtonByStrongLabel(tree, "Attach images").props.disabled).toBeFalsy();
+    expect(tree.root.findByProps({ type: "file", accept: "image/*" }).props.disabled).toBeFalsy();
   });
 
   it("renders prepared Task image previews without a visible file name", () => {
@@ -595,6 +633,48 @@ describe("NewTaskView", () => {
     expect(editorHtml(tree)).toBe("Explain this");
   });
 
+  it("renders prepared Task files beside Images with the same attachment tile vocabulary", () => {
+    const state = createInitialState();
+    const project = { projectId: "project_1", label: "OpenAIDE" };
+    state.projects = [project];
+    state.newTask.selection = selectionWithProject(state.newTask.selection, project);
+    state.newTask.configOptions = { agent_id: "codex", options: [], status: "ready" };
+    state.snapshot = taskSnapshot("task_1", false);
+    state.newTask.context = [{
+      kind: "image",
+      label: "diagram.png",
+      local_id: "image-1",
+      preview_url: "data:image/png;base64,AQID",
+      payload: { data: "AQID", mimeType: "image/png" },
+    }];
+    state.taskInputs.task_1 = {
+      prompt: "Inspect both",
+      context: [{
+        kind: "file",
+        label: "notes.md",
+        local_id: "file-1",
+        app_server_handle_id: "attachment-handle-1" as never,
+      }],
+    };
+
+    const tree = render(
+      <NewTaskView
+        agents={[]}
+        dispatch={vi.fn()}
+        onSelectConfigOption={vi.fn()}
+        onSubmitTask={vi.fn()}
+        state={state}
+        submitShortcut="mod_enter"
+      />,
+    );
+
+    expect(textContent(tree)).toContain("notes.md");
+    expect(tree.root.findAll((node) => node.props.className?.includes("composer-attachment-tile")))
+      .toHaveLength(2);
+    const composerHtml = JSON.stringify(tree.toJSON());
+    expect(composerHtml.indexOf("notes.md")).toBeLessThan(composerHtml.indexOf("composer-editor"));
+  });
+
   it("allows a prepared New Task to send a valid Image without text", () => {
     const state = createInitialState();
     const project = { projectId: "project_1", label: "OpenAIDE" };
@@ -622,6 +702,36 @@ describe("NewTaskView", () => {
     );
 
     expect(textContent(tree)).not.toContain("Add a message for this Agent.");
+    expect(tree.root.findByProps({ "aria-label": "Send message" }).props.disabled).toBe(false);
+  });
+
+  it("allows a prepared New Task to send a file without Image capability", () => {
+    const state = createInitialState();
+    const project = { projectId: "project_1", label: "OpenAIDE" };
+    state.projects = [project];
+    state.newTask.selection = selectionWithProject(state.newTask.selection, project);
+    state.newTask.configOptions = { agent_id: "codex", options: [], status: "ready" };
+    state.newTask.context = [{
+      kind: "file",
+      label: "model.bin",
+      local_id: "file-1",
+      app_server_handle_id: "attachment-handle-1" as never,
+    }];
+    state.snapshot = { ...taskSnapshot("task_1", false), input_capabilities: { image: false } };
+
+    const tree = render(
+      <NewTaskView
+        agents={[]}
+        dispatch={vi.fn()}
+        onSelectConfigOption={vi.fn()}
+        onSubmitTask={vi.fn()}
+        state={state}
+        submitShortcut="mod_enter"
+      />,
+    );
+
+    expect(textContent(tree)).not.toContain("does not accept images");
+    expect(textContent(tree)).not.toContain("Attached context is not ready");
     expect(tree.root.findByProps({ "aria-label": "Send message" }).props.disabled).toBe(false);
   });
 

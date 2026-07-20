@@ -324,6 +324,12 @@ start_systemd_server() {
   local npm_bin
   npm_bin="$(command -v npm)"
   local systemd_trace_env_args=()
+  local systemd_tmp_env_args=()
+  if [[ -n "${TMPDIR:-}" ]]; then
+    # systemd-run does not inherit arbitrary shell variables; preserve the OS
+    # temp selection used for streamed Web attachment bodies.
+    systemd_tmp_env_args+=(--setenv "TMPDIR=$TMPDIR")
+  fi
   if [[ -v OPENAIDE_ACP_TRACE ]]; then
     systemd_trace_env_args+=(--setenv "OPENAIDE_ACP_TRACE=$OPENAIDE_ACP_TRACE")
   fi
@@ -341,6 +347,7 @@ start_systemd_server() {
     --setenv "HOME=$HOME" \
     --setenv "PATH=$PATH" \
     --setenv "NODE_OPTIONS=$node_options" \
+    "${systemd_tmp_env_args[@]}" \
     --setenv "OPENAIDE_WEB_INSTANCE_LABEL=${OPENAIDE_WEB_INSTANCE_LABEL:-}" \
     --setenv "OPENAIDE_WEB_TITLE=${OPENAIDE_WEB_TITLE:-}" \
     --setenv "OPENAIDE_WEB_HOST=$host" \

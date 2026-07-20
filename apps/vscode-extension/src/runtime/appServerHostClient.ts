@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  ATTACHMENT_CREATE_LOCAL_FILE_REFERENCES,
   CLIENT_CAPABILITIES_CHANGED,
   createReliableLocalHttpBackendConnection,
   isAppServerSessionViewMessage,
@@ -124,6 +125,19 @@ export class AppServerHostClient {
     if (message.type === "appServer.session.unregisterRequestHandler") {
       view.requestMethods.delete(message.method);
       this.releaseUnusedServerRequestHandler(message.method);
+      return true;
+    }
+    if (
+      message.type === "appServer.session.request"
+      && message.method === ATTACHMENT_CREATE_LOCAL_FILE_REFERENCES
+    ) {
+      view.post({
+        type: "appServer.session.response",
+        requestId: message.requestId,
+        error: serializeBridgeError(new Error(
+          "This App Server method is available only to the extension host.",
+        )),
+      });
       return true;
     }
 

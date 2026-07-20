@@ -235,26 +235,32 @@ async function proxyAppServer(req, res, url) {
     writeText(res, 405, "Method not allowed");
     return;
   }
-  const body = req.method === "POST" ? await readRequestBody(req) : Buffer.alloc(0);
+  const isUpload = req.method === "POST" && url.pathname.endsWith("/upload");
+  const isDownload = req.method === "GET" && url.pathname.endsWith("/download");
   await startAppServer();
+  const body = req.method === "POST" && !isUpload ? await readRequestBody(req) : Buffer.alloc(0);
   // An ambiguous proxy failure may happen after App Server acceptance. Only the
   // sequenced client transport may retry the identical frame; the proxy must
   // never manufacture a second application delivery.
-  await forwardAppServerRequest(req, res, url, body);
+  await forwardAppServerRequest(req, res, url, body, isUpload, isDownload);
 }
 
-function forwardAppServerRequest(req, res, url, body) {
+function forwardAppServerRequest(req, res, url, body, isUpload, isDownload) {
   const appServerConnection = appServerManager.currentConnection();
   const appServerUrl = appServerManager.currentUrl();
   if (!appServerConnection || !appServerUrl) {
     return Promise.reject(new Error("App Server connection is not ready"));
   }
   return new Promise((resolve, reject) => {
-    const headers = appServerHeaders(req.headers, appServerUrl.host, appServerConnection.authToken, body.byteLength);
+    const contentLength = isUpload ? Number(req.headers["content-length"] ?? 0) : body.byteLength;
+    const headers = appServerHeaders(req.headers, appServerUrl.host, appServerConnection.authToken, contentLength);
+    const appServerPath = isUpload || isDownload
+      ? `${appServerUrl.pathname.replace(/\/$/, "")}/${isUpload ? "upload" : "download"}`
+      : appServerUrl.pathname;
     const proxyReq = http.request({
       hostname: appServerUrl.hostname,
       port: Number(appServerUrl.port),
-      path: appServerUrl.pathname + url.search,
+      path: appServerPath + url.search,
       method: req.method,
       headers,
     }, (proxyRes) => {
@@ -271,7 +277,8 @@ function forwardAppServerRequest(req, res, url, body) {
       pendingResponse.handoff();
       reject(error);
     });
-    proxyReq.end(body);
+    if (isUpload) req.pipe(proxyReq);
+    else proxyReq.end(body);
   });
 }
 

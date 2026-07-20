@@ -1,5 +1,6 @@
-import { Code2 } from "lucide-react";
+import { Download, Eye, FolderOpen, type LucideIcon } from "lucide-react";
 import { attachmentImageLayout, type AttachmentImagePreviewSource } from "./AttachmentImagePreview";
+import { FileKindIcon } from "./ComposerFileMentions";
 
 export interface UserMessageAttachmentItem {
   id: string;
@@ -10,43 +11,67 @@ export interface UserMessageAttachmentItem {
 /** Keeps optimistic and persisted user-message attachments on the same visual contract. */
 export function UserMessageAttachments({
   attachments,
+  fileAction,
+  onOpenFile,
   onOpenImage,
 }: {
   attachments: UserMessageAttachmentItem[];
+  fileAction?: "download" | "reveal";
+  onOpenFile?: (attachment: UserMessageAttachmentItem, index: number) => void;
   onOpenImage: (image: AttachmentImagePreviewSource) => void;
 }) {
-  const imageAttachments = attachments.filter(
-    (item): item is UserMessageAttachmentItem & { image: AttachmentImagePreviewSource } => Boolean(item.image),
-  );
-  const fileAttachments = attachments.filter((item) => !item.image);
-
   return (
-    <>
-      {imageAttachments.length > 0 ? (
-        <div className="chat-image-grid" data-layout={attachmentImageLayout(imageAttachments.length)}>
-          {imageAttachments.map(({ id, image, label }) => (
+    <div className="chat-attachment-list" data-layout={attachmentImageLayout(attachments.length)}>
+      {attachments.map((attachment, index) => attachment.image ? (
             <button
-              aria-label={`Open ${label}`}
-              className="chat-image-attachment"
-              key={id}
-              onClick={() => onOpenImage(image)}
+              aria-label={`Open ${attachment.label}`}
+              className="chat-image-attachment chat-attachment-interactive"
+              data-attachment-tooltip={attachment.label}
+              key={attachment.id}
+              onClick={() => onOpenImage(attachment.image as AttachmentImagePreviewSource)}
               type="button"
             >
-              <img className="chat-image-preview" src={image.url} alt={`${label} preview`} />
+              <img className="chat-image-preview" src={attachment.image.url} alt={`${attachment.label} preview`} />
+              <AttachmentAction action="preview" />
             </button>
-          ))}
-        </div>
-      ) : null}
-      {fileAttachments.length > 0 ? (
-        <div className="chat-file-attachments" aria-label="Attached files">
-          {fileAttachments.map(({ id, label }) => (
-            <span className="chat-attachment-chip" key={id}>
-              <Code2 size={11} />
-              {label}
+          ) : onOpenFile && fileAction ? (
+            <button
+              aria-label={`${fileAction === "download" ? "Download" : "Reveal"} ${attachment.label}`}
+              className="chat-attachment-chip chat-attachment-interactive"
+              data-attachment-tooltip={attachment.label}
+              key={attachment.id}
+              onClick={() => onOpenFile(attachment, index)}
+              type="button"
+            >
+              <FileKindIcon className="chat-file-kind-icon" path={attachment.label} size={28} />
+              <span className="chat-attachment-label">{attachment.label}</span>
+              <AttachmentAction action={fileAction} />
+            </button>
+          ) : (
+            <span className="chat-attachment-chip" key={attachment.id} title={attachment.label}>
+              <FileKindIcon className="chat-file-kind-icon" path={attachment.label} size={28} />
+              <span className="chat-attachment-label">{attachment.label}</span>
             </span>
           ))}
-        </div>
-      ) : null}
-    </>
+    </div>
+  );
+}
+
+function AttachmentAction({ action }: { action: "download" | "preview" | "reveal" }) {
+  const actionDetails: Record<typeof action, { Icon: LucideIcon; label: string }> = {
+    download: { Icon: Download, label: "Download" },
+    preview: { Icon: Eye, label: "Preview" },
+    reveal: { Icon: FolderOpen, label: "Reveal" },
+  };
+  const { Icon, label } = actionDetails[action];
+  return (
+    <span
+      aria-hidden="true"
+      className="chat-attachment-action-overlay"
+      data-attachment-action={action}
+    >
+      <Icon size={17} />
+      <span>{label}</span>
+    </span>
   );
 }

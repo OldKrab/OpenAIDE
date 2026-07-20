@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as vscode from "vscode";
 import {
+  ATTACHMENT_CREATE_LOCAL_FILE_REFERENCES,
   SETTINGS_GET_RUNTIME,
 } from "@openaide/app-server-client";
 import { handleWebviewMessage } from "./messaging";
@@ -71,6 +72,7 @@ vi.mock("vscode", () => ({
   window: {
     showErrorMessage: vi.fn(),
     showInformationMessage: vi.fn(),
+    showOpenDialog: vi.fn(),
     showTextDocument: vi.fn(),
     showWarningMessage: vi.fn(),
   },
@@ -87,6 +89,7 @@ describe("webview messaging composer routes", () => {
     vi.mocked(vscode.workspace.openTextDocument).mockClear();
     vi.mocked(vscode.window.showTextDocument).mockClear();
     vi.mocked(vscode.window.showInformationMessage).mockClear();
+    vi.mocked(vscode.window.showOpenDialog).mockReset();
     vi.mocked(vscode.window.showWarningMessage).mockClear();
     vi.mocked(vscode.window.showErrorMessage).mockClear();
     workspaceMocks.firstWorkspaceRoot.mockReturnValue("/workspace/fallback");
@@ -401,7 +404,7 @@ describe("webview messaging composer routes", () => {
     ]);
   });
 
-  it("opens App Server reveal file requests through the originating App Server handle", async () => {
+  it("reveals App Server files in the VS Code Explorer when they belong to the workspace", async () => {
     const posted: unknown[] = [];
     const runtime = {
       appServerRequest: vi.fn(async () => ({
@@ -430,8 +433,11 @@ describe("webview messaging composer routes", () => {
       originatingClientInstanceId: "client-1",
       fileHandleId: "file-reveal-1",
     });
-    expect(vscode.workspace.openTextDocument).toHaveBeenCalledWith({ fsPath: "/workspace/app/src/main.rs" });
-    expect(vscode.window.showTextDocument).toHaveBeenCalledWith(undefined, { preview: true });
+    expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
+      "revealInExplorer",
+      { fsPath: "/workspace/app/src/main.rs" },
+    );
+    expect(vscode.workspace.openTextDocument).not.toHaveBeenCalled();
     expect(posted).toEqual([
       {
         type: "appServer.serverRequest.result",
@@ -442,6 +448,45 @@ describe("webview messaging composer routes", () => {
         },
       },
     ]);
+  });
+
+  it("reveals App Server files outside the workspace in the OS file manager", async () => {
+    const posted: unknown[] = [];
+    const runtime = {
+      appServerRequest: vi.fn(async () => ({
+        path: "/tmp/report.zip",
+        label: "report.zip",
+      })),
+    };
+
+    await handleWebviewMessage(
+      {
+        type: "appServer.serverRequest",
+        payload: {
+          requestId: "server-request-5",
+          method: "shell/revealFile",
+          params: {
+            originatingClientInstanceId: "client-1",
+            fileHandleId: "file-reveal-2",
+            label: "report.zip",
+          },
+        },
+      },
+      context(runtime, posted),
+    );
+
+    expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
+      "revealFileInOS",
+      { fsPath: "/tmp/report.zip" },
+    );
+    expect(posted).toContainEqual({
+      type: "appServer.serverRequest.result",
+      payload: {
+        requestId: "server-request-5",
+        method: "shell/revealFile",
+        result: { revealed: true },
+      },
+    });
   });
 
   it("routes diagnostics snapshot and export requests", async () => {
@@ -512,6 +557,7 @@ describe("webview messaging composer routes", () => {
     );
     expect(posted).toEqual([]);
   });
+
 
   it("returns workspace roots to the webview", async () => {
     const posted: unknown[] = [];
@@ -591,6 +637,35 @@ describe("webview messaging composer routes", () => {
 
     expect(vscode.env.openExternal).toHaveBeenCalledWith({ value: "https://nodejs.org/en/download" });
     expect(vscode.commands.executeCommand).toHaveBeenCalledWith("workbench.action.reloadWindow");
+  });
+
+  it("brokers native file paths directly from VS Code to the App Server", async () => {
+    vi.mocked(vscode.window.showOpenDialog).mockResolvedValue([
+      { fsPath: "/outside/large-model.bin" } as vscode.Uri,
+    ]);
+    const runtime = {
+      appServerRequest: vi.fn().mockResolvedValue({
+        attachments: [{ handleId: "attachment-1", label: "large-model.bin" }],
+      }),
+    };
+    const posted: unknown[] = [];
+
+    await handleWebviewMessage({
+      type: "attachment.pickFiles",
+      payload: { requestId: "pick-1", taskId: "task-1" },
+    }, context(runtime, posted));
+
+    expect(runtime.appServerRequest).toHaveBeenCalledWith(
+      ATTACHMENT_CREATE_LOCAL_FILE_REFERENCES,
+      { taskId: "task-1", paths: ["/outside/large-model.bin"] },
+    );
+    expect(posted).toEqual([{
+      type: "attachment.pickFiles.result",
+      payload: {
+        requestId: "pick-1",
+        attachments: [{ handleId: "attachment-1", label: "large-model.bin" }],
+      },
+    }]);
   });
 });
 

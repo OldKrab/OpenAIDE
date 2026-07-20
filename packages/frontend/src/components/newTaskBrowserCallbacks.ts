@@ -2,6 +2,7 @@ import {
   ATTACHMENT_CREATE_FILE_REFERENCE,
   ATTACHMENT_LIST_DIRECTORY,
   ATTACHMENT_LIST_ROOTS,
+  CLIENT_HEARTBEAT,
   TASK_SEARCH_FILES,
   WORKSPACE_LIST_DIRECTORY,
   WORKSPACE_LIST_ROOTS,
@@ -32,6 +33,7 @@ import {
   disposableNewTaskControllerId,
   type NewTaskController,
 } from "./newTaskController";
+import { currentFrontendShell } from "../services/frontendShell";
 
 type NewTaskBrowserDependencies = Pick<
   AppCallbacksDependencies,
@@ -85,6 +87,7 @@ function createFileBrowserCallbacks({
   state,
 }: NewTaskBrowserDependencies) {
   const request = backendConnection?.request;
+  const files = currentFrontendShell()?.files;
   if (!request) return undefined;
   const preparationKey = newTaskPreparationKey(state);
   const operation = asyncOperations.scope(
@@ -107,27 +110,54 @@ function createFileBrowserCallbacks({
     request,
     taskId,
   });
-  const ensureTaskId = async (draft?: NewTaskDraftInput) => {
+  const ensureTaskId = async (draft?: NewTaskDraftInput, ignorePendingPreparation = false) => {
     assertOperationCurrent();
     const activePreparationKey = preparationKey as string;
+    // A native/web picker can outlive the render that created these callbacks.
+    // Reuse preparation that completed while the picker was open instead of
+    // acquiring a second Task and releasing the ready options snapshot.
+    if (!preparedTaskId) {
+      const retainedSnapshot = newTaskController.getSnapshot();
+      if (
+        retainedSnapshot
+        && preparedSnapshotMatchesSelection({ ...state, snapshot: retainedSnapshot })
+      ) {
+        // A picker can retain callbacks from the render immediately before the
+        // controller adopted the matching Prepared Task. Matching product
+        // identity is sufficient to reclaim that Task under the current key;
+        // discarding it here would release the Task and then upload to its dead ID.
+        newTaskController.claim({
+          attachmentResources,
+          preparationKey: activePreparationKey,
+          taskId: retainedSnapshot.task.task_id as TaskId,
+        });
+        preparedTaskId = retainedSnapshot.task.task_id as TaskId;
+      }
+    }
     if (preparedTaskId) {
-      newTaskController.claim({
+      return newTaskController.claim({
         attachmentResources,
         preparationKey: activePreparationKey,
         taskId: preparedTaskId,
       });
-      return { taskId: preparedTaskId };
     }
 
     const staleTaskId = disposableNewTaskControllerId(state, newTaskController);
-    if (staleTaskId) await discardNewTask(staleTaskId);
-    assertOperationCurrent();
-    const pending = pendingPreparedNewTask(activePreparationKey);
+    const pending = ignorePendingPreparation
+      ? undefined
+      : pendingPreparedNewTask(activePreparationKey);
     const pendingResult = pending ? await pending : undefined;
     if (pendingResult?.task && !preparedProtocolTaskMatchesSelection(pendingResult.task, state)) {
       await discardNewTask(pendingResult.taskId);
       throw new SupersededNewTaskFileBrowserOperation();
     }
+    // The pending preparation may resolve to the same Task held by the
+    // controller. Validate it before discarding anything; releasing first makes
+    // the subsequent upload target an ID that App Server has already deleted.
+    if (staleTaskId && staleTaskId !== pendingResult?.taskId) {
+      await discardNewTask(staleTaskId);
+    }
+    assertOperationCurrent();
     const prepared = await prepareNewTask(
       { backendConnection, dispatch, state },
       {
@@ -161,7 +191,7 @@ function createFileBrowserCallbacks({
     if (draft) {
       dispatch({ type: "taskInput:prompt", taskId: prepared.taskId, prompt: draft.prompt });
     }
-    return { taskId: preparedTaskId };
+    return lease;
   };
   const releaseLateHandle = (taskId: TaskId, handleId: AttachmentHandleId) => {
     if (attachmentResources) {
@@ -173,6 +203,51 @@ function createFileBrowserCallbacks({
 
   return {
     ownerKey: `new-task-files:${operation.id}`,
+    ...(files ? { attachmentMode: files.kind, attachFiles: async (
+      selectedFiles: File[],
+      options: { onProgress: (progress: { loaded: number; total: number }) => void; signal: AbortSignal; maxFiles: number },
+    ) => {
+      const pickerLease = newTaskController.currentLease(preparedTaskId);
+      // A native file picker can suspend browser timers past the App Server's
+      // client-liveness window. Probe first so reliable transport recovery
+      // completes before choosing the Task that will own the upload.
+      await request(CLIENT_HEARTBEAT, {});
+      const clientLeaseExpired = Boolean(
+        pickerLease && !newTaskController.isCurrent(pickerLease),
+      );
+      if (clientLeaseExpired) preparedTaskId = undefined;
+      const lease = await ensureTaskId(undefined, clientLeaseExpired);
+      const attachments = files.kind === "nativePicker"
+        ? await files.pick(lease.taskId)
+        : selectedFiles.length === 1
+          ? [await files.upload(lease.taskId, selectedFiles[0], options.onProgress, options.signal)]
+          : [];
+      // After Task acquisition, the controller lease—not a render-scoped callback
+      // token—owns the upload. Harmless New Task rerenders can replace callback
+      // scopes while the same Prepared Task remains authoritative.
+      if (!newTaskController.isCurrent(lease)) {
+        attachments.forEach((attachment) => releaseLateHandle(lease.taskId, attachment.handleId));
+        throw new SupersededNewTaskFileBrowserOperation();
+      }
+      const adoption = attachmentResources?.beginAdoption(lease.taskId);
+      if (attachmentResources && !adoption) {
+        attachments.forEach((attachment) => releaseLateHandle(lease.taskId, attachment.handleId));
+        throw new SupersededNewTaskFileBrowserOperation();
+      }
+      for (const attachment of attachments.slice(0, options.maxFiles)) {
+        if (attachmentResources?.adopt({ taskId: lease.taskId, handleId: attachment.handleId }, adoption) === false) {
+          throw new SupersededNewTaskFileBrowserOperation();
+        }
+        dispatch({
+          type: "taskInput:attachment:addAppServer",
+          taskId: lease.taskId,
+          attachment: appServerAttachment(attachment),
+        });
+      }
+      for (const attachment of attachments.slice(options.maxFiles)) {
+        releaseLateHandle(lease.taskId, attachment.handleId);
+      }
+    } } : {}),
     searchFiles: async (query: string) => {
       const lease = await ensureTaskId();
       const result = await request(TASK_SEARCH_FILES, { taskId: lease.taskId, query });

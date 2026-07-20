@@ -40,6 +40,7 @@ fn task_send_message_is_text_plus_inline_ordered_images() {
                 mime_type: "image/png".to_string(),
                 data: "iVBORw0KGgo=".to_string(),
             }],
+            attachments: Vec::new(),
         },
     };
 

@@ -11,6 +11,7 @@ import { QuestionCard } from "./QuestionCard";
 import { SlashCommandText } from "./SlashCommandText";
 import { UserMessageAttachments } from "./UserMessageAttachments";
 import { useLiveMessagePresentation } from "./useLiveMessagePresentation";
+import { currentFrontendShell } from "../services/frontendShell";
 
 export { firstToolPath } from "../state/toolDetailsViewModel";
 
@@ -51,7 +52,14 @@ export const ChatRow = memo(function ChatRow({
     const hasText = body.text.trim().length > 0;
     return (
       <div className="chat-user-block" ref={referenceRootRef}>
-        {body.attachments?.length ? <UserAttachments attachments={body.attachments} onOpenImage={setOpenImage} /> : null}
+        {body.attachments?.length ? (
+          <UserAttachments
+            attachments={body.attachments}
+            messageId={message.message_id}
+            onOpenImage={setOpenImage}
+            taskId={taskId}
+          />
+        ) : null}
         {hasText ? <UserMessageText commandCatalog={commandCatalog} text={body.text} /> : null}
         {hasText ? <MessageCopyAction align="end" text={body.text} /> : null}
         <ReferenceHoverLayer contentKey={body.text} rootRef={referenceRootRef} />
@@ -158,11 +166,16 @@ function unavailableQuestionResponse() {}
 
 function UserAttachments({
   attachments,
+  messageId,
   onOpenImage,
+  taskId,
 }: {
   attachments: Attachment[];
+  messageId: string;
   onOpenImage: (image: AttachmentImagePreviewSource) => void;
+  taskId: string;
 }) {
+  const fileInteraction = currentFrontendShell()?.sentFiles;
   return (
     <UserMessageAttachments
       attachments={attachments.map((attachment, index) => ({
@@ -170,6 +183,13 @@ function UserAttachments({
         image: chatImagePreview(attachment),
         label: attachment.label,
       }))}
+      fileAction={fileInteraction?.sentFileAction}
+      onOpenFile={fileInteraction ? (attachment, attachmentIndex) => fileInteraction.openSentFile({
+        taskId,
+        messageId,
+        attachmentIndex,
+        label: attachment.label,
+      }) : undefined}
       onOpenImage={onOpenImage}
     />
   );

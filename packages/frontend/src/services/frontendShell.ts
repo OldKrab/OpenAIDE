@@ -6,6 +6,36 @@ import type { WebviewBootstrap } from "../state/surfaceTypes";
 import type { PostHostMessage } from "../state/postHostMessage";
 import type { WebTaskNotificationManager } from "../shells/webTaskNotifications";
 import type { AppServerSession } from "@openaide/app-server-client";
+import type { PreSendAttachment } from "@openaide/app-server-client";
+
+export type FileUploadProgress = { loaded: number; total: number };
+
+export type SentFileOpenRequest = {
+  taskId: string;
+  messageId: string;
+  attachmentIndex: number;
+  label: string;
+};
+
+export type SentFileInteraction = {
+  sentFileAction: "download" | "reveal";
+  openSentFile(request: SentFileOpenRequest): void;
+};
+
+export type FrontendFileAcquisition =
+  | {
+      kind: "webUpload";
+      upload(
+        taskId: string,
+        file: File,
+        onProgress: (progress: FileUploadProgress) => void,
+        signal: AbortSignal,
+      ): Promise<PreSendAttachment>;
+    }
+  | {
+      kind: "nativePicker";
+      pick(taskId: string): Promise<PreSendAttachment[]>;
+    };
 
 export type FrontendShell = {
   bootstrap(): WebviewBootstrap;
@@ -28,6 +58,10 @@ export type FrontendShell = {
     /** Reloads the owning shell when it exposes that recovery capability. */
     reload?: () => void;
   };
+  /** Shell-specific acquisition; shared Frontend receives only opaque handles. */
+  files?: FrontendFileAcquisition;
+  /** Opens a durable sent file using the host-native interaction. */
+  sentFiles?: SentFileInteraction;
   /** Browser-profile notification integration; omitted by non-Web shells. */
   taskNotifications?: WebTaskNotificationManager;
 };
