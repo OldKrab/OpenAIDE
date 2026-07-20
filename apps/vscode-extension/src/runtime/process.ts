@@ -216,12 +216,14 @@ export class RuntimeProcess implements vscode.Disposable {
       storageRootKind: storageRoot.kind,
     });
     const child = spawn(command.path, [], {
+      detached: true,
       env: {
         ...process.env,
         OPENAIDE_STORAGE_ROOT: storageRoot.path,
         OPENAIDE_APP_SERVER_PROTOCOL: "app-server-handoff",
       },
       stdio: "pipe",
+      windowsHide: true,
     });
     this.appServerChildren.add(child);
     child.stderr.on("data", (chunk: Buffer) => {
@@ -237,7 +239,14 @@ export class RuntimeProcess implements vscode.Disposable {
     });
 
     try {
-      return parseAppServerConnection(await readFirstStdoutLine(child));
+      const connection = parseAppServerConnection(await readFirstStdoutLine(child));
+      // The state-root App Server belongs to all attached windows, not this extension host.
+      this.appServerChildren.delete(child);
+      child.stdin.end();
+      child.stdout.destroy();
+      child.stderr.destroy();
+      child.unref();
+      return connection;
     } catch (error) {
       if (!child.killed) child.kill();
       throw error;

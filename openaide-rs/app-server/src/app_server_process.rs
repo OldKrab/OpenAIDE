@@ -1,9 +1,10 @@
 use std::net::SocketAddr;
 use std::path::Path;
+use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::client_lifecycle::AppServerTime;
+use crate::client_lifecycle::{AppServerTime, ClientExpiryOutcome};
 use crate::protocol_edge::local_http::listener::{handle_app_stream, LocalHttpProbeListener};
 use crate::protocol_edge::local_http::LocalHttpAppHandler;
 use crate::protocol_edge::SharedRpcGateway;
@@ -16,12 +17,13 @@ use uuid::Uuid;
 
 const LOCAL_HTTP_ACCEPT_ERROR_BACKOFF: Duration = Duration::from_millis(25);
 
-#[derive(Clone)]
 pub struct PublishedAppServerEndpoint {
     endpoint_records: EndpointRecordStore,
     fingerprint: StateRootFingerprint,
     server_id: String,
     auth_token: String,
+    gateway: SharedRpcGateway,
+    shutdown: Receiver<()>,
 }
 
 impl PublishedAppServerEndpoint {
@@ -52,6 +54,15 @@ impl PublishedAppServerEndpoint {
             .remove_if(&self.fingerprint, |record| {
                 record.server_id == self.server_id && record.auth_token == self.auth_token
             });
+    }
+
+    /// Waits for the last App Shell client, then performs graceful shutdown.
+    pub fn shutdown_after_last_client(
+        &self,
+    ) -> Result<crate::app_lifecycle::ShutdownCompletion, crate::protocol::errors::RuntimeError>
+    {
+        let _ = self.shutdown.recv();
+        self.gateway.shutdown()
     }
 }
 
@@ -88,13 +99,15 @@ pub fn publish_local_http_probe_endpoint(
             }],
         },
     )?;
+    let shutdown = start_client_liveness_expirer(gateway.clone());
     let endpoint = PublishedAppServerEndpoint {
         endpoint_records,
         fingerprint: state_root.fingerprint().clone(),
         server_id,
         auth_token,
+        gateway: gateway.clone(),
+        shutdown,
     };
-    start_client_liveness_expirer(gateway.clone());
     start_local_http_listener(
         listener,
         LocalHttpAppHandler::new(
@@ -153,9 +166,9 @@ fn local_http_error_fields(
     fields
 }
 
-/// Expires abandoned product clients without treating UI inactivity as process lifetime.
-/// The App Shell owns the handoff process through its stdio lifetime and explicit shutdown.
-fn start_client_liveness_expirer(gateway: SharedRpcGateway) {
+/// Expires abandoned product clients and signals process shutdown after the last client.
+fn start_client_liveness_expirer(gateway: SharedRpcGateway) -> Receiver<()> {
+    let (shutdown_sender, shutdown_receiver) = mpsc::channel();
     thread::spawn(move || {
         gateway.request_native_session_catalog_refresh();
         let mut last_native_catalog_refresh = Instant::now();
@@ -172,8 +185,21 @@ fn start_client_liveness_expirer(gateway: SharedRpcGateway) {
                     serde_json::json!({ "count": expired.len() }),
                 );
             }
+            if expired.iter().any(|outcome| {
+                matches!(
+                    outcome,
+                    ClientExpiryOutcome::Expired {
+                        last_client: true,
+                        ..
+                    }
+                )
+            }) {
+                let _ = shutdown_sender.send(());
+                return;
+            }
         }
     });
+    shutdown_receiver
 }
 
 fn endpoint_address(address: SocketAddr) -> String {

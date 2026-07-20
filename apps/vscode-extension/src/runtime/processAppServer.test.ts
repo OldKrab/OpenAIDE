@@ -41,6 +41,7 @@ class FakeRuntimeChild extends EventEmitter {
     this.emit("exit", null, "SIGTERM");
     return true;
   });
+  unref = vi.fn();
 }
 
 describe("RuntimeProcess App Server handoff", () => {
@@ -88,9 +89,15 @@ describe("RuntimeProcess App Server handoff", () => {
           OPENAIDE_STORAGE_ROOT: "/storage/openaide",
           OPENAIDE_APP_SERVER_PROTOCOL: "app-server-handoff",
         }),
+        detached: true,
         stdio: "pipe",
+        windowsHide: true,
       }),
     );
+    expect(child.unref).toHaveBeenCalledOnce();
+
+    runtime.dispose();
+    expect(child.kill).not.toHaveBeenCalled();
   });
 
   it("starts shell-local app server requests in shell-control stdio mode", async () => {
