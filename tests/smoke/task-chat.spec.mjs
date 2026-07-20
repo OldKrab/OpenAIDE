@@ -165,11 +165,11 @@ test("retains an unsent prepared New Task across ordinary navigation", async ({ 
 
 test("applies Agent options and inserts prepared slash commands", async ({ page }) => {
   await openPreparedNewTask(page);
-  await page.getByRole("button", { name: "Test: Balanced", exact: true }).click();
+  await page.getByRole("button", { name: "Balanced", exact: true }).click();
   await page.getByRole("menu", { name: "Test mode" })
     .getByRole("menuitemradio", { name: "Verbose" })
     .click();
-  await expect(page.getByRole("button", { name: "Test: Verbose", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Verbose", exact: true })).toBeVisible();
 
   const editor = page.getByRole("textbox", { name: "Message" });
   await editor.fill("/");
