@@ -7,6 +7,7 @@ import { registerAgentSecretHandlers } from "./runtime/hostAgentSecrets";
 import { registerAgentAuthTerminalHandler } from "./runtime/hostAgentAuthTerminal";
 import { registerTerminalHostHandlers } from "./runtime/hostTerminal";
 import { RuntimeClient } from "./runtime/rpcClient";
+import { registerTaskNotifications } from "./notifications/taskNotifications";
 import { TaskEditorManager } from "./webview/editorManager";
 import { TaskViewProvider } from "./webview/navigationProvider";
 import { registerWorkspaceProjectSync } from "./workspace/projectSync";
@@ -22,6 +23,12 @@ export async function activate(context: vscode.ExtensionContext) {
   const terminalHostHandlers = registerTerminalHostHandlers(runtime);
   const workspaceProjectSync = registerWorkspaceProjectSync(runtime, logger);
   await workspaceProjectSync.ready;
+  const taskNotifications = await registerTaskNotifications(
+    runtime,
+    context.globalState,
+    taskEditors,
+    logger,
+  );
   const taskViewProvider = new TaskViewProvider(context, runtime, runtimeProcess, logger, taskEditors);
 
   context.subscriptions.push(runtime);
@@ -31,6 +38,7 @@ export async function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(agentAuthTerminalHandler);
   context.subscriptions.push(terminalHostHandlers);
   context.subscriptions.push(workspaceProjectSync);
+  context.subscriptions.push(taskNotifications);
   context.subscriptions.push(taskEditors);
   context.subscriptions.push(taskViewProvider);
   context.subscriptions.push(

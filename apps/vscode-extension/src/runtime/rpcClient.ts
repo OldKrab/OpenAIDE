@@ -2,11 +2,14 @@ import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import * as vscode from "vscode";
 import type {
   AppServerSessionHostMessage,
+  AppServerStateObserver,
+  BackendUnsubscribe,
   ClientWorkspaceRoot,
   ProtocolMethod,
   RequestMeta,
   RequestParamsByMethod,
   ResponseResultByMethod,
+  SubscriptionScope,
 } from "@openaide/app-server-client";
 import type { HealthResult } from "@openaide/app-shell-contracts";
 import { ExtensionLogger } from "../logging/logger";
@@ -65,6 +68,13 @@ export class RuntimeClient implements vscode.Disposable {
 
   async syncWorkspaceRoots(roots: ClientWorkspaceRoot[]) {
     await this.appServerHostClient.syncWorkspaceRoots(roots);
+  }
+
+  async subscribeAppServerState(
+    scope: SubscriptionScope,
+    observer: AppServerStateObserver,
+  ): Promise<BackendUnsubscribe> {
+    return this.appServerHostClient.subscribeState(scope, observer);
   }
 
   attachAppServerView(viewId: string, post: (message: AppServerSessionHostMessage) => void) {
