@@ -80,6 +80,27 @@ describe("Composer view behavior", () => {
     expect(menusByLabel(renderer.root, "Add context")).toHaveLength(0);
   });
 
+  it("applies a configuration choice after pointer down inside its menu", () => {
+    const listeners = new Map<string, (event: Event) => void>();
+    vi.stubGlobal("document", {
+      addEventListener: vi.fn((type: string, listener: (event: Event) => void) => listeners.set(type, listener)),
+      removeEventListener: vi.fn((type: string) => listeners.delete(type)),
+    });
+    const onSelectConfigOption = vi.fn();
+    const renderer = renderComposer({ configOptions: configOptions(), onSelectConfigOption });
+
+    click(configControlButtonsByText(renderer.root, "Balanced")[0]);
+    act(() => listeners.get("pointerdown")?.({
+      target: {
+        closest: (selector: string) => selector.includes(".composer-option-anchor") ? {} : null,
+      },
+    } as unknown as Event));
+
+    expect(menusByLabel(renderer.root, "Reasoning")).toHaveLength(1);
+    click(menuButtonByStrongLabel(renderer.root, "High"));
+    expect(onSelectConfigOption).toHaveBeenCalledWith("reasoning", { type: "id", value: "high" });
+  });
+
   it("shows feedback after revealing an attachment", async () => {
     const onRevealAttachment = vi.fn(async () => undefined);
     const renderer = renderComposer({

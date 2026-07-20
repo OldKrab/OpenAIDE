@@ -156,7 +156,7 @@ export function Composer({
       const target = event.target as { closest?: (selector: string) => Element | null } | null;
       // Only the active menu anchor and its popover are inside the dismissal
       // boundary. The rest of the Composer is a click-away surface.
-      if (target?.closest?.(".composer-menu-anchor")) return;
+      if (target?.closest?.(".composer-menu-anchor, .composer-option-anchor")) return;
       setOpenMenu(undefined);
     };
     document.addEventListener("pointerdown", onPointerDown);
