@@ -23,7 +23,7 @@ import {
   questionResponseForMessage,
 } from "./taskChatPresentation";
 import { useTaskChatScroll } from "./useTaskChatScroll";
-import { appServerComposerImages } from "../state/composerOptions";
+import { appServerAttachmentHandles, appServerComposerImages } from "../state/composerOptions";
 import { configOptionsMutable } from "../state/configOptionState";
 import type { BackendConnectionState } from "./appControllerBackendLifecycle";
 import type { AgentOption } from "../state/composerOptions";
@@ -159,14 +159,16 @@ export function TaskView({
   const turnBusy = snapshot.task.status === "active";
   const workspaceAvailable = snapshot.task.workspace_available !== false;
   const imageAttachmentsAllowed = snapshot.input_capabilities?.image === true;
-  const attachmentsSendable = taskInput.context.length === 0
-    || (appServerComposerImages(taskInput.context) !== undefined
-      && imageAttachmentsAllowed);
+  const imageAttachments = taskInput.context.filter((attachment) => attachment.kind === "image");
+  const fileAttachments = taskInput.context.filter((attachment) => attachment.kind !== "image");
+  const attachmentsSendable = appServerComposerImages(imageAttachments) !== undefined
+    && appServerAttachmentHandles(fileAttachments) !== undefined
+    && (imageAttachments.length === 0 || imageAttachmentsAllowed);
   const availability = composerAvailability({
     allowEditingWhileSendBlocked: true,
     archived,
     attachmentsReady: attachmentsSendable,
-    attachmentsBlockedMessage: taskInput.context.length > 0 && !imageAttachmentsAllowed
+    attachmentsBlockedMessage: imageAttachments.length > 0 && !imageAttachmentsAllowed
       ? "This Agent does not accept images."
       : "Attached context is not ready to send.",
     blockedPlaceholder: snapshot.task.status === "waiting"

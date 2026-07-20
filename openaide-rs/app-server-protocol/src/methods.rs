@@ -12,11 +12,12 @@ use crate::attachment::{
     AttachmentConfirmEmbeddedParams, AttachmentConfirmEmbeddedResult,
     AttachmentCreateEmbeddedCandidateParams, AttachmentCreateEmbeddedCandidateResult,
     AttachmentCreateFileReferenceParams, AttachmentCreateFileReferenceResult,
+    AttachmentCreateLocalFileReferencesParams, AttachmentCreateLocalFileReferencesResult,
     AttachmentCreatePastedImageParams, AttachmentCreatePastedImageResult,
     AttachmentListDirectoryParams, AttachmentListDirectoryResult, AttachmentListRootsParams,
     AttachmentListRootsResult, AttachmentRefreshHandlesParams, AttachmentRefreshHandlesResult,
     AttachmentReleaseParams, AttachmentReleaseResult, AttachmentRevealParams,
-    AttachmentRevealResult,
+    AttachmentRevealResult, AttachmentRevealSentParams, AttachmentRevealSentResult,
 };
 use crate::client::{
     ClientCapabilitiesChangedParams, ClientCapabilitiesChangedResult, ClientHeartbeatParams,
@@ -317,6 +318,12 @@ protocol_method!(
     AttachmentCreateFileReferenceResult
 );
 protocol_method!(
+    AttachmentCreateLocalFileReferences,
+    ATTACHMENT_CREATE_LOCAL_FILE_REFERENCES,
+    AttachmentCreateLocalFileReferencesParams,
+    AttachmentCreateLocalFileReferencesResult
+);
+protocol_method!(
     AttachmentCreatePastedImage,
     ATTACHMENT_CREATE_PASTED_IMAGE,
     AttachmentCreatePastedImageParams,
@@ -351,6 +358,12 @@ protocol_method!(
     ATTACHMENT_REVEAL,
     AttachmentRevealParams,
     AttachmentRevealResult
+);
+protocol_method!(
+    AttachmentRevealSent,
+    ATTACHMENT_REVEAL_SENT,
+    AttachmentRevealSentParams,
+    AttachmentRevealSentResult
 );
 protocol_method!(
     ShellResolveFileReveal,

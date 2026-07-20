@@ -54,6 +54,32 @@ describe("Composer view behavior", () => {
     expect(onRemoveAttachment).toHaveBeenCalledWith("attachment_1");
   });
 
+  it("closes the attachment menu when the user clicks elsewhere in the composer", () => {
+    const listeners = new Map<string, (event: Event) => void>();
+    vi.stubGlobal("document", {
+      addEventListener: vi.fn((type: string, listener: (event: Event) => void) => listeners.set(type, listener)),
+      removeEventListener: vi.fn((type: string) => listeners.delete(type)),
+    });
+    let renderer: ReturnType<typeof create> | undefined;
+    act(() => {
+      renderer = create(composerElement(), {
+        createNodeMock: (element) => element.type === "section"
+          ? { contains: () => true }
+          : null,
+      });
+    });
+    if (!renderer) throw new Error("Composer renderer was not created");
+
+    click(buttonByLabel(renderer.root, "Add context"));
+    expect(menuByLabel(renderer.root, "Add context")).toBeTruthy();
+
+    act(() => listeners.get("pointerdown")?.({
+      target: { closest: () => null },
+    } as unknown as Event));
+
+    expect(menusByLabel(renderer.root, "Add context")).toHaveLength(0);
+  });
+
   it("shows feedback after revealing an attachment", async () => {
     const onRevealAttachment = vi.fn(async () => undefined);
     const renderer = renderComposer({
@@ -95,13 +121,13 @@ describe("Composer view behavior", () => {
 
     const preview = renderer.root.findByProps({ className: "composer-image-preview" });
     const openButton = buttonByLabel(renderer.root, "Open Clipboard image");
-    const imageGrid = renderer.root.findByProps({ className: "composer-image-grid", "data-layout": "single" });
+    const attachmentList = renderer.root.findByProps({ className: "composer-attachment-list", "data-layout": "single" });
     const composerHtml = JSON.stringify(renderer.toJSON());
 
     expect(preview.props.src).toBe("data:image/png;base64,aW1hZ2U=");
     expect(preview.props.alt).toBe("Clipboard image preview");
-    expect(imageGrid).toBeTruthy();
-    expect(composerHtml.indexOf("composer-image-grid")).toBeLessThan(composerHtml.indexOf("composer-editor"));
+    expect(attachmentList).toBeTruthy();
+    expect(composerHtml.indexOf("composer-attachment-list")).toBeLessThan(composerHtml.indexOf("composer-editor"));
     expect(text(openButton)).not.toContain("Clipboard image");
     expect(buttonsByLabel(renderer.root, "Reveal Clipboard image")).toHaveLength(0);
   });
@@ -115,9 +141,26 @@ describe("Composer view behavior", () => {
       ],
     });
 
-    expect(renderer.root.findByProps({ className: "composer-image-grid", "data-layout": "many" })).toBeTruthy();
+    expect(renderer.root.findByProps({ className: "composer-attachment-list", "data-layout": "many" })).toBeTruthy();
     expect(renderer.root.findAllByProps({ className: "composer-image-preview" })).toHaveLength(3);
     expect(renderer.root.findAllByProps({ className: "composer-image-remove" })).toHaveLength(3);
+  });
+
+  it("keeps Images and files in one ordered attachment list", () => {
+    const renderer = renderComposer({
+      attachments: [
+        attachment("image-1", "diagram.png", "image-handle", "data:image/png;base64,aW1hZ2U="),
+        attachment("file-1", "notes.md", "file-handle"),
+      ],
+    });
+
+    const lists = renderer.root.findAllByProps({ className: "composer-attachment-list" });
+    expect(lists).toHaveLength(1);
+    expect(lists[0].findAll((node) => node.props.className?.includes("composer-attachment-tile"))).toHaveLength(2);
+    expect(lists[0].findByProps({ "data-file-kind": "markdown" })).toBeTruthy();
+    expect(lists[0].findByProps({ title: "notes.md" })).toBeTruthy();
+    const html = JSON.stringify(renderer.toJSON());
+    expect(html.indexOf("diagram.png preview")).toBeLessThan(html.indexOf("notes.md"));
   });
 
   it("opens image attachment previews from composer tokens", () => {
@@ -142,16 +185,17 @@ describe("Composer view behavior", () => {
     );
   });
 
-  it("removes workspace attachments and keeps device image upload", () => {
+  it("keeps device file actions separate from workspace mentions", () => {
     const renderer = renderComposer({ selection: selection({ workspaceRoot: "", workspaceLabel: "Workspace" }) });
 
     click(buttonByLabel(renderer.root, "Add context"));
 
     const menu = menuByLabel(renderer.root, "Add context");
-    expect(menu.findAllByProps({ role: "menuitem" })).toHaveLength(1);
+    expect(menu.findAllByProps({ role: "menuitem" })).toHaveLength(2);
     expect(renderer.root.findAllByType("strong").some((node) => node.children.join("") === "Workspace files")).toBe(false);
-    expect(text(menuButtonByStrongLabel(renderer.root, "Upload or photo"))).toContain("Choose images from this device.");
-    expect(menuButtonByStrongLabel(renderer.root, "Upload or photo").props.disabled).toBe(true);
+    expect(text(menuButtonByStrongLabel(renderer.root, "Attach images"))).toContain("Choose images from this device.");
+    expect(menuButtonByStrongLabel(renderer.root, "Attach files").props.disabled).toBe(true);
+    expect(menuButtonByStrongLabel(renderer.root, "Attach images").props.disabled).toBe(true);
     expect(renderer.root.findAllByProps({ type: "file" })[0].props.disabled).toBe(true);
   });
 
@@ -199,9 +243,9 @@ describe("Composer view behavior", () => {
 
     click(buttonByLabel(renderer.root, "Add context"));
 
-    const uploadButton = menuButtonByStrongLabel(renderer.root, "Upload or photo");
+    const uploadButton = menuButtonByStrongLabel(renderer.root, "Attach images");
     expect(uploadButton.props.disabled).toBeFalsy();
-    const input = renderer.root.findByProps({ type: "file" });
+    const input = renderer.root.findByProps({ type: "file", accept: "image/*" });
     expect(input.props.multiple).toBe(true);
     act(() => {
       input.props.onChange({
@@ -214,6 +258,68 @@ describe("Composer view behavior", () => {
     expect(fileBrowser.attachImage).toHaveBeenNthCalledWith(1, first);
     expect(fileBrowser.attachImage).toHaveBeenNthCalledWith(2, second);
     expect(menusByLabel(renderer.root, "Add context")).toHaveLength(0);
+  });
+
+  it("keeps file upload progress in the same attachment list, blocks Send, and cancels it", async () => {
+    const selected = new File(["0123456789"], "model.bin");
+    let uploadSignal: AbortSignal | undefined;
+    const fileBrowser: TaskFileBrowserCallbacks = {
+      ...fileBrowserCallbacks(),
+      attachmentMode: "webUpload",
+      attachFiles: vi.fn(async (_files, options) => {
+        uploadSignal = options.signal;
+        options.onProgress({ loaded: 5, total: 10 });
+        await new Promise(() => undefined);
+      }),
+    };
+    const renderer = renderComposer({
+      attachments: [attachment("image-1", "diagram.png", "image-handle", "data:image/png;base64,aW1hZ2U=")],
+      fileBrowser,
+      prompt: "Use this",
+    });
+
+    click(buttonByLabel(renderer.root, "Add context"));
+    const input = renderer.root.findAllByProps({ type: "file" }).find((node) => !node.props.accept);
+    expect(input).toBeTruthy();
+    act(() => input?.props.onChange({ currentTarget: { value: "model.bin" }, target: { files: [selected] } }));
+    await settleRenderer();
+
+    expect(fileBrowser.attachFiles).toHaveBeenCalledWith([selected], expect.objectContaining({ maxFiles: 1 }));
+    const uploadTile = renderer.root.findByProps({
+      className: "composer-attachment-tile composer-file-attachment composer-file-upload",
+    });
+    expect(text(uploadTile)).toContain("model.bin");
+    expect(uploadTile.findByProps({ "aria-label": "Uploading model.bin" }).props.value).toBe(5);
+    const attachmentList = renderer.root.findByProps({ className: "composer-attachment-list" });
+    expect(attachmentList.props["data-layout"]).toBe("pair");
+    expect(attachmentList.findAll((node) => node.props.className?.includes("composer-attachment-tile"))).toHaveLength(2);
+    const composerHtml = JSON.stringify(renderer.toJSON());
+    expect(composerHtml.indexOf("composer-file-upload")).toBeLessThan(composerHtml.indexOf("composer-editor"));
+    expect(buttonByLabel(renderer.root, "Send message").props.disabled).toBe(true);
+    click(buttonByLabel(renderer.root, "Cancel model.bin"));
+    expect(uploadSignal?.aborted).toBe(true);
+  });
+
+  it("keeps dropped Images native and routes other dropped files through file attachment", async () => {
+    const image = new File(["image"], "diagram.png", { type: "image/png" });
+    const file = new File(["data"], "model.bin");
+    const fileBrowser: TaskFileBrowserCallbacks = {
+      ...fileBrowserCallbacks(),
+      attachmentMode: "webUpload",
+      attachFiles: vi.fn(async () => undefined),
+    };
+    const renderer = renderComposer({ fileBrowser, prompt: "Inspect" });
+    const preventDefault = vi.fn();
+
+    act(() => textarea(renderer.root).props.onDrop({
+      dataTransfer: { files: [image, file] },
+      preventDefault,
+    }));
+    await settleRenderer();
+
+    expect(preventDefault).toHaveBeenCalledTimes(1);
+    expect(fileBrowser.attachImage).toHaveBeenCalledWith(image, expect.objectContaining({ prompt: "Inspect" }));
+    expect(fileBrowser.attachFiles).toHaveBeenCalledWith([file], expect.objectContaining({ maxFiles: 1 }));
   });
 
   it("attaches every pasted image through the App Server file browser callbacks", async () => {

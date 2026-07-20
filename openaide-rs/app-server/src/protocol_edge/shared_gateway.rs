@@ -1,8 +1,9 @@
 use std::sync::{Arc, Mutex};
 
-use openaide_app_server_protocol::ids::ClientInstanceId;
-#[cfg(test)]
-use openaide_app_server_protocol::ids::TaskId;
+use crate::tasks::product_api::ResolvedSentFile;
+use openaide_app_server_protocol::attachment::PreSendAttachment;
+use openaide_app_server_protocol::errors::ProtocolError;
+use openaide_app_server_protocol::ids::{ClientInstanceId, TaskId};
 
 use crate::app_lifecycle::ShutdownCompletion;
 use crate::client_lifecycle::{AppServerTime, ClientExpiryOutcome, ConnectionId};
@@ -66,6 +67,73 @@ impl SharedRpcGateway {
             .client_hub
             .context_for_connection(connection_id)
             .is_some()
+    }
+
+    pub(crate) fn client_is_initialized(&self, client_instance_id: &ClientInstanceId) -> bool {
+        self.gateway
+            .lock()
+            .expect("protocol gateway lock poisoned")
+            .client_hub
+            .client_by_instance(client_instance_id)
+            .is_some()
+    }
+
+    /// Converts a completed Web upload into an opaque draft attachment handle.
+    pub(crate) fn create_uploaded_file_reference(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        task_id: TaskId,
+        path: String,
+        label: String,
+    ) -> Result<PreSendAttachment, ProtocolError> {
+        let gateway = self.gateway.lock().expect("protocol gateway lock poisoned");
+        if gateway
+            .client_hub
+            .client_by_instance(client_instance_id)
+            .is_none()
+        {
+            return Err(ProtocolError {
+                code: openaide_app_server_protocol::errors::ProtocolErrorCode::NotInitialized,
+                message: "client connection is not initialized".to_string(),
+                recoverable: true,
+                target: None,
+            });
+        }
+        gateway.attachments.create_uploaded_file_reference(
+            client_instance_id,
+            &task_id,
+            path,
+            label,
+        )
+    }
+
+    /// Resolves only a file already persisted in a Task message visible to this client.
+    pub(crate) fn resolve_sent_file(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        task_id: &TaskId,
+        message_id: &str,
+        attachment_index: usize,
+    ) -> Result<ResolvedSentFile, ProtocolError> {
+        let gateway = self.gateway.lock().expect("protocol gateway lock poisoned");
+        if gateway
+            .client_hub
+            .client_by_instance(client_instance_id)
+            .is_none()
+        {
+            return Err(ProtocolError {
+                code: openaide_app_server_protocol::errors::ProtocolErrorCode::NotInitialized,
+                message: "client connection is not initialized".to_string(),
+                recoverable: true,
+                target: None,
+            });
+        }
+        gateway.attachments.resolve_sent_file(
+            client_instance_id,
+            task_id,
+            message_id,
+            attachment_index,
+        )
     }
 
     /// Keeps a client live while its event stream is still accepting writes.

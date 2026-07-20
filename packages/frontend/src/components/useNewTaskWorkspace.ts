@@ -8,7 +8,6 @@ import type { AsyncOperationOwner } from "../state/asyncOperationOwner";
 import { retainNewTaskContext } from "../state/newTaskSelectionDefaults";
 import { sendWebviewTelemetry } from "../state/hostMessageRouter";
 import { agentProjectRequestKey, shouldLoadNativeSessions } from "../state/surfaceRouting";
-import { TASK_NAVIGATION_PAGE_SIZE } from "../state/taskNavigationPolicy";
 import { postHostMessage } from "../services/hostBridge";
 import { useComposerAttachmentResources } from "./useComposerAttachmentResources";
 import { useNewTaskPreparation, type PendingNewTaskPreparation } from "./useNewTaskPreparation";
@@ -176,21 +175,27 @@ export function useNewTaskWorkspace({
 
   useEffect(() => {
     const projectId = newTaskProjectIdForRequests(state, newTaskBootstrapProjectId);
-    if (!backendReady || !shouldLoadNativeSessions(bootstrap, projectId) || !projectId) return;
+    const preparingNewTask = bootstrap.surface === "task" && !bootstrap.taskId && !newTaskSnapshot;
+    // Native Session discovery only enriches Task Navigation. Let the New Task
+    // acquire and subscribe first so slow Agent history cannot hide ready controls.
+    if (
+      !backendReady
+      || preparingNewTask
+      || !shouldLoadNativeSessions(bootstrap, projectId)
+      || !projectId
+    ) return;
     const key = `${replicaEpoch}:${agentProjectRequestKey(state.newTask.selection.agentId, projectId)}`;
     if (latestNavigationSessionKey.current === key) return;
     latestNavigationSessionKey.current = key;
-    const localTaskCount = state.tasks.filter((task) => task.project_id === projectId).length;
-    // Fill the shared project window on startup; pagination should not depend on
-    // how many usable sessions happen to be present in the Agent's first page.
-    requestNativeSessions(
-      undefined,
-      false,
-      Math.max(0, TASK_NAVIGATION_PAGE_SIZE - localTaskCount),
-    );
+    // Startup discovery is optional navigation enrichment. Keep it to one page
+    // so a slow Agent cursor cannot hold uploads, heartbeats, or Task controls;
+    // the returned cursor remains available through explicit Load More.
+    requestNativeSessions();
   }, [
     backendReady,
     bootstrap.surface,
+    bootstrap.taskId,
+    newTaskSnapshot?.task.task_id,
     replicaEpoch,
     state.newTask.selection.agentId,
     state.newTask.selection.projectId,

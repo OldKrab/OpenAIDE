@@ -1,5 +1,5 @@
 import { forwardRef, memo, useImperativeHandle, useLayoutEffect, useRef } from "react";
-import type { ClipboardEvent, KeyboardEvent, MutableRefObject } from "react";
+import type { ClipboardEvent, DragEvent, KeyboardEvent, MutableRefObject } from "react";
 import type { AgentCommandsCatalog } from "@openaide/app-shell-contracts";
 import { exactSlashCommandMatches } from "./commandSearch";
 import {
@@ -31,6 +31,7 @@ type ComposerEditorProps = {
   disabled: boolean;
   onInputText: (value: string, cursor: number) => void;
   onKeyDown: (event: KeyboardEvent<HTMLDivElement>) => void;
+  onDrop: (event: DragEvent<HTMLDivElement>) => void;
   onPaste: (event: ClipboardEvent<HTMLDivElement>) => void;
   onPointerDown: () => void;
   placeholder: string;
@@ -44,6 +45,7 @@ export const ComposerEditor = forwardRef<ComposerEditorHandle, ComposerEditorPro
   disabled,
   onInputText,
   onKeyDown,
+  onDrop,
   onPaste,
   onPointerDown,
   placeholder,
@@ -53,12 +55,14 @@ export const ComposerEditor = forwardRef<ComposerEditorHandle, ComposerEditorPro
   const handlersRef = useRef<ComposerEditorHandlers>({
     onInputText,
     onKeyDown,
+    onDrop,
     onPaste,
     onPointerDown,
   });
   handlersRef.current = {
     onInputText,
     onKeyDown,
+    onDrop,
     onPaste,
     onPointerDown,
   };
@@ -79,7 +83,7 @@ export const ComposerEditor = forwardRef<ComposerEditorHandle, ComposerEditorPro
 
 type ComposerEditorHandlers = Pick<
   ComposerEditorProps,
-  "onInputText" | "onKeyDown" | "onPaste" | "onPointerDown"
+  "onDrop" | "onInputText" | "onKeyDown" | "onPaste" | "onPointerDown"
 >;
 
 type ComposerEditorSurfaceProps = {
@@ -147,6 +151,10 @@ const ComposerEditorSurface = memo(forwardRef<ComposerEditorHandle, ComposerEdit
           restoreSelectionRef.current = { start: cursor, end: cursor };
           handlersRef.current.onInputText(nextValue, cursor);
         }}
+        onDragOver={(event) => {
+          if (event.dataTransfer.types.includes("Files")) event.preventDefault();
+        }}
+        onDrop={(event) => handlersRef.current.onDrop(event)}
         onKeyDown={(event) => handlersRef.current.onKeyDown(event)}
         onPaste={(event) => handlersRef.current.onPaste(event)}
         onPointerDown={() => handlersRef.current.onPointerDown()}

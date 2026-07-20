@@ -207,6 +207,15 @@ describe("composer attachment resource ownership", () => {
     expect(release).not.toHaveBeenCalled();
   });
 
+  it("keeps the controller-retained New Task mounted across replica-only rerenders", () => {
+    const state = createInitialState();
+
+    const observed = composerAttachmentResourceFrame(state, true, "task-1");
+
+    expect(observed.mountedTaskId).toBe("task-1");
+    expect(observed.acceptsAdoptions).toBe(true);
+  });
+
   it("preserves inactive Task drafts across A to B to A navigation", () => {
     const release = vi.fn();
     const owner = new ComposerAttachmentResourceOwner({ release });

@@ -31,7 +31,7 @@ describe("ComposerEditor markup", () => {
     const html = renderEditorHtml('Read @src/main.rs and @"docs/team deck.pptx"', undefined);
 
     expect(html).toBe(
-      'Read <span class="composer-reference-token composer-file-token" data-reference-description="Rust · src" data-reference-file-kind="rust" data-reference-kind="file" data-reference-label="main.rs" data-reference-path="src/main.rs" data-reference-type="Workspace file" spellcheck="false">@src/main.rs</span> and <span class="composer-reference-token composer-file-token" data-reference-description="PowerPoint · docs" data-reference-file-kind="file" data-reference-kind="file" data-reference-label="team deck.pptx" data-reference-path="docs/team deck.pptx" data-reference-type="Workspace file" spellcheck="false">@&quot;docs/team deck.pptx&quot;</span>',
+      'Read <span class="composer-reference-token composer-file-token" data-reference-description="Rust · src" data-reference-file-kind="rust" data-reference-kind="file" data-reference-label="main.rs" data-reference-path="src/main.rs" data-reference-type="Workspace file" spellcheck="false">@src/main.rs</span> and <span class="composer-reference-token composer-file-token" data-reference-description="PowerPoint · docs" data-reference-file-kind="presentation" data-reference-kind="file" data-reference-label="team deck.pptx" data-reference-path="docs/team deck.pptx" data-reference-type="Workspace file" spellcheck="false">@&quot;docs/team deck.pptx&quot;</span>',
     );
     expect(html).not.toContain("title=");
   });

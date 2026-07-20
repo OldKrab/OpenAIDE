@@ -53,6 +53,7 @@ export type WebviewToHostMessage =
   | { type: "surface.openTask"; payload: { task_id: string; title?: string } }
   | { type: "shell.openExternal"; payload: { url: string } }
   | { type: "shell.reload" }
+  | { type: "attachment.pickFiles"; payload: { requestId: string; taskId: string } }
   | { type: "worktree.openFolder"; payload: { repository_id: string; worktree_id: string } }
   | { type: "tool.openPath"; payload: { path: string; line?: number } };
 
@@ -61,6 +62,7 @@ export type HostToWebviewMessage =
   | SecretTransactionResultMessage
   | { type: "appServer.connectionChanged"; payload: { connection: WebviewAppServerConnection } }
   | { type: "surface.focusChanged"; payload: { task_id?: string } }
+  | { type: "attachment.pickFiles.result"; payload: { requestId: string; attachments?: Array<{ handleId: string; label: string }>; error?: string } }
   | { type: "surface.routeChanged"; payload: { surface: "task"; task_id: string } }
   | { type: "surface.settingsChanged"; payload: { agent_id?: string; return_to_new_task?: boolean; project_id?: string } }
   | { type: "diagnostics.snapshot.result"; payload: DiagnosticsSnapshot }

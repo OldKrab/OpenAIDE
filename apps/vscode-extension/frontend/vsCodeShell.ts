@@ -1,7 +1,9 @@
 import type { FrontendShell } from "../../../packages/frontend/src/services/frontendShell";
 import {
+  ATTACHMENT_REVEAL_SENT,
   createBridgedAppServerSession,
   isAppServerSessionHostMessage,
+  type TaskId,
 } from "@openaide/app-server-client";
 import type { WebviewBootstrap } from "../../../packages/frontend/src/state/surfaceTypes";
 import {
@@ -9,6 +11,8 @@ import {
   subscribeWindowMessages,
 } from "../../../packages/frontend/src/shells/domBootstrap";
 import { VSCODE_SHELL } from "../src/webview/types";
+import type { HostToWebviewMessage } from "@openaide/app-shell-contracts";
+import type { PreSendAttachment } from "@openaide/app-server-client";
 
 declare global {
   interface Window {
@@ -20,6 +24,21 @@ declare global {
 export function createVsCodeShell(): FrontendShell {
   const vscode = window.acquireVsCodeApi?.();
   const bootstrap = datasetBootstrap;
+  let nextFileRequest = 1;
+  const pendingFileRequests = new Map<string, {
+    resolve: (attachments: PreSendAttachment[]) => void;
+    reject: (error: Error) => void;
+  }>();
+  if (typeof window.addEventListener === "function") {
+    window.addEventListener("message", (event: MessageEvent<HostToWebviewMessage>) => {
+      if (event.data?.type !== "attachment.pickFiles.result") return;
+      const pending = pendingFileRequests.get(event.data.payload.requestId);
+      if (!pending) return;
+      pendingFileRequests.delete(event.data.payload.requestId);
+      if (event.data.payload.error) pending.reject(new Error(event.data.payload.error));
+      else pending.resolve((event.data.payload.attachments ?? []) as PreSendAttachment[]);
+    });
+  }
   const backendConnection = vscode && typeof window.addEventListener === "function"
     ? createBridgedAppServerSession({
         post: (message) => vscode.postMessage(message),
@@ -35,6 +54,27 @@ export function createVsCodeShell(): FrontendShell {
   return {
     bootstrap,
     ...(backendConnection ? { backendConnection: () => backendConnection } : {}),
+    sentFiles: {
+      sentFileAction: "reveal",
+      openSentFile({ attachmentIndex, messageId, taskId }) {
+        void backendConnection?.request(ATTACHMENT_REVEAL_SENT, {
+          taskId: taskId as TaskId,
+          messageId,
+          attachmentIndex,
+        });
+      },
+    },
+    files: {
+      kind: "nativePicker",
+      pick(taskId) {
+        if (!vscode) return Promise.reject(new Error("VS Code file picker unavailable."));
+        const requestId = `attachment-pick-${nextFileRequest++}`;
+        return new Promise((resolve, reject) => {
+          pendingFileRequests.set(requestId, { resolve, reject });
+          vscode.postMessage({ type: "attachment.pickFiles", payload: { requestId, taskId } });
+        });
+      },
+    },
     messages: {
       post: (message) => vscode?.postMessage(message),
       subscribe: subscribeWindowMessages,

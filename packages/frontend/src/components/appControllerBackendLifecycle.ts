@@ -212,12 +212,14 @@ export function useAppControllerBackendLifecycle({
       else stateSubscriptionContext.current = recoveredContext;
 
       if (baseline.reason === "clientLivenessExpired") {
+        const expiredConfigOptions = newTaskController.getSnapshot()?.agent_config;
         const expiredTaskId = newTaskController.expireClientLease();
         if (expiredTaskId) {
           recoveredDispatch({
             type: "newTask:leaseExpired",
             taskId: expiredTaskId,
             message: "Attachment must be reselected after the client session expired.",
+            ...(expiredConfigOptions ? { configOptions: expiredConfigOptions } : {}),
           });
         }
       }

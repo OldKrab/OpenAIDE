@@ -26,7 +26,7 @@ type NewTaskAction =
   | { type: "submit:attachments:invalidate"; taskId: string; message: string }
   | { type: "newTask:reset" }
   | { type: "newTask:prepared"; taskId: string }
-  | { type: "newTask:leaseExpired"; taskId: string; message: string }
+  | { type: "newTask:leaseExpired"; taskId: string; message: string; configOptions?: ConfigOptionsCatalog }
   | { type: "newTask:agent"; agentId: string; agentLabel?: string; newTaskId?: string }
   | { type: "newTask:project"; project: ProjectOption; newTaskId?: string }
   | { type: "newTask:projectId"; projectId: string; newTaskId?: string }
@@ -151,21 +151,26 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
             draft?.context ?? state.newTask.context,
             action.message,
           ),
+          // Keep the last authoritative Agent controls visible while a replacement
+          // Prepared Task is acquired after client-liveness recovery.
+          configOptions: action.configOptions ?? state.newTask.configOptions,
           pending: undefined,
           submitting: false,
         },
         taskInputs,
       };
     }
-    case "newTask:agent":
+    case "newTask:agent": {
+      const sameAgent = state.newTask.selection.agentId === action.agentId;
       return replacePreparedDraftOnContextChange(state, {
           ...state.newTask,
           selection: selectionWithAgent(state.newTask.selection, action.agentId, action.agentLabel),
-          configOptions: undefined,
-          configOptionsLoading: false,
-          configOptionsError: undefined,
-          nativeSessions: emptyNativeSessions(),
+          configOptions: sameAgent ? state.newTask.configOptions : undefined,
+          configOptionsLoading: sameAgent ? state.newTask.configOptionsLoading : false,
+          configOptionsError: sameAgent ? state.newTask.configOptionsError : undefined,
+          nativeSessions: sameAgent ? state.newTask.nativeSessions : emptyNativeSessions(),
       }, action.newTaskId);
+    }
     case "newTask:project":
       return replacePreparedDraftOnContextChange(state, {
           ...state.newTask,

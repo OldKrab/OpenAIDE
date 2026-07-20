@@ -2,7 +2,10 @@ import { ArrowUp, CircleStop, LoaderCircle } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { AgentCommandsCatalog, AgentSlashCommand, ComposerSubmitShortcut, ConfigOptionCurrentValue, ConfigOptionsCatalog, IsolationKind } from "@openaide/app-shell-contracts";
 import { agentOptions, type AgentOption, type ComposerAttachment, type ComposerSelection } from "../state/composerOptions";
-import { ComposerAttachments } from "./ComposerAttachments";
+import {
+  ComposerAttachments,
+  type ComposerFileUpload,
+} from "./ComposerAttachments";
 import { ComposerControls, type ComposerMenu } from "./ComposerMenus";
 import { ComposerEditor, type ComposerEditorHandle } from "./ComposerEditor";
 import {
@@ -100,10 +103,11 @@ export function Composer({
   const [fileMentionToken, setFileMentionToken] = useState<FileMentionToken | undefined>();
   const [editorText, setEditorText] = useState(prompt);
   const [editorRenderRevision, setEditorRenderRevision] = useState(0);
+  const [fileUploads, setFileUploads] = useState<ComposerFileUpload[]>([]);
   const { keyboardFocus, onKeyboardNavigation, onPointerInteraction } = useComposerKeyboardFocus();
-  const composerRef = useRef<HTMLElement | null>(null);
   const editorRef = useRef<ComposerEditorHandle | null>(null);
   const configMutationSequenceRef = useRef(0);
+  const fileDropHandlerRef = useRef<((files: File[]) => void) | undefined>(undefined);
   const draftRef = useRef(prompt);
   const lastPromptRef = useRef(prompt);
   const submittedDraftRef = useRef<string | undefined>(undefined);
@@ -119,7 +123,8 @@ export function Composer({
   const lastCommandCatalogKey = useRef(commandCatalogRevision);
   const lastSubmissionSettlementKey = useRef(submissionSettlementKey);
   const hasDraftContent = hasComposerContent(editorText, attachments.length);
-  const canSubmit = composerCanSubmit(availability, editorText, attachments.length);
+  const uploadPending = fileUploads.some((upload) => upload.state !== "error");
+  const canSubmit = composerCanSubmit(availability, editorText, attachments.length) && !uploadPending;
 
   useComposerAutoFocus({ autoFocus, disabled, editorRef, focusRequestKey });
 
@@ -148,7 +153,10 @@ export function Composer({
   useEffect(() => {
     if (!openMenu || typeof document === "undefined") return undefined;
     const onPointerDown = (event: PointerEvent) => {
-      if (composerRef.current?.contains(event.target as Node)) return;
+      const target = event.target as { closest?: (selector: string) => Element | null } | null;
+      // Only the active menu anchor and its popover are inside the dismissal
+      // boundary. The rest of the Composer is a click-away surface.
+      if (target?.closest?.(".composer-menu-anchor")) return;
       setOpenMenu(undefined);
     };
     document.addEventListener("pointerdown", onPointerDown);
@@ -268,7 +276,7 @@ export function Composer({
 
   const submitDraft = () => {
     const draft = draftRef.current;
-    if (!composerCanSubmit(availability, draft, attachments.length)) return;
+    if (!canSubmit) return;
     submittedDraftRef.current = draft;
     onSubmit(draft);
   };
@@ -324,7 +332,6 @@ export function Composer({
       data-keyboard-focus={keyboardFocus ? "true" : undefined}
       onKeyDownCapture={onKeyboardNavigation}
       onPointerDownCapture={onPointerInteraction}
-      ref={composerRef}
       onKeyDown={(event) => {
         if (event.key === "Escape") {
           setOpenMenu(undefined);
@@ -338,6 +345,7 @@ export function Composer({
         disabled={disabled}
         onRemoveAttachment={onRemoveAttachment}
         onRevealAttachment={onRevealAttachment}
+        uploads={fileUploads}
       />
       <ComposerEditor
         ariaLabel="Message"
@@ -347,6 +355,30 @@ export function Composer({
           syncDraft(value);
           onChange(value);
           updateCompletionPickers(value, cursor);
+        }}
+        onDrop={(event) => {
+          if (disabled) return;
+          const dropped = Array.from(event.dataTransfer.files ?? []);
+          if (dropped.length === 0) return;
+          event.preventDefault();
+          const images = dropped.filter((file) => file.type.startsWith("image/"));
+          const files = dropped.filter((file) => !file.type.startsWith("image/"));
+          if (images.length > 0) {
+            if (!imageAttachmentsAllowed) {
+              onUnsupportedImageAttachment?.("This Agent does not accept images.");
+            } else if (!fileBrowser?.attachImage) {
+              onUnsupportedImageAttachment?.("Images can be attached after the Task is open.");
+            } else {
+              const draft = { prompt: draftRef.current, context: attachments };
+              void attachEveryImage(images, (image) => fileBrowser.attachImage(image, draft)).catch((error: unknown) => {
+                onUnsupportedImageAttachment?.(composerErrorMessage(error, "Unable to attach image."));
+              });
+            }
+          }
+          if (files.length > 0) {
+            if (fileDropHandlerRef.current) fileDropHandlerRef.current(files);
+            else onUnsupportedImageAttachment?.("Files can be attached after the Task is open.");
+          }
         }}
         onPointerDown={() => {
           setOpenMenu(undefined);
@@ -481,7 +513,10 @@ export function Composer({
           configOptions={presentedConfigOptions}
           disabled={disabled}
           fileBrowser={fileBrowser}
+          fileDropHandlerRef={fileDropHandlerRef}
+          attachmentCount={attachments.filter((attachment) => attachment.kind !== "image").length}
           imageAttachmentsAllowed={imageAttachmentsAllowed}
+          onFileUploadsChange={setFileUploads}
           onUnsupportedImageAttachment={onUnsupportedImageAttachment}
           onSelectAgent={onSelectAgent}
           onSelectConfigOption={selectConfigOption}

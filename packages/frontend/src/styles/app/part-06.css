@@ -200,17 +200,20 @@
   place-items: center;
 }
 
-.composer-file-kind-icon[data-file-kind="typescript"] { color: oklch(58% 0.14 246); }
-.composer-file-kind-icon[data-file-kind="javascript"] { color: oklch(72% 0.14 90); }
-.composer-file-kind-icon[data-file-kind="rust"] { color: oklch(64% 0.14 45); }
-.composer-file-kind-icon[data-file-kind="python"] { color: oklch(62% 0.12 245); }
-.composer-file-kind-icon[data-file-kind="web"] { color: oklch(62% 0.16 40); }
-.composer-file-kind-icon[data-file-kind="json"] { color: oklch(70% 0.12 100); }
-.composer-file-kind-icon[data-file-kind="markdown"] { color: oklch(65% 0.11 235); }
-.composer-file-kind-icon[data-file-kind="image"] { color: oklch(66% 0.13 305); }
-.composer-file-kind-icon[data-file-kind="archive"] { color: oklch(68% 0.12 70); }
-.composer-file-kind-icon[data-file-kind="database"] { color: oklch(65% 0.1 195); }
-.composer-file-kind-icon[data-file-kind="config"] { color: oklch(64% 0.04 240); }
+.file-kind-icon[data-file-kind="typescript"] { color: oklch(58% 0.14 246); }
+.file-kind-icon[data-file-kind="javascript"] { color: oklch(72% 0.14 90); }
+.file-kind-icon[data-file-kind="rust"] { color: oklch(64% 0.14 45); }
+.file-kind-icon[data-file-kind="python"] { color: oklch(62% 0.12 245); }
+.file-kind-icon[data-file-kind="web"] { color: oklch(62% 0.16 40); }
+.file-kind-icon[data-file-kind="json"] { color: oklch(70% 0.12 100); }
+.file-kind-icon[data-file-kind="markdown"] { color: oklch(65% 0.11 235); }
+.file-kind-icon[data-file-kind="image"] { color: oklch(66% 0.13 305); }
+.file-kind-icon[data-file-kind="archive"] { color: oklch(68% 0.12 70); }
+.file-kind-icon[data-file-kind="database"] { color: oklch(65% 0.1 195); }
+.file-kind-icon[data-file-kind="config"] { color: oklch(64% 0.04 240); }
+.file-kind-icon[data-file-kind="pdf"] { color: oklch(62% 0.16 28); }
+.file-kind-icon[data-file-kind="spreadsheet"] { color: oklch(60% 0.13 150); }
+.file-kind-icon[data-file-kind="presentation"] { color: oklch(65% 0.15 48); }
 
 .composer-file-status {
   color: var(--oa-muted);

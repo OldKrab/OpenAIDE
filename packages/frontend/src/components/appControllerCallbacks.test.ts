@@ -16,6 +16,7 @@ import {
   ATTACHMENT_RELEASE,
   ATTACHMENT_REVEAL,
   AppServerProtocolError,
+  CLIENT_HEARTBEAT,
   PENDING_REQUEST_RESOLVE,
   SETTINGS_GET_AGENT_DETAILS,
   SETTINGS_GET_MCP_SERVERS,
@@ -51,6 +52,10 @@ import { NewTaskController } from "./newTaskController";
 
 const postHostMessage = vi.fn();
 const beginAgentSecretTransaction = vi.fn();
+const frontendShellState = vi.hoisted(() => ({ files: undefined as undefined | {
+  kind: "webUpload";
+  upload: ReturnType<typeof vi.fn>;
+} }));
 
 vi.mock("../services/hostBridge", () => ({
   openNewTaskSurface: (projectId?: string) => postHostMessage(projectId
@@ -69,6 +74,10 @@ vi.mock("../services/agentSecretTransaction", () => ({
   beginAgentSecretTransaction: (changes: unknown) => beginAgentSecretTransaction(changes),
 }));
 
+vi.mock("../services/frontendShell", () => ({
+  currentFrontendShell: () => frontendShellState.files ? { files: frontendShellState.files } : undefined,
+}));
+
 describe("app controller callbacks", () => {
   beforeEach(() => {
     postHostMessage.mockClear();
@@ -77,6 +86,7 @@ describe("app controller callbacks", () => {
       commit: vi.fn(async () => undefined),
       rollback: vi.fn(async () => undefined),
     });
+    frontendShellState.files = undefined;
   });
 
   it("starts a New Task with Agent defaults before Send", async () => {
@@ -127,6 +137,45 @@ describe("app controller callbacks", () => {
       payload: {
         task_id: "task_1",
         title: "New task",
+      },
+    });
+  });
+
+  it("sends uploaded file handles with the first New Task message", async () => {
+    const state = preparedNewTaskState("task_1");
+    state.taskInputs.task_1 = {
+      prompt: "Inspect this file",
+      context: [{
+        local_id: "file-1",
+        kind: "file",
+        label: "notes.md",
+        app_server_handle_id: "attachment-handle-1" as AttachmentHandleId,
+      }],
+    };
+    const newTaskController = new NewTaskController();
+    newTaskController.retain({
+      preparationKey: newTaskPreparationKey(state) as string,
+      snapshot: state.snapshot as TaskSnapshot,
+    });
+    const request = vi.fn(async (method: string) => {
+      if (method === TASK_SEND) {
+        return { task: { ...protocolTaskSnapshot("task_1", "New task"), revision: 4 } };
+      }
+      throw new Error(method);
+    });
+
+    callbacks({
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
+      newTaskController,
+      state,
+    }).newTask.submit();
+    await settlePromises();
+
+    expect(request).toHaveBeenCalledWith(TASK_SEND, {
+      taskId: "task_1",
+      message: {
+        text: "Inspect this file",
+        attachments: ["attachment-handle-1"],
       },
     });
   });
@@ -336,6 +385,207 @@ describe("app controller callbacks", () => {
     expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({
       type: "taskInput:attachment:addAppServer",
     }));
+  });
+
+  it("keeps ready agent options when file selection began before preparation completed", async () => {
+    const request = vi.fn((method: string) => {
+      if (method === ATTACHMENT_LIST_ROOTS) return Promise.resolve({ roots: [] });
+      return Promise.reject(new Error(method));
+    });
+    const state = preparedNewTaskState();
+    const newTaskController = new NewTaskController();
+    const fileBrowser = callbacks({
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
+      newTaskController,
+      state,
+    }).newTask.fileBrowser;
+    const readyState = preparedNewTaskState("task_ready");
+    const preparationKey = newTaskPreparationKey(state);
+    expect(preparationKey).toBeDefined();
+    newTaskController.retain({
+      preparationKey: preparationKey as string,
+      snapshot: readyState.snapshot as TaskSnapshot,
+    });
+
+    await expect(fileBrowser?.listRoots()).resolves.toEqual([]);
+
+    expect(request).toHaveBeenCalledWith(ATTACHMENT_LIST_ROOTS, { taskId: "task_ready" });
+    expect(request).not.toHaveBeenCalledWith(TASK_ACQUIRE, expect.anything());
+    expect(request).not.toHaveBeenCalledWith(TASK_RELEASE, expect.anything());
+  });
+
+  it("reuses a matching prepared Task even when the file picker was rendered from an older lease key", async () => {
+    const request = vi.fn((method: string) => {
+      if (method === ATTACHMENT_LIST_ROOTS) return Promise.resolve({ roots: [] });
+      return Promise.reject(new Error(method));
+    });
+    const state = preparedNewTaskState();
+    const readyState = preparedNewTaskState("task_ready");
+    const newTaskController = new NewTaskController();
+    newTaskController.retain({
+      preparationKey: "superseded-render-key",
+      snapshot: readyState.snapshot as TaskSnapshot,
+    });
+    const fileBrowser = callbacks({
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
+      newTaskController,
+      state,
+    }).newTask.fileBrowser;
+
+    await expect(fileBrowser?.listRoots()).resolves.toEqual([]);
+
+    expect(request).toHaveBeenCalledWith(ATTACHMENT_LIST_ROOTS, { taskId: "task_ready" });
+    expect(request).not.toHaveBeenCalledWith(TASK_ACQUIRE, expect.anything());
+    expect(request).not.toHaveBeenCalledWith(TASK_RELEASE, expect.anything());
+  });
+
+  it("does not release a pending prepared Task before validating that it matches the file picker", async () => {
+    const request = vi.fn((method: string) => {
+      if (method === ATTACHMENT_LIST_ROOTS) return Promise.resolve({ roots: [] });
+      if (method === TASK_RELEASE) return Promise.resolve({ discarded: true });
+      return Promise.reject(new Error(method));
+    });
+    const state = preparedNewTaskState("task_ready");
+    state.snapshot = {
+      ...state.snapshot as TaskSnapshot,
+      task: { ...(state.snapshot as TaskSnapshot).task, agent_id: "opencode" },
+    };
+    const protocolTask = protocolTaskSnapshot("task_ready", "Prepared task");
+    const mismatchedSnapshot = preparedNewTaskState("task_ready").snapshot as TaskSnapshot;
+    mismatchedSnapshot.task = { ...mismatchedSnapshot.task, agent_id: "opencode" };
+    const newTaskController = new NewTaskController();
+    newTaskController.retain({
+      preparationKey: "older-render-key",
+      snapshot: mismatchedSnapshot,
+    });
+    const fileBrowser = callbacks({
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
+      newTaskController,
+      pendingPreparedNewTask: () => Promise.resolve({ taskId: "task_ready" as never, task: protocolTask }),
+      state,
+    }).newTask.fileBrowser;
+
+    await expect(fileBrowser?.listRoots()).resolves.toEqual([]);
+
+    expect(request).toHaveBeenCalledWith(ATTACHMENT_LIST_ROOTS, { taskId: "task_ready" });
+    expect(request).not.toHaveBeenCalledWith(TASK_RELEASE, expect.anything());
+    expect(request).not.toHaveBeenCalledWith(TASK_ACQUIRE, expect.anything());
+  });
+
+  it("keeps an uploaded file when only the render-scoped browser callback is replaced", async () => {
+    const uploaded = deferred<{ handleId: string; label: string }>();
+    frontendShellState.files = {
+      kind: "webUpload",
+      upload: vi.fn(() => uploaded.promise),
+    };
+    const dispatch = vi.fn();
+    const request = vi.fn((method: string) => {
+      if (method === CLIENT_HEARTBEAT) return Promise.resolve({});
+      if (method === ATTACHMENT_RELEASE) return Promise.resolve({ outcomes: [] });
+      return Promise.reject(new Error(method));
+    });
+    const state = preparedNewTaskState("task_ready");
+    const asyncOperations = new AsyncOperationOwner();
+    const newTaskController = new NewTaskController();
+    newTaskController.retain({
+      preparationKey: newTaskPreparationKey(state) as string,
+      snapshot: state.snapshot as TaskSnapshot,
+    });
+    const fileBrowser = callbacks({
+      asyncOperations,
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
+      dispatch,
+      newTaskController,
+      state,
+    }).newTask.fileBrowser;
+    const attaching = fileBrowser?.attachFiles?.([new File(["notes"], "notes.md")], {
+      maxFiles: 1,
+      onProgress: vi.fn(),
+      signal: new AbortController().signal,
+    });
+    await Promise.resolve();
+    asyncOperations.claim("new-task-file-browser", "replacement-render");
+    uploaded.resolve({ handleId: "attachment-handle-1", label: "notes.md" });
+
+    await expect(attaching).resolves.toBeUndefined();
+
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
+      type: "taskInput:attachment:addAppServer",
+      taskId: "task_ready",
+    }));
+    expect(request).not.toHaveBeenCalledWith(ATTACHMENT_RELEASE, expect.anything());
+  });
+
+  it("acquires a fresh Prepared Task when client liveness expired in the file picker", async () => {
+    const upload = vi.fn(async () => ({ handleId: "attachment-handle-1", label: "notes.md" }));
+    frontendShellState.files = { kind: "webUpload", upload };
+    const dispatch = vi.fn();
+    const state = preparedNewTaskState("task_expired");
+    const newTaskController = new NewTaskController();
+    newTaskController.retain({
+      preparationKey: newTaskPreparationKey(state) as string,
+      snapshot: state.snapshot as TaskSnapshot,
+    });
+    const request = vi.fn((method: string) => {
+      if (method === CLIENT_HEARTBEAT) {
+        newTaskController.expireClientLease();
+        return Promise.resolve({});
+      }
+      if (method === TASK_ACQUIRE) {
+        return Promise.resolve({ task: protocolTaskSnapshot("task_recovered", "Recovered task") });
+      }
+      return Promise.reject(new Error(method));
+    });
+    const fileBrowser = callbacks({
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
+      dispatch,
+      newTaskController,
+      state,
+    }).newTask.fileBrowser;
+
+    await expect(fileBrowser?.attachFiles?.([new File(["notes"], "notes.md")], {
+      maxFiles: 1,
+      onProgress: vi.fn(),
+      signal: new AbortController().signal,
+    })).resolves.toBeUndefined();
+
+    expect(upload).toHaveBeenCalledWith("task_recovered", expect.any(File), expect.any(Function), expect.any(AbortSignal));
+    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
+      type: "taskInput:attachment:addAppServer",
+      taskId: "task_recovered",
+    }));
+  });
+
+  it("removes and releases a file from the prepared New Task composer", async () => {
+    const dispatch = vi.fn();
+    const request = vi.fn(async () => ({ outcomes: [] }));
+    const state = preparedNewTaskState("task_ready");
+    state.taskInputs.task_ready = {
+      prompt: "Inspect this",
+      context: [{
+        local_id: "file-1",
+        kind: "file",
+        label: "notes.md",
+        app_server_handle_id: "attachment-handle-1" as AttachmentHandleId,
+      }],
+    };
+
+    callbacks({
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
+      dispatch,
+      state,
+    }).newTask.removeAttachment("file-1");
+    await settlePromises();
+
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "taskInput:attachment:remove",
+      taskId: "task_ready",
+      attachmentId: "file-1",
+    });
+    expect(request).toHaveBeenCalledWith(ATTACHMENT_RELEASE, {
+      taskId: "task_ready",
+      resources: [{ kind: "handle", id: "attachment-handle-1" }],
+    });
   });
 
   it("discards a Task prepared after its file picker context was superseded", async () => {

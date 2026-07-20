@@ -4,7 +4,7 @@ use openaide_app_server_protocol::snapshot::NewTaskDefaultsSnapshot;
 use openaide_app_server_protocol::task::TaskSendParams;
 use uuid::Uuid;
 
-use crate::attachment_runtime::ResolvedSendAttachments;
+use crate::attachment_runtime::{AttachmentSendReservation, ResolvedSendAttachments};
 use crate::projects::ProjectIdentity;
 use crate::protocol::model::TaskStatus as LegacyTaskStatus;
 use crate::storage::records::{TaskLifecycle, TaskRecord};
@@ -67,10 +67,26 @@ impl TaskProductApi {
         if existing_task.active_turn_id.is_some() && steering_turn_id.is_none() {
             return Err(conflict_error("Task is not ready to accept steering"));
         }
-        let attachments = ResolvedSendAttachments::from_inline_images(&params.message.images)
+        if params.message.attachments.len() > 20 {
+            return Err(validation_error(
+                "message.attachments",
+                "A draft can attach at most 20 files",
+            ));
+        }
+        let owner =
+            crate::attachment_runtime::AttachmentOwner::new(client_instance_id, &params.task_id);
+        let attachment_reservation = self
+            .attachments
+            .reserve_for_send(&owner, &params.message.attachments)
+            .map_err(protocol_error_from_attachment_runtime)?;
+        let attachments = attachment_reservation
+            .resolved_with_inline_images(&params.message.images)
             .map_err(protocol_error_from_attachment_runtime)?;
         let prompt_text = normalized_message_text(&params.message);
-        if prompt_text.is_empty() && params.message.images.is_empty() {
+        if prompt_text.is_empty()
+            && params.message.images.is_empty()
+            && params.message.attachments.is_empty()
+        {
             return Err(validation_error("message.text", "Message text is required"));
         }
         if !params.message.images.is_empty() && !existing_task.supports_image_input {
@@ -95,6 +111,7 @@ impl TaskProductApi {
                 user_message_id,
                 prompt_text,
                 attachments,
+                attachment_reservation,
                 now,
             );
         }
@@ -168,6 +185,8 @@ impl TaskProductApi {
                 return Err(conflict_error("Task is already running"));
             }
         };
+        // Handles remain retryable until the user message is durably accepted.
+        let attachments = attachment_reservation.commit_with(attachments);
         if promoted_new_task {
             let project = ProjectIdentity::from_workspace_root(&committed_task.workspace_root);
             let defaults = NewTaskDefaultsSnapshot {
@@ -214,6 +233,7 @@ impl TaskProductApi {
         user_message_id: MessageId,
         prompt_text: String,
         attachments: ResolvedSendAttachments,
+        attachment_reservation: AttachmentSendReservation,
         now: String,
     ) -> Result<TaskSendAccepted, ProtocolError> {
         let task_id = existing_task.task_id.clone();
@@ -251,6 +271,8 @@ impl TaskProductApi {
                 return Err(conflict_error("Task is no longer accepting steering"));
             }
         };
+        // Handles remain retryable until the steering message is durably accepted.
+        let attachments = attachment_reservation.commit_with(attachments);
         let snapshot = crate::tasks::snapshot::build_snapshot(&self.store, &task_id, 100)
             .map_err(storage_error)?;
         let accepted = TaskSendAccepted {

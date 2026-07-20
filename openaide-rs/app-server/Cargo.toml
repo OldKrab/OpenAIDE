@@ -20,6 +20,6 @@ fs2.workspace = true
 ignore.workspace = true
 notify.workspace = true
 nucleo-matcher.workspace = true
+tempfile.workspace = true
 
 [dev-dependencies]
-tempfile.workspace = true

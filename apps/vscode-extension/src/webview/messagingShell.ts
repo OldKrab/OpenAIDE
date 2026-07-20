@@ -2,6 +2,7 @@ import * as nodePath from "node:path";
 import * as vscode from "vscode";
 import {
   SECRET_READ,
+  ATTACHMENT_CREATE_LOCAL_FILE_REFERENCES,
   SHELL_REVEAL_FILE,
   SHELL_RESOLVE_FILE_REVEAL,
   SHELL_SHOW_NOTIFICATION,
@@ -11,6 +12,7 @@ import {
   type ShellNotificationLevel,
   type ShellRevealFileParams,
   type ShellShowNotificationParams,
+  type TaskId,
   type WorktreeId,
   type WorktreeRepositoryId,
 } from "@openaide/app-server-client";
@@ -56,6 +58,37 @@ export async function routeHostCapabilityCommand(message: WebviewToHostMessage, 
   }
   if (message.type === "shell.reload") {
     await vscode.commands.executeCommand("workbench.action.reloadWindow");
+    return true;
+  }
+  if (message.type === "attachment.pickFiles" && isObject(message.payload)) {
+    const requestId = requiredString(message.payload, "requestId");
+    const taskId = requiredString(message.payload, "taskId");
+    try {
+      const selected = await vscode.window.showOpenDialog({
+        canSelectFiles: true,
+        canSelectFolders: false,
+        canSelectMany: true,
+        openLabel: "Attach",
+      });
+      const result = selected?.length
+        ? await context.runtime.appServerRequest(ATTACHMENT_CREATE_LOCAL_FILE_REFERENCES, {
+            taskId: taskId as TaskId,
+            paths: selected.map((uri) => uri.fsPath),
+          })
+        : { attachments: [] };
+      await context.post({
+        type: "attachment.pickFiles.result",
+        payload: { requestId, attachments: result.attachments },
+      });
+    } catch (error) {
+      await context.post({
+        type: "attachment.pickFiles.result",
+        payload: {
+          requestId,
+          error: error instanceof Error ? error.message : "Unable to attach files.",
+        },
+      });
+    }
     return true;
   }
   if (
@@ -185,10 +218,16 @@ async function revealShellFile(request: ShellRevealFileParams, context: MessageC
   } catch {
     return false;
   }
-  const document = await vscode.workspace.openTextDocument(
-    vscode.Uri.file(await validatedWorkspacePath(target.path, "existing")),
-  );
-  await vscode.window.showTextDocument(document, { preview: true });
+  if (!nodePath.isAbsolute(target.path)) return false;
+
+  // The App Server already exchanged the opaque, client-bound handle for this
+  // path. Keep workspace files in VS Code and use the OS file manager for the
+  // temporary or external files that native attachment pickers may reference.
+  const uri = vscode.Uri.file(target.path);
+  const inWorkspace = vscode.workspace.workspaceFolders?.some(({ uri: folder }) => (
+    pathContains(folder.fsPath, target.path)
+  )) ?? false;
+  await vscode.commands.executeCommand(inWorkspace ? "revealInExplorer" : "revealFileInOS", uri);
   return true;
 }
 

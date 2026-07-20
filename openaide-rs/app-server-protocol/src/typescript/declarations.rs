@@ -15,14 +15,16 @@ use crate::attachment::{
     AttachmentCandidateError, AttachmentCandidateErrorCode, AttachmentConfirmEmbeddedParams,
     AttachmentConfirmEmbeddedResult, AttachmentCreateEmbeddedCandidateParams,
     AttachmentCreateEmbeddedCandidateResult, AttachmentCreateFileReferenceParams,
-    AttachmentCreateFileReferenceResult, AttachmentCreatePastedImageParams,
+    AttachmentCreateFileReferenceResult, AttachmentCreateLocalFileReferencesParams,
+    AttachmentCreateLocalFileReferencesResult, AttachmentCreatePastedImageParams,
     AttachmentCreatePastedImageResult, AttachmentListDirectoryParams,
     AttachmentListDirectoryResult, AttachmentListRootsParams, AttachmentListRootsResult,
     AttachmentRefreshHandlesParams, AttachmentRefreshHandlesResult, AttachmentReleaseOutcome,
     AttachmentReleaseParams, AttachmentReleaseResult, AttachmentReleaseStatus,
     AttachmentResourceId, AttachmentRevealParams, AttachmentRevealResult,
-    EmbeddedAttachmentCandidate, FileBrowserDirectory, FileBrowserEntry, FileBrowserEntryKind,
-    FileBrowserRoot, PreSendAttachment,
+    AttachmentRevealSentParams, AttachmentRevealSentResult, EmbeddedAttachmentCandidate,
+    FileBrowserDirectory, FileBrowserEntry, FileBrowserEntryKind, FileBrowserRoot,
+    PreSendAttachment,
 };
 use crate::client::{
     ClientCapabilities, ClientCapabilitiesChangedParams, ClientCapabilitiesChangedResult,
@@ -289,6 +291,8 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<FileBrowserEntryKind>(output, config);
     push_decl::<AttachmentCreateFileReferenceParams>(output, config);
     push_decl::<AttachmentCreateFileReferenceResult>(output, config);
+    push_decl::<AttachmentCreateLocalFileReferencesParams>(output, config);
+    push_decl::<AttachmentCreateLocalFileReferencesResult>(output, config);
     push_decl::<AttachmentCreatePastedImageParams>(output, config);
     push_decl::<AttachmentCreatePastedImageResult>(output, config);
     push_decl::<AttachmentCreateEmbeddedCandidateParams>(output, config);
@@ -304,6 +308,8 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<AttachmentReleaseResult>(output, config);
     push_decl::<AttachmentRevealParams>(output, config);
     push_decl::<AttachmentRevealResult>(output, config);
+    push_decl::<AttachmentRevealSentParams>(output, config);
+    push_decl::<AttachmentRevealSentResult>(output, config);
     push_decl::<PreSendAttachment>(output, config);
     push_decl::<EmbeddedAttachmentCandidate>(output, config);
     push_decl::<AttachmentCandidateError>(output, config);

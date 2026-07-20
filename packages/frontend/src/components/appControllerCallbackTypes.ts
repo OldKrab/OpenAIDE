@@ -102,6 +102,15 @@ export type TaskFileBrowserCallbacks = {
   attachEmbedded: (entryId: FileBrowserEntryId) => Promise<void>;
   attachFileReference: (entryId: FileBrowserEntryId) => Promise<void>;
   attachImage: (file: File, draft?: NewTaskDraftInput) => Promise<void>;
+  attachmentMode?: "webUpload" | "nativePicker";
+  attachFiles?: (
+    files: File[],
+    options: {
+      onProgress: (progress: { loaded: number; total: number }) => void;
+      signal: AbortSignal;
+      maxFiles: number;
+    },
+  ) => Promise<void>;
   listDirectory: (rootId: FileBrowserRootId, directoryId?: FileBrowserEntryId) => Promise<AttachmentListDirectoryResult>;
   listRoots: () => Promise<FileBrowserRoot[]>;
   /** Searches the current Task Workspace and returns protocol-relative paths. */

@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import type { AppPreferencesRecord, ConfigOptionCurrentValue } from "@openaide/app-shell-contracts";
 import {
   agentOptions,
+  appServerAttachmentHandles,
   appServerComposerImages,
   type AgentOption,
   type ComposerSelection,
@@ -107,16 +108,31 @@ export function NewTaskView({
   const enteredWorkspacePath = workspacePath.trim();
   const preparedTaskId = state.snapshot && !state.snapshot.task.has_messages ? state.snapshot.task.task_id : undefined;
   const preparedConfigOptions = preparedTaskId ? state.snapshot?.agent_config : undefined;
-  const currentConfigOptions = preparedTaskId ? preparedConfigOptions : state.newTask.configOptions;
+  // Liveness recovery can publish the replacement Task's loading snapshot
+  // before its catalog catches up. Keep the last settled controls visible.
+  const currentConfigOptions = preparedTaskId
+    ? configOptionsSettled(preparedConfigOptions)
+      ? preparedConfigOptions
+      : configOptionsSettled(state.newTask.configOptions)
+        ? state.newTask.configOptions
+        : preparedConfigOptions
+    : state.newTask.configOptions;
+  const configOptionsLoading = state.newTask.configOptionsLoading
+    && !configOptionsSettled(currentConfigOptions);
   const composerConfigOptions = currentConfigOptions && (
     currentConfigOptions.options.length > 0 || currentConfigOptions.status === "empty"
   ) ? currentConfigOptions : undefined;
   const composerConfigOptionsError = currentConfigOptions?.status === "failed"
     ? currentConfigOptions.error
     : preparedTaskId ? undefined : state.newTask.configOptionsError;
+  const preparedTaskAttachments = state.preparedTaskInput?.context ?? [];
   const composerAttachments = state.newTask.submitting
     ? state.newTask.pending?.context ?? []
-    : state.newTask.context;
+    : [
+        ...state.newTask.context,
+        ...preparedTaskAttachments.filter((prepared) =>
+          !state.newTask.context.some((local) => local.local_id === prepared.local_id)),
+      ];
   const externalPrompt = state.newTask.submitting
     ? state.newTask.pending?.prompt ?? ""
     : state.newTask.prompt;
@@ -131,7 +147,7 @@ export function NewTaskView({
   const waitStatus = newTaskStatusLabel({
     agentLabel: state.newTask.selection.agentLabel,
     configOptionsError: composerConfigOptionsError,
-    configOptionsLoading: state.newTask.configOptionsLoading,
+    configOptionsLoading,
     configOptionsReady: configOptionsSettled(currentConfigOptions),
     needsWorkspace,
     openingNativeSession,
@@ -140,13 +156,15 @@ export function NewTaskView({
   // Keep local drafting available while capability discovery is pending; block only
   // when the selected prepared Task explicitly reports that Images are unsupported.
   const imageAttachmentsAllowed = state.snapshot?.input_capabilities?.image !== false;
-  const attachmentsReady = (composerAttachments.length === 0
-    || appServerComposerImages(composerAttachments) !== undefined)
-    && (composerAttachments.length === 0 || imageAttachmentsAllowed);
+  const imageAttachments = composerAttachments.filter((attachment) => attachment.kind === "image");
+  const fileAttachments = composerAttachments.filter((attachment) => attachment.kind !== "image");
+  const attachmentsReady = appServerComposerImages(imageAttachments) !== undefined
+    && appServerAttachmentHandles(fileAttachments) !== undefined
+    && (imageAttachments.length === 0 || imageAttachmentsAllowed);
   const availability = composerAvailability({
     allowEditingWhileSendBlocked: false,
     attachmentsReady,
-    attachmentsBlockedMessage: composerAttachments.length > 0 && !imageAttachmentsAllowed
+    attachmentsBlockedMessage: imageAttachments.length > 0 && !imageAttachmentsAllowed
       ? "This Agent does not accept images."
       : "Attached context is not ready to send.",
     connectionStatus: loadingProjects ? "connecting" : "ready",
@@ -204,7 +222,7 @@ export function NewTaskView({
       attachments={composerAttachments}
       autoFocus
       availability={availability}
-      configLocked={state.newTask.configOptionsLoading || !configOptionsMutable(currentConfigOptions)}
+      configLocked={configOptionsLoading || !configOptionsMutable(currentConfigOptions)}
       configOptions={composerConfigOptions}
       commandCatalog={preparedTaskId ? state.snapshot?.agent_commands : undefined}
       error={undefined}

@@ -5,6 +5,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 use crate::client_lifecycle::{AppServerTime, ConnectionId};
+use openaide_app_server_protocol::ids::{ClientInstanceId, TaskId};
 
 use super::{GatewayOutcome, GatewayResponse, InboundProtocolMessage, SharedRpcGateway};
 
@@ -98,6 +99,81 @@ impl LocalHttpAppHandler {
 
     pub(crate) fn drain_push_messages(&self, lease: &event_streams::EventStreamLease) -> String {
         self.protocol.drain_push_messages(lease)
+    }
+
+    pub(crate) fn authorize_upload(
+        &self,
+        authorization: Option<&str>,
+        client_instance_id: Option<&str>,
+    ) -> Result<ClientInstanceId, LocalHttpResponse> {
+        match auth_status(authorization, &self.probe.auth_token) {
+            AuthStatus::Authorized => {}
+            AuthStatus::Missing => return Err(empty_response(401)),
+            AuthStatus::Invalid => return Err(empty_response(403)),
+        }
+        let client_instance_id = client_instance_id
+            .filter(|value| !value.trim().is_empty())
+            .map(|value| ClientInstanceId::from(value.to_string()))
+            .ok_or_else(|| empty_response(400))?;
+        if !self
+            .probe
+            .gateway
+            .client_is_initialized(&client_instance_id)
+        {
+            return Err(empty_response(409));
+        }
+        Ok(client_instance_id)
+    }
+
+    pub(crate) fn resolve_sent_file(
+        &self,
+        authorization: Option<&str>,
+        client_instance_id: Option<&str>,
+        task_id: Option<&str>,
+        message_id: Option<&str>,
+        attachment_index: Option<usize>,
+    ) -> Result<crate::tasks::product_api::ResolvedSentFile, LocalHttpResponse> {
+        let client_instance_id = self.authorize_upload(authorization, client_instance_id)?;
+        let task_id = task_id
+            .filter(|value| !value.is_empty())
+            .map(|value| TaskId::from(value.to_string()))
+            .ok_or_else(|| empty_response(400))?;
+        let message_id = message_id
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| empty_response(400))?;
+        let attachment_index = attachment_index.ok_or_else(|| empty_response(400))?;
+        self.probe
+            .gateway
+            .resolve_sent_file(&client_instance_id, &task_id, message_id, attachment_index)
+            .map_err(|error| match error.code {
+                ProtocolErrorCode::Unauthorized => empty_response(403),
+                ProtocolErrorCode::NotFound => empty_response(404),
+                _ => json_response(400, json!({ "error": error })),
+            })
+    }
+
+    pub(crate) fn register_uploaded_file(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        task_id: String,
+        path: String,
+        label: String,
+    ) -> LocalHttpResponse {
+        let safe_label = std::path::Path::new(&label)
+            .file_name()
+            .and_then(|value| value.to_str())
+            .filter(|value| !value.is_empty())
+            .unwrap_or("Attached file")
+            .to_string();
+        match self.probe.gateway.create_uploaded_file_reference(
+            client_instance_id,
+            TaskId::from(task_id),
+            path,
+            safe_label,
+        ) {
+            Ok(attachment) => json_response(200, json!({ "attachment": attachment })),
+            Err(error) => json_response(400, json!({ "error": error })),
+        }
     }
 }
 

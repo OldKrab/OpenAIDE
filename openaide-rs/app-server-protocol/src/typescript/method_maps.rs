@@ -1,5 +1,5 @@
 pub(super) fn push_method_maps(output: &mut String) {
-    output.push_str("export type ProtocolMethod = typeof CLIENT_PROBE | typeof CLIENT_INITIALIZE | typeof CLIENT_CAPABILITIES_CHANGED | typeof CLIENT_HEARTBEAT | typeof PENDING_REQUEST_RESOLVE | typeof STATE_SUBSCRIBE | typeof STATE_UNSUBSCRIBE | typeof DIAGNOSTICS_GET_RUNTIME | typeof SUPPORT_RECOVER_STUCK_SESSIONS | typeof AGENT_PROBE | typeof AGENT_AUTHENTICATE | typeof AGENT_LIST_SESSIONS | typeof AGENT_CREATE_CUSTOM | typeof AGENT_UPDATE_CUSTOM_METADATA | typeof AGENT_REPLACE_CUSTOM | typeof AGENT_DELETE_CUSTOM | typeof AGENT_SET_ENABLED | typeof SETTINGS_GET_AGENT_DETAILS | typeof SETTINGS_GET_MCP_SERVERS | typeof SETTINGS_GET_SKILLS | typeof SETTINGS_GET_PREFERENCES | typeof SETTINGS_UPDATE_PREFERENCES | typeof SETTINGS_GET_RUNTIME | typeof SETTINGS_UPDATE_RUNTIME | typeof ATTACHMENT_LIST_ROOTS | typeof ATTACHMENT_LIST_DIRECTORY | typeof ATTACHMENT_CREATE_FILE_REFERENCE | typeof ATTACHMENT_CREATE_PASTED_IMAGE | typeof ATTACHMENT_CREATE_EMBEDDED_CANDIDATE | typeof ATTACHMENT_CONFIRM_EMBEDDED | typeof ATTACHMENT_REFRESH_HANDLES | typeof ATTACHMENT_RELEASE | typeof ATTACHMENT_REVEAL | typeof SHELL_RESOLVE_FILE_REVEAL | typeof WORKSPACE_LIST_ROOTS | typeof WORKSPACE_LIST_DIRECTORY | typeof WORKTREE_REFRESH | typeof WORKTREE_CREATE | typeof WORKTREE_RECREATE | typeof WORKTREE_REMOVAL_PREFLIGHT | typeof WORKTREE_REMOVE | typeof WORKTREE_RENAME | typeof WORKTREE_RESOLVE_FOLDER | typeof WORKTREE_LINKED_TASKS | typeof TASK_ACQUIRE | typeof TASK_ACQUIRE_IN_WORKTREE | typeof TASK_SEARCH_FILES | typeof TASK_ADOPT_NATIVE_SESSION | typeof TASK_SEND | typeof TASK_SET_CONFIG_OPTION | typeof TASK_CANCEL | typeof TASK_OPEN | typeof TASK_MARK_READ | typeof TASK_CHAT_PAGE | typeof TASK_LIST | typeof TASK_RELEASE | typeof TASK_SET_ARCHIVED;\n");
+    output.push_str("export type ProtocolMethod = typeof CLIENT_PROBE | typeof CLIENT_INITIALIZE | typeof CLIENT_CAPABILITIES_CHANGED | typeof CLIENT_HEARTBEAT | typeof PENDING_REQUEST_RESOLVE | typeof STATE_SUBSCRIBE | typeof STATE_UNSUBSCRIBE | typeof DIAGNOSTICS_GET_RUNTIME | typeof SUPPORT_RECOVER_STUCK_SESSIONS | typeof AGENT_PROBE | typeof AGENT_AUTHENTICATE | typeof AGENT_LIST_SESSIONS | typeof AGENT_CREATE_CUSTOM | typeof AGENT_UPDATE_CUSTOM_METADATA | typeof AGENT_REPLACE_CUSTOM | typeof AGENT_DELETE_CUSTOM | typeof AGENT_SET_ENABLED | typeof SETTINGS_GET_AGENT_DETAILS | typeof SETTINGS_GET_MCP_SERVERS | typeof SETTINGS_GET_SKILLS | typeof SETTINGS_GET_PREFERENCES | typeof SETTINGS_UPDATE_PREFERENCES | typeof SETTINGS_GET_RUNTIME | typeof SETTINGS_UPDATE_RUNTIME | typeof ATTACHMENT_LIST_ROOTS | typeof ATTACHMENT_LIST_DIRECTORY | typeof ATTACHMENT_CREATE_FILE_REFERENCE | typeof ATTACHMENT_CREATE_LOCAL_FILE_REFERENCES | typeof ATTACHMENT_CREATE_PASTED_IMAGE | typeof ATTACHMENT_CREATE_EMBEDDED_CANDIDATE | typeof ATTACHMENT_CONFIRM_EMBEDDED | typeof ATTACHMENT_REFRESH_HANDLES | typeof ATTACHMENT_RELEASE | typeof ATTACHMENT_REVEAL | typeof ATTACHMENT_REVEAL_SENT | typeof SHELL_RESOLVE_FILE_REVEAL | typeof WORKSPACE_LIST_ROOTS | typeof WORKSPACE_LIST_DIRECTORY | typeof WORKTREE_REFRESH | typeof WORKTREE_CREATE | typeof WORKTREE_RECREATE | typeof WORKTREE_REMOVAL_PREFLIGHT | typeof WORKTREE_REMOVE | typeof WORKTREE_RENAME | typeof WORKTREE_RESOLVE_FOLDER | typeof WORKTREE_LINKED_TASKS | typeof TASK_ACQUIRE | typeof TASK_ACQUIRE_IN_WORKTREE | typeof TASK_SEARCH_FILES | typeof TASK_ADOPT_NATIVE_SESSION | typeof TASK_SEND | typeof TASK_SET_CONFIG_OPTION | typeof TASK_CANCEL | typeof TASK_OPEN | typeof TASK_MARK_READ | typeof TASK_CHAT_PAGE | typeof TASK_LIST | typeof TASK_RELEASE | typeof TASK_SET_ARCHIVED;\n");
     output.push_str("export type RequestParamsByMethod = {\n");
     output.push_str("  [CLIENT_PROBE]: ClientProbeParams;\n");
     output.push_str("  [CLIENT_INITIALIZE]: InitializeParams;\n");
@@ -28,6 +28,9 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [ATTACHMENT_LIST_ROOTS]: AttachmentListRootsParams;\n");
     output.push_str("  [ATTACHMENT_LIST_DIRECTORY]: AttachmentListDirectoryParams;\n");
     output.push_str("  [ATTACHMENT_CREATE_FILE_REFERENCE]: AttachmentCreateFileReferenceParams;\n");
+    output.push_str(
+        "  [ATTACHMENT_CREATE_LOCAL_FILE_REFERENCES]: AttachmentCreateLocalFileReferencesParams;\n",
+    );
     output.push_str("  [ATTACHMENT_CREATE_PASTED_IMAGE]: AttachmentCreatePastedImageParams;\n");
     output.push_str(
         "  [ATTACHMENT_CREATE_EMBEDDED_CANDIDATE]: AttachmentCreateEmbeddedCandidateParams;\n",
@@ -36,6 +39,7 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [ATTACHMENT_REFRESH_HANDLES]: AttachmentRefreshHandlesParams;\n");
     output.push_str("  [ATTACHMENT_RELEASE]: AttachmentReleaseParams;\n");
     output.push_str("  [ATTACHMENT_REVEAL]: AttachmentRevealParams;\n");
+    output.push_str("  [ATTACHMENT_REVEAL_SENT]: AttachmentRevealSentParams;\n");
     output.push_str("  [SHELL_RESOLVE_FILE_REVEAL]: ShellResolveFileRevealParams;\n");
     output.push_str("  [WORKSPACE_LIST_ROOTS]: WorkspaceListRootsParams;\n");
     output.push_str("  [WORKSPACE_LIST_DIRECTORY]: WorkspaceListDirectoryParams;\n");
@@ -89,6 +93,9 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [ATTACHMENT_LIST_ROOTS]: AttachmentListRootsResult;\n");
     output.push_str("  [ATTACHMENT_LIST_DIRECTORY]: AttachmentListDirectoryResult;\n");
     output.push_str("  [ATTACHMENT_CREATE_FILE_REFERENCE]: AttachmentCreateFileReferenceResult;\n");
+    output.push_str(
+        "  [ATTACHMENT_CREATE_LOCAL_FILE_REFERENCES]: AttachmentCreateLocalFileReferencesResult;\n",
+    );
     output.push_str("  [ATTACHMENT_CREATE_PASTED_IMAGE]: AttachmentCreatePastedImageResult;\n");
     output.push_str(
         "  [ATTACHMENT_CREATE_EMBEDDED_CANDIDATE]: AttachmentCreateEmbeddedCandidateResult;\n",
@@ -97,6 +104,7 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [ATTACHMENT_REFRESH_HANDLES]: AttachmentRefreshHandlesResult;\n");
     output.push_str("  [ATTACHMENT_RELEASE]: AttachmentReleaseResult;\n");
     output.push_str("  [ATTACHMENT_REVEAL]: AttachmentRevealResult;\n");
+    output.push_str("  [ATTACHMENT_REVEAL_SENT]: AttachmentRevealSentResult;\n");
     output.push_str("  [SHELL_RESOLVE_FILE_REVEAL]: ShellResolveFileRevealResult;\n");
     output.push_str("  [WORKSPACE_LIST_ROOTS]: WorkspaceListRootsResult;\n");
     output.push_str("  [WORKSPACE_LIST_DIRECTORY]: WorkspaceListDirectoryResult;\n");
@@ -208,6 +216,9 @@ pub(super) fn push_method_maps(output: &mut String) {
         "export type AttachmentCreateFileReferenceResponse = ResponseEnvelope<AttachmentCreateFileReferenceResult>;\n",
     );
     output.push_str(
+        "export type AttachmentCreateLocalFileReferencesResponse = ResponseEnvelope<AttachmentCreateLocalFileReferencesResult>;\n",
+    );
+    output.push_str(
         "export type AttachmentCreatePastedImageResponse = ResponseEnvelope<AttachmentCreatePastedImageResult>;\n",
     );
     output.push_str(
@@ -224,6 +235,9 @@ pub(super) fn push_method_maps(output: &mut String) {
     );
     output.push_str(
         "export type AttachmentRevealResponse = ResponseEnvelope<AttachmentRevealResult>;\n",
+    );
+    output.push_str(
+        "export type AttachmentRevealSentResponse = ResponseEnvelope<AttachmentRevealSentResult>;\n",
     );
     output.push_str(
         "export type WorkspaceListRootsResponse = ResponseEnvelope<WorkspaceListRootsResult>;\n",

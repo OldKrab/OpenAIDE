@@ -2,8 +2,9 @@ use openaide_app_server_protocol::methods::{
     AGENT_AUTHENTICATE, AGENT_CREATE_CUSTOM, AGENT_DELETE_CUSTOM, AGENT_LIST_SESSIONS, AGENT_PROBE,
     AGENT_REPLACE_CUSTOM, AGENT_SET_ENABLED, AGENT_UPDATE_CUSTOM_METADATA,
     ATTACHMENT_CONFIRM_EMBEDDED, ATTACHMENT_CREATE_EMBEDDED_CANDIDATE,
-    ATTACHMENT_CREATE_FILE_REFERENCE, ATTACHMENT_CREATE_PASTED_IMAGE, ATTACHMENT_LIST_DIRECTORY,
-    ATTACHMENT_LIST_ROOTS, ATTACHMENT_REFRESH_HANDLES, ATTACHMENT_RELEASE, ATTACHMENT_REVEAL,
+    ATTACHMENT_CREATE_FILE_REFERENCE, ATTACHMENT_CREATE_LOCAL_FILE_REFERENCES,
+    ATTACHMENT_CREATE_PASTED_IMAGE, ATTACHMENT_LIST_DIRECTORY, ATTACHMENT_LIST_ROOTS,
+    ATTACHMENT_REFRESH_HANDLES, ATTACHMENT_RELEASE, ATTACHMENT_REVEAL, ATTACHMENT_REVEAL_SENT,
     CLIENT_CAPABILITIES_CHANGED, CLIENT_HEARTBEAT, CLIENT_INITIALIZE, CLIENT_PROBE,
     DIAGNOSTICS_GET_RUNTIME, PENDING_REQUEST_RESOLVE, SETTINGS_GET_AGENT_DETAILS,
     SETTINGS_GET_MCP_SERVERS, SETTINGS_GET_PREFERENCES, SETTINGS_GET_RUNTIME, SETTINGS_GET_SKILLS,
@@ -123,6 +124,9 @@ impl RpcGateway {
             ATTACHMENT_CREATE_FILE_REFERENCE => {
                 self.handle_attachment_create_file_reference(connection_id, id, params, meta)
             }
+            ATTACHMENT_CREATE_LOCAL_FILE_REFERENCES => {
+                self.handle_attachment_create_local_file_references(connection_id, id, params, meta)
+            }
             ATTACHMENT_CREATE_PASTED_IMAGE => {
                 self.handle_attachment_create_pasted_image(connection_id, id, params, meta)
             }
@@ -138,6 +142,9 @@ impl RpcGateway {
             ATTACHMENT_RELEASE => self.handle_attachment_release(connection_id, id, params, meta),
             ATTACHMENT_REVEAL => {
                 self.handle_attachment_reveal(connection_id, id, params, meta, now)
+            }
+            ATTACHMENT_REVEAL_SENT => {
+                self.handle_attachment_reveal_sent(connection_id, id, params, meta, now)
             }
             SHELL_RESOLVE_FILE_REVEAL => {
                 self.handle_shell_resolve_file_reveal(connection_id, id, params, meta)

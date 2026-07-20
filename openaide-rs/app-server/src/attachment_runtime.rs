@@ -18,12 +18,10 @@ mod file_browser;
 mod handles;
 mod ownership;
 mod path_validation;
-#[cfg(test)]
 mod reservation;
 mod resources;
 
 pub(crate) use ownership::AttachmentOwner;
-#[cfg(test)]
 pub(crate) use reservation::AttachmentSendReservation;
 
 use resources::{
@@ -268,6 +266,36 @@ impl AttachmentRuntime {
         })
     }
 
+    /// Registers an exact user-selected local file without granting directory browsing.
+    pub(crate) fn create_local_file_reference(
+        &self,
+        owner: impl Into<AttachmentOwner>,
+        path: impl Into<PathBuf>,
+        label: Option<String>,
+    ) -> Result<PreSendAttachment, AttachmentRuntimeError> {
+        let path = std::fs::canonicalize(path.into())
+            .map_err(|error| AttachmentRuntimeError::ReadFailed(error.to_string()))?;
+        if !path.is_file() {
+            return Err(AttachmentRuntimeError::NotFile);
+        }
+        let label = label
+            .as_deref()
+            .or_else(|| path.file_name().and_then(|value| value.to_str()))
+            .filter(|value| !value.is_empty())
+            .unwrap_or("Attached file")
+            .chars()
+            .take(160)
+            .collect::<String>();
+        let allowed_root = path_validation::AllowedRoot::new(
+            path.parent().ok_or(AttachmentRuntimeError::InvalidRoot)?,
+        )?;
+        let registered = self.register_file_reference(owner, label, path, allowed_root);
+        Ok(PreSendAttachment {
+            handle_id: registered.handle_id,
+            label: registered.label,
+        })
+    }
+
     fn register_pasted_image(
         &self,
         owner: impl Into<AttachmentOwner>,
@@ -413,6 +441,22 @@ impl ResolvedSendAttachments {
             #[cfg(test)]
             fingerprint_handles: Vec::new(),
         })
+    }
+
+    /// Adds Frontend-owned inline Images after App Server-owned file resources.
+    pub(crate) fn clone_with_inline_images(
+        &self,
+        images: &[ComposerImage],
+    ) -> Result<Self, AttachmentRuntimeError> {
+        let inline_images = Self::from_inline_images(images)?;
+        let mut merged = self.clone();
+        merged
+            .chat_attachments
+            .extend(inline_images.chat_attachments);
+        merged
+            .agent_attachments
+            .extend(inline_images.agent_attachments);
+        Ok(merged)
     }
 
     pub(crate) fn chat_attachments(&self) -> Vec<Attachment> {

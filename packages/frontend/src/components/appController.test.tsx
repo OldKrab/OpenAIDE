@@ -220,7 +220,7 @@ describe("app controller mounted lifecycle", () => {
     expect(close).toHaveBeenCalledOnce();
   });
 
-  it("fills the first VS Code project task page with native sessions", async () => {
+  it("loads one Native Session page without eager pagination on startup", async () => {
     bootstrap = navigationBootstrap({ projectId: "project_1" });
     const request = vi.fn(async (method: string, params?: { cursor?: string | null }) => {
       if (method !== AGENT_LIST_SESSIONS) throw new Error(method);
@@ -258,9 +258,9 @@ describe("app controller mounted lifecycle", () => {
 
     expect(request.mock.calls.filter(([method]) => method === AGENT_LIST_SESSIONS)).toEqual([
       [AGENT_LIST_SESSIONS, { agentId: "codex", projectId: "project_1", cursor: null }],
-      [AGENT_LIST_SESSIONS, { agentId: "codex", projectId: "project_1", cursor: "cursor_2" }],
     ]);
-    expect(latestController?.state.newTask.nativeSessions.items).toHaveLength(14);
+    expect(latestController?.state.newTask.nativeSessions.items).toHaveLength(2);
+    expect(latestController?.state.newTask.nativeSessions.nextCursor).toBe("cursor_2");
   });
 
   it("finishes refreshing native sessions after opening a task", async () => {
@@ -1125,6 +1125,58 @@ describe("app controller mounted lifecycle", () => {
     });
   });
 
+  it("acquires a new Task before loading optional Native Session history", async () => {
+    const nativeSessions = deferredValue<{
+      agentId: string;
+      projectId: string;
+      projectLabel: string;
+      sessions: [];
+      nextCursor: null;
+    }>();
+    const request = vi.fn(async (method: string) => {
+      if (method === TASK_ACQUIRE) {
+        return {
+          task: {
+            ...protocolTaskSnapshot("task_new", "New task", { hasMessages: false }),
+            lifecycle: "new" as const,
+          },
+        };
+      }
+      if (method === AGENT_LIST_SESSIONS) return nativeSessions.promise;
+      throw new Error(method);
+    });
+    backendConnection = {
+      initialize: vi.fn(async () => ({ snapshot: clientSnapshot({ includeActiveTask: false }) })),
+      request: request as unknown as BackendConnection["request"],
+      close: vi.fn(),
+    };
+    bootstrap = webTaskBootstrap(undefined, "project_1");
+
+    await act(async () => {
+      create(<ControllerProbe />);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const startupRequests = request.mock.calls
+      .map(([method]) => method)
+      .filter((method) => method === TASK_ACQUIRE || method === AGENT_LIST_SESSIONS);
+    expect(startupRequests).toEqual([TASK_ACQUIRE, AGENT_LIST_SESSIONS]);
+    expect(latestController?.newTaskSnapshot?.task.task_id).toBe("task_new");
+
+    await act(async () => {
+      nativeSessions.resolve({
+        agentId: "codex",
+        projectId: "project_1",
+        projectLabel: "OpenAIDE",
+        sessions: [],
+        nextCursor: null,
+      });
+      await nativeSessions.promise;
+    });
+  });
+
   it("keeps the hidden New Task subscription current while an existing Task is visible", async () => {
     const loadingTask = {
       ...protocolTaskSnapshot("task_new", "New task", { hasMessages: false }),
@@ -1449,6 +1501,100 @@ describe("app controller mounted lifecycle", () => {
     expect(latestController?.newTaskSnapshot?.task.task_id).toBe("task_reacquired");
     expect(request.mock.calls.filter(([method]) => method === TASK_ACQUIRE)).toHaveLength(2);
     expect(latestController?.state.newTask.prompt).toBe("Keep this draft");
+  });
+
+  it("keeps prepared Agent options visible while an expired lease is reacquired", async () => {
+    let publishRecoveryBaseline: ((baseline: BackendRecoveryBaseline) => void) | undefined;
+    let publishInvalidation: Parameters<BackendConnection["handleGenerationInvalidated"]>[0] | undefined;
+    const reacquired = deferredValue<{ task: ReturnType<typeof protocolTaskSnapshot> }>();
+    let acquireCount = 0;
+    const preparedTask = (taskId: string) => {
+      const task = protocolTaskSnapshot(taskId, "New task", { hasMessages: false });
+      task.agentConfig = {
+        state: "ready",
+        options: [{
+          configId: "model" as never,
+          label: "Model",
+          category: "model",
+          kind: "select",
+          currentValue: { type: "id", value: "gpt-5.6-sol" },
+          values: [{ value: "gpt-5.6-sol", label: "GPT-5.6 Sol" }],
+        }],
+      };
+      return task;
+    };
+    const request = vi.fn(async (method: string, params?: { scope?: { kind: string; taskId?: string } }) => {
+      if (method === STATE_SUBSCRIBE && params?.scope) {
+        if (params.scope.kind === "task" && params.scope.taskId) {
+          return taskSubscriptionSnapshot(
+            `cursor_${params.scope.taskId}`,
+            preparedTask(params.scope.taskId),
+          );
+        }
+        return nonTaskSubscriptionSnapshot(params.scope);
+      }
+      if (method === AGENT_LIST_SESSIONS) {
+        return { agentId: "codex", projectLabel: "OpenAIDE", sessions: [], nextCursor: null };
+      }
+      if (method === TASK_ACQUIRE) {
+        acquireCount += 1;
+        return acquireCount === 1
+          ? { task: preparedTask("task_expired") }
+          : reacquired.promise;
+      }
+      throw new Error(method);
+    });
+    backendConnection = {
+      initialize: vi.fn(async () => ({ snapshot: clientSnapshot({ includeActiveTask: false }) })),
+      request: request as unknown as BackendConnection["request"],
+      handleNotification: defaultHandleNotification,
+      handleGenerationInvalidated(handler) {
+        publishInvalidation = handler;
+        return () => {
+          publishInvalidation = undefined;
+        };
+      },
+      handleRecoveryBaseline(handler) {
+        publishRecoveryBaseline = handler;
+        return () => {
+          publishRecoveryBaseline = undefined;
+        };
+      },
+      close: vi.fn(),
+    };
+    bootstrap = webTaskBootstrap(undefined, "project_1");
+
+    await act(async () => {
+      create(<PublicControllerProbe />);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(latestPublicController?.view.primaryTask.newTask.snapshot?.agent_config?.options[0]?.label)
+      .toBe("Model");
+
+    await act(async () => {
+      publishInvalidation?.({ reason: "clientLivenessExpired" });
+      publishRecoveryBaseline?.({
+        reason: "clientLivenessExpired",
+        result: { snapshot: clientSnapshot({ includeActiveTask: false }) },
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(request.mock.calls.filter(([method]) => method === TASK_ACQUIRE)).toHaveLength(2);
+    expect(latestPublicController?.view.primaryTask.newTask.snapshot).toBeUndefined();
+    expect(latestPublicController?.view.primaryTask.newTask.newTask.configOptions?.options[0]?.label)
+      .toBe("Model");
+
+    await act(async () => {
+      reacquired.resolve({ task: preparedTask("task_reacquired") });
+      await reacquired.promise;
+      await Promise.resolve();
+      await Promise.resolve();
+    });
   });
 
   it("sends through the cached New Task after visiting an existing Task without reopening it", async () => {

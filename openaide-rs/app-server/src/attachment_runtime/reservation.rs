@@ -21,6 +21,7 @@ impl AttachmentSendReservation {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn commit(mut self) -> ResolvedSendAttachments {
         {
             let mut state = self
@@ -37,6 +38,36 @@ impl AttachmentSendReservation {
         self.attachments
             .take()
             .expect("attachment reservation has resolved attachments")
+    }
+
+    pub(crate) fn resolved_with_inline_images(
+        &self,
+        images: &[openaide_app_server_protocol::task::ComposerImage],
+    ) -> Result<ResolvedSendAttachments, super::AttachmentRuntimeError> {
+        self.attachments
+            .as_ref()
+            .expect("attachment reservation has resolved attachments")
+            .clone_with_inline_images(images)
+    }
+
+    pub(crate) fn commit_with(
+        mut self,
+        attachments: ResolvedSendAttachments,
+    ) -> ResolvedSendAttachments {
+        {
+            let mut state = self
+                .runtime
+                .state
+                .lock()
+                .expect("attachment runtime mutex poisoned");
+            for handle_id in &self.handle_ids {
+                state.handles.remove(handle_id);
+                state.reserved_handles.remove(handle_id);
+            }
+        }
+        self.committed = true;
+        self.attachments = None;
+        attachments
     }
 }
 

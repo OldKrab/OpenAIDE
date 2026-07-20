@@ -36,6 +36,7 @@ export const SETTINGS_UPDATE_RUNTIME = "settings/updateRuntime" as const;
 export const ATTACHMENT_LIST_ROOTS = "attachment/listRoots" as const;
 export const ATTACHMENT_LIST_DIRECTORY = "attachment/listDirectory" as const;
 export const ATTACHMENT_CREATE_FILE_REFERENCE = "attachment/createFileReference" as const;
+export const ATTACHMENT_CREATE_LOCAL_FILE_REFERENCES = "attachment/createLocalFileReferences" as const;
 export const ATTACHMENT_CREATE_PASTED_IMAGE = "attachment/createPastedImage" as const;
 
 export const ATTACHMENT_CREATE_EMBEDDED_CANDIDATE = "attachment/createEmbeddedCandidate" as const;
@@ -45,6 +46,8 @@ export const ATTACHMENT_REFRESH_HANDLES = "attachment/refreshHandles" as const;
 export const ATTACHMENT_RELEASE = "attachment/release" as const;
 
 export const ATTACHMENT_REVEAL = "attachment/reveal" as const;
+
+export const ATTACHMENT_REVEAL_SENT = "attachment/revealSent" as const;
 
 export const SHELL_RESOLVE_FILE_REVEAL = "shell/resolveFileReveal" as const;
 
@@ -427,6 +430,14 @@ export type AttachmentCreateFileReferenceParams = { taskId: TaskId, entryId: Fil
 
 export type AttachmentCreateFileReferenceResult = { attachment: PreSendAttachment, };
 
+export type AttachmentCreateLocalFileReferencesParams = { taskId: TaskId,
+/**
+ * Trusted App Shell paths. Shared Frontend code must never populate this field.
+ */
+paths: Array<string>, };
+
+export type AttachmentCreateLocalFileReferencesResult = { attachments: Array<PreSendAttachment>, };
+
 export type AttachmentCreatePastedImageParams = { taskId: TaskId, label: string, mimeType: string, data: string, };
 
 export type AttachmentCreatePastedImageResult = { attachment: PreSendAttachment, };
@@ -464,6 +475,10 @@ outcomes: Array<AttachmentReleaseOutcome>, };
 export type AttachmentRevealParams = { taskId: TaskId, handleId: AttachmentHandleId, };
 
 export type AttachmentRevealResult = { requested: boolean, };
+
+export type AttachmentRevealSentParams = { taskId: TaskId, messageId: string, attachmentIndex: number, };
+
+export type AttachmentRevealSentResult = { requested: boolean, };
 
 export type PreSendAttachment = { handleId: AttachmentHandleId, label: string, };
 
@@ -545,7 +560,11 @@ export type TaskAdoptNativeSessionResult = { task: TaskSnapshot, };
 
 export type TaskSendParams = { taskId: TaskId, message: ComposerMessage, };
 
-export type ComposerMessage = { text?: string | null, images?: Array<ComposerImage>, };
+export type ComposerMessage = { text?: string | null, images?: Array<ComposerImage>,
+/**
+ * Ordered App Server-owned resources selected before Send.
+ */
+attachments?: Array<AttachmentHandleId>, };
 
 export type ComposerImage = { label: string, mimeType: string, data: string, };
 
@@ -759,7 +778,7 @@ export type PendingRequestScope = { "kind": "client", clientInstanceId: ClientIn
 
 export type PendingRequestKind = "permission" | "question" | "secret" | "shellCapability";
 
-export type ProtocolMethod = typeof CLIENT_PROBE | typeof CLIENT_INITIALIZE | typeof CLIENT_CAPABILITIES_CHANGED | typeof CLIENT_HEARTBEAT | typeof PENDING_REQUEST_RESOLVE | typeof STATE_SUBSCRIBE | typeof STATE_UNSUBSCRIBE | typeof DIAGNOSTICS_GET_RUNTIME | typeof SUPPORT_RECOVER_STUCK_SESSIONS | typeof AGENT_PROBE | typeof AGENT_AUTHENTICATE | typeof AGENT_LIST_SESSIONS | typeof AGENT_CREATE_CUSTOM | typeof AGENT_UPDATE_CUSTOM_METADATA | typeof AGENT_REPLACE_CUSTOM | typeof AGENT_DELETE_CUSTOM | typeof AGENT_SET_ENABLED | typeof SETTINGS_GET_AGENT_DETAILS | typeof SETTINGS_GET_MCP_SERVERS | typeof SETTINGS_GET_SKILLS | typeof SETTINGS_GET_PREFERENCES | typeof SETTINGS_UPDATE_PREFERENCES | typeof SETTINGS_GET_RUNTIME | typeof SETTINGS_UPDATE_RUNTIME | typeof ATTACHMENT_LIST_ROOTS | typeof ATTACHMENT_LIST_DIRECTORY | typeof ATTACHMENT_CREATE_FILE_REFERENCE | typeof ATTACHMENT_CREATE_PASTED_IMAGE | typeof ATTACHMENT_CREATE_EMBEDDED_CANDIDATE | typeof ATTACHMENT_CONFIRM_EMBEDDED | typeof ATTACHMENT_REFRESH_HANDLES | typeof ATTACHMENT_RELEASE | typeof ATTACHMENT_REVEAL | typeof SHELL_RESOLVE_FILE_REVEAL | typeof WORKSPACE_LIST_ROOTS | typeof WORKSPACE_LIST_DIRECTORY | typeof WORKTREE_REFRESH | typeof WORKTREE_CREATE | typeof WORKTREE_RECREATE | typeof WORKTREE_REMOVAL_PREFLIGHT | typeof WORKTREE_REMOVE | typeof WORKTREE_RENAME | typeof WORKTREE_RESOLVE_FOLDER | typeof WORKTREE_LINKED_TASKS | typeof TASK_ACQUIRE | typeof TASK_ACQUIRE_IN_WORKTREE | typeof TASK_SEARCH_FILES | typeof TASK_ADOPT_NATIVE_SESSION | typeof TASK_SEND | typeof TASK_SET_CONFIG_OPTION | typeof TASK_CANCEL | typeof TASK_OPEN | typeof TASK_MARK_READ | typeof TASK_CHAT_PAGE | typeof TASK_LIST | typeof TASK_RELEASE | typeof TASK_SET_ARCHIVED;
+export type ProtocolMethod = typeof CLIENT_PROBE | typeof CLIENT_INITIALIZE | typeof CLIENT_CAPABILITIES_CHANGED | typeof CLIENT_HEARTBEAT | typeof PENDING_REQUEST_RESOLVE | typeof STATE_SUBSCRIBE | typeof STATE_UNSUBSCRIBE | typeof DIAGNOSTICS_GET_RUNTIME | typeof SUPPORT_RECOVER_STUCK_SESSIONS | typeof AGENT_PROBE | typeof AGENT_AUTHENTICATE | typeof AGENT_LIST_SESSIONS | typeof AGENT_CREATE_CUSTOM | typeof AGENT_UPDATE_CUSTOM_METADATA | typeof AGENT_REPLACE_CUSTOM | typeof AGENT_DELETE_CUSTOM | typeof AGENT_SET_ENABLED | typeof SETTINGS_GET_AGENT_DETAILS | typeof SETTINGS_GET_MCP_SERVERS | typeof SETTINGS_GET_SKILLS | typeof SETTINGS_GET_PREFERENCES | typeof SETTINGS_UPDATE_PREFERENCES | typeof SETTINGS_GET_RUNTIME | typeof SETTINGS_UPDATE_RUNTIME | typeof ATTACHMENT_LIST_ROOTS | typeof ATTACHMENT_LIST_DIRECTORY | typeof ATTACHMENT_CREATE_FILE_REFERENCE | typeof ATTACHMENT_CREATE_LOCAL_FILE_REFERENCES | typeof ATTACHMENT_CREATE_PASTED_IMAGE | typeof ATTACHMENT_CREATE_EMBEDDED_CANDIDATE | typeof ATTACHMENT_CONFIRM_EMBEDDED | typeof ATTACHMENT_REFRESH_HANDLES | typeof ATTACHMENT_RELEASE | typeof ATTACHMENT_REVEAL | typeof ATTACHMENT_REVEAL_SENT | typeof SHELL_RESOLVE_FILE_REVEAL | typeof WORKSPACE_LIST_ROOTS | typeof WORKSPACE_LIST_DIRECTORY | typeof WORKTREE_REFRESH | typeof WORKTREE_CREATE | typeof WORKTREE_RECREATE | typeof WORKTREE_REMOVAL_PREFLIGHT | typeof WORKTREE_REMOVE | typeof WORKTREE_RENAME | typeof WORKTREE_RESOLVE_FOLDER | typeof WORKTREE_LINKED_TASKS | typeof TASK_ACQUIRE | typeof TASK_ACQUIRE_IN_WORKTREE | typeof TASK_SEARCH_FILES | typeof TASK_ADOPT_NATIVE_SESSION | typeof TASK_SEND | typeof TASK_SET_CONFIG_OPTION | typeof TASK_CANCEL | typeof TASK_OPEN | typeof TASK_MARK_READ | typeof TASK_CHAT_PAGE | typeof TASK_LIST | typeof TASK_RELEASE | typeof TASK_SET_ARCHIVED;
 export type RequestParamsByMethod = {
   [CLIENT_PROBE]: ClientProbeParams;
   [CLIENT_INITIALIZE]: InitializeParams;
@@ -788,12 +807,14 @@ export type RequestParamsByMethod = {
   [ATTACHMENT_LIST_ROOTS]: AttachmentListRootsParams;
   [ATTACHMENT_LIST_DIRECTORY]: AttachmentListDirectoryParams;
   [ATTACHMENT_CREATE_FILE_REFERENCE]: AttachmentCreateFileReferenceParams;
+  [ATTACHMENT_CREATE_LOCAL_FILE_REFERENCES]: AttachmentCreateLocalFileReferencesParams;
   [ATTACHMENT_CREATE_PASTED_IMAGE]: AttachmentCreatePastedImageParams;
   [ATTACHMENT_CREATE_EMBEDDED_CANDIDATE]: AttachmentCreateEmbeddedCandidateParams;
   [ATTACHMENT_CONFIRM_EMBEDDED]: AttachmentConfirmEmbeddedParams;
   [ATTACHMENT_REFRESH_HANDLES]: AttachmentRefreshHandlesParams;
   [ATTACHMENT_RELEASE]: AttachmentReleaseParams;
   [ATTACHMENT_REVEAL]: AttachmentRevealParams;
+  [ATTACHMENT_REVEAL_SENT]: AttachmentRevealSentParams;
   [SHELL_RESOLVE_FILE_REVEAL]: ShellResolveFileRevealParams;
   [WORKSPACE_LIST_ROOTS]: WorkspaceListRootsParams;
   [WORKSPACE_LIST_DIRECTORY]: WorkspaceListDirectoryParams;
@@ -848,12 +869,14 @@ export type ResponseResultByMethod = {
   [ATTACHMENT_LIST_ROOTS]: AttachmentListRootsResult;
   [ATTACHMENT_LIST_DIRECTORY]: AttachmentListDirectoryResult;
   [ATTACHMENT_CREATE_FILE_REFERENCE]: AttachmentCreateFileReferenceResult;
+  [ATTACHMENT_CREATE_LOCAL_FILE_REFERENCES]: AttachmentCreateLocalFileReferencesResult;
   [ATTACHMENT_CREATE_PASTED_IMAGE]: AttachmentCreatePastedImageResult;
   [ATTACHMENT_CREATE_EMBEDDED_CANDIDATE]: AttachmentCreateEmbeddedCandidateResult;
   [ATTACHMENT_CONFIRM_EMBEDDED]: AttachmentConfirmEmbeddedResult;
   [ATTACHMENT_REFRESH_HANDLES]: AttachmentRefreshHandlesResult;
   [ATTACHMENT_RELEASE]: AttachmentReleaseResult;
   [ATTACHMENT_REVEAL]: AttachmentRevealResult;
+  [ATTACHMENT_REVEAL_SENT]: AttachmentRevealSentResult;
   [SHELL_RESOLVE_FILE_REVEAL]: ShellResolveFileRevealResult;
   [WORKSPACE_LIST_ROOTS]: WorkspaceListRootsResult;
   [WORKSPACE_LIST_DIRECTORY]: WorkspaceListDirectoryResult;
@@ -916,12 +939,14 @@ export type SettingsUpdateRuntimeResponse = ResponseEnvelope<RuntimeSettingsResu
 export type AttachmentListRootsResponse = ResponseEnvelope<AttachmentListRootsResult>;
 export type AttachmentListDirectoryResponse = ResponseEnvelope<AttachmentListDirectoryResult>;
 export type AttachmentCreateFileReferenceResponse = ResponseEnvelope<AttachmentCreateFileReferenceResult>;
+export type AttachmentCreateLocalFileReferencesResponse = ResponseEnvelope<AttachmentCreateLocalFileReferencesResult>;
 export type AttachmentCreatePastedImageResponse = ResponseEnvelope<AttachmentCreatePastedImageResult>;
 export type AttachmentCreateEmbeddedCandidateResponse = ResponseEnvelope<AttachmentCreateEmbeddedCandidateResult>;
 export type AttachmentConfirmEmbeddedResponse = ResponseEnvelope<AttachmentConfirmEmbeddedResult>;
 export type AttachmentRefreshHandlesResponse = ResponseEnvelope<AttachmentRefreshHandlesResult>;
 export type AttachmentReleaseResponse = ResponseEnvelope<AttachmentReleaseResult>;
 export type AttachmentRevealResponse = ResponseEnvelope<AttachmentRevealResult>;
+export type AttachmentRevealSentResponse = ResponseEnvelope<AttachmentRevealSentResult>;
 export type WorkspaceListRootsResponse = ResponseEnvelope<WorkspaceListRootsResult>;
 export type WorkspaceListDirectoryResponse = ResponseEnvelope<WorkspaceListDirectoryResult>;
 export type TaskAcquireResponse = ResponseEnvelope<TaskAcquireResult>;

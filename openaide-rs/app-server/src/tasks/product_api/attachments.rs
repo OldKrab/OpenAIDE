@@ -2,13 +2,16 @@ use openaide_app_server_protocol::attachment::{
     AttachmentConfirmEmbeddedParams, AttachmentConfirmEmbeddedResult,
     AttachmentCreateEmbeddedCandidateParams, AttachmentCreateEmbeddedCandidateResult,
     AttachmentCreateFileReferenceParams, AttachmentCreateFileReferenceResult,
+    AttachmentCreateLocalFileReferencesParams, AttachmentCreateLocalFileReferencesResult,
     AttachmentCreatePastedImageParams, AttachmentCreatePastedImageResult,
     AttachmentListDirectoryParams, AttachmentListDirectoryResult, AttachmentListRootsParams,
     AttachmentListRootsResult, AttachmentRefreshHandlesParams, AttachmentRefreshHandlesResult,
-    AttachmentReleaseParams, AttachmentReleaseResult, AttachmentRevealParams,
+    AttachmentReleaseParams, AttachmentReleaseResult, AttachmentResourceId, AttachmentRevealParams,
+    PreSendAttachment,
 };
 use openaide_app_server_protocol::errors::{ProtocolError, ProtocolErrorCode};
 use openaide_app_server_protocol::ids::ClientInstanceId;
+use openaide_app_server_protocol::ids::TaskId;
 use openaide_app_server_protocol::workspace::{
     WorkspaceBrowserDirectory, WorkspaceBrowserEntry, WorkspaceBrowserRoot,
     WorkspaceListDirectoryParams, WorkspaceListDirectoryResult, WorkspaceListRootsParams,
@@ -19,12 +22,34 @@ use std::path::{Path, PathBuf};
 use crate::attachment_runtime::{
     AttachmentOwner, AttachmentRuntimeError, ResolvedRevealAttachment,
 };
+use crate::protocol::model::NormalizedMessage;
 
 use super::{validation_error, TaskProductApi};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ResolvedSentFile {
+    pub path: PathBuf,
+    pub label: String,
+}
 
 pub(crate) trait AttachmentFileBrowserWorkflow: Send + Sync {
     fn keep_alive_for_client(&self, client_instance_id: &ClientInstanceId);
     fn discard_resources_for_client(&self, client_instance_id: &ClientInstanceId);
+
+    fn resolve_sent_file(
+        &self,
+        _client_instance_id: &ClientInstanceId,
+        _task_id: &TaskId,
+        _message_id: &str,
+        _attachment_index: usize,
+    ) -> Result<ResolvedSentFile, ProtocolError> {
+        Err(ProtocolError {
+            code: ProtocolErrorCode::CapabilityUnavailable,
+            message: "Sent file access is unavailable".to_string(),
+            recoverable: true,
+            target: None,
+        })
+    }
 
     fn list_roots(
         &self,
@@ -43,6 +68,35 @@ pub(crate) trait AttachmentFileBrowserWorkflow: Send + Sync {
         client_instance_id: &ClientInstanceId,
         params: AttachmentCreateFileReferenceParams,
     ) -> Result<AttachmentCreateFileReferenceResult, ProtocolError>;
+
+    fn create_local_file_references(
+        &self,
+        _client_instance_id: &ClientInstanceId,
+        _params: AttachmentCreateLocalFileReferencesParams,
+    ) -> Result<AttachmentCreateLocalFileReferencesResult, ProtocolError> {
+        Err(ProtocolError {
+            code: ProtocolErrorCode::CapabilityUnavailable,
+            message: "local file references are unavailable".to_string(),
+            recoverable: true,
+            target: None,
+        })
+    }
+
+    /// Registers one completed Web upload without exposing its temp path to Frontend code.
+    fn create_uploaded_file_reference(
+        &self,
+        _client_instance_id: &ClientInstanceId,
+        _task_id: &TaskId,
+        _path: String,
+        _label: String,
+    ) -> Result<PreSendAttachment, ProtocolError> {
+        Err(ProtocolError {
+            code: ProtocolErrorCode::CapabilityUnavailable,
+            message: "Web uploads are unavailable".to_string(),
+            recoverable: true,
+            target: None,
+        })
+    }
 
     fn create_pasted_image(
         &self,
@@ -101,6 +155,38 @@ impl AttachmentFileBrowserWorkflow for TaskProductApi {
             .discard_resources_for_client(client_instance_id);
     }
 
+    fn resolve_sent_file(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        task_id: &TaskId,
+        message_id: &str,
+        attachment_index: usize,
+    ) -> Result<ResolvedSentFile, ProtocolError> {
+        self.read_task_for_client(task_id.as_str(), client_instance_id)?;
+        let messages = self
+            .store
+            .read_messages(task_id.as_str())
+            .map_err(super::runtime_error)?;
+        let attachment = messages
+            .iter()
+            .find(|stored| stored.chat.message_id == message_id)
+            .and_then(|stored| match &stored.chat.message {
+                NormalizedMessage::User { attachments, .. } => attachments.get(attachment_index),
+                _ => None,
+            })
+            .ok_or_else(|| sent_file_not_found("Sent attachment was not found"))?;
+        let path = attachment
+            .path
+            .as_deref()
+            .map(PathBuf::from)
+            .filter(|path| path.is_file())
+            .ok_or_else(|| sent_file_not_found("Sent file is no longer available"))?;
+        Ok(ResolvedSentFile {
+            path,
+            label: attachment.label.clone(),
+        })
+    }
+
     fn list_roots(
         &self,
         client_instance_id: &ClientInstanceId,
@@ -138,6 +224,59 @@ impl AttachmentFileBrowserWorkflow for TaskProductApi {
         let owner = AttachmentOwner::new(client_instance_id, &params.task_id);
         self.attachments
             .create_file_reference(&owner, &params.entry_id)
+            .map_err(protocol_error_from_attachment_runtime)
+    }
+
+    fn create_local_file_references(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        params: AttachmentCreateLocalFileReferencesParams,
+    ) -> Result<AttachmentCreateLocalFileReferencesResult, ProtocolError> {
+        const MAX_FILES: usize = 20;
+        self.read_task_for_client(params.task_id.as_str(), client_instance_id)?;
+        if params.paths.len() > MAX_FILES {
+            return Err(validation_error(
+                "paths",
+                "A draft can attach at most 20 files",
+            ));
+        }
+        let owner = AttachmentOwner::new(client_instance_id, &params.task_id);
+        let mut attachments = Vec::with_capacity(params.paths.len());
+        for path in params.paths {
+            match self
+                .attachments
+                .create_local_file_reference(&owner, path, None)
+            {
+                Ok(attachment) => attachments.push(attachment),
+                Err(error) => {
+                    let resources = attachments
+                        .iter()
+                        .map(|attachment| AttachmentResourceId::Handle {
+                            id: attachment.handle_id.clone(),
+                        })
+                        .collect::<Vec<_>>();
+                    self.attachments.release_resources(&owner, &resources);
+                    return Err(protocol_error_from_attachment_runtime(error));
+                }
+            }
+        }
+        Ok(AttachmentCreateLocalFileReferencesResult { attachments })
+    }
+
+    fn create_uploaded_file_reference(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        task_id: &TaskId,
+        path: String,
+        label: String,
+    ) -> Result<PreSendAttachment, ProtocolError> {
+        self.read_task_for_client(task_id.as_str(), client_instance_id)?;
+        self.attachments
+            .create_local_file_reference(
+                AttachmentOwner::new(client_instance_id, task_id),
+                path,
+                Some(label),
+            )
             .map_err(protocol_error_from_attachment_runtime)
     }
 
@@ -323,6 +462,15 @@ fn workspace_browser_read_error(error: impl std::fmt::Display) -> ProtocolError 
     ProtocolError {
         code: ProtocolErrorCode::Internal,
         message: format!("Unable to read directory: {error}"),
+        recoverable: true,
+        target: None,
+    }
+}
+
+fn sent_file_not_found(message: &str) -> ProtocolError {
+    ProtocolError {
+        code: ProtocolErrorCode::NotFound,
+        message: message.to_string(),
         recoverable: true,
         target: None,
     }

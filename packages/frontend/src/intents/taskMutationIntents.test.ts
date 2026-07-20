@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { TaskSnapshot } from "@openaide/app-shell-contracts";
 import {
   TASK_SEND,
+  type AttachmentHandleId,
 } from "@openaide/app-server-client";
 
 afterEach(() => {
@@ -90,6 +91,34 @@ describe("task mutation intents", () => {
         text: "Explain this",
         images: [{ label: "pasted.png", mimeType: "image/png", data: "AQID" }],
       },
+    }));
+  });
+
+  it("sends general files as opaque attachment handles", async () => {
+    const { sendTaskPromptIntent } = await import("./taskMutationIntents");
+    const request = vi.fn().mockRejectedValue(new Error("connection closed"));
+    const input = {
+      prompt: "",
+      context: [{
+        kind: "file" as const,
+        label: "large-model.bin",
+        local_id: "file-1",
+        app_server_handle_id: "attachment-1" as AttachmentHandleId,
+      }],
+    };
+
+    sendTaskPromptIntent({
+      backendConnection: { request },
+      clientInstanceId: "client-a",
+      createSnapshotRequestId: vi.fn(() => 1),
+      dispatch: vi.fn(),
+      postHostMessage: vi.fn(),
+      stateRootId: "root-a",
+    }, taskSnapshot(), input);
+
+    await vi.waitFor(() => expect(request).toHaveBeenCalledWith(TASK_SEND, {
+      taskId: "task-a",
+      message: { text: "", attachments: ["attachment-1"] },
     }));
   });
 

@@ -5,6 +5,22 @@ import { createInitialState } from "../state/store";
 import { disposableNewTaskControllerId, NewTaskController } from "./newTaskController";
 
 describe("New Task controller", () => {
+  it("keeps one lease when the same Prepared Task is claimed through a newer render key", () => {
+    const controller = new NewTaskController();
+    const originalLease = controller.claim({
+      preparationKey: "render-a",
+      taskId: "task_1" as never,
+    });
+
+    const reclaimedLease = controller.claim({
+      preparationKey: "render-b",
+      taskId: "task_1" as never,
+    });
+
+    expect(reclaimedLease).toBe(originalLease);
+    expect(controller.isCurrent(originalLease)).toBe(true);
+  });
+
   it("keeps an in-flight send protected after a newer New Task is claimed", async () => {
     const request = vi.fn(async () => ({ discarded: true })) as unknown as BackendConnection["request"];
     const dispatch = vi.fn();
@@ -81,6 +97,85 @@ describe("New Task controller", () => {
 
     expect(controller.retain({ preparationKey: "context-a", snapshot })).toBeDefined();
     expect(controller.getSnapshot()).toBe(snapshot);
+  });
+
+  it("keeps settled Agent controls while an expired Task replacement is preparing", () => {
+    const controller = new NewTaskController();
+    const settledCatalog = {
+      agent_id: "codex",
+      options: [],
+      status: "empty",
+    } as const;
+    controller.retain({
+      preparationKey: "context-a",
+      snapshot: {
+        lifecycle: "new",
+        task: { agent_id: "codex", task_id: "task_1" },
+        agent_config: settledCatalog,
+      } as unknown as TaskSnapshot,
+    });
+    controller.expireClientLease();
+
+    controller.retain({
+      preparationKey: "context-a",
+      snapshot: {
+        lifecycle: "new",
+        task: { agent_id: "codex", task_id: "task_2" },
+        agent_config: { agent_id: "codex", options: [], status: "loading" },
+      } as unknown as TaskSnapshot,
+    });
+
+    expect(controller.getSnapshot()?.agent_config).toBe(settledCatalog);
+  });
+
+  it("does not replace settled controls with a transient loading update for the same Task", () => {
+    const controller = new NewTaskController();
+    const settledCatalog = {
+      agent_id: "codex",
+      options: [],
+      status: "empty",
+    } as const;
+    controller.retain({
+      preparationKey: "context-a",
+      snapshot: {
+        lifecycle: "new",
+        task: { agent_id: "codex", task_id: "task_1" },
+        agent_config: settledCatalog,
+      } as unknown as TaskSnapshot,
+    });
+
+    controller.updateSnapshot({
+      lifecycle: "new",
+      task: { agent_id: "codex", task_id: "task_1" },
+      agent_config: { agent_id: "codex", options: [], status: "loading" },
+    } as unknown as TaskSnapshot);
+
+    expect(controller.getSnapshot()?.agent_config).toBe(settledCatalog);
+  });
+
+  it("does not replace a ready Task with an older preparation snapshot", () => {
+    const controller = new NewTaskController();
+    const ready = {
+      lifecycle: "new",
+      revision: 2,
+      task: { agent_id: "codex", task_id: "task_1" },
+      preparation: { kind: "ready" },
+      send_capability: { state: "ready" },
+    } as unknown as TaskSnapshot;
+    controller.retain({ preparationKey: "context-a", snapshot: ready });
+
+    expect(controller.updateSnapshot({
+      lifecycle: "new",
+      revision: 1,
+      task: { agent_id: "codex", task_id: "task_1" },
+      preparation: { kind: "preparing" },
+      send_capability: {
+        state: "loading",
+        blockers: [{ kind: "taskPreparing", message: "Task Agent preparation is still running" }],
+      },
+    } as unknown as TaskSnapshot)).toBe(true);
+
+    expect(controller.getSnapshot()).toBe(ready);
   });
 
   it("never treats a visible zero-message Task as disposable New Task state", () => {
