@@ -1574,6 +1574,39 @@ fn every_running_tool_output_update_reaches_the_session_sink() {
 }
 
 #[test]
+fn metadata_only_tool_updates_that_change_no_projection_do_not_republish() {
+    let capture = Arc::new(CapturingEventSink::default());
+    let sink: Arc<dyn AgentEventSink> = capture.clone();
+    let projection =
+        LivePromptProjection::new("codex", sink, crate::agent::TurnCancellation::new());
+
+    projection
+        .emit(SessionUpdate::ToolCall(
+            ToolCall::new("tool_call_burst", "Run tests")
+                .kind(ToolKind::Execute)
+                .status(ToolCallStatus::InProgress),
+        ))
+        .unwrap();
+    for _ in 0..100 {
+        let update: ToolCallUpdate = serde_json::from_value(serde_json::json!({
+            "toolCallId": "tool_call_burst",
+            "_meta": {
+                "terminal_output_delta": {
+                    "terminal_id": "terminal_1",
+                    "data": "x"
+                }
+            }
+        }))
+        .expect("deserialize metadata extension fixture");
+        projection
+            .emit(SessionUpdate::ToolCallUpdate(update))
+            .unwrap();
+    }
+
+    assert_eq!(capture.events().len(), 1);
+}
+
+#[test]
 fn permission_tool_call_update_seeds_later_partial_tool_updates() {
     let capture = Arc::new(CapturingEventSink::default());
     let sink: Arc<dyn AgentEventSink> = capture.clone();

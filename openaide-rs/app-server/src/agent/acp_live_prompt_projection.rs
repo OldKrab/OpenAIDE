@@ -13,8 +13,8 @@ use crate::agent::acp_content_projection::project_content_block;
 #[cfg(test)]
 use crate::agent::acp_tool_call_projection::{merge_tool_call_update, remember_tool_call};
 use crate::agent::acp_tool_call_projection::{
-    merge_tool_call_update_with_status_change, remember_tool_call_with_status_change,
-    tool_status_name, ToolCallState,
+    merge_tool_call_update_with_changes, merge_tool_call_update_with_status_change,
+    remember_tool_call_with_status_change, tool_status_name, ToolCallState,
 };
 use crate::agent::acp_update_projection::normalize_available_commands;
 use crate::agent::events::{
@@ -159,9 +159,11 @@ impl LivePromptProjection {
                 self.publish_tool_call(&tool_call, status_changed)?;
             }
             SessionUpdate::ToolCallUpdate(update) => {
-                let (tool_call, status_changed) =
-                    merge_tool_call_update_with_status_change(&self.tool_calls, update);
-                self.publish_tool_call(&tool_call, status_changed)?;
+                let (tool_call, status_changed, projection_changed) =
+                    merge_tool_call_update_with_changes(&self.tool_calls, update);
+                if projection_changed {
+                    self.publish_tool_call(&tool_call, status_changed)?;
+                }
             }
             SessionUpdate::ConfigOptionUpdate(update) => {
                 self.sink

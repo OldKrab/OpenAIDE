@@ -6,6 +6,7 @@ pub mod message_store;
 pub mod new_task_defaults;
 pub mod records;
 pub mod root;
+pub mod task_journal;
 pub mod task_store;
 pub mod tool_artifacts;
 
