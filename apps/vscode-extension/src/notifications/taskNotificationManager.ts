@@ -5,13 +5,11 @@ const MAX_HANDLED_EVENTS = 500;
 
 export type TaskNotificationEnvironment = {
   now(): number;
-  isFocused(): boolean;
   focusedTaskId(): string | undefined;
   readHandledEventIds(): string[];
   rememberHandledEventIds(eventIds: string[]): void;
   showNotification(message: string, action: string): Promise<string | undefined>;
   openTask(taskId: string, title: string): void;
-  subscribeFocus(listener: (focused: boolean) => void): () => void;
   subscribeFocusedTask(listener: (taskId: string | undefined) => void): () => void;
   reportError?(error: unknown): void;
 };
@@ -21,7 +19,7 @@ export type TaskNotificationManager = {
   dispose(): void;
 };
 
-/** Owns VS Code-window focus eligibility and durable Task Attention receipts. */
+/** Owns active-Task eligibility and durable VS Code Task Attention receipts. */
 export function createTaskNotificationManager(
   environment: TaskNotificationEnvironment,
 ): TaskNotificationManager {
@@ -32,7 +30,6 @@ export function createTaskNotificationManager(
   let focusedSince = focusedTaskId ? environment.now() : undefined;
   const lastFocusedIntervals = new Map<string, { from: number; until: number }>();
 
-  const stopFocus = environment.subscribeFocus(updateFocusedTask);
   const stopFocusedTask = environment.subscribeFocusedTask(updateFocusedTask);
 
   return {
@@ -52,7 +49,6 @@ export function createTaskNotificationManager(
     dispose() {
       if (disposed) return;
       disposed = true;
-      stopFocus();
       stopFocusedTask();
     },
   };
@@ -89,7 +85,7 @@ export function createTaskNotificationManager(
   }
 
   function currentFocusedTaskId() {
-    return environment.isFocused() ? environment.focusedTaskId() : undefined;
+    return environment.focusedTaskId();
   }
 
   function wasTaskFocusedAt(taskId: string, occurredAt: number) {

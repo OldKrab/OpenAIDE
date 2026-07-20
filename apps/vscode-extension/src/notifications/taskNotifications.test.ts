@@ -3,23 +3,11 @@ import type { AppServerStateObserver, SubscriptionScope } from "@openaide/app-se
 import { registerTaskNotifications } from "./taskNotifications";
 
 const vscodeMocks = vi.hoisted(() => ({
-  focused: false,
-  focusListener: undefined as ((event: { focused: boolean }) => void) | undefined,
   showInformationMessage: vi.fn(async () => "Open Task"),
-  disposeFocus: vi.fn(),
 }));
 
 vi.mock("vscode", () => ({
   window: {
-    state: {
-      get focused() {
-        return vscodeMocks.focused;
-      },
-    },
-    onDidChangeWindowState: vi.fn((listener) => {
-      vscodeMocks.focusListener = listener;
-      return { dispose: vscodeMocks.disposeFocus };
-    }),
     showInformationMessage: vscodeMocks.showInformationMessage,
   },
 }));
@@ -84,7 +72,6 @@ describe("VS Code Task notification registration", () => {
 
     registration.dispose();
     expect(stop).toHaveBeenCalledOnce();
-    expect(vscodeMocks.disposeFocus).toHaveBeenCalledOnce();
     expect(disposeTaskFocus).toHaveBeenCalledOnce();
   });
 });
