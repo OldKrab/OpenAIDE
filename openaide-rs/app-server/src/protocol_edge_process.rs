@@ -92,7 +92,10 @@ pub(super) fn run_stdio(mut dispatcher: ProtocolEdgeStdioDispatcher) {
     openaide_app_server::logging::info("protocol_edge_app_server_stopped", serde_json::json!({}));
 }
 
-pub(super) fn run_local_http_handoff(mut dispatcher: ProtocolEdgeStdioDispatcher) {
+pub(super) fn run_local_http_handoff(
+    mut dispatcher: ProtocolEdgeStdioDispatcher,
+    wait_for_last_client: impl FnOnce(),
+) {
     debug_assert!(dispatcher.take_host_requests().is_none());
     if let Some(task_updates) = dispatcher.take_task_updates() {
         let gateway = dispatcher.shared_gateway();
@@ -111,7 +114,8 @@ pub(super) fn run_local_http_handoff(mut dispatcher: ProtocolEdgeStdioDispatcher
         });
     }
 
-    let _ = io::copy(&mut io::stdin().lock(), &mut io::sink());
+    // The state-root App Server outlives whichever App Shell happened to launch it.
+    wait_for_last_client();
     openaide_app_server::logging::info(
         "protocol_edge_local_http_handoff_stopped",
         serde_json::json!({}),

@@ -2273,8 +2273,9 @@ concrete current gap.
   edge, publishes the LocalHttp endpoint, prints the same connection JSON, and
   keeps serving.
 - The connection JSON is the handoff process's only stdout message. After that
-  line, product traffic and Task event delivery use LocalHttp; stdin remains
-  only as a parent-lifetime signal and is not a second App Server transport.
+  line, product traffic and Task event delivery use LocalHttp. The elected App
+  Server does not use stdin as a parent-lifetime signal; initialized client
+  liveness owns its lifetime so one launching shell cannot stop other windows.
 - LocalHttp handoff advertises ACP filesystem and terminal client capabilities
   as unavailable because it has no typed responder route for those Agent host
   requests. Plain protocol stdio retains its serviced host-request channel.
@@ -2286,6 +2287,8 @@ concrete current gap.
 - VS Code `RuntimeProcess.startAppServerConnection()` spawns handoff mode and
   validates the returned LocalHttp connection info instead of reading endpoint
   files or duplicating endpoint discovery in TypeScript.
+- After a successful handoff, VS Code detaches the child and releases its stdio
+  handles. Extension-host disposal does not stop the state-root App Server.
 - VS Code accepts only loopback `http` LocalHttp handoff endpoints with a
   `/probe` path, explicit port, and non-empty token.
 - VS Code bounds handoff stdout reads with a timeout and maximum line size so a

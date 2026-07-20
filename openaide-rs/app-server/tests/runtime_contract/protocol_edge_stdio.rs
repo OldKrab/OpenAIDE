@@ -110,50 +110,43 @@ fn app_server_handoff_mode_launches_and_serves_local_http() {
 }
 
 #[test]
-fn app_server_handoff_stdout_is_bootstrap_only() {
+fn app_server_handoff_survives_launcher_disconnect_while_another_client_is_attached() {
     let storage = TempDir::new().expect("storage root");
     let runtime = TempDir::new().expect("runtime root");
     let mut child = spawn_handoff_runtime(&storage, &runtime);
-    let stdout = child.stdout.take().expect("runtime stdout");
-    let mut stdout = std::io::BufReader::new(stdout);
+    let mut stdout = std::io::BufReader::new(child.stdout.take().expect("runtime stdout"));
     let connection = read_handoff_connection(&mut stdout);
+    let endpoint_url = connection["endpointUrl"].as_str().expect("endpoint url");
+    let auth_token = connection["authToken"].as_str().expect("auth token");
 
-    let request = json!({
-        "jsonrpc": "2.0",
-        "id": "legacy-stdio-initialize",
-        "method": "client/initialize",
-        "params": {
-            "clientInstanceId": "legacy-stdio-client",
-            "shell": { "kind": "web" },
-            "requestedSurface": { "kind": "home" },
-            "capabilities": {}
-        }
-    });
-    {
-        use std::io::Write;
-        writeln!(child.stdin.as_mut().expect("runtime stdin"), "{request}")
-            .expect("write legacy stdio request");
-    }
-
-    let (tx, rx) = std::sync::mpsc::channel();
-    let reader = std::thread::spawn(move || {
-        let mut line = String::new();
-        let result = std::io::BufRead::read_line(&mut stdout, &mut line);
-        let _ = tx.send((result, line));
-    });
-    let early_output = rx.recv_timeout(Duration::from_millis(250)).ok();
+    post_local_http_initialize(endpoint_url, auth_token, "launching-window");
+    post_local_http_initialize(endpoint_url, auth_token, "second-window");
+    drop(stdout);
     drop(child.stdin.take());
-    let status = child.wait().expect("handoff exits after parent disconnect");
-    let (read_result, line) = early_output.unwrap_or_else(|| {
-        rx.recv_timeout(Duration::from_secs(2))
-            .expect("handoff stdout closes after parent disconnect")
-    });
-    reader.join().expect("stdout reader exits");
 
-    assert!(status.success());
-    assert_eq!(read_result.expect("read handoff stdout"), 0);
-    assert!(line.is_empty(), "unexpected post-handoff stdout: {line}");
-    assert_eq!(connection["kind"], "localHttp");
+    std::thread::sleep(Duration::from_millis(250));
+    assert!(
+        child.try_wait().expect("read handoff status").is_none(),
+        "App Server must not be owned by the launching extension host"
+    );
+
+    let heartbeat = post_local_http_json(
+        endpoint_url,
+        auth_token,
+        "second-window",
+        json!({
+            "jsonrpc": "2.0",
+            "id": "second-window-heartbeat",
+            "method": "client/heartbeat",
+            "params": {}
+        }),
+    );
+
+    assert_eq!(heartbeat[0]["id"], "second-window-heartbeat");
+    assert!(heartbeat[0]["result"]["result"].is_object());
+
+    child.kill().expect("stop handoff runtime");
+    let _ = child.wait();
 }
 
 #[test]

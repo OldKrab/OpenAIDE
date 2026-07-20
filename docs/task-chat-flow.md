@@ -56,9 +56,9 @@ Frontend supplies `clientInstanceId` only through `client/initialize`. Transport
 
 ### App Server process lifetime
 
-Product-client liveness and App Server process lifetime are separate. Missing client heartbeats may expire that client's connection context, cancel its client-scoped requests, release its Prepared-Task lease, and remove its workspace roots, but the last product client expiring never stops the App Server process. Leaving an App Shell idle, unfocused, suspended, or otherwise unable to schedule heartbeats is not a process-lifetime event.
+Product-client liveness controls App Server process lifetime at the App Shell boundary. Missing client heartbeats may expire that client's connection context, cancel its client-scoped requests, release its Prepared-Task lease, and remove its workspace roots. The App Server remains alive while any initialized App Shell client is connected or inside reconnect grace, and shuts down gracefully after the last client expires. Merely changing the focused window or Task does not detach the App Shell client.
 
-The native App Shell owns the process generation through its handoff process lifetime and explicit shutdown. It probes the published endpoint independently from product-client heartbeats. When the endpoint is no longer healthy, the shell performs a new handoff and publishes a replacement endpoint to every live client surface. Those surfaces retain one logical App Server session, preserve the Frontend-owned Composer, invalidate and reinstall authoritative scope baselines, and never replay a Send or another mutation whose outcome is unknown.
+The process generation belongs to the selected state root rather than whichever native App Shell won launch election. After receiving connection information, the launcher releases the handoff child from its own process lifetime. Every App Shell probes the published endpoint independently from product-client heartbeats. When the endpoint is no longer healthy, a shell performs a new handoff and publishes a replacement endpoint to its live client surfaces. Those surfaces retain one logical App Server session, preserve the Frontend-owned Composer, invalidate and reinstall authoritative scope baselines, and never replay a Send or another mutation whose outcome is unknown.
 
 ## Default Project And Agent
 
