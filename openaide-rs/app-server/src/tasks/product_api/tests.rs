@@ -12,8 +12,9 @@ use crate::projects::{project_id_for_workspace, ProjectTaskContext, StorageProje
 use crate::protocol::model::{
     ActivityStatus, ActivityStep, AgentCommand, AgentCommandsCatalog, AgentListSessionsResult,
     AgentListedSession, AgentMessagePart, AgentMessageRole, Attachment, ChatMessage, ConfigOption,
-    ConfigOptionCategory, ConfigOptionValue, ConfigOptionsCatalog, ConfigOptionsStatus,
-    InterruptionReason, IsolationKind, NormalizedMessage, TaskStatus,
+    ConfigOptionCategory, ConfigOptionCurrentValue, ConfigOptionKind, ConfigOptionValue,
+    ConfigOptionsCatalog, ConfigOptionsStatus, InterruptionReason, IsolationKind,
+    NormalizedMessage, TaskStatus,
 };
 use crate::server_requests::{ServerRequestAnswer, ServerRequestRuntime};
 use crate::snapshots::task_snapshot::project_stored_task_snapshot;
@@ -26,8 +27,8 @@ use crate::tasks::mutation::TaskMutationResult;
 use openaide_app_server_protocol::agent::AgentListSessionsParams;
 use openaide_app_server_protocol::ids::{AgentId, ClientInstanceId, ProjectId, TaskId};
 use openaide_app_server_protocol::snapshot::{
-    LiveSessionDataState, MessagePart, TaskHistorySyncSnapshot, TaskPreparationSnapshot,
-    TaskSendCapabilityState, TaskStatus as ProtocolTaskStatus,
+    AgentConfigOptionCurrentValue, LiveSessionDataState, MessagePart, TaskHistorySyncSnapshot,
+    TaskPreparationSnapshot, TaskSendCapabilityState, TaskStatus as ProtocolTaskStatus,
     TaskTitleSource as ProtocolTaskTitleSource,
 };
 use openaide_app_server_protocol::support::SupportRecoverStuckSessionsParams;
@@ -41,6 +42,29 @@ use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+
+fn protocol_config_id(value: &str) -> AgentConfigOptionCurrentValue {
+    AgentConfigOptionCurrentValue::Id {
+        value: value.to_string(),
+    }
+}
+
+fn protocol_value_id(value: &AgentConfigOptionCurrentValue) -> Option<&str> {
+    match value {
+        AgentConfigOptionCurrentValue::Id { value } => Some(value),
+        AgentConfigOptionCurrentValue::Boolean { .. } => None,
+    }
+}
+
+fn task_config_id<'a>(task: &'a TaskRecord, id: &str) -> Option<&'a str> {
+    task.config_options_catalog
+        .as_ref()?
+        .options
+        .iter()
+        .find(|option| option.id == id)?
+        .current_value
+        .as_id()
+}
 
 #[test]
 fn acquire_in_worktree_persists_workspace_identity_without_splitting_project() {
@@ -89,7 +113,6 @@ fn acquire_in_worktree_persists_workspace_identity_without_splitting_project() {
                 project_id: project_id_for_workspace(&project_root_text),
                 agent_id: AgentId::from("codex"),
                 worktree_id: created.worktree_id.clone(),
-                config_options: Default::default(),
             },
         )
         .unwrap();
@@ -180,7 +203,6 @@ fn create_persists_idle_task_without_prompt_or_turn() {
             project_id,
             agent_id: AgentId::from("codex"),
             workspace_root: None,
-            config_options: Default::default(),
         })
         .unwrap();
     assert_eq!(snapshot.task.title, None);
@@ -213,7 +235,6 @@ fn create_reopens_the_existing_draft_for_the_same_project_and_agent() {
         project_id,
         agent_id: AgentId::from("codex"),
         workspace_root: None,
-        config_options: Default::default(),
     };
 
     let first = api.create_for_test(params.clone()).unwrap();
@@ -245,7 +266,6 @@ fn different_clients_get_distinct_new_tasks() {
         project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
         agent_id: AgentId::from("codex"),
         workspace_root: None,
-        config_options: Default::default(),
     };
 
     let first = api
@@ -270,7 +290,7 @@ fn new_task_context_change_is_a_conflict() {
         .unwrap();
     let api = TaskProductApi::new(
         store.clone(),
-        Arc::new(StorageProjectResolver::new(store)),
+        Arc::new(StorageProjectResolver::new(store.clone())),
         AgentRegistry::default_built_ins(),
         Arc::new(crate::agent::mock::MockAgent),
         TaskUpdateNotifier::disabled(),
@@ -281,7 +301,6 @@ fn new_task_context_change_is_a_conflict() {
         project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
         agent_id: AgentId::from(agent_id),
         workspace_root: None,
-        config_options: Default::default(),
     };
     api.acquire_for_client(&client, params("codex")).unwrap();
 
@@ -323,7 +342,6 @@ fn concurrent_create_for_one_client_resolves_one_new_task() {
                     project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
                     agent_id: AgentId::from("codex"),
                     workspace_root: None,
-                    config_options: Default::default(),
                 },
             )
             .unwrap()
@@ -369,7 +387,6 @@ fn released_prepared_task_is_reused_by_another_client() {
         project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
         agent_id: AgentId::from("codex"),
         workspace_root: None,
-        config_options: Default::default(),
     };
     let first = api
         .acquire_for_client(&ClientInstanceId::from("client-a"), params.clone())
@@ -418,7 +435,6 @@ fn restart_clears_prepared_task_lease_and_preserves_the_task_for_reuse() {
         project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
         agent_id: AgentId::from("codex"),
         workspace_root: None,
-        config_options: Default::default(),
     };
     let first_api = TaskProductApi::new(
         store.clone(),
@@ -472,7 +488,7 @@ fn new_task_cannot_be_archived_or_replaced() {
         .unwrap();
     let api = TaskProductApi::new(
         store.clone(),
-        Arc::new(StorageProjectResolver::new(store)),
+        Arc::new(StorageProjectResolver::new(store.clone())),
         AgentRegistry::default_built_ins(),
         Arc::new(crate::agent::mock::MockAgent),
         TaskUpdateNotifier::disabled(),
@@ -482,7 +498,6 @@ fn new_task_cannot_be_archived_or_replaced() {
         project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
         agent_id: AgentId::from("codex"),
         workspace_root: None,
-        config_options: Default::default(),
     };
     let created = api.create_for_test(params.clone()).unwrap();
 
@@ -544,11 +559,11 @@ fn create_reactivates_the_reused_draft_native_session() {
     draft.lifecycle = test_new_task_lifecycle();
     draft.agent_session_id = Some("session-draft".to_string());
     draft.preparation = TaskPreparationRecord::Ready;
-    draft.config_options = mode_config_catalog("agent").current_values();
     draft.config_options_catalog = Some(mode_config_catalog("agent"));
     store.write_task(&draft).unwrap();
     let agent = Arc::new(RecordingAgent {
         config_catalog: Some(config_catalog("gpt-5")),
+        resume_config_catalog: Some(config_catalog("gpt-5")),
         ..RecordingAgent::default()
     });
     let api = TaskProductApi::new(
@@ -564,7 +579,6 @@ fn create_reactivates_the_reused_draft_native_session() {
         project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
         agent_id: AgentId::from("codex"),
         workspace_root: None,
-        config_options: Default::default(),
     })
     .unwrap();
 
@@ -584,71 +598,27 @@ fn create_reactivates_the_reused_draft_native_session() {
         Some("session-draft")
     );
     let reopened = store.read_task("task-draft").unwrap();
-    assert_eq!(
-        reopened.config_options.get("mode").map(String::as_str),
-        Some("agent")
-    );
-    assert!(reopened.config_options_catalog.is_none());
+    assert_eq!(task_config_id(&reopened, "model"), Some("gpt-5"));
     let updated = api
         .set_config_option_for_test(TaskSetConfigOptionParams {
             task_id: "task-draft".into(),
             config_id: "model".into(),
-            value: "gpt-5.6-terra".to_string(),
+            value: protocol_config_id("gpt-5.5"),
             client_mutation_id: "reactivated-draft-config".into(),
         })
         .unwrap();
     assert_eq!(
-        updated.agent_config.options[0].current_value,
-        "gpt-5.6-terra"
+        protocol_value_id(&updated.agent_config.options[0].current_value),
+        Some("gpt-5.5")
     );
 }
 
 #[test]
-fn create_passes_selected_config_into_draft_session_preparation() {
-    let temp = tempfile::tempdir().unwrap();
-    let store = Store::open(temp.path().to_path_buf()).unwrap();
-    store
-        .write_task(&task_record(
-            "task-existing",
-            "/tmp/openaide-unit-workspace/app",
-        ))
-        .unwrap();
-    let agent = Arc::new(RecordingAgent::default());
-    let api = TaskProductApi::new(
-        store.clone(),
-        Arc::new(StorageProjectResolver::new(store.clone())),
-        AgentRegistry::default_built_ins(),
-        agent.clone(),
-        TaskUpdateNotifier::disabled(),
-    )
-    .unwrap();
-
-    api.create_for_test(TaskAcquireParams {
-        project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
-        agent_id: AgentId::from("codex"),
-        workspace_root: None,
-        config_options: [("model".to_string(), "gpt-5".to_string())]
-            .into_iter()
-            .collect(),
-    })
-    .unwrap();
-
-    wait_until(|| !agent.start_config_options.lock().unwrap().is_empty());
-    assert_eq!(
-        agent.start_config_options.lock().unwrap().as_slice(),
-        &[Some(serde_json::json!({ "model": "gpt-5" }))]
-    );
-}
-
-#[test]
-fn create_reconciles_stale_draft_config_with_fresh_agent_defaults() {
+fn create_replaces_a_persisted_draft_catalog_with_fresh_agent_defaults() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut draft = task_record("task-draft", "/tmp/openaide-unit-workspace/app");
     draft.lifecycle = test_new_task_lifecycle();
-    draft.config_options = [("mode".to_string(), "full-access".to_string())]
-        .into_iter()
-        .collect();
     draft.config_options_catalog = Some(mode_config_catalog("full-access"));
     store.write_task(&draft).unwrap();
     let agent = Arc::new(RecordingAgent {
@@ -668,7 +638,6 @@ fn create_reconciles_stale_draft_config_with_fresh_agent_defaults() {
         project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
         agent_id: AgentId::from("codex"),
         workspace_root: None,
-        config_options: Default::default(),
     })
     .unwrap();
 
@@ -680,16 +649,13 @@ fn create_reconciles_stale_draft_config_with_fresh_agent_defaults() {
     });
     let recovered = store.read_task("task-draft").unwrap();
     assert_eq!(
-        recovered.config_options.get("mode").map(String::as_str),
-        Some("agent-full-access")
-    );
-    assert_eq!(
         recovered
             .config_options_catalog
             .expect("fresh catalog")
             .options[0]
-            .current_value,
-        "agent-full-access"
+            .current_value
+            .as_id(),
+        Some("agent-full-access")
     );
 }
 
@@ -717,7 +683,6 @@ fn draft_preparation_keeps_catalogs_delivered_immediately_when_the_sink_attaches
             project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
             agent_id: AgentId::from("codex"),
             workspace_root: None,
-            config_options: Default::default(),
         })
         .unwrap();
     let task_id = created.task.task_id.clone();
@@ -735,7 +700,10 @@ fn draft_preparation_keeps_catalogs_delivered_immediately_when_the_sink_attaches
         .unwrap();
 
     assert_eq!(prepared.agent_config.state, LiveSessionDataState::Ready);
-    assert_eq!(prepared.agent_config.options[0].current_value, "gpt-5.5");
+    assert_eq!(
+        protocol_value_id(&prepared.agent_config.options[0].current_value),
+        Some("gpt-5.5")
+    );
     assert_eq!(prepared.agent_commands.state, LiveSessionDataState::Ready);
     assert_eq!(prepared.agent_commands.commands[0].name, "web");
 }
@@ -838,7 +806,6 @@ fn create_persists_preparing_and_starts_one_native_session_asynchronously() {
             project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
             agent_id: AgentId::from("codex"),
             workspace_root: None,
-            config_options: Default::default(),
         })
         .unwrap();
 
@@ -886,7 +853,10 @@ fn create_persists_preparing_and_starts_one_native_session_asynchronously() {
 
     assert!(matches!(ready.preparation, TaskPreparationSnapshot::Ready));
     assert_eq!(ready.agent_config.state, LiveSessionDataState::Ready);
-    assert_eq!(ready.agent_config.options[0].current_value, "gpt-5");
+    assert_eq!(
+        protocol_value_id(&ready.agent_config.options[0].current_value),
+        Some("gpt-5")
+    );
     assert_eq!(ready.agent_commands.state, LiveSessionDataState::Ready);
     assert_eq!(ready.agent_commands.commands[0].name, "web");
     let accepted = api
@@ -933,7 +903,6 @@ fn create_projects_native_session_start_failure_into_send_readiness() {
             project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
             agent_id: AgentId::from("codex"),
             workspace_root: None,
-            config_options: Default::default(),
         })
         .unwrap();
 
@@ -1022,7 +991,6 @@ fn task_preparation_resolves_custom_agent_secrets_through_typed_server_requests(
             project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
             agent_id: AgentId::from("custom.agent"),
             workspace_root: None,
-            config_options: Default::default(),
         })
         .unwrap();
     let task_id = created.task.task_id.clone();
@@ -1094,7 +1062,6 @@ fn create_closes_native_session_when_preparation_event_attachment_fails() {
             project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
             agent_id: AgentId::from("codex"),
             workspace_root: None,
-            config_options: Default::default(),
         })
         .unwrap();
 
@@ -1142,7 +1109,6 @@ fn first_send_reuses_the_native_session_prepared_during_create() {
             project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
             agent_id: AgentId::from("codex"),
             workspace_root: None,
-            config_options: Default::default(),
         })
         .unwrap();
     assert_eq!(created.task.title, None);
@@ -1205,7 +1171,6 @@ fn first_send_promotes_new_task_with_prompt_title() {
             project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
             agent_id: AgentId::from("codex"),
             workspace_root: None,
-            config_options: Default::default(),
         })
         .unwrap();
     wait_until(|| {
@@ -1268,7 +1233,6 @@ fn acquire_returns_while_prepared_session_resume_is_blocked() {
             project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
             agent_id: AgentId::from("codex"),
             workspace_root: None,
-            config_options: Default::default(),
         })
         .unwrap();
     assert_eq!(acquired.task.task_id.as_str(), "task-draft");
@@ -1320,7 +1284,6 @@ fn missing_prepared_session_fails_without_replacing_the_task_binding() {
         project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
         agent_id: AgentId::from("codex"),
         workspace_root: None,
-        config_options: Default::default(),
     })
     .unwrap();
     wait_until(|| {
@@ -1387,7 +1350,7 @@ fn send_projects_agent_config_catalog_metadata() {
     assert_eq!(option.label, "Model");
     assert_eq!(option.description.as_deref(), Some("Select model"));
     assert_eq!(option.category.as_deref(), Some("model"));
-    assert_eq!(option.current_value, "gpt-5");
+    assert_eq!(protocol_value_id(&option.current_value), Some("gpt-5"));
     assert_eq!(option.values.len(), 2);
     assert_eq!(option.values[1].value, "gpt-5.5");
     assert_eq!(option.values[1].label, "GPT 5.5");
@@ -1451,7 +1414,6 @@ fn startup_marks_abandoned_preparation_failed_and_removes_it_from_the_pool() {
     task.lifecycle = test_new_task_lifecycle();
     task.preparation = TaskPreparationRecord::Preparing;
     task.agent_session_id = Some("bound-before-attach".to_string());
-    task.config_options = config_catalog("gpt-5.5").current_values();
     task.config_options_catalog = Some(config_catalog("gpt-5.5"));
     task.agent_commands_catalog = Some(command_catalog());
     task.model_id = Some("gpt-5.5".to_string());
@@ -1477,10 +1439,6 @@ fn startup_marks_abandoned_preparation_failed_and_removes_it_from_the_pool() {
     );
     assert_eq!(record.config_options_catalog, None);
     assert_eq!(record.agent_commands_catalog, None);
-    assert_eq!(
-        record.config_options.get("model").map(String::as_str),
-        Some("gpt-5.5")
-    );
     assert_eq!(record.model_id.as_deref(), Some("gpt-5.5"));
     let rejected = api
         .send(send_params("task-preparing", "hello"))
@@ -1507,7 +1465,6 @@ fn create_rejects_unknown_project() {
             project_id: ProjectId::from("project-missing"),
             agent_id: AgentId::from("codex"),
             workspace_root: None,
-            config_options: Default::default(),
         })
         .unwrap_err();
 
@@ -1534,7 +1491,6 @@ fn create_accepts_new_workspace_root_for_unknown_project() {
             project_id: project_id_for_workspace(workspace_root),
             agent_id: AgentId::from("codex"),
             workspace_root: Some(workspace_root.to_string()),
-            config_options: Default::default(),
         })
         .unwrap();
 
@@ -1564,7 +1520,6 @@ fn create_rejects_mismatched_new_workspace_root_project_id() {
             project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/other"),
             agent_id: AgentId::from("codex"),
             workspace_root: Some("/tmp/openaide-unit-workspace/new-app".to_string()),
-            config_options: Default::default(),
         })
         .unwrap_err();
 
@@ -1624,7 +1579,6 @@ fn create_rejects_unknown_agent() {
             project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
             agent_id: AgentId::from("missing-agent"),
             workspace_root: None,
-            config_options: Default::default(),
         })
         .unwrap_err();
 
@@ -1855,7 +1809,6 @@ fn list_agent_sessions_hides_a_native_session_while_draft_ownership_is_committin
         project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
         agent_id: AgentId::from("codex"),
         workspace_root: None,
-        config_options: Default::default(),
     })
     .unwrap();
     wait_until(|| agent.attaches.load(Ordering::SeqCst) == 1);
@@ -2269,7 +2222,10 @@ fn open_without_a_cached_native_catalog_recovers_the_native_session() {
     assert_eq!(agent.list_calls.load(Ordering::SeqCst), 0);
     assert_eq!(agent.loads.load(Ordering::SeqCst), 0);
     assert_eq!(recovered.agent_config.state, LiveSessionDataState::Ready);
-    assert_eq!(recovered.agent_config.options[0].current_value, "gpt-5.5");
+    assert_eq!(
+        protocol_value_id(&recovered.agent_config.options[0].current_value),
+        Some("gpt-5.5")
+    );
     assert_eq!(recovered.agent_commands.state, LiveSessionDataState::Ready);
 }
 
@@ -2405,7 +2361,6 @@ fn open_does_not_reload_native_history_for_an_acquired_prepared_task() {
         project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
         agent_id: AgentId::from("codex"),
         workspace_root: None,
-        config_options: Default::default(),
     })
     .unwrap();
     wait_until(|| {
@@ -2865,7 +2820,6 @@ fn first_send_accepts_starting_task_without_history_sync() {
         project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
         agent_id: AgentId::from("codex"),
         workspace_root: None,
-        config_options: Default::default(),
     })
     .unwrap();
     wait_until(|| {
@@ -3212,7 +3166,6 @@ fn send_after_restart_hydrates_loaded_native_session_state_authoritatively() {
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut task = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
     task.agent_session_id = Some("stored-session".to_string());
-    task.config_options = config_catalog("gpt-5").current_values();
     task.config_options_catalog = Some(config_catalog("gpt-5"));
     task.agent_commands_catalog = Some(command_catalog());
     task.model_id = Some("gpt-5".to_string());
@@ -3243,20 +3196,20 @@ fn send_after_restart_hydrates_loaded_native_session_state_authoritatively() {
     let stored = store.read_task("task-existing").unwrap();
 
     assert_eq!(snapshot.agent_config.state, LiveSessionDataState::Ready);
-    assert_eq!(snapshot.agent_config.options[0].current_value, "gpt-5.5");
-    assert_eq!(snapshot.agent_commands.state, LiveSessionDataState::Ready);
-    assert_eq!(snapshot.agent_commands.commands[0].name, "web");
     assert_eq!(
-        stored.config_options.get("model").map(String::as_str),
+        protocol_value_id(&snapshot.agent_config.options[0].current_value),
         Some("gpt-5.5")
     );
+    assert_eq!(snapshot.agent_commands.state, LiveSessionDataState::Ready);
+    assert_eq!(snapshot.agent_commands.commands[0].name, "web");
+    assert_eq!(task_config_id(&stored, "model"), Some("gpt-5.5"));
     assert_eq!(stored.model_id.as_deref(), Some("gpt-5.5"));
     assert_eq!(
         stored
             .config_options_catalog
             .as_ref()
             .and_then(|catalog| catalog.options.first())
-            .map(|option| option.current_value.as_str()),
+            .and_then(|option| option.current_value.as_id()),
         Some("gpt-5.5")
     );
     assert_eq!(
@@ -3290,7 +3243,6 @@ fn send_preserves_hydrated_session_state_when_resume_returns_identity_only() {
     .unwrap();
     let mut task = store.read_task("task-existing").unwrap();
     task.agent_session_id = Some("live-session".to_string());
-    task.config_options = config_catalog("gpt-5.5").current_values();
     task.config_options_catalog = Some(config_catalog("gpt-5.5"));
     task.agent_commands_catalog = Some(command_catalog());
     task.model_id = Some("gpt-5.5".to_string());
@@ -3309,13 +3261,13 @@ fn send_preserves_hydrated_session_state_when_resume_returns_identity_only() {
     let stored = store.read_task("task-existing").unwrap();
 
     assert_eq!(snapshot.agent_config.state, LiveSessionDataState::Ready);
-    assert_eq!(snapshot.agent_config.options[0].current_value, "gpt-5.5");
-    assert_eq!(snapshot.agent_commands.state, LiveSessionDataState::Ready);
-    assert_eq!(snapshot.agent_commands.commands[0].name, "web");
     assert_eq!(
-        stored.config_options.get("model").map(String::as_str),
+        protocol_value_id(&snapshot.agent_config.options[0].current_value),
         Some("gpt-5.5")
     );
+    assert_eq!(snapshot.agent_commands.state, LiveSessionDataState::Ready);
+    assert_eq!(snapshot.agent_commands.commands[0].name, "web");
+    assert_eq!(task_config_id(&stored, "model"), Some("gpt-5.5"));
     assert_eq!(stored.model_id.as_deref(), Some("gpt-5.5"));
 }
 
@@ -3820,15 +3772,12 @@ fn send_keeps_committed_message_when_config_changes_while_agent_session_opens() 
     wait_until(|| {
         store
             .read_task("task-existing")
-            .map(|task| task.config_options.get("model") == Some(&"new-model".to_string()))
+            .map(|task| task_config_id(&task, "model") == Some("new-model"))
             .unwrap_or(false)
     });
 
     let record = store.read_task("task-existing").unwrap();
-    assert_eq!(
-        record.config_options.get("model"),
-        Some(&"new-model".to_string())
-    );
+    assert_eq!(task_config_id(&record, "model"), Some("new-model"));
     assert!(accepted.turn_id.as_str().starts_with("turn_"));
     assert!(store
         .read_messages("task-existing")
@@ -3951,7 +3900,6 @@ fn send_commits_inline_image_without_an_empty_text_part() {
             project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
             agent_id: AgentId::from("codex"),
             workspace_root: None,
-            config_options: Default::default(),
         })
         .unwrap();
     assert_eq!(acquired.task.task_id.as_str(), "task-existing");
@@ -4443,7 +4391,6 @@ fn failed_cancel_commit_does_not_retire_an_accepted_send() {
             project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
             agent_id: AgentId::from("codex"),
             workspace_root: None,
-            config_options: Default::default(),
         })
         .unwrap();
     wait_until(|| agent.starts.load(Ordering::SeqCst) == 1);
@@ -4618,7 +4565,7 @@ fn cancel_rejects_mismatched_turn_id() {
 }
 
 #[test]
-fn set_config_option_persists_for_idle_task() {
+fn set_config_option_rejects_a_task_without_a_native_session_or_live_catalog() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store
@@ -4636,27 +4583,21 @@ fn set_config_option_persists_for_idle_task() {
     )
     .unwrap();
 
-    let snapshot = api
+    let error = api
         .set_config_option_for_test(TaskSetConfigOptionParams {
             task_id: "task-existing".into(),
             config_id: "model".into(),
-            value: "gpt-5.5".to_string(),
+            value: protocol_config_id("gpt-5.5"),
             client_mutation_id: "mutation-1".into(),
         })
-        .unwrap();
+        .unwrap_err();
 
-    assert_eq!(
-        store
-            .read_task("task-existing")
-            .unwrap()
-            .config_options
-            .get("model"),
-        Some(&"gpt-5.5".to_string())
-    );
-    assert_eq!(
-        snapshot.agent_config.pending_change, None,
-        "persisted config changes should not leave frontend pending state"
-    );
+    assert_eq!(error.code, ProtocolErrorCode::Internal);
+    assert!(store
+        .read_task("task-existing")
+        .unwrap()
+        .config_options_catalog
+        .is_none());
 }
 
 #[test]
@@ -4665,7 +4606,6 @@ fn set_config_option_recovers_an_inactive_native_session_before_agent_io() {
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut task = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
     task.agent_session_id = Some("native-session".to_string());
-    task.config_options = config_catalog("gpt-5").current_values();
     task.config_options_catalog = Some(config_catalog("gpt-5"));
     store.write_task(&task).unwrap();
     let agent = Arc::new(RecordingAgent {
@@ -4686,14 +4626,17 @@ fn set_config_option_recovers_an_inactive_native_session_before_agent_io() {
         .set_config_option_for_test(TaskSetConfigOptionParams {
             task_id: "task-existing".into(),
             config_id: "model".into(),
-            value: "gpt-5.5".to_string(),
+            value: protocol_config_id("gpt-5.5"),
             client_mutation_id: "mutation-after-idle-close".into(),
         })
         .unwrap();
 
     assert_eq!(agent.resumes.load(Ordering::SeqCst), 1);
     assert_eq!(agent.attaches.load(Ordering::SeqCst), 1);
-    assert_eq!(snapshot.agent_config.options[0].current_value, "gpt-5.5");
+    assert_eq!(
+        protocol_value_id(&snapshot.agent_config.options[0].current_value),
+        Some("gpt-5.5")
+    );
 }
 
 #[test]
@@ -4702,7 +4645,6 @@ fn config_recovery_loads_when_the_agent_does_not_support_resume() {
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut task = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
     task.agent_session_id = Some("native-session".to_string());
-    task.config_options = config_catalog("gpt-5").current_values();
     task.config_options_catalog = Some(config_catalog("gpt-5"));
     store.write_task(&task).unwrap();
     let agent = Arc::new(RecordingAgent {
@@ -4723,7 +4665,7 @@ fn config_recovery_loads_when_the_agent_does_not_support_resume() {
     api.set_config_option_for_test(TaskSetConfigOptionParams {
         task_id: "task-existing".into(),
         config_id: "model".into(),
-        value: "gpt-5.5".to_string(),
+        value: protocol_config_id("gpt-5.5"),
         client_mutation_id: "mutation-load-fallback".into(),
     })
     .unwrap();
@@ -4739,7 +4681,6 @@ fn restart_hides_persisted_agent_controls_until_native_session_recovery() {
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut record = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
     record.agent_session_id = Some("persisted-session".to_string());
-    record.config_options = config_catalog("gpt-5").current_values();
     record.config_options_catalog = Some(config_catalog("gpt-5"));
     record.agent_commands_catalog = Some(command_catalog());
     store.write_task(&record).unwrap();
@@ -4781,7 +4722,7 @@ fn restart_clears_a_config_mutation_interrupted_during_agent_io() {
         &mut record,
         "mutation-interrupted".to_string(),
         "model".to_string(),
-        "gpt-5.5".to_string(),
+        ConfigOptionCurrentValue::id("gpt-5.5"),
     )
     .unwrap();
     store.write_task(&record).unwrap();
@@ -4812,7 +4753,6 @@ fn task_open_republishes_controls_from_recovered_native_session() {
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut record = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
     record.agent_session_id = Some("persisted-session".to_string());
-    record.config_options = config_catalog("gpt-5").current_values();
     record.config_options_catalog = Some(config_catalog("gpt-5"));
     record.agent_commands_catalog = Some(command_catalog());
     record.updated_at = "2025-12-31T00:00:00.000Z".to_string();
@@ -4892,7 +4832,10 @@ fn task_open_republishes_controls_from_recovered_native_session() {
         .unwrap();
 
     assert_eq!(recovered.agent_config.state, LiveSessionDataState::Ready);
-    assert_eq!(recovered.agent_config.options[0].current_value, "gpt-5.5");
+    assert_eq!(
+        protocol_value_id(&recovered.agent_config.options[0].current_value),
+        Some("gpt-5.5")
+    );
     assert_eq!(recovered.agent_commands.state, LiveSessionDataState::Ready);
     assert_eq!(recovered.agent_commands.commands[0].name, "web");
 }
@@ -4903,7 +4846,6 @@ fn set_config_option_without_native_session_does_not_project_persisted_catalog()
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut record = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
     let catalog = config_catalog("gpt-5");
-    record.config_options = catalog.current_values();
     record.config_options_catalog = Some(catalog);
     store.write_task(&record).unwrap();
     let api = TaskProductApi::new(
@@ -4915,22 +4857,18 @@ fn set_config_option_without_native_session_does_not_project_persisted_catalog()
     )
     .unwrap();
 
-    let snapshot = api
+    let error = api
         .set_config_option_for_test(TaskSetConfigOptionParams {
             task_id: "task-existing".into(),
             config_id: "model".into(),
-            value: "gpt-5.5".to_string(),
+            value: protocol_config_id("gpt-5.5"),
             client_mutation_id: "mutation-1".into(),
         })
-        .unwrap();
+        .unwrap_err();
 
     let stored = store.read_task("task-existing").unwrap();
     assert!(stored.config_options_catalog.is_none());
-    assert_eq!(
-        snapshot.agent_config.state,
-        LiveSessionDataState::Unavailable
-    );
-    assert!(snapshot.agent_config.options.is_empty());
+    assert_eq!(error.code, ProtocolErrorCode::Internal);
 }
 
 #[test]
@@ -4938,7 +4876,6 @@ fn set_config_option_without_native_session_does_not_project_unsupported_fallbac
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut record = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
-    record.config_options = config_catalog("gpt-5").current_values();
     record.config_options_catalog = Some(config_catalog("gpt-5"));
     store.write_task(&record).unwrap();
     let api = TaskProductApi::new(
@@ -4950,20 +4887,16 @@ fn set_config_option_without_native_session_does_not_project_unsupported_fallbac
     )
     .unwrap();
 
-    let snapshot = api
+    let error = api
         .set_config_option_for_test(TaskSetConfigOptionParams {
             task_id: "task-existing".into(),
             config_id: "custom".into(),
-            value: "enabled".to_string(),
+            value: protocol_config_id("enabled"),
             client_mutation_id: "mutation-1".into(),
         })
-        .unwrap();
+        .unwrap_err();
 
-    assert_eq!(
-        snapshot.agent_config.state,
-        LiveSessionDataState::Unavailable
-    );
-    assert!(snapshot.agent_config.options.is_empty());
+    assert_eq!(error.code, ProtocolErrorCode::Internal);
 }
 
 #[test]
@@ -4971,7 +4904,6 @@ fn set_config_option_applies_to_running_task_live_session() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut record = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
-    record.config_options = config_catalog("gpt-5").current_values();
     record.config_options_catalog = Some(config_catalog("gpt-5"));
     store.write_task(&record).unwrap();
     let agent = Arc::new(RecordingAgent::default());
@@ -4987,13 +4919,14 @@ fn set_config_option_applies_to_running_task_live_session() {
     record.status = TaskStatus::Active;
     record.active_turn_id = Some("turn-active".to_string());
     record.agent_session_id = Some("session-active".to_string());
+    record.config_options_catalog = Some(config_catalog("gpt-5"));
     store.write_task(&record).unwrap();
 
     let snapshot = api
         .set_config_option_for_test(TaskSetConfigOptionParams {
             task_id: "task-existing".into(),
             config_id: "model".into(),
-            value: "gpt-5.5".to_string(),
+            value: protocol_config_id("gpt-5.5"),
             client_mutation_id: "mutation-1".into(),
         })
         .unwrap();
@@ -5007,14 +4940,64 @@ fn set_config_option_applies_to_running_task_live_session() {
         )]
     );
     let stored = store.read_task("task-existing").unwrap();
-    assert_eq!(
-        stored.config_options.get("model"),
-        Some(&"gpt-5.5".to_string())
-    );
+    assert_eq!(task_config_id(&stored, "model"), Some("gpt-5.5"));
     assert_eq!(stored.model_id.as_deref(), Some("gpt-5.5"));
     assert_ne!(stored.updated_at, "2026-01-01T00:00:00.000Z");
     assert_eq!(stored.last_activity, "2026-01-01T00:00:00.000Z");
-    assert_eq!(snapshot.agent_config.options[0].current_value, "gpt-5.5");
+    assert_eq!(
+        protocol_value_id(&snapshot.agent_config.options[0].current_value),
+        Some("gpt-5.5")
+    );
+}
+
+#[test]
+fn set_config_option_applies_boolean_to_the_same_native_session() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let mut record = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
+    record.config_options_catalog = Some(boolean_config_catalog(false));
+    store.write_task(&record).unwrap();
+    let agent = Arc::new(RecordingAgent::default());
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        agent.clone(),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+    let mut record = store.read_task("task-existing").unwrap();
+    record.agent_session_id = Some("session-existing".to_string());
+    record.config_options_catalog = Some(boolean_config_catalog(false));
+    store.write_task(&record).unwrap();
+
+    let snapshot = api
+        .set_config_option_for_test(TaskSetConfigOptionParams {
+            task_id: "task-existing".into(),
+            config_id: "brave_mode".into(),
+            value: AgentConfigOptionCurrentValue::Boolean { value: true },
+            client_mutation_id: "mutation-boolean".into(),
+        })
+        .unwrap();
+
+    assert_eq!(
+        agent
+            .typed_session_config_updates
+            .lock()
+            .unwrap()
+            .as_slice(),
+        [(
+            "session-existing".to_string(),
+            "brave_mode".to_string(),
+            ConfigOptionCurrentValue::boolean(true),
+        )]
+    );
+    let stored = store.read_task("task-existing").unwrap();
+    assert_eq!(stored.agent_session_id.as_deref(), Some("session-existing"));
+    assert_eq!(
+        snapshot.agent_config.options[0].current_value,
+        AgentConfigOptionCurrentValue::Boolean { value: true },
+    );
 }
 
 #[test]
@@ -5023,23 +5006,23 @@ fn set_config_option_applies_to_prepared_task_native_session() {
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut record = task_record("task-prepared", "/tmp/openaide-unit-workspace/app");
     record.agent_session_id = Some("session-prepared".to_string());
-    record.config_options = config_catalog("gpt-5").current_values();
     record.config_options_catalog = Some(config_catalog("gpt-5"));
     store.write_task(&record).unwrap();
     let agent = Arc::new(RecordingAgent::default());
     let api = TaskProductApi::new(
         store.clone(),
-        Arc::new(StorageProjectResolver::new(store)),
+        Arc::new(StorageProjectResolver::new(store.clone())),
         AgentRegistry::default_built_ins(),
         agent.clone(),
         TaskUpdateNotifier::disabled(),
     )
     .unwrap();
+    set_live_config_catalog(&store, "task-prepared", config_catalog("gpt-5"));
 
     api.set_config_option_for_test(TaskSetConfigOptionParams {
         task_id: "task-prepared".into(),
         config_id: "model".into(),
-        value: "gpt-5.5".to_string(),
+        value: protocol_config_id("gpt-5.5"),
         client_mutation_id: "mutation-prepared".into(),
     })
     .unwrap();
@@ -5060,7 +5043,6 @@ fn set_config_option_projects_the_pending_client_mutation_during_agent_io() {
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut record = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
     record.agent_session_id = Some("session-a".to_string());
-    record.config_options = config_catalog("gpt-5").current_values();
     record.config_options_catalog = Some(config_catalog("gpt-5"));
     store.write_task(&record).unwrap();
     let agent = Arc::new(RecordingAgent {
@@ -5069,12 +5051,13 @@ fn set_config_option_projects_the_pending_client_mutation_during_agent_io() {
     });
     let api = TaskProductApi::new(
         store.clone(),
-        Arc::new(StorageProjectResolver::new(store)),
+        Arc::new(StorageProjectResolver::new(store.clone())),
         AgentRegistry::default_built_ins(),
         agent.clone(),
         TaskUpdateNotifier::disabled(),
     )
     .unwrap();
+    set_live_config_catalog(&store, "task-existing", config_catalog("gpt-5"));
     let setting_api = api.clone();
     let (result_tx, result_rx) = std::sync::mpsc::channel();
 
@@ -5084,7 +5067,7 @@ fn set_config_option_projects_the_pending_client_mutation_during_agent_io() {
                 setting_api.set_config_option_for_test(TaskSetConfigOptionParams {
                     task_id: "task-existing".into(),
                     config_id: "model".into(),
-                    value: "gpt-5.5".to_string(),
+                    value: protocol_config_id("gpt-5.5"),
                     client_mutation_id: "mutation-pending".into(),
                 }),
             )
@@ -5112,7 +5095,10 @@ fn set_config_option_projects_the_pending_client_mutation_during_agent_io() {
         "mutation-pending"
     );
     assert_eq!(pending_change.config_id.as_str(), "model");
-    assert_eq!(pending_change.requested_value, "gpt-5.5");
+    assert_eq!(
+        protocol_value_id(&pending_change.requested_value),
+        Some("gpt-5.5")
+    );
     assert_eq!(settled.agent_config.pending_change, None);
 }
 
@@ -5122,7 +5108,6 @@ fn same_task_config_changes_reach_agent_and_storage_in_admission_order() {
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut record = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
     record.agent_session_id = Some("session-a".to_string());
-    record.config_options = config_catalog("gpt-5").current_values();
     record.config_options_catalog = Some(config_catalog("gpt-5"));
     store.write_task(&record).unwrap();
     let agent = Arc::new(OrderedConfigAgent::default());
@@ -5134,12 +5119,13 @@ fn same_task_config_changes_reach_agent_and_storage_in_admission_order() {
         TaskUpdateNotifier::disabled(),
     )
     .unwrap();
+    set_live_config_catalog(&store, "task-existing", ordered_config_catalog("gpt-5"));
     let older_api = api.clone();
     let older = std::thread::spawn(move || {
         older_api.set_config_option_for_test(TaskSetConfigOptionParams {
             task_id: "task-existing".into(),
             config_id: "model".into(),
-            value: "gpt-5.1".to_string(),
+            value: protocol_config_id("gpt-5.1"),
             client_mutation_id: "mutation-older".into(),
         })
     });
@@ -5152,7 +5138,7 @@ fn same_task_config_changes_reach_agent_and_storage_in_admission_order() {
         newer_api.set_config_option_for_test(TaskSetConfigOptionParams {
             task_id: "task-existing".into(),
             config_id: "model".into(),
-            value: "gpt-5.2".to_string(),
+            value: protocol_config_id("gpt-5.2"),
             client_mutation_id: "mutation-newer".into(),
         })
     });
@@ -5174,13 +5160,16 @@ fn same_task_config_changes_reach_agent_and_storage_in_admission_order() {
         !newer_reached_agent_before_first_completed,
         "a newer config change must not overtake an admitted change for the same Task"
     );
-    assert_eq!(older.agent_config.options[0].current_value, "gpt-5.1");
-    assert_eq!(newer.agent_config.options[0].current_value, "gpt-5.2");
-    assert_eq!(stored.model_id.as_deref(), Some("gpt-5.2"));
     assert_eq!(
-        stored.config_options.get("model").map(String::as_str),
+        protocol_value_id(&older.agent_config.options[0].current_value),
+        Some("gpt-5.1")
+    );
+    assert_eq!(
+        protocol_value_id(&newer.agent_config.options[0].current_value),
         Some("gpt-5.2")
     );
+    assert_eq!(stored.model_id.as_deref(), Some("gpt-5.2"));
+    assert_eq!(task_config_id(&stored, "model"), Some("gpt-5.2"));
     assert_eq!(stored.config_mutation.sequence, 2);
     assert_eq!(stored.config_mutation.pending, None);
     assert_eq!(
@@ -5199,13 +5188,11 @@ fn blocked_config_change_does_not_stall_an_unrelated_task() {
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut blocked_task = task_record("task-blocked", "/tmp/openaide-unit-workspace/blocked");
     blocked_task.agent_session_id = Some("session-blocked".to_string());
-    blocked_task.config_options = config_catalog("gpt-5").current_values();
     blocked_task.config_options_catalog = Some(config_catalog("gpt-5"));
     store.write_task(&blocked_task).unwrap();
     let mut unrelated_task =
         task_record("task-unrelated", "/tmp/openaide-unit-workspace/unrelated");
     unrelated_task.agent_session_id = Some("session-unrelated".to_string());
-    unrelated_task.config_options = config_catalog("gpt-5").current_values();
     unrelated_task.config_options_catalog = Some(config_catalog("gpt-5"));
     store.write_task(&unrelated_task).unwrap();
     let agent = Arc::new(OrderedConfigAgent::default());
@@ -5217,13 +5204,15 @@ fn blocked_config_change_does_not_stall_an_unrelated_task() {
         TaskUpdateNotifier::disabled(),
     )
     .unwrap();
+    set_live_config_catalog(&store, "task-blocked", ordered_config_catalog("gpt-5"));
+    set_live_config_catalog(&store, "task-unrelated", ordered_config_catalog("gpt-5"));
 
     let blocked_api = api.clone();
     let blocked = std::thread::spawn(move || {
         blocked_api.set_config_option_for_test(TaskSetConfigOptionParams {
             task_id: "task-blocked".into(),
             config_id: "model".into(),
-            value: "gpt-5.1".to_string(),
+            value: protocol_config_id("gpt-5.1"),
             client_mutation_id: "mutation-blocked".into(),
         })
     });
@@ -5239,7 +5228,7 @@ fn blocked_config_change_does_not_stall_an_unrelated_task() {
                 unrelated_api.set_config_option_for_test(TaskSetConfigOptionParams {
                     task_id: "task-unrelated".into(),
                     config_id: "model".into(),
-                    value: "gpt-5.2".to_string(),
+                    value: protocol_config_id("gpt-5.2"),
                     client_mutation_id: "mutation-unrelated".into(),
                 }),
             )
@@ -5258,16 +5247,11 @@ fn blocked_config_change_does_not_stall_an_unrelated_task() {
         .unwrap();
 
     assert_eq!(
-        unrelated_snapshot.agent_config.options[0].current_value,
-        "gpt-5.2"
+        protocol_value_id(&unrelated_snapshot.agent_config.options[0].current_value),
+        Some("gpt-5.2")
     );
     assert_eq!(
-        store
-            .read_task("task-unrelated")
-            .unwrap()
-            .config_options
-            .get("model")
-            .map(String::as_str),
+        task_config_id(&store.read_task("task-unrelated").unwrap(), "model"),
         Some("gpt-5.2")
     );
     assert_eq!(
@@ -5282,7 +5266,6 @@ fn set_config_option_continues_after_concurrent_session_replacement_is_rejected(
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut record = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
     record.agent_session_id = Some("session-a".to_string());
-    record.config_options = config_catalog("gpt-5").current_values();
     record.config_options_catalog = Some(config_catalog("gpt-5"));
     store.write_task(&record).unwrap();
     let agent = Arc::new(RecordingAgent {
@@ -5297,6 +5280,7 @@ fn set_config_option_continues_after_concurrent_session_replacement_is_rejected(
         TaskUpdateNotifier::disabled(),
     )
     .unwrap();
+    set_live_config_catalog(&store, "task-existing", config_catalog("gpt-5"));
     let setting_api = api.clone();
     let (result_tx, result_rx) = std::sync::mpsc::channel();
 
@@ -5306,7 +5290,7 @@ fn set_config_option_continues_after_concurrent_session_replacement_is_rejected(
                 setting_api.set_config_option_for_test(TaskSetConfigOptionParams {
                     task_id: "task-existing".into(),
                     config_id: "model".into(),
-                    value: "gpt-5.5".to_string(),
+                    value: protocol_config_id("gpt-5.5"),
                     client_mutation_id: "session-a-change".into(),
                 }),
             )
@@ -5318,7 +5302,6 @@ fn set_config_option_continues_after_concurrent_session_replacement_is_rejected(
         .commit_existing_task("task-existing", TaskCommitOptions::metadata(), |ctx| {
             let task = ctx.task_mut();
             task.agent_session_id = Some("session-b".to_string());
-            task.config_options = config_catalog("gpt-5").current_values();
             task.config_options_catalog = Some(config_catalog("gpt-5"));
             Ok(crate::tasks::mutation::TaskMutationResult::Changed)
         })
@@ -5336,11 +5319,11 @@ fn set_config_option_continues_after_concurrent_session_replacement_is_rejected(
     let stored = store.read_task("task-existing").unwrap();
 
     assert_eq!(stored.agent_session_id.as_deref(), Some("session-a"));
+    assert_eq!(task_config_id(&stored, "model"), Some("gpt-5.5"));
     assert_eq!(
-        stored.config_options.get("model").map(String::as_str),
+        protocol_value_id(&snapshot.agent_config.options[0].current_value),
         Some("gpt-5.5")
     );
-    assert_eq!(snapshot.agent_config.options[0].current_value, "gpt-5.5");
     assert_eq!(snapshot.agent_config.pending_change, None);
 }
 
@@ -5350,7 +5333,6 @@ fn set_config_option_is_a_noop_when_same_session_event_already_persisted_catalog
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut record = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
     record.agent_session_id = Some("session-a".to_string());
-    record.config_options = config_catalog("gpt-5").current_values();
     record.config_options_catalog = Some(config_catalog("gpt-5"));
     store.write_task(&record).unwrap();
     let agent = Arc::new(RecordingAgent {
@@ -5365,6 +5347,7 @@ fn set_config_option_is_a_noop_when_same_session_event_already_persisted_catalog
         TaskUpdateNotifier::disabled(),
     )
     .unwrap();
+    set_live_config_catalog(&store, "task-existing", config_catalog("gpt-5"));
     let setting_api = api.clone();
     let (result_tx, result_rx) = std::sync::mpsc::channel();
 
@@ -5374,7 +5357,7 @@ fn set_config_option_is_a_noop_when_same_session_event_already_persisted_catalog
                 setting_api.set_config_option_for_test(TaskSetConfigOptionParams {
                     task_id: "task-existing".into(),
                     config_id: "model".into(),
-                    value: "gpt-5.5".to_string(),
+                    value: protocol_config_id("gpt-5.5"),
                     client_mutation_id: "same-session-change".into(),
                 }),
             )
@@ -5410,7 +5393,6 @@ fn set_config_option_preserves_agent_catalog_that_arrives_after_its_response_cat
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut record = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
     record.agent_session_id = Some("session-a".to_string());
-    record.config_options = config_catalog("gpt-5").current_values();
     record.config_options_catalog = Some(config_catalog("gpt-5"));
     store.write_task(&record).unwrap();
     let agent = Arc::new(RecordingAgent {
@@ -5425,6 +5407,7 @@ fn set_config_option_preserves_agent_catalog_that_arrives_after_its_response_cat
         TaskUpdateNotifier::disabled(),
     )
     .unwrap();
+    set_live_config_catalog(&store, "task-existing", config_catalog("gpt-5"));
     let setting_api = api.clone();
     let (result_tx, result_rx) = std::sync::mpsc::channel();
 
@@ -5434,7 +5417,7 @@ fn set_config_option_preserves_agent_catalog_that_arrives_after_its_response_cat
                 setting_api.set_config_option_for_test(TaskSetConfigOptionParams {
                     task_id: "task-existing".into(),
                     config_id: "model".into(),
-                    value: "gpt-5.5".to_string(),
+                    value: protocol_config_id("gpt-5.5"),
                     client_mutation_id: "superseded-change".into(),
                 }),
             )
@@ -5461,7 +5444,10 @@ fn set_config_option_preserves_agent_catalog_that_arrives_after_its_response_cat
         .unwrap();
     let stored = store.read_task("task-existing").unwrap();
 
-    assert_eq!(snapshot.agent_config.options[0].current_value, "gpt-5.2");
+    assert_eq!(
+        protocol_value_id(&snapshot.agent_config.options[0].current_value),
+        Some("gpt-5.2")
+    );
     assert_eq!(snapshot.agent_config.pending_change, None);
     assert_eq!(stored.model_id.as_deref(), Some("gpt-5.2"));
 }
@@ -5491,7 +5477,6 @@ fn release_keeps_one_free_prepared_task_for_reuse() {
         project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
         agent_id: AgentId::from("codex"),
         workspace_root: None,
-        config_options: Default::default(),
     })
     .unwrap();
 
@@ -5529,7 +5514,6 @@ fn release_cleans_all_legacy_presend_attachment_resources_for_the_new_task() {
         project_id: project_id_for_workspace(workspace.to_string_lossy().as_ref()),
         agent_id: AgentId::from("codex"),
         workspace_root: None,
-        config_options: Default::default(),
     })
     .unwrap();
     let attachments = api.attachment_runtime();
@@ -5752,7 +5736,6 @@ fn task_record(task_id: &str, workspace_root: &str) -> TaskRecord {
         archived: false,
         tombstoned: false,
         revision: 1,
-        config_options: Default::default(),
         config_options_catalog: None,
         config_mutation: Default::default(),
         agent_commands_catalog: None,
@@ -5897,7 +5880,7 @@ struct RecordingAgent {
     steer_calls: Mutex<Vec<(String, String)>>,
     prompt_attachments: Mutex<Vec<Vec<Attachment>>>,
     session_config_updates: Mutex<Vec<(String, String, String)>>,
-    start_config_options: Mutex<Vec<Option<serde_json::Value>>>,
+    typed_session_config_updates: Mutex<Vec<(String, String, ConfigOptionCurrentValue)>>,
 }
 
 #[derive(Default)]
@@ -5945,21 +5928,20 @@ impl AgentRuntime for OrderedConfigAgent {
         &self,
         request: AgentSessionSetConfigOptionRequest,
     ) -> Result<ConfigOptionsCatalog, RuntimeError> {
-        self.started_values
-            .lock()
-            .unwrap()
-            .push(request.value.clone());
-        if request.value == "gpt-5.1" {
+        let value = request
+            .value
+            .as_id()
+            .expect("ordered test uses select IDs")
+            .to_string();
+        self.started_values.lock().unwrap().push(value.clone());
+        if value == "gpt-5.1" {
             self.first_request_started.store(true, Ordering::SeqCst);
             while !self.release_first.load(Ordering::SeqCst) {
                 std::thread::yield_now();
             }
         }
-        self.completed_values
-            .lock()
-            .unwrap()
-            .push(request.value.clone());
-        Ok(config_catalog(&request.value))
+        self.completed_values.lock().unwrap().push(value.clone());
+        Ok(ordered_config_catalog(&value))
     }
 
     fn prompt(
@@ -5998,10 +5980,6 @@ impl AgentRuntime for RecordingAgent {
 
     fn start_session(&self, request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
         self.starts.fetch_add(1, Ordering::SeqCst);
-        self.start_config_options
-            .lock()
-            .unwrap()
-            .push(request.config_options.clone());
         while self.block_start.load(Ordering::SeqCst) {
             std::thread::sleep(Duration::from_millis(10));
         }
@@ -6139,15 +6117,26 @@ impl AgentRuntime for RecordingAgent {
                 "ACP session is not active".to_string(),
             ));
         }
-        self.session_config_updates.lock().unwrap().push((
-            request.session_id,
-            request.config_id,
+        self.typed_session_config_updates.lock().unwrap().push((
+            request.session_id.clone(),
+            request.config_id.clone(),
             request.value.clone(),
         ));
+        let response_catalog = match request.value {
+            ConfigOptionCurrentValue::Id { value } => {
+                self.session_config_updates.lock().unwrap().push((
+                    request.session_id,
+                    request.config_id,
+                    value.clone(),
+                ));
+                config_catalog(&value)
+            }
+            ConfigOptionCurrentValue::Boolean { value } => boolean_config_catalog(value),
+        };
         while self.block_set_config.load(Ordering::SeqCst) {
             std::thread::sleep(Duration::from_millis(10));
         }
-        Ok(config_catalog(&request.value))
+        Ok(response_catalog)
     }
 
     fn attach_session_event_sink(
@@ -6332,7 +6321,8 @@ fn config_catalog(current_value: &str) -> ConfigOptionsCatalog {
             label: "Model".to_string(),
             description: Some("Select model".to_string()),
             category: Some(ConfigOptionCategory::Model),
-            current_value: current_value.to_string(),
+            kind: ConfigOptionKind::Select,
+            current_value: ConfigOptionCurrentValue::id(current_value),
             values: vec![
                 ConfigOptionValue {
                     id: "gpt-5".to_string(),
@@ -6353,6 +6343,49 @@ fn config_catalog(current_value: &str) -> ConfigOptionsCatalog {
     }
 }
 
+fn ordered_config_catalog(current_value: &str) -> ConfigOptionsCatalog {
+    let mut catalog = config_catalog(current_value);
+    catalog.options[0].values.extend([
+        ConfigOptionValue {
+            id: "gpt-5.1".to_string(),
+            label: "GPT 5.1".to_string(),
+            description: None,
+            group_id: None,
+            group_label: None,
+        },
+        ConfigOptionValue {
+            id: "gpt-5.2".to_string(),
+            label: "GPT 5.2".to_string(),
+            description: None,
+            group_id: None,
+            group_label: None,
+        },
+    ]);
+    catalog
+}
+
+fn set_live_config_catalog(store: &Store, task_id: &str, catalog: ConfigOptionsCatalog) {
+    let mut task = store.read_task(task_id).unwrap();
+    task.config_options_catalog = Some(catalog);
+    store.write_task(&task).unwrap();
+}
+
+fn boolean_config_catalog(current_value: bool) -> ConfigOptionsCatalog {
+    ConfigOptionsCatalog {
+        agent_id: "codex".to_string(),
+        status: ConfigOptionsStatus::Ready,
+        options: vec![ConfigOption {
+            id: "brave_mode".to_string(),
+            label: "Brave mode".to_string(),
+            description: Some("Skip confirmation prompts".to_string()),
+            category: Some(ConfigOptionCategory::Other),
+            kind: ConfigOptionKind::Boolean,
+            current_value: ConfigOptionCurrentValue::boolean(current_value),
+            values: Vec::new(),
+        }],
+    }
+}
+
 fn mode_config_catalog(current_value: &str) -> ConfigOptionsCatalog {
     ConfigOptionsCatalog {
         agent_id: "codex".to_string(),
@@ -6362,7 +6395,8 @@ fn mode_config_catalog(current_value: &str) -> ConfigOptionsCatalog {
             label: "Approval Preset".to_string(),
             description: None,
             category: Some(ConfigOptionCategory::Mode),
-            current_value: current_value.to_string(),
+            kind: ConfigOptionKind::Select,
+            current_value: ConfigOptionCurrentValue::id(current_value),
             values: vec![ConfigOptionValue {
                 id: "agent-full-access".to_string(),
                 label: "Full Access".to_string(),
@@ -6391,8 +6425,8 @@ struct ConfigMutatingStartAgent {
 impl AgentRuntime for ConfigMutatingStartAgent {
     fn start_session(&self, request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
         let mut task = self.store.read_task("task-existing")?;
-        task.config_options
-            .insert("model".to_string(), "new-model".to_string());
+        task.config_options_catalog = Some(config_catalog("new-model"));
+        task.model_id = Some("new-model".to_string());
         task.revision += 1;
         self.store.write_task(&task)?;
         Ok(AgentSession::new(request.agent_id, "mutating-session"))

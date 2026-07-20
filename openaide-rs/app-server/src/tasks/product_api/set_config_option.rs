@@ -3,9 +3,10 @@ use openaide_app_server_protocol::ids::ClientInstanceId;
 use openaide_app_server_protocol::task::TaskSetConfigOptionParams;
 
 use crate::agent::AgentSessionSetConfigOptionRequest;
+use crate::protocol::model::{ConfigOptionCurrentValue, ConfigOptionKind};
 use crate::tasks::config_options::{
-    apply_stored_config_option, apply_task_config_mutation_result, begin_task_config_mutation,
-    clear_task_config_mutation, TaskConfigMutationToken,
+    apply_task_config_mutation_result, begin_task_config_mutation, clear_task_config_mutation,
+    TaskConfigMutationToken,
 };
 use crate::tasks::mutation::TaskMutationResult;
 use crate::tasks::snapshot::build_snapshot;
@@ -43,11 +44,23 @@ impl TaskProductApi {
                 "Client mutation id is required",
             ));
         }
-        let task = self.store.read_task(task_id).map_err(runtime_error)?;
+        let mut task = self.store.read_task(task_id).map_err(runtime_error)?;
         super::reject_tombstoned_task(&task)?;
         super::prepare::reject_if_preparation_not_ready(&task)?;
+        if task.config_options_catalog.is_none() && task.agent_session_id.is_some() {
+            self.native_sessions
+                .ensure_active_for_interaction(&task)
+                .map_err(protocol_error_from_runtime)?;
+            task = self.store.read_task(task_id).map_err(runtime_error)?;
+        }
+        let value = config_value_from_protocol(params.value);
+        validate_requested_value(&task, params.config_id.as_str(), &value)?;
         if task.config_mutation.pending.is_none()
-            && task.config_options.get(params.config_id.as_str()) == Some(&params.value)
+            && task.config_options_catalog.as_ref().is_some_and(|catalog| {
+                catalog.options.iter().any(|option| {
+                    option.id == params.config_id.as_str() && option.current_value == value
+                })
+            })
         {
             let snapshot =
                 build_snapshot(&self.store, task_id, 100).map_err(super::storage_error)?;
@@ -56,12 +69,14 @@ impl TaskProductApi {
 
         let now = now_string();
         let config_id = params.config_id.into_string();
-        let value = params.value;
         let client_mutation_id = params.client_mutation_id.into_string();
         let expected_session_id = task.agent_session_id.clone();
         let Some(session_id) = expected_session_id.clone() else {
-            return self
-                .set_stored_config_option_without_session(task_id, &config_id, &value, &now);
+            return Err(protocol_error_from_runtime(
+                crate::protocol::errors::RuntimeError::NotReady(
+                    "Task Native Session is not ready".to_string(),
+                ),
+            ));
         };
         let Some(mut mutation) = self.begin_live_config_mutation(
             task_id,
@@ -129,7 +144,7 @@ impl TaskProductApi {
         expected_session_id: Option<&str>,
         client_mutation_id: String,
         config_id: String,
-        requested_value: String,
+        requested_value: ConfigOptionCurrentValue,
         now: &str,
     ) -> Result<Option<LiveConfigMutation>, ProtocolError> {
         let mut admission = LiveConfigMutationAdmission::Missing;
@@ -154,7 +169,6 @@ impl TaskProductApi {
                             return Ok(TaskMutationResult::Unchanged);
                         }
                     }
-                    let admitted_config_options = ctx.task().config_options.clone();
                     let admitted_catalog = ctx.task().config_options_catalog.clone();
                     let task = ctx.task_mut();
                     let token = begin_task_config_mutation(
@@ -165,7 +179,6 @@ impl TaskProductApi {
                     )?;
                     admission = LiveConfigMutationAdmission::Started(LiveConfigMutation {
                         token,
-                        admitted_config_options,
                         admitted_catalog,
                     });
                     task.updated_at = now.to_string();
@@ -219,9 +232,8 @@ impl TaskProductApi {
         let result = self
             .mutations
             .commit_existing_task(task_id, super::response_snapshot_options(), |ctx| {
-                let newer_catalog_exists = ctx.task().config_options
-                    != mutation.admitted_config_options
-                    || ctx.task().config_options_catalog != mutation.admitted_catalog;
+                let newer_catalog_exists =
+                    ctx.task().config_options_catalog != mutation.admitted_catalog;
                 if !live_config_target_is_current(ctx.task(), expected_session_id)
                     || newer_catalog_exists
                 {
@@ -253,38 +265,6 @@ impl TaskProductApi {
             .ok_or_else(|| internal_error("missing task config snapshot"))?;
         self.project_task_snapshot(snapshot)
     }
-
-    fn set_stored_config_option_without_session(
-        &self,
-        task_id: &str,
-        config_id: &str,
-        value: &str,
-        now: &str,
-    ) -> Result<openaide_app_server_protocol::snapshot::TaskSnapshot, ProtocolError> {
-        let result = self
-            .mutations
-            .commit_existing_task(task_id, super::response_snapshot_options(), |ctx| {
-                if ctx.task().tombstoned
-                    || super::prepare::reject_if_preparation_not_ready(ctx.task()).is_err()
-                    || ctx.task().agent_session_id.is_some()
-                {
-                    return Ok(TaskMutationResult::Rejected);
-                }
-                let task = ctx.task_mut();
-                let pending_cleared = task.config_mutation.pending.take().is_some();
-                let changed = apply_stored_config_option(task, config_id, value);
-                if !changed && !pending_cleared {
-                    return Ok(TaskMutationResult::Unchanged);
-                }
-                task.updated_at = now.to_string();
-                Ok(TaskMutationResult::Changed)
-            })
-            .map_err(protocol_error_from_runtime)?;
-        let snapshot = result
-            .response_snapshot
-            .ok_or_else(|| internal_error("missing stored task config snapshot"))?;
-        self.project_task_snapshot(snapshot)
-    }
 }
 
 fn inactive_session_can_recover(error: &crate::protocol::errors::RuntimeError) -> bool {
@@ -310,7 +290,6 @@ struct LiveConfigMutation {
     // before this request resumes. These values reveal whether Agent-owned state
     // already advanced; fallback runtimes that only return a catalog still use the
     // direct response commit.
-    admitted_config_options: std::collections::HashMap<String, String>,
     admitted_catalog: Option<crate::protocol::model::ConfigOptionsCatalog>,
 }
 
@@ -318,9 +297,52 @@ impl LiveConfigMutation {
     /// Recovery can refresh the Agent-owned catalog before the original request is retried.
     /// Treat that refresh as the retry baseline while preserving later update ordering.
     fn rebase(&mut self, task: &crate::storage::records::TaskRecord) {
-        self.admitted_config_options = task.config_options.clone();
         self.admitted_catalog = task.config_options_catalog.clone();
     }
+}
+
+fn config_value_from_protocol(
+    value: openaide_app_server_protocol::snapshot::AgentConfigOptionCurrentValue,
+) -> ConfigOptionCurrentValue {
+    match value {
+        openaide_app_server_protocol::snapshot::AgentConfigOptionCurrentValue::Id { value } => {
+            ConfigOptionCurrentValue::id(value)
+        }
+        openaide_app_server_protocol::snapshot::AgentConfigOptionCurrentValue::Boolean {
+            value,
+        } => ConfigOptionCurrentValue::boolean(value),
+    }
+}
+
+fn validate_requested_value(
+    task: &crate::storage::records::TaskRecord,
+    config_id: &str,
+    value: &ConfigOptionCurrentValue,
+) -> Result<(), ProtocolError> {
+    let catalog = task.config_options_catalog.as_ref().ok_or_else(|| {
+        protocol_error_from_runtime(crate::protocol::errors::RuntimeError::NotReady(
+            "Agent configuration options are not loaded".to_string(),
+        ))
+    })?;
+    let option = catalog
+        .options
+        .iter()
+        .find(|option| option.id == config_id)
+        .ok_or_else(|| validation_error("configId", "Unknown Agent configuration option"))?;
+    let valid = match (&option.kind, value) {
+        (ConfigOptionKind::Select, ConfigOptionCurrentValue::Id { value }) => {
+            option.values.iter().any(|candidate| candidate.id == *value)
+        }
+        (ConfigOptionKind::Boolean, ConfigOptionCurrentValue::Boolean { .. }) => true,
+        _ => false,
+    };
+    if !valid {
+        return Err(validation_error(
+            "value",
+            "Value does not match the Agent configuration option",
+        ));
+    }
+    Ok(())
 }
 
 fn live_config_target_is_current(

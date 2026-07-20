@@ -79,7 +79,7 @@ describe("app controller callbacks", () => {
     });
   });
 
-  it("submits selected config atomically with New Task creation before Send", async () => {
+  it("starts a New Task with Agent defaults before Send", async () => {
     const dispatch = vi.fn();
     const request = vi.fn(async (method: string) => {
       if (method === TASK_ACQUIRE) return { task: protocolTaskSnapshot("task_1", "New task") };
@@ -94,7 +94,6 @@ describe("app controller callbacks", () => {
       agentId: "codex",
       agentLabel: "Codex",
       projectId: "project_1",
-      configOptions: { model: "gpt" },
       workspaceRoot: "/workspace",
       workspaceLabel: "workspace",
     };
@@ -112,7 +111,6 @@ describe("app controller callbacks", () => {
     expect(request).toHaveBeenNthCalledWith(1, TASK_ACQUIRE, {
       projectId: "project_1",
       agentId: "codex",
-      configOptions: { model: "gpt" },
     });
     expect(request).toHaveBeenNthCalledWith(2, TASK_SEND, {
       taskId: "task_1",
@@ -790,7 +788,6 @@ describe("app controller callbacks", () => {
         agentId: "codex",
         agentLabel: "Codex",
         projectId: "project_1",
-        configOptions: { mode: "agent" },
         workspaceRoot: "/workspace",
         workspaceLabel: "workspace",
       };
@@ -806,7 +803,6 @@ describe("app controller callbacks", () => {
       expect(request).toHaveBeenNthCalledWith(1, TASK_ACQUIRE, {
         projectId: "project_1",
         agentId: "codex",
-        configOptions: { mode: "agent" },
       });
       expect(request).not.toHaveBeenCalledWith(TASK_OPEN, expect.anything());
       expect(request).not.toHaveBeenCalledWith(TASK_SET_CONFIG_OPTION, {
@@ -837,13 +833,13 @@ describe("app controller callbacks", () => {
       backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
       state,
-    }).task.selectConfigOption("model", "gpt-5");
+    }).task.selectConfigOption("model", { type: "id", value: "gpt-5" });
     await settlePromises();
 
     expect(request).toHaveBeenCalledWith(TASK_SET_CONFIG_OPTION, {
       taskId: "task_1",
       configId: "model",
-      value: "gpt-5",
+      value: { type: "id", value: "gpt-5" },
       clientMutationId: expect.stringMatching(/^frontend-task-config-model-/),
     });
     expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "snapshot", intent: "refresh" }));
@@ -865,13 +861,13 @@ describe("app controller callbacks", () => {
     state.snapshot = snapshot("task_1");
     state.snapshot.agent_config = editableConfigOptions();
 
-    callbacks({ backendConnection, dispatch, state }).task.selectConfigOption("model", "gpt-5");
+    callbacks({ backendConnection, dispatch, state }).task.selectConfigOption("model", { type: "id", value: "gpt-5" });
     await settlePromises();
 
     expect(request).toHaveBeenCalledWith(TASK_SET_CONFIG_OPTION, expect.objectContaining({
       taskId: "task_1",
       configId: "model",
-      value: "gpt-5",
+      value: { type: "id", value: "gpt-5" },
     }));
     expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "snapshot", intent: "refresh" }));
   });
@@ -886,7 +882,7 @@ describe("app controller callbacks", () => {
       pending_change: {
         mutation_id: "mutation_1",
         option_id: "model",
-        requested_value: "gpt-5",
+        requested_value: { type: "id", value: "gpt-5" },
       },
     };
 
@@ -894,7 +890,7 @@ describe("app controller callbacks", () => {
       backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
       state,
-    }).task.selectConfigOption("model", "gpt-5");
+    }).task.selectConfigOption("model", { type: "id", value: "gpt-5" });
     await settlePromises();
 
     expect(request).not.toHaveBeenCalled();
@@ -929,7 +925,7 @@ describe("app controller callbacks", () => {
         backendConnection: { request: request as unknown as BackendConnection["request"] },
         dispatch,
         state,
-      }).task.selectConfigOption("model", "gpt-5");
+      }).task.selectConfigOption("model", { type: "id", value: "gpt-5" });
       for (let index = 0; index < 8; index += 1) await Promise.resolve();
 
       const configRequest = request.mock.calls.find(([method]) => method === TASK_SET_CONFIG_OPTION);
@@ -978,7 +974,7 @@ describe("app controller callbacks", () => {
       state: callbackState,
     }).task;
 
-    task.selectConfigOption("model", "gpt-5");
+    task.selectConfigOption("model", { type: "id", value: "gpt-5" });
     dispatch({
       type: "taskInput:submit",
       taskId: "task_1",
@@ -2846,7 +2842,7 @@ describe("app controller callbacks", () => {
       projectId: "project-1",
     };
 
-    callbacks({ dispatch, state }).newTask.selectConfigOption("model", "gpt-5");
+    callbacks({ dispatch, state }).newTask.selectConfigOption("model", { type: "id", value: "gpt-5" });
 
     expect(dispatch).toHaveBeenCalledWith({
       type: "newTask:configOptions:error",
@@ -2873,13 +2869,13 @@ describe("app controller callbacks", () => {
       backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
       state,
-    }).newTask.selectConfigOption("model", "gpt-5");
+    }).newTask.selectConfigOption("model", { type: "id", value: "gpt-5" });
     await settlePromises();
 
     expect(request).toHaveBeenCalledWith(TASK_SET_CONFIG_OPTION, {
       taskId: "task-prepared",
       configId: "model",
-      value: "gpt-5",
+      value: { type: "id", value: "gpt-5" },
       clientMutationId: expect.any(String),
     });
     expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "snapshot", intent: "refresh" }));
@@ -2909,7 +2905,7 @@ describe("app controller callbacks", () => {
       backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
       state,
-    }).newTask.selectConfigOption("model", "gpt-5");
+    }).newTask.selectConfigOption("model", { type: "id", value: "gpt-5" });
     await settlePromises();
 
     expect(request).toHaveBeenCalledWith(TASK_OPEN, { taskId: "task-prepared" });
@@ -3141,7 +3137,6 @@ function snapshot(taskId: string): TaskSnapshot {
     settings_summary: {
       agent_id: "codex",
       isolation: "local",
-      config_options: {},
     },
     revision: 1,
   };
@@ -3154,7 +3149,7 @@ function editableConfigOptions(): NonNullable<TaskSnapshot["agent_config"]> {
     options: [{
       id: "model",
       label: "Model",
-      current_value: "gpt",
+      kind: "select", current_value: { type: "id", value: "gpt" },
       values: [
         { id: "gpt", label: "GPT" },
         { id: "gpt-5", label: "GPT-5" },

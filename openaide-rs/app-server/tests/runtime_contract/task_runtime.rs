@@ -24,7 +24,6 @@ fn passive_snapshot_does_not_call_agent() {
             prompt_text: Some("check passive open".to_string()),
             external_session_id: None,
             model_id: None,
-            config_options: None,
             context: Vec::new(),
         })
         .unwrap();
@@ -71,7 +70,6 @@ fn cancel_stops_pending_agent_turn() {
             prompt_text: Some("start then stop".to_string()),
             external_session_id: None,
             model_id: None,
-            config_options: None,
             context: Vec::new(),
         })
         .unwrap();
@@ -147,7 +145,6 @@ fn prompt_rejects_double_turn_while_active() {
             prompt_text: Some("first".to_string()),
             external_session_id: None,
             model_id: None,
-            config_options: None,
             context: Vec::new(),
         })
         .unwrap();
@@ -190,7 +187,6 @@ fn cancel_signals_agent_after_turn_started() {
             prompt_text: Some("wait for cancel".to_string()),
             external_session_id: None,
             model_id: None,
-            config_options: None,
             context: Vec::new(),
         })
         .unwrap();

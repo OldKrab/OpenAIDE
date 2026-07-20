@@ -932,7 +932,7 @@ describe("app controller mounted lifecycle", () => {
         label: "Model",
         category: "model",
         kind: "select",
-        currentValue: "gpt-5.6-sol",
+        currentValue: { type: "id", value: "gpt-5.6-sol" },
         values: [{ value: "gpt-5.6-sol", label: "GPT-5.6 Sol" }],
       }],
     };
@@ -969,7 +969,7 @@ describe("app controller mounted lifecycle", () => {
 
     expect(latestController?.state.snapshot?.agent_config).toMatchObject({
       status: "ready",
-      options: [{ id: "model", current_value: "gpt-5.6-sol" }],
+      options: [{ id: "model", current_value: { type: "id", value: "gpt-5.6-sol" } }],
     });
   });
 
@@ -1277,7 +1277,7 @@ describe("app controller mounted lifecycle", () => {
             id: "model",
             label: "Model",
             category: "model",
-            current_value: "gpt-5.5",
+            kind: "select", current_value: { type: "id", value: "gpt-5.5" },
             values: [{ id: "gpt-5.5", label: "gpt-5.5" }],
           }],
         },
@@ -2135,7 +2135,7 @@ describe("app controller mounted lifecycle", () => {
               label: "Model",
               category: "model",
               kind: "select",
-              currentValue: "gpt-5",
+              currentValue: { type: "id", value: "gpt-5" },
               values: [{ value: "gpt-5", label: "GPT-5" }],
             }],
           };
@@ -2195,7 +2195,10 @@ describe("app controller mounted lifecycle", () => {
       agent_config: {
         agent_id: "codex",
         status: "ready",
-        options: [expect.objectContaining({ id: "model", current_value: "gpt-5" })],
+        options: [expect.objectContaining({
+          id: "model",
+          current_value: { type: "id", value: "gpt-5" },
+        })],
       },
     });
   });
@@ -2757,7 +2760,6 @@ function snapshot(taskId: string, status: TaskSnapshot["task"]["status"], title 
     settings_summary: {
       agent_id: "codex",
       isolation: "local",
-      config_options: {},
     },
     revision: 1,
   };

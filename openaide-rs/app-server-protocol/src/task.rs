@@ -1,11 +1,11 @@
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
 use ts_rs::TS;
 
 use crate::ids::{
     AgentConfigOptionId, AgentId, ClientMutationId, MessageId, ProjectId, TaskId, TaskListCursor,
     TurnId, WorktreeId,
 };
+use crate::snapshot::AgentConfigOptionCurrentValue;
 use crate::snapshot::{ChatItem, TaskSnapshot, TaskSummary};
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
@@ -16,8 +16,6 @@ pub struct TaskAcquireParams {
     /// Legacy bootstrap fallback for Projects not yet present in the App Server catalog.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace_root: Option<String>,
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub config_options: BTreeMap<String, String>,
 }
 
 /// Acquires from the same prepared pool as `task/acquire`, resolving an opaque Worktree first.
@@ -27,8 +25,6 @@ pub struct TaskAcquireInWorktreeParams {
     pub project_id: ProjectId,
     pub agent_id: AgentId,
     pub worktree_id: WorktreeId,
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
-    pub config_options: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
@@ -122,7 +118,7 @@ pub struct TaskSendResult {
 pub struct TaskSetConfigOptionParams {
     pub task_id: TaskId,
     pub config_id: AgentConfigOptionId,
-    pub value: String,
+    pub value: AgentConfigOptionCurrentValue,
     pub client_mutation_id: ClientMutationId,
 }
 

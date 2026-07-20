@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use openaide_app_server::agent::{AcpTraceStatus, RuntimeDeveloperSettings, RuntimeSettings};
 use openaide_app_server::diagnostics::{RuntimeDiagnostics, TaskDiagnostics};
 use openaide_app_server::protocol::host::HostRequest;
@@ -103,7 +101,6 @@ fn main() {
             agent_id: "codex".to_string(),
             isolation: IsolationKind::Local,
             model_id: Some("gpt-5.5".to_string()),
-            config_options: HashMap::from([("model".to_string(), "gpt-5.5".to_string())]),
         },
         config_options_catalog: None,
         pending_config_change: None,
@@ -125,7 +122,6 @@ fn main() {
                 prompt_text: Some("Update docs".to_string()),
                 external_session_id: None,
                 model_id: None,
-                config_options: Some(json!({ "model": "gpt-5.5" })),
                 context: vec![attachment()],
             }),
             "task_id": to_value(TaskIdParams { task_id: "task_1".to_string() }),

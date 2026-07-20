@@ -48,8 +48,8 @@ use crate::agent::tool_details::tool_call_event;
 use crate::agent::{AgentMetadataField, AgentSessionMetadataUpdate};
 use crate::protocol::model::{
     ActivityStatus, ActivityToolContent, ActivityToolValue, AgentCommandsCatalog, AgentMessagePart,
-    AgentMessageRole, Attachment, ConfigOption, ConfigOptionCategory, ConfigOptionValue,
-    ConfigOptionsStatus, NormalizedMessage,
+    AgentMessageRole, Attachment, ConfigOption, ConfigOptionCategory, ConfigOptionCurrentValue,
+    ConfigOptionKind, ConfigOptionValue, ConfigOptionsStatus, NormalizedMessage,
 };
 use agent_client_protocol::JsonRpcMessage;
 use agent_client_protocol::{Agent, Client, ConnectionTo, Handled};
@@ -500,7 +500,7 @@ impl CapturingSessionSink {
             .expect("captured catalog lock poisoned")
             .iter()
             .filter_map(|catalog| catalog.options.first())
-            .map(|option| option.current_value.clone())
+            .filter_map(|option| option.current_value.as_id().map(ToOwned::to_owned))
             .collect()
     }
 
@@ -2048,7 +2048,8 @@ fn config_catalog(current_value: &str) -> ConfigOptionsCatalog {
             label: "Mode".to_string(),
             description: None,
             category: Some(ConfigOptionCategory::Mode),
-            current_value: current_value.to_string(),
+            kind: ConfigOptionKind::Select,
+            current_value: ConfigOptionCurrentValue::id(current_value),
             values: vec![
                 ConfigOptionValue {
                     id: "ask".to_string(),

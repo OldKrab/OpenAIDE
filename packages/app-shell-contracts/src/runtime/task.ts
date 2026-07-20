@@ -44,7 +44,6 @@ export type TaskSnapshot = {
     agent_id: string;
     isolation: IsolationKind;
     model_id?: string;
-    config_options?: Record<string, string>;
   };
   agent_config?: ConfigOptionsCatalog;
   agent_commands?: AgentCommandsCatalog;

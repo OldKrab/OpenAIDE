@@ -96,10 +96,7 @@ function invalidateProcessOwnedState(state: AppState): AppState {
       configOptions: undefined,
       configOptionsLoading: false,
       configOptionsError: undefined,
-      selection: {
-        ...state.newTask.selection,
-        configOptions: {},
-      },
+      selection: state.newTask.selection,
       nativeSessions: {
         items: [],
         loading: false,

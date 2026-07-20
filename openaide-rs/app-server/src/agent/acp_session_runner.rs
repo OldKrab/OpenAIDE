@@ -1,9 +1,7 @@
 use std::path::PathBuf;
 use std::sync::mpsc;
 
-use crate::agent::acp_schema::{
-    InitializeRequest, InitializeResponse, SessionConfigOption, SessionId,
-};
+use crate::agent::acp_schema::{InitializeRequest, InitializeResponse, SessionConfigOption};
 use agent_client_protocol::{Agent, ConnectionTo};
 
 use crate::agent::acp_session_lifecycle::{
@@ -11,7 +9,6 @@ use crate::agent::acp_session_lifecycle::{
     resume_active_session, start_active_session, validate_initialize_protocol,
     LoadActiveSessionRequest, LoadReplayCaptures,
 };
-use crate::agent::acp_session_termination::close_active_session;
 use crate::agent::acp_trace::AcpTraceSession;
 use crate::protocol::errors::RuntimeError;
 
@@ -146,16 +143,6 @@ impl<'a> AcpSessionRunner<'a> {
             self.trace,
         )
         .await
-    }
-
-    pub(super) async fn close(&self, session_id: SessionId) {
-        close_active_session(
-            self.connection,
-            session_id,
-            self.supports_session_close(),
-            self.trace,
-        )
-        .await;
     }
 }
 

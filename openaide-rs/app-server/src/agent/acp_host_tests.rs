@@ -12,6 +12,10 @@ fn form_elicitation_is_advertised_without_shell_host_capabilities() {
     );
     assert_eq!(value["clientCapabilities"]["terminal"], false);
     assert_eq!(value["clientCapabilities"]["auth"]["terminal"], false);
+    assert_eq!(
+        value["clientCapabilities"]["session"]["configOptions"]["boolean"],
+        serde_json::json!({})
+    );
 }
 
 #[test]

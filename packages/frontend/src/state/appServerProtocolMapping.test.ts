@@ -175,7 +175,12 @@ describe("App Server Protocol state mapping", () => {
         ],
       },
     ]);
-    expect(snapshot.settings_summary.config_options).toEqual({ model: "gpt-5" });
+    expect(snapshot.agent_config?.options).toEqual([
+      expect.objectContaining({
+        id: "model",
+        current_value: { type: "id", value: "gpt-5" },
+      }),
+    ]);
     expect(snapshot.send_capability).toEqual({ state: "ready" });
     expect(mapping.warnings).toEqual([]);
     expect(mapping.requiresNativeSurface).toBe(false);
@@ -452,7 +457,7 @@ describe("App Server Protocol state mapping", () => {
     expect(mapProtocolConfigOptions(protocolSnapshot().agentConfig, "codex")).toMatchObject({
       agent_id: "codex",
       status: "ready",
-      options: [{ id: "model", category: "model", current_value: "gpt-5", values: [{ id: "gpt-5" }] }],
+      options: [{ id: "model", category: "model", kind: "select", current_value: { type: "id", value: "gpt-5" }, values: [{ id: "gpt-5" }] }],
     });
   });
 
@@ -468,14 +473,14 @@ describe("App Server Protocol state mapping", () => {
       pendingChange: {
         clientMutationId: "mutation-1" as never,
         configId: "model" as never,
-        requestedValue: "gpt-5.1",
+        requestedValue: { type: "id", value: "gpt-5.1" },
       },
     }, "codex")).toMatchObject({
       status: "stale",
       pending_change: {
         mutation_id: "mutation-1",
         option_id: "model",
-        requested_value: "gpt-5.1",
+        requested_value: { type: "id", value: "gpt-5.1" },
       },
     });
     expect(mapProtocolAgentCommands({ state: "unavailable" }, "codex")).toBeUndefined();
@@ -861,7 +866,7 @@ function protocolSnapshot(overrides: Partial<ProtocolTaskSnapshot> = {}): Protoc
           label: "Model",
           category: "model",
           kind: "select",
-          currentValue: "gpt-5",
+          currentValue: { type: "id", value: "gpt-5" },
           values: [{ value: "gpt-5", label: "GPT-5" }],
         },
       ],

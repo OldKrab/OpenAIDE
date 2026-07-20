@@ -887,27 +887,27 @@ describe("NewTaskView", () => {
       options: [
         {
           category: "mode",
-          current_value: "agent",
+          kind: "select", current_value: { type: "id", value: "agent" },
           id: "mode",
           label: "Mode",
           values: [{ id: "agent", label: "Agent" }],
         },
         {
           category: "model",
-          current_value: "gpt-5.5",
+          kind: "select", current_value: { type: "id", value: "gpt-5.5" },
           id: "model",
           label: "Model",
           values: [{ id: "gpt-5.5", label: "GPT-5.5" }],
         },
         {
           category: "thought_level",
-          current_value: "medium",
+          kind: "select", current_value: { type: "id", value: "medium" },
           id: "reasoning_effort",
           label: "Reasoning",
           values: [{ id: "medium", label: "Medium" }],
         },
         {
-          current_value: "off",
+          kind: "select", current_value: { type: "id", value: "off" },
           id: "fast-mode",
           label: "Fast mode",
           values: [{ id: "off", label: "Off" }],
@@ -928,28 +928,28 @@ describe("NewTaskView", () => {
         agent_id: "codex",
         options: [
           {
-            current_value: "off",
+            kind: "select", current_value: { type: "id", value: "off" },
             id: "fast-mode",
             label: "fast-mode",
             values: [{ id: "off", label: "Off" }],
           },
           {
             category: "mode",
-            current_value: "agent",
+            kind: "select", current_value: { type: "id", value: "agent" },
             id: "mode",
             label: "mode",
             values: [{ id: "agent", label: "Agent" }],
           },
           {
             category: "thought_level",
-            current_value: "medium",
+            kind: "select", current_value: { type: "id", value: "medium" },
             id: "reasoning_effort",
             label: "reasoning_effort",
             values: [{ id: "medium", label: "Medium" }],
           },
           {
             category: "model",
-            current_value: "gpt-5.5",
+            kind: "select", current_value: { type: "id", value: "gpt-5.5" },
             id: "model",
             label: "model",
             values: [{ id: "gpt-5.5", label: "GPT-5.5" }],
@@ -971,7 +971,7 @@ describe("NewTaskView", () => {
     );
 
     expect(composerControlLabels(tree)).toEqual([
-      "fast-mode: Off",
+      "Off",
       "Agent",
       "Medium",
       "GPT-5.5",
@@ -987,7 +987,7 @@ describe("NewTaskView", () => {
       agent_id: "codex",
       options: [{
         category: "model",
-        current_value: "gpt-5.5",
+        kind: "select", current_value: { type: "id", value: "gpt-5.5" },
         id: "model",
         label: "Model",
         values: [{ id: "gpt-5.5", label: "GPT-5.5" }],
@@ -1190,7 +1190,6 @@ function taskSnapshot(taskId: string, hasMessages: boolean): TaskSnapshot {
     settings_summary: {
       agent_id: "codex",
       isolation: "local",
-      config_options: {},
     },
     send_capability: { state: "ready" },
     revision: 1,

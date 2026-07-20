@@ -6,7 +6,6 @@ use crate::protocol::model::{NormalizedMessage, TaskSnapshot, TaskStatus};
 use crate::protocol::params::TaskCreateParams;
 use crate::storage::records::TaskPreparationRecord;
 use crate::storage::records::{TaskLifecycle, TaskRecord};
-use crate::tasks::config_options::selected_config_options;
 use crate::tasks::lifecycle::running_turn_message;
 use crate::tasks::task_start_transaction::TaskSessionStartGuard;
 use crate::time::now_string;
@@ -21,7 +20,6 @@ impl TaskTurnLifecycle {
     ) -> Result<TaskSnapshot, RuntimeError> {
         self.agent_registry.validate_task_create(&params)?;
         let prompt_text = required_optional_prompt_text(params.prompt_text.clone(), "prompt_text")?;
-        let selected_config_options = selected_config_options(params.config_options.as_ref())?;
         let now = now_string();
         let task_id = format!("task_{}", Uuid::new_v4());
         let prompt_attachments = params.context.clone();
@@ -33,10 +31,6 @@ impl TaskTurnLifecycle {
                 task_id: task_id.clone(),
                 cwd: params.workspace_root.clone(),
                 model_id: params.model_id.clone(),
-                config_options: serde_json::to_value(&selected_config_options)
-                    .ok()
-                    .filter(|value| !value.as_object().is_some_and(serde_json::Map::is_empty)),
-                config_option_policy: crate::agent::ConfigOptionPolicy::Strict,
                 context: params.context.clone(),
                 cancellation: TurnCancellation::new(),
                 secret_resolver: None,
@@ -72,7 +66,6 @@ impl TaskTurnLifecycle {
                 archived: false,
                 tombstoned: false,
                 revision: 0,
-                config_options: session.config_options.clone(),
                 config_options_catalog: session.config_catalog.clone(),
                 config_mutation: Default::default(),
                 agent_commands_catalog: None,

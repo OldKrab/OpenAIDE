@@ -1,9 +1,5 @@
-use std::collections::HashMap;
-
-use serde_json::Value;
-
 use crate::protocol::errors::RuntimeError;
-use crate::protocol::model::ConfigOptionsCatalog;
+use crate::protocol::model::{ConfigOptionCurrentValue, ConfigOptionsCatalog};
 use crate::storage::records::{PendingTaskConfigChange, TaskRecord};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,7 +20,7 @@ pub(crate) fn begin_task_config_mutation(
     task: &mut TaskRecord,
     client_mutation_id: String,
     config_id: String,
-    requested_value: String,
+    requested_value: ConfigOptionCurrentValue,
 ) -> Result<TaskConfigMutationToken, RuntimeError> {
     let sequence = task
         .config_mutation
@@ -52,23 +48,22 @@ pub(crate) fn apply_task_config_catalog(
     catalog: ConfigOptionsCatalog,
     now: &str,
 ) -> bool {
-    let config_options = catalog.current_values();
     let model_id = catalog.model_id();
     let resolves_pending = task
         .config_mutation
         .pending
         .as_ref()
         .is_some_and(|pending| {
-            config_options.get(&pending.config_id) == Some(&pending.requested_value)
+            catalog.options.iter().any(|option| {
+                option.id == pending.config_id && option.current_value == pending.requested_value
+            })
         });
-    let changed = task.config_options != config_options
-        || task.config_options_catalog.as_ref() != Some(&catalog)
+    let changed = task.config_options_catalog.as_ref() != Some(&catalog)
         || task.model_id != model_id
         || resolves_pending;
     if !changed {
         return false;
     }
-    task.config_options = config_options;
     task.config_options_catalog = Some(catalog);
     task.model_id = model_id;
     if resolves_pending {
@@ -106,56 +101,4 @@ pub(crate) fn clear_task_config_mutation(
     task.config_mutation.pending = None;
     task.updated_at = now.to_string();
     true
-}
-
-/// Applies config selected before a live Native Session exists.
-pub(crate) fn apply_stored_config_option(
-    task: &mut TaskRecord,
-    config_id: &str,
-    value: &str,
-) -> bool {
-    let previous_options = task.config_options.clone();
-    let previous_catalog = task.config_options_catalog.clone();
-    let previous_model_id = task.model_id.clone();
-
-    task.config_options
-        .insert(config_id.to_string(), value.to_string());
-    if let Some(catalog) = &mut task.config_options_catalog {
-        if let Some(option) = catalog
-            .options
-            .iter_mut()
-            .find(|option| option.id == config_id)
-        {
-            option.current_value = value.to_string();
-        }
-        task.model_id = catalog.model_id();
-    }
-    task.config_options != previous_options
-        || task.config_options_catalog != previous_catalog
-        || task.model_id != previous_model_id
-}
-
-pub(crate) fn selected_config_options(
-    value: Option<&Value>,
-) -> Result<HashMap<String, String>, RuntimeError> {
-    let Some(value) = value else {
-        return Ok(HashMap::new());
-    };
-    if value.is_null() {
-        return Ok(HashMap::new());
-    }
-    let object = value
-        .as_object()
-        .ok_or_else(|| RuntimeError::InvalidParams("config_options".to_string()))?;
-    let mut selected = HashMap::new();
-    for (key, value) in object {
-        if key.trim().is_empty() {
-            return Err(RuntimeError::InvalidParams("config_options".to_string()));
-        }
-        let Some(value) = value.as_str() else {
-            return Err(RuntimeError::InvalidParams(format!("config_options.{key}")));
-        };
-        selected.insert(key.clone(), value.to_string());
-    }
-    Ok(selected)
 }

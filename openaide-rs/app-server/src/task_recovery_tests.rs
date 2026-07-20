@@ -1,5 +1,5 @@
 use super::{volatile_recovery_plan, VolatileRecoveryPlan};
-use crate::protocol::model::{IsolationKind, TaskStatus};
+use crate::protocol::model::{ConfigOptionCurrentValue, IsolationKind, TaskStatus};
 use crate::storage::records::{TaskPreparationRecord, TaskRecord};
 
 #[test]
@@ -47,7 +47,7 @@ fn volatile_recovery_retires_an_interrupted_config_mutation() {
         &mut task,
         "mutation-1".to_string(),
         "model".to_string(),
-        "gpt-5.5".to_string(),
+        ConfigOptionCurrentValue::id("gpt-5.5"),
     )
     .unwrap();
 
@@ -93,7 +93,6 @@ fn task_record() -> TaskRecord {
         archived: false,
         tombstoned: false,
         revision: 0,
-        config_options: Default::default(),
         config_options_catalog: None,
         config_mutation: Default::default(),
         agent_commands_catalog: None,

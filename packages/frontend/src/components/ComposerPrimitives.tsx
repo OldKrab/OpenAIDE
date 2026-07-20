@@ -1,8 +1,9 @@
-import { Check, ChevronDown, LoaderCircle } from "lucide-react";
+import { Check, ChevronDown } from "lucide-react";
 import { forwardRef, type ReactNode } from "react";
 
 export function Selector({
   className,
+  describedBy,
   disabled,
   icon,
   label,
@@ -12,8 +13,9 @@ export function Selector({
   pending = false,
 }: {
   className?: string;
+  describedBy?: string;
   disabled: boolean;
-  icon: ReactNode;
+  icon?: ReactNode;
   label: string;
   locked: boolean;
   menuOpen: boolean;
@@ -25,18 +27,20 @@ export function Selector({
     return (
       <span
         aria-busy={pending || undefined}
+        aria-describedby={describedBy}
         aria-label={pending ? `${label}, updating Agent option` : undefined}
         className={`${classes} locked${pending ? " pending" : ""}`}
         title={pending ? "Updating Agent option" : "Locked after task start"}
       >
         {icon}
         <span className="composer-pill-label">{label}</span>
-        {pending ? <LoaderCircle aria-hidden="true" className="composer-config-pending" size={12} /> : null}
+        <ChevronDown aria-hidden="true" size={11} />
       </span>
     );
   }
   return (
     <button
+      aria-describedby={describedBy}
       aria-expanded={menuOpen}
       className={classes}
       disabled={disabled}
@@ -77,15 +81,26 @@ export function Popover({
   children,
   className = "",
   label,
+  role = "menu",
 }: {
   children: ReactNode;
   className?: string;
   label: string;
+  role?: "group" | "menu";
 }) {
   return (
-    <div aria-label={label} className={`composer-popover ${className}`} role="menu">
+    <div aria-label={label} className={`composer-popover ${className}`} role={role}>
       {children}
     </div>
+  );
+}
+
+export function PopoverHeader({ description, label }: { description?: string; label: string }) {
+  return (
+    <header className="composer-popover-header">
+      <strong>{label}</strong>
+      {description ? <small>{description}</small> : null}
+    </header>
   );
 }
 
@@ -139,11 +154,13 @@ export function MenuButton({
 
 export function PopoverBackButton({
   ariaLabel,
+  description,
   icon,
   label,
   onClick,
 }: {
   ariaLabel: string;
+  description?: string;
   icon: ReactNode;
   label: string;
   onClick: () => void;
@@ -151,7 +168,7 @@ export function PopoverBackButton({
   return (
     <button aria-label={ariaLabel} className="composer-popover-back" onClick={onClick} type="button">
       {icon}
-      <span>{label}</span>
+      <span><strong>{label}</strong>{description ? <small>{description}</small> : null}</span>
     </button>
   );
 }

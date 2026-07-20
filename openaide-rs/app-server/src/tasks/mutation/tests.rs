@@ -858,7 +858,6 @@ fn task_record(task_id: &str) -> TaskRecord {
         archived: false,
         tombstoned: false,
         revision: 0,
-        config_options: Default::default(),
         config_options_catalog: None,
         config_mutation: Default::default(),
         agent_commands_catalog: None,

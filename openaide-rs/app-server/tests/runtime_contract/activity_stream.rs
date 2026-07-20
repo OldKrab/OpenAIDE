@@ -17,7 +17,6 @@ fn tool_call_updates_replace_existing_activity_by_identity() {
             prompt_text: Some("read config".to_string()),
             external_session_id: None,
             model_id: None,
-            config_options: None,
             context: Vec::new(),
         })
         .unwrap();
@@ -157,7 +156,6 @@ fn streamed_agent_text_chunks_are_persisted_as_one_message_per_contiguous_run() 
             prompt_text: Some("call any tool".to_string()),
             external_session_id: None,
             model_id: None,
-            config_options: None,
             context: Vec::new(),
         })
         .unwrap();
@@ -210,7 +208,6 @@ fn source_message_id_preserves_one_agent_message_across_tool_activity() {
             prompt_text: Some("respond around a tool call".to_string()),
             external_session_id: None,
             model_id: None,
-            config_options: None,
             context: Vec::new(),
         })
         .unwrap();

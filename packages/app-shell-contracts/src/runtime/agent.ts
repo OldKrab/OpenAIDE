@@ -37,7 +37,7 @@ export type ConfigOptionsCatalog = {
   pending_change?: {
     mutation_id: string;
     option_id: string;
-    requested_value: string;
+    requested_value: ConfigOptionCurrentValue;
   };
   error?: string;
 };
@@ -47,9 +47,14 @@ export type ConfigOption = {
   label: string;
   description?: string;
   category?: ConfigOptionCategory;
-  current_value: string;
+  kind: "select" | "boolean";
+  current_value: ConfigOptionCurrentValue;
   values: ConfigOptionValue[];
 };
+
+export type ConfigOptionCurrentValue =
+  | { type: "id"; value: string }
+  | { type: "boolean"; value: boolean };
 
 export type ConfigOptionValue = {
   id: string;

@@ -6,7 +6,7 @@ use openaide_app_server_protocol::ids::TurnId;
 use crate::agent::registry_handle::AgentRegistryHandle;
 use crate::agent::{
     AgentPrompt, AgentSession, AgentSessionKey, AgentSessionLoad, AgentSessionResume,
-    AgentSessionStart, ConfigOptionPolicy, TurnCancellation,
+    AgentSessionStart, TurnCancellation,
 };
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{Attachment, TaskStatus};
@@ -110,8 +110,6 @@ impl NativeSessionService {
                 task_id: task.task_id.clone(),
                 cwd: task.workspace_root.clone(),
                 model_id: task.model_id.clone(),
-                config_options: config_options_payload(task),
-                config_option_policy: ConfigOptionPolicy::ReconcileWithAgentDefaults,
                 context: Vec::new(),
                 cancellation: cancellation.clone(),
                 secret_resolver: Some(self.secret_resolver(&task.task_id)),
@@ -123,7 +121,6 @@ impl NativeSessionService {
             session_start.session().key(),
         )?;
         let session_id = session_start.session().session_id.clone();
-        let config_options = session_start.session().config_options.clone();
         let config_catalog = session_start.session().config_catalog.clone();
         let commands_catalog = session_start.session().commands_catalog.clone();
         let model_id = session_start.session().model_id.clone();
@@ -144,7 +141,6 @@ impl NativeSessionService {
                 task.agent_session_id = Some(session_id.clone());
                 task.supports_image_input = supports_image_input;
                 if config_catalog.is_some() {
-                    task.config_options = config_options.clone();
                     task.config_options_catalog = config_catalog.clone();
                     task.model_id = model_id.clone();
                 }
@@ -355,8 +351,6 @@ impl NativeSessionService {
                 task_id: task.task_id.clone(),
                 cwd: task.workspace_root.clone(),
                 model_id: task.model_id.clone(),
-                config_options: config_options_payload(task),
-                config_option_policy: ConfigOptionPolicy::Strict,
                 context: Vec::new(),
                 cancellation,
                 secret_resolver: Some(self.secret_resolver(&task.task_id)),
@@ -452,7 +446,6 @@ impl OpenedSessionTaskState {
     fn apply_to(self, task: &mut TaskRecord) {
         let AgentSession {
             session_id,
-            config_options,
             config_catalog,
             commands_catalog,
             model_id,
@@ -465,14 +458,12 @@ impl OpenedSessionTaskState {
             task.supports_image_input = prompt_capabilities.image;
         }
         if self.metadata_is_authoritative {
-            task.config_options = config_options;
             task.config_options_catalog = config_catalog;
             task.agent_commands_catalog = commands_catalog;
             task.model_id = model_id;
             return;
         }
         if let Some(catalog) = config_catalog {
-            task.config_options = config_options;
             task.config_options_catalog = Some(catalog);
             task.model_id = model_id;
         } else if let Some(model_id) = model_id {
@@ -514,10 +505,4 @@ impl Drop for PreparingSessionOwnership {
 
 fn is_session_resume_unsupported(error: &RuntimeError) -> bool {
     matches!(error, RuntimeError::CapabilityMissing(_))
-}
-
-fn config_options_payload(task: &TaskRecord) -> Option<serde_json::Value> {
-    serde_json::to_value(&task.config_options)
-        .ok()
-        .filter(|value| !value.as_object().is_some_and(serde_json::Map::is_empty))
 }

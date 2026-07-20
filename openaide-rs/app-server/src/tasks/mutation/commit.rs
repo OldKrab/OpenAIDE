@@ -649,7 +649,6 @@ fn changed_fields(original: &TaskRecord, task: &TaskRecord) -> ChangedFields {
         lifecycle: original.lifecycle != task.lifecycle,
         preparation,
         agent_config: preparation
-            || original.config_options != task.config_options
             || original.config_options_catalog != task.config_options_catalog
             || original.config_mutation != task.config_mutation
             || original.model_id != task.model_id,

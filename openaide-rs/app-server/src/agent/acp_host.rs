@@ -1,12 +1,14 @@
 use std::time::Duration;
 
 use crate::agent::acp_schema::{
-    AuthCapabilities, ClientCapabilities, CreateTerminalRequest, CreateTerminalResponse,
+    AuthCapabilities, BooleanConfigOptionCapabilities, ClientCapabilities,
+    ClientSessionCapabilities, CreateTerminalRequest, CreateTerminalResponse,
     ElicitationCapabilities, ElicitationFormCapabilities, FileSystemCapabilities,
     InitializeRequest, KillTerminalRequest, KillTerminalResponse, ProtocolVersion,
     ReadTextFileRequest, ReadTextFileResponse, ReleaseTerminalRequest, ReleaseTerminalResponse,
-    TerminalOutputRequest, TerminalOutputResponse, WaitForTerminalExitRequest,
-    WaitForTerminalExitResponse, WriteTextFileRequest, WriteTextFileResponse,
+    SessionConfigOptionsCapabilities, TerminalOutputRequest, TerminalOutputResponse,
+    WaitForTerminalExitRequest, WaitForTerminalExitResponse, WriteTextFileRequest,
+    WriteTextFileResponse,
 };
 
 use crate::agent::acp_trace::AcpTraceSession;
@@ -21,6 +23,9 @@ const HOST_CAPABILITY_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub(crate) fn initialize_request(host_bridge: &HostBridge) -> InitializeRequest {
     let capabilities = ClientCapabilities::new()
+        .session(ClientSessionCapabilities::new().config_options(
+            SessionConfigOptionsCapabilities::new().boolean(BooleanConfigOptionCapabilities::new()),
+        ))
         .elicitation(ElicitationCapabilities::new().form(ElicitationFormCapabilities::new()));
     if !host_bridge.is_enabled() {
         return InitializeRequest::new(ProtocolVersion::V1).client_capabilities(capabilities);

@@ -61,7 +61,6 @@ fn shutdown_preserves_durable_native_session_bindings_before_restart() {
             prompt_text: Some("first".to_string()),
             external_session_id: None,
             model_id: None,
-            config_options: None,
             context: Vec::new(),
         })
         .unwrap();
@@ -151,7 +150,6 @@ fn runtime_startup_recovers_stale_active_turn_and_session_binding() {
             archived: false,
             tombstoned: false,
             revision: 1,
-            config_options: Default::default(),
             config_options_catalog: None,
             config_mutation: Default::default(),
             agent_commands_catalog: None,
@@ -247,7 +245,6 @@ fn shutdown_stops_active_turn_without_failed_task_state() {
             prompt_text: Some("block until shutdown".to_string()),
             external_session_id: None,
             model_id: None,
-            config_options: None,
             context: Vec::new(),
         })
         .unwrap();
@@ -299,7 +296,6 @@ fn task_create_attach_failure_finalizes_task_without_clearing_native_session() {
             prompt_text: Some("will not run".to_string()),
             external_session_id: None,
             model_id: None,
-            config_options: None,
             context: Vec::new(),
         })
         .unwrap_err();
@@ -359,7 +355,6 @@ fn follow_up_attach_failure_preserves_resumed_native_session() {
             prompt_text: Some("first".to_string()),
             external_session_id: None,
             model_id: None,
-            config_options: None,
             context: Vec::new(),
         })
         .unwrap();
@@ -442,7 +437,6 @@ fn task_updates_emit_typed_task_updates() {
             prompt_text: Some("Notify progress".to_string()),
             external_session_id: None,
             model_id: None,
-            config_options: None,
             context: Vec::new(),
         })
         .unwrap();

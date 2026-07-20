@@ -137,7 +137,6 @@ function mapProtocolTaskSnapshotWithCache(
       settings_summary: {
         agent_id: task.agent_id,
         isolation: DEFAULT_LOCAL_ISOLATION,
-        config_options: configOptionValues(snapshot.agentConfig),
       },
       agent_config: mapProtocolConfigOptions(snapshot.agentConfig, task.agent_id),
       agent_commands: mapProtocolAgentCommands(snapshot.agentCommands, task.agent_id),
@@ -199,6 +198,7 @@ export function mapProtocolConfigOptions(
     label: option.label,
     description: option.description ?? undefined,
     category: configCategoryFromProtocol(option.category),
+    kind: option.kind,
     current_value: option.currentValue,
     values: option.values.map((value) => ({
       id: value.value,
@@ -321,11 +321,6 @@ function taskSummaryStatusFromProtocol(status: ProtocolTaskStatus): TaskSummary[
     case "idle":
       return "inactive";
   }
-}
-
-function configOptionValues(snapshot: ProtocolTaskSnapshot["agentConfig"]) {
-  if (!snapshot.options?.length) return undefined;
-  return Object.fromEntries(snapshot.options.map((option) => [option.configId, option.currentValue]));
 }
 
 function sendCapabilityItems(snapshot: ProtocolTaskSnapshot, createdAt: string) {

@@ -525,11 +525,11 @@ export type TaskAcquireParams = { projectId: ProjectId, agentId: AgentId,
 /**
  * Legacy bootstrap fallback for Projects not yet present in the App Server catalog.
  */
-workspaceRoot?: string | null, configOptions?: { [key in string]: string }, };
+workspaceRoot?: string | null, };
 
 export type TaskAcquireResult = { task: TaskSnapshot, };
 
-export type TaskAcquireInWorktreeParams = { projectId: ProjectId, agentId: AgentId, worktreeId: WorktreeId, configOptions?: { [key in string]: string }, };
+export type TaskAcquireInWorktreeParams = { projectId: ProjectId, agentId: AgentId, worktreeId: WorktreeId, };
 
 export type TaskAcquireInWorktreeResult = { task: TaskSnapshot, };
 
@@ -551,7 +551,7 @@ export type ComposerImage = { label: string, mimeType: string, data: string, };
 
 export type TaskSendResult = { task: TaskSnapshot, turnId: TurnId, userMessageId: MessageId, };
 
-export type TaskSetConfigOptionParams = { taskId: TaskId, configId: AgentConfigOptionId, value: string, clientMutationId: ClientMutationId, };
+export type TaskSetConfigOptionParams = { taskId: TaskId, configId: AgentConfigOptionId, value: AgentConfigOptionCurrentValue, clientMutationId: ClientMutationId, };
 
 export type TaskSetConfigOptionResult = { task: TaskSnapshot, };
 
@@ -695,13 +695,15 @@ export type TaskPreparationAction = "retry" | "changeAgent" | "discard" | "openA
 
 export type TaskAgentConfigSnapshot = { state: LiveSessionDataState, options?: Array<AgentConfigOptionSnapshot>, pendingChange?: PendingAgentConfigChange | null, error?: ProtocolError | null, };
 
-export type AgentConfigOptionSnapshot = { configId: AgentConfigOptionId, label: string, description?: string | null, category?: string | null, kind: AgentConfigOptionKind, currentValue: string, values: Array<AgentConfigOptionValueSnapshot>, };
+export type AgentConfigOptionSnapshot = { configId: AgentConfigOptionId, label: string, description?: string | null, category?: string | null, kind: AgentConfigOptionKind, currentValue: AgentConfigOptionCurrentValue, values: Array<AgentConfigOptionValueSnapshot>, };
 
-export type AgentConfigOptionKind = "select" | "unsupported";
+export type AgentConfigOptionKind = "select" | "boolean";
+
+export type AgentConfigOptionCurrentValue = { "type": "id", value: string, } | { "type": "boolean", value: boolean, };
 
 export type AgentConfigOptionValueSnapshot = { value: string, label: string, description?: string | null, };
 
-export type PendingAgentConfigChange = { clientMutationId: ClientMutationId, configId: AgentConfigOptionId, requestedValue: string, };
+export type PendingAgentConfigChange = { clientMutationId: ClientMutationId, configId: AgentConfigOptionId, requestedValue: AgentConfigOptionCurrentValue, };
 
 export type TaskAgentCommandsSnapshot = { state: LiveSessionDataState, commands?: Array<AgentSlashCommandSnapshot>, error?: ProtocolError | null, };
 

@@ -1,8 +1,8 @@
 import { Brain, ChevronLeft, ChevronRight, Code2, Cpu, Shield, SlidersHorizontal } from "lucide-react";
-import type { ConfigOption, ConfigOptionsCatalog, IsolationKind } from "@openaide/app-shell-contracts";
-import type { Dispatch, SetStateAction } from "react";
+import type { ConfigOption, ConfigOptionCurrentValue, ConfigOptionsCatalog, IsolationKind } from "@openaide/app-shell-contracts";
+import { useId, type Dispatch, type SetStateAction } from "react";
 import { isolationOptions, type ComposerSelection } from "../state/composerOptions";
-import { MenuButton, Popover, PopoverBackButton, Selector } from "./ComposerPrimitives";
+import { MenuButton, Popover, PopoverBackButton, PopoverHeader, Selector } from "./ComposerPrimitives";
 import { useComposerOptionPacking } from "./useComposerOptionPacking";
 
 export type ComposerRunMenu = "options" | "isolation" | `config:${string}`;
@@ -17,7 +17,7 @@ type ComposerRunOptionsProps = {
   configOptions?: ConfigOptionsCatalog;
   controlsLocked: boolean;
   disabled: boolean;
-  onSelectConfigOption?: (configId: string, value: string) => void;
+  onSelectConfigOption?: (configId: string, value: ConfigOptionCurrentValue) => void;
   onSelectIsolation?: (isolation: IsolationKind) => void;
   openMenu?: ComposerMenu;
   selectAndClose: (select: () => void) => void;
@@ -59,7 +59,10 @@ export function ComposerRunOptions({
   if (controls.length === 0) return null;
 
   return (
-    <div className="composer-adaptive-options" ref={packing.containerRef}>
+    <div
+      className={`composer-adaptive-options${pendingChange ? " mutation-pending" : ""}`}
+      ref={packing.containerRef}
+    >
       {visibleControls.map((control) => (
         <DirectRunControl
           configLocked={configLocked}
@@ -89,18 +92,35 @@ export function ComposerRunOptions({
               control.kind === "config" && pendingChange?.option_id === control.option.id)}
           />
           {openMenu === "options" ? (
-            <Popover className="composer-overflow-menu" label="More options">
+            <Popover className="composer-overflow-menu" label="More options" role="group">
               {hiddenControls.map((control) => (
-                <MenuButton
-                  className="composer-overflow-menu-row"
-                  description={controlDescription(control, pendingChange, selection)}
-                  disabled={control.kind === "config" ? configLocked : controlsLocked}
-                  endIcon={<ChevronRight size={12} />}
-                  icon={controlIcon(control, 13)}
-                  key={controlKey(control)}
-                  label={controlLabel(control)}
-                  onClick={() => setOpenMenu(menuForControl(control))}
-                />
+                control.kind === "config" && control.option.kind === "boolean" ? (
+                  <BooleanConfigControl
+                    compact={false}
+                    disabled={configLocked}
+                    key={controlKey(control)}
+                    onToggle={() => onSelectConfigOption?.(
+                      control.option.id,
+                      { type: "boolean", value: !displayedBooleanValue(control.option, pendingChange) },
+                    )}
+                    option={control.option}
+                    pendingValue={pendingBooleanValue(control.option, pendingChange)}
+                  />
+                ) : (
+                  <MenuButton
+                    className="composer-overflow-menu-row"
+                    description={controlDescription(control, pendingChange, selection)}
+                    disabled={control.kind === "config" ? configLocked : controlsLocked}
+                    endIcon={<ChevronRight size={12} />}
+                    icon={controlIcon(control, 13)}
+                    key={controlKey(control)}
+                    label={controlLabel(control)}
+                    onClick={() => {
+                      const menu = menuForControl(control);
+                      if (menu) setOpenMenu(menu);
+                    }}
+                  />
+                )
               ))}
             </Popover>
           ) : hiddenMenuControl ? (
@@ -145,7 +165,7 @@ function DirectRunControl({
   configLocked: boolean;
   control: RunControl;
   controlsLocked: boolean;
-  onSelectConfigOption?: (configId: string, value: string) => void;
+  onSelectConfigOption?: (configId: string, value: ConfigOptionCurrentValue) => void;
   onSelectIsolation?: (isolation: IsolationKind) => void;
   openMenu?: ComposerMenu;
   pendingChange?: NonNullable<ConfigOptionsCatalog["pending_change"]>;
@@ -153,6 +173,33 @@ function DirectRunControl({
   selection: ComposerSelection;
   toggleMenu: (menu: ComposerMenu) => void;
 }) {
+  const infoId = useId();
+  const optionInfo = control.kind === "config" ? {
+    description: control.option.description,
+    label: control.option.label.trim() || controlLabel(control),
+  } : undefined;
+  if (control.kind === "config" && control.option.kind === "boolean") {
+    return (
+      <div className="composer-option-anchor composer-config-control-anchor">
+        <BooleanConfigControl
+          compact
+          describedBy={infoId}
+          disabled={configLocked}
+          onToggle={() => onSelectConfigOption?.(
+            control.option.id,
+            { type: "boolean", value: !displayedBooleanValue(control.option, pendingChange) },
+          )}
+          option={control.option}
+          pendingValue={pendingBooleanValue(control.option, pendingChange)}
+        />
+        <OptionInfoTooltip
+          description={control.option.description}
+          id={infoId}
+          label={control.option.label.trim() || controlLabel(control)}
+        />
+      </div>
+    );
+  }
   const menu = menuForControl(control);
   const locked = control.kind === "config" ? configLocked : controlsLocked;
   const pending = control.kind === "config" && pendingChange?.option_id === control.option.id;
@@ -160,15 +207,24 @@ function DirectRunControl({
     <div className={`composer-option-anchor ${control.kind === "config" ? "composer-config-control-anchor" : "composer-isolation-control-anchor"}`}>
       <Selector
         className={control.kind === "config" ? "composer-config-control" : "composer-isolation-control"}
+        describedBy={optionInfo ? infoId : undefined}
         disabled={locked}
-        icon={controlIcon(control)}
+        icon={control.kind === "config" ? undefined : controlIcon(control)}
         label={controlDirectLabel(control, pending ? pendingChange?.requested_value : undefined, selection)}
         locked={locked}
         menuOpen={openMenu === menu}
-        onClick={() => toggleMenu(menu)}
+        onClick={() => menu && toggleMenu(menu)}
         pending={pending}
       />
-      {openMenu === menu ? (
+      {optionInfo ? (
+        <OptionInfoTooltip
+          description={optionInfo.description}
+          hidden={openMenu === menu}
+          id={infoId}
+          label={optionInfo.label}
+        />
+      ) : null}
+      {menu && openMenu === menu ? (
         <ControlValueMenu
           configLocked={configLocked}
           control={control}
@@ -196,7 +252,7 @@ function GroupedControlMenu({
   configLocked: boolean;
   control: RunControl;
   controlsLocked: boolean;
-  onSelectConfigOption?: (configId: string, value: string) => void;
+  onSelectConfigOption?: (configId: string, value: ConfigOptionCurrentValue) => void;
   onSelectIsolation?: (isolation: IsolationKind) => void;
   selection: ComposerSelection;
   setOpenMenu: Dispatch<SetStateAction<ComposerMenu | undefined>>;
@@ -233,25 +289,28 @@ function ControlValueMenu({
   control: RunControl;
   controlsLocked: boolean;
   onBack?: () => void;
-  onSelectConfigOption: (configId: string, value: string) => void;
+  onSelectConfigOption: (configId: string, value: ConfigOptionCurrentValue) => void;
   onSelectIsolation: (isolation: IsolationKind) => void;
   selection: ComposerSelection;
 }) {
   const label = controlLabel(control);
+  const optionLabel = control.kind === "config" ? control.option.label.trim() || label : label;
+  const optionDescription = control.kind === "config" ? control.option.description : undefined;
   return (
     <Popover className="composer-model-menu" label={label}>
       {onBack ? (
-        <PopoverBackButton ariaLabel="Back to options" icon={<ChevronLeft size={13} />} label={label} onClick={onBack} />
+        <PopoverBackButton ariaLabel="Back to options" description={optionDescription} icon={<ChevronLeft size={13} />} label={optionLabel} onClick={onBack} />
       ) : null}
+      {control.kind === "config" && !onBack ? <PopoverHeader description={optionDescription} label={optionLabel} /> : null}
       {control.kind === "config" ? control.option.values.map((value) => (
         <MenuButton
-          active={control.option.current_value === value.id}
+          active={currentId(control.option) === value.id}
           description={value.description ?? value.group_label ?? control.option.description ?? ""}
           disabled={configLocked}
           icon={configIcon(control.option, 13)}
           key={value.id}
           label={value.label}
-          onClick={() => onSelectConfigOption(control.option.id, value.id)}
+          onClick={() => onSelectConfigOption(control.option.id, { type: "id", value: value.id })}
         />
       )) : isolationOptions.map((isolation) => (
         <MenuButton
@@ -293,16 +352,26 @@ function MeasurementSurface({
         const pending = control.kind === "config" && pendingChange?.option_id === control.option.id;
         const locked = control.kind === "config" ? configLocked : controlsLocked;
         return (
-          <div className="composer-option-anchor" key={controlKey(control)} ref={(node) => setOptionMeasureRef(index, node)}>
-            <Selector
-              disabled={locked}
-              icon={controlIcon(control)}
-              label={controlDirectLabel(control, pending ? pendingChange?.requested_value : undefined, selection)}
-              locked={locked}
-              menuOpen={false}
-              onClick={() => {}}
-              pending={pending}
-            />
+          <div className={`composer-option-anchor ${control.kind === "config" ? "composer-config-control-anchor" : ""}`} key={controlKey(control)} ref={(node) => setOptionMeasureRef(index, node)}>
+            {control.kind === "config" && control.option.kind === "boolean" ? (
+              <BooleanConfigControl
+                compact
+                disabled={locked}
+                onToggle={() => {}}
+                option={control.option}
+                pendingValue={pendingBooleanValue(control.option, pendingChange)}
+              />
+            ) : (
+              <Selector
+                disabled={locked}
+                icon={control.kind === "config" ? undefined : controlIcon(control)}
+                label={controlDirectLabel(control, pending ? pendingChange?.requested_value : undefined, selection)}
+                locked={locked}
+                menuOpen={false}
+                onClick={() => {}}
+                pending={pending}
+              />
+            )}
           </div>
         );
       })}
@@ -325,7 +394,8 @@ function MeasurementSurface({
   );
 }
 
-function menuForControl(control: RunControl): ComposerRunMenu {
+function menuForControl(control: RunControl): ComposerRunMenu | undefined {
+  if (control.kind === "config" && control.option.kind === "boolean") return undefined;
   return control.kind === "config" ? `config:${control.option.id}` : "isolation";
 }
 
@@ -346,11 +416,12 @@ function controlDescription(
   const displayedValue = pendingChange?.option_id === control.option.id
     ? pendingChange.requested_value
     : control.option.current_value;
-  const selected = control.option.values.find((value) => value.id === displayedValue);
-  return `Current: ${normalizedConfigValueLabel(selected?.label) ?? humanizeConfigValue(displayedValue) ?? displayedValue}`;
+  if (displayedValue.type === "boolean") return `Current: ${displayedValue.value ? "On" : "Off"}`;
+  const selected = control.option.values.find((value) => value.id === displayedValue.value);
+  return `Current: ${normalizedConfigValueLabel(selected?.label) ?? humanizeConfigValue(displayedValue.value) ?? displayedValue.value}`;
 }
 
-function controlDirectLabel(control: RunControl, displayedValue: string | undefined, selection: ComposerSelection) {
+function controlDirectLabel(control: RunControl, displayedValue: ConfigOptionCurrentValue | undefined, selection: ComposerSelection) {
   return control.kind === "config"
     ? configOptionLabel(control.option, displayedValue)
     : isolationLabel(selection.isolation);
@@ -379,10 +450,98 @@ function isolationLabel(isolation: IsolationKind) {
 }
 
 function configOptionLabel(option: ConfigOption, displayedValue = option.current_value) {
-  const selected = option.values.find((value) => value.id === displayedValue);
-  const valueLabel = normalizedConfigValueLabel(selected?.label) ?? humanizeConfigValue(displayedValue) ?? option.label;
-  const prefix = configOptionPrefix(option);
-  return prefix ? `${prefix}: ${valueLabel}` : valueLabel;
+  if (displayedValue.type === "boolean") return option.label;
+  const selected = option.values.find((value) => value.id === displayedValue.value);
+  return normalizedConfigValueLabel(selected?.label) ?? humanizeConfigValue(displayedValue.value) ?? option.label;
+}
+
+function currentId(option: ConfigOption) {
+  return option.current_value.type === "id" ? option.current_value.value : undefined;
+}
+
+function pendingBooleanValue(
+  option: ConfigOption,
+  pendingChange: ConfigOptionsCatalog["pending_change"],
+) {
+  if (pendingChange?.option_id !== option.id || pendingChange.requested_value.type !== "boolean") {
+    return undefined;
+  }
+  return pendingChange.requested_value.value;
+}
+
+function displayedBooleanValue(
+  option: ConfigOption,
+  pendingChange: ConfigOptionsCatalog["pending_change"],
+) {
+  return pendingBooleanValue(option, pendingChange)
+    ?? (option.current_value.type === "boolean" ? option.current_value.value : false);
+}
+
+function BooleanConfigControl({
+  compact,
+  describedBy,
+  disabled,
+  onToggle,
+  option,
+  pendingValue,
+}: {
+  compact: boolean;
+  describedBy?: string;
+  disabled: boolean;
+  onToggle: () => void;
+  option: ConfigOption;
+  pendingValue?: boolean;
+}) {
+  const displayedValue = pendingValue
+    ?? (option.current_value.type === "boolean" ? option.current_value.value : false);
+  const pending = pendingValue !== undefined;
+  return (
+    <button
+      aria-busy={pending || undefined}
+      aria-checked={displayedValue}
+      aria-describedby={describedBy}
+      aria-label={`${option.label}: ${displayedValue ? "On" : "Off"}${pending ? ", updating Agent option" : ""}`}
+      className={`${compact ? "composer-boolean-control" : "composer-overflow-boolean-control"}${pending ? " pending" : ""}`}
+      disabled={disabled}
+      onClick={onToggle}
+      role="switch"
+      type="button"
+    >
+      {compact ? (
+        <span className="composer-boolean-control-content">
+          <span className="composer-boolean-label">{option.label}</span>
+          <span aria-hidden="true" className={`composer-boolean-indicator${displayedValue ? " checked" : ""}`} />
+        </span>
+      ) : (
+        <>
+          <span className="composer-boolean-copy">
+            <strong>{option.label}</strong>
+            {option.description ? <small>{option.description}</small> : null}
+          </span>
+          <span aria-hidden="true" className={`composer-boolean-indicator${displayedValue ? " checked" : ""}`} />
+        </>
+      )}
+    </button>
+  );
+}
+
+function OptionInfoTooltip({
+  description,
+  hidden = false,
+  id,
+  label,
+}: {
+  description?: string;
+  hidden?: boolean;
+  id: string;
+  label: string;
+}) {
+  return (
+    <div aria-hidden={hidden || undefined} className={`composer-option-info${hidden ? " hidden" : ""}`} id={id} role="tooltip">
+      <strong>{label}</strong>
+      {description ? <small>{description}</small> : null}
+    </div>
+  );
 }
 
 function runOptionLabel(option: ConfigOption) {
@@ -395,13 +554,6 @@ function normalizedConfigValueLabel(label: string | undefined) {
   if (!label?.trim()) return undefined;
   const trimmed = label.trim();
   return trimmed === trimmed.toLowerCase() ? humanizeConfigValue(trimmed) ?? trimmed : trimmed;
-}
-
-function configOptionPrefix(option: ConfigOption) {
-  if (option.category === "model") return undefined;
-  const label = option.label.trim();
-  if (!label || option.category === "mode" || option.category === "thought_level") return undefined;
-  return label.replace(/\s+mode$/i, "");
 }
 
 function humanizeConfigValue(value: string | undefined) {

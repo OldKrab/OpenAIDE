@@ -1,6 +1,6 @@
 import { act, create, type ReactTestInstance } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { AgentCommandsCatalog, ComposerSubmitShortcut, ConfigOptionsCatalog } from "@openaide/app-shell-contracts";
+import type { AgentCommandsCatalog, ComposerSubmitShortcut, ConfigOptionCurrentValue, ConfigOptionsCatalog } from "@openaide/app-shell-contracts";
 import type { FileBrowserEntryId, FileBrowserRootId } from "@openaide/app-server-client";
 import type { AgentOption, ComposerAttachment, ComposerSelection } from "../state/composerOptions";
 import { Composer } from "./Composer";
@@ -346,9 +346,17 @@ describe("Composer view behavior", () => {
     });
 
     click(configControlButtonsByText(renderer.root, "Balanced")[0]);
-    expect(text(menuByLabel(renderer.root, "Reasoning"))).toContain("Higher accuracy.");
+    const reasoningMenu = menuByLabel(renderer.root, "Reasoning");
+    expect(text(reasoningMenu)).toContain("Reasoning");
+    expect(text(reasoningMenu)).toContain("Reasoning effort.");
+    expect(text(reasoningMenu)).toContain("Higher accuracy.");
     click(menuButtonByStrongLabel(renderer.root, "High"));
-    expect(onSelectConfigOption).toHaveBeenCalledWith("reasoning", "high");
+    expect(onSelectConfigOption).toHaveBeenCalledWith("reasoning", { type: "id", value: "high" });
+    const pendingControl = renderer.root.findByProps({
+      "aria-label": "High, updating Agent option",
+    });
+    expect(text(pendingControl)).toBe("High");
+    expect(pendingControl.props["aria-busy"]).toBe(true);
 
     click(buttonByText(renderer.root, "Worktree"));
     const worktreeButton = menuButtonByStrongLabel(renderer.root, "Worktree");
@@ -370,7 +378,7 @@ describe("Composer view behavior", () => {
         options: [
           {
             category: "model",
-            current_value: "gpt-5.6",
+            kind: "select", current_value: { type: "id", value: "gpt-5.6" },
             id: "model",
             label: "Model",
             values: [{ id: "gpt-5.6", label: "GPT-5.6" }],
@@ -390,7 +398,7 @@ describe("Composer view behavior", () => {
     expect(text(menuByLabel(renderer.root, "Reasoning"))).toContain("Higher accuracy.");
     click(menuButtonByStrongLabel(renderer.root, "High"));
 
-    expect(onSelectConfigOption).toHaveBeenCalledWith("reasoning", "high");
+    expect(onSelectConfigOption).toHaveBeenCalledWith("reasoning", { type: "id", value: "high" });
     expect(text(menuByLabel(renderer.root, "More options"))).toContain("Reasoning");
   });
 
@@ -438,10 +446,10 @@ describe("Composer view behavior", () => {
         pending_change: {
           mutation_id: "mutation-1",
           option_id: "fast-mode",
-          requested_value: "on",
+          requested_value: { type: "id", value: "on" },
         },
         options: [{
-          current_value: "off",
+          kind: "select", current_value: { type: "id", value: "off" },
           id: "fast-mode",
           label: "Fast mode",
           values: [
@@ -454,8 +462,8 @@ describe("Composer view behavior", () => {
       showIsolationSelector: false,
     });
 
-    expect(text(renderer.root)).toContain("Fast: On");
-    expect(text(renderer.root)).not.toContain("Fast: Off");
+    const pendingControl = renderer.root.findByProps({ "aria-label": "On, updating Agent option" });
+    expect(text(pendingControl)).toBe("On");
     expect(renderer.root.findAllByProps({ "aria-busy": true })).toHaveLength(1);
     expect(text(renderer.root)).not.toContain("Agent is still updating options");
 
@@ -467,6 +475,166 @@ describe("Composer view behavior", () => {
     vi.useRealTimers();
   });
 
+  it("renders a boolean option as a text-first switch and sends its inverse typed value", () => {
+    const onSelectConfigOption = vi.fn();
+    const renderer = renderComposer({
+      configOptions: booleanConfigOptions(),
+      onSelectConfigOption,
+      showIsolationSelector: false,
+    });
+
+    const control = buttonByLabel(renderer.root, "Brave mode: Off");
+    expect(control.props.role).toBe("switch");
+    expect(control.props["aria-checked"]).toBe(false);
+    expect(control.props.title).toBeUndefined();
+    expect(text(control)).toBe("Brave mode");
+    expect(control.findAllByType("svg")).toHaveLength(0);
+
+    click(control);
+
+    expect(onSelectConfigOption).toHaveBeenCalledWith(
+      "brave_mode",
+      { type: "boolean", value: true },
+    );
+  });
+
+  it("describes direct Configuration Options with rich hover and focus cards", () => {
+    const renderer = renderComposer({
+      configOptions: {
+        ...configOptions(),
+        options: [...configOptions().options, ...booleanConfigOptions().options],
+      },
+      showIsolationSelector: false,
+    });
+
+    const selectControl = configControlButtonsByText(renderer.root, "Balanced")[0];
+    const selectAnchor = ancestorWithClass(selectControl, "composer-option-anchor");
+    const selectTooltip = selectAnchor?.findByProps({ role: "tooltip" });
+    expect(text(selectTooltip as ReactTestInstance)).toBe("ReasoningReasoning effort.");
+    expect(selectControl.props["aria-describedby"]).toBe(selectTooltip?.props.id);
+
+    const booleanControl = buttonByLabel(renderer.root, "Brave mode: Off");
+    const booleanAnchor = ancestorWithClass(booleanControl, "composer-option-anchor");
+    const booleanTooltip = booleanAnchor?.findByProps({ role: "tooltip" });
+    expect(text(booleanTooltip as ReactTestInstance)).toBe("Brave modeSkip confirmation prompts.");
+    expect(booleanControl.props["aria-describedby"]).toBe(booleanTooltip?.props.id);
+  });
+
+  it("settles immediate pending presentation from the authoritative Agent catalog", () => {
+    const catalog = configOptions();
+    const renderer = renderComposer({ configOptions: catalog });
+
+    click(configControlButtonsByText(renderer.root, "Balanced")[0]);
+    click(menuButtonByStrongLabel(renderer.root, "High"));
+    expect(renderer.root.findAllByProps({ "aria-label": "High, updating Agent option" })).toHaveLength(1);
+
+    act(() => {
+      renderer.update(composerElement({
+        configOptions: {
+          ...catalog,
+          options: catalog.options.map((option) => ({
+            ...option,
+            current_value: { type: "id" as const, value: "high" },
+          })),
+        },
+      }));
+    });
+
+    expect(configControlButtonsByText(renderer.root, "High")).toHaveLength(1);
+    expect(renderer.root.findAllByProps({ "aria-busy": true })).toHaveLength(0);
+  });
+
+  it("clears immediate pending presentation when the mutation fails", () => {
+    const catalog = configOptions();
+    const renderer = renderComposer({ configOptions: catalog });
+
+    click(configControlButtonsByText(renderer.root, "Balanced")[0]);
+    click(menuButtonByStrongLabel(renderer.root, "High"));
+
+    act(() => {
+      renderer.update(composerElement({ configOptions: catalog, error: "Unable to update Agent option." }));
+    });
+
+    expect(configControlButtonsByText(renderer.root, "Balanced")).toHaveLength(1);
+    expect(renderer.root.findAllByProps({ "aria-busy": true })).toHaveLength(0);
+  });
+
+  it("shows a pending boolean's requested state without changing its content width", () => {
+    const catalog = booleanConfigOptions();
+    const renderer = renderComposer({
+      configLocked: true,
+      configOptions: {
+        ...catalog,
+        pending_change: {
+          mutation_id: "mutation-1",
+          option_id: "brave_mode",
+          requested_value: { type: "boolean", value: true },
+        },
+      },
+      showIsolationSelector: false,
+    });
+
+    const control = buttonByLabel(renderer.root, "Brave mode: On, updating Agent option");
+    expect(control.props["aria-checked"]).toBe(true);
+    expect(control.props["aria-busy"]).toBe(true);
+    expect(control.props.className).toContain("pending");
+    expect(text(control)).toBe("Brave mode");
+    expect(control.findAllByType("svg")).toHaveLength(0);
+  });
+
+  it("toggles a grouped boolean without closing the ordered overflow", () => {
+    vi.stubGlobal("ResizeObserver", class {
+      disconnect() {}
+      observe() {}
+      unobserve() {}
+    });
+    const onSelectConfigOption = vi.fn();
+    const renderer = renderComposer({
+      configOptions: booleanConfigOptions(),
+      onSelectConfigOption,
+      showIsolationSelector: false,
+    });
+
+    click(buttonByText(renderer.root, "More · 1"));
+    const overflow = menuByLabel(renderer.root, "More options");
+    const control = buttonByLabel(overflow, "Brave mode: Off");
+    click(control);
+
+    expect(onSelectConfigOption).toHaveBeenCalledWith(
+      "brave_mode",
+      { type: "boolean", value: true },
+    );
+    expect(menuByLabel(renderer.root, "More options")).toBeTruthy();
+  });
+
+  it("marks More as pending when the changing boolean is grouped", () => {
+    vi.stubGlobal("ResizeObserver", class {
+      disconnect() {}
+      observe() {}
+      unobserve() {}
+    });
+    const catalog = booleanConfigOptions();
+    const renderer = renderComposer({
+      configLocked: true,
+      configOptions: {
+        ...catalog,
+        pending_change: {
+          mutation_id: "mutation-1",
+          option_id: "brave_mode",
+          requested_value: { type: "boolean", value: true },
+        },
+      },
+      showIsolationSelector: false,
+    });
+
+    const more = renderer.root.findByProps({
+      "aria-label": "More · 1, updating Agent option",
+    });
+    expect(more.props["aria-busy"]).toBe(true);
+    expect(more.props.className).toContain("pending");
+    expect(text(more)).toBe("More · 1");
+  });
+
   it("labels mode config controls with the compact selected value", () => {
     const renderer = renderComposer({
       configOptions: {
@@ -474,7 +642,7 @@ describe("Composer view behavior", () => {
         options: [
           {
             category: "mode",
-            current_value: "agent",
+            kind: "select", current_value: { type: "id", value: "agent" },
             id: "mode",
             label: "Mode",
             values: [
@@ -498,7 +666,7 @@ describe("Composer view behavior", () => {
         options: [
           {
             category: "mode",
-            current_value: "agent",
+            kind: "select", current_value: { type: "id", value: "agent" },
             id: "mode",
             label: "mode",
             values: [{ id: "read_only", label: "Read-only" }],
@@ -519,7 +687,7 @@ describe("Composer view behavior", () => {
         options: [
           {
             category: "model",
-            current_value: "gpt-5.5",
+            kind: "select", current_value: { type: "id", value: "gpt-5.5" },
             id: "model",
             label: "model",
             values: [],
@@ -533,20 +701,20 @@ describe("Composer view behavior", () => {
     expect(configControlButtonsByText(renderer.root, "Gpt 5.5")).toHaveLength(0);
   });
 
-  it("uses short setting prefixes for ambiguous config values", () => {
+  it("shows current values without Configuration Option title prefixes", () => {
     const renderer = renderComposer({
       configOptions: {
         agent_id: "codex",
         options: [
           {
             category: "mode",
-            current_value: "agent",
+            kind: "select", current_value: { type: "id", value: "agent" },
             id: "mode",
             label: "Mode",
             values: [{ id: "agent", label: "Agent" }],
           },
           {
-            current_value: "off",
+            kind: "select", current_value: { type: "id", value: "off" },
             id: "fast",
             label: "Fast mode",
             values: [{ id: "off", label: "Off" }],
@@ -557,7 +725,8 @@ describe("Composer view behavior", () => {
     });
 
     expect(configControlButtonsByText(renderer.root, "Agent")).toHaveLength(1);
-    expect(configControlButtonsByText(renderer.root, "Fast: Off")).toHaveLength(1);
+    expect(configControlButtonsByText(renderer.root, "Off")).toHaveLength(1);
+    expect(configControlButtonsByText(renderer.root, "Fast: Off")).toHaveLength(0);
   });
 
   it("positions a configuration menu from the control that opened it", () => {
@@ -566,7 +735,7 @@ describe("Composer view behavior", () => {
         agent_id: "codex",
         options: [
           {
-            current_value: "off",
+            kind: "select", current_value: { type: "id", value: "off" },
             id: "fast",
             label: "Fast mode",
             values: [{ id: "off", label: "Off" }],
@@ -576,11 +745,11 @@ describe("Composer view behavior", () => {
       },
     });
 
-    click(configControlButtonsByText(renderer.root, "Fast: Off")[0]);
+    click(configControlButtonsByText(renderer.root, "Off")[0]);
 
     const menuAnchor = ancestorWithClass(menuByLabel(renderer.root, "Fast mode"), "composer-option-anchor");
     expect(menuAnchor?.props.className).toContain("composer-option-anchor");
-    expect(text(menuAnchor as ReactTestInstance)).toContain("Fast: Off");
+    expect(text(menuAnchor as ReactTestInstance)).toContain("Off");
   });
 
   it("normalizes lowercase config value labels in compact controls", () => {
@@ -590,7 +759,7 @@ describe("Composer view behavior", () => {
         options: [
           {
             category: "thought_level",
-            current_value: "medium",
+            kind: "select", current_value: { type: "id", value: "medium" },
             id: "reasoning",
             label: "Reasoning",
             values: [{ id: "medium", label: "medium" }],
@@ -604,21 +773,21 @@ describe("Composer view behavior", () => {
     expect(configControlButtonsByText(renderer.root, "medium")).toHaveLength(0);
   });
 
-  it("uses semantic compact icons for reasoning and other configuration options", () => {
+  it("keeps direct configuration controls text-first", () => {
     const renderer = renderComposer({
       configOptions: {
         agent_id: "codex",
         options: [
           {
             category: "thought_level",
-            current_value: "medium",
+            kind: "select", current_value: { type: "id", value: "medium" },
             id: "reasoning_effort",
             label: "Reasoning effort",
             values: [{ id: "medium", label: "Medium" }],
           },
           {
             category: "other",
-            current_value: "on",
+            kind: "select", current_value: { type: "id", value: "on" },
             id: "fast-mode",
             label: "Fast mode",
             values: [{ id: "on", label: "On" }],
@@ -629,10 +798,12 @@ describe("Composer view behavior", () => {
     });
 
     const reasoningIcons = configControlButtonsByText(renderer.root, "Medium")[0].findAllByType("svg");
-    const otherIcons = configControlButtonsByText(renderer.root, "Fast: On")[0].findAllByType("svg");
+    const otherIcons = configControlButtonsByText(renderer.root, "On")[0].findAllByType("svg");
 
-    expect(reasoningIcons.filter((icon) => String(icon.props.className).includes("lucide-brain"))).toHaveLength(1);
-    expect(otherIcons.filter((icon) => String(icon.props.className).includes("lucide-sliders-horizontal"))).toHaveLength(1);
+    expect(reasoningIcons.filter((icon) => String(icon.props.className).includes("lucide-brain"))).toHaveLength(0);
+    expect(otherIcons.filter((icon) => String(icon.props.className).includes("lucide-sliders-horizontal"))).toHaveLength(0);
+    expect(reasoningIcons.filter((icon) => String(icon.props.className).includes("lucide-chevron-down"))).toHaveLength(1);
+    expect(otherIcons.filter((icon) => String(icon.props.className).includes("lucide-chevron-down"))).toHaveLength(1);
   });
 
   it("can hide Agent and Isolation controls while keeping config option controls", () => {
@@ -650,7 +821,7 @@ describe("Composer view behavior", () => {
     click(configControlButtonsByText(renderer.root, "Balanced")[0]);
     expect(text(menuByLabel(renderer.root, "Reasoning"))).toContain("Higher accuracy.");
     click(menuButtonByStrongLabel(renderer.root, "High"));
-    expect(onSelectConfigOption).toHaveBeenCalledWith("reasoning", "high");
+    expect(onSelectConfigOption).toHaveBeenCalledWith("reasoning", { type: "id", value: "high" });
   });
 
   it("closes an open configuration menu when configuration becomes locked", () => {
@@ -1275,7 +1446,7 @@ type ComposerTestProps = {
   onRevealAttachment: (attachmentId: string) => Promise<void> | void;
   onRemoveAttachment: (attachmentId: string) => void;
   onSelectAgent: (agentId: string) => void;
-  onSelectConfigOption: (configId: string, value: string) => void;
+  onSelectConfigOption: (configId: string, value: ConfigOptionCurrentValue) => void;
   onSelectIsolation: (isolation: ComposerSelection["isolation"]) => void;
   onSubmit: (prompt: string) => void;
   placeholder: string;
@@ -1411,11 +1582,17 @@ function buttonsByLabel(root: ReactTestInstance, ariaLabel: string) {
 }
 
 function menuByLabel(root: ReactTestInstance, ariaLabel: string) {
-  return root.findByProps({ role: "menu", "aria-label": ariaLabel });
+  return root.findAll((candidate) =>
+    (candidate.props.role === "menu" || candidate.props.role === "group")
+      && candidate.props["aria-label"] === ariaLabel,
+  )[0] ?? missing(ariaLabel);
 }
 
 function menusByLabel(root: ReactTestInstance, ariaLabel: string) {
-  return root.findAllByProps({ role: "menu", "aria-label": ariaLabel });
+  return root.findAll((candidate) =>
+    (candidate.props.role === "menu" || candidate.props.role === "group")
+      && candidate.props["aria-label"] === ariaLabel,
+  );
 }
 
 function buttonByText(root: ReactTestInstance, label: string) {
@@ -1467,7 +1644,6 @@ function selection(overrides: Partial<ComposerSelection> = {}): ComposerSelectio
   return {
     agentId: "codex",
     agentLabel: "Codex",
-    configOptions: {},
     isolation: "local",
     workspaceLabel: "Workspace",
     workspaceRoot: "/workspace",
@@ -1492,7 +1668,7 @@ function configOptions(): ConfigOptionsCatalog {
     options: [
       {
         category: "thought_level",
-        current_value: "balanced",
+        kind: "select", current_value: { type: "id", value: "balanced" },
         description: "Reasoning effort.",
         id: "reasoning",
         label: "Reasoning",
@@ -1502,6 +1678,21 @@ function configOptions(): ConfigOptionsCatalog {
         ],
       },
     ],
+    status: "ready",
+  };
+}
+
+function booleanConfigOptions(): ConfigOptionsCatalog {
+  return {
+    agent_id: "codex",
+    options: [{
+      current_value: { type: "boolean", value: false },
+      description: "Skip confirmation prompts.",
+      id: "brave_mode",
+      kind: "boolean",
+      label: "Brave mode",
+      values: [],
+    }],
     status: "ready",
   };
 }

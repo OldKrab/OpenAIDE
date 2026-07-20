@@ -3,7 +3,7 @@ use std::sync::mpsc;
 use crate::agent::acp_schema::InitializeResponse;
 use agent_client_protocol::{Agent, ConnectionTo};
 
-use crate::agent::acp_config_options_apply::apply_config_options;
+use crate::agent::acp_config_projection::normalize_config_options;
 use crate::agent::acp_host::initialize_request;
 use crate::agent::acp_session_lifecycle::LoadReplayCaptures;
 use crate::agent::acp_session_paths::normalized_session_cwd;
@@ -100,7 +100,7 @@ pub(super) async fn open_acp_session<'a>(
                     return Err(acp_start_error(error));
                 }
             };
-            let (mut active_session, initial_options) = match start_result {
+            let (active_session, initial_options) = match start_result {
                 Ok(session) => session,
                 Err(error) => {
                     let _ = context
@@ -109,24 +109,9 @@ pub(super) async fn open_acp_session<'a>(
                     return Err(error);
                 }
             };
-            let applied_options = match apply_config_options(
-                context.request_agent_id,
-                context.connection,
-                &mut active_session,
-                initial_options,
-                request.config_options.as_ref(),
-                request.config_option_policy,
-            )
-            .await
-            {
-                Ok(catalog) => catalog,
-                Err(error) => {
-                    runner.close(active_session.session_id().clone()).await;
-                    let _ = context.start_error_tx.send(Err(error.clone()));
-                    return Err(acp_start_error(error));
-                }
-            };
-            (active_session, Some(applied_options), None, Vec::new())
+            let initial_catalog =
+                normalize_config_options(context.request_agent_id, initial_options);
+            (active_session, Some(initial_catalog), None, Vec::new())
         }
         AcpSessionOpenRequest::Load(request) => {
             let session_cwd = normalized_session_cwd(&request.cwd);

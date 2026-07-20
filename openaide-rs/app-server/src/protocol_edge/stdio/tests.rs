@@ -2004,7 +2004,7 @@ fn task_cancel_clears_active_turn_after_initialize() {
 }
 
 #[test]
-fn task_set_config_option_persists_idle_task_option_after_initialize() {
+fn task_set_config_option_rejects_a_task_without_a_live_catalog() {
     let temp = tempfile::TempDir::new().expect("temp dir");
     {
         let store = Store::open(temp.path().to_path_buf()).unwrap();
@@ -2022,7 +2022,7 @@ fn task_set_config_option_persists_idle_task_option_after_initialize() {
             "params": {
                 "taskId": "task-existing",
                 "configId": "model",
-                "value": "gpt-5.5",
+                "value": { "type": "id", "value": "gpt-5.5" },
                 "clientMutationId": "mutation-1"
             }
         })
@@ -2030,25 +2030,14 @@ fn task_set_config_option_persists_idle_task_option_after_initialize() {
     );
 
     let response = response(&responses[0]);
-    assert_eq!(
-        response["result"]["result"]["task"]["agentConfig"]["state"],
-        "unavailable"
-    );
-    assert!(
-        response["result"]["result"]["task"]["agentConfig"]["options"]
-            .as_array()
-            .is_none_or(Vec::is_empty)
-    );
+    assert!(response.get("error").is_some());
     drop(dispatcher);
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    assert_eq!(
-        store
-            .read_task("task-existing")
-            .unwrap()
-            .config_options
-            .get("model"),
-        Some(&"gpt-5.5".to_string())
-    );
+    assert!(store
+        .read_task("task-existing")
+        .unwrap()
+        .config_options_catalog
+        .is_none());
 }
 
 #[test]
@@ -2428,7 +2417,6 @@ fn task_record(task_id: &str) -> TaskRecord {
         archived: false,
         tombstoned: false,
         revision: 1,
-        config_options: Default::default(),
         config_options_catalog: None,
         config_mutation: Default::default(),
         agent_commands_catalog: None,

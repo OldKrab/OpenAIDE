@@ -48,12 +48,10 @@ export function preparedTaskMatchesNewTaskContext(
 
 export function taskCreateParams(state: Pick<AppState, "newTask">, projectId: string) {
   const workspaceRoot = taskCreateWorkspaceRoot(state);
-  const configOptions = state.newTask.selection.configOptions;
   return {
     projectId: projectId as ProjectId,
     agentId: state.newTask.selection.agentId as AgentId,
     ...(workspaceRoot ? { workspaceRoot } : {}),
-    ...(Object.keys(configOptions).length > 0 ? { configOptions } : {}),
   };
 }
 
@@ -69,7 +67,6 @@ export function taskAcquireInWorktreeParams(state: Pick<AppState, "newTask">, pr
     projectId: params.projectId,
     agentId: params.agentId,
     worktreeId: worktreeId as WorktreeId,
-    ...(params.configOptions ? { configOptions: params.configOptions } : {}),
   };
 }
 

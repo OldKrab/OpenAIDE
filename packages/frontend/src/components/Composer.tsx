@@ -1,6 +1,6 @@
 import { ArrowUp, CircleStop, LoaderCircle } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import type { AgentCommandsCatalog, AgentSlashCommand, ComposerSubmitShortcut, ConfigOptionsCatalog, IsolationKind } from "@openaide/app-shell-contracts";
+import type { AgentCommandsCatalog, AgentSlashCommand, ComposerSubmitShortcut, ConfigOptionCurrentValue, ConfigOptionsCatalog, IsolationKind } from "@openaide/app-shell-contracts";
 import { agentOptions, type AgentOption, type ComposerAttachment, type ComposerSelection } from "../state/composerOptions";
 import { ComposerAttachments } from "./ComposerAttachments";
 import { ComposerControls, type ComposerMenu } from "./ComposerMenus";
@@ -54,7 +54,7 @@ type ComposerProps = {
   onRevealAttachment?: (attachmentId: string) => Promise<void> | void;
   onRemoveAttachment: (attachmentId: string) => void;
   onSelectAgent?: (agentId: string) => void;
-  onSelectConfigOption?: (configId: string, value: string) => void;
+  onSelectConfigOption?: (configId: string, value: ConfigOptionCurrentValue) => void;
   onSelectIsolation?: (isolation: IsolationKind) => void;
   onSubmit: (prompt: string) => void;
   prompt: string;
@@ -103,11 +103,17 @@ export function Composer({
   const { keyboardFocus, onKeyboardNavigation, onPointerInteraction } = useComposerKeyboardFocus();
   const composerRef = useRef<HTMLElement | null>(null);
   const editorRef = useRef<ComposerEditorHandle | null>(null);
+  const configMutationSequenceRef = useRef(0);
   const draftRef = useRef(prompt);
   const lastPromptRef = useRef(prompt);
   const submittedDraftRef = useRef<string | undefined>(undefined);
   const commandCatalogRevision = commandCatalogKey(commandCatalog);
-  const configMutationId = configOptions?.pending_change?.mutation_id;
+  const [optimisticConfigChange, setOptimisticConfigChange] = useState<NonNullable<ConfigOptionsCatalog["pending_change"]>>();
+  const presentedConfigChange = configOptions?.pending_change ?? optimisticConfigChange;
+  const presentedConfigOptions = configOptions && presentedConfigChange
+    ? { ...configOptions, pending_change: presentedConfigChange }
+    : configOptions;
+  const configMutationId = presentedConfigChange?.mutation_id;
   const [showSlowConfigUpdate, setShowSlowConfigUpdate] = useState(false);
   const [filePicker, setFilePicker] = useFileMentionPicker(fileBrowser, fileMentionToken);
   const lastCommandCatalogKey = useRef(commandCatalogRevision);
@@ -125,6 +131,21 @@ export function Composer({
   }, [configMutationId]);
 
   useEffect(() => {
+    setOptimisticConfigChange((current) => {
+      if (!current) return current;
+      // Once App Server projects the mutation, its snapshot owns presentation.
+      if (configOptions?.pending_change) return undefined;
+      const option = configOptions?.options.find((candidate) => candidate.id === current.option_id);
+      if (!option || configValueEquals(option.current_value, current.requested_value)) return undefined;
+      return current;
+    });
+  }, [configOptions]);
+
+  useEffect(() => {
+    if (error) setOptimisticConfigChange(undefined);
+  }, [error]);
+
+  useEffect(() => {
     if (!openMenu || typeof document === "undefined") return undefined;
     const onPointerDown = (event: PointerEvent) => {
       if (composerRef.current?.contains(event.target as Node)) return;
@@ -133,6 +154,18 @@ export function Composer({
     document.addEventListener("pointerdown", onPointerDown);
     return () => document.removeEventListener("pointerdown", onPointerDown);
   }, [openMenu]);
+
+  const selectConfigOption = (configId: string, value: ConfigOptionCurrentValue) => {
+    if (!onSelectConfigOption) return;
+    configMutationSequenceRef.current += 1;
+    // Frontend owns this immediate feedback only until an authoritative snapshot arrives.
+    setOptimisticConfigChange({
+      mutation_id: `local:${configId}:${configMutationSequenceRef.current}`,
+      option_id: configId,
+      requested_value: value,
+    });
+    onSelectConfigOption(configId, value);
+  };
 
   useEffect(() => {
     if (!openMenu || typeof window === "undefined") return undefined;
@@ -444,14 +477,14 @@ export function Composer({
         <ComposerControls
           agentLocked={agentLocked}
           agents={agents}
-          configLocked={configLocked}
-          configOptions={configOptions}
+          configLocked={configLocked || optimisticConfigChange !== undefined}
+          configOptions={presentedConfigOptions}
           disabled={disabled}
           fileBrowser={fileBrowser}
           imageAttachmentsAllowed={imageAttachmentsAllowed}
           onUnsupportedImageAttachment={onUnsupportedImageAttachment}
           onSelectAgent={onSelectAgent}
-          onSelectConfigOption={onSelectConfigOption}
+          onSelectConfigOption={selectConfigOption}
           onSelectIsolation={onSelectIsolation}
           openMenu={openMenu}
           setOpenMenu={setOpenMenu}
@@ -483,4 +516,8 @@ export function Composer({
       </div>
     </section>
   );
+}
+
+function configValueEquals(left: ConfigOptionCurrentValue, right: ConfigOptionCurrentValue) {
+  return left.type === right.type && left.value === right.value;
 }

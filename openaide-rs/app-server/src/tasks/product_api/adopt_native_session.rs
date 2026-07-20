@@ -147,7 +147,6 @@ impl TaskProductApi {
             archived: false,
             tombstoned: false,
             revision: 0,
-            config_options: loaded.session.config_options.clone(),
             config_options_catalog: loaded.session.config_catalog.clone(),
             config_mutation: Default::default(),
             agent_commands_catalog: loaded.session.commands_catalog.clone(),

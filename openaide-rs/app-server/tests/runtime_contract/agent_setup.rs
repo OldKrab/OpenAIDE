@@ -68,7 +68,6 @@ fn blank_task_start_does_not_probe_agent_options() {
             prompt_text: Some("   ".to_string()),
             external_session_id: None,
             model_id: None,
-            config_options: None,
             context: Vec::new(),
         })
         .unwrap_err();
@@ -95,7 +94,6 @@ fn active_config_option_updates_mutate_task_settings_summary() {
             prompt_text: Some("switch model".to_string()),
             external_session_id: None,
             model_id: None,
-            config_options: None,
             context: Vec::new(),
         })
         .unwrap();
@@ -108,14 +106,12 @@ fn active_config_option_updates_mutate_task_settings_summary() {
                 tail_limit: 10,
             })
             .map(|snapshot| {
-                snapshot.settings_summary.config_options.get("model")
-                    == Some(&"gpt-5.5".to_string())
-                    && snapshot.settings_summary.model_id.as_deref() == Some("gpt-5.5")
+                snapshot.settings_summary.model_id.as_deref() == Some("gpt-5.5")
                     && snapshot
                         .config_options_catalog
                         .as_ref()
                         .and_then(|catalog| catalog.options.first())
-                        .is_some_and(|option| option.current_value == "gpt-5.5")
+                        .is_some_and(|option| option.current_value.as_id() == Some("gpt-5.5"))
             })
             .unwrap_or(false)
     });
@@ -141,7 +137,6 @@ fn idle_config_option_updates_mutate_task_settings_and_replace_model() {
             prompt_text: Some("finish quickly".to_string()),
             external_session_id: None,
             model_id: None,
-            config_options: None,
             context: Vec::new(),
         })
         .unwrap();
@@ -164,10 +159,11 @@ fn idle_config_option_updates_mutate_task_settings_and_replace_model() {
             tail_limit: 10,
         })
         .unwrap();
-    assert_eq!(
-        snapshot.settings_summary.config_options.get("mode"),
-        Some(&"plan".to_string())
-    );
+    assert!(snapshot
+        .config_options_catalog
+        .as_ref()
+        .and_then(|catalog| catalog.options.first())
+        .is_some_and(|option| option.current_value.as_id() == Some("plan")));
     assert_eq!(snapshot.settings_summary.model_id, None);
 }
 
@@ -190,7 +186,6 @@ fn idle_agent_title_updates_persist_and_clear_the_agent_owned_title() {
             prompt_text: Some("finish quickly".to_string()),
             external_session_id: None,
             model_id: None,
-            config_options: None,
             context: Vec::new(),
         })
         .unwrap();

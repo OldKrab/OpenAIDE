@@ -9,7 +9,7 @@ use crate::agent::{
     AgentSessionLoad, TurnCancellation,
 };
 use crate::protocol::errors::RuntimeError;
-use crate::protocol::model::ConfigOptionsCatalog;
+use crate::protocol::model::{ConfigOptionCurrentValue, ConfigOptionsCatalog};
 
 #[derive(Clone)]
 pub(super) struct AcpSessionClient {
@@ -150,7 +150,7 @@ impl AcpSessionClient {
         &self,
         agent_id: String,
         config_id: String,
-        value: String,
+        value: ConfigOptionCurrentValue,
     ) -> Result<ConfigOptionsCatalog, RuntimeError> {
         let (reply_tx, reply_rx) = mpsc::channel();
         self.config_tx
@@ -299,7 +299,7 @@ pub(super) enum AcpSessionConfigCommand {
     SetConfigOption {
         agent_id: String,
         config_id: String,
-        value: String,
+        value: ConfigOptionCurrentValue,
         reply_tx: mpsc::Sender<Result<ConfigOptionsCatalog, RuntimeError>>,
     },
 }

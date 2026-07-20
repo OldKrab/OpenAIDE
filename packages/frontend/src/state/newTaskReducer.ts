@@ -8,7 +8,6 @@ import {
   invalidateAppServerAttachments,
   localAttachment,
   selectionWithAgent,
-  selectionWithConfigOptions,
   selectionWithIsolation,
   selectionWithProject,
   selectionWithWorkspace,
@@ -161,7 +160,7 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
     case "newTask:agent":
       return replacePreparedDraftOnContextChange(state, {
           ...state.newTask,
-          selection: { ...selectionWithAgent(state.newTask.selection, action.agentId, action.agentLabel), configOptions: {} },
+          selection: selectionWithAgent(state.newTask.selection, action.agentId, action.agentLabel),
           configOptions: undefined,
           configOptionsLoading: false,
           configOptionsError: undefined,
@@ -170,7 +169,7 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
     case "newTask:project":
       return replacePreparedDraftOnContextChange(state, {
           ...state.newTask,
-          selection: { ...selectionWithProject(state.newTask.selection, action.project), configOptions: {} },
+          selection: selectionWithProject(state.newTask.selection, action.project),
           configOptions: undefined,
           configOptionsLoading: false,
           configOptionsError: undefined,
@@ -185,7 +184,6 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
             ...state.newTask.selection,
             projectId: action.projectId,
             workspaceLabel: project?.label ?? state.newTask.selection.workspaceLabel,
-            configOptions: sameProject ? state.newTask.selection.configOptions : {},
           },
           configOptions: sameProject ? state.newTask.configOptions : undefined,
           configOptionsLoading: sameProject ? state.newTask.configOptionsLoading : false,
@@ -211,7 +209,6 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
           configOptions: action.catalog,
           configOptionsLoading: false,
           configOptionsError: undefined,
-          selection: selectionWithConfigOptions(state.newTask.selection, action.catalog),
         },
       };
     case "newTask:configOptions:error":
@@ -321,7 +318,7 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
     case "newTask:workspace":
       return replacePreparedDraftOnContextChange(state, {
           ...state.newTask,
-          selection: { ...selectionWithWorkspace(state.newTask.selection, action.workspace), configOptions: {} },
+          selection: selectionWithWorkspace(state.newTask.selection, action.workspace),
           configOptions: undefined,
           configOptionsLoading: false,
           configOptionsError: undefined,
@@ -336,7 +333,6 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
           workspaceLabel: action.label,
           workspaceRoot: action.path,
           isolation: action.worktreeId ? "git_worktree" : "local",
-          configOptions: {},
         },
         configOptions: undefined,
         configOptionsLoading: false,

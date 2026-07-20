@@ -30,7 +30,6 @@ fn live_acp_message_ids_create_separate_chat_messages() {
             project_id: project_id_for_workspace(&workspace_root),
             agent_id: AgentId::from("codex"),
             workspace_root: None,
-            config_options: Default::default(),
         })
         .expect("create task");
     let task_id = created.task.task_id;
@@ -127,7 +126,6 @@ fn non_text_acp_output_is_visible_as_typed_chat_parts() {
             project_id: project_id_for_workspace(&workspace_root),
             agent_id: AgentId::from("codex"),
             workspace_root: None,
-            config_options: Default::default(),
         })
         .expect("create task");
     let task_id = created.task.task_id;

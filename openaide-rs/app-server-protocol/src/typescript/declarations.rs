@@ -71,14 +71,14 @@ use crate::settings::{
 };
 use crate::snapshot::{
     ActivityStatus, ActivityStepSnapshot, AgentCapabilities, AgentCollectionSnapshot,
-    AgentConfigOptionKind, AgentConfigOptionSnapshot, AgentConfigOptionValueSnapshot,
-    AgentSetupReason, AgentSlashCommandInputSnapshot, AgentSlashCommandSnapshot, AgentStatus,
-    AgentSummary, AttachmentKind, AttachmentSnapshot, ChatItem, ChatItemStatus, ChatRole,
-    ChatSnapshot, ClientSnapshot, ClientSnapshotScope, LiveSessionDataState, MessagePart,
-    NewTaskDefaultsSnapshot, PendingAgentConfigChange, PendingRequestKind, PendingRequestScope,
-    PendingRequestSnapshot, ProjectCollectionSnapshot, ProjectSummary, ProtocolVersion,
-    QuestionMessageAction, QuestionMessageState, RecoveryAction, RecoverySnapshot,
-    ServerCapabilities, ServerSnapshot, SettingsSnapshot, StateRootSnapshot,
+    AgentConfigOptionCurrentValue, AgentConfigOptionKind, AgentConfigOptionSnapshot,
+    AgentConfigOptionValueSnapshot, AgentSetupReason, AgentSlashCommandInputSnapshot,
+    AgentSlashCommandSnapshot, AgentStatus, AgentSummary, AttachmentKind, AttachmentSnapshot,
+    ChatItem, ChatItemStatus, ChatRole, ChatSnapshot, ClientSnapshot, ClientSnapshotScope,
+    LiveSessionDataState, MessagePart, NewTaskDefaultsSnapshot, PendingAgentConfigChange,
+    PendingRequestKind, PendingRequestScope, PendingRequestSnapshot, ProjectCollectionSnapshot,
+    ProjectSummary, ProtocolVersion, QuestionMessageAction, QuestionMessageState, RecoveryAction,
+    RecoverySnapshot, ServerCapabilities, ServerSnapshot, SettingsSnapshot, StateRootSnapshot,
     TaskAgentCommandsSnapshot, TaskAgentConfigSnapshot, TaskAttentionEvent, TaskAttentionReason,
     TaskHistorySyncSnapshot, TaskInputCapabilities, TaskLifecycle, TaskNavigationSnapshot,
     TaskPreparationAction, TaskPreparationSnapshot, TaskPreparationStep, TaskPreparationStepKind,
@@ -415,6 +415,7 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<TaskAgentConfigSnapshot>(output, config);
     push_decl::<AgentConfigOptionSnapshot>(output, config);
     push_decl::<AgentConfigOptionKind>(output, config);
+    push_decl::<AgentConfigOptionCurrentValue>(output, config);
     push_decl::<AgentConfigOptionValueSnapshot>(output, config);
     push_decl::<PendingAgentConfigChange>(output, config);
     push_decl::<TaskAgentCommandsSnapshot>(output, config);

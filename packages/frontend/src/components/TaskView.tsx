@@ -3,6 +3,7 @@ import { ArrowDown, Check, CircleAlert } from "lucide-react";
 import type {
   AppPreferencesRecord,
   ChatMessage,
+  ConfigOptionCurrentValue,
   ConfigOptionsCatalog,
   ElicitationResponse,
   TaskSnapshot,
@@ -131,7 +132,7 @@ export function TaskView({
   onRemoveAttachment: (attachmentId: string) => void;
   onRestoreTask?: (taskId: string) => void;
   onSendPrompt: (prompt?: string) => void;
-  onSelectConfigOption: (configId: string, value: string) => void;
+  onSelectConfigOption: (configId: string, value: ConfigOptionCurrentValue) => void;
   permissionResponses: AppState["permissionResponses"];
   liveTextPresentation?: TaskLiveTextPresentation;
   questionResponses?: AppState["questionResponses"];
@@ -228,7 +229,6 @@ export function TaskView({
     agentId: snapshot.task.agent_id,
     agentLabel: activeTask?.agent_name ?? snapshot.task.agent_name,
     isolation: snapshot.settings_summary.isolation,
-    configOptions: snapshot.settings_summary.config_options ?? {},
     workspaceRoot: snapshot.task.workspace_root,
     workspaceLabel: workspaceLabel(snapshot.task.workspace_root),
   };

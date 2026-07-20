@@ -257,7 +257,7 @@ function taskSnapshot(taskId: string): NonNullable<AppState["snapshot"]> {
     },
     active_requests: [],
     send_capability: { state: "ready" },
-    settings_summary: { agent_id: "codex", isolation: "local", config_options: {} },
+    settings_summary: { agent_id: "codex", isolation: "local" },
     revision: 1,
   };
 }

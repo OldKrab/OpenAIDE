@@ -16,6 +16,18 @@ use crate::protocol::errors::RuntimeError;
 use crate::protocol::host::HostBridge;
 use crate::protocol::model::AgentAuthenticateStatus;
 
+fn config_id(value: &str) -> crate::protocol::model::ConfigOptionCurrentValue {
+    crate::protocol::model::ConfigOptionCurrentValue::id(value)
+}
+
+fn catalog_id<'a>(catalog: &'a ConfigOptionsCatalog, id: &str) -> Option<&'a str> {
+    catalog
+        .options
+        .iter()
+        .find(|option| option.id == id)
+        .and_then(|option| option.current_value.as_id())
+}
+
 fn fixture_runtime(
     temp: &tempfile::TempDir,
     session_id: &str,
@@ -206,8 +218,6 @@ fn start_request(task_id: &str, cwd: String) -> AgentSessionStart {
         task_id: task_id.to_string(),
         cwd,
         model_id: None,
-        config_options: None,
-        config_option_policy: crate::agent::ConfigOptionPolicy::Strict,
         context: Vec::new(),
         cancellation: TurnCancellation::new(),
         secret_resolver: None,
@@ -215,25 +225,23 @@ fn start_request(task_id: &str, cwd: String) -> AgentSessionStart {
 }
 
 #[test]
-fn draft_recovery_ignores_config_missing_from_fresh_agent_catalog() {
+fn new_session_uses_agent_defaults_without_stored_config_reconciliation() {
     let temp = tempfile::TempDir::new().expect("temp dir");
     let Some((runtime, _log_path)) = fixture_runtime(&temp, "reconciled-session") else {
         return;
     };
-    let mut request = start_request("task-stale-config", cwd_string());
-    request.config_options = Some(serde_json::json!({ "mode": "full-access" }));
-    request.config_option_policy = crate::agent::ConfigOptionPolicy::ReconcileWithAgentDefaults;
-
     let session = runtime
-        .start_session(request)
-        .expect("reconcile stale option");
+        .start_session(start_request("task-default-config", cwd_string()))
+        .expect("start with Agent defaults");
 
     assert_eq!(session.session_id, "reconciled-session");
-    assert!(session.config_options.is_empty());
+    assert!(session
+        .config_catalog
+        .is_some_and(|catalog| catalog.options.is_empty()));
 }
 
 #[test]
-fn draft_recovery_keeps_fresh_catalog_when_one_saved_value_is_stale() {
+fn new_session_keeps_the_complete_agent_catalog() {
     let temp = tempfile::TempDir::new().expect("temp dir");
     if !python3_available() {
         return;
@@ -261,24 +269,16 @@ fn draft_recovery_keeps_fresh_catalog_when_one_saved_value_is_stale() {
         ],
         secret_env: Vec::new(),
     });
-    let mut request = start_request("task-stale-config", cwd_string());
-    request.config_options = Some(serde_json::json!({
-        "mode": "full-access",
-        "model": "gpt-5.5"
-    }));
-    request.config_option_policy = crate::agent::ConfigOptionPolicy::ReconcileWithAgentDefaults;
-
     let session = runtime
-        .start_session(request)
-        .expect("reconcile stale option");
-
+        .start_session(start_request("task-agent-catalog", cwd_string()))
+        .expect("start with complete Agent catalog");
+    let catalog = session.config_catalog.expect("config catalog");
+    assert_eq!(catalog.options[0].id, "mode");
+    assert_eq!(catalog.options[0].current_value.as_id(), Some("agent"));
+    assert_eq!(catalog.options[1].id, "model");
     assert_eq!(
-        session.config_options.get("mode").map(String::as_str),
-        Some("agent")
-    );
-    assert_eq!(
-        session.config_options.get("model").map(String::as_str),
-        Some("gpt-5.5")
+        catalog.options[1].current_value.as_id(),
+        Some("gpt-5.6-sol")
     );
 }
 
@@ -1396,7 +1396,11 @@ fn resume_after_runtime_restart_dispatches_to_the_agent() {
 
     assert_eq!(resumed.session_id, "resumed-session");
     assert_eq!(
-        resumed.config_options.get("model").map(String::as_str),
+        resumed
+            .config_catalog
+            .as_ref()
+            .and_then(|catalog| catalog.options.first())
+            .and_then(|option| option.current_value.as_id()),
         Some("gpt-5.6-sol")
     );
     runtime
@@ -1488,7 +1492,7 @@ fn config_response_and_prior_updates_reach_the_bound_task_before_the_caller() {
                 agent_id: "codex".to_string(),
                 session_id,
                 config_id: "model".to_string(),
-                value: "gpt-final".to_string(),
+                value: config_id("gpt-final"),
             });
         result_tx.send(result).expect("report config result");
     });
@@ -1517,29 +1521,16 @@ fn config_response_and_prior_updates_reach_the_bound_task_before_the_caller() {
         .expect("close session");
 
     assert_eq!(
-        prior_catalog
-            .current_values()
-            .get("model")
-            .map(String::as_str),
+        catalog_id(&prior_catalog, "model"),
         Some("gpt-intermediate")
     );
     assert!(
         !response_overtook_update,
         "the Agent response must not overtake a preceding session update"
     );
+    assert_eq!(catalog_id(&response_catalog, "model"), Some("gpt-final"));
     assert_eq!(
-        response_catalog
-            .current_values()
-            .get("model")
-            .map(String::as_str),
-        Some("gpt-final")
-    );
-    assert_eq!(
-        result
-            .expect("set config option")
-            .current_values()
-            .get("model")
-            .map(String::as_str),
+        catalog_id(&result.expect("set config option"), "model"),
         Some("gpt-final")
     );
 }
@@ -1694,7 +1685,7 @@ fn different_agents_may_own_the_same_native_session_id() {
             agent_id: "agent-a".to_string(),
             session_id: agent_a.session_id.clone(),
             config_id: "model".to_string(),
-            value: "gpt-5.5".to_string(),
+            value: config_id("gpt-5.5"),
         })
         .expect("set Agent A config");
     let agent_b_catalog = runtime
@@ -1702,23 +1693,11 @@ fn different_agents_may_own_the_same_native_session_id() {
             agent_id: "agent-b".to_string(),
             session_id: agent_b.session_id.clone(),
             config_id: "model".to_string(),
-            value: "gpt-5.6-sol".to_string(),
+            value: config_id("gpt-5.6-sol"),
         })
         .expect("set Agent B config");
-    assert_eq!(
-        agent_a_catalog
-            .current_values()
-            .get("model")
-            .map(String::as_str),
-        Some("gpt-5.5")
-    );
-    assert_eq!(
-        agent_b_catalog
-            .current_values()
-            .get("model")
-            .map(String::as_str),
-        Some("gpt-5.6-sol")
-    );
+    assert_eq!(catalog_id(&agent_a_catalog, "model"), Some("gpt-5.5"));
+    assert_eq!(catalog_id(&agent_b_catalog, "model"), Some("gpt-5.6-sol"));
 
     runtime
         .cancel_session(&agent_a.key())
@@ -2494,13 +2473,10 @@ fn set_config_option_dispatches_while_prompt_is_running() {
             agent_id: "codex".to_string(),
             session_id: session.session_id.clone(),
             config_id: "model".to_string(),
-            value: "gpt-5.5".to_string(),
+            value: config_id("gpt-5.5"),
         })
         .expect("set config option");
-    assert_eq!(
-        catalog.current_values().get("model"),
-        Some(&"gpt-5.5".to_string())
-    );
+    assert_eq!(catalog_id(&catalog, "model"), Some("gpt-5.5"));
 
     runtime
         .cancel_session(&session.key())
@@ -2557,14 +2533,11 @@ fn set_config_option_allows_an_agent_response_after_five_seconds() {
             agent_id: "codex".to_string(),
             session_id: session.session_id.clone(),
             config_id: "model".to_string(),
-            value: "gpt-5.5".to_string(),
+            value: config_id("gpt-5.5"),
         })
         .expect("slow config response should remain within the user-visible deadline");
 
-    assert_eq!(
-        catalog.current_values().get("model"),
-        Some(&"gpt-5.5".to_string())
-    );
+    assert_eq!(catalog_id(&catalog, "model"), Some("gpt-5.5"));
     runtime
         .close_session(&session.key())
         .expect("close session");

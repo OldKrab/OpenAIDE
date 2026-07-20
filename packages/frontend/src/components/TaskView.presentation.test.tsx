@@ -398,7 +398,7 @@ describe("TaskView timeline presentation", () => {
       agent_id: "codex",
       status: "ready",
       options: [{
-        current_value: "off",
+        kind: "select", current_value: { type: "id", value: "off" },
         id: "fast-mode",
         label: "Fast mode",
         values: [
@@ -428,10 +428,10 @@ describe("TaskView timeline presentation", () => {
       pending_change: {
         mutation_id: "mutation-1",
         option_id: "fast-mode",
-        requested_value: "on",
+        requested_value: { type: "id", value: "on" },
       },
       options: [{
-        current_value: "off",
+        kind: "select", current_value: { type: "id", value: "off" },
         id: "fast-mode",
         label: "Fast mode",
         values: [

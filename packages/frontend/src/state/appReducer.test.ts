@@ -140,7 +140,7 @@ describe("app reducer composer state", () => {
             id: "model",
             label: "Model",
             category: "model",
-            current_value: "gpt-5.5",
+            kind: "select", current_value: { type: "id", value: "gpt-5.5" },
             values: [{ id: "gpt-5.5", label: "gpt-5.5" }],
           },
         ],
@@ -153,7 +153,7 @@ describe("app reducer composer state", () => {
 
     expect(state.newTask.selection.agentId).toBe("codex");
     expect(state.newTask.selection.agentLabel).toBe("Codex");
-    expect(state.newTask.selection.configOptions.model).toBe("gpt-5.5");
+    expect(state.newTask.configOptions?.options[0].current_value).toEqual({ type: "id", value: "gpt-5.5" });
     expect(state.newTask.selection.projectId).toBe("project-2");
     expect(state.newTask.selection.workspaceRoot).toBe("/workspace/app");
     expect(state.newTask.context[0]).toMatchObject({ kind: "context", label: "App", path: "/workspace/app" });
@@ -206,7 +206,7 @@ describe("app reducer composer state", () => {
             id: "model",
             label: "Model",
             category: "model",
-            current_value: "gpt-5.5",
+            kind: "select", current_value: { type: "id", value: "gpt-5.5" },
             values: [{ id: "gpt-5.5", label: "gpt-5.5" }],
           },
         ],
@@ -217,7 +217,6 @@ describe("app reducer composer state", () => {
 
     expect(state.newTask.configOptions?.options).toHaveLength(1);
     expect(state.newTask.configOptionsLoading).toBe(false);
-    expect(state.newTask.selection.configOptions).toEqual({ model: "gpt-5.5" });
   });
 
   it("marks workspace roots as loaded even when no root exists", () => {
@@ -229,7 +228,7 @@ describe("app reducer composer state", () => {
     expect(state.newTask.selection.workspaceRoot).toBe("");
   });
 
-  it("replaces config option selections from the latest complete catalog", () => {
+  it("replaces the latest complete Agent config catalog", () => {
     let state = createInitialState();
     state = appReducer(state, {
       type: "newTask:configOptions:result",
@@ -241,14 +240,14 @@ describe("app reducer composer state", () => {
             id: "model",
             label: "Model",
             category: "model",
-            current_value: "gpt-5.5",
+            kind: "select", current_value: { type: "id", value: "gpt-5.5" },
             values: [{ id: "gpt-5.5", label: "gpt-5.5" }],
           },
           {
             id: "reasoning",
             label: "Reasoning",
             category: "thought_level",
-            current_value: "medium",
+            kind: "select", current_value: { type: "id", value: "medium" },
             values: [{ id: "medium", label: "Medium" }],
           },
         ],
@@ -265,24 +264,24 @@ describe("app reducer composer state", () => {
             id: "model",
             label: "Model",
             category: "model",
-            current_value: "gpt-5.4",
+            kind: "select", current_value: { type: "id", value: "gpt-5.4" },
             values: [{ id: "gpt-5.4", label: "gpt-5.4" }],
           },
           {
             id: "mode",
             label: "Mode",
             category: "mode",
-            current_value: "code",
+            kind: "select", current_value: { type: "id", value: "code" },
             values: [{ id: "code", label: "Code" }],
           },
         ],
       },
     });
 
-    expect(state.newTask.selection.configOptions).toEqual({
-      model: "gpt-5.4",
-      mode: "code",
-    });
+    expect(state.newTask.configOptions?.options.map((option) => [option.id, option.current_value])).toEqual([
+      ["model", { type: "id", value: "gpt-5.4" }],
+      ["mode", { type: "id", value: "code" }],
+    ]);
   });
 
   it("clears prepared config options when the workspace selector changes", () => {
@@ -297,7 +296,7 @@ describe("app reducer composer state", () => {
             id: "model",
             label: "Model",
             category: "model",
-            current_value: "gpt-5.5",
+            kind: "select", current_value: { type: "id", value: "gpt-5.5" },
             values: [{ id: "gpt-5.5", label: "gpt-5.5" }],
           },
         ],
@@ -310,7 +309,6 @@ describe("app reducer composer state", () => {
     });
 
     expect(state.newTask.configOptions).toBeUndefined();
-    expect(state.newTask.selection.configOptions).toEqual({});
     expect(state.newTask.selection.workspaceRoot).toBe("/workspace/other");
     expect(state.newTask.nativeSessions.items).toEqual([]);
     expect(state.newTask.nativeSessions.loaded).toBe(false);
@@ -851,7 +849,7 @@ describe("app reducer composer state", () => {
       agent_id: "codex",
       options: [{
         category: "model",
-        current_value: "gpt-5.5",
+        kind: "select", current_value: { type: "id", value: "gpt-5.5" },
         id: "model",
         label: "Model",
         values: [{ id: "gpt-5.5", label: "GPT-5.5" }],
@@ -862,7 +860,10 @@ describe("app reducer composer state", () => {
 
     expect(state.newTask.prompt).toBe("Build the thing");
     expect(state.newTask.pending?.prompt).toBe("Build the thing");
-    expect(state.newTask.pending?.configOptions?.options[0].current_value).toBe("gpt-5.5");
+    expect(state.newTask.pending?.configOptions?.options[0].current_value).toEqual({
+      type: "id",
+      value: "gpt-5.5",
+    });
 
     state = appReducer(state, {
       type: "snapshot",
@@ -1562,7 +1563,6 @@ describe("app reducer composer state", () => {
       },
       selection: {
         ...state.newTask.selection,
-        configOptions: { model: "old-model" },
       },
       nativeSessions: {
         items: [{ session_id: "old_session", cwd: "/workspace" }],
@@ -1589,7 +1589,6 @@ describe("app reducer composer state", () => {
       configOptions: undefined,
       configOptionsLoading: false,
       nativeSessions: { items: [], loading: false, loaded: false },
-      selection: { configOptions: {} },
     });
     expect(state.newTask.context[0]).toMatchObject({
       validation_error: "Attachment must be reselected after App Server restart.",
@@ -2110,7 +2109,8 @@ function configCatalog(currentValue: string) {
     agent_id: "codex",
     status: "ready" as const,
     options: [{
-      current_value: currentValue,
+      kind: "select" as const,
+      current_value: { type: "id" as const, value: currentValue },
       id: "fast-mode",
       label: "Fast mode",
       values: [
