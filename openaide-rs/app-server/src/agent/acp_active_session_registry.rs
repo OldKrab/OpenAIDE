@@ -7,7 +7,7 @@ use crate::agent::{
     AgentSessionEventSink, AgentSessionKey, AgentSessionLoad,
 };
 use crate::protocol::errors::RuntimeError;
-use crate::protocol::model::ConfigOptionsCatalog;
+use crate::protocol::model::{ConfigOptionCurrentValue, ConfigOptionsCatalog};
 
 pub(super) struct AcpActiveSessionRegistry {
     sessions: Mutex<HashMap<AgentSessionKey, AcpSessionClient>>,
@@ -88,7 +88,7 @@ impl AcpActiveSessionRegistry {
         &self,
         session: &AgentSessionKey,
         config_id: String,
-        value: String,
+        value: ConfigOptionCurrentValue,
     ) -> Result<ConfigOptionsCatalog, RuntimeError> {
         self.require_session(session)?.set_config_option(
             session.agent_id().to_string(),

@@ -1,14 +1,13 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use serde_json::Value;
 use tokio::sync::watch;
 
 use crate::agent::events::{AgentEvent, AgentPermissionOutcome, AgentPermissionRequest};
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{
     AgentAuthenticateResult, AgentCommandsCatalog, AgentListSessionsResult, AgentProbeResult,
-    Attachment, ConfigOptionsCatalog, NormalizedMessage,
+    Attachment, ConfigOptionCurrentValue, ConfigOptionsCatalog, NormalizedMessage,
 };
 
 /// Identifies a Native Session within the Agent that owns its identifier.
@@ -42,7 +41,6 @@ impl AgentSessionKey {
 pub struct AgentSession {
     pub agent_id: String,
     pub session_id: String,
-    pub config_options: HashMap<String, String>,
     pub config_catalog: Option<ConfigOptionsCatalog>,
     pub commands_catalog: Option<AgentCommandsCatalog>,
     pub model_id: Option<String>,
@@ -62,7 +60,6 @@ impl AgentSession {
         Self {
             agent_id: agent_id.into(),
             session_id: session_id.into(),
-            config_options: HashMap::new(),
             config_catalog: None,
             commands_catalog: None,
             model_id: None,
@@ -76,7 +73,6 @@ impl AgentSession {
     }
 
     pub fn with_config_options(mut self, catalog: &ConfigOptionsCatalog) -> Self {
-        self.config_options = catalog.current_values();
         self.model_id = catalog.model_id();
         self.config_catalog = Some(catalog.clone());
         self
@@ -128,20 +124,9 @@ pub struct AgentSessionStart {
     pub task_id: String,
     pub cwd: String,
     pub model_id: Option<String>,
-    pub config_options: Option<Value>,
-    pub config_option_policy: ConfigOptionPolicy,
     pub context: Vec<Attachment>,
     pub cancellation: TurnCancellation,
     pub secret_resolver: Option<Arc<dyn AgentSecretResolver>>,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum ConfigOptionPolicy {
-    /// Reject selections that are absent from the Agent's fresh catalog.
-    #[default]
-    Strict,
-    /// Keep fresh Agent defaults when persisted draft selections are stale.
-    ReconcileWithAgentDefaults,
 }
 
 #[derive(Clone)]
@@ -199,7 +184,7 @@ pub struct AgentSessionSetConfigOptionRequest {
     pub agent_id: String,
     pub session_id: String,
     pub config_id: String,
-    pub value: String,
+    pub value: ConfigOptionCurrentValue,
 }
 
 impl AgentSessionSetConfigOptionRequest {

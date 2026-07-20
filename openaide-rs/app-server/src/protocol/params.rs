@@ -1,7 +1,5 @@
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
-
 use super::model::{Attachment, IsolationKind};
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct TaskCreateParams {
@@ -18,8 +16,6 @@ pub struct TaskCreateParams {
     pub external_session_id: Option<String>,
     #[serde(default)]
     pub model_id: Option<String>,
-    #[serde(default)]
-    pub config_options: Option<Value>,
     #[serde(default)]
     pub context: Vec<Attachment>,
 }

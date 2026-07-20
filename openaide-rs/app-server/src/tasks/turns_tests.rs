@@ -91,7 +91,6 @@ fn task_params(workspace: &std::path::Path, title: &str) -> TaskCreateParams {
         prompt_text: Some(format!("Keep {title} active")),
         external_session_id: None,
         model_id: None,
-        config_options: None,
         context: Vec::new(),
     }
 }

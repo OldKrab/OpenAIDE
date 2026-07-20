@@ -183,11 +183,8 @@ impl AgentRuntime for LoadSessionAgent {
         assert!(!request.cancellation.is_cancelled());
         self.loads.fetch_add(1, Ordering::SeqCst);
 
-        let mut session = AgentSession::new(request.agent_id, request.session_id);
-        session
-            .config_options
-            .insert("model".to_string(), "gpt-5.5".to_string());
-        session.model_id = Some("gpt-5.5".to_string());
+        let mut session = AgentSession::new(request.agent_id, request.session_id)
+            .with_config_options(&model_catalog("gpt-5.5"));
         session.commands_catalog = Some(AgentCommandsCatalog {
             commands: vec![AgentCommand {
                 name: "web".to_string(),
@@ -679,7 +676,8 @@ fn model_catalog(current_model: &str) -> ConfigOptionsCatalog {
             label: "Model".to_string(),
             description: Some("Model selector".to_string()),
             category: Some(ConfigOptionCategory::Model),
-            current_value: current_model.to_string(),
+            kind: ConfigOptionKind::Select,
+            current_value: ConfigOptionCurrentValue::id(current_model),
             values: vec![
                 ConfigOptionValue {
                     id: "gpt-5.4".to_string(),
@@ -709,7 +707,8 @@ fn mode_only_catalog(current_mode: &str) -> ConfigOptionsCatalog {
             label: "Mode".to_string(),
             description: None,
             category: Some(ConfigOptionCategory::Mode),
-            current_value: current_mode.to_string(),
+            kind: ConfigOptionKind::Select,
+            current_value: ConfigOptionCurrentValue::id(current_mode),
             values: vec![
                 ConfigOptionValue {
                     id: "plan".to_string(),

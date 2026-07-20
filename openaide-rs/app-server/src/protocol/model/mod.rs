@@ -13,7 +13,8 @@ pub use agent::{
     AgentAuthMethodSummary, AgentAuthVariableSummary, AgentAuthenticateResult,
     AgentAuthenticateStatus, AgentCommand, AgentCommandsCatalog, AgentListSessionsResult,
     AgentListedSession, AgentProbeCapabilities, AgentProbeResult, AgentProbeStatus, ConfigOption,
-    ConfigOptionCategory, ConfigOptionValue, ConfigOptionsCatalog, ConfigOptionsStatus,
+    ConfigOptionCategory, ConfigOptionCurrentValue, ConfigOptionKind, ConfigOptionValue,
+    ConfigOptionsCatalog, ConfigOptionsStatus,
 };
 pub use chat::{
     AgentMessagePart, AgentMessageRole, Attachment, ChatMessage, InterruptionReason, MessagePage,

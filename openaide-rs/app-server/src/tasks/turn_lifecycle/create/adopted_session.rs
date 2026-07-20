@@ -7,7 +7,6 @@ use crate::protocol::params::TaskCreateParams;
 use crate::storage::records::{
     TaskLifecycle, TaskPreparationRecord, TaskRecord, TaskTitle, TaskTitleSource,
 };
-use crate::tasks::config_options::selected_config_options;
 use crate::tasks::task_start_transaction::TaskSessionStartGuard;
 use crate::time::now_string;
 
@@ -22,11 +21,6 @@ impl TaskTurnLifecycle {
         self.agent_registry.validate_task_create(&params)?;
         let external_session_id =
             required_optional_text(params.external_session_id.clone(), "external_session_id")?;
-        let selected_config_options = selected_config_options(params.config_options.as_ref())?;
-        if !selected_config_options.is_empty() {
-            return Err(RuntimeError::InvalidParams("config_options".to_string()));
-        }
-
         self.mutations
             .ensure_native_session_unowned(&params.selected_agent_id, &external_session_id)?;
 
@@ -75,7 +69,6 @@ impl TaskTurnLifecycle {
                 archived: false,
                 tombstoned: false,
                 revision: 0,
-                config_options: session.config_options.clone(),
                 config_options_catalog: session.config_catalog.clone(),
                 config_mutation: Default::default(),
                 agent_commands_catalog: session.commands_catalog.clone(),

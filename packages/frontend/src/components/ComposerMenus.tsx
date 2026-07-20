@@ -1,5 +1,5 @@
 import { Code2, Image, Plus } from "lucide-react";
-import type { ConfigOptionsCatalog, IsolationKind } from "@openaide/app-shell-contracts";
+import type { ConfigOptionCurrentValue, ConfigOptionsCatalog, IsolationKind } from "@openaide/app-shell-contracts";
 import { useRef, type Dispatch, type SetStateAction } from "react";
 import {
   agentOptions,
@@ -24,7 +24,7 @@ type ComposerControlsProps = {
   imageAttachmentsAllowed: boolean;
   onUnsupportedImageAttachment?: (message?: string) => void;
   onSelectAgent?: (agentId: string) => void;
-  onSelectConfigOption?: (configId: string, value: string) => void;
+  onSelectConfigOption?: (configId: string, value: ConfigOptionCurrentValue) => void;
   onSelectIsolation?: (isolation: IsolationKind) => void;
   openMenu?: ComposerMenu;
   selectAndClose: (select: () => void) => void;

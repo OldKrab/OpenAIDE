@@ -68,11 +68,6 @@ impl TaskProductApi {
             archived: false,
             tombstoned: false,
             revision: 0,
-            config_options: params
-                .config_options
-                .iter()
-                .map(|(id, value)| (id.clone(), value.clone()))
-                .collect(),
             config_options_catalog: None,
             config_mutation: Default::default(),
             agent_commands_catalog: None,

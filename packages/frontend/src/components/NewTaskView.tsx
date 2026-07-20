@@ -1,6 +1,6 @@
 import { Check, FolderOpen, FolderRoot, GitBranch } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import type { AppPreferencesRecord } from "@openaide/app-shell-contracts";
+import type { AppPreferencesRecord, ConfigOptionCurrentValue } from "@openaide/app-shell-contracts";
 import {
   agentOptions,
   appServerComposerImages,
@@ -77,7 +77,7 @@ export function NewTaskView({
   projectContextMode?: ProjectContextMode;
   focusRequestKey?: number;
   loadingProjects?: boolean;
-  onSelectConfigOption: (configId: string, value: string) => void;
+  onSelectConfigOption: (configId: string, value: ConfigOptionCurrentValue) => void;
   onCancelTask?: () => void;
   onRemoveAttachment: (attachmentId: string) => void;
   onSubmitTask: (draft: { prompt: string; context: AppState["newTask"]["context"] }) => void;

@@ -3,9 +3,14 @@ use crate::agent::acp_schema::{
     SessionConfigSelectOptions,
 };
 use crate::protocol::model::{
-    ConfigOption, ConfigOptionCategory, ConfigOptionValue, ConfigOptionsCatalog,
-    ConfigOptionsStatus,
+    ConfigOption, ConfigOptionCategory, ConfigOptionCurrentValue, ConfigOptionKind,
+    ConfigOptionValue, ConfigOptionsCatalog, ConfigOptionsStatus,
 };
+use serde_json::json;
+
+#[cfg(test)]
+#[path = "acp_config_projection_tests.rs"]
+mod tests;
 
 pub(super) fn normalize_config_options(
     agent_id: &str,
@@ -27,18 +32,32 @@ pub(super) fn normalize_config_options(
 }
 
 fn normalize_config_option(option: SessionConfigOption) -> Option<ConfigOption> {
-    let (current_value, values) = match option.kind {
+    let option_id = option.id.to_string();
+    let (kind, current_value, values) = match option.kind {
         SessionConfigKind::Select(select) => (
-            select.current_value.to_string(),
+            ConfigOptionKind::Select,
+            ConfigOptionCurrentValue::id(select.current_value.to_string()),
             normalize_select_values(select.options),
         ),
-        _ => return None,
+        SessionConfigKind::Boolean(boolean) => (
+            ConfigOptionKind::Boolean,
+            ConfigOptionCurrentValue::boolean(boolean.current_value),
+            Vec::new(),
+        ),
+        _ => {
+            crate::logging::warn(
+                "acp_config_option_kind_unsupported",
+                json!({ "config_id": option_id }),
+            );
+            return None;
+        }
     };
     Some(ConfigOption {
-        id: option.id.to_string(),
+        id: option_id,
         label: option.name,
         description: option.description,
         category: option.category.map(normalize_config_category),
+        kind,
         current_value,
         values,
     })

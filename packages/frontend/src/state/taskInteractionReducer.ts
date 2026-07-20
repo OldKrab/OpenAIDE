@@ -178,10 +178,9 @@ export function reduceTaskInteractionState(state: AppState, action: AppAction): 
               // The accepted worktree belongs to the promoted Task. A fresh New Task
               // starts from its Project root while retaining the Project and Agent.
               selection: selectedProject
-                ? {
+                  ? {
                     ...selectionWithProject(state.newTask.selection, selectedProject),
                     isolation: "local",
-                    configOptions: {},
                   }
                 : state.newTask.selection,
             }

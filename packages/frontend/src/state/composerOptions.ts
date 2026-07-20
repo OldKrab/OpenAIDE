@@ -1,4 +1,4 @@
-import type { AgentIconId, Attachment, ConfigOptionsCatalog, IsolationKind } from "@openaide/app-shell-contracts";
+import type { AgentIconId, Attachment, IsolationKind } from "@openaide/app-shell-contracts";
 import { projectIdForWorkspaceRoot } from "@openaide/app-shell-contracts";
 import type { AttachmentHandleId, ComposerImage, PreSendAttachment } from "@openaide/app-server-client";
 import { agentCatalogEntry, builtInAgents, defaultAgent } from "@openaide/app-shell-contracts";
@@ -46,7 +46,6 @@ export type ComposerSelection = {
   agentId: string;
   agentLabel: string;
   isolation: IsolationKind;
-  configOptions: Record<string, string>;
   projectId?: string;
   workspaceRoot: string;
   workspaceLabel: string;
@@ -73,7 +72,6 @@ export function defaultSelection(workspace?: WorkspaceRoot): ComposerSelection {
     agentId: "",
     agentLabel: "",
     isolation: "local",
-    configOptions: {},
     projectId: workspace?.projectId,
     workspaceRoot: workspace?.path ?? "",
     workspaceLabel: workspace?.label ?? "Workspace",
@@ -88,18 +86,6 @@ export function selectionWithAgent(selection: ComposerSelection, agentId: string
 
 export function selectionWithIsolation(selection: ComposerSelection, isolation: IsolationKind): ComposerSelection {
   return { ...selection, isolation };
-}
-
-export function selectionWithConfigOptions(
-  selection: ComposerSelection,
-  catalog: ConfigOptionsCatalog,
-): ComposerSelection {
-  return {
-    ...selection,
-    configOptions: Object.fromEntries(
-      catalog.options.map((option) => [option.id, option.current_value]),
-    ),
-  };
 }
 
 export function selectionWithWorkspace(selection: ComposerSelection, workspace: WorkspaceRoot): ComposerSelection {

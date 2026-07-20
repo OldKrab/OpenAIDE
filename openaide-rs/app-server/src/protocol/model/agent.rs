@@ -24,18 +24,11 @@ impl ConfigOptionsCatalog {
         }
     }
 
-    pub fn current_values(&self) -> HashMap<String, String> {
-        self.options
-            .iter()
-            .map(|option| (option.id.clone(), option.current_value.clone()))
-            .collect()
-    }
-
     pub fn model_id(&self) -> Option<String> {
         self.options
             .iter()
             .find(|option| matches!(option.category, Some(ConfigOptionCategory::Model)))
-            .map(|option| option.current_value.clone())
+            .and_then(|option| option.current_value.as_id().map(ToOwned::to_owned))
     }
 }
 
@@ -48,6 +41,49 @@ pub enum ConfigOptionCategory {
     Other,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConfigOptionKind {
+    #[default]
+    Select,
+    Boolean,
+}
+
+/// A typed Agent-owned value. The discriminator prevents boolean values from
+/// being confused with string IDs at storage and protocol boundaries.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ConfigOptionCurrentValue {
+    Id { value: String },
+    Boolean { value: bool },
+}
+
+impl ConfigOptionCurrentValue {
+    pub fn id(value: impl Into<String>) -> Self {
+        Self::Id {
+            value: value.into(),
+        }
+    }
+
+    pub fn boolean(value: bool) -> Self {
+        Self::Boolean { value }
+    }
+
+    pub fn as_id(&self) -> Option<&str> {
+        match self {
+            Self::Id { value } => Some(value),
+            Self::Boolean { .. } => None,
+        }
+    }
+
+    pub fn as_bool(&self) -> Option<bool> {
+        match self {
+            Self::Id { .. } => None,
+            Self::Boolean { value } => Some(*value),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct ConfigOption {
     pub id: String,
@@ -56,8 +92,23 @@ pub struct ConfigOption {
     pub description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub category: Option<ConfigOptionCategory>,
-    pub current_value: String,
+    /// Legacy catalogs predate boolean options, so an omitted kind is always select.
+    #[serde(default)]
+    pub kind: ConfigOptionKind,
+    #[serde(deserialize_with = "deserialize_current_value")]
+    pub current_value: ConfigOptionCurrentValue,
     pub values: Vec<ConfigOptionValue>,
+}
+
+fn deserialize_current_value<'de, D>(deserializer: D) -> Result<ConfigOptionCurrentValue, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    if let Some(value) = value.as_str() {
+        return Ok(ConfigOptionCurrentValue::id(value));
+    }
+    serde_json::from_value(value).map_err(serde::de::Error::custom)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]

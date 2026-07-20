@@ -1,17 +1,17 @@
 use openaide_app_server_protocol::errors::{ProtocolError, ProtocolErrorCode};
 use openaide_app_server_protocol::ids::{AgentConfigOptionId, ClientMutationId};
 use openaide_app_server_protocol::snapshot::{
-    AgentConfigOptionKind, AgentConfigOptionSnapshot, AgentConfigOptionValueSnapshot,
-    AgentSlashCommandInputSnapshot, AgentSlashCommandSnapshot, LiveSessionDataState,
-    PendingAgentConfigChange, TaskAgentCommandsSnapshot, TaskAgentConfigSnapshot,
-    TaskPreparationAction, TaskPreparationSnapshot, TaskPreparationStep, TaskPreparationStepKind,
-    TaskPreparationStepStatus, TaskSendBlocker, TaskSendBlockerKind, TaskSendCapabilitySnapshot,
-    TaskSendCapabilityState, TaskSetupBlocker, TaskSetupBlockerKind,
+    AgentConfigOptionCurrentValue, AgentConfigOptionKind, AgentConfigOptionSnapshot,
+    AgentConfigOptionValueSnapshot, AgentSlashCommandInputSnapshot, AgentSlashCommandSnapshot,
+    LiveSessionDataState, PendingAgentConfigChange, TaskAgentCommandsSnapshot,
+    TaskAgentConfigSnapshot, TaskPreparationAction, TaskPreparationSnapshot, TaskPreparationStep,
+    TaskPreparationStepKind, TaskPreparationStepStatus, TaskSendBlocker, TaskSendBlockerKind,
+    TaskSendCapabilitySnapshot, TaskSendCapabilityState, TaskSetupBlocker, TaskSetupBlockerKind,
 };
 
 use crate::protocol::model::{
-    AgentCommand, ConfigOption, ConfigOptionCategory, ConfigOptionValue,
-    TaskSnapshot as StoredTaskSnapshot, TaskStatus as LegacyTaskStatus,
+    AgentCommand, ConfigOption, ConfigOptionCategory, ConfigOptionCurrentValue, ConfigOptionKind,
+    ConfigOptionValue, TaskSnapshot as StoredTaskSnapshot, TaskStatus as LegacyTaskStatus,
 };
 use crate::storage::records::{TaskPreparationBlockerRecord, TaskPreparationRecord};
 
@@ -94,43 +94,17 @@ fn pending_config_change(snapshot: &StoredTaskSnapshot) -> Option<PendingAgentCo
         .map(|pending| PendingAgentConfigChange {
             client_mutation_id: ClientMutationId::from(pending.client_mutation_id.clone()),
             config_id: AgentConfigOptionId::from(pending.config_id.clone()),
-            requested_value: pending.requested_value.clone(),
+            requested_value: project_current_value(&pending.requested_value),
         })
 }
 
 fn agent_config_options(snapshot: &StoredTaskSnapshot) -> Vec<AgentConfigOptionSnapshot> {
-    if let Some(catalog) = &snapshot.config_options_catalog {
-        let mut options = catalog
-            .options
-            .iter()
-            .map(project_config_option)
-            .collect::<Vec<_>>();
-        for (config_id, value) in &snapshot.settings_summary.config_options {
-            if catalog.options.iter().any(|option| &option.id == config_id) {
-                continue;
-            }
-            options.push(unsupported_config_option(config_id, value));
-        }
-        return options;
-    }
     snapshot
-        .settings_summary
-        .config_options
-        .iter()
-        .map(|(config_id, value)| unsupported_config_option(config_id, value))
+        .config_options_catalog
+        .as_ref()
+        .into_iter()
+        .flat_map(|catalog| catalog.options.iter().map(project_config_option))
         .collect()
-}
-
-fn unsupported_config_option(config_id: &str, value: &str) -> AgentConfigOptionSnapshot {
-    AgentConfigOptionSnapshot {
-        config_id: config_id.into(),
-        label: config_id.to_string(),
-        description: None,
-        category: None,
-        kind: AgentConfigOptionKind::Unsupported,
-        current_value: value.to_string(),
-        values: Vec::new(),
-    }
 }
 
 fn project_config_option(option: &ConfigOption) -> AgentConfigOptionSnapshot {
@@ -139,9 +113,23 @@ fn project_config_option(option: &ConfigOption) -> AgentConfigOptionSnapshot {
         label: option.label.clone(),
         description: option.description.clone(),
         category: option.category.as_ref().map(config_category),
-        kind: AgentConfigOptionKind::Select,
-        current_value: option.current_value.clone(),
+        kind: match option.kind {
+            ConfigOptionKind::Select => AgentConfigOptionKind::Select,
+            ConfigOptionKind::Boolean => AgentConfigOptionKind::Boolean,
+        },
+        current_value: project_current_value(&option.current_value),
         values: option.values.iter().map(project_config_value).collect(),
+    }
+}
+
+fn project_current_value(value: &ConfigOptionCurrentValue) -> AgentConfigOptionCurrentValue {
+    match value {
+        ConfigOptionCurrentValue::Id { value } => AgentConfigOptionCurrentValue::Id {
+            value: value.clone(),
+        },
+        ConfigOptionCurrentValue::Boolean { value } => {
+            AgentConfigOptionCurrentValue::Boolean { value: *value }
+        }
     }
 }
 

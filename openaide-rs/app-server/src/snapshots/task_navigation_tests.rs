@@ -224,7 +224,6 @@ fn task_record(task_id: &str, title: &str, updated_at: &str) -> TaskRecord {
         archived: false,
         tombstoned: false,
         revision: 1,
-        config_options: Default::default(),
         config_options_catalog: None,
         config_mutation: Default::default(),
         agent_commands_catalog: None,

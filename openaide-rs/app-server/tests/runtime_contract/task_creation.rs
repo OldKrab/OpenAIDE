@@ -20,7 +20,6 @@ fn prompt_attachments_are_sent_to_agent_runtime() {
             prompt_text: Some("use file".to_string()),
             external_session_id: None,
             model_id: None,
-            config_options: None,
             context: vec![Attachment {
                 kind: "file".to_string(),
                 label: "main.rs".to_string(),
@@ -86,7 +85,6 @@ fn agent_session_boundary_starts_and_resumes_sessions() {
             prompt_text: Some("first".to_string()),
             external_session_id: None,
             model_id: None,
-            config_options: None,
             context: Vec::new(),
         })
         .unwrap();
@@ -146,7 +144,6 @@ fn task_create_adopts_external_session_with_replayed_history() {
             prompt_text: None,
             external_session_id: Some("external-session".to_string()),
             model_id: None,
-            config_options: None,
             context: Vec::new(),
         })
         .unwrap();
@@ -159,10 +156,11 @@ fn task_create_adopts_external_session_with_replayed_history() {
         snapshot.settings_summary.model_id.as_deref(),
         Some("gpt-5.5")
     );
-    assert_eq!(
-        snapshot.settings_summary.config_options.get("model"),
-        Some(&"gpt-5.5".to_string())
-    );
+    assert!(snapshot
+        .config_options_catalog
+        .as_ref()
+        .and_then(|catalog| catalog.options.first())
+        .is_some_and(|option| option.current_value.as_id() == Some("gpt-5.5")));
     assert_eq!(
         snapshot
             .agent_commands_catalog
@@ -218,7 +216,6 @@ fn task_create_rejects_duplicate_external_session_adoption() {
         prompt_text: None,
         external_session_id: Some("external-session".to_string()),
         model_id: None,
-        config_options: None,
         context: Vec::new(),
     };
 
@@ -253,7 +250,6 @@ fn task_delete_deletes_bound_native_session_when_supported() {
         prompt_text: None,
         external_session_id: Some("external-session".to_string()),
         model_id: None,
-        config_options: None,
         context: Vec::new(),
     };
     let created = service.create(params()).unwrap();
@@ -301,7 +297,6 @@ fn task_delete_tombstone_blocks_native_session_readoption_when_agent_delete_fail
         prompt_text: None,
         external_session_id: Some("external-session".to_string()),
         model_id: None,
-        config_options: None,
         context: Vec::new(),
     };
     let created = service.create(params()).unwrap();
@@ -352,7 +347,6 @@ fn task_create_closes_started_session_when_prompt_start_persistence_fails() {
             prompt_text: Some("fail while staging".to_string()),
             external_session_id: None,
             model_id: None,
-            config_options: None,
             context: Vec::new(),
         })
         .unwrap_err();
@@ -398,7 +392,6 @@ fn task_create_closes_loaded_session_when_adoption_persistence_fails() {
             prompt_text: None,
             external_session_id: Some("external-session".to_string()),
             model_id: None,
-            config_options: None,
             context: Vec::new(),
         })
         .unwrap_err();

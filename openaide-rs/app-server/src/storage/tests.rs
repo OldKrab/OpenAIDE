@@ -1,11 +1,11 @@
 use super::*;
 use crate::protocol::model::{
     ActivityStatus, ActivityStep, ActivityToolContent, ActivityToolDetails, AgentMessagePart,
-    AgentMessageRole, ChatMessage, IsolationKind, NormalizedMessage, TaskStatus,
+    AgentMessageRole, ChatMessage, ConfigOption, ConfigOptionCurrentValue, ConfigOptionKind,
+    ConfigOptionsCatalog, ConfigOptionsStatus, IsolationKind, NormalizedMessage, TaskStatus,
 };
 use crate::storage::records::{StoredMessage, TaskPreparationRecord, TaskRecord};
 use crate::storage_runtime::RecoveryClassification;
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 #[test]
@@ -41,6 +41,46 @@ fn task_title_persists_as_one_owned_value() {
     );
     assert!(stored.get("agent_title").is_none());
     assert_eq!(store.read_task("task-title").unwrap().title, task.title);
+}
+
+#[test]
+fn legacy_select_config_option_without_kind_remains_readable() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().to_path_buf()).unwrap();
+    let mut task = task_record("task-legacy-config", TaskStatus::Inactive, "1");
+    task.config_options_catalog = Some(ConfigOptionsCatalog {
+        agent_id: "codex".to_string(),
+        status: ConfigOptionsStatus::Ready,
+        options: vec![ConfigOption {
+            id: "model".to_string(),
+            label: "Model".to_string(),
+            description: None,
+            category: None,
+            kind: ConfigOptionKind::Select,
+            current_value: ConfigOptionCurrentValue::id("gpt-5"),
+            values: Vec::new(),
+        }],
+    });
+    store.write_task(&task).unwrap();
+
+    let path = store
+        .task_dir("task-legacy-config")
+        .unwrap()
+        .join("task.json");
+    let mut persisted: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    persisted["config_options_catalog"]["options"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("kind");
+    std::fs::write(&path, serde_json::to_vec_pretty(&persisted).unwrap()).unwrap();
+
+    let loaded = store.read_task("task-legacy-config").unwrap();
+
+    assert_eq!(
+        loaded.config_options_catalog.unwrap().options[0].kind,
+        ConfigOptionKind::Select
+    );
 }
 
 #[test]
@@ -772,7 +812,6 @@ fn task_record(task_id: &str, status: TaskStatus, created_at: &str) -> TaskRecor
         archived: false,
         tombstoned: false,
         revision: 1,
-        config_options: HashMap::new(),
         config_options_catalog: None,
         config_mutation: Default::default(),
         agent_commands_catalog: None,

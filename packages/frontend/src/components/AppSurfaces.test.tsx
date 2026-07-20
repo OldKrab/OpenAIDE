@@ -578,7 +578,7 @@ describe("AppSurfaces callback wiring", () => {
         agent_id: "codex",
         options: [{
           category: "model",
-          current_value: "gpt-5.5",
+          kind: "select", current_value: { type: "id", value: "gpt-5.5" },
           id: "model",
           label: "Model",
           values: [{ id: "gpt-5.5", label: "GPT-5.5" }],
@@ -1053,7 +1053,6 @@ function snapshot(taskId: string, hasMessages = true): TaskSnapshot {
     revision: 1,
     settings_summary: {
       agent_id: "codex",
-      config_options: {},
       isolation: "local",
     },
     task: {

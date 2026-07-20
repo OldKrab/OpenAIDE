@@ -1,10 +1,9 @@
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-
 use openaide_app_server_protocol::ids::ClientInstanceId;
+use serde::{Deserialize, Serialize};
 
 use crate::protocol::model::{
-    AgentCommandsCatalog, ChatMessage, ConfigOptionsCatalog, IsolationKind, TaskStatus, TaskSummary,
+    AgentCommandsCatalog, ChatMessage, ConfigOptionCurrentValue, ConfigOptionsCatalog,
+    IsolationKind, TaskStatus, TaskSummary,
 };
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -128,7 +127,21 @@ pub struct PendingTaskConfigChange {
     pub sequence: u64,
     pub client_mutation_id: String,
     pub config_id: String,
-    pub requested_value: String,
+    #[serde(deserialize_with = "deserialize_pending_config_value")]
+    pub requested_value: ConfigOptionCurrentValue,
+}
+
+fn deserialize_pending_config_value<'de, D>(
+    deserializer: D,
+) -> Result<ConfigOptionCurrentValue, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = serde_json::Value::deserialize(deserializer)?;
+    if let Some(value) = value.as_str() {
+        return Ok(ConfigOptionCurrentValue::id(value));
+    }
+    serde_json::from_value(value).map_err(serde::de::Error::custom)
 }
 
 /// The latest product-level reason a Task needs user attention.
@@ -201,8 +214,8 @@ pub struct TaskRecord {
     pub tombstoned: bool,
     #[serde(default)]
     pub revision: u64,
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub config_options: HashMap<String, String>,
+    /// Last catalog from the bound live Native Session. Process recovery clears
+    /// it before any snapshot can use it; it is never input to session creation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config_options_catalog: Option<ConfigOptionsCatalog>,
     #[serde(default, skip_serializing_if = "TaskConfigMutationState::is_empty")]

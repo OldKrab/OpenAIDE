@@ -14,9 +14,9 @@ use openaide_app_server::protocol::errors::RuntimeError;
 use openaide_app_server::protocol::host::HostBridge;
 use openaide_app_server::protocol::model::{
     ActivityStatus, AgentCommand, AgentCommandsCatalog, AgentMessagePart, AgentMessageRole,
-    Attachment, ConfigOption, ConfigOptionCategory, ConfigOptionValue, ConfigOptionsCatalog,
-    ConfigOptionsStatus, InterruptionReason, IsolationKind, NormalizedMessage, TaskSnapshot,
-    TaskStatus,
+    Attachment, ConfigOption, ConfigOptionCategory, ConfigOptionCurrentValue, ConfigOptionKind,
+    ConfigOptionValue, ConfigOptionsCatalog, ConfigOptionsStatus, InterruptionReason,
+    IsolationKind, NormalizedMessage, TaskSnapshot, TaskStatus,
 };
 use openaide_app_server::protocol::params::{
     DeleteMode, SessionPromptParams, TaskCreateMode, TaskCreateParams, TaskDeleteParams,

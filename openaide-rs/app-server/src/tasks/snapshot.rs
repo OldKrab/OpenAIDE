@@ -36,7 +36,6 @@ pub(crate) fn snapshot_from_record_and_chat(task: TaskRecord, chat: MessagePage)
             agent_id: task.agent_id.clone(),
             isolation: task.isolation,
             model_id: task.model_id.clone(),
-            config_options: task.config_options.clone(),
         },
         config_options_catalog: task.config_options_catalog.clone(),
         pending_config_change: task.config_mutation.pending.as_ref().map(|pending| {

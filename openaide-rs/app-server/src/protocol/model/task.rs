@@ -1,11 +1,9 @@
-use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
-
 use crate::storage::records::{
     TaskAttentionEvent, TaskLifecycle, TaskPreparationRecord, TaskTitle,
 };
+use serde::{Deserialize, Serialize};
 
-use super::{AgentCommandsCatalog, ConfigOptionsCatalog, MessagePage};
+use super::{AgentCommandsCatalog, ConfigOptionCurrentValue, ConfigOptionsCatalog, MessagePage};
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -74,7 +72,7 @@ pub struct TaskSnapshot {
 pub struct PendingTaskConfigChange {
     pub client_mutation_id: String,
     pub config_id: String,
-    pub requested_value: String,
+    pub requested_value: ConfigOptionCurrentValue,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -83,6 +81,4 @@ pub struct SettingsSummary {
     pub isolation: IsolationKind,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model_id: Option<String>,
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub config_options: HashMap<String, String>,
 }

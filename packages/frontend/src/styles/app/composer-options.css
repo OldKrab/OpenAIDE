@@ -16,6 +16,195 @@
   flex: 0 0 auto;
 }
 
+.composer-config-control-anchor {
+  margin-inline: 2px;
+}
+
+.composer-option-info {
+  width: max-content;
+  max-width: min(240px, calc(100vw - 32px));
+  position: absolute;
+  z-index: 12;
+  bottom: calc(100% + 7px);
+  left: 2px;
+  display: grid;
+  gap: 3px;
+  border: 1px solid color-mix(in oklch, var(--oa-focus) 16%, var(--oa-border-strong));
+  border-radius: 7px;
+  background: color-mix(in oklch, var(--oa-focus) 4%, var(--oa-panel));
+  box-shadow: 0 8px 22px color-mix(in oklch, var(--oa-text) 12%, transparent);
+  padding: 8px 9px;
+  opacity: 0;
+  transform: translateY(2px);
+  transition: opacity 120ms ease-out, transform 120ms ease-out;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.composer-option-info strong {
+  color: var(--oa-text);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.composer-option-info small {
+  color: var(--oa-muted);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.35;
+  white-space: normal;
+}
+
+.composer-config-control-anchor:hover > .composer-option-info:not(.hidden) {
+  opacity: 1;
+  transform: translateY(0);
+  /* Require deliberate hover intent without slowing keyboard disclosure. */
+  transition-delay: 600ms;
+  visibility: visible;
+}
+
+.composer-config-control-anchor:focus-within > .composer-option-info:not(.hidden) {
+  opacity: 1;
+  transform: translateY(0);
+  transition-delay: 0s;
+  visibility: visible;
+}
+
+.composer-config-control-anchor > .composer-config-control,
+.composer-boolean-control {
+  min-height: 28px;
+  margin: 0;
+  padding-inline: 4px;
+}
+
+.composer-boolean-control {
+  position: relative;
+  overflow: hidden;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: color-mix(in oklch, var(--oa-muted) 88%, var(--oa-text));
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.composer-boolean-control-content {
+  height: 16px;
+  display: block;
+  line-height: 16px;
+}
+
+.composer-boolean-label {
+  display: inline-block;
+  line-height: 16px;
+  vertical-align: baseline;
+}
+
+.composer-boolean-indicator {
+  width: 12px;
+  height: 12px;
+  display: inline-block;
+  position: relative;
+  margin-left: 6px;
+  vertical-align: middle;
+}
+
+.composer-boolean-indicator::before {
+  width: 8px;
+  height: 8px;
+  box-sizing: border-box;
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  border: 1px solid color-mix(in oklch, var(--oa-muted) 58%, transparent);
+  border-radius: 50%;
+  background: color-mix(in oklch, var(--oa-muted) 10%, transparent);
+  box-shadow: inset 0 1px 1px color-mix(in oklch, var(--oa-bg) 24%, transparent);
+  content: "";
+  transition: background 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+}
+
+/* A restrained blue core with enough bloom to read as enabled. */
+.composer-boolean-indicator.checked::before {
+  border-color: color-mix(in oklch, var(--oa-focus) 62%, var(--oa-text));
+  background: color-mix(in oklch, var(--oa-focus) 86%, var(--oa-panel));
+  box-shadow:
+    0 0 0 2px color-mix(in oklch, var(--oa-focus) 9%, transparent),
+    0 0 9px color-mix(in oklch, var(--oa-focus) 34%, transparent),
+    0 0 14px color-mix(in oklch, var(--oa-focus) 16%, transparent);
+}
+
+.composer-boolean-control:hover:not(:disabled) {
+  background: color-mix(in oklch, var(--oa-text) 7%, transparent);
+}
+
+.composer-boolean-control:disabled {
+  opacity: .58;
+}
+
+/* A transient mutation locks sibling controls without obscuring their values.
+   Only the changing option should look different; otherwise an enabled boolean
+   can briefly read as off while another option is being applied. */
+.composer-adaptive-options.mutation-pending .composer-config-control-anchor .composer-pill:disabled,
+.composer-adaptive-options.mutation-pending .composer-config-control-anchor .composer-boolean-control:disabled,
+.composer-adaptive-options.mutation-pending .composer-overflow-menu button:disabled {
+  opacity: 1;
+}
+
+.composer-pill.pending,
+.composer-boolean-control.pending,
+.composer-overflow-boolean-control.pending {
+  position: relative;
+  overflow: hidden;
+  background: color-mix(in oklch, var(--oa-focus) 10%, transparent);
+  color: var(--oa-text);
+  opacity: 1;
+}
+
+.composer-pill.pending::after,
+.composer-boolean-control.pending::after,
+.composer-overflow-boolean-control.pending::after {
+  position: absolute;
+  right: 4px;
+  bottom: 2px;
+  left: 4px;
+  height: 1px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, transparent, var(--oa-focus), transparent);
+  background-repeat: no-repeat;
+  background-position: -70% 0;
+  background-size: 42% 100%;
+  animation: composer-option-pending-scan 1.05s cubic-bezier(.25, 1, .5, 1) infinite;
+  content: "";
+}
+
+@keyframes composer-option-pending-scan {
+  to { background-position: 170% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .composer-pill.pending::after,
+  .composer-boolean-control.pending::after,
+  .composer-overflow-boolean-control.pending::after {
+    animation: none;
+  }
+}
+
+.composer-popover .composer-overflow-boolean-control {
+  grid-template-columns: minmax(0, 1fr) 16px;
+}
+
+.composer-overflow-boolean-control .composer-boolean-indicator {
+  margin-left: 0;
+}
+
+.composer-boolean-copy {
+  display: grid;
+  gap: 1px;
+}
+
 /* Real controls and this off-screen row share the same primitives, keeping
    packing accurate for Agent-provided labels and pending/locked states. */
 .composer-options-measurement {

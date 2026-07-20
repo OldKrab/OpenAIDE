@@ -367,7 +367,6 @@ impl TaskAcquireWorkflow for TaskProductApi {
                 project_id: params.project_id,
                 agent_id: params.agent_id,
                 workspace_root: None,
-                config_options: params.config_options,
             },
             Some(&worktree_id),
         )

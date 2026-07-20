@@ -5,6 +5,7 @@ import type {
   CustomAgentCreateParams,
   CustomAgentMetadataUpdateParams,
   CustomAgentReplaceParams,
+  ConfigOptionCurrentValue,
   ElicitationResponse,
   SettingsTabId,
 } from "@openaide/app-shell-contracts";
@@ -67,7 +68,7 @@ export type NewTaskCallbacks = {
   cancel: () => void;
   fileBrowser?: TaskFileBrowserCallbacks;
   removeAttachment: (attachmentId: string) => void;
-  selectConfigOption: (configId: string, value: string) => void;
+  selectConfigOption: (configId: string, value: ConfigOptionCurrentValue) => void;
   submit: (draft?: NewTaskDraftInput) => void;
   workspaceBrowser?: WorkspaceBrowserCallbacks;
 };
@@ -92,7 +93,7 @@ export type TaskCallbacks = {
   ) => void;
   respondToQuestion: (requestId: string, response: ElicitationResponse) => void;
   sendPrompt: (prompt?: string) => void;
-  selectConfigOption: (configId: string, value: string) => void;
+  selectConfigOption: (configId: string, value: ConfigOptionCurrentValue) => void;
 };
 
 export type TaskFileBrowserCallbacks = {

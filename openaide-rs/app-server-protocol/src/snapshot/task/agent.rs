@@ -26,7 +26,7 @@ pub struct AgentConfigOptionSnapshot {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub category: Option<String>,
     pub kind: AgentConfigOptionKind,
-    pub current_value: String,
+    pub current_value: AgentConfigOptionCurrentValue,
     pub values: Vec<AgentConfigOptionValueSnapshot>,
 }
 
@@ -34,7 +34,14 @@ pub struct AgentConfigOptionSnapshot {
 #[serde(rename_all = "camelCase")]
 pub enum AgentConfigOptionKind {
     Select,
-    Unsupported,
+    Boolean,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum AgentConfigOptionCurrentValue {
+    Id { value: String },
+    Boolean { value: bool },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
@@ -51,7 +58,7 @@ pub struct AgentConfigOptionValueSnapshot {
 pub struct PendingAgentConfigChange {
     pub client_mutation_id: ClientMutationId,
     pub config_id: AgentConfigOptionId,
-    pub requested_value: String,
+    pub requested_value: AgentConfigOptionCurrentValue,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
