@@ -214,6 +214,8 @@ test("uploads a 2 MiB file and sends it with the first New Task message", async 
   });
 
   const attached = page.getByLabel("Attached context");
+  await expect(attached.getByRole("button", { name: "Remove two-megabytes.bin" })).toBeVisible();
+  await expect(attached.getByLabel("Uploading two-megabytes.bin")).toHaveCount(0);
   await expect(attached.getByText("two-megabytes.bin", { exact: true })).toBeVisible();
   await page.getByRole("textbox", { name: "Message" }).fill("smoke:file attachment");
   await page.getByLabel("Send message").click();
