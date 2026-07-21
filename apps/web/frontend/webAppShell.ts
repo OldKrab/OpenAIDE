@@ -80,7 +80,7 @@ export function createWebAppShell(): FrontendShell {
     },
     files: {
       kind: "webUpload",
-      upload: (taskId, file, onProgress, signal, options) =>
+      upload: (taskId, file, onProgress, signal) =>
         uploadFile(
           taskId,
           file,
@@ -88,7 +88,6 @@ export function createWebAppShell(): FrontendShell {
           onProgress,
           signal,
           (reason) => logger.info("file_upload_chunk_fallback", { reason }),
-          options,
         ),
     },
     messages: { post, subscribe: subscribeWindowMessages },

@@ -278,33 +278,6 @@ fn creates_pasted_image_handle_for_prompt_payload() {
 }
 
 #[test]
-fn creates_image_handle_from_completed_binary_upload() {
-    let temp = tempfile::tempdir().unwrap();
-    let uploaded = temp.path().join("uploaded-image.png");
-    std::fs::write(&uploaded, b"image").unwrap();
-    let runtime = AttachmentRuntime::new();
-
-    let created = runtime
-        .create_uploaded_image(
-            TaskId::from("task-1"),
-            &uploaded,
-            "Screenshot.png",
-            "image/png",
-        )
-        .unwrap();
-    let resolved = runtime
-        .resolve_for_send(TaskId::from("task-1"), &[created.attachment.handle_id])
-        .unwrap();
-
-    let agent_attachments = resolved.agent_attachments();
-    let payload = agent_attachments[0].payload.as_ref().unwrap();
-    assert_eq!(agent_attachments[0].kind, "image");
-    assert_eq!(payload["mimeType"], "image/png");
-    assert_eq!(payload["data"], "aW1hZ2U=");
-    assert_eq!(payload["sizeBytes"], 5);
-}
-
-#[test]
 fn rejects_invalid_pasted_image_payloads() {
     let runtime = AttachmentRuntime::new();
 

@@ -107,37 +107,6 @@ impl SharedRpcGateway {
         )
     }
 
-    /// Converts a completed Web image upload into an opaque image attachment handle.
-    pub(crate) fn create_uploaded_image(
-        &self,
-        client_instance_id: &ClientInstanceId,
-        task_id: TaskId,
-        path: String,
-        label: String,
-        mime_type: String,
-    ) -> Result<PreSendAttachment, ProtocolError> {
-        let gateway = self.gateway.lock().expect("protocol gateway lock poisoned");
-        if gateway
-            .client_hub
-            .client_by_instance(client_instance_id)
-            .is_none()
-        {
-            return Err(ProtocolError {
-                code: openaide_app_server_protocol::errors::ProtocolErrorCode::NotInitialized,
-                message: "client connection is not initialized".to_string(),
-                recoverable: true,
-                target: None,
-            });
-        }
-        gateway.attachments.create_uploaded_image(
-            client_instance_id,
-            &task_id,
-            path,
-            label,
-            mime_type,
-        )
-    }
-
     /// Resolves only a file already persisted in a Task message visible to this client.
     pub(crate) fn resolve_sent_file(
         &self,

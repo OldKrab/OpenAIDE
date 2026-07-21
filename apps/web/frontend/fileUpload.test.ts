@@ -147,33 +147,6 @@ describe("web file upload transport", () => {
     ]);
   });
 
-  it("preserves image metadata across the single request and every fallback chunk", async () => {
-    vi.stubGlobal("XMLHttpRequest", FakeXMLHttpRequest);
-    FakeXMLHttpRequest.planned = [
-      { kind: "load", status: 403, contentType: "text/html", body: "<html>Denied</html>" },
-      { kind: "load", status: 202, body: '{"received":524288}' },
-      { kind: "load", status: 202, body: '{"received":1048576}' },
-      { kind: "load", status: 200, body: '{"attachment":{"handleId":"image-1","label":"scan.png"}}' },
-    ];
-    const file = new File([new Uint8Array(1_300_000)], "scan.png", { type: "image/png" });
-
-    await uploadFile(
-      "task-1",
-      file,
-      "client-1",
-      vi.fn(),
-      new AbortController().signal,
-      undefined,
-      { kind: "image", mimeType: "image/png" },
-    );
-
-    expect(FakeXMLHttpRequest.requests).toHaveLength(4);
-    expect(FakeXMLHttpRequest.requests.every((request) =>
-      request.headers.get("X-OpenAIDE-Attachment-Kind") === "image"
-      && request.headers.get("X-OpenAIDE-Mime-Type") === "image/png"
-    )).toBe(true);
-  });
-
   it("does not hide an App Server validation error behind chunk fallback", async () => {
     vi.stubGlobal("XMLHttpRequest", FakeXMLHttpRequest);
     FakeXMLHttpRequest.planned = [

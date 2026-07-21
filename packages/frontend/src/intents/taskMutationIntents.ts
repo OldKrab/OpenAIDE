@@ -19,6 +19,7 @@ import {
   releaseComposerAttachments,
   type ComposerAttachmentResourceOwner,
 } from "../services/attachmentResources";
+import { composerErrorMessage } from "../components/composerDraftPolicy";
 
 type TaskMutationConnection = Pick<BackendConnection, "request">;
 
@@ -143,9 +144,7 @@ export function sendTaskPromptIntent(
 
 function appServerComposerMessage(input: TaskComposerInput): ComposerMessage | undefined {
   const imageAttachments = input.context.filter((attachment) => attachment.kind === "image");
-  const resourceAttachments = input.context.filter(
-    (attachment) => attachment.kind !== "image" || attachment.app_server_handle_id,
-  );
+  const resourceAttachments = input.context.filter((attachment) => attachment.kind !== "image");
   const images = appServerComposerImages(imageAttachments);
   const attachments = appServerAttachmentHandles(resourceAttachments);
   if (!images || !attachments) return undefined;
@@ -161,6 +160,5 @@ function taskSendErrorMessage(error: unknown) {
 }
 
 function taskMutationErrorMessage(error: unknown, fallback: string) {
-  if (error instanceof AppServerProtocolError) return error.message;
-  return error instanceof Error ? error.message : fallback;
+  return composerErrorMessage(error, fallback);
 }

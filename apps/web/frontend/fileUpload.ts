@@ -7,11 +7,6 @@ const chunkPreferredFiles = new WeakSet<File>();
 
 type UploadProgress = { loaded: number; total: number };
 type UploadFallbackReason = "requestTooLarge" | "transportError" | "intermediaryRejected";
-export type UploadAttachmentMetadata = {
-  kind: "image";
-  mimeType: string;
-};
-
 class UploadFallbackError extends Error {
   constructor(message: string, readonly reason: UploadFallbackReason) {
     super(message);
@@ -26,18 +21,17 @@ export async function uploadFile(
   onProgress: (progress: UploadProgress) => void,
   signal: AbortSignal,
   onFallback?: (reason: UploadFallbackReason) => void,
-  metadata?: UploadAttachmentMetadata,
 ): Promise<PreSendAttachment> {
   if (chunkPreferredFiles.has(file)) {
-    return uploadFileInChunks(taskId, file, clientInstanceId, onProgress, signal, metadata);
+    return uploadFileInChunks(taskId, file, clientInstanceId, onProgress, signal);
   }
   try {
-    return await uploadFileOnce(taskId, file, clientInstanceId, onProgress, signal, metadata);
+    return await uploadFileOnce(taskId, file, clientInstanceId, onProgress, signal);
   } catch (error) {
     if (!(error instanceof UploadFallbackError)) throw error;
     onFallback?.(error.reason);
     chunkPreferredFiles.add(file);
-    return uploadFileInChunks(taskId, file, clientInstanceId, onProgress, signal, metadata);
+    return uploadFileInChunks(taskId, file, clientInstanceId, onProgress, signal);
   }
 }
 
@@ -47,11 +41,10 @@ async function uploadFileOnce(
   clientInstanceId: string,
   onProgress: (progress: UploadProgress) => void,
   signal: AbortSignal,
-  metadata?: UploadAttachmentMetadata,
 ) {
   const response = await sendUploadRequest({
     path: UPLOAD_PATH,
-    headers: uploadHeaders(taskId, file, clientInstanceId, metadata),
+    headers: uploadHeaders(taskId, file, clientInstanceId),
     body: file,
     signal,
     onProgress: (loaded, total) => onProgress({
@@ -77,7 +70,6 @@ async function uploadFileInChunks(
   clientInstanceId: string,
   onProgress: (progress: UploadProgress) => void,
   signal: AbortSignal,
-  metadata?: UploadAttachmentMetadata,
 ) {
   const uploadId = newUploadId();
   let offset = 0;
@@ -90,7 +82,7 @@ async function uploadFileInChunks(
       const response = await sendUploadRequest({
         path: CHUNK_UPLOAD_PATH,
         headers: {
-          ...uploadHeaders(taskId, file, clientInstanceId, metadata),
+          ...uploadHeaders(taskId, file, clientInstanceId),
           "X-OpenAIDE-Upload-Id": uploadId,
           "X-OpenAIDE-Upload-Offset": String(chunkOffset),
           "X-OpenAIDE-Upload-Size": String(file.size),
@@ -179,17 +171,12 @@ function uploadHeaders(
   taskId: string,
   file: File,
   clientInstanceId: string,
-  metadata?: UploadAttachmentMetadata,
 ) {
   return {
     "Content-Type": "application/octet-stream",
     "X-OpenAIDE-Client-Instance-Id": clientInstanceId,
     "X-OpenAIDE-Task-Id": taskId,
     "X-OpenAIDE-File-Name": encodeURIComponent(file.name || "Attached file"),
-    ...(metadata ? {
-      "X-OpenAIDE-Attachment-Kind": metadata.kind,
-      "X-OpenAIDE-Mime-Type": metadata.mimeType,
-    } : {}),
   };
 }
 

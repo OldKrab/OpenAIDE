@@ -26,11 +26,7 @@ import {
 import { createConfirmedEmbeddedAttachment } from "../services/embeddedAttachmentSelection";
 import { cancelTaskIntent, sendTaskPromptIntent } from "../intents/taskMutationIntents";
 import { respondToPermissionIntent, respondToQuestionIntent } from "../intents/taskIntents";
-import {
-  appServerAttachment,
-  appServerImageAttachment,
-  localImageAttachment,
-} from "../state/composerOptions";
+import { appServerAttachment, localImageAttachment } from "../state/composerOptions";
 import { mapProtocolTaskSnapshot } from "../state/appServerProtocolMapping";
 import { configOptionsMutable } from "../state/configOptionState";
 import { mapProtocolChatPage } from "../state/taskReadMapping";
@@ -341,50 +337,6 @@ function createTaskFileBrowserCallbacks(
       });
     },
     attachImage: async (file: File) => {
-      if (files?.kind === "webUpload") {
-        const attachment = await files.upload(
-          taskId,
-          file,
-          () => undefined,
-          new AbortController().signal,
-          { kind: "image", mimeType: file.type || "image/png" },
-        );
-        const release = () => {
-          if (attachmentResources) {
-            attachmentResources.release({ taskId, handleId: attachment.handleId });
-          } else {
-            releaseAttachmentResources(
-              backendConnection,
-              taskId,
-              [attachmentHandleResource(attachment.handleId)],
-            );
-          }
-        };
-        try {
-          const data = await fileToBase64(file);
-          const adoption = attachmentResources?.beginAdoption(taskId);
-          if (attachmentResources && !adoption) {
-            release();
-            return;
-          }
-          if (attachmentResources?.adopt({ taskId, handleId: attachment.handleId }, adoption) === false) {
-            release();
-            return;
-          }
-          dispatch({
-            type: "taskInput:attachment:addAppServer",
-            taskId,
-            attachment: appServerImageAttachment(
-              attachment,
-              `data:${file.type || "image/png"};base64,${data}`,
-            ),
-          });
-        } catch (error) {
-          release();
-          throw error;
-        }
-        return;
-      }
       const data = await fileToBase64(file);
       dispatch({
         type: "taskInput:attachment:addAppServer",

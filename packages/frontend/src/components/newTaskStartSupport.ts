@@ -8,6 +8,7 @@ import {
 import type { AppState } from "../state/store";
 import type { NewTaskDraftInput } from "./appControllerCallbackTypes";
 import { preparedTaskMatchesNewTaskContext } from "../state/newTaskPreparationContext";
+import { composerErrorMessage } from "./composerDraftPolicy";
 
 /** Stops a pre-send Task, falling through to turn cancellation if send won the race. */
 export async function discardOrCancelStartedTask(
@@ -27,7 +28,7 @@ export async function discardOrCancelStartedTask(
 }
 
 export function submitErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "Unable to start task.";
+  return composerErrorMessage(error, "Unable to start task.");
 }
 
 export function newTaskDraftInput(state: AppState, draft?: NewTaskDraftInput) {

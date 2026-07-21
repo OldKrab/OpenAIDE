@@ -15,8 +15,6 @@ fn assembles_ordered_chunks_and_completes_only_at_the_declared_size() {
             upload_id: "upload-1",
             task_id: "task-1",
             file_name: "report.txt",
-            attachment_kind: "file",
-            mime_type: None,
             total_size: 11,
             offset: 0,
             bytes: b"hello ",
@@ -30,8 +28,6 @@ fn assembles_ordered_chunks_and_completes_only_at_the_declared_size() {
             upload_id: "upload-1",
             task_id: "task-1",
             file_name: "report.txt",
-            attachment_kind: "file",
-            mime_type: None,
             total_size: 11,
             offset: 6,
             bytes: b"world",
@@ -41,16 +37,12 @@ fn assembles_ordered_chunks_and_completes_only_at_the_declared_size() {
         temporary,
         task_id,
         file_name,
-        attachment_kind,
-        mime_type,
     } = second
     else {
         panic!("the final chunk must complete the upload");
     };
     assert_eq!(task_id, "task-1");
     assert_eq!(file_name, "report.txt");
-    assert_eq!(attachment_kind, "file");
-    assert_eq!(mime_type, None);
     assert_eq!(fs::read(temporary.path()).unwrap(), b"hello world");
 }
 
@@ -63,8 +55,6 @@ fn rejects_out_of_order_chunks_without_corrupting_the_session() {
         upload_id: "upload-1",
         task_id: "task-1",
         file_name: "report.txt",
-        attachment_kind: "file",
-        mime_type: None,
         total_size: 6,
         offset,
         bytes,
@@ -91,8 +81,6 @@ fn cancellation_discards_the_partial_session() {
             upload_id: "upload-1",
             task_id: "task-1",
             file_name: "report.txt",
-            attachment_kind: "file",
-            mime_type: None,
             total_size: 6,
             offset: 0,
             bytes: b"abc",
@@ -106,8 +94,6 @@ fn cancellation_discards_the_partial_session() {
             upload_id: "upload-1",
             task_id: "task-1",
             file_name: "report.txt",
-            attachment_kind: "file",
-            mime_type: None,
             total_size: 6,
             offset: 3,
             bytes: b"def",

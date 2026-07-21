@@ -516,7 +516,7 @@ describe("app controller callbacks", () => {
     expect(request).not.toHaveBeenCalledWith(ATTACHMENT_RELEASE, expect.anything());
   });
 
-  it("uploads a new-task image as binary and keeps only its handle in the draft", async () => {
+  it("keeps a new-task image client-owned until Send", async () => {
     const upload = vi.fn(async () => ({ handleId: "image-handle-1", label: "pasted.png" }));
     frontendShellState.files = { kind: "webUpload", upload };
     const dispatch = vi.fn();
@@ -531,26 +531,19 @@ describe("app controller callbacks", () => {
       new File([new Uint8Array([1, 2, 3])], "pasted.png", { type: "image/png" }),
     );
 
-    expect(upload).toHaveBeenCalledWith(
-      "task_ready",
-      expect.any(File),
-      expect.any(Function),
-      expect.any(AbortSignal),
-      { kind: "image", mimeType: "image/png" },
-    );
+    expect(upload).not.toHaveBeenCalled();
     expect(dispatch).toHaveBeenCalledWith({
       type: "newTask:attachment:add",
       attachment: expect.objectContaining({
         kind: "image",
         label: "pasted.png",
-        app_server_handle_id: "image-handle-1",
         preview_url: "data:image/png;base64,AQID",
+        payload: { data: "AQID", mimeType: "image/png" },
       }),
     });
-    expect(dispatch.mock.calls.at(-1)?.[0].attachment).not.toHaveProperty("payload");
   });
 
-  it("uploads an active-task image as binary and keeps only its handle in the draft", async () => {
+  it("keeps an active-task image client-owned until Send", async () => {
     const upload = vi.fn(async () => ({ handleId: "image-handle-1", label: "pasted.png" }));
     frontendShellState.files = { kind: "webUpload", upload };
     const dispatch = vi.fn();
@@ -566,23 +559,16 @@ describe("app controller callbacks", () => {
       new File([new Uint8Array([1, 2, 3])], "pasted.png", { type: "image/png" }),
     );
 
-    expect(upload).toHaveBeenCalledWith(
-      "task_1",
-      expect.any(File),
-      expect.any(Function),
-      expect.any(AbortSignal),
-      { kind: "image", mimeType: "image/png" },
-    );
+    expect(upload).not.toHaveBeenCalled();
     expect(dispatch).toHaveBeenCalledWith({
       type: "taskInput:attachment:addAppServer",
       taskId: "task_1",
       attachment: expect.objectContaining({
         kind: "image",
-        app_server_handle_id: "image-handle-1",
         preview_url: "data:image/png;base64,AQID",
+        payload: { data: "AQID", mimeType: "image/png" },
       }),
     });
-    expect(dispatch.mock.calls.at(-1)?.[0].attachment).not.toHaveProperty("payload");
   });
 
   it("acquires a fresh Prepared Task when client liveness expired in the file picker", async () => {

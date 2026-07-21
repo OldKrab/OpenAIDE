@@ -18,8 +18,6 @@ struct CompletedUpload {
     temporary: NamedTempFile,
     task_id: String,
     file_name: String,
-    attachment_kind: String,
-    mime_type: Option<String>,
 }
 
 pub(super) fn handle_file_upload(
@@ -52,12 +50,6 @@ fn handle_single_upload(
     else {
         return write_http_response(stream, &empty_response(400));
     };
-    let Some((attachment_kind, mime_type)) = upload_metadata(&request) else {
-        return write_http_response(stream, &empty_response(400));
-    };
-    let attachment_kind = attachment_kind.to_string();
-    let mime_type = mime_type.map(str::to_string);
-
     // The fast path retains one request per file while streaming directly to disk.
     stream.set_read_timeout(Some(Duration::from_secs(60)))?;
     let mut temporary = temporary_upload(file_name)?;
@@ -70,8 +62,6 @@ fn handle_single_upload(
             temporary,
             task_id: task_id.to_string(),
             file_name: file_name.to_string(),
-            attachment_kind,
-            mime_type,
         },
     )
 }
@@ -100,9 +90,6 @@ fn handle_chunk_upload(
     ) else {
         return write_http_response(stream, &empty_response(400));
     };
-    let Some((attachment_kind, mime_type)) = upload_metadata(&request) else {
-        return write_http_response(stream, &empty_response(400));
-    };
     if request.content_length > MAX_UPLOAD_CHUNK_BYTES {
         return write_http_response(
             stream,
@@ -119,8 +106,6 @@ fn handle_chunk_upload(
         upload_id,
         task_id,
         file_name,
-        attachment_kind,
-        mime_type,
         total_size,
         offset,
         bytes: &bytes,
@@ -136,8 +121,6 @@ fn handle_chunk_upload(
             temporary,
             task_id,
             file_name,
-            attachment_kind,
-            mime_type,
         }) => register_upload(
             stream,
             handler,
@@ -146,8 +129,6 @@ fn handle_chunk_upload(
                 temporary,
                 task_id,
                 file_name,
-                attachment_kind,
-                mime_type,
             },
         ),
         Err(error) => write_http_response(stream, &chunk_error_response(error)),
@@ -215,18 +196,6 @@ fn register_upload(
     client_instance_id: &ClientInstanceId,
     upload: CompletedUpload,
 ) -> Result<(), LocalHttpProbeListenerError> {
-    if upload.attachment_kind == "image" {
-        let response = handler.register_uploaded_image(
-            client_instance_id,
-            upload.task_id,
-            upload.temporary.path().to_string_lossy().into_owned(),
-            upload.file_name,
-            upload
-                .mime_type
-                .expect("validated image upload must include a MIME type"),
-        );
-        return write_http_response(stream, &response);
-    }
     let (_file, path) = upload.temporary.keep().map_err(|error| error.error)?;
     let response = handler.register_uploaded_file(
         client_instance_id,
@@ -238,18 +207,6 @@ fn register_upload(
         cleanup_failed_upload(&path);
     }
     write_http_response(stream, &response)
-}
-
-fn upload_metadata(request: &LocalHttpRequest) -> Option<(&str, Option<&str>)> {
-    match request.attachment_kind.as_deref().unwrap_or("file") {
-        "file" => Some(("file", None)),
-        "image" => request
-            .mime_type
-            .as_deref()
-            .filter(|mime_type| mime_type.len() <= 127 && mime_type.starts_with("image/"))
-            .map(|mime_type| ("image", Some(mime_type))),
-        _ => None,
-    }
 }
 
 fn cleanup_failed_upload(path: &std::path::Path) {

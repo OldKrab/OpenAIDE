@@ -20,8 +20,6 @@ pub(crate) struct ChunkUploadRequest<'a> {
     pub upload_id: &'a str,
     pub task_id: &'a str,
     pub file_name: &'a str,
-    pub attachment_kind: &'a str,
-    pub mime_type: Option<&'a str>,
     pub total_size: usize,
     pub offset: usize,
     pub bytes: &'a [u8],
@@ -35,8 +33,6 @@ pub(crate) enum AppendChunkOutcome {
         temporary: NamedTempFile,
         task_id: String,
         file_name: String,
-        attachment_kind: String,
-        mime_type: Option<String>,
     },
 }
 
@@ -69,8 +65,6 @@ struct ChunkUploadKey {
 struct ChunkUploadSession {
     task_id: String,
     file_name: String,
-    attachment_kind: String,
-    mime_type: Option<String>,
     total_size: usize,
     received: usize,
     temporary: NamedTempFile,
@@ -111,8 +105,6 @@ impl ChunkUploadRegistry {
                 ChunkUploadSession {
                     task_id: request.task_id.to_string(),
                     file_name: request.file_name.to_string(),
-                    attachment_kind: request.attachment_kind.to_string(),
-                    mime_type: request.mime_type.map(str::to_string),
                     total_size: request.total_size,
                     received: 0,
                     temporary: temporary_upload(request.file_name)?,
@@ -126,8 +118,6 @@ impl ChunkUploadRegistry {
             .ok_or(ChunkUploadError::MissingSession)?;
         if session.task_id != request.task_id
             || session.file_name != request.file_name
-            || session.attachment_kind != request.attachment_kind
-            || session.mime_type.as_deref() != request.mime_type
             || session.total_size != request.total_size
         {
             return Err(ChunkUploadError::MetadataMismatch);
@@ -154,8 +144,6 @@ impl ChunkUploadRegistry {
             temporary: session.temporary,
             task_id: session.task_id,
             file_name: session.file_name,
-            attachment_kind: session.attachment_kind,
-            mime_type: session.mime_type,
         })
     }
 

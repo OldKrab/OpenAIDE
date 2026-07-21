@@ -255,8 +255,6 @@ fn chunk_upload_route_preserves_session_headers_and_binary_body() {
                 assert_eq!(request.upload_id.as_deref(), Some("upload-1"));
                 assert_eq!(request.upload_offset, Some(524_288));
                 assert_eq!(request.upload_size, Some(1_500_000));
-                assert_eq!(request.attachment_kind.as_deref(), Some("image"));
-                assert_eq!(request.mime_type.as_deref(), Some("image/png"));
                 assert_eq!(request.content_length, 6);
                 assert_eq!(request.initial_body, b"second");
                 write_http_response(
@@ -274,7 +272,7 @@ fn chunk_upload_route_preserves_session_headers_and_binary_body() {
 
     let response = send(
         addr,
-        "POST /upload/chunk HTTP/1.1\r\nX-OpenAIDE-Upload-Id: upload-1\r\nX-OpenAIDE-Upload-Offset: 524288\r\nX-OpenAIDE-Upload-Size: 1500000\r\nX-OpenAIDE-Attachment-Kind: image\r\nX-OpenAIDE-Mime-Type: image/png\r\nContent-Length: 6\r\n\r\nsecond",
+        "POST /upload/chunk HTTP/1.1\r\nX-OpenAIDE-Upload-Id: upload-1\r\nX-OpenAIDE-Upload-Offset: 524288\r\nX-OpenAIDE-Upload-Size: 1500000\r\nContent-Length: 6\r\n\r\nsecond",
     );
     server.join().unwrap();
 
