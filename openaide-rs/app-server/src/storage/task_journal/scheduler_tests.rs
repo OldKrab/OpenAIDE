@@ -17,6 +17,23 @@ fn control_capacity_remains_when_one_task_fills_its_stream_lane() {
 }
 
 #[test]
+fn full_stream_lane_can_be_observed_without_blocking_the_caller() {
+    let scheduler = Scheduler::new();
+    let (full_reply, _full_receipt) = mpsc::channel();
+    scheduler
+        .admit(
+            stream_with_estimated_bytes("task", PER_TASK_STREAM_BYTE_CAPACITY),
+            full_reply,
+        )
+        .unwrap();
+    let (reply, _receipt) = mpsc::channel();
+
+    let returned = scheduler.try_admit(stream("task"), reply).unwrap();
+
+    assert!(returned.is_some(), "full-lane write remains caller-owned");
+}
+
+#[test]
 fn barrier_is_admitted_and_runs_after_a_full_stream_lane() {
     let scheduler = Scheduler::new();
     let (stream_reply, _stream_receipt) = mpsc::channel();

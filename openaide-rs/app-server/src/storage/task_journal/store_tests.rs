@@ -51,6 +51,56 @@ fn worker_panic_resolves_receipt_and_emits_the_sole_root_fatal_signal() {
 }
 
 #[test]
+fn quarantine_write_failure_stops_the_root_instead_of_being_ignored() {
+    let root = TempDir::new().expect("create state root");
+    create_setup_task(root.path());
+    let faults = Arc::new(FaultInjector::armed(
+        JournalKind::Task,
+        FaultPoint::FileSync,
+    ));
+    let (store, _commits) = TaskJournalStore::open_with_faults(root.path().to_path_buf(), faults)
+        .expect("open faulted store");
+    let fatal_events = store.take_fatal_events();
+    let status = root
+        .path()
+        .join("task-store-v1/tasks/task_1/storage.quarantined");
+    std::fs::remove_file(&status).unwrap();
+    std::fs::create_dir(&status).unwrap();
+    let mut replacement = task_projection("task_1").task;
+    replacement.updated_at = "2026-07-21T00:00:00Z".to_string();
+
+    store
+        .submit(TaskWrite::barrier_replace_task(replacement))
+        .unwrap()
+        .wait()
+        .expect_err("uncertain commit must fail");
+    assert_eq!(
+        fatal_events
+            .recv_timeout(Duration::from_secs(1))
+            .unwrap()
+            .reason,
+        "worker_panicked"
+    );
+}
+
+#[test]
+fn legacy_quarantine_marker_remains_fail_closed() {
+    let root = TempDir::new().expect("create state root");
+    create_setup_task(root.path());
+    std::fs::write(
+        root.path()
+            .join("task-store-v1/tasks/task_1/storage.quarantined"),
+        b"durability_failure\n",
+    )
+    .unwrap();
+
+    let (store, _commits) =
+        TaskJournalStore::open(root.path().to_path_buf()).expect("open quarantined store");
+    assert!(store.load("task_1").is_err());
+    store.shutdown().unwrap();
+}
+
+#[test]
 fn journal_root_creation_requires_durable_parent_entries() {
     let root = TempDir::new().expect("create state root");
     let faults = Arc::new(FaultInjector::armed(
@@ -345,6 +395,102 @@ fn create_setup_task(root: &Path) {
 
 fn terminal_write() -> TaskWrite {
     TaskWrite::stream_append_terminal("task_1", "artifact_1", "terminal_1", "accepted bytes")
+}
+
+#[test]
+fn durability_sync_metric_counts_exercised_file_syncs() {
+    let root = TempDir::new().expect("create state root");
+    let (store, _commits) =
+        TaskJournalStore::open(root.path().to_path_buf()).expect("open journal");
+    store
+        .submit(TaskWrite::barrier_create(task_projection("task_1")))
+        .unwrap()
+        .wait()
+        .unwrap();
+    let baseline = store.durability_sync_calls();
+
+    let mut replacement = task_projection("task_1").task;
+    replacement.updated_at = "2026-07-21T00:00:00Z".to_string();
+    store
+        .submit(TaskWrite::barrier_replace_task(replacement))
+        .unwrap()
+        .wait()
+        .unwrap();
+    assert_eq!(store.durability_sync_calls() - baseline, 1);
+
+    let before_artifact = store.durability_sync_calls();
+    store.submit(terminal_write()).unwrap().wait().unwrap();
+    assert_eq!(
+        store.durability_sync_calls() - before_artifact,
+        4,
+        "first artifact commit also anchors its new directory and journal entry"
+    );
+    store.shutdown().unwrap();
+}
+
+#[test]
+fn replacing_a_large_message_history_completes_without_quadratic_delay() {
+    let root = TempDir::new().expect("create state root");
+    let (store, _commits) =
+        TaskJournalStore::open(root.path().to_path_buf()).expect("open journal");
+    let mut projection = task_projection("task_1");
+    store
+        .submit(TaskWrite::barrier_create(projection.clone()))
+        .unwrap()
+        .wait()
+        .unwrap();
+    projection.messages = (1..=20_000)
+        .map(|sequence| crate::storage::records::StoredMessage {
+            sequence,
+            chat: crate::protocol::model::ChatMessage {
+                cursor: sequence.to_string(),
+                message_id: format!("message_{sequence}"),
+                identity: format!("identity_{sequence}"),
+                message_type: "agent_message".to_string(),
+                message: crate::protocol::model::NormalizedMessage::AgentMessage {
+                    id: format!("message_{sequence}"),
+                    role: crate::protocol::model::AgentMessageRole::Agent,
+                    parts: vec![crate::protocol::model::AgentMessagePart::Text {
+                        text: "x".to_string(),
+                    }],
+                    created_at: "2026-07-21T00:00:00Z".to_string(),
+                },
+            },
+        })
+        .collect();
+    projection.message_meta.message_count = projection.messages.len() as u64;
+    projection.message_meta.version = 1;
+
+    let (result, finished) = std::sync::mpsc::channel();
+    let worker_store = store.clone();
+    let worker = std::thread::spawn(move || {
+        result
+            .send(
+                worker_store
+                    .submit(TaskWrite::barrier_operations_with_artifacts(
+                        "task_1".to_string(),
+                        vec![TaskOperation::ReplaceMessages {
+                            messages: projection.messages,
+                            message_meta: Box::new(projection.message_meta),
+                        }],
+                        Vec::new(),
+                        Vec::new(),
+                    ))
+                    .unwrap()
+                    .wait(),
+            )
+            .unwrap();
+    });
+    let outcome = finished.recv_timeout(Duration::from_secs(5));
+    if outcome.is_err() {
+        // The worker owns the write, so let it finish before reporting the
+        // bounded user-visible latency failure.
+        worker.join().unwrap();
+        panic!("large history replacement exceeded five seconds");
+    }
+    outcome.unwrap().unwrap();
+    worker.join().unwrap();
+    store.shutdown().unwrap();
 }
 
 fn task_projection(task_id: &str) -> TaskProjection {

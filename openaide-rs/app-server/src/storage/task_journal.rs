@@ -17,4 +17,5 @@ pub use model::{
     TaskStorageFailure, TaskStorageFatalFailure, TaskWrite, TerminalOutputAppend,
     ToolArtifactProjection, ToolArtifactReplacement, ToolTerminalAppend,
 };
+pub(crate) use store::TrySubmit;
 pub use store::{CommitReceipt, TaskJournalStore};

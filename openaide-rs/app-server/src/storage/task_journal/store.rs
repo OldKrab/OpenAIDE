@@ -1,5 +1,4 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::fs;
 use std::panic::{self, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{self, Receiver};
@@ -19,12 +18,14 @@ use super::model::{
 use super::projection::{apply_operations, replay_tasks, validate_operations};
 use super::scheduler::{NextWork, QueuedWrite, Scheduler};
 
+mod admission;
 mod compaction;
+pub(super) mod failure;
+pub(crate) use admission::TrySubmit;
 
 const TASK_STORE_DIR: &str = "task-store-v1";
 const TASKS_DIR: &str = "tasks";
 pub(super) const JOURNAL_FILE: &str = "task.journal";
-pub(super) const QUARANTINE_FILE: &str = "storage.quarantined";
 
 /// Handle for one admitted write. Waiting establishes durability; dropping the
 /// handle leaves the admitted write owned by the storage worker.
@@ -54,6 +55,7 @@ struct StoreInner {
     worker: Mutex<Option<thread::JoinHandle<()>>>,
     failure_subscribers: Arc<Mutex<Vec<mpsc::Sender<TaskStorageFailure>>>>,
     fatal_events: Mutex<Option<Receiver<TaskStorageFatalFailure>>>,
+    faults: Arc<frame::FaultInjector>,
 }
 
 impl Drop for StoreInner {
@@ -95,6 +97,7 @@ impl TaskJournalStore {
         let tasks_root = store_root.join(TASKS_DIR);
         frame::create_directory_durably(&tasks_root, frame::JournalKind::Root, faults.as_ref())?;
         let recovered = replay_tasks(&tasks_root)?;
+        failure::ensure_recovered_statuses(&tasks_root, &recovered)?;
         let artifact_heads = artifact::reconcile(&tasks_root, &recovered)?;
         let projections = Arc::new(RwLock::new(recovered));
         let scheduler = Arc::new(Scheduler::new());
@@ -152,6 +155,7 @@ impl TaskJournalStore {
                     worker: Mutex::new(Some(worker)),
                     failure_subscribers,
                     fatal_events: Mutex::new(Some(fatal_events)),
+                    faults,
                 }),
             },
             commits,
@@ -195,6 +199,12 @@ impl TaskJournalStore {
             peak_global_stream_bytes: metrics.peak_global_stream_bytes,
             peak_task_stream_bytes: metrics.peak_task_stream_bytes,
         }
+    }
+
+    /// Returns the number of durability sync system calls exercised by this
+    /// store instance. Benchmarks use observed I/O instead of inferred counts.
+    pub fn durability_sync_calls(&self) -> u64 {
+        self.inner.faults.sync_calls()
     }
 
     pub fn load(&self, task_id: &str) -> Result<TaskProjection, RuntimeError> {
@@ -407,7 +417,7 @@ fn commit_batch(
         if let Err(error) =
             compaction::compact_task(tasks_root, &mut next_task, task_id, compaction, faults)
         {
-            persist_quarantine(tasks_root, task_id);
+            quarantine_or_abort(tasks_root, task_id);
             return Err(freeze_shared_task(projections, task_id, error));
         }
         projections
@@ -462,6 +472,13 @@ fn commit_batch(
         }
         None => 1,
     };
+    let journal = journal_path(tasks_root, task_id)?;
+    if sequence == 1 {
+        let task_dir = journal.parent().ok_or_else(|| {
+            RuntimeError::Storage("Task journal has no parent directory".to_string())
+        })?;
+        failure::ensure_status(task_dir)?;
+    }
     let frame = JournalFrame {
         format_version: 1,
         sequence,
@@ -495,7 +512,7 @@ fn commit_batch(
         ) {
             Ok(change) => change,
             Err(error) => {
-                persist_quarantine(tasks_root, task_id);
+                quarantine_or_abort(tasks_root, task_id);
                 return Err(freeze_shared_task(projections, task_id, error));
             }
         };
@@ -505,7 +522,6 @@ fn commit_batch(
         );
         artifact_changes.push(change);
     }
-    let journal = journal_path(tasks_root, task_id)?;
     let journal_kind = if has_artifact_reference {
         frame::JournalKind::ArtifactReference
     } else {
@@ -517,14 +533,14 @@ fn commit_batch(
         frame::append_with_faults(&journal, &frame, journal_kind, faults)
     };
     if let Err(error) = persisted {
-        persist_quarantine(tasks_root, task_id);
+        quarantine_or_abort(tasks_root, task_id);
         return Err(freeze_shared_task(projections, task_id, error));
     }
     let compacted =
         match compaction::compact_task(tasks_root, &mut next_task, task_id, compaction, faults) {
             Ok(compacted) => compacted,
             Err(error) => {
-                persist_quarantine(tasks_root, task_id);
+                quarantine_or_abort(tasks_root, task_id);
                 return Err(freeze_shared_task(projections, task_id, error));
             }
         };
@@ -541,26 +557,14 @@ fn commit_batch(
     }))
 }
 
-fn persist_quarantine(tasks_root: &Path, task_id: &str) {
-    let Ok(task_dir) = journal_path(tasks_root, task_id).and_then(|path| {
-        path.parent()
-            .map(Path::to_path_buf)
-            .ok_or_else(|| RuntimeError::Storage("Task journal has no parent".to_string()))
-    }) else {
-        return;
-    };
-    let marker = task_dir.join(QUARANTINE_FILE);
-    if let Err(error) = fs::write(&marker, b"durability_failure\n").and_then(|_| {
-        fs::File::open(&marker)?.sync_all()?;
-        fs::File::open(&task_dir)?.sync_all()
-    }) {
-        crate::logging::warn(
+fn quarantine_or_abort(tasks_root: &Path, task_id: &str) {
+    let task_dir = tasks_root.join(task_id);
+    if let Err(error) = failure::quarantine(&task_dir) {
+        crate::logging::error(
             "task_journal_quarantine_failed",
-            serde_json::json!({
-                "task_id": task_id,
-                "error_kind": format!("{:?}", error.kind()),
-            }),
+            serde_json::json!({ "task_id": task_id, "error": error.to_string() }),
         );
+        panic!("cannot quarantine Task after uncertain durability failure: {error}");
     }
 }
 

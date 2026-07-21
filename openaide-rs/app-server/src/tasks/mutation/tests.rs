@@ -942,6 +942,74 @@ fn test_mutations(
     (dir, store, mutations, notifications)
 }
 
+#[test]
+fn terminal_stream_backpressure_is_waited_outside_the_global_mutation_lock() {
+    let source = include_str!("../mutation.rs");
+    let function = source
+        .split("pub(crate) fn append_terminal_outputs")
+        .nth(1)
+        .unwrap()
+        .split("#[cfg(test)]")
+        .next()
+        .unwrap();
+    let release = function.find("drop(guard)").unwrap();
+    let wait = function.find("wait_for_capacity").unwrap();
+    assert!(
+        release < wait,
+        "backpressure must not retain the workflow lock"
+    );
+}
+
+#[test]
+fn terminal_stream_revalidates_session_after_waiting_for_the_mutation_lock() {
+    let (_dir, store, mutations, _notifications) = test_mutations(0);
+    let mut task = task_record("task_terminal_admission");
+    task.agent_session_id = Some("session_1".to_string());
+    store.write_task(&task).unwrap();
+
+    let guard = mutations.lock();
+    let worker_mutations = mutations.clone();
+    let (result, finished) = std::sync::mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        let outcome = worker_mutations.append_terminal_outputs(
+            "task_terminal_admission",
+            "session_1",
+            vec![crate::storage::task_journal::ToolTerminalAppend {
+                artifact_id: "artifact_1".to_string(),
+                terminal_id: "terminal_1".to_string(),
+                data: "output".to_string(),
+            }],
+        );
+        result.send(outcome).unwrap();
+    });
+
+    assert!(finished
+        .recv_timeout(std::time::Duration::from_millis(100))
+        .is_err());
+    drop(guard);
+    let outcome = finished.recv_timeout(std::time::Duration::from_secs(1));
+    worker.join().unwrap();
+    assert!(outcome
+        .expect("terminal admission must resume after the workflow mutation")
+        .is_ok());
+
+    let mut replacement = store.read_task("task_terminal_admission").unwrap();
+    replacement.agent_session_id = Some("session_2".to_string());
+    store.write_task(&replacement).unwrap();
+    let error = mutations
+        .append_terminal_outputs(
+            "task_terminal_admission",
+            "session_1",
+            vec![crate::storage::task_journal::ToolTerminalAppend {
+                artifact_id: "artifact_1".to_string(),
+                terminal_id: "terminal_1".to_string(),
+                data: "stale".to_string(),
+            }],
+        )
+        .expect_err("stale Native Session output must be rejected after lock wait");
+    assert!(error.to_string().contains("stale Native Session"));
+}
+
 fn task_record(task_id: &str) -> TaskRecord {
     TaskRecord {
         task_id: task_id.to_string(),

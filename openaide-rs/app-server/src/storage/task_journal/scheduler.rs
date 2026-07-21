@@ -82,13 +82,7 @@ impl Scheduler {
         write: TaskWrite,
         reply: mpsc::Sender<Result<CommittedTaskBatch, RuntimeError>>,
     ) -> Result<(), RuntimeError> {
-        if write.boundary == CommitBoundary::Stream
-            && write.estimated_bytes() > PER_TASK_STREAM_BYTE_CAPACITY
-        {
-            return Err(RuntimeError::Storage(
-                "Task journal stream write exceeds admission capacity".to_string(),
-            ));
-        }
+        validate_write_size(&write)?;
         let mut state = self.state.lock().expect("Task scheduler poisoned");
         while !state.closed && state.shutdown_reply.is_none() && !has_capacity(&state, &write) {
             state = self.changed.wait(state).expect("Task scheduler poisoned");
@@ -100,6 +94,43 @@ impl Scheduler {
         }
         enqueue(&mut state, write, reply);
         self.changed.notify_one();
+        Ok(())
+    }
+
+    /// Attempts admission without waiting. The caller retains ownership of a
+    /// full-lane write so it can release unrelated locks before backpressure.
+    pub fn try_admit(
+        &self,
+        write: TaskWrite,
+        reply: mpsc::Sender<Result<CommittedTaskBatch, RuntimeError>>,
+    ) -> Result<Option<TaskWrite>, RuntimeError> {
+        validate_write_size(&write)?;
+        let mut state = self.state.lock().expect("Task scheduler poisoned");
+        if state.closed || state.shutdown_reply.is_some() {
+            return Err(RuntimeError::Storage(
+                "Task journal worker is unavailable".to_string(),
+            ));
+        }
+        if !has_capacity(&state, &write) {
+            return Ok(Some(write));
+        }
+        enqueue(&mut state, write, reply);
+        self.changed.notify_one();
+        Ok(None)
+    }
+
+    /// Waits only for an admission opportunity; callers must retry because a
+    /// competing stream can consume capacity before they reacquire ownership.
+    pub fn wait_for_capacity(&self, write: &TaskWrite) -> Result<(), RuntimeError> {
+        let mut state = self.state.lock().expect("Task scheduler poisoned");
+        while !state.closed && state.shutdown_reply.is_none() && !has_capacity(&state, write) {
+            state = self.changed.wait(state).expect("Task scheduler poisoned");
+        }
+        if state.closed || state.shutdown_reply.is_some() {
+            return Err(RuntimeError::Storage(
+                "Task journal worker is unavailable".to_string(),
+            ));
+        }
         Ok(())
     }
 
@@ -199,6 +230,17 @@ impl Scheduler {
             state = self.changed.wait(state).expect("Task scheduler poisoned");
         }
     }
+}
+
+fn validate_write_size(write: &TaskWrite) -> Result<(), RuntimeError> {
+    if write.boundary == CommitBoundary::Stream
+        && write.estimated_bytes() > PER_TASK_STREAM_BYTE_CAPACITY
+    {
+        return Err(RuntimeError::Storage(
+            "Task journal stream write exceeds admission capacity".to_string(),
+        ));
+    }
+    Ok(())
 }
 
 fn has_capacity(state: &SchedulerState, write: &TaskWrite) -> bool {

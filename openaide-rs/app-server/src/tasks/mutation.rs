@@ -559,21 +559,31 @@ impl TaskMutations {
         expected_session_id: &str,
         appends: Vec<crate::storage::task_journal::ToolTerminalAppend>,
     ) -> Result<(), RuntimeError> {
-        let _guard = self.lock();
-        let projection = self.store.task_journal().load(task_id)?;
-        if projection.task.agent_session_id.as_deref() != Some(expected_session_id) {
-            return Err(RuntimeError::Conflict(
-                "Terminal update belongs to a stale Native Session".to_string(),
-            ));
+        let mut write = crate::storage::task_journal::TaskWrite::stream_append_terminals(
+            task_id.to_string(),
+            appends,
+        );
+        loop {
+            let guard = self.lock();
+            let projection = self.store.task_journal().load(task_id)?;
+            if projection.task.agent_session_id.as_deref() != Some(expected_session_id) {
+                return Err(RuntimeError::Conflict(
+                    "Terminal update belongs to a stale Native Session".to_string(),
+                ));
+            }
+            match self.store.task_journal().try_submit(write)? {
+                crate::storage::task_journal::TrySubmit::Admitted(receipt) => {
+                    drop(guard);
+                    drop(receipt);
+                    return Ok(());
+                }
+                crate::storage::task_journal::TrySubmit::Full(returned) => {
+                    write = returned;
+                    drop(guard);
+                    self.store.task_journal().wait_for_capacity(&write)?;
+                }
+            }
         }
-        let receipt = self.store.task_journal().submit(
-            crate::storage::task_journal::TaskWrite::stream_append_terminals(
-                task_id.to_string(),
-                appends,
-            ),
-        )?;
-        drop(receipt);
-        Ok(())
     }
 
     #[cfg(test)]

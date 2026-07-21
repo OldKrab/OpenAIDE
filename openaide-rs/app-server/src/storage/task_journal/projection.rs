@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
@@ -10,7 +10,7 @@ use crate::storage::records::{MessageMeta, StoredMessage};
 use super::artifact::validate_artifact_id;
 use super::frame::{self, ReplayedFrames};
 use super::model::{JournalFrame, TaskOperation, TaskProjection};
-use super::store::{RecoveredTask, JOURNAL_FILE, QUARANTINE_FILE};
+use super::store::{failure, RecoveredTask, JOURNAL_FILE};
 
 pub(super) fn validate_operations(
     current: Option<&RecoveredTask>,
@@ -258,7 +258,7 @@ pub(super) fn replay_tasks(
         }
         let task_id = entry.file_name().to_string_lossy().to_string();
         validate_task_id(&task_id)?;
-        if entry.path().join(QUARANTINE_FILE).exists() {
+        if failure::is_quarantined(&entry.path())? {
             tasks.insert(
                 task_id,
                 RecoveredTask::Unavailable {
@@ -374,10 +374,18 @@ fn validate_message_meta(task_id: &str, message_meta: &MessageMeta) -> Result<()
 }
 
 fn validate_message_set(messages: &[StoredMessage]) -> Result<(), RuntimeError> {
-    let mut accepted = Vec::with_capacity(messages.len());
+    let mut sequences = HashSet::with_capacity(messages.len());
+    let mut identities = HashSet::with_capacity(messages.len());
+    let mut message_ids = HashSet::with_capacity(messages.len());
     for message in messages {
-        validate_message_append(&accepted, message)?;
-        accepted.push(message.clone());
+        if !sequences.insert(message.sequence)
+            || !identities.insert(message.chat.identity.as_str())
+            || !message_ids.insert(message.chat.message_id.as_str())
+        {
+            return Err(RuntimeError::Conflict(
+                "Task journal message append duplicates durable identity".to_string(),
+            ));
+        }
     }
     Ok(())
 }

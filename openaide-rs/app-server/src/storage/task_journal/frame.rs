@@ -1,6 +1,7 @@
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::Path;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
 
 use serde::de::DeserializeOwned;
@@ -63,6 +64,7 @@ struct ArmedFault {
 #[derive(Default)]
 pub(super) struct FaultInjector {
     armed: Mutex<Option<ArmedFault>>,
+    sync_calls: AtomicU64,
 }
 
 impl FaultInjector {
@@ -74,6 +76,7 @@ impl FaultInjector {
     pub(super) fn armed(kind: JournalKind, point: FaultPoint) -> Self {
         Self {
             armed: Mutex::new(Some(ArmedFault { kind, point })),
+            sync_calls: AtomicU64::new(0),
         }
     }
 
@@ -97,6 +100,14 @@ impl FaultInjector {
             )));
         }
         Ok(())
+    }
+
+    pub(super) fn sync_calls(&self) -> u64 {
+        self.sync_calls.load(Ordering::Relaxed)
+    }
+
+    fn record_sync(&self) {
+        self.sync_calls.fetch_add(1, Ordering::Relaxed);
     }
 
     pub(super) fn panic_if_armed(&self) {
@@ -164,6 +175,7 @@ pub(super) fn create_with_faults<T: FramedRecord>(
         .map_err(|error| io_error("create_header_write", error))?;
     write_frame(&mut file, frame, kind, faults)?;
     faults.check(kind, FaultPoint::FileSync)?;
+    faults.record_sync();
     file.sync_all()
         .map_err(|error| io_error("create_sync", error))?;
     sync_directory(parent, kind, FaultPoint::ParentSync, faults)?;
@@ -227,6 +239,7 @@ pub(super) fn append_with_faults<T: FramedRecord>(
         .map_err(|error| io_error("append_open", error))?;
     write_frame(&mut file, frame, kind, faults)?;
     faults.check(kind, FaultPoint::FileSync)?;
+    faults.record_sync();
     file.sync_all()
         .map_err(|error| io_error("append_sync", error))?;
     Ok(())
@@ -443,6 +456,7 @@ pub(super) fn truncate_after_with_faults<T>(
     file.set_len(retained_len)
         .map_err(|error| io_error("reconcile_truncate", error))?;
     faults.check(kind, FaultPoint::TruncateSync)?;
+    faults.record_sync();
     file.sync_all()
         .map_err(|error| io_error("reconcile_sync", error))?;
     crate::logging::warn(
@@ -507,6 +521,7 @@ fn sync_directory(
     faults: &FaultInjector,
 ) -> Result<(), RuntimeError> {
     faults.check(kind, point)?;
+    faults.record_sync();
     File::open(path)
         .map_err(|error| io_error("parent_sync_open", error))?
         .sync_all()

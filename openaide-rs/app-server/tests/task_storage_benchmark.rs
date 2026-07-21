@@ -24,7 +24,9 @@ use openaide_app_server::storage::records::{
     MessageMeta, StoredMessage, TaskConfigMutationState, TaskLifecycle, TaskPreparationRecord,
     TaskRecord,
 };
-use openaide_app_server::storage::task_journal::{TaskJournalStore, TaskProjection, TaskWrite};
+use openaide_app_server::storage::task_journal::{
+    CommitReceipt, TaskJournalStore, TaskProjection, TaskWrite,
+};
 use openaide_app_server::storage::Store;
 use openaide_app_server::tasks::TaskService;
 use serde::{Deserialize, Serialize};
@@ -77,18 +79,21 @@ fn compare_legacy_rewrites_with_task_journal_deltas() {
 fn benchmark_legacy(operations: usize) -> serde_json::Value {
     let root = TempDir::new().expect("create legacy state root");
     let path = root.path().join("messages.json");
+    let mut setup_sync_calls = 0;
     write_legacy_projection(
         &path,
         &LegacyProjection {
             history: "x".repeat(HISTORY_BYTES),
             tool_output_preview: String::new(),
         },
+        &mut setup_sync_calls,
     );
 
     let started = Instant::now();
     let mut latencies = Vec::with_capacity(operations);
     let mut physical_frame_bytes = 0_usize;
     let mut logical_update_bytes = 0_usize;
+    let mut sync_calls = 0_usize;
     for index in 0..operations {
         let operation_started = Instant::now();
         let bytes = fs::read(&path).expect("read legacy projection");
@@ -96,7 +101,7 @@ fn benchmark_legacy(operations: usize) -> serde_json::Value {
             serde_json::from_slice(&bytes).expect("parse legacy projection");
         projection.tool_output_preview = format!("update-{index}");
         logical_update_bytes += projection.tool_output_preview.len();
-        physical_frame_bytes += write_legacy_projection(&path, &projection);
+        physical_frame_bytes += write_legacy_projection(&path, &projection, &mut sync_calls);
         latencies.push(operation_started.elapsed());
     }
     let elapsed = started.elapsed();
@@ -112,7 +117,7 @@ fn benchmark_legacy(operations: usize) -> serde_json::Value {
         "disk_bytes": directory_bytes(root.path()),
         "logical_update_bytes": logical_update_bytes,
         "physical_frame_bytes": physical_frame_bytes,
-        "sync_calls": operations.saturating_mul(2),
+        "sync_calls": sync_calls,
         "publication_events": operations,
     })
 }
@@ -124,18 +129,26 @@ struct LegacyProjection {
 }
 
 /// Models the old read/serialize/atomic-replace path without calling the cut-over Store facade.
-fn write_legacy_projection(path: &Path, projection: &LegacyProjection) -> usize {
+fn write_legacy_projection(
+    path: &Path,
+    projection: &LegacyProjection,
+    sync_calls: &mut usize,
+) -> usize {
     let bytes = serde_json::to_vec(projection).expect("serialize legacy projection");
     let temporary = path.with_extension("tmp");
     let mut file = fs::File::create(&temporary).expect("create legacy temporary file");
     file.write_all(&bytes).expect("write legacy projection");
-    file.sync_all().expect("sync legacy projection");
+    sync_all_counted(&file, sync_calls, "sync legacy projection");
     fs::rename(&temporary, path).expect("publish legacy projection");
-    fs::File::open(path.parent().expect("legacy parent"))
-        .expect("open legacy parent")
-        .sync_all()
-        .expect("sync legacy parent");
+    let parent = fs::File::open(path.parent().expect("legacy parent")).expect("open legacy parent");
+    sync_all_counted(&parent, sync_calls, "sync legacy parent");
     bytes.len()
+}
+
+fn sync_all_counted(file: &fs::File, sync_calls: &mut usize, context: &str) {
+    file.sync_all()
+        .unwrap_or_else(|error| panic!("{context}: {error}"));
+    *sync_calls += 1;
 }
 
 fn benchmark_journal(history_bytes: usize, operations: usize) -> serde_json::Value {
@@ -171,14 +184,24 @@ fn benchmark_journal(history_bytes: usize, operations: usize) -> serde_json::Val
         .expect("commit create");
     let _ = commits.recv().expect("receive create commit");
     let disk_bytes_after_create = directory_bytes(root.path());
+    let sync_calls_before_workload = store.durability_sync_calls();
 
     let started = Instant::now();
-    let mut latencies = Vec::with_capacity(operations);
+    let mut admission_latencies = Vec::with_capacity(operations);
+    let (receipt_sender, receipt_receiver) = std::sync::mpsc::channel::<(Instant, CommitReceipt)>();
+    let receipt_collector = thread::spawn(move || {
+        let mut durable_latencies = Vec::with_capacity(operations);
+        for (operation_started, receipt) in receipt_receiver {
+            receipt.wait().expect("commit terminal delta");
+            durable_latencies.push(operation_started.elapsed());
+        }
+        durable_latencies
+    });
     for index in 0..operations {
         let operation_started = Instant::now();
         let chunk_bytes = PROFILE_OUTPUT_BYTES / operations
             + usize::from(index < PROFILE_OUTPUT_BYTES % operations);
-        store
+        let receipt = store
             .submit(TaskWrite::stream_append_terminal(
                 "task_journal",
                 "artifact_execute_1",
@@ -186,8 +209,12 @@ fn benchmark_journal(history_bytes: usize, operations: usize) -> serde_json::Val
                 "x".repeat(chunk_bytes),
             ))
             .expect("admit terminal delta");
-        latencies.push(operation_started.elapsed());
+        admission_latencies.push(operation_started.elapsed());
+        receipt_sender
+            .send((operation_started, receipt))
+            .expect("collect durable receipt");
     }
+    drop(receipt_sender);
     let barrier_started = Instant::now();
     store
         .submit(TaskWrite::barrier("task_journal"))
@@ -196,6 +223,10 @@ fn benchmark_journal(history_bytes: usize, operations: usize) -> serde_json::Val
         .expect("flush terminal deltas");
     let barrier_latency = barrier_started.elapsed();
     let elapsed = started.elapsed();
+    let mut durable_latencies = receipt_collector.join().expect("join receipt collector");
+    let sync_calls = store
+        .durability_sync_calls()
+        .saturating_sub(sync_calls_before_workload);
     let durable_commits = commits.try_iter().collect::<Vec<_>>();
     let durable_batches = durable_commits.len();
     let publication_events = durable_commits.len();
@@ -245,9 +276,12 @@ fn benchmark_journal(history_bytes: usize, operations: usize) -> serde_json::Val
         "unrelated_history_bytes_each": UNRELATED_HISTORY_BYTES,
         "operations": operations,
         "wall_ms": elapsed.as_secs_f64() * 1000.0,
-        "admission_p50_ms": percentile_ms(&mut latencies, 50),
-        "admission_p95_ms": percentile_ms(&mut latencies, 95),
-        "admission_max_ms": latencies.iter().max().unwrap().as_secs_f64() * 1000.0,
+        "admission_p50_ms": percentile_ms(&mut admission_latencies, 50),
+        "admission_p95_ms": percentile_ms(&mut admission_latencies, 95),
+        "admission_max_ms": admission_latencies.iter().max().unwrap().as_secs_f64() * 1000.0,
+        "durable_p50_ms": percentile_ms(&mut durable_latencies, 50),
+        "durable_p95_ms": percentile_ms(&mut durable_latencies, 95),
+        "durable_max_ms": durable_latencies.iter().max().unwrap().as_secs_f64() * 1000.0,
         "barrier_ms": barrier_latency.as_secs_f64() * 1000.0,
         "durable_batches": durable_batches,
         "publication_events": publication_events,
@@ -255,7 +289,7 @@ fn benchmark_journal(history_bytes: usize, operations: usize) -> serde_json::Val
         "output_bytes": output_bytes,
         "logical_delta_bytes": PROFILE_OUTPUT_BYTES,
         "physical_frame_bytes": physical_frame_bytes,
-        "sync_calls": durable_batches.saturating_mul(2).saturating_add(2),
+        "sync_calls": sync_calls,
         "peak_global_queued_bytes": queue_metrics.peak_global_stream_bytes,
         "peak_task_queued_bytes": queue_metrics.peak_task_stream_bytes,
         "shutdown_drain_ms": shutdown_drain.latency.as_secs_f64() * 1000.0,
