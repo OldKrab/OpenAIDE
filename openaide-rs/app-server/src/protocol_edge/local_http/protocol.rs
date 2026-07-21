@@ -126,7 +126,7 @@ impl LocalHttpProtocolHandler {
         session_id: &str,
         after: u64,
     ) -> LocalHttpResponse {
-        let connection = valid_connection_id(connection_id);
+        let now = AppServerTime::now();
         handle_reliable_session_poll(
             authorization,
             &self.auth_token,
@@ -134,16 +134,17 @@ impl LocalHttpProtocolHandler {
             session_id,
             after,
             &self.sessions,
-            || {
-                let Some(connection_id) = connection else {
-                    return (Vec::new(), Vec::new());
-                };
-                (
-                    self.gateway
-                        .drain_event_deliveries_for_connection(&connection_id),
-                    self.gateway
-                        .drain_server_requests_for_connection(&connection_id, AppServerTime::now()),
-                )
+            |connection_id| {
+                self.gateway
+                    .observe_connection_activity(connection_id, now)
+                    .then(|| {
+                        (
+                            self.gateway
+                                .drain_event_deliveries_for_connection(connection_id),
+                            self.gateway
+                                .drain_server_requests_for_connection(connection_id, now),
+                        )
+                    })
             },
         )
     }
@@ -174,7 +175,7 @@ impl LocalHttpProtocolHandler {
         self.event_streams.is_current(lease)
             && self
                 .gateway
-                .observe_event_stream_activity(lease.connection_id(), AppServerTime::now())
+                .observe_connection_activity(lease.connection_id(), AppServerTime::now())
     }
 
     pub(crate) fn finish_event_stream(&self, lease: &EventStreamLease) {
@@ -444,10 +445,12 @@ fn handle_reliable_session_poll(
     session_id: &str,
     after: u64,
     sessions: &ReliableSessionRegistry,
-    drain: impl FnOnce() -> (
+    receive: impl FnOnce(
+        &ConnectionId,
+    ) -> Option<(
         Vec<crate::protocol_edge::GatewayEventDelivery>,
         Vec<crate::server_requests::ServerRequestDelivery>,
-    ),
+    )>,
 ) -> LocalHttpResponse {
     match auth_status(authorization, expected_token) {
         AuthStatus::Authorized => {}
@@ -460,7 +463,9 @@ fn handle_reliable_session_poll(
     if sessions.connection_id(session_id).as_ref() != Some(&connection_id) {
         return empty_response(410);
     }
-    let (events, mut server_requests) = drain();
+    let Some((events, mut server_requests)) = receive(&connection_id) else {
+        return empty_response(410);
+    };
     // Task-scoped permissions and questions are shared product state. Their
     // snapshots/events fan out to every eligible client; only client-targeted
     // capabilities remain reverse RPC requests.

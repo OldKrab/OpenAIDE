@@ -136,8 +136,8 @@ impl SharedRpcGateway {
         )
     }
 
-    /// Keeps a client live while its event stream is still accepting writes.
-    pub fn observe_event_stream_activity(
+    /// Keeps an initialized client live while its authenticated transport is active.
+    pub fn observe_connection_activity(
         &self,
         connection_id: &ConnectionId,
         now: AppServerTime,
@@ -145,7 +145,7 @@ impl SharedRpcGateway {
         self.gateway
             .lock()
             .expect("protocol gateway lock poisoned")
-            .observe_event_stream_activity(connection_id, now)
+            .observe_connection_activity(connection_id, now)
     }
 
     pub fn publish_committed_task_update(

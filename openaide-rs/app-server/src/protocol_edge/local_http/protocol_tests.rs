@@ -10,8 +10,8 @@ use openaide_app_server_protocol::snapshot::{
 use serde_json::{json, Value};
 
 use super::*;
-use crate::client_lifecycle::ConnectionId;
-use crate::protocol_edge::{GatewayResponse, InboundProtocolMessage};
+use crate::client_lifecycle::{AppServerTime, ConnectionId};
+use crate::protocol_edge::{GatewayResponse, InboundProtocolMessage, SharedRpcGateway};
 
 #[test]
 fn product_request_requires_connection_id_header() {
@@ -339,6 +339,7 @@ fn reliable_upload_returns_no_rpc_messages_and_poll_delivers_the_response() {
             }
         },
     );
+    let mut observed_liveness = false;
     let poll = handle_reliable_session_poll(
         Some("Bearer token"),
         "token",
@@ -346,11 +347,16 @@ fn reliable_upload_returns_no_rpc_messages_and_poll_delivers_the_response() {
         session_id,
         0,
         &sessions,
-        || (Vec::new(), Vec::new()),
+        |connection_id| {
+            assert_eq!(connection_id, &ConnectionId::new("local-http:client-1"));
+            observed_liveness = true;
+            Some((Vec::new(), Vec::new()))
+        },
     );
 
     assert_eq!(upload.status, 204);
     assert!(upload.body.is_empty());
+    assert!(observed_liveness);
     let batch: Value = serde_json::from_str(&poll.body).unwrap();
     assert_eq!(batch["frames"][0]["sequence"], 1);
     assert_eq!(batch["frames"][0]["message"]["id"], "request-1");
@@ -358,6 +364,30 @@ fn reliable_upload_returns_no_rpc_messages_and_poll_delivers_the_response() {
         batch["frames"][0]["message"]["result"]["result"]["tasks"],
         json!([])
     );
+}
+
+#[test]
+fn reliable_poll_keeps_the_initialized_product_client_live() {
+    let connection_id = ConnectionId::new("local-http:client-1");
+    let gateway = SharedRpcGateway::new(crate::protocol_edge::tests::initialized_gateway(
+        "client-1",
+        "local-http:client-1",
+    ));
+    let handler = LocalHttpProtocolHandler::new(gateway.clone(), "token", "server-1");
+    let opened = handler.handle(
+        Some("Bearer token"),
+        Some("client-1"),
+        &json!({ "transport": "open" }).to_string(),
+    );
+    let handshake: Value = serde_json::from_str(&opened.body).unwrap();
+    let session_id = handshake["sessionId"].as_str().unwrap();
+    let before_poll = AppServerTime::now();
+
+    let poll = handler.poll_session(Some("Bearer token"), Some("client-1"), session_id, 0);
+    gateway.expire_inactive_clients(AppServerTime(before_poll.0 + 1));
+
+    assert_eq!(poll.status, 204);
+    assert!(gateway.connection_is_initialized(&connection_id));
 }
 
 fn request(id: &str, method: &str, params: Value) -> String {

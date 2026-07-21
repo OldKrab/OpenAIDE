@@ -6,7 +6,7 @@ use super::*;
 
 #[test]
 fn transport_close_enters_grace_before_expiry() {
-    let mut hub = ClientHub::new(10);
+    let mut hub = ClientHub::new(ClientLivenessPolicy::new(10, 10));
     let client_id = ClientInstanceId::from("client-1");
     hub.initialize(
         ConnectionId::new("conn-1"),
@@ -39,7 +39,7 @@ fn transport_close_enters_grace_before_expiry() {
 
 #[test]
 fn initialize_with_same_client_id_reattaches_delivery() {
-    let mut hub = ClientHub::new(10);
+    let mut hub = ClientHub::new(ClientLivenessPolicy::new(10, 10));
     let client_id = ClientInstanceId::from("client-1");
     assert!(matches!(
         hub.initialize(
@@ -70,7 +70,7 @@ fn initialize_with_same_client_id_reattaches_delivery() {
 
 #[test]
 fn reinitialize_replaces_old_live_connection_mapping() {
-    let mut hub = ClientHub::new(10);
+    let mut hub = ClientHub::new(ClientLivenessPolicy::new(10, 10));
     let client_id = ClientInstanceId::from("client-1");
     hub.initialize(
         ConnectionId::new("conn-1"),
@@ -100,7 +100,7 @@ fn reinitialize_replaces_old_live_connection_mapping() {
 
 #[test]
 fn connection_activity_extends_liveness_deadline() {
-    let mut hub = ClientHub::new(10);
+    let mut hub = ClientHub::new(ClientLivenessPolicy::new(10, 10));
     let client_id = ClientInstanceId::from("client-1");
     hub.initialize(
         ConnectionId::new("conn-1"),
@@ -123,6 +123,13 @@ fn connection_activity_extends_liveness_deadline() {
     assert_eq!(
         hub.expire_inactive_clients(AppServerTime(19)),
         ClientExpiryBatch {
+            expired: Vec::new(),
+            last_client_expired: false,
+        }
+    );
+    assert_eq!(
+        hub.expire_inactive_clients(AppServerTime(29)),
+        ClientExpiryBatch {
             expired: vec![client_id],
             last_client_expired: true,
         }
@@ -130,8 +137,75 @@ fn connection_activity_extends_liveness_deadline() {
 }
 
 #[test]
-fn inactive_expiry_removes_only_due_clients() {
-    let mut hub = ClientHub::new(10);
+fn heartbeat_timeout_enters_reconnect_grace_before_expiry() {
+    let mut hub = ClientHub::new(ClientLivenessPolicy::new(10, 10));
+    let client_id = ClientInstanceId::from("client-1");
+    hub.initialize(
+        ConnectionId::new("conn-1"),
+        init_params(client_id.clone()),
+        AppServerTime(100),
+    );
+
+    assert_eq!(
+        hub.expire_inactive_clients(AppServerTime(110)),
+        ClientExpiryBatch {
+            expired: Vec::new(),
+            last_client_expired: false,
+        }
+    );
+    assert!(hub.client_by_instance(&client_id).is_some());
+    assert_eq!(
+        hub.expire_inactive_clients(AppServerTime(119)),
+        ClientExpiryBatch {
+            expired: Vec::new(),
+            last_client_expired: false,
+        }
+    );
+    assert_eq!(
+        hub.expire_inactive_clients(AppServerTime(120)),
+        ClientExpiryBatch {
+            expired: vec![client_id],
+            last_client_expired: true,
+        }
+    );
+}
+
+#[test]
+fn heartbeat_timeout_is_independent_from_reconnect_grace() {
+    let mut hub = ClientHub::new(ClientLivenessPolicy::new(10, 30));
+    let client_id = ClientInstanceId::from("client-1");
+    hub.initialize(
+        ConnectionId::new("conn-1"),
+        init_params(client_id.clone()),
+        AppServerTime(100),
+    );
+
+    assert_eq!(
+        hub.expire_inactive_clients(AppServerTime(129)),
+        ClientExpiryBatch {
+            expired: Vec::new(),
+            last_client_expired: false,
+        }
+    );
+    assert_eq!(
+        hub.expire_inactive_clients(AppServerTime(130)),
+        ClientExpiryBatch {
+            expired: Vec::new(),
+            last_client_expired: false,
+        }
+    );
+    assert_eq!(
+        hub.expire_inactive_clients(AppServerTime(140)),
+        ClientExpiryBatch {
+            expired: vec![client_id],
+            last_client_expired: true,
+        }
+    );
+}
+
+#[test]
+fn reconnect_grace_expiry_removes_only_due_clients() {
+    let mut hub = ClientHub::new(ClientLivenessPolicy::new(10, 10));
     let first = ClientInstanceId::from("client-1");
     let second = ClientInstanceId::from("client-2");
     hub.initialize(
@@ -147,6 +221,13 @@ fn inactive_expiry_removes_only_due_clients() {
 
     assert_eq!(
         hub.expire_inactive_clients(AppServerTime(11)),
+        ClientExpiryBatch {
+            expired: Vec::new(),
+            last_client_expired: false,
+        }
+    );
+    assert_eq!(
+        hub.expire_inactive_clients(AppServerTime(21)),
         ClientExpiryBatch {
             expired: vec![first.clone()],
             last_client_expired: false,

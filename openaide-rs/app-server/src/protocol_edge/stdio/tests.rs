@@ -481,7 +481,10 @@ fn new_client_lifecycle_cannot_revive_abandoned_attachment_handles() {
         AppServerTime(1),
     ));
     let handle_id = create_pasted_image_handle(&gateway, &first_connection, "create", 2);
-    let expired = gateway.expire_inactive_clients(AppServerTime(10_002));
+    assert!(gateway
+        .expire_inactive_clients(AppServerTime(30_002))
+        .is_empty());
+    let expired = gateway.expire_inactive_clients(AppServerTime(40_002));
     assert_eq!(expired.len(), 1);
 
     let replacement_connection = ConnectionId::new("conn-replacement");
@@ -492,7 +495,7 @@ fn new_client_lifecycle_cannot_revive_abandoned_attachment_handles() {
             CLIENT_INITIALIZE,
             initialize_params("client-reused"),
         ),
-        AppServerTime(10_003),
+        AppServerTime(40_003),
     ));
     let refresh_error = gateway_error(gateway.handle_inbound(
         replacement_connection,
@@ -501,7 +504,7 @@ fn new_client_lifecycle_cannot_revive_abandoned_attachment_handles() {
             ATTACHMENT_REFRESH_HANDLES,
             json!({ "taskId": "task-1", "handles": [handle_id] }),
         ),
-        AppServerTime(10_004),
+        AppServerTime(40_004),
     ));
     assert_eq!(
         refresh_error.error.code,
