@@ -53,7 +53,6 @@ pub(super) fn gateway(
         store.clone(),
         configured_projects.clone(),
     );
-    let task_navigation = TaskNavigationStore::new(store.clone());
     let project_resolver = StorageProjectResolver::new_with_configured_roots(
         store.clone(),
         configured_projects.clone(),
@@ -75,14 +74,21 @@ pub(super) fn gateway(
         agent_runtime.clone(),
         agent_statuses.clone(),
     );
-    let task_product_api = Arc::new(TaskProductApi::new_with_server_requests(
+    let task_navigation_agents = agent_registry.clone();
+    let task_product_api = Arc::new(TaskProductApi::new_with_server_requests_and_projects(
         store.clone(),
         Arc::new(project_resolver),
         agent_registry,
         agent_runtime,
         task_notifier,
         server_requests.clone(),
+        configured_projects.clone(),
     )?);
+    let task_navigation = TaskNavigationStore::with_native_sessions_and_agents(
+        store.clone(),
+        task_product_api.native_session_catalog(),
+        task_navigation_agents,
+    );
     let task_snapshots = Arc::new(TaskSnapshotStore::with_history_sync(
         store.clone(),
         task_product_api.history_sync_snapshots(),

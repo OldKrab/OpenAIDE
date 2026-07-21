@@ -170,11 +170,12 @@ fn local_http_error_fields(
 fn start_client_liveness_expirer(gateway: SharedRpcGateway) -> Receiver<()> {
     let (shutdown_sender, shutdown_receiver) = mpsc::channel();
     thread::spawn(move || {
-        gateway.request_native_session_catalog_refresh();
         let mut last_native_catalog_refresh = Instant::now();
         loop {
             thread::sleep(Duration::from_secs(1));
-            if last_native_catalog_refresh.elapsed() >= Duration::from_secs(60) {
+            if gateway.has_task_navigation_subscribers()
+                && last_native_catalog_refresh.elapsed() >= Duration::from_secs(60)
+            {
                 gateway.request_native_session_catalog_refresh();
                 last_native_catalog_refresh = Instant::now();
             }

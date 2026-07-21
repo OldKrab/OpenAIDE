@@ -84,7 +84,12 @@ export type AgentAuthMethodSummary = {
 };
 
 export type AgentListedSession = {
+  /** Stable Agent owner when the row comes from global Task Navigation. */
+  agent_id?: string;
+  agent_name?: string;
   session_id: string;
+  /** Project context used to discover and later adopt this Native Session. */
+  project_id?: string;
   cwd: string;
   title?: string;
   last_activity?: string;

@@ -49,6 +49,16 @@ impl AgentSessionEventSink for TaskSessionEventSink {
     }
 
     fn metadata_changed(&self, update: AgentSessionMetadataUpdate) -> Result<(), RuntimeError> {
+        let catalog_title = match &update.title {
+            AgentMetadataField::Unchanged => None,
+            AgentMetadataField::Clear => Some(None),
+            AgentMetadataField::Value(title) => Some(Some(title.clone())),
+        };
+        let catalog_updated_at = match &update.updated_at {
+            AgentMetadataField::Value(updated_at) => Some(updated_at.trim().to_string()),
+            AgentMetadataField::Unchanged | AgentMetadataField::Clear => None,
+        };
+        let mut catalog_reference = None;
         self.mutations.commit_existing_task(
             &self.task_id,
             TaskCommitOptions::metadata(),
@@ -56,6 +66,10 @@ impl AgentSessionEventSink for TaskSessionEventSink {
                 if ctx.task().agent_session_id.as_deref() != Some(self.session_id.as_str()) {
                     return Ok(TaskMutationResult::Unchanged);
                 }
+                catalog_reference = Some(crate::native_sessions::catalog::NativeSessionRef::new(
+                    &ctx.task().agent_id,
+                    &self.session_id,
+                ));
                 let task = ctx.task_mut();
                 let mut changed = false;
                 match &update.title {
@@ -65,9 +79,11 @@ impl AgentSessionEventSink for TaskSessionEventSink {
                 }
                 if let AgentMetadataField::Value(updated_at) = &update.updated_at {
                     let updated_at = updated_at.trim();
-                    if !updated_at.is_empty() && task.last_activity != updated_at {
+                    let advances_activity = crate::time::activity_millis(updated_at)
+                        .zip(crate::time::activity_millis(&task.last_activity))
+                        .is_some_and(|(native, task)| native > task);
+                    if advances_activity {
                         task.last_activity = updated_at.to_string();
-                        task.updated_at = updated_at.to_string();
                         changed = true;
                     }
                 }
@@ -78,6 +94,23 @@ impl AgentSessionEventSink for TaskSessionEventSink {
                 })
             },
         )?;
+        if let (Some(catalog), Some(reference)) = (&self.native_catalog, catalog_reference) {
+            if let Err(error) =
+                catalog.record_live_metadata(&reference, catalog_title, catalog_updated_at)
+            {
+                // Task metadata is authoritative for an owned session. A secondary catalog
+                // persistence failure must not detach its live update consumer.
+                crate::logging::warn(
+                    "native_session_catalog_live_metadata_failed",
+                    serde_json::json!({
+                        "task_id": self.task_id,
+                        "agent_id": reference.agent_id,
+                        "session_id": reference.session_id,
+                        "error_code": error.code(),
+                    }),
+                );
+            }
+        }
         Ok(())
     }
 

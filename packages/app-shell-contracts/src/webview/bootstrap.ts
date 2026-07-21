@@ -1,7 +1,7 @@
 import type { AppPreferencesRecord } from "./preferences.js";
 import type { SettingsTabId } from "./preferences.js";
 
-export type WebviewSurfaceKind = "navigation" | "task" | "settings";
+export type WebviewSurfaceKind = "navigation" | "nativeSession" | "task" | "settings";
 
 export type AppShellBootstrap = {
   kind: "web" | "vscodeExtension";
@@ -27,6 +27,8 @@ export type WebviewBootstrap = {
   /** App Shell-owned editor focus used only to highlight Task Navigation. */
   focusedTaskId?: string | null;
   taskId?: string;
+  agentId?: string;
+  nativeSessionId?: string;
   projectId?: string;
   settingsTab?: SettingsTabId;
   /** Agent detail and return intent supplied by a recovery entry point. */

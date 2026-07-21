@@ -94,6 +94,7 @@ pub(crate) struct TaskSessionEventSink {
     mutations: TaskMutations,
     task_id: String,
     session_id: String,
+    native_catalog: Option<crate::native_sessions::catalog::NativeSessionCatalog>,
     server_requests: ServerRequestRuntime,
     text_chunk_routes: TextChunkRoutes,
     emission_lock: Mutex<()>,
@@ -110,10 +111,19 @@ impl TaskSessionEventSink {
             mutations,
             task_id,
             session_id: session_id.clone(),
+            native_catalog: None,
             server_requests,
             text_chunk_routes: TextChunkRoutes::new(session_id),
             emission_lock: Mutex::new(()),
         }
+    }
+
+    pub(crate) fn with_native_catalog(
+        mut self,
+        native_catalog: Option<crate::native_sessions::catalog::NativeSessionCatalog>,
+    ) -> Self {
+        self.native_catalog = native_catalog;
+        self
     }
 }
 

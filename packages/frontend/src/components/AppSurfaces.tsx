@@ -22,7 +22,11 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
   const webMainSurfaceRef = useRef<HTMLElement | null>(null);
   const usesProjectNavigation = bootstrap.surface !== "invalid" && bootstrap.shell.navigationMode === "project";
   const isWebShell = bootstrap.surface !== "invalid" && bootstrap.shell.kind === "web";
-  const isWebWorkbench = isWebShell && (bootstrap.surface === "task" || bootstrap.surface === "settings");
+  const isWebWorkbench = isWebShell && (
+    bootstrap.surface === "task"
+    || bootstrap.surface === "nativeSession"
+    || bootstrap.surface === "settings"
+  );
   const mobileNavigation = useMobileNavigation(isWebWorkbench && mobileLayoutActive);
   const mobileNavigationOpen = mobileNavigation.open;
   const taskSurfaceModel = primaryTaskSurfaceModel(controller);
@@ -202,7 +206,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     const routedActiveTask = bootstrap.taskId ? activeTask : undefined;
     const mobileTitle = bootstrap.surface === "settings"
       ? "Settings"
-      : renderableTaskSnapshot?.task.title ?? routedActiveTask?.title ?? (bootstrap.taskId || openingNativeSession ? "Opening task" : "New task");
+      : renderableTaskSnapshot?.task.title ?? routedActiveTask?.title ?? (openingNativeSession ? "Opening session" : bootstrap.taskId ? "Opening task" : "New task");
     const mobileProject = activeTask?.project_label ?? navigation.projects[0]?.label ?? "OpenAIDE";
     const mobileTaskStatus = renderableTaskSnapshot?.task.status ?? routedActiveTask?.status;
     const mobileSubtitle = bootstrap.surface === "settings"

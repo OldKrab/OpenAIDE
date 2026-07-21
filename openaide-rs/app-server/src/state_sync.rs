@@ -162,6 +162,16 @@ impl StateStream {
         self.subscriptions.len()
     }
 
+    pub fn subscription_count_for_kind(
+        &self,
+        matches: impl Fn(&SubscriptionScope) -> bool,
+    ) -> usize {
+        self.subscriptions
+            .iter()
+            .filter(|subscription| matches(&subscription.scope))
+            .count()
+    }
+
     pub fn read_token(&self) -> SnapshotReadToken {
         self.cursors.read_token()
     }
@@ -285,6 +295,10 @@ fn payload_matches_subscription(
         }
         SubscriptionScope::TaskNavigation { project_id } => {
             matches!(payload, AppServerEventPayload::SnapshotReplaced { .. })
+                || matches!(
+                    payload,
+                    AppServerEventPayload::TaskNavigationReplaced { .. }
+                )
                 || matches!(
                     payload,
                     AppServerEventPayload::TaskNavigationChanged {

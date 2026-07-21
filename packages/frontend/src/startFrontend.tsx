@@ -80,6 +80,6 @@ function sendWebviewDiagnostics(event: string, fields: Record<string, unknown>) 
 }
 
 function webviewSurfaceForTelemetry(surface: string | undefined): WebviewSurfaceKind | "invalid" | undefined {
-  if (surface === "navigation" || surface === "settings" || surface === "task") return surface;
+  if (surface === "navigation" || surface === "nativeSession" || surface === "settings" || surface === "task") return surface;
   return surface === undefined ? undefined : "invalid";
 }

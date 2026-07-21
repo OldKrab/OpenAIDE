@@ -89,7 +89,8 @@ function payloadMatchesSubscriptionScope(scope: SubscriptionScope, payload: AppS
     case "taskNavigation":
       return (
         payload.kind === "snapshotReplaced" ||
-        payload.kind === "taskNavigationChanged"
+        payload.kind === "taskNavigationChanged" ||
+        payload.kind === "taskNavigationReplaced"
       );
     case "task":
       return (

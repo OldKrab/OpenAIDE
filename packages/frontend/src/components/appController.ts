@@ -49,6 +49,7 @@ import { useTaskWorkspace } from "./useTaskWorkspace";
 import type { NewTaskViewIntents, NewTaskViewState } from "./NewTaskView";
 import type { TaskViewIntents } from "./TaskView";
 import { mapProtocolTaskSummary } from "../state/appServerProtocolMapping";
+import { useNativeSessionRouteLifecycle } from "./useNativeSessionRouteLifecycle";
 
 /** Internal workflow assembly exposed only to the controller lifecycle tests. */
 export type AppControllerTestHarness = {
@@ -159,6 +160,7 @@ function useAppControllerCore({ backendConnection }: AppControllerOptions = {}):
   const {
     acceptSnapshotRequest,
     backendInitialized,
+    backendInitializationReady,
     backendConnectionState,
     backendReady,
     bootstrap,
@@ -203,6 +205,17 @@ function useAppControllerCore({ backendConnection }: AppControllerOptions = {}):
   const newTaskDispatch = newTaskWorkspace.dispatch;
   const attachmentResources = newTaskWorkspace.attachmentResources;
   attachmentResourcesRef.current = attachmentResources;
+  useNativeSessionRouteLifecycle({
+    asyncOperations: operationOwner,
+    attachmentResources,
+    backendConnection: backendConnectionRef,
+    backendReady: backendInitializationReady,
+    bootstrap,
+    dispatch: newTaskDispatch,
+    newTaskController,
+    replicaEpoch,
+    state,
+  });
   useSettingsRouteRefresh({
     backendConnectionRef,
     backendInitialized,
@@ -235,7 +248,6 @@ function useAppControllerCore({ backendConnection }: AppControllerOptions = {}):
     newTaskStartAttempt,
     pendingPreparedNewTask: newTaskWorkspace.pendingPreparationForKey,
     newTaskController: newTaskController,
-    requestNativeSessions: newTaskWorkspace.requestNativeSessions,
     setAgents,
     setPreferences,
     state: callbackState,

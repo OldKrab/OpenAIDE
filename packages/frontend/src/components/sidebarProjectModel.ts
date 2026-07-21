@@ -5,6 +5,7 @@ export type SidebarProjectGroup = {
   key: string;
   label: string;
   tasks: TaskSummary[];
+  nativeSessions: AgentListedSession[];
 };
 
 export type SidebarProjectRow =
@@ -14,18 +15,22 @@ export type SidebarProjectRow =
 export function groupedTasks(
   tasks: TaskSummary[],
   projects: ProjectOption[],
-  options: { includeProjectId?: string; includedProjectSessions?: AgentListedSession[] } = {},
+  options: {
+    includeProjectId?: string;
+    includedProjectSessions?: AgentListedSession[];
+  } = {},
 ): SidebarProjectGroup[] {
   const projectLabels = new Map(projects.map((project) => [project.projectId, project.label]));
   const groups = new Map<string, SidebarProjectGroup>();
   for (const project of projects) {
-    groups.set(project.projectId, { key: project.projectId, label: project.label, tasks: [] });
+    groups.set(project.projectId, { key: project.projectId, label: project.label, tasks: [], nativeSessions: [] });
   }
   if (options.includeProjectId && !groups.has(options.includeProjectId)) {
     groups.set(options.includeProjectId, {
       key: options.includeProjectId,
       label: projectLabels.get(options.includeProjectId) ?? "Current workspace",
       tasks: [],
+      nativeSessions: [],
     });
   }
   for (const task of tasks) {
@@ -33,13 +38,25 @@ export function groupedTasks(
     const label = task.project_label
       ?? (task.project_id ? projectLabels.get(task.project_id) : undefined)
       ?? (task.workspace_root || "Other workspace");
-    const group = groups.get(key) ?? { key, label, tasks: [] };
+    const group = groups.get(key) ?? { key, label, tasks: [], nativeSessions: [] };
     group.tasks.push(task);
+    groups.set(key, group);
+  }
+  for (const session of options.includedProjectSessions ?? []) {
+    const key = session.project_id ?? options.includeProjectId;
+    if (!key) continue;
+    const group = groups.get(key) ?? {
+      key,
+      label: projectLabels.get(key) ?? (session.cwd || "Other workspace"),
+      tasks: [],
+      nativeSessions: [],
+    };
+    group.nativeSessions.push(session);
     groups.set(key, group);
   }
   return [...groups.values()].sort((left, right) =>
     compareInProgressDesc(groupHasInProgress(left), groupHasInProgress(right))
-    || compareActivityDesc(newestGroupActivity(left, options), newestGroupActivity(right, options))
+    || compareActivityDesc(newestGroupActivity(left), newestGroupActivity(right))
     || left.label.localeCompare(right.label)
     || left.key.localeCompare(right.key),
   );
@@ -88,11 +105,8 @@ function newestActivity(tasks: TaskSummary[]) {
 
 function newestGroupActivity(
   group: SidebarProjectGroup,
-  options: { includeProjectId?: string; includedProjectSessions?: AgentListedSession[] },
 ) {
-  const sessionActivity = options.includeProjectId === group.key
-    ? newestSessionActivity(options.includedProjectSessions ?? [])
-    : "";
+  const sessionActivity = newestSessionActivity(group.nativeSessions);
   return newerActivity(newestActivity(group.tasks), sessionActivity);
 }
 
@@ -122,7 +136,7 @@ function compareInProgressDesc(left: boolean, right: boolean) {
 }
 
 function taskNavigationTimestamp(task: TaskSummary) {
-  return firstTimestamp(task.last_activity, task.updated_at, task.created_at);
+  return firstTimestamp(task.last_activity);
 }
 
 function sessionActivityTimestamp(session: AgentListedSession) {

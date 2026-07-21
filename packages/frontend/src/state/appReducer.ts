@@ -1,4 +1,5 @@
 import type {
+  AgentListedSession,
   AgentListSessionsResult,
   AppPreferencesRecord,
   Attachment,
@@ -40,6 +41,13 @@ type AppActionPayload =
   | { type: "appServer:ready" }
   | { type: "appServer:replica"; epoch: number; stateRootId: string }
   | { type: "tasks"; archived: boolean; tasks: TaskSummary[] }
+  | {
+      type: "taskNavigation";
+      archived: false;
+      tasks: TaskSummary[];
+      sessions: AgentListedSession[];
+      refreshing: boolean;
+    }
   | { type: "tasks:error"; message: string }
   | { type: "task:list:remove"; taskId: string }
   | { type: "task:promoted"; snapshot: TaskSnapshot; activate: boolean }
@@ -149,6 +157,7 @@ export function bindAppServerReplicaEpoch(
 type GlobalAction = Extract<
   AppAction,
   | { type: "tasks" }
+  | { type: "taskNavigation" }
   | { type: "appServer:error" }
   | { type: "appServer:ready" }
   | { type: "appServer:replica" }
@@ -184,6 +193,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 function isGlobalAction(action: AppAction): action is GlobalAction {
   switch (action.type) {
     case "tasks":
+    case "taskNavigation":
     case "appServer:error":
     case "appServer:ready":
     case "appServer:replica":
@@ -229,6 +239,26 @@ function reduceGlobalState(state: AppState, action: GlobalAction): AppState {
         tasks,
         taskListCache,
         taskListError: undefined,
+      };
+    }
+    case "taskNavigation": {
+      const taskListCache = { ...state.taskListCache, active: action.tasks };
+      return {
+        ...state,
+        tasks: state.showArchived ? state.tasks : action.tasks,
+        taskListCache,
+        taskListError: undefined,
+        newTask: {
+          ...state.newTask,
+          nativeSessions: {
+            ...state.newTask.nativeSessions,
+            items: action.sessions,
+            loaded: true,
+            loading: action.refreshing,
+            nextCursor: undefined,
+            error: undefined,
+          },
+        },
       };
     }
     case "tasks:error":

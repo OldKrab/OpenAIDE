@@ -7,8 +7,8 @@ use crate::ids::{
 use crate::snapshot::{
     AgentCollectionSnapshot, ChatItem, ChatSnapshot, ClientSnapshot, PendingRequestSnapshot,
     ProjectCollectionSnapshot, TaskAgentCommandsSnapshot, TaskAgentConfigSnapshot,
-    TaskHistorySyncSnapshot, TaskInputCapabilities, TaskLifecycle, TaskPreparationSnapshot,
-    TaskSendCapabilitySnapshot, TaskSummary,
+    TaskHistorySyncSnapshot, TaskInputCapabilities, TaskLifecycle, TaskNavigationSnapshot,
+    TaskPreparationSnapshot, TaskSendCapabilitySnapshot, TaskSummary,
 };
 use crate::state::SubscriptionScope;
 use crate::task::ToolDetailSnapshot;
@@ -69,6 +69,10 @@ pub enum AppServerEventPayload {
     },
     TaskNavigationChanged {
         change: TaskNavigationChange,
+    },
+    /// Replaces the combined durable Task and unadopted Native Session projection.
+    TaskNavigationReplaced {
+        navigation: TaskNavigationSnapshot,
     },
     ProjectCollectionUpdated {
         projects: ProjectCollectionSnapshot,

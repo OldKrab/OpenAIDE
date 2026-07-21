@@ -707,7 +707,13 @@ describe("AppSurfaces callback wiring", () => {
   });
 
   it("renders task loading state while a native session is opening", () => {
-    const controller = webControllerFor("task");
+    const controller = webControllerFor("nativeSession");
+    controller.bootstrap = {
+      surface: "nativeSession",
+      shell: WEB_SHELL,
+      agentId: "codex",
+      nativeSessionId: "native_1",
+    };
     controller.state.newTask.nativeSessions.adoptingSessionId = "native_1";
 
     render(controller);
@@ -715,6 +721,7 @@ describe("AppSurfaces callback wiring", () => {
     expect(surfaceMocks.taskLoading).toHaveBeenCalledWith(
       expect.objectContaining({
         error: undefined,
+        label: "Opening session",
       }),
       undefined,
     );
@@ -722,7 +729,13 @@ describe("AppSurfaces callback wiring", () => {
   });
 
   it("replaces the previous task chat with loading while a native session is opening", () => {
-    const controller = webControllerFor("task");
+    const controller = webControllerFor("nativeSession");
+    controller.bootstrap = {
+      surface: "nativeSession",
+      shell: WEB_SHELL,
+      agentId: "codex",
+      nativeSessionId: "native_1",
+    };
     controller.state.activeTaskId = "task_previous";
     controller.state.snapshot = snapshot("task_previous");
     controller.state.newTask.nativeSessions.adoptingSessionId = "native_1";
@@ -730,10 +743,35 @@ describe("AppSurfaces callback wiring", () => {
     render(controller);
 
     expect(surfaceMocks.taskLoading).toHaveBeenCalledWith(
-      expect.objectContaining({ error: undefined }),
+      expect.objectContaining({ error: undefined, label: "Opening session" }),
       undefined,
     );
     expect(surfaceMocks.task).not.toHaveBeenCalled();
+  });
+
+  it("keeps the Native Session route visible when adoption reports not-found", () => {
+    const controller = webControllerFor("nativeSession");
+    controller.bootstrap = {
+      surface: "nativeSession",
+      shell: WEB_SHELL,
+      agentId: "codex",
+      nativeSessionId: "native_1",
+    };
+    controller.state.newTask.nativeSessions.adoptionError = {
+      sessionId: "native_1",
+      message: "This session no longer exists.",
+    };
+
+    render(controller);
+
+    expect(surfaceMocks.taskLoading).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: "This session no longer exists.",
+        label: "Opening session",
+        onRetry: undefined,
+      }),
+      undefined,
+    );
   });
 
   it("passes new-task callbacks to new task view", () => {
@@ -949,7 +987,7 @@ function controllerFor(surface: AppController["bootstrap"]["surface"]): TestCont
   };
 }
 
-function webControllerFor(surface: "settings" | "task"): TestController {
+function webControllerFor(surface: "nativeSession" | "settings" | "task"): TestController {
   const controller = controllerFor(surface);
   controller.bootstrap = {
     surface,

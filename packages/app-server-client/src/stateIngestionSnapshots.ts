@@ -4,7 +4,11 @@ import type {
   SubscriptionScope,
   SubscriptionSnapshot,
 } from "./generated/protocol.js";
-import { filterTaskNavigationForScope, upsertTaskSummary } from "./stateIngestionTaskNavigation.js";
+import {
+  filterTaskNavigationForScope,
+  removeTaskNavigationEntry,
+  upsertTaskNavigationEntry,
+} from "./stateIngestionTaskNavigation.js";
 import { updateTaskSnapshot } from "./stateIngestionTask.js";
 import type { SnapshotUpdate } from "./stateIngestionTypes.js";
 import { changed, unchanged } from "./stateIngestionTypes.js";
@@ -106,6 +110,12 @@ function updateTaskNavigationSnapshot(
   snapshot: Extract<SubscriptionSnapshot, { kind: "taskNavigation" }>,
   payload: AppServerEventPayload,
 ): SnapshotUpdate {
+  if (payload.kind === "taskNavigationReplaced") {
+    return changed({
+      ...snapshot,
+      navigation: filterTaskNavigationForScope(payload.navigation, scope),
+    });
+  }
   if (payload.kind === "taskNavigationChanged") {
     const change = payload.change;
     if (change.kind === "remove") {
@@ -113,7 +123,7 @@ function updateTaskNavigationSnapshot(
         ...snapshot,
         navigation: {
           ...snapshot.navigation,
-          tasks: snapshot.navigation.tasks.filter((task) => task.taskId !== change.taskId),
+          entries: removeTaskNavigationEntry(snapshot.navigation.entries, change.taskId),
         },
       });
     }
@@ -126,7 +136,7 @@ function updateTaskNavigationSnapshot(
       ...snapshot,
       navigation: {
         ...snapshot.navigation,
-        tasks: upsertTaskSummary(snapshot.navigation.tasks, change.task),
+        entries: upsertTaskNavigationEntry(snapshot.navigation.entries, change.task),
       },
     });
   }

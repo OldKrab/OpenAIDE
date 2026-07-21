@@ -26,6 +26,7 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost, TaskFo
   private focusedTaskId: string | undefined;
   private settingsPanel: vscode.WebviewPanel | undefined;
   private newTaskPanel: vscode.WebviewPanel | undefined;
+  private readonly nativeSessionPanels = new Map<string, vscode.WebviewPanel>();
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -51,6 +52,28 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost, TaskFo
       if (this.newTaskPanel === panel) {
         this.newTaskPanel = undefined;
       }
+    });
+  }
+
+  openNativeSession(agentId: string, nativeSessionId: string, projectId?: string) {
+    const key = nativeSessionPanelKey(agentId, nativeSessionId);
+    const existing = this.nativeSessionPanels.get(key);
+    if (existing) {
+      existing.reveal(vscode.ViewColumn.Active);
+      this.focusPanel(existing);
+      return;
+    }
+    const panel = this.createPanel("openaide.task", "Opening session…", {
+      surface: "nativeSession",
+      agentId,
+      nativeSessionId,
+      projectId: projectId ?? currentWorkspaceRoot()?.projectId,
+    });
+    this.nativeSessionPanels.set(key, panel);
+    this.focusPanel(panel);
+    panel.onDidDispose(() => {
+      this.releaseFocusedPanel(panel);
+      if (this.nativeSessionPanels.get(key) === panel) this.nativeSessionPanels.delete(key);
     });
   }
 
@@ -104,7 +127,9 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost, TaskFo
     for (const panel of this.taskPanels.values()) {
       panel.dispose();
     }
+    for (const panel of this.nativeSessionPanels.values()) panel.dispose();
     this.taskPanels.clear();
+    this.nativeSessionPanels.clear();
     this.focusedTaskListeners.clear();
   }
 
@@ -162,25 +187,34 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost, TaskFo
 
   private adoptTaskPanel(panel: vscode.WebviewPanel, taskId: string, title = "Task") {
     const adoptingNewTaskPanel = this.newTaskPanel === panel;
-    if (!adoptingNewTaskPanel) return;
+    const current = this.panelBootstraps.get(panel);
+    const adoptingNativeSessionPanel = current?.surface === "nativeSession";
+    if (!adoptingNewTaskPanel && !adoptingNativeSessionPanel) return;
     const existingTaskPanel = this.taskPanels.get(taskId);
     if (existingTaskPanel && existingTaskPanel !== panel) {
-      this.newTaskPanel = undefined;
+      if (adoptingNewTaskPanel) this.newTaskPanel = undefined;
+      if (adoptingNativeSessionPanel && current.agentId && current.nativeSessionId) {
+        this.nativeSessionPanels.delete(nativeSessionPanelKey(current.agentId, current.nativeSessionId));
+      }
       panel.dispose();
       existingTaskPanel.reveal(vscode.ViewColumn.Active);
       this.focusPanel(existingTaskPanel);
       return;
     }
     panel.title = taskPanelTitle(title);
-    const current = this.panelBootstraps.get(panel);
     this.panelBootstraps.set(panel, {
       ...(current ?? { surface: "task", shell: VSCODE_SHELL }),
       surface: "task",
       taskId,
       projectId: undefined,
+      agentId: undefined,
+      nativeSessionId: undefined,
     });
     if (panel.active) this.focusPanel(panel);
-    this.newTaskPanel = undefined;
+    if (adoptingNewTaskPanel) this.newTaskPanel = undefined;
+    if (adoptingNativeSessionPanel && current.agentId && current.nativeSessionId) {
+      this.nativeSessionPanels.delete(nativeSessionPanelKey(current.agentId, current.nativeSessionId));
+    }
     if (!this.taskPanels.has(taskId)) {
       this.taskPanels.set(taskId, panel);
       panel.onDidDispose(() => {
@@ -224,4 +258,8 @@ function taskPanelTitle(title: string) {
   const normalized = title.trim() || "Task";
   if (normalized.length <= MAX_TASK_PANEL_TITLE_LENGTH) return normalized;
   return `${normalized.slice(0, MAX_TASK_PANEL_TITLE_LENGTH - 1).trimEnd()}…`;
+}
+
+function nativeSessionPanelKey(agentId: string, nativeSessionId: string) {
+  return `${agentId}\u0000${nativeSessionId}`;
 }

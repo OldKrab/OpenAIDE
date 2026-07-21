@@ -23,9 +23,9 @@ describe("App Server Protocol state mapping", () => {
   it("maps task navigation summaries into current frontend task summaries", () => {
     expect(mapProtocolTaskNavigation({
       activeTaskId: "task-1" as TaskId,
-      tasks: [
-        protocolSummary({ taskId: "task-1" as TaskId, status: "running" }),
-        protocolSummary({ taskId: "task-2" as TaskId, status: "waiting", unread: true }),
+      entries: [
+        { kind: "task", task: protocolSummary({ taskId: "task-1" as TaskId, status: "running" }) },
+        { kind: "task", task: protocolSummary({ taskId: "task-2" as TaskId, status: "waiting", unread: true }) },
       ],
     }, mappingContext())).toMatchObject({
       activeTaskId: "task-1",
@@ -85,26 +85,26 @@ describe("App Server Protocol state mapping", () => {
     });
   });
 
-  it("omits prepared no-message tasks from sidebar navigation", () => {
+  it("keeps visible adopted Tasks even when their loaded history is empty", () => {
     const mapping = mapProtocolTaskNavigation({
       activeTaskId: "task-sent" as TaskId,
-      tasks: [
-        protocolSummary({
+      entries: [
+        { kind: "task", task: protocolSummary({
           taskId: "task-empty" as TaskId,
           title: { value: "New task", source: "user" },
           status: "idle",
           hasMessages: false,
-        }),
-        protocolSummary({
+        }) },
+        { kind: "task", task: protocolSummary({
           taskId: "task-sent" as TaskId,
           title: { value: "Implement feature", source: "user" },
           status: "running",
           hasMessages: true,
-        }),
+        }) },
       ],
     }, mappingContext());
 
-    expect(mapping.tasks.map((task) => task.task_id)).toEqual(["task-sent"]);
+    expect(mapping.tasks.map((task) => task.task_id)).toEqual(["task-empty", "task-sent"]);
     expect(mapping.activeTaskId).toBe("task-sent");
   });
 
@@ -246,7 +246,7 @@ describe("App Server Protocol state mapping", () => {
   it("warns when a task references a project missing from the project collection", () => {
     const mapping = mapProtocolTaskNavigation({
       activeTaskId: "task-1" as TaskId,
-      tasks: [protocolSummary({ taskId: "task-1" as TaskId })],
+      entries: [{ kind: "task", task: protocolSummary({ taskId: "task-1" as TaskId }) }],
     }, { agents: mappingContext().agents, projects: [] });
 
     expect(mapping.warnings).toEqual([{ kind: "projectDisplayNotMapped", projectId: "project-1" }]);

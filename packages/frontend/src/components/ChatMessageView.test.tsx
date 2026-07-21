@@ -1115,6 +1115,7 @@ describe("ChatRow", () => {
       messages: { post: vi.fn(), subscribe: () => () => undefined },
       navigation: {
         openNewTask: vi.fn(),
+        openNativeSession: vi.fn(),
         openSettings: vi.fn(),
         openTask: vi.fn(),
         replaceSettingsTab: vi.fn(),

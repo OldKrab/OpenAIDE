@@ -134,6 +134,7 @@ export function useAppControllerBackendLifecycle({
     replicaIdentity,
   } = useAppServerReplicaLifecycle(dispatch, onReplicaChanged);
   const backendInitialized = useRef(false);
+  const [backendInitializationReady, setBackendInitializationReady] = useState(false);
   const routeOpenError = useRef<string | undefined>(undefined);
   const stateSubscriptionContext = useRef<StateSubscriptionMappingContext | undefined>(undefined);
   const failedSubscriptionBaselines = useRef(new Map<string, string>());
@@ -266,6 +267,7 @@ export function useAppControllerBackendLifecycle({
     const stopSubscriptions: Array<() => void> = [];
     setBackendStateGeneration((generation) => generation + 1);
     backendInitialized.current = false;
+    setBackendInitializationReady(false);
     failedSubscriptionBaselines.current.clear();
     pendingGlobalSubscriptionBaselines.current.clear();
     routeOpenError.current = undefined;
@@ -402,6 +404,7 @@ export function useAppControllerBackendLifecycle({
             // Route opening also starts App Server recovery work, so the route effect must
             // own task/open even when initialize already supplied cached task state.
             backendInitialized.current = true;
+            setBackendInitializationReady(true);
             sendWebviewTelemetry(postHostMessage, "app_server_initialize_completed", {
               surface: initialBootstrap.surface,
             });
@@ -418,6 +421,7 @@ export function useAppControllerBackendLifecycle({
               error_name: errorName(error),
             });
             backendInitialized.current = false;
+            setBackendInitializationReady(false);
             setBackendReady(false);
             const message = error instanceof Error ? error.message : "Unable to connect to App Server.";
             setBackendConnectionState({ status: "unavailable", message });
@@ -455,6 +459,7 @@ export function useAppControllerBackendLifecycle({
     return () => {
       active = false;
       backendInitialized.current = false;
+      setBackendInitializationReady(false);
       failedSubscriptionBaselines.current.clear();
       pendingGlobalSubscriptionBaselines.current.clear();
       setBackendReady(false);
@@ -502,6 +507,7 @@ export function useAppControllerBackendLifecycle({
   return {
     acceptSnapshotRequest,
     backendInitialized,
+    backendInitializationReady,
     backendConnectionState,
     backendReady: backendReady && taskRouteLifecycle.ready,
     bootstrap,

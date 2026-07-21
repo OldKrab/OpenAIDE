@@ -111,9 +111,9 @@ export function SidebarProjectTaskGroup({
           />
         ) : (
           <SidebarNativeSessionRow
-            key={`session:${row.session.session_id}`}
-            nativeSessionAgentId={nativeSessionAgentId}
-            nativeSessionAgentName={nativeSessionAgentName}
+            key={`session:${row.session.agent_id ?? nativeSessionAgentId}:${row.session.session_id}`}
+            nativeSessionAgentId={row.session.agent_id ?? nativeSessionAgentId}
+            nativeSessionAgentName={row.session.agent_name ?? nativeSessionAgentName}
             nativeSessionsAdoptingSessionId={nativeSessionsAdoptingSessionId}
             onOpenNativeSession={onOpenNativeSession}
             session={row.session}

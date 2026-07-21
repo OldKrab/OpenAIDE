@@ -10,6 +10,9 @@ use crate::agent::{
     AgentSessionMetadataUpdate, TurnCancellation,
 };
 use crate::client_lifecycle::AppServerTime;
+use crate::native_sessions::catalog::{
+    NativeSessionCatalog, NativeSessionObservation, NativeSessionRef,
+};
 use crate::protocol::model::{
     ActivityStatus, ActivityToolDetails, ActivityToolOutput, AgentMessagePart, AgentMessageRole,
     IsolationKind, NormalizedMessage, TaskStatus,
@@ -96,6 +99,47 @@ fn agent_session_title_updates_set_and_clear_agent_owned_title() {
     .unwrap();
     let cleared = store.read_task("task_1").unwrap();
     assert_eq!(cleared.title, None);
+}
+
+#[test]
+fn live_session_metadata_updates_the_durable_native_catalog() {
+    let (_dir, store, mutations, _server_requests) = test_runtime();
+    store.write_task(&running_task("task_1")).unwrap();
+    let catalog = NativeSessionCatalog::open(store).unwrap();
+    let reference = NativeSessionRef::new("codex", "session_1");
+    catalog
+        .record_page(
+            "project-1",
+            "/workspace",
+            vec![NativeSessionObservation {
+                reference: reference.clone(),
+                title: Some("Listed title".to_string()),
+                last_activity: Some("2026-07-21T12:00:00Z".to_string()),
+            }],
+        )
+        .unwrap();
+    let sink = TaskSessionEventSink::new(
+        mutations,
+        "task_1".to_string(),
+        "session_1".to_string(),
+        ServerRequestRuntime::new(),
+    )
+    .with_native_catalog(Some(catalog.clone()));
+
+    sink.metadata_changed(AgentSessionMetadataUpdate {
+        title: AgentMetadataField::Value("Live title".to_string()),
+        updated_at: AgentMetadataField::Value("2026-07-21T13:00:00Z".to_string()),
+    })
+    .unwrap();
+
+    assert_eq!(
+        catalog.entry(&reference).unwrap().observation,
+        NativeSessionObservation {
+            reference,
+            title: Some("Live title".to_string()),
+            last_activity: Some("2026-07-21T13:00:00Z".to_string()),
+        }
+    );
 }
 
 #[test]
@@ -197,6 +241,31 @@ fn agent_session_metadata_rejects_updates_from_a_stale_native_session() {
     assert_eq!(task.title, None);
     assert_eq!(task.summary().title, None);
     assert_eq!(task.last_activity, "1");
+}
+
+#[test]
+fn agent_session_metadata_never_moves_task_activity_backwards() {
+    let (_dir, store, mutations, _server_requests) = test_runtime();
+    let mut task = running_task("task_1");
+    task.last_activity = "2026-07-10T10:00:00Z".to_string();
+    store.write_task(&task).unwrap();
+    let sink = TaskSessionEventSink::new(
+        mutations,
+        "task_1".to_string(),
+        "session_1".to_string(),
+        ServerRequestRuntime::new(),
+    );
+
+    sink.metadata_changed(AgentSessionMetadataUpdate {
+        title: AgentMetadataField::Unchanged,
+        updated_at: AgentMetadataField::Value("2026-07-10T09:00:00Z".to_string()),
+    })
+    .unwrap();
+
+    assert_eq!(
+        store.read_task("task_1").unwrap().last_activity,
+        "2026-07-10T10:00:00Z",
+    );
 }
 
 #[test]
@@ -1049,7 +1118,7 @@ fn mixed_tool_update_publishes_one_atomic_detail_delta() {
             match update.kind {
                 TaskUpdateKind::Changed(change) => Some(change),
                 TaskUpdateKind::ToolDetailChanged { .. } => None,
-                TaskUpdateKind::HistorySync(_) => None,
+                TaskUpdateKind::HistorySync(_) | TaskUpdateKind::NavigationChanged => None,
             }
         })
         .expect("Task change publication");

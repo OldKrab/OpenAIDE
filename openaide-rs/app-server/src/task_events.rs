@@ -37,6 +37,8 @@ pub enum TaskUpdateKind {
         artifact_id: String,
         deltas: Vec<openaide_app_server_protocol::events::ToolDetailDelta>,
     },
+    /// The global Task Navigation projection changed outside a Task transaction.
+    NavigationChanged,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -114,6 +116,14 @@ impl TaskUpdateNotifier {
                     })
                     .collect(),
             },
+        });
+    }
+
+    pub(crate) fn navigation_changed(&self) {
+        self.publish(TaskUpdate {
+            task_id: String::new(),
+            revision: 0,
+            kind: TaskUpdateKind::NavigationChanged,
         });
     }
 

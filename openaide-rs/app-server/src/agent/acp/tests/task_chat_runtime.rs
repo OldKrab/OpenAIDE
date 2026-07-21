@@ -3,6 +3,7 @@ use std::process::Command;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use openaide_app_server_protocol::agent::AgentListSessionsParams;
 use openaide_app_server_protocol::ids::{AgentId, TaskId};
 use openaide_app_server_protocol::snapshot::{ChatItem, ChatItemStatus, ChatRole, MessagePart};
 use openaide_app_server_protocol::task::{
@@ -17,6 +18,7 @@ use crate::server_requests::ServerRequestRuntime;
 use crate::storage::records::TaskPreparationRecord;
 use crate::storage::Store;
 use crate::task_events::TaskUpdateNotifier;
+use crate::tasks::product_api::AgentListSessionsWorkflow;
 use crate::tasks::product_api::{TaskAdoptNativeSessionWorkflow, TaskProductApi};
 
 #[test]
@@ -80,12 +82,16 @@ fn replayed_acp_chunks_use_live_logical_message_grouping() {
         return;
     };
 
+    api.list_agent_sessions(AgentListSessionsParams {
+        agent_id: AgentId::from("codex"),
+        project_id: project_id_for_workspace(&workspace_root),
+        cursor: None,
+    })
+    .expect("list replayable ACP session");
     let adopted = api
         .adopt_native_session(TaskAdoptNativeSessionParams {
-            project_id: project_id_for_workspace(&workspace_root),
             agent_id: AgentId::from("codex"),
             native_session_id: "task-chat-session".to_string(),
-            title: Some("Replay grouping".to_string()),
         })
         .expect("adopt replayed ACP session");
     let task_id = adopted.task.task_id;
@@ -365,12 +371,15 @@ for line in sys.stdin:
             "protocolVersion": 1,
             "agentCapabilities": {
                 "loadSession": True,
-                "sessionCapabilities": {"close": {}},
+                "sessionCapabilities": {"close": {}, "list": {}},
             },
             "authMethods": [],
         })
     elif method == "session/new":
         respond(message, {"sessionId": session_id})
+    elif method == "session/list":
+        cwd = message.get("params", {}).get("cwd") or os.getcwd()
+        respond(message, {"sessions": [{"sessionId": session_id, "cwd": cwd, "title": "Task chat session"}]})
     elif method == "session/load":
         if mode == "replay":
             update_chunk("user_message_chunk", "Prior ", "33333333-3333-4333-8333-333333333333")

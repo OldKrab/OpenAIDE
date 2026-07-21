@@ -18,6 +18,7 @@ impl RpcGateway {
     ) -> Vec<GatewayEventDelivery> {
         let task_id = TaskId::from(update.task_id.clone());
         let mut events = match &update.kind {
+            TaskUpdateKind::NavigationChanged => self.publish_navigation_replacement(now),
             TaskUpdateKind::HistorySync(history_sync) => {
                 self.publish_history_sync(&task_id, history_sync.clone(), now)
             }
@@ -51,6 +52,24 @@ impl RpcGateway {
         }
         self.pending_event_deliveries.extend(events.clone());
         events
+    }
+
+    pub(crate) fn publish_navigation_replacement(
+        &mut self,
+        now: AppServerTime,
+    ) -> Vec<GatewayEventDelivery> {
+        let Ok(navigation) = self.snapshots.task_navigation_snapshot() else {
+            return Vec::new();
+        };
+        let client_hub = self.client_hub.clone();
+        event_deliveries(self.state_stream.publish_committed(
+            EventScope::StateRoot {
+                state_root_id: self.state_stream.state_root_id().clone(),
+            },
+            AppServerEventPayload::TaskNavigationReplaced { navigation },
+            |client_id| client_hub.delivery_for(client_id),
+            now,
+        ))
     }
 
     pub(crate) fn publish_committed_task_update_for_connection(

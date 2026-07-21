@@ -1,5 +1,8 @@
 use openaide_app_server_protocol::ids::ProjectId;
 
+use crate::native_sessions::catalog::{
+    NativeSessionCatalog, NativeSessionObservation, NativeSessionRef,
+};
 use crate::projects::project_id_for_workspace;
 use crate::protocol::model::{IsolationKind, TaskStatus};
 use crate::storage::records::{
@@ -76,22 +79,58 @@ fn projects_visible_task_records_into_navigation_snapshot() {
     let snapshot = TaskNavigationStore::new(store).snapshot(None).unwrap();
 
     assert_eq!(snapshot.active_task_id, None);
-    assert_eq!(snapshot.tasks.len(), 2);
-    assert_eq!(snapshot.tasks[0].task_id.as_str(), "task-newer");
+    assert_eq!(task_entries(&snapshot).len(), 2);
+    assert_eq!(task_entries(&snapshot)[0].task_id.as_str(), "task-newer");
     assert_eq!(
-        snapshot.tasks[0]
+        task_entries(&snapshot)[0]
             .title
             .as_ref()
             .map(|title| title.value.as_str()),
         Some("New")
     );
-    assert_eq!(snapshot.tasks[0].status, ProtocolTaskStatus::Idle);
-    assert_eq!(snapshot.tasks[0].agent_id.as_str(), "agent-a");
-    assert!(!snapshot.tasks[0].has_messages);
-    assert!(snapshot.tasks[0]
+    assert_eq!(task_entries(&snapshot)[0].status, ProtocolTaskStatus::Idle);
+    assert_eq!(task_entries(&snapshot)[0].agent_id.as_str(), "agent-a");
+    assert!(!task_entries(&snapshot)[0].has_messages);
+    assert!(task_entries(&snapshot)[0]
         .project_id
         .as_str()
         .starts_with("project-"));
+}
+
+#[test]
+fn navigation_combines_durable_tasks_and_persisted_unadopted_sessions() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let task = task_record("task-owned", "Owned", "2026-07-20T00:00:00Z");
+    let project_id = project_id_for_workspace(&task.workspace_root);
+    store.write_task(&task).unwrap();
+    let catalog = NativeSessionCatalog::open(store.clone()).unwrap();
+    catalog
+        .record_page(
+            project_id.as_str(),
+            &task.workspace_root,
+            vec![NativeSessionObservation {
+                reference: NativeSessionRef::new("agent-a", "native-new"),
+                title: Some("Unadopted".to_string()),
+                last_activity: Some("2026-07-21T00:00:00Z".to_string()),
+            }],
+        )
+        .unwrap();
+
+    let snapshot = TaskNavigationStore::with_native_sessions(store, catalog)
+        .snapshot(None)
+        .unwrap();
+
+    assert_eq!(snapshot.entries.len(), 2);
+    assert!(matches!(
+        &snapshot.entries[0],
+        TaskNavigationEntry::NativeSession { session }
+            if session.reference.session_id == "native-new" && session.title.as_deref() == Some("Unadopted")
+    ));
+    assert!(matches!(
+        &snapshot.entries[1],
+        TaskNavigationEntry::Task { task } if task.task_id.as_str() == "task-owned"
+    ));
 }
 
 #[test]
@@ -124,8 +163,8 @@ fn marks_tasks_with_durable_chat_messages() {
 
     let snapshot = TaskNavigationStore::new(store).snapshot(None).unwrap();
 
-    assert_eq!(snapshot.tasks[0].task_id.as_str(), "task-1");
-    assert!(snapshot.tasks[0].has_messages);
+    assert_eq!(task_entries(&snapshot)[0].task_id.as_str(), "task-1");
+    assert!(task_entries(&snapshot)[0].has_messages);
 }
 
 #[test]
@@ -143,8 +182,8 @@ fn navigation_uses_task_record_message_version_without_reading_chat_files() {
 
     let snapshot = TaskNavigationStore::new(store).snapshot(None).unwrap();
 
-    assert_eq!(snapshot.tasks[0].task_id.as_str(), "task-1");
-    assert!(snapshot.tasks[0].has_messages);
+    assert_eq!(task_entries(&snapshot)[0].task_id.as_str(), "task-1");
+    assert!(task_entries(&snapshot)[0].has_messages);
 }
 
 #[test]
@@ -160,7 +199,7 @@ fn omits_archived_and_tombstoned_records() {
 
     let snapshot = TaskNavigationStore::new(store).snapshot(None).unwrap();
 
-    assert!(snapshot.tasks.is_empty());
+    assert!(task_entries(&snapshot).is_empty());
 }
 
 #[test]
@@ -178,8 +217,8 @@ fn filters_by_project_id_when_requested() {
         .snapshot(Some(&ProjectId::from("project-other")))
         .unwrap();
 
-    assert_eq!(included.tasks.len(), 1);
-    assert!(excluded.tasks.is_empty());
+    assert_eq!(task_entries(&included).len(), 1);
+    assert!(task_entries(&excluded).is_empty());
 }
 
 #[test]
@@ -195,7 +234,18 @@ fn storage_read_failure_is_isolated_from_navigation() {
 
     let snapshot = TaskNavigationStore::new(store).snapshot(None).unwrap();
 
-    assert!(snapshot.tasks.is_empty());
+    assert!(task_entries(&snapshot).is_empty());
+}
+
+fn task_entries(snapshot: &TaskNavigationSnapshot) -> Vec<&TaskSummary> {
+    snapshot
+        .entries
+        .iter()
+        .filter_map(|entry| match entry {
+            TaskNavigationEntry::Task { task } => Some(task.as_ref()),
+            TaskNavigationEntry::NativeSession { .. } => None,
+        })
+        .collect()
 }
 
 fn corrupt_last_byte(path: &std::path::Path) {

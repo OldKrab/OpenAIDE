@@ -11,10 +11,11 @@ use openaide_app_server_protocol::methods::{
     SETTINGS_UPDATE_PREFERENCES, SETTINGS_UPDATE_RUNTIME, SHELL_RESOLVE_FILE_REVEAL,
     STATE_SUBSCRIBE, STATE_UNSUBSCRIBE, SUPPORT_RECOVER_STUCK_SESSIONS, TASK_ACQUIRE,
     TASK_ACQUIRE_IN_WORKTREE, TASK_ADOPT_NATIVE_SESSION, TASK_CANCEL, TASK_CHAT_PAGE, TASK_LIST,
-    TASK_MARK_READ, TASK_OPEN, TASK_RELEASE, TASK_SEARCH_FILES, TASK_SEND, TASK_SET_ARCHIVED,
-    TASK_SET_CONFIG_OPTION, WORKSPACE_LIST_DIRECTORY, WORKSPACE_LIST_ROOTS, WORKTREE_CREATE,
-    WORKTREE_LINKED_TASKS, WORKTREE_RECREATE, WORKTREE_REFRESH, WORKTREE_REMOVAL_PREFLIGHT,
-    WORKTREE_REMOVE, WORKTREE_RENAME, WORKTREE_RESOLVE_FOLDER,
+    TASK_MARK_READ, TASK_NAVIGATION_LOAD_MORE, TASK_NAVIGATION_REFRESH, TASK_OPEN, TASK_RELEASE,
+    TASK_SEARCH_FILES, TASK_SEND, TASK_SET_ARCHIVED, TASK_SET_CONFIG_OPTION,
+    WORKSPACE_LIST_DIRECTORY, WORKSPACE_LIST_ROOTS, WORKTREE_CREATE, WORKTREE_LINKED_TASKS,
+    WORKTREE_RECREATE, WORKTREE_REFRESH, WORKTREE_REMOVAL_PREFLIGHT, WORKTREE_REMOVE,
+    WORKTREE_RENAME, WORKTREE_RESOLVE_FOLDER,
 };
 
 use crate::client_lifecycle::{AppServerTime, ConnectionId};
@@ -81,6 +82,12 @@ impl RpcGateway {
                 self.handle_agent_authenticate(connection_id, id, params, meta, now)
             }
             AGENT_LIST_SESSIONS => self.handle_agent_list_sessions(connection_id, id, params, meta),
+            TASK_NAVIGATION_REFRESH => {
+                self.handle_task_navigation_refresh(connection_id, id, params, meta)
+            }
+            TASK_NAVIGATION_LOAD_MORE => {
+                self.handle_task_navigation_load_more(connection_id, id, params, meta)
+            }
             AGENT_CREATE_CUSTOM => {
                 self.handle_agent_create_custom(connection_id, id, params, meta, now)
             }

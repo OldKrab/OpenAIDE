@@ -18,7 +18,7 @@ use crate::agent::gateway::AgentGateway;
 use crate::agent::registry_handle::AgentRegistryHandle;
 use crate::agent::{AgentRuntime, AgentSessionKey};
 use crate::attachment_runtime::AttachmentRuntime;
-use crate::projects::ProjectResolver;
+use crate::projects::{ConfiguredProjectRoots, ProjectResolver};
 use crate::protocol::errors::RuntimeError;
 use crate::protocol_edge::AppServerShutdownWorkflow;
 #[cfg(test)]
@@ -56,6 +56,7 @@ mod support_recovery;
 pub(crate) struct TaskProductApi {
     store: Store,
     project_resolver: Arc<dyn ProjectResolver>,
+    configured_projects: ConfiguredProjectRoots,
     worktrees: crate::worktrees::WorktreeManager,
     agent_registry: AgentRegistryHandle,
     mutations: TaskMutations,
@@ -70,7 +71,9 @@ pub(crate) struct TaskProductApi {
     // Keep that session reserved so external-session listing never leaks a New Task.
     preparing_session_ids: Arc<Mutex<HashSet<AgentSessionKey>>>,
     history_sync: crate::tasks::history_sync::HistorySyncCoordinator,
+    native_catalog: crate::native_sessions::catalog::NativeSessionCatalog,
     native_catalog_refresh: list_sessions::NativeCatalogRefreshCoordinator,
+    native_adoption: Arc<Mutex<()>>,
     #[allow(dead_code)]
     server_requests: ServerRequestRuntime,
     task_notifier: TaskUpdateNotifier,
@@ -112,6 +115,14 @@ pub(crate) trait AgentListSessionsWorkflow: Send + Sync {
 
     /// Requests coalesced background reconciliation without blocking the caller.
     fn request_native_session_catalog_refresh(&self) {}
+
+    fn request_native_session_catalog_load_more(
+        &self,
+        _project_id: &str,
+        _target_row_count: usize,
+    ) {
+        self.request_native_session_catalog_refresh();
+    }
 }
 
 #[derive(Debug)]
@@ -222,6 +233,7 @@ impl TaskProductApi {
         )
     }
 
+    #[cfg(test)]
     pub(crate) fn new_with_server_requests(
         store: Store,
         project_resolver: Arc<dyn ProjectResolver>,
@@ -229,6 +241,27 @@ impl TaskProductApi {
         agent_runtime: Arc<dyn AgentRuntime>,
         notifier: TaskUpdateNotifier,
         server_requests: ServerRequestRuntime,
+    ) -> Result<Self, RuntimeError> {
+        Self::new_with_server_requests_and_projects(
+            store,
+            project_resolver,
+            agent_registry,
+            agent_runtime,
+            notifier,
+            server_requests,
+            ConfiguredProjectRoots::default(),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new_with_server_requests_and_projects(
+        store: Store,
+        project_resolver: Arc<dyn ProjectResolver>,
+        agent_registry: impl Into<AgentRegistryHandle>,
+        agent_runtime: Arc<dyn AgentRuntime>,
+        notifier: TaskUpdateNotifier,
+        server_requests: ServerRequestRuntime,
+        configured_projects: ConfiguredProjectRoots,
     ) -> Result<Self, RuntimeError> {
         let initial_revision = store.max_task_revision()?;
         let mutations = TaskMutations::new(
@@ -240,11 +273,14 @@ impl TaskProductApi {
         let agent_gateway = AgentGateway::new(agent_runtime.clone());
         let attachments = AttachmentRuntime::new();
         let agent_registry = agent_registry.into();
+        let native_catalog =
+            crate::native_sessions::catalog::NativeSessionCatalog::open(store.clone())?;
         let turn_runner = TurnRunner::new_with_server_requests(
             mutations.clone(),
             agent_runtime,
             server_requests.clone(),
-        );
+        )
+        .with_native_catalog(native_catalog.clone());
         let preparing_session_ids = Arc::new(Mutex::new(HashSet::new()));
         let native_sessions = crate::tasks::native_session_service::NativeSessionService::new(
             agent_registry.clone(),
@@ -258,6 +294,7 @@ impl TaskProductApi {
             worktrees: crate::worktrees::WorktreeManager::new(store.clone()),
             store,
             project_resolver,
+            configured_projects,
             agent_registry,
             mutations,
             agent_gateway,
@@ -269,7 +306,9 @@ impl TaskProductApi {
             config_operations: Default::default(),
             preparing_session_ids,
             history_sync: crate::tasks::history_sync::HistorySyncCoordinator::default(),
+            native_catalog,
             native_catalog_refresh: Default::default(),
+            native_adoption: Arc::new(Mutex::new(())),
             server_requests,
             task_notifier: notifier,
         };
@@ -309,6 +348,12 @@ impl TaskProductApi {
 
     pub(crate) fn history_sync_snapshots(&self) -> Arc<dyn TaskHistorySyncSnapshotSource> {
         Arc::new(self.history_sync.clone())
+    }
+
+    pub(crate) fn native_session_catalog(
+        &self,
+    ) -> crate::native_sessions::catalog::NativeSessionCatalog {
+        self.native_catalog.clone()
     }
 
     pub(crate) fn shutdown(&self) -> Result<(), RuntimeError> {
@@ -585,6 +630,12 @@ pub(super) fn protocol_error_from_runtime(error: RuntimeError) -> ProtocolError 
             target: None,
         },
         RuntimeError::Conflict(message) => conflict_error(&message),
+        RuntimeError::TaskNotFound(message) => ProtocolError {
+            code: ProtocolErrorCode::NotFound,
+            message,
+            recoverable: false,
+            target: None,
+        },
         other => ProtocolError {
             code: ProtocolErrorCode::Internal,
             message: other.to_string(),

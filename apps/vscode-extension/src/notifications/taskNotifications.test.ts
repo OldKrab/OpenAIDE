@@ -81,6 +81,10 @@ function navigationSnapshot(
 ): import("@openaide/app-server-client").SubscriptionSnapshot {
   return {
     kind: "taskNavigation",
-    navigation: { tasks },
+    navigation: {
+      entries: tasks.map((task) => ({ kind: "task" as const, task })),
+      activeTaskId: null,
+      refreshing: false,
+    },
   };
 }

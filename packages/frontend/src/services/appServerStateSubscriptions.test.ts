@@ -93,7 +93,7 @@ describe("startAppServerStateSubscription", () => {
 
     navigation.observer().onSnapshot({
       kind: "taskNavigation",
-      navigation: { tasks: [{
+      navigation: { entries: [{ kind: "task", task: {
         taskId: "task_1",
         projectId: "project_1",
         agentId: "codex",
@@ -103,7 +103,7 @@ describe("startAppServerStateSubscription", () => {
         lastActivity: "2026-07-18T00:00:00.000Z",
         unread: false,
         hasMessages: true,
-      }] },
+      } }] },
     } as never);
     projects.observer().onSnapshot({
       kind: "projects",
@@ -111,13 +111,63 @@ describe("startAppServerStateSubscription", () => {
     } as never);
 
     expect(dispatch).toHaveBeenLastCalledWith({
-      type: "tasks",
+      type: "taskNavigation",
       archived: false,
+      refreshing: false,
+      sessions: [],
       tasks: [expect.objectContaining({
         task_id: "task_1",
         project_label: "OpenAIDE",
         title: "Recovered Task",
       })],
+    });
+  });
+
+  it("maps persisted unadopted sessions from Task Navigation into the shared sidebar state", () => {
+    const navigation = fakeSubscription();
+    const dispatch = vi.fn();
+    startAppServerStateSubscription({
+      backendConnection: navigation.connection,
+      context: {
+        stateRootId: "root_1" as StateRootId,
+        agents: [{ agentId: "codex", label: "Codex", status: "connected" }] as never,
+        projects: [{ projectId: "project_1", label: "OpenAIDE", workspaceRoot: "/workspace/OpenAIDE" }] as never,
+      },
+      dispatch,
+      scope: { kind: "taskNavigation" },
+    });
+
+    navigation.observer().onSnapshot({
+      kind: "taskNavigation",
+      navigation: {
+        refreshing: true,
+        entries: [{
+          kind: "nativeSession",
+          session: {
+            reference: { agentId: "codex", sessionId: "session_1" },
+            projectId: "project_1",
+            workspaceRoot: "/workspace/OpenAIDE",
+            title: "Persisted session",
+            lastActivity: "2026-07-21T00:00:00Z",
+          },
+        }],
+      },
+    } as never);
+
+    expect(dispatch).toHaveBeenLastCalledWith({
+      type: "taskNavigation",
+      archived: false,
+      refreshing: true,
+      sessions: [{
+        agent_id: "codex",
+        agent_name: "Codex",
+        cwd: "/workspace/OpenAIDE",
+        last_activity: "2026-07-21T00:00:00Z",
+        project_id: "project_1",
+        session_id: "session_1",
+        title: "Persisted session",
+      }],
+      tasks: [],
     });
   });
 

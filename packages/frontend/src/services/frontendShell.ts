@@ -47,6 +47,7 @@ export type FrontendShell = {
   };
   navigation: {
     openNewTask(projectId?: string): void;
+    openNativeSession(agentId: string, nativeSessionId: string, projectId?: string): void;
     openSettings(agentId?: string, returnToNewTask?: boolean, projectId?: string): void;
     openTask(taskId: string, title?: string): void;
     replaceSettingsTab(tab: SettingsTabId): void;
