@@ -396,7 +396,7 @@ An implementation conforms to this specification only when all of these are true
 2. First-Send message acceptance, lease consumption, and Prepared-Task promotion are one durable atomic mutation.
 3. Each Send mutation is issued once and is never automatically replayed.
 4. One Native Session update consumer survives prompt completion and accepts later updates until session close or replacement.
-5. One durable Task transaction produces one ordered Task revision; a revision gap installs one new baseline.
+5. One durable transaction that changes `TaskSnapshot` produces one ordered Task revision; Tool-detail-only terminal appends use the independently ordered Tool-detail scope without invalidating the Task replica, and a gap in either scope installs one new baseline for that scope.
 6. One logical App Server session owns connection recovery, retries only replayable reads, and installs the replacement initialization result plus exactly one baseline for each active scope before product requests and Send are enabled.
 7. Durable Chat, transient requests, Tool details, and Frontend-only presentation each have one explicit owner and do not masquerade as one another.
 8. Every notification-worthy Task transition creates one explicit Task Attention Event; no client infers it from status or `unread`.

@@ -310,14 +310,23 @@ fn payload_matches_subscription(
         SubscriptionScope::ToolDetail {
             task_id,
             artifact_id,
-        } => matches!(
-            payload,
-            AppServerEventPayload::ToolDetailUpdated {
-                task_id: updated_task_id,
-                artifact_id: updated_artifact_id,
-                ..
-            } if updated_task_id == task_id && updated_artifact_id == artifact_id
-        ),
+        } => {
+            matches!(
+                payload,
+                AppServerEventPayload::ToolDetailUpdated {
+                    task_id: updated_task_id,
+                    artifact_id: updated_artifact_id,
+                    ..
+                } if updated_task_id == task_id && updated_artifact_id == artifact_id
+            ) || matches!(
+                payload,
+                AppServerEventPayload::ToolDetailChanged {
+                    task_id: updated_task_id,
+                    artifact_id: updated_artifact_id,
+                    ..
+                } if updated_task_id == task_id && updated_artifact_id == artifact_id
+            )
+        }
         SubscriptionScope::WorktreeRepository { repository_id } => {
             matches!(payload, AppServerEventPayload::SnapshotReplaced { .. })
                 || matches!(

@@ -15,8 +15,9 @@ impl Store {
         tool_call_id: &str,
         outcome: ToolPermissionOutcome,
     ) -> Result<Vec<StoredMessage>, RuntimeError> {
-        let mut messages = self.read_messages(task_id)?;
-        let Some(stored) = messages
+        let mut projection = self.task_journal().load(task_id)?;
+        let Some(stored) = projection
+            .messages
             .iter_mut()
             .find(|stored| stored.chat.identity == activity_identity)
         else {
@@ -44,8 +45,8 @@ impl Store {
             permission_outcomes.push(outcome);
         }
         let updated = stored.clone();
-        self.write_messages(task_id, &messages)?;
-        self.write_meta(task_id, &messages)?;
+        super::advance_message_meta(&mut projection, 0);
+        self.commit_task_projection(projection)?;
         Ok(vec![updated])
     }
 
@@ -54,16 +55,16 @@ impl Store {
         task_id: &str,
         status: ActivityStatus,
     ) -> Result<Vec<StoredMessage>, RuntimeError> {
-        let mut messages = self.read_messages(task_id)?;
+        let mut projection = self.task_journal().load(task_id)?;
         let mut changed = Vec::new();
-        for stored in messages.iter_mut().rev() {
+        for stored in projection.messages.iter_mut().rev() {
             if finish_running_activity(&mut stored.chat.message, status) {
                 changed.push(stored.clone());
             }
         }
         if !changed.is_empty() {
-            self.write_messages(task_id, &messages)?;
-            self.write_meta(task_id, &messages)?;
+            super::advance_message_meta(&mut projection, 0);
+            self.commit_task_projection(projection)?;
         }
         Ok(changed)
     }
@@ -74,8 +75,9 @@ impl Store {
         identity: &str,
         status: ActivityStatus,
     ) -> Result<Vec<StoredMessage>, RuntimeError> {
-        let mut messages = self.read_messages(task_id)?;
-        let Some(stored) = messages
+        let mut projection = self.task_journal().load(task_id)?;
+        let Some(stored) = projection
+            .messages
             .iter_mut()
             .find(|stored| stored.chat.identity == identity)
         else {
@@ -84,8 +86,8 @@ impl Store {
         let changed = finish_running_activity(&mut stored.chat.message, status);
         let updated = changed.then(|| stored.clone()).into_iter().collect();
         if changed {
-            self.write_messages(task_id, &messages)?;
-            self.write_meta(task_id, &messages)?;
+            super::advance_message_meta(&mut projection, 0);
+            self.commit_task_projection(projection)?;
         }
         Ok(updated)
     }

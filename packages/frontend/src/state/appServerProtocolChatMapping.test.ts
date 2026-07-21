@@ -5,6 +5,7 @@ import { mapProtocolToolDetail } from "./appServerProtocolChatMapping";
 describe("App Server Protocol Chat mapping", () => {
   it("maps every typed tool content part and nested field value", () => {
     const details: ToolDetailSnapshot = {
+      revision: 0,
       locations: [],
       content: [
         { kind: "text", text: "text" },
@@ -28,6 +29,7 @@ describe("App Server Protocol Chat mapping", () => {
     };
 
     expect(mapProtocolToolDetail(details)).toEqual({
+      terminal_outputs: [],
       locations: [],
       content: [
         { kind: "text", text: "text" },

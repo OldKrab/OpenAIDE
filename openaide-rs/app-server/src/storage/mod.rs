@@ -2,19 +2,22 @@ pub mod app_preferences;
 pub mod atomic;
 pub mod cursor;
 pub mod id;
+mod legacy_task_cleanup;
 pub mod message_store;
 pub mod new_task_defaults;
 pub mod records;
 pub mod root;
+pub mod task_journal;
 pub mod task_store;
 pub mod tool_artifacts;
 
-use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 #[cfg(test)]
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool as RuntimeAtomicBool, Ordering as RuntimeOrdering};
 use std::sync::Arc;
-use std::sync::Mutex;
+use std::sync::{Mutex, RwLock};
+use std::time::Duration;
 
 use crate::protocol::errors::RuntimeError;
 use crate::storage_runtime::{RecoveryClassification, StorageOpenGuard};
@@ -32,7 +35,11 @@ struct StoreInner {
     open_guard: StorageOpenGuard,
     settings_write_lock: Mutex<()>,
     worktree_write_lock: Mutex<()>,
-    agent_message_cache: Mutex<HashMap<String, message_store::AgentMessageCache>>,
+    /// Sole durable owner for Task, Chat, and Tool-detail state.
+    task_journal: task_journal::TaskJournalStore,
+    task_commit_handler: Arc<RwLock<Option<TaskCommitHandler>>>,
+    task_commit_dispatch_stop: Arc<RuntimeAtomicBool>,
+    task_commit_dispatch_worker: Mutex<Option<std::thread::JoinHandle<()>>>,
     #[cfg(test)]
     fail_next_task_write: AtomicBool,
     #[cfg(test)]
@@ -45,6 +52,23 @@ struct StoreInner {
     after_next_task_read: Mutex<Option<Box<dyn FnOnce() + Send>>>,
 }
 
+type TaskCommitHandler = Arc<dyn Fn(task_journal::CommittedTaskBatch) + Send + Sync + 'static>;
+
+impl Drop for StoreInner {
+    fn drop(&mut self) {
+        self.task_commit_dispatch_stop
+            .store(true, RuntimeOrdering::Release);
+        if let Some(worker) = self
+            .task_commit_dispatch_worker
+            .get_mut()
+            .expect("Task commit dispatch worker poisoned")
+            .take()
+        {
+            let _ = worker.join();
+        }
+    }
+}
+
 impl From<StoreOpenError> for RuntimeError {
     fn from(value: StoreOpenError) -> Self {
         RuntimeError::Storage(value.to_string())
@@ -54,11 +78,40 @@ impl From<StoreOpenError> for RuntimeError {
 impl Store {
     pub fn open(root: PathBuf) -> Result<Self, StoreOpenError> {
         let open = StorageOpenGuard::open(&root)?;
-        std::fs::create_dir_all(root.join("tasks"))?;
         std::fs::create_dir_all(root.join("diagnostics"))?;
         std::fs::create_dir_all(root.join("agents"))?;
         std::fs::create_dir_all(root.join("settings"))?;
         std::fs::create_dir_all(root.join("worktrees"))?;
+        let (task_journal, initial_commit_events) =
+            task_journal::TaskJournalStore::open(root.clone())
+                .map_err(|error| StoreOpenError::TaskStorage(error.to_string()))?;
+        legacy_task_cleanup::remove_after_journal_start(&root);
+        let task_commit_handler = Arc::new(RwLock::new(None::<TaskCommitHandler>));
+        let task_commit_dispatch_stop = Arc::new(RuntimeAtomicBool::new(false));
+        let worker_handler = task_commit_handler.clone();
+        let worker_stop = task_commit_dispatch_stop.clone();
+        let task_commit_dispatch_worker = std::thread::Builder::new()
+            .name("openaide-task-commit-dispatch".to_string())
+            .spawn(move || {
+                crate::logging::info("task_commit_dispatch_started", serde_json::json!({}));
+                while !worker_stop.load(RuntimeOrdering::Acquire) {
+                    let committed =
+                        match initial_commit_events.recv_timeout(Duration::from_millis(25)) {
+                            Ok(committed) => committed,
+                            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+                            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+                        };
+                    let handler = worker_handler
+                        .read()
+                        .expect("Task commit handler poisoned")
+                        .clone();
+                    if let Some(handler) = handler {
+                        handler(committed);
+                    }
+                }
+                crate::logging::info("task_commit_dispatch_stopped", serde_json::json!({}));
+            })
+            .map_err(StoreOpenError::Io)?;
 
         Ok(Self {
             inner: Arc::new(StoreInner {
@@ -67,7 +120,10 @@ impl Store {
                 open_guard: open.guard,
                 settings_write_lock: Mutex::new(()),
                 worktree_write_lock: Mutex::new(()),
-                agent_message_cache: Mutex::new(HashMap::new()),
+                task_journal,
+                task_commit_handler,
+                task_commit_dispatch_stop,
+                task_commit_dispatch_worker: Mutex::new(Some(task_commit_dispatch_worker)),
                 #[cfg(test)]
                 fail_next_task_write: AtomicBool::new(false),
                 #[cfg(test)]
@@ -91,8 +147,33 @@ impl Store {
     }
 
     pub fn mark_clean_shutdown(&self) -> Result<(), RuntimeError> {
+        // A clean process marker may only follow a fully drained Task journal.
+        self.inner.task_journal.shutdown()?;
         self.inner.open_guard.mark_clean_shutdown()?;
         Ok(())
+    }
+
+    pub(crate) fn task_journal(&self) -> &task_journal::TaskJournalStore {
+        &self.inner.task_journal
+    }
+
+    /// Installs the current Task runtime's terminal-detail publication sink.
+    /// Store retains the sole commit receiver, so runtime replacement swaps a
+    /// callback instead of creating competing storage subscriptions.
+    pub(crate) fn set_task_commit_handler(&self, handler: TaskCommitHandler) {
+        *self
+            .inner
+            .task_commit_handler
+            .write()
+            .expect("Task commit handler poisoned") = Some(handler);
+    }
+
+    /// Transfers the sole root-wide storage failure stream to the process
+    /// supervisor that owns App Server termination.
+    pub(crate) fn take_task_storage_fatal_events(
+        &self,
+    ) -> std::sync::mpsc::Receiver<task_journal::TaskStorageFatalFailure> {
+        self.inner.task_journal.take_fatal_events()
     }
 
     pub fn tasks_dir(&self) -> PathBuf {
@@ -138,7 +219,7 @@ impl Store {
     }
 
     #[cfg(test)]
-    pub(super) fn take_task_write_failure_for_test(&self) -> bool {
+    pub(crate) fn take_task_write_failure_for_test(&self) -> bool {
         self.inner
             .fail_next_task_write
             .swap(false, Ordering::SeqCst)

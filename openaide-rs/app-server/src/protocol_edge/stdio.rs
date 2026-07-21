@@ -43,6 +43,8 @@ pub struct ProtocolEdgeStdioDispatcher {
     worktree_updates: Option<WorktreeUpdateReceiver>,
     host_bridge: HostBridge,
     host_requests: Option<mpsc::Receiver<HostRequest>>,
+    storage_fatal_events:
+        Option<mpsc::Receiver<crate::storage::task_journal::TaskStorageFatalFailure>>,
 }
 
 impl ProtocolEdgeStdioDispatcher {
@@ -136,6 +138,7 @@ impl ProtocolEdgeStdioDispatcher {
             worktree_updates: Some(output.worktree_updates),
             host_bridge,
             host_requests,
+            storage_fatal_events: Some(output.storage_fatal_events),
         })
     }
 
@@ -163,6 +166,13 @@ impl ProtocolEdgeStdioDispatcher {
 
     pub fn take_host_requests(&mut self) -> Option<mpsc::Receiver<HostRequest>> {
         self.host_requests.take()
+    }
+
+    /// Transfers root-wide storage supervision to the binary process owner.
+    pub fn take_storage_fatal_events(
+        &mut self,
+    ) -> Option<mpsc::Receiver<crate::storage::task_journal::TaskStorageFatalFailure>> {
+        self.storage_fatal_events.take()
     }
 
     pub fn shared_gateway(&self) -> SharedRpcGateway {

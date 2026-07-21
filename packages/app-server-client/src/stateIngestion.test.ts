@@ -187,7 +187,158 @@ describe("scope-local state ingestion", () => {
     if (remove.kind !== "applied" || remove.state.snapshot.kind !== "taskNavigation") return;
     expect(remove.state.snapshot.navigation.tasks).toEqual([]);
   });
+
+  it("applies terminal deltas only to the matching Tool-detail replica", () => {
+    const scope: SubscriptionScope = {
+      kind: "toolDetail",
+      taskId: taskId("task-1"),
+      artifactId: "artifact-1",
+    };
+    const state = createSubscriptionIngestionState({
+      scope,
+      cursor: cursor("cursor-1"),
+      snapshot: {
+        kind: "toolDetail",
+        taskId: taskId("task-1"),
+        artifactId: "artifact-1",
+        details: { revision: 0, locations: [], content: [], terminalOutputs: [{ terminalId: "term-1", output: "a" }] },
+      },
+    }, context());
+    const event: AppServerEvent = {
+      subscription: scope,
+      previousCursor: cursor("cursor-1"),
+      cursor: cursor("cursor-2"),
+      scope: { kind: "task", stateRootId: rootId, taskId: taskId("task-1") },
+      payload: {
+        kind: "toolDetailChanged",
+        taskId: taskId("task-1"),
+        artifactId: "artifact-1",
+        revision: 1,
+        deltas: [
+          { kind: "appendTerminal", terminalId: "term-1", data: "b" },
+          { kind: "appendTerminal", terminalId: "term-2", data: "c" },
+        ],
+      },
+    };
+
+    const result = applySubscriptionEvent(state, event);
+
+    expect(result.kind).toBe("applied");
+    if (result.kind !== "applied" || result.state.snapshot.kind !== "toolDetail") return;
+    expect(result.state.snapshot.details.terminalOutputs).toEqual([
+      { terminalId: "term-1", output: "ab" },
+      { terminalId: "term-2", output: "c" },
+    ]);
+
+    const duplicate = applySubscriptionEvent(result.state, {
+      ...event,
+      previousCursor: cursor("cursor-2"),
+      cursor: cursor("cursor-3"),
+    });
+    expect(duplicate.kind).toBe("applied");
+    if (duplicate.kind !== "applied" || duplicate.state.snapshot.kind !== "toolDetail") return;
+    expect(duplicate.state.snapshot.details.terminalOutputs).toEqual([
+      { terminalId: "term-1", output: "ab" },
+      { terminalId: "term-2", output: "c" },
+    ]);
+  });
+
+  it("requires a fresh Tool-detail baseline when an artifact revision is skipped", () => {
+    const state = toolDetailState(0);
+    const result = applySubscriptionEvent(state, toolDetailEvent("cursor-1", "cursor-2", {
+      kind: "toolDetailChanged",
+      taskId: taskId("task-1"),
+      artifactId: "artifact-1",
+      revision: 2,
+      deltas: [{ kind: "appendTerminal", terminalId: "term-1", data: "lost-prefix" }],
+    }));
+
+    expect(result).toMatchObject({ kind: "resyncRequired", reason: "toolDetailRevisionGap" });
+  });
+
+  it.each(["baseline-first", "delta-first"] as const)(
+    "keeps mixed structured and terminal output when the %s event arrives",
+    (order) => {
+      const baseline: AppServerEventPayload = {
+        kind: "toolDetailUpdated",
+        taskId: taskId("task-1"),
+        artifactId: "artifact-1",
+        details: {
+          revision: 1,
+          locations: [],
+          content: [],
+          terminalOutputs: [{ terminalId: "term-1", output: "complete" }],
+        },
+      };
+      const delta: AppServerEventPayload = {
+        kind: "toolDetailChanged",
+        taskId: taskId("task-1"),
+        artifactId: "artifact-1",
+        revision: 1,
+        deltas: [
+          {
+            kind: "replaceDetails",
+            details: { revision: 1, locations: [], content: [], terminalOutputs: [] },
+          },
+          { kind: "appendTerminal", terminalId: "term-1", data: "complete" },
+        ],
+      };
+      const payloads = order === "baseline-first" ? [baseline, delta] : [delta, baseline];
+      let state = toolDetailState(0);
+      for (const [index, payload] of payloads.entries()) {
+        const result = applySubscriptionEvent(
+          state,
+          toolDetailEvent(`cursor-${index + 1}`, `cursor-${index + 2}`, payload),
+        );
+        expect(result.kind).toBe("applied");
+        if (result.kind !== "applied") return;
+        state = result.state;
+      }
+      expect(state.snapshot.kind).toBe("toolDetail");
+      if (state.snapshot.kind !== "toolDetail") return;
+      expect(state.snapshot.details.terminalOutputs).toEqual([
+        { terminalId: "term-1", output: "complete" },
+      ]);
+    },
+  );
 });
+
+function toolDetailState(revision: number) {
+  const scope: SubscriptionScope = {
+    kind: "toolDetail",
+    taskId: taskId("task-1"),
+    artifactId: "artifact-1",
+  };
+  return createSubscriptionIngestionState({
+    scope,
+    cursor: cursor("cursor-1"),
+    snapshot: {
+      kind: "toolDetail",
+      taskId: taskId("task-1"),
+      artifactId: "artifact-1",
+      details: { revision, locations: [], content: [], terminalOutputs: [] },
+    },
+  }, context());
+}
+
+function toolDetailEvent(
+  previous: string,
+  next: string,
+  payload: AppServerEventPayload,
+): AppServerEvent {
+  const subscription: SubscriptionScope = {
+    kind: "toolDetail",
+    taskId: taskId("task-1"),
+    artifactId: "artifact-1",
+  };
+  return {
+    subscription,
+    previousCursor: cursor(previous),
+    cursor: cursor(next),
+    scope: { kind: "task", stateRootId: rootId, taskId: taskId("task-1") },
+    payload,
+  };
+}
 
 function taskState(id: string, revision: number) {
   const scope: SubscriptionScope = { kind: "task", taskId: taskId(id) };

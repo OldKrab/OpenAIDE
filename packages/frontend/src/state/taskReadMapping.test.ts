@@ -4,6 +4,7 @@ import { mapProtocolToolDetail } from "./appServerProtocolChatMapping";
 describe("task read mapping", () => {
   it("preserves individual web-search queries from lazy tool details", () => {
     const details = mapProtocolToolDetail({
+      revision: 0,
       locations: [],
       content: [],
       input: {

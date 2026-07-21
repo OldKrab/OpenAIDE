@@ -194,12 +194,24 @@ pub struct TaskChatPageResult {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolDetailSnapshot {
+    /// Artifact-local durable revision used to reject a delta already covered by a baseline.
+    #[serde(default)]
+    pub revision: u64,
     pub locations: Vec<ActivityToolLocation>,
     pub content: Vec<ActivityToolContent>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input: Option<ActivityToolInput>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output: Option<ActivityToolOutput>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub terminal_outputs: Vec<TerminalOutputSnapshot>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalOutputSnapshot {
+    pub terminal_id: String,
+    pub output: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]

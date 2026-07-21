@@ -8,7 +8,7 @@ This ADR defines the ordered publication, history-synchronization, and connectio
 
 - `state/subscribe` returns one complete authoritative baseline and its scope-local revision. Baselines are used for initial subscription, stream replacement, revision-gap recovery, and explicit complete history replacement.
 - Each subscribed scope has an independent ordered stream. A Task scope does not advance through unrelated Project, Agent, Navigation, or other Task events.
-- Each durable Task transaction increments one Task revision and publishes exactly one `taskChanged` event. Its payload contains the fields changed atomically by that transaction.
+- Each durable transaction that changes `TaskSnapshot` increments one Task revision and publishes exactly one `taskChanged` event. Tool-detail-only terminal appends advance only their independently ordered Tool-detail scope, as clarified by ADR-0028.
 - Focused Task changes include appended or upserted Chat items, text appended to a stable message id, status, lifecycle, title or summary, complete configuration and command catalogs, Send capability, history state, and other accepted Task fields.
 - A missing next Task revision invalidates that subscription replica. Frontend obtains one fresh baseline instead of reconstructing or retrying individual events.
 - Transient Permission and Question delivery remains outside durable Task revisions until resolution changes a Tool permission outcome or persists a Question Chat item.

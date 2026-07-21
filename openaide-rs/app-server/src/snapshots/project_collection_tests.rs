@@ -1,4 +1,3 @@
-use openaide_app_server_protocol::errors::ProtocolErrorCode;
 use std::process::Command;
 
 use crate::projects::project_id_for_workspace;
@@ -165,16 +164,33 @@ fn omits_archived_and_tombstoned_records() {
 }
 
 #[test]
-fn storage_read_failure_returns_recoverable_error() {
+fn storage_read_failure_is_isolated_from_project_collection() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    std::fs::remove_dir_all(store.tasks_dir()).unwrap();
+    store
+        .write_task(&task_record("corrupt", "/workspace", "1"))
+        .unwrap();
+    drop(store);
+    corrupt_last_byte(&temp.path().join("task-store-v1/tasks/corrupt/task.journal"));
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
 
-    let error = ProjectCollectionStore::new(store).snapshot().unwrap_err();
+    let snapshot = ProjectCollectionStore::new(store).snapshot().unwrap();
 
-    assert_eq!(error.code, ProtocolErrorCode::Internal);
-    assert!(error.recoverable);
-    assert!(error.message.contains("Failed to read project collection"));
+    assert!(snapshot.projects.is_empty());
+}
+
+fn corrupt_last_byte(path: &std::path::Path) {
+    use std::io::{Read, Seek, Write};
+    let mut file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)
+        .unwrap();
+    file.seek(std::io::SeekFrom::End(-1)).unwrap();
+    let mut byte = [0];
+    file.read_exact(&mut byte).unwrap();
+    file.seek(std::io::SeekFrom::End(-1)).unwrap();
+    file.write_all(&[byte[0] ^ 0xff]).unwrap();
 }
 
 fn task_record(task_id: &str, workspace_root: &str, updated_at: &str) -> TaskRecord {

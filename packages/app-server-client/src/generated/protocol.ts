@@ -582,7 +582,13 @@ export type TaskChatPageParams = { taskId: TaskId, beforeCursor: MessageId, limi
 
 export type TaskChatPageResult = { taskId: TaskId, items: Array<ChatItem>, hasBefore: boolean, totalCount: number, revision: number, startCursor?: MessageId | null, endCursor?: MessageId | null, };
 
-export type ToolDetailSnapshot = { locations: Array<ActivityToolLocation>, content: Array<ActivityToolContent>, input?: ActivityToolInput | null, output?: ActivityToolOutput | null, };
+export type ToolDetailSnapshot = {
+/**
+ * Artifact-local durable revision used to reject a delta already covered by a baseline.
+ */
+revision: number, locations: Array<ActivityToolLocation>, content: Array<ActivityToolContent>, input?: ActivityToolInput | null, output?: ActivityToolOutput | null, terminalOutputs?: Array<TerminalOutputSnapshot>, };
+
+export type TerminalOutputSnapshot = { terminalId: string, output: string, };
 
 export type ActivityToolLocation = { path: string, line?: number | null, };
 
@@ -628,7 +634,9 @@ subscription: SubscriptionScope, previousCursor: EventCursor, cursor: EventCurso
 
 export type EventScope = { "kind": "stateRoot", stateRootId: StateRootId, } | { "kind": "client", stateRootId: StateRootId, clientInstanceId: ClientInstanceId, } | { "kind": "task", stateRootId: StateRootId, taskId: TaskId, };
 
-export type AppServerEventPayload = { "kind": "snapshotReplaced", snapshot: ClientSnapshot, } | { "kind": "taskChanged", taskId: TaskId, revision: number, changes: TaskChanges, } | { "kind": "taskHistorySyncUpdated", taskId: TaskId, historySync: TaskHistorySyncSnapshot, } | { "kind": "taskNavigationChanged", change: TaskNavigationChange, } | { "kind": "projectCollectionUpdated", projects: ProjectCollectionSnapshot, } | { "kind": "taskRequestsUpdated", taskId: TaskId, requests: Array<PendingRequestSnapshot>, } | { "kind": "toolDetailUpdated", taskId: TaskId, artifactId: string, details: ToolDetailSnapshot, } | { "kind": "requestUpdated", request: PendingRequestSnapshot, } | { "kind": "agentCollectionUpdated", agents: AgentCollectionSnapshot, } | { "kind": "worktreeRepositoryUpdated", repositoryId: WorktreeRepositoryId, repository: WorktreeRepositorySnapshot, };
+export type AppServerEventPayload = { "kind": "snapshotReplaced", snapshot: ClientSnapshot, } | { "kind": "taskChanged", taskId: TaskId, revision: number, changes: TaskChanges, } | { "kind": "taskHistorySyncUpdated", taskId: TaskId, historySync: TaskHistorySyncSnapshot, } | { "kind": "taskNavigationChanged", change: TaskNavigationChange, } | { "kind": "projectCollectionUpdated", projects: ProjectCollectionSnapshot, } | { "kind": "taskRequestsUpdated", taskId: TaskId, requests: Array<PendingRequestSnapshot>, } | { "kind": "toolDetailUpdated", taskId: TaskId, artifactId: string, details: ToolDetailSnapshot, } | { "kind": "toolDetailChanged", taskId: TaskId, artifactId: string, revision: number, deltas: Array<ToolDetailDelta>, } | { "kind": "requestUpdated", request: PendingRequestSnapshot, } | { "kind": "agentCollectionUpdated", agents: AgentCollectionSnapshot, } | { "kind": "worktreeRepositoryUpdated", repositoryId: WorktreeRepositoryId, repository: WorktreeRepositorySnapshot, };
+
+export type ToolDetailDelta = { "kind": "replaceDetails", details: ToolDetailSnapshot, } | { "kind": "appendTerminal", terminalId: string, data: string, };
 
 export type TaskChanges = { task?: TaskSummary | null,
 /**

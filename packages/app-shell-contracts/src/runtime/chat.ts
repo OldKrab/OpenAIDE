@@ -52,6 +52,7 @@ export type ActivityToolDetails = {
   content: ActivityToolContent[];
   input?: ActivityToolInput;
   output?: ActivityToolOutput;
+  terminal_outputs?: Array<{ terminal_id: string; output: string }>;
 };
 
 /** Durable authorization history for a tool, independent of its execution status. */

@@ -754,7 +754,7 @@ fn subscribe_after_initialize_returns_snapshot_and_stores_subscription() {
 }
 
 #[test]
-fn tool_detail_subscription_receives_only_full_updates_for_its_artifact() {
+fn tool_detail_subscription_receives_only_changes_for_its_artifact() {
     use openaide_app_server_protocol::ids::MessageId;
     use openaide_app_server_protocol::snapshot::{ChatItem, ChatItemStatus, ChatRole};
 
@@ -819,6 +819,7 @@ fn tool_detail_subscription_receives_only_full_updates_for_its_artifact() {
         vec![ToolDetailUpdate {
             artifact_id: "artifact-1".to_string(),
             details: fixed_tool_detail(),
+            terminal_appends: Vec::new(),
         }],
         TestNavigationChange::None,
     );
@@ -831,7 +832,35 @@ fn tool_detail_subscription_receives_only_full_updates_for_its_artifact() {
     );
     assert!(matches!(
         deliveries[0].event.payload,
-        AppServerEventPayload::ToolDetailUpdated { .. }
+        AppServerEventPayload::ToolDetailChanged { ref deltas, .. }
+            if matches!(deltas.as_slice(), [
+                openaide_app_server_protocol::events::ToolDetailDelta::ReplaceDetails { .. }
+            ])
+    ));
+
+    let delta = TaskUpdate {
+        task_id: "task-1".to_string(),
+        revision: 3,
+        kind: TaskUpdateKind::ToolDetailChanged {
+            artifact_id: "artifact-1".to_string(),
+            deltas: vec![
+                openaide_app_server_protocol::events::ToolDetailDelta::AppendTerminal {
+                    terminal_id: "terminal-1".to_string(),
+                    data: "done".to_string(),
+                },
+            ],
+        },
+    };
+    let deliveries = gateway.publish_task_update(&delta, AppServerTime(6));
+    assert_eq!(deliveries.len(), 1);
+    assert_eq!(
+        deliveries[0].delivery.client_instance_id.as_str(),
+        "client-2"
+    );
+    assert!(matches!(
+        &deliveries[0].event.payload,
+        AppServerEventPayload::ToolDetailChanged { artifact_id, deltas, .. }
+            if artifact_id == "artifact-1" && deltas.len() == 1
     ));
 }
 
@@ -2708,6 +2737,8 @@ impl TaskChatPageWorkflow for RejectingTaskChatPage {
 
 fn fixed_tool_detail() -> openaide_app_server_protocol::task::ToolDetailSnapshot {
     openaide_app_server_protocol::task::ToolDetailSnapshot {
+        revision: 1,
+        terminal_outputs: Vec::new(),
         locations: vec![openaide_app_server_protocol::task::ActivityToolLocation {
             path: "src/main.rs".to_string(),
             line: Some(12),

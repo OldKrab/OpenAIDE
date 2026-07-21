@@ -33,6 +33,8 @@ pub(super) struct GatewayFactoryOutput {
     pub gateway: RpcGateway,
     pub task_updates: TaskUpdateReceiver,
     pub worktree_updates: WorktreeUpdateReceiver,
+    pub storage_fatal_events:
+        std::sync::mpsc::Receiver<crate::storage::task_journal::TaskStorageFatalFailure>,
     #[cfg(test)]
     pub attachment_runtime: crate::attachment_runtime::AttachmentRuntime,
 }
@@ -45,6 +47,7 @@ pub(super) fn gateway(
     acp_trace_state: crate::agent::acp_trace::AcpTraceState,
     configured_projects: ConfiguredProjectRoots,
 ) -> Result<GatewayFactoryOutput, ProtocolEdgeStdioStartError> {
+    let storage_fatal_events = store.take_task_storage_fatal_events();
     let (task_notifier, task_updates) = TaskUpdateNotifier::channel();
     let projects = ProjectCollectionStore::new_with_configured_roots(
         store.clone(),
@@ -152,6 +155,7 @@ pub(super) fn gateway(
         gateway,
         task_updates,
         worktree_updates,
+        storage_fatal_events,
         #[cfg(test)]
         attachment_runtime,
     })

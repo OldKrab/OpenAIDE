@@ -37,6 +37,11 @@ pub fn normalize_events(events: Vec<AgentEvent>, created_at: &str) -> Vec<Normal
                     }],
                 })
             }
+            AgentEvent::ToolUpdate(update) => update.summary.and_then(|tool_call| {
+                normalize_events(vec![AgentEvent::ToolCall(tool_call)], created_at)
+                    .into_iter()
+                    .next()
+            }),
             AgentEvent::Activity {
                 title,
                 tool_name,

@@ -25,9 +25,11 @@ impl Store {
         messages: Vec<NormalizedMessage>,
         native_updated_at: u128,
     ) -> Result<(), RuntimeError> {
-        let existing_ids = self
-            .read_messages(task_id)?
-            .into_iter()
+        let projection = self.task_journal().load(task_id)?;
+        let existing_ids = projection
+            .messages
+            .iter()
+            .cloned()
             .map(|message| (message.chat.identity, message.chat.message_id))
             .collect::<HashMap<_, _>>();
         let mut stored_messages = Vec::with_capacity(messages.len());
@@ -48,7 +50,6 @@ impl Store {
                 },
             });
         }
-        self.write_messages(task_id, &stored_messages)?;
-        self.write_meta_at_least(task_id, &stored_messages, native_updated_at)
+        self.replace_projection_messages(projection, stored_messages, native_updated_at)
     }
 }

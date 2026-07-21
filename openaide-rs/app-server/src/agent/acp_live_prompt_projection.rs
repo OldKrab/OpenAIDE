@@ -10,16 +10,17 @@ use serde_json::json;
 
 use crate::agent::acp_config_projection::normalize_config_options;
 use crate::agent::acp_content_projection::project_content_block;
+use crate::agent::acp_terminal_output_adapter::terminal_append;
 #[cfg(test)]
 use crate::agent::acp_tool_call_projection::{merge_tool_call_update, remember_tool_call};
 use crate::agent::acp_tool_call_projection::{
-    merge_tool_call_update_with_status_change, remember_tool_call_with_status_change,
-    tool_status_name, ToolCallState,
+    merge_tool_call_update_with_changes, merge_tool_call_update_with_status_change,
+    remember_tool_call_with_status_change, tool_status_name, ToolCallState,
 };
 use crate::agent::acp_update_projection::normalize_available_commands;
 use crate::agent::events::{
     AgentEvent, AgentPermissionOption, AgentPermissionOptionKind, AgentPermissionOutcome,
-    AgentPermissionRequest, AgentToolCallRef,
+    AgentPermissionRequest, AgentToolCallRef, AgentToolUpdate,
 };
 use crate::agent::tool_details::{tool_call_event, tool_kind_name};
 use crate::agent::{AgentEventSink, AgentSessionEventSink, TurnCancellation};
@@ -159,9 +160,19 @@ impl LivePromptProjection {
                 self.publish_tool_call(&tool_call, status_changed)?;
             }
             SessionUpdate::ToolCallUpdate(update) => {
-                let (tool_call, status_changed) =
-                    merge_tool_call_update_with_status_change(&self.tool_calls, update);
-                self.publish_tool_call(&tool_call, status_changed)?;
+                let terminal_append = terminal_append(&self.agent_id, &update);
+                let (tool_call, status_changed, projection_changed) =
+                    merge_tool_call_update_with_changes(&self.tool_calls, update);
+                if let Some(terminal_append) = terminal_append {
+                    let summary = projection_changed
+                        .then(|| self.project_tool_call(&tool_call, status_changed));
+                    self.sink.emit(AgentEvent::ToolUpdate(AgentToolUpdate {
+                        summary,
+                        terminal_appends: vec![terminal_append],
+                    }))?;
+                } else if projection_changed {
+                    self.publish_tool_call(&tool_call, status_changed)?;
+                }
             }
             SessionUpdate::ConfigOptionUpdate(update) => {
                 self.sink
@@ -186,6 +197,16 @@ impl LivePromptProjection {
         tool_call: &ToolCall,
         status_changed: bool,
     ) -> Result<(), RuntimeError> {
+        self.sink.emit(AgentEvent::ToolCall(
+            self.project_tool_call(tool_call, status_changed),
+        ))
+    }
+
+    fn project_tool_call(
+        &self,
+        tool_call: &ToolCall,
+        status_changed: bool,
+    ) -> crate::agent::events::AgentToolCall {
         let AgentEvent::ToolCall(event) = tool_call_event(tool_call) else {
             unreachable!("tool_call_event always returns a tool event");
         };
@@ -200,7 +221,7 @@ impl LivePromptProjection {
                 }),
             );
         }
-        self.sink.emit(AgentEvent::ToolCall(event))
+        event
     }
 }
 
