@@ -79,7 +79,7 @@ describe("ReliableHttpMessageChannel", () => {
         return response(403, "<!doctype html><html><body>request too large</body></html>");
       }
       chunkBodies.push(body);
-      const received = (envelope.offset ?? 0) + Buffer.from(envelope.data ?? "", "base64").byteLength;
+      const received = (envelope.offset ?? 0) + decodeBase64(envelope.data ?? "").byteLength;
       return response(received === envelope.totalSize ? 204 : 202, "");
     });
     const channel = createReliableHttpMessageChannel({
@@ -105,7 +105,14 @@ describe("ReliableHttpMessageChannel", () => {
       totalSize: number;
     });
     expect(chunkBodies.every((body) => new TextEncoder().encode(body).byteLength < 1_000_000)).toBe(true);
-    expect(Buffer.concat(chunks.map((chunk) => Buffer.from(chunk.data, "base64"))).toString()).toBe(rejectedBody);
+    const reconstructed = new Uint8Array(chunks.reduce((size, chunk) => size + decodeBase64(chunk.data).byteLength, 0));
+    let reconstructedOffset = 0;
+    for (const chunk of chunks) {
+      const bytes = decodeBase64(chunk.data);
+      reconstructed.set(bytes, reconstructedOffset);
+      reconstructedOffset += bytes.byteLength;
+    }
+    expect(new TextDecoder().decode(reconstructed)).toBe(rejectedBody);
     expect(chunks.map((chunk) => chunk.offset)).toEqual([0, 512 * 1024, 1024 * 1024]);
     expect(errors).toEqual([]);
     channel.close();
@@ -233,6 +240,10 @@ describe("ReliableHttpMessageChannel", () => {
     channel.close();
   });
 });
+
+function decodeBase64(data: string) {
+  return Uint8Array.from(atob(data), (character) => character.charCodeAt(0));
+}
 
 function response(status: number, body: string) {
   return {
