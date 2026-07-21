@@ -40,7 +40,7 @@ export type AppControllerCallbacks = {
 export type NavigationCallbacks = {
   archiveTask: (taskId: string) => void;
   changeSearch: (query: string) => void;
-  loadNativeSessions: (cursor?: string) => void;
+  loadNativeSessions: (cursor?: string, projectId?: string, targetRowCount?: number) => void;
   openNativeSession: (session: AgentListedSession) => void;
   openNewTask: (projectId?: string) => void;
   openSettings: (agentId?: string, returnToNewTask?: boolean, projectId?: string) => void;
@@ -154,7 +154,6 @@ export type AppCallbacksDependencies = {
   newTaskStartAttempt: { current: NewTaskStartAttempt | undefined };
   pendingPreparedNewTask: (key: string) => Promise<PendingNewTaskPreparationResult> | undefined;
   newTaskController?: NewTaskController;
-  requestNativeSessions: (cursor?: string, append?: boolean, minimumSessionCount?: number) => void;
   setAgents?: (agents: AgentOption[]) => void;
   setPreferences: (preferences: AppPreferencesRecord) => void;
   state: AppState;

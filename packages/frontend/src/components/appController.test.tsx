@@ -13,6 +13,7 @@ import {
   STATE_SUBSCRIBE,
   STATE_UNSUBSCRIBE,
   TASK_ACQUIRE,
+  TASK_ADOPT_NATIVE_SESSION,
   TASK_RELEASE,
   TASK_LIST,
   TASK_MARK_READ,
@@ -220,23 +221,9 @@ describe("app controller mounted lifecycle", () => {
     expect(close).toHaveBeenCalledOnce();
   });
 
-  it("loads one Native Session page without eager pagination on startup", async () => {
+  it("does not issue an independent Native Session list request on startup", async () => {
     bootstrap = navigationBootstrap({ projectId: "project_1" });
-    const request = vi.fn(async (method: string, params?: { cursor?: string | null }) => {
-      if (method !== AGENT_LIST_SESSIONS) throw new Error(method);
-      const start = params?.cursor ? 3 : 1;
-      const count = params?.cursor ? 12 : 2;
-      return {
-        agentId: "codex",
-        projectId: "project_1",
-        projectLabel: "OpenAIDE",
-        sessions: Array.from({ length: count }, (_, index) => ({
-          sessionId: `native_${start + index}`,
-          title: `Native ${start + index}`,
-        })),
-        nextCursor: params?.cursor ? null : "cursor_2",
-      };
-    });
+    const request = vi.fn(async (method: string) => { throw new Error(method); });
     const initializedSnapshot = clientSnapshot({ includeActiveTask: false });
     initializedSnapshot.client.surface = { kind: "project", projectId: "project_1" as never };
     initializedSnapshot.newTaskDefaults.projectId = "project_1" as never;
@@ -256,24 +243,79 @@ describe("app controller mounted lifecycle", () => {
       await Promise.resolve();
     });
 
-    expect(request.mock.calls.filter(([method]) => method === AGENT_LIST_SESSIONS)).toEqual([
-      [AGENT_LIST_SESSIONS, { agentId: "codex", projectId: "project_1", cursor: null }],
-    ]);
-    expect(latestController?.state.newTask.nativeSessions.items).toHaveLength(2);
-    expect(latestController?.state.newTask.nativeSessions.nextCursor).toBe("cursor_2");
+    expect(request.mock.calls.filter(([method]) => method === AGENT_LIST_SESSIONS)).toEqual([]);
+    expect(latestController?.state.newTask.nativeSessions.items).toEqual([]);
   });
 
-  it("finishes refreshing native sessions after opening a task", async () => {
+  it("adopts a direct Native Session route as soon as initialization completes", async () => {
+    bootstrap = nativeSessionBootstrap("codex", "session_1");
+    const request = vi.fn(async (method: string, params?: { scope?: { kind: string } }) => {
+      if (method === STATE_SUBSCRIBE) return nonTaskSubscriptionSnapshot(params?.scope);
+      if (method === STATE_UNSUBSCRIBE) return { scope: params?.scope };
+      if (method === TASK_ADOPT_NATIVE_SESSION) {
+        return { task: protocolTaskSnapshot("task_adopted", "Existing session") };
+      }
+      throw new Error(method);
+    });
+    backendConnection = {
+      initialize: vi.fn(async () => ({ snapshot: clientSnapshot({ includeActiveTask: false }) })),
+      request: request as unknown as BackendConnection["request"],
+      handleNotification: defaultHandleNotification,
+      close: vi.fn(),
+    };
+
+    await act(async () => {
+      create(<ControllerProbe />);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(request).toHaveBeenCalledWith(TASK_ADOPT_NATIVE_SESSION, {
+      agentId: "codex",
+      nativeSessionId: "session_1",
+    });
+    expect(postHostMessage).toHaveBeenCalledWith({
+      type: "surface.openTask",
+      payload: { task_id: "task_adopted", title: "Existing session" },
+    });
+  });
+
+  it("keeps a direct Native Session route error after initialization advances the replica", async () => {
+    bootstrap = nativeSessionBootstrap("codex", "missing_session");
+    const request = vi.fn(async (method: string, params?: { scope?: { kind: string } }) => {
+      if (method === STATE_SUBSCRIBE) return nonTaskSubscriptionSnapshot(params?.scope);
+      if (method === STATE_UNSUBSCRIBE) return { scope: params?.scope };
+      if (method === TASK_ADOPT_NATIVE_SESSION) {
+        throw new AppServerProtocolError({
+          error: { code: "notFound", message: "Native Session is no longer available" },
+        });
+      }
+      throw new Error(method);
+    });
+    backendConnection = {
+      initialize: vi.fn(async () => ({ snapshot: clientSnapshot({ includeActiveTask: false }) })),
+      request: request as unknown as BackendConnection["request"],
+      handleNotification: defaultHandleNotification,
+      close: vi.fn(),
+    };
+
+    await act(async () => {
+      create(<ControllerProbe />);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(latestController?.state.newTask.nativeSessions.adoptionError).toEqual({
+      sessionId: "missing_session",
+      message: "This session no longer exists.",
+    });
+  });
+
+  it("opens a task without coupling navigation to Native Session listing", async () => {
     bootstrap = navigationBootstrap({ projectId: "project_1" });
-    const sessionList = deferredValue<{
-      agentId: string;
-      projectId: string;
-      projectLabel: string;
-      sessions: Array<{ sessionId: string; title: string }>;
-      nextCursor: null;
-    }>();
     const request = vi.fn(async (method: string) => {
-      if (method === AGENT_LIST_SESSIONS) return sessionList.promise;
       if (method === TASK_OPEN) return { task: protocolTaskSnapshot("task_1", "Opened Task") };
       throw new Error(method);
     });
@@ -294,27 +336,16 @@ describe("app controller mounted lifecycle", () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(latestController?.state.newTask.nativeSessions.loading).toBe(true);
+    expect(latestController?.state.newTask.nativeSessions.loading).toBe(false);
 
     await act(async () => {
       latestController?.callbacks.navigation.openTask("task_1");
       webRouteListeners.forEach((listener) => listener(taskBootstrap("task_1")));
       await Promise.resolve();
-      sessionList.resolve({
-        agentId: "codex",
-        projectId: "project_1",
-        projectLabel: "OpenAIDE",
-        sessions: [{ sessionId: "native_1", title: "Native session" }],
-        nextCursor: null,
-      });
-      await sessionList.promise;
-      await Promise.resolve();
     });
 
-    expect(latestController?.state.newTask.nativeSessions).toMatchObject({
-      loading: false,
-      items: [{ session_id: "native_1", title: "Native session" }],
-    });
+    expect(request.mock.calls.filter(([method]) => method === AGENT_LIST_SESSIONS)).toEqual([]);
+    expect(latestController?.state.newTask.nativeSessions.loading).toBe(false);
   });
 
   it("settles an initialization failure as unavailable", async () => {
@@ -1125,14 +1156,7 @@ describe("app controller mounted lifecycle", () => {
     });
   });
 
-  it("acquires a new Task before loading optional Native Session history", async () => {
-    const nativeSessions = deferredValue<{
-      agentId: string;
-      projectId: string;
-      projectLabel: string;
-      sessions: [];
-      nextCursor: null;
-    }>();
+  it("acquires a new Task without independently loading Native Session history", async () => {
     const request = vi.fn(async (method: string) => {
       if (method === TASK_ACQUIRE) {
         return {
@@ -1142,7 +1166,6 @@ describe("app controller mounted lifecycle", () => {
           },
         };
       }
-      if (method === AGENT_LIST_SESSIONS) return nativeSessions.promise;
       throw new Error(method);
     });
     backendConnection = {
@@ -1162,19 +1185,8 @@ describe("app controller mounted lifecycle", () => {
     const startupRequests = request.mock.calls
       .map(([method]) => method)
       .filter((method) => method === TASK_ACQUIRE || method === AGENT_LIST_SESSIONS);
-    expect(startupRequests).toEqual([TASK_ACQUIRE, AGENT_LIST_SESSIONS]);
+    expect(startupRequests).toEqual([TASK_ACQUIRE]);
     expect(latestController?.newTaskSnapshot?.task.task_id).toBe("task_new");
-
-    await act(async () => {
-      nativeSessions.resolve({
-        agentId: "codex",
-        projectId: "project_1",
-        projectLabel: "OpenAIDE",
-        sessions: [],
-        nextCursor: null,
-      });
-      await nativeSessions.promise;
-    });
   });
 
   it("keeps the hidden New Task subscription current while an existing Task is visible", async () => {
@@ -1231,7 +1243,7 @@ describe("app controller mounted lifecycle", () => {
           return {
             cursor: "cursor_navigation",
             scope,
-            snapshot: { kind: "taskNavigation", navigation: { tasks: [], activeTaskId: null } },
+            snapshot: { kind: "taskNavigation", navigation: { entries: [], activeTaskId: null } },
           };
         }
         if (scope?.kind === "task" && scope.taskId === "task_new") {
@@ -2799,10 +2811,21 @@ describe("app controller mounted lifecycle", () => {
 
 type TestBootstrap =
   | ReturnType<typeof navigationBootstrap>
+  | ReturnType<typeof nativeSessionBootstrap>
   | ReturnType<typeof taskBootstrap>
   | ReturnType<typeof settingsBootstrap>
   | ReturnType<typeof webTaskBootstrap>
   | ReturnType<typeof webSettingsBootstrap>;
+
+function nativeSessionBootstrap(agentId: string, nativeSessionId: string) {
+  return {
+    surface: "nativeSession" as const,
+    shell: { kind: "vscodeExtension" as const, navigationMode: "currentProject" as const },
+    agentId,
+    nativeSessionId,
+    preferences: { composer_submit_shortcut: "mod_enter" as const },
+  };
+}
 
 type TestBackendConnection = {
   initialize: (params: InitializeParams) => Promise<InitializeResult>;
@@ -2952,7 +2975,7 @@ function clientSnapshot(
     },
     tasks: includeTasks ? {
       activeTaskId: "task_1" as never,
-      tasks: [protocolTaskSummary("task_1", options.activeTaskTitle ?? "Task", options.activeTaskStatus)],
+      entries: [{ kind: "task", task: protocolTaskSummary("task_1", options.activeTaskTitle ?? "Task", options.activeTaskStatus) }],
     } : null,
     activeTask: includeActiveTask
       ? protocolTaskSnapshot("task_1", options.activeTaskTitle ?? "Task", options.activeTaskStatus)
@@ -3067,7 +3090,7 @@ function nonTaskSubscriptionSnapshot(
       scope,
       snapshot: {
         kind: "taskNavigation" as const,
-        navigation: { activeTaskId: "task_1" as never, tasks: [] },
+        navigation: { activeTaskId: "task_1" as never, entries: [] },
       },
     };
   }

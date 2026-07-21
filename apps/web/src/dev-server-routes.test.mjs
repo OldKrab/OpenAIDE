@@ -8,6 +8,22 @@ test("recognizes direct app routes that need web shell bootstrap metadata", () =
   assert.deepEqual(webRoute("/archive"), { archived: true, surface: "task", taskId: undefined });
   assert.deepEqual(webRoute("/settings"), { archived: undefined, surface: "settings", taskId: undefined });
   assert.deepEqual(webRoute("/task/task_1"), { archived: undefined, surface: "task", taskId: "task_1" });
+  assert.deepEqual(webRoute("/session/codex/session%2F1"), {
+    agentId: "codex",
+    archived: undefined,
+    nativeSessionId: "session/1",
+    surface: "nativeSession",
+    taskId: undefined,
+  });
+});
+
+test("injects Native Session identity into direct opening-route loads", () => {
+  const html = '<html><body><div id="root"></div></body></html>';
+  const injected = injectBootstrap(html, webRoute("/session/codex/session_1"));
+
+  assert.match(injected, /data-surface="nativeSession"/);
+  assert.match(injected, /data-agent-id="codex"/);
+  assert.match(injected, /data-native-session-id="session_1"/);
 });
 
 test("does not treat Vite or App Server support paths as app routes", () => {

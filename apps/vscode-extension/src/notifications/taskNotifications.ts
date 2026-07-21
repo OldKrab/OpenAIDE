@@ -67,7 +67,10 @@ export async function registerTaskNotifications(
       { kind: "taskNavigation" },
       {
         onSnapshot(snapshot) {
-          if (snapshot.kind === "taskNavigation") manager.reconcile(snapshot.navigation.tasks);
+          if (snapshot.kind !== "taskNavigation") return;
+          manager.reconcile(snapshot.navigation.entries.flatMap((entry) => (
+            entry.kind === "task" ? [entry.task] : []
+          )));
         },
         onBaselineError(error) {
           logger.warn("VS Code Task notification subscription failed", {

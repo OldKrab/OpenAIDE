@@ -33,9 +33,16 @@ describe("App Server initial snapshot ingestion", () => {
       { type: "settings:runtimeSettings", settings: { developer: { acp_trace: { enabled: true } } } },
       { type: "settings:preferences", preferences: { composer_submit_shortcut: "enter" } },
       {
-        type: "tasks",
+        type: "taskNavigation",
         archived: false,
         tasks: [{ task_id: "task-1", agent_name: "Codex", workspace_root: "" }],
+        sessions: [{
+          agent_id: "codex",
+          session_id: "native-1",
+          project_id: "project-1",
+          title: "Cached Native Session",
+        }],
+        refreshing: false,
       },
       { type: "selection:set", taskId: "task-1" },
       { type: "snapshot", intent: "open", snapshot: { task: { task_id: "task-1" } } },
@@ -60,7 +67,7 @@ describe("App Server initial snapshot ingestion", () => {
     expect(actionsFromInitialSnapshot(clientSnapshot(), { includeActiveTask: false }).actions).toMatchObject([
       { type: "projects" },
       { type: "newTask:agent" },
-      { type: "tasks" },
+      { type: "taskNavigation" },
       { type: "selection:set" },
     ]);
   });
@@ -148,7 +155,18 @@ function clientSnapshot(overrides: Partial<ClientSnapshot> = {}): ClientSnapshot
     },
     tasks: {
       activeTaskId: "task-1" as TaskId,
-      tasks: [taskSummary()],
+      entries: [
+        { kind: "task", task: taskSummary() },
+        {
+          kind: "nativeSession",
+          session: {
+            reference: { agentId: "codex" as AgentId, sessionId: "native-1" },
+            projectId: "project-1" as ProjectId,
+            workspaceRoot: "/workspace/Project",
+            title: "Cached Native Session",
+          },
+        },
+      ],
     },
     activeTask: {
       task: taskSummary(),

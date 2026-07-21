@@ -17,9 +17,45 @@ pub use send::*;
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskNavigationSnapshot {
-    pub tasks: Vec<TaskSummary>,
+    /// Combined authoritative Navigation rows.
+    #[serde(default)]
+    pub entries: Vec<TaskNavigationEntry>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_task_id: Option<TaskId>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub refreshing: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum TaskNavigationEntry {
+    Task { task: Box<TaskSummary> },
+    NativeSession { session: NativeSessionSummary },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeSessionSummary {
+    pub reference: NativeSessionReference,
+    pub project_id: ProjectId,
+    pub workspace_root: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub worktree_id: Option<WorktreeId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_activity: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeSessionReference {
+    pub agent_id: AgentId,
+    pub session_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]

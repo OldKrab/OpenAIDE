@@ -183,5 +183,11 @@ function actionsFromSubscriptionSnapshot(
 function remappedTaskNavigationActions(context: StateSubscriptionMappingContext): AppAction[] {
   if (!context.taskNavigation) return [];
   const mapped = mapProtocolTaskNavigation(context.taskNavigation, context);
-  return [{ type: "tasks", archived: false, tasks: mapped.tasks }];
+  return [{
+    type: "taskNavigation",
+    archived: false,
+    tasks: mapped.tasks,
+    sessions: mapped.sessions,
+    refreshing: mapped.refreshing,
+  }];
 }

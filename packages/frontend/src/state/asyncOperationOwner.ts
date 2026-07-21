@@ -159,6 +159,8 @@ export function navigationTargetForBootstrap(bootstrap: WebviewBootstrap): strin
       return bootstrap.taskId
         ? taskNavigationTarget(bootstrap.taskId)
         : newTaskNavigationTarget(bootstrap.projectId);
+    case "nativeSession":
+      return nativeSessionNavigationTarget(bootstrap.agentId, bootstrap.nativeSessionId);
     case "settings":
       return `settings:${bootstrap.settingsTab ?? "default"}`;
     case "navigation":
@@ -166,6 +168,10 @@ export function navigationTargetForBootstrap(bootstrap: WebviewBootstrap): strin
     case "invalid":
       return "invalid";
   }
+}
+
+export function nativeSessionNavigationTarget(agentId?: string, nativeSessionId?: string): string {
+  return `native-session:${agentId ?? "missing"}:${nativeSessionId ?? "missing"}`;
 }
 
 export function taskNavigationTarget(taskId: string): string {

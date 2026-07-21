@@ -9,8 +9,16 @@ The canonical product identity.
 _Avoid_: Alternate product names
 
 **Task**:
-A visible unit of agent work in OpenAIDE's task list that has status, Project Context, Agent selection, an Agent-owned Native Session, and at least one durably accepted user message.
+A visible unit of agent work in OpenAIDE's task list that has status, Project Context, Agent selection, and one immutable Agent-owned Native Session binding. It becomes visible through a durably accepted user message or successful Native Session adoption.
 _Avoid_: Chat, conversation
+
+**Task Activity Time**:
+The latest known work or conversation activity for a Task, advanced monotonically by OpenAIDE activity or a newer timestamp from its bound Native Session.
+_Avoid_: Task record update time, moving activity backward
+
+**Unknown Activity**:
+A Navigation Entry whose source provides no valid activity timestamp. Unknown Activity sorts after every entry with known activity and uses Agent Identity plus Native Session identity as a stable tie-breaker. Discovery time is not activity.
+_Avoid_: treating first observation or refresh time as user activity
 
 **New Task**:
 The pre-history work surface where a user selects Task context, configures an Agent, and composes the first message. It is backed by an exclusively leased Prepared Task but is not visible in Task Navigation, Task lists, or Archive.
@@ -175,6 +183,15 @@ _Avoid_: User-facing replacement for Task, treating OpenAIDE's local Chat projec
 **Native Session Discovery**:
 The optional listing of Agent-owned sessions that a user may adopt as OpenAIDE Tasks. Its availability does not determine whether saved OpenAIDE Tasks loaded successfully.
 _Avoid_: Agent session history as a synonym for Task history, replacing Task Navigation errors with Agent errors
+
+**Native Session Catalog**:
+OpenAIDE's persisted view of Native Sessions last observed through Native Session Discovery. It reflects listing results only; live metadata for an owned Native Session belongs to its active Task runtime. Discovery is driven by demand for one Project and uses working-directory-filtered listing for the Project root and every available worktree in its Worktree Repository, including worktrees not yet referenced by a Task; OpenAIDE does not perform unfiltered, all-Project discovery. Discovery for a Project covers all enabled Agents that support session listing, with independent Agent and Task Workspace requests running in parallel and coalesced by Agent Identity plus canonical Task Workspace root. Each Agent's results are committed and published independently; the Project list is derived by merging the latest committed Agent catalogs rather than waiting at a Project-wide barrier. Discovery is bounded: Navigation is activity-sorted among known entries, but is not guaranteed to contain the globally newest entries unless every Agent is enumerated completely. Discovery optimistically treats each Agent's pages as newest-first and continues an Agent only while its observed activity-time frontier could beat the requested Project cutoff. This is an optimization rather than an ACP guarantee. The Catalog validates the raw Agent order before normalizing it; a missing or invalid activity timestamp, a page that is not descending, or a later page crossing the prior page's activity frontier makes that Agent's ordering untrusted for the refresh. Equal timestamps and duplicate entries do not. An untrusted Agent is discovered up to the requested Project row depth for that Agent, or until exhaustion. As a temporary safety rule, a page that contributes no session identity not already seen in the same live cursor generation stops that Agent and Task Workspace generation even when it returns a next cursor. Whether an identity already exists in the persisted Catalog is irrelevant to this rule. A failed refresh preserves that Agent's last committed entries because failure provides no evidence that they disappeared. Persisted entries survive App Server restarts, but listing cursors and discovery-demand high-water marks do not; each process starts with the current startup demand.
+Disabling or removing an Agent hides both its durable Tasks and its unadopted catalog entries from Navigation without deleting them. Re-enabling the same Agent Identity makes retained rows eligible again and starts discovery refresh. A direct URL may still open retained durable history read-only.
+_Avoid_: Task store, merging live session updates into listing observations, unfiltered all-Project discovery, discovering only the currently selected Agent, serializing independent Agent or Task Workspace requests, delaying successful Agent results behind another Agent, treating newest-first ordering as an ACP guarantee, claiming bounded discovery is a globally exact newest-first result, clearing entries when refresh fails, deleting entries merely because an Agent is disabled, treating historical load-more depth as permanent startup demand
+
+**Native Session Opening**:
+The pre-Task attempt to load a discovered Native Session for adoption. It is identified by its Agent Identity and Native Session identity; success creates a Task, while failure does not.
+_Avoid_: Task opening, allocating a Task before adoption succeeds
 
 **Configuration Option**:
 An Agent-provided setting for a Native Session whose available choices and current value can change as the Agent state changes.

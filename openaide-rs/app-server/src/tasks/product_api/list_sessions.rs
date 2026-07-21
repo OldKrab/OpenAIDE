@@ -5,6 +5,8 @@ use openaide_app_server_protocol::errors::ProtocolError;
 use std::sync::{Arc, Mutex};
 
 use crate::agent::{AgentListSessionsRequest, AgentSessionKey};
+use crate::native_sessions::catalog::{NativeSessionObservation, NativeSessionRef};
+use crate::projects::ProjectIdentity;
 use crate::storage::records::TaskRecord;
 use crate::tasks::mutation::{TaskCommitOptions, TaskMutationResult};
 
@@ -20,9 +22,89 @@ pub(super) struct NativeCatalogRefreshCoordinator {
 struct NativeCatalogRefreshState {
     running: bool,
     trailing_run_requested: bool,
+    project_targets: std::collections::HashMap<String, usize>,
+}
+
+#[derive(Default)]
+struct ListingOrderValidator {
+    trusted: bool,
+    previous_page_frontier: Option<i128>,
+}
+
+struct PageOrderObservation {
+    activity_frontier: Option<i128>,
+    new_identity_count: usize,
+}
+
+impl ListingOrderValidator {
+    fn new() -> Self {
+        Self {
+            trusted: true,
+            previous_page_frontier: None,
+        }
+    }
+
+    /// Validates Agent order before catalog normalization can hide malformed timestamps.
+    fn observe(
+        &mut self,
+        sessions: &[crate::protocol::model::AgentListedSession],
+        seen: &mut std::collections::HashSet<String>,
+    ) -> PageOrderObservation {
+        let mut page_times = Vec::new();
+        let mut previous_time = None;
+        let mut new_identity_count = 0;
+        for session in sessions {
+            if !seen.insert(session.session_id.clone()) {
+                continue;
+            }
+            new_identity_count += 1;
+            let time = listed_session_activity(session);
+            let Some(time) = time else {
+                self.trusted = false;
+                continue;
+            };
+            if previous_time.is_some_and(|previous| time > previous) {
+                self.trusted = false;
+            }
+            previous_time = Some(time);
+            page_times.push(time);
+        }
+        if let (Some(previous_frontier), Some(page_max)) = (
+            self.previous_page_frontier,
+            page_times.iter().copied().max(),
+        ) {
+            if page_max > previous_frontier {
+                self.trusted = false;
+            }
+        }
+        let activity_frontier = page_times.iter().copied().min();
+        if activity_frontier.is_some() {
+            self.previous_page_frontier = activity_frontier;
+        }
+        PageOrderObservation {
+            activity_frontier,
+            new_identity_count,
+        }
+    }
 }
 
 impl TaskProductApi {
+    pub(crate) fn request_native_session_catalog_load_more(
+        &self,
+        project_id: &str,
+        target_row_count: usize,
+    ) {
+        self.native_catalog_refresh
+            .state
+            .lock()
+            .expect("Native Session catalog refresh state poisoned")
+            .project_targets
+            .entry(project_id.to_string())
+            .and_modify(|target| *target = (*target).max(target_row_count))
+            .or_insert(target_row_count);
+        self.request_native_session_catalog_refresh();
+    }
+
     /// Coalesces catalog work while preserving one trailing refresh requested during a run.
     pub(crate) fn request_native_session_catalog_refresh(&self) {
         {
@@ -37,6 +119,9 @@ impl TaskProductApi {
             }
             state.running = true;
         }
+
+        self.native_catalog.set_refreshing(true);
+        self.task_notifier.navigation_changed();
 
         let api = self.clone();
         std::thread::spawn(move || loop {
@@ -56,6 +141,8 @@ impl TaskProductApi {
                 continue;
             }
             state.running = false;
+            api.native_catalog.set_refreshing(false);
+            api.task_notifier.navigation_changed();
             break;
         });
     }
@@ -65,25 +152,89 @@ impl TaskProductApi {
             .store
             .list_all_task_records_strict()
             .map_err(protocol_error_from_runtime)?;
-        let contexts = task_records
-            .iter()
-            .filter(|task| !task.tombstoned && task.agent_session_id.is_some())
-            .map(|task| (task.agent_id.clone(), task.workspace_root.clone()))
-            .collect::<std::collections::HashSet<_>>();
-        let mut first_error = None;
-        for (agent_id, workspace_root) in contexts {
-            match self.fetch_complete_native_catalog(&agent_id, &workspace_root) {
-                Ok(sessions) => {
-                    self.reconcile_native_session_titles(
-                        &agent_id,
-                        &workspace_root,
-                        &sessions,
-                        &task_records,
-                    )?;
-                    self.history_sync
-                        .replace_listed_sessions(&agent_id, &workspace_root, sessions)
+        let mut workspaces = self
+            .configured_projects
+            .projects()
+            .into_iter()
+            .flat_map(|project| {
+                let mut contexts = vec![(
+                    project.project_id.as_str().to_string(),
+                    project.workspace_root.clone(),
+                )];
+                if let Ok(Some(repository)) = self
+                    .worktrees
+                    .refresh_project(std::path::Path::new(&project.workspace_root))
+                {
+                    contexts.extend(
+                        repository
+                            .repository
+                            .worktrees
+                            .into_iter()
+                            .filter(|worktree| {
+                                !worktree.forgotten
+                                    && worktree.availability
+                                        == openaide_app_server_protocol::worktree::WorktreeAvailability::Available
+                            })
+                            .map(|worktree| (project.project_id.as_str().to_string(), worktree.path)),
+                    );
                 }
-                Err(error) => {
+                contexts
+            })
+            .collect::<std::collections::HashSet<_>>();
+        workspaces.extend(
+            task_records
+                .iter()
+                .filter(|task| !task.tombstoned)
+                .map(|task| {
+                    let project_id = ProjectIdentity::from_workspace_root(
+                        task.project_root.as_deref().unwrap_or(&task.workspace_root),
+                    )
+                    .project_id;
+                    (project_id.as_str().to_string(), task.workspace_root.clone())
+                }),
+        );
+        let contexts = self
+            .agent_registry
+            .summaries()
+            .into_iter()
+            .flat_map(|agent| {
+                workspaces
+                    .iter()
+                    .cloned()
+                    .map(move |(project_id, workspace_root)| {
+                        (agent.id.clone(), project_id, workspace_root)
+                    })
+            })
+            .collect::<Vec<_>>();
+        let mut first_error = None;
+        for batch in contexts.chunks(20) {
+            let results = std::thread::scope(|scope| {
+                batch
+                    .iter()
+                    .map(|(agent_id, project_id, workspace_root)| {
+                        scope.spawn(|| {
+                            self.refresh_native_catalog_context(
+                                agent_id,
+                                project_id,
+                                workspace_root,
+                                &task_records,
+                            )
+                        })
+                    })
+                    .map(|worker| {
+                        worker.join().unwrap_or_else(|_| {
+                            Err(ProtocolError {
+                                code: openaide_app_server_protocol::errors::ProtocolErrorCode::Internal,
+                                message: "Native Session refresh worker panicked".to_string(),
+                                recoverable: true,
+                                target: None,
+                            })
+                        })
+                    })
+                    .collect::<Vec<_>>()
+            });
+            for result in results {
+                if let Err(error) = result {
                     first_error.get_or_insert(error);
                 }
             }
@@ -91,22 +242,145 @@ impl TaskProductApi {
         first_error.map_or(Ok(()), Err)
     }
 
-    /// Reconciles Agent-owned title metadata without coupling it to Chat history refresh.
-    fn reconcile_native_session_titles(
+    fn refresh_native_catalog_context(
+        &self,
+        agent_id: &str,
+        project_id: &str,
+        workspace_root: &str,
+        task_records: &[TaskRecord],
+    ) -> Result<(), ProtocolError> {
+        let target = self
+            .native_catalog_refresh
+            .state
+            .lock()
+            .expect("Native Session catalog refresh state poisoned")
+            .project_targets
+            .get(project_id)
+            .copied()
+            .unwrap_or(20);
+        let mut cursor = OpaqueSessionCursor::new(None);
+        let mut sessions = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        let mut listing_order = ListingOrderValidator::new();
+        loop {
+            let result = self
+                .agent_gateway
+                .list_sessions(AgentListSessionsRequest {
+                    agent_id: agent_id.to_string(),
+                    cwd: workspace_root.to_string(),
+                    cursor: cursor.current(),
+                })
+                .map_err(protocol_error_from_runtime)?;
+            let page_order = listing_order.observe(&result.sessions, &mut seen);
+            self.record_native_catalog_page(
+                project_id,
+                agent_id,
+                workspace_root,
+                &result.sessions,
+            )?;
+            self.reconcile_native_session_activity(
+                agent_id,
+                workspace_root,
+                &result.sessions,
+                task_records,
+            )?;
+            sessions.extend(result.sessions);
+            let next = cursor.advance(result.next_cursor);
+            let reached_activity_cutoff = listing_order.trusted
+                && page_order
+                    .activity_frontier
+                    .zip(self.project_activity_cutoff(project_id, target, task_records))
+                    .is_some_and(|(frontier, cutoff)| frontier <= cutoff);
+            if next.is_none()
+                || page_order.new_identity_count == 0
+                || seen.len() >= target
+                || reached_activity_cutoff
+            {
+                break;
+            }
+        }
+        self.history_sync
+            .replace_listed_sessions(agent_id, workspace_root, sessions);
+        Ok(())
+    }
+
+    fn project_activity_cutoff(
+        &self,
+        project_id: &str,
+        target: usize,
+        task_records: &[TaskRecord],
+    ) -> Option<i128> {
+        if target == 0 {
+            return None;
+        }
+        let enabled_agents = self
+            .agent_registry
+            .summaries()
+            .into_iter()
+            .map(|agent| agent.id)
+            .collect::<std::collections::HashSet<_>>();
+        let owned = task_records
+            .iter()
+            .filter_map(|task| {
+                task.agent_session_id
+                    .as_ref()
+                    .map(|session_id| (task.agent_id.clone(), session_id.clone()))
+            })
+            .collect::<std::collections::HashSet<_>>();
+        let mut activities = task_records
+            .iter()
+            .filter(|task| {
+                !task.tombstoned
+                    && !task.archived
+                    && task.lifecycle.is_visible()
+                    && enabled_agents.contains(&task.agent_id)
+                    && ProjectIdentity::from_workspace_root(
+                        task.project_root.as_deref().unwrap_or(&task.workspace_root),
+                    )
+                    .project_id
+                    .as_str()
+                        == project_id
+            })
+            .map(|task| crate::time::activity_millis(&task.last_activity))
+            .collect::<Vec<_>>();
+        activities.extend(
+            self.native_catalog
+                .entries()
+                .into_iter()
+                .filter(|entry| entry.project_id == project_id)
+                .filter(|entry| enabled_agents.contains(&entry.observation.reference.agent_id))
+                .filter(|entry| {
+                    !owned.contains(&(
+                        entry.observation.reference.agent_id.clone(),
+                        entry.observation.reference.session_id.clone(),
+                    ))
+                })
+                .map(|entry| {
+                    entry
+                        .observation
+                        .last_activity
+                        .as_deref()
+                        .and_then(crate::time::activity_millis)
+                }),
+        );
+        if activities.len() < target {
+            return None;
+        }
+        activities.sort_by(|left, right| right.cmp(left));
+        activities.get(target - 1).copied().flatten()
+    }
+
+    /// Advances owned Task activity from listings without importing stale runtime metadata.
+    fn reconcile_native_session_activity(
         &self,
         agent_id: &str,
         workspace_root: &str,
         sessions: &[crate::protocol::model::AgentListedSession],
         task_records: &[TaskRecord],
     ) -> Result<(), ProtocolError> {
-        let titles = sessions
+        let metadata = sessions
             .iter()
-            .filter_map(|session| {
-                session
-                    .title
-                    .as_deref()
-                    .map(|title| (&session.session_id, title))
-            })
+            .map(|session| (&session.session_id, session))
             .collect::<std::collections::HashMap<_, _>>();
         for record in task_records.iter().filter(|task| {
             !task.tombstoned
@@ -115,13 +389,22 @@ impl TaskProductApi {
                 && task
                     .agent_session_id
                     .as_ref()
-                    .is_some_and(|session_id| titles.contains_key(session_id))
+                    .is_some_and(|session_id| metadata.contains_key(session_id))
         }) {
             let expected_session_id = record
                 .agent_session_id
                 .clone()
                 .expect("matched Task has a Native Session");
-            let title = titles[&expected_session_id].to_string();
+            let session = metadata[&expected_session_id];
+            let native_activity = [
+                session.last_activity.as_deref(),
+                session.updated_at.as_deref(),
+            ]
+            .into_iter()
+            .flatten()
+            .filter_map(|value| crate::time::activity_millis(value).map(|time| (time, value)))
+            .max_by_key(|(time, _)| *time)
+            .map(|(_, value)| value.to_string());
             self.mutations
                 .commit_existing_task(&record.task_id, TaskCommitOptions::metadata(), |ctx| {
                     let task = ctx.task_mut();
@@ -132,7 +415,19 @@ impl TaskProductApi {
                     {
                         return Ok(TaskMutationResult::Unchanged);
                     }
-                    Ok(if task.set_agent_title(&title) {
+                    let mut changed = false;
+                    if let Some(native_activity) = &native_activity {
+                        let native_time = crate::time::activity_millis(native_activity);
+                        let task_time = crate::time::activity_millis(&task.last_activity);
+                        if native_time
+                            .zip(task_time)
+                            .is_some_and(|(native, task)| native > task)
+                        {
+                            task.last_activity = native_activity.clone();
+                            changed = true;
+                        }
+                    }
+                    Ok(if changed {
                         TaskMutationResult::Changed
                     } else {
                         TaskMutationResult::Unchanged
@@ -141,29 +436,6 @@ impl TaskProductApi {
                 .map_err(protocol_error_from_runtime)?;
         }
         Ok(())
-    }
-
-    fn fetch_complete_native_catalog(
-        &self,
-        agent_id: &str,
-        workspace_root: &str,
-    ) -> Result<Vec<crate::protocol::model::AgentListedSession>, ProtocolError> {
-        let mut cursor = OpaqueSessionCursor::new(None);
-        let mut sessions = Vec::new();
-        loop {
-            let result = self
-                .agent_gateway
-                .list_sessions(AgentListSessionsRequest {
-                    agent_id: agent_id.to_string(),
-                    cwd: workspace_root.to_string(),
-                    cursor: cursor.current(),
-                })
-                .map_err(protocol_error_from_runtime)?;
-            sessions.extend(result.sessions);
-            if cursor.advance(result.next_cursor).is_none() {
-                return Ok(sessions);
-            }
-        }
     }
 
     fn list_sessions_for_project(
@@ -192,7 +464,7 @@ impl TaskProductApi {
                 .store
                 .list_all_task_records_strict()
                 .map_err(protocol_error_from_runtime)?;
-            self.reconcile_native_session_titles(
+            self.reconcile_native_session_activity(
                 params.agent_id.as_str(),
                 &project.workspace_root,
                 &result.sessions,
@@ -203,6 +475,12 @@ impl TaskProductApi {
                 &project.workspace_root,
                 &result.sessions,
             );
+            self.record_native_catalog_page(
+                project.project_id.as_str(),
+                params.agent_id.as_str(),
+                &project.workspace_root,
+                &result.sessions,
+            )?;
             let sessions = self
                 .unowned_native_sessions(params.agent_id.as_str(), result.sessions, &task_records)?
                 .into_iter()
@@ -223,6 +501,34 @@ impl TaskProductApi {
                 });
             }
         }
+    }
+
+    fn record_native_catalog_page(
+        &self,
+        project_id: &str,
+        agent_id: &str,
+        workspace_root: &str,
+        sessions: &[crate::protocol::model::AgentListedSession],
+    ) -> Result<(), ProtocolError> {
+        self.native_catalog
+            .record_page(
+                project_id,
+                workspace_root,
+                sessions
+                    .iter()
+                    .map(|session| NativeSessionObservation {
+                        reference: NativeSessionRef::new(agent_id, &session.session_id),
+                        title: session.title.clone(),
+                        last_activity: session
+                            .last_activity
+                            .clone()
+                            .or_else(|| session.updated_at.clone()),
+                    })
+                    .collect(),
+            )
+            .map_err(protocol_error_from_runtime)?;
+        self.task_notifier.navigation_changed();
+        Ok(())
     }
 
     fn unowned_native_sessions(
@@ -260,6 +566,18 @@ impl TaskProductApi {
     }
 }
 
+fn listed_session_activity(session: &crate::protocol::model::AgentListedSession) -> Option<i128> {
+    session
+        .last_activity
+        .as_deref()
+        .or(session.updated_at.as_deref())
+        .and_then(crate::time::activity_millis)
+}
+
+#[cfg(test)]
+#[path = "list_sessions_tests.rs"]
+mod tests;
+
 impl AgentListSessionsWorkflow for TaskProductApi {
     fn list_agent_sessions(
         &self,
@@ -270,5 +588,9 @@ impl AgentListSessionsWorkflow for TaskProductApi {
 
     fn request_native_session_catalog_refresh(&self) {
         TaskProductApi::request_native_session_catalog_refresh(self)
+    }
+
+    fn request_native_session_catalog_load_more(&self, project_id: &str, target_row_count: usize) {
+        TaskProductApi::request_native_session_catalog_load_more(self, project_id, target_row_count)
     }
 }

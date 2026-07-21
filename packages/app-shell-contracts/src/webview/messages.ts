@@ -48,6 +48,7 @@ export type WebviewToHostMessage =
   | { type: "workspace.roots" }
   | { type: "developer.settings.unlock" }
   | { type: "surface.openNewTask"; payload?: { project_id?: string } }
+  | { type: "surface.openNativeSession"; payload: { agent_id: string; native_session_id: string; project_id?: string } }
   | { type: "surface.openArchive" }
   | { type: "surface.openSettings"; payload?: { agent_id?: string; return_to_new_task?: boolean; project_id?: string } }
   | { type: "surface.openTask"; payload: { task_id: string; title?: string } }

@@ -1,4 +1,9 @@
-import type { SubscriptionScope, TaskNavigationSnapshot, TaskSummary } from "./generated/protocol.js";
+import type {
+  SubscriptionScope,
+  TaskNavigationEntry,
+  TaskNavigationSnapshot,
+  TaskSummary,
+} from "./generated/protocol.js";
 
 export function filterTaskNavigationForScope(
   navigation: TaskNavigationSnapshot,
@@ -6,20 +11,38 @@ export function filterTaskNavigationForScope(
 ): TaskNavigationSnapshot {
   if (scope.kind !== "taskNavigation" || scope.projectId === null || scope.projectId === undefined) return navigation;
 
-  const tasks = navigation.tasks.filter((task) => task.projectId === scope.projectId);
+  const entries = navigation.entries.filter((entry) => (
+    entry.kind === "task"
+      ? entry.task.projectId === scope.projectId
+      : entry.session.projectId === scope.projectId
+  ));
   const activeTaskId =
     navigation.activeTaskId !== null && navigation.activeTaskId !== undefined
-      ? tasks.some((task) => task.taskId === navigation.activeTaskId)
+      ? entries.some((entry) => entry.kind === "task" && entry.task.taskId === navigation.activeTaskId)
         ? navigation.activeTaskId
         : null
       : navigation.activeTaskId;
 
-  return { ...navigation, tasks, activeTaskId };
+  return { ...navigation, entries, activeTaskId };
 }
 
-export function upsertTaskSummary(tasks: TaskSummary[], task: TaskSummary): TaskSummary[] {
-  const existing = tasks.findIndex((candidate) => candidate.taskId === task.taskId);
-  if (existing === -1) return [task, ...tasks];
+/** Keeps the combined Navigation projection coherent while focused Task events arrive. */
+export function upsertTaskNavigationEntry(
+  entries: TaskNavigationEntry[],
+  task: TaskSummary,
+): TaskNavigationEntry[] {
+  const next = entries.filter((entry) => entry.kind !== "task" || entry.task.taskId !== task.taskId);
+  next.push({ kind: "task", task });
+  return next.sort((left, right) => entryActivity(right).localeCompare(entryActivity(left)));
+}
 
-  return tasks.map((candidate, index) => (index === existing ? task : candidate));
+export function removeTaskNavigationEntry(
+  entries: TaskNavigationEntry[],
+  taskId: TaskSummary["taskId"],
+): TaskNavigationEntry[] {
+  return entries.filter((entry) => entry.kind !== "task" || entry.task.taskId !== taskId);
+}
+
+function entryActivity(entry: TaskNavigationEntry): string {
+  return entry.kind === "task" ? entry.task.lastActivity : entry.session.lastActivity ?? "";
 }

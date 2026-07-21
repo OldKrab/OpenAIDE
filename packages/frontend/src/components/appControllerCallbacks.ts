@@ -24,21 +24,17 @@ export function createAppCallbacks({
   newTaskStartAttempt,
   pendingPreparedNewTask,
   newTaskController = new NewTaskController(),
-  requestNativeSessions,
   setAgents,
   setPreferences,
   state,
 }: AppCallbacksDependencies): AppControllerCallbacks {
   return {
     navigation: createNavigationCallbacks({
-      acceptTaskOpen,
       backendConnection,
       asyncOperations,
       attachmentResources,
-      createSnapshotRequestId,
       dispatch,
       newTaskController,
-      requestNativeSessions,
       setAgents,
       state,
     }),

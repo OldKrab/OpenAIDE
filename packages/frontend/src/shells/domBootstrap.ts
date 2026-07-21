@@ -4,7 +4,7 @@ import type { WebviewBootstrap } from "../state/surfaceTypes";
 export function datasetBootstrap(): WebviewBootstrap {
   const surface = document.body.dataset.surface;
   const shell = shellBootstrap();
-  if ((surface !== "navigation" && surface !== "settings" && surface !== "task") || !shell) {
+  if ((surface !== "navigation" && surface !== "nativeSession" && surface !== "settings" && surface !== "task") || !shell) {
     return { surface: "invalid" };
   }
   return {
@@ -13,6 +13,8 @@ export function datasetBootstrap(): WebviewBootstrap {
     clientInstanceId: document.body.dataset.clientInstanceId || undefined,
     focusedTaskId: focusedTaskId(),
     taskId: document.body.dataset.taskId || undefined,
+    agentId: document.body.dataset.agentId || undefined,
+    nativeSessionId: document.body.dataset.nativeSessionId || undefined,
     projectId: document.body.dataset.projectId || undefined,
     settingsAgentId: document.body.dataset.settingsAgentId || undefined,
     returnToNewTask: document.body.dataset.returnToNewTask === "true",

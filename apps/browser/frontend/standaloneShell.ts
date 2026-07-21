@@ -15,6 +15,14 @@ export function createStandaloneShell(): FrontendShell {
       openNewTask: (projectId) => host?.postMessage(projectId
         ? { type: "surface.openNewTask", payload: { project_id: projectId } }
         : { type: "surface.openNewTask" }),
+      openNativeSession: (agentId, nativeSessionId, projectId) => host?.postMessage({
+        type: "surface.openNativeSession",
+        payload: {
+          agent_id: agentId,
+          native_session_id: nativeSessionId,
+          ...(projectId ? { project_id: projectId } : {}),
+        },
+      }),
       openSettings: (agentId, returnToNewTask, projectId) => host?.postMessage({
         type: "surface.openSettings",
         payload: {

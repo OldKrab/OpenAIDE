@@ -86,6 +86,7 @@ export function createWebAppShell(): FrontendShell {
     messages: { post, subscribe: subscribeWindowMessages },
     navigation: {
       openNewTask: (projectId) => navigate(newTaskPath(projectId)),
+      openNativeSession: (agentId, nativeSessionId) => navigate(nativeSessionPath(agentId, nativeSessionId)),
       openSettings: (agentId, returnToNewTask, projectId) => navigate(settingsPath(agentId, returnToNewTask, projectId)),
       openTask: (taskId) => navigate(`/task/${encodeURIComponent(taskId)}`),
       replaceSettingsTab(tab) {
@@ -299,6 +300,15 @@ function webBootstrapForLocation(): WebviewBootstrap {
   }
   const taskMatch = /^\/task\/([^/]+)\/?$/.exec(pathname);
   if (taskMatch) return { surface: "task", taskId: decodeURIComponent(taskMatch[1]), ...shared };
+  const nativeSessionMatch = /^\/session\/([^/]+)\/([^/]+)\/?$/.exec(pathname);
+  if (nativeSessionMatch) {
+    return {
+      surface: "nativeSession",
+      agentId: decodeURIComponent(nativeSessionMatch[1]),
+      nativeSessionId: decodeURIComponent(nativeSessionMatch[2]),
+      ...shared,
+    };
+  }
   if (pathname === "/new-task" || pathname.startsWith("/new-task/")) {
     return {
       surface: "task",
@@ -322,6 +332,10 @@ function newTaskPath(projectId?: string) {
   return projectId ? `/new-task?projectId=${encodeURIComponent(projectId)}` : "/new-task";
 }
 
+function nativeSessionPath(agentId: string, nativeSessionId: string) {
+  return `/session/${encodeURIComponent(agentId)}/${encodeURIComponent(nativeSessionId)}`;
+}
+
 function settingsPath(agentId?: string, returnToNewTask?: boolean, projectId?: string) {
   const search = new URLSearchParams();
   if (agentId) search.set("agentId", agentId);
@@ -335,6 +349,7 @@ function isWebviewBootstrap(value: unknown): value is WebviewBootstrap {
   if (!value || typeof value !== "object") return false;
   const candidate = value as { surface?: unknown; shell?: { kind?: unknown; navigationMode?: unknown } };
   const validSurface = candidate.surface === "navigation"
+    || candidate.surface === "nativeSession"
     || candidate.surface === "task"
     || candidate.surface === "settings";
   return validSurface

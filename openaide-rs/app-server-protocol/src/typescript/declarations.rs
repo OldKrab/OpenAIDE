@@ -77,17 +77,18 @@ use crate::snapshot::{
     AgentConfigOptionValueSnapshot, AgentSetupReason, AgentSlashCommandInputSnapshot,
     AgentSlashCommandSnapshot, AgentStatus, AgentSummary, AttachmentKind, AttachmentSnapshot,
     ChatItem, ChatItemStatus, ChatRole, ChatSnapshot, ClientSnapshot, ClientSnapshotScope,
-    LiveSessionDataState, MessagePart, NewTaskDefaultsSnapshot, PendingAgentConfigChange,
-    PendingRequestKind, PendingRequestScope, PendingRequestSnapshot, ProjectCollectionSnapshot,
-    ProjectSummary, ProtocolVersion, QuestionMessageAction, QuestionMessageState, RecoveryAction,
-    RecoverySnapshot, ServerCapabilities, ServerSnapshot, SettingsSnapshot, StateRootSnapshot,
+    LiveSessionDataState, MessagePart, NativeSessionReference, NativeSessionSummary,
+    NewTaskDefaultsSnapshot, PendingAgentConfigChange, PendingRequestKind, PendingRequestScope,
+    PendingRequestSnapshot, ProjectCollectionSnapshot, ProjectSummary, ProtocolVersion,
+    QuestionMessageAction, QuestionMessageState, RecoveryAction, RecoverySnapshot,
+    ServerCapabilities, ServerSnapshot, SettingsSnapshot, StateRootSnapshot,
     TaskAgentCommandsSnapshot, TaskAgentConfigSnapshot, TaskAttentionEvent, TaskAttentionReason,
-    TaskHistorySyncSnapshot, TaskInputCapabilities, TaskLifecycle, TaskNavigationSnapshot,
-    TaskPreparationAction, TaskPreparationSnapshot, TaskPreparationStep, TaskPreparationStepKind,
-    TaskPreparationStepStatus, TaskSendBlocker, TaskSendBlockerKind, TaskSendCapabilitySnapshot,
-    TaskSendCapabilityState, TaskSetupBlocker, TaskSetupBlockerKind, TaskSnapshot, TaskStatus,
-    TaskSummary, TaskTitle, TaskTitleSource, ToolPermissionDecisionSnapshot,
-    ToolPermissionOutcomeSnapshot,
+    TaskHistorySyncSnapshot, TaskInputCapabilities, TaskLifecycle, TaskNavigationEntry,
+    TaskNavigationSnapshot, TaskPreparationAction, TaskPreparationSnapshot, TaskPreparationStep,
+    TaskPreparationStepKind, TaskPreparationStepStatus, TaskSendBlocker, TaskSendBlockerKind,
+    TaskSendCapabilitySnapshot, TaskSendCapabilityState, TaskSetupBlocker, TaskSetupBlockerKind,
+    TaskSnapshot, TaskStatus, TaskSummary, TaskTitle, TaskTitleSource,
+    ToolPermissionDecisionSnapshot, ToolPermissionOutcomeSnapshot,
 };
 use crate::state::{
     StateSubscribeParams, StateSubscribeResult, StateUnsubscribeParams, StateUnsubscribeResult,
@@ -100,11 +101,12 @@ use crate::task::{
     TaskAcquireInWorktreeParams, TaskAcquireInWorktreeResult, TaskAcquireParams, TaskAcquireResult,
     TaskAdoptNativeSessionParams, TaskAdoptNativeSessionResult, TaskCancelParams, TaskCancelResult,
     TaskChatPageParams, TaskChatPageResult, TaskListParams, TaskListResult, TaskMarkReadParams,
-    TaskMarkReadResult, TaskOpenParams, TaskOpenResult, TaskReleaseParams, TaskReleaseResult,
-    TaskSearchFilesParams, TaskSearchFilesResult, TaskSendParams, TaskSendResult,
-    TaskSetArchivedParams, TaskSetArchivedResult, TaskSetConfigOptionParams,
-    TaskSetConfigOptionResult, TerminalOutputSnapshot, ToolDetailSnapshot,
-    WorkspaceFileSearchState,
+    TaskMarkReadResult, TaskNavigationLoadMoreParams, TaskNavigationLoadMoreResult,
+    TaskNavigationRefreshParams, TaskNavigationRefreshResult, TaskOpenParams, TaskOpenResult,
+    TaskReleaseParams, TaskReleaseResult, TaskSearchFilesParams, TaskSearchFilesResult,
+    TaskSendParams, TaskSendResult, TaskSetArchivedParams, TaskSetArchivedResult,
+    TaskSetConfigOptionParams, TaskSetConfigOptionResult, TerminalOutputSnapshot,
+    ToolDetailSnapshot, WorkspaceFileSearchState,
 };
 use crate::workspace::{
     WorkspaceBrowserDirectory, WorkspaceBrowserEntry, WorkspaceBrowserRoot,
@@ -374,6 +376,10 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<TaskMarkReadResult>(output, config);
     push_decl::<TaskListParams>(output, config);
     push_decl::<TaskListResult>(output, config);
+    push_decl::<TaskNavigationRefreshParams>(output, config);
+    push_decl::<TaskNavigationRefreshResult>(output, config);
+    push_decl::<TaskNavigationLoadMoreParams>(output, config);
+    push_decl::<TaskNavigationLoadMoreResult>(output, config);
     push_decl::<TaskReleaseParams>(output, config);
     push_decl::<TaskReleaseResult>(output, config);
     push_decl::<TaskSetArchivedParams>(output, config);
@@ -404,6 +410,9 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<AgentSetupReason>(output, config);
     push_decl::<AgentCapabilities>(output, config);
     push_decl::<TaskNavigationSnapshot>(output, config);
+    push_decl::<TaskNavigationEntry>(output, config);
+    push_decl::<NativeSessionSummary>(output, config);
+    push_decl::<NativeSessionReference>(output, config);
     push_decl::<TaskSummary>(output, config);
     push_decl::<TaskAttentionEvent>(output, config);
     push_decl::<TaskAttentionReason>(output, config);

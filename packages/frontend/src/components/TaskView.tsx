@@ -46,7 +46,15 @@ export type TaskViewIntents = {
   reportAttachmentError: (message?: string) => void;
 };
 
-export function TaskLoadingView({ error, onRetry }: { error?: string; onRetry?: () => void }) {
+export function TaskLoadingView({
+  error,
+  label = "Opening task",
+  onRetry,
+}: {
+  error?: string;
+  label?: string;
+  onRetry?: () => void;
+}) {
   if (error) {
     return (
       <section className="task-surface task-loading" aria-label="Unable to open task">
@@ -59,14 +67,14 @@ export function TaskLoadingView({ error, onRetry }: { error?: string; onRetry?: 
     );
   }
   return (
-    <section className="task-surface task-loading" aria-label="Opening task">
+    <section className="task-surface task-loading" aria-label={label}>
       <div className="task-loading-status" role="status" aria-live="polite">
         <span className="working-status-dots" aria-hidden="true">
           <span />
           <span />
           <span />
         </span>
-        <span>Opening task</span>
+        <span>{label}</span>
       </div>
     </section>
   );

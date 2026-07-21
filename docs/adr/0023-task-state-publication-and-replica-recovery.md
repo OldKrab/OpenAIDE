@@ -26,13 +26,23 @@ Command normalization preserves all supported command-input information rather t
 
 ## Native Session Catalog
 
-`NativeSessionCatalogService` owns cached `session/list` results keyed by Agent and Project Context. It supplies Native Sessions and their `updatedAt` values to history surfaces. It refreshes active catalogs:
+`NativeSessionCatalog` is the only owner of ACP `session/list`. It durably stores successful observations by Agent identity and Native Session identity, with Project and canonical Task Workspace context. The Task Navigation snapshot merges those observations with durable Tasks into one activity-sorted list and excludes sessions already bound to a Task.
 
-- once per minute;
+The catalog also accepts normalized `session_info_update` metadata from live Task runtimes. Activity advances monotonically, and a later listing page may replace cached title or activity only when it carries newer activity evidence; a lagging `session/list` response cannot roll a live observation backward. Task title provenance remains independently authoritative for the owned Task.
+
+Discovery covers every enabled Agent across each visible Project root and available worktree. Independent Agent/workspace requests run in parallel with a global bound of 20. Successful pages persist and publish independently; omitted rows and failed requests never delete cached observations. A page containing no new identity in its live cursor generation stops that generation. App Server owns all cursors and process-local Project depth high-water marks.
+
+Bounded discovery validates each raw Agent page before normalization. Descending, timestamped pages remain trusted and may stop when their oldest activity cannot beat the requested Project cutoff. Missing or invalid activity, ascending rows, or a later page crossing the prior page frontier makes that listing generation untrusted; equal timestamps and duplicate identities do not. Every generation still stops at its requested depth, cursor exhaustion, or a page with no new identity.
+
+It refreshes active catalogs:
+
+- once when Task Navigation gains a subscriber and once per minute while subscribers remain;
 - on explicit user Refresh;
 - after a user prompt successfully starts.
 
-Concurrent background refresh requests coalesce while preserving one trailing refresh. Each result reconciles non-empty Agent titles into matching stored Tasks before owned sessions are filtered from adoption results. Catalog updates never initiate Task history synchronization.
+`taskNavigation/loadMore` raises a Project's process-local depth target without exposing Agent cursors to Frontend. Concurrent requests coalesce with one trailing generation. Disabling or removing an Agent hides both its durable Tasks and unadopted sessions without deleting retained data.
+
+Each result reconciles Agent title metadata and advances a bound Task's activity only when the Agent timestamp is newer. Catalog updates never initiate Task history synchronization.
 
 ## History Synchronization
 

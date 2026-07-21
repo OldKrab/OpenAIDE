@@ -602,6 +602,7 @@ describe("webview messaging composer routes", () => {
     const calls: string[] = [];
     const surfaces = {
       openNewTask: vi.fn(),
+      openNativeSession: vi.fn(),
       openSettings: vi.fn(),
       openTask: vi.fn(() => calls.push("open")),
     };
@@ -613,6 +614,10 @@ describe("webview messaging composer routes", () => {
       context({}, posted, surfaces),
     );
     await handleWebviewMessage({ type: "surface.openSettings" }, context({}, posted, surfaces));
+    await handleWebviewMessage({
+      type: "surface.openNativeSession",
+      payload: { agent_id: "codex", native_session_id: "session_1", project_id: "project_1" },
+    }, context({}, posted, surfaces));
     await handleWebviewMessage(
       { type: "surface.openTask", payload: { task_id: "task_1", title: "Fix ACP" } },
       context({}, posted, surfaces, undefined, undefined, { adoptTask }),
@@ -621,6 +626,7 @@ describe("webview messaging composer routes", () => {
     expect(surfaces.openNewTask).toHaveBeenCalledTimes(2);
     expect(surfaces.openNewTask).toHaveBeenCalledWith("project_1");
     expect(surfaces.openSettings).toHaveBeenCalledTimes(1);
+    expect(surfaces.openNativeSession).toHaveBeenCalledWith("codex", "session_1", "project_1");
     expect(adoptTask).toHaveBeenCalledWith("task_1", "Fix ACP");
     expect(surfaces.openTask).toHaveBeenCalledWith("task_1", "Fix ACP");
     expect(calls).toEqual(["adopt", "open"]);

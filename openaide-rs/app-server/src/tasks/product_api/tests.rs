@@ -1643,7 +1643,7 @@ fn list_agent_sessions_filters_already_adopted_native_sessions() {
 }
 
 #[test]
-fn list_agent_sessions_reconciles_title_before_filtering_owned_session() {
+fn list_agent_sessions_does_not_replace_owned_task_title_from_catalog() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut task = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
@@ -1680,7 +1680,7 @@ fn list_agent_sessions_reconciles_title_before_filtering_owned_session() {
     assert!(result.sessions.is_empty());
     assert_eq!(
         store.read_task("task-existing").unwrap().title,
-        TaskTitle::new("Agent catalog title", TaskTitleSource::Agent)
+        TaskTitle::new("Prompt fallback", TaskTitleSource::Prompt)
     );
 }
 
@@ -1718,11 +1718,15 @@ fn native_session_adoption_is_scoped_by_agent_not_workspace() {
         TaskUpdateNotifier::disabled(),
     )
     .unwrap();
-    let params = |workspace: &str, agent_id: &str| TaskAdoptNativeSessionParams {
-        project_id: project_id_for_workspace(workspace),
+    api.list_agent_sessions(AgentListSessionsParams {
+        agent_id: AgentId::from("codex"),
+        project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/a"),
+        cursor: None,
+    })
+    .expect("discover shared session");
+    let params = |_workspace: &str, agent_id: &str| TaskAdoptNativeSessionParams {
         agent_id: AgentId::from(agent_id),
         native_session_id: "shared-native-session".to_string(),
-        title: Some("  Shared session  ".to_string()),
     };
 
     let adopted = api
@@ -1752,8 +1756,14 @@ fn native_session_adoption_is_scoped_by_agent_not_workspace() {
     );
     let duplicate = api
         .adopt_native_session(params("/tmp/openaide-unit-workspace/b", "codex"))
-        .expect_err("one Agent session cannot be owned in another workspace");
-    assert_eq!(duplicate.code, ProtocolErrorCode::ValidationFailed);
+        .expect("repeat adoption converges on the existing Task");
+    assert_eq!(duplicate.task.task_id, adopted.task.task_id);
+    api.list_agent_sessions(AgentListSessionsParams {
+        agent_id: AgentId::from("opencode"),
+        project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/b"),
+        cursor: None,
+    })
+    .expect("discover same id for the other Agent");
     api.adopt_native_session(params("/tmp/openaide-unit-workspace/b", "opencode"))
         .expect("another Agent may reuse the same native session id");
 }
@@ -1795,10 +1805,8 @@ fn adopting_native_session_preserves_its_listed_activity_time() {
     .unwrap();
     let adopted = api
         .adopt_native_session(TaskAdoptNativeSessionParams {
-            project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
             agent_id: AgentId::from("codex"),
             native_session_id: "native-session".to_string(),
-            title: Some("Existing session".to_string()),
         })
         .unwrap();
 
@@ -1816,6 +1824,13 @@ fn adopting_native_session_persists_replayed_tool_details_with_the_new_task() {
         ))
         .unwrap();
     let agent = Arc::new(RecordingAgent {
+        listed_sessions: Mutex::new(vec![AgentListedSession {
+            session_id: "native-session".to_string(),
+            cwd: "/tmp/openaide-unit-workspace/app".to_string(),
+            title: Some("Existing session".to_string()),
+            last_activity: None,
+            updated_at: None,
+        }]),
         replayed_messages: Mutex::new(vec![NormalizedMessage::Activity {
             id: "activity-1".to_string(),
             title: "Edited a file".to_string(),
@@ -1853,12 +1868,16 @@ fn adopting_native_session_persists_replayed_tool_details_with_the_new_task() {
     )
     .unwrap();
 
+    api.list_agent_sessions(AgentListSessionsParams {
+        agent_id: AgentId::from("codex"),
+        project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
+        cursor: None,
+    })
+    .expect("discover replayable session");
     let adopted = api
         .adopt_native_session(TaskAdoptNativeSessionParams {
-            project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
             agent_id: AgentId::from("codex"),
             native_session_id: "native-session".to_string(),
-            title: Some("Existing session".to_string()),
         })
         .expect("adopt replayed session with tool details");
 
@@ -2010,7 +2029,7 @@ fn list_agent_sessions_stops_when_empty_pages_cycle_between_cursors() {
 }
 
 #[test]
-fn background_native_catalog_refresh_treats_a_session_cursor_cycle_as_exhausted() {
+fn background_native_catalog_refresh_stops_when_a_page_adds_no_session_identity() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut task = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
@@ -2027,14 +2046,11 @@ fn background_native_catalog_refresh_treats_a_session_cursor_cycle_as_exhausted(
     .unwrap();
 
     api.refresh_native_session_catalogs().unwrap();
-    assert_eq!(
-        agent.requested_cursors(),
-        vec![None, Some("page-2".to_string()), Some("page-3".to_string())]
-    );
+    assert_eq!(agent.requested_cursors(), vec![None, None]);
 }
 
 #[test]
-fn background_native_catalog_refresh_updates_agent_owned_task_title() {
+fn background_native_catalog_refresh_does_not_replace_owned_task_title() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut task = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
@@ -2064,7 +2080,7 @@ fn background_native_catalog_refresh_updates_agent_owned_task_title() {
 
     assert_eq!(
         store.read_task("task-existing").unwrap().title,
-        TaskTitle::new("Agent catalog title", TaskTitleSource::Agent)
+        TaskTitle::new("Prompt fallback", TaskTitleSource::Prompt)
     );
 }
 
@@ -2093,8 +2109,8 @@ fn native_catalog_refresh_requests_coalesce_with_one_trailing_run() {
     api.request_native_session_catalog_refresh();
     agent.block_list.store(false, Ordering::SeqCst);
 
-    wait_until(|| agent.list_calls.load(Ordering::SeqCst) == 2);
-    assert_eq!(agent.list_calls.load(Ordering::SeqCst), 2);
+    wait_until(|| !api.native_session_catalog().refreshing());
+    assert_eq!(agent.list_calls.load(Ordering::SeqCst), 4);
 }
 
 #[test]
@@ -2355,12 +2371,12 @@ fn failed_native_session_listing_is_not_cached() {
     )
     .unwrap();
 
-    for expected in 1..=2 {
+    for expected in [2, 4] {
         assert!(api.refresh_native_session_catalogs().is_err());
         assert_eq!(agent.list_calls.load(Ordering::SeqCst), expected);
     }
 
-    assert_eq!(agent.list_calls.load(Ordering::SeqCst), 2);
+    assert_eq!(agent.list_calls.load(Ordering::SeqCst), 4);
 }
 
 #[test]
@@ -3158,7 +3174,7 @@ fn send_requests_native_catalog_refresh_after_prompt_start() {
     api.send(send_params("task-existing", "hello")).unwrap();
 
     wait_until(|| agent.prompts.load(Ordering::SeqCst) == 1);
-    wait_until(|| agent.list_calls.load(Ordering::SeqCst) == 1);
+    wait_until(|| agent.list_calls.load(Ordering::SeqCst) >= 2);
 }
 
 #[test]
@@ -6397,12 +6413,17 @@ struct PagedSessionAgent {
 
 #[derive(Default)]
 struct CyclingEmptySessionAgent {
-    requested_cursors: Mutex<Vec<Option<String>>>,
+    requested_cursors: Mutex<Vec<(String, Option<String>)>>,
 }
 
 impl CyclingEmptySessionAgent {
     fn requested_cursors(&self) -> Vec<Option<String>> {
-        self.requested_cursors.lock().unwrap().clone()
+        self.requested_cursors
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(_, cursor)| cursor.clone())
+            .collect()
     }
 }
 
@@ -6412,12 +6433,15 @@ impl AgentRuntime for CyclingEmptySessionAgent {
         request: crate::agent::AgentListSessionsRequest,
     ) -> Result<crate::protocol::model::AgentListSessionsResult, RuntimeError> {
         let mut requested = self.requested_cursors.lock().unwrap();
-        if requested.iter().any(|cursor| cursor == &request.cursor) {
+        if requested
+            .iter()
+            .any(|(agent_id, cursor)| agent_id == &request.agent_id && cursor == &request.cursor)
+        {
             return Err(RuntimeError::Internal(
                 "repeated session cursor must not be requested".to_string(),
             ));
         }
-        requested.push(request.cursor.clone());
+        requested.push((request.agent_id.clone(), request.cursor.clone()));
         let next_cursor = match request.cursor.as_deref() {
             None => Some("page-2".to_string()),
             Some("page-2") => Some("page-3".to_string()),

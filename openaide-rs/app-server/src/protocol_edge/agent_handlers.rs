@@ -9,6 +9,10 @@ use openaide_app_server_protocol::agent::{
 use openaide_app_server_protocol::envelopes::RequestMeta;
 use openaide_app_server_protocol::events::{AppServerEventPayload, EventScope};
 use openaide_app_server_protocol::snapshot::AgentCollectionSnapshot;
+use openaide_app_server_protocol::task::{
+    TaskNavigationLoadMoreParams, TaskNavigationLoadMoreResult, TaskNavigationRefreshParams,
+    TaskNavigationRefreshResult,
+};
 use serde_json::Value;
 
 use crate::client_lifecycle::{AppServerTime, ConnectionId};
@@ -16,6 +20,52 @@ use crate::client_lifecycle::{AppServerTime, ConnectionId};
 use super::{event_deliveries, responses, GatewayEventDelivery, GatewayOutcome, RpcGateway};
 
 impl RpcGateway {
+    pub(super) fn handle_task_navigation_refresh(
+        &mut self,
+        connection_id: ConnectionId,
+        id: String,
+        params: Value,
+        meta: RequestMeta,
+    ) -> GatewayOutcome {
+        if let Err(error) = serde_json::from_value::<TaskNavigationRefreshParams>(params) {
+            return self.error(connection_id, id, meta, responses::invalid_params(error));
+        }
+        self.agent_list_sessions
+            .request_native_session_catalog_refresh();
+        self.result(
+            connection_id,
+            id,
+            meta,
+            TaskNavigationRefreshResult { accepted: true },
+        )
+    }
+
+    pub(super) fn handle_task_navigation_load_more(
+        &mut self,
+        connection_id: ConnectionId,
+        id: String,
+        params: Value,
+        meta: RequestMeta,
+    ) -> GatewayOutcome {
+        let params = match serde_json::from_value::<TaskNavigationLoadMoreParams>(params) {
+            Ok(params) => params,
+            Err(error) => {
+                return self.error(connection_id, id, meta, responses::invalid_params(error))
+            }
+        };
+        self.agent_list_sessions
+            .request_native_session_catalog_load_more(
+                params.project_id.as_str(),
+                params.target_row_count as usize,
+            );
+        self.result(
+            connection_id,
+            id,
+            meta,
+            TaskNavigationLoadMoreResult { accepted: true },
+        )
+    }
+
     pub(super) fn handle_agent_probe(
         &mut self,
         connection_id: ConnectionId,
@@ -238,13 +288,15 @@ impl RpcGateway {
         now: AppServerTime,
     ) -> Vec<GatewayEventDelivery> {
         let client_hub = self.client_hub.clone();
-        event_deliveries(self.state_stream.publish_committed(
+        let mut events = event_deliveries(self.state_stream.publish_committed(
             EventScope::StateRoot {
                 state_root_id: self.state_stream.state_root_id().clone(),
             },
             AppServerEventPayload::AgentCollectionUpdated { agents },
             |client_id| client_hub.delivery_for(client_id),
             now,
-        ))
+        ));
+        events.extend(self.publish_navigation_replacement(now));
+        events
     }
 }

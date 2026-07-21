@@ -372,6 +372,36 @@ describe("host bridge", () => {
     expect(pushState).toHaveBeenCalledWith(null, "", "/new-task?projectId=project%2F1");
   });
 
+  it("routes Native Session opening through encoded browser history identity", async () => {
+    const location = { pathname: "/new-task", search: "" };
+    const pushState = vi.fn((_state: unknown, _title: string, path: string) => {
+      const next = new URL(path, "http://localhost");
+      location.pathname = next.pathname;
+      location.search = next.search;
+    });
+    vi.stubGlobal("document", {
+      body: { dataset: { shell: "web", navigationMode: "project", surface: "task" } },
+    });
+    vi.stubGlobal("window", {
+      acquireVsCodeApi: undefined,
+      history: { pushState },
+      location,
+      addEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+      removeEventListener: vi.fn(),
+    });
+
+    const { getBootstrap, openNativeSessionSurface } = await installedHostBridge();
+    openNativeSessionSurface("agent/one", "session/two");
+
+    expect(pushState).toHaveBeenCalledWith(null, "", "/session/agent%2Fone/session%2Ftwo");
+    expect(getBootstrap()).toMatchObject({
+      surface: "nativeSession",
+      agentId: "agent/one",
+      nativeSessionId: "session/two",
+    });
+  });
+
   it("reads archive navigation from browser history", async () => {
     const location = { pathname: "/new-task", search: "" };
     const pushState = vi.fn((_state: unknown, _title: string, path: string) => {

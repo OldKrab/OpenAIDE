@@ -106,6 +106,8 @@ function requestedSurfaceForBootstrap(bootstrap: WebviewBootstrap): RequestedSur
         : { kind: "home" };
     case "settings":
       return { kind: "settings" };
+    case "nativeSession":
+      return { kind: "home" };
     case "task":
       return bootstrap.taskId
         ? { kind: "task", taskId: bootstrap.taskId as RequestedSurfaceTaskId }

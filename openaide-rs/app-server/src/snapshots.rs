@@ -215,6 +215,10 @@ impl SnapshotBuilder {
     ) -> Result<ProjectCollectionSnapshot, ProtocolError> {
         self.projects.snapshot()
     }
+
+    pub(crate) fn task_navigation_snapshot(&self) -> Result<TaskNavigationSnapshot, ProtocolError> {
+        self.task_navigation.snapshot(None)
+    }
 }
 
 impl SnapshotProvider for SnapshotBuilder {
@@ -324,8 +328,9 @@ impl TaskNavigationSnapshotSource for EmptyTaskNavigation {
         _project_id: Option<&ProjectId>,
     ) -> Result<TaskNavigationSnapshot, ProtocolError> {
         Ok(TaskNavigationSnapshot {
-            tasks: Vec::new(),
+            entries: Vec::new(),
             active_task_id: None,
+            refreshing: false,
         })
     }
 }

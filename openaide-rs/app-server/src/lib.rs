@@ -9,6 +9,7 @@ pub mod client_lifecycle;
 pub mod diagnostics;
 pub mod logging;
 pub(crate) mod media;
+pub(crate) mod native_sessions;
 pub mod projects;
 pub mod protocol;
 pub mod protocol_edge;

@@ -153,6 +153,28 @@ describe("VS Code webview surfaces", () => {
     );
   });
 
+  it("opens a Native Session route and adopts the resulting Task in the same panel", () => {
+    const manager = new TaskEditorManager(context(), runtime(), runtimeProcess(), logger());
+
+    manager.openNativeSession("codex", "session_1", "project-current");
+    const panel = vscodeMocks.panels[0];
+
+    expect(panel.webview.html).toContain('data-surface="nativeSession"');
+    expect(panel.webview.html).toContain('data-agent-id="codex"');
+    expect(panel.webview.html).toContain('data-native-session-id="session_1"');
+    triggerLastMessageHandler(panel, {
+      type: "surface.openTask",
+      payload: { task_id: "task_adopted", title: "Existing session" },
+    });
+
+    expect(panel.title).toBe("Existing session");
+    expect(panel.dispose).not.toHaveBeenCalled();
+    expect(panel.webview.postMessage).toHaveBeenCalledWith({
+      type: "surface.routeChanged",
+      payload: { surface: "task", task_id: "task_adopted" },
+    });
+  });
+
   it("keeps the editor tab concise when a New Task becomes a Task", () => {
     const manager = new TaskEditorManager(context(), runtime(), runtimeProcess(), logger());
 

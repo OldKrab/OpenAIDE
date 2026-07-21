@@ -24,6 +24,7 @@ pub struct TurnRunner {
     mutations: TaskMutations,
     active_turns: Arc<ActiveTurnRegistry>,
     server_requests: ServerRequestRuntime,
+    native_catalog: Option<crate::native_sessions::catalog::NativeSessionCatalog>,
     cancel_grace_period: Arc<Mutex<Duration>>,
 }
 
@@ -43,10 +44,20 @@ impl TurnRunner {
             mutations,
             active_turns: Arc::new(ActiveTurnRegistry::default()),
             server_requests,
+            native_catalog: None,
             cancel_grace_period: Arc::new(Mutex::new(DEFAULT_CANCEL_GRACE_PERIOD)),
         };
         runner.start_storage_failure_monitor(storage_failures);
         runner
+    }
+
+    /// Attaches the durable Native Session metadata projection used by live session updates.
+    pub(crate) fn with_native_catalog(
+        mut self,
+        native_catalog: crate::native_sessions::catalog::NativeSessionCatalog,
+    ) -> Self {
+        self.native_catalog = Some(native_catalog);
+        self
     }
 
     /// Stops live Native Session work as soon as its Task can no longer be durably updated.
@@ -415,12 +426,15 @@ impl TurnRunner {
         task_id: String,
         session: &AgentSessionKey,
     ) -> Result<Arc<TaskSessionEventSink>, RuntimeError> {
-        let sink = Arc::new(TaskSessionEventSink::new(
-            self.mutations.clone(),
-            task_id,
-            session.session_id().to_string(),
-            self.server_requests.clone(),
-        ));
+        let sink = Arc::new(
+            TaskSessionEventSink::new(
+                self.mutations.clone(),
+                task_id,
+                session.session_id().to_string(),
+                self.server_requests.clone(),
+            )
+            .with_native_catalog(self.native_catalog.clone()),
+        );
         self.agent
             .attach_session_event_sink(session, sink.clone() as Arc<dyn AgentSessionEventSink>)?;
         Ok(sink)

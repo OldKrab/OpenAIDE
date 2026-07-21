@@ -409,6 +409,26 @@ describe("SidebarNativeSessionRow", () => {
     expect(tree.root.findAllByType("button")[1].props.title).toBe("Opening task");
     expect(tree.root.findByProps({ className: "task-trailing-indicator" }).props["aria-label"]).toBe("Opening task");
   });
+
+  it("keeps other Native Sessions clickable while one adoption is pending", () => {
+    const onOpenNativeSession = vi.fn();
+    const session = nativeSession({ session_id: "session_2", title: "Another session" });
+    const tree = render(
+      <SidebarNativeSessionRow
+        nativeSessionAgentId="codex"
+        nativeSessionAgentName="Codex"
+        nativeSessionsAdoptingSessionId="session_1"
+        onOpenNativeSession={onOpenNativeSession}
+        session={session}
+      />,
+    );
+
+    const buttons = tree.root.findAllByType("button");
+    expect(buttons.map((button) => button.props.disabled)).toEqual([false, false]);
+
+    act(() => buttons[0].props.onClick());
+    expect(onOpenNativeSession).toHaveBeenCalledWith(session);
+  });
 });
 
 describe("Sidebar", () => {
@@ -496,7 +516,7 @@ describe("Sidebar", () => {
       />,
     );
 
-    act(() => tree.root.findByProps({ "aria-label": "Refresh external sessions" }).props.onClick());
+    act(() => tree.root.findByProps({ "aria-label": "Refresh tasks" }).props.onClick());
 
     expect(onLoadNativeSessions).toHaveBeenCalledWith();
   });
@@ -517,7 +537,7 @@ describe("Sidebar", () => {
     expect(title.props.className).toBe("task-section-title");
     expect(title.children.join("")).toBe("Tasks");
     expect(tools.props.className).toBe("task-section-tools");
-    expect(tools.findByProps({ "aria-label": "Refresh external sessions" })).toBeDefined();
+    expect(tools.findByProps({ "aria-label": "Refresh tasks" })).toBeDefined();
   });
 
   it("marks Settings as the sole current navigation destination", () => {
@@ -547,9 +567,10 @@ describe("Sidebar", () => {
     );
 
     expect(tree.root.findByProps({ className: "task-section-head" }).findByType("small").children.join("")).toBe(
-      "Refreshing sessions",
+      "Refreshing tasks",
     );
-    expect(tree.root.findByProps({ "aria-label": "Refresh external sessions" }).props.disabled).toBe(true);
+    expect(tree.root.findByProps({ "aria-label": "Refresh tasks" }).props.disabled).toBe(true);
+    expect(tree.root.findByProps({ "aria-label": "Refresh tasks" }).props.className).toContain("refreshing");
   });
 
   it("hides the external-session refresh control in archive mode", () => {
@@ -562,7 +583,7 @@ describe("Sidebar", () => {
       />,
     );
 
-    expect(tree.root.findAllByProps({ "aria-label": "Refresh external sessions" })).toHaveLength(0);
+    expect(tree.root.findAllByProps({ "aria-label": "Refresh tasks" })).toHaveLength(0);
   });
 
   it("switches task list mode with Active and Archived tabs", () => {
@@ -659,6 +680,21 @@ describe("Sidebar", () => {
     );
 
     expect(tree.root.findByProps({ className: "empty-list" }).children.join("")).toBe("Loading tasks.");
+  });
+
+  it("keeps an existing Task list free of loading copy while another Task opens", () => {
+    const tree = render(
+      <Sidebar
+        {...sidebarCallbacks()}
+        loadingTasks
+        nativeSessions={nativeSessions()}
+        showArchived={false}
+        tasks={[task({ task_id: "task-existing" })]}
+      />,
+    );
+
+    expect(tree.root.findAllByProps({ className: "empty-list" })).toHaveLength(0);
+    expect(tree.root.findAllByType(SidebarTaskRow)).toHaveLength(1);
   });
 
   it("labels task-history pagination as search-specific while filtering", () => {
@@ -776,7 +812,7 @@ describe("Sidebar", () => {
     expect(rowTitles(tree)).toEqual(["Recent epoch task", "Old ISO session"]);
   });
 
-  it("falls back to task update time when last activity is missing", () => {
+  it("does not treat Task record update time as Task activity", () => {
     const tree = render(
       <Sidebar
         {...sidebarCallbacks()}
@@ -799,7 +835,7 @@ describe("Sidebar", () => {
       />,
     );
 
-    expect(rowTitles(tree)).toEqual(["Missing activity", "Old task"]);
+    expect(rowTitles(tree)).toEqual(["Old task", "Missing activity"]);
   });
 
   it("disables load-more while native sessions are loading or adopting", () => {
@@ -824,7 +860,7 @@ describe("Sidebar", () => {
     expect(adoptingTree.root.findByProps({ className: "session-more" }).props.disabled).toBe(true);
   });
 
-  it("keeps project groups expanded by default, collapsible, and reveals fifteen more rows at a time", () => {
+  it("keeps project groups expanded by default, resets on re-expand, and reveals ten more rows", () => {
     const tasks = Array.from({ length: 32 }, (_, index) =>
       task({
         task_id: `task_${index + 1}`,
@@ -844,7 +880,7 @@ describe("Sidebar", () => {
       />,
     );
 
-    expect(taskRows(tree)).toHaveLength(15);
+    expect(taskRows(tree)).toHaveLength(20);
     expect(tree.root.findByProps({ className: "project-task-group-toggle" }).props["aria-expanded"]).toBe(true);
 
     act(() => tree.root.findByProps({ className: "project-task-group-toggle" }).props.onClick());
@@ -852,8 +888,8 @@ describe("Sidebar", () => {
     expect(tree.root.findByProps({ className: "project-task-group-toggle" }).props["aria-expanded"]).toBe(false);
 
     act(() => tree.root.findByProps({ className: "project-task-group-toggle" }).props.onClick());
-    expect(taskRows(tree)).toHaveLength(15);
-    expect(tree.root.findByProps({ className: "project-task-more" }).children.join("")).toBe("Load 15 more tasks");
+    expect(taskRows(tree)).toHaveLength(20);
+    expect(tree.root.findByProps({ className: "project-task-more" }).children.join("")).toBe("Load 10 more tasks");
     act(() => tree.root.findByProps({ className: "project-task-more" }).props.onClick());
 
     expect(taskRows(tree)).toHaveLength(30);
@@ -862,6 +898,10 @@ describe("Sidebar", () => {
 
     expect(taskRows(tree)).toHaveLength(32);
     expect(tree.root.findAllByProps({ className: "project-task-more" })).toHaveLength(0);
+
+    act(() => tree.root.findByProps({ className: "project-task-group-toggle" }).props.onClick());
+    act(() => tree.root.findByProps({ className: "project-task-group-toggle" }).props.onClick());
+    expect(taskRows(tree)).toHaveLength(20);
   });
 
   it("keeps the active task visible when its project group is collapsed", () => {
@@ -897,6 +937,7 @@ describe("Sidebar", () => {
       <Sidebar
         {...sidebarCallbacks()}
         groupByProject={true}
+        maxTasksPerProject={15}
         nativeSessionProjectId="project_1"
         nativeSessions={nativeSessions({
           items: [nativeSession({ session_id: "session_1", title: "Existing native session" })],
@@ -1087,6 +1128,7 @@ describe("Sidebar", () => {
       <Sidebar
         {...sidebarCallbacks()}
         groupByProject={true}
+        maxTasksPerProject={15}
         nativeSessionProjectId="project_1"
         nativeSessions={nativeSessions({
           items: [nativeSession({ session_id: "session_1", title: "Current session" })],
@@ -1122,6 +1164,7 @@ describe("Sidebar", () => {
       <Sidebar
         {...sidebarCallbacks()}
         groupByProject={true}
+        maxTasksPerProject={15}
         nativeSessionProjectId="project_1"
         nativeSessions={nativeSessions({
           items: [
@@ -1295,6 +1338,7 @@ describe("Sidebar", () => {
       <Sidebar
         {...sidebarCallbacks()}
         groupByProject={true}
+        maxTasksPerProject={15}
         nativeSessionProjectId="project_1"
         nativeSessions={nativeSessions({ items: sessions, nextCursor: "cursor_2" })}
         onLoadNativeSessions={onLoadNativeSessions}
@@ -1324,7 +1368,7 @@ describe("Sidebar", () => {
     expect(tree.root.findByProps({ className: "project-task-more" }).children.join(""))
       .toBe("Load more tasks");
     expect(taskRows(tree)).toHaveLength(17);
-    expect(onLoadNativeSessions).toHaveBeenCalledWith("cursor_2");
+    expect(onLoadNativeSessions).toHaveBeenCalledWith(undefined, "project_1", 17);
   });
 
   it("reveals exactly the numeric task count when a prefetched page arrives", () => {
@@ -1340,6 +1384,7 @@ describe("Sidebar", () => {
       <Sidebar
         {...sidebarCallbacks()}
         groupByProject={true}
+        maxTasksPerProject={15}
         nativeSessionProjectId="project_1"
         nativeSessions={nativeSessions({ items, nextCursor })}
         onLoadNativeSessions={onLoadNativeSessions}
@@ -1367,7 +1412,7 @@ describe("Sidebar", () => {
 
     expect(taskRows(tree)).toHaveLength(17);
     expect(tree.root.findByProps({ className: "project-task-more" }).children.join(""))
-      .toBe("Load 15 more tasks");
+      .toBe("Load 10 more tasks");
   });
 });
 

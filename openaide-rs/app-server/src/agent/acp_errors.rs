@@ -19,6 +19,12 @@ pub(super) fn acp_request_error(error: &agent_client_protocol::Error) -> Runtime
                 .to_string(),
         );
     }
+    let message = error.to_string();
+    if message.to_ascii_lowercase().contains("not found")
+        || message.to_ascii_lowercase().contains("does not exist")
+    {
+        return RuntimeError::TaskNotFound(message);
+    }
     acp_error(error)
 }
 

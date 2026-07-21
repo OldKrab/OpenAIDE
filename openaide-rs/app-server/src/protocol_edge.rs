@@ -334,6 +334,14 @@ impl RpcGateway {
             Err(error) => return self.error(connection_id, id, meta, error),
         };
         self.add_pending_to_subscription_snapshot(&mut result.snapshot);
+        if matches!(
+            &result.scope,
+            openaide_app_server_protocol::state::SubscriptionScope::TaskNavigation { .. }
+        ) {
+            // The baseline is durable and immediate; discovery then refreshes it asynchronously.
+            self.agent_list_sessions
+                .request_native_session_catalog_refresh();
+        }
         let server_requests = match &result.scope {
             openaide_app_server_protocol::state::SubscriptionScope::Task { task_id } => {
                 self.server_requests.observe_subscription_added(
