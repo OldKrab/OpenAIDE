@@ -289,6 +289,8 @@ fn project_activity_step(step: &ActivityStep) -> ActivityStepSnapshot {
 
 pub(crate) fn project_tool_details(details: &ActivityToolDetails) -> ToolDetailSnapshot {
     ToolDetailSnapshot {
+        revision: 0,
+        terminal_outputs: Vec::new(),
         locations: details
             .locations
             .iter()

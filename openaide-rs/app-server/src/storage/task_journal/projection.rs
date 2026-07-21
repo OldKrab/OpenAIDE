@@ -5,19 +5,22 @@ use std::path::Path;
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{AgentMessagePart, NormalizedMessage};
 use crate::storage::id::validate_task_id;
+use crate::storage::records::{MessageMeta, StoredMessage};
 
 use super::artifact::validate_artifact_id;
 use super::frame::{self, ReplayedFrames};
 use super::model::{JournalFrame, TaskOperation, TaskProjection};
-use super::store::{RecoveredTask, JOURNAL_FILE};
+use super::store::{RecoveredTask, JOURNAL_FILE, QUARANTINE_FILE};
 
 pub(super) fn validate_operations(
     current: Option<&RecoveredTask>,
     task_id: &str,
     operations: &[TaskOperation],
 ) -> Result<(), RuntimeError> {
+    // Validate against a private shadow so operations in one atomic frame can
+    // depend on earlier operations without exposing partially applied state.
     let mut projection = match current {
-        Some(RecoveredTask::Available { projection, .. }) => Some(projection),
+        Some(RecoveredTask::Available { projection, .. }) => Some(projection.as_ref().clone()),
         Some(RecoveredTask::Unavailable { error }) => {
             return Err(RuntimeError::Storage(error.clone()))
         }
@@ -38,29 +41,79 @@ pub(super) fn validate_operations(
                         "Task journal create identities do not match".to_string(),
                     ));
                 }
-                projection = Some(created);
+                projection = Some(created.as_ref().clone());
             }
             TaskOperation::ReplaceTask { task } => {
-                if projection.is_none() {
-                    return Err(RuntimeError::TaskNotFound(task_id.to_string()));
-                }
+                let projection = projection
+                    .as_mut()
+                    .ok_or_else(|| RuntimeError::TaskNotFound(task_id.to_string()))?;
                 if task.task_id != task_id {
                     return Err(RuntimeError::Storage(
                         "Task journal replacement identity does not match".to_string(),
                     ));
                 }
+                projection.task = task.as_ref().clone();
+            }
+            TaskOperation::ReplaceProjection {
+                projection: replacement,
+            } => {
+                if projection.is_none() {
+                    return Err(RuntimeError::TaskNotFound(task_id.to_string()));
+                }
+                if replacement.task.task_id != task_id
+                    || replacement.message_meta.task_id != task_id
+                {
+                    return Err(RuntimeError::Storage(
+                        "Task journal replacement identities do not match".to_string(),
+                    ));
+                }
+                projection = Some(replacement.as_ref().clone());
             }
             TaskOperation::AppendText { identity, .. } => {
-                let projection =
-                    projection.ok_or_else(|| RuntimeError::TaskNotFound(task_id.to_string()))?;
+                let projection = projection
+                    .as_ref()
+                    .ok_or_else(|| RuntimeError::TaskNotFound(task_id.to_string()))?;
                 validate_text_target(&projection.messages, identity)?;
+            }
+            TaskOperation::AppendMessage { message } => {
+                let projection = projection
+                    .as_mut()
+                    .ok_or_else(|| RuntimeError::TaskNotFound(task_id.to_string()))?;
+                validate_message_append(&projection.messages, message)?;
+                projection.messages.push(message.as_ref().clone());
+            }
+            TaskOperation::UpsertMessage { message } => {
+                let projection = projection
+                    .as_mut()
+                    .ok_or_else(|| RuntimeError::TaskNotFound(task_id.to_string()))?;
+                upsert_message(&mut projection.messages, message.as_ref().clone())?;
+            }
+            TaskOperation::ReplaceMessages {
+                messages,
+                message_meta,
+            } => {
+                let projection = projection
+                    .as_mut()
+                    .ok_or_else(|| RuntimeError::TaskNotFound(task_id.to_string()))?;
+                validate_message_meta(task_id, message_meta)?;
+                validate_message_set(messages)?;
+                projection.messages.clone_from(messages);
+                projection.message_meta = message_meta.as_ref().clone();
+            }
+            TaskOperation::ReplaceMessageMeta { message_meta } => {
+                let projection = projection
+                    .as_mut()
+                    .ok_or_else(|| RuntimeError::TaskNotFound(task_id.to_string()))?;
+                validate_message_meta(task_id, message_meta)?;
+                projection.message_meta = message_meta.as_ref().clone();
             }
             TaskOperation::CommitArtifact {
                 artifact_id,
                 artifact_sequence,
             } => {
-                let projection =
-                    projection.ok_or_else(|| RuntimeError::TaskNotFound(task_id.to_string()))?;
+                let projection = projection
+                    .as_mut()
+                    .ok_or_else(|| RuntimeError::TaskNotFound(task_id.to_string()))?;
                 validate_artifact_id(artifact_id)?;
                 let expected = projection
                     .artifact_heads
@@ -76,6 +129,9 @@ pub(super) fn validate_operations(
                         "Tool artifact sequence gap: expected {expected}, found {artifact_sequence}"
                     )));
                 }
+                projection
+                    .artifact_heads
+                    .insert(artifact_id.clone(), *artifact_sequence);
             }
         }
     }
@@ -89,6 +145,7 @@ pub(super) fn apply_operations(
     sequence: u64,
 ) -> Result<(), RuntimeError> {
     let mut history_changed = false;
+    let mut message_meta_replaced = false;
     for operation in operations {
         match operation {
             TaskOperation::Create { projection } => {
@@ -103,6 +160,18 @@ pub(super) fn apply_operations(
             TaskOperation::ReplaceTask { task } => {
                 available_projection_mut(state, task_id)?.task = *task;
             }
+            TaskOperation::ReplaceProjection { projection } => {
+                let RecoveredTask::Available {
+                    projection: current,
+                    ..
+                } = state
+                    .get_mut(task_id)
+                    .ok_or_else(|| RuntimeError::TaskNotFound(task_id.to_string()))?
+                else {
+                    return Err(RuntimeError::Storage("Task is unavailable".to_string()));
+                };
+                *current = projection;
+            }
             TaskOperation::AppendText {
                 identity,
                 text,
@@ -112,6 +181,38 @@ pub(super) fn apply_operations(
                 append_text(&mut projection.messages, &identity, &text)?;
                 projection.message_meta.local_history_updated_at = local_history_updated_at;
                 history_changed = true;
+            }
+            TaskOperation::AppendMessage { message } => {
+                let projection = available_projection_mut(state, task_id)?;
+                validate_message_append(&projection.messages, &message)?;
+                projection.messages.push(*message);
+                history_changed = true;
+            }
+            TaskOperation::UpsertMessage { message } => {
+                upsert_message(
+                    &mut available_projection_mut(state, task_id)?.messages,
+                    *message,
+                )?;
+                history_changed = true;
+            }
+            TaskOperation::ReplaceMessages {
+                messages,
+                message_meta,
+            } => {
+                validate_message_set(&messages)?;
+                validate_message_meta(task_id, &message_meta)?;
+                let projection = available_projection_mut(state, task_id)?;
+                projection.messages = messages;
+                projection.message_meta = *message_meta;
+                projection.task.message_history_version = projection.message_meta.version;
+                message_meta_replaced = true;
+            }
+            TaskOperation::ReplaceMessageMeta { message_meta } => {
+                validate_message_meta(task_id, &message_meta)?;
+                let projection = available_projection_mut(state, task_id)?;
+                projection.message_meta = *message_meta;
+                projection.task.message_history_version = projection.message_meta.version;
+                message_meta_replaced = true;
             }
             TaskOperation::CommitArtifact {
                 artifact_id,
@@ -123,7 +224,7 @@ pub(super) fn apply_operations(
             }
         }
     }
-    if history_changed {
+    if history_changed && !message_meta_replaced {
         let projection = available_projection_mut(state, task_id)?;
         projection.message_meta.version = projection
             .message_meta
@@ -157,6 +258,15 @@ pub(super) fn replay_tasks(
         }
         let task_id = entry.file_name().to_string_lossy().to_string();
         validate_task_id(&task_id)?;
+        if entry.path().join(QUARANTINE_FILE).exists() {
+            tasks.insert(
+                task_id,
+                RecoveredTask::Unavailable {
+                    error: "Task storage is quarantined after a durability failure".to_string(),
+                },
+            );
+            continue;
+        }
         let journal = entry.path().join(JOURNAL_FILE);
         if !journal.exists() {
             continue;
@@ -176,12 +286,17 @@ pub(super) fn replay_tasks(
         let mut replay_state = HashMap::new();
         let mut replay_error = None;
         for frame in replayed.frames {
-            if let Err(error) = apply_operations(
-                &mut replay_state,
-                &task_id,
-                frame.operations,
-                frame.sequence,
-            ) {
+            let result =
+                validate_operations(replay_state.get(&task_id), &task_id, &frame.operations)
+                    .and_then(|_| {
+                        apply_operations(
+                            &mut replay_state,
+                            &task_id,
+                            frame.operations,
+                            frame.sequence,
+                        )
+                    });
+            if let Err(error) = result {
                 replay_error = Some(error.to_string());
                 break;
             }
@@ -211,10 +326,7 @@ fn available_projection_mut<'a>(
     }
 }
 
-fn validate_text_target(
-    messages: &[crate::storage::records::StoredMessage],
-    identity: &str,
-) -> Result<(), RuntimeError> {
+fn validate_text_target(messages: &[StoredMessage], identity: &str) -> Result<(), RuntimeError> {
     let stored = messages
         .iter()
         .find(|stored| stored.chat.identity == identity)
@@ -233,7 +345,7 @@ fn validate_text_target(
 }
 
 fn append_text(
-    messages: &mut [crate::storage::records::StoredMessage],
+    messages: &mut [StoredMessage],
     identity: &str,
     chunk: &str,
 ) -> Result<(), RuntimeError> {
@@ -249,5 +361,64 @@ fn append_text(
         unreachable!("text target validated above")
     };
     text.push_str(chunk);
+    Ok(())
+}
+
+fn validate_message_meta(task_id: &str, message_meta: &MessageMeta) -> Result<(), RuntimeError> {
+    if message_meta.task_id != task_id {
+        return Err(RuntimeError::Storage(
+            "Task journal message metadata identity does not match".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_message_set(messages: &[StoredMessage]) -> Result<(), RuntimeError> {
+    let mut accepted = Vec::with_capacity(messages.len());
+    for message in messages {
+        validate_message_append(&accepted, message)?;
+        accepted.push(message.clone());
+    }
+    Ok(())
+}
+
+fn validate_message_append(
+    messages: &[StoredMessage],
+    message: &StoredMessage,
+) -> Result<(), RuntimeError> {
+    if messages.iter().any(|stored| {
+        stored.sequence == message.sequence
+            || stored.chat.identity == message.chat.identity
+            || stored.chat.message_id == message.chat.message_id
+    }) {
+        return Err(RuntimeError::Conflict(
+            "Task journal message append duplicates durable identity".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn upsert_message(
+    messages: &mut Vec<StoredMessage>,
+    message: StoredMessage,
+) -> Result<(), RuntimeError> {
+    if let Some(index) = messages
+        .iter()
+        .position(|stored| stored.chat.identity == message.chat.identity)
+    {
+        if messages.iter().enumerate().any(|(candidate, stored)| {
+            candidate != index
+                && (stored.sequence == message.sequence
+                    || stored.chat.message_id == message.chat.message_id)
+        }) {
+            return Err(RuntimeError::Conflict(
+                "Task journal message upsert collides with durable identity".to_string(),
+            ));
+        }
+        messages[index] = message;
+        return Ok(());
+    }
+    validate_message_append(messages, &message)?;
+    messages.push(message);
     Ok(())
 }

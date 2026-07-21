@@ -37,13 +37,73 @@ impl TurnRunner {
         agent: Arc<dyn AgentRuntime>,
         server_requests: ServerRequestRuntime,
     ) -> Self {
-        Self {
+        let storage_failures = mutations.store().task_journal().subscribe_failures();
+        let runner = Self {
             agent,
             mutations,
             active_turns: Arc::new(ActiveTurnRegistry::default()),
             server_requests,
             cancel_grace_period: Arc::new(Mutex::new(DEFAULT_CANCEL_GRACE_PERIOD)),
-        }
+        };
+        runner.start_storage_failure_monitor(storage_failures);
+        runner
+    }
+
+    /// Stops live Native Session work as soon as its Task can no longer be durably updated.
+    fn start_storage_failure_monitor(
+        &self,
+        failures: std::sync::mpsc::Receiver<crate::storage::task_journal::TaskStorageFailure>,
+    ) {
+        let active_turns = Arc::downgrade(&self.active_turns);
+        let agent = self.agent.clone();
+        let server_requests = self.server_requests.clone();
+        std::thread::Builder::new()
+            .name("openaide-task-storage-failure".to_string())
+            .spawn(move || {
+                while let Ok(failure) = failures.recv() {
+                    let Some(active_turns) = active_turns.upgrade() else {
+                        return;
+                    };
+                    let affected = active_turns
+                        .turns
+                        .lock()
+                        .expect("active turn registry poisoned")
+                        .values()
+                        .filter(|active| active.task_id == failure.task_id)
+                        .cloned()
+                        .collect::<Vec<_>>();
+                    if affected.is_empty() {
+                        continue;
+                    }
+                    crate::logging::error(
+                        "task_storage_failure_cancel_started",
+                        serde_json::json!({
+                            "task_id": failure.task_id,
+                            "active_turns": affected.len(),
+                        }),
+                    );
+                    server_requests.interrupt_task_requests(
+                        &TaskId::from(failure.task_id.clone()),
+                        crate::client_lifecycle::AppServerTime::now(),
+                    );
+                    for active in affected {
+                        active.cancellation.cancel();
+                        if let Err(error) = agent.cancel_session(&active.session) {
+                            crate::logging::error(
+                                "task_storage_failure_cancel_failed",
+                                serde_json::json!({
+                                    "task_id": failure.task_id,
+                                    "agent_id": active.session.agent_id(),
+                                    "session_id": active.session.session_id(),
+                                    "error_code": error.code(),
+                                    "error_kind": error.reason(),
+                                }),
+                            );
+                        }
+                    }
+                }
+            })
+            .expect("Task storage failure monitor must start");
     }
 
     #[cfg(test)]
@@ -105,7 +165,10 @@ impl TurnRunner {
             match runner.transitions().mark_turn_running(&task_id, &turn_id) {
                 Ok(true) => {}
                 Ok(false) => {
-                    if cancellation.is_cancelled() {
+                    // Stop is persisted before its in-memory cancellation token is
+                    // signalled. If startup observes that durable Stopping window,
+                    // it still owns finalization even when the token is not set yet.
+                    if runner.turn_is_active(&task_id, &turn_id) {
                         let _ = runner.transitions().finish_turn(
                             &task_id,
                             &turn_id,

@@ -37,7 +37,7 @@ fn ensure_native_session_unowned(
     agent_id: &str,
     session_id: &str,
 ) -> Result<(), RuntimeError> {
-    let records = store.list_all_task_records_strict()?;
+    let records = store.list_all_task_records()?;
     if let Some(owner) = records.into_iter().find(|record| {
         record.agent_id == agent_id && record.agent_session_id.as_deref() == Some(session_id)
     }) {

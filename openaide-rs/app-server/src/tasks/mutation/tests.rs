@@ -43,6 +43,48 @@ fn metadata_commit_assigns_revision_once_and_returns_publication_facts() {
 }
 
 #[test]
+fn replacing_task_runtime_routes_terminal_commits_to_the_new_notifier() {
+    let (_dir, store, _first_mutations, first_notifications) = test_mutations(0);
+    store.write_task(&task_record("task_runtime_swap")).unwrap();
+    let (second_notifier, second_notifications) = TaskUpdateNotifier::channel();
+    let _second_mutations = TaskMutations::new(
+        store.clone(),
+        Arc::new(Mutex::new(())),
+        Arc::new(Mutex::new(RuntimeState::with_revision(0))),
+        second_notifier,
+    );
+
+    store
+        .task_journal()
+        .submit(
+            crate::storage::task_journal::TaskWrite::stream_append_terminal(
+                "task_runtime_swap",
+                "artifact_1",
+                "terminal_1",
+                "durable",
+            ),
+        )
+        .unwrap();
+    store
+        .task_journal()
+        .submit(crate::storage::task_journal::TaskWrite::barrier(
+            "task_runtime_swap",
+        ))
+        .unwrap()
+        .wait()
+        .unwrap();
+
+    let update = second_notifications
+        .recv_timeout(std::time::Duration::from_secs(1))
+        .expect("replacement runtime receives terminal publication");
+    assert!(matches!(
+        update.kind,
+        crate::task_events::TaskUpdateKind::ToolDetailChanged { .. }
+    ));
+    assert!(first_notifications.try_recv().is_err());
+}
+
+#[test]
 fn commit_rejects_clearing_or_replacing_a_bound_native_session() {
     let (_dir, store, mutations, notifications) = test_mutations(0);
     for (task_id, replacement) in [
@@ -328,7 +370,7 @@ fn rejected_commit_rolls_back_durable_agent_text_chunk() {
 
 #[test]
 fn streamed_agent_text_materializes_large_history_only_once() {
-    let (_dir, store, mutations, _notifications) = test_mutations(0);
+    let (dir, store, mutations, _notifications) = test_mutations(0);
     store.write_task(&task_record("task_stream_cache")).unwrap();
     let mut history = (0..2_000)
         .map(|index| NormalizedMessage::User {
@@ -349,6 +391,10 @@ fn streamed_agent_text_materializes_large_history_only_once() {
     store
         .replace_messages_with_normalized("task_stream_cache", history)
         .unwrap();
+    let journal = dir
+        .path()
+        .join("task-store-v1/tasks/task_stream_cache/task.journal");
+    let before_stream = journal.metadata().unwrap().len();
 
     for text in [" first", " second"] {
         mutations
@@ -372,10 +418,14 @@ fn streamed_agent_text_materializes_large_history_only_once() {
             )
             .unwrap();
         if text == " first" {
-            let reads_after_first_chunk = store.message_file_read_count_for_test();
-            assert!(reads_after_first_chunk > 0);
+            assert_eq!(store.message_file_read_count_for_test(), 0);
         }
     }
+    let streamed_bytes = journal.metadata().unwrap().len() - before_stream;
+    assert!(
+        streamed_bytes < 32 * 1024,
+        "two text deltas rewrote unchanged history ({streamed_bytes} bytes)"
+    );
 
     let reads_after_stream = store.message_file_read_count_for_test();
     mutations
@@ -400,6 +450,63 @@ fn streamed_agent_text_materializes_large_history_only_once() {
         .unwrap();
 
     assert_eq!(store.message_file_read_count_for_test(), reads_after_stream);
+    let messages = store.read_messages("task_stream_cache").unwrap();
+    let NormalizedMessage::AgentMessage { parts, .. } = &messages.last().unwrap().chat.message
+    else {
+        panic!("expected final Agent message");
+    };
+    assert_eq!(
+        parts,
+        &[AgentMessagePart::Text {
+            text: "start first second third".to_string(),
+        }]
+    );
+}
+
+#[test]
+fn one_transaction_persists_every_text_chunk_exactly_once() {
+    let (_dir, store, mutations, _notifications) = test_mutations(0);
+    store.write_task(&task_record("task_multi_chunk")).unwrap();
+    mutations
+        .commit_existing_task("task_multi_chunk", TaskCommitOptions::metadata(), |ctx| {
+            ctx.append_message(NormalizedMessage::AgentMessage {
+                id: "agent-message".to_string(),
+                role: AgentMessageRole::Agent,
+                parts: vec![AgentMessagePart::Text {
+                    text: "start".to_string(),
+                }],
+                created_at: "2".to_string(),
+            })?;
+            Ok(TaskMutationResult::Changed)
+        })
+        .unwrap();
+
+    mutations
+        .commit_existing_task("task_multi_chunk", TaskCommitOptions::metadata(), |ctx| {
+            for text in [" one", " two"] {
+                ctx.append_agent_message_part(NormalizedMessage::AgentMessage {
+                    id: "agent-message".to_string(),
+                    role: AgentMessageRole::Agent,
+                    parts: vec![AgentMessagePart::Text {
+                        text: text.to_string(),
+                    }],
+                    created_at: "3".to_string(),
+                })?;
+            }
+            Ok(TaskMutationResult::Changed)
+        })
+        .unwrap();
+
+    let messages = store.read_messages("task_multi_chunk").unwrap();
+    let NormalizedMessage::AgentMessage { parts, .. } = &messages[0].chat.message else {
+        panic!("expected Agent message");
+    };
+    assert_eq!(
+        parts,
+        &[AgentMessagePart::Text {
+            text: "start one two".to_string(),
+        }]
+    );
 }
 
 #[test]
@@ -521,7 +628,7 @@ fn task_revisions_are_consecutive_across_interleaved_task_commits() {
 
 #[test]
 fn create_task_persists_initial_history_in_one_message_batch() {
-    let (_dir, store, mutations, _notifications) = test_mutations(0);
+    let (dir, store, mutations, _notifications) = test_mutations(0);
     let messages = ["first", "second", "third"]
         .into_iter()
         .enumerate()
@@ -541,8 +648,16 @@ fn create_task_persists_initial_history_in_one_message_batch() {
         )
         .unwrap();
 
-    assert_eq!(store.message_file_write_count_for_test(), 1);
+    assert_eq!(store.message_file_write_count_for_test(), 0);
     assert_eq!(store.read_messages("task_bulk_history").unwrap().len(), 3);
+    assert!(!dir
+        .path()
+        .join("tasks/task_bulk_history/messages.jsonl")
+        .exists());
+    assert!(dir
+        .path()
+        .join("task-store-v1/tasks/task_bulk_history/task.journal")
+        .exists());
 }
 
 #[test]
@@ -569,10 +684,7 @@ fn failed_create_task_write_rolls_back_initial_chat_and_revision() {
     assert!(error.to_string().contains("forced write failure"));
     assert_eq!(mutations.current_revision(), 6);
     assert!(store.read_task("task_create_write_failure").is_err());
-    assert!(store
-        .read_messages("task_create_write_failure")
-        .unwrap()
-        .is_empty());
+    assert!(store.read_messages("task_create_write_failure").is_err());
     assert!(notifications.try_recv().is_err());
 }
 

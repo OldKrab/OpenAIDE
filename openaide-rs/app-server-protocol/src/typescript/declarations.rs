@@ -44,7 +44,7 @@ use crate::envelopes::{
 use crate::errors::{ErrorTarget, ProtocolError, ProtocolErrorCode};
 use crate::events::{
     AppServerEvent, AppServerEventPayload, EventScope, TaskChanges, TaskChatChange,
-    TaskNavigationChange,
+    TaskNavigationChange, ToolDetailDelta,
 };
 use crate::ids::{
     AgentConfigOptionId, AgentId, AttachmentCandidateId, AttachmentHandleId, AttachmentId,
@@ -103,7 +103,8 @@ use crate::task::{
     TaskMarkReadResult, TaskOpenParams, TaskOpenResult, TaskReleaseParams, TaskReleaseResult,
     TaskSearchFilesParams, TaskSearchFilesResult, TaskSendParams, TaskSendResult,
     TaskSetArchivedParams, TaskSetArchivedResult, TaskSetConfigOptionParams,
-    TaskSetConfigOptionResult, ToolDetailSnapshot, WorkspaceFileSearchState,
+    TaskSetConfigOptionResult, TerminalOutputSnapshot, ToolDetailSnapshot,
+    WorkspaceFileSearchState,
 };
 use crate::workspace::{
     WorkspaceBrowserDirectory, WorkspaceBrowserEntry, WorkspaceBrowserRoot,
@@ -360,6 +361,7 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<TaskChatPageParams>(output, config);
     push_decl::<TaskChatPageResult>(output, config);
     push_decl::<ToolDetailSnapshot>(output, config);
+    push_decl::<TerminalOutputSnapshot>(output, config);
     push_decl::<ActivityToolLocation>(output, config);
     push_decl::<ActivityToolContent>(output, config);
     push_decl::<ActivityToolInput>(output, config);
@@ -382,6 +384,7 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<AppServerEvent>(output, config);
     push_decl::<EventScope>(output, config);
     push_decl::<AppServerEventPayload>(output, config);
+    push_decl::<ToolDetailDelta>(output, config);
     push_decl::<TaskChanges>(output, config);
     push_decl::<TaskChatChange>(output, config);
     push_decl::<TaskNavigationChange>(output, config);

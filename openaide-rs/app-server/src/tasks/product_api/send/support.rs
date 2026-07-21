@@ -4,41 +4,40 @@ use uuid::Uuid;
 
 use crate::attachment_runtime::AttachmentRuntimeError;
 use crate::protocol::model::{ChatMessage, NormalizedMessage};
-use crate::storage::cursor;
 use crate::storage::records::{TaskTitle, TaskTitleSource};
 use crate::tasks::lifecycle::running_turn_message;
+use crate::tasks::mutation::TaskMutationContext;
 
 use super::{validation_error, TaskProductApi};
 
 impl TaskProductApi {
     pub(super) fn append_user_message(
         &self,
-        task_id: &str,
+        ctx: &mut TaskMutationContext<'_>,
         identity: &str,
         message_id: &str,
         text: String,
         attachments: Vec<crate::protocol::model::Attachment>,
         created_at: &str,
     ) -> Result<(), crate::protocol::errors::RuntimeError> {
-        self.append_chat_message(
-            task_id,
-            ChatMessage {
-                cursor: String::new(),
-                identity: identity.to_string(),
-                message_type: "user".to_string(),
-                message_id: message_id.to_string(),
-                message: NormalizedMessage::User {
-                    id: identity.to_string(),
-                    text,
-                    created_at: created_at.to_string(),
-                    attachments,
-                },
+        ctx.append_chat_message(ChatMessage {
+            cursor: String::new(),
+            identity: identity.to_string(),
+            message_type: "user".to_string(),
+            message_id: message_id.to_string(),
+            message: NormalizedMessage::User {
+                id: identity.to_string(),
+                text,
+                created_at: created_at.to_string(),
+                attachments,
             },
-        )
+        });
+        Ok(())
     }
 
     pub(super) fn append_running_turn(
         &self,
+        ctx: &mut TaskMutationContext<'_>,
         task_id: &str,
         turn_id: &str,
         created_at: &str,
@@ -50,31 +49,14 @@ impl TaskProductApi {
             ));
         };
         *id = format!("turn:{turn_id}");
-        self.append_chat_message(
-            task_id,
-            ChatMessage {
-                cursor: String::new(),
-                identity: format!("turn:{turn_id}"),
-                message_type: "activity".to_string(),
-                message_id: format!("message_{}", Uuid::new_v4()),
-                message,
-            },
-        )
-    }
-
-    fn append_chat_message(
-        &self,
-        task_id: &str,
-        mut message: ChatMessage,
-    ) -> Result<(), crate::protocol::errors::RuntimeError> {
-        let next_sequence = self
-            .store
-            .read_messages(task_id)?
-            .last()
-            .map(|message| message.sequence + 1)
-            .unwrap_or(1);
-        message.cursor = cursor::from_sequence(next_sequence);
-        self.store.append_message(task_id, message)?;
+        let _ = task_id;
+        ctx.append_chat_message(ChatMessage {
+            cursor: String::new(),
+            identity: format!("turn:{turn_id}"),
+            message_type: "activity".to_string(),
+            message_id: format!("message_{}", Uuid::new_v4()),
+            message,
+        });
         Ok(())
     }
 }

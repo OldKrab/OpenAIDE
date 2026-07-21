@@ -53,6 +53,8 @@ pub enum StorageOpenError {
     Io(#[from] std::io::Error),
     #[error("storage metadata JSON failed: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("Task storage failed to open: {0}")]
+    TaskStorage(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, serde::Serialize)]

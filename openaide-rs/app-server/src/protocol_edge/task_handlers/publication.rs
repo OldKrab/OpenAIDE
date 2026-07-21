@@ -24,6 +24,16 @@ impl RpcGateway {
             TaskUpdateKind::Changed(change) => {
                 self.publish_committed_task_change(&task_id, update.revision, change, now)
             }
+            TaskUpdateKind::ToolDetailChanged {
+                artifact_id,
+                deltas,
+            } => self.publish_tool_detail_change(
+                &task_id,
+                artifact_id,
+                update.revision,
+                deltas.clone(),
+                now,
+            ),
         };
         let pending_requests = self.server_requests.pending_for_task(&task_id);
         if !pending_requests.is_empty() {
@@ -90,15 +100,27 @@ impl RpcGateway {
 
         let client_hub = self.client_hub.clone();
         for detail in &change.tool_details {
+            let mut deltas = vec![
+                openaide_app_server_protocol::events::ToolDetailDelta::ReplaceDetails {
+                    details: Box::new(detail.details.clone()),
+                },
+            ];
+            deltas.extend(detail.terminal_appends.iter().map(|append| {
+                openaide_app_server_protocol::events::ToolDetailDelta::AppendTerminal {
+                    terminal_id: append.terminal_id.clone(),
+                    data: append.data.clone(),
+                }
+            }));
             events.extend(event_deliveries(self.state_stream.publish_committed(
                 EventScope::Task {
                     state_root_id: self.state_stream.state_root_id().clone(),
                     task_id: task_id.clone(),
                 },
-                AppServerEventPayload::ToolDetailUpdated {
+                AppServerEventPayload::ToolDetailChanged {
                     task_id: task_id.clone(),
                     artifact_id: detail.artifact_id.clone(),
-                    details: detail.details.clone(),
+                    revision: detail.details.revision,
+                    deltas,
                 },
                 |client_id| client_hub.delivery_for(client_id),
                 now,
@@ -124,6 +146,31 @@ impl RpcGateway {
                 task_id: task_id.clone(),
             },
             payload,
+            |client_id| client_hub.delivery_for(client_id),
+            now,
+        ))
+    }
+
+    fn publish_tool_detail_change(
+        &mut self,
+        task_id: &TaskId,
+        artifact_id: &str,
+        revision: u64,
+        deltas: Vec<openaide_app_server_protocol::events::ToolDetailDelta>,
+        now: AppServerTime,
+    ) -> Vec<GatewayEventDelivery> {
+        let client_hub = self.client_hub.clone();
+        event_deliveries(self.state_stream.publish_committed(
+            EventScope::Task {
+                state_root_id: self.state_stream.state_root_id().clone(),
+                task_id: task_id.clone(),
+            },
+            AppServerEventPayload::ToolDetailChanged {
+                task_id: task_id.clone(),
+                artifact_id: artifact_id.to_string(),
+                revision,
+                deltas,
+            },
             |client_id| client_hub.delivery_for(client_id),
             now,
         ))

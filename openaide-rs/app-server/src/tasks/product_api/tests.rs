@@ -514,7 +514,7 @@ fn new_task_cannot_be_archived_or_replaced() {
 }
 
 #[test]
-fn create_fails_closed_when_task_ownership_records_are_malformed() {
+fn startup_isolates_a_malformed_task_and_keeps_unrelated_tasks_available() {
     struct FixedProjectResolver;
 
     impl ProjectResolver for FixedProjectResolver {
@@ -533,22 +533,52 @@ fn create_fails_closed_when_task_ownership_records_are_malformed() {
 
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    let corrupt_dir = store.tasks_dir().join("corrupt-task");
-    std::fs::create_dir_all(&corrupt_dir).unwrap();
-    std::fs::write(corrupt_dir.join("task.json"), "{not-json").unwrap();
-    let error = match TaskProductApi::new(
+    store
+        .write_task(&task_record(
+            "corrupt-task",
+            "/tmp/openaide-unit-workspace/app",
+        ))
+        .unwrap();
+    drop(store);
+    corrupt_last_byte(
+        &temp
+            .path()
+            .join("task-store-v1/tasks/corrupt-task/task.journal"),
+    );
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let api = TaskProductApi::new(
         store.clone(),
         Arc::new(FixedProjectResolver),
         AgentRegistry::default_built_ins(),
         Arc::new(crate::agent::mock::MockAgent),
         TaskUpdateNotifier::disabled(),
-    ) {
-        Ok(_) => panic!("corrupt ownership records must fail startup closed"),
-        Err(error) => error,
-    };
+    )
+    .expect("one malformed Task must not prevent runtime startup");
+    let acquired = api
+        .create_for_test(TaskAcquireParams {
+            project_id: ProjectId::from("project-after-corruption"),
+            agent_id: AgentId::from("codex"),
+            workspace_root: None,
+        })
+        .expect("malformed Task must not block unrelated acquisition");
 
-    assert!(matches!(error, RuntimeError::Storage(_)));
-    assert_eq!(store.task_record_count().unwrap(), 1);
+    assert!(store.read_task("corrupt-task").is_err());
+    assert_ne!(acquired.task.task_id.as_str(), "corrupt-task");
+    assert!(store.list_all_task_records_strict().is_err());
+}
+
+fn corrupt_last_byte(path: &std::path::Path) {
+    use std::io::{Read, Seek, Write};
+    let mut file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)
+        .unwrap();
+    file.seek(std::io::SeekFrom::End(-1)).unwrap();
+    let mut byte = [0];
+    file.read_exact(&mut byte).unwrap();
+    file.seek(std::io::SeekFrom::End(-1)).unwrap();
+    file.write_all(&[byte[0] ^ 0xff]).unwrap();
 }
 
 #[test]

@@ -1,4 +1,3 @@
-use openaide_app_server_protocol::errors::ProtocolErrorCode;
 use openaide_app_server_protocol::ids::ProjectId;
 
 use crate::projects::project_id_for_workspace;
@@ -136,11 +135,11 @@ fn navigation_uses_task_record_message_version_without_reading_chat_files() {
     let mut record = task_record("task-1", "Task", "2026-01-01T00:00:00.000Z");
     record.message_history_version = 7;
     store.write_task(&record).unwrap();
-    std::fs::write(
-        store.task_dir("task-1").unwrap().join("messages.jsonl"),
-        "{not valid json",
-    )
-    .unwrap();
+    assert!(!store
+        .task_dir("task-1")
+        .unwrap()
+        .join("messages.jsonl")
+        .exists());
 
     let snapshot = TaskNavigationStore::new(store).snapshot(None).unwrap();
 
@@ -184,16 +183,33 @@ fn filters_by_project_id_when_requested() {
 }
 
 #[test]
-fn storage_read_failure_returns_recoverable_error() {
+fn storage_read_failure_is_isolated_from_navigation() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    std::fs::remove_dir_all(store.tasks_dir()).unwrap();
+    store
+        .write_task(&task_record("corrupt", "Task", "1"))
+        .unwrap();
+    drop(store);
+    corrupt_last_byte(&temp.path().join("task-store-v1/tasks/corrupt/task.journal"));
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
 
-    let error = TaskNavigationStore::new(store).snapshot(None).unwrap_err();
+    let snapshot = TaskNavigationStore::new(store).snapshot(None).unwrap();
 
-    assert_eq!(error.code, ProtocolErrorCode::Internal);
-    assert!(error.recoverable);
-    assert!(error.message.contains("Failed to read task navigation"));
+    assert!(snapshot.tasks.is_empty());
+}
+
+fn corrupt_last_byte(path: &std::path::Path) {
+    use std::io::{Read, Seek, Write};
+    let mut file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)
+        .unwrap();
+    file.seek(std::io::SeekFrom::End(-1)).unwrap();
+    let mut byte = [0];
+    file.read_exact(&mut byte).unwrap();
+    file.seek(std::io::SeekFrom::End(-1)).unwrap();
+    file.write_all(&[byte[0] ^ 0xff]).unwrap();
 }
 
 fn task_record(task_id: &str, title: &str, updated_at: &str) -> TaskRecord {

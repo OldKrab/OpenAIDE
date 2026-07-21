@@ -31,11 +31,42 @@ export function updateSubscriptionSnapshot(
     case "task":
       return updateTaskSnapshot(snapshot, payload);
     case "toolDetail":
-      return payload.kind === "toolDetailUpdated"
-        && payload.taskId === snapshot.taskId
-        && payload.artifactId === snapshot.artifactId
-        ? changed({ ...snapshot, details: payload.details })
-        : unchanged(snapshot);
+      if ((payload.kind !== "toolDetailUpdated" && payload.kind !== "toolDetailChanged")
+        || payload.taskId !== snapshot.taskId
+        || payload.artifactId !== snapshot.artifactId) {
+        return unchanged(snapshot);
+      }
+      if (payload.kind === "toolDetailUpdated") {
+        if (payload.details.revision < snapshot.details.revision) return unchanged(snapshot);
+        return changed({ ...snapshot, details: payload.details });
+      }
+      if (payload.kind === "toolDetailChanged") {
+        // A baseline can race with dispatch of the durable delta it already contains.
+        if (payload.revision <= snapshot.details.revision) return unchanged(snapshot);
+        if (payload.revision !== snapshot.details.revision + 1) {
+          return { kind: "resyncRequired", reason: "toolDetailRevisionGap" };
+        }
+        const terminalOutputs = (snapshot.details.terminalOutputs ?? []).map((terminal) => ({ ...terminal }));
+        let details = snapshot.details;
+        for (const delta of payload.deltas) {
+          if (delta.kind === "replaceDetails") {
+            details = {
+              ...delta.details,
+              revision: payload.revision,
+              terminalOutputs,
+            };
+            continue;
+          }
+          const existing = terminalOutputs.find((terminal) => terminal.terminalId === delta.terminalId);
+          if (existing) existing.output += delta.data;
+          else terminalOutputs.push({ terminalId: delta.terminalId, output: delta.data });
+        }
+        return changed({
+          ...snapshot,
+          details: { ...details, revision: payload.revision, terminalOutputs },
+        });
+      }
+      return unchanged(snapshot);
     case "worktreeRepository":
       return payload.kind === "worktreeRepositoryUpdated"
         && payload.repositoryId === snapshot.repository.repositoryId

@@ -51,6 +51,8 @@ pub struct Runtime {
     service: TaskService,
     host_bridge: HostBridge,
     acp_trace_state: AcpTraceState,
+    storage_fatal_events:
+        std::sync::Mutex<Option<mpsc::Receiver<storage::task_journal::TaskStorageFatalFailure>>>,
 }
 
 impl Runtime {
@@ -149,6 +151,7 @@ impl Runtime {
         acp_trace_state: AcpTraceState,
         agent_registry: AgentRegistryHandle,
     ) -> RuntimeResult<Self> {
+        let storage_fatal_events = store.take_task_storage_fatal_events();
         Ok(Self {
             service: TaskService::open_with_task_update_notifier_and_agent_registry(
                 store,
@@ -158,6 +161,7 @@ impl Runtime {
             )?,
             host_bridge,
             acp_trace_state,
+            storage_fatal_events: std::sync::Mutex::new(Some(storage_fatal_events)),
         })
     }
 
@@ -167,6 +171,19 @@ impl Runtime {
 
     pub fn host_bridge(&self) -> HostBridge {
         self.host_bridge.clone()
+    }
+
+    /// Transfers the sole fatal storage signal to the binary process
+    /// supervisor. A worker-wide durability failure must terminate this App
+    /// Server epoch rather than leave it accepting requests.
+    pub fn take_storage_fatal_events(
+        &self,
+    ) -> mpsc::Receiver<storage::task_journal::TaskStorageFatalFailure> {
+        self.storage_fatal_events
+            .lock()
+            .expect("Task storage fatal receiver poisoned")
+            .take()
+            .expect("Task storage fatal stream already has an owner")
     }
 
     pub fn diagnostics(&self) -> RuntimeResult<RuntimeDiagnostics> {

@@ -168,6 +168,34 @@ impl TaskSessionEventSink {
             return result;
         }
         self.finish_anonymous_text_routes();
+        if let AgentEvent::ToolUpdate(mut update) = event {
+            let terminal_appends = update
+                .terminal_appends
+                .into_iter()
+                .map(|append| crate::storage::task_journal::ToolTerminalAppend {
+                    artifact_id: crate::storage::tool_artifacts::tool_artifact_id(
+                        &format!("acp_tool:{}:{}", self.session_id, append.tool_call_id),
+                        0,
+                    ),
+                    terminal_id: append.terminal_id,
+                    data: append.data,
+                })
+                .collect::<Vec<_>>();
+            let Some(mut tool_call) = update.summary.take() else {
+                if terminal_appends.is_empty() {
+                    return Ok(());
+                }
+                self.mutations.append_terminal_outputs(
+                    &self.task_id,
+                    &self.session_id,
+                    terminal_appends,
+                )?;
+                return Ok(());
+            };
+            tool_call.scope_id = Some(self.session_id.clone());
+            let message = normalize_event(AgentEvent::ToolCall(tool_call), &now);
+            return self.upsert_session_tool_with_terminal(message, terminal_appends, &now);
+        }
         if let AgentEvent::ToolCall(tool_call) = &mut event {
             tool_call
                 .scope_id
@@ -298,6 +326,33 @@ impl TaskSessionEventSink {
                     return Ok(TaskMutationResult::Unchanged);
                 }
                 ctx.upsert_message_with_details(message)?;
+                ctx.task_mut().updated_at = now.to_string();
+                Ok(TaskMutationResult::Changed)
+            },
+        )?;
+        Ok(())
+    }
+
+    fn upsert_session_tool_with_terminal(
+        &self,
+        message: NormalizedMessage,
+        terminal_appends: Vec<crate::storage::task_journal::ToolTerminalAppend>,
+        now: &str,
+    ) -> Result<(), RuntimeError> {
+        self.mutations.commit_existing_task(
+            &self.task_id,
+            TaskCommitOptions {
+                refresh_message_history: true,
+                response_snapshot_tail_limit: None,
+            },
+            |ctx| {
+                if ctx.task().agent_session_id.as_deref() != Some(self.session_id.as_str()) {
+                    return Ok(TaskMutationResult::Unchanged);
+                }
+                ctx.upsert_message_with_details(message)?;
+                for append in terminal_appends {
+                    ctx.append_terminal(append.artifact_id, append.terminal_id, append.data);
+                }
                 ctx.task_mut().updated_at = now.to_string();
                 Ok(TaskMutationResult::Changed)
             },

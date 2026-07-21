@@ -101,6 +101,47 @@ fn an_incomplete_tail_is_discarded_before_the_next_commit() {
 }
 
 #[test]
+fn every_appended_frame_prefix_recovers_old_or_new_state() {
+    let source = TempDir::new().unwrap();
+    let (store, _commits) = TaskJournalStore::open(source.path().to_path_buf()).unwrap();
+    store
+        .submit(TaskWrite::barrier_create(task_projection("task_prefix")))
+        .unwrap()
+        .wait()
+        .unwrap();
+    let journal = task_journal_path(source.path(), "task_prefix");
+    let first_len = journal.metadata().unwrap().len() as usize;
+    let mut task = store.load("task_prefix").unwrap().task;
+    task.status = TaskStatus::Completed;
+    store
+        .submit(TaskWrite::barrier_replace_task(task))
+        .unwrap()
+        .wait()
+        .unwrap();
+    store.shutdown().unwrap();
+    let bytes = std::fs::read(&journal).unwrap();
+
+    for cut in first_len..=bytes.len() {
+        let root = TempDir::new().unwrap();
+        let path = task_journal_path(root.path(), "task_prefix");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, &bytes[..cut]).unwrap();
+        let (recovered, _events) = TaskJournalStore::open(root.path().to_path_buf()).unwrap();
+        let status = recovered.load("task_prefix").unwrap().task.status;
+        assert!(matches!(
+            status,
+            TaskStatus::Inactive | TaskStatus::Completed
+        ));
+        if cut < bytes.len() {
+            assert_eq!(status, TaskStatus::Inactive);
+        } else {
+            assert_eq!(status, TaskStatus::Completed);
+        }
+        recovered.shutdown().unwrap();
+    }
+}
+
+#[test]
 fn sequential_stream_chunks_are_batched_and_replay_exactly_once() {
     let root = TempDir::new().expect("create state root");
     let mut projection = task_projection("task_stream");
@@ -115,7 +156,7 @@ fn sequential_stream_chunks_are_batched_and_replay_exactly_once() {
         .wait()
         .expect("commit create");
 
-    for _ in 0..10_000 {
+    for _ in 0..10_002 {
         store
             .submit(TaskWrite::stream_append_text(
                 "task_stream",
@@ -138,11 +179,109 @@ fn sequential_stream_chunks_are_batched_and_replay_exactly_once() {
     let (reopened, _commits) =
         TaskJournalStore::open(root.path().to_path_buf()).expect("reopen store");
     let loaded = reopened.load("task_stream").expect("load streamed Task");
-    assert_eq!(agent_text(&loaded.messages[0]).len(), 10_000);
+    assert_eq!(agent_text(&loaded.messages[0]).len(), 10_002);
     assert!(agent_text(&loaded.messages[0])
         .bytes()
         .all(|byte| byte == b'x'));
     reopened.shutdown().expect("close reopened store");
+}
+
+#[test]
+fn compaction_replaces_history_with_one_restart_safe_projection() {
+    let root = TempDir::new().expect("create state root");
+    let mut projection = task_projection("task_compact");
+    projection.messages.push(agent_message("agent_message", ""));
+    projection.message_meta.message_count = 1;
+    projection.message_meta.version = 1;
+    let (store, _commits) = TaskJournalStore::open(root.path().to_path_buf()).unwrap();
+    store
+        .submit(TaskWrite::barrier_create(projection))
+        .unwrap()
+        .wait()
+        .unwrap();
+    for _ in 0..1_000 {
+        store
+            .submit(TaskWrite::stream_append_text(
+                "task_compact",
+                "agent_message",
+                "x",
+                "2",
+            ))
+            .unwrap();
+    }
+    store
+        .submit(TaskWrite::barrier("task_compact"))
+        .unwrap()
+        .wait()
+        .unwrap();
+    let journal = task_journal_path(root.path(), "task_compact");
+    let before = journal.metadata().unwrap().len();
+
+    store
+        .submit(TaskWrite::compaction_barrier("task_compact"))
+        .unwrap()
+        .wait()
+        .unwrap();
+    let after = journal.metadata().unwrap().len();
+    assert!(after < before);
+    store.shutdown().unwrap();
+
+    let (reopened, _commits) = TaskJournalStore::open(root.path().to_path_buf()).unwrap();
+    assert_eq!(
+        agent_text(&reopened.load("task_compact").unwrap().messages[0]),
+        "x".repeat(1_000)
+    );
+    reopened.shutdown().unwrap();
+}
+
+#[test]
+fn idle_compaction_waits_for_a_measured_reclaim_threshold() {
+    let root = TempDir::new().expect("create state root");
+    let (store, _commits) = TaskJournalStore::open(root.path().to_path_buf()).unwrap();
+    store
+        .submit(TaskWrite::barrier_create(task_projection("task_threshold")))
+        .unwrap()
+        .wait()
+        .unwrap();
+    let mut task = store.load("task_threshold").unwrap().task;
+    task.task_version += 1;
+    store
+        .submit(TaskWrite::barrier_replace_task(task.clone()))
+        .unwrap()
+        .wait()
+        .unwrap();
+    let journal = task_journal_path(root.path(), "task_threshold");
+    let before_small_check = journal.metadata().unwrap().len();
+
+    let skipped = store
+        .submit(TaskWrite::compaction_if_worthwhile_barrier(
+            "task_threshold",
+        ))
+        .unwrap()
+        .wait()
+        .unwrap();
+    assert_eq!(skipped.journal_sequence, 2);
+    assert_eq!(journal.metadata().unwrap().len(), before_small_check);
+
+    for version in 2..=129 {
+        task.task_version = version;
+        store
+            .submit(TaskWrite::barrier_replace_task(task.clone()))
+            .unwrap()
+            .wait()
+            .unwrap();
+    }
+    let before_compaction = journal.metadata().unwrap().len();
+    let compacted = store
+        .submit(TaskWrite::compaction_if_worthwhile_barrier(
+            "task_threshold",
+        ))
+        .unwrap()
+        .wait()
+        .unwrap();
+    assert_eq!(compacted.journal_sequence, 1);
+    assert!(journal.metadata().unwrap().len() < before_compaction);
+    store.shutdown().unwrap();
 }
 
 #[test]
@@ -155,7 +294,7 @@ fn terminal_output_is_committed_lazily_without_revising_the_task() {
         .wait()
         .expect("commit create");
 
-    for _ in 0..10_000 {
+    for _ in 0..10_002 {
         store
             .submit(TaskWrite::stream_append_terminal(
                 "task_terminal",
@@ -184,7 +323,7 @@ fn terminal_output_is_committed_lazily_without_revising_the_task() {
     let artifact = reopened
         .load_tool_artifact("task_terminal", "artifact_execute_1")
         .expect("load lazy Tool artifact");
-    assert_eq!(artifact.terminal_outputs["terminal_1"].len(), 10_000);
+    assert_eq!(artifact.terminal_outputs["terminal_1"].len(), 10_002);
     assert!(artifact.terminal_outputs["terminal_1"]
         .bytes()
         .all(|byte| byte == b'x'));
@@ -333,6 +472,139 @@ fn empty_terminal_append_is_a_semantic_noop() {
     store.shutdown().expect("close store");
 }
 
+#[test]
+fn identical_task_replace_and_empty_text_create_no_frame_or_event() {
+    let root = TempDir::new().unwrap();
+    let mut projection = task_projection("task_noop");
+    projection
+        .messages
+        .push(agent_message("agent_message", "start"));
+    projection.message_meta.message_count = 1;
+    projection.message_meta.version = 1;
+    let (store, commits) = TaskJournalStore::open(root.path().to_path_buf()).unwrap();
+    store
+        .submit(TaskWrite::barrier_create(projection.clone()))
+        .unwrap()
+        .wait()
+        .unwrap();
+    commits.recv().unwrap();
+    let journal = task_journal_path(root.path(), "task_noop");
+    let before = journal.metadata().unwrap().len();
+
+    let replace = store
+        .submit(TaskWrite::barrier_replace_task(projection.task.clone()))
+        .unwrap()
+        .wait()
+        .unwrap();
+    let empty = store
+        .submit(TaskWrite::stream_append_text(
+            "task_noop",
+            "agent_message",
+            "",
+            "2",
+        ))
+        .unwrap()
+        .wait()
+        .unwrap();
+
+    assert_eq!(replace.journal_sequence, 1);
+    assert_eq!(empty.journal_sequence, 1);
+    assert_eq!(journal.metadata().unwrap().len(), before);
+    assert!(commits.try_recv().is_err());
+    store.shutdown().unwrap();
+}
+
+#[test]
+fn randomized_operations_match_an_independent_model_across_restart_and_compaction() {
+    let root = TempDir::new().unwrap();
+    let mut projection = task_projection("task_model");
+    projection.messages.push(agent_message("agent_message", ""));
+    projection.message_meta.message_count = 1;
+    projection.message_meta.version = 1;
+    let (mut store, _commits) = TaskJournalStore::open(root.path().to_path_buf()).unwrap();
+    store
+        .submit(TaskWrite::barrier_create(projection))
+        .unwrap()
+        .wait()
+        .unwrap();
+    let mut text_model = String::new();
+    let mut terminal_model = String::new();
+    let mut completed_model = false;
+    let mut seed = 0x5eed_u64;
+
+    for index in 0..500 {
+        seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+        match seed % 3 {
+            0 => {
+                let chunk = char::from(b'a' + (seed % 26) as u8).to_string();
+                text_model.push_str(&chunk);
+                store
+                    .submit(TaskWrite::stream_append_text(
+                        "task_model",
+                        "agent_message",
+                        chunk,
+                        index.to_string(),
+                    ))
+                    .unwrap();
+            }
+            1 => {
+                let chunk = char::from(b'A' + (seed % 26) as u8).to_string();
+                terminal_model.push_str(&chunk);
+                store
+                    .submit(TaskWrite::stream_append_terminal(
+                        "task_model",
+                        "artifact_execute_1",
+                        "terminal_1",
+                        chunk,
+                    ))
+                    .unwrap();
+            }
+            _ => {
+                let mut task = store.load("task_model").unwrap().task;
+                completed_model = !completed_model;
+                task.status = if completed_model {
+                    TaskStatus::Completed
+                } else {
+                    TaskStatus::Inactive
+                };
+                store
+                    .submit(TaskWrite::barrier_replace_task(task))
+                    .unwrap()
+                    .wait()
+                    .unwrap();
+            }
+        }
+        if index % 50 == 49 {
+            store
+                .submit(TaskWrite::compaction_barrier("task_model"))
+                .unwrap()
+                .wait()
+                .unwrap();
+            assert_model(&store, &text_model, &terminal_model, completed_model);
+            store.shutdown().unwrap();
+            let (reopened, _events) = TaskJournalStore::open(root.path().to_path_buf()).unwrap();
+            store = reopened;
+            assert_model(&store, &text_model, &terminal_model, completed_model);
+        }
+    }
+    store.shutdown().unwrap();
+}
+
+fn assert_model(store: &TaskJournalStore, text: &str, terminal: &str, completed: bool) {
+    let projection = store.load("task_model").unwrap();
+    assert_eq!(agent_text(&projection.messages[0]), text);
+    assert_eq!(projection.task.status == TaskStatus::Completed, completed);
+    if !terminal.is_empty() {
+        assert_eq!(
+            store
+                .load_tool_artifact("task_model", "artifact_execute_1")
+                .unwrap()
+                .terminal_outputs["terminal_1"],
+            terminal
+        );
+    }
+}
+
 #[cfg(unix)]
 #[test]
 fn append_failure_freezes_only_the_affected_task() {
@@ -340,6 +612,7 @@ fn append_failure_freezes_only_the_affected_task() {
 
     let root = TempDir::new().expect("create state root");
     let (store, commits) = TaskJournalStore::open(root.path().to_path_buf()).expect("open store");
+    let failures = store.subscribe_failures();
     for task_id in ["task_frozen", "task_healthy"] {
         store
             .submit(TaskWrite::barrier_create(task_projection(task_id)))
@@ -359,7 +632,14 @@ fn append_failure_freezes_only_the_affected_task() {
         .expect("admit failing write")
         .wait()
         .expect_err("append must fail");
-    assert!(error.to_string().contains("Permission denied"));
+    assert!(error.to_string().contains("permission_denied"));
+    assert_eq!(
+        failures
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .expect("write failure is reported to runtime safety monitors")
+            .task_id,
+        "task_frozen"
+    );
     assert!(store.load("task_frozen").is_err(), "Task must freeze");
     assert!(commits.try_recv().is_err(), "failed write must not publish");
 
@@ -374,6 +654,14 @@ fn append_failure_freezes_only_the_affected_task() {
     std::fs::set_permissions(&journal, std::fs::Permissions::from_mode(0o644))
         .expect("restore journal permissions");
     store.shutdown().expect("close store");
+
+    let (reopened, _events) = TaskJournalStore::open(root.path().to_path_buf()).unwrap();
+    assert!(reopened.load("task_frozen").is_err());
+    assert_eq!(
+        reopened.load("task_healthy").unwrap().task.status,
+        TaskStatus::Completed
+    );
+    reopened.shutdown().unwrap();
 }
 
 fn corrupt_final_checksum(root: &std::path::Path, task_id: &str) {
@@ -515,7 +803,6 @@ fn task_projection(task_id: &str) -> TaskProjection {
             archived: false,
             tombstoned: false,
             revision: 1,
-            config_options: HashMap::new(),
             config_options_catalog: None,
             config_mutation: TaskConfigMutationState::default(),
             agent_commands_catalog: None,

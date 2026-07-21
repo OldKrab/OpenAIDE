@@ -11,8 +11,10 @@ mod projection;
 mod scheduler;
 mod store;
 
+pub(crate) use model::TaskOperation;
 pub use model::{
-    CommittedArtifactChange, CommittedTaskBatch, TaskProjection, TaskWrite, TerminalOutputAppend,
-    ToolArtifactProjection,
+    CommittedArtifactChange, CommittedTaskBatch, TaskJournalQueueMetrics, TaskProjection,
+    TaskStorageFailure, TaskStorageFatalFailure, TaskWrite, TerminalOutputAppend,
+    ToolArtifactProjection, ToolArtifactReplacement, ToolTerminalAppend,
 };
 pub use store::{CommitReceipt, TaskJournalStore};

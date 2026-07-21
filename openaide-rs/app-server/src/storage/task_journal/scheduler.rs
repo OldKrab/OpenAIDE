@@ -11,8 +11,10 @@ use super::model::{CommitBoundary, CommittedTaskBatch, TaskWrite};
 #[path = "scheduler_tests.rs"]
 mod tests;
 
-const GLOBAL_STREAM_CAPACITY: usize = 1_024;
-const PER_TASK_STREAM_CAPACITY: usize = 512;
+// Stream deltas vary widely in size, so admission bounds retained payload bytes
+// rather than write count. One noisy Task can consume at most a quarter.
+const GLOBAL_STREAM_BYTE_CAPACITY: usize = 8 * 1024 * 1024;
+const PER_TASK_STREAM_BYTE_CAPACITY: usize = 2 * 1024 * 1024;
 const CONTROL_CAPACITY: usize = 64;
 const MAX_BATCH_AGE: Duration = Duration::from_millis(32);
 const MAX_BATCH_BYTES: usize = 64 * 1024;
@@ -29,7 +31,7 @@ struct PendingTask {
     writes: VecDeque<QueuedWrite>,
     queued_bytes: usize,
     queued_operations: usize,
-    stream_writes: usize,
+    stream_bytes: usize,
     control_writes: usize,
 }
 
@@ -37,10 +39,18 @@ struct PendingTask {
 struct SchedulerState {
     pending: HashMap<String, PendingTask>,
     ready: VecDeque<String>,
-    global_stream_writes: usize,
+    global_stream_bytes: usize,
     global_control_writes: usize,
+    peak_global_stream_bytes: usize,
+    peak_task_stream_bytes: usize,
     shutdown_reply: Option<mpsc::Sender<()>>,
     closed: bool,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(super) struct SchedulerMetrics {
+    pub peak_global_stream_bytes: usize,
+    pub peak_task_stream_bytes: usize,
 }
 
 /// Bounded fair admission shared by callers and the one physical writer.
@@ -72,8 +82,15 @@ impl Scheduler {
         write: TaskWrite,
         reply: mpsc::Sender<Result<CommittedTaskBatch, RuntimeError>>,
     ) -> Result<(), RuntimeError> {
+        if write.boundary == CommitBoundary::Stream
+            && write.estimated_bytes() > PER_TASK_STREAM_BYTE_CAPACITY
+        {
+            return Err(RuntimeError::Storage(
+                "Task journal stream write exceeds admission capacity".to_string(),
+            ));
+        }
         let mut state = self.state.lock().expect("Task scheduler poisoned");
-        while !state.closed && !has_capacity(&state, &write) {
+        while !state.closed && state.shutdown_reply.is_none() && !has_capacity(&state, &write) {
             state = self.changed.wait(state).expect("Task scheduler poisoned");
         }
         if state.closed || state.shutdown_reply.is_some() {
@@ -102,6 +119,46 @@ impl Scheduler {
         let mut state = self.state.lock().expect("Task scheduler poisoned");
         state.closed = true;
         self.changed.notify_all();
+    }
+
+    /// Closes root-wide admission and resolves every queued receipt after the
+    /// sole writer dies. This prevents callers from waiting forever on work
+    /// that no thread can make durable.
+    pub fn fail_all(&self, message: &str) {
+        // Root-fatal cleanup must still run when a panic poisoned the scheduler
+        // lock; the state is no longer used for normal scheduling afterward.
+        let mut state = self
+            .state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        state.closed = true;
+        for queued in state
+            .pending
+            .values_mut()
+            .flat_map(|task| task.writes.drain(..))
+        {
+            let _ = queued
+                .reply
+                .send(Err(RuntimeError::Storage(message.to_string())));
+        }
+        state.pending.clear();
+        state.ready.clear();
+        state.global_stream_bytes = 0;
+        state.global_control_writes = 0;
+        if let Some(reply) = state.shutdown_reply.take() {
+            let _ = reply.send(());
+        }
+        self.changed.notify_all();
+    }
+
+    /// Returns high-water marks since this scheduler opened. These retained-byte
+    /// measurements make overload benchmarks and production diagnostics honest.
+    pub fn metrics(&self) -> SchedulerMetrics {
+        let state = self.state.lock().expect("Task scheduler poisoned");
+        SchedulerMetrics {
+            peak_global_stream_bytes: state.peak_global_stream_bytes,
+            peak_task_stream_bytes: state.peak_task_stream_bytes,
+        }
     }
 
     pub fn next(&self) -> NextWork {
@@ -147,12 +204,13 @@ impl Scheduler {
 fn has_capacity(state: &SchedulerState, write: &TaskWrite) -> bool {
     match write.boundary {
         CommitBoundary::Stream => {
-            state.global_stream_writes < GLOBAL_STREAM_CAPACITY
-                && state
-                    .pending
-                    .get(&write.task_id)
-                    .map_or(0, |task| task.stream_writes)
-                    < PER_TASK_STREAM_CAPACITY
+            let write_bytes = write.estimated_bytes();
+            let task_bytes = state
+                .pending
+                .get(&write.task_id)
+                .map_or(0, |task| task.stream_bytes);
+            write_bytes <= GLOBAL_STREAM_BYTE_CAPACITY.saturating_sub(state.global_stream_bytes)
+                && write_bytes <= PER_TASK_STREAM_BYTE_CAPACITY.saturating_sub(task_bytes)
         }
         CommitBoundary::Barrier => state.global_control_writes < CONTROL_CAPACITY,
     }
@@ -166,15 +224,20 @@ fn enqueue(
     let task_id = write.task_id.clone();
     let is_new = !state.pending.contains_key(&task_id);
     let boundary = write.boundary;
+    let write_bytes = write.estimated_bytes();
     let entry = state.pending.entry(task_id.clone()).or_default();
-    entry.queued_bytes = entry.queued_bytes.saturating_add(write.estimated_bytes());
+    entry.queued_bytes = entry.queued_bytes.saturating_add(write_bytes);
     entry.queued_operations = entry
         .queued_operations
         .saturating_add(write.operations.len() + write.artifacts.len());
     match boundary {
         CommitBoundary::Stream => {
-            entry.stream_writes += 1;
-            state.global_stream_writes += 1;
+            entry.stream_bytes += write_bytes;
+            state.global_stream_bytes += write_bytes;
+            state.peak_global_stream_bytes = state
+                .peak_global_stream_bytes
+                .max(state.global_stream_bytes);
+            state.peak_task_stream_bytes = state.peak_task_stream_bytes.max(entry.stream_bytes);
         }
         CommitBoundary::Barrier => {
             entry.control_writes += 1;
@@ -224,8 +287,8 @@ fn take_batch(state: &mut SchedulerState, task_id: &str) -> Vec<QueuedWrite> {
         operations += next_operations;
         match queued.write.boundary {
             CommitBoundary::Stream => {
-                task.stream_writes -= 1;
-                state.global_stream_writes -= 1;
+                task.stream_bytes -= next_bytes;
+                state.global_stream_bytes -= next_bytes;
             }
             CommitBoundary::Barrier => {
                 task.control_writes -= 1;

@@ -105,8 +105,12 @@ fn resolves_isolation_from_newest_matching_task() {
 fn corrupt_task_record_blocks_project_resolution() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    std::fs::create_dir_all(store.tasks_dir().join("corrupt")).unwrap();
-    std::fs::write(store.tasks_dir().join("corrupt/task.json"), "{not-json").unwrap();
+    store
+        .write_task(&task_record("corrupt", "/workspace/app"))
+        .unwrap();
+    drop(store);
+    corrupt_last_byte(&temp.path().join("task-store-v1/tasks/corrupt/task.journal"));
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
 
     let error = StorageProjectResolver::new(store)
         .resolve_task_context(&ProjectId::from("project-any"))
@@ -114,6 +118,21 @@ fn corrupt_task_record_blocks_project_resolution() {
 
     assert_eq!(error.code, ProtocolErrorCode::Internal);
     assert!(error.recoverable);
+}
+
+fn corrupt_last_byte(path: &std::path::Path) {
+    use std::io::{Read, Seek, Write};
+    let mut file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)
+        .unwrap();
+    file.seek(std::io::SeekFrom::End(-1)).unwrap();
+    let mut byte = [0];
+    file.read_exact(&mut byte).unwrap();
+    file.seek(std::io::SeekFrom::End(-1)).unwrap();
+    file.write_all(&[byte[0] ^ 0xff]).unwrap();
+    file.sync_all().unwrap();
 }
 
 fn task_record(task_id: &str, workspace_root: &str) -> TaskRecord {

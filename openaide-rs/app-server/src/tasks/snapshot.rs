@@ -15,8 +15,8 @@ pub fn build_snapshot(
         #[cfg(test)]
         store.run_after_task_snapshot_read_hook_for_test();
         let chat = store.tail_page(task_id, tail_limit)?;
-        // Message files are committed before task.json. Matching versions prove the snapshot did
-        // not cross that commit boundary; a mismatch is transient while the Task write catches up.
+        // Separate reads may straddle one atomic journal projection swap. Matching versions prove
+        // the Task record and Chat page came from the same committed projection.
         if task.message_history_version != chat.version {
             std::thread::yield_now();
             continue;

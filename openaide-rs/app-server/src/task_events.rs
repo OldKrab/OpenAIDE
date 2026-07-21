@@ -17,6 +17,7 @@ pub enum CommittedChatChange {
 pub struct ToolDetailUpdate {
     pub artifact_id: String,
     pub details: ToolDetailSnapshot,
+    pub terminal_appends: Vec<crate::storage::task_journal::TerminalOutputAppend>,
 }
 
 /// The complete focused publication produced by one durable Task transaction.
@@ -32,6 +33,10 @@ pub struct CommittedTaskChange {
 pub enum TaskUpdateKind {
     Changed(Box<CommittedTaskChange>),
     HistorySync(openaide_app_server_protocol::snapshot::TaskHistorySyncSnapshot),
+    ToolDetailChanged {
+        artifact_id: String,
+        deltas: Vec<openaide_app_server_protocol::events::ToolDetailDelta>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -81,6 +86,34 @@ impl TaskUpdateNotifier {
             task_id: task_id.to_string(),
             revision,
             kind: TaskUpdateKind::HistorySync(history_sync),
+        });
+    }
+
+    pub(crate) fn tool_detail_changed(
+        &self,
+        task_id: &str,
+        artifact_id: String,
+        artifact_sequence: u64,
+        appends: Vec<crate::storage::task_journal::TerminalOutputAppend>,
+    ) {
+        if appends.is_empty() {
+            return;
+        }
+        self.publish(TaskUpdate {
+            task_id: task_id.to_string(),
+            revision: artifact_sequence,
+            kind: TaskUpdateKind::ToolDetailChanged {
+                artifact_id,
+                deltas: appends
+                    .into_iter()
+                    .map(|append| {
+                        openaide_app_server_protocol::events::ToolDetailDelta::AppendTerminal {
+                            terminal_id: append.terminal_id,
+                            data: append.data,
+                        }
+                    })
+                    .collect(),
+            },
         });
     }
 
