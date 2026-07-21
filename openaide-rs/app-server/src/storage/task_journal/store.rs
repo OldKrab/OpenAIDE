@@ -418,16 +418,24 @@ fn commit_batch(
     }
     let mut planned_artifacts = Vec::new();
     if !reduced.artifacts.is_empty() {
-        let projection = match current_task.as_ref() {
-            Some(RecoveredTask::Available { projection, .. }) => projection,
+        let artifact_heads = match current_task.as_ref() {
+            Some(RecoveredTask::Available { projection, .. }) => projection.artifact_heads.clone(),
             Some(RecoveredTask::Unavailable { error }) => {
                 return Err(RuntimeError::Storage(error.clone()))
             }
-            None => return Err(RuntimeError::TaskNotFound(task_id.to_string())),
+            None => reduced
+                .task_operations
+                .iter()
+                .find_map(|operation| match operation {
+                    // Initial Tool details belong to the same atomic frame as
+                    // Task creation, so their base heads come from its draft.
+                    TaskOperation::Create { projection } => Some(projection.artifact_heads.clone()),
+                    _ => None,
+                })
+                .ok_or_else(|| RuntimeError::TaskNotFound(task_id.to_string()))?,
         };
         for (artifact_id, operations) in reduced.artifacts {
-            let committed_head = projection
-                .artifact_heads
+            let committed_head = artifact_heads
                 .get(&artifact_id)
                 .copied()
                 .unwrap_or_default();

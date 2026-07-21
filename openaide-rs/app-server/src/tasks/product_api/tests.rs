@@ -10,11 +10,11 @@ use crate::attachment_runtime::AttachmentRuntimeError;
 use crate::client_lifecycle::{AppServerTime, ConnectionId, Delivery};
 use crate::projects::{project_id_for_workspace, ProjectTaskContext, StorageProjectResolver};
 use crate::protocol::model::{
-    ActivityStatus, ActivityStep, AgentCommand, AgentCommandsCatalog, AgentListSessionsResult,
-    AgentListedSession, AgentMessagePart, AgentMessageRole, Attachment, ChatMessage, ConfigOption,
-    ConfigOptionCategory, ConfigOptionCurrentValue, ConfigOptionKind, ConfigOptionValue,
-    ConfigOptionsCatalog, ConfigOptionsStatus, InterruptionReason, IsolationKind,
-    NormalizedMessage, TaskStatus,
+    ActivityStatus, ActivityStep, ActivityToolContent, ActivityToolDetails, AgentCommand,
+    AgentCommandsCatalog, AgentListSessionsResult, AgentListedSession, AgentMessagePart,
+    AgentMessageRole, Attachment, ChatMessage, ConfigOption, ConfigOptionCategory,
+    ConfigOptionCurrentValue, ConfigOptionKind, ConfigOptionValue, ConfigOptionsCatalog,
+    ConfigOptionsStatus, InterruptionReason, IsolationKind, NormalizedMessage, TaskStatus,
 };
 use crate::server_requests::{ServerRequestAnswer, ServerRequestRuntime};
 use crate::snapshots::task_snapshot::project_stored_task_snapshot;
@@ -1803,6 +1803,81 @@ fn adopting_native_session_preserves_its_listed_activity_time() {
         .unwrap();
 
     assert_eq!(adopted.task.last_activity, "2026-01-02T03:04:05.000Z");
+}
+
+#[test]
+fn adopting_native_session_persists_replayed_tool_details_with_the_new_task() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    store
+        .write_task(&task_record(
+            "project-task",
+            "/tmp/openaide-unit-workspace/app",
+        ))
+        .unwrap();
+    let agent = Arc::new(RecordingAgent {
+        replayed_messages: Mutex::new(vec![NormalizedMessage::Activity {
+            id: "activity-1".to_string(),
+            title: "Edited a file".to_string(),
+            status: ActivityStatus::Completed,
+            created_at: "2026-01-02T03:04:05.000Z".to_string(),
+            collapsed: true,
+            steps: vec![ActivityStep::Tool {
+                tool_call_id: Some("tool-1".to_string()),
+                name: "edit".to_string(),
+                status: ActivityStatus::Completed,
+                input_summary: None,
+                output_preview: None,
+                detail_artifact_id: None,
+                details: Some(Box::new(ActivityToolDetails {
+                    locations: Vec::new(),
+                    content: vec![ActivityToolContent::Diff {
+                        path: "/tmp/openaide-unit-workspace/app/src/main.rs".to_string(),
+                        old_text: Some("old".to_string()),
+                        new_text: "new".to_string(),
+                    }],
+                    input: None,
+                    output: None,
+                })),
+                permission_outcomes: Vec::new(),
+            }],
+        }]),
+        ..RecordingAgent::default()
+    });
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        agent,
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+
+    let adopted = api
+        .adopt_native_session(TaskAdoptNativeSessionParams {
+            project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
+            agent_id: AgentId::from("codex"),
+            native_session_id: "native-session".to_string(),
+            title: Some("Existing session".to_string()),
+        })
+        .expect("adopt replayed session with tool details");
+
+    assert_eq!(adopted.chat.items.len(), 1);
+    let task_id = adopted.task.task_id.as_str();
+    let stored = store.read_messages(task_id).unwrap();
+    let NormalizedMessage::Activity { steps, .. } = &stored[0].chat.message else {
+        panic!("expected replayed activity");
+    };
+    let ActivityStep::Tool {
+        detail_artifact_id,
+        details,
+        ..
+    } = &steps[0]
+    else {
+        panic!("expected replayed tool step");
+    };
+    assert!(detail_artifact_id.is_some());
+    assert!(details.is_none());
 }
 
 #[test]
