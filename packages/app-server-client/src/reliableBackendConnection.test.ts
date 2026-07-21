@@ -137,6 +137,34 @@ describe("ReliableBackendConnection", () => {
     connection.close();
   });
 
+  it("initializes a replacement session before polling it after mobile expiry", async () => {
+    const transport = createExpiringSessionTransport("transport", "task", false, true);
+    const connection = createReliableWebProxyBackendConnection({
+      endpointUrl: "http://app-server.test/rpc",
+      connectionId: "connection-1",
+      fetch: transport.fetch,
+      retryDelayMs: 1,
+      heartbeatIntervalMs: 60_000,
+    });
+    await connection.initialize({
+      clientInstanceId: "client-1" as ClientInstanceId,
+      shell: { kind: "web" },
+      requestedSurface: { kind: "home" },
+      capabilities: { protocol: [], shell: [] },
+    });
+
+    await expect(connection.request(TASK_LIST, { archived: false })).rejects.toThrow("HTTP 410");
+    await vi.waitFor(() => expect(transport.initializedSessions()).toEqual([
+      "session-1",
+      "session-2",
+    ]));
+    await expect(connection.request(TASK_LIST, { archived: false })).resolves.toEqual({
+      tasks: [],
+      revision: 2,
+    });
+    connection.close();
+  });
+
   it("recovers an expired mobile client from the resumed heartbeat", async () => {
     const transport = createExpiringSessionTransport("client", "heartbeat");
     const connection = createReliableWebProxyBackendConnection({
@@ -461,6 +489,7 @@ function createExpiringSessionTransport(
   expiry: "transport" | "client",
   trigger: "task" | "heartbeat" = "task",
   serverByEndpoint = false,
+  rejectReplacementPollBeforeInitialize = false,
 ) {
   const frames = new Map<string, Array<{ sequence: number; message: RpcMessage }>>();
   const initialized: string[] = [];
@@ -504,6 +533,13 @@ function createExpiringSessionTransport(
           });
         }
         const sessionId = init.headers["X-OpenAIDE-Session-Id"] ?? "";
+        if (
+          rejectReplacementPollBeforeInitialize
+          && sessionId !== "session-1"
+          && !initialized.includes(sessionId)
+        ) {
+          return response(410, "client is not initialized");
+        }
         const after = Number(init.headers["X-OpenAIDE-After"] ?? "0");
         const available = (frames.get(sessionId) ?? []).filter((frame) => frame.sequence > after);
         if (available.length > 0) return response(200, { frames: available });
