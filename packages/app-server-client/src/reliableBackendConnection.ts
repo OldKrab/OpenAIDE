@@ -216,6 +216,7 @@ function createReliableHttpBackendConnection(
     const channel = createReliableHttpMessageChannel({
       endpointUrl: endpoint.endpointUrl,
       connectionId: options.connectionId,
+      deferReceiveUntilFirstUpload: true,
       ...(endpoint.authToken ? { authToken: endpoint.authToken } : {}),
       ...(options.fetch ? { fetch: options.fetch } : {}),
       ...(options.retryDelayMs === undefined ? {} : { retryDelayMs: options.retryDelayMs }),
