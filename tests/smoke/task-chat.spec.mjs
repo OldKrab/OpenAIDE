@@ -181,7 +181,7 @@ test("applies Agent options and inserts prepared slash commands", async ({ page 
 
 test("sends an attachment-only first message through the real resolver boundary", async ({ page }) => {
   await openPreparedNewTask(page);
-  await page.getByLabel("Add context").click();
+  await page.getByRole("button", { name: "Add context" }).click();
   const chooser = page.waitForEvent("filechooser");
   await page.getByRole("menu", { name: "Add context" })
     .getByRole("menuitem", { name: /Attach images/ })
@@ -202,7 +202,7 @@ test("sends an attachment-only first message through the real resolver boundary"
 
 test("uploads a 2 MiB file and sends it with the first New Task message", async ({ page }) => {
   await openPreparedNewTask(page);
-  await page.getByLabel("Add context").click();
+  await page.getByRole("button", { name: "Add context" }).click();
   const chooser = page.waitForEvent("filechooser");
   await page.getByRole("menu", { name: "Add context" })
     .getByRole("menuitem", { name: /Attach files/ })
@@ -237,7 +237,7 @@ test("uploads a 2 MiB file and sends it with the first New Task message", async 
 
 test("keeps Images and files in one composer attachment list", async ({ page }) => {
   await openPreparedNewTask(page);
-  await page.getByLabel("Add context").click();
+  await page.getByRole("button", { name: "Add context" }).click();
   let chooser = page.waitForEvent("filechooser");
   await page.getByRole("menuitem", { name: /Attach images/ }).click();
   await (await chooser).setFiles({
@@ -245,7 +245,8 @@ test("keeps Images and files in one composer attachment list", async ({ page }) 
     mimeType: "image/png",
     buffer: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64"),
   });
-  await page.getByLabel("Add context").click();
+  await expect(page.getByRole("menu", { name: "Add context" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Add context" }).click();
   chooser = page.waitForEvent("filechooser");
   await page.getByRole("menuitem", { name: /Attach files/ }).click();
   await (await chooser).setFiles({
