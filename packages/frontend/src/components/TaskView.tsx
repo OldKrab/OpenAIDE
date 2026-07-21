@@ -160,9 +160,11 @@ export function TaskView({
   const workspaceAvailable = snapshot.task.workspace_available !== false;
   const imageAttachmentsAllowed = snapshot.input_capabilities?.image === true;
   const imageAttachments = taskInput.context.filter((attachment) => attachment.kind === "image");
-  const fileAttachments = taskInput.context.filter((attachment) => attachment.kind !== "image");
+  const resourceAttachments = taskInput.context.filter(
+    (attachment) => attachment.kind !== "image" || attachment.app_server_handle_id,
+  );
   const attachmentsSendable = appServerComposerImages(imageAttachments) !== undefined
-    && appServerAttachmentHandles(fileAttachments) !== undefined
+    && appServerAttachmentHandles(resourceAttachments) !== undefined
     && (imageAttachments.length === 0 || imageAttachmentsAllowed);
   const availability = composerAvailability({
     allowEditingWhileSendBlocked: true,

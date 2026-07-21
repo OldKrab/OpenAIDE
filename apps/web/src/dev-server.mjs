@@ -15,7 +15,7 @@ import {
   isAuthorized,
   writeUnauthorized,
 } from "./dev-server-auth.mjs";
-import { injectBootstrap, webRoute } from "./dev-server-routes.mjs";
+import { appServerTransportRoute, injectBootstrap, webRoute } from "./dev-server-routes.mjs";
 import { pipeProxyResponse, watchPendingProxyResponse } from "./dev-server-streams.mjs";
 import { createViteProxy } from "./dev-server-vite-proxy.mjs";
 
@@ -235,27 +235,28 @@ async function proxyAppServer(req, res, url) {
     writeText(res, 405, "Method not allowed");
     return;
   }
-  const isUpload = req.method === "POST" && url.pathname.endsWith("/upload");
-  const isDownload = req.method === "GET" && url.pathname.endsWith("/download");
+  const transportRoute = appServerTransportRoute(req.method, url.pathname);
+  const isUpload = transportRoute?.kind === "upload";
   await startAppServer();
   const body = req.method === "POST" && !isUpload ? await readRequestBody(req) : Buffer.alloc(0);
   // An ambiguous proxy failure may happen after App Server acceptance. Only the
   // sequenced client transport may retry the identical frame; the proxy must
   // never manufacture a second application delivery.
-  await forwardAppServerRequest(req, res, url, body, isUpload, isDownload);
+  await forwardAppServerRequest(req, res, url, body, transportRoute);
 }
 
-function forwardAppServerRequest(req, res, url, body, isUpload, isDownload) {
+function forwardAppServerRequest(req, res, url, body, transportRoute) {
   const appServerConnection = appServerManager.currentConnection();
   const appServerUrl = appServerManager.currentUrl();
   if (!appServerConnection || !appServerUrl) {
     return Promise.reject(new Error("App Server connection is not ready"));
   }
   return new Promise((resolve, reject) => {
+    const isUpload = transportRoute?.kind === "upload";
     const contentLength = isUpload ? Number(req.headers["content-length"] ?? 0) : body.byteLength;
     const headers = appServerHeaders(req.headers, appServerUrl.host, appServerConnection.authToken, contentLength);
-    const appServerPath = isUpload || isDownload
-      ? `${appServerUrl.pathname.replace(/\/$/, "")}/${isUpload ? "upload" : "download"}`
+    const appServerPath = transportRoute
+      ? `${appServerUrl.pathname.replace(/\/$/, "")}/${transportRoute.appServerSuffix}`
       : appServerUrl.pathname;
     const proxyReq = http.request({
       hostname: appServerUrl.hostname,

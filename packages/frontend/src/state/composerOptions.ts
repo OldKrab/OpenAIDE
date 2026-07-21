@@ -127,6 +127,20 @@ export function appServerAttachment(
   };
 }
 
+/** Keeps image presentation local while Send references only the App Server handle. */
+export function appServerImageAttachment(
+  attachment: PreSendAttachment,
+  previewUrl: string,
+): ComposerAttachment {
+  return {
+    kind: "image",
+    label: attachment.label,
+    local_id: `image_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    app_server_handle_id: attachment.handleId,
+    preview_url: previewUrl,
+  };
+}
+
 export function protocolAttachments(attachments: ComposerAttachment[]): Attachment[] {
   return attachments.map(({
     local_id: localId,
@@ -166,14 +180,18 @@ export function localImageAttachment(file: File, data: string): ComposerAttachme
 /** Converts only valid client-owned Images into the inline task/send representation. */
 export function appServerComposerImages(attachments: ComposerAttachment[]): ComposerImage[] | undefined {
   const images = attachments.map((attachment) => {
-    if (attachment.kind !== "image" || !isComposerImagePayload(attachment.payload)) return undefined;
+    if (attachment.kind !== "image") return undefined;
+    if (attachment.app_server_handle_id) return null;
+    if (!isComposerImagePayload(attachment.payload)) return undefined;
     return {
       label: attachment.label,
       mimeType: attachment.payload.mimeType,
       data: attachment.payload.data,
     } satisfies ComposerImage;
   });
-  return images.every((image): image is ComposerImage => image !== undefined) ? images : undefined;
+  return images.every((image) => image !== undefined)
+    ? images.filter((image): image is ComposerImage => image != null)
+    : undefined;
 }
 
 function isComposerImagePayload(payload: unknown): payload is ComposerImagePayload {

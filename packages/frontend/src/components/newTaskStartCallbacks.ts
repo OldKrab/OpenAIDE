@@ -131,7 +131,9 @@ async function submitNewTask({
   }
   const draftInput = newTaskDraftInput(state, draft);
   const imageAttachments = draftInput.context.filter((attachment) => attachment.kind === "image");
-  const resourceAttachments = draftInput.context.filter((attachment) => attachment.kind !== "image");
+  const resourceAttachments = draftInput.context.filter(
+    (attachment) => attachment.kind !== "image" || attachment.app_server_handle_id,
+  );
   const images = appServerComposerImages(imageAttachments);
   const attachments = appServerAttachmentHandles(resourceAttachments);
   if (!images || !attachments) {

@@ -42,6 +42,20 @@ export function webRoute(pathname) {
   return undefined;
 }
 
+/** Maps streaming support routes without making the proxy infer subpaths ad hoc. */
+export function appServerTransportRoute(method, pathname) {
+  if (method === "POST" && pathname.endsWith("/upload/chunk")) {
+    return { kind: "upload", appServerSuffix: "upload/chunk" };
+  }
+  if (method === "POST" && pathname.endsWith("/upload")) {
+    return { kind: "upload", appServerSuffix: "upload" };
+  }
+  if (method === "GET" && pathname.endsWith("/download")) {
+    return { kind: "download", appServerSuffix: "download" };
+  }
+  return undefined;
+}
+
 function escapeAttribute(value) {
   return value
     .replaceAll("&", "&amp;")

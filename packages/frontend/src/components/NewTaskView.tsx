@@ -157,9 +157,11 @@ export function NewTaskView({
   // when the selected prepared Task explicitly reports that Images are unsupported.
   const imageAttachmentsAllowed = state.snapshot?.input_capabilities?.image !== false;
   const imageAttachments = composerAttachments.filter((attachment) => attachment.kind === "image");
-  const fileAttachments = composerAttachments.filter((attachment) => attachment.kind !== "image");
+  const resourceAttachments = composerAttachments.filter(
+    (attachment) => attachment.kind !== "image" || attachment.app_server_handle_id,
+  );
   const attachmentsReady = appServerComposerImages(imageAttachments) !== undefined
-    && appServerAttachmentHandles(fileAttachments) !== undefined
+    && appServerAttachmentHandles(resourceAttachments) !== undefined
     && (imageAttachments.length === 0 || imageAttachmentsAllowed);
   const availability = composerAvailability({
     allowEditingWhileSendBlocked: false,

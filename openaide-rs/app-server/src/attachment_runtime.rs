@@ -5,6 +5,8 @@ use std::sync::Barrier;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use base64::Engine;
+
 use openaide_app_server_protocol::attachment::{
     AttachmentCreatePastedImageResult, PreSendAttachment,
 };
@@ -264,6 +266,20 @@ impl AttachmentRuntime {
                 label: registered.label,
             },
         })
+    }
+
+    /// Converts a completed binary Web upload into the existing image handle model.
+    pub(crate) fn create_uploaded_image(
+        &self,
+        owner: impl Into<AttachmentOwner>,
+        path: impl AsRef<std::path::Path>,
+        label: impl Into<String>,
+        mime_type: impl Into<String>,
+    ) -> Result<AttachmentCreatePastedImageResult, AttachmentRuntimeError> {
+        let bytes = std::fs::read(path)
+            .map_err(|error| AttachmentRuntimeError::ReadFailed(error.to_string()))?;
+        let data = base64::engine::general_purpose::STANDARD.encode(bytes);
+        self.create_pasted_image(owner, label, mime_type, data)
     }
 
     /// Registers an exact user-selected local file without granting directory browsing.

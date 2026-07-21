@@ -143,7 +143,9 @@ export function sendTaskPromptIntent(
 
 function appServerComposerMessage(input: TaskComposerInput): ComposerMessage | undefined {
   const imageAttachments = input.context.filter((attachment) => attachment.kind === "image");
-  const resourceAttachments = input.context.filter((attachment) => attachment.kind !== "image");
+  const resourceAttachments = input.context.filter(
+    (attachment) => attachment.kind !== "image" || attachment.app_server_handle_id,
+  );
   const images = appServerComposerImages(imageAttachments);
   const attachments = appServerAttachmentHandles(resourceAttachments);
   if (!images || !attachments) return undefined;

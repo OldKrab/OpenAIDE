@@ -1,4 +1,4 @@
-use std::io::{ErrorKind, Read, Write};
+use std::io::ErrorKind;
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::time::Duration;
 
@@ -10,11 +10,13 @@ use super::{LocalHttpAppHandler, LocalHttpProbeHandler, LocalHttpResponse};
 const DEFAULT_TIMEOUT: Duration = Duration::from_millis(750);
 
 mod http;
+mod uploads;
 
 use http::{
     read_http_request, write_event_stream_data, write_event_stream_headers,
     write_event_stream_heartbeat, write_file_download, write_http_response,
 };
+use uploads::handle_file_upload;
 
 pub struct LocalHttpProbeListener {
     listener: TcpListener,
@@ -91,6 +93,12 @@ pub(crate) struct LocalHttpRequest {
     pub client_instance_id: Option<String>,
     pub task_id: Option<String>,
     pub file_name: Option<String>,
+    pub attachment_kind: Option<String>,
+    pub mime_type: Option<String>,
+    pub upload_id: Option<String>,
+    pub upload_offset: Option<usize>,
+    pub upload_size: Option<usize>,
+    pub upload_cancel: bool,
     pub session_id: Option<String>,
     pub after_sequence: Option<u64>,
     pub accepts_event_stream: bool,
@@ -166,6 +174,12 @@ fn handle_stream_with_routes(
             client_instance_id: request.client_instance_id,
             task_id: request.task_id,
             file_name: request.file_name,
+            attachment_kind: request.attachment_kind,
+            mime_type: request.mime_type,
+            upload_id: request.upload_id,
+            upload_offset: request.upload_offset,
+            upload_size: request.upload_size,
+            upload_cancel: request.upload_cancel,
             session_id: request.session_id,
             after_sequence: request.after_sequence,
             accepts_event_stream: request.accepts_event_stream,
@@ -239,7 +253,7 @@ fn handle_stream_with_routes(
         .target
         .split('?')
         .next()
-        .is_some_and(|path| path.ends_with("/upload"))
+        .is_some_and(|path| path.ends_with("/upload") || path.ends_with("/upload/chunk"))
     {
         return upload(stream, request);
     }
@@ -317,87 +331,6 @@ fn hex_value(value: u8) -> Option<u8> {
         b'A'..=b'F' => Some(value - b'A' + 10),
         _ => None,
     }
-}
-
-fn handle_file_upload(
-    stream: &mut TcpStream,
-    handler: &LocalHttpAppHandler,
-    request: LocalHttpRequest,
-) -> Result<(), LocalHttpProbeListenerError> {
-    let client_instance_id = match handler.authorize_upload(
-        request.authorization.as_deref(),
-        request.client_instance_id.as_deref(),
-    ) {
-        Ok(client_instance_id) => client_instance_id,
-        Err(response) => return write_http_response(stream, &response),
-    };
-    let (Some(task_id), Some(file_name)) = (request.task_id, request.file_name) else {
-        return write_http_response(
-            stream,
-            &LocalHttpResponse {
-                status: 400,
-                body: String::new(),
-            },
-        );
-    };
-
-    // Uploads have no product size limit. A finite inactivity timeout still prevents
-    // abandoned sockets from retaining partial temp files forever.
-    stream.set_read_timeout(Some(Duration::from_secs(60)))?;
-    let suffix = safe_temp_suffix(&file_name);
-    let mut temporary = tempfile::Builder::new()
-        .prefix("openaide-upload-")
-        .suffix(&suffix)
-        .tempfile()?;
-    let initial = request.initial_body.len().min(request.content_length);
-    temporary.write_all(&request.initial_body[..initial])?;
-    let mut received = initial;
-    let mut chunk = [0_u8; 64 * 1024];
-    while received < request.content_length {
-        let wanted = chunk.len().min(request.content_length - received);
-        let read = stream.read(&mut chunk[..wanted])?;
-        if read == 0 {
-            return Err(LocalHttpProbeListenerError::MalformedRequest(
-                "connection closed before upload completed",
-            ));
-        }
-        temporary.write_all(&chunk[..read])?;
-        received += read;
-    }
-    temporary.flush()?;
-    let (_file, path) = temporary.keep().map_err(|error| error.error)?;
-    let response = handler.register_uploaded_file(
-        &client_instance_id,
-        task_id,
-        path.to_string_lossy().into_owned(),
-        file_name,
-    );
-    if response.status != 200 {
-        if let Err(error) = std::fs::remove_file(&path) {
-            crate::logging::error(
-                "attachment_upload_cleanup_failed",
-                json!({ "error": error.to_string() }),
-            );
-        }
-    }
-    write_http_response(stream, &response)
-}
-
-fn safe_temp_suffix(file_name: &str) -> String {
-    let Some(extension) = std::path::Path::new(file_name)
-        .extension()
-        .and_then(|value| value.to_str())
-        .filter(|value| {
-            !value.is_empty()
-                && value.len() <= 16
-                && value
-                    .chars()
-                    .all(|character| character.is_ascii_alphanumeric())
-        })
-    else {
-        return String::new();
-    };
-    format!(".{extension}")
 }
 
 fn handle_session_poll(

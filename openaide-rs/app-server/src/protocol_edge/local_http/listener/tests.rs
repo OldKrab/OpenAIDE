@@ -240,6 +240,48 @@ fn upload_route_does_not_apply_the_json_body_limit_or_buffer_the_file() {
 }
 
 #[test]
+fn chunk_upload_route_preserves_session_headers_and_binary_body() {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let addr = listener.local_addr().unwrap();
+
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        handle_stream_with_routes(
+            &mut stream,
+            |_request| panic!("chunk upload must not enter JSON-RPC handling"),
+            |_stream, _request| panic!("chunk upload must not enter event-stream handling"),
+            |_stream, _request| panic!("chunk upload must not enter session polling"),
+            |stream, request| {
+                assert_eq!(request.upload_id.as_deref(), Some("upload-1"));
+                assert_eq!(request.upload_offset, Some(524_288));
+                assert_eq!(request.upload_size, Some(1_500_000));
+                assert_eq!(request.attachment_kind.as_deref(), Some("image"));
+                assert_eq!(request.mime_type.as_deref(), Some("image/png"));
+                assert_eq!(request.content_length, 6);
+                assert_eq!(request.initial_body, b"second");
+                write_http_response(
+                    stream,
+                    &LocalHttpResponse {
+                        status: 202,
+                        body: r#"{"received":524294}"#.to_string(),
+                    },
+                )
+            },
+            |_stream, _request| panic!("chunk upload must not enter file download handling"),
+        )
+        .unwrap();
+    });
+
+    let response = send(
+        addr,
+        "POST /upload/chunk HTTP/1.1\r\nX-OpenAIDE-Upload-Id: upload-1\r\nX-OpenAIDE-Upload-Offset: 524288\r\nX-OpenAIDE-Upload-Size: 1500000\r\nX-OpenAIDE-Attachment-Kind: image\r\nX-OpenAIDE-Mime-Type: image/png\r\nContent-Length: 6\r\n\r\nsecond",
+    );
+    server.join().unwrap();
+
+    assert!(response.starts_with("HTTP/1.1 202 Accepted\r\n"));
+}
+
+#[test]
 fn non_post_returns_405_without_delegating() {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();

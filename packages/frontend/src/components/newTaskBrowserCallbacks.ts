@@ -16,7 +16,11 @@ import {
   releaseAttachmentResources,
 } from "../services/attachmentResources";
 import { createConfirmedEmbeddedAttachment } from "../services/embeddedAttachmentSelection";
-import { appServerAttachment, localImageAttachment } from "../state/composerOptions";
+import {
+  appServerAttachment,
+  appServerImageAttachment,
+  localImageAttachment,
+} from "../state/composerOptions";
 import { mapProtocolTaskSnapshot } from "../state/appServerProtocolMapping";
 import { newTaskPreparationKey } from "../state/newTaskPreparationContext";
 import type {
@@ -292,6 +296,40 @@ function createFileBrowserCallbacks({
       });
     },
     attachImage: async (file: File, draft?: NewTaskDraftInput) => {
+      if (files?.kind === "webUpload") {
+        const lease = await ensureTaskId(draft);
+        const attachment = await files.upload(
+          lease.taskId,
+          file,
+          () => undefined,
+          new AbortController().signal,
+          { kind: "image", mimeType: file.type || "image/png" },
+        );
+        try {
+          const data = await fileToBase64(file);
+          if (!newTaskController.isCurrent(lease)) {
+            throw new SupersededNewTaskFileBrowserOperation();
+          }
+          const adoption = attachmentResources?.beginAdoption(lease.taskId);
+          if (attachmentResources && !adoption) {
+            throw new SupersededNewTaskFileBrowserOperation();
+          }
+          if (attachmentResources?.adopt({ taskId: lease.taskId, handleId: attachment.handleId }, adoption) === false) {
+            throw new SupersededNewTaskFileBrowserOperation();
+          }
+          dispatch({
+            type: "newTask:attachment:add",
+            attachment: appServerImageAttachment(
+              attachment,
+              `data:${file.type || "image/png"};base64,${data}`,
+            ),
+          });
+        } catch (error) {
+          releaseLateHandle(lease.taskId, attachment.handleId);
+          throw error;
+        }
+        return;
+      }
       const data = await fileToBase64(file);
       dispatch({
         type: "newTask:attachment:add",

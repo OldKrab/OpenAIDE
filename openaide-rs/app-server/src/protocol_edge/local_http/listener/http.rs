@@ -16,6 +16,12 @@ pub(super) struct HttpRequest {
     pub client_instance_id: Option<String>,
     pub task_id: Option<String>,
     pub file_name: Option<String>,
+    pub attachment_kind: Option<String>,
+    pub mime_type: Option<String>,
+    pub upload_id: Option<String>,
+    pub upload_offset: Option<usize>,
+    pub upload_size: Option<usize>,
+    pub upload_cancel: bool,
     pub session_id: Option<String>,
     pub after_sequence: Option<u64>,
     pub accepts_event_stream: bool,
@@ -40,6 +46,14 @@ pub(super) fn read_http_request(
         header_value(&headers, "x-openaide-client-instance-id").map(str::to_string);
     let task_id = header_value(&headers, "x-openaide-task-id").map(str::to_string);
     let file_name = header_value(&headers, "x-openaide-file-name").map(percent_decode);
+    let attachment_kind = header_value(&headers, "x-openaide-attachment-kind").map(str::to_string);
+    let mime_type = header_value(&headers, "x-openaide-mime-type").map(str::to_string);
+    let upload_id = header_value(&headers, "x-openaide-upload-id").map(str::to_string);
+    let upload_offset = header_value(&headers, "x-openaide-upload-offset")
+        .and_then(|value| value.parse::<usize>().ok());
+    let upload_size = header_value(&headers, "x-openaide-upload-size")
+        .and_then(|value| value.parse::<usize>().ok());
+    let upload_cancel = header_value(&headers, "x-openaide-upload-cancel") == Some("true");
     let session_id = header_value(&headers, "x-openaide-session-id").map(str::to_string);
     let after_sequence =
         header_value(&headers, "x-openaide-after").and_then(|value| value.parse::<u64>().ok());
@@ -52,7 +66,7 @@ pub(super) fn read_http_request(
     let is_upload = target
         .split('?')
         .next()
-        .is_some_and(|path| path.ends_with("/upload"));
+        .is_some_and(|path| path.ends_with("/upload") || path.ends_with("/upload/chunk"));
     if !is_upload && content_length > MAX_BODY_BYTES {
         return Err(LocalHttpProbeListenerError::MalformedRequest(
             "body is too large",
@@ -86,6 +100,12 @@ pub(super) fn read_http_request(
         client_instance_id,
         task_id,
         file_name,
+        attachment_kind,
+        mime_type,
+        upload_id,
+        upload_offset,
+        upload_size,
+        upload_cancel,
         session_id,
         after_sequence,
         accepts_event_stream,
@@ -132,7 +152,7 @@ pub(super) fn write_http_response(
         "Content-Type: application/json\r\n".to_string()
     };
     let wire = format!(
-        "HTTP/1.1 {} {}\r\n{}Access-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Authorization, Content-Type, X-OpenAIDE-Connection-Id, X-OpenAIDE-Client-Instance-Id, X-OpenAIDE-Session-Id, X-OpenAIDE-After, X-OpenAIDE-Task-Id, X-OpenAIDE-File-Name\r\nAccess-Control-Max-Age: 600\r\nCache-Control: no-store\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        "HTTP/1.1 {} {}\r\n{}Access-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Authorization, Content-Type, X-OpenAIDE-Connection-Id, X-OpenAIDE-Client-Instance-Id, X-OpenAIDE-Session-Id, X-OpenAIDE-After, X-OpenAIDE-Task-Id, X-OpenAIDE-File-Name, X-OpenAIDE-Attachment-Kind, X-OpenAIDE-Mime-Type, X-OpenAIDE-Upload-Id, X-OpenAIDE-Upload-Offset, X-OpenAIDE-Upload-Size, X-OpenAIDE-Upload-Cancel\r\nAccess-Control-Max-Age: 600\r\nCache-Control: no-store\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
         response.status,
         reason_phrase(response.status),
         content_type,
@@ -312,12 +332,15 @@ fn header_end_index(bytes: &[u8]) -> Option<usize> {
 fn reason_phrase(status: u16) -> &'static str {
     match status {
         200 => "OK",
+        202 => "Accepted",
         204 => "No Content",
         400 => "Bad Request",
         401 => "Unauthorized",
         403 => "Forbidden",
+        404 => "Not Found",
         405 => "Method Not Allowed",
         409 => "Conflict",
+        413 => "Payload Too Large",
         500 => "Internal Server Error",
         _ => "Status",
     }

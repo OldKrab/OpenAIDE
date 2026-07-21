@@ -9,6 +9,7 @@ import type { AppServerSession } from "@openaide/app-server-client";
 import type { PreSendAttachment } from "@openaide/app-server-client";
 
 export type FileUploadProgress = { loaded: number; total: number };
+export type FileUploadOptions = { kind: "image"; mimeType: string };
 
 export type SentFileOpenRequest = {
   taskId: string;
@@ -30,6 +31,7 @@ export type FrontendFileAcquisition =
         file: File,
         onProgress: (progress: FileUploadProgress) => void,
         signal: AbortSignal,
+        options?: FileUploadOptions,
       ): Promise<PreSendAttachment>;
     }
   | {
