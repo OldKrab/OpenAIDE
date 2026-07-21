@@ -6,7 +6,7 @@ use crate::agent::{
     registry_handle::AgentRegistryHandle, status_cache::AgentStatusCache, AgentRuntime,
 };
 use crate::app_lifecycle::AppLifecycle;
-use crate::client_lifecycle::ClientHub;
+use crate::client_lifecycle::{ClientHub, ClientLivenessPolicy};
 use crate::diagnostics::RuntimeDiagnosticsService;
 use crate::projects::{ConfiguredProjectRoots, StorageProjectResolver};
 use crate::protocol_edge::{AppServerProbeFacts, RpcGateway};
@@ -100,7 +100,7 @@ pub(super) fn gateway(
     // distinguish restarts, while SnapshotBuilder keeps it stable for every snapshot in the epoch.
     let server_id = Uuid::new_v4().to_string();
     let gateway = RpcGateway::new(
-        ClientHub::new(10_000),
+        ClientHub::new(ClientLivenessPolicy::new(10_000, 30_000)),
         AppLifecycle::new(),
         StateStream::new(state_root_id.clone().into()),
         server_requests,

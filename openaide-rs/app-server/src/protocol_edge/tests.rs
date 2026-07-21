@@ -33,7 +33,9 @@ use crate::agent::product_api::{
 };
 use crate::app_lifecycle::{AppLifecycle, LifecycleState};
 use crate::attachment_runtime::ResolvedRevealAttachment;
-use crate::client_lifecycle::{AppServerTime, ClientExpiryOutcome, ClientHub, ConnectionId};
+use crate::client_lifecycle::{
+    AppServerTime, ClientExpiryOutcome, ClientHub, ClientLivenessPolicy, ConnectionId,
+};
 use crate::diagnostics::RuntimeDiagnosticsWorkflow;
 use crate::server_requests::ServerRequestRuntime;
 use crate::server_requests::{OpenRequestOutcome, ServerRequestAnswer, ServerRequestDraft};
@@ -1474,8 +1476,11 @@ fn heartbeat_refreshes_client_liveness() {
     assert!(gateway
         .expire_inactive_clients(AppServerTime(10))
         .is_empty());
+    assert!(gateway
+        .expire_inactive_clients(AppServerTime(19))
+        .is_empty());
     assert_eq!(
-        gateway.expire_inactive_clients(AppServerTime(19)),
+        gateway.expire_inactive_clients(AppServerTime(29)),
         vec![ClientExpiryOutcome::Expired {
             client_instance_id: ClientInstanceId::from("client-1"),
             last_client: true,
@@ -1485,16 +1490,19 @@ fn heartbeat_refreshes_client_liveness() {
 }
 
 #[test]
-fn event_stream_activity_refreshes_client_liveness() {
+fn authenticated_transport_activity_refreshes_client_liveness() {
     let mut gateway = initialized_gateway("client-1", "conn-1");
 
-    assert!(gateway.observe_event_stream_activity(&ConnectionId::new("conn-1"), AppServerTime(9),));
+    assert!(gateway.observe_connection_activity(&ConnectionId::new("conn-1"), AppServerTime(9),));
 
     assert!(gateway
         .expire_inactive_clients(AppServerTime(10))
         .is_empty());
+    assert!(gateway
+        .expire_inactive_clients(AppServerTime(19))
+        .is_empty());
     assert_eq!(
-        gateway.expire_inactive_clients(AppServerTime(19)),
+        gateway.expire_inactive_clients(AppServerTime(29)),
         vec![ClientExpiryOutcome::Expired {
             client_instance_id: ClientInstanceId::from("client-1"),
             last_client: true,
@@ -1507,7 +1515,10 @@ fn inactive_expiry_interrupts_client_scoped_requests() {
     let mut gateway = initialized_gateway("client-1", "conn-1");
     gateway.open_server_request(client_server_request("client-1"), AppServerTime(2));
 
-    let expired = gateway.expire_inactive_clients(AppServerTime(11));
+    assert!(gateway
+        .expire_inactive_clients(AppServerTime(11))
+        .is_empty());
+    let expired = gateway.expire_inactive_clients(AppServerTime(21));
 
     assert_eq!(
         expired,
@@ -1724,7 +1735,7 @@ fn gateway_with_project_context_and_store() -> (RpcGateway, Store) {
         ),
     );
     let gateway = RpcGateway::new(
-        ClientHub::new(10),
+        ClientHub::new(ClientLivenessPolicy::new(10, 10)),
         AppLifecycle::new(),
         StateStream::new(StateRootId::from("root-1")),
         ServerRequestRuntime::new(),
@@ -1762,7 +1773,7 @@ fn gateway_with_project_context_and_store() -> (RpcGateway, Store) {
 
 fn gateway_with_attachments(attachments: Arc<dyn AttachmentFileBrowserWorkflow>) -> RpcGateway {
     RpcGateway::new(
-        ClientHub::new(10),
+        ClientHub::new(ClientLivenessPolicy::new(10, 10)),
         AppLifecycle::new(),
         StateStream::new(StateRootId::from("root-1")),
         ServerRequestRuntime::new(),
@@ -1849,7 +1860,7 @@ fn gateway_with_agent_session_listing(
     agent_list_sessions: Arc<dyn AgentListSessionsWorkflow>,
 ) -> RpcGateway {
     RpcGateway::new(
-        ClientHub::new(10),
+        ClientHub::new(ClientLivenessPolicy::new(10, 10)),
         AppLifecycle::new(),
         StateStream::new(StateRootId::from("root-1")),
         ServerRequestRuntime::new(),
@@ -1888,7 +1899,7 @@ fn gateway_with_agent_authenticate(
     agent_authenticate: Arc<dyn AgentAuthenticateWorkflow>,
 ) -> RpcGateway {
     RpcGateway::new(
-        ClientHub::new(10),
+        ClientHub::new(ClientLivenessPolicy::new(10, 10)),
         AppLifecycle::new(),
         StateStream::new(StateRootId::from("root-1")),
         ServerRequestRuntime::new(),
@@ -2798,7 +2809,7 @@ impl TaskArchiveWorkflow for RejectingTaskArchive {
     }
 }
 
-fn initialized_gateway(client_id: &str, connection_id: &str) -> RpcGateway {
+pub(super) fn initialized_gateway(client_id: &str, connection_id: &str) -> RpcGateway {
     let mut gateway = gateway();
     gateway.handle_inbound(
         ConnectionId::new(connection_id),

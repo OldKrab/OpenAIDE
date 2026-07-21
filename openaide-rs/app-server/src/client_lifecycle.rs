@@ -131,17 +131,33 @@ struct ClientRecord {
     liveness_expires_at: AppServerTime,
 }
 
+/// Defines when a silent client becomes reconnecting and when reconnect grace ends.
+#[derive(Debug, Clone, Copy)]
+pub struct ClientLivenessPolicy {
+    reconnect_grace_ms: u64,
+    heartbeat_timeout_ms: u64,
+}
+
+impl ClientLivenessPolicy {
+    pub fn new(reconnect_grace_ms: u64, heartbeat_timeout_ms: u64) -> Self {
+        Self {
+            reconnect_grace_ms,
+            heartbeat_timeout_ms,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ClientHub {
-    reconnect_grace_ms: u64,
+    liveness_policy: ClientLivenessPolicy,
     clients: HashMap<ClientInstanceId, ClientRecord>,
     connections: HashMap<ConnectionId, ClientInstanceId>,
 }
 
 impl ClientHub {
-    pub fn new(reconnect_grace_ms: u64) -> Self {
+    pub fn new(liveness_policy: ClientLivenessPolicy) -> Self {
         Self {
-            reconnect_grace_ms,
+            liveness_policy,
             clients: HashMap::new(),
             connections: HashMap::new(),
         }
@@ -170,7 +186,9 @@ impl ClientHub {
             ClientRecord {
                 context: context.clone(),
                 reconnect_expires_at: None,
-                liveness_expires_at: AppServerTime(now.0 + self.reconnect_grace_ms),
+                liveness_expires_at: AppServerTime(
+                    now.0 + self.liveness_policy.heartbeat_timeout_ms,
+                ),
             },
         );
 
@@ -203,7 +221,7 @@ impl ClientHub {
         let Some(client_instance_id) = self.connections.remove(connection_id) else {
             return TransportClosedOutcome::UnknownConnection;
         };
-        let expires_at = AppServerTime(now.0 + self.reconnect_grace_ms);
+        let expires_at = AppServerTime(now.0 + self.liveness_policy.reconnect_grace_ms);
         if let Some(record) = self.clients.get_mut(&client_instance_id) {
             record.reconnect_expires_at = Some(expires_at);
         }
@@ -220,7 +238,8 @@ impl ClientHub {
     ) -> Option<ClientInstanceId> {
         let client_instance_id = self.connections.get(connection_id)?.clone();
         let record = self.clients.get_mut(&client_instance_id)?;
-        record.liveness_expires_at = AppServerTime(now.0 + self.reconnect_grace_ms);
+        record.liveness_expires_at =
+            AppServerTime(now.0 + self.liveness_policy.heartbeat_timeout_ms);
         Some(client_instance_id)
     }
 
@@ -250,16 +269,35 @@ impl ClientHub {
     }
 
     pub fn expire_inactive_clients(&mut self, now: AppServerTime) -> ClientExpiryBatch {
+        // Silence first removes transport authority and opens a fresh reconnect window.
+        // Actual client cleanup happens only after that grace period expires.
+        let entered_reconnect_grace = self
+            .clients
+            .iter()
+            .filter(|(_, record)| {
+                record.reconnect_expires_at.is_none() && now >= record.liveness_expires_at
+            })
+            .map(|(client_instance_id, _)| client_instance_id.clone())
+            .collect::<Vec<_>>();
+
+        for client_instance_id in &entered_reconnect_grace {
+            if let Some(record) = self.clients.get_mut(client_instance_id) {
+                record.reconnect_expires_at = Some(AppServerTime(
+                    now.0 + self.liveness_policy.reconnect_grace_ms,
+                ));
+            }
+            self.connections
+                .retain(|_, value| value != client_instance_id);
+        }
+
         let expired = self
             .clients
             .iter()
             .filter_map(|(client_instance_id, record)| {
-                let reconnect_expired = record
+                record
                     .reconnect_expires_at
-                    .map(|expires_at| now >= expires_at)
-                    .unwrap_or(false);
-                let liveness_expired = now >= record.liveness_expires_at;
-                (reconnect_expired || liveness_expired).then(|| client_instance_id.clone())
+                    .filter(|expires_at| now >= *expires_at)
+                    .map(|_| client_instance_id.clone())
             })
             .collect::<Vec<_>>();
 
