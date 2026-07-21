@@ -27,9 +27,12 @@ The worker drafts only the affected Task and does not hold the root projection
 lock during file I/O; unrelated reads and commit cost do not scale with every
 stored Chat history.
 
-Existing file-backed Tasks are not migrated. Their Native Sessions appear as
-unadopted sessions and may be adopted into fresh Tasks. Legacy bytes are not
-silently deleted.
+Existing file-backed Tasks are not migrated. After the journal store opens
+successfully, App Server removes the unsupported `<state-root>/tasks` store
+without deleting Agents, settings, worktrees, diagnostics, or Agent-owned
+Native Sessions. Cleanup failure is logged without blocking startup and is
+retried whenever the legacy directory is present on a later start. Native
+Sessions may still appear as unadopted sessions and be adopted into fresh Tasks.
 
 ## Normalized Operations And Admission
 

@@ -91,6 +91,53 @@ fn blocked_store_open_does_not_create_product_dirs() {
 }
 
 #[test]
+fn successful_journal_start_removes_only_unsupported_legacy_task_storage() {
+    let dir = tempfile::tempdir().unwrap();
+    let legacy_task = dir.path().join("tasks/task-old");
+    std::fs::create_dir_all(legacy_task.join("tool-artifacts")).unwrap();
+    std::fs::write(legacy_task.join("task.json"), b"legacy task").unwrap();
+    std::fs::write(legacy_task.join("messages.jsonl"), b"legacy chat").unwrap();
+    std::fs::write(
+        legacy_task.join("tool-artifacts/tool-old.json"),
+        b"legacy tool",
+    )
+    .unwrap();
+    let agent_sentinel = dir.path().join("agents/catalog.json");
+    std::fs::create_dir_all(agent_sentinel.parent().unwrap()).unwrap();
+    std::fs::write(&agent_sentinel, b"preserve agent state").unwrap();
+
+    let _store = Store::open(dir.path().to_path_buf()).unwrap();
+
+    assert!(!dir.path().join("tasks").exists());
+    assert_eq!(
+        std::fs::read(agent_sentinel).unwrap(),
+        b"preserve agent state"
+    );
+    assert!(dir.path().join("task-store-v1/tasks").is_dir());
+}
+
+#[cfg(unix)]
+#[test]
+fn legacy_cleanup_failure_does_not_block_journal_start() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let legacy_tasks = dir.path().join("tasks");
+    std::fs::create_dir_all(legacy_tasks.join("task-old")).unwrap();
+    std::fs::write(legacy_tasks.join("task-old/task.json"), b"legacy task").unwrap();
+    std::fs::set_permissions(&legacy_tasks, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+    let opened = Store::open(dir.path().to_path_buf());
+
+    assert!(
+        opened.is_ok(),
+        "obsolete-file permissions must not block startup"
+    );
+    assert!(legacy_tasks.exists(), "failed cleanup is retried later");
+    std::fs::set_permissions(&legacy_tasks, std::fs::Permissions::from_mode(0o700)).unwrap();
+}
+
+#[test]
 fn diagnostics_include_redacted_active_task_session_state() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path().to_path_buf()).unwrap();

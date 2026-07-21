@@ -2,6 +2,7 @@ pub mod app_preferences;
 pub mod atomic;
 pub mod cursor;
 pub mod id;
+mod legacy_task_cleanup;
 pub mod message_store;
 pub mod new_task_defaults;
 pub mod records;
@@ -77,7 +78,6 @@ impl From<StoreOpenError> for RuntimeError {
 impl Store {
     pub fn open(root: PathBuf) -> Result<Self, StoreOpenError> {
         let open = StorageOpenGuard::open(&root)?;
-        std::fs::create_dir_all(root.join("tasks"))?;
         std::fs::create_dir_all(root.join("diagnostics"))?;
         std::fs::create_dir_all(root.join("agents"))?;
         std::fs::create_dir_all(root.join("settings"))?;
@@ -85,6 +85,7 @@ impl Store {
         let (task_journal, initial_commit_events) =
             task_journal::TaskJournalStore::open(root.clone())
                 .map_err(|error| StoreOpenError::TaskStorage(error.to_string()))?;
+        legacy_task_cleanup::remove_after_journal_start(&root);
         let task_commit_handler = Arc::new(RwLock::new(None::<TaskCommitHandler>));
         let task_commit_dispatch_stop = Arc::new(RuntimeAtomicBool::new(false));
         let worker_handler = task_commit_handler.clone();
