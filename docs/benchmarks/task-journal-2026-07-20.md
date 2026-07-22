@@ -69,6 +69,17 @@ startup against the same copy reached them after 6 ms. Both published handoff
 within the existing five-second wrapper deadline; the real Driver root was not
 opened by the benchmark.
 
+## Target-State Startup Check
+
+The real disposable Target contained 28 Tasks and 70.16 MiB of Task journals,
+including individual 44.32 MiB and 15.47 MiB histories. Its first deployment
+exposed a remaining eager path: restart recovery loaded every Task before
+checking whether its catalog metadata required recovery, so the five-second web
+handoff still timed out. After moving that eligibility check ahead of hydration,
+the same Target completed web handoff in 65 ms. Opening the 44.32 MiB Task then
+paid its replay cost on demand; the browser rendered its Chat and expanded a
+saved Tool detail with no console errors or warnings.
+
 ## Interpretation And Limits
 
 The comparison intentionally bounds the legacy run: running all 10,002 updates

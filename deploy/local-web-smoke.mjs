@@ -42,18 +42,17 @@ async function runSmoke() {
     ?? initialized.snapshot?.agents?.agents?.[0]?.agentId;
   if (!agentId) throw new Error("no agent is available");
 
-  const created = await request("task/create", { projectId, agentId });
+  const created = await request("task/acquire", { projectId, agentId });
   taskId = created.task?.task?.taskId;
-  const revision = created.task?.revision;
-  if (!taskId || !Number.isInteger(revision)) {
-    throw new Error("task/create returned an invalid task snapshot");
+  if (!taskId) {
+    throw new Error("task/acquire returned an invalid task snapshot");
   }
+  await waitUntilTaskSendReady(created.task);
 
   const sent = await request(
     "task/send",
     {
       taskId,
-      taskRevision: revision,
       message: { text: prompt, attachments: [] },
     },
     sendTimeoutMs,
@@ -61,6 +60,19 @@ async function runSmoke() {
   turnId = sent.turnId;
   if (!turnId || !sent.userMessageId) {
     throw new Error("task/send returned an invalid send result");
+  }
+}
+
+async function waitUntilTaskSendReady(initialSnapshot) {
+  const deadline = Date.now() + sendTimeoutMs;
+  let snapshot = initialSnapshot;
+  while (snapshot?.sendCapability?.state !== "ready") {
+    if (Date.now() >= deadline) {
+      throw new Error(`task/acquire did not become send-ready within ${sendTimeoutMs}ms`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const opened = await request("task/open", { taskId }, Math.min(5_000, deadline - Date.now()));
+    snapshot = opened.task;
   }
 }
 

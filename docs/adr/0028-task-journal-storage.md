@@ -85,6 +85,9 @@ Task cannot be replayed against a simultaneous append. Existing journals are
 replayed once to create their first catalog; later starts remain proportional
 to catalog size rather than retained Chat size. A stale catalog discovered
 after an interrupted journal/cache publication is repaired from the journal.
+Restart recovery first derives its eligibility plan from catalog metadata and
+hydrates only Tasks with volatile state to repair; stable Tasks must not be
+replayed merely to prove that no recovery is required.
 
 At an idle prompt boundary, the worker may compact a Task journal whose obsolete
 record count or byte ratio crosses a measured threshold. Compaction writes and
@@ -185,6 +188,7 @@ The replacement does not cut over until all of the following pass:
 
 - deterministic replay matches an independent reference model;
 - startup and Task Navigation do not read cataloged Chat or artifact journals;
+- restart recovery rejects stable Tasks from catalog metadata before hydration;
 - first Task access replays only that Task, and first Tool-detail access
   reconciles only that artifact under concurrent read/write stress;
 - restart fault injection covers every write, sync, artifact-reference, and
