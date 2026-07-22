@@ -253,16 +253,20 @@ fn benchmark_journal(history_bytes: usize, operations: usize) -> serde_json::Val
     let disk_bytes_after_compaction = directory_bytes(root.path());
     store.shutdown().expect("close journal");
 
-    let replay_started = Instant::now();
+    let startup_started = Instant::now();
     let (reopened, _commits) =
         TaskJournalStore::open(root.path().to_path_buf()).expect("replay journal");
-    let replay_ms = replay_started.elapsed().as_secs_f64() * 1000.0;
+    let startup_ms = startup_started.elapsed().as_secs_f64() * 1000.0;
+    let task_load_started = Instant::now();
+    reopened.load("task_journal").expect("lazy-load Task");
+    let task_load_ms = task_load_started.elapsed().as_secs_f64() * 1000.0;
+    let artifact_load_started = Instant::now();
+    let replayed_output = reopened
+        .load_tool_artifact("task_journal", "artifact_execute_1")
+        .expect("lazy-load output");
+    let artifact_load_ms = artifact_load_started.elapsed().as_secs_f64() * 1000.0;
     assert_eq!(
-        reopened
-            .load_tool_artifact("task_journal", "artifact_execute_1")
-            .expect("replay output")
-            .terminal_outputs["terminal_1"]
-            .len(),
+        replayed_output.terminal_outputs["terminal_1"].len(),
         PROFILE_OUTPUT_BYTES
     );
     reopened.shutdown().expect("close replayed journal");
@@ -298,7 +302,9 @@ fn benchmark_journal(history_bytes: usize, operations: usize) -> serde_json::Val
         "disk_bytes_before_compaction": disk_bytes_before_compaction,
         "disk_bytes_after_compaction": disk_bytes_after_compaction,
         "compaction_ms": compaction_ms,
-        "replay_ms": replay_ms,
+        "startup_ms": startup_ms,
+        "task_load_ms": task_load_ms,
+        "artifact_load_ms": artifact_load_ms,
         "task_revision": 1,
     })
 }

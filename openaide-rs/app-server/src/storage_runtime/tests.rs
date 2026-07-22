@@ -148,6 +148,7 @@ fn endpoint_record(fingerprint: &StateRootFingerprint) -> RuntimeEndpointRecord 
         app_version: "0.1.0".to_string(),
         status: RuntimeEndpointRecordStatus::Running,
         auth_token: "token".to_string(),
+        replacement_token: Some("replacement-token".to_string()),
         endpoints: vec![RuntimeEndpoint {
             transport: TransportKind::LocalHttp,
             address: "http://127.0.0.1:12345".to_string(),

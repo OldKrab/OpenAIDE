@@ -3,6 +3,7 @@ import {
   AppServerProtocolError,
   ATTACHMENT_CREATE_LOCAL_FILE_REFERENCES,
   CLIENT_CAPABILITIES_CHANGED,
+  CLIENT_DETACH,
   CLIENT_INITIALIZE,
   TASK_OPEN,
   type ReliableHttpFetch,
@@ -114,6 +115,25 @@ describe("AppServerHostClient", () => {
     expect(jsonRpcCalls(fetch)[1]).toMatchObject({
       method: CLIENT_CAPABILITIES_CHANGED,
       params: { workspaceRoots: [] },
+    });
+  });
+
+  it("explicitly detaches the VS Code host before closing its connection", async () => {
+    const fetch = fetchSequence([
+      [response("rpc-1", { result: initializeResult() })],
+      [response("rpc-2", { result: {} })],
+    ]);
+    vi.stubGlobal("fetch", fetch);
+    client = new AppServerHostClient(providerReturningConnection());
+    await client.syncWorkspaceRoots([{ path: "/workspace/app" }]);
+
+    await client.close();
+
+    expect(jsonRpcCalls(fetch)[1]).toEqual({
+      jsonrpc: "2.0",
+      id: "rpc-2",
+      method: CLIENT_DETACH,
+      params: {},
     });
   });
 

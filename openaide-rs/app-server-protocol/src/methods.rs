@@ -20,9 +20,9 @@ use crate::attachment::{
     AttachmentRevealResult, AttachmentRevealSentParams, AttachmentRevealSentResult,
 };
 use crate::client::{
-    ClientCapabilitiesChangedParams, ClientCapabilitiesChangedResult, ClientHeartbeatParams,
-    ClientHeartbeatResult, ClientProbeParams, ClientProbeResult, InitializeParams,
-    InitializeResult,
+    ClientCapabilitiesChangedParams, ClientCapabilitiesChangedResult, ClientDetachParams,
+    ClientDetachResult, ClientHeartbeatParams, ClientHeartbeatResult, ClientProbeParams,
+    ClientProbeResult, InitializeParams, InitializeResult,
 };
 use crate::diagnostics::{RuntimeDiagnosticsParams, RuntimeDiagnosticsResult};
 use crate::envelopes::{ClientRequestEnvelope, RequestMeta, ResponseEnvelope, ResponseMeta};
@@ -124,6 +124,12 @@ protocol_method!(
     CLIENT_HEARTBEAT,
     ClientHeartbeatParams,
     ClientHeartbeatResult
+);
+protocol_method!(
+    ClientDetach,
+    CLIENT_DETACH,
+    ClientDetachParams,
+    ClientDetachResult
 );
 protocol_method!(
     PendingRequestResolve,

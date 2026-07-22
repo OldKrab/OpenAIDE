@@ -13,8 +13,8 @@ Run it with:
 cargo test -p openaide-app-server --release --test task_storage_benchmark -- --ignored --nocapture
 ```
 
-Environment: Linux 6.12.74, Rust/Cargo 1.96.0, `/tmp` on tmpfs. Cutover base
-`4f13bf3`; measurements refreshed on 2026-07-21. Results are local engineering
+Environment: Linux 6.12.74, Rust/Cargo 1.96.0, `/tmp` on ext4. Cutover base
+`4f13bf3`; measurements refreshed on 2026-07-22. Results are local engineering
 measurements, not a hardware-independent performance contract. These results
 are from the release run after durable-receipt latency and sync-call
 instrumentation were added.
@@ -23,38 +23,51 @@ instrumentation were added.
 
 | Store/workload | Wall time | p50 | p95 | max | Physical frame bytes |
 |---|---:|---:|---:|---:|---:|
-| Legacy model, 16 updates, 4 MiB | 303.12 ms | 17.22 ms | 24.37 ms | 26.00 ms | 64.0 MiB |
-| Legacy model, 64 updates, 4 MiB | 897.27 ms | 13.49 ms | 17.27 ms | 20.19 ms | 256.0 MiB |
-| Legacy model, 256 updates, 4 MiB | 3,621.61 ms | 13.69 ms | 19.48 ms | 22.31 ms | 1.0 GiB |
-| Journal, 10,002 updates, 64 KiB | 118.20 ms | 24.58 ms durable | 49.78 ms durable | 54.56 ms durable | 384,085 B |
-| Journal, 10,002 updates, 1 MiB | 119.71 ms | 28.88 ms durable | 52.17 ms durable | 56.39 ms durable | 384,085 B |
-| Journal, 10,002 updates, 4 MiB | 125.86 ms | 30.24 ms durable | 60.40 ms durable | 64.89 ms durable | 384,085 B |
+| Legacy model, 16 updates, 4 MiB | 302.92 ms | 17.86 ms | 19.40 ms | 24.75 ms | 64.0 MiB |
+| Legacy model, 64 updates, 4 MiB | 952.97 ms | 14.27 ms | 18.27 ms | 23.02 ms | 256.0 MiB |
+| Legacy model, 256 updates, 4 MiB | 3,774.88 ms | 14.39 ms | 16.97 ms | 23.07 ms | 1.0 GiB |
+| Journal, 10,002 updates, 64 KiB | 126.27 ms | 23.72 ms durable | 55.97 ms durable | 61.07 ms durable | 384,086 B |
+| Journal, 10,002 updates, 1 MiB | 174.59 ms | 53.90 ms durable | 102.53 ms durable | 107.65 ms durable | 384,086 B |
+| Journal, 10,002 updates, 4 MiB | 156.46 ms | 44.97 ms durable | 88.19 ms durable | 93.38 ms durable | 384,085 B |
 
 The bounded legacy samples are linear at about 14–20 ms and 4 MiB serialized per
 update after warmup. Extrapolating that measured slope to 10,002 updates gives
 about 140–200 seconds and 39.1 GiB written. The complete 4 MiB journal case is
-126 ms, roughly 1,100 times faster than that projection, while its append
+156 ms, roughly 900 times faster than that projection, while its append
 frames add 384,085 bytes for 372,861 logical output bytes.
 
 Every journal size produced 40 durable batches, 40 commit-publication events,
 and 40 coalesced terminal-append events. The instrumented workload observed 82
 durability sync calls: the new artifact directory is anchored and synced, then
 each batch syncs artifact and Task-journal files. The final same-Task durability
-barrier, deliberately submitted behind the complete flood, took 54.53 ms at 64
-KiB, 56.34 ms at 1 MiB, and 64.82 ms at 4 MiB. Shutdown drain of an identical
-flood took 83.10 ms, 71.90 ms, and 114.28 ms, with restart proving every admitted byte.
+barrier, deliberately submitted behind the complete flood, took 60.99 ms at 64
+KiB, 107.56 ms at 1 MiB, and 93.29 ms at 4 MiB. Shutdown drain of an identical
+flood took 116.33 ms, 98.56 ms, and 127.41 ms, with restart proving every admitted byte.
 Separately, production Stop—including the durable `stopping` transition and
-Agent cancellation dispatch—took 2.35–2.72 ms. Protocol publication is covered
+Agent cancellation dispatch—took 3.87–4.40 ms. Protocol publication is covered
 by the runtime contract suite rather than this disabled-notifier timing fixture. Peak retained
-same-Task/global queue payload stayed between 563,730 B and 629,778 B, below
+same-Task/global queue payload stayed between 563,730 B and 794,898 B, below
 the 2 MiB per-Task bound.
 
-Compaction took 5.09 ms, 16.47 ms, and 51.70 ms respectively. Restart replay
-after compaction took 43.06 ms, 52.68 ms, and 73.96 ms while also recovering 16
-unrelated Tasks with 256 KiB histories. All 372,861 output bytes replayed
-exactly once, and the Task revision remained 1. The 4 MiB state root used
-8,790,808 bytes before compaction and 8,784,828 bytes afterward, including the
-4 MiB unrelated-history fixture.
+Compaction took 6.35 ms, 24.40 ms, and 54.09 ms respectively. Catalog-only
+startup took 1.39 ms, 2.03 ms, and 1.69 ms while listing 16 unrelated Tasks with
+256 KiB histories. First access to the selected Task then replayed only its Chat
+in 0.51 ms, 13.59 ms, and 19.80 ms. First access to its Tool detail reconciled
+only that artifact in 3.59 ms, 10.27 ms, and 3.92 ms. All 372,861 output bytes
+replayed exactly once, and the Task revision remained 1. The 4 MiB state root
+used 8,803,845 bytes before compaction and 8,797,865 bytes afterward, including
+the 4 MiB unrelated-history fixture and catalog projections.
+
+## Driver-State Startup Check
+
+The production failure involved six Tasks, 8.49 MiB of Task journals, and 1,817
+Tool-artifact journals totaling 78.98 MiB. The previous startup reached its
+storage workers after 7,249 ms because it scanned every artifact. A bounded run
+of the new binary against an isolated reflink copy of those exact bytes reached
+the workers after 743 ms while creating the six missing catalogs. A second
+startup against the same copy reached them after 6 ms. Both published handoff
+within the existing five-second wrapper deadline; the real Driver root was not
+opened by the benchmark.
 
 ## Interpretation And Limits
 
@@ -71,7 +84,7 @@ compaction, exact replay,
 publication counts, observed queue high-water marks, and directory-size
 measurement at three Task sizes plus 16 unrelated historical Tasks. Journal
 percentiles measure admission-to-durable-receipt latency; admission alone was
-0.0043 ms p50 and 0.0057–0.0075 ms p95. “Physical frame bytes” is the exact retained
+0.0043–0.0047 ms p50 and 0.0075–0.0085 ms p95. “Physical frame bytes” is the exact retained
 file-byte growth (or bytes passed to the legacy replacement writes), not a
 kernel/block-device counter. Sync counts come from instrumentation around each
 exercised durability call; individual sync-call latency is not separately

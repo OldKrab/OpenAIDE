@@ -3,12 +3,17 @@ use std::time::Duration;
 
 use thiserror::Error;
 
+use super::replacement::{request_local_http_replacement, ReplacementRequestOutcome};
 use super::runner::{
     AttachOrLaunchRequirements, AttachOrLaunchRunError, AttachOrLaunchRunResult,
     AttachOrLaunchRunner,
 };
 use super::{AttachOrLaunchFailure, EndpointTarget, StorageWriterState};
 use crate::storage_runtime::{RuntimeLock, StateRootFingerprint};
+
+// The release immediately before authenticated replacement support needs its existing
+// 30-second heartbeat timeout plus 10-second reconnect grace to stop without a PID kill.
+const LEGACY_REPLACEMENT_MAX_WAIT_ATTEMPTS: usize = 200;
 
 pub trait LaunchWaiter {
     fn wait_for_launch_progress(&mut self, lock_path: &Path) -> Result<(), LaunchWaitError>;
@@ -93,6 +98,24 @@ impl AttachOrLaunchHandoff {
                 AttachOrLaunchRunResult::Fail { reason } => {
                     return Ok(LaunchHandoffResult::Fail { reason });
                 }
+                AttachOrLaunchRunResult::ReplaceIncompatible { target, reason } => {
+                    let replacement = request_local_http_replacement(&target)?;
+                    let max_wait_attempts = match replacement {
+                        ReplacementRequestOutcome::AwaitLegacyShutdown => {
+                            LEGACY_REPLACEMENT_MAX_WAIT_ATTEMPTS
+                        }
+                        ReplacementRequestOutcome::Accepted
+                        | ReplacementRequestOutcome::Unreachable => self.policy.max_wait_attempts,
+                    };
+                    if wait_attempts >= max_wait_attempts {
+                        return Err(LaunchHandoffError::ReplacementStillStopping {
+                            server_id: target.server_id,
+                            reason,
+                        });
+                    }
+                    waiter.wait_for_launch_progress(self.runner.launch_lock_path())?;
+                    wait_attempts += 1;
+                }
                 AttachOrLaunchRunResult::WaitForLaunch { lock_path } => {
                     if wait_attempts >= self.policy.max_wait_attempts {
                         return Err(LaunchHandoffError::LaunchStillInProgress { lock_path });
@@ -118,8 +141,15 @@ pub enum LaunchHandoffError {
     AttachOrLaunch(#[from] AttachOrLaunchRunError),
     #[error(transparent)]
     Wait(#[from] LaunchWaitError),
+    #[error(transparent)]
+    Replacement(#[from] super::replacement::ReplacementRequestError),
     #[error("App Server launch is still in progress: {lock_path}")]
     LaunchStillInProgress { lock_path: PathBuf },
+    #[error("incompatible App Server {server_id} is still stopping after replacement request ({reason:?})")]
+    ReplacementStillStopping {
+        server_id: String,
+        reason: AttachOrLaunchFailure,
+    },
 }
 
 #[cfg(test)]

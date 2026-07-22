@@ -11,6 +11,7 @@ import type {
 } from "@openaide/app-server-client";
 import {
   createProtocolTaskSnapshotMapper,
+  AppServerCompatibilityError,
   mapProtocolConfigOptions,
   mapProtocolAgentCommands,
   mapProtocolTaskNavigation,
@@ -20,6 +21,15 @@ import {
 import { renderedChat } from "./chatPaging";
 
 describe("App Server Protocol state mapping", () => {
+  it("reports an actionable compatibility error for a previous task-list schema", () => {
+    expect(() => mapProtocolTaskNavigation({ tasks: [] } as never)).toThrow(
+      AppServerCompatibilityError,
+    );
+    expect(() => mapProtocolTaskNavigation({ tasks: [] } as never)).toThrow(
+      "Reload the VS Code window",
+    );
+  });
+
   it("maps task navigation summaries into current frontend task summaries", () => {
     expect(mapProtocolTaskNavigation({
       activeTaskId: "task-1" as TaskId,

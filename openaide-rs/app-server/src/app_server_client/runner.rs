@@ -51,6 +51,10 @@ impl AttachOrLaunchRunner {
         }
     }
 
+    pub(crate) fn launch_lock_path(&self) -> &std::path::Path {
+        &self.launch_lock_path
+    }
+
     pub fn run<P: EndpointProber>(
         &self,
         fingerprint: &StateRootFingerprint,
@@ -192,6 +196,11 @@ impl AttachOrLaunchRunner {
             AttachOrLaunchDecision::AttachExisting { target } => Ok(EndpointDecisionResult::Done(
                 AttachOrLaunchRunResult::AttachExisting { target },
             )),
+            AttachOrLaunchDecision::ReplaceIncompatible { target, reason } => {
+                Ok(EndpointDecisionResult::Done(
+                    AttachOrLaunchRunResult::ReplaceIncompatible { target, reason },
+                ))
+            }
             AttachOrLaunchDecision::CleanStaleEndpoint { target, .. } => {
                 if self.remove_if_current_target(fingerprint, &target)? {
                     Ok(EndpointDecisionResult::RetryAfterCleanup)
@@ -224,10 +233,22 @@ impl AttachOrLaunchRunner {
 
 #[derive(Debug)]
 pub enum AttachOrLaunchRunResult {
-    AttachExisting { target: EndpointTarget },
-    LaunchNew { lock: RuntimeLock },
-    WaitForLaunch { lock_path: PathBuf },
-    Fail { reason: AttachOrLaunchFailure },
+    AttachExisting {
+        target: EndpointTarget,
+    },
+    LaunchNew {
+        lock: RuntimeLock,
+    },
+    WaitForLaunch {
+        lock_path: PathBuf,
+    },
+    ReplaceIncompatible {
+        target: EndpointTarget,
+        reason: AttachOrLaunchFailure,
+    },
+    Fail {
+        reason: AttachOrLaunchFailure,
+    },
 }
 
 enum EndpointDecisionResult {
@@ -261,6 +282,7 @@ fn target_matches_record(
         && target.protocol_version == record.protocol_version
         && target.app_version == record.app_version
         && target.auth_token == record.auth_token
+        && target.replacement_token == record.replacement_token
         && target.endpoints == record.endpoints
 }
 

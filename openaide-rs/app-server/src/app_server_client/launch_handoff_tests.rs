@@ -39,6 +39,62 @@ fn compatible_endpoint_attaches_without_waiting() {
 }
 
 #[test]
+fn incompatible_server_with_replacement_endpoint_stops_then_launches_replacement() {
+    let fixture = Fixture::new();
+    let dispatcher = ProtocolEdgeStdioDispatcher::new_for_test(fixture.state_root.clone());
+    let published = crate::app_server_process::publish_local_http_probe_endpoint(
+        dispatcher.shared_gateway(),
+        &fixture.state_root,
+        fixture.runtime_dir.path(),
+    )
+    .unwrap();
+    let mut waiter = RemoveIncompatibleEndpointAfterWait {
+        published: Some(published),
+        calls: 0,
+    };
+
+    let result = fixture
+        .run_requiring_app_version("next-release", &mut waiter)
+        .unwrap();
+
+    assert!(matches!(result, LaunchHandoffResult::LaunchNew { .. }));
+    assert_eq!(waiter.calls, 1);
+}
+
+#[test]
+fn legacy_release_without_replacement_endpoint_waits_for_liveness_shutdown() {
+    let fixture = Fixture::new();
+    let dispatcher = ProtocolEdgeStdioDispatcher::new_for_test(fixture.state_root.clone());
+    let published = crate::app_server_process::publish_local_http_probe_endpoint(
+        dispatcher.shared_gateway(),
+        &fixture.state_root,
+        fixture.runtime_dir.path(),
+    )
+    .unwrap();
+    let mut legacy_record = fixture
+        .endpoint_records
+        .read(fixture.state_root.fingerprint())
+        .unwrap()
+        .expect("published endpoint");
+    legacy_record.replacement_token = None;
+    fixture
+        .endpoint_records
+        .write(fixture.state_root.fingerprint(), &legacy_record)
+        .unwrap();
+    let mut waiter = RemoveIncompatibleEndpointAfterWait {
+        published: Some(published),
+        calls: 0,
+    };
+
+    let result = fixture
+        .run_requiring_app_version("next-release", &mut waiter)
+        .unwrap();
+
+    assert!(matches!(result, LaunchHandoffResult::LaunchNew { .. }));
+    assert_eq!(waiter.calls, 1);
+}
+
+#[test]
 fn busy_launch_lock_waits_then_retries_endpoint_probe() {
     let fixture = Fixture::new();
     let held_lock = acquire_launch_lock(&fixture);
@@ -113,6 +169,34 @@ impl Fixture {
         &self,
         waiter: &mut W,
     ) -> Result<LaunchHandoffResult, LaunchHandoffError> {
+        self.run_requiring_protocol(APP_SERVER_PROTOCOL_VERSION, waiter)
+    }
+
+    fn run_requiring_protocol<W: LaunchWaiter>(
+        &self,
+        required_protocol_version: &str,
+        waiter: &mut W,
+    ) -> Result<LaunchHandoffResult, LaunchHandoffError> {
+        let handoff = AttachOrLaunchHandoff::new(
+            AttachOrLaunchRunner::new(self.endpoint_records.clone(), &self.launch_lock_path),
+            self.policy,
+        );
+        handoff.run(
+            self.state_root.fingerprint(),
+            &AttachOrLaunchRequirements {
+                required_protocol_version: required_protocol_version.to_string(),
+                required_app_version: env!("CARGO_PKG_VERSION").to_string(),
+            },
+            StorageWriterState::Available,
+            waiter,
+        )
+    }
+
+    fn run_requiring_app_version<W: LaunchWaiter>(
+        &self,
+        required_app_version: &str,
+        waiter: &mut W,
+    ) -> Result<LaunchHandoffResult, LaunchHandoffError> {
         let handoff = AttachOrLaunchHandoff::new(
             AttachOrLaunchRunner::new(self.endpoint_records.clone(), &self.launch_lock_path),
             self.policy,
@@ -121,11 +205,24 @@ impl Fixture {
             self.state_root.fingerprint(),
             &AttachOrLaunchRequirements {
                 required_protocol_version: APP_SERVER_PROTOCOL_VERSION.to_string(),
-                required_app_version: env!("CARGO_PKG_VERSION").to_string(),
+                required_app_version: required_app_version.to_string(),
             },
             StorageWriterState::Available,
             waiter,
         )
+    }
+}
+
+struct RemoveIncompatibleEndpointAfterWait {
+    published: Option<crate::app_server_process::PublishedAppServerEndpoint>,
+    calls: usize,
+}
+
+impl LaunchWaiter for RemoveIncompatibleEndpointAfterWait {
+    fn wait_for_launch_progress(&mut self, _lock_path: &Path) -> Result<(), LaunchWaitError> {
+        self.calls += 1;
+        self.published.take();
+        Ok(())
     }
 }
 

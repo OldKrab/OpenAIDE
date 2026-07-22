@@ -208,7 +208,7 @@ fn run_protocol_edge_stdio(storage_root: PathBuf, startup: ProtocolEdgeStartup) 
         ProtocolEdgeStartup::Plain => protocol_edge_process::run_stdio(dispatcher),
         ProtocolEdgeStartup::LocalHttpHandoff => {
             protocol_edge_process::run_local_http_handoff(dispatcher, || {
-                if let Err(error) = published_endpoint.shutdown_after_last_client() {
+                if let Err(error) = published_endpoint.shutdown_when_requested() {
                     openaide_app_server::logging::error(
                         "local_http_last_client_shutdown_failed",
                         serde_json::json!({ "error": error.to_string() }),

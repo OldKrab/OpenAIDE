@@ -4,6 +4,7 @@ use crate::storage_runtime::{RuntimeEndpoint, RuntimeEndpointRecord, RuntimeEndp
 
 pub mod launch_handoff;
 pub mod probe;
+pub(crate) mod replacement;
 pub mod runner;
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -44,6 +45,7 @@ pub struct EndpointTarget {
     pub protocol_version: String,
     pub app_version: String,
     pub auth_token: String,
+    pub replacement_token: Option<String>,
     pub endpoints: Vec<RuntimeEndpoint>,
 }
 
@@ -56,6 +58,7 @@ impl fmt::Debug for EndpointTarget {
             .field("protocol_version", &self.protocol_version)
             .field("app_version", &self.app_version)
             .field("auth_token", &"<redacted>")
+            .field("replacement_token", &"<redacted>")
             .field("endpoints", &self.endpoints)
             .finish()
     }
@@ -94,6 +97,10 @@ pub enum AttachOrLaunchDecision {
     CleanStaleEndpoint {
         target: EndpointTarget,
         reason: StaleEndpointReason,
+    },
+    ReplaceIncompatible {
+        target: EndpointTarget,
+        reason: AttachOrLaunchFailure,
     },
     Fail {
         reason: AttachOrLaunchFailure,
@@ -160,12 +167,18 @@ impl AttachOrLaunchDecider {
                 EndpointProbeOutcome::Compatible => {
                     AttachOrLaunchDecision::AttachExisting { target }
                 }
-                EndpointProbeOutcome::IncompatibleProtocol => AttachOrLaunchDecision::Fail {
-                    reason: AttachOrLaunchFailure::IncompatibleProtocol,
-                },
-                EndpointProbeOutcome::IncompatibleApp => AttachOrLaunchDecision::Fail {
-                    reason: AttachOrLaunchFailure::IncompatibleApp,
-                },
+                EndpointProbeOutcome::IncompatibleProtocol => {
+                    AttachOrLaunchDecision::ReplaceIncompatible {
+                        target,
+                        reason: AttachOrLaunchFailure::IncompatibleProtocol,
+                    }
+                }
+                EndpointProbeOutcome::IncompatibleApp => {
+                    AttachOrLaunchDecision::ReplaceIncompatible {
+                        target,
+                        reason: AttachOrLaunchFailure::IncompatibleApp,
+                    }
+                }
                 EndpointProbeOutcome::AuthFailed => AttachOrLaunchDecision::Fail {
                     reason: AttachOrLaunchFailure::AuthOrPermissionFailure,
                 },
@@ -209,6 +222,7 @@ fn target(endpoint: &RuntimeEndpointRecord) -> EndpointTarget {
         protocol_version: endpoint.protocol_version.clone(),
         app_version: endpoint.app_version.clone(),
         auth_token: endpoint.auth_token.clone(),
+        replacement_token: endpoint.replacement_token.clone(),
         endpoints: endpoint.endpoints.clone(),
     }
 }

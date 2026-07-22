@@ -133,6 +133,109 @@ fn published_local_http_endpoint_accepts_next_request_while_one_connection_is_sl
     assert!(response.starts_with("HTTP/1.1 200 OK\r\n"));
 }
 
+#[test]
+fn private_replacement_credential_gracefully_stops_published_endpoint() {
+    let state_dir = tempfile::TempDir::new().expect("state dir");
+    let runtime_dir = tempfile::TempDir::new().expect("runtime dir");
+    let state_root = StateRoot::resolve(state_dir.path()).expect("state root");
+    let dispatcher = ProtocolEdgeStdioDispatcher::new_for_test(state_root.clone());
+    let endpoint_records = EndpointRecordStore::new(runtime_dir.path());
+    let published = publish_local_http_probe_endpoint(
+        dispatcher.shared_gateway(),
+        &state_root,
+        runtime_dir.path(),
+    )
+    .expect("publish endpoint");
+    let record = endpoint_records
+        .read(state_root.fingerprint())
+        .unwrap()
+        .expect("endpoint record");
+    let request = json!({
+        "jsonrpc": "2.0",
+        "id": "app_server_replace",
+        "method": "appServer/replace",
+        "params": {}
+    })
+    .to_string();
+
+    let webview_attempt = post_json(
+        &record.endpoints[0].address,
+        &record.auth_token,
+        None,
+        &request,
+    );
+    assert!(webview_attempt.starts_with("HTTP/1.1 403 Forbidden\r\n"));
+    let replacement = post_json(
+        &record.endpoints[0].address,
+        record
+            .replacement_token
+            .as_deref()
+            .expect("replacement token"),
+        None,
+        &request,
+    );
+    assert!(replacement.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(matches!(
+        published.shutdown_when_requested().unwrap(),
+        crate::app_lifecycle::ShutdownCompletion::CleanRelease
+    ));
+}
+
+#[test]
+fn explicit_last_vscode_detach_gracefully_stops_published_endpoint() {
+    let state_dir = tempfile::TempDir::new().expect("state dir");
+    let runtime_dir = tempfile::TempDir::new().expect("runtime dir");
+    let state_root = StateRoot::resolve(state_dir.path()).expect("state root");
+    let dispatcher = ProtocolEdgeStdioDispatcher::new_for_test(state_root.clone());
+    let endpoint_records = EndpointRecordStore::new(runtime_dir.path());
+    let published = publish_local_http_probe_endpoint(
+        dispatcher.shared_gateway(),
+        &state_root,
+        runtime_dir.path(),
+    )
+    .expect("publish endpoint");
+    let record = endpoint_records
+        .read(state_root.fingerprint())
+        .unwrap()
+        .expect("endpoint record");
+
+    let initialized = post_json(
+        &record.endpoints[0].address,
+        &record.auth_token,
+        Some("vscode-connection-1"),
+        &json!({
+            "jsonrpc": "2.0",
+            "id": "initialize-host",
+            "method": "client/initialize",
+            "params": {
+                "clientInstanceId": "vscode-host-1",
+                "shell": { "kind": "vscodeExtension", "name": "OpenAIDE" },
+                "requestedSurface": { "kind": "home" },
+                "workspaceRoots": []
+            }
+        })
+        .to_string(),
+    );
+    assert!(initialized.starts_with("HTTP/1.1 200 OK\r\n"));
+    let detached = post_json(
+        &record.endpoints[0].address,
+        &record.auth_token,
+        Some("vscode-connection-1"),
+        &json!({
+            "jsonrpc": "2.0",
+            "id": "detach-host",
+            "method": "client/detach",
+            "params": {}
+        })
+        .to_string(),
+    );
+    assert!(detached.starts_with("HTTP/1.1 200 OK\r\n"));
+    assert!(matches!(
+        published.shutdown_when_requested().unwrap(),
+        crate::app_lifecycle::ShutdownCompletion::CleanRelease
+    ));
+}
+
 fn post_json(address: &str, token: &str, connection_id: Option<&str>, body: &str) -> String {
     let target = address.strip_prefix("http://").expect("http address");
     let (authority, path) = target

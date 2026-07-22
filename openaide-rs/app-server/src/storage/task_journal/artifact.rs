@@ -1,4 +1,5 @@
 use std::collections::{hash_map::Entry, HashMap};
+#[cfg(test)]
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -147,9 +148,39 @@ pub(super) fn load(
     })
 }
 
+/// Restores the crash-consistent physical head for one Tool detail at the
+/// moment a caller first reads or extends it.
+pub(super) fn reconcile_one(
+    tasks_root: &Path,
+    task_id: &str,
+    artifact_id: &str,
+    committed_head: u64,
+) -> Result<u64, RuntimeError> {
+    let path = artifact_path(tasks_root, task_id, artifact_id)?;
+    if !path.try_exists()? {
+        if committed_head == 0 {
+            return Ok(0);
+        }
+        return Err(RuntimeError::Storage(format!(
+            "Tool artifact {artifact_id} is missing committed sequence {committed_head}"
+        )));
+    }
+    let replayed: ReplayedFrames<ArtifactFrame> = frame::scan(&path)
+        .map_err(|error| artifact_frame_error("reconcile_replay", task_id, artifact_id, error))?;
+    if replayed.frame_count < committed_head as usize {
+        return Err(RuntimeError::Storage(format!(
+            "Tool artifact {artifact_id} ends before committed sequence {committed_head}"
+        )));
+    }
+    frame::truncate_after(&path, &replayed, committed_head as usize)
+        .map_err(|error| artifact_frame_error("reconcile_truncate", task_id, artifact_id, error))?;
+    Ok(committed_head)
+}
+
 /// Reconciles prepared artifact tails against Task visibility heads at open.
 /// A corrupt or missing artifact is isolated to Tool detail and logged; the
 /// containing Task projection remains readable.
+#[cfg(test)]
 pub(super) fn reconcile(
     tasks_root: &Path,
     tasks: &HashMap<String, super::store::RecoveredTask>,

@@ -5,7 +5,7 @@ use openaide_app_server_protocol::methods::{
     ATTACHMENT_CREATE_FILE_REFERENCE, ATTACHMENT_CREATE_LOCAL_FILE_REFERENCES,
     ATTACHMENT_CREATE_PASTED_IMAGE, ATTACHMENT_LIST_DIRECTORY, ATTACHMENT_LIST_ROOTS,
     ATTACHMENT_REFRESH_HANDLES, ATTACHMENT_RELEASE, ATTACHMENT_REVEAL, ATTACHMENT_REVEAL_SENT,
-    CLIENT_CAPABILITIES_CHANGED, CLIENT_HEARTBEAT, CLIENT_INITIALIZE, CLIENT_PROBE,
+    CLIENT_CAPABILITIES_CHANGED, CLIENT_DETACH, CLIENT_HEARTBEAT, CLIENT_INITIALIZE, CLIENT_PROBE,
     DIAGNOSTICS_GET_RUNTIME, PENDING_REQUEST_RESOLVE, SETTINGS_GET_AGENT_DETAILS,
     SETTINGS_GET_MCP_SERVERS, SETTINGS_GET_PREFERENCES, SETTINGS_GET_RUNTIME, SETTINGS_GET_SKILLS,
     SETTINGS_UPDATE_PREFERENCES, SETTINGS_UPDATE_RUNTIME, SHELL_RESOLVE_FILE_REVEAL,
@@ -66,6 +66,7 @@ impl RpcGateway {
                 self.handle_client_capabilities_changed(connection_id, id, params, meta, now)
             }
             CLIENT_HEARTBEAT => self.handle_client_heartbeat(connection_id, id, params, meta, now),
+            CLIENT_DETACH => self.handle_client_detach(connection_id, id, params, meta, now),
             PENDING_REQUEST_RESOLVE => {
                 self.handle_pending_request_resolve(connection_id, id, params, meta, now)
             }

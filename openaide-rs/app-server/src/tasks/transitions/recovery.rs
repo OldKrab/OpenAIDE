@@ -11,6 +11,12 @@ use super::{ActiveWorkEnd, TaskTransitions};
 impl TaskTransitions {
     pub(crate) fn recover_volatile_runtime_state(&self) -> Result<(), RuntimeError> {
         for task in self.recoverable_records()? {
+            // Catalog metadata is sufficient to exclude durable idle Tasks.
+            // Avoid replaying their Chat during process startup; the mutation
+            // closure rechecks the plan after loading Tasks that need repair.
+            if volatile_recovery_plan(&task).is_none() {
+                continue;
+            }
             let task_id = task.task_id;
             let mut active_work_ended = false;
             self.mutations

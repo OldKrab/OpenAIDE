@@ -113,6 +113,28 @@ impl RpcGateway {
         outcome
     }
 
+    pub(super) fn detach_client(
+        &mut self,
+        client_instance_id: &openaide_app_server_protocol::ids::ClientInstanceId,
+        now: AppServerTime,
+    ) {
+        if !matches!(
+            self.client_hub.detach(client_instance_id),
+            crate::client_lifecycle::DetachOutcome::Detached { .. }
+        ) {
+            return;
+        }
+        self.server_requests
+            .observe_client_expired(client_instance_id, now);
+        if let Err(error) = self.task_release.release_expired_client(client_instance_id) {
+            crate::logging::error(
+                "explicit_client_detach_task_release_failed",
+                serde_json::json!({ "error": error.message }),
+            );
+        }
+        self.remove_expired_client_workspace_roots(client_instance_id, now);
+    }
+
     pub fn expire_client_after_reconnect_grace(
         &mut self,
         client_instance_id: &openaide_app_server_protocol::ids::ClientInstanceId,

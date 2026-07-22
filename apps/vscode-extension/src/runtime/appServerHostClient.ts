@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   ATTACHMENT_CREATE_LOCAL_FILE_REFERENCES,
   CLIENT_CAPABILITIES_CHANGED,
+  CLIENT_DETACH,
   createReliableLocalHttpBackendConnection,
   isAppServerSessionViewMessage,
   serializeBridgeError,
@@ -64,6 +65,7 @@ export class AppServerHostClient {
   private readonly serverRequestStops = new Map<ServerRequestMethod, BackendUnsubscribe>();
   private readonly pendingServerRequests = new Map<string, PendingServerRequest>();
   private nextServerRequestId = 1;
+  private closing: Promise<void> | undefined;
 
   constructor(
     private readonly provider: ConnectionProvider,
@@ -225,6 +227,12 @@ export class AppServerHostClient {
   }
 
   dispose() {
+    void this.close();
+  }
+
+  /** Explicitly detaches this VS Code host so the shared server can stop at zero hosts. */
+  close(): Promise<void> {
+    if (this.closing) return this.closing;
     for (const viewId of [...this.views.keys()]) this.detachView(viewId);
     for (const request of this.pendingServerRequests.values()) {
       request.reject(new Error("VS Code App Server client disposed"));
@@ -233,13 +241,26 @@ export class AppServerHostClient {
     for (const stop of this.serverRequestStops.values()) stop();
     this.serverRequestStops.clear();
     for (const stop of this.sessionStops.splice(0)) stop();
-    void this.connection?.close();
-    this.connection = undefined;
-    this.initialized = undefined;
-    this.initializationResult = undefined;
-    this.latestSessionStatus = undefined;
-    this.reportedWorkspaceRoots = undefined;
-    this.workspaceSync = undefined;
+    const initialized = this.initialized;
+    this.closing = (async () => {
+      const connection = this.connection ?? await initialized?.catch(() => undefined);
+      try {
+        await connection?.request(CLIENT_DETACH, {});
+      } catch (error) {
+        this.logger?.warn("app server host detach failed", {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      } finally {
+        connection?.close();
+        this.connection = undefined;
+        this.initialized = undefined;
+        this.initializationResult = undefined;
+        this.latestSessionStatus = undefined;
+        this.reportedWorkspaceRoots = undefined;
+        this.workspaceSync = undefined;
+      }
+    })();
+    return this.closing;
   }
 
   private async ensureInitialized(): Promise<AppServerSession> {

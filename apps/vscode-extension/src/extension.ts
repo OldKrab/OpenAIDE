@@ -12,10 +12,13 @@ import { TaskEditorManager } from "./webview/editorManager";
 import { TaskViewProvider } from "./webview/navigationProvider";
 import { registerWorkspaceProjectSync } from "./workspace/projectSync";
 
+let activeRuntime: RuntimeClient | undefined;
+
 export async function activate(context: vscode.ExtensionContext) {
   const logger = new ExtensionLogger("openaide");
   const runtimeProcess = new RuntimeProcess(context, logger);
   const runtime = new RuntimeClient(runtimeProcess, logger);
+  activeRuntime = runtime;
   const taskEditors = new TaskEditorManager(context, runtime, runtimeProcess, logger);
   const fileSystemHostHandlers = registerFileSystemHostHandlers(runtime);
   const agentSecretHandlers = registerAgentSecretHandlers(runtime, context.secrets);
@@ -51,5 +54,7 @@ export async function activate(context: vscode.ExtensionContext) {
 }
 
 export async function deactivate() {
-  // Disposables registered in activate own runtime shutdown order.
+  const runtime = activeRuntime;
+  activeRuntime = undefined;
+  await runtime?.close();
 }

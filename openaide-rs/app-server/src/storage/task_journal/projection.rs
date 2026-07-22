@@ -1,5 +1,4 @@
 use std::collections::{HashMap, HashSet};
-use std::fs;
 use std::path::Path;
 
 use crate::protocol::errors::RuntimeError;
@@ -247,72 +246,64 @@ pub(super) fn apply_operations(
     Ok(())
 }
 
-pub(super) fn replay_tasks(
-    tasks_root: &Path,
-) -> Result<HashMap<String, RecoveredTask>, RuntimeError> {
-    let mut tasks = HashMap::new();
-    for entry in fs::read_dir(tasks_root)? {
-        let entry = entry?;
-        if !entry.file_type()?.is_dir() {
-            continue;
+/// Reconstructs one Task only when a caller crosses the Task-detail seam.
+pub(super) fn replay_task(
+    task_dir: &Path,
+) -> Result<Option<(String, RecoveredTask)>, RuntimeError> {
+    let task_id = task_dir
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .ok_or_else(|| RuntimeError::Storage("Task directory has no identity".to_string()))?;
+    validate_task_id(&task_id)?;
+    if failure::is_quarantined(task_dir)? {
+        return Ok(Some((
+            task_id,
+            RecoveredTask::Unavailable {
+                error: "Task storage is quarantined after a durability failure".to_string(),
+            },
+        )));
+    }
+    let journal = task_dir.join(JOURNAL_FILE);
+    if !journal.exists() {
+        return Ok(None);
+    }
+    let replayed: ReplayedFrames<JournalFrame> = match frame::replay(&journal) {
+        Ok(replayed) => replayed,
+        Err(error) => {
+            let message = error.to_string();
+            crate::logging::warn(
+                "task_journal_unavailable",
+                serde_json::json!({ "task_id": task_id, "error": message }),
+            );
+            return Ok(Some((
+                task_id,
+                RecoveredTask::Unavailable { error: message },
+            )));
         }
-        let task_id = entry.file_name().to_string_lossy().to_string();
-        validate_task_id(&task_id)?;
-        if failure::is_quarantined(&entry.path())? {
-            tasks.insert(
+    };
+    let mut replay_state = HashMap::new();
+    for frame in replayed.frames {
+        if let Err(error) =
+            validate_operations(replay_state.get(&task_id), &task_id, &frame.operations).and_then(
+                |_| {
+                    apply_operations(
+                        &mut replay_state,
+                        &task_id,
+                        frame.operations,
+                        frame.sequence,
+                    )
+                },
+            )
+        {
+            return Ok(Some((
                 task_id,
                 RecoveredTask::Unavailable {
-                    error: "Task storage is quarantined after a durability failure".to_string(),
+                    error: error.to_string(),
                 },
-            );
-            continue;
-        }
-        let journal = entry.path().join(JOURNAL_FILE);
-        if !journal.exists() {
-            continue;
-        }
-        let replayed: ReplayedFrames<JournalFrame> = match frame::replay(&journal) {
-            Ok(replayed) => replayed,
-            Err(error) => {
-                let message = error.to_string();
-                crate::logging::warn(
-                    "task_journal_unavailable",
-                    serde_json::json!({ "task_id": task_id, "error": message }),
-                );
-                tasks.insert(task_id, RecoveredTask::Unavailable { error: message });
-                continue;
-            }
-        };
-        let mut replay_state = HashMap::new();
-        let mut replay_error = None;
-        for frame in replayed.frames {
-            let result =
-                validate_operations(replay_state.get(&task_id), &task_id, &frame.operations)
-                    .and_then(|_| {
-                        apply_operations(
-                            &mut replay_state,
-                            &task_id,
-                            frame.operations,
-                            frame.sequence,
-                        )
-                    });
-            if let Err(error) = result {
-                replay_error = Some(error.to_string());
-                break;
-            }
-        }
-        match replay_error {
-            Some(error) => {
-                tasks.insert(task_id, RecoveredTask::Unavailable { error });
-            }
-            None => {
-                if let Some(task) = replay_state.remove(&task_id) {
-                    tasks.insert(task_id, task);
-                }
-            }
+            )));
         }
     }
-    Ok(tasks)
+    Ok(replay_state.remove(&task_id).map(|task| (task_id, task)))
 }
 
 fn available_projection_mut<'a>(

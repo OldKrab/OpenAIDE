@@ -567,6 +567,39 @@ fn startup_isolates_a_malformed_task_and_keeps_unrelated_tasks_available() {
     assert!(store.list_all_task_records_strict().is_err());
 }
 
+#[test]
+fn startup_does_not_replay_inactive_task_chat_during_volatile_recovery() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    store
+        .write_task(&task_record(
+            "inactive-corrupt-chat",
+            "/tmp/openaide-unit-workspace/app",
+        ))
+        .unwrap();
+    drop(store);
+    corrupt_first_payload_byte(
+        &temp
+            .path()
+            .join("task-store-v1/tasks/inactive-corrupt-chat/task.journal"),
+    );
+
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        Arc::new(crate::agent::mock::MockAgent),
+        TaskUpdateNotifier::disabled(),
+    )
+    .expect("inactive Task Chat must stay lazy during volatile recovery");
+
+    assert!(
+        store.read_task("inactive-corrupt-chat").is_err(),
+        "opening the Task must still surface its corrupt Chat"
+    );
+}
+
 fn corrupt_last_byte(path: &std::path::Path) {
     use std::io::{Read, Seek, Write};
     let mut file = std::fs::OpenOptions::new()
@@ -579,6 +612,22 @@ fn corrupt_last_byte(path: &std::path::Path) {
     file.read_exact(&mut byte).unwrap();
     file.seek(std::io::SeekFrom::End(-1)).unwrap();
     file.write_all(&[byte[0] ^ 0xff]).unwrap();
+}
+
+fn corrupt_first_payload_byte(path: &std::path::Path) {
+    use std::io::{Read, Seek, Write};
+    let mut file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)
+        .unwrap();
+    // Header (10 bytes) and frame length (8 bytes) precede the JSON payload.
+    file.seek(std::io::SeekFrom::Start(18)).unwrap();
+    let mut byte = [0];
+    file.read_exact(&mut byte).unwrap();
+    file.seek(std::io::SeekFrom::Start(18)).unwrap();
+    file.write_all(&[byte[0] ^ 0xff]).unwrap();
+    file.sync_all().unwrap();
 }
 
 #[test]

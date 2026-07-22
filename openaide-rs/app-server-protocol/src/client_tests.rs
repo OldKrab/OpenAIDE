@@ -14,7 +14,7 @@ fn client_probe_result_uses_endpoint_validation_facts() {
     let value = serde_json::to_value(result).unwrap();
 
     assert_eq!(value["stateRootFingerprint"], json!("root-a"));
-    assert_eq!(value["protocolVersion"], json!("1"));
+    assert_eq!(value["protocolVersion"], json!("2"));
     assert_eq!(value["appVersion"], json!("0.1.0"));
     assert_eq!(value["lifecycle"], json!("running"));
 }

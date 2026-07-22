@@ -94,6 +94,11 @@ export class RuntimeClient implements vscode.Disposable {
     this.activeChild = undefined;
   }
 
+  /** Waits for the App Server host lease to be released during extension deactivation. */
+  async close() {
+    await this.appServerHostClient.close();
+  }
+
   onNotification(listener: (notification: RuntimeNotification) => void) {
     this.notificationListeners.add(listener);
     return {

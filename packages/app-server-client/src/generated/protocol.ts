@@ -5,6 +5,7 @@ export const CLIENT_PROBE = "client/probe" as const;
 export const CLIENT_INITIALIZE = "client/initialize" as const;
 export const CLIENT_CAPABILITIES_CHANGED = "client/capabilitiesChanged" as const;
 export const CLIENT_HEARTBEAT = "client/heartbeat" as const;
+export const CLIENT_DETACH = "client/detach" as const;
 
 export const PENDING_REQUEST_RESOLVE = "pendingRequest/resolve" as const;
 
@@ -161,6 +162,10 @@ export type ClientProbeResult = { stateRootFingerprint: string, protocolVersion:
 export type ClientHeartbeatParams = Record<symbol, never>;
 
 export type ClientHeartbeatResult = Record<symbol, never>;
+
+export type ClientDetachParams = Record<symbol, never>;
+
+export type ClientDetachResult = Record<symbol, never>;
 
 export type ClientProbeLifecycle = "running" | "draining" | "stopping";
 
@@ -806,12 +811,13 @@ export type PendingRequestScope = { "kind": "client", clientInstanceId: ClientIn
 
 export type PendingRequestKind = "permission" | "question" | "secret" | "shellCapability";
 
-export type ProtocolMethod = typeof CLIENT_PROBE | typeof CLIENT_INITIALIZE | typeof CLIENT_CAPABILITIES_CHANGED | typeof CLIENT_HEARTBEAT | typeof PENDING_REQUEST_RESOLVE | typeof STATE_SUBSCRIBE | typeof STATE_UNSUBSCRIBE | typeof DIAGNOSTICS_GET_RUNTIME | typeof SUPPORT_RECOVER_STUCK_SESSIONS | typeof AGENT_PROBE | typeof AGENT_AUTHENTICATE | typeof AGENT_LIST_SESSIONS | typeof AGENT_CREATE_CUSTOM | typeof AGENT_UPDATE_CUSTOM_METADATA | typeof AGENT_REPLACE_CUSTOM | typeof AGENT_DELETE_CUSTOM | typeof AGENT_SET_ENABLED | typeof SETTINGS_GET_AGENT_DETAILS | typeof SETTINGS_GET_MCP_SERVERS | typeof SETTINGS_GET_SKILLS | typeof SETTINGS_GET_PREFERENCES | typeof SETTINGS_UPDATE_PREFERENCES | typeof SETTINGS_GET_RUNTIME | typeof SETTINGS_UPDATE_RUNTIME | typeof ATTACHMENT_LIST_ROOTS | typeof ATTACHMENT_LIST_DIRECTORY | typeof ATTACHMENT_CREATE_FILE_REFERENCE | typeof ATTACHMENT_CREATE_LOCAL_FILE_REFERENCES | typeof ATTACHMENT_CREATE_PASTED_IMAGE | typeof ATTACHMENT_CREATE_EMBEDDED_CANDIDATE | typeof ATTACHMENT_CONFIRM_EMBEDDED | typeof ATTACHMENT_REFRESH_HANDLES | typeof ATTACHMENT_RELEASE | typeof ATTACHMENT_REVEAL | typeof ATTACHMENT_REVEAL_SENT | typeof SHELL_RESOLVE_FILE_REVEAL | typeof WORKSPACE_LIST_ROOTS | typeof WORKSPACE_LIST_DIRECTORY | typeof WORKTREE_REFRESH | typeof WORKTREE_CREATE | typeof WORKTREE_RECREATE | typeof WORKTREE_REMOVAL_PREFLIGHT | typeof WORKTREE_REMOVE | typeof WORKTREE_RENAME | typeof WORKTREE_RESOLVE_FOLDER | typeof WORKTREE_LINKED_TASKS | typeof TASK_ACQUIRE | typeof TASK_ACQUIRE_IN_WORKTREE | typeof TASK_SEARCH_FILES | typeof TASK_ADOPT_NATIVE_SESSION | typeof TASK_SEND | typeof TASK_SET_CONFIG_OPTION | typeof TASK_CANCEL | typeof TASK_OPEN | typeof TASK_MARK_READ | typeof TASK_CHAT_PAGE | typeof TASK_LIST | typeof TASK_NAVIGATION_REFRESH | typeof TASK_NAVIGATION_LOAD_MORE | typeof TASK_RELEASE | typeof TASK_SET_ARCHIVED;
+export type ProtocolMethod = typeof CLIENT_PROBE | typeof CLIENT_INITIALIZE | typeof CLIENT_CAPABILITIES_CHANGED | typeof CLIENT_HEARTBEAT | typeof CLIENT_DETACH | typeof PENDING_REQUEST_RESOLVE | typeof STATE_SUBSCRIBE | typeof STATE_UNSUBSCRIBE | typeof DIAGNOSTICS_GET_RUNTIME | typeof SUPPORT_RECOVER_STUCK_SESSIONS | typeof AGENT_PROBE | typeof AGENT_AUTHENTICATE | typeof AGENT_LIST_SESSIONS | typeof AGENT_CREATE_CUSTOM | typeof AGENT_UPDATE_CUSTOM_METADATA | typeof AGENT_REPLACE_CUSTOM | typeof AGENT_DELETE_CUSTOM | typeof AGENT_SET_ENABLED | typeof SETTINGS_GET_AGENT_DETAILS | typeof SETTINGS_GET_MCP_SERVERS | typeof SETTINGS_GET_SKILLS | typeof SETTINGS_GET_PREFERENCES | typeof SETTINGS_UPDATE_PREFERENCES | typeof SETTINGS_GET_RUNTIME | typeof SETTINGS_UPDATE_RUNTIME | typeof ATTACHMENT_LIST_ROOTS | typeof ATTACHMENT_LIST_DIRECTORY | typeof ATTACHMENT_CREATE_FILE_REFERENCE | typeof ATTACHMENT_CREATE_LOCAL_FILE_REFERENCES | typeof ATTACHMENT_CREATE_PASTED_IMAGE | typeof ATTACHMENT_CREATE_EMBEDDED_CANDIDATE | typeof ATTACHMENT_CONFIRM_EMBEDDED | typeof ATTACHMENT_REFRESH_HANDLES | typeof ATTACHMENT_RELEASE | typeof ATTACHMENT_REVEAL | typeof ATTACHMENT_REVEAL_SENT | typeof SHELL_RESOLVE_FILE_REVEAL | typeof WORKSPACE_LIST_ROOTS | typeof WORKSPACE_LIST_DIRECTORY | typeof WORKTREE_REFRESH | typeof WORKTREE_CREATE | typeof WORKTREE_RECREATE | typeof WORKTREE_REMOVAL_PREFLIGHT | typeof WORKTREE_REMOVE | typeof WORKTREE_RENAME | typeof WORKTREE_RESOLVE_FOLDER | typeof WORKTREE_LINKED_TASKS | typeof TASK_ACQUIRE | typeof TASK_ACQUIRE_IN_WORKTREE | typeof TASK_SEARCH_FILES | typeof TASK_ADOPT_NATIVE_SESSION | typeof TASK_SEND | typeof TASK_SET_CONFIG_OPTION | typeof TASK_CANCEL | typeof TASK_OPEN | typeof TASK_MARK_READ | typeof TASK_CHAT_PAGE | typeof TASK_LIST | typeof TASK_NAVIGATION_REFRESH | typeof TASK_NAVIGATION_LOAD_MORE | typeof TASK_RELEASE | typeof TASK_SET_ARCHIVED;
 export type RequestParamsByMethod = {
   [CLIENT_PROBE]: ClientProbeParams;
   [CLIENT_INITIALIZE]: InitializeParams;
   [CLIENT_CAPABILITIES_CHANGED]: ClientCapabilitiesChangedParams;
   [CLIENT_HEARTBEAT]: ClientHeartbeatParams;
+  [CLIENT_DETACH]: ClientDetachParams;
   [PENDING_REQUEST_RESOLVE]: PendingRequestResolveParams;
   [STATE_SUBSCRIBE]: StateSubscribeParams;
   [STATE_UNSUBSCRIBE]: StateUnsubscribeParams;
@@ -876,6 +882,7 @@ export type ResponseResultByMethod = {
   [CLIENT_INITIALIZE]: InitializeResult;
   [CLIENT_CAPABILITIES_CHANGED]: ClientCapabilitiesChangedResult;
   [CLIENT_HEARTBEAT]: ClientHeartbeatResult;
+  [CLIENT_DETACH]: ClientDetachResult;
   [PENDING_REQUEST_RESOLVE]: PendingRequestResolveResult;
   [STATE_SUBSCRIBE]: StateSubscribeResult;
   [STATE_UNSUBSCRIBE]: StateUnsubscribeResult;
@@ -945,10 +952,12 @@ export type ClientProbeRequest = TypedClientRequest<typeof CLIENT_PROBE>;
 export type ClientProbeResponse = ResponseEnvelope<ClientProbeResult>;
 export type ClientInitializeRequest = TypedClientRequest<typeof CLIENT_INITIALIZE>;
 export type ClientHeartbeatRequest = TypedClientRequest<typeof CLIENT_HEARTBEAT>;
+export type ClientDetachRequest = TypedClientRequest<typeof CLIENT_DETACH>;
 export type ClientCapabilitiesChangedRequest = TypedClientRequest<typeof CLIENT_CAPABILITIES_CHANGED>;
 export type ClientInitializeResponse = ResponseEnvelope<InitializeResult>;
 export type ClientCapabilitiesChangedResponse = ResponseEnvelope<ClientCapabilitiesChangedResult>;
 export type ClientHeartbeatResponse = ResponseEnvelope<ClientHeartbeatResult>;
+export type ClientDetachResponse = ResponseEnvelope<ClientDetachResult>;
 export type StateSubscribeResponse = ResponseEnvelope<StateSubscribeResult>;
 export type StateUnsubscribeResponse = ResponseEnvelope<StateUnsubscribeResult>;
 export type DiagnosticsGetRuntimeResponse = ResponseEnvelope<RuntimeDiagnosticsResult>;
