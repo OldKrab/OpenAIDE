@@ -452,7 +452,7 @@ fn list_omits_a_corrupt_task_record() {
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     store.write_task(&task_record("corrupt")).unwrap();
     drop(store);
-    corrupt_last_byte(&temp.path().join("task-store-v1/tasks/corrupt/task.journal"));
+    corrupt_last_byte(&temp.path().join("task-store-v1/tasks/corrupt/task.json"));
     let store = Store::open(temp.path().to_path_buf()).unwrap();
 
     let snapshot = TaskSnapshotStore::new(store)

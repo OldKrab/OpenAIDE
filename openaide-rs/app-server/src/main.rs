@@ -3,6 +3,7 @@ use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::Instant;
 
 use openaide_app_server::protocol_edge::stdio::{
     AcpHostRequestTransport, ProtocolEdgeStdioDispatcher,
@@ -130,6 +131,7 @@ enum ProtocolEdgeStartup {
 }
 
 fn run_protocol_edge_stdio(storage_root: PathBuf, startup: ProtocolEdgeStartup) {
+    let startup_started = Instant::now();
     let runtime_root = env::var_os(RUNTIME_ROOT_ENV)
         .map(PathBuf::from)
         .unwrap_or_else(default_runtime_root);
@@ -149,10 +151,14 @@ fn run_protocol_edge_stdio(storage_root: PathBuf, startup: ProtocolEdgeStartup) 
         ProtocolEdgeStartup::LocalHttpHandoff => {
             match app_server_handoff::attach_or_launch(&state_root, &runtime_root) {
                 app_server_handoff::HandoffStart::Attached(connection) => {
+                    log_startup_phase(&startup_started, "attached_existing");
                     app_server_handoff::print_connection_or_exit(&connection);
                     return;
                 }
-                app_server_handoff::HandoffStart::LaunchHere(lock) => Some(lock),
+                app_server_handoff::HandoffStart::LaunchHere(lock) => {
+                    log_startup_phase(&startup_started, "launch_elected");
+                    Some(lock)
+                }
             }
         }
     };
@@ -174,6 +180,7 @@ fn run_protocol_edge_stdio(storage_root: PathBuf, startup: ProtocolEdgeStartup) 
             std::process::exit(1);
         }
     };
+    log_startup_phase(&startup_started, "product_state_ready");
     start_storage_fatal_supervisor(
         dispatcher
             .take_storage_fatal_events()
@@ -195,6 +202,7 @@ fn run_protocol_edge_stdio(storage_root: PathBuf, startup: ProtocolEdgeStartup) 
                 std::process::exit(1);
             }
         };
+    log_startup_phase(&startup_started, "endpoint_published");
     if startup == ProtocolEdgeStartup::LocalHttpHandoff {
         app_server_handoff::print_connection_or_exit(
             &published_endpoint
@@ -202,6 +210,7 @@ fn run_protocol_edge_stdio(storage_root: PathBuf, startup: ProtocolEdgeStartup) 
                 .expect("published endpoint includes LocalHttp connection")
                 .into(),
         );
+        log_startup_phase(&startup_started, "handoff_ready");
     }
     let _launch_lock = launch_lock;
     match startup {
@@ -217,6 +226,15 @@ fn run_protocol_edge_stdio(storage_root: PathBuf, startup: ProtocolEdgeStartup) 
             })
         }
     }
+}
+
+/// Records monotonic startup milestones without paths, endpoint material, or Task identity.
+fn log_startup_phase(started: &Instant, phase: &str) {
+    let duration_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+    openaide_app_server::logging::info(
+        "app_server_startup_phase_completed",
+        serde_json::json!({ "phase": phase, "elapsed_ms": duration_ms }),
+    );
 }
 
 /// The binary owns the root-wide storage failure signal. A dead sole writer

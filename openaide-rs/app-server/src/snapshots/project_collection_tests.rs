@@ -171,7 +171,7 @@ fn storage_read_failure_is_isolated_from_project_collection() {
         .write_task(&task_record("corrupt", "/workspace", "1"))
         .unwrap();
     drop(store);
-    corrupt_last_byte(&temp.path().join("task-store-v1/tasks/corrupt/task.journal"));
+    corrupt_last_byte(&temp.path().join("task-store-v1/tasks/corrupt/task.json"));
     let store = Store::open(temp.path().to_path_buf()).unwrap();
 
     let snapshot = ProjectCollectionStore::new(store).snapshot().unwrap();

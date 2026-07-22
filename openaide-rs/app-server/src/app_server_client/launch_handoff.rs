@@ -59,7 +59,9 @@ pub struct LaunchHandoffPolicy {
 impl Default for LaunchHandoffPolicy {
     fn default() -> Self {
         Self {
-            max_wait_attempts: 20,
+            // Startup and authenticated replacement share one bounded 50-second
+            // window, below the shell adapters' final 60-second safety ceiling.
+            max_wait_attempts: 200,
         }
     }
 }

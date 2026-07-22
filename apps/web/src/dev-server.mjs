@@ -4,7 +4,11 @@ import { createReadStream, existsSync } from "node:fs";
 import { mkdir, stat } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { parseAppServerHandoffConnection } from "@openaide/app-server-client";
+import {
+  APP_SERVER_HANDOFF_TIMEOUT_MS,
+  APP_SERVER_HANDOFF_MAX_LINE_BYTES,
+  parseAppServerHandoffConnection,
+} from "@openaide/app-server-client";
 import { createAppServerManager } from "./app-server-manager.mjs";
 import {
   allowedHostNamesFromEnv,
@@ -89,12 +93,22 @@ const prototypeViteProxy = prototypePort === undefined
       unavailableMessage: "Prototype server is not running. Start it with npm run prototype:target.",
     });
 
-await startAppServer();
-
 const server = http.createServer(async (req, res) => {
   try {
     if (!isAllowedHost(req.headers.host, allowedHosts)) {
       writeText(res, 403, "Host not allowed");
+      return;
+    }
+    const url = new URL(req.url ?? "/", `http://${req.headers.host ?? host}`);
+    // Probes intentionally precede browser-origin auth and expose only process state.
+    if (url.pathname === "/livez") {
+      writeText(res, 200, "live");
+      return;
+    }
+    if (url.pathname === "/readyz") {
+      const ready = appServerManager.currentConnection() !== undefined;
+      if (!ready) void startAppServer().catch(() => {});
+      writeText(res, ready ? 200 : 503, ready ? "ready" : "starting");
       return;
     }
     if (!isAllowedBrowserOrigin(req.headers.origin, req.headers)) {
@@ -106,7 +120,6 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    const url = new URL(req.url ?? "/", `http://${req.headers.host ?? host}`);
     if (url.pathname === "/favicon.ico" || url.pathname === "/favicon.svg") {
       writeFavicon(res);
       return;
@@ -170,6 +183,10 @@ server.listen(port, host, () => {
     console.log("Protect public routes with authentication before exposing this server.");
   }
 });
+
+// Asset serving and liveness do not depend on product-state recovery. The manager
+// coalesces this eager attempt with the first protocol request and permits retry.
+void startAppServer().catch(() => {});
 
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.once(signal, () => shutdown(signal));
@@ -385,9 +402,17 @@ function writeFavicon(res) {
 function readHandoffConnection(child) {
   return new Promise((resolve, reject) => {
     let buffer = "";
-    const timeout = setTimeout(() => reject(new Error("App Server handoff timed out")), 5000);
+    const timeout = setTimeout(
+      () => reject(new Error("App Server handoff timed out")),
+      APP_SERVER_HANDOFF_TIMEOUT_MS,
+    );
     child.stdout.on("data", (chunk) => {
       buffer += chunk.toString("utf8");
+      if (Buffer.byteLength(buffer, "utf8") > APP_SERVER_HANDOFF_MAX_LINE_BYTES) {
+        clearTimeout(timeout);
+        reject(new Error("App Server handoff connection info is too large"));
+        return;
+      }
       const newline = buffer.indexOf("\n");
       if (newline < 0) return;
       clearTimeout(timeout);

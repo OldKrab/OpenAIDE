@@ -3,6 +3,10 @@ export type AppServerHandoffConnection = {
   authToken: string;
 };
 
+/** One shared safety ceiling for shell adapters; normal readiness is state-based. */
+export const APP_SERVER_HANDOFF_TIMEOUT_MS = 60_000;
+export const APP_SERVER_HANDOFF_MAX_LINE_BYTES = 8 * 1024;
+
 export function parseAppServerHandoffConnection(line: string): AppServerHandoffConnection {
   const parsed = JSON.parse(line) as unknown;
   if (!parsed || typeof parsed !== "object") {

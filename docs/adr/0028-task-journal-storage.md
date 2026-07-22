@@ -1,6 +1,6 @@
 # Task Journal Storage
 
-Status: accepted
+Status: superseded by ADR-0029
 
 This ADR supersedes the Task-storage implementation in
 [ADR-0024](0024-task-chat-persistence.md) and the SQLite requirement for the

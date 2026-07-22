@@ -344,8 +344,41 @@ test("local web supports durable user systemd daemon mode", () => {
   assert.match(script, /OPENAIDE_WEB_SYSTEMD_UNIT/);
   assert.match(script, /background\|systemd/);
   assert.match(script, /systemd-run --user/);
-  assert.match(script, /Restart=always/);
+  assert.match(script, /Restart=on-failure/);
+  assert.match(script, /StartLimitBurst=3/);
+  assert.match(script, /\/readyz/);
   assert.match(script, /systemctl --user status "\$systemd_unit\.service"/);
+});
+
+test("systemd start waits for App Server readiness before reporting success", (t) => {
+  const fixture = systemdStartFixture(t, "ready-after-retries");
+  writeFileSync(join(fixture.fakeBin, "curl"), `#!/usr/bin/env bash
+printf 'probe\n' >> "$OPENAIDE_TEST_CURL_LOG"
+count=$(wc -l < "$OPENAIDE_TEST_CURL_LOG")
+[[ "$count" -ge 3 ]]
+`);
+  chmodSync(join(fixture.fakeBin, "curl"), 0o755);
+
+  const result = runSystemdStartFixture(fixture, { OPENAIDE_WEB_START_TIMEOUT_MS: "1000" });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /App Server ready/);
+  assert.equal(readFileSync(fixture.curlLog, "utf8").trim().split("\n").length, 3);
+});
+
+test("systemd start fails when App Server never becomes ready", (t) => {
+  const fixture = systemdStartFixture(t, "never-ready");
+  writeFileSync(join(fixture.fakeBin, "curl"), `#!/usr/bin/env bash
+printf 'probe\n' >> "$OPENAIDE_TEST_CURL_LOG"
+exit 1
+`);
+  chmodSync(join(fixture.fakeBin, "curl"), 0o755);
+
+  const result = runSystemdStartFixture(fixture, { OPENAIDE_WEB_START_TIMEOUT_MS: "500" });
+
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /did not become ready/);
+  assert.equal(readFileSync(fixture.curlLog, "utf8").trim().split("\n").length, 2);
 });
 
 test("systemd app server receives an explicit OS temp directory", (t) => {
@@ -366,11 +399,13 @@ exit 0
 printf '%s\n' "$*" >> "$OPENAIDE_TEST_SYSTEMD_RUN_LOG"
 exit 0
 `);
+  writeFileSync(join(fakeBin, "curl"), "#!/usr/bin/env bash\nexit 0\n");
   // Startup intentionally waits for systemd in production; the fixture's
   // fake service is immediately ready and must not slow the repository gate.
   writeFileSync(join(fakeBin, "sleep"), "#!/usr/bin/env bash\nexit 0\n");
   chmodSync(join(fakeBin, "systemctl"), 0o755);
   chmodSync(join(fakeBin, "systemd-run"), 0o755);
+  chmodSync(join(fakeBin, "curl"), 0o755);
   chmodSync(join(fakeBin, "sleep"), 0o755);
   t.after(() => rmSync(fixtureRoot, { recursive: true, force: true }));
 
@@ -399,6 +434,54 @@ exit 0
   assert.equal(result.status, 0, result.stderr);
   assert.match(readFileSync(systemdRunLog, "utf8"), /--setenv TMPDIR=\/var\/tmp\/openaide-test/);
 });
+
+function systemdStartFixture(t, name) {
+  const fixtureRoot = mkdtempSync(join(tmpdir(), `openaide-local-web-${name}-`));
+  const fakeBin = join(fixtureRoot, "bin");
+  const staticRoot = join(fixtureRoot, "static");
+  const curlLog = join(fixtureRoot, "curl.log");
+  mkdirSync(fakeBin);
+  mkdirSync(staticRoot);
+  writeFileSync(join(staticRoot, "index.html"), "ready\n");
+  writeFileSync(curlLog, "");
+  writeFileSync(join(fakeBin, "systemctl"), `#!/usr/bin/env bash
+if [[ "$*" == *"show-environment"* ]]; then exit 0; fi
+if [[ "$*" == *"is-active"* ]]; then exit 0; fi
+if [[ "$*" == *"--property MainPID --value"* ]]; then printf '4242\\n'; fi
+exit 0
+`);
+  writeFileSync(join(fakeBin, "systemd-run"), "#!/usr/bin/env bash\nexit 0\n");
+  writeFileSync(join(fakeBin, "sleep"), "#!/usr/bin/env bash\nexit 0\n");
+  for (const command of ["systemctl", "systemd-run", "sleep"]) {
+    chmodSync(join(fakeBin, command), 0o755);
+  }
+  t.after(() => rmSync(fixtureRoot, { recursive: true, force: true }));
+  return { fixtureRoot, fakeBin, staticRoot, curlLog };
+}
+
+function runSystemdStartFixture(fixture, extraEnv = {}) {
+  return spawnSync("bash", ["deploy/local-web.sh", "start"], {
+    cwd: new URL("..", import.meta.url),
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      PATH: `${fixture.fakeBin}:${process.env.PATH}`,
+      OPENAIDE_TEST_CURL_LOG: fixture.curlLog,
+      OPENAIDE_WEB_ROLE: "",
+      OPENAIDE_WEB_ALLOWED_HOSTS: "localhost,127.0.0.1",
+      OPENAIDE_WEB_DAEMON: "systemd",
+      OPENAIDE_WEB_SYSTEMD_UNIT: "openaide-web-test",
+      OPENAIDE_WEB_STATIC_ROOT: fixture.staticRoot,
+      OPENAIDE_WEB_STATE_ROOT: join(fixture.fixtureRoot, "state"),
+      OPENAIDE_WEB_RUNTIME_ROOT: join(fixture.fixtureRoot, "runtime"),
+      OPENAIDE_WEB_PID_FILE: join(fixture.fixtureRoot, "web.pid"),
+      OPENAIDE_WEB_LOG_FILE: join(fixture.fixtureRoot, "web.log"),
+      OPENAIDE_WEB_BUILD: "0",
+      OPENAIDE_WEB_SKIP_BUILD: "1",
+      ...extraEnv,
+    },
+  });
+}
 
 test("local web enables JavaScript source maps for background and systemd servers", () => {
   const script = readFileSync(new URL("./local-web.sh", import.meta.url), "utf8");

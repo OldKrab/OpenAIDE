@@ -234,6 +234,18 @@ pub struct TaskRecord {
 }
 
 impl TaskRecord {
+    /// Starts a new App Server epoch without carrying live Agent controls across processes.
+    ///
+    /// These fields describe an attached Native Session, not durable Chat. Clearing them in
+    /// the lightweight catalog keeps startup independent from Task-history size; the same
+    /// overlay is applied if that Task is hydrated later in this process.
+    pub(crate) fn clear_process_local_agent_state(&mut self) -> bool {
+        let had_config_catalog = self.config_options_catalog.take().is_some();
+        let had_commands_catalog = self.agent_commands_catalog.take().is_some();
+        let had_pending_mutation = self.config_mutation.pending.take().is_some();
+        had_config_catalog || had_commands_catalog || had_pending_mutation
+    }
+
     /// Applies an Agent title over provisional or Agent-owned titles, preserving user ownership.
     pub fn set_agent_title(&mut self, value: &str) -> bool {
         if self

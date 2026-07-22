@@ -18,10 +18,10 @@ use super::model::{
 };
 use super::projection::{apply_operations, validate_operations};
 use super::scheduler::{QueuedWrite, Scheduler};
-
 mod admission;
 mod compaction;
 pub(super) mod failure;
+mod maintenance;
 mod recovery;
 mod worker;
 pub(crate) use admission::TrySubmit;
@@ -54,6 +54,8 @@ pub struct TaskJournalStore {
 struct StoreInner {
     scheduler: Arc<Scheduler>,
     catalog: Arc<RwLock<HashMap<String, TaskRecord>>>,
+    /// Process-epoch Task metadata projected without hydrating durable Chat.
+    epoch_task_overlays: Arc<RwLock<HashMap<String, TaskRecord>>>,
     projections: Arc<RwLock<HashMap<String, RecoveredTask>>>,
     projection_load_lock: Arc<Mutex<()>>,
     artifact_heads: Arc<Mutex<artifact::ReconciledArtifactHeads>>,
@@ -68,6 +70,7 @@ struct StoreInner {
 struct CommitContext {
     tasks_root: PathBuf,
     catalog: Arc<RwLock<HashMap<String, TaskRecord>>>,
+    epoch_task_overlays: Arc<RwLock<HashMap<String, TaskRecord>>>,
     projections: Arc<RwLock<HashMap<String, RecoveredTask>>>,
     projection_load_lock: Arc<Mutex<()>>,
     artifact_heads: Arc<Mutex<artifact::ReconciledArtifactHeads>>,
@@ -112,9 +115,24 @@ impl TaskJournalStore {
         frame::create_directory_durably(&store_root, frame::JournalKind::Root, faults.as_ref())?;
         let tasks_root = store_root.join(TASKS_DIR);
         frame::create_directory_durably(&tasks_root, frame::JournalKind::Root, faults.as_ref())?;
-        let (catalog_records, initially_recovered) = recovery::open_catalog(&tasks_root)?;
+        let (mut catalog_records, mut initially_recovered) = recovery::open_catalog(&tasks_root)?;
         failure::ensure_recovered_statuses(&tasks_root, &initially_recovered)?;
+        let epoch_task_overlays = catalog_records
+            .iter_mut()
+            .filter_map(|(task_id, task)| {
+                task.clear_process_local_agent_state()
+                    .then(|| (task_id.clone(), task.clone()))
+            })
+            .collect::<HashMap<_, _>>();
+        for (task_id, overlay) in &epoch_task_overlays {
+            if let Some(RecoveredTask::Available { projection, .. }) =
+                initially_recovered.get_mut(task_id)
+            {
+                projection.task = overlay.clone();
+            }
+        }
         let catalog = Arc::new(RwLock::new(catalog_records));
+        let epoch_task_overlays = Arc::new(RwLock::new(epoch_task_overlays));
         let projections = Arc::new(RwLock::new(initially_recovered));
         let projection_load_lock = Arc::new(Mutex::new(()));
         let artifact_heads = Arc::new(Mutex::new(HashMap::new()));
@@ -130,6 +148,7 @@ impl TaskJournalStore {
         let commit_context = CommitContext {
             tasks_root: tasks_root.clone(),
             catalog: catalog.clone(),
+            epoch_task_overlays: epoch_task_overlays.clone(),
             projections: projections.clone(),
             projection_load_lock: projection_load_lock.clone(),
             artifact_heads: artifact_heads.clone(),
@@ -171,6 +190,7 @@ impl TaskJournalStore {
                 inner: Arc::new(StoreInner {
                     scheduler,
                     catalog,
+                    epoch_task_overlays,
                     projections,
                     projection_load_lock,
                     artifact_heads,
@@ -235,6 +255,7 @@ impl TaskJournalStore {
         recovery::ensure_task_loaded(
             &self.inner.tasks_root,
             &self.inner.catalog,
+            &self.inner.epoch_task_overlays,
             &self.inner.projections,
             &self.inner.projection_load_lock,
             task_id,
@@ -368,6 +389,7 @@ fn commit_batch(
     recovery::ensure_task_loaded(
         tasks_root,
         catalog_records,
+        context.epoch_task_overlays.as_ref(),
         projections,
         projection_load_lock,
         task_id,
@@ -401,24 +423,17 @@ fn commit_batch(
         )
     });
     if reduced.task_operations.is_empty() && reduced.artifacts.is_empty() {
-        let mut next_task =
+        let next_task =
             current_task.ok_or_else(|| RuntimeError::TaskNotFound(task_id.to_string()))?;
-        let compacted =
-            match compaction::compact_task(tasks_root, &mut next_task, task_id, compaction, faults)
-            {
-                Ok(compacted) => compacted,
-                Err(error) => {
-                    quarantine_or_abort(tasks_root, task_id);
-                    return Err(freeze_shared_task(projections, task_id, error));
-                }
-            };
-        if compacted {
-            recovery::publish_catalog(tasks_root, catalog_records, task_id, &next_task)?;
-        }
-        projections
-            .write()
-            .expect("Task journal projections poisoned")
-            .insert(task_id.to_string(), next_task);
+        maintenance::compact_loaded_task(
+            tasks_root,
+            catalog_records,
+            projections,
+            task_id,
+            next_task,
+            compaction,
+            faults,
+        )?;
         return Ok(None);
     }
     let mut planned_artifacts = Vec::new();
@@ -456,6 +471,7 @@ fn commit_batch(
         }
     }
     validate_operations(current_task.as_ref(), task_id, &reduced.task_operations)?;
+    let has_artifact_reference = !planned_artifacts.is_empty();
     let sequence = match current_task.as_ref() {
         Some(RecoveredTask::Available {
             journal_sequence, ..
@@ -486,10 +502,9 @@ fn commit_batch(
         next_state.insert(task_id.to_string(), current_task);
     }
     apply_operations(&mut next_state, task_id, frame.operations.clone(), sequence)?;
-    let mut next_task = next_state
+    let next_task = next_state
         .remove(task_id)
         .expect("Task reducer must publish its target");
-    let has_artifact_reference = !planned_artifacts.is_empty();
     let mut artifact_changes = Vec::new();
     for (artifact_id, committed_head, operations) in planned_artifacts {
         let mut artifact_heads = artifact_heads
@@ -526,28 +541,18 @@ fn commit_batch(
         artifact_heads.insert(artifact_key, change.artifact_sequence);
         artifact_changes.push(change);
     }
-    let journal_kind = if has_artifact_reference {
-        frame::JournalKind::ArtifactReference
-    } else {
-        frame::JournalKind::Task
-    };
-    let persisted = if sequence == 1 {
-        frame::create_with_faults(&journal, &frame, journal_kind, faults)
-    } else {
-        frame::append_with_faults(&journal, &frame, journal_kind, faults)
-    };
+    let persisted = maintenance::persist_split_commit(
+        journal.parent().expect("Task journal path has a parent"),
+        &next_task,
+        &frame.operations,
+        sequence,
+        has_artifact_reference,
+        faults,
+    );
     if let Err(error) = persisted {
         quarantine_or_abort(tasks_root, task_id);
         return Err(freeze_shared_task(projections, task_id, error));
     }
-    let compacted =
-        match compaction::compact_task(tasks_root, &mut next_task, task_id, compaction, faults) {
-            Ok(compacted) => compacted,
-            Err(error) => {
-                quarantine_or_abort(tasks_root, task_id);
-                return Err(freeze_shared_task(projections, task_id, error));
-            }
-        };
     if let Err(error) = recovery::publish_catalog(tasks_root, catalog_records, task_id, &next_task)
     {
         quarantine_or_abort(tasks_root, task_id);
@@ -559,7 +564,7 @@ fn commit_batch(
         .insert(task_id.to_string(), next_task);
     Ok(Some(CommittedTaskBatch {
         task_id: task_id.to_string(),
-        journal_sequence: if compacted { 1 } else { sequence },
+        journal_sequence: sequence,
         task_snapshot_changed,
         replaced_artifact_ids,
         artifact_changes,

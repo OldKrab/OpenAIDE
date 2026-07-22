@@ -69,7 +69,7 @@ fn startup_recovery_does_not_replay_stable_task_history() {
         .write_task(&task_record(task_id, &workspace_root.to_string_lossy()))
         .unwrap();
     drop(store);
-    corrupt_first_task_journal_payload(&state_root, task_id);
+    corrupt_chat_snapshot(&state_root, task_id);
 
     let reopened = Store::open(state_root).unwrap();
     TaskProductApi::new(
@@ -80,6 +80,33 @@ fn startup_recovery_does_not_replay_stable_task_history() {
         TaskUpdateNotifier::disabled(),
     )
     .expect("stable Task history stays lazy during startup recovery");
+}
+
+#[test]
+fn startup_recovery_does_not_replay_task_history_to_hide_process_local_agent_controls() {
+    let temp = tempfile::tempdir().unwrap();
+    let state_root = temp.path().join("state");
+    let workspace_root = temp.path().join("workspace");
+    let task_id = "task-process-local-controls-corrupt-history";
+
+    let store = Store::open(state_root.clone()).unwrap();
+    let mut task = task_record(task_id, &workspace_root.to_string_lossy());
+    task.agent_session_id = Some("persisted-session".to_string());
+    task.config_options_catalog = Some(config_catalog("gpt-5"));
+    task.agent_commands_catalog = Some(command_catalog());
+    store.write_task(&task).unwrap();
+    drop(store);
+    corrupt_chat_snapshot(&state_root, task_id);
+
+    let reopened = Store::open(state_root).unwrap();
+    TaskProductApi::new(
+        reopened.clone(),
+        Arc::new(StorageProjectResolver::new(reopened)),
+        AgentRegistry::default_built_ins(),
+        Arc::new(crate::agent::mock::MockAgent),
+        TaskUpdateNotifier::disabled(),
+    )
+    .expect("process-local controls are hidden without hydrating unopened Task history");
 }
 
 fn task_config_id<'a>(task: &'a TaskRecord, id: &str) -> Option<&'a str> {
@@ -569,7 +596,7 @@ fn startup_isolates_a_malformed_task_and_keeps_unrelated_tasks_available() {
     corrupt_last_byte(
         &temp
             .path()
-            .join("task-store-v1/tasks/corrupt-task/task.journal"),
+            .join("task-store-v1/tasks/corrupt-task/task.json"),
     );
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let api = TaskProductApi::new(
@@ -6020,22 +6047,21 @@ fn task_record(task_id: &str, workspace_root: &str) -> TaskRecord {
     }
 }
 
-fn corrupt_first_task_journal_payload(state_root: &std::path::Path, task_id: &str) {
+fn corrupt_chat_snapshot(state_root: &std::path::Path, task_id: &str) {
     let path = state_root
         .join("task-store-v1/tasks")
         .join(task_id)
-        .join("task.journal");
+        .join("chat.snapshot");
     let mut file = std::fs::OpenOptions::new()
         .read(true)
         .write(true)
         .open(path)
         .unwrap();
-    // The fixed header and frame length precede the first JSON payload byte.
-    file.seek(SeekFrom::Start(18)).unwrap();
+    file.seek(SeekFrom::Start(0)).unwrap();
     let mut byte = [0_u8; 1];
     file.read_exact(&mut byte).unwrap();
     byte[0] ^= 0xff;
-    file.seek(SeekFrom::Start(18)).unwrap();
+    file.seek(SeekFrom::Start(0)).unwrap();
     file.write_all(&byte).unwrap();
     file.sync_all().unwrap();
 }

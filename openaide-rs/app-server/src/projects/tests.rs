@@ -109,7 +109,7 @@ fn corrupt_task_record_blocks_project_resolution() {
         .write_task(&task_record("corrupt", "/workspace/app"))
         .unwrap();
     drop(store);
-    corrupt_last_byte(&temp.path().join("task-store-v1/tasks/corrupt/task.journal"));
+    corrupt_last_byte(&temp.path().join("task-store-v1/tasks/corrupt/task.json"));
     let store = Store::open(temp.path().to_path_buf()).unwrap();
 
     let error = StorageProjectResolver::new(store)

@@ -1178,7 +1178,7 @@ fn dispatcher_startup_isolates_damaged_task_storage() {
     corrupt_last_byte(
         &temp
             .path()
-            .join("task-store-v1/tasks/corrupt-task/task.journal"),
+            .join("task-store-v1/tasks/corrupt-task/task.json"),
     );
     let state_root = StateRoot::resolve(temp.path()).expect("state root");
     let mut dispatcher = ProtocolEdgeStdioDispatcher::new_for_test(state_root);

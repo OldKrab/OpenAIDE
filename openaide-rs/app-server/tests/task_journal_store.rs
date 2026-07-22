@@ -4,11 +4,12 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::sync::{Arc, Barrier};
 
 use openaide_app_server::protocol::model::{
-    AgentMessagePart, AgentMessageRole, ChatMessage, IsolationKind, NormalizedMessage, TaskStatus,
+    AgentCommand, AgentCommandsCatalog, AgentMessagePart, AgentMessageRole, ChatMessage,
+    ConfigOptionsCatalog, IsolationKind, NormalizedMessage, TaskStatus,
 };
 use openaide_app_server::storage::records::{
     MessageMeta, StoredMessage, TaskConfigMutationState, TaskLifecycle, TaskPreparationRecord,
-    TaskRecord,
+    TaskRecord, TaskTitle, TaskTitleSource,
 };
 use openaide_app_server::storage::task_journal::{TaskJournalStore, TaskProjection, TaskWrite};
 use tempfile::TempDir;
@@ -39,6 +40,192 @@ fn a_committed_task_survives_store_restart() {
     assert!(loaded.messages.is_empty());
     assert_eq!(loaded.message_meta.message_count, 0);
     reopened.shutdown().expect("close reopened store");
+}
+
+#[test]
+fn durable_task_metadata_and_chat_survive_without_persisting_live_agent_catalogs() {
+    let root = TempDir::new().expect("create state root");
+    let mut projection = task_projection("task_split_authority");
+    projection
+        .messages
+        .push(agent_message("agent_message", "durable chat"));
+    projection.message_meta.message_count = 1;
+    projection.message_meta.version = 1;
+    projection.task.agent_commands_catalog = Some(AgentCommandsCatalog {
+        commands: vec![AgentCommand {
+            name: "review".to_string(),
+            description: "Review changes".to_string(),
+            input_hint: None,
+        }],
+    });
+    projection.task.config_options_catalog = Some(ConfigOptionsCatalog::empty("codex"));
+
+    let (store, _commits) = TaskJournalStore::open(root.path().to_path_buf()).unwrap();
+    store
+        .submit(TaskWrite::barrier_create(projection))
+        .unwrap()
+        .wait()
+        .unwrap();
+    let mut task = store.load("task_split_authority").unwrap().task;
+    task.title = TaskTitle::new("Durable title", TaskTitleSource::User);
+    store
+        .submit(TaskWrite::barrier_replace_task(task))
+        .unwrap()
+        .wait()
+        .unwrap();
+    store.shutdown().unwrap();
+
+    let task_dir = root.path().join("task-store-v1/tasks/task_split_authority");
+    assert!(task_dir.join("task.json").is_file());
+    assert!(task_dir.join("chat.snapshot").is_file());
+    assert!(!task_dir.join("task.journal").exists());
+
+    let (reopened, _commits) = TaskJournalStore::open(root.path().to_path_buf()).unwrap();
+    let loaded = reopened.load("task_split_authority").unwrap();
+    assert_eq!(
+        loaded.task.title.as_ref().map(TaskTitle::value),
+        Some("Durable title")
+    );
+    assert_eq!(agent_text(&loaded.messages[0]), "durable chat");
+    assert!(loaded.task.agent_commands_catalog.is_none());
+    assert!(loaded.task.config_options_catalog.is_none());
+    reopened.shutdown().unwrap();
+}
+
+#[test]
+fn idle_compaction_merges_chat_deltas_into_the_materialized_snapshot() {
+    let root = TempDir::new().expect("create state root");
+    let mut projection = task_projection("task_split_compact");
+    projection.messages.push(agent_message("agent_message", ""));
+    projection.message_meta.message_count = 1;
+    projection.message_meta.version = 1;
+    let (store, _commits) = TaskJournalStore::open(root.path().to_path_buf()).unwrap();
+    store
+        .submit(TaskWrite::barrier_create(projection))
+        .unwrap()
+        .wait()
+        .unwrap();
+    for _ in 0..128 {
+        store
+            .submit(TaskWrite::stream_append_text(
+                "task_split_compact",
+                "agent_message",
+                "x",
+                "2026-07-22T00:00:00Z",
+            ))
+            .unwrap()
+            .wait()
+            .unwrap();
+    }
+    store
+        .submit(TaskWrite::barrier("task_split_compact"))
+        .unwrap()
+        .wait()
+        .unwrap();
+    store
+        .submit(TaskWrite::compaction_if_worthwhile_barrier(
+            "task_split_compact",
+        ))
+        .unwrap()
+        .wait()
+        .unwrap();
+    store.shutdown().unwrap();
+
+    let task_dir = root.path().join("task-store-v1/tasks/task_split_compact");
+    assert!(!task_dir.join("chat.journal").exists());
+    let (reopened, _commits) = TaskJournalStore::open(root.path().to_path_buf()).unwrap();
+    assert_eq!(
+        agent_text(&reopened.load("task_split_compact").unwrap().messages[0]),
+        "x".repeat(128)
+    );
+    reopened.shutdown().unwrap();
+}
+
+#[test]
+fn chat_committed_before_metadata_is_repaired_after_restart() {
+    let root = TempDir::new().expect("create state root");
+    let mut projection = task_projection("task_metadata_lag");
+    projection.messages.push(agent_message("agent_message", ""));
+    projection.message_meta.message_count = 1;
+    projection.message_meta.version = 1;
+    let (store, _commits) = TaskJournalStore::open(root.path().to_path_buf()).unwrap();
+    store
+        .submit(TaskWrite::barrier_create(projection))
+        .unwrap()
+        .wait()
+        .unwrap();
+    store
+        .submit(TaskWrite::stream_append_text(
+            "task_metadata_lag",
+            "agent_message",
+            "durable",
+            "1",
+        ))
+        .unwrap()
+        .wait()
+        .unwrap();
+    store.shutdown().unwrap();
+
+    let metadata_path = root
+        .path()
+        .join("task-store-v1/tasks/task_metadata_lag/task.json");
+    let mut metadata: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&metadata_path).unwrap()).unwrap();
+    metadata["chatSequence"] = serde_json::json!(0);
+    metadata["storageSequence"] = serde_json::json!(1);
+    std::fs::write(&metadata_path, serde_json::to_vec(&metadata).unwrap()).unwrap();
+
+    let (reopened, _commits) = TaskJournalStore::open(root.path().to_path_buf()).unwrap();
+    let loaded = reopened.load("task_metadata_lag").unwrap();
+    assert_eq!(agent_text(&loaded.messages[0]), "durable");
+    reopened.shutdown().unwrap();
+
+    let repaired: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(metadata_path).unwrap()).unwrap();
+    assert_eq!(repaired["chatSequence"], 1);
+}
+
+#[test]
+fn stale_pre_compaction_chat_tail_is_ignored_after_snapshot_publication() {
+    let root = TempDir::new().expect("create state root");
+    let mut projection = task_projection("task_stale_tail");
+    projection.messages.push(agent_message("agent_message", ""));
+    projection.message_meta.message_count = 1;
+    projection.message_meta.version = 1;
+    let (store, _commits) = TaskJournalStore::open(root.path().to_path_buf()).unwrap();
+    store
+        .submit(TaskWrite::barrier_create(projection))
+        .unwrap()
+        .wait()
+        .unwrap();
+    store
+        .submit(TaskWrite::stream_append_text(
+            "task_stale_tail",
+            "agent_message",
+            "once",
+            "1",
+        ))
+        .unwrap()
+        .wait()
+        .unwrap();
+    let task_dir = root.path().join("task-store-v1/tasks/task_stale_tail");
+    let stale_tail = std::fs::read(task_dir.join("chat.journal")).unwrap();
+    store
+        .submit(TaskWrite::compaction_barrier("task_stale_tail"))
+        .unwrap()
+        .wait()
+        .unwrap();
+    store.shutdown().unwrap();
+
+    // Models a crash after publishing the new snapshot pointer but before the
+    // obsolete generation was removed from the directory.
+    std::fs::write(task_dir.join("chat.journal"), stale_tail).unwrap();
+    let (reopened, _commits) = TaskJournalStore::open(root.path().to_path_buf()).unwrap();
+    assert_eq!(
+        agent_text(&reopened.load("task_stale_tail").unwrap().messages[0]),
+        "once"
+    );
+    reopened.shutdown().unwrap();
 }
 
 #[test]
@@ -109,12 +296,26 @@ fn first_artifact_read_and_live_append_are_serialized_without_losing_bytes() {
 #[test]
 fn checksum_damage_isolated_to_the_affected_task() {
     let root = TempDir::new().expect("create state root");
+    let mut projection = task_projection("task_damaged");
+    projection.messages.push(agent_message("agent_message", ""));
+    projection.message_meta.message_count = 1;
+    projection.message_meta.version = 1;
     let (store, _commits) = TaskJournalStore::open(root.path().to_path_buf()).expect("open store");
     store
-        .submit(TaskWrite::barrier_create(task_projection("task_damaged")))
+        .submit(TaskWrite::barrier_create(projection))
         .expect("admit create")
         .wait()
         .expect("commit create");
+    store
+        .submit(TaskWrite::stream_append_text(
+            "task_damaged",
+            "agent_message",
+            "x",
+            "1",
+        ))
+        .unwrap()
+        .wait()
+        .unwrap();
     store.shutdown().expect("close store");
 
     corrupt_final_checksum(root.path(), "task_damaged");
@@ -132,12 +333,26 @@ fn checksum_damage_isolated_to_the_affected_task() {
 #[test]
 fn an_incomplete_tail_is_discarded_before_the_next_commit() {
     let root = TempDir::new().expect("create state root");
+    let mut projection = task_projection("task_tail");
+    projection.messages.push(agent_message("agent_message", ""));
+    projection.message_meta.message_count = 1;
+    projection.message_meta.version = 1;
     let (store, _commits) = TaskJournalStore::open(root.path().to_path_buf()).expect("open store");
     store
-        .submit(TaskWrite::barrier_create(task_projection("task_tail")))
+        .submit(TaskWrite::barrier_create(projection))
         .expect("admit create")
         .wait()
         .expect("commit create");
+    store
+        .submit(TaskWrite::stream_append_text(
+            "task_tail",
+            "agent_message",
+            "x",
+            "1",
+        ))
+        .unwrap()
+        .wait()
+        .unwrap();
     store.shutdown().expect("close store");
     append_incomplete_frame(root.path(), "task_tail");
 
@@ -154,7 +369,7 @@ fn an_incomplete_tail_is_discarded_before_the_next_commit() {
         .expect("admit replacement")
         .wait()
         .expect("commit after recovered tail");
-    assert_eq!(committed.journal_sequence, 2);
+    assert_eq!(committed.journal_sequence, 3);
     reopened.shutdown().expect("close recovered store");
 
     let (verified, _commits) =
@@ -164,47 +379,6 @@ fn an_incomplete_tail_is_discarded_before_the_next_commit() {
         TaskStatus::Completed
     );
     verified.shutdown().expect("close verified store");
-}
-
-#[test]
-fn every_appended_frame_prefix_recovers_old_or_new_state() {
-    let source = TempDir::new().unwrap();
-    let (store, _commits) = TaskJournalStore::open(source.path().to_path_buf()).unwrap();
-    store
-        .submit(TaskWrite::barrier_create(task_projection("task_prefix")))
-        .unwrap()
-        .wait()
-        .unwrap();
-    let journal = task_journal_path(source.path(), "task_prefix");
-    let first_len = journal.metadata().unwrap().len() as usize;
-    let mut task = store.load("task_prefix").unwrap().task;
-    task.status = TaskStatus::Completed;
-    store
-        .submit(TaskWrite::barrier_replace_task(task))
-        .unwrap()
-        .wait()
-        .unwrap();
-    store.shutdown().unwrap();
-    let bytes = std::fs::read(&journal).unwrap();
-
-    for cut in first_len..=bytes.len() {
-        let root = TempDir::new().unwrap();
-        let path = task_journal_path(root.path(), "task_prefix");
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(&path, &bytes[..cut]).unwrap();
-        let (recovered, _events) = TaskJournalStore::open(root.path().to_path_buf()).unwrap();
-        let status = recovered.load("task_prefix").unwrap().task.status;
-        assert!(matches!(
-            status,
-            TaskStatus::Inactive | TaskStatus::Completed
-        ));
-        if cut < bytes.len() {
-            assert_eq!(status, TaskStatus::Inactive);
-        } else {
-            assert_eq!(status, TaskStatus::Completed);
-        }
-        recovered.shutdown().unwrap();
-    }
 }
 
 #[test]
@@ -288,8 +462,8 @@ fn compaction_replaces_history_with_one_restart_safe_projection() {
         .unwrap()
         .wait()
         .unwrap();
-    let after = journal.metadata().unwrap().len();
-    assert!(after < before);
+    assert!(before > 0);
+    assert!(!journal.exists());
     store.shutdown().unwrap();
 
     let (reopened, _commits) = TaskJournalStore::open(root.path().to_path_buf()).unwrap();
@@ -303,16 +477,23 @@ fn compaction_replaces_history_with_one_restart_safe_projection() {
 #[test]
 fn idle_compaction_waits_for_a_measured_reclaim_threshold() {
     let root = TempDir::new().expect("create state root");
+    let mut projection = task_projection("task_threshold");
+    projection.messages.push(agent_message("agent_message", ""));
+    projection.message_meta.message_count = 1;
+    projection.message_meta.version = 1;
     let (store, _commits) = TaskJournalStore::open(root.path().to_path_buf()).unwrap();
     store
-        .submit(TaskWrite::barrier_create(task_projection("task_threshold")))
+        .submit(TaskWrite::barrier_create(projection))
         .unwrap()
         .wait()
         .unwrap();
-    let mut task = store.load("task_threshold").unwrap().task;
-    task.task_version += 1;
     store
-        .submit(TaskWrite::barrier_replace_task(task.clone()))
+        .submit(TaskWrite::stream_append_text(
+            "task_threshold",
+            "agent_message",
+            "x",
+            "1",
+        ))
         .unwrap()
         .wait()
         .unwrap();
@@ -329,10 +510,14 @@ fn idle_compaction_waits_for_a_measured_reclaim_threshold() {
     assert_eq!(skipped.journal_sequence, 2);
     assert_eq!(journal.metadata().unwrap().len(), before_small_check);
 
-    for version in 2..=129 {
-        task.task_version = version;
+    for version in 2..=128 {
         store
-            .submit(TaskWrite::barrier_replace_task(task.clone()))
+            .submit(TaskWrite::stream_append_text(
+                "task_threshold",
+                "agent_message",
+                "x",
+                version.to_string(),
+            ))
             .unwrap()
             .wait()
             .unwrap();
@@ -345,8 +530,9 @@ fn idle_compaction_waits_for_a_measured_reclaim_threshold() {
         .unwrap()
         .wait()
         .unwrap();
-    assert_eq!(compacted.journal_sequence, 1);
-    assert!(journal.metadata().unwrap().len() < before_compaction);
+    assert_eq!(compacted.journal_sequence, 129);
+    assert!(before_compaction > 0);
+    assert!(!journal.exists());
     store.shutdown().unwrap();
 }
 
@@ -554,8 +740,9 @@ fn identical_task_replace_and_empty_text_create_no_frame_or_event() {
         .wait()
         .unwrap();
     commits.recv().unwrap();
-    let journal = task_journal_path(root.path(), "task_noop");
-    let before = journal.metadata().unwrap().len();
+    let task_dir = root.path().join("task-store-v1/tasks/task_noop");
+    let before_task = std::fs::read(task_dir.join("task.json")).unwrap();
+    let before_chat = std::fs::read(task_dir.join("chat.snapshot")).unwrap();
 
     let replace = store
         .submit(TaskWrite::barrier_replace_task(projection.task.clone()))
@@ -575,7 +762,14 @@ fn identical_task_replace_and_empty_text_create_no_frame_or_event() {
 
     assert_eq!(replace.journal_sequence, 1);
     assert_eq!(empty.journal_sequence, 1);
-    assert_eq!(journal.metadata().unwrap().len(), before);
+    assert_eq!(
+        std::fs::read(task_dir.join("task.json")).unwrap(),
+        before_task
+    );
+    assert_eq!(
+        std::fs::read(task_dir.join("chat.snapshot")).unwrap(),
+        before_chat
+    );
     assert!(commits.try_recv().is_err());
     store.shutdown().unwrap();
 }
@@ -688,9 +882,9 @@ fn append_failure_freezes_only_the_affected_task() {
     }
     while commits.try_recv().is_ok() {}
 
-    let journal = task_journal_path(root.path(), "task_frozen");
-    std::fs::set_permissions(&journal, std::fs::Permissions::from_mode(0o444))
-        .expect("make journal unwritable");
+    let task_dir = root.path().join("task-store-v1/tasks/task_frozen");
+    std::fs::set_permissions(&task_dir, std::fs::Permissions::from_mode(0o555))
+        .expect("make Task storage unwritable");
     let mut frozen = store.load("task_frozen").expect("load Task").task;
     frozen.status = TaskStatus::Completed;
     let error = store
@@ -698,7 +892,7 @@ fn append_failure_freezes_only_the_affected_task() {
         .expect("admit failing write")
         .wait()
         .expect_err("append must fail");
-    assert!(error.to_string().contains("permission_denied"));
+    assert!(error.to_string().contains("Task storage is frozen"));
     assert_eq!(
         failures
             .recv_timeout(std::time::Duration::from_secs(1))
@@ -717,8 +911,8 @@ fn append_failure_freezes_only_the_affected_task() {
         .wait()
         .expect("unrelated Task remains writable");
 
-    std::fs::set_permissions(&journal, std::fs::Permissions::from_mode(0o644))
-        .expect("restore journal permissions");
+    std::fs::set_permissions(&task_dir, std::fs::Permissions::from_mode(0o755))
+        .expect("restore Task storage permissions");
     store.shutdown().expect("close store");
 
     let (reopened, _events) = TaskJournalStore::open(root.path().to_path_buf()).unwrap();
@@ -761,7 +955,7 @@ fn task_journal_path(root: &std::path::Path, task_id: &str) -> std::path::PathBu
     root.join("task-store-v1")
         .join("tasks")
         .join(task_id)
-        .join("task.journal")
+        .join("chat.journal")
 }
 
 fn append_incomplete_frame(root: &std::path::Path, task_id: &str) {
@@ -769,7 +963,7 @@ fn append_incomplete_frame(root: &std::path::Path, task_id: &str) {
         .join("task-store-v1")
         .join("tasks")
         .join(task_id)
-        .join("task.journal");
+        .join("chat.journal");
     let mut file = OpenOptions::new()
         .append(true)
         .open(path)

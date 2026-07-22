@@ -7,6 +7,7 @@ use crate::storage::id::validate_task_id;
 use crate::storage::records::TaskRecord;
 use crate::storage::task_journal::catalog;
 use crate::storage::task_journal::projection::replay_task;
+use crate::storage::task_journal::split;
 
 use super::{failure, RecoveredTask};
 
@@ -37,6 +38,50 @@ pub(super) fn open_catalog(tasks_root: &Path) -> Result<OpenedCatalog, RuntimeEr
         // Journals created before fail-closed status bytes must gain the marker
         // even when their new Navigation catalog lets startup skip replay.
         failure::ensure_status(&task_dir)?;
+        match split::load_task(&task_dir) {
+            Ok(Some(metadata)) if metadata.task.task_id == task_id => {
+                if let Err(error) = split::remove_legacy_files(&task_dir) {
+                    crate::logging::warn(
+                        "legacy_task_cleanup_retry_failed",
+                        serde_json::json!({ "task_id": task_id, "error": error.to_string() }),
+                    );
+                }
+                records.insert(task_id, metadata.task);
+                continue;
+            }
+            Ok(Some(_)) => {
+                crate::logging::warn(
+                    "split_task_identity_mismatch",
+                    serde_json::json!({ "task_id": task_id }),
+                );
+                recovered.insert(
+                    task_id,
+                    RecoveredTask::Unavailable {
+                        error: "Split Task metadata identity does not match its directory"
+                            .to_string(),
+                    },
+                );
+                continue;
+            }
+            Err(error) if !task_dir.join(super::JOURNAL_FILE).is_file() => {
+                crate::logging::warn(
+                    "split_task_metadata_unavailable",
+                    serde_json::json!({ "task_id": task_id, "error": error.to_string() }),
+                );
+                recovered.insert(
+                    task_id,
+                    RecoveredTask::Unavailable {
+                        error: error.to_string(),
+                    },
+                );
+                continue;
+            }
+            Err(error) => crate::logging::warn(
+                "split_task_metadata_incomplete_migration",
+                serde_json::json!({ "task_id": task_id, "error": error.to_string() }),
+            ),
+            Ok(None) => {}
+        }
         match catalog::load(&task_dir) {
             Ok(Some(entry)) if entry.task.task_id == task_id => {
                 records.insert(task_id, entry.task);
@@ -71,6 +116,7 @@ pub(super) fn open_catalog(tasks_root: &Path) -> Result<OpenedCatalog, RuntimeEr
 pub(super) fn ensure_task_loaded(
     tasks_root: &Path,
     catalog_records: &RwLock<HashMap<String, TaskRecord>>,
+    epoch_task_overlays: &RwLock<HashMap<String, TaskRecord>>,
     projections: &RwLock<HashMap<String, RecoveredTask>>,
     load_lock: &Mutex<()>,
     task_id: &str,
@@ -100,13 +146,50 @@ pub(super) fn ensure_task_loaded(
         return Ok(true);
     }
     let task_dir = tasks_root.join(task_id);
-    let Some((replayed_id, task)) = replay_task(&task_dir)? else {
-        return Ok(false);
+    let split_projection = split::load_projection(&task_dir)?;
+    let (replayed_id, mut task) = if let Some((projection, sequence)) = split_projection {
+        (
+            projection.task.task_id.clone(),
+            RecoveredTask::Available {
+                projection: Box::new(projection),
+                journal_sequence: sequence,
+            },
+        )
+    } else {
+        let Some((replayed_id, task)) = replay_task(&task_dir)? else {
+            return Ok(false);
+        };
+        if let RecoveredTask::Available {
+            projection,
+            journal_sequence,
+        } = &task
+        {
+            split::migrate(
+                &task_dir,
+                projection,
+                *journal_sequence,
+                &crate::storage::task_journal::frame::FaultInjector::disabled(),
+            )?;
+        }
+        (replayed_id, task)
     };
+    let epoch_overlay = epoch_task_overlays
+        .read()
+        .expect("Task epoch overlays poisoned")
+        .get(task_id)
+        .cloned();
+    if let (Some(overlay), RecoveredTask::Available { projection, .. }) =
+        (&epoch_overlay, &mut task)
+    {
+        projection.task = overlay.clone();
+    }
     if let RecoveredTask::Available { projection, .. } = &task {
-        // Loading repairs a cache that survived a crash between journal and
-        // catalog publication without making the cache authoritative.
-        refresh_catalog_cache(&task_dir, &projection.task);
+        // Loading normally repairs a stale cache. An epoch overlay is deliberately
+        // non-durable until the next Task mutation, so publishing it here could make
+        // stale live controls reappear from the journal after another restart.
+        if epoch_overlay.is_none() && !split::exists(&task_dir) {
+            refresh_catalog_cache(&task_dir, &projection.task);
+        }
         catalog_records
             .write()
             .expect("Task catalog poisoned")
@@ -130,7 +213,10 @@ pub(super) fn publish_catalog(
             "Unavailable Task cannot publish Navigation metadata".to_string(),
         ));
     };
-    refresh_catalog_cache(&tasks_root.join(task_id), &projection.task);
+    let task_dir = tasks_root.join(task_id);
+    if !split::exists(&task_dir) {
+        refresh_catalog_cache(&task_dir, &projection.task);
+    }
     records
         .write()
         .expect("Task catalog poisoned")

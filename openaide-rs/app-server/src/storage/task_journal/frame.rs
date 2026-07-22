@@ -88,7 +88,7 @@ impl FaultInjector {
             .is_some()
     }
 
-    fn check(&self, kind: JournalKind, point: FaultPoint) -> Result<(), RuntimeError> {
+    pub(super) fn check(&self, kind: JournalKind, point: FaultPoint) -> Result<(), RuntimeError> {
         let mut armed = self
             .armed
             .lock()
@@ -106,7 +106,7 @@ impl FaultInjector {
         self.sync_calls.load(Ordering::Relaxed)
     }
 
-    fn record_sync(&self) {
+    pub(super) fn record_sync(&self) {
         self.sync_calls.fetch_add(1, Ordering::Relaxed);
     }
 
