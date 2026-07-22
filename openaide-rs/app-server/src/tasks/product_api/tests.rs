@@ -2655,12 +2655,13 @@ fn history_load_failure_adds_activity_and_leaves_task_sendable() {
         fail_load_once_with_already_active: AtomicBool::new(true),
         ..Default::default()
     });
+    let (notifier, updates) = TaskUpdateNotifier::channel();
     let api = TaskProductApi::new(
         store.clone(),
         Arc::new(StorageProjectResolver::new(store.clone())),
         AgentRegistry::default_built_ins(),
         agent.clone(),
-        TaskUpdateNotifier::disabled(),
+        notifier,
     )
     .unwrap();
     api.list_agent_sessions(AgentListSessionsParams {
@@ -2669,6 +2670,7 @@ fn history_load_failure_adds_activity_and_leaves_task_sendable() {
         cursor: None,
     })
     .unwrap();
+    while updates.try_recv().is_ok() {}
 
     let snapshot = api
         .open_for_test(TaskOpenParams {
@@ -2680,8 +2682,17 @@ fn history_load_failure_adds_activity_and_leaves_task_sendable() {
         snapshot.chat.items[0].parts.first(),
         Some(MessagePart::Text { text }) if text == "Stale cached history."
     ));
-    wait_until(|| agent.loads.load(Ordering::SeqCst) == 1);
-    std::thread::sleep(Duration::from_millis(25));
+    loop {
+        let update = updates
+            .recv_timeout(Duration::from_secs(1))
+            .expect("history recovery completion notification");
+        if matches!(
+            update.kind,
+            crate::task_events::TaskUpdateKind::HistorySync(TaskHistorySyncSnapshot::Idle { .. })
+        ) {
+            break;
+        }
+    }
     assert_eq!(agent.loads.load(Ordering::SeqCst), 1);
     assert_eq!(agent.closes.load(Ordering::SeqCst), 0);
     assert_eq!(agent.attaches.load(Ordering::SeqCst), 0);
