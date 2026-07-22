@@ -78,17 +78,24 @@ export function useNewTaskPreparation({
     completedPreparationKey.current = undefined;
   }
   const retainedSnapshot = newTaskController.getSnapshot();
+  const replacementTaskId = newTaskController.taskRequiringReplacement();
   const preparationResetKey = newTaskController.preparationResetKey();
   const previousPreparationResetKey = useRef(preparationResetKey);
   const preparationWasReset = previousPreparationResetKey.current !== preparationResetKey;
   previousPreparationResetKey.current = preparationResetKey;
   const preparedTaskMatches = Boolean(
     retainedSnapshot
+      && !replacementTaskId
       && retainedSnapshot.lifecycle === "new"
       && retainedSnapshot.task.project_id === state.newTask.selection.projectId
       && retainedSnapshot.task.agent_id === state.newTask.selection.agentId
       && retainedSnapshot.task.worktree_id === state.newTask.selection.worktreeId,
   );
+  if (replacementTaskId && preparationKey) {
+    completedPreparationKey.current = undefined;
+    failedPreparationKey.current = undefined;
+    if (pendingPreparation.current?.key === preparationKey) pendingPreparation.current = undefined;
+  }
   if (isNewTaskRoute && preparedTaskMatches && preparationKey) {
     completedPreparationKey.current = preparationKey;
   } else if (preparationWasReset) {
@@ -130,7 +137,7 @@ export function useNewTaskPreparation({
       if (!asyncOperations.owns(operation)) {
         throw new SupersededPreparation();
       }
-      if (staleTaskId) await discard(staleTaskId);
+      if (staleTaskId && staleTaskId !== replacementTaskId) await discard(staleTaskId);
       if (!asyncOperations.owns(operation)) {
         throw new SupersededPreparation();
       }
@@ -157,13 +164,22 @@ export function useNewTaskPreparation({
       }
 
       const snapshot = mapProtocolTaskSnapshot(task).snapshot;
-      const lease = newTaskController.retain({
-        attachmentResources,
-        preparationKey,
-        snapshot,
-      });
+      const lease = replacementTaskId
+        ? newTaskController.retainReplacement({
+            attachmentResources,
+            preparationKey,
+            snapshot,
+            staleTaskId: replacementTaskId,
+          })
+        : newTaskController.retain({
+            attachmentResources,
+            preparationKey,
+            snapshot,
+          });
       if (!lease) throw new SupersededPreparation();
-      dispatch({ type: "newTask:prepared", taskId });
+      dispatch(replacementTaskId
+        ? { type: "newTask:replaced", staleTaskId: replacementTaskId, taskId }
+        : { type: "newTask:prepared", taskId });
       completedPreparationKey.current = preparationKey;
       failedPreparationKey.current = undefined;
       return { taskId, task };
@@ -199,6 +215,7 @@ export function useNewTaskPreparation({
     newTaskController,
     preparedTaskMatches,
     replicaEpoch,
+    replacementTaskId,
     retainedSnapshot,
     state,
     startAttempt,

@@ -56,7 +56,7 @@ export type TaskSnapshot = {
           kind: "authRequired" | "setupRequired" | "nodeJsRequired" | "capabilityUnavailable" | "nativeSessionUnavailable";
         };
       }
-    | { kind: "failed" };
+    | { kind: "failed"; recovery?: "replaceTask" };
   send_capability: {
     state: "loading" | "ready" | "blocked" | "failed";
     blockers?: Array<{

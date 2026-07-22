@@ -185,7 +185,9 @@ function mapTaskPreparation(
     case "blocked":
       return { kind: "blocked", blocker: { kind: preparation.blocker.kind } };
     case "failed":
-      return { kind: "failed" };
+      return preparation.error.code === "notFound"
+        ? { kind: "failed", recovery: "replaceTask" }
+        : { kind: "failed" };
     case "preparing":
       return { kind: "preparing" };
     case "ready":
