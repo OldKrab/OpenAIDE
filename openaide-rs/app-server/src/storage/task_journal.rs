@@ -5,6 +5,7 @@
 //! interface so workflow code never depends on physical files.
 
 mod artifact;
+mod catalog;
 mod frame;
 mod model;
 mod projection;

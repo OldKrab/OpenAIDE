@@ -39,6 +39,7 @@ use openaide_app_server_protocol::task::{
 };
 use openaide_app_server_protocol::workspace::WorkspaceListDirectoryParams;
 use std::collections::HashMap;
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -54,6 +55,31 @@ fn protocol_value_id(value: &AgentConfigOptionCurrentValue) -> Option<&str> {
         AgentConfigOptionCurrentValue::Id { value } => Some(value),
         AgentConfigOptionCurrentValue::Boolean { .. } => None,
     }
+}
+
+#[test]
+fn startup_recovery_does_not_replay_stable_task_history() {
+    let temp = tempfile::tempdir().unwrap();
+    let state_root = temp.path().join("state");
+    let workspace_root = temp.path().join("workspace");
+    let task_id = "task-stable-corrupt-history";
+
+    let store = Store::open(state_root.clone()).unwrap();
+    store
+        .write_task(&task_record(task_id, &workspace_root.to_string_lossy()))
+        .unwrap();
+    drop(store);
+    corrupt_first_task_journal_payload(&state_root, task_id);
+
+    let reopened = Store::open(state_root).unwrap();
+    TaskProductApi::new(
+        reopened.clone(),
+        Arc::new(StorageProjectResolver::new(reopened)),
+        AgentRegistry::default_built_ins(),
+        Arc::new(crate::agent::mock::MockAgent),
+        TaskUpdateNotifier::disabled(),
+    )
+    .expect("stable Task history stays lazy during startup recovery");
 }
 
 fn task_config_id<'a>(task: &'a TaskRecord, id: &str) -> Option<&'a str> {
@@ -5992,6 +6018,26 @@ fn task_record(task_id: &str, workspace_root: &str) -> TaskRecord {
         supports_image_input: true,
         preparation: TaskPreparationRecord::Ready,
     }
+}
+
+fn corrupt_first_task_journal_payload(state_root: &std::path::Path, task_id: &str) {
+    let path = state_root
+        .join("task-store-v1/tasks")
+        .join(task_id)
+        .join("task.journal");
+    let mut file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)
+        .unwrap();
+    // The fixed header and frame length precede the first JSON payload byte.
+    file.seek(SeekFrom::Start(18)).unwrap();
+    let mut byte = [0_u8; 1];
+    file.read_exact(&mut byte).unwrap();
+    byte[0] ^= 0xff;
+    file.seek(SeekFrom::Start(18)).unwrap();
+    file.write_all(&byte).unwrap();
+    file.sync_all().unwrap();
 }
 
 fn test_new_task_lifecycle() -> TaskLifecycle {

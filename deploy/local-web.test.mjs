@@ -329,7 +329,9 @@ test("local web can run an opt-in send-path smoke check after start", () => {
   assert.match(script, /smoke_if_requested/);
   assert.match(script, /local-web-smoke\.mjs" "http:\/\/\$host:\$port"/);
   assert.match(smoke, /\/__openaide-app-server\/probe/);
-  assert.match(smoke, /"task\/create"/);
+  assert.match(smoke, /"task\/acquire"/);
+  assert.match(smoke, /"task\/open"/);
+  assert.doesNotMatch(smoke, /taskRevision/);
   assert.match(smoke, /"task\/send"/);
   assert.match(smoke, /"task\/cancel"/);
   assert.match(smoke, /"task\/setArchived"/);

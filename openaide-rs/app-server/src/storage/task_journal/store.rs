@@ -7,6 +7,7 @@ use std::thread;
 
 use crate::protocol::errors::RuntimeError;
 use crate::storage::id::validate_task_id;
+use crate::storage::records::TaskRecord;
 
 use super::artifact;
 use super::frame;
@@ -15,12 +16,14 @@ use super::model::{
     TaskOperation, TaskProjection, TaskStorageFailure, TaskStorageFatalFailure, TaskWrite,
     ToolArtifactProjection,
 };
-use super::projection::{apply_operations, replay_tasks, validate_operations};
-use super::scheduler::{NextWork, QueuedWrite, Scheduler};
+use super::projection::{apply_operations, validate_operations};
+use super::scheduler::{QueuedWrite, Scheduler};
 
 mod admission;
 mod compaction;
 pub(super) mod failure;
+mod recovery;
+mod worker;
 pub(crate) use admission::TrySubmit;
 
 const TASK_STORE_DIR: &str = "task-store-v1";
@@ -50,11 +53,24 @@ pub struct TaskJournalStore {
 
 struct StoreInner {
     scheduler: Arc<Scheduler>,
+    catalog: Arc<RwLock<HashMap<String, TaskRecord>>>,
     projections: Arc<RwLock<HashMap<String, RecoveredTask>>>,
+    projection_load_lock: Arc<Mutex<()>>,
+    artifact_heads: Arc<Mutex<artifact::ReconciledArtifactHeads>>,
     tasks_root: PathBuf,
     worker: Mutex<Option<thread::JoinHandle<()>>>,
     failure_subscribers: Arc<Mutex<Vec<mpsc::Sender<TaskStorageFailure>>>>,
     fatal_events: Mutex<Option<Receiver<TaskStorageFatalFailure>>>,
+    faults: Arc<frame::FaultInjector>,
+}
+
+#[derive(Clone)]
+struct CommitContext {
+    tasks_root: PathBuf,
+    catalog: Arc<RwLock<HashMap<String, TaskRecord>>>,
+    projections: Arc<RwLock<HashMap<String, RecoveredTask>>>,
+    projection_load_lock: Arc<Mutex<()>>,
+    artifact_heads: Arc<Mutex<artifact::ReconciledArtifactHeads>>,
     faults: Arc<frame::FaultInjector>,
 }
 
@@ -96,10 +112,12 @@ impl TaskJournalStore {
         frame::create_directory_durably(&store_root, frame::JournalKind::Root, faults.as_ref())?;
         let tasks_root = store_root.join(TASKS_DIR);
         frame::create_directory_durably(&tasks_root, frame::JournalKind::Root, faults.as_ref())?;
-        let recovered = replay_tasks(&tasks_root)?;
-        failure::ensure_recovered_statuses(&tasks_root, &recovered)?;
-        let artifact_heads = artifact::reconcile(&tasks_root, &recovered)?;
-        let projections = Arc::new(RwLock::new(recovered));
+        let (catalog_records, initially_recovered) = recovery::open_catalog(&tasks_root)?;
+        failure::ensure_recovered_statuses(&tasks_root, &initially_recovered)?;
+        let catalog = Arc::new(RwLock::new(catalog_records));
+        let projections = Arc::new(RwLock::new(initially_recovered));
+        let projection_load_lock = Arc::new(Mutex::new(()));
+        let artifact_heads = Arc::new(Mutex::new(HashMap::new()));
         let scheduler = Arc::new(Scheduler::new());
         let commit_subscribers = Arc::new(Mutex::new(Vec::new()));
         let failure_subscribers = Arc::new(Mutex::new(Vec::new()));
@@ -109,25 +127,27 @@ impl TaskJournalStore {
             .lock()
             .expect("Task commit subscribers poisoned")
             .push(commit_sender);
-        let worker_projections = projections.clone();
-        let worker_tasks_root = tasks_root.clone();
+        let commit_context = CommitContext {
+            tasks_root: tasks_root.clone(),
+            catalog: catalog.clone(),
+            projections: projections.clone(),
+            projection_load_lock: projection_load_lock.clone(),
+            artifact_heads: artifact_heads.clone(),
+            faults: faults.clone(),
+        };
         let worker_scheduler = scheduler.clone();
         let worker_commit_subscribers = commit_subscribers.clone();
         let worker_failure_subscribers = failure_subscribers.clone();
-        let worker_faults = faults.clone();
         let worker = thread::Builder::new()
             .name("openaide-task-journal".to_string())
             .spawn(move || {
                 crate::logging::info("task_journal_worker_started", serde_json::json!({}));
                 let result = panic::catch_unwind(AssertUnwindSafe(|| {
-                    run_worker(
-                        worker_tasks_root,
-                        worker_projections,
+                    worker::run(
+                        commit_context,
                         worker_scheduler.clone(),
                         worker_commit_subscribers,
                         worker_failure_subscribers,
-                        artifact_heads,
-                        worker_faults,
                     )
                 }));
                 if result.is_err() {
@@ -150,7 +170,10 @@ impl TaskJournalStore {
             Self {
                 inner: Arc::new(StoreInner {
                     scheduler,
+                    catalog,
                     projections,
+                    projection_load_lock,
+                    artifact_heads,
                     tasks_root,
                     worker: Mutex::new(Some(worker)),
                     failure_subscribers,
@@ -209,6 +232,13 @@ impl TaskJournalStore {
 
     pub fn load(&self, task_id: &str) -> Result<TaskProjection, RuntimeError> {
         validate_task_id(task_id)?;
+        recovery::ensure_task_loaded(
+            &self.inner.tasks_root,
+            &self.inner.catalog,
+            &self.inner.projections,
+            &self.inner.projection_load_lock,
+            task_id,
+        )?;
         self.inner
             .projections
             .read()
@@ -222,34 +252,34 @@ impl TaskJournalStore {
             .ok_or_else(|| RuntimeError::TaskNotFound(task_id.to_string()))
     }
 
-    /// Returns one consistent clone of every available recovered projection.
-    /// A damaged Task stays isolated and is omitted from tolerant collection
-    /// reads; strict point reads still expose its stable storage failure.
-    pub fn list(&self) -> Vec<TaskProjection> {
+    /// Returns lightweight Task records without hydrating Chat or Tool details.
+    pub fn list_task_records(&self) -> Vec<TaskRecord> {
         self.inner
-            .projections
+            .catalog
             .read()
-            .expect("Task journal projections poisoned")
+            .expect("Task catalog poisoned")
             .values()
-            .filter_map(|task| match task {
-                RecoveredTask::Available { projection, .. } => Some(projection.as_ref().clone()),
-                RecoveredTask::Unavailable { .. } => None,
-            })
+            .cloned()
             .collect()
     }
 
-    /// Strict collection reads fail if any recovered Task is unavailable.
-    pub fn list_strict(&self) -> Result<Vec<TaskProjection>, RuntimeError> {
-        self.inner
+    /// Strict collection reads preserve fail-closed behavior for Tasks whose
+    /// journal had to be recovered while rebuilding a missing catalog.
+    pub fn list_task_records_strict(&self) -> Result<Vec<TaskRecord>, RuntimeError> {
+        if let Some(error) = self
+            .inner
             .projections
             .read()
             .expect("Task journal projections poisoned")
             .values()
-            .map(|task| match task {
-                RecoveredTask::Available { projection, .. } => Ok(projection.as_ref().clone()),
-                RecoveredTask::Unavailable { error } => Err(RuntimeError::Storage(error.clone())),
+            .find_map(|task| match task {
+                RecoveredTask::Unavailable { error } => Some(error.clone()),
+                RecoveredTask::Available { .. } => None,
             })
-            .collect()
+        {
+            return Err(RuntimeError::Storage(error));
+        }
+        Ok(self.list_task_records())
     }
 
     /// Loads Tool detail only when requested, bounded by the artifact head
@@ -261,19 +291,8 @@ impl TaskJournalStore {
     ) -> Result<ToolArtifactProjection, RuntimeError> {
         validate_task_id(task_id)?;
         artifact::validate_artifact_id(artifact_id)?;
+        let projection = self.load(task_id)?;
         let committed_head = {
-            let state = self
-                .inner
-                .projections
-                .read()
-                .expect("Task journal projections poisoned");
-            let projection = match state.get(task_id) {
-                Some(RecoveredTask::Available { projection, .. }) => projection,
-                Some(RecoveredTask::Unavailable { error }) => {
-                    return Err(RuntimeError::Storage(error.clone()))
-                }
-                None => return Err(RuntimeError::TaskNotFound(task_id.to_string())),
-            };
             projection
                 .artifact_heads
                 .get(artifact_id)
@@ -282,6 +301,21 @@ impl TaskJournalStore {
                     RuntimeError::Storage(format!("Tool artifact is not committed: {artifact_id}"))
                 })?
         };
+        let artifact_key = (task_id.to_string(), artifact_id.to_string());
+        let mut heads = self
+            .inner
+            .artifact_heads
+            .lock()
+            .expect("Tool artifact reconciliation lock poisoned");
+        if let std::collections::hash_map::Entry::Vacant(entry) = heads.entry(artifact_key) {
+            let reconciled = artifact::reconcile_one(
+                &self.inner.tasks_root,
+                task_id,
+                artifact_id,
+                committed_head,
+            )?;
+            entry.insert(reconciled);
+        }
         let mut artifact =
             artifact::load(&self.inner.tasks_root, task_id, artifact_id, committed_head)?;
         artifact.revision = committed_head;
@@ -310,68 +344,17 @@ impl TaskJournalStore {
     }
 }
 
-fn run_worker(
-    tasks_root: PathBuf,
-    projections: Arc<RwLock<HashMap<String, RecoveredTask>>>,
-    scheduler: Arc<Scheduler>,
-    commit_subscribers: Arc<Mutex<Vec<mpsc::Sender<CommittedTaskBatch>>>>,
-    failure_subscribers: Arc<Mutex<Vec<mpsc::Sender<TaskStorageFailure>>>>,
-    mut artifact_heads: artifact::ReconciledArtifactHeads,
-    faults: Arc<frame::FaultInjector>,
-) {
-    loop {
-        match scheduler.next() {
-            NextWork::Batch { task_id, writes } => {
-                faults.panic_if_armed();
-                let result = commit_batch(
-                    &tasks_root,
-                    &projections,
-                    &task_id,
-                    &writes,
-                    &mut artifact_heads,
-                    faults.as_ref(),
-                );
-                if let Ok(Some(committed)) = &result {
-                    broadcast(&commit_subscribers, committed.clone());
-                } else if result.is_err() {
-                    broadcast(
-                        &failure_subscribers,
-                        TaskStorageFailure {
-                            task_id: task_id.clone(),
-                        },
-                    );
-                }
-                let receipt_result = match result {
-                    Ok(Some(committed)) => Ok(committed),
-                    Ok(None) => current_commit(&projections, &task_id),
-                    Err(error) => Err(error),
-                };
-                resolve_batch(writes, receipt_result);
-            }
-            NextWork::Shutdown(reply) => {
-                let _ = reply.send(());
-                return;
-            }
-            NextWork::Closed => return,
-        }
-    }
-}
-
-fn broadcast<T: Clone>(subscribers: &Mutex<Vec<mpsc::Sender<T>>>, event: T) {
-    subscribers
-        .lock()
-        .expect("Task journal subscribers poisoned")
-        .retain(|subscriber| subscriber.send(event.clone()).is_ok());
-}
-
 fn commit_batch(
-    tasks_root: &Path,
-    projections: &RwLock<HashMap<String, RecoveredTask>>,
+    context: &CommitContext,
     task_id: &str,
     batch: &[QueuedWrite],
-    artifact_heads: &mut artifact::ReconciledArtifactHeads,
-    faults: &frame::FaultInjector,
 ) -> Result<Option<CommittedTaskBatch>, RuntimeError> {
+    let tasks_root = context.tasks_root.as_path();
+    let catalog_records = context.catalog.as_ref();
+    let projections = context.projections.as_ref();
+    let projection_load_lock = context.projection_load_lock.as_ref();
+    let artifact_heads = context.artifact_heads.as_ref();
+    let faults = context.faults.as_ref();
     let replaced_artifact_ids = batch
         .iter()
         .flat_map(|queued| queued.write.artifacts.iter())
@@ -382,9 +365,15 @@ fn commit_batch(
         .collect();
     let mut reduced = reduce_batch(batch);
     let compaction = compaction::requested_compaction(batch);
-    // The worker is the sole writer, so one target clone is a stable private
-    // draft. Reads of unrelated Tasks remain available while physical I/O is
-    // in progress, and commit cost does not scale with all stored histories.
+    recovery::ensure_task_loaded(
+        tasks_root,
+        catalog_records,
+        projections,
+        projection_load_lock,
+        task_id,
+    )?;
+    // The sole writer drafts one Task without holding the root projection lock,
+    // so unrelated reads stay available during physical I/O.
     let current_task = projections
         .read()
         .expect("Task journal projections poisoned")
@@ -414,11 +403,17 @@ fn commit_batch(
     if reduced.task_operations.is_empty() && reduced.artifacts.is_empty() {
         let mut next_task =
             current_task.ok_or_else(|| RuntimeError::TaskNotFound(task_id.to_string()))?;
-        if let Err(error) =
-            compaction::compact_task(tasks_root, &mut next_task, task_id, compaction, faults)
-        {
-            quarantine_or_abort(tasks_root, task_id);
-            return Err(freeze_shared_task(projections, task_id, error));
+        let compacted =
+            match compaction::compact_task(tasks_root, &mut next_task, task_id, compaction, faults)
+            {
+                Ok(compacted) => compacted,
+                Err(error) => {
+                    quarantine_or_abort(tasks_root, task_id);
+                    return Err(freeze_shared_task(projections, task_id, error));
+                }
+            };
+        if compacted {
+            recovery::publish_catalog(tasks_root, catalog_records, task_id, &next_task)?;
         }
         projections
             .write()
@@ -484,9 +479,8 @@ fn commit_batch(
         sequence,
         operations: reduced.task_operations,
     };
-    // Run the one reducer on a clone before touching disk. After the journal
-    // sync, publication is an infallible state swap rather than a second
-    // validation/application path that could disagree with durable bytes.
+    // Reduce on a clone before I/O so publication after sync is an infallible
+    // state swap, never a second path that can disagree with durable bytes.
     let mut next_state = HashMap::new();
     if let Some(current_task) = current_task {
         next_state.insert(task_id.to_string(), current_task);
@@ -498,9 +492,22 @@ fn commit_batch(
     let has_artifact_reference = !planned_artifacts.is_empty();
     let mut artifact_changes = Vec::new();
     for (artifact_id, committed_head, operations) in planned_artifacts {
-        let reconciled_head = artifact_heads
-            .get(&(task_id.to_string(), artifact_id.clone()))
-            .copied();
+        let mut artifact_heads = artifact_heads
+            .lock()
+            .expect("Tool artifact reconciliation lock poisoned");
+        let artifact_key = (task_id.to_string(), artifact_id.clone());
+        if !artifact_heads.contains_key(&artifact_key) {
+            let reconciled =
+                match artifact::reconcile_one(tasks_root, task_id, &artifact_id, committed_head) {
+                    Ok(reconciled) => reconciled,
+                    Err(error) => {
+                        quarantine_or_abort(tasks_root, task_id);
+                        return Err(freeze_shared_task(projections, task_id, error));
+                    }
+                };
+            artifact_heads.insert(artifact_key.clone(), reconciled);
+        }
+        let reconciled_head = artifact_heads.get(&artifact_key).copied();
         let change = match artifact::prepare_reconciled_with_faults(
             tasks_root,
             task_id,
@@ -516,10 +523,7 @@ fn commit_batch(
                 return Err(freeze_shared_task(projections, task_id, error));
             }
         };
-        artifact_heads.insert(
-            (task_id.to_string(), artifact_id.clone()),
-            change.artifact_sequence,
-        );
+        artifact_heads.insert(artifact_key, change.artifact_sequence);
         artifact_changes.push(change);
     }
     let journal_kind = if has_artifact_reference {
@@ -544,6 +548,11 @@ fn commit_batch(
                 return Err(freeze_shared_task(projections, task_id, error));
             }
         };
+    if let Err(error) = recovery::publish_catalog(tasks_root, catalog_records, task_id, &next_task)
+    {
+        quarantine_or_abort(tasks_root, task_id);
+        return Err(freeze_shared_task(projections, task_id, error));
+    }
     projections
         .write()
         .expect("Task journal projections poisoned")

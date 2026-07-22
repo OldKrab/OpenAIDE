@@ -17,6 +17,14 @@ Chat, lifecycle state, Task-local ordering, and lazy Tool-detail artifacts.
 Projects, Agents, settings, worktree inventory, diagnostics, and other
 state-root stores remain unchanged.
 
+Task Navigation uses a small per-Task catalog projection containing the durable
+`TaskRecord` plus a stamp of the journal bytes from which it was produced. The
+canonical Task journal remains authoritative. Catalog files are disposable:
+they are atomically replaced after commits without adding another durability
+sync, and a missing, malformed, or stale stamp is rebuilt by replaying only its
+Task. A catalog written by an earlier release is therefore a startup cache, not
+a second source of truth.
+
 Exactly one App Server process owns a state root. App Shell clients attach to
 that process instead of opening Task storage independently. Inside the process,
 one fair storage worker serializes physical writes while maintaining bounded
@@ -69,6 +77,18 @@ untouched. Only an incomplete final frame is discarded automatically after a
 crash. Replay, live mutation, compaction, and tests use the same normalized Task
 model.
 
+Startup reads catalog projections for Task Navigation but does not replay
+cataloged Chat histories. Full `TaskProjection` replay happens on the first
+point read or write for that Task and is cached for the process lifetime.
+Concurrent readers and the sole writer cross one internal hydration gate, so a
+Task cannot be replayed against a simultaneous append. Existing journals are
+replayed once to create their first catalog; later starts remain proportional
+to catalog size rather than retained Chat size. A stale catalog discovered
+after an interrupted journal/cache publication is repaired from the journal.
+Restart recovery first derives its eligibility plan from catalog metadata and
+hydrates only Tasks with volatile state to repair; stable Tasks must not be
+replayed merely to prove that no recovery is required.
+
 At an idle prompt boundary, the worker may compact a Task journal whose obsolete
 record count or byte ratio crosses a measured threshold. Compaction writes and
 syncs a unique sibling temporary journal, validates it through normal replay,
@@ -99,12 +119,14 @@ Task replay records committed artifact heads. Tool-detail replay exposes only
 frames at or below those heads. A missing or corrupt artifact makes that Tool
 detail unavailable without making the Task snapshot unreadable.
 
-Startup validates artifact journals with a streaming scan that retains frame
-offsets rather than lifetime output payloads. Normal appends trust the
-startup-reconciled head and append directly; an uncertain prepare or Task-head
-commit freezes that Task instead of replaying or retrying. Reconciliation skips
-unavailable or quarantined Tasks because no authoritative head exists and their
-original artifact bytes are diagnostic evidence.
+Artifact journals are not scanned at startup or when only Task Navigation or
+Chat is requested. The first read or write of one Tool detail reconciles only
+that artifact against the committed head recovered from its Task journal. A
+shared internal reconciliation gate prevents a lazy read from truncating while
+the sole writer appends. Later appends trust the process-cached reconciled head;
+an uncertain prepare or Task-head commit freezes that Task instead of replaying
+or retrying. Unavailable or quarantined Tasks never reconcile artifacts because
+no authoritative head exists and their original bytes are diagnostic evidence.
 
 The first implementation does not rewrite large artifact journals. It may append
 structured-detail checkpoints and index frame offsets for lazy reads. Automatic
@@ -165,6 +187,10 @@ artifact commit is ordered by its Tool-detail subscription cursor.
 The replacement does not cut over until all of the following pass:
 
 - deterministic replay matches an independent reference model;
+- startup and Task Navigation do not read cataloged Chat or artifact journals;
+- restart recovery rejects stable Tasks from catalog metadata before hydration;
+- first Task access replays only that Task, and first Tool-detail access
+  reconciles only that artifact under concurrent read/write stress;
 - restart fault injection covers every write, sync, artifact-reference, and
   compaction publication boundary;
 - incomplete-tail recovery and visible non-tail corruption behavior are proven;
