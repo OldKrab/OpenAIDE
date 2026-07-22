@@ -20,6 +20,9 @@ pub enum TaskPreparationRecord {
     },
     Failed {
         message: String,
+        /// The empty Prepared Task can be replaced because its Agent-owned session vanished.
+        #[serde(default)]
+        native_session_missing: bool,
     },
 }
 

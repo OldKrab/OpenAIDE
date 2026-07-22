@@ -966,7 +966,7 @@ fn create_projects_native_session_start_failure_into_send_readiness() {
     );
     assert!(matches!(
         failed_record.preparation,
-        TaskPreparationRecord::Failed { ref message }
+        TaskPreparationRecord::Failed { ref message, .. }
             if message.contains("agent failed to start")
     ));
     assert_eq!(failed_record.agent_session_id, None);
@@ -1291,7 +1291,7 @@ fn acquire_returns_while_prepared_session_resume_is_blocked() {
 }
 
 #[test]
-fn missing_prepared_session_fails_without_replacing_the_task_binding() {
+fn reacquiring_replaces_a_prepared_task_whose_native_session_is_missing() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut draft = task_record("task-draft", "/tmp/openaide-unit-workspace/app");
@@ -1310,12 +1310,13 @@ fn missing_prepared_session_fails_without_replacing_the_task_binding() {
         TaskUpdateNotifier::disabled(),
     )
     .unwrap();
-    api.create_for_test(TaskAcquireParams {
+    let params = TaskAcquireParams {
         project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
         agent_id: AgentId::from("codex"),
         workspace_root: None,
-    })
-    .unwrap();
+    };
+    let stale = api.create_for_test(params.clone()).unwrap();
+    assert_eq!(stale.task.task_id.as_str(), "task-draft");
     wait_until(|| {
         matches!(
             store.read_task("task-draft").unwrap().preparation,
@@ -1323,15 +1324,24 @@ fn missing_prepared_session_fails_without_replacing_the_task_binding() {
         )
     });
 
-    let error = api.send(send_params("task-draft", "hello")).unwrap_err();
-    assert_eq!(error.code, ProtocolErrorCode::Internal);
-    assert!(agent.resumes.load(Ordering::SeqCst) >= 1);
+    let replacement = api.create_for_test(params).unwrap();
+    let replacement_id = replacement.task.task_id.as_str().to_string();
+    assert_ne!(replacement_id, "task-draft");
+    wait_until(|| {
+        matches!(
+            store.read_task(&replacement_id).unwrap().preparation,
+            TaskPreparationRecord::Ready
+        )
+    });
+
+    assert!(store.read_task("task-draft").unwrap().tombstoned);
+    assert_eq!(agent.resumes.load(Ordering::SeqCst), 1);
     assert_eq!(agent.loads.load(Ordering::SeqCst), 0);
-    assert_eq!(agent.starts.load(Ordering::SeqCst), 0);
+    assert_eq!(agent.starts.load(Ordering::SeqCst), 1);
     assert_eq!(agent.prompts.load(Ordering::SeqCst), 0);
     assert_eq!(
-        store.read_task("task-draft").unwrap().agent_session_id,
-        Some("missing-session".to_string())
+        store.read_task(&replacement_id).unwrap().agent_session_id,
+        Some("recorded-session".to_string())
     );
 }
 
@@ -6209,8 +6219,8 @@ impl AgentRuntime for RecordingAgent {
             std::thread::sleep(Duration::from_millis(10));
         }
         if self.resume_session_missing {
-            return Err(RuntimeError::Internal(
-                "ACP session is missing from the runtime".to_string(),
+            return Err(RuntimeError::TaskNotFound(
+                "Native Session missing-session".to_string(),
             ));
         }
         if self.resume_after_restart_unavailable && !self.active_after_load.load(Ordering::SeqCst) {

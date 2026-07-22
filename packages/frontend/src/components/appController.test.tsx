@@ -1515,6 +1515,80 @@ describe("app controller mounted lifecycle", () => {
     expect(latestController?.state.newTask.prompt).toBe("Keep this draft");
   });
 
+  it("replaces a Prepared Task whose native session vanished without losing its draft", async () => {
+    const missingSession = deferredValue<ReturnType<typeof taskSubscriptionSnapshot>>();
+    let acquireCount = 0;
+    const request = vi.fn(async (method: string, params?: { scope?: { kind: string; taskId?: string } }) => {
+      if (method === STATE_SUBSCRIBE && params?.scope) {
+        if (params.scope.kind === "task" && params.scope.taskId === "task_stale") {
+          return missingSession.promise;
+        }
+        if (params.scope.kind === "task" && params.scope.taskId === "task_replacement") {
+          return taskSubscriptionSnapshot(
+            "cursor_task_replacement",
+            protocolTaskSnapshot("task_replacement", "New task", { hasMessages: false }),
+          );
+        }
+        return nonTaskSubscriptionSnapshot(params.scope);
+      }
+      if (method === AGENT_LIST_SESSIONS) {
+        return { agentId: "codex", projectLabel: "OpenAIDE", sessions: [], nextCursor: null };
+      }
+      if (method === TASK_ACQUIRE) {
+        acquireCount += 1;
+        return {
+          task: protocolTaskSnapshot(
+            acquireCount === 1 ? "task_stale" : "task_replacement",
+            "New task",
+            { hasMessages: false },
+          ),
+        };
+      }
+      throw new Error(method);
+    });
+    backendConnection = {
+      initialize: vi.fn(async () => ({ snapshot: clientSnapshot({ includeActiveTask: false }) })),
+      request: request as unknown as BackendConnection["request"],
+      handleNotification: defaultHandleNotification,
+      close: vi.fn(),
+    };
+    bootstrap = webTaskBootstrap(undefined, "project_1");
+
+    await act(async () => {
+      create(<ControllerProbe />);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    act(() => {
+      latestController?.dispatch({
+        type: "taskInput:prompt",
+        taskId: "task_stale",
+        prompt: "Keep this draft",
+      });
+    });
+
+    const failedTask = protocolTaskSnapshot("task_stale", "New task", { hasMessages: false });
+    failedTask.revision = 2;
+    failedTask.preparation = {
+      kind: "failed",
+      error: { code: "notFound", message: "Native Session no longer exists" },
+      actions: ["retry", "discard"],
+    };
+    await act(async () => {
+      missingSession.resolve(taskSubscriptionSnapshot("cursor_task_stale", failedTask));
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(request.mock.calls.filter(([method]) => method === TASK_ACQUIRE)).toHaveLength(2);
+    expect(request.mock.calls.filter(([method]) => method === TASK_RELEASE)).toEqual([]);
+    expect(latestController?.newTaskSnapshot?.task.task_id).toBe("task_replacement");
+    expect(latestController?.state.taskInputs.task_replacement?.prompt).toBe("Keep this draft");
+    expect(latestController?.state.taskInputs.task_stale).toBeUndefined();
+  });
+
   it("keeps prepared Agent options visible while an expired lease is reacquired", async () => {
     let publishRecoveryBaseline: ((baseline: BackendRecoveryBaseline) => void) | undefined;
     let publishInvalidation: Parameters<BackendConnection["handleGenerationInvalidated"]>[0] | undefined;

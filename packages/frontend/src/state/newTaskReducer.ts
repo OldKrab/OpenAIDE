@@ -26,6 +26,7 @@ type NewTaskAction =
   | { type: "submit:attachments:invalidate"; taskId: string; message: string }
   | { type: "newTask:reset" }
   | { type: "newTask:prepared"; taskId: string }
+  | { type: "newTask:replaced"; staleTaskId: string; taskId: string }
   | { type: "newTask:leaseExpired"; taskId: string; message: string; configOptions?: ConfigOptionsCatalog }
   | { type: "newTask:agent"; agentId: string; agentLabel?: string; newTaskId?: string }
   | { type: "newTask:project"; project: ProjectOption; newTaskId?: string }
@@ -137,6 +138,16 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
       };
     case "newTask:prepared": {
       return state;
+    }
+    case "newTask:replaced": {
+      const staleInput = state.taskInputs[action.staleTaskId];
+      const { [action.staleTaskId]: _staleInput, ...taskInputs } = state.taskInputs;
+      return {
+        ...state,
+        taskInputs: staleInput
+          ? { ...taskInputs, [action.taskId]: staleInput }
+          : taskInputs,
+      };
     }
     case "newTask:leaseExpired": {
       const preparedInput = state.taskInputs[action.taskId];

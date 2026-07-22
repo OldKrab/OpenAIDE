@@ -82,7 +82,10 @@ impl TaskProductApi {
                     // Preserve the durable Native Session identity so retry can resume it.
                     task.config_options_catalog = None;
                     task.agent_commands_catalog = None;
-                    task.preparation = TaskPreparationRecord::Failed { message };
+                    task.preparation = TaskPreparationRecord::Failed {
+                        message,
+                        native_session_missing: false,
+                    };
                     Ok(TaskMutationResult::Changed)
                 },
             )?;
@@ -112,7 +115,7 @@ pub(super) fn reject_if_preparation_not_ready(task: &TaskRecord) -> Result<(), P
             recoverable: true,
             target: None,
         }),
-        TaskPreparationRecord::Failed { message } => Err(ProtocolError {
+        TaskPreparationRecord::Failed { message, .. } => Err(ProtocolError {
             code: ProtocolErrorCode::Internal,
             message: format!("Task Agent preparation failed: {message}"),
             recoverable: true,
@@ -141,6 +144,7 @@ fn preparation_failure_record(error: &RuntimeError) -> TaskPreparationRecord {
         Some((reason, message)) => TaskPreparationRecord::Blocked { reason, message },
         None => TaskPreparationRecord::Failed {
             message: error.to_string(),
+            native_session_missing: matches!(error, RuntimeError::TaskNotFound(_)),
         },
     }
 }

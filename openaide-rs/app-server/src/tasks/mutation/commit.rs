@@ -136,6 +136,56 @@ pub(super) fn acquire_prepared_task(
                 "Release the current Prepared Task before acquiring another context".to_string(),
             ));
         }
+        if matches!(
+            existing.preparation,
+            crate::storage::records::TaskPreparationRecord::Failed {
+                native_session_missing: true,
+                ..
+            }
+        ) {
+            let original = existing.clone();
+            let mut stale = original.clone();
+            stale.lifecycle = TaskLifecycle::New { lease: None };
+            stale.tombstoned = true;
+            stale.updated_at = task.updated_at.clone();
+            let stale_facts = persist_changed_task(
+                target,
+                &original,
+                &mut stale,
+                TaskCommitOptions::metadata(),
+                Vec::new(),
+                Vec::new(),
+            )?;
+
+            let replacement_task_id = task.task_id.clone();
+            let mut replacement = task;
+            let facts = persist_new_task(
+                target,
+                &mut replacement,
+                initial_messages,
+                |_store, _task| Ok(()),
+            )?;
+            // Publish only after both records are durable so observers never see
+            // the client between Prepared-Task identities.
+            notify_task_changed(target, &stale_facts);
+            notify_task_changed(target, &facts);
+            let response_snapshot = match options.response_snapshot_tail_limit {
+                Some(limit) => Some(build_snapshot(&target.store, &replacement_task_id, limit)?),
+                None => None,
+            };
+            crate::logging::info(
+                "prepared_task_replaced",
+                serde_json::json!({
+                    "stale_task_id": stale.task_id,
+                    "replacement_task_id": replacement_task_id,
+                    "reason": "native_session_missing",
+                }),
+            );
+            return Ok(TaskCommitResult {
+                outcome: TaskCommitOutcome::Committed(facts),
+                response_snapshot,
+            });
+        }
         let response_snapshot = match options.response_snapshot_tail_limit {
             Some(limit) => Some(build_snapshot(&target.store, &existing.task_id, limit)?),
             None => None,

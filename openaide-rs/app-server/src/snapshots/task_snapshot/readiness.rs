@@ -41,8 +41,11 @@ pub(super) fn preparation_snapshot(preparation: &TaskPreparationRecord) -> TaskP
             },
             actions: setup_blocker_actions(*reason),
         },
-        TaskPreparationRecord::Failed { message } => TaskPreparationSnapshot::Failed {
-            error: preparation_error(message),
+        TaskPreparationRecord::Failed {
+            message,
+            native_session_missing,
+        } => TaskPreparationSnapshot::Failed {
+            error: preparation_error(message, *native_session_missing),
             actions: vec![TaskPreparationAction::Retry, TaskPreparationAction::Discard],
         },
     }
@@ -78,11 +81,11 @@ pub(super) fn agent_config_snapshot(snapshot: &StoredTaskSnapshot) -> TaskAgentC
             pending_change: None,
             error: Some(setup_blocker_error(*reason, message)),
         },
-        TaskPreparationRecord::Failed { message } => TaskAgentConfigSnapshot {
+        TaskPreparationRecord::Failed { message, .. } => TaskAgentConfigSnapshot {
             state: LiveSessionDataState::Failed,
             options: Vec::new(),
             pending_change: None,
-            error: Some(preparation_error(message)),
+            error: Some(preparation_error(message, false)),
         },
     }
 }
@@ -177,10 +180,10 @@ pub(super) fn agent_commands_snapshot(snapshot: &StoredTaskSnapshot) -> TaskAgen
             commands: Vec::new(),
             error: Some(setup_blocker_error(*reason, message)),
         },
-        TaskPreparationRecord::Failed { message } => TaskAgentCommandsSnapshot {
+        TaskPreparationRecord::Failed { message, .. } => TaskAgentCommandsSnapshot {
             state: LiveSessionDataState::Failed,
             commands: Vec::new(),
-            error: Some(preparation_error(message)),
+            error: Some(preparation_error(message, false)),
         },
     }
 }
@@ -210,7 +213,7 @@ pub(super) fn send_capability_for_task(
                 }],
             };
         }
-        TaskPreparationRecord::Failed { message } => {
+        TaskPreparationRecord::Failed { message, .. } => {
             return TaskSendCapabilitySnapshot {
                 state: TaskSendCapabilityState::Failed,
                 blockers: vec![TaskSendBlocker {
@@ -253,9 +256,13 @@ pub(super) fn send_capability_for_task(
     }
 }
 
-fn preparation_error(message: &str) -> ProtocolError {
+fn preparation_error(message: &str, native_session_missing: bool) -> ProtocolError {
     ProtocolError {
-        code: ProtocolErrorCode::Internal,
+        code: if native_session_missing {
+            ProtocolErrorCode::NotFound
+        } else {
+            ProtocolErrorCode::Internal
+        },
         message: message.to_string(),
         recoverable: true,
         target: None,

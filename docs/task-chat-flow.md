@@ -117,6 +117,8 @@ App Server serializes acquisition and:
 
 Concurrent duplicate acquisition requests for one client and key return the same Task id. Only ready, unleased, zero-message Tasks are reusable; a missing free entry creates and prepares another Task.
 
+A leased Prepared Task whose immutable Native Session is definitively missing is the one exception to same-id reacquisition. App Server projects that preparation failure as `notFound`. Frontend automatically repeats `task/acquire` for the same key without first releasing the stale lease. Under the acquisition lock, App Server tombstones the failed zero-message Task, persists and leases a fresh Prepared Task, then publishes both changes and returns the replacement snapshot. Frontend adopts the replacement Task id and transfers its Composer draft. This recovery is automatic only because no User message or Agent work was ever accepted; Native Session loss for a visible Task remains an explicit failure and never changes that Task's binding.
+
 ### Worktree repositories and Task Workspaces
 
 When a Project root is itself Git's reported top-level working tree, App Server resolves its canonical Git common directory and exposes one Worktree Repository identity shared by the primary checkout and linked worktrees. OpenAIDE does not walk upward from a nested Project folder and does not unify separate clones by remote URL.

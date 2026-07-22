@@ -28,6 +28,7 @@ export class NewTaskController {
   private cachedSnapshot?: TaskSnapshot;
   private settledConfigOptions?: ConfigOptionsCatalog;
   private expiredLeaseTaskId?: TaskId;
+  private replacementRequired?: { taskId: TaskId; revision: number };
   private generation = 0;
   private preparationReset = 0;
   private readonly listeners = new Set<() => void>();
@@ -55,6 +56,25 @@ export class NewTaskController {
     }
     const taskId = this.cachedSnapshot?.task.task_id ?? this.current?.taskId;
     if (taskId !== undefined && taskId !== snapshot.task.task_id) return false;
+    if (
+      snapshot.preparation?.kind === "failed"
+      && snapshot.preparation.recovery === "replaceTask"
+    ) {
+      const taskId = snapshot.task.task_id as TaskId;
+      if (!this.replacementRequired || snapshot.revision > this.replacementRequired.revision) {
+        this.replacementRequired = { taskId, revision: snapshot.revision };
+        this.cachedSnapshot = snapshot;
+        this.emit();
+      }
+      return true;
+    }
+    if (
+      this.replacementRequired?.taskId === snapshot.task.task_id
+      && snapshot.revision <= this.replacementRequired.revision
+    ) return true;
+    if (this.replacementRequired?.taskId === snapshot.task.task_id) {
+      this.replacementRequired = undefined;
+    }
     // Async preparation, subscriptions, and attachment work can settle out of
     // order. A delayed acquire result must never roll a ready composer back to
     // an older "preparing" revision.
@@ -89,6 +109,28 @@ export class NewTaskController {
     if (this.expiredLeaseTaskId === snapshot.task.task_id) this.expiredLeaseTaskId = undefined;
     if (!this.updateSnapshot(snapshot)) return undefined;
     return this.claim({ attachmentResources, preparationKey, taskId: snapshot.task.task_id as TaskId });
+  }
+
+  /** Atomically adopts the server replacement without releasing the stale lease first. */
+  retainReplacement({
+    attachmentResources,
+    preparationKey,
+    snapshot,
+    staleTaskId,
+  }: {
+    attachmentResources?: ComposerAttachmentResourceOwner;
+    preparationKey: string;
+    snapshot: TaskSnapshot;
+    staleTaskId: TaskId;
+  }) {
+    if (this.currentTaskId() !== staleTaskId || this.replacementRequired?.taskId !== staleTaskId) {
+      return undefined;
+    }
+    this.generation += 1;
+    this.current = undefined;
+    this.cachedSnapshot = undefined;
+    this.replacementRequired = undefined;
+    return this.retain({ attachmentResources, preparationKey, snapshot });
   }
 
   claim({
@@ -128,6 +170,10 @@ export class NewTaskController {
 
   preparationResetKey() {
     return this.preparationReset;
+  }
+
+  taskRequiringReplacement() {
+    return this.replacementRequired?.taskId;
   }
 
   /** Requests the retained New Task context be prepared again after recovery. */
@@ -196,6 +242,7 @@ export class NewTaskController {
     this.generation += 1;
     this.current = undefined;
     this.expiredLeaseTaskId = undefined;
+    this.replacementRequired = undefined;
     this.settledConfigOptions = undefined;
     this.cachedSnapshot = undefined;
     this.disposals.clear();
@@ -211,6 +258,7 @@ export class NewTaskController {
     this.preparationReset += 1;
     this.current = undefined;
     this.expiredLeaseTaskId = lease.taskId;
+    this.replacementRequired = undefined;
     if (this.cachedSnapshot?.task.task_id === lease.taskId) this.cachedSnapshot = undefined;
     this.emit();
     return lease.taskId;
