@@ -69,8 +69,10 @@ fn compare_legacy_rewrites_with_task_journal_deltas() {
     assert!(journals.iter().all(|journal| {
         journal["operations"] == FULL_DELTA_COUNT
             && journal["publication_events"] == journal["durable_batches"]
+            // Each batch durably publishes artifact bytes, its Chat reference,
+            // and compact Task metadata; the first artifact adds four anchors.
             && journal["sync_calls"].as_u64().unwrap()
-                == journal["durable_batches"].as_u64().unwrap() * 2 + 2
+                == journal["durable_batches"].as_u64().unwrap() * 3 + 4
             && journal["peak_task_queued_bytes"].as_u64().unwrap() <= 2 * 1024 * 1024
             && journal["shutdown_publication_events"].as_u64().unwrap() <= 50
     }));

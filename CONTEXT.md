@@ -12,6 +12,14 @@ _Avoid_: Alternate product names
 A visible unit of agent work in OpenAIDE's task list that has status, Project Context, Agent selection, and one immutable Agent-owned Native Session binding. It becomes visible through a durably accepted user message or successful Native Session adoption.
 _Avoid_: Chat, conversation
 
+**Durable Task Metadata**:
+The Task facts that remain authoritative independently of Chat, including title, Archive state, Project Context, Agent and Native Session binding, and explicit user preferences.
+_Avoid_: Live Agent catalogs, transient turn state, treating all Task presentation state as durable metadata
+
+**Transient Task Runtime State**:
+Process-owned Task state that is valid only while its App Server and Native Session are live, including Agent command and Configuration Option catalogs, pending requests, and active runtime controls.
+_Avoid_: Restoring transient controls as durable Task truth after restart
+
 **Task Activity Time**:
 The latest known work or conversation activity for a Task, advanced monotonically by OpenAIDE activity or a newer timestamp from its bound Native Session.
 _Avoid_: Task record update time, moving activity backward

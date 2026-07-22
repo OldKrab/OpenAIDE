@@ -393,7 +393,7 @@ fn streamed_agent_text_materializes_large_history_only_once() {
         .unwrap();
     let journal = dir
         .path()
-        .join("task-store-v1/tasks/task_stream_cache/task.journal");
+        .join("task-store-v1/tasks/task_stream_cache/chat.journal");
     let before_stream = journal.metadata().unwrap().len();
 
     for text in [" first", " second"] {
@@ -654,10 +654,9 @@ fn create_task_persists_initial_history_in_one_message_batch() {
         .path()
         .join("tasks/task_bulk_history/messages.jsonl")
         .exists());
-    assert!(dir
-        .path()
-        .join("task-store-v1/tasks/task_bulk_history/task.journal")
-        .exists());
+    let task_dir = dir.path().join("task-store-v1/tasks/task_bulk_history");
+    assert!(task_dir.join("task.json").exists());
+    assert!(task_dir.join("chat.snapshot").exists());
 }
 
 #[test]

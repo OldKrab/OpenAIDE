@@ -97,11 +97,8 @@ fn task_storage_failure_cancels_the_live_agent_turn() {
     agent.wait_for_prompt();
 
     let task_id = created.task.task_id;
-    let journal = state_root
-        .join("task-store-v1/tasks")
-        .join(&task_id)
-        .join("task.journal");
-    std::fs::set_permissions(&journal, std::fs::Permissions::from_mode(0o444)).unwrap();
+    let task_dir = state_root.join("task-store-v1/tasks").join(&task_id);
+    std::fs::set_permissions(&task_dir, std::fs::Permissions::from_mode(0o555)).unwrap();
     let mut task = store.read_task(&task_id).unwrap();
     task.status = TaskStatus::Completed;
     store
@@ -112,7 +109,7 @@ fn task_storage_failure_cancels_the_live_agent_turn() {
         .expect_err("write failure freezes the Task");
 
     agent.wait_for_cancel();
-    std::fs::set_permissions(&journal, std::fs::Permissions::from_mode(0o644)).unwrap();
+    std::fs::set_permissions(&task_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
     assert_eq!(agent.cancel_count.load(Ordering::SeqCst), 1);
 }
 

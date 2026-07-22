@@ -219,7 +219,7 @@ describe("RuntimeProcess App Server handoff", () => {
     const runtime = new RuntimeProcess(context(), logger());
 
     const connectionPromise = runtime.startAppServerConnection();
-    vi.advanceTimersByTime(5_000);
+    vi.advanceTimersByTime(60_000);
 
     await expect(connectionPromise).rejects.toThrow("timed out");
     expect(child.kill).toHaveBeenCalledOnce();

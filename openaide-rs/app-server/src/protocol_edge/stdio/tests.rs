@@ -1178,7 +1178,7 @@ fn dispatcher_startup_isolates_damaged_task_storage() {
     corrupt_last_byte(
         &temp
             .path()
-            .join("task-store-v1/tasks/corrupt-task/task.journal"),
+            .join("task-store-v1/tasks/corrupt-task/task.json"),
     );
     let state_root = StateRoot::resolve(temp.path()).expect("state root");
     let mut dispatcher = ProtocolEdgeStdioDispatcher::new_for_test(state_root);
@@ -1786,20 +1786,7 @@ fn runtime_task_update_notification_emits_app_event_after_agent_completion() {
         .to_string(),
     );
 
-    let deadline = Instant::now() + Duration::from_secs(1);
-    let mut saw_completion_event = false;
-    while Instant::now() < deadline {
-        let notification = notifications
-            .recv_timeout(Duration::from_millis(50))
-            .expect("task update notification");
-        let messages = dispatcher.handle_task_update(notification);
-        if messages.iter().any(|line| completed_task_event(line)) {
-            saw_completion_event = true;
-            break;
-        }
-    }
-
-    assert!(saw_completion_event);
+    wait_for_protocol_task_status(&mut dispatcher, &notifications, "task-existing", "idle");
 }
 
 #[test]
@@ -2542,14 +2529,6 @@ fn open_store_after_dispatcher_drop(path: &std::path::Path) -> Store {
             Err(error) => panic!("store should reopen after dispatcher drop: {error}"),
         }
     }
-}
-
-fn completed_task_event(line: &str) -> bool {
-    let value = serde_json::from_str::<Value>(line).expect("event json");
-    value["method"] == "app/event"
-        && value["params"]["payload"]["kind"] == "taskChanged"
-        && value["params"]["payload"]["taskId"] == "task-existing"
-        && value["params"]["payload"]["changes"]["task"]["status"] == "idle"
 }
 
 fn event_payload_kind(line: &str, kind: &str) -> bool {

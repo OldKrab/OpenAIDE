@@ -2,12 +2,14 @@ import { ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import * as path from "node:path";
 import * as vscode from "vscode";
 import type { WebviewAppServerConnection } from "@openaide/app-shell-contracts";
+import {
+  APP_SERVER_HANDOFF_MAX_LINE_BYTES,
+  APP_SERVER_HANDOFF_TIMEOUT_MS,
+} from "@openaide/app-server-client";
 import { ExtensionLogger } from "../logging/logger";
 import { resolveRuntimePath, type RuntimeSourceKind, type StorageRootKind } from "./paths";
 
 export const RUNTIME_SHUTDOWN_GRACE_MS = 10_000;
-const APP_SERVER_HANDOFF_TIMEOUT_MS = 5_000;
-const APP_SERVER_HANDOFF_MAX_LINE_BYTES = 8 * 1024;
 const APP_SERVER_HEALTH_INTERVAL_MS = 5_000;
 const APP_SERVER_HEALTH_TIMEOUT_MS = 3_000;
 const APP_SERVER_HEALTH_FAILURE_THRESHOLD = 2;

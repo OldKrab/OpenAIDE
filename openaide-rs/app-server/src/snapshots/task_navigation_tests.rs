@@ -229,7 +229,7 @@ fn storage_read_failure_is_isolated_from_navigation() {
         .write_task(&task_record("corrupt", "Task", "1"))
         .unwrap();
     drop(store);
-    corrupt_last_byte(&temp.path().join("task-store-v1/tasks/corrupt/task.journal"));
+    corrupt_last_byte(&temp.path().join("task-store-v1/tasks/corrupt/task.json"));
     let store = Store::open(temp.path().to_path_buf()).unwrap();
 
     let snapshot = TaskNavigationStore::new(store).snapshot(None).unwrap();

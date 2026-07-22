@@ -22,6 +22,7 @@ env_override_names=(
   OPENAIDE_WEB_SKIP_BUILD
   OPENAIDE_WEB_DAEMON
   OPENAIDE_WEB_SYSTEMD_UNIT
+  OPENAIDE_WEB_START_TIMEOUT_MS
   OPENAIDE_WEB_SMOKE
   OPENAIDE_WEB_SMOKE_TIMEOUT_MS
   OPENAIDE_WEB_SMOKE_SEND_TIMEOUT_MS
@@ -92,6 +93,7 @@ static_root_file="$pid_file.static-root"
 lock_file="${OPENAIDE_WEB_LOCK_FILE:-/tmp/openaide-local-web-$port.lock}"
 daemon_mode="${OPENAIDE_WEB_DAEMON:-background}"
 systemd_unit="${OPENAIDE_WEB_SYSTEMD_UNIT:-openaide-local-web-$port}"
+start_timeout_ms="${OPENAIDE_WEB_START_TIMEOUT_MS:-75000}"
 # Keep JavaScript stack traces mapped to their TypeScript sources in every local role.
 node_options="${NODE_OPTIONS:-}"
 if [[ " $node_options " != *" --enable-source-maps "* ]]; then
@@ -251,6 +253,34 @@ smoke_if_requested() {
   fi
 }
 
+wait_for_web_ready() {
+  if [[ ! "$start_timeout_ms" =~ ^[1-9][0-9]*$ ]]; then
+    echo "OPENAIDE_WEB_START_TIMEOUT_MS must be a positive integer." >&2
+    return 2
+  fi
+  local readiness_host="$host"
+  if [[ "$readiness_host" == "0.0.0.0" || "$readiness_host" == "::" ]]; then
+    readiness_host="127.0.0.1"
+  fi
+  local poll_ms=250
+  local attempts=$(((start_timeout_ms + poll_ms - 1) / poll_ms))
+  local attempt
+  for ((attempt = 1; attempt <= attempts; attempt += 1)); do
+    if curl --fail --silent --show-error --max-time 2 \
+      "http://$readiness_host:$port/readyz" >/dev/null 2>&1; then
+      echo "App Server ready on http://$host:$port"
+      return 0
+    fi
+    if ! server_running; then
+      echo "OpenAIDE local web stopped before App Server readiness." >&2
+      return 1
+    fi
+    sleep 0.25
+  done
+  echo "OpenAIDE App Server did not become ready within ${start_timeout_ms}ms." >&2
+  return 1
+}
+
 start_server() {
   require_daemon_mode
   if [[ "$daemon_mode" == "systemd" ]]; then
@@ -293,11 +323,10 @@ start_server() {
 
   echo "$!" > "$pid_file"
   echo "$static_root" > "$static_root_file"
-  sleep 3
-
-  if ! kill -0 "$(cat "$pid_file")" 2>/dev/null && ! owned_web_listener_running; then
+  if ! wait_for_web_ready; then
     rm -f "$static_root_file"
-    cat "$log_file" >&2
+    cat "$log_file" >&2 || true
+    stop_server
     exit 1
   fi
 
@@ -340,8 +369,10 @@ start_systemd_server() {
     --unit "$systemd_unit" \
     --description "OpenAIDE local web on $host:$port" \
     --working-directory "$repo_root" \
-    --property Restart=always \
+    --property Restart=on-failure \
     --property RestartSec=2 \
+    --property StartLimitBurst=3 \
+    --property StartLimitIntervalSec=60 \
     --property "StandardOutput=append:$log_file" \
     --property "StandardError=append:$log_file" \
     --setenv "HOME=$HOME" \
@@ -363,12 +394,11 @@ start_systemd_server() {
     "${systemd_trace_env_args[@]}" \
     "$npm_bin" run web:dev >/dev/null
   echo "$static_root" > "$static_root_file"
-  sleep 3
-
-  if ! systemctl --user is-active --quiet "$systemd_unit.service"; then
+  if ! wait_for_web_ready; then
     rm -f "$static_root_file"
     systemctl --user status "$systemd_unit.service" --no-pager >&2 || true
     cat "$log_file" >&2 || true
+    stop_server
     exit 1
   fi
 

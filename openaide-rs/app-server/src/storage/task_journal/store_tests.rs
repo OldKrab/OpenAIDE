@@ -112,10 +112,40 @@ fn legacy_quarantine_marker_remains_fail_closed() {
 fn task_catalog_lists_metadata_without_replaying_corrupt_chat_history() {
     let root = TempDir::new().expect("create state root");
     create_setup_task(root.path());
-    corrupt_first_frame_payload(
-        &journal_path(&root.path().join("task-store-v1/tasks"), "task_1")
-            .expect("resolve Task journal"),
-    );
+    let (store, _commits) =
+        TaskJournalStore::open(root.path().to_path_buf()).expect("reopen setup store");
+    let mut projection = store.load("task_1").expect("load setup Task");
+    projection
+        .messages
+        .push(crate::storage::records::StoredMessage {
+            sequence: 1,
+            chat: crate::protocol::model::ChatMessage {
+                cursor: "1".to_string(),
+                identity: "message_1".to_string(),
+                message_type: "agent_message".to_string(),
+                message_id: "message_1".to_string(),
+                message: crate::protocol::model::NormalizedMessage::AgentMessage {
+                    id: "message_1".to_string(),
+                    role: crate::protocol::model::AgentMessageRole::Agent,
+                    parts: vec![crate::protocol::model::AgentMessagePart::Text {
+                        text: "durable chat".to_string(),
+                    }],
+                    created_at: "2026-07-20T00:00:00Z".to_string(),
+                },
+            },
+        });
+    projection.message_meta.message_count = 1;
+    projection.message_meta.version = 1;
+    store
+        .submit(TaskWrite::barrier_replace_projection(
+            projection,
+            Vec::new(),
+        ))
+        .unwrap()
+        .wait()
+        .unwrap();
+    store.shutdown().unwrap();
+    corrupt_first_frame_payload(&root.path().join("task-store-v1/tasks/task_1/chat.journal"));
 
     let (store, _commits) =
         TaskJournalStore::open(root.path().to_path_buf()).expect("open catalog-backed store");
@@ -132,6 +162,69 @@ fn task_catalog_lists_metadata_without_replaying_corrupt_chat_history() {
         "opening the Task must surface its corrupt Chat history"
     );
     store.shutdown().expect("close catalog-backed store");
+}
+
+#[test]
+fn legacy_task_is_migrated_only_when_its_chat_is_opened() {
+    let root = TempDir::new().expect("create state root");
+    let task_dir = root.path().join("task-store-v1/tasks/task_legacy");
+    std::fs::create_dir_all(&task_dir).unwrap();
+    let projection = task_projection("task_legacy");
+    let frame = JournalFrame {
+        format_version: 1,
+        sequence: 1,
+        operations: vec![TaskOperation::Create {
+            projection: Box::new(projection.clone()),
+        }],
+    };
+    crate::storage::task_journal::frame::create(&task_dir.join("task.journal"), &frame).unwrap();
+    crate::storage::task_journal::catalog::publish(&task_dir, &projection.task).unwrap();
+
+    let (store, _commits) = TaskJournalStore::open(root.path().to_path_buf()).unwrap();
+    assert!(task_dir.join("task.journal").is_file());
+    assert!(!task_dir.join("task.json").exists());
+    assert_eq!(store.list_task_records()[0].task_id, "task_legacy");
+
+    assert_eq!(
+        store.load("task_legacy").unwrap().task.task_id,
+        "task_legacy"
+    );
+    assert!(task_dir.join("task.json").is_file());
+    assert!(task_dir.join("chat.snapshot").is_file());
+    assert!(!task_dir.join("task.journal").exists());
+    assert!(!task_dir.join("task.catalog.json").exists());
+    store.shutdown().unwrap();
+}
+
+#[test]
+fn corrupt_split_metadata_does_not_prevent_other_tasks_from_opening() {
+    let root = TempDir::new().expect("create state root");
+    let (store, _commits) = TaskJournalStore::open(root.path().to_path_buf()).unwrap();
+    for task_id in ["task_healthy", "task_damaged"] {
+        store
+            .submit(TaskWrite::barrier_create(task_projection(task_id)))
+            .unwrap()
+            .wait()
+            .unwrap();
+    }
+    store.shutdown().unwrap();
+    std::fs::write(
+        root.path()
+            .join("task-store-v1/tasks/task_damaged/task.json"),
+        b"not json",
+    )
+    .unwrap();
+
+    let (reopened, _commits) = TaskJournalStore::open(root.path().to_path_buf())
+        .expect("one damaged Task must not stop the storage root");
+    let listed = reopened.list_task_records();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].task_id, "task_healthy");
+    assert_eq!(
+        reopened.load("task_healthy").unwrap().task.task_id,
+        "task_healthy"
+    );
+    reopened.shutdown().unwrap();
 }
 
 #[test]
@@ -220,11 +313,14 @@ fn journal_root_creation_requires_durable_parent_entries() {
 #[test]
 fn every_task_append_fault_freezes_the_task_across_restart() {
     for point in [
-        FaultPoint::AppendOpen,
+        FaultPoint::DirectoryParentSync,
+        FaultPoint::CreateOpen,
+        FaultPoint::CreateHeaderWrite,
         FaultPoint::FrameLengthWrite,
         FaultPoint::FramePayloadWrite,
         FaultPoint::FrameChecksumWrite,
         FaultPoint::FileSync,
+        FaultPoint::ParentSync,
     ] {
         assert_commit_fault_quarantines(JournalKind::Task, point, |store| {
             let mut task = store.load("task_1").expect("load setup Task").task;
@@ -294,11 +390,14 @@ fn every_artifact_prepare_and_visibility_fault_freezes_across_restart() {
         assert_existing_artifact_append_fault_quarantines(point);
     }
     for point in [
-        FaultPoint::AppendOpen,
+        FaultPoint::DirectoryParentSync,
+        FaultPoint::CreateOpen,
+        FaultPoint::CreateHeaderWrite,
         FaultPoint::FrameLengthWrite,
         FaultPoint::FramePayloadWrite,
         FaultPoint::FrameChecksumWrite,
         FaultPoint::FileSync,
+        FaultPoint::ParentSync,
     ] {
         assert_commit_fault_quarantines(JournalKind::ArtifactReference, point, |_| {
             terminal_write()
@@ -522,8 +621,8 @@ fn durability_sync_metric_counts_exercised_file_syncs() {
     store.submit(terminal_write()).unwrap().wait().unwrap();
     assert_eq!(
         store.durability_sync_calls() - before_artifact,
-        4,
-        "first artifact commit also anchors its new directory and journal entry"
+        7,
+        "first artifact commit anchors artifact bytes, Chat visibility, and Task metadata"
     );
     store.shutdown().unwrap();
 }
