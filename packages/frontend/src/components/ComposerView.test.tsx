@@ -321,6 +321,63 @@ describe("Composer view behavior", () => {
     expect(uploadSignal?.aborted).toBe(true);
   });
 
+  it("shows a failed file upload inline without using the tile tooltip for the error", async () => {
+    const selected = new File(["support"], "openaide-support-report.zip");
+    const fileBrowser: TaskFileBrowserCallbacks = {
+      ...fileBrowserCallbacks(),
+      attachmentMode: "webUpload",
+      attachFiles: vi.fn().mockRejectedValue(new Error("File upload failed.")),
+    };
+    const renderer = renderComposer({ fileBrowser, prompt: "Inspect this" });
+
+    click(buttonByLabel(renderer.root, "Add context"));
+    const input = renderer.root.findAllByProps({ type: "file" }).find((node) => !node.props.accept);
+    act(() => input?.props.onChange({
+      currentTarget: { value: selected.name },
+      target: { files: [selected] },
+    }));
+    await settleRenderer();
+
+    const uploadTile = renderer.root.findByProps({
+      className: "composer-attachment-tile composer-file-attachment composer-file-upload",
+    });
+    expect(uploadTile.props.title).toBeUndefined();
+    expect(uploadTile.findByProps({ className: "composer-file-attachment-label" }).props.title).toBe(selected.name);
+    const error = uploadTile.findByProps({ className: "composer-file-upload-error", role: "status" });
+    expect(text(error)).toContain("Upload failed");
+    expect(error.props["aria-live"]).toBe("polite");
+  });
+
+  it("retries a failed file upload without asking the user to select the file again", async () => {
+    const selected = new File(["support"], "openaide-support-report.zip");
+    const attachFiles = vi.fn()
+      .mockRejectedValueOnce(new Error("File upload failed."))
+      .mockResolvedValueOnce(undefined);
+    const fileBrowser: TaskFileBrowserCallbacks = {
+      ...fileBrowserCallbacks(),
+      attachmentMode: "webUpload",
+      attachFiles,
+    };
+    const renderer = renderComposer({ fileBrowser, prompt: "Inspect this" });
+
+    click(buttonByLabel(renderer.root, "Add context"));
+    const input = renderer.root.findAllByProps({ type: "file" }).find((node) => !node.props.accept);
+    act(() => input?.props.onChange({
+      currentTarget: { value: selected.name },
+      target: { files: [selected] },
+    }));
+    await settleRenderer();
+
+    click(buttonByLabel(renderer.root, `Retry ${selected.name}`));
+    await settleRenderer();
+
+    expect(attachFiles).toHaveBeenCalledTimes(2);
+    expect(attachFiles).toHaveBeenLastCalledWith([selected], expect.objectContaining({ maxFiles: 1 }));
+    expect(renderer.root.findAllByProps({
+      className: "composer-attachment-tile composer-file-attachment composer-file-upload",
+    })).toHaveLength(0);
+  });
+
   it("keeps dropped Images native and routes other dropped files through file attachment", async () => {
     const image = new File(["image"], "diagram.png", { type: "image/png" });
     const file = new File(["data"], "model.bin");

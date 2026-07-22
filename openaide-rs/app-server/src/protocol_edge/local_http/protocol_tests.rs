@@ -367,6 +367,61 @@ fn reliable_upload_returns_no_rpc_messages_and_poll_delivers_the_response() {
 }
 
 #[test]
+fn reliable_chunk_upload_reassembles_one_in_memory_client_frame() {
+    use base64::Engine;
+
+    let gateway = SharedRpcGateway::new(crate::protocol_edge::tests::initialized_gateway(
+        "client-1",
+        "local-http:client-1",
+    ));
+    let handler = LocalHttpProtocolHandler::new(gateway, "token", "server-1");
+    let opened = handler.handle(
+        Some("Bearer token"),
+        Some("client-1"),
+        &json!({ "transport": "open" }).to_string(),
+    );
+    let handshake: Value = serde_json::from_str(&opened.body).unwrap();
+    let session_id = handshake["sessionId"].as_str().unwrap();
+    let upload = json!({
+        "transport": "send",
+        "sessionId": session_id,
+        "sequence": 1,
+        "message": {
+            "jsonrpc": "2.0",
+            "id": "request-1",
+            "method": "task/list",
+            "params": {},
+            "meta": RequestMeta::default(),
+        }
+    })
+    .to_string();
+    let split = upload.len() / 2;
+    let chunks = [&upload.as_bytes()[..split], &upload.as_bytes()[split..]];
+
+    for (index, chunk) in chunks.into_iter().enumerate() {
+        let offset = if index == 0 { 0 } else { split };
+        let response = handler.handle(
+            Some("Bearer token"),
+            Some("client-1"),
+            &json!({
+                "transport": "chunk",
+                "sessionId": session_id,
+                "sequence": 1,
+                "offset": offset,
+                "totalSize": upload.len(),
+                "data": base64::engine::general_purpose::STANDARD.encode(chunk),
+            })
+            .to_string(),
+        );
+        assert_eq!(response.status, if index == 0 { 202 } else { 204 });
+    }
+
+    let poll = handler.poll_session(Some("Bearer token"), Some("client-1"), session_id, 0);
+    let batch: Value = serde_json::from_str(&poll.body).unwrap();
+    assert_eq!(batch["frames"][0]["message"]["id"], "request-1");
+}
+
+#[test]
 fn reliable_poll_keeps_the_initialized_product_client_live() {
     let connection_id = ConnectionId::new("local-http:client-1");
     let gateway = SharedRpcGateway::new(crate::protocol_edge::tests::initialized_gateway(

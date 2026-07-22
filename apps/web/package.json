@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "dev": "node src/dev-server.mjs",
-    "test": "node src/runtime-logger.test.mjs && node src/app-server-manager.test.mjs && node src/dev-server-auth.test.mjs && node src/dev-server-origin.test.mjs && node src/dev-server-prototype.test.mjs && node src/dev-server-routes.test.mjs && node src/dev-server-streams.test.mjs && node src/dev-server-vite-proxy.test.mjs"
+    "test": "node src/runtime-logger.test.mjs && node src/app-server-manager.test.mjs && node src/dev-server-auth.test.mjs && node src/dev-server-origin.test.mjs && node src/dev-server-prototype.test.mjs && node src/dev-server-routes.test.mjs && node src/dev-server-streams.test.mjs && node src/dev-server-vite-proxy.test.mjs && vitest run frontend/fileUpload.test.ts --config ../../packages/frontend/vite.config.ts"
   },
   "dependencies": {
     "@openaide/app-server-client": "*",

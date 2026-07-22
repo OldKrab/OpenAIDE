@@ -125,6 +125,8 @@ impl NativeSessionService {
         let commands_catalog = session_start.session().commands_catalog.clone();
         let model_id = session_start.session().model_id.clone();
         let supports_image_input = session_start.session().prompt_capabilities.image;
+        let prompt_capabilities_authoritative =
+            session_start.session().prompt_capabilities_authoritative;
         let now = now_string();
 
         let binding = self.mutations.commit_existing_task(
@@ -139,7 +141,11 @@ impl NativeSessionService {
                 }
                 let task = ctx.task_mut();
                 task.agent_session_id = Some(session_id.clone());
-                task.supports_image_input = supports_image_input;
+                // Resume can return an identity-only session. Preserve the last
+                // capability snapshot until ACP supplies authoritative metadata.
+                if prompt_capabilities_authoritative {
+                    task.supports_image_input = supports_image_input;
+                }
                 if config_catalog.is_some() {
                     task.config_options_catalog = config_catalog.clone();
                     task.model_id = model_id.clone();

@@ -17,5 +17,10 @@ export function pastedImageFiles(clipboardData: DataTransfer | null) {
 }
 
 export function composerErrorMessage(error: unknown, fallback: string) {
-  return error instanceof Error ? error.message : fallback;
+  if (!(error instanceof Error)) return fallback;
+  const message = error.message.trim();
+  if (!message || /<\s*(?:!doctype|html)\b/i.test(message) || message.length > 320) {
+    return fallback;
+  }
+  return message;
 }

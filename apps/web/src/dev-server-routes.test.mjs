@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { injectBootstrap, webRoute } from "./dev-server-routes.mjs";
+import { appServerTransportRoute, injectBootstrap, webRoute } from "./dev-server-routes.mjs";
 
 test("recognizes direct app routes that need web shell bootstrap metadata", () => {
   assert.deepEqual(webRoute("/"), { archived: undefined, surface: "task", taskId: undefined });
@@ -30,6 +30,21 @@ test("does not treat Vite or App Server support paths as app routes", () => {
   assert.equal(webRoute("/@vite/client"), undefined);
   assert.equal(webRoute("/src/main.tsx"), undefined);
   assert.equal(webRoute("/__openaide-app-server/probe"), undefined);
+});
+
+test("streams both whole-file and chunked upload routes to the matching App Server path", () => {
+  assert.deepEqual(appServerTransportRoute("POST", "/__openaide-app-server/upload"), {
+    kind: "upload",
+    appServerSuffix: "upload",
+  });
+  assert.deepEqual(appServerTransportRoute("POST", "/__openaide-app-server/upload/chunk"), {
+    kind: "upload",
+    appServerSuffix: "upload/chunk",
+  });
+  assert.deepEqual(appServerTransportRoute("GET", "/__openaide-app-server/download"), {
+    kind: "download",
+    appServerSuffix: "download",
+  });
 });
 
 test("injects web shell connection metadata into direct archive loads", () => {

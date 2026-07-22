@@ -43,6 +43,8 @@ type ServerBatch = {
   frames: Array<{ sequence: number; message: RpcMessage }>;
 };
 
+const RELIABLE_UPLOAD_CHUNK_BYTES = 512 * 1024;
+
 /**
  * Hides the two finite HTTP directions behind one logical message channel.
  * Upload retries preserve the exact sequence and body; receive retries use the
@@ -151,7 +153,15 @@ export function createReliableHttpMessageChannel(
             signal: abort.signal,
           });
           const text = await response.text();
-          if (!response.ok) throw httpError("upload", response.status, text);
+          if (!response.ok) {
+            if (isRequestSizeRejection(response.status, text)) {
+              await uploadInChunks(opened, upload, body);
+              uploads.shift();
+              startReceiving();
+              continue;
+            }
+            throw httpError("upload", response.status, text);
+          }
           uploads.shift();
           startReceiving();
         } catch (error) {
@@ -166,6 +176,37 @@ export function createReliableHttpMessageChannel(
     } finally {
       pumping = false;
       if (!closed && !terminalError && uploads.length > 0) void pumpUploads();
+    }
+  }
+
+  /** Retries the exact reliable-session frame without storing attachment bytes on disk. */
+  async function uploadInChunks(
+    opened: SessionHandshake,
+    upload: { sequence: number },
+    body: string,
+  ) {
+    const bytes = new TextEncoder().encode(body);
+    for (let offset = 0; offset < bytes.byteLength; offset += RELIABLE_UPLOAD_CHUNK_BYTES) {
+      const data = bytes.subarray(offset, Math.min(offset + RELIABLE_UPLOAD_CHUNK_BYTES, bytes.byteLength));
+      const response = await fetchImpl(options.endpointUrl, {
+        method: "POST",
+        headers: baseHeaders(),
+        body: JSON.stringify({
+          transport: "chunk",
+          sessionId: opened.sessionId,
+          sequence: upload.sequence,
+          offset,
+          totalSize: bytes.byteLength,
+          data: bytesToBase64(data),
+        }),
+        signal: abort.signal,
+      });
+      const text = await response.text();
+      const complete = offset + data.byteLength === bytes.byteLength;
+      const expectedStatus = complete ? 204 : 202;
+      if (response.status !== expectedStatus) {
+        throw httpError("chunk upload", response.status, text);
+      }
     }
   }
 
@@ -253,6 +294,19 @@ export function createReliableHttpMessageChannel(
     abort.abort();
     for (const listener of errorListeners) listener(error);
   }
+}
+
+function isRequestSizeRejection(status: number, body: string) {
+  return status === 413 || (status === 403 && /<\s*(?:!doctype|html)\b/i.test(body));
+}
+
+function bytesToBase64(bytes: Uint8Array) {
+  let binary = "";
+  const binaryChunkBytes = 0x8000;
+  for (let offset = 0; offset < bytes.byteLength; offset += binaryChunkBytes) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + binaryChunkBytes));
+  }
+  return btoa(binary);
 }
 
 function httpError(operation: string, status: number, body: string) {

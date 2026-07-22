@@ -524,6 +524,61 @@ describe("app controller callbacks", () => {
     expect(request).not.toHaveBeenCalledWith(ATTACHMENT_RELEASE, expect.anything());
   });
 
+  it("keeps a new-task image client-owned until Send", async () => {
+    const upload = vi.fn(async () => ({ handleId: "image-handle-1", label: "pasted.png" }));
+    frontendShellState.files = { kind: "webUpload", upload };
+    const dispatch = vi.fn();
+    const state = preparedNewTaskState("task_ready");
+
+    const request = vi.fn();
+    await callbacks({
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
+      dispatch,
+      state,
+    }).newTask.fileBrowser?.attachImage(
+      new File([new Uint8Array([1, 2, 3])], "pasted.png", { type: "image/png" }),
+    );
+
+    expect(upload).not.toHaveBeenCalled();
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "newTask:attachment:add",
+      attachment: expect.objectContaining({
+        kind: "image",
+        label: "pasted.png",
+        preview_url: "data:image/png;base64,AQID",
+        payload: { data: "AQID", mimeType: "image/png" },
+      }),
+    });
+  });
+
+  it("keeps an active-task image client-owned until Send", async () => {
+    const upload = vi.fn(async () => ({ handleId: "image-handle-1", label: "pasted.png" }));
+    frontendShellState.files = { kind: "webUpload", upload };
+    const dispatch = vi.fn();
+    const state = createInitialState();
+    state.snapshot = snapshot("task_1");
+
+    const request = vi.fn();
+    await callbacks({
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
+      dispatch,
+      state,
+    }).task.fileBrowser?.attachImage(
+      new File([new Uint8Array([1, 2, 3])], "pasted.png", { type: "image/png" }),
+    );
+
+    expect(upload).not.toHaveBeenCalled();
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "taskInput:attachment:addAppServer",
+      taskId: "task_1",
+      attachment: expect.objectContaining({
+        kind: "image",
+        preview_url: "data:image/png;base64,AQID",
+        payload: { data: "AQID", mimeType: "image/png" },
+      }),
+    });
+  });
+
   it("acquires a fresh Prepared Task when client liveness expired in the file picker", async () => {
     const upload = vi.fn(async () => ({ handleId: "attachment-handle-1", label: "notes.md" }));
     frontendShellState.files = { kind: "webUpload", upload };

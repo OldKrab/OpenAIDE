@@ -19,6 +19,7 @@ import {
   releaseComposerAttachments,
   type ComposerAttachmentResourceOwner,
 } from "../services/attachmentResources";
+import { composerErrorMessage } from "../components/composerDraftPolicy";
 
 type TaskMutationConnection = Pick<BackendConnection, "request">;
 
@@ -159,6 +160,5 @@ function taskSendErrorMessage(error: unknown) {
 }
 
 function taskMutationErrorMessage(error: unknown, fallback: string) {
-  if (error instanceof AppServerProtocolError) return error.message;
-  return error instanceof Error ? error.message : fallback;
+  return composerErrorMessage(error, fallback);
 }

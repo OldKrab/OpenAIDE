@@ -8,10 +8,13 @@ use crate::client_lifecycle::{AppServerTime, ConnectionId};
 use openaide_app_server_protocol::ids::{ClientInstanceId, TaskId};
 
 use super::{GatewayOutcome, GatewayResponse, InboundProtocolMessage, SharedRpcGateway};
+use file_upload::{AppendChunkOutcome, ChunkUploadError, ChunkUploadRegistry, ChunkUploadRequest};
 
 mod event_streams;
+mod file_upload;
 pub mod listener;
 mod protocol;
+mod reliable_upload_chunks;
 mod sessions;
 
 pub use protocol::LocalHttpProtocolHandler;
@@ -33,6 +36,7 @@ pub struct LocalHttpProbeHandler {
 pub struct LocalHttpAppHandler {
     probe: LocalHttpProbeHandler,
     protocol: LocalHttpProtocolHandler,
+    uploads: ChunkUploadRegistry,
 }
 
 impl LocalHttpAppHandler {
@@ -45,6 +49,7 @@ impl LocalHttpAppHandler {
         Self {
             probe: LocalHttpProbeHandler::new(gateway.clone(), auth_token.clone()),
             protocol: LocalHttpProtocolHandler::new(gateway, auth_token, server_id),
+            uploads: ChunkUploadRegistry::default(),
         }
     }
 
@@ -174,6 +179,21 @@ impl LocalHttpAppHandler {
             Ok(attachment) => json_response(200, json!({ "attachment": attachment })),
             Err(error) => json_response(400, json!({ "error": error })),
         }
+    }
+
+    pub(crate) fn append_upload_chunk(
+        &self,
+        request: ChunkUploadRequest<'_>,
+    ) -> Result<AppendChunkOutcome, ChunkUploadError> {
+        self.uploads.append(request)
+    }
+
+    pub(crate) fn cancel_upload_chunk(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        upload_id: &str,
+    ) -> bool {
+        self.uploads.cancel(client_instance_id, upload_id)
     }
 }
 
