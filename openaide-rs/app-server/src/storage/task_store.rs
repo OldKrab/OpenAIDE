@@ -51,26 +51,24 @@ impl Store {
     pub fn list_all_task_records(&self) -> Result<Vec<TaskRecord>, RuntimeError> {
         Ok(self
             .task_journal()
-            .list()
+            .list_task_records()
             .into_iter()
-            .map(|projection| projection.task)
             .collect())
     }
 
     pub(crate) fn list_all_task_records_strict(&self) -> Result<Vec<TaskRecord>, RuntimeError> {
         Ok(self
             .task_journal()
-            .list_strict()?
+            .list_task_records_strict()?
             .into_iter()
-            .map(|projection| projection.task)
             .collect())
     }
 
     fn list_tasks_by_archived(&self, archived: bool) -> Result<Vec<TaskRecord>, RuntimeError> {
-        let projections = self.task_journal().list();
-        let mut records = projections
+        let mut records = self
+            .task_journal()
+            .list_task_records()
             .into_iter()
-            .map(|projection| projection.task)
             .filter(|record| {
                 !record.tombstoned && record.lifecycle.is_visible() && record.archived == archived
             })
@@ -82,9 +80,9 @@ impl Store {
     pub fn max_task_revision(&self) -> Result<u64, RuntimeError> {
         Ok(self
             .task_journal()
-            .list()
+            .list_task_records()
             .into_iter()
-            .map(|projection| projection.task.revision)
+            .map(|task| task.revision)
             .max()
             .unwrap_or(0))
     }
@@ -101,7 +99,7 @@ impl Store {
     }
 
     pub fn task_record_count(&self) -> Result<usize, RuntimeError> {
-        Ok(self.task_journal().list().len())
+        Ok(self.task_journal().list_task_records().len())
     }
 }
 

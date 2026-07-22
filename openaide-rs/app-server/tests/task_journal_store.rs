@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::io::{Read, Seek, SeekFrom, Write};
+use std::sync::{Arc, Barrier};
 
 use openaide_app_server::protocol::model::{
     AgentMessagePart, AgentMessageRole, ChatMessage, IsolationKind, NormalizedMessage, TaskStatus,
@@ -38,6 +39,71 @@ fn a_committed_task_survives_store_restart() {
     assert!(loaded.messages.is_empty());
     assert_eq!(loaded.message_meta.message_count, 0);
     reopened.shutdown().expect("close reopened store");
+}
+
+#[test]
+fn first_artifact_read_and_live_append_are_serialized_without_losing_bytes() {
+    let root = TempDir::new().expect("create state root");
+    let (setup, _commits) = TaskJournalStore::open(root.path().to_path_buf()).unwrap();
+    setup
+        .submit(TaskWrite::barrier_create(task_projection(
+            "task_artifact_race",
+        )))
+        .unwrap()
+        .wait()
+        .unwrap();
+    let original = "x".repeat(1024 * 1024);
+    setup
+        .submit(TaskWrite::stream_append_terminal(
+            "task_artifact_race",
+            "artifact_1",
+            "terminal_1",
+            original.clone(),
+        ))
+        .unwrap()
+        .wait()
+        .unwrap();
+    setup.shutdown().unwrap();
+
+    let (store, _commits) = TaskJournalStore::open(root.path().to_path_buf()).unwrap();
+    let start = Arc::new(Barrier::new(3));
+    let reader_store = store.clone();
+    let reader_start = start.clone();
+    let reader = std::thread::spawn(move || {
+        reader_start.wait();
+        reader_store
+            .load_tool_artifact("task_artifact_race", "artifact_1")
+            .unwrap()
+            .terminal_outputs["terminal_1"]
+            .len()
+    });
+    let writer_store = store.clone();
+    let writer_start = start.clone();
+    let writer = std::thread::spawn(move || {
+        writer_start.wait();
+        writer_store
+            .submit(TaskWrite::stream_append_terminal(
+                "task_artifact_race",
+                "artifact_1",
+                "terminal_1",
+                "y",
+            ))
+            .unwrap()
+            .wait()
+            .unwrap();
+    });
+    start.wait();
+    let observed_len = reader.join().unwrap();
+    writer.join().unwrap();
+    assert!(observed_len == original.len() || observed_len == original.len() + 1);
+    assert_eq!(
+        store
+            .load_tool_artifact("task_artifact_race", "artifact_1")
+            .unwrap()
+            .terminal_outputs["terminal_1"],
+        format!("{original}y")
+    );
+    store.shutdown().unwrap();
 }
 
 #[test]

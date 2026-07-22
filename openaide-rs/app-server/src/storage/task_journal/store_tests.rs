@@ -1,6 +1,10 @@
 use std::sync::Arc;
 use std::time::Duration;
-use std::{collections::HashMap, path::Path};
+use std::{
+    collections::HashMap,
+    io::{Read, Seek, SeekFrom, Write},
+    path::Path,
+};
 
 use tempfile::TempDir;
 
@@ -9,6 +13,7 @@ use crate::protocol::model::{IsolationKind, TaskStatus};
 use crate::storage::records::{
     MessageMeta, TaskConfigMutationState, TaskLifecycle, TaskPreparationRecord, TaskRecord,
 };
+use crate::storage::task_journal::artifact;
 use crate::storage::task_journal::frame::{FaultInjector, FaultPoint, JournalKind};
 use crate::storage::task_journal::model::{JournalFrame, TaskOperation};
 use crate::storage::task_journal::{TaskProjection, TaskWrite};
@@ -61,6 +66,9 @@ fn quarantine_write_failure_stops_the_root_instead_of_being_ignored() {
     let (store, _commits) = TaskJournalStore::open_with_faults(root.path().to_path_buf(), faults)
         .expect("open faulted store");
     let fatal_events = store.take_fatal_events();
+    // Cross the lazy Task-detail seam before sabotaging the already-open
+    // quarantine marker; this test targets failure after an uncertain write.
+    store.load("task_1").expect("hydrate setup Task");
     let status = root
         .path()
         .join("task-store-v1/tasks/task_1/storage.quarantined");
@@ -97,6 +105,80 @@ fn legacy_quarantine_marker_remains_fail_closed() {
     let (store, _commits) =
         TaskJournalStore::open(root.path().to_path_buf()).expect("open quarantined store");
     assert!(store.load("task_1").is_err());
+    store.shutdown().unwrap();
+}
+
+#[test]
+fn task_catalog_lists_metadata_without_replaying_corrupt_chat_history() {
+    let root = TempDir::new().expect("create state root");
+    create_setup_task(root.path());
+    corrupt_first_frame_payload(
+        &journal_path(&root.path().join("task-store-v1/tasks"), "task_1")
+            .expect("resolve Task journal"),
+    );
+
+    let (store, _commits) =
+        TaskJournalStore::open(root.path().to_path_buf()).expect("open catalog-backed store");
+
+    let listed = store.list_task_records();
+    assert_eq!(
+        listed.len(),
+        1,
+        "Task metadata remains available to Navigation"
+    );
+    assert_eq!(listed[0].task_id, "task_1");
+    assert!(
+        store.load("task_1").is_err(),
+        "opening the Task must surface its corrupt Chat history"
+    );
+    store.shutdown().expect("close catalog-backed store");
+}
+
+#[test]
+fn tool_artifact_tail_is_reconciled_only_when_the_detail_is_loaded() {
+    let root = TempDir::new().expect("create state root");
+    let tasks_root = root.path().join("task-store-v1/tasks");
+    let (setup, _commits) =
+        TaskJournalStore::open(root.path().to_path_buf()).expect("open setup store");
+    setup
+        .submit(TaskWrite::barrier_create(task_projection("task_1")))
+        .unwrap()
+        .wait()
+        .unwrap();
+    setup.submit(terminal_write()).unwrap().wait().unwrap();
+    setup.shutdown().unwrap();
+    artifact::prepare(
+        &tasks_root,
+        "task_1",
+        "artifact_1",
+        1,
+        vec![
+            crate::storage::task_journal::model::ArtifactOperation::AppendTerminal {
+                terminal_id: "terminal_1".to_string(),
+                data: "-orphan".to_string(),
+            },
+        ],
+    )
+    .expect("append crash-orphaned artifact frame");
+    let artifact_path = tasks_root.join("task_1/artifacts/artifact_1.journal");
+    let orphaned_len = std::fs::metadata(&artifact_path).unwrap().len();
+
+    let (store, _commits) =
+        TaskJournalStore::open(root.path().to_path_buf()).expect("open lazy store");
+    assert_eq!(
+        std::fs::metadata(&artifact_path).unwrap().len(),
+        orphaned_len,
+        "startup must not touch unopened Tool details"
+    );
+
+    let loaded = store
+        .load_tool_artifact("task_1", "artifact_1")
+        .expect("load committed Tool detail");
+    assert_eq!(loaded.terminal_outputs["terminal_1"], "accepted bytes");
+    assert!(
+        std::fs::metadata(&artifact_path).unwrap().len() < orphaned_len,
+        "first detail access must discard the uncommitted tail"
+    );
     store.shutdown().unwrap();
 }
 
@@ -391,6 +473,24 @@ fn create_setup_task(root: &Path) {
         .wait()
         .expect("commit setup Task");
     store.shutdown().expect("close setup store");
+}
+
+fn corrupt_first_frame_payload(path: &Path) {
+    let mut file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)
+        .expect("open Task journal for corruption");
+    // Header (10 bytes) and frame length (8 bytes) precede the JSON payload.
+    file.seek(SeekFrom::Start(18))
+        .expect("seek to first payload byte");
+    let mut byte = [0_u8; 1];
+    file.read_exact(&mut byte).expect("read payload byte");
+    byte[0] ^= 0xff;
+    file.seek(SeekFrom::Start(18))
+        .expect("rewind to first payload byte");
+    file.write_all(&byte).expect("corrupt payload byte");
+    file.sync_all().expect("sync corrupt fixture");
 }
 
 fn terminal_write() -> TaskWrite {
