@@ -11,6 +11,7 @@ fn authorized_client_probe_routes_to_gateway_response() {
     let response = handle_local_http_probe(
         Some("Bearer token"),
         "token",
+        "replacement-token",
         &json!({
             "jsonrpc": "2.0",
             "id": "client_probe",
@@ -36,6 +37,7 @@ fn authorized_client_probe_routes_to_gateway_response() {
             events: Vec::new(),
             server_requests: Vec::new(),
         },
+        || Ok(()),
     );
 
     assert_eq!(response.status, 200);
@@ -47,10 +49,22 @@ fn authorized_client_probe_routes_to_gateway_response() {
 
 #[test]
 fn auth_is_required_before_protocol_parsing() {
-    let missing = handle_local_http_probe(None, "token", "{not-json", |_| GatewayOutcome::Noop);
-    let invalid = handle_local_http_probe(Some("Bearer wrong"), "token", "{not-json", |_| {
-        GatewayOutcome::Noop
-    });
+    let missing = handle_local_http_probe(
+        None,
+        "token",
+        "replacement-token",
+        "{not-json",
+        |_| GatewayOutcome::Noop,
+        || Ok(()),
+    );
+    let invalid = handle_local_http_probe(
+        Some("Bearer wrong"),
+        "token",
+        "replacement-token",
+        "{not-json",
+        |_| GatewayOutcome::Noop,
+        || Ok(()),
+    );
 
     assert_eq!(missing.status, 401);
     assert!(missing.body.is_empty());
@@ -60,9 +74,14 @@ fn auth_is_required_before_protocol_parsing() {
 
 #[test]
 fn malformed_jsonrpc_returns_protocol_error_body() {
-    let response = handle_local_http_probe(Some("Bearer token"), "token", "{not-json", |_| {
-        GatewayOutcome::Noop
-    });
+    let response = handle_local_http_probe(
+        Some("Bearer token"),
+        "token",
+        "replacement-token",
+        "{not-json",
+        |_| GatewayOutcome::Noop,
+        || Ok(()),
+    );
 
     assert_eq!(response.status, 400);
     let body: Value = serde_json::from_str(&response.body).unwrap();
@@ -74,6 +93,7 @@ fn rejects_non_probe_methods() {
     let response = handle_local_http_probe(
         Some("Bearer token"),
         "token",
+        "replacement-token",
         &json!({
             "jsonrpc": "2.0",
             "id": "not_probe",
@@ -82,6 +102,7 @@ fn rejects_non_probe_methods() {
         })
         .to_string(),
         |_| GatewayOutcome::Noop,
+        || Ok(()),
     );
 
     assert_eq!(response.status, 400);

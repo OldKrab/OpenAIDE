@@ -193,6 +193,69 @@ test("heartbeat diagnostics report one failure transition and one recovery", asy
   assert.doesNotMatch(JSON.stringify(events), /private transport detail/);
 });
 
+test("failed heartbeat invalidates the connection so a later start hands off again", async () => {
+  const children = [];
+  const manager = createAppServerManager({
+    connectionUrl: (connection) => new URL(connection.endpointUrl),
+    readHandoffConnection: async () => ({
+      authToken: `token-${children.length}`,
+      endpointUrl: `http://127.0.0.1:${1000 + children.length}/probe`,
+    }),
+    requestAppServer: async (_connection, _connectionId, body) => {
+      if (body.method === "client/heartbeat") throw new TypeError("connection refused");
+      return {};
+    },
+    shellHeartbeatIntervalMs: 5,
+    spawnAppServer: () => {
+      const child = childProcess();
+      children.push(child);
+      return child;
+    },
+  });
+
+  await manager.startAppServer();
+  await waitFor(() => manager.currentConnection() === undefined);
+  await manager.startAppServer();
+  manager.clearConnection();
+
+  assert.equal(children.length, 2);
+  assert.equal(manager.currentConnection(), undefined);
+});
+
+test("late heartbeat failures from an old connection do not invalidate its replacement", async () => {
+  const children = [];
+  const oldHeartbeats = [];
+  const manager = createAppServerManager({
+    connectionUrl: (connection) => new URL(connection.endpointUrl),
+    readHandoffConnection: async () => ({
+      authToken: `token-${children.length}`,
+      endpointUrl: `http://127.0.0.1:${1000 + children.length}/probe`,
+    }),
+    requestAppServer: async (connection, _connectionId, body) => {
+      if (body.method !== "client/heartbeat" || connection.authToken !== "token-1") return {};
+      const heartbeat = deferred();
+      oldHeartbeats.push(heartbeat);
+      return heartbeat.promise;
+    },
+    shellHeartbeatIntervalMs: 5,
+    spawnAppServer: () => {
+      const child = childProcess();
+      children.push(child);
+      return child;
+    },
+  });
+
+  await manager.startAppServer();
+  await waitFor(() => oldHeartbeats.length >= 3);
+  manager.clearConnection();
+  await manager.startAppServer();
+  oldHeartbeats.forEach((heartbeat) => heartbeat.reject(new TypeError("old connection closed")));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(manager.currentConnection().authToken, "token-2");
+  manager.clearConnection();
+});
+
 function childProcess() {
   const child = new EventEmitter();
   child.killed = false;

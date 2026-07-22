@@ -17,6 +17,9 @@ pub struct RuntimeEndpointRecord {
     pub app_version: String,
     pub status: RuntimeEndpointRecordStatus,
     pub auth_token: String,
+    /// Host-only credential for gracefully replacing this process during an upgrade.
+    #[serde(default)]
+    pub replacement_token: Option<String>,
     pub endpoints: Vec<RuntimeEndpoint>,
 }
 

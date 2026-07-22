@@ -52,6 +52,13 @@ export type ProtocolTaskSnapshotMapping = {
   requiresNativeSurface: boolean;
 };
 
+export class AppServerCompatibilityError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AppServerCompatibilityError";
+  }
+}
+
 type ProtocolChatItem = ProtocolTaskSnapshot["chat"]["items"][number];
 type ChatItemProjectionCache = WeakMap<ProtocolChatItem, ChatMessage>;
 
@@ -71,6 +78,11 @@ export function mapProtocolTaskNavigation(
   snapshot: ProtocolTaskNavigationSnapshot,
   context: ProtocolMappingContext = {},
 ): ProtocolTaskNavigationMapping {
+  if (!Array.isArray(snapshot?.entries)) {
+    throw new AppServerCompatibilityError(
+      "OpenAIDE received an incompatible App Server response. Reload the VS Code window.",
+    );
+  }
   const taskEntries = snapshot.entries
     .filter((entry) => entry.kind === "task")
     .map((entry) => entry.task);

@@ -391,6 +391,7 @@ fn endpoint_record(fingerprint: &StateRootFingerprint, server_id: &str) -> Runti
         app_version: "0.1.0".to_string(),
         status: RuntimeEndpointRecordStatus::Running,
         auth_token: "token".to_string(),
+        replacement_token: Some("replacement-token".to_string()),
         endpoints: vec![RuntimeEndpoint {
             transport: TransportKind::LocalHttp,
             address: "http://127.0.0.1:12345".to_string(),
@@ -405,6 +406,7 @@ fn endpoint_target(record: &RuntimeEndpointRecord) -> EndpointTarget {
         protocol_version: record.protocol_version.clone(),
         app_version: record.app_version.clone(),
         auth_token: record.auth_token.clone(),
+        replacement_token: record.replacement_token.clone(),
         endpoints: record.endpoints.clone(),
     }
 }

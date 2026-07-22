@@ -4,7 +4,7 @@ use ts_rs::TS;
 use crate::ids::{ClientInstanceId, ProjectId, TaskId};
 use crate::snapshot::{ClientSnapshot, ProjectCollectionSnapshot};
 
-pub const APP_SERVER_PROTOCOL_VERSION: &str = "1";
+pub const APP_SERVER_PROTOCOL_VERSION: &str = "2";
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -26,6 +26,14 @@ pub struct ClientHeartbeatParams {}
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ClientHeartbeatResult {}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientDetachParams {}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientDetachResult {}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]

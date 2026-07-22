@@ -152,6 +152,7 @@ pub struct ClientHub {
     liveness_policy: ClientLivenessPolicy,
     clients: HashMap<ClientInstanceId, ClientRecord>,
     connections: HashMap<ConnectionId, ClientInstanceId>,
+    has_ever_initialized: bool,
 }
 
 impl ClientHub {
@@ -160,6 +161,7 @@ impl ClientHub {
             liveness_policy,
             clients: HashMap::new(),
             connections: HashMap::new(),
+            has_ever_initialized: false,
         }
     }
 
@@ -169,6 +171,7 @@ impl ClientHub {
         params: openaide_app_server_protocol::client::InitializeParams,
         now: AppServerTime,
     ) -> InitializeClientOutcome {
+        self.has_ever_initialized = true;
         let context = ClientContext {
             client_instance_id: params.client_instance_id,
             connection_id: connection_id.clone(),
@@ -334,6 +337,10 @@ impl ClientHub {
 
     pub fn has_initialized_clients(&self) -> bool {
         !self.clients.is_empty()
+    }
+
+    pub fn has_ever_initialized_clients(&self) -> bool {
+        self.has_ever_initialized
     }
 
     pub fn client_by_instance(

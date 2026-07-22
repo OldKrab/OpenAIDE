@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
 use std::path::Path;
-use std::sync::mpsc::{self, Receiver};
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -56,8 +56,8 @@ impl PublishedAppServerEndpoint {
             });
     }
 
-    /// Waits for the last App Shell client, then performs graceful shutdown.
-    pub fn shutdown_after_last_client(
+    /// Waits for the last VS Code host or an authenticated replacement request.
+    pub fn shutdown_when_requested(
         &self,
     ) -> Result<crate::app_lifecycle::ShutdownCompletion, crate::protocol::errors::RuntimeError>
     {
@@ -80,6 +80,7 @@ pub fn publish_local_http_probe_endpoint(
     let listener = LocalHttpProbeListener::bind_loopback()?;
     let address = listener.local_addr()?;
     let auth_token = process_token();
+    let replacement_token = process_token();
     let server_id = Uuid::new_v4().to_string();
     let probe_facts = gateway.probe_facts();
     let endpoint_records = EndpointRecordStore::new(runtime_root);
@@ -93,13 +94,15 @@ pub fn publish_local_http_probe_endpoint(
             app_version: probe_facts.app_version,
             status: RuntimeEndpointRecordStatus::Running,
             auth_token: auth_token.clone(),
+            replacement_token: Some(replacement_token.clone()),
             endpoints: vec![RuntimeEndpoint {
                 transport: TransportKind::LocalHttp,
                 address: endpoint_address(address),
             }],
         },
     )?;
-    let shutdown = start_client_liveness_expirer(gateway.clone());
+    let (shutdown_sender, shutdown) = mpsc::channel();
+    start_client_liveness_expirer(gateway.clone(), shutdown_sender.clone());
     let endpoint = PublishedAppServerEndpoint {
         endpoint_records,
         fingerprint: state_root.fingerprint().clone(),
@@ -114,6 +117,8 @@ pub fn publish_local_http_probe_endpoint(
             gateway,
             endpoint.auth_token.clone(),
             endpoint.server_id.clone(),
+            replacement_token,
+            shutdown_sender,
         ),
     );
     Ok(endpoint)
@@ -167,8 +172,7 @@ fn local_http_error_fields(
 }
 
 /// Expires abandoned product clients and signals process shutdown after the last client.
-fn start_client_liveness_expirer(gateway: SharedRpcGateway) -> Receiver<()> {
-    let (shutdown_sender, shutdown_receiver) = mpsc::channel();
+fn start_client_liveness_expirer(gateway: SharedRpcGateway, shutdown_sender: Sender<()>) {
     thread::spawn(move || {
         let mut last_native_catalog_refresh = Instant::now();
         loop {
@@ -195,12 +199,17 @@ fn start_client_liveness_expirer(gateway: SharedRpcGateway) -> Receiver<()> {
                     }
                 )
             }) {
+                if let Err(error) = gateway.shutdown() {
+                    crate::logging::error(
+                        "last_client_shutdown_failed",
+                        serde_json::json!({ "error": error.to_string() }),
+                    );
+                }
                 let _ = shutdown_sender.send(());
                 return;
             }
         }
     });
-    shutdown_receiver
 }
 
 fn endpoint_address(address: SocketAddr) -> String {

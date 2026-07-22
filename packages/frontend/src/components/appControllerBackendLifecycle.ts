@@ -429,7 +429,7 @@ export function useAppControllerBackendLifecycle({
               type: "appServer:error",
               message,
             });
-            dispatchStartupReadError(bootstrap, dispatch);
+            dispatchStartupReadError(bootstrap, dispatch, message);
           });
       } else {
         sendWebviewTelemetry(postHostMessage, "app_server_connection_unavailable", {

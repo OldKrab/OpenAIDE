@@ -1,6 +1,6 @@
 use openaide_app_server_protocol::client::{
-    ClientCapabilitiesChangedParams, ClientCapabilitiesChangedResult, ClientHeartbeatParams,
-    ClientHeartbeatResult,
+    ClientCapabilitiesChangedParams, ClientCapabilitiesChangedResult, ClientDetachParams,
+    ClientDetachResult, ClientHeartbeatParams, ClientHeartbeatResult,
 };
 use openaide_app_server_protocol::envelopes::RequestMeta;
 use serde_json::Value;
@@ -93,5 +93,31 @@ impl RpcGateway {
         }
         let events = self.drain_event_deliveries_for_connection(&connection_id);
         responses::result_with_events(connection_id, id, meta, ClientHeartbeatResult {}, events)
+    }
+
+    /// Explicit host shutdown bypasses reconnect grace so the last VS Code closes the server.
+    pub(super) fn handle_client_detach(
+        &mut self,
+        connection_id: ConnectionId,
+        id: String,
+        params: Value,
+        meta: RequestMeta,
+        now: AppServerTime,
+    ) -> GatewayOutcome {
+        if let Err(error) = serde_json::from_value::<ClientDetachParams>(params) {
+            return self.error(connection_id, id, meta, responses::invalid_params(error));
+        }
+        let Some(context) = self.client_hub.context_for_connection(&connection_id) else {
+            return self.error(
+                connection_id,
+                id,
+                meta,
+                responses::not_initialized(
+                    openaide_app_server_protocol::methods::CLIENT_DETACH.to_string(),
+                ),
+            );
+        };
+        self.detach_client(&context.client_instance_id, now);
+        responses::result(connection_id, id, meta, ClientDetachResult {})
     }
 }

@@ -4,6 +4,7 @@ use super::*;
 fn client_initialize_uses_slash_method_namespace() {
     assert_eq!(ClientProbe::METHOD, "client/probe");
     assert_eq!(ClientInitialize::METHOD, "client/initialize");
+    assert_eq!(ClientDetach::METHOD, "client/detach");
     assert_eq!(
         ClientCapabilitiesChanged::METHOD,
         "client/capabilitiesChanged"

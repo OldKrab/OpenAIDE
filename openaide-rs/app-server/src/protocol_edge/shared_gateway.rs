@@ -235,6 +235,22 @@ impl SharedRpcGateway {
             .expire_inactive_clients(now)
     }
 
+    pub fn has_initialized_clients(&self) -> bool {
+        self.gateway
+            .lock()
+            .expect("protocol gateway lock poisoned")
+            .client_hub
+            .has_initialized_clients()
+    }
+
+    pub fn has_ever_initialized_clients(&self) -> bool {
+        self.gateway
+            .lock()
+            .expect("protocol gateway lock poisoned")
+            .client_hub
+            .has_ever_initialized_clients()
+    }
+
     pub fn shutdown(&self) -> Result<ShutdownCompletion, RuntimeError> {
         self.gateway
             .lock()

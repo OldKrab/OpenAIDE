@@ -263,6 +263,7 @@ fn target(endpoints: Vec<RuntimeEndpoint>) -> EndpointTarget {
         protocol_version: "1".to_string(),
         app_version: "0.1.0".to_string(),
         auth_token: "token".to_string(),
+        replacement_token: Some("replacement-token".to_string()),
         endpoints,
     }
 }

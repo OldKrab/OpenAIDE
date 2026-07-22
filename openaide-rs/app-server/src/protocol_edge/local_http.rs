@@ -3,6 +3,7 @@ use openaide_app_server_protocol::errors::{ErrorTarget, ProtocolError, ProtocolE
 use openaide_app_server_protocol::methods::CLIENT_PROBE;
 use serde::Deserialize;
 use serde_json::{json, Value};
+use std::sync::mpsc::Sender;
 
 use crate::client_lifecycle::{AppServerTime, ConnectionId};
 use openaide_app_server_protocol::ids::{ClientInstanceId, TaskId};
@@ -30,6 +31,8 @@ pub struct LocalHttpResponse {
 pub struct LocalHttpProbeHandler {
     gateway: SharedRpcGateway,
     auth_token: String,
+    replacement_token: String,
+    replacement_requested: Sender<()>,
 }
 
 #[derive(Clone)]
@@ -44,10 +47,17 @@ impl LocalHttpAppHandler {
         gateway: SharedRpcGateway,
         auth_token: impl Into<String>,
         server_id: impl Into<String>,
+        replacement_token: impl Into<String>,
+        replacement_requested: Sender<()>,
     ) -> Self {
         let auth_token = auth_token.into();
         Self {
-            probe: LocalHttpProbeHandler::new(gateway.clone(), auth_token.clone()),
+            probe: LocalHttpProbeHandler::new(
+                gateway.clone(),
+                auth_token.clone(),
+                replacement_token,
+                replacement_requested,
+            ),
             protocol: LocalHttpProtocolHandler::new(gateway, auth_token, server_id),
             uploads: ChunkUploadRegistry::default(),
         }
@@ -60,9 +70,13 @@ impl LocalHttpAppHandler {
         body: &str,
     ) -> LocalHttpResponse {
         match connection_id {
-            Some(connection_id) => self
-                .protocol
-                .handle(authorization, Some(connection_id), body),
+            Some(connection_id) => {
+                let response = self
+                    .protocol
+                    .handle(authorization, Some(connection_id), body);
+                self.probe.shutdown_if_last_client_detached();
+                response
+            }
             None => self.probe.handle(authorization, body),
         }
     }
@@ -198,19 +212,48 @@ impl LocalHttpAppHandler {
 }
 
 impl LocalHttpProbeHandler {
-    pub fn new(gateway: SharedRpcGateway, auth_token: impl Into<String>) -> Self {
+    pub fn new(
+        gateway: SharedRpcGateway,
+        auth_token: impl Into<String>,
+        replacement_token: impl Into<String>,
+        replacement_requested: Sender<()>,
+    ) -> Self {
         Self {
             gateway,
             auth_token: auth_token.into(),
+            replacement_token: replacement_token.into(),
+            replacement_requested,
         }
     }
 
     pub fn handle(&self, authorization: Option<&str>, body: &str) -> LocalHttpResponse {
         let now = AppServerTime::now();
-        handle_local_http_probe(authorization, &self.auth_token, body, |message| {
-            self.gateway
-                .handle_inbound(ConnectionId::new(LOCAL_HTTP_CONNECTION_ID), message, now)
-        })
+        handle_local_http_probe(
+            authorization,
+            &self.auth_token,
+            &self.replacement_token,
+            body,
+            |message| {
+                self.gateway.handle_inbound(
+                    ConnectionId::new(LOCAL_HTTP_CONNECTION_ID),
+                    message,
+                    now,
+                )
+            },
+            || {
+                // Acknowledge before the process owner drains agents and storage; that
+                // shutdown may outlive the handoff transport timeout.
+                self.replacement_requested
+                    .send(())
+                    .map_err(|error| error.to_string())
+            },
+        )
+    }
+
+    fn shutdown_if_last_client_detached(&self) {
+        if self.gateway.has_ever_initialized_clients() && !self.gateway.has_initialized_clients() {
+            let _ = self.replacement_requested.send(());
+        }
     }
 }
 
@@ -219,6 +262,8 @@ impl Clone for LocalHttpProbeHandler {
         Self {
             gateway: self.gateway.clone(),
             auth_token: self.auth_token.clone(),
+            replacement_token: self.replacement_token.clone(),
+            replacement_requested: self.replacement_requested.clone(),
         }
     }
 }
@@ -226,15 +271,21 @@ impl Clone for LocalHttpProbeHandler {
 fn handle_local_http_probe(
     authorization: Option<&str>,
     expected_token: &str,
+    replacement_token: &str,
     body: &str,
     dispatch: impl FnOnce(InboundProtocolMessage) -> GatewayOutcome,
+    replace: impl FnOnce() -> Result<(), String>,
 ) -> LocalHttpResponse {
-    match auth_status(authorization, expected_token) {
-        AuthStatus::Authorized => {}
-        AuthStatus::Missing => return empty_response(401),
-        AuthStatus::Invalid => return empty_response(403),
+    let regular_auth = auth_status(authorization, expected_token);
+    let replacement_auth = auth_status(authorization, replacement_token);
+    if matches!(regular_auth, AuthStatus::Missing) {
+        return empty_response(401);
     }
-
+    if !matches!(regular_auth, AuthStatus::Authorized)
+        && !matches!(replacement_auth, AuthStatus::Authorized)
+    {
+        return empty_response(403);
+    }
     let request = match serde_json::from_str::<LocalHttpJsonRpcRequest>(body) {
         Ok(request) => request,
         Err(error) => {
@@ -265,6 +316,21 @@ fn handle_local_http_probe(
             );
         }
     };
+    if request.method == crate::app_server_client::replacement::APP_SERVER_REPLACE_METHOD {
+        return match replacement_auth {
+            AuthStatus::Missing => empty_response(401),
+            AuthStatus::Invalid => empty_response(403),
+            AuthStatus::Authorized => match replace() {
+                Ok(()) => json_response(200, json!({ "jsonrpc": "2.0", "id": id, "result": {} })),
+                Err(error) => json_response(500, jsonrpc_error(id, internal_error(error))),
+            },
+        };
+    }
+    match regular_auth {
+        AuthStatus::Authorized => {}
+        AuthStatus::Missing => return empty_response(401),
+        AuthStatus::Invalid => return empty_response(403),
+    }
     if request.method != CLIENT_PROBE {
         return json_response(
             400,
@@ -303,6 +369,7 @@ struct LocalHttpJsonRpcRequest {
     meta: RequestMeta,
 }
 
+#[derive(Clone, Copy)]
 enum AuthStatus {
     Authorized,
     Missing,

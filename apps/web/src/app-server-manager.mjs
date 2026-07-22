@@ -7,6 +7,7 @@ import { createRuntimeLogger } from "./runtime-logger.mjs";
 const WEB_SHELL_CLIENT_ID = "web-app-shell";
 const WEB_SHELL_CONNECTION_ID = "web-app-shell";
 const DEFAULT_SHELL_HEARTBEAT_INTERVAL_MS = 5_000;
+const MAX_CONSECUTIVE_HEARTBEAT_FAILURES = 3;
 
 export function createAppServerManager({
   connectionUrl = defaultConnectionUrl,
@@ -21,6 +22,7 @@ export function createAppServerManager({
   let appServerUrl;
   let shellHeartbeat;
   let heartbeatFailureActive = false;
+  let consecutiveHeartbeatFailures = 0;
   let startPromise;
 
   async function startAppServer() {
@@ -84,15 +86,25 @@ export function createAppServerManager({
     shellHeartbeat = setInterval(() => {
       void sendShellRequest(connection, CLIENT_HEARTBEAT, {})
         .then(() => {
+          if (appServerConnection !== connection) return;
+          consecutiveHeartbeatFailures = 0;
           if (!heartbeatFailureActive) return;
           heartbeatFailureActive = false;
           logger.info("app_server_heartbeat_recovered");
         })
         .catch((error) => {
+          if (appServerConnection !== connection) return;
+          consecutiveHeartbeatFailures += 1;
           // Log only the transition into failure; the interval itself is intentionally retrying.
-          if (heartbeatFailureActive) return;
-          heartbeatFailureActive = true;
-          logger.warn("app_server_heartbeat_failed", { error_kind: errorKind(error) });
+          if (!heartbeatFailureActive) {
+            heartbeatFailureActive = true;
+            logger.warn("app_server_heartbeat_failed", { error_kind: errorKind(error) });
+          }
+          if (consecutiveHeartbeatFailures < MAX_CONSECUTIVE_HEARTBEAT_FAILURES) return;
+          logger.warn("app_server_connection_invalidated", {
+            heartbeat_failure_count: consecutiveHeartbeatFailures,
+          });
+          clearConnection();
         });
     }, shellHeartbeatIntervalMs);
     shellHeartbeat.unref?.();
@@ -104,6 +116,14 @@ export function createAppServerManager({
       shellHeartbeat = undefined;
     }
     heartbeatFailureActive = false;
+    consecutiveHeartbeatFailures = 0;
+  }
+
+  function clearConnection() {
+    stopShellClient();
+    appServerConnection = undefined;
+    appServerUrl = undefined;
+    appServer = undefined;
   }
 
   function sendShellRequest(connection, method, params) {
@@ -116,12 +136,7 @@ export function createAppServerManager({
   }
 
   return {
-    clearConnection: () => {
-      stopShellClient();
-      appServerConnection = undefined;
-      appServerUrl = undefined;
-      appServer = undefined;
-    },
+    clearConnection,
     currentConnection: () => appServerConnection,
     currentProcess: () => appServer,
     currentUrl: () => appServerUrl,

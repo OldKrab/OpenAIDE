@@ -28,10 +28,10 @@ use crate::attachment::{
 };
 use crate::client::{
     ClientCapabilities, ClientCapabilitiesChangedParams, ClientCapabilitiesChangedResult,
-    ClientHeartbeatParams, ClientHeartbeatResult, ClientProbeLifecycle, ClientProbeParams,
-    ClientProbeResult, ClientProtocolCapability, ClientWorkspaceRoot, InitializeParams,
-    InitializeResult, RequestedSurface, SettingsSection, ShellCapability, ShellDescriptor,
-    ShellKind,
+    ClientDetachParams, ClientDetachResult, ClientHeartbeatParams, ClientHeartbeatResult,
+    ClientProbeLifecycle, ClientProbeParams, ClientProbeResult, ClientProtocolCapability,
+    ClientWorkspaceRoot, InitializeParams, InitializeResult, RequestedSurface, SettingsSection,
+    ShellCapability, ShellDescriptor, ShellKind,
 };
 use crate::diagnostics::{
     ActiveTaskDiagnosticsResult, DiagnosticsRedaction, RuntimeDiagnosticsParams,
@@ -162,6 +162,8 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<ClientProbeResult>(output, config);
     push_decl::<ClientHeartbeatParams>(output, config);
     push_decl::<ClientHeartbeatResult>(output, config);
+    push_decl::<ClientDetachParams>(output, config);
+    push_decl::<ClientDetachResult>(output, config);
     push_decl::<ClientProbeLifecycle>(output, config);
     push_decl::<InitializeParams>(output, config);
     push_decl::<InitializeResult>(output, config);

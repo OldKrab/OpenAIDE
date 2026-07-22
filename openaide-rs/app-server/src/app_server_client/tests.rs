@@ -163,7 +163,7 @@ fn storage_writer_block_blocks_attach_or_launch() {
 }
 
 #[test]
-fn incompatible_protocol_endpoint_is_not_reused() {
+fn incompatible_protocol_endpoint_is_replaced() {
     let request = request("root-a");
     let record = record("root-a", RuntimeEndpointRecordStatus::Running);
 
@@ -179,14 +179,15 @@ fn incompatible_protocol_endpoint_is_not_reused() {
             LaunchLockState::Acquired,
             StorageWriterState::Available,
         ),
-        AttachOrLaunchDecision::Fail {
+        AttachOrLaunchDecision::ReplaceIncompatible {
+            target: target(),
             reason: AttachOrLaunchFailure::IncompatibleProtocol,
         }
     );
 }
 
 #[test]
-fn incompatible_app_endpoint_is_not_reused() {
+fn incompatible_app_endpoint_is_replaced() {
     let request = request("root-a");
     let record = record("root-a", RuntimeEndpointRecordStatus::Running);
 
@@ -202,7 +203,8 @@ fn incompatible_app_endpoint_is_not_reused() {
             LaunchLockState::Acquired,
             StorageWriterState::Available,
         ),
-        AttachOrLaunchDecision::Fail {
+        AttachOrLaunchDecision::ReplaceIncompatible {
+            target: target(),
             reason: AttachOrLaunchFailure::IncompatibleApp,
         }
     );
@@ -301,6 +303,7 @@ fn record(fingerprint: &str, status: RuntimeEndpointRecordStatus) -> RuntimeEndp
         app_version: "0.1.0".to_string(),
         status,
         auth_token: "token".to_string(),
+        replacement_token: Some("replacement-token".to_string()),
         endpoints: vec![RuntimeEndpoint {
             transport: TransportKind::LocalHttp,
             address: "http://127.0.0.1:12345".to_string(),
@@ -322,6 +325,7 @@ fn target() -> EndpointTarget {
         protocol_version: "1".to_string(),
         app_version: "0.1.0".to_string(),
         auth_token: "token".to_string(),
+        replacement_token: Some("replacement-token".to_string()),
         endpoints: vec![RuntimeEndpoint {
             transport: TransportKind::LocalHttp,
             address: "http://127.0.0.1:12345".to_string(),
@@ -341,6 +345,7 @@ fn probe(
             protocol_version: record.protocol_version.clone(),
             app_version: record.app_version.clone(),
             auth_token: record.auth_token.clone(),
+            replacement_token: record.replacement_token.clone(),
             endpoints: record.endpoints.clone(),
         },
         requirements: EndpointRequirements {

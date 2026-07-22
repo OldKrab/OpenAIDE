@@ -85,15 +85,19 @@ export function useSettingsRouteRefresh({
 export function dispatchStartupReadError(
   bootstrap: WebviewBootstrap,
   dispatch: Dispatch<AppAction>,
+  compatibilityMessage?: string,
 ) {
   if (bootstrap.surface === "navigation") {
-    dispatch({ type: "tasks:error", message: "Unable to load tasks from App Server" });
+    dispatch({
+      type: "tasks:error",
+      message: compatibilityMessage ?? "Unable to load tasks from App Server",
+    });
   }
   if (bootstrap.surface === "task" && bootstrap.taskId) {
     dispatch({
       type: "taskOpen:error",
       taskId: bootstrap.taskId,
-      message: "Unable to open task from App Server",
+      message: compatibilityMessage ?? "Unable to open task from App Server",
     });
   }
 }

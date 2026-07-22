@@ -9,10 +9,11 @@ use openaide_app_server_protocol::events::{AppServerEventPayload, EventScope};
 use openaide_app_server_protocol::ids::{ClientInstanceId, ClientRequestId, StateRootId, TaskId};
 use openaide_app_server_protocol::methods::{
     AGENT_AUTHENTICATE, AGENT_LIST_SESSIONS, ATTACHMENT_REVEAL, ATTACHMENT_REVEAL_SENT,
-    CLIENT_CAPABILITIES_CHANGED, CLIENT_HEARTBEAT, CLIENT_INITIALIZE, DIAGNOSTICS_GET_RUNTIME,
-    SETTINGS_GET_MCP_SERVERS, SETTINGS_GET_PREFERENCES, SETTINGS_GET_RUNTIME, SETTINGS_GET_SKILLS,
-    SETTINGS_UPDATE_PREFERENCES, SETTINGS_UPDATE_RUNTIME, SHELL_RESOLVE_FILE_REVEAL,
-    STATE_SUBSCRIBE, STATE_UNSUBSCRIBE, TASK_CHAT_PAGE,
+    CLIENT_CAPABILITIES_CHANGED, CLIENT_DETACH, CLIENT_HEARTBEAT, CLIENT_INITIALIZE,
+    DIAGNOSTICS_GET_RUNTIME, SETTINGS_GET_MCP_SERVERS, SETTINGS_GET_PREFERENCES,
+    SETTINGS_GET_RUNTIME, SETTINGS_GET_SKILLS, SETTINGS_UPDATE_PREFERENCES,
+    SETTINGS_UPDATE_RUNTIME, SHELL_RESOLVE_FILE_REVEAL, STATE_SUBSCRIBE, STATE_UNSUBSCRIBE,
+    TASK_CHAT_PAGE,
 };
 use openaide_app_server_protocol::settings::{
     AppPreferencesPatch, AppPreferencesUpdateParams, ComposerSubmitShortcut,
@@ -1516,6 +1517,35 @@ fn heartbeat_refreshes_client_liveness() {
         }]
     );
     assert_eq!(gateway.lifecycle.state(), LifecycleState::Running);
+}
+
+#[test]
+fn explicit_detach_removes_only_that_vscode_host_and_identifies_zero_hosts() {
+    let mut gateway = initialized_gateway("client-1", "conn-1");
+    gateway.handle_inbound(
+        ConnectionId::new("conn-2"),
+        request("init-2", CLIENT_INITIALIZE, init_params("client-2")),
+        AppServerTime(2),
+    );
+
+    response_value(gateway.handle_inbound(
+        ConnectionId::new("conn-1"),
+        request("detach-1", CLIENT_DETACH, json!({})),
+        AppServerTime(3),
+    ));
+    assert!(gateway.client_hub.has_initialized_clients());
+    assert!(gateway
+        .client_hub
+        .context_for_connection(&ConnectionId::new("conn-2"))
+        .is_some());
+
+    response_value(gateway.handle_inbound(
+        ConnectionId::new("conn-2"),
+        request("detach-2", CLIENT_DETACH, json!({})),
+        AppServerTime(4),
+    ));
+    assert!(!gateway.client_hub.has_initialized_clients());
+    assert!(gateway.client_hub.has_ever_initialized_clients());
 }
 
 #[test]

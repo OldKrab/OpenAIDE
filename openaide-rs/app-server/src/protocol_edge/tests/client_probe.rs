@@ -16,7 +16,10 @@ fn allowed_before_initialize_without_registering_client() {
 
     let value = response_value(outcome);
     assert_eq!(value["result"]["stateRootFingerprint"], json!("root-1"));
-    assert_eq!(value["result"]["protocolVersion"], json!("1"));
+    assert_eq!(
+        value["result"]["protocolVersion"],
+        json!(openaide_app_server_protocol::client::APP_SERVER_PROTOCOL_VERSION)
+    );
     assert_eq!(
         value["result"]["appVersion"],
         json!(env!("CARGO_PKG_VERSION"))
