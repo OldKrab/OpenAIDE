@@ -20,8 +20,12 @@ pub(super) fn acp_request_error(error: &agent_client_protocol::Error) -> Runtime
         );
     }
     let message = error.to_string();
-    if message.to_ascii_lowercase().contains("not found")
-        || message.to_ascii_lowercase().contains("does not exist")
+    let normalized = message.to_ascii_lowercase();
+    if normalized.contains("not found")
+        || normalized.contains("does not exist")
+        // Codex can create an empty session identity before its first durable rollout.
+        // After a restart, that identity is explicitly reported as missing this way.
+        || normalized.contains("no rollout found for thread id")
     {
         return RuntimeError::TaskNotFound(message);
     }
