@@ -12,8 +12,16 @@ import { ComposerRunOptions, type ComposerRunMenu } from "./ComposerRunOptions";
 import type { TaskFileBrowserCallbacks } from "./appControllerCallbackTypes";
 import { attachEveryImage } from "./imageAttachmentBatch";
 import type { ComposerFileUpload } from "./ComposerAttachments";
+import { composerErrorMessage } from "./composerDraftPolicy";
 
 export type ComposerMenu = "add" | "agent" | ComposerRunMenu;
+
+type WebFileUploadItem = {
+  id: string;
+  file: File;
+  controller: AbortController;
+  dismiss(): void;
+};
 
 type ComposerControlsProps = {
   agentLocked: boolean;
@@ -81,7 +89,7 @@ export function ComposerControls({
     if (disabled || !imageAttachmentsAllowed || files.length === 0 || !fileBrowser?.attachImage) return;
     void attachEveryImage(files, (file) => fileBrowser.attachImage(file)).then(
       () => setOpenMenu(undefined),
-      (error: unknown) => onUnsupportedImageAttachment?.(errorMessage(error, "Unable to upload image.")),
+      (error: unknown) => onUnsupportedImageAttachment?.(composerErrorMessage(error, "Unable to upload image.")),
     );
   };
   const attachFiles = (selectedFiles: File[]) => {
@@ -106,7 +114,7 @@ export function ComposerControls({
         signal: new AbortController().signal,
       }).then(dismiss, (error: unknown) => {
         setFileUploads((current) => current.map((item) => item.id === id
-          ? { ...item, state: "error", error: errorMessage(error, "Unable to attach files.") }
+          ? { ...item, state: "error", error: composerErrorMessage(error, "Unable to attach files.") }
           : item));
       }).finally(() => {
         fileAcquisitionActive.current = false;
@@ -118,55 +126,66 @@ export function ComposerControls({
     if (selectedFiles.length > accepted.length) {
       onUnsupportedImageAttachment?.("A draft can attach at most 20 files.");
     }
-    const queued = accepted.map((file, index) => {
-      const id = `file-upload-${Date.now()}-${index}`;
-      const controller = new AbortController();
+    const uploadFile = async (item: WebFileUploadItem) => {
+      const controller = item.controller;
       uploadControllers.current.add(controller);
+      setFileUploads((current) => current.map((upload) => upload.id === item.id
+        ? { ...upload, loaded: 0, total: item.file.size, state: "uploading" }
+        : upload));
+      try {
+        await fileBrowser.attachFiles?.([item.file], {
+          maxFiles: 1,
+          signal: controller.signal,
+          onProgress: ({ loaded, total }) => setFileUploads((current) => current.map((upload) =>
+            upload.id === item.id ? { ...upload, loaded, total } : upload)),
+        });
+        item.dismiss();
+      } catch (error) {
+        if (controller.signal.aborted) item.dismiss();
+        else setFileUploads((current) => current.map((upload) => upload.id === item.id
+          ? { ...upload, state: "error", error: composerErrorMessage(error, "Unable to upload file.") }
+          : upload));
+      } finally {
+        uploadControllers.current.delete(controller);
+      }
+    };
+    const retryUpload = (item: WebFileUploadItem) => {
+      item.controller = new AbortController();
+      fileAcquisitionActive.current = true;
+      void uploadFile(item).finally(() => {
+        if (uploadControllers.current.size === 0) fileAcquisitionActive.current = false;
+      });
+    };
+    const queued = accepted.map((file, index): WebFileUploadItem => {
+      const id = `file-upload-${Date.now()}-${index}`;
       const dismiss = () => setFileUploads((current) => current.filter((item) => item.id !== id));
       return {
         id,
         file,
-        controller,
-        visible: {
-          id,
-          label: file.name || "Attached file",
-          loaded: 0,
-          total: file.size,
-          state: "queued" as const,
-          cancel: () => controller.abort(),
-          dismiss,
-        },
+        controller: new AbortController(),
+        dismiss,
       };
     });
     fileAcquisitionActive.current = true;
-    setFileUploads(queued.map((item) => item.visible));
+    setFileUploads(queued.map((item) => ({
+      id: item.id,
+      label: item.file.name || "Attached file",
+      loaded: 0,
+      total: item.file.size,
+      state: "queued",
+      cancel: () => item.controller.abort(),
+      dismiss: item.dismiss,
+      retry: () => retryUpload(item),
+    })));
     let next = 0;
     const worker = async () => {
       while (next < queued.length) {
         const item = queued[next++];
         if (item.controller.signal.aborted) {
-          item.visible.dismiss();
+          item.dismiss();
           continue;
         }
-        setFileUploads((current) => current.map((upload) => upload.id === item.id
-          ? { ...upload, state: "uploading" }
-          : upload));
-        try {
-          await fileBrowser.attachFiles?.([item.file], {
-            maxFiles: 1,
-            signal: item.controller.signal,
-            onProgress: ({ loaded, total }) => setFileUploads((current) => current.map((upload) =>
-              upload.id === item.id ? { ...upload, loaded, total } : upload)),
-          });
-          item.visible.dismiss();
-        } catch (error) {
-          if (item.controller.signal.aborted) item.visible.dismiss();
-          else setFileUploads((current) => current.map((upload) => upload.id === item.id
-            ? { ...upload, state: "error", error: errorMessage(error, "Unable to upload file.") }
-            : upload));
-        } finally {
-          uploadControllers.current.delete(item.controller);
-        }
+        await uploadFile(item);
       }
     };
     void Promise.all([worker(), worker()]).finally(() => {
@@ -275,8 +294,4 @@ export function ComposerControls({
       />
     </div>
   );
-}
-
-function errorMessage(error: unknown, fallback: string) {
-  return error instanceof Error ? error.message : fallback;
 }

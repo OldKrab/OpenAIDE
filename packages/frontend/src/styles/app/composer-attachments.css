@@ -54,6 +54,43 @@
 
 .composer-file-upload[data-state="error"] {
   border-color: color-mix(in oklch, var(--oa-danger) 48%, var(--oa-border));
+  min-height: 80px;
+  min-width: 104px;
+}
+
+.composer-file-upload-error {
+  align-items: center;
+  color: var(--oa-danger);
+  display: inline-flex;
+  font-size: 10px;
+  gap: 3px;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.composer-file-upload-retry {
+  background: transparent;
+  border: 0;
+  border-radius: var(--oa-radius-sm);
+  color: var(--oa-text);
+  font: inherit;
+  margin-left: 2px;
+  padding: 2px 3px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.composer-file-upload-retry:hover:not(:disabled) {
+  background: color-mix(in oklch, var(--oa-text) 8%, transparent);
+}
+
+.composer-file-upload-retry:disabled {
+  opacity: 0.5;
+}
+
+.composer-file-upload-retry:focus-visible {
+  outline: 1px solid var(--oa-focus);
+  outline-offset: 1px;
 }
 
 .composer-file-attachment-main {

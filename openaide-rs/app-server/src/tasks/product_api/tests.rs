@@ -1291,6 +1291,41 @@ fn acquire_returns_while_prepared_session_resume_is_blocked() {
 }
 
 #[test]
+fn resumed_identity_only_session_preserves_known_image_capability() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let mut draft = task_record("task-draft", "/tmp/openaide-unit-workspace/app");
+    draft.lifecycle = test_new_task_lifecycle();
+    draft.agent_session_id = Some("known-session".to_string());
+    draft.supports_image_input = true;
+    store.write_task(&draft).unwrap();
+    let agent = Arc::new(RecordingAgent::default());
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        agent,
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+
+    api.create_for_test(TaskAcquireParams {
+        project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
+        agent_id: AgentId::from("codex"),
+        workspace_root: None,
+    })
+    .unwrap();
+    wait_until(|| {
+        matches!(
+            store.read_task("task-draft").unwrap().preparation,
+            TaskPreparationRecord::Ready
+        )
+    });
+
+    assert!(store.read_task("task-draft").unwrap().supports_image_input);
+}
+
+#[test]
 fn reacquiring_replaces_a_prepared_task_whose_native_session_is_missing() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();

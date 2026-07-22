@@ -35,6 +35,29 @@ describe("task mutation intents", () => {
     });
   });
 
+  it("does not expose an HTML intermediary response as the send error", async () => {
+    const { sendTaskPromptIntent } = await import("./taskMutationIntents");
+    const dispatch = vi.fn();
+    const request = vi.fn().mockRejectedValue(new Error(
+      "App Server reliable-session upload failed with HTTP 403: <!doctype html><html>proxy</html>",
+    ));
+
+    sendTaskPromptIntent({
+      backendConnection: { request },
+      clientInstanceId: "client-a",
+      createSnapshotRequestId: vi.fn(() => 1),
+      dispatch,
+      postHostMessage: vi.fn(),
+      stateRootId: "root-a",
+    }, taskSnapshot(), { prompt: "Explain this", context: [] });
+
+    await vi.waitFor(() => expect(dispatch).toHaveBeenCalledWith({
+      type: "taskInput:sendError",
+      taskId: "task-a",
+      message: "Unable to send message.",
+    }));
+  });
+
   it("does not issue task/send while the authoritative capability is blocked", async () => {
     const { sendTaskPromptIntent } = await import("./taskMutationIntents");
     const request = vi.fn();

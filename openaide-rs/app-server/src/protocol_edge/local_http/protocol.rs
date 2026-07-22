@@ -11,6 +11,10 @@ use crate::protocol_edge::{
 };
 
 use super::event_streams::{EventStreamLease, EventStreamRegistry};
+use super::reliable_upload_chunks::{
+    AppendError as ReliableChunkError, AppendOutcome as ReliableChunkOutcome,
+    ReliableUploadChunkRegistry,
+};
 use super::sessions::{AcceptClientFrame, PollError, ReliableSessionRegistry};
 use super::{auth_status, empty_response, json_response, AuthStatus, LocalHttpResponse};
 
@@ -22,11 +26,22 @@ struct ReliableUpload {
     message: Value,
 }
 
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ReliableUploadChunk {
+    session_id: String,
+    sequence: u64,
+    offset: usize,
+    total_size: usize,
+    data: String,
+}
+
 pub struct LocalHttpProtocolHandler {
     gateway: SharedRpcGateway,
     auth_token: String,
     event_streams: EventStreamRegistry,
     sessions: ReliableSessionRegistry,
+    upload_chunks: ReliableUploadChunkRegistry,
 }
 
 impl Clone for LocalHttpProtocolHandler {
@@ -36,6 +51,7 @@ impl Clone for LocalHttpProtocolHandler {
             auth_token: self.auth_token.clone(),
             event_streams: self.event_streams.clone(),
             sessions: self.sessions.clone(),
+            upload_chunks: self.upload_chunks.clone(),
         }
     }
 }
@@ -51,6 +67,7 @@ impl LocalHttpProtocolHandler {
             auth_token: auth_token.into(),
             event_streams: EventStreamRegistry::default(),
             sessions: ReliableSessionRegistry::new(server_id),
+            upload_chunks: ReliableUploadChunkRegistry::default(),
         }
     }
 
@@ -60,15 +77,19 @@ impl LocalHttpProtocolHandler {
         connection_id: Option<&str>,
         body: &str,
     ) -> LocalHttpResponse {
-        if serde_json::from_str::<Value>(body)
-            .ok()
-            .and_then(|value| {
-                value
-                    .get("transport")
-                    .and_then(Value::as_str)
-                    .map(str::to_string)
-            })
-            .as_deref()
+        let parsed = serde_json::from_str::<Value>(body).ok();
+        if parsed
+            .as_ref()
+            .and_then(|value| value.get("transport"))
+            .and_then(Value::as_str)
+            == Some("chunk")
+        {
+            return self.handle_reliable_upload_chunk(authorization, connection_id, body);
+        }
+        if parsed
+            .as_ref()
+            .and_then(|value| value.get("transport"))
+            .and_then(Value::as_str)
             == Some("open")
         {
             return handle_reliable_session_open(
@@ -78,15 +99,10 @@ impl LocalHttpProtocolHandler {
                 &self.sessions,
             );
         }
-        if serde_json::from_str::<Value>(body)
-            .ok()
-            .and_then(|value| {
-                value
-                    .get("transport")
-                    .and_then(Value::as_str)
-                    .map(str::to_string)
-            })
-            .as_deref()
+        if parsed
+            .as_ref()
+            .and_then(|value| value.get("transport"))
+            .and_then(Value::as_str)
             == Some("send")
         {
             let now = AppServerTime::now();
@@ -117,6 +133,50 @@ impl LocalHttpProtocolHandler {
                 }
             },
         )
+    }
+
+    fn handle_reliable_upload_chunk(
+        &self,
+        authorization: Option<&str>,
+        connection_id: Option<&str>,
+        body: &str,
+    ) -> LocalHttpResponse {
+        match auth_status(authorization, &self.auth_token) {
+            AuthStatus::Authorized => {}
+            AuthStatus::Missing => return empty_response(401),
+            AuthStatus::Invalid => return empty_response(403),
+        }
+        let raw_connection_id = connection_id;
+        let Some(connection_id) = valid_connection_id(raw_connection_id) else {
+            return empty_response(400);
+        };
+        let chunk = match serde_json::from_str::<ReliableUploadChunk>(body) {
+            Ok(chunk) => chunk,
+            Err(_) => return empty_response(400),
+        };
+        match self.sessions.connection_id(&chunk.session_id) {
+            None => return empty_response(410),
+            Some(owner) if owner != connection_id => return empty_response(403),
+            Some(_) => {}
+        }
+        let bytes =
+            match base64::Engine::decode(&base64::engine::general_purpose::STANDARD, chunk.data) {
+                Ok(bytes) => bytes,
+                Err(_) => return empty_response(400),
+            };
+        match self.upload_chunks.append(
+            &chunk.session_id,
+            chunk.sequence,
+            chunk.offset,
+            chunk.total_size,
+            bytes,
+        ) {
+            Ok(ReliableChunkOutcome::Partial) => empty_response(202),
+            Ok(ReliableChunkOutcome::Complete(upload)) => {
+                self.handle(authorization, raw_connection_id, &upload)
+            }
+            Err(error) => reliable_chunk_error_response(error),
+        }
     }
 
     pub fn poll_session(
@@ -348,6 +408,16 @@ fn handle_local_http_protocol(
             )),
         ),
     }
+}
+
+fn reliable_chunk_error_response(error: ReliableChunkError) -> LocalHttpResponse {
+    let status = match error {
+        ReliableChunkError::ChunkTooLarge | ReliableChunkError::UploadTooLarge => 413,
+        ReliableChunkError::MetadataMismatch | ReliableChunkError::OffsetMismatch => 409,
+        ReliableChunkError::StateUnavailable => 500,
+        ReliableChunkError::InvalidChunk | ReliableChunkError::InvalidUtf8 => 400,
+    };
+    empty_response(status)
 }
 
 fn handle_reliable_session_open(

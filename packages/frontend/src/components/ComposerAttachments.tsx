@@ -1,4 +1,4 @@
-import { ExternalLink, FolderOpen, X } from "lucide-react";
+import { CircleAlert, ExternalLink, FolderOpen, X } from "lucide-react";
 import { useState } from "react";
 import type { ComposerAttachment } from "../state/composerOptions";
 import {
@@ -19,6 +19,7 @@ export type ComposerFileUpload = {
   cancellable?: boolean;
   cancel(): void;
   dismiss(): void;
+  retry?(): void;
 };
 
 export function ComposerAttachments({
@@ -41,6 +42,7 @@ export function ComposerAttachments({
     attachment,
     image: composerImagePreview(attachment),
   }));
+  const uploadActive = uploads.some((upload) => upload.state !== "error");
   return (
     <div className="composer-attachments" aria-label="Attached context">
       <div className="composer-attachment-list" data-layout={attachmentImageLayout(attachmentItems.length + uploads.length)}>
@@ -124,7 +126,6 @@ export function ComposerAttachments({
             className="composer-attachment-tile composer-file-attachment composer-file-upload"
             data-state={upload.state}
             key={upload.id}
-            title={upload.state === "error" ? upload.error : undefined}
           >
             <span className="composer-file-attachment-main">
               <FileKindIcon path={upload.label} size={20} />
@@ -136,6 +137,28 @@ export function ComposerAttachments({
                 max={Math.max(upload.total, 1)}
                 value={upload.loaded}
               />
+            ) : null}
+            {upload.state === "error" ? (
+              <span
+                aria-label={upload.error ? `Upload failed: ${upload.error}` : "Upload failed"}
+                aria-live="polite"
+                className="composer-file-upload-error"
+                role="status"
+              >
+                <CircleAlert aria-hidden="true" size={11} />
+                Upload failed
+                {upload.retry ? (
+                  <button
+                    aria-label={`Retry ${upload.label}`}
+                    className="composer-file-upload-retry"
+                    disabled={uploadActive}
+                    onClick={upload.retry}
+                    type="button"
+                  >
+                    Retry
+                  </button>
+                ) : null}
+              </span>
             ) : null}
             {upload.state === "error" || upload.cancellable !== false ? (
               <button

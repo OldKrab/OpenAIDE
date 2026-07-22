@@ -60,6 +60,70 @@ describe("ReliableHttpMessageChannel", () => {
     channel.close();
   });
 
+  it("falls back to in-memory chunks when an intermediary rejects a large upload", async () => {
+    const chunkBodies: string[] = [];
+    let rejectedBody = "";
+    let receivePolls = 0;
+    const fetch = vi.fn<ReliableHttpFetch>(async (_input, init) => {
+      if (init.method === "GET") {
+        receivePolls += 1;
+        return new Promise(() => undefined);
+      }
+      const body = init.body ?? "";
+      if (body.includes('"transport":"open"')) {
+        return response(200, JSON.stringify({
+          transportVersion: 1,
+          sessionId: "session-1",
+          serverId: "server-1",
+        }));
+      }
+      const envelope = JSON.parse(body) as { transport?: string; offset?: number; totalSize?: number; data?: string };
+      if (envelope.transport !== "chunk") {
+        rejectedBody = body;
+        return response(403, "<!doctype html><html><body>request too large</body></html>");
+      }
+      chunkBodies.push(body);
+      const received = (envelope.offset ?? 0) + decodeBase64(envelope.data ?? "").byteLength;
+      return response(received === envelope.totalSize ? 204 : 202, "");
+    });
+    const channel = createReliableHttpMessageChannel({
+      endpointUrl: "http://127.0.0.1:4321",
+      connectionId: "client-1",
+      fetch,
+      retryDelayMs: 0,
+      deferReceiveUntilFirstUpload: true,
+    });
+    const errors: unknown[] = [];
+    channel.subscribeErrors?.((error) => errors.push(error));
+
+    channel.send({
+      jsonrpc: "2.0",
+      id: "rpc-large-image",
+      method: "task/send",
+      params: { image: "x".repeat(1_300_000) },
+    });
+
+    await vi.waitFor(() => expect(chunkBodies.length).toBeGreaterThanOrEqual(3));
+    await vi.waitFor(() => expect(receivePolls).toBe(1));
+    const chunks = chunkBodies.map((body) => JSON.parse(body) as {
+      data: string;
+      offset: number;
+      totalSize: number;
+    });
+    expect(chunkBodies.every((body) => new TextEncoder().encode(body).byteLength < 1_000_000)).toBe(true);
+    const reconstructed = new Uint8Array(chunks.reduce((size, chunk) => size + decodeBase64(chunk.data).byteLength, 0));
+    let reconstructedOffset = 0;
+    for (const chunk of chunks) {
+      const bytes = decodeBase64(chunk.data);
+      reconstructed.set(bytes, reconstructedOffset);
+      reconstructedOffset += bytes.byteLength;
+    }
+    expect(new TextDecoder().decode(reconstructed)).toBe(rejectedBody);
+    expect(chunks.map((chunk) => chunk.offset)).toEqual([0, 512 * 1024, 1024 * 1024]);
+    expect(errors).toEqual([]);
+    channel.close();
+  });
+
   it("reports authoritative session loss instead of retrying it forever", async () => {
     const fetch = vi.fn<ReliableHttpFetch>(async (_input, init) => {
       if (init.method === "POST") {
@@ -182,6 +246,10 @@ describe("ReliableHttpMessageChannel", () => {
     channel.close();
   });
 });
+
+function decodeBase64(data: string) {
+  return Uint8Array.from(atob(data), (character) => character.charCodeAt(0));
+}
 
 function response(status: number, body: string) {
   return {
