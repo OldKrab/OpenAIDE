@@ -174,6 +174,9 @@ fn build_entry(root: PathBuf) -> Result<RegistryEntry, String> {
         notify::recommended_watcher(move |event: notify::Result<notify::Event>| match event {
             Ok(event) => {
                 if callback_armed.load(Ordering::Acquire)
+                    // Index scans can deliver delayed read-only events after arming.
+                    // Reads never change the file inventory, so they must not refresh it.
+                    && !matches!(event.kind, notify::EventKind::Access(_))
                     && event
                         .paths
                         .iter()
