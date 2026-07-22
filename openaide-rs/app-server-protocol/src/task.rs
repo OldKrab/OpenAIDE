@@ -67,11 +67,8 @@ pub enum WorkspaceFileSearchState {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskAdoptNativeSessionParams {
-    pub project_id: ProjectId,
     pub agent_id: AgentId,
     pub native_session_id: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub title: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
@@ -194,12 +191,24 @@ pub struct TaskChatPageResult {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolDetailSnapshot {
+    /// Artifact-local durable revision used to reject a delta already covered by a baseline.
+    #[serde(default)]
+    pub revision: u64,
     pub locations: Vec<ActivityToolLocation>,
     pub content: Vec<ActivityToolContent>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input: Option<ActivityToolInput>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub output: Option<ActivityToolOutput>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub terminal_outputs: Vec<TerminalOutputSnapshot>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TerminalOutputSnapshot {
+    pub terminal_id: String,
+    pub output: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
@@ -339,6 +348,29 @@ pub struct TaskListResult {
     pub revision: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub next_cursor: Option<TaskListCursor>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskNavigationRefreshParams {}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskNavigationRefreshResult {
+    pub accepted: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskNavigationLoadMoreParams {
+    pub project_id: ProjectId,
+    pub target_row_count: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskNavigationLoadMoreResult {
+    pub accepted: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]

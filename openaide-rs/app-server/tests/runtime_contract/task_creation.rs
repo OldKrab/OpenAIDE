@@ -322,7 +322,7 @@ fn task_create_closes_started_session_when_prompt_start_persistence_fails() {
     let tmp = TempDir::new().unwrap();
     let store_root = tmp.path().join("store");
     let store = Store::open(store_root.clone()).unwrap();
-    let tasks_dir = store.tasks_dir();
+    let tasks_dir = store_root.join("task-store-v1/tasks");
     let original_permissions = std::fs::metadata(&tasks_dir).unwrap().permissions();
     std::fs::set_permissions(&tasks_dir, std::fs::Permissions::from_mode(0o500)).unwrap();
 
@@ -365,7 +365,7 @@ fn task_create_closes_loaded_session_when_adoption_persistence_fails() {
     let tmp = TempDir::new().unwrap();
     let store_root = tmp.path().join("store");
     let store = Store::open(store_root.clone()).unwrap();
-    let tasks_dir = store.tasks_dir();
+    let tasks_dir = store_root.join("task-store-v1/tasks");
     let original_permissions = std::fs::metadata(&tasks_dir).unwrap().permissions();
     std::fs::set_permissions(&tasks_dir, std::fs::Permissions::from_mode(0o500)).unwrap();
 

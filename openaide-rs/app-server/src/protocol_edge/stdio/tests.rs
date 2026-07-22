@@ -8,12 +8,12 @@ use openaide_app_server_protocol::envelopes::RequestMeta;
 use openaide_app_server_protocol::errors::ProtocolErrorCode;
 use openaide_app_server_protocol::ids::TaskId;
 use openaide_app_server_protocol::methods::{
-    AGENT_CREATE_CUSTOM, AGENT_DELETE_CUSTOM, AGENT_PROBE, AGENT_REPLACE_CUSTOM, AGENT_SET_ENABLED,
-    AGENT_UPDATE_CUSTOM_METADATA, ATTACHMENT_CONFIRM_EMBEDDED,
-    ATTACHMENT_CREATE_EMBEDDED_CANDIDATE, ATTACHMENT_CREATE_FILE_REFERENCE,
-    ATTACHMENT_CREATE_PASTED_IMAGE, ATTACHMENT_LIST_DIRECTORY, ATTACHMENT_LIST_ROOTS,
-    ATTACHMENT_REFRESH_HANDLES, ATTACHMENT_RELEASE, ATTACHMENT_REVEAL, CLIENT_HEARTBEAT,
-    CLIENT_INITIALIZE, SETTINGS_GET_AGENT_DETAILS, STATE_SUBSCRIBE, TASK_ACQUIRE,
+    AGENT_CREATE_CUSTOM, AGENT_DELETE_CUSTOM, AGENT_LIST_SESSIONS, AGENT_PROBE,
+    AGENT_REPLACE_CUSTOM, AGENT_SET_ENABLED, AGENT_UPDATE_CUSTOM_METADATA,
+    ATTACHMENT_CONFIRM_EMBEDDED, ATTACHMENT_CREATE_EMBEDDED_CANDIDATE,
+    ATTACHMENT_CREATE_FILE_REFERENCE, ATTACHMENT_CREATE_PASTED_IMAGE, ATTACHMENT_LIST_DIRECTORY,
+    ATTACHMENT_LIST_ROOTS, ATTACHMENT_REFRESH_HANDLES, ATTACHMENT_RELEASE, ATTACHMENT_REVEAL,
+    CLIENT_HEARTBEAT, CLIENT_INITIALIZE, SETTINGS_GET_AGENT_DETAILS, STATE_SUBSCRIBE, TASK_ACQUIRE,
     TASK_ADOPT_NATIVE_SESSION, TASK_CANCEL, TASK_LIST, TASK_MARK_READ, TASK_OPEN, TASK_RELEASE,
     TASK_SEND, TASK_SET_ARCHIVED, TASK_SET_CONFIG_OPTION,
 };
@@ -591,7 +591,7 @@ fn initialize_returns_storage_backed_task_navigation() {
 
     let response = response(&responses[0]);
     assert_eq!(
-        response["result"]["result"]["snapshot"]["tasks"]["tasks"][0]["taskId"],
+        response["result"]["result"]["snapshot"]["tasks"]["entries"][0]["task"]["taskId"],
         "task-1"
     );
 }
@@ -1168,19 +1168,33 @@ fn rejected_agent_mutations_return_errors_without_agent_events() {
 }
 
 #[test]
-fn initialize_returns_error_when_storage_backed_snapshot_fails() {
-    let (temp, mut dispatcher) = dispatcher();
-    std::fs::remove_dir_all(temp.path().join("tasks")).unwrap();
-
-    let responses = dispatcher.handle_line(&init_request("1", "client-1"));
+fn dispatcher_startup_isolates_damaged_task_storage() {
+    let (temp, dispatcher) = dispatcher();
+    drop(dispatcher);
+    {
+        let store = Store::open(temp.path().to_path_buf()).unwrap();
+        store.write_task(&task_record("corrupt-task")).unwrap();
+    }
+    corrupt_last_byte(
+        &temp
+            .path()
+            .join("task-store-v1/tasks/corrupt-task/task.journal"),
+    );
+    let state_root = StateRoot::resolve(temp.path()).expect("state root");
+    let mut dispatcher = ProtocolEdgeStdioDispatcher::new_for_test(state_root);
+    dispatcher.handle_line(&init_request("1", "client-1"));
+    let responses = dispatcher.handle_line(
+        &json!({
+            "jsonrpc": "2.0",
+            "id": "2",
+            "method": TASK_LIST,
+            "params": {}
+        })
+        .to_string(),
+    );
 
     let response = response(&responses[0]);
-    assert_eq!(response["error"]["error"]["code"], "internal");
-    assert_eq!(response["error"]["error"]["recoverable"], true);
-    assert!(response["error"]["error"]["message"]
-        .as_str()
-        .unwrap()
-        .contains("Failed to read project collection"));
+    assert_eq!(response["result"]["result"]["tasks"], json!([]));
 }
 
 #[test]
@@ -1262,9 +1276,14 @@ fn task_open_returns_storage_backed_task_snapshot_after_initialize() {
         response["result"]["result"]["task"]["chat"]["items"][0]["parts"][0]["text"],
         "hello"
     );
-    let task_json = std::fs::read_to_string(temp.path().join("tasks/task-1/task.json")).unwrap();
-    let stored_task: serde_json::Value = serde_json::from_str(&task_json).unwrap();
-    assert_eq!(stored_task["unread"], false);
+    drop(dispatcher);
+    assert!(
+        !Store::open(temp.path().to_path_buf())
+            .unwrap()
+            .read_task("task-1")
+            .unwrap()
+            .unread
+    );
 }
 
 #[test]
@@ -1295,9 +1314,29 @@ fn task_mark_read_acknowledges_unread_task_over_stdio() {
         response["result"]["result"]["task"]["task"]["unread"],
         false
     );
-    let task_json = std::fs::read_to_string(temp.path().join("tasks/task-1/task.json")).unwrap();
-    let stored_task: serde_json::Value = serde_json::from_str(&task_json).unwrap();
-    assert_eq!(stored_task["unread"], false);
+    drop(dispatcher);
+    assert!(
+        !Store::open(temp.path().to_path_buf())
+            .unwrap()
+            .read_task("task-1")
+            .unwrap()
+            .unread
+    );
+}
+
+fn corrupt_last_byte(path: &std::path::Path) {
+    use std::io::{Read, Seek, Write};
+    let mut file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)
+        .unwrap();
+    file.seek(std::io::SeekFrom::End(-1)).unwrap();
+    let mut byte = [0];
+    file.read_exact(&mut byte).unwrap();
+    file.seek(std::io::SeekFrom::End(-1)).unwrap();
+    file.write_all(&[byte[0] ^ 0xff]).unwrap();
+    file.sync_all().unwrap();
 }
 
 #[test]
@@ -1555,6 +1594,19 @@ fn task_adopt_native_session_loads_agent_session_after_initialize() {
     let state_root = StateRoot::resolve(temp.path()).expect("state root");
     let mut dispatcher = ProtocolEdgeStdioDispatcher::new_for_test(state_root);
     dispatcher.handle_line(&init_request("1", "client-1"));
+    dispatcher.handle_line(
+        &json!({
+            "jsonrpc": "2.0",
+            "id": "list",
+            "method": AGENT_LIST_SESSIONS,
+            "params": {
+                "projectId": project_id_for_workspace("/tmp/openaide-stdio-workspace/a"),
+                "agentId": "codex",
+                "cursor": null
+            }
+        })
+        .to_string(),
+    );
 
     let responses = dispatcher.handle_line(
         &json!({
@@ -1562,10 +1614,8 @@ fn task_adopt_native_session_loads_agent_session_after_initialize() {
             "id": "adopt",
             "method": TASK_ADOPT_NATIVE_SESSION,
             "params": {
-                "projectId": project_id_for_workspace("/tmp/openaide-stdio-workspace/a"),
                 "agentId": "codex",
-                "nativeSessionId": "native-session-1",
-                "title": "Imported native session"
+                "nativeSessionId": "mock-session"
             }
         })
         .to_string(),
@@ -1579,7 +1629,7 @@ fn task_adopt_native_session_loads_agent_session_after_initialize() {
     assert!(task_id.starts_with("task_"));
     assert_eq!(
         response["result"]["result"]["task"]["task"]["title"],
-        serde_json::json!({ "value": "Imported native session", "source": "agent" })
+        serde_json::json!({ "value": "Mock session", "source": "agent" })
     );
     assert_eq!(
         response["result"]["result"]["task"]["chat"]["items"][0]["parts"][0]["text"],
@@ -1588,12 +1638,41 @@ fn task_adopt_native_session_loads_agent_session_after_initialize() {
     drop(dispatcher);
     let store = open_store_after_dispatcher_drop(temp.path());
     let record = store.read_task(&task_id).unwrap();
-    assert_eq!(record.agent_session_id.as_deref(), Some("native-session-1"));
+    assert_eq!(record.agent_session_id.as_deref(), Some("mock-session"));
     assert_eq!(
         record.lifecycle,
         crate::storage::records::TaskLifecycle::Visible
     );
     assert!(matches!(record.preparation, TaskPreparationRecord::Ready));
+}
+
+#[test]
+fn task_adopt_native_session_rejects_an_unknown_catalog_identity() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let state_root = StateRoot::resolve(temp.path()).expect("state root");
+    let mut dispatcher = ProtocolEdgeStdioDispatcher::new_for_test(state_root);
+    dispatcher.handle_line(&init_request("1", "client-1"));
+
+    let responses = dispatcher.handle_line(
+        &json!({
+            "jsonrpc": "2.0",
+            "id": "adopt-missing",
+            "method": TASK_ADOPT_NATIVE_SESSION,
+            "params": {
+                "agentId": "codex",
+                "nativeSessionId": "missing-session"
+            }
+        })
+        .to_string(),
+    );
+
+    let response = response(&responses[0]);
+    assert_eq!(response["id"], "adopt-missing");
+    assert_eq!(response["error"]["error"]["code"], "notFound");
+    assert_eq!(
+        response["error"]["error"]["message"],
+        "Native Session is no longer available"
+    );
 }
 
 #[test]
@@ -1657,7 +1736,7 @@ fn task_send_commits_user_message_and_active_turn_after_initialize() {
     let events = dispatcher.handle_task_update(committed);
     assert!(events
         .iter()
-        .any(|line| event_payload_kind(line, "taskNavigationChanged")));
+        .any(|line| event_payload_kind(line, "taskNavigationReplaced")));
     drop(dispatcher);
     let store = open_store_after_dispatcher_drop(temp.path());
     let record = store.read_task("task-existing").unwrap();
@@ -2135,7 +2214,7 @@ fn task_release_is_idempotent_after_restart_clears_the_lease() {
     assert_eq!(response["result"]["result"]["taskId"], "task-draft");
     assert_eq!(responses.len(), 1);
     drop(dispatcher);
-    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let store = open_store_after_dispatcher_drop(temp.path());
     assert_eq!(
         store.read_task("task-draft").unwrap().lifecycle,
         crate::storage::records::TaskLifecycle::New { lease: None }

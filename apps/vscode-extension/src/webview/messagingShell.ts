@@ -28,6 +28,14 @@ export async function routeSurfaceCommand(message: WebviewToHostMessage, context
     context.surfaces?.openNewTask(message.payload?.project_id);
     return true;
   }
+  if (message.type === "surface.openNativeSession") {
+    context.surfaces?.openNativeSession(
+      message.payload.agent_id,
+      message.payload.native_session_id,
+      message.payload.project_id,
+    );
+    return true;
+  }
   if (message.type === "surface.openSettings") {
     context.surfaces?.openSettings(
       message.payload?.agent_id,

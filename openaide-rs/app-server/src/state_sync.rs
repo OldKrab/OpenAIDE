@@ -162,6 +162,16 @@ impl StateStream {
         self.subscriptions.len()
     }
 
+    pub fn subscription_count_for_kind(
+        &self,
+        matches: impl Fn(&SubscriptionScope) -> bool,
+    ) -> usize {
+        self.subscriptions
+            .iter()
+            .filter(|subscription| matches(&subscription.scope))
+            .count()
+    }
+
     pub fn read_token(&self) -> SnapshotReadToken {
         self.cursors.read_token()
     }
@@ -287,6 +297,10 @@ fn payload_matches_subscription(
             matches!(payload, AppServerEventPayload::SnapshotReplaced { .. })
                 || matches!(
                     payload,
+                    AppServerEventPayload::TaskNavigationReplaced { .. }
+                )
+                || matches!(
+                    payload,
                     AppServerEventPayload::TaskNavigationChanged {
                         change:
                             openaide_app_server_protocol::events::TaskNavigationChange::Remove { .. }
@@ -310,14 +324,23 @@ fn payload_matches_subscription(
         SubscriptionScope::ToolDetail {
             task_id,
             artifact_id,
-        } => matches!(
-            payload,
-            AppServerEventPayload::ToolDetailUpdated {
-                task_id: updated_task_id,
-                artifact_id: updated_artifact_id,
-                ..
-            } if updated_task_id == task_id && updated_artifact_id == artifact_id
-        ),
+        } => {
+            matches!(
+                payload,
+                AppServerEventPayload::ToolDetailUpdated {
+                    task_id: updated_task_id,
+                    artifact_id: updated_artifact_id,
+                    ..
+                } if updated_task_id == task_id && updated_artifact_id == artifact_id
+            ) || matches!(
+                payload,
+                AppServerEventPayload::ToolDetailChanged {
+                    task_id: updated_task_id,
+                    artifact_id: updated_artifact_id,
+                    ..
+                } if updated_task_id == task_id && updated_artifact_id == artifact_id
+            )
+        }
         SubscriptionScope::WorktreeRepository { repository_id } => {
             matches!(payload, AppServerEventPayload::SnapshotReplaced { .. })
                 || matches!(

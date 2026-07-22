@@ -14,6 +14,30 @@ use crate::storage::Store;
 use crate::tasks::snapshot::{build_snapshot, snapshot_from_record_and_chat};
 
 pub(crate) use chat_projection::{project_chat_item, project_tool_details};
+
+/// Projects one committed lazy artifact into the complete replica baseline.
+/// Structured details and terminal output share the artifact revision and must
+/// never be published as competing partial snapshots.
+pub(crate) fn project_tool_artifact(
+    artifact: crate::storage::task_journal::ToolArtifactProjection,
+) -> Option<ToolDetailSnapshot> {
+    let details = artifact.details?;
+    let mut snapshot = project_tool_details(&details);
+    snapshot.revision = artifact.revision;
+    snapshot.terminal_outputs = artifact
+        .terminal_order
+        .into_iter()
+        .filter_map(|terminal_id| {
+            artifact.terminal_outputs.get(&terminal_id).map(|output| {
+                openaide_app_server_protocol::task::TerminalOutputSnapshot {
+                    terminal_id,
+                    output: output.clone(),
+                }
+            })
+        })
+        .collect();
+    Some(snapshot)
+}
 use readiness::{
     agent_commands_snapshot, agent_config_snapshot, preparation_snapshot, send_capability_for_task,
 };
@@ -114,7 +138,7 @@ impl TaskSnapshotSource for TaskSnapshotStore {
         }
         let tasks = self
             .store
-            .list_tasks_strict_for_archive(archived)
+            .list_available_tasks_for_archive(archived)
             .map_err(snapshot_read_error)?
             .into_iter()
             .map(project_task_summary)
@@ -157,11 +181,16 @@ impl TaskSnapshotSource for TaskSnapshotStore {
             .map_err(task_snapshot_error)?;
         crate::tasks::access::require_client_task_access(&task, client_instance_id)
             .map_err(task_snapshot_error)?;
-        let details = self
+        let artifact = self
             .store
-            .read_tool_artifact(task_id.as_str(), artifact_id)
+            .read_tool_artifact_projection(task_id.as_str(), artifact_id)
             .map_err(task_snapshot_error)?;
-        Ok(project_tool_details(&details))
+        project_tool_artifact(artifact).ok_or_else(|| ProtocolError {
+            code: openaide_app_server_protocol::errors::ProtocolErrorCode::NotFound,
+            message: "Tool detail baseline is unavailable".to_string(),
+            recoverable: true,
+            target: None,
+        })
     }
 }
 
@@ -194,22 +223,22 @@ impl TaskSnapshotStore {
 }
 
 trait TaskSnapshotStoreArchiveList {
-    fn list_tasks_strict_for_archive(
+    fn list_available_tasks_for_archive(
         &self,
         archived: bool,
     ) -> Result<Vec<crate::storage::records::TaskRecord>, crate::protocol::errors::RuntimeError>;
 }
 
 impl TaskSnapshotStoreArchiveList for Store {
-    fn list_tasks_strict_for_archive(
+    fn list_available_tasks_for_archive(
         &self,
         archived: bool,
     ) -> Result<Vec<crate::storage::records::TaskRecord>, crate::protocol::errors::RuntimeError>
     {
         if archived {
-            self.list_archived_tasks_strict()
+            self.list_archived_tasks()
         } else {
-            self.list_tasks_strict()
+            self.list_tasks()
         }
     }
 }

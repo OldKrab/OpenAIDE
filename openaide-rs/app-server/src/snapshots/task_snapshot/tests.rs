@@ -447,19 +447,33 @@ fn client_snapshot_read_hides_another_clients_new_task() {
 }
 
 #[test]
-fn list_returns_error_for_corrupt_task_record() {
+fn list_omits_a_corrupt_task_record() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    std::fs::create_dir_all(store.tasks_dir().join("corrupt")).unwrap();
-    std::fs::write(store.tasks_dir().join("corrupt/task.json"), "{not-json").unwrap();
+    store.write_task(&task_record("corrupt")).unwrap();
+    drop(store);
+    corrupt_last_byte(&temp.path().join("task-store-v1/tasks/corrupt/task.journal"));
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
 
-    let error = TaskSnapshotStore::new(store)
+    let snapshot = TaskSnapshotStore::new(store)
         .list(false, None, None)
-        .expect_err("corrupt task record should fail list");
+        .expect("corrupt Task must stay isolated from collection reads");
 
-    assert_eq!(error.code, ProtocolErrorCode::Internal);
-    assert!(error.recoverable);
-    assert!(error.message.contains("Failed to read task navigation"));
+    assert!(snapshot.tasks.is_empty());
+}
+
+fn corrupt_last_byte(path: &std::path::Path) {
+    use std::io::{Read, Seek, Write};
+    let mut file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)
+        .unwrap();
+    file.seek(std::io::SeekFrom::End(-1)).unwrap();
+    let mut byte = [0];
+    file.read_exact(&mut byte).unwrap();
+    file.seek(std::io::SeekFrom::End(-1)).unwrap();
+    file.write_all(&[byte[0] ^ 0xff]).unwrap();
 }
 
 fn chat_message(message: NormalizedMessage) -> ChatMessage {

@@ -285,7 +285,7 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
             adoptingSessionId: undefined,
             loading: false,
             loaded: true,
-            error: action.message,
+            adoptionError: { sessionId: action.sessionId, message: action.message },
           },
         },
       };
@@ -299,7 +299,7 @@ export function reduceNewTaskState(state: AppState, action: AppAction): AppState
           nativeSessions: {
             ...state.newTask.nativeSessions,
             adoptingSessionId: action.sessionId,
-            error: undefined,
+            adoptionError: undefined,
           },
         },
       };

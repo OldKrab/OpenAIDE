@@ -44,6 +44,16 @@ A Task Workspace is either the selected Project root or one durable worktree ide
 - **Native Session update consumer** is the canonical name for the one session-lifetime listener that projects `session/update` notifications into Task state.
 - **Baseline** is a complete authoritative snapshot for one subscribed scope at one scope-local revision.
 
+## Task Navigation And Native Session Discovery
+
+The global Task Navigation subscription is one flat, activity-sorted projection of visible durable Tasks and persisted unadopted Native Sessions. A Native Session has no Task id until `session/load` succeeds. Selecting one first opens a pre-Task route identified by Agent id and Native Session id (`/session/{agentId}/{sessionId}` in the Web App). Successful load replaces that route with `/task/{taskId}`; definitive not-found leaves the opening route visible with **This session no longer exists.** while removing the stale Navigation row. One Agent Native Session can bind to only one Task, and that binding never changes; concurrent adoption attempts converge on that Task.
+
+App Server persists successful `session/list` observations and returns them in the immediate subscription baseline after restart. It never deletes a cached row merely because a partial or failed listing omitted it. A definitive not-found response from `session/load` removes the stale Native Session while its opening surface reports that it no longer exists.
+
+Only the Native Session Catalog calls `session/list`. It discovers all enabled Agents for every visible Project root and available worktree, coalesces overlapping refresh demand, publishes successful pages independently, and retains cursors only inside App Server. Discovery starts when Task Navigation gains a subscriber, repeats every 60 seconds while demand remains, and also responds to `taskNavigation/refresh` and `taskNavigation/loadMore`.
+
+Frontend may retain more rows than it renders. Initial per-Project presentation is 20 rows for one Project, 10 each for two Projects, and 7 each for three or more. Load More reveals 10 additional rows and raises the App Server process high-water for that Project. Collapsing and re-expanding a Project resets only its presentation limit.
+
 ## Client Identity
 
 Frontend supplies `clientInstanceId` only through `client/initialize`. Transport assigns a connection-local `connectionId`; `ClientHub` maps that connection to the initialized client. Product handlers obtain client identity from this trusted connection context instead of accepting a client id in product request parameters.
@@ -396,7 +406,7 @@ An implementation conforms to this specification only when all of these are true
 2. First-Send message acceptance, lease consumption, and Prepared-Task promotion are one durable atomic mutation.
 3. Each Send mutation is issued once and is never automatically replayed.
 4. One Native Session update consumer survives prompt completion and accepts later updates until session close or replacement.
-5. One durable Task transaction produces one ordered Task revision; a revision gap installs one new baseline.
+5. One durable transaction that changes `TaskSnapshot` produces one ordered Task revision; Tool-detail-only terminal appends use the independently ordered Tool-detail scope without invalidating the Task replica, and a gap in either scope installs one new baseline for that scope.
 6. One logical App Server session owns connection recovery, retries only replayable reads, and installs the replacement initialization result plus exactly one baseline for each active scope before product requests and Send are enabled.
 7. Durable Chat, transient requests, Tool details, and Frontend-only presentation each have one explicit owner and do not masquerade as one another.
 8. Every notification-worthy Task transition creates one explicit Task Attention Event; no client infers it from status or `unread`.

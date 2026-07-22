@@ -13,6 +13,7 @@ use crate::storage::records::{
     TaskLifecycle, TaskPreparationRecord, TaskRecord, TaskTitle, TaskTitleSource,
 };
 use crate::tasks::mutation::TaskCommitOptions;
+use crate::tasks::mutation::TaskMutationResult;
 use crate::tasks::task_start_transaction::TaskSessionStartGuard;
 use crate::tasks::transitions::TaskTransitions;
 use crate::time::now_string;
@@ -24,9 +25,62 @@ impl TaskProductApi {
         &self,
         params: TaskAdoptNativeSessionParams,
     ) -> Result<TaskSnapshot, ProtocolError> {
-        let project = self
-            .project_resolver
-            .resolve_task_context(&params.project_id)?;
+        crate::logging::info(
+            "native_session_adoption_started",
+            serde_json::json!({
+                "agent_id": params.agent_id.as_str(),
+                "session_id": params.native_session_id.as_str(),
+            }),
+        );
+        let _adoption = self.native_adoption.lock().map_err(|_| {
+            protocol_error_from_runtime(RuntimeError::Internal(
+                "Native Session adoption lock poisoned".to_string(),
+            ))
+        })?;
+        if let Some(existing) = self
+            .store
+            .list_all_task_records_strict()
+            .map_err(protocol_error_from_runtime)?
+            .into_iter()
+            .find(|task| {
+                !task.tombstoned
+                    && task.agent_id == params.agent_id.as_str()
+                    && task.agent_session_id.as_deref() == Some(params.native_session_id.as_str())
+            })
+        {
+            let result = self
+                .mutations
+                .commit_existing_task(
+                    &existing.task_id,
+                    super::response_snapshot_options(),
+                    |_| Ok(TaskMutationResult::Unchanged),
+                )
+                .map_err(protocol_error_from_runtime)?;
+            return self.project_task_snapshot(
+                result.response_snapshot.ok_or_else(|| {
+                    super::internal_error("missing existing adopted Task snapshot")
+                })?,
+            );
+        }
+        let reference = crate::native_sessions::catalog::NativeSessionRef::new(
+            params.agent_id.as_str(),
+            &params.native_session_id,
+        );
+        let catalog_entry = self.native_catalog.entry(&reference).ok_or_else(|| {
+            crate::logging::info(
+                "native_session_adoption_catalog_miss",
+                serde_json::json!({
+                    "agent_id": params.agent_id.as_str(),
+                    "session_id": params.native_session_id.as_str(),
+                }),
+            );
+            protocol_error_from_runtime(RuntimeError::TaskNotFound(
+                "Native Session is no longer available".to_string(),
+            ))
+        })?;
+        let project = self.project_resolver.resolve_task_context(
+            &openaide_app_server_protocol::ids::ProjectId::from(catalog_entry.project_id.clone()),
+        )?;
         self.agent_registry
             .require(params.agent_id.as_str())
             .map_err(protocol_error_from_runtime)?;
@@ -38,30 +92,37 @@ impl TaskProductApi {
         // Preserve the activity time shown in Native Session navigation when the row becomes a
         // Task. Adoption time is persistence metadata, not new conversation activity.
         let last_activity = self
-            .history_sync
-            .cached_session(
-                params.agent_id.as_str(),
-                &project.workspace_root,
-                &params.native_session_id,
-            )
-            .and_then(|session| session.last_activity.or(session.updated_at))
+            .native_catalog
+            .entry(&reference)
+            .and_then(|entry| entry.observation.last_activity)
             .unwrap_or_else(|| now.clone());
         let task_id = format!("task_{}", Uuid::new_v4());
-        let loaded = self
-            .agent_gateway
-            .load_session(AgentSessionLoad {
-                agent_id: params.agent_id.as_str().to_string(),
-                task_id: task_id.clone(),
-                cwd: project.workspace_root.clone(),
-                model_id: None,
-                session_id: params.native_session_id.clone(),
-                cancellation: TurnCancellation::new(),
-                secret_resolver: Some(self.task_secret_resolver(&task_id)),
-            })
-            .map_err(protocol_error_from_runtime)?;
+        let loaded = match self.agent_gateway.load_session(AgentSessionLoad {
+            agent_id: params.agent_id.as_str().to_string(),
+            task_id: task_id.clone(),
+            cwd: catalog_entry.workspace_root.clone(),
+            model_id: None,
+            session_id: params.native_session_id.clone(),
+            cancellation: TurnCancellation::new(),
+            secret_resolver: Some(self.task_secret_resolver(&task_id)),
+        }) {
+            Ok(loaded) => loaded,
+            Err(error @ RuntimeError::TaskNotFound(_)) => {
+                let reference = crate::native_sessions::catalog::NativeSessionRef::new(
+                    params.agent_id.as_str(),
+                    &params.native_session_id,
+                );
+                if self.native_catalog.remove(&reference).unwrap_or(false) {
+                    self.task_notifier.navigation_changed();
+                }
+                return Err(protocol_error_from_runtime(error));
+            }
+            Err(error) => return Err(protocol_error_from_runtime(error)),
+        };
         let mut session_start =
             TaskSessionStartGuard::new(&self.agent_gateway, loaded.session.clone());
-        let title = params
+        let title = catalog_entry
+            .observation
             .title
             .clone()
             .and_then(|title| TaskTitle::new(title, TaskTitleSource::Agent));
@@ -69,8 +130,13 @@ impl TaskProductApi {
 
         let persist_result = self.persist_adopted_session_task(
             &params,
+            &catalog_entry.workspace_root,
             &project.workspace_root,
-            project.isolation,
+            if catalog_entry.workspace_root == project.workspace_root {
+                project.isolation
+            } else {
+                IsolationKind::GitWorktree
+            },
             &task_id,
             &now,
             &last_activity,
@@ -110,6 +176,7 @@ impl TaskProductApi {
         &self,
         params: &TaskAdoptNativeSessionParams,
         workspace_root: &str,
+        project_root: &str,
         isolation: IsolationKind,
         task_id: &str,
         now: &str,
@@ -138,7 +205,7 @@ impl TaskProductApi {
             agent_id: selected_agent_id.clone(),
             isolation,
             workspace_root: workspace_root.clone(),
-            project_root: Some(workspace_root.clone()),
+            project_root: Some(project_root.to_string()),
             worktree_id: None,
             lifecycle: TaskLifecycle::Visible,
             agent_session_id: Some(session_id.clone()),

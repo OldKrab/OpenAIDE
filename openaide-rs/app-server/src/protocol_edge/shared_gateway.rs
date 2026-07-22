@@ -41,6 +41,20 @@ impl SharedRpcGateway {
         workflow.request_native_session_catalog_refresh();
     }
 
+    pub fn has_task_navigation_subscribers(&self) -> bool {
+        self.gateway
+            .lock()
+            .expect("protocol gateway lock poisoned")
+            .state_stream
+            .subscription_count_for_kind(|scope| {
+                matches!(
+                    scope,
+                    openaide_app_server_protocol::state::SubscriptionScope::TaskNavigation { .. }
+                )
+            })
+            > 0
+    }
+
     pub fn handle_inbound(
         &self,
         connection_id: ConnectionId,

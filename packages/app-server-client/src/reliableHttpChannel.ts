@@ -27,6 +27,8 @@ export type ReliableHttpMessageChannelOptions = {
   fetch?: ReliableHttpFetch;
   retryDelayMs?: number;
   receiveTimeoutMs?: number;
+  /** Waits for the first acknowledged client frame before polling server messages. */
+  deferReceiveUntilFirstUpload?: boolean;
   /** Restarts only the replayable receive poll when a suspended runtime wakes. */
   subscribeToWake?: (wake: () => void) => () => void;
 };
@@ -63,6 +65,7 @@ export function createReliableHttpMessageChannel(
   let nextClientSequence = 1;
   let lastServerSequence = 0;
   let pumping = false;
+  let receiving = false;
   let closed = false;
   let terminalError: unknown;
   const unsubscribeWake = options.subscribeToWake?.(() => {
@@ -74,7 +77,7 @@ export function createReliableHttpMessageChannel(
     fail(error);
     throw error;
   });
-  void receiveLoop();
+  if (!options.deferReceiveUntilFirstUpload) startReceiving();
 
   return {
     ready: async () => {
@@ -154,11 +157,13 @@ export function createReliableHttpMessageChannel(
             if (isRequestSizeRejection(response.status, text)) {
               await uploadInChunks(opened, upload, body);
               uploads.shift();
+              startReceiving();
               continue;
             }
             throw httpError("upload", response.status, text);
           }
           uploads.shift();
+          startReceiving();
         } catch (error) {
           if (closed || isAbort(error)) return;
           if (isTerminalHttpError(error)) {
@@ -203,6 +208,14 @@ export function createReliableHttpMessageChannel(
         throw httpError("chunk upload", response.status, text);
       }
     }
+  }
+
+  function startReceiving() {
+    if (receiving || closed || terminalError) return;
+    receiving = true;
+    // The first acknowledged client frame initializes product routing. Polling
+    // earlier races that frame and makes the real App Server reject the session.
+    void receiveLoop();
   }
 
   async function receiveLoop() {

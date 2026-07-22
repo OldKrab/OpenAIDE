@@ -83,6 +83,14 @@ export function createVsCodeShell(): FrontendShell {
       openNewTask: (projectId) => vscode?.postMessage(projectId
         ? { type: "surface.openNewTask", payload: { project_id: projectId } }
         : { type: "surface.openNewTask" }),
+      openNativeSession: (agentId, nativeSessionId, projectId) => vscode?.postMessage({
+        type: "surface.openNativeSession",
+        payload: {
+          agent_id: agentId,
+          native_session_id: nativeSessionId,
+          ...(projectId ? { project_id: projectId } : {}),
+        },
+      }),
       openSettings: (agentId, returnToNewTask, projectId) => vscode?.postMessage({
         type: "surface.openSettings",
         payload: {

@@ -63,8 +63,12 @@ describe("ReliableHttpMessageChannel", () => {
   it("falls back to in-memory chunks when an intermediary rejects a large upload", async () => {
     const chunkBodies: string[] = [];
     let rejectedBody = "";
+    let receivePolls = 0;
     const fetch = vi.fn<ReliableHttpFetch>(async (_input, init) => {
-      if (init.method === "GET") return new Promise(() => undefined);
+      if (init.method === "GET") {
+        receivePolls += 1;
+        return new Promise(() => undefined);
+      }
       const body = init.body ?? "";
       if (body.includes('"transport":"open"')) {
         return response(200, JSON.stringify({
@@ -87,6 +91,7 @@ describe("ReliableHttpMessageChannel", () => {
       connectionId: "client-1",
       fetch,
       retryDelayMs: 0,
+      deferReceiveUntilFirstUpload: true,
     });
     const errors: unknown[] = [];
     channel.subscribeErrors?.((error) => errors.push(error));
@@ -99,6 +104,7 @@ describe("ReliableHttpMessageChannel", () => {
     });
 
     await vi.waitFor(() => expect(chunkBodies.length).toBeGreaterThanOrEqual(3));
+    await vi.waitFor(() => expect(receivePolls).toBe(1));
     const chunks = chunkBodies.map((body) => JSON.parse(body) as {
       data: string;
       offset: number;

@@ -1,21 +1,11 @@
-use std::fs;
-
-use serde::{Deserialize, Serialize};
-
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{
     ActivityStep, ActivityToolContent, ActivityToolDetails, NormalizedMessage,
 };
 
-use super::atomic;
+#[cfg(test)]
+use super::task_journal::{TaskWrite, ToolArtifactReplacement};
 use super::Store;
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct ToolDetailArtifact {
-    pub task_id: String,
-    pub artifact_id: String,
-    pub details: ActivityToolDetails,
-}
 
 #[derive(Debug, Clone)]
 pub(crate) struct PersistedToolDetail {
@@ -24,47 +14,30 @@ pub(crate) struct PersistedToolDetail {
 }
 
 impl Store {
+    #[cfg(test)]
     pub(crate) fn persist_tool_artifacts(
         &self,
         task_id: &str,
         message: &mut NormalizedMessage,
     ) -> Result<Vec<PersistedToolDetail>, RuntimeError> {
-        let NormalizedMessage::Activity { id, steps, .. } = message else {
+        let replacements = extract_tool_artifacts(message);
+        if replacements.is_empty() {
             return Ok(Vec::new());
-        };
-
-        let mut persisted = Vec::new();
-
-        for (index, step) in steps.iter_mut().enumerate() {
-            let ActivityStep::Tool {
-                name,
-                input_summary,
-                detail_artifact_id,
-                details,
-                ..
-            } = step
-            else {
-                continue;
-            };
-            let Some(details) = details.take() else {
-                continue;
-            };
-            if should_replace_input_summary(name, input_summary.as_deref()) {
-                *input_summary = lightweight_detail_summary(&details);
-            }
-            let artifact_id = detail_artifact_id
-                .clone()
-                .unwrap_or_else(|| tool_artifact_id(id, index));
-            let details = *details;
-            self.write_tool_artifact(task_id, &artifact_id, details.clone())?;
-            *detail_artifact_id = Some(artifact_id.clone());
-            persisted.push(PersistedToolDetail {
-                artifact_id,
-                details,
-            });
         }
-
-        Ok(persisted)
+        let projection = self.task_journal().load(task_id)?;
+        self.task_journal()
+            .submit(TaskWrite::barrier_replace_projection(
+                projection,
+                replacements
+                    .iter()
+                    .map(|detail| ToolArtifactReplacement {
+                        artifact_id: detail.artifact_id.clone(),
+                        details: detail.details.clone(),
+                    })
+                    .collect(),
+            ))?
+            .wait()?;
+        Ok(replacements)
     }
 
     pub fn read_tool_artifact(
@@ -72,41 +45,57 @@ impl Store {
         task_id: &str,
         artifact_id: &str,
     ) -> Result<ActivityToolDetails, RuntimeError> {
-        validate_artifact_id(artifact_id)?;
-        let path = self
-            .tool_artifact_dir(task_id)?
-            .join(format!("{artifact_id}.json"));
-        let text = fs::read_to_string(path)?;
-        let artifact: ToolDetailArtifact = serde_json::from_str(&text)?;
-        if artifact.task_id != task_id || artifact.artifact_id != artifact_id {
-            return Err(RuntimeError::Storage(
-                "tool artifact identity mismatch".to_string(),
-            ));
-        }
-        Ok(artifact.details)
+        self.task_journal()
+            .load_tool_artifact(task_id, artifact_id)?
+            .details
+            .ok_or_else(|| {
+                RuntimeError::Storage("Tool detail has no structured baseline".to_string())
+            })
     }
 
-    fn write_tool_artifact(
+    pub(crate) fn read_tool_artifact_projection(
         &self,
         task_id: &str,
         artifact_id: &str,
-        details: ActivityToolDetails,
-    ) -> Result<(), RuntimeError> {
-        validate_artifact_id(artifact_id)?;
-        let dir = self.tool_artifact_dir(task_id)?;
-        fs::create_dir_all(&dir)?;
-        let artifact = ToolDetailArtifact {
-            task_id: task_id.to_string(),
-            artifact_id: artifact_id.to_string(),
-            details,
-        };
-        let bytes = serde_json::to_vec_pretty(&artifact)?;
-        atomic::write_bytes(&dir.join(format!("{artifact_id}.json")), &bytes)
+    ) -> Result<super::task_journal::ToolArtifactProjection, RuntimeError> {
+        self.task_journal().load_tool_artifact(task_id, artifact_id)
     }
+}
 
-    fn tool_artifact_dir(&self, task_id: &str) -> Result<std::path::PathBuf, RuntimeError> {
-        Ok(self.task_dir(task_id)?.join("tool-artifacts"))
+/// Removes heavy Tool details from Chat and returns their lazy replacements.
+pub(crate) fn extract_tool_artifacts(message: &mut NormalizedMessage) -> Vec<PersistedToolDetail> {
+    let NormalizedMessage::Activity { id, steps, .. } = message else {
+        return Vec::new();
+    };
+    let mut persisted = Vec::new();
+    for (index, step) in steps.iter_mut().enumerate() {
+        let ActivityStep::Tool {
+            name,
+            input_summary,
+            detail_artifact_id,
+            details,
+            ..
+        } = step
+        else {
+            continue;
+        };
+        let Some(details) = details.take() else {
+            continue;
+        };
+        if should_replace_input_summary(name, input_summary.as_deref()) {
+            *input_summary = lightweight_detail_summary(&details);
+        }
+        let artifact_id = detail_artifact_id
+            .clone()
+            .unwrap_or_else(|| tool_artifact_id(id, index));
+        let details = *details;
+        *detail_artifact_id = Some(artifact_id.clone());
+        persisted.push(PersistedToolDetail {
+            artifact_id,
+            details,
+        });
     }
+    persisted
 }
 
 pub(super) fn should_replace_input_summary(tool_name: &str, summary: Option<&str>) -> bool {
@@ -162,28 +151,17 @@ fn path_leaf(value: &str) -> String {
         .to_string()
 }
 
-fn tool_artifact_id(message_id: &str, step_index: usize) -> String {
-    let mut value = message_id
-        .chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' {
-                ch
-            } else {
-                '_'
-            }
-        })
-        .collect::<String>();
-    value.truncate(96);
-    format!("{value}_{step_index}")
+/// Stable opaque identity. Two independently seeded FNV streams keep raw
+/// Native Session/tool identifiers out of storage paths and diagnostics.
+pub(crate) fn tool_artifact_id(message_id: &str, step_index: usize) -> String {
+    let input = format!("{message_id}\0{step_index}");
+    let left = fnv64(input.as_bytes(), 0xcbf29ce484222325);
+    let right = fnv64(input.as_bytes(), 0x84222325cbf29ce4);
+    format!("artifact_{left:016x}{right:016x}")
 }
 
-fn validate_artifact_id(value: &str) -> Result<(), RuntimeError> {
-    if !value.is_empty()
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
-    {
-        return Ok(());
-    }
-    Err(RuntimeError::InvalidParams("artifact_id".to_string()))
+fn fnv64(bytes: &[u8], seed: u64) -> u64 {
+    bytes.iter().fold(seed, |hash, byte| {
+        (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3)
+    })
 }

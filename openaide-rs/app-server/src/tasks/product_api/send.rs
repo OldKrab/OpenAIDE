@@ -42,6 +42,9 @@ impl TaskProductApi {
     ) -> Result<TaskSendAccepted, ProtocolError> {
         let task_id = params.task_id.as_str().to_string();
         let mut existing_task = self.read_task_for_client(&task_id, client_instance_id)?;
+        if existing_task.active_turn_id.is_none() {
+            self.turn_acceptance.retire_for_idle_task(&task_id);
+        }
         if !std::path::Path::new(&existing_task.workspace_root).is_dir() {
             return Err(conflict_error(
                 "Task workspace is unavailable. Restore it before sending.",
@@ -144,14 +147,14 @@ impl TaskProductApi {
                     }
                     promoted_new_task = matches!(ctx.task().lifecycle, TaskLifecycle::New { .. });
                     self.append_user_message(
-                        &task_id,
+                        ctx,
                         &format!("user:{}", user_message_id.as_str()),
                         user_message_id.as_str(),
                         prompt_text.clone(),
                         attachments.chat_attachments(),
                         &now,
                     )?;
-                    self.append_running_turn(&task_id, turn_id.as_str(), &now)?;
+                    self.append_running_turn(ctx, &task_id, turn_id.as_str(), &now)?;
 
                     let task = ctx.task_mut();
                     task.status = LegacyTaskStatus::Starting;
@@ -252,7 +255,7 @@ impl TaskProductApi {
                     return Ok(TaskMutationResult::Rejected);
                 }
                 self.append_user_message(
-                    &task_id,
+                    ctx,
                     &format!("user:{}", user_message_id.as_str()),
                     user_message_id.as_str(),
                     prompt_text.clone(),
@@ -304,7 +307,7 @@ impl TaskProductApi {
     ) -> Result<(), ProtocolError> {
         let task_id = existing_task.task_id.clone();
         let turn_id = committed_send.turn_id().clone();
-        match self
+        let result = match self
             .native_sessions
             .start_primary_prompt(PrimaryPromptRequest {
                 task: existing_task,
@@ -312,14 +315,17 @@ impl TaskProductApi {
                 text: prompt_text,
                 attachments: attachments.agent_attachments(),
             }) {
-            Ok(()) => self.request_native_session_catalog_refresh(),
-            Err(error) => {
-                committed_send.fail(self, error)?;
+            Ok(()) => {
+                self.request_native_session_catalog_refresh();
+                Ok(())
             }
-        }
+            Err(error) => committed_send.fail(self, error).map(|_| ()),
+        };
+        // Ownership must retire even when recovery itself reports a storage error;
+        // otherwise every later Send is rejected by stale in-memory admission state.
         self.turn_acceptance
             .retire_pending_turn(&task_id, turn_id.as_str());
-        Ok(())
+        result
     }
 
     fn recover_stale_active_turn(&self, task_id: &str, turn_id: &str) -> Result<(), ProtocolError> {

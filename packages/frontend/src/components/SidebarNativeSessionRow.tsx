@@ -22,7 +22,6 @@ export function SidebarNativeSessionRow({
   const rowRef = useRef<HTMLDivElement>(null);
   const preview = useSidebarTaskPreview();
   const adopting = nativeSessionsAdoptingSessionId === session.session_id;
-  const disabled = nativeSessionsAdoptingSessionId !== undefined || adopting;
   const title = nativeSessionTitle(session);
   const timestamp = session.last_activity ?? session.updated_at;
   const age = timestamp ? relativeTime(timestamp) : "";
@@ -42,7 +41,7 @@ export function SidebarNativeSessionRow({
     >
       <button
         className="task-open"
-        disabled={disabled}
+        disabled={adopting}
         onClick={openSession}
         type="button"
         aria-label={`Open ${title}`}
@@ -68,7 +67,7 @@ export function SidebarNativeSessionRow({
       <SidebarRowActionSlot>
         <button
           className="task-row-action"
-          disabled={disabled}
+          disabled={adopting}
           onClick={openSession}
           title={adopting ? "Opening task" : "Open task"}
           type="button"

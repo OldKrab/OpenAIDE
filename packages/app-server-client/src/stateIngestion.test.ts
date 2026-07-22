@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import type {
   AppServerEvent,
   AppServerEventPayload,
+  AgentId,
   ChatItem,
   EventCursor,
+  ProjectId,
   StateRootId,
   StateSubscribeResult,
   SubscriptionScope,
@@ -170,7 +172,7 @@ describe("scope-local state ingestion", () => {
     let state = createSubscriptionIngestionState({
       scope,
       cursor: cursor("cursor-1"),
-      snapshot: { kind: "taskNavigation", navigation: { tasks: [], activeTaskId: null } },
+      snapshot: { kind: "taskNavigation", navigation: { entries: [], activeTaskId: null } },
     }, context());
     const upsert = applySubscriptionEvent(state, navigationEvent(scope, "cursor-1", "cursor-2", {
       kind: "upsert",
@@ -185,9 +187,240 @@ describe("scope-local state ingestion", () => {
     }));
     expect(remove.kind).toBe("applied");
     if (remove.kind !== "applied" || remove.state.snapshot.kind !== "taskNavigation") return;
-    expect(remove.state.snapshot.navigation.tasks).toEqual([]);
+    expect(remove.state.snapshot.navigation.entries).toEqual([]);
   });
+
+  it("keeps combined Navigation entries coherent across durable Task events", () => {
+    const scope: SubscriptionScope = { kind: "taskNavigation", projectId: null };
+    let state = createSubscriptionIngestionState({
+      scope,
+      cursor: cursor("cursor-1"),
+      snapshot: {
+        kind: "taskNavigation",
+        navigation: {
+          activeTaskId: null,
+          entries: [{
+            kind: "nativeSession",
+            session: {
+              reference: { agentId: "codex" as AgentId, sessionId: "native-1" },
+              projectId: "project-1" as ProjectId,
+              workspaceRoot: "/workspace/project-1",
+              title: "Discovered",
+              lastActivity: "2026-07-21T00:00:00Z",
+            },
+          }],
+        },
+      },
+    }, context());
+
+    const upsert = applySubscriptionEvent(state, navigationEvent(scope, "cursor-1", "cursor-2", {
+      kind: "upsert",
+      task: taskSummary("task-1"),
+    }));
+    expect(upsert.kind).toBe("applied");
+    if (upsert.kind !== "applied" || upsert.state.snapshot.kind !== "taskNavigation") return;
+    state = upsert.state;
+    if (state.snapshot.kind !== "taskNavigation") return;
+    expect(state.snapshot.navigation.entries?.map((entry) => entry.kind)).toEqual([
+      "nativeSession",
+      "task",
+    ]);
+
+    const remove = applySubscriptionEvent(state, navigationEvent(scope, "cursor-2", "cursor-3", {
+      kind: "remove",
+      taskId: taskId("task-1"),
+    }));
+    expect(remove.kind).toBe("applied");
+    if (remove.kind !== "applied" || remove.state.snapshot.kind !== "taskNavigation") return;
+    expect(remove.state.snapshot.navigation.entries?.map((entry) => entry.kind)).toEqual([
+      "nativeSession",
+    ]);
+  });
+
+  it("atomically replaces Task Navigation when a catalog page commits", () => {
+    const scope: SubscriptionScope = { kind: "taskNavigation", projectId: null };
+    const state = createSubscriptionIngestionState({
+      scope,
+      cursor: cursor("cursor-1"),
+      snapshot: { kind: "taskNavigation", navigation: { entries: [], refreshing: true } },
+    }, context());
+    const replacement = {
+      refreshing: false,
+      entries: [{
+        kind: "nativeSession" as const,
+        session: {
+          reference: { agentId: "codex" as AgentId, sessionId: "native-1" },
+          projectId: "project-1" as ProjectId,
+          workspaceRoot: "/workspace/project-1",
+          title: "Discovered",
+        },
+      }],
+    };
+
+    const update = applySubscriptionEvent(state, {
+      subscription: scope,
+      previousCursor: cursor("cursor-1"),
+      cursor: cursor("cursor-2"),
+      scope: { kind: "stateRoot", stateRootId: rootId },
+      payload: { kind: "taskNavigationReplaced", navigation: replacement },
+    });
+
+    expect(update.kind).toBe("applied");
+    if (update.kind !== "applied" || update.state.snapshot.kind !== "taskNavigation") return;
+    expect(update.state.snapshot.navigation).toEqual(replacement);
+  });
+
+  it("applies terminal deltas only to the matching Tool-detail replica", () => {
+    const scope: SubscriptionScope = {
+      kind: "toolDetail",
+      taskId: taskId("task-1"),
+      artifactId: "artifact-1",
+    };
+    const state = createSubscriptionIngestionState({
+      scope,
+      cursor: cursor("cursor-1"),
+      snapshot: {
+        kind: "toolDetail",
+        taskId: taskId("task-1"),
+        artifactId: "artifact-1",
+        details: { revision: 0, locations: [], content: [], terminalOutputs: [{ terminalId: "term-1", output: "a" }] },
+      },
+    }, context());
+    const event: AppServerEvent = {
+      subscription: scope,
+      previousCursor: cursor("cursor-1"),
+      cursor: cursor("cursor-2"),
+      scope: { kind: "task", stateRootId: rootId, taskId: taskId("task-1") },
+      payload: {
+        kind: "toolDetailChanged",
+        taskId: taskId("task-1"),
+        artifactId: "artifact-1",
+        revision: 1,
+        deltas: [
+          { kind: "appendTerminal", terminalId: "term-1", data: "b" },
+          { kind: "appendTerminal", terminalId: "term-2", data: "c" },
+        ],
+      },
+    };
+
+    const result = applySubscriptionEvent(state, event);
+
+    expect(result.kind).toBe("applied");
+    if (result.kind !== "applied" || result.state.snapshot.kind !== "toolDetail") return;
+    expect(result.state.snapshot.details.terminalOutputs).toEqual([
+      { terminalId: "term-1", output: "ab" },
+      { terminalId: "term-2", output: "c" },
+    ]);
+
+    const duplicate = applySubscriptionEvent(result.state, {
+      ...event,
+      previousCursor: cursor("cursor-2"),
+      cursor: cursor("cursor-3"),
+    });
+    expect(duplicate.kind).toBe("applied");
+    if (duplicate.kind !== "applied" || duplicate.state.snapshot.kind !== "toolDetail") return;
+    expect(duplicate.state.snapshot.details.terminalOutputs).toEqual([
+      { terminalId: "term-1", output: "ab" },
+      { terminalId: "term-2", output: "c" },
+    ]);
+  });
+
+  it("requires a fresh Tool-detail baseline when an artifact revision is skipped", () => {
+    const state = toolDetailState(0);
+    const result = applySubscriptionEvent(state, toolDetailEvent("cursor-1", "cursor-2", {
+      kind: "toolDetailChanged",
+      taskId: taskId("task-1"),
+      artifactId: "artifact-1",
+      revision: 2,
+      deltas: [{ kind: "appendTerminal", terminalId: "term-1", data: "lost-prefix" }],
+    }));
+
+    expect(result).toMatchObject({ kind: "resyncRequired", reason: "toolDetailRevisionGap" });
+  });
+
+  it.each(["baseline-first", "delta-first"] as const)(
+    "keeps mixed structured and terminal output when the %s event arrives",
+    (order) => {
+      const baseline: AppServerEventPayload = {
+        kind: "toolDetailUpdated",
+        taskId: taskId("task-1"),
+        artifactId: "artifact-1",
+        details: {
+          revision: 1,
+          locations: [],
+          content: [],
+          terminalOutputs: [{ terminalId: "term-1", output: "complete" }],
+        },
+      };
+      const delta: AppServerEventPayload = {
+        kind: "toolDetailChanged",
+        taskId: taskId("task-1"),
+        artifactId: "artifact-1",
+        revision: 1,
+        deltas: [
+          {
+            kind: "replaceDetails",
+            details: { revision: 1, locations: [], content: [], terminalOutputs: [] },
+          },
+          { kind: "appendTerminal", terminalId: "term-1", data: "complete" },
+        ],
+      };
+      const payloads = order === "baseline-first" ? [baseline, delta] : [delta, baseline];
+      let state = toolDetailState(0);
+      for (const [index, payload] of payloads.entries()) {
+        const result = applySubscriptionEvent(
+          state,
+          toolDetailEvent(`cursor-${index + 1}`, `cursor-${index + 2}`, payload),
+        );
+        expect(result.kind).toBe("applied");
+        if (result.kind !== "applied") return;
+        state = result.state;
+      }
+      expect(state.snapshot.kind).toBe("toolDetail");
+      if (state.snapshot.kind !== "toolDetail") return;
+      expect(state.snapshot.details.terminalOutputs).toEqual([
+        { terminalId: "term-1", output: "complete" },
+      ]);
+    },
+  );
 });
+
+function toolDetailState(revision: number) {
+  const scope: SubscriptionScope = {
+    kind: "toolDetail",
+    taskId: taskId("task-1"),
+    artifactId: "artifact-1",
+  };
+  return createSubscriptionIngestionState({
+    scope,
+    cursor: cursor("cursor-1"),
+    snapshot: {
+      kind: "toolDetail",
+      taskId: taskId("task-1"),
+      artifactId: "artifact-1",
+      details: { revision, locations: [], content: [], terminalOutputs: [] },
+    },
+  }, context());
+}
+
+function toolDetailEvent(
+  previous: string,
+  next: string,
+  payload: AppServerEventPayload,
+): AppServerEvent {
+  const subscription: SubscriptionScope = {
+    kind: "toolDetail",
+    taskId: taskId("task-1"),
+    artifactId: "artifact-1",
+  };
+  return {
+    subscription,
+    previousCursor: cursor(previous),
+    cursor: cursor(next),
+    scope: { kind: "task", stateRootId: rootId, taskId: taskId("task-1") },
+    payload,
+  };
+}
 
 function taskState(id: string, revision: number) {
   const scope: SubscriptionScope = { kind: "task", taskId: taskId(id) };

@@ -447,7 +447,10 @@ describe("app reducer composer state", () => {
     });
     expect(state.newTask.submitting).toBe(false);
     expect(state.newTask.nativeSessions.adoptingSessionId).toBeUndefined();
-    expect(state.newTask.nativeSessions.error).toBe("Unable to open task.");
+    expect(state.newTask.nativeSessions.adoptionError).toEqual({
+      sessionId: "session_2",
+      message: "Unable to open task.",
+    });
 
     state = appReducer(state, {
       type: "newTask:nativeSessions:result",
@@ -478,8 +481,31 @@ describe("app reducer composer state", () => {
 
     state = appReducer(state, { type: "newTask:nativeSessions:adopt", sessionId: "session_1" });
 
-    expect(state.newTask.nativeSessions.error).toBeUndefined();
+    expect(state.newTask.nativeSessions.adoptionError).toBeUndefined();
     expect(state.newTask.nativeSessions.adoptingSessionId).toBe("session_1");
+  });
+
+  it("keeps a route adoption error through later Task Navigation refreshes", () => {
+    let state = createInitialState();
+    state = appReducer(state, { type: "newTask:nativeSessions:adopt", sessionId: "session_1" });
+    state = appReducer(state, {
+      type: "newTask:nativeSessions:error",
+      sessionId: "session_1",
+      message: "This session no longer exists.",
+    });
+
+    state = appReducer(state, {
+      type: "taskNavigation",
+      archived: false,
+      tasks: [],
+      sessions: [],
+      refreshing: false,
+    });
+
+    expect(state.newTask.nativeSessions.adoptionError).toEqual({
+      sessionId: "session_1",
+      message: "This session no longer exists.",
+    });
   });
 
   it("does not let stale native-session adoption completion unlock a newer first send", () => {
@@ -524,7 +550,7 @@ describe("app reducer composer state", () => {
     } as never);
 
     expect(state.newTask.submitting).toBe(true);
-    expect(state.newTask.nativeSessions.error).toBeUndefined();
+    expect(state.newTask.nativeSessions.adoptionError).toBeUndefined();
   });
 
   it("keeps native-session adoption ownership through unrelated Task snapshots", () => {

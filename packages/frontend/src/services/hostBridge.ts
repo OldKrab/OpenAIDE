@@ -30,6 +30,10 @@ export function openNewTaskSurface(projectId?: string) {
   frontendShell().navigation.openNewTask(projectId);
 }
 
+export function openNativeSessionSurface(agentId: string, nativeSessionId: string, projectId?: string) {
+  frontendShell().navigation.openNativeSession(agentId, nativeSessionId, projectId);
+}
+
 export function openSettingsSurface(agentId?: string, returnToNewTask?: boolean, projectId?: string) {
   frontendShell().navigation.openSettings(agentId, returnToNewTask, projectId);
 }

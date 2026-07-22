@@ -1,10 +1,15 @@
 use uuid::Uuid;
 
+#[cfg(test)]
 use crate::protocol::errors::RuntimeError;
-use crate::protocol::model::{ActivityStatus, ActivityStep, ChatMessage, NormalizedMessage};
+#[cfg(test)]
+use crate::protocol::model::ChatMessage;
+use crate::protocol::model::{ActivityStatus, ActivityStep, NormalizedMessage};
+#[cfg(test)]
 use crate::storage::cursor;
 use crate::storage::records::StoredMessage;
 use crate::storage::tool_artifacts::PersistedToolDetail;
+#[cfg(test)]
 use crate::storage::Store;
 
 pub(crate) fn running_turn_message(created_at: &str) -> NormalizedMessage {
@@ -21,6 +26,7 @@ pub(crate) fn running_turn_message(created_at: &str) -> NormalizedMessage {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn append_normalized_to_store(
     store: &Store,
     task_id: &str,
@@ -42,27 +48,6 @@ pub(crate) fn append_normalized_to_store(
         message,
     };
     store.append_message(task_id, chat)
-}
-
-pub(crate) fn upsert_normalized_to_store(
-    store: &Store,
-    task_id: &str,
-    mut message: NormalizedMessage,
-) -> Result<UpsertedMessage, RuntimeError> {
-    let tool_details = store.persist_tool_artifacts(task_id, &mut message)?;
-    let identity = message.identity();
-    let chat = ChatMessage {
-        cursor: String::new(),
-        message_id: identity.clone(),
-        identity,
-        message_type: message.message_type().to_string(),
-        message,
-    };
-    let stored = store.upsert_message_by_identity(task_id, chat)?;
-    Ok(UpsertedMessage {
-        stored,
-        tool_details,
-    })
 }
 
 pub(crate) struct UpsertedMessage {

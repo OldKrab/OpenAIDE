@@ -60,6 +60,14 @@ impl TurnAcceptanceCoordinator {
         }
     }
 
+    /// Durable idle state is authoritative over a startup owner finishing asynchronously.
+    pub(super) fn retire_for_idle_task(&self, task_id: &str) {
+        self.pending_turns
+            .lock()
+            .expect("pending Turn ownership registry poisoned")
+            .remove(task_id);
+    }
+
     #[cfg(test)]
     pub(super) fn owned_turns(&self) -> HashSet<(String, String)> {
         self.pending_turns

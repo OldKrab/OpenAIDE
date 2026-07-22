@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, type Dispatch, type MutableRefObject } from "react";
+import { useCallback, useEffect, type Dispatch, type MutableRefObject } from "react";
 import { defaultAgent } from "@openaide/app-shell-contracts";
 import type { AgentOption } from "../state/composerOptions";
 import type { AppAction } from "../state/appReducer";
@@ -6,13 +6,8 @@ import type { AppState } from "../state/store";
 import type { WebviewBootstrap } from "../state/surfaceTypes";
 import type { AsyncOperationOwner } from "../state/asyncOperationOwner";
 import { retainNewTaskContext } from "../state/newTaskSelectionDefaults";
-import { sendWebviewTelemetry } from "../state/hostMessageRouter";
-import { agentProjectRequestKey, shouldLoadNativeSessions } from "../state/surfaceRouting";
-import { postHostMessage } from "../services/hostBridge";
 import { useComposerAttachmentResources } from "./useComposerAttachmentResources";
 import { useNewTaskPreparation, type PendingNewTaskPreparation } from "./useNewTaskPreparation";
-import { createRequestControllerNativeSessions } from "./appControllerNativeSessions";
-import { newTaskProjectIdForRequests } from "./newTaskRequestContext";
 import type { AppControllerBackendConnection } from "./appControllerBackendLifecycle";
 import type { NewTaskStartAttempt } from "./appControllerCallbackTypes";
 import type { NewTaskController } from "./newTaskController";
@@ -33,7 +28,7 @@ type NewTaskWorkspaceOptions = {
   state: AppState;
 };
 
-/** Owns New Task preparation, resources, retained selection, and Native Session discovery. */
+/** Owns New Task preparation, resources, and retained selection. */
 export function useNewTaskWorkspace({
   agents,
   asyncOperations,
@@ -49,7 +44,6 @@ export function useNewTaskWorkspace({
   startAttempt,
   state,
 }: NewTaskWorkspaceOptions) {
-  const latestNavigationSessionKey = useRef<string | undefined>(undefined);
   const newTaskDispatch = useCallback((action: AppAction) => {
     switch (action.type) {
       case "newTask:agent":
@@ -105,25 +99,6 @@ export function useNewTaskWorkspace({
     state,
   });
 
-  const requestNativeSessions = createRequestControllerNativeSessions({
-    backendConnection,
-    dispatch,
-    getAgentId: () => state.newTask.selection.agentId,
-    getExistingSessionIds: () => state.newTask.nativeSessions.items.map((session) => session.session_id),
-    getProjectId: () => state.newTask.selection.projectId,
-    asyncOperations,
-    onFailure: (failure) => sendWebviewTelemetry(postHostMessage, "native_sessions_load_failed", {
-      surface: bootstrap.surface,
-      request: failure.request,
-      session_list_request_id: failure.requestId,
-      agent_id: failure.agentId,
-      project_id: failure.projectId,
-      error_name: failure.errorName,
-      error_code: failure.errorCode,
-      error_message: failure.errorMessage,
-    }),
-  });
-
   useEffect(() => {
     if (
       bootstrap.surface === "task"
@@ -173,44 +148,11 @@ export function useNewTaskWorkspace({
     newTaskDispatch({ type: "newTask:agent", agentId: fallback.id, agentLabel: fallback.label });
   }, [agents, bootstrap.surface, bootstrap.taskId, state.newTask.selection.agentId]);
 
-  useEffect(() => {
-    const projectId = newTaskProjectIdForRequests(state, newTaskBootstrapProjectId);
-    const preparingNewTask = bootstrap.surface === "task" && !bootstrap.taskId && !newTaskSnapshot;
-    // Native Session discovery only enriches Task Navigation. Let the New Task
-    // acquire and subscribe first so slow Agent history cannot hide ready controls.
-    if (
-      !backendReady
-      || preparingNewTask
-      || !shouldLoadNativeSessions(bootstrap, projectId)
-      || !projectId
-    ) return;
-    const key = `${replicaEpoch}:${agentProjectRequestKey(state.newTask.selection.agentId, projectId)}`;
-    if (latestNavigationSessionKey.current === key) return;
-    latestNavigationSessionKey.current = key;
-    // Startup discovery is optional navigation enrichment. Keep it to one page
-    // so a slow Agent cursor cannot hold uploads, heartbeats, or Task controls;
-    // the returned cursor remains available through explicit Load More.
-    requestNativeSessions();
-  }, [
-    backendReady,
-    bootstrap.surface,
-    bootstrap.taskId,
-    newTaskSnapshot?.task.task_id,
-    replicaEpoch,
-    state.newTask.selection.agentId,
-    state.newTask.selection.projectId,
-    state.newTask.selection.workspaceRoot,
-    state.projects,
-    state.tasks,
-    newTaskBootstrapProjectId,
-  ]);
-
   return {
     attachmentResources,
     dispatch: newTaskDispatch,
     pendingPreparationForKey: (key: string) => (
       pendingPreparation.current?.key === key ? pendingPreparation.current.promise : undefined
     ),
-    requestNativeSessions,
   };
 }

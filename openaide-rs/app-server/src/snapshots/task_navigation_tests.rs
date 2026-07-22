@@ -1,6 +1,8 @@
-use openaide_app_server_protocol::errors::ProtocolErrorCode;
 use openaide_app_server_protocol::ids::ProjectId;
 
+use crate::native_sessions::catalog::{
+    NativeSessionCatalog, NativeSessionObservation, NativeSessionRef,
+};
 use crate::projects::project_id_for_workspace;
 use crate::protocol::model::{IsolationKind, TaskStatus};
 use crate::storage::records::{
@@ -77,22 +79,58 @@ fn projects_visible_task_records_into_navigation_snapshot() {
     let snapshot = TaskNavigationStore::new(store).snapshot(None).unwrap();
 
     assert_eq!(snapshot.active_task_id, None);
-    assert_eq!(snapshot.tasks.len(), 2);
-    assert_eq!(snapshot.tasks[0].task_id.as_str(), "task-newer");
+    assert_eq!(task_entries(&snapshot).len(), 2);
+    assert_eq!(task_entries(&snapshot)[0].task_id.as_str(), "task-newer");
     assert_eq!(
-        snapshot.tasks[0]
+        task_entries(&snapshot)[0]
             .title
             .as_ref()
             .map(|title| title.value.as_str()),
         Some("New")
     );
-    assert_eq!(snapshot.tasks[0].status, ProtocolTaskStatus::Idle);
-    assert_eq!(snapshot.tasks[0].agent_id.as_str(), "agent-a");
-    assert!(!snapshot.tasks[0].has_messages);
-    assert!(snapshot.tasks[0]
+    assert_eq!(task_entries(&snapshot)[0].status, ProtocolTaskStatus::Idle);
+    assert_eq!(task_entries(&snapshot)[0].agent_id.as_str(), "agent-a");
+    assert!(!task_entries(&snapshot)[0].has_messages);
+    assert!(task_entries(&snapshot)[0]
         .project_id
         .as_str()
         .starts_with("project-"));
+}
+
+#[test]
+fn navigation_combines_durable_tasks_and_persisted_unadopted_sessions() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let task = task_record("task-owned", "Owned", "2026-07-20T00:00:00Z");
+    let project_id = project_id_for_workspace(&task.workspace_root);
+    store.write_task(&task).unwrap();
+    let catalog = NativeSessionCatalog::open(store.clone()).unwrap();
+    catalog
+        .record_page(
+            project_id.as_str(),
+            &task.workspace_root,
+            vec![NativeSessionObservation {
+                reference: NativeSessionRef::new("agent-a", "native-new"),
+                title: Some("Unadopted".to_string()),
+                last_activity: Some("2026-07-21T00:00:00Z".to_string()),
+            }],
+        )
+        .unwrap();
+
+    let snapshot = TaskNavigationStore::with_native_sessions(store, catalog)
+        .snapshot(None)
+        .unwrap();
+
+    assert_eq!(snapshot.entries.len(), 2);
+    assert!(matches!(
+        &snapshot.entries[0],
+        TaskNavigationEntry::NativeSession { session }
+            if session.reference.session_id == "native-new" && session.title.as_deref() == Some("Unadopted")
+    ));
+    assert!(matches!(
+        &snapshot.entries[1],
+        TaskNavigationEntry::Task { task } if task.task_id.as_str() == "task-owned"
+    ));
 }
 
 #[test]
@@ -125,8 +163,8 @@ fn marks_tasks_with_durable_chat_messages() {
 
     let snapshot = TaskNavigationStore::new(store).snapshot(None).unwrap();
 
-    assert_eq!(snapshot.tasks[0].task_id.as_str(), "task-1");
-    assert!(snapshot.tasks[0].has_messages);
+    assert_eq!(task_entries(&snapshot)[0].task_id.as_str(), "task-1");
+    assert!(task_entries(&snapshot)[0].has_messages);
 }
 
 #[test]
@@ -136,16 +174,16 @@ fn navigation_uses_task_record_message_version_without_reading_chat_files() {
     let mut record = task_record("task-1", "Task", "2026-01-01T00:00:00.000Z");
     record.message_history_version = 7;
     store.write_task(&record).unwrap();
-    std::fs::write(
-        store.task_dir("task-1").unwrap().join("messages.jsonl"),
-        "{not valid json",
-    )
-    .unwrap();
+    assert!(!store
+        .task_dir("task-1")
+        .unwrap()
+        .join("messages.jsonl")
+        .exists());
 
     let snapshot = TaskNavigationStore::new(store).snapshot(None).unwrap();
 
-    assert_eq!(snapshot.tasks[0].task_id.as_str(), "task-1");
-    assert!(snapshot.tasks[0].has_messages);
+    assert_eq!(task_entries(&snapshot)[0].task_id.as_str(), "task-1");
+    assert!(task_entries(&snapshot)[0].has_messages);
 }
 
 #[test]
@@ -161,7 +199,7 @@ fn omits_archived_and_tombstoned_records() {
 
     let snapshot = TaskNavigationStore::new(store).snapshot(None).unwrap();
 
-    assert!(snapshot.tasks.is_empty());
+    assert!(task_entries(&snapshot).is_empty());
 }
 
 #[test]
@@ -179,21 +217,49 @@ fn filters_by_project_id_when_requested() {
         .snapshot(Some(&ProjectId::from("project-other")))
         .unwrap();
 
-    assert_eq!(included.tasks.len(), 1);
-    assert!(excluded.tasks.is_empty());
+    assert_eq!(task_entries(&included).len(), 1);
+    assert!(task_entries(&excluded).is_empty());
 }
 
 #[test]
-fn storage_read_failure_returns_recoverable_error() {
+fn storage_read_failure_is_isolated_from_navigation() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
-    std::fs::remove_dir_all(store.tasks_dir()).unwrap();
+    store
+        .write_task(&task_record("corrupt", "Task", "1"))
+        .unwrap();
+    drop(store);
+    corrupt_last_byte(&temp.path().join("task-store-v1/tasks/corrupt/task.journal"));
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
 
-    let error = TaskNavigationStore::new(store).snapshot(None).unwrap_err();
+    let snapshot = TaskNavigationStore::new(store).snapshot(None).unwrap();
 
-    assert_eq!(error.code, ProtocolErrorCode::Internal);
-    assert!(error.recoverable);
-    assert!(error.message.contains("Failed to read task navigation"));
+    assert!(task_entries(&snapshot).is_empty());
+}
+
+fn task_entries(snapshot: &TaskNavigationSnapshot) -> Vec<&TaskSummary> {
+    snapshot
+        .entries
+        .iter()
+        .filter_map(|entry| match entry {
+            TaskNavigationEntry::Task { task } => Some(task.as_ref()),
+            TaskNavigationEntry::NativeSession { .. } => None,
+        })
+        .collect()
+}
+
+fn corrupt_last_byte(path: &std::path::Path) {
+    use std::io::{Read, Seek, Write};
+    let mut file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(path)
+        .unwrap();
+    file.seek(std::io::SeekFrom::End(-1)).unwrap();
+    let mut byte = [0];
+    file.read_exact(&mut byte).unwrap();
+    file.seek(std::io::SeekFrom::End(-1)).unwrap();
+    file.write_all(&[byte[0] ^ 0xff]).unwrap();
 }
 
 fn task_record(task_id: &str, title: &str, updated_at: &str) -> TaskRecord {

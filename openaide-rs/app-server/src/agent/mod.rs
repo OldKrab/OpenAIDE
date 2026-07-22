@@ -36,6 +36,7 @@ pub(crate) mod acp_session_requests;
 pub(crate) mod acp_session_runner;
 pub(crate) mod acp_session_termination;
 pub(crate) mod acp_session_worker;
+pub(crate) mod acp_terminal_output_adapter;
 pub(crate) mod acp_tool_call_projection;
 pub(crate) mod acp_trace;
 pub(crate) mod acp_update_projection;

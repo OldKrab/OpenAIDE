@@ -43,10 +43,11 @@ use crate::task::{
     TaskAcquireInWorktreeParams, TaskAcquireInWorktreeResult, TaskAcquireParams, TaskAcquireResult,
     TaskAdoptNativeSessionParams, TaskAdoptNativeSessionResult, TaskCancelParams, TaskCancelResult,
     TaskChatPageParams, TaskChatPageResult, TaskListParams, TaskListResult, TaskMarkReadParams,
-    TaskMarkReadResult, TaskOpenParams, TaskOpenResult, TaskReleaseParams, TaskReleaseResult,
-    TaskSearchFilesParams, TaskSearchFilesResult, TaskSendParams, TaskSendResult,
-    TaskSetArchivedParams, TaskSetArchivedResult, TaskSetConfigOptionParams,
-    TaskSetConfigOptionResult,
+    TaskMarkReadResult, TaskNavigationLoadMoreParams, TaskNavigationLoadMoreResult,
+    TaskNavigationRefreshParams, TaskNavigationRefreshResult, TaskOpenParams, TaskOpenResult,
+    TaskReleaseParams, TaskReleaseResult, TaskSearchFilesParams, TaskSearchFilesResult,
+    TaskSendParams, TaskSendResult, TaskSetArchivedParams, TaskSetArchivedResult,
+    TaskSetConfigOptionParams, TaskSetConfigOptionResult,
 };
 use crate::workspace::{
     WorkspaceListDirectoryParams, WorkspaceListDirectoryResult, WorkspaceListRootsParams,
@@ -388,6 +389,18 @@ protocol_method!(
     TASK_SEARCH_FILES,
     TaskSearchFilesParams,
     TaskSearchFilesResult
+);
+protocol_method!(
+    TaskNavigationRefresh,
+    TASK_NAVIGATION_REFRESH,
+    TaskNavigationRefreshParams,
+    TaskNavigationRefreshResult
+);
+protocol_method!(
+    TaskNavigationLoadMore,
+    TASK_NAVIGATION_LOAD_MORE,
+    TaskNavigationLoadMoreParams,
+    TaskNavigationLoadMoreResult
 );
 protocol_method!(
     TaskAdoptNativeSession,

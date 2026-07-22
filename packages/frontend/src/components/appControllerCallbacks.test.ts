@@ -61,6 +61,14 @@ vi.mock("../services/hostBridge", () => ({
   openNewTaskSurface: (projectId?: string) => postHostMessage(projectId
     ? { type: "surface.openNewTask", payload: { project_id: projectId } }
     : { type: "surface.openNewTask" }),
+  openNativeSessionSurface: (agentId: string, nativeSessionId: string, projectId?: string) => postHostMessage({
+    type: "surface.openNativeSession",
+    payload: {
+      agent_id: agentId,
+      native_session_id: nativeSessionId,
+      ...(projectId ? { project_id: projectId } : {}),
+    },
+  }),
   openSettingsSurface: () => postHostMessage({ type: "surface.openSettings" }),
   openTaskSurface: (taskId: string, title?: string) => postHostMessage({
     type: "surface.openTask",
@@ -939,13 +947,10 @@ describe("app controller callbacks", () => {
     });
   });
 
-  it("refreshes the current task snapshot when manually refreshing native sessions", async () => {
+  it("requests one global Task Navigation refresh", async () => {
     const dispatch = vi.fn();
-    const requestNativeSessions = vi.fn();
     const request = vi.fn(async (method: string) => {
-      if (method === TASK_OPEN) {
-        return { task: protocolTaskSnapshot("task_1", "Updated adopted task") };
-      }
+      if (method === "taskNavigation/refresh") return { accepted: true };
       throw new Error(method);
     });
     const state = createInitialState();
@@ -959,28 +964,23 @@ describe("app controller callbacks", () => {
     callbacks({
       backendConnection: { request: request as unknown as BackendConnection["request"] },
       dispatch,
-      requestNativeSessions,
       state,
     }).navigation.loadNativeSessions();
     await settlePromises();
 
-    expect(requestNativeSessions).toHaveBeenCalledWith(undefined, false, 2);
-    expect(request).toHaveBeenCalledWith(TASK_OPEN, { taskId: "task_1" });
-    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
-      type: "snapshot",
-      intent: "refresh",
-      snapshot: expect.objectContaining({
-        task: expect.objectContaining({ task_id: "task_1", title: "Updated adopted task" }),
-      }),
-    }));
+    expect(request).toHaveBeenCalledWith("taskNavigation/refresh", {});
+    expect(dispatch).not.toHaveBeenCalled();
   });
 
-  it("loads fifteen additional visible tasks for each history-page request", () => {
-    const requestNativeSessions = vi.fn();
+  it("routes legacy history-page requests through the Task Navigation coordinator", async () => {
+    const request = vi.fn(async () => ({ accepted: true }));
 
-    callbacks({ requestNativeSessions }).navigation.loadNativeSessions("cursor_2");
+    callbacks({
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
+    }).navigation.loadNativeSessions("cursor_2");
+    await settlePromises();
 
-    expect(requestNativeSessions).toHaveBeenCalledWith("cursor_2", true, 15);
+    expect(request).toHaveBeenCalledWith("taskNavigation/refresh", {});
   });
 
   it("opens the prepared new Task while send capability is still preparing", async () => {
@@ -2486,7 +2486,7 @@ describe("app controller callbacks", () => {
     expect(postHostMessage).not.toHaveBeenCalled();
   });
 
-  it("rejects external native session adoption without BackendConnection", () => {
+  it("routes to Native Session opening before any adoption request", () => {
     const dispatch = vi.fn();
     const state = createInitialState();
     state.newTask.selection = {
@@ -2503,19 +2503,46 @@ describe("app controller callbacks", () => {
       updated_at: "2026-06-27T00:00:00Z",
     });
 
-    expect(dispatch).toHaveBeenNthCalledWith(1, {
-      type: "newTask:nativeSessions:adopt",
-      sessionId: "native_1",
-    });
-    expect(dispatch).toHaveBeenCalledWith({
-      type: "newTask:nativeSessions:error",
-      sessionId: "native_1",
-      message: "App Server connection unavailable.",
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(postHostMessage).toHaveBeenCalledWith({
+      type: "surface.openNativeSession",
+      payload: {
+        agent_id: "codex",
+        native_session_id: "native_1",
+      },
     });
     expect(postHostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "task.create" }));
   });
 
-  it("opens an external native session through BackendConnection when available", async () => {
+  it("routes to another Native Session while the current session is opening", () => {
+    const dispatch = vi.fn();
+    const state = createInitialState();
+    state.newTask.selection = {
+      ...state.newTask.selection,
+      agentId: "codex",
+      agentLabel: "Codex",
+      workspaceRoot: "/workspace",
+    };
+    state.newTask.submitting = true;
+    state.newTask.nativeSessions.adoptingSessionId = "native_1";
+
+    callbacks({ dispatch, state }).navigation.openNativeSession({
+      cwd: "/workspace",
+      session_id: "native_2",
+      title: "Another Native Session",
+      updated_at: "2026-06-28T00:00:00Z",
+    });
+
+    expect(postHostMessage).toHaveBeenCalledWith({
+      type: "surface.openNativeSession",
+      payload: {
+        agent_id: "codex",
+        native_session_id: "native_2",
+      },
+    });
+  });
+
+  it("includes discovered Agent and Project context in the Native Session route", async () => {
     const dispatch = vi.fn();
     const request = vi.fn(async () => ({ task: protocolTaskSnapshot("task_1", "Native Session") }));
     const state = createInitialState();
@@ -2532,34 +2559,23 @@ describe("app controller callbacks", () => {
       dispatch,
       state,
     }).navigation.openNativeSession({
+      agent_id: "opencode",
       cwd: "/workspace",
+      project_id: "project_1",
       session_id: "native_1",
       title: "Native Session",
       updated_at: "2026-06-27T00:00:00Z",
     });
     await settlePromises();
 
-    expect(dispatch).toHaveBeenNthCalledWith(1, {
-      type: "newTask:nativeSessions:adopt",
-      sessionId: "native_1",
-    });
-    expect(request).toHaveBeenCalledWith(TASK_ADOPT_NATIVE_SESSION, {
-      projectId: "project_1",
-      agentId: "codex",
-      nativeSessionId: "native_1",
-      title: "Native Session",
-    });
-    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
-      type: "snapshot",
-      intent: "open",
-    }));
-    expect(dispatch).toHaveBeenCalledWith({
-      type: "newTask:nativeSessions:remove",
-      sessionId: "native_1",
-    });
+    expect(request).not.toHaveBeenCalled();
     expect(postHostMessage).toHaveBeenCalledWith({
-      type: "surface.openTask",
-      payload: { task_id: "task_1", title: "Native Session" },
+      type: "surface.openNativeSession",
+      payload: {
+        agent_id: "opencode",
+        native_session_id: "native_1",
+        project_id: "project_1",
+      },
     });
     expect(postHostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "task.create" }));
   });
@@ -2608,7 +2624,7 @@ describe("app controller callbacks", () => {
     expect(dispatch).not.toHaveBeenCalledWith({ type: "task:list:remove", taskId: "task_prepared" });
   });
 
-  it("discards the prepared Task before adopting a Native Session", async () => {
+  it("defers prepared Task disposal and adoption to the routed lifecycle", async () => {
     const dispatch = vi.fn();
     const request = vi.fn(async (method: string) => {
       if (method === TASK_RELEASE) return { discarded: true };
@@ -2631,13 +2647,9 @@ describe("app controller callbacks", () => {
     });
     await settlePromises();
 
-    expect(request.mock.calls.filter(([method]) => method === TASK_RELEASE)).toEqual([
-      [TASK_RELEASE, { taskId: "task_prepared" }],
-    ]);
-    expect(request.mock.calls.findIndex(([method]) => method === TASK_RELEASE))
-      .toBeLessThan(request.mock.calls.findIndex(([method]) => method === TASK_ADOPT_NATIVE_SESSION));
-    expect(request).toHaveBeenCalledWith(TASK_ADOPT_NATIVE_SESSION, expect.objectContaining({
-      nativeSessionId: "native_1",
+    expect(request).not.toHaveBeenCalled();
+    expect(postHostMessage).toHaveBeenCalledWith(expect.objectContaining({
+      type: "surface.openNativeSession",
     }));
   });
 
@@ -2729,14 +2741,7 @@ describe("app controller callbacks", () => {
     resolveRequest?.({ task: protocolTaskSnapshot("task_1", "Native Session") });
     await settlePromises();
 
-    expect(dispatch).toHaveBeenCalledWith({
-      type: "newTask:nativeSessions:adopt",
-      sessionId: "native_1",
-    });
-    expect(dispatch).toHaveBeenCalledWith({
-      type: "newTask:nativeSessions:remove",
-      sessionId: "native_1",
-    });
+    expect(dispatch).not.toHaveBeenCalled();
     expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({
       type: "snapshot",
       intent: "open",
@@ -2773,10 +2778,6 @@ describe("app controller callbacks", () => {
 
     expect(beginNavigation).toHaveBeenCalledTimes(2);
     expect(dispatch).toHaveBeenCalledWith({ type: "submit:cancel" });
-    expect(dispatch).toHaveBeenCalledWith({
-      type: "newTask:nativeSessions:remove",
-      sessionId: "native_1",
-    });
     expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: "snapshot", intent: "open" }));
     expect(postHostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "surface.openTask" }));
   });
@@ -3345,7 +3346,6 @@ function callbacks({
   newTaskStartAttempt = { current: undefined },
   pendingPreparedNewTask = vi.fn(() => undefined),
   newTaskController,
-  requestNativeSessions = vi.fn(),
   setAgents = vi.fn(),
   setPreferences = vi.fn(),
 }: Partial<Parameters<typeof createAppCallbacks>[0]> = {}) {
@@ -3370,7 +3370,6 @@ function callbacks({
     newTaskStartAttempt,
     pendingPreparedNewTask,
     newTaskController: ownedNewTaskController,
-    requestNativeSessions,
     setAgents,
     setPreferences,
     state,

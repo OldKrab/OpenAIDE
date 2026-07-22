@@ -59,6 +59,7 @@ fn run_shell_control_stdio(storage_root: PathBuf) {
             std::process::exit(1);
         }
     };
+    start_storage_fatal_supervisor(runtime.take_storage_fatal_events());
 
     let mut dispatcher = ShellControlDispatcher::new(runtime);
     let stdin = io::stdin();
@@ -159,7 +160,7 @@ fn run_protocol_edge_stdio(storage_root: PathBuf, startup: ProtocolEdgeStartup) 
         ProtocolEdgeStartup::Plain => AcpHostRequestTransport::Stdio,
         ProtocolEdgeStartup::LocalHttpHandoff => AcpHostRequestTransport::Unavailable,
     };
-    let dispatcher = match ProtocolEdgeStdioDispatcher::try_new_with_host_request_transport(
+    let mut dispatcher = match ProtocolEdgeStdioDispatcher::try_new_with_host_request_transport(
         state_root.clone(),
         host_request_transport,
     ) {
@@ -173,6 +174,11 @@ fn run_protocol_edge_stdio(storage_root: PathBuf, startup: ProtocolEdgeStartup) 
             std::process::exit(1);
         }
     };
+    start_storage_fatal_supervisor(
+        dispatcher
+            .take_storage_fatal_events()
+            .expect("protocol edge owns Task storage fatal stream"),
+    );
     let published_endpoint =
         match openaide_app_server::app_server_process::publish_local_http_probe_endpoint(
             dispatcher.shared_gateway(),
@@ -213,6 +219,40 @@ fn run_protocol_edge_stdio(storage_root: PathBuf, startup: ProtocolEdgeStartup) 
     }
 }
 
+/// The binary owns the root-wide storage failure signal. A dead sole writer
+/// invalidates durability for the entire state-root epoch, so graceful request
+/// handling is no longer safe and the process must terminate non-zero.
+fn start_storage_fatal_supervisor(
+    failures: std::sync::mpsc::Receiver<
+        openaide_app_server::storage::task_journal::TaskStorageFatalFailure,
+    >,
+) {
+    spawn_storage_fatal_supervisor(failures, |_| std::process::exit(1));
+}
+
+fn spawn_storage_fatal_supervisor(
+    failures: std::sync::mpsc::Receiver<
+        openaide_app_server::storage::task_journal::TaskStorageFatalFailure,
+    >,
+    terminate: impl FnOnce(openaide_app_server::storage::task_journal::TaskStorageFatalFailure)
+        + Send
+        + 'static,
+) -> thread::JoinHandle<()> {
+    thread::Builder::new()
+        .name("openaide-storage-fatal-supervisor".to_string())
+        .spawn(move || {
+            let Ok(failure) = failures.recv() else {
+                return;
+            };
+            openaide_app_server::logging::error(
+                "app_server_storage_fatal",
+                serde_json::json!({ "reason": failure.reason }),
+            );
+            terminate(failure);
+        })
+        .expect("Task storage fatal supervisor must start")
+}
+
 fn protocol_mode() -> Result<String, env::VarError> {
     env::var(APP_SERVER_PROTOCOL_MODE_ENV).or_else(|_| env::var(LEGACY_PROTOCOL_MODE_ENV))
 }
@@ -234,3 +274,7 @@ fn default_runtime_root() -> PathBuf {
         .join("openaide")
         .join("runtime")
 }
+
+#[cfg(test)]
+#[path = "storage_fatal_supervisor_tests.rs"]
+mod storage_fatal_supervisor_tests;

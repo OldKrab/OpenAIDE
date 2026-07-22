@@ -3,7 +3,10 @@ import { Plus, RefreshCcw, Search, Settings } from "lucide-react";
 import type { AgentListedSession, TaskSummary } from "@openaide/app-shell-contracts";
 import type { ProjectOption } from "../state/composerOptions";
 import type { AppState } from "../state/store";
-import { TASK_NAVIGATION_PAGE_SIZE } from "../state/taskNavigationPolicy";
+import {
+  initialTaskNavigationRowsPerProject,
+  TASK_NAVIGATION_PAGE_SIZE,
+} from "../state/taskNavigationPolicy";
 import { SidebarNativeSessionRow } from "./SidebarNativeSessionRow";
 import { SidebarProjectTaskGroup } from "./SidebarProjectTaskGroup";
 import { SidebarTaskRow } from "./SidebarTaskRow";
@@ -17,7 +20,7 @@ type SidebarProps = {
   nativeSessionAgentId: string;
   nativeSessionAgentName: string;
   nativeSessionProjectId?: string;
-  onLoadNativeSessions: (cursor?: string) => void;
+  onLoadNativeSessions: (cursor?: string, projectId?: string, targetRowCount?: number) => void;
   onManageWorktrees?: (projectId: string) => void;
   onNewTask: (projectId?: string) => void;
   onOpenNativeSession: (session: AgentListedSession) => void;
@@ -43,7 +46,7 @@ type SidebarProps = {
   showNativeSessions?: boolean;
 };
 
-export const DEFAULT_MAX_TASKS_PER_PROJECT = TASK_NAVIGATION_PAGE_SIZE;
+export const DEFAULT_MAX_TASKS_PER_PROJECT = 20;
 
 export const Sidebar = memo(function Sidebar({
   activeTaskId,
@@ -71,7 +74,7 @@ export const Sidebar = memo(function Sidebar({
   hiddenFromAccessibility = false,
   modal = false,
   projects = [],
-  maxTasksPerProject = DEFAULT_MAX_TASKS_PER_PROJECT,
+  maxTasksPerProject,
   maxVisibleProjects = 5,
   loadingTasks = false,
   showNativeSessions = true,
@@ -100,20 +103,17 @@ export const Sidebar = memo(function Sidebar({
   const activeTaskShownOutsideSearch =
     hasSearchQuery && activeTask !== undefined && !taskMatchesSearch(activeTask, groupSearchQuery);
   const groups = groupedTasks(tasks, projects, {
-    includeProjectId:
-      !showArchived && showNativeSessions && viewModel.visibleNativeSessions.length > 0
-        ? nativeSessionProjectId
-        : undefined,
+    includeProjectId: nativeSessionProjectId,
     includedProjectSessions:
-      !showArchived && showNativeSessions && nativeSessionProjectId
-        ? viewModel.visibleNativeSessions
-        : [],
+      !showArchived && showNativeSessions ? viewModel.visibleNativeSessions : [],
   }).filter((group) =>
     !groupSearchQuery ||
     group.tasks.length > 0 ||
     group.label.toLowerCase().includes(groupSearchQuery) ||
-    (nativeSessionProjectId === group.key && viewModel.visibleNativeSessions.length > 0),
+    group.nativeSessions.length > 0,
   );
+  const initialProjectRowLimit = maxTasksPerProject
+    ?? initialTaskNavigationRowsPerProject(groups.length);
   const activeProjectKey = activeTask?.project_id;
   const visibleGroups = groupByProject
     ? recentVisibleGroups(groups, Math.max(1, visibleProjectLimit), activeProjectKey)
@@ -156,16 +156,16 @@ export const Sidebar = memo(function Sidebar({
         {showSessionRefresh ? (
           <span className="task-section-tools">
             <button
-              aria-label="Refresh external sessions"
-              className="task-section-refresh"
+              aria-label="Refresh tasks"
+              className={`task-section-refresh ${nativeSessions.loading ? "refreshing" : ""}`}
               disabled={nativeSessions.loading || nativeSessions.adoptingSessionId !== undefined}
               onClick={() => onLoadNativeSessions()}
-              title="Refresh external sessions"
+              title="Refresh tasks"
               type="button"
             >
               <RefreshCcw size={13} />
             </button>
-            {nativeSessions.loading ? <small>Refreshing sessions</small> : null}
+            {nativeSessions.loading ? <small>Refreshing tasks</small> : null}
           </span>
         ) : null}
       </div>
@@ -191,7 +191,7 @@ export const Sidebar = memo(function Sidebar({
       </div>
       <SidebarTaskPreviewProvider><div className="task-list" role="list" aria-label={showArchived ? "Archived tasks" : "Tasks"}>
         {taskListError ? <p className="empty-list">{taskListError}</p> : null}
-        {showEmptyState || (loadingTasks && !taskListError && !showArchived)
+        {showEmptyState
           ? <p className="empty-list">{viewModel.emptyMessage}</p>
           : null}
         {activeTaskShownOutsideSearch ? (
@@ -216,29 +216,24 @@ export const Sidebar = memo(function Sidebar({
                 collapsed={groupSearchQuery ? false : collapsedProjectKeys.has(group.key)}
                 group={group}
                 key={group.key}
-                maxTasks={projectRowLimits.get(group.key) ?? maxTasksPerProject}
-                pageSize={maxTasksPerProject}
+                maxTasks={projectRowLimits.get(group.key) ?? initialProjectRowLimit}
+                pageSize={TASK_NAVIGATION_PAGE_SIZE}
                 nativeSessionAgentId={nativeSessionAgentId}
                 nativeSessionAgentName={nativeSessionAgentName}
-                nativeSessions={
-                  !showArchived && showNativeSessions && nativeSessionProjectId === group.key
-                    ? viewModel.visibleNativeSessions
-                    : []
-                }
+                nativeSessions={group.nativeSessions}
                 nativeSessionsAdoptingSessionId={nativeSessions.adoptingSessionId}
-                nativeSessionsHaveMore={nativeSessions.nextCursor !== undefined}
+                nativeSessionsHaveMore={nativeSessions.nextCursor !== undefined && nativeSessionProjectId === group.key}
                 canManageWorktrees={Boolean(projects.find((project) => project.projectId === group.key)?.worktreeRepositoryId)}
                 onArchiveTask={onArchiveTask}
                 onLoadMore={(visibleIncrement) =>
                   {
+                    const nextLimit = (projectRowLimits.get(group.key) ?? initialProjectRowLimit) + visibleIncrement;
                     setProjectRowLimits((current) => {
                     const next = new Map(current);
-                    next.set(group.key, (current.get(group.key) ?? maxTasksPerProject) + visibleIncrement);
+                    next.set(group.key, nextLimit);
                     return next;
                     });
-                    if (nativeSessions.nextCursor && nativeSessionProjectId === group.key) {
-                      onLoadNativeSessions(nativeSessions.nextCursor);
-                    }
+                    onLoadNativeSessions(undefined, group.key, nextLimit);
                   }
                 }
                 onManageWorktrees={onManageWorktrees ? () => onManageWorktrees(group.key) : undefined}
@@ -251,6 +246,11 @@ export const Sidebar = memo(function Sidebar({
                     const next = new Set(current);
                     if (next.has(group.key)) {
                       next.delete(group.key);
+                      setProjectRowLimits((limits) => {
+                        const reset = new Map(limits);
+                        reset.delete(group.key);
+                        return reset;
+                      });
                     } else {
                       next.add(group.key);
                     }
@@ -273,9 +273,9 @@ export const Sidebar = memo(function Sidebar({
                 />
               ) : (
                 <SidebarNativeSessionRow
-                  key={`session:${row.session.session_id}`}
-                  nativeSessionAgentId={nativeSessionAgentId}
-                  nativeSessionAgentName={nativeSessionAgentName}
+                  key={`session:${row.session.agent_id ?? nativeSessionAgentId}:${row.session.session_id}`}
+                  nativeSessionAgentId={row.session.agent_id ?? nativeSessionAgentId}
+                  nativeSessionAgentName={row.session.agent_name ?? nativeSessionAgentName}
                   nativeSessionsAdoptingSessionId={nativeSessions.adoptingSessionId}
                   onOpenNativeSession={onOpenNativeSession}
                   session={row.session}

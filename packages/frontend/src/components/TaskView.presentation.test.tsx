@@ -299,6 +299,18 @@ describe("TaskView timeline presentation", () => {
     expect(retry).toHaveBeenCalledOnce();
   });
 
+  it("uses the route-specific opening label", async () => {
+    const { TaskLoadingView } = await import("./TaskView");
+    let tree!: ReactTestRenderer;
+
+    act(() => {
+      tree = create(<TaskLoadingView label="Opening session" />);
+    });
+
+    expect(tree.root.findByType("section").props["aria-label"]).toBe("Opening session");
+    expect(JSON.stringify(tree.toJSON())).toContain("Opening session");
+  });
+
   it("announces each completed history generation once as a settled notice", async () => {
     const { TaskView } = await import("./TaskView");
     const updated = snapshotWithAuthoritativeTail(true);

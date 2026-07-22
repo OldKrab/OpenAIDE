@@ -23,15 +23,22 @@ export function primaryTaskSurfaceModel(controller: AppController) {
   const startupConfigOptions = renderableTaskSnapshot?.task.has_messages === false && snapshotTaskInput?.pending
     ? primaryTask.newTask.newTask.pending?.configOptions
     : undefined;
-  const openingNativeSession = primaryTask.newTask.newTask.nativeSessions.adoptingSessionId !== undefined;
+  const openingNativeSession = bootstrap.surface === "nativeSession";
   const renderableTaskArchived = Boolean(
     view.navigation.showArchived
       && renderableTaskSnapshot
       && activeTask?.task_id === renderableTaskSnapshot.task.task_id,
   );
-  const taskLoadingError = bootstrap.taskId && primaryTask.taskOpenError?.taskId === bootstrap.taskId
-    ? primaryTask.taskOpenError.message
+  const adoptionError = primaryTask.newTask.newTask.nativeSessions.adoptionError;
+  const routedNativeSessionId = bootstrap.surface === "nativeSession" ? bootstrap.nativeSessionId : undefined;
+  const nativeRouteError = adoptionError && adoptionError.sessionId === routedNativeSessionId
+    ? adoptionError.message
     : undefined;
+  const taskLoadingError = openingNativeSession
+    ? nativeRouteError
+    : bootstrap.taskId && primaryTask.taskOpenError?.taskId === bootstrap.taskId
+      ? primaryTask.taskOpenError.message
+      : undefined;
   return {
     openingNativeSession,
     renderableTaskArchived,
@@ -75,7 +82,8 @@ export function AppPrimaryTaskSurface({ controller, focusRequestKey, model, work
     taskLoadingError,
   } = model;
   const usesProjectNavigation = bootstrap.surface !== "invalid" && bootstrap.shell.navigationMode === "project";
-  const retryTaskOpen = taskLoadingError || controller.backendConnectionState.status === "unavailable"
+  const retryTaskOpen = !openingNativeSession
+    && (taskLoadingError || controller.backendConnectionState.status === "unavailable")
     ? controller.retryTaskOpen
     : undefined;
   const recoveryActions = createAgentRecoveryActions(controller);
@@ -126,6 +134,7 @@ export function AppPrimaryTaskSurface({ controller, focusRequestKey, model, work
     return (
       <TaskLoadingView
         error={taskLoadingError}
+        label={openingNativeSession ? "Opening session" : undefined}
         onRetry={retryTaskOpen}
       />
     );

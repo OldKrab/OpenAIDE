@@ -7,8 +7,8 @@ use crate::ids::{
 use crate::snapshot::{
     AgentCollectionSnapshot, ChatItem, ChatSnapshot, ClientSnapshot, PendingRequestSnapshot,
     ProjectCollectionSnapshot, TaskAgentCommandsSnapshot, TaskAgentConfigSnapshot,
-    TaskHistorySyncSnapshot, TaskInputCapabilities, TaskLifecycle, TaskPreparationSnapshot,
-    TaskSendCapabilitySnapshot, TaskSummary,
+    TaskHistorySyncSnapshot, TaskInputCapabilities, TaskLifecycle, TaskNavigationSnapshot,
+    TaskPreparationSnapshot, TaskSendCapabilitySnapshot, TaskSummary,
 };
 use crate::state::SubscriptionScope;
 use crate::task::ToolDetailSnapshot;
@@ -70,6 +70,10 @@ pub enum AppServerEventPayload {
     TaskNavigationChanged {
         change: TaskNavigationChange,
     },
+    /// Replaces the combined durable Task and unadopted Native Session projection.
+    TaskNavigationReplaced {
+        navigation: TaskNavigationSnapshot,
+    },
     ProjectCollectionUpdated {
         projects: ProjectCollectionSnapshot,
     },
@@ -82,6 +86,12 @@ pub enum AppServerEventPayload {
         artifact_id: String,
         details: ToolDetailSnapshot,
     },
+    ToolDetailChanged {
+        task_id: TaskId,
+        artifact_id: String,
+        revision: u64,
+        deltas: Vec<ToolDetailDelta>,
+    },
     RequestUpdated {
         request: PendingRequestSnapshot,
     },
@@ -92,6 +102,17 @@ pub enum AppServerEventPayload {
         repository_id: WorktreeRepositoryId,
         repository: WorktreeRepositorySnapshot,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum ToolDetailDelta {
+    ReplaceDetails { details: Box<ToolDetailSnapshot> },
+    AppendTerminal { terminal_id: String, data: String },
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, TS)]

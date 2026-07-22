@@ -12,6 +12,9 @@ pub enum AgentEvent {
         source_message_id: Option<String>,
     },
     ToolCall(AgentToolCall),
+    /// One ordered ACP Tool update. Summary and terminal changes share this
+    /// envelope so a mixed wire update cannot be reordered at the event seam.
+    ToolUpdate(AgentToolUpdate),
     Activity {
         title: String,
         tool_name: String,
@@ -20,6 +23,32 @@ pub enum AgentEvent {
     PermissionRequest(AgentPermissionRequest),
     ConfigOptionsChanged(ConfigOptionsCatalog),
     CommandsChanged(AgentCommandsCatalog),
+}
+
+#[derive(Debug, Clone)]
+pub struct AgentToolUpdate {
+    /// Present only when lightweight or structured Tool projection changed.
+    pub summary: Option<AgentToolCall>,
+    /// Agent-owned terminal appends in wire arrival order.
+    pub terminal_appends: Vec<AgentTerminalAppend>,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct AgentTerminalAppend {
+    pub tool_call_id: String,
+    pub terminal_id: String,
+    pub data: String,
+}
+
+impl std::fmt::Debug for AgentTerminalAppend {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("AgentTerminalAppend")
+            .field("tool_call_id", &self.tool_call_id)
+            .field("terminal_id_bytes", &self.terminal_id.len())
+            .field("data_bytes", &self.data.len())
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone)]

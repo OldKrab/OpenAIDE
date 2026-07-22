@@ -7,6 +7,7 @@ import type {
   TaskSummary as ProtocolTaskSummary,
 } from "@openaide/app-server-client";
 import type {
+  AgentListedSession,
   AgentCommandsCatalog,
   ChatMessage,
   ConfigOptionsCatalog,
@@ -38,6 +39,8 @@ export type ProtocolMappingWarning =
 
 export type ProtocolTaskNavigationMapping = {
   tasks: TaskSummary[];
+  sessions: AgentListedSession[];
+  refreshing: boolean;
   activeTaskId?: string;
   warnings: ProtocolMappingWarning[];
   requiresNativeSurface: boolean;
@@ -68,11 +71,28 @@ export function mapProtocolTaskNavigation(
   snapshot: ProtocolTaskNavigationSnapshot,
   context: ProtocolMappingContext = {},
 ): ProtocolTaskNavigationMapping {
-  const mapped = snapshot.tasks
-    .filter((task) => task.hasMessages)
+  const taskEntries = snapshot.entries
+    .filter((entry) => entry.kind === "task")
+    .map((entry) => entry.task);
+  const mapped = taskEntries
     .map((task) => mapProtocolTaskSummaryWithWarnings(task, 0, context));
+  const sessions = snapshot.entries.flatMap((entry): AgentListedSession[] => {
+    if (entry.kind !== "nativeSession") return [];
+    return [{
+      agent_id: entry.session.reference.agentId,
+      agent_name: context.agents?.find((agent) => agent.agentId === entry.session.reference.agentId)?.label
+        ?? entry.session.reference.agentId,
+      session_id: entry.session.reference.sessionId,
+      project_id: entry.session.projectId,
+      cwd: entry.session.workspaceRoot,
+      title: entry.session.title ?? undefined,
+      last_activity: entry.session.lastActivity ?? undefined,
+    }];
+  });
   return {
     tasks: mapped.map((item) => item.task),
+    sessions,
+    refreshing: snapshot.refreshing === true,
     activeTaskId: mapped.some((item) => item.task.task_id === snapshot.activeTaskId)
       ? snapshot.activeTaskId ?? undefined
       : undefined,

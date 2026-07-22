@@ -191,7 +191,7 @@ fn batch_requests_after_shutdown_are_rejected_without_mutating_storage() {
     assert_eq!(shutdown_response["result"], json!({}));
     assert_eq!(health_response["error"]["data"]["reason"], "not_ready");
     assert_eq!(
-        std::fs::read_dir(storage.path().join("tasks"))
+        std::fs::read_dir(storage.path().join("task-store-v1/tasks"))
             .unwrap()
             .count(),
         0

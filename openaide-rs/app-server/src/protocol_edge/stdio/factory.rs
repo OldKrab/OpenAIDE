@@ -33,6 +33,8 @@ pub(super) struct GatewayFactoryOutput {
     pub gateway: RpcGateway,
     pub task_updates: TaskUpdateReceiver,
     pub worktree_updates: WorktreeUpdateReceiver,
+    pub storage_fatal_events:
+        std::sync::mpsc::Receiver<crate::storage::task_journal::TaskStorageFatalFailure>,
     #[cfg(test)]
     pub attachment_runtime: crate::attachment_runtime::AttachmentRuntime,
 }
@@ -45,12 +47,12 @@ pub(super) fn gateway(
     acp_trace_state: crate::agent::acp_trace::AcpTraceState,
     configured_projects: ConfiguredProjectRoots,
 ) -> Result<GatewayFactoryOutput, ProtocolEdgeStdioStartError> {
+    let storage_fatal_events = store.take_task_storage_fatal_events();
     let (task_notifier, task_updates) = TaskUpdateNotifier::channel();
     let projects = ProjectCollectionStore::new_with_configured_roots(
         store.clone(),
         configured_projects.clone(),
     );
-    let task_navigation = TaskNavigationStore::new(store.clone());
     let project_resolver = StorageProjectResolver::new_with_configured_roots(
         store.clone(),
         configured_projects.clone(),
@@ -72,14 +74,21 @@ pub(super) fn gateway(
         agent_runtime.clone(),
         agent_statuses.clone(),
     );
-    let task_product_api = Arc::new(TaskProductApi::new_with_server_requests(
+    let task_navigation_agents = agent_registry.clone();
+    let task_product_api = Arc::new(TaskProductApi::new_with_server_requests_and_projects(
         store.clone(),
         Arc::new(project_resolver),
         agent_registry,
         agent_runtime,
         task_notifier,
         server_requests.clone(),
+        configured_projects.clone(),
     )?);
+    let task_navigation = TaskNavigationStore::with_native_sessions_and_agents(
+        store.clone(),
+        task_product_api.native_session_catalog(),
+        task_navigation_agents,
+    );
     let task_snapshots = Arc::new(TaskSnapshotStore::with_history_sync(
         store.clone(),
         task_product_api.history_sync_snapshots(),
@@ -152,6 +161,7 @@ pub(super) fn gateway(
         gateway,
         task_updates,
         worktree_updates,
+        storage_fatal_events,
         #[cfg(test)]
         attachment_runtime,
     })

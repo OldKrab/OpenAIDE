@@ -44,6 +44,18 @@
   opacity: 0.5;
 }
 
+.task-section-refresh.refreshing svg {
+  animation: task-refresh-spin 900ms linear infinite;
+}
+
+@keyframes task-refresh-spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .task-section-refresh.refreshing svg { animation: none; }
+}
+
 .task-mode-tabs {
   min-width: 0;
   border-bottom: 1px solid color-mix(in oklch, var(--oa-border) 48%, transparent);

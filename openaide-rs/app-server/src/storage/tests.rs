@@ -31,10 +31,7 @@ fn task_title_persists_as_one_owned_value() {
 
     store.write_task(&task).unwrap();
 
-    let stored: serde_json::Value = serde_json::from_slice(
-        &std::fs::read(store.task_dir("task-title").unwrap().join("task.json")).unwrap(),
-    )
-    .unwrap();
+    let stored = serde_json::to_value(store.read_task("task-title").unwrap()).unwrap();
     assert_eq!(
         stored["title"],
         serde_json::json!({ "value": "Agent title", "source": "agent" })
@@ -63,19 +60,12 @@ fn legacy_select_config_option_without_kind_remains_readable() {
     });
     store.write_task(&task).unwrap();
 
-    let path = store
-        .task_dir("task-legacy-config")
-        .unwrap()
-        .join("task.json");
-    let mut persisted: serde_json::Value =
-        serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    let mut persisted = serde_json::to_value(&task).unwrap();
     persisted["config_options_catalog"]["options"][0]
         .as_object_mut()
         .unwrap()
         .remove("kind");
-    std::fs::write(&path, serde_json::to_vec_pretty(&persisted).unwrap()).unwrap();
-
-    let loaded = store.read_task("task-legacy-config").unwrap();
+    let loaded: TaskRecord = serde_json::from_value(persisted).unwrap();
 
     assert_eq!(
         loaded.config_options_catalog.unwrap().options[0].kind,
@@ -98,6 +88,53 @@ fn blocked_store_open_does_not_create_product_dirs() {
     ));
     assert!(!dir.path().join("tasks").exists());
     assert!(!dir.path().join("diagnostics").exists());
+}
+
+#[test]
+fn successful_journal_start_removes_only_unsupported_legacy_task_storage() {
+    let dir = tempfile::tempdir().unwrap();
+    let legacy_task = dir.path().join("tasks/task-old");
+    std::fs::create_dir_all(legacy_task.join("tool-artifacts")).unwrap();
+    std::fs::write(legacy_task.join("task.json"), b"legacy task").unwrap();
+    std::fs::write(legacy_task.join("messages.jsonl"), b"legacy chat").unwrap();
+    std::fs::write(
+        legacy_task.join("tool-artifacts/tool-old.json"),
+        b"legacy tool",
+    )
+    .unwrap();
+    let agent_sentinel = dir.path().join("agents/catalog.json");
+    std::fs::create_dir_all(agent_sentinel.parent().unwrap()).unwrap();
+    std::fs::write(&agent_sentinel, b"preserve agent state").unwrap();
+
+    let _store = Store::open(dir.path().to_path_buf()).unwrap();
+
+    assert!(!dir.path().join("tasks").exists());
+    assert_eq!(
+        std::fs::read(agent_sentinel).unwrap(),
+        b"preserve agent state"
+    );
+    assert!(dir.path().join("task-store-v1/tasks").is_dir());
+}
+
+#[cfg(unix)]
+#[test]
+fn legacy_cleanup_failure_does_not_block_journal_start() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().unwrap();
+    let legacy_tasks = dir.path().join("tasks");
+    std::fs::create_dir_all(legacy_tasks.join("task-old")).unwrap();
+    std::fs::write(legacy_tasks.join("task-old/task.json"), b"legacy task").unwrap();
+    std::fs::set_permissions(&legacy_tasks, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+    let opened = Store::open(dir.path().to_path_buf());
+
+    assert!(
+        opened.is_ok(),
+        "obsolete-file permissions must not block startup"
+    );
+    assert!(legacy_tasks.exists(), "failed cleanup is retried later");
+    std::fs::set_permissions(&legacy_tasks, std::fs::Permissions::from_mode(0o700)).unwrap();
 }
 
 #[test]
@@ -197,6 +234,7 @@ fn clean_shutdown_writes_clean_marker() {
 fn persisted_tool_artifacts_keep_a_lightweight_file_summary() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path().to_path_buf()).unwrap();
+    ensure_task(&store, "task_1");
     let mut message = NormalizedMessage::Activity {
         id: "activity_1".to_string(),
         title: "Updated file".to_string(),
@@ -241,7 +279,10 @@ fn persisted_tool_artifacts_keep_a_lightweight_file_summary() {
         panic!("expected tool step");
     };
     assert_eq!(input_summary.as_deref(), Some("chat.ts"));
-    assert_eq!(detail_artifact_id.as_deref(), Some("activity_1_0"));
+    assert_eq!(
+        detail_artifact_id.as_deref(),
+        Some(crate::storage::tool_artifacts::tool_artifact_id("activity_1", 0).as_str())
+    );
     assert!(details.is_none());
 }
 
@@ -250,7 +291,7 @@ fn pages_hydrate_missing_tool_file_summaries_from_artifacts() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path().to_path_buf()).unwrap();
     let task_id = "task_tool_summary";
-    std::fs::create_dir_all(store.task_dir(task_id).unwrap()).unwrap();
+    ensure_task(&store, task_id);
     let mut message = activity_message_with_edit_details("activity_1");
     store
         .persist_tool_artifacts(task_id, &mut message.message)
@@ -287,7 +328,7 @@ fn pages_before_legacy_message_cursor_returned_to_frontend() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path().to_path_buf()).unwrap();
     let task_id = "task_legacy_cursor";
-    std::fs::create_dir_all(store.task_dir(task_id).unwrap()).unwrap();
+    ensure_task(&store, task_id);
     store
         .append_message(task_id, chat_message("legacy-1", "First"))
         .unwrap();
@@ -314,7 +355,7 @@ fn tail_page_keeps_the_user_prompt_before_a_large_activity_run() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path().to_path_buf()).unwrap();
     let task_id = "task_large_activity_run";
-    std::fs::create_dir_all(store.task_dir(task_id).unwrap()).unwrap();
+    ensure_task(&store, task_id);
     let mut messages = vec![StoredMessage {
         sequence: 1,
         chat: agent_chat_message("older", "Older response"),
@@ -347,7 +388,7 @@ fn tail_page_targets_recent_conversation_turns_instead_of_raw_records() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path().to_path_buf()).unwrap();
     let task_id = "task_recent_turns";
-    std::fs::create_dir_all(store.task_dir(task_id).unwrap()).unwrap();
+    ensure_task(&store, task_id);
     let messages: Vec<_> = (1..=12)
         .map(|sequence| StoredMessage {
             sequence,
@@ -434,16 +475,19 @@ fn runtime_marker_path(root: &Path) -> PathBuf {
 }
 
 fn write_stored_messages(store: &Store, task_id: &str, messages: &[StoredMessage]) {
-    let mut bytes = Vec::new();
-    for message in messages {
-        serde_json::to_writer(&mut bytes, message).unwrap();
-        bytes.push(b'\n');
+    ensure_task(store, task_id);
+    let projection = store.task_journal().load(task_id).unwrap();
+    store
+        .replace_projection_messages(projection, messages.to_vec(), 0)
+        .unwrap();
+}
+
+fn ensure_task(store: &Store, task_id: &str) {
+    if store.read_task(task_id).is_err() {
+        store
+            .write_task(&task_record(task_id, TaskStatus::Inactive, "1"))
+            .unwrap();
     }
-    std::fs::write(
-        store.task_dir(task_id).unwrap().join("messages.jsonl"),
-        bytes,
-    )
-    .unwrap();
 }
 
 fn chat_message(id: &str, text: &str) -> ChatMessage {
@@ -545,6 +589,7 @@ fn local_history_timestamp_advances_for_every_chat_write() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let task_id = "task-history-clock";
+    ensure_task(&store, task_id);
 
     store
         .append_message(task_id, chat_message("message-1", "First"))
@@ -569,10 +614,11 @@ fn agent_text_chunk_is_durable_without_rewriting_existing_history() {
         .join("messages.jsonl");
     {
         let store = Store::open(temp.path().to_path_buf()).unwrap();
+        ensure_task(&store, task_id);
         store
             .append_message(task_id, agent_chat_message("agent-message", "Hello"))
             .unwrap();
-        let history_before_chunk = std::fs::read(&messages_path).unwrap();
+        assert!(!messages_path.exists());
 
         store
             .append_agent_message_part(
@@ -588,7 +634,7 @@ fn agent_text_chunk_is_durable_without_rewriting_existing_history() {
             )
             .unwrap();
 
-        assert_eq!(std::fs::read(&messages_path).unwrap(), history_before_chunk);
+        assert!(!messages_path.exists());
     }
 
     let reopened = Store::open(temp.path().to_path_buf()).unwrap();
@@ -609,11 +655,12 @@ fn first_agent_text_chunk_appends_without_rewriting_existing_history() {
     let temp = tempfile::tempdir().unwrap();
     let task_id = "task-first-agent-text-journal";
     let store = Store::open(temp.path().to_path_buf()).unwrap();
+    ensure_task(&store, task_id);
     store
         .append_message(task_id, chat_message("user-message", "Prompt"))
         .unwrap();
     let messages_path = store.task_dir(task_id).unwrap().join("messages.jsonl");
-    let history_before_chunk = std::fs::read(&messages_path).unwrap();
+    assert!(!messages_path.exists());
 
     let result = store
         .append_agent_message_part(
@@ -633,7 +680,7 @@ fn first_agent_text_chunk_appends_without_rewriting_existing_history() {
         result,
         crate::storage::message_store::AgentMessageAppend::Appended(_)
     ));
-    assert_eq!(std::fs::read(&messages_path).unwrap(), history_before_chunk);
+    assert!(!messages_path.exists());
     assert_eq!(store.read_messages(task_id).unwrap().len(), 2);
 }
 
@@ -642,6 +689,7 @@ fn compacted_agent_text_accepts_later_durable_chunks() {
     let temp = tempfile::tempdir().unwrap();
     let task_id = "task-agent-text-compaction";
     let store = Store::open(temp.path().to_path_buf()).unwrap();
+    ensure_task(&store, task_id);
     store
         .append_message(task_id, agent_chat_message("agent-message", "one"))
         .unwrap();
@@ -696,71 +744,11 @@ fn compacted_agent_text_accepts_later_durable_chunks() {
 }
 
 #[test]
-fn incomplete_final_journal_record_does_not_poison_later_chunks() {
-    let temp = tempfile::tempdir().unwrap();
-    let task_id = "task-agent-text-partial-record";
-    let store = Store::open(temp.path().to_path_buf()).unwrap();
-    store
-        .append_message(task_id, agent_chat_message("agent-message", "one"))
-        .unwrap();
-    store
-        .append_agent_message_part(
-            task_id,
-            NormalizedMessage::AgentMessage {
-                id: "agent-message".to_string(),
-                role: AgentMessageRole::Agent,
-                parts: vec![AgentMessagePart::Text {
-                    text: " two".to_string(),
-                }],
-                created_at: "2026-07-01T00:00:01Z".to_string(),
-            },
-        )
-        .unwrap();
-    let journal_path = store
-        .task_dir(task_id)
-        .unwrap()
-        .join("message_journal.jsonl");
-    use std::io::Write as _;
-    std::fs::OpenOptions::new()
-        .append(true)
-        .open(&journal_path)
-        .unwrap()
-        .write_all(br#"{"sequence":999"#)
-        .unwrap();
-
-    store
-        .append_agent_message_part(
-            task_id,
-            NormalizedMessage::AgentMessage {
-                id: "agent-message".to_string(),
-                role: AgentMessageRole::Agent,
-                parts: vec![AgentMessagePart::Text {
-                    text: " three".to_string(),
-                }],
-                created_at: "2026-07-01T00:00:02Z".to_string(),
-            },
-        )
-        .unwrap();
-    drop(store);
-
-    let reopened = Store::open(temp.path().to_path_buf()).unwrap();
-    let messages = reopened.read_messages(task_id).unwrap();
-    let NormalizedMessage::AgentMessage { parts, .. } = &messages[0].chat.message else {
-        panic!("expected Agent message");
-    };
-    assert_eq!(
-        parts,
-        &[AgentMessagePart::Text {
-            text: "one two three".to_string(),
-        }]
-    );
-}
-
-#[test]
 fn native_history_replacement_records_the_native_history_clock() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let task_id = "task-native-history-clock";
+    ensure_task(&store, task_id);
     let native_updated_at = u128::MAX - 1;
 
     store

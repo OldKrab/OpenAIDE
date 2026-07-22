@@ -17,6 +17,8 @@ export function injectBootstrap(html, route, presentation = {}) {
     'data-navigation-mode="project"',
     `data-surface="${route.surface}"`,
     route.taskId ? `data-task-id="${escapeAttribute(route.taskId)}"` : undefined,
+    route.agentId ? `data-agent-id="${escapeAttribute(route.agentId)}"` : undefined,
+    route.nativeSessionId ? `data-native-session-id="${escapeAttribute(route.nativeSessionId)}"` : undefined,
     route.archived ? 'data-archived="true"' : undefined,
     presentation.instanceLabel ? `data-instance-label="${escapeAttribute(presentation.instanceLabel)}"` : undefined,
     `data-app-server-connection="${escapeAttribute(JSON.stringify(browserConnection))}"`,
@@ -29,6 +31,19 @@ export function injectBootstrap(html, route, presentation = {}) {
 }
 
 export function webRoute(pathname) {
+  const nativeSessionMatch = /^\/session\/([^/]+)\/([^/]+)\/?$/.exec(pathname);
+  if (nativeSessionMatch) {
+    const agentId = decodedPathSegment(nativeSessionMatch[1]);
+    const nativeSessionId = decodedPathSegment(nativeSessionMatch[2]);
+    if (agentId === undefined || nativeSessionId === undefined) return undefined;
+    return {
+      agentId,
+      archived: undefined,
+      nativeSessionId,
+      surface: "nativeSession",
+      taskId: undefined,
+    };
+  }
   for (const route of webRoutes) {
     const match = route.pattern.exec(pathname);
     if (match) {
@@ -54,6 +69,14 @@ export function appServerTransportRoute(method, pathname) {
     return { kind: "download", appServerSuffix: "download" };
   }
   return undefined;
+}
+
+function decodedPathSegment(value) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return undefined;
+  }
 }
 
 function escapeAttribute(value) {

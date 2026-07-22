@@ -295,7 +295,7 @@ fn app_server_handoff_registers_vscode_workspace_project_without_task_history() 
             project["projectId"] == "project-d997698f027765f9"
                 && project["label"] == "OpenAIDE"
         }));
-    assert!(snapshot["tasks"]["tasks"]
+    assert!(snapshot["tasks"]["entries"]
         .as_array()
         .expect("task navigation")
         .is_empty());
@@ -434,11 +434,12 @@ fn app_server_handoff_reinitialize_home_lists_the_current_task_after_send() {
     );
 
     let reinitialized = post_local_http_initialize(endpoint_url, auth_token, "project-list-client");
-    let tasks = reinitialized[0]["result"]["result"]["snapshot"]["tasks"]["tasks"]
+    let tasks = reinitialized[0]["result"]["result"]["snapshot"]["tasks"]["entries"]
         .as_array()
         .expect("task navigation");
     let listed = tasks
         .iter()
+        .filter_map(|entry| entry.get("task"))
         .find(|task| task["taskId"] == task_id)
         .expect("created task is listed after reload");
     assert_eq!(listed["projectId"], project_id);

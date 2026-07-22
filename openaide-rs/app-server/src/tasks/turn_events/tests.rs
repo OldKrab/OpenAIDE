@@ -3,13 +3,16 @@ use std::sync::{Arc, Mutex};
 
 use crate::agent::events::{
     AgentEvent, AgentPermissionOption, AgentPermissionOptionKind, AgentPermissionRequest,
-    AgentToolCall, AgentToolCallRef, AgentToolCallStatus,
+    AgentTerminalAppend, AgentToolCall, AgentToolCallRef, AgentToolCallStatus, AgentToolUpdate,
 };
 use crate::agent::{
     AgentEventSink, AgentMetadataField, AgentPromptOutcome, AgentSessionEventSink,
     AgentSessionMetadataUpdate, TurnCancellation,
 };
 use crate::client_lifecycle::AppServerTime;
+use crate::native_sessions::catalog::{
+    NativeSessionCatalog, NativeSessionObservation, NativeSessionRef,
+};
 use crate::protocol::model::{
     ActivityStatus, ActivityToolDetails, ActivityToolOutput, AgentMessagePart, AgentMessageRole,
     IsolationKind, NormalizedMessage, TaskStatus,
@@ -96,6 +99,47 @@ fn agent_session_title_updates_set_and_clear_agent_owned_title() {
     .unwrap();
     let cleared = store.read_task("task_1").unwrap();
     assert_eq!(cleared.title, None);
+}
+
+#[test]
+fn live_session_metadata_updates_the_durable_native_catalog() {
+    let (_dir, store, mutations, _server_requests) = test_runtime();
+    store.write_task(&running_task("task_1")).unwrap();
+    let catalog = NativeSessionCatalog::open(store).unwrap();
+    let reference = NativeSessionRef::new("codex", "session_1");
+    catalog
+        .record_page(
+            "project-1",
+            "/workspace",
+            vec![NativeSessionObservation {
+                reference: reference.clone(),
+                title: Some("Listed title".to_string()),
+                last_activity: Some("2026-07-21T12:00:00Z".to_string()),
+            }],
+        )
+        .unwrap();
+    let sink = TaskSessionEventSink::new(
+        mutations,
+        "task_1".to_string(),
+        "session_1".to_string(),
+        ServerRequestRuntime::new(),
+    )
+    .with_native_catalog(Some(catalog.clone()));
+
+    sink.metadata_changed(AgentSessionMetadataUpdate {
+        title: AgentMetadataField::Value("Live title".to_string()),
+        updated_at: AgentMetadataField::Value("2026-07-21T13:00:00Z".to_string()),
+    })
+    .unwrap();
+
+    assert_eq!(
+        catalog.entry(&reference).unwrap().observation,
+        NativeSessionObservation {
+            reference,
+            title: Some("Live title".to_string()),
+            last_activity: Some("2026-07-21T13:00:00Z".to_string()),
+        }
+    );
 }
 
 #[test]
@@ -197,6 +241,31 @@ fn agent_session_metadata_rejects_updates_from_a_stale_native_session() {
     assert_eq!(task.title, None);
     assert_eq!(task.summary().title, None);
     assert_eq!(task.last_activity, "1");
+}
+
+#[test]
+fn agent_session_metadata_never_moves_task_activity_backwards() {
+    let (_dir, store, mutations, _server_requests) = test_runtime();
+    let mut task = running_task("task_1");
+    task.last_activity = "2026-07-10T10:00:00Z".to_string();
+    store.write_task(&task).unwrap();
+    let sink = TaskSessionEventSink::new(
+        mutations,
+        "task_1".to_string(),
+        "session_1".to_string(),
+        ServerRequestRuntime::new(),
+    );
+
+    sink.metadata_changed(AgentSessionMetadataUpdate {
+        title: AgentMetadataField::Unchanged,
+        updated_at: AgentMetadataField::Value("2026-07-10T09:00:00Z".to_string()),
+    })
+    .unwrap();
+
+    assert_eq!(
+        store.read_task("task_1").unwrap().last_activity,
+        "2026-07-10T10:00:00Z",
+    );
 }
 
 #[test]
@@ -880,6 +949,271 @@ fn prompt_completion_leaves_running_agent_activity_open_for_later_session_update
 }
 
 #[test]
+fn terminal_only_tool_updates_are_durable_without_task_revision() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().to_path_buf()).unwrap();
+    let (notifier, notifications) = TaskUpdateNotifier::channel();
+    let mutations = TaskMutations::new(
+        store.clone(),
+        Arc::new(Mutex::new(())),
+        Arc::new(Mutex::new(RuntimeState::with_revision(0))),
+        notifier,
+    );
+    let server_requests = ServerRequestRuntime::new();
+    store.write_task(&running_task("task_terminal")).unwrap();
+    let sink = TaskSessionEventSink::new(
+        mutations,
+        "task_terminal".to_string(),
+        "session_1".to_string(),
+        server_requests,
+    );
+
+    for _ in 0..100 {
+        sink.session_update(AgentEvent::ToolUpdate(AgentToolUpdate {
+            summary: None,
+            terminal_appends: vec![AgentTerminalAppend {
+                tool_call_id: "tool_1".to_string(),
+                terminal_id: "terminal_1".to_string(),
+                data: "x".to_string(),
+            }],
+        }))
+        .unwrap();
+    }
+    let published = notifications
+        .recv_timeout(std::time::Duration::from_secs(1))
+        .expect("terminal-only durability publishes without a later Task mutation");
+    assert!(matches!(
+        published.kind,
+        TaskUpdateKind::ToolDetailChanged { ref deltas, .. } if !deltas.is_empty()
+    ));
+    store.compact_message_journal("task_terminal").unwrap();
+
+    let artifact_id =
+        crate::storage::tool_artifacts::tool_artifact_id("acp_tool:session_1:tool_1", 0);
+    let artifact = store
+        .task_journal()
+        .load_tool_artifact("task_terminal", &artifact_id)
+        .unwrap();
+    assert_eq!(artifact.terminal_outputs["terminal_1"], "x".repeat(100));
+    assert_eq!(store.read_task("task_terminal").unwrap().revision, 0);
+}
+
+#[test]
+fn terminal_append_immediately_before_task_change_is_published_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().to_path_buf()).unwrap();
+    let (notifier, notifications) = TaskUpdateNotifier::channel();
+    let mutations = TaskMutations::new(
+        store.clone(),
+        Arc::new(Mutex::new(())),
+        Arc::new(Mutex::new(RuntimeState::with_revision(0))),
+        notifier,
+    );
+    store
+        .write_task(&running_task("task_terminal_barrier"))
+        .unwrap();
+    let sink = TaskSessionEventSink::new(
+        mutations,
+        "task_terminal_barrier".to_string(),
+        "session_1".to_string(),
+        ServerRequestRuntime::new(),
+    );
+
+    sink.session_update(AgentEvent::ToolUpdate(AgentToolUpdate {
+        summary: None,
+        terminal_appends: vec![AgentTerminalAppend {
+            tool_call_id: "tool_1".to_string(),
+            terminal_id: "terminal_1".to_string(),
+            data: "before barrier".to_string(),
+        }],
+    }))
+    .unwrap();
+    sink.metadata_changed(AgentSessionMetadataUpdate {
+        title: AgentMetadataField::Value("Changed title".to_string()),
+        updated_at: AgentMetadataField::Unchanged,
+    })
+    .unwrap();
+
+    let updates = (0..2)
+        .map(|_| {
+            notifications
+                .recv_timeout(std::time::Duration::from_secs(1))
+                .expect("terminal and Task changes are both published")
+                .kind
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        updates
+            .iter()
+            .filter(|kind| matches!(kind, TaskUpdateKind::ToolDetailChanged { .. }))
+            .count(),
+        1
+    );
+    assert_eq!(
+        updates
+            .iter()
+            .filter(|kind| matches!(kind, TaskUpdateKind::Changed(_)))
+            .count(),
+        1
+    );
+    assert!(notifications.try_recv().is_err());
+
+    let artifact_id =
+        crate::storage::tool_artifacts::tool_artifact_id("acp_tool:session_1:tool_1", 0);
+    let artifact = store
+        .task_journal()
+        .load_tool_artifact("task_terminal_barrier", &artifact_id)
+        .unwrap();
+    assert_eq!(artifact.terminal_outputs["terminal_1"], "before barrier");
+}
+
+#[test]
+fn mixed_tool_update_publishes_one_atomic_detail_delta() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().to_path_buf()).unwrap();
+    let (notifier, notifications) = TaskUpdateNotifier::channel();
+    let mutations = TaskMutations::new(
+        store.clone(),
+        Arc::new(Mutex::new(())),
+        Arc::new(Mutex::new(RuntimeState::with_revision(0))),
+        notifier,
+    );
+    store.write_task(&running_task("task_mixed_tool")).unwrap();
+    let sink = TaskSessionEventSink::new(
+        mutations,
+        "task_mixed_tool".to_string(),
+        "session_1".to_string(),
+        ServerRequestRuntime::new(),
+    );
+
+    sink.session_update(AgentEvent::ToolUpdate(AgentToolUpdate {
+        summary: Some(AgentToolCall {
+            tool_call_id: "tool_1".to_string(),
+            scope_id: None,
+            title: "Running".to_string(),
+            kind: "execute".to_string(),
+            status: AgentToolCallStatus::InProgress,
+            input_summary: None,
+            output_preview: None,
+            details: Some(Box::new(ActivityToolDetails {
+                locations: Vec::new(),
+                content: Vec::new(),
+                input: None,
+                output: None,
+            })),
+        }),
+        terminal_appends: vec![AgentTerminalAppend {
+            tool_call_id: "tool_1".to_string(),
+            terminal_id: "terminal_1".to_string(),
+            data: "complete".to_string(),
+        }],
+    }))
+    .unwrap();
+
+    let changed = (0..2)
+        .find_map(|_| {
+            let update = notifications
+                .recv_timeout(std::time::Duration::from_secs(1))
+                .expect("mixed update publication");
+            match update.kind {
+                TaskUpdateKind::Changed(change) => Some(change),
+                TaskUpdateKind::ToolDetailChanged { .. } => None,
+                TaskUpdateKind::HistorySync(_) | TaskUpdateKind::NavigationChanged => None,
+            }
+        })
+        .expect("Task change publication");
+    assert_eq!(changed.tool_details.len(), 1);
+    assert_eq!(changed.tool_details[0].details.revision, 1);
+    assert_eq!(
+        changed.tool_details[0].terminal_appends,
+        vec![crate::storage::task_journal::TerminalOutputAppend {
+            terminal_id: "terminal_1".to_string(),
+            data: "complete".to_string(),
+        }]
+    );
+}
+
+#[test]
+fn preceding_stream_and_mixed_update_share_one_atomic_tool_delta() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().to_path_buf()).unwrap();
+    let (notifier, notifications) = TaskUpdateNotifier::channel();
+    let mutations = TaskMutations::new(
+        store.clone(),
+        Arc::new(Mutex::new(())),
+        Arc::new(Mutex::new(RuntimeState::with_revision(0))),
+        notifier,
+    );
+    store
+        .write_task(&running_task("task_coalesced_tool"))
+        .unwrap();
+    let sink = TaskSessionEventSink::new(
+        mutations,
+        "task_coalesced_tool".to_string(),
+        "session_1".to_string(),
+        ServerRequestRuntime::new(),
+    );
+
+    sink.session_update(AgentEvent::ToolUpdate(AgentToolUpdate {
+        summary: None,
+        terminal_appends: vec![AgentTerminalAppend {
+            tool_call_id: "tool_1".to_string(),
+            terminal_id: "terminal_1".to_string(),
+            data: "before".to_string(),
+        }],
+    }))
+    .unwrap();
+    sink.session_update(AgentEvent::ToolUpdate(AgentToolUpdate {
+        summary: Some(AgentToolCall {
+            tool_call_id: "tool_1".to_string(),
+            scope_id: None,
+            title: "Finished".to_string(),
+            kind: "execute".to_string(),
+            status: AgentToolCallStatus::Completed,
+            input_summary: None,
+            output_preview: None,
+            details: Some(Box::new(ActivityToolDetails {
+                locations: Vec::new(),
+                content: Vec::new(),
+                input: None,
+                output: None,
+            })),
+        }),
+        terminal_appends: vec![AgentTerminalAppend {
+            tool_call_id: "tool_1".to_string(),
+            terminal_id: "terminal_1".to_string(),
+            data: " after".to_string(),
+        }],
+    }))
+    .unwrap();
+
+    let update = notifications
+        .recv_timeout(std::time::Duration::from_secs(1))
+        .expect("one atomic mixed Tool update");
+    let TaskUpdateKind::Changed(changed) = update.kind else {
+        panic!("structured Tool publisher must own the coalesced artifact delta");
+    };
+    assert_eq!(changed.tool_details.len(), 1);
+    assert_eq!(
+        changed.tool_details[0]
+            .terminal_appends
+            .iter()
+            .map(|append| append.data.as_str())
+            .collect::<Vec<_>>(),
+        vec!["before", " after"]
+    );
+    assert!(notifications.try_recv().is_err());
+
+    let artifact_id =
+        crate::storage::tool_artifacts::tool_artifact_id("acp_tool:session_1:tool_1", 0);
+    let artifact = store
+        .task_journal()
+        .load_tool_artifact("task_coalesced_tool", &artifact_id)
+        .unwrap();
+    assert_eq!(artifact.terminal_outputs["terminal_1"], "before after");
+}
+
+#[test]
 fn prompt_limit_appends_one_failed_activity_without_closing_agent_activity() {
     let (_dir, store, mutations, server_requests) = test_runtime();
     store.write_task(&running_task("task_1")).unwrap();
@@ -1219,7 +1553,10 @@ fn every_tool_update_commits_one_lightweight_upsert_and_latest_detail() {
                 assert_eq!(change.tool_details.len(), 1);
                 assert_eq!(
                     change.tool_details[0].artifact_id,
-                    "acp_tool_session_1_tool_1_0"
+                    crate::storage::tool_artifacts::tool_artifact_id(
+                        "acp_tool:session_1:tool_1",
+                        0,
+                    )
                 );
                 assert_eq!(
                     change.tool_details[0]
@@ -1235,9 +1572,11 @@ fn every_tool_update_commits_one_lightweight_upsert_and_latest_detail() {
     }
 
     assert_eq!(store.read_messages("task_1").unwrap().len(), 1);
+    let artifact_id =
+        crate::storage::tool_artifacts::tool_artifact_id("acp_tool:session_1:tool_1", 0);
     assert_eq!(
         store
-            .read_tool_artifact("task_1", "acp_tool_session_1_tool_1_0")
+            .read_tool_artifact("task_1", &artifact_id)
             .unwrap()
             .output
             .and_then(|detail| detail.stdout),

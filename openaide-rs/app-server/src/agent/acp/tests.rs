@@ -1574,6 +1574,136 @@ fn every_running_tool_output_update_reaches_the_session_sink() {
 }
 
 #[test]
+fn codex_terminal_metadata_survives_as_typed_delta_without_republishing_summary() {
+    let capture = Arc::new(CapturingEventSink::default());
+    let sink: Arc<dyn AgentEventSink> = capture.clone();
+    let projection =
+        LivePromptProjection::new("codex", sink, crate::agent::TurnCancellation::new());
+
+    projection
+        .emit(SessionUpdate::ToolCall(
+            ToolCall::new("tool_call_burst", "Run tests")
+                .kind(ToolKind::Execute)
+                .status(ToolCallStatus::InProgress),
+        ))
+        .unwrap();
+    for _ in 0..100 {
+        let update: ToolCallUpdate = serde_json::from_value(serde_json::json!({
+            "toolCallId": "tool_call_burst",
+            "_meta": {
+                "terminal_output_delta": {
+                    "terminal_id": "terminal_1",
+                    "data": "x"
+                }
+            }
+        }))
+        .expect("deserialize metadata extension fixture");
+        projection
+            .emit(SessionUpdate::ToolCallUpdate(update))
+            .unwrap();
+    }
+
+    let events = capture.events();
+    assert_eq!(events.len(), 101);
+    assert!(events[1..].iter().all(|event| matches!(
+        event,
+        AgentEvent::ToolUpdate(update)
+            if update.summary.is_none()
+                && update.terminal_appends.as_slice() == [crate::agent::events::AgentTerminalAppend {
+                    tool_call_id: "tool_call_burst".to_string(),
+                    terminal_id: "terminal_1".to_string(),
+                    data: "x".to_string(),
+                }]
+    )));
+}
+
+#[test]
+fn codex_mixed_tool_update_emits_one_ordered_envelope() {
+    let capture = Arc::new(CapturingEventSink::default());
+    let sink: Arc<dyn AgentEventSink> = capture.clone();
+    let projection =
+        LivePromptProjection::new("codex", sink, crate::agent::TurnCancellation::new());
+    projection
+        .emit(SessionUpdate::ToolCall(
+            ToolCall::new("tool_call_burst", "Run tests")
+                .kind(ToolKind::Execute)
+                .status(ToolCallStatus::InProgress),
+        ))
+        .unwrap();
+    let update: ToolCallUpdate = serde_json::from_value(serde_json::json!({
+        "toolCallId": "tool_call_burst",
+        "status": "completed",
+        "_meta": {
+            "terminal_output_delta": {
+                "terminal_id": "terminal_1",
+                "data": "done\n"
+            }
+        }
+    }))
+    .unwrap();
+    projection
+        .emit(SessionUpdate::ToolCallUpdate(update))
+        .unwrap();
+
+    let events = capture.events();
+    assert_eq!(events.len(), 2);
+    assert!(matches!(
+        &events[1],
+        AgentEvent::ToolUpdate(update)
+            if update.summary.as_ref().is_some_and(|summary| summary.status == AgentToolCallStatus::Completed)
+                && update.terminal_appends.len() == 1
+                && update.terminal_appends[0].data == "done\n"
+    ));
+}
+
+#[test]
+fn terminal_metadata_is_ignored_for_non_codex_and_when_malformed() {
+    for (agent_id, delta) in [
+        (
+            "custom",
+            serde_json::json!({ "terminal_id": "terminal_1", "data": "secret" }),
+        ),
+        (
+            "codex",
+            serde_json::json!({ "terminal_id": "terminal_1", "data": 42 }),
+        ),
+        (
+            "codex",
+            serde_json::json!({ "terminal_id": "", "data": "secret" }),
+        ),
+        (
+            "codex",
+            serde_json::json!({ "terminal_id": "terminal_1", "data": "" }),
+        ),
+        (
+            "codex",
+            serde_json::json!({ "terminal_id": "terminal_1", "data": "secret", "unknown": true }),
+        ),
+        (
+            "codex",
+            serde_json::json!({ "terminal_id": "terminal_1", "data": "x".repeat(1024 * 1024 + 1) }),
+        ),
+    ] {
+        let capture = Arc::new(CapturingEventSink::default());
+        let sink: Arc<dyn AgentEventSink> = capture.clone();
+        let projection =
+            LivePromptProjection::new(agent_id, sink, crate::agent::TurnCancellation::new());
+        let update: ToolCallUpdate = serde_json::from_value(serde_json::json!({
+            "toolCallId": "tool_call_burst",
+            "_meta": { "terminal_output_delta": delta }
+        }))
+        .unwrap();
+        projection
+            .emit(SessionUpdate::ToolCallUpdate(update))
+            .unwrap();
+        assert!(capture.events().iter().all(|event| !matches!(
+            event,
+            AgentEvent::ToolUpdate(update) if !update.terminal_appends.is_empty()
+        )));
+    }
+}
+
+#[test]
 fn permission_tool_call_update_seeds_later_partial_tool_updates() {
     let capture = Arc::new(CapturingEventSink::default());
     let sink: Arc<dyn AgentEventSink> = capture.clone();

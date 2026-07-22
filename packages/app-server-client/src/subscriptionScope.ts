@@ -89,7 +89,8 @@ function payloadMatchesSubscriptionScope(scope: SubscriptionScope, payload: AppS
     case "taskNavigation":
       return (
         payload.kind === "snapshotReplaced" ||
-        payload.kind === "taskNavigationChanged"
+        payload.kind === "taskNavigationChanged" ||
+        payload.kind === "taskNavigationReplaced"
       );
     case "task":
       return (
@@ -100,7 +101,7 @@ function payloadMatchesSubscriptionScope(scope: SubscriptionScope, payload: AppS
         payload.kind === "requestUpdated"
       );
     case "toolDetail":
-      return payload.kind === "toolDetailUpdated"
+      return (payload.kind === "toolDetailUpdated" || payload.kind === "toolDetailChanged")
         && payload.taskId === scope.taskId
         && payload.artifactId === scope.artifactId;
     case "worktreeRepository":

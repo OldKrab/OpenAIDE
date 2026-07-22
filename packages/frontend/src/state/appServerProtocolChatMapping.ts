@@ -315,6 +315,10 @@ function activityStepLevel(level: string | null | undefined): Extract<ActivitySt
 
 export function mapProtocolToolDetail(details: ToolDetailSnapshot): ActivityToolDetails {
   return {
+    terminal_outputs: (details.terminalOutputs ?? []).map((terminal) => ({
+      terminal_id: terminal.terminalId,
+      output: terminal.output,
+    })),
     locations: details.locations.map((location) => ({
       path: location.path,
       line: location.line ?? undefined,
