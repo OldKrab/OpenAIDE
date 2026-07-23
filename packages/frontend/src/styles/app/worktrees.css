@@ -123,7 +123,7 @@
 .worktree-removal-actions button.danger { background: var(--oa-danger); color: white; }
 
 @media (max-width: 760px) {
-  .task-workspace-popover { position: fixed; z-index: 70; top: auto; right: 8px; bottom: 8px; left: 8px; width: auto; max-height: min(74vh, 560px); transform: none; }
+  body:not([data-shell="vscodeExtension"]) .task-workspace-popover { position: fixed; z-index: 70; top: auto; right: 8px; bottom: 8px; left: 8px; width: auto; max-height: min(74vh, 560px); transform: none; }
   .task-workspace-list { max-height: min(48vh, 340px); }
   .worktree-management { inset: 0; z-index: 75; }
   .worktree-management-body { display: block; overflow-y: auto; }

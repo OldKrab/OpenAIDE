@@ -310,6 +310,11 @@ describe("task list row styles", () => {
     expect(appCss).toMatch(/\.composer textarea,\s*\.composer-editor\s*{[^}]*min-height:\s*40px;[^}]*max-height:\s*80px;/);
   });
 
+  it("keeps the worktree picker anchored in narrow VS Code editor surfaces", () => {
+    expect(appCss).toMatch(/@media \(max-width:\s*760px\)\s*{[^}]*body:not\(\[data-shell="vscodeExtension"\]\) \.task-workspace-popover\s*{[^}]*position:\s*fixed;/);
+    expect(appCss).not.toMatch(/@media \(max-width:\s*760px\)\s*{[^}]*\n\s*\.task-workspace-popover\s*{[^}]*position:\s*fixed;/);
+  });
+
   it("renders new-task context selectors as one quiet control group", () => {
     expect(appCss).toMatch(/\.new-task-context-controls\s*{[^}]*width:\s*fit-content;[^}]*position:\s*relative;[^}]*border:\s*1px solid color-mix\(in oklch, var\(--oa-border\) 48%, transparent\);[^}]*border-radius:\s*999px;[^}]*background:\s*color-mix\(in oklch, var\(--oa-panel\) 72%, transparent\);/);
     expect(appCss).toMatch(/\.new-task-context-anchor\s*{[^}]*position:\s*static;/);
