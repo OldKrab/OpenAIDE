@@ -47,6 +47,7 @@ impl TaskTransitions {
                 serde_json::json!({
                     "task_id": task_id,
                     "cause": cause.name(),
+                    "error": cause.diagnostic_message(),
                 }),
             );
         }
@@ -110,6 +111,15 @@ impl ActiveWorkEnd {
         }
     }
 
+    pub(super) fn diagnostic_message(&self) -> Option<&str> {
+        match self {
+            Self::AgentFailed(message)
+            | Self::AgentStartFailed(message)
+            | Self::CancellationFailed(message) => Some(message),
+            Self::UserStopped | Self::Restarted | Self::Shutdown | Self::SupportRecovery => None,
+        }
+    }
+
     fn reason(&self) -> InterruptionReason {
         match self {
             Self::UserStopped | Self::Shutdown | Self::SupportRecovery => {
@@ -125,10 +135,11 @@ impl ActiveWorkEnd {
     fn message(&self) -> String {
         match self {
             Self::UserStopped => "Task was stopped.".to_string(),
-            Self::AgentFailed(message) | Self::AgentStartFailed(message) => {
-                format!("Agent work stopped: {message}")
+            // Runtime errors remain diagnostic data; Chat receives stable product language.
+            Self::AgentFailed(_) | Self::AgentStartFailed(_) => {
+                "Agent work stopped unexpectedly. Try again.".to_string()
             }
-            Self::CancellationFailed(message) => format!("Unable to stop the Agent: {message}"),
+            Self::CancellationFailed(_) => "Unable to stop the Agent. Try again.".to_string(),
             Self::Restarted => "Task was interrupted because OpenAIDE restarted.".to_string(),
             Self::Shutdown => "Task was interrupted because OpenAIDE shut down.".to_string(),
             Self::SupportRecovery => {

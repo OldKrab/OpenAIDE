@@ -1393,7 +1393,7 @@ fn agent_failure_interrupts_running_tools_and_returns_task_to_idle() {
             "task_1",
             "turn_1",
             Err(crate::protocol::errors::RuntimeError::NotReady(
-                "Agent process exited".to_string(),
+                "provider-internal-secret: Agent process exited".to_string(),
             )),
         )
         .unwrap();
@@ -1420,8 +1420,11 @@ fn agent_failure_interrupts_running_tools_and_returns_task_to_idle() {
             message,
             recoverable: true,
             ..
-        } if message.contains("Agent work stopped")
+        } if message == "Agent work stopped unexpectedly. Try again."
     )));
+    assert!(messages.iter().all(|stored| {
+        !format!("{:?}", stored.chat.message).contains("provider-internal-secret")
+    }));
 }
 
 #[test]

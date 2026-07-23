@@ -37,6 +37,8 @@ pub(super) struct OpenedAcpSession {
     pub(super) active_session: AcpActiveSession,
     pub(super) supports_session_close: bool,
     pub(super) supports_session_delete: bool,
+    /// A new session may not exist durably until its first prompt creates history.
+    pub(super) idle_close_eligible: bool,
     pub(super) content_policy: PromptContentPolicy,
     pub(super) started_session: AgentSession,
     pub(super) replayed_messages: Vec<NormalizedMessage>,
@@ -88,6 +90,7 @@ pub(super) async fn open_acp_session<'a>(
         }
     }
 
+    let idle_close_eligible = !matches!(&context.request, AcpSessionOpenRequest::Start(_));
     let (active_session, applied_options, replayed_commands, replayed_messages) = match context
         .request
     {
@@ -158,6 +161,7 @@ pub(super) async fn open_acp_session<'a>(
         active_session,
         supports_session_close,
         supports_session_delete: runner.supports_session_delete(),
+        idle_close_eligible,
         content_policy,
         started_session,
         replayed_messages,
