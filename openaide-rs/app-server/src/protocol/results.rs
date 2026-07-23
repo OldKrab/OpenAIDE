@@ -13,7 +13,7 @@ pub struct HealthResult {
 pub struct TaskListResult {
     pub tasks: Vec<TaskSummary>,
     pub revision: u64,
-    pub archived: bool,
+    pub lifecycle: openaide_app_server_protocol::task::TaskListLifecycle,
 }
 
 #[derive(Debug, Serialize)]

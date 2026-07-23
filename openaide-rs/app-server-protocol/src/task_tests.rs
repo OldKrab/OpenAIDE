@@ -61,12 +61,14 @@ fn task_send_message_is_text_plus_inline_ordered_images() {
 #[test]
 fn task_list_filter_is_optional_for_global_history() {
     let value = serde_json::to_value(TaskListParams {
-        archived: false,
+        lifecycle: TaskListLifecycle::Open,
         project_id: None,
         cursor: None,
     })
     .unwrap();
 
+    assert_eq!(value["lifecycle"], json!("open"));
     assert!(value.get("projectId").is_none());
     assert!(value.get("cursor").is_none());
+    assert!(value.get("archived").is_none());
 }

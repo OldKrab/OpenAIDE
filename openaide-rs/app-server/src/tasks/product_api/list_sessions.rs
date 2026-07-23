@@ -331,8 +331,7 @@ impl TaskProductApi {
             .iter()
             .filter(|task| {
                 !task.tombstoned
-                    && !task.archived
-                    && task.lifecycle.is_visible()
+                    && task.lifecycle.is_open()
                     && enabled_agents.contains(&task.agent_id)
                     && ProjectIdentity::from_workspace_root(
                         task.project_root.as_deref().unwrap_or(&task.workspace_root),

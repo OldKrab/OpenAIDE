@@ -122,7 +122,7 @@ function preparedState() {
     workspaceRoot: "/workspace",
   };
   state.snapshot = {
-    lifecycle: "new",
+    lifecycle: "prepared",
     task: { task_id: "task-prepared" },
   } as never;
   return state;

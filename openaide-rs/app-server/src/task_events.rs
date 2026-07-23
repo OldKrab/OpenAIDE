@@ -27,6 +27,7 @@ pub struct CommittedTaskChange {
     pub changes: TaskChanges,
     pub tool_details: Vec<ToolDetailUpdate>,
     pub navigation: Option<TaskNavigationChange>,
+    pub lifecycle: Option<openaide_app_server_protocol::task::TaskLifecycleChanged>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

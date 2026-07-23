@@ -12,7 +12,7 @@ import {
   type ProjectId,
 } from "@openaide/app-server-client";
 import { applyProtocolAgents } from "../state/appServerAgents";
-import { requestTaskList, requestTaskSetArchived } from "../intents/taskReadIntents";
+import { requestTaskArchive, requestTaskRestore } from "../intents/taskReadIntents";
 import { newTaskPreparationKey } from "../state/newTaskPreparationContext";
 import type { AppCallbacksDependencies, NavigationCallbacks } from "./appControllerCallbackTypes";
 import {
@@ -63,10 +63,9 @@ export function createNavigationCallbacks({
         }
         const request = backendConnection.request;
         // The focused Task Navigation event, not the mutation response, updates the sidebar.
-        void requestTaskSetArchived(
+        void requestTaskArchive(
           { backendConnection: { request }, dispatch },
           taskId,
-          true,
         ).catch((error) => dispatch({
           type: "tasks:error",
           message: error instanceof Error ? error.message : "Unable to archive task.",
@@ -137,10 +136,9 @@ export function createNavigationCallbacks({
     restoreTask: (taskId) => {
       if (backendConnection?.request) {
         const request = backendConnection.request;
-        void requestTaskSetArchived(
+        void requestTaskRestore(
           { backendConnection: { request }, dispatch },
           taskId,
-          false,
         ).then(() => {
           dispatch({ type: "taskInput:clear", taskId });
           asyncOperations.beginNavigation(taskNavigationTarget(taskId), false);
@@ -158,19 +156,7 @@ export function createNavigationCallbacks({
       const showArchived = !state.showArchived;
       asyncOperations.beginNavigation(taskListNavigationTarget(showArchived), showArchived);
       dispatch({ type: "archive:set", showArchived });
-      const cachedTasks = state.taskListCache[showArchived ? "archived" : "active"];
-      if (cachedTasks !== undefined) return;
-      if (backendConnection?.request) {
-        void requestTaskList(
-          { backendConnection: { request: backendConnection.request }, dispatch },
-          showArchived,
-        ).catch((error) => dispatch({
-          type: "tasks:error",
-          message: error instanceof Error ? error.message : "Unable to load tasks from App Server",
-        }));
-        return;
-      }
-      dispatch({ type: "tasks:error", message: "App Server connection unavailable." });
+      // Both lifecycle collections are live session replicas; navigation only selects one.
     },
   };
 }

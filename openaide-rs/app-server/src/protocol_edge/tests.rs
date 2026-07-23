@@ -2515,7 +2515,7 @@ struct EmptyTaskSnapshots;
 impl TaskSnapshotSource for EmptyTaskSnapshots {
     fn list(
         &self,
-        _archived: bool,
+        _lifecycle: openaide_app_server_protocol::task::TaskListLifecycle,
         _project_id: Option<&openaide_app_server_protocol::ids::ProjectId>,
         _cursor: Option<&openaide_app_server_protocol::ids::TaskListCursor>,
     ) -> Result<TaskListSnapshot, openaide_app_server_protocol::errors::ProtocolError> {
@@ -2856,11 +2856,30 @@ impl TaskReleaseWorkflow for RejectingTaskRelease {
 struct RejectingTaskArchive;
 
 impl TaskArchiveWorkflow for RejectingTaskArchive {
-    fn set_archived_for_client(
+    fn archive_for_client(
         &self,
         _client_instance_id: &ClientInstanceId,
-        _params: openaide_app_server_protocol::task::TaskSetArchivedParams,
-    ) -> Result<(), openaide_app_server_protocol::errors::ProtocolError> {
+        _params: openaide_app_server_protocol::task::TaskArchiveParams,
+    ) -> Result<
+        openaide_app_server_protocol::task::TaskLifecycleChanged,
+        openaide_app_server_protocol::errors::ProtocolError,
+    > {
+        Err(openaide_app_server_protocol::errors::ProtocolError {
+            code: openaide_app_server_protocol::errors::ProtocolErrorCode::Internal,
+            message: "task archive unavailable in test gateway".to_string(),
+            recoverable: true,
+            target: None,
+        })
+    }
+
+    fn restore_for_client(
+        &self,
+        _client_instance_id: &ClientInstanceId,
+        _params: openaide_app_server_protocol::task::TaskRestoreParams,
+    ) -> Result<
+        openaide_app_server_protocol::task::TaskLifecycleChanged,
+        openaide_app_server_protocol::errors::ProtocolError,
+    > {
         Err(openaide_app_server_protocol::errors::ProtocolError {
             code: openaide_app_server_protocol::errors::ProtocolErrorCode::Internal,
             message: "task archive unavailable in test gateway".to_string(),
@@ -2901,13 +2920,12 @@ fn client_new_task_record(
         workspace_root: "/workspace/app".to_string(),
         project_root: None,
         worktree_id: None,
-        lifecycle: crate::storage::records::TaskLifecycle::New {
+        lifecycle: crate::storage::records::TaskLifecycle::Prepared {
             lease: Some(ClientInstanceId::from(owner_client_instance_id)),
         },
         agent_session_id: None,
         active_turn_id: None,
         active_turn_started_at: None,
-        archived: false,
         tombstoned: false,
         revision: 1,
         config_options_catalog: None,
@@ -3051,6 +3069,7 @@ fn committed_task_update(
                 task_id: task_id.into(),
                 project_id: "project-1".into(),
                 agent_id: "codex".into(),
+                lifecycle: openaide_app_server_protocol::snapshot::TaskLifecycle::Open,
                 title: None,
                 status: TaskStatus::Idle,
                 updated_at: "2026-01-01T00:00:00Z".to_string(),
@@ -3067,6 +3086,7 @@ fn committed_task_update(
         task_id: task_id.to_string(),
         revision,
         kind: TaskUpdateKind::Changed(Box::new(CommittedTaskChange {
+            lifecycle: None,
             changes: TaskChanges {
                 chat,
                 ..TaskChanges::default()

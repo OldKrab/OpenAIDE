@@ -229,7 +229,7 @@ function memoryStorage(): Storage {
 
 function taskSnapshot(taskId: string): NonNullable<AppState["snapshot"]> {
   return {
-    lifecycle: "visible",
+    lifecycle: "open",
     task: {
       task_id: taskId,
       title: "Task",

@@ -347,7 +347,7 @@ export function useAppController(options: AppControllerOptions = {}): AppControl
     visibleTasks: decoratedVisibleTasks,
     taskNotifications: {
       stateRootId: state.appServerStateRootId,
-      tasks: decorateTaskWorkspaces(state.taskListCache.active ?? (state.showArchived ? [] : state.tasks), state),
+      tasks: decorateTaskWorkspaces(state.taskLists.open ?? (state.showArchived ? [] : state.tasks), state),
     },
     intents: {
       newTask: {
@@ -445,8 +445,8 @@ export function useAppController(options: AppControllerOptions = {}): AppControl
         loadProjectTasks: async (projectId) => {
           if (!request) throw new Error("App Server connection unavailable.");
           const [active, archived] = await Promise.all([
-            request(TASK_LIST, { archived: false, projectId: projectId as ProjectId }),
-            request(TASK_LIST, { archived: true, projectId: projectId as ProjectId }),
+            request(TASK_LIST, { lifecycle: "open", projectId: projectId as ProjectId }),
+            request(TASK_LIST, { lifecycle: "archived", projectId: projectId as ProjectId }),
           ]);
           const context = {
             agents: renderState.agents?.map((agent) => ({

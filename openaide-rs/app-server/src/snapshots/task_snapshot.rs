@@ -3,7 +3,7 @@ use openaide_app_server_protocol::ids::{ClientInstanceId, ProjectId, TaskId, Tas
 use openaide_app_server_protocol::snapshot::{
     ChatSnapshot, TaskHistorySyncSnapshot, TaskSnapshot, TaskSummary,
 };
-use openaide_app_server_protocol::task::ToolDetailSnapshot;
+use openaide_app_server_protocol::task::{TaskListLifecycle, ToolDetailSnapshot};
 use std::sync::Arc;
 
 use crate::chat_history::ChatHistoryPolicy;
@@ -53,7 +53,7 @@ mod readiness;
 pub trait TaskSnapshotSource: Send + Sync {
     fn list(
         &self,
-        archived: bool,
+        lifecycle: TaskListLifecycle,
         project_id: Option<&ProjectId>,
         cursor: Option<&TaskListCursor>,
     ) -> Result<TaskListSnapshot, ProtocolError>;
@@ -129,16 +129,18 @@ impl TaskSnapshotStore {
 impl TaskSnapshotSource for TaskSnapshotStore {
     fn list(
         &self,
-        archived: bool,
+        lifecycle: TaskListLifecycle,
         project_id: Option<&ProjectId>,
         cursor: Option<&TaskListCursor>,
     ) -> Result<TaskListSnapshot, ProtocolError> {
         if cursor.is_some() {
             return Err(unsupported_cursor_error());
         }
-        let tasks = self
-            .store
-            .list_available_tasks_for_archive(archived)
+        let records = match lifecycle {
+            TaskListLifecycle::Open => self.store.list_tasks(),
+            TaskListLifecycle::Archived => self.store.list_archived_tasks(),
+        };
+        let tasks = records
             .map_err(snapshot_read_error)?
             .into_iter()
             .map(project_task_summary)
@@ -146,7 +148,7 @@ impl TaskSnapshotSource for TaskSnapshotStore {
             .collect();
         let revision = self
             .store
-            .max_visible_task_revision()
+            .max_listed_task_revision()
             .map_err(snapshot_read_error)?;
         Ok(TaskListSnapshot {
             tasks,
@@ -222,27 +224,6 @@ impl TaskSnapshotStore {
     }
 }
 
-trait TaskSnapshotStoreArchiveList {
-    fn list_available_tasks_for_archive(
-        &self,
-        archived: bool,
-    ) -> Result<Vec<crate::storage::records::TaskRecord>, crate::protocol::errors::RuntimeError>;
-}
-
-impl TaskSnapshotStoreArchiveList for Store {
-    fn list_available_tasks_for_archive(
-        &self,
-        archived: bool,
-    ) -> Result<Vec<crate::storage::records::TaskRecord>, crate::protocol::errors::RuntimeError>
-    {
-        if archived {
-            self.list_archived_tasks()
-        } else {
-            self.list_tasks()
-        }
-    }
-}
-
 #[cfg(test)]
 pub(crate) fn project_stored_task_snapshot(
     snapshot: StoredTaskSnapshot,
@@ -255,11 +236,14 @@ pub(crate) fn project_stored_task_snapshot_with_history_sync(
     history_sync: TaskHistorySyncSnapshot,
 ) -> Result<TaskSnapshot, ProtocolError> {
     let lifecycle = match snapshot.lifecycle {
-        crate::storage::records::TaskLifecycle::New { .. } => {
-            openaide_app_server_protocol::snapshot::TaskLifecycle::New
+        crate::storage::records::TaskLifecycle::Prepared { .. } => {
+            openaide_app_server_protocol::snapshot::TaskLifecycle::Prepared
         }
-        crate::storage::records::TaskLifecycle::Visible => {
-            openaide_app_server_protocol::snapshot::TaskLifecycle::Visible
+        crate::storage::records::TaskLifecycle::Open => {
+            openaide_app_server_protocol::snapshot::TaskLifecycle::Open
+        }
+        crate::storage::records::TaskLifecycle::Archived => {
+            openaide_app_server_protocol::snapshot::TaskLifecycle::Archived
         }
     };
     let send_capability = send_capability_for_task(snapshot.task.status, &snapshot.preparation);
@@ -267,7 +251,8 @@ pub(crate) fn project_stored_task_snapshot_with_history_sync(
     let agent_commands = agent_commands_snapshot(&snapshot);
     let projected_status =
         project_status_with_preparation(snapshot.task.status, &snapshot.preparation);
-    let mut task = project_legacy_task_summary(snapshot.task, snapshot.chat.total_count > 0);
+    let mut task =
+        project_legacy_task_summary(snapshot.task, snapshot.chat.total_count > 0, lifecycle);
     task.status = projected_status;
     Ok(TaskSnapshot {
         task,

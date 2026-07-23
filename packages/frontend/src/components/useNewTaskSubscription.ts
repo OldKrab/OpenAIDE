@@ -37,7 +37,7 @@ export function useNewTaskSubscription({
       backendConnection,
       context: mappingContext,
       dispatch: (action) => {
-        if (action.type === "snapshot" && action.snapshot.lifecycle === "new") {
+        if (action.type === "snapshot" && action.snapshot.lifecycle === "prepared") {
           newTaskController.updateSnapshot(action.snapshot);
           return;
         }

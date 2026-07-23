@@ -111,7 +111,7 @@ describe("ReliableBackendConnection", () => {
       capabilities: { protocol: [], shell: [] },
     });
 
-    const interruptedRequest = connection.request(TASK_LIST, { archived: false });
+    const interruptedRequest = connection.request(TASK_LIST, { lifecycle: "open" });
     if (expiry === "transport") {
       await expect(interruptedRequest).rejects.toThrow(failure);
     } else {
@@ -124,7 +124,7 @@ describe("ReliableBackendConnection", () => {
     ]));
 
     if (expiry === "transport") {
-      await expect(connection.request(TASK_LIST, { archived: false })).resolves.toEqual({
+      await expect(connection.request(TASK_LIST, { lifecycle: "open" })).resolves.toEqual({
         tasks: [],
         revision: 2,
       });
@@ -153,12 +153,12 @@ describe("ReliableBackendConnection", () => {
       capabilities: { protocol: [], shell: [] },
     });
 
-    await expect(connection.request(TASK_LIST, { archived: false })).rejects.toThrow("HTTP 410");
+    await expect(connection.request(TASK_LIST, { lifecycle: "open" })).rejects.toThrow("HTTP 410");
     await vi.waitFor(() => expect(transport.initializedSessions()).toEqual([
       "session-1",
       "session-2",
     ]));
-    await expect(connection.request(TASK_LIST, { archived: false })).resolves.toEqual({
+    await expect(connection.request(TASK_LIST, { lifecycle: "open" })).resolves.toEqual({
       tasks: [],
       revision: 2,
     });
@@ -212,7 +212,7 @@ describe("ReliableBackendConnection", () => {
       capabilities: { protocol: [], shell: [] },
     });
 
-    await connection.request(TASK_LIST, { archived: false });
+    await connection.request(TASK_LIST, { lifecycle: "open" });
 
     await vi.waitFor(() => expect(baselines).toEqual([{
       reason: "clientLivenessExpired",
@@ -317,7 +317,7 @@ describe("ReliableBackendConnection", () => {
       "session-2:projects",
       "session-2:agents",
     ]));
-    const followUp = connection.request(TASK_LIST, { archived: false });
+    const followUp = connection.request(TASK_LIST, { lifecycle: "open" });
     await Promise.resolve();
     expect(transport.taskListSessions()).not.toContain("session-2");
 
@@ -349,7 +349,7 @@ describe("ReliableBackendConnection", () => {
 
     transport.expireReplayOnNextReceive();
     await vi.waitFor(() => expect(statuses).toContain("recovering"));
-    const queuedRequest = connection.request(TASK_LIST, { archived: false });
+    const queuedRequest = connection.request(TASK_LIST, { lifecycle: "open" });
 
     await vi.waitFor(() => expect(statuses.at(-1)).toBe("unavailable"));
     await expect(queuedRequest).rejects.toThrow("replacement initialization failed");
@@ -434,7 +434,7 @@ describe("ReliableBackendConnection", () => {
     });
     transport.holdNextSessionOpen();
 
-    const interrupted = connection.request(TASK_LIST, { archived: false });
+    const interrupted = connection.request(TASK_LIST, { lifecycle: "open" });
     void interrupted.catch(() => undefined);
     await vi.waitFor(() => expect(transport.openedSessions()).toBe(2));
     replaceEndpoint?.({
@@ -478,7 +478,7 @@ describe("ReliableBackendConnection", () => {
     transport.rejectAcknowledgementOnNextReceive();
     await vi.waitFor(() => expect(transport.rejectedAcknowledgements()).toBe(1));
 
-    await expect(connection.request(TASK_LIST, { archived: false })).rejects.toThrow("HTTP 409");
+    await expect(connection.request(TASK_LIST, { lifecycle: "open" })).rejects.toThrow("HTTP 409");
     expect(transport.openedSessions()).toBe(1);
     expect(invalidations).not.toHaveBeenCalled();
     connection.close();

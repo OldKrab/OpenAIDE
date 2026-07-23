@@ -718,7 +718,7 @@ describe("app controller mounted lifecycle", () => {
     expect(latestController?.state.snapshot?.task.title).toBe("Initialize");
   });
 
-  it("still ingests initialize navigation after an ignored archive-mismatched legacy list", async () => {
+  it("does not let initialize navigation populate the independently subscribed task list", async () => {
     const deferred = deferredInitialize();
     backendConnection = { initialize: vi.fn(() => deferred.promise), request: vi.fn(), close: vi.fn() };
 
@@ -737,10 +737,10 @@ describe("app controller mounted lifecycle", () => {
       await deferred.promise;
     });
 
-    expect(latestController?.state.tasks.map((task) => task.title)).toEqual(["Initialize"]);
+    expect(latestController?.state.tasks).toEqual([]);
   });
 
-  it("requests typed task list when initialize omits navigation tasks", async () => {
+  it("does not fall back to a one-shot task list when initialize omits navigation tasks", async () => {
     const request = vi.fn(async () => ({
       revision: 4,
       tasks: [protocolTaskSummary("task_2", "Typed List")],
@@ -757,11 +757,11 @@ describe("app controller mounted lifecycle", () => {
       await Promise.resolve();
     });
 
-    expect(request).toHaveBeenCalledWith(TASK_LIST, { archived: false });
-    expect(latestController?.state.tasks.map((task) => task.title)).toEqual(["Typed List"]);
+    expect(request).not.toHaveBeenCalledWith(TASK_LIST, expect.anything());
+    expect(latestController?.state.tasks).toEqual([]);
   });
 
-  it("starts archived web navigation in archive mode and requests archived tasks", async () => {
+  it("starts archived web navigation without a one-shot archived task request", async () => {
     const request = vi.fn(async () => ({
       archived: true,
       revision: 4,
@@ -781,11 +781,11 @@ describe("app controller mounted lifecycle", () => {
     });
 
     expect(latestController?.state.showArchived).toBe(true);
-    expect(request).toHaveBeenCalledWith(TASK_LIST, { archived: true });
-    expect(latestController?.state.tasks.map((task) => task.title)).toEqual(["Archived task"]);
+    expect(request).not.toHaveBeenCalledWith(TASK_LIST, expect.anything());
+    expect(latestController?.state.tasks).toEqual([]);
   });
 
-  it("surfaces typed task-list failures without falling back to legacy task list", async () => {
+  it("does not issue a one-shot task-list request that can fail during startup", async () => {
     const request = vi.fn(async () => {
       throw new Error("Backend unavailable");
     });
@@ -801,8 +801,8 @@ describe("app controller mounted lifecycle", () => {
       await Promise.resolve();
     });
 
-    expect(request).toHaveBeenCalledWith(TASK_LIST, { archived: false });
-    expect(latestController?.state.taskListError).toBe("Backend unavailable");
+    expect(request).not.toHaveBeenCalledWith(TASK_LIST, expect.anything());
+    expect(latestController?.state.taskListError).toBeUndefined();
     expect(postHostMessage).not.toHaveBeenCalledWith({ type: "task.list", payload: { archived: false } });
   });
 
@@ -1114,7 +1114,7 @@ describe("app controller mounted lifecycle", () => {
         return {
           task: {
             ...protocolTaskSnapshot("task_new", "New task", { hasMessages: false }),
-            lifecycle: "new" as const,
+            lifecycle: "prepared" as const,
             agentCommands: {
               state: "ready" as const,
               commands: [{ name: "review", description: "Review changes." }],
@@ -1162,7 +1162,7 @@ describe("app controller mounted lifecycle", () => {
         return {
           task: {
             ...protocolTaskSnapshot("task_new", "New task", { hasMessages: false }),
-            lifecycle: "new" as const,
+            lifecycle: "prepared" as const,
           },
         };
       }
@@ -1192,7 +1192,7 @@ describe("app controller mounted lifecycle", () => {
   it("keeps the hidden New Task subscription current while an existing Task is visible", async () => {
     const loadingTask = {
       ...protocolTaskSnapshot("task_new", "New task", { hasMessages: false }),
-      lifecycle: "new" as const,
+      lifecycle: "prepared" as const,
       agentCommands: { state: "loading" as const, commands: [] },
     };
     const readyTask = {
@@ -1372,7 +1372,7 @@ describe("app controller mounted lifecycle", () => {
         return {
           task: {
             ...protocolTaskSnapshot("task_prepared", "New task", { hasMessages: false }),
-            lifecycle: "new" as const,
+            lifecycle: "prepared" as const,
           },
         };
       }
@@ -2208,10 +2208,7 @@ describe("app controller mounted lifecycle", () => {
 
     expect(latestController?.state.activeTaskId).toBe("task_1");
     expect(latestController?.state.snapshot?.task.title).toBe("Previous task");
-    expect(latestController?.state.tasks.find((task) => task.task_id === "task_new")).toMatchObject({
-      has_messages: true,
-      title: "Sent task",
-    });
+    expect(latestController?.state.tasks.find((task) => task.task_id === "task_new")).toBeUndefined();
     expect(latestController?.state.taskInputs.task_new?.pending).toBeUndefined();
   });
 
@@ -2257,7 +2254,7 @@ describe("app controller mounted lifecycle", () => {
       created.resolve({
         task: {
           ...protocolTaskSnapshot("task_new", "New task", { hasMessages: false }),
-          lifecycle: "new",
+          lifecycle: "prepared",
         },
       });
       await created.promise;
@@ -2344,10 +2341,7 @@ describe("app controller mounted lifecycle", () => {
     });
 
     expect(latestController?.newTaskSnapshot).toBeUndefined();
-    expect(latestController?.state.tasks.find((task) => task.task_id === "task_new")).toMatchObject({
-      has_messages: true,
-      title: "Sent task",
-    });
+    expect(latestController?.state.tasks.find((task) => task.task_id === "task_new")).toBeUndefined();
   });
 
   it("prepares and exposes Agent config for a new draft after the previous task was accepted", async () => {
@@ -2972,7 +2966,7 @@ function webSettingsBootstrap(settingsTab?: "agents" | "mcp" | "skills" | "commo
 
 function snapshot(taskId: string, status: TaskSnapshot["task"]["status"], title = "Task"): TaskSnapshot {
   return {
-    lifecycle: "visible",
+    lifecycle: "open",
     task: {
       task_id: taskId,
       title,
@@ -3062,6 +3056,7 @@ function protocolTaskSummary(taskId: string, title: string, status: "idle" | "ru
     taskId: taskId as never,
     projectId: "project_1" as never,
     agentId: "codex" as never,
+    lifecycle: "open" as const,
     title: { value: title, source: "user" as const },
     status,
     updatedAt: "2026-05-22T00:00:00.000Z",
@@ -3088,7 +3083,7 @@ function protocolTaskSnapshot(
   const userText = typeof options === "string" ? undefined : options.userText;
   return {
     task: protocolTaskSummary(taskId, title, status, hasMessages),
-    lifecycle: hasMessages ? "visible" : "new",
+    lifecycle: hasMessages ? "open" : "prepared",
     revision: 1,
     preparation: { kind: "ready" as const },
     agentConfig: { state: "ready" as const, options: [] },
@@ -3133,7 +3128,7 @@ function taskSubscriptionSnapshot(
 }
 
 function nonTaskSubscriptionSnapshot(
-  scope: { kind: string; taskId?: string } | undefined,
+  scope: { kind: string; taskId?: string; lifecycle?: "open" | "archived" } | undefined,
   cursor = "cursor_navigation",
 ) {
   if (scope?.kind === "projects") {
@@ -3165,6 +3160,16 @@ function nonTaskSubscriptionSnapshot(
       snapshot: {
         kind: "taskNavigation" as const,
         navigation: { activeTaskId: "task_1" as never, entries: [] },
+      },
+    };
+  }
+  if (scope?.kind === "taskList" && scope.lifecycle) {
+    return {
+      cursor: cursor as never,
+      scope,
+      snapshot: {
+        kind: "taskList" as const,
+        taskList: { lifecycle: scope.lifecycle, tasks: [], revision: 0 },
       },
     };
   }

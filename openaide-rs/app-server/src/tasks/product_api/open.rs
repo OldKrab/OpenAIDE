@@ -68,6 +68,16 @@ impl TaskProductApi {
         let task_id = params.task_id.as_str().to_string();
         let task = self.read_task_for_client(&task_id, client_instance_id)?;
 
+        if matches!(task.lifecycle, TaskLifecycle::Archived) {
+            let snapshot = crate::tasks::snapshot::build_snapshot(
+                &self.store,
+                &task_id,
+                crate::chat_history::ChatHistoryPolicy::default().task_snapshot_tail_limit(),
+            )
+            .map_err(super::protocol_error_from_runtime)?;
+            return self.project_task_snapshot(snapshot);
+        }
+
         let result = self
             .mutations
             .commit_existing_task(&task_id, super::response_snapshot_options(), |ctx| {
@@ -93,12 +103,13 @@ impl TaskProductApi {
     /// Task opening returns cached state first, then recovers the Native Session without
     /// synchronously listing Agent sessions. The cached clock selects resume or history replay.
     fn spawn_adopted_task_refresh(&self, task: TaskRecord) {
-        if matches!(task.lifecycle, TaskLifecycle::New { .. })
-            || matches!(
-                task.status,
-                LegacyTaskStatus::Starting | LegacyTaskStatus::Active
-            )
-            || task.active_turn_id.is_some()
+        if matches!(
+            task.lifecycle,
+            TaskLifecycle::Prepared { .. } | TaskLifecycle::Archived
+        ) || matches!(
+            task.status,
+            LegacyTaskStatus::Starting | LegacyTaskStatus::Active
+        ) || task.active_turn_id.is_some()
         {
             return;
         }

@@ -69,7 +69,7 @@ describe("New Task controller", () => {
     const listener = vi.fn();
     controller.subscribe(listener);
     const snapshot = {
-      lifecycle: "new",
+      lifecycle: "prepared",
       task: { task_id: "task_1" },
     } as TaskSnapshot;
 
@@ -86,7 +86,7 @@ describe("New Task controller", () => {
   it("ignores the expired lease's stale baseline until the Task is acquired again", () => {
     const controller = new NewTaskController();
     const snapshot = {
-      lifecycle: "new",
+      lifecycle: "prepared",
       task: { task_id: "task_1" },
     } as TaskSnapshot;
     controller.retain({ preparationKey: "context-a", snapshot });
@@ -109,7 +109,7 @@ describe("New Task controller", () => {
     controller.retain({
       preparationKey: "context-a",
       snapshot: {
-        lifecycle: "new",
+        lifecycle: "prepared",
         task: { agent_id: "codex", task_id: "task_1" },
         agent_config: settledCatalog,
       } as unknown as TaskSnapshot,
@@ -119,7 +119,7 @@ describe("New Task controller", () => {
     controller.retain({
       preparationKey: "context-a",
       snapshot: {
-        lifecycle: "new",
+        lifecycle: "prepared",
         task: { agent_id: "codex", task_id: "task_2" },
         agent_config: { agent_id: "codex", options: [], status: "loading" },
       } as unknown as TaskSnapshot,
@@ -138,14 +138,14 @@ describe("New Task controller", () => {
     controller.retain({
       preparationKey: "context-a",
       snapshot: {
-        lifecycle: "new",
+        lifecycle: "prepared",
         task: { agent_id: "codex", task_id: "task_1" },
         agent_config: settledCatalog,
       } as unknown as TaskSnapshot,
     });
 
     controller.updateSnapshot({
-      lifecycle: "new",
+      lifecycle: "prepared",
       task: { agent_id: "codex", task_id: "task_1" },
       agent_config: { agent_id: "codex", options: [], status: "loading" },
     } as unknown as TaskSnapshot);
@@ -156,7 +156,7 @@ describe("New Task controller", () => {
   it("does not replace a ready Task with an older preparation snapshot", () => {
     const controller = new NewTaskController();
     const ready = {
-      lifecycle: "new",
+      lifecycle: "prepared",
       revision: 2,
       task: { agent_id: "codex", task_id: "task_1" },
       preparation: { kind: "ready" },
@@ -165,7 +165,7 @@ describe("New Task controller", () => {
     controller.retain({ preparationKey: "context-a", snapshot: ready });
 
     expect(controller.updateSnapshot({
-      lifecycle: "new",
+      lifecycle: "prepared",
       revision: 1,
       task: { agent_id: "codex", task_id: "task_1" },
       preparation: { kind: "preparing" },
@@ -182,7 +182,7 @@ describe("New Task controller", () => {
     const controller = new NewTaskController();
     const state = createInitialState();
     state.snapshot = {
-      lifecycle: "visible",
+      lifecycle: "open",
       task: { has_messages: false, task_id: "task_1" },
     } as TaskSnapshot;
     controller.claim({ preparationKey: "context-a", taskId: "task_1" as never });

@@ -129,7 +129,7 @@ function mapProtocolTaskSnapshotWithCache(
     snapshot.task,
     snapshot.revision,
     context,
-    snapshot.lifecycle === "new" ? "New task" : "Untitled task",
+    snapshot.lifecycle === "prepared" ? "New task" : "Untitled task",
   );
   const task = mappedTask.task;
   const items = snapshot.chat.items.map((item) => {

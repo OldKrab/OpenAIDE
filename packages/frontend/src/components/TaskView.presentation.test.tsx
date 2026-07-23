@@ -675,7 +675,7 @@ function snapshotWithAuthoritativeTail(includeTail: boolean): TaskSnapshot {
   }
 
   return {
-    lifecycle: "visible",
+    lifecycle: "open",
     task: {
       task_id: "task-1",
       title: "Task",

@@ -34,8 +34,8 @@ use openaide_app_server_protocol::snapshot::{
 use openaide_app_server_protocol::support::SupportRecoverStuckSessionsParams;
 use openaide_app_server_protocol::task::{
     ComposerImage, ComposerMessage, TaskAcquireParams, TaskAdoptNativeSessionParams,
-    TaskCancelParams, TaskMarkReadParams, TaskOpenParams, TaskReleaseParams, TaskSendParams,
-    TaskSetArchivedParams, TaskSetConfigOptionParams,
+    TaskArchiveParams, TaskCancelParams, TaskMarkReadParams, TaskOpenParams, TaskReleaseParams,
+    TaskSendParams, TaskSetConfigOptionParams,
 };
 use openaide_app_server_protocol::workspace::WorkspaceListDirectoryParams;
 use std::collections::HashMap;
@@ -262,7 +262,7 @@ fn create_persists_idle_task_without_prompt_or_turn() {
 
     let record = store.read_task(snapshot.task.task_id.as_str()).unwrap();
     assert_eq!(record.status, TaskStatus::Inactive);
-    assert!(matches!(record.lifecycle, TaskLifecycle::New { .. }));
+    assert!(matches!(record.lifecycle, TaskLifecycle::Prepared { .. }));
     assert_eq!(record.active_turn_id, None);
     assert!(store.read_messages(&record.task_id).unwrap().is_empty());
     assert_eq!(snapshot.chat.items.len(), 0);
@@ -273,7 +273,7 @@ fn create_reopens_the_existing_draft_for_the_same_project_and_agent() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut project_anchor = task_record("task-project-anchor", "/tmp/openaide-unit-workspace/app");
-    project_anchor.lifecycle = TaskLifecycle::Visible;
+    project_anchor.lifecycle = TaskLifecycle::Open;
     store.write_task(&project_anchor).unwrap();
     let project_id = project_id_for_workspace("/tmp/openaide-unit-workspace/app");
     let api = TaskProductApi::new(
@@ -412,7 +412,7 @@ fn concurrent_create_for_one_client_resolves_one_new_task() {
             .list_all_task_records()
             .unwrap()
             .into_iter()
-            .filter(|task| matches!(task.lifecycle, TaskLifecycle::New { .. }))
+            .filter(|task| matches!(task.lifecycle, TaskLifecycle::Prepared { .. }))
             .count(),
         1
     );
@@ -555,15 +555,56 @@ fn new_task_cannot_be_archived_or_replaced() {
     let created = api.create_for_test(params.clone()).unwrap();
 
     let error = api
-        .set_archived_for_test(TaskSetArchivedParams {
+        .archive_for_test(TaskArchiveParams {
             task_id: created.task.task_id.clone(),
-            archived: true,
         })
         .unwrap_err();
     let reopened = api.create_for_test(params).unwrap();
 
     assert_eq!(error.code, ProtocolErrorCode::Conflict);
     assert_eq!(reopened.task.task_id, created.task.task_id);
+}
+
+#[test]
+fn archived_task_is_read_only_until_restored() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    store
+        .write_task(&task_record(
+            "task-archive-read-only",
+            "/tmp/openaide-unit-workspace/app",
+        ))
+        .unwrap();
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store)),
+        AgentRegistry::default_built_ins(),
+        Arc::new(crate::agent::mock::MockAgent),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+
+    api.archive_for_test(TaskArchiveParams {
+        task_id: "task-archive-read-only".into(),
+    })
+    .unwrap();
+    let error = api
+        .read_interactive_task_for_client(
+            "task-archive-read-only",
+            &crate::attachment_runtime::AttachmentOwner::test_client_instance_id(),
+        )
+        .unwrap_err();
+    assert_eq!(error.code, ProtocolErrorCode::Conflict);
+
+    let restored = api
+        .restore_for_test(openaide_app_server_protocol::task::TaskRestoreParams {
+            task_id: "task-archive-read-only".into(),
+        })
+        .unwrap();
+    assert_eq!(
+        restored.task.lifecycle,
+        openaide_app_server_protocol::snapshot::TaskLifecycle::Open
+    );
 }
 
 #[test]
@@ -1832,7 +1873,7 @@ fn native_session_adoption_is_scoped_by_agent_not_workspace() {
         .expect("first Agent session owner");
     assert_eq!(
         adopted.lifecycle,
-        openaide_app_server_protocol::snapshot::TaskLifecycle::Visible
+        openaide_app_server_protocol::snapshot::TaskLifecycle::Open
     );
     assert_eq!(
         adopted.task.title,
@@ -3067,7 +3108,7 @@ fn first_send_accepts_starting_task_without_history_sync() {
         TaskHistorySyncSnapshot::Idle { generation: 0 }
     );
     let record = store.read_task("task-existing").unwrap();
-    assert_eq!(record.lifecycle, TaskLifecycle::Visible);
+    assert_eq!(record.lifecycle, TaskLifecycle::Open);
     if matches!(record.status, TaskStatus::Starting | TaskStatus::Active) {
         assert_eq!(
             record.active_turn_id.as_deref(),
@@ -4684,7 +4725,7 @@ fn failed_cancel_commit_does_not_retire_an_accepted_send() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut project_anchor = task_record("task-project-anchor", "/tmp/openaide-unit-workspace/app");
-    project_anchor.lifecycle = TaskLifecycle::Visible;
+    project_anchor.lifecycle = TaskLifecycle::Open;
     store.write_task(&project_anchor).unwrap();
     let agent = Arc::new(RecordingAgent {
         block_start: AtomicBool::new(true),
@@ -5800,7 +5841,7 @@ fn release_keeps_one_free_prepared_task_for_reuse() {
 
     let released = store.read_task("task-draft").unwrap();
     assert!(!released.tombstoned);
-    assert_eq!(released.lifecycle, TaskLifecycle::New { lease: None });
+    assert_eq!(released.lifecycle, TaskLifecycle::Prepared { lease: None });
     assert!(!store.read_task("task-existing").unwrap().tombstoned);
 }
 
@@ -5990,7 +6031,7 @@ fn archiving_task_does_not_refresh_last_activity() {
     let mut newer_archived = task_record("task-newer-archived", "/tmp/openaide-unit-workspace/app");
     newer_archived.last_activity = "2026-02-01T00:00:00.000Z".to_string();
     newer_archived.updated_at = newer_archived.last_activity.clone();
-    newer_archived.archived = true;
+    newer_archived.lifecycle = crate::storage::records::TaskLifecycle::Archived;
     store.write_task(&older).unwrap();
     store.write_task(&newer_archived).unwrap();
     let api = TaskProductApi::new(
@@ -6002,9 +6043,8 @@ fn archiving_task_does_not_refresh_last_activity() {
     )
     .unwrap();
 
-    api.set_archived_for_test(TaskSetArchivedParams {
+    api.archive_for_test(TaskArchiveParams {
         task_id: "task-old".into(),
-        archived: true,
     })
     .unwrap();
 
@@ -6042,11 +6082,10 @@ fn task_record(task_id: &str, workspace_root: &str) -> TaskRecord {
         workspace_root: workspace_root.to_string(),
         project_root: None,
         worktree_id: None,
-        lifecycle: TaskLifecycle::Visible,
+        lifecycle: TaskLifecycle::Open,
         agent_session_id: None,
         active_turn_id: None,
         active_turn_started_at: None,
-        archived: false,
         tombstoned: false,
         revision: 1,
         config_options_catalog: None,
@@ -6078,7 +6117,7 @@ fn corrupt_chat_snapshot(state_root: &std::path::Path, task_id: &str) {
 }
 
 fn test_new_task_lifecycle() -> TaskLifecycle {
-    TaskLifecycle::New {
+    TaskLifecycle::Prepared {
         lease: Some(crate::attachment_runtime::AttachmentOwner::test_client_instance_id()),
     }
 }

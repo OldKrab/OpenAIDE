@@ -197,6 +197,7 @@ pub(crate) fn project_task_summary_with_has_messages(
 ) -> TaskSummary {
     let title = record.title.map(project_title);
     let status = project_status_with_preparation(record.status, &record.preparation);
+    let lifecycle = project_task_lifecycle(&record.lifecycle);
     let workspace_available = std::path::Path::new(&record.workspace_root).is_dir();
     TaskSummary {
         task_id: TaskId::from(record.task_id),
@@ -208,6 +209,7 @@ pub(crate) fn project_task_summary_with_has_messages(
         )
         .project_id,
         agent_id: AgentId::from(record.agent_id),
+        lifecycle,
         title,
         status,
         updated_at: record.updated_at,
@@ -248,6 +250,7 @@ pub(crate) fn project_status_with_preparation(
 pub(crate) fn project_legacy_task_summary(
     summary: LegacyTaskSummary,
     has_messages: bool,
+    lifecycle: openaide_app_server_protocol::snapshot::TaskLifecycle,
 ) -> TaskSummary {
     let workspace_available = std::path::Path::new(&summary.workspace_root).is_dir();
     TaskSummary {
@@ -260,6 +263,7 @@ pub(crate) fn project_legacy_task_summary(
         )
         .project_id,
         agent_id: AgentId::from(summary.agent_id),
+        lifecycle,
         title: summary.title.map(project_title),
         status: project_status(summary.status),
         updated_at: summary.updated_at,
@@ -269,6 +273,22 @@ pub(crate) fn project_legacy_task_summary(
         has_messages,
         worktree_id: summary.worktree_id.map(WorktreeId::from),
         workspace_available,
+    }
+}
+
+pub(crate) fn project_task_lifecycle(
+    lifecycle: &crate::storage::records::TaskLifecycle,
+) -> openaide_app_server_protocol::snapshot::TaskLifecycle {
+    match lifecycle {
+        crate::storage::records::TaskLifecycle::Prepared { .. } => {
+            openaide_app_server_protocol::snapshot::TaskLifecycle::Prepared
+        }
+        crate::storage::records::TaskLifecycle::Open => {
+            openaide_app_server_protocol::snapshot::TaskLifecycle::Open
+        }
+        crate::storage::records::TaskLifecycle::Archived => {
+            openaide_app_server_protocol::snapshot::TaskLifecycle::Archived
+        }
     }
 }
 

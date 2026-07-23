@@ -42,10 +42,9 @@ describe("task list row styles", () => {
   it("gives archive mode a restrained warm color identity", () => {
     expect(appCss).toMatch(/\.archive-sidebar\s*{\s*background:\s*color-mix\(in oklch, var\(--oa-warning\) 3%, var\(--oa-panel\)\);/);
     expect(appCss).toMatch(/\.archive-sidebar \.sidebar-actions button:hover,[^{]+{\s*background:\s*color-mix\(in oklch, var\(--oa-warning\) 7%, var\(--oa-raised\)\);/);
-    expect(appCss).toMatch(/\.task-mode-tabs\s*{[^}]*border-bottom:\s*1px solid color-mix\(in oklch, var\(--oa-border\) 48%, transparent\);[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\);/);
-    expect(appCss).toMatch(/\.task-mode-tabs button\.active\s*{[^}]*background:\s*transparent;[^}]*font-weight:\s*560;/);
-    expect(appCss).toMatch(/\.task-mode-tabs button\.active::after\s*{[^}]*height:\s*2px;[^}]*background:\s*var\(--oa-focus\);/);
-    expect(appCss).not.toMatch(/\.archive-head\s*{/);
+    expect(appCss).toMatch(/\.archive-section-head\s*{[^}]*display:\s*flex;[^}]*gap:\s*7px;/);
+    expect(appCss).toMatch(/\.task-section-head \.archive-navigation\s*{[^}]*margin-left:\s*auto;[^}]*font-size:\s*12px;/);
+    expect(appCss).not.toMatch(/\.task-mode-tabs\s*{/);
   });
 
   it("applies hover highlight to the whole task row, not only the open button", () => {
@@ -373,7 +372,7 @@ describe("task list row styles", () => {
     expect(appCss).toMatch(/\.project-task-group-toggle\s*{[^}]*color:\s*var\(--oa-text\);/);
     expect(appCss).toMatch(/\.project-task-group-toggle strong\s*{[^}]*color:\s*var\(--oa-text\);[^}]*font-size:\s*13px;[^}]*font-weight:\s*600;/);
     expect(appCss).toMatch(/\.project-task-group-counts\s*{[^}]*font-size:\s*11px;[^}]*color:\s*var\(--oa-muted\);/);
-    expect(appCss).toMatch(/\.project-task-more\s*{[^}]*min-height:\s*30px;[^}]*background:\s*transparent;[^}]*justify-self:\s*stretch;/);
+    expect(appCss).toMatch(/\.project-task-more\s*{[^}]*min-height:\s*32px;[^}]*background:\s*transparent;[^}]*justify-self:\s*stretch;[^}]*font-size:\s*13px;/);
     expect(appCss).toMatch(/\.project-task-group-toggle span\s*{[^}]*display:\s*grid;/);
   });
 
@@ -432,7 +431,7 @@ describe("task list row styles", () => {
   });
 
   it("renders external sessions inside the same sidebar list as tasks", () => {
-    expect(appCss).toMatch(/\.sidebar\s*{[^}]*min-height:\s*0;[^}]*height:\s*100vh;[^}]*grid-template-rows:\s*auto auto auto minmax\(0, 1fr\) auto;[^}]*overflow:\s*hidden;/);
+    expect(appCss).toMatch(/\.sidebar\s*{[^}]*min-height:\s*0;[^}]*height:\s*100vh;[^}]*grid-template-rows:\s*auto auto minmax\(0, 1fr\) auto;[^}]*overflow:\s*hidden;/);
     expect(appCss).toMatch(/\.task-list\s*{[^}]*min-height:\s*0;[^}]*overflow:\s*auto;[^}]*scrollbar-gutter:\s*stable;[^}]*padding-right:\s*10px;[^}]*padding-bottom:\s*24px;/);
     expect(appCss).toMatch(/\.task-list\s*{[^}]*scroll-padding-bottom:\s*24px;/);
     expect(appCss).toMatch(/body\[data-shell="vscodeExtension"\] \.task-list\s*{[^}]*padding-right:\s*0;/);
@@ -518,7 +517,7 @@ describe("task list row styles", () => {
   });
 
   it("keeps mobile sidebar rows visually clear of the footer action", () => {
-    expect(appCss).toMatch(/body\[data-shell="web"\] \.web-workbench-shell \.sidebar\s*{[^}]*grid-template-rows:\s*auto auto auto minmax\(0,\s*1fr\) auto;/);
+    expect(appCss).toMatch(/body\[data-shell="web"\] \.web-workbench-shell \.sidebar\s*{[^}]*grid-template-rows:\s*auto auto minmax\(0,\s*1fr\) auto;/);
     expect(appCss).toMatch(/body\[data-shell="web"\] \.web-workbench-shell \.sidebar\s*{[^}]*width:\s*min\(288px,\s*calc\(100vw - 96px\)\);/);
     expect(appCss).toMatch(/body\[data-shell="web"\] \.sidebar-actions > button\s*{[^}]*width:\s*100%;[^}]*white-space:\s*nowrap;/);
     expect(appCss).toMatch(/body\[data-shell="web"\] \.web-workbench-shell \.sidebar \.task-list\s*{[^}]*overflow-x:\s*hidden;[^}]*overflow-y:\s*auto;[^}]*scrollbar-gutter:\s*stable;[^}]*margin-right:\s*-8px;[^}]*padding-right:\s*4px;[^}]*padding-bottom:\s*24px;[^}]*scroll-padding-bottom:\s*24px;/);

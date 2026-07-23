@@ -41,6 +41,49 @@ fn task_title_persists_as_one_owned_value() {
 }
 
 #[test]
+fn task_lifecycle_exclusively_owns_open_and_archived_list_membership() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().to_path_buf()).unwrap();
+    let open = task_record("task-open", TaskStatus::Inactive, "2");
+    let mut archived = task_record("task-archived", TaskStatus::Inactive, "1");
+    archived.lifecycle = crate::storage::records::TaskLifecycle::Archived;
+
+    store.write_task(&open).unwrap();
+    store.write_task(&archived).unwrap();
+
+    assert_eq!(store.list_tasks().unwrap()[0].task_id, "task-open");
+    assert_eq!(
+        store.list_archived_tasks().unwrap()[0].task_id,
+        "task-archived"
+    );
+    let persisted = serde_json::to_value(store.read_task("task-archived").unwrap()).unwrap();
+    assert_eq!(
+        persisted["lifecycle"]["state"],
+        serde_json::json!("archived")
+    );
+    assert!(persisted.get("archived").is_none());
+}
+
+#[test]
+fn legacy_archived_flag_migrates_into_the_archived_lifecycle() {
+    let task = task_record("task-legacy-archived", TaskStatus::Inactive, "1");
+    let mut persisted = serde_json::to_value(task).unwrap();
+    persisted["lifecycle"]["state"] = serde_json::json!("visible");
+    persisted["archived"] = serde_json::json!(true);
+
+    let loaded: TaskRecord = serde_json::from_value(persisted).unwrap();
+
+    assert_eq!(
+        loaded.lifecycle,
+        crate::storage::records::TaskLifecycle::Archived
+    );
+    assert!(serde_json::to_value(loaded)
+        .unwrap()
+        .get("archived")
+        .is_none());
+}
+
+#[test]
 fn legacy_select_config_option_without_kind_remains_readable() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path().to_path_buf()).unwrap();
@@ -563,7 +606,7 @@ fn visible_task_queries_exclude_client_private_new_tasks() {
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let visible = task_record("task-visible", TaskStatus::Inactive, "1");
     let mut new_task = task_record("task-new", TaskStatus::Inactive, "2");
-    new_task.lifecycle = super::records::TaskLifecycle::New {
+    new_task.lifecycle = super::records::TaskLifecycle::Prepared {
         lease: Some(openaide_app_server_protocol::ids::ClientInstanceId::from(
             "client-a",
         )),
@@ -793,11 +836,10 @@ fn task_record(task_id: &str, status: TaskStatus, created_at: &str) -> TaskRecor
         workspace_root: "/workspace".to_string(),
         project_root: None,
         worktree_id: None,
-        lifecycle: super::records::TaskLifecycle::Visible,
+        lifecycle: super::records::TaskLifecycle::Open,
         agent_session_id: None,
         active_turn_id: None,
         active_turn_started_at: None,
-        archived: false,
         tombstoned: false,
         revision: 1,
         config_options_catalog: None,

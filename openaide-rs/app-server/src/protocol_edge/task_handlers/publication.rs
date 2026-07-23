@@ -149,6 +149,19 @@ impl RpcGateway {
         if let Some(navigation) = &change.navigation {
             events.extend(self.publish_navigation_change(navigation.clone(), now));
         }
+        if let Some(lifecycle) = &change.lifecycle {
+            let client_hub = self.client_hub.clone();
+            events.extend(event_deliveries(self.state_stream.publish_committed(
+                EventScope::StateRoot {
+                    state_root_id: self.state_stream.state_root_id().clone(),
+                },
+                AppServerEventPayload::TaskLifecycleChanged {
+                    change: lifecycle.clone(),
+                },
+                |client_id| client_hub.delivery_for(client_id),
+                now,
+            )));
+        }
         events
     }
 

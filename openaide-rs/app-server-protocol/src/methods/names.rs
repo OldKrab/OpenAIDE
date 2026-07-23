@@ -59,7 +59,8 @@ pub const TASK_LIST: &str = "task/list";
 pub const TASK_NAVIGATION_REFRESH: &str = "taskNavigation/refresh";
 pub const TASK_NAVIGATION_LOAD_MORE: &str = "taskNavigation/loadMore";
 pub const TASK_RELEASE: &str = "task/release";
-pub const TASK_SET_ARCHIVED: &str = "task/setArchived";
+pub const TASK_ARCHIVE: &str = "task/archive";
+pub const TASK_RESTORE: &str = "task/restore";
 
 pub const CLIENT_METHODS: &[&str] = &[
     CLIENT_PROBE,
@@ -123,5 +124,6 @@ pub const CLIENT_METHODS: &[&str] = &[
     TASK_NAVIGATION_REFRESH,
     TASK_NAVIGATION_LOAD_MORE,
     TASK_RELEASE,
-    TASK_SET_ARCHIVED,
+    TASK_ARCHIVE,
+    TASK_RESTORE,
 ];

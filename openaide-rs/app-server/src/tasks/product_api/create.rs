@@ -59,13 +59,12 @@ impl TaskProductApi {
             workspace_root: workspace.path.to_string_lossy().to_string(),
             project_root: Some(project.workspace_root),
             worktree_id: workspace.worktree_id.map(|id| id.into_string()),
-            lifecycle: TaskLifecycle::New {
+            lifecycle: TaskLifecycle::Prepared {
                 lease: Some(client_instance_id.clone()),
             },
             agent_session_id: None,
             active_turn_id: None,
             active_turn_started_at: None,
-            archived: false,
             tombstoned: false,
             revision: 0,
             config_options_catalog: None,

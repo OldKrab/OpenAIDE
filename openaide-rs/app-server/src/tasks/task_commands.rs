@@ -2,6 +2,7 @@ use crate::agent::gateway::AgentGateway;
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::TaskSnapshot;
 use crate::protocol::params::{DeleteMode, TaskDeleteParams, TaskIdParams};
+use crate::storage::records::TaskLifecycle;
 use crate::tasks::mutation::{
     TaskCommitOptions, TaskCommitOutcome, TaskMutationResult, TaskMutations,
 };
@@ -54,16 +55,16 @@ impl TaskCommands {
             |ctx| {
                 match mode {
                     DeleteMode::Archive => {
-                        if ctx.task().archived {
+                        if matches!(ctx.task().lifecycle, TaskLifecycle::Archived) {
                             return Ok(TaskMutationResult::Unchanged);
                         }
-                        ctx.task_mut().archived = true;
+                        ctx.task_mut().lifecycle = TaskLifecycle::Archived;
                     }
                     DeleteMode::Restore => {
-                        if !ctx.task().archived {
+                        if !matches!(ctx.task().lifecycle, TaskLifecycle::Archived) {
                             return Ok(TaskMutationResult::Unchanged);
                         }
-                        ctx.task_mut().archived = false;
+                        ctx.task_mut().lifecycle = TaskLifecycle::Open;
                     }
                     DeleteMode::Delete => {
                         if ctx.task().tombstoned {

@@ -151,7 +151,7 @@ fn preparation_failure_record(error: &RuntimeError) -> TaskPreparationRecord {
 
 fn is_abandoned_preparation(task: &TaskRecord) -> bool {
     !task.tombstoned
-        && matches!(task.lifecycle, TaskLifecycle::New { .. })
+        && matches!(task.lifecycle, TaskLifecycle::Prepared { .. })
         && task.status == LegacyTaskStatus::Inactive
         && matches!(
             task.preparation,

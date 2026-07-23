@@ -38,7 +38,14 @@ pub(super) fn commit_existing_task(
         chat_changes: Vec::new(),
         tool_details: Vec::new(),
     };
-    let mutation_result = mutation(&mut ctx)?;
+    let mut mutation_result = mutation(&mut ctx)?;
+    // Archived Tasks are immutable history. This transaction-boundary guard also
+    // drops late ACP updates that raced with the archive transition.
+    if matches!(original_task.lifecycle, TaskLifecycle::Archived)
+        && matches!(ctx.task().lifecycle, TaskLifecycle::Archived)
+    {
+        mutation_result = TaskMutationResult::Unchanged;
+    }
     let chat_changes = std::mem::take(&mut ctx.chat_changes);
     let tool_details = std::mem::take(&mut ctx.tool_details);
     let artifact_replacements = std::mem::take(&mut ctx.artifact_replacements);
@@ -111,7 +118,7 @@ pub(super) fn acquire_prepared_task(
     options: TaskCommitOptions,
 ) -> Result<TaskCommitResult, RuntimeError> {
     let _guard = target.lock();
-    let TaskLifecycle::New {
+    let TaskLifecycle::Prepared {
         lease: Some(requesting_client),
     } = &task.lifecycle
     else {
@@ -122,15 +129,9 @@ pub(super) fn acquire_prepared_task(
         !candidate.tombstoned
             && matches!(
                 &candidate.lifecycle,
-                TaskLifecycle::New { lease: Some(lessee) } if lessee == requesting_client
+                TaskLifecycle::Prepared { lease: Some(lessee) } if lessee == requesting_client
             )
     }) {
-        if existing.archived {
-            return Err(RuntimeError::Conflict(
-                "Leased Prepared Task is archived, which violates its lifecycle invariant"
-                    .to_string(),
-            ));
-        }
         if existing.agent_id != task.agent_id || existing.workspace_root != task.workspace_root {
             return Err(RuntimeError::Conflict(
                 "Release the current Prepared Task before acquiring another context".to_string(),
@@ -145,7 +146,7 @@ pub(super) fn acquire_prepared_task(
         ) {
             let original = existing.clone();
             let mut stale = original.clone();
-            stale.lifecycle = TaskLifecycle::New { lease: None };
+            stale.lifecycle = TaskLifecycle::Prepared { lease: None };
             stale.tombstoned = true;
             stale.updated_at = task.updated_at.clone();
             let stale_facts = persist_changed_task(
@@ -203,7 +204,7 @@ pub(super) fn acquire_prepared_task(
     }) {
         let original = existing.clone();
         let mut leased = existing;
-        leased.lifecycle = TaskLifecycle::New {
+        leased.lifecycle = TaskLifecycle::Prepared {
             lease: Some(requesting_client.clone()),
         };
         let facts = persist_changed_task(
@@ -246,8 +247,7 @@ pub(super) fn acquire_prepared_task(
 
 fn is_reusable_prepared_task(target: &TaskMutations, task: &TaskRecord) -> bool {
     !task.tombstoned
-        && !task.archived
-        && matches!(task.lifecycle, TaskLifecycle::New { lease: None })
+        && matches!(task.lifecycle, TaskLifecycle::Prepared { lease: None })
         && matches!(
             task.preparation,
             crate::storage::records::TaskPreparationRecord::Ready
@@ -276,7 +276,7 @@ pub(super) fn release_prepared_task(
     };
     let leased_by_client = matches!(
         &task.lifecycle,
-        TaskLifecycle::New { lease: Some(lessee) } if lessee == client_instance_id
+        TaskLifecycle::Prepared { lease: Some(lessee) } if lessee == client_instance_id
     );
     if !leased_by_client {
         return Ok(Vec::new());
@@ -291,7 +291,7 @@ pub(super) fn release_prepared_task(
     }
 
     let original = task.clone();
-    task.lifecycle = TaskLifecycle::New { lease: None };
+    task.lifecycle = TaskLifecycle::Prepared { lease: None };
     task.updated_at = now.to_string();
     task.last_activity = now.to_string();
     let same_key_already_free = target
@@ -393,15 +393,14 @@ pub(super) fn reconcile_prepared_task_pool(
     let _guard = target.lock();
     let mut disposed = Vec::new();
     for mut task in target.store.list_all_task_records()? {
-        let TaskLifecycle::New { lease } = &task.lifecycle else {
+        let TaskLifecycle::Prepared { lease } = &task.lifecycle else {
             continue;
         };
         if task.tombstoned {
             continue;
         }
         let original = task.clone();
-        let invalid = task.archived
-            || task.status != crate::protocol::model::TaskStatus::Inactive
+        let invalid = task.status != crate::protocol::model::TaskStatus::Inactive
             || task.active_turn_id.is_some()
             || !target.store.read_messages(&task.task_id)?.is_empty();
         let failed_and_free = (lease.is_none() || clear_leases)
@@ -410,7 +409,7 @@ pub(super) fn reconcile_prepared_task_pool(
                 crate::storage::records::TaskPreparationRecord::Failed { .. }
             );
         if clear_leases {
-            task.lifecycle = TaskLifecycle::New { lease: None };
+            task.lifecycle = TaskLifecycle::Prepared { lease: None };
         }
         if invalid || failed_and_free {
             task.tombstoned = true;
@@ -502,12 +501,12 @@ fn dispose_prepared_tasks_matching(
     for mut task in target.store.list_all_task_records()? {
         if task.tombstoned
             || !matches(&task)
-            || !matches!(task.lifecycle, TaskLifecycle::New { .. })
+            || !matches!(task.lifecycle, TaskLifecycle::Prepared { .. })
         {
             continue;
         }
         let original = task.clone();
-        task.lifecycle = TaskLifecycle::New { lease: None };
+        task.lifecycle = TaskLifecycle::Prepared { lease: None };
         task.tombstoned = true;
         let facts = persist_changed_task(
             target,
@@ -607,6 +606,12 @@ fn persist_changed_projection(
     )
     .map_err(|error| RuntimeError::Internal(error.message))?;
     let navigation = navigation_change(original, &projection.task, fields.summary, &projected.task);
+    let lifecycle = (original.lifecycle != projection.task.lifecycle).then(|| {
+        openaide_app_server_protocol::task::TaskLifecycleChanged {
+            previous_lifecycle: crate::snapshots::project_task_lifecycle(&original.lifecycle),
+            task: crate::snapshots::project_task_summary(projection.task.clone()),
+        }
+    });
     let committed_task = projection.task.clone();
     let journal_operations = journal_operations(projection, &chat)?;
     // Build every fallible publication value before the durability barrier.
@@ -656,6 +661,7 @@ fn persist_changed_projection(
             changes,
             tool_details,
             navigation,
+            lifecycle,
         },
     })
 }
@@ -771,7 +777,7 @@ fn project_committed_changes(
 }
 
 fn navigation_member(task: &TaskRecord) -> bool {
-    matches!(task.lifecycle, TaskLifecycle::Visible) && !task.archived && !task.tombstoned
+    matches!(task.lifecycle, TaskLifecycle::Open) && !task.tombstoned
 }
 
 struct VersionFields {

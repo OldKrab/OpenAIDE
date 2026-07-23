@@ -1,60 +1,35 @@
 import {
-  TASK_LIST,
+  TASK_ARCHIVE,
   TASK_OPEN,
-  TASK_SET_ARCHIVED,
+  TASK_RESTORE,
   type BackendConnection,
   type TaskId,
-  type TaskListResult,
   type TaskOpenResult,
 } from "@openaide/app-server-client";
-import type { WebviewBootstrap } from "../state/surfaceTypes";
 import type { AppAction, SnapshotIntent } from "../state/appReducer";
-import { mapProtocolTaskSnapshot, mapProtocolTaskSummary } from "../state/appServerProtocolMapping";
+import { mapProtocolTaskSnapshot } from "../state/appServerProtocolMapping";
 
 type TaskReadConnection = Pick<BackendConnection, "request">;
 
 export type TaskReadIntentDependencies = {
   acceptTaskOpen?: (taskId: string, requestId: number | undefined, intent: SnapshotIntent) => boolean;
-  acceptTaskList?: () => boolean;
   backendConnection: TaskReadConnection;
   createTaskOpenRequestId?: (taskId: string, intent: SnapshotIntent) => number;
   dispatch: (action: AppAction) => void;
 };
 
-export function requestMissingInitialTaskList(
-  dependencies: Pick<TaskReadIntentDependencies, "acceptTaskList" | "backendConnection" | "dispatch">,
-  bootstrap: WebviewBootstrap,
-  snapshot: { tasks?: unknown },
-) {
-  if (bootstrap.surface === "navigation" && !snapshot.tasks) {
-    void requestTaskList(dependencies, bootstrap.archived === true).catch((error) => {
-      dependencies.dispatch({
-        type: "tasks:error",
-        message: error instanceof Error ? error.message : "Unable to load tasks from App Server",
-      });
-    });
-  }
-}
-
-export async function requestTaskList({
-  acceptTaskList,
-  backendConnection,
-  dispatch,
-}: TaskReadIntentDependencies, archived = false) {
-  const result = await backendConnection.request(TASK_LIST, { archived });
-  if (acceptTaskList && !acceptTaskList()) return;
-  dispatchTaskListResult(dispatch, result, archived);
-}
-
-export async function requestTaskSetArchived(
+export async function requestTaskArchive(
   { backendConnection }: TaskReadIntentDependencies,
   taskId: string,
-  archived: boolean,
 ) {
-  await backendConnection.request(TASK_SET_ARCHIVED, {
-    taskId: taskId as TaskId,
-    archived,
-  });
+  await backendConnection.request(TASK_ARCHIVE, { taskId: taskId as TaskId });
+}
+
+export async function requestTaskRestore(
+  { backendConnection }: TaskReadIntentDependencies,
+  taskId: string,
+) {
+  await backendConnection.request(TASK_RESTORE, { taskId: taskId as TaskId });
 }
 
 export async function requestTaskOpen(
@@ -65,18 +40,6 @@ export async function requestTaskOpen(
   const requestId = createTaskOpenRequestId?.(taskId, intent);
   const result = await backendConnection.request(TASK_OPEN, { taskId: taskId as TaskId });
   dispatchTaskOpenResult(dispatch, result, intent, requestId, acceptTaskOpen);
-}
-
-function dispatchTaskListResult(
-  dispatch: (action: AppAction) => void,
-  result: TaskListResult,
-  archived: boolean,
-) {
-  dispatch({
-    type: "tasks",
-    archived,
-    tasks: result.tasks.map((task) => mapProtocolTaskSummary(task, result.revision)),
-  });
 }
 
 function dispatchTaskOpenResult(

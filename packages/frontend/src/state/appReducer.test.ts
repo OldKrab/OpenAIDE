@@ -508,6 +508,25 @@ describe("app reducer composer state", () => {
     });
   });
 
+  it("does not let Task Navigation overwrite the open task replica", () => {
+    let state = appReducer(createInitialState(), {
+      type: "tasks",
+      archived: false,
+      tasks: [taskSummary("task_open")],
+    });
+
+    state = appReducer(state, {
+      type: "taskNavigation",
+      archived: false,
+      tasks: [taskSummary("stale_task")],
+      sessions: [],
+      refreshing: false,
+    });
+
+    expect(state.taskLists.open?.map((task) => task.task_id)).toEqual(["task_open"]);
+    expect(state.tasks.map((task) => task.task_id)).toEqual(["task_open"]);
+  });
+
   it("does not let stale native-session adoption completion unlock a newer first send", () => {
     let state = createInitialState();
     state = appReducer(state, {
@@ -981,22 +1000,22 @@ describe("app reducer composer state", () => {
     expect(state.newTask.error).toBeUndefined();
   });
 
-  it("adds an opened task snapshot to the task list so the sidebar can show it", () => {
+  it("does not let an opened task snapshot insert collection membership", () => {
     let state = createInitialState();
 
     state = appReducer(state, { type: "snapshot", intent: "open", snapshot: snapshot("task_1") });
 
-    expect(state.tasks.map((task) => task.task_id)).toEqual(["task_1"]);
+    expect(state.tasks).toEqual([]);
   });
 
   it("keeps a client-private New Task out of visible Task state", () => {
     let state = createInitialState();
-    const newTask = { ...noMessageSnapshot("task_new"), lifecycle: "new" as const };
+    const newTask = { ...noMessageSnapshot("task_new"), lifecycle: "prepared" as const };
 
     state = appReducer(state, { type: "snapshot", intent: "open", snapshot: newTask });
 
     expect(state.tasks).toEqual([]);
-    expect(state.taskListCache).toEqual({});
+    expect(state.taskLists).toEqual({});
     expect(state.activeTaskId).toBeUndefined();
     expect(state.snapshot).toBeUndefined();
     expect(state.taskSnapshots.task_new).toBeUndefined();
@@ -1052,7 +1071,7 @@ describe("app reducer composer state", () => {
     state = appReducer(state, { type: "tasks", archived: false, tasks: [taskSummary("task_1")] });
 
     expect(state.tasks.map((task) => task.task_id)).toEqual(["task_1"]);
-    expect(state.taskListCache.active?.map((task) => task.task_id)).toEqual(["task_1"]);
+    expect(state.taskLists.open?.map((task) => task.task_id)).toEqual(["task_1"]);
   });
 
   it("keeps a late background snapshot out of an authoritative list that omitted its Task", () => {
@@ -1061,8 +1080,8 @@ describe("app reducer composer state", () => {
       ...state,
       activeTaskId: "task_1",
       tasks: [taskSummary("task_1"), taskSummary("task_removed")],
-      taskListCache: {
-        active: [taskSummary("task_1"), taskSummary("task_removed")],
+      taskLists: {
+        open: [taskSummary("task_1"), taskSummary("task_removed")],
       },
     };
     state = appReducer(state, {
@@ -1082,7 +1101,7 @@ describe("app reducer composer state", () => {
     });
 
     expect(state.tasks.map((task) => task.task_id)).toEqual(["task_1"]);
-    expect(state.taskListCache.active?.map((task) => task.task_id)).toEqual(["task_1"]);
+    expect(state.taskLists.open?.map((task) => task.task_id)).toEqual(["task_1"]);
     expect(state.taskSnapshots.task_removed?.task.title).toBe("Late refresh");
   });
 
@@ -1094,8 +1113,8 @@ describe("app reducer composer state", () => {
       activeTaskId: "task_archived",
       showArchived: true,
       tasks: [archivedTask],
-      taskListCache: {
-        active: [taskSummary("task_active")],
+      taskLists: {
+        open: [taskSummary("task_active")],
         archived: [archivedTask],
       },
     };
@@ -1110,8 +1129,8 @@ describe("app reducer composer state", () => {
     });
 
     expect(state.tasks).toEqual([archivedTask]);
-    expect(state.taskListCache.archived).toEqual([archivedTask]);
-    expect(state.taskListCache.active?.[0].title).toBe("Updated active");
+    expect(state.taskLists.archived).toEqual([archivedTask]);
+    expect(state.taskLists.open?.[0].title).toBe("Updated active");
   });
 
   it("keeps active subscription updates out of the visible Archived slice", () => {
@@ -1121,7 +1140,7 @@ describe("app reducer composer state", () => {
       ...state,
       showArchived: true,
       tasks: [archivedTask],
-      taskListCache: { archived: [archivedTask] },
+      taskLists: { archived: [archivedTask] },
     };
     const activeTask = { ...taskSummary("task_active"), title: "Active Task" };
 
@@ -1132,8 +1151,8 @@ describe("app reducer composer state", () => {
     });
 
     expect(state.tasks).toEqual([archivedTask]);
-    expect(state.taskListCache.archived).toEqual([archivedTask]);
-    expect(state.taskListCache.active).toEqual([activeTask]);
+    expect(state.taskLists.archived).toEqual([archivedTask]);
+    expect(state.taskLists.open).toEqual([activeTask]);
   });
 
   it("reuses a cached task snapshot immediately when selecting a previously opened task", () => {
@@ -1224,7 +1243,7 @@ describe("app reducer composer state", () => {
 
     expect(state.showArchived).toBe(true);
     expect(state.searchQuery).toBe("");
-    expect(state.tasks.map((task) => task.task_id)).toEqual(["task_1"]);
+    expect(state.tasks).toEqual([]);
   });
 
   it("keeps the open task page while switching the sidebar archive filter", () => {
@@ -1725,7 +1744,7 @@ describe("app reducer composer state", () => {
       activeTaskId: undefined,
       projects: [],
       tasks: [],
-      taskListCache: {},
+      taskLists: {},
       taskInputs: {},
       taskSnapshots: {},
       taskSnapshotReplicaEpochs: {},
@@ -2107,7 +2126,7 @@ describe("app reducer composer state", () => {
 function snapshot(taskId: string, items: ChatMessage[] = [], revision = 1): TaskSnapshot {
   const task = taskSummary(taskId);
   return {
-    lifecycle: "visible",
+    lifecycle: "open",
     task: { ...task, task_version: revision, message_history_version: revision },
     chat: {
       task_id: taskId,

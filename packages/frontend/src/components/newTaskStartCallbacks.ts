@@ -183,7 +183,7 @@ async function submitNewTask({
   };
   try {
     const cachedSnapshot = newTaskController.getSnapshot();
-    const cachedNewTask = cachedSnapshot?.lifecycle === "new"
+    const cachedNewTask = cachedSnapshot?.lifecycle === "prepared"
       && preparedTaskMatchesNewTaskContext(state, {
         agentId: cachedSnapshot.task.agent_id,
         projectId: cachedSnapshot.task.project_id,

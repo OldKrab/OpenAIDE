@@ -83,11 +83,11 @@ use crate::snapshot::{
     QuestionMessageAction, QuestionMessageState, RecoveryAction, RecoverySnapshot,
     ServerCapabilities, ServerSnapshot, SettingsSnapshot, StateRootSnapshot,
     TaskAgentCommandsSnapshot, TaskAgentConfigSnapshot, TaskAttentionEvent, TaskAttentionReason,
-    TaskHistorySyncSnapshot, TaskInputCapabilities, TaskLifecycle, TaskNavigationEntry,
-    TaskNavigationSnapshot, TaskPreparationAction, TaskPreparationSnapshot, TaskPreparationStep,
-    TaskPreparationStepKind, TaskPreparationStepStatus, TaskSendBlocker, TaskSendBlockerKind,
-    TaskSendCapabilitySnapshot, TaskSendCapabilityState, TaskSetupBlocker, TaskSetupBlockerKind,
-    TaskSnapshot, TaskStatus, TaskSummary, TaskTitle, TaskTitleSource,
+    TaskHistorySyncSnapshot, TaskInputCapabilities, TaskLifecycle, TaskListSnapshot,
+    TaskNavigationEntry, TaskNavigationSnapshot, TaskPreparationAction, TaskPreparationSnapshot,
+    TaskPreparationStep, TaskPreparationStepKind, TaskPreparationStepStatus, TaskSendBlocker,
+    TaskSendBlockerKind, TaskSendCapabilitySnapshot, TaskSendCapabilityState, TaskSetupBlocker,
+    TaskSetupBlockerKind, TaskSnapshot, TaskStatus, TaskSummary, TaskTitle, TaskTitleSource,
     ToolPermissionDecisionSnapshot, ToolPermissionOutcomeSnapshot,
 };
 use crate::state::{
@@ -99,12 +99,13 @@ use crate::task::{
     ActivityToolContent, ActivityToolField, ActivityToolInput, ActivityToolLocation,
     ActivityToolOutput, ActivityToolValue, ComposerImage, ComposerMessage,
     TaskAcquireInWorktreeParams, TaskAcquireInWorktreeResult, TaskAcquireParams, TaskAcquireResult,
-    TaskAdoptNativeSessionParams, TaskAdoptNativeSessionResult, TaskCancelParams, TaskCancelResult,
-    TaskChatPageParams, TaskChatPageResult, TaskListParams, TaskListResult, TaskMarkReadParams,
+    TaskAdoptNativeSessionParams, TaskAdoptNativeSessionResult, TaskArchiveParams,
+    TaskArchiveResult, TaskCancelParams, TaskCancelResult, TaskChatPageParams, TaskChatPageResult,
+    TaskLifecycleChanged, TaskListLifecycle, TaskListParams, TaskListResult, TaskMarkReadParams,
     TaskMarkReadResult, TaskNavigationLoadMoreParams, TaskNavigationLoadMoreResult,
     TaskNavigationRefreshParams, TaskNavigationRefreshResult, TaskOpenParams, TaskOpenResult,
-    TaskReleaseParams, TaskReleaseResult, TaskSearchFilesParams, TaskSearchFilesResult,
-    TaskSendParams, TaskSendResult, TaskSetArchivedParams, TaskSetArchivedResult,
+    TaskReleaseParams, TaskReleaseResult, TaskRestoreParams, TaskRestoreResult,
+    TaskSearchFilesParams, TaskSearchFilesResult, TaskSendParams, TaskSendResult,
     TaskSetConfigOptionParams, TaskSetConfigOptionResult, TerminalOutputSnapshot,
     ToolDetailSnapshot, WorkspaceFileSearchState,
 };
@@ -378,14 +379,18 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<TaskMarkReadResult>(output, config);
     push_decl::<TaskListParams>(output, config);
     push_decl::<TaskListResult>(output, config);
+    push_decl::<TaskListLifecycle>(output, config);
     push_decl::<TaskNavigationRefreshParams>(output, config);
     push_decl::<TaskNavigationRefreshResult>(output, config);
     push_decl::<TaskNavigationLoadMoreParams>(output, config);
     push_decl::<TaskNavigationLoadMoreResult>(output, config);
     push_decl::<TaskReleaseParams>(output, config);
     push_decl::<TaskReleaseResult>(output, config);
-    push_decl::<TaskSetArchivedParams>(output, config);
-    push_decl::<TaskSetArchivedResult>(output, config);
+    push_decl::<TaskArchiveParams>(output, config);
+    push_decl::<TaskArchiveResult>(output, config);
+    push_decl::<TaskRestoreParams>(output, config);
+    push_decl::<TaskRestoreResult>(output, config);
+    push_decl::<TaskLifecycleChanged>(output, config);
     push_decl::<SupportRecoverStuckSessionsParams>(output, config);
     push_decl::<SupportRecoverStuckSessionsResult>(output, config);
 
@@ -412,6 +417,7 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<AgentSetupReason>(output, config);
     push_decl::<AgentCapabilities>(output, config);
     push_decl::<TaskNavigationSnapshot>(output, config);
+    push_decl::<TaskListSnapshot>(output, config);
     push_decl::<TaskNavigationEntry>(output, config);
     push_decl::<NativeSessionSummary>(output, config);
     push_decl::<NativeSessionReference>(output, config);

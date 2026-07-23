@@ -313,6 +313,42 @@ fn payload_matches_subscription(
                     } if project_id.as_ref().is_none_or(|project_id| &task.project_id == project_id)
                 )
         }
+        SubscriptionScope::TaskList {
+            lifecycle,
+            project_id,
+        } => {
+            matches!(
+                payload,
+                AppServerEventPayload::SnapshotReplaced { .. }
+                    | AppServerEventPayload::TaskLifecycleChanged { .. }
+            ) && match payload {
+                AppServerEventPayload::TaskLifecycleChanged { change } => {
+                    let matches_lifecycle =
+                        |candidate: openaide_app_server_protocol::snapshot::TaskLifecycle| {
+                            match lifecycle {
+                                openaide_app_server_protocol::task::TaskListLifecycle::Open => {
+                                    matches!(
+                                        candidate,
+                                        openaide_app_server_protocol::snapshot::TaskLifecycle::Open
+                                    )
+                                }
+                                openaide_app_server_protocol::task::TaskListLifecycle::Archived => {
+                                    matches!(
+                                    candidate,
+                                    openaide_app_server_protocol::snapshot::TaskLifecycle::Archived
+                                )
+                                }
+                            }
+                        };
+                    project_id
+                        .as_ref()
+                        .is_none_or(|project_id| &change.task.project_id == project_id)
+                        && (matches_lifecycle(change.task.lifecycle)
+                            || matches_lifecycle(change.previous_lifecycle))
+                }
+                _ => true,
+            }
+        }
         SubscriptionScope::Task { .. } => matches!(
             payload,
             AppServerEventPayload::SnapshotReplaced { .. }

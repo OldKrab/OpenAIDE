@@ -10,9 +10,9 @@ use openaide_app_server_protocol::methods::{
     SETTINGS_GET_MCP_SERVERS, SETTINGS_GET_PREFERENCES, SETTINGS_GET_RUNTIME, SETTINGS_GET_SKILLS,
     SETTINGS_UPDATE_PREFERENCES, SETTINGS_UPDATE_RUNTIME, SHELL_RESOLVE_FILE_REVEAL,
     STATE_SUBSCRIBE, STATE_UNSUBSCRIBE, SUPPORT_RECOVER_STUCK_SESSIONS, TASK_ACQUIRE,
-    TASK_ACQUIRE_IN_WORKTREE, TASK_ADOPT_NATIVE_SESSION, TASK_CANCEL, TASK_CHAT_PAGE, TASK_LIST,
-    TASK_MARK_READ, TASK_NAVIGATION_LOAD_MORE, TASK_NAVIGATION_REFRESH, TASK_OPEN, TASK_RELEASE,
-    TASK_SEARCH_FILES, TASK_SEND, TASK_SET_ARCHIVED, TASK_SET_CONFIG_OPTION,
+    TASK_ACQUIRE_IN_WORKTREE, TASK_ADOPT_NATIVE_SESSION, TASK_ARCHIVE, TASK_CANCEL, TASK_CHAT_PAGE,
+    TASK_LIST, TASK_MARK_READ, TASK_NAVIGATION_LOAD_MORE, TASK_NAVIGATION_REFRESH, TASK_OPEN,
+    TASK_RELEASE, TASK_RESTORE, TASK_SEARCH_FILES, TASK_SEND, TASK_SET_CONFIG_OPTION,
     WORKSPACE_LIST_DIRECTORY, WORKSPACE_LIST_ROOTS, WORKTREE_CREATE, WORKTREE_LINKED_TASKS,
     WORKTREE_RECREATE, WORKTREE_REFRESH, WORKTREE_REMOVAL_PREFLIGHT, WORKTREE_REMOVE,
     WORKTREE_RENAME, WORKTREE_RESOLVE_FOLDER,
@@ -194,9 +194,8 @@ impl RpcGateway {
                 self.handle_task_set_config_option(connection_id, id, params, meta, now)
             }
             TASK_RELEASE => self.handle_task_release(connection_id, id, params, meta, now),
-            TASK_SET_ARCHIVED => {
-                self.handle_task_set_archived(connection_id, id, params, meta, now)
-            }
+            TASK_ARCHIVE => self.handle_task_archive(connection_id, id, params, meta, now),
+            TASK_RESTORE => self.handle_task_restore(connection_id, id, params, meta),
             TASK_LIST => self.handle_task_list(connection_id, id, params, meta),
             TASK_OPEN => self.handle_task_open(connection_id, id, params, meta),
             TASK_MARK_READ => self.handle_task_mark_read(connection_id, id, params, meta, now),

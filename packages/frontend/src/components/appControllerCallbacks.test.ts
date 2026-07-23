@@ -29,11 +29,12 @@ import {
   TASK_CANCEL,
   TASK_CHAT_PAGE,
   TASK_ACQUIRE,
+  TASK_ARCHIVE,
   TASK_RELEASE,
   TASK_LIST,
   TASK_OPEN,
   TASK_SEND,
-  TASK_SET_ARCHIVED,
+  TASK_RESTORE,
   TASK_SET_CONFIG_OPTION,
   type AttachmentHandleId,
   type BackendConnection,
@@ -776,7 +777,7 @@ describe("app controller callbacks", () => {
       turnId: "turn-1",
       userMessageId: "user-message",
       task: {
-        ...protocolTaskSnapshot("task_1", "Accepted task", "visible"),
+        ...protocolTaskSnapshot("task_1", "Accepted task", "open"),
         revision: 3,
         chat: {
           items: [{
@@ -2877,7 +2878,7 @@ describe("app controller callbacks", () => {
   it("archives and restores tasks through BackendConnection when available", async () => {
     const dispatch = vi.fn();
     const request = vi.fn(async (method: string) => {
-      if (method === TASK_SET_ARCHIVED) {
+      if (method === TASK_ARCHIVE) {
         return {
           taskId: "task_1",
           archived: true,
@@ -2913,7 +2914,7 @@ describe("app controller callbacks", () => {
     }).navigation.archiveTask("task_1");
     await settlePromises();
 
-    expect(request).toHaveBeenCalledWith(TASK_SET_ARCHIVED, { taskId: "task_1", archived: true });
+    expect(request).toHaveBeenCalledWith(TASK_ARCHIVE, { taskId: "task_1" });
     expect(request).toHaveBeenCalledTimes(1);
     expect(dispatch).toHaveBeenCalledWith({ type: "selection:clear" });
     expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: "tasks" }));
@@ -2927,7 +2928,7 @@ describe("app controller callbacks", () => {
     dispatch.mockClear();
     request.mockClear();
     request.mockImplementation(async (method: string) => {
-      if (method === TASK_SET_ARCHIVED) {
+      if (method === TASK_RESTORE) {
         return {
           taskId: "task_1",
           archived: false,
@@ -2945,7 +2946,7 @@ describe("app controller callbacks", () => {
     }).navigation.restoreTask("task_1");
     await settlePromises();
 
-    expect(request).toHaveBeenCalledWith(TASK_SET_ARCHIVED, { taskId: "task_1", archived: false });
+    expect(request).toHaveBeenCalledWith(TASK_RESTORE, { taskId: "task_1" });
     expect(request).toHaveBeenCalledTimes(1);
     expect(dispatch).toHaveBeenCalledWith({ type: "archive:set", showArchived: false });
     expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: "tasks" }));
@@ -2959,7 +2960,7 @@ describe("app controller callbacks", () => {
   it("restores the visible archived task into normal task context without preserving local draft", async () => {
     const dispatch = vi.fn();
     const request = vi.fn(async (method: string) => {
-      if (method === TASK_SET_ARCHIVED) {
+      if (method === TASK_RESTORE) {
         return {
           taskId: "task_1",
           archived: false,
@@ -2980,7 +2981,7 @@ describe("app controller callbacks", () => {
     }).navigation.restoreTask("task_1");
     await settlePromises();
 
-    expect(request).toHaveBeenCalledWith(TASK_SET_ARCHIVED, { taskId: "task_1", archived: false });
+    expect(request).toHaveBeenCalledWith(TASK_RESTORE, { taskId: "task_1" });
     expect(request).toHaveBeenCalledTimes(1);
     expect(dispatch).toHaveBeenCalledWith({ type: "taskInput:clear", taskId: "task_1" });
     expect(dispatch).toHaveBeenCalledWith({ type: "archive:set", showArchived: false });
@@ -2994,7 +2995,7 @@ describe("app controller callbacks", () => {
   it("leaves the archived task route when the current snapshot is active but selection is not", async () => {
     const dispatch = vi.fn();
     const request = vi.fn(async (method: string) => {
-      if (method === TASK_SET_ARCHIVED) {
+      if (method === TASK_ARCHIVE) {
         return {
           taskId: "task_1",
           archived: true,
@@ -3027,7 +3028,7 @@ describe("app controller callbacks", () => {
     const dispatch = vi.fn();
     const pendingArchive = deferred<unknown>();
     const request = vi.fn(async (method: string) => {
-      if (method === TASK_SET_ARCHIVED) return pendingArchive.promise;
+      if (method === TASK_ARCHIVE) return pendingArchive.promise;
       throw new Error(method);
     });
     const state = createInitialState();
@@ -3063,7 +3064,7 @@ describe("app controller callbacks", () => {
     });
   });
 
-  it("toggles archive mode and reports an error when listing without BackendConnection", () => {
+  it("toggles archive mode from the live lifecycle replicas", () => {
     const asyncOperations = new AsyncOperationOwner();
     const beginNavigation = vi.spyOn(asyncOperations, "beginNavigation");
     const dispatch = vi.fn();
@@ -3075,15 +3076,11 @@ describe("app controller callbacks", () => {
     expect(dispatch).toHaveBeenNthCalledWith(1, { type: "archive:set", showArchived: true });
     expect(postHostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "surface.openArchive" }));
     expect(postHostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "surface.openNewTask" }));
-    expect(dispatch).toHaveBeenCalledWith({
-      type: "tasks:error",
-      message: "App Server connection unavailable.",
-    });
     expect(postHostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "task.list" }));
     expectCalledBefore(beginNavigation, dispatch);
   });
 
-  it("toggles archive mode through typed task list when BackendConnection is available", async () => {
+  it("does not request a one-shot archive list when BackendConnection is available", async () => {
     const asyncOperations = new AsyncOperationOwner();
     const beginNavigation = vi.spyOn(asyncOperations, "beginNavigation");
     const dispatch = vi.fn();
@@ -3106,12 +3103,7 @@ describe("app controller callbacks", () => {
     expect(dispatch).toHaveBeenNthCalledWith(1, { type: "archive:set", showArchived: true });
     expect(postHostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "surface.openArchive" }));
     expect(postHostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "surface.openNewTask" }));
-    expect(request).toHaveBeenCalledWith(TASK_LIST, { archived: true });
-    expect(dispatch).toHaveBeenCalledWith(expect.objectContaining({
-      type: "tasks",
-      archived: true,
-      tasks: [expect.objectContaining({ task_id: "task_archived" })],
-    }));
+    expect(request).not.toHaveBeenCalled();
     expect(postHostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "task.list" }));
   });
 
@@ -3124,7 +3116,7 @@ describe("app controller callbacks", () => {
       tasks: [protocolTaskSummary("task_archived_fresh", "Fresh Archived")],
     }));
     const state = createInitialState();
-    state.taskListCache.archived = [snapshot("task_archived_cached").task];
+    state.taskLists.archived = [snapshot("task_archived_cached").task];
 
     callbacks({
       backendConnection: { request: request as unknown as BackendConnection["request"] },
@@ -3351,7 +3343,7 @@ function callbacks({
 }: Partial<Parameters<typeof createAppCallbacks>[0]> = {}) {
   state.appServerStateRootId ??= "state_root_1";
   const ownedNewTaskController = newTaskController ?? new NewTaskController();
-  if (state.snapshot?.lifecycle === "new" && !ownedNewTaskController.currentTaskId()) {
+  if (state.snapshot?.lifecycle === "prepared" && !ownedNewTaskController.currentTaskId()) {
     const preparationKey = newTaskPreparationKey(state);
     if (preparationKey) {
       ownedNewTaskController.claim({
@@ -3389,7 +3381,7 @@ function preparedNewTaskState(taskId?: string) {
   if (taskId) {
     state.snapshot = {
       ...snapshot(taskId),
-      lifecycle: "new",
+      lifecycle: "prepared",
       task: {
         ...snapshot(taskId).task,
         project_id: "project_1",
@@ -3410,7 +3402,7 @@ function settlePromises() {
 
 function snapshot(taskId: string): TaskSnapshot {
   return {
-    lifecycle: "visible",
+    lifecycle: "open",
     task: {
       task_id: taskId,
       title: "Task",
@@ -3465,7 +3457,7 @@ function editableConfigOptions(): NonNullable<TaskSnapshot["agent_config"]> {
 function protocolTaskSnapshot(
   taskId: string,
   title: string,
-  lifecycle: ProtocolTaskSnapshot["lifecycle"] = "new",
+  lifecycle: ProtocolTaskSnapshot["lifecycle"] = "prepared",
 ): ProtocolTaskSnapshot {
   return {
     task: protocolTaskSummary(taskId, title),
@@ -3535,6 +3527,7 @@ function protocolTaskSummary(taskId: string, title: string) {
     taskId: taskId as never,
     projectId: "project_1" as never,
     agentId: "codex" as never,
+    lifecycle: "open" as const,
     title: { value: title, source: "user" as const },
     status: "idle" as const,
     hasMessages: true,

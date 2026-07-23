@@ -7,6 +7,51 @@
   padding: 2px 4px 0;
 }
 
+.task-section-head .archive-navigation {
+  min-height: 22px;
+  margin-left: auto;
+  border: 0;
+  border-radius: var(--oa-radius-sm);
+  background: transparent;
+  color: var(--oa-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 5px;
+  font-size: 12px;
+}
+
+.task-section-head .archive-navigation:hover,
+.task-section-head .archive-navigation:focus-visible {
+  background: var(--oa-raised);
+  color: var(--oa-text);
+}
+
+.archive-section-head {
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 1px 4px 4px;
+}
+
+.archive-section-head > button {
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: var(--oa-radius-sm);
+  background: transparent;
+  color: var(--oa-muted);
+  display: grid;
+  place-items: center;
+}
+
+.archive-section-head > button:hover { background: var(--oa-raised); color: var(--oa-text); }
+.archive-section-head > span { display: grid; min-width: 0; }
+.archive-section-head strong { font-size: 14px; line-height: 1.15; }
+.archive-section-head small { color: var(--oa-muted); font-size: 11px; line-height: 1.2; }
+.archive-actions { margin-bottom: 11px; }
+
 .task-section-title {
   color: var(--oa-text);
   font-size: 14px;
@@ -56,55 +101,6 @@
   .task-section-refresh.refreshing svg { animation: none; }
 }
 
-.task-mode-tabs {
-  min-width: 0;
-  border-bottom: 1px solid color-mix(in oklch, var(--oa-border) 48%, transparent);
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-  margin: 2px 4px 8px;
-  padding: 0 0 4px;
-  align-self: start;
-}
-
-.task-mode-tabs button {
-  position: relative;
-  min-width: 0;
-  min-height: 24px;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  color: var(--oa-muted);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 2px 5px;
-  font-size: 12px;
-}
-
-.task-mode-tabs button:hover,
-.task-mode-tabs button:focus-visible {
-  background: var(--oa-raised);
-  color: var(--oa-text);
-}
-
-.task-mode-tabs button.active {
-  background: transparent;
-  color: var(--oa-text);
-  font-weight: 560;
-}
-
-.task-mode-tabs button.active::after {
-  content: "";
-  position: absolute;
-  right: 8px;
-  bottom: -5px;
-  left: 8px;
-  height: 2px;
-  border-radius: 999px;
-  background: var(--oa-focus);
-}
-
 .task-section-head small {
   margin-left: 2px;
   color: var(--oa-muted);
@@ -142,6 +138,31 @@ body[data-shell="web"] .task-list {
   display: grid;
   gap: 2px;
   padding: 6px 0;
+}
+
+.project-task-group-rows {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+  padding-left: 6px;
+  overflow: hidden;
+  transform-origin: top;
+  transition: grid-template-rows 160ms ease, opacity 130ms ease;
+}
+
+.project-task-group-rows.expanded {
+  opacity: 1;
+  animation: project-rows-expand 160ms ease-out;
+}
+.project-task-group-rows.collapsed { opacity: 0.88; }
+
+@keyframes project-rows-expand {
+  from { opacity: 0; transform: translateY(-3px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .project-task-group-rows { transition: none; }
 }
 
 .project-task-group-header {
@@ -215,20 +236,20 @@ body[data-shell="web"] .task-list {
 }
 
 .project-task-more {
-  min-height: 30px;
+  min-height: 32px;
   border: 0;
   border-radius: var(--oa-radius-sm);
   background: transparent;
   color: var(--oa-muted);
   justify-self: stretch;
-  margin: 6px 4px 0 26px;
+  margin: 2px 0 0 6px;
   padding: 4px 8px;
+  font-size: 13px;
   text-align: left;
 }
 
 .project-task-more:hover {
   background: var(--oa-raised);
-  color: var(--oa-text);
 }
 
 .empty-list {

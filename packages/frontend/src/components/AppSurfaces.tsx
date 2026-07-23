@@ -27,6 +27,11 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     || bootstrap.surface === "nativeSession"
     || bootstrap.surface === "settings"
   );
+  const sidebarActiveTaskId = bootstrap.surface === "settings"
+    ? undefined
+    : bootstrap.surface === "task"
+      ? bootstrap.taskId
+      : activeNavigationTaskId;
   const mobileNavigation = useMobileNavigation(isWebWorkbench && mobileLayoutActive);
   const mobileNavigationOpen = mobileNavigation.open;
   const taskSurfaceModel = primaryTaskSurfaceModel(controller);
@@ -301,7 +306,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           )}
         </section>
         <Sidebar
-          activeTaskId={bootstrap.surface === "settings" ? undefined : activeNavigationTaskId}
+          activeTaskId={sidebarActiveTaskId}
           groupByProject={usesProjectNavigation}
           hiddenFromAccessibility={mobileLayoutActive && !mobileNavigation.active}
           maxTasksPerProject={DEFAULT_MAX_TASKS_PER_PROJECT}

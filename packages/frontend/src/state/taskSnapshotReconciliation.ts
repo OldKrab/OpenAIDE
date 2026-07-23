@@ -14,14 +14,14 @@ export function reconcileBackgroundTaskSnapshot(
   // Navigation snapshots own membership. A late task/open or mutation response
   // may refresh cached details, but it cannot resurrect or reclassify a Task.
   const tasks = replaceTaskSummary(state.tasks, reconciled.task);
-  const activeTasks = replaceTaskSummary(state.taskListCache.active, reconciled.task);
-  const archivedTasks = replaceTaskSummary(state.taskListCache.archived, reconciled.task);
+  const openTasks = replaceTaskSummary(state.taskLists.open, reconciled.task);
+  const archivedTasks = replaceTaskSummary(state.taskLists.archived, reconciled.task);
   return {
     ...reconciliation.state,
     tasks,
-    taskListCache: {
-      ...state.taskListCache,
-      ...(activeTasks ? { active: activeTasks } : {}),
+    taskLists: {
+      ...state.taskLists,
+      ...(openTasks ? { open: openTasks } : {}),
       ...(archivedTasks ? { archived: archivedTasks } : {}),
     },
   };
@@ -226,12 +226,12 @@ function sameTaskNavigationSummary(left: TaskSummary, right: TaskSummary) {
     && left.workspace_root === right.workspace_root;
 }
 
-function replaceTaskSummary(tasks: TaskSummary[], task: TaskSummary): TaskSummary[];
-function replaceTaskSummary(
+export function replaceTaskSummary(tasks: TaskSummary[], task: TaskSummary): TaskSummary[];
+export function replaceTaskSummary(
   tasks: TaskSummary[] | undefined,
   task: TaskSummary,
 ): TaskSummary[] | undefined;
-function replaceTaskSummary(
+export function replaceTaskSummary(
   tasks: TaskSummary[] | undefined,
   task: TaskSummary,
 ): TaskSummary[] | undefined {

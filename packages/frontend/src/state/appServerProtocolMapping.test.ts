@@ -121,11 +121,11 @@ describe("App Server Protocol state mapping", () => {
   it("uses lifecycle-specific presentation titles when App Server has no title", () => {
     expect(mapProtocolTaskSummary(protocolSummary({ title: null })).title).toBe("Untitled task");
     const newTask = mapProtocolTaskSnapshot(protocolSnapshot({
-      lifecycle: "new",
+      lifecycle: "prepared",
       task: protocolSummary({ title: null }),
     })).snapshot;
     expect(newTask.task.title).toBe("New task");
-    expect(newTask.lifecycle).toBe("new");
+    expect(newTask.lifecycle).toBe("prepared");
   });
 
   it("maps task snapshots into current frontend task snapshots", () => {
@@ -865,7 +865,7 @@ describe("App Server Protocol state mapping", () => {
 function protocolSnapshot(overrides: Partial<ProtocolTaskSnapshot> = {}): ProtocolTaskSnapshot {
   return {
     task: protocolSummary({ status: "preparing" }),
-    lifecycle: "visible",
+    lifecycle: "open",
     revision: 7,
     preparation: { kind: "ready" },
     agentConfig: {
@@ -953,6 +953,7 @@ function protocolSummary(overrides: Partial<ProtocolTaskSummary> = {}): Protocol
     taskId: "task-1" as TaskId,
     projectId: "project-1" as ProjectId,
     agentId: "codex" as AgentId,
+    lifecycle: "open",
     title: { value: "Task", source: "user" },
     status: "idle" as const,
     updatedAt: "2026-06-27T12:00:00.000Z",

@@ -7,10 +7,10 @@ use openaide_app_server_protocol::snapshot::{
     AgentCollectionSnapshot, ChatSnapshot, ClientSnapshot, ClientSnapshotScope,
     LiveSessionDataState, NewTaskDefaultsSnapshot, ProjectCollectionSnapshot, ProtocolVersion,
     ServerCapabilities, ServerSnapshot, StateRootSnapshot, TaskAgentCommandsSnapshot,
-    TaskAgentConfigSnapshot, TaskLifecycle, TaskNavigationSnapshot, TaskPreparationAction,
-    TaskPreparationSnapshot, TaskSendBlocker, TaskSendBlockerKind, TaskSendCapabilitySnapshot,
-    TaskSendCapabilityState, TaskSetupBlocker, TaskSetupBlockerKind, TaskSnapshot, TaskStatus,
-    TaskSummary,
+    TaskAgentConfigSnapshot, TaskLifecycle, TaskListSnapshot as ProtocolTaskListSnapshot,
+    TaskNavigationSnapshot, TaskPreparationAction, TaskPreparationSnapshot, TaskSendBlocker,
+    TaskSendBlockerKind, TaskSendCapabilitySnapshot, TaskSendCapabilityState, TaskSetupBlocker,
+    TaskSetupBlockerKind, TaskSnapshot, TaskStatus, TaskSummary,
 };
 use openaide_app_server_protocol::state::{SubscriptionScope, SubscriptionSnapshot};
 
@@ -26,8 +26,7 @@ mod worktree_repository;
 
 pub use agent_collection::{AgentCollectionSnapshotSource, AgentRegistrySnapshotSource};
 pub use project_collection::{ProjectCollectionSnapshotSource, ProjectCollectionStore};
-#[cfg(test)]
-pub(crate) use task_navigation::project_task_summary;
+pub(crate) use task_navigation::{project_task_lifecycle, project_task_summary};
 pub use task_navigation::{TaskNavigationSnapshotSource, TaskNavigationStore};
 pub use task_snapshot::{TaskListSnapshot, TaskSnapshotSource, TaskSnapshotStore};
 pub use worktree_repository::WorktreeRepositorySnapshotSource;
@@ -246,6 +245,21 @@ impl SnapshotProvider for SnapshotBuilder {
                     navigation: self.task_navigation.snapshot(project_id.as_ref())?,
                 }
             }
+            SubscriptionScope::TaskList {
+                lifecycle,
+                project_id,
+            } => {
+                let snapshot = self
+                    .task_snapshots
+                    .list(*lifecycle, project_id.as_ref(), None)?;
+                SubscriptionSnapshot::TaskList {
+                    task_list: ProtocolTaskListSnapshot {
+                        lifecycle: *lifecycle,
+                        tasks: snapshot.tasks,
+                        revision: snapshot.revision,
+                    },
+                }
+            }
             SubscriptionScope::Task { task_id } => SubscriptionSnapshot::Task {
                 task: self
                     .task_snapshots
@@ -341,7 +355,7 @@ struct EmptyTaskSnapshots;
 impl TaskSnapshotSource for EmptyTaskSnapshots {
     fn list(
         &self,
-        _archived: bool,
+        _lifecycle: openaide_app_server_protocol::task::TaskListLifecycle,
         _project_id: Option<&ProjectId>,
         _cursor: Option<&openaide_app_server_protocol::ids::TaskListCursor>,
     ) -> Result<TaskListSnapshot, ProtocolError> {
@@ -385,6 +399,7 @@ fn unavailable_task_snapshot(task_id: TaskId) -> TaskSnapshot {
             task_id,
             project_id: ProjectId::from("unavailable-project"),
             agent_id: AgentId::from("unavailable-agent"),
+            lifecycle: TaskLifecycle::Open,
             title: None,
             status: TaskStatus::Failed,
             updated_at: "1970-01-01T00:00:00.000Z".to_string(),
@@ -396,7 +411,7 @@ fn unavailable_task_snapshot(task_id: TaskId) -> TaskSnapshot {
             workspace_available: false,
         },
         active_turn_started_at: None,
-        lifecycle: TaskLifecycle::Visible,
+        lifecycle: TaskLifecycle::Open,
         revision: 0,
         preparation: TaskPreparationSnapshot::Blocked {
             blocker: TaskSetupBlocker {

@@ -31,9 +31,9 @@ impl TaskQueries {
     pub(crate) fn list(&self, params: TaskListParams) -> Result<TaskListResult, RuntimeError> {
         let _guard = self.lock();
         Ok(TaskListResult {
-            tasks: self.store.list_task_summaries(params.archived)?,
+            tasks: self.store.list_task_summaries(params.lifecycle)?,
             revision: self.revision_source.current_revision(),
-            archived: params.archived,
+            lifecycle: params.lifecycle,
         })
     }
 

@@ -18,6 +18,41 @@ import { applySubscriptionEvent, createSubscriptionIngestionState } from "./stat
 const rootId = "root-1" as StateRootId;
 
 describe("scope-local state ingestion", () => {
+  it("moves a Task between authoritative open and archived replicas", () => {
+    const openScope = { kind: "taskList", lifecycle: "open" } as const;
+    const archivedScope = { kind: "taskList", lifecycle: "archived" } as const;
+    const summary = taskSummary("task-1");
+    const openState = createSubscriptionIngestionState({
+      cursor: cursor("cursor-1"),
+      scope: openScope,
+      snapshot: { kind: "taskList", taskList: { lifecycle: "open", tasks: [summary], revision: 1 } },
+    }, context());
+    const archivedState = createSubscriptionIngestionState({
+      cursor: cursor("cursor-1"),
+      scope: archivedScope,
+      snapshot: { kind: "taskList", taskList: { lifecycle: "archived", tasks: [], revision: 1 } },
+    }, context());
+    const change = {
+      previousLifecycle: "open" as const,
+      task: { ...summary, lifecycle: "archived" as const },
+    };
+    const event = (subscription: SubscriptionScope): AppServerEvent => ({
+      subscription,
+      previousCursor: cursor("cursor-1"),
+      cursor: cursor("cursor-2"),
+      scope: { kind: "stateRoot", stateRootId: rootId },
+      payload: { kind: "taskLifecycleChanged", change },
+    });
+
+    const nextOpen = applySubscriptionEvent(openState, event(openScope));
+    const nextArchived = applySubscriptionEvent(archivedState, event(archivedScope));
+
+    expect(nextOpen.kind === "applied" && nextOpen.state.snapshot.kind === "taskList"
+      ? nextOpen.state.snapshot.taskList.tasks : []).toEqual([]);
+    expect(nextArchived.kind === "applied" && nextArchived.state.snapshot.kind === "taskList"
+      ? nextArchived.state.snapshot.taskList.tasks.map((task) => task.taskId) : []).toEqual(["task-1"]);
+  });
+
   it("applies one atomic Task patch at the exact next Task revision", () => {
     const state = taskState("task-1", 4);
     const item = chatItem("agent-1", "Hello");
@@ -465,7 +500,7 @@ function navigationEvent(
 function taskSnapshot(id: string, revision: number): TaskSnapshot {
   return {
     task: taskSummary(id),
-    lifecycle: "visible",
+    lifecycle: "open",
     revision,
     preparation: { kind: "ready" },
     agentConfig: { state: "ready", options: [] },
@@ -482,6 +517,7 @@ function taskSummary(id: string): TaskSummary {
     taskId: taskId(id),
     projectId: "project-1" as never,
     agentId: "agent-1" as never,
+    lifecycle: "open",
     title: { value: "Task", source: "user" },
     status: "idle",
     updatedAt: "1",

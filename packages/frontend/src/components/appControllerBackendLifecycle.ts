@@ -8,7 +8,6 @@ import {
 } from "react";
 import type { AppPreferencesRecord } from "@openaide/app-shell-contracts";
 import type { AppServerSession } from "@openaide/app-server-client";
-import { requestMissingInitialTaskList } from "../intents/taskReadIntents";
 import { refreshSettingsProjectionsThroughBackend } from "../intents/settingsProjectionIntents";
 import { startAppServerServerRequestBridge } from "../services/appServerServerRequests";
 import {
@@ -315,7 +314,7 @@ export function useAppControllerBackendLifecycle({
             stateSubscriptionContext.current = subscriptionContext;
             for (const action of ingestion.actions) {
               if (action.type === "settings:preferences") setPreferences(action.preferences);
-              if (action.type === "snapshot" && action.snapshot.lifecycle === "new") {
+              if (action.type === "snapshot" && action.snapshot.lifecycle === "prepared") {
                 newTaskController.updateSnapshot(action.snapshot);
                 continue;
               }
@@ -356,6 +355,14 @@ export function useAppControllerBackendLifecycle({
                   onBaselineReady: () => markSubscriptionReady("task-navigation"),
                   scope: taskNavigationScopeForBootstrap(initialBootstrap),
                 }));
+                for (const lifecycle of ["open", "archived"] as const) {
+                  stopSubscriptions.push(startAppServerStateSubscription({
+                    backendConnection: subscriptionConnection,
+                    context: subscriptionContext,
+                    dispatch: dispatchForCurrentReplica,
+                    scope: { kind: "taskList", lifecycle },
+                  }));
+                }
               }
               for (const project of result.snapshot.projects?.projects ?? []) {
                 if (!project.worktreeRepositoryId) continue;
@@ -390,17 +397,6 @@ export function useAppControllerBackendLifecycle({
                 });
               });
             }
-            requestMissingInitialTaskList(
-              {
-                acceptTaskList: () => operationOwner.owns(startupOperation)
-                  && operationOwner.currentArchived()
-                    === (initialBootstrap.surface === "navigation" && initialBootstrap.archived === true),
-                backendConnection,
-                dispatch: initializedDispatch,
-              },
-              initialBootstrap,
-              result.snapshot,
-            );
             // Route opening also starts App Server recovery work, so the route effect must
             // own task/open even when initialize already supplied cached task state.
             backendInitialized.current = true;

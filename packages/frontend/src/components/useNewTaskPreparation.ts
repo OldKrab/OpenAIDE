@@ -86,7 +86,7 @@ export function useNewTaskPreparation({
   const preparedTaskMatches = Boolean(
     retainedSnapshot
       && !replacementTaskId
-      && retainedSnapshot.lifecycle === "new"
+      && retainedSnapshot.lifecycle === "prepared"
       && retainedSnapshot.task.project_id === state.newTask.selection.projectId
       && retainedSnapshot.task.agent_id === state.newTask.selection.agentId
       && retainedSnapshot.task.worktree_id === state.newTask.selection.worktreeId,

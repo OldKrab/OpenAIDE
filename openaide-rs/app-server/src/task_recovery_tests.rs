@@ -82,7 +82,7 @@ fn task_record() -> TaskRecord {
         workspace_root: "/workspace".to_string(),
         project_root: None,
         worktree_id: None,
-        lifecycle: crate::storage::records::TaskLifecycle::New {
+        lifecycle: crate::storage::records::TaskLifecycle::Prepared {
             lease: Some(openaide_app_server_protocol::ids::ClientInstanceId::from(
                 "test-client",
             )),
@@ -90,7 +90,6 @@ fn task_record() -> TaskRecord {
         agent_session_id: None,
         active_turn_id: None,
         active_turn_started_at: None,
-        archived: false,
         tombstoned: false,
         revision: 0,
         config_options_catalog: None,
