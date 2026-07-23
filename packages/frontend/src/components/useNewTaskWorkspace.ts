@@ -1,4 +1,4 @@
-import { useCallback, useEffect, type Dispatch, type MutableRefObject } from "react";
+import { useCallback, useEffect, useRef, type Dispatch, type MutableRefObject } from "react";
 import { defaultAgent } from "@openaide/app-shell-contracts";
 import type { AgentOption } from "../state/composerOptions";
 import type { AppAction } from "../state/appReducer";
@@ -71,6 +71,7 @@ export function useNewTaskWorkspace({
   const newTaskBootstrapProjectId = bootstrap.surface === "task" && !bootstrap.taskId
     ? bootstrap.projectId
     : undefined;
+  const appliedNewTaskBootstrap = useRef<WebviewBootstrap | undefined>(undefined);
 
   useEffect(() => {
     if (!state.appServerStateRootId) return;
@@ -104,11 +105,19 @@ export function useNewTaskWorkspace({
       bootstrap.surface === "task"
       && !bootstrap.taskId
       && newTaskBootstrapProjectId
+      && appliedNewTaskBootstrap.current !== bootstrap
       && state.newTask.selection.projectId !== newTaskBootstrapProjectId
     ) {
+      // A shell Project hint seeds this route once; selector changes made after
+      // the surface opens remain Frontend-owned New Task context.
+      appliedNewTaskBootstrap.current = bootstrap;
       newTaskDispatch({ type: "newTask:projectId", projectId: newTaskBootstrapProjectId });
+      return;
     }
-  }, [bootstrap.surface, bootstrap.taskId, newTaskBootstrapProjectId, state.newTask.selection.projectId]);
+    if (bootstrap.surface === "task" && !bootstrap.taskId && newTaskBootstrapProjectId) {
+      appliedNewTaskBootstrap.current = bootstrap;
+    }
+  }, [bootstrap, newTaskBootstrapProjectId, newTaskDispatch, state.newTask.selection.projectId]);
 
   useEffect(() => {
     const selectedWorktreeId = state.newTask.selection.worktreeId;
