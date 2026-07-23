@@ -143,22 +143,22 @@ body[data-shell="web"] .task-list {
 .project-task-group-rows {
   min-width: 0;
   display: grid;
-  gap: 1px;
+  grid-template-rows: 1fr;
   padding-left: 6px;
   overflow: hidden;
-  transform-origin: top;
-  transition: grid-template-rows 160ms ease, opacity 130ms ease;
+  transition: grid-template-rows 180ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-.project-task-group-rows.expanded {
-  opacity: 1;
-  animation: project-rows-expand 160ms ease-out;
+.project-task-group-rows.collapsed {
+  grid-template-rows: 0fr;
 }
-.project-task-group-rows.collapsed { opacity: 0.88; }
 
-@keyframes project-rows-expand {
-  from { opacity: 0; transform: translateY(-3px); }
-  to { opacity: 1; transform: translateY(0); }
+.project-task-group-rows-inner {
+  min-height: 0;
+  display: grid;
+  align-content: start;
+  gap: 1px;
+  overflow: hidden;
 }
 
 @media (prefers-reduced-motion: reduce) {
