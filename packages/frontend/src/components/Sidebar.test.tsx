@@ -481,6 +481,21 @@ describe("Sidebar", () => {
     expect(tree.root.findAllByProps({ className: "task-row external-session-row" })).toHaveLength(0);
   });
 
+  it("does not expose Tasks pagination in Archive", () => {
+    const tree = render(
+      <Sidebar
+        {...sidebarCallbacks()}
+        groupByProject
+        nativeSessions={nativeSessions({ hasMoreProjectIds: ["project_1"] })}
+        projects={[{ projectId: "project_1", label: "OpenAIDE" }]}
+        showArchived
+        tasks={[]}
+      />,
+    );
+
+    expect(tree.root.findAllByProps({ className: "project-task-more" })).toHaveLength(0);
+  });
+
   it("renders native-session errors without hiding valid rows", () => {
     const onRecoverNativeSessions = vi.fn();
     const tree = render(
