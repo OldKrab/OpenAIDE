@@ -493,7 +493,7 @@
   animation: oa-spin 0.9s linear infinite;
 }
 
-.composer-pill:hover:not(:disabled),
+.composer-pill:hover:not(:disabled):not(.locked),
 .composer-icon-button:hover:not(:disabled),
 .composer-icon-button[aria-pressed="true"] {
   background: color-mix(in oklch, var(--oa-text) 7%, transparent);
@@ -521,6 +521,7 @@
 }
 
 .composer-popover {
+  --oa-popup-content-max-height: 260px;
   width: min(290px, calc(100vw - 32px));
   max-height: 260px;
   border: 1px solid var(--oa-border);
@@ -540,8 +541,11 @@
 .composer-popover-header {
   display: grid;
   gap: 2px;
-  padding: 7px 9px 8px;
-  border-bottom: 1px solid var(--oa-border-subtle);
+  margin: -5px -5px 5px;
+  border-bottom: 1px solid var(--oa-border);
+  border-radius: calc(var(--oa-radius-lg) - 1px) calc(var(--oa-radius-lg) - 1px) 0 0;
+  background: color-mix(in oklch, var(--oa-bg) 58%, var(--oa-panel));
+  padding: 9px 11px 8px;
 }
 
 .composer-popover > .composer-popover-header strong {
@@ -562,6 +566,7 @@
 }
 
 .new-task-context-menu {
+  --oa-popup-content-max-height: min(360px, max(96px, calc(100vh - 104px)));
   width: min(320px, calc(100vw - 32px));
   max-height: min(360px, max(96px, calc(100vh - 104px)));
   border-radius: 10px;

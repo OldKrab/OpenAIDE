@@ -648,6 +648,14 @@ impl TaskMutations {
         commit::dispose_prepared_tasks_for_agent(self, agent_id)
     }
 
+    /// Retires cached New Tasks whose live options predate a new Agent preference.
+    pub(crate) fn dispose_free_prepared_tasks_for_agent(
+        &self,
+        agent_id: &str,
+    ) -> Result<Vec<TaskRecord>, RuntimeError> {
+        commit::dispose_free_prepared_tasks_for_agent(self, agent_id)
+    }
+
     /// Removes invisible leased/free Tasks before their worktree directory is deleted.
     pub(crate) fn dispose_prepared_tasks_for_worktree(
         &self,

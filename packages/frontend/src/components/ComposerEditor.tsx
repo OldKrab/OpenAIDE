@@ -26,8 +26,10 @@ export type ComposerEditorHandle = {
 };
 
 type ComposerEditorProps = {
+  activeDescendant?: string;
   ariaLabel: string;
   commandCatalog?: AgentCommandsCatalog;
+  controls?: string;
   disabled: boolean;
   onInputText: (value: string, cursor: number) => void;
   onKeyDown: (event: KeyboardEvent<HTMLDivElement>) => void;
@@ -40,8 +42,10 @@ type ComposerEditorProps = {
 };
 
 export const ComposerEditor = forwardRef<ComposerEditorHandle, ComposerEditorProps>(function ComposerEditor({
+  activeDescendant,
   ariaLabel,
   commandCatalog,
+  controls,
   disabled,
   onInputText,
   onKeyDown,
@@ -70,6 +74,8 @@ export const ComposerEditor = forwardRef<ComposerEditorHandle, ComposerEditorPro
   return (
     <ComposerEditorSurface
       ariaLabel={ariaLabel}
+      activeDescendant={activeDescendant}
+      controls={controls}
       disabled={disabled}
       handlersRef={handlersRef}
       html={renderEditorHtml(value, commandCatalog)}
@@ -87,7 +93,9 @@ type ComposerEditorHandlers = Pick<
 >;
 
 type ComposerEditorSurfaceProps = {
+  activeDescendant?: string;
   ariaLabel: string;
+  controls?: string;
   disabled: boolean;
   handlersRef: MutableRefObject<ComposerEditorHandlers>;
   html: string;
@@ -97,7 +105,9 @@ type ComposerEditorSurfaceProps = {
 };
 
 const ComposerEditorSurface = memo(forwardRef<ComposerEditorHandle, ComposerEditorSurfaceProps>(function ComposerEditorSurface({
+  activeDescendant,
   ariaLabel,
+  controls,
   disabled,
   handlersRef,
   html,
@@ -137,7 +147,11 @@ const ComposerEditorSurface = memo(forwardRef<ComposerEditorHandle, ComposerEdit
   return (
     <>
       <div
+        aria-activedescendant={activeDescendant}
+        aria-controls={controls}
         aria-disabled={disabled}
+        aria-expanded={controls ? true : undefined}
+        aria-haspopup={controls ? "listbox" : undefined}
         aria-label={ariaLabel}
         aria-placeholder={placeholder}
         className="composer-editor"
@@ -171,7 +185,9 @@ const ComposerEditorSurface = memo(forwardRef<ComposerEditorHandle, ComposerEdit
 }), sameEditorSurfaceProps);
 
 function sameEditorSurfaceProps(previous: ComposerEditorSurfaceProps, next: ComposerEditorSurfaceProps) {
-  return previous.ariaLabel === next.ariaLabel
+  return previous.activeDescendant === next.activeDescendant
+    && previous.ariaLabel === next.ariaLabel
+    && previous.controls === next.controls
     && previous.disabled === next.disabled
     && previous.html === next.html
     && previous.placeholder === next.placeholder

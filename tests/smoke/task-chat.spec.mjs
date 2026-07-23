@@ -84,6 +84,101 @@ test("creates a New Task, sends once, streams Chat, tools, and Agent title", asy
   await expect(page.getByRole("textbox", { name: "Message" })).toHaveText("");
 });
 
+test("keeps a Task actions popup interactive after the pointer leaves its row", async ({ page }) => {
+  await openPreparedNewTask(page);
+  await send(page, "smoke:basic");
+  await expect(page.getByLabel("Task status: Ready")).toBeVisible();
+
+  const row = page.getByRole("listitem").filter({ hasText: "Smoke task" }).first();
+  await page.evaluate(() => {
+    window.__taskPreviewInsertions = 0;
+    const observer = new MutationObserver((records) => {
+      for (const record of records) {
+        for (const node of record.addedNodes) {
+          if (node instanceof Element
+            && (node.matches(".task-preview-popover") || node.querySelector(".task-preview-popover"))) {
+            window.__taskPreviewInsertions += 1;
+          }
+        }
+      }
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+  });
+  await row.hover();
+  await page.waitForTimeout(250);
+  await row.getByRole("button", { name: "Task actions for Smoke task" }).click();
+  await page.waitForTimeout(1_100);
+
+  const menu = page.getByRole("menu", { name: "Task actions for Smoke task" });
+  await expect(menu).toBeVisible();
+  expect(await page.evaluate(() => window.__taskPreviewInsertions)).toBe(0);
+  await expect(menu).toHaveCSS("transition-duration", "0.045s");
+  await expect(page.locator(".task-preview-popover")).toHaveCount(0);
+  await expect(page.locator("#openaide-popup-layer").getByRole("menu")).toHaveCount(1);
+  const bounds = await menu.boundingBox();
+  expect(bounds).not.toBeNull();
+
+  await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height + 8);
+  await page.mouse.move(bounds.x + bounds.width / 2, bounds.y + bounds.height - 2);
+  const hitRole = await page.evaluate(({ x, y }) =>
+    document.elementFromPoint(x, y)?.closest("[role]")?.getAttribute("role"), {
+    x: bounds.x + bounds.width / 2,
+    y: bounds.y + bounds.height - 2,
+  });
+  expect(hitRole).toBe("menu");
+
+  const taskUrl = page.url();
+  await page.mouse.click(bounds.x + 2, bounds.y + 2);
+  await expect(page).toHaveURL(taskUrl);
+  await expect(menu).toBeVisible();
+});
+
+test("shows a complete long Task title in a compact hover preview", async ({ page }) => {
+  const title = "A deliberately long task title segment that remains readable in the compact hover preview. ".repeat(12).trim();
+  await openPreparedNewTask(page);
+  await send(page, "smoke:long-title");
+  await expect(page.getByLabel("Task status: Ready")).toBeVisible();
+  await page.setViewportSize({ width: 1_662, height: 215 });
+
+  const row = page.getByRole("listitem").filter({ hasText: title }).first();
+  await row.hover();
+  const preview = page.locator(".task-preview-popover");
+  await expect(preview).toBeVisible();
+  await expect(preview.locator("header strong")).toHaveText(title);
+
+  const geometry = await preview.evaluate((element) => {
+    const titleElement = element.querySelector("header strong");
+    const bounds = element.getBoundingClientRect();
+    return {
+      bottom: bounds.bottom,
+      height: bounds.height,
+      titleClientHeight: titleElement.clientHeight,
+      titleClientWidth: titleElement.clientWidth,
+      titleScrollTop: titleElement.scrollTop,
+      titleScrollHeight: titleElement.scrollHeight,
+      titleScrollWidth: titleElement.scrollWidth,
+      width: bounds.width,
+    };
+  });
+  expect(geometry.width).toBeLessThanOrEqual(380);
+  expect(geometry.bottom).toBeLessThanOrEqual(207);
+  expect(geometry.titleScrollWidth).toBeLessThanOrEqual(geometry.titleClientWidth);
+  expect(geometry.titleClientHeight).toBeLessThanOrEqual(110);
+  expect(geometry.titleScrollHeight).toBeGreaterThan(geometry.titleClientHeight);
+  const titleWrap = preview.locator(".task-preview-title-wrap");
+  await expect(titleWrap).toHaveAttribute("data-more-below", "true");
+  expect(await titleWrap.evaluate((element) => getComputedStyle(element, "::after").opacity)).toBe("1");
+  await preview.locator(".task-preview-title").evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+    element.dispatchEvent(new Event("scroll"));
+  });
+  expect(await preview.locator(".task-preview-title").evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  await expect(titleWrap).toHaveAttribute("data-more-below", "false");
+  await expect.poll(() => titleWrap.evaluate((element) => getComputedStyle(element, "::after").opacity)).toBe("0");
+  await expect(preview.getByText("Project", { exact: true })).toBeVisible();
+  await expect(preview.getByText("Location", { exact: true })).toBeVisible();
+});
+
 test("recovers an open Task composer once after client liveness expires", async ({ page }) => {
   await openPreparedNewTask(page);
   await send(page, "smoke:basic");

@@ -13,6 +13,17 @@ function readCssWithImports(path: string): string {
   );
 }
 
+describe("interactive control styles", () => {
+  it("uses a pointer cursor only for enabled semantic controls", () => {
+    expect(appCss).toMatch(
+      /:where\(\s*button,\s*a\[href\],\s*summary,\s*\[role="button"\],\s*\[role="menuitem"\],\s*\[role="tab"\]\s*\):not\(:disabled\):not\(\[aria-disabled="true"\]\)\s*{\s*cursor:\s*pointer;/,
+    );
+    expect(appCss).toMatch(
+      /:where\(\s*button,\s*\[role="button"\],\s*\[role="menuitem"\],\s*\[role="tab"\]\s*\):is\(:disabled,\s*\[aria-disabled="true"\]\)\s*{\s*cursor:\s*default;/,
+    );
+  });
+});
+
 describe("task list row styles", () => {
   it("renders Questions as one soft surface with quiet field separation and low-border controls", () => {
     expect(appCss).toMatch(/\.question-card\s*{[^}]*border:\s*0;[^}]*border-radius:\s*12px;[^}]*background:\s*color-mix\(in oklch, var\(--oa-panel\) 78%, var\(--oa-bg\)\);/);
@@ -31,10 +42,13 @@ describe("task list row styles", () => {
   });
 
   it("uses one token-based scrollbar style across the webview", () => {
-    expect(appCss).toMatch(/\*\s*{[^}]*scrollbar-width:\s*thin;[^}]*scrollbar-color:\s*color-mix\(in oklch, var\(--oa-muted\) 42%, transparent\) transparent;/);
+    expect(appCss).toMatch(/\*\s*{[^}]*scrollbar-width:\s*thin;/);
+    expect(appCss).toMatch(/\*\s*{[^}]*scrollbar-color:\s*var\(--oa-border-strong\) transparent;/);
     expect(appCss).toMatch(/\*::-webkit-scrollbar\s*{[^}]*width:\s*10px;[^}]*height:\s*10px;/);
     expect(appCss).toMatch(/\*::-webkit-scrollbar-track\s*{\s*background:\s*transparent;/);
     expect(appCss).toMatch(/\*::-webkit-scrollbar-thumb\s*{[^}]*background:\s*color-mix\(in oklch, var\(--oa-muted\) 42%, transparent\);[^}]*background-clip:\s*content-box;/);
+    expect(appCss).toMatch(/\*::-webkit-scrollbar-thumb:hover\s*{[^}]*background:\s*color-mix\(in oklch, var\(--oa-muted\) 62%, transparent\);[^}]*background-clip:\s*content-box;/);
+    expect(appCss).not.toMatch(/::-webkit-scrollbar-thumb:active/);
     expect(appCss).not.toMatch(/\.task-list::-webkit-scrollbar/);
     expect(appCss).not.toMatch(/\.composer-popover\s*{[^}]*scrollbar-color:/);
   });
@@ -69,7 +83,11 @@ describe("task list row styles", () => {
     expect(appCss).toMatch(/\.task-row:hover \.task-row-action-slot,\s*\.task-row:has\(:focus-visible\) \.task-row-action-slot\s*{[^}]*pointer-events:\s*auto;/);
     expect(appCss).toMatch(/\.task-row-action\s*{[^}]*cursor:\s*pointer;/);
     expect(appCss).toMatch(/\.task-row-action:hover,\s*\.task-row-action:focus-visible\s*{[^}]*background:\s*transparent;[^}]*color:\s*var\(--oa-text\);/);
-    expect(appCss).toMatch(/\.task-row-menu\s*{[^}]*position:\s*absolute;[^}]*min-width:\s*132px;[^}]*background:\s*var\(--oa-panel\);/);
+    expect(appCss).toMatch(/\.oa-popup-menu\s*{[^}]*min-width:\s*min\(180px,\s*calc\(100vw - 16px\)\);/);
+    expect(appCss).toMatch(/\.oa-popup-surface\s*{[^}]*background:\s*var\(--oa-panel\);/);
+    expect(appCss).toMatch(/\.oa-popup-menu \[role\^="menuitem"\]\s*{[^}]*min-height:\s*30px;[^}]*gap:\s*8px;[^}]*padding:\s*5px 8px;[^}]*font-size:\s*13px;[^}]*font-weight:\s*400;/);
+    expect(appCss).toMatch(/\.oa-popup-menu \[role\^="menuitem"\] > svg\s*{[^}]*width:\s*14px;[^}]*height:\s*14px;[^}]*color:\s*var\(--oa-muted\);/);
+    expect(appCss).not.toMatch(/\.task-row-menu\s*{[^}]*position:\s*absolute;/);
     expect(appCss).not.toMatch(/\.task-row-action\s*{[^}]*pointer-events:\s*none;/);
   });
 
@@ -79,8 +97,26 @@ describe("task list row styles", () => {
   });
 
   it("exposes Task details in the row menu only on mobile", () => {
-    expect(appCss).toMatch(/button\.task-row-mobile-details-action\s*{\s*display:\s*none;/);
-    expect(appCss).toMatch(/@media \(max-width:\s*760px\)\s*{[\s\S]*button\.task-row-mobile-details-action\s*{\s*display:\s*flex;/);
+    expect(appCss).toMatch(/\.oa-popup-menu button\.task-row-mobile-details-action\s*{\s*display:\s*none;/);
+    expect(appCss).toMatch(/@media \(max-width:\s*760px\)\s*{[\s\S]*\.oa-popup-menu button\.task-row-mobile-details-action\s*{\s*display:\s*flex;/);
+  });
+
+  it("keeps composer popup end actions in their grid column", () => {
+    expect(appCss).toMatch(/\.oa-popup-menu\.composer-popover \[role\^="menuitem"\]\s*{\s*display:\s*grid;/);
+  });
+
+  it("caps descriptive composer menus at a readable width", () => {
+    expect(appCss).toMatch(/\.oa-popup-surface\.composer-popover\s*{[^}]*width:\s*min\(360px,\s*calc\(100vw - 16px\)\);/);
+  });
+
+  it("uses the smaller of a popup's content cap and its available anchored height", () => {
+    expect(appCss).toMatch(/\.oa-popup-surface\s*{[^}]*max-height:\s*min\(\s*var\(--oa-popup-content-max-height,\s*100dvh\),\s*var\(--oa-popup-available-height,\s*calc\(100dvh - 16px\)\)\s*\);/);
+    expect(appCss).toMatch(/\.composer-popover\s*{[^}]*--oa-popup-content-max-height:\s*260px;/);
+    expect(appCss).toMatch(/\.composer-model-menu\s*{[^}]*--oa-popup-content-max-height:\s*320px;/);
+  });
+
+  it("separates composer menu headers from selectable rows without relying on icons", () => {
+    expect(appCss).toMatch(/\.composer-popover-header\s*{[^}]*margin:\s*-5px -5px 5px;[^}]*border-bottom:\s*1px solid var\(--oa-border\);[^}]*background:\s*color-mix\(in oklch, var\(--oa-bg\) 58%, var\(--oa-panel\)\);/);
   });
 
   it("lets agent markdown use the full readable chat lane", () => {
@@ -436,7 +472,7 @@ describe("task list row styles", () => {
     expect(appCss).toMatch(/\.task-list\s*{[^}]*scroll-padding-bottom:\s*24px;/);
     expect(appCss).toMatch(/body\[data-shell="vscodeExtension"\] \.task-list\s*{[^}]*padding-right:\s*0;/);
     expect(appCss).toMatch(/body\[data-shell="web"\] \.task-list\s*{[^}]*margin-right:\s*-8px;[^}]*padding-right:\s*4px;/);
-    expect(appCss).toMatch(/\.sidebar-footer\s*{[^}]*border-top:\s*1px solid var\(--oa-border-subtle\);[^}]*padding-top:\s*6px;/);
+    expect(appCss).toMatch(/\.sidebar-footer\s*{[^}]*border-top:\s*1px solid var\(--oa-border\);[^}]*padding-top:\s*6px;/);
     expect(appCss).toMatch(/\.settings-button\s*{\s*width:\s*100%;/);
     expect(appCss).toMatch(/\.task-trailing-meta\s*{[^}]*display:\s*inline-flex;[^}]*gap:\s*4px;[^}]*font-size:\s*11px;/);
     expect(appCss).not.toMatch(/\.task-trailing-agent-name\s*{/);
@@ -489,7 +525,7 @@ describe("task list row styles", () => {
     expect(appCss).toMatch(/\.composer-controls \.composer-pill\s*{[^}]*width:\s*fit-content;[^}]*max-width:\s*min\(260px,\s*100%\);[^}]*flex:\s*0 1 auto;/);
     expect(appCss).toMatch(/\.composer-pill:not\(:disabled\),[^{]+\.composer-popover button:not\(:disabled\)\s*{[^}]*cursor:\s*pointer;/);
     expect(appCss).toMatch(/\.composer-overflow-menu-row:hover:not\(:disabled\) small,[^{]+{[^}]*color:\s*var\(--oa-text\);/);
-    expect(appCss).toMatch(/@media \(hover:\s*none\)\s*{[^}]*\.composer \.composer-pill:hover:not\(:disabled\)\s*{[^}]*background:\s*transparent;/);
+    expect(appCss).toMatch(/@media \(hover:\s*none\)\s*{[^}]*\.composer \.composer-pill:hover:not\(:disabled\),[^}]*\.composer \.composer-boolean-control:hover:not\(:disabled\)\s*{[^}]*background:\s*transparent;/);
     expect(appCss).not.toMatch(/\.composer-menu-anchor > \.composer-popover:not\(\.composer-file-browser-popover\)\s*{[^}]*position:\s*static;/);
     expect(appCss).not.toMatch(/\.composer-option-anchor > \.composer-popover:not\(\.composer-file-browser-popover\)\s*{[^}]*position:\s*static;/);
     expect(appCss).not.toMatch(/body\[data-shell="web"\] \.composer-pill\s*{\s*max-width:\s*128px;/);

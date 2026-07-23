@@ -5,6 +5,7 @@ pub(crate) mod attention;
 mod boundary_tests;
 pub mod commands;
 pub(crate) mod config_options;
+pub(crate) mod config_preferences;
 pub(crate) mod history_sync;
 pub(crate) mod lifecycle;
 pub(crate) mod mutation;

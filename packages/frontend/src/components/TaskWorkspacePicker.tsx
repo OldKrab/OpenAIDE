@@ -129,7 +129,7 @@ export function TaskWorkspacePicker({
     || `${worktree.name} ${headLabel(worktree)}`.toLocaleLowerCase().includes(normalizedQuery));
 
   return (
-    <div className="task-workspace-popover" role="dialog" aria-label="Task workspace">
+    <div className="task-workspace-popover">
       <header className="task-workspace-popover-header">
         <span><strong>Task workspace</strong><small>Choose the folder where this task will run.</small></span>
         <button aria-label="Close task workspace" onClick={onClose} type="button"><X size={15} /></button>
@@ -220,7 +220,7 @@ function CreateWorktreePanel({ intents, onBack, onCreated, project, recreate, re
     }
   };
   return (
-    <div className="task-workspace-popover task-workspace-create" role="dialog" aria-label="New worktree">
+    <div className="task-workspace-popover task-workspace-create">
       <header className="task-workspace-popover-header">
         <button aria-label="Back to task workspace" onClick={onBack} type="button"><ArrowLeft size={15} /></button>
         <span><strong>{recreate ? "Recreate worktree" : "New worktree"}</strong><small>{project.label}</small></span>

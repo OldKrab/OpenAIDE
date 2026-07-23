@@ -12,8 +12,9 @@ import {
   LoaderCircle,
   Presentation,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import type { TaskFileBrowserCallbacks } from "./appControllerCallbackTypes";
+import { EditorListbox } from "./Popup";
 
 export type FileMentionToken = {
   end: number;
@@ -207,12 +208,15 @@ export function useFileMentionPicker(
   return [visibleState, setState] as const;
 }
 
-export function FileMentionPicker({ state, onSelect }: {
+export function FileMentionPicker({ id, state, onSelect }: {
+  id?: string;
   state: FileMentionPickerState;
   onSelect: (path: string) => void;
 }) {
+  const generatedId = useId();
+  const listboxId = id ?? `workspace-files-${generatedId}`;
   return (
-    <div aria-label="Workspace files" className="composer-file-popover" role="listbox">
+    <EditorListbox className="composer-file-popover" id={listboxId} label="Workspace files">
       {state.loading ? (
         <div className="composer-file-status" role="status">
           <LoaderCircle aria-hidden="true" size={13} /> Indexing files…
@@ -225,6 +229,7 @@ export function FileMentionPicker({ state, onSelect }: {
         <button
           aria-selected={index === state.activeIndex}
           className="composer-file-option"
+          id={`${listboxId}-option-${index}`}
           key={path}
           onClick={() => onSelect(path)}
           onMouseDown={(event) => event.preventDefault()}
@@ -235,7 +240,7 @@ export function FileMentionPicker({ state, onSelect }: {
           <span>{path}</span>
         </button>
       ))}
-    </div>
+    </EditorListbox>
   );
 }
 

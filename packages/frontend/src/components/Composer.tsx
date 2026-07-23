@@ -1,5 +1,5 @@
 import { ArrowUp, CircleStop, LoaderCircle } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { AgentCommandsCatalog, AgentSlashCommand, ComposerSubmitShortcut, ConfigOptionCurrentValue, ConfigOptionsCatalog, IsolationKind } from "@openaide/app-shell-contracts";
 import { agentOptions, type AgentOption, type ComposerAttachment, type ComposerSelection } from "../state/composerOptions";
 import {
@@ -101,6 +101,7 @@ export function Composer({
   const [openMenu, setOpenMenu] = useState<ComposerMenu | undefined>();
   const [slashPicker, setSlashPicker] = useState<SlashPickerState | undefined>();
   const [fileMentionToken, setFileMentionToken] = useState<FileMentionToken | undefined>();
+  const completionId = useId();
   const [editorText, setEditorText] = useState(prompt);
   const [editorRenderRevision, setEditorRenderRevision] = useState(0);
   const [fileUploads, setFileUploads] = useState<ComposerFileUpload[]>([]);
@@ -120,6 +121,12 @@ export function Composer({
   const configMutationId = presentedConfigChange?.mutation_id;
   const [showSlowConfigUpdate, setShowSlowConfigUpdate] = useState(false);
   const [filePicker, setFilePicker] = useFileMentionPicker(fileBrowser, fileMentionToken);
+  const completionListboxId = filePicker
+    ? `${completionId}-files`
+    : slashPicker ? `${completionId}-commands` : undefined;
+  const activeCompletionId = filePicker
+    ? `${completionListboxId}-option-${filePicker.activeIndex}`
+    : slashPicker ? `${completionListboxId}-option-${slashPicker.activeIndex}` : undefined;
   const lastCommandCatalogKey = useRef(commandCatalogRevision);
   const lastSubmissionSettlementKey = useRef(submissionSettlementKey);
   const hasDraftContent = hasComposerContent(editorText, attachments.length);
@@ -150,19 +157,6 @@ export function Composer({
     if (error) setOptimisticConfigChange(undefined);
   }, [error]);
 
-  useEffect(() => {
-    if (!openMenu || typeof document === "undefined") return undefined;
-    const onPointerDown = (event: PointerEvent) => {
-      const target = event.target as { closest?: (selector: string) => Element | null } | null;
-      // Only the active menu anchor and its popover are inside the dismissal
-      // boundary. The rest of the Composer is a click-away surface.
-      if (target?.closest?.(".composer-menu-anchor, .composer-option-anchor")) return;
-      setOpenMenu(undefined);
-    };
-    document.addEventListener("pointerdown", onPointerDown);
-    return () => document.removeEventListener("pointerdown", onPointerDown);
-  }, [openMenu]);
-
   const selectConfigOption = (configId: string, value: ConfigOptionCurrentValue) => {
     if (!onSelectConfigOption) return;
     configMutationSequenceRef.current += 1;
@@ -174,15 +168,6 @@ export function Composer({
     });
     onSelectConfigOption(configId, value);
   };
-
-  useEffect(() => {
-    if (!openMenu || typeof window === "undefined") return undefined;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setOpenMenu(undefined);
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [openMenu]);
 
   useEffect(() => {
     if (!configLocked) return;
@@ -348,8 +333,10 @@ export function Composer({
         uploads={fileUploads}
       />
       <ComposerEditor
+        activeDescendant={activeCompletionId}
         ariaLabel="Message"
         commandCatalog={commandCatalog}
+        controls={completionListboxId}
         disabled={disabled}
         onInputText={(value, cursor) => {
           syncDraft(value);
@@ -489,10 +476,11 @@ export function Composer({
         <SlashCommandPicker
           activeIndex={slashPicker.activeIndex}
           commands={slashPicker.results}
+          id={`${completionId}-commands`}
           onSelect={selectSlashCommand}
         />
       ) : null}
-      {filePicker ? <FileMentionPicker onSelect={selectFileMention} state={filePicker} /> : null}
+      {filePicker ? <FileMentionPicker id={`${completionId}-files`} onSelect={selectFileMention} state={filePicker} /> : null}
       {error ? <p className="inline-error">{error}</p> : null}
       {hasDraftContent && !canSubmit && availability.submissionBlockedMessage ? (
         <p aria-live="polite" className="inline-status composer-submission-blocker">

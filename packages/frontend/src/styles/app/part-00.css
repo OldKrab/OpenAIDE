@@ -1,7 +1,7 @@
 * {
   box-sizing: border-box;
   scrollbar-width: thin;
-  scrollbar-color: color-mix(in oklch, var(--oa-muted) 42%, transparent) transparent;
+  scrollbar-color: var(--oa-border-strong) transparent;
 }
 
 *::-webkit-scrollbar {
@@ -66,6 +66,27 @@ input {
 
 button {
   color: var(--oa-text);
+}
+
+/* Semantic controls share one cursor contract across every App Shell. */
+:where(
+  button,
+  a[href],
+  summary,
+  [role="button"],
+  [role="menuitem"],
+  [role="tab"]
+):not(:disabled):not([aria-disabled="true"]) {
+  cursor: pointer;
+}
+
+:where(
+  button,
+  [role="button"],
+  [role="menuitem"],
+  [role="tab"]
+):is(:disabled, [aria-disabled="true"]) {
+  cursor: default;
 }
 
 .app-shell {
@@ -204,8 +225,8 @@ body[data-shell="web"] .sidebar {
 
 .sidebar-footer {
   min-width: 0;
-  border-top: 1px solid var(--oa-border-subtle);
-  margin-top: 6px;
+  border-top: 1px solid var(--oa-border);
+  margin-top: 0;
   padding-top: 6px;
 }
 
