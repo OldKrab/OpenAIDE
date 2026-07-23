@@ -75,7 +75,7 @@
 }
 
 .oa-popup-surface.task-preview-popover {
-  width: min(360px, calc(100vw - 16px));
+  width: min(296px, calc(100vw - 16px));
 }
 
 .task-workspace-popup > .task-workspace-popover {

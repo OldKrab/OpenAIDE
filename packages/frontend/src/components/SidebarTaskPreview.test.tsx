@@ -11,6 +11,34 @@ afterEach(() => {
 });
 
 describe("SidebarTaskPreview", () => {
+  it("keeps task previews available in a narrow VS Code sidebar", () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("window", {
+      innerHeight: 800,
+      innerWidth: 280,
+      matchMedia: () => ({ matches: true }),
+    });
+    vi.stubGlobal("document", {
+      body: { dataset: { shell: "vscodeExtension" } },
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    });
+    const row = {
+      getBoundingClientRect: () => ({ bottom: 72, height: 32, left: 4, right: 276, top: 40, width: 272, x: 4, y: 40 }),
+    } as HTMLElement;
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<SidebarTaskPreviewProvider><HoverTarget row={row} /></SidebarTaskPreviewProvider>);
+    });
+
+    act(() => tree.root.findByType("button").props.onPointerEnter());
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+    });
+
+    expect(tree.root.findAllByProps({ role: "dialog" })).toHaveLength(1);
+  });
+
   it("opens after one second of pointer dwell", () => {
     vi.useFakeTimers();
     vi.stubGlobal("window", {

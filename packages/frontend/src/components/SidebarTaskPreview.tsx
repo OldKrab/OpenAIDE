@@ -52,7 +52,10 @@ export function SidebarTaskPreviewProvider({ children }: { children: ReactNode }
   }, []);
 
   const enter = (content: SidebarPreviewContent, row: HTMLElement, immediate = false) => {
-    if (typeof window !== "undefined" && window.matchMedia("(max-width: 760px)").matches) return;
+    const narrowWebNavigation = typeof window !== "undefined"
+      && window.matchMedia("(max-width: 760px)").matches
+      && !usesContainedVscodePreview();
+    if (narrowWebNavigation) return;
     if (!immediate && pendingRowRef.current === row) return;
     clearTimeout(showTimer.current);
     clearTimeout(hideTimer.current);
@@ -98,7 +101,7 @@ export function SidebarTaskPreviewProvider({ children }: { children: ReactNode }
 
   return <Context.Provider value={{ dismiss, enter, leave }}>
     {children}
-    {preview ? <PopupHoverSurface anchor={preview.anchor} className="task-preview-popover" onPointerEnter={() => clearTimeout(hideTimer.current)} onPointerLeave={leave} containerRef={previewRef} semanticRole="dialog">
+    {preview ? <PopupHoverSurface anchor={preview.anchor} className="task-preview-popover" onPointerEnter={() => clearTimeout(hideTimer.current)} onPointerLeave={leave} containerRef={previewRef} placement={usesContainedVscodePreview() ? "bottom-start" : undefined} semanticRole="dialog">
       {preview.content.kind === "task" ? <TaskPreviewDetails content={preview.content} /> : <>
         <header><ScrollablePreviewTitle title={preview.content.title} /><span className="task-preview-state">{preview.content.state}</span></header>
         <section
@@ -131,6 +134,12 @@ export function SidebarTaskPreviewProvider({ children }: { children: ReactNode }
 }
 
 export function useSidebarTaskPreview() { return useContext(Context); }
+
+/** VS Code webviews cannot paint outside their sidebar, so narrow previews stay below their row. */
+function usesContainedVscodePreview() {
+  return typeof document !== "undefined"
+    && document.body?.dataset.shell === "vscodeExtension";
+}
 
 /** Shared Task facts rendered by desktop hover previews and mobile Task details. */
 export function TaskPreviewDetails({
