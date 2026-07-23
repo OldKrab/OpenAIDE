@@ -209,6 +209,7 @@ function CreateWorktreePanel({ intents, onBack, onCreated, project, recreate, re
   const [error, setError] = useState<string>();
   const bases = repository?.bases ?? [];
   const branchCollision = createBranch && bases.some((item) => item.kind === "localBranch" && item.name === branch.trim());
+  const showBranchCollision = branchCollision && !busy;
   const base = baseKey === "head"
     ? ({ kind: "currentHead" } satisfies WorktreeBaseSelection)
     : ({ kind: "localBranch", name: baseKey } satisfies WorktreeBaseSelection);
@@ -232,9 +233,9 @@ function CreateWorktreePanel({ intents, onBack, onCreated, project, recreate, re
           {bases.filter((item) => item.kind === "localBranch").map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}
         </select></label>
         <label className="task-workspace-checkbox"><input checked={createBranch} onChange={(event) => setCreateBranch(event.target.checked)} type="checkbox" />Create a branch</label>
-        {createBranch ? <label>Branch name<input aria-invalid={branchCollision || undefined} onChange={(event) => { setBranchEdited(true); setBranch(event.target.value); }} value={branch} />{branchCollision ? <small className="task-workspace-field-error">A local branch with this name already exists.</small> : null}</label> : <small className="task-workspace-form-hint">Leave off for a detached worktree.</small>}
+        {createBranch ? <label>Branch name<input aria-invalid={showBranchCollision || undefined} onChange={(event) => { setBranchEdited(true); setBranch(event.target.value); }} value={branch} />{showBranchCollision ? <small className="task-workspace-field-error">A local branch with this name already exists.</small> : null}</label> : <small className="task-workspace-form-hint">Leave off for a detached worktree.</small>}
         <p className="task-workspace-dirty-note"><CircleAlert size={13} />New worktrees start from committed files only.</p>
-        {busy ? <div className="task-workspace-create-progress" role="status"><RefreshCw size={14} /><span><strong>{progress?.stage ?? (recreate ? "Recreating worktree" : "Creating worktree")}</strong><small>{worktreeProgressLabel(progress)}</small></span></div> : null}
+        {busy ? <div className="task-workspace-create-progress" role="status"><RefreshCw size={14} /><span><strong>{worktreeProgressStage(progress, Boolean(recreate))}</strong><small>{worktreeProgressLabel(progress)}</small></span></div> : null}
         {error ? <p className="task-workspace-error">{error}</p> : null}
       </div>
       <footer className="task-workspace-form-actions">
@@ -255,13 +256,19 @@ function CreateWorktreePanel({ intents, onBack, onCreated, project, recreate, re
   );
 }
 
+function worktreeProgressStage(progress: WorktreeOperationSnapshot | undefined, recreate: boolean) {
+  // Queued is the operation's initial state and does not prove another operation holds the lock.
+  if (progress?.state === "queued") return "Starting worktree operation";
+  return progress?.stage ?? (recreate ? "Recreating worktree" : "Creating worktree");
+}
+
 function worktreeProgressLabel(progress?: WorktreeOperationSnapshot) {
   if (!progress) return "Git is preparing the folder and local setup.";
   if (progress.totalFiles !== undefined && progress.completedFiles !== undefined) {
     const bytes = progress.totalBytes ? ` · ${formatBytes(progress.completedBytes ?? 0)} of ${formatBytes(progress.totalBytes)}` : "";
     return `${progress.completedFiles} of ${progress.totalFiles} files${bytes}`;
   }
-  return progress.state === "queued" ? "Waiting for another worktree operation." : "Git is preparing the folder and local setup.";
+  return "Git is preparing the folder and local setup.";
 }
 
 function formatBytes(bytes: number) {
