@@ -2,6 +2,8 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { readAgentSettingsRecords } from "./agent-settings.mjs";
+import { readSplitProjectionMaybe, splitMetadata } from "./split-task-store.mjs";
 
 const HOME = os.homedir();
 const DEFAULT_LIMIT = 50;
@@ -94,15 +96,18 @@ function normalizeCandidateRoots(candidates) {
 }
 
 function localWebStateCandidates(startDir) {
-  const candidates = [];
   for (const dir of ancestorDirs(startDir)) {
+    const candidates = [];
     for (const entry of readdirMaybe(dir)) {
-      if (!entry.startsWith(".openaide-web-dev")) continue;
+      if (!entry.startsWith(".openaide-web-")) continue;
       candidates.push(path.join(dir, entry));
       candidates.push(path.join(dir, entry, "state"));
     }
+    // A local instance belongs to its nearest enclosing project. Looking above
+    // that boundary can accidentally mix unrelated repositories or /tmp runs.
+    if (candidates.length > 0) return candidates;
   }
-  return candidates;
+  return [];
 }
 
 function ancestorDirs(startDir) {
@@ -119,12 +124,35 @@ function ancestorDirs(startDir) {
 function normalizeRuntimeRoot(candidate) {
   const stat = statMaybe(candidate);
   if (!stat?.isDirectory()) return undefined;
+  const splitTasksRoot = path.join(candidate, "task-store-v1", "tasks");
+  if (fs.existsSync(splitTasksRoot)) {
+    return { storageRoot: candidate, runtimeRoot: candidate, tasksRoot: splitTasksRoot, layout: "split-v1" };
+  }
   if (fs.existsSync(path.join(candidate, "tasks"))) {
-    return { storageRoot: path.dirname(candidate), runtimeRoot: candidate, tasksRoot: path.join(candidate, "tasks") };
+    return {
+      storageRoot: path.dirname(candidate),
+      runtimeRoot: candidate,
+      tasksRoot: path.join(candidate, "tasks"),
+      layout: "legacy",
+    };
   }
   const runtimeRoot = path.join(candidate, "runtime");
+  const runtimeSplitTasksRoot = path.join(runtimeRoot, "task-store-v1", "tasks");
+  if (fs.existsSync(runtimeSplitTasksRoot)) {
+    return {
+      storageRoot: candidate,
+      runtimeRoot,
+      tasksRoot: runtimeSplitTasksRoot,
+      layout: "split-v1",
+    };
+  }
   if (fs.existsSync(path.join(runtimeRoot, "tasks"))) {
-    return { storageRoot: candidate, runtimeRoot, tasksRoot: path.join(runtimeRoot, "tasks") };
+    return {
+      storageRoot: candidate,
+      runtimeRoot,
+      tasksRoot: path.join(runtimeRoot, "tasks"),
+      layout: "legacy",
+    };
   }
   return undefined;
 }
@@ -151,13 +179,14 @@ function printTasks(roots, args) {
   if (filtered.length === 0) return console.log("No tasks.");
   for (const entry of filtered) {
     const task = entry.task ?? {};
+    const messageSummary = entry.storage.layout === "split-v1" ? "messages=lazy" : `messages=${entry.messageCount ?? "?"}`;
     console.log(
       [
         task.task_id ?? entry.taskId,
         task.status ?? "?",
         task.unread ? "unread" : "read",
-        task.title ?? "(untitled)",
-        `messages=${entry.messageCount ?? "?"}`,
+        taskTitle(task),
+        messageSummary,
         shortPath(entry.root.runtimeRoot),
       ].join(" | "),
     );
@@ -249,7 +278,8 @@ function searchArtifacts(roots, args) {
   const limit = numberFlag(args.flags.limit, DEFAULT_LIMIT);
   const hits = [];
   for (const entry of allTasks(roots)) {
-    for (const file of ["task.json", "message_meta.json", "messages.jsonl"]) {
+    const split = entry.storage.layout === "split-v1";
+    for (const file of split ? ["task.json"] : ["task.json", "message_meta.json", "messages.jsonl"]) {
       const filePath = path.join(entry.taskDir, file);
       if (!fs.existsSync(filePath)) continue;
       const lines = fs.readFileSync(filePath, "utf8").split(/\n/);
@@ -267,11 +297,26 @@ function searchArtifacts(roots, args) {
       }
       if (hits.length >= limit) break;
     }
+    if (split && hits.length < limit) {
+      for (const stored of readMessages(entry)) {
+        const serialized = JSON.stringify(stored);
+        if (!serialized.toLowerCase().includes(lower)) continue;
+        hits.push({
+          task_id: entry.taskId,
+          title: taskTitle(entry.task),
+          source: "materialized-chat",
+          sequence: stored.sequence,
+          preview: redact(serialized.slice(0, 220)),
+        });
+        if (hits.length >= limit) break;
+      }
+    }
     if (hits.length >= limit) break;
   }
   if (args.flags.json) return console.log(JSON.stringify({ query, hits }, null, 2));
   for (const hit of hits) {
-    console.log(`${hit.task_id} ${path.basename(hit.file)}:${hit.line} ${hit.preview}`);
+    const location = hit.source === "materialized-chat" ? `chat:${hit.sequence}` : `${path.basename(hit.file)}:${hit.line}`;
+    console.log(`${hit.task_id} ${location} ${hit.preview}`);
   }
 }
 
@@ -351,48 +396,6 @@ function formatLogEntry(entry) {
   return redact([time, entry.component ?? "?", entry.level ?? "?", title, detail].filter(Boolean).join(" | "));
 }
 
-function readAgentSettingsRecords() {
-  const files = findSettingsFiles();
-  const records = [];
-  for (const file of files) {
-    const parsed = readJsoncMaybe(file).value;
-    const agents = parsed?.["openaide.agents"];
-    if (!Array.isArray(agents)) continue;
-    records.push({
-      file,
-      history: file.includes(`${path.sep}History${path.sep}`),
-      agents,
-    });
-  }
-  return records;
-}
-
-function findSettingsFiles() {
-  const roots = [
-    path.join(HOME, ".vscode-server", "data", "User"),
-    path.join(HOME, ".vscode-server-insiders", "data", "User"),
-    path.join(HOME, ".config", "Code", "User"),
-    path.join(HOME, ".config", "Code - Insiders", "User"),
-  ];
-  const files = [];
-  for (const root of roots) {
-    for (const file of [path.join(root, "settings.json"), path.join(root, "Machine", "settings.json")]) {
-      if (fs.existsSync(file)) files.push(file);
-    }
-    const historyRoot = path.join(root, "History");
-    if (!fs.existsSync(historyRoot)) continue;
-    for (const dir of fs.readdirSync(historyRoot)) {
-      const fullDir = path.join(historyRoot, dir);
-      if (!statMaybe(fullDir)?.isDirectory()) continue;
-      for (const entry of fs.readdirSync(fullDir)) {
-        const file = path.join(fullDir, entry);
-        if (statMaybe(file)?.isFile() && entry.endsWith(".json")) files.push(file);
-      }
-    }
-  }
-  return files;
-}
-
 function doctor(roots, args) {
   const taskId = args.positionals[1];
   const entries = taskId ? [requireTask(roots, taskId)] : allTasks(roots);
@@ -421,13 +424,14 @@ function exportReport(roots, args) {
   const out = outIndex >= 0 ? process.argv[outIndex + 1] : undefined;
   if (!taskId || !out) throw new Error("Usage: export <task-id-or-prefix> --out <file>");
   const entry = requireTask(roots, taskId);
+  const projection = readProjection(entry);
   const report = {
     generated_at: new Date().toISOString(),
     root: args.flags.redact === false ? entry.root.runtimeRoot : redact(entry.root.runtimeRoot),
     task: entry.task,
-    message_meta: readJsonMaybe(path.join(entry.taskDir, "message_meta.json")).value,
+    message_meta: projection.messageMeta,
     findings: doctorTask(entry),
-    messages: readMessages(entry),
+    messages: projection.messages,
   };
   const text = JSON.stringify(args.flags.redact === false ? report : redactObject(report), null, 2);
   fs.mkdirSync(path.dirname(path.resolve(out)), { recursive: true });
@@ -440,24 +444,38 @@ function doctorTask(entry) {
   const task = entry.task;
   const taskId = entry.taskId;
   const taskJson = readJsonMaybe(path.join(entry.taskDir, "task.json"));
-  const metaJson = readJsonMaybe(path.join(entry.taskDir, "message_meta.json"));
-  const messagesResult = readMessagesMaybe(entry);
+  const split = splitMetadata(taskJson.value);
+  const metaJson = split
+    ? readSplitProjectionMaybe(entry.taskDir, split)
+    : readJsonMaybe(path.join(entry.taskDir, "message_meta.json"));
+  const messagesResult = split ? metaJson : readMessagesMaybe(entry);
   if (taskJson.error) findings.push(finding("error", taskId, "task-json-invalid", taskJson.error));
-  if (metaJson.error) findings.push(finding("error", taskId, "message-meta-invalid", metaJson.error));
-  if (messagesResult.error) findings.push(finding("error", taskId, "messages-jsonl-invalid", messagesResult.error));
-  const messages = messagesResult.value ?? [];
-
-  if (!taskJson.value) findings.push(finding("error", taskId, "task-json-missing", "Missing task.json."));
-  if (!metaJson.value) findings.push(finding("warning", taskId, "message-meta-missing", "Missing message_meta.json."));
-
-  if (metaJson.value && messages.length !== metaJson.value.message_count) {
+  if (metaJson.error) findings.push(finding("error", taskId, "chat-storage-invalid", metaJson.error));
+  if (!split && messagesResult.error) findings.push(finding("error", taskId, "messages-jsonl-invalid", messagesResult.error));
+  const messages = split ? (messagesResult.value?.messages ?? []) : (messagesResult.value ?? []);
+  const messageMeta = split ? metaJson.value?.messageMeta : metaJson.value;
+  if (split && metaJson.value?.journal.incompleteTailBytes > 0) {
     findings.push(
-      finding("error", taskId, "message-count-mismatch", `message_meta count=${metaJson.value.message_count}, actual=${messages.length}.`),
+      finding(
+        "warning",
+        taskId,
+        "incomplete-chat-tail",
+        `Chat journal has ${metaJson.value.journal.incompleteTailBytes} recoverable trailing byte(s).`,
+      ),
     );
   }
-  if (task && metaJson.value && task.message_history_version !== metaJson.value.version) {
+
+  if (!taskJson.value) findings.push(finding("error", taskId, "task-json-missing", "Missing task.json."));
+  if (!messageMeta) findings.push(finding("warning", taskId, "message-meta-missing", "Missing persisted Chat metadata."));
+
+  if (messageMeta && messages.length !== messageMeta.message_count) {
     findings.push(
-      finding("warning", taskId, "history-version-mismatch", `task message_history_version=${task.message_history_version}, meta version=${metaJson.value.version}.`),
+      finding("error", taskId, "message-count-mismatch", `message metadata count=${messageMeta.message_count}, actual=${messages.length}.`),
+    );
+  }
+  if (task && messageMeta && task.message_history_version !== messageMeta.version) {
+    findings.push(
+      finding("warning", taskId, "history-version-mismatch", `task message_history_version=${task.message_history_version}, meta version=${messageMeta.version}.`),
     );
   }
 
@@ -537,13 +555,24 @@ function readTasks(root) {
     .filter((name) => name.startsWith("task_"))
     .map((taskId) => {
       const taskDir = path.join(root.tasksRoot, taskId);
-      const task = readJsonMaybe(path.join(taskDir, "task.json")).value;
-      const meta = readJsonMaybe(path.join(taskDir, "message_meta.json")).value;
+      const taskFile = readJsonMaybe(path.join(taskDir, "task.json")).value;
+      const split = splitMetadata(taskFile);
+      const task = split?.task ?? taskFile;
+      const meta = split ? undefined : readJsonMaybe(path.join(taskDir, "message_meta.json")).value;
       return {
         taskId,
         taskDir,
         task,
         messageCount: meta?.message_count,
+        storage: split
+          ? {
+              layout: "split-v1",
+              storageSequence: split.storageSequence,
+              chatSequence: split.chatSequence,
+              chatSnapshot: split.chatSnapshot,
+              chatJournal: split.chatJournal,
+            }
+          : { layout: "legacy" },
       };
     });
 }
@@ -559,9 +588,24 @@ function requireTask(roots, idOrPrefix) {
 }
 
 function readMessages(entry) {
-  const result = readMessagesMaybe(entry);
+  return readProjection(entry).messages;
+}
+
+function readProjection(entry) {
+  const taskFile = readJsonMaybe(path.join(entry.taskDir, "task.json"));
+  if (taskFile.error) throw new Error(taskFile.error);
+  const split = splitMetadata(taskFile.value);
+  if (!split) {
+    const result = readMessagesMaybe(entry);
+    if (result.error) throw new Error(result.error);
+    return {
+      messages: result.value ?? [],
+      messageMeta: readJsonMaybe(path.join(entry.taskDir, "message_meta.json")).value,
+    };
+  }
+  const result = readSplitProjectionMaybe(entry.taskDir, split);
   if (result.error) throw new Error(result.error);
-  return result.value ?? [];
+  return result.value;
 }
 
 function readMessagesMaybe(entry) {
@@ -588,56 +632,17 @@ function readJsonMaybe(file) {
   }
 }
 
-function readJsoncMaybe(file) {
-  if (!fs.existsSync(file)) return { value: undefined };
-  try {
-    return { value: JSON.parse(stripJsonComments(fs.readFileSync(file, "utf8")).replace(/,\s*([}\]])/g, "$1")) };
-  } catch (error) {
-    return { error: `${file}: ${error.message}` };
-  }
-}
-
-function stripJsonComments(text) {
-  let output = "";
-  let inString = false;
-  let escaped = false;
-  for (let index = 0; index < text.length; index += 1) {
-    const char = text[index];
-    const next = text[index + 1];
-    if (inString) {
-      output += char;
-      if (escaped) {
-        escaped = false;
-      } else if (char === "\\") {
-        escaped = true;
-      } else if (char === "\"") {
-        inString = false;
-      }
-      continue;
-    }
-    if (char === "\"") {
-      inString = true;
-      output += char;
-      continue;
-    }
-    if (char === "/" && next === "/") {
-      while (index < text.length && text[index] !== "\n") index += 1;
-      output += "\n";
-      continue;
-    }
-    if (char === "/" && next === "*") {
-      index += 2;
-      while (index < text.length && !(text[index] === "*" && text[index + 1] === "/")) index += 1;
-      index += 1;
-      continue;
-    }
-    output += char;
-  }
-  return output;
-}
-
 function previewMessage(message, full) {
   if (full) return JSON.stringify(message, null, 2);
+  if (message.kind === "agent_message") {
+    return redact(
+      (message.parts ?? [])
+        .filter((part) => part.kind === "text")
+        .map((part) => part.text)
+        .join("")
+        .slice(0, 240),
+    );
+  }
   if (message.kind === "user" || message.kind === "agent_text" || message.kind === "interruption") {
     return redact(String(message.text ?? message.message ?? "").slice(0, 240));
   }
@@ -652,6 +657,13 @@ function previewMessage(message, full) {
 
 function haystack(entry) {
   return JSON.stringify([entry.taskId, entry.task, entry.messageCount]);
+}
+
+function taskTitle(task) {
+  const title = task?.title;
+  if (typeof title === "string") return title;
+  if (title && typeof title.value === "string") return title.value;
+  return "(untitled)";
 }
 
 function finding(severity, taskId, code, message) {
@@ -749,7 +761,7 @@ Usage:
   oa-artifacts export <task-id-or-prefix> --out <file>
 
 Options:
-  --root <path>  Extension storage directory or runtime directory.
+  --root <path>  State directory, extension storage directory, or legacy runtime directory.
   --json         Machine-readable output.
 `);
 }
