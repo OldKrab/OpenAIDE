@@ -192,6 +192,7 @@ pub(super) async fn run_native_session_worker(
                             prompt,
                             content_policy,
                             trace.as_ref(),
+                            None,
                         ) {
                             crate::logging::error(
                                 "acp_steering_prompt_start_failed",

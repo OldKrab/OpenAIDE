@@ -217,7 +217,9 @@ First Send performs no history synchronization because the New Task has no Agent
 
 ### Steering messages
 
-A Send accepted while the Task is `working` is a steering message. App Server durably appends its text, Images, and file attachments to Chat and returns authoritative Task state, then asks `NativeSessionService.steer` to forward that accepted content to the same Native Session as another `session/prompt` request. The workflow does not wait for the steering response, and that response never controls Task status. The transport consumes or safely discards any eventual JSON-RPC response.
+A Send accepted while the Task is `working` is a steering message. App Server durably appends its text, Images, and file attachments to Chat and returns authoritative Task state, then asks `NativeSessionService.steer` to forward that accepted content to the same Native Session as another `session/prompt` request. The workflow does not wait synchronously for the steering response; the Native Session runtime retains that response as part of the active Task turn's prompt set.
+
+The primary prompt and every steering prompt accepted during its active Task turn form one current prompt set. The first current prompt response with `end_turn`, whether it belongs to the primary prompt or a steering prompt, ends that Task turn and publishes idle state. OpenAIDE then retires the remaining response waiters from lifecycle ownership; their eventual responses are stale and cannot finish, revive, or otherwise mutate the ended turn. Session updates remain owned by the session-lifetime update consumer and continue to be projected in arrival order.
 
 ## Native Session Updates And Chat
 
@@ -275,9 +277,9 @@ Submit, user Cancel, and prompt cancellation close the request for every client.
 
 During live work, App Server intentionally ignores ACP `user_message_chunk` because it already persisted the User message before `session/prompt`; an Agent echo must not duplicate it. During `session/load`, user-message chunks reconstruct Native Session history, grouped by native `messageId` when present, including supported non-text content.
 
-### Primary prompt completion
+### Prompt completion
 
-App Server preserves the ACP `session/prompt` response and `stopReason`. The primary response changes Task status from `working` to idle but does not finalize Chat messages, Tool state, or the Native Session update consumer.
+App Server preserves every ACP `session/prompt` response and `stopReason`. The first `end_turn` response from any prompt in the current prompt set changes Task status from `working` to idle but does not finalize Chat messages, Tool state, or the Native Session update consumer. Other stop reasons retain their prompt-specific handling below; a steering response with another stop reason does not settle the Task turn.
 
 Before publishing that idle transition, App Server projects every session update already received ahead of the prompt response through the same ordered Task revision stream. Session updates received after the response remain valid and continue through the session-lifetime update consumer.
 
