@@ -58,7 +58,7 @@ use crate::tasks::product_api::{
     AgentListSessionsWorkflow, AttachmentFileBrowserWorkflow, ResolvedSentFile,
     TaskAcquireWorkflow, TaskAdoptNativeSessionWorkflow, TaskArchiveWorkflow, TaskCancelWorkflow,
     TaskChatPageWorkflow, TaskFileSearchWorkflow, TaskOpenWorkflow, TaskReleaseWorkflow,
-    TaskSendAccepted, TaskSendWorkflow, TaskSetConfigOptionWorkflow,
+    TaskSendAccepted, TaskSendWorkflow, TaskSetConfigOptionWorkflow, TaskSetTitleWorkflow,
 };
 
 use super::*;
@@ -1940,6 +1940,7 @@ fn gateway_with_project_context_and_store() -> (RpcGateway, Store) {
         Arc::new(RejectingTaskOpen),
         Arc::new(RejectingTaskChatPage),
         Arc::new(RejectingTaskSetConfigOption),
+        Arc::new(RejectingTaskSetTitle),
         Arc::new(RejectingTaskRelease),
         Arc::new(RejectingTaskArchive),
         Arc::new(crate::worktrees::WorktreeManager::new(store.clone())),
@@ -1978,6 +1979,7 @@ fn gateway_with_attachments(attachments: Arc<dyn AttachmentFileBrowserWorkflow>)
         std::sync::Arc::new(RejectingTaskOpen),
         std::sync::Arc::new(FixedTaskChatPage),
         std::sync::Arc::new(RejectingTaskSetConfigOption),
+        std::sync::Arc::new(RejectingTaskSetTitle),
         std::sync::Arc::new(RejectingTaskRelease),
         std::sync::Arc::new(RejectingTaskArchive),
         test_worktrees(),
@@ -2065,6 +2067,7 @@ fn gateway_with_agent_session_listing(
         std::sync::Arc::new(RejectingTaskOpen),
         std::sync::Arc::new(RejectingTaskChatPage),
         std::sync::Arc::new(RejectingTaskSetConfigOption),
+        std::sync::Arc::new(RejectingTaskSetTitle),
         std::sync::Arc::new(RejectingTaskRelease),
         std::sync::Arc::new(RejectingTaskArchive),
         test_worktrees(),
@@ -2104,6 +2107,7 @@ fn gateway_with_agent_authenticate(
         std::sync::Arc::new(RejectingTaskOpen),
         std::sync::Arc::new(RejectingTaskChatPage),
         std::sync::Arc::new(RejectingTaskSetConfigOption),
+        std::sync::Arc::new(RejectingTaskSetTitle),
         std::sync::Arc::new(RejectingTaskRelease),
         std::sync::Arc::new(RejectingTaskArchive),
         test_worktrees(),
@@ -2940,6 +2944,26 @@ impl TaskSetConfigOptionWorkflow for RejectingTaskSetConfigOption {
     }
 }
 
+struct RejectingTaskSetTitle;
+
+impl TaskSetTitleWorkflow for RejectingTaskSetTitle {
+    fn set_title_for_client(
+        &self,
+        _client_instance_id: &ClientInstanceId,
+        _params: openaide_app_server_protocol::task::TaskSetTitleParams,
+    ) -> Result<
+        openaide_app_server_protocol::snapshot::TaskSummary,
+        openaide_app_server_protocol::errors::ProtocolError,
+    > {
+        Err(openaide_app_server_protocol::errors::ProtocolError {
+            code: openaide_app_server_protocol::errors::ProtocolErrorCode::Internal,
+            message: "task set title unavailable in test gateway".to_string(),
+            recoverable: true,
+            target: None,
+        })
+    }
+}
+
 struct RejectingTaskRelease;
 
 impl TaskReleaseWorkflow for RejectingTaskRelease {
@@ -3023,7 +3047,7 @@ fn client_new_task_record(
 ) -> crate::storage::records::TaskRecord {
     crate::storage::records::TaskRecord {
         task_id: task_id.to_string(),
-        title: None,
+        title: Default::default(),
         status: crate::protocol::model::TaskStatus::Inactive,
         task_version: 1,
         message_history_version: 0,

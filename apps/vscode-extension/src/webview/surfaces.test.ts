@@ -156,6 +156,18 @@ describe("VS Code webview surfaces", () => {
     );
   });
 
+  it("updates an existing Task tab title without revealing the editor", () => {
+    const manager = new TaskEditorManager(context(), runtime(), runtimeProcess(), logger());
+
+    manager.openTask("task_1", "Original title");
+    const panel = vscodeMocks.panels[0];
+    manager.updateTaskTitle("task_1", "User title");
+
+    expect(panel.title).toBe("User title");
+    expect(panel.reveal).not.toHaveBeenCalled();
+    expect(vscodeMocks.createWebviewPanel).toHaveBeenCalledOnce();
+  });
+
   it("opens a Native Session route and adopts the resulting Task in the same panel", () => {
     const manager = new TaskEditorManager(context(), runtime(), runtimeProcess(), logger());
 

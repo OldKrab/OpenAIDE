@@ -11,7 +11,7 @@ use openaide_app_server_protocol::support::{
 use openaide_app_server_protocol::task::{
     TaskAcquireParams, TaskAdoptNativeSessionParams, TaskArchiveParams, TaskCancelParams,
     TaskLifecycleChanged, TaskRestoreParams, TaskSearchFilesParams, TaskSearchFilesResult,
-    TaskSendParams,
+    TaskSendParams, TaskSetTitleParams,
 };
 use openaide_app_server_protocol::task::{TaskReleaseParams, TaskSetConfigOptionParams};
 
@@ -51,6 +51,7 @@ pub(crate) mod secret_resolver;
 pub(crate) mod send;
 mod session_cursor;
 mod set_config_option;
+mod set_title;
 mod support_recovery;
 
 #[derive(Clone)]
@@ -169,6 +170,14 @@ pub(crate) trait TaskSetConfigOptionWorkflow: Send + Sync {
         client_instance_id: &ClientInstanceId,
         params: TaskSetConfigOptionParams,
     ) -> Result<TaskSnapshot, ProtocolError>;
+}
+
+pub(crate) trait TaskSetTitleWorkflow: Send + Sync {
+    fn set_title_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        params: TaskSetTitleParams,
+    ) -> Result<openaide_app_server_protocol::snapshot::TaskSummary, ProtocolError>;
 }
 
 pub(crate) trait TaskReleaseWorkflow: Send + Sync {
@@ -637,6 +646,16 @@ impl TaskArchiveWorkflow for TaskProductApi {
         params: TaskRestoreParams,
     ) -> Result<TaskLifecycleChanged, ProtocolError> {
         self.restore_task(client_instance_id, params)
+    }
+}
+
+impl TaskSetTitleWorkflow for TaskProductApi {
+    fn set_title_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        params: TaskSetTitleParams,
+    ) -> Result<openaide_app_server_protocol::snapshot::TaskSummary, ProtocolError> {
+        self.set_task_title(client_instance_id, params)
     }
 }
 

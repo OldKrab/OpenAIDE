@@ -1,5 +1,17 @@
 import { useEffect, useRef, useState } from "react";
-import { Archive, ArrowLeft, FolderRoot, GitBranch, Info, MoreHorizontal, RotateCcw } from "lucide-react";
+import {
+  Archive,
+  ArrowLeft,
+  Check,
+  FolderRoot,
+  GitBranch,
+  Info,
+  MoreHorizontal,
+  Pencil,
+  RotateCcw,
+  Undo2,
+  X,
+} from "lucide-react";
 import type { TaskStatus, TaskSummary } from "@openaide/app-shell-contracts";
 import { AgentIcon } from "./AgentIcon";
 import { SidebarRowActionSlot } from "./SidebarRowParts";
@@ -11,6 +23,7 @@ export function SidebarTaskRow({
   onArchiveTask,
   onOpenTask,
   onRestoreTask,
+  onSetTaskTitle,
   showArchived,
   task,
 }: {
@@ -18,11 +31,19 @@ export function SidebarTaskRow({
   onArchiveTask: (taskId: string) => void;
   onOpenTask: (taskId: string) => void;
   onRestoreTask: (taskId: string) => void;
+  onSetTaskTitle?: (
+    taskId: string,
+    title: { kind: "user"; value: string } | { kind: "automatic" },
+  ) => Promise<void>;
   showArchived: boolean;
   task: TaskSummary;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState(task.title);
+  const [titleError, setTitleError] = useState<string>();
+  const [titleSaving, setTitleSaving] = useState(false);
   const rowRef = useRef<HTMLDivElement>(null);
   const preview = useSidebarTaskPreview();
   const actionSlotRef = useRef<HTMLDivElement>(null);
@@ -40,6 +61,44 @@ export function SidebarTaskRow({
       onRestoreTask(task.task_id);
     } else {
       onArchiveTask(task.task_id);
+    }
+  };
+  const beginRename = () => {
+    setMenuOpen(false);
+    setDetailsOpen(false);
+    setTitleDraft(title);
+    setTitleError(undefined);
+    setEditingTitle(true);
+  };
+  const cancelRename = () => {
+    if (titleSaving) return;
+    setEditingTitle(false);
+    setTitleError(undefined);
+  };
+  const saveTitle = async () => {
+    if (!onSetTaskTitle || titleSaving) return;
+    setTitleSaving(true);
+    setTitleError(undefined);
+    try {
+      await onSetTaskTitle(task.task_id, { kind: "user", value: titleDraft });
+      setEditingTitle(false);
+    } catch (error) {
+      setTitleError(error instanceof Error ? error.message : "Unable to rename task.");
+    } finally {
+      setTitleSaving(false);
+    }
+  };
+  const resetTitle = async () => {
+    if (!onSetTaskTitle || titleSaving) return;
+    setMenuOpen(false);
+    setTitleSaving(true);
+    setTitleError(undefined);
+    try {
+      await onSetTaskTitle(task.task_id, { kind: "automatic" });
+    } catch (error) {
+      setTitleError(error instanceof Error ? error.message : "Unable to reset task title.");
+    } finally {
+      setTitleSaving(false);
     }
   };
   useEffect(() => {
@@ -72,11 +131,37 @@ export function SidebarTaskRow({
       ref={rowRef}
       role="listitem"
     >
-      <button
-        className="task-open"
-        onClick={openTask}
-        type="button"
-      >
+      {editingTitle ? (
+        <form
+          className="task-rename-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void saveTitle();
+          }}
+        >
+          <input
+            aria-label={`Rename ${title}`}
+            autoFocus
+            disabled={titleSaving}
+            maxLength={200}
+            onChange={(event) => setTitleDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.preventDefault();
+                cancelRename();
+              }
+            }}
+            value={titleDraft}
+          />
+          <button aria-label="Save task title" disabled={titleSaving} type="submit"><Check size={13} /></button>
+          <button aria-label="Cancel task rename" disabled={titleSaving} onClick={cancelRename} type="button"><X size={13} /></button>
+          {titleError ? <small role="alert">{titleError}</small> : null}
+        </form>
+      ) : <button
+          className="task-open"
+          onClick={openTask}
+          type="button"
+        >
         <span
           aria-label={`Agent: ${task.agent_name}`}
           className="task-agent-icon"
@@ -94,7 +179,7 @@ export function SidebarTaskRow({
             worktreeName={task.worktree_id ? task.worktree_name ?? "Worktree" : undefined}
           />
         </span>
-      </button>
+        </button>}
       <SidebarRowActionSlot containerRef={actionSlotRef}>
         <button
           ref={actionTriggerRef}
@@ -120,6 +205,12 @@ export function SidebarTaskRow({
               </div>
             </> : <>
               <button className="task-row-mobile-details-action" onClick={() => setDetailsOpen(true)} type="button" role="menuitem"><Info size={13} />Task details</button>
+              {onSetTaskTitle && !showArchived ? (
+                <button onClick={beginRename} type="button" role="menuitem"><Pencil size={13} />Rename task</button>
+              ) : null}
+              {onSetTaskTitle && !showArchived && task.title_source === "user" ? (
+                <button onClick={() => void resetTitle()} type="button" role="menuitem"><Undo2 size={13} />Reset automatic title</button>
+              ) : null}
               <button onClick={runAction} type="button" role="menuitem">
                 {showArchived ? <RotateCcw size={13} /> : <Archive size={13} />}
                 {actionLabel}
@@ -128,6 +219,9 @@ export function SidebarTaskRow({
           </div>
         ) : null}
       </SidebarRowActionSlot>
+      {!editingTitle && titleError ? (
+        <small className="task-title-error" role="alert">{titleError}</small>
+      ) : null}
     </div>
   );
 }

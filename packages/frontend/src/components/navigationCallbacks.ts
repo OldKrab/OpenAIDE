@@ -8,8 +8,10 @@ import {
   AGENT_PROBE,
   TASK_NAVIGATION_LOAD_MORE,
   TASK_NAVIGATION_REFRESH,
+  TASK_SET_TITLE,
   type AgentId,
   type ProjectId,
+  type TaskId,
 } from "@openaide/app-server-client";
 import { applyProtocolAgents } from "../state/appServerAgents";
 import { requestTaskArchive, requestTaskRestore } from "../intents/taskReadIntents";
@@ -151,6 +153,15 @@ export function createNavigationCallbacks({
         return;
       }
       dispatch({ type: "tasks:error", message: "App Server connection unavailable." });
+    },
+    setTaskTitle: async (taskId, title) => {
+      if (!backendConnection?.request) {
+        throw new Error("App Server connection unavailable.");
+      }
+      await backendConnection.request(TASK_SET_TITLE, {
+        taskId: taskId as TaskId,
+        title,
+      });
     },
     toggleArchived: () => {
       const showArchived = !state.showArchived;

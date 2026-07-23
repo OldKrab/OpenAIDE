@@ -51,7 +51,7 @@ use crate::snapshots::{SnapshotBuilder, TaskSnapshotSource};
 use crate::state_sync::StateStream;
 use crate::tasks::product_api::{
     AgentListSessionsWorkflow, AttachmentFileBrowserWorkflow, TaskFileSearchWorkflow,
-    TaskOpenWorkflow, TaskReleaseWorkflow, TaskSetConfigOptionWorkflow,
+    TaskOpenWorkflow, TaskReleaseWorkflow, TaskSetConfigOptionWorkflow, TaskSetTitleWorkflow,
 };
 use crate::tasks::product_api::{
     TaskAcquireWorkflow, TaskAdoptNativeSessionWorkflow, TaskArchiveWorkflow, TaskCancelWorkflow,
@@ -88,6 +88,7 @@ pub struct RpcGateway {
     task_open: Arc<dyn TaskOpenWorkflow>,
     task_chat_page: Arc<dyn TaskChatPageWorkflow>,
     task_set_config_option: Arc<dyn TaskSetConfigOptionWorkflow>,
+    task_set_title: Arc<dyn TaskSetTitleWorkflow>,
     task_release: Arc<dyn TaskReleaseWorkflow>,
     task_archive: Arc<dyn TaskArchiveWorkflow>,
     worktrees: Arc<crate::worktrees::WorktreeManager>,
@@ -157,6 +158,7 @@ impl RpcGateway {
         task_open: Arc<dyn TaskOpenWorkflow>,
         task_chat_page: Arc<dyn TaskChatPageWorkflow>,
         task_set_config_option: Arc<dyn TaskSetConfigOptionWorkflow>,
+        task_set_title: Arc<dyn TaskSetTitleWorkflow>,
         task_release: Arc<dyn TaskReleaseWorkflow>,
         task_archive: Arc<dyn TaskArchiveWorkflow>,
         worktrees: Arc<crate::worktrees::WorktreeManager>,
@@ -192,6 +194,7 @@ impl RpcGateway {
             task_open,
             task_chat_page,
             task_set_config_option,
+            task_set_title,
             task_release,
             task_archive,
             worktrees,

@@ -20,13 +20,15 @@ fn second_store_open_is_blocked_while_first_store_lives() {
 }
 
 #[test]
-fn task_title_persists_as_one_owned_value() {
+fn task_title_persists_automatic_title_state() {
     let dir = tempfile::tempdir().unwrap();
     let store = Store::open(dir.path().to_path_buf()).unwrap();
     let mut task = task_record("task-title", TaskStatus::Inactive, "1");
-    task.title = crate::storage::records::TaskTitle::new(
-        "  Agent title  ",
-        crate::storage::records::TaskTitleSource::Agent,
+    task.title = crate::storage::records::TaskTitleState::from_title(
+        crate::storage::records::TaskTitle::new(
+            "  Agent title  ",
+            crate::storage::records::TaskTitleSource::Agent,
+        ),
     );
 
     store.write_task(&task).unwrap();
@@ -34,10 +36,35 @@ fn task_title_persists_as_one_owned_value() {
     let stored = serde_json::to_value(store.read_task("task-title").unwrap()).unwrap();
     assert_eq!(
         stored["title"],
-        serde_json::json!({ "value": "Agent title", "source": "agent" })
+        serde_json::json!({
+            "ownership": "automatic",
+            "title": { "value": "Agent title", "source": "agent" }
+        })
     );
     assert!(stored.get("agent_title").is_none());
     assert_eq!(store.read_task("task-title").unwrap().title, task.title);
+}
+
+#[test]
+fn legacy_single_task_titles_migrate_without_changing_the_visible_owner() {
+    let task = task_record("task-legacy-title", TaskStatus::Inactive, "1");
+    let mut persisted = serde_json::to_value(task).unwrap();
+    persisted["title"] = serde_json::json!({ "value": "Legacy automatic", "source": "agent" });
+
+    let automatic: TaskRecord = serde_json::from_value(persisted.clone()).unwrap();
+    assert_eq!(
+        automatic.title.effective().map(|title| title.value()),
+        Some("Legacy automatic")
+    );
+    assert!(!automatic.title.has_user_override());
+
+    persisted["title"] = serde_json::json!({ "value": "Legacy user", "source": "user" });
+    let user: TaskRecord = serde_json::from_value(persisted).unwrap();
+    assert_eq!(
+        user.title.effective().map(|title| title.value()),
+        Some("Legacy user")
+    );
+    assert!(user.title.has_user_override());
 }
 
 #[test]
@@ -818,9 +845,11 @@ fn native_history_replacement_records_the_native_history_clock() {
 fn task_record(task_id: &str, status: TaskStatus, created_at: &str) -> TaskRecord {
     TaskRecord {
         task_id: task_id.to_string(),
-        title: crate::storage::records::TaskTitle::new(
-            task_id,
-            crate::storage::records::TaskTitleSource::User,
+        title: crate::storage::records::TaskTitleState::from_title(
+            crate::storage::records::TaskTitle::new(
+                task_id,
+                crate::storage::records::TaskTitleSource::User,
+            ),
         ),
         status,
         task_version: 1,

@@ -7,6 +7,7 @@ export type TaskSummary = {
   project_id?: string;
   project_label?: string;
   title: string;
+  title_source?: "prompt" | "agent" | "user";
   status: TaskStatus;
   task_version: number;
   message_history_version: number;

@@ -42,6 +42,13 @@ export function openTaskSurface(taskId: string, title?: string) {
   frontendShell().navigation.openTask(taskId, title);
 }
 
+export function updateTaskSurfaceTitle(taskId: string, title: string) {
+  postHostMessage({
+    type: "surface.updateTaskTitle",
+    payload: { task_id: taskId, title },
+  });
+}
+
 export function replaceSettingsTabRoute(tab: SettingsTabId) {
   frontendShell().navigation.replaceSettingsTab(tab);
 }

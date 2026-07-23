@@ -138,9 +138,11 @@ fn corrupt_last_byte(path: &std::path::Path) {
 fn task_record(task_id: &str, workspace_root: &str) -> TaskRecord {
     TaskRecord {
         task_id: task_id.to_string(),
-        title: crate::storage::records::TaskTitle::new(
-            "Task",
-            crate::storage::records::TaskTitleSource::User,
+        title: crate::storage::records::TaskTitleState::from_title(
+            crate::storage::records::TaskTitle::new(
+                "Task",
+                crate::storage::records::TaskTitleSource::User,
+            ),
         ),
         status: TaskStatus::Inactive,
         task_version: 1,

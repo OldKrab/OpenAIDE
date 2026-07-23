@@ -13,9 +13,9 @@ use openaide_app_server_protocol::methods::{
     TASK_ACQUIRE_IN_WORKTREE, TASK_ADOPT_NATIVE_SESSION, TASK_ARCHIVE, TASK_CANCEL, TASK_CHAT_PAGE,
     TASK_LIST, TASK_MARK_READ, TASK_NAVIGATION_LOAD_MORE, TASK_NAVIGATION_REFRESH, TASK_OPEN,
     TASK_RELEASE, TASK_RESTORE, TASK_SEARCH_FILES, TASK_SEND, TASK_SET_CONFIG_OPTION,
-    WORKSPACE_LIST_DIRECTORY, WORKSPACE_LIST_ROOTS, WORKTREE_CREATE, WORKTREE_LINKED_TASKS,
-    WORKTREE_RECREATE, WORKTREE_REFRESH, WORKTREE_REMOVAL_PREFLIGHT, WORKTREE_REMOVE,
-    WORKTREE_RENAME, WORKTREE_RESOLVE_FOLDER,
+    TASK_SET_TITLE, WORKSPACE_LIST_DIRECTORY, WORKSPACE_LIST_ROOTS, WORKTREE_CREATE,
+    WORKTREE_LINKED_TASKS, WORKTREE_RECREATE, WORKTREE_REFRESH, WORKTREE_REMOVAL_PREFLIGHT,
+    WORKTREE_REMOVE, WORKTREE_RENAME, WORKTREE_RESOLVE_FOLDER,
 };
 
 use crate::client_lifecycle::{AppServerTime, ConnectionId};
@@ -193,6 +193,7 @@ impl RpcGateway {
             TASK_SET_CONFIG_OPTION => {
                 self.handle_task_set_config_option(connection_id, id, params, meta, now)
             }
+            TASK_SET_TITLE => self.handle_task_set_title(connection_id, id, params, meta, now),
             TASK_RELEASE => self.handle_task_release(connection_id, id, params, meta, now),
             TASK_ARCHIVE => self.handle_task_archive(connection_id, id, params, meta, now),
             TASK_RESTORE => self.handle_task_restore(connection_id, id, params, meta),

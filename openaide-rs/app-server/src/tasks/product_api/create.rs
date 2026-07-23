@@ -41,7 +41,7 @@ impl TaskProductApi {
         let now = now_string();
         let record = TaskRecord {
             task_id: format!("task_{}", Uuid::new_v4()),
-            title: None,
+            title: Default::default(),
             status: LegacyTaskStatus::Inactive,
             task_version: 1,
             message_history_version: 0,

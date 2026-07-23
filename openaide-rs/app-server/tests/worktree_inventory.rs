@@ -631,7 +631,10 @@ fn task_record(
 
     openaide_app_server::storage::records::TaskRecord {
         task_id: task_id.to_string(),
-        title: TaskTitle::new("Task", TaskTitleSource::User),
+        title: openaide_app_server::storage::records::TaskTitleState::from_title(TaskTitle::new(
+            "Task",
+            TaskTitleSource::User,
+        )),
         status: TaskStatus::Inactive,
         task_version: 0,
         message_history_version: 0,

@@ -125,10 +125,10 @@ fn runtime_startup_recovers_stale_active_turn_and_session_binding() {
     store
         .write_task(&TaskRecord {
             task_id: task_id.clone(),
-            title: openaide_app_server::storage::records::TaskTitle::new(
+            title: openaide_app_server::storage::records::TaskTitleState::from_title(openaide_app_server::storage::records::TaskTitle::new(
                 "Stale boot",
                 openaide_app_server::storage::records::TaskTitleSource::User,
-            ),
+            )),
             status: TaskStatus::Active,
             task_version: 1,
             message_history_version: 0,

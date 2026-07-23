@@ -28,6 +28,10 @@ type SidebarProjectTaskGroupProps = {
   onOpenNativeSession: (session: AgentListedSession) => void;
   onOpenTask: (taskId: string) => void;
   onRestoreTask: (taskId: string) => void;
+  onSetTaskTitle?: (
+    taskId: string,
+    title: { kind: "user"; value: string } | { kind: "automatic" },
+  ) => Promise<void>;
   onToggleCollapse: () => void;
   showArchived: boolean;
 };
@@ -51,6 +55,7 @@ export function SidebarProjectTaskGroup({
   onOpenNativeSession,
   onOpenTask,
   onRestoreTask,
+  onSetTaskTitle,
   onToggleCollapse,
   showArchived,
 }: SidebarProjectTaskGroupProps) {
@@ -112,6 +117,7 @@ export function SidebarProjectTaskGroup({
                 onArchiveTask={onArchiveTask}
                 onOpenTask={onOpenTask}
                 onRestoreTask={onRestoreTask}
+                onSetTaskTitle={onSetTaskTitle}
                 showArchived={showArchived}
                 task={row.task}
               />

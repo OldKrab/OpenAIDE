@@ -358,7 +358,11 @@ When synchronization is required, Frontend keeps the stored Chat visible, shows 
 
 ## Task Titles
 
-A Task stores one optional title with Prompt, Agent, or User provenance. New Tasks have no stored title; Frontend renders `New task` as fallback. First Send stores a normalized 60-character prefix of the first User message as a provisional Prompt title. An Agent title value or clear supersedes Prompt- or Agent-owned state, while User-owned titles remain protected. Native Session adoption stores the supplied session title as Agent-owned. User title mutation remains a future interface.
+A Task stores automatic title state plus an optional User override. New Tasks have no stored title; Frontend renders `New task` as fallback. First Send stores a normalized 60-character prefix of the first User message as a provisional Prompt title. Agent metadata may replace or clear that automatic title, and Native Session adoption stores its supplied title as Agent-owned.
+
+An Open Task may be renamed through `task/setTitle`. A User title is whitespace-normalized, non-empty, and at most 200 characters. It becomes the visible title without discarding the automatic title. Agent title updates continue to advance the hidden automatic value while the override is visible. Resetting through the same method selects automatic ownership and immediately reveals the latest automatic title, or the normal untitled fallback if the Agent cleared it. Rename and reset update Task metadata but do not count as Task activity or reorder the Task list. Archived Tasks are immutable and reject either mutation.
+
+Task title mutation is an OpenAIDE product capability, not an ACP Session operation. OpenAIDE does not send a rename request to the Agent; Agent-originated title updates continue to arrive through the existing ACP Session metadata flow.
 
 ## Query And Authorization
 

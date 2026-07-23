@@ -192,6 +192,43 @@ describe("SidebarTaskRow", () => {
     expect(detailRows.some((row) => row.children.includes("Sidebar scrolling"))).toBe(true);
   });
 
+  it("renames and resets a user-owned Task title from the row menu", async () => {
+    const onSetTaskTitle = vi.fn().mockResolvedValue(undefined);
+    const tree = render(
+      <SidebarTaskRow
+        onArchiveTask={vi.fn()}
+        onOpenTask={vi.fn()}
+        onRestoreTask={vi.fn()}
+        onSetTaskTitle={onSetTaskTitle}
+        showArchived={false}
+        task={task({ task_id: "task_rename", title: "Agent title", title_source: "user" })}
+      />,
+    );
+
+    act(() => tree.root.findByProps({ "aria-label": "Task actions for Agent title" }).props.onClick());
+    act(() => tree.root.findAllByProps({ role: "menuitem" })
+      .find((item) => item.children.includes("Rename task"))!.props.onClick());
+    const input = tree.root.findByProps({ "aria-label": "Rename Agent title" });
+    act(() => input.props.onChange({ target: { value: "My title" } }));
+    await act(async () => {
+      tree.root.findByProps({ className: "task-rename-form" }).props.onSubmit({
+        preventDefault: vi.fn(),
+      });
+    });
+
+    expect(onSetTaskTitle).toHaveBeenCalledWith("task_rename", {
+      kind: "user",
+      value: "My title",
+    });
+
+    act(() => tree.root.findByProps({ "aria-label": "Task actions for Agent title" }).props.onClick());
+    await act(async () => {
+      tree.root.findAllByProps({ role: "menuitem" })
+        .find((item) => item.children.includes("Reset automatic title"))!.props.onClick();
+    });
+    expect(onSetTaskTitle).toHaveBeenLastCalledWith("task_rename", { kind: "automatic" });
+  });
+
   it("dismisses the task actions menu on outside click and Escape", () => {
     const listeners = new Map<string, EventListener>();
     const fakeDocument = {

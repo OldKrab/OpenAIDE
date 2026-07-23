@@ -146,7 +146,10 @@ fn live_session_metadata_updates_the_durable_native_catalog() {
 fn agent_session_title_clear_overrides_prompt_title() {
     let (_dir, store, mutations, _server_requests) = test_runtime();
     let mut task = running_task("task_1");
-    task.title = TaskTitle::new("Prompt fallback", TaskTitleSource::Prompt);
+    task.title = crate::storage::records::TaskTitleState::from_title(TaskTitle::new(
+        "Prompt fallback",
+        TaskTitleSource::Prompt,
+    ));
     store.write_task(&task).unwrap();
     let sink = TaskSessionEventSink::new(
         mutations,
@@ -168,7 +171,10 @@ fn agent_session_title_clear_overrides_prompt_title() {
 fn blank_agent_session_title_value_does_not_clear_the_agent_owned_title() {
     let (_dir, store, mutations, _server_requests) = test_runtime();
     let mut task = running_task("task_1");
-    task.title = TaskTitle::new("Agent title", TaskTitleSource::Agent);
+    task.title = crate::storage::records::TaskTitleState::from_title(TaskTitle::new(
+        "Agent title",
+        TaskTitleSource::Agent,
+    ));
     store.write_task(&task).unwrap();
     let sink = TaskSessionEventSink::new(
         mutations,
@@ -190,10 +196,14 @@ fn blank_agent_session_title_value_does_not_clear_the_agent_owned_title() {
 }
 
 #[test]
-fn agent_session_title_updates_never_replace_or_clear_a_user_owned_title() {
+fn agent_session_title_updates_advance_the_hidden_automatic_title() {
     let (_dir, store, mutations, _server_requests) = test_runtime();
     let mut task = running_task("task_1");
-    task.title = TaskTitle::new("User title", TaskTitleSource::User);
+    task.title = crate::storage::records::TaskTitleState::from_title(TaskTitle::new(
+        "Original Agent title",
+        TaskTitleSource::Agent,
+    ));
+    task.title.set_user_title("User title");
     store.write_task(&task).unwrap();
     let sink = TaskSessionEventSink::new(
         mutations,
@@ -207,15 +217,15 @@ fn agent_session_title_updates_never_replace_or_clear_a_user_owned_title() {
         updated_at: AgentMetadataField::Unchanged,
     })
     .unwrap();
-    sink.metadata_changed(AgentSessionMetadataUpdate {
-        title: AgentMetadataField::Clear,
-        updated_at: AgentMetadataField::Unchanged,
-    })
-    .unwrap();
-
+    let mut stored = store.read_task("task_1").unwrap();
     assert_eq!(
-        store.read_task("task_1").unwrap().title,
+        stored.title,
         TaskTitle::new("User title", TaskTitleSource::User)
+    );
+    assert!(stored.title.reset_to_automatic());
+    assert_eq!(
+        stored.title,
+        TaskTitle::new("Agent title", TaskTitleSource::Agent)
     );
 }
 
@@ -1860,7 +1870,7 @@ fn test_runtime() -> (
 fn running_task(task_id: &str) -> TaskRecord {
     TaskRecord {
         task_id: task_id.to_string(),
-        title: None,
+        title: Default::default(),
         status: TaskStatus::Active,
         task_version: 0,
         message_history_version: 0,

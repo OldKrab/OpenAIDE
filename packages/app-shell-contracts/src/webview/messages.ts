@@ -52,6 +52,7 @@ export type WebviewToHostMessage =
   | { type: "surface.openArchive" }
   | { type: "surface.openSettings"; payload?: { agent_id?: string; return_to_new_task?: boolean; project_id?: string } }
   | { type: "surface.openTask"; payload: { task_id: string; title?: string } }
+  | { type: "surface.updateTaskTitle"; payload: { task_id: string; title: string } }
   | { type: "shell.openExternal"; payload: { url: string } }
   | { type: "shell.reload" }
   | { type: "attachment.pickFiles"; payload: { requestId: string; taskId: string } }

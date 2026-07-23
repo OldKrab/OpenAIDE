@@ -163,8 +163,8 @@ impl TaskProductApi {
                     // Promotion is durable before Agent work starts, so permissions and other
                     // Agent requests can never belong to a client-private New Task.
                     task.lifecycle = TaskLifecycle::Open;
-                    if promoted_new_task && task.title.is_none() {
-                        task.title = prompt_title(&prompt_text);
+                    if promoted_new_task && task.title.is_empty() {
+                        task.title.set_prompt_title(prompt_title(&prompt_text));
                     }
                     task.active_turn_id = Some(turn_id.as_str().to_string());
                     task.active_turn_started_at = Some(now.clone());

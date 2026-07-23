@@ -130,6 +130,30 @@ pub struct TaskSetConfigOptionResult {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
+pub struct TaskSetTitleParams {
+    pub task_id: TaskId,
+    pub title: TaskTitleSelection,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum TaskTitleSelection {
+    User { value: String },
+    Automatic,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskSetTitleResult {
+    pub task: TaskSummary,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
 pub struct TaskCancelParams {
     pub task_id: TaskId,
     #[serde(default, skip_serializing_if = "Option::is_none")]

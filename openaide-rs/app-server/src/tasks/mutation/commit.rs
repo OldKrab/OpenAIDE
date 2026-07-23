@@ -675,7 +675,7 @@ struct ChangedFields {
 
 fn changed_fields(original: &TaskRecord, task: &TaskRecord) -> ChangedFields {
     let preparation = original.preparation != task.preparation;
-    let summary = original.title != task.title
+    let summary = original.title.effective() != task.title.effective()
         || original.status != task.status
         || original.unread != task.unread
         || original.attention != task.attention

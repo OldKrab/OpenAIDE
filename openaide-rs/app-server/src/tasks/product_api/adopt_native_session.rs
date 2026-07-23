@@ -191,7 +191,7 @@ impl TaskProductApi {
         let session_id = session_id.to_string();
         let record = TaskRecord {
             task_id: task_id.to_string(),
-            title,
+            title: crate::storage::records::TaskTitleState::from_title(title),
             status: LegacyTaskStatus::Inactive,
             task_version: 1,
             message_history_version: 0,

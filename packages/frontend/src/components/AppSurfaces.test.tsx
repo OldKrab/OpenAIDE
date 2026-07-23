@@ -16,6 +16,7 @@ const surfaceMocks = vi.hoisted(() => ({
   sidebar: vi.fn(() => null),
   task: vi.fn(() => null),
   taskLoading: vi.fn(() => null),
+  updateTaskSurfaceTitle: vi.fn(),
 }));
 
 function latestMockProps<T>(mock: { mock: { calls: unknown[][] } }) {
@@ -40,6 +41,11 @@ vi.mock("./NewTaskView", () => ({
   NewTaskView: surfaceMocks.newTask,
 }));
 
+vi.mock("../services/hostBridge", async (importOriginal) => ({
+  ...await importOriginal<typeof import("../services/hostBridge")>(),
+  updateTaskSurfaceTitle: surfaceMocks.updateTaskSurfaceTitle,
+}));
+
 describe("AppSurfaces callback wiring", () => {
   beforeEach(() => {
     (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -48,6 +54,7 @@ describe("AppSurfaces callback wiring", () => {
     surfaceMocks.sidebar.mockClear();
     surfaceMocks.task.mockClear();
     surfaceMocks.taskLoading.mockClear();
+    surfaceMocks.updateTaskSurfaceTitle.mockClear();
   });
 
   afterEach(() => {
@@ -618,6 +625,10 @@ describe("AppSurfaces callback wiring", () => {
       }),
       undefined,
     );
+    expect(surfaceMocks.updateTaskSurfaceTitle).toHaveBeenCalledWith(
+      "task_1",
+      controller.state.snapshot.task.title,
+    );
     expect(surfaceMocks.newTask).not.toHaveBeenCalled();
   });
 
@@ -942,6 +953,7 @@ function controllerFor(surface: AppController["bootstrap"]["surface"]): TestCont
         retryAgent: vi.fn(async () => true),
         openTask: vi.fn(),
         restoreTask: vi.fn(),
+        setTaskTitle: vi.fn(),
         toggleArchived: vi.fn(),
       },
       newTask: {

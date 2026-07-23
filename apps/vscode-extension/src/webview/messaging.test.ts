@@ -605,6 +605,7 @@ describe("webview messaging composer routes", () => {
       openNativeSession: vi.fn(),
       openSettings: vi.fn(),
       openTask: vi.fn(() => calls.push("open")),
+      updateTaskTitle: vi.fn(),
     };
     const adoptTask = vi.fn(() => calls.push("adopt"));
 
@@ -622,6 +623,10 @@ describe("webview messaging composer routes", () => {
       { type: "surface.openTask", payload: { task_id: "task_1", title: "Fix ACP" } },
       context({}, posted, surfaces, undefined, undefined, { adoptTask }),
     );
+    await handleWebviewMessage(
+      { type: "surface.updateTaskTitle", payload: { task_id: "task_1", title: "Renamed Task" } },
+      context({}, posted, surfaces),
+    );
 
     expect(surfaces.openNewTask).toHaveBeenCalledTimes(2);
     expect(surfaces.openNewTask).toHaveBeenCalledWith("project_1");
@@ -629,6 +634,7 @@ describe("webview messaging composer routes", () => {
     expect(surfaces.openNativeSession).toHaveBeenCalledWith("codex", "session_1", "project_1");
     expect(adoptTask).toHaveBeenCalledWith("task_1", "Fix ACP");
     expect(surfaces.openTask).toHaveBeenCalledWith("task_1", "Fix ACP");
+    expect(surfaces.updateTaskTitle).toHaveBeenCalledWith("task_1", "Renamed Task");
     expect(calls).toEqual(["adopt", "open"]);
     expect(posted).toEqual([]);
   });

@@ -35,7 +35,7 @@ use openaide_app_server_protocol::support::SupportRecoverStuckSessionsParams;
 use openaide_app_server_protocol::task::{
     ComposerImage, ComposerMessage, TaskAcquireParams, TaskAdoptNativeSessionParams,
     TaskArchiveParams, TaskCancelParams, TaskMarkReadParams, TaskOpenParams, TaskReleaseParams,
-    TaskSendParams, TaskSetConfigOptionParams,
+    TaskSendParams, TaskSetConfigOptionParams, TaskSetTitleParams, TaskTitleSelection,
 };
 use openaide_app_server_protocol::workspace::WorkspaceListDirectoryParams;
 use std::collections::HashMap;
@@ -238,7 +238,7 @@ fn create_persists_idle_task_without_prompt_or_turn() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut record = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
-    record.title = None;
+    record.title = Default::default();
     record.lifecycle = test_new_task_lifecycle();
     store.write_task(&record).unwrap();
     let project_id = project_id_for_workspace("/tmp/openaide-unit-workspace/app");
@@ -1327,6 +1327,113 @@ fn first_send_promotes_new_task_with_prompt_title() {
 }
 
 #[test]
+fn set_title_preserves_and_restores_the_latest_automatic_title() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let workspace = "/tmp/openaide-title-workspace/app";
+    let mut record = task_record("task-title", workspace);
+    record.title = crate::storage::records::TaskTitleState::from_title(TaskTitle::new(
+        "Agent title",
+        TaskTitleSource::Agent,
+    ));
+    let last_activity = record.last_activity.clone();
+    store.write_task(&record).unwrap();
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        Arc::new(crate::agent::mock::MockAgent),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+    let client = crate::attachment_runtime::AttachmentOwner::test_client_instance_id();
+
+    let renamed = api
+        .set_task_title(
+            &client,
+            TaskSetTitleParams {
+                task_id: "task-title".into(),
+                title: TaskTitleSelection::User {
+                    value: "  My\ncustom   title  ".to_string(),
+                },
+            },
+        )
+        .unwrap();
+    assert_eq!(renamed.title.unwrap().value, "My custom title");
+
+    let mut current = store.read_task("task-title").unwrap();
+    assert!(current.set_agent_title("New Agent title"));
+    store.write_task(&current).unwrap();
+
+    let reset = api
+        .set_task_title(
+            &client,
+            TaskSetTitleParams {
+                task_id: "task-title".into(),
+                title: TaskTitleSelection::Automatic,
+            },
+        )
+        .unwrap();
+    let title = reset.title.expect("reset restores the automatic title");
+    assert_eq!(title.value, "New Agent title");
+    assert_eq!(title.source, ProtocolTaskTitleSource::Agent);
+    assert_eq!(
+        store.read_task("task-title").unwrap().last_activity,
+        last_activity
+    );
+}
+
+#[test]
+fn set_title_validates_user_input_and_rejects_archived_tasks() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let workspace = "/tmp/openaide-title-validation/app";
+    store
+        .write_task(&task_record("task-title", workspace))
+        .unwrap();
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        Arc::new(crate::agent::mock::MockAgent),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+    let client = crate::attachment_runtime::AttachmentOwner::test_client_instance_id();
+
+    let blank = api
+        .set_task_title(
+            &client,
+            TaskSetTitleParams {
+                task_id: "task-title".into(),
+                title: TaskTitleSelection::User {
+                    value: " \n ".to_string(),
+                },
+            },
+        )
+        .unwrap_err();
+    assert_eq!(blank.code, ProtocolErrorCode::ValidationFailed);
+    assert_eq!(
+        blank.target.and_then(|target| target.field),
+        Some("title.value".to_string())
+    );
+
+    let mut archived = store.read_task("task-title").unwrap();
+    archived.lifecycle = TaskLifecycle::Archived;
+    store.write_task(&archived).unwrap();
+    let archived_error = api
+        .set_task_title(
+            &client,
+            TaskSetTitleParams {
+                task_id: "task-title".into(),
+                title: TaskTitleSelection::Automatic,
+            },
+        )
+        .unwrap_err();
+    assert_eq!(archived_error.code, ProtocolErrorCode::Conflict);
+}
+
+#[test]
 fn acquire_returns_while_prepared_session_resume_is_blocked() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
@@ -1787,7 +1894,10 @@ fn list_agent_sessions_does_not_replace_owned_task_title_from_catalog() {
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut task = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
     task.agent_session_id = Some("native-session".to_string());
-    task.title = TaskTitle::new("Prompt fallback", TaskTitleSource::Prompt);
+    task.title = crate::storage::records::TaskTitleState::from_title(TaskTitle::new(
+        "Prompt fallback",
+        TaskTitleSource::Prompt,
+    ));
     store.write_task(&task).unwrap();
     let agent = Arc::new(RecordingAgent {
         listed_sessions: Mutex::new(vec![AgentListedSession {
@@ -2194,7 +2304,10 @@ fn background_native_catalog_refresh_does_not_replace_owned_task_title() {
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut task = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
     task.agent_session_id = Some("native-session".to_string());
-    task.title = TaskTitle::new("Prompt fallback", TaskTitleSource::Prompt);
+    task.title = crate::storage::records::TaskTitleState::from_title(TaskTitle::new(
+        "Prompt fallback",
+        TaskTitleSource::Prompt,
+    ));
     store.write_task(&task).unwrap();
     let agent = Arc::new(RecordingAgent {
         listed_sessions: Mutex::new(vec![AgentListedSession {
@@ -4119,9 +4232,11 @@ fn send_accepts_the_current_task_after_an_unrelated_revision_change() {
     .unwrap();
 
     let mut current = store.read_task("task-existing").unwrap();
-    current.title = crate::storage::records::TaskTitle::new(
-        "Updated elsewhere",
-        crate::storage::records::TaskTitleSource::User,
+    current.title = crate::storage::records::TaskTitleState::from_title(
+        crate::storage::records::TaskTitle::new(
+            "Updated elsewhere",
+            crate::storage::records::TaskTitleSource::User,
+        ),
     );
     store.write_task(&current).unwrap();
 
@@ -4279,7 +4394,7 @@ fn send_commits_inline_image_without_an_empty_text_part() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut task = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
-    task.title = None;
+    task.title = Default::default();
     task.lifecycle = test_new_task_lifecycle();
     store.write_task(&task).unwrap();
     let api = TaskProductApi::new(
@@ -6108,9 +6223,11 @@ fn task_record(task_id: &str, workspace_root: &str) -> TaskRecord {
     std::fs::create_dir_all(workspace_root).unwrap();
     TaskRecord {
         task_id: task_id.to_string(),
-        title: crate::storage::records::TaskTitle::new(
-            "Existing",
-            crate::storage::records::TaskTitleSource::User,
+        title: crate::storage::records::TaskTitleState::from_title(
+            crate::storage::records::TaskTitle::new(
+                "Existing",
+                crate::storage::records::TaskTitleSource::User,
+            ),
         ),
         status: TaskStatus::Inactive,
         task_version: 1,

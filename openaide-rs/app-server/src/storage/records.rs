@@ -72,6 +72,205 @@ pub struct TaskTitle {
     source: TaskTitleSource,
 }
 
+/// One durable title state: an optional Agent/Prompt title plus an optional user override.
+///
+/// Agent metadata keeps advancing the hidden automatic value while a user override is
+/// visible, so resetting never depends on a live Native Session or a fresh Agent event.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TaskTitleState {
+    Automatic {
+        title: Option<TaskTitle>,
+    },
+    UserOverride {
+        title: TaskTitle,
+        automatic: Option<TaskTitle>,
+    },
+}
+
+impl Default for TaskTitleState {
+    fn default() -> Self {
+        Self::Automatic { title: None }
+    }
+}
+
+impl PartialEq<Option<TaskTitle>> for TaskTitleState {
+    fn eq(&self, other: &Option<TaskTitle>) -> bool {
+        self.effective() == other.as_ref()
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(tag = "ownership", rename_all = "snake_case")]
+enum StoredTaskTitleState {
+    Automatic {
+        title: Option<TaskTitle>,
+    },
+    UserOverride {
+        title: TaskTitle,
+        automatic: Option<TaskTitle>,
+    },
+}
+
+impl Serialize for TaskTitleState {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            Self::Automatic { title } => StoredTaskTitleState::Automatic {
+                title: title.clone(),
+            },
+            Self::UserOverride { title, automatic } => StoredTaskTitleState::UserOverride {
+                title: title.clone(),
+                automatic: automatic.clone(),
+            },
+        }
+        .serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for TaskTitleState {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        if value.is_null() {
+            return Ok(Self::default());
+        }
+        let state = if value.get("ownership").is_some() {
+            match serde_json::from_value::<StoredTaskTitleState>(value)
+                .map_err(serde::de::Error::custom)?
+            {
+                StoredTaskTitleState::Automatic { title } => Self::Automatic { title },
+                StoredTaskTitleState::UserOverride { title, automatic } => {
+                    Self::UserOverride { title, automatic }
+                }
+            }
+        } else {
+            // Records written before user-reset support stored only the visible title.
+            let title =
+                serde_json::from_value::<TaskTitle>(value).map_err(serde::de::Error::custom)?;
+            if title.source() == TaskTitleSource::User {
+                Self::UserOverride {
+                    title,
+                    automatic: None,
+                }
+            } else {
+                Self::Automatic { title: Some(title) }
+            }
+        };
+        state.validate().map_err(serde::de::Error::custom)?;
+        Ok(state)
+    }
+}
+
+impl TaskTitleState {
+    pub fn from_title(title: Option<TaskTitle>) -> Self {
+        match title {
+            Some(title) if title.source() == TaskTitleSource::User => Self::UserOverride {
+                title,
+                automatic: None,
+            },
+            title => Self::Automatic { title },
+        }
+    }
+
+    pub fn effective(&self) -> Option<&TaskTitle> {
+        match self {
+            Self::Automatic { title } => title.as_ref(),
+            Self::UserOverride { title, .. } => Some(title),
+        }
+    }
+
+    pub fn as_ref(&self) -> Option<&TaskTitle> {
+        self.effective()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.effective().is_none()
+    }
+
+    pub fn has_user_override(&self) -> bool {
+        matches!(self, Self::UserOverride { .. })
+    }
+
+    pub fn set_prompt_title(&mut self, title: Option<TaskTitle>) -> bool {
+        if !self.is_empty() || title.is_none() {
+            return false;
+        }
+        let next = Self::Automatic { title };
+        if *self == next {
+            return false;
+        }
+        *self = next;
+        true
+    }
+
+    pub fn set_agent_title(&mut self, value: &str) -> bool {
+        let Some(next) = TaskTitle::new(value, TaskTitleSource::Agent) else {
+            return false;
+        };
+        self.replace_automatic(Some(next))
+    }
+
+    pub fn clear_agent_title(&mut self) -> bool {
+        self.replace_automatic(None)
+    }
+
+    pub fn set_user_title(&mut self, value: impl Into<String>) -> bool {
+        let Some(title) = TaskTitle::new(value, TaskTitleSource::User) else {
+            return false;
+        };
+        let automatic = match self {
+            Self::Automatic { title } => title.clone(),
+            Self::UserOverride { automatic, .. } => automatic.clone(),
+        };
+        let next = Self::UserOverride { title, automatic };
+        if *self == next {
+            return false;
+        }
+        *self = next;
+        true
+    }
+
+    pub fn reset_to_automatic(&mut self) -> bool {
+        let Self::UserOverride { automatic, .. } = self else {
+            return false;
+        };
+        *self = Self::Automatic {
+            title: automatic.clone(),
+        };
+        true
+    }
+
+    fn replace_automatic(&mut self, next: Option<TaskTitle>) -> bool {
+        let current = match self {
+            Self::Automatic { title } => title,
+            Self::UserOverride { automatic, .. } => automatic,
+        };
+        if *current == next {
+            return false;
+        }
+        *current = next;
+        true
+    }
+
+    fn validate(&self) -> Result<(), &'static str> {
+        let (user, automatic) = match self {
+            Self::Automatic { title } => (None, title.as_ref()),
+            Self::UserOverride { title, automatic } => (Some(title), automatic.as_ref()),
+        };
+        if user.is_some_and(|title| title.source() != TaskTitleSource::User) {
+            return Err("Task user title must have user ownership");
+        }
+        if automatic.is_some_and(|title| title.source() == TaskTitleSource::User) {
+            return Err("Task automatic title cannot have user ownership");
+        }
+        Ok(())
+    }
+}
+
 impl TaskTitle {
     pub fn new(value: impl Into<String>, source: TaskTitleSource) -> Option<Self> {
         let value = value.into().trim().to_string();
@@ -194,7 +393,7 @@ impl TaskAttentionEvent {
 #[derive(Debug, Clone, Serialize)]
 pub struct TaskRecord {
     pub task_id: String,
-    pub title: Option<TaskTitle>,
+    pub title: TaskTitleState,
     pub status: TaskStatus,
     pub task_version: u64,
     pub message_history_version: u64,
@@ -251,7 +450,8 @@ impl<'de> Deserialize<'de> for TaskRecord {
         #[derive(Deserialize)]
         struct StoredTaskRecord {
             task_id: String,
-            title: Option<TaskTitle>,
+            #[serde(default)]
+            title: TaskTitleState,
             status: TaskStatus,
             task_version: u64,
             message_history_version: u64,
@@ -347,42 +547,20 @@ impl TaskRecord {
         had_config_catalog || had_commands_catalog || had_pending_mutation
     }
 
-    /// Applies an Agent title over provisional or Agent-owned titles, preserving user ownership.
+    /// Updates the automatic title without replacing a visible user override.
     pub fn set_agent_title(&mut self, value: &str) -> bool {
-        if self
-            .title
-            .as_ref()
-            .is_some_and(|title| title.source() == TaskTitleSource::User)
-        {
-            return false;
-        }
-        let Some(next) = TaskTitle::new(value, TaskTitleSource::Agent) else {
-            return false;
-        };
-        if self.title.as_ref() == Some(&next) {
-            return false;
-        }
-        self.title = Some(next);
-        true
+        self.title.set_agent_title(value)
     }
 
-    /// Applies an Agent clear over provisional or Agent-owned titles, preserving user ownership.
+    /// Clears the automatic title without replacing a visible user override.
     pub fn clear_agent_title(&mut self) -> bool {
-        if self
-            .title
-            .as_ref()
-            .is_none_or(|title| title.source() == TaskTitleSource::User)
-        {
-            return false;
-        }
-        self.title = None;
-        true
+        self.title.clear_agent_title()
     }
 
     pub fn summary(&self) -> TaskSummary {
         TaskSummary {
             task_id: self.task_id.clone(),
-            title: self.title.clone(),
+            title: self.title.effective().cloned(),
             status: self.status,
             task_version: self.task_version,
             message_history_version: self.message_history_version,

@@ -9,6 +9,7 @@ import { useMobileNavigation } from "./useMobileNavigation";
 import { useInputModality } from "./useInputModality";
 import { useWebTaskNotifications } from "./useWebTaskNotifications";
 import { TaskWorkspacePicker } from "./TaskWorkspacePicker";
+import { updateTaskSurfaceTitle } from "../services/hostBridge";
 
 export function AppSurfaces({ controller }: { controller: AppController }) {
   useInputModality();
@@ -51,6 +52,24 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     return authenticated;
   };
   const { openingNativeSession, renderableTaskSnapshot } = taskSurfaceModel;
+  useEffect(() => {
+    if (
+      bootstrap.surface !== "task"
+      || bootstrap.shell.kind !== "vscodeExtension"
+      || !renderableTaskSnapshot
+      || renderableTaskSnapshot.task.task_id !== bootstrap.taskId
+    ) return;
+    updateTaskSurfaceTitle(
+      renderableTaskSnapshot.task.task_id,
+      renderableTaskSnapshot.task.title,
+    );
+  }, [
+    bootstrap.surface,
+    bootstrap.surface === "task" ? bootstrap.taskId : undefined,
+    bootstrap.surface === "invalid" ? undefined : bootstrap.shell.kind,
+    renderableTaskSnapshot?.task.task_id,
+    renderableTaskSnapshot?.task.title,
+  ]);
   const managedProject = navigation.projects.find((project) => project.projectId === managedProjectId);
   const managedRepository = managedProject?.worktreeRepositoryId
     ? view.primaryTask.newTask.worktreeRepositories[managedProject.worktreeRepositoryId]
@@ -160,6 +179,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
             ? callbacks.navigation.loadNativeSessions()
             : callbacks.navigation.openSettings()}
           onRestoreTask={callbacks.navigation.restoreTask}
+          onSetTaskTitle={callbacks.navigation.setTaskTitle}
           onSearchChange={callbacks.navigation.changeSearch}
           onSettings={callbacks.navigation.openSettings}
           onToggleArchived={callbacks.navigation.toggleArchived}
@@ -325,6 +345,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
             ? callbacks.navigation.loadNativeSessions()
             : callbacks.navigation.openSettings()}
           onRestoreTask={callbacks.navigation.restoreTask}
+          onSetTaskTitle={callbacks.navigation.setTaskTitle}
           onSearchChange={callbacks.navigation.changeSearch}
           onSettings={closeAfter(callbacks.navigation.openSettings)}
           onToggleArchived={callbacks.navigation.toggleArchived}

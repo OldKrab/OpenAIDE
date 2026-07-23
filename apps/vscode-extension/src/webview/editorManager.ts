@@ -93,6 +93,12 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost, TaskFo
     });
   }
 
+  /** Updates an existing Task tab without changing editor focus or opening a new panel. */
+  updateTaskTitle(taskId: string, title: string) {
+    const panel = this.taskPanels.get(taskId);
+    if (panel) panel.title = taskPanelTitle(title);
+  }
+
   openSettings(agentId?: string, returnToNewTask?: boolean, projectId?: string) {
     if (this.settingsPanel) {
       this.settingsPanel.reveal(vscode.ViewColumn.Active);
