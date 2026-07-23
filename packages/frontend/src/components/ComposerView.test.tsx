@@ -737,6 +737,56 @@ describe("Composer view behavior", () => {
     expect(booleanControl.props["aria-describedby"]).toBe(booleanTooltip?.props.id);
   });
 
+  it("requires fresh pointer movement before showing option hover details after a click", () => {
+    const renderer = renderComposer({
+      configOptions: configOptions(),
+      showIsolationSelector: false,
+    });
+    const control = configControlButtonsByText(renderer.root, "Balanced")[0];
+    const anchor = ancestorWithClass(control, "composer-config-control-anchor")!;
+
+    act(() => anchor.props.onPointerMove());
+    expect(ancestorWithClass(control, "composer-config-control-anchor")?.props["data-hover-armed"]).toBe(true);
+
+    act(() => anchor.props.onPointerDown());
+    click(control);
+    click(control);
+
+    expect(ancestorWithClass(control, "composer-config-control-anchor")?.props["data-hover-armed"]).toBeUndefined();
+  });
+
+  it("shows the next option hover immediately after one option hover has activated", () => {
+    vi.useFakeTimers();
+    try {
+      const renderer = renderComposer({
+        configOptions: {
+          ...configOptions(),
+          options: [...configOptions().options, ...booleanConfigOptions().options],
+        },
+        showIsolationSelector: false,
+      });
+      const select = configControlButtonsByText(renderer.root, "Balanced")[0];
+      const boolean = buttonByLabel(renderer.root, "Brave mode: Off");
+      const selectAnchor = ancestorWithClass(select, "composer-config-control-anchor")!;
+
+      act(() => selectAnchor.props.onPointerMove());
+      act(() => {
+        vi.advanceTimersByTime(600);
+      });
+
+      const booleanAnchor = ancestorWithClass(boolean, "composer-config-control-anchor")!;
+      expect(booleanAnchor.props["data-hover-quick"]).toBe(true);
+      act(() => booleanAnchor.props.onPointerMove());
+      expect(ancestorWithClass(boolean, "composer-config-control-anchor")?.props["data-hover-armed"]).toBe(true);
+
+      const options = renderer.root.findByProps({ className: "composer-adaptive-options" });
+      act(() => options.props.onPointerLeave());
+      expect(ancestorWithClass(boolean, "composer-config-control-anchor")?.props["data-hover-quick"]).toBeUndefined();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("settles immediate pending presentation from the authoritative Agent catalog", () => {
     const catalog = configOptions();
     const renderer = renderComposer({ configOptions: catalog });
@@ -822,6 +872,38 @@ describe("Composer view behavior", () => {
       { type: "boolean", value: true },
     );
     expect(menuByLabel(renderer.root, "More options")).toBeTruthy();
+  });
+
+  it("keeps grouped configuration rows iconless and the boolean indicator beside its label", () => {
+    vi.stubGlobal("ResizeObserver", class {
+      disconnect() {}
+      observe() {}
+      unobserve() {}
+    });
+    const renderer = renderComposer({
+      configOptions: {
+        ...configOptions(),
+        options: [...configOptions().options, ...booleanConfigOptions().options],
+      },
+      showIsolationSelector: false,
+    });
+
+    click(buttonByText(renderer.root, "More · 2"));
+    const overflow = menuByLabel(renderer.root, "More options");
+    const reasoning = menuButtonByStrongLabel(overflow, "Reasoning");
+    const boolean = buttonByLabel(overflow, "Brave mode: Off");
+    const booleanCopy = boolean.findByProps({ className: "composer-boolean-copy" });
+
+    expect(reasoning.findAll((node) =>
+      node.type === "svg" && String(node.props.className).includes("lucide-brain"),
+    )).toHaveLength(0);
+    expect(booleanCopy.findAllByProps({ className: "composer-boolean-indicator" })).toHaveLength(1);
+
+    click(reasoning);
+    const high = menuButtonByStrongLabel(renderer.root, "High");
+    expect(high.findAll((node) =>
+      node.type === "svg" && String(node.props.className).includes("lucide-brain"),
+    )).toHaveLength(0);
   });
 
   it("marks More as pending when the changing boolean is grouped", () => {

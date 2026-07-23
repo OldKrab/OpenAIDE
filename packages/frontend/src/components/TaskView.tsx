@@ -415,7 +415,7 @@ const TaskChatTimeline = memo(function TaskChatTimeline({
 }: TaskChatTimelineProps) {
   const latestTextMessageIds = latestTextMessageIdsByChannel(items);
   return (
-    <div className="message-list-shell">
+    <div className="message-list-shell" data-more-below={String(chatScroll.moreBelow)}>
       <div
         className="message-list"
         onKeyDown={chatScroll.onKeyDown}

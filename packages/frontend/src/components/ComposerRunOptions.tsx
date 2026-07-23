@@ -1,8 +1,9 @@
 import { Brain, ChevronLeft, ChevronRight, Code2, Cpu, Shield, SlidersHorizontal } from "lucide-react";
 import type { ConfigOption, ConfigOptionCurrentValue, ConfigOptionsCatalog, IsolationKind } from "@openaide/app-shell-contracts";
-import { useId, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useId, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { isolationOptions, type ComposerSelection } from "../state/composerOptions";
-import { MenuButton, Popover, PopoverBackButton, PopoverHeader, Selector } from "./ComposerPrimitives";
+import { MenuButton, PopoverBackButton, PopoverHeader, Selector } from "./ComposerPrimitives";
+import { PopupMenu } from "./Popup";
 import { useComposerOptionPacking } from "./useComposerOptionPacking";
 
 export type ComposerRunMenu = "options" | "isolation" | `config:${string}`;
@@ -42,6 +43,7 @@ export function ComposerRunOptions({
   showIsolationSelector,
   toggleMenu,
 }: ComposerRunOptionsProps) {
+  const [optionHoverActive, setOptionHoverActive] = useState(false);
   const options = configOptions?.options ?? [];
   const pendingChange = configOptions?.pending_change;
   const controls: RunControl[] = [
@@ -63,6 +65,8 @@ export function ComposerRunOptions({
   return (
     <div
       className={`composer-adaptive-options${pendingChange ? " mutation-pending" : ""}`}
+      onPointerDownCapture={() => setOptionHoverActive(false)}
+      onPointerLeave={() => setOptionHoverActive(false)}
       ref={packing.containerRef}
     >
       {visibleControls.map((control) => (
@@ -71,6 +75,9 @@ export function ComposerRunOptions({
           control={control}
           controlsLocked={controlsLocked}
           key={controlKey(control)}
+          hoverSequenceActive={optionHoverActive}
+          onHoverSequenceActivate={() => setOptionHoverActive(true)}
+          onHoverSequenceReset={() => setOptionHoverActive(false)}
           onSelectConfigOption={onSelectConfigOption}
           onSelectIsolation={onSelectIsolation}
           openMenu={openMenu}
@@ -82,24 +89,28 @@ export function ComposerRunOptions({
       ))}
       {hiddenControls.length > 0 ? (
         <div className="composer-option-anchor composer-overflow-options-anchor">
-          <Selector
-            className="composer-overflow-options-control"
-            disabled={disabled || overflowLocked}
-            icon={<SlidersHorizontal size={12} />}
-            label={`More · ${hiddenControls.length}`}
-            locked={overflowLocked}
-            menuOpen={openMenu === "options" || hiddenMenuControl !== undefined}
-            onClick={() => {
-              // The overflow trigger owns both its list and a nested option menu.
-              // Pressing the visibly expanded trigger must close either state.
-              if (openMenu === "options" || hiddenMenuControl) setOpenMenu(undefined);
-              else toggleMenu("options");
-            }}
-            pending={hiddenControls.some((control) =>
-              control.kind === "config" && pendingChange?.option_id === control.option.id)}
-          />
-          {openMenu === "options" ? (
-            <Popover className="composer-overflow-menu" label="More options" role="group">
+          <PopupMenu
+            className="composer-popover composer-overflow-menu"
+            label={hiddenMenuControl ? controlLabel(hiddenMenuControl) : "More options"}
+            onOpenChange={(nextOpen) => setOpenMenu(nextOpen ? "options" : undefined)}
+            open={openMenu === "options" || hiddenMenuControl !== undefined}
+            placement="top-start"
+            trigger={(popupTrigger) => (
+              <Selector
+                className="composer-overflow-options-control"
+                disabled={disabled || overflowLocked}
+                icon={<SlidersHorizontal size={12} />}
+                label={`More · ${hiddenControls.length}`}
+                locked={overflowLocked}
+                menuOpen={openMenu === "options" || hiddenMenuControl !== undefined}
+                pending={hiddenControls.some((control) =>
+                  control.kind === "config" && pendingChange?.option_id === control.option.id)}
+                popupTrigger={popupTrigger}
+              />
+            )}
+          >
+            {openMenu === "options" ? (
+              <>
               {hiddenControls.map((control) => (
                 control.kind === "config" && control.option.kind === "boolean" ? (
                   <BooleanConfigControl
@@ -119,7 +130,7 @@ export function ComposerRunOptions({
                     description={controlDescription(control, pendingChange, selection)}
                     disabled={control.kind === "config" ? configLocked : controlsLocked}
                     endIcon={<ChevronRight size={12} />}
-                    icon={controlIcon(control, 13)}
+                    icon={control.kind === "config" ? undefined : controlIcon(control, 13)}
                     key={controlKey(control)}
                     label={controlLabel(control)}
                     onClick={() => {
@@ -129,18 +140,19 @@ export function ComposerRunOptions({
                   />
                 )
               ))}
-            </Popover>
-          ) : hiddenMenuControl ? (
-            <GroupedControlMenu
-              configLocked={configLocked}
-              control={hiddenMenuControl}
-              controlsLocked={controlsLocked}
-              onSelectConfigOption={onSelectConfigOption}
-              onSelectIsolation={onSelectIsolation}
-              selection={selection}
-              setOpenMenu={setOpenMenu}
-            />
-          ) : null}
+              </>
+            ) : hiddenMenuControl ? (
+              <GroupedControlMenu
+                configLocked={configLocked}
+                control={hiddenMenuControl}
+                controlsLocked={controlsLocked}
+                onSelectConfigOption={onSelectConfigOption}
+                onSelectIsolation={onSelectIsolation}
+                selection={selection}
+                setOpenMenu={setOpenMenu}
+              />
+            ) : null}
+          </PopupMenu>
         </div>
       ) : null}
       {packing.measurementAvailable ? (
@@ -161,6 +173,9 @@ function DirectRunControl({
   configLocked,
   control,
   controlsLocked,
+  hoverSequenceActive,
+  onHoverSequenceActivate,
+  onHoverSequenceReset,
   onSelectConfigOption,
   onSelectIsolation,
   openMenu,
@@ -172,6 +187,9 @@ function DirectRunControl({
   configLocked: boolean;
   control: RunControl;
   controlsLocked: boolean;
+  hoverSequenceActive: boolean;
+  onHoverSequenceActivate: () => void;
+  onHoverSequenceReset: () => void;
   onSelectConfigOption?: (configId: string, value: ConfigOptionCurrentValue) => void;
   onSelectIsolation?: (isolation: IsolationKind) => void;
   openMenu?: ComposerMenu;
@@ -181,13 +199,38 @@ function DirectRunControl({
   toggleMenu: (menu: ComposerMenu) => void;
 }) {
   const infoId = useId();
+  const [pointerHoverArmed, setPointerHoverArmed] = useState(false);
+  const hoverActivationTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(hoverActivationTimer.current), []);
+  const clearHoverActivation = () => {
+    clearTimeout(hoverActivationTimer.current);
+    hoverActivationTimer.current = undefined;
+  };
+  const hoverOwnerProps = {
+    "data-hover-armed": pointerHoverArmed || undefined,
+    "data-hover-quick": hoverSequenceActive || undefined,
+    onPointerDown: () => {
+      clearHoverActivation();
+      setPointerHoverArmed(false);
+      onHoverSequenceReset();
+    },
+    onPointerLeave: clearHoverActivation,
+    onPointerMove: () => {
+      setPointerHoverArmed(true);
+      if (hoverSequenceActive || hoverActivationTimer.current) return;
+      hoverActivationTimer.current = setTimeout(() => {
+        hoverActivationTimer.current = undefined;
+        onHoverSequenceActivate();
+      }, 600);
+    },
+  };
   const optionInfo = control.kind === "config" ? {
     description: control.option.description,
     label: control.option.label.trim() || controlLabel(control),
   } : undefined;
   if (control.kind === "config" && control.option.kind === "boolean") {
     return (
-      <div className="composer-option-anchor composer-config-control-anchor">
+      <div className="composer-option-anchor composer-config-control-anchor" {...hoverOwnerProps}>
         <BooleanConfigControl
           compact
           describedBy={infoId}
@@ -201,6 +244,7 @@ function DirectRunControl({
         />
         <OptionInfoTooltip
           description={control.option.description}
+          hidden={openMenu !== undefined}
           id={infoId}
           label={control.option.label.trim() || controlLabel(control)}
         />
@@ -211,36 +255,51 @@ function DirectRunControl({
   const locked = control.kind === "config" ? configLocked : controlsLocked;
   const pending = control.kind === "config" && pendingChange?.option_id === control.option.id;
   return (
-    <div className={`composer-option-anchor ${control.kind === "config" ? "composer-config-control-anchor" : "composer-isolation-control-anchor"}`}>
-      <Selector
-        className={control.kind === "config" ? "composer-config-control" : "composer-isolation-control"}
-        describedBy={optionInfo ? infoId : undefined}
-        disabled={locked}
-        icon={control.kind === "config" ? undefined : controlIcon(control)}
-        label={controlDirectLabel(control, pending ? pendingChange?.requested_value : undefined, selection)}
-        locked={locked}
-        menuOpen={openMenu === menu}
-        onClick={() => menu && toggleMenu(menu)}
-        pending={pending}
-      />
+    <div
+      className={`composer-option-anchor ${control.kind === "config" ? "composer-config-control-anchor" : "composer-isolation-control-anchor"}`}
+      {...hoverOwnerProps}
+    >
+      {menu ? (
+        <PopupMenu
+          className="composer-popover composer-model-menu"
+          label={controlLabel(control)}
+          onOpenChange={(nextOpen) => {
+            if ((openMenu === menu) !== nextOpen) toggleMenu(menu);
+          }}
+          open={openMenu === menu}
+          placement="top-start"
+          trigger={(popupTrigger) => (
+            <Selector
+              className={control.kind === "config" ? "composer-config-control" : "composer-isolation-control"}
+              describedBy={optionInfo ? infoId : undefined}
+              disabled={locked}
+              icon={control.kind === "config" ? undefined : controlIcon(control)}
+              label={controlDirectLabel(control, pending ? pendingChange?.requested_value : undefined, selection)}
+              locked={locked}
+              menuOpen={openMenu === menu}
+              pending={pending}
+              popupTrigger={popupTrigger}
+            />
+          )}
+        >
+          <ControlValueMenuContent
+            configLocked={configLocked}
+            control={control}
+            controlsLocked={controlsLocked}
+            onSelectConfigOption={(optionId, value) =>
+              selectAndClose(() => onSelectConfigOption?.(optionId, value))}
+            onSelectIsolation={(isolation) =>
+              selectAndClose(() => onSelectIsolation?.(isolation))}
+            selection={selection}
+          />
+        </PopupMenu>
+      ) : null}
       {optionInfo ? (
         <OptionInfoTooltip
           description={optionInfo.description}
-          hidden={openMenu === menu}
+          hidden={openMenu !== undefined}
           id={infoId}
           label={optionInfo.label}
-        />
-      ) : null}
-      {menu && openMenu === menu ? (
-        <ControlValueMenu
-          configLocked={configLocked}
-          control={control}
-          controlsLocked={controlsLocked}
-          onSelectConfigOption={(optionId, value) =>
-            selectAndClose(() => onSelectConfigOption?.(optionId, value))}
-          onSelectIsolation={(isolation) =>
-            selectAndClose(() => onSelectIsolation?.(isolation))}
-          selection={selection}
         />
       ) : null}
     </div>
@@ -265,7 +324,7 @@ function GroupedControlMenu({
   setOpenMenu: Dispatch<SetStateAction<ComposerMenu | undefined>>;
 }) {
   return (
-    <ControlValueMenu
+    <ControlValueMenuContent
       configLocked={configLocked}
       control={control}
       controlsLocked={controlsLocked}
@@ -283,7 +342,7 @@ function GroupedControlMenu({
   );
 }
 
-function ControlValueMenu({
+function ControlValueMenuContent({
   configLocked,
   control,
   controlsLocked,
@@ -304,7 +363,7 @@ function ControlValueMenu({
   const optionLabel = control.kind === "config" ? control.option.label.trim() || label : label;
   const optionDescription = control.kind === "config" ? control.option.description : undefined;
   return (
-    <Popover className="composer-model-menu" label={label}>
+    <>
       {onBack ? (
         <PopoverBackButton ariaLabel="Back to options" description={optionDescription} icon={<ChevronLeft size={13} />} label={optionLabel} onClick={onBack} />
       ) : null}
@@ -314,7 +373,7 @@ function ControlValueMenu({
           active={currentId(control.option) === value.id}
           description={value.description ?? value.group_label ?? control.option.description ?? ""}
           disabled={configLocked}
-          icon={configIcon(control.option, 13)}
+          icon={undefined}
           key={value.id}
           label={value.label}
           onClick={() => onSelectConfigOption(control.option.id, { type: "id", value: value.id })}
@@ -330,7 +389,7 @@ function ControlValueMenu({
           onClick={() => onSelectIsolation(isolation.id)}
         />
       ))}
-    </Popover>
+    </>
   );
 }
 
@@ -522,10 +581,12 @@ function BooleanConfigControl({
       ) : (
         <>
           <span className="composer-boolean-copy">
-            <strong>{option.label}</strong>
+            <span className="composer-boolean-heading">
+              <strong>{option.label}</strong>
+              <span aria-hidden="true" className={`composer-boolean-indicator${displayedValue ? " checked" : ""}`} />
+            </span>
             {option.description ? <small>{option.description}</small> : null}
           </span>
-          <span aria-hidden="true" className={`composer-boolean-indicator${displayedValue ? " checked" : ""}`} />
         </>
       )}
     </button>

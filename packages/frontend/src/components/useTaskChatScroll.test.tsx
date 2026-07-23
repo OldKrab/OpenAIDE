@@ -463,6 +463,33 @@ describe("useTaskChatScroll", () => {
     expect(messageList.scrollTop).toBe(700);
   });
 
+  it("gives an overlay scrollbar press reader ownership before live layout reconciliation", () => {
+    const resize = installResizeObserver();
+    const messageList = scrollNode({ clientHeight: 400, scrollHeight: 1400 });
+    messageList.clientWidth = 600;
+    messageList.offsetWidth = 600;
+    messageList.getBoundingClientRect = () => ({ left: 0, right: 600 });
+    let tree!: ReactTestRenderer;
+
+    act(() => {
+      tree = create(<Harness itemCount={1} />, {
+        createNodeMock: (element) => (
+          (element.props as { className?: string }).className === "message-list" ? messageList : null
+        ),
+      });
+    });
+
+    act(() => {
+      const viewport = tree.root.findByProps({ className: "message-list" });
+      viewport.props.onPointerDown({ clientX: 595, currentTarget: messageList, pointerType: "mouse" });
+    });
+    messageList.scrollTop = 700;
+    messageList.scrollHeight = 1500;
+    act(() => resize.notify());
+
+    expect(messageList.scrollTop).toBe(700);
+  });
+
   it("does not infer scrollbar intent from a pointer down in Chat content", () => {
     const resize = installResizeObserver();
     const messageList = scrollNode({ clientHeight: 400, scrollHeight: 1400 });

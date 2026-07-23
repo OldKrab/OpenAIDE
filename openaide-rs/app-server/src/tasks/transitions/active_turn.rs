@@ -83,6 +83,7 @@ impl TaskTransitions {
     ) -> Result<bool, RuntimeError> {
         let mut active_work_ended = false;
         let mut active_work_end_name = None;
+        let mut active_work_end_error = None;
         let commit =
             self.mutations
                 .commit_existing_task(task_id, chat_commit_options(), |ctx| {
@@ -97,6 +98,7 @@ impl TaskTransitions {
                             Err(error) => ActiveWorkEnd::CancellationFailed(error.to_string()),
                         };
                         active_work_end_name = Some(cause.name());
+                        active_work_end_error = cause.diagnostic_message().map(str::to_string);
                         apply_active_work_end(ctx, &cause, now)?;
                         active_work_ended = true;
                         return Ok(TaskMutationResult::Changed);
@@ -120,6 +122,7 @@ impl TaskTransitions {
                         Err(error) => {
                             let cause = ActiveWorkEnd::AgentFailed(error.to_string());
                             active_work_end_name = Some(cause.name());
+                            active_work_end_error = cause.diagnostic_message().map(str::to_string);
                             apply_active_work_end(ctx, &cause, now)?;
                             active_work_ended = true;
                             return Ok(TaskMutationResult::Changed);
@@ -156,6 +159,7 @@ impl TaskTransitions {
                 serde_json::json!({
                     "task_id": task_id,
                     "cause": active_work_end_name,
+                    "error": active_work_end_error,
                 }),
             );
         }

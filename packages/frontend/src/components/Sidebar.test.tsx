@@ -137,7 +137,7 @@ describe("SidebarTaskRow", () => {
     expect(read.root.findAllByProps({ className: "task-meta-age" })).toHaveLength(1);
   });
 
-  it("opens selected tasks and exposes Archive beside the mobile Task details action", () => {
+  it("opens selected tasks and exposes Archive beside the Task details action", () => {
     const onOpenTask = vi.fn();
     const onArchiveTask = vi.fn();
     const tree = render(
@@ -159,7 +159,7 @@ describe("SidebarTaskRow", () => {
     act(() => tree.root.findByProps({ "aria-label": "Task actions for Task" }).props.onClick());
     const menuItems = tree.root.findAllByProps({ role: "menuitem" });
     expect(menuItems).toHaveLength(2);
-    expect(menuItems[0].props.className).toBe("task-row-mobile-details-action");
+    expect(menuItems[0].props.className).toBe("task-row-details-action");
     expect(menuItems[1].children).toContain("Archive task");
     act(() => menuItems[1].props.onClick());
 
@@ -167,7 +167,7 @@ describe("SidebarTaskRow", () => {
     expect(onArchiveTask).toHaveBeenCalledWith("task_1");
   });
 
-  it("opens Task details through the mobile-only row action", () => {
+  it("shows the complete desktop preview content through the Task details action", () => {
     const tree = render(
       <SidebarTaskRow
         onArchiveTask={vi.fn()}
@@ -175,6 +175,8 @@ describe("SidebarTaskRow", () => {
         onRestoreTask={vi.fn()}
         showArchived={false}
         task={task({
+          status: "failed",
+          title: "Popup work",
           project_label: "OpenAIDE",
           worktree_id: "worktree_1",
           worktree_name: "Sidebar scrolling",
@@ -183,13 +185,14 @@ describe("SidebarTaskRow", () => {
       />,
     );
 
-    act(() => tree.root.findByProps({ "aria-label": "Task actions for Task" }).props.onClick());
-    act(() => tree.root.findByProps({ className: "task-row-mobile-details-action" }).props.onClick());
+    act(() => tree.root.findByProps({ "aria-label": "Task actions for Popup work" }).props.onClick());
+    act(() => tree.root.findByProps({ className: "task-row-details-action" }).props.onClick());
 
     const details = tree.root.findByProps({ className: "task-row-details" });
-    const detailRows = details.findAllByType("span");
-    expect(detailRows.some((row) => row.children.includes("OpenAIDE"))).toBe(true);
-    expect(detailRows.some((row) => row.children.includes("Sidebar scrolling"))).toBe(true);
+    const text = details.findAllByType("strong").map((item) => item.children.join(""));
+    expect(text).toEqual(["Popup work", "OpenAIDE", "Sidebar scrolling"]);
+    expect(details.findByProps({ className: "task-preview-state" }).children).toContain("Failed");
+    expect(details.findByType("em").children).toContain("fix/sidebar-scroll");
   });
 
   it("dismisses the task actions menu on outside click and Escape", () => {
@@ -223,6 +226,149 @@ describe("SidebarTaskRow", () => {
       act(() => listeners.get("keydown")?.({ key: "Escape", preventDefault: vi.fn() } as unknown as Event));
       expect(tree.root.findAllByProps({ role: "menu" })).toHaveLength(0);
     } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("keeps the task preview dismissed while the actions menu is open", () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("window", {
+      innerHeight: 800,
+      innerWidth: 1200,
+      matchMedia: () => ({ matches: false }),
+    });
+    vi.stubGlobal("document", {
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    });
+    const rowNode = {
+      getBoundingClientRect: () => ({
+        bottom: 72,
+        height: 32,
+        left: 8,
+        right: 296,
+        top: 40,
+        width: 288,
+        x: 8,
+        y: 40,
+      }),
+    } as HTMLElement;
+    try {
+      const tree = render(
+        <SidebarTaskPreviewProvider>
+          <SidebarTaskRow
+            onArchiveTask={vi.fn()}
+            onOpenTask={vi.fn()}
+            onRestoreTask={vi.fn()}
+            showArchived={false}
+            task={task({ task_id: "task_popup", title: "Popup task" })}
+          />
+        </SidebarTaskPreviewProvider>,
+        {
+          createNodeMock: (element) => (
+            (element.props as { className?: string }).className?.startsWith("task-row task-product-row")
+              ? rowNode
+              : null
+          ),
+        },
+      );
+      const row = tree.root.findByProps({ role: "listitem" });
+
+      act(() => row.props.onPointerMove());
+      act(() => tree.root.findByProps({ "aria-label": "Task actions for Popup task" }).props.onClick());
+      act(() => {
+        vi.advanceTimersByTime(1_000);
+      });
+
+      expect(tree.root.findAllByProps({ role: "menu" })).toHaveLength(1);
+      expect(tree.root.findAllByProps({ role: "dialog" })).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("does not open the task preview when the actions button receives focus", () => {
+    vi.stubGlobal("window", {
+      matchMedia: () => ({ matches: false }),
+    });
+    vi.stubGlobal("document", {
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    });
+    const rowNode = {} as HTMLElement;
+    try {
+      const tree = render(
+        <SidebarTaskPreviewProvider>
+          <SidebarTaskRow
+            onArchiveTask={vi.fn()}
+            onOpenTask={vi.fn()}
+            onRestoreTask={vi.fn()}
+            showArchived={false}
+            task={task({ task_id: "task_focus", title: "Focus task" })}
+          />
+        </SidebarTaskPreviewProvider>,
+        {
+          createNodeMock: (element) => (
+            (element.props as { className?: string }).className?.startsWith("task-row task-product-row")
+              ? rowNode
+              : null
+          ),
+        },
+      );
+      const actions = tree.root.findByProps({ "aria-label": "Task actions for Focus task" });
+
+      act(() => actions.props.onFocus?.());
+
+      expect(tree.root.findAllByProps({ role: "dialog" })).toHaveLength(0);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("opens a pointer preview only after the pointer actually moves over the row", () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("window", {
+      matchMedia: () => ({ matches: false }),
+    });
+    vi.stubGlobal("document", {
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    });
+    const rowNode = {} as HTMLElement;
+    try {
+      const tree = render(
+        <SidebarTaskPreviewProvider>
+          <SidebarTaskRow
+            onArchiveTask={vi.fn()}
+            onOpenTask={vi.fn()}
+            onRestoreTask={vi.fn()}
+            showArchived={false}
+            task={task({ task_id: "task_move", title: "Move task" })}
+          />
+        </SidebarTaskPreviewProvider>,
+        {
+          createNodeMock: (element) => (
+            (element.props as { className?: string }).className?.startsWith("task-row task-product-row")
+              ? rowNode
+              : null
+          ),
+        },
+      );
+      const row = tree.root.findByProps({ role: "listitem" });
+
+      act(() => {
+        vi.advanceTimersByTime(1_000);
+      });
+      expect(tree.root.findAllByProps({ role: "dialog" })).toHaveLength(0);
+
+      act(() => row.props.onPointerMove());
+      act(() => {
+        vi.advanceTimersByTime(1_000);
+      });
+      expect(tree.root.findAllByProps({ role: "dialog" })).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
       vi.unstubAllGlobals();
     }
   });
@@ -330,6 +476,7 @@ describe("SidebarNativeSessionRow", () => {
     const buttons = tree.root.findAllByType("button");
     expect(buttons[0].props.disabled).toBe(false);
     expect(buttons[1].props.title).toBe("Open task");
+    expect(buttons[2].props.title).toBe("Task actions");
     expect(tree.root.findByProps({ className: "task-agent-icon" }).props["aria-label"]).toBe("Agent: Codex");
     expect(tree.root.findByProps({ className: "task-meta-age" })).toBeDefined();
     expect(tree.root.findByProps({ className: "task-title" }).props.title).toBeUndefined();
@@ -337,6 +484,30 @@ describe("SidebarNativeSessionRow", () => {
     act(() => buttons[0].props.onClick());
 
     expect(onOpenNativeSession).toHaveBeenCalledWith(session);
+  });
+
+  it("shows complete Task details for listed Agent history", () => {
+    const tree = render(
+      <SidebarNativeSessionRow
+        nativeSessionAgentId="codex"
+        nativeSessionAgentName="Codex"
+        onOpenNativeSession={vi.fn()}
+        session={nativeSession({
+          cwd: "/workspace/OpenAIDE",
+          last_activity: "2026-07-20T10:00:00Z",
+          title: "Existing session",
+        })}
+      />,
+    );
+
+    act(() => tree.root.findByProps({ "aria-label": "Task actions for Existing session" }).props.onClick());
+    act(() => tree.root.findByProps({ className: "task-row-details-action" }).props.onClick());
+
+    const details = tree.root.findByProps({ className: "task-row-details" });
+    expect(details.findAllByType("strong").map((item) => item.children.join("")))
+      .toEqual(["Existing session", "/workspace/OpenAIDE"]);
+    expect(details.findByProps({ className: "task-preview-source-action" }).children.join(""))
+      .toBe("· Open to load");
   });
 
   it("shows the delayed rich preview for a Native Session that is not yet adopted", () => {
@@ -405,7 +576,7 @@ describe("SidebarNativeSessionRow", () => {
       />,
     );
 
-    expect(tree.root.findAllByType("button").map((button) => button.props.disabled)).toEqual([true, true]);
+    expect(tree.root.findAllByType("button").map((button) => button.props.disabled)).toEqual([true, true, true]);
     expect(tree.root.findAllByType("button")[1].props.title).toBe("Opening task");
     expect(tree.root.findByProps({ className: "task-trailing-indicator" }).props["aria-label"]).toBe("Opening task");
   });
@@ -424,7 +595,7 @@ describe("SidebarNativeSessionRow", () => {
     );
 
     const buttons = tree.root.findAllByType("button");
-    expect(buttons.map((button) => button.props.disabled)).toEqual([false, false]);
+    expect(buttons.map((button) => button.props.disabled)).toEqual([false, false, false]);
 
     act(() => buttons[0].props.onClick());
     expect(onOpenNativeSession).toHaveBeenCalledWith(session);

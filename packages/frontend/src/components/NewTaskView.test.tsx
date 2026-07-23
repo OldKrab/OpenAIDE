@@ -1191,11 +1191,7 @@ describe("NewTaskView", () => {
     expect(menuLabels(tree)).not.toContain("Codex");
 
     act(() => buttonWithText(tree, "Codex").props.onClick());
-    act(() =>
-      tree.root.findByProps({ "aria-label": "New task" }).props.onPointerDownCapture({
-        target: {},
-      }),
-    );
+    act(() => buttonWithText(tree, "Codex").props.onClick());
     act(() => buttonWithText(tree, "GPT-5.5").props.onClick());
 
     expect(menuLabels(tree)).not.toContain("Codex");

@@ -1,14 +1,17 @@
 import type { AgentCommandsCatalog, AgentSlashCommand } from "@openaide/app-shell-contracts";
+import { useId } from "react";
 import {
   commandTokenAtCursor,
   slashCommandDisplayName,
   slashCommandPickerResults,
   type CommandToken,
 } from "./commandSearch";
+import { EditorListbox } from "./Popup";
 
 type SlashCommandPickerProps = {
   activeIndex: number;
   commands: AgentSlashCommand[];
+  id?: string;
   onSelect: (command: AgentSlashCommand) => void;
 };
 
@@ -18,15 +21,18 @@ export type SlashPickerState = {
   token: CommandToken;
 };
 
-export function SlashCommandPicker({ activeIndex, commands, onSelect }: SlashCommandPickerProps) {
+export function SlashCommandPicker({ activeIndex, commands, id, onSelect }: SlashCommandPickerProps) {
   const activeCommand = commands[activeIndex] ?? commands[0];
+  const generatedId = useId();
+  const listboxId = id ?? `slash-commands-${generatedId}`;
   return (
-    <div aria-label="Slash commands" className="composer-slash-popover" role="listbox">
+    <EditorListbox className="composer-slash-popover" id={listboxId} label="Slash commands">
       <div className="composer-slash-results">
         {commands.map((command, index) => (
           <button
             aria-selected={index === activeIndex}
             className="composer-slash-option"
+            id={`${listboxId}-option-${index}`}
             key={command.name}
             onClick={() => onSelect(command)}
             onMouseDown={(event) => event.preventDefault()}
@@ -46,7 +52,7 @@ export function SlashCommandPicker({ activeIndex, commands, onSelect }: SlashCom
           {activeCommand.input_hint ? <small>Argument: {activeCommand.input_hint}</small> : null}
         </aside>
       ) : null}
-    </div>
+    </EditorListbox>
   );
 }
 

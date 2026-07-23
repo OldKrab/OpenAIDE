@@ -784,7 +784,7 @@ fn listing_sessions_does_not_create_a_native_session() {
 }
 
 #[test]
-fn inactive_native_session_is_closed_after_the_idle_timeout() {
+fn new_native_session_waits_for_history_before_idle_close() {
     let temp = tempfile::TempDir::new().expect("temp dir");
     let Some((runtime, log_path)) = fixture_runtime(&temp, "idle-session") else {
         return;
@@ -799,23 +799,63 @@ fn inactive_native_session_is_closed_after_the_idle_timeout() {
         .attach_session_event_sink(&session.key(), session_sink.clone())
         .expect("attach session sink");
 
-    wait_for_method(&log_path, "session/close");
-    wait_until(|| {
+    std::thread::sleep(Duration::from_millis(100));
+    assert_eq!(
+        read_fixture_methods(&log_path),
+        ["initialize", "session/new"]
+    );
+
+    assert_eq!(
         runtime
-            .attach_session_event_sink(&session.key(), Arc::new(CapturingSessionSink::default()))
-            .is_err()
-    });
+            .prompt(
+                AgentPrompt {
+                    agent_id: "codex".to_string(),
+                    task_id: "task-idle-session".to_string(),
+                    session_id: session.session_id,
+                    text: "create durable history".to_string(),
+                    attachments: Vec::new(),
+                    cancellation: TurnCancellation::new(),
+                },
+                Arc::new(CapturingEventSink::default()),
+            )
+            .expect("first prompt remains usable after the empty-session idle timeout"),
+        AgentPromptOutcome::EndTurn
+    );
+    wait_for_method(&log_path, "session/close");
+    assert_eq!(
+        read_fixture_methods(&log_path),
+        [
+            "initialize",
+            "session/new",
+            "session/prompt",
+            "session/close"
+        ]
+    );
+}
+
+#[test]
+fn resumed_native_session_is_closed_after_the_idle_timeout() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((runtime, log_path)) = fixture_runtime(&temp, "idle-session") else {
+        return;
+    };
+    let runtime = runtime.with_session_idle_timeout(Duration::from_millis(50));
+
     let resumed = runtime
         .resume_session(AgentSessionResume {
             agent_id: "codex".to_string(),
             task_id: "task-idle-session".to_string(),
-            session_id: session.session_id,
+            session_id: "idle-session".to_string(),
             cwd: cwd_string(),
             model_id: None,
             cancellation: TurnCancellation::new(),
             secret_resolver: None,
         })
         .expect("resume expired session");
+    let session_sink = Arc::new(CapturingSessionSink::default());
+    runtime
+        .attach_session_event_sink(&resumed.key(), session_sink.clone())
+        .expect("attach resumed session sink");
     wait_until(|| !session_sink.metadata_updates().is_empty());
     assert_eq!(
         session_sink.metadata_updates(),
@@ -824,18 +864,10 @@ fn inactive_native_session_is_closed_after_the_idle_timeout() {
             updated_at: AgentMetadataField::Unchanged,
         }]
     );
-    runtime
-        .close_session(&resumed.key())
-        .expect("close resumed session");
+    wait_for_method(&log_path, "session/close");
     assert_eq!(
         read_fixture_methods(&log_path),
-        [
-            "initialize",
-            "session/new",
-            "session/close",
-            "session/resume",
-            "session/close"
-        ]
+        ["initialize", "session/resume", "session/close"]
     );
 }
 

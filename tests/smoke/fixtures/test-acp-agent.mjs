@@ -187,7 +187,10 @@ async function runPrompt(message) {
   textUpdate(sessionId, "agent_message_chunk", "Smoke ", `agent-${promptNumber}`);
   await delay(16);
   textUpdate(sessionId, "agent_message_chunk", "answer", `agent-${promptNumber}`);
-  update(sessionId, { sessionUpdate: "session_info_update", title: "Smoke task" });
+  const title = text === "smoke:long-title"
+    ? "A deliberately long task title segment that remains readable in the compact hover preview. ".repeat(12).trim()
+    : "Smoke task";
+  update(sessionId, { sessionUpdate: "session_info_update", title });
   respond(message.id, { stopReason: "end_turn", userMessageId: message.params.messageId });
   session.activePrompts.delete(String(message.id));
 }
