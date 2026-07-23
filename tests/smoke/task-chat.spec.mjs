@@ -94,8 +94,7 @@ test("recovers an open Task composer once after client liveness expires", async 
   await startComposerPlaceholderTrace(page);
   const stopExpiryFault = await reportClientLivenessExpiredOnNextHeartbeat(page);
   try {
-    await page.waitForTimeout(2_000);
-    const transitions = await composerPlaceholderTrace(page);
+    const transitions = await waitForComposerPlaceholderRecovery(page);
     expect(transitions).toEqual([
       "Send follow-up",
       "Reconnecting. Draft is saved here.",
@@ -318,6 +317,11 @@ async function send(page, text) {
 
 async function startComposerPlaceholderTrace(page) {
   await page.evaluate(() => {
+    const expected = [
+      "Send follow-up",
+      "Reconnecting. Draft is saved here.",
+      "Send follow-up",
+    ];
     const transitions = [];
     const sample = () => {
       const editor = document.querySelector('[role="textbox"][aria-label="Message"]');
@@ -325,14 +329,28 @@ async function startComposerPlaceholderTrace(page) {
         ? editor.getAttribute("data-placeholder") ?? "missing"
         : "missing";
       if (transitions.at(-1) !== value) transitions.push(value);
+      const completed = expected.every((item, index) => transitions[index] === item);
+      if (completed) {
+        observer.disconnect();
+        window.__openaideComposerPlaceholderTrace.completed = true;
+      }
     };
+    const observer = new MutationObserver(sample);
+    window.__openaideComposerPlaceholderTrace = { completed: false, transitions };
     sample();
-    const interval = window.setInterval(sample, 25);
-    window.__openaideComposerPlaceholderTrace = { interval, transitions };
+    if (!window.__openaideComposerPlaceholderTrace.completed) {
+      observer.observe(document.body, {
+        attributes: true,
+        attributeFilter: ["data-placeholder"],
+        childList: true,
+        subtree: true,
+      });
+    }
   });
 }
 
-async function composerPlaceholderTrace(page) {
+async function waitForComposerPlaceholderRecovery(page) {
+  await page.waitForFunction(() => window.__openaideComposerPlaceholderTrace?.completed === true);
   return page.evaluate(() => window.__openaideComposerPlaceholderTrace?.transitions ?? []);
 }
 
