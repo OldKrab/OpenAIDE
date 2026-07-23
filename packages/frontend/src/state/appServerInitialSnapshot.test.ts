@@ -12,7 +12,7 @@ import type {
 import { actionsFromInitialSnapshot } from "./appServerInitialSnapshot";
 
 describe("App Server initial snapshot ingestion", () => {
-  it("maps initial task navigation and active task into current app actions", () => {
+  it("maps initialization state without creating a Navigation replica", () => {
     const ingestion = actionsFromInitialSnapshot(clientSnapshot({
       settings: {
         sections: [],
@@ -32,19 +32,6 @@ describe("App Server initial snapshot ingestion", () => {
       { type: "newTask:agent", agentId: "codex" },
       { type: "settings:runtimeSettings", settings: { developer: { acp_trace: { enabled: true } } } },
       { type: "settings:preferences", preferences: { composer_submit_shortcut: "enter" } },
-      {
-        type: "taskNavigation",
-        archived: false,
-        tasks: [{ task_id: "task-1", agent_name: "Codex", workspace_root: "" }],
-        sessions: [{
-          agent_id: "codex",
-          session_id: "native-1",
-          project_id: "project-1",
-          title: "Cached Native Session",
-        }],
-        refreshing: false,
-      },
-      { type: "selection:set", taskId: "task-1" },
       { type: "snapshot", intent: "open", snapshot: { task: { task_id: "task-1" } } },
     ]);
     expect(ingestion.requiresNativeSurface).toBe(false);
@@ -58,17 +45,10 @@ describe("App Server initial snapshot ingestion", () => {
     });
   });
 
-  it("can suppress task slices that were already loaded by legacy startup", () => {
-    expect(actionsFromInitialSnapshot(clientSnapshot(), { includeTaskNavigation: false }).actions).toMatchObject([
-      { type: "projects" },
-      { type: "newTask:agent" },
-      { type: "snapshot" },
-    ]);
+  it("can suppress the focused Task while Navigation remains subscription-owned", () => {
     expect(actionsFromInitialSnapshot(clientSnapshot(), { includeActiveTask: false }).actions).toMatchObject([
       { type: "projects" },
       { type: "newTask:agent" },
-      { type: "taskNavigation" },
-      { type: "selection:set" },
     ]);
   });
 
@@ -154,8 +134,13 @@ function clientSnapshot(overrides: Partial<ClientSnapshot> = {}): ClientSnapshot
       agents: [{ agentId: "codex" as AgentId, label: "Codex", status: "connected" }],
     },
     tasks: {
-      activeTaskId: "task-1" as TaskId,
-      entries: [
+      section: "tasks",
+      refresh: { state: "idle" },
+      groups: [{
+        projectId: "project-1" as ProjectId,
+        projectLabel: "Project",
+        taskCount: 1,
+        entries: [
         { kind: "task", task: taskSummary() },
         {
           kind: "nativeSession",
@@ -166,7 +151,8 @@ function clientSnapshot(overrides: Partial<ClientSnapshot> = {}): ClientSnapshot
             title: "Cached Native Session",
           },
         },
-      ],
+        ],
+      }],
     },
     activeTask: {
       task: taskSummary(),

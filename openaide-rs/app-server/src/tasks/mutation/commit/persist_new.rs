@@ -1,12 +1,10 @@
-use openaide_app_server_protocol::events::TaskNavigationChange;
-
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::NormalizedMessage;
 use crate::storage::records::TaskRecord;
 use crate::storage::Store;
-use crate::task_events::{CommittedChatChange, CommittedTaskChange};
+use crate::task_events::{CommittedChatChange, CommittedNavigationChange, CommittedTaskChange};
 
-use super::{navigation_member, project_committed_changes, ChangedFields};
+use super::{navigation_change::navigation_member, project_committed_changes, ChangedFields};
 use crate::tasks::mutation::{TaskCommitFacts, TaskMutations};
 
 pub(super) fn persist_new_task(
@@ -68,9 +66,10 @@ pub(super) fn persist_new_task(
         input_capabilities: true,
         removed: task.tombstoned,
     };
-    let navigation = navigation_member(task).then(|| TaskNavigationChange::Upsert {
-        task: Box::new(projected.task.clone()),
-    });
+    let navigation =
+        navigation_member(task).then(|| CommittedNavigationChange::ProjectEntriesChanged {
+            project_id: projected.task.project_id.clone(),
+        });
     // Test-only injected writers validate failure before any durable frame.
     write_task(&target.store, task)?;
     let projection = crate::storage::task_journal::TaskProjection {
@@ -114,7 +113,6 @@ pub(super) fn persist_new_task(
         revision: task.revision,
         committed_task: task.clone(),
         change: CommittedTaskChange {
-            lifecycle: None,
             changes,
             tool_details: Vec::new(),
             navigation,

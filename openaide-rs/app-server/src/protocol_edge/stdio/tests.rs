@@ -578,7 +578,7 @@ fn plain_stdio_factory_preserves_acp_host_request_transport() {
 }
 
 #[test]
-fn initialize_returns_storage_backed_task_navigation() {
+fn task_navigation_subscription_returns_the_only_storage_backed_baseline() {
     let temp = tempfile::TempDir::new().expect("temp dir");
     {
         let store = Store::open(temp.path().to_path_buf()).unwrap();
@@ -588,10 +588,25 @@ fn initialize_returns_storage_backed_task_navigation() {
     let mut dispatcher = ProtocolEdgeStdioDispatcher::new_for_test(state_root);
 
     let responses = dispatcher.handle_line(&init_request("1", "client-1"));
-
+    assert!(response(&responses[0])["result"]["result"]["snapshot"]["tasks"].is_null());
+    let responses = dispatcher.handle_line(
+        &json!({
+            "jsonrpc": "2.0",
+            "id": "subscribe-navigation",
+            "method": STATE_SUBSCRIBE,
+            "params": StateSubscribeParams {
+                scope: SubscriptionScope::TaskNavigation {
+                    section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
+                    project_ids: None,
+                },
+            },
+        })
+        .to_string(),
+    );
     let response = response(&responses[0]);
     assert_eq!(
-        response["result"]["result"]["snapshot"]["tasks"]["entries"][0]["task"]["taskId"],
+        response["result"]["result"]["snapshot"]["navigation"]["groups"][0]["entries"][0]["task"]
+            ["taskId"],
         "task-1"
     );
 }
@@ -1693,7 +1708,7 @@ fn task_send_commits_user_message_and_active_turn_after_initialize() {
             "id": "subscribe",
             "method": STATE_SUBSCRIBE,
             "params": StateSubscribeParams {
-                scope: SubscriptionScope::TaskNavigation { project_id: None },
+                scope: SubscriptionScope::TaskNavigation { section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks, project_ids: None },
             }
         })
         .to_string(),
@@ -1730,13 +1745,21 @@ fn task_send_commits_user_message_and_active_turn_after_initialize() {
         .as_str()
         .unwrap()
         .starts_with("turn_"));
-    let committed = notifications
-        .recv_timeout(Duration::from_secs(1))
-        .expect("committed send notification");
-    let events = dispatcher.handle_task_update(committed);
-    assert!(events
-        .iter()
-        .any(|line| event_payload_kind(line, "taskNavigationReplaced")));
+    let deadline = Instant::now() + Duration::from_secs(1);
+    let mut navigation_updated = false;
+    while Instant::now() < deadline {
+        let committed = notifications
+            .recv_timeout(Duration::from_millis(50))
+            .expect("committed send notification");
+        navigation_updated = dispatcher
+            .handle_task_update(committed)
+            .iter()
+            .any(|line| event_payload_kind(line, "taskUpdated"));
+        if navigation_updated {
+            break;
+        }
+    }
+    assert!(navigation_updated);
     drop(dispatcher);
     let store = open_store_after_dispatcher_drop(temp.path());
     let record = store.read_task("task-existing").unwrap();
@@ -1818,7 +1841,7 @@ fn task_update_notification_emits_focused_task_and_navigation_changes() {
             "id": "subscribe-navigation",
             "method": STATE_SUBSCRIBE,
             "params": StateSubscribeParams {
-                scope: SubscriptionScope::TaskNavigation { project_id: None },
+                scope: SubscriptionScope::TaskNavigation { section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks, project_ids: None },
             }
         })
         .to_string(),
@@ -1829,21 +1852,18 @@ fn task_update_notification_emits_focused_task_and_navigation_changes() {
         revision: 2,
         kind: crate::task_events::TaskUpdateKind::Changed(Box::new(
             crate::task_events::CommittedTaskChange {
-                lifecycle: None,
                 changes: openaide_app_server_protocol::events::TaskChanges::default(),
                 tool_details: Vec::new(),
-                navigation: Some(
-                    openaide_app_server_protocol::events::TaskNavigationChange::Upsert {
-                        task: Box::new(navigation_task),
-                    },
-                ),
+                navigation: Some(crate::task_events::CommittedNavigationChange::TaskUpdated(
+                    Box::new(navigation_task),
+                )),
             },
         )),
     });
 
     assert!(messages
         .iter()
-        .any(|line| event_payload_kind(line, "taskNavigationChanged")));
+        .any(|line| event_payload_kind(line, "taskUpdated")));
     assert!(!messages
         .iter()
         .any(|line| event_payload_kind(line, "projectCollectionUpdated")));
@@ -2182,7 +2202,7 @@ fn task_release_is_idempotent_after_restart_clears_the_lease() {
             "id": "subscribe",
             "method": STATE_SUBSCRIBE,
             "params": StateSubscribeParams {
-                scope: SubscriptionScope::TaskNavigation { project_id: None },
+                scope: SubscriptionScope::TaskNavigation { section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks, project_ids: None },
             }
         })
         .to_string(),

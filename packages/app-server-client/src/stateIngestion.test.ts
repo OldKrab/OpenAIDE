@@ -18,41 +18,6 @@ import { applySubscriptionEvent, createSubscriptionIngestionState } from "./stat
 const rootId = "root-1" as StateRootId;
 
 describe("scope-local state ingestion", () => {
-  it("moves a Task between authoritative open and archived replicas", () => {
-    const openScope = { kind: "taskList", lifecycle: "open" } as const;
-    const archivedScope = { kind: "taskList", lifecycle: "archived" } as const;
-    const summary = taskSummary("task-1");
-    const openState = createSubscriptionIngestionState({
-      cursor: cursor("cursor-1"),
-      scope: openScope,
-      snapshot: { kind: "taskList", taskList: { lifecycle: "open", tasks: [summary], revision: 1 } },
-    }, context());
-    const archivedState = createSubscriptionIngestionState({
-      cursor: cursor("cursor-1"),
-      scope: archivedScope,
-      snapshot: { kind: "taskList", taskList: { lifecycle: "archived", tasks: [], revision: 1 } },
-    }, context());
-    const change = {
-      previousLifecycle: "open" as const,
-      task: { ...summary, lifecycle: "archived" as const },
-    };
-    const event = (subscription: SubscriptionScope): AppServerEvent => ({
-      subscription,
-      previousCursor: cursor("cursor-1"),
-      cursor: cursor("cursor-2"),
-      scope: { kind: "stateRoot", stateRootId: rootId },
-      payload: { kind: "taskLifecycleChanged", change },
-    });
-
-    const nextOpen = applySubscriptionEvent(openState, event(openScope));
-    const nextArchived = applySubscriptionEvent(archivedState, event(archivedScope));
-
-    expect(nextOpen.kind === "applied" && nextOpen.state.snapshot.kind === "taskList"
-      ? nextOpen.state.snapshot.taskList.tasks : []).toEqual([]);
-    expect(nextArchived.kind === "applied" && nextArchived.state.snapshot.kind === "taskList"
-      ? nextArchived.state.snapshot.taskList.tasks.map((task) => task.taskId) : []).toEqual(["task-1"]);
-  });
-
   it("applies one atomic Task patch at the exact next Task revision", () => {
     const state = taskState("task-1", 4);
     const item = chatItem("agent-1", "Hello");
@@ -202,107 +167,155 @@ describe("scope-local state ingestion", () => {
     expect(result.state.snapshot.task.historySync).toEqual({ state: "syncing", generation: 3 });
   });
 
-  it("applies focused Navigation upserts and removals", () => {
-    const scope: SubscriptionScope = { kind: "taskNavigation", projectId: null };
-    let state = createSubscriptionIngestionState({
-      scope,
-      cursor: cursor("cursor-1"),
-      snapshot: { kind: "taskNavigation", navigation: { entries: [], activeTaskId: null } },
-    }, context());
-    const upsert = applySubscriptionEvent(state, navigationEvent(scope, "cursor-1", "cursor-2", {
-      kind: "upsert",
-      task: taskSummary("task-1"),
-    }));
-    expect(upsert.kind).toBe("applied");
-    if (upsert.kind !== "applied") return;
-    state = upsert.state;
-    const remove = applySubscriptionEvent(state, navigationEvent(scope, "cursor-2", "cursor-3", {
-      kind: "remove",
-      taskId: taskId("task-1"),
-    }));
-    expect(remove.kind).toBe("applied");
-    if (remove.kind !== "applied" || remove.state.snapshot.kind !== "taskNavigation") return;
-    expect(remove.state.snapshot.navigation.entries).toEqual([]);
-  });
-
-  it("keeps combined Navigation entries coherent across durable Task events", () => {
-    const scope: SubscriptionScope = { kind: "taskNavigation", projectId: null };
+  it("updates only an existing Task Navigation row", () => {
+    const scope: SubscriptionScope = { kind: "taskNavigation", section: "tasks", projectIds: null };
+    const existing = taskSummary("task-1");
     let state = createSubscriptionIngestionState({
       scope,
       cursor: cursor("cursor-1"),
       snapshot: {
         kind: "taskNavigation",
         navigation: {
-          activeTaskId: null,
-          entries: [{
-            kind: "nativeSession",
-            session: {
-              reference: { agentId: "codex" as AgentId, sessionId: "native-1" },
-              projectId: "project-1" as ProjectId,
-              workspaceRoot: "/workspace/project-1",
-              title: "Discovered",
-              lastActivity: "2026-07-21T00:00:00Z",
-            },
+          section: "tasks",
+          refresh: { state: "idle" },
+          groups: [{
+            projectId: existing.projectId,
+            projectLabel: "Project",
+            taskCount: 1,
+            entries: [{ kind: "task", task: existing }],
           }],
         },
       },
     }, context());
-
-    const upsert = applySubscriptionEvent(state, navigationEvent(scope, "cursor-1", "cursor-2", {
-      kind: "upsert",
-      task: taskSummary("task-1"),
+    const update = applySubscriptionEvent(state, navigationEvent(scope, "cursor-1", "cursor-2", {
+      kind: "taskUpdated",
+      projectId: existing.projectId,
+      task: { ...existing, status: "waiting", unread: true },
     }));
-    expect(upsert.kind).toBe("applied");
-    if (upsert.kind !== "applied" || upsert.state.snapshot.kind !== "taskNavigation") return;
-    state = upsert.state;
-    if (state.snapshot.kind !== "taskNavigation") return;
-    expect(state.snapshot.navigation.entries?.map((entry) => entry.kind)).toEqual([
-      "nativeSession",
-      "task",
-    ]);
+    expect(update.kind).toBe("applied");
+    if (update.kind !== "applied" || update.state.snapshot.kind !== "taskNavigation") return;
+    expect(update.state.snapshot.navigation.groups[0]?.entries[0]).toMatchObject({
+      kind: "task",
+      task: { taskId: taskId("task-1"), status: "waiting", unread: true },
+    });
 
-    const remove = applySubscriptionEvent(state, navigationEvent(scope, "cursor-2", "cursor-3", {
-      kind: "remove",
-      taskId: taskId("task-1"),
+    state = update.state;
+    const missing = applySubscriptionEvent(state, navigationEvent(scope, "cursor-2", "cursor-3", {
+      kind: "taskUpdated",
+      projectId: existing.projectId,
+      task: taskSummary("task-missing"),
     }));
-    expect(remove.kind).toBe("applied");
-    if (remove.kind !== "applied" || remove.state.snapshot.kind !== "taskNavigation") return;
-    expect(remove.state.snapshot.navigation.entries?.map((entry) => entry.kind)).toEqual([
-      "nativeSession",
-    ]);
+    expect(missing.kind).toBe("applied");
+    if (missing.kind !== "applied" || missing.state.snapshot.kind !== "taskNavigation") return;
+    expect(missing.state.snapshot.navigation.groups[0]?.entries).toHaveLength(1);
   });
 
-  it("atomically replaces Task Navigation when a catalog page commits", () => {
-    const scope: SubscriptionScope = { kind: "taskNavigation", projectId: null };
+  it("replaces one Project's entries without changing other Projects", () => {
+    const scope: SubscriptionScope = { kind: "taskNavigation", section: "tasks", projectIds: null };
+    let state = createSubscriptionIngestionState({
+      scope,
+      cursor: cursor("cursor-1"),
+      snapshot: {
+        kind: "taskNavigation",
+        navigation: {
+          section: "tasks",
+          refresh: { state: "idle" },
+          groups: [
+            {
+              projectId: "project-1" as ProjectId,
+              projectLabel: "One",
+              taskCount: 0,
+              entries: [],
+            },
+            {
+              projectId: "project-2" as ProjectId,
+              projectLabel: "Two",
+              taskCount: 1,
+              entries: [{ kind: "task", task: { ...taskSummary("task-2"), projectId: "project-2" as ProjectId } }],
+            },
+          ],
+        },
+      },
+    }, context());
+
+    const replacement = applySubscriptionEvent(state, navigationEvent(scope, "cursor-1", "cursor-2", {
+      kind: "projectEntriesReplaced",
+      section: "tasks",
+      projectId: "project-1" as ProjectId,
+      taskCount: 1,
+      entries: [{ kind: "task", task: taskSummary("task-1") }],
+      hasMore: false,
+    }));
+    expect(replacement.kind).toBe("applied");
+    if (replacement.kind !== "applied" || replacement.state.snapshot.kind !== "taskNavigation") return;
+    expect(replacement.state.snapshot.navigation.groups[0]?.entries).toHaveLength(1);
+    expect(replacement.state.snapshot.navigation.groups[1]?.entries).toEqual(
+      state.snapshot.kind === "taskNavigation"
+        ? state.snapshot.navigation.groups[1]?.entries
+        : [],
+    );
+  });
+
+  it("updates refresh state without replacing Navigation entries", () => {
+    const scope: SubscriptionScope = { kind: "taskNavigation", section: "tasks", projectIds: null };
+    const navigation = {
+      section: "tasks" as const,
+      refresh: { state: "idle" as const },
+      groups: [{
+        projectId: "project-1" as ProjectId,
+        projectLabel: "One",
+        taskCount: 1,
+        entries: [{ kind: "task" as const, task: taskSummary("task-1") }],
+      }],
+    };
     const state = createSubscriptionIngestionState({
       scope,
       cursor: cursor("cursor-1"),
-      snapshot: { kind: "taskNavigation", navigation: { entries: [], refreshing: true } },
+      snapshot: { kind: "taskNavigation", navigation },
     }, context());
-    const replacement = {
-      refreshing: false,
-      entries: [{
-        kind: "nativeSession" as const,
-        session: {
-          reference: { agentId: "codex" as AgentId, sessionId: "native-1" },
-          projectId: "project-1" as ProjectId,
-          workspaceRoot: "/workspace/project-1",
-          title: "Discovered",
-        },
-      }],
-    };
-
-    const update = applySubscriptionEvent(state, {
-      subscription: scope,
-      previousCursor: cursor("cursor-1"),
-      cursor: cursor("cursor-2"),
-      scope: { kind: "stateRoot", stateRootId: rootId },
-      payload: { kind: "taskNavigationReplaced", navigation: replacement },
-    });
+    const update = applySubscriptionEvent(state, navigationEvent(scope, "cursor-1", "cursor-2", {
+      kind: "refreshStateChanged",
+      refresh: { state: "refreshing" },
+    }));
 
     expect(update.kind).toBe("applied");
     if (update.kind !== "applied" || update.state.snapshot.kind !== "taskNavigation") return;
-    expect(update.state.snapshot.navigation).toEqual(replacement);
+    expect(update.state.snapshot.navigation.refresh).toEqual({ state: "refreshing" });
+    expect(update.state.snapshot.navigation.groups).toBe(navigation.groups);
+  });
+
+  it("replaces the complete Navigation section at a recovery boundary", () => {
+    const scope: SubscriptionScope = { kind: "taskNavigation", section: "archive", projectIds: null };
+    const state = createSubscriptionIngestionState({
+      scope,
+      cursor: cursor("cursor-1"),
+      snapshot: {
+        kind: "taskNavigation",
+        navigation: { section: "archive", refresh: { state: "idle" }, groups: [] },
+      },
+    }, context());
+    const navigation = {
+      section: "archive" as const,
+      refresh: { state: "idle" as const },
+      groups: [{
+        projectId: "project-1" as ProjectId,
+        projectLabel: "One",
+        taskCount: 1,
+        entries: [{
+          kind: "task" as const,
+          task: { ...taskSummary("task-1"), lifecycle: "archived" as const },
+        }],
+      }],
+    };
+
+    const update = applySubscriptionEvent(state, navigationEvent(scope, "cursor-1", "cursor-2", {
+      kind: "navigationReplaced",
+      navigation,
+    }));
+
+    expect(update.kind).toBe("applied");
+    if (update.kind !== "applied" || update.state.snapshot.kind !== "taskNavigation") return;
+    expect(update.state.snapshot.navigation).toEqual(navigation);
   });
 
   it("applies terminal deltas only to the matching Tool-detail replica", () => {
@@ -486,14 +499,20 @@ function navigationEvent(
   subscription: Extract<SubscriptionScope, { kind: "taskNavigation" }>,
   previous: string,
   next: string,
-  change: Extract<AppServerEventPayload, { kind: "taskNavigationChanged" }>["change"],
+  payload: Extract<AppServerEventPayload, {
+    kind:
+      | "taskUpdated"
+      | "projectEntriesReplaced"
+      | "refreshStateChanged"
+      | "navigationReplaced";
+  }>,
 ): AppServerEvent {
   return {
     subscription,
     previousCursor: cursor(previous),
     cursor: cursor(next),
     scope: { kind: "stateRoot", stateRootId: rootId },
-    payload: { kind: "taskNavigationChanged", change },
+    payload,
   };
 }
 

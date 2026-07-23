@@ -1,8 +1,8 @@
 use std::sync::mpsc;
 
-use openaide_app_server_protocol::events::{TaskChanges, TaskNavigationChange};
-use openaide_app_server_protocol::ids::MessageId;
-use openaide_app_server_protocol::snapshot::ChatItem;
+use openaide_app_server_protocol::events::TaskChanges;
+use openaide_app_server_protocol::ids::{MessageId, ProjectId};
+use openaide_app_server_protocol::snapshot::{ChatItem, TaskNavigationRefreshState, TaskSummary};
 use openaide_app_server_protocol::task::ToolDetailSnapshot;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,14 +20,21 @@ pub struct ToolDetailUpdate {
     pub terminal_appends: Vec<crate::storage::task_journal::TerminalOutputAppend>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CommittedNavigationChange {
+    /// Row-only data changed without changing membership or ordering.
+    TaskUpdated(Box<TaskSummary>),
+    /// The authoritative ordered entries for this Project must be projected again.
+    ProjectEntriesChanged { project_id: ProjectId },
+}
+
 /// The complete focused publication produced by one durable Task transaction.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommittedTaskChange {
     /// Exact values captured by the durable transaction, never re-read during publication.
     pub changes: TaskChanges,
     pub tool_details: Vec<ToolDetailUpdate>,
-    pub navigation: Option<TaskNavigationChange>,
-    pub lifecycle: Option<openaide_app_server_protocol::task::TaskLifecycleChanged>,
+    pub navigation: Option<CommittedNavigationChange>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,8 +45,14 @@ pub enum TaskUpdateKind {
         artifact_id: String,
         deltas: Vec<openaide_app_server_protocol::events::ToolDetailDelta>,
     },
-    /// The global Task Navigation projection changed outside a Task transaction.
-    NavigationChanged,
+    /// Native Session membership or ordering changed for one Project.
+    NavigationProjectEntriesChanged {
+        project_id: ProjectId,
+    },
+    /// Native Session discovery refresh state changed without changing entries.
+    NavigationRefreshStateChanged {
+        refresh: TaskNavigationRefreshState,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -120,11 +133,21 @@ impl TaskUpdateNotifier {
         });
     }
 
-    pub(crate) fn navigation_changed(&self) {
+    pub(crate) fn navigation_project_entries_changed(&self, project_id: impl Into<ProjectId>) {
         self.publish(TaskUpdate {
             task_id: String::new(),
             revision: 0,
-            kind: TaskUpdateKind::NavigationChanged,
+            kind: TaskUpdateKind::NavigationProjectEntriesChanged {
+                project_id: project_id.into(),
+            },
+        });
+    }
+
+    pub(crate) fn navigation_refresh_state_changed(&self, refresh: TaskNavigationRefreshState) {
+        self.publish(TaskUpdate {
+            task_id: String::new(),
+            revision: 0,
+            kind: TaskUpdateKind::NavigationRefreshStateChanged { refresh },
         });
     }
 

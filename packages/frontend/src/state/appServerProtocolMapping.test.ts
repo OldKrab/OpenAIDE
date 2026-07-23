@@ -32,13 +32,13 @@ describe("App Server Protocol state mapping", () => {
 
   it("maps task navigation summaries into current frontend task summaries", () => {
     expect(mapProtocolTaskNavigation({
-      activeTaskId: "task-1" as TaskId,
-      entries: [
+      section: "tasks",
+      refresh: { state: "idle" },
+      groups: [{ projectId: "project-1" as ProjectId, projectLabel: "Project", taskCount: 2, entries: [
         { kind: "task", task: protocolSummary({ taskId: "task-1" as TaskId, status: "running" }) },
         { kind: "task", task: protocolSummary({ taskId: "task-2" as TaskId, status: "waiting", unread: true }) },
-      ],
+      ] }],
     }, mappingContext())).toMatchObject({
-      activeTaskId: "task-1",
       tasks: [
         { task_id: "task-1", status: "active", agent_id: "codex", agent_name: "Codex", workspace_root: "" },
         { task_id: "task-2", status: "waiting", unread: true },
@@ -46,6 +46,23 @@ describe("App Server Protocol state mapping", () => {
       warnings: [],
       requiresNativeSurface: false,
     });
+  });
+
+  it("maps Navigation refresh failure without discarding saved rows", () => {
+    const mapping = mapProtocolTaskNavigation({
+      section: "tasks",
+      refresh: { state: "failed", message: "Codex history unavailable" },
+      groups: [{
+        projectId: "project-1" as ProjectId,
+        projectLabel: "Project",
+        taskCount: 1,
+        entries: [{ kind: "task", task: protocolSummary({ taskId: "task-1" as TaskId }) }],
+      }],
+    }, mappingContext());
+
+    expect(mapping.tasks.map((task) => task.task_id)).toEqual(["task-1"]);
+    expect(mapping.refreshError).toBe("Codex history unavailable");
+    expect(mapping.refreshing).toBe(false);
   });
 
   it("keeps stopping distinct from running", () => {
@@ -97,8 +114,9 @@ describe("App Server Protocol state mapping", () => {
 
   it("keeps visible adopted Tasks even when their loaded history is empty", () => {
     const mapping = mapProtocolTaskNavigation({
-      activeTaskId: "task-sent" as TaskId,
-      entries: [
+      section: "tasks",
+      refresh: { state: "idle" },
+      groups: [{ projectId: "project-1" as ProjectId, projectLabel: "Project", taskCount: 2, entries: [
         { kind: "task", task: protocolSummary({
           taskId: "task-empty" as TaskId,
           title: { value: "New task", source: "user" },
@@ -111,11 +129,11 @@ describe("App Server Protocol state mapping", () => {
           status: "running",
           hasMessages: true,
         }) },
-      ],
+      ] }],
     }, mappingContext());
 
     expect(mapping.tasks.map((task) => task.task_id)).toEqual(["task-empty", "task-sent"]);
-    expect(mapping.activeTaskId).toBe("task-sent");
+    expect(mapping.activeTaskId).toBeUndefined();
   });
 
   it("uses lifecycle-specific presentation titles when App Server has no title", () => {
@@ -255,8 +273,14 @@ describe("App Server Protocol state mapping", () => {
 
   it("warns when a task references a project missing from the project collection", () => {
     const mapping = mapProtocolTaskNavigation({
-      activeTaskId: "task-1" as TaskId,
-      entries: [{ kind: "task", task: protocolSummary({ taskId: "task-1" as TaskId }) }],
+      section: "tasks",
+      refresh: { state: "idle" },
+      groups: [{
+        projectId: "project-1" as ProjectId,
+        projectLabel: "Project",
+        taskCount: 1,
+        entries: [{ kind: "task", task: protocolSummary({ taskId: "task-1" as TaskId }) }],
+      }],
     }, { agents: mappingContext().agents, projects: [] });
 
     expect(mapping.warnings).toEqual([{ kind: "projectDisplayNotMapped", projectId: "project-1" }]);

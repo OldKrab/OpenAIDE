@@ -11,7 +11,7 @@ use crate::snapshot::{
     TaskPreparationSnapshot, TaskSendCapabilitySnapshot, TaskSummary,
 };
 use crate::state::SubscriptionScope;
-use crate::task::{TaskLifecycleChanged, ToolDetailSnapshot};
+use crate::task::{TaskNavigationSection, ToolDetailSnapshot};
 use crate::worktree::WorktreeRepositorySnapshot;
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
@@ -67,14 +67,26 @@ pub enum AppServerEventPayload {
         task_id: TaskId,
         history_sync: TaskHistorySyncSnapshot,
     },
-    TaskNavigationChanged {
-        change: TaskNavigationChange,
+    /// Updates row-visible fields for one Task already present in Navigation.
+    ///
+    /// Consumers must never treat this as an insertion or lifecycle move.
+    TaskUpdated {
+        project_id: crate::ids::ProjectId,
+        task: Box<crate::snapshot::TaskSummary>,
     },
-    TaskLifecycleChanged {
-        change: TaskLifecycleChanged,
+    /// Replaces the bounded authoritative row window for one Project.
+    ProjectEntriesReplaced {
+        section: TaskNavigationSection,
+        project_id: crate::ids::ProjectId,
+        task_count: u64,
+        entries: Vec<crate::snapshot::TaskNavigationEntry>,
+        has_more: bool,
     },
-    /// Replaces the combined durable Task and unadopted Native Session projection.
-    TaskNavigationReplaced {
+    RefreshStateChanged {
+        refresh: crate::snapshot::TaskNavigationRefreshState,
+    },
+    /// Recovers Navigation after initialization, reconnect, or cursor loss.
+    NavigationReplaced {
         navigation: TaskNavigationSnapshot,
     },
     ProjectCollectionUpdated {
@@ -170,17 +182,6 @@ pub enum TaskChatChange {
     Upsert { item: ChatItem },
     AppendText { message_id: MessageId, text: String },
     Replace { chat: ChatSnapshot },
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
-#[serde(
-    tag = "kind",
-    rename_all = "camelCase",
-    rename_all_fields = "camelCase"
-)]
-pub enum TaskNavigationChange {
-    Upsert { task: Box<TaskSummary> },
-    Remove { task_id: TaskId },
 }
 
 fn is_false(value: &bool) -> bool {

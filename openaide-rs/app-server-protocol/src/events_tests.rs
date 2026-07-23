@@ -60,3 +60,34 @@ fn tool_summary_and_full_detail_are_distinct_event_shapes() {
         json!("complete output")
     );
 }
+
+#[test]
+fn task_navigation_task_update_has_a_distinct_wire_event() {
+    let payload: AppServerEventPayload = serde_json::from_value(json!({
+        "kind": "taskUpdated",
+        "projectId": "project-api",
+        "task": {
+            "taskId": "task-1",
+            "projectId": "project-api",
+            "agentId": "codex",
+            "lifecycle": "open",
+            "title": null,
+            "status": "waiting",
+            "updatedAt": "2026-07-23T12:00:00Z",
+            "lastActivity": "2026-07-23T11:00:00Z",
+            "unread": true,
+            "attention": {
+                "eventId": "permission-1",
+                "reason": "needsPermission",
+                "occurredAt": "2026-07-23T12:00:00Z"
+            },
+            "hasMessages": true,
+            "workspaceAvailable": true
+        }
+    }))
+    .unwrap();
+
+    let encoded = serde_json::to_value(payload).unwrap();
+    assert_eq!(encoded["kind"], json!("taskUpdated"));
+    assert_eq!(encoded["task"]["status"], json!("waiting"));
+}

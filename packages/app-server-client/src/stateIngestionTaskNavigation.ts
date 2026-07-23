@@ -1,48 +1,65 @@
 import type {
+  ProjectId,
   SubscriptionScope,
   TaskNavigationEntry,
   TaskNavigationSnapshot,
   TaskSummary,
 } from "./generated/protocol.js";
 
+/** Restricts one authoritative Navigation baseline without regrouping or sorting it. */
 export function filterTaskNavigationForScope(
   navigation: TaskNavigationSnapshot,
   scope: SubscriptionScope,
 ): TaskNavigationSnapshot {
-  if (scope.kind !== "taskNavigation" || scope.projectId === null || scope.projectId === undefined) return navigation;
-
-  const entries = navigation.entries.filter((entry) => (
-    entry.kind === "task"
-      ? entry.task.projectId === scope.projectId
-      : entry.session.projectId === scope.projectId
-  ));
-  const activeTaskId =
-    navigation.activeTaskId !== null && navigation.activeTaskId !== undefined
-      ? entries.some((entry) => entry.kind === "task" && entry.task.taskId === navigation.activeTaskId)
-        ? navigation.activeTaskId
-        : null
-      : navigation.activeTaskId;
-
-  return { ...navigation, entries, activeTaskId };
+  if (scope.kind !== "taskNavigation") return navigation;
+  const selected = scope.projectIds;
+  if (selected === null || selected === undefined) return navigation;
+  return {
+    ...navigation,
+    groups: navigation.groups.filter((group) => selected.includes(group.projectId)),
+  };
 }
 
-/** Keeps the combined Navigation projection coherent while focused Task events arrive. */
-export function upsertTaskNavigationEntry(
-  entries: TaskNavigationEntry[],
+/**
+ * Updates row-visible state only when the Task already belongs to this replica.
+ * Membership changes require an authoritative projectEntriesReplaced event.
+ */
+export function updateExistingNavigationTask(
+  navigation: TaskNavigationSnapshot,
+  projectId: ProjectId,
   task: TaskSummary,
-): TaskNavigationEntry[] {
-  const next = entries.filter((entry) => entry.kind !== "task" || entry.task.taskId !== task.taskId);
-  next.push({ kind: "task", task });
-  return next.sort((left, right) => entryActivity(right).localeCompare(entryActivity(left)));
+): TaskNavigationSnapshot | undefined {
+  const groupIndex = navigation.groups.findIndex((group) => group.projectId === projectId);
+  if (groupIndex < 0) return undefined;
+  const group = navigation.groups[groupIndex]!;
+  const entryIndex = group.entries.findIndex(
+    (entry) => entry.kind === "task" && entry.task.taskId === task.taskId,
+  );
+  if (entryIndex < 0) return undefined;
+
+  const entries = group.entries.slice();
+  entries[entryIndex] = { kind: "task", task };
+  const groups = navigation.groups.slice();
+  groups[groupIndex] = { ...group, entries };
+  return { ...navigation, groups };
 }
 
-export function removeTaskNavigationEntry(
+/** Replaces one Project's complete loaded row window while preserving group order and label. */
+export function replaceNavigationProjectEntries(
+  navigation: TaskNavigationSnapshot,
+  projectId: ProjectId,
+  taskCount: number,
   entries: TaskNavigationEntry[],
-  taskId: TaskSummary["taskId"],
-): TaskNavigationEntry[] {
-  return entries.filter((entry) => entry.kind !== "task" || entry.task.taskId !== taskId);
-}
-
-function entryActivity(entry: TaskNavigationEntry): string {
-  return entry.kind === "task" ? entry.task.lastActivity : entry.session.lastActivity ?? "";
+  hasMore: boolean,
+): TaskNavigationSnapshot | undefined {
+  const groupIndex = navigation.groups.findIndex((group) => group.projectId === projectId);
+  if (groupIndex < 0) return undefined;
+  const groups = navigation.groups.slice();
+  groups[groupIndex] = {
+    ...groups[groupIndex]!,
+    taskCount,
+    entries,
+    hasMore,
+  };
+  return { ...navigation, groups };
 }

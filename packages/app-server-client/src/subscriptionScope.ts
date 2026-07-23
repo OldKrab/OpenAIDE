@@ -25,11 +25,9 @@ export function subscriptionScopesEqual(left: SubscriptionScope, right: Subscrip
     case "settings":
       return right.kind === "settings" && normalizeOptional(left.section) === normalizeOptional(right.section);
     case "taskNavigation":
-      return right.kind === "taskNavigation" && normalizeOptional(left.projectId) === normalizeOptional(right.projectId);
-    case "taskList":
-      return right.kind === "taskList"
-        && left.lifecycle === right.lifecycle
-        && normalizeOptional(left.projectId) === normalizeOptional(right.projectId);
+      return right.kind === "taskNavigation"
+        && left.section === right.section
+        && normalizedProjectIds(left.projectIds) === normalizedProjectIds(right.projectIds);
     case "task":
       return right.kind === "task" && left.taskId === right.taskId;
     case "toolDetail":
@@ -91,17 +89,18 @@ function payloadMatchesSubscriptionScope(scope: SubscriptionScope, payload: AppS
     case "settings":
       return payload.kind === "snapshotReplaced";
     case "taskNavigation":
-      return (
-        payload.kind === "snapshotReplaced" ||
-        payload.kind === "taskNavigationChanged" ||
-        payload.kind === "taskNavigationReplaced"
-      );
-    case "taskList":
-      return payload.kind === "snapshotReplaced" || (
-        payload.kind === "taskLifecycleChanged"
-        && (scope.projectId === undefined || scope.projectId === null || payload.change.task.projectId === scope.projectId)
-        && (payload.change.task.lifecycle === scope.lifecycle || payload.change.previousLifecycle === scope.lifecycle)
-      );
+      if (payload.kind === "snapshotReplaced") return true;
+      if (payload.kind === "refreshStateChanged") return scope.section === "tasks";
+      if (payload.kind === "navigationReplaced") return payload.navigation.section === scope.section;
+      if (payload.kind === "projectEntriesReplaced") {
+        return payload.section === scope.section && projectSelected(scope.projectIds, payload.projectId);
+      }
+      return payload.kind === "taskUpdated"
+        && projectSelected(scope.projectIds, payload.projectId)
+        && (
+          (scope.section === "tasks" && payload.task.lifecycle === "open")
+          || (scope.section === "archive" && payload.task.lifecycle === "archived")
+        );
     case "task":
       return (
         payload.kind === "snapshotReplaced" ||
@@ -122,4 +121,15 @@ function payloadMatchesSubscriptionScope(scope: SubscriptionScope, payload: AppS
 
 function normalizeOptional(value: string | null | undefined): string | undefined {
   return value ?? undefined;
+}
+
+function normalizedProjectIds(value: string[] | null | undefined): string {
+  return value?.join("\u0000") ?? "*";
+}
+
+function projectSelected(
+  selected: string[] | null | undefined,
+  projectId: string,
+): boolean {
+  return selected === null || selected === undefined || selected.includes(projectId);
 }

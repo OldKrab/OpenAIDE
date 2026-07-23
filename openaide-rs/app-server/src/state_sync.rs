@@ -293,61 +293,44 @@ fn payload_matches_subscription(
         SubscriptionScope::Settings { .. } => {
             matches!(payload, AppServerEventPayload::SnapshotReplaced { .. })
         }
-        SubscriptionScope::TaskNavigation { project_id } => {
+        SubscriptionScope::TaskNavigation {
+            section,
+            project_ids,
+        } => {
             matches!(payload, AppServerEventPayload::SnapshotReplaced { .. })
                 || matches!(
                     payload,
-                    AppServerEventPayload::TaskNavigationReplaced { .. }
+                    AppServerEventPayload::NavigationReplaced { navigation }
+                        if navigation.section == *section
+                )
+                || matches!(
+                    payload, AppServerEventPayload::RefreshStateChanged { .. }
+                        if matches!(
+                            section,
+                            openaide_app_server_protocol::task::TaskNavigationSection::Tasks
+                        )
                 )
                 || matches!(
                     payload,
-                    AppServerEventPayload::TaskNavigationChanged {
-                        change:
-                            openaide_app_server_protocol::events::TaskNavigationChange::Remove { .. }
-                    }
+                    AppServerEventPayload::ProjectEntriesReplaced {
+                        section: changed_section,
+                        project_id,
+                        ..
+                    } if changed_section == section
+                        && project_ids
+                            .as_ref()
+                            .is_none_or(|project_ids| project_ids.contains(project_id))
                 )
                 || matches!(
                     payload,
-                    AppServerEventPayload::TaskNavigationChanged {
-                        change: openaide_app_server_protocol::events::TaskNavigationChange::Upsert { task }
-                    } if project_id.as_ref().is_none_or(|project_id| &task.project_id == project_id)
-                )
-        }
-        SubscriptionScope::TaskList {
-            lifecycle,
-            project_id,
-        } => {
-            matches!(
-                payload,
-                AppServerEventPayload::SnapshotReplaced { .. }
-                    | AppServerEventPayload::TaskLifecycleChanged { .. }
-            ) && match payload {
-                AppServerEventPayload::TaskLifecycleChanged { change } => {
-                    let matches_lifecycle =
-                        |candidate: openaide_app_server_protocol::snapshot::TaskLifecycle| {
-                            match lifecycle {
-                                openaide_app_server_protocol::task::TaskListLifecycle::Open => {
-                                    matches!(
-                                        candidate,
-                                        openaide_app_server_protocol::snapshot::TaskLifecycle::Open
-                                    )
-                                }
-                                openaide_app_server_protocol::task::TaskListLifecycle::Archived => {
-                                    matches!(
-                                    candidate,
-                                    openaide_app_server_protocol::snapshot::TaskLifecycle::Archived
-                                )
-                                }
-                            }
-                        };
-                    project_id
+                    AppServerEventPayload::TaskUpdated {
+                        project_id,
+                        task,
+                    } if project_ids
                         .as_ref()
-                        .is_none_or(|project_id| &change.task.project_id == project_id)
-                        && (matches_lifecycle(change.task.lifecycle)
-                            || matches_lifecycle(change.previous_lifecycle))
-                }
-                _ => true,
-            }
+                        .is_none_or(|project_ids| project_ids.contains(project_id))
+                        && task_lifecycle_matches_navigation_section(task.lifecycle, *section)
+                )
         }
         SubscriptionScope::Task { .. } => matches!(
             payload,
@@ -388,6 +371,22 @@ fn payload_matches_subscription(
                 )
         }
     }
+}
+
+fn task_lifecycle_matches_navigation_section(
+    lifecycle: openaide_app_server_protocol::snapshot::TaskLifecycle,
+    section: openaide_app_server_protocol::task::TaskNavigationSection,
+) -> bool {
+    matches!(
+        (lifecycle, section),
+        (
+            openaide_app_server_protocol::snapshot::TaskLifecycle::Open,
+            openaide_app_server_protocol::task::TaskNavigationSection::Tasks
+        ) | (
+            openaide_app_server_protocol::snapshot::TaskLifecycle::Archived,
+            openaide_app_server_protocol::task::TaskNavigationSection::Archive
+        )
+    )
 }
 
 #[cfg(test)]

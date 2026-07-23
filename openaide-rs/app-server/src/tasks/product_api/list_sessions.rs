@@ -121,16 +121,13 @@ impl TaskProductApi {
         }
 
         self.native_catalog.set_refreshing(true);
-        self.task_notifier.navigation_changed();
+        self.task_notifier.navigation_refresh_state_changed(
+            openaide_app_server_protocol::snapshot::TaskNavigationRefreshState::Refreshing,
+        );
 
         let api = self.clone();
         std::thread::spawn(move || loop {
-            if let Err(error) = api.refresh_native_session_catalogs() {
-                crate::logging::warn(
-                    "native_session_catalog_refresh_failed",
-                    serde_json::json!({ "error": error.message }),
-                );
-            }
+            let refresh = api.refresh_native_session_catalogs();
             let mut state = api
                 .native_catalog_refresh
                 .state
@@ -141,8 +138,20 @@ impl TaskProductApi {
                 continue;
             }
             state.running = false;
-            api.native_catalog.set_refreshing(false);
-            api.task_notifier.navigation_changed();
+            let refresh = match refresh {
+                Ok(()) => openaide_app_server_protocol::snapshot::TaskNavigationRefreshState::Idle,
+                Err(error) => {
+                    crate::logging::warn(
+                        "native_session_catalog_refresh_failed",
+                        serde_json::json!({ "error": error.message }),
+                    );
+                    openaide_app_server_protocol::snapshot::TaskNavigationRefreshState::Failed {
+                        message: error.message,
+                    }
+                }
+            };
+            api.native_catalog.set_refresh_state(refresh.clone());
+            api.task_notifier.navigation_refresh_state_changed(refresh);
             break;
         });
     }
@@ -207,36 +216,63 @@ impl TaskProductApi {
             })
             .collect::<Vec<_>>();
         let mut first_error = None;
+        let mut projects_with_errors = std::collections::HashSet::new();
+        let mut project_has_more = contexts
+            .iter()
+            .map(|(_, project_id, _)| (project_id.clone(), false))
+            .collect::<std::collections::HashMap<_, _>>();
         for batch in contexts.chunks(20) {
             let results = std::thread::scope(|scope| {
                 batch
                     .iter()
                     .map(|(agent_id, project_id, workspace_root)| {
-                        scope.spawn(|| {
-                            self.refresh_native_catalog_context(
-                                agent_id,
-                                project_id,
-                                workspace_root,
-                                &task_records,
-                            )
-                        })
+                        (
+                            project_id.clone(),
+                            scope.spawn(|| {
+                                self.refresh_native_catalog_context(
+                                    agent_id,
+                                    project_id,
+                                    workspace_root,
+                                    &task_records,
+                                )
+                            }),
+                        )
                     })
-                    .map(|worker| {
-                        worker.join().unwrap_or_else(|_| {
-                            Err(ProtocolError {
-                                code: openaide_app_server_protocol::errors::ProtocolErrorCode::Internal,
-                                message: "Native Session refresh worker panicked".to_string(),
-                                recoverable: true,
-                                target: None,
-                            })
-                        })
+                    .map(|(project_id, worker)| {
+                        let result = worker.join().unwrap_or_else(|_| {
+                                Err(ProtocolError {
+                                    code: openaide_app_server_protocol::errors::ProtocolErrorCode::Internal,
+                                    message: "Native Session refresh worker panicked".to_string(),
+                                    recoverable: true,
+                                    target: None,
+                                })
+                            });
+                        (project_id, result)
                     })
                     .collect::<Vec<_>>()
             });
-            for result in results {
-                if let Err(error) = result {
-                    first_error.get_or_insert(error);
+            for (project_id, result) in results {
+                match result {
+                    Ok(has_more) => {
+                        project_has_more
+                            .entry(project_id)
+                            .and_modify(|current| *current |= has_more);
+                    }
+                    Err(error) => {
+                        projects_with_errors.insert(project_id);
+                        first_error.get_or_insert(error);
+                    }
                 }
+            }
+        }
+        for (project_id, has_more) in project_has_more {
+            if !projects_with_errors.contains(&project_id)
+                && self
+                    .native_catalog
+                    .set_project_has_more(&project_id, has_more)
+            {
+                self.task_notifier
+                    .navigation_project_entries_changed(project_id);
             }
         }
         first_error.map_or(Ok(()), Err)
@@ -248,7 +284,7 @@ impl TaskProductApi {
         project_id: &str,
         workspace_root: &str,
         task_records: &[TaskRecord],
-    ) -> Result<(), ProtocolError> {
+    ) -> Result<bool, ProtocolError> {
         let target = self
             .native_catalog_refresh
             .state
@@ -262,7 +298,7 @@ impl TaskProductApi {
         let mut sessions = Vec::new();
         let mut seen = std::collections::HashSet::new();
         let mut listing_order = ListingOrderValidator::new();
-        loop {
+        let has_more = loop {
             let result = self
                 .agent_gateway
                 .list_sessions(AgentListSessionsRequest {
@@ -296,12 +332,12 @@ impl TaskProductApi {
                 || seen.len() >= target
                 || reached_activity_cutoff
             {
-                break;
+                break next.is_some() && page_order.new_identity_count > 0;
             }
-        }
+        };
         self.history_sync
             .replace_listed_sessions(agent_id, workspace_root, sessions);
-        Ok(())
+        Ok(has_more)
     }
 
     fn project_activity_cutoff(
@@ -526,7 +562,8 @@ impl TaskProductApi {
                     .collect(),
             )
             .map_err(protocol_error_from_runtime)?;
-        self.task_notifier.navigation_changed();
+        self.task_notifier
+            .navigation_project_entries_changed(project_id.to_string());
         Ok(())
     }
 

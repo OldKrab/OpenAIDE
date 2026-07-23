@@ -6,8 +6,8 @@ import type {
 } from "./generated/protocol.js";
 import {
   filterTaskNavigationForScope,
-  removeTaskNavigationEntry,
-  upsertTaskNavigationEntry,
+  replaceNavigationProjectEntries,
+  updateExistingNavigationTask,
 } from "./stateIngestionTaskNavigation.js";
 import { updateTaskSnapshot } from "./stateIngestionTask.js";
 import type { SnapshotUpdate } from "./stateIngestionTypes.js";
@@ -32,8 +32,6 @@ export function updateSubscriptionSnapshot(
       return unchanged(snapshot);
     case "taskNavigation":
       return updateTaskNavigationSnapshot(scope, snapshot, payload);
-    case "taskList":
-      return updateTaskListSnapshot(scope, snapshot, payload);
     case "task":
       return updateTaskSnapshot(snapshot, payload);
     case "toolDetail":
@@ -97,8 +95,6 @@ function updateFromClientSnapshot(
       return clientSnapshot.tasks
         ? changed({ kind: "taskNavigation", navigation: filterTaskNavigationForScope(clientSnapshot.tasks, scope) })
         : unchanged(snapshot);
-    case "taskList":
-      return unchanged(snapshot);
     case "task":
       return clientSnapshot.activeTask && clientSnapshot.activeTask.task.taskId === snapshot.task.task.taskId
         ? changed({ kind: "task", task: clientSnapshot.activeTask })
@@ -109,62 +105,44 @@ function updateFromClientSnapshot(
   }
 }
 
-function updateTaskListSnapshot(
-  scope: SubscriptionScope,
-  snapshot: Extract<SubscriptionSnapshot, { kind: "taskList" }>,
-  payload: AppServerEventPayload,
-): SnapshotUpdate {
-  if (scope.kind !== "taskList" || payload.kind !== "taskLifecycleChanged") return unchanged(snapshot);
-  const { task, previousLifecycle } = payload.change;
-  const matchesProject = scope.projectId === undefined || scope.projectId === null || task.projectId === scope.projectId;
-  const withoutTask = snapshot.taskList.tasks.filter((candidate) => candidate.taskId !== task.taskId);
-  const belongs = matchesProject && task.lifecycle === scope.lifecycle;
-  if (!belongs && previousLifecycle !== scope.lifecycle) return unchanged(snapshot);
-  const tasks = belongs ? [task, ...withoutTask] : withoutTask;
-  return changed({
-    ...snapshot,
-    taskList: {
-      ...snapshot.taskList,
-      revision: snapshot.taskList.revision,
-      tasks,
-    },
-  });
-}
-
 function updateTaskNavigationSnapshot(
   scope: SubscriptionScope,
   snapshot: Extract<SubscriptionSnapshot, { kind: "taskNavigation" }>,
   payload: AppServerEventPayload,
 ): SnapshotUpdate {
-  if (payload.kind === "taskNavigationReplaced") {
+  if (payload.kind === "navigationReplaced") {
     return changed({
       ...snapshot,
       navigation: filterTaskNavigationForScope(payload.navigation, scope),
     });
   }
-  if (payload.kind === "taskNavigationChanged") {
-    const change = payload.change;
-    if (change.kind === "remove") {
-      return changed({
-        ...snapshot,
-        navigation: {
-          ...snapshot.navigation,
-          entries: removeTaskNavigationEntry(snapshot.navigation.entries, change.taskId),
-        },
-      });
-    }
-    const matchesProject = scope.kind !== "taskNavigation"
-      || scope.projectId === null
-      || scope.projectId === undefined
-      || change.task.projectId === scope.projectId;
-    if (!matchesProject) return unchanged(snapshot);
+  if (payload.kind === "refreshStateChanged") {
     return changed({
       ...snapshot,
       navigation: {
         ...snapshot.navigation,
-        entries: upsertTaskNavigationEntry(snapshot.navigation.entries, change.task),
+        refresh: payload.refresh,
       },
     });
+  }
+  if (payload.kind === "taskUpdated") {
+    const navigation = updateExistingNavigationTask(
+      snapshot.navigation,
+      payload.projectId,
+      payload.task,
+    );
+    return navigation ? changed({ ...snapshot, navigation }) : unchanged(snapshot);
+  }
+  if (payload.kind === "projectEntriesReplaced") {
+    if (payload.section !== snapshot.navigation.section) return unchanged(snapshot);
+    const navigation = replaceNavigationProjectEntries(
+      snapshot.navigation,
+      payload.projectId,
+      payload.taskCount,
+      payload.entries,
+      payload.hasMore,
+    );
+    return navigation ? changed({ ...snapshot, navigation }) : unchanged(snapshot);
   }
 
   return unchanged(snapshot);

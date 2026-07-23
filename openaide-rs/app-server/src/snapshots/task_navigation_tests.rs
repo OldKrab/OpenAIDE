@@ -76,9 +76,10 @@ fn projects_visible_task_records_into_navigation_snapshot() {
         ))
         .unwrap();
 
-    let snapshot = TaskNavigationStore::new(store).snapshot(None).unwrap();
+    let snapshot = TaskNavigationStore::new(store)
+        .snapshot(TaskNavigationSection::Tasks, None)
+        .unwrap();
 
-    assert_eq!(snapshot.active_task_id, None);
     assert_eq!(task_entries(&snapshot).len(), 2);
     assert_eq!(task_entries(&snapshot)[0].task_id.as_str(), "task-newer");
     assert_eq!(
@@ -118,17 +119,17 @@ fn navigation_combines_durable_tasks_and_persisted_unadopted_sessions() {
         .unwrap();
 
     let snapshot = TaskNavigationStore::with_native_sessions(store, catalog)
-        .snapshot(None)
+        .snapshot(TaskNavigationSection::Tasks, None)
         .unwrap();
 
-    assert_eq!(snapshot.entries.len(), 2);
+    assert_eq!(snapshot.groups[0].entries.len(), 2);
     assert!(matches!(
-        &snapshot.entries[0],
+        &snapshot.groups[0].entries[0],
         TaskNavigationEntry::NativeSession { session }
             if session.reference.session_id == "native-new" && session.title.as_deref() == Some("Unadopted")
     ));
     assert!(matches!(
-        &snapshot.entries[1],
+        &snapshot.groups[0].entries[1],
         TaskNavigationEntry::Task { task } if task.task_id.as_str() == "task-owned"
     ));
 }
@@ -161,7 +162,9 @@ fn marks_tasks_with_durable_chat_messages() {
     record.message_history_version = store.message_history_version("task-1").unwrap();
     store.write_task(&record).unwrap();
 
-    let snapshot = TaskNavigationStore::new(store).snapshot(None).unwrap();
+    let snapshot = TaskNavigationStore::new(store)
+        .snapshot(TaskNavigationSection::Tasks, None)
+        .unwrap();
 
     assert_eq!(task_entries(&snapshot)[0].task_id.as_str(), "task-1");
     assert!(task_entries(&snapshot)[0].has_messages);
@@ -180,7 +183,9 @@ fn navigation_uses_task_record_message_version_without_reading_chat_files() {
         .join("messages.jsonl")
         .exists());
 
-    let snapshot = TaskNavigationStore::new(store).snapshot(None).unwrap();
+    let snapshot = TaskNavigationStore::new(store)
+        .snapshot(TaskNavigationSection::Tasks, None)
+        .unwrap();
 
     assert_eq!(task_entries(&snapshot)[0].task_id.as_str(), "task-1");
     assert!(task_entries(&snapshot)[0].has_messages);
@@ -197,9 +202,68 @@ fn omits_archived_and_tombstoned_records() {
     store.write_task(&archived).unwrap();
     store.write_task(&tombstoned).unwrap();
 
-    let snapshot = TaskNavigationStore::new(store).snapshot(None).unwrap();
+    let snapshot = TaskNavigationStore::new(store)
+        .snapshot(TaskNavigationSection::Tasks, None)
+        .unwrap();
 
     assert!(task_entries(&snapshot).is_empty());
+}
+
+#[test]
+fn archive_snapshot_contains_only_archived_tasks() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let open = task_record("task-open", "Open", "2026-01-01T00:00:00.000Z");
+    let mut archived = task_record("task-archived", "Archived", "2026-01-02T00:00:00.000Z");
+    archived.lifecycle = crate::storage::records::TaskLifecycle::Archived;
+    store.write_task(&open).unwrap();
+    store.write_task(&archived).unwrap();
+
+    let snapshot = TaskNavigationStore::new(store)
+        .snapshot(TaskNavigationSection::Archive, None)
+        .unwrap();
+
+    assert_eq!(task_entries(&snapshot).len(), 1);
+    assert_eq!(task_entries(&snapshot)[0].task_id.as_str(), "task-archived");
+    assert!(snapshot.groups.iter().all(|group| {
+        group
+            .entries
+            .iter()
+            .all(|entry| matches!(entry, TaskNavigationEntry::Task { .. }))
+    }));
+}
+
+#[test]
+fn archived_task_keeps_its_native_session_out_of_primary_navigation() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let mut archived = task_record("task-archived", "Archived", "2026-01-02T00:00:00.000Z");
+    archived.lifecycle = crate::storage::records::TaskLifecycle::Archived;
+    archived.agent_session_id = Some("native-owned".to_string());
+    let project_id = project_id_for_workspace(&archived.workspace_root);
+    store.write_task(&archived).unwrap();
+    let catalog = NativeSessionCatalog::open(store.clone()).unwrap();
+    catalog
+        .record_page(
+            project_id.as_str(),
+            &archived.workspace_root,
+            vec![NativeSessionObservation {
+                reference: NativeSessionRef::new("agent-a", "native-owned"),
+                title: Some("Must stay owned".to_string()),
+                last_activity: Some("2026-07-21T00:00:00Z".to_string()),
+            }],
+        )
+        .unwrap();
+
+    let snapshot = TaskNavigationStore::with_native_sessions(store, catalog)
+        .snapshot(TaskNavigationSection::Tasks, None)
+        .unwrap();
+
+    assert!(snapshot
+        .groups
+        .iter()
+        .flat_map(|group| &group.entries)
+        .all(|entry| !matches!(entry, TaskNavigationEntry::NativeSession { .. })));
 }
 
 #[test]
@@ -211,10 +275,16 @@ fn filters_by_project_id_when_requested() {
     store.write_task(&task).unwrap();
 
     let included = TaskNavigationStore::new(store.clone())
-        .snapshot(Some(&included_project_id))
+        .snapshot(
+            TaskNavigationSection::Tasks,
+            Some(std::slice::from_ref(&included_project_id)),
+        )
         .unwrap();
     let excluded = TaskNavigationStore::new(store)
-        .snapshot(Some(&ProjectId::from("project-other")))
+        .snapshot(
+            TaskNavigationSection::Tasks,
+            Some(&[ProjectId::from("project-other")]),
+        )
         .unwrap();
 
     assert_eq!(task_entries(&included).len(), 1);
@@ -232,15 +302,18 @@ fn storage_read_failure_is_isolated_from_navigation() {
     corrupt_last_byte(&temp.path().join("task-store-v1/tasks/corrupt/task.json"));
     let store = Store::open(temp.path().to_path_buf()).unwrap();
 
-    let snapshot = TaskNavigationStore::new(store).snapshot(None).unwrap();
+    let snapshot = TaskNavigationStore::new(store)
+        .snapshot(TaskNavigationSection::Tasks, None)
+        .unwrap();
 
     assert!(task_entries(&snapshot).is_empty());
 }
 
 fn task_entries(snapshot: &TaskNavigationSnapshot) -> Vec<&TaskSummary> {
     snapshot
-        .entries
+        .groups
         .iter()
+        .flat_map(|group| group.entries.iter())
         .filter_map(|entry| match entry {
             TaskNavigationEntry::Task { task } => Some(task.as_ref()),
             TaskNavigationEntry::NativeSession { .. } => None,

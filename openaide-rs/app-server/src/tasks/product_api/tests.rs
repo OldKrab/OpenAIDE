@@ -22,7 +22,7 @@ use crate::storage::records::{
     TaskLifecycle, TaskPreparationRecord, TaskRecord, TaskTitle, TaskTitleSource,
 };
 use crate::storage::Store;
-use crate::task_events::TaskUpdateNotifier;
+use crate::task_events::{TaskUpdateKind, TaskUpdateNotifier};
 use crate::tasks::mutation::TaskMutationResult;
 use openaide_app_server_protocol::agent::AgentListSessionsParams;
 use openaide_app_server_protocol::ids::{AgentId, ClientInstanceId, ProjectId, TaskId};
@@ -2516,6 +2516,50 @@ fn failed_native_session_listing_is_not_cached() {
     }
 
     assert_eq!(agent.list_calls.load(Ordering::SeqCst), 4);
+}
+
+#[test]
+fn background_native_session_failure_is_published_as_failed_refresh_state() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    store
+        .write_task(&task_record(
+            "task-existing",
+            "/tmp/openaide-unit-workspace/app",
+        ))
+        .unwrap();
+    let agent = Arc::new(RecordingAgent {
+        fail_list: true,
+        ..Default::default()
+    });
+    let (notifier, updates) = TaskUpdateNotifier::channel();
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store)),
+        AgentRegistry::default_built_ins(),
+        agent,
+        notifier,
+    )
+    .unwrap();
+
+    api.request_native_session_catalog_refresh();
+
+    assert!(matches!(
+        updates.recv_timeout(Duration::from_secs(1)).unwrap().kind,
+        TaskUpdateKind::NavigationRefreshStateChanged {
+            refresh: openaide_app_server_protocol::snapshot::TaskNavigationRefreshState::Refreshing
+        }
+    ));
+    assert!(matches!(
+        updates.recv_timeout(Duration::from_secs(1)).unwrap().kind,
+        TaskUpdateKind::NavigationRefreshStateChanged {
+            refresh: openaide_app_server_protocol::snapshot::TaskNavigationRefreshState::Failed { .. }
+        }
+    ));
+    assert!(matches!(
+        api.native_session_catalog().refresh_state(),
+        openaide_app_server_protocol::snapshot::TaskNavigationRefreshState::Failed { .. }
+    ));
 }
 
 #[test]

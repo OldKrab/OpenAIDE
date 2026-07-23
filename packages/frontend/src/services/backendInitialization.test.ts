@@ -96,7 +96,7 @@ describe("backend initialization", () => {
     expect(initialized.capabilities?.shell ?? []).not.toContain("writeSecret");
   });
 
-  it("scopes only the VS Code task list to its fixed Project Context", () => {
+  it("scopes VS Code Navigation to its workspace Projects", () => {
     expect(taskNavigationScopeForBootstrap({
       surface: "navigation",
       shell: VSCODE_SHELL,
@@ -104,14 +104,15 @@ describe("backend initialization", () => {
       appServerConnection: { kind: "webProxy", endpointUrl: "/transport-does-not-control-scope" },
     })).toEqual({
       kind: "taskNavigation",
-      projectId: "project-1",
+      section: "tasks",
+      projectIds: ["project-1"],
     });
     expect(taskNavigationScopeForBootstrap({
       surface: "task",
       shell: WEB_SHELL,
       projectId: "project-1",
       appServerConnection: { kind: "webProxy", endpointUrl: "/probe" },
-    })).toEqual({ kind: "taskNavigation" });
+    })).toEqual({ kind: "taskNavigation", section: "tasks" });
   });
 
   it("uses session storage for stable tab identity", () => {

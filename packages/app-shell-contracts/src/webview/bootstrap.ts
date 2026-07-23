@@ -30,6 +30,8 @@ export type WebviewBootstrap = {
   agentId?: string;
   nativeSessionId?: string;
   projectId?: string;
+  /** Ordered Project Contexts visible in a multi-root App Shell navigation surface. */
+  projectIds?: string[];
   settingsTab?: SettingsTabId;
   /** Agent detail and return intent supplied by a recovery entry point. */
   settingsAgentId?: string;

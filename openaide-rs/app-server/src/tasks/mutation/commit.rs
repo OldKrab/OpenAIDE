@@ -1,4 +1,4 @@
-use openaide_app_server_protocol::events::{TaskChanges, TaskChatChange, TaskNavigationChange};
+use openaide_app_server_protocol::events::{TaskChanges, TaskChatChange};
 use openaide_app_server_protocol::ids::ClientInstanceId;
 use std::collections::HashSet;
 
@@ -17,8 +17,10 @@ use super::{
 };
 
 mod journal_operations;
+mod navigation_change;
 mod persist_new;
 use journal_operations::journal_operations;
+use navigation_change::navigation_change;
 use persist_new::persist_new_task;
 
 pub(super) fn commit_existing_task(
@@ -606,12 +608,6 @@ fn persist_changed_projection(
     )
     .map_err(|error| RuntimeError::Internal(error.message))?;
     let navigation = navigation_change(original, &projection.task, fields.summary, &projected.task);
-    let lifecycle = (original.lifecycle != projection.task.lifecycle).then(|| {
-        openaide_app_server_protocol::task::TaskLifecycleChanged {
-            previous_lifecycle: crate::snapshots::project_task_lifecycle(&original.lifecycle),
-            task: crate::snapshots::project_task_summary(projection.task.clone()),
-        }
-    });
     let committed_task = projection.task.clone();
     let journal_operations = journal_operations(projection, &chat)?;
     // Build every fallible publication value before the durability barrier.
@@ -661,7 +657,6 @@ fn persist_changed_projection(
             changes,
             tool_details,
             navigation,
-            lifecycle,
         },
     })
 }
@@ -703,26 +698,6 @@ fn changed_fields(original: &TaskRecord, task: &TaskRecord) -> ChangedFields {
         send_capability: preparation || original.status != task.status,
         input_capabilities: original.supports_image_input != task.supports_image_input,
         removed: !original.tombstoned && task.tombstoned,
-    }
-}
-
-fn navigation_change(
-    original: &TaskRecord,
-    task: &TaskRecord,
-    summary_changed: bool,
-    summary: &openaide_app_server_protocol::snapshot::TaskSummary,
-) -> Option<TaskNavigationChange> {
-    match (navigation_member(original), navigation_member(task)) {
-        (true, false) => Some(TaskNavigationChange::Remove {
-            task_id: task.task_id.clone().into(),
-        }),
-        (false, true) => Some(TaskNavigationChange::Upsert {
-            task: Box::new(summary.clone()),
-        }),
-        (true, true) if summary_changed => Some(TaskNavigationChange::Upsert {
-            task: Box::new(summary.clone()),
-        }),
-        _ => None,
     }
 }
 
@@ -774,10 +749,6 @@ fn project_committed_changes(
         chat: projected_chat,
         removed: fields.removed,
     })
-}
-
-fn navigation_member(task: &TaskRecord) -> bool {
-    matches!(task.lifecycle, TaskLifecycle::Open) && !task.tombstoned
 }
 
 struct VersionFields {

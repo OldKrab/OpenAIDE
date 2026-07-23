@@ -1118,7 +1118,9 @@ fn mixed_tool_update_publishes_one_atomic_detail_delta() {
             match update.kind {
                 TaskUpdateKind::Changed(change) => Some(change),
                 TaskUpdateKind::ToolDetailChanged { .. } => None,
-                TaskUpdateKind::HistorySync(_) | TaskUpdateKind::NavigationChanged => None,
+                TaskUpdateKind::HistorySync(_)
+                | TaskUpdateKind::NavigationProjectEntriesChanged { .. }
+                | TaskUpdateKind::NavigationRefreshStateChanged { .. } => None,
             }
         })
         .expect("Task change publication");

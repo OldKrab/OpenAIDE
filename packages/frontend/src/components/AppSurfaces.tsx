@@ -20,7 +20,6 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
   const [managedProjectId, setManagedProjectId] = useState<string>();
   const mobileNavigationButtonRef = useRef<HTMLButtonElement | null>(null);
   const webMainSurfaceRef = useRef<HTMLElement | null>(null);
-  const usesProjectNavigation = bootstrap.surface !== "invalid" && bootstrap.shell.navigationMode === "project";
   const isWebShell = bootstrap.surface !== "invalid" && bootstrap.shell.kind === "web";
   const isWebWorkbench = isWebShell && (
     bootstrap.surface === "task"
@@ -145,7 +144,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
       <main className="app-shell navigation-shell">
         <Sidebar
           activeTaskId={activeNavigationTaskId}
-          groupByProject={usesProjectNavigation}
+          groupByProject={true}
           maxTasksPerProject={DEFAULT_MAX_TASKS_PER_PROJECT}
           nativeSessions={navigation.nativeSessions}
           nativeSessionAgentId={navigation.newTaskSelection.agentId}
@@ -307,7 +306,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         </section>
         <Sidebar
           activeTaskId={sidebarActiveTaskId}
-          groupByProject={usesProjectNavigation}
+          groupByProject={true}
           hiddenFromAccessibility={mobileLayoutActive && !mobileNavigation.active}
           maxTasksPerProject={DEFAULT_MAX_TASKS_PER_PROJECT}
           modal={mobileLayoutActive && mobileNavigation.active}

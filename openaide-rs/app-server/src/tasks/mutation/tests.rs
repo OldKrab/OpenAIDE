@@ -6,7 +6,9 @@ use crate::protocol::model::{
 };
 use crate::storage::records::{TaskLifecycle, TaskPreparationRecord, TaskRecord};
 use crate::storage::Store;
-use crate::task_events::{TaskUpdateNotifier, TaskUpdateReceiver};
+use crate::task_events::{
+    CommittedNavigationChange, TaskUpdateKind, TaskUpdateNotifier, TaskUpdateReceiver,
+};
 use crate::tasks::mutation::{
     TaskCommitOptions, TaskCommitOutcome, TaskCommitRejection, TaskMutationResult, TaskMutations,
 };
@@ -40,6 +42,44 @@ fn metadata_commit_assigns_revision_once_and_returns_publication_facts() {
     let notification = notifications.try_recv().unwrap();
     assert_eq!(notification.task_id, "task_commit");
     assert_eq!(notification.revision, 1);
+}
+
+#[test]
+fn navigation_event_kind_follows_row_vs_collection_ownership() {
+    let (_dir, store, mutations, notifications) = test_mutations(0);
+    store.write_task(&task_record("task_navigation")).unwrap();
+
+    mutations
+        .commit_existing_task("task_navigation", TaskCommitOptions::metadata(), |ctx| {
+            ctx.task_mut().status = TaskStatus::Waiting;
+            Ok(TaskMutationResult::Changed)
+        })
+        .unwrap();
+    let row_update = notifications.try_recv().unwrap();
+    assert!(matches!(
+        row_update.kind,
+        TaskUpdateKind::Changed(change)
+            if matches!(
+                change.navigation,
+                Some(CommittedNavigationChange::TaskUpdated(_))
+            )
+    ));
+
+    mutations
+        .commit_existing_task("task_navigation", TaskCommitOptions::metadata(), |ctx| {
+            ctx.task_mut().lifecycle = TaskLifecycle::Archived;
+            Ok(TaskMutationResult::Changed)
+        })
+        .unwrap();
+    let collection_update = notifications.try_recv().unwrap();
+    assert!(matches!(
+        collection_update.kind,
+        TaskUpdateKind::Changed(change)
+            if matches!(
+                change.navigation,
+                Some(CommittedNavigationChange::ProjectEntriesChanged { .. })
+            )
+    ));
 }
 
 #[test]

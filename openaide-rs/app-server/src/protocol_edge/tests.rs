@@ -153,6 +153,76 @@ fn client_capabilities_changed_replaces_reported_workspace_roots() {
 }
 
 #[test]
+fn workspace_root_change_replaces_both_navigation_sections() {
+    let mut gateway = gateway_with_project_context();
+    let connection_id = ConnectionId::new("conn-1");
+    let mut params = init_params("client-1");
+    params.workspace_roots = vec![ClientWorkspaceRoot {
+        path: "/workspace/alpha".to_string(),
+    }];
+    response_value(gateway.handle_inbound(
+        connection_id.clone(),
+        request("1", CLIENT_INITIALIZE, params),
+        AppServerTime(1),
+    ));
+    for (id, section) in [
+        (
+            "2",
+            openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
+        ),
+        (
+            "3",
+            openaide_app_server_protocol::task::TaskNavigationSection::Archive,
+        ),
+    ] {
+        response_value(gateway.handle_inbound(
+            connection_id.clone(),
+            request(
+                id,
+                STATE_SUBSCRIBE,
+                StateSubscribeParams {
+                    scope: SubscriptionScope::TaskNavigation {
+                        section,
+                        project_ids: None,
+                    },
+                },
+            ),
+            AppServerTime(2),
+        ));
+    }
+
+    let events = response_events(gateway.handle_inbound(
+        connection_id,
+        request(
+            "4",
+            CLIENT_CAPABILITIES_CHANGED,
+            ClientCapabilitiesChangedParams {
+                capabilities: None,
+                workspace_roots: Some(vec![ClientWorkspaceRoot {
+                    path: "/workspace/beta".to_string(),
+                }]),
+            },
+        ),
+        AppServerTime(3),
+    ));
+
+    let sections = events
+        .iter()
+        .filter_map(|delivery| match &delivery.event.payload {
+            AppServerEventPayload::NavigationReplaced { navigation } => Some(navigation.section),
+            _ => None,
+        })
+        .collect::<std::collections::HashSet<_>>();
+    assert_eq!(
+        sections,
+        std::collections::HashSet::from([
+            openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
+            openaide_app_server_protocol::task::TaskNavigationSection::Archive,
+        ])
+    );
+}
+
+#[test]
 fn workspace_root_replacement_preserves_other_clients_projects() {
     let mut gateway = gateway_with_project_context();
     let first_connection = ConnectionId::new("conn-1");
@@ -698,10 +768,8 @@ fn initialize_after_event_uses_state_stream_cursor() {
         EventScope::StateRoot {
             state_root_id: StateRootId::from("root-1"),
         },
-        AppServerEventPayload::TaskNavigationChanged {
-            change: openaide_app_server_protocol::events::TaskNavigationChange::Remove {
-                task_id: TaskId::from("absent"),
-            },
+        AppServerEventPayload::RefreshStateChanged {
+            refresh: openaide_app_server_protocol::snapshot::TaskNavigationRefreshState::Refreshing,
         },
         |_| None,
         AppServerTime(1),
@@ -742,7 +810,10 @@ fn subscribe_after_initialize_returns_snapshot_and_stores_subscription() {
             "2",
             STATE_SUBSCRIBE,
             StateSubscribeParams {
-                scope: SubscriptionScope::TaskNavigation { project_id: None },
+                scope: SubscriptionScope::TaskNavigation {
+                    section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
+                    project_ids: None,
+                },
             },
         ),
         AppServerTime(2),
@@ -1156,7 +1227,10 @@ fn heartbeat_delivers_a_queued_navigation_change_once() {
             "2",
             STATE_SUBSCRIBE,
             StateSubscribeParams {
-                scope: SubscriptionScope::TaskNavigation { project_id: None },
+                scope: SubscriptionScope::TaskNavigation {
+                    section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
+                    project_ids: None,
+                },
             },
         ),
         AppServerTime(2),
@@ -1185,7 +1259,7 @@ fn heartbeat_delivers_a_queued_navigation_change_once() {
     assert_eq!(events.len(), 1);
     assert!(matches!(
         &events[0].event.payload,
-        AppServerEventPayload::TaskNavigationChanged { .. }
+        AppServerEventPayload::TaskUpdated { .. }
     ));
 
     let second = gateway.handle_inbound(
@@ -1194,6 +1268,43 @@ fn heartbeat_delivers_a_queued_navigation_change_once() {
         AppServerTime(5),
     );
     assert!(response_events(second).is_empty());
+}
+
+#[test]
+fn committed_task_summary_change_publishes_task_updated_to_navigation() {
+    let mut gateway = initialized_gateway("client-1", "local-http:client-1");
+    gateway.handle_inbound(
+        ConnectionId::new("local-http:client-1"),
+        request(
+            "2",
+            STATE_SUBSCRIBE,
+            StateSubscribeParams {
+                scope: SubscriptionScope::TaskNavigation {
+                    section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
+                    project_ids: None,
+                },
+            },
+        ),
+        AppServerTime(2),
+    );
+
+    let published = gateway.publish_task_update(
+        &committed_task_update(
+            "task-1",
+            2,
+            Vec::new(),
+            Vec::new(),
+            TestNavigationChange::Upsert,
+        ),
+        AppServerTime(3),
+    );
+
+    assert_eq!(published.len(), 1);
+    assert!(matches!(
+        &published[0].event.payload,
+        AppServerEventPayload::TaskUpdated { task, .. }
+            if task.task_id == TaskId::from("task-1")
+    ));
 }
 
 #[test]
@@ -1231,7 +1342,10 @@ fn new_task_update_is_delivered_only_to_its_owner_task_subscription() {
             "4",
             STATE_SUBSCRIBE,
             StateSubscribeParams {
-                scope: SubscriptionScope::TaskNavigation { project_id: None },
+                scope: SubscriptionScope::TaskNavigation {
+                    section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
+                    project_ids: None,
+                },
             },
         ),
         AppServerTime(4),
@@ -1379,7 +1493,10 @@ fn client_response_error_keeps_pending_server_request() {
 #[test]
 fn unsubscribe_after_initialize_removes_subscription() {
     let mut gateway = initialized_gateway("client-1", "conn-1");
-    let scope = SubscriptionScope::TaskNavigation { project_id: None };
+    let scope = SubscriptionScope::TaskNavigation {
+        section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
+        project_ids: None,
+    };
     gateway.handle_inbound(
         ConnectionId::new("conn-1"),
         request(
@@ -1411,7 +1528,10 @@ fn reinitialized_client_receives_later_events_on_new_connection() {
             "2",
             STATE_SUBSCRIBE,
             StateSubscribeParams {
-                scope: SubscriptionScope::TaskNavigation { project_id: None },
+                scope: SubscriptionScope::TaskNavigation {
+                    section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
+                    project_ids: None,
+                },
             },
         ),
         AppServerTime(2),
@@ -1427,10 +1547,8 @@ fn reinitialized_client_receives_later_events_on_new_connection() {
         EventScope::StateRoot {
             state_root_id: StateRootId::from("root-1"),
         },
-        AppServerEventPayload::TaskNavigationChanged {
-            change: openaide_app_server_protocol::events::TaskNavigationChange::Remove {
-                task_id: TaskId::from("absent"),
-            },
+        AppServerEventPayload::RefreshStateChanged {
+            refresh: openaide_app_server_protocol::snapshot::TaskNavigationRefreshState::Refreshing,
         },
         |client_id| gateway.client_hub.delivery_for(client_id),
         AppServerTime(5),
@@ -3040,7 +3158,7 @@ fn committed_task_update(
     tool_details: Vec<ToolDetailUpdate>,
     navigation: TestNavigationChange,
 ) -> TaskUpdate {
-    use openaide_app_server_protocol::events::{TaskChanges, TaskChatChange, TaskNavigationChange};
+    use openaide_app_server_protocol::events::{TaskChanges, TaskChatChange};
     use openaide_app_server_protocol::snapshot::{ChatSnapshot, TaskStatus, TaskSummary};
 
     let chat = chat
@@ -3064,8 +3182,8 @@ fn committed_task_update(
         .collect();
     let navigation = match navigation {
         TestNavigationChange::None => None,
-        TestNavigationChange::Upsert => Some(TaskNavigationChange::Upsert {
-            task: Box::new(TaskSummary {
+        TestNavigationChange::Upsert => Some(
+            crate::task_events::CommittedNavigationChange::TaskUpdated(Box::new(TaskSummary {
                 task_id: task_id.into(),
                 project_id: "project-1".into(),
                 agent_id: "codex".into(),
@@ -3079,14 +3197,13 @@ fn committed_task_update(
                 has_messages: true,
                 worktree_id: None,
                 workspace_available: true,
-            }),
-        }),
+            })),
+        ),
     };
     TaskUpdate {
         task_id: task_id.to_string(),
         revision,
         kind: TaskUpdateKind::Changed(Box::new(CommittedTaskChange {
-            lifecycle: None,
             changes: TaskChanges {
                 chat,
                 ..TaskChanges::default()

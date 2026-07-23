@@ -49,7 +49,10 @@ impl SharedRpcGateway {
             .subscription_count_for_kind(|scope| {
                 matches!(
                     scope,
-                    openaide_app_server_protocol::state::SubscriptionScope::TaskNavigation { .. }
+                    openaide_app_server_protocol::state::SubscriptionScope::TaskNavigation {
+                        section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
+                        ..
+                    }
                 )
             })
             > 0

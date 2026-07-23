@@ -295,7 +295,12 @@ fn app_server_handoff_registers_vscode_workspace_project_without_task_history() 
             project["projectId"] == "project-d997698f027765f9"
                 && project["label"] == "OpenAIDE"
         }));
-    assert!(snapshot["tasks"]["entries"]
+    let navigation = subscribe_task_navigation(
+        endpoint_url,
+        auth_token,
+        "vscode-empty-workspace-client",
+    );
+    assert!(navigation["groups"][0]["entries"]
         .as_array()
         .expect("task navigation")
         .is_empty());
@@ -433,12 +438,15 @@ fn app_server_handoff_reinitialize_home_lists_the_current_task_after_send() {
         "show this task in navigation",
     );
 
-    let reinitialized = post_local_http_initialize(endpoint_url, auth_token, "project-list-client");
-    let tasks = reinitialized[0]["result"]["result"]["snapshot"]["tasks"]["entries"]
+    post_local_http_initialize(endpoint_url, auth_token, "project-list-client");
+    let navigation =
+        subscribe_task_navigation(endpoint_url, auth_token, "project-list-client");
+    let tasks = navigation["groups"]
         .as_array()
         .expect("task navigation");
     let listed = tasks
         .iter()
+        .flat_map(|group| group["entries"].as_array().into_iter().flatten())
         .filter_map(|entry| entry.get("task"))
         .find(|task| task["taskId"] == task_id)
         .expect("created task is listed after reload");
@@ -560,6 +568,30 @@ fn post_local_http_initialize(endpoint_url: &str, auth_token: &str, client_id: &
     );
     ensure_process_test_agent(endpoint_url, auth_token, client_id, &initialized);
     initialized
+}
+
+fn subscribe_task_navigation(
+    endpoint_url: &str,
+    auth_token: &str,
+    client_id: &str,
+) -> Value {
+    post_local_http_json(
+        endpoint_url,
+        auth_token,
+        client_id,
+        json!({
+            "jsonrpc": "2.0",
+            "id": "subscribe-task-navigation",
+            "method": "state/subscribe",
+            "params": {
+                "scope": {
+                    "kind": "taskNavigation",
+                    "section": "tasks"
+                }
+            }
+        }),
+    )[0]["result"]["result"]["snapshot"]["navigation"]
+        .clone()
 }
 
 fn ensure_process_test_agent(

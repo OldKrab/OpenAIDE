@@ -34,6 +34,9 @@ vi.mock("./messaging", () => ({
 
 vi.mock("../workspace/roots", () => ({
   currentWorkspaceRoot: () => ({ label: "OpenAIDE", path: "/workspace/OpenAIDE", projectId: "project-current" }),
+  workspaceRoots: () => [
+    { label: "OpenAIDE", path: "/workspace/OpenAIDE", projectId: "project-current" },
+  ],
 }));
 
 describe("VS Code webview surfaces", () => {

@@ -499,6 +499,7 @@ describe("app reducer composer state", () => {
       archived: false,
       tasks: [],
       sessions: [],
+      hasMoreProjectIds: [],
       refreshing: false,
     });
 
@@ -520,6 +521,7 @@ describe("app reducer composer state", () => {
       archived: false,
       tasks: [taskSummary("stale_task")],
       sessions: [],
+      hasMoreProjectIds: [],
       refreshing: false,
     });
 
