@@ -37,8 +37,6 @@ const Context = createContext<PreviewContext | undefined>(undefined);
 
 export function SidebarTaskPreviewProvider({ children }: { children: ReactNode }) {
   const [preview, setPreview] = useState<Preview>();
-  const [helpOpen, setHelpOpen] = useState(false);
-  const helpId = useId();
   const previewRef = useRef<HTMLDivElement>(null);
   const pendingRowRef = useRef<HTMLElement | undefined>(undefined);
   const showTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -52,12 +50,15 @@ export function SidebarTaskPreviewProvider({ children }: { children: ReactNode }
   }, []);
 
   const enter = (content: SidebarPreviewContent, row: HTMLElement, immediate = false) => {
+    // VS Code navigation cannot place a rich preview beside its webview, so
+    // details remain an explicit row action instead of obscuring the Task list.
+    if (typeof document !== "undefined"
+      && document.body?.dataset.shell === "vscodeExtension") return;
     if (typeof window !== "undefined" && window.matchMedia("(max-width: 760px)").matches) return;
     if (!immediate && pendingRowRef.current === row) return;
     clearTimeout(showTimer.current);
     clearTimeout(hideTimer.current);
     pendingRowRef.current = row;
-    setHelpOpen(false);
     const open = () => {
       pendingRowRef.current = undefined;
       setPreview({
@@ -78,7 +79,6 @@ export function SidebarTaskPreviewProvider({ children }: { children: ReactNode }
     clearTimeout(showTimer.current);
     clearTimeout(hideTimer.current);
     pendingRowRef.current = undefined;
-    setHelpOpen(false);
     setPreview(undefined);
   };
 
@@ -99,38 +99,54 @@ export function SidebarTaskPreviewProvider({ children }: { children: ReactNode }
   return <Context.Provider value={{ dismiss, enter, leave }}>
     {children}
     {preview ? <PopupHoverSurface anchor={preview.anchor} className="task-preview-popover" onPointerEnter={() => clearTimeout(hideTimer.current)} onPointerLeave={leave} containerRef={previewRef} semanticRole="dialog">
-      {preview.content.kind === "task" ? <TaskPreviewDetails content={preview.content} /> : <>
-        <header><ScrollablePreviewTitle title={preview.content.title} /><span className="task-preview-state">{preview.content.state}</span></header>
-        <section
-          className="task-preview-source-wrap"
-          onBlur={(event) => {
-            if (!event.currentTarget.contains(event.relatedTarget)) setHelpOpen(false);
-          }}
-          onPointerLeave={() => setHelpOpen(false)}
-        >
-          <p className="task-preview-source">
-            <button
-              aria-describedby={helpOpen ? helpId : undefined}
-              aria-expanded={helpOpen}
-              aria-label={`What loading from ${preview.content.agentName} means`}
-              onClick={() => setHelpOpen((open) => !open)}
-              onFocus={() => setHelpOpen(true)}
-              onPointerEnter={() => setHelpOpen(true)}
-              type="button"
-            >From {preview.content.agentName}</button>
-            <span className="task-preview-source-action">· Open to load</span>
-          </p>
-          {helpOpen ? <div className="task-preview-explanation" id={helpId} role="tooltip">
-            This conversation exists in {preview.content.agentName} but has not been added to OpenAIDE. Opening it creates an OpenAIDE task and loads its message history. After that, it behaves like your other tasks.
-          </div> : null}
-        </section>
-        <div><FolderRoot size={15} /><span><small>Folder</small><strong>{preview.content.workspaceLabel}</strong></span></div>
-      </>}
+      {preview.content.kind === "task"
+        ? <TaskPreviewDetails content={preview.content} />
+        : <AgentHistoryPreviewDetails content={preview.content} />}
     </PopupHoverSurface> : null}
   </Context.Provider>;
 }
 
 export function useSidebarTaskPreview() { return useContext(Context); }
+
+/** Shared Agent-history facts for web hover previews and contained Task details. */
+export function AgentHistoryPreviewDetails({
+  content,
+  explainSource = true,
+}: {
+  content: Extract<SidebarPreviewContent, { kind: "agent_history" }>;
+  explainSource?: boolean;
+}) {
+  const [helpOpen, setHelpOpen] = useState(false);
+  const helpId = useId();
+  const source = <>From {content.agentName}</>;
+  return <>
+    <header><ScrollablePreviewTitle title={content.title} /><span className="task-preview-state">{content.state}</span></header>
+    <section
+      className="task-preview-source-wrap"
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) setHelpOpen(false);
+      }}
+      onPointerLeave={() => setHelpOpen(false)}
+    >
+      <p className="task-preview-source">
+        {explainSource ? <button
+          aria-describedby={helpOpen ? helpId : undefined}
+          aria-expanded={helpOpen}
+          aria-label={`What loading from ${content.agentName} means`}
+          onClick={() => setHelpOpen((open) => !open)}
+          onFocus={() => setHelpOpen(true)}
+          onPointerEnter={() => setHelpOpen(true)}
+          type="button"
+        >{source}</button> : <span>{source}</span>}
+        <span className="task-preview-source-action">· Open to load</span>
+      </p>
+      {explainSource && helpOpen ? <div className="task-preview-explanation" id={helpId} role="tooltip">
+        This conversation exists in {content.agentName} but has not been added to OpenAIDE. Opening it creates an OpenAIDE task and loads its message history. After that, it behaves like your other tasks.
+      </div> : null}
+    </section>
+    <div><FolderRoot size={15} /><span><small>Folder</small><strong>{content.workspaceLabel}</strong></span></div>
+  </>;
+}
 
 /** Shared Task facts rendered by desktop hover previews and mobile Task details. */
 export function TaskPreviewDetails({

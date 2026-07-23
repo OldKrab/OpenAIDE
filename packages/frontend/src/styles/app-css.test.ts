@@ -96,9 +96,14 @@ describe("task list row styles", () => {
     expect(appCss).not.toMatch(/\.task-row\s*{[^}]*overflow:\s*hidden;/);
   });
 
-  it("exposes Task details in the row menu only on mobile", () => {
-    expect(appCss).toMatch(/\.oa-popup-menu button\.task-row-mobile-details-action\s*{\s*display:\s*none;/);
-    expect(appCss).toMatch(/@media \(max-width:\s*760px\)\s*{[\s\S]*\.oa-popup-menu button\.task-row-mobile-details-action\s*{\s*display:\s*flex;/);
+  it("exposes Task details in VS Code and the mobile web drawer", () => {
+    expect(appCss).toMatch(/\.oa-popup-menu button\.task-row-details-action\s*{\s*display:\s*none;/);
+    expect(appCss).toMatch(/body\[data-shell="vscodeExtension"\] \.oa-popup-menu button\.task-row-details-action\s*{\s*display:\s*flex;/);
+    expect(appCss).toMatch(/@media \(max-width:\s*760px\)\s*{[\s\S]*body\[data-shell="web"\] \.oa-popup-menu button\.task-row-details-action\s*{\s*display:\s*flex;/);
+    expect(appCss).toMatch(/\.task-preview-popover > div strong,\s*\.task-row-details > div strong\s*{\s*overflow-wrap:\s*anywhere;/);
+    expect(appCss).toMatch(/body\[data-shell="vscodeExtension"\] \.external-session-open-action\s*{\s*display:\s*none;/);
+    expect(appCss).toMatch(/body\[data-shell="vscodeExtension"\] \.external-session-details-actions\s*{\s*display:\s*inline-flex;/);
+    expect(appCss).toMatch(/@media \(max-width:\s*760px\)\s*{[\s\S]*body\[data-shell="web"\] \.external-session-open-action\s*{\s*display:\s*none;/);
   });
 
   it("keeps composer popup end actions in their grid column", () => {
