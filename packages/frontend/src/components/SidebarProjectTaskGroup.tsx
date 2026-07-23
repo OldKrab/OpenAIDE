@@ -71,7 +71,6 @@ export function SidebarProjectTaskGroup({
     ? allRows.find((row) => row.kind === "task" && row.task.task_id === activeTask.task_id)
     : undefined;
   const visibleRows = recentVisibleRows(allRows, maxTasks, activeRow);
-  const renderedRows = collapsed ? [] : visibleRows;
   const hiddenCount = Math.max(0, allRows.length - visibleRows.length);
   const countSummary = projectGroupCountSummary(taskRows.length, nativeSessions.length);
 
@@ -98,37 +97,46 @@ export function SidebarProjectTaskGroup({
           </div> : null}
         </div>
       </div>
-      <div className={`project-task-group-rows ${collapsed ? "collapsed" : "expanded"}`}>{renderedRows.map((row) =>
-        row.kind === "task" ? (
-          <SidebarTaskRow
-            key={`task:${row.task.task_id}`}
-            activeTaskId={activeTaskId}
-            onArchiveTask={onArchiveTask}
-            onOpenTask={onOpenTask}
-            onRestoreTask={onRestoreTask}
-            showArchived={showArchived}
-            task={row.task}
-          />
-        ) : (
-          <SidebarNativeSessionRow
-            key={`session:${row.session.agent_id ?? nativeSessionAgentId}:${row.session.session_id}`}
-            nativeSessionAgentId={row.session.agent_id ?? nativeSessionAgentId}
-            nativeSessionAgentName={row.session.agent_name ?? nativeSessionAgentName}
-            nativeSessionsAdoptingSessionId={nativeSessionsAdoptingSessionId}
-            onOpenNativeSession={onOpenNativeSession}
-            session={row.session}
-          />
-        ),
-      )}</div>
-      {!collapsed && (hiddenCount > 0 || nativeSessionsHaveMore) ? (
-        <button
-          className="project-task-more"
-          onClick={() => onLoadMore(hiddenCount > 0 ? Math.min(pageSize, hiddenCount) : pageSize)}
-          type="button"
-        >
-          Load more
-        </button>
-      ) : null}
+      <div
+        aria-hidden={collapsed}
+        className={`project-task-group-rows ${collapsed ? "collapsed" : "expanded"}`}
+        inert={collapsed}
+      >
+        {/* Keep rows mounted so closing can animate before the clipped region reaches zero height. */}
+        <div className="project-task-group-rows-inner">
+          {visibleRows.map((row) =>
+            row.kind === "task" ? (
+              <SidebarTaskRow
+                key={`task:${row.task.task_id}`}
+                activeTaskId={activeTaskId}
+                onArchiveTask={onArchiveTask}
+                onOpenTask={onOpenTask}
+                onRestoreTask={onRestoreTask}
+                showArchived={showArchived}
+                task={row.task}
+              />
+            ) : (
+              <SidebarNativeSessionRow
+                key={`session:${row.session.agent_id ?? nativeSessionAgentId}:${row.session.session_id}`}
+                nativeSessionAgentId={row.session.agent_id ?? nativeSessionAgentId}
+                nativeSessionAgentName={row.session.agent_name ?? nativeSessionAgentName}
+                nativeSessionsAdoptingSessionId={nativeSessionsAdoptingSessionId}
+                onOpenNativeSession={onOpenNativeSession}
+                session={row.session}
+              />
+            ),
+          )}
+          {hiddenCount > 0 || nativeSessionsHaveMore ? (
+            <button
+              className="project-task-more"
+              onClick={() => onLoadMore(hiddenCount > 0 ? Math.min(pageSize, hiddenCount) : pageSize)}
+              type="button"
+            >
+              Load more
+            </button>
+          ) : null}
+        </div>
+      </div>
     </section>
   );
 }

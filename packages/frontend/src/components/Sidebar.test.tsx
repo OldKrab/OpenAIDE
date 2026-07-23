@@ -902,8 +902,11 @@ describe("Sidebar", () => {
     expect(tree.root.findByProps({ className: "project-task-group-toggle" }).props["aria-expanded"]).toBe(true);
 
     act(() => tree.root.findByProps({ className: "project-task-group-toggle" }).props.onClick());
-    expect(taskRows(tree)).toHaveLength(0);
     expect(tree.root.findByProps({ className: "project-task-group-toggle" }).props["aria-expanded"]).toBe(false);
+    expect(tree.root.findByProps({ className: "project-task-group-rows collapsed" }).props).toMatchObject({
+      "aria-hidden": true,
+      inert: true,
+    });
 
     act(() => tree.root.findByProps({ className: "project-task-group-toggle" }).props.onClick());
     expect(taskRows(tree)).toHaveLength(20);
@@ -946,8 +949,10 @@ describe("Sidebar", () => {
     act(() => tree.root.findByProps({ className: "project-task-group-toggle" }).props.onClick());
 
     expect(tree.root.findByProps({ className: "project-task-group-toggle" }).props["aria-expanded"]).toBe(false);
-    expect(taskRows(tree)).toHaveLength(0);
-    expect(tree.root.findAllByProps({ className: "project-task-more" })).toHaveLength(0);
+    expect(tree.root.findByProps({ className: "project-task-group-rows collapsed" }).props).toMatchObject({
+      "aria-hidden": true,
+      inert: true,
+    });
   });
 
   it("uses project pagination instead of global native-session pagination in grouped mode", () => {
@@ -971,7 +976,7 @@ describe("Sidebar", () => {
 
     act(() => tree.root.findByProps({ className: "project-task-group-toggle" }).props.onClick());
 
-    expect(tree.root.findAllByProps({ className: "task-row external-session-row" })).toHaveLength(0);
+    expect(tree.root.findByProps({ className: "project-task-group-rows collapsed" }).props["aria-hidden"]).toBe(true);
     expect(tree.root.findAllByProps({ className: "session-more" })).toHaveLength(0);
   });
 
@@ -1065,8 +1070,8 @@ describe("Sidebar", () => {
     );
 
     act(() => tree.root.findByProps({ className: "project-task-group-toggle" }).props.onClick());
-    expect(taskRows(tree)).toHaveLength(0);
     expect(tree.root.findByProps({ className: "project-task-group-toggle" }).props["aria-expanded"]).toBe(false);
+    expect(tree.root.findByProps({ className: "project-task-group-rows collapsed" }).props["aria-hidden"]).toBe(true);
 
     act(() => tree.update(
       <Sidebar
@@ -1110,8 +1115,8 @@ describe("Sidebar", () => {
       />,
     ));
 
-    expect(taskRows(tree)).toHaveLength(0);
     expect(tree.root.findByProps({ className: "project-task-group-toggle" }).props["aria-expanded"]).toBe(false);
+    expect(tree.root.findByProps({ className: "project-task-group-rows collapsed" }).props["aria-hidden"]).toBe(true);
   });
 
   it("explains when search keeps the selected task visible outside the match set", () => {
@@ -1165,7 +1170,7 @@ describe("Sidebar", () => {
 
     act(() => tree.root.findByProps({ className: "project-task-group-toggle" }).props.onClick());
 
-    expect(group.findAllByProps({ className: "task-row external-session-row" })).toHaveLength(0);
+    expect(group.findByProps({ className: "project-task-group-rows collapsed" }).props["aria-hidden"]).toBe(true);
   });
 
   it("keeps older loaded native sessions reachable when recent local tasks fill a project group", () => {
