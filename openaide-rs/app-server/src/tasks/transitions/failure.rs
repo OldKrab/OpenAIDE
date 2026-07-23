@@ -24,7 +24,7 @@ impl TaskTransitions {
         &self,
         task_id: &str,
         session_id: &str,
-        error: &RuntimeError,
+        _error: &RuntimeError,
     ) -> Result<(), RuntimeError> {
         let result = self
             .mutations
@@ -36,7 +36,7 @@ impl TaskTransitions {
                 append_interruption(
                     ctx,
                     InterruptionReason::Failed,
-                    &error.to_string(),
+                    "The Agent session could not be opened. Try again.",
                     now.clone(),
                     true,
                 )?;
