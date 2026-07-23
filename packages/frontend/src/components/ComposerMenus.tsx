@@ -7,8 +7,9 @@ import {
   type ComposerSelection,
 } from "../state/composerOptions";
 import { AgentIcon } from "./AgentIcon";
-import { IconButton, MenuButton, Popover, Selector } from "./ComposerPrimitives";
+import { IconButton, MenuButton, Selector } from "./ComposerPrimitives";
 import { ComposerRunOptions, type ComposerRunMenu } from "./ComposerRunOptions";
+import { PopupMenu } from "./Popup";
 import type { TaskFileBrowserCallbacks } from "./appControllerCallbackTypes";
 import { attachEveryImage } from "./imageAttachmentBatch";
 import type { ComposerFileUpload } from "./ComposerAttachments";
@@ -200,15 +201,22 @@ export function ComposerControls({
   return (
     <div className="composer-controls">
       <div className="composer-menu-anchor">
-        <IconButton
-          ariaLabel="Add context"
-          disabled={disabled || (!fileBrowser?.attachFiles && !imageAttachmentsAllowed)}
-          icon={<Plus size={14} />}
-          onClick={() => toggleMenu("add")}
-          pressed={openMenu === "add"}
-        />
-        {openMenu === "add" ? (
-          <Popover label="Add context">
+        <PopupMenu
+          className="composer-popover"
+          label="Add context"
+          onOpenChange={(nextOpen) => setOpenMenu(nextOpen ? "add" : undefined)}
+          open={openMenu === "add"}
+          placement="top-start"
+          trigger={(popupTrigger) => (
+            <IconButton
+              ariaLabel="Add context"
+              disabled={disabled || (!fileBrowser?.attachFiles && !imageAttachmentsAllowed)}
+              icon={<Plus size={14} />}
+              popupTrigger={popupTrigger}
+              pressed={openMenu === "add"}
+            />
+          )}
+        >
             <MenuButton
               description={fileBrowser?.attachmentMode === "nativePicker"
                 ? "Choose files from this computer."
@@ -249,21 +257,27 @@ export function ComposerControls({
               style={{ display: "none" }}
               type="file"
             />
-          </Popover>
-        ) : null}
+        </PopupMenu>
       </div>
       {showAgentSelector ? (
         <div className="composer-option-anchor">
-          <Selector
-            disabled={controlsLocked}
-            icon={<Code2 size={12} />}
-            label={selection.agentLabel}
-            locked={agentLocked}
-            menuOpen={openMenu === "agent"}
-            onClick={() => toggleMenu("agent")}
-          />
-          {openMenu === "agent" ? (
-            <Popover label="Agent">
+          <PopupMenu
+            className="composer-popover"
+            label="Agent"
+            onOpenChange={(nextOpen) => setOpenMenu(nextOpen ? "agent" : undefined)}
+            open={openMenu === "agent"}
+            placement="top-start"
+            trigger={(popupTrigger) => (
+              <Selector
+                disabled={controlsLocked}
+                icon={<Code2 size={12} />}
+                label={selection.agentLabel}
+                locked={agentLocked}
+                menuOpen={openMenu === "agent"}
+                popupTrigger={popupTrigger}
+              />
+            )}
+          >
               {agents.filter((agent) => agent.enabled !== false).map((agent) => (
                 <MenuButton
                   active={selection.agentId === agent.id}
@@ -274,8 +288,7 @@ export function ComposerControls({
                   onClick={() => selectAndClose(() => onSelectAgent?.(agent.id))}
                 />
               ))}
-            </Popover>
-          ) : null}
+          </PopupMenu>
         </div>
       ) : null}
       <ComposerRunOptions

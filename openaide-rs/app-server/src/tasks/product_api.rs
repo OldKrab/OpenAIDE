@@ -317,6 +317,7 @@ impl TaskProductApi {
         .with_native_catalog(native_catalog.clone());
         let preparing_session_ids = Arc::new(Mutex::new(HashSet::new()));
         let native_sessions = crate::tasks::native_session_service::NativeSessionService::new(
+            store.clone(),
             agent_registry.clone(),
             agent_gateway.clone(),
             mutations.clone(),

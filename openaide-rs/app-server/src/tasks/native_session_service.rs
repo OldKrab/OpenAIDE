@@ -30,6 +30,7 @@ pub(crate) use open_recovery::{HistoryRefreshRequest, OpenSessionResumeOutcome};
 /// Product workflows provide intent; they do not choose ACP start/load/resume paths.
 #[derive(Clone)]
 pub(crate) struct NativeSessionService {
+    store: crate::storage::Store,
     agent_registry: AgentRegistryHandle,
     agent_gateway: AgentGateway,
     mutations: TaskMutations,
@@ -48,6 +49,7 @@ pub(crate) struct PrimaryPromptRequest {
 
 impl NativeSessionService {
     pub(crate) fn new(
+        store: crate::storage::Store,
         agent_registry: AgentRegistryHandle,
         agent_gateway: AgentGateway,
         mutations: TaskMutations,
@@ -56,6 +58,7 @@ impl NativeSessionService {
         preparing_session_ids: Arc<Mutex<HashSet<AgentSessionKey>>>,
     ) -> Self {
         Self {
+            store,
             agent_registry,
             agent_gateway,
             mutations,
@@ -115,6 +118,11 @@ impl NativeSessionService {
                 secret_resolver: Some(self.secret_resolver(&task.task_id)),
             })?,
         };
+        let session = crate::tasks::config_preferences::apply_to_prepared_session(
+            &self.store,
+            &self.agent_gateway,
+            session,
+        );
         let session_start = TaskSessionStartGuard::new(&self.agent_gateway, session);
         let _ownership = PreparingSessionOwnership::reserve(
             self.preparing_session_ids.clone(),

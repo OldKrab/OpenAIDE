@@ -17,6 +17,7 @@ type PrependAnchor = ScrollAnchor & { requestGeneration: number; requestStarted:
 const SHOW_JUMP_TO_LATEST_DISTANCE_PX = 96;
 const HIDE_JUMP_TO_LATEST_DISTANCE_PX = 48;
 const JUMP_TO_LATEST_DURATION_MS = 180;
+const OVERLAY_SCROLLBAR_HIT_WIDTH_PX = 10;
 
 type UseTaskChatScrollOptions = {
   historySyncState?: "idle" | "syncing" | "updated";
@@ -49,6 +50,7 @@ export function useTaskChatScroll(options: UseTaskChatScrollOptions) {
   const scrollIntentRef = useRef<ScrollIntent | undefined>(undefined);
   const scrollOwnershipRef = useRef<TaskChatScrollState["ownership"]>("following");
   const [showJumpToLatest, setShowJumpToLatest] = useState(false);
+  const [moreBelow, setMoreBelow] = useState(false);
   onScrollStateRef.current = onScrollState;
 
   const setScrollOwnership = useCallback((ownership: TaskChatScrollState["ownership"]) => {
@@ -65,6 +67,7 @@ export function useTaskChatScroll(options: UseTaskChatScrollOptions) {
 
   const updateJumpToLatestVisibility = useCallback((messageList: HTMLDivElement) => {
     const distanceFromBottom = distanceFromLatest(messageList);
+    setMoreBelow(distanceFromBottom > 2);
     setShowJumpToLatest((visible) => (
       visible
         ? distanceFromBottom > HIDE_JUMP_TO_LATEST_DISTANCE_PX
@@ -138,10 +141,15 @@ export function useTaskChatScroll(options: UseTaskChatScrollOptions) {
   }, [cancelJumpAnimation, reconcileViewport, taskId]);
 
   const finishPointerGesture = useCallback(() => {
-    if (!pointerGestureRef.current) return;
+    const gesture = pointerGestureRef.current;
+    if (!gesture) return;
     pointerGestureRef.current = undefined;
     scrollIntentRef.current = undefined;
-  }, []);
+    const messageList = messageListRef.current;
+    if (gesture.kind === "scrollbar" && messageList && isAtLatest(messageList)) {
+      setScrollOwnership("following");
+    }
+  }, [setScrollOwnership]);
 
   const trackTouchGesture = useCallback((event: globalThis.PointerEvent) => {
     const gesture = pointerGestureRef.current;
@@ -350,8 +358,12 @@ export function useTaskChatScroll(options: UseTaskChatScrollOptions) {
       ? { kind: "touch" as const, lastClientY: event.clientY }
       : (isVerticalScrollbarPointer(event) ? { kind: "scrollbar" as const } : undefined);
     pointerGestureRef.current = gesture;
-    if (gesture?.kind === "scrollbar") cancelJumpAnimation();
-  }, [cancelJumpAnimation]);
+    if (gesture?.kind !== "scrollbar") return;
+    // Claim reader ownership before the browser's first drag scroll event so live
+    // content reflow cannot reconcile the viewport back to Follow mode.
+    cancelJumpAnimation();
+    setScrollOwnership("reading");
+  }, [cancelJumpAnimation, setScrollOwnership]);
 
   const capturePrependAnchor = useCallback((requestGeneration: number) => {
     const messageList = messageListRef.current;
@@ -402,6 +414,7 @@ export function useTaskChatScroll(options: UseTaskChatScrollOptions) {
     capturePrependAnchor,
     jumpToLatest,
     messageListRef,
+    moreBelow,
     onKeyDown,
     onPointerCancel: finishPointerGesture,
     onPointerDown,
@@ -413,6 +426,7 @@ export function useTaskChatScroll(options: UseTaskChatScrollOptions) {
     capturePrependAnchor,
     finishPointerGesture,
     jumpToLatest,
+    moreBelow,
     onKeyDown,
     onPointerDown,
     onScroll,
@@ -443,8 +457,13 @@ function nestedControlOwnsScrollKey(target: EventTarget, viewport: HTMLDivElemen
 
 function isVerticalScrollbarPointer(event: PointerEvent<HTMLDivElement>) {
   if (event.pointerType !== "mouse") return false;
-  const scrollbarWidth = event.currentTarget.offsetWidth - event.currentTarget.clientWidth;
-  if (scrollbarWidth <= 0) return false;
+  if (event.currentTarget.scrollHeight <= event.currentTarget.clientHeight) return false;
+  // Firefox overlay scrollbars occupy no layout width, so use the styled
+  // scrollbar width as a right-edge hit target when geometry reports zero.
+  const scrollbarWidth = Math.max(
+    event.currentTarget.offsetWidth - event.currentTarget.clientWidth,
+    OVERLAY_SCROLLBAR_HIT_WIDTH_PX,
+  );
   const bounds = event.currentTarget.getBoundingClientRect();
   return event.clientX >= bounds.right - scrollbarWidth && event.clientX <= bounds.right;
 }

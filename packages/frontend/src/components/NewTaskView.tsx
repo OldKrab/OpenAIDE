@@ -1,5 +1,5 @@
 import { Check, FolderOpen, FolderRoot, GitBranch } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { AppPreferencesRecord, ConfigOptionCurrentValue } from "@openaide/app-shell-contracts";
 import {
   agentOptions,
@@ -15,12 +15,13 @@ import type { AppState, NewTaskState, TaskComposerInput } from "../state/store";
 import { AgentIcon } from "./AgentIcon";
 import { Composer } from "./Composer";
 import { composerAvailability, composerCanSubmit } from "./composerAvailability";
-import { MenuButton, Popover, Selector } from "./ComposerPrimitives";
+import { MenuButton, Selector } from "./ComposerPrimitives";
 import type { TaskFileBrowserCallbacks, WorkspaceBrowserCallbacks } from "./appControllerCallbackTypes";
 import { NewWorkspacePicker } from "./NewWorkspacePicker";
 import { NewTaskStartingView } from "./NewTaskStartingView";
 import { newTaskStatusLabel } from "./taskSurfaceHelpers";
 import { TaskWorkspacePicker } from "./TaskWorkspacePicker";
+import { PopupMenu, PopupPanel } from "./Popup";
 import { AgentRecoveryPanel, agentRecoveryKind, type AgentRecoveryActions } from "./AgentRecovery";
 
 type NewTaskContextMenu = "project" | "workspace" | "agent";
@@ -88,7 +89,6 @@ export function NewTaskView({
 }) {
   const [openContextMenu, setOpenContextMenu] = useState<NewTaskContextMenu | undefined>();
   const [workspacePath, setWorkspacePath] = useState(state.newTask.selection.workspaceRoot);
-  const contextControlsRef = useRef<HTMLDivElement | null>(null);
   const agentChoices = agents?.length ? agents : agentOptions;
   const selectedAgent = agentChoices.find((agent) => agent.id === state.newTask.selection.agentId);
   const recoveryKind = agentRecoveryKind(selectedAgent, state.snapshot?.preparation);
@@ -189,9 +189,6 @@ export function NewTaskView({
     if (!canSubmit) return;
     onSubmitTask({ prompt, context: composerAttachments });
   };
-  const toggleContextMenu = (menu: NewTaskContextMenu) => {
-    setOpenContextMenu((current) => current === menu ? undefined : menu);
-  };
   const selectContextAndClose = (select: () => void) => {
     select();
     setOpenContextMenu(undefined);
@@ -207,16 +204,6 @@ export function NewTaskView({
     setOpenContextMenu(undefined);
   };
   const useWorkspacePath = () => selectWorkspacePath(enteredWorkspacePath);
-  useEffect(() => {
-    if (!openContextMenu || typeof document === "undefined") return undefined;
-    const onPointerDown = (event: PointerEvent) => {
-      if (contextControlsRef.current?.contains(event.target as Node)) return;
-      setOpenContextMenu(undefined);
-    };
-    document.addEventListener("pointerdown", onPointerDown);
-    return () => document.removeEventListener("pointerdown", onPointerDown);
-  }, [openContextMenu]);
-
   const composer = (
     <Composer
       attachments={composerAttachments}
@@ -267,26 +254,28 @@ export function NewTaskView({
       onKeyDown={(event) => {
         if (event.key === "Escape") setOpenContextMenu(undefined);
       }}
-      onPointerDownCapture={(event) => {
-        if (!openContextMenu) return;
-        if (contextControlsRef.current?.contains(event.target as Node)) return;
-        setOpenContextMenu(undefined);
-      }}
     >
       <div className="new-task-center">
         <h1>What are we working on?</h1>
-        <div className="new-task-context-controls" aria-label="Task start context" ref={contextControlsRef}>
+        <div className="new-task-context-controls" aria-label="Task start context">
           {!fixedProjectContext ? <div className={`new-task-context-anchor new-task-context-anchor-project ${openContextMenu === "project" ? "context-menu-open" : ""}`}>
-            <Selector
-              disabled={loadingProjects || state.newTask.submitting}
-              icon={<FolderOpen size={12} />}
-              label={projectSelectorLabel}
-              locked={false}
-              menuOpen={openContextMenu === "project"}
-              onClick={() => toggleContextMenu("project")}
-            />
-            {openContextMenu === "project" ? (
-              <Popover className="new-task-context-menu" label="Workspace">
+            <PopupPanel
+              className="composer-popover new-task-context-menu new-task-project-menu"
+              label="Workspace"
+              onOpenChange={(nextOpen) => setOpenContextMenu(nextOpen ? "project" : undefined)}
+              open={openContextMenu === "project"}
+              placement="bottom"
+              trigger={(popupTrigger) => (
+                <Selector
+                  disabled={loadingProjects || state.newTask.submitting}
+                  icon={<FolderOpen size={12} />}
+                  label={projectSelectorLabel}
+                  locked={false}
+                  menuOpen={openContextMenu === "project"}
+                  popupTrigger={popupTrigger}
+                />
+              )}
+            >
                 {projectChoices.length ? <div className="new-task-context-menu-heading" role="none">Workspaces</div> : null}
                 {projectChoices.map((project) => (
                   <MenuButton
@@ -333,19 +322,26 @@ export function NewTaskView({
                     </button>
                   </div>
                 </div>
-              </Popover>
-            ) : null}
+            </PopupPanel>
           </div> : null}
           {selectedProject?.worktreeRepositoryId ? <div className={`new-task-context-anchor new-task-context-anchor-workspace ${openContextMenu === "workspace" ? "context-menu-open" : ""}`}>
-            <Selector
-              disabled={state.newTask.submitting}
-              icon={state.newTask.selection.worktreeId ? <GitBranch size={12} /> : <FolderRoot size={12} />}
-              label={taskWorkspaceLabel}
-              locked={false}
-              menuOpen={openContextMenu === "workspace"}
-              onClick={() => toggleContextMenu("workspace")}
-            />
-            {openContextMenu === "workspace" ? (
+            <PopupPanel
+              className="task-workspace-popup"
+              label="Task workspace"
+              onOpenChange={(nextOpen) => setOpenContextMenu(nextOpen ? "workspace" : undefined)}
+              open={openContextMenu === "workspace"}
+              placement="bottom"
+              trigger={(popupTrigger) => (
+                <Selector
+                  disabled={state.newTask.submitting}
+                  icon={state.newTask.selection.worktreeId ? <GitBranch size={12} /> : <FolderRoot size={12} />}
+                  label={taskWorkspaceLabel}
+                  locked={false}
+                  menuOpen={openContextMenu === "workspace"}
+                  popupTrigger={popupTrigger}
+                />
+              )}
+            >
               <TaskWorkspacePicker
                 intents={intents}
                 onClose={() => setOpenContextMenu(undefined)}
@@ -354,26 +350,33 @@ export function NewTaskView({
                 selectedWorktreeId={state.newTask.selection.worktreeId}
                 tasks={state.tasks}
               />
-            ) : null}
+            </PopupPanel>
           </div> : null}
           <div className={`new-task-context-anchor new-task-context-anchor-agent ${openContextMenu === "agent" ? "context-menu-open" : ""}`}>
-            <Selector
-              disabled={state.newTask.submitting}
-              icon={(
-                <AgentIcon
-                  agentId={selectedAgent?.id ?? state.newTask.selection.agentId}
-                  agentName={selectedAgent?.label ?? state.newTask.selection.agentLabel}
-                  icon={selectedAgent?.icon}
-                  size={12}
+            <PopupMenu
+              className="composer-popover new-task-context-menu"
+              label="Agent"
+              onOpenChange={(nextOpen) => setOpenContextMenu(nextOpen ? "agent" : undefined)}
+              open={openContextMenu === "agent"}
+              placement="bottom"
+              trigger={(popupTrigger) => (
+                <Selector
+                  disabled={state.newTask.submitting}
+                  icon={(
+                    <AgentIcon
+                      agentId={selectedAgent?.id ?? state.newTask.selection.agentId}
+                      agentName={selectedAgent?.label ?? state.newTask.selection.agentLabel}
+                      icon={selectedAgent?.icon}
+                      size={12}
+                    />
+                  )}
+                  label={state.newTask.selection.agentLabel}
+                  locked={false}
+                  menuOpen={openContextMenu === "agent"}
+                  popupTrigger={popupTrigger}
                 />
               )}
-              label={state.newTask.selection.agentLabel}
-              locked={false}
-              menuOpen={openContextMenu === "agent"}
-              onClick={() => toggleContextMenu("agent")}
-            />
-            {openContextMenu === "agent" ? (
-              <Popover className="new-task-context-menu" label="Agent">
+            >
                 {agentChoices.filter((agent) => agent.enabled !== false).map((agent) => (
                   <MenuButton
                     active={state.newTask.selection.agentId === agent.id}
@@ -388,8 +391,7 @@ export function NewTaskView({
                     }
                   />
                 ))}
-              </Popover>
-            ) : null}
+            </PopupMenu>
           </div>
         </div>
         {recoveryKind && selectedAgent && agentRecoveryActions ? (

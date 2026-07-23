@@ -69,6 +69,7 @@ pub(super) async fn run_native_session_worker(
         mut active_session,
         supports_session_close,
         supports_session_delete,
+        mut idle_close_eligible,
         content_policy,
         started_session,
         ..
@@ -155,6 +156,9 @@ pub(super) async fn run_native_session_worker(
                                     replayed_messages,
                                 }
                             });
+                        if result.is_ok() {
+                            idle_close_eligible = true;
+                        }
                         let _ = reply_tx.send(result);
                     }
                     AcpSessionCommand::Prompt {
@@ -184,6 +188,9 @@ pub(super) async fn run_native_session_worker(
                             &mut pending_session_catalogs,
                         )
                         .await;
+                        if result.is_ok() {
+                            idle_close_eligible = true;
+                        }
                         let _ = done_tx.send(result);
                     }
                     AcpSessionCommand::Steer { prompt } => {
@@ -242,7 +249,7 @@ pub(super) async fn run_native_session_worker(
                 .await
                 .map_err(|error| agent_client_protocol::util::internal_error(error.to_string()))?;
             }
-            () = &mut idle_deadline, if supports_session_close => {
+            () = &mut idle_deadline, if supports_session_close && idle_close_eligible => {
                 let idle_session_id = active_session.session_id().clone();
                 crate::logging::info(
                     "acp_session_idle_timeout",

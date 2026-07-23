@@ -1,7 +1,19 @@
 import { Check, ChevronDown } from "lucide-react";
-import { forwardRef, type ReactNode } from "react";
+import { forwardRef, type ForwardedRef, type ReactNode } from "react";
+import type { PopupTriggerProps } from "./Popup";
 
-export function Selector({
+export const Selector = forwardRef<HTMLButtonElement, {
+  className?: string;
+  describedBy?: string;
+  disabled: boolean;
+  icon?: ReactNode;
+  label: string;
+  locked: boolean;
+  menuOpen: boolean;
+  onClick?: () => void;
+  pending?: boolean;
+  popupTrigger?: PopupTriggerProps;
+}>(function Selector({
   className,
   describedBy,
   disabled,
@@ -11,17 +23,8 @@ export function Selector({
   menuOpen,
   onClick,
   pending = false,
-}: {
-  className?: string;
-  describedBy?: string;
-  disabled: boolean;
-  icon?: ReactNode;
-  label: string;
-  locked: boolean;
-  menuOpen: boolean;
-  onClick: () => void;
-  pending?: boolean;
-}) {
+  popupTrigger,
+}, forwardedRef) {
   const classes = ["composer-pill", className].filter(Boolean).join(" ");
   if (locked) {
     return (
@@ -38,13 +41,16 @@ export function Selector({
       </span>
     );
   }
+  const { ref: popupRef, ...popupProps } = popupTrigger ?? {};
   return (
     <button
+      {...popupProps}
       aria-describedby={describedBy}
       aria-expanded={menuOpen}
       className={classes}
       disabled={disabled}
-      onClick={onClick}
+      onClick={popupTrigger?.onClick ?? onClick}
+      ref={(node) => assignButtonRef(node, forwardedRef, popupRef)}
       type="button"
     >
       {icon}
@@ -52,14 +58,15 @@ export function Selector({
       <ChevronDown size={11} />
     </button>
   );
-}
+});
 
 export const IconButton = forwardRef<HTMLButtonElement, {
   ariaLabel: string;
   className?: string;
   disabled?: boolean;
   icon: ReactNode;
-  onClick: () => void;
+  onClick?: () => void;
+  popupTrigger?: PopupTriggerProps;
   pressed?: boolean;
 }>(function IconButton({
   ariaLabel,
@@ -67,15 +74,36 @@ export const IconButton = forwardRef<HTMLButtonElement, {
   disabled,
   icon,
   onClick,
+  popupTrigger,
   pressed,
 }, ref) {
   const classes = ["composer-icon-button", className].filter(Boolean).join(" ");
+  const { ref: popupRef, ...popupProps } = popupTrigger ?? {};
   return (
-    <button ref={ref} aria-label={ariaLabel} aria-pressed={pressed} className={classes} disabled={disabled} onClick={onClick} type="button">
+    <button
+      {...popupProps}
+      ref={(node) => assignButtonRef(node, ref, popupRef)}
+      aria-label={ariaLabel}
+      aria-pressed={pressed}
+      className={classes}
+      disabled={disabled}
+      onClick={popupTrigger?.onClick ?? onClick}
+      type="button"
+    >
       {icon}
     </button>
   );
 });
+
+function assignButtonRef(
+  node: HTMLButtonElement | null,
+  forwardedRef?: ForwardedRef<HTMLButtonElement>,
+  popupRef?: PopupTriggerProps["ref"],
+) {
+  popupRef?.(node);
+  if (typeof forwardedRef === "function") forwardedRef(node);
+  else if (forwardedRef) forwardedRef.current = node;
+}
 
 export function Popover({
   children,
@@ -131,6 +159,7 @@ export function MenuButton({
         className,
         active === undefined ? undefined : "composer-menu-choice",
         endIcon ? "composer-menu-choice-with-end" : undefined,
+        icon ? undefined : "composer-menu-choice-iconless",
         description ? undefined : "composer-menu-choice-compact",
       ].filter(Boolean).join(" ") || undefined}
       disabled={disabled}

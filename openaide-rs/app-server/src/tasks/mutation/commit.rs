@@ -485,6 +485,16 @@ pub(super) fn dispose_prepared_tasks_for_agent(
     dispose_prepared_tasks_matching(target, |task| task.agent_id == agent_id)
 }
 
+pub(super) fn dispose_free_prepared_tasks_for_agent(
+    target: &TaskMutations,
+    agent_id: &str,
+) -> Result<Vec<TaskRecord>, RuntimeError> {
+    dispose_prepared_tasks_matching(target, |task| {
+        task.agent_id == agent_id
+            && matches!(task.lifecycle, TaskLifecycle::Prepared { lease: None })
+    })
+}
+
 pub(super) fn dispose_prepared_tasks_for_worktree(
     target: &TaskMutations,
     worktree_id: &str,

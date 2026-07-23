@@ -931,6 +931,40 @@ fn disabling_an_agent_disposes_its_leased_and_free_prepared_tasks_only() {
 }
 
 #[test]
+fn changed_agent_preferences_dispose_only_free_prepared_tasks() {
+    let (_dir, store, mutations, _notifications) = test_mutations(0);
+    for (task_id, lifecycle, agent_id) in [
+        (
+            "leased",
+            TaskLifecycle::Prepared {
+                lease: Some("client-a".into()),
+            },
+            "codex",
+        ),
+        ("free", TaskLifecycle::Prepared { lease: None }, "codex"),
+        (
+            "other-agent",
+            TaskLifecycle::Prepared { lease: None },
+            "opencode",
+        ),
+    ] {
+        let mut task = task_record(task_id);
+        task.lifecycle = lifecycle;
+        task.agent_id = agent_id.to_string();
+        store.write_task(&task).unwrap();
+    }
+
+    let disposed = mutations
+        .dispose_free_prepared_tasks_for_agent("codex")
+        .unwrap();
+
+    assert_eq!(disposed.len(), 1);
+    assert!(!store.read_task("leased").unwrap().tombstoned);
+    assert!(store.read_task("free").unwrap().tombstoned);
+    assert!(!store.read_task("other-agent").unwrap().tombstoned);
+}
+
+#[test]
 fn removing_a_worktree_disposes_its_leased_and_free_prepared_tasks_only() {
     let (_dir, store, mutations, _notifications) = test_mutations(0);
     for (task_id, lifecycle, worktree_id) in [

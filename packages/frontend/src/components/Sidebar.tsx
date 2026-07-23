@@ -1,4 +1,4 @@
-import { memo, useState } from "react";
+import { memo, useRef, useState } from "react";
 import { Archive, ArrowLeft, Plus, RefreshCcw, Search, Settings } from "lucide-react";
 import type { AgentListedSession, TaskSummary } from "@openaide/app-shell-contracts";
 import type { ProjectOption } from "../state/composerOptions";
@@ -13,6 +13,7 @@ import { SidebarTaskRow } from "./SidebarTaskRow";
 import { groupedTasks, projectGroupRows, recentVisibleGroups, taskMatchesSearch } from "./sidebarProjectModel";
 import { sidebarViewModel } from "./sidebarViewModel";
 import { SidebarTaskPreviewProvider } from "./SidebarTaskPreview";
+import { useScrollOverflow } from "./useScrollOverflow";
 
 type SidebarProps = {
   activeTaskId?: string;
@@ -84,6 +85,8 @@ export const Sidebar = memo(function Sidebar({
   loadingTasks = false,
   showNativeSessions = true,
 }: SidebarProps) {
+  const taskListRef = useRef<HTMLDivElement>(null);
+  const taskListOverflow = useScrollOverflow(taskListRef, showArchived);
   const [collapsedProjectKeys, setCollapsedProjectKeys] = useState<Set<string>>(() => new Set());
   const [projectRowLimits, setProjectRowLimits] = useState<Map<string, number>>(() => new Map());
   const [visibleProjectLimit, setVisibleProjectLimit] = useState(maxVisibleProjects);
@@ -182,7 +185,13 @@ export const Sidebar = memo(function Sidebar({
         ) : null}
         <button className="archive-navigation" onClick={onToggleArchived} type="button"><Archive size={13} />Archive</button>
       </div> : null}
-      <SidebarTaskPreviewProvider><div className="task-list" role="list" aria-label={showArchived ? "Archived tasks" : "Tasks"}>
+      <SidebarTaskPreviewProvider><div className="task-list-shell" data-more-below={String(taskListOverflow.moreBelow)}><div
+        className="task-list"
+        role="list"
+        aria-label={showArchived ? "Archived tasks" : "Tasks"}
+        onScroll={taskListOverflow.onScroll}
+        ref={taskListRef}
+      >
         {taskListError ? <p className="empty-list">{taskListError}</p> : null}
         {showEmptyState
           ? <p className="empty-list">{viewModel.emptyMessage}</p>
@@ -304,7 +313,7 @@ export const Sidebar = memo(function Sidebar({
             Show {Math.min(maxVisibleProjects, hiddenProjectCount)} more workspaces
           </button>
         ) : null}
-      </div></SidebarTaskPreviewProvider>
+      </div></div></SidebarTaskPreviewProvider>
       <div className="sidebar-footer">
         <button
           aria-current={settingsActive ? "page" : undefined}

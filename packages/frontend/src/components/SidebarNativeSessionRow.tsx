@@ -1,10 +1,11 @@
-import { ExternalLink } from "lucide-react";
-import { useRef } from "react";
+import { ArrowLeft, ExternalLink, Info, MoreHorizontal } from "lucide-react";
+import { useRef, useState } from "react";
 import type { AgentListedSession } from "@openaide/app-shell-contracts";
 import { AgentIcon } from "./AgentIcon";
+import { PopupMenu } from "./Popup";
 import { SidebarRowActionSlot } from "./SidebarRowParts";
 import { nativeSessionTitle, relativeTime } from "./taskSurfaceHelpers";
-import { useSidebarTaskPreview } from "./SidebarTaskPreview";
+import { AgentHistoryPreviewDetails, useSidebarTaskPreview } from "./SidebarTaskPreview";
 
 export function SidebarNativeSessionRow({
   nativeSessionAgentId,
@@ -19,6 +20,8 @@ export function SidebarNativeSessionRow({
   onOpenNativeSession: (session: AgentListedSession) => void;
   session: AgentListedSession;
 }) {
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const rowRef = useRef<HTMLDivElement>(null);
   const preview = useSidebarTaskPreview();
   const adopting = nativeSessionsAdoptingSessionId === session.session_id;
@@ -26,8 +29,15 @@ export function SidebarNativeSessionRow({
   const timestamp = session.last_activity ?? session.updated_at;
   const age = timestamp ? relativeTime(timestamp) : "";
   const openSession = () => {
+    setDetailsOpen(false);
+    setMenuOpen(false);
     preview?.dismiss();
     onOpenNativeSession(session);
+  };
+  const changeMenuOpen = (open: boolean) => {
+    if (open) preview?.dismiss();
+    else setDetailsOpen(false);
+    setMenuOpen(open);
   };
 
   return (
@@ -66,15 +76,45 @@ export function SidebarNativeSessionRow({
       </button>
       <SidebarRowActionSlot>
         <button
-          className="task-row-action"
+          aria-label={`Open ${title}`}
+          className="task-row-action external-session-open-action"
           disabled={adopting}
           onClick={openSession}
           title={adopting ? "Opening task" : "Open task"}
           type="button"
-          aria-label={`Open ${title}`}
         >
           <ExternalLink size={13} />
         </button>
+        <span className="external-session-details-actions">
+          <PopupMenu
+            className="task-row-menu"
+            label={`Task actions for ${title}`}
+            onOpenChange={changeMenuOpen}
+            open={menuOpen}
+            trigger={(triggerProps) => (
+              <button
+                {...triggerProps}
+                aria-label={`Task actions for ${title}`}
+                className="task-row-action"
+                disabled={adopting}
+                title={adopting ? "Opening task" : menuOpen ? undefined : "Task actions"}
+                type="button"
+              >
+                <MoreHorizontal size={14} />
+              </button>
+            )}
+          >
+            {detailsOpen ? <>
+              <button onClick={() => setDetailsOpen(false)} type="button" role="menuitem"><ArrowLeft size={13} />Task actions</button>
+              <div className="task-row-details">
+                <AgentHistoryPreviewDetails content={previewContent()} explainSource={false} />
+              </div>
+            </> : <>
+              <button className="task-row-details-action" onClick={() => setDetailsOpen(true)} type="button" role="menuitem"><Info size={13} />Task details</button>
+              <button onClick={openSession} type="button" role="menuitem"><ExternalLink size={13} />Open task</button>
+            </>}
+          </PopupMenu>
+        </span>
       </SidebarRowActionSlot>
     </div>
   );

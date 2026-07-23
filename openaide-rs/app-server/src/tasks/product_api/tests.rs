@@ -784,6 +784,337 @@ fn create_replaces_a_persisted_draft_catalog_with_fresh_agent_defaults() {
 }
 
 #[test]
+fn new_task_reuses_the_last_confirmed_agent_config_options() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let workspace = "/tmp/openaide-unit-workspace/app";
+    store
+        .write_task(&task_record("task-project-anchor", workspace))
+        .unwrap();
+    let agent = Arc::new(RememberedConfigAgent::default());
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        agent.clone(),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+    let acquire = || TaskAcquireParams {
+        project_id: project_id_for_workspace(workspace),
+        agent_id: AgentId::from("codex"),
+        workspace_root: None,
+    };
+
+    let first = api.create_for_test(acquire()).unwrap();
+    wait_until(|| {
+        matches!(
+            store
+                .read_task(first.task.task_id.as_str())
+                .unwrap()
+                .preparation,
+            TaskPreparationRecord::Ready
+        )
+    });
+    api.set_config_option_for_test(TaskSetConfigOptionParams {
+        task_id: first.task.task_id.clone(),
+        config_id: "mode".into(),
+        value: protocol_config_id("agent-full-access"),
+        client_mutation_id: "remember-full-access".into(),
+    })
+    .unwrap();
+    api.send(send_params(first.task.task_id.as_str(), "promote task"))
+        .unwrap();
+
+    let second = api.create_for_test(acquire()).unwrap();
+    wait_until(|| {
+        matches!(
+            store
+                .read_task(second.task.task_id.as_str())
+                .unwrap()
+                .preparation,
+            TaskPreparationRecord::Ready
+        )
+    });
+
+    assert_eq!(
+        task_config_id(
+            &store.read_task(second.task.task_id.as_str()).unwrap(),
+            "mode"
+        ),
+        Some("agent-full-access")
+    );
+    assert_eq!(
+        agent.config_updates.lock().unwrap().as_slice(),
+        [
+            (
+                first.task.task_id.as_str().to_string(),
+                "agent-full-access".to_string()
+            ),
+            (
+                second.task.task_id.as_str().to_string(),
+                "agent-full-access".to_string()
+            ),
+        ]
+    );
+}
+
+#[test]
+fn new_task_reconciles_dependent_options_from_complete_agent_responses() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let workspace = "/tmp/openaide-unit-workspace/app";
+    store
+        .write_task(&task_record("task-project-anchor", workspace))
+        .unwrap();
+    let agent = Arc::new(DependentConfigAgent::default());
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        agent.clone(),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+    let acquire = || TaskAcquireParams {
+        project_id: project_id_for_workspace(workspace),
+        agent_id: AgentId::from("codex"),
+        workspace_root: None,
+    };
+
+    let first = api.create_for_test(acquire()).unwrap();
+    wait_until(|| {
+        matches!(
+            store
+                .read_task(first.task.task_id.as_str())
+                .unwrap()
+                .preparation,
+            TaskPreparationRecord::Ready
+        )
+    });
+    api.set_config_option_for_test(TaskSetConfigOptionParams {
+        task_id: first.task.task_id.clone(),
+        config_id: "model".into(),
+        value: protocol_config_id("new-model"),
+        client_mutation_id: "remember-model".into(),
+    })
+    .unwrap();
+    api.set_config_option_for_test(TaskSetConfigOptionParams {
+        task_id: first.task.task_id.clone(),
+        config_id: "reasoning".into(),
+        value: protocol_config_id("high"),
+        client_mutation_id: "remember-reasoning".into(),
+    })
+    .unwrap();
+    api.send(send_params(first.task.task_id.as_str(), "promote task"))
+        .unwrap();
+
+    let second = api.create_for_test(acquire()).unwrap();
+    wait_until(|| {
+        matches!(
+            store
+                .read_task(second.task.task_id.as_str())
+                .unwrap()
+                .preparation,
+            TaskPreparationRecord::Ready
+        )
+    });
+    let second = store.read_task(second.task.task_id.as_str()).unwrap();
+
+    assert_eq!(task_config_id(&second, "model"), Some("new-model"));
+    assert_eq!(task_config_id(&second, "reasoning"), Some("high"));
+    assert_eq!(
+        agent
+            .updates_for(second.task_id.as_str())
+            .iter()
+            .map(|(id, value)| (id.as_str(), value.as_str()))
+            .collect::<Vec<_>>(),
+        vec![("model", "new-model"), ("reasoning", "high")]
+    );
+}
+
+#[test]
+fn new_task_skips_a_remembered_value_the_agent_no_longer_offers() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let workspace = "/tmp/openaide-unit-workspace/app";
+    store
+        .write_task(&task_record("task-project-anchor", workspace))
+        .unwrap();
+    store
+        .write_agent_config_preferences(&mode_config_catalog("retired-mode"))
+        .unwrap();
+    let agent = Arc::new(RememberedConfigAgent::default());
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        agent.clone(),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+
+    let created = api
+        .create_for_test(TaskAcquireParams {
+            project_id: project_id_for_workspace(workspace),
+            agent_id: AgentId::from("codex"),
+            workspace_root: None,
+        })
+        .unwrap();
+    wait_until(|| {
+        matches!(
+            store
+                .read_task(created.task.task_id.as_str())
+                .unwrap()
+                .preparation,
+            TaskPreparationRecord::Ready
+        )
+    });
+
+    assert_eq!(
+        task_config_id(
+            &store.read_task(created.task.task_id.as_str()).unwrap(),
+            "mode"
+        ),
+        Some("agent")
+    );
+    assert!(agent.config_updates.lock().unwrap().is_empty());
+}
+
+#[test]
+fn changing_a_preference_retires_a_free_prepared_task_with_stale_options() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let workspace = "/tmp/openaide-unit-workspace/app";
+    store
+        .write_task(&task_record("task-project-anchor", workspace))
+        .unwrap();
+    let agent = Arc::new(RememberedConfigAgent::default());
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        agent,
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+    let acquire = || TaskAcquireParams {
+        project_id: project_id_for_workspace(workspace),
+        agent_id: AgentId::from("codex"),
+        workspace_root: None,
+    };
+
+    let visible = api.create_for_test(acquire()).unwrap();
+    wait_until(|| {
+        matches!(
+            store
+                .read_task(visible.task.task_id.as_str())
+                .unwrap()
+                .preparation,
+            TaskPreparationRecord::Ready
+        )
+    });
+    api.send(send_params(visible.task.task_id.as_str(), "promote task"))
+        .unwrap();
+    let stale = api.create_for_test(acquire()).unwrap();
+    wait_until(|| {
+        matches!(
+            store
+                .read_task(stale.task.task_id.as_str())
+                .unwrap()
+                .preparation,
+            TaskPreparationRecord::Ready
+        )
+    });
+    api.release_for_test(TaskReleaseParams {
+        task_id: stale.task.task_id.clone(),
+    })
+    .unwrap();
+
+    api.set_config_option_for_test(TaskSetConfigOptionParams {
+        task_id: visible.task.task_id.clone(),
+        config_id: "mode".into(),
+        value: protocol_config_id("agent-full-access"),
+        client_mutation_id: "replace-stale-pool".into(),
+    })
+    .unwrap();
+    let fresh = api.create_for_test(acquire()).unwrap();
+    wait_until(|| {
+        matches!(
+            store
+                .read_task(fresh.task.task_id.as_str())
+                .unwrap()
+                .preparation,
+            TaskPreparationRecord::Ready
+        )
+    });
+
+    assert_ne!(fresh.task.task_id, stale.task.task_id);
+    assert_eq!(
+        task_config_id(
+            &store.read_task(fresh.task.task_id.as_str()).unwrap(),
+            "mode"
+        ),
+        Some("agent-full-access")
+    );
+}
+
+#[test]
+fn reopened_prepared_task_applies_preferences_after_runtime_restart() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let workspace = "/tmp/openaide-unit-workspace/app";
+    store
+        .write_task(&task_record("task-project-anchor", workspace))
+        .unwrap();
+    store
+        .write_agent_config_preferences(&mode_config_catalog("agent-full-access"))
+        .unwrap();
+    let mut prepared = task_record("task-prepared", workspace);
+    prepared.lifecycle = TaskLifecycle::Prepared { lease: None };
+    prepared.preparation = TaskPreparationRecord::Ready;
+    prepared.agent_session_id = Some("session-task-prepared".to_string());
+    prepared.config_options_catalog = Some(mode_config_catalog("agent"));
+    store.write_task(&prepared).unwrap();
+    let agent = Arc::new(RememberedConfigAgent::default());
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        agent.clone(),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+
+    let reopened = api
+        .create_for_test(TaskAcquireParams {
+            project_id: project_id_for_workspace(workspace),
+            agent_id: AgentId::from("codex"),
+            workspace_root: None,
+        })
+        .unwrap();
+    wait_until(|| {
+        matches!(
+            store
+                .read_task(reopened.task.task_id.as_str())
+                .unwrap()
+                .preparation,
+            TaskPreparationRecord::Ready
+        )
+    });
+
+    assert_eq!(reopened.task.task_id.as_str(), "task-prepared");
+    assert_eq!(
+        task_config_id(&store.read_task("task-prepared").unwrap(), "mode"),
+        Some("agent-full-access")
+    );
+    assert_eq!(
+        agent.config_updates.lock().unwrap().as_slice(),
+        [("task-prepared".to_string(), "agent-full-access".to_string())]
+    );
+}
+
+#[test]
 fn draft_preparation_keeps_catalogs_delivered_immediately_when_the_sink_attaches() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
@@ -6426,6 +6757,125 @@ struct OrderedConfigAgent {
 
 struct ImmediatePreparationCatalogAgent;
 
+#[derive(Default)]
+struct RememberedConfigAgent {
+    config_updates: Mutex<Vec<(String, String)>>,
+}
+
+#[derive(Default)]
+struct DependentConfigAgent {
+    sessions: Mutex<HashMap<String, (String, String)>>,
+    updates: Mutex<Vec<(String, String, String)>>,
+}
+
+impl DependentConfigAgent {
+    fn updates_for(&self, task_id: &str) -> Vec<(String, String)> {
+        self.updates
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(recorded_task_id, _, _)| recorded_task_id == task_id)
+            .map(|(_, id, value)| (id.clone(), value.clone()))
+            .collect()
+    }
+}
+
+impl AgentRuntime for DependentConfigAgent {
+    fn start_session(&self, request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
+        let session_id = format!("session-{}", request.task_id);
+        self.sessions.lock().unwrap().insert(
+            session_id.clone(),
+            ("old-model".to_string(), "medium".to_string()),
+        );
+        Ok(AgentSession::new(request.agent_id, session_id)
+            .with_config_options(&dependent_config_catalog("old-model", "medium")))
+    }
+
+    fn set_session_config_option(
+        &self,
+        request: AgentSessionSetConfigOptionRequest,
+    ) -> Result<ConfigOptionsCatalog, RuntimeError> {
+        let value = request
+            .value
+            .as_id()
+            .expect("dependent options use select values")
+            .to_string();
+        let task_id = request
+            .session_id
+            .strip_prefix("session-")
+            .expect("test sessions carry their task identity")
+            .to_string();
+        self.updates
+            .lock()
+            .unwrap()
+            .push((task_id, request.config_id.clone(), value.clone()));
+        let mut sessions = self.sessions.lock().unwrap();
+        let (model, reasoning) = sessions
+            .get_mut(&request.session_id)
+            .expect("started session has config state");
+        match request.config_id.as_str() {
+            "model" => {
+                *model = value;
+                *reasoning = "low".to_string();
+            }
+            "reasoning" => *reasoning = value,
+            other => panic!("unexpected config option {other}"),
+        }
+        Ok(dependent_config_catalog(model, reasoning))
+    }
+
+    fn prompt(
+        &self,
+        _prompt: AgentPrompt,
+        _sink: Arc<dyn AgentEventSink>,
+    ) -> Result<crate::agent::AgentPromptOutcome, RuntimeError> {
+        Ok(crate::agent::AgentPromptOutcome::EndTurn)
+    }
+}
+
+impl AgentRuntime for RememberedConfigAgent {
+    fn start_session(&self, request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
+        Ok(
+            AgentSession::new(request.agent_id, format!("session-{}", request.task_id))
+                .with_config_options(&mode_config_catalog("agent")),
+        )
+    }
+
+    fn set_session_config_option(
+        &self,
+        request: AgentSessionSetConfigOptionRequest,
+    ) -> Result<ConfigOptionsCatalog, RuntimeError> {
+        let value = request
+            .value
+            .as_id()
+            .expect("mode is represented by a select value")
+            .to_string();
+        let task_id = request
+            .session_id
+            .strip_prefix("session-")
+            .expect("test sessions carry their task identity")
+            .to_string();
+        self.config_updates
+            .lock()
+            .unwrap()
+            .push((task_id, value.clone()));
+        Ok(mode_config_catalog(&value))
+    }
+
+    fn resume_session(&self, request: AgentSessionResume) -> Result<AgentSession, RuntimeError> {
+        Ok(AgentSession::new(request.agent_id, request.session_id)
+            .with_config_options(&mode_config_catalog("agent")))
+    }
+
+    fn prompt(
+        &self,
+        _prompt: AgentPrompt,
+        _sink: Arc<dyn AgentEventSink>,
+    ) -> Result<crate::agent::AgentPromptOutcome, RuntimeError> {
+        Ok(crate::agent::AgentPromptOutcome::EndTurn)
+    }
+}
+
 impl AgentRuntime for ImmediatePreparationCatalogAgent {
     fn start_session(&self, request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
         Ok(AgentSession::new(
@@ -6938,14 +7388,68 @@ fn mode_config_catalog(current_value: &str) -> ConfigOptionsCatalog {
             category: Some(ConfigOptionCategory::Mode),
             kind: ConfigOptionKind::Select,
             current_value: ConfigOptionCurrentValue::id(current_value),
-            values: vec![ConfigOptionValue {
-                id: "agent-full-access".to_string(),
-                label: "Full Access".to_string(),
-                description: None,
-                group_id: None,
-                group_label: None,
-            }],
+            values: vec![
+                ConfigOptionValue {
+                    id: "agent".to_string(),
+                    label: "Agent".to_string(),
+                    description: None,
+                    group_id: None,
+                    group_label: None,
+                },
+                ConfigOptionValue {
+                    id: "agent-full-access".to_string(),
+                    label: "Full Access".to_string(),
+                    description: None,
+                    group_id: None,
+                    group_label: None,
+                },
+            ],
         }],
+    }
+}
+
+fn dependent_config_catalog(model: &str, reasoning: &str) -> ConfigOptionsCatalog {
+    ConfigOptionsCatalog {
+        agent_id: "codex".to_string(),
+        status: ConfigOptionsStatus::Ready,
+        options: vec![
+            ConfigOption {
+                id: "reasoning".to_string(),
+                label: "Reasoning".to_string(),
+                description: None,
+                category: Some(ConfigOptionCategory::ThoughtLevel),
+                kind: ConfigOptionKind::Select,
+                current_value: ConfigOptionCurrentValue::id(reasoning),
+                values: ["low", "medium", "high"]
+                    .into_iter()
+                    .map(|value| ConfigOptionValue {
+                        id: value.to_string(),
+                        label: value.to_string(),
+                        description: None,
+                        group_id: None,
+                        group_label: None,
+                    })
+                    .collect(),
+            },
+            ConfigOption {
+                id: "model".to_string(),
+                label: "Model".to_string(),
+                description: None,
+                category: Some(ConfigOptionCategory::Model),
+                kind: ConfigOptionKind::Select,
+                current_value: ConfigOptionCurrentValue::id(model),
+                values: ["old-model", "new-model"]
+                    .into_iter()
+                    .map(|value| ConfigOptionValue {
+                        id: value.to_string(),
+                        label: value.to_string(),
+                        description: None,
+                        group_id: None,
+                        group_label: None,
+                    })
+                    .collect(),
+            },
+        ],
     }
 }
 

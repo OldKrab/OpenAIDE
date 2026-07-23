@@ -1,9 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import {
   Archive,
   ArrowLeft,
   Check,
-  FolderRoot,
   GitBranch,
   Info,
   MoreHorizontal,
@@ -14,9 +13,10 @@ import {
 } from "lucide-react";
 import type { TaskStatus, TaskSummary } from "@openaide/app-shell-contracts";
 import { AgentIcon } from "./AgentIcon";
+import { PopupMenu } from "./Popup";
 import { SidebarRowActionSlot } from "./SidebarRowParts";
 import { relativeTime } from "./taskSurfaceHelpers";
-import { taskPreviewContent, useSidebarTaskPreview } from "./SidebarTaskPreview";
+import { TaskPreviewDetails, taskPreviewContent, useSidebarTaskPreview } from "./SidebarTaskPreview";
 
 export function SidebarTaskRow({
   activeTaskId,
@@ -46,8 +46,6 @@ export function SidebarTaskRow({
   const [titleSaving, setTitleSaving] = useState(false);
   const rowRef = useRef<HTMLDivElement>(null);
   const preview = useSidebarTaskPreview();
-  const actionSlotRef = useRef<HTMLDivElement>(null);
-  const actionTriggerRef = useRef<HTMLButtonElement>(null);
   const title = task.title || "Untitled task";
   const actionLabel = showArchived ? "Restore task" : "Archive task";
   const openTask = () => {
@@ -101,33 +99,21 @@ export function SidebarTaskRow({
       setTitleSaving(false);
     }
   };
-  useEffect(() => {
-    if (!menuOpen || typeof document === "undefined") return;
-    const dismissOnPointerDown = (event: PointerEvent) => {
-      if (actionSlotRef.current?.contains(event.target as Node | null)) return;
-      setMenuOpen(false);
+  const changeMenuOpen = (open: boolean) => {
+    if (open) {
+      // A task menu owns this row until it closes; discard any preview dwell.
+      preview?.dismiss();
+    } else {
       setDetailsOpen(false);
-    };
-    const dismissOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      setMenuOpen(false);
-      setDetailsOpen(false);
-      actionTriggerRef.current?.focus();
-    };
-    document.addEventListener("pointerdown", dismissOnPointerDown);
-    document.addEventListener("keydown", dismissOnEscape);
-    return () => {
-      document.removeEventListener("pointerdown", dismissOnPointerDown);
-      document.removeEventListener("keydown", dismissOnEscape);
-    };
-  }, [menuOpen]);
+    }
+    setMenuOpen(open);
+  };
   return (
     <div
       className={`task-row task-product-row ${task.task_id === activeTaskId ? "selected" : ""}`}
-      onFocus={() => rowRef.current && preview?.enter(taskPreviewContent(task), rowRef.current, true)}
-      onPointerEnter={() => rowRef.current && preview?.enter(taskPreviewContent(task), rowRef.current)}
+      data-menu-open={menuOpen || undefined}
       onPointerLeave={() => preview?.leave()}
+      onPointerMove={() => !menuOpen && rowRef.current && preview?.enter(taskPreviewContent(task), rowRef.current)}
       ref={rowRef}
       role="listitem"
     >
@@ -157,8 +143,10 @@ export function SidebarTaskRow({
           <button aria-label="Cancel task rename" disabled={titleSaving} onClick={cancelRename} type="button"><X size={13} /></button>
           {titleError ? <small role="alert">{titleError}</small> : null}
         </form>
-      ) : <button
+      ) : (
+        <button
           className="task-open"
+          onFocus={() => !menuOpen && rowRef.current && preview?.enter(taskPreviewContent(task), rowRef.current, true)}
           onClick={openTask}
           type="button"
         >
@@ -179,45 +167,45 @@ export function SidebarTaskRow({
             worktreeName={task.worktree_id ? task.worktree_name ?? "Worktree" : undefined}
           />
         </span>
-        </button>}
-      <SidebarRowActionSlot containerRef={actionSlotRef}>
-        <button
-          ref={actionTriggerRef}
-          className="task-row-action"
-          onClick={() => setMenuOpen((open) => {
-            if (open) setDetailsOpen(false);
-            return !open;
-          })}
-          title={menuOpen ? undefined : "Task actions"}
-          type="button"
-          aria-expanded={menuOpen}
-          aria-label={`Task actions for ${title}`}
-        >
-          <MoreHorizontal size={14} />
         </button>
-        {menuOpen ? (
-          <div className="task-row-menu" role="menu">
-            {detailsOpen ? <>
-              <button onClick={() => setDetailsOpen(false)} type="button" role="menuitem"><ArrowLeft size={13} />Task actions</button>
-              <div className="task-row-details">
-                <span><FolderRoot size={13} />{task.project_label ?? "Project"}</span>
-                <span>{task.worktree_id ? <GitBranch size={13} /> : <FolderRoot size={13} />}{task.worktree_name ?? "Project root"}{task.git_ref ? <small>{task.git_ref}</small> : null}</span>
-              </div>
-            </> : <>
-              <button className="task-row-mobile-details-action" onClick={() => setDetailsOpen(true)} type="button" role="menuitem"><Info size={13} />Task details</button>
-              {onSetTaskTitle && !showArchived ? (
-                <button onClick={beginRename} type="button" role="menuitem"><Pencil size={13} />Rename task</button>
-              ) : null}
-              {onSetTaskTitle && !showArchived && task.title_source === "user" ? (
-                <button onClick={() => void resetTitle()} type="button" role="menuitem"><Undo2 size={13} />Reset automatic title</button>
-              ) : null}
-              <button onClick={runAction} type="button" role="menuitem">
-                {showArchived ? <RotateCcw size={13} /> : <Archive size={13} />}
-                {actionLabel}
-              </button>
-            </>}
-          </div>
-        ) : null}
+      )}
+      <SidebarRowActionSlot>
+        <PopupMenu
+          className="task-row-menu"
+          label={`Task actions for ${title}`}
+          onOpenChange={changeMenuOpen}
+          open={menuOpen}
+          trigger={(triggerProps) => (
+            <button
+              {...triggerProps}
+              className="task-row-action"
+              title={menuOpen ? undefined : "Task actions"}
+              type="button"
+              aria-label={`Task actions for ${title}`}
+            >
+              <MoreHorizontal size={14} />
+            </button>
+          )}
+        >
+          {detailsOpen ? <>
+            <button onClick={() => setDetailsOpen(false)} type="button" role="menuitem"><ArrowLeft size={13} />Task actions</button>
+            <div className="task-row-details">
+              <TaskPreviewDetails content={taskPreviewContent(task)} />
+            </div>
+          </> : <>
+            <button className="task-row-details-action" onClick={() => setDetailsOpen(true)} type="button" role="menuitem"><Info size={13} />Task details</button>
+            {onSetTaskTitle && !showArchived ? (
+              <button onClick={beginRename} type="button" role="menuitem"><Pencil size={13} />Rename task</button>
+            ) : null}
+            {onSetTaskTitle && !showArchived && task.title_source === "user" ? (
+              <button onClick={() => void resetTitle()} type="button" role="menuitem"><Undo2 size={13} />Reset automatic title</button>
+            ) : null}
+            <button onClick={runAction} type="button" role="menuitem">
+              {showArchived ? <RotateCcw size={13} /> : <Archive size={13} />}
+              {actionLabel}
+            </button>
+          </>}
+        </PopupMenu>
       </SidebarRowActionSlot>
       {!editingTitle && titleError ? (
         <small className="task-title-error" role="alert">{titleError}</small>

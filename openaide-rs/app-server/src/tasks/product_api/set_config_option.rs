@@ -129,13 +129,47 @@ impl TaskProductApi {
                 return Err(protocol_error_from_runtime(error));
             }
         };
-        self.finish_live_config_mutation(
+        let confirmed_catalog = live_catalog.clone();
+        let snapshot = self.finish_live_config_mutation(
             task_id,
             expected_session_id.as_deref(),
             mutation,
             live_catalog,
             &now_string(),
-        )
+        )?;
+        match self
+            .store
+            .write_agent_config_preferences(&confirmed_catalog)
+        {
+            Ok(true) => self.retire_stale_prepared_tasks(&confirmed_catalog.agent_id, task_id),
+            Ok(false) => {}
+            Err(error) => crate::logging::warn(
+                "agent_config_preferences_write_failed",
+                serde_json::json!({
+                    "agent_id": confirmed_catalog.agent_id,
+                    "task_id": task_id,
+                    "error": error.to_string(),
+                }),
+            ),
+        }
+        Ok(snapshot)
+    }
+
+    fn retire_stale_prepared_tasks(&self, agent_id: &str, source_task_id: &str) {
+        match self
+            .mutations
+            .dispose_free_prepared_tasks_for_agent(agent_id)
+        {
+            Ok(disposed) => self.close_disposed_prepared_tasks(disposed),
+            Err(error) => crate::logging::warn(
+                "stale_prepared_tasks_retire_failed",
+                serde_json::json!({
+                    "agent_id": agent_id,
+                    "source_task_id": source_task_id,
+                    "error": error.to_string(),
+                }),
+            ),
+        }
     }
 
     fn begin_live_config_mutation(

@@ -1,0 +1,142 @@
+#openaide-popup-layer {
+  position: relative;
+  z-index: 100;
+}
+
+.oa-popup-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 110;
+  display: grid;
+  place-items: center;
+  background: color-mix(in oklch, var(--oa-bg) 74%, transparent);
+  padding: 24px;
+}
+
+.oa-popup-dialog {
+  min-width: 0;
+  max-width: calc(100vw - 48px);
+  max-height: calc(100dvh - 48px);
+  outline: none;
+}
+
+.oa-popup-surface {
+  width: max-content;
+  max-width: calc(100vw - 16px);
+  max-height: min(
+    var(--oa-popup-content-max-height, 100dvh),
+    var(--oa-popup-available-height, calc(100dvh - 16px))
+  );
+  border: 1px solid var(--oa-border);
+  border-radius: var(--oa-radius-lg);
+  background: var(--oa-panel);
+  box-shadow:
+    0 8px 24px color-mix(in oklch, var(--oa-text) 14%, transparent),
+    0 2px 6px color-mix(in oklch, var(--oa-text) 8%, transparent);
+  color: var(--oa-text);
+  overflow: auto;
+  padding: 5px;
+  z-index: 100;
+}
+
+.oa-popup-menu {
+  min-width: min(180px, calc(100vw - 16px));
+  display: grid;
+  gap: 1px;
+}
+
+.oa-popup-panel {
+  min-width: 240px;
+}
+
+.oa-popup-surface.composer-popover,
+.oa-popup-surface.new-task-context-menu {
+  position: fixed;
+  inset: auto;
+  transform: none;
+}
+
+.oa-popup-surface.composer-popover {
+  width: min(360px, calc(100vw - 16px));
+}
+
+.oa-popup-surface.composer-file-browser-popover {
+  width: min(430px, calc(100vw - 16px));
+}
+
+.oa-popup-surface.new-task-project-menu {
+  width: min(360px, calc(100vw - 16px));
+}
+
+.oa-popup-surface.task-workspace-popup {
+  width: min(360px, calc(100vw - 16px));
+  padding: 0;
+  overflow: visible;
+}
+
+.oa-popup-surface.task-preview-popover {
+  width: min(360px, calc(100vw - 16px));
+}
+
+.task-workspace-popup > .task-workspace-popover {
+  width: 100%;
+  position: static;
+  transform: none;
+  border: 0;
+  box-shadow: none;
+}
+
+.oa-popup-menu [role^="menuitem"] {
+  width: 100%;
+  min-height: 30px;
+  border: 0;
+  border-radius: var(--oa-radius-sm);
+  background: transparent;
+  color: var(--oa-text);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.35;
+  text-align: left;
+}
+
+.oa-popup-menu.composer-popover [role^="menuitem"] {
+  display: grid;
+}
+
+.oa-popup-menu [role^="menuitem"] > svg {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+  color: var(--oa-muted);
+  stroke-width: 1.7;
+}
+
+.oa-popup-menu [role^="menuitem"]:hover:not(:disabled),
+.oa-popup-menu [role^="menuitem"]:focus-visible,
+.oa-popup-menu [role^="menuitem"][aria-checked="true"] {
+  background: var(--oa-raised);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .oa-popup-hover,
+  .oa-popup-listbox {
+    animation: oa-popup-enter 90ms ease-out;
+  }
+}
+
+@keyframes oa-popup-enter {
+  from {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .oa-popup-menu,
+  .oa-popup-panel {
+    transition-duration: 0.01ms !important;
+  }
+}

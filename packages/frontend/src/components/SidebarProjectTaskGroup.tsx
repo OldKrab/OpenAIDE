@@ -1,7 +1,8 @@
 import type { AgentListedSession } from "@openaide/app-shell-contracts";
 import { Folder, FolderOpen, GitBranch, MoreHorizontal, Plus } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { SidebarNativeSessionRow } from "./SidebarNativeSessionRow";
+import { PopupMenu } from "./Popup";
 import { SidebarTaskRow } from "./SidebarTaskRow";
 import {
   projectGroupRows,
@@ -60,15 +61,6 @@ export function SidebarProjectTaskGroup({
   showArchived,
 }: SidebarProjectTaskGroupProps) {
   const [menuOpen, setMenuOpen] = useState(false);
-  const actionsRef = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!menuOpen) return undefined;
-    const dismiss = (event: PointerEvent) => {
-      if (!actionsRef.current?.contains(event.target as Node)) setMenuOpen(false);
-    };
-    document.addEventListener("pointerdown", dismiss);
-    return () => document.removeEventListener("pointerdown", dismiss);
-  }, [menuOpen]);
   const activeTask = group.tasks.find((task) => task.task_id === activeTaskId);
   const taskRows = projectGroupRows(group.tasks, []);
   const allRows = projectGroupRows(group.tasks, nativeSessions);
@@ -94,12 +86,21 @@ export function SidebarProjectTaskGroup({
             {countSummary ? <small className="project-task-group-counts">{countSummary}</small> : null}
           </span>
         </button>
-        <div className="project-task-group-actions" ref={actionsRef}>
-          <button aria-expanded={menuOpen} aria-label={`${group.label} actions`} onClick={() => setMenuOpen((open) => !open)} type="button"><MoreHorizontal size={14} /></button>
-          {menuOpen ? <div className="project-task-group-menu" role="menu">
+        <div className="project-task-group-actions">
+          <PopupMenu
+            className="project-task-group-menu"
+            label={`${group.label} actions`}
+            onOpenChange={setMenuOpen}
+            open={menuOpen}
+            trigger={(triggerProps) => (
+              <button {...triggerProps} aria-label={`${group.label} actions`} type="button">
+                <MoreHorizontal size={14} />
+              </button>
+            )}
+          >
             <button onClick={() => { setMenuOpen(false); onNewTask(); }} role="menuitem" type="button"><Plus size={13} />New task</button>
             {canManageWorktrees && onManageWorktrees ? <button onClick={() => { setMenuOpen(false); onManageWorktrees(); }} role="menuitem" type="button"><GitBranch size={13} />Manage worktrees</button> : null}
-          </div> : null}
+          </PopupMenu>
         </div>
       </div>
       <div
