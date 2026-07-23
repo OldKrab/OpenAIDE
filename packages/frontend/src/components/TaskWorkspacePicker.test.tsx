@@ -163,6 +163,74 @@ describe("TaskWorkspacePicker", () => {
     expect(tree.root.findAllByType("input").some((input) => input.props.value === "fix-sidebar-scroll-2")).toBe(true);
   });
 
+  it("does not report the branch being created as a collision while creation is in progress", async () => {
+    const intents = testIntents();
+    const repo = repository();
+    vi.mocked(intents.createWorktree).mockImplementation((_project, _draft, onProgress) => {
+      onProgress?.({
+        operationId: "operation_1",
+        kind: "create",
+        state: "queued",
+        stage: "Waiting to start",
+      } as never);
+      return new Promise(() => {});
+    });
+    const project = {
+      projectId: "project_1",
+      label: "OpenAIDE",
+      workspaceRoot: "/workspace/OpenAIDE",
+      worktreeRepositoryId: "repository_1",
+      projectWorktreeId: "worktree_root",
+    };
+    const view = () => (
+      <TaskWorkspacePicker
+        intents={intents}
+        onClose={vi.fn()}
+        project={project}
+        repository={repo}
+        tasks={[]}
+      />
+    );
+    let tree!: ReturnType<typeof create>;
+    act(() => { tree = create(view()); });
+    act(() => tree.root.findAllByType("button").find((button) => hasText(button, "New worktree"))?.props.onClick());
+    const name = tree.root.findAllByType("input")[0];
+    act(() => name.props.onChange({ target: { value: "Rename task" } }));
+    act(() => tree.root.findAllByType("input").find((input) => input.props.type === "checkbox")?.props.onChange({ target: { checked: true } }));
+    await act(async () => {
+      void tree.root.findAllByType("button").find((button) => hasText(button, "Create worktree"))?.props.onClick();
+      await Promise.resolve();
+    });
+
+    repo.bases?.push({ kind: "localBranch", name: "rename-task", commit: "8ea7d1c000000000" });
+    act(() => tree.update(view()));
+
+    expect(text(tree.root)).not.toContain("A local branch with this name already exists.");
+  });
+
+  it("presents the initial queued state as startup rather than lock contention", async () => {
+    const intents = testIntents();
+    vi.mocked(intents.createWorktree).mockImplementation((_project, _draft, onProgress) => {
+      onProgress?.({
+        operationId: "operation_1",
+        kind: "create",
+        state: "queued",
+        stage: "Waiting to start",
+      } as never);
+      return new Promise(() => {});
+    });
+    const tree = render(intents);
+    act(() => tree.root.findAllByType("button").find((button) => hasText(button, "New worktree"))?.props.onClick());
+    act(() => tree.root.findAllByType("input")[0].props.onChange({ target: { value: "Rename task" } }));
+    await act(async () => {
+      void tree.root.findAllByType("button").find((button) => hasText(button, "Create worktree"))?.props.onClick();
+      await Promise.resolve();
+    });
+
+    expect(text(tree.root)).toContain("Starting worktree operation");
+    expect(text(tree.root)).not.toContain("Waiting for another worktree operation.");
+  });
+
   it("offers Forget for an unavailable worktree and removes it from active inventory", async () => {
     const intents = testIntents();
     const repo = repository();
