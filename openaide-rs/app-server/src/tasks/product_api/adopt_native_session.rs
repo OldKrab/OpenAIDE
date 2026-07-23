@@ -113,7 +113,8 @@ impl TaskProductApi {
                     &params.native_session_id,
                 );
                 if self.native_catalog.remove(&reference).unwrap_or(false) {
-                    self.task_notifier.navigation_changed();
+                    self.task_notifier
+                        .navigation_project_entries_changed(catalog_entry.project_id.clone());
                 }
                 return Err(protocol_error_from_runtime(error));
             }

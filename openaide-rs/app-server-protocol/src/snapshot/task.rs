@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::ids::{AgentId, ProjectId, TaskId, WorktreeId};
-use crate::task::TaskListLifecycle;
+use crate::task::TaskNavigationSection;
 
 use super::chat::{ChatSnapshot, RecoverySnapshot};
 use super::pending_request::PendingRequestSnapshot;
@@ -18,23 +18,40 @@ pub use send::*;
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskNavigationSnapshot {
-    /// Combined authoritative Navigation rows.
+    /// Selects the primary Tasks surface or the secondary read-only Archive.
+    pub section: TaskNavigationSection,
+    /// Authoritative rows grouped and ordered by Project.
     #[serde(default)]
-    pub entries: Vec<TaskNavigationEntry>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub active_task_id: Option<TaskId>,
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub refreshing: bool,
+    pub groups: Vec<TaskNavigationGroup>,
+    #[serde(default)]
+    pub refresh: TaskNavigationRefreshState,
 }
 
-/// Authoritative membership baseline for exactly one durable Task lifecycle.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
-pub struct TaskListSnapshot {
-    pub lifecycle: TaskListLifecycle,
+pub struct TaskNavigationGroup {
+    pub project_id: ProjectId,
+    pub project_label: String,
+    pub task_count: u64,
     #[serde(default)]
-    pub tasks: Vec<TaskSummary>,
-    pub revision: u64,
+    pub entries: Vec<TaskNavigationEntry>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub has_more: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(
+    tag = "state",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum TaskNavigationRefreshState {
+    #[default]
+    Idle,
+    Refreshing,
+    Failed {
+        message: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]

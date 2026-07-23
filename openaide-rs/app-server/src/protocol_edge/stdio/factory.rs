@@ -88,6 +88,7 @@ pub(super) fn gateway(
         store.clone(),
         task_product_api.native_session_catalog(),
         task_navigation_agents,
+        configured_projects.clone(),
     );
     let task_snapshots = Arc::new(TaskSnapshotStore::with_history_sync(
         store.clone(),

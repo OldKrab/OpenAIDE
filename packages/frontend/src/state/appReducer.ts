@@ -46,7 +46,9 @@ type AppActionPayload =
       archived: false;
       tasks: TaskSummary[];
       sessions: AgentListedSession[];
+      hasMoreProjectIds: string[];
       refreshing: boolean;
+      refreshError?: string;
     }
   | { type: "tasks:error"; message: string }
   | { type: "task:list:remove"; taskId: string }
@@ -250,10 +252,11 @@ function reduceGlobalState(state: AppState, action: GlobalAction): AppState {
           nativeSessions: {
             ...state.newTask.nativeSessions,
             items: action.sessions,
+            hasMoreProjectIds: action.hasMoreProjectIds,
             loaded: true,
             loading: action.refreshing,
             nextCursor: undefined,
-            error: undefined,
+            error: action.refreshError,
           },
         },
       };

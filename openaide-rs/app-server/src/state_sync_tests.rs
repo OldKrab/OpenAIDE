@@ -1,9 +1,7 @@
 use openaide_app_server_protocol::client::{
     ClientCapabilities, RequestedSurface, ShellDescriptor, ShellKind,
 };
-use openaide_app_server_protocol::events::{
-    AppServerEventPayload, EventScope, TaskChanges, TaskNavigationChange,
-};
+use openaide_app_server_protocol::events::{AppServerEventPayload, EventScope, TaskChanges};
 use openaide_app_server_protocol::ids::{ClientInstanceId, StateRootId, TaskId};
 use openaide_app_server_protocol::snapshot::{
     AgentCollectionSnapshot, ProjectCollectionSnapshot, TaskHistorySyncSnapshot,
@@ -21,7 +19,10 @@ fn subscribe_returns_scope_baseline_and_registers_subscription() {
     let result = stream
         .subscribe(
             &ctx("client-1", "conn-1"),
-            SubscriptionScope::TaskNavigation { project_id: None },
+            SubscriptionScope::TaskNavigation {
+                section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
+                project_ids: None,
+            },
             &snapshots(),
             AppServerTime(1),
         )
@@ -125,7 +126,10 @@ fn project_updates_do_not_leak_into_navigation_or_task_subscriptions() {
     let context = ctx("client-1", "conn-1");
     for scope in [
         SubscriptionScope::Projects,
-        SubscriptionScope::TaskNavigation { project_id: None },
+        SubscriptionScope::TaskNavigation {
+            section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
+            project_ids: None,
+        },
         SubscriptionScope::Task {
             task_id: TaskId::from("task-1"),
         },
@@ -188,7 +192,10 @@ fn navigation_change_is_delivered_only_to_navigation_scope() {
     stream
         .subscribe(
             &ctx("client-1", "conn-1"),
-            SubscriptionScope::TaskNavigation { project_id: None },
+            SubscriptionScope::TaskNavigation {
+                section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
+                project_ids: None,
+            },
             &snapshots(),
             AppServerTime(1),
         )
@@ -196,10 +203,8 @@ fn navigation_change_is_delivered_only_to_navigation_scope() {
 
     let publish = stream.publish_committed(
         state_root_scope(),
-        AppServerEventPayload::TaskNavigationChanged {
-            change: TaskNavigationChange::Remove {
-                task_id: TaskId::from("task-1"),
-            },
+        AppServerEventPayload::RefreshStateChanged {
+            refresh: openaide_app_server_protocol::snapshot::TaskNavigationRefreshState::Refreshing,
         },
         |client_id| Some(delivery(client_id)),
         AppServerTime(2),

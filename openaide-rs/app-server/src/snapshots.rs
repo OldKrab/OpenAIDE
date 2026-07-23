@@ -7,10 +7,10 @@ use openaide_app_server_protocol::snapshot::{
     AgentCollectionSnapshot, ChatSnapshot, ClientSnapshot, ClientSnapshotScope,
     LiveSessionDataState, NewTaskDefaultsSnapshot, ProjectCollectionSnapshot, ProtocolVersion,
     ServerCapabilities, ServerSnapshot, StateRootSnapshot, TaskAgentCommandsSnapshot,
-    TaskAgentConfigSnapshot, TaskLifecycle, TaskListSnapshot as ProtocolTaskListSnapshot,
-    TaskNavigationSnapshot, TaskPreparationAction, TaskPreparationSnapshot, TaskSendBlocker,
-    TaskSendBlockerKind, TaskSendCapabilitySnapshot, TaskSendCapabilityState, TaskSetupBlocker,
-    TaskSetupBlockerKind, TaskSnapshot, TaskStatus, TaskSummary,
+    TaskAgentConfigSnapshot, TaskLifecycle, TaskNavigationSnapshot, TaskPreparationAction,
+    TaskPreparationSnapshot, TaskSendBlocker, TaskSendBlockerKind, TaskSendCapabilitySnapshot,
+    TaskSendCapabilityState, TaskSetupBlocker, TaskSetupBlockerKind, TaskSnapshot, TaskStatus,
+    TaskSummary,
 };
 use openaide_app_server_protocol::state::{SubscriptionScope, SubscriptionSnapshot};
 
@@ -202,7 +202,9 @@ impl SnapshotBuilder {
             new_task_defaults: self.new_task_defaults.snapshot()?,
             projects: Some(self.projects.snapshot()?),
             agents: Some(self.agents.snapshot()?),
-            tasks: Some(self.task_navigation.snapshot(None)?),
+            // Navigation has an independently ordered subscription stream.
+            // Initialization must not create a second baseline or cache.
+            tasks: None,
             active_task,
             settings: Some(self.settings.snapshot(None)?),
             pending_requests: Vec::new(),
@@ -215,8 +217,12 @@ impl SnapshotBuilder {
         self.projects.snapshot()
     }
 
-    pub(crate) fn task_navigation_snapshot(&self) -> Result<TaskNavigationSnapshot, ProtocolError> {
-        self.task_navigation.snapshot(None)
+    pub(crate) fn task_navigation_snapshot(
+        &self,
+        section: openaide_app_server_protocol::task::TaskNavigationSection,
+        project_ids: Option<&[ProjectId]>,
+    ) -> Result<TaskNavigationSnapshot, ProtocolError> {
+        self.task_navigation.snapshot(section, project_ids)
     }
 }
 
@@ -240,26 +246,14 @@ impl SnapshotProvider for SnapshotBuilder {
                     _ => None,
                 })?,
             },
-            SubscriptionScope::TaskNavigation { project_id } => {
-                SubscriptionSnapshot::TaskNavigation {
-                    navigation: self.task_navigation.snapshot(project_id.as_ref())?,
-                }
-            }
-            SubscriptionScope::TaskList {
-                lifecycle,
-                project_id,
-            } => {
-                let snapshot = self
-                    .task_snapshots
-                    .list(*lifecycle, project_id.as_ref(), None)?;
-                SubscriptionSnapshot::TaskList {
-                    task_list: ProtocolTaskListSnapshot {
-                        lifecycle: *lifecycle,
-                        tasks: snapshot.tasks,
-                        revision: snapshot.revision,
-                    },
-                }
-            }
+            SubscriptionScope::TaskNavigation {
+                section,
+                project_ids,
+            } => SubscriptionSnapshot::TaskNavigation {
+                navigation: self
+                    .task_navigation
+                    .snapshot(*section, project_ids.as_deref())?,
+            },
             SubscriptionScope::Task { task_id } => SubscriptionSnapshot::Task {
                 task: self
                     .task_snapshots
@@ -339,12 +333,13 @@ struct EmptyTaskNavigation;
 impl TaskNavigationSnapshotSource for EmptyTaskNavigation {
     fn snapshot(
         &self,
-        _project_id: Option<&ProjectId>,
+        section: openaide_app_server_protocol::task::TaskNavigationSection,
+        _project_ids: Option<&[ProjectId]>,
     ) -> Result<TaskNavigationSnapshot, ProtocolError> {
         Ok(TaskNavigationSnapshot {
-            entries: Vec::new(),
-            active_task_id: None,
-            refreshing: false,
+            section,
+            groups: Vec::new(),
+            refresh: openaide_app_server_protocol::snapshot::TaskNavigationRefreshState::Idle,
         })
     }
 }

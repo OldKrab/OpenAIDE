@@ -75,7 +75,7 @@ describe("AppSurfaces callback wiring", () => {
     );
   });
 
-  it("keeps VS Code Task Navigation flat inside its current Project Context", () => {
+  it("groups VS Code Task Navigation even for one Project", () => {
     const controller = controllerFor("navigation");
     controller.bootstrap = {
       surface: "navigation",
@@ -94,7 +94,7 @@ describe("AppSurfaces callback wiring", () => {
 
     expect(surfaceMocks.sidebar).toHaveBeenCalledWith(
       expect.objectContaining({
-        groupByProject: false,
+        groupByProject: true,
         maxTasksPerProject: 15,
         projects: controller.state.projects,
       }),

@@ -785,6 +785,52 @@ describe("app controller mounted lifecycle", () => {
     expect(latestController?.state.tasks).toEqual([]);
   });
 
+  it("subscribes to Archive only while Archive is open", async () => {
+    const request = vi.fn(async (
+      method: string,
+      params?: { scope?: { kind: string; section?: "tasks" | "archive" } },
+    ) => {
+      if (method === STATE_SUBSCRIBE) return nonTaskSubscriptionSnapshot(params?.scope);
+      if (method === STATE_UNSUBSCRIBE) return { scope: params?.scope };
+      throw new Error(method);
+    });
+    backendConnection = {
+      initialize: vi.fn(async () => ({
+        snapshot: clientSnapshot({ includeTasks: false, includeActiveTask: false }),
+      })),
+      request: request as unknown as BackendConnection["request"],
+      handleNotification: defaultHandleNotification,
+      close: vi.fn(),
+    };
+
+    await act(async () => {
+      create(<ControllerProbe />);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    const subscribedSections = () => request.mock.calls
+      .filter(([method]) => method === STATE_SUBSCRIBE)
+      .map(([, params]) => params?.scope?.section);
+    expect(subscribedSections()).toContain("tasks");
+    expect(subscribedSections()).not.toContain("archive");
+
+    await act(async () => {
+      latestController?.callbacks.navigation.toggleArchived();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(subscribedSections()).toContain("archive");
+
+    await act(async () => {
+      latestController?.callbacks.navigation.toggleArchived();
+      await Promise.resolve();
+    });
+    expect(request).toHaveBeenCalledWith(STATE_UNSUBSCRIBE, {
+      scope: expect.objectContaining({ kind: "taskNavigation", section: "archive" }),
+    });
+  });
+
   it("does not issue a one-shot task-list request that can fail during startup", async () => {
     const request = vi.fn(async () => {
       throw new Error("Backend unavailable");
@@ -1208,7 +1254,10 @@ describe("app controller mounted lifecycle", () => {
       scope: { kind: "task"; taskId: never };
       snapshot: { kind: "task"; task: typeof readyTask };
     }>();
-    const request = vi.fn(async (method: string, params?: { scope?: { kind: string; taskId?: string } }) => {
+    const request = vi.fn(async (
+      method: string,
+      params?: { scope?: { kind: string; taskId?: string; section?: "tasks" | "archive" } },
+    ) => {
       if (method === AGENT_LIST_SESSIONS) {
         return { agentId: "codex", projectLabel: "OpenAIDE", sessions: [], nextCursor: null };
       }
@@ -1243,7 +1292,14 @@ describe("app controller mounted lifecycle", () => {
           return {
             cursor: "cursor_navigation",
             scope,
-            snapshot: { kind: "taskNavigation", navigation: { entries: [], activeTaskId: null } },
+            snapshot: {
+              kind: "taskNavigation",
+              navigation: {
+                section: scope.section ?? "tasks",
+                groups: [],
+                refresh: { state: "idle" },
+              },
+            },
           };
         }
         if (scope?.kind === "task" && scope.taskId === "task_new") {
@@ -3042,8 +3098,14 @@ function clientSnapshot(
       runtime: options.runtimeSettings ?? null,
     },
     tasks: includeTasks ? {
-      activeTaskId: "task_1" as never,
-      entries: [{ kind: "task", task: protocolTaskSummary("task_1", options.activeTaskTitle ?? "Task", options.activeTaskStatus) }],
+      section: "tasks" as const,
+      refresh: { state: "idle" as const },
+      groups: [{
+        projectId: "project_1" as never,
+        projectLabel: "Project",
+        taskCount: 1,
+        entries: [{ kind: "task" as const, task: protocolTaskSummary("task_1", options.activeTaskTitle ?? "Task", options.activeTaskStatus) }],
+      }],
     } : null,
     activeTask: includeActiveTask
       ? protocolTaskSnapshot("task_1", options.activeTaskTitle ?? "Task", options.activeTaskStatus)
@@ -3128,7 +3190,7 @@ function taskSubscriptionSnapshot(
 }
 
 function nonTaskSubscriptionSnapshot(
-  scope: { kind: string; taskId?: string; lifecycle?: "open" | "archived" } | undefined,
+  scope: { kind: string; taskId?: string; section?: "tasks" | "archive" } | undefined,
   cursor = "cursor_navigation",
 ) {
   if (scope?.kind === "projects") {
@@ -3159,17 +3221,11 @@ function nonTaskSubscriptionSnapshot(
       scope,
       snapshot: {
         kind: "taskNavigation" as const,
-        navigation: { activeTaskId: "task_1" as never, entries: [] },
-      },
-    };
-  }
-  if (scope?.kind === "taskList" && scope.lifecycle) {
-    return {
-      cursor: cursor as never,
-      scope,
-      snapshot: {
-        kind: "taskList" as const,
-        taskList: { lifecycle: scope.lifecycle, tasks: [], revision: 0 },
+        navigation: {
+          section: scope.section ?? "tasks",
+          groups: [],
+          refresh: { state: "idle" as const },
+        },
       },
     };
   }

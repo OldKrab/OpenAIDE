@@ -4,10 +4,10 @@ use ts_rs::TS;
 use crate::client::SettingsSection;
 use crate::ids::{EventCursor, ProjectId, TaskId, WorktreeRepositoryId};
 use crate::snapshot::{
-    AgentCollectionSnapshot, ProjectCollectionSnapshot, SettingsSnapshot, TaskListSnapshot,
-    TaskNavigationSnapshot, TaskSnapshot,
+    AgentCollectionSnapshot, ProjectCollectionSnapshot, SettingsSnapshot, TaskNavigationSnapshot,
+    TaskSnapshot,
 };
-use crate::task::TaskListLifecycle;
+use crate::task::TaskNavigationSection;
 use crate::task::ToolDetailSnapshot;
 use crate::worktree::WorktreeRepositorySnapshot;
 
@@ -51,13 +51,10 @@ pub enum SubscriptionScope {
         section: Option<SettingsSection>,
     },
     TaskNavigation {
+        #[serde(default)]
+        section: TaskNavigationSection,
         #[serde(default, skip_serializing_if = "Option::is_none")]
-        project_id: Option<ProjectId>,
-    },
-    TaskList {
-        lifecycle: TaskListLifecycle,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        project_id: Option<ProjectId>,
+        project_ids: Option<Vec<ProjectId>>,
     },
     Task {
         task_id: TaskId,
@@ -92,9 +89,6 @@ pub enum SubscriptionSnapshot {
     },
     TaskNavigation {
         navigation: TaskNavigationSnapshot,
-    },
-    TaskList {
-        task_list: TaskListSnapshot,
     },
     Task {
         task: TaskSnapshot,

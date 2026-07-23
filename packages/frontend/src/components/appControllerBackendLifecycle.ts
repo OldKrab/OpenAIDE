@@ -225,7 +225,6 @@ export function useAppControllerBackendLifecycle({
       }
 
       const ingestion = actionsFromInitialSnapshot(recoveredSnapshot, {
-        includeTaskNavigation: true,
         includeActiveTask: initialBootstrap.surface === "task" && Boolean(initialBootstrap.taskId),
         retainedNewTaskContext: retainedNewTaskContextForInitialization(
           recoveredSnapshot,
@@ -277,7 +276,6 @@ export function useAppControllerBackendLifecycle({
       const archived = initialBootstrap.archived === true;
       dispatch({ type: "archive:set", showArchived: archived });
     }
-    const startupOperation = operationOwner.claim("startup");
     postControllerStarted(postHostMessage, initialBootstrap);
     const stopSession = startHostMessageSession(subscribeHostMessages, (message) => {
       if (serverRequestBridge?.handleHostMessage(message)) return;
@@ -300,10 +298,7 @@ export function useAppControllerBackendLifecycle({
             const initializedReplicaEpoch = establishReplica(replicaIdentityFromSnapshot(result.snapshot));
             const initializedDispatch = bindAppServerReplicaEpoch(dispatch, initializedReplicaEpoch);
             initializedDispatch({ type: "appServer:ready" });
-            const canApplyStartupNavigation = initialBootstrap.surface !== "navigation"
-              || (operationOwner.owns(startupOperation) && !operationOwner.currentArchived());
             const ingestion = actionsFromInitialSnapshot(result.snapshot, {
-              includeTaskNavigation: canApplyStartupNavigation,
               includeActiveTask: initialBootstrap.surface === "task",
               retainedNewTaskContext: retainedNewTaskContextForInitialization(
                 result.snapshot,
@@ -355,14 +350,6 @@ export function useAppControllerBackendLifecycle({
                   onBaselineReady: () => markSubscriptionReady("task-navigation"),
                   scope: taskNavigationScopeForBootstrap(initialBootstrap),
                 }));
-                for (const lifecycle of ["open", "archived"] as const) {
-                  stopSubscriptions.push(startAppServerStateSubscription({
-                    backendConnection: subscriptionConnection,
-                    context: subscriptionContext,
-                    dispatch: dispatchForCurrentReplica,
-                    scope: { kind: "taskList", lifecycle },
-                  }));
-                }
               }
               for (const project of result.snapshot.projects?.projects ?? []) {
                 if (!project.worktreeRepositoryId) continue;
@@ -469,6 +456,37 @@ export function useAppControllerBackendLifecycle({
       backendConnection?.close();
     };
   }, [backendConnection, initialBootstrap.surface, initialBootstrap.taskId]);
+
+  useEffect(() => {
+    if (
+      !backendConnection
+      || !backendInitializationReady
+      || !state.showArchived
+      || !shouldLoadTaskNavigation(initialBootstrap)
+    ) {
+      return;
+    }
+    const context = stateSubscriptionContext.current;
+    if (!context) return;
+    return startAppServerStateSubscription({
+      backendConnection: { subscribeState: backendConnection.subscribeState },
+      context,
+      dispatch: dispatchForCurrentReplica,
+      onBaselineError: (error) => {
+        dispatchForCurrentReplica({
+          type: "tasks:error",
+          message: error instanceof Error ? error.message : "Unable to load archived tasks.",
+        });
+      },
+      scope: taskNavigationScopeForBootstrap(initialBootstrap, "archive"),
+    });
+  }, [
+    backendConnection,
+    backendInitializationReady,
+    dispatchForCurrentReplica,
+    initialBootstrap,
+    state.showArchived,
+  ]);
 
   useNewTaskSubscription({
     backendConnection,

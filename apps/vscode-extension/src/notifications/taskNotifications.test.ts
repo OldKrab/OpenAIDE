@@ -12,6 +12,10 @@ vi.mock("vscode", () => ({
   },
 }));
 
+vi.mock("../workspace/roots", () => ({
+  workspaceRoots: () => [{ projectId: "project-1" }],
+}));
+
 describe("VS Code Task notification registration", () => {
   it("subscribes once at extension-host scope and routes the notification action", async () => {
     let observer: AppServerStateObserver | undefined;
@@ -47,7 +51,11 @@ describe("VS Code Task notification registration", () => {
       logger,
     );
     expect(runtime.subscribeAppServerState).toHaveBeenCalledWith(
-      { kind: "taskNavigation" },
+      {
+        kind: "taskNavigation",
+        section: "tasks",
+        projectIds: ["project-1"],
+      },
       expect.any(Object),
     );
 
@@ -82,9 +90,14 @@ function navigationSnapshot(
   return {
     kind: "taskNavigation",
     navigation: {
-      entries: tasks.map((task) => ({ kind: "task" as const, task })),
-      activeTaskId: null,
-      refreshing: false,
+      section: "tasks",
+      groups: [{
+        projectId: "project-1" as import("@openaide/app-server-client").ProjectId,
+        projectLabel: "Project",
+        taskCount: tasks.length,
+        entries: tasks.map((task) => ({ kind: "task" as const, task })),
+      }],
+      refresh: { state: "idle" },
     },
   };
 }

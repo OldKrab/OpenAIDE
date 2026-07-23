@@ -1358,7 +1358,10 @@ describe("Sidebar", () => {
         groupByProject={true}
         maxTasksPerProject={15}
         nativeSessionProjectId="project_1"
-        nativeSessions={nativeSessions({ items: sessions, nextCursor: "cursor_2" })}
+        nativeSessions={nativeSessions({
+          items: sessions,
+          hasMoreProjectIds: ["project_1"],
+        })}
         onLoadNativeSessions={onLoadNativeSessions}
         projects={[{ projectId: "project_1", label: "OpenAIDE" }]}
         showArchived={false}

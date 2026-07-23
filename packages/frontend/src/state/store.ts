@@ -29,6 +29,7 @@ export type PendingComposerSend = {
 
 export type NativeSessionsState = {
   items: AgentListedSession[];
+  hasMoreProjectIds?: string[];
   loading: boolean;
   loaded: boolean;
   nextCursor?: string;

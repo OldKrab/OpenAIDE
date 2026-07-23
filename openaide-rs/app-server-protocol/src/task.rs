@@ -349,6 +349,15 @@ pub enum TaskListLifecycle {
     Archived,
 }
 
+/// Selects the primary Task navigation or its secondary read-only Archive.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum TaskNavigationSection {
+    #[default]
+    Tasks,
+    Archive,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskListResult {

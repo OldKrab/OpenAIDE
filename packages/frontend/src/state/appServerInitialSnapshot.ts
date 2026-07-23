@@ -1,7 +1,6 @@
 import type { ClientSnapshot } from "@openaide/app-server-client";
 import type { AppAction } from "./appReducer";
 import {
-  mapProtocolTaskNavigation,
   mapProtocolTaskSnapshot,
   type ProtocolMappingWarning,
 } from "./appServerProtocolMapping";
@@ -20,7 +19,6 @@ export type InitialSnapshotIngestion = {
 };
 
 export type InitialSnapshotIngestionOptions = {
-  includeTaskNavigation?: boolean;
   includeActiveTask?: boolean;
   retainedNewTaskContext?: NewTaskContextIds;
 };
@@ -29,7 +27,6 @@ export function actionsFromInitialSnapshot(
   snapshot: ClientSnapshot,
   options: InitialSnapshotIngestionOptions = {},
 ): InitialSnapshotIngestion {
-  const includeTaskNavigation = options.includeTaskNavigation ?? true;
   const includeActiveTask = options.includeActiveTask ?? true;
   const context = {
     agents: snapshot.agents?.agents,
@@ -94,20 +91,6 @@ export function actionsFromInitialSnapshot(
       type: "settings:preferences",
       preferences: mapProtocolAppPreferences(snapshot.settings.preferences),
     });
-  }
-
-  if (includeTaskNavigation && snapshot.tasks) {
-    const mapped = mapProtocolTaskNavigation(snapshot.tasks, context);
-    actions.push({
-      type: "taskNavigation",
-      archived: false,
-      tasks: mapped.tasks,
-      sessions: mapped.sessions,
-      refreshing: mapped.refreshing,
-    });
-    if (mapped.activeTaskId) actions.push({ type: "selection:set", taskId: mapped.activeTaskId });
-    warnings.push(...mapped.warnings);
-    requiresNativeSurface ||= mapped.requiresNativeSurface;
   }
 
   if (includeActiveTask && snapshot.activeTask) {

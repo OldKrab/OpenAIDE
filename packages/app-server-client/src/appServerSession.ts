@@ -310,9 +310,7 @@ function scopeKey(scope: SubscriptionScope) {
     case "settings":
       return `settings:${scope.section ?? ""}`;
     case "taskNavigation":
-      return `taskNavigation:${scope.projectId ?? ""}`;
-    case "taskList":
-      return `taskList:${scope.lifecycle}:${scope.projectId ?? ""}`;
+      return `taskNavigation:${scope.section}:${scope.projectIds?.join(",") ?? "*"}`;
     case "task":
       return `task:${scope.taskId}`;
     case "toolDetail":

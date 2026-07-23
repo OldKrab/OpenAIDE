@@ -210,7 +210,7 @@ export const Sidebar = memo(function Sidebar({
                 nativeSessionAgentName={nativeSessionAgentName}
                 nativeSessions={group.nativeSessions}
                 nativeSessionsAdoptingSessionId={nativeSessions.adoptingSessionId}
-                nativeSessionsHaveMore={nativeSessions.nextCursor !== undefined && nativeSessionProjectId === group.key}
+                nativeSessionsHaveMore={nativeSessions.hasMoreProjectIds?.includes(group.key) === true}
                 canManageWorktrees={Boolean(projects.find((project) => project.projectId === group.key)?.worktreeRepositoryId)}
                 onArchiveTask={onArchiveTask}
                 onLoadMore={(visibleIncrement) =>

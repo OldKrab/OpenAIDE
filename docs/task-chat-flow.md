@@ -46,7 +46,7 @@ A Task Workspace is either the selected Project root or one durable worktree ide
 
 ## Task Navigation And Native Session Discovery
 
-The global Task Navigation subscription is one flat, activity-sorted projection of visible durable Tasks and persisted unadopted Native Sessions. A Native Session has no Task id until `session/load` succeeds. Selecting one first opens a pre-Task route identified by Agent id and Native Session id (`/session/{agentId}/{sessionId}` in the Web App). Successful load replaces that route with `/task/{taskId}`; definitive not-found leaves the opening route visible with **This session no longer exists.** while removing the stale Navigation row. One Agent Native Session can bind to only one Task, and that binding never changes; concurrent adoption attempts converge on that Task.
+Task Navigation is an App Server-owned, Project-grouped projection. Its primary `tasks` section contains visible Open Tasks and persisted unadopted Native Sessions; its secondary `archive` section contains Archived Tasks only. Every App Shell renders the Project groups, including a single-Project VS Code workspace. A Native Session has no Task id until `session/load` succeeds. Selecting one first opens a pre-Task route identified by Agent id and Native Session id (`/session/{agentId}/{sessionId}` in the Web App). Successful load replaces that route with `/task/{taskId}`; definitive not-found leaves the opening route visible with **This session no longer exists.** while removing the stale Navigation row. One Agent Native Session can bind to only one Task, and that binding never changes; concurrent adoption attempts converge on that Task.
 
 App Server persists successful `session/list` observations and returns them in the immediate subscription baseline after restart. It never deletes a cached row merely because a partial or failed listing omitted it. A definitive not-found response from `session/load` removes the stale Native Session while its opening surface reports that it no longer exists.
 
@@ -58,7 +58,9 @@ Frontend may retain more rows than it renders. Initial per-Project presentation 
 
 A durable Task has exactly one product lifecycle: `prepared`, `open`, or `archived`. Runtime status such as active, waiting, failed, or completed is separate. Prepared Tasks belong to neither user-facing collection. Open and Archived are disjoint authoritative collections; a Task can never appear in both.
 
-Clients subscribe to `taskList` twice, once for `open` and once for `archived`, and retain both live baselines. `task/list` uses the same explicit lifecycle selector for bounded reads. Task snapshots own Task content only: opening a Task or receiving a late Task snapshot may update a row already present in a collection, but cannot insert, remove, or reclassify collection membership. Only a collection baseline or `taskLifecycleChanged` event can move a row.
+Clients subscribe to the `tasks` Task Navigation section while Navigation is mounted and subscribe to `archive` only while Archive is open. Each scope returns Project groups and its own ordered baseline. `task/list` remains an explicit-lifecycle, one-shot query for non-navigation workflows.
+
+Navigation uses four event kinds. `taskUpdated` replaces row-visible fields only for a Task already present. `projectEntriesReplaced` replaces one Project's authoritative membership, order, count, and pagination window in one section. `refreshStateChanged` changes Native Session discovery state without resending rows. `navigationReplaced` replaces a whole section after project/agent projection changes or recovery. Missing-row `taskUpdated` events never insert a Task. Task snapshots own Task content only and cannot insert, remove, resurrect, or reclassify Navigation rows.
 
 `task/archive` changes an idle Open Task to Archived. A Task with active Agent work or a pending request must be stopped or resolved first. Archiving clears process-local Agent catalogs and controls. `task/restore` changes an Archived Task to Open but does not load or resume its Native Session.
 
@@ -213,7 +215,7 @@ The durable first-Send transaction:
 3. durably appends the User message and sets Task state to `starting`;
 4. changes New Task lifecycle from leased Prepared Task to visible, consuming the lease;
 5. updates state-root last-used Project and Agent defaults;
-6. publishes the visible Task into Task Navigation and normal Task subscriptions;
+6. publishes the visible Task through its Project's Task Navigation replacement event;
 7. releases the command lock;
 8. returns the authoritative Task snapshot containing the accepted User message.
 

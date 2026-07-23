@@ -82,7 +82,7 @@ describe("startAppServerStateSubscription", () => {
       backendConnection: navigation.connection,
       context,
       dispatch,
-      scope: { kind: "taskNavigation" },
+      scope: { kind: "taskNavigation", section: "tasks" },
     });
     startAppServerStateSubscription({
       backendConnection: projects.connection,
@@ -93,7 +93,10 @@ describe("startAppServerStateSubscription", () => {
 
     navigation.observer().onSnapshot({
       kind: "taskNavigation",
-      navigation: { entries: [{ kind: "task", task: {
+      navigation: {
+        section: "tasks",
+        refresh: { state: "idle" },
+        groups: [{ projectId: "project_1", projectLabel: "OpenAIDE", taskCount: 1, entries: [{ kind: "task", task: {
         taskId: "task_1",
         projectId: "project_1",
         agentId: "codex",
@@ -103,7 +106,8 @@ describe("startAppServerStateSubscription", () => {
         lastActivity: "2026-07-18T00:00:00.000Z",
         unread: false,
         hasMessages: true,
-      } }] },
+        } }] }],
+      },
     } as never);
     projects.observer().onSnapshot({
       kind: "projects",
@@ -113,6 +117,8 @@ describe("startAppServerStateSubscription", () => {
     expect(dispatch).toHaveBeenLastCalledWith({
       type: "taskNavigation",
       archived: false,
+      hasMoreProjectIds: [],
+      refreshError: undefined,
       refreshing: false,
       sessions: [],
       tasks: [expect.objectContaining({
@@ -134,14 +140,19 @@ describe("startAppServerStateSubscription", () => {
         projects: [{ projectId: "project_1", label: "OpenAIDE", workspaceRoot: "/workspace/OpenAIDE" }] as never,
       },
       dispatch,
-      scope: { kind: "taskNavigation" },
+      scope: { kind: "taskNavigation", section: "tasks" },
     });
 
     navigation.observer().onSnapshot({
       kind: "taskNavigation",
       navigation: {
-        refreshing: true,
-        entries: [{
+        section: "tasks",
+        refresh: { state: "refreshing" },
+        groups: [{
+          projectId: "project_1",
+          projectLabel: "OpenAIDE",
+          taskCount: 0,
+          entries: [{
           kind: "nativeSession",
           session: {
             reference: { agentId: "codex", sessionId: "session_1" },
@@ -150,6 +161,7 @@ describe("startAppServerStateSubscription", () => {
             title: "Persisted session",
             lastActivity: "2026-07-21T00:00:00Z",
           },
+          }],
         }],
       },
     } as never);
@@ -157,6 +169,8 @@ describe("startAppServerStateSubscription", () => {
     expect(dispatch).toHaveBeenLastCalledWith({
       type: "taskNavigation",
       archived: false,
+      hasMoreProjectIds: [],
+      refreshError: undefined,
       refreshing: true,
       sessions: [{
         agent_id: "codex",

@@ -2,9 +2,11 @@ import * as vscode from "vscode";
 import type {
   AppServerStateObserver,
   BackendUnsubscribe,
+  ProjectId,
   SubscriptionScope,
 } from "@openaide/app-server-client";
 import { createTaskNotificationManager } from "./taskNotificationManager";
+import { workspaceRoots } from "../workspace/roots";
 
 const HANDLED_EVENTS_KEY = "openaide.taskNotifications.handled";
 
@@ -64,11 +66,15 @@ export async function registerTaskNotifications(
   let stop: BackendUnsubscribe;
   try {
     stop = await runtime.subscribeAppServerState(
-      { kind: "taskNavigation" },
+      {
+        kind: "taskNavigation",
+        section: "tasks",
+        projectIds: workspaceRoots().map((root) => root.projectId as ProjectId),
+      },
       {
         onSnapshot(snapshot) {
           if (snapshot.kind !== "taskNavigation") return;
-          manager.reconcile(snapshot.navigation.entries.flatMap((entry) => (
+          manager.reconcile(snapshot.navigation.groups.flatMap((group) => group.entries).flatMap((entry) => (
             entry.kind === "task" ? [entry.task] : []
           )));
         },

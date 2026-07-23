@@ -1,7 +1,4 @@
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc, Mutex,
-};
+use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 
@@ -52,7 +49,8 @@ pub(crate) struct NativeSessionCatalogEntry {
 pub(crate) struct NativeSessionCatalog {
     store: Store,
     state: Arc<Mutex<StoredNativeSessionCatalog>>,
-    refreshing: Arc<AtomicBool>,
+    refresh_state: Arc<Mutex<openaide_app_server_protocol::snapshot::TaskNavigationRefreshState>>,
+    projects_with_more: Arc<Mutex<std::collections::HashSet<String>>>,
 }
 
 impl NativeSessionCatalog {
@@ -67,7 +65,10 @@ impl NativeSessionCatalog {
         Ok(Self {
             store,
             state: Arc::new(Mutex::new(state)),
-            refreshing: Arc::new(AtomicBool::new(false)),
+            refresh_state: Arc::new(Mutex::new(
+                openaide_app_server_protocol::snapshot::TaskNavigationRefreshState::Idle,
+            )),
+            projects_with_more: Arc::new(Mutex::new(std::collections::HashSet::new())),
         })
     }
 
@@ -228,11 +229,58 @@ impl NativeSessionCatalog {
     }
 
     pub(crate) fn set_refreshing(&self, refreshing: bool) {
-        self.refreshing.store(refreshing, Ordering::Release);
+        self.set_refresh_state(if refreshing {
+            openaide_app_server_protocol::snapshot::TaskNavigationRefreshState::Refreshing
+        } else {
+            openaide_app_server_protocol::snapshot::TaskNavigationRefreshState::Idle
+        });
     }
 
+    #[cfg(test)]
     pub(crate) fn refreshing(&self) -> bool {
-        self.refreshing.load(Ordering::Acquire)
+        matches!(
+            self.refresh_state(),
+            openaide_app_server_protocol::snapshot::TaskNavigationRefreshState::Refreshing
+        )
+    }
+
+    pub(crate) fn set_refresh_state(
+        &self,
+        state: openaide_app_server_protocol::snapshot::TaskNavigationRefreshState,
+    ) {
+        *self
+            .refresh_state
+            .lock()
+            .expect("native session refresh state poisoned") = state;
+    }
+
+    pub(crate) fn refresh_state(
+        &self,
+    ) -> openaide_app_server_protocol::snapshot::TaskNavigationRefreshState {
+        self.refresh_state
+            .lock()
+            .expect("native session refresh state poisoned")
+            .clone()
+    }
+
+    /// Records whether discovery stopped before exhausting a Project's Agent history.
+    pub(crate) fn set_project_has_more(&self, project_id: &str, has_more: bool) -> bool {
+        let mut projects = self
+            .projects_with_more
+            .lock()
+            .expect("native session pagination state poisoned");
+        if has_more {
+            projects.insert(project_id.to_string())
+        } else {
+            projects.remove(project_id)
+        }
+    }
+
+    pub(crate) fn project_has_more(&self, project_id: &str) -> bool {
+        self.projects_with_more
+            .lock()
+            .expect("native session pagination state poisoned")
+            .contains(project_id)
     }
 }
 

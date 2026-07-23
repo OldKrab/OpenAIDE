@@ -16,11 +16,25 @@ export function datasetBootstrap(): WebviewBootstrap {
     agentId: document.body.dataset.agentId || undefined,
     nativeSessionId: document.body.dataset.nativeSessionId || undefined,
     projectId: document.body.dataset.projectId || undefined,
+    projectIds: projectIds(),
     settingsAgentId: document.body.dataset.settingsAgentId || undefined,
     returnToNewTask: document.body.dataset.returnToNewTask === "true",
     preferences: shellPreferences(),
     appServerConnection: appServerConnection(),
   };
+}
+
+function projectIds(): string[] | undefined {
+  const value = document.body.dataset.projectIds;
+  if (!value) return undefined;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return Array.isArray(parsed) && parsed.every((item) => typeof item === "string")
+      ? parsed
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function focusedTaskId(): string | null | undefined {

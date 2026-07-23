@@ -8,7 +8,6 @@ import {
   type SubscriptionScope,
   type SubscriptionSnapshot,
   type TaskNavigationSnapshot,
-  type TaskListSnapshot,
 } from "@openaide/app-server-client";
 import type { Dispatch } from "react";
 import type { AppAction } from "../state/appReducer";
@@ -26,8 +25,7 @@ type StateSubscriptionConnection = Pick<AppServerSession, "subscribeState">;
 export type StateSubscriptionMappingContext = SubscriptionIngestionContext & {
   agents?: AgentSummary[];
   projects?: ProjectSummary[];
-  taskNavigation?: TaskNavigationSnapshot;
-  taskLists?: Partial<Record<"open" | "archived", TaskListSnapshot>>;
+  taskNavigations?: Partial<Record<"tasks" | "archive", TaskNavigationSnapshot>>;
 };
 
 export function mappingContextFromClientSnapshot(snapshot: ClientSnapshot): StateSubscriptionMappingContext {
@@ -163,18 +161,11 @@ function actionsFromSubscriptionSnapshot(
       }
       return remappedTaskNavigationActions(context);
     case "taskNavigation":
-      context.taskNavigation = snapshot.navigation;
-      return remappedTaskNavigationActions(context);
-    case "taskList":
-      context.taskLists = {
-        ...context.taskLists,
-        [snapshot.taskList.lifecycle]: snapshot.taskList,
+      context.taskNavigations = {
+        ...context.taskNavigations,
+        [snapshot.navigation.section]: snapshot.navigation,
       };
-      return [{
-        type: "tasks",
-        archived: snapshot.taskList.lifecycle === "archived",
-        tasks: snapshot.taskList.tasks.map((task) => mapProtocolTaskSummary(task, snapshot.taskList.revision, context)),
-      }];
+      return remappedTaskNavigationActions(context);
     case "task": {
       const mapped = mapTaskSnapshot(snapshot.task, context);
       return [{ type: "snapshot", snapshot: mapped.snapshot, intent: "refresh" }];
@@ -194,13 +185,26 @@ function actionsFromSubscriptionSnapshot(
 }
 
 function remappedTaskNavigationActions(context: StateSubscriptionMappingContext): AppAction[] {
-  if (!context.taskNavigation) return [];
-  const mapped = mapProtocolTaskNavigation(context.taskNavigation, context);
-  return [{
-    type: "taskNavigation",
-    archived: false,
-    tasks: mapped.tasks,
-    sessions: mapped.sessions,
-    refreshing: mapped.refreshing,
-  }];
+  return (["tasks", "archive"] as const).flatMap((section): AppAction[] => {
+    const navigation = context.taskNavigations?.[section];
+    if (!navigation) return [];
+    const mapped = mapProtocolTaskNavigation(navigation, context);
+    const actions: AppAction[] = [{
+      type: "tasks",
+      archived: section === "archive",
+      tasks: mapped.tasks,
+    }];
+    if (section === "tasks") {
+      actions.push({
+        type: "taskNavigation",
+        archived: false,
+        tasks: mapped.tasks,
+        sessions: mapped.sessions,
+        hasMoreProjectIds: mapped.hasMoreProjectIds,
+        refreshing: mapped.refreshing,
+        refreshError: mapped.refreshError,
+      });
+    }
+    return actions;
+  });
 }

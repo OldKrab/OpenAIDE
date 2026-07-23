@@ -7,7 +7,7 @@ import { RuntimeClient } from "../runtime/rpcClient";
 import { renderWebviewHtml, webviewRoot } from "./html";
 import { handleWebviewMessage } from "./messaging";
 import { VSCODE_SHELL, type TaskFocusSource, type WebviewHost } from "./types";
-import { currentWorkspaceRoot } from "../workspace/roots";
+import { currentWorkspaceRoot, workspaceRoots } from "../workspace/roots";
 
 export class TaskViewProvider implements vscode.WebviewViewProvider, vscode.Disposable {
   static readonly viewType = "openaide.tasks";
@@ -95,6 +95,7 @@ export class TaskViewProvider implements vscode.WebviewViewProvider, vscode.Disp
       shell: VSCODE_SHELL,
       focusedTaskId: this.focusedTaskId ?? null,
       projectId: currentWorkspaceRoot()?.projectId,
+      projectIds: workspaceRoots().map((root) => root.projectId),
     };
   }
 }

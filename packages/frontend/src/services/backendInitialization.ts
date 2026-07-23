@@ -56,13 +56,20 @@ export function clientInstanceIdForBootstrap(bootstrap: WebviewBootstrap): Clien
   return getClientInstanceId();
 }
 
-export function taskNavigationScopeForBootstrap(bootstrap: WebviewBootstrap): SubscriptionScope {
+export function taskNavigationScopeForBootstrap(
+  bootstrap: WebviewBootstrap,
+  section: "tasks" | "archive" = "tasks",
+): SubscriptionScope {
   const fixedProjectId = bootstrap.surface !== "invalid" && bootstrap.shell.navigationMode === "currentProject"
     ? bootstrap.projectId
     : undefined;
-  return fixedProjectId
-    ? { kind: "taskNavigation", projectId: fixedProjectId as ProjectId }
-    : { kind: "taskNavigation" };
+  const fixedProjectIds = bootstrap.surface !== "invalid" && bootstrap.shell.navigationMode === "currentProject"
+    ? bootstrap.projectIds?.map((projectId) => projectId as ProjectId)
+      ?? (fixedProjectId ? [fixedProjectId as ProjectId] : undefined)
+    : undefined;
+  return fixedProjectIds
+    ? { kind: "taskNavigation", section, projectIds: fixedProjectIds }
+    : { kind: "taskNavigation", section };
 }
 
 export function initializeParamsForBootstrap(

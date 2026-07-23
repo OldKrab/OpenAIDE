@@ -1,11 +1,12 @@
-use openaide_app_server_protocol::events::{
-    AppServerEventPayload, EventScope, TaskNavigationChange as ProtocolTaskNavigationChange,
-};
-use openaide_app_server_protocol::ids::TaskId;
+use openaide_app_server_protocol::events::{AppServerEventPayload, EventScope};
+use openaide_app_server_protocol::ids::{ProjectId, TaskId};
+use openaide_app_server_protocol::task::{TaskNavigationSection, TaskNavigationSection::*};
 
 use crate::client_lifecycle::{AppServerTime, ConnectionId};
 use crate::server_requests::ServerRequestDelivery;
-use crate::task_events::{CommittedTaskChange, TaskUpdate, TaskUpdateKind};
+use crate::task_events::{
+    CommittedNavigationChange, CommittedTaskChange, TaskUpdate, TaskUpdateKind,
+};
 
 use super::RpcGateway;
 use crate::protocol_edge::{event_deliveries, GatewayEventDelivery};
@@ -18,7 +19,12 @@ impl RpcGateway {
     ) -> Vec<GatewayEventDelivery> {
         let task_id = TaskId::from(update.task_id.clone());
         let mut events = match &update.kind {
-            TaskUpdateKind::NavigationChanged => self.publish_navigation_replacement(now),
+            TaskUpdateKind::NavigationProjectEntriesChanged { project_id } => {
+                self.publish_project_entries_replaced(project_id, now)
+            }
+            TaskUpdateKind::NavigationRefreshStateChanged { refresh } => {
+                self.publish_refresh_state_changed(refresh.clone(), now)
+            }
             TaskUpdateKind::HistorySync(history_sync) => {
                 self.publish_history_sync(&task_id, history_sync.clone(), now)
             }
@@ -58,18 +64,22 @@ impl RpcGateway {
         &mut self,
         now: AppServerTime,
     ) -> Vec<GatewayEventDelivery> {
-        let Ok(navigation) = self.snapshots.task_navigation_snapshot() else {
-            return Vec::new();
-        };
-        let client_hub = self.client_hub.clone();
-        event_deliveries(self.state_stream.publish_committed(
-            EventScope::StateRoot {
-                state_root_id: self.state_stream.state_root_id().clone(),
-            },
-            AppServerEventPayload::TaskNavigationReplaced { navigation },
-            |client_id| client_hub.delivery_for(client_id),
-            now,
-        ))
+        let mut events = Vec::new();
+        for section in [TaskNavigationSection::Tasks, TaskNavigationSection::Archive] {
+            let Ok(navigation) = self.snapshots.task_navigation_snapshot(section, None) else {
+                continue;
+            };
+            let client_hub = self.client_hub.clone();
+            events.extend(event_deliveries(self.state_stream.publish_committed(
+                EventScope::StateRoot {
+                    state_root_id: self.state_stream.state_root_id().clone(),
+                },
+                AppServerEventPayload::NavigationReplaced { navigation },
+                |client_id| client_hub.delivery_for(client_id),
+                now,
+            )));
+        }
+        events
     }
 
     pub(crate) fn publish_committed_task_update_for_connection(
@@ -147,20 +157,14 @@ impl RpcGateway {
         }
 
         if let Some(navigation) = &change.navigation {
-            events.extend(self.publish_navigation_change(navigation.clone(), now));
-        }
-        if let Some(lifecycle) = &change.lifecycle {
-            let client_hub = self.client_hub.clone();
-            events.extend(event_deliveries(self.state_stream.publish_committed(
-                EventScope::StateRoot {
-                    state_root_id: self.state_stream.state_root_id().clone(),
-                },
-                AppServerEventPayload::TaskLifecycleChanged {
-                    change: lifecycle.clone(),
-                },
-                |client_id| client_hub.delivery_for(client_id),
-                now,
-            )));
+            events.extend(match navigation {
+                CommittedNavigationChange::TaskUpdated(task) => {
+                    self.publish_task_updated(task.clone(), now)
+                }
+                CommittedNavigationChange::ProjectEntriesChanged { project_id } => {
+                    self.publish_project_entries_replaced(project_id, now)
+                }
+            });
         }
         events
     }
@@ -208,9 +212,66 @@ impl RpcGateway {
         ))
     }
 
-    fn publish_navigation_change(
+    fn publish_task_updated(
         &mut self,
-        change: ProtocolTaskNavigationChange,
+        task: Box<openaide_app_server_protocol::snapshot::TaskSummary>,
+        now: AppServerTime,
+    ) -> Vec<GatewayEventDelivery> {
+        let payload = AppServerEventPayload::TaskUpdated {
+            project_id: task.project_id.clone(),
+            task,
+        };
+        let client_hub = self.client_hub.clone();
+        event_deliveries(self.state_stream.publish_committed(
+            EventScope::StateRoot {
+                state_root_id: self.state_stream.state_root_id().clone(),
+            },
+            payload,
+            |client_id| client_hub.delivery_for(client_id),
+            now,
+        ))
+    }
+
+    fn publish_project_entries_replaced(
+        &mut self,
+        project_id: &ProjectId,
+        now: AppServerTime,
+    ) -> Vec<GatewayEventDelivery> {
+        let mut events = Vec::new();
+        for section in [Tasks, Archive] {
+            let selected = [project_id.clone()];
+            let Ok(snapshot) = self
+                .snapshots
+                .task_navigation_snapshot(section, Some(&selected))
+            else {
+                continue;
+            };
+            let group = snapshot.groups.into_iter().next();
+            let (task_count, entries, has_more) = group
+                .map(|group| (group.task_count, group.entries, group.has_more))
+                .unwrap_or((0, Vec::new(), false));
+            let client_hub = self.client_hub.clone();
+            events.extend(event_deliveries(self.state_stream.publish_committed(
+                EventScope::StateRoot {
+                    state_root_id: self.state_stream.state_root_id().clone(),
+                },
+                AppServerEventPayload::ProjectEntriesReplaced {
+                    section,
+                    project_id: project_id.clone(),
+                    task_count,
+                    entries,
+                    has_more,
+                },
+                |client_id| client_hub.delivery_for(client_id),
+                now,
+            )));
+        }
+        events
+    }
+
+    fn publish_refresh_state_changed(
+        &mut self,
+        refresh: openaide_app_server_protocol::snapshot::TaskNavigationRefreshState,
         now: AppServerTime,
     ) -> Vec<GatewayEventDelivery> {
         let client_hub = self.client_hub.clone();
@@ -218,7 +279,7 @@ impl RpcGateway {
             EventScope::StateRoot {
                 state_root_id: self.state_stream.state_root_id().clone(),
             },
-            AppServerEventPayload::TaskNavigationChanged { change },
+            AppServerEventPayload::RefreshStateChanged { refresh },
             |client_id| client_hub.delivery_for(client_id),
             now,
         ))
@@ -238,6 +299,9 @@ impl RpcGateway {
             |client_id| client_hub.delivery_for(client_id),
             now,
         );
-        Some(event_deliveries(outcome))
+        let mut events = event_deliveries(outcome);
+        // Project membership and labels are part of both Navigation sections.
+        events.extend(self.publish_navigation_replacement(now));
+        Some(events)
     }
 }

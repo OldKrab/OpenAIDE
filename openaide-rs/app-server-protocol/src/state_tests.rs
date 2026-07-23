@@ -17,16 +17,35 @@ fn task_subscription_scope_uses_typed_kind_and_task_id() {
 
 #[test]
 fn task_navigation_scope_can_be_global_or_project_filtered() {
-    let global =
-        serde_json::to_value(SubscriptionScope::TaskNavigation { project_id: None }).unwrap();
+    let global = serde_json::to_value(SubscriptionScope::TaskNavigation {
+        section: crate::task::TaskNavigationSection::Tasks,
+        project_ids: None,
+    })
+    .unwrap();
     let project = serde_json::to_value(SubscriptionScope::TaskNavigation {
-        project_id: Some("project-1".into()),
+        section: crate::task::TaskNavigationSection::Tasks,
+        project_ids: Some(vec!["project-1".into()]),
     })
     .unwrap();
 
     assert_eq!(global["kind"], json!("taskNavigation"));
-    assert!(global.get("projectId").is_none());
-    assert_eq!(project["projectId"], json!("project-1"));
+    assert_eq!(global["section"], json!("tasks"));
+    assert!(global.get("projectIds").is_none());
+    assert_eq!(project["projectIds"], json!(["project-1"]));
+}
+
+#[test]
+fn task_navigation_scope_selects_section_and_multiple_projects() {
+    let scope: SubscriptionScope = serde_json::from_value(json!({
+        "kind": "taskNavigation",
+        "section": "archive",
+        "projectIds": ["project-api", "project-web"]
+    }))
+    .unwrap();
+
+    let encoded = serde_json::to_value(scope).unwrap();
+    assert_eq!(encoded["section"], json!("archive"));
+    assert_eq!(encoded["projectIds"], json!(["project-api", "project-web"]));
 }
 
 #[test]

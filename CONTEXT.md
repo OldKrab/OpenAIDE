@@ -243,9 +243,9 @@ _Avoid_: Treating every unread update or status change as an alert
 - A Project folder below a repository root does not receive worktree creation, selection, or management support; it retains **Project root** as its only Task Workspace.
 - A **Task** is created only after the user selects the required start context.
 - Web App and Desktop App can show task history across Project Contexts.
-- VS Code Extension defaults Task Navigation to the current Project Context.
+- VS Code Extension shows Task Navigation for all Project Contexts in its workspace.
 - Web App and Desktop App use **Project Navigation** as their primary navigation.
-- VS Code Extension uses **Task Navigation** within the current Project Context.
+- VS Code Extension groups **Task Navigation** by Project Context, even for a single-Project workspace.
 - A **Task** opens one **Chat** backed by its **Native Session**.
 - **Task Navigation** opens **Task Pages**.
 - **Settings** contains Agents, MCP Servers, Skills, and Common Settings.
