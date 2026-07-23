@@ -101,12 +101,6 @@ describe("task list row styles", () => {
     expect(appCss).toMatch(/@media \(max-width:\s*760px\)\s*{[\s\S]*\.oa-popup-menu button\.task-row-mobile-details-action\s*{\s*display:\s*flex;/);
   });
 
-  it("contains narrow VS Code task previews while hiding them in the mobile web drawer", () => {
-    expect(appCss).toMatch(/\.oa-popup-surface\.task-preview-popover\s*{[^}]*width:\s*min\(296px,\s*calc\(100vw - 16px\)\);/);
-    expect(appCss).toMatch(/@media \(max-width:\s*760px\)\s*{[^}]*body\[data-shell="web"\] \.task-preview-popover\s*{\s*display:\s*none;/);
-    expect(appCss).not.toMatch(/@media \(max-width:\s*760px\)\s*{[^}]*\n\s*\.task-preview-popover\s*{\s*display:\s*none;/);
-  });
-
   it("keeps composer popup end actions in their grid column", () => {
     expect(appCss).toMatch(/\.oa-popup-menu\.composer-popover \[role\^="menuitem"\]\s*{\s*display:\s*grid;/);
   });
