@@ -1,7 +1,8 @@
-import { createContext, useContext, useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { FolderRoot, GitBranch } from "lucide-react";
 import type { TaskSummary } from "@openaide/app-shell-contracts";
 import { relativeTime } from "./taskSurfaceHelpers";
+import { PopupHoverSurface } from "./Popup";
 
 type PreviewContentBase = {
   state: string;
@@ -23,7 +24,7 @@ export type SidebarPreviewContent = PreviewContentBase & (
     }
 );
 
-type Preview = { content: SidebarPreviewContent; left: number; top: number };
+type Preview = { anchor: HTMLElement; content: SidebarPreviewContent };
 type PreviewContext = {
   dismiss: () => void;
   enter: (content: SidebarPreviewContent, row: HTMLElement, immediate?: boolean) => void;
@@ -39,6 +40,7 @@ export function SidebarTaskPreviewProvider({ children }: { children: ReactNode }
   const [helpOpen, setHelpOpen] = useState(false);
   const helpId = useId();
   const previewRef = useRef<HTMLDivElement>(null);
+  const pendingRowRef = useRef<HTMLElement | undefined>(undefined);
   const showTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const hideTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const previewOpen = useRef(false);
@@ -51,15 +53,16 @@ export function SidebarTaskPreviewProvider({ children }: { children: ReactNode }
 
   const enter = (content: SidebarPreviewContent, row: HTMLElement, immediate = false) => {
     if (typeof window !== "undefined" && window.matchMedia("(max-width: 760px)").matches) return;
+    if (!immediate && pendingRowRef.current === row) return;
     clearTimeout(showTimer.current);
     clearTimeout(hideTimer.current);
+    pendingRowRef.current = row;
     setHelpOpen(false);
     const open = () => {
-      const bounds = row.getBoundingClientRect();
+      pendingRowRef.current = undefined;
       setPreview({
+        anchor: row,
         content,
-        left: Math.min(bounds.right + 8, window.innerWidth - 304),
-        top: Math.max(8, Math.min(bounds.top - 7, window.innerHeight - 170)),
       });
     };
     if (immediate || previewOpen.current) open();
@@ -68,11 +71,13 @@ export function SidebarTaskPreviewProvider({ children }: { children: ReactNode }
   const leave = () => {
     clearTimeout(showTimer.current);
     clearTimeout(hideTimer.current);
+    pendingRowRef.current = undefined;
     hideTimer.current = setTimeout(() => setPreview(undefined), 140);
   };
   const dismiss = () => {
     clearTimeout(showTimer.current);
     clearTimeout(hideTimer.current);
+    pendingRowRef.current = undefined;
     setHelpOpen(false);
     setPreview(undefined);
   };
@@ -93,15 +98,9 @@ export function SidebarTaskPreviewProvider({ children }: { children: ReactNode }
 
   return <Context.Provider value={{ dismiss, enter, leave }}>
     {children}
-    {preview ? <div className="task-preview-popover" onPointerEnter={() => clearTimeout(hideTimer.current)} onPointerLeave={leave} ref={previewRef} role="dialog" style={{ left: preview.left, top: preview.top }}>
-      <header><strong>{preview.content.title}</strong><span>{preview.content.state}</span></header>
-      {preview.content.kind === "task" ? <>
-        <div><FolderRoot size={15} /><span><small>Project</small><strong>{preview.content.projectLabel}</strong></span></div>
-        <div className={preview.content.unavailable ? "unavailable" : ""}>
-          {preview.content.workspaceKind === "worktree" ? <GitBranch size={15} /> : <FolderRoot size={15} />}
-          <span><small>{preview.content.workspaceKind === "worktree" ? "Worktree" : "Location"}</small><strong>{preview.content.workspaceLabel}</strong>{preview.content.gitRef ? <em>{preview.content.gitRef}</em> : null}</span>
-        </div>
-      </> : <>
+    {preview ? <PopupHoverSurface anchor={preview.anchor} className="task-preview-popover" onPointerEnter={() => clearTimeout(hideTimer.current)} onPointerLeave={leave} containerRef={previewRef} semanticRole="dialog">
+      {preview.content.kind === "task" ? <TaskPreviewDetails content={preview.content} /> : <>
+        <header><ScrollablePreviewTitle title={preview.content.title} /><span className="task-preview-state">{preview.content.state}</span></header>
         <section
           className="task-preview-source-wrap"
           onBlur={(event) => {
@@ -127,14 +126,56 @@ export function SidebarTaskPreviewProvider({ children }: { children: ReactNode }
         </section>
         <div><FolderRoot size={15} /><span><small>Folder</small><strong>{preview.content.workspaceLabel}</strong></span></div>
       </>}
-    </div> : null}
+    </PopupHoverSurface> : null}
   </Context.Provider>;
 }
 
 export function useSidebarTaskPreview() { return useContext(Context); }
 
+/** Shared Task facts rendered by desktop hover previews and mobile Task details. */
+export function TaskPreviewDetails({
+  content,
+}: {
+  content: Extract<SidebarPreviewContent, { kind: "task" }>;
+}) {
+  return <>
+    <header><ScrollablePreviewTitle title={content.title} /><span className="task-preview-state">{content.state}</span></header>
+    <div><FolderRoot size={15} /><span><small>Project</small><strong>{content.projectLabel}</strong></span></div>
+    <div className={content.unavailable ? "unavailable" : ""}>
+      {content.workspaceKind === "worktree" ? <GitBranch size={15} /> : <FolderRoot size={15} />}
+      <span><small>{content.workspaceKind === "worktree" ? "Worktree" : "Location"}</small><strong>{content.workspaceLabel}</strong>{content.gitRef ? <em>{content.gitRef}</em> : null}</span>
+    </div>
+  </>;
+}
+
+function ScrollablePreviewTitle({ title }: { title: string }) {
+  const titleRef = useRef<HTMLElement>(null);
+  const [moreBelow, setMoreBelow] = useState(false);
+  const updateOverflow = useCallback(() => {
+    const element = titleRef.current;
+    if (!element) return;
+    setMoreBelow(element.scrollTop + element.clientHeight < element.scrollHeight - 1);
+  }, []);
+
+  useLayoutEffect(() => {
+    updateOverflow();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(updateOverflow);
+    if (titleRef.current) observer.observe(titleRef.current);
+    return () => observer.disconnect();
+  }, [title, updateOverflow]);
+
+  return (
+    <span className="task-preview-title-wrap" data-more-below={String(moreBelow)}>
+      <strong className="task-preview-title" onScroll={updateOverflow} ref={titleRef}>{title}</strong>
+    </span>
+  );
+}
+
 /** Maps an adopted Task to the shared compact Sidebar preview. */
-export function taskPreviewContent(task: TaskSummary): SidebarPreviewContent {
+export function taskPreviewContent(
+  task: TaskSummary,
+): Extract<SidebarPreviewContent, { kind: "task" }> {
   return {
     gitRef: task.git_ref,
     kind: "task",

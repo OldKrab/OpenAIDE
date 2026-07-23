@@ -95,11 +95,13 @@
   }
 
   .composer-pill,
+  .composer-boolean-control,
   .composer-submit-pending {
     min-height: 30px;
   }
 
-  .composer-pill {
+  .composer-pill,
+  .composer-boolean-control {
     border: 0;
     font-size: 12px;
     font-weight: 500;
@@ -122,11 +124,13 @@
 }
 
 @media (hover: none) {
-  .composer .composer-pill:hover:not(:disabled) {
+  .composer .composer-pill:hover:not(:disabled),
+  .composer .composer-boolean-control:hover:not(:disabled) {
     background: transparent;
   }
 
   .composer .composer-pill:active:not(:disabled),
+  .composer .composer-boolean-control:active:not(:disabled),
   .composer .composer-pill[aria-expanded="true"] {
     background: color-mix(in oklch, var(--oa-text) 7%, transparent);
   }

@@ -56,7 +56,7 @@
   white-space: normal;
 }
 
-.composer-config-control-anchor:hover > .composer-option-info:not(.hidden) {
+.composer-config-control-anchor[data-hover-armed="true"]:hover > .composer-option-info:not(.hidden) {
   opacity: 1;
   transform: translateY(0);
   /* Require deliberate hover intent without slowing keyboard disclosure. */
@@ -64,25 +64,30 @@
   visibility: visible;
 }
 
-.composer-config-control-anchor:focus-within > .composer-option-info:not(.hidden) {
+.composer-config-control-anchor[data-hover-armed="true"][data-hover-quick="true"]:hover > .composer-option-info:not(.hidden) {
+  transition-delay: 0s;
+}
+
+.composer-config-control-anchor:has(> :focus-visible) > .composer-option-info:not(.hidden) {
   opacity: 1;
   transform: translateY(0);
   transition-delay: 0s;
   visibility: visible;
 }
 
-.composer-config-control-anchor > .composer-config-control,
+.composer-pill,
 .composer-boolean-control {
   min-height: 28px;
   margin: 0;
-  padding-inline: 4px;
+  border-radius: 999px;
+  padding: 2px 8px;
+  transition: background 90ms ease-out, color 90ms ease-out;
 }
 
 .composer-boolean-control {
   position: relative;
   overflow: hidden;
   border: 0;
-  border-radius: 5px;
   background: transparent;
   color: color-mix(in oklch, var(--oa-muted) 88%, var(--oa-text));
   font: inherit;
@@ -136,8 +141,17 @@
     0 0 14px color-mix(in oklch, var(--oa-focus) 16%, transparent);
 }
 
+.composer-pill:hover:not(:disabled):not(.locked),
+.composer-pill[aria-expanded="true"],
 .composer-boolean-control:hover:not(:disabled) {
   background: color-mix(in oklch, var(--oa-text) 7%, transparent);
+  color: var(--oa-text);
+}
+
+.composer-pill:focus-visible,
+.composer-boolean-control:focus-visible {
+  outline: 1px solid color-mix(in oklch, var(--oa-focus) 72%, var(--oa-border));
+  outline-offset: -1px;
 }
 
 .composer-boolean-control:disabled {
@@ -193,7 +207,7 @@
 }
 
 .composer-popover .composer-overflow-boolean-control {
-  grid-template-columns: minmax(0, 1fr) 16px;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .composer-overflow-boolean-control .composer-boolean-indicator {
@@ -203,6 +217,13 @@
 .composer-boolean-copy {
   display: grid;
   gap: 1px;
+}
+
+.composer-boolean-heading {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 6px !important;
+  justify-self: start;
 }
 
 /* Real controls and this off-screen row share the same primitives, keeping

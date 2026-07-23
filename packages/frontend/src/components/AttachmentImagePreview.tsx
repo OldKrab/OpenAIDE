@@ -1,7 +1,7 @@
 import { X } from "lucide-react";
-import { useEffect, useRef } from "react";
 import type { Attachment } from "@openaide/app-shell-contracts";
 import type { ComposerAttachment } from "../state/composerOptions";
+import { PopupDialog } from "./Popup";
 
 export type AttachmentImagePreviewSource = {
   label: string;
@@ -24,50 +24,23 @@ export function AttachmentImagePreviewLightbox({
   image: AttachmentImagePreviewSource;
   onClose: () => void;
 }) {
-  const lightboxRef = useRef<HTMLDivElement | null>(null);
-  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return undefined;
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        onClose();
-        return;
-      }
-      if (event.key === "Tab") {
-        event.preventDefault();
-        closeButtonRef.current?.focus();
-      }
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [onClose]);
-  useEffect(() => {
-    if (typeof document === "undefined") return undefined;
-    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : undefined;
-    closeButtonRef.current?.focus();
-    return () => previouslyFocused?.focus();
-  }, []);
-
   return (
-    <div
-      aria-label={`${image.label} preview`}
-      aria-modal="true"
-      className="attachment-preview-backdrop"
-      onClick={onClose}
-      role="dialog"
+    <PopupDialog
+      backdropClassName="attachment-preview-backdrop"
+      label={`${image.label} preview`}
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+      open
     >
       <div
         className="attachment-preview-lightbox"
-        onClick={(event) => event.stopPropagation()}
-        ref={lightboxRef}
         tabIndex={-1}
       >
         <button
           aria-label="Close image preview"
           className="attachment-preview-close"
           onClick={onClose}
-          ref={closeButtonRef}
           type="button"
         >
           <X aria-hidden="true" size={18} />
@@ -76,7 +49,7 @@ export function AttachmentImagePreviewLightbox({
           <img alt={image.label} src={image.url} />
         </div>
       </div>
-    </div>
+    </PopupDialog>
   );
 }
 

@@ -167,7 +167,7 @@ describe("SidebarTaskRow", () => {
     expect(onArchiveTask).toHaveBeenCalledWith("task_1");
   });
 
-  it("opens Task details through the mobile-only row action", () => {
+  it("shows the complete desktop preview content through the mobile Task details action", () => {
     const tree = render(
       <SidebarTaskRow
         onArchiveTask={vi.fn()}
@@ -175,6 +175,8 @@ describe("SidebarTaskRow", () => {
         onRestoreTask={vi.fn()}
         showArchived={false}
         task={task({
+          status: "failed",
+          title: "Popup work",
           project_label: "OpenAIDE",
           worktree_id: "worktree_1",
           worktree_name: "Sidebar scrolling",
@@ -183,13 +185,14 @@ describe("SidebarTaskRow", () => {
       />,
     );
 
-    act(() => tree.root.findByProps({ "aria-label": "Task actions for Task" }).props.onClick());
+    act(() => tree.root.findByProps({ "aria-label": "Task actions for Popup work" }).props.onClick());
     act(() => tree.root.findByProps({ className: "task-row-mobile-details-action" }).props.onClick());
 
     const details = tree.root.findByProps({ className: "task-row-details" });
-    const detailRows = details.findAllByType("span");
-    expect(detailRows.some((row) => row.children.includes("OpenAIDE"))).toBe(true);
-    expect(detailRows.some((row) => row.children.includes("Sidebar scrolling"))).toBe(true);
+    const text = details.findAllByType("strong").map((item) => item.children.join(""));
+    expect(text).toEqual(["Popup work", "OpenAIDE", "Sidebar scrolling"]);
+    expect(details.findByProps({ className: "task-preview-state" }).children).toContain("Failed");
+    expect(details.findByType("em").children).toContain("fix/sidebar-scroll");
   });
 
   it("dismisses the task actions menu on outside click and Escape", () => {
@@ -223,6 +226,149 @@ describe("SidebarTaskRow", () => {
       act(() => listeners.get("keydown")?.({ key: "Escape", preventDefault: vi.fn() } as unknown as Event));
       expect(tree.root.findAllByProps({ role: "menu" })).toHaveLength(0);
     } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("keeps the task preview dismissed while the actions menu is open", () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("window", {
+      innerHeight: 800,
+      innerWidth: 1200,
+      matchMedia: () => ({ matches: false }),
+    });
+    vi.stubGlobal("document", {
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    });
+    const rowNode = {
+      getBoundingClientRect: () => ({
+        bottom: 72,
+        height: 32,
+        left: 8,
+        right: 296,
+        top: 40,
+        width: 288,
+        x: 8,
+        y: 40,
+      }),
+    } as HTMLElement;
+    try {
+      const tree = render(
+        <SidebarTaskPreviewProvider>
+          <SidebarTaskRow
+            onArchiveTask={vi.fn()}
+            onOpenTask={vi.fn()}
+            onRestoreTask={vi.fn()}
+            showArchived={false}
+            task={task({ task_id: "task_popup", title: "Popup task" })}
+          />
+        </SidebarTaskPreviewProvider>,
+        {
+          createNodeMock: (element) => (
+            (element.props as { className?: string }).className?.startsWith("task-row task-product-row")
+              ? rowNode
+              : null
+          ),
+        },
+      );
+      const row = tree.root.findByProps({ role: "listitem" });
+
+      act(() => row.props.onPointerMove());
+      act(() => tree.root.findByProps({ "aria-label": "Task actions for Popup task" }).props.onClick());
+      act(() => {
+        vi.advanceTimersByTime(1_000);
+      });
+
+      expect(tree.root.findAllByProps({ role: "menu" })).toHaveLength(1);
+      expect(tree.root.findAllByProps({ role: "dialog" })).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("does not open the task preview when the actions button receives focus", () => {
+    vi.stubGlobal("window", {
+      matchMedia: () => ({ matches: false }),
+    });
+    vi.stubGlobal("document", {
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    });
+    const rowNode = {} as HTMLElement;
+    try {
+      const tree = render(
+        <SidebarTaskPreviewProvider>
+          <SidebarTaskRow
+            onArchiveTask={vi.fn()}
+            onOpenTask={vi.fn()}
+            onRestoreTask={vi.fn()}
+            showArchived={false}
+            task={task({ task_id: "task_focus", title: "Focus task" })}
+          />
+        </SidebarTaskPreviewProvider>,
+        {
+          createNodeMock: (element) => (
+            (element.props as { className?: string }).className?.startsWith("task-row task-product-row")
+              ? rowNode
+              : null
+          ),
+        },
+      );
+      const actions = tree.root.findByProps({ "aria-label": "Task actions for Focus task" });
+
+      act(() => actions.props.onFocus?.());
+
+      expect(tree.root.findAllByProps({ role: "dialog" })).toHaveLength(0);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("opens a pointer preview only after the pointer actually moves over the row", () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("window", {
+      matchMedia: () => ({ matches: false }),
+    });
+    vi.stubGlobal("document", {
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    });
+    const rowNode = {} as HTMLElement;
+    try {
+      const tree = render(
+        <SidebarTaskPreviewProvider>
+          <SidebarTaskRow
+            onArchiveTask={vi.fn()}
+            onOpenTask={vi.fn()}
+            onRestoreTask={vi.fn()}
+            showArchived={false}
+            task={task({ task_id: "task_move", title: "Move task" })}
+          />
+        </SidebarTaskPreviewProvider>,
+        {
+          createNodeMock: (element) => (
+            (element.props as { className?: string }).className?.startsWith("task-row task-product-row")
+              ? rowNode
+              : null
+          ),
+        },
+      );
+      const row = tree.root.findByProps({ role: "listitem" });
+
+      act(() => {
+        vi.advanceTimersByTime(1_000);
+      });
+      expect(tree.root.findAllByProps({ role: "dialog" })).toHaveLength(0);
+
+      act(() => row.props.onPointerMove());
+      act(() => {
+        vi.advanceTimersByTime(1_000);
+      });
+      expect(tree.root.findAllByProps({ role: "dialog" })).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
       vi.unstubAllGlobals();
     }
   });

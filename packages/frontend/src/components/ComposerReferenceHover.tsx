@@ -1,7 +1,7 @@
 import { FileText, ScanSearch } from "lucide-react";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { CSSProperties, RefObject } from "react";
-import { createPortal } from "react-dom";
+import { useEffect, useRef, useState } from "react";
+import type { RefObject } from "react";
+import { PopupHoverSurface } from "./Popup";
 
 type ReferenceRect = {
   bottom: number;
@@ -148,44 +148,14 @@ export function ReferenceHoverLayer({
 }
 
 function ComposerReferenceHover({ target }: { target: HoverTarget }) {
-  const popupRef = useRef<HTMLDivElement | null>(null);
-  const [style, setStyle] = useState<CSSProperties>({
-    left: 0,
-    top: 0,
-    visibility: "hidden",
-  });
-
-  useLayoutEffect(() => {
-    const popup = popupRef.current;
-    if (!popup) return;
-
-    const placePopup = () => {
-      if (!target.anchor.isConnected) return;
-      const position = referenceHoverPosition(
-        target.anchor.getBoundingClientRect(),
-        popup.getBoundingClientRect(),
-        { height: window.innerHeight, width: window.innerWidth },
-      );
-      setStyle({ ...position, visibility: "visible" });
-    };
-    placePopup();
-    window.addEventListener("resize", placePopup);
-    window.addEventListener("scroll", placePopup, true);
-    return () => {
-      window.removeEventListener("resize", placePopup);
-      window.removeEventListener("scroll", placePopup, true);
-    };
-  }, [target]);
-
-  if (typeof document === "undefined") return null;
   const Icon = target.model.kind === "command" ? ScanSearch : FileText;
-  return createPortal(
-    <div
+  return (
+    <PopupHoverSurface
+      anchor={target.anchor}
       className="composer-reference-hover"
-      data-reference-kind={target.model.kind}
-      ref={popupRef}
-      role="tooltip"
-      style={style}
+      dataKind={target.model.kind}
+      placement="bottom-start"
+      semanticRole="tooltip"
     >
       <Icon aria-hidden="true" className="composer-reference-hover-icon" size={16} strokeWidth={1.7} />
       <div className="composer-reference-hover-content">
@@ -195,7 +165,6 @@ function ComposerReferenceHover({ target }: { target: HoverTarget }) {
         </div>
         <p>{target.model.description}</p>
       </div>
-    </div>,
-    document.body,
+    </PopupHoverSurface>
   );
 }

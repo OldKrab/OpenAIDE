@@ -10,10 +10,12 @@
 }
 
 .composer-model-menu {
+  --oa-popup-content-max-height: 320px;
   max-height: 320px;
 }
 
 .composer-file-browser-popover {
+  --oa-popup-content-max-height: min(320px, calc(100dvh - 24px));
   width: min(430px, calc(100vw - 32px));
   max-height: min(320px, calc(100dvh - 24px));
 }
@@ -139,6 +141,15 @@
 
 .composer-popover .composer-menu-choice {
   grid-template-columns: 18px minmax(0, 1fr) 16px;
+}
+
+.composer-popover button.composer-menu-choice-iconless {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.composer-popover button.composer-menu-choice-iconless.composer-menu-choice,
+.composer-popover button.composer-menu-choice-iconless.composer-menu-choice-with-end {
+  grid-template-columns: minmax(0, 1fr) 16px;
 }
 
 .composer-menu-selection {
