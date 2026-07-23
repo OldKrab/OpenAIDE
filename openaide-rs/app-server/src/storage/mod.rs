@@ -1,3 +1,4 @@
+pub(crate) mod agent_config_preferences;
 pub mod app_preferences;
 pub mod atomic;
 pub mod cursor;
