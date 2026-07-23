@@ -1,8 +1,9 @@
-//! Owns the single in-flight ACP prompt for a Native Session.
+//! Owns the current ACP prompt set for a Native Session.
 //!
-//! ACP prompt turns are sequential. The session worker therefore keeps one
-//! request and one update projection alive until the Agent returns its response.
+//! One primary request owns Task lifecycle while additional prompt requests may
+//! steer the same work. The first current `end_turn` settles the shared prompt set.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -19,7 +20,9 @@ use crate::agent::{AgentEventSink, AgentPrompt, AgentPromptOutcome, TurnCancella
 use crate::protocol::errors::RuntimeError;
 
 pub(super) struct ActivePrompt {
+    completion_tx: mpsc::UnboundedSender<PromptCompletion>,
     completion_rx: mpsc::UnboundedReceiver<PromptCompletion>,
+    settled: Arc<AtomicBool>,
     // Holding the slot keeps host requests bound to this projection until the prompt exits.
     _projection_slot: CurrentPromptSlot,
     cancellation: TurnCancellation,
@@ -52,9 +55,19 @@ impl ActivePrompt {
         );
         projection_slot.activate(projection.clone());
         let (completion_tx, completion_rx) = mpsc::unbounded_channel();
-        send_prompt_request(active_session, prompt, content_policy, trace, completion_tx)?;
+        let settled = Arc::new(AtomicBool::new(false));
+        send_prompt_request(
+            active_session,
+            prompt,
+            content_policy,
+            trace,
+            completion_tx.clone(),
+            settled.clone(),
+        )?;
         Ok(Self {
+            completion_tx,
             completion_rx,
+            settled,
             _projection_slot: projection_slot,
             cancellation,
             task_id,
@@ -65,6 +78,17 @@ impl ActivePrompt {
         self.completion_rx.recv().await
     }
 
+    pub(super) fn steering_settlement(&self) -> PromptSettlement {
+        PromptSettlement {
+            completion_tx: self.completion_tx.clone(),
+            settled: self.settled.clone(),
+        }
+    }
+
+    pub(super) fn mark_settled(&self) {
+        self.settled.store(true, Ordering::Release);
+    }
+
     pub(super) fn cancellation(&self) -> &TurnCancellation {
         &self.cancellation
     }
@@ -72,6 +96,12 @@ impl ActivePrompt {
     pub(super) fn task_id(&self) -> &str {
         &self.task_id
     }
+}
+
+/// Lets an `end_turn` steering response settle the same lifecycle as the primary prompt.
+pub(super) struct PromptSettlement {
+    completion_tx: mpsc::UnboundedSender<PromptCompletion>,
+    settled: Arc<AtomicBool>,
 }
 
 /// Holds the ACP response boundary until its preceding session updates are projected.
@@ -139,6 +169,7 @@ fn send_prompt_request(
     content_policy: PromptContentPolicy,
     trace: Option<&AcpTraceSession>,
     completion_tx: mpsc::UnboundedSender<PromptCompletion>,
+    settled: Arc<AtomicBool>,
 ) -> Result<(), RuntimeError> {
     let task_id = prompt.task_id.clone();
     let session_id = active_session.session_id().to_string();
@@ -164,6 +195,17 @@ fn send_prompt_request(
                 }
                 Err(error) => Err(acp_error(error)),
             };
+            if settled.load(Ordering::Acquire) {
+                crate::logging::info(
+                    "acp_prompt_result_stale",
+                    serde_json::json!({
+                        "task_id": task_id,
+                        "active_session_id": session_id,
+                        "prompt_kind": "primary",
+                    }),
+                );
+                return Ok(());
+            }
             if completion_tx
                 .send(PromptCompletion {
                     result: Some(result),
@@ -188,13 +230,14 @@ fn send_prompt_request(
         .map_err(acp_error)
 }
 
-/// Sends steering on the same ACP method while deliberately discarding its
-/// eventual response. Session updates continue through the permanent listener.
+/// Sends steering on the same ACP method. A current `end_turn` joins the primary
+/// completion channel; other outcomes remain prompt-local diagnostics.
 pub(super) fn send_steering_prompt_request(
     active_session: &agent_client_protocol::ActiveSession<'static, Agent>,
     prompt: AgentPrompt,
     content_policy: PromptContentPolicy,
     trace: Option<&AcpTraceSession>,
+    settlement: Option<PromptSettlement>,
 ) -> Result<(), RuntimeError> {
     let task_id = prompt.task_id.clone();
     let session_id = active_session.session_id().to_string();
@@ -215,14 +258,46 @@ pub(super) fn send_steering_prompt_request(
                     if let Some(trace) = &result_trace {
                         trace.record("agent_to_client", "session/prompt.response", &response);
                     }
+                    let outcome = prompt_outcome(response.stop_reason);
                     crate::logging::info(
                         "acp_steering_prompt_result",
                         serde_json::json!({
                             "task_id": task_id,
                             "active_session_id": session_id,
                             "result": "stop_reason",
+                            "stop_reason": runtime_outcome_name(&outcome),
                         }),
                     );
+                    if outcome != AgentPromptOutcome::EndTurn {
+                        return Ok(());
+                    }
+                    let Some(settlement) = settlement else {
+                        return Ok(());
+                    };
+                    if settlement.settled.load(Ordering::Acquire) {
+                        crate::logging::info(
+                            "acp_prompt_result_stale",
+                            serde_json::json!({
+                                "task_id": task_id,
+                                "active_session_id": session_id,
+                                "prompt_kind": "steering",
+                            }),
+                        );
+                        return Ok(());
+                    }
+                    let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+                    if settlement
+                        .completion_tx
+                        .send(PromptCompletion {
+                            result: Some(Ok(outcome)),
+                            release: Some(release_tx),
+                        })
+                        .is_ok()
+                    {
+                        // Preserve the response boundary until all earlier session updates
+                        // have been projected before the Task publishes Idle.
+                        let _ = release_rx.await;
+                    }
                 }
                 Err(error) => {
                     crate::logging::warn(
@@ -239,6 +314,17 @@ pub(super) fn send_steering_prompt_request(
             Ok(())
         })
         .map_err(acp_error)
+}
+
+fn runtime_outcome_name(outcome: &AgentPromptOutcome) -> &'static str {
+    match outcome {
+        AgentPromptOutcome::EndTurn => "end_turn",
+        AgentPromptOutcome::MaxTokens => "max_tokens",
+        AgentPromptOutcome::MaxTurnRequests => "max_turn_requests",
+        AgentPromptOutcome::Refusal => "refusal",
+        AgentPromptOutcome::Cancelled => "cancelled",
+        AgentPromptOutcome::Other(_) => "other",
+    }
 }
 
 fn prompt_outcome(stop_reason: crate::agent::acp_schema::StopReason) -> AgentPromptOutcome {

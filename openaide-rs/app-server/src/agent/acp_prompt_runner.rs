@@ -172,6 +172,7 @@ pub(super) async fn run_prompt(
                             prompt,
                             context.content_policy,
                             context.trace.as_ref(),
+                            Some(active_prompt.steering_settlement()),
                         ) {
                             logging::error(
                                 "acp_steering_prompt_start_failed",
@@ -224,6 +225,7 @@ pub(super) async fn run_prompt(
                         *config_catalog = catalog;
                     }
                 }
+                active_prompt.mark_settled();
                 let result = completion.finish();
                 let succeeded = result.is_ok();
                 logging::info(
@@ -258,6 +260,10 @@ pub(super) async fn run_prompt(
             }
         }
     };
+
+    // Retire every still-pending response from lifecycle ownership. The session-level
+    // update consumer remains attached and continues accepting late updates.
+    active_prompt.mark_settled();
 
     if let (Some(trace), Some(requested_at)) = (context.trace.as_ref(), cancel_requested_at) {
         trace.record_value(

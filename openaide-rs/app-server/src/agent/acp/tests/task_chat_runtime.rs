@@ -226,6 +226,49 @@ fn non_text_acp_output_is_visible_as_typed_chat_parts() {
     api.shutdown().expect("shutdown task runtime");
 }
 
+#[test]
+fn steering_end_turn_makes_the_task_idle_when_primary_never_returns() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((api, store, workspace_root)) = task_chat_fixture(&temp, "steering_end_turn") else {
+        return;
+    };
+    let created = api
+        .create_for_test(TaskAcquireParams {
+            project_id: project_id_for_workspace(&workspace_root),
+            agent_id: AgentId::from("codex"),
+            workspace_root: None,
+        })
+        .expect("create task");
+    let task_id = created.task.task_id;
+    wait_until(|| {
+        matches!(
+            store
+                .read_task(task_id.as_str())
+                .map(|task| task.preparation),
+            Ok(TaskPreparationRecord::Ready)
+        )
+    });
+
+    api.send(send_params(&task_id, "start primary work"))
+        .expect("send primary prompt");
+    wait_until(|| {
+        store
+            .read_task(task_id.as_str())
+            .map(|task| task.status == TaskStatus::Active && task.active_turn_id.is_some())
+            .unwrap_or(false)
+    });
+    api.send(send_params(&task_id, "replace it with this"))
+        .expect("send steering prompt");
+
+    wait_until(|| {
+        store
+            .read_task(task_id.as_str())
+            .map(|task| task.status == TaskStatus::Inactive && task.active_turn_id.is_none())
+            .unwrap_or(false)
+    });
+    api.shutdown().expect("shutdown task runtime");
+}
+
 fn task_chat_fixture(
     temp: &tempfile::TempDir,
     mode: &str,
@@ -327,6 +370,8 @@ import sys
 
 mode = os.environ.get("OPENAIDE_TASK_CHAT_MODE", "message_ids")
 session_id = "task-chat-session"
+prompt_count = 0
+pending_primary_id = None
 
 def write(message):
     sys.stdout.write(json.dumps(message) + "\n")
@@ -393,6 +438,10 @@ for line in sys.stdin:
             update_content({"type": "image", "mimeType": "image/png", "data": "aW1hZ2U="}, "replayed-image")
         respond(message, {"configOptions": []})
     elif method == "session/prompt":
+        prompt_count += 1
+        if mode == "steering_end_turn" and prompt_count == 1:
+            pending_primary_id = message.get("id")
+            continue
         if mode == "content_blocks":
             update_content({"type": "image", "mimeType": "image/png", "data": "aW1hZ2U=", "uri": "memory://diagram.png"}, "content-image")
             update_content({"type": "resource", "resource": {"uri": "memory://notes.txt", "mimeType": "text/plain", "text": "Embedded notes"}}, "content-text-resource")
@@ -407,6 +456,8 @@ for line in sys.stdin:
             update_chunk("agent_message_chunk", "message", "22222222-2222-4222-8222-222222222222")
         respond(message, {"stopReason": "end_turn"})
     elif method == "session/close":
+        if pending_primary_id is not None:
+            respond({"id": pending_primary_id}, {"stopReason": "end_turn"})
         respond(message, {})
         break
 "#

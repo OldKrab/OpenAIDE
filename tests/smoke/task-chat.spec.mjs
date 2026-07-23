@@ -136,7 +136,7 @@ test("redelivers a pending permission after a page reload", async ({ page }) => 
   await expect(page.getByLabel("Task chat").locator(".chat-agent").last()).toContainText("Permission result: reject-once");
 });
 
-test("accepts a steering message while working and lets the user stop the primary prompt", async ({ page }) => {
+test("settles the task when an accepted steering message ends", async ({ page }) => {
   await openPreparedNewTask(page);
   await send(page, "smoke:hold");
   await expect(page.getByLabel("Task chat").getByText("Waiting for steering", { exact: true })).toBeVisible();
@@ -145,8 +145,8 @@ test("accepts a steering message while working and lets the user stop the primar
   await send(page, "follow up");
   await expect(page.getByLabel("Task chat").locator("p.chat-user").filter({ hasText: "follow up" })).toHaveText("follow up");
   await expect(page.getByLabel("Task chat").getByText("Steering received: follow up", { exact: true })).toBeVisible();
-  await page.getByLabel("Stop task").click();
   await expect(page.getByLabel("Task status: Ready")).toBeVisible();
+  await expect(page.getByLabel("Stop task")).toBeHidden();
 });
 
 test("retains an unsent prepared New Task across ordinary navigation", async ({ page }) => {
