@@ -161,7 +161,7 @@ function taskSubscription(cursor: string, revision: number): StateSubscribeResul
       kind: "task",
       task: {
         task: taskSummary(),
-        lifecycle: "visible",
+        lifecycle: "open",
         revision,
         preparation: { kind: "ready" },
         agentConfig: { state: "ready", options: [] },
@@ -195,6 +195,7 @@ function taskSummary() {
     taskId: "task_1" as TaskId,
     projectId: "project_1" as never,
     agentId: "codex" as never,
+    lifecycle: "open" as const,
     title: { value: "Recovered Task", source: "user" as const },
     status: "idle" as const,
     updatedAt: "2026-07-18T00:00:00.000Z",

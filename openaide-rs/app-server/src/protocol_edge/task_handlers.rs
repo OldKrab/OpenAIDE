@@ -1,12 +1,12 @@
 use openaide_app_server_protocol::envelopes::RequestMeta;
 use openaide_app_server_protocol::task::{
     TaskAcquireInWorktreeParams, TaskAcquireInWorktreeResult, TaskAcquireParams, TaskAcquireResult,
-    TaskAdoptNativeSessionParams, TaskAdoptNativeSessionResult, TaskCancelParams, TaskCancelResult,
-    TaskChatPageParams, TaskChatPageResult, TaskListParams, TaskListResult, TaskMarkReadParams,
-    TaskMarkReadResult, TaskOpenParams, TaskOpenResult, TaskReleaseParams, TaskReleaseResult,
+    TaskAdoptNativeSessionParams, TaskAdoptNativeSessionResult, TaskArchiveParams,
+    TaskArchiveResult, TaskCancelParams, TaskCancelResult, TaskChatPageParams, TaskChatPageResult,
+    TaskListParams, TaskListResult, TaskMarkReadParams, TaskMarkReadResult, TaskOpenParams,
+    TaskOpenResult, TaskReleaseParams, TaskReleaseResult, TaskRestoreParams, TaskRestoreResult,
     TaskSearchFilesParams, TaskSearchFilesResult, TaskSendParams, TaskSendResult,
-    TaskSetArchivedParams, TaskSetArchivedResult, TaskSetConfigOptionParams,
-    TaskSetConfigOptionResult,
+    TaskSetConfigOptionParams, TaskSetConfigOptionResult,
 };
 use serde_json::Value;
 
@@ -62,7 +62,7 @@ impl RpcGateway {
             }
         };
         let result = match self.task_snapshots.list(
-            params.archived,
+            params.lifecycle,
             params.project_id.as_ref(),
             params.cursor.as_ref(),
         ) {
@@ -376,7 +376,7 @@ impl RpcGateway {
         self.result::<TaskReleaseResult>(connection_id, id, meta, TaskReleaseResult { task_id })
     }
 
-    pub(super) fn handle_task_set_archived(
+    pub(super) fn handle_task_archive(
         &mut self,
         connection_id: ConnectionId,
         id: String,
@@ -384,30 +384,51 @@ impl RpcGateway {
         meta: RequestMeta,
         _now: AppServerTime,
     ) -> GatewayOutcome {
-        let params = match serde_json::from_value::<TaskSetArchivedParams>(params) {
+        let params = match serde_json::from_value::<TaskArchiveParams>(params) {
             Ok(params) => params,
             Err(error) => {
                 return self.error(connection_id, id, meta, responses::invalid_params(error))
             }
         };
-        let task_id = params.task_id.clone();
-        let archived = params.archived;
         let client = self
             .client_hub
             .context_for_connection(&connection_id)
             .expect("routing requires an initialized client for task archive");
-        if let Err(error) = self
+        let change = match self
             .task_archive
-            .set_archived_for_client(&client.client_instance_id, params)
+            .archive_for_client(&client.client_instance_id, params)
         {
-            return self.error(connection_id, id, meta, error);
-        }
-        self.result::<TaskSetArchivedResult>(
-            connection_id,
-            id,
-            meta,
-            TaskSetArchivedResult { task_id, archived },
-        )
+            Ok(change) => change,
+            Err(error) => return self.error(connection_id, id, meta, error),
+        };
+        self.result::<TaskArchiveResult>(connection_id, id, meta, TaskArchiveResult { change })
+    }
+
+    pub(super) fn handle_task_restore(
+        &mut self,
+        connection_id: ConnectionId,
+        id: String,
+        params: Value,
+        meta: RequestMeta,
+    ) -> GatewayOutcome {
+        let params = match serde_json::from_value::<TaskRestoreParams>(params) {
+            Ok(params) => params,
+            Err(error) => {
+                return self.error(connection_id, id, meta, responses::invalid_params(error))
+            }
+        };
+        let client = self
+            .client_hub
+            .context_for_connection(&connection_id)
+            .expect("routing requires an initialized client for task restore");
+        let change = match self
+            .task_archive
+            .restore_for_client(&client.client_instance_id, params)
+        {
+            Ok(change) => change,
+            Err(error) => return self.error(connection_id, id, meta, error),
+        };
+        self.result::<TaskRestoreResult>(connection_id, id, meta, TaskRestoreResult { change })
     }
 
     pub(super) fn result_with_events<T: serde::Serialize>(

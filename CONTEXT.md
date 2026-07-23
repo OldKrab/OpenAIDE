@@ -57,8 +57,8 @@ The user-facing message surface inside a Task where the user and agent exchange 
 _Avoid_: Log-style names
 
 **Archive**:
-A place for tasks intentionally removed from the default task list without deleting their history.
-_Avoid_: Recent, inactive
+The read-only lifecycle for Tasks the user no longer needs in ordinary work. Archived Tasks retain saved history, do not interact with their Agent Native Session, and can return to Open only through Restore.
+_Avoid_: Treating Archive as a peer task mode, location-only flag, Recent, inactive
 
 **Task Navigation**:
 The compact App Shell navigation surface for finding, creating, selecting, archiving, and checking status of Tasks.
@@ -225,7 +225,7 @@ _Avoid_: Treating every unread update or status change as an alert
 - **App Shells** embed or mount **Frontend** through a narrow shell API.
 - Web App, Desktop App, and Mobile App share as much **Frontend** composition as their shell constraints allow.
 - VS Code Extension composes the same **Frontend** surfaces into VS Code-specific locations.
-- A **Task** can be moved to the **Archive**.
+- An idle **Open Task** can enter the read-only **Archive** lifecycle and later be restored to Open.
 - One client holds at most one **Prepared-Task Lease**, and one **Prepared Task** is leased to at most one client.
 - A **Free Prepared Task** may be reused by another client selecting the same Agent and Task Workspace.
 - Changing Project Context, Agent, or Task Workspace releases the current **Prepared-Task Lease** while leaving the Frontend-owned composer unchanged.

@@ -43,7 +43,8 @@ pub enum TaskPreparationBlockerRecord {
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum TaskLifecycle {
-    New {
+    #[serde(alias = "new")]
+    Prepared {
         #[serde(
             default,
             alias = "owner_client_instance_id",
@@ -51,7 +52,9 @@ pub enum TaskLifecycle {
         )]
         lease: Option<ClientInstanceId>,
     },
-    Visible,
+    #[serde(alias = "visible")]
+    Open,
+    Archived,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
@@ -102,8 +105,16 @@ impl<'de> Deserialize<'de> for TaskTitle {
 }
 
 impl TaskLifecycle {
-    pub fn is_visible(&self) -> bool {
-        matches!(self, Self::Visible)
+    pub fn is_open(&self) -> bool {
+        matches!(self, Self::Open)
+    }
+
+    pub fn is_archived(&self) -> bool {
+        matches!(self, Self::Archived)
+    }
+
+    pub fn is_listed(&self) -> bool {
+        matches!(self, Self::Open | Self::Archived)
     }
 }
 
@@ -180,7 +191,7 @@ impl TaskAttentionEvent {
     }
 }
 
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct TaskRecord {
     pub task_id: String,
     pub title: Option<TaskTitle>,
@@ -212,8 +223,6 @@ pub struct TaskRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_turn_started_at: Option<String>,
     #[serde(default)]
-    pub archived: bool,
-    #[serde(default)]
     pub tombstoned: bool,
     #[serde(default)]
     pub revision: u64,
@@ -231,6 +240,98 @@ pub struct TaskRecord {
     pub supports_image_input: bool,
     #[serde(default, skip_serializing_if = "is_default_preparation")]
     pub preparation: TaskPreparationRecord,
+}
+
+impl<'de> Deserialize<'de> for TaskRecord {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        /// Read-only compatibility shape for records written before Archive became lifecycle.
+        #[derive(Deserialize)]
+        struct StoredTaskRecord {
+            task_id: String,
+            title: Option<TaskTitle>,
+            status: TaskStatus,
+            task_version: u64,
+            message_history_version: u64,
+            unread: bool,
+            #[serde(default)]
+            attention: Option<TaskAttentionEvent>,
+            created_at: String,
+            updated_at: String,
+            last_activity: String,
+            agent_id: String,
+            agent_name: String,
+            isolation: IsolationKind,
+            workspace_root: String,
+            #[serde(default)]
+            project_root: Option<String>,
+            #[serde(default)]
+            worktree_id: Option<String>,
+            lifecycle: TaskLifecycle,
+            #[serde(default)]
+            agent_session_id: Option<String>,
+            #[serde(default)]
+            active_turn_id: Option<String>,
+            #[serde(default)]
+            active_turn_started_at: Option<String>,
+            #[serde(default)]
+            archived: bool,
+            #[serde(default)]
+            tombstoned: bool,
+            #[serde(default)]
+            revision: u64,
+            #[serde(default)]
+            config_options_catalog: Option<ConfigOptionsCatalog>,
+            #[serde(default)]
+            config_mutation: TaskConfigMutationState,
+            #[serde(default)]
+            agent_commands_catalog: Option<AgentCommandsCatalog>,
+            model_id: Option<String>,
+            #[serde(default)]
+            supports_image_input: bool,
+            #[serde(default)]
+            preparation: TaskPreparationRecord,
+        }
+
+        let stored = StoredTaskRecord::deserialize(deserializer)?;
+        let lifecycle = if stored.archived && matches!(stored.lifecycle, TaskLifecycle::Open) {
+            TaskLifecycle::Archived
+        } else {
+            stored.lifecycle
+        };
+        Ok(Self {
+            task_id: stored.task_id,
+            title: stored.title,
+            status: stored.status,
+            task_version: stored.task_version,
+            message_history_version: stored.message_history_version,
+            unread: stored.unread,
+            attention: stored.attention,
+            created_at: stored.created_at,
+            updated_at: stored.updated_at,
+            last_activity: stored.last_activity,
+            agent_id: stored.agent_id,
+            agent_name: stored.agent_name,
+            isolation: stored.isolation,
+            workspace_root: stored.workspace_root,
+            project_root: stored.project_root,
+            worktree_id: stored.worktree_id,
+            lifecycle,
+            agent_session_id: stored.agent_session_id,
+            active_turn_id: stored.active_turn_id,
+            active_turn_started_at: stored.active_turn_started_at,
+            tombstoned: stored.tombstoned,
+            revision: stored.revision,
+            config_options_catalog: stored.config_options_catalog,
+            config_mutation: stored.config_mutation,
+            agent_commands_catalog: stored.agent_commands_catalog,
+            model_id: stored.model_id,
+            supports_image_input: stored.supports_image_input,
+            preparation: stored.preparation,
+        })
+    }
 }
 
 impl TaskRecord {

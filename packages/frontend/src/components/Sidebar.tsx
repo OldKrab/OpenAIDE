@@ -1,5 +1,5 @@
 import { memo, useState } from "react";
-import { Plus, RefreshCcw, Search, Settings } from "lucide-react";
+import { Archive, ArrowLeft, Plus, RefreshCcw, Search, Settings } from "lucide-react";
 import type { AgentListedSession, TaskSummary } from "@openaide/app-shell-contracts";
 import type { ProjectOption } from "../state/composerOptions";
 import type { AppState } from "../state/store";
@@ -136,11 +136,18 @@ export const Sidebar = memo(function Sidebar({
       inert={hiddenFromAccessibility ? true : undefined}
       role={modal ? "dialog" : undefined}
     >
-      <div className="sidebar-actions">
-        <button type="button" onClick={() => onNewTask()}>
+      {showArchived ? (
+        <div className="archive-section-head">
+          <button aria-label="Back to tasks" onClick={onToggleArchived} type="button"><ArrowLeft size={15} /></button>
+          <Archive size={15} />
+          <span><strong>Archive</strong><small>Read-only tasks</small></span>
+        </div>
+      ) : null}
+      <div className={`sidebar-actions ${showArchived ? "archive-actions" : ""}`}>
+        {!showArchived ? <button type="button" onClick={() => onNewTask()}>
           <Plus size={15} />
           New task
-        </button>
+        </button> : null}
         <label className="sidebar-search">
           <Search size={15} />
           <input
@@ -151,7 +158,7 @@ export const Sidebar = memo(function Sidebar({
           />
         </label>
       </div>
-      <div className="task-section-head">
+      {!showArchived ? <div className="task-section-head">
         <span className="task-section-title">Tasks</span>
         {showSessionRefresh ? (
           <span className="task-section-tools">
@@ -168,27 +175,8 @@ export const Sidebar = memo(function Sidebar({
             {nativeSessions.loading ? <small>Refreshing tasks</small> : null}
           </span>
         ) : null}
-      </div>
-      <div className="task-mode-tabs" role="tablist" aria-label="Task list mode">
-        <button
-          className={!showArchived ? "active" : ""}
-          type="button"
-          role="tab"
-          aria-selected={!showArchived}
-          onClick={showArchived ? onToggleArchived : undefined}
-        >
-          Active
-        </button>
-        <button
-          className={showArchived ? "active" : ""}
-          type="button"
-          role="tab"
-          aria-selected={showArchived}
-          onClick={showArchived ? undefined : onToggleArchived}
-        >
-          Archived
-        </button>
-      </div>
+        <button className="archive-navigation" onClick={onToggleArchived} type="button"><Archive size={13} />Archive</button>
+      </div> : null}
       <SidebarTaskPreviewProvider><div className="task-list" role="list" aria-label={showArchived ? "Archived tasks" : "Tasks"}>
         {taskListError ? <p className="empty-list">{taskListError}</p> : null}
         {showEmptyState

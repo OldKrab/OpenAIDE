@@ -773,7 +773,7 @@ fn stale_release_from_an_old_client_does_not_unlock_a_newer_lease() {
     let (_dir, store, mutations, _notifications) = test_mutations(0);
     let current_client = openaide_app_server_protocol::ids::ClientInstanceId::from("client-new");
     let mut task = task_record("task-prepared");
-    task.lifecycle = TaskLifecycle::New {
+    task.lifecycle = TaskLifecycle::Prepared {
         lease: Some(current_client.clone()),
     };
     store.write_task(&task).unwrap();
@@ -789,7 +789,7 @@ fn stale_release_from_an_old_client_does_not_unlock_a_newer_lease() {
     assert!(disposed.is_empty());
     assert_eq!(
         store.read_task("task-prepared").unwrap().lifecycle,
-        TaskLifecycle::New {
+        TaskLifecycle::Prepared {
             lease: Some(current_client)
         }
     );
@@ -800,7 +800,7 @@ fn releasing_a_second_task_for_the_same_key_disposes_the_extra() {
     let (_dir, store, mutations, _notifications) = test_mutations(0);
     for (task_id, client_id) in [("task-a", "client-a"), ("task-b", "client-b")] {
         let mut task = task_record(task_id);
-        task.lifecycle = TaskLifecycle::New {
+        task.lifecycle = TaskLifecycle::Prepared {
             lease: Some(client_id.into()),
         };
         store.write_task(&task).unwrap();
@@ -826,7 +826,7 @@ fn free_pool_evicts_the_oldest_entry_after_the_global_cap() {
     for index in 0..=8 {
         let mut task = task_record(&format!("task-{index}"));
         task.workspace_root = format!("/tmp/workspace-{index}");
-        task.lifecycle = TaskLifecycle::New {
+        task.lifecycle = TaskLifecycle::Prepared {
             lease: Some(format!("client-{index}").into()),
         };
         store.write_task(&task).unwrap();
@@ -856,16 +856,16 @@ fn disabling_an_agent_disposes_its_leased_and_free_prepared_tasks_only() {
     for (task_id, lifecycle, agent_id) in [
         (
             "leased",
-            TaskLifecycle::New {
+            TaskLifecycle::Prepared {
                 lease: Some("client-a".into()),
             },
             "codex",
         ),
-        ("free", TaskLifecycle::New { lease: None }, "codex"),
-        ("visible", TaskLifecycle::Visible, "codex"),
+        ("free", TaskLifecycle::Prepared { lease: None }, "codex"),
+        ("visible", TaskLifecycle::Open, "codex"),
         (
             "other-agent",
-            TaskLifecycle::New { lease: None },
+            TaskLifecycle::Prepared { lease: None },
             "opencode",
         ),
     ] {
@@ -890,23 +890,27 @@ fn removing_a_worktree_disposes_its_leased_and_free_prepared_tasks_only() {
     for (task_id, lifecycle, worktree_id) in [
         (
             "leased",
-            TaskLifecycle::New {
+            TaskLifecycle::Prepared {
                 lease: Some("client-a".into()),
             },
             Some("worktree-a"),
         ),
         (
             "free",
-            TaskLifecycle::New { lease: None },
+            TaskLifecycle::Prepared { lease: None },
             Some("worktree-a"),
         ),
-        ("visible", TaskLifecycle::Visible, Some("worktree-a")),
+        ("visible", TaskLifecycle::Open, Some("worktree-a")),
         (
             "other-worktree",
-            TaskLifecycle::New { lease: None },
+            TaskLifecycle::Prepared { lease: None },
             Some("worktree-b"),
         ),
-        ("project-root", TaskLifecycle::New { lease: None }, None),
+        (
+            "project-root",
+            TaskLifecycle::Prepared { lease: None },
+            None,
+        ),
     ] {
         let mut task = task_record(task_id);
         task.lifecycle = lifecycle;
@@ -1030,11 +1034,10 @@ fn task_record(task_id: &str) -> TaskRecord {
         workspace_root: "/tmp/workspace".to_string(),
         project_root: None,
         worktree_id: None,
-        lifecycle: crate::storage::records::TaskLifecycle::Visible,
+        lifecycle: crate::storage::records::TaskLifecycle::Open,
         agent_session_id: None,
         active_turn_id: None,
         active_turn_started_at: None,
-        archived: false,
         tombstoned: false,
         revision: 0,
         config_options_catalog: None,

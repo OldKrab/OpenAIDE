@@ -226,7 +226,7 @@ describe("chatPaging", () => {
 
 function snapshot(items: ChatMessage[]): TaskSnapshot {
   return {
-    lifecycle: "visible",
+    lifecycle: "open",
     task: {
       task_id: "task_1",
       title: "Task",

@@ -191,7 +191,7 @@ fn omits_archived_and_tombstoned_records() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut archived = task_record("task-archived", "Archived", "2026-01-02T00:00:00.000Z");
-    archived.archived = true;
+    archived.lifecycle = crate::storage::records::TaskLifecycle::Archived;
     let mut tombstoned = task_record("task-deleted", "Deleted", "2026-01-03T00:00:00.000Z");
     tombstoned.tombstoned = true;
     store.write_task(&archived).unwrap();
@@ -283,11 +283,10 @@ fn task_record(task_id: &str, title: &str, updated_at: &str) -> TaskRecord {
         workspace_root: "/workspace/a".to_string(),
         project_root: None,
         worktree_id: None,
-        lifecycle: crate::storage::records::TaskLifecycle::Visible,
+        lifecycle: crate::storage::records::TaskLifecycle::Open,
         agent_session_id: None,
         active_turn_id: None,
         active_turn_started_at: None,
-        archived: false,
         tombstoned: false,
         revision: 1,
         config_options_catalog: None,

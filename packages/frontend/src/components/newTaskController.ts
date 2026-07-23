@@ -50,7 +50,7 @@ export class NewTaskController {
 
   /** Installs a newer snapshot only for this controller's current New Task identity. */
   updateSnapshot(snapshot: TaskSnapshot) {
-    if (snapshot.lifecycle !== "new") return false;
+    if (snapshot.lifecycle !== "prepared") return false;
     if (!this.current && !this.cachedSnapshot && this.expiredLeaseTaskId === snapshot.task.task_id) {
       return false;
     }
@@ -304,7 +304,7 @@ export function disposableNewTaskControllerId(
   state: AppState,
   controller: NewTaskController,
 ): TaskId | undefined {
-  if (state.newTask.submitting || state.snapshot?.lifecycle !== "new") return undefined;
+  if (state.newTask.submitting || state.snapshot?.lifecycle !== "prepared") return undefined;
   const taskId = state.snapshot.task.task_id as TaskId;
   if (controller.currentTaskId() !== taskId || !controller.isDisposable(taskId)) return undefined;
   return taskId;

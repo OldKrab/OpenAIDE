@@ -29,7 +29,7 @@ import { reduceSettingsState } from "./settingsReducer";
 import {
   reconcileBackgroundTaskSnapshot,
   reconcileTaskSnapshotDependents,
-  upsertTaskSummary,
+  replaceTaskSummary,
 } from "./taskSnapshotReconciliation";
 import { reduceTaskInteractionState } from "./taskInteractionReducer";
 import type { AppState, NativeSessionsState, TaskChatScrollState } from "./store";
@@ -227,28 +227,24 @@ function reduceGlobalState(state: AppState, action: GlobalAction): AppState {
       return applyAppServerReplica(state, action.epoch, action.stateRootId);
     case "tasks": {
       const tasks = action.tasks;
-      const cacheKey = taskListCacheKey(action.archived);
-      const taskListCache = {
-        ...state.taskListCache,
-        [cacheKey]: tasks,
+      const listKey = taskListKey(action.archived);
+      const taskLists = {
+        ...state.taskLists,
+        [listKey]: tasks,
       };
       if (state.showArchived !== action.archived) {
-        return { ...state, taskListCache };
+        return { ...state, taskLists };
       }
       return {
         ...state,
         tasks,
-        taskListCache,
+        taskLists,
         taskListError: undefined,
       };
     }
     case "taskNavigation": {
-      const taskListCache = { ...state.taskListCache, active: action.tasks };
       return {
         ...state,
-        tasks: state.showArchived ? state.tasks : action.tasks,
-        taskListCache,
-        taskListError: undefined,
         newTask: {
           ...state.newTask,
           nativeSessions: {
@@ -266,7 +262,7 @@ function reduceGlobalState(state: AppState, action: GlobalAction): AppState {
       return { ...state, taskListError: action.message };
     case "task:list:remove":
       {
-        const cacheKey = taskListCacheKey(state.showArchived);
+        const listKey = taskListKey(state.showArchived);
         const nextTasks = state.tasks.filter((task) => task.task_id !== action.taskId);
         const { [action.taskId]: _snapshot, ...taskSnapshots } = state.taskSnapshots;
         const { [action.taskId]: _snapshotEpoch, ...taskSnapshotReplicaEpochs } = state.taskSnapshotReplicaEpochs;
@@ -275,9 +271,9 @@ function reduceGlobalState(state: AppState, action: GlobalAction): AppState {
         return {
           ...state,
           tasks: nextTasks,
-          taskListCache: {
-            ...state.taskListCache,
-            [cacheKey]: nextTasks,
+          taskLists: {
+            ...state.taskLists,
+            [listKey]: nextTasks,
           },
           activeTaskId: state.activeTaskId === action.taskId ? undefined : state.activeTaskId,
           snapshot: state.snapshot?.task.task_id === action.taskId ? undefined : state.snapshot,
@@ -298,20 +294,20 @@ function reduceGlobalState(state: AppState, action: GlobalAction): AppState {
       }
       const replicaEpoch = action.replicaEpoch ?? state.appServerReplicaEpoch;
       const reconciled = reconcileBackgroundTaskSnapshot(state, action.snapshot, replicaEpoch);
-      const tasks = upsertTaskSummary(reconciled.tasks, action.snapshot.task);
+      const tasks = replaceTaskSummary(reconciled.tasks, action.snapshot.task) ?? reconciled.tasks;
       return {
         ...reconciled,
         tasks,
-        taskListCache: {
-          ...reconciled.taskListCache,
-          [taskListCacheKey(reconciled.showArchived)]: tasks,
+        taskLists: {
+          ...reconciled.taskLists,
+          [taskListKey(reconciled.showArchived)]: tasks,
         },
       };
     }
     case "snapshot": {
       // New Task state belongs to the client-private New Task controller. It must not
       // enter visible Task navigation, active Task state, or normal Task caches.
-      if (action.snapshot.lifecycle === "new") return state;
+      if (action.snapshot.lifecycle === "prepared") return state;
       const replicaEpoch = action.replicaEpoch ?? state.appServerReplicaEpoch;
       if (replicaEpoch < state.appServerReplicaEpoch) return state;
       if (action.intent === "refresh" && state.activeTaskId !== action.snapshot.task.task_id) {
@@ -325,16 +321,16 @@ function reduceGlobalState(state: AppState, action: GlobalAction): AppState {
           : state;
       }
       const { snapshot } = reconciliation;
-      const tasks = upsertTaskSummary(state.tasks, snapshot.task);
+      const tasks = replaceTaskSummary(state.tasks, snapshot.task) ?? state.tasks;
       const nextState = {
         ...reconciliation.state,
         snapshot,
         showArchived: state.showArchived,
         searchQuery: action.intent === "open" ? "" : state.searchQuery,
         tasks,
-        taskListCache: {
-          ...state.taskListCache,
-          [taskListCacheKey(state.showArchived)]: tasks,
+        taskLists: {
+          ...state.taskLists,
+          [taskListKey(state.showArchived)]: tasks,
         },
         activeTaskId: snapshot.task.task_id,
         taskOpenError: undefined,
@@ -393,7 +389,7 @@ function reduceGlobalState(state: AppState, action: GlobalAction): AppState {
       return {
         ...state,
         showArchived: action.showArchived,
-        tasks: state.taskListCache[taskListCacheKey(action.showArchived)] ?? [],
+        tasks: state.taskLists[taskListKey(action.showArchived)] ?? [],
         taskListError: undefined,
       };
     case "selection:set":
@@ -449,8 +445,8 @@ function abandonNativeSessionOpening(newTask: AppState["newTask"]): AppState["ne
   };
 }
 
-function taskListCacheKey(showArchived: boolean) {
-  return showArchived ? "archived" : "active";
+function taskListKey(showArchived: boolean) {
+  return showArchived ? "archived" : "open";
 }
 
 function selectedProject(projects: ProjectOption[], initialProjectId: string | undefined) {

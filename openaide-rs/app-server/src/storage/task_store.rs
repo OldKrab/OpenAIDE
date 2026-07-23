@@ -41,11 +41,11 @@ impl Store {
     }
 
     pub fn list_tasks(&self) -> Result<Vec<TaskRecord>, RuntimeError> {
-        self.list_tasks_by_archived(false)
+        self.list_tasks_by_lifecycle(|lifecycle| lifecycle.is_open())
     }
 
     pub fn list_archived_tasks(&self) -> Result<Vec<TaskRecord>, RuntimeError> {
-        self.list_tasks_by_archived(true)
+        self.list_tasks_by_lifecycle(|lifecycle| lifecycle.is_archived())
     }
 
     pub fn list_all_task_records(&self) -> Result<Vec<TaskRecord>, RuntimeError> {
@@ -64,14 +64,15 @@ impl Store {
             .collect())
     }
 
-    fn list_tasks_by_archived(&self, archived: bool) -> Result<Vec<TaskRecord>, RuntimeError> {
+    fn list_tasks_by_lifecycle(
+        &self,
+        matches: impl Fn(&super::records::TaskLifecycle) -> bool,
+    ) -> Result<Vec<TaskRecord>, RuntimeError> {
         let mut records = self
             .task_journal()
             .list_task_records()
             .into_iter()
-            .filter(|record| {
-                !record.tombstoned && record.lifecycle.is_visible() && record.archived == archived
-            })
+            .filter(|record| !record.tombstoned && matches(&record.lifecycle))
             .collect::<Vec<_>>();
         records.sort_by(compare_task_records_for_navigation);
         Ok(records)
@@ -88,11 +89,11 @@ impl Store {
     }
 
     /// Returns the collection revision without exposing client-private New Task activity.
-    pub(crate) fn max_visible_task_revision(&self) -> Result<u64, RuntimeError> {
+    pub(crate) fn max_listed_task_revision(&self) -> Result<u64, RuntimeError> {
         Ok(self
             .list_all_task_records()?
             .into_iter()
-            .filter(|task| task.lifecycle.is_visible())
+            .filter(|task| task.lifecycle.is_listed())
             .map(|task| task.revision)
             .max()
             .unwrap_or(0))

@@ -14,8 +14,8 @@ use openaide_app_server_protocol::methods::{
     ATTACHMENT_CREATE_FILE_REFERENCE, ATTACHMENT_CREATE_PASTED_IMAGE, ATTACHMENT_LIST_DIRECTORY,
     ATTACHMENT_LIST_ROOTS, ATTACHMENT_REFRESH_HANDLES, ATTACHMENT_RELEASE, ATTACHMENT_REVEAL,
     CLIENT_HEARTBEAT, CLIENT_INITIALIZE, SETTINGS_GET_AGENT_DETAILS, STATE_SUBSCRIBE, TASK_ACQUIRE,
-    TASK_ADOPT_NATIVE_SESSION, TASK_CANCEL, TASK_LIST, TASK_MARK_READ, TASK_OPEN, TASK_RELEASE,
-    TASK_SEND, TASK_SET_ARCHIVED, TASK_SET_CONFIG_OPTION,
+    TASK_ADOPT_NATIVE_SESSION, TASK_ARCHIVE, TASK_CANCEL, TASK_LIST, TASK_MARK_READ, TASK_OPEN,
+    TASK_RELEASE, TASK_SEND, TASK_SET_CONFIG_OPTION,
 };
 use openaide_app_server_protocol::snapshot::PendingRequestScope;
 use openaide_app_server_protocol::state::{StateSubscribeParams, SubscriptionScope};
@@ -650,7 +650,7 @@ fn agent_custom_create_updates_live_registry_and_emits_agent_event() {
     {
         let store = Store::open(temp.path().to_path_buf()).unwrap();
         let mut project_anchor = task_record("task-existing");
-        project_anchor.lifecycle = crate::storage::records::TaskLifecycle::Visible;
+        project_anchor.lifecycle = crate::storage::records::TaskLifecycle::Open;
         store.write_task(&project_anchor).unwrap();
     }
     {
@@ -1188,7 +1188,7 @@ fn dispatcher_startup_isolates_damaged_task_storage() {
             "jsonrpc": "2.0",
             "id": "2",
             "method": TASK_LIST,
-            "params": {}
+            "params": { "lifecycle": "open" }
         })
         .to_string(),
     );
@@ -1213,7 +1213,7 @@ fn task_list_returns_storage_backed_tasks_after_initialize() {
             "jsonrpc": "2.0",
             "id": "2",
             "method": TASK_LIST,
-            "params": {}
+            "params": { "lifecycle": "open" }
         })
         .to_string(),
     );
@@ -1533,7 +1533,7 @@ fn task_create_persists_idle_task_without_prompt_after_initialize() {
     assert_eq!(record.status, TaskStatus::Inactive);
     assert_eq!(
         record.lifecycle,
-        crate::storage::records::TaskLifecycle::New {
+        crate::storage::records::TaskLifecycle::Prepared {
             lease: Some(openaide_app_server_protocol::ids::ClientInstanceId::from(
                 "client-1"
             )),
@@ -1641,7 +1641,7 @@ fn task_adopt_native_session_loads_agent_session_after_initialize() {
     assert_eq!(record.agent_session_id.as_deref(), Some("mock-session"));
     assert_eq!(
         record.lifecycle,
-        crate::storage::records::TaskLifecycle::Visible
+        crate::storage::records::TaskLifecycle::Open
     );
     assert!(matches!(record.preparation, TaskPreparationRecord::Ready));
 }
@@ -1742,7 +1742,7 @@ fn task_send_commits_user_message_and_active_turn_after_initialize() {
     let record = store.read_task("task-existing").unwrap();
     assert_eq!(
         record.lifecycle,
-        crate::storage::records::TaskLifecycle::Visible
+        crate::storage::records::TaskLifecycle::Open
     );
     assert!(record.agent_session_id.is_some());
     assert!(store.read_messages("task-existing").unwrap().len() >= 2);
@@ -1829,6 +1829,7 @@ fn task_update_notification_emits_focused_task_and_navigation_changes() {
         revision: 2,
         kind: crate::task_events::TaskUpdateKind::Changed(Box::new(
             crate::task_events::CommittedTaskChange {
+                lifecycle: None,
                 changes: openaide_app_server_protocol::events::TaskChanges::default(),
                 tool_details: Vec::new(),
                 navigation: Some(
@@ -2162,14 +2163,14 @@ fn task_release_is_idempotent_after_restart_clears_the_lease() {
     {
         let store = Store::open(temp.path().to_path_buf()).unwrap();
         let mut draft = task_record("task-draft");
-        draft.lifecycle = crate::storage::records::TaskLifecycle::New {
+        draft.lifecycle = crate::storage::records::TaskLifecycle::Prepared {
             lease: Some(openaide_app_server_protocol::ids::ClientInstanceId::from(
                 "client-1",
             )),
         };
         store.write_task(&draft).unwrap();
         let mut existing = task_record("task-existing");
-        existing.lifecycle = crate::storage::records::TaskLifecycle::Visible;
+        existing.lifecycle = crate::storage::records::TaskLifecycle::Open;
         store.write_task(&existing).unwrap();
     }
     let state_root = StateRoot::resolve(temp.path()).expect("state root");
@@ -2204,12 +2205,12 @@ fn task_release_is_idempotent_after_restart_clears_the_lease() {
     let store = open_store_after_dispatcher_drop(temp.path());
     assert_eq!(
         store.read_task("task-draft").unwrap().lifecycle,
-        crate::storage::records::TaskLifecycle::New { lease: None }
+        crate::storage::records::TaskLifecycle::Prepared { lease: None }
     );
 }
 
 #[test]
-fn task_set_archived_moves_task_between_navigation_lists() {
+fn task_archive_moves_task_between_lifecycle_lists() {
     let temp = tempfile::TempDir::new().expect("temp dir");
     {
         let store = Store::open(temp.path().to_path_buf()).unwrap();
@@ -2223,17 +2224,20 @@ fn task_set_archived_moves_task_between_navigation_lists() {
         &json!({
             "jsonrpc": "2.0",
             "id": "archive",
-            "method": TASK_SET_ARCHIVED,
-            "params": { "taskId": "task-active", "archived": true }
+            "method": TASK_ARCHIVE,
+            "params": { "taskId": "task-active" }
         })
         .to_string(),
     );
     let archive_response = response(&responses[0]);
     assert_eq!(
-        archive_response["result"]["result"]["taskId"],
+        archive_response["result"]["result"]["change"]["task"]["taskId"],
         "task-active"
     );
-    assert_eq!(archive_response["result"]["result"]["archived"], true);
+    assert_eq!(
+        archive_response["result"]["result"]["change"]["task"]["lifecycle"],
+        "archived"
+    );
     assert!(archive_response["result"]["result"].get("tasks").is_none());
 
     let active = dispatcher.handle_line(
@@ -2241,7 +2245,7 @@ fn task_set_archived_moves_task_between_navigation_lists() {
             "jsonrpc": "2.0",
             "id": "list-active",
             "method": TASK_LIST,
-            "params": { "archived": false }
+            "params": { "lifecycle": "open" }
         })
         .to_string(),
     );
@@ -2255,7 +2259,7 @@ fn task_set_archived_moves_task_between_navigation_lists() {
             "jsonrpc": "2.0",
             "id": "list-archived",
             "method": TASK_LIST,
-            "params": { "archived": true }
+            "params": { "lifecycle": "archived" }
         })
         .to_string(),
     );
@@ -2275,7 +2279,7 @@ fn task_discard_keeps_the_configured_project_after_its_last_task() {
         let store = Store::open(temp.path().to_path_buf()).unwrap();
         let mut draft = task_record("task-draft");
         draft.workspace_root = workspace_root.to_string();
-        draft.lifecycle = crate::storage::records::TaskLifecycle::New {
+        draft.lifecycle = crate::storage::records::TaskLifecycle::Prepared {
             lease: Some(openaide_app_server_protocol::ids::ClientInstanceId::from(
                 "client-1",
             )),
@@ -2479,11 +2483,10 @@ fn task_record(task_id: &str) -> TaskRecord {
         workspace_root: workspace_root.to_string(),
         project_root: None,
         worktree_id: None,
-        lifecycle: crate::storage::records::TaskLifecycle::Visible,
+        lifecycle: crate::storage::records::TaskLifecycle::Open,
         agent_session_id: None,
         active_turn_id: None,
         active_turn_started_at: None,
-        archived: false,
         tombstoned: false,
         revision: 1,
         config_options_catalog: None,

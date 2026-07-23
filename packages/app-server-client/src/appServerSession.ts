@@ -311,6 +311,8 @@ function scopeKey(scope: SubscriptionScope) {
       return `settings:${scope.section ?? ""}`;
     case "taskNavigation":
       return `taskNavigation:${scope.projectId ?? ""}`;
+    case "taskList":
+      return `taskList:${scope.lifecycle}:${scope.projectId ?? ""}`;
     case "task":
       return `task:${scope.taskId}`;
     case "toolDetail":

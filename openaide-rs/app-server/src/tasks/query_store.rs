@@ -16,12 +16,15 @@ impl TaskReadStore {
 
     pub(crate) fn list_task_summaries(
         &self,
-        archived: bool,
+        lifecycle: openaide_app_server_protocol::task::TaskListLifecycle,
     ) -> Result<Vec<TaskSummary>, RuntimeError> {
-        let records = if archived {
-            self.store.list_archived_tasks()?
-        } else {
-            self.store.list_tasks()?
+        let records = match lifecycle {
+            openaide_app_server_protocol::task::TaskListLifecycle::Open => {
+                self.store.list_tasks()?
+            }
+            openaide_app_server_protocol::task::TaskListLifecycle::Archived => {
+                self.store.list_archived_tasks()?
+            }
         };
         Ok(records.into_iter().map(|task| task.summary()).collect())
     }

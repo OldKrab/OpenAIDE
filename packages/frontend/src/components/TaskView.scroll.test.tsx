@@ -233,7 +233,7 @@ function taskViewProps(taskSnapshot: TaskSnapshot) {
 
 function snapshot(status: TaskSnapshot["task"]["status"], revision = 1, taskId = "task-1"): TaskSnapshot {
   return {
-    lifecycle: "visible",
+    lifecycle: "open",
     task: {
       task_id: taskId,
       title: "Task",

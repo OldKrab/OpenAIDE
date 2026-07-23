@@ -127,7 +127,7 @@ fn excludes_prepared_tasks_from_linked_task_counts_and_results() {
     let store = Store::open(state.path().to_path_buf()).expect("store");
     let visible = task_record("visible-task", fixture.repository());
     let mut prepared = task_record("prepared-task", fixture.repository());
-    prepared.lifecycle = TaskLifecycle::New { lease: None };
+    prepared.lifecycle = TaskLifecycle::Prepared { lease: None };
     store.write_task(&visible).expect("write visible task");
     store.write_task(&prepared).expect("write prepared task");
     let manager = WorktreeManager::new(store);
@@ -646,11 +646,10 @@ fn task_record(
         workspace_root: workspace.to_string_lossy().to_string(),
         project_root: None,
         worktree_id: None,
-        lifecycle: TaskLifecycle::Visible,
+        lifecycle: TaskLifecycle::Open,
         agent_session_id: None,
         active_turn_id: None,
         active_turn_started_at: None,
-        archived: false,
         tombstoned: false,
         config_options_catalog: None,
         config_mutation: Default::default(),

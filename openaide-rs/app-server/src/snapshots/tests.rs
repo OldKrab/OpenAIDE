@@ -291,7 +291,7 @@ struct StaticTaskSnapshots;
 impl TaskSnapshotSource for StaticTaskSnapshots {
     fn list(
         &self,
-        _archived: bool,
+        _lifecycle: openaide_app_server_protocol::task::TaskListLifecycle,
         _project_id: Option<&openaide_app_server_protocol::ids::ProjectId>,
         _cursor: Option<&openaide_app_server_protocol::ids::TaskListCursor>,
     ) -> Result<TaskListSnapshot, openaide_app_server_protocol::errors::ProtocolError> {
@@ -311,6 +311,7 @@ impl TaskSnapshotSource for StaticTaskSnapshots {
                 task_id: task_id.clone(),
                 project_id: "project-1".into(),
                 agent_id: CODEX_AGENT_ID.into(),
+                lifecycle: openaide_app_server_protocol::snapshot::TaskLifecycle::Open,
                 title: Some(openaide_app_server_protocol::snapshot::TaskTitle {
                     value: "Stored task".to_string(),
                     source: openaide_app_server_protocol::snapshot::TaskTitleSource::User,
@@ -325,7 +326,7 @@ impl TaskSnapshotSource for StaticTaskSnapshots {
                 workspace_available: true,
             },
             active_turn_started_at: None,
-            lifecycle: openaide_app_server_protocol::snapshot::TaskLifecycle::Visible,
+            lifecycle: openaide_app_server_protocol::snapshot::TaskLifecycle::Open,
             revision: 7,
             preparation: TaskPreparationSnapshot::Ready,
             agent_config: TaskAgentConfigSnapshot {

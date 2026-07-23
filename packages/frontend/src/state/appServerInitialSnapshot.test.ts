@@ -170,7 +170,7 @@ function clientSnapshot(overrides: Partial<ClientSnapshot> = {}): ClientSnapshot
     },
     activeTask: {
       task: taskSummary(),
-      lifecycle: "visible",
+      lifecycle: "open",
       revision: 2,
       preparation: { kind: "ready" },
       agentConfig: { state: "ready", options: [] },
@@ -188,6 +188,7 @@ function taskSummary() {
     taskId: "task-1" as TaskId,
     projectId: "project-1" as ProjectId,
     agentId: "codex" as AgentId,
+    lifecycle: "open" as const,
     title: { value: "Task", source: "user" as const },
     status: "idle" as const,
     updatedAt: "2026-06-27T12:00:00.000Z",

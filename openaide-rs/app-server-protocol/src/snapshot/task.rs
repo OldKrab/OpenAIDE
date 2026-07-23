@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::ids::{AgentId, ProjectId, TaskId, WorktreeId};
+use crate::task::TaskListLifecycle;
 
 use super::chat::{ChatSnapshot, RecoverySnapshot};
 use super::pending_request::PendingRequestSnapshot;
@@ -24,6 +25,16 @@ pub struct TaskNavigationSnapshot {
     pub active_task_id: Option<TaskId>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub refreshing: bool,
+}
+
+/// Authoritative membership baseline for exactly one durable Task lifecycle.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskListSnapshot {
+    pub lifecycle: TaskListLifecycle,
+    #[serde(default)]
+    pub tasks: Vec<TaskSummary>,
+    pub revision: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
@@ -64,6 +75,7 @@ pub struct TaskSummary {
     pub task_id: TaskId,
     pub project_id: ProjectId,
     pub agent_id: AgentId,
+    pub lifecycle: TaskLifecycle,
     pub title: Option<TaskTitle>,
     pub status: TaskStatus,
     pub updated_at: String,
@@ -130,8 +142,9 @@ pub enum TaskStatus {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub enum TaskLifecycle {
-    New,
-    Visible,
+    Prepared,
+    Open,
+    Archived,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]

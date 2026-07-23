@@ -44,7 +44,7 @@ fn list_projects_visible_tasks_and_revision() {
     store.write_task(&task_record("task-1")).unwrap();
 
     let result = TaskSnapshotStore::new(store)
-        .list(false, None, None)
+        .list(TaskListLifecycle::Open, None, None)
         .expect("list");
 
     assert_eq!(result.tasks.len(), 1);
@@ -60,7 +60,7 @@ fn list_revision_ignores_client_private_new_tasks() {
     store.write_task(&task_record("task-visible")).unwrap();
     let mut new_task = task_record("task-new");
     new_task.revision = 99;
-    new_task.lifecycle = crate::storage::records::TaskLifecycle::New {
+    new_task.lifecycle = crate::storage::records::TaskLifecycle::Prepared {
         lease: Some(openaide_app_server_protocol::ids::ClientInstanceId::from(
             "client-a",
         )),
@@ -68,7 +68,7 @@ fn list_revision_ignores_client_private_new_tasks() {
     store.write_task(&new_task).unwrap();
 
     let result = TaskSnapshotStore::new(store)
-        .list(false, None, None)
+        .list(TaskListLifecycle::Open, None, None)
         .expect("list");
 
     assert_eq!(result.revision, 7);
@@ -354,7 +354,7 @@ fn failed_task_with_ready_preparation_is_sendable_for_follow_up_recovery() {
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut task = task_record("task-1");
     task.status = TaskStatus::Failed;
-    task.lifecycle = crate::storage::records::TaskLifecycle::Visible;
+    task.lifecycle = crate::storage::records::TaskLifecycle::Open;
     task.agent_session_id = Some("session-1".to_string());
     task.preparation = TaskPreparationRecord::Ready;
     store.write_task(&task).unwrap();
@@ -377,7 +377,7 @@ fn working_task_is_sendable_for_steering() {
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut task = task_record("task-1");
     task.status = TaskStatus::Active;
-    task.lifecycle = crate::storage::records::TaskLifecycle::Visible;
+    task.lifecycle = crate::storage::records::TaskLifecycle::Open;
     task.agent_session_id = Some("session-1".to_string());
     task.active_turn_id = Some("turn-primary".to_string());
     task.active_turn_started_at = Some("2026-07-13T00:00:00Z".to_string());
@@ -418,7 +418,7 @@ fn client_snapshot_read_hides_another_clients_new_task() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut task = task_record("task-new");
-    task.lifecycle = crate::storage::records::TaskLifecycle::New {
+    task.lifecycle = crate::storage::records::TaskLifecycle::Prepared {
         lease: Some(openaide_app_server_protocol::ids::ClientInstanceId::from(
             "test-client",
         )),
@@ -441,7 +441,7 @@ fn client_snapshot_read_hides_another_clients_new_task() {
 
     assert_eq!(
         owner.lifecycle,
-        openaide_app_server_protocol::snapshot::TaskLifecycle::New
+        openaide_app_server_protocol::snapshot::TaskLifecycle::Prepared
     );
     assert_eq!(hidden.code, ProtocolErrorCode::NotFound);
 }
@@ -456,7 +456,7 @@ fn list_omits_a_corrupt_task_record() {
     let store = Store::open(temp.path().to_path_buf()).unwrap();
 
     let snapshot = TaskSnapshotStore::new(store)
-        .list(false, None, None)
+        .list(TaskListLifecycle::Open, None, None)
         .expect("corrupt Task must stay isolated from collection reads");
 
     assert!(snapshot.tasks.is_empty());
@@ -540,11 +540,10 @@ fn task_record(task_id: &str) -> TaskRecord {
         workspace_root: "/workspace/a".to_string(),
         project_root: None,
         worktree_id: None,
-        lifecycle: crate::storage::records::TaskLifecycle::Visible,
+        lifecycle: crate::storage::records::TaskLifecycle::Open,
         agent_session_id: None,
         active_turn_id: None,
         active_turn_started_at: None,
-        archived: false,
         tombstoned: false,
         revision: 7,
         config_options_catalog: None,

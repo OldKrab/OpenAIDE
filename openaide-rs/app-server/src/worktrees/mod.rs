@@ -297,7 +297,7 @@ impl WorktreeManager {
             .into_iter()
             .filter(|task| {
                 !task.tombstoned
-                    && task.lifecycle.is_visible()
+                    && task.lifecycle.is_listed()
                     && (task.worktree_id.as_deref() == Some(worktree_id.as_str())
                         || (task.worktree_id.is_none() && task.workspace_root == target_path))
             })
@@ -367,7 +367,7 @@ impl WorktreeManager {
         for worktree in &mut repository.worktrees {
             let linked = tasks.iter().filter(|task| {
                 // Prepared Tasks back New Task composers, but do not belong to visible Task history.
-                if task.tombstoned || !task.lifecycle.is_visible() {
+                if task.tombstoned || !task.lifecycle.is_listed() {
                     return false;
                 }
                 task.worktree_id
@@ -523,7 +523,7 @@ impl WorktreeManager {
             .into_iter()
             .filter(|task| {
                 !task.tombstoned
-                    && task.lifecycle.is_visible()
+                    && task.lifecycle.is_listed()
                     && task.worktree_id.as_deref() == Some(worktree_id.as_str())
                     && matches!(
                         task.status,
@@ -658,7 +658,7 @@ impl WorktreeManager {
             .iter()
             .any(|task| {
                 !task.tombstoned
-                    && task.lifecycle.is_visible()
+                    && task.lifecycle.is_listed()
                     && (task.worktree_id.as_deref() == Some(worktree_id.as_str())
                         || (task.worktree_id.is_none()
                             && Path::new(&task.workspace_root) == target.path))

@@ -26,6 +26,10 @@ export function subscriptionScopesEqual(left: SubscriptionScope, right: Subscrip
       return right.kind === "settings" && normalizeOptional(left.section) === normalizeOptional(right.section);
     case "taskNavigation":
       return right.kind === "taskNavigation" && normalizeOptional(left.projectId) === normalizeOptional(right.projectId);
+    case "taskList":
+      return right.kind === "taskList"
+        && left.lifecycle === right.lifecycle
+        && normalizeOptional(left.projectId) === normalizeOptional(right.projectId);
     case "task":
       return right.kind === "task" && left.taskId === right.taskId;
     case "toolDetail":
@@ -91,6 +95,12 @@ function payloadMatchesSubscriptionScope(scope: SubscriptionScope, payload: AppS
         payload.kind === "snapshotReplaced" ||
         payload.kind === "taskNavigationChanged" ||
         payload.kind === "taskNavigationReplaced"
+      );
+    case "taskList":
+      return payload.kind === "snapshotReplaced" || (
+        payload.kind === "taskLifecycleChanged"
+        && (scope.projectId === undefined || scope.projectId === null || payload.change.task.projectId === scope.projectId)
+        && (payload.change.task.lifecycle === scope.lifecycle || payload.change.previousLifecycle === scope.lifecycle)
       );
     case "task":
       return (

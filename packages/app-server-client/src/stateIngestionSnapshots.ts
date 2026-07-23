@@ -32,6 +32,8 @@ export function updateSubscriptionSnapshot(
       return unchanged(snapshot);
     case "taskNavigation":
       return updateTaskNavigationSnapshot(scope, snapshot, payload);
+    case "taskList":
+      return updateTaskListSnapshot(scope, snapshot, payload);
     case "task":
       return updateTaskSnapshot(snapshot, payload);
     case "toolDetail":
@@ -95,6 +97,8 @@ function updateFromClientSnapshot(
       return clientSnapshot.tasks
         ? changed({ kind: "taskNavigation", navigation: filterTaskNavigationForScope(clientSnapshot.tasks, scope) })
         : unchanged(snapshot);
+    case "taskList":
+      return unchanged(snapshot);
     case "task":
       return clientSnapshot.activeTask && clientSnapshot.activeTask.task.taskId === snapshot.task.task.taskId
         ? changed({ kind: "task", task: clientSnapshot.activeTask })
@@ -103,6 +107,28 @@ function updateFromClientSnapshot(
     case "worktreeRepository":
       return unchanged(snapshot);
   }
+}
+
+function updateTaskListSnapshot(
+  scope: SubscriptionScope,
+  snapshot: Extract<SubscriptionSnapshot, { kind: "taskList" }>,
+  payload: AppServerEventPayload,
+): SnapshotUpdate {
+  if (scope.kind !== "taskList" || payload.kind !== "taskLifecycleChanged") return unchanged(snapshot);
+  const { task, previousLifecycle } = payload.change;
+  const matchesProject = scope.projectId === undefined || scope.projectId === null || task.projectId === scope.projectId;
+  const withoutTask = snapshot.taskList.tasks.filter((candidate) => candidate.taskId !== task.taskId);
+  const belongs = matchesProject && task.lifecycle === scope.lifecycle;
+  if (!belongs && previousLifecycle !== scope.lifecycle) return unchanged(snapshot);
+  const tasks = belongs ? [task, ...withoutTask] : withoutTask;
+  return changed({
+    ...snapshot,
+    taskList: {
+      ...snapshot.taskList,
+      revision: snapshot.taskList.revision,
+      tasks,
+    },
+  });
 }
 
 function updateTaskNavigationSnapshot(

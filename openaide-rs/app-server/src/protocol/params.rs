@@ -35,7 +35,7 @@ pub struct TaskIdParams {
 #[derive(Debug, Deserialize, Serialize, Default)]
 pub struct TaskListParams {
     #[serde(default)]
-    pub archived: bool,
+    pub lifecycle: openaide_app_server_protocol::task::TaskListLifecycle,
 }
 
 #[derive(Debug, Deserialize, Serialize)]

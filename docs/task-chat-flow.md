@@ -54,6 +54,16 @@ Only the Native Session Catalog calls `session/list`. It discovers all enabled A
 
 Frontend may retain more rows than it renders. Initial per-Project presentation is 20 rows for one Project, 10 each for two Projects, and 7 each for three or more. Load More reveals 10 additional rows and raises the App Server process high-water for that Project. Collapsing and re-expanding a Project resets only its presentation limit.
 
+## Open And Archived Task Lifecycles
+
+A durable Task has exactly one product lifecycle: `prepared`, `open`, or `archived`. Runtime status such as active, waiting, failed, or completed is separate. Prepared Tasks belong to neither user-facing collection. Open and Archived are disjoint authoritative collections; a Task can never appear in both.
+
+Clients subscribe to `taskList` twice, once for `open` and once for `archived`, and retain both live baselines. `task/list` uses the same explicit lifecycle selector for bounded reads. Task snapshots own Task content only: opening a Task or receiving a late Task snapshot may update a row already present in a collection, but cannot insert, remove, or reclassify collection membership. Only a collection baseline or `taskLifecycleChanged` event can move a row.
+
+`task/archive` changes an idle Open Task to Archived. A Task with active Agent work or a pending request must be stopped or resolved first. Archiving clears process-local Agent catalogs and controls. `task/restore` changes an Archived Task to Open but does not load or resume its Native Session.
+
+Archived Tasks are saved, read-only history. `task/open` returns their stored state without Agent session load, resume, or history synchronization. Send, cancel, configuration mutation, and other Agent-interactive operations reject Archived Tasks until Restore. Late Agent events cannot reclassify an Archived Task or restore live controls. The sidebar presents Archive as a secondary destination from Tasks, visually identifies the read-only context, and provides Restore as the only lifecycle action.
+
 ## Client Identity
 
 Frontend supplies `clientInstanceId` only through `client/initialize`. Transport assigns a connection-local `connectionId`; `ClientHub` maps that connection to the initialized client. Product handlers obtain client identity from this trusted connection context instead of accepting a client id in product request parameters.

@@ -34,7 +34,7 @@ export function applyAppServerReplica(
     appServerReplicaEpoch: epoch,
     appServerStateRootId: stateRootId,
     tasks: initial.tasks,
-    taskListCache: initial.taskListCache,
+    taskLists: initial.taskLists,
     taskListError: undefined,
     activeTaskId: undefined,
     snapshot: undefined,

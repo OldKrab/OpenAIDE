@@ -41,7 +41,8 @@ impl TaskProductApi {
         params: TaskSendParams,
     ) -> Result<TaskSendAccepted, ProtocolError> {
         let task_id = params.task_id.as_str().to_string();
-        let mut existing_task = self.read_task_for_client(&task_id, client_instance_id)?;
+        let mut existing_task =
+            self.read_interactive_task_for_client(&task_id, client_instance_id)?;
         if existing_task.active_turn_id.is_none() {
             self.turn_acceptance.retire_for_idle_task(&task_id);
         }
@@ -145,7 +146,8 @@ impl TaskProductApi {
                     if super::prepare::reject_if_preparation_not_ready(ctx.task()).is_err() {
                         return Ok(TaskMutationResult::Rejected);
                     }
-                    promoted_new_task = matches!(ctx.task().lifecycle, TaskLifecycle::New { .. });
+                    promoted_new_task =
+                        matches!(ctx.task().lifecycle, TaskLifecycle::Prepared { .. });
                     self.append_user_message(
                         ctx,
                         &format!("user:{}", user_message_id.as_str()),
@@ -160,7 +162,7 @@ impl TaskProductApi {
                     task.status = LegacyTaskStatus::Starting;
                     // Promotion is durable before Agent work starts, so permissions and other
                     // Agent requests can never belong to a client-private New Task.
-                    task.lifecycle = TaskLifecycle::Visible;
+                    task.lifecycle = TaskLifecycle::Open;
                     if promoted_new_task && task.title.is_none() {
                         task.title = prompt_title(&prompt_text);
                     }

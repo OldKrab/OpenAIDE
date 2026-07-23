@@ -6,7 +6,7 @@ use crate::ids::{
     TaskId, TaskListCursor, TurnId, WorktreeId,
 };
 use crate::snapshot::AgentConfigOptionCurrentValue;
-use crate::snapshot::{ChatItem, TaskSnapshot, TaskSummary};
+use crate::snapshot::{ChatItem, TaskLifecycle, TaskSnapshot, TaskSummary};
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -333,12 +333,20 @@ pub enum ActivityToolValue {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskListParams {
-    #[serde(default)]
-    pub archived: bool,
+    pub lifecycle: TaskListLifecycle,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project_id: Option<ProjectId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cursor: Option<TaskListCursor>,
+}
+
+/// Selects one authoritative visible Task collection.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum TaskListLifecycle {
+    #[default]
+    Open,
+    Archived,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
@@ -387,16 +395,33 @@ pub struct TaskReleaseResult {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
-pub struct TaskSetArchivedParams {
+pub struct TaskArchiveParams {
     pub task_id: TaskId,
-    pub archived: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
-pub struct TaskSetArchivedResult {
+pub struct TaskArchiveResult {
+    pub change: TaskLifecycleChanged,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskRestoreParams {
     pub task_id: TaskId,
-    pub archived: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskRestoreResult {
+    pub change: TaskLifecycleChanged,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskLifecycleChanged {
+    pub previous_lifecycle: TaskLifecycle,
+    pub task: TaskSummary,
 }
 
 #[cfg(test)]

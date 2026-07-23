@@ -1,5 +1,5 @@
 import type { AgentListedSession } from "@openaide/app-shell-contracts";
-import { ChevronDown, ChevronRight, GitBranch, MoreHorizontal, Plus } from "lucide-react";
+import { Folder, FolderOpen, GitBranch, MoreHorizontal, Plus } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { SidebarNativeSessionRow } from "./SidebarNativeSessionRow";
 import { SidebarTaskRow } from "./SidebarTaskRow";
@@ -71,7 +71,7 @@ export function SidebarProjectTaskGroup({
     ? allRows.find((row) => row.kind === "task" && row.task.task_id === activeTask.task_id)
     : undefined;
   const visibleRows = recentVisibleRows(allRows, maxTasks, activeRow);
-  const renderedRows = collapsed ? (activeRow ? [activeRow] : []) : visibleRows;
+  const renderedRows = collapsed ? [] : visibleRows;
   const hiddenCount = Math.max(0, allRows.length - visibleRows.length);
   const countSummary = projectGroupCountSummary(taskRows.length, nativeSessions.length);
 
@@ -84,7 +84,7 @@ export function SidebarProjectTaskGroup({
           onClick={onToggleCollapse}
           type="button"
         >
-          {collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
+          {collapsed ? <Folder size={14} /> : <FolderOpen size={14} />}
           <span>
             <strong>{group.label}</strong>
             {countSummary ? <small className="project-task-group-counts">{countSummary}</small> : null}
@@ -98,7 +98,7 @@ export function SidebarProjectTaskGroup({
           </div> : null}
         </div>
       </div>
-      {renderedRows.map((row) =>
+      <div className={`project-task-group-rows ${collapsed ? "collapsed" : "expanded"}`}>{renderedRows.map((row) =>
         row.kind === "task" ? (
           <SidebarTaskRow
             key={`task:${row.task.task_id}`}
@@ -119,14 +119,14 @@ export function SidebarProjectTaskGroup({
             session={row.session}
           />
         ),
-      )}
+      )}</div>
       {!collapsed && (hiddenCount > 0 || nativeSessionsHaveMore) ? (
         <button
           className="project-task-more"
           onClick={() => onLoadMore(hiddenCount > 0 ? Math.min(pageSize, hiddenCount) : pageSize)}
           type="button"
         >
-          {hiddenCount > 0 ? `Load ${Math.min(pageSize, hiddenCount)} more tasks` : "Load more tasks"}
+          Load more
         </button>
       ) : null}
     </section>

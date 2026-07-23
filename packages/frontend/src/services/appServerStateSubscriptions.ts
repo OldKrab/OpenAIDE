@@ -8,6 +8,7 @@ import {
   type SubscriptionScope,
   type SubscriptionSnapshot,
   type TaskNavigationSnapshot,
+  type TaskListSnapshot,
 } from "@openaide/app-server-client";
 import type { Dispatch } from "react";
 import type { AppAction } from "../state/appReducer";
@@ -15,6 +16,7 @@ import { applyProtocolAgents } from "../state/appServerAgents";
 import {
   createProtocolTaskSnapshotMapper,
   mapProtocolTaskNavigation,
+  mapProtocolTaskSummary,
 } from "../state/appServerProtocolMapping";
 import { mapProtocolToolDetail } from "../state/appServerProtocolChatMapping";
 import type { AgentOption } from "../state/composerOptions";
@@ -25,6 +27,7 @@ export type StateSubscriptionMappingContext = SubscriptionIngestionContext & {
   agents?: AgentSummary[];
   projects?: ProjectSummary[];
   taskNavigation?: TaskNavigationSnapshot;
+  taskLists?: Partial<Record<"open" | "archived", TaskListSnapshot>>;
 };
 
 export function mappingContextFromClientSnapshot(snapshot: ClientSnapshot): StateSubscriptionMappingContext {
@@ -162,6 +165,16 @@ function actionsFromSubscriptionSnapshot(
     case "taskNavigation":
       context.taskNavigation = snapshot.navigation;
       return remappedTaskNavigationActions(context);
+    case "taskList":
+      context.taskLists = {
+        ...context.taskLists,
+        [snapshot.taskList.lifecycle]: snapshot.taskList,
+      };
+      return [{
+        type: "tasks",
+        archived: snapshot.taskList.lifecycle === "archived",
+        tasks: snapshot.taskList.tasks.map((task) => mapProtocolTaskSummary(task, snapshot.taskList.revision, context)),
+      }];
     case "task": {
       const mapped = mapTaskSnapshot(snapshot.task, context);
       return [{ type: "snapshot", snapshot: mapped.snapshot, intent: "refresh" }];

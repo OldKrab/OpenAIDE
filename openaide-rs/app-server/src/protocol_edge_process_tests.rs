@@ -12,6 +12,7 @@ fn local_http_handoff_forwards_committed_delta_without_reducing_it_to_task_id() 
             task_id: "task-1".to_string(),
             revision: 2,
             kind: TaskUpdateKind::Changed(Box::new(CommittedTaskChange {
+                lifecycle: None,
                 changes: TaskChanges {
                     chat: vec![TaskChatChange::AppendText {
                         message_id: MessageId::from("message-1"),

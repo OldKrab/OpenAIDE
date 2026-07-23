@@ -101,7 +101,7 @@ body[data-input-modality="pointer"] button:focus-visible {
     border-bottom: 0;
     background: var(--oa-panel);
     display: grid;
-    grid-template-rows: auto auto auto minmax(0, 1fr) auto;
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
     padding: 56px 8px 10px;
     overflow: hidden;
     pointer-events: none;

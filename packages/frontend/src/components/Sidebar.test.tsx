@@ -586,7 +586,7 @@ describe("Sidebar", () => {
     expect(tree.root.findAllByProps({ "aria-label": "Refresh tasks" })).toHaveLength(0);
   });
 
-  it("switches task list mode with Active and Archived tabs", () => {
+  it("opens Archive as a secondary destination instead of an equal tab", () => {
     const onToggleArchived = vi.fn();
     const tree = render(
       <Sidebar
@@ -598,12 +598,30 @@ describe("Sidebar", () => {
       />,
     );
 
-    const tabs = tree.root.findByProps({ className: "task-mode-tabs" }).findAllByType("button");
-    expect(tabs.map((tab) => tab.children.join(""))).toEqual(["Active", "Archived"]);
-    expect(tabs.map((tab) => tab.props["aria-selected"])).toEqual([true, false]);
+    expect(tree.root.findAllByProps({ className: "task-mode-tabs" })).toHaveLength(0);
+    const archive = tree.root.findByProps({ className: "archive-navigation" });
 
-    act(() => tabs[1].props.onClick());
+    act(() => archive.props.onClick());
 
+    expect(onToggleArchived).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders Archive as a visibly read-only secondary destination", () => {
+    const onToggleArchived = vi.fn();
+    const tree = render(
+      <Sidebar
+        {...sidebarCallbacks()}
+        nativeSessions={nativeSessions()}
+        onToggleArchived={onToggleArchived}
+        showArchived={true}
+        tasks={[]}
+      />,
+    );
+
+    expect(tree.root.findByProps({ className: "archive-section-head" }).findByType("strong").children).toEqual(["Archive"]);
+    expect(tree.root.findByType("small").children).toEqual(["Read-only tasks"]);
+    expect(tree.root.findAllByProps({ children: "New task" })).toHaveLength(0);
+    act(() => tree.root.findByProps({ "aria-label": "Back to tasks" }).props.onClick());
     expect(onToggleArchived).toHaveBeenCalledTimes(1);
   });
 
@@ -889,11 +907,11 @@ describe("Sidebar", () => {
 
     act(() => tree.root.findByProps({ className: "project-task-group-toggle" }).props.onClick());
     expect(taskRows(tree)).toHaveLength(20);
-    expect(tree.root.findByProps({ className: "project-task-more" }).children.join("")).toBe("Load 10 more tasks");
+    expect(tree.root.findByProps({ className: "project-task-more" }).children.join("")).toBe("Load more");
     act(() => tree.root.findByProps({ className: "project-task-more" }).props.onClick());
 
     expect(taskRows(tree)).toHaveLength(30);
-    expect(tree.root.findByProps({ className: "project-task-more" }).children.join("")).toBe("Load 2 more tasks");
+    expect(tree.root.findByProps({ className: "project-task-more" }).children.join("")).toBe("Load more");
     act(() => tree.root.findByProps({ className: "project-task-more" }).props.onClick());
 
     expect(taskRows(tree)).toHaveLength(32);
@@ -904,7 +922,7 @@ describe("Sidebar", () => {
     expect(taskRows(tree)).toHaveLength(20);
   });
 
-  it("keeps the active task visible when its project group is collapsed", () => {
+  it("hides the active task when its project group is collapsed", () => {
     const tree = render(
       <Sidebar
         {...sidebarCallbacks()}
@@ -928,7 +946,7 @@ describe("Sidebar", () => {
     act(() => tree.root.findByProps({ className: "project-task-group-toggle" }).props.onClick());
 
     expect(tree.root.findByProps({ className: "project-task-group-toggle" }).props["aria-expanded"]).toBe(false);
-    expect(rowTitles(tree)).toEqual(["Task 6"]);
+    expect(taskRows(tree)).toHaveLength(0);
     expect(tree.root.findAllByProps({ className: "project-task-more" })).toHaveLength(0);
   });
 
@@ -1182,7 +1200,7 @@ describe("Sidebar", () => {
     );
 
     expect(localTaskRows(tree)).toHaveLength(15);
-    expect(tree.root.findByProps({ className: "project-task-more" }).children.join("")).toBe("Load 2 more tasks");
+    expect(tree.root.findByProps({ className: "project-task-more" }).children.join("")).toBe("Load more");
     expect(tree.root.findAllByProps({ className: "task-row external-session-row" })).toHaveLength(0);
 
     act(() => tree.root.findByProps({ className: "project-task-more" }).props.onClick());
@@ -1358,7 +1376,7 @@ describe("Sidebar", () => {
 
     expect(localTaskRows(tree)).toHaveLength(1);
     expect(tree.root.findAllByProps({ className: "task-row external-session-row" })).toHaveLength(14);
-    expect(tree.root.findByProps({ className: "project-task-more" }).children.join("")).toBe("Load 2 more tasks");
+    expect(tree.root.findByProps({ className: "project-task-more" }).children.join("")).toBe("Load more");
     expect(taskRows(tree)).toHaveLength(15);
 
     act(() => tree.root.findByProps({ className: "project-task-more" }).props.onClick());
@@ -1366,7 +1384,7 @@ describe("Sidebar", () => {
     expect(localTaskRows(tree)).toHaveLength(1);
     expect(tree.root.findAllByProps({ className: "task-row external-session-row" })).toHaveLength(16);
     expect(tree.root.findByProps({ className: "project-task-more" }).children.join(""))
-      .toBe("Load more tasks");
+      .toBe("Load more");
     expect(taskRows(tree)).toHaveLength(17);
     expect(onLoadNativeSessions).toHaveBeenCalledWith(undefined, "project_1", 17);
   });
@@ -1405,14 +1423,14 @@ describe("Sidebar", () => {
 
     expect(taskRows(tree)).toHaveLength(15);
     expect(tree.root.findByProps({ className: "project-task-more" }).children.join(""))
-      .toBe("Load 2 more tasks");
+      .toBe("Load more");
 
     act(() => tree.root.findByProps({ className: "project-task-more" }).props.onClick());
     act(() => tree.update(sidebar(sessions, "cursor_3")));
 
     expect(taskRows(tree)).toHaveLength(17);
     expect(tree.root.findByProps({ className: "project-task-more" }).children.join(""))
-      .toBe("Load 10 more tasks");
+      .toBe("Load more");
   });
 });
 

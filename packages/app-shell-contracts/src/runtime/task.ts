@@ -33,7 +33,7 @@ export type TaskAttentionEvent = {
 };
 
 export type TaskSnapshot = {
-  lifecycle: "new" | "visible";
+  lifecycle: "prepared" | "open" | "archived";
   task: TaskSummary;
   /** App Server-authored start of the active turn; absent when no turn is running. */
   active_turn_started_at?: string;
@@ -87,5 +87,5 @@ export type HistorySyncState =
 export type TaskListResult = {
   tasks: TaskSummary[];
   revision: number;
-  archived: boolean;
+  lifecycle: "open" | "archived";
 };

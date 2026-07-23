@@ -11,7 +11,7 @@ use crate::snapshot::{
     TaskPreparationSnapshot, TaskSendCapabilitySnapshot, TaskSummary,
 };
 use crate::state::SubscriptionScope;
-use crate::task::ToolDetailSnapshot;
+use crate::task::{TaskLifecycleChanged, ToolDetailSnapshot};
 use crate::worktree::WorktreeRepositorySnapshot;
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
@@ -69,6 +69,9 @@ pub enum AppServerEventPayload {
     },
     TaskNavigationChanged {
         change: TaskNavigationChange,
+    },
+    TaskLifecycleChanged {
+        change: TaskLifecycleChanged,
     },
     /// Replaces the combined durable Task and unadopted Native Session projection.
     TaskNavigationReplaced {

@@ -114,6 +114,7 @@ pub(super) fn persist_new_task(
         revision: task.revision,
         committed_task: task.clone(),
         change: CommittedTaskChange {
+            lifecycle: None,
             changes,
             tool_details: Vec::new(),
             navigation,

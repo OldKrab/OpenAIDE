@@ -9,8 +9,9 @@ use openaide_app_server_protocol::support::{
     SupportRecoverStuckSessionsParams, SupportRecoverStuckSessionsResult,
 };
 use openaide_app_server_protocol::task::{
-    TaskAcquireParams, TaskAdoptNativeSessionParams, TaskCancelParams, TaskSearchFilesParams,
-    TaskSearchFilesResult, TaskSendParams, TaskSetArchivedParams,
+    TaskAcquireParams, TaskAdoptNativeSessionParams, TaskArchiveParams, TaskCancelParams,
+    TaskLifecycleChanged, TaskRestoreParams, TaskSearchFilesParams, TaskSearchFilesResult,
+    TaskSendParams,
 };
 use openaide_app_server_protocol::task::{TaskReleaseParams, TaskSetConfigOptionParams};
 
@@ -186,11 +187,17 @@ pub(crate) trait TaskReleaseWorkflow: Send + Sync {
 }
 
 pub(crate) trait TaskArchiveWorkflow: Send + Sync {
-    fn set_archived_for_client(
+    fn archive_for_client(
         &self,
         client_instance_id: &ClientInstanceId,
-        params: TaskSetArchivedParams,
-    ) -> Result<(), ProtocolError>;
+        params: TaskArchiveParams,
+    ) -> Result<TaskLifecycleChanged, ProtocolError>;
+
+    fn restore_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        params: TaskRestoreParams,
+    ) -> Result<TaskLifecycleChanged, ProtocolError>;
 }
 
 pub(crate) use attachments::{AttachmentFileBrowserWorkflow, ResolvedSentFile};
@@ -207,6 +214,24 @@ impl TaskProductApi {
         crate::tasks::access::require_client_task_access(&task, client_instance_id)
             .map_err(runtime_error)?;
         reject_tombstoned_task(&task)?;
+        Ok(task)
+    }
+
+    /// Guards operations that can contact or mutate the task's Agent session.
+    pub(super) fn read_interactive_task_for_client(
+        &self,
+        task_id: &str,
+        client_instance_id: &ClientInstanceId,
+    ) -> Result<TaskRecord, ProtocolError> {
+        let task = self.read_task_for_client(task_id, client_instance_id)?;
+        if matches!(
+            task.lifecycle,
+            crate::storage::records::TaskLifecycle::Archived
+        ) {
+            return Err(conflict_error(
+                "Archived Tasks are read-only; restore the Task before interacting with its Agent",
+            ));
+        }
         Ok(task)
     }
 
@@ -496,11 +521,21 @@ impl TaskProductApi {
         )
     }
 
-    pub(crate) fn set_archived_for_test(
+    pub(crate) fn archive_for_test(
         &self,
-        params: TaskSetArchivedParams,
-    ) -> Result<(), ProtocolError> {
-        self.set_task_archived(
+        params: TaskArchiveParams,
+    ) -> Result<TaskLifecycleChanged, ProtocolError> {
+        self.archive_task(
+            &crate::attachment_runtime::AttachmentOwner::test_client_instance_id(),
+            params,
+        )
+    }
+
+    pub(crate) fn restore_for_test(
+        &self,
+        params: TaskRestoreParams,
+    ) -> Result<TaskLifecycleChanged, ProtocolError> {
+        self.restore_task(
             &crate::attachment_runtime::AttachmentOwner::test_client_instance_id(),
             params,
         )
@@ -562,7 +597,7 @@ impl TaskReleaseWorkflow for TaskProductApi {
             .find(|task| {
                 matches!(
                     &task.lifecycle,
-                    crate::storage::records::TaskLifecycle::New { lease: Some(lessee) }
+                    crate::storage::records::TaskLifecycle::Prepared { lease: Some(lessee) }
                         if lessee == client_instance_id
                 )
             });
@@ -588,12 +623,20 @@ impl TaskReleaseWorkflow for TaskProductApi {
 }
 
 impl TaskArchiveWorkflow for TaskProductApi {
-    fn set_archived_for_client(
+    fn archive_for_client(
         &self,
         client_instance_id: &ClientInstanceId,
-        params: TaskSetArchivedParams,
-    ) -> Result<(), ProtocolError> {
-        self.set_task_archived(client_instance_id, params)
+        params: TaskArchiveParams,
+    ) -> Result<TaskLifecycleChanged, ProtocolError> {
+        self.archive_task(client_instance_id, params)
+    }
+
+    fn restore_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        params: TaskRestoreParams,
+    ) -> Result<TaskLifecycleChanged, ProtocolError> {
+        self.restore_task(client_instance_id, params)
     }
 }
 

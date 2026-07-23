@@ -132,8 +132,8 @@ export type AppState = {
   appServerReplicaEpoch: number;
   appServerStateRootId?: string;
   tasks: TaskSummary[];
-  taskListCache: {
-    active?: TaskSummary[];
+  taskLists: {
+    open?: TaskSummary[];
     archived?: TaskSummary[];
   };
   taskListError?: string;
@@ -171,7 +171,7 @@ export function createInitialState(): AppState {
   return {
     appServerReplicaEpoch: 0,
     tasks: [],
-    taskListCache: {},
+    taskLists: {},
     taskSnapshots: {},
     taskSnapshotReplicaEpochs: {},
     taskChatScrollStates: {},

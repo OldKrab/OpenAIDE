@@ -195,6 +195,27 @@ describe("AppSurfaces callback wiring", () => {
     );
   });
 
+  it("keeps the routed Task selected when transient navigation focus is absent", () => {
+    const controller = webControllerFor("task");
+    controller.bootstrap = {
+      surface: "task",
+      shell: WEB_SHELL,
+      taskId: "task_2",
+      appServerConnection: {
+        kind: "webProxy",
+        endpointUrl: "/__openaide-app-server/probe",
+      },
+    };
+    controller.activeNavigationTaskId = undefined;
+
+    render(controller);
+
+    expect(surfaceMocks.sidebar).toHaveBeenCalledWith(
+      expect.objectContaining({ activeTaskId: "task_2" }),
+      undefined,
+    );
+  });
+
   it("opens mobile web navigation after a left-edge swipe", () => {
     stubMobileWindow();
     const controller = webControllerFor("task");
@@ -1076,7 +1097,7 @@ function stubMobileWindow() {
 
 function snapshot(taskId: string, hasMessages = true): TaskSnapshot {
   return {
-    lifecycle: hasMessages ? "visible" : "new",
+    lifecycle: hasMessages ? "open" : "prepared",
     chat: {
       has_before: false,
       has_messages: hasMessages,

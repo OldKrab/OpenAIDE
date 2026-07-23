@@ -20,6 +20,7 @@ use openaide_app_server::protocol::params::{
 };
 use openaide_app_server::protocol::results::{HealthResult, TaskListResult};
 use openaide_app_server::storage::records::TaskPreparationRecord;
+use openaide_app_server_protocol::task::TaskListLifecycle;
 use serde_json::{json, Value};
 
 fn main() {
@@ -95,7 +96,7 @@ fn main() {
     let snapshot = TaskSnapshot {
         task: task.clone(),
         active_turn_started_at: None,
-        lifecycle: openaide_app_server::storage::records::TaskLifecycle::Visible,
+        lifecycle: openaide_app_server::storage::records::TaskLifecycle::Open,
         chat: chat.clone(),
         settings_summary: SettingsSummary {
             agent_id: "codex".to_string(),
@@ -125,7 +126,7 @@ fn main() {
                 context: vec![attachment()],
             }),
             "task_id": to_value(TaskIdParams { task_id: "task_1".to_string() }),
-            "task_list": to_value(TaskListParams { archived: true }),
+            "task_list": to_value(TaskListParams { lifecycle: TaskListLifecycle::Archived }),
             "task_snapshot": to_value(TaskSnapshotParams { task_id: "task_1".to_string(), tail_limit: 50 }),
             "chat_tail": to_value(ChatTailParams { task_id: "task_1".to_string(), limit: 25 }),
             "chat_page": to_value(ChatPageParams { task_id: "task_1".to_string(), before_cursor: "cursor_10".to_string(), limit: 25 }),
@@ -154,7 +155,7 @@ fn main() {
             "task_list": to_value(TaskListResult {
                 tasks: vec![task.clone()],
                 revision: 9,
-                archived: false,
+                lifecycle: TaskListLifecycle::Open,
             }),
             "task_snapshot": to_value(snapshot),
             "message_page": to_value(chat),
