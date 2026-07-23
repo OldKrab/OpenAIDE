@@ -107,7 +107,7 @@ export function SidebarTaskRow({
               <TaskPreviewDetails content={taskPreviewContent(task)} />
             </div>
           </> : <>
-            <button className="task-row-mobile-details-action" onClick={() => setDetailsOpen(true)} type="button" role="menuitem"><Info size={13} />Task details</button>
+            <button className="task-row-details-action" onClick={() => setDetailsOpen(true)} type="button" role="menuitem"><Info size={13} />Task details</button>
             <button onClick={runAction} type="button" role="menuitem">
               {showArchived ? <RotateCcw size={13} /> : <Archive size={13} />}
               {actionLabel}

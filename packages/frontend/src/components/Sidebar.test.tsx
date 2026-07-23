@@ -137,7 +137,7 @@ describe("SidebarTaskRow", () => {
     expect(read.root.findAllByProps({ className: "task-meta-age" })).toHaveLength(1);
   });
 
-  it("opens selected tasks and exposes Archive beside the mobile Task details action", () => {
+  it("opens selected tasks and exposes Archive beside the Task details action", () => {
     const onOpenTask = vi.fn();
     const onArchiveTask = vi.fn();
     const tree = render(
@@ -159,7 +159,7 @@ describe("SidebarTaskRow", () => {
     act(() => tree.root.findByProps({ "aria-label": "Task actions for Task" }).props.onClick());
     const menuItems = tree.root.findAllByProps({ role: "menuitem" });
     expect(menuItems).toHaveLength(2);
-    expect(menuItems[0].props.className).toBe("task-row-mobile-details-action");
+    expect(menuItems[0].props.className).toBe("task-row-details-action");
     expect(menuItems[1].children).toContain("Archive task");
     act(() => menuItems[1].props.onClick());
 
@@ -167,7 +167,7 @@ describe("SidebarTaskRow", () => {
     expect(onArchiveTask).toHaveBeenCalledWith("task_1");
   });
 
-  it("shows the complete desktop preview content through the mobile Task details action", () => {
+  it("shows the complete desktop preview content through the Task details action", () => {
     const tree = render(
       <SidebarTaskRow
         onArchiveTask={vi.fn()}
@@ -186,7 +186,7 @@ describe("SidebarTaskRow", () => {
     );
 
     act(() => tree.root.findByProps({ "aria-label": "Task actions for Popup work" }).props.onClick());
-    act(() => tree.root.findByProps({ className: "task-row-mobile-details-action" }).props.onClick());
+    act(() => tree.root.findByProps({ className: "task-row-details-action" }).props.onClick());
 
     const details = tree.root.findByProps({ className: "task-row-details" });
     const text = details.findAllByType("strong").map((item) => item.children.join(""));
@@ -476,6 +476,7 @@ describe("SidebarNativeSessionRow", () => {
     const buttons = tree.root.findAllByType("button");
     expect(buttons[0].props.disabled).toBe(false);
     expect(buttons[1].props.title).toBe("Open task");
+    expect(buttons[2].props.title).toBe("Task actions");
     expect(tree.root.findByProps({ className: "task-agent-icon" }).props["aria-label"]).toBe("Agent: Codex");
     expect(tree.root.findByProps({ className: "task-meta-age" })).toBeDefined();
     expect(tree.root.findByProps({ className: "task-title" }).props.title).toBeUndefined();
@@ -483,6 +484,30 @@ describe("SidebarNativeSessionRow", () => {
     act(() => buttons[0].props.onClick());
 
     expect(onOpenNativeSession).toHaveBeenCalledWith(session);
+  });
+
+  it("shows complete Task details for listed Agent history", () => {
+    const tree = render(
+      <SidebarNativeSessionRow
+        nativeSessionAgentId="codex"
+        nativeSessionAgentName="Codex"
+        onOpenNativeSession={vi.fn()}
+        session={nativeSession({
+          cwd: "/workspace/OpenAIDE",
+          last_activity: "2026-07-20T10:00:00Z",
+          title: "Existing session",
+        })}
+      />,
+    );
+
+    act(() => tree.root.findByProps({ "aria-label": "Task actions for Existing session" }).props.onClick());
+    act(() => tree.root.findByProps({ className: "task-row-details-action" }).props.onClick());
+
+    const details = tree.root.findByProps({ className: "task-row-details" });
+    expect(details.findAllByType("strong").map((item) => item.children.join("")))
+      .toEqual(["Existing session", "/workspace/OpenAIDE"]);
+    expect(details.findByProps({ className: "task-preview-source-action" }).children.join(""))
+      .toBe("· Open to load");
   });
 
   it("shows the delayed rich preview for a Native Session that is not yet adopted", () => {
@@ -551,7 +576,7 @@ describe("SidebarNativeSessionRow", () => {
       />,
     );
 
-    expect(tree.root.findAllByType("button").map((button) => button.props.disabled)).toEqual([true, true]);
+    expect(tree.root.findAllByType("button").map((button) => button.props.disabled)).toEqual([true, true, true]);
     expect(tree.root.findAllByType("button")[1].props.title).toBe("Opening task");
     expect(tree.root.findByProps({ className: "task-trailing-indicator" }).props["aria-label"]).toBe("Opening task");
   });
@@ -570,7 +595,7 @@ describe("SidebarNativeSessionRow", () => {
     );
 
     const buttons = tree.root.findAllByType("button");
-    expect(buttons.map((button) => button.props.disabled)).toEqual([false, false]);
+    expect(buttons.map((button) => button.props.disabled)).toEqual([false, false, false]);
 
     act(() => buttons[0].props.onClick());
     expect(onOpenNativeSession).toHaveBeenCalledWith(session);

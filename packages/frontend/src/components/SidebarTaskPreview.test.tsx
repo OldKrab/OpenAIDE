@@ -11,6 +11,34 @@ afterEach(() => {
 });
 
 describe("SidebarTaskPreview", () => {
+  it("does not open rich hover previews inside VS Code navigation", () => {
+    vi.useFakeTimers();
+    vi.stubGlobal("window", {
+      innerHeight: 800,
+      innerWidth: 900,
+      matchMedia: () => ({ matches: false }),
+    });
+    vi.stubGlobal("document", {
+      body: { dataset: { shell: "vscodeExtension" } },
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    });
+    const row = {
+      getBoundingClientRect: () => ({ bottom: 72, height: 32, left: 8, right: 296, top: 40, width: 288, x: 8, y: 40 }),
+    } as HTMLElement;
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<SidebarTaskPreviewProvider><HoverTarget row={row} /></SidebarTaskPreviewProvider>);
+    });
+
+    act(() => tree.root.findByType("button").props.onPointerEnter());
+    act(() => {
+      vi.advanceTimersByTime(1_000);
+    });
+
+    expect(tree.root.findAllByProps({ role: "dialog" })).toHaveLength(0);
+  });
+
   it("opens after one second of pointer dwell", () => {
     vi.useFakeTimers();
     vi.stubGlobal("window", {
