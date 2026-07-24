@@ -173,10 +173,18 @@ impl SnapshotBuilder {
         token: &SnapshotReadToken,
     ) -> Result<ClientSnapshot, ProtocolError> {
         let active_task = match &requested_surface {
-            RequestedSurface::Task { task_id } => Some(
-                self.task_snapshots
-                    .open_for_client(&ctx.client_instance_id, task_id)?,
-            ),
+            RequestedSurface::Task { task_id } => {
+                match self
+                    .task_snapshots
+                    .open_for_client(&ctx.client_instance_id, task_id)
+                {
+                    Ok(task) => Some(task),
+                    // Client initialization owns the global baseline. The routed
+                    // task/open request reports a missing Task without poisoning it.
+                    Err(error) if error.code == ProtocolErrorCode::NotFound => None,
+                    Err(error) => return Err(error),
+                }
+            }
             _ => None,
         };
         Ok(ClientSnapshot {

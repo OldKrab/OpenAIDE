@@ -134,7 +134,6 @@ export function useAppControllerBackendLifecycle({
   } = useAppServerReplicaLifecycle(dispatch, onReplicaChanged);
   const backendInitialized = useRef(false);
   const [backendInitializationReady, setBackendInitializationReady] = useState(false);
-  const routeOpenError = useRef<string | undefined>(undefined);
   const stateSubscriptionContext = useRef<StateSubscriptionMappingContext | undefined>(undefined);
   const failedSubscriptionBaselines = useRef(new Map<string, string>());
   const pendingGlobalSubscriptionBaselines = useRef(new Set<string>());
@@ -179,10 +178,6 @@ export function useAppControllerBackendLifecycle({
     const remainingMessage = [...failedSubscriptionBaselines.current.values()].at(-1);
     if (remainingMessage) {
       setBackendConnectionState({ status: "reconnecting", message: remainingMessage });
-      return;
-    }
-    if (routeOpenError.current) {
-      setBackendConnectionState({ status: "unavailable", message: routeOpenError.current });
       return;
     }
     if (pendingGlobalSubscriptionBaselines.current.size > 0) return;
@@ -268,7 +263,6 @@ export function useAppControllerBackendLifecycle({
     setBackendInitializationReady(false);
     failedSubscriptionBaselines.current.clear();
     pendingGlobalSubscriptionBaselines.current.clear();
-    routeOpenError.current = undefined;
     setBackendReady(false);
     setBackendConnectionState({ status: "connecting" });
     taskRouteLifecycle.reset();
@@ -512,7 +506,6 @@ export function useAppControllerBackendLifecycle({
     markSubscriptionReady,
     operationOwner,
     replicaEpochRef,
-    routeOpenError,
     setBackendConnectionState,
     snapshot: state.snapshot,
     stateSubscriptionContext,

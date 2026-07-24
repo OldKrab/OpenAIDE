@@ -4,7 +4,7 @@ import { invalidateAppServerAttachments, localAttachment, selectionWithProject }
 import type { ComposerAttachment } from "./composerOptions";
 import type { AppAction } from "./appReducer";
 import { configOptionsCatalogKey } from "./configOptionState";
-import { toolDetailCacheKey, type AppState } from "./store";
+import { toolDetailCacheKey, type AppState, type TaskOpenError } from "./store";
 
 type TaskInteractionAction =
   | { type: "taskInput:prompt"; taskId: string; prompt: string }
@@ -27,7 +27,7 @@ type TaskInteractionAction =
   | { type: "taskInput:cancelError"; taskId: string; message: string }
   | { type: "taskInput:attachments:invalidate"; taskId: string; message: string }
   | { type: "taskOpen:start"; taskId: string }
-  | { type: "taskOpen:error"; taskId: string; message: string }
+  | { type: "taskOpen:error"; taskId: string; kind?: TaskOpenError["kind"]; message: string }
   | { type: "chatPage:start"; taskId: string; requestGeneration: number }
   | { type: "chatPage:result"; taskId: string; requestGeneration: number; page: MessagePage }
   | { type: "chatPage:error"; taskId: string; requestGeneration: number; message: string }
@@ -263,7 +263,14 @@ export function reduceTaskInteractionState(state: AppState, action: AppAction): 
         (state.snapshot && state.snapshot.task.task_id !== action.taskId)
         || (state.activeTaskId !== undefined && state.activeTaskId !== action.taskId)
       ) return state;
-      return { ...state, taskOpenError: { taskId: action.taskId, message: action.message } };
+      return {
+        ...state,
+        taskOpenError: {
+          taskId: action.taskId,
+          kind: action.kind ?? "failed",
+          message: action.message,
+        },
+      };
     case "chatPage:start": {
       const current = state.chatPages[action.taskId] ?? { olderItems: [], hasBefore: true };
       if ((current.requestGeneration ?? 0) >= action.requestGeneration) return state;

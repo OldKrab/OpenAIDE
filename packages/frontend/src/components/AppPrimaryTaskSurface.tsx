@@ -34,17 +34,21 @@ export function primaryTaskSurfaceModel(controller: AppController) {
   const nativeRouteError = adoptionError && adoptionError.sessionId === routedNativeSessionId
     ? adoptionError.message
     : undefined;
-  const taskLoadingError = openingNativeSession
-    ? nativeRouteError
-    : bootstrap.taskId && primaryTask.taskOpenError?.taskId === bootstrap.taskId
-      ? primaryTask.taskOpenError.message
-      : undefined;
+  const routedTaskOpenError = bootstrap.taskId
+    && primaryTask.taskOpenError?.taskId === bootstrap.taskId
+    ? primaryTask.taskOpenError
+    : undefined;
+  const taskLoadingError = openingNativeSession ? nativeRouteError : routedTaskOpenError?.message;
+  const taskLoadingErrorKind = openingNativeSession
+    ? nativeRouteError ? "failed" as const : undefined
+    : routedTaskOpenError?.kind;
   return {
     openingNativeSession,
     renderableTaskArchived,
     renderableTaskSnapshot,
     startupConfigOptions,
     taskLoadingError,
+    taskLoadingErrorKind,
   };
 }
 
@@ -80,6 +84,7 @@ export function AppPrimaryTaskSurface({ controller, focusRequestKey, model, work
     renderableTaskSnapshot,
     startupConfigOptions,
     taskLoadingError,
+    taskLoadingErrorKind,
   } = model;
   const usesProjectNavigation = bootstrap.surface !== "invalid" && bootstrap.shell.navigationMode === "project";
   const canSelectNewTaskProject = usesProjectNavigation
@@ -136,6 +141,7 @@ export function AppPrimaryTaskSurface({ controller, focusRequestKey, model, work
     return (
       <TaskLoadingView
         error={taskLoadingError}
+        errorKind={taskLoadingErrorKind}
         label={openingNativeSession ? "Opening session" : undefined}
         onRetry={retryTaskOpen}
       />

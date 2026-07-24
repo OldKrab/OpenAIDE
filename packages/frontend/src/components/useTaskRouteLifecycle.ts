@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type Dispatch, type MutableRefObject, type RefObject } from "react";
 import type { TaskSnapshot } from "@openaide/app-shell-contracts";
-import type { TaskId } from "@openaide/app-server-client";
+import { AppServerProtocolError, type TaskId } from "@openaide/app-server-client";
 import { requestTaskOpen } from "../intents/taskReadIntents";
 import {
   startAppServerStateSubscription,
@@ -8,7 +8,9 @@ import {
 } from "../services/appServerStateSubscriptions";
 import { bindAppServerReplicaEpoch, type AppAction, type SnapshotIntent } from "../state/appReducer";
 import type { AsyncOperationOwner } from "../state/asyncOperationOwner";
+import { sendWebviewTelemetry } from "../state/hostMessageRouter";
 import type { WebviewBootstrap } from "../state/surfaceTypes";
+import { postHostMessage } from "../services/hostBridge";
 import type {
   AppControllerBackendConnection,
   BackendConnectionState,
@@ -28,7 +30,6 @@ type TaskRouteLifecycleOptions = {
   markSubscriptionReady(key: string): void;
   operationOwner: AsyncOperationOwner;
   replicaEpochRef: RefObject<number>;
-  routeOpenError: MutableRefObject<string | undefined>;
   setBackendConnectionState(state: BackendConnectionState): void;
   snapshot?: TaskSnapshot;
   stateSubscriptionContext: RefObject<StateSubscriptionMappingContext | undefined>;
@@ -49,7 +50,6 @@ export function useTaskRouteLifecycle({
   markSubscriptionReady,
   operationOwner,
   replicaEpochRef,
-  routeOpenError,
   setBackendConnectionState,
   snapshot,
   stateSubscriptionContext,
@@ -66,10 +66,9 @@ export function useTaskRouteLifecycle({
   const reset = useCallback(() => {
     lastRequestedRouteTaskKey.current = undefined;
     routeOpenInFlight.current = undefined;
-    routeOpenError.current = undefined;
     setReadyTaskSubscriptionKey(undefined);
     setReadyRouteOpenKey(undefined);
-  }, [routeOpenError]);
+  }, []);
 
   useEffect(() => {
     if (!backendConnection || !backendReady || !backendInitialized.current || !snapshot) return;
@@ -111,7 +110,6 @@ export function useTaskRouteLifecycle({
     if (bootstrap.surface !== "task" || !bootstrap.taskId) {
       lastRequestedRouteTaskKey.current = undefined;
       routeOpenInFlight.current = undefined;
-      routeOpenError.current = undefined;
       if (backendInitialized.current && failedSubscriptionBaselines.current.size === 0) {
         setBackendConnectionState({ status: "ready" });
       }
@@ -131,9 +129,6 @@ export function useTaskRouteLifecycle({
     if (lastRequestedRouteTaskKey.current === requestKey) return;
     if (routeOpenInFlight.current?.requestKey === requestKey) return;
     lastRequestedRouteTaskKey.current = requestKey;
-    const wasUnavailable = routeOpenError.current !== undefined;
-    routeOpenError.current = undefined;
-    if (wasUnavailable) setBackendConnectionState({ status: "connecting" });
     const openOperation = operationOwner.claim("route-task-open", requestKey);
     const requestReplicaEpoch = replicaEpochRef.current;
     const requestDispatch = bindAppServerReplicaEpoch(dispatch, requestReplicaEpoch);
@@ -152,16 +147,24 @@ export function useTaskRouteLifecycle({
       .then(() => {
         if (openAccepted && operationOwner.owns(openOperation)) {
           setReadyRouteOpenKey(requestKey);
-          if (failedSubscriptionBaselines.current.size === 0) {
-            setBackendConnectionState({ status: "ready" });
-          }
         }
       })
       .catch((error) => {
         if (!operationOwner.owns(openOperation)) return;
         const message = error instanceof Error ? error.message : "Unable to open task from App Server.";
-        routeOpenError.current = message;
-        setBackendConnectionState({ status: "unavailable", message });
+        const taskNotFound = error instanceof AppServerProtocolError
+          && error.protocolError.code === "notFound";
+        sendWebviewTelemetry(postHostMessage, "task_route_open_failed", {
+          task_id: taskId,
+          error_name: error instanceof Error ? error.name : typeof error,
+          error_code: error instanceof AppServerProtocolError
+            ? error.protocolError.code
+            : undefined,
+        });
+        if (taskNotFound) {
+          requestDispatch({ type: "taskOpen:error", taskId, kind: "notFound", message });
+          return;
+        }
         requestDispatch({ type: "taskOpen:error", taskId, message });
       });
     routeOpenInFlight.current = { promise: openRequest, requestKey };
@@ -193,9 +196,7 @@ export function useTaskRouteLifecycle({
   const retryTaskOpen = useCallback(() => {
     if (bootstrap.surface !== "task" || !bootstrap.taskId || !backendInitialized.current) return;
     lastRequestedRouteTaskKey.current = undefined;
-    routeOpenError.current = undefined;
     setReadyRouteOpenKey(undefined);
-    setBackendConnectionState({ status: "reconnecting", message: "Retrying task open." });
     dispatch({ type: "taskOpen:start", taskId: bootstrap.taskId });
     setRouteOpenSettlement((settlement) => settlement + 1);
   }, [bootstrap.surface, bootstrap.taskId, dispatch]);
