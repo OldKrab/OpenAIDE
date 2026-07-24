@@ -180,6 +180,71 @@ describe("NewTaskView", () => {
     expect(menuLabels(tree)).toEqual(expect.arrayContaining(["Codex", "OpenCode"]));
   });
 
+  it("shows the selected Project worktrees after changing New Task Project context", () => {
+    let state = createInitialState();
+    const webProject = { projectId: "project_web", label: "Web", workspaceRoot: "/workspace/web" };
+    const apiProject = {
+      projectId: "project_api",
+      label: "API",
+      workspaceRoot: "/workspace/api",
+      worktreeRepositoryId: "repository_api",
+      projectWorktreeId: "worktree_api_root",
+    };
+    state.projects = [webProject, apiProject];
+    state.newTask.selection = selectionWithProject(state.newTask.selection, webProject);
+    state.worktreeRepositories.repository_api = {
+      repositoryId: "repository_api" as never,
+      revision: 1,
+      bases: [],
+      worktrees: [{
+        worktreeId: "worktree_api_root" as never,
+        name: "API",
+        path: "/workspace/api",
+        forgotten: false,
+        ownership: "external",
+        isMain: true,
+        head: { kind: "branch", name: "main", commit: "8ea7d1c000000000" },
+        availability: "available",
+        projectIds: ["project_api" as never],
+        linkedTaskCount: 0,
+        runningTaskCount: 0,
+      }, {
+        worktreeId: "worktree_api_feature" as never,
+        name: "API feature",
+        path: "/workspace/api-feature",
+        forgotten: false,
+        ownership: "external",
+        isMain: false,
+        head: { kind: "branch", name: "feature/api", commit: "8ea7d1c000000000" },
+        availability: "available",
+        projectIds: [],
+        linkedTaskCount: 0,
+        runningTaskCount: 0,
+      }],
+    };
+    const dispatch = vi.fn((action: AppAction) => {
+      state = appReducer(state, action);
+    });
+    const view = () => (
+      <NewTaskView
+        agents={[]}
+        dispatch={dispatch}
+        onSelectConfigOption={vi.fn()}
+        onSubmitTask={vi.fn()}
+        state={state}
+        submitShortcut="mod_enter"
+      />
+    );
+    const tree = render(view());
+
+    act(() => buttonWithText(tree, "Web").props.onClick());
+    act(() => buttonWithText(tree, "API").props.onClick());
+    act(() => tree.update(view()));
+    act(() => buttonWithText(tree, "Project root").props.onClick());
+
+    expect(buttonWithText(tree, "API feature")).toBeDefined();
+  });
+
   it("does not synthesize authoritative workspace choices from Task history", () => {
     const state = createInitialState();
     state.tasks = [{

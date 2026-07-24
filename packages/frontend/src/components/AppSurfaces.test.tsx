@@ -524,6 +524,23 @@ describe("AppSurfaces callback wiring", () => {
     expect(surfaceMocks.task).not.toHaveBeenCalled();
   });
 
+  it("allows project selection for a VS Code New Task with multiple workspace Projects", () => {
+    const controller = controllerFor("task");
+    controller.bootstrap = {
+      surface: "task",
+      shell: VSCODE_SHELL,
+      projectId: "project_1",
+      projectIds: ["project_1", "project_2"],
+    };
+
+    render(controller);
+
+    expect(surfaceMocks.newTask).toHaveBeenCalledWith(
+      expect.objectContaining({ projectContextMode: "selectable" }),
+      undefined,
+    );
+  });
+
   it("passes archive context and restore action to the task view", () => {
     const controller = controllerFor("task");
     controller.state.snapshot = snapshot("task_1", true);

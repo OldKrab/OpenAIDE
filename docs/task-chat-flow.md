@@ -48,6 +48,8 @@ A Task Workspace is either the selected Project root or one durable worktree ide
 
 Task Navigation is an App Server-owned, Project-grouped projection. Its primary `tasks` section contains visible Open Tasks and persisted unadopted Native Sessions; its secondary `archive` section contains Archived Tasks only. Every App Shell renders the Project groups, including a single-Project VS Code workspace. A Native Session has no Task id until `session/load` succeeds. Selecting one first opens a pre-Task route identified by Agent id and Native Session id (`/session/{agentId}/{sessionId}` in the Web App). Successful load replaces that route with `/task/{taskId}`; definitive not-found leaves the opening route visible with **This session no longer exists.** while removing the stale Navigation row. One Agent Native Session can bind to only one Task, and that binding never changes; concurrent adoption attempts converge on that Task.
 
+VS Code scopes Task Navigation and editor surfaces to the Projects represented by folders in the current VS Code window. A multi-root window exposes those Projects in New Task so the user can change Project Context and then choose that Project's root or worktree as the Task Workspace; a single-root window keeps its Project Context fixed. General New Task entry uses the client's retained valid selection and then the App Server default, while a Project-scoped New Task action supplies an initial Project hint. A route hint applies once when that New Task surface opens and never overrides a later user selection.
+
 App Server persists successful `session/list` observations and returns them in the immediate subscription baseline after restart. It never deletes a cached row merely because a partial or failed listing omitted it. A definitive not-found response from `session/load` removes the stale Native Session while its opening surface reports that it no longer exists.
 
 Only the Native Session Catalog calls `session/list`. It discovers all enabled Agents for every visible Project root and available worktree, coalesces overlapping refresh demand, publishes successful pages independently, and retains cursors only inside App Server. Discovery starts when Task Navigation gains a subscriber, repeats every 60 seconds while demand remains, and also responds to `taskNavigation/refresh` and `taskNavigation/loadMore`.
@@ -91,8 +93,8 @@ There are two selection owners:
 
 Selection priority is:
 
-1. the client's retained valid selection;
-2. an explicit App Shell Project hint, such as the VS Code Project Context;
+1. an explicit Project-scoped New Task route hint;
+2. the client's retained valid selection;
 3. App Server's persisted last-used default when it remains available;
 4. the first available Project in collection label/id order and the first available Agent in registry order.
 

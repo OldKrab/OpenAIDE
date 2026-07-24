@@ -82,6 +82,8 @@ export function AppPrimaryTaskSurface({ controller, focusRequestKey, model, work
     taskLoadingError,
   } = model;
   const usesProjectNavigation = bootstrap.surface !== "invalid" && bootstrap.shell.navigationMode === "project";
+  const canSelectNewTaskProject = usesProjectNavigation
+    || (bootstrap.surface !== "invalid" && (bootstrap.projectIds?.length ?? 0) > 1);
   const retryTaskOpen = !openingNativeSession
     && (taskLoadingError || controller.backendConnectionState.status === "unavailable")
     ? controller.retryTaskOpen
@@ -152,7 +154,7 @@ export function AppPrimaryTaskSurface({ controller, focusRequestKey, model, work
       onRemoveAttachment={callbacks.newTask.removeAttachment}
       onSelectConfigOption={callbacks.newTask.selectConfigOption}
       onSubmitTask={callbacks.newTask.submit}
-      projectContextMode={usesProjectNavigation ? "selectable" : "fixed"}
+      projectContextMode={canSelectNewTaskProject ? "selectable" : "fixed"}
       state={primaryTask.newTask}
       submitShortcut={preferences.composer_submit_shortcut}
       workspaceBrowser={callbacks.newTask.workspaceBrowser}
