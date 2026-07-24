@@ -329,7 +329,7 @@ impl TaskProductApi {
                     .is_some_and(|(frontier, cutoff)| frontier <= cutoff);
             if next.is_none()
                 || page_order.new_identity_count == 0
-                || seen.len() >= target
+                || self.active_navigation_row_count(project_id, task_records) >= target
                 || reached_activity_cutoff
             {
                 break next.is_some() && page_order.new_identity_count > 0;
@@ -390,6 +390,11 @@ impl TaskProductApi {
                         entry.observation.reference.session_id.clone(),
                     ))
                 })
+                .filter(|entry| {
+                    !self
+                        .native_catalog
+                        .is_archived(&entry.observation.reference)
+                })
                 .map(|entry| {
                     entry
                         .observation
@@ -403,6 +408,56 @@ impl TaskProductApi {
         }
         activities.sort_by(|left, right| right.cmp(left));
         activities.get(target - 1).copied().flatten()
+    }
+
+    fn active_navigation_row_count(&self, project_id: &str, task_records: &[TaskRecord]) -> usize {
+        let enabled_agents = self
+            .agent_registry
+            .summaries()
+            .into_iter()
+            .map(|agent| agent.id)
+            .collect::<std::collections::HashSet<_>>();
+        let owned = task_records
+            .iter()
+            .filter_map(|task| {
+                task.agent_session_id
+                    .as_ref()
+                    .map(|session_id| (task.agent_id.clone(), session_id.clone()))
+            })
+            .collect::<std::collections::HashSet<_>>();
+        let task_count = task_records
+            .iter()
+            .filter(|task| {
+                !task.tombstoned
+                    && task.lifecycle.is_open()
+                    && enabled_agents.contains(&task.agent_id)
+                    && ProjectIdentity::from_workspace_root(
+                        task.project_root.as_deref().unwrap_or(&task.workspace_root),
+                    )
+                    .project_id
+                    .as_str()
+                        == project_id
+            })
+            .count();
+        let session_count = self
+            .native_catalog
+            .entries()
+            .into_iter()
+            .filter(|entry| entry.project_id == project_id)
+            .filter(|entry| enabled_agents.contains(&entry.observation.reference.agent_id))
+            .filter(|entry| {
+                !owned.contains(&(
+                    entry.observation.reference.agent_id.clone(),
+                    entry.observation.reference.session_id.clone(),
+                ))
+            })
+            .filter(|entry| {
+                !self
+                    .native_catalog
+                    .is_archived(&entry.observation.reference)
+            })
+            .count();
+        task_count + session_count
     }
 
     /// Advances owned Task activity from listings without importing stale runtime metadata.

@@ -961,6 +961,7 @@ function controllerFor(surface: AppController["bootstrap"]["surface"]): TestCont
     bootstrap: surface === "invalid" ? { surface } : { surface, shell: VSCODE_SHELL },
     callbacks: {
       navigation: {
+        archiveNativeSession: vi.fn(),
         archiveTask: vi.fn(),
         changeSearch: vi.fn(),
         loadNativeSessions: vi.fn(),
@@ -969,6 +970,7 @@ function controllerFor(surface: AppController["bootstrap"]["surface"]): TestCont
         openSettings: vi.fn(),
         retryAgent: vi.fn(async () => true),
         openTask: vi.fn(),
+        restoreNativeSession: vi.fn(),
         restoreTask: vi.fn(),
         setTaskTitle: vi.fn(),
         toggleArchived: vi.fn(),
@@ -1056,6 +1058,7 @@ function viewFor(state: AppState): AppController["view"] {
     appServerError: state.appServerError,
     navigation: {
       nativeSessions: state.newTask.nativeSessions,
+      nativeSessionMutations: state.nativeSessionMutations,
       newTaskSelection: state.newTask.selection,
       projects: state.projects,
       searchQuery: state.searchQuery,

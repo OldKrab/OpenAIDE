@@ -73,6 +73,7 @@ export type AppControllerView = {
   appServerError?: string;
   navigation: {
     nativeSessions: AppState["newTask"]["nativeSessions"];
+    nativeSessionMutations: AppState["nativeSessionMutations"];
     newTaskSelection: AppState["newTask"]["selection"];
     projects: AppState["projects"];
     searchQuery: string;
@@ -497,7 +498,10 @@ export function useAppController(options: AppControllerOptions = {}): AppControl
     view: {
       appServerError: state.appServerError,
       navigation: {
-        nativeSessions: state.newTask.nativeSessions,
+        nativeSessions: state.showArchived
+          ? state.archivedNativeSessions
+          : state.newTask.nativeSessions,
+        nativeSessionMutations: state.nativeSessionMutations,
         newTaskSelection: state.newTask.selection,
         projects: state.projects,
         searchQuery: state.searchQuery,

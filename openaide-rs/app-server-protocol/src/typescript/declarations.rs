@@ -98,17 +98,18 @@ use crate::support::{SupportRecoverStuckSessionsParams, SupportRecoverStuckSessi
 use crate::task::{
     ActivityToolContent, ActivityToolField, ActivityToolInput, ActivityToolLocation,
     ActivityToolOutput, ActivityToolValue, ComposerImage, ComposerMessage,
-    TaskAcquireInWorktreeParams, TaskAcquireInWorktreeResult, TaskAcquireParams, TaskAcquireResult,
-    TaskAdoptNativeSessionParams, TaskAdoptNativeSessionResult, TaskArchiveParams,
-    TaskArchiveResult, TaskCancelParams, TaskCancelResult, TaskChatPageParams, TaskChatPageResult,
-    TaskLifecycleChanged, TaskListLifecycle, TaskListParams, TaskListResult, TaskMarkReadParams,
-    TaskMarkReadResult, TaskNavigationLoadMoreParams, TaskNavigationLoadMoreResult,
-    TaskNavigationRefreshParams, TaskNavigationRefreshResult, TaskNavigationSection,
-    TaskOpenParams, TaskOpenResult, TaskReleaseParams, TaskReleaseResult, TaskRestoreParams,
-    TaskRestoreResult, TaskSearchFilesParams, TaskSearchFilesResult, TaskSendParams,
-    TaskSendResult, TaskSetConfigOptionParams, TaskSetConfigOptionResult, TaskSetTitleParams,
-    TaskSetTitleResult, TaskTitleSelection, TerminalOutputSnapshot, ToolDetailSnapshot,
-    WorkspaceFileSearchState,
+    NativeSessionArchiveParams, NativeSessionArchiveResult, NativeSessionRestoreParams,
+    NativeSessionRestoreResult, TaskAcquireInWorktreeParams, TaskAcquireInWorktreeResult,
+    TaskAcquireParams, TaskAcquireResult, TaskAdoptNativeSessionParams,
+    TaskAdoptNativeSessionResult, TaskArchiveParams, TaskArchiveResult, TaskCancelParams,
+    TaskCancelResult, TaskChatPageParams, TaskChatPageResult, TaskLifecycleChanged,
+    TaskListLifecycle, TaskListParams, TaskListResult, TaskMarkReadParams, TaskMarkReadResult,
+    TaskNavigationLoadMoreParams, TaskNavigationLoadMoreResult, TaskNavigationRefreshParams,
+    TaskNavigationRefreshResult, TaskNavigationSection, TaskOpenParams, TaskOpenResult,
+    TaskReleaseParams, TaskReleaseResult, TaskRestoreParams, TaskRestoreResult,
+    TaskSearchFilesParams, TaskSearchFilesResult, TaskSendParams, TaskSendResult,
+    TaskSetConfigOptionParams, TaskSetConfigOptionResult, TaskSetTitleParams, TaskSetTitleResult,
+    TaskTitleSelection, TerminalOutputSnapshot, ToolDetailSnapshot, WorkspaceFileSearchState,
 };
 use crate::workspace::{
     WorkspaceBrowserDirectory, WorkspaceBrowserEntry, WorkspaceBrowserRoot,
@@ -389,6 +390,10 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<TaskNavigationRefreshResult>(output, config);
     push_decl::<TaskNavigationLoadMoreParams>(output, config);
     push_decl::<TaskNavigationLoadMoreResult>(output, config);
+    push_decl::<NativeSessionArchiveParams>(output, config);
+    push_decl::<NativeSessionArchiveResult>(output, config);
+    push_decl::<NativeSessionRestoreParams>(output, config);
+    push_decl::<NativeSessionRestoreResult>(output, config);
     push_decl::<TaskReleaseParams>(output, config);
     push_decl::<TaskReleaseResult>(output, config);
     push_decl::<TaskArchiveParams>(output, config);

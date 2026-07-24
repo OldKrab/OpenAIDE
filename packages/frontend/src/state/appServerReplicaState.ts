@@ -35,6 +35,8 @@ export function applyAppServerReplica(
     appServerStateRootId: stateRootId,
     tasks: initial.tasks,
     taskLists: initial.taskLists,
+    archivedNativeSessions: initial.archivedNativeSessions,
+    nativeSessionMutations: initial.nativeSessionMutations,
     taskListError: undefined,
     activeTaskId: undefined,
     snapshot: undefined,
@@ -84,6 +86,7 @@ function invalidateProcessOwnedState(state: AppState): AppState {
     taskLiveTextPresentation: {},
     taskInputs,
     toolDetails: {},
+    nativeSessionMutations: {},
     newTask: {
       ...state.newTask,
       prompt: state.newTask.pending?.prompt ?? state.newTask.prompt,

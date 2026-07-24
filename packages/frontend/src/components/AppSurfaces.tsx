@@ -166,10 +166,12 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           groupByProject={true}
           maxTasksPerProject={DEFAULT_MAX_TASKS_PER_PROJECT}
           nativeSessions={navigation.nativeSessions}
+          nativeSessionMutations={navigation.nativeSessionMutations}
           nativeSessionAgentId={navigation.newTaskSelection.agentId}
           nativeSessionAgentName={navigation.newTaskSelection.agentLabel}
           nativeSessionProjectId={navigation.newTaskSelection.projectId}
           onArchiveTask={callbacks.navigation.archiveTask}
+          onArchiveNativeSession={callbacks.navigation.archiveNativeSession}
           onLoadNativeSessions={callbacks.navigation.loadNativeSessions}
           onManageWorktrees={setManagedProjectId}
           onNewTask={callbacks.navigation.openNewTask}
@@ -180,6 +182,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
             : callbacks.navigation.openSettings()}
           onRestoreTask={callbacks.navigation.restoreTask}
           onSetTaskTitle={callbacks.navigation.setTaskTitle}
+          onRestoreNativeSession={callbacks.navigation.restoreNativeSession}
           onSearchChange={callbacks.navigation.changeSearch}
           onSettings={callbacks.navigation.openSettings}
           onToggleArchived={callbacks.navigation.toggleArchived}
@@ -332,9 +335,11 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           modal={mobileLayoutActive && mobileNavigation.active}
           loadingTasks={!backendReady}
           nativeSessions={navigation.nativeSessions}
+          nativeSessionMutations={navigation.nativeSessionMutations}
           nativeSessionAgentId={navigation.newTaskSelection.agentId}
           nativeSessionAgentName={navigation.newTaskSelection.agentLabel}
           nativeSessionProjectId={navigation.newTaskSelection.projectId}
+          onArchiveNativeSession={callbacks.navigation.archiveNativeSession}
           onArchiveTask={callbacks.navigation.archiveTask}
           onLoadNativeSessions={callbacks.navigation.loadNativeSessions}
           onManageWorktrees={(projectId) => { closeMobileNavigation({ restoreFocus: false }); setManagedProjectId(projectId); }}
@@ -346,6 +351,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
             : callbacks.navigation.openSettings()}
           onRestoreTask={callbacks.navigation.restoreTask}
           onSetTaskTitle={callbacks.navigation.setTaskTitle}
+          onRestoreNativeSession={callbacks.navigation.restoreNativeSession}
           onSearchChange={callbacks.navigation.changeSearch}
           onSettings={closeAfter(callbacks.navigation.openSettings)}
           onToggleArchived={callbacks.navigation.toggleArchived}

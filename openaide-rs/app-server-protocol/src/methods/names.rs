@@ -59,6 +59,8 @@ pub const TASK_CHAT_PAGE: &str = "task/chatPage";
 pub const TASK_LIST: &str = "task/list";
 pub const TASK_NAVIGATION_REFRESH: &str = "taskNavigation/refresh";
 pub const TASK_NAVIGATION_LOAD_MORE: &str = "taskNavigation/loadMore";
+pub const NATIVE_SESSION_ARCHIVE: &str = "nativeSession/archive";
+pub const NATIVE_SESSION_RESTORE: &str = "nativeSession/restore";
 pub const TASK_RELEASE: &str = "task/release";
 pub const TASK_ARCHIVE: &str = "task/archive";
 pub const TASK_RESTORE: &str = "task/restore";
@@ -125,6 +127,8 @@ pub const CLIENT_METHODS: &[&str] = &[
     TASK_LIST,
     TASK_NAVIGATION_REFRESH,
     TASK_NAVIGATION_LOAD_MORE,
+    NATIVE_SESSION_ARCHIVE,
+    NATIVE_SESSION_RESTORE,
     TASK_RELEASE,
     TASK_ARCHIVE,
     TASK_RESTORE,

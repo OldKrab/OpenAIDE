@@ -39,6 +39,16 @@ export type NativeSessionsState = {
   adoptingSessionId?: string;
 };
 
+export type NativeSessionMutationState = {
+  action: "archive" | "restore";
+  state: "pending" | "failed";
+  error?: string;
+};
+
+export function nativeSessionMutationKey(agentId: string, sessionId: string) {
+  return `${agentId}\u0000${sessionId}`;
+}
+
 export type NewTaskState = {
   prompt: string;
   question: string;
@@ -137,6 +147,8 @@ export type AppState = {
     open?: TaskSummary[];
     archived?: TaskSummary[];
   };
+  archivedNativeSessions: NativeSessionsState;
+  nativeSessionMutations: Record<string, NativeSessionMutationState>;
   taskListError?: string;
   activeTaskId?: string;
   snapshot?: TaskSnapshot;
@@ -173,6 +185,12 @@ export function createInitialState(): AppState {
     appServerReplicaEpoch: 0,
     tasks: [],
     taskLists: {},
+    archivedNativeSessions: {
+      items: [],
+      loading: false,
+      loaded: false,
+    },
+    nativeSessionMutations: {},
     taskSnapshots: {},
     taskSnapshotReplicaEpochs: {},
     taskChatScrollStates: {},

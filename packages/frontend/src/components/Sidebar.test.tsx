@@ -31,7 +31,7 @@ describe("sidebarViewModel", () => {
     expect(model.visibleCount).toBe(3);
   });
 
-  it("uses archive empty state and excludes native sessions from archive count", () => {
+  it("includes archived native sessions in the archive count", () => {
     const model = sidebarViewModel({
       nativeSessionAgentName: "Codex",
       nativeSessions: nativeSessions({ items: [nativeSession({ session_id: "session_1" })] }),
@@ -40,8 +40,7 @@ describe("sidebarViewModel", () => {
       taskCount: 0,
     });
 
-    expect(model.visibleCount).toBe(0);
-    expect(model.emptyMessage).toBe("Archive is empty. Archived tasks will appear here.");
+    expect(model.visibleCount).toBe(1);
   });
 
   it("keeps loading and search empty states distinct", () => {
@@ -485,6 +484,8 @@ describe("SidebarNativeSessionRow", () => {
   it("uses the shared agent-left layout while opening task history", () => {
     const tree = render(
       <SidebarNativeSessionRow
+        {...nativeSessionRowCallbacks()}
+        archived={false}
         nativeSessionAgentId="codex"
         nativeSessionAgentName="Codex"
         nativeSessionsAdoptingSessionId="session_1"
@@ -503,6 +504,8 @@ describe("SidebarNativeSessionRow", () => {
     const onOpenNativeSession = vi.fn();
     const tree = render(
       <SidebarNativeSessionRow
+        {...nativeSessionRowCallbacks()}
+        archived={false}
         nativeSessionAgentId="codex"
         nativeSessionAgentName="Codex"
         onOpenNativeSession={onOpenNativeSession}
@@ -526,6 +529,8 @@ describe("SidebarNativeSessionRow", () => {
   it("shows complete Task details for listed Agent history", () => {
     const tree = render(
       <SidebarNativeSessionRow
+        {...nativeSessionRowCallbacks()}
+        archived={false}
         nativeSessionAgentId="codex"
         nativeSessionAgentName="Codex"
         onOpenNativeSession={vi.fn()}
@@ -547,6 +552,30 @@ describe("SidebarNativeSessionRow", () => {
       .toBe("· Open to load");
   });
 
+  it("archives listed Agent history from its action menu", () => {
+    const onArchiveNativeSession = vi.fn();
+    const session = nativeSession({ session_id: "session_1", title: "Existing session" });
+    const tree = render(
+      <SidebarNativeSessionRow
+        {...nativeSessionRowCallbacks()}
+        archived={false}
+        nativeSessionAgentId="codex"
+        nativeSessionAgentName="Codex"
+        onArchiveNativeSession={onArchiveNativeSession}
+        onOpenNativeSession={vi.fn()}
+        session={session}
+      />,
+    );
+
+    act(() => tree.root.findByProps({ "aria-label": "Task actions for Existing session" }).props.onClick());
+    const archive = tree.root.findAllByProps({ role: "menuitem" })
+      .find((button) => button.children.join("").includes("Archive"));
+    expect(archive).toBeDefined();
+    act(() => archive?.props.onClick());
+
+    expect(onArchiveNativeSession).toHaveBeenCalledWith(session);
+  });
+
   it("shows the delayed rich preview for a Native Session that is not yet adopted", () => {
     vi.useFakeTimers();
     vi.stubGlobal("window", {
@@ -566,6 +595,8 @@ describe("SidebarNativeSessionRow", () => {
     const tree = render(
       <SidebarTaskPreviewProvider>
         <SidebarNativeSessionRow
+          {...nativeSessionRowCallbacks()}
+          archived={false}
           nativeSessionAgentId="codex"
           nativeSessionAgentName="Codex"
           onOpenNativeSession={onOpenNativeSession}
@@ -605,6 +636,8 @@ describe("SidebarNativeSessionRow", () => {
   it("disables listed session actions while adoption is pending", () => {
     const tree = render(
       <SidebarNativeSessionRow
+        {...nativeSessionRowCallbacks()}
+        archived={false}
         nativeSessionAgentId="codex"
         nativeSessionAgentName="Codex"
         nativeSessionsAdoptingSessionId="session_1"
@@ -623,6 +656,8 @@ describe("SidebarNativeSessionRow", () => {
     const session = nativeSession({ session_id: "session_2", title: "Another session" });
     const tree = render(
       <SidebarNativeSessionRow
+        {...nativeSessionRowCallbacks()}
+        archived={false}
         nativeSessionAgentId="codex"
         nativeSessionAgentName="Codex"
         nativeSessionsAdoptingSessionId="session_1"
@@ -673,20 +708,26 @@ describe("Sidebar", () => {
     expect(sidebar.props["aria-label"]).toBe("Task navigation");
   });
 
-  it("hides native sessions and shows archive empty copy in archive mode", () => {
+  it("shows archived native sessions with Restore instead of opening them", () => {
+    const onOpenNativeSession = vi.fn();
+    const onRestoreNativeSession = vi.fn();
+    const session = nativeSession({ agent_id: "codex", session_id: "session_1", title: "Existing" });
     const tree = render(
       <Sidebar
-        nativeSessions={nativeSessions({ items: [nativeSession({ session_id: "session_1", title: "Existing" })] })}
+        {...sidebarCallbacks()}
+        nativeSessions={nativeSessions({ items: [session] })}
+        onOpenNativeSession={onOpenNativeSession}
+        onRestoreNativeSession={onRestoreNativeSession}
         showArchived={true}
         tasks={[]}
-        {...sidebarCallbacks()}
       />,
     );
 
-    expect(tree.root.findByProps({ className: "empty-list" }).children).toEqual([
-      "Archive is empty. Archived tasks will appear here.",
-    ]);
-    expect(tree.root.findAllByProps({ className: "task-row external-session-row" })).toHaveLength(0);
+    expect(tree.root.findAllByProps({ className: "task-row external-session-row" })).toHaveLength(1);
+    expect(tree.root.findByProps({ "aria-label": "Restore Existing" })).toBeDefined();
+    act(() => tree.root.findByProps({ "aria-label": "Restore Existing" }).props.onClick());
+    expect(onRestoreNativeSession).toHaveBeenCalledWith(session);
+    expect(onOpenNativeSession).not.toHaveBeenCalled();
   });
 
   it("does not expose Tasks pagination in Archive", () => {
@@ -842,7 +883,7 @@ describe("Sidebar", () => {
     );
 
     expect(tree.root.findByProps({ className: "archive-section-head" }).findByType("strong").children).toEqual(["Archive"]);
-    expect(tree.root.findByType("small").children).toEqual(["Read-only tasks"]);
+    expect(tree.root.findByType("small").children).toEqual(["Tasks and Native Sessions"]);
     expect(tree.root.findAllByProps({ children: "New task" })).toHaveLength(0);
     act(() => tree.root.findByProps({ "aria-label": "Back to tasks" }).props.onClick());
     expect(onToggleArchived).toHaveBeenCalledTimes(1);
@@ -1694,15 +1735,25 @@ function sidebarCallbacks() {
     nativeSessionAgentId: "codex",
     nativeSessionAgentName: "Codex",
     onArchiveTask: vi.fn(),
+    onArchiveNativeSession: vi.fn(),
     onLoadNativeSessions: vi.fn(),
     onNewTask: vi.fn(),
     onOpenNativeSession: vi.fn(),
     onOpenTask: vi.fn(),
     onRestoreTask: vi.fn(),
+    onRestoreNativeSession: vi.fn(),
     onSearchChange: vi.fn(),
     onSettings: vi.fn(),
     onToggleArchived: vi.fn(),
     searchQuery: "",
+  };
+}
+
+function nativeSessionRowCallbacks() {
+  return {
+    onArchiveNativeSession: vi.fn(),
+    onOpenNativeSession: vi.fn(),
+    onRestoreNativeSession: vi.fn(),
   };
 }
 

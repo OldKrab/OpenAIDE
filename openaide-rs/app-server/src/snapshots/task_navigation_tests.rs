@@ -210,7 +210,7 @@ fn omits_archived_and_tombstoned_records() {
 }
 
 #[test]
-fn archive_snapshot_contains_only_archived_tasks() {
+fn archive_snapshot_contains_archived_tasks_and_archived_native_sessions() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let open = task_record("task-open", "Open", "2026-01-01T00:00:00.000Z");
@@ -218,19 +218,66 @@ fn archive_snapshot_contains_only_archived_tasks() {
     archived.lifecycle = crate::storage::records::TaskLifecycle::Archived;
     store.write_task(&open).unwrap();
     store.write_task(&archived).unwrap();
+    let catalog = NativeSessionCatalog::open(store.clone()).unwrap();
+    let native_reference = NativeSessionRef::new("agent-a", "native-archived");
+    catalog
+        .record_page(
+            project_id_for_workspace(&open.workspace_root).as_str(),
+            &open.workspace_root,
+            vec![NativeSessionObservation {
+                reference: native_reference.clone(),
+                title: Some("Archived Native Session".to_string()),
+                last_activity: Some("2026-01-03T00:00:00.000Z".to_string()),
+            }],
+        )
+        .unwrap();
+    catalog.archive(&native_reference).unwrap();
 
-    let snapshot = TaskNavigationStore::new(store)
+    let snapshot = TaskNavigationStore::with_native_sessions(store, catalog)
         .snapshot(TaskNavigationSection::Archive, None)
         .unwrap();
 
     assert_eq!(task_entries(&snapshot).len(), 1);
     assert_eq!(task_entries(&snapshot)[0].task_id.as_str(), "task-archived");
-    assert!(snapshot.groups.iter().all(|group| {
-        group
-            .entries
-            .iter()
-            .all(|entry| matches!(entry, TaskNavigationEntry::Task { .. }))
-    }));
+    assert!(snapshot
+        .groups
+        .iter()
+        .flat_map(|group| &group.entries)
+        .any(|entry| matches!(
+            entry,
+            TaskNavigationEntry::NativeSession { session }
+                if session.reference.session_id == "native-archived"
+        )));
+}
+
+#[test]
+fn active_navigation_excludes_archived_native_sessions() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let catalog = NativeSessionCatalog::open(store.clone()).unwrap();
+    let reference = NativeSessionRef::new("agent-a", "native-archived");
+    catalog
+        .record_page(
+            "project-1",
+            "/workspace/project",
+            vec![NativeSessionObservation {
+                reference: reference.clone(),
+                title: None,
+                last_activity: None,
+            }],
+        )
+        .unwrap();
+    catalog.archive(&reference).unwrap();
+
+    let snapshot = TaskNavigationStore::with_native_sessions(store, catalog)
+        .snapshot(TaskNavigationSection::Tasks, None)
+        .unwrap();
+
+    assert!(snapshot
+        .groups
+        .iter()
+        .flat_map(|group| &group.entries)
+        .all(|entry| !matches!(entry, TaskNavigationEntry::NativeSession { .. })));
 }
 
 #[test]

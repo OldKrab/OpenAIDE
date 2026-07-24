@@ -9,9 +9,10 @@ use openaide_app_server_protocol::support::{
     SupportRecoverStuckSessionsParams, SupportRecoverStuckSessionsResult,
 };
 use openaide_app_server_protocol::task::{
-    TaskAcquireParams, TaskAdoptNativeSessionParams, TaskArchiveParams, TaskCancelParams,
-    TaskLifecycleChanged, TaskRestoreParams, TaskSearchFilesParams, TaskSearchFilesResult,
-    TaskSendParams, TaskSetTitleParams,
+    NativeSessionArchiveParams, NativeSessionRestoreParams, TaskAcquireParams,
+    TaskAdoptNativeSessionParams, TaskArchiveParams, TaskCancelParams, TaskLifecycleChanged,
+    TaskRestoreParams, TaskSearchFilesParams, TaskSearchFilesResult, TaskSendParams,
+    TaskSetTitleParams,
 };
 use openaide_app_server_protocol::task::{TaskReleaseParams, TaskSetConfigOptionParams};
 
@@ -45,6 +46,7 @@ mod create;
 mod discard;
 mod file_search;
 mod list_sessions;
+mod native_session_archive;
 mod open;
 mod prepare;
 pub(crate) mod secret_resolver;
@@ -207,6 +209,37 @@ pub(crate) trait TaskArchiveWorkflow: Send + Sync {
         client_instance_id: &ClientInstanceId,
         params: TaskRestoreParams,
     ) -> Result<TaskLifecycleChanged, ProtocolError>;
+
+    fn archive_native_session(
+        &self,
+        _params: NativeSessionArchiveParams,
+    ) -> Result<NativeSessionArchiveMutation, ProtocolError> {
+        Err(ProtocolError {
+            code: ProtocolErrorCode::CapabilityUnavailable,
+            message: "Native Session archive is unavailable".to_string(),
+            recoverable: false,
+            target: None,
+        })
+    }
+
+    fn restore_native_session(
+        &self,
+        _params: NativeSessionRestoreParams,
+    ) -> Result<NativeSessionArchiveMutation, ProtocolError> {
+        Err(ProtocolError {
+            code: ProtocolErrorCode::CapabilityUnavailable,
+            message: "Native Session archive is unavailable".to_string(),
+            recoverable: false,
+            target: None,
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct NativeSessionArchiveMutation {
+    pub(crate) reference: openaide_app_server_protocol::snapshot::NativeSessionReference,
+    pub(crate) project_id: openaide_app_server_protocol::ids::ProjectId,
+    pub(crate) archived: bool,
 }
 
 pub(crate) use attachments::{AttachmentFileBrowserWorkflow, ResolvedSentFile};
@@ -647,6 +680,20 @@ impl TaskArchiveWorkflow for TaskProductApi {
         params: TaskRestoreParams,
     ) -> Result<TaskLifecycleChanged, ProtocolError> {
         self.restore_task(client_instance_id, params)
+    }
+
+    fn archive_native_session(
+        &self,
+        params: NativeSessionArchiveParams,
+    ) -> Result<NativeSessionArchiveMutation, ProtocolError> {
+        self.set_native_session_archived(params.agent_id.as_str(), &params.native_session_id, true)
+    }
+
+    fn restore_native_session(
+        &self,
+        params: NativeSessionRestoreParams,
+    ) -> Result<NativeSessionArchiveMutation, ProtocolError> {
+        self.set_native_session_archived(params.agent_id.as_str(), &params.native_session_id, false)
     }
 }
 

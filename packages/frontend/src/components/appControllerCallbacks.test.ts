@@ -17,6 +17,8 @@ import {
   ATTACHMENT_REVEAL,
   AppServerProtocolError,
   CLIENT_HEARTBEAT,
+  NATIVE_SESSION_ARCHIVE,
+  NATIVE_SESSION_RESTORE,
   PENDING_REQUEST_RESOLVE,
   SETTINGS_GET_AGENT_DETAILS,
   SETTINGS_GET_MCP_SERVERS,
@@ -2541,6 +2543,89 @@ describe("app controller callbacks", () => {
         native_session_id: "native_2",
       },
     });
+  });
+
+  it("archives and restores Native Sessions without optimistic row removal", async () => {
+    const dispatch = vi.fn();
+    const request = vi.fn(async () => ({
+      reference: { agentId: "codex", sessionId: "native_1" },
+      archived: true,
+    }));
+    const state = createInitialState();
+    const session = {
+      agent_id: "codex",
+      cwd: "/workspace",
+      session_id: "native_1",
+      title: "Native Session",
+    };
+    state.newTask.nativeSessions.items = [session];
+
+    const navigation = callbacks({
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
+      dispatch,
+      state,
+    }).navigation;
+    navigation.archiveNativeSession(session);
+    await settlePromises();
+
+    expect(request).toHaveBeenNthCalledWith(1, NATIVE_SESSION_ARCHIVE, {
+      agentId: "codex",
+      nativeSessionId: "native_1",
+    });
+    expect(dispatch).toHaveBeenNthCalledWith(1, {
+      type: "nativeSessionArchive:start",
+      agentId: "codex",
+      sessionId: "native_1",
+      action: "archive",
+    });
+    expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({
+      type: "newTask:nativeSessions:remove",
+    }));
+
+    request.mockResolvedValueOnce({
+      reference: { agentId: "codex", sessionId: "native_1" },
+      archived: false,
+    });
+    navigation.restoreNativeSession(session);
+    await settlePromises();
+
+    expect(request).toHaveBeenNthCalledWith(2, NATIVE_SESSION_RESTORE, {
+      agentId: "codex",
+      nativeSessionId: "native_1",
+    });
+  });
+
+  it("keeps a Native Session visible and exposes archive failure", async () => {
+    const dispatch = vi.fn();
+    const request = vi.fn(async () => {
+      throw new Error("Archive storage is unavailable");
+    });
+    const state = createInitialState();
+    const session = {
+      agent_id: "codex",
+      cwd: "/workspace",
+      session_id: "native_1",
+      title: "Native Session",
+    };
+    state.newTask.nativeSessions.items = [session];
+
+    callbacks({
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
+      dispatch,
+      state,
+    }).navigation.archiveNativeSession(session);
+    await settlePromises();
+
+    expect(dispatch).toHaveBeenLastCalledWith({
+      type: "nativeSessionArchive:error",
+      agentId: "codex",
+      sessionId: "native_1",
+      action: "archive",
+      message: "Archive storage is unavailable",
+    });
+    expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({
+      type: "newTask:nativeSessions:remove",
+    }));
   });
 
   it("includes discovered Agent and Project context in the Native Session route", async () => {

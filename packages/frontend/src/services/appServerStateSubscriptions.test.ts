@@ -185,6 +185,57 @@ describe("startAppServerStateSubscription", () => {
     });
   });
 
+  it("keeps archived Native Sessions in the Archive section replica", () => {
+    const navigation = fakeSubscription();
+    const dispatch = vi.fn();
+    startAppServerStateSubscription({
+      backendConnection: navigation.connection,
+      context: {
+        stateRootId: "root_1" as StateRootId,
+        agents: [{ agentId: "codex", label: "Codex", status: "connected" }] as never,
+      },
+      dispatch,
+      scope: { kind: "taskNavigation", section: "archive" },
+    });
+
+    navigation.observer().onSnapshot({
+      kind: "taskNavigation",
+      navigation: {
+        section: "archive",
+        refresh: { state: "idle" },
+        groups: [{
+          projectId: "project_1",
+          projectLabel: "OpenAIDE",
+          taskCount: 0,
+          entries: [{
+            kind: "nativeSession",
+            session: {
+              reference: { agentId: "codex", sessionId: "session_1" },
+              projectId: "project_1",
+              workspaceRoot: "/workspace/OpenAIDE",
+              title: "Archived session",
+              lastActivity: null,
+            },
+          }],
+        }],
+      },
+    } as never);
+
+    expect(dispatch).toHaveBeenLastCalledWith({
+      type: "taskNavigation",
+      archived: true,
+      hasMoreProjectIds: [],
+      refreshError: undefined,
+      refreshing: false,
+      sessions: [expect.objectContaining({
+        agent_id: "codex",
+        session_id: "session_1",
+        title: "Archived session",
+      })],
+      tasks: [],
+    });
+  });
+
   it("maps Agent baselines and ordered live text without owning stream state", () => {
     const agents = fakeSubscription();
     const task = fakeSubscription();

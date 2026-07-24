@@ -10,8 +10,9 @@ use openaide_app_server_protocol::envelopes::RequestMeta;
 use openaide_app_server_protocol::events::{AppServerEventPayload, EventScope};
 use openaide_app_server_protocol::snapshot::AgentCollectionSnapshot;
 use openaide_app_server_protocol::task::{
-    TaskNavigationLoadMoreParams, TaskNavigationLoadMoreResult, TaskNavigationRefreshParams,
-    TaskNavigationRefreshResult,
+    NativeSessionArchiveParams, NativeSessionArchiveResult, NativeSessionRestoreParams,
+    NativeSessionRestoreResult, TaskNavigationLoadMoreParams, TaskNavigationLoadMoreResult,
+    TaskNavigationRefreshParams, TaskNavigationRefreshResult,
 };
 use serde_json::Value;
 
@@ -20,6 +21,68 @@ use crate::client_lifecycle::{AppServerTime, ConnectionId};
 use super::{event_deliveries, responses, GatewayEventDelivery, GatewayOutcome, RpcGateway};
 
 impl RpcGateway {
+    pub(super) fn handle_native_session_archive(
+        &mut self,
+        connection_id: ConnectionId,
+        id: String,
+        params: Value,
+        meta: RequestMeta,
+        now: AppServerTime,
+    ) -> GatewayOutcome {
+        let params = match serde_json::from_value::<NativeSessionArchiveParams>(params) {
+            Ok(params) => params,
+            Err(error) => {
+                return self.error(connection_id, id, meta, responses::invalid_params(error))
+            }
+        };
+        let mutation = match self.task_archive.archive_native_session(params) {
+            Ok(mutation) => mutation,
+            Err(error) => return self.error(connection_id, id, meta, error),
+        };
+        let events = self.publish_project_entries_replaced(&mutation.project_id, now);
+        self.result_with_events::<NativeSessionArchiveResult>(
+            connection_id,
+            id,
+            meta,
+            NativeSessionArchiveResult {
+                reference: mutation.reference,
+                archived: mutation.archived,
+            },
+            events,
+        )
+    }
+
+    pub(super) fn handle_native_session_restore(
+        &mut self,
+        connection_id: ConnectionId,
+        id: String,
+        params: Value,
+        meta: RequestMeta,
+        now: AppServerTime,
+    ) -> GatewayOutcome {
+        let params = match serde_json::from_value::<NativeSessionRestoreParams>(params) {
+            Ok(params) => params,
+            Err(error) => {
+                return self.error(connection_id, id, meta, responses::invalid_params(error))
+            }
+        };
+        let mutation = match self.task_archive.restore_native_session(params) {
+            Ok(mutation) => mutation,
+            Err(error) => return self.error(connection_id, id, meta, error),
+        };
+        let events = self.publish_project_entries_replaced(&mutation.project_id, now);
+        self.result_with_events::<NativeSessionRestoreResult>(
+            connection_id,
+            id,
+            meta,
+            NativeSessionRestoreResult {
+                reference: mutation.reference,
+                archived: mutation.archived,
+            },
+            events,
+        )
+    }
+
     pub(super) fn handle_task_navigation_refresh(
         &mut self,
         connection_id: ConnectionId,

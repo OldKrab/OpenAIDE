@@ -194,17 +194,15 @@ function remappedTaskNavigationActions(context: StateSubscriptionMappingContext)
       archived: section === "archive",
       tasks: mapped.tasks,
     }];
-    if (section === "tasks") {
-      actions.push({
-        type: "taskNavigation",
-        archived: false,
-        tasks: mapped.tasks,
-        sessions: mapped.sessions,
-        hasMoreProjectIds: mapped.hasMoreProjectIds,
-        refreshing: mapped.refreshing,
-        refreshError: mapped.refreshError,
-      });
-    }
+    actions.push({
+      type: "taskNavigation",
+      archived: section === "archive",
+      tasks: mapped.tasks,
+      sessions: mapped.sessions,
+      hasMoreProjectIds: mapped.hasMoreProjectIds,
+      refreshing: mapped.refreshing,
+      refreshError: mapped.refreshError,
+    });
     return actions;
   });
 }

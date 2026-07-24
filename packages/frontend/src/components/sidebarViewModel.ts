@@ -30,20 +30,20 @@ export function sidebarViewModel({
   const hasSearch = searchQuery.trim().length > 0;
   const query = searchQuery.trim().toLowerCase();
   const visibleNativeSessions =
-    showArchived || !query
+    !query
       ? nativeSessions.items
       : nativeSessions.items.filter((session) =>
           [nativeSessionTitle(session), nativeSessionMeta(session, nativeSessionAgentName)].some((value) =>
             value.toLowerCase().includes(query),
           ),
         );
-  const visibleCount = taskCount + (showArchived ? 0 : visibleNativeSessions.length);
+  const visibleCount = taskCount + visibleNativeSessions.length;
   const emptyMessage = hasSearch
     ? showArchived
-      ? "No archived tasks match."
+      ? "No archived items match."
       : "No matching tasks."
     : showArchived
-      ? "Archive is empty. Archived tasks will appear here."
+      ? "Archive is empty. Archived Tasks and Native Sessions will appear here."
       : loadingTasks || nativeSessions.loading
         ? "Loading tasks."
         : "No tasks yet.";

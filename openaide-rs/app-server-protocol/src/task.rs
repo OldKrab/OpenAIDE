@@ -416,6 +416,34 @@ pub struct TaskNavigationLoadMoreResult {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
+pub struct NativeSessionArchiveParams {
+    pub agent_id: AgentId,
+    pub native_session_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeSessionArchiveResult {
+    pub reference: crate::snapshot::NativeSessionReference,
+    pub archived: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeSessionRestoreParams {
+    pub agent_id: AgentId,
+    pub native_session_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeSessionRestoreResult {
+    pub reference: crate::snapshot::NativeSessionReference,
+    pub archived: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
 pub struct TaskReleaseParams {
     pub task_id: TaskId,
 }

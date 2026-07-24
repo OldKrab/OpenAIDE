@@ -38,6 +38,7 @@ export type AppControllerCallbacks = {
 };
 
 export type NavigationCallbacks = {
+  archiveNativeSession: (session: AgentListedSession) => void;
   archiveTask: (taskId: string) => void;
   changeSearch: (query: string) => void;
   loadNativeSessions: (cursor?: string, projectId?: string, targetRowCount?: number) => void;
@@ -46,6 +47,7 @@ export type NavigationCallbacks = {
   openSettings: (agentId?: string, returnToNewTask?: boolean, projectId?: string) => void;
   openTask: (taskId: string) => void;
   retryAgent: (agentId: string) => Promise<boolean>;
+  restoreNativeSession: (session: AgentListedSession) => void;
   setTaskTitle: (
     taskId: string,
     title: { kind: "user"; value: string } | { kind: "automatic" },
