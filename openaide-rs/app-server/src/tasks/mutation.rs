@@ -603,6 +603,42 @@ impl TaskMutations {
         commit::commit_existing_task(self, task_id, options, mutation)
     }
 
+    /// Rebinds only the accepted first prompt after its empty Agent session is confirmed missing.
+    pub(crate) fn replace_missing_session_for_initial_prompt(
+        &self,
+        task_id: &str,
+        turn_id: &str,
+        expected_session_id: &str,
+        options: TaskCommitOptions,
+        mutation: impl FnOnce(&mut TaskMutationContext<'_>) -> Result<TaskMutationResult, RuntimeError>,
+    ) -> Result<TaskCommitResult, RuntimeError> {
+        commit::replace_missing_session_for_initial_prompt(
+            self,
+            task_id,
+            turn_id,
+            expected_session_id,
+            options,
+            mutation,
+        )
+    }
+
+    /// Rebinds an empty Prepared Task only while its missing Agent session is being prepared.
+    pub(crate) fn replace_missing_session_for_prepared_task(
+        &self,
+        task_id: &str,
+        expected_session_id: &str,
+        options: TaskCommitOptions,
+        mutation: impl FnOnce(&mut TaskMutationContext<'_>) -> Result<TaskMutationResult, RuntimeError>,
+    ) -> Result<TaskCommitResult, RuntimeError> {
+        commit::replace_missing_session_for_prepared_task(
+            self,
+            task_id,
+            expected_session_id,
+            options,
+            mutation,
+        )
+    }
+
     pub(crate) fn create_task(
         &self,
         task: TaskRecord,

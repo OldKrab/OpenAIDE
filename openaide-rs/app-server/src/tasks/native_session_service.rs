@@ -80,43 +80,42 @@ impl NativeSessionService {
     /// Acquires and binds the empty New Task's Native Session before Composer becomes sendable.
     pub(crate) fn prepare_task(&self, task: &TaskRecord) -> Result<(), RuntimeError> {
         let cancellation = TurnCancellation::new();
-        let session = match &task.agent_session_id {
-            Some(session_id) => self
-                .agent_gateway
-                .resume_session(AgentSessionResume {
-                    agent_id: task.agent_id.clone(),
-                    task_id: task.task_id.clone(),
-                    session_id: session_id.clone(),
-                    cwd: task.workspace_root.clone(),
-                    model_id: task.model_id.clone(),
-                    cancellation: cancellation.clone(),
-                    secret_resolver: Some(self.secret_resolver(&task.task_id)),
-                })
-                .or_else(|error| {
-                    if !is_session_resume_unsupported(&error) {
-                        return Err(error);
-                    }
-                    self.agent_gateway
-                        .load_session(AgentSessionLoad {
-                            agent_id: task.agent_id.clone(),
-                            task_id: task.task_id.clone(),
-                            session_id: session_id.clone(),
-                            cwd: task.workspace_root.clone(),
-                            model_id: task.model_id.clone(),
-                            cancellation: cancellation.clone(),
-                            secret_resolver: Some(self.secret_resolver(&task.task_id)),
-                        })
-                        .map(|loaded| loaded.session)
-                })?,
-            None => self.agent_gateway.start_session(AgentSessionStart {
+        let (session, missing_session_id) = match &task.agent_session_id {
+            Some(session_id) => match self.agent_gateway.resume_session(AgentSessionResume {
                 agent_id: task.agent_id.clone(),
                 task_id: task.task_id.clone(),
+                session_id: session_id.clone(),
                 cwd: task.workspace_root.clone(),
                 model_id: task.model_id.clone(),
-                context: Vec::new(),
                 cancellation: cancellation.clone(),
                 secret_resolver: Some(self.secret_resolver(&task.task_id)),
-            })?,
+            }) {
+                Ok(session) => (session, None),
+                Err(error) if is_session_resume_unsupported(&error) => {
+                    match self.agent_gateway.load_session(AgentSessionLoad {
+                        agent_id: task.agent_id.clone(),
+                        task_id: task.task_id.clone(),
+                        session_id: session_id.clone(),
+                        cwd: task.workspace_root.clone(),
+                        model_id: task.model_id.clone(),
+                        cancellation: cancellation.clone(),
+                        secret_resolver: Some(self.secret_resolver(&task.task_id)),
+                    }) {
+                        Ok(loaded) => (loaded.session, None),
+                        Err(RuntimeError::TaskNotFound(_)) => (
+                            self.start_new_session(task, cancellation.clone())?,
+                            Some(session_id.clone()),
+                        ),
+                        Err(error) => return Err(error),
+                    }
+                }
+                Err(RuntimeError::TaskNotFound(_)) => (
+                    self.start_new_session(task, cancellation.clone())?,
+                    Some(session_id.clone()),
+                ),
+                Err(error) => return Err(error),
+            },
+            None => (self.start_new_session(task, cancellation.clone())?, None),
         };
         let session = crate::tasks::config_preferences::apply_to_prepared_session(
             &self.store,
@@ -135,25 +134,28 @@ impl NativeSessionService {
         let supports_image_input = session_start.session().prompt_capabilities.image;
         let prompt_capabilities_authoritative =
             session_start.session().prompt_capabilities_authoritative;
+        let replacement_metadata_is_authoritative = missing_session_id.is_some();
         let now = now_string();
 
-        let binding = self.mutations.commit_existing_task(
-            &task.task_id,
-            TaskCommitOptions::metadata(),
-            |ctx| {
-                if ctx.task().tombstoned
-                    || ctx.task().agent_session_id != task.agent_session_id
-                    || !matches!(ctx.task().preparation, TaskPreparationRecord::Preparing)
-                {
-                    return Ok(TaskMutationResult::Rejected);
-                }
-                let task = ctx.task_mut();
-                task.agent_session_id = Some(session_id.clone());
-                // Resume can return an identity-only session. Preserve the last
-                // capability snapshot until ACP supplies authoritative metadata.
-                if prompt_capabilities_authoritative {
-                    task.supports_image_input = supports_image_input;
-                }
+        let bind_session = |ctx: &mut crate::tasks::mutation::TaskMutationContext<'_>| {
+            if ctx.task().tombstoned
+                || ctx.task().agent_session_id != task.agent_session_id
+                || !matches!(ctx.task().preparation, TaskPreparationRecord::Preparing)
+            {
+                return Ok(TaskMutationResult::Rejected);
+            }
+            let task = ctx.task_mut();
+            task.agent_session_id = Some(session_id.clone());
+            // Resume can return an identity-only session. Preserve the last
+            // capability snapshot until ACP supplies authoritative metadata.
+            if prompt_capabilities_authoritative {
+                task.supports_image_input = supports_image_input;
+            }
+            if replacement_metadata_is_authoritative {
+                task.config_options_catalog = config_catalog.clone();
+                task.agent_commands_catalog = commands_catalog.clone();
+                task.model_id = model_id.clone();
+            } else {
                 if config_catalog.is_some() {
                     task.config_options_catalog = config_catalog.clone();
                     task.model_id = model_id.clone();
@@ -161,14 +163,30 @@ impl NativeSessionService {
                 if task.agent_commands_catalog.is_none() {
                     task.agent_commands_catalog = commands_catalog.clone();
                 }
-                task.updated_at = now.clone();
-                Ok(TaskMutationResult::Changed)
-            },
-        )?;
+            }
+            task.updated_at = now.clone();
+            Ok(TaskMutationResult::Changed)
+        };
+        let binding = match missing_session_id.as_deref() {
+            Some(missing_session_id) => self.mutations.replace_missing_session_for_prepared_task(
+                &task.task_id,
+                missing_session_id,
+                TaskCommitOptions::metadata(),
+                bind_session,
+            )?,
+            None => self.mutations.commit_existing_task(
+                &task.task_id,
+                TaskCommitOptions::metadata(),
+                bind_session,
+            )?,
+        };
         if !matches!(binding.outcome, TaskCommitOutcome::Committed(_)) {
             return Err(RuntimeError::NotReady(
                 "Task changed before Agent preparation completed".to_string(),
             ));
+        }
+        if missing_session_id.is_some() {
+            log_missing_session_replaced(&task.task_id, &task.agent_id, &session_id, "preparation");
         }
 
         if let Err(error) =
@@ -219,21 +237,43 @@ impl NativeSessionService {
         let task_id = task.task_id.clone();
         let opened = self.acquire_for_prompt(&task)?;
         let session_state = opened.task_state();
-        let binding = self.mutations.commit_existing_task(
-            &task_id,
-            TaskCommitOptions::metadata(),
-            |ctx| {
-                if ctx.task().active_turn_id.as_deref() != Some(turn_id.as_str()) {
-                    return Ok(TaskMutationResult::Rejected);
-                }
-                session_state.apply_to(ctx.task_mut());
-                Ok(TaskMutationResult::Changed)
-            },
-        )?;
+        let missing_session_id = opened.replaced_session_id().map(str::to_string);
+        let replacement_session_id = opened.session().session_id.clone();
+        let binding = match missing_session_id.as_deref() {
+            Some(missing_session_id) => self.mutations.replace_missing_session_for_initial_prompt(
+                &task_id,
+                turn_id.as_str(),
+                missing_session_id,
+                TaskCommitOptions::metadata(),
+                |ctx| {
+                    session_state.apply_to(ctx.task_mut());
+                    Ok(TaskMutationResult::Changed)
+                },
+            )?,
+            None => self.mutations.commit_existing_task(
+                &task_id,
+                TaskCommitOptions::metadata(),
+                |ctx| {
+                    if ctx.task().active_turn_id.as_deref() != Some(turn_id.as_str()) {
+                        return Ok(TaskMutationResult::Rejected);
+                    }
+                    session_state.apply_to(ctx.task_mut());
+                    Ok(TaskMutationResult::Changed)
+                },
+            )?,
+        };
         if !matches!(binding.outcome, TaskCommitOutcome::Committed(_)) {
             return Err(RuntimeError::NotReady(
                 "Native Session changed before prompt start".to_string(),
             ));
+        }
+        if missing_session_id.is_some() {
+            log_missing_session_replaced(
+                &task_id,
+                &task.agent_id,
+                &replacement_session_id,
+                "initial_prompt",
+            );
         }
 
         let session_sink = self.ensure_update_subscription(&task_id, &opened.session().key())?;
@@ -347,11 +387,38 @@ impl NativeSessionService {
                             &self.agent_gateway,
                             loaded.session,
                         ))
+                    })
+                    .or_else(|error| {
+                        if !matches!(error, RuntimeError::TaskNotFound(_)) {
+                            return Err(error);
+                        }
+                        self.start_replacement(task, session_id, cancellation)
                     }),
+                Err(RuntimeError::TaskNotFound(_)) => {
+                    self.start_replacement(task, session_id, cancellation)
+                }
                 Err(error) => Err(error),
             },
             None => self.start_fresh(task, cancellation),
         }
+    }
+
+    fn start_replacement(
+        &self,
+        task: &TaskRecord,
+        missing_session_id: &str,
+        cancellation: TurnCancellation,
+    ) -> Result<OpenedNativeSession<'_>, RuntimeError> {
+        let started = self.start_new_session(task, cancellation)?;
+        let restored = crate::tasks::config_preferences::apply_to_prepared_session(
+            &self.store,
+            &self.agent_gateway,
+            started,
+        );
+        Ok(OpenedNativeSession::Replaced {
+            session: TaskSessionStartGuard::new(&self.agent_gateway, restored),
+            missing_session_id: missing_session_id.to_string(),
+        })
     }
 
     fn start_fresh(
@@ -359,22 +426,25 @@ impl NativeSessionService {
         task: &TaskRecord,
         cancellation: TurnCancellation,
     ) -> Result<OpenedNativeSession<'_>, RuntimeError> {
-        self.agent_gateway
-            .start_session(AgentSessionStart {
-                agent_id: task.agent_id.clone(),
-                task_id: task.task_id.clone(),
-                cwd: task.workspace_root.clone(),
-                model_id: task.model_id.clone(),
-                context: Vec::new(),
-                cancellation,
-                secret_resolver: Some(self.secret_resolver(&task.task_id)),
-            })
-            .map(|session| {
-                OpenedNativeSession::Started(TaskSessionStartGuard::new(
-                    &self.agent_gateway,
-                    session,
-                ))
-            })
+        self.start_new_session(task, cancellation).map(|session| {
+            OpenedNativeSession::Started(TaskSessionStartGuard::new(&self.agent_gateway, session))
+        })
+    }
+
+    fn start_new_session(
+        &self,
+        task: &TaskRecord,
+        cancellation: TurnCancellation,
+    ) -> Result<AgentSession, RuntimeError> {
+        self.agent_gateway.start_session(AgentSessionStart {
+            agent_id: task.agent_id.clone(),
+            task_id: task.task_id.clone(),
+            cwd: task.workspace_root.clone(),
+            model_id: task.model_id.clone(),
+            context: Vec::new(),
+            cancellation,
+            secret_resolver: Some(self.secret_resolver(&task.task_id)),
+        })
     }
 
     fn ensure_update_subscription(
@@ -425,6 +495,10 @@ struct NativeSessionSubscription {
 enum OpenedNativeSession<'a> {
     Started(TaskSessionStartGuard<'a>),
     Loaded(TaskSessionStartGuard<'a>),
+    Replaced {
+        session: TaskSessionStartGuard<'a>,
+        missing_session_id: String,
+    },
     Resumed(AgentSession),
 }
 
@@ -432,20 +506,31 @@ impl OpenedNativeSession<'_> {
     fn session(&self) -> &AgentSession {
         match self {
             Self::Started(guard) | Self::Loaded(guard) => guard.session(),
+            Self::Replaced { session, .. } => session.session(),
             Self::Resumed(session) => session,
+        }
+    }
+
+    fn replaced_session_id(&self) -> Option<&str> {
+        match self {
+            Self::Replaced {
+                missing_session_id, ..
+            } => Some(missing_session_id),
+            _ => None,
         }
     }
 
     fn task_state(&self) -> OpenedSessionTaskState {
         OpenedSessionTaskState {
             session: self.session().clone(),
-            metadata_is_authoritative: matches!(self, Self::Loaded(_)),
+            metadata_is_authoritative: matches!(self, Self::Loaded(_) | Self::Replaced { .. }),
         }
     }
 
     fn commit(self) -> AgentSession {
         match self {
             Self::Started(guard) | Self::Loaded(guard) => guard.commit(),
+            Self::Replaced { session, .. } => session.commit(),
             Self::Resumed(session) => session,
         }
     }
@@ -519,4 +604,21 @@ impl Drop for PreparingSessionOwnership {
 
 fn is_session_resume_unsupported(error: &RuntimeError) -> bool {
     matches!(error, RuntimeError::CapabilityMissing(_))
+}
+
+fn log_missing_session_replaced(
+    task_id: &str,
+    agent_id: &str,
+    replacement_session_id: &str,
+    recovery_phase: &str,
+) {
+    crate::logging::info(
+        "missing_native_session_replaced",
+        serde_json::json!({
+            "task_id": task_id,
+            "agent_id": agent_id,
+            "replacement_session_id": replacement_session_id,
+            "recovery_phase": recovery_phase,
+        }),
+    );
 }
