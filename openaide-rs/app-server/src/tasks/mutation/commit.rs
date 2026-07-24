@@ -17,9 +17,14 @@ use super::{
 };
 
 mod journal_operations;
+mod native_session_binding;
 mod navigation_change;
 mod persist_new;
 use journal_operations::journal_operations;
+pub(super) use native_session_binding::{
+    replace_missing_session_for_initial_prompt, replace_missing_session_for_prepared_task,
+};
+use native_session_binding::{validate_task_invariants, NativeSessionBindingPolicy, VersionFields};
 use navigation_change::navigation_change;
 use persist_new::persist_new_task;
 
@@ -29,8 +34,25 @@ pub(super) fn commit_existing_task(
     options: TaskCommitOptions,
     mutation: impl FnOnce(&mut TaskMutationContext<'_>) -> Result<TaskMutationResult, RuntimeError>,
 ) -> Result<TaskCommitResult, RuntimeError> {
+    commit_existing_task_with_session_policy(
+        target,
+        task_id,
+        options,
+        NativeSessionBindingPolicy::Preserve,
+        mutation,
+    )
+}
+
+fn commit_existing_task_with_session_policy(
+    target: &TaskMutations,
+    task_id: &str,
+    options: TaskCommitOptions,
+    session_policy: NativeSessionBindingPolicy<'_>,
+    mutation: impl FnOnce(&mut TaskMutationContext<'_>) -> Result<TaskMutationResult, RuntimeError>,
+) -> Result<TaskCommitResult, RuntimeError> {
     let _guard = target.lock();
     let mut projection = target.store.task_journal().load(task_id)?;
+    session_policy.validate_replacement_boundary(&projection)?;
     let original_task = projection.task.clone();
     let original_version_fields = VersionFields::from_task(&projection.task);
     let mut ctx = TaskMutationContext {
@@ -55,7 +77,12 @@ pub(super) fn commit_existing_task(
     drop(ctx);
     let outcome = match mutation_result {
         TaskMutationResult::Changed => {
-            validate_task_invariants(task_id, &original_version_fields, &projection.task)?;
+            validate_task_invariants(
+                task_id,
+                &original_version_fields,
+                &projection.task,
+                session_policy,
+            )?;
             let facts = persist_changed_projection(
                 target,
                 &original_task,
@@ -759,50 +786,4 @@ fn project_committed_changes(
         chat: projected_chat,
         removed: fields.removed,
     })
-}
-
-struct VersionFields {
-    task_version: u64,
-    message_history_version: u64,
-    revision: u64,
-    bound_native_session_id: Option<String>,
-}
-
-impl VersionFields {
-    fn from_task(task: &TaskRecord) -> Self {
-        Self {
-            task_version: task.task_version,
-            message_history_version: task.message_history_version,
-            revision: task.revision,
-            bound_native_session_id: task.agent_session_id.clone(),
-        }
-    }
-}
-
-fn validate_task_invariants(
-    requested_task_id: &str,
-    original: &VersionFields,
-    task: &TaskRecord,
-) -> Result<(), RuntimeError> {
-    if task.task_id != requested_task_id {
-        return Err(RuntimeError::Internal(
-            "task mutation changed task identity".to_string(),
-        ));
-    }
-    if task.task_version != original.task_version
-        || task.message_history_version != original.message_history_version
-        || task.revision != original.revision
-    {
-        return Err(RuntimeError::Internal(
-            "task mutation changed commit-managed version fields".to_string(),
-        ));
-    }
-    if original.bound_native_session_id.is_some()
-        && task.agent_session_id != original.bound_native_session_id
-    {
-        return Err(RuntimeError::Internal(
-            "task mutation changed bound Native Session identity".to_string(),
-        ));
-    }
-    Ok(())
 }

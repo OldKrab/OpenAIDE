@@ -1858,7 +1858,7 @@ fn resumed_identity_only_session_preserves_known_image_capability() {
 }
 
 #[test]
-fn reacquiring_replaces_a_prepared_task_whose_native_session_is_missing() {
+fn acquiring_recovers_a_prepared_task_whose_native_session_is_missing() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
     let mut draft = task_record("task-draft", "/tmp/openaide-unit-workspace/app");
@@ -1882,32 +1882,22 @@ fn reacquiring_replaces_a_prepared_task_whose_native_session_is_missing() {
         agent_id: AgentId::from("codex"),
         workspace_root: None,
     };
-    let stale = api.create_for_test(params.clone()).unwrap();
-    assert_eq!(stale.task.task_id.as_str(), "task-draft");
+    let recovered = api.create_for_test(params).unwrap();
+    assert_eq!(recovered.task.task_id.as_str(), "task-draft");
     wait_until(|| {
         matches!(
             store.read_task("task-draft").unwrap().preparation,
-            TaskPreparationRecord::Failed { .. }
-        )
-    });
-
-    let replacement = api.create_for_test(params).unwrap();
-    let replacement_id = replacement.task.task_id.as_str().to_string();
-    assert_ne!(replacement_id, "task-draft");
-    wait_until(|| {
-        matches!(
-            store.read_task(&replacement_id).unwrap().preparation,
             TaskPreparationRecord::Ready
         )
     });
 
-    assert!(store.read_task("task-draft").unwrap().tombstoned);
+    assert!(!store.read_task("task-draft").unwrap().tombstoned);
     assert_eq!(agent.resumes.load(Ordering::SeqCst), 1);
     assert_eq!(agent.loads.load(Ordering::SeqCst), 0);
     assert_eq!(agent.starts.load(Ordering::SeqCst), 1);
     assert_eq!(agent.prompts.load(Ordering::SeqCst), 0);
     assert_eq!(
-        store.read_task(&replacement_id).unwrap().agent_session_id,
+        store.read_task("task-draft").unwrap().agent_session_id,
         Some("recorded-session".to_string())
     );
 }
@@ -3885,6 +3875,82 @@ fn send_recovers_stale_active_turn_and_starts_current_prompt() {
             NormalizedMessage::User { ref text, .. } if text == "why stuck"
         )
     }));
+}
+
+#[test]
+fn first_send_replaces_a_missing_native_session_without_interrupting_chat() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    store
+        .write_agent_config_preferences(&mode_config_catalog("agent-full-access"))
+        .unwrap();
+    let agent = Arc::new(RecordingAgent {
+        resume_session_missing: true,
+        config_catalog: Some(mode_config_catalog("agent")),
+        ..Default::default()
+    });
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        agent.clone(),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+    let mut task = task_record("task-new", "/tmp/openaide-unit-workspace/app");
+    task.lifecycle = test_new_task_lifecycle();
+    task.agent_session_id = Some("missing-session".to_string());
+    task.config_options_catalog = Some(mode_config_catalog("agent-full-access"));
+    store.write_task(&task).unwrap();
+
+    api.send(send_params("task-new", "hello")).unwrap();
+
+    wait_until(|| store.read_task("task-new").unwrap().status == TaskStatus::Inactive);
+    assert_eq!(
+        agent.prompts.load(Ordering::SeqCst),
+        1,
+        "messages: {:?}",
+        store
+            .read_messages("task-new")
+            .unwrap()
+            .iter()
+            .map(|message| &message.chat.message)
+            .collect::<Vec<_>>()
+    );
+    let recovered = store.read_task("task-new").unwrap();
+    assert_eq!(
+        recovered.agent_session_id.as_deref(),
+        Some("recorded-session")
+    );
+    assert_eq!(
+        task_config_id(&recovered, "mode"),
+        Some("agent-full-access")
+    );
+    assert_eq!(agent.resumes.load(Ordering::SeqCst), 1);
+    assert_eq!(agent.starts.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        agent.prompt_calls.lock().unwrap().as_slice(),
+        &[("recorded-session".to_string(), "hello".to_string())]
+    );
+    assert_eq!(
+        agent.session_config_updates.lock().unwrap().as_slice(),
+        &[(
+            "recorded-session".to_string(),
+            "mode".to_string(),
+            "agent-full-access".to_string()
+        )]
+    );
+    let messages = store.read_messages("task-new").unwrap();
+    assert_eq!(
+        messages
+            .iter()
+            .filter(|message| matches!(message.chat.message, NormalizedMessage::User { .. }))
+            .count(),
+        1
+    );
+    assert!(!messages
+        .iter()
+        .any(|message| matches!(message.chat.message, NormalizedMessage::Interruption { .. })));
 }
 
 #[test]
@@ -7110,10 +7176,14 @@ impl AgentRuntime for RecordingAgent {
             ConfigOptionCurrentValue::Id { value } => {
                 self.session_config_updates.lock().unwrap().push((
                     request.session_id,
-                    request.config_id,
+                    request.config_id.clone(),
                     value.clone(),
                 ));
-                config_catalog(&value)
+                if request.config_id == "mode" {
+                    mode_config_catalog(&value)
+                } else {
+                    config_catalog(&value)
+                }
             }
             ConfigOptionCurrentValue::Boolean { value } => boolean_config_catalog(value),
         };

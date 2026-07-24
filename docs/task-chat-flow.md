@@ -157,6 +157,8 @@ Free entries, pool keys, counts, recency, and eviction decisions are App Server-
 
 App Server restart clears all leases before accepting requests. Durable Prepared Tasks remain; ready zero-message records rebuild the free pool, and their Native Sessions are restored lazily only when leased. Existing legacy zero-message New Tasks are adopted as free candidates with owners cleared; App Server keeps the newest eligible entry per key, applies the global cap, and closes extras. It never restores a pre-restart lease.
 
+If restoring a zero-message Prepared Task proves that its Agent-owned Native Session no longer exists, App Server creates a fresh Native Session for the same Task, reapplies the Agent's remembered Configuration Options against the new authoritative catalog, and continues preparation without publishing a failure. This narrow recovery may replace the otherwise immutable Native Session binding only while the Task has no Agent history.
+
 Disabling or deleting an Agent disposes its free and leased zero-message Prepared Tasks. Releasing a failed Prepared Task also disposes it because failed entries are never free-pool candidates.
 
 ### Agent preparation
@@ -228,6 +230,8 @@ App Server materializes the acceptance response from durable state before ACP pr
 Frontend remains on the New Task surface in submitting state until it reconciles acceptance. Because the UI permits only one in-flight Send per Task, success clears that Task's Composer directly and asks the App Shell to route to the now-visible Task id. It does not compare message text, message id, idempotency key, or a settlement key to clear the acknowledged Composer. Rejection leaves the Composer unchanged and does not route to the Task page.
 
 First Send performs no history synchronization because the New Task has no Agent conversation history. Acceptance or scheduling alone never publishes `historySync: syncing`.
+
+If Native Session acquisition for that accepted first prompt proves that the empty session no longer exists, `NativeSessionService` creates a fresh session, reapplies remembered Configuration Options, atomically replaces the missing binding while the Task still contains only the accepted User message and running marker, and starts the prompt once. Chat receives no interruption for the recovered missing-session condition. Missing sessions on Tasks that already have Agent history are not replaced because doing so would silently discard conversation context.
 
 ### Steering messages
 

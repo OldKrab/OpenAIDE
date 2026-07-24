@@ -9,7 +9,7 @@ The canonical product identity.
 _Avoid_: Alternate product names
 
 **Task**:
-A visible unit of agent work in OpenAIDE's task list that has status, Project Context, Agent selection, and one immutable Agent-owned Native Session binding. It becomes visible through a durably accepted user message or successful Native Session adoption.
+A visible unit of agent work in OpenAIDE's task list that has status, Project Context, Agent selection, and one Agent-owned Native Session binding. The binding is immutable after Agent history begins; if an empty New Task session is confirmed missing during preparation or its accepted first prompt, App Server may silently replace that binding before Agent history exists. A Task becomes visible through a durably accepted user message or successful Native Session adoption.
 _Avoid_: Chat, conversation
 
 **Durable Task Metadata**:
