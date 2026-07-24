@@ -661,6 +661,37 @@ describe("ChatRow", () => {
     expect(html).not.toContain("<code>Terminal output</code>");
   });
 
+  it("changes execute title and icon from presentation while retaining execute details", async () => {
+    const { ActivityStepRow } = await import("./ChatActivityView");
+    const command = "sed -n '1,260p' /home/user/.agents/skills/tdd/SKILL.md";
+    const html = renderToStaticMarkup(
+      ActivityStepRow({
+        step: {
+          kind: "tool",
+          name: "execute",
+          status: "completed",
+          presentation: { kind: "skill", subjects: ["tdd"] },
+          input_summary: command,
+          details: {
+            locations: [],
+            content: [],
+            input: input({ command: [command] }),
+            output: { stdout: "skill instructions", exit_code: 0, success: true, fields: [] },
+          },
+        },
+        taskId: "task_1",
+      }),
+    );
+
+    expect(html).toContain("lucide-book-open activity-kind-icon");
+    expect(html).toContain("tool-execute tool-presentation-skill completed");
+    expect(html).toContain("Activated tdd skill");
+    expect(html).toContain("activity-tool-execute-detail completed");
+    expect(html).toContain("sed -n");
+    expect(html).toContain("skill instructions");
+    expect(html).not.toContain("activity-tool-skill-detail");
+  });
+
   it("renders execute permission requests with approval controls", async () => {
     const { ChatRow } = await import("./ChatMessageView");
     const html = renderToStaticMarkup(
@@ -864,7 +895,7 @@ describe("ChatRow", () => {
     expect(loadedHtml).toContain("Edit notes.md");
   });
 
-  it("keeps search scope visible beside a failed status", async () => {
+  it("keeps search scope in the title beside a failed status", async () => {
     const { ActivityStepRow } = await import("./ChatActivityView");
     const html = renderToStaticMarkup(
       ActivityStepRow({
@@ -878,8 +909,34 @@ describe("ChatRow", () => {
       }),
     );
 
-    expect(html).toContain('class="activity-step-context">frontend</small>');
+    expect(html).toContain('class="activity-step-semantic-action">Search</span>');
+    expect(html).toContain('class="activity-step-semantic-subject">“activity”</span>');
+    expect(html).toContain('class="activity-step-semantic-connector">in</span>');
+    expect(html).toContain('class="activity-step-semantic-scope">frontend</span>');
+    expect(html).not.toContain("activity-step-context");
     expect(html).toContain('class="activity-step-state">Failed</small>');
+  });
+
+  it("uses the same neutral subject treatment for multi-file reads", async () => {
+    const { ActivityStepRow } = await import("./ChatActivityView");
+    const html = renderToStaticMarkup(
+      ActivityStepRow({
+        step: {
+          kind: "tool",
+          name: "execute",
+          status: "completed",
+          presentation: { kind: "read", subjects: ["acp_session_worker.rs", "prompt_start.rs"] },
+          input_summary: "sed -n ...",
+        },
+        taskId: "task_1",
+      }),
+    );
+
+    expect(html).toContain('class="activity-step-semantic-action">Read</span>');
+    expect(html).toContain('class="activity-step-semantic-subject-list">');
+    expect(html).toContain('class="activity-step-semantic-subject">acp_session_worker.rs</span>');
+    expect(html).toContain('class="activity-step-semantic-connector"> and </span>');
+    expect(html).toContain('class="activity-step-semantic-subject">prompt_start.rs</span>');
   });
 
   it("renders web search as its own compact tool row", async () => {

@@ -3,6 +3,7 @@ use crate::agent::acp_schema::{
 };
 use std::ffi::OsStr;
 
+use crate::agent::command_presentation::infer_execute_presentation;
 use crate::agent::events::{AgentEvent, AgentToolCall, AgentToolCallStatus};
 use crate::agent::tool_details_io::{
     tool_input_detail, tool_input_summary, tool_output_detail, truncate_preview,
@@ -11,12 +12,16 @@ use crate::protocol::model::{ActivityToolContent, ActivityToolDetails, ActivityT
 
 pub(crate) fn tool_call_event(tool_call: &ToolCall) -> AgentEvent {
     let (kind, input_summary) = tool_presentation(tool_call);
+    let presentation = (kind == "execute")
+        .then(|| infer_execute_presentation(tool_call.raw_input.as_ref()))
+        .flatten();
     AgentEvent::ToolCall(AgentToolCall {
         tool_call_id: tool_call.tool_call_id.to_string(),
         scope_id: None,
         title: tool_call.title.clone(),
         kind,
         status: tool_status(tool_call.status),
+        presentation,
         input_summary,
         output_preview: tool_content_preview(&tool_call.content),
         details: tool_details(tool_call),

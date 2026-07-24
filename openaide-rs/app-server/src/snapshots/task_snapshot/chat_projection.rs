@@ -239,6 +239,7 @@ fn project_activity_step(step: &ActivityStep) -> ActivityStepSnapshot {
             tool_call_id,
             name,
             status,
+            presentation,
             input_summary,
             output_preview,
             detail_artifact_id,
@@ -248,6 +249,25 @@ fn project_activity_step(step: &ActivityStep) -> ActivityStepSnapshot {
             tool_call_id: tool_call_id.clone(),
             name: name.clone(),
             status: project_activity_status(*status),
+            presentation: presentation.as_ref().map(|presentation| {
+                openaide_app_server_protocol::snapshot::ToolPresentationSnapshot {
+                    kind: match presentation.kind {
+                        crate::protocol::model::ToolPresentationKind::Skill => {
+                            openaide_app_server_protocol::snapshot::ToolPresentationKindSnapshot::Skill
+                        }
+                        crate::protocol::model::ToolPresentationKind::Read => {
+                            openaide_app_server_protocol::snapshot::ToolPresentationKindSnapshot::Read
+                        }
+                        crate::protocol::model::ToolPresentationKind::List => {
+                            openaide_app_server_protocol::snapshot::ToolPresentationKindSnapshot::List
+                        }
+                        crate::protocol::model::ToolPresentationKind::Search => {
+                            openaide_app_server_protocol::snapshot::ToolPresentationKindSnapshot::Search
+                        }
+                    },
+                    subjects: presentation.subjects.clone(),
+                }
+            }),
             input_summary: input_summary.clone(),
             output_preview: output_preview.clone(),
             detail_artifact_id: detail_artifact_id.clone(),

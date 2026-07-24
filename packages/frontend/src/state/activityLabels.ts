@@ -3,6 +3,12 @@ import { firstFieldValue } from "./toolDetailsShared";
 
 type ActivityMessage = Extract<NormalizedMessage, { kind: "activity" }>;
 
+export type ActivityStepSemanticTitle = {
+  action: "Read" | "Search";
+  scope?: string;
+  subjects: string[];
+};
+
 export function activitySummary(activity: ActivityMessage) {
   if (activity.steps.length > 1) return groupedActivitySummary(activity);
   const first = activity.steps[0];
@@ -37,16 +43,40 @@ export function activityStepLabel(step: ActivityStep) {
   if (step.kind === "thought") return "Thought";
   if (step.kind === "command") return step.command_label;
   if (step.kind === "text") return step.text;
+  const semanticTitle = activityStepSemanticTitle(step);
+  if (semanticTitle) return semanticTitleText(semanticTitle);
+  if (step.presentation) {
+    return toolLabel(presentationAction(step.presentation.kind), presentationSubject(step) ?? "");
+  }
   const subject = toolSubjectLabel(step);
   if (isExecuteTool(step)) return subject ?? humanizeToolName(step.name);
   if (step.name === "think") return "Reasoning tool";
   if (step.name === "switch_mode") return subject ? `Switch mode to ${subject}` : "Switch mode";
-  if (step.name === "search" && subject && searchTitleParts(step.input_summary)) return `Search: ${subject}`;
   if (step.name === "web_search" && subject) return `Web search: ${subject}`;
   const action = toolActionLabel(step.name);
   if (subject && action) return toolLabel(action, subject);
   if (subject) return subject;
   return action ?? humanizeToolName(step.name);
+}
+
+/** Structured compact-title roles let the UI add hierarchy without inventing tool-specific colors. */
+export function activityStepSemanticTitle(step: ActivityStep): ActivityStepSemanticTitle | undefined {
+  if (step.kind !== "tool") return undefined;
+  if (step.presentation?.kind === "read") {
+    const subjects = step.presentation.subjects.map((subject) => subject.trim()).filter(Boolean);
+    return subjects.length ? { action: "Read", subjects } : undefined;
+  }
+  if (step.name === "read") {
+    const subject = (pathSubjectLabel(step) ?? step.input_summary)?.replace(/^Read\s+/i, "").trim();
+    return subject ? { action: "Read", subjects: [subject] } : undefined;
+  }
+  if (step.name !== "search") return undefined;
+  const scope = searchScopeLabel(step);
+  const query = searchQueryLabel(step);
+  if (query) return { action: "Search", subjects: [searchQueryPreview(query)], ...(scope ? { scope } : {}) };
+  const subject = searchSubjectLabel(step);
+  if (!subject) return { action: "Search", subjects: [], ...(scope ? { scope } : {}) };
+  return { action: "Search", subjects: [subject], ...(scope && subject !== scope ? { scope } : {}) };
 }
 
 /** Describes the concrete action currently in flight, using the activity title when ACP normalized the tool name. */
@@ -58,6 +88,9 @@ export function activityStepProgressLabel(step: ActivityStep, activityTitle?: st
     `${step.name} ${activityTitle ?? ""} ${step.input_summary ?? ""}`,
   );
   if (collaborationLabel) return collaborationLabel;
+  if (step.presentation) {
+    return progressLabel(presentationProgressAction(step.presentation.kind), presentationSubject(step) ?? "");
+  }
   const subject = toolSubjectLabel(step);
   if (isExecuteTool(step)) return progressLabel("Running", subject ?? humanizeToolName(step.name));
   if (step.name === "think") return "Using reasoning tool";
@@ -84,6 +117,14 @@ export function activityStepCompletedLabel(step: ActivityStep) {
     return step.status === "error" ? `Command failed: ${step.command_label}` : `Ran ${step.command_label}`;
   }
   if (step.kind === "text") return step.text;
+  if (step.presentation) {
+    const subject = presentationSubject(step) ?? "";
+    if (step.status === "interrupted") return progressLabel("Interrupted", subject);
+    if (step.status === "error") {
+      return progressLabel(presentationFailureAction(step.presentation.kind), subject);
+    }
+    return progressLabel(presentationCompletedAction(step.presentation.kind), subject);
+  }
   const subject = toolSubjectLabel(step);
   if (step.status === "interrupted") return progressLabel("Interrupted", subject ?? humanizeToolName(step.name));
   if (step.status === "error") return progressLabel("Failed to use", subject ?? humanizeToolName(step.name));
@@ -117,8 +158,7 @@ export function activityStepContext(step: ActivityStep) {
   if (step.kind !== "tool") return undefined;
   const input = step.details?.input;
   if (step.name === "search") {
-    const fieldScope = ["path", "file", "cwd"].map((name) => firstFieldValue(input?.fields, name)).find(Boolean);
-    return input?.path ?? fieldScope ?? searchTitleParts(step.input_summary)?.scope ?? input?.cwd;
+    return undefined;
   }
   return input?.cwd;
 }
@@ -155,6 +195,7 @@ type ActivitySummaryKind =
   | "move"
   | "run"
   | "search"
+  | "list"
   | "fetch"
   | "thinkTool"
   | "switchMode"
@@ -168,6 +209,7 @@ function classifyStep(step: ActivityStep, title: string): ActivitySummaryKind {
   if (step.kind === "text") return classifyTextStep(step.text);
   const value = stepSearchText(step, title);
   if (isTerminalInputTool(title)) return "terminalInput";
+  if (step.presentation) return step.presentation.kind;
   if (step.name === "skill") return "skill";
   if (collaborationAction(value)) return "collaboration";
   if (isExecuteTool(step)) return "run";
@@ -213,6 +255,7 @@ function countLabel(kind: ActivitySummaryKind, count: number, sentenceStart: boo
     move: { verb: "moved", single: "file", plural: "files" },
     run: { verb: "ran", single: "command", plural: "commands" },
     search: { verb: "ran", single: "search", plural: "searches" },
+    list: { verb: "listed", single: "directory", plural: "directories" },
     fetch: { verb: "fetched", single: "resource", plural: "resources" },
     thinkTool: { verb: "used", single: "reasoning tool", plural: "reasoning tools" },
     switchMode: { verb: "switched", single: "mode", plural: "modes" },
@@ -231,6 +274,7 @@ function countLabel(kind: ActivitySummaryKind, count: number, sentenceStart: boo
 }
 
 function toolSubjectLabel(step: Extract<ActivityStep, { kind: "tool" }>) {
+  if (step.presentation) return presentationSubject(step);
   if (step.name === "skill") return skillSubjectLabel(step.input_summary);
   const collaborationLabel = collaborationAction(`${step.name} ${step.input_summary ?? ""}`);
   if (collaborationLabel) return collaborationLabel;
@@ -242,6 +286,54 @@ function toolSubjectLabel(step: Extract<ActivityStep, { kind: "tool" }>) {
   const detailsLabel = toolDetailsLabel(step);
   if (detailsLabel && (!step.input_summary || isContextOnlySummary(step, step.input_summary))) return detailsLabel;
   return step.input_summary ?? detailsLabel;
+}
+
+function presentationSubject(step: Extract<ActivityStep, { kind: "tool" }>) {
+  const subjects = step.presentation?.subjects.map((subject) => subject.trim()).filter(Boolean);
+  if (!subjects?.length) return undefined;
+  const joined = naturalJoin(subjects);
+  if (step.presentation?.kind !== "skill") return joined;
+  return subjects.length === 1 ? `${joined} skill` : `${joined} skills`;
+}
+
+function naturalJoin(values: string[]) {
+  if (values.length < 2) return values[0] ?? "";
+  if (values.length === 2) return `${values[0]} and ${values[1]}`;
+  return `${values.slice(0, -1).join(", ")}, and ${values.at(-1)}`;
+}
+
+function semanticTitleText(title: ActivityStepSemanticTitle) {
+  const subjects = naturalJoin(title.subjects);
+  const actionAndSubjects = subjects ? `${title.action} ${subjects}` : title.action;
+  return title.scope ? `${actionAndSubjects} in ${title.scope}` : actionAndSubjects;
+}
+
+function presentationAction(kind: NonNullable<Extract<ActivityStep, { kind: "tool" }>["presentation"]>["kind"]) {
+  if (kind === "skill") return "Activated";
+  if (kind === "read") return "Read";
+  if (kind === "list") return "List";
+  return "Search";
+}
+
+function presentationProgressAction(kind: NonNullable<Extract<ActivityStep, { kind: "tool" }>["presentation"]>["kind"]) {
+  if (kind === "skill") return "Activating";
+  if (kind === "read") return "Reading";
+  if (kind === "list") return "Listing";
+  return "Searching";
+}
+
+function presentationCompletedAction(kind: NonNullable<Extract<ActivityStep, { kind: "tool" }>["presentation"]>["kind"]) {
+  if (kind === "skill") return "Activated";
+  if (kind === "read") return "Read";
+  if (kind === "list") return "Listed";
+  return "Searched";
+}
+
+function presentationFailureAction(kind: NonNullable<Extract<ActivityStep, { kind: "tool" }>["presentation"]>["kind"]) {
+  if (kind === "skill") return "Failed to activate";
+  if (kind === "read") return "Failed to read";
+  if (kind === "list") return "Failed to list";
+  return "Failed to search";
 }
 
 function skillSubjectLabel(value: string | undefined) {
@@ -270,6 +362,21 @@ function searchSubjectLabel(step: Extract<ActivityStep, { kind: "tool" }>) {
   return searchTitleParts(step.input_summary)?.query ?? step.input_summary ?? command;
 }
 
+function searchQueryLabel(step: Extract<ActivityStep, { kind: "tool" }>) {
+  const input = step.details?.input;
+  return (
+    input?.query ??
+    ["query", "q", "pattern"].map((name) => firstFieldValue(input?.fields, name)).find(Boolean) ??
+    searchTitleParts(step.input_summary)?.query
+  );
+}
+
+function searchScopeLabel(step: Extract<ActivityStep, { kind: "tool" }>) {
+  const input = step.details?.input;
+  const fieldScope = ["path", "file", "cwd"].map((name) => firstFieldValue(input?.fields, name)).find(Boolean);
+  return input?.path ?? fieldScope ?? searchTitleParts(step.input_summary)?.scope ?? input?.cwd;
+}
+
 function searchTitleParts(value: string | undefined) {
   const title = value?.trim();
   if (!title) return undefined;
@@ -278,6 +385,26 @@ function searchTitleParts(value: string | undefined) {
   const plain = /^Search(?: for)? (.+) in (.+)$/i.exec(title);
   if (plain) return { query: plain[1].trim(), scope: plain[2].trim() };
   return undefined;
+}
+
+function searchQueryPreview(query: string) {
+  const normalized = query.replace(/\s+/g, " ").trim();
+  const characters = Array.from(normalized);
+  const preview = characters.length > 48 ? `${characters.slice(0, 47).join("")}…` : normalized;
+  return looksLikeRegex(normalized) ? `/${preview}/` : `“${preview}”`;
+}
+
+function looksLikeRegex(query: string) {
+  return (
+    /\\(?:[\\^$.*+?(){}|]|\[|\])/.test(query) ||
+    /\[[^\]]+\]/.test(query) ||
+    /\((?:\?:)?[^)]*\)/.test(query) ||
+    /\{\d+(?:,\d*)?\}/.test(query) ||
+    /(^|[^\\])\|/.test(query) ||
+    /(^|[^\\])\.[*+?]/.test(query) ||
+    query.startsWith("^") ||
+    (query.endsWith("$") && !query.endsWith("\\$"))
+  );
 }
 
 function pathSubjectLabel(step: Extract<ActivityStep, { kind: "tool" }>) {

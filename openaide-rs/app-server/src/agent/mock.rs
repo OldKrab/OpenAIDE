@@ -107,6 +107,7 @@ impl AgentRuntime for MockAgent {
                 title: "Edit workspace files".to_string(),
                 kind: "edit".to_string(),
                 status: AgentToolCallStatus::Pending,
+                presentation: None,
                 input_summary: None,
                 output_preview: None,
                 details: None,

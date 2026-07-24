@@ -9,6 +9,22 @@ pub enum ActivityStatus {
     Error,
 }
 
+/// Optional semantic chrome for a Tool row. It never changes Tool identity or detail routing.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct ToolPresentation {
+    pub kind: ToolPresentationKind,
+    pub subjects: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolPresentationKind {
+    Skill,
+    Read,
+    List,
+    Search,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ActivityStep {
@@ -22,6 +38,8 @@ pub enum ActivityStep {
         tool_call_id: Option<String>,
         name: String,
         status: ActivityStatus,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        presentation: Option<ToolPresentation>,
         #[serde(skip_serializing_if = "Option::is_none")]
         input_summary: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]

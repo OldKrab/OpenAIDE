@@ -61,6 +61,38 @@ fn projects_thought_messages_as_system_chat_items() {
 }
 
 #[test]
+fn projects_execute_presentation_without_reclassifying_the_tool() {
+    let step = project_activity_step(&ActivityStep::Tool {
+        tool_call_id: Some("call-1".to_string()),
+        name: "execute".to_string(),
+        status: ActivityStatus::Completed,
+        presentation: Some(crate::protocol::model::ToolPresentation {
+            kind: crate::protocol::model::ToolPresentationKind::Skill,
+            subjects: vec!["tdd".to_string(), "impeccable".to_string()],
+        }),
+        input_summary: Some("sed -n ...".to_string()),
+        output_preview: Some("skill contents".to_string()),
+        detail_artifact_id: None,
+        details: None,
+        permission_outcomes: vec![],
+    });
+
+    let ActivityStepSnapshot::Tool {
+        name, presentation, ..
+    } = step
+    else {
+        panic!("expected tool step");
+    };
+    assert_eq!(name, "execute");
+    let presentation = presentation.expect("presentation");
+    assert_eq!(
+        presentation.kind,
+        openaide_app_server_protocol::snapshot::ToolPresentationKindSnapshot::Skill
+    );
+    assert_eq!(presentation.subjects, ["tdd", "impeccable"]);
+}
+
+#[test]
 fn projects_one_agent_message_as_one_ordered_chat_item() {
     let item = project_chat_item(&ChatMessage {
         cursor: "msg-2".to_string(),

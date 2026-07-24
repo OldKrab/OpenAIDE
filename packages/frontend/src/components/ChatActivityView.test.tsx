@@ -44,9 +44,12 @@ describe("ChatActivityView", () => {
 
     expect(toggle.props["aria-expanded"]).toBe(true);
     expect(renderedThoughtRows(tree)).toHaveLength(3);
-    const rendered = JSON.stringify(tree.toJSON());
-    expect(rendered.indexOf("Inspect before reading")).toBeLessThan(rendered.indexOf("Read notes.md"));
-    expect(rendered.indexOf("Read notes.md")).toBeLessThan(rendered.indexOf("Verify after reading"));
+    const orderedRows = stepList.findAll(
+      (node) => node.type === "div" && String(node.props.className).startsWith("activity-step "),
+    );
+    expect(orderedRows[0].findByType("p").children).toEqual(["Inspect before reading"]);
+    expect(orderedRows[1].findByProps({ className: "activity-step-semantic-subject" }).children).toEqual(["notes.md"]);
+    expect(orderedRows[2].findByType("p").children).toEqual(["Verify after reading"]);
   });
 
   it("shows every Thought in a Thought-only group without a reasoning toggle", () => {

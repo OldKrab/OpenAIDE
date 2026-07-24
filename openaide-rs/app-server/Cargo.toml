@@ -13,6 +13,7 @@ openaide-app-server-protocol.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 regex.workspace = true
+shell-words.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
 uuid.workspace = true

@@ -1,3 +1,4 @@
+use crate::agent::infer_saved_execute_presentation;
 use crate::chat_history::ChatHistoryPolicy;
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{
@@ -200,6 +201,7 @@ impl Store {
         for step in steps {
             let ActivityStep::Tool {
                 name,
+                presentation,
                 input_summary,
                 detail_artifact_id,
                 details,
@@ -208,15 +210,43 @@ impl Store {
             else {
                 continue;
             };
-            if !should_replace_input_summary(name, input_summary.as_deref()) || details.is_some() {
+            let needs_summary = should_replace_input_summary(name, input_summary.as_deref());
+            // Legacy execute rows either have no semantic hint or retain the
+            // pre-migration full paths used by read presentations.
+            let needs_presentation = name == "execute"
+                && presentation.as_ref().is_none_or(|presentation| {
+                    presentation.kind == crate::protocol::model::ToolPresentationKind::Read
+                        && presentation
+                            .subjects
+                            .iter()
+                            .any(|subject| subject.contains('/') || subject.contains('\\'))
+                });
+            if !needs_summary && !needs_presentation {
+                continue;
+            }
+            if needs_presentation {
+                *presentation = details
+                    .as_deref()
+                    .and_then(|details| details.input.as_ref())
+                    .and_then(|input| infer_saved_execute_presentation(&input.command));
+            }
+            if details.is_some() {
                 continue;
             }
             let Some(artifact_id) = detail_artifact_id.as_deref() else {
                 continue;
             };
             if let Ok(details) = self.read_tool_artifact(task_id, artifact_id) {
-                if let Some(summary) = lightweight_detail_summary(&details) {
-                    *input_summary = Some(summary);
+                if needs_summary {
+                    if let Some(summary) = lightweight_detail_summary(&details) {
+                        *input_summary = Some(summary);
+                    }
+                }
+                if needs_presentation {
+                    *presentation = details
+                        .input
+                        .as_ref()
+                        .and_then(|input| infer_saved_execute_presentation(&input.command));
                 }
             }
         }

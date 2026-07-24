@@ -264,13 +264,11 @@
 
 .execute-command-chip {
   display: block;
-  width: fit-content;
+  width: 100%;
   max-width: 100%;
   min-width: 0;
-  overflow-x: auto;
-  overflow-y: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
   border: 1px solid color-mix(in oklch, var(--oa-border) 68%, var(--oa-bg));
   border-radius: var(--oa-radius-sm);
   background: color-mix(in oklch, var(--oa-raised) 45%, var(--oa-bg));

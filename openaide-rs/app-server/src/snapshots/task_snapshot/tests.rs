@@ -497,6 +497,7 @@ fn activity_message(id: &str, tool_call_id: &str) -> NormalizedMessage {
             tool_call_id: Some(tool_call_id.to_string()),
             name: "shell".to_string(),
             status: ActivityStatus::Running,
+            presentation: None,
             input_summary: None,
             output_preview: None,
             detail_artifact_id: None,

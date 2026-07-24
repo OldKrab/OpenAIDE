@@ -136,6 +136,22 @@ pub enum ActivityStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolPresentationSnapshot {
+    pub kind: ToolPresentationKindSnapshot,
+    pub subjects: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolPresentationKindSnapshot {
+    Skill,
+    Read,
+    List,
+    Search,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 // Snapshot variants mirror the serialized contract; boxing only the Rust side
 // would add protocol-boundary ownership complexity without changing the wire.
 #[allow(clippy::large_enum_variant)]
@@ -155,6 +171,8 @@ pub enum ActivityStepSnapshot {
         tool_call_id: Option<String>,
         name: String,
         status: ActivityStatus,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        presentation: Option<ToolPresentationSnapshot>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         input_summary: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
