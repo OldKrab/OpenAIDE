@@ -36,6 +36,7 @@ vi.mock("../workspace/roots", () => ({
   currentWorkspaceRoot: () => ({ label: "OpenAIDE", path: "/workspace/OpenAIDE", projectId: "project-current" }),
   workspaceRoots: () => [
     { label: "OpenAIDE", path: "/workspace/OpenAIDE", projectId: "project-current" },
+    { label: "API", path: "/workspace/API", projectId: "project-api" },
   ],
 }));
 
@@ -119,7 +120,10 @@ describe("VS Code webview surfaces", () => {
     );
     expect(vscodeMocks.panels[0].webview.html).toContain('data-surface="task"');
     expect(vscodeMocks.panels[0].webview.html).toContain('data-task-id=""');
-    expect(vscodeMocks.panels[0].webview.html).toContain('data-project-id="project-current"');
+    expect(vscodeMocks.panels[0].webview.html).toContain('data-project-id=""');
+    expect(vscodeMocks.panels[0].webview.html).toContain(
+      'data-project-ids="[&quot;project-current&quot;,&quot;project-api&quot;]"',
+    );
     expect(vscodeMocks.panels[0].webview.html).toContain('data-composer-submit-shortcut="enter"');
 
     expect(vscodeMocks.createWebviewPanel).toHaveBeenNthCalledWith(
@@ -154,6 +158,14 @@ describe("VS Code webview surfaces", () => {
       1,
       expect.any(Object),
     );
+  });
+
+  it("passes an explicitly scoped New Task Project to the editor surface", () => {
+    const manager = new TaskEditorManager(context(), runtime(), runtimeProcess(), logger());
+
+    manager.openNewTask("project-api");
+
+    expect(vscodeMocks.panels[0].webview.html).toContain('data-project-id="project-api"');
   });
 
   it("opens a Native Session route and adopts the resulting Task in the same panel", () => {

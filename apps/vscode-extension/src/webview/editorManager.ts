@@ -12,7 +12,7 @@ import {
   type WebviewBootstrap,
   type WebviewHost,
 } from "./types";
-import { currentWorkspaceRoot } from "../workspace/roots";
+import { currentWorkspaceRoot, workspaceRoots } from "../workspace/roots";
 
 type PanelBootstrap = Omit<WebviewBootstrap, "shell">;
 
@@ -43,7 +43,9 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost, TaskFo
     }
     const panel = this.createPanel("openaide.task", "New task", {
       surface: "task",
-      projectId: projectId ?? currentWorkspaceRoot()?.projectId,
+      // An omitted Project lets the retained/App Server New Task default win.
+      // Sidebar Project actions still pass an explicit hint.
+      projectId,
     });
     this.newTaskPanel = panel;
     this.focusPanel(panel);
@@ -249,7 +251,13 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost, TaskFo
   }
 
   private bootstrap(bootstrap: PanelBootstrap): WebviewBootstrap {
-    return { ...bootstrap, shell: VSCODE_SHELL };
+    return {
+      ...bootstrap,
+      shell: VSCODE_SHELL,
+      // Editor surfaces need the same Project scope as Task Navigation so a
+      // multi-root VS Code window can change New Task context in place.
+      projectIds: workspaceRoots().map(({ projectId }) => projectId),
+    };
   }
 }
 

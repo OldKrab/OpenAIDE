@@ -636,6 +636,41 @@ describe("app controller mounted lifecycle", () => {
     expect(latestController?.state.newTask.selection.projectId).toBe("project_2");
   });
 
+  it("keeps a user-selected VS Code New Task Project after applying the route hint", async () => {
+    bootstrap = vscodeNewTaskBootstrap("project_1");
+    const initializedSnapshot = clientSnapshot({ includeActiveTask: false });
+    initializedSnapshot.newTaskDefaults.projectId = "project_2" as never;
+    initializedSnapshot.projects = {
+      projects: [
+        { projectId: "project_1" as never, label: "Web", workspaceRoot: "/workspace/web", available: true },
+        { projectId: "project_2" as never, label: "API", workspaceRoot: "/workspace/api", available: true },
+      ],
+    };
+    backendConnection = {
+      initialize: vi.fn(async () => ({ snapshot: initializedSnapshot })),
+      request: vi.fn(),
+      close: vi.fn(),
+    };
+
+    await act(async () => {
+      create(<PublicControllerProbe />);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(latestPublicController?.view.navigation.newTaskSelection.projectId).toBe("project_1");
+
+    act(() => {
+      latestPublicController?.intents.newTask.selectProject({
+        projectId: "project_2",
+        label: "API",
+        workspaceRoot: "/workspace/api",
+        available: true,
+      });
+    });
+
+    expect(latestPublicController?.view.navigation.newTaskSelection.projectId).toBe("project_2");
+  });
+
   it("does not overwrite a user-selected Agent when initialize resolves late", async () => {
     const deferred = deferredInitialize();
     backendConnection = { initialize: vi.fn(() => deferred.promise), request: vi.fn(), close: vi.fn() };
@@ -2937,6 +2972,7 @@ type TestBootstrap =
   | ReturnType<typeof navigationBootstrap>
   | ReturnType<typeof nativeSessionBootstrap>
   | ReturnType<typeof taskBootstrap>
+  | ReturnType<typeof vscodeNewTaskBootstrap>
   | ReturnType<typeof settingsBootstrap>
   | ReturnType<typeof webTaskBootstrap>
   | ReturnType<typeof webSettingsBootstrap>;
@@ -2976,6 +3012,17 @@ function taskBootstrap(taskId: string) {
     surface: "task" as const,
     shell: { kind: "vscodeExtension" as const, navigationMode: "currentProject" as const },
     taskId,
+    agents: [],
+    preferences: { composer_submit_shortcut: "mod_enter" as const },
+  };
+}
+
+function vscodeNewTaskBootstrap(projectId?: string) {
+  return {
+    surface: "task" as const,
+    shell: { kind: "vscodeExtension" as const, navigationMode: "currentProject" as const },
+    projectId,
+    projectIds: ["project_1", "project_2"],
     agents: [],
     preferences: { composer_submit_shortcut: "mod_enter" as const },
   };
