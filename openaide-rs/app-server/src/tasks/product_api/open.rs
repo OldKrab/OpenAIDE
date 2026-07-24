@@ -103,14 +103,7 @@ impl TaskProductApi {
     /// Task opening returns cached state first, then recovers the Native Session without
     /// synchronously listing Agent sessions. The cached clock selects resume or history replay.
     fn spawn_adopted_task_refresh(&self, task: TaskRecord) {
-        if matches!(
-            task.lifecycle,
-            TaskLifecycle::Prepared { .. } | TaskLifecycle::Archived
-        ) || matches!(
-            task.status,
-            LegacyTaskStatus::Starting | LegacyTaskStatus::Active
-        ) || task.active_turn_id.is_some()
-        {
+        if !task_allows_history_recovery(&task) {
             return;
         }
         let Some(stored_session_id) = task.agent_session_id.clone() else {
@@ -137,6 +130,61 @@ impl TaskProductApi {
             self.spawn_adopted_task_resume(task, stored_session_id, Some(native_session));
             return;
         };
+        self.spawn_history_refresh(
+            task,
+            stored_session_id,
+            native_session,
+            native_updated_at,
+            refreshed_at,
+        );
+    }
+
+    /// A catalog observation may refresh Chat only while at least one client is
+    /// actively subscribed to this idle Task. The clocks remain App Server-owned.
+    pub(super) fn spawn_subscribed_task_history_refresh(&self, task: TaskRecord) {
+        if !self
+            .task_subscription_presence
+            .has_subscribers(&task.task_id)
+            || !task_allows_history_recovery(&task)
+        {
+            return;
+        }
+        let Some(stored_session_id) = task.agent_session_id.clone() else {
+            return;
+        };
+        let Some(native_session) = self.history_sync.cached_session(
+            &task.agent_id,
+            &task.workspace_root,
+            &stored_session_id,
+        ) else {
+            return;
+        };
+        let Ok(local_history_updated_at) = self.store.local_history_updated_at(&task.task_id)
+        else {
+            return;
+        };
+        let Some((native_updated_at, refreshed_at)) =
+            newer_native_activity(&native_session, &local_history_updated_at)
+        else {
+            return;
+        };
+        self.spawn_history_refresh(
+            task,
+            stored_session_id,
+            native_session,
+            native_updated_at,
+            refreshed_at,
+        );
+    }
+
+    fn spawn_history_refresh(
+        &self,
+        task: TaskRecord,
+        stored_session_id: String,
+        native_session: AgentListedSession,
+        native_updated_at: u128,
+        refreshed_at: String,
+    ) {
         let Some(generation) = self.history_sync.begin_passive(&task.task_id) else {
             return;
         };
@@ -344,6 +392,16 @@ impl TaskProductApi {
         )?;
         Ok(())
     }
+}
+
+fn task_allows_history_recovery(task: &TaskRecord) -> bool {
+    !matches!(
+        task.lifecycle,
+        TaskLifecycle::Prepared { .. } | TaskLifecycle::Archived
+    ) && !matches!(
+        task.status,
+        LegacyTaskStatus::Starting | LegacyTaskStatus::Active
+    ) && task.active_turn_id.is_none()
 }
 
 /// Native history replacement is destructive, so missing or incomparable clocks never win.

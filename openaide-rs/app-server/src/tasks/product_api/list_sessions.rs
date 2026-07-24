@@ -337,7 +337,23 @@ impl TaskProductApi {
         };
         self.history_sync
             .replace_listed_sessions(agent_id, workspace_root, sessions);
+        self.refresh_subscribed_task_histories(agent_id, workspace_root, task_records);
         Ok(has_more)
+    }
+
+    fn refresh_subscribed_task_histories(
+        &self,
+        agent_id: &str,
+        workspace_root: &str,
+        task_records: &[TaskRecord],
+    ) {
+        for task in task_records.iter().filter(|task| {
+            task.agent_id == agent_id
+                && task.workspace_root == workspace_root
+                && task.agent_session_id.is_some()
+        }) {
+            self.spawn_subscribed_task_history_refresh(task.clone());
+        }
     }
 
     fn project_activity_cutoff(
@@ -564,6 +580,11 @@ impl TaskProductApi {
                 params.agent_id.as_str(),
                 &project.workspace_root,
                 &result.sessions,
+            );
+            self.refresh_subscribed_task_histories(
+                params.agent_id.as_str(),
+                &project.workspace_root,
+                &task_records,
             );
             self.record_native_catalog_page(
                 project.project_id.as_str(),

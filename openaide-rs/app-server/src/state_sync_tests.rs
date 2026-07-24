@@ -33,6 +33,31 @@ fn subscribe_returns_scope_baseline_and_registers_subscription() {
 }
 
 #[test]
+fn task_subscription_presence_follows_subscribe_unsubscribe_and_client_expiry() {
+    let presence = TaskSubscriptionPresence::default();
+    let mut stream =
+        StateStream::with_task_subscription_presence(StateRootId::from("root-1"), presence.clone());
+    let context = ctx("client-1", "conn-1");
+    let scope = SubscriptionScope::Task {
+        task_id: TaskId::from("task-1"),
+    };
+
+    stream
+        .subscribe(&context, scope.clone(), &snapshots(), AppServerTime(1))
+        .unwrap();
+    assert!(presence.has_subscribers("task-1"));
+
+    stream.unsubscribe(&context, scope.clone(), AppServerTime(2));
+    assert!(!presence.has_subscribers("task-1"));
+
+    stream
+        .subscribe(&context, scope, &snapshots(), AppServerTime(3))
+        .unwrap();
+    stream.drop_client_subscriptions(&context.client_instance_id);
+    assert!(!presence.has_subscribers("task-1"));
+}
+
+#[test]
 fn unrelated_subscription_event_does_not_advance_task_cursor() {
     let mut stream = StateStream::new(StateRootId::from("root-1"));
     let context = ctx("client-1", "conn-1");

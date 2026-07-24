@@ -29,6 +29,7 @@ use crate::server_requests::ServerRequestRuntime;
 use crate::snapshots::task_snapshot::{
     project_stored_task_snapshot_with_history_sync, TaskHistorySyncSnapshotSource,
 };
+use crate::state_sync::TaskSubscriptionPresence;
 use crate::storage::records::TaskRecord;
 use crate::storage::Store;
 use crate::task_events::TaskUpdateNotifier;
@@ -77,6 +78,7 @@ pub(crate) struct TaskProductApi {
     history_sync: crate::tasks::history_sync::HistorySyncCoordinator,
     native_catalog: crate::native_sessions::catalog::NativeSessionCatalog,
     native_catalog_refresh: list_sessions::NativeCatalogRefreshCoordinator,
+    task_subscription_presence: TaskSubscriptionPresence,
     native_adoption: Arc<Mutex<()>>,
     #[allow(dead_code)]
     server_requests: ServerRequestRuntime,
@@ -376,6 +378,7 @@ impl TaskProductApi {
             history_sync: crate::tasks::history_sync::HistorySyncCoordinator::default(),
             native_catalog,
             native_catalog_refresh: Default::default(),
+            task_subscription_presence: Default::default(),
             native_adoption: Arc::new(Mutex::new(())),
             server_requests,
             task_notifier: notifier,
@@ -387,6 +390,16 @@ impl TaskProductApi {
         // directly from durable zero-message Tasks before accepting protocol requests.
         api.mutations.reconcile_prepared_task_pool(true)?;
         Ok(api)
+    }
+
+    /// Connects Task-view presence from the protocol subscription owner to
+    /// background recovery without making Frontend timestamps authoritative.
+    pub(crate) fn with_task_subscription_presence(
+        mut self,
+        task_subscription_presence: TaskSubscriptionPresence,
+    ) -> Self {
+        self.task_subscription_presence = task_subscription_presence;
+        self
     }
 
     pub(super) fn publish_history_sync(
