@@ -19,15 +19,18 @@ type SidebarProjectTaskGroupProps = {
   nativeSessionAgentId: string;
   nativeSessionAgentName: string;
   nativeSessions: AgentListedSession[];
+  nativeSessionMutations: import("../state/store").AppState["nativeSessionMutations"];
   nativeSessionsAdoptingSessionId?: string;
   nativeSessionsHaveMore: boolean;
   canManageWorktrees: boolean;
+  onArchiveNativeSession: (session: AgentListedSession) => void;
   onArchiveTask: (taskId: string) => void;
   onLoadMore: (visibleIncrement: number) => void;
   onManageWorktrees?: () => void;
   onNewTask: () => void;
   onOpenNativeSession: (session: AgentListedSession) => void;
   onOpenTask: (taskId: string) => void;
+  onRestoreNativeSession: (session: AgentListedSession) => void;
   onRestoreTask: (taskId: string) => void;
   onSetTaskTitle?: (
     taskId: string,
@@ -46,15 +49,18 @@ export function SidebarProjectTaskGroup({
   nativeSessionAgentId,
   nativeSessionAgentName,
   nativeSessions,
+  nativeSessionMutations,
   nativeSessionsAdoptingSessionId,
   nativeSessionsHaveMore,
   canManageWorktrees,
+  onArchiveNativeSession,
   onArchiveTask,
   onLoadMore,
   onManageWorktrees,
   onNewTask,
   onOpenNativeSession,
   onOpenTask,
+  onRestoreNativeSession,
   onRestoreTask,
   onSetTaskTitle,
   onToggleCollapse,
@@ -124,11 +130,17 @@ export function SidebarProjectTaskGroup({
               />
             ) : (
               <SidebarNativeSessionRow
+                archived={showArchived}
                 key={`session:${row.session.agent_id ?? nativeSessionAgentId}:${row.session.session_id}`}
+                mutation={nativeSessionMutations[
+                  `${row.session.agent_id ?? nativeSessionAgentId}\u0000${row.session.session_id}`
+                ]}
                 nativeSessionAgentId={row.session.agent_id ?? nativeSessionAgentId}
                 nativeSessionAgentName={row.session.agent_name ?? nativeSessionAgentName}
                 nativeSessionsAdoptingSessionId={nativeSessionsAdoptingSessionId}
+                onArchiveNativeSession={onArchiveNativeSession}
                 onOpenNativeSession={onOpenNativeSession}
+                onRestoreNativeSession={onRestoreNativeSession}
                 session={row.session}
               />
             ),

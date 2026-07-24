@@ -405,6 +405,55 @@ describe("app reducer composer state", () => {
     ]);
   });
 
+  it("keeps active and archived Native Session subscription replicas separate", () => {
+    let state = createInitialState();
+    const active = { session_id: "active", cwd: "/workspace/app", title: "Active" };
+    const archived = { session_id: "archived", cwd: "/workspace/app", title: "Archived" };
+
+    state = appReducer(state, {
+      type: "taskNavigation",
+      archived: false,
+      tasks: [],
+      sessions: [active],
+      hasMoreProjectIds: [],
+      refreshing: false,
+    });
+    state = appReducer(state, {
+      type: "taskNavigation",
+      archived: true,
+      tasks: [],
+      sessions: [archived],
+      hasMoreProjectIds: [],
+      refreshing: false,
+    });
+
+    expect(state.newTask.nativeSessions.items).toEqual([active]);
+    expect(state.archivedNativeSessions.items).toEqual([archived]);
+  });
+
+  it("retains a failed Native Session archive mutation for inline recovery", () => {
+    let state = createInitialState();
+    state = appReducer(state, {
+      type: "nativeSessionArchive:start",
+      agentId: "codex",
+      sessionId: "session_1",
+      action: "archive",
+    });
+    state = appReducer(state, {
+      type: "nativeSessionArchive:error",
+      agentId: "codex",
+      sessionId: "session_1",
+      action: "archive",
+      message: "Unable to persist archive",
+    });
+
+    expect(state.nativeSessionMutations["codex\u0000session_1"]).toEqual({
+      action: "archive",
+      state: "failed",
+      error: "Unable to persist archive",
+    });
+  });
+
   it("keeps a newer first-send submission locked when session-list loading fails", () => {
     let state = createInitialState();
     state = appReducer(state, { type: "newTask:nativeSessions:start", append: false });

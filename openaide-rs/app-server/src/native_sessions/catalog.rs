@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::protocol::errors::RuntimeError;
 use crate::storage::{atomic, Store};
 
-const CATALOG_VERSION: u32 = 1;
+const CATALOG_VERSION: u32 = 2;
 
 /// Stable Agent-scoped identity for one Agent-owned conversation.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Deserialize, Serialize)]
@@ -214,17 +214,71 @@ impl NativeSessionCatalog {
             .cloned()
     }
 
+    /// Returns whether OpenAIDE locally hides this Agent-owned session.
+    pub(crate) fn is_archived(&self, reference: &NativeSessionRef) -> bool {
+        self.state
+            .lock()
+            .expect("native session catalog poisoned")
+            .archived
+            .contains(reference)
+    }
+
+    /// Durably hides a catalog entry without mutating the Agent-owned session.
+    pub(crate) fn archive(&self, reference: &NativeSessionRef) -> Result<bool, RuntimeError> {
+        self.set_archived(reference, true)
+    }
+
+    /// Durably returns a catalog entry to active discovery without loading it.
+    pub(crate) fn restore(&self, reference: &NativeSessionRef) -> Result<bool, RuntimeError> {
+        self.set_archived(reference, false)
+    }
+
+    fn set_archived(
+        &self,
+        reference: &NativeSessionRef,
+        archived: bool,
+    ) -> Result<bool, RuntimeError> {
+        let mut state = self.state.lock().expect("native session catalog poisoned");
+        if !state
+            .entries
+            .iter()
+            .any(|entry| &entry.observation.reference == reference)
+        {
+            return Ok(false);
+        }
+        let already_matches = state.archived.contains(reference) == archived;
+        if already_matches {
+            return Ok(true);
+        }
+        // Persist the candidate before replacing memory so a failed atomic write
+        // cannot make live subscriptions disagree with the restart baseline.
+        let mut candidate = state.clone();
+        candidate.version = CATALOG_VERSION;
+        if archived {
+            candidate.archived.insert(reference.clone());
+        } else {
+            candidate.archived.remove(reference);
+        }
+        atomic::write_json(&catalog_path(&self.store), &candidate)?;
+        *state = candidate;
+        Ok(true)
+    }
+
     /// Removes only after a definitive `session/load` failure; partial listings never delete.
     pub(crate) fn remove(&self, reference: &NativeSessionRef) -> Result<bool, RuntimeError> {
         let mut state = self.state.lock().expect("native session catalog poisoned");
-        let before = state.entries.len();
-        state
+        let mut candidate = state.clone();
+        let before = candidate.entries.len();
+        candidate
             .entries
             .retain(|entry| &entry.observation.reference != reference);
-        if state.entries.len() == before {
+        if candidate.entries.len() == before {
             return Ok(false);
         }
-        atomic::write_json(&catalog_path(&self.store), &*state)?;
+        candidate.archived.remove(reference);
+        candidate.version = CATALOG_VERSION;
+        atomic::write_json(&catalog_path(&self.store), &candidate)?;
+        *state = candidate;
         Ok(true)
     }
 
@@ -284,11 +338,13 @@ impl NativeSessionCatalog {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct StoredNativeSessionCatalog {
     version: u32,
     entries: Vec<NativeSessionCatalogEntry>,
+    #[serde(default, skip_serializing_if = "std::collections::HashSet::is_empty")]
+    archived: std::collections::HashSet<NativeSessionRef>,
 }
 
 impl Default for StoredNativeSessionCatalog {
@@ -296,6 +352,7 @@ impl Default for StoredNativeSessionCatalog {
         Self {
             version: CATALOG_VERSION,
             entries: Vec::new(),
+            archived: std::collections::HashSet::new(),
         }
     }
 }

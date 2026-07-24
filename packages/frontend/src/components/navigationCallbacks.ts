@@ -6,6 +6,8 @@ import {
 } from "../services/hostBridge";
 import {
   AGENT_PROBE,
+  NATIVE_SESSION_ARCHIVE,
+  NATIVE_SESSION_RESTORE,
   TASK_NAVIGATION_LOAD_MORE,
   TASK_NAVIGATION_REFRESH,
   TASK_SET_TITLE,
@@ -16,6 +18,7 @@ import {
 import { applyProtocolAgents } from "../state/appServerAgents";
 import { requestTaskArchive, requestTaskRestore } from "../intents/taskReadIntents";
 import { newTaskPreparationKey } from "../state/newTaskPreparationContext";
+import { nativeSessionMutationKey } from "../state/store";
 import type { AppCallbacksDependencies, NavigationCallbacks } from "./appControllerCallbackTypes";
 import {
   newTaskNavigationTarget,
@@ -49,6 +52,9 @@ export function createNavigationCallbacks({
   state,
 }: NavigationDependencies): NavigationCallbacks {
   return {
+    archiveNativeSession: (session) => {
+      mutateNativeSessionArchive("archive", session);
+    },
     archiveTask: (taskId) => {
       const archivedTask = state.tasks.find((task) => task.task_id === taskId);
       const archivedProjectId = archivedTask?.project_id ?? (
@@ -163,6 +169,9 @@ export function createNavigationCallbacks({
         title,
       });
     },
+    restoreNativeSession: (session) => {
+      mutateNativeSessionArchive("restore", session);
+    },
     toggleArchived: () => {
       const showArchived = !state.showArchived;
       asyncOperations.beginNavigation(taskListNavigationTarget(showArchived), showArchived);
@@ -170,6 +179,54 @@ export function createNavigationCallbacks({
       // Both lifecycle collections are live session replicas; navigation only selects one.
     },
   };
+
+  function mutateNativeSessionArchive(
+    action: "archive" | "restore",
+    session: import("@openaide/app-shell-contracts").AgentListedSession,
+  ) {
+    const agentId = session.agent_id ?? state.newTask.selection.agentId;
+    const key = nativeSessionMutationKey(agentId, session.session_id);
+    if (state.nativeSessionMutations[key]?.state === "pending") return;
+    if (!backendConnection?.request) {
+      dispatch({
+        type: "nativeSessionArchive:error",
+        agentId,
+        sessionId: session.session_id,
+        action,
+        message: "App Server connection unavailable.",
+      });
+      return;
+    }
+    dispatch({
+      type: "nativeSessionArchive:start",
+      agentId,
+      sessionId: session.session_id,
+      action,
+    });
+    const method = action === "archive"
+      ? NATIVE_SESSION_ARCHIVE
+      : NATIVE_SESSION_RESTORE;
+    void backendConnection.request(method, {
+      agentId: agentId as AgentId,
+      nativeSessionId: session.session_id,
+    }).then(() => {
+      dispatch({
+        type: "nativeSessionArchive:complete",
+        agentId,
+        sessionId: session.session_id,
+      });
+    }).catch((error) => {
+      dispatch({
+        type: "nativeSessionArchive:error",
+        agentId,
+        sessionId: session.session_id,
+        action,
+        message: error instanceof Error
+          ? error.message
+          : `Unable to ${action} Native Session.`,
+      });
+    });
+  }
 }
 
 export function discardPreparedNewTask({

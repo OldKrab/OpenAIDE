@@ -33,9 +33,10 @@ use openaide_app_server_protocol::snapshot::{
 };
 use openaide_app_server_protocol::support::SupportRecoverStuckSessionsParams;
 use openaide_app_server_protocol::task::{
-    ComposerImage, ComposerMessage, TaskAcquireParams, TaskAdoptNativeSessionParams,
-    TaskArchiveParams, TaskCancelParams, TaskMarkReadParams, TaskOpenParams, TaskReleaseParams,
-    TaskSendParams, TaskSetConfigOptionParams, TaskSetTitleParams, TaskTitleSelection,
+    ComposerImage, ComposerMessage, NativeSessionArchiveParams, NativeSessionRestoreParams,
+    TaskAcquireParams, TaskAdoptNativeSessionParams, TaskArchiveParams, TaskCancelParams,
+    TaskMarkReadParams, TaskOpenParams, TaskReleaseParams, TaskSendParams,
+    TaskSetConfigOptionParams, TaskSetTitleParams, TaskTitleSelection,
 };
 use openaide_app_server_protocol::workspace::WorkspaceListDirectoryParams;
 use std::collections::HashMap;
@@ -2564,6 +2565,94 @@ fn list_agent_sessions_skips_filtered_empty_pages() {
 }
 
 #[test]
+fn native_session_archive_and_restore_do_not_contact_the_agent() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let agent = Arc::new(RecordingAgent::default());
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store)),
+        AgentRegistry::default_built_ins(),
+        agent.clone(),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+    let reference = crate::native_sessions::catalog::NativeSessionRef::new("codex", "native-1");
+    api.native_session_catalog()
+        .record_page(
+            project_id_for_workspace("/tmp/openaide-unit-workspace/app").as_str(),
+            "/tmp/openaide-unit-workspace/app",
+            vec![crate::native_sessions::catalog::NativeSessionObservation {
+                reference: reference.clone(),
+                title: Some("Native Session".to_string()),
+                last_activity: None,
+            }],
+        )
+        .unwrap();
+
+    let archived = api
+        .archive_native_session(NativeSessionArchiveParams {
+            agent_id: AgentId::from("codex"),
+            native_session_id: "native-1".to_string(),
+        })
+        .unwrap();
+    let restored = api
+        .restore_native_session(NativeSessionRestoreParams {
+            agent_id: AgentId::from("codex"),
+            native_session_id: "native-1".to_string(),
+        })
+        .unwrap();
+
+    assert!(archived.archived);
+    assert!(!restored.archived);
+    assert!(!api.native_session_catalog().is_archived(&reference));
+    assert_eq!(agent.list_calls.load(Ordering::SeqCst), 0);
+    assert_eq!(agent.loads.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn native_session_archive_rejects_task_owned_identity() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let mut task = task_record("task-owned", "/tmp/openaide-unit-workspace/app");
+    task.agent_session_id = Some("native-owned".to_string());
+    store.write_task(&task).unwrap();
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store)),
+        AgentRegistry::default_built_ins(),
+        Arc::new(RecordingAgent::default()),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+    let reference = crate::native_sessions::catalog::NativeSessionRef::new("codex", "native-owned");
+    api.native_session_catalog()
+        .record_page(
+            project_id_for_workspace("/tmp/openaide-unit-workspace/app").as_str(),
+            "/tmp/openaide-unit-workspace/app",
+            vec![crate::native_sessions::catalog::NativeSessionObservation {
+                reference: reference.clone(),
+                title: None,
+                last_activity: None,
+            }],
+        )
+        .unwrap();
+
+    let error = api
+        .archive_native_session(NativeSessionArchiveParams {
+            agent_id: AgentId::from("codex"),
+            native_session_id: "native-owned".to_string(),
+        })
+        .unwrap_err();
+
+    assert_eq!(
+        error.code,
+        openaide_app_server_protocol::errors::ProtocolErrorCode::Conflict
+    );
+    assert!(!api.native_session_catalog().is_archived(&reference));
+}
+
+#[test]
 fn list_agent_sessions_stops_when_empty_pages_cycle_between_cursors() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
@@ -2618,6 +2707,54 @@ fn background_native_catalog_refresh_stops_when_a_page_adds_no_session_identity(
 
     api.refresh_native_session_catalogs().unwrap();
     assert_eq!(agent.requested_cursors(), vec![None, None]);
+}
+
+#[test]
+fn load_more_continues_past_a_page_containing_only_archived_sessions() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let mut archived_task = task_record("task-archived", "/tmp/openaide-unit-workspace/app");
+    archived_task.lifecycle = TaskLifecycle::Archived;
+    store.write_task(&archived_task).unwrap();
+    let agent = Arc::new(ArchivedFirstPageAgent::default());
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store)),
+        AgentRegistry::default_built_ins(),
+        agent.clone(),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+    let project_id = project_id_for_workspace("/tmp/openaide-unit-workspace/app");
+    for agent_id in ["codex", "opencode"] {
+        let reference =
+            crate::native_sessions::catalog::NativeSessionRef::new(agent_id, "archived-page");
+        api.native_session_catalog()
+            .record_page(
+                project_id.as_str(),
+                "/tmp/openaide-unit-workspace/app",
+                vec![crate::native_sessions::catalog::NativeSessionObservation {
+                    reference: reference.clone(),
+                    title: None,
+                    last_activity: None,
+                }],
+            )
+            .unwrap();
+        api.native_session_catalog().archive(&reference).unwrap();
+    }
+
+    api.request_native_session_catalog_load_more(project_id.as_str(), 1);
+    wait_until(|| {
+        agent
+            .requested_cursors()
+            .iter()
+            .any(|cursor| cursor.as_deref() == Some("page-2"))
+    });
+
+    assert!(agent
+        .requested_cursors()
+        .iter()
+        .any(|cursor| cursor.as_deref() == Some("page-2")));
 }
 
 #[test]
@@ -7263,6 +7400,69 @@ struct PagedSessionAgent {
 #[derive(Default)]
 struct CyclingEmptySessionAgent {
     requested_cursors: Mutex<Vec<(String, Option<String>)>>,
+}
+
+#[derive(Default)]
+struct ArchivedFirstPageAgent {
+    requested_cursors: Mutex<Vec<Option<String>>>,
+}
+
+impl ArchivedFirstPageAgent {
+    fn requested_cursors(&self) -> Vec<Option<String>> {
+        self.requested_cursors.lock().unwrap().clone()
+    }
+}
+
+impl AgentRuntime for ArchivedFirstPageAgent {
+    fn list_sessions(
+        &self,
+        request: AgentListSessionsRequest,
+    ) -> Result<AgentListSessionsResult, RuntimeError> {
+        self.requested_cursors
+            .lock()
+            .unwrap()
+            .push(request.cursor.clone());
+        let (sessions, next_cursor) = match request.cursor.as_deref() {
+            None => (
+                vec![AgentListedSession {
+                    session_id: "archived-page".to_string(),
+                    cwd: request.cwd,
+                    title: Some("Archived".to_string()),
+                    last_activity: None,
+                    updated_at: None,
+                }],
+                Some("page-2".to_string()),
+            ),
+            Some("page-2") => (
+                vec![AgentListedSession {
+                    session_id: "active-page".to_string(),
+                    cwd: request.cwd,
+                    title: Some("Active".to_string()),
+                    last_activity: None,
+                    updated_at: None,
+                }],
+                None,
+            ),
+            _ => (Vec::new(), None),
+        };
+        Ok(AgentListSessionsResult {
+            agent_id: request.agent_id,
+            sessions,
+            next_cursor,
+        })
+    }
+
+    fn start_session(&self, request: AgentSessionStart) -> Result<AgentSession, RuntimeError> {
+        Ok(AgentSession::new(request.agent_id, "archive-pagination"))
+    }
+
+    fn prompt(
+        &self,
+        _prompt: AgentPrompt,
+        _sink: Arc<dyn AgentEventSink>,
+    ) -> Result<crate::agent::AgentPromptOutcome, RuntimeError> {
+        Ok(crate::agent::AgentPromptOutcome::EndTurn)
+    }
 }
 
 impl CyclingEmptySessionAgent {

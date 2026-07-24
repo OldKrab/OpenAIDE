@@ -43,12 +43,30 @@ type AppActionPayload =
   | { type: "tasks"; archived: boolean; tasks: TaskSummary[] }
   | {
       type: "taskNavigation";
-      archived: false;
+      archived: boolean;
       tasks: TaskSummary[];
       sessions: AgentListedSession[];
       hasMoreProjectIds: string[];
       refreshing: boolean;
       refreshError?: string;
+    }
+  | {
+      type: "nativeSessionArchive:start";
+      agentId: string;
+      sessionId: string;
+      action: "archive" | "restore";
+    }
+  | {
+      type: "nativeSessionArchive:complete";
+      agentId: string;
+      sessionId: string;
+    }
+  | {
+      type: "nativeSessionArchive:error";
+      agentId: string;
+      sessionId: string;
+      action: "archive" | "restore";
+      message: string;
     }
   | { type: "tasks:error"; message: string }
   | { type: "task:list:remove"; taskId: string }
@@ -161,6 +179,9 @@ type GlobalAction = Extract<
   AppAction,
   | { type: "tasks" }
   | { type: "taskNavigation" }
+  | { type: "nativeSessionArchive:start" }
+  | { type: "nativeSessionArchive:complete" }
+  | { type: "nativeSessionArchive:error" }
   | { type: "appServer:error" }
   | { type: "appServer:ready" }
   | { type: "appServer:replica" }
@@ -197,6 +218,9 @@ function isGlobalAction(action: AppAction): action is GlobalAction {
   switch (action.type) {
     case "tasks":
     case "taskNavigation":
+    case "nativeSessionArchive:start":
+    case "nativeSessionArchive:complete":
+    case "nativeSessionArchive:error":
     case "appServer:error":
     case "appServer:ready":
     case "appServer:replica":
@@ -245,19 +269,51 @@ function reduceGlobalState(state: AppState, action: GlobalAction): AppState {
       };
     }
     case "taskNavigation": {
+      const nextSessions = {
+        ...(action.archived ? state.archivedNativeSessions : state.newTask.nativeSessions),
+        items: action.sessions,
+        hasMoreProjectIds: action.hasMoreProjectIds,
+        loaded: true,
+        loading: action.refreshing,
+        nextCursor: undefined,
+        error: action.refreshError,
+      };
+      if (action.archived) {
+        return {
+          ...state,
+          archivedNativeSessions: nextSessions,
+        };
+      }
       return {
         ...state,
         newTask: {
           ...state.newTask,
-          nativeSessions: {
-            ...state.newTask.nativeSessions,
-            items: action.sessions,
-            hasMoreProjectIds: action.hasMoreProjectIds,
-            loaded: true,
-            loading: action.refreshing,
-            nextCursor: undefined,
-            error: action.refreshError,
-          },
+          nativeSessions: nextSessions,
+        },
+      };
+    }
+    case "nativeSessionArchive:start": {
+      const key = `${action.agentId}\u0000${action.sessionId}`;
+      return {
+        ...state,
+        nativeSessionMutations: {
+          ...state.nativeSessionMutations,
+          [key]: { action: action.action, state: "pending" },
+        },
+      };
+    }
+    case "nativeSessionArchive:complete": {
+      const key = `${action.agentId}\u0000${action.sessionId}`;
+      const { [key]: _completed, ...nativeSessionMutations } = state.nativeSessionMutations;
+      return { ...state, nativeSessionMutations };
+    }
+    case "nativeSessionArchive:error": {
+      const key = `${action.agentId}\u0000${action.sessionId}`;
+      return {
+        ...state,
+        nativeSessionMutations: {
+          ...state.nativeSessionMutations,
+          [key]: { action: action.action, state: "failed", error: action.message },
         },
       };
     }

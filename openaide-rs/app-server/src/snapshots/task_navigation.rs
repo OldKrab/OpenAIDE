@@ -149,45 +149,47 @@ impl TaskNavigationSnapshotSource for TaskNavigationStore {
                 task: Box::new(task),
             });
         }
-        if matches!(section, TaskNavigationSection::Tasks) {
-            if let Some(catalog) = &self.native_sessions {
-                for entry in catalog
-                    .entries()
-                    .into_iter()
-                    .filter(|entry| {
-                        enabled_agents.as_ref().is_none_or(|agents| {
-                            agents.contains(&entry.observation.reference.agent_id)
-                        })
-                    })
-                    .filter(|entry| project_selected_str(project_ids, &entry.project_id))
-                    .filter(|entry| {
-                        !owned.contains(&(
-                            entry.observation.reference.agent_id.clone(),
-                            entry.observation.reference.session_id.clone(),
-                        ))
-                    })
-                {
-                    let project_id = ProjectId::from(entry.project_id);
-                    let project_label =
-                        ProjectIdentity::from_workspace_root(&entry.workspace_root).label;
-                    groups
-                        .entry(project_id.clone())
-                        .or_insert_with(|| empty_group(project_id.clone(), project_label))
-                        .entries
-                        .push(TaskNavigationEntry::NativeSession {
-                            session: NativeSessionSummary {
-                                reference: NativeSessionReference {
-                                    agent_id: AgentId::from(entry.observation.reference.agent_id),
-                                    session_id: entry.observation.reference.session_id,
-                                },
-                                project_id,
-                                workspace_root: entry.workspace_root,
-                                worktree_id: None,
-                                title: entry.observation.title,
-                                last_activity: entry.observation.last_activity,
+        if let Some(catalog) = &self.native_sessions {
+            for entry in catalog
+                .entries()
+                .into_iter()
+                .filter(|entry| {
+                    enabled_agents
+                        .as_ref()
+                        .is_none_or(|agents| agents.contains(&entry.observation.reference.agent_id))
+                })
+                .filter(|entry| project_selected_str(project_ids, &entry.project_id))
+                .filter(|entry| {
+                    !owned.contains(&(
+                        entry.observation.reference.agent_id.clone(),
+                        entry.observation.reference.session_id.clone(),
+                    ))
+                })
+                .filter(|entry| {
+                    catalog.is_archived(&entry.observation.reference)
+                        == matches!(section, TaskNavigationSection::Archive)
+                })
+            {
+                let project_id = ProjectId::from(entry.project_id);
+                let project_label =
+                    ProjectIdentity::from_workspace_root(&entry.workspace_root).label;
+                groups
+                    .entry(project_id.clone())
+                    .or_insert_with(|| empty_group(project_id.clone(), project_label))
+                    .entries
+                    .push(TaskNavigationEntry::NativeSession {
+                        session: NativeSessionSummary {
+                            reference: NativeSessionReference {
+                                agent_id: AgentId::from(entry.observation.reference.agent_id),
+                                session_id: entry.observation.reference.session_id,
                             },
-                        });
-                }
+                            project_id,
+                            workspace_root: entry.workspace_root,
+                            worktree_id: None,
+                            title: entry.observation.title,
+                            last_activity: entry.observation.last_activity,
+                        },
+                    });
             }
         }
         let mut groups = groups.into_values().collect::<Vec<_>>();

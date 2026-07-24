@@ -90,6 +90,7 @@
 .task-row-action-slot {
   min-width: 0;
   position: absolute;
+  z-index: 1;
   top: 0;
   right: 0;
   bottom: 0;
@@ -146,8 +147,34 @@
   opacity: 0.55;
 }
 
-.external-session-row .task-row-action:disabled {
+.external-session-row .task-row-action:disabled:not(.pending) {
   opacity: 0;
+}
+
+.external-session-row .task-row-action.pending {
+  opacity: 1;
+}
+
+.external-session-row[data-archived-native-session] .task-open {
+  cursor: default;
+}
+
+.native-session-archive-label {
+  max-width: 88px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.native-session-mutation-error {
+  align-items: center;
+  color: var(--oa-danger);
+  display: inline-flex;
+  gap: 3px;
+  max-width: 94px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .session-more {

@@ -18,9 +18,11 @@ import { useScrollOverflow } from "./useScrollOverflow";
 type SidebarProps = {
   activeTaskId?: string;
   nativeSessions: AppState["newTask"]["nativeSessions"];
+  nativeSessionMutations?: AppState["nativeSessionMutations"];
   nativeSessionAgentId: string;
   nativeSessionAgentName: string;
   nativeSessionProjectId?: string;
+  onArchiveNativeSession: (session: AgentListedSession) => void;
   onLoadNativeSessions: (cursor?: string, projectId?: string, targetRowCount?: number) => void;
   onManageWorktrees?: (projectId: string) => void;
   onNewTask: (projectId?: string) => void;
@@ -28,6 +30,7 @@ type SidebarProps = {
   onOpenTask: (taskId: string) => void;
   onRecoverNativeSessions?: (kind: NonNullable<AppState["newTask"]["nativeSessions"]["recoveryKind"]>) => void;
   onArchiveTask: (taskId: string) => void;
+  onRestoreNativeSession: (session: AgentListedSession) => void;
   onRestoreTask: (taskId: string) => void;
   onSetTaskTitle?: (
     taskId: string,
@@ -56,9 +59,11 @@ export const DEFAULT_MAX_TASKS_PER_PROJECT = 20;
 export const Sidebar = memo(function Sidebar({
   activeTaskId,
   nativeSessions,
+  nativeSessionMutations = {},
   nativeSessionAgentId,
   nativeSessionAgentName,
   nativeSessionProjectId,
+  onArchiveNativeSession,
   onLoadNativeSessions,
   onManageWorktrees,
   onNewTask,
@@ -66,6 +71,7 @@ export const Sidebar = memo(function Sidebar({
   onOpenTask,
   onRecoverNativeSessions,
   onArchiveTask,
+  onRestoreNativeSession,
   onRestoreTask,
   onSetTaskTitle,
   onSearchChange,
@@ -103,7 +109,7 @@ export const Sidebar = memo(function Sidebar({
   });
   const flatRows = projectGroupRows(
     tasks,
-    !showArchived && showNativeSessions ? viewModel.visibleNativeSessions : [],
+    showNativeSessions ? viewModel.visibleNativeSessions : [],
   );
   const groupSearchQuery = searchQuery.trim().toLowerCase();
   const hasSearchQuery = groupSearchQuery.length > 0;
@@ -113,7 +119,7 @@ export const Sidebar = memo(function Sidebar({
   const groups = groupedTasks(tasks, projects, {
     includeProjectId: nativeSessionProjectId,
     includedProjectSessions:
-      !showArchived && showNativeSessions ? viewModel.visibleNativeSessions : [],
+      showNativeSessions ? viewModel.visibleNativeSessions : [],
   }).filter((group) =>
     !groupSearchQuery ||
     group.tasks.length > 0 ||
@@ -148,7 +154,7 @@ export const Sidebar = memo(function Sidebar({
         <div className="archive-section-head">
           <button aria-label="Back to tasks" onClick={onToggleArchived} type="button"><ArrowLeft size={15} /></button>
           <Archive size={15} />
-          <span><strong>Archive</strong><small>Read-only tasks</small></span>
+          <span><strong>Archive</strong><small>Tasks and Native Sessions</small></span>
         </div>
       ) : null}
       <div className={`sidebar-actions ${showArchived ? "archive-actions" : ""}`}>
@@ -223,11 +229,13 @@ export const Sidebar = memo(function Sidebar({
                 nativeSessionAgentId={nativeSessionAgentId}
                 nativeSessionAgentName={nativeSessionAgentName}
                 nativeSessions={group.nativeSessions}
+                nativeSessionMutations={nativeSessionMutations}
                 nativeSessionsAdoptingSessionId={nativeSessions.adoptingSessionId}
                 nativeSessionsHaveMore={
                   !showArchived && nativeSessions.hasMoreProjectIds?.includes(group.key) === true
                 }
                 canManageWorktrees={Boolean(projects.find((project) => project.projectId === group.key)?.worktreeRepositoryId)}
+                onArchiveNativeSession={onArchiveNativeSession}
                 onArchiveTask={onArchiveTask}
                 onLoadMore={(visibleIncrement) =>
                   {
@@ -244,6 +252,7 @@ export const Sidebar = memo(function Sidebar({
                 onNewTask={() => onNewTask(group.key)}
                 onOpenNativeSession={onOpenNativeSession}
                 onOpenTask={onOpenTask}
+                onRestoreNativeSession={onRestoreNativeSession}
                 onRestoreTask={onRestoreTask}
                 onSetTaskTitle={onSetTaskTitle}
                 onToggleCollapse={() =>
@@ -279,11 +288,17 @@ export const Sidebar = memo(function Sidebar({
                 />
               ) : (
                 <SidebarNativeSessionRow
+                  archived={showArchived}
                   key={`session:${row.session.agent_id ?? nativeSessionAgentId}:${row.session.session_id}`}
+                  mutation={nativeSessionMutations[
+                    `${row.session.agent_id ?? nativeSessionAgentId}\u0000${row.session.session_id}`
+                  ]}
                   nativeSessionAgentId={row.session.agent_id ?? nativeSessionAgentId}
                   nativeSessionAgentName={row.session.agent_name ?? nativeSessionAgentName}
                   nativeSessionsAdoptingSessionId={nativeSessions.adoptingSessionId}
+                  onArchiveNativeSession={onArchiveNativeSession}
                   onOpenNativeSession={onOpenNativeSession}
+                  onRestoreNativeSession={onRestoreNativeSession}
                   session={row.session}
                 />
               ),
@@ -332,6 +347,7 @@ export const Sidebar = memo(function Sidebar({
 function sameSidebarDataProps(prev: SidebarProps, next: SidebarProps) {
   return prev.activeTaskId === next.activeTaskId &&
     prev.nativeSessions === next.nativeSessions &&
+    prev.nativeSessionMutations === next.nativeSessionMutations &&
     prev.nativeSessionAgentId === next.nativeSessionAgentId &&
     prev.nativeSessionAgentName === next.nativeSessionAgentName &&
     prev.nativeSessionProjectId === next.nativeSessionProjectId &&

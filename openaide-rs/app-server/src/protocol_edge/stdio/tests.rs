@@ -13,9 +13,10 @@ use openaide_app_server_protocol::methods::{
     ATTACHMENT_CONFIRM_EMBEDDED, ATTACHMENT_CREATE_EMBEDDED_CANDIDATE,
     ATTACHMENT_CREATE_FILE_REFERENCE, ATTACHMENT_CREATE_PASTED_IMAGE, ATTACHMENT_LIST_DIRECTORY,
     ATTACHMENT_LIST_ROOTS, ATTACHMENT_REFRESH_HANDLES, ATTACHMENT_RELEASE, ATTACHMENT_REVEAL,
-    CLIENT_HEARTBEAT, CLIENT_INITIALIZE, SETTINGS_GET_AGENT_DETAILS, STATE_SUBSCRIBE, TASK_ACQUIRE,
-    TASK_ADOPT_NATIVE_SESSION, TASK_ARCHIVE, TASK_CANCEL, TASK_LIST, TASK_MARK_READ, TASK_OPEN,
-    TASK_RELEASE, TASK_SEND, TASK_SET_CONFIG_OPTION,
+    CLIENT_HEARTBEAT, CLIENT_INITIALIZE, NATIVE_SESSION_ARCHIVE, NATIVE_SESSION_RESTORE,
+    SETTINGS_GET_AGENT_DETAILS, STATE_SUBSCRIBE, TASK_ACQUIRE, TASK_ADOPT_NATIVE_SESSION,
+    TASK_ARCHIVE, TASK_CANCEL, TASK_LIST, TASK_MARK_READ, TASK_OPEN, TASK_RELEASE, TASK_SEND,
+    TASK_SET_CONFIG_OPTION,
 };
 use openaide_app_server_protocol::snapshot::PendingRequestScope;
 use openaide_app_server_protocol::state::{StateSubscribeParams, SubscriptionScope};
@@ -609,6 +610,94 @@ fn task_navigation_subscription_returns_the_only_storage_backed_baseline() {
             ["taskId"],
         "task-1"
     );
+}
+
+#[test]
+fn native_session_archive_updates_both_navigation_section_subscriptions() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let catalog =
+        crate::native_sessions::catalog::NativeSessionCatalog::open(store.clone()).unwrap();
+    let reference =
+        crate::native_sessions::catalog::NativeSessionRef::new("codex", "native-session");
+    catalog
+        .record_page(
+            "project-1",
+            "/workspace/OpenAIDE",
+            vec![crate::native_sessions::catalog::NativeSessionObservation {
+                reference: reference.clone(),
+                title: Some("Native Session".to_string()),
+                last_activity: None,
+            }],
+        )
+        .unwrap();
+    drop(catalog);
+    drop(store);
+    let state_root = StateRoot::resolve(temp.path()).expect("state root");
+    let mut dispatcher = ProtocolEdgeStdioDispatcher::new_for_test(state_root);
+    dispatcher.handle_line(&init_request("1", "client-1"));
+    for (id, section) in [
+        (
+            "subscribe-tasks",
+            openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
+        ),
+        (
+            "subscribe-archive",
+            openaide_app_server_protocol::task::TaskNavigationSection::Archive,
+        ),
+    ] {
+        dispatcher.handle_line(
+            &json!({
+                "jsonrpc": "2.0",
+                "id": id,
+                "method": STATE_SUBSCRIBE,
+                "params": StateSubscribeParams {
+                    scope: SubscriptionScope::TaskNavigation { section, project_ids: None },
+                }
+            })
+            .to_string(),
+        );
+    }
+
+    let archived = dispatcher.handle_line(
+        &json!({
+            "jsonrpc": "2.0",
+            "id": "archive-native",
+            "method": NATIVE_SESSION_ARCHIVE,
+            "params": { "agentId": "codex", "nativeSessionId": "native-session" }
+        })
+        .to_string(),
+    );
+    assert!(response(&archived[0])["result"]["result"]["archived"]
+        .as_bool()
+        .unwrap());
+    let sections = archived[1..]
+        .iter()
+        .map(|line| response(line)["params"]["payload"]["section"].clone())
+        .collect::<std::collections::HashSet<_>>();
+    assert_eq!(
+        sections,
+        std::collections::HashSet::from([json!("tasks"), json!("archive")])
+    );
+
+    let restored = dispatcher.handle_line(
+        &json!({
+            "jsonrpc": "2.0",
+            "id": "restore-native",
+            "method": NATIVE_SESSION_RESTORE,
+            "params": { "agentId": "codex", "nativeSessionId": "native-session" }
+        })
+        .to_string(),
+    );
+    assert!(!response(&restored[0])["result"]["result"]["archived"]
+        .as_bool()
+        .unwrap());
+    drop(dispatcher);
+    let reopened = crate::native_sessions::catalog::NativeSessionCatalog::open(
+        open_store_after_dispatcher_drop(temp.path()),
+    )
+    .unwrap();
+    assert!(!reopened.is_archived(&reference));
 }
 
 #[test]

@@ -40,15 +40,17 @@ use crate::state::{
 };
 use crate::support::{SupportRecoverStuckSessionsParams, SupportRecoverStuckSessionsResult};
 use crate::task::{
-    TaskAcquireInWorktreeParams, TaskAcquireInWorktreeResult, TaskAcquireParams, TaskAcquireResult,
-    TaskAdoptNativeSessionParams, TaskAdoptNativeSessionResult, TaskArchiveParams,
-    TaskArchiveResult, TaskCancelParams, TaskCancelResult, TaskChatPageParams, TaskChatPageResult,
-    TaskListParams, TaskListResult, TaskMarkReadParams, TaskMarkReadResult,
-    TaskNavigationLoadMoreParams, TaskNavigationLoadMoreResult, TaskNavigationRefreshParams,
-    TaskNavigationRefreshResult, TaskOpenParams, TaskOpenResult, TaskReleaseParams,
-    TaskReleaseResult, TaskRestoreParams, TaskRestoreResult, TaskSearchFilesParams,
-    TaskSearchFilesResult, TaskSendParams, TaskSendResult, TaskSetConfigOptionParams,
-    TaskSetConfigOptionResult, TaskSetTitleParams, TaskSetTitleResult,
+    NativeSessionArchiveParams, NativeSessionArchiveResult, NativeSessionRestoreParams,
+    NativeSessionRestoreResult, TaskAcquireInWorktreeParams, TaskAcquireInWorktreeResult,
+    TaskAcquireParams, TaskAcquireResult, TaskAdoptNativeSessionParams,
+    TaskAdoptNativeSessionResult, TaskArchiveParams, TaskArchiveResult, TaskCancelParams,
+    TaskCancelResult, TaskChatPageParams, TaskChatPageResult, TaskListParams, TaskListResult,
+    TaskMarkReadParams, TaskMarkReadResult, TaskNavigationLoadMoreParams,
+    TaskNavigationLoadMoreResult, TaskNavigationRefreshParams, TaskNavigationRefreshResult,
+    TaskOpenParams, TaskOpenResult, TaskReleaseParams, TaskReleaseResult, TaskRestoreParams,
+    TaskRestoreResult, TaskSearchFilesParams, TaskSearchFilesResult, TaskSendParams,
+    TaskSendResult, TaskSetConfigOptionParams, TaskSetConfigOptionResult, TaskSetTitleParams,
+    TaskSetTitleResult,
 };
 use crate::workspace::{
     WorkspaceListDirectoryParams, WorkspaceListDirectoryResult, WorkspaceListRootsParams,
@@ -408,6 +410,18 @@ protocol_method!(
     TASK_NAVIGATION_LOAD_MORE,
     TaskNavigationLoadMoreParams,
     TaskNavigationLoadMoreResult
+);
+protocol_method!(
+    NativeSessionArchive,
+    NATIVE_SESSION_ARCHIVE,
+    NativeSessionArchiveParams,
+    NativeSessionArchiveResult
+);
+protocol_method!(
+    NativeSessionRestore,
+    NATIVE_SESSION_RESTORE,
+    NativeSessionRestoreParams,
+    NativeSessionRestoreResult
 );
 protocol_method!(
     TaskAdoptNativeSession,

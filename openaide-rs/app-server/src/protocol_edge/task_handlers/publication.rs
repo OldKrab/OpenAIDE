@@ -232,7 +232,7 @@ impl RpcGateway {
         ))
     }
 
-    fn publish_project_entries_replaced(
+    pub(crate) fn publish_project_entries_replaced(
         &mut self,
         project_id: &ProjectId,
         now: AppServerTime,
