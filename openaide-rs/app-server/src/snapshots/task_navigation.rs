@@ -287,7 +287,7 @@ pub(crate) fn project_task_summary_with_has_messages(
     record: TaskRecord,
     has_messages: bool,
 ) -> TaskSummary {
-    let title = record.title.map(project_title);
+    let title = record.title.effective().cloned().map(project_title);
     let status = project_status_with_preparation(record.status, &record.preparation);
     let lifecycle = project_task_lifecycle(&record.lifecycle);
     let workspace_available = std::path::Path::new(&record.workspace_root).is_dir();

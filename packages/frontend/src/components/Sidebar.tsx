@@ -29,6 +29,10 @@ type SidebarProps = {
   onRecoverNativeSessions?: (kind: NonNullable<AppState["newTask"]["nativeSessions"]["recoveryKind"]>) => void;
   onArchiveTask: (taskId: string) => void;
   onRestoreTask: (taskId: string) => void;
+  onSetTaskTitle?: (
+    taskId: string,
+    title: { kind: "user"; value: string } | { kind: "automatic" },
+  ) => Promise<void>;
   onSearchChange: (query: string) => void;
   onSettings: () => void;
   onToggleArchived: () => void;
@@ -63,6 +67,7 @@ export const Sidebar = memo(function Sidebar({
   onRecoverNativeSessions,
   onArchiveTask,
   onRestoreTask,
+  onSetTaskTitle,
   onSearchChange,
   onSettings,
   onToggleArchived,
@@ -240,6 +245,7 @@ export const Sidebar = memo(function Sidebar({
                 onOpenNativeSession={onOpenNativeSession}
                 onOpenTask={onOpenTask}
                 onRestoreTask={onRestoreTask}
+                onSetTaskTitle={onSetTaskTitle}
                 onToggleCollapse={() =>
                   setCollapsedProjectKeys((current) => {
                     const next = new Set(current);
@@ -267,6 +273,7 @@ export const Sidebar = memo(function Sidebar({
                   onArchiveTask={onArchiveTask}
                   onOpenTask={onOpenTask}
                   onRestoreTask={onRestoreTask}
+                  onSetTaskTitle={onSetTaskTitle}
                   showArchived={showArchived}
                   task={row.task}
                 />

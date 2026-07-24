@@ -501,7 +501,7 @@ fn task_projection(task_id: &str) -> TaskProjection {
 fn task_record(task_id: &str) -> TaskRecord {
     TaskRecord {
         task_id: task_id.to_string(),
-        title: None,
+        title: Default::default(),
         status: TaskStatus::Inactive,
         task_version: 1,
         message_history_version: 0,

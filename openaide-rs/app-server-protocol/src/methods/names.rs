@@ -51,6 +51,7 @@ pub const TASK_SEARCH_FILES: &str = "task/searchFiles";
 pub const TASK_ADOPT_NATIVE_SESSION: &str = "task/adoptNativeSession";
 pub const TASK_SEND: &str = "task/send";
 pub const TASK_SET_CONFIG_OPTION: &str = "task/setConfigOption";
+pub const TASK_SET_TITLE: &str = "task/setTitle";
 pub const TASK_CANCEL: &str = "task/cancel";
 pub const TASK_OPEN: &str = "task/open";
 pub const TASK_MARK_READ: &str = "task/markRead";
@@ -116,6 +117,7 @@ pub const CLIENT_METHODS: &[&str] = &[
     TASK_ADOPT_NATIVE_SESSION,
     TASK_SEND,
     TASK_SET_CONFIG_OPTION,
+    TASK_SET_TITLE,
     TASK_CANCEL,
     TASK_OPEN,
     TASK_MARK_READ,

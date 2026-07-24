@@ -157,9 +157,11 @@ fn queued_updates_keep_values_from_their_own_committed_revision() {
     for title in ["First", "Second"] {
         mutations
             .commit_existing_task("task_ordered", TaskCommitOptions::metadata(), |ctx| {
-                ctx.task_mut().title = crate::storage::records::TaskTitle::new(
-                    title,
-                    crate::storage::records::TaskTitleSource::User,
+                ctx.task_mut().title = crate::storage::records::TaskTitleState::from_title(
+                    crate::storage::records::TaskTitle::new(
+                        title,
+                        crate::storage::records::TaskTitleSource::User,
+                    ),
                 );
                 Ok(TaskMutationResult::Changed)
             })
@@ -213,9 +215,11 @@ fn rejected_commit_returns_rejection_without_storage_or_publication_facts() {
 
     let result = mutations
         .commit_existing_task("task_rejected", TaskCommitOptions::metadata(), |ctx| {
-            ctx.task_mut().title = crate::storage::records::TaskTitle::new(
-                "Should not persist",
-                crate::storage::records::TaskTitleSource::User,
+            ctx.task_mut().title = crate::storage::records::TaskTitleState::from_title(
+                crate::storage::records::TaskTitle::new(
+                    "Should not persist",
+                    crate::storage::records::TaskTitleSource::User,
+                ),
             );
             Ok(TaskMutationResult::Rejected)
         })
@@ -252,9 +256,11 @@ fn chat_commit_refreshes_message_history_before_task_write() {
                 response_snapshot_tail_limit: None,
             },
             |ctx| {
-                ctx.task_mut().title = crate::storage::records::TaskTitle::new(
-                    "Updated",
-                    crate::storage::records::TaskTitleSource::User,
+                ctx.task_mut().title = crate::storage::records::TaskTitleState::from_title(
+                    crate::storage::records::TaskTitle::new(
+                        "Updated",
+                        crate::storage::records::TaskTitleSource::User,
+                    ),
                 );
                 Ok(TaskMutationResult::Changed)
             },
@@ -1090,9 +1096,11 @@ fn terminal_stream_revalidates_session_after_waiting_for_the_mutation_lock() {
 fn task_record(task_id: &str) -> TaskRecord {
     TaskRecord {
         task_id: task_id.to_string(),
-        title: crate::storage::records::TaskTitle::new(
-            "Task",
-            crate::storage::records::TaskTitleSource::User,
+        title: crate::storage::records::TaskTitleState::from_title(
+            crate::storage::records::TaskTitle::new(
+                "Task",
+                crate::storage::records::TaskTitleSource::User,
+            ),
         ),
         status: TaskStatus::Inactive,
         task_version: 0,

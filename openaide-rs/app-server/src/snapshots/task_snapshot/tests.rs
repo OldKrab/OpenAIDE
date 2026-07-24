@@ -522,9 +522,11 @@ fn sync_task_message_history_version(store: &Store, task_id: &str) {
 fn task_record(task_id: &str) -> TaskRecord {
     TaskRecord {
         task_id: task_id.to_string(),
-        title: crate::storage::records::TaskTitle::new(
-            "Task",
-            crate::storage::records::TaskTitleSource::User,
+        title: crate::storage::records::TaskTitleState::from_title(
+            crate::storage::records::TaskTitle::new(
+                "Task",
+                crate::storage::records::TaskTitleSource::User,
+            ),
         ),
         status: TaskStatus::Inactive,
         task_version: 1,

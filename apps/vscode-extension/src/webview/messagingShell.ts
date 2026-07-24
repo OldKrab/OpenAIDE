@@ -53,6 +53,10 @@ export async function routeSurfaceCommand(message: WebviewToHostMessage, context
     }
     return true;
   }
+  if (message.type === "surface.updateTaskTitle") {
+    context.surfaces?.updateTaskTitle?.(message.payload.task_id, message.payload.title);
+    return true;
+  }
   return false;
 }
 

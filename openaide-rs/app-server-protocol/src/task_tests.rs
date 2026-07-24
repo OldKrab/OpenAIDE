@@ -72,3 +72,24 @@ fn task_list_filter_is_optional_for_global_history() {
     assert!(value.get("cursor").is_none());
     assert!(value.get("archived").is_none());
 }
+
+#[test]
+fn task_set_title_selects_user_or_automatic_ownership() {
+    assert_eq!(
+        serde_json::to_value(TaskSetTitleParams {
+            task_id: "task-1".into(),
+            title: TaskTitleSelection::User {
+                value: "My title".to_string(),
+            },
+        })
+        .unwrap(),
+        json!({
+            "taskId": "task-1",
+            "title": { "kind": "user", "value": "My title" }
+        })
+    );
+    assert_eq!(
+        serde_json::to_value(TaskTitleSelection::Automatic).unwrap(),
+        json!({ "kind": "automatic" })
+    );
+}

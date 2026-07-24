@@ -41,7 +41,7 @@ impl TaskTurnLifecycle {
             let session = session_start.session();
             let record = TaskRecord {
                 task_id: task_id.clone(),
-                title: None,
+                title: Default::default(),
                 status: TaskStatus::Active,
                 task_version: 1,
                 message_history_version: 0,

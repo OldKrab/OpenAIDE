@@ -46,6 +46,10 @@ export type NavigationCallbacks = {
   openSettings: (agentId?: string, returnToNewTask?: boolean, projectId?: string) => void;
   openTask: (taskId: string) => void;
   retryAgent: (agentId: string) => Promise<boolean>;
+  setTaskTitle: (
+    taskId: string,
+    title: { kind: "user"; value: string } | { kind: "automatic" },
+  ) => Promise<void>;
   restoreTask: (taskId: string) => void;
   toggleArchived: () => void;
 };

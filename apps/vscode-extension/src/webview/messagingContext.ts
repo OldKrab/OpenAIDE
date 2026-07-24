@@ -18,5 +18,6 @@ export type MessageContext = {
     openNativeSession: (agentId: string, nativeSessionId: string, projectId?: string) => void;
     openSettings: (agentId?: string, returnToNewTask?: boolean, projectId?: string) => void;
     openTask: (taskId: string, title?: string) => void;
+    updateTaskTitle?: (taskId: string, title: string) => void;
   };
 };

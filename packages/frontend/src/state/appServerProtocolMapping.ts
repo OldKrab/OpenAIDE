@@ -295,6 +295,7 @@ function mapProtocolTaskSummaryWithWarnings(
       project_id: summary.projectId,
       project_label: project?.label,
       title: summary.title?.value ?? fallbackTitle,
+      title_source: summary.title?.source,
       status: taskSummaryStatusFromProtocol(summary.status),
       task_version: revision,
       message_history_version: revision,

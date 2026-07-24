@@ -6,7 +6,7 @@ use openaide_app_server_protocol::task::{
     TaskListParams, TaskListResult, TaskMarkReadParams, TaskMarkReadResult, TaskOpenParams,
     TaskOpenResult, TaskReleaseParams, TaskReleaseResult, TaskRestoreParams, TaskRestoreResult,
     TaskSearchFilesParams, TaskSearchFilesResult, TaskSendParams, TaskSendResult,
-    TaskSetConfigOptionParams, TaskSetConfigOptionResult,
+    TaskSetConfigOptionParams, TaskSetConfigOptionResult, TaskSetTitleParams, TaskSetTitleResult,
 };
 use serde_json::Value;
 
@@ -253,6 +253,34 @@ impl RpcGateway {
             meta,
             TaskSetConfigOptionResult { task },
         )
+    }
+
+    pub(super) fn handle_task_set_title(
+        &mut self,
+        connection_id: ConnectionId,
+        id: String,
+        params: Value,
+        meta: RequestMeta,
+        _now: AppServerTime,
+    ) -> GatewayOutcome {
+        let params = match serde_json::from_value::<TaskSetTitleParams>(params) {
+            Ok(params) => params,
+            Err(error) => {
+                return self.error(connection_id, id, meta, responses::invalid_params(error))
+            }
+        };
+        let client = self
+            .client_hub
+            .context_for_connection(&connection_id)
+            .expect("routing requires an initialized client for Task title changes");
+        let task = match self
+            .task_set_title
+            .set_title_for_client(&client.client_instance_id, params)
+        {
+            Ok(task) => task,
+            Err(error) => return self.error(connection_id, id, meta, error),
+        };
+        self.result::<TaskSetTitleResult>(connection_id, id, meta, TaskSetTitleResult { task })
     }
 
     pub(super) fn handle_task_open(

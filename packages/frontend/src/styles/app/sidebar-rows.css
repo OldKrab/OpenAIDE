@@ -17,6 +17,53 @@
   gap: 5px;
 }
 
+.task-rename-form {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 26px 26px;
+  gap: 2px;
+  align-items: center;
+  padding: 1px 34px 1px 6px;
+}
+
+.task-rename-form input {
+  min-width: 0;
+  height: 26px;
+  border: 1px solid var(--oa-focus);
+  border-radius: var(--oa-radius-sm);
+  background: var(--oa-bg);
+  color: var(--oa-text);
+  padding: 2px 6px;
+}
+
+.task-rename-form button {
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: var(--oa-radius-sm);
+  background: transparent;
+  color: var(--oa-muted);
+  display: inline-grid;
+  place-items: center;
+}
+
+.task-rename-form button:hover:not(:disabled),
+.task-rename-form button:focus-visible {
+  background: var(--oa-raised);
+  color: var(--oa-text);
+}
+
+.task-rename-form small,
+.task-title-error {
+  grid-column: 1 / -1;
+  color: var(--oa-danger);
+  font-size: 10px;
+}
+
+.task-title-error {
+  padding: 0 36px 3px 27px;
+}
+
 .task-agent-icon {
   width: 16px;
   height: 16px;

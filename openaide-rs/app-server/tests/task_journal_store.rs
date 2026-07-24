@@ -67,7 +67,10 @@ fn durable_task_metadata_and_chat_survive_without_persisting_live_agent_catalogs
         .wait()
         .unwrap();
     let mut task = store.load("task_split_authority").unwrap().task;
-    task.title = TaskTitle::new("Durable title", TaskTitleSource::User);
+    task.title = openaide_app_server::storage::records::TaskTitleState::from_title(TaskTitle::new(
+        "Durable title",
+        TaskTitleSource::User,
+    ));
     store
         .submit(TaskWrite::barrier_replace_task(task))
         .unwrap()
@@ -1041,7 +1044,7 @@ fn task_projection(task_id: &str) -> TaskProjection {
     TaskProjection {
         task: TaskRecord {
             task_id: task_id.to_string(),
-            title: None,
+            title: Default::default(),
             status: TaskStatus::Inactive,
             task_version: 1,
             message_history_version: 0,

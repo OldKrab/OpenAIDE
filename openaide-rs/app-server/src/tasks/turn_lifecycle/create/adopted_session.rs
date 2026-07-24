@@ -44,7 +44,7 @@ impl TaskTurnLifecycle {
             let session_id = session.session_id.clone();
             let record = TaskRecord {
                 task_id: task_id.clone(),
-                title,
+                title: crate::storage::records::TaskTitleState::from_title(title),
                 status: TaskStatus::Inactive,
                 task_version: 1,
                 message_history_version: 0,
