@@ -198,7 +198,7 @@ export function SidebarTaskRow({
               <button onClick={beginRename} type="button" role="menuitem"><Pencil size={13} />Rename task</button>
             ) : null}
             {onSetTaskTitle && !showArchived && task.title_source === "user" ? (
-              <button onClick={() => void resetTitle()} type="button" role="menuitem"><Undo2 size={13} />Reset automatic title</button>
+              <button onClick={() => void resetTitle()} type="button" role="menuitem"><Undo2 size={13} />Reset to Agent title</button>
             ) : null}
             <button onClick={runAction} type="button" role="menuitem">
               {showArchived ? <RotateCcw size={13} /> : <Archive size={13} />}

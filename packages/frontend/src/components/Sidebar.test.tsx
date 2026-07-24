@@ -227,7 +227,7 @@ describe("SidebarTaskRow", () => {
     act(() => tree.root.findByProps({ "aria-label": "Task actions for Agent title" }).props.onClick());
     await act(async () => {
       tree.root.findAllByProps({ role: "menuitem" })
-        .find((item) => item.children.includes("Reset automatic title"))!.props.onClick();
+        .find((item) => item.children.includes("Reset to Agent title"))!.props.onClick();
     });
     expect(onSetTaskTitle).toHaveBeenLastCalledWith("task_rename", { kind: "automatic" });
   });
