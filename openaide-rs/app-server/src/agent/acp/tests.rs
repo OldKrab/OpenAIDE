@@ -50,6 +50,7 @@ use crate::protocol::model::{
     ActivityStatus, ActivityToolContent, ActivityToolValue, AgentCommandsCatalog, AgentMessagePart,
     AgentMessageRole, Attachment, ConfigOption, ConfigOptionCategory, ConfigOptionCurrentValue,
     ConfigOptionKind, ConfigOptionValue, ConfigOptionsStatus, NormalizedMessage,
+    ToolPresentationKind,
 };
 use agent_client_protocol::JsonRpcMessage;
 use agent_client_protocol::{Agent, Client, ConnectionTo, Handled};
@@ -2110,6 +2111,249 @@ fn tool_call_event_identifies_skill_instruction_reads() {
     match ordinary {
         AgentEvent::ToolCall(tool_call) => assert_eq!(tool_call.kind, "read"),
         other => panic!("expected tool call event, got {other:?}"),
+    }
+}
+
+#[test]
+fn execute_tool_call_presents_canonical_skill_reads_without_changing_execute_identity() {
+    let command = "/usr/bin/zsh -lc \"sed -n '1,260p' /home/user/.agents/skills/tdd/SKILL.md && sed -n '1,300p' /home/user/.agents/skills/diagnosing-bugs/SKILL.md && sed -n '1,300p' /home/user/.agents/skills/impeccable/SKILL.md\"";
+    let event = tool_call_event(
+        &ToolCall::new("tool_call_execute_skills", command)
+            .kind(ToolKind::Execute)
+            .raw_input(serde_json::json!({ "cmd": command })),
+    );
+
+    let AgentEvent::ToolCall(tool_call) = event else {
+        panic!("expected tool call event");
+    };
+    assert_eq!(tool_call.kind, "execute");
+    let presentation = tool_call.presentation.expect("skill presentation");
+    assert_eq!(presentation.kind, ToolPresentationKind::Skill);
+    assert_eq!(
+        presentation.subjects,
+        ["tdd", "diagnosing-bugs", "impeccable"]
+    );
+    let details = tool_call.details.expect("execute details");
+    assert_eq!(
+        details.input.expect("execute input").command,
+        [command.to_string()]
+    );
+}
+
+#[test]
+fn execute_tool_call_presents_wrapped_semicolon_separated_sed_reads() {
+    let command = "zsh -lc \"sed -n '45,75p' openaide-rs/app-server/examples/runtime_contract_fixtures.rs; sed -n '42,55p' openaide-rs/app-server/src/agent/command_presentation/shell.rs; sed -n '400,414p' openaide-rs/app-server/src/agent/command_presentation/mod.rs\"";
+    let event = tool_call_event(
+        &ToolCall::new("tool_call_execute_sed_reads", command)
+            .kind(ToolKind::Execute)
+            .raw_input(serde_json::json!({ "cmd": command })),
+    );
+
+    let AgentEvent::ToolCall(tool_call) = event else {
+        panic!("expected tool call event");
+    };
+    assert_eq!(tool_call.kind, "execute");
+    assert_eq!(
+        tool_call.presentation,
+        Some(crate::protocol::model::ToolPresentation {
+            kind: ToolPresentationKind::Read,
+            subjects: vec![
+                "runtime_contract_fixtures.rs".to_string(),
+                "shell.rs".to_string(),
+                "mod.rs".to_string(),
+            ],
+        })
+    );
+}
+
+#[test]
+fn execute_tool_call_does_not_present_mutating_or_mixed_sed_commands() {
+    for command in [
+        "sed -i -n '1,20p' /workspace/file.md",
+        "sed -n '1,20p' /workspace/file.md > /workspace/copy.md",
+        "sed -n '1,20p' /workspace/file.md | sh",
+        "sed -n '1,20p' /workspace/file.md && npm test",
+        "sed -n '1,20p' /workspace/file.md; npm test",
+    ] {
+        let event = tool_call_event(
+            &ToolCall::new("tool_call_execute_unsafe_sed", command)
+                .kind(ToolKind::Execute)
+                .raw_input(serde_json::json!({ "cmd": command })),
+        );
+        let AgentEvent::ToolCall(tool_call) = event else {
+            panic!("expected tool call event");
+        };
+        assert_eq!(tool_call.kind, "execute");
+        assert_eq!(tool_call.presentation, None, "{command}");
+    }
+}
+
+#[test]
+fn execute_tool_call_presents_single_file_cat_as_read() {
+    let event = tool_call_event(
+        &ToolCall::new("tool_call_execute_cat", "cat PRODUCT.md")
+            .kind(ToolKind::Execute)
+            .raw_input(serde_json::json!({ "command": ["cat", "PRODUCT.md"] })),
+    );
+
+    let AgentEvent::ToolCall(tool_call) = event else {
+        panic!("expected tool call event");
+    };
+    assert_eq!(
+        tool_call.presentation,
+        Some(crate::protocol::model::ToolPresentation {
+            kind: ToolPresentationKind::Read,
+            subjects: vec!["PRODUCT.md".to_string()],
+        })
+    );
+}
+
+#[test]
+fn execute_tool_call_rejects_conflicting_command_fields() {
+    let event = tool_call_event(
+        &ToolCall::new("tool_call_execute_conflicting_command", "cat PRODUCT.md")
+            .kind(ToolKind::Execute)
+            .raw_input(serde_json::json!({
+                "command": "cat PRODUCT.md",
+                "cmd": "npm test"
+            })),
+    );
+
+    let AgentEvent::ToolCall(tool_call) = event else {
+        panic!("expected tool call event");
+    };
+    assert_eq!(tool_call.kind, "execute");
+    assert_eq!(tool_call.presentation, None);
+}
+
+#[test]
+fn execute_tool_call_does_not_treat_traversal_paths_as_skills() {
+    let command = "cat /tmp/skills/tdd/../../../etc/SKILL.md";
+    let event = tool_call_event(
+        &ToolCall::new("tool_call_execute_traversal_skill", command)
+            .kind(ToolKind::Execute)
+            .raw_input(serde_json::json!({ "command": command })),
+    );
+
+    let AgentEvent::ToolCall(tool_call) = event else {
+        panic!("expected tool call event");
+    };
+    assert_eq!(tool_call.kind, "execute");
+    assert_eq!(
+        tool_call.presentation,
+        Some(crate::protocol::model::ToolPresentation {
+            kind: ToolPresentationKind::Read,
+            subjects: vec!["SKILL.md".to_string()],
+        })
+    );
+}
+
+#[test]
+fn execute_tool_call_sanitizes_presentation_subjects() {
+    let cases = [
+        ("cat /home/alice/private/notes.md", "notes.md"),
+        (
+            "rg token=secret /home/alice/project",
+            "token=[redacted] in project",
+        ),
+    ];
+
+    for (command, expected_subject) in cases {
+        let event = tool_call_event(
+            &ToolCall::new("tool_call_execute_sanitized_subject", command)
+                .kind(ToolKind::Execute)
+                .raw_input(serde_json::json!({ "command": command })),
+        );
+        let AgentEvent::ToolCall(tool_call) = event else {
+            panic!("expected tool call event");
+        };
+        assert_eq!(
+            tool_call.presentation.expect(command).subjects,
+            [expected_subject],
+            "{command}"
+        );
+    }
+}
+
+#[test]
+fn execute_tool_call_presents_supported_read_list_and_search_commands() {
+    let cases = [
+        (
+            "head -n 20 PRODUCT.md",
+            ToolPresentationKind::Read,
+            vec!["PRODUCT.md"],
+        ),
+        (
+            "ls -la packages/frontend",
+            ToolPresentationKind::List,
+            vec!["packages/frontend"],
+        ),
+        (
+            "rg --files packages/frontend",
+            ToolPresentationKind::List,
+            vec!["packages/frontend"],
+        ),
+        ("git ls-files", ToolPresentationKind::List, vec!["."]),
+        (
+            "rg -n activityLabels packages/frontend",
+            ToolPresentationKind::Search,
+            vec!["activityLabels in packages/frontend"],
+        ),
+        (
+            "grep -R TODO src",
+            ToolPresentationKind::Search,
+            vec!["TODO in src"],
+        ),
+        (
+            "git grep ToolPresentation",
+            ToolPresentationKind::Search,
+            vec!["ToolPresentation"],
+        ),
+        (
+            "find . -name '*.md' -print",
+            ToolPresentationKind::Search,
+            vec!["*.md in ."],
+        ),
+    ];
+
+    for (command, kind, subjects) in cases {
+        let event = tool_call_event(
+            &ToolCall::new("tool_call_execute_semantic", command)
+                .kind(ToolKind::Execute)
+                .raw_input(serde_json::json!({ "cmd": command })),
+        );
+        let AgentEvent::ToolCall(tool_call) = event else {
+            panic!("expected tool call event");
+        };
+        let presentation = tool_call.presentation.expect(command);
+        assert_eq!(presentation.kind, kind, "{command}");
+        assert_eq!(presentation.subjects, subjects, "{command}");
+    }
+}
+
+#[test]
+fn execute_tool_call_falls_back_for_ambiguous_or_effectful_commands() {
+    for command in [
+        "cat first.md second.md",
+        "/tmp/cat PRODUCT.md",
+        "cat *.md",
+        "cat file.md | tee copy.md",
+        "rg TODO src | sh",
+        "rg TODO src && npm test",
+        "find . -delete",
+        "find . -exec printf '%s\\n' '{}' ';'",
+        "xargs cat",
+        "awk '{ print $1 }' file",
+    ] {
+        let event = tool_call_event(
+            &ToolCall::new("tool_call_execute_fallback", command)
+                .kind(ToolKind::Execute)
+                .raw_input(serde_json::json!({ "cmd": command })),
+        );
+        let AgentEvent::ToolCall(tool_call) = event else {
+            panic!("expected tool call event");
+        };
+        assert_eq!(tool_call.presentation, None, "{command}");
     }
 }
 

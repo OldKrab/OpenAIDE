@@ -1,5 +1,5 @@
 import { Brain, ChevronRight, CircleX, Check, Terminal, Wrench } from "lucide-react";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import type { ActivityStep, ActivityToolDetails, NormalizedMessage } from "@openaide/app-shell-contracts";
 import { toolDetailCacheKey } from "../state/store";
 import { AgentMarkdown } from "./AgentMarkdown";
@@ -9,8 +9,10 @@ import {
   activityStepContext,
   activityStepLabel,
   activityStepPreview,
+  activityStepSemanticTitle,
   activityStepStatus,
   activitySummary,
+  type ActivityStepSemanticTitle,
 } from "../state/activityLabels";
 import { hasToolDetails, toolKindClass } from "../state/toolDetailsViewModel";
 import { toolPresentationName } from "../state/toolDetailsShared";
@@ -101,6 +103,8 @@ export function ActivityStepRow({
   const displayStep: ActivityStep =
     step.kind === "tool" ? presentToolStep(step, details) : step;
   const label = activityStepLabel(displayStep);
+  const semanticTitle = activityStepSemanticTitle(displayStep);
+  const title = semanticTitle ? <SemanticStepTitle title={semanticTitle} /> : label;
   const preview = activityStepPreview(displayStep);
   const status = activityStepStatus(displayStep);
   const context = activityStepContext(displayStep);
@@ -114,7 +118,13 @@ export function ActivityStepRow({
       status={status}
     />
   );
-  const className = `activity-step ${displayStep.kind === "tool" ? `tool-${toolKindClass(displayStep.name)} ${displayStep.status}` : ""}`;
+  const className = `activity-step ${displayStep.kind === "tool"
+    ? [
+        `tool-${toolKindClass(displayStep.name)}`,
+        displayStep.presentation ? `tool-presentation-${toolKindClass(displayStep.presentation.kind)}` : "",
+        displayStep.status,
+      ].filter(Boolean).join(" ")
+    : ""}`;
   const legacyCommandText = commandTextForExpandableLegacyStep(displayStep);
   if (step.kind === "thought") {
     return (
@@ -182,7 +192,7 @@ export function ActivityStepRow({
         stepId={displayStep.tool_call_id}
         trigger={(
           <>
-            <ActivityStepContent disclosure icon={activityStepIcon(displayStep)} label={label} />
+            <ActivityStepContent disclosure icon={activityStepIcon(displayStep)} label={title} titleClassName={semanticTitle ? "semantic" : undefined} />
             {metadata}
           </>
         )}
@@ -193,7 +203,11 @@ export function ActivityStepRow({
   }
   return (
     <div className={className} data-step-id={displayStep.kind === "tool" ? displayStep.tool_call_id : undefined}>
-      <ActivityStepContent icon={activityStepIcon(displayStep)} label={label} />
+      <ActivityStepContent
+        icon={activityStepIcon(displayStep)}
+        label={title}
+        titleClassName={semanticTitle ? "semantic" : undefined}
+      />
       {metadata}
       {preview ? <pre>{preview}</pre> : null}
     </div>
@@ -226,9 +240,12 @@ function LiveToolDetailDisclosure({
     if (!open || !artifactId) return undefined;
     return subscribeToolDetailRef.current?.(artifactId);
   }, [artifactId, open]);
-  const commandTitle = step.name === "execute"
-    ? <CommandStepTitle command={activityStepLabel(step)} status={step.status} />
-    : activityStepLabel(step);
+  const semanticTitle = activityStepSemanticTitle(step);
+  const commandTitle = semanticTitle
+    ? <SemanticStepTitle title={semanticTitle} />
+    : step.name === "execute" && !step.presentation
+      ? <CommandStepTitle command={activityStepLabel(step)} status={step.status} />
+      : activityStepLabel(step);
   return (
     <AnimatedDisclosure
       className={className}
@@ -240,7 +257,7 @@ function LiveToolDetailDisclosure({
             disclosure
             icon={activityStepIcon(step)}
             label={commandTitle}
-            titleClassName={step.name === "execute" ? "command" : undefined}
+            titleClassName={semanticTitle ? "semantic" : step.name === "execute" && !step.presentation ? "command" : undefined}
           />
           {metadata}
         </>
@@ -297,6 +314,32 @@ function CommandStepTitle({ command, status }: { command: string; status: "runni
     <>
       <span className="activity-step-action">{action}</span>
       <code className="activity-step-command">{command}</code>
+    </>
+  );
+}
+
+function SemanticStepTitle({ title }: { title: ActivityStepSemanticTitle }) {
+  return (
+    <>
+      <span className="activity-step-semantic-action">{title.action}</span>
+      <span className="activity-step-semantic-subject-list">
+        {title.subjects.map((subject, index) => (
+          <Fragment key={`${subject}-${index}`}>
+          {index > 0 ? (
+            <span className="activity-step-semantic-connector">
+              {index === title.subjects.length - 1 ? " and " : ", "}
+            </span>
+          ) : null}
+            <span className="activity-step-semantic-subject">{subject}</span>
+          </Fragment>
+        ))}
+      </span>
+      {title.scope ? (
+        <>
+          <span className="activity-step-semantic-connector">in</span>
+          <span className="activity-step-semantic-scope">{title.scope}</span>
+        </>
+      ) : null}
     </>
   );
 }
@@ -413,10 +456,10 @@ function AnimatedDisclosure({
 
 export function activityStepIcon(step: ActivityStep) {
   if (step.kind === "thought") return <Brain className="activity-kind-icon" size={12} />;
-  if (step.kind === "command" || (step.kind === "tool" && step.name === "execute")) {
+  if (step.kind === "command" || (step.kind === "tool" && step.name === "execute" && !step.presentation)) {
     return <Terminal className="activity-kind-icon" size={12} />;
   }
-  if (step.kind === "tool") return toolKindIcon(step.name, 12, "activity-kind-icon");
+  if (step.kind === "tool") return toolKindIcon(step.presentation?.kind ?? step.name, 12, "activity-kind-icon");
   return <Wrench className="activity-kind-icon" size={12} />;
 }
 
@@ -434,6 +477,7 @@ function commandStepClassName(step: ActivityStep, className: string) {
 function commandTextForExpandableLegacyStep(step: ActivityStep) {
   if (step.kind === "text") return isCommandLikeText(step.text) ? step.text : undefined;
   if (step.kind !== "tool" || hasToolDetails(step)) return undefined;
+  if (step.presentation) return undefined;
   if (step.name === "execute" && step.input_summary) return step.input_summary;
   if (step.input_summary && isCommandLikeText(step.input_summary)) return step.input_summary;
   return undefined;

@@ -876,6 +876,7 @@ dependencies = [
  "regex",
  "serde",
  "serde_json",
+ "shell-words",
  "tempfile",
  "thiserror",
  "tokio",

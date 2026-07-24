@@ -41,6 +41,8 @@ pub(crate) mod acp_tool_call_projection;
 pub(crate) mod acp_trace;
 pub(crate) mod acp_update_projection;
 pub(crate) mod catalog_store;
+mod command_presentation;
+pub(crate) use command_presentation::infer_saved_execute_presentation;
 pub mod events;
 pub(crate) mod gateway;
 pub mod mock;

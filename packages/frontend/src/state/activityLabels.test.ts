@@ -56,7 +56,7 @@ describe("activity labels", () => {
           input: { command: ["rg", "-n", "activity", "."], cwd: "/workspace", query: "activity", fields: [] },
         },
       }),
-    ).toBe("Search activity");
+    ).toBe("Search “activity” in /workspace");
     expect(activityStepLabel({ kind: "tool", name: "read", status: "completed", input_summary: "Read notes.md" })).toBe(
       "Read notes.md",
     );
@@ -82,11 +82,11 @@ describe("activity labels", () => {
     ]);
 
     expect(activitySummary(message)).toBe("Ran search");
-    expect(activityStepLabel(message.steps[0])).toBe("Search find . -name 'index.md' -print");
-    expect(activityStepContext(message.steps[0])).toBe("sample-workspace");
+    expect(activityStepLabel(message.steps[0])).toBe("Search find . -name 'index.md' -print in sample-workspace");
+    expect(activityStepContext(message.steps[0])).toBeUndefined();
   });
 
-  it("separates a fallback ACP search title into query and scope", () => {
+  it("delimits a fallback ACP regex while keeping scope inline", () => {
     const step = {
       kind: "tool" as const,
       name: "search",
@@ -94,8 +94,33 @@ describe("activity labels", () => {
       input_summary: "Search for '\"name\":\"search\"[^\\n]{0,500}' in state",
     };
 
-    expect(activityStepLabel(step)).toBe('Search: "name":"search"[^\\n]{0,500}');
-    expect(activityStepContext(step)).toBe("state");
+    expect(activityStepLabel(step)).toBe('Search /"name":"search"[^\\n]{0,500}/ in state');
+    expect(activityStepContext(step)).toBeUndefined();
+  });
+
+  it("bounds long regex previews without changing their separate scope", () => {
+    const step = {
+      kind: "tool" as const,
+      name: "search",
+      status: "completed" as const,
+      input_summary:
+        "Search for 'task_create_attach_failure|follow_up_attach_failure|no rollout|missing.*session|Agent work stopped' in tests",
+    };
+
+    expect(activityStepLabel(step)).toBe("Search /task_create_attach_failure|follow_up_attach_fai…/ in tests");
+    expect(activityStepContext(step)).toBeUndefined();
+  });
+
+  it("does not call ordinary punctuation in a literal query a regex", () => {
+    const step = {
+      kind: "tool" as const,
+      name: "search",
+      status: "completed" as const,
+      input_summary: "Search for 'activityLabels.test.ts' in frontend",
+    };
+
+    expect(activityStepLabel(step)).toBe("Search “activityLabels.test.ts” in frontend");
+    expect(activityStepContext(step)).toBeUndefined();
   });
 
   it("labels terminal input separately from commands", () => {
@@ -179,6 +204,32 @@ describe("activity labels", () => {
         ]),
       ),
     ).toBe("Ran command");
+  });
+
+  it("uses trusted execute presentation for semantic titles and status copy", () => {
+    const skill = {
+      kind: "tool" as const,
+      name: "execute",
+      status: "completed" as const,
+      presentation: { kind: "skill" as const, subjects: ["tdd", "diagnosing-bugs", "impeccable"] },
+      input_summary: "sed -n ...",
+    };
+    const search = {
+      kind: "tool" as const,
+      name: "execute",
+      status: "running" as const,
+      presentation: { kind: "search" as const, subjects: ["activityLabels in frontend"] },
+      input_summary: "rg -n activityLabels frontend",
+    };
+
+    expect(activitySummary(activity("Commands", "completed", [skill]))).toBe("Activated skill");
+    expect(activityStepLabel(skill)).toBe("Activated tdd, diagnosing-bugs, and impeccable skills");
+    expect(activityStepProgressLabel({ ...skill, status: "running" })).toBe(
+      "Activating tdd, diagnosing-bugs, and impeccable skills",
+    );
+    expect(activityStepCompletedLabel(skill)).toBe("Activated tdd, diagnosing-bugs, and impeccable skills");
+    expect(activityStepLabel(search)).toBe("Search activityLabels in frontend");
+    expect(activityStepProgressLabel(search)).toBe("Searching activityLabels in frontend");
   });
 
   it("summarizes mixed grouped tool activity by work type", () => {

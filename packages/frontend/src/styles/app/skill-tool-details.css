@@ -1,4 +1,5 @@
-.activity-step.tool-skill .activity-kind-icon {
+.activity-step.tool-skill .activity-kind-icon,
+.activity-step.tool-presentation-skill .activity-kind-icon {
   color: color-mix(in oklch, var(--oa-focus) 58%, var(--oa-muted));
 }
 

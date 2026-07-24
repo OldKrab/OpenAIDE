@@ -58,6 +58,7 @@ fn main() {
                         tool_call_id: Some("tool_read_1".to_string()),
                         name: "read".to_string(),
                         status: ActivityStatus::Completed,
+                        presentation: None,
                         input_summary: Some("README.md".to_string()),
                         output_preview: Some("content".to_string()),
                         detail_artifact_id: Some("artifact_1".to_string()),

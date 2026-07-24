@@ -5,6 +5,7 @@ import {
   Earth,
   FileInput,
   FileText,
+  ListTree,
   Pencil,
   Repeat2,
   Search,
@@ -16,6 +17,7 @@ import {
 export function toolKindIcon(kind: string | undefined, size: number, className?: string) {
   if (kind === "skill") return <BookOpen className={className} size={size} />;
   if (kind === "read") return <FileText className={className} size={size} />;
+  if (kind === "list") return <ListTree className={className} size={size} />;
   if (kind === "edit") return <Pencil className={className} size={size} />;
   if (kind === "delete") return <Trash2 className={className} size={size} />;
   if (kind === "move") return <FileInput className={className} size={size} />;

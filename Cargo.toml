@@ -12,6 +12,7 @@ openaide-app-server-protocol = { path = "openaide-rs/app-server-protocol" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 regex = "1.12"
+shell-words = "1.1"
 thiserror = "2.0"
 uuid = { version = "1.18", features = ["v4", "serde"] }
 tempfile = "3.23"

@@ -79,7 +79,12 @@ test("creates a New Task, sends once, streams Chat, tools, and Agent title", asy
   await expect(chat.getByText("Smoke answer", { exact: true })).toBeVisible();
   await expect(chat.locator(".task-header-title > strong")).toHaveText("Smoke task");
   await page.getByRole("button", { name: "Thought, read file" }).click();
-  await expect(page.getByText("Read README.md", { exact: true })).toBeVisible();
+  const readStep = chat.locator(".activity-step").filter({
+    has: page.locator(".activity-step-semantic-action", { hasText: /^Read$/ }),
+  }).filter({
+    has: page.locator(".activity-step-semantic-subject", { hasText: /^README\.md$/ }),
+  });
+  await expect(readStep).toBeVisible();
   await expect(page.getByLabel("Task status: Ready")).toBeVisible();
   await expect(page.getByRole("textbox", { name: "Message" })).toHaveText("");
 });

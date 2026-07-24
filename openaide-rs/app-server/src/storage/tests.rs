@@ -1,8 +1,9 @@
 use super::*;
 use crate::protocol::model::{
-    ActivityStatus, ActivityStep, ActivityToolContent, ActivityToolDetails, AgentMessagePart,
-    AgentMessageRole, ChatMessage, ConfigOption, ConfigOptionCurrentValue, ConfigOptionKind,
-    ConfigOptionsCatalog, ConfigOptionsStatus, IsolationKind, NormalizedMessage, TaskStatus,
+    ActivityStatus, ActivityStep, ActivityToolContent, ActivityToolDetails, ActivityToolInput,
+    AgentMessagePart, AgentMessageRole, ChatMessage, ConfigOption, ConfigOptionCurrentValue,
+    ConfigOptionKind, ConfigOptionsCatalog, ConfigOptionsStatus, IsolationKind, NormalizedMessage,
+    TaskStatus, ToolPresentation, ToolPresentationKind,
 };
 use crate::storage::records::{StoredMessage, TaskPreparationRecord, TaskRecord};
 use crate::storage_runtime::RecoveryClassification;
@@ -315,6 +316,7 @@ fn persisted_tool_artifacts_keep_a_lightweight_file_summary() {
             tool_call_id: None,
             name: "edit".to_string(),
             status: ActivityStatus::Completed,
+            presentation: None,
             input_summary: None,
             output_preview: None,
             detail_artifact_id: None,
@@ -391,6 +393,195 @@ fn pages_hydrate_missing_tool_file_summaries_from_artifacts() {
         panic!("expected tool step");
     };
     assert_eq!(input_summary.as_deref(), Some("chat.ts"));
+}
+
+#[test]
+fn pages_enrich_legacy_execute_presentation_without_changing_saved_tools() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().to_path_buf()).unwrap();
+    let task_id = "task_legacy_execute_presentation";
+    ensure_task(&store, task_id);
+    let mut message = ChatMessage {
+        cursor: "activity_1".to_string(),
+        identity: "activity_1".to_string(),
+        message_type: "activity".to_string(),
+        message_id: "activity_1".to_string(),
+        message: NormalizedMessage::Activity {
+            id: "activity_1".to_string(),
+            title: "Ran 2 commands".to_string(),
+            status: ActivityStatus::Completed,
+            created_at: "2026-07-02T00:00:00Z".to_string(),
+            collapsed: true,
+            steps: vec![
+                execute_step(
+                    "read-call",
+                    "zsh -lc \"sed -n '45,75p' src/runtime.rs; sed -n '1,10p' src/model.rs\"",
+                ),
+                execute_step("build-call", "cargo test -p openaide-app-server"),
+            ],
+        },
+    };
+    store
+        .persist_tool_artifacts(task_id, &mut message.message)
+        .unwrap();
+    write_stored_messages(
+        &store,
+        task_id,
+        &[StoredMessage {
+            sequence: 1,
+            chat: message,
+        }],
+    );
+
+    let page = store.tail_page(task_id, 1).unwrap();
+
+    let NormalizedMessage::Activity { steps, .. } = &page.items[0].message else {
+        panic!("expected activity");
+    };
+    assert_eq!(steps.len(), 2);
+    let ActivityStep::Tool {
+        tool_call_id,
+        name,
+        presentation,
+        details,
+        ..
+    } = &steps[0]
+    else {
+        panic!("expected first tool");
+    };
+    assert_eq!(tool_call_id.as_deref(), Some("read-call"));
+    assert_eq!(name, "execute");
+    assert!(details.is_none());
+    let presentation = presentation.as_ref().expect("legacy read presentation");
+    assert_eq!(presentation.kind, ToolPresentationKind::Read);
+    assert_eq!(presentation.subjects, ["runtime.rs", "model.rs"]);
+    let ActivityStep::Tool {
+        tool_call_id,
+        name,
+        presentation,
+        ..
+    } = &steps[1]
+    else {
+        panic!("expected second tool");
+    };
+    assert_eq!(tool_call_id.as_deref(), Some("build-call"));
+    assert_eq!(name, "execute");
+    assert!(presentation.is_none());
+
+    let stored = store.read_messages(task_id).unwrap();
+    let NormalizedMessage::Activity { steps, .. } = &stored[0].chat.message else {
+        panic!("expected saved activity");
+    };
+    assert_eq!(steps.len(), 2);
+    assert!(matches!(
+        &steps[0],
+        ActivityStep::Tool {
+            presentation: None,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn pages_enrich_legacy_execute_presentation_from_inline_details() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().to_path_buf()).unwrap();
+    let task_id = "task_inline_legacy_execute_presentation";
+    ensure_task(&store, task_id);
+    let message = ChatMessage {
+        cursor: "activity_1".to_string(),
+        identity: "activity_1".to_string(),
+        message_type: "activity".to_string(),
+        message_id: "activity_1".to_string(),
+        message: NormalizedMessage::Activity {
+            id: "activity_1".to_string(),
+            title: "Ran command".to_string(),
+            status: ActivityStatus::Completed,
+            created_at: "2026-07-02T00:00:00Z".to_string(),
+            collapsed: true,
+            steps: vec![execute_step("read-call", "cat PRODUCT.md")],
+        },
+    };
+    write_stored_messages(
+        &store,
+        task_id,
+        &[StoredMessage {
+            sequence: 1,
+            chat: message,
+        }],
+    );
+
+    let page = store.tail_page(task_id, 1).unwrap();
+
+    let NormalizedMessage::Activity { steps, .. } = &page.items[0].message else {
+        panic!("expected activity");
+    };
+    let ActivityStep::Tool { presentation, .. } = &steps[0] else {
+        panic!("expected tool");
+    };
+    let presentation = presentation.as_ref().expect("legacy read presentation");
+    assert_eq!(presentation.kind, ToolPresentationKind::Read);
+    assert_eq!(presentation.subjects, ["PRODUCT.md"]);
+}
+
+#[test]
+fn pages_refresh_existing_execute_presentation_from_saved_details() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().to_path_buf()).unwrap();
+    let task_id = "task_stale_execute_presentation";
+    ensure_task(&store, task_id);
+    let mut step = execute_step(
+        "read-call",
+        "sed -n '1,20p' packages/frontend/src/components/ChatMessageView.tsx",
+    );
+    let ActivityStep::Tool { presentation, .. } = &mut step else {
+        panic!("expected tool");
+    };
+    *presentation = Some(ToolPresentation {
+        kind: ToolPresentationKind::Read,
+        subjects: vec!["packages/frontend/src/components/ChatMessageView.tsx".to_string()],
+    });
+    let mut message = ChatMessage {
+        cursor: "activity_1".to_string(),
+        identity: "activity_1".to_string(),
+        message_type: "activity".to_string(),
+        message_id: "activity_1".to_string(),
+        message: NormalizedMessage::Activity {
+            id: "activity_1".to_string(),
+            title: "Read file".to_string(),
+            status: ActivityStatus::Completed,
+            created_at: "2026-07-02T00:00:00Z".to_string(),
+            collapsed: true,
+            steps: vec![step],
+        },
+    };
+    store
+        .persist_tool_artifacts(task_id, &mut message.message)
+        .unwrap();
+    write_stored_messages(
+        &store,
+        task_id,
+        &[StoredMessage {
+            sequence: 1,
+            chat: message,
+        }],
+    );
+
+    let page = store.tail_page(task_id, 1).unwrap();
+
+    let NormalizedMessage::Activity { steps, .. } = &page.items[0].message else {
+        panic!("expected activity");
+    };
+    let ActivityStep::Tool { presentation, .. } = &steps[0] else {
+        panic!("expected tool");
+    };
+    assert_eq!(
+        presentation
+            .as_ref()
+            .expect("refreshed presentation")
+            .subjects,
+        ["ChatMessageView.tsx"]
+    );
 }
 
 #[test]
@@ -608,6 +799,7 @@ fn activity_message_with_edit_details(id: &str) -> ChatMessage {
                 tool_call_id: None,
                 name: "edit".to_string(),
                 status: ActivityStatus::Completed,
+                presentation: None,
                 input_summary: None,
                 output_preview: None,
                 detail_artifact_id: None,
@@ -624,6 +816,33 @@ fn activity_message_with_edit_details(id: &str) -> ChatMessage {
                 permission_outcomes: Vec::new(),
             }],
         },
+    }
+}
+
+fn execute_step(tool_call_id: &str, command: &str) -> ActivityStep {
+    ActivityStep::Tool {
+        tool_call_id: Some(tool_call_id.to_string()),
+        name: "execute".to_string(),
+        status: ActivityStatus::Completed,
+        presentation: None,
+        input_summary: Some(command.to_string()),
+        output_preview: Some("done".to_string()),
+        detail_artifact_id: None,
+        details: Some(Box::new(ActivityToolDetails {
+            locations: Vec::new(),
+            content: Vec::new(),
+            input: Some(ActivityToolInput {
+                command: vec![command.to_string()],
+                cwd: Some("/workspace".to_string()),
+                query: None,
+                queries: Vec::new(),
+                url: None,
+                path: None,
+                fields: Vec::new(),
+            }),
+            output: None,
+        })),
+        permission_outcomes: Vec::new(),
     }
 }
 

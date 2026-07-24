@@ -371,6 +371,48 @@
   color: color-mix(in oklch, var(--oa-text) 88%, var(--oa-muted));
 }
 
+.activity-step-title.semantic {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.activity-step-semantic-action,
+.activity-step-semantic-connector,
+.activity-step-semantic-scope {
+  flex: 0 0 auto;
+}
+
+.activity-step-semantic-subject-list {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activity-step-semantic-subject {
+  font-weight: 400;
+}
+
+.activity-step-semantic-subject,
+.activity-step-semantic-scope {
+  color: inherit;
+  font: inherit;
+}
+
+.activity-step-semantic-connector {
+  color: inherit;
+}
+
+.activity-step-semantic-scope {
+  min-width: 0;
+  max-width: 18ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 400;
+}
+
 .activity-step pre {
   grid-column: 1 / -1;
   min-width: 0;
@@ -410,6 +452,15 @@
 
 .activity-step.tool-execute .activity-kind-icon {
   color: color-mix(in oklch, var(--oa-muted) 82%, var(--oa-text));
+}
+
+/* Presentation overrides execute chrome without changing execute identity. */
+.activity-step.tool-presentation-read .activity-kind-icon {
+  color: color-mix(in oklch, var(--oa-focus) 70%, var(--oa-muted));
+}
+
+.activity-step.tool-presentation-search .activity-kind-icon {
+  color: color-mix(in oklch, var(--oa-success) 70%, var(--oa-muted));
 }
 
 .activity-tool-details {

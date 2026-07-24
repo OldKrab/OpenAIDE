@@ -88,7 +88,7 @@ use crate::snapshot::{
     TaskPreparationStepStatus, TaskSendBlocker, TaskSendBlockerKind, TaskSendCapabilitySnapshot,
     TaskSendCapabilityState, TaskSetupBlocker, TaskSetupBlockerKind, TaskSnapshot, TaskStatus,
     TaskSummary, TaskTitle, TaskTitleSource, ToolPermissionDecisionSnapshot,
-    ToolPermissionOutcomeSnapshot,
+    ToolPermissionOutcomeSnapshot, ToolPresentationKindSnapshot, ToolPresentationSnapshot,
 };
 use crate::state::{
     StateSubscribeParams, StateSubscribeResult, StateUnsubscribeParams, StateUnsubscribeResult,
@@ -466,6 +466,8 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<QuestionMessageAction>(output, config);
     push_decl::<ActivityStatus>(output, config);
     push_decl::<ActivityStepSnapshot>(output, config);
+    push_decl::<ToolPresentationSnapshot>(output, config);
+    push_decl::<ToolPresentationKindSnapshot>(output, config);
     push_decl::<ToolPermissionOutcomeSnapshot>(output, config);
     push_decl::<ToolPermissionDecisionSnapshot>(output, config);
     push_decl::<AttachmentSnapshot>(output, config);

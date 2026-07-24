@@ -1,6 +1,6 @@
 use crate::protocol::model::{
     ActivityToolDetails, AgentCommandsCatalog, AgentMessagePart, AgentMessageRole,
-    ConfigOptionsCatalog,
+    ConfigOptionsCatalog, ToolPresentation,
 };
 
 #[derive(Debug, Clone)]
@@ -58,6 +58,7 @@ pub struct AgentToolCall {
     pub title: String,
     pub kind: String,
     pub status: AgentToolCallStatus,
+    pub presentation: Option<ToolPresentation>,
     pub input_summary: Option<String>,
     pub output_preview: Option<String>,
     pub details: Option<Box<ActivityToolDetails>>,

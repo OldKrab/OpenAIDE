@@ -814,7 +814,11 @@ export type QuestionMessageAction = "submit" | "cancel";
 
 export type ActivityStatus = "running" | "completed" | "interrupted" | "failed";
 
-export type ActivityStepSnapshot = { "kind": "text", text: string, level?: string | null, } | { "kind": "tool", toolCallId?: string | null, name: string, status: ActivityStatus, inputSummary?: string | null, outputPreview?: string | null, detailArtifactId?: string | null, details?: ToolDetailSnapshot | null, permissionOutcomes: Array<ToolPermissionOutcomeSnapshot>, } | { "kind": "command", commandLabel: string, status: ActivityStatus, exitCode?: number | null, outputPreview?: string | null, };
+export type ActivityStepSnapshot = { "kind": "text", text: string, level?: string | null, } | { "kind": "tool", toolCallId?: string | null, name: string, status: ActivityStatus, presentation?: ToolPresentationSnapshot | null, inputSummary?: string | null, outputPreview?: string | null, detailArtifactId?: string | null, details?: ToolDetailSnapshot | null, permissionOutcomes: Array<ToolPermissionOutcomeSnapshot>, } | { "kind": "command", commandLabel: string, status: ActivityStatus, exitCode?: number | null, outputPreview?: string | null, };
+
+export type ToolPresentationSnapshot = { kind: ToolPresentationKindSnapshot, subjects: Array<string>, };
+
+export type ToolPresentationKindSnapshot = "skill" | "read" | "list" | "search";
 
 export type ToolPermissionOutcomeSnapshot = { requestId: RequestId, decision: ToolPermissionDecisionSnapshot, optionId?: string | null, optionLabel?: string | null, resolvedAt: string, };
 

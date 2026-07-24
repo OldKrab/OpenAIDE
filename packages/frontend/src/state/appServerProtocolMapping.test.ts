@@ -271,6 +271,74 @@ describe("App Server Protocol state mapping", () => {
     });
   });
 
+  it("maps execute presentation separately from execute identity", () => {
+    const mapping = mapProtocolTaskSnapshot(protocolSnapshot({
+      chat: {
+        hasMoreBefore: false,
+        hasMessages: true,
+        items: [{
+          messageId: "execute-1" as MessageId,
+          role: "agent",
+          status: "complete",
+          parts: [{
+            kind: "activity",
+            title: "Run shell command",
+            status: "completed",
+            steps: [{
+              kind: "tool",
+              name: "execute",
+              status: "completed",
+              presentation: { kind: "skill", subjects: ["tdd", "impeccable"] },
+              inputSummary: "sed -n ...",
+              permissionOutcomes: [],
+            }],
+          }],
+        }],
+      },
+    }), mappingContext());
+
+    expect(mapping.snapshot.chat.items[0].message).toMatchObject({
+      kind: "activity",
+      steps: [{
+        kind: "tool",
+        name: "execute",
+        presentation: { kind: "skill", subjects: ["tdd", "impeccable"] },
+      }],
+    });
+  });
+
+  it("drops malformed execute presentation metadata", () => {
+    const mapping = mapProtocolTaskSnapshot(protocolSnapshot({
+      chat: {
+        hasMoreBefore: false,
+        hasMessages: true,
+        items: [{
+          messageId: "execute-invalid" as MessageId,
+          role: "agent",
+          status: "complete",
+          parts: [{
+            kind: "activity",
+            title: "Run shell command",
+            status: "completed",
+            steps: [{
+              kind: "tool",
+              name: "execute",
+              status: "completed",
+              presentation: { kind: "read", subjects: [] },
+              inputSummary: "cat PRODUCT.md",
+              permissionOutcomes: [],
+            }],
+          }],
+        }],
+      },
+    }), mappingContext());
+
+    const message = mapping.snapshot.chat.items[0].message;
+    expect(message.kind).toBe("activity");
+    if (message.kind !== "activity") throw new Error("expected activity");
+    expect(message.steps[0]).not.toHaveProperty("presentation");
+  });
+
   it("warns when a task references a project missing from the project collection", () => {
     const mapping = mapProtocolTaskNavigation({
       section: "tasks",

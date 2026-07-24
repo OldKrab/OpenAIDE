@@ -285,11 +285,13 @@ function activityStepFromProtocol(step: ActivityStepSnapshot, activityTitle: str
       output_preview: step.outputPreview ?? undefined,
     };
   }
+  const presentation = toolPresentationFromProtocol(step.presentation);
   return {
     kind: "tool",
     tool_call_id: step.toolCallId ?? undefined,
     name: step.name,
     status: activityStatusFromProtocol(step.status),
+    ...(presentation ? { presentation } : {}),
     input_summary: step.inputSummary ?? activityTitle,
     output_preview: step.outputPreview ?? undefined,
     detail_artifact_id: step.detailArtifactId ?? undefined,
@@ -302,6 +304,17 @@ function activityStepFromProtocol(step: ActivityStepSnapshot, activityTitle: str
       resolved_at: outcome.resolvedAt,
     })),
   };
+}
+
+function toolPresentationFromProtocol(
+  presentation: Extract<ActivityStepSnapshot, { kind: "tool" }>["presentation"],
+) {
+  if (!presentation || presentation.subjects.length === 0 || presentation.subjects.length > 8) {
+    return undefined;
+  }
+  const subjects = presentation.subjects.map((subject) => subject.trim());
+  if (subjects.some((subject) => !subject || subject.length > 512)) return undefined;
+  return { kind: presentation.kind, subjects };
 }
 
 function activityStatusFromProtocol(status: ProtocolActivityStatus): ActivityStatus {

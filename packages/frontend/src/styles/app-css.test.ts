@@ -275,11 +275,37 @@ describe("task list row styles", () => {
     );
   });
 
-  it("contains long execute tool output inside the chat column", () => {
+  it("uses quiet typography rather than chips for search queries, scopes, and read files", () => {
+    expect(appCss).toMatch(
+      /\.activity-step-title\.semantic\s*{[^}]*display:\s*inline-flex;[^}]*align-items:\s*baseline;[^}]*gap:\s*4px;/,
+    );
+    expect(appCss).toMatch(
+      /\.activity-step-semantic-subject-list\s*{[^}]*min-width:\s*0;[^}]*overflow:\s*hidden;[^}]*text-overflow:\s*ellipsis;[^}]*white-space:\s*nowrap;/,
+    );
+    expect(appCss).toMatch(
+      /\.activity-step-semantic-subject\s*{[^}]*font-weight:\s*400;/,
+    );
+    expect(appCss).not.toMatch(/\.activity-step-semantic-subject\s*{[^}]*(?:background|border-radius|padding):/);
+    expect(appCss).toMatch(
+      /\.activity-step-semantic-subject,\s*\.activity-step-semantic-scope\s*{[^}]*color:\s*inherit;[^}]*font:\s*inherit;/,
+    );
+    expect(appCss).toMatch(
+      /\.activity-step-semantic-connector\s*{[^}]*color:\s*inherit;/,
+    );
+    expect(appCss).toMatch(
+      /\.activity-step-semantic-scope\s*{[^}]*font-weight:\s*400;/,
+    );
+  });
+
+  it("keeps full execute commands readable without false horizontal overflow", () => {
     expect(appCss).toMatch(/\.activity-group\s*{[^}]*max-width:\s*100%;/);
     expect(appCss).toMatch(/\.activity-step-list\s*{[^}]*min-width:\s*0;[^}]*max-width:\s*100%;/);
     expect(appCss).toMatch(/\.activity-tool-execute-detail\s*{[^}]*max-width:\s*100%;[^}]*overflow-x:\s*hidden;/);
-    expect(appCss).toMatch(/\.execute-command-chip\s*{[^}]*display:\s*block;[^}]*overflow-x:\s*auto;/);
+    expect(appCss).toMatch(
+      /\.execute-command-chip\s*{[^}]*display:\s*block;[^}]*width:\s*100%;[^}]*overflow-wrap:\s*anywhere;[^}]*white-space:\s*pre-wrap;/,
+    );
+    expect(appCss).not.toMatch(/\.execute-command-chip\s*{[^}]*overflow-x:\s*auto;/);
+    expect(appCss).not.toMatch(/\.execute-command-chip\s*{[^}]*text-overflow:\s*ellipsis;/);
     expect(appCss).toMatch(/\.execute-output\s*{[^}]*max-width:\s*100%;[^}]*overflow-x:\s*hidden;/);
     expect(appCss).toMatch(/\.execute-output pre\s*{[^}]*max-width:\s*100%;[^}]*overflow:\s*auto;/);
   });
