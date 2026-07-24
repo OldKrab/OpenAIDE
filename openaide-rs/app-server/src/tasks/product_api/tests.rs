@@ -2970,6 +2970,103 @@ fn open_reloads_adopted_task_when_native_session_is_newer_than_cached_history() 
 }
 
 #[test]
+fn catalog_refresh_reloads_newer_history_for_an_already_open_task() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let mut task = task_record("task-existing", "/tmp/openaide-unit-workspace/app");
+    task.agent_session_id = Some("native-session".to_string());
+    store.write_task(&task).unwrap();
+    store
+        .append_message(
+            "task-existing",
+            ChatMessage {
+                cursor: "m:1".to_string(),
+                identity: "cached:stale".to_string(),
+                message_type: "agent_message".to_string(),
+                message_id: "cached_message".to_string(),
+                message: NormalizedMessage::AgentMessage {
+                    id: "cached:stale".to_string(),
+                    role: AgentMessageRole::Agent,
+                    parts: vec![AgentMessagePart::Text {
+                        text: "Stale cached history.".to_string(),
+                    }],
+                    created_at: "2026-01-01T00:00:00.000Z".to_string(),
+                },
+            },
+        )
+        .unwrap();
+    let mut task = store.read_task("task-existing").unwrap();
+    task.message_history_version = store.message_history_version("task-existing").unwrap();
+    store.write_task(&task).unwrap();
+    let native_updated_at = store
+        .local_history_updated_at("task-existing")
+        .unwrap()
+        .parse::<u128>()
+        .unwrap()
+        + 6_000;
+    let agent = Arc::new(RecordingAgent {
+        replayed_messages: Mutex::new(vec![NormalizedMessage::AgentMessage {
+            id: "native:fresh".to_string(),
+            role: AgentMessageRole::Agent,
+            parts: vec![AgentMessagePart::Text {
+                text: "Fresh native history.".to_string(),
+            }],
+            created_at: "2026-01-02T00:00:00.000Z".to_string(),
+        }]),
+        ..Default::default()
+    });
+    let (notifier, updates) = TaskUpdateNotifier::channel();
+    let task_subscription_presence = crate::state_sync::TaskSubscriptionPresence::default();
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        agent.clone(),
+        notifier,
+    )
+    .unwrap()
+    .with_task_subscription_presence(task_subscription_presence.clone());
+
+    api.open_for_test(TaskOpenParams {
+        task_id: "task-existing".into(),
+    })
+    .unwrap();
+    wait_until(|| agent.resumes.load(Ordering::SeqCst) == 1);
+    task_subscription_presence.subscribe_for_test(
+        ClientInstanceId::from("client-open-task"),
+        TaskId::from("task-existing"),
+    );
+    while updates.try_recv().is_ok() {}
+    *agent.listed_sessions.lock().unwrap() = vec![AgentListedSession {
+        session_id: "native-session".to_string(),
+        cwd: "/tmp/openaide-unit-workspace/app".to_string(),
+        title: None,
+        last_activity: Some(native_updated_at.to_string()),
+        updated_at: Some(native_updated_at.to_string()),
+    }];
+
+    api.refresh_native_session_catalogs().unwrap();
+
+    wait_until(|| {
+        agent.loads.load(Ordering::SeqCst) == 1
+            && store.read_messages("task-existing").is_ok_and(|messages| {
+                matches!(
+                    messages.as_slice(),
+                    [message]
+                        if matches!(
+                            &message.chat.message,
+                            NormalizedMessage::AgentMessage { id, .. } if id == "native:fresh"
+                        )
+                )
+            })
+    });
+    assert!(updates.try_iter().any(|update| matches!(
+        update.kind,
+        TaskUpdateKind::HistorySync(TaskHistorySyncSnapshot::Syncing { .. })
+    )));
+}
+
+#[test]
 fn open_returns_cached_task_while_native_session_refresh_is_blocked() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();

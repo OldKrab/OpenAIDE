@@ -126,6 +126,8 @@ impl RpcGateway {
         }
         self.server_requests
             .observe_client_expired(client_instance_id, now);
+        self.state_stream
+            .drop_client_subscriptions(client_instance_id);
         if let Err(error) = self.task_release.release_expired_client(client_instance_id) {
             crate::logging::error(
                 "explicit_client_detach_task_release_failed",
@@ -144,6 +146,8 @@ impl RpcGateway {
         if let ClientExpiryOutcome::Expired { .. } = &outcome {
             self.server_requests
                 .observe_client_expired(client_instance_id, now);
+            self.state_stream
+                .drop_client_subscriptions(client_instance_id);
             if let Err(error) = self.task_release.release_expired_client(client_instance_id) {
                 crate::logging::error(
                     "prepared_task_lease_expiry_release_failed",
@@ -161,6 +165,8 @@ impl RpcGateway {
         for client_instance_id in &batch.expired {
             self.server_requests
                 .observe_client_expired(client_instance_id, now);
+            self.state_stream
+                .drop_client_subscriptions(client_instance_id);
             if let Err(error) = self.task_release.release_expired_client(client_instance_id) {
                 crate::logging::error(
                     "prepared_task_lease_expiry_release_failed",

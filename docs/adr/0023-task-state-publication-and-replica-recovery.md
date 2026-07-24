@@ -42,11 +42,11 @@ It refreshes active catalogs:
 
 `taskNavigation/loadMore` raises a Project's process-local depth target without exposing Agent cursors to Frontend. Concurrent requests coalesce with one trailing generation. Disabling or removing an Agent hides both its durable Tasks and unadopted sessions without deleting retained data.
 
-Each result reconciles Agent title metadata and advances a bound Task's activity only when the Agent timestamp is newer. Catalog updates never initiate Task history synchronization.
+Each result reconciles Agent title metadata and advances a bound Task's activity only when the Agent timestamp is newer. After committing the complete listing observation, App Server checks subscribed, idle bound Tasks for stale Chat and may initiate Task history synchronization.
 
 ## History Synchronization
 
-Opening an existing Task is the only automatic Native Session recovery and history-synchronization trigger. App Server returns stored Task state immediately, then recovers the Native Session in the background without issuing `session/list`. When a matching cached Native Session exists, App Server compares its Agent-provided `updatedAt` with the Task's `localHistoryUpdatedAt`.
+Opening an existing Task triggers Native Session recovery and a history-freshness check. App Server returns stored Task state immediately, then recovers the Native Session in the background without issuing `session/list`. A later Native Session catalog observation also checks history freshness for an idle Task while at least one client holds its Task-scope subscription. When a matching cached Native Session exists, App Server compares its Agent-provided `updatedAt` with the Task's `localHistoryUpdatedAt`.
 
 When the cached Native timestamp is present, comparable, and more than five seconds newer, App Server treats Chat as stale and calls `session/load` directly. The fixed tolerance absorbs normal delay between App Server persisting an Agent update and the Agent persisting its session timestamp. When Chat is not proven stale—including missing catalog data or missing, invalid, equal, older, or no-more-than-five-seconds-newer timestamps—App Server prefers `session/resume`, which restores the Native Session without replaying Chat. If the Agent does not advertise resume support, App Server falls back to `session/load`.
 
@@ -54,7 +54,7 @@ A successful resume applies any returned Configuration Options, attaches the Nat
 
 When synchronization is required—either because Chat is stale or resume is unsupported—App Server publishes `historySync: syncing`, disables Send, and loads history in the background. Successful replay atomically replaces stored Chat with exactly the rendered `session/load` replay, sets `localHistoryUpdatedAt` to the load completion time, publishes a complete authoritative Task baseline, ends syncing, and enables Send. Failed replay keeps existing Chat, appends `History update failed` Live Activity, ends syncing, and enables Send.
 
-Send and catalog refresh never check or initiate synchronization. A newer Native timestamp discovered while a Task stays open waits until that Task is opened again. Live updates for App Server-owned Native Sessions continue through their Native Session update consumers.
+Send never checks or initiates synchronization. After a complete listing observation updates the catalog cache, a newer Native timestamp initiates synchronization for a subscribed, idle Task. Unsubscribed, Archived, Prepared, Starting, Active, or active-turn Tasks are not refreshed by catalog discovery. Live updates for App Server-owned Native Sessions continue through their Native Session update consumers.
 
 ## Connection Authority
 
