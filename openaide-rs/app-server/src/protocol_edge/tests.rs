@@ -117,6 +117,50 @@ fn initialize_records_client_and_returns_snapshot_cursor() {
 }
 
 #[test]
+fn initialize_unknown_task_route_keeps_the_client_usable() {
+    let mut gateway = gateway();
+    let missing_tasks = Arc::new(EmptyTaskSnapshots);
+    gateway.snapshots =
+        SnapshotBuilder::with_task_snapshots("server-1".into(), "root-1".into(), missing_tasks);
+    let connection_id = ConnectionId::new("conn-1");
+    let mut params = init_params("client-1");
+    params.requested_surface = RequestedSurface::Task {
+        task_id: TaskId::from("task-missing"),
+    };
+
+    let initialized = response_value(gateway.handle_inbound(
+        connection_id.clone(),
+        request("1", CLIENT_INITIALIZE, params),
+        AppServerTime(1),
+    ));
+
+    assert!(initialized["result"]["snapshot"]["activeTask"].is_null());
+    assert_eq!(
+        initialized["result"]["snapshot"]["client"]["surface"],
+        json!({ "kind": "task", "taskId": "task-missing" })
+    );
+
+    let subscribed = response_value(gateway.handle_inbound(
+        connection_id,
+        request(
+            "2",
+            STATE_SUBSCRIBE,
+            StateSubscribeParams {
+                scope: SubscriptionScope::TaskNavigation {
+                    section: openaide_app_server_protocol::task::TaskNavigationSection::Tasks,
+                    project_ids: None,
+                },
+            },
+        ),
+        AppServerTime(2),
+    ));
+    assert_eq!(
+        subscribed["result"]["snapshot"]["kind"],
+        json!("taskNavigation")
+    );
+}
+
+#[test]
 fn client_capabilities_changed_replaces_reported_workspace_roots() {
     let mut gateway = gateway_with_project_context();
     let connection_id = ConnectionId::new("conn-1");

@@ -186,6 +186,30 @@ fn client_snapshot_includes_requested_task_for_task_surface() {
 }
 
 #[test]
+fn client_snapshot_preserves_global_state_when_requested_task_is_missing() {
+    let snapshot = builder()
+        .client_snapshot(
+            &ctx(),
+            RequestedSurface::Task {
+                task_id: TaskId::from("task-missing"),
+            },
+            &CursorSequencer::new().read_token(),
+        )
+        .expect("a missing routed Task must not fail client initialization");
+
+    assert!(snapshot.active_task.is_none());
+    assert_eq!(
+        snapshot
+            .projects
+            .expect("global Projects remain available")
+            .projects[0]
+            .project_id
+            .as_str(),
+        "project-1"
+    );
+}
+
+#[test]
 fn task_subscription_uses_backend_owned_task_snapshot() {
     let SubscriptionSnapshot::Task { task } = builder()
         .snapshot(
@@ -306,6 +330,14 @@ impl TaskSnapshotSource for StaticTaskSnapshots {
         &self,
         task_id: &TaskId,
     ) -> Result<TaskSnapshot, openaide_app_server_protocol::errors::ProtocolError> {
+        if task_id.as_str() == "task-missing" {
+            return Err(openaide_app_server_protocol::errors::ProtocolError {
+                code: openaide_app_server_protocol::errors::ProtocolErrorCode::NotFound,
+                message: "task not found: task-missing".to_string(),
+                recoverable: false,
+                target: None,
+            });
+        }
         Ok(TaskSnapshot {
             task: TaskSummary {
                 task_id: task_id.clone(),

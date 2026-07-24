@@ -72,6 +72,8 @@ Navigation uses four event kinds. `taskUpdated` replaces row-visible fields only
 
 Archived Tasks are saved, read-only history. `task/open` returns their stored state without Agent session load, resume, or history synchronization. Send, cancel, configuration mutation, and other Agent-interactive operations reject Archived Tasks until Restore. Late Agent events cannot reclassify an Archived Task or restore live controls. The sidebar presents Archive as a secondary destination from Tasks, visually identifies the read-only context, and provides Restore as the only lifecycle action.
 
+An unknown Task route is a route-local failure, not an App Server connection failure. When `client/initialize` requests a missing Task, initialization still returns the global client baseline with no active Task; the explicit `task/open` request then reports `notFound`. Frontend keeps Task Navigation and App Server health intact, renders **Task not found**, and allows immediate recovery through another Task or New Task. Only transport, logical-session, initialization, or subscription failure may change global connection health.
+
 ## Client Identity
 
 Frontend supplies `clientInstanceId` only through `client/initialize`. Transport assigns a connection-local `connectionId`; `ClientHub` maps that connection to the initialized client. Product handlers obtain client identity from this trusted connection context instead of accepting a client id in product request parameters.

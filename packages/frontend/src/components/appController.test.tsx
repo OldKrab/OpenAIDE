@@ -1010,12 +1010,10 @@ describe("app controller mounted lifecycle", () => {
     });
     expect(latestController?.state.taskOpenError).toEqual({
       taskId: "task_1",
+      kind: "failed",
       message: "Connection closed.",
     });
-    expect(latestController?.backendConnectionState).toEqual({
-      status: "unavailable",
-      message: "Connection closed.",
-    });
+    expect(latestController?.backendConnectionState).toEqual({ status: "ready" });
 
     act(() => {
       latestController?.dispatch({ type: "taskInput:prompt", taskId: "task_1", prompt: "Keep this draft" });
@@ -1029,6 +1027,98 @@ describe("app controller mounted lifecycle", () => {
     expect(request.mock.calls.filter(([method]) => method === TASK_OPEN)).toHaveLength(2);
     expect(latestController?.state.snapshot?.task.title).toBe("Recovered Task");
     expect(latestController?.state.taskInputs.task_1?.prompt).toBe("Keep this draft");
+  });
+
+  it("keeps a missing routed Task local while the App Server remains ready", async () => {
+    const request = vi.fn(async (
+      method: string,
+      params?: {
+        scope?: { kind: string; section?: "tasks" | "archive"; taskId?: string };
+        taskId?: string;
+      },
+    ) => {
+      if (method === STATE_SUBSCRIBE) {
+        if (params?.scope?.kind === "task") {
+          return taskSubscriptionSnapshot(
+            "cursor_task",
+            protocolTaskSnapshot(params.scope.taskId ?? "task_1", "Existing Task"),
+          );
+        }
+        return nonTaskSubscriptionSnapshot(
+          params?.scope,
+          "cursor_navigation",
+          [protocolTaskSummary("task_1", "Existing Task")],
+        );
+      }
+      if (method === STATE_UNSUBSCRIBE) return { scope: params?.scope };
+      if (method === TASK_OPEN) {
+        if (params?.taskId === "task_1") {
+          return { task: protocolTaskSnapshot("task_1", "Existing Task") };
+        }
+        throw new AppServerProtocolError({
+          error: {
+            code: "notFound",
+            message: "task not found: task_missing",
+            recoverable: false,
+          },
+        });
+      }
+      throw new Error(method);
+    });
+    backendConnection = {
+      initialize: vi.fn(async () => ({
+        snapshot: clientSnapshot({ includeActiveTask: false, includeTasks: false }),
+      })),
+      request: request as unknown as BackendConnection["request"],
+      handleNotification: defaultHandleNotification,
+      close: vi.fn(),
+    };
+    bootstrap = webTaskBootstrap("task_missing");
+
+    await act(async () => {
+      create(<ControllerProbe />);
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(latestController?.state.taskOpenError).toEqual({
+      taskId: "task_missing",
+      kind: "notFound",
+      message: "task not found: task_missing",
+    });
+    expect(latestController?.backendConnectionState).toEqual({ status: "ready" });
+    expect(latestController?.state.appServerError).toBeUndefined();
+    expect(latestController?.state.taskListError).toBeUndefined();
+    expect(latestController?.state.tasks.map((task) => task.task_id)).toEqual(["task_1"]);
+
+    await act(async () => {
+      webRouteListeners.forEach((listener) => listener(webTaskBootstrap("task_1")));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(latestController?.state.snapshot?.task.task_id).toBe("task_1");
+    expect(latestController?.state.taskOpenError).toBeUndefined();
+
+    await act(async () => {
+      webRouteListeners.forEach((listener) => listener(webTaskBootstrap("task_missing")));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(latestController?.state.taskOpenError).toMatchObject({
+      taskId: "task_missing",
+      kind: "notFound",
+    });
+    expect(latestController?.backendConnectionState).toEqual({ status: "ready" });
+    expect(latestController?.state.tasks.map((task) => task.task_id)).toEqual(["task_1"]);
+    expect(postHostMessage).toHaveBeenCalledWith({
+      type: "webview.telemetry",
+      payload: expect.objectContaining({
+        event: "task_route_open_failed",
+        task_id: "task_missing",
+        error_code: "notFound",
+      }),
+    });
   });
 
   it("opens an initialized task route to recover unavailable Agent config", async () => {
@@ -2929,6 +3019,7 @@ describe("app controller mounted lifecycle", () => {
 
     expect(latestController?.state.taskOpenError).toEqual({
       taskId: "task_1",
+      kind: "failed",
       message: "App Server connection unavailable.",
     });
     expect(postHostMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: "task.snapshot" }));
@@ -3239,6 +3330,7 @@ function taskSubscriptionSnapshot(
 function nonTaskSubscriptionSnapshot(
   scope: { kind: string; taskId?: string; section?: "tasks" | "archive" } | undefined,
   cursor = "cursor_navigation",
+  taskNavigationTasks: ReturnType<typeof protocolTaskSummary>[] = [],
 ) {
   if (scope?.kind === "projects") {
     return {
@@ -3270,7 +3362,17 @@ function nonTaskSubscriptionSnapshot(
         kind: "taskNavigation" as const,
         navigation: {
           section: scope.section ?? "tasks",
-          groups: [],
+          groups: taskNavigationTasks.length === 0
+            ? []
+            : [{
+                projectId: "project_1" as never,
+                projectLabel: "Project",
+                taskCount: taskNavigationTasks.length,
+                entries: taskNavigationTasks.map((task) => ({
+                  kind: "task" as const,
+                  task,
+                })),
+              }],
           refresh: { state: "idle" as const },
         },
       },

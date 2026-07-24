@@ -299,6 +299,26 @@ describe("TaskView timeline presentation", () => {
     expect(retry).toHaveBeenCalledOnce();
   });
 
+  it("renders a missing routed Task without exposing the backend error as its heading", async () => {
+    const { TaskLoadingView } = await import("./TaskView");
+    let tree!: ReactTestRenderer;
+
+    act(() => {
+      tree = create(
+        <TaskLoadingView
+          error="task not found: task_unknown"
+          errorKind="notFound"
+        />,
+      );
+    });
+
+    expect(tree.root.findByType("section").props["aria-label"]).toBe("Task not found");
+    const rendered = JSON.stringify(tree.toJSON());
+    expect(rendered).toContain("Task not found.");
+    expect(rendered).toContain("This Task does not exist or is no longer available.");
+    expect(rendered).not.toContain("task not found: task_unknown");
+  });
+
   it("uses the route-specific opening label", async () => {
     const { TaskLoadingView } = await import("./TaskView");
     let tree!: ReactTestRenderer;

@@ -1259,7 +1259,11 @@ describe("app reducer composer state", () => {
     let state = createInitialState();
 
     state = appReducer(state, { type: "taskOpen:error", taskId: "task_1", message: "Unable to open task" });
-    expect(state.taskOpenError).toEqual({ taskId: "task_1", message: "Unable to open task" });
+    expect(state.taskOpenError).toEqual({
+      taskId: "task_1",
+      kind: "failed",
+      message: "Unable to open task",
+    });
 
     state = appReducer(state, { type: "snapshot", intent: "open", snapshot: snapshot("task_1") });
     expect(state.taskOpenError).toBeUndefined();

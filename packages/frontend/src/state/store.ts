@@ -138,6 +138,12 @@ export function toolDetailCacheKey(taskId: string, artifactId: string) {
   return `${taskId}\u0000${artifactId}`;
 }
 
+export type TaskOpenError = {
+  taskId: string;
+  kind: "notFound" | "failed";
+  message: string;
+};
+
 export type AppState = {
   appServerError?: string;
   appServerReplicaEpoch: number;
@@ -156,7 +162,7 @@ export type AppState = {
   taskSnapshotReplicaEpochs: Record<string, number>;
   taskChatScrollStates: Record<string, TaskChatScrollState>;
   taskLiveTextPresentation: Record<string, TaskLiveTextPresentation>;
-  taskOpenError?: { taskId: string; message: string };
+  taskOpenError?: TaskOpenError;
   permissionResponses: Record<string, { responding: boolean; error?: string }>;
   questionResponses: Record<string, { responding: boolean; error?: string }>;
   searchQuery: string;

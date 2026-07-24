@@ -742,7 +742,11 @@ describe("AppSurfaces callback wiring", () => {
   it("offers the in-place retry after task opening fails", () => {
     const controller = controllerFor("task");
     controller.bootstrap = { surface: "task", shell: VSCODE_SHELL, taskId: "task_1" };
-    controller.state.taskOpenError = { taskId: "task_1", message: "Connection closed." };
+    controller.state.taskOpenError = {
+      taskId: "task_1",
+      kind: "failed",
+      message: "Connection closed.",
+    };
 
     render(controller);
 
@@ -750,6 +754,44 @@ describe("AppSurfaces callback wiring", () => {
       expect.objectContaining({
         error: "Connection closed.",
         onRetry: controller.retryTaskOpen,
+      }),
+      undefined,
+    );
+  });
+
+  it("keeps Web Task Navigation available for a missing routed Task", () => {
+    const controller = webControllerFor("task");
+    controller.bootstrap = {
+      surface: "task",
+      shell: WEB_SHELL,
+      taskId: "task_unknown",
+      appServerConnection: {
+        kind: "webProxy",
+        endpointUrl: "/__openaide-app-server/probe",
+      },
+    };
+    controller.backendReady = true;
+    controller.backendConnectionState = { status: "ready" };
+    controller.state.taskOpenError = {
+      taskId: "task_unknown",
+      kind: "notFound",
+      message: "task not found: task_unknown",
+    };
+    controller.visibleTasks = [snapshot("task_existing").task];
+
+    render(controller);
+
+    expect(surfaceMocks.taskLoading).toHaveBeenCalledWith(
+      expect.objectContaining({
+        error: "task not found: task_unknown",
+        errorKind: "notFound",
+      }),
+      undefined,
+    );
+    expect(surfaceMocks.sidebar).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tasks: controller.visibleTasks,
+        taskListError: undefined,
       }),
       undefined,
     );
