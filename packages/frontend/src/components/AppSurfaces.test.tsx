@@ -12,8 +12,9 @@ const WEB_SHELL = { kind: "web", navigationMode: "project" } as const;
 
 const surfaceMocks = vi.hoisted(() => ({
   newTask: vi.fn(() => null),
+  renderRealSidebar: false,
   settings: vi.fn(() => null),
-  sidebar: vi.fn(() => null),
+  sidebar: vi.fn((_props?: unknown, _context?: unknown) => null),
   task: vi.fn(() => null),
   taskLoading: vi.fn(() => null),
   updateTaskSurfaceTitle: vi.fn(),
@@ -23,10 +24,18 @@ function latestMockProps<T>(mock: { mock: { calls: unknown[][] } }) {
   return mock.mock.calls.at(-1)?.[0] as T | undefined;
 }
 
-vi.mock("./Sidebar", () => ({
-  DEFAULT_MAX_TASKS_PER_PROJECT: 15,
-  Sidebar: surfaceMocks.sidebar,
-}));
+vi.mock("./Sidebar", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./Sidebar")>();
+  const { createElement } = await import("react");
+  return {
+    ...actual,
+    DEFAULT_MAX_TASKS_PER_PROJECT: 15,
+    Sidebar: (props: React.ComponentProps<typeof actual.Sidebar>, context: unknown) => {
+      surfaceMocks.sidebar(props, context);
+      return surfaceMocks.renderRealSidebar ? createElement(actual.Sidebar, props) : null;
+    },
+  };
+});
 
 vi.mock("./settings/SettingsView", () => ({
   SettingsView: surfaceMocks.settings,
@@ -50,6 +59,7 @@ describe("AppSurfaces callback wiring", () => {
   beforeEach(() => {
     (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     surfaceMocks.newTask.mockClear();
+    surfaceMocks.renderRealSidebar = false;
     surfaceMocks.settings.mockClear();
     surfaceMocks.sidebar.mockClear();
     surfaceMocks.task.mockClear();
@@ -80,6 +90,116 @@ describe("AppSurfaces callback wiring", () => {
       }),
       undefined,
     );
+  });
+
+  it("dismisses Worktree Management when a Task is opened through rendered Task Navigation", () => {
+    surfaceMocks.renderRealSidebar = true;
+    const controller = controllerFor("navigation");
+    showWorktreeProject(controller, "task_2");
+    const tree = render(controller);
+
+    act(() => tree.root.findByProps({ "aria-label": "OpenAIDE actions" }).props.onClick());
+    act(() => tree.root.findAllByType("button")
+      .find((button) => button.children.includes("Manage worktrees"))?.props.onClick());
+    expect(tree.root.findAllByProps({ className: "worktree-management" })).toHaveLength(1);
+
+    act(() => tree.root.findByProps({ className: "task-open" }).props.onClick());
+
+    expect(controller.callbacks.navigation.openTask).toHaveBeenCalledWith("task_2");
+    expect(tree.root.findAllByProps({ className: "worktree-management" })).toHaveLength(1);
+
+    controller.bootstrap = { surface: "task", shell: VSCODE_SHELL, taskId: "task_2" };
+    act(() => tree.update(<AppSurfaces controller={controller} />));
+
+    expect(tree.root.findAllByProps({ className: "worktree-management" })).toHaveLength(0);
+  });
+
+  it("dismisses Worktree Management and constrained navigation when a Task is opened", () => {
+    stubMobileWindow();
+    surfaceMocks.renderRealSidebar = true;
+    const controller = webControllerFor("task");
+    showWorktreeProject(controller, "task_2");
+    const tree = render(controller);
+
+    act(() => tree.root.findByProps({ "aria-label": "Open task navigation" }).props.onClick());
+    act(() => tree.root.findByProps({ "aria-label": "OpenAIDE actions" }).props.onClick());
+    act(() => tree.root.findAllByType("button")
+      .find((button) => button.children.includes("Manage worktrees"))?.props.onClick());
+    expect(tree.root.findAllByProps({ className: "worktree-management" })).toHaveLength(1);
+
+    act(() => tree.root.findByProps({ className: "task-open" }).props.onClick());
+
+    expect(tree.root.findByProps({ "aria-label": "Open task navigation" }).props["aria-expanded"]).toBe(false);
+    expect(controller.callbacks.navigation.openTask).toHaveBeenCalledWith("task_2");
+    expect(tree.root.findAllByProps({ className: "worktree-management" })).toHaveLength(1);
+
+    controller.bootstrap = {
+      surface: "task",
+      shell: WEB_SHELL,
+      taskId: "task_2",
+      appServerConnection: {
+        kind: "webProxy",
+        endpointUrl: "/__openaide-app-server/probe",
+      },
+    };
+    act(() => tree.update(<AppSurfaces controller={controller} />));
+
+    expect(tree.root.findAllByProps({ className: "worktree-management" })).toHaveLength(0);
+  });
+
+  it("dismisses Worktree Management when the authoritative surface changes to Settings", () => {
+    surfaceMocks.renderRealSidebar = true;
+    const controller = webControllerFor("task");
+    showWorktreeProject(controller, "task_1");
+    const tree = render(controller);
+
+    act(() => tree.root.findByProps({ "aria-label": "OpenAIDE actions" }).props.onClick());
+    act(() => tree.root.findAllByType("button")
+      .find((button) => button.children.includes("Manage worktrees"))?.props.onClick());
+    expect(tree.root.findAllByProps({ className: "worktree-management" })).toHaveLength(1);
+
+    act(() => tree.root.findAllByType("button")
+      .find((button) => button.children.includes("Settings"))?.props.onClick());
+    expect(controller.callbacks.navigation.openSettings).toHaveBeenCalledOnce();
+    expect(tree.root.findAllByProps({ className: "worktree-management" })).toHaveLength(1);
+
+    controller.bootstrap = {
+      surface: "settings",
+      shell: WEB_SHELL,
+      appServerConnection: {
+        kind: "webProxy",
+        endpointUrl: "/__openaide-app-server/probe",
+      },
+    };
+    act(() => tree.update(<AppSurfaces controller={controller} />));
+
+    expect(tree.root.findAllByProps({ className: "worktree-management" })).toHaveLength(0);
+  });
+
+  it("dismisses Worktree Management when the authoritative Task changes", () => {
+    surfaceMocks.renderRealSidebar = true;
+    const controller = webControllerFor("task");
+    controller.bootstrap = {
+      surface: "task",
+      shell: WEB_SHELL,
+      taskId: "task_1",
+      appServerConnection: {
+        kind: "webProxy",
+        endpointUrl: "/__openaide-app-server/probe",
+      },
+    };
+    showWorktreeProject(controller, "task_1");
+    const tree = render(controller);
+
+    act(() => tree.root.findByProps({ "aria-label": "OpenAIDE actions" }).props.onClick());
+    act(() => tree.root.findAllByType("button")
+      .find((button) => button.children.includes("Manage worktrees"))?.props.onClick());
+    expect(tree.root.findAllByProps({ className: "worktree-management" })).toHaveLength(1);
+
+    controller.bootstrap = { ...controller.bootstrap, taskId: "task_2" };
+    act(() => tree.update(<AppSurfaces controller={controller} />));
+
+    expect(tree.root.findAllByProps({ className: "worktree-management" })).toHaveLength(0);
   });
 
   it("groups VS Code Task Navigation even for one Project", () => {
@@ -991,6 +1111,19 @@ function render(controller: TestController) {
     tree = create(<AppSurfaces controller={controller} />);
   });
   return tree;
+}
+
+function showWorktreeProject(controller: TestController, taskId: string) {
+  controller.state.projects = [{
+    projectId: "project_1",
+    label: "OpenAIDE",
+    workspaceRoot: "/workspace/OpenAIDE",
+    worktreeRepositoryId: "repository_1",
+  }];
+  const task = snapshot(taskId).task;
+  task.project_id = "project_1";
+  task.project_label = "OpenAIDE";
+  controller.visibleTasks = [task];
 }
 
 function controllerFor(surface: AppController["bootstrap"]["surface"]): TestController {
