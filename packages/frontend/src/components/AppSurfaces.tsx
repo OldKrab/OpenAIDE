@@ -18,9 +18,15 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
   const { appServerError, navigation, settings } = view;
   const [mobileLayoutActive, setMobileLayoutActive] = useState(() => isMobileWebViewport());
   const [newTaskFocusRequestKey, setNewTaskFocusRequestKey] = useState(0);
-  const [managedProjectId, setManagedProjectId] = useState<string>();
+  const [managedProjectSurface, setManagedProjectSurface] = useState<{
+    projectId: string;
+    surfaceKey: string;
+  }>();
   const mobileNavigationButtonRef = useRef<HTMLButtonElement | null>(null);
   const webMainSurfaceRef = useRef<HTMLElement | null>(null);
+  const surfaceKey = appSurfaceKey(bootstrap);
+  const surfaceKeyRef = useRef(surfaceKey);
+  surfaceKeyRef.current = surfaceKey;
   const isWebShell = bootstrap.surface !== "invalid" && bootstrap.shell.kind === "web";
   const isWebWorkbench = isWebShell && (
     bootstrap.surface === "task"
@@ -70,6 +76,18 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     renderableTaskSnapshot?.task.task_id,
     renderableTaskSnapshot?.task.title,
   ]);
+  const managedProjectId = managedProjectSurface?.surfaceKey === surfaceKey
+    ? managedProjectSurface.projectId
+    : undefined;
+  useEffect(() => {
+    if (managedProjectSurface && managedProjectSurface.surfaceKey !== surfaceKey) {
+      setManagedProjectSurface(undefined);
+    }
+  }, [managedProjectSurface, surfaceKey]);
+  const manageWorktrees = (projectId: string) => {
+    // Sidebar intentionally ignores callback identity while memoizing, so read the current owner lazily.
+    setManagedProjectSurface({ projectId, surfaceKey: surfaceKeyRef.current });
+  };
   const managedProject = navigation.projects.find((project) => project.projectId === managedProjectId);
   const managedRepository = managedProject?.worktreeRepositoryId
     ? view.primaryTask.newTask.worktreeRepositories[managedProject.worktreeRepositoryId]
@@ -79,7 +97,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
       initialMode="manage"
       intents={controller.intents.newTask}
       managementOnly
-      onClose={() => setManagedProjectId(undefined)}
+      onClose={() => setManagedProjectSurface(undefined)}
       onUseForNewTask={() => callbacks.navigation.openNewTask(managedProject.projectId)}
       project={managedProject}
       repository={managedRepository}
@@ -173,7 +191,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           onArchiveTask={callbacks.navigation.archiveTask}
           onArchiveNativeSession={callbacks.navigation.archiveNativeSession}
           onLoadNativeSessions={callbacks.navigation.loadNativeSessions}
-          onManageWorktrees={setManagedProjectId}
+          onManageWorktrees={manageWorktrees}
           onNewTask={callbacks.navigation.openNewTask}
           onOpenNativeSession={callbacks.navigation.openNativeSession}
           onOpenTask={callbacks.navigation.openTask}
@@ -323,7 +341,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
               controller={controller}
               focusRequestKey={newTaskFocusRequestKey}
               model={taskSurfaceModel}
-              workspaceRecovery={{ manageWorktrees: setManagedProjectId, openProjectSettings: callbacks.navigation.openSettings, reconnectProject: callbacks.navigation.openNewTask }}
+              workspaceRecovery={{ manageWorktrees, openProjectSettings: callbacks.navigation.openSettings, reconnectProject: callbacks.navigation.openNewTask }}
             />
           )}
         </section>
@@ -342,7 +360,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           onArchiveNativeSession={callbacks.navigation.archiveNativeSession}
           onArchiveTask={callbacks.navigation.archiveTask}
           onLoadNativeSessions={callbacks.navigation.loadNativeSessions}
-          onManageWorktrees={(projectId) => { closeMobileNavigation({ restoreFocus: false }); setManagedProjectId(projectId); }}
+          onManageWorktrees={(projectId) => { closeMobileNavigation({ restoreFocus: false }); manageWorktrees(projectId); }}
           onNewTask={openNewTaskFromNavigation}
           onOpenNativeSession={closeAfter(callbacks.navigation.openNativeSession)}
           onOpenTask={closeAfter(callbacks.navigation.openTask)}
@@ -373,7 +391,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         controller={controller}
         focusRequestKey={newTaskFocusRequestKey}
         model={taskSurfaceModel}
-        workspaceRecovery={{ manageWorktrees: setManagedProjectId, openProjectSettings: callbacks.navigation.openSettings, reconnectProject: callbacks.navigation.openNewTask }}
+        workspaceRecovery={{ manageWorktrees, openProjectSettings: callbacks.navigation.openSettings, reconnectProject: callbacks.navigation.openNewTask }}
       />
       {managementSurface}
     </main>
@@ -386,6 +404,26 @@ function isMobileWebViewport() {
     return window.matchMedia("(max-width: 760px)").matches;
   }
   return window.innerWidth <= 760;
+}
+
+function appSurfaceKey(bootstrap: AppController["bootstrap"]): string {
+  if (bootstrap.surface === "invalid") return "invalid";
+  if (bootstrap.surface === "task") {
+    return JSON.stringify(bootstrap.taskId
+      ? ["task", bootstrap.taskId]
+      : ["new-task", bootstrap.projectId ?? null]);
+  }
+  if (bootstrap.surface === "nativeSession") {
+    return JSON.stringify(["native-session", bootstrap.agentId ?? null, bootstrap.nativeSessionId ?? null]);
+  }
+  if (bootstrap.surface === "navigation") {
+    return JSON.stringify([
+      "navigation",
+      bootstrap.archived ? "archived" : "active",
+      bootstrap.projectIds ?? (bootstrap.projectId ? [bootstrap.projectId] : []),
+    ]);
+  }
+  return JSON.stringify(["settings", bootstrap.settingsTab ?? null, bootstrap.settingsAgentId ?? null]);
 }
 
 function mobileNavigationFocusableElements(root: HTMLElement) {
