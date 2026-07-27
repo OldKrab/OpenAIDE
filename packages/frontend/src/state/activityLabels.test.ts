@@ -245,6 +245,21 @@ describe("activity labels", () => {
     ).toBe("Read 2 files, updated file, ran command");
   });
 
+  it.each([
+    [
+      { kind: "tool" as const, name: "edit", status: "completed" as const, input_summary: "app.ts" },
+      { kind: "tool" as const, name: "web_search", status: "completed" as const, input_summary: "OpenAIDE" },
+    ],
+    [
+      { kind: "tool" as const, name: "web_search", status: "completed" as const, input_summary: "OpenAIDE" },
+      { kind: "tool" as const, name: "edit", status: "completed" as const, input_summary: "app.ts" },
+    ],
+  ])("keeps each Tool's kind authoritative in a mixed activity group", (...steps) => {
+    expect(activitySummary(activity("Updated file", "completed", steps))).toBe(
+      steps[0].name === "edit" ? "Updated file, ran search" : "Ran search, updated file",
+    );
+  });
+
   it("presents activated skills distinctly inside mixed activity", () => {
     const message = activity("Tool activity", "completed", [
       { kind: "tool", name: "skill", status: "completed", input_summary: "tdd" },

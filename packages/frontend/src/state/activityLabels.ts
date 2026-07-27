@@ -9,21 +9,40 @@ export type ActivityStepSemanticTitle = {
   subjects: string[];
 };
 
+export type ActivityToolKind =
+  | "skill"
+  | "read"
+  | "list"
+  | "edit"
+  | "delete"
+  | "move"
+  | "search"
+  | "web_search"
+  | "execute"
+  | "think"
+  | "fetch"
+  | "switch_mode"
+  | "terminal_input"
+  | "collaboration"
+  | "other";
+
 export function activitySummary(activity: ActivityMessage) {
   if (activity.steps.length > 1) return groupedActivitySummary(activity);
   const first = activity.steps[0];
   if (first?.kind === "text") {
-    const kind = classifyStep(first, activity.title);
+    const kind = classifyStep(first);
     if (kind !== "other") return countLabel(kind, 1, true) ?? humanizeToolName(activity.title);
   }
-  if (first && first.kind !== "text") return countLabel(classifyStep(first, activity.title), 1, true) ?? humanizeToolName(activity.title);
+  if (first && first.kind !== "text") {
+    return countLabel(classifyStep(first, activity.title), 1, true) ?? humanizeToolName(activity.title);
+  }
   return humanizeToolName(activity.title);
 }
 
 function groupedActivitySummary(activity: ActivityMessage) {
   const counts = new Map<ActivitySummaryKind, number>();
   for (const step of activity.steps) {
-    const kind = classifyStep(step, activity.title);
+    const kind = classifyStep(step);
     counts.set(kind, (counts.get(kind) ?? 0) + 1);
   }
   const parts = Array.from(counts, ([kind, count], index) => countLabel(kind, count, index === 0)).filter(
@@ -177,15 +196,6 @@ export function activityStepPreview(step: ActivityStep) {
   return step.output_preview;
 }
 
-function isCommandTool(step: Extract<ActivityStep, { kind: "tool" }>, title: string) {
-  const value = stepSearchText(step, title);
-  return step.name === "execute" || /\b(exec|command|shell|bash|terminal)\b/.test(value) || isCommandLine(value) || value.includes("exec_command");
-}
-
-function isTerminalInputTool(title: string) {
-  return title.toLowerCase().includes("write_stdin");
-}
-
 type ActivitySummaryKind =
   | "thought"
   | "skill"
@@ -203,26 +213,60 @@ type ActivitySummaryKind =
   | "collaboration"
   | "other";
 
-function classifyStep(step: ActivityStep, title: string): ActivitySummaryKind {
+function classifyStep(step: ActivityStep, legacyToolName?: string): ActivitySummaryKind {
   if (step.kind === "thought") return "thought";
   if (step.kind === "command") return "run";
   if (step.kind === "text") return classifyTextStep(step.text);
-  const value = stepSearchText(step, title);
-  if (isTerminalInputTool(title)) return "terminalInput";
+  return summaryKindForTool(activityToolKind(step, legacyToolName));
+}
+
+/**
+ * Resolves one Tool meaning for every visual consumer. Trusted presentation
+ * and explicit names win; legacy heuristics inspect only the Tool itself.
+ */
+export function activityToolKind(
+  step: Extract<ActivityStep, { kind: "tool" }>,
+  legacyToolName?: string,
+): ActivityToolKind {
   if (step.presentation) return step.presentation.kind;
-  if (step.name === "skill") return "skill";
+  const namedKinds: Record<string, ActivityToolKind> = {
+    skill: "skill",
+    read: "read",
+    list: "list",
+    edit: "edit",
+    delete: "delete",
+    move: "move",
+    search: "search",
+    web_search: "web_search",
+    execute: "execute",
+    exec_command: "execute",
+    think: "think",
+    fetch: "fetch",
+    switch_mode: "switch_mode",
+    write_stdin: "terminal_input",
+  };
+  const namedKind = namedKinds[step.name] ?? (legacyToolName ? namedKinds[legacyToolName] : undefined);
+  if (namedKind) return namedKind;
+
+  const value = stepSearchText(step);
   if (collaborationAction(value)) return "collaboration";
-  if (isExecuteTool(step)) return "run";
-  if (step.name === "delete") return "delete";
-  if (step.name === "move") return "move";
-  if (step.name === "think") return "thinkTool";
-  if (step.name === "switch_mode") return "switchMode";
-  if (step.name === "read" || /\bread(?:ing)?\b|\bread file\b|\bopened file\b/.test(value)) return "read";
-  if (step.name === "edit" || /\b(edit|edited|update|updated|write|wrote|create|created|patch|patched)\b/.test(value)) return "edit";
-  if (step.name === "search" || step.name === "web_search" || /\b(search|searched|grep|rg|find)\b/.test(value)) return "search";
-  if (step.name === "fetch" || /\b(fetch|fetched|open(?:ed)? (?:page|url)|url|https?:\/\/)\b/.test(value)) return "fetch";
-  if (isCommandTool(step, title)) return "run";
+  if (/\bread(?:ing)?\b|\bread file\b|\bopened file\b/.test(value)) return "read";
+  if (/\b(edit|edited|update|updated|write|wrote|create|created|patch|patched)\b/.test(value)) return "edit";
+  if (/\b(search|searched|grep|rg|find)\b/.test(value)) return "search";
+  if (/\b(fetch|fetched|open(?:ed)? (?:page|url)|url|https?:\/\/)\b/.test(value)) return "fetch";
+  if (/\b(exec|command|shell|bash|terminal)\b/.test(value) || isCommandLine(value) || value.includes("exec_command")) {
+    return "execute";
+  }
   return "other";
+}
+
+function summaryKindForTool(kind: ActivityToolKind): ActivitySummaryKind {
+  if (kind === "web_search") return "search";
+  if (kind === "execute") return "run";
+  if (kind === "think") return "thinkTool";
+  if (kind === "switch_mode") return "switchMode";
+  if (kind === "terminal_input") return "terminalInput";
+  return kind;
 }
 
 function classifyTextStep(text: string): ActivitySummaryKind {
@@ -239,9 +283,9 @@ function isCommandLine(value: string) {
   return /(?:^|\s)(?:git|npm|pnpm|yarn|cargo|go|node|python3?|pytest|npx|rg|grep|sed|cat|ls|curl|docker|deno|bun)\b/.test(value);
 }
 
-function stepSearchText(step: Extract<ActivityStep, { kind: "tool" }>, title: string) {
+function stepSearchText(step: Extract<ActivityStep, { kind: "tool" }>) {
   const detailsLabel = toolSubjectLabel(step);
-  return `${step.name} ${title} ${step.input_summary ?? ""} ${detailsLabel ?? ""}`.toLowerCase();
+  return `${step.name} ${step.input_summary ?? ""} ${detailsLabel ?? ""}`.toLowerCase();
 }
 
 function countLabel(kind: ActivitySummaryKind, count: number, sentenceStart: boolean) {

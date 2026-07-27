@@ -12,6 +12,7 @@ import {
   activityStepSemanticTitle,
   activityStepStatus,
   activitySummary,
+  activityToolKind,
   type ActivityStepSemanticTitle,
 } from "../state/activityLabels";
 import { hasToolDetails, toolKindClass } from "../state/toolDetailsViewModel";
@@ -68,6 +69,7 @@ export function ChatActivityView({
           return (
             <ActivityStepRow
               key={activityStepIdentity(step) ?? index}
+              legacyToolName={activity.steps.length === 1 ? activity.title : undefined}
               onSubscribeToolDetail={onSubscribeToolDetail}
               step={step}
               taskId={taskId}
@@ -85,11 +87,13 @@ function thoughtCountLabel(count: number) {
 }
 
 export function ActivityStepRow({
+  legacyToolName,
   onSubscribeToolDetail,
   step,
   taskId,
   toolDetails,
 }: {
+  legacyToolName?: string;
   onSubscribeToolDetail?: (artifactId: string) => () => void;
   step: ActivityStep;
   taskId: string;
@@ -131,7 +135,7 @@ export function ActivityStepRow({
       <AnimatedDisclosure
         className="activity-step activity-thought-block"
         stepId={step.message_id}
-        trigger={<ActivityStepContent disclosure icon={activityStepIcon(step)} label="Thought" />}
+        trigger={<ActivityStepContent disclosure icon={activityStepIcon(step, legacyToolName)} label="Thought" />}
       >
         <AgentMarkdown className="chat-thought" text={step.text} />
         <MessageCopyAction text={step.text} />
@@ -149,7 +153,7 @@ export function ActivityStepRow({
           <>
             <ActivityStepContent
               disclosure
-              icon={activityStepIcon(displayStep)}
+              icon={activityStepIcon(displayStep, legacyToolName)}
               label={
                 <CommandStepTitle
                   command={commandText}
@@ -178,6 +182,7 @@ export function ActivityStepRow({
         artifactState={artifactState}
         className={className}
         details={details}
+        legacyToolName={legacyToolName}
         metadata={metadata}
         onSubscribeToolDetail={onSubscribeToolDetail}
         preview={preview}
@@ -192,7 +197,7 @@ export function ActivityStepRow({
         stepId={displayStep.tool_call_id}
         trigger={(
           <>
-            <ActivityStepContent disclosure icon={activityStepIcon(displayStep)} label={title} titleClassName={semanticTitle ? "semantic" : undefined} />
+            <ActivityStepContent disclosure icon={activityStepIcon(displayStep, legacyToolName)} label={title} titleClassName={semanticTitle ? "semantic" : undefined} />
             {metadata}
           </>
         )}
@@ -204,7 +209,7 @@ export function ActivityStepRow({
   return (
     <div className={className} data-step-id={displayStep.kind === "tool" ? displayStep.tool_call_id : undefined}>
       <ActivityStepContent
-        icon={activityStepIcon(displayStep)}
+        icon={activityStepIcon(displayStep, legacyToolName)}
         label={title}
         titleClassName={semanticTitle ? "semantic" : undefined}
       />
@@ -219,6 +224,7 @@ function LiveToolDetailDisclosure({
   artifactState,
   className,
   details,
+  legacyToolName,
   metadata,
   onSubscribeToolDetail,
   preview,
@@ -228,6 +234,7 @@ function LiveToolDetailDisclosure({
   artifactState?: { loading: boolean; details?: ActivityToolDetails; error?: string };
   className: string;
   details?: ActivityToolDetails;
+  legacyToolName?: string;
   metadata: ReactNode;
   onSubscribeToolDetail?: (artifactId: string) => () => void;
   preview?: string;
@@ -255,7 +262,7 @@ function LiveToolDetailDisclosure({
         <>
           <ActivityStepContent
             disclosure
-            icon={activityStepIcon(step)}
+            icon={activityStepIcon(step, legacyToolName)}
             label={commandTitle}
             titleClassName={semanticTitle ? "semantic" : step.name === "execute" && !step.presentation ? "command" : undefined}
           />
@@ -454,12 +461,12 @@ function AnimatedDisclosure({
   );
 }
 
-export function activityStepIcon(step: ActivityStep) {
+export function activityStepIcon(step: ActivityStep, legacyToolName?: string) {
   if (step.kind === "thought") return <Brain className="activity-kind-icon" size={12} />;
   if (step.kind === "command" || (step.kind === "tool" && step.name === "execute" && !step.presentation)) {
     return <Terminal className="activity-kind-icon" size={12} />;
   }
-  if (step.kind === "tool") return toolKindIcon(step.presentation?.kind ?? step.name, 12, "activity-kind-icon");
+  if (step.kind === "tool") return toolKindIcon(activityToolKind(step, legacyToolName), 12, "activity-kind-icon");
   return <Wrench className="activity-kind-icon" size={12} />;
 }
 
