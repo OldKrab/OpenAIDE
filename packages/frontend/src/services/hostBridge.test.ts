@@ -65,6 +65,34 @@ describe("host bridge", () => {
     expect(vi.isMockFunction(globalThis.fetch)).toBe(false);
   });
 
+  it("exposes the VS Code folder-opening capability through the shell boundary", async () => {
+    const posted: unknown[] = [];
+    vi.stubGlobal("document", {
+      body: {
+        dataset: {
+          shell: "vscodeExtension",
+          navigationMode: "currentProject",
+          surface: "navigation",
+        },
+      },
+    });
+    vi.stubGlobal("window", {
+      acquireVsCodeApi: () => ({ postMessage: (message: unknown) => posted.push(message) }),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    });
+    const [{ installFrontendShell }, { createVsCodeShell }, { getWorkspaceCapability }] = await Promise.all([
+      import("./frontendShell"),
+      import("../../../../apps/vscode-extension/frontend/vsCodeShell"),
+      import("./hostBridge"),
+    ]);
+    installFrontendShell(createVsCodeShell());
+
+    getWorkspaceCapability()?.openFolder();
+
+    expect(posted).toContainEqual({ type: "workspace.openFolder" });
+  });
+
   it("creates a direct LocalHttp BackendConnection from bootstrap endpoint info", async () => {
     const fetch = reliableFetch();
     vi.stubGlobal("fetch", fetch);

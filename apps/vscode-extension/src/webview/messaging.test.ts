@@ -570,6 +570,38 @@ describe("webview messaging composer routes", () => {
     });
   });
 
+  it("opens a selected workspace folder in the current VS Code window", async () => {
+    const posted: unknown[] = [];
+    vi.mocked(vscode.window.showOpenDialog).mockResolvedValue([
+      { fsPath: "/workspace/selected" } as vscode.Uri,
+    ]);
+
+    await handleWebviewMessage({ type: "workspace.openFolder" }, context({}, posted));
+
+    expect(vscode.window.showOpenDialog).toHaveBeenCalledWith({
+      canSelectFiles: false,
+      canSelectFolders: true,
+      canSelectMany: false,
+      openLabel: "Open Folder",
+    });
+    expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
+      "vscode.openFolder",
+      { fsPath: "/workspace/selected" },
+      false,
+    );
+    expect(posted).toEqual([]);
+  });
+
+  it("keeps the workspace setup state stable when folder selection is cancelled", async () => {
+    const posted: unknown[] = [];
+    vi.mocked(vscode.window.showOpenDialog).mockResolvedValue(undefined);
+
+    await handleWebviewMessage({ type: "workspace.openFolder" }, context({}, posted));
+
+    expect(vscode.commands.executeCommand).not.toHaveBeenCalled();
+    expect(posted).toEqual([]);
+  });
+
   it("persists developer settings unlock and returns refreshed runtime settings", async () => {
     const runtime = {
       appServerRequest: vi.fn().mockResolvedValue({
