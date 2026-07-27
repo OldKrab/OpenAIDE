@@ -7,7 +7,9 @@ mod session;
 mod tests;
 mod text_chunks;
 
-use crate::agent::events::{AgentEvent, AgentPermissionOutcome, AgentPermissionRequest};
+use crate::agent::events::{
+    AgentContextUsage, AgentEvent, AgentPermissionOutcome, AgentPermissionRequest, AgentTurnUsage,
+};
 use crate::agent::normalizer::normalize_event;
 use crate::agent::{AgentEventSink, TurnCancellation};
 use crate::protocol::errors::RuntimeError;
@@ -151,6 +153,14 @@ impl TaskSessionEventSink {
         if let AgentEvent::CommandsChanged(catalog) = event {
             self.finish_anonymous_text_routes();
             return self.update_task_commands(catalog, &now);
+        }
+        if let AgentEvent::ContextUsage(usage) = event {
+            self.finish_anonymous_text_routes();
+            return self.update_context_usage(usage);
+        }
+        if let AgentEvent::TurnUsage(usage) = event {
+            self.finish_anonymous_text_routes();
+            return self.update_turn_usage(usage);
         }
         if let AgentEvent::MessageChunk {
             role,
@@ -386,5 +396,60 @@ impl TaskSessionEventSink {
                 session_id: &self.session_id,
             },
         )
+    }
+
+    fn update_context_usage(&self, usage: AgentContextUsage) -> Result<(), RuntimeError> {
+        self.mutations.commit_existing_task(
+            &self.task_id,
+            TaskCommitOptions::metadata(),
+            |ctx| {
+                if ctx.task().agent_session_id.as_deref() != Some(self.session_id.as_str()) {
+                    return Ok(TaskMutationResult::Unchanged);
+                }
+                let next = crate::protocol::model::TaskContextUsage {
+                    used_tokens: usage.used_tokens,
+                    capacity_tokens: usage.capacity_tokens,
+                    cost: usage
+                        .cost
+                        .map(|cost| crate::protocol::model::TaskUsageCost {
+                            amount: cost.amount,
+                            currency: cost.currency,
+                        }),
+                    last_turn: None,
+                };
+                if ctx.task().context_usage.as_ref() == Some(&next) {
+                    return Ok(TaskMutationResult::Unchanged);
+                }
+                ctx.task_mut().context_usage = Some(next);
+                Ok(TaskMutationResult::Changed)
+            },
+        )?;
+        Ok(())
+    }
+
+    fn update_turn_usage(&self, usage: AgentTurnUsage) -> Result<(), RuntimeError> {
+        self.mutations.commit_existing_task(
+            &self.task_id,
+            TaskCommitOptions::metadata(),
+            |ctx| {
+                if ctx.task().agent_session_id.as_deref() != Some(self.session_id.as_str()) {
+                    return Ok(TaskMutationResult::Unchanged);
+                }
+                let next = crate::protocol::model::TaskTurnUsage {
+                    total_tokens: usage.total_tokens,
+                    input_tokens: usage.input_tokens,
+                    output_tokens: usage.output_tokens,
+                    reasoning_tokens: usage.reasoning_tokens,
+                    cached_read_tokens: usage.cached_read_tokens,
+                    cached_write_tokens: usage.cached_write_tokens,
+                };
+                if ctx.task().last_turn_usage.as_ref() == Some(&next) {
+                    return Ok(TaskMutationResult::Unchanged);
+                }
+                ctx.task_mut().last_turn_usage = Some(next);
+                Ok(TaskMutationResult::Changed)
+            },
+        )?;
+        Ok(())
     }
 }

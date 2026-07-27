@@ -179,12 +179,47 @@ pub struct TaskSnapshot {
     pub send_capability: TaskSendCapabilitySnapshot,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_capabilities: Option<TaskInputCapabilities>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_usage: Option<TaskContextUsage>,
     pub chat: ChatSnapshot,
     pub history_sync: TaskHistorySyncSnapshot,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending_requests: Vec<PendingRequestSnapshot>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recovery: Option<RecoverySnapshot>,
+}
+
+/// Standard ACP usage projected from the Task's bound live Native Session.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskContextUsage {
+    pub used_tokens: u64,
+    pub capacity_tokens: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost: Option<TaskUsageCost>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_turn: Option<TaskTurnUsage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskUsageCost {
+    pub amount: String,
+    pub currency: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskTurnUsage {
+    pub total_tokens: u64,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cached_read_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cached_write_tokens: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize, TS)]

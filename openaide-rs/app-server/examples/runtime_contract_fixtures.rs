@@ -109,6 +109,7 @@ fn main() {
         agent_commands_catalog: None,
         preparation: TaskPreparationRecord::Ready,
         supports_image_input: false,
+        context_usage: None,
         revision: 9,
     };
 

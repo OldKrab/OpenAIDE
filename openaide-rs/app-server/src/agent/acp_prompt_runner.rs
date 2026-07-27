@@ -68,7 +68,7 @@ pub(super) async fn run_prompt(
         context.content_policy,
         context.trace.as_ref(),
         prompt,
-        sink,
+        sink.clone(),
         session_projection.as_ref(),
     )?;
 
@@ -173,6 +173,7 @@ pub(super) async fn run_prompt(
                             context.content_policy,
                             context.trace.as_ref(),
                             Some(active_prompt.steering_settlement()),
+                            Some(sink.clone()),
                         ) {
                             logging::error(
                                 "acp_steering_prompt_start_failed",

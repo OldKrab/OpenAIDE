@@ -76,6 +76,66 @@ fn live_acp_message_ids_create_separate_chat_messages() {
 }
 
 #[test]
+fn acp_usage_is_published_in_the_authoritative_task_snapshot() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((api, store, workspace_root)) = task_chat_fixture(&temp, "usage") else {
+        return;
+    };
+    let created = api
+        .create_for_test(TaskAcquireParams {
+            project_id: project_id_for_workspace(&workspace_root),
+            agent_id: AgentId::from("codex"),
+            workspace_root: None,
+        })
+        .expect("create task");
+    let task_id = created.task.task_id;
+    wait_until(|| {
+        matches!(
+            store
+                .read_task(task_id.as_str())
+                .map(|task| task.preparation),
+            Ok(TaskPreparationRecord::Ready)
+        )
+    });
+
+    api.send(send_params(&task_id, "report usage"))
+        .expect("send prompt");
+    wait_until(|| {
+        store
+            .read_task(task_id.as_str())
+            .map(|task| task.status == TaskStatus::Inactive)
+            .unwrap_or(false)
+    });
+
+    let snapshot = api
+        .open_for_test(openaide_app_server_protocol::task::TaskOpenParams {
+            task_id: task_id.clone(),
+        })
+        .expect("open completed task");
+    let snapshot = serde_json::to_value(snapshot).expect("serialize task snapshot");
+    assert_eq!(
+        snapshot.get("contextUsage"),
+        Some(&serde_json::json!({
+            "usedTokens": 31_000,
+            "capacityTokens": 258_400,
+            "cost": {
+                "amount": "0.42",
+                "currency": "USD",
+            },
+            "lastTurn": {
+                "totalTokens": 168_500,
+                "inputTokens": 1_700,
+                "outputTokens": 118,
+                "reasoningTokens": 14,
+                "cachedReadTokens": 166_700,
+                "cachedWriteTokens": 86,
+            },
+        }))
+    );
+    api.shutdown().expect("shutdown task runtime");
+}
+
+#[test]
 fn replayed_acp_chunks_use_live_logical_message_grouping() {
     let temp = tempfile::TempDir::new().expect("temp dir");
     let Some((api, store, workspace_root)) = task_chat_fixture(&temp, "replay") else {
@@ -408,6 +468,21 @@ def update_content(content, message_id):
         },
     })
 
+def update_usage():
+    write({
+        "jsonrpc": "2.0",
+        "method": "session/update",
+        "params": {
+            "sessionId": session_id,
+            "update": {
+                "sessionUpdate": "usage_update",
+                "used": 31000,
+                "size": 258400,
+                "cost": {"amount": 0.42, "currency": "USD"},
+            },
+        },
+    })
+
 for line in sys.stdin:
     message = json.loads(line)
     method = message.get("method")
@@ -454,7 +529,21 @@ for line in sys.stdin:
             update_chunk("agent_message_chunk", "message", "11111111-1111-4111-8111-111111111111")
             update_chunk("agent_message_chunk", "Final ", "22222222-2222-4222-8222-222222222222")
             update_chunk("agent_message_chunk", "message", "22222222-2222-4222-8222-222222222222")
-        respond(message, {"stopReason": "end_turn"})
+        if mode == "usage":
+            update_usage()
+            respond(message, {
+                "stopReason": "end_turn",
+                "usage": {
+                    "totalTokens": 168500,
+                    "inputTokens": 1700,
+                    "outputTokens": 118,
+                    "thoughtTokens": 14,
+                    "cachedReadTokens": 166700,
+                    "cachedWriteTokens": 86,
+                },
+            })
+        else:
+            respond(message, {"stopReason": "end_turn"})
     elif method == "session/close":
         if pending_primary_id is not None:
             respond({"id": pending_primary_id}, {"stopReason": "end_turn"})

@@ -76,8 +76,26 @@ export type TaskSnapshot = {
   input_capabilities?: {
     image: boolean;
   };
+  context_usage?: TaskContextUsage;
   revision: number;
   history_sync: HistorySyncState;
+};
+
+export type TaskContextUsage = {
+  used_tokens: number;
+  capacity_tokens: number;
+  cost?: {
+    amount: string;
+    currency: string;
+  };
+  last_turn?: {
+    total_tokens: number;
+    input_tokens: number;
+    output_tokens: number;
+    reasoning_tokens?: number;
+    cached_read_tokens?: number;
+    cached_write_tokens?: number;
+  };
 };
 
 export type HistorySyncState =

@@ -268,6 +268,28 @@ pub(crate) fn project_stored_task_snapshot_with_history_sync(
                 image: snapshot.supports_image_input,
             },
         ),
+        context_usage: snapshot.context_usage.map(|usage| {
+            openaide_app_server_protocol::snapshot::TaskContextUsage {
+                used_tokens: usage.used_tokens,
+                capacity_tokens: usage.capacity_tokens,
+                cost: usage.cost.map(|cost| {
+                    openaide_app_server_protocol::snapshot::TaskUsageCost {
+                        amount: cost.amount,
+                        currency: cost.currency,
+                    }
+                }),
+                last_turn: usage.last_turn.map(|turn| {
+                    openaide_app_server_protocol::snapshot::TaskTurnUsage {
+                        total_tokens: turn.total_tokens,
+                        input_tokens: turn.input_tokens,
+                        output_tokens: turn.output_tokens,
+                        reasoning_tokens: turn.reasoning_tokens,
+                        cached_read_tokens: turn.cached_read_tokens,
+                        cached_write_tokens: turn.cached_write_tokens,
+                    }
+                }),
+            }
+        }),
         chat: project_chat_page(snapshot.chat),
         history_sync,
         pending_requests: Vec::new(),

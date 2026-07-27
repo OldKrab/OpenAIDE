@@ -19,8 +19,9 @@ use crate::agent::acp_tool_call_projection::{
 };
 use crate::agent::acp_update_projection::normalize_available_commands;
 use crate::agent::events::{
-    AgentEvent, AgentPermissionOption, AgentPermissionOptionKind, AgentPermissionOutcome,
-    AgentPermissionRequest, AgentToolCallRef, AgentToolUpdate,
+    AgentContextUsage, AgentEvent, AgentPermissionOption, AgentPermissionOptionKind,
+    AgentPermissionOutcome, AgentPermissionRequest, AgentToolCallRef, AgentToolUpdate,
+    AgentUsageCost,
 };
 use crate::agent::tool_details::{tool_call_event, tool_kind_name};
 use crate::agent::{AgentEventSink, AgentSessionEventSink, TurnCancellation};
@@ -186,6 +187,16 @@ impl LivePromptProjection {
                     .emit(AgentEvent::CommandsChanged(normalize_available_commands(
                         update,
                     )))?;
+            }
+            SessionUpdate::UsageUpdate(update) => {
+                self.sink.emit(AgentEvent::ContextUsage(AgentContextUsage {
+                    used_tokens: update.used,
+                    capacity_tokens: update.size,
+                    cost: update.cost.map(|cost| AgentUsageCost {
+                        amount: cost.amount.to_string(),
+                        currency: cost.currency,
+                    }),
+                }))?;
             }
             _ => {}
         }

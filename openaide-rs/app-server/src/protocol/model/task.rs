@@ -63,7 +63,40 @@ pub struct TaskSnapshot {
     pub agent_commands_catalog: Option<AgentCommandsCatalog>,
     pub preparation: TaskPreparationRecord,
     pub supports_image_input: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_usage: Option<TaskContextUsage>,
     pub revision: u64,
+}
+
+/// Agent-reported usage for the live Native Session bound to this Task.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct TaskContextUsage {
+    pub used_tokens: u64,
+    pub capacity_tokens: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cost: Option<TaskUsageCost>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_turn: Option<TaskTurnUsage>,
+}
+
+/// Currency amount is stored as text so protocol state remains exact and Eq-safe.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct TaskUsageCost {
+    pub amount: String,
+    pub currency: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct TaskTurnUsage {
+    pub total_tokens: u64,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reasoning_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cached_read_tokens: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cached_write_tokens: Option<u64>,
 }
 
 /// Process-neutral projection of an in-flight config mutation.

@@ -23,6 +23,32 @@ pub enum AgentEvent {
     PermissionRequest(AgentPermissionRequest),
     ConfigOptionsChanged(ConfigOptionsCatalog),
     CommandsChanged(AgentCommandsCatalog),
+    ContextUsage(AgentContextUsage),
+    TurnUsage(AgentTurnUsage),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentContextUsage {
+    pub used_tokens: u64,
+    pub capacity_tokens: u64,
+    pub cost: Option<AgentUsageCost>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentUsageCost {
+    /// Text preserves the ACP decimal value without introducing float equality into snapshots.
+    pub amount: String,
+    pub currency: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentTurnUsage {
+    pub total_tokens: u64,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub reasoning_tokens: Option<u64>,
+    pub cached_read_tokens: Option<u64>,
+    pub cached_write_tokens: Option<u64>,
 }
 
 #[derive(Debug, Clone)]

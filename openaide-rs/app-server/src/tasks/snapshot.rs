@@ -30,6 +30,10 @@ pub fn build_snapshot(
 
 /// Projects one already-committed record and its matching Chat page without another store read.
 pub(crate) fn snapshot_from_record_and_chat(task: TaskRecord, chat: MessagePage) -> TaskSnapshot {
+    let context_usage = task.context_usage.clone().map(|mut usage| {
+        usage.last_turn = task.last_turn_usage.clone();
+        usage
+    });
     TaskSnapshot {
         active_turn_started_at: task.active_turn_started_at.clone(),
         settings_summary: SettingsSummary {
@@ -49,6 +53,7 @@ pub(crate) fn snapshot_from_record_and_chat(task: TaskRecord, chat: MessagePage)
         lifecycle: task.lifecycle.clone(),
         preparation: task.preparation.clone(),
         supports_image_input: task.supports_image_input,
+        context_usage,
         revision: task.revision,
         task: task.summary(),
         chat,
