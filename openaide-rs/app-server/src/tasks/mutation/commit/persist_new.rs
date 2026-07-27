@@ -64,6 +64,7 @@ pub(super) fn persist_new_task(
         agent_commands: true,
         send_capability: true,
         input_capabilities: true,
+        context_usage: true,
         removed: task.tombstoned,
     };
     let navigation =

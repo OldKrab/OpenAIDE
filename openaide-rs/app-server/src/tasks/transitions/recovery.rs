@@ -32,6 +32,8 @@ impl TaskTransitions {
                         let task = ctx.task_mut();
                         task.config_options_catalog = None;
                         task.agent_commands_catalog = None;
+                        task.context_usage = None;
+                        task.last_turn_usage = None;
                     }
                     if plan.clear_pending_config_change {
                         // Agent I/O cannot be resumed after process restart. Preserve the

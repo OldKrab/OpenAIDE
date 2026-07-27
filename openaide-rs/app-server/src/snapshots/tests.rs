@@ -378,6 +378,7 @@ impl TaskSnapshotSource for StaticTaskSnapshots {
                 blockers: Vec::new(),
             },
             input_capabilities: None,
+            context_usage: None,
             chat: ChatSnapshot {
                 items: Vec::new(),
                 has_more_before: false,

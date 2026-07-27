@@ -707,6 +707,7 @@ struct ChangedFields {
     agent_commands: bool,
     send_capability: bool,
     input_capabilities: bool,
+    context_usage: bool,
     removed: bool,
 }
 
@@ -734,6 +735,8 @@ fn changed_fields(original: &TaskRecord, task: &TaskRecord) -> ChangedFields {
             || original.agent_commands_catalog != task.agent_commands_catalog,
         send_capability: preparation || original.status != task.status,
         input_capabilities: original.supports_image_input != task.supports_image_input,
+        context_usage: original.context_usage != task.context_usage
+            || original.last_turn_usage != task.last_turn_usage,
         removed: !original.tombstoned && task.tombstoned,
     }
 }
@@ -783,6 +786,7 @@ fn project_committed_changes(
             .input_capabilities
             .then_some(task.input_capabilities)
             .flatten(),
+        context_usage: fields.context_usage.then(|| task.context_usage.clone()),
         chat: projected_chat,
         removed: fields.removed,
     })

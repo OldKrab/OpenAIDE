@@ -15,6 +15,7 @@ use crate::agent::acp_errors::acp_error;
 use crate::agent::acp_host_capabilities::AcpSessionPromptMap;
 use crate::agent::acp_trace::AcpTraceSession;
 use crate::agent::acp_update_projection::LivePromptProjection;
+use crate::agent::events::{AgentEvent, AgentTurnUsage};
 use crate::agent::prompt_content::{build_prompt_content_with_policy, PromptContentPolicy};
 use crate::agent::{AgentEventSink, AgentPrompt, AgentPromptOutcome, TurnCancellation};
 use crate::protocol::errors::RuntimeError;
@@ -49,7 +50,7 @@ impl ActivePrompt {
         let task_id = prompt.task_id.clone();
         let projection = LivePromptProjection::for_prompt(
             agent_id,
-            sink,
+            sink.clone(),
             cancellation.clone(),
             session_projection,
         );
@@ -63,6 +64,7 @@ impl ActivePrompt {
             trace,
             completion_tx.clone(),
             settled.clone(),
+            sink,
         )?;
         Ok(Self {
             completion_tx,
@@ -170,6 +172,7 @@ fn send_prompt_request(
     trace: Option<&AcpTraceSession>,
     completion_tx: mpsc::UnboundedSender<PromptCompletion>,
     settled: Arc<AtomicBool>,
+    sink: Arc<dyn AgentEventSink>,
 ) -> Result<(), RuntimeError> {
     let task_id = prompt.task_id.clone();
     let session_id = active_session.session_id().to_string();
@@ -191,7 +194,19 @@ fn send_prompt_request(
                     if let Some(trace) = &result_trace {
                         trace.record("agent_to_client", "session/prompt.response", &response);
                     }
-                    Ok(prompt_outcome(response.stop_reason))
+                    if let Some(usage) = response.usage {
+                        sink.emit(AgentEvent::TurnUsage(AgentTurnUsage {
+                            total_tokens: usage.total_tokens,
+                            input_tokens: usage.input_tokens,
+                            output_tokens: usage.output_tokens,
+                            reasoning_tokens: usage.thought_tokens,
+                            cached_read_tokens: usage.cached_read_tokens,
+                            cached_write_tokens: usage.cached_write_tokens,
+                        }))
+                        .map(|()| prompt_outcome(response.stop_reason))
+                    } else {
+                        Ok(prompt_outcome(response.stop_reason))
+                    }
                 }
                 Err(error) => Err(acp_error(error)),
             };
@@ -238,6 +253,7 @@ pub(super) fn send_steering_prompt_request(
     content_policy: PromptContentPolicy,
     trace: Option<&AcpTraceSession>,
     settlement: Option<PromptSettlement>,
+    usage_sink: Option<Arc<dyn AgentEventSink>>,
 ) -> Result<(), RuntimeError> {
     let task_id = prompt.task_id.clone();
     let session_id = active_session.session_id().to_string();
@@ -258,6 +274,19 @@ pub(super) fn send_steering_prompt_request(
                     if let Some(trace) = &result_trace {
                         trace.record("agent_to_client", "session/prompt.response", &response);
                     }
+                    let usage_error = response.usage.and_then(|usage| {
+                        usage_sink.as_ref().and_then(|sink| {
+                            sink.emit(AgentEvent::TurnUsage(AgentTurnUsage {
+                                total_tokens: usage.total_tokens,
+                                input_tokens: usage.input_tokens,
+                                output_tokens: usage.output_tokens,
+                                reasoning_tokens: usage.thought_tokens,
+                                cached_read_tokens: usage.cached_read_tokens,
+                                cached_write_tokens: usage.cached_write_tokens,
+                            }))
+                            .err()
+                        })
+                    });
                     let outcome = prompt_outcome(response.stop_reason);
                     crate::logging::info(
                         "acp_steering_prompt_result",
@@ -289,7 +318,10 @@ pub(super) fn send_steering_prompt_request(
                     if settlement
                         .completion_tx
                         .send(PromptCompletion {
-                            result: Some(Ok(outcome)),
+                            result: Some(match usage_error {
+                                Some(error) => Err(error),
+                                None => Ok(outcome),
+                            }),
                             release: Some(release_tx),
                         })
                         .is_ok()

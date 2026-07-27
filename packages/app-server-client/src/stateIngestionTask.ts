@@ -58,6 +58,9 @@ function applyTaskChanges(
     agentCommands: changes.agentCommands ?? snapshot.task.agentCommands,
     sendCapability: changes.sendCapability ?? snapshot.task.sendCapability,
     inputCapabilities: changes.inputCapabilities ?? snapshot.task.inputCapabilities,
+    contextUsage: changes.contextUsage === undefined
+      ? snapshot.task.contextUsage
+      : changes.contextUsage,
   };
 
   for (const chatChange of changes.chat ?? []) {

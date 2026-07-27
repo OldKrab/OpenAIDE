@@ -3134,6 +3134,8 @@ fn client_new_task_record(
         config_options_catalog: None,
         config_mutation: Default::default(),
         agent_commands_catalog: None,
+        context_usage: None,
+        last_turn_usage: None,
         model_id: None,
         supports_image_input: false,
         preparation: crate::storage::records::TaskPreparationRecord::Ready,

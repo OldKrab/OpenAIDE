@@ -218,6 +218,8 @@ impl TaskProductApi {
             config_options_catalog: loaded.session.config_catalog.clone(),
             config_mutation: Default::default(),
             agent_commands_catalog: loaded.session.commands_catalog.clone(),
+            context_usage: None,
+            last_turn_usage: None,
             model_id: loaded.session.model_id.clone(),
             supports_image_input: loaded.session.prompt_capabilities.image,
             preparation: TaskPreparationRecord::Ready,

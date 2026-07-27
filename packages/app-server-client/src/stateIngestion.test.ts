@@ -29,6 +29,10 @@ describe("scope-local state ingestion", () => {
         task: { ...taskSummary("task-1"), status: "running", unread: true },
         activeTurnStartedAt: "2026-07-13T00:00:00Z",
         inputCapabilities: { image: true },
+        contextUsage: {
+          usedTokens: 31_000,
+          capacityTokens: 258_400,
+        },
         sendCapability: { state: "blocked", blockers: [] },
         chat: [{ kind: "append", item }],
       },
@@ -41,9 +45,32 @@ describe("scope-local state ingestion", () => {
       task: { status: "running", unread: true },
       activeTurnStartedAt: "2026-07-13T00:00:00Z",
       inputCapabilities: { image: true },
+      contextUsage: {
+        usedTokens: 31_000,
+        capacityTokens: 258_400,
+      },
       sendCapability: { state: "blocked" },
     });
     expect(result.state.snapshot.task.chat.items).toEqual([item]);
+  });
+
+  it("clears stale context usage when a new live session removes it", () => {
+    const state = taskState("task-1", 4);
+    if (state.snapshot.kind !== "task") return;
+    state.snapshot.task.contextUsage = {
+      usedTokens: 31_000,
+      capacityTokens: 258_400,
+    };
+    const result = applySubscriptionEvent(state, taskEvent("task-1", "cursor-1", "cursor-2", {
+      kind: "taskChanged",
+      taskId: taskId("task-1"),
+      revision: 5,
+      changes: { contextUsage: null },
+    }));
+
+    expect(result.kind).toBe("applied");
+    if (result.kind !== "applied" || result.state.snapshot.kind !== "task") return;
+    expect(result.state.snapshot.task.contextUsage).toBeNull();
   });
 
   it("requires a fresh baseline for a missing Task revision", () => {

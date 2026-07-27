@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::protocol::model::{
     AgentCommandsCatalog, ChatMessage, ConfigOptionCurrentValue, ConfigOptionsCatalog,
-    IsolationKind, TaskStatus, TaskSummary,
+    IsolationKind, TaskContextUsage, TaskStatus, TaskSummary, TaskTurnUsage,
 };
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
@@ -435,6 +435,11 @@ pub struct TaskRecord {
     pub config_mutation: TaskConfigMutationState,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_commands_catalog: Option<AgentCommandsCatalog>,
+    /// Latest usage for the bound live Native Session. Process recovery clears it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_usage: Option<TaskContextUsage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_turn_usage: Option<TaskTurnUsage>,
     pub model_id: Option<String>,
     /// Native Session prompt capabilities captured during preparation.
     #[serde(default)]
@@ -492,6 +497,10 @@ impl<'de> Deserialize<'de> for TaskRecord {
             config_mutation: TaskConfigMutationState,
             #[serde(default)]
             agent_commands_catalog: Option<AgentCommandsCatalog>,
+            #[serde(default)]
+            context_usage: Option<TaskContextUsage>,
+            #[serde(default)]
+            last_turn_usage: Option<TaskTurnUsage>,
             model_id: Option<String>,
             #[serde(default)]
             supports_image_input: bool,
@@ -532,6 +541,8 @@ impl<'de> Deserialize<'de> for TaskRecord {
             config_options_catalog: stored.config_options_catalog,
             config_mutation: stored.config_mutation,
             agent_commands_catalog: stored.agent_commands_catalog,
+            context_usage: stored.context_usage,
+            last_turn_usage: stored.last_turn_usage,
             model_id: stored.model_id,
             supports_image_input: stored.supports_image_input,
             preparation: stored.preparation,
@@ -549,7 +560,13 @@ impl TaskRecord {
         let had_config_catalog = self.config_options_catalog.take().is_some();
         let had_commands_catalog = self.agent_commands_catalog.take().is_some();
         let had_pending_mutation = self.config_mutation.pending.take().is_some();
-        had_config_catalog || had_commands_catalog || had_pending_mutation
+        let had_context_usage = self.context_usage.take().is_some();
+        let had_turn_usage = self.last_turn_usage.take().is_some();
+        had_config_catalog
+            || had_commands_catalog
+            || had_pending_mutation
+            || had_context_usage
+            || had_turn_usage
     }
 
     /// Updates the automatic title without replacing a visible user override.

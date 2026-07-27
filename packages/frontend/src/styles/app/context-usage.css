@@ -1,0 +1,295 @@
+.composer-context-host {
+  width: min(760px, 100%);
+  position: relative;
+}
+
+.composer-context-host > .composer {
+  width: 100%;
+}
+
+.composer-context-host .composer-actions {
+  /* Keep the send action visually separate from the interactive edge meter. */
+  margin-right: 13px;
+}
+
+.context-usage-interaction {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.context-usage-meter {
+  --context-usage-color: var(--oa-focus);
+  width: 16px;
+  height: 100%;
+  position: absolute;
+  right: -1px;
+  top: 0;
+  z-index: 1;
+  border: 0;
+  background: transparent;
+  cursor: default;
+  padding: 0;
+  pointer-events: auto;
+}
+
+.context-usage-meter:focus-visible {
+  outline: 1px solid var(--oa-focus);
+  outline-offset: 2px;
+}
+
+.context-usage-edge {
+  width: 20px;
+  height: 100%;
+  position: absolute;
+  inset: 0 0 0 auto;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.context-usage-edge-track {
+  fill: color-mix(in oklch, var(--oa-muted) 28%, transparent);
+}
+
+.context-usage-edge-fill {
+  clip-path: inset(calc(100% - var(--context-usage-percent)) 0 0 0);
+  fill: var(--context-usage-color);
+  opacity: .52;
+  transition:
+    clip-path 180ms cubic-bezier(.22, 1, .36, 1),
+    fill 180ms ease-out,
+    opacity 140ms ease-out;
+}
+
+.context-usage-meter:hover .context-usage-edge-fill,
+.context-usage-meter:focus-visible .context-usage-edge-fill {
+  opacity: .68;
+}
+
+.context-usage-meter-high,
+.context-usage-panel-high {
+  --context-usage-color: var(--oa-warning);
+}
+
+.context-usage-meter-critical,
+.context-usage-panel-critical {
+  --context-usage-color: var(--oa-danger);
+}
+
+.context-usage-tooltip {
+  width: max-content;
+  max-width: 180px;
+  position: absolute;
+  right: calc(100% + 6px);
+  top: 50%;
+  border: 1px solid var(--oa-border);
+  border-radius: 6px;
+  background: var(--oa-panel);
+  box-shadow: 0 4px 14px color-mix(in oklch, var(--oa-text) 12%, transparent);
+  color: var(--oa-text);
+  padding: 5px 7px;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(2px, -50%);
+  transition: opacity 100ms ease, transform 100ms ease;
+  white-space: nowrap;
+  font-size: 11px;
+}
+
+.context-usage-tooltip-cursor {
+  position: fixed;
+  right: clamp(
+    8px,
+    calc(100vw - var(--context-usage-cursor-x) + 10px),
+    calc(100vw - 188px)
+  );
+  top: clamp(16px, var(--context-usage-cursor-y), calc(100dvh - 16px));
+  transform: translate(2px, -50%);
+}
+
+.context-usage-meter:hover .context-usage-tooltip,
+.context-usage-meter:focus-visible .context-usage-tooltip {
+  opacity: 1;
+  transform: translate(0, -50%);
+}
+
+.context-usage-panel {
+  --context-usage-color: var(--oa-focus);
+  width: 288px;
+  max-height: min(360px, calc(100dvh - 140px));
+  z-index: 20;
+  overflow-y: auto;
+  border: 1px solid var(--oa-border);
+  border-radius: 10px;
+  background: var(--oa-panel);
+  box-shadow:
+    0 8px 24px color-mix(in oklch, var(--oa-text) 14%, transparent),
+    0 2px 6px color-mix(in oklch, var(--oa-text) 8%, transparent);
+  color: var(--oa-text);
+  padding: 12px;
+  pointer-events: auto;
+  animation: context-panel-in 160ms cubic-bezier(.22, 1, .36, 1);
+}
+
+.context-usage-panel-anchor {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 10px);
+  transform-origin: bottom right;
+}
+
+.context-usage-panel-header,
+.context-usage-current-heading,
+.context-usage-section-heading,
+.context-usage-breakdown > div,
+.context-usage-cost {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.context-usage-panel-header {
+  min-height: 24px;
+}
+
+.context-usage-panel-header > strong,
+.context-usage-current-heading span:first-child {
+  font-weight: 600;
+}
+
+.context-usage-panel-header button {
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--oa-muted);
+  display: grid;
+  place-items: center;
+  padding: 0;
+}
+
+.context-usage-panel-header button:hover {
+  background: var(--oa-raised);
+  color: var(--oa-text);
+}
+
+.context-usage-current {
+  min-width: 0;
+  padding: 10px 0 14px;
+}
+
+.context-usage-current-heading {
+  gap: 12px;
+  font-size: 12px;
+}
+
+.context-usage-current-heading span:last-child,
+.context-usage-token-line,
+.context-usage-section-heading span,
+.context-usage-cost span {
+  color: var(--oa-muted);
+}
+
+.context-usage-horizontal-track {
+  height: 3px;
+  margin: 8px 0 6px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: color-mix(in oklch, var(--oa-muted) 25%, transparent);
+}
+
+.context-usage-horizontal-track span {
+  height: 100%;
+  display: block;
+  border-radius: inherit;
+  background: var(--context-usage-color);
+  transition: width 180ms cubic-bezier(.22, 1, .36, 1);
+}
+
+.context-usage-token-line,
+.context-usage-section-heading span {
+  font-size: 11px;
+}
+
+.context-usage-section-heading {
+  min-height: 30px;
+  border-top: 1px solid var(--oa-border);
+  gap: 10px;
+  padding-top: 8px;
+}
+
+.context-usage-section-heading strong {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.context-usage-breakdown {
+  margin: 3px 0 0;
+}
+
+.context-usage-breakdown > div {
+  min-height: 25px;
+  gap: 16px;
+}
+
+.context-usage-breakdown dt,
+.context-usage-breakdown dd {
+  margin: 0;
+  font-size: 12px;
+}
+
+.context-usage-breakdown dt {
+  color: var(--oa-muted);
+}
+
+.context-usage-breakdown dd {
+  font-variant-numeric: tabular-nums;
+}
+
+.context-usage-breakdown dd small {
+  margin-left: 6px;
+  color: var(--oa-muted);
+  font-size: 10px;
+}
+
+.context-usage-cost {
+  min-height: 30px;
+  margin-top: 7px;
+  border-top: 1px solid var(--oa-border);
+  padding-top: 7px;
+  font-size: 12px;
+}
+
+@keyframes context-panel-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(.985);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .context-usage-edge-fill,
+  .context-usage-horizontal-track span,
+  .context-usage-tooltip {
+    transition: none;
+  }
+
+  .context-usage-panel {
+    animation: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .context-usage-panel-anchor {
+    width: 100%;
+  }
+
+  .context-usage-panel {
+    padding: 11px 13px 10px;
+  }
+
+  .context-usage-current {
+    padding: 8px 0 12px;
+  }
+}

@@ -307,6 +307,12 @@ Submit, user Cancel, and prompt cancellation close the request for every client.
 
 During live work, App Server intentionally ignores ACP `user_message_chunk` because it already persisted the User message before `session/prompt`; an Agent echo must not duplicate it. During `session/load`, user-message chunks reconstruct Native Session history, grouped by native `messageId` when present, including supported non-text content.
 
+### Context usage
+
+App Server projects standard ACP `usage_update` values and optional prompt-response token usage as process-local state for the Task's bound Native Session. Context used, capacity, and optional cumulative cost come from `usage_update`; processed, input, output, reasoning, cache-read, and cache-write totals come from prompt responses when the Agent supplies them. Agent-private `_meta` values are never interpreted as usage. Task snapshots and contiguous Task deltas publish the latest values, and process recovery or Native Session replacement clears them rather than presenting stale telemetry.
+
+Frontend renders the percentage as a subtle animated meter along the Composer's rounded right edge. Hover reveals the percentage; click opens a separate responsive details panel above the Composer with the standard fields that are available. The panel never merges into or changes the Composer controls or dimensions.
+
 ### Prompt completion
 
 App Server preserves every ACP `session/prompt` response and `stopReason`. The first `end_turn` response from any prompt in the current prompt set changes Task status from `working` to idle but does not finalize Chat messages, Tool state, or the Native Session update consumer. Other stop reasons retain their prompt-specific handling below; a steering response with another stop reason does not settle the Task turn.

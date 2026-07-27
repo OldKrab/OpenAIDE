@@ -82,13 +82,14 @@ use crate::snapshot::{
     QuestionMessageAction, QuestionMessageState, RecoveryAction, RecoverySnapshot,
     ServerCapabilities, ServerSnapshot, SettingsSnapshot, StateRootSnapshot,
     TaskAgentCommandsSnapshot, TaskAgentConfigSnapshot, TaskAttentionEvent, TaskAttentionReason,
-    TaskHistorySyncSnapshot, TaskInputCapabilities, TaskLifecycle, TaskNavigationEntry,
-    TaskNavigationGroup, TaskNavigationRefreshState, TaskNavigationSnapshot, TaskPreparationAction,
-    TaskPreparationSnapshot, TaskPreparationStep, TaskPreparationStepKind,
+    TaskContextUsage, TaskHistorySyncSnapshot, TaskInputCapabilities, TaskLifecycle,
+    TaskNavigationEntry, TaskNavigationGroup, TaskNavigationRefreshState, TaskNavigationSnapshot,
+    TaskPreparationAction, TaskPreparationSnapshot, TaskPreparationStep, TaskPreparationStepKind,
     TaskPreparationStepStatus, TaskSendBlocker, TaskSendBlockerKind, TaskSendCapabilitySnapshot,
     TaskSendCapabilityState, TaskSetupBlocker, TaskSetupBlockerKind, TaskSnapshot, TaskStatus,
-    TaskSummary, TaskTitle, TaskTitleSource, ToolPermissionDecisionSnapshot,
-    ToolPermissionOutcomeSnapshot, ToolPresentationKindSnapshot, ToolPresentationSnapshot,
+    TaskSummary, TaskTitle, TaskTitleSource, TaskTurnUsage, TaskUsageCost,
+    ToolPermissionDecisionSnapshot, ToolPermissionOutcomeSnapshot, ToolPresentationKindSnapshot,
+    ToolPresentationSnapshot,
 };
 use crate::state::{
     StateSubscribeParams, StateSubscribeResult, StateUnsubscribeParams, StateUnsubscribeResult,
@@ -447,6 +448,9 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<TaskLifecycle>(output, config);
     push_decl::<TaskSnapshot>(output, config);
     push_decl::<TaskInputCapabilities>(output, config);
+    push_decl::<TaskContextUsage>(output, config);
+    push_decl::<TaskUsageCost>(output, config);
+    push_decl::<TaskTurnUsage>(output, config);
     push_decl::<TaskHistorySyncSnapshot>(output, config);
     push_decl::<TaskPreparationSnapshot>(output, config);
     push_decl::<TaskPreparationStep>(output, config);

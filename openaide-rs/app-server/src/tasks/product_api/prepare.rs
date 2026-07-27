@@ -56,6 +56,8 @@ impl TaskProductApi {
                 // failed, no closed session may remain the source of visible controls.
                 task.config_options_catalog = None;
                 task.agent_commands_catalog = None;
+                task.context_usage = None;
+                task.last_turn_usage = None;
                 task.preparation = preparation;
                 task.updated_at = now;
                 Ok(TaskMutationResult::Changed)
@@ -82,6 +84,8 @@ impl TaskProductApi {
                     // Preserve the durable Native Session identity so retry can resume it.
                     task.config_options_catalog = None;
                     task.agent_commands_catalog = None;
+                    task.context_usage = None;
+                    task.last_turn_usage = None;
                     task.preparation = TaskPreparationRecord::Failed {
                         message,
                         native_session_missing: false,

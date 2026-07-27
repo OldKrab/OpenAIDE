@@ -35,6 +35,7 @@ import { configOptionsMutable } from "../state/configOptionState";
 import type { BackendConnectionState } from "./appControllerBackendLifecycle";
 import type { AgentOption } from "../state/composerOptions";
 import { AgentRecoveryPanel, taskAgentRecovery, type AgentRecoveryActions } from "./AgentRecovery";
+import { ComposerWithContextUsage } from "./ContextUsageIndicator";
 
 export {
   scrollTopAfterPrependedContent,
@@ -355,36 +356,43 @@ export function TaskView({
           actions={agentRecoveryActions}
           agent={recovery.agent}
           kind={recovery.kind}
-        /> : <Composer
-          agentLocked
-          attachments={taskInput.context}
-          autoFocus
-          availability={availability}
-          configLocked={!backendReady || !configOptionsMutable(taskConfigOptions)}
-          configOptions={taskConfigOptions}
-          commandCatalog={snapshot.agent_commands}
-          error={taskInput.error ?? taskInput.configError?.message ?? taskConfigOptions?.error}
-          fileBrowser={fileBrowser}
-          imageAttachmentsAllowed={imageAttachmentsAllowed}
-          focusRequestKey={snapshot.task.task_id}
-          onCancel={
-            backendReady && (turnBusy || inputPending)
-              ? onCancel
-              : undefined
-          }
-          onChange={intents.changePrompt}
-          onUnsupportedImageAttachment={intents.reportAttachmentError}
-          onRevealAttachment={onRevealAttachment}
-          onRemoveAttachment={onRemoveAttachment}
-          onSelectConfigOption={onSelectConfigOption}
-          onSubmit={submit}
-          prompt={taskInput.prompt}
-          selection={taskSelection}
-          submitShortcut={submitShortcut}
-          submissionSettlementKey={taskInput.acceptedUserMessageId}
-          showAgentSelector={false}
-          showIsolationSelector={false}
-        />}
+        /> : (
+          <ComposerWithContextUsage
+            configOptions={taskConfigOptions}
+            usage={snapshot.context_usage}
+          >
+            <Composer
+              agentLocked
+              attachments={taskInput.context}
+              autoFocus
+              availability={availability}
+              configLocked={!backendReady || !configOptionsMutable(taskConfigOptions)}
+              configOptions={taskConfigOptions}
+              commandCatalog={snapshot.agent_commands}
+              error={taskInput.error ?? taskInput.configError?.message ?? taskConfigOptions?.error}
+              fileBrowser={fileBrowser}
+              imageAttachmentsAllowed={imageAttachmentsAllowed}
+              focusRequestKey={snapshot.task.task_id}
+              onCancel={
+                backendReady && (turnBusy || inputPending)
+                  ? onCancel
+                  : undefined
+              }
+              onChange={intents.changePrompt}
+              onUnsupportedImageAttachment={intents.reportAttachmentError}
+              onRevealAttachment={onRevealAttachment}
+              onRemoveAttachment={onRemoveAttachment}
+              onSelectConfigOption={onSelectConfigOption}
+              onSubmit={submit}
+              prompt={taskInput.prompt}
+              selection={taskSelection}
+              submitShortcut={submitShortcut}
+              submissionSettlementKey={taskInput.acceptedUserMessageId}
+              showAgentSelector={false}
+              showIsolationSelector={false}
+            />
+          </ComposerWithContextUsage>
+        )}
       </div>
     </section>
   );

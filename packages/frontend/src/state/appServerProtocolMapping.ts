@@ -187,6 +187,26 @@ function mapProtocolTaskSnapshotWithCache(
       input_capabilities: {
         image: snapshot.inputCapabilities?.image ?? false,
       },
+      context_usage: snapshot.contextUsage ? {
+        used_tokens: snapshot.contextUsage.usedTokens,
+        capacity_tokens: snapshot.contextUsage.capacityTokens,
+        ...(snapshot.contextUsage.cost ? {
+          cost: {
+            amount: snapshot.contextUsage.cost.amount,
+            currency: snapshot.contextUsage.cost.currency,
+          },
+        } : {}),
+        ...(snapshot.contextUsage.lastTurn ? {
+          last_turn: {
+            total_tokens: snapshot.contextUsage.lastTurn.totalTokens,
+            input_tokens: snapshot.contextUsage.lastTurn.inputTokens,
+            output_tokens: snapshot.contextUsage.lastTurn.outputTokens,
+            reasoning_tokens: snapshot.contextUsage.lastTurn.reasoningTokens ?? undefined,
+            cached_read_tokens: snapshot.contextUsage.lastTurn.cachedReadTokens ?? undefined,
+            cached_write_tokens: snapshot.contextUsage.lastTurn.cachedWriteTokens ?? undefined,
+          },
+        } : {}),
+      } : undefined,
       revision: snapshot.revision,
       history_sync: mapHistorySync(snapshot.historySync ?? { state: "idle", generation: 0 }),
     },

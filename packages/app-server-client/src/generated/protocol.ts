@@ -698,7 +698,11 @@ export type TaskChanges = { task?: TaskSummary | null,
 /**
  * Present when the active-turn clock changes; inner `None` clears it.
  */
-activeTurnStartedAt?: string | null | null, lifecycle?: TaskLifecycle | null, preparation?: TaskPreparationSnapshot | null, agentConfig?: TaskAgentConfigSnapshot | null, agentCommands?: TaskAgentCommandsSnapshot | null, sendCapability?: TaskSendCapabilitySnapshot | null, inputCapabilities?: TaskInputCapabilities | null, chat?: Array<TaskChatChange>, removed?: boolean, };
+activeTurnStartedAt?: string | null | null, lifecycle?: TaskLifecycle | null, preparation?: TaskPreparationSnapshot | null, agentConfig?: TaskAgentConfigSnapshot | null, agentCommands?: TaskAgentCommandsSnapshot | null, sendCapability?: TaskSendCapabilitySnapshot | null, inputCapabilities?: TaskInputCapabilities | null,
+/**
+ * Outer option controls delta presence; inner option clears stale session usage.
+ */
+contextUsage?: TaskContextUsage | null | null, chat?: Array<TaskChatChange>, removed?: boolean, };
 
 export type TaskChatChange = { "kind": "append", item: ChatItem, } | { "kind": "upsert", item: ChatItem, } | { "kind": "appendText", messageId: MessageId, text: string, } | { "kind": "replace", chat: ChatSnapshot, };
 
@@ -772,9 +776,15 @@ export type TaskSnapshot = { task: TaskSummary,
 /**
  * App Server-authored start of the active turn; absent when no turn is running.
  */
-activeTurnStartedAt?: string | null, lifecycle: TaskLifecycle, revision: number, preparation: TaskPreparationSnapshot, agentConfig: TaskAgentConfigSnapshot, agentCommands: TaskAgentCommandsSnapshot, sendCapability: TaskSendCapabilitySnapshot, inputCapabilities?: TaskInputCapabilities | null, chat: ChatSnapshot, historySync: TaskHistorySyncSnapshot, pendingRequests?: Array<PendingRequestSnapshot>, recovery?: RecoverySnapshot | null, };
+activeTurnStartedAt?: string | null, lifecycle: TaskLifecycle, revision: number, preparation: TaskPreparationSnapshot, agentConfig: TaskAgentConfigSnapshot, agentCommands: TaskAgentCommandsSnapshot, sendCapability: TaskSendCapabilitySnapshot, inputCapabilities?: TaskInputCapabilities | null, contextUsage?: TaskContextUsage | null, chat: ChatSnapshot, historySync: TaskHistorySyncSnapshot, pendingRequests?: Array<PendingRequestSnapshot>, recovery?: RecoverySnapshot | null, };
 
 export type TaskInputCapabilities = { image: boolean, };
+
+export type TaskContextUsage = { usedTokens: number, capacityTokens: number, cost?: TaskUsageCost | null, lastTurn?: TaskTurnUsage | null, };
+
+export type TaskUsageCost = { amount: string, currency: string, };
+
+export type TaskTurnUsage = { totalTokens: number, inputTokens: number, outputTokens: number, reasoningTokens?: number | null, cachedReadTokens?: number | null, cachedWriteTokens?: number | null, };
 
 export type TaskHistorySyncSnapshot = { "state": "idle", generation: number, } | { "state": "syncing", generation: number, } | { "state": "updated", generation: number, };
 

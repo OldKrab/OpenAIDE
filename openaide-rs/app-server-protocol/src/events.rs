@@ -7,8 +7,8 @@ use crate::ids::{
 use crate::snapshot::{
     AgentCollectionSnapshot, ChatItem, ChatSnapshot, ClientSnapshot, PendingRequestSnapshot,
     ProjectCollectionSnapshot, TaskAgentCommandsSnapshot, TaskAgentConfigSnapshot,
-    TaskHistorySyncSnapshot, TaskInputCapabilities, TaskLifecycle, TaskNavigationSnapshot,
-    TaskPreparationSnapshot, TaskSendCapabilitySnapshot, TaskSummary,
+    TaskContextUsage, TaskHistorySyncSnapshot, TaskInputCapabilities, TaskLifecycle,
+    TaskNavigationSnapshot, TaskPreparationSnapshot, TaskSendCapabilitySnapshot, TaskSummary,
 };
 use crate::state::SubscriptionScope;
 use crate::task::{TaskNavigationSection, ToolDetailSnapshot};
@@ -150,6 +150,9 @@ pub struct TaskChanges {
     pub send_capability: Option<TaskSendCapabilitySnapshot>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input_capabilities: Option<TaskInputCapabilities>,
+    /// Outer option controls delta presence; inner option clears stale session usage.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_usage: Option<Option<TaskContextUsage>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub chat: Vec<TaskChatChange>,
     #[serde(default, skip_serializing_if = "is_false")]
@@ -166,6 +169,7 @@ impl TaskChanges {
             && self.agent_commands.is_none()
             && self.send_capability.is_none()
             && self.input_capabilities.is_none()
+            && self.context_usage.is_none()
             && self.chat.is_empty()
             && !self.removed
     }

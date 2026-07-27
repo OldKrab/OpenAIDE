@@ -961,6 +961,38 @@ describe("App Server Protocol state mapping", () => {
       ]),
     );
   });
+
+  it("maps standard ACP context and last-turn usage without private metadata", () => {
+    const mapping = mapProtocolTaskSnapshot(protocolSnapshot({
+      contextUsage: {
+        usedTokens: 31_000,
+        capacityTokens: 258_400,
+        cost: { amount: "0.42", currency: "USD" },
+        lastTurn: {
+          totalTokens: 168_500,
+          inputTokens: 1_700,
+          outputTokens: 118,
+          reasoningTokens: 14,
+          cachedReadTokens: 166_700,
+          cachedWriteTokens: 86,
+        },
+      },
+    }));
+
+    expect(mapping.snapshot.context_usage).toEqual({
+      used_tokens: 31_000,
+      capacity_tokens: 258_400,
+      cost: { amount: "0.42", currency: "USD" },
+      last_turn: {
+        total_tokens: 168_500,
+        input_tokens: 1_700,
+        output_tokens: 118,
+        reasoning_tokens: 14,
+        cached_read_tokens: 166_700,
+        cached_write_tokens: 86,
+      },
+    });
+  });
 });
 
 function protocolSnapshot(overrides: Partial<ProtocolTaskSnapshot> = {}): ProtocolTaskSnapshot {

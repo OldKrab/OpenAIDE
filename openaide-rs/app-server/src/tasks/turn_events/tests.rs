@@ -2,8 +2,9 @@ use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
 
 use crate::agent::events::{
-    AgentEvent, AgentPermissionOption, AgentPermissionOptionKind, AgentPermissionRequest,
-    AgentTerminalAppend, AgentToolCall, AgentToolCallRef, AgentToolCallStatus, AgentToolUpdate,
+    AgentContextUsage, AgentEvent, AgentPermissionOption, AgentPermissionOptionKind,
+    AgentPermissionRequest, AgentTerminalAppend, AgentToolCall, AgentToolCallRef,
+    AgentToolCallStatus, AgentToolUpdate, AgentTurnUsage, AgentUsageCost,
 };
 use crate::agent::{
     AgentEventSink, AgentMetadataField, AgentPromptOutcome, AgentSessionEventSink,
@@ -319,6 +320,76 @@ fn repeated_identical_session_catalogs_do_not_churn_task_revision() {
     sink.commands_changed(Default::default()).unwrap();
 
     assert_eq!(store.read_task("task_1").unwrap().revision, 2);
+}
+
+#[test]
+fn context_usage_updates_publish_complete_contiguous_task_deltas() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().to_path_buf()).unwrap();
+    store.write_task(&running_task("task_1")).unwrap();
+    let (notifier, notifications) = TaskUpdateNotifier::channel();
+    let mutations = TaskMutations::new(
+        store,
+        Arc::new(Mutex::new(())),
+        Arc::new(Mutex::new(RuntimeState::with_revision(0))),
+        notifier,
+    );
+    let sink = TaskSessionEventSink::new(
+        mutations,
+        "task_1".to_string(),
+        "session_1".to_string(),
+        ServerRequestRuntime::new(),
+    );
+
+    sink.session_update(AgentEvent::ContextUsage(AgentContextUsage {
+        used_tokens: 31_000,
+        capacity_tokens: 258_400,
+        cost: Some(AgentUsageCost {
+            amount: "0.42".to_string(),
+            currency: "USD".to_string(),
+        }),
+    }))
+    .unwrap();
+    sink.session_update(AgentEvent::TurnUsage(AgentTurnUsage {
+        total_tokens: 168_500,
+        input_tokens: 1_700,
+        output_tokens: 118,
+        reasoning_tokens: Some(14),
+        cached_read_tokens: Some(166_700),
+        cached_write_tokens: Some(86),
+    }))
+    .unwrap();
+
+    let first = notifications.recv().expect("context delta");
+    let second = notifications.recv().expect("turn delta");
+    assert_eq!((first.revision, second.revision), (1, 2));
+    let TaskUpdateKind::Changed(first) = first.kind else {
+        panic!("expected context Task change");
+    };
+    let TaskUpdateKind::Changed(second) = second.kind else {
+        panic!("expected turn Task change");
+    };
+    assert_eq!(
+        first.changes.context_usage.flatten().map(|usage| (
+            usage.used_tokens,
+            usage.capacity_tokens,
+            usage.last_turn.is_none()
+        )),
+        Some((31_000, 258_400, true))
+    );
+    assert_eq!(
+        second
+            .changes
+            .context_usage
+            .flatten()
+            .and_then(|usage| usage.last_turn)
+            .map(|turn| (
+                turn.total_tokens,
+                turn.cached_read_tokens,
+                turn.reasoning_tokens
+            )),
+        Some((168_500, Some(166_700), Some(14)))
+    );
 }
 
 #[test]
@@ -1906,6 +1977,8 @@ fn running_task(task_id: &str) -> TaskRecord {
         config_options_catalog: None,
         config_mutation: Default::default(),
         agent_commands_catalog: None,
+        context_usage: None,
+        last_turn_usage: None,
         model_id: None,
         supports_image_input: false,
         preparation: TaskPreparationRecord::Ready,
