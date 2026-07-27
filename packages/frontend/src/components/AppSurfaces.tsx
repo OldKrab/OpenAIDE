@@ -212,6 +212,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
             ? callbacks.navigation.loadNativeSessions()
             : callbacks.navigation.openSettings()}
           onRestoreTask={callbacks.navigation.restoreTask}
+          onSetTaskPinned={callbacks.navigation.setTaskPinned}
           onSetTaskTitle={callbacks.navigation.setTaskTitle}
           onRestoreNativeSession={callbacks.navigation.restoreNativeSession}
           onSearchChange={callbacks.navigation.changeSearch}
@@ -381,6 +382,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
             ? callbacks.navigation.loadNativeSessions()
             : callbacks.navigation.openSettings()}
           onRestoreTask={callbacks.navigation.restoreTask}
+          onSetTaskPinned={callbacks.navigation.setTaskPinned}
           onSetTaskTitle={callbacks.navigation.setTaskTitle}
           onRestoreNativeSession={callbacks.navigation.restoreNativeSession}
           onSearchChange={callbacks.navigation.changeSearch}

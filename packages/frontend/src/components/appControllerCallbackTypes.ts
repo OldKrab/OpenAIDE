@@ -48,6 +48,7 @@ export type NavigationCallbacks = {
   openTask: (taskId: string) => void;
   retryAgent: (agentId: string) => Promise<boolean>;
   restoreNativeSession: (session: AgentListedSession) => void;
+  setTaskPinned: (taskId: string, pinned: boolean) => Promise<void>;
   setTaskTitle: (
     taskId: string,
     title: { kind: "user"; value: string } | { kind: "automatic" },

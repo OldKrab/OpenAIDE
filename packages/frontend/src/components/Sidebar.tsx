@@ -34,6 +34,7 @@ type SidebarProps = {
   onArchiveTask: (taskId: string) => void;
   onRestoreNativeSession: (session: AgentListedSession) => void;
   onRestoreTask: (taskId: string) => void;
+  onSetTaskPinned?: (taskId: string, pinned: boolean) => Promise<void>;
   onSetTaskTitle?: (
     taskId: string,
     title: { kind: "user"; value: string } | { kind: "automatic" },
@@ -76,6 +77,7 @@ export const Sidebar = memo(function Sidebar({
   onArchiveTask,
   onRestoreNativeSession,
   onRestoreTask,
+  onSetTaskPinned,
   onSetTaskTitle,
   onSearchChange,
   onSettings,
@@ -261,6 +263,7 @@ export const Sidebar = memo(function Sidebar({
                 onOpenTask={onOpenTask}
                 onRestoreNativeSession={onRestoreNativeSession}
                 onRestoreTask={onRestoreTask}
+                onSetTaskPinned={onSetTaskPinned}
                 onSetTaskTitle={onSetTaskTitle}
                 onToggleCollapse={() =>
                   setCollapsedProjectKeys((current) => {
@@ -289,6 +292,7 @@ export const Sidebar = memo(function Sidebar({
                   onArchiveTask={onArchiveTask}
                   onOpenTask={onOpenTask}
                   onRestoreTask={onRestoreTask}
+                  onSetTaskPinned={onSetTaskPinned}
                   onSetTaskTitle={onSetTaskTitle}
                   showArchived={showArchived}
                   task={row.task}

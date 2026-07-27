@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Archive,
   ArrowLeft,
@@ -7,6 +7,7 @@ import {
   Info,
   MoreHorizontal,
   Pencil,
+  Pin,
   RotateCcw,
   Undo2,
   X,
@@ -23,6 +24,7 @@ export function SidebarTaskRow({
   onArchiveTask,
   onOpenTask,
   onRestoreTask,
+  onSetTaskPinned,
   onSetTaskTitle,
   showArchived,
   task,
@@ -31,6 +33,7 @@ export function SidebarTaskRow({
   onArchiveTask: (taskId: string) => void;
   onOpenTask: (taskId: string) => void;
   onRestoreTask: (taskId: string) => void;
+  onSetTaskPinned?: (taskId: string, pinned: boolean) => Promise<void>;
   onSetTaskTitle?: (
     taskId: string,
     title: { kind: "user"; value: string } | { kind: "automatic" },
@@ -44,6 +47,8 @@ export function SidebarTaskRow({
   const [titleDraft, setTitleDraft] = useState(task.title);
   const [titleError, setTitleError] = useState<string>();
   const [titleSaving, setTitleSaving] = useState(false);
+  const [pinSaving, setPinSaving] = useState(false);
+  const [pinError, setPinError] = useState<string>();
   const rowRef = useRef<HTMLDivElement>(null);
   const preview = useSidebarTaskPreview();
   const title = task.title || "Untitled task";
@@ -99,6 +104,25 @@ export function SidebarTaskRow({
       setTitleSaving(false);
     }
   };
+  const setPinned = async () => {
+    if (!onSetTaskPinned || pinSaving) return;
+    setMenuOpen(false);
+    setDetailsOpen(false);
+    setPinSaving(true);
+    setPinError(undefined);
+    try {
+      await onSetTaskPinned(task.task_id, !task.pinned);
+    } catch (error) {
+      setPinError(error instanceof Error ? error.message : `Unable to ${task.pinned ? "unpin" : "pin"} task.`);
+    } finally {
+      setPinSaving(false);
+    }
+  };
+  useEffect(() => {
+    if (!pinError) return undefined;
+    const timeout = setTimeout(() => setPinError(undefined), 5_000);
+    return () => clearTimeout(timeout);
+  }, [pinError]);
   const changeMenuOpen = (open: boolean) => {
     if (open) {
       // A task menu owns this row until it closes; discard any preview dwell.
@@ -161,6 +185,8 @@ export function SidebarTaskRow({
         <span className="task-row-body">
           <span className="task-title">{title}</span>
           <TaskTrailingMeta
+            pinned={task.pinned}
+            pinSaving={pinSaving}
             status={task.status}
             timestamp={task.last_activity}
             unread={task.unread}
@@ -200,6 +226,11 @@ export function SidebarTaskRow({
             {onSetTaskTitle && !showArchived && task.title_source === "user" ? (
               <button onClick={() => void resetTitle()} type="button" role="menuitem"><Undo2 size={13} />Reset to Agent title</button>
             ) : null}
+            {onSetTaskPinned && !showArchived ? (
+              <button disabled={pinSaving} onClick={() => void setPinned()} type="button" role="menuitem">
+                <Pin size={13} />{task.pinned ? "Unpin task" : "Pin task"}
+              </button>
+            ) : null}
             <button onClick={runAction} type="button" role="menuitem">
               {showArchived ? <RotateCcw size={13} /> : <Archive size={13} />}
               {actionLabel}
@@ -210,16 +241,21 @@ export function SidebarTaskRow({
       {!editingTitle && titleError ? (
         <small className="task-title-error" role="alert">{titleError}</small>
       ) : null}
+      {pinError ? <small className="task-pin-error" role="alert">{pinError}</small> : null}
     </div>
   );
 }
 
 function TaskTrailingMeta({
+  pinned,
+  pinSaving,
   status,
   timestamp,
   unread,
   worktreeName,
 }: {
+  pinned: boolean;
+  pinSaving: boolean;
   status: TaskStatus;
   timestamp?: string;
   unread: boolean;
@@ -227,6 +263,20 @@ function TaskTrailingMeta({
 }) {
   return (
     <span className="task-trailing-meta">
+      {pinned ? (
+        <span aria-label="Pinned" className="task-pin-marker" role="img" title="Pinned">
+          <Pin size={12} />
+        </span>
+      ) : null}
+      {pinSaving ? (
+        <span
+          aria-label={pinned ? "Unpinning task" : "Pinning task"}
+          className="task-trailing-indicator task-pin-pending"
+          role="img"
+        >
+          <span className="task-state-spinner" />
+        </span>
+      ) : null}
       {worktreeName ? <span aria-label={`Worktree: ${worktreeName}`} className="task-worktree-marker" role="img" title={`Worktree: ${worktreeName}`}><GitBranch size={12} /></span> : null}
       <TaskStateOrAge status={status} timestamp={timestamp} unread={unread} />
     </span>

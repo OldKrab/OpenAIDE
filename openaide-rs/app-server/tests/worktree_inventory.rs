@@ -639,6 +639,7 @@ fn task_record(
         task_version: 0,
         message_history_version: 0,
         unread: false,
+        pinned: false,
         attention: None,
         created_at: "1".to_string(),
         updated_at: "1".to_string(),

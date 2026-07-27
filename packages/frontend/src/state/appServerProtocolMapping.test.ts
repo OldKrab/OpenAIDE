@@ -81,6 +81,15 @@ describe("App Server Protocol state mapping", () => {
     });
   });
 
+  it("maps authoritative pin state and defaults legacy summaries to unpinned", () => {
+    expect(mapProtocolTaskSummary(protocolSummary({ pinned: true }))).toMatchObject({
+      pinned: true,
+    });
+    expect(mapProtocolTaskSummary(protocolSummary())).toMatchObject({
+      pinned: false,
+    });
+  });
+
   it("maps explicit Task Attention without inferring it from status or unread", () => {
     expect(mapProtocolTaskSummary(protocolSummary({
       status: "waiting",

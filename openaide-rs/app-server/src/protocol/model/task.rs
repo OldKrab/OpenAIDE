@@ -33,6 +33,7 @@ pub struct TaskSummary {
     pub task_version: u64,
     pub message_history_version: u64,
     pub unread: bool,
+    pub pinned: bool,
     pub attention: Option<TaskAttentionEvent>,
     pub created_at: String,
     pub updated_at: String,

@@ -92,6 +92,7 @@ function task(): TaskSummary {
     updated_at: "1",
     last_activity: "1",
     unread: false,
+    pinned: false,
     workspace_root: "/workspace/OpenAIDE",
     isolation: "local",
     workspace_available: true,

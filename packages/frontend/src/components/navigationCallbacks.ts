@@ -10,6 +10,7 @@ import {
   NATIVE_SESSION_RESTORE,
   TASK_NAVIGATION_LOAD_MORE,
   TASK_NAVIGATION_REFRESH,
+  TASK_SET_PINNED,
   TASK_SET_TITLE,
   type AgentId,
   type ProjectId,
@@ -167,6 +168,15 @@ export function createNavigationCallbacks({
       await backendConnection.request(TASK_SET_TITLE, {
         taskId: taskId as TaskId,
         title,
+      });
+    },
+    setTaskPinned: async (taskId, pinned) => {
+      if (!backendConnection?.request) {
+        throw new Error("App Server connection unavailable.");
+      }
+      await backendConnection.request(TASK_SET_PINNED, {
+        taskId: taskId as TaskId,
+        pinned,
       });
     },
     restoreNativeSession: (session) => {

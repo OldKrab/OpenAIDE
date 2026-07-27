@@ -301,6 +301,7 @@ function mapProtocolTaskSummaryWithWarnings(
       message_history_version: revision,
       has_messages: summary.hasMessages,
       unread: summary.unread,
+      pinned: summary.pinned ?? false,
       attention: summary.attention ? {
         event_id: summary.attention.eventId,
         reason: summary.attention.reason,
