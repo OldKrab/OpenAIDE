@@ -39,6 +39,7 @@ import {
   TASK_RESTORE,
   TASK_SET_CONFIG_OPTION,
   TASK_SET_PINNED,
+  TASK_TOOL_IMAGE_PREVIEW,
   type AttachmentHandleId,
   type BackendConnection,
   type FileBrowserEntryId,
@@ -3414,6 +3415,33 @@ describe("app controller callbacks", () => {
     expect(postHostMessage).not.toHaveBeenCalled();
   });
 
+  it("loads an optional Tool image preview through task and artifact identity", async () => {
+    const request = vi.fn(async () => ({
+      preview: {
+        label: "diagram.png",
+        mediaType: "image/png",
+        dataUrl: "data:image/png;base64,aW1hZ2U=",
+      },
+    }));
+    const state = createInitialState();
+    state.snapshot = snapshot("task_1");
+
+    const preview = await callbacks({
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
+      state,
+    }).task.loadToolImagePreview("artifact_1");
+
+    expect(request).toHaveBeenCalledWith(TASK_TOOL_IMAGE_PREVIEW, {
+      taskId: "task_1",
+      artifactId: "artifact_1",
+    });
+    expect(preview).toEqual({
+      label: "diagram.png",
+      mediaType: "image/png",
+      dataUrl: "data:image/png;base64,aW1hZ2U=",
+    });
+  });
+
   it("task callbacks no-op when there is no active snapshot", () => {
     const dispatch = vi.fn();
     const state = createInitialState();
@@ -3421,6 +3449,7 @@ describe("app controller callbacks", () => {
 
     task.cancel();
     task.loadChatPage("cursor_1");
+    void task.loadToolImagePreview("artifact_1");
     task.subscribeToolDetail("artifact_1");
     task.respondToPermission("permission_1", "allow_once");
     task.sendPrompt();

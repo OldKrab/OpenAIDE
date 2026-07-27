@@ -16,14 +16,15 @@ use openaide_app_server_protocol::methods::{
     CLIENT_HEARTBEAT, CLIENT_INITIALIZE, NATIVE_SESSION_ARCHIVE, NATIVE_SESSION_RESTORE,
     SETTINGS_GET_AGENT_DETAILS, STATE_SUBSCRIBE, TASK_ACQUIRE, TASK_ADOPT_NATIVE_SESSION,
     TASK_ARCHIVE, TASK_CANCEL, TASK_LIST, TASK_MARK_READ, TASK_OPEN, TASK_RELEASE, TASK_SEND,
-    TASK_SET_CONFIG_OPTION, TASK_SET_PINNED,
+    TASK_SET_CONFIG_OPTION, TASK_SET_PINNED, TASK_TOOL_IMAGE_PREVIEW,
 };
 use openaide_app_server_protocol::snapshot::PendingRequestScope;
 use openaide_app_server_protocol::state::{StateSubscribeParams, SubscriptionScope};
 
 use crate::projects::{project_id_for_workspace, ConfiguredProjectRoots};
 use crate::protocol::model::{
-    ActivityStep, IsolationKind, NormalizedMessage, TaskStatus, ToolPermissionDecision,
+    ActivityStep, ActivityToolDetails, ActivityToolLocation, IsolationKind, NormalizedMessage,
+    TaskStatus, ToolPermissionDecision,
 };
 use crate::storage::records::{TaskPreparationRecord, TaskRecord};
 use crate::storage::Store;
@@ -2416,6 +2417,83 @@ fn task_set_pinned_publishes_authoritative_state_through_protocol() {
     assert_eq!(
         response(&listed[0])["result"]["result"]["tasks"][0]["pinned"],
         true
+    );
+}
+
+#[test]
+fn task_tool_image_preview_returns_validated_artifact_image_through_protocol() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let workspace = temp.path().join("workspace");
+    std::fs::create_dir_all(&workspace).unwrap();
+    let image_path = workspace.join("diagram.png");
+    std::fs::write(&image_path, b"\x89PNG\r\n\x1a\ndiagram").unwrap();
+    let artifact_id;
+    {
+        let store = Store::open(temp.path().to_path_buf()).unwrap();
+        let mut task = task_record("task-image");
+        task.workspace_root = workspace.to_string_lossy().to_string();
+        store.write_task(&task).unwrap();
+        let mut message = NormalizedMessage::Activity {
+            id: "activity-image".to_string(),
+            title: "Read image".to_string(),
+            status: crate::protocol::model::ActivityStatus::Completed,
+            created_at: "2026-01-01T00:00:01.000Z".to_string(),
+            collapsed: true,
+            steps: vec![ActivityStep::Tool {
+                tool_call_id: Some("tool-image".to_string()),
+                name: "read".to_string(),
+                status: crate::protocol::model::ActivityStatus::Completed,
+                presentation: None,
+                input_summary: None,
+                output_preview: None,
+                detail_artifact_id: None,
+                details: Some(Box::new(ActivityToolDetails {
+                    locations: vec![ActivityToolLocation {
+                        path: image_path.to_string_lossy().to_string(),
+                        line: None,
+                    }],
+                    content: Vec::new(),
+                    input: None,
+                    output: None,
+                })),
+                permission_outcomes: Vec::new(),
+            }],
+        };
+        store
+            .persist_tool_artifacts("task-image", &mut message)
+            .unwrap();
+        let NormalizedMessage::Activity { steps, .. } = message else {
+            unreachable!()
+        };
+        let ActivityStep::Tool {
+            detail_artifact_id: Some(id),
+            ..
+        } = &steps[0]
+        else {
+            unreachable!()
+        };
+        artifact_id = id.clone();
+    }
+    let state_root = StateRoot::resolve(temp.path()).expect("state root");
+    let mut dispatcher = ProtocolEdgeStdioDispatcher::new_for_test(state_root);
+    dispatcher.handle_line(&init_request("1", "client-1"));
+
+    let responses = dispatcher.handle_line(
+        &json!({
+            "jsonrpc": "2.0",
+            "id": "preview",
+            "method": TASK_TOOL_IMAGE_PREVIEW,
+            "params": { "taskId": "task-image", "artifactId": artifact_id }
+        })
+        .to_string(),
+    );
+    let preview = &response(&responses[0])["result"]["result"]["preview"];
+
+    assert_eq!(preview["label"], "diagram.png");
+    assert_eq!(preview["mediaType"], "image/png");
+    assert_eq!(
+        preview["dataUrl"],
+        "data:image/png;base64,iVBORw0KGgpkaWFncmFt"
     );
 }
 

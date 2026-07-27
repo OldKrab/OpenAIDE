@@ -243,6 +243,28 @@ pub struct ToolDetailSnapshot {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
+pub struct TaskToolImagePreviewParams {
+    pub task_id: TaskId,
+    pub artifact_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskToolImagePreviewResult {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview: Option<ToolImagePreview>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolImagePreview {
+    pub label: String,
+    pub media_type: String,
+    pub data_url: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
 pub struct TerminalOutputSnapshot {
     pub terminal_id: String,
     pub output: String,

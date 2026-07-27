@@ -508,7 +508,9 @@ fn presentation(kind: ToolPresentationKind, subjects: Vec<String>) -> Option<Too
         subjects
             .into_iter()
             .map(|subject| match kind {
-                ToolPresentationKind::Read => path_leaf_summary(&subject),
+                ToolPresentationKind::Read | ToolPresentationKind::View => {
+                    path_leaf_summary(&subject)
+                }
                 _ => sanitize_command_summary(&subject),
             })
             .filter(|subject| !subject.is_empty())

@@ -111,6 +111,7 @@ export function AppPrimaryTaskSurface({ controller, focusRequestKey, model, work
           ? callbacks.task.cancel
           : callbacks.newTask.cancel}
         onLoadChatPage={callbacks.task.loadChatPage}
+        onLoadToolImagePreview={callbacks.task.loadToolImagePreview}
         onManageWorktrees={workspaceRecovery?.manageWorktrees}
         onOpenProjectSettings={workspaceRecovery?.openProjectSettings}
         onSubscribeToolDetail={callbacks.task.subscribeToolDetail}

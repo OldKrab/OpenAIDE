@@ -147,6 +147,7 @@ pub struct ToolPresentationSnapshot {
 pub enum ToolPresentationKindSnapshot {
     Skill,
     Read,
+    View,
     List,
     Search,
 }

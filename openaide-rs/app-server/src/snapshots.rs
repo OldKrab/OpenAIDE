@@ -394,6 +394,15 @@ impl TaskSnapshotSource for EmptyTaskSnapshots {
             target: None,
         })
     }
+
+    fn tool_image_preview_for_client(
+        &self,
+        _client_instance_id: &openaide_app_server_protocol::ids::ClientInstanceId,
+        _task_id: &TaskId,
+        _artifact_id: &str,
+    ) -> Result<Option<openaide_app_server_protocol::task::ToolImagePreview>, ProtocolError> {
+        Ok(None)
+    }
 }
 
 fn unavailable_task_snapshot(task_id: TaskId) -> TaskSnapshot {

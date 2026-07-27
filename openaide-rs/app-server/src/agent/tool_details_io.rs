@@ -11,7 +11,7 @@ use crate::protocol::model::{
 pub(super) use crate::agent::tool_details_sanitizer::truncate_preview;
 
 pub(super) fn tool_input_detail(value: &Value) -> Option<ActivityToolInput> {
-    let Some(object) = value.as_object() else {
+    let Some(object) = tool_input_object(value) else {
         return Some(ActivityToolInput {
             command: Vec::new(),
             cwd: None,
@@ -132,7 +132,7 @@ pub(super) fn tool_output_detail(value: &Value) -> Option<ActivityToolOutput> {
 
 pub(super) fn tool_input_summary(raw_input: Option<&Value>) -> Option<String> {
     let value = raw_input?;
-    let object = value.as_object()?;
+    let object = tool_input_object(value)?;
     if let Some(summary) =
         command_input_summary(object.get("cmd").or_else(|| object.get("command")))
     {
@@ -171,6 +171,18 @@ pub(super) fn tool_input_summary(raw_input: Option<&Value>) -> Option<String> {
     } else {
         Some(truncate_preview(summary))
     }
+}
+
+/// Tool bridges may wrap their actual arguments with a machine-facing tool name.
+/// Present the arguments, not envelope metadata, as the user's tool input.
+fn tool_input_object(value: &Value) -> Option<&serde_json::Map<String, Value>> {
+    let object = value.as_object()?;
+    if object.get("name").and_then(Value::as_str).is_some() {
+        if let Some(arguments) = object.get("arguments").and_then(Value::as_object) {
+            return Some(arguments);
+        }
+    }
+    Some(object)
 }
 
 fn web_search_queries(action: Option<&Value>) -> Vec<String> {

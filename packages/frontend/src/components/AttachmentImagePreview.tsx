@@ -1,12 +1,12 @@
-import { X } from "lucide-react";
 import type { Attachment } from "@openaide/app-shell-contracts";
 import type { ComposerAttachment } from "../state/composerOptions";
+import {
+  ImagePreviewViewport,
+  type ImagePreviewViewportSource,
+} from "./ImagePreviewViewport";
 import { PopupDialog } from "./Popup";
 
-export type AttachmentImagePreviewSource = {
-  label: string;
-  url: string;
-};
+export type AttachmentImagePreviewSource = ImagePreviewViewportSource;
 
 export type AttachmentImageLayout = "single" | "pair" | "many";
 
@@ -27,6 +27,7 @@ export function AttachmentImagePreviewLightbox({
   return (
     <PopupDialog
       backdropClassName="attachment-preview-backdrop"
+      className="attachment-preview-dialog"
       label={`${image.label} preview`}
       onOpenChange={(open) => {
         if (!open) onClose();
@@ -37,17 +38,7 @@ export function AttachmentImagePreviewLightbox({
         className="attachment-preview-lightbox"
         tabIndex={-1}
       >
-        <button
-          aria-label="Close image preview"
-          className="attachment-preview-close"
-          onClick={onClose}
-          type="button"
-        >
-          <X aria-hidden="true" size={18} />
-        </button>
-        <div className="attachment-preview-stage">
-          <img alt={image.label} src={image.url} />
-        </div>
+        <ImagePreviewViewport image={image} onClose={onClose} />
       </div>
     </PopupDialog>
   );
