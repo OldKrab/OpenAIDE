@@ -1978,6 +1978,45 @@ fn tool_call_preview_does_not_expose_raw_fields_or_full_diff_paths() {
 }
 
 #[test]
+fn tool_call_preview_reads_inputs_from_a_structured_tool_envelope() {
+    let event = tool_call_event(
+        &ToolCall::new("tool_call_view_image", "View image")
+            .kind(ToolKind::Read)
+            .raw_input(serde_json::json!({
+                "name": "view_image",
+                "arguments": {
+                    "path": "/tmp/context-usage-live-animation.png",
+                    "detail": "original"
+                }
+            })),
+    );
+
+    match event {
+        AgentEvent::ToolCall(tool_call) => {
+            assert_eq!(
+                tool_call.input_summary.as_deref(),
+                Some("context-usage-live-animation.png")
+            );
+            let presentation = tool_call.presentation.expect("view presentation");
+            assert_eq!(
+                presentation.kind,
+                crate::protocol::model::ToolPresentationKind::View
+            );
+            assert_eq!(presentation.subjects, ["context-usage-live-animation.png"]);
+            assert_eq!(
+                tool_call
+                    .details
+                    .and_then(|details| details.input)
+                    .and_then(|input| input.path)
+                    .as_deref(),
+                Some("/tmp/context-usage-live-animation.png")
+            );
+        }
+        other => panic!("expected tool call event, got {other:?}"),
+    }
+}
+
+#[test]
 fn tool_call_details_preserve_typed_acp_content_and_nested_safe_fields() {
     let event = tool_call_event(
         &ToolCall::new("tool_call_typed_content", "Fetch context")

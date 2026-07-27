@@ -1260,6 +1260,7 @@ function controllerFor(surface: AppController["bootstrap"]["surface"]): TestCont
       task: {
         cancel: vi.fn(),
         loadChatPage: vi.fn(),
+        loadToolImagePreview: vi.fn(async () => undefined),
         subscribeToolDetail: vi.fn(() => vi.fn()),
         revealAttachment: vi.fn(),
         removeAttachment: vi.fn(),

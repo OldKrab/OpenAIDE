@@ -109,8 +109,9 @@ use crate::task::{
     TaskReleaseParams, TaskReleaseResult, TaskRestoreParams, TaskRestoreResult,
     TaskSearchFilesParams, TaskSearchFilesResult, TaskSendParams, TaskSendResult,
     TaskSetConfigOptionParams, TaskSetConfigOptionResult, TaskSetPinnedParams, TaskSetPinnedResult,
-    TaskSetTitleParams, TaskSetTitleResult, TaskTitleSelection, TerminalOutputSnapshot,
-    ToolDetailSnapshot, WorkspaceFileSearchState,
+    TaskSetTitleParams, TaskSetTitleResult, TaskTitleSelection, TaskToolImagePreviewParams,
+    TaskToolImagePreviewResult, TerminalOutputSnapshot, ToolDetailSnapshot, ToolImagePreview,
+    WorkspaceFileSearchState,
 };
 use crate::workspace::{
     WorkspaceBrowserDirectory, WorkspaceBrowserEntry, WorkspaceBrowserRoot,
@@ -369,6 +370,9 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<TaskSetTitleResult>(output, config);
     push_decl::<TaskSetPinnedParams>(output, config);
     push_decl::<TaskSetPinnedResult>(output, config);
+    push_decl::<TaskToolImagePreviewParams>(output, config);
+    push_decl::<TaskToolImagePreviewResult>(output, config);
+    push_decl::<ToolImagePreview>(output, config);
     push_decl::<TaskCancelParams>(output, config);
     push_decl::<TaskCancelResult>(output, config);
     push_decl::<TaskChatPageParams>(output, config);

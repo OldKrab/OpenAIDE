@@ -8,7 +8,9 @@ use crate::storage::records::{MessageMeta, StoredMessage};
 use crate::storage::task_journal::{TaskProjection, TaskWrite};
 
 use super::cursor;
-use super::tool_artifacts::{lightweight_detail_summary, should_replace_input_summary};
+use super::tool_artifacts::{
+    legacy_view_presentation, lightweight_detail_summary, should_replace_input_summary,
+};
 use super::Store;
 
 #[cfg(test)]
@@ -213,7 +215,7 @@ impl Store {
             let needs_summary = should_replace_input_summary(name, input_summary.as_deref());
             // Legacy execute rows either have no semantic hint or retain the
             // pre-migration full paths used by read presentations.
-            let needs_presentation = name == "execute"
+            let needs_execute_presentation = name == "execute"
                 && presentation.as_ref().is_none_or(|presentation| {
                     presentation.kind == crate::protocol::model::ToolPresentationKind::Read
                         && presentation
@@ -221,14 +223,23 @@ impl Store {
                             .iter()
                             .any(|subject| subject.contains('/') || subject.contains('\\'))
                 });
+            let needs_view_presentation = name == "read"
+                && presentation.is_none()
+                && input_summary
+                    .as_deref()
+                    .is_some_and(|summary| summary.eq_ignore_ascii_case("name view_image"));
+            let needs_presentation = needs_execute_presentation || needs_view_presentation;
             if !needs_summary && !needs_presentation {
                 continue;
             }
-            if needs_presentation {
+            if needs_execute_presentation {
                 *presentation = details
                     .as_deref()
                     .and_then(|details| details.input.as_ref())
                     .and_then(|input| infer_saved_execute_presentation(&input.command));
+            }
+            if needs_view_presentation {
+                *presentation = details.as_deref().and_then(legacy_view_presentation);
             }
             if details.is_some() {
                 continue;
@@ -242,11 +253,14 @@ impl Store {
                         *input_summary = Some(summary);
                     }
                 }
-                if needs_presentation {
+                if needs_execute_presentation {
                     *presentation = details
                         .input
                         .as_ref()
                         .and_then(|input| infer_saved_execute_presentation(&input.command));
+                }
+                if needs_view_presentation {
+                    *presentation = legacy_view_presentation(&details);
                 }
             }
         }

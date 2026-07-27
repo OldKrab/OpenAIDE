@@ -49,7 +49,7 @@ export type ActivityStep =
 
 /** Semantic compact-row chrome; the Tool's actual `name` still owns detail routing. */
 export type ToolPresentation = {
-  kind: "skill" | "read" | "list" | "search";
+  kind: "skill" | "read" | "view" | "list" | "search";
   subjects: string[];
 };
 

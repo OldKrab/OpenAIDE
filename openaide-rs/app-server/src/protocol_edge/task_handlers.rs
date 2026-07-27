@@ -7,7 +7,7 @@ use openaide_app_server_protocol::task::{
     TaskOpenResult, TaskReleaseParams, TaskReleaseResult, TaskRestoreParams, TaskRestoreResult,
     TaskSearchFilesParams, TaskSearchFilesResult, TaskSendParams, TaskSendResult,
     TaskSetConfigOptionParams, TaskSetConfigOptionResult, TaskSetPinnedParams, TaskSetPinnedResult,
-    TaskSetTitleParams, TaskSetTitleResult,
+    TaskSetTitleParams, TaskSetTitleResult, TaskToolImagePreviewParams, TaskToolImagePreviewResult,
 };
 use serde_json::Value;
 
@@ -310,6 +310,47 @@ impl RpcGateway {
             Err(error) => return self.error(connection_id, id, meta, error),
         };
         self.result::<TaskSetPinnedResult>(connection_id, id, meta, TaskSetPinnedResult { task })
+    }
+
+    pub(super) fn handle_task_tool_image_preview(
+        &mut self,
+        connection_id: ConnectionId,
+        id: String,
+        params: Value,
+        meta: RequestMeta,
+    ) -> GatewayOutcome {
+        let params = match serde_json::from_value::<TaskToolImagePreviewParams>(params) {
+            Ok(params) => params,
+            Err(error) => {
+                return self.error(connection_id, id, meta, responses::invalid_params(error))
+            }
+        };
+        let client = self
+            .client_hub
+            .context_for_connection(&connection_id)
+            .expect("routing requires an initialized client for Tool image previews");
+        let preview = match self.task_snapshots.tool_image_preview_for_client(
+            &client.client_instance_id,
+            &params.task_id,
+            &params.artifact_id,
+        ) {
+            Ok(preview) => preview,
+            Err(error) => return self.error(connection_id, id, meta, error),
+        };
+        crate::logging::info(
+            "tool_image_preview_resolved",
+            serde_json::json!({
+                "task_id": params.task_id,
+                "artifact_id": params.artifact_id,
+                "preview_status": if preview.is_some() { "available" } else { "unavailable" },
+            }),
+        );
+        self.result::<TaskToolImagePreviewResult>(
+            connection_id,
+            id,
+            meta,
+            TaskToolImagePreviewResult { preview },
+        )
     }
 
     pub(super) fn handle_task_open(

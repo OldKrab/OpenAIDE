@@ -9,6 +9,7 @@ import type {
   TaskSnapshot,
   TaskSummary,
 } from "@openaide/app-shell-contracts";
+import type { ToolImagePreview } from "@openaide/app-server-client";
 import { renderedChat } from "../state/chatPaging";
 import type {
   AppState,
@@ -110,6 +111,7 @@ export function TaskView({
   onCancel,
   fileBrowser,
   onLoadChatPage,
+  onLoadToolImagePreview,
   onManageWorktrees,
   onOpenProjectSettings,
   onSubscribeToolDetail,
@@ -144,6 +146,7 @@ export function TaskView({
   onCancel: () => void;
   fileBrowser?: TaskFileBrowserCallbacks;
   onLoadChatPage: (beforeCursor: string) => number | undefined;
+  onLoadToolImagePreview?: (artifactId: string) => Promise<ToolImagePreview | undefined>;
   onManageWorktrees?: (projectId: string) => void;
   onOpenProjectSettings?: () => void;
   onSubscribeToolDetail: (artifactId: string) => () => void;
@@ -270,6 +273,7 @@ export function TaskView({
     taskId: snapshot.task.task_id,
   });
   const loadChatPage = useCurrentCallback(onLoadChatPage);
+  const loadToolImagePreview = useCurrentCallback(onLoadToolImagePreview ?? unavailableToolImagePreview);
   const subscribeToolDetail = useCurrentCallback(onSubscribeToolDetail);
   const respondToPermission = useCurrentCallback(onPermissionRespond);
   const respondToQuestion = useCurrentCallback((requestId: string, response: ElicitationResponse) => {
@@ -307,6 +311,7 @@ export function TaskView({
           items={chatItems}
           liveTextPresentation={liveTextPresentation}
           onLoadChatPage={loadChatPage}
+          onLoadToolImagePreview={loadToolImagePreview}
           onPermissionRespond={respondToPermission}
           onQuestionRespond={respondToQuestion}
           onRestoreTask={restoreTask}
@@ -394,6 +399,7 @@ type TaskChatTimelineProps = {
   items: ChatMessage[];
   liveTextPresentation?: TaskLiveTextPresentation;
   onLoadChatPage: (beforeCursor: string) => number | undefined;
+  onLoadToolImagePreview?: (artifactId: string) => Promise<ToolImagePreview | undefined>;
   onPermissionRespond: (requestId: string, optionId: string) => void;
   onQuestionRespond: (requestId: string, response: ElicitationResponse) => void;
   onRestoreTask: (taskId: string) => void;
@@ -418,6 +424,7 @@ const TaskChatTimeline = memo(function TaskChatTimeline({
   items,
   liveTextPresentation,
   onLoadChatPage,
+  onLoadToolImagePreview,
   onPermissionRespond,
   onQuestionRespond,
   onRestoreTask,
@@ -476,6 +483,7 @@ const TaskChatTimeline = memo(function TaskChatTimeline({
           <ChatRow
             key={chatRowKey(message)}
             message={message}
+            onLoadToolImagePreview={onLoadToolImagePreview}
             liveTextEventCursor={liveTextCursorForMessage(liveTextPresentation, latestTextMessageIds, message)}
             presentLiveText={taskStatus === "active" || taskStatus === "waiting" || taskStatus === "stopping"}
             taskId={taskId}
@@ -506,6 +514,10 @@ const TaskChatTimeline = memo(function TaskChatTimeline({
     </div>
   );
 });
+
+async function unavailableToolImagePreview() {
+  return undefined;
+}
 
 function liveTextCursorForMessage(
   presentation: TaskLiveTextPresentation | undefined,

@@ -6,8 +6,9 @@ use openaide_app_server_protocol::snapshot::{
 use std::sync::{Arc, Mutex};
 
 use crate::protocol::model::{
-    ActivityStatus, ActivityStep, AgentMessagePart, AgentMessageRole, ChatMessage, IsolationKind,
-    NormalizedMessage, TaskStatus, ToolPermissionDecision, ToolPermissionOutcome,
+    ActivityStatus, ActivityStep, ActivityToolDetails, ActivityToolField, ActivityToolInput,
+    ActivityToolLocation, ActivityToolValue, AgentMessagePart, AgentMessageRole, ChatMessage,
+    IsolationKind, NormalizedMessage, TaskStatus, ToolPermissionDecision, ToolPermissionOutcome,
 };
 use crate::storage::records::{TaskPreparationBlockerRecord, TaskPreparationRecord, TaskRecord};
 use crate::storage::Store;
@@ -414,6 +415,209 @@ fn missing_task_returns_not_found_error() {
 }
 
 #[test]
+fn tool_image_preview_reads_supported_structured_paths_without_a_workspace_boundary() {
+    let temp = tempfile::tempdir().unwrap();
+    let workspace = temp.path().join("workspace");
+    let outside = temp.path().join("outside");
+    std::fs::create_dir_all(&workspace).unwrap();
+    std::fs::create_dir_all(&outside).unwrap();
+    let png_path = workspace.join("preview.png");
+    let text_path = workspace.join("notes.png");
+    let outside_path = outside.join("secret.png");
+    let alternate_path = workspace.join("alternate.png");
+    let jpeg_path = workspace.join("preview.jpeg");
+    let gif_path = workspace.join("preview.gif");
+    let webp_path = workspace.join("preview.webp");
+    let oversized_path = workspace.join("oversized.png");
+    std::fs::write(&png_path, b"\x89PNG\r\n\x1a\npreview").unwrap();
+    std::fs::write(&text_path, b"not an image").unwrap();
+    std::fs::write(&outside_path, b"\x89PNG\r\n\x1a\noutside").unwrap();
+    std::fs::write(&alternate_path, b"\x89PNG\r\n\x1a\nalternate").unwrap();
+    std::fs::write(&jpeg_path, b"\xff\xd8\xffpreview").unwrap();
+    std::fs::write(&gif_path, b"GIF89apreview").unwrap();
+    std::fs::write(&webp_path, b"RIFF\x04\x00\x00\x00WEBPpreview").unwrap();
+    let mut oversized = vec![0; 5 * 1024 * 1024 + 1];
+    oversized[..8].copy_from_slice(b"\x89PNG\r\n\x1a\n");
+    std::fs::write(&oversized_path, oversized).unwrap();
+
+    let store = Store::open(temp.path().join("state")).unwrap();
+    let mut task = task_record("task-1");
+    task.workspace_root = workspace.to_string_lossy().to_string();
+    store.write_task(&task).unwrap();
+    let valid_artifact = persist_tool_detail(
+        &store,
+        "task-1",
+        "valid",
+        png_path.to_string_lossy().as_ref(),
+    );
+    let non_image_artifact = persist_tool_detail(
+        &store,
+        "task-1",
+        "non-image",
+        text_path.to_string_lossy().as_ref(),
+    );
+    let outside_artifact = persist_tool_detail(
+        &store,
+        "task-1",
+        "outside",
+        outside_path.to_string_lossy().as_ref(),
+    );
+    #[cfg(unix)]
+    let symlink_artifact = {
+        let symlink_path = workspace.join("linked-secret.png");
+        std::os::unix::fs::symlink(&outside_path, &symlink_path).unwrap();
+        persist_tool_detail(
+            &store,
+            "task-1",
+            "symlink-outside",
+            symlink_path.to_string_lossy().as_ref(),
+        )
+    };
+    let multiple_paths_artifact = persist_tool_detail_with_paths(
+        &store,
+        "task-1",
+        "multiple-paths",
+        &[
+            text_path.to_string_lossy().as_ref(),
+            alternate_path.to_string_lossy().as_ref(),
+        ],
+    );
+    let supported_artifacts = [
+        (
+            persist_tool_detail(
+                &store,
+                "task-1",
+                "jpeg",
+                jpeg_path.to_string_lossy().as_ref(),
+            ),
+            "image/jpeg",
+        ),
+        (
+            persist_tool_detail(&store, "task-1", "gif", gif_path.to_string_lossy().as_ref()),
+            "image/gif",
+        ),
+        (
+            persist_tool_detail(
+                &store,
+                "task-1",
+                "webp",
+                webp_path.to_string_lossy().as_ref(),
+            ),
+            "image/webp",
+        ),
+    ];
+    let oversized_artifact = persist_tool_detail(
+        &store,
+        "task-1",
+        "oversized",
+        oversized_path.to_string_lossy().as_ref(),
+    );
+    let nested_path_artifact = persist_tool_detail_with_input(
+        &store,
+        "task-1",
+        "nested-path",
+        ActivityToolInput {
+            command: Vec::new(),
+            cwd: None,
+            query: None,
+            queries: Vec::new(),
+            url: None,
+            path: None,
+            fields: vec![ActivityToolField {
+                name: "arguments".to_string(),
+                value: ActivityToolValue::Object {
+                    fields: vec![ActivityToolField {
+                        name: "path".to_string(),
+                        value: ActivityToolValue::String {
+                            value: jpeg_path.to_string_lossy().to_string(),
+                        },
+                    }],
+                },
+            }],
+        },
+    );
+    let snapshots = TaskSnapshotStore::new(store);
+    let client_id = openaide_app_server_protocol::ids::ClientInstanceId::from("test-client");
+
+    let preview = snapshots
+        .tool_image_preview_for_client(&client_id, &TaskId::from("task-1"), &valid_artifact)
+        .expect("preview request")
+        .expect("valid workspace image");
+
+    assert_eq!(preview.label, "preview.png");
+    assert_eq!(preview.media_type, "image/png");
+    assert_eq!(
+        preview.data_url,
+        "data:image/png;base64,iVBORw0KGgpwcmV2aWV3"
+    );
+    assert!(snapshots
+        .tool_image_preview_for_client(&client_id, &TaskId::from("task-1"), &non_image_artifact,)
+        .expect("non-image request")
+        .is_none());
+    assert_eq!(
+        snapshots
+            .tool_image_preview_for_client(&client_id, &TaskId::from("task-1"), &outside_artifact,)
+            .expect("outside request")
+            .expect("outside image")
+            .label,
+        "secret.png"
+    );
+    #[cfg(unix)]
+    assert_eq!(
+        snapshots
+            .tool_image_preview_for_client(&client_id, &TaskId::from("task-1"), &symlink_artifact,)
+            .expect("outside symlink request")
+            .expect("outside symlink image")
+            .label,
+        "linked-secret.png"
+    );
+    assert_eq!(
+        snapshots
+            .tool_image_preview_for_client(
+                &client_id,
+                &TaskId::from("task-1"),
+                &multiple_paths_artifact,
+            )
+            .expect("multiple paths request")
+            .expect("later valid image")
+            .label,
+        "alternate.png"
+    );
+    for (artifact_id, expected_media_type) in supported_artifacts {
+        assert_eq!(
+            snapshots
+                .tool_image_preview_for_client(&client_id, &TaskId::from("task-1"), &artifact_id,)
+                .expect("supported image request")
+                .expect("supported image")
+                .media_type,
+            expected_media_type
+        );
+    }
+    assert!(snapshots
+        .tool_image_preview_for_client(&client_id, &TaskId::from("task-1"), &oversized_artifact,)
+        .expect("oversized image request")
+        .is_none());
+    assert_eq!(
+        snapshots
+            .tool_image_preview_for_client(
+                &client_id,
+                &TaskId::from("task-1"),
+                &nested_path_artifact,
+            )
+            .expect("nested path request")
+            .expect("typed nested path image")
+            .media_type,
+        "image/jpeg"
+    );
+
+    std::fs::remove_file(png_path).unwrap();
+    assert!(snapshots
+        .tool_image_preview_for_client(&client_id, &TaskId::from("task-1"), &valid_artifact,)
+        .expect("deleted image request")
+        .is_none());
+}
+
+#[test]
 fn client_snapshot_read_hides_another_clients_new_task() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
@@ -444,6 +648,104 @@ fn client_snapshot_read_hides_another_clients_new_task() {
         openaide_app_server_protocol::snapshot::TaskLifecycle::Prepared
     );
     assert_eq!(hidden.code, ProtocolErrorCode::NotFound);
+}
+
+fn persist_tool_detail(store: &Store, task_id: &str, activity_id: &str, path: &str) -> String {
+    persist_tool_detail_with_paths(store, task_id, activity_id, &[path])
+}
+
+fn persist_tool_detail_with_paths(
+    store: &Store,
+    task_id: &str,
+    activity_id: &str,
+    paths: &[&str],
+) -> String {
+    let mut message = NormalizedMessage::Activity {
+        id: activity_id.to_string(),
+        title: "Read image".to_string(),
+        status: ActivityStatus::Completed,
+        created_at: "2026-01-01T00:00:01.000Z".to_string(),
+        collapsed: true,
+        steps: vec![ActivityStep::Tool {
+            tool_call_id: Some(format!("tool-{activity_id}")),
+            name: "read".to_string(),
+            status: ActivityStatus::Completed,
+            presentation: None,
+            input_summary: None,
+            output_preview: None,
+            detail_artifact_id: None,
+            details: Some(Box::new(ActivityToolDetails {
+                locations: paths
+                    .iter()
+                    .map(|path| ActivityToolLocation {
+                        path: (*path).to_string(),
+                        line: None,
+                    })
+                    .collect(),
+                content: Vec::new(),
+                input: None,
+                output: None,
+            })),
+            permission_outcomes: Vec::new(),
+        }],
+    };
+    store
+        .persist_tool_artifacts(task_id, &mut message)
+        .expect("persist tool detail");
+    let NormalizedMessage::Activity { steps, .. } = message else {
+        unreachable!()
+    };
+    let ActivityStep::Tool {
+        detail_artifact_id, ..
+    } = &steps[0]
+    else {
+        unreachable!()
+    };
+    detail_artifact_id.clone().expect("artifact id")
+}
+
+fn persist_tool_detail_with_input(
+    store: &Store,
+    task_id: &str,
+    activity_id: &str,
+    input: ActivityToolInput,
+) -> String {
+    let mut message = NormalizedMessage::Activity {
+        id: activity_id.to_string(),
+        title: "Read image".to_string(),
+        status: ActivityStatus::Completed,
+        created_at: "2026-01-01T00:00:01.000Z".to_string(),
+        collapsed: true,
+        steps: vec![ActivityStep::Tool {
+            tool_call_id: Some(format!("tool-{activity_id}")),
+            name: "read".to_string(),
+            status: ActivityStatus::Completed,
+            presentation: None,
+            input_summary: None,
+            output_preview: None,
+            detail_artifact_id: None,
+            details: Some(Box::new(ActivityToolDetails {
+                locations: Vec::new(),
+                content: Vec::new(),
+                input: Some(input),
+                output: None,
+            })),
+            permission_outcomes: Vec::new(),
+        }],
+    };
+    store
+        .persist_tool_artifacts(task_id, &mut message)
+        .expect("persist tool detail");
+    let NormalizedMessage::Activity { steps, .. } = message else {
+        unreachable!()
+    };
+    let ActivityStep::Tool {
+        detail_artifact_id, ..
+    } = &steps[0]
+    else {
+        unreachable!()
+    };
+    detail_artifact_id.clone().expect("artifact id")
 }
 
 #[test]

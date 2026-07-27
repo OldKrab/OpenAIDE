@@ -1,4 +1,5 @@
 import type { ActivityStep, ActivityToolDetails } from "@openaide/app-shell-contracts";
+import type { ToolImagePreview } from "@openaide/app-server-client";
 import { useEffect, useState } from "react";
 import { ToolCodeBlock } from "./ChatToolBlocks";
 import { EditToolDetails } from "./EditToolDetails";
@@ -9,17 +10,22 @@ import { ReadToolDetails } from "./ReadToolDetails";
 import { SearchToolDetails } from "./SearchToolDetails";
 import { SkillToolDetails } from "./SkillToolDetails";
 import { WebSearchToolDetails } from "./WebSearchToolDetails";
+import { ToolImageFilePreview, ToolImageFilePreviewLoading } from "./ToolImageFilePreview";
 
 export function ChatToolDetails({
   details,
   error,
   fallbackPreview,
+  imagePreview,
+  imagePreviewLoading,
   loading,
   step,
 }: {
   details?: ActivityToolDetails;
   error?: string;
   fallbackPreview?: string;
+  imagePreview?: ToolImagePreview;
+  imagePreviewLoading?: boolean;
   loading?: boolean;
   step: Extract<ActivityStep, { kind: "tool" }>;
 }) {
@@ -29,16 +35,28 @@ export function ChatToolDetails({
     if (error) return <p className="activity-tool-muted">{error}</p>;
     return fallbackPreview ? <ToolCodeBlock text={fallbackPreview} /> : null;
   }
-  if (step.name === "skill") return <SkillToolDetails details={details} fallbackPreview={fallbackPreview} />;
-  if (step.name === "read") return <ReadToolDetails details={details} fallbackPreview={fallbackPreview} step={step} />;
-  if (step.name === "edit") return <EditToolDetails details={details} fallbackPreview={fallbackPreview} step={step} />;
-  if (step.name === "search") return <SearchToolDetails details={details} fallbackPreview={fallbackPreview} step={step} />;
-  if (step.name === "web_search") return <WebSearchToolDetails details={details} fallbackPreview={fallbackPreview} step={step} />;
-  if (step.name === "execute") return <ExecuteToolDetails details={details} fallbackPreview={fallbackPreview} step={step} />;
-  if (["delete", "move", "think", "fetch", "switch_mode"].includes(step.name)) {
-    return <DefinedToolDetails details={details} fallbackPreview={fallbackPreview} step={step} />;
+  if (step.name === "read") {
+    return (
+      <ReadToolDetails
+        details={details}
+        fallbackPreview={fallbackPreview}
+        imagePreview={imagePreview}
+        imagePreviewLoading={imagePreviewLoading}
+        step={step}
+      />
+    );
   }
-  return <GenericToolStepDetails details={details} fallbackPreview={fallbackPreview} step={step} />;
+  let content = <GenericToolStepDetails details={details} fallbackPreview={fallbackPreview} step={step} />;
+  if (step.name === "skill") content = <SkillToolDetails details={details} fallbackPreview={fallbackPreview} />;
+  else if (step.name === "edit") content = <EditToolDetails details={details} fallbackPreview={fallbackPreview} step={step} />;
+  else if (step.name === "search") content = <SearchToolDetails details={details} fallbackPreview={fallbackPreview} step={step} />;
+  else if (step.name === "web_search") content = <WebSearchToolDetails details={details} fallbackPreview={fallbackPreview} step={step} />;
+  else if (step.name === "execute") content = <ExecuteToolDetails details={details} fallbackPreview={fallbackPreview} step={step} />;
+  else if (["delete", "move", "think", "fetch", "switch_mode"].includes(step.name)) {
+    content = <DefinedToolDetails details={details} fallbackPreview={fallbackPreview} step={step} />;
+  }
+  if (imagePreviewLoading) return <>{content}<ToolImageFilePreviewLoading /></>;
+  return imagePreview ? <>{content}<ToolImageFilePreview preview={imagePreview} /></> : content;
 }
 
 function DelayedToolDetailsSkeleton() {

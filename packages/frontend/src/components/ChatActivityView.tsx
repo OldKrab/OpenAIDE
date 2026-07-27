@@ -1,6 +1,7 @@
 import { Brain, ChevronRight, CircleX, Check, Terminal, Wrench } from "lucide-react";
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import type { ActivityStep, ActivityToolDetails, NormalizedMessage } from "@openaide/app-shell-contracts";
+import type { ToolImagePreview } from "@openaide/app-server-client";
 import { toolDetailCacheKey } from "../state/store";
 import { AgentMarkdown } from "./AgentMarkdown";
 import { MessageCopyAction } from "./chatMessageActions";
@@ -23,11 +24,13 @@ import { toolKindIcon } from "./chatToolIcons";
 
 export function ChatActivityView({
   activity,
+  onLoadToolImagePreview,
   onSubscribeToolDetail,
   taskId,
   toolDetails,
 }: {
   activity: Extract<NormalizedMessage, { kind: "activity" }>;
+  onLoadToolImagePreview?: (artifactId: string) => Promise<ToolImagePreview | undefined>;
   onSubscribeToolDetail?: (artifactId: string) => () => void;
   taskId: string;
   toolDetails?: Record<string, { loading: boolean; details?: ActivityToolDetails; error?: string }>;
@@ -70,6 +73,7 @@ export function ChatActivityView({
             <ActivityStepRow
               key={activityStepIdentity(step) ?? index}
               legacyToolName={activity.steps.length === 1 ? activity.title : undefined}
+              onLoadToolImagePreview={onLoadToolImagePreview}
               onSubscribeToolDetail={onSubscribeToolDetail}
               step={step}
               taskId={taskId}
@@ -88,12 +92,14 @@ function thoughtCountLabel(count: number) {
 
 export function ActivityStepRow({
   legacyToolName,
+  onLoadToolImagePreview,
   onSubscribeToolDetail,
   step,
   taskId,
   toolDetails,
 }: {
   legacyToolName?: string;
+  onLoadToolImagePreview?: (artifactId: string) => Promise<ToolImagePreview | undefined>;
   onSubscribeToolDetail?: (artifactId: string) => () => void;
   step: ActivityStep;
   taskId: string;
@@ -184,6 +190,7 @@ export function ActivityStepRow({
         details={details}
         legacyToolName={legacyToolName}
         metadata={metadata}
+        onLoadToolImagePreview={onLoadToolImagePreview}
         onSubscribeToolDetail={onSubscribeToolDetail}
         preview={preview}
         step={displayStep}
@@ -226,6 +233,7 @@ function LiveToolDetailDisclosure({
   details,
   legacyToolName,
   metadata,
+  onLoadToolImagePreview,
   onSubscribeToolDetail,
   preview,
   step,
@@ -236,17 +244,47 @@ function LiveToolDetailDisclosure({
   details?: ActivityToolDetails;
   legacyToolName?: string;
   metadata: ReactNode;
+  onLoadToolImagePreview?: (artifactId: string) => Promise<ToolImagePreview | undefined>;
   onSubscribeToolDetail?: (artifactId: string) => () => void;
   preview?: string;
   step: Extract<ActivityStep, { kind: "tool" }>;
 }) {
   const [open, setOpen] = useState(false);
+  const [imagePreview, setImagePreview] = useState<ToolImagePreview>();
+  const [imagePreviewLoading, setImagePreviewLoading] = useState(false);
+  const loadToolImagePreviewRef = useRef(onLoadToolImagePreview);
+  loadToolImagePreviewRef.current = onLoadToolImagePreview;
   const subscribeToolDetailRef = useRef(onSubscribeToolDetail);
   subscribeToolDetailRef.current = onSubscribeToolDetail;
   useEffect(() => {
     if (!open || !artifactId) return undefined;
     return subscribeToolDetailRef.current?.(artifactId);
   }, [artifactId, open]);
+  const detailsAvailable = details !== undefined;
+  useEffect(() => {
+    const loadImagePreview = loadToolImagePreviewRef.current;
+    if (!open || !artifactId || !detailsAvailable || !loadImagePreview) {
+      setImagePreview(undefined);
+      setImagePreviewLoading(false);
+      return undefined;
+    }
+    let active = true;
+    setImagePreview(undefined);
+    setImagePreviewLoading(true);
+    void loadImagePreview(artifactId)
+      .then((preview) => {
+        if (active) setImagePreview(preview);
+      })
+      .catch(() => {
+        if (active) setImagePreview(undefined);
+      })
+      .finally(() => {
+        if (active) setImagePreviewLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [artifactId, detailsAvailable, open]);
   const semanticTitle = activityStepSemanticTitle(step);
   const commandTitle = semanticTitle
     ? <SemanticStepTitle title={semanticTitle} />
@@ -274,6 +312,8 @@ function LiveToolDetailDisclosure({
         details={details}
         error={artifactState?.error}
         fallbackPreview={preview}
+        imagePreview={imagePreview}
+        imagePreviewLoading={imagePreviewLoading}
         loading={artifactState?.loading}
         step={step}
       />

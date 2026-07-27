@@ -4,7 +4,7 @@ import { firstFieldValue } from "./toolDetailsShared";
 type ActivityMessage = Extract<NormalizedMessage, { kind: "activity" }>;
 
 export type ActivityStepSemanticTitle = {
-  action: "Read" | "Search";
+  action: "Read" | "Search" | "View";
   scope?: string;
   subjects: string[];
 };
@@ -79,11 +79,15 @@ export function activityStepLabel(step: ActivityStep) {
 }
 
 /** Structured compact-title roles let the UI add hierarchy without inventing tool-specific colors. */
-export function activityStepSemanticTitle(step: ActivityStep): ActivityStepSemanticTitle | undefined {
+export function activityStepSemanticTitle(
+  step: ActivityStep,
+): ActivityStepSemanticTitle | undefined {
   if (step.kind !== "tool") return undefined;
-  if (step.presentation?.kind === "read") {
+  if (step.presentation?.kind === "read" || step.presentation?.kind === "view") {
     const subjects = step.presentation.subjects.map((subject) => subject.trim()).filter(Boolean);
-    return subjects.length ? { action: "Read", subjects } : undefined;
+    return subjects.length
+      ? { action: step.presentation.kind === "view" ? "View" : "Read", subjects }
+      : undefined;
   }
   if (step.name === "read") {
     const subject = (pathSubjectLabel(step) ?? step.input_summary)?.replace(/^Read\s+/i, "").trim();
@@ -228,7 +232,7 @@ export function activityToolKind(
   step: Extract<ActivityStep, { kind: "tool" }>,
   legacyToolName?: string,
 ): ActivityToolKind {
-  if (step.presentation) return step.presentation.kind;
+  if (step.presentation) return step.presentation.kind === "view" ? "read" : step.presentation.kind;
   const namedKinds: Record<string, ActivityToolKind> = {
     skill: "skill",
     read: "read",
@@ -355,6 +359,7 @@ function semanticTitleText(title: ActivityStepSemanticTitle) {
 function presentationAction(kind: NonNullable<Extract<ActivityStep, { kind: "tool" }>["presentation"]>["kind"]) {
   if (kind === "skill") return "Activated";
   if (kind === "read") return "Read";
+  if (kind === "view") return "View";
   if (kind === "list") return "List";
   return "Search";
 }
@@ -362,6 +367,7 @@ function presentationAction(kind: NonNullable<Extract<ActivityStep, { kind: "too
 function presentationProgressAction(kind: NonNullable<Extract<ActivityStep, { kind: "tool" }>["presentation"]>["kind"]) {
   if (kind === "skill") return "Activating";
   if (kind === "read") return "Reading";
+  if (kind === "view") return "Viewing";
   if (kind === "list") return "Listing";
   return "Searching";
 }
@@ -369,6 +375,7 @@ function presentationProgressAction(kind: NonNullable<Extract<ActivityStep, { ki
 function presentationCompletedAction(kind: NonNullable<Extract<ActivityStep, { kind: "tool" }>["presentation"]>["kind"]) {
   if (kind === "skill") return "Activated";
   if (kind === "read") return "Read";
+  if (kind === "view") return "Viewed";
   if (kind === "list") return "Listed";
   return "Searched";
 }
@@ -376,6 +383,7 @@ function presentationCompletedAction(kind: NonNullable<Extract<ActivityStep, { k
 function presentationFailureAction(kind: NonNullable<Extract<ActivityStep, { kind: "tool" }>["presentation"]>["kind"]) {
   if (kind === "skill") return "Failed to activate";
   if (kind === "read") return "Failed to read";
+  if (kind === "view") return "Failed to view";
   if (kind === "list") return "Failed to list";
   return "Failed to search";
 }

@@ -258,6 +258,9 @@ fn project_activity_step(step: &ActivityStep) -> ActivityStepSnapshot {
                         crate::protocol::model::ToolPresentationKind::Read => {
                             openaide_app_server_protocol::snapshot::ToolPresentationKindSnapshot::Read
                         }
+                        crate::protocol::model::ToolPresentationKind::View => {
+                            openaide_app_server_protocol::snapshot::ToolPresentationKindSnapshot::View
+                        }
                         crate::protocol::model::ToolPresentationKind::List => {
                             openaide_app_server_protocol::snapshot::ToolPresentationKindSnapshot::List
                         }

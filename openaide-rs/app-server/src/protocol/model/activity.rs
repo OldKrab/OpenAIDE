@@ -21,6 +21,7 @@ pub struct ToolPresentation {
 pub enum ToolPresentationKind {
     Skill,
     Read,
+    View,
     List,
     Search,
 }
