@@ -89,6 +89,47 @@ test("creates a New Task, sends once, streams Chat, tools, and Agent title", asy
   await expect(page.getByRole("textbox", { name: "Message" })).toHaveText("");
 });
 
+test("copies fenced Markdown code independently at desktop and constrained widths", async ({ context, page }) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: harness.baseUrl });
+  await openPreparedNewTask(page);
+  await send(page, "smoke:code-block-copy");
+  await expect(page.getByLabel("Task status: Ready")).toBeVisible();
+
+  const codeBlocks = page.locator(".agent-markdown-code-block");
+  await expect(codeBlocks).toHaveCount(2);
+  await expect(page.getByRole("button", { name: "Copy code" })).toHaveCount(2);
+  await codeBlocks.nth(1).getByRole("button", { name: "Copy code" }).click();
+  await expect(codeBlocks.nth(1).getByRole("button", { name: "Code copied" })).toBeVisible();
+  expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("def second():\n    return 2");
+  await expect(codeBlocks.nth(0).getByRole("button", { name: "Copy code" })).toBeVisible();
+
+  await page.setViewportSize({ width: 360, height: 640 });
+  const geometry = await codeBlocks.nth(1).evaluate((element) => {
+    const pre = element.querySelector("pre");
+    const button = element.querySelector("button");
+    const code = element.querySelector("code");
+    if (!pre || !button || !code) throw new Error("Code block structure is incomplete.");
+    const preBounds = pre.getBoundingClientRect();
+    const buttonBounds = button.getBoundingClientRect();
+    const codeBounds = code.getBoundingClientRect();
+    return {
+      blockClientWidth: element.clientWidth,
+      blockScrollWidth: element.scrollWidth,
+      buttonDoesNotOverlapCode:
+        buttonBounds.right <= codeBounds.left
+        || buttonBounds.left >= codeBounds.right
+        || buttonBounds.bottom <= codeBounds.top
+        || buttonBounds.top >= codeBounds.bottom,
+      buttonInsidePre: buttonBounds.right <= preBounds.right && buttonBounds.left >= preBounds.left,
+      firstLineInset: codeBounds.top - preBounds.top,
+    };
+  });
+  expect(geometry.blockScrollWidth).toBe(geometry.blockClientWidth);
+  expect(geometry.firstLineInset).toBeLessThanOrEqual(12);
+  expect(geometry.buttonDoesNotOverlapCode).toBe(true);
+  expect(geometry.buttonInsidePre).toBe(true);
+});
+
 test("keeps a Task actions popup interactive after the pointer leaves its row", async ({ page }) => {
   await openPreparedNewTask(page);
   await send(page, "smoke:basic");
