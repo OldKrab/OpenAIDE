@@ -157,6 +157,7 @@ export function AppPrimaryTaskSurface({ controller, focusRequestKey, model, work
       intents={intents.newTask}
       loadingProjects={!backendReady}
       onCancelTask={callbacks.newTask.cancel}
+      onOpenWorkspaceFolder={controller.workspaceSetup?.openFolder}
       onRemoveAttachment={callbacks.newTask.removeAttachment}
       onSelectConfigOption={callbacks.newTask.selectConfigOption}
       onSubmitTask={callbacks.newTask.submit}

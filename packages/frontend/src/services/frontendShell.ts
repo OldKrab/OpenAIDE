@@ -59,6 +59,10 @@ export type FrontendShell = {
     /** Reloads the owning shell when it exposes that recovery capability. */
     reload?: () => void;
   };
+  /** Shell-owned recovery for environments where an empty workspace blocks Task creation. */
+  workspace?: {
+    openFolder(): void;
+  };
   /** Shell-specific acquisition; shared Frontend receives only opaque handles. */
   files?: FrontendFileAcquisition;
   /** Opens a durable sent file using the host-native interaction. */

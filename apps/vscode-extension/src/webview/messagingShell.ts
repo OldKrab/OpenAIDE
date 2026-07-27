@@ -119,6 +119,18 @@ export async function routeHostCapabilityCommand(message: WebviewToHostMessage, 
     await context.post({ type: "workspace.roots.result", payload: { roots: workspaceRoots() } });
     return true;
   }
+  if (message.type === "workspace.openFolder") {
+    const selected = await vscode.window.showOpenDialog({
+      canSelectFiles: false,
+      canSelectFolders: true,
+      canSelectMany: false,
+      openLabel: "Open Folder",
+    });
+    if (selected?.[0]) {
+      await vscode.commands.executeCommand("vscode.openFolder", selected[0], false);
+    }
+    return true;
+  }
   if (message.type === "worktree.openFolder" && isObject(message.payload)) {
     const repositoryId = requiredString(message.payload, "repository_id") as WorktreeRepositoryId;
     const worktreeId = requiredString(message.payload, "worktree_id") as WorktreeId;

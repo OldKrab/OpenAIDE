@@ -4,6 +4,7 @@ import type { AppPreferencesRecord, TaskSnapshot, TaskSummary } from "@openaide/
 import {
   getBackendConnection,
   getBootstrap,
+  getWorkspaceCapability,
   postHostMessage,
 } from "../services/hostBridge";
 import { clientInstanceIdForBootstrap } from "../services/backendInitialization";
@@ -116,6 +117,9 @@ export type AppController = {
   };
   view: AppControllerView;
   visibleTasks: AppState["tasks"];
+  workspaceSetup?: {
+    openFolder: () => void;
+  };
 };
 
 export type AppControllerOptions = {
@@ -288,6 +292,7 @@ export function useAppController(options: AppControllerOptions = {}): AppControl
   // A transport owns subscriptions and lifecycle cleanup, so create the shell default once per
   // mounted controller. Recreating it on every render causes initialization to cancel itself.
   const defaultBackendConnection = useMemo(() => getBackendConnection(), []);
+  const workspaceCapability = useMemo(() => getWorkspaceCapability(), []);
   const backendConnection = options.backendConnection ?? defaultBackendConnection;
   const core = useAppControllerCore({ backendConnection });
   const request = backendConnection?.request;
@@ -306,6 +311,11 @@ export function useAppController(options: AppControllerOptions = {}): AppControl
     : undefined;
   const decoratedNewTaskSnapshot = newTaskViewSnapshot
     ? { ...newTaskViewSnapshot, task: decorateTaskWorkspaces([newTaskViewSnapshot.task], state)[0] }
+    : undefined;
+  const workspaceSetup = workspaceCapability
+    && state.workspaceRootsLoaded
+    && state.workspaceRoots.length === 0
+    ? workspaceCapability
     : undefined;
   const waitForWorktreeOperation = async (
     projectId: string,
@@ -350,6 +360,7 @@ export function useAppController(options: AppControllerOptions = {}): AppControl
       stateRootId: state.appServerStateRootId,
       tasks: decorateTaskWorkspaces(state.taskLists.open ?? (state.showArchived ? [] : state.tasks), state),
     },
+    workspaceSetup,
     intents: {
       newTask: {
         changePrompt: (prompt) => dispatch({ type: "prompt", prompt }),

@@ -1,0 +1,71 @@
+.workspace-setup-prompt {
+  width: min(520px, 100%);
+  color: var(--oa-muted);
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 8px 10px;
+}
+
+.workspace-setup-prompt > svg {
+  color: color-mix(in oklch, var(--oa-text) 78%, var(--oa-muted));
+  margin-top: 1px;
+}
+
+.workspace-setup-copy {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.workspace-setup-copy strong {
+  color: var(--oa-text);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.workspace-setup-action {
+  grid-column: 2;
+  width: fit-content;
+  min-height: 28px;
+  border: 0;
+  border-radius: var(--oa-radius-sm);
+  background: var(--vscode-button-background, var(--oa-focus));
+  color: var(--vscode-button-foreground, var(--oa-bg));
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.workspace-setup-action:hover {
+  background: var(--vscode-button-hoverBackground, color-mix(in oklch, var(--oa-focus) 86%, var(--oa-text)));
+}
+
+.workspace-setup-action:focus-visible {
+  outline: 1px solid var(--oa-focus);
+  outline-offset: 2px;
+}
+
+.workspace-setup-prompt.compact {
+  width: auto;
+  grid-template-columns: auto minmax(0, 1fr);
+  margin: 8px;
+}
+
+.workspace-setup-prompt.compact .workspace-setup-copy {
+  font-size: 12px;
+}
+
+.workspace-setup-prompt.compact .workspace-setup-copy strong {
+  font-size: 12px;
+}
+
+.workspace-setup-prompt.compact .workspace-setup-action {
+  min-height: 24px;
+  padding: 3px 8px;
+}

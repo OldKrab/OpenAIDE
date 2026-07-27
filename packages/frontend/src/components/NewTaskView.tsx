@@ -23,6 +23,7 @@ import { newTaskStatusLabel } from "./taskSurfaceHelpers";
 import { TaskWorkspacePicker } from "./TaskWorkspacePicker";
 import { PopupMenu, PopupPanel } from "./Popup";
 import { AgentRecoveryPanel, agentRecoveryKind, type AgentRecoveryActions } from "./AgentRecovery";
+import { WorkspaceSetupPrompt } from "./WorkspaceSetupPrompt";
 
 type NewTaskContextMenu = "project" | "workspace" | "agent";
 export type ProjectContextMode = "fixed" | "selectable";
@@ -66,6 +67,7 @@ export function NewTaskView({
   agents,
   agentRecoveryActions,
   loadingProjects = false,
+  onOpenWorkspaceFolder,
   submitShortcut,
   fileBrowser,
   focusRequestKey,
@@ -79,6 +81,7 @@ export function NewTaskView({
   projectContextMode?: ProjectContextMode;
   focusRequestKey?: number;
   loadingProjects?: boolean;
+  onOpenWorkspaceFolder?: () => void;
   onSelectConfigOption: (configId: string, value: ConfigOptionCurrentValue) => void;
   onCancelTask?: () => void;
   onRemoveAttachment: (attachmentId: string) => void;
@@ -89,6 +92,15 @@ export function NewTaskView({
 }) {
   const [openContextMenu, setOpenContextMenu] = useState<NewTaskContextMenu | undefined>();
   const [workspacePath, setWorkspacePath] = useState(state.newTask.selection.workspaceRoot);
+  if (onOpenWorkspaceFolder) {
+    return (
+      <section className="task-surface new-task-surface" aria-label="New task">
+        <div className="new-task-center">
+          <WorkspaceSetupPrompt onOpenFolder={onOpenWorkspaceFolder} />
+        </div>
+      </section>
+    );
+  }
   const agentChoices = agents?.length ? agents : agentOptions;
   const selectedAgent = agentChoices.find((agent) => agent.id === state.newTask.selection.agentId);
   const recoveryKind = agentRecoveryKind(selectedAgent, state.snapshot?.preparation);

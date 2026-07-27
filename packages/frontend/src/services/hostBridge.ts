@@ -61,6 +61,11 @@ export function reloadRecoveryShell() {
   frontendShell().recovery.reload?.();
 }
 
+/** Returns the optional shell-owned action for recovering an empty workspace. */
+export function getWorkspaceCapability() {
+  return frontendShell().workspace;
+}
+
 export function getBackendConnection() {
   const shellConnection = frontendShell().backendConnection?.();
   if (shellConnection) return shellConnection;

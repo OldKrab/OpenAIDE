@@ -14,6 +14,7 @@ import { groupedTasks, projectGroupRows, recentVisibleGroups, taskMatchesSearch 
 import { sidebarViewModel } from "./sidebarViewModel";
 import { SidebarTaskPreviewProvider } from "./SidebarTaskPreview";
 import { useScrollOverflow } from "./useScrollOverflow";
+import { WorkspaceSetupPrompt } from "./WorkspaceSetupPrompt";
 
 type SidebarProps = {
   activeTaskId?: string;
@@ -27,6 +28,7 @@ type SidebarProps = {
   onManageWorktrees?: (projectId: string) => void;
   onNewTask: (projectId?: string) => void;
   onOpenNativeSession: (session: AgentListedSession) => void;
+  onOpenWorkspaceFolder?: () => void;
   onOpenTask: (taskId: string) => void;
   onRecoverNativeSessions?: (kind: NonNullable<AppState["newTask"]["nativeSessions"]["recoveryKind"]>) => void;
   onArchiveTask: (taskId: string) => void;
@@ -68,6 +70,7 @@ export const Sidebar = memo(function Sidebar({
   onManageWorktrees,
   onNewTask,
   onOpenNativeSession,
+  onOpenWorkspaceFolder,
   onOpenTask,
   onRecoverNativeSessions,
   onArchiveTask,
@@ -139,6 +142,7 @@ export const Sidebar = memo(function Sidebar({
     nativeSessionProjectId !== undefined &&
     collapsedProjectKeys.has(nativeSessionProjectId);
   const showEmptyState = !taskListError && (groupByProject ? groups.length === 0 : viewModel.visibleCount === 0);
+  const showWorkspaceSetup = !showArchived && onOpenWorkspaceFolder !== undefined;
   const showSessionRefresh = !showArchived && showNativeSessions;
 
   return (
@@ -199,7 +203,10 @@ export const Sidebar = memo(function Sidebar({
         ref={taskListRef}
       >
         {taskListError ? <p className="empty-list">{taskListError}</p> : null}
-        {showEmptyState
+        {showWorkspaceSetup
+          ? <WorkspaceSetupPrompt compact onOpenFolder={onOpenWorkspaceFolder} />
+          : null}
+        {!showWorkspaceSetup && showEmptyState
           ? <p className="empty-list">{viewModel.emptyMessage}</p>
           : null}
         {activeTaskShownOutsideSearch ? (
@@ -351,6 +358,7 @@ function sameSidebarDataProps(prev: SidebarProps, next: SidebarProps) {
     prev.nativeSessionAgentId === next.nativeSessionAgentId &&
     prev.nativeSessionAgentName === next.nativeSessionAgentName &&
     prev.nativeSessionProjectId === next.nativeSessionProjectId &&
+    prev.onOpenWorkspaceFolder === next.onOpenWorkspaceFolder &&
     prev.searchQuery === next.searchQuery &&
     prev.settingsActive === next.settingsActive &&
     prev.showArchived === next.showArchived &&

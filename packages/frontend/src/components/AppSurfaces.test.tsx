@@ -92,6 +92,32 @@ describe("AppSurfaces callback wiring", () => {
     );
   });
 
+  it("passes shell-provided workspace recovery to Task Navigation", () => {
+    const controller = controllerFor("navigation");
+    const openFolder = vi.fn();
+    controller.workspaceSetup = { openFolder };
+
+    render(controller);
+
+    expect(surfaceMocks.sidebar).toHaveBeenCalledWith(
+      expect.objectContaining({ onOpenWorkspaceFolder: openFolder }),
+      undefined,
+    );
+  });
+
+  it("passes shell-provided workspace recovery to New Task", () => {
+    const controller = controllerFor("task");
+    const openFolder = vi.fn();
+    controller.workspaceSetup = { openFolder };
+
+    render(controller);
+
+    expect(surfaceMocks.newTask).toHaveBeenCalledWith(
+      expect.objectContaining({ onOpenWorkspaceFolder: openFolder }),
+      undefined,
+    );
+  });
+
   it("dismisses Worktree Management when a Task is opened through rendered Task Navigation", () => {
     surfaceMocks.renderRealSidebar = true;
     const controller = controllerFor("navigation");

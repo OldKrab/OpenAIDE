@@ -117,6 +117,9 @@ export function createVsCodeShell(): FrontendShell {
       openExternal: (url) => vscode?.postMessage({ type: "shell.openExternal", payload: { url } }),
       reload: () => vscode?.postMessage({ type: "shell.reload" }),
     },
+    workspace: {
+      openFolder: () => vscode?.postMessage({ type: "workspace.openFolder" }),
+    },
   };
 }
 

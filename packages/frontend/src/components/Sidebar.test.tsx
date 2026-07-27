@@ -675,6 +675,25 @@ describe("SidebarNativeSessionRow", () => {
 });
 
 describe("Sidebar", () => {
+  it("replaces the ordinary empty state with an actionable folder setup state", () => {
+    const onOpenWorkspaceFolder = vi.fn();
+    const tree = render(
+      <Sidebar
+        {...sidebarCallbacks()}
+        nativeSessions={nativeSessions()}
+        onOpenWorkspaceFolder={onOpenWorkspaceFolder}
+        showArchived={false}
+        tasks={[]}
+      />,
+    );
+
+    expect(textContent(tree)).toContain("Open a folder to start a task");
+    expect(textContent(tree)).not.toContain("No tasks yet.");
+
+    act(() => buttonWithText(tree, "Open Folder").props.onClick());
+    expect(onOpenWorkspaceFolder).toHaveBeenCalledOnce();
+  });
+
   it("marks hidden navigation inert and outside the accessibility tree", () => {
     const tree = render(
       <Sidebar
@@ -1728,6 +1747,19 @@ function render(element: React.ReactElement, options?: Parameters<typeof create>
     tree = create(element, options);
   });
   return tree!;
+}
+
+function textContent(tree: ReturnType<typeof render>) {
+  return tree.root.findAll((node) => typeof node.children[0] === "string")
+    .flatMap((node) => node.children.filter((child): child is string => typeof child === "string"))
+    .join(" ");
+}
+
+function buttonWithText(tree: ReturnType<typeof render>, label: string) {
+  const button = tree.root.findAllByType("button")
+    .find((candidate) => candidate.children.some((child) => child === label));
+  if (!button) throw new Error(`Button not found: ${label}`);
+  return button;
 }
 
 function sidebarCallbacks() {

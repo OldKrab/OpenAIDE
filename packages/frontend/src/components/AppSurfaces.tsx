@@ -194,6 +194,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           onManageWorktrees={manageWorktrees}
           onNewTask={callbacks.navigation.openNewTask}
           onOpenNativeSession={callbacks.navigation.openNativeSession}
+          onOpenWorkspaceFolder={controller.workspaceSetup?.openFolder}
           onOpenTask={callbacks.navigation.openTask}
           onRecoverNativeSessions={(kind) => kind === "launchFailed"
             ? callbacks.navigation.loadNativeSessions()
