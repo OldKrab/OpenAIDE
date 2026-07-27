@@ -1,6 +1,8 @@
-import { Fragment, memo, type ReactNode } from "react";
+import { Fragment, isValidElement, memo, useEffect, useRef, useState, type ReactNode } from "react";
+import { Check, CircleAlert, Copy } from "lucide-react";
 import Markdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { copyText } from "./clipboard";
 
 type AgentMarkdownProps = {
   className?: string;
@@ -51,10 +53,55 @@ function MarkdownRenderer({ streaming, text }: { streaming: boolean; text: strin
             <span>{children}</span>
           );
         },
+        pre: ({ children, node: _node, ...props }) => (
+          <MarkdownCodeBlock text={plainText(children).replace(/\n$/, "")}>
+            <pre {...props}>{children}</pre>
+          </MarkdownCodeBlock>
+        ),
       }}
     >
       {text}
     </Markdown>
+  );
+}
+
+type CopyState = "idle" | "copied" | "failed";
+
+function MarkdownCodeBlock({ children, text }: { children: ReactNode; text: string }) {
+  const [copyState, setCopyState] = useState<CopyState>("idle");
+  const resetTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(resetTimer.current), []);
+  const feedback = copyState === "copied"
+    ? { label: "Code copied", text: "Copied", title: "Copied" }
+    : copyState === "failed"
+      ? { label: "Copy code failed", text: "Copy failed", title: "Copy failed" }
+      : { label: "Copy code", text: "", title: "Copy code" };
+  const Icon = copyState === "copied" ? Check : copyState === "failed" ? CircleAlert : Copy;
+
+  return (
+    <div className="agent-markdown-code-block" data-copy-state={copyState}>
+      <button
+        aria-label={feedback.label}
+        className="agent-markdown-code-copy"
+        onClick={async () => {
+          clearTimeout(resetTimer.current);
+          try {
+            await copyText(text);
+            setCopyState("copied");
+          } catch (error) {
+            console.warn("Failed to copy a Markdown code block.", error);
+            setCopyState("failed");
+          }
+          resetTimer.current = setTimeout(() => setCopyState("idle"), 1_400);
+        }}
+        title={feedback.title}
+        type="button"
+      >
+        <Icon aria-hidden="true" size={13} />
+        {feedback.text ? <span aria-live="polite">{feedback.text}</span> : null}
+      </button>
+      {children}
+    </div>
   );
 }
 
@@ -150,5 +197,6 @@ function isSafeDataImageUrl(value: unknown): value is string {
 function plainText(children: ReactNode): string {
   if (typeof children === "string" || typeof children === "number") return String(children);
   if (Array.isArray(children)) return children.map(plainText).join("");
+  if (isValidElement<{ children?: ReactNode }>(children)) return plainText(children.props.children);
   return "";
 }

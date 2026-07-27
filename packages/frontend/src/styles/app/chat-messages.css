@@ -232,6 +232,52 @@
   padding: 0;
 }
 
+.agent-markdown-code-block {
+  max-width: 100%;
+  position: relative;
+}
+
+.agent-markdown-code-copy {
+  min-width: 22px;
+  min-height: 22px;
+  position: absolute;
+  z-index: 1;
+  top: 4px;
+  right: 4px;
+  border: 1px solid var(--oa-border-subtle);
+  border-radius: var(--oa-radius-sm);
+  background: color-mix(in oklch, var(--oa-panel) 94%, var(--oa-bg));
+  color: var(--oa-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  opacity: 0;
+  padding: 2px 5px;
+  transition: opacity 120ms ease-out, background 120ms ease-out, color 120ms ease-out;
+}
+
+.agent-markdown-code-block:hover .agent-markdown-code-copy,
+.agent-markdown-code-copy:focus-visible,
+.agent-markdown-code-block[data-copy-state="copied"] .agent-markdown-code-copy,
+.agent-markdown-code-block[data-copy-state="failed"] .agent-markdown-code-copy {
+  opacity: 1;
+}
+
+.agent-markdown-code-copy:hover {
+  background: var(--oa-raised);
+  color: var(--oa-text);
+}
+
+.agent-markdown-code-copy:focus-visible {
+  outline: 1px solid var(--oa-focus);
+  outline-offset: 1px;
+}
+
+.agent-markdown-code-block[data-copy-state="failed"] .agent-markdown-code-copy {
+  color: var(--oa-danger);
+}
+
 .chat-agent blockquote {
   border-left: 1px solid var(--oa-border);
   color: var(--oa-muted);
@@ -330,6 +376,20 @@
 .chat-message-action:focus-visible {
   outline: 1px solid var(--oa-focus);
   outline-offset: 1px;
+}
+
+@media (hover: none), (pointer: coarse) {
+  .agent-markdown-code-copy {
+    min-width: 36px;
+    min-height: 36px;
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .agent-markdown-code-copy {
+    transition-duration: 0.01ms;
+  }
 }
 
 .chat-system {

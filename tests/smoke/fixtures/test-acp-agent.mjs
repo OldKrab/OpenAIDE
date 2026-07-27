@@ -157,6 +157,17 @@ async function runPrompt(message) {
     session.activePrompts.delete(String(message.id));
     return;
   }
+  if (text.includes("smoke:code-block-copy")) {
+    textUpdate(
+      sessionId,
+      "agent_message_chunk",
+      "Use `inline` first.\n\n```ts\nconst first = true;\n```\n\n```py\ndef second():\n    return 2\n```",
+      `agent-${promptNumber}`,
+    );
+    respond(message.id, { stopReason: "end_turn", userMessageId: message.params.messageId });
+    session.activePrompts.delete(String(message.id));
+    return;
+  }
 
   if (session.activePrompts.size > 1) {
     textUpdate(sessionId, "agent_message_chunk", `Steering received: ${text}`, `agent-${promptNumber}`);
