@@ -72,6 +72,7 @@ impl TaskProductApi {
                 let task = ctx.task_mut();
                 task.lifecycle = next_lifecycle.clone();
                 if matches!(next_lifecycle, TaskLifecycle::Archived) {
+                    task.pinned = false;
                     task.clear_process_local_agent_state();
                 }
                 task.updated_at = now;

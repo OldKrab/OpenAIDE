@@ -3201,6 +3201,7 @@ function snapshot(taskId: string, status: TaskSnapshot["task"]["status"], title 
       message_history_version: 1,
       has_messages: true,
       unread: false,
+      pinned: false,
       created_at: "2026-05-22T00:00:00.000Z",
       updated_at: "2026-05-22T00:00:00.000Z",
       last_activity: "2026-05-22T00:00:00.000Z",
@@ -3294,6 +3295,7 @@ function protocolTaskSummary(taskId: string, title: string, status: "idle" | "ru
     updatedAt: "2026-05-22T00:00:00.000Z",
     lastActivity: "2026-05-22T00:00:00.000Z",
     unread: false,
+    pinned: false,
     hasMessages,
     workspaceAvailable: true,
   };

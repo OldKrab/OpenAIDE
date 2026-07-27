@@ -93,3 +93,18 @@ fn task_set_title_selects_user_or_automatic_ownership() {
         json!({ "kind": "automatic" })
     );
 }
+
+#[test]
+fn task_set_pinned_carries_authoritative_boolean_intent() {
+    assert_eq!(
+        serde_json::to_value(TaskSetPinnedParams {
+            task_id: "task-1".into(),
+            pinned: true,
+        })
+        .unwrap(),
+        json!({
+            "taskId": "task-1",
+            "pinned": true
+        })
+    );
+}

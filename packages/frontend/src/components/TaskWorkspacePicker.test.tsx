@@ -424,6 +424,7 @@ function linkedTask() {
     updated_at: "1",
     last_activity: "1",
     unread: false,
+    pinned: false,
     workspace_root: "/workspace/OpenAIDE-sidebar",
     isolation: "git_worktree" as const,
     workspace_available: true,

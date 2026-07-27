@@ -704,6 +704,7 @@ function snapshotWithAuthoritativeTail(includeTail: boolean): TaskSnapshot {
       message_history_version: revision,
       has_messages: true,
       unread: false,
+      pinned: false,
       created_at: "2026-07-12T00:00:00Z",
       updated_at: "2026-07-12T00:00:03Z",
       last_activity: "2026-07-12T00:00:03Z",

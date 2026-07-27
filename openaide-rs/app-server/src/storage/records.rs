@@ -398,6 +398,8 @@ pub struct TaskRecord {
     pub task_version: u64,
     pub message_history_version: u64,
     pub unread: bool,
+    #[serde(default)]
+    pub pinned: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attention: Option<TaskAttentionEvent>,
     pub created_at: String,
@@ -457,6 +459,8 @@ impl<'de> Deserialize<'de> for TaskRecord {
             message_history_version: u64,
             unread: bool,
             #[serde(default)]
+            pinned: bool,
+            #[serde(default)]
             attention: Option<TaskAttentionEvent>,
             created_at: String,
             updated_at: String,
@@ -508,6 +512,7 @@ impl<'de> Deserialize<'de> for TaskRecord {
             task_version: stored.task_version,
             message_history_version: stored.message_history_version,
             unread: stored.unread,
+            pinned: stored.pinned,
             attention: stored.attention,
             created_at: stored.created_at,
             updated_at: stored.updated_at,
@@ -565,6 +570,7 @@ impl TaskRecord {
             task_version: self.task_version,
             message_history_version: self.message_history_version,
             unread: self.unread,
+            pinned: self.pinned,
             attention: self.attention.clone(),
             created_at: self.created_at.clone(),
             updated_at: self.updated_at.clone(),

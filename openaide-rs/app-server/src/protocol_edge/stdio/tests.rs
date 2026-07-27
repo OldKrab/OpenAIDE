@@ -16,7 +16,7 @@ use openaide_app_server_protocol::methods::{
     CLIENT_HEARTBEAT, CLIENT_INITIALIZE, NATIVE_SESSION_ARCHIVE, NATIVE_SESSION_RESTORE,
     SETTINGS_GET_AGENT_DETAILS, STATE_SUBSCRIBE, TASK_ACQUIRE, TASK_ADOPT_NATIVE_SESSION,
     TASK_ARCHIVE, TASK_CANCEL, TASK_LIST, TASK_MARK_READ, TASK_OPEN, TASK_RELEASE, TASK_SEND,
-    TASK_SET_CONFIG_OPTION,
+    TASK_SET_CONFIG_OPTION, TASK_SET_PINNED,
 };
 use openaide_app_server_protocol::snapshot::PendingRequestScope;
 use openaide_app_server_protocol::state::{StateSubscribeParams, SubscriptionScope};
@@ -2380,6 +2380,46 @@ fn task_archive_moves_task_between_lifecycle_lists() {
 }
 
 #[test]
+fn task_set_pinned_publishes_authoritative_state_through_protocol() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    {
+        let store = Store::open(temp.path().to_path_buf()).unwrap();
+        store.write_task(&task_record("task-pin")).unwrap();
+    }
+    let state_root = StateRoot::resolve(temp.path()).expect("state root");
+    let mut dispatcher = ProtocolEdgeStdioDispatcher::new_for_test(state_root);
+    dispatcher.handle_line(&init_request("1", "client-1"));
+
+    let responses = dispatcher.handle_line(
+        &json!({
+            "jsonrpc": "2.0",
+            "id": "pin",
+            "method": TASK_SET_PINNED,
+            "params": { "taskId": "task-pin", "pinned": true }
+        })
+        .to_string(),
+    );
+    assert_eq!(
+        response(&responses[0])["result"]["result"]["task"]["pinned"],
+        true
+    );
+
+    let listed = dispatcher.handle_line(
+        &json!({
+            "jsonrpc": "2.0",
+            "id": "list",
+            "method": TASK_LIST,
+            "params": { "lifecycle": "open" }
+        })
+        .to_string(),
+    );
+    assert_eq!(
+        response(&listed[0])["result"]["result"]["tasks"][0]["pinned"],
+        true
+    );
+}
+
+#[test]
 fn task_discard_keeps_the_configured_project_after_its_last_task() {
     let workspace_root = "/tmp/openaide-stdio-workspace/configured-project";
     std::fs::create_dir_all(workspace_root).unwrap();
@@ -2584,6 +2624,7 @@ fn task_record(task_id: &str) -> TaskRecord {
         task_version: 1,
         message_history_version: 0,
         unread: false,
+        pinned: false,
         attention: None,
         created_at: "2026-01-01T00:00:00.000Z".to_string(),
         updated_at: "2026-01-01T00:00:00.000Z".to_string(),

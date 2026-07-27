@@ -154,6 +154,19 @@ pub struct TaskSetTitleResult {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
+pub struct TaskSetPinnedParams {
+    pub task_id: TaskId,
+    pub pinned: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskSetPinnedResult {
+    pub task: TaskSummary,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
 pub struct TaskCancelParams {
     pub task_id: TaskId,
     #[serde(default, skip_serializing_if = "Option::is_none")]

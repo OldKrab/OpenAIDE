@@ -242,6 +242,7 @@ function snapshot(status: TaskSnapshot["task"]["status"], revision = 1, taskId =
       message_history_version: revision,
       has_messages: false,
       unread: false,
+      pinned: false,
       created_at: "2026-07-10T00:00:00Z",
       updated_at: "2026-07-10T00:00:00Z",
       last_activity: "2026-07-10T00:00:00Z",

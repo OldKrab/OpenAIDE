@@ -268,6 +268,7 @@ describe("NewTaskView", () => {
       task_version: 1,
       title: "Existing task",
       unread: false,
+      pinned: false,
       updated_at: "2026-05-22T00:00:00.000Z",
       workspace_root: "",
     }];
@@ -1344,6 +1345,7 @@ function taskSnapshot(taskId: string, hasMessages: boolean): TaskSnapshot {
       message_history_version: 1,
       has_messages: hasMessages,
       unread: false,
+      pinned: false,
       created_at: "2026-05-22T00:00:00.000Z",
       updated_at: "2026-05-22T00:00:00.000Z",
       last_activity: "2026-05-22T00:00:00.000Z",

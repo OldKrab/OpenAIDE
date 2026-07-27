@@ -71,6 +71,7 @@ export const TASK_ADOPT_NATIVE_SESSION = "task/adoptNativeSession" as const;
 export const TASK_SEND = "task/send" as const;
 export const TASK_SET_CONFIG_OPTION = "task/setConfigOption" as const;
 export const TASK_SET_TITLE = "task/setTitle" as const;
+export const TASK_SET_PINNED = "task/setPinned" as const;
 export const TASK_CANCEL = "task/cancel" as const;
 export const TASK_OPEN = "task/open" as const;
 export const TASK_MARK_READ = "task/markRead" as const;
@@ -592,6 +593,10 @@ export type TaskTitleSelection = { "kind": "user", value: string, } | { "kind": 
 
 export type TaskSetTitleResult = { task: TaskSummary, };
 
+export type TaskSetPinnedParams = { taskId: TaskId, pinned: boolean, };
+
+export type TaskSetPinnedResult = { task: TaskSummary, };
+
 export type TaskCancelParams = { taskId: TaskId, turnId?: TurnId | null, };
 
 export type TaskCancelResult = { task: TaskSnapshot, };
@@ -738,7 +743,7 @@ export type NativeSessionSummary = { reference: NativeSessionReference, projectI
 
 export type NativeSessionReference = { agentId: AgentId, sessionId: string, };
 
-export type TaskSummary = { taskId: TaskId, projectId: ProjectId, agentId: AgentId, lifecycle: TaskLifecycle, title: TaskTitle | null, status: TaskStatus, updatedAt: string, lastActivity: string, unread: boolean, attention?: TaskAttentionEvent | null, hasMessages: boolean, worktreeId?: WorktreeId | null,
+export type TaskSummary = { taskId: TaskId, projectId: ProjectId, agentId: AgentId, lifecycle: TaskLifecycle, title: TaskTitle | null, status: TaskStatus, updatedAt: string, lastActivity: string, unread: boolean, pinned?: boolean, attention?: TaskAttentionEvent | null, hasMessages: boolean, worktreeId?: WorktreeId | null,
 /**
  * Availability is independent of Task runtime status so history remains readable.
  */
@@ -850,7 +855,7 @@ export type PendingRequestScope = { "kind": "client", clientInstanceId: ClientIn
 
 export type PendingRequestKind = "permission" | "question" | "secret" | "shellCapability";
 
-export type ProtocolMethod = typeof CLIENT_PROBE | typeof CLIENT_INITIALIZE | typeof CLIENT_CAPABILITIES_CHANGED | typeof CLIENT_HEARTBEAT | typeof CLIENT_DETACH | typeof PENDING_REQUEST_RESOLVE | typeof STATE_SUBSCRIBE | typeof STATE_UNSUBSCRIBE | typeof DIAGNOSTICS_GET_RUNTIME | typeof SUPPORT_RECOVER_STUCK_SESSIONS | typeof AGENT_PROBE | typeof AGENT_AUTHENTICATE | typeof AGENT_LIST_SESSIONS | typeof AGENT_CREATE_CUSTOM | typeof AGENT_UPDATE_CUSTOM_METADATA | typeof AGENT_REPLACE_CUSTOM | typeof AGENT_DELETE_CUSTOM | typeof AGENT_SET_ENABLED | typeof SETTINGS_GET_AGENT_DETAILS | typeof SETTINGS_GET_MCP_SERVERS | typeof SETTINGS_GET_SKILLS | typeof SETTINGS_GET_PREFERENCES | typeof SETTINGS_UPDATE_PREFERENCES | typeof SETTINGS_GET_RUNTIME | typeof SETTINGS_UPDATE_RUNTIME | typeof ATTACHMENT_LIST_ROOTS | typeof ATTACHMENT_LIST_DIRECTORY | typeof ATTACHMENT_CREATE_FILE_REFERENCE | typeof ATTACHMENT_CREATE_LOCAL_FILE_REFERENCES | typeof ATTACHMENT_CREATE_PASTED_IMAGE | typeof ATTACHMENT_CREATE_EMBEDDED_CANDIDATE | typeof ATTACHMENT_CONFIRM_EMBEDDED | typeof ATTACHMENT_REFRESH_HANDLES | typeof ATTACHMENT_RELEASE | typeof ATTACHMENT_REVEAL | typeof ATTACHMENT_REVEAL_SENT | typeof SHELL_RESOLVE_FILE_REVEAL | typeof WORKSPACE_LIST_ROOTS | typeof WORKSPACE_LIST_DIRECTORY | typeof WORKTREE_REFRESH | typeof WORKTREE_CREATE | typeof WORKTREE_RECREATE | typeof WORKTREE_REMOVAL_PREFLIGHT | typeof WORKTREE_REMOVE | typeof WORKTREE_RENAME | typeof WORKTREE_RESOLVE_FOLDER | typeof WORKTREE_LINKED_TASKS | typeof TASK_ACQUIRE | typeof TASK_ACQUIRE_IN_WORKTREE | typeof TASK_SEARCH_FILES | typeof TASK_ADOPT_NATIVE_SESSION | typeof TASK_SEND | typeof TASK_SET_CONFIG_OPTION | typeof TASK_SET_TITLE | typeof TASK_CANCEL | typeof TASK_OPEN | typeof TASK_MARK_READ | typeof TASK_CHAT_PAGE | typeof TASK_LIST | typeof TASK_NAVIGATION_REFRESH | typeof TASK_NAVIGATION_LOAD_MORE | typeof NATIVE_SESSION_ARCHIVE | typeof NATIVE_SESSION_RESTORE | typeof TASK_RELEASE | typeof TASK_ARCHIVE | typeof TASK_RESTORE;
+export type ProtocolMethod = typeof CLIENT_PROBE | typeof CLIENT_INITIALIZE | typeof CLIENT_CAPABILITIES_CHANGED | typeof CLIENT_HEARTBEAT | typeof CLIENT_DETACH | typeof PENDING_REQUEST_RESOLVE | typeof STATE_SUBSCRIBE | typeof STATE_UNSUBSCRIBE | typeof DIAGNOSTICS_GET_RUNTIME | typeof SUPPORT_RECOVER_STUCK_SESSIONS | typeof AGENT_PROBE | typeof AGENT_AUTHENTICATE | typeof AGENT_LIST_SESSIONS | typeof AGENT_CREATE_CUSTOM | typeof AGENT_UPDATE_CUSTOM_METADATA | typeof AGENT_REPLACE_CUSTOM | typeof AGENT_DELETE_CUSTOM | typeof AGENT_SET_ENABLED | typeof SETTINGS_GET_AGENT_DETAILS | typeof SETTINGS_GET_MCP_SERVERS | typeof SETTINGS_GET_SKILLS | typeof SETTINGS_GET_PREFERENCES | typeof SETTINGS_UPDATE_PREFERENCES | typeof SETTINGS_GET_RUNTIME | typeof SETTINGS_UPDATE_RUNTIME | typeof ATTACHMENT_LIST_ROOTS | typeof ATTACHMENT_LIST_DIRECTORY | typeof ATTACHMENT_CREATE_FILE_REFERENCE | typeof ATTACHMENT_CREATE_LOCAL_FILE_REFERENCES | typeof ATTACHMENT_CREATE_PASTED_IMAGE | typeof ATTACHMENT_CREATE_EMBEDDED_CANDIDATE | typeof ATTACHMENT_CONFIRM_EMBEDDED | typeof ATTACHMENT_REFRESH_HANDLES | typeof ATTACHMENT_RELEASE | typeof ATTACHMENT_REVEAL | typeof ATTACHMENT_REVEAL_SENT | typeof SHELL_RESOLVE_FILE_REVEAL | typeof WORKSPACE_LIST_ROOTS | typeof WORKSPACE_LIST_DIRECTORY | typeof WORKTREE_REFRESH | typeof WORKTREE_CREATE | typeof WORKTREE_RECREATE | typeof WORKTREE_REMOVAL_PREFLIGHT | typeof WORKTREE_REMOVE | typeof WORKTREE_RENAME | typeof WORKTREE_RESOLVE_FOLDER | typeof WORKTREE_LINKED_TASKS | typeof TASK_ACQUIRE | typeof TASK_ACQUIRE_IN_WORKTREE | typeof TASK_SEARCH_FILES | typeof TASK_ADOPT_NATIVE_SESSION | typeof TASK_SEND | typeof TASK_SET_CONFIG_OPTION | typeof TASK_SET_TITLE | typeof TASK_CANCEL | typeof TASK_OPEN | typeof TASK_MARK_READ | typeof TASK_CHAT_PAGE | typeof TASK_LIST | typeof TASK_NAVIGATION_REFRESH | typeof TASK_NAVIGATION_LOAD_MORE | typeof NATIVE_SESSION_ARCHIVE | typeof NATIVE_SESSION_RESTORE | typeof TASK_RELEASE | typeof TASK_ARCHIVE | typeof TASK_RESTORE | typeof TASK_SET_PINNED;
 export type RequestParamsByMethod = {
   [CLIENT_PROBE]: ClientProbeParams;
   [CLIENT_INITIALIZE]: InitializeParams;
@@ -906,6 +911,7 @@ export type RequestParamsByMethod = {
   [TASK_SEND]: TaskSendParams;
   [TASK_SET_CONFIG_OPTION]: TaskSetConfigOptionParams;
   [TASK_SET_TITLE]: TaskSetTitleParams;
+  [TASK_SET_PINNED]: TaskSetPinnedParams;
   [TASK_CANCEL]: TaskCancelParams;
   [TASK_OPEN]: TaskOpenParams;
   [TASK_MARK_READ]: TaskMarkReadParams;
@@ -975,6 +981,7 @@ export type ResponseResultByMethod = {
   [TASK_SEND]: TaskSendResult;
   [TASK_SET_CONFIG_OPTION]: TaskSetConfigOptionResult;
   [TASK_SET_TITLE]: TaskSetTitleResult;
+  [TASK_SET_PINNED]: TaskSetPinnedResult;
   [TASK_CANCEL]: TaskCancelResult;
   [TASK_OPEN]: TaskOpenResult;
   [TASK_MARK_READ]: TaskMarkReadResult;
