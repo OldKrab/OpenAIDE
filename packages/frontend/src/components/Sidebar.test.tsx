@@ -4,6 +4,7 @@ import type { AgentListedSession, TaskSummary } from "@openaide/app-shell-contra
 import type { NativeSessionsState } from "../state/store";
 import { Sidebar } from "./Sidebar";
 import { SidebarNativeSessionRow } from "./SidebarNativeSessionRow";
+import { SidebarProjectTaskGroup } from "./SidebarProjectTaskGroup";
 import { SidebarTaskRow } from "./SidebarTaskRow";
 import { SidebarTaskPreviewProvider } from "./SidebarTaskPreview";
 import { sidebarViewModel } from "./sidebarViewModel";
@@ -680,8 +681,11 @@ describe("Sidebar", () => {
     const tree = render(
       <Sidebar
         {...sidebarCallbacks()}
-        nativeSessions={nativeSessions()}
+        groupByProject
+        nativeSessionProjectId="project_stale"
+        nativeSessions={nativeSessions({ loading: true })}
         onOpenWorkspaceFolder={onOpenWorkspaceFolder}
+        projects={[{ projectId: "project_stale", label: "Current workspace" }]}
         showArchived={false}
         tasks={[]}
       />,
@@ -689,6 +693,8 @@ describe("Sidebar", () => {
 
     expect(textContent(tree)).toContain("Open a folder to start a task");
     expect(textContent(tree)).not.toContain("No tasks yet.");
+    expect(textContent(tree)).not.toContain("Refreshing tasks");
+    expect(tree.root.findAllByType(SidebarProjectTaskGroup)).toHaveLength(0);
 
     act(() => buttonWithText(tree, "Open Folder").props.onClick());
     expect(onOpenWorkspaceFolder).toHaveBeenCalledOnce();

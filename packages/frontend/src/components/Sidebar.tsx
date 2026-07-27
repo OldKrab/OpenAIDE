@@ -143,7 +143,7 @@ export const Sidebar = memo(function Sidebar({
     collapsedProjectKeys.has(nativeSessionProjectId);
   const showEmptyState = !taskListError && (groupByProject ? groups.length === 0 : viewModel.visibleCount === 0);
   const showWorkspaceSetup = !showArchived && onOpenWorkspaceFolder !== undefined;
-  const showSessionRefresh = !showArchived && showNativeSessions;
+  const showSessionRefresh = !showArchived && showNativeSessions && !showWorkspaceSetup;
 
   return (
     <aside
@@ -202,17 +202,17 @@ export const Sidebar = memo(function Sidebar({
         onScroll={taskListOverflow.onScroll}
         ref={taskListRef}
       >
-        {taskListError ? <p className="empty-list">{taskListError}</p> : null}
+        {!showWorkspaceSetup && taskListError ? <p className="empty-list">{taskListError}</p> : null}
         {showWorkspaceSetup
           ? <WorkspaceSetupPrompt compact onOpenFolder={onOpenWorkspaceFolder} />
           : null}
         {!showWorkspaceSetup && showEmptyState
           ? <p className="empty-list">{viewModel.emptyMessage}</p>
           : null}
-        {activeTaskShownOutsideSearch ? (
+        {!showWorkspaceSetup && activeTaskShownOutsideSearch ? (
           <p className="search-context-note">Selected task is shown outside the search results.</p>
         ) : null}
-        {!showArchived && showNativeSessions && nativeSessions.error ? (
+        {!showWorkspaceSetup && !showArchived && showNativeSessions && nativeSessions.error ? (
           <div className="native-session-recovery" role="status">
             <span>{nativeSessions.error}</span>
             {nativeSessions.recoveryKind && onRecoverNativeSessions ? (
@@ -224,7 +224,7 @@ export const Sidebar = memo(function Sidebar({
             ) : null}
           </div>
         ) : null}
-        {groupByProject
+        {!showWorkspaceSetup && (groupByProject
           ? visibleGroups.map((group) => (
               <SidebarProjectTaskGroup
                 activeTaskId={activeTaskId}
@@ -309,8 +309,8 @@ export const Sidebar = memo(function Sidebar({
                   session={row.session}
                 />
               ),
-            )}
-        {!groupByProject && !showArchived && showNativeSessions && nativeSessions.nextCursor && !selectedSessionProjectCollapsed ? (
+            ))}
+        {!showWorkspaceSetup && !groupByProject && !showArchived && showNativeSessions && nativeSessions.nextCursor && !selectedSessionProjectCollapsed ? (
           <button
             className="session-more"
             disabled={nativeSessions.adoptingSessionId !== undefined || nativeSessions.loading}
@@ -326,7 +326,7 @@ export const Sidebar = memo(function Sidebar({
               : hasSearchQuery ? "Search more tasks" : "Load more tasks"}
           </button>
         ) : null}
-        {groupByProject && hiddenProjectCount > 0 ? (
+        {!showWorkspaceSetup && groupByProject && hiddenProjectCount > 0 ? (
           <button
             className="project-more"
             onClick={() => setVisibleProjectLimit((current) => current + maxVisibleProjects)}
