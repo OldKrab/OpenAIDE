@@ -59,10 +59,10 @@ fn structured_tool_presentation(
     if tool_name != "view_image" {
         return None;
     }
-    Some(ToolPresentation {
-        kind: ToolPresentationKind::View,
-        subjects: input_summary.map(str::to_string).into_iter().collect(),
-    })
+    Some(ToolPresentation::single(
+        ToolPresentationKind::View,
+        input_summary.map(str::to_string).into_iter().collect(),
+    ))
 }
 
 fn web_search_input_summary(raw_input: Option<&serde_json::Value>) -> Option<String> {

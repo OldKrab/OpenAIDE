@@ -131,7 +131,7 @@ export function ActivityStepRow({
   const className = `activity-step ${displayStep.kind === "tool"
     ? [
         `tool-${toolKindClass(displayStep.name)}`,
-        displayStep.presentation ? `tool-presentation-${toolKindClass(displayStep.presentation.kind)}` : "",
+        displayStep.presentation ? `tool-presentation-${toolKindClass(activityToolKind(displayStep))}` : "",
         displayStep.status,
       ].filter(Boolean).join(" ")
     : displayStep.kind === "subagent"
@@ -164,6 +164,7 @@ export function ActivityStepRow({
               disclosure
               icon={activityStepIcon(displayStep, legacyToolName)}
               label={title}
+              tooltip={semanticTitle?.tooltip ?? label}
             />
             {metadata}
           </>
@@ -213,6 +214,7 @@ export function ActivityStepRow({
                 />
               }
               titleClassName="command"
+              tooltip={commandText}
             />
             {metadata}
           </>
@@ -250,7 +252,13 @@ export function ActivityStepRow({
         stepId={displayStep.tool_call_id}
         trigger={(
           <>
-            <ActivityStepContent disclosure icon={activityStepIcon(displayStep, legacyToolName)} label={title} titleClassName={semanticTitle ? "semantic" : undefined} />
+            <ActivityStepContent
+              disclosure
+              icon={activityStepIcon(displayStep, legacyToolName)}
+              label={title}
+              titleClassName={semanticTitle ? "semantic" : undefined}
+              tooltip={label}
+            />
             {metadata}
           </>
         )}
@@ -265,6 +273,7 @@ export function ActivityStepRow({
         icon={activityStepIcon(displayStep, legacyToolName)}
         label={title}
         titleClassName={semanticTitle ? "semantic" : undefined}
+        tooltip={semanticTitle?.tooltip ?? label}
       />
       {metadata}
       {preview ? <pre>{preview}</pre> : null}
@@ -343,6 +352,7 @@ function LiveToolDetailDisclosure({
             icon={activityStepIcon(step, legacyToolName)}
             label={commandTitle}
             titleClassName={semanticTitle ? "semantic" : step.name === "execute" && !step.presentation ? "command" : undefined}
+            tooltip={semanticTitle?.tooltip ?? activityStepLabel(step)}
           />
           {metadata}
         </>
@@ -375,11 +385,13 @@ function ActivityStepContent({
   icon,
   label,
   titleClassName,
+  tooltip,
 }: {
   disclosure?: boolean;
   icon: ReactNode;
   label: ReactNode;
   titleClassName?: string;
+  tooltip?: string;
 }) {
   return (
     <span className="activity-step-main">
@@ -389,7 +401,12 @@ function ActivityStepContent({
         <span className="activity-step-disclosure-placeholder" aria-hidden="true" />
       )}
       {icon}
-      <span className={["activity-step-title", titleClassName].filter(Boolean).join(" ")}>{label}</span>
+      <span
+        className={["activity-step-title", titleClassName].filter(Boolean).join(" ")}
+        title={tooltip ?? (typeof label === "string" ? label : undefined)}
+      >
+        {label}
+      </span>
     </span>
   );
 }
@@ -407,25 +424,32 @@ function CommandStepTitle({ command, status }: { command: string; status: "runni
 function SemanticStepTitle({ title }: { title: ActivityStepSemanticTitle }) {
   return (
     <>
-      <span className="activity-step-semantic-action">{title.action}</span>
-      <span className="activity-step-semantic-subject-list">
-        {title.subjects.map((subject, index) => (
-          <Fragment key={`${subject}-${index}`}>
-          {index > 0 ? (
-            <span className="activity-step-semantic-connector">
-              {index === title.subjects.length - 1 ? " and " : ", "}
-            </span>
+      {title.actions.map((action, actionIndex) => (
+        <Fragment key={`${action.action}-${actionIndex}`}>
+          {actionIndex > 0 ? (
+            <span className="activity-step-semantic-connector">then</span>
           ) : null}
-            <span className="activity-step-semantic-subject">{subject}</span>
+          <span className="activity-step-semantic-action">{action.action}</span>
+          <span className="activity-step-semantic-subject-list">
+            {action.subjects.map((subject, subjectIndex) => (
+              <Fragment key={`${subject}-${subjectIndex}`}>
+              {subjectIndex > 0 ? (
+                <span className="activity-step-semantic-connector">
+                  {subjectIndex === action.subjects.length - 1 ? " and " : ", "}
+                </span>
+              ) : null}
+                <span className="activity-step-semantic-subject">{subject}</span>
+              </Fragment>
+            ))}
+          </span>
+          {action.scope ? (
+            <>
+              <span className="activity-step-semantic-connector">in</span>
+              <span className="activity-step-semantic-scope">{action.scope}</span>
+            </>
+          ) : null}
           </Fragment>
-        ))}
-      </span>
-      {title.scope ? (
-        <>
-          <span className="activity-step-semantic-connector">in</span>
-          <span className="activity-step-semantic-scope">{title.scope}</span>
-        </>
-      ) : null}
+      ))}
     </>
   );
 }

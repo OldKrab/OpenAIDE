@@ -2246,11 +2246,17 @@ fn tool_call_preview_reads_inputs_from_a_structured_tool_envelope() {
                 Some("context-usage-live-animation.png")
             );
             let presentation = tool_call.presentation.expect("view presentation");
+            let [action] = presentation.actions.as_slice() else {
+                panic!("expected one view action");
+            };
             assert_eq!(
-                presentation.kind,
+                action.kind(),
                 crate::protocol::model::ToolPresentationKind::View
             );
-            assert_eq!(presentation.subjects, ["context-usage-live-animation.png"]);
+            assert_eq!(
+                action.subjects().expect("view subjects"),
+                ["context-usage-live-animation.png"]
+            );
             assert_eq!(
                 tool_call
                     .details
@@ -2415,9 +2421,12 @@ fn execute_tool_call_presents_canonical_skill_reads_without_changing_execute_ide
     };
     assert_eq!(tool_call.kind, "execute");
     let presentation = tool_call.presentation.expect("skill presentation");
-    assert_eq!(presentation.kind, ToolPresentationKind::Skill);
+    let [action] = presentation.actions.as_slice() else {
+        panic!("expected one skill action");
+    };
+    assert_eq!(action.kind(), ToolPresentationKind::Skill);
     assert_eq!(
-        presentation.subjects,
+        action.subjects().expect("skill subjects"),
         ["tdd", "diagnosing-bugs", "impeccable"]
     );
     let details = tool_call.details.expect("execute details");
@@ -2442,14 +2451,82 @@ fn execute_tool_call_presents_wrapped_semicolon_separated_sed_reads() {
     assert_eq!(tool_call.kind, "execute");
     assert_eq!(
         tool_call.presentation,
-        Some(crate::protocol::model::ToolPresentation {
-            kind: ToolPresentationKind::Read,
-            subjects: vec![
+        Some(crate::protocol::model::ToolPresentation::single(
+            ToolPresentationKind::Read,
+            vec![
                 "runtime_contract_fixtures.rs".to_string(),
                 "shell.rs".to_string(),
                 "mod.rs".to_string(),
             ],
-        })
+        ))
+    );
+}
+
+#[test]
+fn execute_tool_call_presents_proven_read_then_search_commands() {
+    let command = "/usr/bin/zsh -lc \"sed -n '1,130p' packages/frontend/src/styles/app/agent-settings-catalog.css && sed -n '1,75p' packages/frontend/src/styles/app/mcp-settings.css && sed -n '480,545p' packages/frontend/src/styles/app/mcp-settings.css && rg -n \\\"skill\\\" packages/frontend/src/styles/app/part-09.css packages/frontend/src/styles/app/part-10.css packages/frontend/src/styles/app/settings-shell.css\"";
+    let event = tool_call_event(
+        &ToolCall::new("tool_call_execute_read_search", command)
+            .kind(ToolKind::Execute)
+            .raw_input(serde_json::json!({ "cmd": command })),
+    );
+
+    let AgentEvent::ToolCall(tool_call) = event else {
+        panic!("expected tool call event");
+    };
+    assert_eq!(tool_call.kind, "execute");
+    let presentation = tool_call
+        .presentation
+        .expect("proven read + search commands should receive semantic presentation");
+    assert_eq!(presentation.actions.len(), 2);
+    assert_eq!(presentation.actions[0].kind(), ToolPresentationKind::Read);
+    assert_eq!(
+        presentation.actions[0].subjects().expect("read subjects"),
+        ["agent-settings-catalog.css", "mcp-settings.css",]
+    );
+    assert_eq!(
+        presentation.actions[1],
+        crate::protocol::model::ToolPresentationAction::Search {
+            query: "skill".to_string(),
+            scopes: vec![
+                "packages/frontend/src/styles/app/part-09.css".to_string(),
+                "packages/frontend/src/styles/app/part-10.css".to_string(),
+                "packages/frontend/src/styles/app/settings-shell.css".to_string(),
+            ],
+            target: crate::protocol::model::ToolSearchTarget::Contents,
+        }
+    );
+}
+
+#[test]
+fn execute_tool_call_preserves_skill_identity_in_read_then_search_commands() {
+    let command = "/usr/bin/zsh -lc \"sed -n '1,240p' /home/user/.agents/skills/diagnosing-bugs/SKILL.md && rg -n \\\"parse.*command|command.*parse|shell.*parser|ParsedCommand|parse_command\\\" . --glob '!node_modules' --glob '!target'\"";
+    let event = tool_call_event(
+        &ToolCall::new("tool_call_execute_skill_search", command)
+            .kind(ToolKind::Execute)
+            .raw_input(serde_json::json!({ "cmd": command })),
+    );
+
+    let AgentEvent::ToolCall(tool_call) = event else {
+        panic!("expected tool call event");
+    };
+    let presentation = tool_call
+        .presentation
+        .expect("proven skill read + search should receive semantic presentation");
+    assert_eq!(presentation.actions.len(), 2);
+    assert_eq!(presentation.actions[0].kind(), ToolPresentationKind::Skill);
+    assert_eq!(
+        presentation.actions[0].subjects().expect("skill subjects"),
+        ["diagnosing-bugs"]
+    );
+    assert_eq!(
+        presentation.actions[1],
+        crate::protocol::model::ToolPresentationAction::Search {
+            query: "parse.*command|command.*parse|shell.*parser|ParsedCommand|parse_command"
+                .to_string(),
+            scopes: vec![".".to_string()],
+            target: crate::protocol::model::ToolSearchTarget::Contents,
+        }
     );
 }
 
@@ -2488,10 +2565,10 @@ fn execute_tool_call_presents_single_file_cat_as_read() {
     };
     assert_eq!(
         tool_call.presentation,
-        Some(crate::protocol::model::ToolPresentation {
-            kind: ToolPresentationKind::Read,
-            subjects: vec!["PRODUCT.md".to_string()],
-        })
+        Some(crate::protocol::model::ToolPresentation::single(
+            ToolPresentationKind::Read,
+            vec!["PRODUCT.md".to_string()],
+        ))
     );
 }
 
@@ -2528,38 +2605,45 @@ fn execute_tool_call_does_not_treat_traversal_paths_as_skills() {
     assert_eq!(tool_call.kind, "execute");
     assert_eq!(
         tool_call.presentation,
-        Some(crate::protocol::model::ToolPresentation {
-            kind: ToolPresentationKind::Read,
-            subjects: vec!["SKILL.md".to_string()],
-        })
+        Some(crate::protocol::model::ToolPresentation::single(
+            ToolPresentationKind::Read,
+            vec!["SKILL.md".to_string()],
+        ))
     );
 }
 
 #[test]
 fn execute_tool_call_sanitizes_presentation_subjects() {
-    let cases = [
-        ("cat /home/alice/private/notes.md", "notes.md"),
-        (
-            "rg token=secret /home/alice/project",
-            "token=[redacted] in project",
-        ),
-    ];
+    let read_command = "cat /home/alice/private/notes.md";
+    let AgentEvent::ToolCall(read) = tool_call_event(
+        &ToolCall::new("tool_call_execute_sanitized_read", read_command)
+            .kind(ToolKind::Execute)
+            .raw_input(serde_json::json!({ "command": read_command })),
+    ) else {
+        panic!("expected tool call event");
+    };
+    let read_presentation = read.presentation.expect(read_command);
+    let [read_action] = read_presentation.actions.as_slice() else {
+        panic!("expected one read action");
+    };
+    assert_eq!(read_action.subjects().expect("read subjects"), ["notes.md"]);
 
-    for (command, expected_subject) in cases {
-        let event = tool_call_event(
-            &ToolCall::new("tool_call_execute_sanitized_subject", command)
-                .kind(ToolKind::Execute)
-                .raw_input(serde_json::json!({ "command": command })),
-        );
-        let AgentEvent::ToolCall(tool_call) = event else {
-            panic!("expected tool call event");
-        };
-        assert_eq!(
-            tool_call.presentation.expect(command).subjects,
-            [expected_subject],
-            "{command}"
-        );
-    }
+    let search_command = "rg token=secret /home/alice/project";
+    let AgentEvent::ToolCall(search) = tool_call_event(
+        &ToolCall::new("tool_call_execute_sanitized_search", search_command)
+            .kind(ToolKind::Execute)
+            .raw_input(serde_json::json!({ "command": search_command })),
+    ) else {
+        panic!("expected tool call event");
+    };
+    assert_eq!(
+        search.presentation.expect(search_command).actions,
+        [crate::protocol::model::ToolPresentationAction::Search {
+            query: "token=[redacted]".to_string(),
+            scopes: vec!["project".to_string()],
+            target: crate::protocol::model::ToolSearchTarget::Contents,
+        }]
+    );
 }
 
 #[test]
@@ -2581,26 +2665,6 @@ fn execute_tool_call_presents_supported_read_list_and_search_commands() {
             vec!["packages/frontend"],
         ),
         ("git ls-files", ToolPresentationKind::List, vec!["."]),
-        (
-            "rg -n activityLabels packages/frontend",
-            ToolPresentationKind::Search,
-            vec!["activityLabels in packages/frontend"],
-        ),
-        (
-            "grep -R TODO src",
-            ToolPresentationKind::Search,
-            vec!["TODO in src"],
-        ),
-        (
-            "git grep ToolPresentation",
-            ToolPresentationKind::Search,
-            vec!["ToolPresentation"],
-        ),
-        (
-            "find . -name '*.md' -print",
-            ToolPresentationKind::Search,
-            vec!["*.md in ."],
-        ),
     ];
 
     for (command, kind, subjects) in cases {
@@ -2613,9 +2677,181 @@ fn execute_tool_call_presents_supported_read_list_and_search_commands() {
             panic!("expected tool call event");
         };
         let presentation = tool_call.presentation.expect(command);
-        assert_eq!(presentation.kind, kind, "{command}");
-        assert_eq!(presentation.subjects, subjects, "{command}");
+        let [action] = presentation.actions.as_slice() else {
+            panic!("expected one semantic action for {command}");
+        };
+        assert_eq!(action.kind(), kind, "{command}");
+        assert_eq!(
+            action.subjects().expect("subject-based action"),
+            subjects,
+            "{command}"
+        );
     }
+
+    let search_cases = [
+        (
+            "rg -n activityLabels packages/frontend",
+            "activityLabels",
+            vec!["packages/frontend"],
+        ),
+        ("grep -R TODO src", "TODO", vec!["src"]),
+        ("git grep ToolPresentation", "ToolPresentation", vec![]),
+        ("find . -name '*.md' -print", "*.md", vec!["."]),
+    ];
+    for (command, query, scopes) in search_cases {
+        let AgentEvent::ToolCall(tool_call) = tool_call_event(
+            &ToolCall::new("tool_call_execute_search", command)
+                .kind(ToolKind::Execute)
+                .raw_input(serde_json::json!({ "cmd": command })),
+        ) else {
+            panic!("expected tool call event");
+        };
+        assert_eq!(
+            tool_call.presentation.expect(command).actions,
+            [crate::protocol::model::ToolPresentationAction::Search {
+                query: query.to_string(),
+                scopes: scopes.into_iter().map(str::to_string).collect(),
+                target: crate::protocol::model::ToolSearchTarget::Contents,
+            }],
+            "{command}"
+        );
+    }
+}
+
+#[test]
+fn execute_tool_call_preserves_structured_search_facts() {
+    let command = "rg -n \"presentationAction|presentationProgressAction\" packages/frontend/src/state/activityLabels.ts";
+    let event = tool_call_event(
+        &ToolCall::new("tool_call_execute_structured_search", command)
+            .kind(ToolKind::Execute)
+            .raw_input(serde_json::json!({ "cmd": command })),
+    );
+
+    let AgentEvent::ToolCall(tool_call) = event else {
+        panic!("expected tool call event");
+    };
+    assert_eq!(
+        serde_json::to_value(tool_call.presentation.expect("search presentation")).unwrap(),
+        serde_json::json!({
+            "actions": [{
+                "kind": "search",
+                "query": "presentationAction|presentationProgressAction",
+                "scopes": ["packages/frontend/src/state/activityLabels.ts"],
+                "target": "contents"
+            }]
+        })
+    );
+}
+
+#[test]
+fn execute_tool_call_presents_search_through_a_proven_head_limiter() {
+    let command = "/usr/bin/zsh -lc \"sed -n '390,455p' packages/frontend/src/state/activityLabels.ts && rg -n \\\"semantic-title|activity-step-title|subjects\\\" packages/frontend/src/components packages/frontend/src/styles --glob '*.tsx' --glob '*.css' | head -120\"";
+    let AgentEvent::ToolCall(tool_call) = tool_call_event(
+        &ToolCall::new("tool_call_execute_limited_search", command)
+            .kind(ToolKind::Execute)
+            .raw_input(serde_json::json!({ "cmd": command })),
+    ) else {
+        panic!("expected tool call event");
+    };
+
+    assert_eq!(
+        serde_json::to_value(
+            tool_call
+                .presentation
+                .expect("read + limited search presentation")
+        )
+        .unwrap(),
+        serde_json::json!({
+            "actions": [
+                {
+                    "kind": "read",
+                    "subjects": ["activityLabels.ts"]
+                },
+                {
+                    "kind": "search",
+                    "query": "semantic-title|activity-step-title|subjects",
+                    "scopes": [
+                        "packages/frontend/src/components",
+                        "packages/frontend/src/styles"
+                    ],
+                    "target": "contents"
+                }
+            ]
+        })
+    );
+}
+
+#[test]
+fn execute_tool_call_presents_proven_file_name_search_pipeline() {
+    let command = "rg --files openaide-rs/app-server/src/agent/command_presentation openaide-rs/app-server/tests packages/frontend | rg '(test|command)'";
+    let AgentEvent::ToolCall(tool_call) = tool_call_event(
+        &ToolCall::new("tool_call_execute_file_name_search", command)
+            .kind(ToolKind::Execute)
+            .raw_input(serde_json::json!({ "cmd": command })),
+    ) else {
+        panic!("expected tool call event");
+    };
+
+    assert_eq!(
+        serde_json::to_value(
+            tool_call
+                .presentation
+                .expect("file-name search presentation")
+        )
+        .unwrap(),
+        serde_json::json!({
+            "actions": [{
+                "kind": "search",
+                "query": "(test|command)",
+                "scopes": [
+                    "openaide-rs/app-server/src/agent/command_presentation",
+                    "openaide-rs/app-server/tests",
+                    "packages/frontend"
+                ],
+                "target": "paths"
+            }]
+        })
+    );
+}
+
+#[test]
+fn execute_tool_call_preserves_ordered_path_and_content_searches() {
+    let command = "/usr/bin/zsh -lc \"rg --files openaide-rs/app-server/src/agent/command_presentation openaide-rs/app-server/tests packages/frontend | rg '(test|command)' && rg -n \\\"infer_execute_presentation|ToolPresentationKind::(Read|Search)|zsh -lc|sed -n\\\" openaide-rs/app-server/src/agent openaide-rs/app-server/tests packages/frontend --glob '*.rs' --glob '*.ts'\"";
+    let AgentEvent::ToolCall(tool_call) = tool_call_event(
+        &ToolCall::new("tool_call_execute_two_searches", command)
+            .kind(ToolKind::Execute)
+            .raw_input(serde_json::json!({ "cmd": command })),
+    ) else {
+        panic!("expected tool call event");
+    };
+
+    assert_eq!(
+        serde_json::to_value(tool_call.presentation.expect("ordered search presentation")).unwrap(),
+        serde_json::json!({
+            "actions": [
+                {
+                    "kind": "search",
+                    "query": "(test|command)",
+                    "scopes": [
+                        "openaide-rs/app-server/src/agent/command_presentation",
+                        "openaide-rs/app-server/tests",
+                        "packages/frontend"
+                    ],
+                    "target": "paths"
+                },
+                {
+                    "kind": "search",
+                    "query": "infer_execute_presentation|ToolPresentationKind::(Read|Search)|zsh -lc|sed -n",
+                    "scopes": [
+                        "openaide-rs/app-server/src/agent",
+                        "openaide-rs/app-server/tests",
+                        "packages/frontend"
+                    ],
+                    "target": "contents"
+                }
+            ]
+        })
+    );
 }
 
 #[test]
@@ -2625,8 +2861,14 @@ fn execute_tool_call_falls_back_for_ambiguous_or_effectful_commands() {
         "/tmp/cat PRODUCT.md",
         "cat *.md",
         "cat file.md | tee copy.md",
+        "cat PRODUCT.md && ls src",
         "rg TODO src | sh",
+        "rg TODO src | head -n nope",
+        "rg TODO src | head -10 file",
+        "rg --files src | grep test",
+        "rg TODO src | head -80 && git status --short",
         "rg TODO src && npm test",
+        "rg TODO src && ls src",
         "find . -delete",
         "find . -exec printf '%s\\n' '{}' ';'",
         "xargs cat",

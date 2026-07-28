@@ -1,7 +1,8 @@
 //! Conservative semantic presentation for execute commands.
 //!
-//! Unknown or mixed shell syntax deliberately returns `None`: these hints only
-//! change compact UI chrome, and a false semantic claim is worse than fallback.
+//! Unknown or unsupported mixed shell syntax deliberately returns `None`: these
+//! hints only change compact UI chrome, and a false semantic claim is worse than
+//! fallback.
 
 use std::path::{Component, Path};
 use std::sync::OnceLock;
@@ -10,11 +11,15 @@ use regex::Regex;
 use serde_json::Value;
 
 use crate::agent::tool_details_sanitizer::{path_leaf_summary, sanitize_command_summary};
-use crate::protocol::model::{ToolPresentation, ToolPresentationKind};
+use crate::protocol::model::{
+    ToolPresentation, ToolPresentationAction, ToolPresentationKind, ToolSearchTarget,
+};
 
+mod search;
 mod shell;
 
-use shell::{parse_commands, parse_saved_command};
+use search::{classify_search, classify_search_program, SearchOptions};
+use shell::{parse_commands, parse_saved_command, ParsedCommand};
 
 const MAX_COMMANDS: usize = 8;
 const MAX_SUBJECT_BYTES: usize = 512;
@@ -31,41 +36,167 @@ pub(crate) fn infer_saved_execute_presentation(command: &[String]) -> Option<Too
     infer_parsed_commands(parse_saved_command(command)?)
 }
 
-fn infer_parsed_commands(commands: Vec<Vec<String>>) -> Option<ToolPresentation> {
+fn infer_parsed_commands(commands: Vec<ParsedCommand>) -> Option<ToolPresentation> {
     if commands.is_empty() || commands.len() > MAX_COMMANDS {
         return None;
     }
 
-    let mut action = None;
+    let mut actions: Vec<SemanticAction> = Vec::new();
     for command in commands {
-        let next = classify_command(&command)?;
-        match &mut action {
-            None => action = Some(next),
-            Some(current) if current.kind == next.kind => {
-                current.subjects.extend(next.subjects);
+        let next = classify_pipeline(&command.stages)?;
+        if let Some(current) = actions.last_mut() {
+            match current.merge(next) {
+                Ok(()) => continue,
+                Err(next) => actions.push(next),
             }
-            Some(_) => return None,
+        } else {
+            actions.push(next);
         }
     }
 
-    let mut action = action?;
-    if action.kind == ToolPresentationKind::Read {
-        if let Some(subjects) = action
-            .subjects
-            .iter()
-            .map(|path| skill_name(path))
-            .collect::<Option<Vec<_>>>()
+    if actions.len() > 1 && !is_supported_action_sequence(&actions) {
+        return None;
+    }
+    for action in &mut actions {
+        if let SemanticAction::Subjects {
+            kind: ToolPresentationKind::Read,
+            subjects,
+        } = action
         {
-            action.kind = ToolPresentationKind::Skill;
-            action.subjects = subjects;
+            if let Some(skill_names) = subjects
+                .iter()
+                .map(|path| skill_name(path))
+                .collect::<Option<Vec<_>>>()
+            {
+                *action = SemanticAction::Subjects {
+                    kind: ToolPresentationKind::Skill,
+                    subjects: skill_names,
+                };
+            }
         }
     }
-    presentation(action.kind, ordered_unique(action.subjects))
+    presentation(actions)
 }
 
-struct SemanticAction {
-    kind: ToolPresentationKind,
-    subjects: Vec<String>,
+/// A pipeline receives semantic chrome only when every stage and their data-flow
+/// relationship are on this small allowlist.
+fn classify_pipeline(stages: &[Vec<String>]) -> Option<SemanticAction> {
+    match stages {
+        [command] => classify_command(command),
+        [search, limiter] if is_stdin_head_limiter(limiter) => {
+            let action = classify_search(search)?;
+            matches!(action, SemanticAction::Search { .. }).then_some(action)
+        }
+        [files, filter] => classify_file_name_search(files, filter),
+        _ => None,
+    }
+}
+
+fn is_stdin_head_limiter(words: &[String]) -> bool {
+    if command_name(words.first().map(String::as_str).unwrap_or_default()) != Some("head") {
+        return false;
+    }
+    match words {
+        [_] => true,
+        [_, flag] => flag
+            .strip_prefix("--lines=")
+            .or_else(|| flag.strip_prefix('-'))
+            .is_some_and(is_unsigned),
+        [_, flag, count] => flag == "-n" && is_unsigned(count),
+        _ => false,
+    }
+}
+
+fn classify_file_name_search(files: &[String], filter: &[String]) -> Option<SemanticAction> {
+    if command_name(files.first()?)? != "rg" || command_name(filter.first()?)? != "rg" {
+        return None;
+    }
+    let SemanticAction::Subjects {
+        kind: ToolPresentationKind::List,
+        subjects: scopes,
+    } = classify_rg_files(files)?
+    else {
+        return None;
+    };
+    let SemanticAction::Search {
+        query,
+        scopes: filter_scopes,
+        ..
+    } = classify_search_program(filter, SearchOptions::Ripgrep)?
+    else {
+        return None;
+    };
+    if !filter_scopes.is_empty() {
+        return None;
+    }
+    Some(SemanticAction::Search {
+        query,
+        scopes,
+        target: ToolSearchTarget::Paths,
+    })
+}
+
+enum SemanticAction {
+    Subjects {
+        kind: ToolPresentationKind,
+        subjects: Vec<String>,
+    },
+    Search {
+        query: String,
+        scopes: Vec<String>,
+        target: ToolSearchTarget,
+    },
+}
+
+impl SemanticAction {
+    fn kind(&self) -> ToolPresentationKind {
+        match self {
+            Self::Subjects { kind, .. } => *kind,
+            Self::Search { .. } => ToolPresentationKind::Search,
+        }
+    }
+
+    /// Only subject-list actions share one natural-language verb and can merge.
+    fn merge(&mut self, next: Self) -> Result<(), Self> {
+        match (self, next) {
+            (
+                Self::Subjects {
+                    kind: current_kind,
+                    subjects: current_subjects,
+                },
+                Self::Subjects {
+                    kind: next_kind,
+                    subjects: next_subjects,
+                },
+            ) if *current_kind == next_kind => {
+                current_subjects.extend(next_subjects);
+                Ok(())
+            }
+            (_, next) => Err(next),
+        }
+    }
+}
+
+/// Mixed inference stays deliberately narrow: only fully classified Read + Search
+/// command lists may replace Execute chrome. Every other combination falls back.
+fn is_supported_action_sequence(actions: &[SemanticAction]) -> bool {
+    if actions
+        .iter()
+        .all(|action| action.kind() == actions[0].kind())
+    {
+        return true;
+    }
+    actions.iter().all(|action| {
+        matches!(
+            action.kind(),
+            ToolPresentationKind::Read | ToolPresentationKind::Search
+        )
+    }) && actions
+        .iter()
+        .any(|action| action.kind() == ToolPresentationKind::Read)
+        && actions
+            .iter()
+            .any(|action| action.kind() == ToolPresentationKind::Search)
 }
 
 fn classify_command(words: &[String]) -> Option<SemanticAction> {
@@ -262,184 +393,8 @@ fn classify_git_ls_files(words: &[String]) -> Option<SemanticAction> {
     action(ToolPresentationKind::List, subjects)
 }
 
-fn classify_search(words: &[String]) -> Option<SemanticAction> {
-    match command_name(words.first()?)? {
-        "rg" | "rga" | "ripgrep-all" | "ag" | "ack" | "pt" => {
-            classify_search_program(words, SearchOptions::Ripgrep)
-        }
-        "grep" | "egrep" | "fgrep" => classify_search_program(words, SearchOptions::Grep),
-        "git" if words.get(1).is_some_and(|word| word == "grep") => classify_git_grep(words),
-        "fd" => classify_fd_search(words),
-        "find" => classify_find_search(words),
-        _ => None,
-    }
-}
-
-#[derive(Clone, Copy)]
-enum SearchOptions {
-    Ripgrep,
-    Grep,
-}
-
-fn classify_search_program(words: &[String], options: SearchOptions) -> Option<SemanticAction> {
-    let mut positionals = Vec::new();
-    let mut index = 1;
-    let mut options_ended = false;
-    while index < words.len() {
-        let word = &words[index];
-        if !options_ended && word == "--" {
-            options_ended = true;
-            index += 1;
-            continue;
-        }
-        if !options_ended && search_flag_without_value(word, options) {
-            index += 1;
-            continue;
-        }
-        if !options_ended && search_flag_with_value(word, options) {
-            index += 2;
-            if index > words.len() {
-                return None;
-            }
-            continue;
-        }
-        if !options_ended && word.starts_with('-') {
-            return None;
-        }
-        positionals.push(word.as_str());
-        index += 1;
-    }
-    let (query, scopes) = positionals.split_first()?;
-    search_action(query, scopes)
-}
-
-fn search_flag_without_value(word: &str, options: SearchOptions) -> bool {
-    match options {
-        SearchOptions::Ripgrep => matches!(
-            word,
-            "-n" | "-i"
-                | "-F"
-                | "-w"
-                | "-x"
-                | "-l"
-                | "-L"
-                | "-c"
-                | "-s"
-                | "-S"
-                | "--hidden"
-                | "--no-ignore"
-                | "--text"
-                | "--follow"
-        ),
-        SearchOptions::Grep => matches!(
-            word,
-            "-n" | "-i"
-                | "-F"
-                | "-E"
-                | "-G"
-                | "-P"
-                | "-w"
-                | "-x"
-                | "-l"
-                | "-L"
-                | "-c"
-                | "-s"
-                | "-R"
-                | "-r"
-                | "--recursive"
-                | "--line-number"
-                | "--ignore-case"
-        ),
-    }
-}
-
-fn search_flag_with_value(word: &str, options: SearchOptions) -> bool {
-    match options {
-        SearchOptions::Ripgrep => matches!(
-            word,
-            "-g" | "--glob"
-                | "-t"
-                | "--type"
-                | "-T"
-                | "--type-not"
-                | "-A"
-                | "-B"
-                | "-C"
-                | "--context"
-        ),
-        SearchOptions::Grep => matches!(word, "-A" | "-B" | "-C" | "--include" | "--exclude"),
-    }
-}
-
-fn classify_git_grep(words: &[String]) -> Option<SemanticAction> {
-    let mut positionals = Vec::new();
-    let mut options_ended = false;
-    for word in &words[2..] {
-        if !options_ended && word == "--" {
-            options_ended = true;
-        } else if !options_ended
-            && matches!(
-                word.as_str(),
-                "-n" | "-i"
-                    | "-F"
-                    | "-E"
-                    | "-G"
-                    | "-P"
-                    | "-w"
-                    | "-l"
-                    | "--cached"
-                    | "--untracked"
-                    | "--no-index"
-            )
-        {
-            continue;
-        } else if !options_ended && word.starts_with('-') {
-            return None;
-        } else {
-            positionals.push(word.as_str());
-        }
-    }
-    let (query, scopes) = positionals.split_first()?;
-    search_action(query, scopes)
-}
-
-fn classify_fd_search(words: &[String]) -> Option<SemanticAction> {
-    match words {
-        [_, query] => search_action(query, &[]),
-        [_, query, path] => search_action(query, &[path.as_str()]),
-        _ => None,
-    }
-}
-
-fn classify_find_search(words: &[String]) -> Option<SemanticAction> {
-    let [_, path, name_flag, query, rest @ ..] = words else {
-        return None;
-    };
-    if !matches!(name_flag.as_str(), "-name" | "-iname") {
-        return None;
-    }
-    if !rest.is_empty() && rest != ["-print"] {
-        return None;
-    }
-    search_action(query, &[path.as_str()])
-}
-
-fn search_action(query: &str, scopes: &[&str]) -> Option<SemanticAction> {
-    let query = safe_subject(query)?;
-    let subject = if scopes.is_empty() {
-        query
-    } else {
-        let scopes = scopes
-            .iter()
-            .map(|scope| safe_subject(scope))
-            .collect::<Option<Vec<_>>>()?;
-        format!("{query} in {}", scopes.join(", "))
-    };
-    action(ToolPresentationKind::Search, vec![subject])
-}
-
 fn action(kind: ToolPresentationKind, subjects: Vec<String>) -> Option<SemanticAction> {
-    (!subjects.is_empty()).then_some(SemanticAction { kind, subjects })
+    (!subjects.is_empty()).then_some(SemanticAction::Subjects { kind, subjects })
 }
 
 fn is_unsigned(value: &str) -> bool {
@@ -503,21 +458,61 @@ fn skill_name(path: &str) -> Option<String> {
     safe_subject(directory.file_name()?.to_str()?)
 }
 
-fn presentation(kind: ToolPresentationKind, subjects: Vec<String>) -> Option<ToolPresentation> {
-    let subjects = ordered_unique(
-        subjects
-            .into_iter()
-            .map(|subject| match kind {
-                ToolPresentationKind::Read | ToolPresentationKind::View => {
-                    path_leaf_summary(&subject)
-                }
-                _ => sanitize_command_summary(&subject),
-            })
-            .filter(|subject| !subject.is_empty())
-            .collect(),
-    );
-    (!subjects.is_empty() && subjects.len() <= MAX_COMMANDS)
-        .then_some(ToolPresentation { kind, subjects })
+fn presentation(actions: Vec<SemanticAction>) -> Option<ToolPresentation> {
+    let mut subject_count = 0;
+    let actions = actions
+        .into_iter()
+        .map(|action| match action {
+            SemanticAction::Subjects { kind, subjects } => {
+                let subjects = ordered_unique(
+                    subjects
+                        .into_iter()
+                        .map(|subject| match kind {
+                            ToolPresentationKind::Read | ToolPresentationKind::View => {
+                                path_leaf_summary(&subject)
+                            }
+                            _ => sanitize_command_summary(&subject),
+                        })
+                        .filter(|subject| !subject.is_empty())
+                        .collect(),
+                );
+                subject_count += subjects.len();
+                let action = match kind {
+                    ToolPresentationKind::Skill => ToolPresentationAction::Skill { subjects },
+                    ToolPresentationKind::Read => ToolPresentationAction::Read { subjects },
+                    ToolPresentationKind::View => ToolPresentationAction::View { subjects },
+                    ToolPresentationKind::List => ToolPresentationAction::List { subjects },
+                    ToolPresentationKind::Search => return None,
+                };
+                action
+                    .subjects()
+                    .is_some_and(|subjects| !subjects.is_empty())
+                    .then_some(action)
+            }
+            SemanticAction::Search {
+                query,
+                scopes,
+                target,
+            } => {
+                let query = sanitize_command_summary(&query);
+                let scopes = ordered_unique(
+                    scopes
+                        .into_iter()
+                        .map(|scope| sanitize_command_summary(&scope))
+                        .collect(),
+                );
+                subject_count += 1;
+                (!query.is_empty() && scopes.iter().all(|scope| !scope.is_empty())).then_some(
+                    ToolPresentationAction::Search {
+                        query,
+                        scopes,
+                        target,
+                    },
+                )
+            }
+        })
+        .collect::<Option<Vec<_>>>()?;
+    (!actions.is_empty() && subject_count <= MAX_COMMANDS).then_some(ToolPresentation { actions })
 }
 
 fn ordered_unique(subjects: Vec<String>) -> Vec<String> {

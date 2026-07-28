@@ -670,7 +670,9 @@ describe("ChatRow", () => {
           kind: "tool",
           name: "execute",
           status: "completed",
-          presentation: { kind: "skill", subjects: ["tdd"] },
+          presentation: {
+            actions: [{ kind: "skill", subjects: ["tdd"] }],
+          },
           input_summary: command,
           details: {
             locations: [],
@@ -937,7 +939,9 @@ describe("ChatRow", () => {
           kind: "tool",
           name: "read",
           status: "completed",
-          presentation: { kind: "view", subjects: ["context-usage-live-animation.png"] },
+          presentation: {
+            actions: [{ kind: "view", subjects: ["context-usage-live-animation.png"] }],
+          },
           input_summary: "context-usage-live-animation.png",
           details: {
             locations: [],
@@ -1044,7 +1048,12 @@ describe("ChatRow", () => {
           kind: "tool",
           name: "execute",
           status: "completed",
-          presentation: { kind: "read", subjects: ["acp_session_worker.rs", "prompt_start.rs"] },
+          presentation: {
+            actions: [{
+              kind: "read",
+              subjects: ["acp_session_worker.rs", "prompt_start.rs"],
+            }],
+          },
           input_summary: "sed -n ...",
         },
         taskId: "task_1",
@@ -1056,6 +1065,122 @@ describe("ChatRow", () => {
     expect(html).toContain('class="activity-step-semantic-subject">acp_session_worker.rs</span>');
     expect(html).toContain('class="activity-step-semantic-connector"> and </span>');
     expect(html).toContain('class="activity-step-semantic-subject">prompt_start.rs</span>');
+  });
+
+  it("compacts mixed presentation while preserving full paths and subjects in its tooltip", async () => {
+    const { ActivityStepRow } = await import("./ChatActivityView");
+    const html = renderToStaticMarkup(
+      ActivityStepRow({
+        step: {
+          kind: "tool",
+          name: "execute",
+          status: "completed",
+          presentation: {
+            actions: [
+              {
+                kind: "read",
+                subjects: [
+                  "agent-settings-catalog.css",
+                  "mcp-settings.css",
+                  "part-09.css",
+                  "part-10.css",
+                ],
+              },
+              {
+                kind: "search",
+                query: "semantic-title|activity-step-title|subjects",
+                scopes: [
+                  "packages/frontend/src/components",
+                  "packages/frontend/src/styles/components",
+                  ".",
+                ],
+                target: "contents",
+              },
+            ],
+          },
+          input_summary: "zsh -lc ...",
+        },
+        taskId: "task_1",
+      }),
+    );
+
+    expect(html).toContain("lucide-file-search");
+    expect(html).toContain('class="activity-step-semantic-connector">then</span>');
+    expect(html).toContain('class="activity-step-semantic-action">Search</span>');
+    expect(html).toContain('class="activity-step-semantic-subject">2 more</span>');
+    expect(html).toContain('class="activity-step-semantic-scope">src/components');
+    expect(html).toContain("styles/components");
+    expect(html).toContain("workspace");
+    expect(html).toContain(
+      'title="Read agent-settings-catalog.css, mcp-settings.css, part-09.css, and part-10.css; '
+      + 'Search “semantic-title|activity-step-title|subjects” in '
+      + 'packages/frontend/src/components, packages/frontend/src/styles/components, and workspace"',
+    );
+  });
+
+  it("preserves skill identity in a mixed skill read and search presentation", async () => {
+    const { ActivityStepRow } = await import("./ChatActivityView");
+    const html = renderToStaticMarkup(
+      ActivityStepRow({
+        step: {
+          kind: "tool",
+          name: "execute",
+          status: "completed",
+          presentation: {
+            actions: [
+              { kind: "skill", subjects: ["diagnosing-bugs"] },
+              {
+                kind: "search",
+                query: "parse.*command|command.*parse|shell.*parser|ParsedCommand|parse_command",
+                scopes: ["."],
+                target: "contents",
+              },
+            ],
+          },
+          input_summary: "zsh -lc ...",
+        },
+        taskId: "task_1",
+      }),
+    );
+
+    expect(html).toContain("lucide-file-search");
+    expect(html).toContain('class="activity-step-semantic-action">Activated</span>');
+    expect(html).toContain('class="activity-step-semantic-subject">diagnosing-bugs skill</span>');
+    expect(html).toContain(
+      'title="Activated diagnosing-bugs skill; '
+      + 'Search “parse.*command|command.*parse|shell.*parser|ParsedCommand|parse_command” in workspace"',
+    );
+  });
+
+  it("renders a proven path pipeline as a file-name search with the Search icon", async () => {
+    const { ActivityStepRow } = await import("./ChatActivityView");
+    const html = renderToStaticMarkup(
+      ActivityStepRow({
+        step: {
+          kind: "tool",
+          name: "execute",
+          status: "completed",
+          presentation: {
+            actions: [{
+              kind: "search",
+              query: "(test|command)",
+              scopes: ["openaide-rs/app-server/src/agent/command_presentation"],
+              target: "paths",
+            }],
+          },
+          input_summary: "rg --files ... | rg '(test|command)'",
+        },
+        taskId: "task_1",
+      }),
+    );
+
+    expect(html).toContain("lucide-search");
+    expect(html).not.toContain("lucide-file-search");
+    expect(html).toContain(
+      'title="Search file names for “(test|command)” in '
+      + 'openaide-rs/app-server/src/agent/command_presentation"',
+    );
+    expect(html).toContain('class="activity-step-semantic-scope">command_presentation</span>');
   });
 
   it("renders web search as its own compact tool row", async () => {
@@ -1118,7 +1243,7 @@ describe("ChatRow", () => {
 
     expect(html).toContain('class="activity-step tool-web_search completed"');
     expect(html).toContain("lucide-earth activity-kind-icon");
-    expect(html).toContain('<span class="activity-step-title">Web search</span>');
+    expect(html).toContain('<span class="activity-step-title" title="Web search">Web search</span>');
     expect(html).not.toContain("exec-internal");
     expect(html).not.toContain("No matches in .");
   });

@@ -8,7 +8,7 @@ pub use activity::{
     ActivityStatus, ActivityStep, ActivityToolContent, ActivityToolDetails, ActivityToolField,
     ActivityToolInput, ActivityToolLocation, ActivityToolOutput, ActivityToolValue,
     SubagentActivity, ToolPermissionDecision, ToolPermissionOutcome, ToolPresentation,
-    ToolPresentationKind,
+    ToolPresentationAction, ToolPresentationKind, ToolSearchTarget,
 };
 pub use agent::{
     AgentAuthMethodSummary, AgentAuthVariableSummary, AgentAuthenticateResult,

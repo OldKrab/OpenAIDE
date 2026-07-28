@@ -153,18 +153,36 @@ pub enum SubagentActivitySnapshot {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolPresentationSnapshot {
-    pub kind: ToolPresentationKindSnapshot,
-    pub subjects: Vec<String>,
+    pub actions: Vec<ToolPresentationActionSnapshot>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ToolPresentationActionSnapshot {
+    Skill {
+        subjects: Vec<String>,
+    },
+    Read {
+        subjects: Vec<String>,
+    },
+    View {
+        subjects: Vec<String>,
+    },
+    List {
+        subjects: Vec<String>,
+    },
+    Search {
+        query: String,
+        scopes: Vec<String>,
+        target: ToolSearchTargetSnapshot,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "snake_case")]
-pub enum ToolPresentationKindSnapshot {
-    Skill,
-    Read,
-    View,
-    List,
-    Search,
+pub enum ToolSearchTargetSnapshot {
+    Contents,
+    Paths,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]

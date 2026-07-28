@@ -24,8 +24,76 @@ pub enum SubagentActivity {
 /// Optional semantic chrome for a Tool row. It never changes Tool identity or detail routing.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct ToolPresentation {
-    pub kind: ToolPresentationKind,
-    pub subjects: Vec<String>,
+    /// Ordered, proven semantic actions performed by one underlying Tool call.
+    pub actions: Vec<ToolPresentationAction>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ToolPresentationAction {
+    Skill {
+        subjects: Vec<String>,
+    },
+    Read {
+        subjects: Vec<String>,
+    },
+    View {
+        subjects: Vec<String>,
+    },
+    List {
+        subjects: Vec<String>,
+    },
+    Search {
+        query: String,
+        scopes: Vec<String>,
+        target: ToolSearchTarget,
+    },
+}
+
+impl ToolPresentation {
+    pub(crate) fn single(kind: ToolPresentationKind, subjects: Vec<String>) -> Self {
+        let action = match kind {
+            ToolPresentationKind::Skill => ToolPresentationAction::Skill { subjects },
+            ToolPresentationKind::Read => ToolPresentationAction::Read { subjects },
+            ToolPresentationKind::View => ToolPresentationAction::View { subjects },
+            ToolPresentationKind::List => ToolPresentationAction::List { subjects },
+            ToolPresentationKind::Search => {
+                unreachable!("search presentations require structured query and scope facts")
+            }
+        };
+        Self {
+            actions: vec![action],
+        }
+    }
+}
+
+impl ToolPresentationAction {
+    pub(crate) fn kind(&self) -> ToolPresentationKind {
+        match self {
+            Self::Skill { .. } => ToolPresentationKind::Skill,
+            Self::Read { .. } => ToolPresentationKind::Read,
+            Self::View { .. } => ToolPresentationKind::View,
+            Self::List { .. } => ToolPresentationKind::List,
+            Self::Search { .. } => ToolPresentationKind::Search,
+        }
+    }
+
+    pub(crate) fn subjects(&self) -> Option<&[String]> {
+        match self {
+            Self::Skill { subjects }
+            | Self::Read { subjects }
+            | Self::View { subjects }
+            | Self::List { subjects } => Some(subjects),
+            Self::Search { .. } => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolSearchTarget {
+    Contents,
+    Paths,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]

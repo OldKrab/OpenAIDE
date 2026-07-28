@@ -1,13 +1,18 @@
 import type { ActivityStep, NormalizedMessage } from "@openaide/app-shell-contracts";
+import {
+  presentationKind,
+  presentationSemanticTitle,
+  presentationSubject,
+  semanticTitleText,
+  type ActivityStepSemanticAction,
+  type ActivityStepSemanticTitle,
+  type PresentationDisplayKind,
+} from "./activityPresentationLabels";
 import { firstFieldValue } from "./toolDetailsShared";
 
 type ActivityMessage = Extract<NormalizedMessage, { kind: "activity" }>;
 
-export type ActivityStepSemanticTitle = {
-  action: "Read" | "Search" | "View";
-  scope?: string;
-  subjects: string[];
-};
+export type { ActivityStepSemanticTitle } from "./activityPresentationLabels";
 
 export type ActivityToolKind =
   | "skill"
@@ -17,6 +22,7 @@ export type ActivityToolKind =
   | "delete"
   | "move"
   | "search"
+  | "inspect"
   | "web_search"
   | "execute"
   | "think"
@@ -80,7 +86,10 @@ export function activityStepLabel(step: ActivityStep) {
   const semanticTitle = activityStepSemanticTitle(step);
   if (semanticTitle) return semanticTitleText(semanticTitle);
   if (step.presentation) {
-    return toolLabel(presentationAction(step.presentation.kind), presentationSubject(step) ?? "");
+    return toolLabel(
+      presentationAction(presentationKind(step.presentation)),
+      presentationSubject(step.presentation) ?? "",
+    );
   }
   const subject = toolSubjectLabel(step);
   if (isExecuteTool(step)) return subject ?? humanizeToolName(step.name);
@@ -98,23 +107,36 @@ export function activityStepSemanticTitle(
   step: ActivityStep,
 ): ActivityStepSemanticTitle | undefined {
   if (step.kind !== "tool") return undefined;
-  if (step.presentation?.kind === "read" || step.presentation?.kind === "view") {
-    const subjects = step.presentation.subjects.map((subject) => subject.trim()).filter(Boolean);
-    return subjects.length
-      ? { action: step.presentation.kind === "view" ? "View" : "Read", subjects }
-      : undefined;
-  }
+  const presentation = step.presentation;
+  if (presentation) return presentationSemanticTitle(presentation);
   if (step.name === "read") {
     const subject = (pathSubjectLabel(step) ?? step.input_summary)?.replace(/^Read\s+/i, "").trim();
-    return subject ? { action: "Read", subjects: [subject] } : undefined;
+    return subject ? semanticTitle([{ action: "Read", subjects: [subject] }]) : undefined;
   }
   if (step.name !== "search") return undefined;
   const scope = searchScopeLabel(step);
   const query = searchQueryLabel(step);
-  if (query) return { action: "Search", subjects: [searchQueryPreview(query)], ...(scope ? { scope } : {}) };
+  if (query) {
+    return semanticTitle([{
+        action: "Search",
+        subjects: [searchQueryPreview(query)],
+        ...(scope ? { scope } : {}),
+      }]);
+  }
   const subject = searchSubjectLabel(step);
-  if (!subject) return { action: "Search", subjects: [], ...(scope ? { scope } : {}) };
-  return { action: "Search", subjects: [subject], ...(scope && subject !== scope ? { scope } : {}) };
+  if (!subject) {
+    return semanticTitle([{ action: "Search", subjects: [], ...(scope ? { scope } : {}) }]);
+  }
+  return semanticTitle([{
+      action: "Search",
+      subjects: [subject],
+      ...(scope && subject !== scope ? { scope } : {}),
+    }]);
+}
+
+function semanticTitle(actions: ActivityStepSemanticAction[]): ActivityStepSemanticTitle {
+  const title = { actions, tooltip: "" };
+  return { actions, tooltip: semanticTitleText(title) };
 }
 
 /** Describes the concrete action currently in flight, using the activity title when ACP normalized the tool name. */
@@ -132,7 +154,10 @@ export function activityStepProgressLabel(step: ActivityStep, activityTitle?: st
   );
   if (collaborationLabel) return collaborationLabel;
   if (step.presentation) {
-    return progressLabel(presentationProgressAction(step.presentation.kind), presentationSubject(step) ?? "");
+    return progressLabel(
+      presentationProgressAction(presentationKind(step.presentation)),
+      presentationSubject(step.presentation) ?? "",
+    );
   }
   const subject = toolSubjectLabel(step);
   if (isExecuteTool(step)) return progressLabel("Running", subject ?? humanizeToolName(step.name));
@@ -171,12 +196,12 @@ export function activityStepCompletedLabel(step: ActivityStep) {
     return "Waited for subagents";
   }
   if (step.presentation) {
-    const subject = presentationSubject(step) ?? "";
+    const subject = presentationSubject(step.presentation) ?? "";
     if (step.status === "interrupted") return progressLabel("Interrupted", subject);
     if (step.status === "error") {
-      return progressLabel(presentationFailureAction(step.presentation.kind), subject);
+      return progressLabel(presentationFailureAction(presentationKind(step.presentation)), subject);
     }
-    return progressLabel(presentationCompletedAction(step.presentation.kind), subject);
+    return progressLabel(presentationCompletedAction(presentationKind(step.presentation)), subject);
   }
   const subject = toolSubjectLabel(step);
   if (step.status === "interrupted") return progressLabel("Interrupted", subject ?? humanizeToolName(step.name));
@@ -250,6 +275,7 @@ type ActivitySummaryKind =
   | "move"
   | "run"
   | "search"
+  | "inspect"
   | "list"
   | "fetch"
   | "thinkTool"
@@ -289,7 +315,10 @@ export function activityToolKind(
   step: Extract<ActivityStep, { kind: "tool" }>,
   legacyToolName?: string,
 ): ActivityToolKind {
-  if (step.presentation) return step.presentation.kind === "view" ? "read" : step.presentation.kind;
+  if (step.presentation) {
+    const kind = presentationKind(step.presentation);
+    return kind === "view" ? "read" : kind;
+  }
   const namedKinds: Record<string, ActivityToolKind> = {
     skill: "skill",
     read: "read",
@@ -361,6 +390,7 @@ function countLabel(kind: ActivitySummaryKind, count: number, sentenceStart: boo
     move: { verb: "moved", single: "file", plural: "files" },
     run: { verb: "ran", single: "command", plural: "commands" },
     search: { verb: "ran", single: "search", plural: "searches" },
+    inspect: { verb: "inspected", single: "files", plural: "file groups" },
     list: { verb: "listed", single: "directory", plural: "directories" },
     fetch: { verb: "fetched", single: "resource", plural: "resources" },
     thinkTool: { verb: "used", single: "reasoning tool", plural: "reasoning tools" },
@@ -388,7 +418,7 @@ function countLabel(kind: ActivitySummaryKind, count: number, sentenceStart: boo
 }
 
 function toolSubjectLabel(step: Extract<ActivityStep, { kind: "tool" }>) {
-  if (step.presentation) return presentationSubject(step);
+  if (step.presentation) return presentationSubject(step.presentation);
   if (step.name === "skill") return skillSubjectLabel(step.input_summary);
   const collaborationLabel = collaborationAction(`${step.name} ${step.input_summary ?? ""}`);
   if (collaborationLabel) return collaborationLabel;
@@ -402,55 +432,39 @@ function toolSubjectLabel(step: Extract<ActivityStep, { kind: "tool" }>) {
   return step.input_summary ?? detailsLabel;
 }
 
-function presentationSubject(step: Extract<ActivityStep, { kind: "tool" }>) {
-  const subjects = step.presentation?.subjects.map((subject) => subject.trim()).filter(Boolean);
-  if (!subjects?.length) return undefined;
-  const joined = naturalJoin(subjects);
-  if (step.presentation?.kind !== "skill") return joined;
-  return subjects.length === 1 ? `${joined} skill` : `${joined} skills`;
-}
-
-function naturalJoin(values: string[]) {
-  if (values.length < 2) return values[0] ?? "";
-  if (values.length === 2) return `${values[0]} and ${values[1]}`;
-  return `${values.slice(0, -1).join(", ")}, and ${values.at(-1)}`;
-}
-
-function semanticTitleText(title: ActivityStepSemanticTitle) {
-  const subjects = naturalJoin(title.subjects);
-  const actionAndSubjects = subjects ? `${title.action} ${subjects}` : title.action;
-  return title.scope ? `${actionAndSubjects} in ${title.scope}` : actionAndSubjects;
-}
-
-function presentationAction(kind: NonNullable<Extract<ActivityStep, { kind: "tool" }>["presentation"]>["kind"]) {
+function presentationAction(kind: PresentationDisplayKind) {
   if (kind === "skill") return "Activated";
   if (kind === "read") return "Read";
   if (kind === "view") return "View";
   if (kind === "list") return "List";
+  if (kind === "inspect") return "Inspect";
   return "Search";
 }
 
-function presentationProgressAction(kind: NonNullable<Extract<ActivityStep, { kind: "tool" }>["presentation"]>["kind"]) {
+function presentationProgressAction(kind: PresentationDisplayKind) {
   if (kind === "skill") return "Activating";
   if (kind === "read") return "Reading";
   if (kind === "view") return "Viewing";
   if (kind === "list") return "Listing";
+  if (kind === "inspect") return "Inspecting";
   return "Searching";
 }
 
-function presentationCompletedAction(kind: NonNullable<Extract<ActivityStep, { kind: "tool" }>["presentation"]>["kind"]) {
+function presentationCompletedAction(kind: PresentationDisplayKind) {
   if (kind === "skill") return "Activated";
   if (kind === "read") return "Read";
   if (kind === "view") return "Viewed";
   if (kind === "list") return "Listed";
+  if (kind === "inspect") return "Inspected";
   return "Searched";
 }
 
-function presentationFailureAction(kind: NonNullable<Extract<ActivityStep, { kind: "tool" }>["presentation"]>["kind"]) {
+function presentationFailureAction(kind: PresentationDisplayKind) {
   if (kind === "skill") return "Failed to activate";
   if (kind === "read") return "Failed to read";
   if (kind === "view") return "Failed to view";
   if (kind === "list") return "Failed to list";
+  if (kind === "inspect") return "Failed to inspect";
   return "Failed to search";
 }
 

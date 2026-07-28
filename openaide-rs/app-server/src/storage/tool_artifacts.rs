@@ -137,9 +137,11 @@ pub(super) fn lightweight_detail_summary(details: &ActivityToolDetails) -> Optio
 }
 
 pub(super) fn legacy_view_presentation(details: &ActivityToolDetails) -> Option<ToolPresentation> {
-    (legacy_tool_name(details)? == "view_image").then(|| ToolPresentation {
-        kind: ToolPresentationKind::View,
-        subjects: lightweight_detail_summary(details).into_iter().collect(),
+    (legacy_tool_name(details)? == "view_image").then(|| {
+        ToolPresentation::single(
+            ToolPresentationKind::View,
+            lightweight_detail_summary(details).into_iter().collect(),
+        )
     })
 }
 

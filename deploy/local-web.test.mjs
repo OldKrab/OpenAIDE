@@ -160,6 +160,47 @@ test("local web role loads an ignored role-local env after tracked role defaults
   assert.doesNotMatch(result.stdout, /:5580\b/);
 });
 
+test("linked worktrees reuse the primary worktree role-local env", (t) => {
+  const fixtureRoot = mkdtempSync(join(tmpdir(), "openaide-local-web-linked-role-local-"));
+  const primaryRoot = join(fixtureRoot, "primary");
+  const linkedRoot = join(fixtureRoot, "linked");
+  const primaryDeploy = join(primaryRoot, "deploy");
+  mkdirSync(primaryRoot);
+  cpSync(new URL(".", import.meta.url), primaryDeploy, { recursive: true });
+  writeFileSync(join(primaryDeploy, "local-web.fixture.env"), "OPENAIDE_WEB_PORT=5580\n");
+
+  for (const args of [
+    ["init"],
+    ["config", "user.email", "tests@openaide.invalid"],
+    ["config", "user.name", "OpenAIDE Tests"],
+    ["add", "deploy"],
+    ["commit", "-m", "fixture"],
+    ["worktree", "add", "-b", "linked", linkedRoot],
+  ]) {
+    const git = spawnSync("git", args, { cwd: primaryRoot, encoding: "utf8" });
+    assert.equal(git.status, 0, git.stderr);
+  }
+  writeFileSync(
+    join(primaryDeploy, "local-web.fixture.local.env"),
+    "OPENAIDE_WEB_PORT=5591\n",
+  );
+  t.after(() => rmSync(fixtureRoot, { recursive: true, force: true }));
+
+  const result = spawnSync("bash", [join(linkedRoot, "deploy/local-web.sh"), "status"], {
+    cwd: linkedRoot,
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      OPENAIDE_WEB_ROLE: "fixture",
+      OPENAIDE_WEB_DAEMON: "background",
+    },
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /:5591\b/);
+  assert.doesNotMatch(result.stdout, /:5580\b/);
+});
+
 test("target role uses a durable isolated systemd service", () => {
   const targetEnv = readFileSync(new URL("./local-web.target.env", import.meta.url), "utf8");
 

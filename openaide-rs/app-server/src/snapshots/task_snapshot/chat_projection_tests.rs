@@ -66,10 +66,10 @@ fn projects_execute_presentation_without_reclassifying_the_tool() {
         tool_call_id: Some("call-1".to_string()),
         name: "execute".to_string(),
         status: ActivityStatus::Completed,
-        presentation: Some(crate::protocol::model::ToolPresentation {
-            kind: crate::protocol::model::ToolPresentationKind::Skill,
-            subjects: vec!["tdd".to_string(), "impeccable".to_string()],
-        }),
+        presentation: Some(crate::protocol::model::ToolPresentation::single(
+            crate::protocol::model::ToolPresentationKind::Skill,
+            vec!["tdd".to_string(), "impeccable".to_string()],
+        )),
         input_summary: Some("sed -n ...".to_string()),
         output_preview: Some("skill contents".to_string()),
         detail_artifact_id: None,
@@ -85,11 +85,15 @@ fn projects_execute_presentation_without_reclassifying_the_tool() {
     };
     assert_eq!(name, "execute");
     let presentation = presentation.expect("presentation");
+    let [action] = presentation.actions.as_slice() else {
+        panic!("expected one projected action");
+    };
     assert_eq!(
-        presentation.kind,
-        openaide_app_server_protocol::snapshot::ToolPresentationKindSnapshot::Skill
+        action,
+        &openaide_app_server_protocol::snapshot::ToolPresentationActionSnapshot::Skill {
+            subjects: vec!["tdd".to_string(), "impeccable".to_string()],
+        }
     );
-    assert_eq!(presentation.subjects, ["tdd", "impeccable"]);
 }
 
 #[test]

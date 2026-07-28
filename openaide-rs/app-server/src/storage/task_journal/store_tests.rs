@@ -310,10 +310,10 @@ fn task_with_view_presentation_still_opens() {
                         tool_call_id: Some("view_image".to_string()),
                         name: "read".to_string(),
                         status: crate::protocol::model::ActivityStatus::Completed,
-                        presentation: Some(crate::protocol::model::ToolPresentation {
-                            kind: crate::protocol::model::ToolPresentationKind::Read,
-                            subjects: vec!["preview.png".to_string()],
-                        }),
+                        presentation: Some(crate::protocol::model::ToolPresentation::single(
+                            crate::protocol::model::ToolPresentationKind::Read,
+                            vec!["preview.png".to_string()],
+                        )),
                         input_summary: Some("preview.png".to_string()),
                         output_preview: None,
                         detail_artifact_id: None,
@@ -334,7 +334,9 @@ fn task_with_view_presentation_still_opens() {
     };
     let mut persisted = serde_json::to_value(current).unwrap();
     *persisted
-        .pointer_mut("/operations/0/projection/messages/0/chat/message/steps/0/presentation/kind")
+        .pointer_mut(
+            "/operations/0/projection/messages/0/chat/message/steps/0/presentation/actions/0/kind",
+        )
         .expect("presentation kind") = serde_json::Value::String("view".to_string());
     let newer: LegacyJournalFrame = serde_json::from_value(persisted).unwrap();
     crate::storage::task_journal::frame::create(&task_dir.join("task.journal"), &newer).unwrap();
@@ -348,16 +350,17 @@ fn task_with_view_presentation_still_opens() {
     else {
         panic!("expected activity");
     };
-    assert!(matches!(
-        &steps[0],
-        crate::protocol::model::ActivityStep::Tool {
-            presentation: Some(crate::protocol::model::ToolPresentation {
-                kind: crate::protocol::model::ToolPresentationKind::View,
-                ..
-            }),
-            ..
-        }
-    ));
+    let crate::protocol::model::ActivityStep::Tool {
+        presentation: Some(presentation),
+        ..
+    } = &steps[0]
+    else {
+        panic!("expected tool presentation");
+    };
+    assert_eq!(
+        presentation.actions[0].kind(),
+        crate::protocol::model::ToolPresentationKind::View
+    );
     store.shutdown().unwrap();
 }
 

@@ -262,24 +262,11 @@ fn project_activity_step(step: &ActivityStep) -> ActivityStepSnapshot {
             status: project_activity_status(*status),
             presentation: presentation.as_ref().map(|presentation| {
                 openaide_app_server_protocol::snapshot::ToolPresentationSnapshot {
-                    kind: match presentation.kind {
-                        crate::protocol::model::ToolPresentationKind::Skill => {
-                            openaide_app_server_protocol::snapshot::ToolPresentationKindSnapshot::Skill
-                        }
-                        crate::protocol::model::ToolPresentationKind::Read => {
-                            openaide_app_server_protocol::snapshot::ToolPresentationKindSnapshot::Read
-                        }
-                        crate::protocol::model::ToolPresentationKind::View => {
-                            openaide_app_server_protocol::snapshot::ToolPresentationKindSnapshot::View
-                        }
-                        crate::protocol::model::ToolPresentationKind::List => {
-                            openaide_app_server_protocol::snapshot::ToolPresentationKindSnapshot::List
-                        }
-                        crate::protocol::model::ToolPresentationKind::Search => {
-                            openaide_app_server_protocol::snapshot::ToolPresentationKindSnapshot::Search
-                        }
-                    },
-                    subjects: presentation.subjects.clone(),
+                    actions: presentation
+                        .actions
+                        .iter()
+                        .map(project_tool_presentation_action)
+                        .collect(),
                 }
             }),
             input_summary: input_summary.clone(),
@@ -360,6 +347,42 @@ fn project_activity_step(step: &ActivityStep) -> ActivityStepSnapshot {
                     }
                 })
                 .collect(),
+        },
+    }
+}
+
+fn project_tool_presentation_action(
+    action: &crate::protocol::model::ToolPresentationAction,
+) -> openaide_app_server_protocol::snapshot::ToolPresentationActionSnapshot {
+    use crate::protocol::model::{ToolPresentationAction, ToolSearchTarget};
+    use openaide_app_server_protocol::snapshot::{
+        ToolPresentationActionSnapshot, ToolSearchTargetSnapshot,
+    };
+
+    match action {
+        ToolPresentationAction::Skill { subjects } => ToolPresentationActionSnapshot::Skill {
+            subjects: subjects.clone(),
+        },
+        ToolPresentationAction::Read { subjects } => ToolPresentationActionSnapshot::Read {
+            subjects: subjects.clone(),
+        },
+        ToolPresentationAction::View { subjects } => ToolPresentationActionSnapshot::View {
+            subjects: subjects.clone(),
+        },
+        ToolPresentationAction::List { subjects } => ToolPresentationActionSnapshot::List {
+            subjects: subjects.clone(),
+        },
+        ToolPresentationAction::Search {
+            query,
+            scopes,
+            target,
+        } => ToolPresentationActionSnapshot::Search {
+            query: query.clone(),
+            scopes: scopes.clone(),
+            target: match target {
+                ToolSearchTarget::Contents => ToolSearchTargetSnapshot::Contents,
+                ToolSearchTarget::Paths => ToolSearchTargetSnapshot::Paths,
+            },
         },
     }
 }

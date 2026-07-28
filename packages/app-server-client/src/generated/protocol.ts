@@ -871,9 +871,11 @@ export type ActivityStepSnapshot = { "kind": "text", text: string, level?: strin
 
 export type SubagentActivitySnapshot = "delegated" | "interacted" | "running" | "completed" | "failed" | "stopped";
 
-export type ToolPresentationSnapshot = { kind: ToolPresentationKindSnapshot, subjects: Array<string>, };
+export type ToolPresentationSnapshot = { actions: Array<ToolPresentationActionSnapshot>, };
 
-export type ToolPresentationKindSnapshot = "skill" | "read" | "view" | "list" | "search";
+export type ToolPresentationActionSnapshot = { "kind": "skill", subjects: Array<string>, } | { "kind": "read", subjects: Array<string>, } | { "kind": "view", subjects: Array<string>, } | { "kind": "list", subjects: Array<string>, } | { "kind": "search", query: string, scopes: Array<string>, target: ToolSearchTargetSnapshot, };
+
+export type ToolSearchTargetSnapshot = "contents" | "paths";
 
 export type ToolPermissionOutcomeSnapshot = { requestId: RequestId, decision: ToolPermissionDecisionSnapshot, optionId?: string | null, optionLabel?: string | null, resolvedAt: string, };
 
