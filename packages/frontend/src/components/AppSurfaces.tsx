@@ -1,5 +1,6 @@
 import { Menu, X } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { AppSidebarFrame } from "./AppSidebarFrame";
 import { AppPrimaryTaskSurface, createAgentRecoveryActions, primaryTaskSurfaceModel } from "./AppPrimaryTaskSurface";
 import { Sidebar } from "./Sidebar";
 import { SettingsView } from "./settings/SettingsView";
@@ -69,6 +70,29 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     }
     return authenticated;
   };
+  const newTaskInWorktree = (
+    project: (typeof navigationProjects)[number],
+    worktree: (typeof view.primaryTask.newTask.worktreeRepositories)[string]["worktrees"][number],
+  ) => {
+    controller.intents.newTask.selectProject(project);
+    controller.intents.newTask.selectWorktree({
+      label: worktree.name,
+      path: worktree.path,
+      worktreeId: worktree.worktreeId,
+    });
+    callbacks.navigation.openNewTask(project.projectId);
+  };
+  const backFromSettings = isWebShell
+    ? () => {
+        if (activeNavigationTaskId) {
+          callbacks.navigation.openTask(activeNavigationTaskId);
+          return;
+        }
+        callbacks.navigation.openNewTask(
+          bootstrap.surface === "settings" ? bootstrap.projectId : undefined,
+        );
+      }
+    : undefined;
   const { openingNativeSession, renderableTaskSnapshot } = taskSurfaceModel;
   useEffect(() => {
     if (
@@ -215,7 +239,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           onSetTaskTitle={callbacks.navigation.setTaskTitle}
           onRestoreNativeSession={callbacks.navigation.restoreNativeSession}
           onSearchChange={callbacks.navigation.changeSearch}
-          onSettings={callbacks.navigation.openSettings}
+          onSettings={() => callbacks.navigation.openSettings()}
           onToggleArchived={callbacks.navigation.toggleArchived}
           projects={navigationProjects}
           searchQuery={navigation.searchQuery}
@@ -236,40 +260,51 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     );
   }
 
-  if (bootstrap.surface === "settings" && !isWebShell) {
+  if (bootstrap.surface === "settings") {
     return (
-      <main className="app-shell editor-shell">
-        <SettingsView
-          onAuthenticate={authenticateAndReturn}
-          onCreateCustomAgent={callbacks.settings.createCustomAgent}
-          onDeleteCustomAgent={callbacks.settings.deleteCustomAgent}
-          onRefresh={callbacks.settings.refreshSettings}
-          onReplaceCustomAgent={callbacks.settings.replaceCustomAgent}
-          onSelectTab={callbacks.settings.selectSettingsTab}
-          onSetAcpTrace={callbacks.settings.setAcpTrace}
-          onSetAgentEnabled={callbacks.settings.setAgentEnabled}
-          onSetComposerSubmitShortcut={callbacks.settings.setComposerSubmitShortcut}
-          onUpdateCustomAgentMetadata={callbacks.settings.updateCustomAgentMetadata}
-          onUnlockDeveloperSettings={callbacks.settings.unlockDeveloperSettings}
-          preferences={preferences}
-          preferredAgentId={bootstrap.settingsAgentId}
-          recoveryActions={settingsRecoveryActions}
-          state={settings}
-        />
-      </main>
+      <SettingsView
+        desktopNotifications={taskNotifications?.settings}
+        onAuthenticate={authenticateAndReturn}
+        onBackToApp={backFromSettings}
+        onCreateCustomAgent={callbacks.settings.createCustomAgent}
+        onDeleteCustomAgent={callbacks.settings.deleteCustomAgent}
+        onDeleteMcpServer={callbacks.settings.deleteMcpServer}
+        onGetMcpServerDetails={callbacks.settings.getMcpServerDetails}
+        onGetSkillDetails={callbacks.settings.getSkillDetails}
+        onNewTaskInWorktree={newTaskInWorktree}
+        onRefresh={callbacks.settings.refreshSettings}
+        onReplaceCustomAgent={callbacks.settings.replaceCustomAgent}
+        onSelectTab={callbacks.settings.selectSettingsTab}
+        onSetDesktopNotifications={taskNotifications?.setEnabled}
+        onSetAcpTrace={callbacks.settings.setAcpTrace}
+        onSetAgentEnabled={callbacks.settings.setAgentEnabled}
+        onSetMcpServerEnabled={callbacks.settings.setMcpServerEnabled}
+        onSaveMcpServer={callbacks.settings.saveMcpServer}
+        onSetComposerSubmitShortcut={callbacks.settings.setComposerSubmitShortcut}
+        onUpdateCustomAgentMetadata={callbacks.settings.updateCustomAgentMetadata}
+        onUnlockDeveloperSettings={callbacks.settings.unlockDeveloperSettings}
+        preferences={preferences}
+        preferredAgentId={bootstrap.settingsAgentId}
+        projects={navigationProjects}
+        recoveryActions={settingsRecoveryActions}
+        state={settings}
+        worktreeIntents={controller.intents.newTask}
+        worktreeRepositories={view.primaryTask.newTask.worktreeRepositories}
+      />
     );
   }
 
   if (isWebWorkbench) {
     const routedActiveTask = bootstrap.taskId ? activeTask : undefined;
-    const mobileTitle = bootstrap.surface === "settings"
-      ? "Settings"
-      : renderableTaskSnapshot?.task.title ?? routedActiveTask?.title ?? (openingNativeSession ? "Opening session" : bootstrap.taskId ? "Opening task" : "New task");
+    const mobileTitle = renderableTaskSnapshot?.task.title
+      ?? routedActiveTask?.title
+      ?? (openingNativeSession ? "Opening session" : bootstrap.taskId ? "Opening task" : "New task");
     const mobileProject = activeTask?.project_label ?? navigation.projects[0]?.label ?? "OpenAIDE";
     const mobileTaskStatus = renderableTaskSnapshot?.task.status ?? routedActiveTask?.status;
-    const mobileSubtitle = bootstrap.surface === "settings"
-      ? "Agent and app configuration"
-      : [mobileTaskStatus ? taskStatusLabel(mobileTaskStatus) : undefined, mobileProject].filter(Boolean).join(" · ");
+    const mobileSubtitle = [
+      mobileTaskStatus ? taskStatusLabel(mobileTaskStatus) : undefined,
+      mobileProject,
+    ].filter(Boolean).join(" · ");
     const closeAfter = <T extends unknown[]>(callback: (...args: T) => void) => (...args: T) => {
       closeMobileNavigation();
       callback(...args);
@@ -279,8 +314,44 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
       requestNewTaskFocus();
       callbacks.navigation.openNewTask(projectId);
     };
+    const taskNavigation = (
+      <Sidebar
+        activeTaskId={sidebarActiveTaskId}
+        groupByProject={true}
+        hiddenFromAccessibility={mobileLayoutActive && !mobileNavigation.active}
+        modal={mobileLayoutActive && mobileNavigation.active}
+        loadingTasks={!backendReady}
+        nativeSessions={navigation.nativeSessions}
+        nativeSessionMutations={navigation.nativeSessionMutations}
+        nativeSessionAgentId={navigation.newTaskSelection.agentId}
+        nativeSessionAgentName={navigation.newTaskSelection.agentLabel}
+        nativeSessionProjectId={navigation.newTaskSelection.projectId}
+        onArchiveNativeSession={callbacks.navigation.archiveNativeSession}
+        onArchiveTask={callbacks.navigation.archiveTask}
+        onLoadNativeSessions={callbacks.navigation.loadNativeSessions}
+        onManageWorktrees={(projectId) => { closeMobileNavigation({ restoreFocus: false }); manageWorktrees(projectId); }}
+        onNewTask={openNewTaskFromNavigation}
+        onOpenNativeSession={closeAfter(callbacks.navigation.openNativeSession)}
+        onOpenTask={closeAfter(callbacks.navigation.openTask)}
+        onRecoverNativeSessions={(kind) => kind === "launchFailed"
+          ? callbacks.navigation.loadNativeSessions()
+          : callbacks.navigation.openSettings()}
+        onRestoreTask={callbacks.navigation.restoreTask}
+        onSetTaskPinned={callbacks.navigation.setTaskPinned}
+        onSetTaskTitle={callbacks.navigation.setTaskTitle}
+        onRestoreNativeSession={callbacks.navigation.restoreNativeSession}
+        onSearchChange={callbacks.navigation.changeSearch}
+        onSettings={closeAfter(() => callbacks.navigation.openSettings())}
+        onToggleArchived={callbacks.navigation.toggleArchived}
+        projects={navigation.projects}
+        searchQuery={navigation.searchQuery}
+        showArchived={navigation.showArchived}
+        taskListError={navigation.taskListError}
+        tasks={visibleTasks}
+      />
+    );
     return (
-      <main
+      <AppSidebarFrame
         className={[
           "app-shell web-workbench-shell",
           mobileNavigationOpen ? "mobile-navigation-open" : undefined,
@@ -291,6 +362,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         onPointerDownCapture={mobileNavigation.beginSwipe}
         onPointerMoveCapture={mobileNavigation.trackSwipe}
         onPointerUp={mobileNavigation.endSwipe}
+        sidebar={taskNavigation}
         style={mobileNavigation.dragProgress === undefined
           ? undefined
           : { "--mobile-navigation-progress": mobileNavigation.dragProgress } as CSSProperties}
@@ -329,26 +401,6 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         >
           {appServerError ? (
             <AppServerErrorView message={appServerError} />
-          ) : bootstrap.surface === "settings" ? (
-            <SettingsView
-              desktopNotifications={taskNotifications?.settings}
-              onAuthenticate={authenticateAndReturn}
-              onCreateCustomAgent={callbacks.settings.createCustomAgent}
-              onDeleteCustomAgent={callbacks.settings.deleteCustomAgent}
-              onRefresh={callbacks.settings.refreshSettings}
-              onReplaceCustomAgent={callbacks.settings.replaceCustomAgent}
-              onSelectTab={callbacks.settings.selectSettingsTab}
-              onSetDesktopNotifications={taskNotifications?.setEnabled}
-              onSetAcpTrace={callbacks.settings.setAcpTrace}
-              onSetAgentEnabled={callbacks.settings.setAgentEnabled}
-              onSetComposerSubmitShortcut={callbacks.settings.setComposerSubmitShortcut}
-              onUpdateCustomAgentMetadata={callbacks.settings.updateCustomAgentMetadata}
-              onUnlockDeveloperSettings={callbacks.settings.unlockDeveloperSettings}
-              preferences={preferences}
-              preferredAgentId={bootstrap.settingsAgentId}
-              recoveryActions={settingsRecoveryActions}
-              state={settings}
-            />
           ) : (
             <AppPrimaryTaskSurface
               controller={controller}
@@ -358,43 +410,8 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
             />
           )}
         </section>
-        <Sidebar
-          activeTaskId={sidebarActiveTaskId}
-          groupByProject={true}
-          hiddenFromAccessibility={mobileLayoutActive && !mobileNavigation.active}
-          modal={mobileLayoutActive && mobileNavigation.active}
-          loadingTasks={!backendReady}
-          nativeSessions={navigation.nativeSessions}
-          nativeSessionMutations={navigation.nativeSessionMutations}
-          nativeSessionAgentId={navigation.newTaskSelection.agentId}
-          nativeSessionAgentName={navigation.newTaskSelection.agentLabel}
-          nativeSessionProjectId={navigation.newTaskSelection.projectId}
-          onArchiveNativeSession={callbacks.navigation.archiveNativeSession}
-          onArchiveTask={callbacks.navigation.archiveTask}
-          onLoadNativeSessions={callbacks.navigation.loadNativeSessions}
-          onManageWorktrees={(projectId) => { closeMobileNavigation({ restoreFocus: false }); manageWorktrees(projectId); }}
-          onNewTask={openNewTaskFromNavigation}
-          onOpenNativeSession={closeAfter(callbacks.navigation.openNativeSession)}
-          onOpenTask={closeAfter(callbacks.navigation.openTask)}
-          onRecoverNativeSessions={(kind) => kind === "launchFailed"
-            ? callbacks.navigation.loadNativeSessions()
-            : callbacks.navigation.openSettings()}
-          onRestoreTask={callbacks.navigation.restoreTask}
-          onSetTaskPinned={callbacks.navigation.setTaskPinned}
-          onSetTaskTitle={callbacks.navigation.setTaskTitle}
-          onRestoreNativeSession={callbacks.navigation.restoreNativeSession}
-          onSearchChange={callbacks.navigation.changeSearch}
-          onSettings={closeAfter(callbacks.navigation.openSettings)}
-          onToggleArchived={callbacks.navigation.toggleArchived}
-          projects={navigation.projects}
-          searchQuery={navigation.searchQuery}
-          settingsActive={bootstrap.surface === "settings"}
-          showArchived={navigation.showArchived}
-          taskListError={navigation.taskListError}
-          tasks={visibleTasks}
-        />
         {managementSurface}
-      </main>
+      </AppSidebarFrame>
     );
   }
 

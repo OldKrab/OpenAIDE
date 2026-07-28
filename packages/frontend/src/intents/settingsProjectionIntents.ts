@@ -1,6 +1,7 @@
 import {
   SETTINGS_GET_AGENT_DETAILS,
   SETTINGS_GET_MCP_SERVERS,
+  SETTINGS_GET_SKILL_DETAILS,
   SETTINGS_GET_SKILLS,
   type BackendConnection,
 } from "@openaide/app-server-client";
@@ -9,6 +10,7 @@ import type { AgentOption } from "../state/composerOptions";
 import type { AppState } from "../state/store";
 import {
   mapMcpServersProjection,
+  mapSkillDetailsProjection,
   mapSkillsProjection,
 } from "../state/settingsProjectionMapping";
 import {
@@ -37,6 +39,16 @@ export async function refreshSettingsProjectionsThroughBackend(
     refreshSkills(context, backendConnection),
   ]);
   return true;
+}
+
+export async function loadSkillDetailsThroughBackend(
+  context: SettingsProjectionIntentContext,
+  id: string,
+) {
+  const backendConnection = context.backendConnection;
+  if (!backendConnection) throw new Error("Skill details require the App Server.");
+  const result = await backendConnection.request(SETTINGS_GET_SKILL_DETAILS, { id });
+  return mapSkillDetailsProjection(result);
 }
 
 async function refreshAgentDetails(

@@ -58,7 +58,7 @@ describe("AgentSettingsTab interactions", () => {
   });
 
   it("starts Add Custom Agent as a normal new draft", () => {
-    const view = renderAgentSettings({ agents: [builtInAgent("codex")] });
+    const view = renderAgentSettings({ agents: [builtInAgent("codex")], openFirst: false });
 
     act(() => {
       buttonByText(view.root, "Add agent").props.onClick();
@@ -71,7 +71,7 @@ describe("AgentSettingsTab interactions", () => {
   });
 
   it("puts required new Agent launch fields before icon customization", () => {
-    const view = renderAgentSettings({ agents: [builtInAgent("codex")] });
+    const view = renderAgentSettings({ agents: [builtInAgent("codex")], openFirst: false });
 
     act(() => {
       buttonByText(view.root, "Add agent").props.onClick();
@@ -87,7 +87,7 @@ describe("AgentSettingsTab interactions", () => {
 
   it("keeps blank new custom Agent drafts local until required launch fields are filled", () => {
     const onCreateCustomAgent = vi.fn();
-    const view = renderAgentSettings({ agents: [builtInAgent("codex")], onCreateCustomAgent });
+    const view = renderAgentSettings({ agents: [builtInAgent("codex")], onCreateCustomAgent, openFirst: false });
 
     act(() => {
       buttonByText(view.root, "Add agent").props.onClick();
@@ -114,15 +114,16 @@ describe("AgentSettingsTab interactions", () => {
   });
 
   it("labels Agent and environment add actions distinctly", () => {
-    const view = renderAgentSettings({ agents: [customAgent("custom.local")] });
+    const view = renderAgentSettings({ agents: [customAgent("custom.local")], openFirst: false });
 
     expect(buttonByText(view.root, "Add agent")).toBeTruthy();
+    act(() => view.root.findByProps({ className: "agent-catalog-row" }).props.onClick());
     expect(buttonByText(view.root, "Add variable")).toBeTruthy();
     expect(buttonsByText(view.root, "Add")).toHaveLength(0);
   });
 
   it("cancels a new custom Agent draft back to the selected Agent", () => {
-    const view = renderAgentSettings({ agents: [builtInAgent("codex")] });
+    const view = renderAgentSettings({ agents: [builtInAgent("codex")], openFirst: false });
 
     act(() => {
       buttonByText(view.root, "Add agent").props.onClick();
@@ -169,7 +170,7 @@ describe("AgentSettingsTab interactions", () => {
     expect(inputByProps(view.root, { value: "Edited Agent" })).toBeTruthy();
   });
 
-  it("prevents Agent selection from silently discarding an unsaved draft", () => {
+  it("prevents leaving an Agent while it has an unsaved draft", () => {
     const view = renderAgentSettings({
       agents: [customAgent("custom.local"), builtInAgent("codex")],
     });
@@ -178,10 +179,7 @@ describe("AgentSettingsTab interactions", () => {
       inputByProps(view.root, { value: "Custom Agent" }).props.onChange({ currentTarget: { value: "Unsaved name" } });
     });
 
-    const agentRows = view.root.findByProps({ "aria-label": "Agents", role: "list" }).findAllByType("button");
-    expect(agentRows.every((button) => button.props.disabled === true)).toBe(true);
-    expect(buttonByText(view.root, "Add agent").props.disabled).toBe(true);
-    expect(textContent(view.root)).toContain("Save or cancel changes before selecting another agent.");
+    expect(buttonByText(view.root, "Back to Agents").props.disabled).toBe(true);
     expect(inputByProps(view.root, { value: "Unsaved name" })).toBeTruthy();
   });
 
@@ -219,7 +217,7 @@ describe("AgentSettingsTab interactions", () => {
     });
 
     expect(textContent(view.root)).toContain("Disabled");
-    expect(textContent(view.root)).toContain("Agent is hidden from new task selection.");
+    expect(textContent(view.root)).not.toContain("Agent is hidden from new task selection.");
     expect(textContent(view.root)).not.toContain("Agent is available to be selected and used.");
   });
 
@@ -324,11 +322,11 @@ describe("AgentSettingsTab interactions", () => {
     expect(buttonByText(view.root, "Sign in with browser").props.disabled).toBe(true);
   });
 
-  it("preserves the empty Agent list header text from the original tab", () => {
+  it("shows a useful empty Agent catalog", () => {
     const view = renderAgentSettings({ agents: [] });
-    const details = view.root.findByProps({ className: "agent-detail-identity" });
 
-    expect(textContent(details)).toBe("Built-in");
+    expect(textContent(view.root)).toContain("No agents configured");
+    expect(buttonByText(view.root, "Add agent")).toBeTruthy();
   });
 });
 
@@ -341,6 +339,7 @@ function renderAgentSettings({
   onSetAgentEnabled = vi.fn(),
   onUpdateCustomAgentMetadata = vi.fn(),
   onAuthenticate = vi.fn(),
+  openFirst = true,
   recoveryActions,
 }: {
   agents: AgentSettingsRecord[];
@@ -351,6 +350,7 @@ function renderAgentSettings({
   onSetAgentEnabled?: (agentId: string, enabled: boolean) => void;
   onUpdateCustomAgentMetadata?: Parameters<typeof AgentSettingsTab>[0]["onUpdateCustomAgentMetadata"];
   onAuthenticate?: Parameters<typeof AgentSettingsTab>[0]["onAuthenticate"];
+  openFirst?: boolean;
   recoveryActions?: AgentRecoveryActions;
 }) {
   let view: ReactTestRenderer | undefined;
@@ -369,6 +369,11 @@ function renderAgentSettings({
       />,
     );
   });
+  if (openFirst && agents.length) {
+    act(() => {
+      view!.root.findAllByProps({ className: "agent-catalog-row" })[0].props.onClick();
+    });
+  }
   return view!;
 }
 

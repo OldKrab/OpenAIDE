@@ -4,115 +4,216 @@
   height: 100vh;
   overflow: hidden;
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  padding: 18px 22px;
+  background: var(--oa-bg);
+}
+
+@media (min-width: 761px) {
+  body[data-shell="web"] .settings-view {
+    --app-sidebar-width: 304px;
+  }
+}
+
+.settings-sidebar {
+  grid-column: 1;
+  grid-row: 1;
+  min-width: 0;
+  min-height: 0;
+  border-right: 1px solid var(--oa-border-subtle);
+  background: color-mix(in oklch, var(--oa-panel) 96%, var(--oa-bg));
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  align-content: start;
+  gap: 14px;
+  overflow-y: auto;
+  padding: 14px 10px;
+}
+
+.settings-sidebar-heading {
+  display: grid;
+  gap: 10px;
+}
+
+.settings-back-to-app {
+  width: max-content;
+  min-height: 28px;
+  border: 0;
+  border-radius: var(--oa-radius-sm);
+  background: transparent;
+  color: var(--oa-muted);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+}
+
+.settings-back-to-app:hover {
+  background: var(--oa-raised);
+  color: var(--oa-text);
 }
 
 .settings-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 12px;
+  gap: 8px;
+  padding: 0 6px;
 }
 
-.settings-header-copy {
+.settings-header > span {
   min-width: 0;
   display: grid;
-  gap: 2px;
-}
-
-.settings-header h1 {
-  margin: 0;
-  font-size: 17px;
-  font-weight: 600;
+  line-height: 1.2;
 }
 
 .settings-title-button {
   border: 0;
-  border-radius: var(--oa-radius-sm);
   background: transparent;
-  color: inherit;
-  font: inherit;
+  color: var(--oa-text);
+  font-size: 14px;
+  font-weight: 650;
   padding: 0;
   text-align: left;
 }
 
-.settings-title-button:hover {
-  color: var(--oa-text);
-}
-
-.settings-header p {
-  margin: 0;
+.settings-header small {
   color: var(--oa-muted);
+  font-size: 11px;
 }
 
-.settings-header button {
-  min-height: 28px;
+.settings-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.settings-header-actions button {
+  width: 28px;
+  height: 28px;
   border: 0;
   border-radius: var(--oa-radius-sm);
   background: transparent;
-  color: var(--oa-text);
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 9px;
-}
-
-.settings-header button:hover {
-  background: var(--oa-raised);
-}
-
-.settings-header button:disabled {
-  opacity: 0.55;
-}
-
-.settings-header .settings-title-button {
-  min-height: 0;
-  display: inline;
-  gap: 0;
+  color: var(--oa-muted);
+  display: grid;
+  place-items: center;
   padding: 0;
 }
 
-.settings-header .settings-title-button:hover {
+.settings-header-actions button:hover {
+  background: var(--oa-raised);
+  color: var(--oa-text);
+}
+
+.settings-header-actions button:disabled {
+  opacity: 0.55;
+}
+
+.settings-search {
+  height: 31px;
+  border: 1px solid var(--oa-border);
+  border-radius: 7px;
+  background: var(--oa-raised);
+  color: var(--oa-muted);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 9px;
+}
+
+.settings-search:focus-within {
+  border-color: var(--oa-focus);
   background: transparent;
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--oa-focus) 13%, transparent);
 }
 
-.settings-body {
+.settings-search input {
   min-width: 0;
-  min-height: 0;
-  display: grid;
-  grid-template-columns: 160px minmax(0, 1fr);
-  gap: 16px;
-  align-items: stretch;
-  overflow: hidden;
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--oa-text);
 }
 
-.settings-content {
+.settings-catalog-tools {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-bottom: 22px;
+}
+
+.settings-catalog-search {
+  width: min(320px, 100%);
+  height: 32px;
+  border: 1px solid var(--oa-border);
+  border-radius: 7px;
+  background: var(--oa-raised);
+  color: var(--oa-muted);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 9px;
+}
+
+.settings-catalog-search:focus-within {
+  border-color: var(--oa-focus);
+  background: transparent;
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--oa-focus) 13%, transparent);
+}
+
+.settings-catalog-search input {
   min-width: 0;
-  min-height: 0;
-  overflow-x: hidden;
-  overflow-y: auto;
-  padding-bottom: 42px;
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--oa-text);
+}
+
+@media (max-width: 760px) {
+  .settings-catalog-tools {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .settings-catalog-tools-search-only {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .settings-catalog-search {
+    width: 100%;
+  }
 }
 
 .settings-tabs {
-  min-width: 0;
+  display: grid;
   align-self: start;
+  gap: 16px;
+}
+
+.settings-tabs section {
   display: grid;
   gap: 3px;
-  border-right: 1px solid var(--oa-border);
-  padding-right: 10px;
+}
+
+.settings-tabs h2 {
+  margin: 0;
+  color: var(--oa-muted);
+  padding: 0 8px 2px;
+  font-size: 10px;
+  font-weight: 650;
 }
 
 .settings-tabs button {
   width: 100%;
-  min-height: 28px;
-  align-self: start;
+  min-height: 31px;
   border: 0;
   border-radius: var(--oa-radius-sm);
   background: transparent;
   color: var(--oa-muted);
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 7px;
   padding: 5px 8px;
   text-align: left;
 }
@@ -125,6 +226,147 @@
 .settings-tabs button.selected {
   background: var(--oa-selected);
   color: var(--oa-text);
+}
+
+.settings-tabs > p {
+  margin: 0;
+  color: var(--oa-muted);
+  padding: 6px 8px;
+  font-size: 11px;
+}
+
+.settings-content {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 44px clamp(24px, 4vw, 58px) 42px;
+}
+
+.settings-page-heading {
+  width: min(920px, 100%);
+  margin: 0 auto 28px;
+}
+
+.settings-page-heading > span {
+  color: var(--oa-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.settings-page-heading h1 {
+  margin: 3px 0 0;
+  font-size: 22px;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+.settings-content:has(.agent-focused-view) > .settings-page-heading,
+.settings-content:has(.skill-document) > .settings-page-heading,
+.settings-content:has(.settings-worktree-detail) > .settings-page-heading {
+  display: none;
+}
+
+.settings-detail-back {
+  min-height: 32px;
+  border: 0;
+  border-radius: var(--oa-radius-sm);
+  background: transparent;
+  color: var(--oa-text);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 18px -7px;
+  padding: 5px 7px;
+  font-size: 13px;
+  font-weight: 550;
+}
+
+.settings-detail-back:hover:not(:disabled) {
+  background: var(--oa-raised);
+}
+
+.settings-mobile-index,
+.mobile-settings-index-button {
+  display: none;
+}
+
+.mobile-settings-index-button {
+  min-height: 30px;
+  border: 0;
+  border-radius: var(--oa-radius-sm);
+  background: transparent;
+  color: var(--oa-muted);
+  align-items: center;
+  gap: 5px;
+  margin-left: -7px;
+  padding: 4px 7px;
+}
+
+.settings-mobile-index.open {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  align-content: start;
+  gap: 16px;
+  padding: 18px 16px 42px;
+}
+
+.settings-mobile-index > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.settings-mobile-index > header > span {
+  display: grid;
+}
+
+.settings-mobile-index > header strong {
+  font-size: 18px;
+}
+
+.settings-mobile-index > header small {
+  color: var(--oa-muted);
+}
+
+.settings-mobile-index nav,
+.settings-mobile-index section {
+  display: grid;
+  gap: 4px;
+}
+
+.settings-mobile-index nav {
+  gap: 18px;
+}
+
+.settings-mobile-index h2 {
+  margin: 0;
+  color: var(--oa-muted);
+  padding: 0 7px 3px;
+  font-size: 11px;
+}
+
+.settings-mobile-index nav button {
+  min-height: 46px;
+  border: 0;
+  border-radius: var(--oa-radius-sm);
+  background: transparent;
+  color: var(--oa-text);
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  text-align: left;
+}
+
+.settings-mobile-index nav button:hover {
+  background: var(--oa-raised);
 }
 
 .settings-panel {

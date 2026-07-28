@@ -10,7 +10,8 @@ use openaide_app_server_protocol::ids::{ClientInstanceId, ClientRequestId, State
 use openaide_app_server_protocol::methods::{
     AGENT_AUTHENTICATE, AGENT_LIST_SESSIONS, ATTACHMENT_REVEAL, ATTACHMENT_REVEAL_SENT,
     CLIENT_CAPABILITIES_CHANGED, CLIENT_DETACH, CLIENT_HEARTBEAT, CLIENT_INITIALIZE,
-    DIAGNOSTICS_GET_RUNTIME, SETTINGS_GET_MCP_SERVERS, SETTINGS_GET_PREFERENCES,
+    DIAGNOSTICS_GET_RUNTIME, MCP_CREATE_SERVER, MCP_DELETE_SERVER, MCP_GET_SERVER_DETAILS,
+    MCP_SET_SERVER_ENABLED, MCP_UPDATE_SERVER, SETTINGS_GET_MCP_SERVERS, SETTINGS_GET_PREFERENCES,
     SETTINGS_GET_RUNTIME, SETTINGS_GET_SKILLS, SETTINGS_UPDATE_PREFERENCES,
     SETTINGS_UPDATE_RUNTIME, SHELL_RESOLVE_FILE_REVEAL, STATE_SUBSCRIBE, STATE_UNSUBSCRIBE,
     TASK_CHAT_PAGE, TASK_COMPOSER_HISTORY,
@@ -715,7 +716,7 @@ fn runtime_settings_get_and_update_use_app_server_protocol() {
 }
 
 #[test]
-fn non_agent_settings_reads_report_missing_discovery_sources_as_unavailable() {
+fn non_agent_settings_reads_report_each_discovery_capability_independently() {
     let mut gateway = gateway();
     let connection_id = ConnectionId::new("conn-1");
     initialize(&mut gateway, connection_id.clone());
@@ -727,7 +728,7 @@ fn non_agent_settings_reads_report_missing_discovery_sources_as_unavailable() {
     );
     let mcp = response_value(mcp);
     assert!(mcp["result"]["generatedAt"].as_str().is_some());
-    assert_eq!(mcp["result"]["availability"], json!("unavailable"));
+    assert_eq!(mcp["result"]["availability"], json!("available"));
     assert_eq!(mcp["result"]["servers"], json!([]));
     assert!(mcp["result"].get("notices").is_none());
 
@@ -738,9 +739,92 @@ fn non_agent_settings_reads_report_missing_discovery_sources_as_unavailable() {
     );
     let skills = response_value(skills);
     assert!(skills["result"]["generatedAt"].as_str().is_some());
-    assert_eq!(skills["result"]["availability"], json!("unavailable"));
-    assert_eq!(skills["result"]["skills"], json!([]));
+    assert_eq!(skills["result"]["availability"], json!("available"));
+    assert!(skills["result"]["skills"].is_array());
     assert!(skills["result"].get("notices").is_none());
+}
+
+#[test]
+fn mcp_definition_methods_use_the_app_server_protocol() {
+    let mut gateway = gateway();
+    let connection_id = ConnectionId::new("conn-1");
+    initialize(&mut gateway, connection_id.clone());
+    let server = json!({
+        "id": "mcp-files",
+        "label": "Filesystem",
+        "description": "Approved files",
+        "enabled": true,
+        "scope": { "kind": "global" },
+        "configuration": {
+            "transport": "stdio",
+            "commandLine": "/usr/bin/npx filesystem",
+            "command": "/usr/bin/npx",
+            "args": ["filesystem"],
+            "secretEnv": ["TOKEN"]
+        }
+    });
+
+    let created = response_value(gateway.handle_inbound(
+        connection_id.clone(),
+        request("2", MCP_CREATE_SERVER, json!({ "server": server })),
+        AppServerTime(2),
+    ));
+    assert_eq!(created["result"]["serverId"], json!("mcp-files"));
+    assert_eq!(
+        created["result"]["servers"]["servers"][0]["status"],
+        json!("configured")
+    );
+
+    let details = response_value(gateway.handle_inbound(
+        connection_id.clone(),
+        request("3", MCP_GET_SERVER_DETAILS, json!({ "id": "mcp-files" })),
+        AppServerTime(3),
+    ));
+    assert_eq!(details["result"]["server"]["label"], json!("Filesystem"));
+
+    let mut updated_server = details["result"]["server"].clone();
+    updated_server["label"] = json!("Local files");
+    let updated = response_value(gateway.handle_inbound(
+        connection_id.clone(),
+        request(
+            "4",
+            MCP_UPDATE_SERVER,
+            json!({
+                "server": updated_server,
+                "expectedSecretNames": ["TOKEN"]
+            }),
+        ),
+        AppServerTime(4),
+    ));
+    assert_eq!(
+        updated["result"]["servers"]["servers"][0]["label"],
+        json!("Local files")
+    );
+
+    let disabled = response_value(gateway.handle_inbound(
+        connection_id.clone(),
+        request(
+            "5",
+            MCP_SET_SERVER_ENABLED,
+            json!({ "id": "mcp-files", "enabled": false }),
+        ),
+        AppServerTime(5),
+    ));
+    assert_eq!(
+        disabled["result"]["servers"]["servers"][0]["status"],
+        json!("disabled")
+    );
+
+    let deleted = response_value(gateway.handle_inbound(
+        connection_id,
+        request(
+            "6",
+            MCP_DELETE_SERVER,
+            json!({ "id": "mcp-files", "expectedSecretNames": ["TOKEN"] }),
+        ),
+        AppServerTime(6),
+    ));
+    assert_eq!(deleted["result"]["servers"]["servers"], json!([]));
 }
 
 #[test]
@@ -1996,7 +2080,7 @@ fn gateway_with_project_context_and_store() -> (RpcGateway, Store) {
         Arc::new(RejectingAgentAuthenticate),
         Arc::new(RejectingAgentCatalogMutations),
         Arc::new(RejectingAgentSettingsDetails),
-        Arc::new(McpServersSettingsService::new()),
+        mcp_servers(),
         Arc::new(SkillsSettingsService::new()),
         app_preferences(),
         runtime_settings(),
@@ -2035,7 +2119,7 @@ fn gateway_with_attachments(attachments: Arc<dyn AttachmentFileBrowserWorkflow>)
         std::sync::Arc::new(RejectingAgentAuthenticate),
         std::sync::Arc::new(RejectingAgentCatalogMutations),
         std::sync::Arc::new(RejectingAgentSettingsDetails),
-        std::sync::Arc::new(McpServersSettingsService::new()),
+        mcp_servers(),
         std::sync::Arc::new(SkillsSettingsService::new()),
         app_preferences(),
         runtime_settings(),
@@ -2067,6 +2151,12 @@ fn app_preferences() -> Arc<AppPreferencesService> {
     let dir = tempfile::tempdir().unwrap().keep();
     let store = crate::storage::Store::open(dir).unwrap();
     Arc::new(AppPreferencesService::new(store))
+}
+
+fn mcp_servers() -> Arc<McpServersSettingsService> {
+    let dir = tempfile::tempdir().unwrap().keep();
+    let store = crate::storage::Store::open(dir).unwrap();
+    Arc::new(McpServersSettingsService::new(store))
 }
 
 fn test_worktrees() -> Arc<crate::worktrees::WorktreeManager> {
@@ -2123,7 +2213,7 @@ fn gateway_with_agent_session_listing(
         std::sync::Arc::new(RejectingAgentAuthenticate),
         std::sync::Arc::new(RejectingAgentCatalogMutations),
         std::sync::Arc::new(RejectingAgentSettingsDetails),
-        std::sync::Arc::new(McpServersSettingsService::new()),
+        mcp_servers(),
         std::sync::Arc::new(SkillsSettingsService::new()),
         app_preferences(),
         runtime_settings(),
@@ -2163,7 +2253,7 @@ fn gateway_with_agent_authenticate(
         agent_authenticate,
         std::sync::Arc::new(RejectingAgentCatalogMutations),
         std::sync::Arc::new(RejectingAgentSettingsDetails),
-        std::sync::Arc::new(McpServersSettingsService::new()),
+        mcp_servers(),
         std::sync::Arc::new(SkillsSettingsService::new()),
         app_preferences(),
         runtime_settings(),

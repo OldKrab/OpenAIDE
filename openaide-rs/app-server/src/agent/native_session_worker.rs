@@ -123,6 +123,19 @@ pub(super) async fn run_native_session_worker(
                         ));
                     }
                     AcpSessionCommand::Load { request, reply_tx } => {
+                        let mcp_servers = match request.secret_resolver.as_deref() {
+                            Some(resolver) => resolver.resolve_mcp_servers(
+                                &initialize.agent_capabilities.mcp_capabilities,
+                            ),
+                            None => Ok(Vec::new()),
+                        };
+                        let mcp_servers = match mcp_servers {
+                            Ok(servers) => servers,
+                            Err(error) => {
+                                let _ = reply_tx.send(Err(error));
+                                continue;
+                            }
+                        };
                         let connection = active_session.connection();
                         let runner = AcpSessionRunner::new(
                             &request_agent_id,
@@ -135,6 +148,7 @@ pub(super) async fn run_native_session_worker(
                             .load(
                                 request.session_id,
                                 normalized_session_cwd(&request.cwd),
+                                mcp_servers,
                                 &load_replay,
                             )
                             .await

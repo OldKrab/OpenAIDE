@@ -1,0 +1,118 @@
+.settings-worktree-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: color-mix(in oklch, black 28%, transparent);
+  display: grid;
+  place-items: center;
+  padding: 20px;
+}
+
+.settings-worktree-dialog {
+  width: min(430px, 100%);
+  max-height: calc(100vh - 40px);
+  overflow-y: auto;
+  border: 1px solid var(--oa-border);
+  border-radius: 9px;
+  background: var(--oa-panel);
+  box-shadow: 0 18px 56px color-mix(in oklch, black 28%, transparent);
+  padding: 18px;
+}
+
+.settings-worktree-dialog > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.settings-worktree-dialog > header > span {
+  display: grid;
+}
+
+.settings-worktree-dialog h2 {
+  margin: 0;
+  font-size: 17px;
+}
+
+.settings-worktree-dialog small,
+.settings-worktree-dialog label > span {
+  color: var(--oa-muted);
+}
+
+.settings-worktree-dialog > header > button {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+}
+
+.settings-worktree-dialog label {
+  position: relative;
+  display: grid;
+  gap: 5px;
+  margin-top: 13px;
+}
+
+.settings-worktree-dialog label > span {
+  font-size: 11px;
+}
+
+.settings-worktree-dialog input,
+.settings-worktree-dialog-select > button {
+  width: 100%;
+  min-height: 34px;
+  border: 1px solid var(--oa-control-border, var(--oa-border));
+  border-radius: var(--oa-radius-sm);
+  background: var(--oa-input-bg, var(--oa-raised));
+  color: var(--oa-text);
+  padding: 5px 9px;
+  font: inherit;
+}
+
+.settings-worktree-dialog input:focus,
+.settings-worktree-dialog-select > button:focus {
+  border-color: var(--oa-focus);
+  outline: 0;
+}
+
+.settings-worktree-dialog-select > button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.settings-worktree-dialog-select [role="listbox"] {
+  position: absolute;
+  inset: calc(100% + 4px) 0 auto;
+  z-index: 1;
+  overflow: hidden;
+  border: 1px solid var(--oa-border);
+  border-radius: var(--oa-radius-sm);
+  background: var(--oa-panel);
+  box-shadow: 0 8px 28px color-mix(in oklch, black 18%, transparent);
+  display: grid;
+  padding: 4px;
+}
+
+.settings-worktree-dialog-select [role="option"] {
+  min-height: 31px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 7px;
+  text-align: left;
+}
+
+.settings-worktree-dialog > footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 24px;
+}
+
+.settings-worktree-dialog > footer button {
+  min-height: 30px;
+  padding: 4px 10px;
+}

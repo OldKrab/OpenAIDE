@@ -76,30 +76,33 @@
   min-width: 0;
   display: grid;
   align-content: start;
-  gap: 18px;
+  gap: 20px;
   padding-left: 20px;
 }
 
 .agent-detail-header {
   min-width: 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  border: 1px solid color-mix(in oklch, var(--oa-border) 84%, var(--oa-selected));
+  border-radius: 12px;
+  background: color-mix(in oklch, var(--oa-bg) 91%, var(--oa-panel));
+  display: grid;
   gap: 18px;
+  padding: 20px;
+  box-shadow: 0 1px 2px color-mix(in oklch, var(--oa-text) 3%, transparent);
 }
 
 .agent-detail-identity {
   min-width: 0;
   display: grid;
-  grid-template-columns: 48px minmax(0, 1fr);
+  grid-template-columns: 72px minmax(0, 1fr);
   align-items: center;
-  gap: 12px;
+  gap: 16px;
 }
 
 .agent-detail-avatar {
-  width: 48px;
-  height: 48px;
-  border-radius: var(--oa-radius-md);
+  width: 72px;
+  height: 72px;
+  border-radius: 16px;
   background: color-mix(in oklch, var(--oa-focus) 12%, var(--oa-raised));
   color: var(--oa-focus);
   display: inline-flex;
@@ -110,13 +113,18 @@
 .agent-detail-identity > span {
   min-width: 0;
   display: grid;
-  gap: 2px;
+  gap: 7px;
 }
 
 .agent-detail-identity .agent-title-line {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+.agent-detail-identity .agent-title-line strong {
+  font-size: 20px;
+  line-height: 1.2;
 }
 
 .agent-detail-identity .agent-source-badge {
@@ -129,6 +137,20 @@
   padding: 2px 8px;
   font-size: 12px;
   font-weight: 500;
+}
+
+.agent-detail-state {
+  min-width: 0;
+  border-top: 1px solid color-mix(in oklch, var(--oa-border) 64%, transparent);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding-top: 14px;
+}
+
+.agent-availability-control {
+  border-left: 1px solid var(--oa-border);
+  padding-left: 14px;
 }
 
 .agent-primary-action {
@@ -156,15 +178,14 @@
 
 .agent-status-panel {
   min-width: 0;
-  border: solid var(--oa-border);
-  border-width: 1px 0;
+  border: 0;
   border-radius: 0;
   background: transparent;
-  display: grid;
-  grid-template-columns: max-content minmax(0, 1fr) max-content;
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px 16px;
-  padding: 10px 0;
+  padding: 0;
   color: var(--oa-text);
 }
 
@@ -173,7 +194,7 @@
 }
 
 .agent-status-panel .settings-inline-message {
-  grid-column: 1 / -1;
+  flex-basis: 100%;
   min-width: 0;
 }
 
@@ -189,7 +210,7 @@
 }
 
 .agent-status-panel > .agent-recovery-actions {
-  grid-column: 1 / -1;
+  flex-basis: 100%;
   margin-top: 0;
 }
 
@@ -223,10 +244,43 @@
 
 .agent-detail-section {
   min-width: 0;
-  border-top: 1px solid var(--oa-border);
+  border: 1px solid color-mix(in oklch, var(--oa-border) 84%, var(--oa-selected));
+  border-radius: 11px;
+  background: color-mix(in oklch, var(--oa-bg) 94%, var(--oa-panel));
   display: grid;
   gap: 14px;
-  padding-top: 18px;
+  padding: 16px 18px;
+  box-shadow: 0 1px 2px color-mix(in oklch, var(--oa-text) 2%, transparent);
+}
+
+.agent-section-heading {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.agent-section-heading strong {
+  font-size: 13px;
+}
+
+.agent-section-heading > button {
+  min-height: 28px;
+  border: 1px solid var(--oa-border);
+  border-radius: var(--oa-radius-sm);
+  background: var(--oa-bg);
+  color: var(--oa-text);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 9px;
+  font-size: 12px;
+}
+
+.agent-section-heading > button:hover {
+  border-color: color-mix(in oklch, var(--oa-focus) 38%, var(--oa-border));
+  background: var(--oa-hover);
 }
 
 .agent-readonly-rows {
@@ -235,12 +289,13 @@
 
 .agent-readonly-row {
   min-width: 0;
-  min-height: 44px;
+  min-height: 46px;
   border-top: 1px solid color-mix(in oklch, var(--oa-border) 58%, transparent);
   display: grid;
   grid-template-columns: 22px minmax(90px, 140px) minmax(0, 1fr);
   align-items: center;
   gap: 10px;
+  padding-block: 6px;
 }
 
 .agent-readonly-row:first-child {
@@ -280,7 +335,7 @@
 .agent-field input,
 .agent-env-row input {
   min-width: 0;
-  min-height: 26px;
+  min-height: 32px;
   border: 1px solid var(--oa-border);
   border-radius: var(--oa-radius-sm);
   background: color-mix(in oklch, var(--oa-panel) 72%, var(--oa-bg));

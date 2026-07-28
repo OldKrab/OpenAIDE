@@ -445,27 +445,49 @@ describe("task list row styles", () => {
     expect(appCss).toMatch(/\.project-task-group-toggle span\s*{[^}]*display:\s*grid;/);
   });
 
-  it("keeps settings header and tabs fixed while settings content scrolls", () => {
+  it("keeps the Settings navigation fixed while page content scrolls", () => {
     expect(appCss).toMatch(/\.app-shell\s*{[^}]*height:\s*100vh;[^}]*overflow:\s*hidden;/);
-    expect(appCss).toMatch(/\.settings-view\s*{[^}]*height:\s*100vh;[^}]*overflow:\s*hidden;[^}]*grid-template-rows:\s*auto minmax\(0,\s*1fr\);/);
-    expect(appCss).toMatch(/\.settings-body\s*{[^}]*min-height:\s*0;[^}]*align-items:\s*stretch;[^}]*overflow:\s*hidden;/);
+    expect(appCss).toMatch(/\.app-sidebar-frame\s*{[^}]*grid-template-columns:\s*var\(--app-sidebar-width,\s*304px\) minmax\(0,\s*1fr\);/);
+    expect(appCss).toMatch(/\.settings-view\s*{[^}]*height:\s*100vh;[^}]*overflow:\s*hidden;/);
+    expect(appCss).toMatch(/body\[data-shell="web"\] \.settings-view\s*{[^}]*--app-sidebar-width:\s*304px;/);
+    expect(appCss).toMatch(/\.settings-sidebar\s*{[^}]*min-height:\s*0;[^}]*overflow-y:\s*auto;/);
     expect(appCss).toMatch(/\.settings-tabs\s*{[^}]*align-self:\s*start;/);
-    expect(appCss).toMatch(/\.settings-tabs button\s*{[^}]*align-self:\s*start;/);
-    expect(appCss).toMatch(/\.settings-content\s*{[^}]*min-height:\s*0;[^}]*overflow-x:\s*hidden;[^}]*overflow-y:\s*auto;[^}]*padding-bottom:\s*42px;/);
+    expect(appCss).toMatch(/\.settings-content\s*{[^}]*min-height:\s*0;[^}]*overflow-x:\s*hidden;[^}]*overflow-y:\s*auto;[^}]*padding:\s*44px clamp\(24px,\s*4vw,\s*58px\) 42px;/);
     expect(appCss).toMatch(/\.settings-tab-panel\s*{[^}]*min-width:\s*0;[^}]*min-height:\s*0;/);
   });
 
-  it("uses compact editor-native proportions for Agent settings", () => {
-    expect(appCss).toMatch(/\.settings-body\s*{[^}]*grid-template-columns:\s*160px minmax\(0,\s*1fr\);[^}]*gap:\s*16px;/);
-    expect(appCss).toMatch(/\.agent-settings-layout\s*{[^}]*grid-template-columns:\s*minmax\(260px,\s*320px\) minmax\(380px,\s*1fr\);/);
-    expect(appCss).toMatch(/\.agent-settings-list button\s*{[^}]*min-height:\s*48px;[^}]*border-radius:\s*var\(--oa-radius-sm\);/);
-    expect(appCss).toMatch(/\.agent-detail-identity\s*{[^}]*grid-template-columns:\s*48px minmax\(0,\s*1fr\);/);
-    expect(appCss).toMatch(/\.agent-detail-avatar\s*{[^}]*width:\s*48px;[^}]*height:\s*48px;/);
-    expect(appCss).toMatch(/\.agent-status-panel\s*{[^}]*border-radius:\s*0;[^}]*background:\s*transparent;[^}]*padding:\s*10px 0;/);
+  it("keeps the shared sidebar controls quiet until they are needed", () => {
+    expect(appCss).toMatch(/\.app-sidebar-frame\.sidebar-collapsed\s*{[^}]*grid-template-columns:\s*0 minmax\(0,\s*1fr\);/);
+    expect(appCss).not.toMatch(/\.app-sidebar-collapse/);
+    expect(appCss).not.toMatch(/\.app-sidebar-resizer::after/);
+    expect(appCss).toMatch(/\.app-sidebar-expand\s*{[^}]*top:\s*10px;[^}]*left:\s*10px;/);
   });
 
-  it("keeps mobile settings tabs adjacent to their panel", () => {
-    expect(appCss).toMatch(/\.settings-body\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);[^}]*grid-template-rows:\s*auto minmax\(0,\s*1fr\);[^}]*gap:\s*12px;/);
+  it("uses the approved card hierarchy for Agent details", () => {
+    expect(appCss).toMatch(/\.app-sidebar-frame\s*{[^}]*grid-template-columns:\s*var\(--app-sidebar-width,\s*304px\) minmax\(0,\s*1fr\);/);
+    expect(appCss).toMatch(/\.agent-focused-view\s*{[^}]*width:\s*min\(1040px,\s*100%\);/);
+    expect(appCss).toMatch(/\.agent-detail-header\s*{[^}]*border:\s*1px solid[^}]*border-radius:\s*12px;[^}]*display:\s*grid;/);
+    expect(appCss).toMatch(/\.agent-detail-identity\s*{[^}]*grid-template-columns:\s*72px minmax\(0,\s*1fr\);/);
+    expect(appCss).toMatch(/\.agent-detail-avatar\s*{[^}]*width:\s*72px;[^}]*height:\s*72px;/);
+    expect(appCss).toMatch(/\.agent-detail-section\s*{[^}]*border:\s*1px solid[^}]*border-radius:\s*11px;/);
+    expect(appCss).toMatch(/\.agent-section-heading > button\s*{[^}]*border:\s*1px solid var\(--oa-border\);[^}]*background:\s*var\(--oa-bg\);/);
+  });
+
+  it("replaces repeated Settings headings with a clear detail back control", () => {
+    expect(appCss).toMatch(
+      /\.settings-content:has\(\.agent-focused-view\) > \.settings-page-heading,\s*\.settings-content:has\(\.skill-document\) > \.settings-page-heading,\s*\.settings-content:has\(\.settings-worktree-detail\) > \.settings-page-heading\s*{[^}]*display:\s*none;/,
+    );
+    expect(appCss).toMatch(/\.settings-detail-back\s*{[^}]*min-height:\s*32px;[^}]*color:\s*var\(--oa-text\);/);
+    expect(appCss).not.toMatch(/\.settings-detail-back\s*{[^}]*!important/);
+  });
+
+  it("uses a dedicated Settings index on constrained widths", () => {
+    expect(appCss).toMatch(/\.settings-content\.mobile-index-open\s*{\s*display:\s*none;/);
+    expect(appCss).toMatch(/\.settings-mobile-index\.open\s*{[^}]*display:\s*grid;/);
+    expect(appCss).toMatch(/\.settings-view\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);[^}]*height:\s*100dvh;/);
+    expect(appCss).toMatch(/@media \(max-width:\s*760px\)\s*{[\s\S]*\.settings-content\s*{[^}]*grid-column:\s*1;/);
+    expect(appCss).toMatch(/\.settings-content,[^{]+\.settings-mobile-index\s*{[^}]*scrollbar-width:\s*none;/);
+    expect(appCss).toMatch(/\.settings-content::-webkit-scrollbar,[^{]+\.settings-mobile-index::-webkit-scrollbar\s*{[^}]*display:\s*none;/);
   });
 
   it("keeps mobile Add Agent controls at touch target size", () => {
@@ -477,8 +499,8 @@ describe("task list row styles", () => {
   it("renders general settings as a searchable compact row list", () => {
     expect(appCss).toMatch(/\.settings-filter\s*{[^}]*border:\s*1px solid var\(--oa-border\);[^}]*display:\s*flex;/);
     expect(appCss).toMatch(/\.settings-filter:focus-within\s*{\s*border-color:\s*var\(--oa-focus\);/);
-    expect(appCss).toMatch(/\.settings-common-list\s*{[^}]*display:\s*grid;[^}]*gap:\s*12px;/);
-    expect(appCss).toMatch(/\.settings-section\s*{[^}]*border-top:\s*1px solid var\(--oa-border\);[^}]*display:\s*grid;/);
+    expect(appCss).toMatch(/\.settings-common-list\s*{[^}]*display:\s*grid;[^}]*gap:\s*18px;/);
+    expect(appCss).toMatch(/\.settings-section-rows\s*{[^}]*border:\s*1px solid color-mix[^}]*border-radius:\s*10px;/);
     expect(appCss).toMatch(/\.settings-row\s*{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\) minmax\(140px,\s*max-content\);/);
     expect(appCss).toMatch(/\.settings-row-value\s*{[^}]*justify-self:\s*end;[^}]*text-overflow:\s*ellipsis;/);
     expect(appCss).toMatch(/code\.settings-row-value\s*{[^}]*overflow-x:\s*auto;[^}]*text-overflow:\s*clip;/);

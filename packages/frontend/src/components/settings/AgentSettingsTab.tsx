@@ -1,3 +1,4 @@
+import { ArrowLeft } from "lucide-react";
 import { useEffect, useState } from "react";
 import type {
   AgentSettingsRecord,
@@ -46,13 +47,13 @@ export function AgentSettingsTab({
   preferredAgentId?: string;
   recoveryActions?: AgentRecoveryActions;
 }) {
-  const [selectedId, setSelectedId] = useState(agents[0]?.id);
+  const [selectedId, setSelectedId] = useState<string>();
   const [confirmDeleteAgentId, setConfirmDeleteAgentId] = useState<string | undefined>();
   const [confirmReplaceAgentId, setConfirmReplaceAgentId] = useState<string | undefined>();
   const [draft, setDraft] = useState<AgentDraft | undefined>();
   const [pendingDeleteAgentId, setPendingDeleteAgentId] = useState<string | undefined>();
   const [pendingSaveAgentId, setPendingSaveAgentId] = useState<string | undefined>();
-  const selectedAgent = agents.find((agent) => agent.id === selectedId) ?? agents[0];
+  const selectedAgent = agents.find((agent) => agent.id === selectedId);
   const selected = draft ? undefined : selectedAgent;
   const activeDraft = draft ?? (selected ? draftFromAgent(selected) : newAgentDraft());
   const isCustom = draft !== undefined || selected?.source_kind === "custom";
@@ -75,7 +76,7 @@ export function AgentSettingsTab({
   useEffect(() => {
     if (!shouldConsumeAgentDeleteAck({ deletedAgentId, pendingDeleteAgentId })) return;
     setDraft(undefined);
-    setSelectedId(agents.find((agent) => agent.id !== deletedAgentId)?.id ?? agents[0]?.id ?? "");
+    setSelectedId(undefined);
     setPendingDeleteAgentId(undefined);
   }, [agents, deletedAgentId, pendingDeleteAgentId]);
 
@@ -136,16 +137,31 @@ export function AgentSettingsTab({
     setDraft(undefined);
   };
 
-  return (
-    <div className="settings-panel agents-settings-panel">
-      <div className="agent-settings-layout">
+  if (!selected && !draft) {
+    return (
+      <div className="settings-panel agents-settings-panel">
         <AgentSettingsList
           agents={agents}
-          draftActive={draft !== undefined}
           onAdd={() => setDraft(newAgentDraft())}
           onSelectAgent={selectAgent}
-          selectedId={activeDraft.agent_id ?? selected?.id}
         />
+      </div>
+    );
+  }
+
+  return (
+    <div className="settings-panel agents-settings-panel">
+      <div className="agent-focused-view">
+        <button
+          aria-label="Back to Agents"
+          className="settings-detail-back agent-detail-back"
+          disabled={draft !== undefined && !isCreating}
+          onClick={() => setSelectedId(undefined)}
+          title={draft !== undefined && !isCreating ? "Save or cancel changes first" : undefined}
+          type="button"
+        >
+          <ArrowLeft size={14} /><span>Back to Agents</span>
+        </button>
         <AgentSettingsDetail
           activeDraft={activeDraft}
           authPending={authPending}

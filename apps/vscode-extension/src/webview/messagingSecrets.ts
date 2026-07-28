@@ -1,7 +1,7 @@
 import type * as vscode from "vscode";
 import type {
-  AgentEnvironmentSecretRef,
   HostToWebviewMessage,
+  SecretRef,
   SecretSyncPayload,
   SecretSyncWrite,
   SecretTransactionMessage,
@@ -130,23 +130,47 @@ function secretSyncWrite(value: unknown): SecretSyncWrite {
     : { target, copyFrom: secretRef(value.copyFrom) };
 }
 
-function secretRef(value: unknown): AgentEnvironmentSecretRef {
-  if (!isObject(value) || value.kind !== "agentEnvironment") {
+function secretRef(value: unknown): SecretRef {
+  if (!isObject(value)) {
     throw new Error("Secure storage reference is invalid.");
   }
-  const agentId = value.agentId;
-  const name = value.name;
-  if (typeof agentId !== "string" || !/^[A-Za-z0-9_.-]+$/.test(agentId)) {
-    throw new Error("Secure storage Agent id is invalid.");
+  if (value.kind === "agentEnvironment") {
+    const agentId = value.agentId;
+    const name = value.name;
+    if (typeof agentId !== "string" || !/^[A-Za-z0-9_.-]+$/.test(agentId)) {
+      throw new Error("Secure storage Agent id is invalid.");
+    }
+    if (typeof name !== "string" || !/^[_A-Za-z][_A-Za-z0-9]*$/.test(name)) {
+      throw new Error("Secure storage environment name is invalid.");
+    }
+    return { kind: "agentEnvironment", agentId, name };
   }
-  if (typeof name !== "string" || !/^[_A-Za-z][_A-Za-z0-9]*$/.test(name)) {
-    throw new Error("Secure storage environment name is invalid.");
+  if (value.kind === "mcp") {
+    const serverId = value.serverId;
+    const field = value.field;
+    const name = value.name;
+    if (typeof serverId !== "string" || !/^[A-Za-z0-9_.-]+$/.test(serverId)) {
+      throw new Error("Secure storage MCP server id is invalid.");
+    }
+    if (field !== "env" && field !== "header") {
+      throw new Error("Secure storage MCP field kind is invalid.");
+    }
+    if (typeof name !== "string") {
+      throw new Error("Secure storage MCP field name is invalid.");
+    }
+    const validName = field === "env"
+      ? /^[_A-Za-z][_A-Za-z0-9]*$/.test(name)
+      : /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(name);
+    if (!validName) throw new Error("Secure storage MCP field name is invalid.");
+    return { kind: "mcp", serverId, field, name };
   }
-  return { kind: "agentEnvironment", agentId, name };
+  throw new Error("Secure storage reference is invalid.");
 }
 
-function secretKey(reference: AgentEnvironmentSecretRef) {
-  return customAgentSecretKey(reference.agentId, reference.name);
+function secretKey(reference: SecretRef) {
+  return reference.kind === "agentEnvironment"
+    ? customAgentSecretKey(reference.agentId, reference.name)
+    : `openaide.mcp.${reference.serverId}.${reference.field}.${reference.name}`;
 }
 
 function safeTransactionError(error: unknown) {

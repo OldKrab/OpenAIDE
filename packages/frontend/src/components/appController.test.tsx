@@ -3176,7 +3176,7 @@ function webTaskBootstrap(taskId?: string, projectId?: string) {
   };
 }
 
-function webSettingsBootstrap(settingsTab?: "agents" | "mcp" | "skills" | "common") {
+function webSettingsBootstrap(settingsTab?: "agents" | "mcp" | "skills" | "common" | "worktrees") {
   return {
     surface: "settings" as const,
     shell: { kind: "web" as const, navigationMode: "project" as const },

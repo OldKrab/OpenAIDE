@@ -5,6 +5,7 @@ pub mod composer_history;
 pub mod cursor;
 pub mod id;
 mod legacy_task_cleanup;
+pub mod mcp_servers;
 pub mod message_store;
 pub mod new_task_defaults;
 pub mod records;

@@ -4,7 +4,7 @@ export const builtInAgents = [
   {
     id: "codex",
     label: "Codex",
-    description: "Built-in ACP Agent. Configuration Options are discovered before task start.",
+    description: "OpenAI coding agent.",
     source_kind: "built_in",
     icon: "openai",
     enabled: true,
@@ -18,7 +18,7 @@ export const builtInAgents = [
   {
     id: "opencode",
     label: "OpenCode",
-    description: "Built-in ACP Agent. Configuration Options are discovered before task start.",
+    description: "Open-source coding agent.",
     source_kind: "built_in",
     icon: "opencode",
     enabled: true,
@@ -40,4 +40,3 @@ export function agentCatalogEntry(agentId: string): AgentCatalogEntry | undefine
 export function resolveAgentCatalogEntry(agentId: string): AgentCatalogEntry {
   return agentCatalogEntry(agentId) ?? defaultAgent;
 }
-

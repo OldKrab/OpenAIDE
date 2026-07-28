@@ -1,7 +1,9 @@
 use std::path::PathBuf;
 use std::sync::mpsc;
 
-use crate::agent::acp_schema::{InitializeRequest, InitializeResponse, SessionConfigOption};
+use crate::agent::acp_schema::{
+    InitializeRequest, InitializeResponse, McpServer, SessionConfigOption,
+};
 use agent_client_protocol::{Agent, ConnectionTo};
 
 use crate::agent::acp_session_lifecycle::{
@@ -82,12 +84,14 @@ impl<'a> AcpSessionRunner<'a> {
     pub(super) async fn start(
         &self,
         cwd: PathBuf,
+        mcp_servers: Vec<McpServer>,
     ) -> Result<(AcpActiveSession, Vec<SessionConfigOption>), agent_client_protocol::Error> {
         start_active_session(
             self.connection,
             cwd,
             &self.initialize,
             self.auth_method_id,
+            mcp_servers,
             self.trace,
         )
         .await
@@ -97,6 +101,7 @@ impl<'a> AcpSessionRunner<'a> {
         &self,
         session_id: String,
         cwd: PathBuf,
+        mcp_servers: Vec<McpServer>,
         load_replay: &LoadReplayCaptures,
     ) -> Result<
         (
@@ -116,6 +121,7 @@ impl<'a> AcpSessionRunner<'a> {
                 agent_id: self.agent_id,
                 session_id,
                 cwd,
+                mcp_servers,
                 preferred_auth_method_id: self.auth_method_id,
             },
         )
@@ -126,6 +132,7 @@ impl<'a> AcpSessionRunner<'a> {
         &self,
         session_id: String,
         cwd: PathBuf,
+        mcp_servers: Vec<McpServer>,
     ) -> Result<
         (
             AcpActiveSession,
@@ -134,13 +141,16 @@ impl<'a> AcpSessionRunner<'a> {
         RuntimeError,
     > {
         resume_active_session(
-            self.agent_id,
             self.connection,
             &self.initialize,
-            session_id,
-            cwd,
-            self.auth_method_id,
             self.trace,
+            super::acp_session_lifecycle::ResumeActiveSessionRequest {
+                agent_id: self.agent_id,
+                session_id,
+                cwd,
+                mcp_servers,
+                preferred_auth_method_id: self.auth_method_id,
+            },
         )
         .await
     }

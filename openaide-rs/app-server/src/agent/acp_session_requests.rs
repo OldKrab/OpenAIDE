@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use crate::agent::acp_schema::{
     InitializeResponse, ListSessionsRequest, ListSessionsResponse, LoadSessionRequest,
-    LoadSessionResponse, NewSessionRequest, NewSessionResponse, ResumeSessionRequest,
+    LoadSessionResponse, McpServer, NewSessionRequest, NewSessionResponse, ResumeSessionRequest,
     ResumeSessionResponse, SessionId,
 };
 use agent_client_protocol::{Agent, ConnectionTo};
@@ -14,9 +14,10 @@ pub(super) async fn request_new_session(
     cwd: PathBuf,
     _initialize: &InitializeResponse,
     _preferred_auth_method_id: Option<&str>,
+    mcp_servers: Vec<McpServer>,
     trace: Option<&AcpTraceSession>,
 ) -> Result<NewSessionResponse, agent_client_protocol::Error> {
-    send_new_session_request(connection, cwd, trace).await
+    send_new_session_request(connection, cwd, mcp_servers, trace).await
 }
 
 pub(super) async fn request_load_session(
@@ -25,9 +26,10 @@ pub(super) async fn request_load_session(
     cwd: PathBuf,
     _initialize: &InitializeResponse,
     _preferred_auth_method_id: Option<&str>,
+    mcp_servers: Vec<McpServer>,
     trace: Option<&AcpTraceSession>,
 ) -> Result<LoadSessionResponse, agent_client_protocol::Error> {
-    send_load_session_request(connection, session_id, cwd, trace).await
+    send_load_session_request(connection, session_id, cwd, mcp_servers, trace).await
 }
 
 pub(super) async fn request_resume_session(
@@ -36,9 +38,10 @@ pub(super) async fn request_resume_session(
     cwd: PathBuf,
     _initialize: &InitializeResponse,
     _preferred_auth_method_id: Option<&str>,
+    mcp_servers: Vec<McpServer>,
     trace: Option<&AcpTraceSession>,
 ) -> Result<ResumeSessionResponse, agent_client_protocol::Error> {
-    send_resume_session_request(connection, session_id, cwd, trace).await
+    send_resume_session_request(connection, session_id, cwd, mcp_servers, trace).await
 }
 
 pub(super) async fn request_session_list(
@@ -54,9 +57,10 @@ pub(super) async fn request_session_list(
 async fn send_new_session_request(
     connection: &ConnectionTo<Agent>,
     cwd: PathBuf,
+    mcp_servers: Vec<McpServer>,
     trace: Option<&AcpTraceSession>,
 ) -> Result<NewSessionResponse, agent_client_protocol::Error> {
-    let request = NewSessionRequest::new(cwd);
+    let request = NewSessionRequest::new(cwd).mcp_servers(mcp_servers);
     if let Some(trace) = trace {
         trace.record("client_to_agent", "session/new.request", &request);
     }
@@ -71,9 +75,10 @@ async fn send_load_session_request(
     connection: &ConnectionTo<Agent>,
     session_id: SessionId,
     cwd: PathBuf,
+    mcp_servers: Vec<McpServer>,
     trace: Option<&AcpTraceSession>,
 ) -> Result<LoadSessionResponse, agent_client_protocol::Error> {
-    let request = LoadSessionRequest::new(session_id, cwd);
+    let request = LoadSessionRequest::new(session_id, cwd).mcp_servers(mcp_servers);
     if let Some(trace) = trace {
         trace.record("client_to_agent", "session/load.request", &request);
     }
@@ -88,9 +93,10 @@ async fn send_resume_session_request(
     connection: &ConnectionTo<Agent>,
     session_id: SessionId,
     cwd: PathBuf,
+    mcp_servers: Vec<McpServer>,
     trace: Option<&AcpTraceSession>,
 ) -> Result<ResumeSessionResponse, agent_client_protocol::Error> {
-    let request = ResumeSessionRequest::new(session_id, cwd);
+    let request = ResumeSessionRequest::new(session_id, cwd).mcp_servers(mcp_servers);
     if let Some(trace) = trace {
         trace.record("client_to_agent", "session/resume.request", &request);
     }

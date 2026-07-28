@@ -1,0 +1,211 @@
+.agent-catalog,
+.agent-focused-view {
+  width: min(920px, 100%);
+  margin-inline: auto;
+}
+
+.agent-add-button {
+  min-height: 31px;
+  border: 0;
+  border-radius: var(--oa-radius-sm);
+  background: var(--oa-focus);
+  color: white;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  font: inherit;
+}
+
+.agent-add-button:hover {
+  background: color-mix(in oklch, var(--oa-focus) 84%, var(--oa-text));
+}
+
+.agent-catalog-groups {
+  display: grid;
+  gap: 24px;
+}
+
+.agent-catalog-group > header {
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 4px 7px;
+}
+
+.agent-catalog-group > header strong {
+  font-size: 12px;
+}
+
+.agent-catalog-group > header small {
+  min-width: 18px;
+  border-radius: 999px;
+  background: var(--oa-raised);
+  color: var(--oa-muted);
+  padding: 1px 5px;
+  font-size: 10px;
+  text-align: center;
+}
+
+.agent-catalog-list {
+  overflow: hidden;
+  border: 1px solid color-mix(in oklch, var(--oa-border) 84%, var(--oa-selected));
+  border-radius: 10px;
+  background: color-mix(in oklch, var(--oa-bg) 88%, var(--oa-panel));
+  box-shadow: 0 1px 2px color-mix(in oklch, var(--oa-text) 3%, transparent);
+}
+
+.agent-catalog-row {
+  width: 100%;
+  min-width: 0;
+  min-height: 58px;
+  border: 0;
+  border-bottom: 1px solid color-mix(in oklch, var(--oa-border) 56%, transparent);
+  border-radius: 0;
+  background: transparent;
+  color: var(--oa-text);
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  text-align: left;
+}
+
+.agent-catalog-row:last-child {
+  border-bottom: 0;
+}
+
+.agent-catalog-row:hover {
+  background: color-mix(in oklch, var(--oa-selected) 28%, transparent);
+}
+
+.agent-catalog-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.agent-catalog-copy strong,
+.agent-catalog-copy small,
+.agent-catalog-source {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.agent-catalog-copy small,
+.agent-catalog-source {
+  color: var(--oa-muted);
+  font-size: 11px;
+}
+
+.agent-catalog-trailing {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.agent-catalog-trailing > svg {
+  color: var(--oa-muted);
+}
+
+.agent-focused-view {
+  width: min(1040px, 100%);
+}
+
+.agent-detail-back {
+  margin-bottom: 18px;
+}
+
+.agent-detail-back:disabled {
+  opacity: .48;
+}
+
+.agent-focused-view .agent-detail-pane {
+  padding-left: 0;
+}
+
+.agent-auth-method {
+  min-width: 0;
+  border: 0;
+  border-top: 1px solid color-mix(in oklch, var(--oa-border) 64%, transparent);
+  border-radius: 0;
+  background: transparent;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px 18px;
+  padding: 14px 4px;
+}
+
+.agent-section-heading + .agent-auth-method {
+  border-top: 0;
+}
+
+.agent-auth-method > div:first-child {
+  display: grid;
+  gap: 2px;
+}
+
+.agent-auth-method > div:first-child small {
+  color: var(--oa-muted);
+}
+
+.agent-auth-method > .agent-field {
+  grid-column: 1 / -1;
+}
+
+.agent-auth-method > button {
+  grid-column: 2;
+  grid-row: 1;
+  min-height: 30px;
+  width: fit-content;
+  border: 1px solid var(--oa-border);
+  border-radius: var(--oa-radius-sm);
+  background: var(--oa-bg);
+  color: var(--oa-text);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  font: inherit;
+}
+
+.agent-auth-method > button:hover:not(:disabled) {
+  border-color: color-mix(in oklch, var(--oa-focus) 46%, var(--oa-border));
+  background: var(--oa-hover);
+}
+
+.agent-auth-method > button:disabled {
+  opacity: .55;
+}
+
+@media (max-width: 700px) {
+  .agent-catalog-tools {
+    grid-template-columns: minmax(0, 1fr) auto;
+    margin-bottom: 16px;
+  }
+
+  .agent-add-button {
+    width: 31px;
+    overflow: hidden;
+    padding: 0;
+    font-size: 0;
+    justify-content: center;
+  }
+
+  .agent-catalog-source {
+    display: none;
+  }
+
+  .agent-auth-method {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .agent-auth-method > button {
+    grid-column: 1;
+    grid-row: auto;
+  }
+}

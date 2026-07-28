@@ -18,7 +18,13 @@ pub const AGENT_DELETE_CUSTOM: &str = "agent/deleteCustom";
 pub const AGENT_SET_ENABLED: &str = "agent/setEnabled";
 pub const SETTINGS_GET_AGENT_DETAILS: &str = "settings/getAgentDetails";
 pub const SETTINGS_GET_MCP_SERVERS: &str = "settings/getMcpServers";
+pub const MCP_GET_SERVER_DETAILS: &str = "mcp/getServerDetails";
+pub const MCP_CREATE_SERVER: &str = "mcp/createServer";
+pub const MCP_UPDATE_SERVER: &str = "mcp/updateServer";
+pub const MCP_DELETE_SERVER: &str = "mcp/deleteServer";
+pub const MCP_SET_SERVER_ENABLED: &str = "mcp/setServerEnabled";
 pub const SETTINGS_GET_SKILLS: &str = "settings/getSkills";
+pub const SETTINGS_GET_SKILL_DETAILS: &str = "settings/getSkillDetails";
 pub const SETTINGS_GET_PREFERENCES: &str = "settings/getPreferences";
 pub const SETTINGS_UPDATE_PREFERENCES: &str = "settings/updatePreferences";
 pub const SETTINGS_GET_RUNTIME: &str = "settings/getRuntime";
@@ -89,7 +95,13 @@ pub const CLIENT_METHODS: &[&str] = &[
     AGENT_SET_ENABLED,
     SETTINGS_GET_AGENT_DETAILS,
     SETTINGS_GET_MCP_SERVERS,
+    MCP_GET_SERVER_DETAILS,
+    MCP_CREATE_SERVER,
+    MCP_UPDATE_SERVER,
+    MCP_DELETE_SERVER,
+    MCP_SET_SERVER_ENABLED,
     SETTINGS_GET_SKILLS,
+    SETTINGS_GET_SKILL_DETAILS,
     SETTINGS_GET_PREFERENCES,
     SETTINGS_UPDATE_PREFERENCES,
     SETTINGS_GET_RUNTIME,

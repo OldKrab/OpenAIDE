@@ -117,8 +117,16 @@ The main user-facing page for one Task's Chat, composer, permissions, and folded
 _Avoid_: Squeezing the main work surface into Task Navigation
 
 **Settings**:
-The user-facing configuration area with tabs for Agents, MCP Servers, Skills, and Common Settings.
-_Avoid_: Hiding Agent, MCP, or Skill setup inside task-specific controls
+The global user-facing area for reusable configuration across Tasks and Worktree Management. It includes Agents, MCP Servers, Skills, application preferences, and Worktrees, but does not own Project records or Task lifecycle management.
+_Avoid_: Hiding reusable setup inside task-specific controls, treating all Project or Task management as Settings, prescribing tabs as the layout
+
+**Project-scoped configuration**:
+Reusable configuration owned by a Project Context and presented alongside global configuration in Settings. It applies across that Project's root and worktrees rather than belonging to one Task Workspace.
+_Avoid_: Workspace-scoped settings, worktree settings, Project lifecycle management
+
+**Worktree Management**:
+The Settings area for repository-scoped discovery and maintenance of Git worktrees, presented in Project groups.
+_Avoid_: Project-scoped configuration, Task Workspace settings, Task lifecycle
 
 **Support Export**:
 A hidden command that writes redacted troubleshooting data for bug reports.
@@ -273,12 +281,15 @@ _Avoid_: Treating every unread update or status change as an alert
 - VS Code Extension groups **Task Navigation** by Project Context, even for a single-Project workspace.
 - A **Task** opens one **Chat** backed by its **Native Session**.
 - **Task Navigation** opens **Task Pages**.
-- **Settings** contains Agents, MCP Servers, Skills, and Common Settings.
+- **Settings** contains Agents, MCP Servers, Skills, application preferences, and **Worktree Management**.
+- **Settings** presents global and **Project-scoped configuration** for all Projects on the relevant resource page.
+- **Worktree Management** groups worktrees by Project for navigation. Projects that share a **Worktree Repository** may present the same inventory in more than one group, but mutations and operation state still belong to that one authoritative repository.
 - **Support Export** is available through a hidden command, not visible Settings UI in the first iteration.
 - **MCP Servers** are configured in **Settings** and made available to compatible **Agents** for Task work.
 - **Skills** are managed in **Settings** and are not automatically injected into Agent prompts in the first iteration.
 - A **Task** is handled by one **Agent**.
 - An **Agent** can handle multiple **Tasks**.
+- Agent definitions, authentication, status, and availability are global configuration, not **Project-scoped configuration**.
 - An **Agent Identity** owns the Agent side of Task history keys.
 - **Built-in Agents** and **Custom Agents** are both **Agents**.
 - A user can start Agent work only with a **Connected Agent**.
@@ -355,7 +366,7 @@ _Avoid_: Treating every unread update or status change as an alert
 > **Domain expert:** "Not in the first iteration. Enabled **MCP Servers** are available to compatible **Agents**."
 
 > **Dev:** "If a Skill is enabled, does every Task receive it?"
-> **Domain expert:** "No. **Skills** are managed metadata in the first iteration; automatic injection is not part of Task runtime."
+> **Domain expert:** "No. The first iteration discovers and inspects **Skill** files read-only; it neither enables them nor automatically injects them into Task runtime."
 
 > **Dev:** "If Desktop is already running and the VS Code Extension opens OpenAIDE, should it start another server?"
 > **Domain expert:** "No, it should reuse the compatible **App Server** for the selected state root when reachable. Starting a new one is a fallback."
@@ -381,7 +392,7 @@ _Avoid_: Treating every unread update or status change as an alert
 - Cross-App Shell and cross-App Server blocking applies to live **Native Session** interaction, not to observing persisted Task history or answering Task-scoped requests from a subscribed App Shell client.
 - "last client" was ambiguous between a Task subscriber and an App Shell client; resolved: losing Task subscribers does not stop a **Running Task**, but losing all **App Shell** clients lets **App Server** shut down.
 - "side panel" was used ambiguously; resolved: **Task Navigation** is the sidebar, while **Task Page** is the main work surface.
-- Settings was discussed through MCP task selection; resolved: **Settings** has tabs for Agents, MCP Servers, Skills, and Common Settings.
+- Settings was discussed through MCP task selection and Worktree management; resolved: **Settings** owns reusable configuration across Tasks plus aggregated **Worktree Management**, but not Project records or Task lifecycle management.
 - Diagnostics was unclear user-facing language; resolved: use hidden **Support Export** for first iteration, not visible Settings troubleshooting UI.
 - MCP selection was discussed as per-Agent or per-Task; resolved: enabled **MCP Servers** apply to compatible **Agents** in the first iteration.
-- Skills were discussed as a Settings tab; resolved: **Skills** are managed metadata only in the first iteration.
+- Skills were discussed as editable or toggleable Settings records; resolved: the first iteration discovers and inspects **Skill** files read-only, with no enable state or automatic Task injection.

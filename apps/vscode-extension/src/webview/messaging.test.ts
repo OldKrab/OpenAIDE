@@ -270,6 +270,10 @@ describe("webview messaging composer routes", () => {
               target: { kind: "agentEnvironment", agentId: "custom.new", name: "EXISTING" },
               copyFrom: { kind: "agentEnvironment", agentId: "custom.old", name: "EXISTING" },
             },
+            {
+              target: { kind: "mcp", serverId: "server-files", field: "header", name: "Authorization" },
+              value: "mcp-secret",
+            },
           ],
             deletes: [
               { kind: "agentEnvironment", agentId: "custom.old", name: "TOKEN" },
@@ -285,6 +289,7 @@ describe("webview messaging composer routes", () => {
     expect(agentSecretStore.store.mock.calls).toEqual([
       ["openaide.agent.custom.new.env.TOKEN", "rotated-secret"],
       ["openaide.agent.custom.new.env.EXISTING", "preserved-secret"],
+      ["openaide.mcp.server-files.header.Authorization", "mcp-secret"],
     ]);
     expect(agentSecretStore.delete.mock.calls).toEqual([
       ["openaide.agent.custom.old.env.TOKEN"],

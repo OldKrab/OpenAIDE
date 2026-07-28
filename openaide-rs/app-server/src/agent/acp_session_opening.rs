@@ -79,6 +79,19 @@ pub(super) async fn open_acp_session<'a>(
     );
     let supports_session_close = runner.supports_session_close();
     let content_policy = prompt_content_policy(runner.initialize());
+    let mcp_servers = match context.request.secret_resolver() {
+        Some(resolver) => {
+            resolver.resolve_mcp_servers(&runner.initialize().agent_capabilities.mcp_capabilities)
+        }
+        None => Ok(Vec::new()),
+    };
+    let mcp_servers = match mcp_servers {
+        Ok(servers) => servers,
+        Err(error) => {
+            let _ = context.start_error_tx.send(Err(error.clone()));
+            return Err(acp_start_error(error));
+        }
+    };
 
     if let AcpSessionOpenRequest::Start(request) = &context.request {
         if let Err(error) = validate_prompt_attachments(&request.context, content_policy) {
@@ -96,7 +109,7 @@ pub(super) async fn open_acp_session<'a>(
         AcpSessionOpenRequest::Start(request) => {
             let session_cwd = normalized_session_cwd(&request.cwd);
             let start_result = tokio::select! {
-                result = runner.start(session_cwd) => result,
+                result = runner.start(session_cwd, mcp_servers) => result,
                 error = wait_for_startup_cancellation(request.cancellation.clone()) => {
                     let _ = context.start_error_tx.send(Err(error.clone()));
                     return Err(acp_start_error(error));
@@ -123,7 +136,12 @@ pub(super) async fn open_acp_session<'a>(
         AcpSessionOpenRequest::Load(request) => {
             let session_cwd = normalized_session_cwd(&request.cwd);
             let load_result = tokio::select! {
-                result = runner.load(request.session_id, session_cwd, context.load_replay) => result,
+                result = runner.load(
+                    request.session_id,
+                    session_cwd,
+                    mcp_servers,
+                    context.load_replay,
+                ) => result,
                 error = wait_for_startup_cancellation(request.cancellation.clone()) => Err(error),
             };
             match load_result {
@@ -139,7 +157,7 @@ pub(super) async fn open_acp_session<'a>(
         AcpSessionOpenRequest::Resume(request) => {
             let session_cwd = normalized_session_cwd(&request.cwd);
             let resume_result = tokio::select! {
-                result = runner.resume(request.session_id, session_cwd) => result,
+                result = runner.resume(request.session_id, session_cwd, mcp_servers) => result,
                 error = wait_for_startup_cancellation(request.cancellation.clone()) => Err(error),
             };
             match resume_result {

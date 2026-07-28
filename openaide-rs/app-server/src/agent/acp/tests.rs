@@ -1396,6 +1396,7 @@ fn start_active_session_does_not_implicitly_authenticate_or_retry() {
                     env::current_dir().unwrap_or_else(|_| PathBuf::from("/")),
                     &initialize,
                     Some("codex-login"),
+                    Vec::new(),
                     None,
                 )
                 .await;
@@ -1502,6 +1503,7 @@ fn load_active_session_captures_replayed_updates_before_response() {
                             agent_id: "codex",
                             session_id: "external-session".to_string(),
                             cwd: requested_cwd,
+                            mcp_servers: Vec::new(),
                             preferred_auth_method_id: None,
                         },
                     )

@@ -1,5 +1,6 @@
 import type {
   McpServerSettingsRecord,
+  SkillSettingsDetails,
   SkillSettingsRecord,
 } from "@openaide/app-shell-contracts";
 import type {
@@ -7,6 +8,7 @@ import type {
   SettingsMcpServersResult,
   SettingsSection,
   SettingsSkillRecord,
+  SettingsSkillDetailsResult,
   SettingsSkillsResult,
 } from "@openaide/app-server-client";
 
@@ -27,6 +29,23 @@ export function mapSkillsProjection(result: SettingsSkillsResult) {
     generatedAt: result.generatedAt,
     availability: result.availability,
     skills: result.skills.map(mapSkill),
+  };
+}
+
+export function mapSkillDetailsProjection(result: SettingsSkillDetailsResult): SkillSettingsDetails {
+  return {
+    generated_at: result.generatedAt,
+    skill: mapSkill(result.skill),
+    document: {
+      name: result.document.name,
+      description: result.document.description,
+      additional_fields: (result.document.additionalFields ?? []).map((field) => ({
+        name: field.name,
+        value: field.value,
+      })),
+      instructions: result.document.instructions,
+      source: result.document.source,
+    },
   };
 }
 
@@ -52,9 +71,7 @@ function mapMcpServer(server: SettingsMcpServerRecord): McpServerSettingsRecord 
     transport: server.transport,
     status: server.status,
     description: server.description ?? undefined,
-    tool_count: server.toolCount ?? undefined,
-    last_checked_at: server.lastCheckedAt ?? undefined,
-    last_error_summary: server.lastErrorSummary ?? undefined,
+    validation_error: server.validationError ?? undefined,
   };
 }
 

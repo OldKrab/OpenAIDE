@@ -12,21 +12,18 @@ pub(crate) struct BuiltInAgentMetadata {
     pub(crate) description: &'static str,
 }
 
-const BUILT_IN_DESCRIPTION: &str =
-    "Built-in ACP Agent. Configuration Options are discovered before task start.";
-
 pub(crate) const BUILT_IN_AGENT_METADATA: [BuiltInAgentMetadata; 2] = [
     BuiltInAgentMetadata {
         id: CODEX_AGENT_ID,
         label: CODEX_AGENT_LABEL,
         icon: "openai",
-        description: BUILT_IN_DESCRIPTION,
+        description: "OpenAI coding agent.",
     },
     BuiltInAgentMetadata {
         id: OPENCODE_AGENT_ID,
         label: OPENCODE_AGENT_LABEL,
         icon: "opencode",
-        description: BUILT_IN_DESCRIPTION,
+        description: "Open-source coding agent.",
     },
 ];
 

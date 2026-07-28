@@ -1,4 +1,5 @@
 import { act, create } from "react-test-renderer";
+import type { ReactTestInstance } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentSettingsRecord } from "@openaide/app-shell-contracts";
 import { shouldConsumeAgentDeleteAck, shouldConsumeAgentSaveAck } from "./AgentSettingsTab";
@@ -12,6 +13,20 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("SettingsView custom Agent acknowledgements", () => {
+  it("opens the Settings index first on a narrow viewport", () => {
+    vi.stubGlobal("window", {
+      cancelAnimationFrame: vi.fn(),
+      localStorage: { getItem: vi.fn(() => null), setItem: vi.fn() },
+      matchMedia: vi.fn((query: string) => ({ matches: query === "(max-width: 760px)" })),
+      requestAnimationFrame: vi.fn(() => 1),
+    });
+
+    const tree = renderSettingsView();
+
+    expect(tree.root.findByProps({ className: "settings-mobile-index open" })).toBeTruthy();
+    expect(tree.root.findByProps({ className: "settings-content mobile-index-open" })).toBeTruthy();
+  });
+
   it("hides desktop composer shortcut settings on a mobile pointer", () => {
     vi.stubGlobal("window", {
       matchMedia: vi.fn(() => ({ matches: true })),
@@ -101,7 +116,9 @@ describe("SettingsView custom Agent acknowledgements", () => {
       />,
     );
 
-    expect(tree.root.findAllByType("strong").some((item) => item.children.includes("Local Agent"))).toBe(true);
+    const agentRow = tree.root.findByProps({ className: "agent-catalog-row" });
+    expect(agentRow.findAllByType("strong").some((item) => item.children.includes("Local Agent"))).toBe(true);
+    act(() => agentRow.props.onClick());
     expect(tree.root.findAllByType("input").some((input) => input.props.value === "local-agent --stdio")).toBe(true);
   });
 
@@ -229,7 +246,7 @@ describe("SettingsView custom Agent acknowledgements", () => {
     );
 
     expect(tree.root.findByProps({ role: "tabpanel" }).props["aria-labelledby"]).toBe("settings-tab-common");
-    expect(tree.root.findAllByType("strong").some((item) => item.children.includes("General"))).toBe(true);
+    expect(tree.root.findAllByType("h1").some((item) => item.children.includes("General"))).toBe(true);
   });
 
   it("compacts long local paths while preserving the full title", () => {
@@ -262,9 +279,9 @@ describe("SettingsView custom Agent acknowledgements", () => {
       />,
     );
 
-    const tabLabels = tree.root.findAllByProps({ role: "tab" }).map((tab) => tab.children.join(""));
-    expect(tabLabels).toEqual(["Agents", "General"]);
-    expect(tree.root.findByProps({ role: "tabpanel" }).props["aria-labelledby"]).toBe("settings-tab-agents");
+    const tabLabels = tree.root.findAllByProps({ role: "tab" }).map(settingsTabLabel);
+    expect(tabLabels).toEqual(["General", "Agents", "Worktrees"]);
+    expect(tree.root.findByProps({ role: "tabpanel" }).props["aria-labelledby"]).toBe("settings-tab-common");
   });
 
   it("moves focus to the active tab when Settings opens", () => {
@@ -292,7 +309,33 @@ describe("SettingsView custom Agent acknowledgements", () => {
     );
 
     const tabs = tree.root.findAllByProps({ role: "tab" });
-    expect(tabs.map((tab) => Boolean(tab.props.autoFocus))).toEqual([false, false, false, true]);
+    expect(tabs.map((tab) => Boolean(tab.props.autoFocus))).toEqual([true, false, false, false, false]);
+  });
+
+  it("returns to the app from the Settings sidebar", () => {
+    const onBackToApp = vi.fn();
+    const tree = render(
+      <SettingsView
+        onAuthenticate={() => undefined}
+        onBackToApp={onBackToApp}
+        onCreateCustomAgent={() => undefined}
+        onDeleteCustomAgent={() => undefined}
+        onRefresh={() => undefined}
+        onReplaceCustomAgent={() => undefined}
+        onSelectTab={() => undefined}
+        onSetAcpTrace={() => undefined}
+        onSetAgentEnabled={() => undefined}
+        onSetComposerSubmitShortcut={() => undefined}
+        onUpdateCustomAgentMetadata={() => undefined}
+        onUnlockDeveloperSettings={() => undefined}
+        preferences={{ composer_submit_shortcut: "mod_enter" }}
+        state={{ activeTab: "common", loading: false }}
+      />,
+    );
+
+    act(() => tree.root.findAllByProps({ "aria-label": "Back to app" })[0]?.props.onClick());
+
+    expect(onBackToApp).toHaveBeenCalledOnce();
   });
 
   it("explains when App Server MCP discovery is unavailable instead of claiming the list is empty", () => {
@@ -321,12 +364,12 @@ describe("SettingsView custom Agent acknowledgements", () => {
       />,
     );
 
-    const tabLabels = tree.root.findAllByProps({ role: "tab" }).map((tab) => tab.children.join(""));
-    expect(tabLabels).toEqual(["Agents", "MCP", "Skills", "General"]);
+    const tabLabels = tree.root.findAllByProps({ role: "tab" }).map(settingsTabLabel);
+    expect(tabLabels).toEqual(["General", "Agents", "MCP Servers", "Skills", "Worktrees"]);
     expect(tree.root.findByProps({ role: "tabpanel" }).props["aria-labelledby"]).toBe("settings-tab-mcp");
-    expect(tree.root.findAllByType("strong").some((item) => item.children.includes("MCP discovery unavailable"))).toBe(true);
+    expect(tree.root.findAllByType("strong").some((item) => item.children.includes("MCP settings unavailable"))).toBe(true);
     expect(tree.root.findAllByType("span").some((item) =>
-      item.children.includes("OpenAIDE cannot currently enumerate MCP servers from the App Server.")
+      item.children.includes("The App Server could not read MCP configuration.")
     )).toBe(true);
     expect(tree.root.findAllByType("strong").some((item) => item.children.includes("No MCP servers"))).toBe(false);
   });
@@ -426,6 +469,30 @@ function render(element: React.ReactElement) {
     tree = create(element);
   });
   return tree!;
+}
+
+function renderSettingsView() {
+  return render(
+    <SettingsView
+      onAuthenticate={() => undefined}
+      onCreateCustomAgent={() => undefined}
+      onDeleteCustomAgent={() => undefined}
+      onRefresh={() => undefined}
+      onReplaceCustomAgent={() => undefined}
+      onSelectTab={() => undefined}
+      onSetAcpTrace={() => undefined}
+      onSetAgentEnabled={() => undefined}
+      onSetComposerSubmitShortcut={() => undefined}
+      onUpdateCustomAgentMetadata={() => undefined}
+      onUnlockDeveloperSettings={() => undefined}
+      preferences={{ composer_submit_shortcut: "mod_enter" }}
+      state={{ activeTab: "common", loading: false }}
+    />,
+  );
+}
+
+function settingsTabLabel(tab: ReactTestInstance) {
+  return tab.findByType("span").children.join("");
 }
 
 function agent(id: string): AgentSettingsRecord {

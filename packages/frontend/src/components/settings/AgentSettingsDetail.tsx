@@ -47,20 +47,27 @@ export function AgentSettingsDetail({
       <header className="agent-detail-header">
         <div className="agent-detail-identity">
           <span className="agent-detail-avatar" aria-hidden="true">
-            <AgentIcon icon={activeDraft.icon} size={24} />
+            <AgentIcon icon={activeDraft.icon} size={36} />
           </span>
           <span>
             <span className="agent-title-line">
               <strong>{isCustom ? (isCreating ? "Add Custom Agent" : "Edit Custom Agent") : selected?.label}</strong>
               <span className="agent-source-badge">{isCustom ? "Custom" : "Built-in"}</span>
             </span>
-            <small>{isCustom ? "Custom ACP stdio Agent" : selected?.description}</small>
+            <small>{isCustom ? "Custom ACP agent" : selected?.description}</small>
           </span>
         </div>
+        {selected ? (
+          <div className="agent-detail-state">
+            {selected.status !== "disabled" ? (
+              <AgentStatusPanel agent={selected} authPending={authPending} recoveryActions={recoveryActions} />
+            ) : null}
+            {!isCustom ? (
+              <AgentAvailabilityControl agent={selected} onSetAgentEnabled={onSetAgentEnabled} />
+            ) : null}
+          </div>
+        ) : null}
       </header>
-      {selected ? (
-        <AgentStatusPanel agent={selected} authPending={authPending} recoveryActions={recoveryActions} />
-      ) : null}
       {selected?.auth_methods.length ? (
         <AgentAuthenticationSection
           agent={selected}
@@ -69,8 +76,8 @@ export function AgentSettingsDetail({
         />
       ) : null}
       <section className="agent-detail-section">
-        <div className="settings-section-title">
-          <strong>Launch</strong>
+        <div className="agent-section-heading">
+          <strong>How it runs</strong>
         </div>
         {isCustom ? (
           <>
@@ -101,28 +108,30 @@ export function AgentSettingsDetail({
         )}
       </section>
       {isCustom ? <AgentEnvEditor env={activeDraft.env} onChange={(env) => onUpdateDraft({ env })} /> : null}
-      {!isCustom && selected ? (
-        <AgentAvailabilitySection agent={selected} onSetAgentEnabled={onSetAgentEnabled} />
-      ) : null}
       {isCustom ? (
-        <div className="agent-detail-actions">
-          <button disabled={authPending || Boolean(saveBlockedMessage)} type="button" onClick={onSaveDraft}>
-            <Save size={13} />
-            {showReplaceConfirmation ? "Confirm replace" : "Save"}
-          </button>
-          {activeDraft.agent_id ? (
-            <button className="danger" disabled={authPending} type="button" onClick={onDeleteClick}>
-              <Trash2 size={13} />
-              {confirmDeleteAgentId === activeDraft.agent_id ? "Confirm delete" : "Delete"}
+        <section className="agent-detail-section agent-actions-section">
+          <div className="agent-section-heading">
+            <strong>Actions</strong>
+          </div>
+          <div className="agent-detail-actions">
+            <button disabled={authPending || Boolean(saveBlockedMessage)} type="button" onClick={onSaveDraft}>
+              <Save size={13} />
+              {showReplaceConfirmation ? "Confirm replace" : "Save"}
             </button>
-          ) : null}
-          {onCancelDraft ? (
-            <button disabled={authPending} type="button" onClick={onCancelDraft}>
-              <X size={13} />
-              Cancel
-            </button>
-          ) : null}
-        </div>
+            {onCancelDraft ? (
+              <button disabled={authPending} type="button" onClick={onCancelDraft}>
+                <X size={13} />
+                Cancel
+              </button>
+            ) : null}
+            {activeDraft.agent_id ? (
+              <button className="danger" disabled={authPending} type="button" onClick={onDeleteClick}>
+                <Trash2 size={13} />
+                {confirmDeleteAgentId === activeDraft.agent_id ? "Confirm delete" : "Delete"}
+              </button>
+            ) : null}
+          </div>
+        </section>
       ) : null}
       {saveBlockedMessage ? <InlineNotice message={saveBlockedMessage} /> : null}
       {showReplaceConfirmation ? (
@@ -157,7 +166,7 @@ function AgentReadonlyRows({ selected }: { selected?: AgentSettingsRecord }) {
   );
 }
 
-function AgentAvailabilitySection({
+function AgentAvailabilityControl({
   agent,
   onSetAgentEnabled,
 }: {
@@ -166,10 +175,7 @@ function AgentAvailabilitySection({
 }) {
   const available = agent.enabled;
   return (
-    <section className="agent-detail-section">
-      <div className="settings-section-title">
-        <strong>Availability</strong>
-      </div>
+    <div className="agent-availability-control">
       <label className="settings-switch agent-enabled-toggle">
         <input
           checked={agent.enabled}
@@ -181,10 +187,7 @@ function AgentAvailabilitySection({
         <span className="settings-switch-track" aria-hidden="true" />
         <span>{available ? "Enabled" : "Disabled"}</span>
       </label>
-      <InlineNotice
-        message={available ? "Agent is available to be selected and used." : "Agent is hidden from new task selection."}
-      />
-    </section>
+    </div>
   );
 }
 
@@ -198,12 +201,15 @@ function AgentStatusPanel({
   recoveryActions?: AgentRecoveryActions;
 }) {
   const recoveryKind = agentSettingsRecoveryKind(agent);
+  const showStatusCopy = agent.status !== "ready" && agent.status !== "connected";
   return (
     <section className={`agent-status-panel ${agent.status}`}>
       <StatusBadge status={agent.status} />
-      <span>{authPending && agent.status === "authenticating"
-        ? "Authentication is running. Follow any prompt opened by the Agent."
-        : agentStatusCopy(agent)}</span>
+      {showStatusCopy ? (
+        <span>{authPending && agent.status === "authenticating"
+          ? "Authentication is running. Follow any prompt opened by the Agent."
+          : agentStatusCopy(agent)}</span>
+      ) : null}
       {agent.last_error_summary ? <InlineFailure message={agent.last_error_summary} /> : null}
       {recoveryActions && recoveryKind ? (
         <AgentRecoveryButtons
@@ -228,7 +234,7 @@ function AgentAuthenticationSection({
 }) {
   return (
     <section className="agent-detail-section agent-auth-methods">
-      <div className="settings-section-title">
+      <div className="agent-section-heading">
         <strong>Authentication</strong>
       </div>
       {agent.auth_methods.map((method) => (

@@ -12,7 +12,16 @@ import {
   setAgentEnabledThroughBackend,
   updateCustomAgentMetadataThroughBackend,
 } from "../intents/agentSettingsIntents";
-import { refreshSettingsProjectionsThroughBackend } from "../intents/settingsProjectionIntents";
+import {
+  loadSkillDetailsThroughBackend,
+  refreshSettingsProjectionsThroughBackend,
+} from "../intents/settingsProjectionIntents";
+import {
+  deleteMcpServerThroughBackend,
+  loadMcpServerDetailsThroughBackend,
+  saveMcpServerThroughBackend,
+  setMcpServerEnabledThroughBackend,
+} from "../intents/mcpSettingsIntents";
 
 type SettingsDependencies = Pick<
   AppCallbacksDependencies,
@@ -62,6 +71,13 @@ export function createSettingsCallbacks({
         })
         .catch((error) => dispatch({ type: "settings:error", message: safeErrorMessage(error) }));
     },
+    deleteMcpServer: (server) => {
+      dispatch({ type: "settings:start" });
+      void deleteMcpServerThroughBackend(agentSettingsContext(), server)
+        .catch((error) => dispatch({ type: "settings:error", message: safeErrorMessage(error) }));
+    },
+    getMcpServerDetails: (id) => loadMcpServerDetailsThroughBackend(agentSettingsContext(), id),
+    getSkillDetails: (id) => loadSkillDetailsThroughBackend(agentSettingsContext(), id),
     refreshSettings: () => {
       dispatch({ type: "settings:start" });
       void refreshSettingsProjectionsThroughBackend(agentSettingsContext())
@@ -76,6 +92,11 @@ export function createSettingsCallbacks({
         .then((handled) => {
           if (!handled) dispatch({ type: "settings:error", message: appServerRequiredMessage() });
         })
+        .catch((error) => dispatch({ type: "settings:error", message: safeErrorMessage(error) }));
+    },
+    saveMcpServer: (input) => {
+      dispatch({ type: "settings:start" });
+      void saveMcpServerThroughBackend(agentSettingsContext(), input)
         .catch((error) => dispatch({ type: "settings:error", message: safeErrorMessage(error) }));
     },
     selectSettingsTab: (tab) => {
@@ -100,6 +121,10 @@ export function createSettingsCallbacks({
         .then((handled) => {
           if (!handled) dispatch({ type: "settings:error", message: appServerRequiredMessage() });
         })
+        .catch((error) => dispatch({ type: "settings:error", message: safeErrorMessage(error) }));
+    },
+    setMcpServerEnabled: (id, enabled) => {
+      void setMcpServerEnabledThroughBackend(agentSettingsContext(), id, enabled)
         .catch((error) => dispatch({ type: "settings:error", message: safeErrorMessage(error) }));
     },
     setComposerSubmitShortcut: (shortcut) => {

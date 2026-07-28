@@ -1,4 +1,5 @@
 @import "./app/part-00.css";
+@import "./app/sidebar-frame.css";
 @import "./app/sidebar-sections.css";
 @import "./app/sidebar-rows.css";
 @import "./app/part-01.css";
@@ -18,6 +19,10 @@
 @import "./app/context-usage.css";
 @import "./app/agent-plan.css";
 @import "./app/settings-shell.css";
+@import "./app/agent-settings-catalog.css";
+@import "./app/mcp-settings.css";
+@import "./app/settings-worktrees.css";
+@import "./app/settings-worktree-dialog.css";
 @import "./app/part-08.css";
 @import "./app/part-09.css";
 @import "./app/part-10.css";

@@ -61,13 +61,11 @@ export type McpServerSettingsRecord = {
   id: string;
   label: string;
   enabled: boolean;
-  scope: SettingsScope;
+  scope: { kind: "global" } | { kind: "project"; projectId: string };
   transport: "stdio" | "http" | "sse";
-  status: "unknown" | "available" | "failed" | "disabled";
+  status: "configured" | "invalid" | "disabled";
   description?: string;
-  tool_count?: number;
-  last_checked_at?: string;
-  last_error_summary?: string;
+  validation_error?: string;
 };
 
 export type SettingsProjectionAvailability = "available" | "unavailable";
@@ -82,4 +80,19 @@ export type SkillSettingsRecord = {
   warnings: string[];
   tags: string[];
   last_scanned_at: string;
+};
+
+export type SkillSettingsDetails = {
+  generated_at: string;
+  skill: SkillSettingsRecord;
+  document: {
+    name: string;
+    description: string;
+    additional_fields: Array<{
+      name: string;
+      value: string;
+    }>;
+    instructions: string;
+    source: string;
+  };
 };
