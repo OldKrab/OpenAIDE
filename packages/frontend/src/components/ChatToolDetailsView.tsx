@@ -10,14 +10,13 @@ import { ReadToolDetails } from "./ReadToolDetails";
 import { SearchToolDetails } from "./SearchToolDetails";
 import { SkillToolDetails } from "./SkillToolDetails";
 import { WebSearchToolDetails } from "./WebSearchToolDetails";
-import { ToolImageFilePreview, ToolImageFilePreviewLoading } from "./ToolImageFilePreview";
+import { ToolImageFilePreview } from "./ToolImageFilePreview";
 
 export function ChatToolDetails({
   details,
   error,
   fallbackPreview,
   imagePreview,
-  imagePreviewLoading,
   loading,
   step,
 }: {
@@ -25,7 +24,6 @@ export function ChatToolDetails({
   error?: string;
   fallbackPreview?: string;
   imagePreview?: ToolImagePreview;
-  imagePreviewLoading?: boolean;
   loading?: boolean;
   step: Extract<ActivityStep, { kind: "tool" }>;
 }) {
@@ -41,7 +39,6 @@ export function ChatToolDetails({
         details={details}
         fallbackPreview={fallbackPreview}
         imagePreview={imagePreview}
-        imagePreviewLoading={imagePreviewLoading}
         step={step}
       />
     );
@@ -55,7 +52,6 @@ export function ChatToolDetails({
   else if (["delete", "move", "think", "fetch", "switch_mode"].includes(step.name)) {
     content = <DefinedToolDetails details={details} fallbackPreview={fallbackPreview} step={step} />;
   }
-  if (imagePreviewLoading) return <>{content}<ToolImageFilePreviewLoading /></>;
   return imagePreview ? <>{content}<ToolImageFilePreview preview={imagePreview} /></> : content;
 }
 

@@ -297,7 +297,6 @@ function LiveToolDetailDisclosure({
 }) {
   const [open, setOpen] = useState(false);
   const [imagePreview, setImagePreview] = useState<ToolImagePreview>();
-  const [imagePreviewLoading, setImagePreviewLoading] = useState(false);
   const loadToolImagePreviewRef = useRef(onLoadToolImagePreview);
   loadToolImagePreviewRef.current = onLoadToolImagePreview;
   const subscribeToolDetailRef = useRef(onSubscribeToolDetail);
@@ -311,21 +310,16 @@ function LiveToolDetailDisclosure({
     const loadImagePreview = loadToolImagePreviewRef.current;
     if (!open || !artifactId || !detailsAvailable || !loadImagePreview) {
       setImagePreview(undefined);
-      setImagePreviewLoading(false);
       return undefined;
     }
     let active = true;
     setImagePreview(undefined);
-    setImagePreviewLoading(true);
     void loadImagePreview(artifactId)
       .then((preview) => {
         if (active) setImagePreview(preview);
       })
       .catch(() => {
         if (active) setImagePreview(undefined);
-      })
-      .finally(() => {
-        if (active) setImagePreviewLoading(false);
       });
     return () => {
       active = false;
@@ -359,7 +353,6 @@ function LiveToolDetailDisclosure({
         error={artifactState?.error}
         fallbackPreview={preview}
         imagePreview={imagePreview}
-        imagePreviewLoading={imagePreviewLoading}
         loading={artifactState?.loading}
         step={step}
       />

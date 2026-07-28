@@ -955,7 +955,7 @@ describe("ChatRow", () => {
     expect(html).not.toContain("name view_image");
   });
 
-  it("loads a file image preview after Tool details open and reuses the image lightbox", async () => {
+  it("loads an optional file image preview without replacing the Tool details loading state", async () => {
     const { ActivityStepRow } = await import("./ChatActivityView");
     let resolvePreview!: (preview: { label: string; mediaType: string; dataUrl: string }) => void;
     const previewResult = new Promise<{ label: string; mediaType: string; dataUrl: string }>((resolve) => {
@@ -996,9 +996,9 @@ describe("ChatRow", () => {
 
     expect(onLoadToolImagePreview).toHaveBeenCalledOnce();
     expect(onLoadToolImagePreview).toHaveBeenCalledWith("artifact_1");
-    expect(tree.root.findByProps({ role: "status" })).toBeDefined();
-    expect(JSON.stringify(tree.toJSON())).toContain("Loading image preview");
-    expect(JSON.stringify(tree.toJSON())).not.toContain("No output returned.");
+    expect(tree.root.findAllByProps({ role: "status" })).toHaveLength(0);
+    expect(JSON.stringify(tree.toJSON())).not.toContain("Loading image preview");
+    expect(JSON.stringify(tree.toJSON())).toContain("No output returned.");
     expect(JSON.stringify(tree.toJSON())).not.toContain("Open image preview");
     await act(async () => {
       resolvePreview({
