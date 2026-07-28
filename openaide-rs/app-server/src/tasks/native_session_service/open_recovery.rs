@@ -48,6 +48,7 @@ impl NativeSessionService {
             secret_resolver: Some(self.secret_resolver(&task.task_id)),
         })?;
         let load_ms = load_started.elapsed().as_millis();
+        let replayed_plan = loaded.session.replayed_plan.clone();
         let session_start = TaskSessionStartGuard::new(&self.agent_gateway, loaded.session);
         let loaded_session_id = session_start.session_id().to_string();
         let refreshed_title = native_session
@@ -86,6 +87,8 @@ impl NativeSessionService {
                 task.status = TaskStatus::Inactive;
                 task.unread = false;
                 task.agent_session_id = Some(loaded_session_id.clone());
+                task.current_plan = replayed_plan.current_plan.clone();
+                task.completed_plan_message_id = replayed_plan.completed_plan_message_id.clone();
                 task.updated_at = refreshed_at.clone();
                 task.last_activity = refreshed_at.clone();
                 Ok(TaskMutationResult::Changed)

@@ -128,6 +128,14 @@ _Avoid_: Automatically injected prompt content in the first iteration
 A user-selectable external ACP worker that performs Task work.
 _Avoid_: Adapter, provider, raw runtime process, non-ACP protocol selector
 
+**Agent Plan**:
+The Agent's current non-empty ordered strategy for a Task. An Agent Plan has no independent identity; each new snapshot supersedes the current snapshot until every entry is complete, while an empty snapshot clears it.
+_Avoid_: OpenAIDE workflow, Tool activity, one plan per prompt
+
+**Completed Plan**:
+The final non-empty, all-complete snapshot of an Agent Plan retained in Chat. A later snapshot with incomplete work begins a new Agent Plan.
+_Avoid_: Archived Plan, treating repeated completion snapshots as separate plans
+
 **Agent Identity**:
 The stable App Server-owned identity for one Agent definition and launch configuration.
 _Avoid_: Display name or executable path as identity

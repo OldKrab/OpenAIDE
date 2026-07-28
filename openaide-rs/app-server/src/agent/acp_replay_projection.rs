@@ -4,17 +4,27 @@ use std::sync::{Arc, Mutex};
 use crate::agent::acp_schema::{ContentBlock, SessionUpdate};
 
 use crate::agent::acp_content_projection::project_content_block;
+use crate::agent::acp_live_prompt_projection::project_plan_entry;
 use crate::agent::acp_message_identity::stable_message_id;
 use crate::agent::acp_tool_call_projection::{
     merge_tool_call_update, remember_tool_call, ToolCallState,
 };
 use crate::agent::normalizer::normalize_event;
 use crate::agent::tool_details::tool_call_event;
-use crate::protocol::model::{AgentMessagePart, AgentMessageRole, NormalizedMessage};
+use crate::agent::AgentReplayPlanState;
+use crate::protocol::model::{
+    AgentMessagePart, AgentMessageRole, AgentPlan, AgentPlanStatus, NormalizedMessage,
+};
 use crate::time::now_string;
 
 pub(super) struct ReplayProjection {
     session_id: String,
+}
+
+#[derive(Default)]
+pub(super) struct ReplayProjectionResult {
+    pub(super) messages: Vec<NormalizedMessage>,
+    pub(super) plan: AgentReplayPlanState,
 }
 
 impl ReplayProjection {
@@ -24,7 +34,12 @@ impl ReplayProjection {
         }
     }
 
+    #[cfg(test)]
     pub(super) fn project(&self, updates: Vec<SessionUpdate>) -> Vec<NormalizedMessage> {
+        self.project_with_plan(updates).messages
+    }
+
+    pub(super) fn project_with_plan(&self, updates: Vec<SessionUpdate>) -> ReplayProjectionResult {
         let created_at = now_string();
         let tool_calls = Arc::new(Mutex::new(Default::default()));
         let mut replay = ReplayBuffer::new(&self.session_id);
@@ -32,7 +47,13 @@ impl ReplayProjection {
             replay.project(update, &created_at, &tool_calls);
         }
         replay.finalize_fallback_ids();
-        replay.messages
+        ReplayProjectionResult {
+            messages: replay.messages,
+            plan: AgentReplayPlanState {
+                current_plan: replay.current_plan,
+                completed_plan_message_id: replay.completed_plan_message_id,
+            },
+        }
     }
 }
 
@@ -45,6 +66,9 @@ struct ReplayBuffer {
     sourced_agent_indices: HashMap<String, usize>,
     session_id: String,
     next_text_ordinal: usize,
+    current_plan: Option<AgentPlan>,
+    completed_plan_message_id: Option<String>,
+    next_plan_ordinal: usize,
 }
 
 impl ReplayBuffer {
@@ -56,6 +80,9 @@ impl ReplayBuffer {
             sourced_agent_indices: HashMap::new(),
             session_id: session_id.to_string(),
             next_text_ordinal: 0,
+            current_plan: None,
+            completed_plan_message_id: None,
+            next_plan_ordinal: 0,
         }
     }
 
@@ -92,8 +119,62 @@ impl ReplayBuffer {
                 let tool_call = merge_tool_call_update(tool_calls, update);
                 self.upsert(normalize_event(tool_call_event(&tool_call), created_at));
             }
+            SessionUpdate::Plan(plan) => {
+                self.end_anonymous_text_run();
+                let Some(entries) = plan
+                    .entries
+                    .into_iter()
+                    .map(project_plan_entry)
+                    .collect::<Option<Vec<_>>>()
+                else {
+                    crate::logging::warn(
+                        "acp_replayed_plan_update_ignored",
+                        serde_json::json!({
+                            "session_id": self.session_id,
+                            "reason": "unsupported plan entry enum value",
+                        }),
+                    );
+                    return;
+                };
+                self.replace_plan(entries, created_at);
+            }
             _ => self.end_anonymous_text_run(),
         }
+    }
+
+    fn replace_plan(
+        &mut self,
+        entries: Vec<crate::protocol::model::AgentPlanEntry>,
+        created_at: &str,
+    ) {
+        if entries.is_empty() {
+            self.current_plan = None;
+            self.completed_plan_message_id = None;
+            return;
+        }
+        if entries
+            .iter()
+            .all(|entry| entry.status == AgentPlanStatus::Completed)
+        {
+            let id = self.completed_plan_message_id.clone().unwrap_or_else(|| {
+                let id = format!(
+                    "acp:{}:replay:plan:{}",
+                    self.session_id, self.next_plan_ordinal
+                );
+                self.next_plan_ordinal += 1;
+                id
+            });
+            self.upsert(NormalizedMessage::CompletedPlan {
+                id: id.clone(),
+                entries,
+                created_at: created_at.to_string(),
+            });
+            self.current_plan = None;
+            self.completed_plan_message_id = Some(id);
+            return;
+        }
+        self.current_plan = Some(AgentPlan { entries });
+        self.completed_plan_message_id = None;
     }
 
     fn push_agent_part(

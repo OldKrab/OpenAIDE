@@ -73,6 +73,8 @@ impl TaskTurnLifecycle {
                 config_mutation: Default::default(),
                 agent_commands_catalog: session.commands_catalog.clone(),
                 context_usage: None,
+                current_plan: session.replayed_plan.current_plan.clone(),
+                completed_plan_message_id: session.replayed_plan.completed_plan_message_id.clone(),
                 last_turn_usage: None,
                 model_id: params.model_id.or(session.model_id.clone()),
                 supports_image_input: session.prompt_capabilities.image,

@@ -73,7 +73,8 @@ use crate::settings::{
 use crate::snapshot::{
     ActivityStatus, ActivityStepSnapshot, AgentCapabilities, AgentCollectionSnapshot,
     AgentConfigOptionCurrentValue, AgentConfigOptionKind, AgentConfigOptionSnapshot,
-    AgentConfigOptionValueSnapshot, AgentSetupReason, AgentSlashCommandInputSnapshot,
+    AgentConfigOptionValueSnapshot, AgentPlanEntrySnapshot, AgentPlanPrioritySnapshot,
+    AgentPlanSnapshot, AgentPlanStatusSnapshot, AgentSetupReason, AgentSlashCommandInputSnapshot,
     AgentSlashCommandSnapshot, AgentStatus, AgentSummary, AttachmentKind, AttachmentSnapshot,
     ChatItem, ChatItemStatus, ChatRole, ChatSnapshot, ClientSnapshot, ClientSnapshotScope,
     LiveSessionDataState, MessagePart, NativeSessionReference, NativeSessionSummary,
@@ -447,6 +448,10 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<TaskStatus>(output, config);
     push_decl::<TaskLifecycle>(output, config);
     push_decl::<TaskSnapshot>(output, config);
+    push_decl::<AgentPlanSnapshot>(output, config);
+    push_decl::<AgentPlanEntrySnapshot>(output, config);
+    push_decl::<AgentPlanPrioritySnapshot>(output, config);
+    push_decl::<AgentPlanStatusSnapshot>(output, config);
     push_decl::<TaskInputCapabilities>(output, config);
     push_decl::<TaskContextUsage>(output, config);
     push_decl::<TaskUsageCost>(output, config);

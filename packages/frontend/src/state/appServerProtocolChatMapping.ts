@@ -104,6 +104,21 @@ export function systemInterruptionItem(
 
 function mapProtocolMessage(item: ChatItem, createdAt: string): NormalizedMessage {
   const text = textFromParts(item.parts);
+  const completedPlan = item.parts.find(
+    (part): part is Extract<MessagePart, { kind: "completedPlan" }> => part.kind === "completedPlan",
+  );
+  if (completedPlan) {
+    return {
+      kind: "completed_plan",
+      id: item.messageId,
+      entries: completedPlan.entries.map((entry) => ({
+        content: entry.content,
+        priority: entry.priority,
+        status: entry.status === "inProgress" ? "in_progress" : entry.status,
+      })),
+      created_at: createdAt,
+    };
+  }
   const activity = firstActivityPart(item.parts);
   if (activity) {
     return {

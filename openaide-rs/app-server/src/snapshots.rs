@@ -459,6 +459,7 @@ fn unavailable_task_snapshot(task_id: TaskId) -> TaskSnapshot {
         },
         input_capabilities: None,
         context_usage: None,
+        current_plan: None,
         chat: ChatSnapshot {
             items: Vec::new(),
             has_more_before: false,

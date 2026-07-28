@@ -6,6 +6,7 @@ import type {
   PermissionState,
 } from "./primitives.js";
 import type { ElicitationMessage } from "./elicitation.js";
+import type { AgentPlanEntry } from "./task.js";
 
 export type ChatMessage = {
   cursor: string;
@@ -19,6 +20,7 @@ export type NormalizedMessage =
   | { kind: "user"; id: string; text: string; created_at: string; attachments?: Attachment[] }
   | { kind: "agent_message"; id: string; role: AgentMessageRole; parts: AgentMessagePart[]; created_at: string }
   | { kind: "activity"; id: string; title: string; status: ActivityStatus; created_at: string; collapsed: boolean; steps: ActivityStep[] }
+  | { kind: "completed_plan"; id: string; entries: AgentPlanEntry[]; created_at: string }
   | { kind: "permission"; id: string; request_id: string; app_server_request_id?: string; title: string; description?: string; scope?: string; risk?: string; tool_call: PermissionToolCall; state: PermissionState; created_at: string; options: PermissionOption[]; selected_option?: string; decision?: PermissionDecision; resolution_message?: string }
   | ElicitationMessage
   | { kind: "interruption"; id: string; reason: InterruptionReason; message: string; created_at: string; recoverable: boolean };

@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 
 use openaide_app_server_protocol::server_requests::{QuestionField, QuestionValue};
 
-use super::{ActivityStatus, ActivityStep};
+use super::{ActivityStatus, ActivityStep, AgentPlanEntry};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct MessagePage {
@@ -51,6 +51,11 @@ pub enum NormalizedMessage {
         collapsed: bool,
         steps: Vec<ActivityStep>,
     },
+    CompletedPlan {
+        id: String,
+        entries: Vec<AgentPlanEntry>,
+        created_at: String,
+    },
     Question {
         id: String,
         request_id: String,
@@ -89,6 +94,7 @@ impl NormalizedMessage {
                 ..
             } => "thought_message",
             NormalizedMessage::Activity { .. } => "activity",
+            NormalizedMessage::CompletedPlan { .. } => "completed_plan",
             NormalizedMessage::Question { .. } => "question",
             NormalizedMessage::Interruption { .. } => "interruption",
         }
@@ -99,6 +105,7 @@ impl NormalizedMessage {
             NormalizedMessage::User { id, .. }
             | NormalizedMessage::AgentMessage { id, .. }
             | NormalizedMessage::Activity { id, .. }
+            | NormalizedMessage::CompletedPlan { id, .. }
             | NormalizedMessage::Question { id, .. }
             | NormalizedMessage::Interruption { id, .. } => id.clone(),
         }
@@ -109,6 +116,7 @@ impl NormalizedMessage {
             NormalizedMessage::User { created_at, .. }
             | NormalizedMessage::AgentMessage { created_at, .. }
             | NormalizedMessage::Activity { created_at, .. }
+            | NormalizedMessage::CompletedPlan { created_at, .. }
             | NormalizedMessage::Question { created_at, .. }
             | NormalizedMessage::Interruption { created_at, .. } => created_at.clone(),
         };
@@ -116,6 +124,7 @@ impl NormalizedMessage {
             NormalizedMessage::User { created_at, .. }
             | NormalizedMessage::AgentMessage { created_at, .. }
             | NormalizedMessage::Activity { created_at, .. }
+            | NormalizedMessage::CompletedPlan { created_at, .. }
             | NormalizedMessage::Question { created_at, .. }
             | NormalizedMessage::Interruption { created_at, .. } => {
                 *created_at = existing_created_at

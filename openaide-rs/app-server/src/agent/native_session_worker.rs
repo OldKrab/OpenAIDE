@@ -138,7 +138,7 @@ pub(super) async fn run_native_session_worker(
                                 &load_replay,
                             )
                             .await
-                            .map(|(reloaded, catalog, commands, replayed_messages)| {
+                            .map(|(reloaded, catalog, commands, replay)| {
                                 let session_id = reloaded.session_id().to_string();
                                 active_session = reloaded;
                                 config_catalog = catalog.clone();
@@ -147,13 +147,14 @@ pub(super) async fn run_native_session_worker(
                                     session_id,
                                 )
                                 .with_commands_catalog(commands)
+                                .with_replayed_plan(replay.plan)
                                 .with_prompt_capabilities(AgentPromptCapabilities {
                                     image: content_policy.capabilities.image,
                                 })
                                 .with_config_options(&catalog);
                                 AgentLoadedSession {
                                     session,
-                                    replayed_messages,
+                                    replayed_messages: replay.messages,
                                 }
                             });
                         if result.is_ok() {

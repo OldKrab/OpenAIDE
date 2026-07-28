@@ -103,7 +103,7 @@ impl<'a> AcpSessionRunner<'a> {
             AcpActiveSession,
             crate::protocol::model::ConfigOptionsCatalog,
             Option<crate::protocol::model::AgentCommandsCatalog>,
-            Vec<crate::protocol::model::NormalizedMessage>,
+            crate::agent::acp_update_projection::ReplayProjectionResult,
         ),
         RuntimeError,
     > {

@@ -255,6 +255,16 @@ One Native Session update consumer exists from acquisition until session close o
 
 Agent message chunks with the same Agent-owned `messageId` update the same in-progress Chat message; interleaved message ids remain separate. Tool updates use `toolCallId` and never depend on an OpenAIDE Turn id.
 
+### Agent Plans
+
+ACP v1 `plan` updates are complete ordered replacement snapshots. App Server validates and normalizes every entry, preserves Agent order, and atomically replaces the Task's one current Agent Plan. It never merges entries or infers Agent or entry identity. An empty snapshot clears the current Plan without adding Chat history.
+
+A non-empty incomplete Agent Plan remains durable across prompt completion, Stop, refusal, failure, reconnect, history synchronization, and App Server restart. Frontend pins it in one collapsible panel above the Composer. A new Plan opens by default. Frontend-owned collapse state survives updates and Task navigation within the current page lifetime, but resets after reload. When collapsed, the panel retains the current `in_progress` entry, or the first pending entry when none is explicitly in progress. High and low priority use quiet text; medium has no priority decoration.
+
+The current entry marker animates only while the Task is actively running. Waiting, idle, stopped, failed, and reduced-motion presentation keep the same marker static. Plan status describes the strategy; Task runtime status owns whether motion may imply active work.
+
+The first non-empty snapshot whose entries are all completed removes the pinned Plan and appends one collapsed Completed Plan row to Chat. Further all-completed snapshots update that same row. A later incomplete snapshot starts the next Agent Plan and no longer targets the prior Completed Plan row. Completed Plan rows and incomplete current Plan state are both durable and replay-safe.
+
 ### Live Agent and Thought text
 
 Smooth streaming is Frontend-only ephemeral presentation layered over immediately updated authoritative Chat. The authoritative Task reducer owns one Chat replica, not a second presented-Chat array. Only the selected Agent or Thought row owns an ephemeral visible-text cursor. Initial open, Task switch, a baseline, a hidden browser tab, and reduced-motion preference render all known text immediately without an animation backlog.
@@ -372,7 +382,6 @@ App Server owns Task Attention meaning, identity, persistence, ordering, and cle
 
 ### ACP update scope
 
-- ACP `plan` updates are ignored until Plan presentation and persistence are deliberately specified.
 - OpenAIDE uses Session Config Options as its single product model. Dedicated Session Modes are ignored with diagnostics rather than synchronized into a second Mode model.
 - ACP `usage_update` is ignored with diagnostics until context-window and Agent-reported cost presentation are specified.
 

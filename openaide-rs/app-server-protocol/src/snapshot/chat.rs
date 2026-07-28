@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use super::task::AgentPlanEntrySnapshot;
 use crate::ids::{AttachmentId, MessageId, RequestId, TurnId};
 use crate::server_requests::{QuestionField, QuestionValue};
 use crate::task::ToolDetailSnapshot;
@@ -107,6 +108,9 @@ pub enum MessagePart {
         error: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         resolution_message: Option<String>,
+    },
+    CompletedPlan {
+        entries: Vec<AgentPlanEntrySnapshot>,
     },
 }
 
