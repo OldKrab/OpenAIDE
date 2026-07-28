@@ -217,11 +217,15 @@ impl Store {
             // pre-migration full paths used by read presentations.
             let needs_execute_presentation = name == "execute"
                 && presentation.as_ref().is_none_or(|presentation| {
-                    presentation.kind == crate::protocol::model::ToolPresentationKind::Read
-                        && presentation
-                            .subjects
-                            .iter()
-                            .any(|subject| subject.contains('/') || subject.contains('\\'))
+                    let [action] = presentation.actions.as_slice() else {
+                        return false;
+                    };
+                    action.kind() == crate::protocol::model::ToolPresentationKind::Read
+                        && action.subjects().is_some_and(|subjects| {
+                            subjects
+                                .iter()
+                                .any(|subject| subject.contains('/') || subject.contains('\\'))
+                        })
                 });
             let needs_view_presentation = name == "read"
                 && presentation.is_none()

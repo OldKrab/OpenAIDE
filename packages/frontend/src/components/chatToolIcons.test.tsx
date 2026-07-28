@@ -10,6 +10,7 @@ describe("chat tool icons", () => {
     expect(icons.every(Boolean)).toBe(true);
     expect(new Set(icons).size).toBe(icons.length);
     expect(renderToStaticMarkup(toolKindIcon("skill", 12))).toContain("lucide-book-open");
+    expect(renderToStaticMarkup(toolKindIcon("inspect", 12))).toContain("lucide-file-search");
     expect(renderToStaticMarkup(toolKindIcon("other", 12))).toContain("lucide-wrench");
   });
 });

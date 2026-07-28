@@ -299,14 +299,26 @@ describe("activity labels", () => {
       kind: "tool" as const,
       name: "execute",
       status: "completed" as const,
-      presentation: { kind: "skill" as const, subjects: ["tdd", "diagnosing-bugs", "impeccable"] },
+      presentation: {
+        actions: [{
+          kind: "skill" as const,
+          subjects: ["tdd", "diagnosing-bugs", "impeccable"],
+        }],
+      },
       input_summary: "sed -n ...",
     };
     const search = {
       kind: "tool" as const,
       name: "execute",
       status: "running" as const,
-      presentation: { kind: "search" as const, subjects: ["activityLabels in frontend"] },
+      presentation: {
+        actions: [{
+          kind: "search" as const,
+          query: "activityLabels",
+          scopes: ["frontend"],
+          target: "contents" as const,
+        }],
+      },
       input_summary: "rg -n activityLabels frontend",
     };
 
@@ -316,8 +328,33 @@ describe("activity labels", () => {
       "Activating tdd, diagnosing-bugs, and impeccable skills",
     );
     expect(activityStepCompletedLabel(skill)).toBe("Activated tdd, diagnosing-bugs, and impeccable skills");
-    expect(activityStepLabel(search)).toBe("Search activityLabels in frontend");
-    expect(activityStepProgressLabel(search)).toBe("Searching activityLabels in frontend");
+    expect(activityStepLabel(search)).toBe("Search “activityLabels” in frontend");
+    expect(activityStepProgressLabel(search)).toBe("Searching “activityLabels” in frontend");
+
+    const inspect = {
+      kind: "tool" as const,
+      name: "execute",
+      status: "completed" as const,
+      presentation: {
+        actions: [
+          { kind: "read" as const, subjects: ["agent-settings-catalog.css", "mcp-settings.css"] },
+          {
+            kind: "search" as const,
+            query: "skill",
+            scopes: ["part-09.css", "part-10.css", "settings-shell.css"],
+            target: "contents" as const,
+          },
+        ],
+      },
+      input_summary: "zsh -lc ...",
+    };
+    expect(activitySummary(activity("Commands", "completed", [inspect]))).toBe("Inspected files");
+    expect(activityStepLabel(inspect)).toBe(
+      "Read agent-settings-catalog.css and mcp-settings.css; "
+      + "Search “skill” in part-09.css, part-10.css, and settings-shell.css",
+    );
+    expect(activityStepProgressLabel({ ...inspect, status: "running" })).toBe("Inspecting files");
+    expect(activityStepCompletedLabel(inspect)).toBe("Inspected files");
   });
 
   it("summarizes mixed grouped tool activity by work type", () => {

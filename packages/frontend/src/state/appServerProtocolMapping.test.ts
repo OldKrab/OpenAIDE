@@ -344,7 +344,17 @@ describe("App Server Protocol state mapping", () => {
               kind: "tool",
               name: "execute",
               status: "completed",
-              presentation: { kind: "skill", subjects: ["tdd", "impeccable"] },
+              presentation: {
+                actions: [
+                  { kind: "skill", subjects: ["diagnosing-bugs"] },
+                  {
+                    kind: "search",
+                    query: "skill",
+                    scopes: ["packages/frontend/src/styles/settings-shell.css"],
+                    target: "contents",
+                  },
+                ],
+              },
               inputSummary: "sed -n ...",
               permissionOutcomes: [],
             }],
@@ -358,7 +368,17 @@ describe("App Server Protocol state mapping", () => {
       steps: [{
         kind: "tool",
         name: "execute",
-        presentation: { kind: "skill", subjects: ["tdd", "impeccable"] },
+        presentation: {
+          actions: [
+            { kind: "skill", subjects: ["diagnosing-bugs"] },
+            {
+              kind: "search",
+              query: "skill",
+              scopes: ["packages/frontend/src/styles/settings-shell.css"],
+              target: "contents",
+            },
+          ],
+        },
       }],
     });
   });
@@ -380,7 +400,9 @@ describe("App Server Protocol state mapping", () => {
               kind: "tool",
               name: "execute",
               status: "completed",
-              presentation: { kind: "read", subjects: [] },
+              presentation: {
+                actions: [{ kind: "read", subjects: [] }],
+              },
               inputSummary: "cat PRODUCT.md",
               permissionOutcomes: [],
             }],

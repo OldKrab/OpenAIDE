@@ -4,6 +4,7 @@ import {
   CloudDownload,
   Earth,
   FileInput,
+  FileSearch,
   FileText,
   ListTree,
   Pencil,
@@ -21,6 +22,7 @@ export function toolKindIcon(kind: string | undefined, size: number, className?:
   if (kind === "edit") return <Pencil className={className} size={size} />;
   if (kind === "delete") return <Trash2 className={className} size={size} />;
   if (kind === "move") return <FileInput className={className} size={size} />;
+  if (kind === "inspect") return <FileSearch className={className} size={size} />;
   if (kind === "search") return <Search className={className} size={size} />;
   if (kind === "web_search") return <Earth className={className} size={size} />;
   if (kind === "execute") return <Terminal className={className} size={size} />;

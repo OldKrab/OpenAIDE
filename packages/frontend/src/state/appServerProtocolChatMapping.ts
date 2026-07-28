@@ -17,6 +17,7 @@ import type {
   Attachment,
   ChatMessage,
   NormalizedMessage,
+  ToolPresentationAction,
 } from "@openaide/app-shell-contracts";
 import { mapPendingProtocolQuestion, mapProtocolQuestion } from "./questionProtocolMapping";
 
@@ -338,12 +339,43 @@ function activityStepFromProtocol(step: ActivityStepSnapshot, activityTitle: str
 function toolPresentationFromProtocol(
   presentation: Extract<ActivityStepSnapshot, { kind: "tool" }>["presentation"],
 ) {
-  if (!presentation || presentation.subjects.length === 0 || presentation.subjects.length > 8) {
+  if (!presentation || presentation.actions.length === 0 || presentation.actions.length > 8) {
     return undefined;
   }
-  const subjects = presentation.subjects.map((subject) => subject.trim());
-  if (subjects.some((subject) => !subject || subject.length > 512)) return undefined;
-  return { kind: presentation.kind, subjects };
+  let subjectCount = 0;
+  const actions: ToolPresentationAction[] = [];
+  for (const action of presentation.actions) {
+    if (action.kind === "search") {
+      const query = action.query.trim();
+      const scopes = action.scopes.map((scope) => scope.trim());
+      if (
+        !query
+        || query.length > 512
+        || scopes.length > 8
+        || scopes.some((scope) => !scope || scope.length > 512)
+      ) return undefined;
+      subjectCount += 1;
+      actions.push({ kind: "search", query, scopes, target: action.target });
+      continue;
+    }
+    const subjects = action.subjects.map((subject) => subject.trim());
+    if (
+      subjects.length === 0
+      || subjects.some((subject) => !subject || subject.length > 512)
+    ) return undefined;
+    subjectCount += subjects.length;
+    actions.push({ kind: action.kind, subjects });
+  }
+  if (subjectCount === 0 || subjectCount > 8) return undefined;
+  const kinds = new Set(actions.map((action) => action.kind));
+  const supported = actions.length === 1
+    || (kinds.size === 1 && kinds.has("search"))
+    || (
+      kinds.has("search")
+      && [...kinds].every((kind) => kind === "read" || kind === "skill" || kind === "search")
+      && (kinds.has("read") || kinds.has("skill"))
+    );
+  return supported ? { actions } : undefined;
 }
 
 function activityStatusFromProtocol(status: ProtocolActivityStatus): ActivityStatus {

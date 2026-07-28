@@ -71,9 +71,17 @@ export type SubagentActivity =
 
 /** Semantic compact-row chrome; the Tool's actual `name` still owns detail routing. */
 export type ToolPresentation = {
-  kind: "skill" | "read" | "view" | "list" | "search";
-  subjects: string[];
+  actions: ToolPresentationAction[];
 };
+
+export type ToolPresentationAction =
+  | { kind: "skill" | "read" | "view" | "list"; subjects: string[] }
+  | {
+      kind: "search";
+      query: string;
+      scopes: string[];
+      target: "contents" | "paths";
+    };
 
 export type ActivityToolDetails = {
   locations: ActivityToolLocation[];

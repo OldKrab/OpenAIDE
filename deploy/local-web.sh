@@ -67,8 +67,18 @@ if [[ -n "${OPENAIDE_WEB_ROLE:-}" ]]; then
     set +a
   fi
 
-  # Machine-specific role settings stay outside version control and override shared defaults.
+  # Machine-specific role settings live in the primary checkout so linked task
+  # worktrees inherit the same local Driver and Target routing.
   role_local_env_file="$repo_root/deploy/local-web.$OPENAIDE_WEB_ROLE.local.env"
+  if [[ ! -f "$role_local_env_file" ]]; then
+    git_common_dir="$(
+      git -C "$repo_root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true
+    )"
+    if [[ "$git_common_dir" == */.git ]]; then
+      primary_repo_root="${git_common_dir%/.git}"
+      role_local_env_file="$primary_repo_root/deploy/local-web.$OPENAIDE_WEB_ROLE.local.env"
+    fi
+  fi
   if [[ -f "$role_local_env_file" ]]; then
     set -a
     # shellcheck disable=SC1090

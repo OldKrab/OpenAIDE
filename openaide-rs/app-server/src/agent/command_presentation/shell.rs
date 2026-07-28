@@ -2,7 +2,11 @@ use std::path::Path;
 
 use serde_json::Value;
 
-pub(super) fn parse_commands(raw_input: &Value) -> Option<Vec<Vec<String>>> {
+pub(super) struct ParsedCommand {
+    pub(super) stages: Vec<Vec<String>>,
+}
+
+pub(super) fn parse_commands(raw_input: &Value) -> Option<Vec<ParsedCommand>> {
     match command_input(raw_input)? {
         CommandInput::Source(source) => {
             let words = shell_words::split(&source).ok()?;
@@ -13,13 +17,15 @@ pub(super) fn parse_commands(raw_input: &Value) -> Option<Vec<Vec<String>>> {
             if let Some(source) = shell_body(&words) {
                 parse_source(source)
             } else {
-                Some(vec![words])
+                Some(vec![ParsedCommand {
+                    stages: vec![words],
+                }])
             }
         }
     }
 }
 
-pub(super) fn parse_saved_command(command: &[String]) -> Option<Vec<Vec<String>>> {
+pub(super) fn parse_saved_command(command: &[String]) -> Option<Vec<ParsedCommand>> {
     let [source] = command else {
         return None;
     };
@@ -59,10 +65,16 @@ fn command_input(raw_input: &Value) -> Option<CommandInput> {
     }
 }
 
-fn parse_source(source: &str) -> Option<Vec<Vec<String>>> {
+fn parse_source(source: &str) -> Option<Vec<ParsedCommand>> {
     split_plain_commands(source)?
         .into_iter()
-        .map(|command| shell_words::split(command).ok())
+        .map(|stages| {
+            stages
+                .into_iter()
+                .map(|stage| shell_words::split(stage).ok())
+                .collect::<Option<Vec<_>>>()
+                .map(|stages| ParsedCommand { stages })
+        })
         .collect()
 }
 
@@ -88,16 +100,17 @@ fn shell_body<S: AsRef<str>>(words: &[S]) -> Option<&str> {
     Some(words[2].as_ref())
 }
 
-/// Splits only plain `&&` or `;` command lists. Classification later requires
-/// every segment to have the same proven read/list/search meaning.
+/// Splits only plain `&&`/`;` command lists and explicit pipelines.
+/// Classification later proves every pipeline stage and the full composition.
 ///
 /// Other operators, expansions, substitutions, and redirections deliberately
 /// fall back to execute.
-fn split_plain_commands(source: &str) -> Option<Vec<&str>> {
+fn split_plain_commands(source: &str) -> Option<Vec<Vec<&str>>> {
     let bytes = source.as_bytes();
     let mut quote = None;
     let mut escaped = false;
-    let mut start = 0;
+    let mut stage_start = 0;
+    let mut stages = Vec::new();
     let mut commands = Vec::new();
     let mut index = 0;
     while index < bytes.len() {
@@ -127,29 +140,43 @@ fn split_plain_commands(source: &str) -> Option<Vec<&str>> {
             continue;
         }
         if byte == b'&' && bytes.get(index + 1) == Some(&b'&') {
-            let command = source[start..index].trim();
-            if command.is_empty() {
+            let stage = source[stage_start..index].trim();
+            if stage.is_empty() {
                 return None;
             }
-            commands.push(command);
+            stages.push(stage);
+            commands.push(std::mem::take(&mut stages));
             index += 2;
-            start = index;
+            stage_start = index;
             continue;
         }
         if byte == b';' {
-            let command = source[start..index].trim();
-            if command.is_empty() {
+            let stage = source[stage_start..index].trim();
+            if stage.is_empty() {
                 return None;
             }
-            commands.push(command);
+            stages.push(stage);
+            commands.push(std::mem::take(&mut stages));
             index += 1;
-            start = index;
+            stage_start = index;
+            continue;
+        }
+        if byte == b'|' {
+            if bytes.get(index + 1) == Some(&b'|') {
+                return None;
+            }
+            let stage = source[stage_start..index].trim();
+            if stage.is_empty() {
+                return None;
+            }
+            stages.push(stage);
+            index += 1;
+            stage_start = index;
             continue;
         }
         if matches!(
             byte,
-            b'|' | b'&'
-                | b'<'
+            b'&' | b'<'
                 | b'>'
                 | b'`'
                 | b'$'
@@ -171,10 +198,11 @@ fn split_plain_commands(source: &str) -> Option<Vec<&str>> {
     if quote.is_some() || escaped {
         return None;
     }
-    let command = source[start..].trim();
-    if command.is_empty() {
+    let stage = source[stage_start..].trim();
+    if stage.is_empty() {
         return None;
     }
-    commands.push(command);
+    stages.push(stage);
+    commands.push(stages);
     Some(commands)
 }

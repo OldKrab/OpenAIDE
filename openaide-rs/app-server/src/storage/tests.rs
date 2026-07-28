@@ -531,8 +531,14 @@ fn pages_upgrade_saved_view_image_envelopes_to_view_presentations() {
         Some("context-usage-live-animation.png")
     );
     let presentation = presentation.as_ref().expect("view presentation");
-    assert_eq!(presentation.kind, ToolPresentationKind::View);
-    assert_eq!(presentation.subjects, ["context-usage-live-animation.png"]);
+    let [action] = presentation.actions.as_slice() else {
+        panic!("expected one view action");
+    };
+    assert_eq!(action.kind(), ToolPresentationKind::View);
+    assert_eq!(
+        action.subjects().expect("view subjects"),
+        ["context-usage-live-animation.png"]
+    );
 }
 
 #[test]
@@ -593,8 +599,14 @@ fn pages_enrich_legacy_execute_presentation_without_changing_saved_tools() {
     assert_eq!(name, "execute");
     assert!(details.is_none());
     let presentation = presentation.as_ref().expect("legacy read presentation");
-    assert_eq!(presentation.kind, ToolPresentationKind::Read);
-    assert_eq!(presentation.subjects, ["runtime.rs", "model.rs"]);
+    let [action] = presentation.actions.as_slice() else {
+        panic!("expected one read action");
+    };
+    assert_eq!(action.kind(), ToolPresentationKind::Read);
+    assert_eq!(
+        action.subjects().expect("read subjects"),
+        ["runtime.rs", "model.rs"]
+    );
     let ActivityStep::Tool {
         tool_call_id,
         name,
@@ -660,8 +672,11 @@ fn pages_enrich_legacy_execute_presentation_from_inline_details() {
         panic!("expected tool");
     };
     let presentation = presentation.as_ref().expect("legacy read presentation");
-    assert_eq!(presentation.kind, ToolPresentationKind::Read);
-    assert_eq!(presentation.subjects, ["PRODUCT.md"]);
+    let [action] = presentation.actions.as_slice() else {
+        panic!("expected one read action");
+    };
+    assert_eq!(action.kind(), ToolPresentationKind::Read);
+    assert_eq!(action.subjects().expect("read subjects"), ["PRODUCT.md"]);
 }
 
 #[test]
@@ -677,10 +692,10 @@ fn pages_refresh_existing_execute_presentation_from_saved_details() {
     let ActivityStep::Tool { presentation, .. } = &mut step else {
         panic!("expected tool");
     };
-    *presentation = Some(ToolPresentation {
-        kind: ToolPresentationKind::Read,
-        subjects: vec!["packages/frontend/src/components/ChatMessageView.tsx".to_string()],
-    });
+    *presentation = Some(ToolPresentation::single(
+        ToolPresentationKind::Read,
+        vec!["packages/frontend/src/components/ChatMessageView.tsx".to_string()],
+    ));
     let mut message = ChatMessage {
         cursor: "activity_1".to_string(),
         identity: "activity_1".to_string(),
@@ -719,7 +734,9 @@ fn pages_refresh_existing_execute_presentation_from_saved_details() {
         presentation
             .as_ref()
             .expect("refreshed presentation")
-            .subjects,
+            .actions[0]
+            .subjects()
+            .expect("read subjects"),
         ["ChatMessageView.tsx"]
     );
 }
