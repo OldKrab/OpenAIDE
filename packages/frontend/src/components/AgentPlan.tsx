@@ -3,6 +3,7 @@ import { ChevronDown } from "lucide-react";
 import type { AgentPlan, AgentPlanEntry, TaskStatus } from "@openaide/app-shell-contracts";
 
 const currentPlanDisclosure = new Map<string, boolean>();
+const PLAN_DISCLOSURE_STORAGE_PREFIX = "openaide.agentPlanDisclosure:";
 
 export function AgentPlanView({
   plan,
@@ -13,7 +14,7 @@ export function AgentPlanView({
   taskId: string;
   taskStatus: TaskStatus;
 }) {
-  const [open, setOpen] = useState(() => currentPlanDisclosure.get(taskId) ?? true);
+  const [open, setOpen] = useState(() => readAgentPlanDisclosure(taskId));
   const completed = plan.entries.filter((entry) => entry.status === "completed").length;
   const current = plan.entries.find((entry) => entry.status === "in_progress")
     ?? plan.entries.find((entry) => entry.status === "pending");
@@ -25,8 +26,9 @@ export function AgentPlanView({
         aria-label={`${open ? "Collapse" : "Expand"} Agent Plan`}
         className="agent-plan-heading"
         onClick={() => setOpen((value) => {
-          currentPlanDisclosure.set(taskId, !value);
-          return !value;
+          const next = !value;
+          retainAgentPlanDisclosure(taskId, next);
+          return next;
         })}
         type="button"
       >
@@ -45,9 +47,14 @@ export function AgentPlanView({
   );
 }
 
-/** A completed or cleared Plan makes the next Plan a new, initially open disclosure. */
+/** A completed or cleared Plan makes the next Plan a new, initially collapsed disclosure. */
 export function resetAgentPlanDisclosure(taskId: string) {
   currentPlanDisclosure.delete(taskId);
+  try {
+    availableSessionStorage()?.removeItem(planDisclosureStorageKey(taskId));
+  } catch {
+    // A blocked session store only removes reload retention.
+  }
 }
 
 export function CompletedPlanView({ entries }: { entries: AgentPlanEntry[] }) {
@@ -121,4 +128,40 @@ function PlanStatusMark({
       <i />
     </span>
   );
+}
+
+/** Restores per-Task disclosure across navigation and page reloads in the current tab. */
+function readAgentPlanDisclosure(taskId: string) {
+  try {
+    const retained = availableSessionStorage()?.getItem(planDisclosureStorageKey(taskId));
+    if (retained === "expanded") return true;
+    if (retained === "collapsed") return false;
+  } catch {
+    // Live memory remains available when browser storage is blocked.
+  }
+  return currentPlanDisclosure.get(taskId) ?? false;
+}
+
+function retainAgentPlanDisclosure(taskId: string, open: boolean) {
+  currentPlanDisclosure.set(taskId, open);
+  try {
+    availableSessionStorage()?.setItem(
+      planDisclosureStorageKey(taskId),
+      open ? "expanded" : "collapsed",
+    );
+  } catch {
+    // Disclosure still works for this page lifetime when browser storage is blocked.
+  }
+}
+
+function planDisclosureStorageKey(taskId: string) {
+  return `${PLAN_DISCLOSURE_STORAGE_PREFIX}${taskId}`;
+}
+
+function availableSessionStorage(): Storage | undefined {
+  try {
+    return globalThis.sessionStorage;
+  } catch {
+    return undefined;
+  }
 }
