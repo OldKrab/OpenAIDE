@@ -1278,6 +1278,156 @@ describe("Composer view behavior", () => {
     expect(onSubmit).toHaveBeenCalledWith("No reducer per key");
   });
 
+  it("recalls Composer History and restores the unsent draft with Up and Down", async () => {
+    const onChange = vi.fn();
+    const { editorDom, renderer } = renderComposerWithEditorDom({
+      attachments: [attachment("attachment_1", "notes.md", "attachment-handle-1")],
+      historyScopeKey: "task:task-1",
+      loadComposerHistory: vi.fn(async () => ["latest accepted", "older accepted"]),
+      onChange,
+      prompt: "unfinished draft",
+    });
+    await settleRenderer();
+    const input = textarea(renderer.root);
+
+    keyDown(input, { key: "ArrowUp" });
+    expect(editorDom.innerText).toBe("latest accepted");
+    keyDown(input, { key: "ArrowUp" });
+    expect(editorDom.innerText).toBe("older accepted");
+    keyDown(input, { key: "ArrowDown" });
+    expect(editorDom.innerText).toBe("latest accepted");
+    keyDown(input, { key: "ArrowDown" });
+
+    expect(editorDom.innerText).toBe("unfinished draft");
+    expect(text(renderer.root)).toContain("notes.md");
+    expect(onChange.mock.calls.map(([value]) => value)).toEqual([
+      "latest accepted",
+      "older accepted",
+      "latest accepted",
+      "unfinished draft",
+    ]);
+  });
+
+  it("cycles multiline recalled entries only while the caret remains at their exact end", async () => {
+    const latest = "latest first line\nlatest second line";
+    const { editorDom, renderer, setCaret } = renderComposerWithEditorDom({
+      historyScopeKey: "task:task-1",
+      loadComposerHistory: vi.fn(async () => [latest, "older accepted"]),
+      prompt: "unfinished draft",
+    }, { selectionAware: true });
+    await settleRenderer();
+    const input = textarea(renderer.root);
+
+    keyDown(input, { key: "ArrowUp" });
+    await settleRenderer();
+    keyDown(input, { key: "ArrowUp" });
+    expect(editorDom.innerText).toBe("older accepted");
+    await settleRenderer();
+    keyDown(input, { key: "ArrowDown" });
+    expect(editorDom.innerText).toBe(latest);
+    await settleRenderer();
+
+    setCaret(3);
+    const nativeDown = vi.fn();
+    keyDown(input, { key: "ArrowDown", preventDefault: nativeDown });
+    const nativeUp = vi.fn();
+    keyDown(input, { key: "ArrowUp", preventDefault: nativeUp });
+    expect(editorDom.innerText).toBe(latest);
+    expect(nativeDown).not.toHaveBeenCalled();
+    expect(nativeUp).not.toHaveBeenCalled();
+
+    setCaret(latest.length);
+    keyDown(input, { key: "ArrowUp" });
+    expect(editorDom.innerText).toBe("older accepted");
+  });
+
+  it("detaches an edited history entry and restores that edited draft after later browsing", async () => {
+    const { editorDom, renderer } = renderComposerWithEditorDom({
+      historyScopeKey: "task:task-1",
+      loadComposerHistory: vi.fn(async () => ["latest accepted", "older accepted"]),
+      prompt: "unfinished draft",
+    });
+    await settleRenderer();
+    const input = textarea(renderer.root);
+
+    keyDown(input, { key: "ArrowUp" });
+    editorDom.innerHTML = "latest accepted, corrected";
+    inputText(input, "latest accepted, corrected");
+    keyDown(input, { key: "ArrowUp" });
+    expect(editorDom.innerText).toBe("latest accepted");
+    keyDown(input, { key: "ArrowDown" });
+
+    expect(editorDom.innerText).toBe("latest accepted, corrected");
+  });
+
+  it("leaves modified and IME arrow keys to the native editor", async () => {
+    const onChange = vi.fn();
+    const { editorDom, renderer } = renderComposerWithEditorDom({
+      historyScopeKey: "task:task-1",
+      loadComposerHistory: vi.fn(async () => ["accepted"]),
+      onChange,
+      prompt: "draft",
+    });
+    await settleRenderer();
+    const input = textarea(renderer.root);
+
+    keyDown(input, { key: "ArrowUp", ctrlKey: true });
+    keyDown(input, { key: "ArrowUp", nativeEvent: { isComposing: true } });
+
+    expect(editorDom.innerText).toBe("draft");
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("gives an open slash picker precedence over Composer History", async () => {
+    const onChange = vi.fn();
+    const { editorDom, renderer } = renderComposerWithEditorDom({
+      commandCatalog: commandCatalog(),
+      historyScopeKey: "task:task-1",
+      loadComposerHistory: vi.fn(async () => ["accepted"]),
+      onChange,
+    });
+    await settleRenderer();
+    const input = textarea(renderer.root);
+    editorDom.innerHTML = "/";
+    inputText(input, "/", 1);
+
+    keyDown(input, { key: "ArrowUp" });
+
+    expect(editorDom.innerText).toBe("/");
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(renderer.root.findByProps({
+      role: "listbox",
+      "aria-label": "Slash commands",
+    })).toBeDefined();
+  });
+
+  it("resets browsing state and history entries when the Composer scope changes", async () => {
+    const firstLoad = vi.fn(async () => ["first task message"]);
+    const secondLoad = vi.fn(async () => ["second task message"]);
+    const { editorDom, renderer } = renderComposerWithEditorDom({
+      historyScopeKey: "task:first",
+      loadComposerHistory: firstLoad,
+      prompt: "first draft",
+    });
+    await settleRenderer();
+    keyDown(textarea(renderer.root), { key: "ArrowUp" });
+    expect(editorDom.innerText).toBe("first task message");
+
+    act(() => {
+      renderer.update(composerElement({
+        historyScopeKey: "task:second",
+        loadComposerHistory: secondLoad,
+        prompt: "second draft",
+      }));
+    });
+    await settleRenderer();
+    keyDown(textarea(renderer.root), { key: "ArrowUp" });
+
+    expect(editorDom.innerText).toBe("second task message");
+    expect(firstLoad).toHaveBeenCalledTimes(1);
+    expect(secondLoad).toHaveBeenCalledTimes(1);
+  });
+
   it("does not replace editor markup for ordinary typing", () => {
     const onSubmit = vi.fn();
     const { editorDom, renderer } = renderComposerWithEditorDom({ onSubmit, prompt: "seed" });
@@ -1548,7 +1698,12 @@ describe("Composer view behavior", () => {
         state: "refreshing",
         paths: ["src/main.rs", "docs/team deck.pptx"],
       });
-      const renderer = renderComposer({ fileBrowser, onChange });
+      const renderer = renderComposer({
+        fileBrowser,
+        historyScopeKey: "task:task-1",
+        loadComposerHistory: vi.fn(async () => ["accepted"]),
+        onChange,
+      });
 
       inputText(textarea(renderer.root), "Read @ma", 8);
       await act(async () => {
@@ -1560,6 +1715,8 @@ describe("Composer view behavior", () => {
       expect(text(picker)).toContain("src/main.rs");
       expect(text(picker)).not.toContain("Refreshing files");
       expect(picker.findByProps({ "data-file-kind": "rust" })).toBeTruthy();
+      keyDown(textarea(renderer.root), { key: "ArrowUp" });
+      expect(onChange).toHaveBeenLastCalledWith("Read @ma");
       click(buttonByText(renderer.root, "src/main.rs"));
       expect(onChange).toHaveBeenLastCalledWith("Read @src/main.rs ");
     } finally {
@@ -1641,8 +1798,11 @@ function renderComposer(overrides: Partial<ComposerTestProps> = {}) {
   return renderer;
 }
 
-function renderComposerWithEditorDom(overrides: Partial<ComposerTestProps> = {}) {
-  const editorDom = mockEditorDom();
+function renderComposerWithEditorDom(
+  overrides: Partial<ComposerTestProps> = {},
+  options: { selectionAware?: boolean } = {},
+) {
+  const { editorDom, setCaret } = mockEditorDom(options.selectionAware);
   let renderer: ReturnType<typeof create> | undefined;
   act(() => {
     renderer = create(composerElement(overrides), {
@@ -1651,17 +1811,53 @@ function renderComposerWithEditorDom(overrides: Partial<ComposerTestProps> = {})
     });
   });
   if (!renderer) throw new Error("Composer renderer was not created");
-  return { editorDom, renderer };
+  return { editorDom, renderer, setCaret };
 }
 
-function mockEditorDom() {
+function mockEditorDom(selectionAware = false) {
   let html = "";
+  let selectionOffset = 0;
+  const textNode = {
+    childNodes: [],
+    nodeType: 3,
+    textContent: "",
+  };
+  const selection = {
+    addRange: (range: { endOffset?: number }) => {
+      selectionOffset = range.endOffset ?? selectionOffset;
+    },
+    getRangeAt: () => ({
+      endContainer: textNode,
+      endOffset: selectionOffset,
+      startContainer: textNode,
+      startOffset: selectionOffset,
+    }),
+    rangeCount: 1,
+    removeAllRanges: vi.fn(),
+  };
   const editor = {
+    childNodes: selectionAware ? [textNode] : [],
+    contains: (node: unknown) => node === textNode,
     focus: vi.fn(),
     innerText: "",
     ownerDocument: {
       activeElement: undefined,
-      getSelection: () => null,
+      createRange: () => {
+        const range: { endOffset?: number; startOffset?: number } = {};
+        return {
+          ...range,
+          setEnd: (_node: unknown, offset: number) => {
+            range.endOffset = offset;
+          },
+          setStart: (_node: unknown, offset: number) => {
+            range.startOffset = offset;
+          },
+          get endOffset() {
+            return range.endOffset;
+          },
+        };
+      },
+      getSelection: () => selectionAware ? selection : null,
     },
     textContent: "",
   };
@@ -1672,9 +1868,15 @@ function mockEditorDom() {
       const text = value.replace(/<br>/g, "\n").replace(/<[^>]+>/g, "");
       editor.innerText = text;
       editor.textContent = text;
+      textNode.textContent = text;
     },
   });
-  return editor as unknown as HTMLElement;
+  return {
+    editorDom: editor as unknown as HTMLElement,
+    setCaret: (offset: number) => {
+      selectionOffset = offset;
+    },
+  };
 }
 
 function composerElement(overrides: Partial<ComposerTestProps> = {}) {
@@ -1708,6 +1910,8 @@ function composerElement(overrides: Partial<ComposerTestProps> = {}) {
       error={overrides.error}
       fileBrowser={overrides.fileBrowser}
       imageAttachmentsAllowed={overrides.imageAttachmentsAllowed}
+      historyScopeKey={overrides.historyScopeKey}
+      loadComposerHistory={overrides.loadComposerHistory}
       onCancel={overrides.onCancel}
       onChange={overrides.onChange ?? vi.fn()}
       onUnsupportedImageAttachment={overrides.onUnsupportedImagePaste ?? vi.fn()}
@@ -1739,6 +1943,8 @@ type ComposerTestProps = {
   error: string;
   fileBrowser: TaskFileBrowserCallbacks;
   imageAttachmentsAllowed: boolean;
+  historyScopeKey: string;
+  loadComposerHistory: () => Promise<string[]>;
   onCancel: () => void;
   onChange: (prompt: string) => void;
   onUnsupportedImagePaste: (message?: string) => void;

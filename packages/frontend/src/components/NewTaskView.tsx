@@ -68,6 +68,7 @@ export function NewTaskView({
   agentRecoveryActions,
   loadingProjects = false,
   onOpenWorkspaceFolder,
+  onLoadComposerHistory,
   submitShortcut,
   fileBrowser,
   focusRequestKey,
@@ -82,6 +83,7 @@ export function NewTaskView({
   focusRequestKey?: number;
   loadingProjects?: boolean;
   onOpenWorkspaceFolder?: () => void;
+  onLoadComposerHistory?: () => Promise<string[]>;
   onSelectConfigOption: (configId: string, value: ConfigOptionCurrentValue) => void;
   onCancelTask?: () => void;
   onRemoveAttachment: (attachmentId: string) => void;
@@ -227,6 +229,10 @@ export function NewTaskView({
       error={undefined}
       fileBrowser={composerFileBrowser}
       imageAttachmentsAllowed={imageAttachmentsAllowed}
+      historyScopeKey={state.newTask.selection.projectId
+        ? `project:${state.newTask.selection.projectId}`
+        : undefined}
+      loadComposerHistory={onLoadComposerHistory}
       focusRequestKey={composerFocusKey}
       onCancel={state.newTask.submitting ? onCancelTask : undefined}
       onChange={intents.changePrompt}

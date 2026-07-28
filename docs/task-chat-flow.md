@@ -409,6 +409,22 @@ Task title mutation is an OpenAIDE product capability, not an ACP Session operat
 - Explicitly internal cleanup and support diagnostics may inspect New Tasks.
 - After promotion, normal visible-Task authorization and subscription rules apply.
 
+## Composer History
+
+Composer History recalls previously accepted User message text without mutating Chat. In an existing Task, its scope is that Task. In New Task, its scope is the selected Project and includes entries originating from Open and Archived Tasks. A scope returns its 50 most recently accepted unique text values, newest first, with a stable identity and deterministic acceptance order.
+
+App Server owns a durable bounded Composer History projection because Native Session history replacement cannot preserve trustworthy OpenAIDE-send provenance or original cross-Task message timestamps. The projection records text only after `task/send` durably accepts it, together with the originating Task, Project, stable entry identity, and acceptance order. Initial prompts, follow-ups, and steering messages qualify. Failed or uncertain Sends, unsent drafts, queued messages, and attachment-only messages do not. Text sent with attachments contributes only its text. Native Session user messages loaded from another client do not enter Composer History.
+
+Duplicate detection compares the exact text after normal Send normalization. Accepting the same text again moves that value to the newest position rather than creating another recall entry; case and meaningful whitespace differences remain distinct. Archive does not remove entries, and Task deletion does not proactively purge them. The projection retains enough bounded entries to return 50 unique values for either supported scope.
+
+Frontend prefetches Composer History whenever the Composer's Task or New Task Project scope changes and refreshes it after a successful local Send. A failed prefetch leaves ordinary editor behavior and Send availability unchanged, records diagnostics, and retries on a later scope change or reconnect. Empty and unavailable history add no persistent Composer UI.
+
+Unmodified Up enters history from an ordinary draft only when no slash-command or file-mention picker owns the key, IME composition is inactive, the selection is collapsed, and the caret is on the first visual line. Once an unchanged recalled entry is visible, Up and Down move through history whenever its caret is at the exact text end, even when the entry is multiline. Moving the caret away from the end restores ordinary caret movement; returning it to the end resumes history navigation. Modified keys and non-collapsed selections retain ordinary editor behavior. Wrapped text and explicit newlines both count when determining the initial entry boundary.
+
+Entering history saves the exact unsent text and caret. Recalled text is an editable copy and places the caret at its end. Current unsent Images and File Attachments remain unchanged; Composer History never restores attachments from the recalled message. Down past the newest entry restores the saved text and caret. Editing recalled text exits history mode and makes the edited value the saved draft; the next eligible Up starts again from the newest entry. Sending recalled or edited text uses the ordinary Send path and creates one new User message.
+
+Changing Task or New Task Project resets the active browsing cursor and installs the correct prefetched scope without transferring browsing state between Composers. Frontend owns only the ephemeral browsing cursor, saved draft text and caret, visual-line detection, and key handling. It does not derive or persist another history from rendered Chat.
+
 ## Images, File Attachments, And Workspace File Mentions
 
 An unsent Image is part of the Frontend-owned Composer draft, not a Task resource. Paste, drag/drop, and the image picker are only input methods for the same Image content kind.

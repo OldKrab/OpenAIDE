@@ -159,6 +159,7 @@ impl TaskProductApi {
                     self.append_running_turn(ctx, &task_id, turn_id.as_str(), &now)?;
 
                     let task = ctx.task_mut();
+                    record_composer_history(task, user_message_id.as_str(), &prompt_text, &now);
                     task.status = LegacyTaskStatus::Starting;
                     // Promotion is durable before Agent work starts, so permissions and other
                     // Agent requests can never belong to a client-private New Task.
@@ -265,6 +266,7 @@ impl TaskProductApi {
                     &now,
                 )?;
                 let task = ctx.task_mut();
+                record_composer_history(task, user_message_id.as_str(), &prompt_text, &now);
                 task.updated_at = now.clone();
                 task.last_activity = now.clone();
                 Ok(TaskMutationResult::Changed)
@@ -340,6 +342,25 @@ impl TaskProductApi {
             .map_err(super::protocol_error_from_runtime)?;
         Ok(())
     }
+}
+
+fn record_composer_history(task: &mut TaskRecord, entry_id: &str, text: &str, accepted_at: &str) {
+    if text.is_empty() {
+        return;
+    }
+    let project_id = crate::projects::project_id_for_workspace(
+        task.project_root
+            .as_deref()
+            .unwrap_or(task.workspace_root.as_str()),
+    );
+    task.composer_history.record(
+        crate::storage::composer_history::ComposerHistoryEntryRecord {
+            entry_id: entry_id.to_string(),
+            project_id: project_id.as_str().to_string(),
+            text: text.to_string(),
+            accepted_at: accepted_at.to_string(),
+        },
+    );
 }
 
 fn durable_send_commit_options() -> super::TaskCommitOptions {

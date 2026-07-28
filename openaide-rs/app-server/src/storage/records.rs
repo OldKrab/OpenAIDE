@@ -5,6 +5,7 @@ use crate::protocol::model::{
     AgentCommandsCatalog, AgentPlan, ChatMessage, ConfigOptionCurrentValue, ConfigOptionsCatalog,
     IsolationKind, TaskContextUsage, TaskStatus, TaskSummary, TaskTurnUsage,
 };
+use crate::storage::composer_history::ComposerHistory;
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case", tag = "status")]
@@ -405,6 +406,9 @@ pub struct TaskRecord {
     pub created_at: String,
     pub updated_at: String,
     pub last_activity: String,
+    /// Bounded accepted text recall kept separate from replaceable Native Session Chat.
+    #[serde(default, skip_serializing_if = "ComposerHistory::is_empty")]
+    pub composer_history: ComposerHistory,
     pub agent_id: String,
     pub agent_name: String,
     pub isolation: IsolationKind,
@@ -476,6 +480,8 @@ impl<'de> Deserialize<'de> for TaskRecord {
             created_at: String,
             updated_at: String,
             last_activity: String,
+            #[serde(default)]
+            composer_history: ComposerHistory,
             agent_id: String,
             agent_name: String,
             isolation: IsolationKind,
@@ -536,6 +542,7 @@ impl<'de> Deserialize<'de> for TaskRecord {
             created_at: stored.created_at,
             updated_at: stored.updated_at,
             last_activity: stored.last_activity,
+            composer_history: stored.composer_history,
             agent_id: stored.agent_id,
             agent_name: stored.agent_name,
             isolation: stored.isolation,

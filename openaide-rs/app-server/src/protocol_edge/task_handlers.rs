@@ -1,6 +1,7 @@
 use openaide_app_server_protocol::envelopes::RequestMeta;
 use openaide_app_server_protocol::task::{
-    TaskAcquireInWorktreeParams, TaskAcquireInWorktreeResult, TaskAcquireParams, TaskAcquireResult,
+    ComposerHistoryParams, ComposerHistoryResult, TaskAcquireInWorktreeParams,
+    TaskAcquireInWorktreeResult, TaskAcquireParams, TaskAcquireResult,
     TaskAdoptNativeSessionParams, TaskAdoptNativeSessionResult, TaskArchiveParams,
     TaskArchiveResult, TaskCancelParams, TaskCancelResult, TaskChatPageParams, TaskChatPageResult,
     TaskListParams, TaskListResult, TaskMarkReadParams, TaskMarkReadResult, TaskOpenParams,
@@ -428,13 +429,40 @@ impl RpcGateway {
             .context_for_connection(&connection_id)
             .expect("routing requires an initialized client for Chat paging");
         let page = match self
-            .task_chat_page
+            .task_history
             .chat_page_for_client(&client.client_instance_id, params)
         {
             Ok(page) => page,
             Err(error) => return self.error(connection_id, id, meta, error),
         };
         self.result::<TaskChatPageResult>(connection_id, id, meta, page)
+    }
+
+    pub(super) fn handle_task_composer_history(
+        &mut self,
+        connection_id: ConnectionId,
+        id: String,
+        params: Value,
+        meta: RequestMeta,
+    ) -> GatewayOutcome {
+        let params = match serde_json::from_value::<ComposerHistoryParams>(params) {
+            Ok(params) => params,
+            Err(error) => {
+                return self.error(connection_id, id, meta, responses::invalid_params(error))
+            }
+        };
+        let client = self
+            .client_hub
+            .context_for_connection(&connection_id)
+            .expect("routing requires an initialized client for Composer History");
+        let result = match self
+            .task_history
+            .composer_history_for_client(&client.client_instance_id, params)
+        {
+            Ok(result) => result,
+            Err(error) => return self.error(connection_id, id, meta, error),
+        };
+        self.result::<ComposerHistoryResult>(connection_id, id, meta, result)
     }
 
     pub(super) fn handle_task_release(

@@ -113,6 +113,7 @@ export function TaskView({
   onCancel,
   fileBrowser,
   onLoadChatPage,
+  onLoadComposerHistory,
   onLoadToolImagePreview,
   onManageWorktrees,
   onOpenProjectSettings,
@@ -148,6 +149,7 @@ export function TaskView({
   onCancel: () => void;
   fileBrowser?: TaskFileBrowserCallbacks;
   onLoadChatPage: (beforeCursor: string) => number | undefined;
+  onLoadComposerHistory?: () => Promise<string[]>;
   onLoadToolImagePreview?: (artifactId: string) => Promise<ToolImagePreview | undefined>;
   onManageWorktrees?: (projectId: string) => void;
   onOpenProjectSettings?: () => void;
@@ -383,6 +385,8 @@ export function TaskView({
               error={taskInput.error ?? taskInput.configError?.message ?? taskConfigOptions?.error}
               fileBrowser={fileBrowser}
               imageAttachmentsAllowed={imageAttachmentsAllowed}
+              historyScopeKey={`task:${snapshot.task.task_id}`}
+              loadComposerHistory={onLoadComposerHistory}
               focusRequestKey={snapshot.task.task_id}
               onCancel={
                 backendReady && (turnBusy || inputPending)

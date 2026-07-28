@@ -41,6 +41,7 @@ mod archive;
 mod attachments;
 mod cancel;
 mod chat_page;
+mod composer_history;
 mod create;
 mod discard;
 mod file_search;
@@ -90,7 +91,7 @@ pub(crate) struct TaskProductApi {
 pub(crate) use open::TaskOpenWorkflow;
 
 pub(crate) use attachments::{AttachmentFileBrowserWorkflow, ResolvedSentFile};
-pub(crate) use chat_page::TaskChatPageWorkflow;
+pub(crate) use chat_page::TaskHistoryWorkflow;
 
 impl TaskProductApi {
     /// Reads a Task at a client intent boundary and hides another client's New Task.

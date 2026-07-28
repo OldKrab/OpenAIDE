@@ -58,6 +58,7 @@ pub const TASK_CANCEL: &str = "task/cancel";
 pub const TASK_OPEN: &str = "task/open";
 pub const TASK_MARK_READ: &str = "task/markRead";
 pub const TASK_CHAT_PAGE: &str = "task/chatPage";
+pub const TASK_COMPOSER_HISTORY: &str = "task/composerHistory";
 pub const TASK_LIST: &str = "task/list";
 pub const TASK_NAVIGATION_REFRESH: &str = "taskNavigation/refresh";
 pub const TASK_NAVIGATION_LOAD_MORE: &str = "taskNavigation/loadMore";
@@ -128,6 +129,7 @@ pub const CLIENT_METHODS: &[&str] = &[
     TASK_OPEN,
     TASK_MARK_READ,
     TASK_CHAT_PAGE,
+    TASK_COMPOSER_HISTORY,
     TASK_LIST,
     TASK_NAVIGATION_REFRESH,
     TASK_NAVIGATION_LOAD_MORE,

@@ -56,6 +56,14 @@ _Avoid_: Upload when the App Shell references an original local path, treating `
 The user-facing message surface inside a Task where the user and agent exchange messages and folded tool activity.
 _Avoid_: Log-style names
 
+**Composer History**:
+A bounded recall history of previously accepted User message text available through the Composer. It is distinct from Chat and contains no reusable attachments.
+_Avoid_: Chat history, Prompt History, command history
+
+**Composer History Entry**:
+One durable text value in Composer History, ordered by its latest acceptance and recalled as an editable Composer draft.
+_Avoid_: Chat message, reusable attachment, immutable prompt
+
 **Archive**:
 The read-only lifecycle for Tasks the user no longer needs in ordinary work. Archived Tasks retain saved history, do not interact with their Agent Native Session, and can return to Open only through Restore.
 _Avoid_: Treating Archive as a peer task mode, location-only flag, Recent, inactive

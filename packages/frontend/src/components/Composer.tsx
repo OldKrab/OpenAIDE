@@ -27,6 +27,7 @@ import {
 import { attachEveryImage } from "./imageAttachmentBatch";
 import { useComposerAutoFocus } from "./useComposerAutoFocus";
 import { useComposerKeyboardFocus } from "./useComposerKeyboardFocus";
+import { useComposerHistory } from "./useComposerHistory";
 import { usesMobileComposerBehavior } from "./mobileComposerBehavior";
 import {
   FileMentionPicker,
@@ -49,7 +50,9 @@ type ComposerProps = {
   error?: string;
   fileBrowser?: TaskFileBrowserCallbacks;
   focusRequestKey?: number | string;
+  historyScopeKey?: string;
   imageAttachmentsAllowed?: boolean;
+  loadComposerHistory?: () => Promise<string[]>;
   agents?: AgentOption[];
   onCancel?: () => void;
   onChange: (prompt: string) => void;
@@ -79,7 +82,9 @@ export function Composer({
   error,
   fileBrowser,
   focusRequestKey,
+  historyScopeKey,
   imageAttachmentsAllowed = true,
+  loadComposerHistory,
   agents = agentOptions,
   onCancel,
   onChange,
@@ -132,6 +137,11 @@ export function Composer({
   const hasDraftContent = hasComposerContent(editorText, attachments.length);
   const uploadPending = fileUploads.some((upload) => upload.state !== "error");
   const canSubmit = composerCanSubmit(availability, editorText, attachments.length) && !uploadPending;
+  const composerHistory = useComposerHistory({
+    load: loadComposerHistory,
+    refreshKey: submissionSettlementKey,
+    scopeKey: historyScopeKey,
+  });
 
   useComposerAutoFocus({ autoFocus, disabled, editorRef, focusRequestKey });
 
@@ -339,6 +349,7 @@ export function Composer({
         controls={completionListboxId}
         disabled={disabled}
         onInputText={(value, cursor) => {
+          composerHistory.edited(value, cursor);
           syncDraft(value);
           onChange(value);
           updateCompletionPickers(value, cursor);
@@ -448,6 +459,30 @@ export function Composer({
             }
             if (event.key === "Escape") {
               setSlashPicker(undefined);
+              return;
+            }
+          }
+          if (
+            (event.key === "ArrowUp" || event.key === "ArrowDown")
+            && !event.altKey
+            && !event.ctrlKey
+            && !event.metaKey
+            && !event.shiftKey
+            && !event.nativeEvent.isComposing
+          ) {
+            const selectionState = editorRef.current?.selectionState();
+            const next = selectionState
+              ? composerHistory.navigate(
+                  event.key === "ArrowUp" ? "older" : "newer",
+                  draftRef.current,
+                  selectionState,
+                )
+              : undefined;
+            if (next) {
+              event.preventDefault();
+              syncDraft(next.text, { renderEditor: true });
+              onChange(next.text);
+              queueEditorSelection(next.caret);
               return;
             }
           }

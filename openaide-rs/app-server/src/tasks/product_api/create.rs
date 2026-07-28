@@ -51,6 +51,7 @@ impl TaskProductApi {
             created_at: now.clone(),
             updated_at: now.clone(),
             last_activity: now,
+            composer_history: Default::default(),
             agent_name: self
                 .agent_registry
                 .display_name(params.agent_id.as_str(), None)
