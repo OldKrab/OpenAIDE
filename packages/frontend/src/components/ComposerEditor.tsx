@@ -9,6 +9,7 @@ import {
 } from "./ComposerFileMentions";
 import {
   captureFocusedEditorSelection,
+  editorSelectionState,
   restoreEditorSelection,
   selectionOffsets,
   setSelectionOffsets,
@@ -20,6 +21,7 @@ export { captureFocusedEditorSelection, restoreEditorSelection } from "./compose
 
 export type ComposerEditorHandle = {
   focus: () => void;
+  selectionState: () => import("./composerEditorSelection").EditorSelectionState;
   selectionRange: () => { start: number; end: number };
   selectionStart: () => number;
   setSelectionRange: (start: number, end: number) => void;
@@ -120,6 +122,14 @@ const ComposerEditorSurface = memo(forwardRef<ComposerEditorHandle, ComposerEdit
 
   useImperativeHandle(ref, () => ({
     focus: () => editorRef.current?.focus(),
+    selectionState: () => editorRef.current
+      ? editorSelectionState(editorRef.current)
+      : {
+          start: valueLength,
+          end: valueLength,
+          firstVisualLine: true,
+          lastVisualLine: true,
+        },
     selectionRange: () => editorRef.current ? selectionOffsets(editorRef.current) : { start: valueLength, end: valueLength },
     selectionStart: () => editorRef.current ? selectionOffsets(editorRef.current).start : valueLength,
     setSelectionRange: (start, end) => {

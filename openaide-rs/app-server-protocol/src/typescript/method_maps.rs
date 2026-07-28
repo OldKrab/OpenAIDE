@@ -4,7 +4,7 @@ pub(super) fn push_method_maps(output: &mut String) {
     let method_union_end = output.len() - ";\n".len();
     output.insert_str(
         method_union_end,
-        " | typeof TASK_SET_PINNED | typeof TASK_TOOL_IMAGE_PREVIEW",
+        " | typeof TASK_SET_PINNED | typeof TASK_TOOL_IMAGE_PREVIEW | typeof TASK_COMPOSER_HISTORY",
     );
     output.push_str("export type RequestParamsByMethod = {\n");
     output.push_str("  [CLIENT_PROBE]: ClientProbeParams;\n");
@@ -71,6 +71,7 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [TASK_OPEN]: TaskOpenParams;\n");
     output.push_str("  [TASK_MARK_READ]: TaskMarkReadParams;\n");
     output.push_str("  [TASK_CHAT_PAGE]: TaskChatPageParams;\n");
+    output.push_str("  [TASK_COMPOSER_HISTORY]: ComposerHistoryParams;\n");
     output.push_str("  [TASK_LIST]: TaskListParams;\n");
     output.push_str("  [TASK_NAVIGATION_REFRESH]: TaskNavigationRefreshParams;\n");
     output.push_str("  [TASK_NAVIGATION_LOAD_MORE]: TaskNavigationLoadMoreParams;\n");
@@ -144,6 +145,7 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [TASK_OPEN]: TaskOpenResult;\n");
     output.push_str("  [TASK_MARK_READ]: TaskMarkReadResult;\n");
     output.push_str("  [TASK_CHAT_PAGE]: TaskChatPageResult;\n");
+    output.push_str("  [TASK_COMPOSER_HISTORY]: ComposerHistoryResult;\n");
     output.push_str("  [TASK_LIST]: TaskListResult;\n");
     output.push_str("  [TASK_NAVIGATION_REFRESH]: TaskNavigationRefreshResult;\n");
     output.push_str("  [TASK_NAVIGATION_LOAD_MORE]: TaskNavigationLoadMoreResult;\n");
@@ -284,6 +286,9 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("export type TaskCancelResponse = ResponseEnvelope<TaskCancelResult>;\n");
     output.push_str("export type TaskOpenResponse = ResponseEnvelope<TaskOpenResult>;\n");
     output.push_str("export type TaskChatPageResponse = ResponseEnvelope<TaskChatPageResult>;\n");
+    output.push_str(
+        "export type TaskComposerHistoryResponse = ResponseEnvelope<ComposerHistoryResult>;\n",
+    );
     output.push_str("export type TaskListResponse = ResponseEnvelope<TaskListResult>;\n");
     output.push_str("export type TaskReleaseResponse = ResponseEnvelope<TaskReleaseResult>;\n");
     output.push_str(

@@ -55,7 +55,7 @@ use crate::tasks::product_api::{
 };
 use crate::tasks::product_api::{
     TaskAcquireWorkflow, TaskAdoptNativeSessionWorkflow, TaskArchiveWorkflow, TaskCancelWorkflow,
-    TaskChatPageWorkflow, TaskSendWorkflow,
+    TaskHistoryWorkflow, TaskSendWorkflow,
 };
 
 pub struct RpcGateway {
@@ -86,7 +86,7 @@ pub struct RpcGateway {
     task_send: Arc<dyn TaskSendWorkflow>,
     task_cancel: Arc<dyn TaskCancelWorkflow>,
     task_open: Arc<dyn TaskOpenWorkflow>,
-    task_chat_page: Arc<dyn TaskChatPageWorkflow>,
+    task_history: Arc<dyn TaskHistoryWorkflow>,
     task_set_config_option: Arc<dyn TaskSetConfigOptionWorkflow>,
     task_metadata: Arc<dyn TaskMetadataWorkflow>,
     task_release: Arc<dyn TaskReleaseWorkflow>,
@@ -156,7 +156,7 @@ impl RpcGateway {
         task_send: Arc<dyn TaskSendWorkflow>,
         task_cancel: Arc<dyn TaskCancelWorkflow>,
         task_open: Arc<dyn TaskOpenWorkflow>,
-        task_chat_page: Arc<dyn TaskChatPageWorkflow>,
+        task_history: Arc<dyn TaskHistoryWorkflow>,
         task_set_config_option: Arc<dyn TaskSetConfigOptionWorkflow>,
         task_metadata: Arc<dyn TaskMetadataWorkflow>,
         task_release: Arc<dyn TaskReleaseWorkflow>,
@@ -192,7 +192,7 @@ impl RpcGateway {
             task_send,
             task_cancel,
             task_open,
-            task_chat_page,
+            task_history,
             task_set_config_option,
             task_metadata,
             task_release,

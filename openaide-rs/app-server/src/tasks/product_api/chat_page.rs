@@ -1,18 +1,35 @@
 use openaide_app_server_protocol::errors::ProtocolError;
 use openaide_app_server_protocol::ids::ClientInstanceId;
-use openaide_app_server_protocol::task::{TaskChatPageParams, TaskChatPageResult};
+use openaide_app_server_protocol::task::{
+    ComposerHistoryParams, ComposerHistoryResult, TaskChatPageParams, TaskChatPageResult,
+};
 
 use super::{protocol_error_from_runtime, TaskProductApi};
 
-pub(crate) trait TaskChatPageWorkflow: Send + Sync {
+/// Authorized, read-only Task history projections exposed through the protocol edge.
+pub(crate) trait TaskHistoryWorkflow: Send + Sync {
     fn chat_page_for_client(
         &self,
         client_instance_id: &ClientInstanceId,
         params: TaskChatPageParams,
     ) -> Result<TaskChatPageResult, ProtocolError>;
+
+    fn composer_history_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        params: ComposerHistoryParams,
+    ) -> Result<ComposerHistoryResult, ProtocolError>;
 }
 
-impl TaskChatPageWorkflow for TaskProductApi {
+impl TaskHistoryWorkflow for TaskProductApi {
+    fn composer_history_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        params: ComposerHistoryParams,
+    ) -> Result<ComposerHistoryResult, ProtocolError> {
+        super::composer_history::query(self, client_instance_id, params)
+    }
+
     fn chat_page_for_client(
         &self,
         client_instance_id: &ClientInstanceId,

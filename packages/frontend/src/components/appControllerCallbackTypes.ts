@@ -75,6 +75,7 @@ export type SettingsCallbacks = {
 export type NewTaskCallbacks = {
   cancel: () => void;
   fileBrowser?: TaskFileBrowserCallbacks;
+  loadComposerHistory?: () => Promise<string[]>;
   removeAttachment: (attachmentId: string) => void;
   selectConfigOption: (configId: string, value: ConfigOptionCurrentValue) => void;
   submit: (draft?: NewTaskDraftInput) => void;
@@ -91,6 +92,7 @@ export type TaskCallbacks = {
   fileBrowser?: TaskFileBrowserCallbacks;
   /** Starts one earlier-page request and returns its viewport/reducer generation. */
   loadChatPage: (beforeCursor: string) => number | undefined;
+  loadComposerHistory?: () => Promise<string[]>;
   /** Keeps full Tool details current until the disclosure closes or unmounts. */
   subscribeToolDetail: (artifactId: string) => () => void;
   /** Lazily loads a validated workspace image without exposing a caller-selected path. */

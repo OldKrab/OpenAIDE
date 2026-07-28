@@ -2,6 +2,7 @@ import {
   TASK_SET_CONFIG_OPTION,
   type AgentConfigOptionId,
   type ClientMutationId,
+  type ProjectId,
   type TaskId,
 } from "@openaide/app-server-client";
 import {
@@ -15,6 +16,7 @@ import { createNewTaskBrowserCallbacks } from "./newTaskBrowserCallbacks";
 import { createNewTaskStartCallbacks } from "./newTaskStartCallbacks";
 import type { NewTaskController } from "./newTaskController";
 import { refreshTaskSnapshotAfterMutationFailure } from "./taskSnapshotRefresh";
+import { requestComposerHistory } from "../intents/taskReadIntents";
 
 type NewTaskDependencies = Pick<
   AppCallbacksDependencies,
@@ -42,6 +44,14 @@ export function createNewTaskCallbacks(dependencies: NewTaskDependencies): NewTa
   return {
     ...createNewTaskStartCallbacks(dependencies),
     ...createNewTaskBrowserCallbacks(dependencies),
+    loadComposerHistory: () => {
+      const projectId = state.newTask.selection.projectId;
+      if (!projectId) return Promise.resolve([]);
+      return requestComposerHistory(
+        backendConnection?.request ? { request: backendConnection.request } : undefined,
+        { kind: "project", projectId: projectId as ProjectId },
+      );
+    },
     removeAttachment: (attachmentId) => {
       const taskId = state.snapshot && !state.snapshot.task.has_messages
         ? state.snapshot.task.task_id

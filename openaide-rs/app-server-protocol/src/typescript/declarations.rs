@@ -100,7 +100,8 @@ use crate::state::{
 use crate::support::{SupportRecoverStuckSessionsParams, SupportRecoverStuckSessionsResult};
 use crate::task::{
     ActivityToolContent, ActivityToolField, ActivityToolInput, ActivityToolLocation,
-    ActivityToolOutput, ActivityToolValue, ComposerImage, ComposerMessage,
+    ActivityToolOutput, ActivityToolValue, ComposerHistoryEntry, ComposerHistoryParams,
+    ComposerHistoryResult, ComposerHistoryScope, ComposerImage, ComposerMessage,
     NativeSessionArchiveParams, NativeSessionArchiveResult, NativeSessionRestoreParams,
     NativeSessionRestoreResult, TaskAcquireInWorktreeParams, TaskAcquireInWorktreeResult,
     TaskAcquireParams, TaskAcquireResult, TaskAdoptNativeSessionParams,
@@ -380,6 +381,10 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<TaskCancelResult>(output, config);
     push_decl::<TaskChatPageParams>(output, config);
     push_decl::<TaskChatPageResult>(output, config);
+    push_decl::<ComposerHistoryScope>(output, config);
+    push_decl::<ComposerHistoryParams>(output, config);
+    push_decl::<ComposerHistoryEntry>(output, config);
+    push_decl::<ComposerHistoryResult>(output, config);
     push_decl::<ToolDetailSnapshot>(output, config);
     push_decl::<TerminalOutputSnapshot>(output, config);
     push_decl::<ActivityToolLocation>(output, config);

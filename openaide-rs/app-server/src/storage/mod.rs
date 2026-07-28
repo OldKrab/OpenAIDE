@@ -1,6 +1,7 @@
 pub(crate) mod agent_config_preferences;
 pub mod app_preferences;
 pub mod atomic;
+pub mod composer_history;
 pub mod cursor;
 pub mod id;
 mod legacy_task_cleanup;

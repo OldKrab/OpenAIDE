@@ -3,6 +3,11 @@ export type EditorSelection = {
   end: number;
 };
 
+export type EditorSelectionState = EditorSelection & {
+  firstVisualLine: boolean;
+  lastVisualLine: boolean;
+};
+
 /** Capture selection in the composer's plain-text coordinate system, where each BR is one newline. */
 export function captureFocusedEditorSelection(root: HTMLElement | null): EditorSelection | undefined {
   if (!root || root.ownerDocument.activeElement !== root) return undefined;
@@ -24,6 +29,57 @@ export function selectionOffsets(root: HTMLElement) {
     start: boundaryOffset(root, range.startContainer, range.startOffset),
     end: boundaryOffset(root, range.endContainer, range.endOffset),
   };
+}
+
+/** Reports visual-line boundaries while retaining a logical-line fallback for non-layout DOMs. */
+export function editorSelectionState(root: HTMLElement): EditorSelectionState {
+  const selection = selectionOffsets(root);
+  const text = editableText(root);
+  const logical = {
+    firstVisualLine: !text.slice(0, selection.start).includes("\n"),
+    lastVisualLine: !text.slice(selection.end).includes("\n"),
+  };
+  if (selection.start !== selection.end) return { ...selection, ...logical };
+
+  const nativeSelection = root.ownerDocument?.getSelection?.();
+  if (!nativeSelection || nativeSelection.rangeCount === 0) return { ...selection, ...logical };
+  const caretRange = nativeSelection.getRangeAt(0);
+  if (typeof caretRange.getClientRects !== "function") return { ...selection, ...logical };
+  const caretRect = Array.from(caretRange.getClientRects()).at(-1)
+    ?? adjacentCharacterRect(root, selection.start);
+  const documentRange = root.ownerDocument.createRange?.();
+  if (!caretRect || !documentRange || typeof documentRange.getClientRects !== "function") {
+    return { ...selection, ...logical };
+  }
+  documentRange.selectNodeContents(root);
+  const lineRects = Array.from(documentRange.getClientRects()).filter((rect) => rect.height > 0);
+  if (lineRects.length === 0) return { ...selection, ...logical };
+  const tolerance = 1;
+  return {
+    ...selection,
+    firstVisualLine: Math.abs(caretRect.top - lineRects[0].top) <= tolerance,
+    lastVisualLine: Math.abs(caretRect.bottom - lineRects[lineRects.length - 1].bottom) <= tolerance,
+  };
+}
+
+/**
+ * Chromium can return no rectangle for a collapsed contenteditable Range. The
+ * adjacent character still identifies the caret's visual line without moving selection.
+ */
+function adjacentCharacterRect(root: HTMLElement, offset: number) {
+  const textLength = editableText(root).length;
+  if (textLength === 0) return undefined;
+  const start = offset < textLength ? offset : Math.max(0, offset - 1);
+  const end = offset < textLength ? offset + 1 : offset;
+  const startBoundary = textBoundary(root, start);
+  const endBoundary = textBoundary(root, end);
+  const range = root.ownerDocument.createRange?.();
+  if (!startBoundary || !endBoundary || !range || typeof range.getClientRects !== "function") {
+    return undefined;
+  }
+  range.setStart(startBoundary.node, startBoundary.offset);
+  range.setEnd(endBoundary.node, endBoundary.offset);
+  return Array.from(range.getClientRects()).at(offset < textLength ? 0 : -1);
 }
 
 export function setSelectionOffsets(root: HTMLElement, start: number, end: number) {

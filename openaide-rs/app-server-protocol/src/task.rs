@@ -114,6 +114,37 @@ pub struct TaskSendResult {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum ComposerHistoryScope {
+    Task { task_id: TaskId },
+    Project { project_id: ProjectId },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ComposerHistoryParams {
+    pub scope: ComposerHistoryScope,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ComposerHistoryEntry {
+    pub entry_id: String,
+    pub text: String,
+    pub accepted_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ComposerHistoryResult {
+    pub entries: Vec<ComposerHistoryEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskSetConfigOptionParams {
     pub task_id: TaskId,

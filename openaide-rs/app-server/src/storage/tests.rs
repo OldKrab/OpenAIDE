@@ -48,6 +48,36 @@ fn task_title_persists_automatic_title_state() {
 }
 
 #[test]
+fn task_composer_history_survives_store_reopen() {
+    let dir = tempfile::tempdir().unwrap();
+    let state_root = dir.path().to_path_buf();
+    let store = Store::open(state_root.clone()).unwrap();
+    let mut task = task_record("task-history", TaskStatus::Inactive, "1");
+    task.composer_history.record(
+        crate::storage::composer_history::ComposerHistoryEntryRecord {
+            entry_id: "message-1".to_string(),
+            project_id: "project-1".to_string(),
+            text: "durable prompt".to_string(),
+            accepted_at: "100".to_string(),
+        },
+    );
+    store.write_task(&task).unwrap();
+    drop(store);
+
+    let reopened = Store::open(state_root).unwrap();
+
+    assert_eq!(
+        reopened
+            .read_task("task-history")
+            .unwrap()
+            .composer_history
+            .entries()[0]
+            .text,
+        "durable prompt"
+    );
+}
+
+#[test]
 fn legacy_single_task_titles_migrate_without_changing_the_visible_owner() {
     let task = task_record("task-legacy-title", TaskStatus::Inactive, "1");
     let mut persisted = serde_json::to_value(task).unwrap();
@@ -1189,6 +1219,7 @@ fn task_record(task_id: &str, status: TaskStatus, created_at: &str) -> TaskRecor
         created_at: created_at.to_string(),
         updated_at: created_at.to_string(),
         last_activity: created_at.to_string(),
+        composer_history: Default::default(),
         agent_id: "codex".to_string(),
         agent_name: "Codex".to_string(),
         isolation: IsolationKind::Local,

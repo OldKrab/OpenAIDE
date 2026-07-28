@@ -111,6 +111,7 @@ export function AppPrimaryTaskSurface({ controller, focusRequestKey, model, work
           ? callbacks.task.cancel
           : callbacks.newTask.cancel}
         onLoadChatPage={callbacks.task.loadChatPage}
+        onLoadComposerHistory={callbacks.task.loadComposerHistory}
         onLoadToolImagePreview={callbacks.task.loadToolImagePreview}
         onManageWorktrees={workspaceRecovery?.manageWorktrees}
         onOpenProjectSettings={workspaceRecovery?.openProjectSettings}
@@ -158,6 +159,7 @@ export function AppPrimaryTaskSurface({ controller, focusRequestKey, model, work
       intents={intents.newTask}
       loadingProjects={!backendReady}
       onCancelTask={callbacks.newTask.cancel}
+      onLoadComposerHistory={callbacks.newTask.loadComposerHistory}
       onOpenWorkspaceFolder={controller.workspaceSetup?.openFolder}
       onRemoveAttachment={callbacks.newTask.removeAttachment}
       onSelectConfigOption={callbacks.newTask.selectConfigOption}

@@ -26,6 +26,7 @@ import {
 } from "../services/attachmentResources";
 import { createConfirmedEmbeddedAttachment } from "../services/embeddedAttachmentSelection";
 import { cancelTaskIntent, sendTaskPromptIntent } from "../intents/taskMutationIntents";
+import { requestComposerHistory } from "../intents/taskReadIntents";
 import { respondToPermissionIntent, respondToQuestionIntent } from "../intents/taskIntents";
 import { appServerAttachment, localImageAttachment } from "../state/composerOptions";
 import { mapProtocolTaskSnapshot } from "../state/appServerProtocolMapping";
@@ -76,6 +77,14 @@ export function createTaskCallbacks({
       cancel();
     },
     fileBrowser: createTaskFileBrowserCallbacks(backendConnection, dispatch, state, attachmentResources),
+    loadComposerHistory: () => {
+      const taskId = state.snapshot?.task.task_id;
+      if (!taskId) return Promise.resolve([]);
+      return requestComposerHistory(
+        backendConnection?.request ? { request: backendConnection.request } : undefined,
+        { kind: "task", taskId: taskId as TaskId },
+      );
+    },
     loadChatPage: (beforeCursor) => {
       if (!state.snapshot) return;
       const task = state.snapshot.task;

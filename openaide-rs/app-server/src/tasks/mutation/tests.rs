@@ -1111,6 +1111,7 @@ fn task_record(task_id: &str) -> TaskRecord {
         created_at: "1".to_string(),
         updated_at: "1".to_string(),
         last_activity: "1".to_string(),
+        composer_history: Default::default(),
         agent_name: "Codex".to_string(),
         agent_id: "codex".to_string(),
         isolation: IsolationKind::Local,

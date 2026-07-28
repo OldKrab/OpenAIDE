@@ -18,6 +18,7 @@ use crate::protocol::model::{
 };
 use crate::server_requests::{ServerRequestAnswer, ServerRequestRuntime};
 use crate::snapshots::task_snapshot::project_stored_task_snapshot;
+use crate::storage::composer_history::ComposerHistoryEntryRecord;
 use crate::storage::records::{
     TaskLifecycle, TaskPreparationRecord, TaskRecord, TaskTitle, TaskTitleSource,
 };
@@ -33,10 +34,11 @@ use openaide_app_server_protocol::snapshot::{
 };
 use openaide_app_server_protocol::support::SupportRecoverStuckSessionsParams;
 use openaide_app_server_protocol::task::{
-    ComposerImage, ComposerMessage, NativeSessionArchiveParams, NativeSessionRestoreParams,
-    TaskAcquireParams, TaskAdoptNativeSessionParams, TaskArchiveParams, TaskCancelParams,
-    TaskMarkReadParams, TaskOpenParams, TaskReleaseParams, TaskSendParams,
-    TaskSetConfigOptionParams, TaskSetPinnedParams, TaskSetTitleParams, TaskTitleSelection,
+    ComposerHistoryParams, ComposerHistoryScope, ComposerImage, ComposerMessage,
+    NativeSessionArchiveParams, NativeSessionRestoreParams, TaskAcquireParams,
+    TaskAdoptNativeSessionParams, TaskArchiveParams, TaskCancelParams, TaskMarkReadParams,
+    TaskOpenParams, TaskReleaseParams, TaskSendParams, TaskSetConfigOptionParams,
+    TaskSetPinnedParams, TaskSetTitleParams, TaskTitleSelection,
 };
 use openaide_app_server_protocol::workspace::WorkspaceListDirectoryParams;
 use std::collections::HashMap;
@@ -3895,6 +3897,119 @@ fn first_send_accepts_starting_task_without_history_sync() {
 }
 
 #[test]
+fn accepted_text_is_available_through_task_composer_history() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let mut new_task = task_record("task-history", "/tmp/openaide-unit-workspace/app");
+    new_task.lifecycle = test_new_task_lifecycle();
+    store.write_task(&new_task).unwrap();
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        Arc::new(crate::agent::mock::MockAgent),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+    api.create_for_test(TaskAcquireParams {
+        project_id: project_id_for_workspace("/tmp/openaide-unit-workspace/app"),
+        agent_id: AgentId::from("codex"),
+        workspace_root: None,
+    })
+    .unwrap();
+    wait_until(|| {
+        matches!(
+            store.read_task("task-history").unwrap().preparation,
+            TaskPreparationRecord::Ready
+        )
+    });
+
+    api.send(send_params("task-history", "  explain this  "))
+        .unwrap();
+    let result = api
+        .composer_history_for_client(
+            &crate::attachment_runtime::AttachmentOwner::test_client_instance_id(),
+            ComposerHistoryParams {
+                scope: ComposerHistoryScope::Task {
+                    task_id: TaskId::from("task-history"),
+                },
+            },
+        )
+        .unwrap();
+
+    assert_eq!(result.entries.len(), 1);
+    assert_eq!(result.entries[0].text, "explain this");
+}
+
+#[test]
+fn project_composer_history_merges_open_and_archived_tasks_without_cross_project_leaks() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let project_root = "/tmp/openaide-composer-history/project";
+    let project_id = project_id_for_workspace(project_root);
+    let mut open = task_record("task-history-open", project_root);
+    open.composer_history.record(ComposerHistoryEntryRecord {
+        entry_id: "open-old".to_string(),
+        project_id: project_id.as_str().to_string(),
+        text: "shared".to_string(),
+        accepted_at: "100".to_string(),
+    });
+    open.composer_history.record(ComposerHistoryEntryRecord {
+        entry_id: "open-new".to_string(),
+        project_id: project_id.as_str().to_string(),
+        text: "newest".to_string(),
+        accepted_at: "300".to_string(),
+    });
+    let mut archived = task_record("task-history-archived", project_root);
+    archived.lifecycle = TaskLifecycle::Archived;
+    archived
+        .composer_history
+        .record(ComposerHistoryEntryRecord {
+            entry_id: "archived-shared".to_string(),
+            project_id: project_id.as_str().to_string(),
+            text: "shared".to_string(),
+            accepted_at: "200".to_string(),
+        });
+    let other_root = "/tmp/openaide-composer-history/other";
+    let mut other = task_record("task-history-other", other_root);
+    other.composer_history.record(ComposerHistoryEntryRecord {
+        entry_id: "other".to_string(),
+        project_id: project_id_for_workspace(other_root).as_str().to_string(),
+        text: "must not leak".to_string(),
+        accepted_at: "400".to_string(),
+    });
+    store.write_task(&open).unwrap();
+    store.write_task(&archived).unwrap();
+    store.write_task(&other).unwrap();
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store)),
+        AgentRegistry::default_built_ins(),
+        Arc::new(crate::agent::mock::MockAgent),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+
+    let result = api
+        .composer_history_for_client(
+            &crate::attachment_runtime::AttachmentOwner::test_client_instance_id(),
+            ComposerHistoryParams {
+                scope: ComposerHistoryScope::Project { project_id },
+            },
+        )
+        .unwrap();
+
+    assert_eq!(
+        result
+            .entries
+            .iter()
+            .map(|entry| entry.text.as_str())
+            .collect::<Vec<_>>(),
+        vec!["newest", "shared"]
+    );
+}
+
+#[test]
 fn send_returns_after_durable_acceptance_without_waiting_for_session_start() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
@@ -4015,6 +4130,14 @@ fn send_while_working_accepts_a_steering_message_without_replacing_primary_work(
         message.chat.message,
         NormalizedMessage::User { ref text, .. } if text == "also check tests"
     )));
+    assert_eq!(
+        task.composer_history
+            .entries()
+            .iter()
+            .map(|entry| entry.text.as_str())
+            .collect::<Vec<_>>(),
+        vec!["also check tests", "start work"]
+    );
     wait_until(|| agent.steers.load(Ordering::SeqCst) == 1);
     assert_eq!(
         agent.steer_calls.lock().unwrap().as_slice(),
@@ -6948,6 +7071,7 @@ fn task_record(task_id: &str, workspace_root: &str) -> TaskRecord {
         created_at: "2026-01-01T00:00:00.000Z".to_string(),
         updated_at: "2026-01-01T00:00:00.000Z".to_string(),
         last_activity: "2026-01-01T00:00:00.000Z".to_string(),
+        composer_history: Default::default(),
         agent_id: "codex".to_string(),
         agent_name: "Codex".to_string(),
         isolation: IsolationKind::Local,

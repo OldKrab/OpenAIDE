@@ -40,18 +40,18 @@ use crate::state::{
 };
 use crate::support::{SupportRecoverStuckSessionsParams, SupportRecoverStuckSessionsResult};
 use crate::task::{
-    NativeSessionArchiveParams, NativeSessionArchiveResult, NativeSessionRestoreParams,
-    NativeSessionRestoreResult, TaskAcquireInWorktreeParams, TaskAcquireInWorktreeResult,
-    TaskAcquireParams, TaskAcquireResult, TaskAdoptNativeSessionParams,
-    TaskAdoptNativeSessionResult, TaskArchiveParams, TaskArchiveResult, TaskCancelParams,
-    TaskCancelResult, TaskChatPageParams, TaskChatPageResult, TaskListParams, TaskListResult,
-    TaskMarkReadParams, TaskMarkReadResult, TaskNavigationLoadMoreParams,
-    TaskNavigationLoadMoreResult, TaskNavigationRefreshParams, TaskNavigationRefreshResult,
-    TaskOpenParams, TaskOpenResult, TaskReleaseParams, TaskReleaseResult, TaskRestoreParams,
-    TaskRestoreResult, TaskSearchFilesParams, TaskSearchFilesResult, TaskSendParams,
-    TaskSendResult, TaskSetConfigOptionParams, TaskSetConfigOptionResult, TaskSetPinnedParams,
-    TaskSetPinnedResult, TaskSetTitleParams, TaskSetTitleResult, TaskToolImagePreviewParams,
-    TaskToolImagePreviewResult,
+    ComposerHistoryParams, ComposerHistoryResult, NativeSessionArchiveParams,
+    NativeSessionArchiveResult, NativeSessionRestoreParams, NativeSessionRestoreResult,
+    TaskAcquireInWorktreeParams, TaskAcquireInWorktreeResult, TaskAcquireParams, TaskAcquireResult,
+    TaskAdoptNativeSessionParams, TaskAdoptNativeSessionResult, TaskArchiveParams,
+    TaskArchiveResult, TaskCancelParams, TaskCancelResult, TaskChatPageParams, TaskChatPageResult,
+    TaskListParams, TaskListResult, TaskMarkReadParams, TaskMarkReadResult,
+    TaskNavigationLoadMoreParams, TaskNavigationLoadMoreResult, TaskNavigationRefreshParams,
+    TaskNavigationRefreshResult, TaskOpenParams, TaskOpenResult, TaskReleaseParams,
+    TaskReleaseResult, TaskRestoreParams, TaskRestoreResult, TaskSearchFilesParams,
+    TaskSearchFilesResult, TaskSendParams, TaskSendResult, TaskSetConfigOptionParams,
+    TaskSetConfigOptionResult, TaskSetPinnedParams, TaskSetPinnedResult, TaskSetTitleParams,
+    TaskSetTitleResult, TaskToolImagePreviewParams, TaskToolImagePreviewResult,
 };
 use crate::workspace::{
     WorkspaceListDirectoryParams, WorkspaceListDirectoryResult, WorkspaceListRootsParams,
@@ -468,6 +468,12 @@ protocol_method!(
     TASK_CHAT_PAGE,
     TaskChatPageParams,
     TaskChatPageResult
+);
+protocol_method!(
+    TaskComposerHistory,
+    TASK_COMPOSER_HISTORY,
+    ComposerHistoryParams,
+    ComposerHistoryResult
 );
 protocol_method!(TaskList, TASK_LIST, TaskListParams, TaskListResult);
 protocol_method!(

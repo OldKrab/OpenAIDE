@@ -13,7 +13,7 @@ use openaide_app_server_protocol::methods::{
     DIAGNOSTICS_GET_RUNTIME, SETTINGS_GET_MCP_SERVERS, SETTINGS_GET_PREFERENCES,
     SETTINGS_GET_RUNTIME, SETTINGS_GET_SKILLS, SETTINGS_UPDATE_PREFERENCES,
     SETTINGS_UPDATE_RUNTIME, SHELL_RESOLVE_FILE_REVEAL, STATE_SUBSCRIBE, STATE_UNSUBSCRIBE,
-    TASK_CHAT_PAGE,
+    TASK_CHAT_PAGE, TASK_COMPOSER_HISTORY,
 };
 use openaide_app_server_protocol::settings::{
     AppPreferencesPatch, AppPreferencesUpdateParams, ComposerSubmitShortcut,
@@ -57,7 +57,7 @@ use crate::task_events::{
 use crate::tasks::product_api::{
     AgentListSessionsWorkflow, AttachmentFileBrowserWorkflow, ResolvedSentFile,
     TaskAcquireWorkflow, TaskAdoptNativeSessionWorkflow, TaskArchiveWorkflow, TaskCancelWorkflow,
-    TaskChatPageWorkflow, TaskFileSearchWorkflow, TaskMetadataWorkflow, TaskOpenWorkflow,
+    TaskFileSearchWorkflow, TaskHistoryWorkflow, TaskMetadataWorkflow, TaskOpenWorkflow,
     TaskReleaseWorkflow, TaskSendAccepted, TaskSendWorkflow, TaskSetConfigOptionWorkflow,
 };
 
@@ -643,6 +643,32 @@ fn task_chat_page_returns_protocol_chat_items() {
         json!("older")
     );
     assert_eq!(value["result"]["hasBefore"], json!(false));
+}
+
+#[test]
+fn task_composer_history_returns_typed_entries() {
+    let mut gateway = gateway();
+    let connection_id = ConnectionId::new("conn-1");
+    initialize(&mut gateway, connection_id.clone());
+
+    let outcome = gateway.handle_inbound(
+        connection_id,
+        request(
+            "2",
+            TASK_COMPOSER_HISTORY,
+            serde_json::json!({
+                "scope": { "kind": "task", "taskId": "task-1" },
+            }),
+        ),
+        AppServerTime(2),
+    );
+
+    let value = response_value(outcome);
+    assert_eq!(value["result"]["entries"][0]["entryId"], json!("history-1"));
+    assert_eq!(
+        value["result"]["entries"][0]["text"],
+        json!("Earlier prompt")
+    );
 }
 
 #[test]
@@ -1982,7 +2008,7 @@ fn gateway_with_project_context_and_store() -> (RpcGateway, Store) {
         Arc::new(RejectingTaskSend),
         Arc::new(RejectingTaskCancel),
         Arc::new(RejectingTaskOpen),
-        Arc::new(RejectingTaskChatPage),
+        Arc::new(RejectingTaskHistory),
         Arc::new(RejectingTaskSetConfigOption),
         Arc::new(RejectingTaskSetTitle),
         Arc::new(RejectingTaskRelease),
@@ -2021,7 +2047,7 @@ fn gateway_with_attachments(attachments: Arc<dyn AttachmentFileBrowserWorkflow>)
         std::sync::Arc::new(RejectingTaskSend),
         std::sync::Arc::new(RejectingTaskCancel),
         std::sync::Arc::new(RejectingTaskOpen),
-        std::sync::Arc::new(FixedTaskChatPage),
+        std::sync::Arc::new(FixedTaskHistory),
         std::sync::Arc::new(RejectingTaskSetConfigOption),
         std::sync::Arc::new(RejectingTaskSetTitle),
         std::sync::Arc::new(RejectingTaskRelease),
@@ -2109,7 +2135,7 @@ fn gateway_with_agent_session_listing(
         std::sync::Arc::new(RejectingTaskSend),
         std::sync::Arc::new(RejectingTaskCancel),
         std::sync::Arc::new(RejectingTaskOpen),
-        std::sync::Arc::new(RejectingTaskChatPage),
+        std::sync::Arc::new(RejectingTaskHistory),
         std::sync::Arc::new(RejectingTaskSetConfigOption),
         std::sync::Arc::new(RejectingTaskSetTitle),
         std::sync::Arc::new(RejectingTaskRelease),
@@ -2149,7 +2175,7 @@ fn gateway_with_agent_authenticate(
         std::sync::Arc::new(RejectingTaskSend),
         std::sync::Arc::new(RejectingTaskCancel),
         std::sync::Arc::new(RejectingTaskOpen),
-        std::sync::Arc::new(RejectingTaskChatPage),
+        std::sync::Arc::new(RejectingTaskHistory),
         std::sync::Arc::new(RejectingTaskSetConfigOption),
         std::sync::Arc::new(RejectingTaskSetTitle),
         std::sync::Arc::new(RejectingTaskRelease),
@@ -2878,9 +2904,26 @@ impl TaskOpenWorkflow for RejectingTaskOpen {
     }
 }
 
-struct FixedTaskChatPage;
+struct FixedTaskHistory;
 
-impl TaskChatPageWorkflow for FixedTaskChatPage {
+impl TaskHistoryWorkflow for FixedTaskHistory {
+    fn composer_history_for_client(
+        &self,
+        _client_instance_id: &ClientInstanceId,
+        _params: openaide_app_server_protocol::task::ComposerHistoryParams,
+    ) -> Result<
+        openaide_app_server_protocol::task::ComposerHistoryResult,
+        openaide_app_server_protocol::errors::ProtocolError,
+    > {
+        Ok(openaide_app_server_protocol::task::ComposerHistoryResult {
+            entries: vec![openaide_app_server_protocol::task::ComposerHistoryEntry {
+                entry_id: "history-1".to_string(),
+                text: "Earlier prompt".to_string(),
+                accepted_at: "1".to_string(),
+            }],
+        })
+    }
+
     fn chat_page_for_client(
         &self,
         _client_instance_id: &ClientInstanceId,
@@ -2911,9 +2954,25 @@ impl TaskChatPageWorkflow for FixedTaskChatPage {
 
 struct RejectingTaskSetConfigOption;
 
-struct RejectingTaskChatPage;
+struct RejectingTaskHistory;
 
-impl TaskChatPageWorkflow for RejectingTaskChatPage {
+impl TaskHistoryWorkflow for RejectingTaskHistory {
+    fn composer_history_for_client(
+        &self,
+        _client_instance_id: &ClientInstanceId,
+        _params: openaide_app_server_protocol::task::ComposerHistoryParams,
+    ) -> Result<
+        openaide_app_server_protocol::task::ComposerHistoryResult,
+        openaide_app_server_protocol::errors::ProtocolError,
+    > {
+        Err(openaide_app_server_protocol::errors::ProtocolError {
+            code: openaide_app_server_protocol::errors::ProtocolErrorCode::Internal,
+            message: "Composer History unavailable in test gateway".to_string(),
+            recoverable: true,
+            target: None,
+        })
+    }
+
     fn chat_page_for_client(
         &self,
         _client_instance_id: &ClientInstanceId,
@@ -3117,6 +3176,7 @@ fn client_new_task_record(
         created_at: "2026-01-01T00:00:00.000Z".to_string(),
         updated_at: "2026-01-01T00:00:00.000Z".to_string(),
         last_activity: "2026-01-01T00:00:00.000Z".to_string(),
+        composer_history: Default::default(),
         agent_id: "codex".to_string(),
         agent_name: "Codex".to_string(),
         isolation: crate::protocol::model::IsolationKind::Local,
