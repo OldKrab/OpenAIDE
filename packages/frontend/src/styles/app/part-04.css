@@ -128,25 +128,6 @@
   object-fit: contain;
 }
 
-.activity-tool-image-preview-loading {
-  width: min(100%, 240px);
-  height: 152px;
-  align-self: start;
-  display: grid;
-  place-content: center;
-  justify-items: center;
-  gap: 8px;
-  border: 1px solid var(--oa-border);
-  border-radius: 5px;
-  background: var(--oa-surface-subtle);
-  color: var(--oa-muted);
-  font-size: 11px;
-}
-
-.activity-tool-image-preview-loading > svg {
-  opacity: 0.72;
-}
-
 .activity-tool-media {
   display: grid;
   gap: 3px;

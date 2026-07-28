@@ -2,18 +2,16 @@ import { Terminal } from "lucide-react";
 import type { ActivityStep, ActivityToolDetails } from "@openaide/app-shell-contracts";
 import type { ToolImagePreview } from "@openaide/app-server-client";
 import { displayCommand, readDetailOutput, readDetailPath, splitToolLines } from "../state/toolDetailsViewModel";
-import { ToolImageFilePreview, ToolImageFilePreviewLoading } from "./ToolImageFilePreview";
+import { ToolImageFilePreview } from "./ToolImageFilePreview";
 
 export function ReadToolDetails({
   details,
   fallbackPreview,
   imagePreview,
-  imagePreviewLoading,
 }: {
   details: ActivityToolDetails;
   fallbackPreview?: string;
   imagePreview?: ToolImagePreview;
-  imagePreviewLoading?: boolean;
   step: Extract<ActivityStep, { kind: "tool" }>;
 }) {
   const fullPath = readDetailPath(details);
@@ -23,11 +21,7 @@ export function ReadToolDetails({
   return (
     <div className="activity-tool-details activity-tool-read-detail">
       {fullPath ? <p className="read-tool-path">{fullPath}</p> : null}
-      {imagePreviewLoading
-        ? <ToolImageFilePreviewLoading />
-        : imagePreview
-          ? <ToolImageFilePreview preview={imagePreview} />
-          : null}
+      {imagePreview ? <ToolImageFilePreview preview={imagePreview} /> : null}
       {lines.length ? (
         <pre className="read-tool-output">
           {lines.map((line, index) => (
@@ -37,7 +31,7 @@ export function ReadToolDetails({
             </span>
           ))}
         </pre>
-      ) : !imagePreview && !imagePreviewLoading ? (
+      ) : !imagePreview ? (
         <p className="activity-tool-muted">No output returned.</p>
       ) : null}
       {command ? (

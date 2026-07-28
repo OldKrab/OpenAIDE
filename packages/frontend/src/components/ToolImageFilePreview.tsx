@@ -1,4 +1,3 @@
-import { Image as ImageIcon } from "lucide-react";
 import { useState } from "react";
 import type { ToolImagePreview } from "@openaide/app-server-client";
 import { AttachmentImagePreviewLightbox } from "./AttachmentImagePreview";
@@ -23,20 +22,5 @@ export function ToolImageFilePreview({ preview }: { preview: ToolImagePreview })
         />
       ) : null}
     </>
-  );
-}
-
-/** Reserves the final thumbnail footprint while App Server resolves a file preview. */
-export function ToolImageFilePreviewLoading() {
-  return (
-    <div
-      aria-busy="true"
-      aria-live="polite"
-      className="activity-tool-image-preview-loading"
-      role="status"
-    >
-      <ImageIcon aria-hidden="true" size={18} />
-      <span>Loading image preview…</span>
-    </div>
   );
 }
