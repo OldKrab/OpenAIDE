@@ -14,9 +14,26 @@ use crate::storage::records::{
     MessageMeta, TaskConfigMutationState, TaskLifecycle, TaskPreparationRecord, TaskRecord,
 };
 use crate::storage::task_journal::artifact;
-use crate::storage::task_journal::frame::{FaultInjector, FaultPoint, JournalKind};
+use crate::storage::task_journal::frame::{FaultInjector, FaultPoint, FramedRecord, JournalKind};
 use crate::storage::task_journal::model::{JournalFrame, TaskOperation};
 use crate::storage::task_journal::{TaskProjection, TaskWrite};
+
+#[derive(serde::Deserialize, serde::Serialize)]
+struct LegacyJournalFrame {
+    format_version: u16,
+    sequence: u64,
+    operations: serde_json::Value,
+}
+
+impl FramedRecord for LegacyJournalFrame {
+    fn format_version(&self) -> u16 {
+        self.format_version
+    }
+
+    fn sequence(&self) -> u64 {
+        self.sequence
+    }
+}
 
 #[test]
 fn worker_panic_resolves_receipt_and_emits_the_sole_root_fatal_signal() {
@@ -193,6 +210,154 @@ fn legacy_task_is_migrated_only_when_its_chat_is_opened() {
     assert!(task_dir.join("chat.snapshot").is_file());
     assert!(!task_dir.join("task.journal").exists());
     assert!(!task_dir.join("task.catalog.json").exists());
+    store.shutdown().unwrap();
+}
+
+#[test]
+fn pre_upgrade_subagent_activity_without_events_still_opens() {
+    let root = TempDir::new().expect("create state root");
+    let task_dir = root.path().join("task-store-v1/tasks/task_legacy_subagent");
+    std::fs::create_dir_all(&task_dir).unwrap();
+    let mut projection = task_projection("task_legacy_subagent");
+    projection
+        .messages
+        .push(crate::storage::records::StoredMessage {
+            sequence: 1,
+            chat: crate::protocol::model::ChatMessage {
+                cursor: "1".to_string(),
+                identity: "subagent:thread_1".to_string(),
+                message_type: "activity".to_string(),
+                message_id: "subagent:thread_1".to_string(),
+                message: crate::protocol::model::NormalizedMessage::Activity {
+                    id: "subagent:thread_1".to_string(),
+                    title: "status check".to_string(),
+                    status: crate::protocol::model::ActivityStatus::Running,
+                    created_at: "2026-07-28T00:00:00Z".to_string(),
+                    collapsed: true,
+                    steps: vec![crate::protocol::model::ActivityStep::Subagent {
+                        tool_call_id: None,
+                        title: None,
+                        thread_id: None,
+                        raw_path: None,
+                        activity: None,
+                        name: "status_check".to_string(),
+                        path: vec!["status_check".to_string()],
+                        status: crate::protocol::model::ActivityStatus::Running,
+                        events: vec![crate::protocol::model::SubagentActivity::Delegated],
+                    }],
+                },
+            },
+        });
+    projection.message_meta.message_count = 1;
+    projection.message_meta.version = 1;
+    let current = JournalFrame {
+        format_version: 1,
+        sequence: 1,
+        operations: vec![TaskOperation::Create {
+            projection: Box::new(projection),
+        }],
+    };
+    let mut persisted = serde_json::to_value(current).unwrap();
+    persisted
+        .pointer_mut("/operations/0/projection/messages/0/chat/message/steps/0")
+        .and_then(serde_json::Value::as_object_mut)
+        .expect("subagent step")
+        .remove("events");
+    let legacy: LegacyJournalFrame = serde_json::from_value(persisted).unwrap();
+    crate::storage::task_journal::frame::create(&task_dir.join("task.journal"), &legacy).unwrap();
+
+    let (store, _commits) = TaskJournalStore::open(root.path().to_path_buf()).unwrap();
+    let loaded = store
+        .load("task_legacy_subagent")
+        .expect("pre-upgrade Task remains openable");
+    let crate::protocol::model::NormalizedMessage::Activity { steps, .. } =
+        &loaded.messages[0].chat.message
+    else {
+        panic!("expected activity");
+    };
+    assert!(matches!(
+        &steps[0],
+        crate::protocol::model::ActivityStep::Subagent {
+            events,
+            ..
+        } if events == &[crate::protocol::model::SubagentActivity::Delegated]
+    ));
+    store.shutdown().unwrap();
+}
+
+#[test]
+fn task_with_view_presentation_still_opens() {
+    let root = TempDir::new().expect("create state root");
+    let task_dir = root.path().join("task-store-v1/tasks/task_newer_view");
+    std::fs::create_dir_all(&task_dir).unwrap();
+    let mut projection = task_projection("task_newer_view");
+    projection
+        .messages
+        .push(crate::storage::records::StoredMessage {
+            sequence: 1,
+            chat: crate::protocol::model::ChatMessage {
+                cursor: "1".to_string(),
+                identity: "tool:view_image".to_string(),
+                message_type: "activity".to_string(),
+                message_id: "tool:view_image".to_string(),
+                message: crate::protocol::model::NormalizedMessage::Activity {
+                    id: "tool:view_image".to_string(),
+                    title: "View image".to_string(),
+                    status: crate::protocol::model::ActivityStatus::Completed,
+                    created_at: "2026-07-28T00:00:00Z".to_string(),
+                    collapsed: true,
+                    steps: vec![crate::protocol::model::ActivityStep::Tool {
+                        tool_call_id: Some("view_image".to_string()),
+                        name: "read".to_string(),
+                        status: crate::protocol::model::ActivityStatus::Completed,
+                        presentation: Some(crate::protocol::model::ToolPresentation {
+                            kind: crate::protocol::model::ToolPresentationKind::Read,
+                            subjects: vec!["preview.png".to_string()],
+                        }),
+                        input_summary: Some("preview.png".to_string()),
+                        output_preview: None,
+                        detail_artifact_id: None,
+                        details: None,
+                        permission_outcomes: Vec::new(),
+                    }],
+                },
+            },
+        });
+    projection.message_meta.message_count = 1;
+    projection.message_meta.version = 1;
+    let current = JournalFrame {
+        format_version: 1,
+        sequence: 1,
+        operations: vec![TaskOperation::Create {
+            projection: Box::new(projection),
+        }],
+    };
+    let mut persisted = serde_json::to_value(current).unwrap();
+    *persisted
+        .pointer_mut("/operations/0/projection/messages/0/chat/message/steps/0/presentation/kind")
+        .expect("presentation kind") = serde_json::Value::String("view".to_string());
+    let newer: LegacyJournalFrame = serde_json::from_value(persisted).unwrap();
+    crate::storage::task_journal::frame::create(&task_dir.join("task.journal"), &newer).unwrap();
+
+    let (store, _commits) = TaskJournalStore::open(root.path().to_path_buf()).unwrap();
+    let loaded = store
+        .load("task_newer_view")
+        .expect("Task written by a newer presentation build remains openable");
+    let crate::protocol::model::NormalizedMessage::Activity { steps, .. } =
+        &loaded.messages[0].chat.message
+    else {
+        panic!("expected activity");
+    };
+    assert!(matches!(
+        &steps[0],
+        crate::protocol::model::ActivityStep::Tool {
+            presentation: Some(crate::protocol::model::ToolPresentation {
+                kind: crate::protocol::model::ToolPresentationKind::View,
+                ..
+            }),
+            ..
+        }
+    ));
     store.shutdown().unwrap();
 }
 

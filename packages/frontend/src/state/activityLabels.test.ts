@@ -180,6 +180,94 @@ describe("activity labels", () => {
     expect(activityStepLabel(message.steps[0])).toBe("Started subagent");
   });
 
+  it("renders a targetless Codex wait once without implying a specific subagent", () => {
+    const wait = {
+      kind: "tool" as const,
+      name: "collaboration",
+      status: "completed" as const,
+      input_summary: "Wait for subagents",
+    };
+
+    expect(activitySummary(activity("Wait for subagents", "completed", [wait]))).toBe("Wait for subagents");
+    expect(activityStepLabel(wait)).toBe("Wait for subagents");
+    expect(activityStepStatus(wait)).toBe("Completed");
+  });
+
+  it.each([
+    ["started", "Start subagent standards_review", "Started subagent"],
+    ["interacted", "Interact with subagent standards_review", "Interacted with subagent"],
+  ] as const)("generates the subagent group title from %s activity while preserving the ACP row title", (
+    subagentActivity,
+    acpTitle,
+    groupTitle,
+  ) => {
+    const step = {
+      kind: "subagent" as const,
+      name: "standards_review",
+      path: ["review", "standards_review"],
+      status: "completed" as const,
+      events: [],
+      title: acpTitle,
+      activity: subagentActivity,
+    };
+
+    expect(activitySummary(activity(acpTitle, "completed", [step]))).toBe(groupTitle);
+    expect(activityStepLabel(step)).toBe(acpTitle);
+  });
+
+  it("counts grouped subagent actions like other tool kinds", () => {
+    const subagent = (
+      name: string,
+      subagentActivity: "started" | "interacted",
+    ) => ({
+      kind: "subagent" as const,
+      name,
+      path: [name],
+      status: "completed" as const,
+      events: [],
+      title: `${subagentActivity} ${name}`,
+      activity: subagentActivity,
+    });
+
+    expect(activitySummary(activity("Tool activity", "completed", [
+      subagent("review_a", "started"),
+      subagent("review_b", "started"),
+    ]))).toBe("Started 2 subagents");
+    expect(activitySummary(activity("Tool activity", "completed", [
+      subagent("review_a", "started"),
+      subagent("review_a", "interacted"),
+    ]))).toBe("2 subagent actions");
+  });
+
+  it("presents first-class subagents with readable hierarchy and lifecycle copy", () => {
+    const running = {
+      kind: "subagent" as const,
+      name: "standards_review",
+      path: ["review", "standards_review"],
+      status: "running" as const,
+      events: ["running" as const],
+    };
+
+    expect(activitySummary(activity("Delegated work", "running", [running]))).toBe(
+      "Delegated to standards review",
+    );
+    expect(activityStepLabel(running)).toBe("standards review");
+    expect(activityStepContext(running)).toBe("review");
+    expect(activityStepProgressLabel(running)).toBe("standards review is working");
+    expect(activityStepCompletedLabel({ ...running, status: "completed", events: ["completed"] })).toBe(
+      "standards review completed",
+    );
+    expect(activityStepCompletedLabel({ ...running, status: "error", events: ["failed"] })).toBe(
+      "standards review failed",
+    );
+    expect(activityStepCompletedLabel({ ...running, status: "interrupted", events: ["stopped"] })).toBe(
+      "standards review stopped",
+    );
+    expect(activityStepCompletedLabel({ ...running, status: "completed", events: ["delegated", "interacted"] })).toBe(
+      "Checked in with standards review",
+    );
+  });
+
   it("summarizes grouped command activity without promoting every command", () => {
     expect(
       activitySummary(

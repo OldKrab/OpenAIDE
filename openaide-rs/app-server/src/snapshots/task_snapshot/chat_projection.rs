@@ -2,7 +2,8 @@ use openaide_app_server_protocol::ids::MessageId;
 use openaide_app_server_protocol::snapshot::{
     ActivityStatus as ProtocolActivityStatus, ActivityStepSnapshot, AttachmentKind,
     AttachmentSnapshot, ChatItem, ChatItemStatus, ChatRole, MessagePart, QuestionMessageAction,
-    QuestionMessageState, ToolPermissionDecisionSnapshot, ToolPermissionOutcomeSnapshot,
+    QuestionMessageState, SubagentActivitySnapshot, ToolPermissionDecisionSnapshot,
+    ToolPermissionOutcomeSnapshot,
 };
 use openaide_app_server_protocol::task::{
     ActivityToolContent as ProtocolActivityToolContent,
@@ -316,6 +317,49 @@ fn project_activity_step(step: &ActivityStep) -> ActivityStepSnapshot {
             status: project_activity_status(*status),
             exit_code: *exit_code,
             output_preview: output_preview.clone(),
+        },
+        ActivityStep::Subagent {
+            tool_call_id,
+            title,
+            thread_id,
+            raw_path,
+            activity,
+            name,
+            path,
+            status,
+            events,
+        } => ActivityStepSnapshot::Subagent {
+            tool_call_id: tool_call_id.clone(),
+            title: title.clone(),
+            thread_id: thread_id.clone(),
+            raw_path: raw_path.clone(),
+            activity: activity.clone(),
+            name: name.clone(),
+            path: path.clone(),
+            status: project_activity_status(*status),
+            events: events
+                .iter()
+                .map(|event| match event {
+                    crate::protocol::model::SubagentActivity::Delegated => {
+                        SubagentActivitySnapshot::Delegated
+                    }
+                    crate::protocol::model::SubagentActivity::Interacted => {
+                        SubagentActivitySnapshot::Interacted
+                    }
+                    crate::protocol::model::SubagentActivity::Running => {
+                        SubagentActivitySnapshot::Running
+                    }
+                    crate::protocol::model::SubagentActivity::Completed => {
+                        SubagentActivitySnapshot::Completed
+                    }
+                    crate::protocol::model::SubagentActivity::Failed => {
+                        SubagentActivitySnapshot::Failed
+                    }
+                    crate::protocol::model::SubagentActivity::Stopped => {
+                        SubagentActivitySnapshot::Stopped
+                    }
+                })
+                .collect(),
         },
     }
 }

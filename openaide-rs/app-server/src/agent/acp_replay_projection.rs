@@ -3,6 +3,9 @@ use std::sync::{Arc, Mutex};
 
 use crate::agent::acp_schema::{ContentBlock, SessionUpdate};
 
+use crate::agent::acp_codex_subagent::{
+    project_codex_collaboration, CodexSubagentProjection, CodexSubagentState,
+};
 use crate::agent::acp_content_projection::project_content_block;
 use crate::agent::acp_live_prompt_projection::project_plan_entry;
 use crate::agent::acp_message_identity::stable_message_id;
@@ -18,6 +21,7 @@ use crate::protocol::model::{
 use crate::time::now_string;
 
 pub(super) struct ReplayProjection {
+    agent_id: Option<String>,
     session_id: String,
 }
 
@@ -28,8 +32,18 @@ pub(super) struct ReplayProjectionResult {
 }
 
 impl ReplayProjection {
+    #[cfg(test)]
     pub(super) fn new(session_id: impl Into<String>) -> Self {
         Self {
+            agent_id: None,
+            session_id: session_id.into(),
+        }
+    }
+
+    /// Selects the vendor adapter that may interpret replayed extension metadata.
+    pub(super) fn for_agent(agent_id: impl Into<String>, session_id: impl Into<String>) -> Self {
+        Self {
+            agent_id: Some(agent_id.into()),
             session_id: session_id.into(),
         }
     }
@@ -42,9 +56,11 @@ impl ReplayProjection {
     pub(super) fn project_with_plan(&self, updates: Vec<SessionUpdate>) -> ReplayProjectionResult {
         let created_at = now_string();
         let tool_calls = Arc::new(Mutex::new(Default::default()));
+        let codex_subagents =
+            (self.agent_id.as_deref() == Some("codex")).then(CodexSubagentState::default);
         let mut replay = ReplayBuffer::new(&self.session_id);
         for update in updates {
-            replay.project(update, &created_at, &tool_calls);
+            replay.project(update, &created_at, &tool_calls, codex_subagents.as_ref());
         }
         replay.finalize_fallback_ids();
         ReplayProjectionResult {
@@ -86,7 +102,13 @@ impl ReplayBuffer {
         }
     }
 
-    fn project(&mut self, update: SessionUpdate, created_at: &str, tool_calls: &ToolCallState) {
+    fn project(
+        &mut self,
+        update: SessionUpdate,
+        created_at: &str,
+        tool_calls: &ToolCallState,
+        codex_subagents: Option<&CodexSubagentState>,
+    ) {
         match update {
             SessionUpdate::UserMessageChunk(chunk) => {
                 if let ContentBlock::Text(text) = chunk.content {
@@ -112,12 +134,46 @@ impl ReplayBuffer {
             SessionUpdate::ToolCall(tool_call) => {
                 self.end_anonymous_text_run();
                 remember_tool_call(tool_calls, tool_call.clone());
-                self.upsert(normalize_event(tool_call_event(&tool_call), created_at));
+                match codex_subagents
+                    .map(|state| state.project_tool_call(&tool_call))
+                    .unwrap_or(CodexSubagentProjection::GenericTool)
+                {
+                    CodexSubagentProjection::Event(subagent) => {
+                        self.upsert(normalize_event(
+                            crate::agent::events::AgentEvent::Subagent(subagent),
+                            created_at,
+                        ));
+                    }
+                    CodexSubagentProjection::Suppress => {}
+                    CodexSubagentProjection::GenericTool => {
+                        self.upsert(normalize_event(
+                            replay_tool_event(&tool_call, codex_subagents.is_some()),
+                            created_at,
+                        ));
+                    }
+                }
             }
             SessionUpdate::ToolCallUpdate(update) => {
                 self.end_anonymous_text_run();
+                let subagent_projection = codex_subagents
+                    .map(|state| state.project_tool_update(&update))
+                    .unwrap_or(CodexSubagentProjection::GenericTool);
                 let tool_call = merge_tool_call_update(tool_calls, update);
-                self.upsert(normalize_event(tool_call_event(&tool_call), created_at));
+                match subagent_projection {
+                    CodexSubagentProjection::Event(subagent) => {
+                        self.upsert(normalize_event(
+                            crate::agent::events::AgentEvent::Subagent(subagent),
+                            created_at,
+                        ));
+                    }
+                    CodexSubagentProjection::Suppress => {}
+                    CodexSubagentProjection::GenericTool => {
+                        self.upsert(normalize_event(
+                            replay_tool_event(&tool_call, codex_subagents.is_some()),
+                            created_at,
+                        ));
+                    }
+                }
             }
             SessionUpdate::Plan(plan) => {
                 self.end_anonymous_text_run();
@@ -315,6 +371,18 @@ impl ReplayBuffer {
             set_message_id(message, stable_id);
         }
     }
+}
+
+fn replay_tool_event(
+    tool_call: &crate::agent::acp_schema::ToolCall,
+    codex: bool,
+) -> crate::agent::events::AgentEvent {
+    if codex {
+        if let Some(tool) = project_codex_collaboration(tool_call) {
+            return crate::agent::events::AgentEvent::ToolCall(tool);
+        }
+    }
+    tool_call_event(tool_call)
 }
 
 #[derive(Clone, Copy, Hash, PartialEq, Eq)]

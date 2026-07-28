@@ -33,6 +33,14 @@ export function activitySummary(activity: ActivityMessage) {
     const kind = classifyStep(first);
     if (kind !== "other") return countLabel(kind, 1, true) ?? humanizeToolName(activity.title);
   }
+  if (first?.kind === "subagent") {
+    if (first.activity === "started" || first.activity === "interacted") {
+      return countLabel(classifyStep(first), 1, true) ?? "Subagent activity";
+    }
+    if (first.title) return "Subagent activity";
+    return `Delegated to ${subagentName(first.name)}`;
+  }
+  if (first?.kind === "tool" && first.name === "collaboration") return "Wait for subagents";
   if (first && first.kind !== "text") {
     return countLabel(classifyStep(first, activity.title), 1, true) ?? humanizeToolName(activity.title);
   }
@@ -40,9 +48,14 @@ export function activitySummary(activity: ActivityMessage) {
 }
 
 function groupedActivitySummary(activity: ActivityMessage) {
+  const kinds = activity.steps.map((step) => classifyStep(step));
+  const subagentKinds = new Set(kinds.filter(isSubagentSummaryKind));
+  const collapseSubagentActions = subagentKinds.size > 1;
   const counts = new Map<ActivitySummaryKind, number>();
-  for (const step of activity.steps) {
-    const kind = classifyStep(step);
+  for (const classifiedKind of kinds) {
+    const kind = collapseSubagentActions && isSubagentSummaryKind(classifiedKind)
+      ? "subagentAction"
+      : classifiedKind;
     counts.set(kind, (counts.get(kind) ?? 0) + 1);
   }
   const parts = Array.from(counts, ([kind, count], index) => countLabel(kind, count, index === 0)).filter(
@@ -62,6 +75,8 @@ export function activityStepLabel(step: ActivityStep) {
   if (step.kind === "thought") return "Thought";
   if (step.kind === "command") return step.command_label;
   if (step.kind === "text") return step.text;
+  if (step.kind === "subagent") return step.title ?? subagentName(step.name);
+  if (step.name === "collaboration") return "Wait for subagents";
   const semanticTitle = activityStepSemanticTitle(step);
   if (semanticTitle) return semanticTitleText(semanticTitle);
   if (step.presentation) {
@@ -107,6 +122,11 @@ export function activityStepProgressLabel(step: ActivityStep, activityTitle?: st
   if (step.kind === "thought") return "Thinking";
   if (step.kind === "command") return `Running ${step.command_label}`;
   if (step.kind === "text") return step.text;
+  if (step.kind === "subagent") {
+    if (step.title) return step.title;
+    return subagentEventProgressLabel(step.events.at(-1), subagentName(step.name));
+  }
+  if (step.name === "collaboration") return "Waiting for subagents";
   const collaborationLabel = collaborationProgressAction(
     `${step.name} ${activityTitle ?? ""} ${step.input_summary ?? ""}`,
   );
@@ -140,6 +160,16 @@ export function activityStepCompletedLabel(step: ActivityStep) {
     return step.status === "error" ? `Command failed: ${step.command_label}` : `Ran ${step.command_label}`;
   }
   if (step.kind === "text") return step.text;
+  if (step.kind === "subagent") {
+    if (step.title) return step.title;
+    const name = subagentName(step.name);
+    return subagentEventCompletedLabel(step.events.at(-1), name);
+  }
+  if (step.name === "collaboration") {
+    if (step.status === "error") return "Failed while waiting for subagents";
+    if (step.status === "interrupted") return "Stopped waiting for subagents";
+    return "Waited for subagents";
+  }
   if (step.presentation) {
     const subject = presentationSubject(step) ?? "";
     if (step.status === "interrupted") return progressLabel("Interrupted", subject);
@@ -178,6 +208,11 @@ function collaborationProgressAction(value: string) {
 }
 
 export function activityStepContext(step: ActivityStep) {
+  if (step.kind === "subagent") {
+    if (step.title) return undefined;
+    const parents = step.path.slice(0, -1).map(subagentName).filter(Boolean);
+    return parents.length ? parents.join(" › ") : undefined;
+  }
   if (step.kind !== "tool") return undefined;
   const input = step.details?.input;
   if (step.name === "search") {
@@ -192,11 +227,17 @@ export function activityStepStatus(step: ActivityStep) {
   if (step.status === "running") return "Running";
   if (step.status === "interrupted") return "Interrupted";
   if (step.status === "error") return "Failed";
+  if (
+    step.status === "completed"
+    && ((step.kind === "subagent" && step.title) || (step.kind === "tool" && step.name === "collaboration"))
+  ) {
+    return "Completed";
+  }
   return undefined;
 }
 
 export function activityStepPreview(step: ActivityStep) {
-  if (step.kind === "text" || step.kind === "thought") return undefined;
+  if (step.kind === "text" || step.kind === "thought" || step.kind === "subagent") return undefined;
   return step.output_preview;
 }
 
@@ -215,12 +256,28 @@ type ActivitySummaryKind =
   | "switchMode"
   | "terminalInput"
   | "collaboration"
+  | "subagent"
+  | "subagentStarted"
+  | "subagentInteracted"
+  | "subagentAction"
   | "other";
+
+function isSubagentSummaryKind(kind: ActivitySummaryKind) {
+  return kind === "collaboration"
+    || kind === "subagent"
+    || kind === "subagentStarted"
+    || kind === "subagentInteracted";
+}
 
 function classifyStep(step: ActivityStep, legacyToolName?: string): ActivitySummaryKind {
   if (step.kind === "thought") return "thought";
   if (step.kind === "command") return "run";
   if (step.kind === "text") return classifyTextStep(step.text);
+  if (step.kind === "subagent") {
+    if (step.activity === "started") return "subagentStarted";
+    if (step.activity === "interacted") return "subagentInteracted";
+    return "subagent";
+  }
   return summaryKindForTool(activityToolKind(step, legacyToolName));
 }
 
@@ -248,6 +305,7 @@ export function activityToolKind(
     fetch: "fetch",
     switch_mode: "switch_mode",
     write_stdin: "terminal_input",
+    collaboration: "collaboration",
   };
   const namedKind = namedKinds[step.name] ?? (legacyToolName ? namedKinds[legacyToolName] : undefined);
   if (namedKind) return namedKind;
@@ -309,9 +367,17 @@ function countLabel(kind: ActivitySummaryKind, count: number, sentenceStart: boo
     switchMode: { verb: "switched", single: "mode", plural: "modes" },
     terminalInput: { verb: "sent", single: "terminal input", plural: "terminal inputs" },
     collaboration: { verb: "coordinated", single: "subagent", plural: "subagents" },
+    subagent: { verb: "delegated to", single: "subagent", plural: "subagents" },
+    subagentStarted: { verb: "started", single: "subagent", plural: "subagents" },
+    subagentInteracted: { verb: "interacted with", single: "subagent", plural: "subagents" },
+    subagentAction: { single: "subagent action", plural: "subagent actions" },
     other: { verb: "called", single: "tool", plural: "tools" },
   };
   const label = labels[kind];
+  if (kind === "subagentAction") {
+    const phrase = count === 1 ? label.single : `${count} ${label.plural}`;
+    return sentenceStart ? capitalize(phrase) : phrase;
+  }
   if (kind === "thought") {
     const phrase = count === 1 ? "thought" : count === 2 ? "thought twice" : `thought ${count} times`;
     return sentenceStart ? capitalize(phrase) : phrase;
@@ -497,6 +563,7 @@ function toolActionLabel(name: string) {
     fetch: "Fetch",
     switch_mode: "Switch mode",
     think: "Reasoning tool",
+    collaboration: "Wait for subagents",
   };
   return labels[name];
 }
@@ -562,6 +629,34 @@ function humanizeToolName(value: string) {
     .replace(/\s+/g, " ")
     .trim()
     .replace(/^\w/, (letter) => letter.toUpperCase());
+}
+
+function subagentName(value: string) {
+  return value.trim().replace(/[_-]+/g, " ").replace(/\s+/g, " ");
+}
+
+function subagentEventProgressLabel(
+  event: Extract<ActivityStep, { kind: "subagent" }>["events"][number] | undefined,
+  name: string,
+) {
+  if (event === "interacted") return `Checking in with ${name}`;
+  if (event === "completed") return `${name} completed`;
+  if (event === "failed") return `${name} failed`;
+  if (event === "stopped") return `${name} stopped`;
+  if (event === "running") return `${name} is working`;
+  return `Delegating to ${name}`;
+}
+
+function subagentEventCompletedLabel(
+  event: Extract<ActivityStep, { kind: "subagent" }>["events"][number] | undefined,
+  name: string,
+) {
+  if (event === "interacted") return `Checked in with ${name}`;
+  if (event === "completed") return `${name} completed`;
+  if (event === "failed") return `${name} failed`;
+  if (event === "stopped") return `${name} stopped`;
+  if (event === "running") return `${name} is working`;
+  return `Delegated to ${name}`;
 }
 
 function capitalize(value: string) {

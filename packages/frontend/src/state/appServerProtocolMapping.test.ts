@@ -280,6 +280,53 @@ describe("App Server Protocol state mapping", () => {
     });
   });
 
+  it("maps the Agent-owned subagent title and identity details", () => {
+    const mapping = mapProtocolTaskSnapshot(protocolSnapshot({
+      chat: {
+        hasMoreBefore: false,
+        hasMessages: true,
+        items: [{
+          messageId: "subagent-1" as MessageId,
+          role: "agent",
+          status: "complete",
+          parts: [{
+            kind: "activity",
+            title: "Start subagent standards_review",
+            status: "completed",
+            steps: [{
+              kind: "subagent",
+              toolCallId: "call_start",
+              title: "Start subagent standards_review",
+              threadId: "thread_standards",
+              rawPath: "/root/review/standards_review",
+              activity: "started",
+              name: "standards_review",
+              path: ["review", "standards_review"],
+              status: "completed",
+              events: [],
+            }],
+          }],
+        }],
+      },
+    }), mappingContext());
+
+    expect(mapping.snapshot.chat.items[0].message).toMatchObject({
+      kind: "activity",
+      steps: [{
+        kind: "subagent",
+        tool_call_id: "call_start",
+        title: "Start subagent standards_review",
+        thread_id: "thread_standards",
+        raw_path: "/root/review/standards_review",
+        activity: "started",
+        name: "standards_review",
+        path: ["review", "standards_review"],
+        status: "completed",
+        events: [],
+      }],
+    });
+  });
+
   it("maps execute presentation separately from execute identity", () => {
     const mapping = mapProtocolTaskSnapshot(protocolSnapshot({
       chat: {

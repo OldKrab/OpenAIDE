@@ -65,6 +65,36 @@ pub fn normalize_events(events: Vec<AgentEvent>, created_at: &str) -> Vec<Normal
                     permission_outcomes: Vec::new(),
                 }],
             }),
+            AgentEvent::Subagent(subagent) => {
+                let path = subagent
+                    .path
+                    .split('/')
+                    .filter(|segment| !segment.is_empty() && *segment != "root")
+                    .map(str::to_string)
+                    .collect::<Vec<_>>();
+                let name = path
+                    .last()
+                    .cloned()
+                    .unwrap_or_else(|| "Subagent".to_string());
+                Some(NormalizedMessage::Activity {
+                    id: format!("acp_tool:{}", subagent.tool_call_id),
+                    title: subagent.title.clone(),
+                    status: subagent.status,
+                    created_at: created_at.to_string(),
+                    collapsed: true,
+                    steps: vec![ActivityStep::Subagent {
+                        tool_call_id: Some(subagent.tool_call_id),
+                        title: Some(subagent.title),
+                        thread_id: Some(subagent.thread_id),
+                        raw_path: Some(subagent.path),
+                        activity: Some(subagent.activity),
+                        name,
+                        path,
+                        status: subagent.status,
+                        events: Vec::new(),
+                    }],
+                })
+            }
             AgentEvent::PermissionRequest(_) => None,
             AgentEvent::ConfigOptionsChanged(_)
             | AgentEvent::CommandsChanged(_)

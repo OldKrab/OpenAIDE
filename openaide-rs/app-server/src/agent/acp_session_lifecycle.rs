@@ -124,7 +124,8 @@ pub(super) async fn load_active_session(
         .attach_session(active_response, Vec::new())
         .map_err(|error| acp_request_error(&error))?;
     let replayed_command_catalog = latest_command_catalog(&replayed_updates);
-    let replay = ReplayProjection::new(session_id.to_string()).project_with_plan(replayed_updates);
+    let replay = ReplayProjection::for_agent(agent_id, session_id.to_string())
+        .project_with_plan(replayed_updates);
     Ok((
         active_session,
         normalize_config_options(agent_id, response_options),

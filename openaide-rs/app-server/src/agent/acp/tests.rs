@@ -831,7 +831,7 @@ fn load_session_capability_requires_explicit_support() {
 
 #[test]
 fn replayed_session_updates_are_normalized_as_chat_history() {
-    let messages = ReplayProjection::new("session-replay").project(vec![
+    let messages = ReplayProjection::for_agent("codex", "session-replay").project(vec![
         SessionUpdate::UserMessageChunk(ContentChunk::new(ContentBlock::Text(TextContent::new(
             "Prior user question",
         )))),
@@ -887,6 +887,121 @@ fn replayed_session_updates_are_normalized_as_chat_history() {
         agent_message_text(&messages[3], AgentMessageRole::Agent),
         Some("Prior agent answer")
     );
+}
+
+#[test]
+fn replay_projects_each_recorded_codex_subagent_tool_with_agent_owned_copy() {
+    let lifecycle = |tool_call_id: &str, title: &str, activity: &str| {
+        serde_json::from_value::<SessionUpdate>(serde_json::json!({
+            "sessionUpdate": "tool_call",
+            "toolCallId": tool_call_id,
+            "title": title,
+            "status": "completed",
+            "rawInput": {
+                "agentThreadId": "thread_correctness",
+                "agentPath": "/root/review/correctness",
+                "activityKind": activity
+            }
+        }))
+        .unwrap()
+    };
+
+    let messages = ReplayProjection::for_agent("codex", "session-replay").project(vec![
+        lifecycle("call_start", "Start subagent correctness", "started"),
+        lifecycle(
+            "call_interact",
+            "Interact with subagent correctness",
+            "interacted",
+        ),
+        serde_json::from_value(serde_json::json!({
+            "sessionUpdate": "tool_call",
+            "toolCallId": "call_wait",
+            "title": "wait",
+            "status": "in_progress",
+            "rawInput": {
+                "prompt": null,
+                "senderThreadId": "parent_thread",
+                "receiverThreadIds": [],
+                "agentsStates": {},
+                "status": "inProgress"
+            },
+            "_meta": {
+                "codex": {
+                    "collaboration": {
+                        "tool": "wait",
+                        "senderThreadId": "parent_thread",
+                        "receiverThreadIds": []
+                    }
+                }
+            }
+        }))
+        .unwrap(),
+        serde_json::from_value(serde_json::json!({
+            "sessionUpdate": "tool_call_update",
+            "toolCallId": "call_wait",
+            "title": "wait",
+            "status": "completed",
+            "rawInput": {
+                "senderThreadId": "parent_thread",
+                "receiverThreadIds": [],
+                "agentsStates": {},
+                "status": "completed"
+            }
+        }))
+        .unwrap(),
+    ]);
+
+    assert_eq!(messages.len(), 3);
+    assert!(matches!(
+        &messages[0],
+        NormalizedMessage::Activity {
+            id,
+            title,
+            status: ActivityStatus::Completed,
+            steps,
+            ..
+        } if id == "acp_tool:call_start"
+            && title == "Start subagent correctness"
+            && matches!(
+                steps.as_slice(),
+                [crate::protocol::model::ActivityStep::Subagent {
+                    thread_id: Some(thread_id),
+                    activity: Some(activity),
+                    ..
+                }] if thread_id == "thread_correctness" && activity == "started"
+            )
+    ));
+    assert!(matches!(
+        &messages[1],
+        NormalizedMessage::Activity {
+            id,
+            title,
+            steps,
+            ..
+        } if id == "acp_tool:call_interact"
+            && title == "Interact with subagent correctness"
+            && matches!(
+                steps.as_slice(),
+                [crate::protocol::model::ActivityStep::Subagent {
+                    activity: Some(activity),
+                    ..
+                }] if activity == "interacted"
+            )
+    ));
+    assert!(matches!(
+        &messages[2],
+        NormalizedMessage::Activity { steps, .. }
+            if matches!(
+                steps.as_slice(),
+                [crate::protocol::model::ActivityStep::Tool {
+                    name,
+                    status: ActivityStatus::Completed,
+                    input_summary: None,
+                    details: None,
+                    ..
+                }] if name == "collaboration"
+            )
+    ));
 }
 
 #[test]
@@ -1741,6 +1856,100 @@ fn terminal_metadata_is_ignored_for_non_codex_and_when_malformed() {
             AgentEvent::ToolUpdate(update) if !update.terminal_appends.is_empty()
         )));
     }
+}
+
+#[test]
+fn codex_subagent_start_is_projected_as_product_activity() {
+    let capture = Arc::new(CapturingEventSink::default());
+    let sink: Arc<dyn AgentEventSink> = capture.clone();
+    let projection =
+        LivePromptProjection::new("codex", sink, crate::agent::TurnCancellation::new());
+    let update: SessionUpdate = serde_json::from_value(serde_json::json!({
+        "sessionUpdate": "tool_call",
+        "toolCallId": "call_spawn_correctness",
+        "title": "Start subagent correctness",
+        "status": "completed",
+        "rawInput": {
+            "agentThreadId": "thread_correctness",
+            "agentPath": "/root/review/correctness",
+            "activityKind": "started"
+        },
+        "_meta": {
+            "codex": {
+                "subagent": {
+                    "threadId": "thread_correctness",
+                    "path": "/root/review/correctness",
+                    "activity": "started"
+                }
+            }
+        }
+    }))
+    .expect("deserialize recorded Codex subagent activity");
+
+    projection.emit(update).unwrap();
+
+    assert!(matches!(
+        capture.events().as_slice(),
+        [AgentEvent::Subagent(subagent)]
+            if subagent.tool_call_id == "call_spawn_correctness"
+                && subagent.title == "Start subagent correctness"
+                && subagent.thread_id == "thread_correctness"
+                && subagent.path == "/root/review/correctness"
+                && subagent.activity == "started"
+                && subagent.status == ActivityStatus::Completed
+    ));
+}
+
+#[test]
+fn codex_subagent_calls_remain_distinct_and_partial_updates_do_not_leak_as_tools() {
+    let capture = Arc::new(CapturingEventSink::default());
+    let sink: Arc<dyn AgentEventSink> = capture.clone();
+    let projection =
+        LivePromptProjection::new("codex", sink, crate::agent::TurnCancellation::new());
+    let lifecycle = |tool_call_id: &str, activity: &str| {
+        serde_json::from_value::<SessionUpdate>(serde_json::json!({
+            "sessionUpdate": "tool_call",
+            "toolCallId": tool_call_id,
+            "title": "Subagent lifecycle",
+            "status": "completed",
+            "rawInput": {
+                "agentThreadId": "thread_correctness",
+                "agentPath": "/root/review/correctness",
+                "activityKind": activity
+            }
+        }))
+        .unwrap()
+    };
+
+    projection.emit(lifecycle("call_start", "started")).unwrap();
+    projection
+        .emit(SessionUpdate::ToolCallUpdate(
+            serde_json::from_value(serde_json::json!({
+                "toolCallId": "call_start",
+                "status": "completed",
+                "rawOutput": { "output": "{\"task_name\":\"/root/review/correctness\"}" }
+            }))
+            .unwrap(),
+        ))
+        .unwrap();
+    projection
+        .emit(lifecycle("call_interact", "interacted"))
+        .unwrap();
+
+    let events = capture.events();
+    assert_eq!(events.len(), 2);
+    assert!(matches!(
+        events.as_slice(),
+        [
+            AgentEvent::Subagent(started),
+            AgentEvent::Subagent(interacted),
+        ]
+            if started.tool_call_id == "call_start"
+                && interacted.tool_call_id == "call_interact"
+                && started.activity == "started"
+                && interacted.activity == "interacted"
+                && started.thread_id == interacted.thread_id
+    ));
 }
 
 #[test]

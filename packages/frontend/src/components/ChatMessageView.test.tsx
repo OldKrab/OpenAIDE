@@ -895,6 +895,40 @@ describe("ChatRow", () => {
     expect(loadedHtml).toContain("Edit notes.md");
   });
 
+  it("renders the ACP subagent title and exact identity details", async () => {
+    const { ActivityStepRow } = await import("./ChatActivityView");
+    let tree!: ReturnType<typeof create>;
+    act(() => {
+      tree = create(
+        <ActivityStepRow
+          step={{
+            kind: "subagent",
+            name: "check_in",
+            path: ["check_in"],
+            status: "completed",
+            events: [],
+            tool_call_id: "call_start",
+            title: "Start subagent check_in",
+            thread_id: "019fa82f-1c51-7f93-9843-96b59a5ed9a8",
+            raw_path: "/root/check_in",
+            activity: "started",
+          }}
+          taskId="task_1"
+        />,
+      );
+    });
+
+    const trigger = tree.root.findByProps({ className: "activity-disclosure-trigger" });
+    expect(trigger.props["aria-expanded"]).toBe(false);
+    act(() => trigger.props.onClick());
+    expect(tree.root.findByProps({ className: "subagent-tool-details" })).toBeDefined();
+    const html = JSON.stringify(tree.toJSON());
+    expect(html).toContain("Start subagent check_in");
+    expect(html).toContain("/root/check_in");
+    expect(html).toContain("019fa82f-1c51-7f93-9843-96b59a5ed9a8");
+    expect(html).toContain("started");
+  });
+
   it("uses the ACP view action with a normalized image filename", async () => {
     const { ActivityStepRow } = await import("./ChatActivityView");
     const html = renderToStaticMarkup(

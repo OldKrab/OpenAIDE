@@ -300,6 +300,20 @@ function activityStepFromProtocol(step: ActivityStepSnapshot, activityTitle: str
       output_preview: step.outputPreview ?? undefined,
     };
   }
+  if (step.kind === "subagent") {
+    return {
+      kind: "subagent",
+      name: step.name,
+      path: step.path,
+      status: activityStatusFromProtocol(step.status),
+      events: step.events,
+      tool_call_id: step.toolCallId ?? undefined,
+      title: step.title ?? undefined,
+      thread_id: step.threadId ?? undefined,
+      raw_path: step.rawPath ?? undefined,
+      activity: step.activity ?? undefined,
+    };
+  }
   const presentation = toolPresentationFromProtocol(step.presentation);
   return {
     kind: "tool",

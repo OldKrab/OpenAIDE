@@ -139,6 +139,17 @@ pub enum ActivityStatus {
     Failed,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum SubagentActivitySnapshot {
+    Delegated,
+    Interacted,
+    Running,
+    Completed,
+    Failed,
+    Stopped,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolPresentationSnapshot {
@@ -195,6 +206,22 @@ pub enum ActivityStepSnapshot {
         exit_code: Option<i32>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         output_preview: Option<String>,
+    },
+    Subagent {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tool_call_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        thread_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        raw_path: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        activity: Option<String>,
+        name: String,
+        path: Vec<String>,
+        status: ActivityStatus,
+        events: Vec<SubagentActivitySnapshot>,
     },
 }
 

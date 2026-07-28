@@ -1,4 +1,4 @@
-import { Brain, ChevronRight, CircleX, Check, Terminal, Wrench } from "lucide-react";
+import { Bot, Brain, ChevronRight, CircleX, Check, Terminal, Wrench } from "lucide-react";
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 import type { ActivityStep, ActivityToolDetails, NormalizedMessage } from "@openaide/app-shell-contracts";
 import type { ToolImagePreview } from "@openaide/app-server-client";
@@ -134,7 +134,9 @@ export function ActivityStepRow({
         displayStep.presentation ? `tool-presentation-${toolKindClass(displayStep.presentation.kind)}` : "",
         displayStep.status,
       ].filter(Boolean).join(" ")
-    : ""}`;
+    : displayStep.kind === "subagent"
+      ? `activity-subagent ${displayStep.status}`
+      : ""}`;
   const legacyCommandText = commandTextForExpandableLegacyStep(displayStep);
   if (step.kind === "thought") {
     return (
@@ -145,6 +147,50 @@ export function ActivityStepRow({
       >
         <AgentMarkdown className="chat-thought" text={step.text} />
         <MessageCopyAction text={step.text} />
+      </AnimatedDisclosure>
+    );
+  }
+  if (displayStep.kind === "subagent") {
+    const hasProtocolDetails = Boolean(
+      displayStep.title && displayStep.thread_id && displayStep.raw_path && displayStep.activity,
+    );
+    return (
+      <AnimatedDisclosure
+        className={className}
+        stepId={displayStep.tool_call_id}
+        trigger={(
+          <>
+            <ActivityStepContent
+              disclosure
+              icon={activityStepIcon(displayStep, legacyToolName)}
+              label={title}
+            />
+            {metadata}
+          </>
+        )}
+      >
+        {hasProtocolDetails ? (
+          <dl className="subagent-tool-details">
+            <div>
+              <dt>Path</dt>
+              <dd><code>{displayStep.raw_path}</code></dd>
+            </div>
+            <div>
+              <dt>Thread ID</dt>
+              <dd><code>{displayStep.thread_id}</code></dd>
+            </div>
+            <div>
+              <dt>Activity</dt>
+              <dd>{displayStep.activity}</dd>
+            </div>
+          </dl>
+        ) : (
+          <ol className="subagent-activity-history">
+            {displayStep.events.map((event, index) => (
+              <li key={`${event}:${index}`}>{subagentEventLabel(event)}</li>
+            ))}
+          </ol>
+        )}
       </AnimatedDisclosure>
     );
   }
@@ -503,6 +549,7 @@ function AnimatedDisclosure({
 
 export function activityStepIcon(step: ActivityStep, legacyToolName?: string) {
   if (step.kind === "thought") return <Brain className="activity-kind-icon" size={12} />;
+  if (step.kind === "subagent") return <Bot className="activity-kind-icon" size={12} />;
   if (step.kind === "command" || (step.kind === "tool" && step.name === "execute" && !step.presentation)) {
     return <Terminal className="activity-kind-icon" size={12} />;
   }
@@ -513,7 +560,20 @@ export function activityStepIcon(step: ActivityStep, legacyToolName?: string) {
 function activityStepIdentity(step: ActivityStep) {
   if (step.kind === "thought") return step.message_id;
   if (step.kind === "tool") return step.tool_call_id;
+  if (step.kind === "subagent") return step.tool_call_id;
   return undefined;
+}
+
+function subagentEventLabel(event: Extract<ActivityStep, { kind: "subagent" }>["events"][number]) {
+  const labels = {
+    delegated: "Delegated work",
+    interacted: "Checked in with subagent",
+    running: "Subagent reported running",
+    completed: "Subagent completed",
+    failed: "Subagent failed",
+    stopped: "Subagent stopped",
+  } satisfies Record<Extract<ActivityStep, { kind: "subagent" }>["events"][number], string>;
+  return labels[event];
 }
 
 function commandStepClassName(step: ActivityStep, className: string) {

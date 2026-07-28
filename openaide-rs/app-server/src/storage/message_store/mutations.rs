@@ -115,6 +115,10 @@ fn finish_running_activity(message: &mut NormalizedMessage, status: ActivityStat
             | ActivityStep::Command {
                 status: step_status,
                 ..
+            }
+            | ActivityStep::Subagent {
+                status: step_status,
+                ..
             } if *step_status == ActivityStatus::Running => *step_status = status,
             _ => {}
         }

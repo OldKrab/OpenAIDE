@@ -8,6 +8,9 @@ use crate::agent::acp_schema::{
 };
 use serde_json::json;
 
+use crate::agent::acp_codex_subagent::{
+    project_codex_collaboration, CodexSubagentProjection, CodexSubagentState,
+};
 use crate::agent::acp_config_projection::normalize_config_options;
 use crate::agent::acp_content_projection::project_content_block;
 use crate::agent::acp_terminal_output_adapter::terminal_append;
@@ -35,6 +38,7 @@ pub(super) struct LivePromptProjection {
     agent_id: String,
     sink: Arc<dyn AgentEventSink>,
     tool_calls: ToolCallState,
+    codex_subagents: CodexSubagentState,
     cancellation: TurnCancellation,
 }
 
@@ -61,6 +65,9 @@ impl LivePromptProjection {
             sink,
             tool_calls: session_projection
                 .map(|projection| projection.tool_calls.clone())
+                .unwrap_or_default(),
+            codex_subagents: session_projection
+                .map(|projection| projection.codex_subagents.clone())
                 .unwrap_or_default(),
             cancellation,
         }
@@ -159,12 +166,34 @@ impl LivePromptProjection {
             SessionUpdate::ToolCall(tool_call) => {
                 let status_changed =
                     remember_tool_call_with_status_change(&self.tool_calls, tool_call.clone());
-                self.publish_tool_call(&tool_call, status_changed)?;
+                if self.agent_id == "codex" {
+                    match self.codex_subagents.project_tool_call(&tool_call) {
+                        CodexSubagentProjection::Event(subagent) => {
+                            self.sink.emit(AgentEvent::Subagent(subagent))?
+                        }
+                        CodexSubagentProjection::Suppress => {}
+                        CodexSubagentProjection::GenericTool => {
+                            self.publish_tool_call(&tool_call, status_changed)?
+                        }
+                    }
+                } else {
+                    self.publish_tool_call(&tool_call, status_changed)?;
+                }
             }
             SessionUpdate::ToolCallUpdate(update) => {
+                let subagent_projection = (self.agent_id == "codex")
+                    .then(|| self.codex_subagents.project_tool_update(&update));
                 let terminal_append = terminal_append(&self.agent_id, &update);
                 let (tool_call, status_changed, projection_changed) =
                     merge_tool_call_update_with_changes(&self.tool_calls, update);
+                match subagent_projection {
+                    Some(CodexSubagentProjection::Event(subagent)) => {
+                        self.sink.emit(AgentEvent::Subagent(subagent))?;
+                        return Ok(());
+                    }
+                    Some(CodexSubagentProjection::Suppress) => return Ok(()),
+                    _ => {}
+                }
                 if let Some(terminal_append) = terminal_append {
                     let summary = projection_changed
                         .then(|| self.project_tool_call(&tool_call, status_changed));
@@ -237,9 +266,17 @@ impl LivePromptProjection {
         tool_call: &ToolCall,
         status_changed: bool,
     ) -> crate::agent::events::AgentToolCall {
-        let AgentEvent::ToolCall(event) = tool_call_event(tool_call) else {
-            unreachable!("tool_call_event always returns a tool event");
-        };
+        let event = if self.agent_id == "codex" {
+            project_codex_collaboration(tool_call)
+        } else {
+            None
+        }
+        .unwrap_or_else(|| {
+            let AgentEvent::ToolCall(event) = tool_call_event(tool_call) else {
+                unreachable!("tool_call_event always returns a tool event");
+            };
+            event
+        });
         if status_changed {
             logging::info(
                 "acp_tool_call_status_projected",
