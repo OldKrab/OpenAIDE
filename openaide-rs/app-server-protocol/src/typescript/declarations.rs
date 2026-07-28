@@ -81,10 +81,11 @@ use crate::snapshot::{
     PendingRequestSnapshot, ProjectCollectionSnapshot, ProjectSummary, ProtocolVersion,
     QuestionMessageAction, QuestionMessageState, RecoveryAction, RecoverySnapshot,
     ServerCapabilities, ServerSnapshot, SettingsSnapshot, StateRootSnapshot,
-    TaskAgentCommandsSnapshot, TaskAgentConfigSnapshot, TaskAttentionEvent, TaskAttentionReason,
-    TaskContextUsage, TaskHistorySyncSnapshot, TaskInputCapabilities, TaskLifecycle,
-    TaskNavigationEntry, TaskNavigationGroup, TaskNavigationRefreshState, TaskNavigationSnapshot,
-    TaskPreparationAction, TaskPreparationSnapshot, TaskPreparationStep, TaskPreparationStepKind,
+    SubagentActivitySnapshot, TaskAgentCommandsSnapshot, TaskAgentConfigSnapshot,
+    TaskAttentionEvent, TaskAttentionReason, TaskContextUsage, TaskHistorySyncSnapshot,
+    TaskInputCapabilities, TaskLifecycle, TaskNavigationEntry, TaskNavigationGroup,
+    TaskNavigationRefreshState, TaskNavigationSnapshot, TaskPreparationAction,
+    TaskPreparationSnapshot, TaskPreparationStep, TaskPreparationStepKind,
     TaskPreparationStepStatus, TaskSendBlocker, TaskSendBlockerKind, TaskSendCapabilitySnapshot,
     TaskSendCapabilityState, TaskSetupBlocker, TaskSetupBlockerKind, TaskSnapshot, TaskStatus,
     TaskSummary, TaskTitle, TaskTitleSource, TaskTurnUsage, TaskUsageCost,
@@ -475,6 +476,7 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<QuestionMessageAction>(output, config);
     push_decl::<ActivityStatus>(output, config);
     push_decl::<ActivityStepSnapshot>(output, config);
+    push_decl::<SubagentActivitySnapshot>(output, config);
     push_decl::<ToolPresentationSnapshot>(output, config);
     push_decl::<ToolPresentationKindSnapshot>(output, config);
     push_decl::<ToolPermissionOutcomeSnapshot>(output, config);

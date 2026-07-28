@@ -222,6 +222,9 @@ impl TaskSessionEventSink {
                 .get_or_insert_with(|| self.session_id.clone());
             return self.upsert_session_tool(normalize_event(event, &now), &now);
         }
+        if matches!(event, AgentEvent::Subagent(_)) {
+            return self.upsert_session_tool(normalize_event(event, &now), &now);
+        }
         self.append_session_message(normalize_event(event, &now), &now)
     }
 

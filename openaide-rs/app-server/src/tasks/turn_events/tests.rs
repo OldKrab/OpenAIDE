@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 
 use crate::agent::events::{
     AgentContextUsage, AgentEvent, AgentPermissionOption, AgentPermissionOptionKind,
-    AgentPermissionRequest, AgentTerminalAppend, AgentToolCall, AgentToolCallRef,
+    AgentPermissionRequest, AgentSubagent, AgentTerminalAppend, AgentToolCall, AgentToolCallRef,
     AgentToolCallStatus, AgentToolUpdate, AgentTurnUsage, AgentUsageCost,
 };
 use crate::agent::{
@@ -55,6 +55,41 @@ fn sourced_agent_text_event(text: &str, source_message_id: &str) -> AgentEvent {
         },
         source_message_id: Some(source_message_id.to_string()),
     }
+}
+
+#[test]
+fn subagent_tool_updates_replace_one_durable_activity_by_tool_identity() {
+    let (_dir, store, mutations, server_requests) = test_runtime();
+    store.write_task(&running_task("task_1")).unwrap();
+    let sink = TaskSessionEventSink::new(
+        mutations,
+        "task_1".to_string(),
+        "session_1".to_string(),
+        server_requests,
+    );
+
+    for status in [ActivityStatus::Running, ActivityStatus::Completed] {
+        sink.session_update(AgentEvent::Subagent(AgentSubagent {
+            tool_call_id: "call_correctness".to_string(),
+            title: "Start subagent correctness".to_string(),
+            thread_id: "thread_correctness".to_string(),
+            path: "/root/review/correctness".to_string(),
+            activity: "started".to_string(),
+            status,
+        }))
+        .unwrap();
+    }
+
+    let messages = store.read_messages("task_1").unwrap();
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0].chat.identity, "acp_tool:call_correctness");
+    assert!(matches!(
+        &messages[0].chat.message,
+        NormalizedMessage::Activity {
+            status: ActivityStatus::Completed,
+            ..
+        }
+    ));
 }
 
 fn agent_message_text(message: &NormalizedMessage) -> Option<&str> {

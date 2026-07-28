@@ -1,5 +1,5 @@
 use crate::protocol::model::{
-    ActivityToolDetails, AgentCommandsCatalog, AgentMessagePart, AgentMessageRole,
+    ActivityStatus, ActivityToolDetails, AgentCommandsCatalog, AgentMessagePart, AgentMessageRole,
     ConfigOptionsCatalog, ToolPresentation,
 };
 
@@ -15,6 +15,8 @@ pub enum AgentEvent {
     /// One ordered ACP Tool update. Summary and terminal changes share this
     /// envelope so a mixed wire update cannot be reordered at the event seam.
     ToolUpdate(AgentToolUpdate),
+    /// Protocol-faithful projection of one Codex subagent Tool call.
+    Subagent(AgentSubagent),
     Activity {
         title: String,
         tool_name: String,
@@ -25,6 +27,18 @@ pub enum AgentEvent {
     CommandsChanged(AgentCommandsCatalog),
     ContextUsage(AgentContextUsage),
     TurnUsage(AgentTurnUsage),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentSubagent {
+    /// Tool identity keeps start and interaction calls as separate transcript rows.
+    pub tool_call_id: String,
+    /// Agent-owned ACP title; the product must not replace it with inferred lifecycle copy.
+    pub title: String,
+    pub thread_id: String,
+    pub path: String,
+    pub activity: String,
+    pub status: ActivityStatus,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

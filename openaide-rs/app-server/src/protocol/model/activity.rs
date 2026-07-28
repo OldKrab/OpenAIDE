@@ -9,6 +9,18 @@ pub enum ActivityStatus {
     Error,
 }
 
+/// User-readable events observed for one delegated Agent thread.
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SubagentActivity {
+    Delegated,
+    Interacted,
+    Running,
+    Completed,
+    Failed,
+    Stopped,
+}
+
 /// Optional semantic chrome for a Tool row. It never changes Tool identity or detail routing.
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub struct ToolPresentation {
@@ -20,6 +32,9 @@ pub struct ToolPresentation {
 #[serde(rename_all = "snake_case")]
 pub enum ToolPresentationKind {
     Skill,
+    // A newer image-preview build persisted `view`; older builds can safely
+    // retain its file-oriented presentation by treating it as a read.
+    #[serde(alias = "view")]
     Read,
     List,
     Search,
@@ -58,6 +73,34 @@ pub enum ActivityStep {
         #[serde(skip_serializing_if = "Option::is_none")]
         output_preview: Option<String>,
     },
+    /// One delegated Agent thread. Correlation identity stays on the parent message.
+    Subagent {
+        /// New protocol-faithful fields are optional so tasks saved by the first
+        /// Subagent renderer remain readable after upgrade.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tool_call_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        title: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        thread_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        raw_path: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        activity: Option<String>,
+        #[serde(default)]
+        name: String,
+        #[serde(default)]
+        path: Vec<String>,
+        status: ActivityStatus,
+        // The first Subagent release persisted rows before event history existed.
+        // Treat those rows as delegation observations so upgrades remain readable.
+        #[serde(default = "default_subagent_events")]
+        events: Vec<SubagentActivity>,
+    },
+}
+
+fn default_subagent_events() -> Vec<SubagentActivity> {
+    vec![SubagentActivity::Delegated]
 }
 
 /// Durable authorization decisions associated with one ACP tool call.

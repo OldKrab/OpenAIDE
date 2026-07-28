@@ -45,7 +45,27 @@ export type ActivityStep =
   | { kind: "text"; text: string; level?: "info" | "warning" | "error" }
   | { kind: "thought"; message_id?: string; text: string; streaming?: boolean }
   | { kind: "tool"; tool_call_id?: string; name: string; status: ActivityStatus; presentation?: ToolPresentation; input_summary?: string; output_preview?: string; detail_artifact_id?: string; details?: ActivityToolDetails; permission_outcomes?: ToolPermissionOutcome[] }
-  | { kind: "command"; command_label: string; status: ActivityStatus; exit_code?: number; output_preview?: string };
+  | { kind: "command"; command_label: string; status: ActivityStatus; exit_code?: number; output_preview?: string }
+  | {
+      kind: "subagent";
+      name: string;
+      path: string[];
+      status: ActivityStatus;
+      events: SubagentActivity[];
+      tool_call_id?: string;
+      title?: string;
+      thread_id?: string;
+      raw_path?: string;
+      activity?: string;
+    };
+
+export type SubagentActivity =
+  | "delegated"
+  | "interacted"
+  | "running"
+  | "completed"
+  | "failed"
+  | "stopped";
 
 /** Semantic compact-row chrome; the Tool's actual `name` still owns detail routing. */
 export type ToolPresentation = {

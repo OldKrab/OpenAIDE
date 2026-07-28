@@ -834,7 +834,9 @@ export type QuestionMessageAction = "submit" | "cancel";
 
 export type ActivityStatus = "running" | "completed" | "interrupted" | "failed";
 
-export type ActivityStepSnapshot = { "kind": "text", text: string, level?: string | null, } | { "kind": "tool", toolCallId?: string | null, name: string, status: ActivityStatus, presentation?: ToolPresentationSnapshot | null, inputSummary?: string | null, outputPreview?: string | null, detailArtifactId?: string | null, details?: ToolDetailSnapshot | null, permissionOutcomes: Array<ToolPermissionOutcomeSnapshot>, } | { "kind": "command", commandLabel: string, status: ActivityStatus, exitCode?: number | null, outputPreview?: string | null, };
+export type ActivityStepSnapshot = { "kind": "text", text: string, level?: string | null, } | { "kind": "tool", toolCallId?: string | null, name: string, status: ActivityStatus, presentation?: ToolPresentationSnapshot | null, inputSummary?: string | null, outputPreview?: string | null, detailArtifactId?: string | null, details?: ToolDetailSnapshot | null, permissionOutcomes: Array<ToolPermissionOutcomeSnapshot>, } | { "kind": "command", commandLabel: string, status: ActivityStatus, exitCode?: number | null, outputPreview?: string | null, } | { "kind": "subagent", toolCallId?: string | null, title?: string | null, threadId?: string | null, rawPath?: string | null, activity?: string | null, name: string, path: Array<string>, status: ActivityStatus, events: Array<SubagentActivitySnapshot>, };
+
+export type SubagentActivitySnapshot = "delegated" | "interacted" | "running" | "completed" | "failed" | "stopped";
 
 export type ToolPresentationSnapshot = { kind: ToolPresentationKindSnapshot, subjects: Array<string>, };
 
