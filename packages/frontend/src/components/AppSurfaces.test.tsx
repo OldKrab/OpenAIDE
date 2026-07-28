@@ -29,7 +29,6 @@ vi.mock("./Sidebar", async (importOriginal) => {
   const { createElement } = await import("react");
   return {
     ...actual,
-    DEFAULT_MAX_TASKS_PER_PROJECT: 15,
     Sidebar: (props: React.ComponentProps<typeof actual.Sidebar>, context: unknown) => {
       surfaceMocks.sidebar(props, context);
       return surfaceMocks.renderRealSidebar ? createElement(actual.Sidebar, props) : null;
@@ -248,11 +247,38 @@ describe("AppSurfaces callback wiring", () => {
     expect(surfaceMocks.sidebar).toHaveBeenCalledWith(
       expect.objectContaining({
         groupByProject: true,
-        maxTasksPerProject: 15,
         projects: controller.state.projects,
       }),
       undefined,
     );
+  });
+
+  it("uses the adaptive Task Navigation row budget for two Projects", () => {
+    surfaceMocks.renderRealSidebar = true;
+    const controller = controllerFor("navigation");
+    controller.state.projects = [
+      { projectId: "project_1", label: "OpenAIDE" },
+      { projectId: "project_2", label: "Other" },
+    ];
+    controller.visibleTasks = controller.state.projects.flatMap((project) =>
+      Array.from({ length: 24 }, (_, index) => {
+        const task = snapshot(`${project.projectId}_task_${index}`).task;
+        task.project_id = project.projectId;
+        task.project_label = project.label;
+        return task;
+      }),
+    );
+
+    const tree = render(controller);
+    const visibleRows = (projectLabel: string) =>
+      tree.root.findByProps({ "aria-label": projectLabel }).findAll((node) =>
+        node.props.role === "listitem"
+        && typeof node.props.className === "string"
+        && node.props.className.includes("task-row"),
+      );
+
+    expect(visibleRows("OpenAIDE")).toHaveLength(10);
+    expect(visibleRows("Other")).toHaveLength(10);
   });
 
   it("limits current-Project Task Navigation to Projects in the workspace", () => {

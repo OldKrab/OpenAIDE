@@ -57,8 +57,6 @@ type SidebarProps = {
   showNativeSessions?: boolean;
 };
 
-export const DEFAULT_MAX_TASKS_PER_PROJECT = 20;
-
 export const Sidebar = memo(function Sidebar({
   activeTaskId,
   nativeSessions,

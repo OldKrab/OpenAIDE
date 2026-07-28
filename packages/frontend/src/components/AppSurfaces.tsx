@@ -1,7 +1,7 @@
 import { Menu, X } from "lucide-react";
 import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { AppPrimaryTaskSurface, createAgentRecoveryActions, primaryTaskSurfaceModel } from "./AppPrimaryTaskSurface";
-import { DEFAULT_MAX_TASKS_PER_PROJECT, Sidebar } from "./Sidebar";
+import { Sidebar } from "./Sidebar";
 import { SettingsView } from "./settings/SettingsView";
 import { taskStatusLabel } from "./TaskHeader";
 import type { AppController } from "./appController";
@@ -194,7 +194,6 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         <Sidebar
           activeTaskId={activeNavigationTaskId}
           groupByProject={true}
-          maxTasksPerProject={DEFAULT_MAX_TASKS_PER_PROJECT}
           nativeSessions={navigation.nativeSessions}
           nativeSessionMutations={navigation.nativeSessionMutations}
           nativeSessionAgentId={navigation.newTaskSelection.agentId}
@@ -363,7 +362,6 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           activeTaskId={sidebarActiveTaskId}
           groupByProject={true}
           hiddenFromAccessibility={mobileLayoutActive && !mobileNavigation.active}
-          maxTasksPerProject={DEFAULT_MAX_TASKS_PER_PROJECT}
           modal={mobileLayoutActive && mobileNavigation.active}
           loadingTasks={!backendReady}
           nativeSessions={navigation.nativeSessions}
