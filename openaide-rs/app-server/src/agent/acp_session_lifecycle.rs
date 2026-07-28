@@ -21,6 +21,7 @@ use crate::agent::acp_session_requests::{
 use crate::agent::acp_trace::AcpTraceSession;
 use crate::agent::acp_update_projection::{
     normalize_available_commands, normalize_config_options, ReplayProjection,
+    ReplayProjectionResult,
 };
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{
@@ -72,7 +73,7 @@ pub(super) async fn load_active_session(
         agent_client_protocol::ActiveSession<'static, Agent>,
         ConfigOptionsCatalog,
         Option<AgentCommandsCatalog>,
-        Vec<crate::protocol::model::NormalizedMessage>,
+        ReplayProjectionResult,
     ),
     RuntimeError,
 > {
@@ -123,12 +124,12 @@ pub(super) async fn load_active_session(
         .attach_session(active_response, Vec::new())
         .map_err(|error| acp_request_error(&error))?;
     let replayed_command_catalog = latest_command_catalog(&replayed_updates);
-    let replayed_messages = ReplayProjection::new(session_id.to_string()).project(replayed_updates);
+    let replay = ReplayProjection::new(session_id.to_string()).project_with_plan(replayed_updates);
     Ok((
         active_session,
         normalize_config_options(agent_id, response_options),
         replayed_command_catalog,
-        replayed_messages,
+        replay,
     ))
 }
 

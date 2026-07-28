@@ -702,7 +702,11 @@ activeTurnStartedAt?: string | null | null, lifecycle?: TaskLifecycle | null, pr
 /**
  * Outer option controls delta presence; inner option clears stale session usage.
  */
-contextUsage?: TaskContextUsage | null | null, chat?: Array<TaskChatChange>, removed?: boolean, };
+contextUsage?: TaskContextUsage | null | null,
+/**
+ * Outer option controls delta presence; inner option clears the current Agent Plan.
+ */
+currentPlan?: AgentPlanSnapshot | null | null, chat?: Array<TaskChatChange>, removed?: boolean, };
 
 export type TaskChatChange = { "kind": "append", item: ChatItem, } | { "kind": "upsert", item: ChatItem, } | { "kind": "appendText", messageId: MessageId, text: string, } | { "kind": "replace", chat: ChatSnapshot, };
 
@@ -776,7 +780,15 @@ export type TaskSnapshot = { task: TaskSummary,
 /**
  * App Server-authored start of the active turn; absent when no turn is running.
  */
-activeTurnStartedAt?: string | null, lifecycle: TaskLifecycle, revision: number, preparation: TaskPreparationSnapshot, agentConfig: TaskAgentConfigSnapshot, agentCommands: TaskAgentCommandsSnapshot, sendCapability: TaskSendCapabilitySnapshot, inputCapabilities?: TaskInputCapabilities | null, contextUsage?: TaskContextUsage | null, chat: ChatSnapshot, historySync: TaskHistorySyncSnapshot, pendingRequests?: Array<PendingRequestSnapshot>, recovery?: RecoverySnapshot | null, };
+activeTurnStartedAt?: string | null, lifecycle: TaskLifecycle, revision: number, preparation: TaskPreparationSnapshot, agentConfig: TaskAgentConfigSnapshot, agentCommands: TaskAgentCommandsSnapshot, sendCapability: TaskSendCapabilitySnapshot, inputCapabilities?: TaskInputCapabilities | null, contextUsage?: TaskContextUsage | null, currentPlan?: AgentPlanSnapshot | null, chat: ChatSnapshot, historySync: TaskHistorySyncSnapshot, pendingRequests?: Array<PendingRequestSnapshot>, recovery?: RecoverySnapshot | null, };
+
+export type AgentPlanSnapshot = { entries: Array<AgentPlanEntrySnapshot>, };
+
+export type AgentPlanEntrySnapshot = { content: string, priority: AgentPlanPrioritySnapshot, status: AgentPlanStatusSnapshot, };
+
+export type AgentPlanPrioritySnapshot = "high" | "medium" | "low";
+
+export type AgentPlanStatusSnapshot = "pending" | "inProgress" | "completed";
 
 export type TaskInputCapabilities = { image: boolean, };
 
@@ -838,7 +850,7 @@ export type ChatRole = "user" | "agent" | "system";
 
 export type ChatItemStatus = "complete" | "streaming" | "failed" | "interrupted";
 
-export type MessagePart = { "kind": "text", text: string, } | { "kind": "attachment", attachment: AttachmentSnapshot, } | { "kind": "image", mediaType: string, dataUrl: string, uri?: string | null, } | { "kind": "resource", uri: string, name?: string | null, title?: string | null, description?: string | null, mediaType?: string | null, sizeBytes?: number | null, text?: string | null, } | { "kind": "unsupported", contentType: string, mediaType?: string | null, uri?: string | null, } | { "kind": "activity", title: string, status: ActivityStatus, steps?: Array<ActivityStepSnapshot>, } | { "kind": "question", requestId: RequestId, message: string, fields: Array<QuestionField>, state: QuestionMessageState, action?: QuestionMessageAction | null, content?: { [key in string]: QuestionValue } | null, error?: string | null, resolutionMessage?: string | null, };
+export type MessagePart = { "kind": "text", text: string, } | { "kind": "attachment", attachment: AttachmentSnapshot, } | { "kind": "image", mediaType: string, dataUrl: string, uri?: string | null, } | { "kind": "resource", uri: string, name?: string | null, title?: string | null, description?: string | null, mediaType?: string | null, sizeBytes?: number | null, text?: string | null, } | { "kind": "unsupported", contentType: string, mediaType?: string | null, uri?: string | null, } | { "kind": "activity", title: string, status: ActivityStatus, steps?: Array<ActivityStepSnapshot>, } | { "kind": "question", requestId: RequestId, message: string, fields: Array<QuestionField>, state: QuestionMessageState, action?: QuestionMessageAction | null, content?: { [key in string]: QuestionValue } | null, error?: string | null, resolutionMessage?: string | null, } | { "kind": "completedPlan", entries: Array<AgentPlanEntrySnapshot>, };
 
 export type QuestionMessageState = "pending" | "resolved" | "cancelled" | "error";
 

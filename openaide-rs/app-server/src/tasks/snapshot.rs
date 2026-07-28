@@ -54,6 +54,7 @@ pub(crate) fn snapshot_from_record_and_chat(task: TaskRecord, chat: MessagePage)
         preparation: task.preparation.clone(),
         supports_image_input: task.supports_image_input,
         context_usage,
+        current_plan: task.current_plan.clone(),
         revision: task.revision,
         task: task.summary(),
         chat,

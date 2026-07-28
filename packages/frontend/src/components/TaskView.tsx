@@ -36,6 +36,7 @@ import type { BackendConnectionState } from "./appControllerBackendLifecycle";
 import type { AgentOption } from "../state/composerOptions";
 import { AgentRecoveryPanel, taskAgentRecovery, type AgentRecoveryActions } from "./AgentRecovery";
 import { ComposerWithContextUsage } from "./ContextUsageIndicator";
+import { AgentPlanView, resetAgentPlanDisclosure } from "./AgentPlan";
 
 export {
   scrollTopAfterPrependedContent,
@@ -243,6 +244,9 @@ export function TaskView({
     const timer = window.setTimeout(() => setShowHistoryUpdated(false), 2_000);
     return () => window.clearTimeout(timer);
   }, [snapshot.history_sync.generation, snapshot.history_sync.state, snapshot.task.task_id]);
+  useEffect(() => {
+    if (!snapshot.current_plan) resetAgentPlanDisclosure(snapshot.task.task_id);
+  }, [snapshot.current_plan, snapshot.task.task_id]);
   const timelineStatusLabel = taskWorkingStatusLabel(
     chatItems,
     snapshot.task.status,
@@ -352,6 +356,13 @@ export function TaskView({
             </>}
           </div>
         </div> : null}
+        {snapshot.current_plan ? (
+          <AgentPlanView
+            plan={snapshot.current_plan}
+            taskId={snapshot.task.task_id}
+            taskStatus={snapshot.task.status}
+          />
+        ) : null}
         {recovery && agentRecoveryActions ? <AgentRecoveryPanel
           actions={agentRecoveryActions}
           agent={recovery.agent}

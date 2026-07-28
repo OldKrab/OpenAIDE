@@ -72,6 +72,16 @@ fn project_message(message: &NormalizedMessage) -> (ChatRole, ChatItemStatus, Ve
                 steps: steps.iter().map(project_activity_step).collect(),
             }],
         ),
+        NormalizedMessage::CompletedPlan { entries, .. } => (
+            ChatRole::System,
+            ChatItemStatus::Complete,
+            vec![MessagePart::CompletedPlan {
+                entries: super::project_agent_plan(crate::protocol::model::AgentPlan {
+                    entries: entries.clone(),
+                })
+                .entries,
+            }],
+        ),
         NormalizedMessage::Question {
             request_id,
             message,

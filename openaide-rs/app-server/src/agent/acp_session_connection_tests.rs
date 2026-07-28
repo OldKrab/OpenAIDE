@@ -13,7 +13,7 @@ use crate::agent::acp_schema::{
     TextContent, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields, WaitForTerminalExitRequest,
     WriteTextFileRequest,
 };
-use agent_client_protocol::Client;
+use agent_client_protocol::{Client, UntypedMessage};
 use serde::{Deserialize, Serialize};
 
 use crate::agent::acp_elicitation_wire::ElicitationCreateResponse;
@@ -718,4 +718,39 @@ fn notification_handler_traces_and_forwards_unmatched_updates_without_retry() {
     assert!(trace_content.contains("\"sessionId\":\"other_session\""));
     assert!(trace_content.contains("\"toolCallId\":\"tool_terminal\""));
     assert!(trace_content.contains("\"status\":\"completed\""));
+}
+
+#[test]
+fn raw_plan_validation_rejects_the_whole_snapshot_when_one_entry_is_malformed() {
+    let valid = UntypedMessage::new(
+        "session/update",
+        serde_json::json!({
+            "sessionId": "session_1",
+            "update": {
+                "sessionUpdate": "plan",
+                "entries": [
+                    {"content": "First", "priority": "high", "status": "completed"},
+                    {"content": "Second", "priority": "low", "status": "pending"},
+                ],
+            },
+        }),
+    )
+    .unwrap();
+    let malformed = UntypedMessage::new(
+        "session/update",
+        serde_json::json!({
+            "sessionId": "session_1",
+            "update": {
+                "sessionUpdate": "plan",
+                "entries": [
+                    {"content": "First", "priority": "high", "status": "completed"},
+                    {"content": "Second", "priority": "urgent", "status": "pending"},
+                ],
+            },
+        }),
+    )
+    .unwrap();
+
+    assert!(raw_plan_update_is_valid(&valid).is_ok());
+    assert!(raw_plan_update_is_valid(&malformed).is_err());
 }

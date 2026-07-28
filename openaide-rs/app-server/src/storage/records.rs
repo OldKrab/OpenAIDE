@@ -2,7 +2,7 @@ use openaide_app_server_protocol::ids::ClientInstanceId;
 use serde::{Deserialize, Serialize};
 
 use crate::protocol::model::{
-    AgentCommandsCatalog, ChatMessage, ConfigOptionCurrentValue, ConfigOptionsCatalog,
+    AgentCommandsCatalog, AgentPlan, ChatMessage, ConfigOptionCurrentValue, ConfigOptionsCatalog,
     IsolationKind, TaskContextUsage, TaskStatus, TaskSummary, TaskTurnUsage,
 };
 
@@ -438,6 +438,12 @@ pub struct TaskRecord {
     /// Latest usage for the bound live Native Session. Process recovery clears it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_usage: Option<TaskContextUsage>,
+    /// Durable Agent Plan replacement snapshot. Unlike session catalogs, this survives restart.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_plan: Option<AgentPlan>,
+    /// Correlates repeated completed snapshots to one durable Chat row.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completed_plan_message_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_turn_usage: Option<TaskTurnUsage>,
     pub model_id: Option<String>,
@@ -500,6 +506,10 @@ impl<'de> Deserialize<'de> for TaskRecord {
             #[serde(default)]
             context_usage: Option<TaskContextUsage>,
             #[serde(default)]
+            current_plan: Option<AgentPlan>,
+            #[serde(default)]
+            completed_plan_message_id: Option<String>,
+            #[serde(default)]
             last_turn_usage: Option<TaskTurnUsage>,
             model_id: Option<String>,
             #[serde(default)]
@@ -542,6 +552,8 @@ impl<'de> Deserialize<'de> for TaskRecord {
             config_mutation: stored.config_mutation,
             agent_commands_catalog: stored.agent_commands_catalog,
             context_usage: stored.context_usage,
+            current_plan: stored.current_plan,
+            completed_plan_message_id: stored.completed_plan_message_id,
             last_turn_usage: stored.last_turn_usage,
             model_id: stored.model_id,
             supports_image_input: stored.supports_image_input,

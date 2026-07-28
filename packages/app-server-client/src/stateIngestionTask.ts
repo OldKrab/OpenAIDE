@@ -61,6 +61,9 @@ function applyTaskChanges(
     contextUsage: changes.contextUsage === undefined
       ? snapshot.task.contextUsage
       : changes.contextUsage,
+    currentPlan: changes.currentPlan === undefined
+      ? snapshot.task.currentPlan
+      : changes.currentPlan,
   };
 
   for (const chatChange of changes.chat ?? []) {

@@ -162,6 +162,10 @@ impl TaskSessionEventSink {
             self.finish_anonymous_text_routes();
             return self.update_turn_usage(usage);
         }
+        if let AgentEvent::Plan(plan) = event {
+            self.finish_anonymous_text_routes();
+            return self.update_plan(plan, &now);
+        }
         if let AgentEvent::MessageChunk {
             role,
             part,
@@ -238,6 +242,72 @@ impl TaskSessionEventSink {
     /// a boundary when another content kind is observed.
     fn finish_anonymous_text_routes(&self) {
         self.text_chunk_routes.finish_all_anonymous();
+    }
+
+    fn update_plan(
+        &self,
+        plan: crate::protocol::model::AgentPlan,
+        now: &str,
+    ) -> Result<(), RuntimeError> {
+        let all_completed = !plan.entries.is_empty()
+            && plan
+                .entries
+                .iter()
+                .all(|entry| entry.status == crate::protocol::model::AgentPlanStatus::Completed);
+        self.mutations.commit_existing_task(
+            &self.task_id,
+            TaskCommitOptions {
+                refresh_message_history: all_completed,
+                response_snapshot_tail_limit: None,
+            },
+            |ctx| {
+                if ctx.task().agent_session_id.as_deref() != Some(self.session_id.as_str()) {
+                    return Ok(TaskMutationResult::Unchanged);
+                }
+                if plan.entries.is_empty() {
+                    if ctx.task().current_plan.is_none()
+                        && ctx.task().completed_plan_message_id.is_none()
+                    {
+                        return Ok(TaskMutationResult::Unchanged);
+                    }
+                    let task = ctx.task_mut();
+                    task.current_plan = None;
+                    task.completed_plan_message_id = None;
+                    task.updated_at = now.to_string();
+                    return Ok(TaskMutationResult::Changed);
+                }
+                if all_completed {
+                    let message_id =
+                        ctx.task()
+                            .completed_plan_message_id
+                            .clone()
+                            .unwrap_or_else(|| {
+                                format!("acp_plan:{}:{}", self.session_id, uuid::Uuid::new_v4())
+                            });
+                    ctx.upsert_message_with_details(NormalizedMessage::CompletedPlan {
+                        id: message_id.clone(),
+                        entries: plan.entries,
+                        created_at: now.to_string(),
+                    })?;
+                    let task = ctx.task_mut();
+                    task.current_plan = None;
+                    task.completed_plan_message_id = Some(message_id);
+                    task.updated_at = now.to_string();
+                    return Ok(TaskMutationResult::Changed);
+                }
+                let next = Some(plan);
+                if ctx.task().current_plan == next && ctx.task().completed_plan_message_id.is_none()
+                {
+                    return Ok(TaskMutationResult::Unchanged);
+                }
+                let task = ctx.task_mut();
+                task.current_plan = next;
+                task.completed_plan_message_id = None;
+                task.updated_at = now.to_string();
+                Ok(TaskMutationResult::Changed)
+            },
+        )?;
+        Ok(())
     }
 
     fn commit_agent_message_part(

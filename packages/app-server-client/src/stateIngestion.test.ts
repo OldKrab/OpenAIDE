@@ -73,6 +73,35 @@ describe("scope-local state ingestion", () => {
     expect(result.state.snapshot.task.contextUsage).toBeNull();
   });
 
+  it("replaces and clears the current Agent Plan from ordered Task deltas", () => {
+    const state = taskState("task-1", 4);
+    const plan = {
+      entries: [{ content: "Implement", priority: "high" as const, status: "inProgress" as const }],
+    };
+    const replaced = applySubscriptionEvent(state, taskEvent("task-1", "cursor-1", "cursor-2", {
+      kind: "taskChanged",
+      taskId: taskId("task-1"),
+      revision: 5,
+      changes: { currentPlan: plan },
+    }));
+    expect(replaced.kind).toBe("applied");
+    if (replaced.kind !== "applied" || replaced.state.snapshot.kind !== "task") return;
+    expect(replaced.state.snapshot.task.currentPlan).toEqual(plan);
+
+    const cleared = applySubscriptionEvent(
+      replaced.state,
+      taskEvent("task-1", "cursor-2", "cursor-3", {
+        kind: "taskChanged",
+        taskId: taskId("task-1"),
+        revision: 6,
+        changes: { currentPlan: null },
+      }),
+    );
+    expect(cleared.kind).toBe("applied");
+    if (cleared.kind !== "applied" || cleared.state.snapshot.kind !== "task") return;
+    expect(cleared.state.snapshot.task.currentPlan).toBeNull();
+  });
+
   it("requires a fresh baseline for a missing Task revision", () => {
     const result = applySubscriptionEvent(
       taskState("task-1", 4),

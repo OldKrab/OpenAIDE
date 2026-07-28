@@ -321,11 +321,42 @@ pub(crate) fn project_stored_task_snapshot_with_history_sync(
                 }),
             }
         }),
+        current_plan: snapshot.current_plan.map(project_agent_plan),
         chat: project_chat_page(snapshot.chat),
         history_sync,
         pending_requests: Vec::new(),
         recovery: None,
     })
+}
+
+pub(super) fn project_agent_plan(
+    plan: crate::protocol::model::AgentPlan,
+) -> openaide_app_server_protocol::snapshot::AgentPlanSnapshot {
+    use crate::protocol::model::{AgentPlanPriority, AgentPlanStatus};
+    use openaide_app_server_protocol::snapshot::{
+        AgentPlanEntrySnapshot, AgentPlanPrioritySnapshot, AgentPlanSnapshot,
+        AgentPlanStatusSnapshot,
+    };
+
+    AgentPlanSnapshot {
+        entries: plan
+            .entries
+            .into_iter()
+            .map(|entry| AgentPlanEntrySnapshot {
+                content: entry.content,
+                priority: match entry.priority {
+                    AgentPlanPriority::High => AgentPlanPrioritySnapshot::High,
+                    AgentPlanPriority::Medium => AgentPlanPrioritySnapshot::Medium,
+                    AgentPlanPriority::Low => AgentPlanPrioritySnapshot::Low,
+                },
+                status: match entry.status {
+                    AgentPlanStatus::Pending => AgentPlanStatusSnapshot::Pending,
+                    AgentPlanStatus::InProgress => AgentPlanStatusSnapshot::InProgress,
+                    AgentPlanStatus::Completed => AgentPlanStatusSnapshot::Completed,
+                },
+            })
+            .collect(),
+    }
 }
 
 /// Projects metadata from the exact committed Task record without reading Chat from storage.

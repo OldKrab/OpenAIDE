@@ -993,6 +993,44 @@ describe("App Server Protocol state mapping", () => {
       },
     });
   });
+
+  it("maps the current Agent Plan and completed Plan Chat row into product state", () => {
+    const entries = [
+      { content: "Inspect projection", priority: "high" as const, status: "completed" as const },
+      { content: "Render plan", priority: "medium" as const, status: "inProgress" as const },
+    ];
+    const mapping = mapProtocolTaskSnapshot(protocolSnapshot({
+      currentPlan: { entries },
+      chat: {
+        hasMessages: true,
+        items: [{
+          messageId: "completed-plan-1" as MessageId,
+          role: "system",
+          status: "complete",
+          parts: [{
+            kind: "completedPlan",
+            entries: entries.map((entry) => ({ ...entry, status: "completed" as const })),
+          }],
+        }],
+      },
+    }));
+
+    expect(mapping.snapshot.current_plan).toEqual({
+      entries: [
+        { content: "Inspect projection", priority: "high", status: "completed" },
+        { content: "Render plan", priority: "medium", status: "in_progress" },
+      ],
+    });
+    expect(mapping.snapshot.chat.items[0]?.message).toEqual({
+      kind: "completed_plan",
+      id: "completed-plan-1",
+      entries: [
+        { content: "Inspect projection", priority: "high", status: "completed" },
+        { content: "Render plan", priority: "medium", status: "completed" },
+      ],
+      created_at: "2026-06-27T12:00:00.000Z",
+    });
+  });
 });
 
 function protocolSnapshot(overrides: Partial<ProtocolTaskSnapshot> = {}): ProtocolTaskSnapshot {

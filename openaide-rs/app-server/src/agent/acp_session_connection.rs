@@ -3,7 +3,10 @@ use crate::agent::acp_schema::{
     RequestPermissionRequest, SessionNotification, SessionUpdate, TerminalOutputRequest,
     WaitForTerminalExitRequest, WriteTextFileRequest,
 };
-use agent_client_protocol::{Agent, Client, ConnectTo, ConnectionTo, Handled, JsonRpcMessage};
+use agent_client_protocol::{
+    Agent, Client, ConnectTo, ConnectionTo, Handled, JsonRpcMessage, UntypedMessage,
+};
+use serde::Deserialize;
 
 use crate::agent::acp_elicitation_wire::{
     CancelRequestNotification, ElicitationCreateRequest, RawElicitationCreateRequest, WireRequestId,
@@ -53,6 +56,28 @@ where
     Client
         .builder()
         .name("openaide")
+        .on_receive_notification(
+            async move |notification: UntypedMessage, cx| {
+                if let Err(reason) = raw_plan_update_is_valid(&notification) {
+                    crate::logging::warn(
+                        "acp_plan_update_ignored",
+                        serde_json::json!({
+                            "session_id": notification
+                                .params()
+                                .get("sessionId")
+                                .and_then(serde_json::Value::as_str),
+                            "reason": reason,
+                        }),
+                    );
+                    return Ok(Handled::Yes);
+                }
+                Ok(Handled::No {
+                    message: (notification, cx),
+                    retry: false,
+                })
+            },
+            agent_client_protocol::on_receive_notification!(),
+        )
         .on_receive_notification(
             async move |notification: SessionNotification, cx| {
                 match handle_session_update_notification(
@@ -246,6 +271,61 @@ where
         )
         .connect_with(agent, run)
         .await
+}
+
+/// ACP's tolerant schema can skip invalid list entries, so validate Plan snapshots before typed
+/// decoding. Dropping the whole notification prevents a partial list from replacing good state.
+fn raw_plan_update_is_valid(notification: &UntypedMessage) -> Result<(), &'static str> {
+    if notification.method() != "session/update" {
+        return Ok(());
+    }
+    let Some(update) = notification.params().get("update") else {
+        return Ok(());
+    };
+    if update
+        .get("sessionUpdate")
+        .and_then(serde_json::Value::as_str)
+        != Some("plan")
+    {
+        return Ok(());
+    }
+    serde_json::from_value::<RawPlanUpdate>(update.clone())
+        .map(|_| ())
+        .map_err(|_| "malformed ACP Plan snapshot")
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawPlanUpdate {
+    #[allow(dead_code)]
+    entries: Vec<RawPlanEntry>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RawPlanEntry {
+    #[allow(dead_code)]
+    content: String,
+    #[allow(dead_code)]
+    priority: RawPlanPriority,
+    #[allow(dead_code)]
+    status: RawPlanStatus,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum RawPlanPriority {
+    High,
+    Medium,
+    Low,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum RawPlanStatus {
+    Pending,
+    InProgress,
+    Completed,
 }
 
 fn handle_session_update_notification(

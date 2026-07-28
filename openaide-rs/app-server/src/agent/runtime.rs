@@ -6,8 +6,9 @@ use tokio::sync::watch;
 use crate::agent::events::{AgentEvent, AgentPermissionOutcome, AgentPermissionRequest};
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{
-    AgentAuthenticateResult, AgentCommandsCatalog, AgentListSessionsResult, AgentProbeResult,
-    Attachment, ConfigOptionCurrentValue, ConfigOptionsCatalog, NormalizedMessage,
+    AgentAuthenticateResult, AgentCommandsCatalog, AgentListSessionsResult, AgentPlan,
+    AgentProbeResult, Attachment, ConfigOptionCurrentValue, ConfigOptionsCatalog,
+    NormalizedMessage,
 };
 
 /// Identifies a Native Session within the Agent that owns its identifier.
@@ -48,6 +49,14 @@ pub struct AgentSession {
     /// False for identity-only handles returned when an ACP session is already active.
     /// Callers must not replace persisted capability state from such a handle.
     pub prompt_capabilities_authoritative: bool,
+    /// Plan state reconstructed while `session/load` replay was isolated from live updates.
+    pub replayed_plan: AgentReplayPlanState,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct AgentReplayPlanState {
+    pub current_plan: Option<AgentPlan>,
+    pub completed_plan_message_id: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -65,6 +74,7 @@ impl AgentSession {
             model_id: None,
             prompt_capabilities: AgentPromptCapabilities::default(),
             prompt_capabilities_authoritative: false,
+            replayed_plan: AgentReplayPlanState::default(),
         }
     }
 
@@ -86,6 +96,11 @@ impl AgentSession {
     pub fn with_prompt_capabilities(mut self, capabilities: AgentPromptCapabilities) -> Self {
         self.prompt_capabilities = capabilities;
         self.prompt_capabilities_authoritative = true;
+        self
+    }
+
+    pub fn with_replayed_plan(mut self, plan: AgentReplayPlanState) -> Self {
+        self.replayed_plan = plan;
         self
     }
 }

@@ -110,6 +110,7 @@ fn main() {
         preparation: TaskPreparationRecord::Ready,
         supports_image_input: false,
         context_usage: None,
+        current_plan: None,
         revision: 9,
     };
 

@@ -68,6 +68,7 @@ pub fn normalize_events(events: Vec<AgentEvent>, created_at: &str) -> Vec<Normal
             AgentEvent::PermissionRequest(_) => None,
             AgentEvent::ConfigOptionsChanged(_)
             | AgentEvent::CommandsChanged(_)
+            | AgentEvent::Plan(_)
             | AgentEvent::ContextUsage(_)
             | AgentEvent::TurnUsage(_) => None,
         })
