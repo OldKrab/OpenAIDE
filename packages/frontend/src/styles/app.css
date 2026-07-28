@@ -16,6 +16,7 @@
 @import "./app/part-07.css";
 @import "./app/composer-options.css";
 @import "./app/context-usage.css";
+@import "./app/agent-plan.css";
 @import "./app/settings-shell.css";
 @import "./app/part-08.css";
 @import "./app/part-09.css";
@@ -24,4 +25,5 @@
 @import "./app/mobile-chat.css";
 @import "./app/worktrees.css";
 @import "./app/agent-recovery.css";
+@import "./app/workspace-setup.css";
 @import "./app/popup.css";

@@ -23,6 +23,7 @@ import type {
   TaskSnapshot as ProtocolTaskSnapshot,
   TaskId,
   TaskSearchFilesResult,
+  ToolImagePreview,
   WorkspaceBrowserRoot,
   WorkspaceListDirectoryResult,
 } from "@openaide/app-server-client";
@@ -48,6 +49,7 @@ export type NavigationCallbacks = {
   openTask: (taskId: string) => void;
   retryAgent: (agentId: string) => Promise<boolean>;
   restoreNativeSession: (session: AgentListedSession) => void;
+  setTaskPinned: (taskId: string, pinned: boolean) => Promise<void>;
   setTaskTitle: (
     taskId: string,
     title: { kind: "user"; value: string } | { kind: "automatic" },
@@ -91,6 +93,8 @@ export type TaskCallbacks = {
   loadChatPage: (beforeCursor: string) => number | undefined;
   /** Keeps full Tool details current until the disclosure closes or unmounts. */
   subscribeToolDetail: (artifactId: string) => () => void;
+  /** Lazily loads a validated workspace image without exposing a caller-selected path. */
+  loadToolImagePreview: (artifactId: string) => Promise<ToolImagePreview | undefined>;
   revealAttachment: (attachmentId: string) => Promise<void>;
   removeAttachment: (attachmentId: string) => void;
   respondToPermission: (

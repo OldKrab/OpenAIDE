@@ -196,6 +196,7 @@ impl TaskProductApi {
             task_version: 1,
             message_history_version: 0,
             unread: false,
+            pinned: false,
             attention: None,
             created_at: now.to_string(),
             updated_at: now.to_string(),
@@ -218,6 +219,12 @@ impl TaskProductApi {
             config_mutation: Default::default(),
             agent_commands_catalog: loaded.session.commands_catalog.clone(),
             context_usage: None,
+            current_plan: loaded.session.replayed_plan.current_plan.clone(),
+            completed_plan_message_id: loaded
+                .session
+                .replayed_plan
+                .completed_plan_message_id
+                .clone(),
             last_turn_usage: None,
             model_id: loaded.session.model_id.clone(),
             supports_image_input: loaded.session.prompt_capabilities.image,

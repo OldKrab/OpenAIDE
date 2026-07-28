@@ -110,6 +110,7 @@ fn main() {
         preparation: TaskPreparationRecord::Ready,
         supports_image_input: false,
         context_usage: None,
+        current_plan: None,
         revision: 9,
     };
 
@@ -254,6 +255,7 @@ fn task_summary() -> TaskSummary {
         task_version: 4,
         message_history_version: 6,
         unread: true,
+        pinned: false,
         attention: None,
         created_at: "2026-05-22T00:00:00Z".to_string(),
         updated_at: "2026-05-22T00:00:05Z".to_string(),

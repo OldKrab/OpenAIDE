@@ -207,6 +207,7 @@ function task(overrides: Partial<TaskSummary> = {}): TaskSummary {
     task_version: 1,
     title: "Task",
     unread: false,
+    pinned: false,
     updated_at: "2026-05-22T00:00:00.000Z",
     workspace_root: "/workspace",
     ...overrides,

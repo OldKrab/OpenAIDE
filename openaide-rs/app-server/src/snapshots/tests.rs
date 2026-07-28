@@ -352,6 +352,7 @@ impl TaskSnapshotSource for StaticTaskSnapshots {
                 updated_at: "2026-06-28T00:00:00.000Z".to_string(),
                 last_activity: "2026-06-28T00:00:00.000Z".to_string(),
                 unread: false,
+                pinned: false,
                 attention: None,
                 has_messages: false,
                 worktree_id: None,
@@ -378,6 +379,7 @@ impl TaskSnapshotSource for StaticTaskSnapshots {
             },
             input_capabilities: None,
             context_usage: None,
+            current_plan: None,
             chat: ChatSnapshot {
                 items: Vec::new(),
                 has_more_before: false,

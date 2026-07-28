@@ -32,10 +32,8 @@ pub struct ToolPresentation {
 #[serde(rename_all = "snake_case")]
 pub enum ToolPresentationKind {
     Skill,
-    // A newer image-preview build persisted `view`; older builds can safely
-    // retain its file-oriented presentation by treating it as a read.
-    #[serde(alias = "view")]
     Read,
+    View,
     List,
     Search,
 }

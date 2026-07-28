@@ -56,6 +56,8 @@ Only the Native Session Catalog calls `session/list`. It discovers all enabled A
 
 Frontend may retain more rows than it renders. Initial per-Project presentation is 20 rows for one Project, 10 each for two Projects, and 7 each for three or more. Load More reveals 10 additional active rows and raises the App Server process high-water for that Project. Archived and Task-owned Native Sessions do not satisfy that active-row demand; discovery continues until the visible target is met or the Agent history is exhausted. Collapsing and re-expanding a Project resets only its presentation limit.
 
+An Open Task may be pinned through `task/setPinned`. Pinned Tasks stay in their Project group and sort ahead of every unpinned Task and Native Session; flat Navigation uses the same pinned-first ordering without adding a separate group. Within pinned and unpinned tiers, active-first and activity ordering are unchanged. Pins count toward the ordinary presentation limit, so a selected unpinned Task is not injected ahead of a full pinned window. Pinning is durable Task metadata, does not count as Task activity, and waits for App Server confirmation before Navigation reorders. Archiving clears the pin permanently; Restore does not revive it. Prepared and Archived Tasks cannot be pinned.
+
 `nativeSession/archive` and `nativeSession/restore` mutate only App Server-owned catalog visibility, keyed by Agent Identity plus Native Session identity. Archive removes an unowned Native Session from the `tasks` section and adds it to `archive`; Restore performs the inverse. Both persist before publishing authoritative `projectEntriesReplaced` events to the two section subscriptions. Archive and Restore are idempotent, never call ACP session mutation or loading methods, and reject an identity owned by any durable Task. Failed persistence leaves both the live catalog and subscription membership unchanged.
 
 The `archive` subscription does not drive `session/list`, refresh, or pagination. Its baseline comes from persisted OpenAIDE state and reports `hasMore: false`. Later active discovery may refresh metadata for an archived entry without restoring it; an open Archive subscription receives the corresponding authoritative Project replacement. Frontend keeps active and archived Native Session replicas separate and shows mutation pending or failure state without optimistic row removal.
@@ -253,6 +255,16 @@ One Native Session update consumer exists from acquisition until session close o
 
 Agent message chunks with the same Agent-owned `messageId` update the same in-progress Chat message; interleaved message ids remain separate. Tool updates use `toolCallId` and never depend on an OpenAIDE Turn id.
 
+### Agent Plans
+
+ACP v1 `plan` updates are complete ordered replacement snapshots. App Server validates and normalizes every entry, preserves Agent order, and atomically replaces the Task's one current Agent Plan. It never merges entries or infers Agent or entry identity. An empty snapshot clears the current Plan without adding Chat history.
+
+A non-empty incomplete Agent Plan remains durable across prompt completion, Stop, refusal, failure, reconnect, history synchronization, and App Server restart. Frontend pins it in one collapsible panel above the Composer. A new Plan opens by default. Frontend-owned collapse state survives updates and Task navigation within the current page lifetime, but resets after reload. When collapsed, the panel retains the current `in_progress` entry, or the first pending entry when none is explicitly in progress. High and low priority use quiet text; medium has no priority decoration.
+
+The current entry marker animates only while the Task is actively running. Waiting, idle, stopped, failed, and reduced-motion presentation keep the same marker static. Plan status describes the strategy; Task runtime status owns whether motion may imply active work.
+
+The first non-empty snapshot whose entries are all completed removes the pinned Plan and appends one collapsed Completed Plan row to Chat. Further all-completed snapshots update that same row. A later incomplete snapshot starts the next Agent Plan and no longer targets the prior Completed Plan row. Completed Plan rows and incomplete current Plan state are both durable and replay-safe.
+
 ### Live Agent and Thought text
 
 Smooth streaming is Frontend-only ephemeral presentation layered over immediately updated authoritative Chat. The authoritative Task reducer owns one Chat replica, not a second presented-Chat array. Only the selected Agent or Thought row owns an ephemeral visible-text cursor. Initial open, Task switch, a baseline, a hidden browser tab, and reduced-motion preference render all known text immediately without an animation backlog.
@@ -276,6 +288,8 @@ The Native Session update consumer owns tool state by Native Session id plus Age
 - App Server persists detail changes without subscribers so later expansion receives complete content.
 
 Tool detail delivery is event-driven and does not poll. Publication is not coalesced unless measured volume requires it; any future coalescer guarantees a trailing flush of the newest state.
+
+An expanded Tool with structured file locations may lazily request one optional image preview by Task id plus Tool artifact id. Frontend never supplies or reads a filesystem path for this request. App Server selects the first readable PNG, JPEG, WebP, or GIF from structured Tool locations, the normalized input path, or an exact typed `path` input field such as `arguments.path`; it never extracts paths from output or free-form text. Absolute structured paths are not restricted to the Task Workspace. Relative paths resolve against the structured working directory or Task Workspace. App Server canonicalizes the result, verifies the image signature, and enforces the 5 MB image limit before returning an ephemeral data URL; preview bytes are not persisted in Chat or Tool artifacts. Preview loading never blocks detail text and reserves the thumbnail footprint with an explicit loading status. Any missing, deleted, unreadable, unsupported, or oversized file preserves the existing text-only presentation. A successfully loading or loaded image is content, so Frontend does not also label the Tool as having returned no output. Frontend renders a compact, width-bounded thumbnail after the path and opens it with the shared Image inspection lightbox. The lightbox uses the full browser viewport as a borderless image canvas and reserves a quiet top gutter for the filename, zoom controls, and top-right close action, so controls never obscure image pixels and a full-page screenshot remains visibly distinct from the live App Shell. Clicking the empty canvas dismisses the lightbox, while clicking or dragging the image does not. The initial state is labeled `Fit` and fits the image into the available canvas with a small margin. Every zoom level uses the same recoverable pan boundary: either image edge may reach the canvas center but cannot move beyond it; reset recenters the image. The image also supports pointer-centered wheel zoom, double-click zoom, touch pinch and pan, and keyboard zoom controls.
 
 Every defined ACP Tool kind except `other` has a distinct appropriate icon, action label, grouped-summary classification, and detail presentation based only on Agent-supplied fields. ACP `think` is a reasoning or planning Tool call, distinct from `agent_thought_chunk`; it uses Thought-like visuals inside an activity group while retaining Tool identity, status, input, output, and updates. `other` uses the generic presentation.
 
@@ -370,7 +384,6 @@ App Server owns Task Attention meaning, identity, persistence, ordering, and cle
 
 ### ACP update scope
 
-- ACP `plan` updates are ignored until Plan presentation and persistence are deliberately specified.
 - OpenAIDE uses Session Config Options as its single product model. Dedicated Session Modes are ignored with diagnostics rather than synchronized into a second Mode model.
 - ACP `usage_update` is ignored with diagnostics until context-window and Agent-reported cost presentation are specified.
 

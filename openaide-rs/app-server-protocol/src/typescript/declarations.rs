@@ -73,7 +73,8 @@ use crate::settings::{
 use crate::snapshot::{
     ActivityStatus, ActivityStepSnapshot, AgentCapabilities, AgentCollectionSnapshot,
     AgentConfigOptionCurrentValue, AgentConfigOptionKind, AgentConfigOptionSnapshot,
-    AgentConfigOptionValueSnapshot, AgentSetupReason, AgentSlashCommandInputSnapshot,
+    AgentConfigOptionValueSnapshot, AgentPlanEntrySnapshot, AgentPlanPrioritySnapshot,
+    AgentPlanSnapshot, AgentPlanStatusSnapshot, AgentSetupReason, AgentSlashCommandInputSnapshot,
     AgentSlashCommandSnapshot, AgentStatus, AgentSummary, AttachmentKind, AttachmentSnapshot,
     ChatItem, ChatItemStatus, ChatRole, ChatSnapshot, ClientSnapshot, ClientSnapshotScope,
     LiveSessionDataState, MessagePart, NativeSessionReference, NativeSessionSummary,
@@ -110,8 +111,10 @@ use crate::task::{
     TaskNavigationRefreshResult, TaskNavigationSection, TaskOpenParams, TaskOpenResult,
     TaskReleaseParams, TaskReleaseResult, TaskRestoreParams, TaskRestoreResult,
     TaskSearchFilesParams, TaskSearchFilesResult, TaskSendParams, TaskSendResult,
-    TaskSetConfigOptionParams, TaskSetConfigOptionResult, TaskSetTitleParams, TaskSetTitleResult,
-    TaskTitleSelection, TerminalOutputSnapshot, ToolDetailSnapshot, WorkspaceFileSearchState,
+    TaskSetConfigOptionParams, TaskSetConfigOptionResult, TaskSetPinnedParams, TaskSetPinnedResult,
+    TaskSetTitleParams, TaskSetTitleResult, TaskTitleSelection, TaskToolImagePreviewParams,
+    TaskToolImagePreviewResult, TerminalOutputSnapshot, ToolDetailSnapshot, ToolImagePreview,
+    WorkspaceFileSearchState,
 };
 use crate::workspace::{
     WorkspaceBrowserDirectory, WorkspaceBrowserEntry, WorkspaceBrowserRoot,
@@ -368,6 +371,11 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<TaskSetTitleParams>(output, config);
     push_decl::<TaskTitleSelection>(output, config);
     push_decl::<TaskSetTitleResult>(output, config);
+    push_decl::<TaskSetPinnedParams>(output, config);
+    push_decl::<TaskSetPinnedResult>(output, config);
+    push_decl::<TaskToolImagePreviewParams>(output, config);
+    push_decl::<TaskToolImagePreviewResult>(output, config);
+    push_decl::<ToolImagePreview>(output, config);
     push_decl::<TaskCancelParams>(output, config);
     push_decl::<TaskCancelResult>(output, config);
     push_decl::<TaskChatPageParams>(output, config);
@@ -441,6 +449,10 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<TaskStatus>(output, config);
     push_decl::<TaskLifecycle>(output, config);
     push_decl::<TaskSnapshot>(output, config);
+    push_decl::<AgentPlanSnapshot>(output, config);
+    push_decl::<AgentPlanEntrySnapshot>(output, config);
+    push_decl::<AgentPlanPrioritySnapshot>(output, config);
+    push_decl::<AgentPlanStatusSnapshot>(output, config);
     push_decl::<TaskInputCapabilities>(output, config);
     push_decl::<TaskContextUsage>(output, config);
     push_decl::<TaskUsageCost>(output, config);

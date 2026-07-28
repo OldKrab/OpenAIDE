@@ -136,6 +136,210 @@ fn acp_usage_is_published_in_the_authoritative_task_snapshot() {
 }
 
 #[test]
+fn incomplete_acp_plan_is_published_in_the_authoritative_task_snapshot() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((api, store, workspace_root)) = task_chat_fixture(&temp, "incomplete_plan") else {
+        return;
+    };
+    let created = api
+        .create_for_test(TaskAcquireParams {
+            project_id: project_id_for_workspace(&workspace_root),
+            agent_id: AgentId::from("codex"),
+            workspace_root: None,
+        })
+        .expect("create task");
+    let task_id = created.task.task_id;
+    wait_until(|| {
+        matches!(
+            store
+                .read_task(task_id.as_str())
+                .map(|task| task.preparation),
+            Ok(TaskPreparationRecord::Ready)
+        )
+    });
+
+    api.send(send_params(&task_id, "report a plan"))
+        .expect("send prompt");
+    wait_until(|| {
+        store
+            .read_task(task_id.as_str())
+            .map(|task| task.status == TaskStatus::Inactive)
+            .unwrap_or(false)
+    });
+
+    let snapshot = api
+        .open_for_test(openaide_app_server_protocol::task::TaskOpenParams {
+            task_id: task_id.clone(),
+        })
+        .expect("open completed task");
+    let snapshot = serde_json::to_value(snapshot).expect("serialize task snapshot");
+    assert_eq!(
+        snapshot.get("currentPlan"),
+        Some(&serde_json::json!({
+            "entries": [
+                {
+                    "content": "Inspect the projection",
+                    "priority": "high",
+                    "status": "completed",
+                },
+                {
+                    "content": "Persist the replacement snapshot",
+                    "priority": "medium",
+                    "status": "inProgress",
+                },
+                {
+                    "content": "Render the plan",
+                    "priority": "low",
+                    "status": "pending",
+                },
+            ],
+        }))
+    );
+    api.shutdown().expect("shutdown task runtime");
+    drop(api);
+    drop(store);
+
+    let reopened = Store::open(temp.path().join("store")).expect("reopen store");
+    let restored = crate::tasks::snapshot::build_snapshot(&reopened, task_id.as_str(), 100)
+        .expect("restore durable task snapshot");
+    assert_eq!(
+        restored.current_plan.map(|plan| plan.entries),
+        Some(vec![
+            crate::protocol::model::AgentPlanEntry {
+                content: "Inspect the projection".to_string(),
+                priority: crate::protocol::model::AgentPlanPriority::High,
+                status: crate::protocol::model::AgentPlanStatus::Completed,
+            },
+            crate::protocol::model::AgentPlanEntry {
+                content: "Persist the replacement snapshot".to_string(),
+                priority: crate::protocol::model::AgentPlanPriority::Medium,
+                status: crate::protocol::model::AgentPlanStatus::InProgress,
+            },
+            crate::protocol::model::AgentPlanEntry {
+                content: "Render the plan".to_string(),
+                priority: crate::protocol::model::AgentPlanPriority::Low,
+                status: crate::protocol::model::AgentPlanStatus::Pending,
+            },
+        ])
+    );
+}
+
+#[test]
+fn completed_acp_plan_moves_once_to_chat_and_later_completed_snapshots_replace_it() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((api, store, workspace_root)) = task_chat_fixture(&temp, "completed_plan") else {
+        return;
+    };
+    let created = api
+        .create_for_test(TaskAcquireParams {
+            project_id: project_id_for_workspace(&workspace_root),
+            agent_id: AgentId::from("codex"),
+            workspace_root: None,
+        })
+        .expect("create task");
+    let task_id = created.task.task_id;
+    wait_until(|| {
+        matches!(
+            store
+                .read_task(task_id.as_str())
+                .map(|task| task.preparation),
+            Ok(TaskPreparationRecord::Ready)
+        )
+    });
+
+    api.send(send_params(&task_id, "complete a plan"))
+        .expect("send prompt");
+    wait_until(|| {
+        store
+            .read_task(task_id.as_str())
+            .map(|task| task.status == TaskStatus::Inactive)
+            .unwrap_or(false)
+    });
+
+    let snapshot = api
+        .open_for_test(openaide_app_server_protocol::task::TaskOpenParams {
+            task_id: task_id.clone(),
+        })
+        .expect("open completed task");
+    let snapshot = serde_json::to_value(snapshot).expect("serialize task snapshot");
+    assert_eq!(snapshot.get("currentPlan"), None);
+    let completed_parts = snapshot["chat"]["items"]
+        .as_array()
+        .expect("chat items")
+        .iter()
+        .flat_map(|item| item["parts"].as_array().expect("chat item parts"))
+        .filter(|part| part.get("kind") == Some(&serde_json::json!("completedPlan")))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        completed_parts,
+        vec![&serde_json::json!({
+            "kind": "completedPlan",
+            "entries": [
+                {
+                    "content": "Inspect the projection",
+                    "priority": "high",
+                    "status": "completed",
+                },
+                {
+                    "content": "Persist the final replacement",
+                    "priority": "low",
+                    "status": "completed",
+                },
+            ],
+        })]
+    );
+    api.shutdown().expect("shutdown task runtime");
+}
+
+#[test]
+fn empty_acp_plan_clears_the_current_plan_without_adding_chat() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((api, store, workspace_root)) = task_chat_fixture(&temp, "cleared_plan") else {
+        return;
+    };
+    let created = api
+        .create_for_test(TaskAcquireParams {
+            project_id: project_id_for_workspace(&workspace_root),
+            agent_id: AgentId::from("codex"),
+            workspace_root: None,
+        })
+        .expect("create task");
+    let task_id = created.task.task_id;
+    wait_until(|| {
+        matches!(
+            store
+                .read_task(task_id.as_str())
+                .map(|task| task.preparation),
+            Ok(TaskPreparationRecord::Ready)
+        )
+    });
+
+    api.send(send_params(&task_id, "clear the plan"))
+        .expect("send prompt");
+    wait_until(|| {
+        store
+            .read_task(task_id.as_str())
+            .map(|task| task.status == TaskStatus::Inactive)
+            .unwrap_or(false)
+    });
+
+    let snapshot = api
+        .open_for_test(openaide_app_server_protocol::task::TaskOpenParams {
+            task_id: task_id.clone(),
+        })
+        .expect("open completed task");
+    let snapshot = serde_json::to_value(snapshot).expect("serialize task snapshot");
+    assert_eq!(snapshot.get("currentPlan"), None);
+    assert!(snapshot["chat"]["items"]
+        .as_array()
+        .expect("chat items")
+        .iter()
+        .flat_map(|item| item["parts"].as_array().expect("chat item parts"))
+        .all(|part| part.get("kind") != Some(&serde_json::json!("completedPlan"))));
+    api.shutdown().expect("shutdown task runtime");
+}
+
+#[test]
 fn replayed_acp_chunks_use_live_logical_message_grouping() {
     let temp = tempfile::TempDir::new().expect("temp dir");
     let Some((api, store, workspace_root)) = task_chat_fixture(&temp, "replay") else {
@@ -483,6 +687,19 @@ def update_usage():
         },
     })
 
+def update_plan(entries):
+    write({
+        "jsonrpc": "2.0",
+        "method": "session/update",
+        "params": {
+            "sessionId": session_id,
+            "update": {
+                "sessionUpdate": "plan",
+                "entries": entries,
+            },
+        },
+    })
+
 for line in sys.stdin:
     message = json.loads(line)
     method = message.get("method")
@@ -524,6 +741,34 @@ for line in sys.stdin:
             update_content({"type": "audio", "mimeType": "audio/wav", "data": "YXVkaW8="}, "content-audio")
             update_content({"type": "resource", "resource": {"uri": "memory://archive.bin", "mimeType": "application/octet-stream", "blob": "YmluYXJ5"}}, "content-binary-resource")
             update_content({"type": "image", "mimeType": "text/html", "data": "PGh0bWw+", "uri": "memory://not-an-image"}, "content-invalid-image")
+        elif mode == "incomplete_plan":
+            update_plan([
+                {"content": "Old step that must disappear", "priority": "medium", "status": "pending"},
+            ])
+            update_plan([
+                {"content": "Inspect the projection", "priority": "high", "status": "completed"},
+                {"content": "Persist the replacement snapshot", "priority": "medium", "status": "in_progress"},
+                {"content": "Render the plan", "priority": "low", "status": "pending"},
+            ])
+        elif mode == "completed_plan":
+            update_plan([
+                {"content": "Inspect the projection", "priority": "high", "status": "in_progress"},
+                {"content": "Persist the replacement snapshot", "priority": "medium", "status": "pending"},
+                {"content": "Remove this step", "priority": "low", "status": "pending"},
+            ])
+            update_plan([
+                {"content": "Inspect the projection", "priority": "high", "status": "completed"},
+                {"content": "Persist the replacement snapshot", "priority": "medium", "status": "completed"},
+            ])
+            update_plan([
+                {"content": "Inspect the projection", "priority": "high", "status": "completed"},
+                {"content": "Persist the final replacement", "priority": "low", "status": "completed"},
+            ])
+        elif mode == "cleared_plan":
+            update_plan([
+                {"content": "Temporary step", "priority": "medium", "status": "in_progress"},
+            ])
+            update_plan([])
         else:
             update_chunk("agent_message_chunk", "Commentary ", "11111111-1111-4111-8111-111111111111")
             update_chunk("agent_message_chunk", "message", "11111111-1111-4111-8111-111111111111")

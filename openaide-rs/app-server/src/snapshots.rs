@@ -394,6 +394,15 @@ impl TaskSnapshotSource for EmptyTaskSnapshots {
             target: None,
         })
     }
+
+    fn tool_image_preview_for_client(
+        &self,
+        _client_instance_id: &openaide_app_server_protocol::ids::ClientInstanceId,
+        _task_id: &TaskId,
+        _artifact_id: &str,
+    ) -> Result<Option<openaide_app_server_protocol::task::ToolImagePreview>, ProtocolError> {
+        Ok(None)
+    }
 }
 
 fn unavailable_task_snapshot(task_id: TaskId) -> TaskSnapshot {
@@ -408,6 +417,7 @@ fn unavailable_task_snapshot(task_id: TaskId) -> TaskSnapshot {
             updated_at: "1970-01-01T00:00:00.000Z".to_string(),
             last_activity: "1970-01-01T00:00:00.000Z".to_string(),
             unread: false,
+            pinned: false,
             attention: None,
             has_messages: false,
             worktree_id: None,
@@ -449,6 +459,7 @@ fn unavailable_task_snapshot(task_id: TaskId) -> TaskSnapshot {
         },
         input_capabilities: None,
         context_usage: None,
+        current_plan: None,
         chat: ChatSnapshot {
             items: Vec::new(),
             has_more_before: false,

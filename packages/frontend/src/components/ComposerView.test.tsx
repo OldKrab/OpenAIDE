@@ -200,7 +200,7 @@ describe("Composer view behavior", () => {
     click(buttonByLabel(renderer.root, "Open Clipboard image"));
 
     const lightbox = renderer.root.findByProps({ className: "attachment-preview-lightbox" });
-    expect(text(lightbox)).not.toContain("Clipboard image");
+    expect(text(lightbox)).toContain("Clipboard image");
     expect(renderer.root.findByProps({ className: "attachment-preview-stage" }).findByType("img").props.src).toBe(
       "data:image/png;base64,aW1hZ2U=",
     );

@@ -4,6 +4,7 @@ import type { AgentListedSession, TaskSummary } from "@openaide/app-shell-contra
 import type { NativeSessionsState } from "../state/store";
 import { Sidebar } from "./Sidebar";
 import { SidebarNativeSessionRow } from "./SidebarNativeSessionRow";
+import { SidebarProjectTaskGroup } from "./SidebarProjectTaskGroup";
 import { SidebarTaskRow } from "./SidebarTaskRow";
 import { SidebarTaskPreviewProvider } from "./SidebarTaskPreview";
 import { sidebarViewModel } from "./sidebarViewModel";
@@ -229,6 +230,65 @@ describe("SidebarTaskRow", () => {
         .find((item) => item.children.includes("Reset to Agent title"))!.props.onClick();
     });
     expect(onSetTaskTitle).toHaveBeenLastCalledWith("task_rename", { kind: "automatic" });
+  });
+
+  it("shows confirmed pin state and keeps Unpin visibly pending until confirmation", async () => {
+    let confirmMutation: (() => void) | undefined;
+    const onSetTaskPinned = vi.fn(() => new Promise<void>((resolve) => {
+      confirmMutation = resolve;
+    }));
+    const tree = render(
+      <SidebarTaskRow
+        onArchiveTask={vi.fn()}
+        onOpenTask={vi.fn()}
+        onRestoreTask={vi.fn()}
+        onSetTaskPinned={onSetTaskPinned}
+        showArchived={false}
+        task={task({ task_id: "task_pinned", pinned: true, title: "Pinned task" })}
+      />,
+    );
+
+    expect(tree.root.findByProps({ "aria-label": "Pinned" })).toBeDefined();
+    act(() => tree.root.findByProps({ "aria-label": "Task actions for Pinned task" }).props.onClick());
+    act(() => tree.root.findAllByProps({ role: "menuitem" })
+      .find((item) => item.children.includes("Unpin task"))!.props.onClick());
+
+    expect(onSetTaskPinned).toHaveBeenCalledWith("task_pinned", false);
+    expect(tree.root.findByProps({ "aria-label": "Unpinning task" })).toBeDefined();
+    expect(tree.root.findByProps({ "aria-label": "Pinned" })).toBeDefined();
+
+    await act(async () => confirmMutation?.());
+    expect(tree.root.findAllByProps({ "aria-label": "Unpinning task" })).toHaveLength(0);
+  });
+
+  it("shows a transient row notice when a pin mutation fails", async () => {
+    vi.useFakeTimers();
+    try {
+      const tree = render(
+        <SidebarTaskRow
+          onArchiveTask={vi.fn()}
+          onOpenTask={vi.fn()}
+          onRestoreTask={vi.fn()}
+          onSetTaskPinned={vi.fn().mockRejectedValue(new Error("Unable to save pin"))}
+          showArchived={false}
+          task={task({ task_id: "task_unpinned", title: "Unpinned task" })}
+        />,
+      );
+
+      act(() => tree.root.findByProps({ "aria-label": "Task actions for Unpinned task" }).props.onClick());
+      await act(async () => {
+        tree.root.findAllByProps({ role: "menuitem" })
+          .find((item) => item.children.includes("Pin task"))!.props.onClick();
+      });
+      expect(tree.root.findByProps({ role: "alert" }).children.join("")).toBe("Unable to save pin");
+
+      act(() => {
+        vi.advanceTimersByTime(5_000);
+      });
+      expect(tree.root.findAllByProps({ role: "alert" })).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("dismisses the task actions menu on outside click and Escape", () => {
@@ -675,6 +735,30 @@ describe("SidebarNativeSessionRow", () => {
 });
 
 describe("Sidebar", () => {
+  it("replaces the ordinary empty state with an actionable folder setup state", () => {
+    const onOpenWorkspaceFolder = vi.fn();
+    const tree = render(
+      <Sidebar
+        {...sidebarCallbacks()}
+        groupByProject
+        nativeSessionProjectId="project_stale"
+        nativeSessions={nativeSessions({ loading: true })}
+        onOpenWorkspaceFolder={onOpenWorkspaceFolder}
+        projects={[{ projectId: "project_stale", label: "Current workspace" }]}
+        showArchived={false}
+        tasks={[]}
+      />,
+    );
+
+    expect(textContent(tree)).toContain("Open a folder to start a task");
+    expect(textContent(tree)).not.toContain("No tasks yet.");
+    expect(textContent(tree)).not.toContain("Refreshing tasks");
+    expect(tree.root.findAllByType(SidebarProjectTaskGroup)).toHaveLength(0);
+
+    act(() => buttonWithText(tree, "Open Folder").props.onClick());
+    expect(onOpenWorkspaceFolder).toHaveBeenCalledOnce();
+  });
+
   it("marks hidden navigation inert and outside the accessibility tree", () => {
     const tree = render(
       <Sidebar
@@ -1064,6 +1148,52 @@ describe("Sidebar", () => {
     );
 
     expect(rowTitles(tree)).toEqual(["Older active task", "Recent session", "Recent idle task"]);
+  });
+
+  it("puts pinned flat rows before live unpinned tasks and native sessions", () => {
+    const tree = render(
+      <Sidebar
+        {...sidebarCallbacks()}
+        nativeSessions={nativeSessions({
+          items: [
+            nativeSession({
+              session_id: "session_newest",
+              title: "Newest session",
+              last_activity: "2026-05-22T00:05:00.000Z",
+            }),
+          ],
+        })}
+        showArchived={false}
+        tasks={[
+          task({
+            task_id: "task_pinned_idle",
+            pinned: true,
+            title: "Pinned idle",
+            last_activity: "2026-05-22T00:02:00.000Z",
+          }),
+          task({
+            task_id: "task_pinned_active",
+            pinned: true,
+            status: "active",
+            title: "Pinned active",
+            last_activity: "2026-05-22T00:01:00.000Z",
+          }),
+          task({
+            task_id: "task_unpinned_active",
+            status: "active",
+            title: "Unpinned active",
+            last_activity: "2026-05-22T00:04:00.000Z",
+          }),
+        ]}
+      />,
+    );
+
+    expect(rowTitles(tree)).toEqual([
+      "Pinned active",
+      "Pinned idle",
+      "Unpinned active",
+      "Newest session",
+    ]);
   });
 
   it("sorts rows by parsed activity time when timestamp formats differ", () => {
@@ -1586,6 +1716,46 @@ describe("Sidebar", () => {
     expect(rowTitles(tree)).toEqual(["Earlier active", "Later active"]);
   });
 
+  it("does not displace pinned rows to force a selected unpinned task into pagination", () => {
+    const tree = render(
+      <Sidebar
+        {...sidebarCallbacks()}
+        activeTaskId="task_selected"
+        groupByProject={true}
+        maxTasksPerProject={2}
+        nativeSessions={nativeSessions()}
+        projects={[{ projectId: "project_1", label: "OpenAIDE" }]}
+        showArchived={false}
+        tasks={[
+          task({
+            task_id: "task_pinned_new",
+            pinned: true,
+            project_id: "project_1",
+            title: "Pinned new",
+            last_activity: "2026-07-02T10:10:00.000Z",
+          }),
+          task({
+            task_id: "task_pinned_old",
+            pinned: true,
+            project_id: "project_1",
+            title: "Pinned old",
+            last_activity: "2026-07-02T10:05:00.000Z",
+          }),
+          task({
+            task_id: "task_selected",
+            project_id: "project_1",
+            status: "active",
+            title: "Selected unpinned",
+            last_activity: "2026-07-02T10:15:00.000Z",
+          }),
+        ]}
+      />,
+    );
+
+    expect(rowTitles(tree)).toEqual(["Pinned new", "Pinned old"]);
+    expect(tree.root.findByProps({ className: "project-task-more" }).children.join("")).toBe("Load more");
+  });
+
   it("uses the primary new task action instead of per-project create controls", () => {
     const onNewTask = vi.fn();
     const tree = render(
@@ -1730,6 +1900,19 @@ function render(element: React.ReactElement, options?: Parameters<typeof create>
   return tree!;
 }
 
+function textContent(tree: ReturnType<typeof render>) {
+  return tree.root.findAll((node) => typeof node.children[0] === "string")
+    .flatMap((node) => node.children.filter((child): child is string => typeof child === "string"))
+    .join(" ");
+}
+
+function buttonWithText(tree: ReturnType<typeof render>, label: string) {
+  const button = tree.root.findAllByType("button")
+    .find((candidate) => candidate.children.some((child) => child === label));
+  if (!button) throw new Error(`Button not found: ${label}`);
+  return button;
+}
+
 function sidebarCallbacks() {
   return {
     nativeSessionAgentId: "codex",
@@ -1790,6 +1973,7 @@ function task(overrides: Partial<TaskSummary> = {}): TaskSummary {
     task_version: 1,
     title: "Task",
     unread: false,
+    pinned: false,
     updated_at: "2026-05-22T00:00:00.000Z",
     workspace_root: "/workspace",
     ...overrides,

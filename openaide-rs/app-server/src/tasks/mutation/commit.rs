@@ -708,6 +708,7 @@ struct ChangedFields {
     send_capability: bool,
     input_capabilities: bool,
     context_usage: bool,
+    current_plan: bool,
     removed: bool,
 }
 
@@ -737,6 +738,7 @@ fn changed_fields(original: &TaskRecord, task: &TaskRecord) -> ChangedFields {
         input_capabilities: original.supports_image_input != task.supports_image_input,
         context_usage: original.context_usage != task.context_usage
             || original.last_turn_usage != task.last_turn_usage,
+        current_plan: original.current_plan != task.current_plan,
         removed: !original.tombstoned && task.tombstoned,
     }
 }
@@ -787,6 +789,7 @@ fn project_committed_changes(
             .then_some(task.input_capabilities)
             .flatten(),
         context_usage: fields.context_usage.then(|| task.context_usage.clone()),
+        current_plan: fields.current_plan.then(|| task.current_plan.clone()),
         chat: projected_chat,
         removed: fields.removed,
     })

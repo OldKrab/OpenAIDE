@@ -1,6 +1,7 @@
 import { CircleAlert, ChevronRight, FileText } from "lucide-react";
 import { memo, useRef, useState } from "react";
 import type { ActivityToolDetails, AgentCommandsCatalog, AgentMessagePart, Attachment, ChatMessage, ElicitationResponse } from "@openaide/app-shell-contracts";
+import type { ToolImagePreview } from "@openaide/app-server-client";
 import { AgentMarkdown } from "./AgentMarkdown";
 import { AttachmentImagePreviewLightbox, chatImagePreview, type AttachmentImagePreviewSource } from "./AttachmentImagePreview";
 import { ChatActivityView } from "./ChatActivityView";
@@ -12,11 +13,13 @@ import { SlashCommandText } from "./SlashCommandText";
 import { UserMessageAttachments } from "./UserMessageAttachments";
 import { useLiveMessagePresentation } from "./useLiveMessagePresentation";
 import { currentFrontendShell } from "../services/frontendShell";
+import { CompletedPlanView } from "./AgentPlan";
 
 export { firstToolPath } from "../state/toolDetailsViewModel";
 
 export const ChatRow = memo(function ChatRow({
   message,
+  onLoadToolImagePreview,
   onSubscribeToolDetail,
   onPermissionRespond,
   onQuestionRespond,
@@ -31,6 +34,7 @@ export const ChatRow = memo(function ChatRow({
 }: {
   commandCatalog?: AgentCommandsCatalog;
   message: ChatMessage;
+  onLoadToolImagePreview?: (artifactId: string) => Promise<ToolImagePreview | undefined>;
   onSubscribeToolDetail?: (artifactId: string) => () => void;
   onPermissionRespond: (
     requestId: string,
@@ -82,8 +86,17 @@ export const ChatRow = memo(function ChatRow({
   }
   if (body.kind === "activity") {
     return (
-      <ChatActivityView activity={body} onSubscribeToolDetail={onSubscribeToolDetail} taskId={taskId} toolDetails={toolDetails} />
+      <ChatActivityView
+        activity={body}
+        onLoadToolImagePreview={onLoadToolImagePreview}
+        onSubscribeToolDetail={onSubscribeToolDetail}
+        taskId={taskId}
+        toolDetails={toolDetails}
+      />
     );
+  }
+  if (body.kind === "completed_plan") {
+    return <CompletedPlanView entries={body.entries} />;
   }
   if (body.kind === "interruption") {
     if (body.recoverable) {

@@ -131,13 +131,15 @@ describe("NewTaskView", () => {
     expect(buttonWithText(tree, "Codex")).toBeDefined();
   });
 
-  it("asks users to open a VS Code folder when fixed context is unavailable", () => {
+  it("replaces New Task controls with an actionable folder setup state", () => {
     const state = createInitialState();
     state.workspaceRootsLoaded = true;
+    const onOpenWorkspaceFolder = vi.fn();
     const tree = render(
       <NewTaskView
         agents={[]}
         dispatch={vi.fn()}
+        onOpenWorkspaceFolder={onOpenWorkspaceFolder}
         onSelectConfigOption={vi.fn()}
         onSubmitTask={vi.fn()}
         projectContextMode="fixed"
@@ -146,8 +148,12 @@ describe("NewTaskView", () => {
       />,
     );
 
-    expect(textContent(tree)).toContain("Open a folder in VS Code to start a task.");
-    expect(textContent(tree)).not.toContain("Choose or enter");
+    expect(textContent(tree)).toContain("Open a folder to start a task");
+    expect(textContent(tree)).not.toContain("What are we working on?");
+    expect(tree.root.findAllByType(Composer)).toHaveLength(0);
+
+    act(() => buttonWithText(tree, "Open Folder").props.onClick());
+    expect(onOpenWorkspaceFolder).toHaveBeenCalledOnce();
   });
 
   it("renders backend-provided project and agent choices in the context selectors", () => {
@@ -262,6 +268,7 @@ describe("NewTaskView", () => {
       task_version: 1,
       title: "Existing task",
       unread: false,
+      pinned: false,
       updated_at: "2026-05-22T00:00:00.000Z",
       workspace_root: "",
     }];
@@ -1338,6 +1345,7 @@ function taskSnapshot(taskId: string, hasMessages: boolean): TaskSnapshot {
       message_history_version: 1,
       has_messages: hasMessages,
       unread: false,
+      pinned: false,
       created_at: "2026-05-22T00:00:00.000Z",
       updated_at: "2026-05-22T00:00:00.000Z",
       last_activity: "2026-05-22T00:00:00.000Z",

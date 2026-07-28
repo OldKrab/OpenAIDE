@@ -12,6 +12,7 @@ use crate::agent::acp_session_runner::{
 };
 use crate::agent::acp_session_worker::{AcpSessionOpenRequest, AcpStartedSession};
 use crate::agent::acp_trace::AcpTraceSession;
+use crate::agent::acp_update_projection::ReplayProjectionResult;
 use crate::agent::prompt_content::{
     validate_prompt_attachments, PromptContentCapabilities, PromptContentPolicy,
 };
@@ -91,9 +92,7 @@ pub(super) async fn open_acp_session<'a>(
     }
 
     let idle_close_eligible = !matches!(&context.request, AcpSessionOpenRequest::Start(_));
-    let (active_session, applied_options, replayed_commands, replayed_messages) = match context
-        .request
-    {
+    let (active_session, applied_options, replayed_commands, replay) = match context.request {
         AcpSessionOpenRequest::Start(request) => {
             let session_cwd = normalized_session_cwd(&request.cwd);
             let start_result = tokio::select! {
@@ -114,7 +113,12 @@ pub(super) async fn open_acp_session<'a>(
             };
             let initial_catalog =
                 normalize_config_options(context.request_agent_id, initial_options);
-            (active_session, Some(initial_catalog), None, Vec::new())
+            (
+                active_session,
+                Some(initial_catalog),
+                None,
+                ReplayProjectionResult::default(),
+            )
         }
         AcpSessionOpenRequest::Load(request) => {
             let session_cwd = normalized_session_cwd(&request.cwd);
@@ -123,8 +127,8 @@ pub(super) async fn open_acp_session<'a>(
                 error = wait_for_startup_cancellation(request.cancellation.clone()) => Err(error),
             };
             match load_result {
-                Ok((active_session, catalog, commands, messages)) => {
-                    (active_session, Some(catalog), commands, messages)
+                Ok((active_session, catalog, commands, replay)) => {
+                    (active_session, Some(catalog), commands, replay)
                 }
                 Err(error) => {
                     let _ = context.start_error_tx.send(Err(error.clone()));
@@ -139,7 +143,12 @@ pub(super) async fn open_acp_session<'a>(
                 error = wait_for_startup_cancellation(request.cancellation.clone()) => Err(error),
             };
             match resume_result {
-                Ok((active_session, catalog)) => (active_session, catalog, None, Vec::new()),
+                Ok((active_session, catalog)) => (
+                    active_session,
+                    catalog,
+                    None,
+                    ReplayProjectionResult::default(),
+                ),
                 Err(error) => {
                     let _ = context.start_error_tx.send(Err(error.clone()));
                     return Err(acp_start_error(error));
@@ -151,6 +160,7 @@ pub(super) async fn open_acp_session<'a>(
     let session_id = active_session.session_id().to_string();
     let mut started_session = AgentSession::new(context.request_agent_id, session_id)
         .with_commands_catalog(replayed_commands)
+        .with_replayed_plan(replay.plan)
         .with_prompt_capabilities(crate::agent::AgentPromptCapabilities {
             image: content_policy.capabilities.image,
         });
@@ -164,7 +174,7 @@ pub(super) async fn open_acp_session<'a>(
         idle_close_eligible,
         content_policy,
         started_session,
-        replayed_messages,
+        replayed_messages: replay.messages,
     })
 }
 

@@ -5,6 +5,35 @@ use serde::{Deserialize, Serialize};
 
 use super::{AgentCommandsCatalog, ConfigOptionCurrentValue, ConfigOptionsCatalog, MessagePage};
 
+/// Current normalized ACP Agent Plan. Every incoming snapshot replaces this list in order.
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct AgentPlan {
+    pub entries: Vec<AgentPlanEntry>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+pub struct AgentPlanEntry {
+    pub content: String,
+    pub priority: AgentPlanPriority,
+    pub status: AgentPlanStatus,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentPlanPriority {
+    High,
+    Medium,
+    Low,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentPlanStatus {
+    Pending,
+    InProgress,
+    Completed,
+}
+
 #[derive(Debug, Clone, Copy, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskStatus {
@@ -33,6 +62,7 @@ pub struct TaskSummary {
     pub task_version: u64,
     pub message_history_version: u64,
     pub unread: bool,
+    pub pinned: bool,
     pub attention: Option<TaskAttentionEvent>,
     pub created_at: String,
     pub updated_at: String,
@@ -65,6 +95,8 @@ pub struct TaskSnapshot {
     pub supports_image_input: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context_usage: Option<TaskContextUsage>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub current_plan: Option<AgentPlan>,
     pub revision: u64,
 }
 

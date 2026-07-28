@@ -286,7 +286,7 @@ fn pre_upgrade_subagent_activity_without_events_still_opens() {
 }
 
 #[test]
-fn task_with_newer_view_presentation_still_opens() {
+fn task_with_view_presentation_still_opens() {
     let root = TempDir::new().expect("create state root");
     let task_dir = root.path().join("task-store-v1/tasks/task_newer_view");
     std::fs::create_dir_all(&task_dir).unwrap();
@@ -352,7 +352,7 @@ fn task_with_newer_view_presentation_still_opens() {
         &steps[0],
         crate::protocol::model::ActivityStep::Tool {
             presentation: Some(crate::protocol::model::ToolPresentation {
-                kind: crate::protocol::model::ToolPresentationKind::Read,
+                kind: crate::protocol::model::ToolPresentationKind::View,
                 ..
             }),
             ..
@@ -866,6 +866,7 @@ fn task_projection(task_id: &str) -> TaskProjection {
             task_version: 1,
             message_history_version: 0,
             unread: false,
+            pinned: false,
             attention: None,
             created_at: "2026-07-20T00:00:00Z".to_string(),
             updated_at: "2026-07-20T00:00:00Z".to_string(),
@@ -886,6 +887,8 @@ fn task_projection(task_id: &str) -> TaskProjection {
             config_mutation: TaskConfigMutationState::default(),
             agent_commands_catalog: None,
             context_usage: None,
+            current_plan: None,
+            completed_plan_message_id: None,
             last_turn_usage: None,
             model_id: None,
             supports_image_input: false,

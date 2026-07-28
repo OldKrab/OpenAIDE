@@ -16,6 +16,18 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
   const taskNotifications = useWebTaskNotifications(controller);
   const { activeNavigationTaskId, activeTask, backendReady, bootstrap, callbacks, preferences, view, visibleTasks } = controller;
   const { appServerError, navigation, settings } = view;
+  // The App Server Project catalog is global; current-Project shells expose only
+  // the ordered Project identities represented by this App Shell workspace.
+  const currentNavigationProjectIds = bootstrap.surface !== "invalid"
+    && bootstrap.shell.navigationMode === "currentProject"
+    ? bootstrap.projectIds ?? (bootstrap.projectId ? [bootstrap.projectId] : undefined)
+    : undefined;
+  const navigationProjects = currentNavigationProjectIds === undefined
+    ? navigation.projects
+    : currentNavigationProjectIds.flatMap((projectId) => {
+        const project = navigation.projects.find((candidate) => candidate.projectId === projectId);
+        return project ? [project] : [];
+      });
   const [mobileLayoutActive, setMobileLayoutActive] = useState(() => isMobileWebViewport());
   const [newTaskFocusRequestKey, setNewTaskFocusRequestKey] = useState(0);
   const [managedProjectSurface, setManagedProjectSurface] = useState<{
@@ -88,7 +100,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     // Sidebar intentionally ignores callback identity while memoizing, so read the current owner lazily.
     setManagedProjectSurface({ projectId, surfaceKey: surfaceKeyRef.current });
   };
-  const managedProject = navigation.projects.find((project) => project.projectId === managedProjectId);
+  const managedProject = navigationProjects.find((project) => project.projectId === managedProjectId);
   const managedRepository = managedProject?.worktreeRepositoryId
     ? view.primaryTask.newTask.worktreeRepositories[managedProject.worktreeRepositoryId]
     : undefined;
@@ -194,17 +206,19 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           onManageWorktrees={manageWorktrees}
           onNewTask={callbacks.navigation.openNewTask}
           onOpenNativeSession={callbacks.navigation.openNativeSession}
+          onOpenWorkspaceFolder={controller.workspaceSetup?.openFolder}
           onOpenTask={callbacks.navigation.openTask}
           onRecoverNativeSessions={(kind) => kind === "launchFailed"
             ? callbacks.navigation.loadNativeSessions()
             : callbacks.navigation.openSettings()}
           onRestoreTask={callbacks.navigation.restoreTask}
+          onSetTaskPinned={callbacks.navigation.setTaskPinned}
           onSetTaskTitle={callbacks.navigation.setTaskTitle}
           onRestoreNativeSession={callbacks.navigation.restoreNativeSession}
           onSearchChange={callbacks.navigation.changeSearch}
           onSettings={callbacks.navigation.openSettings}
           onToggleArchived={callbacks.navigation.toggleArchived}
-          projects={navigation.projects}
+          projects={navigationProjects}
           searchQuery={navigation.searchQuery}
           showArchived={navigation.showArchived}
           taskListError={navigation.taskListError}
@@ -368,6 +382,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
             ? callbacks.navigation.loadNativeSessions()
             : callbacks.navigation.openSettings()}
           onRestoreTask={callbacks.navigation.restoreTask}
+          onSetTaskPinned={callbacks.navigation.setTaskPinned}
           onSetTaskTitle={callbacks.navigation.setTaskTitle}
           onRestoreNativeSession={callbacks.navigation.restoreNativeSession}
           onSearchChange={callbacks.navigation.changeSearch}

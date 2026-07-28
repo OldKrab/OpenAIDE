@@ -22,7 +22,7 @@ _Avoid_: Restoring transient controls as durable Task truth after restart
 
 **Task Activity Time**:
 The latest known work or conversation activity for a Task, advanced monotonically by OpenAIDE activity or a newer timestamp from its bound Native Session.
-_Avoid_: Task record update time, moving activity backward
+_Avoid_: Task record update time, moving activity backward, treating Pin or Unpin as activity
 
 **Unknown Activity**:
 A Navigation Entry whose source provides no valid activity timestamp. Unknown Activity sorts after every entry with known activity and uses Agent Identity plus Native Session identity as a stable tie-breaker. Discovery time is not activity.
@@ -63,6 +63,10 @@ _Avoid_: Treating Archive as a peer task mode, location-only flag, Recent, inact
 **Task Navigation**:
 The compact App Shell navigation surface for finding, creating, selecting, archiving, and checking status of Tasks.
 _Avoid_: Full Task pages or Settings inside the sidebar
+
+**Pinned Task**:
+An Open Task the user has marked for Task Navigation's highest-priority ordering tier. Pinned Tasks precede every unpinned Task and unadopted Native Session regardless of runtime or selection state, within their Project group when grouped and across the Task list when flat.
+_Avoid_: Favorite, global Pinned section, duplicate Task row
 
 **Project Navigation**:
 The Web App and Desktop App navigation surface for switching Projects and seeing Tasks grouped by Project Context.
@@ -123,6 +127,14 @@ _Avoid_: Automatically injected prompt content in the first iteration
 **Agent**:
 A user-selectable external ACP worker that performs Task work.
 _Avoid_: Adapter, provider, raw runtime process, non-ACP protocol selector
+
+**Agent Plan**:
+The Agent's current non-empty ordered strategy for a Task. An Agent Plan has no independent identity; each new snapshot supersedes the current snapshot until every entry is complete, while an empty snapshot clears it.
+_Avoid_: OpenAIDE workflow, Tool activity, one plan per prompt
+
+**Completed Plan**:
+The final non-empty, all-complete snapshot of an Agent Plan retained in Chat. A later snapshot with incomplete work begins a new Agent Plan.
+_Avoid_: Archived Plan, treating repeated completion snapshots as separate plans
 
 **Agent Identity**:
 The stable App Server-owned identity for one Agent definition and launch configuration.

@@ -54,13 +54,15 @@
 }
 
 .task-rename-form small,
-.task-title-error {
+.task-title-error,
+.task-pin-error {
   grid-column: 1 / -1;
   color: var(--oa-danger);
   font-size: 10px;
 }
 
-.task-title-error {
+.task-title-error,
+.task-pin-error {
   padding: 0 36px 3px 27px;
 }
 
@@ -211,6 +213,7 @@
   font-size: 11px;
 }
 
+.task-pin-marker,
 .task-worktree-marker { width: 14px; height: 14px; display: inline-grid; flex: 0 0 14px; place-items: center; }
 
 .task-trailing-indicator {

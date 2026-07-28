@@ -236,6 +236,8 @@ describe("task list row styles", () => {
     expect(appCss).toMatch(/\.activity-tool-fields\s*{[^}]*grid-template-columns:\s*max-content minmax\(0, 1fr\);/);
     expect(appCss).toMatch(/\.activity-tool-inline-fields\s*{[^}]*display:\s*flex;[^}]*flex-wrap:\s*wrap;/);
     expect(appCss).toMatch(/\.activity-tool-path-link\s*{[^}]*font-family:\s*var\(--oa-mono-font\);[^}]*cursor:\s*pointer;/);
+    expect(appCss).toMatch(/\.activity-tool-image-preview\s*{[^}]*width:\s*min\(100%, 240px\);[^}]*overflow:\s*hidden;/);
+    expect(appCss).toMatch(/\.activity-tool-image-preview > img\s*{[^}]*width:\s*100%;[^}]*height:\s*100%;[^}]*object-fit:\s*contain;/);
     expect(appCss).toMatch(/\.activity-tool-diff-line\.add\s*{[^}]*background:\s*color-mix\(in oklch, var\(--oa-success\) 13%, transparent\);/);
     expect(appCss).toMatch(/\.activity-tool-diff-line\.remove\s*{[^}]*background:\s*color-mix\(in oklch, var\(--oa-danger\) 11%, transparent\);/);
     expect(appCss).toMatch(/\.activity-search-results li\s*{[^}]*grid-template-columns:\s*minmax\(0, max-content\) minmax\(0, 1fr\);/);
@@ -615,10 +617,18 @@ describe("task list row styles", () => {
     expect(appCss).toMatch(/\.chat-image-preview\s*{[^}]*max-height:\s*240px;[^}]*object-fit:\s*contain;/);
   });
 
-  it("shows attachment images at intrinsic size in a dismissible lightbox", () => {
-    expect(appCss).toMatch(/\.attachment-preview-backdrop\s*{[^}]*position:\s*fixed;[^}]*inset:\s*0;[^}]*background:/);
-    expect(appCss).toMatch(/\.attachment-preview-stage img\s*{[^}]*width:\s*auto;[^}]*height:\s*auto;[^}]*max-width:\s*calc\(100vw - 48px\);[^}]*max-height:\s*calc\(100vh - 48px\);/);
-    expect(appCss).toMatch(/\.attachment-preview-close\s*{[^}]*position:\s*fixed;[^}]*width:\s*40px;[^}]*height:\s*40px;/);
+  it("frames attachment images as a labeled, dismissible preview surface", () => {
+    expect(appCss).toMatch(/\.oa-popup-backdrop\.attachment-preview-backdrop\s*{[^}]*position:\s*fixed;[^}]*inset:\s*0;[^}]*background:/);
+    expect(appCss).toMatch(/\.oa-popup-backdrop\.attachment-preview-backdrop\s*{[^}]*padding:\s*0;/);
+    expect(appCss).toMatch(/\.oa-popup-dialog\.attachment-preview-dialog\s*{[^}]*width:\s*100vw;[^}]*height:\s*100dvh;/);
+    expect(appCss).toMatch(/\.attachment-preview-lightbox\s*{[^}]*width:\s*100%;[^}]*height:\s*100%;[^}]*display:\s*grid;[^}]*grid-template-rows:\s*auto minmax\(0,\s*1fr\);/);
+    expect(appCss).toMatch(/\.attachment-preview-chrome\s*{[^}]*display:\s*flex;[^}]*justify-content:\s*space-between;/);
+    expect(appCss).toMatch(/\.attachment-preview-label\s*{[^}]*text-overflow:\s*ellipsis;[^}]*color:\s*var\(--oa-muted\);/);
+    expect(appCss).toMatch(/\.attachment-preview-actions\s*{[^}]*display:\s*flex;[^}]*gap:\s*2px;/);
+    expect(appCss).toMatch(/\.attachment-preview-stage\s*{[^}]*overflow:\s*hidden;[^}]*touch-action:\s*none;/);
+    expect(appCss).not.toMatch(/\.attachment-preview-stage\s*{[^}]*(?:border|background):/);
+    expect(appCss).toMatch(/\.attachment-preview-stage img\s*{[^}]*width:\s*auto;[^}]*height:\s*auto;[^}]*max-width:\s*100%;[^}]*max-height:\s*100%;/);
+    expect(appCss).toMatch(/\.attachment-preview-close\s*{[^}]*width:\s*28px;[^}]*height:\s*28px;/);
   });
 
   it("opens the new-task project picker toward available viewport space", () => {

@@ -13,14 +13,15 @@ use crate::agent::acp_schema::{
     EmbeddedResourceResource, ImageContent, Implementation, InitializeRequest, InitializeResponse,
     ListSessionsRequest, ListSessionsResponse, LoadSessionRequest, LoadSessionResponse,
     McpCapabilities, NewSessionRequest, NewSessionResponse, PermissionOption, PermissionOptionKind,
-    PromptCapabilities, ProtocolVersion, ReadTextFileRequest, RequestPermissionOutcome,
-    RequestPermissionRequest, ResourceLink, SessionCapabilities, SessionCloseCapabilities,
-    SessionConfigOption, SessionConfigOptionCategory as AcpConfigOptionCategory,
-    SessionConfigSelectOption, SessionDeleteCapabilities, SessionInfo, SessionInfoUpdate,
-    SessionListCapabilities, SessionNotification, SessionUpdate, TextContent, TextResourceContents,
-    ToolCall, ToolCallContent, ToolCallLocation, ToolCallStatus, ToolCallUpdate,
-    ToolCallUpdateFields, ToolKind, UnstructuredCommandInput, WaitForTerminalExitRequest,
-    WaitForTerminalExitResponse, WriteTextFileRequest,
+    Plan, PlanEntry, PlanEntryPriority, PlanEntryStatus, PromptCapabilities, ProtocolVersion,
+    ReadTextFileRequest, RequestPermissionOutcome, RequestPermissionRequest, ResourceLink,
+    SessionCapabilities, SessionCloseCapabilities, SessionConfigOption,
+    SessionConfigOptionCategory as AcpConfigOptionCategory, SessionConfigSelectOption,
+    SessionDeleteCapabilities, SessionInfo, SessionInfoUpdate, SessionListCapabilities,
+    SessionNotification, SessionUpdate, TextContent, TextResourceContents, ToolCall,
+    ToolCallContent, ToolCallLocation, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields,
+    ToolKind, UnstructuredCommandInput, WaitForTerminalExitRequest, WaitForTerminalExitResponse,
+    WriteTextFileRequest,
 };
 use crate::agent::acp_session_capabilities::{
     validate_auth_method, validate_initialize_protocol, validate_session_list_capability,
@@ -1004,6 +1005,45 @@ fn replay_projects_each_recorded_codex_subagent_tool_with_agent_owned_copy() {
 }
 
 #[test]
+fn replayed_plan_updates_restore_completed_chat_and_the_latest_current_plan() {
+    let entry = |content: &str, status| PlanEntry::new(content, PlanEntryPriority::Medium, status);
+    let replay = ReplayProjection::new("session-plan").project_with_plan(vec![
+        SessionUpdate::Plan(Plan::new(vec![entry(
+            "First plan",
+            PlanEntryStatus::InProgress,
+        )])),
+        SessionUpdate::Plan(Plan::new(vec![entry(
+            "First plan",
+            PlanEntryStatus::Completed,
+        )])),
+        SessionUpdate::Plan(Plan::new(vec![entry(
+            "First plan revised",
+            PlanEntryStatus::Completed,
+        )])),
+        SessionUpdate::Plan(Plan::new(vec![entry(
+            "Second plan",
+            PlanEntryStatus::InProgress,
+        )])),
+    ]);
+
+    assert_eq!(
+        replay.plan.current_plan.expect("current plan").entries[0].content,
+        "Second plan"
+    );
+    assert!(replay.plan.completed_plan_message_id.is_none());
+    let completed = replay
+        .messages
+        .iter()
+        .filter_map(|message| match message {
+            NormalizedMessage::CompletedPlan { entries, .. } => Some(entries),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(completed.len(), 1);
+    assert_eq!(completed[0][0].content, "First plan revised");
+}
+
+#[test]
 fn replayed_text_without_source_ids_has_restart_stable_identity() {
     let updates = || {
         vec![SessionUpdate::AgentMessageChunk(ContentChunk::new(
@@ -1453,23 +1493,22 @@ fn load_active_session_captures_replayed_updates_before_response() {
                         .send_request(InitializeRequest::new(ProtocolVersion::V1))
                         .block_task()
                         .await?;
-                    let (active_session, catalog, command_catalog, replayed_messages) =
-                        load_active_session(
-                            &connection,
-                            &initialize,
-                            &load_replay,
-                            None,
-                            LoadActiveSessionRequest {
-                                agent_id: "codex",
-                                session_id: "external-session".to_string(),
-                                cwd: requested_cwd,
-                                preferred_auth_method_id: None,
-                            },
-                        )
-                        .await
-                        .map_err(|error| {
-                            agent_client_protocol::util::internal_error(error.to_string())
-                        })?;
+                    let (active_session, catalog, command_catalog, replay) = load_active_session(
+                        &connection,
+                        &initialize,
+                        &load_replay,
+                        None,
+                        LoadActiveSessionRequest {
+                            agent_id: "codex",
+                            session_id: "external-session".to_string(),
+                            cwd: requested_cwd,
+                            preferred_auth_method_id: None,
+                        },
+                    )
+                    .await
+                    .map_err(|error| {
+                        agent_client_protocol::util::internal_error(error.to_string())
+                    })?;
 
                     assert_eq!(active_session.session_id().to_string(), "external-session");
                     assert_eq!(catalog.model_id().as_deref(), Some("gpt-5.5"));
@@ -1479,15 +1518,15 @@ fn load_active_session_captures_replayed_updates_before_response() {
                         command_catalog.commands[0].input_hint.as_deref(),
                         Some("query")
                     );
-                    assert_eq!(replayed_messages.len(), 2);
-                    match &replayed_messages[0] {
+                    assert_eq!(replay.messages.len(), 2);
+                    match &replay.messages[0] {
                         NormalizedMessage::User { text, .. } => {
                             assert_eq!(text, "Prior user question");
                         }
                         other => panic!("expected replayed user message, got {other:?}"),
                     }
                     assert_eq!(
-                        agent_message_text(&replayed_messages[1], AgentMessageRole::Agent),
+                        agent_message_text(&replay.messages[1], AgentMessageRole::Agent),
                         Some("Prior agent answer")
                     );
                     Ok(())
@@ -2181,6 +2220,45 @@ fn tool_call_preview_does_not_expose_raw_fields_or_full_diff_paths() {
                 }
                 other => panic!("expected diff content, got {other:?}"),
             }
+        }
+        other => panic!("expected tool call event, got {other:?}"),
+    }
+}
+
+#[test]
+fn tool_call_preview_reads_inputs_from_a_structured_tool_envelope() {
+    let event = tool_call_event(
+        &ToolCall::new("tool_call_view_image", "View image")
+            .kind(ToolKind::Read)
+            .raw_input(serde_json::json!({
+                "name": "view_image",
+                "arguments": {
+                    "path": "/tmp/context-usage-live-animation.png",
+                    "detail": "original"
+                }
+            })),
+    );
+
+    match event {
+        AgentEvent::ToolCall(tool_call) => {
+            assert_eq!(
+                tool_call.input_summary.as_deref(),
+                Some("context-usage-live-animation.png")
+            );
+            let presentation = tool_call.presentation.expect("view presentation");
+            assert_eq!(
+                presentation.kind,
+                crate::protocol::model::ToolPresentationKind::View
+            );
+            assert_eq!(presentation.subjects, ["context-usage-live-animation.png"]);
+            assert_eq!(
+                tool_call
+                    .details
+                    .and_then(|details| details.input)
+                    .and_then(|input| input.path)
+                    .as_deref(),
+                Some("/tmp/context-usage-live-animation.png")
+            );
         }
         other => panic!("expected tool call event, got {other:?}"),
     }

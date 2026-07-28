@@ -66,7 +66,8 @@ pub use acp_trace::{AcpTraceStatus, RuntimeDeveloperSettings, RuntimeSettings};
 pub use runtime::{
     AgentAuthenticateRequest, AgentEventSink, AgentListSessionsRequest, AgentLoadedSession,
     AgentMetadataField, AgentProbeRequest, AgentPrompt, AgentPromptCapabilities,
-    AgentPromptOutcome, AgentRuntime, AgentSecretResolver, AgentSession, AgentSessionDelete,
-    AgentSessionEventSink, AgentSessionKey, AgentSessionLoad, AgentSessionMetadataUpdate,
-    AgentSessionResume, AgentSessionSetConfigOptionRequest, AgentSessionStart, TurnCancellation,
+    AgentPromptOutcome, AgentReplayPlanState, AgentRuntime, AgentSecretResolver, AgentSession,
+    AgentSessionDelete, AgentSessionEventSink, AgentSessionKey, AgentSessionLoad,
+    AgentSessionMetadataUpdate, AgentSessionResume, AgentSessionSetConfigOptionRequest,
+    AgentSessionStart, TurnCancellation,
 };

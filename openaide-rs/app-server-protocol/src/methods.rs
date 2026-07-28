@@ -49,8 +49,9 @@ use crate::task::{
     TaskNavigationLoadMoreResult, TaskNavigationRefreshParams, TaskNavigationRefreshResult,
     TaskOpenParams, TaskOpenResult, TaskReleaseParams, TaskReleaseResult, TaskRestoreParams,
     TaskRestoreResult, TaskSearchFilesParams, TaskSearchFilesResult, TaskSendParams,
-    TaskSendResult, TaskSetConfigOptionParams, TaskSetConfigOptionResult, TaskSetTitleParams,
-    TaskSetTitleResult,
+    TaskSendResult, TaskSetConfigOptionParams, TaskSetConfigOptionResult, TaskSetPinnedParams,
+    TaskSetPinnedResult, TaskSetTitleParams, TaskSetTitleResult, TaskToolImagePreviewParams,
+    TaskToolImagePreviewResult,
 };
 use crate::workspace::{
     WorkspaceListDirectoryParams, WorkspaceListDirectoryResult, WorkspaceListRootsParams,
@@ -441,6 +442,18 @@ protocol_method!(
     TASK_SET_TITLE,
     TaskSetTitleParams,
     TaskSetTitleResult
+);
+protocol_method!(
+    TaskSetPinned,
+    TASK_SET_PINNED,
+    TaskSetPinnedParams,
+    TaskSetPinnedResult
+);
+protocol_method!(
+    TaskToolImagePreview,
+    TASK_TOOL_IMAGE_PREVIEW,
+    TaskToolImagePreviewParams,
+    TaskToolImagePreviewResult
 );
 protocol_method!(TaskCancel, TASK_CANCEL, TaskCancelParams, TaskCancelResult);
 protocol_method!(TaskOpen, TASK_OPEN, TaskOpenParams, TaskOpenResult);

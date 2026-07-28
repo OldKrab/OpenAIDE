@@ -1,6 +1,6 @@
 use crate::protocol::model::{
     ActivityStatus, ActivityToolDetails, AgentCommandsCatalog, AgentMessagePart, AgentMessageRole,
-    ConfigOptionsCatalog, ToolPresentation,
+    AgentPlan, ConfigOptionsCatalog, ToolPresentation,
 };
 
 #[derive(Debug, Clone)]
@@ -25,6 +25,7 @@ pub enum AgentEvent {
     PermissionRequest(AgentPermissionRequest),
     ConfigOptionsChanged(ConfigOptionsCatalog),
     CommandsChanged(AgentCommandsCatalog),
+    Plan(AgentPlan),
     ContextUsage(AgentContextUsage),
     TurnUsage(AgentTurnUsage),
 }

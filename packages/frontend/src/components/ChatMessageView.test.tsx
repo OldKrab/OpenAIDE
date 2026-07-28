@@ -929,6 +929,91 @@ describe("ChatRow", () => {
     expect(html).toContain("started");
   });
 
+  it("uses the ACP view action with a normalized image filename", async () => {
+    const { ActivityStepRow } = await import("./ChatActivityView");
+    const html = renderToStaticMarkup(
+      <ActivityStepRow
+        step={{
+          kind: "tool",
+          name: "read",
+          status: "completed",
+          presentation: { kind: "view", subjects: ["context-usage-live-animation.png"] },
+          input_summary: "context-usage-live-animation.png",
+          details: {
+            locations: [],
+            content: [],
+            input: input({ path: "/tmp/context-usage-live-animation.png" }),
+          },
+        }}
+        taskId="task_1"
+      />,
+    );
+
+    expect(html).toContain('activity-step-semantic-action">View</span>');
+    expect(html).toContain('activity-step-semantic-subject">context-usage-live-animation.png</span>');
+    expect(html).not.toContain('activity-step-semantic-action">Read</span>');
+    expect(html).not.toContain("name view_image");
+  });
+
+  it("loads a file image preview after Tool details open and reuses the image lightbox", async () => {
+    const { ActivityStepRow } = await import("./ChatActivityView");
+    let resolvePreview!: (preview: { label: string; mediaType: string; dataUrl: string }) => void;
+    const previewResult = new Promise<{ label: string; mediaType: string; dataUrl: string }>((resolve) => {
+      resolvePreview = resolve;
+    });
+    const onLoadToolImagePreview = vi.fn(() => previewResult);
+    const step = {
+      kind: "tool" as const,
+      name: "read",
+      status: "completed" as const,
+      input_summary: "Read diagram.png",
+      detail_artifact_id: "artifact_1",
+    };
+    let tree!: ReturnType<typeof create>;
+    await act(async () => {
+      tree = create(
+        <ActivityStepRow
+          onLoadToolImagePreview={onLoadToolImagePreview}
+          step={step}
+          taskId="task_1"
+          toolDetails={{
+            ["task_1\u0000artifact_1"]: {
+              loading: false,
+              details: {
+                locations: [{ path: "/workspace/diagram.png" }],
+                content: [],
+              },
+            },
+          }}
+        />,
+      );
+    });
+
+    expect(onLoadToolImagePreview).not.toHaveBeenCalled();
+    await act(async () => {
+      tree.root.findByProps({ className: "activity-disclosure-trigger" }).props.onClick();
+    });
+
+    expect(onLoadToolImagePreview).toHaveBeenCalledOnce();
+    expect(onLoadToolImagePreview).toHaveBeenCalledWith("artifact_1");
+    expect(tree.root.findByProps({ role: "status" })).toBeDefined();
+    expect(JSON.stringify(tree.toJSON())).toContain("Loading image preview");
+    expect(JSON.stringify(tree.toJSON())).not.toContain("No output returned.");
+    expect(JSON.stringify(tree.toJSON())).not.toContain("Open image preview");
+    await act(async () => {
+      resolvePreview({
+        label: "diagram.png",
+        mediaType: "image/png",
+        dataUrl: "data:image/png;base64,aW1hZ2U=",
+      });
+    });
+    expect(tree.root.findAllByProps({ role: "status" })).toHaveLength(0);
+    expect(JSON.stringify(tree.toJSON())).not.toContain("No output returned.");
+    const previewButton = tree.root.findByProps({ "aria-label": "Open image preview for diagram.png" });
+    await act(async () => previewButton.props.onClick());
+    expect(tree.root.findByProps({ "aria-label": "Close image preview" })).toBeDefined();
+  });
+
   it("keeps search scope in the title beside a failed status", async () => {
     const { ActivityStepRow } = await import("./ChatActivityView");
     const html = renderToStaticMarkup(

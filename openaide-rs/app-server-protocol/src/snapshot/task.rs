@@ -98,6 +98,8 @@ pub struct TaskSummary {
     pub updated_at: String,
     pub last_activity: String,
     pub unread: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub pinned: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attention: Option<TaskAttentionEvent>,
     pub has_messages: bool,
@@ -181,12 +183,44 @@ pub struct TaskSnapshot {
     pub input_capabilities: Option<TaskInputCapabilities>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_usage: Option<TaskContextUsage>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub current_plan: Option<AgentPlanSnapshot>,
     pub chat: ChatSnapshot,
     pub history_sync: TaskHistorySyncSnapshot,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending_requests: Vec<PendingRequestSnapshot>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recovery: Option<RecoverySnapshot>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentPlanSnapshot {
+    pub entries: Vec<AgentPlanEntrySnapshot>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentPlanEntrySnapshot {
+    pub content: String,
+    pub priority: AgentPlanPrioritySnapshot,
+    pub status: AgentPlanStatusSnapshot,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum AgentPlanPrioritySnapshot {
+    High,
+    Medium,
+    Low,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub enum AgentPlanStatusSnapshot {
+    Pending,
+    InProgress,
+    Completed,
 }
 
 /// Standard ACP usage projected from the Task's bound live Native Session.

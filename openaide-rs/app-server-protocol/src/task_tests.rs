@@ -93,3 +93,33 @@ fn task_set_title_selects_user_or_automatic_ownership() {
         json!({ "kind": "automatic" })
     );
 }
+
+#[test]
+fn task_set_pinned_carries_authoritative_boolean_intent() {
+    assert_eq!(
+        serde_json::to_value(TaskSetPinnedParams {
+            task_id: "task-1".into(),
+            pinned: true,
+        })
+        .unwrap(),
+        json!({
+            "taskId": "task-1",
+            "pinned": true
+        })
+    );
+}
+
+#[test]
+fn tool_image_preview_request_uses_only_task_and_artifact_identity() {
+    assert_eq!(
+        serde_json::to_value(TaskToolImagePreviewParams {
+            task_id: "task-1".into(),
+            artifact_id: "artifact-1".to_string(),
+        })
+        .unwrap(),
+        json!({
+            "taskId": "task-1",
+            "artifactId": "artifact-1"
+        })
+    );
+}

@@ -92,6 +92,32 @@ describe("AppSurfaces callback wiring", () => {
     );
   });
 
+  it("passes shell-provided workspace recovery to Task Navigation", () => {
+    const controller = controllerFor("navigation");
+    const openFolder = vi.fn();
+    controller.workspaceSetup = { openFolder };
+
+    render(controller);
+
+    expect(surfaceMocks.sidebar).toHaveBeenCalledWith(
+      expect.objectContaining({ onOpenWorkspaceFolder: openFolder }),
+      undefined,
+    );
+  });
+
+  it("passes shell-provided workspace recovery to New Task", () => {
+    const controller = controllerFor("task");
+    const openFolder = vi.fn();
+    controller.workspaceSetup = { openFolder };
+
+    render(controller);
+
+    expect(surfaceMocks.newTask).toHaveBeenCalledWith(
+      expect.objectContaining({ onOpenWorkspaceFolder: openFolder }),
+      undefined,
+    );
+  });
+
   it("dismisses Worktree Management when a Task is opened through rendered Task Navigation", () => {
     surfaceMocks.renderRealSidebar = true;
     const controller = controllerFor("navigation");
@@ -227,6 +253,67 @@ describe("AppSurfaces callback wiring", () => {
       }),
       undefined,
     );
+  });
+
+  it("limits current-Project Task Navigation to Projects in the workspace", () => {
+    const controller = controllerFor("navigation");
+    const currentProject = { projectId: "project_current", label: "ai-bench-runner" };
+    const staleProject = { projectId: "project_stale", label: "agent-kernel-workspace" };
+    controller.bootstrap = {
+      surface: "navigation",
+      shell: VSCODE_SHELL,
+      projectIds: [currentProject.projectId],
+    };
+    controller.state.projects = [currentProject, staleProject];
+
+    render(controller);
+
+    expect(latestMockProps<React.ComponentProps<typeof import("./Sidebar").Sidebar>>(
+      surfaceMocks.sidebar,
+    )?.projects).toEqual([currentProject]);
+  });
+
+  it("keeps every Project represented by a multi-root workspace", () => {
+    const controller = controllerFor("navigation");
+    const firstProject = { projectId: "project_first", label: "api" };
+    const secondProject = { projectId: "project_second", label: "web" };
+    controller.bootstrap = {
+      surface: "navigation",
+      shell: VSCODE_SHELL,
+      projectIds: [firstProject.projectId, secondProject.projectId],
+    };
+    controller.state.projects = [
+      secondProject,
+      { projectId: "project_stale", label: "old-workspace" },
+      firstProject,
+    ];
+
+    render(controller);
+
+    expect(latestMockProps<React.ComponentProps<typeof import("./Sidebar").Sidebar>>(
+      surfaceMocks.sidebar,
+    )?.projects).toEqual([firstProject, secondProject]);
+  });
+
+  it("hides global Project groups when the current workspace has no folders", () => {
+    const controller = controllerFor("navigation");
+    controller.bootstrap = {
+      surface: "navigation",
+      shell: VSCODE_SHELL,
+      projectIds: [],
+    };
+    controller.state.projects = [
+      { projectId: "project_stale", label: "agent-kernel-workspace" },
+    ];
+    controller.workspaceSetup = { openFolder: vi.fn() };
+
+    render(controller);
+
+    const sidebarProps = latestMockProps<React.ComponentProps<typeof import("./Sidebar").Sidebar>>(
+      surfaceMocks.sidebar,
+    );
+    expect(sidebarProps?.projects).toEqual([]);
+    expect(sidebarProps?.onOpenWorkspaceFolder).toBe(controller.workspaceSetup.openFolder);
   });
 
   it("passes settings callbacks to settings view", () => {
@@ -1145,9 +1232,10 @@ function controllerFor(surface: AppController["bootstrap"]["surface"]): TestCont
         openSettings: vi.fn(),
         retryAgent: vi.fn(async () => true),
         openTask: vi.fn(),
-        restoreNativeSession: vi.fn(),
-        restoreTask: vi.fn(),
-        setTaskTitle: vi.fn(),
+      restoreNativeSession: vi.fn(),
+      restoreTask: vi.fn(),
+      setTaskPinned: vi.fn(),
+      setTaskTitle: vi.fn(),
         toggleArchived: vi.fn(),
       },
       newTask: {
@@ -1172,6 +1260,7 @@ function controllerFor(surface: AppController["bootstrap"]["surface"]): TestCont
       task: {
         cancel: vi.fn(),
         loadChatPage: vi.fn(),
+        loadToolImagePreview: vi.fn(async () => undefined),
         subscribeToolDetail: vi.fn(() => vi.fn()),
         revealAttachment: vi.fn(),
         removeAttachment: vi.fn(),
@@ -1334,6 +1423,7 @@ function snapshot(taskId: string, hasMessages = true): TaskSnapshot {
       task_version: 1,
       title: "Task",
       unread: false,
+      pinned: false,
       updated_at: "2026-05-22T00:00:00.000Z",
       workspace_root: "/workspace",
     },

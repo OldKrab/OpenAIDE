@@ -13,6 +13,7 @@ export type TaskSummary = {
   message_history_version: number;
   has_messages: boolean;
   unread: boolean;
+  pinned: boolean;
   attention?: TaskAttentionEvent;
   created_at: string;
   updated_at: string;
@@ -77,8 +78,19 @@ export type TaskSnapshot = {
     image: boolean;
   };
   context_usage?: TaskContextUsage;
+  current_plan?: AgentPlan;
   revision: number;
   history_sync: HistorySyncState;
+};
+
+export type AgentPlan = {
+  entries: AgentPlanEntry[];
+};
+
+export type AgentPlanEntry = {
+  content: string;
+  priority: "high" | "medium" | "low";
+  status: "pending" | "in_progress" | "completed";
 };
 
 export type TaskContextUsage = {

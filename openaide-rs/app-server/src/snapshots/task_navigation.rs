@@ -201,8 +201,10 @@ impl TaskNavigationSnapshotSource for TaskNavigationStore {
                     .is_some_and(|catalog| catalog.project_has_more(group.project_id.as_str()));
             }
             group.entries.sort_by(|left, right| {
-                navigation_activity(right)
-                    .cmp(&navigation_activity(left))
+                navigation_pinned(right)
+                    .cmp(&navigation_pinned(left))
+                    .then_with(|| navigation_active(right).cmp(&navigation_active(left)))
+                    .then_with(|| navigation_activity(right).cmp(&navigation_activity(left)))
                     .then_with(|| navigation_identity(left).cmp(&navigation_identity(right)))
             });
         }
@@ -257,6 +259,17 @@ fn project_selected_str(project_ids: Option<&[ProjectId]>, project_id: &str) -> 
     })
 }
 
+fn navigation_pinned(entry: &TaskNavigationEntry) -> bool {
+    matches!(entry, TaskNavigationEntry::Task { task } if task.pinned)
+}
+
+fn navigation_active(entry: &TaskNavigationEntry) -> bool {
+    matches!(
+        entry,
+        TaskNavigationEntry::Task { task } if task.status == ProtocolTaskStatus::Running
+    )
+}
+
 fn navigation_activity(entry: &TaskNavigationEntry) -> Option<i128> {
     match entry {
         TaskNavigationEntry::Task { task } => crate::time::activity_millis(&task.last_activity),
@@ -309,6 +322,7 @@ pub(crate) fn project_task_summary_with_has_messages(
         updated_at: record.updated_at,
         last_activity: record.last_activity,
         unread: record.unread,
+        pinned: record.pinned,
         attention: record.attention.map(project_attention),
         has_messages,
         worktree_id: record.worktree_id.map(WorktreeId::from),
@@ -363,6 +377,7 @@ pub(crate) fn project_legacy_task_summary(
         updated_at: summary.updated_at,
         last_activity: summary.last_activity,
         unread: summary.unread,
+        pinned: summary.pinned,
         attention: summary.attention.map(project_attention),
         has_messages,
         worktree_id: summary.worktree_id.map(WorktreeId::from),

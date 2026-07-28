@@ -154,6 +154,19 @@ pub struct TaskSetTitleResult {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
+pub struct TaskSetPinnedParams {
+    pub task_id: TaskId,
+    pub pinned: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskSetPinnedResult {
+    pub task: TaskSummary,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
 pub struct TaskCancelParams {
     pub task_id: TaskId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -226,6 +239,28 @@ pub struct ToolDetailSnapshot {
     pub output: Option<ActivityToolOutput>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub terminal_outputs: Vec<TerminalOutputSnapshot>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskToolImagePreviewParams {
+    pub task_id: TaskId,
+    pub artifact_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskToolImagePreviewResult {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub preview: Option<ToolImagePreview>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolImagePreview {
+    pub label: String,
+    pub media_type: String,
+    pub data_url: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]

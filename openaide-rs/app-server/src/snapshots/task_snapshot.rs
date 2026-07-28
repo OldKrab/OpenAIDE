@@ -3,7 +3,7 @@ use openaide_app_server_protocol::ids::{ClientInstanceId, ProjectId, TaskId, Tas
 use openaide_app_server_protocol::snapshot::{
     ChatSnapshot, TaskHistorySyncSnapshot, TaskSnapshot, TaskSummary,
 };
-use openaide_app_server_protocol::task::{TaskListLifecycle, ToolDetailSnapshot};
+use openaide_app_server_protocol::task::{TaskListLifecycle, ToolDetailSnapshot, ToolImagePreview};
 use std::sync::Arc;
 
 use crate::chat_history::ChatHistoryPolicy;
@@ -14,6 +14,8 @@ use crate::storage::Store;
 use crate::tasks::snapshot::{build_snapshot, snapshot_from_record_and_chat};
 
 pub(crate) use chat_projection::{project_chat_item, project_tool_details};
+
+mod tool_image_preview;
 
 /// Projects one committed lazy artifact into the complete replica baseline.
 /// Structured details and terminal output share the artifact revision and must
@@ -75,6 +77,16 @@ pub trait TaskSnapshotSource: Send + Sync {
         task_id: &TaskId,
         artifact_id: &str,
     ) -> Result<ToolDetailSnapshot, ProtocolError>;
+
+    /// Resolves an image from server-owned Tool detail paths without accepting a client path.
+    fn tool_image_preview_for_client(
+        &self,
+        _client_instance_id: &ClientInstanceId,
+        _task_id: &TaskId,
+        _artifact_id: &str,
+    ) -> Result<Option<ToolImagePreview>, ProtocolError> {
+        Ok(None)
+    }
 }
 
 /// Supplies process-local history reconciliation state for otherwise durable Task snapshots.
@@ -194,6 +206,25 @@ impl TaskSnapshotSource for TaskSnapshotStore {
             target: None,
         })
     }
+
+    fn tool_image_preview_for_client(
+        &self,
+        client_instance_id: &ClientInstanceId,
+        task_id: &TaskId,
+        artifact_id: &str,
+    ) -> Result<Option<ToolImagePreview>, ProtocolError> {
+        let task = self
+            .store
+            .read_task(task_id.as_str())
+            .map_err(task_snapshot_error)?;
+        crate::tasks::access::require_client_task_access(&task, client_instance_id)
+            .map_err(task_snapshot_error)?;
+        let details = self
+            .store
+            .read_tool_artifact(task_id.as_str(), artifact_id)
+            .map_err(task_snapshot_error)?;
+        Ok(tool_image_preview::load_tool_image_preview(&task, &details))
+    }
 }
 
 impl TaskSnapshotStore {
@@ -290,11 +321,42 @@ pub(crate) fn project_stored_task_snapshot_with_history_sync(
                 }),
             }
         }),
+        current_plan: snapshot.current_plan.map(project_agent_plan),
         chat: project_chat_page(snapshot.chat),
         history_sync,
         pending_requests: Vec::new(),
         recovery: None,
     })
+}
+
+pub(super) fn project_agent_plan(
+    plan: crate::protocol::model::AgentPlan,
+) -> openaide_app_server_protocol::snapshot::AgentPlanSnapshot {
+    use crate::protocol::model::{AgentPlanPriority, AgentPlanStatus};
+    use openaide_app_server_protocol::snapshot::{
+        AgentPlanEntrySnapshot, AgentPlanPrioritySnapshot, AgentPlanSnapshot,
+        AgentPlanStatusSnapshot,
+    };
+
+    AgentPlanSnapshot {
+        entries: plan
+            .entries
+            .into_iter()
+            .map(|entry| AgentPlanEntrySnapshot {
+                content: entry.content,
+                priority: match entry.priority {
+                    AgentPlanPriority::High => AgentPlanPrioritySnapshot::High,
+                    AgentPlanPriority::Medium => AgentPlanPrioritySnapshot::Medium,
+                    AgentPlanPriority::Low => AgentPlanPrioritySnapshot::Low,
+                },
+                status: match entry.status {
+                    AgentPlanStatus::Pending => AgentPlanStatusSnapshot::Pending,
+                    AgentPlanStatus::InProgress => AgentPlanStatusSnapshot::InProgress,
+                    AgentPlanStatus::Completed => AgentPlanStatusSnapshot::Completed,
+                },
+            })
+            .collect(),
+    }
 }
 
 /// Projects metadata from the exact committed Task record without reading Chat from storage.

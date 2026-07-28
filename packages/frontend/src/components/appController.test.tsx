@@ -47,6 +47,7 @@ let bootstrap: TestBootstrap = navigationBootstrap();
 let backendConnection: TestBackendConnection | undefined;
 let latestController: AppControllerTestHarness | undefined;
 let latestPublicController: AppController | undefined;
+let workspaceCapability: { openFolder: () => void } | undefined;
 const defaultHandleNotification: BackendConnection["handleNotification"] = () => () => undefined;
 const defaultHandleRequest: BackendConnection["handleRequest"] = () => () => undefined;
 const defaultHandleGenerationInvalidated: BackendConnection["handleGenerationInvalidated"] = () => () => undefined;
@@ -82,6 +83,7 @@ vi.mock("../services/hostBridge", () => ({
     });
   },
   getBootstrap: () => bootstrap,
+  getWorkspaceCapability: () => workspaceCapability,
   openNewTaskSurface: (projectId?: string) => postHostMessage(projectId
     ? { type: "surface.openNewTask", payload: { project_id: projectId } }
     : { type: "surface.openNewTask" }),
@@ -139,6 +141,7 @@ describe("app controller mounted lifecycle", () => {
     backendConnection = undefined;
     latestController = undefined;
     latestPublicController = undefined;
+    workspaceCapability = undefined;
   });
 
   it("exposes render-ready surface state and intents without reducer controls", () => {
@@ -154,6 +157,35 @@ describe("app controller mounted lifecycle", () => {
       latestPublicController?.intents.newTask.changePrompt("Describe the work");
     });
     expect(latestPublicController?.view.primaryTask.newTask.newTask.prompt).toBe("Describe the work");
+  });
+
+  it("exposes shell-provided workspace recovery after roots resolve empty", () => {
+    const openFolder = vi.fn();
+    workspaceCapability = { openFolder };
+    act(() => {
+      create(<PublicControllerProbe />);
+    });
+
+    expect(latestPublicController?.workspaceSetup).toBeUndefined();
+
+    act(() => {
+      listeners.forEach((listener) => listener({
+        type: "workspace.roots.result",
+        payload: { roots: [] },
+      }));
+    });
+
+    expect(latestPublicController?.workspaceSetup).toBeDefined();
+    latestPublicController?.workspaceSetup?.openFolder();
+    expect(openFolder).toHaveBeenCalledOnce();
+
+    act(() => {
+      listeners.forEach((listener) => listener({
+        type: "workspace.roots.result",
+        payload: { roots: [{ path: "/workspace/OpenAIDE", label: "OpenAIDE" }] },
+      }));
+    });
+    expect(latestPublicController?.workspaceSetup).toBeUndefined();
   });
 
   it("keeps the default backend connection stable across public controller renders", () => {
@@ -3169,6 +3201,7 @@ function snapshot(taskId: string, status: TaskSnapshot["task"]["status"], title 
       message_history_version: 1,
       has_messages: true,
       unread: false,
+      pinned: false,
       created_at: "2026-05-22T00:00:00.000Z",
       updated_at: "2026-05-22T00:00:00.000Z",
       last_activity: "2026-05-22T00:00:00.000Z",
@@ -3262,6 +3295,7 @@ function protocolTaskSummary(taskId: string, title: string, status: "idle" | "ru
     updatedAt: "2026-05-22T00:00:00.000Z",
     lastActivity: "2026-05-22T00:00:00.000Z",
     unread: false,
+    pinned: false,
     hasMessages,
     workspaceAvailable: true,
   };

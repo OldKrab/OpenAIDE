@@ -8,13 +8,19 @@ use crate::agent::events::{AgentEvent, AgentToolCall, AgentToolCallStatus};
 use crate::agent::tool_details_io::{
     tool_input_detail, tool_input_summary, tool_output_detail, truncate_preview,
 };
-use crate::protocol::model::{ActivityToolContent, ActivityToolDetails, ActivityToolLocation};
+use crate::protocol::model::{
+    ActivityToolContent, ActivityToolDetails, ActivityToolLocation, ToolPresentation,
+    ToolPresentationKind,
+};
 
 pub(crate) fn tool_call_event(tool_call: &ToolCall) -> AgentEvent {
     let (kind, input_summary) = tool_presentation(tool_call);
     let presentation = (kind == "execute")
         .then(|| infer_execute_presentation(tool_call.raw_input.as_ref()))
-        .flatten();
+        .flatten()
+        .or_else(|| {
+            structured_tool_presentation(tool_call.raw_input.as_ref(), input_summary.as_deref())
+        });
     AgentEvent::ToolCall(AgentToolCall {
         tool_call_id: tool_call.tool_call_id.to_string(),
         scope_id: None,
@@ -42,6 +48,21 @@ fn tool_presentation(tool_call: &ToolCall) -> (String, Option<String>) {
         }
     }
     (kind, tool_input_summary(tool_call.raw_input.as_ref()))
+}
+
+fn structured_tool_presentation(
+    raw_input: Option<&serde_json::Value>,
+    input_summary: Option<&str>,
+) -> Option<ToolPresentation> {
+    let input = raw_input?.as_object()?;
+    let tool_name = input.get("name")?.as_str()?;
+    if tool_name != "view_image" {
+        return None;
+    }
+    Some(ToolPresentation {
+        kind: ToolPresentationKind::View,
+        subjects: input_summary.map(str::to_string).into_iter().collect(),
+    })
 }
 
 fn web_search_input_summary(raw_input: Option<&serde_json::Value>) -> Option<String> {

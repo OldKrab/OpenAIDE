@@ -6,6 +6,7 @@ import {
   TASK_CHAT_PAGE,
   TASK_SEARCH_FILES,
   TASK_SET_CONFIG_OPTION,
+  TASK_TOOL_IMAGE_PREVIEW,
   type AppServerSession,
   type AgentConfigOptionId,
   type BackendConnection,
@@ -114,6 +115,19 @@ export function createTaskCallbacks({
           });
         });
       return requestGeneration;
+    },
+    loadToolImagePreview: async (artifactId) => {
+      if (!state.snapshot || !backendConnection?.request) return undefined;
+      try {
+        const result = await backendConnection.request(TASK_TOOL_IMAGE_PREVIEW, {
+          taskId: state.snapshot.task.task_id as TaskId,
+          artifactId,
+        });
+        return result.preview ?? undefined;
+      } catch {
+        // Preview is an optional enhancement; Tool text remains the recovery surface.
+        return undefined;
+      }
     },
     subscribeToolDetail: (artifactId) => {
       if (!state.snapshot) return () => undefined;

@@ -194,6 +194,7 @@ function task(
     message_history_version: 1,
     has_messages: true,
     unread: Boolean(eventId),
+    pinned: false,
     attention: eventId ? {
       event_id: eventId,
       reason,

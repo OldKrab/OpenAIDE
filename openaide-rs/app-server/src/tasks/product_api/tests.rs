@@ -36,7 +36,7 @@ use openaide_app_server_protocol::task::{
     ComposerImage, ComposerMessage, NativeSessionArchiveParams, NativeSessionRestoreParams,
     TaskAcquireParams, TaskAdoptNativeSessionParams, TaskArchiveParams, TaskCancelParams,
     TaskMarkReadParams, TaskOpenParams, TaskReleaseParams, TaskSendParams,
-    TaskSetConfigOptionParams, TaskSetTitleParams, TaskTitleSelection,
+    TaskSetConfigOptionParams, TaskSetPinnedParams, TaskSetTitleParams, TaskTitleSelection,
 };
 use openaide_app_server_protocol::workspace::WorkspaceListDirectoryParams;
 use std::collections::HashMap;
@@ -1763,6 +1763,55 @@ fn set_title_validates_user_input_and_rejects_archived_tasks() {
         )
         .unwrap_err();
     assert_eq!(archived_error.code, ProtocolErrorCode::Conflict);
+}
+
+#[test]
+fn set_pinned_persists_without_advancing_task_activity_and_is_idempotent() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let record = task_record("task-pinned", "/tmp/openaide-pin-workspace/app");
+    let last_activity = record.last_activity.clone();
+    store.write_task(&record).unwrap();
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        Arc::new(crate::agent::mock::MockAgent),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+    let client = crate::attachment_runtime::AttachmentOwner::test_client_instance_id();
+
+    let pinned = api
+        .set_task_pinned(
+            &client,
+            TaskSetPinnedParams {
+                task_id: "task-pinned".into(),
+                pinned: true,
+            },
+        )
+        .unwrap();
+    assert!(pinned.pinned);
+
+    let stored = store.read_task("task-pinned").unwrap();
+    assert!(stored.pinned);
+    assert_eq!(stored.last_activity, last_activity);
+    let committed_revision = stored.revision;
+
+    let repeated = api
+        .set_task_pinned(
+            &client,
+            TaskSetPinnedParams {
+                task_id: "task-pinned".into(),
+                pinned: true,
+            },
+        )
+        .unwrap();
+    assert!(repeated.pinned);
+    assert_eq!(
+        store.read_task("task-pinned").unwrap().revision,
+        committed_revision
+    );
 }
 
 #[test]
@@ -6849,6 +6898,35 @@ fn archiving_task_does_not_refresh_last_activity() {
     assert_eq!(archived_old.last_activity, "2026-01-01T00:00:00.000Z");
 }
 
+#[test]
+fn archiving_clears_pinned_state_and_restore_does_not_revive_it() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let mut record = task_record("task-pinned", "/tmp/openaide-archive-pinned/app");
+    record.pinned = true;
+    store.write_task(&record).unwrap();
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        Arc::new(crate::agent::mock::MockAgent),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+
+    api.archive_for_test(TaskArchiveParams {
+        task_id: "task-pinned".into(),
+    })
+    .unwrap();
+    assert!(!store.read_task("task-pinned").unwrap().pinned);
+
+    api.restore_for_test(openaide_app_server_protocol::task::TaskRestoreParams {
+        task_id: "task-pinned".into(),
+    })
+    .unwrap();
+    assert!(!store.read_task("task-pinned").unwrap().pinned);
+}
+
 fn task_record(task_id: &str, workspace_root: &str) -> TaskRecord {
     // Product API tests use stable logical roots so Project ids remain readable.
     // Materialize them because production now rejects unavailable workspaces.
@@ -6865,6 +6943,7 @@ fn task_record(task_id: &str, workspace_root: &str) -> TaskRecord {
         task_version: 1,
         message_history_version: 0,
         unread: false,
+        pinned: false,
         attention: None,
         created_at: "2026-01-01T00:00:00.000Z".to_string(),
         updated_at: "2026-01-01T00:00:00.000Z".to_string(),
@@ -6885,6 +6964,8 @@ fn task_record(task_id: &str, workspace_root: &str) -> TaskRecord {
         config_mutation: Default::default(),
         agent_commands_catalog: None,
         context_usage: None,
+        current_plan: None,
+        completed_plan_message_id: None,
         last_turn_usage: None,
         model_id: None,
         supports_image_input: true,

@@ -73,6 +73,16 @@ fn project_message(message: &NormalizedMessage) -> (ChatRole, ChatItemStatus, Ve
                 steps: steps.iter().map(project_activity_step).collect(),
             }],
         ),
+        NormalizedMessage::CompletedPlan { entries, .. } => (
+            ChatRole::System,
+            ChatItemStatus::Complete,
+            vec![MessagePart::CompletedPlan {
+                entries: super::project_agent_plan(crate::protocol::model::AgentPlan {
+                    entries: entries.clone(),
+                })
+                .entries,
+            }],
+        ),
         NormalizedMessage::Question {
             request_id,
             message,
@@ -258,6 +268,9 @@ fn project_activity_step(step: &ActivityStep) -> ActivityStepSnapshot {
                         }
                         crate::protocol::model::ToolPresentationKind::Read => {
                             openaide_app_server_protocol::snapshot::ToolPresentationKindSnapshot::Read
+                        }
+                        crate::protocol::model::ToolPresentationKind::View => {
+                            openaide_app_server_protocol::snapshot::ToolPresentationKindSnapshot::View
                         }
                         crate::protocol::model::ToolPresentationKind::List => {
                             openaide_app_server_protocol::snapshot::ToolPresentationKindSnapshot::List

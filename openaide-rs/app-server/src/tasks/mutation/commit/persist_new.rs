@@ -65,6 +65,7 @@ pub(super) fn persist_new_task(
         send_capability: true,
         input_capabilities: true,
         context_usage: true,
+        current_plan: true,
         removed: task.tombstoned,
     };
     let navigation =

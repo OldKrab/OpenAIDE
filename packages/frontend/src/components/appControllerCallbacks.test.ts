@@ -38,6 +38,8 @@ import {
   TASK_SEND,
   TASK_RESTORE,
   TASK_SET_CONFIG_OPTION,
+  TASK_SET_PINNED,
+  TASK_TOOL_IMAGE_PREVIEW,
   type AttachmentHandleId,
   type BackendConnection,
   type FileBrowserEntryId,
@@ -931,6 +933,7 @@ describe("app controller callbacks", () => {
       task_version: 1,
       title: "Unread task",
       unread: true,
+      pinned: false,
       updated_at: "2026-05-22T00:00:00.000Z",
       workspace_root: "/workspace",
     }];
@@ -2988,6 +2991,7 @@ describe("app controller callbacks", () => {
       task_version: 1,
       title: "Archived task",
       unread: false,
+      pinned: false,
       updated_at: "2026-05-22T00:00:00.000Z",
       workspace_root: "/workspace",
     }];
@@ -3039,6 +3043,19 @@ describe("app controller callbacks", () => {
     expect(postHostMessage).toHaveBeenCalledWith({
       type: "surface.openTask",
       payload: { task_id: "task_1" },
+    });
+  });
+
+  it("sends typed Task pin intent through the central navigation callback", async () => {
+    const request = vi.fn().mockResolvedValue({ task: protocolTaskSummary("task_1", "Pinned") });
+
+    await callbacks({
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
+    }).navigation.setTaskPinned("task_1", true);
+
+    expect(request).toHaveBeenCalledWith(TASK_SET_PINNED, {
+      taskId: "task_1",
+      pinned: true,
     });
   });
 
@@ -3133,6 +3150,7 @@ describe("app controller callbacks", () => {
       task_version: 1,
       title: "Archived task",
       unread: false,
+      pinned: false,
       updated_at: "2026-05-22T00:00:00.000Z",
       workspace_root: "/workspace",
     }];
@@ -3397,6 +3415,33 @@ describe("app controller callbacks", () => {
     expect(postHostMessage).not.toHaveBeenCalled();
   });
 
+  it("loads an optional Tool image preview through task and artifact identity", async () => {
+    const request = vi.fn(async () => ({
+      preview: {
+        label: "diagram.png",
+        mediaType: "image/png",
+        dataUrl: "data:image/png;base64,aW1hZ2U=",
+      },
+    }));
+    const state = createInitialState();
+    state.snapshot = snapshot("task_1");
+
+    const preview = await callbacks({
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
+      state,
+    }).task.loadToolImagePreview("artifact_1");
+
+    expect(request).toHaveBeenCalledWith(TASK_TOOL_IMAGE_PREVIEW, {
+      taskId: "task_1",
+      artifactId: "artifact_1",
+    });
+    expect(preview).toEqual({
+      label: "diagram.png",
+      mediaType: "image/png",
+      dataUrl: "data:image/png;base64,aW1hZ2U=",
+    });
+  });
+
   it("task callbacks no-op when there is no active snapshot", () => {
     const dispatch = vi.fn();
     const state = createInitialState();
@@ -3404,6 +3449,7 @@ describe("app controller callbacks", () => {
 
     task.cancel();
     task.loadChatPage("cursor_1");
+    void task.loadToolImagePreview("artifact_1");
     task.subscribeToolDetail("artifact_1");
     task.respondToPermission("permission_1", "allow_once");
     task.sendPrompt();
@@ -3496,6 +3542,7 @@ function snapshot(taskId: string): TaskSnapshot {
       message_history_version: 1,
       has_messages: true,
       unread: false,
+      pinned: false,
       created_at: "2026-05-22T00:00:00.000Z",
       updated_at: "2026-05-22T00:00:00.000Z",
       last_activity: "2026-05-22T00:00:00.000Z",
@@ -3617,6 +3664,7 @@ function protocolTaskSummary(taskId: string, title: string) {
     status: "idle" as const,
     hasMessages: true,
     unread: false,
+    pinned: false,
     updatedAt: "2026-05-22T00:00:00.000Z",
     lastActivity: "2026-05-22T00:00:00.000Z",
     workspaceAvailable: true,

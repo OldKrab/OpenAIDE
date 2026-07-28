@@ -207,11 +207,24 @@ function mapProtocolTaskSnapshotWithCache(
           },
         } : {}),
       } : undefined,
+      current_plan: snapshot.currentPlan ? {
+        entries: snapshot.currentPlan.entries.map(mapProtocolPlanEntry),
+      } : undefined,
       revision: snapshot.revision,
       history_sync: mapHistorySync(snapshot.historySync ?? { state: "idle", generation: 0 }),
     },
     warnings,
     requiresNativeSurface: warnings.some(requiresNativeSurface),
+  };
+}
+
+function mapProtocolPlanEntry(
+  entry: import("@openaide/app-server-client").AgentPlanEntrySnapshot,
+): import("@openaide/app-shell-contracts").AgentPlanEntry {
+  return {
+    content: entry.content,
+    priority: entry.priority,
+    status: entry.status === "inProgress" ? "in_progress" : entry.status,
   };
 }
 
@@ -321,6 +334,7 @@ function mapProtocolTaskSummaryWithWarnings(
       message_history_version: revision,
       has_messages: summary.hasMessages,
       unread: summary.unread,
+      pinned: summary.pinned ?? false,
       attention: summary.attention ? {
         event_id: summary.attention.eventId,
         reason: summary.attention.reason,

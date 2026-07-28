@@ -1,6 +1,7 @@
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::{
-    ActivityStep, ActivityToolContent, ActivityToolDetails, NormalizedMessage,
+    ActivityStep, ActivityToolContent, ActivityToolDetails, ActivityToolField, ActivityToolValue,
+    NormalizedMessage, ToolPresentation, ToolPresentationKind,
 };
 
 #[cfg(test)]
@@ -113,6 +114,7 @@ pub(super) fn should_replace_input_summary(tool_name: &str, summary: Option<&str
             | ("edit", "created file")
             | ("read", "read")
             | ("read", "read file")
+            | ("read", "name view_image")
             | ("delete", "delete")
             | ("delete", "deleted file")
             | ("move", "move")
@@ -129,8 +131,52 @@ pub(super) fn lightweight_detail_summary(details: &ActivityToolDetails) -> Optio
         .or(details
             .input
             .as_ref()
-            .and_then(|input| input.path.as_deref()))?;
+            .and_then(|input| input.path.as_deref()))
+        .or_else(|| legacy_tool_argument(details, "path"))?;
     Some(path_leaf(path))
+}
+
+pub(super) fn legacy_view_presentation(details: &ActivityToolDetails) -> Option<ToolPresentation> {
+    (legacy_tool_name(details)? == "view_image").then(|| ToolPresentation {
+        kind: ToolPresentationKind::View,
+        subjects: lightweight_detail_summary(details).into_iter().collect(),
+    })
+}
+
+fn legacy_tool_name(details: &ActivityToolDetails) -> Option<&str> {
+    field_string(&details.input.as_ref()?.fields, "name")
+}
+
+fn legacy_tool_argument<'a>(details: &'a ActivityToolDetails, name: &str) -> Option<&'a str> {
+    let arguments = field_object(&details.input.as_ref()?.fields, "arguments")?;
+    field_string(arguments, name)
+}
+
+fn field_string<'a>(fields: &'a [ActivityToolField], name: &str) -> Option<&'a str> {
+    fields.iter().find_map(|field| {
+        if field.name != name {
+            return None;
+        }
+        match &field.value {
+            ActivityToolValue::String { value } => Some(value.as_str()),
+            _ => None,
+        }
+    })
+}
+
+fn field_object<'a>(
+    fields: &'a [ActivityToolField],
+    name: &str,
+) -> Option<&'a [ActivityToolField]> {
+    fields.iter().find_map(|field| {
+        if field.name != name {
+            return None;
+        }
+        match &field.value {
+            ActivityToolValue::Object { fields } => Some(fields.as_slice()),
+            _ => None,
+        }
+    })
 }
 
 fn first_diff_path(content: &[ActivityToolContent]) -> Option<&str> {

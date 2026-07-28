@@ -2247,6 +2247,7 @@ function taskSummary(taskId: string): TaskSummary {
     message_history_version: 1,
     has_messages: true,
     unread: false,
+    pinned: false,
     created_at: now,
     updated_at: now,
     last_activity: now,

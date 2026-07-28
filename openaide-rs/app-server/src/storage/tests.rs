@@ -1,9 +1,10 @@
 use super::*;
 use crate::protocol::model::{
-    ActivityStatus, ActivityStep, ActivityToolContent, ActivityToolDetails, ActivityToolInput,
-    AgentMessagePart, AgentMessageRole, ChatMessage, ConfigOption, ConfigOptionCurrentValue,
-    ConfigOptionKind, ConfigOptionsCatalog, ConfigOptionsStatus, IsolationKind, NormalizedMessage,
-    TaskStatus, ToolPresentation, ToolPresentationKind,
+    ActivityStatus, ActivityStep, ActivityToolContent, ActivityToolDetails, ActivityToolField,
+    ActivityToolInput, ActivityToolValue, AgentMessagePart, AgentMessageRole, ChatMessage,
+    ConfigOption, ConfigOptionCurrentValue, ConfigOptionKind, ConfigOptionsCatalog,
+    ConfigOptionsStatus, IsolationKind, NormalizedMessage, TaskStatus, ToolPresentation,
+    ToolPresentationKind,
 };
 use crate::storage::records::{StoredMessage, TaskPreparationRecord, TaskRecord};
 use crate::storage_runtime::RecoveryClassification;
@@ -393,6 +394,115 @@ fn pages_hydrate_missing_tool_file_summaries_from_artifacts() {
         panic!("expected tool step");
     };
     assert_eq!(input_summary.as_deref(), Some("chat.ts"));
+}
+
+#[test]
+fn pages_upgrade_saved_view_image_envelopes_to_view_presentations() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().to_path_buf()).unwrap();
+    let task_id = "task_legacy_view_image";
+    ensure_task(&store, task_id);
+    let mut message = ChatMessage {
+        cursor: "activity_1".to_string(),
+        identity: "activity_1".to_string(),
+        message_type: "activity".to_string(),
+        message_id: "activity_1".to_string(),
+        message: NormalizedMessage::Activity {
+            id: "activity_1".to_string(),
+            title: "Read files".to_string(),
+            status: ActivityStatus::Completed,
+            created_at: "2026-07-02T00:00:00Z".to_string(),
+            collapsed: true,
+            steps: vec![ActivityStep::Tool {
+                tool_call_id: Some("view-call".to_string()),
+                name: "read".to_string(),
+                status: ActivityStatus::Completed,
+                presentation: None,
+                input_summary: Some("name view_image".to_string()),
+                output_preview: None,
+                detail_artifact_id: None,
+                details: Some(Box::new(ActivityToolDetails {
+                    locations: Vec::new(),
+                    content: Vec::new(),
+                    input: Some(ActivityToolInput {
+                        command: Vec::new(),
+                        cwd: None,
+                        query: None,
+                        queries: Vec::new(),
+                        url: None,
+                        path: None,
+                        fields: vec![
+                            ActivityToolField {
+                                name: "arguments".to_string(),
+                                value: ActivityToolValue::Object {
+                                    fields: vec![ActivityToolField {
+                                        name: "path".to_string(),
+                                        value: ActivityToolValue::String {
+                                            value: "/tmp/context-usage-live-animation.png"
+                                                .to_string(),
+                                        },
+                                    }],
+                                },
+                            },
+                            ActivityToolField {
+                                name: "name".to_string(),
+                                value: ActivityToolValue::String {
+                                    value: "view_image".to_string(),
+                                },
+                            },
+                        ],
+                    }),
+                    output: None,
+                })),
+                permission_outcomes: Vec::new(),
+            }],
+        },
+    };
+    store
+        .persist_tool_artifacts(task_id, &mut message.message)
+        .unwrap();
+    let NormalizedMessage::Activity { steps, .. } = &mut message.message else {
+        panic!("expected activity");
+    };
+    let ActivityStep::Tool {
+        presentation,
+        input_summary,
+        ..
+    } = &mut steps[0]
+    else {
+        panic!("expected tool");
+    };
+    *presentation = None;
+    *input_summary = Some("name view_image".to_string());
+    write_stored_messages(
+        &store,
+        task_id,
+        &[StoredMessage {
+            sequence: 1,
+            chat: message,
+        }],
+    );
+
+    let page = store.tail_page(task_id, 1).unwrap();
+
+    let NormalizedMessage::Activity { steps, .. } = &page.items[0].message else {
+        panic!("expected activity");
+    };
+    let ActivityStep::Tool {
+        presentation,
+        input_summary,
+        ..
+    } = &steps[0]
+    else {
+        panic!("expected tool");
+    };
+    assert_eq!(
+        input_summary.as_deref(),
+        Some("context-usage-live-animation.png")
+    );
+    let presentation = presentation.as_ref().expect("view presentation");
+    assert_eq!(presentation.kind, ToolPresentationKind::View);
+    assert_eq!(presentation.subjects, ["context-usage-live-animation.png"]);
 }
 
 #[test]
@@ -1074,6 +1184,7 @@ fn task_record(task_id: &str, status: TaskStatus, created_at: &str) -> TaskRecor
         task_version: 1,
         message_history_version: 1,
         unread: false,
+        pinned: false,
         attention: None,
         created_at: created_at.to_string(),
         updated_at: created_at.to_string(),
@@ -1094,6 +1205,8 @@ fn task_record(task_id: &str, status: TaskStatus, created_at: &str) -> TaskRecor
         config_mutation: Default::default(),
         agent_commands_catalog: None,
         context_usage: None,
+        current_plan: None,
+        completed_plan_message_id: None,
         last_turn_usage: None,
         model_id: None,
         supports_image_input: false,

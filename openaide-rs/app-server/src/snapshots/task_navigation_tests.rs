@@ -135,6 +135,58 @@ fn navigation_combines_durable_tasks_and_persisted_unadopted_sessions() {
 }
 
 #[test]
+fn navigation_orders_pins_before_live_tasks_and_native_sessions() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    let mut pinned_idle = task_record("pinned-idle", "Pinned idle", "2026-01-02T00:00:00Z");
+    pinned_idle.pinned = true;
+    let mut pinned_active = task_record("pinned-active", "Pinned active", "2026-01-01T00:00:00Z");
+    pinned_active.pinned = true;
+    pinned_active.status = TaskStatus::Active;
+    let mut unpinned_active =
+        task_record("unpinned-active", "Unpinned active", "2026-01-04T00:00:00Z");
+    unpinned_active.status = TaskStatus::Active;
+    let project_id = project_id_for_workspace(&pinned_idle.workspace_root);
+    store.write_task(&pinned_idle).unwrap();
+    store.write_task(&pinned_active).unwrap();
+    store.write_task(&unpinned_active).unwrap();
+    let catalog = NativeSessionCatalog::open(store.clone()).unwrap();
+    catalog
+        .record_page(
+            project_id.as_str(),
+            &pinned_idle.workspace_root,
+            vec![NativeSessionObservation {
+                reference: NativeSessionRef::new("agent-a", "native-newest"),
+                title: Some("Newest Native Session".to_string()),
+                last_activity: Some("2026-01-05T00:00:00Z".to_string()),
+            }],
+        )
+        .unwrap();
+
+    let snapshot = TaskNavigationStore::with_native_sessions(store, catalog)
+        .snapshot(TaskNavigationSection::Tasks, None)
+        .unwrap();
+    let identities = snapshot.groups[0]
+        .entries
+        .iter()
+        .map(|entry| match entry {
+            TaskNavigationEntry::Task { task } => task.task_id.as_str(),
+            TaskNavigationEntry::NativeSession { session } => session.reference.session_id.as_str(),
+        })
+        .collect::<Vec<_>>();
+
+    assert_eq!(
+        identities,
+        vec![
+            "pinned-active",
+            "pinned-idle",
+            "unpinned-active",
+            "native-newest"
+        ]
+    );
+}
+
+#[test]
 fn marks_tasks_with_durable_chat_messages() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();
@@ -395,6 +447,7 @@ fn task_record(task_id: &str, title: &str, updated_at: &str) -> TaskRecord {
         task_version: 1,
         message_history_version: 0,
         unread: false,
+        pinned: false,
         attention: None,
         created_at: "2026-01-01T00:00:00.000Z".to_string(),
         updated_at: updated_at.to_string(),
@@ -415,6 +468,8 @@ fn task_record(task_id: &str, title: &str, updated_at: &str) -> TaskRecord {
         config_mutation: Default::default(),
         agent_commands_catalog: None,
         context_usage: None,
+        current_plan: None,
+        completed_plan_message_id: None,
         last_turn_usage: None,
         model_id: None,
         supports_image_input: false,

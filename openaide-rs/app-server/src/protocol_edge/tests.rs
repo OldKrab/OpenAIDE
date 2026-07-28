@@ -57,8 +57,8 @@ use crate::task_events::{
 use crate::tasks::product_api::{
     AgentListSessionsWorkflow, AttachmentFileBrowserWorkflow, ResolvedSentFile,
     TaskAcquireWorkflow, TaskAdoptNativeSessionWorkflow, TaskArchiveWorkflow, TaskCancelWorkflow,
-    TaskChatPageWorkflow, TaskFileSearchWorkflow, TaskOpenWorkflow, TaskReleaseWorkflow,
-    TaskSendAccepted, TaskSendWorkflow, TaskSetConfigOptionWorkflow, TaskSetTitleWorkflow,
+    TaskChatPageWorkflow, TaskFileSearchWorkflow, TaskMetadataWorkflow, TaskOpenWorkflow,
+    TaskReleaseWorkflow, TaskSendAccepted, TaskSendWorkflow, TaskSetConfigOptionWorkflow,
 };
 
 use super::*;
@@ -2990,7 +2990,7 @@ impl TaskSetConfigOptionWorkflow for RejectingTaskSetConfigOption {
 
 struct RejectingTaskSetTitle;
 
-impl TaskSetTitleWorkflow for RejectingTaskSetTitle {
+impl TaskMetadataWorkflow for RejectingTaskSetTitle {
     fn set_title_for_client(
         &self,
         _client_instance_id: &ClientInstanceId,
@@ -3002,6 +3002,22 @@ impl TaskSetTitleWorkflow for RejectingTaskSetTitle {
         Err(openaide_app_server_protocol::errors::ProtocolError {
             code: openaide_app_server_protocol::errors::ProtocolErrorCode::Internal,
             message: "task set title unavailable in test gateway".to_string(),
+            recoverable: true,
+            target: None,
+        })
+    }
+
+    fn set_pinned_for_client(
+        &self,
+        _client_instance_id: &ClientInstanceId,
+        _params: openaide_app_server_protocol::task::TaskSetPinnedParams,
+    ) -> Result<
+        openaide_app_server_protocol::snapshot::TaskSummary,
+        openaide_app_server_protocol::errors::ProtocolError,
+    > {
+        Err(openaide_app_server_protocol::errors::ProtocolError {
+            code: openaide_app_server_protocol::errors::ProtocolErrorCode::Internal,
+            message: "task set pinned unavailable in test gateway".to_string(),
             recoverable: true,
             target: None,
         })
@@ -3096,6 +3112,7 @@ fn client_new_task_record(
         task_version: 1,
         message_history_version: 0,
         unread: false,
+        pinned: false,
         attention: None,
         created_at: "2026-01-01T00:00:00.000Z".to_string(),
         updated_at: "2026-01-01T00:00:00.000Z".to_string(),
@@ -3118,6 +3135,8 @@ fn client_new_task_record(
         config_mutation: Default::default(),
         agent_commands_catalog: None,
         context_usage: None,
+        current_plan: None,
+        completed_plan_message_id: None,
         last_turn_usage: None,
         model_id: None,
         supports_image_input: false,
@@ -3263,6 +3282,7 @@ fn committed_task_update(
                 updated_at: "2026-01-01T00:00:00Z".to_string(),
                 last_activity: "2026-01-01T00:00:00Z".to_string(),
                 unread: false,
+                pinned: false,
                 attention: None,
                 has_messages: true,
                 worktree_id: None,

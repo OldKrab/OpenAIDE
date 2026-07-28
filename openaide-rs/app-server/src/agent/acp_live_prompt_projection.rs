@@ -31,6 +31,7 @@ use crate::agent::{AgentEventSink, AgentSessionEventSink, TurnCancellation};
 use crate::logging;
 use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::AgentMessageRole;
+use crate::protocol::model::{AgentPlan, AgentPlanEntry, AgentPlanPriority, AgentPlanStatus};
 
 #[derive(Clone)]
 pub(super) struct LivePromptProjection {
@@ -227,6 +228,24 @@ impl LivePromptProjection {
                     }),
                 }))?;
             }
+            SessionUpdate::Plan(plan) => {
+                let Some(entries) = plan
+                    .entries
+                    .into_iter()
+                    .map(project_plan_entry)
+                    .collect::<Option<Vec<_>>>()
+                else {
+                    logging::warn(
+                        "acp_plan_update_ignored",
+                        json!({
+                            "agent_id": self.agent_id.as_str(),
+                            "reason": "unsupported plan entry enum value",
+                        }),
+                    );
+                    return Ok(());
+                };
+                self.sink.emit(AgentEvent::Plan(AgentPlan { entries }))?;
+            }
             _ => {}
         }
         Ok(())
@@ -271,6 +290,28 @@ impl LivePromptProjection {
         }
         event
     }
+}
+
+pub(super) fn project_plan_entry(
+    entry: crate::agent::acp_schema::PlanEntry,
+) -> Option<AgentPlanEntry> {
+    let priority = match entry.priority {
+        crate::agent::acp_schema::PlanEntryPriority::High => AgentPlanPriority::High,
+        crate::agent::acp_schema::PlanEntryPriority::Medium => AgentPlanPriority::Medium,
+        crate::agent::acp_schema::PlanEntryPriority::Low => AgentPlanPriority::Low,
+        _ => return None,
+    };
+    let status = match entry.status {
+        crate::agent::acp_schema::PlanEntryStatus::Pending => AgentPlanStatus::Pending,
+        crate::agent::acp_schema::PlanEntryStatus::InProgress => AgentPlanStatus::InProgress,
+        crate::agent::acp_schema::PlanEntryStatus::Completed => AgentPlanStatus::Completed,
+        _ => return None,
+    };
+    Some(AgentPlanEntry {
+        content: entry.content,
+        priority,
+        status,
+    })
 }
 
 struct SessionUpdateEventSink {

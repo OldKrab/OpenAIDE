@@ -55,7 +55,7 @@ export function groupedTasks(
     groups.set(key, group);
   }
   return [...groups.values()].sort((left, right) =>
-    compareInProgressDesc(groupHasInProgress(left), groupHasInProgress(right))
+    compareBooleanDesc(groupHasInProgress(left), groupHasInProgress(right))
     || compareActivityDesc(newestGroupActivity(left), newestGroupActivity(right))
     || left.label.localeCompare(right.label)
     || left.key.localeCompare(right.key),
@@ -81,6 +81,9 @@ export function projectGroupRows(tasks: TaskSummary[], sessions: AgentListedSess
 export function recentVisibleRows(rows: SidebarProjectRow[], maxRows: number, activeRow?: SidebarProjectRow) {
   const visible = rows.slice(0, maxRows);
   if (activeRow && !visible.some((row) => sameProjectGroupRow(row, activeRow))) {
+    if (visible.length === maxRows && visible.every(rowPinned)) {
+      return visible;
+    }
     return [activeRow, ...visible.slice(0, Math.max(0, maxRows - 1))];
   }
   return visible;
@@ -115,8 +118,13 @@ function newestSessionActivity(sessions: AgentListedSession[]) {
 }
 
 function compareProjectGroupRows(left: SidebarProjectRow, right: SidebarProjectRow) {
-  return compareInProgressDesc(rowInProgress(left), rowInProgress(right))
+  return compareBooleanDesc(rowPinned(left), rowPinned(right))
+    || compareBooleanDesc(rowInProgress(left), rowInProgress(right))
     || compareActivityDesc(left.timestamp, right.timestamp);
+}
+
+function rowPinned(row: SidebarProjectRow) {
+  return row.kind === "task" && row.task.pinned;
 }
 
 function groupHasInProgress(group: SidebarProjectGroup) {
@@ -131,7 +139,7 @@ function taskInProgress(task: TaskSummary) {
   return task.status === "active";
 }
 
-function compareInProgressDesc(left: boolean, right: boolean) {
+function compareBooleanDesc(left: boolean, right: boolean) {
   return Number(right) - Number(left);
 }
 
