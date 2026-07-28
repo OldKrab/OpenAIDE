@@ -81,6 +81,107 @@ describe("TaskView follow scroll", () => {
     expect(jumpButtons(tree)).toHaveLength(0);
   });
 
+  it("loads an earlier page when folded Chat does not fill the viewport", async () => {
+    const { TaskView } = await import("./TaskView");
+    const messageList = scrollNode({ clientHeight: 400, scrollHeight: 180 });
+    const taskSnapshot = snapshotWithStreamingText("task-1", "Recent response");
+    taskSnapshot.task.status = "inactive";
+    taskSnapshot.chat.has_before = true;
+    taskSnapshot.chat.start_cursor = "cursor-oldest-loaded";
+    const onLoadChatPage = vi.fn(() => 1);
+
+    act(() => {
+      create(
+        <TaskView
+          {...taskViewProps(taskSnapshot)}
+          onLoadChatPage={onLoadChatPage}
+        />,
+        {
+          createNodeMock: (element) => (
+            (element.props as { className?: string }).className === "message-list" ? messageList : null
+          ),
+        },
+      );
+    });
+
+    expect(onLoadChatPage).toHaveBeenCalledTimes(1);
+    expect(onLoadChatPage).toHaveBeenCalledWith("cursor-oldest-loaded");
+  });
+
+  it("keeps earlier history manual when the rendered Chat already fills the viewport", async () => {
+    const { TaskView } = await import("./TaskView");
+    const messageList = scrollNode({ clientHeight: 400, scrollHeight: 640 });
+    const taskSnapshot = snapshotWithStreamingText("task-1", "Recent response");
+    taskSnapshot.chat.has_before = true;
+    taskSnapshot.chat.start_cursor = "cursor-oldest-loaded";
+    const onLoadChatPage = vi.fn(() => 1);
+
+    act(() => {
+      create(
+        <TaskView
+          {...taskViewProps(taskSnapshot)}
+          onLoadChatPage={onLoadChatPage}
+        />,
+        {
+          createNodeMock: (element) => (
+            (element.props as { className?: string }).className === "message-list" ? messageList : null
+          ),
+        },
+      );
+    });
+
+    expect(onLoadChatPage).not.toHaveBeenCalled();
+  });
+
+  it("bounds automatic history loading when collapsed pages keep Chat underfilled", async () => {
+    const { TaskView } = await import("./TaskView");
+    const messageList = scrollNode({ clientHeight: 400, scrollHeight: 180 });
+    const taskSnapshot = snapshotWithStreamingText("task-1", "Recent response");
+    taskSnapshot.chat.has_before = true;
+    taskSnapshot.chat.start_cursor = "cursor-0";
+    const onLoadChatPage = vi.fn((_beforeCursor: string) => onLoadChatPage.mock.calls.length);
+    let tree!: ReactTestRenderer;
+
+    act(() => {
+      tree = create(
+        <TaskView
+          {...taskViewProps(taskSnapshot)}
+          onLoadChatPage={onLoadChatPage}
+        />,
+        {
+          createNodeMock: (element) => (
+            (element.props as { className?: string }).className === "message-list" ? messageList : null
+          ),
+        },
+      );
+    });
+
+    for (let page = 1; page <= 5; page += 1) {
+      act(() => {
+        tree.update(
+          <TaskView
+            {...taskViewProps(taskSnapshot)}
+            chatPageState={{
+              olderItems: [],
+              hasBefore: true,
+              pending: false,
+              requestGeneration: page,
+              startCursor: `cursor-${page}`,
+            }}
+            onLoadChatPage={onLoadChatPage}
+          />,
+        );
+      });
+    }
+
+    expect(onLoadChatPage.mock.calls.map(([cursor]) => cursor)).toEqual([
+      "cursor-0",
+      "cursor-1",
+      "cursor-2",
+      "cursor-3",
+    ]);
+  });
+
   it("focuses the composer again when the user switches tasks", async () => {
     const { TaskView } = await import("./TaskView");
     const focus = vi.fn();

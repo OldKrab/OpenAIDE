@@ -268,16 +268,19 @@ export function TaskView({
     workspaceRoot: snapshot.task.workspace_root,
     workspaceLabel: workspaceLabel(snapshot.task.workspace_root),
   };
+  const loadChatPage = useCurrentCallback(onLoadChatPage);
   const chatScroll = useTaskChatScroll({
+    beforeCursor: chat.beforeCursor,
+    hasEarlier: chat.hasBefore,
     historySyncState: snapshot.history_sync.state,
     itemCount: chatItems.length,
+    onLoadEarlier: loadChatPage,
     onScrollState: intents.recordScroll,
     pendingPrepend: chat.pending,
     prependRequestGeneration: chatPageState?.requestGeneration ?? 0,
     savedScrollState,
     taskId: snapshot.task.task_id,
   });
-  const loadChatPage = useCurrentCallback(onLoadChatPage);
   const loadToolImagePreview = useCurrentCallback(onLoadToolImagePreview ?? unavailableToolImagePreview);
   const subscribeToolDetail = useCurrentCallback(onSubscribeToolDetail);
   const respondToPermission = useCurrentCallback(onPermissionRespond);

@@ -277,6 +277,8 @@ While an active turn has a live status footer, Frontend shows its elapsed wall t
 
 Protocol-to-view mapping preserves object identity for unchanged Chat items and derived uninterrupted Tool and Thought groups. Task Navigation changes only when a navigation-visible summary field changes. The Chat viewport observes direct row insertion and row size changes; row-level `ResizeObserver`s handle later Markdown, image, request, and Tool-detail reflow.
 
+Task snapshots may contain a bounded Chat tail whose raw Tool and Thought rows collapse into little visible content. On initial presentation, Frontend automatically requests earlier pages while the rendered Chat does not fill the viewport and a bounded automatic-load budget remains. It stops when the viewport is filled, history is exhausted, or that budget is reached; remaining history stays available through **Load earlier**. A failed automatic request is never silently retried against the same cursor.
+
 ### Tool activity and details
 
 The Native Session update consumer owns tool state by Native Session id plus Agent `toolCallId`, merges every accepted `tool_call_update`, and persists it even when no client views the Tool.
