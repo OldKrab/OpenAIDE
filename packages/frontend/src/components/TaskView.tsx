@@ -361,6 +361,7 @@ export function TaskView({
         </div> : null}
         {snapshot.current_plan ? (
           <AgentPlanView
+            key={snapshot.task.task_id}
             plan={snapshot.current_plan}
             taskId={snapshot.task.task_id}
             taskStatus={snapshot.task.status}
