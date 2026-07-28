@@ -221,8 +221,8 @@ test("shows a complete long Task title in a compact hover preview", async ({ pag
   expect(await preview.locator(".task-preview-title").evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
   await expect(titleWrap).toHaveAttribute("data-more-below", "false");
   await expect.poll(() => titleWrap.evaluate((element) => getComputedStyle(element, "::after").opacity)).toBe("0");
-  await expect(preview.getByText("Project", { exact: true })).toBeVisible();
-  await expect(preview.getByText("Location", { exact: true })).toBeVisible();
+  await expect(preview.locator("small").filter({ hasText: /^Project$/ })).toBeVisible();
+  await expect(preview.locator("small").filter({ hasText: /^Location$/ })).toBeVisible();
 });
 
 test("recovers an open Task composer once after client liveness expires", async ({ page }) => {
