@@ -18,10 +18,15 @@ const SHOW_JUMP_TO_LATEST_DISTANCE_PX = 96;
 const HIDE_JUMP_TO_LATEST_DISTANCE_PX = 48;
 const JUMP_TO_LATEST_DURATION_MS = 180;
 const OVERLAY_SCROLLBAR_HIT_WIDTH_PX = 10;
+const AUTO_FILL_HISTORY_BUFFER_PX = 120;
+const MAX_AUTO_FILL_PAGES = 4;
 
 type UseTaskChatScrollOptions = {
+  beforeCursor?: string;
+  hasEarlier: boolean;
   historySyncState?: "idle" | "syncing" | "updated";
   itemCount: number;
+  onLoadEarlier: (beforeCursor: string) => number | undefined;
   onScrollState: (scrollState: TaskChatScrollState) => void;
   pendingPrepend: boolean;
   prependRequestGeneration: number;
@@ -32,14 +37,19 @@ type UseTaskChatScrollOptions = {
 /** Owns the Chat viewport: content follows only until explicit reader input takes control. */
 export function useTaskChatScroll(options: UseTaskChatScrollOptions) {
   const {
+    beforeCursor,
+    hasEarlier,
     historySyncState,
     itemCount,
+    onLoadEarlier,
     onScrollState,
     pendingPrepend,
     prependRequestGeneration,
     savedScrollState,
     taskId,
   } = options;
+  const autoFillPageCountRef = useRef(0);
+  const autoFillCursorRef = useRef<string | undefined>(undefined);
   const messageListRef = useRef<HTMLDivElement | null>(null);
   const historyAnchorRef = useRef<HistoryAnchor | undefined>(undefined);
   const jumpAnimationFrameRef = useRef<number | undefined>(undefined);
@@ -93,6 +103,36 @@ export function useTaskChatScroll(options: UseTaskChatScrollOptions) {
     updateJumpToLatestVisibility(messageList);
   }, [updateJumpToLatestVisibility]);
 
+  const capturePrependAnchor = useCallback((requestGeneration: number) => {
+    const messageList = messageListRef.current;
+    if (!messageList) return;
+    prependAnchorRef.current = {
+      requestGeneration,
+      requestStarted: false,
+      scrollHeight: messageList.scrollHeight,
+      scrollTop: messageList.scrollTop,
+    };
+  }, []);
+
+  const autoLoadEarlierIfUnderfilled = useCallback((messageList: HTMLDivElement) => {
+    if (
+      !hasEarlier
+      || !beforeCursor
+      || pendingPrepend
+      || messageList.clientHeight <= 0
+      || messageList.scrollHeight >= messageList.clientHeight + AUTO_FILL_HISTORY_BUFFER_PX
+      || autoFillPageCountRef.current >= MAX_AUTO_FILL_PAGES
+      || autoFillCursorRef.current === beforeCursor
+    ) return;
+
+    // One cursor gets one automatic attempt. A failed request remains explicitly retryable
+    // through Load earlier instead of silently looping against the same page.
+    autoFillCursorRef.current = beforeCursor;
+    autoFillPageCountRef.current += 1;
+    const requestGeneration = onLoadEarlier(beforeCursor);
+    if (requestGeneration !== undefined) capturePrependAnchor(requestGeneration);
+  }, [beforeCursor, capturePrependAnchor, hasEarlier, onLoadEarlier, pendingPrepend]);
+
   const refreshPendingPrependBaseline = useCallback((messageList: HTMLDivElement) => {
     const anchor = prependAnchorRef.current;
     if (
@@ -126,6 +166,8 @@ export function useTaskChatScroll(options: UseTaskChatScrollOptions) {
     pointerGestureRef.current = undefined;
     prependAnchorRef.current = undefined;
     scrollIntentRef.current = undefined;
+    autoFillCursorRef.current = undefined;
+    autoFillPageCountRef.current = 0;
 
     scrollOwnershipRef.current = savedScrollState?.ownership ?? "following";
     messageList.scrollTop = savedScrollState?.scrollTop ?? messageList.scrollHeight;
@@ -137,6 +179,8 @@ export function useTaskChatScroll(options: UseTaskChatScrollOptions) {
       pointerGestureRef.current = undefined;
       prependAnchorRef.current = undefined;
       scrollIntentRef.current = undefined;
+      autoFillCursorRef.current = undefined;
+      autoFillPageCountRef.current = 0;
     };
   }, [cancelJumpAnimation, reconcileViewport, taskId]);
 
@@ -189,6 +233,7 @@ export function useTaskChatScroll(options: UseTaskChatScrollOptions) {
       reconcileViewport(messageList);
       refreshHistorySyncBaseline(messageList);
       refreshPendingPrependBaseline(messageList);
+      autoLoadEarlierIfUnderfilled(messageList);
     };
     const resizeObserver = new ResizeObserver(onResize);
     const observedChildren = new Set<Element>();
@@ -223,7 +268,13 @@ export function useTaskChatScroll(options: UseTaskChatScrollOptions) {
       mutationObserver?.disconnect();
       resizeObserver.disconnect();
     };
-  }, [reconcileViewport, refreshHistorySyncBaseline, refreshPendingPrependBaseline, taskId]);
+  }, [
+    autoLoadEarlierIfUnderfilled,
+    reconcileViewport,
+    refreshHistorySyncBaseline,
+    refreshPendingPrependBaseline,
+    taskId,
+  ]);
 
   useLayoutEffect(() => {
     const messageList = messageListRef.current;
@@ -282,6 +333,13 @@ export function useTaskChatScroll(options: UseTaskChatScrollOptions) {
     const messageList = messageListRef.current;
     if (messageList) reconcileViewport(messageList);
   });
+
+  // Visible height, rather than raw stored-row count, decides whether the initial
+  // folded Chat contains enough history to orient the reader.
+  useLayoutEffect(() => {
+    const messageList = messageListRef.current;
+    if (messageList) autoLoadEarlierIfUnderfilled(messageList);
+  }, [autoLoadEarlierIfUnderfilled, itemCount]);
 
   const onScroll = useCallback((event: UIEvent<HTMLDivElement>) => {
     const messageList = event.currentTarget;
@@ -364,17 +422,6 @@ export function useTaskChatScroll(options: UseTaskChatScrollOptions) {
     cancelJumpAnimation();
     setScrollOwnership("reading");
   }, [cancelJumpAnimation, setScrollOwnership]);
-
-  const capturePrependAnchor = useCallback((requestGeneration: number) => {
-    const messageList = messageListRef.current;
-    if (!messageList) return;
-    prependAnchorRef.current = {
-      requestGeneration,
-      requestStarted: false,
-      scrollHeight: messageList.scrollHeight,
-      scrollTop: messageList.scrollTop,
-    };
-  }, []);
 
   const jumpToLatest = useCallback(() => {
     const messageList = messageListRef.current;

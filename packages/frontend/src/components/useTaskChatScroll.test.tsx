@@ -739,8 +739,10 @@ function Harness({
     task_1: { ownership: "following", scrollTop: 1000 },
   });
   const chatScroll = useTaskChatScroll({
+    hasEarlier: false,
     historySyncState,
     itemCount,
+    onLoadEarlier: () => undefined,
     onScrollState: (scrollState) => setSavedScrollStates((current) => ({
       ...current,
       [taskId]: scrollState,
