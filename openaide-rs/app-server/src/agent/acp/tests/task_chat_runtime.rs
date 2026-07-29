@@ -76,6 +76,62 @@ fn live_acp_message_ids_create_separate_chat_messages() {
 }
 
 #[test]
+fn one_acp_message_id_can_cross_visible_and_thought_channels() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((api, store, workspace_root)) =
+        task_chat_fixture(&temp, "shared_message_id_across_channels")
+    else {
+        return;
+    };
+    let created = api
+        .create_for_test(TaskAcquireParams {
+            project_id: project_id_for_workspace(&workspace_root),
+            agent_id: AgentId::from("codex"),
+            workspace_root: None,
+        })
+        .expect("create task");
+    let task_id = created.task.task_id;
+    wait_until(|| {
+        matches!(
+            store
+                .read_task(task_id.as_str())
+                .map(|task| task.preparation),
+            Ok(TaskPreparationRecord::Ready)
+        )
+    });
+
+    for prompt in ["first prompt", "second prompt"] {
+        api.send(send_params(&task_id, prompt))
+            .expect("send prompt");
+        wait_until(|| {
+            store
+                .read_task(task_id.as_str())
+                .map(|task| task.status == TaskStatus::Inactive)
+                .unwrap_or(false)
+        });
+    }
+
+    assert_eq!(
+        logical_text_messages(&store, &task_id),
+        [
+            ("user", "first prompt".to_string()),
+            (
+                "agent",
+                "Visible before thoughtVisible after thought".to_string()
+            ),
+            ("thought", "Private thought".to_string()),
+            ("user", "second prompt".to_string()),
+            (
+                "agent",
+                "Visible before thoughtVisible after thought".to_string()
+            ),
+            ("thought", "Private thought".to_string()),
+        ]
+    );
+    api.shutdown().expect("shutdown task runtime");
+}
+
+#[test]
 fn acp_usage_is_published_in_the_authoritative_task_snapshot() {
     let temp = tempfile::TempDir::new().expect("temp dir");
     let Some((api, store, workspace_root)) = task_chat_fixture(&temp, "usage") else {
@@ -769,6 +825,11 @@ for line in sys.stdin:
                 {"content": "Temporary step", "priority": "medium", "status": "in_progress"},
             ])
             update_plan([])
+        elif mode == "shared_message_id_across_channels":
+            message_id = f"shared-message-{prompt_count}"
+            update_chunk("agent_message_chunk", "Visible before thought", message_id)
+            update_chunk("agent_thought_chunk", "Private thought", message_id)
+            update_chunk("agent_message_chunk", "Visible after thought", message_id)
         else:
             update_chunk("agent_message_chunk", "Commentary ", "11111111-1111-4111-8111-111111111111")
             update_chunk("agent_message_chunk", "message", "11111111-1111-4111-8111-111111111111")
