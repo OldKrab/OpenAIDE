@@ -39,36 +39,26 @@ export function activitySummary(activity: ActivityMessage) {
     const kind = classifyStep(first);
     if (kind !== "other") return countLabel(kind, 1, true) ?? humanizeToolName(activity.title);
   }
-  if (first?.kind === "subagent") {
-    if (first.activity === "started" || first.activity === "interacted") {
-      return countLabel(classifyStep(first), 1, true) ?? "Subagent activity";
-    }
-    if (first.title) return "Subagent activity";
-    return `Delegated to ${subagentName(first.name)}`;
-  }
-  if (first?.kind === "tool" && first.name === "collaboration") return "Wait for subagents";
   if (first && first.kind !== "text") {
-    return countLabel(classifyStep(first, activity.title), 1, true) ?? humanizeToolName(activity.title);
+    return summarizeKinds(classifyStepKinds(first, activity.title)) ?? humanizeToolName(activity.title);
   }
   return humanizeToolName(activity.title);
 }
 
 function groupedActivitySummary(activity: ActivityMessage) {
-  const kinds = activity.steps.map((step) => classifyStep(step));
-  const subagentKinds = new Set(kinds.filter(isSubagentSummaryKind));
-  const collapseSubagentActions = subagentKinds.size > 1;
+  return summarizeKinds(activity.steps.flatMap((step) => classifyStepKinds(step))) ?? humanizeToolName(activity.title);
+}
+
+function summarizeKinds(kinds: ActivitySummaryKind[]) {
   const counts = new Map<ActivitySummaryKind, number>();
-  for (const classifiedKind of kinds) {
-    const kind = collapseSubagentActions && isSubagentSummaryKind(classifiedKind)
-      ? "subagentAction"
-      : classifiedKind;
+  for (const kind of kinds) {
     counts.set(kind, (counts.get(kind) ?? 0) + 1);
   }
   const parts = Array.from(counts, ([kind, count], index) => countLabel(kind, count, index === 0)).filter(
     (part): part is string => part !== undefined,
   );
 
-  return parts.join(", ");
+  return parts.length ? parts.join(", ") : undefined;
 }
 
 export function activityStatusLabel(status: ActivityMessage["status"]) {
@@ -268,43 +258,31 @@ export function activityStepPreview(step: ActivityStep) {
 
 type ActivitySummaryKind =
   | "thought"
-  | "skill"
   | "read"
   | "edit"
   | "delete"
-  | "move"
   | "run"
   | "search"
-  | "inspect"
-  | "list"
-  | "fetch"
-  | "thinkTool"
-  | "switchMode"
-  | "terminalInput"
-  | "collaboration"
-  | "subagent"
-  | "subagentStarted"
-  | "subagentInteracted"
-  | "subagentAction"
+  | "subagentInteraction"
   | "other";
-
-function isSubagentSummaryKind(kind: ActivitySummaryKind) {
-  return kind === "collaboration"
-    || kind === "subagent"
-    || kind === "subagentStarted"
-    || kind === "subagentInteracted";
-}
 
 function classifyStep(step: ActivityStep, legacyToolName?: string): ActivitySummaryKind {
   if (step.kind === "thought") return "thought";
   if (step.kind === "command") return "run";
   if (step.kind === "text") return classifyTextStep(step.text);
-  if (step.kind === "subagent") {
-    if (step.activity === "started") return "subagentStarted";
-    if (step.activity === "interacted") return "subagentInteracted";
-    return "subagent";
-  }
+  if (step.kind === "subagent") return "subagentInteraction";
   return summaryKindForTool(activityToolKind(step, legacyToolName));
+}
+
+/** Expands composite Tool presentation into the real actions shown in the group summary. */
+function classifyStepKinds(step: ActivityStep, legacyToolName?: string): ActivitySummaryKind[] {
+  if (step.kind !== "tool" || !step.presentation || presentationKind(step.presentation) !== "inspect") {
+    return [classifyStep(step, legacyToolName)];
+  }
+  const kinds = step.presentation.actions.map((action) =>
+    summaryKindForTool(action.kind === "view" ? "read" : action.kind)
+  );
+  return kinds.length ? kinds : ["other"];
 }
 
 /**
@@ -352,11 +330,17 @@ export function activityToolKind(
 }
 
 function summaryKindForTool(kind: ActivityToolKind): ActivitySummaryKind {
+  if (kind === "collaboration") return "subagentInteraction";
+  if (kind === "skill") return "other";
   if (kind === "web_search") return "search";
+  if (kind === "move") return "edit";
   if (kind === "execute") return "run";
-  if (kind === "think") return "thinkTool";
-  if (kind === "switch_mode") return "switchMode";
-  if (kind === "terminal_input") return "terminalInput";
+  if (kind === "think") return "thought";
+  if (kind === "fetch") return "search";
+  if (kind === "list") return "search";
+  if (kind === "switch_mode") return "other";
+  if (kind === "terminal_input") return "other";
+  if (kind === "inspect") return "other";
   return kind;
 }
 
@@ -365,7 +349,7 @@ function classifyTextStep(text: string): ActivitySummaryKind {
   if (/\bread(?:ing)?\b|\bread file\b|\bopened file\b/.test(value)) return "read";
   if (/\b(edit|edits|edited|editing|update|updates|updated|updating|write|writes|wrote|writing|create|creates|created|creating|patch|patches|patched|patching)\b/.test(value)) return "edit";
   if (/\b(search|searches|searched|searching|grep|rg|find)\b/.test(value)) return "search";
-  if (/\b(fetch|fetches|fetched|fetching|open(?:ed|ing)? (?:page|url)|url|https?:\/\/)\b/.test(value)) return "fetch";
+  if (/\b(fetch|fetches|fetched|fetching|open(?:ed|ing)? (?:page|url)|url|https?:\/\/)\b/.test(value)) return "search";
   if (/\b(exec|execute|executed|executing|command|shell|bash|terminal)\b|\/bin\/(?:ba|z)?sh\b|\bnpm\b|\bgit\b/.test(value)) return "run";
   return "other";
 }
@@ -383,29 +367,17 @@ function countLabel(kind: ActivitySummaryKind, count: number, sentenceStart: boo
   if (count === 0) return undefined;
   const labels: Record<ActivitySummaryKind, { verb?: string; single: string; plural: string }> = {
     thought: { single: "thought", plural: "thoughts" },
-    skill: { verb: "activated", single: "skill", plural: "skills" },
     read: { verb: "read", single: "file", plural: "files" },
     edit: { verb: "updated", single: "file", plural: "files" },
     delete: { verb: "deleted", single: "file", plural: "files" },
-    move: { verb: "moved", single: "file", plural: "files" },
     run: { verb: "ran", single: "command", plural: "commands" },
     search: { verb: "ran", single: "search", plural: "searches" },
-    inspect: { verb: "inspected", single: "files", plural: "file groups" },
-    list: { verb: "listed", single: "directory", plural: "directories" },
-    fetch: { verb: "fetched", single: "resource", plural: "resources" },
-    thinkTool: { verb: "used", single: "reasoning tool", plural: "reasoning tools" },
-    switchMode: { verb: "switched", single: "mode", plural: "modes" },
-    terminalInput: { verb: "sent", single: "terminal input", plural: "terminal inputs" },
-    collaboration: { verb: "coordinated", single: "subagent", plural: "subagents" },
-    subagent: { verb: "delegated to", single: "subagent", plural: "subagents" },
-    subagentStarted: { verb: "started", single: "subagent", plural: "subagents" },
-    subagentInteracted: { verb: "interacted with", single: "subagent", plural: "subagents" },
-    subagentAction: { single: "subagent action", plural: "subagent actions" },
+    subagentInteraction: { single: "subagent interaction", plural: "subagent interactions" },
     other: { verb: "called", single: "tool", plural: "tools" },
   };
   const label = labels[kind];
-  if (kind === "subagentAction") {
-    const phrase = count === 1 ? label.single : `${count} ${label.plural}`;
+  if (kind === "subagentInteraction") {
+    const phrase = count === 1 ? "interacted with subagent" : `${count} ${label.plural}`;
     return sentenceStart ? capitalize(phrase) : phrase;
   }
   if (kind === "thought") {
