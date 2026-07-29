@@ -62,6 +62,26 @@ describe("VS Code Task notifications", () => {
     expect(test.notifications[0]?.message).toBe("Task finished: Review the implementation");
   });
 
+  it("keeps Agent output from expanding a Task notification", async () => {
+    const test = environment(Date.parse("2026-07-20T12:00:00.000Z"), "task-2");
+    const manager = createTaskNotificationManager(test.environment);
+    const completed = task("verbose-title", "finished", "2026-07-20T12:00:01.000Z");
+    const fullTitle = "Investigate what happened on Windows\n"
+      + "and whose changes caused the test failures: "
+      + "FAILED ".repeat(20);
+    completed.title = { value: fullTitle };
+
+    manager.reconcile([]);
+    manager.reconcile([completed]);
+
+    expect(test.notifications[0]?.message).toBe(
+      "Task finished: Investigate what happened on Windows and whose changes caused the test failures…",
+    );
+    test.resolveNotification("Open Task");
+    await Promise.resolve();
+    expect(test.openTask).toHaveBeenCalledWith("task-1", fullTitle.trim());
+  });
+
   it("accepts App Server epoch-millisecond attention timestamps", () => {
     const test = environment(1_784_505_208_000, "task-2");
     const manager = createTaskNotificationManager(test.environment);

@@ -2,6 +2,7 @@ import type { TaskAttentionReason, TaskSummary } from "@openaide/app-server-clie
 
 const OPEN_TASK_ACTION = "Open Task";
 const MAX_HANDLED_EVENTS = 500;
+const MAX_NOTIFICATION_TASK_TITLE_LENGTH = 80;
 
 export type TaskNotificationEnvironment = {
   now(): number;
@@ -64,7 +65,7 @@ export function createTaskNotificationManager(
 
     const title = task.title?.value.trim() || "Untitled task";
     void environment.showNotification(
-      attentionMessage(attention.reason, title),
+      attentionMessage(attention.reason, notificationTaskTitle(title)),
       OPEN_TASK_ACTION,
     ).then((selection) => {
       if (!disposed && selection === OPEN_TASK_ACTION) {
@@ -145,4 +146,12 @@ function attentionMessage(reason: TaskAttentionReason, title: string) {
     case "failed":
       return `Task failed: ${title}`;
   }
+}
+
+/** Keeps untrusted Agent titles from turning a compact workbench toast into an output panel. */
+function notificationTaskTitle(title: string) {
+  const normalized = title.split(/\s+/u).join(" ");
+  const characters = [...normalized];
+  if (characters.length <= MAX_NOTIFICATION_TASK_TITLE_LENGTH) return normalized;
+  return `${characters.slice(0, MAX_NOTIFICATION_TASK_TITLE_LENGTH - 1).join("").trimEnd()}…`;
 }
