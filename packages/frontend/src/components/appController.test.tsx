@@ -587,6 +587,41 @@ describe("app controller mounted lifecycle", () => {
     expect(latestController?.state.settings.activeTab).toBe("skills");
   });
 
+  it("selects the Settings tab requested by an in-app route change", async () => {
+    const request = vi.fn(async (method: string) => {
+      if (method === SETTINGS_GET_MCP_SERVERS) {
+        return { generatedAt: "mcp-now", availability: "unavailable", servers: [] };
+      }
+      if (method === SETTINGS_GET_SKILLS) {
+        return { generatedAt: "skills-now", availability: "unavailable", skills: [] };
+      }
+      if (method === SETTINGS_GET_AGENT_DETAILS) return { generatedAt: "now", agents: [] };
+      return { revision: 1, tasks: [] };
+    });
+    backendConnection = {
+      initialize: vi.fn(async () => ({ snapshot: clientSnapshot({ includeActiveTask: false }) })),
+      request: request as unknown as BackendConnection["request"],
+      close: vi.fn(),
+    };
+    bootstrap = webTaskBootstrap();
+
+    await act(async () => {
+      create(<ControllerProbe />);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      webRouteListeners[0]?.(webSettingsBootstrap("worktrees"));
+      await Promise.resolve();
+    });
+
+    expect(latestController?.bootstrap.surface).toBe("settings");
+    if (latestController?.bootstrap.surface !== "settings") throw new Error("expected Settings bootstrap");
+    expect(latestController.bootstrap.settingsTab).toBe("worktrees");
+    expect(latestController?.state.settings.activeTab).toBe("worktrees");
+  });
+
   it("switches web routes without reinitializing the App Server connection", async () => {
     const initialize = vi.fn(async () => ({ snapshot: clientSnapshot({ includeActiveTask: false }) }));
     const request = vi.fn(async (method: string) => {

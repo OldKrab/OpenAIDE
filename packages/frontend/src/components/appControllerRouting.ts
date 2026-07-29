@@ -27,6 +27,14 @@ export function useRoutedBootstrap(
         nextBootstrap.surface === "navigation" ? nextBootstrap.archived === true : undefined,
       );
       setBootstrap(nextBootstrap);
+      if (nextBootstrap.surface === "settings") {
+        // App Shell route changes must update the live Settings selection just as
+        // initial bootstrap does; otherwise the URL and rendered tab diverge.
+        if (nextBootstrap.settingsTab) {
+          dispatch({ type: "settings:tab", tab: nextBootstrap.settingsTab });
+        }
+        return;
+      }
       if (nextBootstrap.surface !== "task") return;
       if (nextBootstrap.taskId) {
         dispatch({ type: "selection:set", taskId: nextBootstrap.taskId });
