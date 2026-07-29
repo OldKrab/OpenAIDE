@@ -523,7 +523,7 @@ describe("webview messaging composer routes", () => {
     expect(posted).toEqual([]);
   });
 
-  it("rejects expanded tool paths outside the workspace", async () => {
+  it("opens explicitly clicked paths outside the workspace", async () => {
     const posted: unknown[] = [];
 
     await handleWebviewMessage(
@@ -531,11 +531,12 @@ describe("webview messaging composer routes", () => {
       context({}, posted),
     );
 
-    expect(vscode.workspace.openTextDocument).not.toHaveBeenCalled();
-    expect(posted[0]).toMatchObject({
-      type: "runtime.error",
-      payload: { action: "tool.openPath" },
+    expect(vscode.workspace.openTextDocument).toHaveBeenCalledWith({ fsPath: "/tmp/secret.txt" });
+    expect(vscode.window.showTextDocument).toHaveBeenCalledWith(undefined, {
+      preview: true,
+      selection: undefined,
     });
+    expect(posted).toEqual([]);
   });
 
   it("resolves worktree folders through the App Server before revealing them", async () => {
