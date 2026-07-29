@@ -178,12 +178,8 @@ impl LocalHttpAppHandler {
         path: String,
         label: String,
     ) -> LocalHttpResponse {
-        let safe_label = std::path::Path::new(&label)
-            .file_name()
-            .and_then(|value| value.to_str())
-            .filter(|value| !value.is_empty())
-            .unwrap_or("Attached file")
-            .to_string();
+        let safe_label =
+            crate::protocol_edge::local_http::file_upload::safe_upload_file_name(&label);
         match self.probe.gateway.create_uploaded_file_reference(
             client_instance_id,
             TaskId::from(task_id),
