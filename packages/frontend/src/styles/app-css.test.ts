@@ -288,6 +288,9 @@ describe("task list row styles", () => {
       /\.activity-step-semantic-subject-list\.identity\s*{[^}]*flex:\s*0 0 auto;[^}]*max-width:\s*24ch;/,
     );
     expect(appCss).toMatch(
+      /\.activity-step-semantic-subject-list\.resource\s*{[^}]*flex:\s*0 0 auto;[^}]*max-width:\s*28ch;/,
+    );
+    expect(appCss).toMatch(
       /\.activity-step-semantic-subject-list\.technical\s*{[^}]*flex:\s*1 8 auto;[^}]*min-width:\s*6ch;/,
     );
     expect(appCss).toMatch(

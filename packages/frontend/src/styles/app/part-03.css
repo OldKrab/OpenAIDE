@@ -396,6 +396,11 @@
   max-width: 24ch;
 }
 
+.activity-step-semantic-subject-list.resource {
+  flex: 0 0 auto;
+  max-width: 28ch;
+}
+
 .activity-step-semantic-subject-list.technical {
   flex: 1 8 auto;
   min-width: 6ch;
