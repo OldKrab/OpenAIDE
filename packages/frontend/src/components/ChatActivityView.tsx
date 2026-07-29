@@ -433,7 +433,11 @@ function SemanticStepTitle({ title }: { title: ActivityStepSemanticTitle }) {
           <span
             className={[
               "activity-step-semantic-subject-list",
-              action.action === "Activated" ? "identity" : "technical",
+              action.action === "Activated"
+                ? "identity"
+                : action.action === "Read" || action.action === "View"
+                  ? "resource"
+                  : "technical",
             ].join(" ")}
           >
             {action.subjects.map((subject, subjectIndex) => (

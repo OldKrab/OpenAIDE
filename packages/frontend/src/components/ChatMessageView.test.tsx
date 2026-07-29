@@ -1061,7 +1061,7 @@ describe("ChatRow", () => {
     );
 
     expect(html).toContain('class="activity-step-semantic-action">Read</span>');
-    expect(html).toContain('class="activity-step-semantic-subject-list technical">');
+    expect(html).toContain('class="activity-step-semantic-subject-list resource">');
     expect(html).toContain('class="activity-step-semantic-subject">acp_session_worker.rs</span>');
     expect(html).toContain('class="activity-step-semantic-connector"> and </span>');
     expect(html).toContain('class="activity-step-semantic-subject">prompt_start.rs</span>');
@@ -1158,6 +1158,54 @@ describe("ChatRow", () => {
       'title="Activated diagnosing-bugs skill; '
       + 'Search “parse.*command|command.*parse|shell.*parser|ParsedCommand|parse_command” in workspace"',
     );
+  });
+
+  it("compacts repeated reads around a search without losing the ordered tooltip", async () => {
+    const { ActivityStepRow } = await import("./ChatActivityView");
+    const command = "/usr/bin/zsh -lc \"sed -n '180,230p' crates/core/src/agent/loop_/layer/layer.rs; rg -n \\\"struct AgentDecision|enum AgentDecision|force_continue|add_messages\\\" crates/core/src/agent/loop_ -g '*.rs' | head -100; sed -n '1,130p' crates/core/src/agent/loop_/layer/hooks/mod.rs; sed -n '760,900p' crates/core/src/agent/loop_/layer/layer.rs\"";
+    const html = renderToStaticMarkup(
+      ActivityStepRow({
+        step: {
+          kind: "tool",
+          name: "execute",
+          status: "completed",
+          presentation: {
+            actions: [
+              { kind: "read", subjects: ["layer.rs"] },
+              {
+                kind: "search",
+                query: "struct AgentDecision|enum AgentDecision|force_continue|add_messages",
+                scopes: ["crates/core/src/agent/loop_"],
+                target: "contents",
+              },
+              { kind: "read", subjects: ["mod.rs", "layer.rs"] },
+            ],
+          },
+          details: {
+            locations: [],
+            content: [],
+            input: input({ command: [command], cwd: "/workspace/project" }),
+          },
+          input_summary: command,
+        },
+        taskId: "task_1",
+      }),
+    );
+
+    expect(html.match(/class="activity-step-semantic-action">Read<\/span>/g)).toHaveLength(1);
+    expect(html).toContain(
+      'class="activity-step-semantic-subject-list resource">'
+      + '<span class="activity-step-semantic-subject">layer.rs</span>'
+      + '<span class="activity-step-semantic-connector"> and </span>'
+      + '<span class="activity-step-semantic-subject">mod.rs</span>',
+    );
+    expect(html).toContain(
+      'title="Read layer.rs; '
+      + 'Search “struct AgentDecision|enum AgentDecision|force_continue|add_messages” '
+      + 'in crates/core/src/agent/loop_; Read mod.rs and layer.rs"',
+    );
+    expect(html).not.toContain('class="activity-step-context"');
+    expect(html).not.toContain("/workspace/project");
   });
 
   it("renders a proven path pipeline as a file-name search with the Search icon", async () => {

@@ -1,6 +1,7 @@
 import type { ActivityStep } from "@openaide/app-shell-contracts";
 
 type ToolPresentation = NonNullable<Extract<ActivityStep, { kind: "tool" }>["presentation"]>;
+type ToolPresentationAction = ToolPresentation["actions"][number];
 
 export type ActivityStepSemanticTitle = {
   actions: ActivityStepSemanticAction[];
@@ -20,51 +21,87 @@ export type PresentationDisplayKind =
 export function presentationSemanticTitle(
   presentation: ToolPresentation,
 ): ActivityStepSemanticTitle | undefined {
-  const compactActions: ActivityStepSemanticAction[] = [];
-  const fullActions: ActivityStepSemanticAction[] = [];
-
-  for (const action of presentation.actions) {
-    if (action.kind === "search") {
-      const query = action.query.trim();
-      if (!query) return undefined;
-      const scopes = action.scopes.map(displayWorkspace).filter(Boolean);
-      const compactScopes = shortestUniqueSuffixes(scopes);
-      const label = action.target === "paths" ? "Search file names for" : "Search";
-      compactActions.push({
-        action: label,
-        subjects: [`“${query}”`],
-        ...(compactScopes.length ? { scope: naturalJoin(compactScopes) } : {}),
-      });
-      fullActions.push({
-        action: label,
-        subjects: [`“${query}”`],
-        ...(scopes.length ? { scope: naturalJoin(scopes) } : {}),
-      });
-      continue;
-    }
-
-    const mixedSkill = action.kind === "skill" && presentation.actions.length > 1;
-    if (!mixedSkill && action.kind !== "read" && action.kind !== "view") return undefined;
-    const subjects = action.subjects.map((subject) => subject.trim()).filter(Boolean);
-    if (!subjects.length) return undefined;
-    const verb = mixedSkill ? "Activated" : action.kind === "view" ? "View" : "Read";
-    compactActions.push({
-      action: verb,
-      subjects: mixedSkill
-        ? appendSkillNoun(summarizeSubjects(subjects), subjects.length)
-        : summarizeSubjects(subjects),
-    });
-    fullActions.push({
-      action: verb,
-      subjects: mixedSkill ? appendSkillNoun(subjects, subjects.length) : subjects,
-    });
-  }
-
-  if (compactActions.length !== presentation.actions.length) return undefined;
+  const fullActions = semanticPresentationActions(
+    presentation.actions,
+    presentation.actions.length,
+    false,
+  );
+  const compactActions = semanticPresentationActions(
+    compactPresentationActions(presentation.actions),
+    presentation.actions.length,
+    true,
+  );
+  if (!fullActions || !compactActions) return undefined;
   return {
     actions: compactActions,
     tooltip: semanticTitleText({ actions: fullActions, tooltip: "" }),
   };
+}
+
+function semanticPresentationActions(
+  actions: ToolPresentationAction[],
+  presentationActionCount: number,
+  compact: boolean,
+) {
+  const semanticActions: ActivityStepSemanticAction[] = [];
+  for (const action of actions) {
+    const semanticAction = semanticPresentationAction(action, presentationActionCount, compact);
+    if (!semanticAction) return undefined;
+    semanticActions.push(semanticAction);
+  }
+  return semanticActions;
+}
+
+function semanticPresentationAction(
+  action: ToolPresentationAction,
+  presentationActionCount: number,
+  compact: boolean,
+): ActivityStepSemanticAction | undefined {
+  if (action.kind === "search") {
+    const query = action.query.trim();
+    if (!query) return undefined;
+    const scopes = action.scopes.map(displayWorkspace).filter(Boolean);
+    const visibleScopes = compact ? shortestUniqueSuffixes(scopes) : scopes;
+    return {
+      action: action.target === "paths" ? "Search file names for" : "Search",
+      subjects: [`“${query}”`],
+      ...(visibleScopes.length ? { scope: naturalJoin(visibleScopes) } : {}),
+    };
+  }
+
+  const mixedSkill = action.kind === "skill" && presentationActionCount > 1;
+  if (!mixedSkill && action.kind !== "read" && action.kind !== "view") return undefined;
+  const subjects = action.subjects.map((subject) => subject.trim()).filter(Boolean);
+  if (!subjects.length) return undefined;
+  const visibleSubjects = compact ? summarizeSubjects(subjects) : subjects;
+  return {
+    action: mixedSkill ? "Activated" : action.kind === "view" ? "View" : "Read",
+    subjects: mixedSkill
+      ? appendSkillNoun(visibleSubjects, subjects.length)
+      : visibleSubjects,
+  };
+}
+
+/** Compact chrome groups repeated file operations; the tooltip retains protocol order. */
+function compactPresentationActions(actions: ToolPresentationAction[]) {
+  const compacted: ToolPresentationAction[] = [];
+  for (const action of actions) {
+    if (action.kind !== "read" && action.kind !== "view") {
+      compacted.push(action);
+      continue;
+    }
+    const existing = compacted.find((candidate) => candidate.kind === action.kind);
+    if (existing?.kind === action.kind && "subjects" in existing) {
+      existing.subjects = orderedUnique([...existing.subjects, ...action.subjects]);
+      continue;
+    }
+    compacted.push({ ...action, subjects: [...action.subjects] });
+  }
+  return compacted;
+}
+
+function orderedUnique(subjects: string[]) {
+  return subjects.filter((subject, index) => subjects.indexOf(subject) === index);
 }
 
 export function presentationKind(presentation: ToolPresentation): PresentationDisplayKind {

@@ -229,11 +229,12 @@ export function activityStepContext(step: ActivityStep) {
     return parents.length ? parents.join(" › ") : undefined;
   }
   if (step.kind !== "tool") return undefined;
-  const input = step.details?.input;
-  if (step.name === "search") {
+  // Structured presentation already owns user-facing scope; raw cwd would
+  // duplicate it and steal width from the semantic title.
+  if (step.presentation || step.name === "search") {
     return undefined;
   }
-  return input?.cwd;
+  return step.details?.input?.cwd;
 }
 
 export function activityStepStatus(step: ActivityStep) {
