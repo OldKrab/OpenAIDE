@@ -48,6 +48,26 @@ fn task_title_persists_automatic_title_state() {
 }
 
 #[test]
+fn agent_task_titles_collapse_output_and_stay_within_the_product_limit() {
+    let noisy_output = format!(
+        "Investigate the failure\n\n{}\nFAILED test",
+        "x".repeat(240),
+    );
+
+    let title = crate::storage::records::TaskTitle::new(
+        noisy_output,
+        crate::storage::records::TaskTitleSource::Agent,
+    )
+    .unwrap();
+
+    assert_eq!(title.value().chars().count(), 200);
+    assert_eq!(
+        title.value(),
+        format!("Investigate the failure {}...", "x".repeat(173)),
+    );
+}
+
+#[test]
 fn task_composer_history_survives_store_reopen() {
     let dir = tempfile::tempdir().unwrap();
     let state_root = dir.path().to_path_buf();

@@ -4,13 +4,11 @@ use openaide_app_server_protocol::snapshot::TaskSummary;
 use openaide_app_server_protocol::task::{TaskSetTitleParams, TaskTitleSelection};
 
 use crate::snapshots::project_task_summary;
-use crate::storage::records::TaskLifecycle;
+use crate::storage::records::{TaskLifecycle, MAX_TASK_TITLE_CHARS};
 use crate::tasks::mutation::{TaskCommitOptions, TaskCommitOutcome, TaskMutationResult};
 use crate::time::now_string;
 
 use super::{conflict_error, protocol_error_from_runtime, validation_error, TaskProductApi};
-
-const MAX_USER_TITLE_CHARS: usize = 200;
 
 impl TaskProductApi {
     pub(super) fn set_task_title(
@@ -80,7 +78,7 @@ fn normalize_selection(selection: TaskTitleSelection) -> Result<TaskTitleSelecti
     if value.is_empty() {
         return Err(validation_error("title.value", "Task title is required"));
     }
-    if value.chars().count() > MAX_USER_TITLE_CHARS {
+    if value.chars().count() > MAX_TASK_TITLE_CHARS {
         return Err(validation_error(
             "title.value",
             "Task title must be 200 characters or fewer",
