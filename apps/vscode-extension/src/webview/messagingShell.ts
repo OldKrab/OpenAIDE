@@ -17,7 +17,6 @@ import {
   type WorktreeRepositoryId,
 } from "@openaide/app-server-client";
 import type { WebviewToHostMessage } from "@openaide/app-shell-contracts";
-import { validatedWorkspacePath } from "../runtime/workspaceBoundary";
 import { workspaceRoots } from "../workspace/roots";
 import type { MessageContext } from "./messagingContext";
 import { isObject } from "./messagingFields";
@@ -146,7 +145,9 @@ export async function routeHostCapabilityCommand(message: WebviewToHostMessage, 
   if (message.type === "tool.openPath" && isObject(message.payload)) {
     const path = typeof message.payload.path === "string" ? message.payload.path : "";
     const line = typeof message.payload.line === "number" && message.payload.line > 0 ? message.payload.line : undefined;
-    const document = await vscode.workspace.openTextDocument(vscode.Uri.file(await validatedWorkspacePath(path, "existing")));
+    if (!nodePath.isAbsolute(path)) throw new Error("path must be absolute");
+    // This user-triggered reveal may open any host file; ACP filesystem operations keep their workspace boundary.
+    const document = await vscode.workspace.openTextDocument(vscode.Uri.file(path));
     await vscode.window.showTextDocument(document, {
       preview: true,
       selection: line ? new vscode.Range(line - 1, 0, line - 1, 0) : undefined,

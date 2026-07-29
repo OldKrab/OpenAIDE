@@ -1,10 +1,16 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { act, create } from "react-test-renderer";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+const postHostMessage = vi.hoisted(() => vi.fn());
+
+vi.mock("../services/hostBridge", () => ({ postHostMessage }));
+
 import { AgentMarkdown } from "./AgentMarkdown";
 
 describe("AgentMarkdown", () => {
   afterEach(() => {
+    postHostMessage.mockClear();
     vi.unstubAllGlobals();
   });
 
@@ -33,6 +39,51 @@ describe("AgentMarkdown", () => {
     expect(html).toContain('href="https://www.cloudflare.com/"');
     expect(html).toContain('rel="noreferrer"');
     expect(html).toContain('target="_blank"');
+  });
+
+  it("opens an absolute filesystem link at its line through the App Shell", () => {
+    let tree: ReturnType<typeof create>;
+    act(() => {
+      tree = create(
+        <AgentMarkdown
+          text={
+            "[traits.rs](/home/remote-user/src/company-agent-kernel/crates/sdk-api/src/traits.rs:305)"
+          }
+        />,
+      );
+    });
+    const link = tree!.root.findByType("a");
+    const preventDefault = vi.fn();
+
+    act(() => {
+      link.props.onClick({ preventDefault });
+    });
+
+    expect(preventDefault).toHaveBeenCalledOnce();
+    expect(postHostMessage).toHaveBeenCalledWith({
+      type: "tool.openPath",
+      payload: {
+        line: 305,
+        path: "/home/remote-user/src/company-agent-kernel/crates/sdk-api/src/traits.rs",
+      },
+    });
+  });
+
+  it("preserves Windows filesystem links for App Shell opening", () => {
+    let tree: ReturnType<typeof create>;
+    act(() => {
+      tree = create(<AgentMarkdown text={"[main.ts](C:/Users/example/project/src/main.ts:42)"} />);
+    });
+    const link = tree!.root.findByType("a");
+
+    act(() => {
+      link.props.onClick({ preventDefault: vi.fn() });
+    });
+
+    expect(postHostMessage).toHaveBeenCalledWith({
+      type: "tool.openPath",
+      payload: { line: 42, path: "C:/Users/example/project/src/main.ts" },
+    });
   });
 
   it("does not render unsafe javascript links", () => {

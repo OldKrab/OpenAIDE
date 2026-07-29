@@ -2,6 +2,7 @@ import { Fragment, isValidElement, memo, useEffect, useRef, useState, type React
 import { Check, CircleAlert, Copy } from "lucide-react";
 import Markdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { postHostMessage } from "../services/hostBridge";
 import { copyText } from "./clipboard";
 
 type AgentMarkdownProps = {
@@ -44,6 +45,21 @@ function MarkdownRenderer({ streaming, text }: { streaming: boolean; text: strin
           const label = plainText(children) || "Image";
           if (isSafeDataImageUrl(href)) {
             return <AgentMarkdownImage label={label} url={href} />;
+          }
+          const fileLocation = markdownFileLocation(href);
+          if (fileLocation) {
+            return (
+              <a
+                {...props}
+                href={href}
+                onClick={(event) => {
+                  event.preventDefault();
+                  postHostMessage({ type: "tool.openPath", payload: fileLocation });
+                }}
+              >
+                {children}
+              </a>
+            );
           }
           return href ? (
             <a {...props} href={href} rel="noreferrer" target="_blank">
@@ -187,7 +203,27 @@ export function splitDataImageMarkdown(text: string): MarkdownPart[] {
 }
 
 function safeMarkdownUrl(value: string) {
-  return isSafeDataImageUrl(value) ? value : defaultUrlTransform(value);
+  return isSafeDataImageUrl(value) || markdownFileLocation(value) ? value : defaultUrlTransform(value);
+}
+
+// Agent file citations use an absolute path with an optional one-based line suffix.
+function markdownFileLocation(href: string | undefined): { path: string; line?: number } | undefined {
+  if (!href) return undefined;
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(href);
+  } catch {
+    return undefined;
+  }
+  const lineSuffix = decoded.match(/^(.*):([1-9]\d*)$/);
+  if (lineSuffix?.[1] && isAbsoluteFilePath(lineSuffix[1])) {
+    return { path: lineSuffix[1], line: Number(lineSuffix[2]) };
+  }
+  return isAbsoluteFilePath(decoded) ? { path: decoded } : undefined;
+}
+
+function isAbsoluteFilePath(value: string) {
+  return value.startsWith("/") || /^[a-z]:[\\/]/i.test(value);
 }
 
 function isSafeDataImageUrl(value: unknown): value is string {

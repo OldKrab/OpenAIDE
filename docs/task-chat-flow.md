@@ -277,6 +277,8 @@ While an active turn has a live status footer, Frontend shows its elapsed wall t
 
 Protocol-to-view mapping preserves object identity for unchanged Chat items and derived uninterrupted Tool and Thought groups. Task Navigation changes only when a navigation-visible summary field changes. The Chat viewport observes direct row insertion and row size changes; row-level `ResizeObserver`s handle later Markdown, image, request, and Tool-detail reflow.
 
+Agent Markdown links whose targets are absolute filesystem paths, optionally followed by a one-based `:line` suffix, are explicit file-open actions rather than browser navigation. The VS Code App Shell opens a clicked path in the current window and selects the requested line, including when the file is outside the current workspace. This user-triggered editor action does not expand the workspace boundary applied to ACP filesystem or terminal operations. Web URLs retain ordinary external-link behavior.
+
 Task snapshots may contain a bounded Chat tail whose raw Tool and Thought rows collapse into little visible content. On initial presentation, Frontend automatically requests earlier pages while the rendered Chat does not fill the viewport and a bounded automatic-load budget remains. It stops when the viewport is filled, history is exhausted, or that budget is reached; remaining history stays available through **Load earlier**. A failed automatic request is never silently retried against the same cursor.
 
 ### Tool activity and details
