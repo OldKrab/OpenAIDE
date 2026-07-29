@@ -285,6 +285,12 @@ describe("task list row styles", () => {
       /\.activity-step-semantic-subject-list\s*{[^}]*min-width:\s*0;[^}]*overflow:\s*hidden;[^}]*text-overflow:\s*ellipsis;[^}]*white-space:\s*nowrap;/,
     );
     expect(appCss).toMatch(
+      /\.activity-step-semantic-subject-list\.identity\s*{[^}]*flex:\s*0 0 auto;[^}]*max-width:\s*24ch;/,
+    );
+    expect(appCss).toMatch(
+      /\.activity-step-semantic-subject-list\.technical\s*{[^}]*flex:\s*1 8 auto;[^}]*min-width:\s*6ch;/,
+    );
+    expect(appCss).toMatch(
       /\.activity-step-semantic-subject\s*{[^}]*font-weight:\s*400;/,
     );
     expect(appCss).not.toMatch(/\.activity-step-semantic-subject\s*{[^}]*(?:background|border-radius|padding):/);
@@ -295,7 +301,7 @@ describe("task list row styles", () => {
       /\.activity-step-semantic-connector\s*{[^}]*color:\s*inherit;/,
     );
     expect(appCss).toMatch(
-      /\.activity-step-semantic-scope\s*{[^}]*font-weight:\s*400;/,
+      /\.activity-step-semantic-scope\s*{[^}]*flex:\s*0 4 18ch;[^}]*min-width:\s*6ch;[^}]*max-width:\s*18ch;[^}]*font-weight:\s*400;/,
     );
   });
 
