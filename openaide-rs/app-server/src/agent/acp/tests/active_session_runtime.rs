@@ -522,6 +522,9 @@ for line in sys.stdin:
     elif method == "initialize":
         respond(message, initialize_result())
     elif method == "session/new":
+        for server in message.get("params", {}).get("mcpServers", []):
+            env = {item["name"]: item["value"] for item in server.get("env", [])}
+            log("mcp:" + server.get("name", "") + ":" + env.get("TOKEN", ""))
         next_session_number += 1
         if prompt_mode == "host_terminal_during_new_hang":
             request_terminal("startup-terminal-create")
@@ -702,6 +705,29 @@ for line in sys.stdin:
 
 struct StaticSecretResolver {
     values: HashMap<String, String>,
+}
+
+struct StaticMcpResolver;
+
+impl AgentSecretResolver for StaticMcpResolver {
+    fn resolve_secret_env(
+        &self,
+        _agent_id: &str,
+        _names: &[String],
+    ) -> Result<HashMap<String, String>, RuntimeError> {
+        Ok(HashMap::new())
+    }
+
+    fn resolve_mcp_servers(
+        &self,
+        _capabilities: &crate::agent::acp_schema::McpCapabilities,
+    ) -> Result<Vec<crate::agent::acp_schema::McpServer>, RuntimeError> {
+        Ok(vec![crate::agent::acp_schema::McpServer::Stdio(
+            crate::agent::acp_schema::McpServerStdio::new("Filesystem", "/usr/bin/mcp").env(vec![
+                crate::agent::acp_schema::EnvVariable::new("TOKEN", "resolved-token"),
+            ]),
+        )])
+    }
 }
 
 impl AgentSecretResolver for StaticSecretResolver {
@@ -1369,6 +1395,21 @@ fn start_session_passes_resolved_secret_env_to_acp_process() {
     let session = runtime.start_session(request).expect("start session");
     assert_eq!(session.session_id, "secret-session");
     wait_for_method(&log_path, "secret:resolved-secret");
+    runtime.close_session(&session.key()).unwrap();
+}
+
+#[test]
+fn new_session_request_includes_resolved_mcp_servers() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let Some((runtime, log_path)) = fixture_runtime(&temp, "mcp-session") else {
+        return;
+    };
+    let mut request = start_request("task-mcp", cwd_string());
+    request.secret_resolver = Some(Arc::new(StaticMcpResolver));
+
+    let session = runtime.start_session(request).expect("start session");
+
+    wait_for_method(&log_path, "mcp:Filesystem:resolved-token");
     runtime.close_session(&session.key()).unwrap();
 }
 

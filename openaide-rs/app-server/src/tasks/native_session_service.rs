@@ -351,7 +351,7 @@ impl NativeSessionService {
         &self,
         task_id: &str,
     ) -> Arc<dyn crate::agent::AgentSecretResolver> {
-        task_secret_resolver(&self.server_requests, task_id)
+        task_secret_resolver(&self.server_requests, &self.store, task_id)
     }
 
     fn acquire_for_prompt(

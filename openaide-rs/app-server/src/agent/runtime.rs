@@ -131,6 +131,15 @@ pub trait AgentSecretResolver: Send + Sync {
         agent_id: &str,
         names: &[String],
     ) -> Result<HashMap<String, String>, RuntimeError>;
+
+    /// Resolves the effective MCP set only after Agent capabilities are known.
+    /// Implementations without product-managed MCP settings keep the ACP list empty.
+    fn resolve_mcp_servers(
+        &self,
+        _capabilities: &crate::agent::acp_schema::McpCapabilities,
+    ) -> Result<Vec<crate::agent::acp_schema::McpServer>, RuntimeError> {
+        Ok(Vec::new())
+    }
 }
 
 #[derive(Clone)]

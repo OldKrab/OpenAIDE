@@ -1,4 +1,4 @@
-import { Search, SlidersHorizontal } from "lucide-react";
+import { Search } from "lucide-react";
 import { useState } from "react";
 import type { ReactNode } from "react";
 import type {
@@ -136,15 +136,6 @@ export function GeneralSettingsTab({
 
   return (
     <div className="settings-panel">
-      <div className="settings-panel-title">
-        <SlidersHorizontal size={15} />
-        <span>
-          <strong>General</strong>
-          <small>{mobileComposerBehavior
-            ? "App behavior."
-            : developerSettingsUnlocked ? "Composer behavior and developer diagnostics." : "Composer behavior."}</small>
-        </span>
-      </div>
       <label className="settings-filter">
         <Search size={13} />
         <input
@@ -162,15 +153,17 @@ export function GeneralSettingsTab({
               <div className="settings-section-title">
                 <strong>{group.label}</strong>
               </div>
-              {group.rows.map((row) => (
-                <div className="settings-row" key={row.id}>
-                  <span className="settings-row-copy">
-                    <strong>{row.label}</strong>
-                    {row.detail ? <small>{row.detail}</small> : null}
-                  </span>
-                  {row.value}
-                </div>
-              ))}
+              <div className="settings-section-rows">
+                {group.rows.map((row) => (
+                  <div className="settings-row" key={row.id}>
+                    <span className="settings-row-copy">
+                      <strong>{row.label}</strong>
+                      {row.detail ? <small>{row.detail}</small> : null}
+                    </span>
+                    {row.value}
+                  </div>
+                ))}
+              </div>
             </section>
           ))
         ) : (

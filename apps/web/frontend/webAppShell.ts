@@ -23,7 +23,7 @@ import {
 import { uploadFile } from "./fileUpload";
 
 const WEB_ROUTE_EVENT = "openaide:webRoute";
-const settingsTabs = new Set<SettingsTabId>(["agents", "mcp", "skills", "common"]);
+const settingsTabs = new Set<SettingsTabId>(["agents", "mcp", "skills", "common", "worktrees"]);
 const logger = createRuntimeLogger("openaide-webview");
 
 /** Browser-history adapter owned by the Web App composition boundary. */

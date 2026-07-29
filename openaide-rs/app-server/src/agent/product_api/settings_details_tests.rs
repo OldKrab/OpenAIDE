@@ -8,7 +8,9 @@ use openaide_app_server_protocol::snapshot::{AgentCapabilities, AgentSetupReason
 
 use crate::agent::catalog_store::AgentCatalogStore;
 use crate::agent::product_api::{AgentProductApi, AgentSettingsDetailsWorkflow};
-use crate::agent::registry::{AgentCatalogRecord, AgentRegistry, CODEX_AGENT_ID};
+use crate::agent::registry::{
+    AgentCatalogRecord, AgentRegistry, CODEX_AGENT_ID, OPENCODE_AGENT_ID,
+};
 use crate::agent::registry_handle::AgentRegistryHandle;
 use crate::agent::runtime::{
     AgentEventSink, AgentProbeRequest, AgentPrompt, AgentRuntime, AgentSession, AgentSessionStart,
@@ -44,6 +46,33 @@ fn agent_settings_details_expose_the_structured_setup_reason() {
 
     assert_eq!(codex.status, AgentSettingsStatus::SetupRequired);
     assert_eq!(codex.setup_reason, Some(AgentSetupReason::NodeJsRequired));
+}
+
+#[test]
+fn built_in_agent_settings_use_agent_specific_descriptions() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = Store::open(dir.path().to_path_buf()).unwrap();
+    let api = AgentProductApi::new(
+        AgentRegistryHandle::new(AgentRegistry::default_built_ins()),
+        AgentCatalogStore::new(store),
+        Arc::new(ProbeReadyAgentRuntime),
+        AgentStatusCache::default(),
+    );
+
+    let result = api
+        .agent_settings_details(AgentSettingsDetailsParams {})
+        .unwrap();
+    let description = |agent_id: &str| {
+        result
+            .agents
+            .iter()
+            .find(|agent| agent.agent_id.as_str() == agent_id)
+            .map(|agent| agent.description.as_str())
+            .unwrap()
+    };
+
+    assert_eq!(description(CODEX_AGENT_ID), "OpenAI coding agent.");
+    assert_eq!(description(OPENCODE_AGENT_ID), "Open-source coding agent.");
 }
 
 #[test]

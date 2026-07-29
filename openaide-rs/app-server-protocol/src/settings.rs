@@ -1,5 +1,9 @@
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
+
+use crate::ids::ProjectId;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -13,9 +17,54 @@ pub struct AppPreferencesParams {}
 #[serde(rename_all = "camelCase")]
 pub struct SettingsMcpServersParams {}
 
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct McpGetServerDetailsParams {
+    /// Stable opaque identifier returned by `settings/getMcpServers`.
+    pub id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct McpCreateServerParams {
+    pub server: McpServerDefinition,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct McpUpdateServerParams {
+    pub server: McpServerDefinition,
+    /// Guards secure-storage cleanup against a stale editor.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub expected_secret_names: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct McpDeleteServerParams {
+    pub id: String,
+    /// Names the host can safely remove after the durable definition is deleted.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub expected_secret_names: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct McpSetServerEnabledParams {
+    pub id: String,
+    pub enabled: bool,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct SettingsSkillsParams {}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingsSkillDetailsParams {
+    /// Opaque identifier returned by `settings/getSkills`.
+    pub id: String,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
@@ -29,12 +78,116 @@ pub struct SettingsMcpServersResult {
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
+pub struct McpGetServerDetailsResult {
+    pub generated_at: String,
+    pub server: McpServerDefinition,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct McpMutationResult {
+    pub server_id: String,
+    pub servers: SettingsMcpServersResult,
+}
+
+/// Durable MCP configuration. Secret fields contain names only; their values
+/// remain in shell-owned secure storage keyed by this definition's stable id.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct McpServerDefinition {
+    pub id: String,
+    pub label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    pub enabled: bool,
+    pub scope: McpServerScope,
+    pub configuration: McpServerConfiguration,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum McpServerScope {
+    Global,
+    Project { project_id: ProjectId },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(
+    tag = "transport",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum McpServerConfiguration {
+    Stdio {
+        /// Original user input retained so the editor can preserve formatting.
+        command_line: String,
+        command: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        args: Vec<String>,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        env: BTreeMap<String, String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        secret_env: Vec<String>,
+    },
+    Http {
+        url: String,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        headers: BTreeMap<String, String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        secret_headers: Vec<String>,
+    },
+    /// SSE remains editable for compatibility but is deprecated by ACP.
+    Sse {
+        url: String,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        headers: BTreeMap<String, String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        secret_headers: Vec<String>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
 pub struct SettingsSkillsResult {
     pub generated_at: String,
     pub availability: SettingsProjectionAvailability,
     pub skills: Vec<SettingsSkillRecord>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notices: Vec<SettingsProjectionNotice>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingsSkillDetailsResult {
+    pub generated_at: String,
+    pub skill: SettingsSkillRecord,
+    pub document: SettingsSkillDocument,
+}
+
+/// Parsed `SKILL.md` content. Required fields stay first-class while unknown
+/// frontmatter remains visible without making the protocol agent-specific.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingsSkillDocument {
+    pub name: String,
+    pub description: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub additional_fields: Vec<SettingsSkillDocumentField>,
+    pub instructions: String,
+    /// Exact file contents for lossless inspection and unsupported YAML syntax.
+    pub source: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct SettingsSkillDocumentField {
+    pub name: String,
+    /// YAML representation of the field value, including nested structures.
+    pub value: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]
@@ -72,17 +225,13 @@ pub struct SettingsMcpServerRecord {
     pub id: String,
     pub label: String,
     pub enabled: bool,
-    pub scope: SettingsScope,
+    pub scope: McpServerScope,
     pub transport: SettingsMcpServerTransport,
     pub status: SettingsMcpServerStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tool_count: Option<u32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last_checked_at: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last_error_summary: Option<String>,
+    pub validation_error: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]
@@ -96,9 +245,8 @@ pub enum SettingsMcpServerTransport {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub enum SettingsMcpServerStatus {
-    Unknown,
-    Available,
-    Failed,
+    Configured,
+    Invalid,
     Disabled,
 }
 

@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use crate::agent::acp_schema::{
-    InitializeResponse, ListSessionsResponse, NewSessionResponse, SessionConfigOption, SessionId,
-    SessionUpdate,
+    InitializeResponse, ListSessionsResponse, McpServer, NewSessionResponse, SessionConfigOption,
+    SessionId, SessionUpdate,
 };
 use agent_client_protocol::{Agent, ConnectionTo};
 
@@ -40,6 +40,7 @@ pub(super) async fn start_active_session(
     cwd: PathBuf,
     initialize: &InitializeResponse,
     preferred_auth_method_id: Option<&str>,
+    mcp_servers: Vec<McpServer>,
     trace: Option<&AcpTraceSession>,
 ) -> Result<
     (
@@ -48,8 +49,15 @@ pub(super) async fn start_active_session(
     ),
     agent_client_protocol::Error,
 > {
-    let response =
-        request_new_session(connection, cwd, initialize, preferred_auth_method_id, trace).await?;
+    let response = request_new_session(
+        connection,
+        cwd,
+        initialize,
+        preferred_auth_method_id,
+        mcp_servers,
+        trace,
+    )
+    .await?;
     let initial_options = response.config_options.clone().unwrap_or_default();
     let active_session = connection.attach_session(response, Vec::new())?;
     Ok((active_session, initial_options))
@@ -59,6 +67,7 @@ pub(super) struct LoadActiveSessionRequest<'a> {
     pub(super) agent_id: &'a str,
     pub(super) session_id: String,
     pub(super) cwd: PathBuf,
+    pub(super) mcp_servers: Vec<McpServer>,
     pub(super) preferred_auth_method_id: Option<&'a str>,
 }
 
@@ -81,6 +90,7 @@ pub(super) async fn load_active_session(
         agent_id,
         session_id,
         cwd,
+        mcp_servers,
         preferred_auth_method_id,
     } = request;
     validate_load_session_capability(initialize)?;
@@ -104,6 +114,7 @@ pub(super) async fn load_active_session(
         cwd,
         initialize,
         preferred_auth_method_id,
+        mcp_servers,
         trace,
     )
     .await
@@ -134,14 +145,19 @@ pub(super) async fn load_active_session(
     ))
 }
 
+pub(super) struct ResumeActiveSessionRequest<'a> {
+    pub(super) agent_id: &'a str,
+    pub(super) session_id: String,
+    pub(super) cwd: PathBuf,
+    pub(super) mcp_servers: Vec<McpServer>,
+    pub(super) preferred_auth_method_id: Option<&'a str>,
+}
+
 pub(super) async fn resume_active_session(
-    agent_id: &str,
     connection: &ConnectionTo<Agent>,
     initialize: &InitializeResponse,
-    session_id: String,
-    cwd: PathBuf,
-    preferred_auth_method_id: Option<&str>,
     trace: Option<&AcpTraceSession>,
+    request: ResumeActiveSessionRequest<'_>,
 ) -> Result<
     (
         agent_client_protocol::ActiveSession<'static, Agent>,
@@ -149,6 +165,13 @@ pub(super) async fn resume_active_session(
     ),
     RuntimeError,
 > {
+    let ResumeActiveSessionRequest {
+        agent_id,
+        session_id,
+        cwd,
+        mcp_servers,
+        preferred_auth_method_id,
+    } = request;
     validate_resume_session_capability(initialize)?;
     let session_id = SessionId::new(session_id);
     let response = request_resume_session(
@@ -157,6 +180,7 @@ pub(super) async fn resume_active_session(
         cwd,
         initialize,
         preferred_auth_method_id,
+        mcp_servers,
         trace,
     )
     .await

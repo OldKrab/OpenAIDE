@@ -62,13 +62,17 @@ use crate::server_requests::{
 };
 use crate::settings::{
     AppPreferences, AppPreferencesParams, AppPreferencesPatch, AppPreferencesResult,
-    AppPreferencesUpdateParams, ComposerSubmitShortcut, RuntimeAcpTraceSettings,
-    RuntimeAcpTraceSettingsPatch, RuntimeDeveloperSettings, RuntimeDeveloperSettingsPatch,
-    RuntimeSettingsParams, RuntimeSettingsResult, RuntimeSettingsUpdateParams,
-    SettingsMcpServerRecord, SettingsMcpServerStatus, SettingsMcpServerTransport,
-    SettingsMcpServersParams, SettingsMcpServersResult, SettingsProjectionAvailability,
-    SettingsProjectionNotice, SettingsProjectionNoticeSeverity, SettingsScope, SettingsSkillRecord,
-    SettingsSkillStatus, SettingsSkillsParams, SettingsSkillsResult,
+    AppPreferencesUpdateParams, ComposerSubmitShortcut, McpCreateServerParams,
+    McpDeleteServerParams, McpGetServerDetailsParams, McpGetServerDetailsResult, McpMutationResult,
+    McpServerConfiguration, McpServerDefinition, McpServerScope, McpSetServerEnabledParams,
+    McpUpdateServerParams, RuntimeAcpTraceSettings, RuntimeAcpTraceSettingsPatch,
+    RuntimeDeveloperSettings, RuntimeDeveloperSettingsPatch, RuntimeSettingsParams,
+    RuntimeSettingsResult, RuntimeSettingsUpdateParams, SettingsMcpServerRecord,
+    SettingsMcpServerStatus, SettingsMcpServerTransport, SettingsMcpServersParams,
+    SettingsMcpServersResult, SettingsProjectionAvailability, SettingsProjectionNotice,
+    SettingsProjectionNoticeSeverity, SettingsScope, SettingsSkillDetailsParams,
+    SettingsSkillDetailsResult, SettingsSkillDocument, SettingsSkillDocumentField,
+    SettingsSkillRecord, SettingsSkillStatus, SettingsSkillsParams, SettingsSkillsResult,
 };
 use crate::snapshot::{
     ActivityStatus, ActivityStepSnapshot, AgentCapabilities, AgentCollectionSnapshot,
@@ -233,12 +237,26 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<AgentSettingsAuthVariable>(output, config);
     push_decl::<SettingsMcpServersParams>(output, config);
     push_decl::<SettingsMcpServersResult>(output, config);
+    push_decl::<McpGetServerDetailsParams>(output, config);
+    push_decl::<McpGetServerDetailsResult>(output, config);
+    push_decl::<McpCreateServerParams>(output, config);
+    push_decl::<McpUpdateServerParams>(output, config);
+    push_decl::<McpDeleteServerParams>(output, config);
+    push_decl::<McpSetServerEnabledParams>(output, config);
+    push_decl::<McpMutationResult>(output, config);
+    push_decl::<McpServerDefinition>(output, config);
+    push_decl::<McpServerScope>(output, config);
+    push_decl::<McpServerConfiguration>(output, config);
     push_decl::<SettingsProjectionAvailability>(output, config);
     push_decl::<SettingsMcpServerRecord>(output, config);
     push_decl::<SettingsMcpServerTransport>(output, config);
     push_decl::<SettingsMcpServerStatus>(output, config);
     push_decl::<SettingsSkillsParams>(output, config);
     push_decl::<SettingsSkillsResult>(output, config);
+    push_decl::<SettingsSkillDetailsParams>(output, config);
+    push_decl::<SettingsSkillDetailsResult>(output, config);
+    push_decl::<SettingsSkillDocument>(output, config);
+    push_decl::<SettingsSkillDocumentField>(output, config);
     push_decl::<SettingsSkillRecord>(output, config);
     push_decl::<SettingsSkillStatus>(output, config);
     push_decl::<SettingsProjectionNotice>(output, config);

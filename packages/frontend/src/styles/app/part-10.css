@@ -164,28 +164,48 @@ textarea:focus-visible,
   }
 
   .settings-view {
-    padding-inline: 18px;
-  }
-
-  .settings-body {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto minmax(0, 1fr);
-    gap: 12px;
+    height: 100dvh;
   }
 
-  .settings-tabs {
-    display: flex;
-    overflow-x: auto;
-    border-right: 0;
-    border-bottom: 1px solid var(--oa-border);
-    padding-right: 0;
-    padding-bottom: 6px;
+  .settings-sidebar {
+    display: none;
   }
 
-  .settings-tabs button {
-    width: auto;
-    flex: 0 0 auto;
-    white-space: nowrap;
+  .settings-content {
+    grid-column: 1;
+    padding: 18px 16px 42px;
+  }
+
+  .settings-content,
+  .settings-mobile-index {
+    scrollbar-width: none;
+  }
+
+  .settings-content::-webkit-scrollbar,
+  .settings-mobile-index::-webkit-scrollbar {
+    display: none;
+  }
+
+  .settings-content.mobile-index-open {
+    display: none;
+  }
+
+  .settings-page-heading {
+    margin-bottom: 24px;
+  }
+
+  .settings-page-heading > span {
+    display: block;
+    margin-top: 18px;
+  }
+
+  .mobile-settings-index-button {
+    display: inline-flex;
+  }
+
+  .settings-mobile-index.open {
+    display: grid;
   }
 
   .agent-settings-layout {
@@ -198,31 +218,43 @@ textarea:focus-visible,
   }
 
   .agent-detail-pane {
-    border-top: 1px solid var(--oa-border);
+    border-top: 0;
     padding-left: 0;
-    padding-top: 12px;
-  }
-
-  .agent-detail-header,
-  .agent-status-panel {
-    grid-template-columns: minmax(0, 1fr);
+    padding-top: 0;
   }
 
   .agent-detail-header {
-    align-items: flex-start;
+    padding: 16px;
   }
 
   .agent-detail-identity {
-    grid-template-columns: 48px minmax(0, 1fr);
+    grid-template-columns: 56px minmax(0, 1fr);
   }
 
   .agent-detail-avatar {
-    width: 48px;
-    height: 48px;
+    width: 56px;
+    height: 56px;
+    border-radius: 13px;
+  }
+
+  .agent-detail-state {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .agent-availability-control {
+    border-left: 0;
+    padding-left: 0;
+  }
+
+  .agent-detail-section {
+    padding: 14px;
   }
 
   .agent-readonly-row {
     grid-template-columns: 22px minmax(0, 1fr);
+    row-gap: 4px;
+    padding-block: 8px;
   }
 
   .agent-readonly-row strong {

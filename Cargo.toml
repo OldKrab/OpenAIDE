@@ -11,6 +11,7 @@ publish = false
 openaide-app-server-protocol = { path = "openaide-rs/app-server-protocol" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+serde_yaml = "0.9"
 regex = "1.12"
 shell-words = "1.1"
 thiserror = "2.0"

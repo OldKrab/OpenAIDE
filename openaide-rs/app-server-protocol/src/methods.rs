@@ -31,9 +31,12 @@ use crate::server_requests::{
     ShellResolveFileRevealResult,
 };
 use crate::settings::{
-    AppPreferencesParams, AppPreferencesResult, AppPreferencesUpdateParams, RuntimeSettingsParams,
-    RuntimeSettingsResult, RuntimeSettingsUpdateParams, SettingsMcpServersParams,
-    SettingsMcpServersResult, SettingsSkillsParams, SettingsSkillsResult,
+    AppPreferencesParams, AppPreferencesResult, AppPreferencesUpdateParams, McpCreateServerParams,
+    McpDeleteServerParams, McpGetServerDetailsParams, McpGetServerDetailsResult, McpMutationResult,
+    McpSetServerEnabledParams, McpUpdateServerParams, RuntimeSettingsParams, RuntimeSettingsResult,
+    RuntimeSettingsUpdateParams, SettingsMcpServersParams, SettingsMcpServersResult,
+    SettingsSkillDetailsParams, SettingsSkillDetailsResult, SettingsSkillsParams,
+    SettingsSkillsResult,
 };
 use crate::state::{
     StateSubscribeParams, StateSubscribeResult, StateUnsubscribeParams, StateUnsubscribeResult,
@@ -221,10 +224,46 @@ protocol_method!(
     SettingsMcpServersResult
 );
 protocol_method!(
+    McpGetServerDetails,
+    MCP_GET_SERVER_DETAILS,
+    McpGetServerDetailsParams,
+    McpGetServerDetailsResult
+);
+protocol_method!(
+    McpCreateServer,
+    MCP_CREATE_SERVER,
+    McpCreateServerParams,
+    McpMutationResult
+);
+protocol_method!(
+    McpUpdateServer,
+    MCP_UPDATE_SERVER,
+    McpUpdateServerParams,
+    McpMutationResult
+);
+protocol_method!(
+    McpDeleteServer,
+    MCP_DELETE_SERVER,
+    McpDeleteServerParams,
+    McpMutationResult
+);
+protocol_method!(
+    McpSetServerEnabled,
+    MCP_SET_SERVER_ENABLED,
+    McpSetServerEnabledParams,
+    McpMutationResult
+);
+protocol_method!(
     SettingsGetSkills,
     SETTINGS_GET_SKILLS,
     SettingsSkillsParams,
     SettingsSkillsResult
+);
+protocol_method!(
+    SettingsGetSkillDetails,
+    SETTINGS_GET_SKILL_DETAILS,
+    SettingsSkillDetailsParams,
+    SettingsSkillDetailsResult
 );
 protocol_method!(
     SettingsGetPreferences,

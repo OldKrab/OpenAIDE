@@ -97,6 +97,12 @@ impl TaskProductApi {
             .and_then(|entry| entry.observation.last_activity)
             .unwrap_or_else(|| now.clone());
         let task_id = format!("task_{}", Uuid::new_v4());
+        // Adoption loads the Native Session before its Task record is persisted, so carry the
+        // catalog's already-resolved project identity into MCP selection.
+        let secret_resolver = self.task_secret_resolver_for_project(
+            &task_id,
+            openaide_app_server_protocol::ids::ProjectId::from(catalog_entry.project_id.clone()),
+        );
         let loaded = match self.agent_gateway.load_session(AgentSessionLoad {
             agent_id: params.agent_id.as_str().to_string(),
             task_id: task_id.clone(),
@@ -104,7 +110,7 @@ impl TaskProductApi {
             model_id: None,
             session_id: params.native_session_id.clone(),
             cancellation: TurnCancellation::new(),
-            secret_resolver: Some(self.task_secret_resolver(&task_id)),
+            secret_resolver: Some(secret_resolver),
         }) {
             Ok(loaded) => loaded,
             Err(error @ RuntimeError::TaskNotFound(_)) => {

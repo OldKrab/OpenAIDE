@@ -7,6 +7,7 @@ import type {
   CustomAgentReplaceParams,
   ConfigOptionCurrentValue,
   ElicitationResponse,
+  SkillSettingsDetails,
   SettingsTabId,
 } from "@openaide/app-shell-contracts";
 import type { AppAction, SnapshotIntent } from "../state/appReducer";
@@ -20,6 +21,7 @@ import type {
   FileBrowserRootId,
   AppServerSession,
   BackendConnection,
+  McpServerDefinition,
   TaskSnapshot as ProtocolTaskSnapshot,
   TaskId,
   TaskSearchFilesResult,
@@ -27,6 +29,7 @@ import type {
   WorkspaceBrowserRoot,
   WorkspaceListDirectoryResult,
 } from "@openaide/app-server-client";
+import type { McpServerSaveInput } from "../intents/mcpSettingsIntents";
 import type { ComposerAttachmentResourceOwner } from "../services/attachmentResources";
 import type { NewTaskController, NewTaskLease } from "./newTaskController";
 import type { AsyncOperationOwner } from "../state/asyncOperationOwner";
@@ -62,11 +65,16 @@ export type SettingsCallbacks = {
   authenticateAgent: (agentId: string, methodId: string, values?: Record<string, string>) => Promise<boolean>;
   createCustomAgent: (payload: CustomAgentCreateParams) => void;
   deleteCustomAgent: (agentId: string) => void;
+  deleteMcpServer: (server: McpServerDefinition) => void;
+  getMcpServerDetails: (id: string) => Promise<McpServerDefinition>;
+  getSkillDetails: (id: string) => Promise<SkillSettingsDetails>;
   replaceCustomAgent: (payload: CustomAgentReplaceParams) => void;
   refreshSettings: () => void;
+  saveMcpServer: (input: McpServerSaveInput) => void;
   selectSettingsTab: (tab: SettingsTabId) => void;
   setAcpTrace: (enabled: boolean) => void;
   setAgentEnabled: (agentId: string, enabled: boolean) => void;
+  setMcpServerEnabled: (id: string, enabled: boolean) => void;
   setComposerSubmitShortcut: (shortcut: AppPreferencesRecord["composer_submit_shortcut"]) => void;
   updateCustomAgentMetadata: (payload: CustomAgentMetadataUpdateParams) => void;
   unlockDeveloperSettings: () => void;

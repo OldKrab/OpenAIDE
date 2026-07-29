@@ -37,7 +37,7 @@ export function AgentEnvEditor({ env, onChange }: { env: CustomAgentEnvRecord[];
   };
   return (
     <section className="agent-detail-section">
-      <div className="settings-section-title">
+      <div className="agent-section-heading">
         <strong>Environment</strong>
         <button type="button" onClick={() => onChange([...env, { name: "", value: "", secret: false }])}>
           <Plus size={12} />

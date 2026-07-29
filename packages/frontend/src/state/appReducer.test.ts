@@ -2101,7 +2101,14 @@ describe("app reducer composer state", () => {
       type: "settings:mcpServersResult",
       generatedAt: "mcp-now",
       availability: "available",
-      servers: [{ id: "server-1", label: "Filesystem", enabled: true, scope: "global", transport: "stdio", status: "available" }],
+      servers: [{
+        id: "server-1",
+        label: "Filesystem",
+        enabled: true,
+        scope: { kind: "global" },
+        transport: "stdio",
+        status: "configured",
+      }],
     });
     expect(state.settings.mcpServersLoading).toBe(false);
     expect(state.settings.mcpServersAvailability).toBe("available");

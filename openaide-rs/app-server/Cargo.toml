@@ -12,6 +12,7 @@ base64.workspace = true
 openaide-app-server-protocol.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+serde_yaml.workspace = true
 regex.workspace = true
 shell-words.workspace = true
 thiserror.workspace = true

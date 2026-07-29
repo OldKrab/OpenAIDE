@@ -17,11 +17,13 @@ import {
   ATTACHMENT_REVEAL,
   AppServerProtocolError,
   CLIENT_HEARTBEAT,
+  MCP_CREATE_SERVER,
   NATIVE_SESSION_ARCHIVE,
   NATIVE_SESSION_RESTORE,
   PENDING_REQUEST_RESOLVE,
   SETTINGS_GET_AGENT_DETAILS,
   SETTINGS_GET_MCP_SERVERS,
+  SETTINGS_GET_SKILL_DETAILS,
   SETTINGS_GET_SKILLS,
   SETTINGS_UPDATE_PREFERENCES,
   SETTINGS_UPDATE_RUNTIME,
@@ -1499,6 +1501,57 @@ describe("app controller callbacks", () => {
     expect(JSON.stringify(dispatch.mock.calls)).not.toContain("secret-token");
   });
 
+  it("creates an MCP server through one secure-storage transaction", async () => {
+    const dispatch = vi.fn();
+    const request = vi.fn(async () => ({
+      serverId: "mcp-files",
+      servers: {
+        generatedAt: "mcp-now",
+        availability: "available",
+        servers: [],
+      },
+    }));
+    const settings = callbacks({
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
+      dispatch,
+    }).settings;
+
+    settings.saveMcpServer({
+      server: {
+        id: "mcp-files",
+        label: "Filesystem",
+        enabled: true,
+        scope: { kind: "global" },
+        configuration: {
+          transport: "stdio",
+          commandLine: "/usr/bin/mcp",
+          command: "/usr/bin/mcp",
+          secretEnv: ["TOKEN"],
+        },
+      },
+      secretValues: [{ field: "env", name: "TOKEN", value: "mcp-secret" }],
+    });
+    await settlePromises();
+
+    expect(beginAgentSecretTransaction).toHaveBeenCalledWith({
+      writes: [{
+        target: { kind: "mcp", serverId: "mcp-files", field: "env", name: "TOKEN" },
+        value: "mcp-secret",
+      }],
+      deletes: [],
+    });
+    expect(request).toHaveBeenCalledWith(MCP_CREATE_SERVER, {
+      server: expect.objectContaining({ id: "mcp-files", label: "Filesystem" }),
+    });
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "settings:mcpServersResult",
+      generatedAt: "mcp-now",
+      availability: "available",
+      servers: [],
+    });
+    expect(JSON.stringify(dispatch.mock.calls)).not.toContain("mcp-secret");
+  });
+
   it("refreshes Settings projections through BackendConnection when available", async () => {
     const dispatch = vi.fn();
     const request = vi.fn(async (method: string) => {
@@ -1566,6 +1619,41 @@ describe("app controller callbacks", () => {
       skills: [],
     });
     expect(postHostMessage).not.toHaveBeenCalled();
+  });
+
+  it("loads full skill file details lazily through BackendConnection", async () => {
+    const request = vi.fn(async () => ({
+      generatedAt: "now",
+      skill: {
+        id: "skill-opaque",
+        label: "Research",
+        scope: "global",
+        sourceLabel: "User configuration",
+        status: "valid",
+        description: "Find primary sources",
+        warnings: [],
+        tags: [],
+        lastScannedAt: "now",
+      },
+      document: {
+        name: "Research",
+        description: "Find primary sources",
+        additionalFields: [{ name: "compatibility", value: "tools:\\n- web" }],
+        instructions: "# Workflow",
+        source: "---\\nname: Research",
+      },
+    }));
+
+    const result = await callbacks({
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
+      dispatch: vi.fn(),
+    }).settings.getSkillDetails("skill-opaque");
+
+    expect(request).toHaveBeenCalledWith(SETTINGS_GET_SKILL_DETAILS, { id: "skill-opaque" });
+    expect(result.document.additional_fields).toEqual([
+      { name: "compatibility", value: "tools:\\n- web" },
+    ]);
+    expect(result.document.instructions).toBe("# Workflow");
   });
 
   it("reports an error for Settings refresh when BackendConnection requests are unavailable", async () => {

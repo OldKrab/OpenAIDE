@@ -84,7 +84,7 @@ describe("AppSurfaces callback wiring", () => {
         onOpenTask: controller.callbacks.navigation.openTask,
         onRestoreTask: controller.callbacks.navigation.restoreTask,
         onSearchChange: controller.callbacks.navigation.changeSearch,
-        onSettings: controller.callbacks.navigation.openSettings,
+        onSettings: expect.any(Function),
         onToggleArchived: controller.callbacks.navigation.toggleArchived,
       }),
       undefined,
@@ -184,8 +184,8 @@ describe("AppSurfaces callback wiring", () => {
     expect(tree.root.findAllByProps({ className: "worktree-management" })).toHaveLength(1);
 
     act(() => tree.root.findAllByType("button")
-      .find((button) => button.children.includes("Settings"))?.props.onClick());
-    expect(controller.callbacks.navigation.openSettings).toHaveBeenCalledOnce();
+      .find((button) => button.children.includes("Settings"))?.props.onClick({ type: "click" }));
+    expect(controller.callbacks.navigation.openSettings).toHaveBeenCalledWith();
     expect(tree.root.findAllByProps({ className: "worktree-management" })).toHaveLength(1);
 
     controller.bootstrap = {
@@ -360,9 +360,62 @@ describe("AppSurfaces callback wiring", () => {
         onSetComposerSubmitShortcut: controller.callbacks.settings.setComposerSubmitShortcut,
         onUpdateCustomAgentMetadata: controller.callbacks.settings.updateCustomAgentMetadata,
         onUnlockDeveloperSettings: controller.callbacks.settings.unlockDeveloperSettings,
+        worktreeIntents: controller.intents.newTask,
+        worktreeRepositories: controller.state.worktreeRepositories,
       }),
       undefined,
     );
+  });
+
+  it("returns web Settings to the previously active Task", () => {
+    const controller = controllerFor("settings");
+    controller.bootstrap = {
+      surface: "settings",
+      shell: WEB_SHELL,
+      appServerConnection: {
+        kind: "webProxy",
+        endpointUrl: "/__openaide-app-server/probe",
+      },
+    };
+    controller.activeNavigationTaskId = "task_2";
+    render(controller);
+    const settingsProps = latestMockProps<{ onBackToApp: () => void }>(surfaceMocks.settings);
+
+    act(() => settingsProps?.onBackToApp());
+
+    expect(controller.callbacks.navigation.openTask).toHaveBeenCalledWith("task_2");
+    expect(controller.callbacks.navigation.openNewTask).not.toHaveBeenCalled();
+  });
+
+  it("opens New Task with the worktree selected from Settings", () => {
+    const controller = controllerFor("settings");
+    const project = {
+      label: "OpenAIDE",
+      projectId: "project_1",
+      workspaceRoot: "/workspace/OpenAIDE",
+      worktreeRepositoryId: "repository_1",
+    };
+    render(controller);
+    const settingsProps = latestMockProps<{
+      onNewTaskInWorktree: (
+        selectedProject: typeof project,
+        worktree: { name: string; path: string; worktreeId: string },
+      ) => void;
+    }>(surfaceMocks.settings);
+
+    act(() => settingsProps?.onNewTaskInWorktree(project, {
+      name: "Settings refactor",
+      path: "/workspace/.worktrees/settings-refactor",
+      worktreeId: "worktree_1",
+    }));
+
+    expect(controller.intents.newTask.selectProject).toHaveBeenCalledWith(project);
+    expect(controller.intents.newTask.selectWorktree).toHaveBeenCalledWith({
+      label: "Settings refactor",
+      path: "/workspace/.worktrees/settings-refactor",
+      worktreeId: "worktree_1",
+    });
+    expect(controller.callbacks.navigation.openNewTask).toHaveBeenCalledWith("project_1");
   });
 
   it("refreshes Agent Settings after retrying setup", async () => {
@@ -403,7 +456,7 @@ describe("AppSurfaces callback wiring", () => {
     expect(controller.callbacks.navigation.openNewTask).toHaveBeenCalledWith("project_1");
   });
 
-  it("renders web settings inside the web workbench sidebar shell", () => {
+  it("replaces Task navigation with Settings in the web app", () => {
     const controller = controllerFor("settings");
     controller.bootstrap = {
       surface: "settings",
@@ -417,16 +470,7 @@ describe("AppSurfaces callback wiring", () => {
 
     render(controller);
 
-    expect(surfaceMocks.sidebar).toHaveBeenCalledWith(
-      expect.objectContaining({
-        activeTaskId: undefined,
-        groupByProject: true,
-        onNewTask: expect.any(Function),
-        onSettings: expect.any(Function),
-        settingsActive: true,
-      }),
-      undefined,
-    );
+    expect(surfaceMocks.sidebar).not.toHaveBeenCalled();
     expect(surfaceMocks.settings).toHaveBeenCalledWith(
       expect.objectContaining({
         onRefresh: controller.callbacks.settings.refreshSettings,
@@ -624,7 +668,7 @@ describe("AppSurfaces callback wiring", () => {
 
   it("hides the web main surface from assistive tech while mobile navigation is open", () => {
     stubMobileWindow();
-    const controller = webControllerFor("settings");
+    const controller = webControllerFor("task");
     const tree = render(controller);
 
     expect(tree.root.findByProps({ className: "web-main-surface" }).props["aria-hidden"]).toBeUndefined();
@@ -640,7 +684,7 @@ describe("AppSurfaces callback wiring", () => {
 
   it("hides the closed mobile web navigation from assistive tech", () => {
     stubMobileWindow();
-    const controller = webControllerFor("settings");
+    const controller = webControllerFor("task");
     const tree = render(controller);
 
     expect(latestMockProps<{ hiddenFromAccessibility?: boolean }>(surfaceMocks.sidebar)?.hiddenFromAccessibility).toBe(true);
@@ -661,7 +705,7 @@ describe("AppSurfaces callback wiring", () => {
       removeEventListener: vi.fn(),
       requestAnimationFrame: (callback: FrameRequestCallback) => callback(0),
     });
-    const controller = webControllerFor("settings");
+    const controller = webControllerFor("task");
 
     render(controller);
 
@@ -1274,11 +1318,16 @@ function controllerFor(surface: AppController["bootstrap"]["surface"]): TestCont
         authenticateAgent: vi.fn(),
         createCustomAgent: vi.fn(),
         deleteCustomAgent: vi.fn(),
+        deleteMcpServer: vi.fn(),
+        getMcpServerDetails: vi.fn(),
+        getSkillDetails: vi.fn(),
         replaceCustomAgent: vi.fn(),
         refreshSettings: vi.fn(),
+        saveMcpServer: vi.fn(),
         selectSettingsTab: vi.fn(),
         setAcpTrace: vi.fn(),
         setAgentEnabled: vi.fn(),
+        setMcpServerEnabled: vi.fn(),
         setComposerSubmitShortcut: vi.fn(),
         updateCustomAgentMetadata: vi.fn(),
         unlockDeveloperSettings: vi.fn(),

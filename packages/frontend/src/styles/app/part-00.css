@@ -108,12 +108,19 @@ button {
 }
 
 .web-workbench-shell {
-  grid-template-columns: 304px minmax(0, 1fr);
+  grid-template-columns: var(--app-sidebar-width, 304px) minmax(0, 1fr);
   background:
-    linear-gradient(90deg, transparent 0, transparent 303px, var(--oa-border-subtle) 303px, transparent 305px),
+    linear-gradient(
+      90deg,
+      transparent 0,
+      transparent calc(var(--app-sidebar-width, 304px) - 1px),
+      var(--oa-border-subtle) calc(var(--app-sidebar-width, 304px) - 1px),
+      transparent calc(var(--app-sidebar-width, 304px) + 1px)
+    ),
     var(--oa-bg);
 }
 
+.web-workbench-shell .app-sidebar-pane,
 .web-workbench-shell .sidebar {
   grid-column: 1;
   grid-row: 1;

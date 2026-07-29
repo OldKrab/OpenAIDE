@@ -4,21 +4,30 @@ export type AgentEnvironmentSecretRef = {
   name: string;
 };
 
+export type McpSecretRef = {
+  kind: "mcp";
+  serverId: string;
+  field: "env" | "header";
+  name: string;
+};
+
+export type SecretRef = AgentEnvironmentSecretRef | McpSecretRef;
+
 export type SecretSyncWrite =
   | {
-      target: AgentEnvironmentSecretRef;
+      target: SecretRef;
       value: string;
       copyFrom?: never;
     }
   | {
-      target: AgentEnvironmentSecretRef;
-      copyFrom: AgentEnvironmentSecretRef;
+      target: SecretRef;
+      copyFrom: SecretRef;
       value?: never;
     };
 
 export type SecretSyncPayload = {
   writes: SecretSyncWrite[];
-  deletes: AgentEnvironmentSecretRef[];
+  deletes: SecretRef[];
 };
 
 export type SecretTransactionApplyMessage = {

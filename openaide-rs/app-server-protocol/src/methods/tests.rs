@@ -40,6 +40,12 @@ fn agent_methods_use_agent_namespace() {
 }
 
 #[test]
+fn settings_methods_expose_skill_list_and_lazy_skill_details() {
+    assert_eq!(SettingsGetSkills::METHOD, "settings/getSkills");
+    assert_eq!(SettingsGetSkillDetails::METHOD, "settings/getSkillDetails");
+}
+
+#[test]
 fn attachment_methods_use_attachment_namespace() {
     assert_eq!(AttachmentListRoots::METHOD, "attachment/listRoots");
     assert_eq!(AttachmentListDirectory::METHOD, "attachment/listDirectory");

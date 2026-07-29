@@ -28,7 +28,13 @@ export const AGENT_SET_ENABLED = "agent/setEnabled" as const;
 
 export const SETTINGS_GET_AGENT_DETAILS = "settings/getAgentDetails" as const;
 export const SETTINGS_GET_MCP_SERVERS = "settings/getMcpServers" as const;
+export const MCP_GET_SERVER_DETAILS = "mcp/getServerDetails" as const;
+export const MCP_CREATE_SERVER = "mcp/createServer" as const;
+export const MCP_UPDATE_SERVER = "mcp/updateServer" as const;
+export const MCP_DELETE_SERVER = "mcp/deleteServer" as const;
+export const MCP_SET_SERVER_ENABLED = "mcp/setServerEnabled" as const;
 export const SETTINGS_GET_SKILLS = "settings/getSkills" as const;
+export const SETTINGS_GET_SKILL_DETAILS = "settings/getSkillDetails" as const;
 export const SETTINGS_GET_PREFERENCES = "settings/getPreferences" as const;
 export const SETTINGS_UPDATE_PREFERENCES = "settings/updatePreferences" as const;
 export const SETTINGS_GET_RUNTIME = "settings/getRuntime" as const;
@@ -301,17 +307,73 @@ export type SettingsMcpServersParams = Record<symbol, never>;
 
 export type SettingsMcpServersResult = { generatedAt: string, availability: SettingsProjectionAvailability, servers: Array<SettingsMcpServerRecord>, notices?: Array<SettingsProjectionNotice>, };
 
+export type McpGetServerDetailsParams = {
+/**
+ * Stable opaque identifier returned by `settings/getMcpServers`.
+ */
+id: string, };
+
+export type McpGetServerDetailsResult = { generatedAt: string, server: McpServerDefinition, };
+
+export type McpCreateServerParams = { server: McpServerDefinition, };
+
+export type McpUpdateServerParams = { server: McpServerDefinition,
+/**
+ * Guards secure-storage cleanup against a stale editor.
+ */
+expectedSecretNames?: Array<string>, };
+
+export type McpDeleteServerParams = { id: string,
+/**
+ * Names the host can safely remove after the durable definition is deleted.
+ */
+expectedSecretNames?: Array<string>, };
+
+export type McpSetServerEnabledParams = { id: string, enabled: boolean, };
+
+export type McpMutationResult = { serverId: string, servers: SettingsMcpServersResult, };
+
+export type McpServerDefinition = { id: string, label: string, description?: string | null, enabled: boolean, scope: McpServerScope, configuration: McpServerConfiguration, };
+
+export type McpServerScope = { "kind": "global" } | { "kind": "project", projectId: ProjectId, };
+
+export type McpServerConfiguration = { "transport": "stdio",
+/**
+ * Original user input retained so the editor can preserve formatting.
+ */
+commandLine: string, command: string, args?: Array<string>, env?: { [key in string]: string }, secretEnv?: Array<string>, } | { "transport": "http", url: string, headers?: { [key in string]: string }, secretHeaders?: Array<string>, } | { "transport": "sse", url: string, headers?: { [key in string]: string }, secretHeaders?: Array<string>, };
+
 export type SettingsProjectionAvailability = "available" | "unavailable";
 
-export type SettingsMcpServerRecord = { id: string, label: string, enabled: boolean, scope: SettingsScope, transport: SettingsMcpServerTransport, status: SettingsMcpServerStatus, description?: string | null, toolCount?: number | null, lastCheckedAt?: string | null, lastErrorSummary?: string | null, };
+export type SettingsMcpServerRecord = { id: string, label: string, enabled: boolean, scope: McpServerScope, transport: SettingsMcpServerTransport, status: SettingsMcpServerStatus, description?: string | null, validationError?: string | null, };
 
 export type SettingsMcpServerTransport = "stdio" | "http" | "sse";
 
-export type SettingsMcpServerStatus = "unknown" | "available" | "failed" | "disabled";
+export type SettingsMcpServerStatus = "configured" | "invalid" | "disabled";
 
 export type SettingsSkillsParams = Record<symbol, never>;
 
 export type SettingsSkillsResult = { generatedAt: string, availability: SettingsProjectionAvailability, skills: Array<SettingsSkillRecord>, notices?: Array<SettingsProjectionNotice>, };
+
+export type SettingsSkillDetailsParams = {
+/**
+ * Opaque identifier returned by `settings/getSkills`.
+ */
+id: string, };
+
+export type SettingsSkillDetailsResult = { generatedAt: string, skill: SettingsSkillRecord, document: SettingsSkillDocument, };
+
+export type SettingsSkillDocument = { name: string, description: string, additionalFields?: Array<SettingsSkillDocumentField>, instructions: string,
+/**
+ * Exact file contents for lossless inspection and unsupported YAML syntax.
+ */
+source: string, };
+
+export type SettingsSkillDocumentField = { name: string,
+/**
+ * YAML representation of the field value, including nested structures.
+ */
+value: string, };
 
 export type SettingsSkillRecord = { id: string, label: string, scope: SettingsScope, sourceLabel: string, status: SettingsSkillStatus, description?: string | null, warnings?: Array<string>, tags?: Array<string>, lastScannedAt: string, };
 
@@ -897,7 +959,7 @@ export type PendingRequestScope = { "kind": "client", clientInstanceId: ClientIn
 
 export type PendingRequestKind = "permission" | "question" | "secret" | "shellCapability";
 
-export type ProtocolMethod = typeof CLIENT_PROBE | typeof CLIENT_INITIALIZE | typeof CLIENT_CAPABILITIES_CHANGED | typeof CLIENT_HEARTBEAT | typeof CLIENT_DETACH | typeof PENDING_REQUEST_RESOLVE | typeof STATE_SUBSCRIBE | typeof STATE_UNSUBSCRIBE | typeof DIAGNOSTICS_GET_RUNTIME | typeof SUPPORT_RECOVER_STUCK_SESSIONS | typeof AGENT_PROBE | typeof AGENT_AUTHENTICATE | typeof AGENT_LIST_SESSIONS | typeof AGENT_CREATE_CUSTOM | typeof AGENT_UPDATE_CUSTOM_METADATA | typeof AGENT_REPLACE_CUSTOM | typeof AGENT_DELETE_CUSTOM | typeof AGENT_SET_ENABLED | typeof SETTINGS_GET_AGENT_DETAILS | typeof SETTINGS_GET_MCP_SERVERS | typeof SETTINGS_GET_SKILLS | typeof SETTINGS_GET_PREFERENCES | typeof SETTINGS_UPDATE_PREFERENCES | typeof SETTINGS_GET_RUNTIME | typeof SETTINGS_UPDATE_RUNTIME | typeof ATTACHMENT_LIST_ROOTS | typeof ATTACHMENT_LIST_DIRECTORY | typeof ATTACHMENT_CREATE_FILE_REFERENCE | typeof ATTACHMENT_CREATE_LOCAL_FILE_REFERENCES | typeof ATTACHMENT_CREATE_PASTED_IMAGE | typeof ATTACHMENT_CREATE_EMBEDDED_CANDIDATE | typeof ATTACHMENT_CONFIRM_EMBEDDED | typeof ATTACHMENT_REFRESH_HANDLES | typeof ATTACHMENT_RELEASE | typeof ATTACHMENT_REVEAL | typeof ATTACHMENT_REVEAL_SENT | typeof SHELL_RESOLVE_FILE_REVEAL | typeof WORKSPACE_LIST_ROOTS | typeof WORKSPACE_LIST_DIRECTORY | typeof WORKTREE_REFRESH | typeof WORKTREE_CREATE | typeof WORKTREE_RECREATE | typeof WORKTREE_REMOVAL_PREFLIGHT | typeof WORKTREE_REMOVE | typeof WORKTREE_RENAME | typeof WORKTREE_RESOLVE_FOLDER | typeof WORKTREE_LINKED_TASKS | typeof TASK_ACQUIRE | typeof TASK_ACQUIRE_IN_WORKTREE | typeof TASK_SEARCH_FILES | typeof TASK_ADOPT_NATIVE_SESSION | typeof TASK_SEND | typeof TASK_SET_CONFIG_OPTION | typeof TASK_SET_TITLE | typeof TASK_CANCEL | typeof TASK_OPEN | typeof TASK_MARK_READ | typeof TASK_CHAT_PAGE | typeof TASK_LIST | typeof TASK_NAVIGATION_REFRESH | typeof TASK_NAVIGATION_LOAD_MORE | typeof NATIVE_SESSION_ARCHIVE | typeof NATIVE_SESSION_RESTORE | typeof TASK_RELEASE | typeof TASK_ARCHIVE | typeof TASK_RESTORE | typeof TASK_SET_PINNED | typeof TASK_TOOL_IMAGE_PREVIEW | typeof TASK_COMPOSER_HISTORY;
+export type ProtocolMethod = typeof CLIENT_PROBE | typeof CLIENT_INITIALIZE | typeof CLIENT_CAPABILITIES_CHANGED | typeof CLIENT_HEARTBEAT | typeof CLIENT_DETACH | typeof PENDING_REQUEST_RESOLVE | typeof STATE_SUBSCRIBE | typeof STATE_UNSUBSCRIBE | typeof DIAGNOSTICS_GET_RUNTIME | typeof SUPPORT_RECOVER_STUCK_SESSIONS | typeof AGENT_PROBE | typeof AGENT_AUTHENTICATE | typeof AGENT_LIST_SESSIONS | typeof AGENT_CREATE_CUSTOM | typeof AGENT_UPDATE_CUSTOM_METADATA | typeof AGENT_REPLACE_CUSTOM | typeof AGENT_DELETE_CUSTOM | typeof AGENT_SET_ENABLED | typeof SETTINGS_GET_AGENT_DETAILS | typeof SETTINGS_GET_MCP_SERVERS | typeof MCP_GET_SERVER_DETAILS | typeof MCP_CREATE_SERVER | typeof MCP_UPDATE_SERVER | typeof MCP_DELETE_SERVER | typeof MCP_SET_SERVER_ENABLED | typeof SETTINGS_GET_SKILLS | typeof SETTINGS_GET_SKILL_DETAILS | typeof SETTINGS_GET_PREFERENCES | typeof SETTINGS_UPDATE_PREFERENCES | typeof SETTINGS_GET_RUNTIME | typeof SETTINGS_UPDATE_RUNTIME | typeof ATTACHMENT_LIST_ROOTS | typeof ATTACHMENT_LIST_DIRECTORY | typeof ATTACHMENT_CREATE_FILE_REFERENCE | typeof ATTACHMENT_CREATE_LOCAL_FILE_REFERENCES | typeof ATTACHMENT_CREATE_PASTED_IMAGE | typeof ATTACHMENT_CREATE_EMBEDDED_CANDIDATE | typeof ATTACHMENT_CONFIRM_EMBEDDED | typeof ATTACHMENT_REFRESH_HANDLES | typeof ATTACHMENT_RELEASE | typeof ATTACHMENT_REVEAL | typeof ATTACHMENT_REVEAL_SENT | typeof SHELL_RESOLVE_FILE_REVEAL | typeof WORKSPACE_LIST_ROOTS | typeof WORKSPACE_LIST_DIRECTORY | typeof WORKTREE_REFRESH | typeof WORKTREE_CREATE | typeof WORKTREE_RECREATE | typeof WORKTREE_REMOVAL_PREFLIGHT | typeof WORKTREE_REMOVE | typeof WORKTREE_RENAME | typeof WORKTREE_RESOLVE_FOLDER | typeof WORKTREE_LINKED_TASKS | typeof TASK_ACQUIRE | typeof TASK_ACQUIRE_IN_WORKTREE | typeof TASK_SEARCH_FILES | typeof TASK_ADOPT_NATIVE_SESSION | typeof TASK_SEND | typeof TASK_SET_CONFIG_OPTION | typeof TASK_SET_TITLE | typeof TASK_CANCEL | typeof TASK_OPEN | typeof TASK_MARK_READ | typeof TASK_CHAT_PAGE | typeof TASK_LIST | typeof TASK_NAVIGATION_REFRESH | typeof TASK_NAVIGATION_LOAD_MORE | typeof NATIVE_SESSION_ARCHIVE | typeof NATIVE_SESSION_RESTORE | typeof TASK_RELEASE | typeof TASK_ARCHIVE | typeof TASK_RESTORE | typeof TASK_SET_PINNED | typeof TASK_TOOL_IMAGE_PREVIEW | typeof TASK_COMPOSER_HISTORY;
 export type RequestParamsByMethod = {
   [CLIENT_PROBE]: ClientProbeParams;
   [CLIENT_INITIALIZE]: InitializeParams;
@@ -919,7 +981,13 @@ export type RequestParamsByMethod = {
   [AGENT_SET_ENABLED]: AgentSetEnabledParams;
   [SETTINGS_GET_AGENT_DETAILS]: AgentSettingsDetailsParams;
   [SETTINGS_GET_MCP_SERVERS]: SettingsMcpServersParams;
+  [MCP_GET_SERVER_DETAILS]: McpGetServerDetailsParams;
+  [MCP_CREATE_SERVER]: McpCreateServerParams;
+  [MCP_UPDATE_SERVER]: McpUpdateServerParams;
+  [MCP_DELETE_SERVER]: McpDeleteServerParams;
+  [MCP_SET_SERVER_ENABLED]: McpSetServerEnabledParams;
   [SETTINGS_GET_SKILLS]: SettingsSkillsParams;
+  [SETTINGS_GET_SKILL_DETAILS]: SettingsSkillDetailsParams;
   [SETTINGS_GET_PREFERENCES]: AppPreferencesParams;
   [SETTINGS_UPDATE_PREFERENCES]: AppPreferencesUpdateParams;
   [SETTINGS_GET_RUNTIME]: RuntimeSettingsParams;
@@ -991,7 +1059,13 @@ export type ResponseResultByMethod = {
   [AGENT_SET_ENABLED]: AgentSetEnabledResult;
   [SETTINGS_GET_AGENT_DETAILS]: AgentSettingsDetailsResult;
   [SETTINGS_GET_MCP_SERVERS]: SettingsMcpServersResult;
+  [MCP_GET_SERVER_DETAILS]: McpGetServerDetailsResult;
+  [MCP_CREATE_SERVER]: McpMutationResult;
+  [MCP_UPDATE_SERVER]: McpMutationResult;
+  [MCP_DELETE_SERVER]: McpMutationResult;
+  [MCP_SET_SERVER_ENABLED]: McpMutationResult;
   [SETTINGS_GET_SKILLS]: SettingsSkillsResult;
+  [SETTINGS_GET_SKILL_DETAILS]: SettingsSkillDetailsResult;
   [SETTINGS_GET_PREFERENCES]: AppPreferencesResult;
   [SETTINGS_UPDATE_PREFERENCES]: AppPreferencesResult;
   [SETTINGS_GET_RUNTIME]: RuntimeSettingsResult;
@@ -1072,7 +1146,13 @@ export type AgentDeleteCustomResponse = ResponseEnvelope<AgentDeleteCustomResult
 export type AgentSetEnabledResponse = ResponseEnvelope<AgentSetEnabledResult>;
 export type SettingsGetAgentDetailsResponse = ResponseEnvelope<AgentSettingsDetailsResult>;
 export type SettingsGetMcpServersResponse = ResponseEnvelope<SettingsMcpServersResult>;
+export type McpGetServerDetailsResponse = ResponseEnvelope<McpGetServerDetailsResult>;
+export type McpCreateServerResponse = ResponseEnvelope<McpMutationResult>;
+export type McpUpdateServerResponse = ResponseEnvelope<McpMutationResult>;
+export type McpDeleteServerResponse = ResponseEnvelope<McpMutationResult>;
+export type McpSetServerEnabledResponse = ResponseEnvelope<McpMutationResult>;
 export type SettingsGetSkillsResponse = ResponseEnvelope<SettingsSkillsResult>;
+export type SettingsGetSkillDetailsResponse = ResponseEnvelope<SettingsSkillDetailsResult>;
 export type SettingsGetPreferencesResponse = ResponseEnvelope<AppPreferencesResult>;
 export type SettingsUpdatePreferencesResponse = ResponseEnvelope<AppPreferencesResult>;
 export type SettingsGetRuntimeResponse = ResponseEnvelope<RuntimeSettingsResult>;
