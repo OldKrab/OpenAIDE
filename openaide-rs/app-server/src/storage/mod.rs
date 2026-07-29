@@ -160,6 +160,11 @@ impl Store {
         &self.inner.task_journal
     }
 
+    /// Permanently removes local Task, Chat, Tool-artifact, and Composer History data.
+    pub(crate) fn reset_task_history(&self) -> Result<(), RuntimeError> {
+        self.inner.task_journal.reset_task_history()
+    }
+
     /// Installs the current Task runtime's terminal-detail publication sink.
     /// Store retains the sole commit receiver, so runtime replacement swaps a
     /// callback instead of creating competing storage subscriptions.

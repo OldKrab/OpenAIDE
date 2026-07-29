@@ -1,4 +1,4 @@
-import { Search } from "lucide-react";
+import { AlertTriangle, Search } from "lucide-react";
 import { useState } from "react";
 import type { ReactNode } from "react";
 import type {
@@ -8,10 +8,12 @@ import type {
 } from "@openaide/app-shell-contracts";
 import type { DesktopNotificationSettings } from "../../shells/webTaskNotifications";
 import { usesMobileComposerBehavior } from "../mobileComposerBehavior";
+import { PopupDialog } from "../Popup";
 
 export function GeneralSettingsTab({
   developerSettingsUnlocked = false,
   desktopNotifications,
+  onResetTaskHistory,
   onSetAcpTrace,
   onSetComposerSubmitShortcut,
   onSetDesktopNotifications,
@@ -20,6 +22,7 @@ export function GeneralSettingsTab({
 }: {
   developerSettingsUnlocked?: boolean;
   desktopNotifications?: DesktopNotificationSettings;
+  onResetTaskHistory?: () => Promise<void>;
   onSetAcpTrace: (enabled: boolean) => void;
   onSetComposerSubmitShortcut: (shortcut: ComposerSubmitShortcut) => void;
   onSetDesktopNotifications?: (enabled: boolean) => void | Promise<void>;
@@ -124,6 +127,20 @@ export function GeneralSettingsTab({
     });
   }
 
+  if (onResetTaskHistory) {
+    groups.push({
+      id: "recovery",
+      label: "Recovery",
+      rows: [{
+        id: "reset-task-history",
+        label: "Reset task history",
+        detail: "Delete local Tasks, chats, tool details, and recalled composer prompts.",
+        searchText: "recovery reset task history clear delete local data chats tool details composer prompts",
+        value: <ResetTaskHistoryButton onReset={onResetTaskHistory} />,
+      }],
+    });
+  }
+
   const normalizedQuery = query.trim().toLowerCase();
   const visibleGroups = normalizedQuery
     ? groups
@@ -174,6 +191,71 @@ export function GeneralSettingsTab({
         )}
       </div>
     </div>
+  );
+}
+
+function ResetTaskHistoryButton({ onReset }: { onReset: () => Promise<void> }) {
+  const [open, setOpen] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const [error, setError] = useState<string>();
+  const close = () => {
+    if (resetting) return;
+    setError(undefined);
+    setOpen(false);
+  };
+  const confirm = async () => {
+    setResetting(true);
+    setError(undefined);
+    try {
+      await onReset();
+      setOpen(false);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Unable to reset Task history.");
+    } finally {
+      setResetting(false);
+    }
+  };
+
+  return (
+    <>
+      <button
+        aria-label="Reset task history"
+        className="settings-danger-button"
+        onClick={() => setOpen(true)}
+        type="button"
+      >
+        Reset
+      </button>
+      <PopupDialog
+        className="settings-reset-dialog"
+        label="Reset task history confirmation"
+        onOpenChange={(nextOpen) => { if (!nextOpen) close(); }}
+        open={open}
+      >
+        <header>
+          <AlertTriangle size={17} />
+          <div>
+            <strong>Reset task history?</strong>
+            <small>This cannot be undone.</small>
+          </div>
+        </header>
+        <p>Permanently delete all OpenAIDE Tasks, chats, tool details, and recalled composer prompts from this device.</p>
+        <p>Projects, files, worktrees, settings, credentials, and Agent-owned sessions are preserved. Agent-owned sessions may appear again in history.</p>
+        {error ? <p className="settings-reset-error" role="alert">{error}</p> : null}
+        <footer>
+          <button disabled={resetting} onClick={close} type="button">Cancel</button>
+          <button
+            aria-label="Confirm reset task history"
+            className="danger"
+            disabled={resetting}
+            onClick={() => void confirm()}
+            type="button"
+          >
+            {resetting ? "Resetting…" : "Reset task history"}
+          </button>
+        </footer>
+      </PopupDialog>
+    </>
   );
 }
 

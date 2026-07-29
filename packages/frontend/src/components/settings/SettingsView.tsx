@@ -64,6 +64,7 @@ export function SettingsView({
   onGetMcpServerDetails = async () => { throw new Error("MCP settings require the App Server."); },
   onGetSkillDetails,
   onReplaceCustomAgent,
+  onResetTaskHistory,
   onSetAgentEnabled,
   onSetMcpServerEnabled = () => undefined,
   onSaveMcpServer = () => undefined,
@@ -93,6 +94,7 @@ export function SettingsView({
   onGetSkillDetails?: (id: string) => Promise<SkillSettingsDetails>;
   onNewTaskInWorktree?: (project: ProjectOption, worktree: WorktreeSummary) => void;
   onReplaceCustomAgent: (params: CustomAgentReplaceParams) => void;
+  onResetTaskHistory?: () => Promise<void>;
   onSetAgentEnabled: (agentId: string, enabled: boolean) => void;
   onSetMcpServerEnabled?: (id: string, enabled: boolean) => void;
   onSaveMcpServer?: (input: McpServerSaveInput) => void;
@@ -319,6 +321,7 @@ export function SettingsView({
             onGetSkillDetails={onGetSkillDetails}
             onNewTaskInWorktree={onNewTaskInWorktree}
             onReplaceCustomAgent={onReplaceCustomAgent}
+            onResetTaskHistory={onResetTaskHistory}
             onSetAcpTrace={onSetAcpTrace}
             onSetAgentEnabled={onSetAgentEnabled}
             onSetMcpServerEnabled={onSetMcpServerEnabled}
@@ -362,6 +365,7 @@ function SettingsTabContent({
   onGetSkillDetails,
   onNewTaskInWorktree,
   onReplaceCustomAgent,
+  onResetTaskHistory,
   onSetAgentEnabled,
   onSetMcpServerEnabled,
   onSaveMcpServer,
@@ -395,6 +399,7 @@ function SettingsTabContent({
   onGetSkillDetails?: (id: string) => Promise<SkillSettingsDetails>;
   onNewTaskInWorktree?: (project: ProjectOption, worktree: WorktreeSummary) => void;
   onReplaceCustomAgent: (params: CustomAgentReplaceParams) => void;
+  onResetTaskHistory?: () => Promise<void>;
   onSetAgentEnabled: (agentId: string, enabled: boolean) => void;
   onSetMcpServerEnabled: (id: string, enabled: boolean) => void;
   onSaveMcpServer: (input: McpServerSaveInput) => void;
@@ -443,6 +448,7 @@ function SettingsTabContent({
           developerSettingsUnlocked={developerSettingsUnlocked}
           desktopNotifications={desktopNotifications}
           onSetAcpTrace={onSetAcpTrace}
+          onResetTaskHistory={onResetTaskHistory}
           onSetComposerSubmitShortcut={onSetComposerSubmitShortcut}
           onSetDesktopNotifications={onSetDesktopNotifications}
           preferences={preferences}

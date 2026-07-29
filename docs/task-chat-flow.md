@@ -427,6 +427,27 @@ Entering history saves the exact unsent text and caret. Recalled text is an edit
 
 Changing Task or New Task Project resets the active browsing cursor and installs the correct prefetched scope without transferring browsing state between Composers. Frontend owns only the ephemeral browsing cursor, saved draft text and caret, visual-line detection, and key handling. It does not derive or persist another history from rendered Chat.
 
+## Reset Task History
+
+Common Settings exposes **Reset task history** as a destructive recovery action,
+not as repair and not as a generic data reset. Its confirmation states that the
+operation is irreversible and deletes all OpenAIDE Tasks, Chat, Tool artifacts,
+Composer History, and local Native Session bindings. It also states that
+Projects, project files, Managed and External Worktrees, Agents, MCP Servers,
+Skills, preferences, credentials, and Agent-owned Native Sessions are preserved.
+The action never calls an Agent session-deletion method; preserved Native
+Sessions may later reappear through Native Session Discovery.
+
+App Server owns the reset for the selected state root. After confirmation it
+cancels running and waiting Task activity, settles runtime and durability
+barriers, permanently removes the scoped local history, and only then publishes
+empty authoritative Task and Composer History state to every connected client.
+Frontend leaves deleted Task surfaces after that publication. Failure is visible
+and never presents a partial reset as success.
+
+The reset path does not hydrate or deserialize individual Tasks, so an unreadable
+Task payload cannot prevent the recovery action that removes it.
+
 ## Images, File Attachments, And Workspace File Mentions
 
 An unsent Image is part of the Frontend-owned Composer draft, not a Task resource. Paste, drag/drop, and the image picker are only input methods for the same Image content kind.

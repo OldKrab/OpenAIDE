@@ -17,6 +17,21 @@ fn control_capacity_remains_when_one_task_fills_its_stream_lane() {
 }
 
 #[test]
+fn shutdown_waits_for_an_already_requested_reset() {
+    let scheduler = Scheduler::new();
+    let (reset_reply, _reset_result) = mpsc::channel();
+    scheduler.request_reset(reset_reply).unwrap();
+    let (shutdown_reply, _shutdown_result) = mpsc::channel();
+    scheduler
+        .request_shutdown(shutdown_reply)
+        .expect("shutdown queues behind reset");
+
+    assert!(matches!(scheduler.next(), NextWork::Reset(_)));
+    scheduler.finish_reset();
+    assert!(matches!(scheduler.next(), NextWork::Shutdown(_)));
+}
+
+#[test]
 fn full_stream_lane_can_be_observed_without_blocking_the_caller() {
     let scheduler = Scheduler::new();
     let (full_reply, _full_receipt) = mpsc::channel();

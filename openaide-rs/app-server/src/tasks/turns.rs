@@ -481,6 +481,39 @@ impl TurnRunner {
         first_error.map_or(Ok(()), Err)
     }
 
+    /// Settles every active turn without shutting down the reusable Agent runtime.
+    pub(crate) fn settle_for_task_history_reset(&self) -> Result<(), RuntimeError> {
+        let active_turns = self
+            .active_turns
+            .turns
+            .lock()
+            .expect("active turn registry poisoned")
+            .iter()
+            .map(|(turn_id, active)| (turn_id.clone(), active.clone()))
+            .collect::<Vec<_>>();
+        for (_, active) in &active_turns {
+            active.cancellation.cancel();
+        }
+        let mut first_error = None;
+        for (turn_id, active) in active_turns {
+            if let Err(error) = self.finalize_shutdown_turn(&active.task_id, &turn_id) {
+                first_error.get_or_insert(error);
+            }
+        }
+        if let Err(error) = self.wait_for_active_turns_to_exit() {
+            first_error.get_or_insert(error);
+        }
+        first_error.map_or(Ok(()), Err)
+    }
+
+    /// Closes OpenAIDE's live handle without deleting the Agent-owned session.
+    pub(crate) fn close_session_for_task_history_reset(
+        &self,
+        session: &AgentSessionKey,
+    ) -> Result<(), RuntimeError> {
+        self.agent.close_session(session)
+    }
+
     #[cfg(test)]
     pub(crate) fn active_turns(&self) -> HashSet<(String, String)> {
         self.active_turns

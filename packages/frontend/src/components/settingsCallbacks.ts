@@ -1,4 +1,8 @@
-import { SETTINGS_UPDATE_PREFERENCES, SETTINGS_UPDATE_RUNTIME } from "@openaide/app-server-client";
+import {
+  SETTINGS_RESET_TASK_HISTORY,
+  SETTINGS_UPDATE_PREFERENCES,
+  SETTINGS_UPDATE_RUNTIME,
+} from "@openaide/app-server-client";
 import { postHostMessage, replaceSettingsTabRoute } from "../services/hostBridge";
 import { mapProtocolAppPreferences, protocolComposerSubmitShortcut } from "../state/appPreferencesMapping";
 import { mapProtocolRuntimeSettings } from "../state/runtimeSettingsMapping";
@@ -85,6 +89,10 @@ export function createSettingsCallbacks({
           if (!handled) dispatch({ type: "settings:error", message: settingsReadRequiredMessage() });
         })
         .catch((error) => dispatch({ type: "settings:error", message: safeErrorMessage(error) }));
+    },
+    resetTaskHistory: async () => {
+      if (!backendConnection?.request) throw new Error(appServerRequiredMessage());
+      await backendConnection.request(SETTINGS_RESET_TASK_HISTORY, {});
     },
     replaceCustomAgent: (payload) => {
       dispatch({ type: "settings:start" });

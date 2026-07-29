@@ -4,6 +4,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::protocol::errors::RuntimeError;
 use crate::storage::records::{MessageMeta, StoredMessage, TaskRecord};
@@ -15,7 +16,8 @@ use super::store::RecoveredTask;
 pub(super) const TASK_FILE: &str = "task.json";
 pub(super) const CHAT_SNAPSHOT_FILE: &str = "chat.snapshot";
 pub(super) const CHAT_JOURNAL_FILE: &str = "chat.journal";
-const SCHEMA_VERSION: u16 = 1;
+const TASK_SCHEMA_VERSION: u16 = 1;
+pub(super) const CHAT_SCHEMA_VERSION: u16 = 2;
 
 #[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -56,7 +58,7 @@ pub(super) fn load_task(task_dir: &Path) -> Result<Option<TaskMetadata>, Runtime
         Err(error) => return Err(error.into()),
     };
     let file: DurableTaskFile = serde_json::from_slice(&bytes)?;
-    validate_schema(file.schema_version)?;
+    validate_schema("Task metadata", file.schema_version, TASK_SCHEMA_VERSION)?;
     Ok(Some(TaskMetadata {
         task: file.task,
         storage_sequence: file.storage_sequence,
@@ -72,14 +74,13 @@ pub(super) fn load_projection(
     let Some(metadata) = load_task(task_dir)? else {
         return Ok(None);
     };
-    let snapshot: ChatSnapshotFile =
-        serde_json::from_slice(&fs::read(task_dir.join(&metadata.chat_snapshot))?)?;
-    validate_schema(snapshot.schema_version)?;
+    let snapshot_path = task_dir.join(&metadata.chat_snapshot);
+    let (snapshot, migrated_snapshot) = load_chat_snapshot(&snapshot_path)?;
     let mut projection = TaskProjection {
         task: metadata.task.clone(),
-        messages: snapshot.messages,
-        message_meta: snapshot.message_meta,
-        artifact_heads: snapshot.artifact_heads,
+        messages: snapshot.messages.clone(),
+        message_meta: snapshot.message_meta.clone(),
+        artifact_heads: snapshot.artifact_heads.clone(),
     };
     let journal = task_dir.join(&metadata.chat_journal);
     if journal.is_file() {
@@ -129,12 +130,28 @@ pub(super) fn load_projection(
                 &metadata.chat_journal,
                 &FaultInjector::disabled(),
             )?;
+            if migrated_snapshot {
+                durable_replace_json(
+                    &snapshot_path,
+                    &snapshot,
+                    JournalKind::Task,
+                    &FaultInjector::disabled(),
+                )?;
+            }
             return Ok(Some((projection, repaired_storage_sequence)));
         }
     } else if metadata.chat_sequence > 0 {
         return Err(RuntimeError::Storage(
             "Committed Chat journal generation is missing".to_string(),
         ));
+    }
+    if migrated_snapshot {
+        durable_replace_json(
+            &snapshot_path,
+            &snapshot,
+            JournalKind::Task,
+            &FaultInjector::disabled(),
+        )?;
     }
     Ok(Some((projection, metadata.storage_sequence)))
 }
@@ -148,7 +165,7 @@ pub(super) fn publish_initial(
 ) -> Result<(), RuntimeError> {
     fs::create_dir_all(task_dir)?;
     let snapshot = ChatSnapshotFile {
-        schema_version: SCHEMA_VERSION,
+        schema_version: CHAT_SCHEMA_VERSION,
         messages: projection.messages.clone(),
         message_meta: projection.message_meta.clone(),
         artifact_heads: projection.artifact_heads.clone(),
@@ -191,6 +208,7 @@ pub(super) fn append(
             .ok_or_else(|| RuntimeError::Storage("Chat journal sequence overflow".to_string()))?;
         let frame = JournalFrame {
             format_version: 1,
+            schema_version: CHAT_SCHEMA_VERSION,
             sequence: next,
             operations: chat_operations,
         };
@@ -228,7 +246,7 @@ pub(super) fn compact(
     durable_replace_json(
         &task_dir.join(&new_snapshot),
         &ChatSnapshotFile {
-            schema_version: SCHEMA_VERSION,
+            schema_version: CHAT_SCHEMA_VERSION,
             messages: projection.messages.clone(),
             message_meta: projection.message_meta.clone(),
             artifact_heads: projection.artifact_heads.clone(),
@@ -355,7 +373,7 @@ fn publish_task(
     durable_replace_json(
         &task_dir.join(TASK_FILE),
         &DurableTaskFile {
-            schema_version: SCHEMA_VERSION,
+            schema_version: TASK_SCHEMA_VERSION,
             storage_sequence,
             chat_sequence,
             chat_snapshot: chat_snapshot.to_string(),
@@ -425,12 +443,78 @@ fn remove_if_present(path: &Path) -> Result<(), RuntimeError> {
     }
 }
 
-fn validate_schema(version: u16) -> Result<(), RuntimeError> {
-    if version == SCHEMA_VERSION {
+fn load_chat_snapshot(path: &Path) -> Result<(ChatSnapshotFile, bool), RuntimeError> {
+    let bytes = fs::read(path)?;
+    let mut value: Value = serde_json::from_slice(&bytes)?;
+    let version = value
+        .get("schemaVersion")
+        .and_then(Value::as_u64)
+        .and_then(|version| u16::try_from(version).ok())
+        .ok_or_else(|| {
+            RuntimeError::Storage("Chat snapshot schema version is missing".to_string())
+        })?;
+    let migrated = match version {
+        CHAT_SCHEMA_VERSION => false,
+        1 => {
+            migrate_v1_tool_presentations(&mut value);
+            value["schemaVersion"] = Value::from(CHAT_SCHEMA_VERSION);
+            true
+        }
+        _ => {
+            return Err(RuntimeError::Storage(format!(
+                "Unsupported Chat snapshot schema version {version}"
+            )))
+        }
+    };
+    let snapshot: ChatSnapshotFile = serde_json::from_value(value)?;
+    validate_schema(
+        "Chat snapshot",
+        snapshot.schema_version,
+        CHAT_SCHEMA_VERSION,
+    )?;
+    Ok((snapshot, migrated))
+}
+
+/// Converts the only released v1 Chat shape that cannot deserialize into v2.
+/// Migration stays at the durable boundary so runtime model evolution does not
+/// silently redefine already-written Task history.
+pub(super) fn migrate_v1_tool_presentations(value: &mut Value) {
+    match value {
+        Value::Array(values) => {
+            for value in values {
+                migrate_v1_tool_presentations(value);
+            }
+        }
+        Value::Object(fields) => {
+            if let Some(Value::Object(presentation)) = fields.get_mut("presentation") {
+                if !presentation.contains_key("actions") {
+                    let kind = presentation.remove("kind");
+                    let subjects = presentation.remove("subjects");
+                    if let (Some(kind), Some(subjects)) = (kind, subjects) {
+                        presentation.insert(
+                            "actions".to_string(),
+                            Value::Array(vec![serde_json::json!({
+                                "kind": kind,
+                                "subjects": subjects,
+                            })]),
+                        );
+                    }
+                }
+            }
+            for value in fields.values_mut() {
+                migrate_v1_tool_presentations(value);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn validate_schema(kind: &str, version: u16, current: u16) -> Result<(), RuntimeError> {
+    if version == current {
         Ok(())
     } else {
         Err(RuntimeError::Storage(format!(
-            "Unsupported split Task schema version {version}"
+            "Unsupported {kind} schema version {version}"
         )))
     }
 }

@@ -65,6 +65,20 @@ export function startAppServerStateSubscription({
     onBaselineLost,
     onBaselineReady,
     onSnapshot(snapshot, event, snapshotChanged = true) {
+      const removedTaskId = event?.payload.kind === "taskChanged"
+        && event.payload.changes.removed
+        ? event.payload.taskId
+        : undefined;
+      if (removedTaskId) {
+        dispatch({ type: "task:list:remove", taskId: removedTaskId });
+        dispatch({
+          type: "taskOpen:error",
+          taskId: removedTaskId,
+          kind: "notFound",
+          message: "Task history was reset.",
+        });
+        return;
+      }
       const liveText = event ? liveTextPresentationAction(event, snapshot) : undefined;
       if (!snapshotChanged) {
         if (liveText) dispatch(liveText);

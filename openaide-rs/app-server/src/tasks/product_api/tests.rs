@@ -5806,6 +5806,41 @@ fn support_recovery_clears_live_stuck_turn_without_waiting_for_agent() {
 }
 
 #[test]
+fn reset_task_history_settles_active_work_and_closes_without_deleting_native_session() {
+    let temp = tempfile::tempdir().unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    store
+        .write_task(&task_record(
+            "task-existing",
+            "/tmp/openaide-unit-workspace/app",
+        ))
+        .unwrap();
+    let agent = Arc::new(RecordingAgent {
+        block_prompt: true,
+        ..RecordingAgent::default()
+    });
+    let api = TaskProductApi::new(
+        store.clone(),
+        Arc::new(StorageProjectResolver::new(store.clone())),
+        AgentRegistry::default_built_ins(),
+        agent.clone(),
+        TaskUpdateNotifier::disabled(),
+    )
+    .unwrap();
+    api.send(send_params("task-existing", "hello")).unwrap();
+    wait_until(|| agent.prompts.load(Ordering::SeqCst) == 1);
+
+    let reset = api.reset_local_task_history().unwrap();
+
+    assert_eq!(reset.len(), 1);
+    assert_eq!(reset[0].task_id, TaskId::from("task-existing"));
+    assert!(store.task_journal().list_task_records().is_empty());
+    assert_eq!(api.shutdown_blockers().unwrap().active_turns, 0);
+    assert_eq!(agent.prompt_completions.load(Ordering::SeqCst), 1);
+    assert_eq!(agent.closes.load(Ordering::SeqCst), 1);
+}
+
+#[test]
 fn support_recovery_retires_an_accepted_turn_still_starting_its_session() {
     let temp = tempfile::tempdir().unwrap();
     let store = Store::open(temp.path().to_path_buf()).unwrap();

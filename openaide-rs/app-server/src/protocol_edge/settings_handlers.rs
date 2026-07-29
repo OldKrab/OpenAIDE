@@ -1,8 +1,10 @@
 use openaide_app_server_protocol::envelopes::RequestMeta;
+use openaide_app_server_protocol::events::{AppServerEventPayload, TaskChanges};
 use openaide_app_server_protocol::settings::{
     AppPreferencesParams, AppPreferencesResult, AppPreferencesUpdateParams, McpCreateServerParams,
     McpDeleteServerParams, McpGetServerDetailsParams, McpGetServerDetailsResult, McpMutationResult,
-    McpSetServerEnabledParams, McpUpdateServerParams, RuntimeSettingsParams, RuntimeSettingsResult,
+    McpSetServerEnabledParams, McpUpdateServerParams, ResetTaskHistoryParams,
+    ResetTaskHistoryResult, RuntimeSettingsParams, RuntimeSettingsResult,
     RuntimeSettingsUpdateParams, SettingsMcpServersParams, SettingsMcpServersResult,
     SettingsSkillDetailsParams, SettingsSkillDetailsResult, SettingsSkillsParams,
     SettingsSkillsResult,
@@ -14,6 +16,48 @@ use crate::client_lifecycle::ConnectionId;
 use super::{responses, GatewayOutcome, RpcGateway};
 
 impl RpcGateway {
+    pub(super) fn handle_settings_reset_task_history(
+        &mut self,
+        connection_id: ConnectionId,
+        id: String,
+        params: Value,
+        meta: RequestMeta,
+        now: crate::client_lifecycle::AppServerTime,
+    ) -> GatewayOutcome {
+        if let Err(error) = serde_json::from_value::<ResetTaskHistoryParams>(params) {
+            return self.error(connection_id, id, meta, responses::invalid_params(error));
+        }
+        let removed_tasks = match self.task_history.reset_task_history() {
+            Ok(tasks) => tasks,
+            Err(error) => return self.error(connection_id, id, meta, error),
+        };
+        let mut events = removed_tasks
+            .into_iter()
+            .flat_map(|task| {
+                self.publish_task_payload(
+                    &task.task_id,
+                    AppServerEventPayload::TaskChanged {
+                        task_id: task.task_id.clone(),
+                        revision: task.next_revision,
+                        changes: TaskChanges {
+                            removed: true,
+                            ..TaskChanges::default()
+                        },
+                    },
+                    now,
+                )
+            })
+            .collect::<Vec<_>>();
+        events.extend(self.publish_navigation_replacement(now));
+        responses::result_with_events(
+            connection_id,
+            id,
+            meta,
+            ResetTaskHistoryResult::default(),
+            events,
+        )
+    }
+
     pub(super) fn handle_settings_get_mcp_servers(
         &mut self,
         connection_id: ConnectionId,

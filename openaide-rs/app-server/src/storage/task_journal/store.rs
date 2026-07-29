@@ -23,26 +23,14 @@ mod compaction;
 pub(super) mod failure;
 mod maintenance;
 mod recovery;
+mod reset;
 mod worker;
+pub use admission::CommitReceipt;
 pub(crate) use admission::TrySubmit;
 
 const TASK_STORE_DIR: &str = "task-store-v1";
 const TASKS_DIR: &str = "tasks";
 pub(super) const JOURNAL_FILE: &str = "task.journal";
-
-/// Handle for one admitted write. Waiting establishes durability; dropping the
-/// handle leaves the admitted write owned by the storage worker.
-pub struct CommitReceipt {
-    receiver: Receiver<Result<CommittedTaskBatch, RuntimeError>>,
-}
-
-impl CommitReceipt {
-    pub fn wait(self) -> Result<CommittedTaskBatch, RuntimeError> {
-        self.receiver.recv().map_err(|_| {
-            RuntimeError::Storage("Task journal worker stopped before commit".to_string())
-        })?
-    }
-}
 
 /// Deep Task persistence module. One worker owns ordering and physical writes;
 /// callers observe recovered projections and durable commit facts only.
@@ -113,6 +101,7 @@ impl TaskJournalStore {
     ) -> Result<(Self, Receiver<CommittedTaskBatch>), RuntimeError> {
         let store_root = state_root.join(TASK_STORE_DIR);
         frame::create_directory_durably(&store_root, frame::JournalKind::Root, faults.as_ref())?;
+        reset::cleanup_tombstones(&store_root);
         let tasks_root = store_root.join(TASKS_DIR);
         frame::create_directory_durably(&tasks_root, frame::JournalKind::Root, faults.as_ref())?;
         let (mut catalog_records, mut initially_recovered) = recovery::open_catalog(&tasks_root)?;
@@ -231,7 +220,7 @@ impl TaskJournalStore {
         validate_task_id(&write.task_id)?;
         let (reply, receiver) = mpsc::channel();
         self.inner.scheduler.admit(write, reply)?;
-        Ok(CommitReceipt { receiver })
+        Ok(CommitReceipt::new(receiver))
     }
 
     /// Reports observed retained stream payload, rather than queue length,
@@ -492,6 +481,7 @@ fn commit_batch(
     }
     let frame = JournalFrame {
         format_version: 1,
+        schema_version: super::split::CHAT_SCHEMA_VERSION,
         sequence,
         operations: reduced.task_operations,
     };

@@ -25,6 +25,7 @@ import {
   SETTINGS_GET_MCP_SERVERS,
   SETTINGS_GET_SKILL_DETAILS,
   SETTINGS_GET_SKILLS,
+  SETTINGS_RESET_TASK_HISTORY,
   SETTINGS_UPDATE_PREFERENCES,
   SETTINGS_UPDATE_RUNTIME,
   STATE_SUBSCRIBE,
@@ -1378,6 +1379,17 @@ describe("app controller callbacks", () => {
       type: "settings:error",
       message: "Agent catalog changes require the App Server.",
     });
+    expect(postHostMessage).not.toHaveBeenCalled();
+  });
+
+  it("resets Task history through BackendConnection", async () => {
+    const request = vi.fn(async () => ({}));
+
+    await callbacks({
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
+    }).settings.resetTaskHistory();
+
+    expect(request).toHaveBeenCalledWith(SETTINGS_RESET_TASK_HISTORY, {});
     expect(postHostMessage).not.toHaveBeenCalled();
   });
 

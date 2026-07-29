@@ -128,6 +128,10 @@ _Avoid_: Workspace-scoped settings, worktree settings, Project lifecycle managem
 The Settings area for repository-scoped discovery and maintenance of Git worktrees, presented in Project groups.
 _Avoid_: Project-scoped configuration, Task Workspace settings, Task lifecycle
 
+**Reset Task History**:
+An explicit, irreversible Settings action that deletes all OpenAIDE Tasks, Chat, Tool artifacts, Composer History, and Native Session bindings while preserving Projects, worktrees and project files, Agents, MCP and Skill configuration, preferences, credentials, and Agent-owned Native Sessions.
+_Avoid_: Clear data, repair, reset OpenAIDE
+
 **Support Export**:
 A hidden command that writes redacted troubleshooting data for bug reports.
 _Avoid_: Visible troubleshooting area in first-iteration Settings

@@ -17,6 +17,13 @@ pub(super) struct TurnAcceptanceCoordinator {
 }
 
 impl TurnAcceptanceCoordinator {
+    pub(super) fn clear(&self) {
+        self.pending_turns
+            .lock()
+            .expect("pending Turn ownership registry poisoned")
+            .clear();
+    }
+
     /// Serializes Send acceptance for one Task through its durable commit.
     ///
     /// This protects the Task revision and attachment reservation as one admission decision;

@@ -8,6 +8,37 @@ import type {
 import { startAppServerStateSubscription } from "./appServerStateSubscriptions";
 
 describe("startAppServerStateSubscription", () => {
+  it("clears a focused Task when the App Server resets its history", () => {
+    const task = fakeSubscription();
+    const dispatch = vi.fn();
+    startAppServerStateSubscription({
+      backendConnection: task.connection,
+      context: { stateRootId: "root_1" as StateRootId },
+      dispatch,
+      scope: { kind: "task", taskId: "task_1" as never },
+    });
+
+    task.observer().onSnapshot({ kind: "task", task: {} } as never, {
+      cursor: "cursor_2",
+      payload: {
+        kind: "taskChanged",
+        taskId: "task_1",
+        revision: 2,
+        changes: { removed: true },
+      },
+      previousCursor: "cursor_1",
+      scope: { kind: "task", stateRootId: "root_1", taskId: "task_1" },
+    } as never);
+
+    expect(dispatch).toHaveBeenNthCalledWith(1, { type: "task:list:remove", taskId: "task_1" });
+    expect(dispatch).toHaveBeenNthCalledWith(2, {
+      type: "taskOpen:error",
+      taskId: "task_1",
+      kind: "notFound",
+      message: "Task history was reset.",
+    });
+  });
+
   it("maps a session-owned Projects baseline into Frontend state", () => {
     const subscription = fakeSubscription();
     const dispatch = vi.fn();

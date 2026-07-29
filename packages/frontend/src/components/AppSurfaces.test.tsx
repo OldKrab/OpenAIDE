@@ -1324,6 +1324,7 @@ function controllerFor(surface: AppController["bootstrap"]["surface"]): TestCont
         replaceCustomAgent: vi.fn(),
         refreshSettings: vi.fn(),
         saveMcpServer: vi.fn(),
+        resetTaskHistory: vi.fn(async () => undefined),
         selectSettingsTab: vi.fn(),
         setAcpTrace: vi.fn(),
         setAgentEnabled: vi.fn(),

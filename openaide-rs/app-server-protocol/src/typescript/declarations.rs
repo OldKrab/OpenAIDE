@@ -65,14 +65,15 @@ use crate::settings::{
     AppPreferencesUpdateParams, ComposerSubmitShortcut, McpCreateServerParams,
     McpDeleteServerParams, McpGetServerDetailsParams, McpGetServerDetailsResult, McpMutationResult,
     McpServerConfiguration, McpServerDefinition, McpServerScope, McpSetServerEnabledParams,
-    McpUpdateServerParams, RuntimeAcpTraceSettings, RuntimeAcpTraceSettingsPatch,
-    RuntimeDeveloperSettings, RuntimeDeveloperSettingsPatch, RuntimeSettingsParams,
-    RuntimeSettingsResult, RuntimeSettingsUpdateParams, SettingsMcpServerRecord,
-    SettingsMcpServerStatus, SettingsMcpServerTransport, SettingsMcpServersParams,
-    SettingsMcpServersResult, SettingsProjectionAvailability, SettingsProjectionNotice,
-    SettingsProjectionNoticeSeverity, SettingsScope, SettingsSkillDetailsParams,
-    SettingsSkillDetailsResult, SettingsSkillDocument, SettingsSkillDocumentField,
-    SettingsSkillRecord, SettingsSkillStatus, SettingsSkillsParams, SettingsSkillsResult,
+    McpUpdateServerParams, ResetTaskHistoryParams, ResetTaskHistoryResult, RuntimeAcpTraceSettings,
+    RuntimeAcpTraceSettingsPatch, RuntimeDeveloperSettings, RuntimeDeveloperSettingsPatch,
+    RuntimeSettingsParams, RuntimeSettingsResult, RuntimeSettingsUpdateParams,
+    SettingsMcpServerRecord, SettingsMcpServerStatus, SettingsMcpServerTransport,
+    SettingsMcpServersParams, SettingsMcpServersResult, SettingsProjectionAvailability,
+    SettingsProjectionNotice, SettingsProjectionNoticeSeverity, SettingsScope,
+    SettingsSkillDetailsParams, SettingsSkillDetailsResult, SettingsSkillDocument,
+    SettingsSkillDocumentField, SettingsSkillRecord, SettingsSkillStatus, SettingsSkillsParams,
+    SettingsSkillsResult,
 };
 use crate::snapshot::{
     ActivityStatus, ActivityStepSnapshot, AgentCapabilities, AgentCollectionSnapshot,
@@ -273,6 +274,8 @@ pub(super) fn push_protocol_declarations(output: &mut String, config: &Config) {
     push_decl::<RuntimeDeveloperSettingsPatch>(output, config);
     push_decl::<RuntimeAcpTraceSettingsPatch>(output, config);
     push_decl::<RuntimeSettingsResult>(output, config);
+    push_decl::<ResetTaskHistoryParams>(output, config);
+    push_decl::<ResetTaskHistoryResult>(output, config);
     push_decl::<RuntimeDeveloperSettings>(output, config);
     push_decl::<RuntimeAcpTraceSettings>(output, config);
 

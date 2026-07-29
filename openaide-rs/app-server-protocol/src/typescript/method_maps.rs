@@ -4,7 +4,7 @@ pub(super) fn push_method_maps(output: &mut String) {
     let method_union_end = output.len() - ";\n".len();
     output.insert_str(
         method_union_end,
-        " | typeof TASK_SET_PINNED | typeof TASK_TOOL_IMAGE_PREVIEW | typeof TASK_COMPOSER_HISTORY",
+        " | typeof TASK_SET_PINNED | typeof TASK_TOOL_IMAGE_PREVIEW | typeof TASK_COMPOSER_HISTORY | typeof SETTINGS_RESET_TASK_HISTORY",
     );
     output.push_str("export type RequestParamsByMethod = {\n");
     output.push_str("  [CLIENT_PROBE]: ClientProbeParams;\n");
@@ -38,6 +38,7 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [SETTINGS_UPDATE_PREFERENCES]: AppPreferencesUpdateParams;\n");
     output.push_str("  [SETTINGS_GET_RUNTIME]: RuntimeSettingsParams;\n");
     output.push_str("  [SETTINGS_UPDATE_RUNTIME]: RuntimeSettingsUpdateParams;\n");
+    output.push_str("  [SETTINGS_RESET_TASK_HISTORY]: ResetTaskHistoryParams;\n");
     output.push_str("  [ATTACHMENT_LIST_ROOTS]: AttachmentListRootsParams;\n");
     output.push_str("  [ATTACHMENT_LIST_DIRECTORY]: AttachmentListDirectoryParams;\n");
     output.push_str("  [ATTACHMENT_CREATE_FILE_REFERENCE]: AttachmentCreateFileReferenceParams;\n");
@@ -118,6 +119,7 @@ pub(super) fn push_method_maps(output: &mut String) {
     output.push_str("  [SETTINGS_UPDATE_PREFERENCES]: AppPreferencesResult;\n");
     output.push_str("  [SETTINGS_GET_RUNTIME]: RuntimeSettingsResult;\n");
     output.push_str("  [SETTINGS_UPDATE_RUNTIME]: RuntimeSettingsResult;\n");
+    output.push_str("  [SETTINGS_RESET_TASK_HISTORY]: ResetTaskHistoryResult;\n");
     output.push_str("  [ATTACHMENT_LIST_ROOTS]: AttachmentListRootsResult;\n");
     output.push_str("  [ATTACHMENT_LIST_DIRECTORY]: AttachmentListDirectoryResult;\n");
     output.push_str("  [ATTACHMENT_CREATE_FILE_REFERENCE]: AttachmentCreateFileReferenceResult;\n");
@@ -256,6 +258,9 @@ pub(super) fn push_method_maps(output: &mut String) {
     );
     output.push_str(
         "export type SettingsUpdateRuntimeResponse = ResponseEnvelope<RuntimeSettingsResult>;\n",
+    );
+    output.push_str(
+        "export type SettingsResetTaskHistoryResponse = ResponseEnvelope<ResetTaskHistoryResult>;\n",
     );
     output.push_str(
         "export type AttachmentListRootsResponse = ResponseEnvelope<AttachmentListRootsResult>;\n",

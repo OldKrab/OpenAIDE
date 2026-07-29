@@ -6,7 +6,7 @@ use openaide_app_server_protocol::task::{
 
 use super::{protocol_error_from_runtime, TaskProductApi};
 
-/// Authorized, read-only Task history projections exposed through the protocol edge.
+/// Authorized Task-history queries and destructive recovery exposed through the protocol edge.
 pub(crate) trait TaskHistoryWorkflow: Send + Sync {
     fn chat_page_for_client(
         &self,
@@ -19,9 +19,22 @@ pub(crate) trait TaskHistoryWorkflow: Send + Sync {
         client_instance_id: &ClientInstanceId,
         params: ComposerHistoryParams,
     ) -> Result<ComposerHistoryResult, ProtocolError>;
+
+    fn reset_task_history(&self) -> Result<Vec<crate::protocol_edge::RemovedTask>, ProtocolError> {
+        Err(ProtocolError {
+            code: openaide_app_server_protocol::errors::ProtocolErrorCode::CapabilityUnavailable,
+            message: "Task history reset is unavailable".to_string(),
+            recoverable: false,
+            target: None,
+        })
+    }
 }
 
 impl TaskHistoryWorkflow for TaskProductApi {
+    fn reset_task_history(&self) -> Result<Vec<crate::protocol_edge::RemovedTask>, ProtocolError> {
+        self.reset_local_task_history()
+    }
+
     fn composer_history_for_client(
         &self,
         client_instance_id: &ClientInstanceId,

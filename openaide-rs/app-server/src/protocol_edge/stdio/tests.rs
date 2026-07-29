@@ -171,6 +171,72 @@ fn initialize_succeeds_through_protocol_edge_stdio() {
 }
 
 #[test]
+fn reset_task_history_removes_local_tasks_without_touching_project_files() {
+    let temp = tempfile::TempDir::new().expect("temp dir");
+    let project_file = temp.path().join("project-file.txt");
+    std::fs::write(&project_file, "preserve me").unwrap();
+    let store = Store::open(temp.path().to_path_buf()).unwrap();
+    store.write_task(&task_record("task-reset")).unwrap();
+    store.mark_clean_shutdown().unwrap();
+    drop(store);
+
+    let state_root = StateRoot::resolve(temp.path()).expect("state root");
+    let mut dispatcher = ProtocolEdgeStdioDispatcher::new_for_test(state_root);
+    dispatcher.handle_line(&init_request("initialize", "client-1"));
+    dispatcher.handle_line(
+        &json!({
+            "jsonrpc": "2.0",
+            "id": "subscribe-task",
+            "method": STATE_SUBSCRIBE,
+            "params": StateSubscribeParams {
+                scope: SubscriptionScope::Task {
+                    task_id: TaskId::from("task-reset"),
+                },
+            },
+        })
+        .to_string(),
+    );
+
+    let responses = dispatcher.handle_line(
+        &json!({
+            "jsonrpc": "2.0",
+            "id": "reset",
+            "method": "settings/resetTaskHistory",
+            "params": {},
+        })
+        .to_string(),
+    );
+
+    assert!(responses
+        .iter()
+        .any(|line| response(line)["result"]["result"] == serde_json::json!({})));
+    assert!(responses.iter().any(|line| {
+        let value = response(line);
+        value["method"] == "app/event"
+            && value["params"]["payload"]["kind"] == "taskChanged"
+            && value["params"]["payload"]["taskId"] == "task-reset"
+            && value["params"]["payload"]["changes"]["removed"] == true
+    }));
+    let listed = dispatcher.handle_line(
+        &json!({
+            "jsonrpc": "2.0",
+            "id": "list",
+            "method": TASK_LIST,
+            "params": { "lifecycle": "open" },
+        })
+        .to_string(),
+    );
+    assert_eq!(
+        response(&listed[0])["result"]["result"]["tasks"],
+        serde_json::json!([])
+    );
+    assert_eq!(
+        std::fs::read_to_string(project_file).unwrap(),
+        "preserve me"
+    );
+}
+
+#[test]
 fn initialize_exposes_one_stable_server_id_per_gateway_process_epoch() {
     let (_first_temp, mut first_process) = dispatcher();
     let first_snapshot = first_process.handle_line(&init_request("first-1", "client-1"));

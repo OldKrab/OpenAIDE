@@ -274,6 +274,7 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         onNewTaskInWorktree={newTaskInWorktree}
         onRefresh={callbacks.settings.refreshSettings}
         onReplaceCustomAgent={callbacks.settings.replaceCustomAgent}
+        onResetTaskHistory={callbacks.settings.resetTaskHistory}
         onSelectTab={callbacks.settings.selectSettingsTab}
         onSetDesktopNotifications={taskNotifications?.setEnabled}
         onSetAcpTrace={callbacks.settings.setAcpTrace}

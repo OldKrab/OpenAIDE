@@ -396,6 +396,62 @@ code.settings-row-value {
   text-overflow: clip;
 }
 
+.settings-danger-button {
+  color: var(--oa-danger);
+}
+
+.settings-danger-button:hover {
+  background: color-mix(in oklch, var(--oa-danger) 8%, transparent);
+}
+
+.settings-reset-dialog {
+  width: min(460px, calc(100vw - 32px));
+  border: 1px solid var(--oa-border);
+  border-radius: var(--oa-radius-lg);
+  background: var(--oa-panel);
+  box-shadow: 0 18px 48px color-mix(in oklch, var(--oa-text) 18%, transparent);
+  padding: 16px;
+}
+
+.settings-reset-dialog header {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin-bottom: 12px;
+}
+
+.settings-reset-dialog header > svg,
+.settings-reset-error {
+  color: var(--oa-danger);
+}
+
+.settings-reset-dialog header div {
+  display: grid;
+  gap: 2px;
+}
+
+.settings-reset-dialog header small,
+.settings-reset-dialog p {
+  color: var(--oa-muted);
+}
+
+.settings-reset-dialog p {
+  margin: 8px 0;
+  line-height: 1.5;
+}
+
+.settings-reset-dialog footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+  margin-top: 16px;
+}
+
+.settings-reset-dialog footer button.danger {
+  background: var(--oa-danger);
+  color: white;
+}
+
 .settings-record {
   min-width: 0;
   border: 1px solid var(--oa-border);

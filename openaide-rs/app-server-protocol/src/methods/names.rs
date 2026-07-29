@@ -29,6 +29,7 @@ pub const SETTINGS_GET_PREFERENCES: &str = "settings/getPreferences";
 pub const SETTINGS_UPDATE_PREFERENCES: &str = "settings/updatePreferences";
 pub const SETTINGS_GET_RUNTIME: &str = "settings/getRuntime";
 pub const SETTINGS_UPDATE_RUNTIME: &str = "settings/updateRuntime";
+pub const SETTINGS_RESET_TASK_HISTORY: &str = "settings/resetTaskHistory";
 pub const ATTACHMENT_LIST_ROOTS: &str = "attachment/listRoots";
 pub const ATTACHMENT_LIST_DIRECTORY: &str = "attachment/listDirectory";
 pub const ATTACHMENT_CREATE_FILE_REFERENCE: &str = "attachment/createFileReference";
@@ -106,6 +107,7 @@ pub const CLIENT_METHODS: &[&str] = &[
     SETTINGS_UPDATE_PREFERENCES,
     SETTINGS_GET_RUNTIME,
     SETTINGS_UPDATE_RUNTIME,
+    SETTINGS_RESET_TASK_HISTORY,
     ATTACHMENT_LIST_ROOTS,
     ATTACHMENT_LIST_DIRECTORY,
     ATTACHMENT_CREATE_FILE_REFERENCE,

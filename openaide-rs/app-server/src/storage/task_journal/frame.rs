@@ -121,6 +121,11 @@ impl FaultInjector {
 }
 
 pub(super) trait FramedRecord: Serialize + DeserializeOwned {
+    /// Decodes one checksummed payload at its durable compatibility boundary.
+    fn decode(payload: &[u8]) -> Result<Self, RuntimeError> {
+        serde_json::from_slice(payload).map_err(|error| json_error("frame_decode", error))
+    }
+
     fn format_version(&self) -> u16;
     fn sequence(&self) -> u64;
 }
@@ -364,8 +369,7 @@ fn replay_internal<T: FramedRecord>(
                 "Task journal checksum mismatch at sequence {expected_sequence}"
             )));
         }
-        let frame: T =
-            serde_json::from_slice(&payload).map_err(|error| json_error("frame_decode", error))?;
+        let frame = T::decode(&payload)?;
         if frame.format_version() != FORMAT_VERSION {
             return Err(RuntimeError::Storage(format!(
                 "Unsupported journal frame version {}",

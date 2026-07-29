@@ -169,7 +169,7 @@ impl RpcGateway {
         events
     }
 
-    fn publish_task_payload(
+    pub(crate) fn publish_task_payload(
         &mut self,
         task_id: &TaskId,
         payload: AppServerEventPayload,
