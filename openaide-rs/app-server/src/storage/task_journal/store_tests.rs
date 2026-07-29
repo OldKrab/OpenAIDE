@@ -382,6 +382,93 @@ fn released_tool_presentation_snapshot_migrates_when_task_opens() {
 }
 
 #[test]
+fn released_search_presentation_snapshot_migrates_when_task_opens() {
+    let root = TempDir::new().expect("create state root");
+    let (store, _commits) = TaskJournalStore::open(root.path().to_path_buf()).unwrap();
+    let mut projection = task_projection("task_legacy_search_presentation");
+    projection
+        .messages
+        .push(crate::storage::records::StoredMessage {
+            sequence: 1,
+            chat: crate::protocol::model::ChatMessage {
+                cursor: "1".to_string(),
+                identity: "tool:search".to_string(),
+                message_type: "activity".to_string(),
+                message_id: "tool:search".to_string(),
+                message: crate::protocol::model::NormalizedMessage::Activity {
+                    id: "tool:search".to_string(),
+                    title: "Search storage".to_string(),
+                    status: crate::protocol::model::ActivityStatus::Completed,
+                    created_at: "2026-07-29T00:00:00Z".to_string(),
+                    collapsed: true,
+                    steps: vec![crate::protocol::model::ActivityStep::Tool {
+                        tool_call_id: Some("search".to_string()),
+                        name: "search".to_string(),
+                        status: crate::protocol::model::ActivityStatus::Completed,
+                        presentation: Some(crate::protocol::model::ToolPresentation {
+                            actions: vec![crate::protocol::model::ToolPresentationAction::Search {
+                                query: "FramedRecord".to_string(),
+                                scopes: vec!["openaide-rs/app-server/src/storage".to_string()],
+                                target: crate::protocol::model::ToolSearchTarget::Contents,
+                            }],
+                        }),
+                        input_summary: Some("FramedRecord".to_string()),
+                        output_preview: None,
+                        detail_artifact_id: None,
+                        details: None,
+                        permission_outcomes: Vec::new(),
+                    }],
+                },
+            },
+        });
+    projection.message_meta.message_count = 1;
+    projection.message_meta.version = 1;
+    store
+        .submit(TaskWrite::barrier_create(projection))
+        .unwrap()
+        .wait()
+        .unwrap();
+    store.shutdown().unwrap();
+
+    let snapshot_path = root
+        .path()
+        .join("task-store-v1/tasks/task_legacy_search_presentation/chat.snapshot");
+    let mut released: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&snapshot_path).unwrap()).unwrap();
+    released["schemaVersion"] = serde_json::json!(1);
+    *released
+        .pointer_mut("/messages/0/chat/message/steps/0/presentation")
+        .expect("stored Tool presentation") = released_search_presentation_v1();
+    std::fs::write(&snapshot_path, serde_json::to_vec(&released).unwrap()).unwrap();
+
+    let (store, _commits) = TaskJournalStore::open(root.path().to_path_buf()).unwrap();
+    let loaded = store
+        .load("task_legacy_search_presentation")
+        .expect("released search presentation migrates");
+    let crate::protocol::model::NormalizedMessage::Activity { steps, .. } =
+        &loaded.messages[0].chat.message
+    else {
+        panic!("expected activity");
+    };
+    let crate::protocol::model::ActivityStep::Tool {
+        presentation: Some(presentation),
+        ..
+    } = &steps[0]
+    else {
+        panic!("expected Tool presentation");
+    };
+    assert_eq!(
+        presentation.actions,
+        vec![crate::protocol::model::ToolPresentationAction::Search {
+            query: "FramedRecord in openaide-rs/app-server/src/storage".to_string(),
+            scopes: Vec::new(),
+            target: crate::protocol::model::ToolSearchTarget::Contents,
+        }]
+    );
+    store.shutdown().unwrap();
+}
+
+#[test]
 fn released_tool_presentation_journal_migrates_when_task_opens() {
     let root = TempDir::new().expect("create state root");
     let task_dir = root
@@ -1099,4 +1186,9 @@ fn task_projection(task_id: &str) -> TaskProjection {
 fn released_tool_presentation_v1() -> serde_json::Value {
     serde_json::from_str(include_str!("fixtures/tool-presentation-v1.json"))
         .expect("released v1 Tool presentation fixture")
+}
+
+fn released_search_presentation_v1() -> serde_json::Value {
+    serde_json::from_str(include_str!("fixtures/tool-presentation-search-v1.json"))
+        .expect("released v1 search presentation fixture")
 }
