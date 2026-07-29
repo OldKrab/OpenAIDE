@@ -113,6 +113,26 @@ describe("AgentSettingsTab interactions", () => {
     }));
   });
 
+  it("shows that a new custom Agent is being saved and checked", () => {
+    const view = renderAgentSettings({ agents: [builtInAgent("codex")], openFirst: false });
+
+    act(() => {
+      buttonByText(view.root, "Add agent").props.onClick();
+    });
+    const [nameInput, commandInput] = view.root.findAllByType("input").filter((input) => input.props.value === "");
+    act(() => {
+      nameInput.props.onChange({ currentTarget: { value: "Local Agent" } });
+    });
+    act(() => {
+      commandInput.props.onChange({ currentTarget: { value: "local-agent --stdio" } });
+    });
+    act(() => {
+      buttonByText(view.root, "Save").props.onClick();
+    });
+
+    expect(buttonByText(view.root, "Saving and checking…").props.disabled).toBe(true);
+  });
+
   it("labels Agent and environment add actions distinctly", () => {
     const view = renderAgentSettings({ agents: [customAgent("custom.local")], openFirst: false });
 
