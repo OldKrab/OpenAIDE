@@ -8,7 +8,7 @@ use serde_json::json;
 use tokio::sync::mpsc as tokio_mpsc;
 
 use crate::agent::acp_active_prompt::{
-    cancel_active_prompt, send_steering_prompt_request, ActivePrompt,
+    cancel_active_prompt, send_steering_prompt_request, ActivePrompt, PromptSettlementKind,
 };
 use crate::agent::acp_config_options_apply::set_task_config_option_after_prior_updates;
 use crate::agent::acp_errors::acp_error;
@@ -56,6 +56,7 @@ pub(super) async fn run_prompt(
     session_projection: &mut Option<LivePromptProjection>,
     pending_session_catalogs: &mut PendingSessionCatalogs,
 ) -> Result<AgentPromptOutcome, RuntimeError> {
+    let prompt_started_at = Instant::now();
     if prompt.cancellation.is_cancelled() {
         return Ok(AgentPromptOutcome::Cancelled);
     }
@@ -74,6 +75,7 @@ pub(super) async fn run_prompt(
 
     let mut cancel_sent = false;
     let mut cancel_requested_at = None;
+    let mut settled_by_response = false;
     let result = loop {
         if active_prompt.cancellation().is_cancelled() && !cancel_sent {
             match dispatch_prompt_cancel(
@@ -226,7 +228,8 @@ pub(super) async fn run_prompt(
                         *config_catalog = catalog;
                     }
                 }
-                active_prompt.mark_settled();
+                active_prompt.mark_settled(PromptSettlementKind::PromptResponse);
+                settled_by_response = true;
                 let result = completion.finish();
                 let succeeded = result.is_ok();
                 logging::info(
@@ -264,7 +267,7 @@ pub(super) async fn run_prompt(
 
     // Retire every still-pending response from lifecycle ownership. The session-level
     // update consumer remains attached and continues accepting late updates.
-    active_prompt.mark_settled();
+    active_prompt.mark_settled(PromptSettlementKind::RunnerExit);
 
     if let (Some(trace), Some(requested_at)) = (context.trace.as_ref(), cancel_requested_at) {
         trace.record_value(
@@ -284,7 +287,11 @@ pub(super) async fn run_prompt(
             "agent_id": context.agent_id,
             "task_id": active_prompt.task_id(),
             "active_session_id": active_session_id.as_str(),
-            "result": runtime_result_name(&result),
+            "settlement_kind": if settled_by_response { "prompt_response" } else { "runner_exit" },
+            "result_status": runtime_result_name(&result),
+            "error_kind": result.as_ref().err().map(RuntimeError::reason),
+            "error_code": result.as_ref().err().map(RuntimeError::code),
+            "duration_ms": prompt_started_at.elapsed().as_millis(),
             "cancel_to_settlement_ms": cancel_requested_at
                 .map(|started: Instant| started.elapsed().as_millis()),
         }),

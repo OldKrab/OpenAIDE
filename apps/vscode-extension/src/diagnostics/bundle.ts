@@ -200,7 +200,7 @@ function publicLogFields(value: unknown) {
 
 function isSafeFieldName(key: string) {
   return ["method", "signal", "code", "idType", "commandKind", "storageRootKind", "byteLength"].includes(key)
-    || /_(kind|code|count|bytes|status)$/.test(key);
+    || /_(kind|code|count|bytes|status|ms)$/.test(key);
 }
 
 function controlledFailure(event: string) {

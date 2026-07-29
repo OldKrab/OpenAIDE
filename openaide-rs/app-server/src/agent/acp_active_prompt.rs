@@ -3,7 +3,7 @@
 //! One primary request owns Task lifecycle while additional prompt requests may
 //! steer the same work. The first current `end_turn` settles the shared prompt set.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -23,7 +23,7 @@ use crate::protocol::errors::RuntimeError;
 pub(super) struct ActivePrompt {
     completion_tx: mpsc::UnboundedSender<PromptCompletion>,
     completion_rx: mpsc::UnboundedReceiver<PromptCompletion>,
-    settled: Arc<AtomicBool>,
+    settlement: Arc<PromptSettlementState>,
     // Holding the slot keeps host requests bound to this projection until the prompt exits.
     _projection_slot: CurrentPromptSlot,
     cancellation: TurnCancellation,
@@ -56,20 +56,20 @@ impl ActivePrompt {
         );
         projection_slot.activate(projection.clone());
         let (completion_tx, completion_rx) = mpsc::unbounded_channel();
-        let settled = Arc::new(AtomicBool::new(false));
+        let settlement = Arc::new(PromptSettlementState::default());
         send_prompt_request(
             active_session,
             prompt,
             content_policy,
             trace,
             completion_tx.clone(),
-            settled.clone(),
+            settlement.clone(),
             sink,
         )?;
         Ok(Self {
             completion_tx,
             completion_rx,
-            settled,
+            settlement,
             _projection_slot: projection_slot,
             cancellation,
             task_id,
@@ -83,12 +83,12 @@ impl ActivePrompt {
     pub(super) fn steering_settlement(&self) -> PromptSettlement {
         PromptSettlement {
             completion_tx: self.completion_tx.clone(),
-            settled: self.settled.clone(),
+            settlement: self.settlement.clone(),
         }
     }
 
-    pub(super) fn mark_settled(&self) {
-        self.settled.store(true, Ordering::Release);
+    pub(super) fn mark_settled(&self, kind: PromptSettlementKind) {
+        self.settlement.settle(kind);
     }
 
     pub(super) fn cancellation(&self) -> &TurnCancellation {
@@ -103,7 +103,47 @@ impl ActivePrompt {
 /// Lets an `end_turn` steering response settle the same lifecycle as the primary prompt.
 pub(super) struct PromptSettlement {
     completion_tx: mpsc::UnboundedSender<PromptCompletion>,
-    settled: Arc<AtomicBool>,
+    settlement: Arc<PromptSettlementState>,
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum PromptSettlementKind {
+    PromptResponse = 1,
+    RunnerExit = 2,
+}
+
+impl PromptSettlementKind {
+    fn label(self) -> &'static str {
+        match self {
+            Self::PromptResponse => "prompt_response",
+            Self::RunnerExit => "runner_exit",
+        }
+    }
+}
+
+#[derive(Default)]
+struct PromptSettlementState {
+    kind: AtomicU8,
+}
+
+impl PromptSettlementState {
+    fn settle(&self, kind: PromptSettlementKind) {
+        let _ = self
+            .kind
+            .compare_exchange(0, kind as u8, Ordering::AcqRel, Ordering::Acquire);
+    }
+
+    fn kind(&self) -> Option<PromptSettlementKind> {
+        match self.kind.load(Ordering::Acquire) {
+            value if value == PromptSettlementKind::PromptResponse as u8 => {
+                Some(PromptSettlementKind::PromptResponse)
+            }
+            value if value == PromptSettlementKind::RunnerExit as u8 => {
+                Some(PromptSettlementKind::RunnerExit)
+            }
+            _ => None,
+        }
+    }
 }
 
 /// Holds the ACP response boundary until its preceding session updates are projected.
@@ -171,7 +211,7 @@ fn send_prompt_request(
     content_policy: PromptContentPolicy,
     trace: Option<&AcpTraceSession>,
     completion_tx: mpsc::UnboundedSender<PromptCompletion>,
-    settled: Arc<AtomicBool>,
+    settlement: Arc<PromptSettlementState>,
     sink: Arc<dyn AgentEventSink>,
 ) -> Result<(), RuntimeError> {
     let task_id = prompt.task_id.clone();
@@ -184,6 +224,7 @@ fn send_prompt_request(
         trace.record("client_to_agent", "session/prompt.request", &request);
     }
     let result_trace = trace.cloned();
+    let prompt_started_at = Instant::now();
     let (release_tx, release_rx) = tokio::sync::oneshot::channel();
     active_session
         .connection()
@@ -210,13 +251,16 @@ fn send_prompt_request(
                 }
                 Err(error) => Err(acp_error(error)),
             };
-            if settled.load(Ordering::Acquire) {
+            if let Some(settlement_kind) = settlement.kind() {
                 crate::logging::info(
                     "acp_prompt_result_stale",
                     serde_json::json!({
                         "task_id": task_id,
                         "active_session_id": session_id,
                         "prompt_kind": "primary",
+                        "settlement_kind": settlement_kind.label(),
+                        "result_status": if result.is_ok() { "stop_reason" } else { "error" },
+                        "duration_ms": prompt_started_at.elapsed().as_millis(),
                     }),
                 );
                 return Ok(());
@@ -303,13 +347,15 @@ pub(super) fn send_steering_prompt_request(
                     let Some(settlement) = settlement else {
                         return Ok(());
                     };
-                    if settlement.settled.load(Ordering::Acquire) {
+                    if let Some(settlement_kind) = settlement.settlement.kind() {
                         crate::logging::info(
                             "acp_prompt_result_stale",
                             serde_json::json!({
                                 "task_id": task_id,
                                 "active_session_id": session_id,
                                 "prompt_kind": "steering",
+                                "settlement_kind": settlement_kind.label(),
+                                "result_status": "stop_reason",
                             }),
                         );
                         return Ok(());

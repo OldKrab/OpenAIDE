@@ -33,7 +33,7 @@ test("split store discovers target state and replays committed chat deltas", () 
   fs.writeFileSync(
     path.join(taskDir, "chat.snapshot.generation"),
     JSON.stringify({
-      schemaVersion: 1,
+      schemaVersion: 2,
       messages: [storedAgentMessage(1, "agent:one", "before")],
       messageMeta: {
         task_id: "task_split",
@@ -48,6 +48,7 @@ test("split store discovers target state and replays committed chat deltas", () 
   writeJournal(path.join(taskDir, "chat.journal.generation"), [
     {
       format_version: 1,
+      schema_version: 2,
       sequence: 1,
       operations: [
         {

@@ -42,6 +42,10 @@ describe("support diagnostics bundle", () => {
       event: "rpc_request_failed",
       fields: {
         method: "task/open",
+        settlement_kind: "runner_exit",
+        result_status: "error",
+        error_kind: "projection_conflict",
+        duration_ms: 2_983,
         error: "private provider response",
       },
     })}\n`);
@@ -72,6 +76,10 @@ describe("support diagnostics bundle", () => {
     expect(entries.get("logs/openaide-extension.jsonl")).not.toContain("old_event");
     expect(entries.get("logs/openaide-app-server.jsonl")).toContain("rpc_request_failed");
     expect(entries.get("logs/openaide-app-server.jsonl")).toContain("task/open");
+    expect(entries.get("logs/openaide-app-server.jsonl")).toContain('"settlement_kind":"runner_exit"');
+    expect(entries.get("logs/openaide-app-server.jsonl")).toContain('"result_status":"error"');
+    expect(entries.get("logs/openaide-app-server.jsonl")).toContain('"error_kind":"projection_conflict"');
+    expect(entries.get("logs/openaide-app-server.jsonl")).toContain('"duration_ms":2983');
     expect(archive.toString("utf8")).not.toContain("private");
     expect(archive.toString("utf8")).not.toContain("token-secret");
     expect(archive.toString("utf8")).not.toContain("customer.private.example");

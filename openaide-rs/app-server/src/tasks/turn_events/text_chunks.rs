@@ -2,7 +2,8 @@ use std::sync::Mutex;
 
 use uuid::Uuid;
 
-use crate::agent::acp_message_identity::stable_message_id;
+use crate::agent::acp_message_identity::stable_agent_message_id;
+use crate::protocol::model::AgentMessageRole;
 
 #[derive(Clone, Copy)]
 pub(super) enum TextChannel {
@@ -37,7 +38,11 @@ impl TextChunkRoutes {
     ) -> String {
         if let Some(source_message_id) = source_message_id {
             self.finish_anonymous(channel);
-            return stable_message_id(&self.session_id, &source_message_id);
+            let role = match channel {
+                TextChannel::Agent => AgentMessageRole::Agent,
+                TextChannel::Thought => AgentMessageRole::Thought,
+            };
+            return stable_agent_message_id(&self.session_id, role, &source_message_id);
         }
 
         let mut anonymous = self.anonymous.lock().expect("text route lock poisoned");

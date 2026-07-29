@@ -8,7 +8,7 @@ use crate::agent::acp_codex_subagent::{
 };
 use crate::agent::acp_content_projection::project_content_block;
 use crate::agent::acp_live_prompt_projection::project_plan_entry;
-use crate::agent::acp_message_identity::stable_message_id;
+use crate::agent::acp_message_identity::{stable_agent_message_id, stable_message_id};
 use crate::agent::acp_tool_call_projection::{
     merge_tool_call_update, remember_tool_call, ToolCallState,
 };
@@ -78,8 +78,8 @@ struct ReplayBuffer {
     // Anonymous chunks have no durable correlation and merge only within one contiguous run.
     active_anonymous_text: Option<ActiveAnonymousTextRun>,
     sourced_user_indices: HashMap<String, usize>,
-    // ACP message ids keep Agent and Thought parts open across interleaved updates.
-    sourced_agent_indices: HashMap<String, usize>,
+    // ACP message ids keep each Agent or Thought channel open across interleaved updates.
+    sourced_agent_indices: HashMap<(AgentMessageRole, String), usize>,
     session_id: String,
     next_text_ordinal: usize,
     current_plan: Option<AgentPlan>,
@@ -267,19 +267,19 @@ impl ReplayBuffer {
         };
 
         self.end_anonymous_text_run();
-        if let Some(message_index) = self.sourced_agent_indices.get(&source_message_id).copied() {
+        let source_key = (role, source_message_id.clone());
+        if let Some(message_index) = self.sourced_agent_indices.get(&source_key).copied() {
             append_agent_part(&mut self.messages[message_index], role, part);
             return;
         }
         let message_index = self.messages.len();
         self.messages.push(NormalizedMessage::AgentMessage {
-            id: stable_message_id(&self.session_id, &source_message_id),
+            id: stable_agent_message_id(&self.session_id, role, &source_message_id),
             role,
             parts: vec![part],
             created_at: created_at.to_string(),
         });
-        self.sourced_agent_indices
-            .insert(source_message_id, message_index);
+        self.sourced_agent_indices.insert(source_key, message_index);
     }
 
     fn push_user_text(

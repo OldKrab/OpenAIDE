@@ -4,6 +4,7 @@ import path from "node:path";
 const JOURNAL_MAGIC = Buffer.from("OAIDETJ\0");
 const JOURNAL_HEADER_BYTES = JOURNAL_MAGIC.length + 2;
 const MAX_FRAME_BYTES = 256 * 1024 * 1024;
+const SUPPORTED_CHAT_SCHEMA_VERSIONS = new Set([1, 2]);
 
 /** Identifies the durable metadata envelope used by task-store-v1. */
 export function splitMetadata(taskFile) {
@@ -26,7 +27,9 @@ export function readSplitProjectionMaybe(taskDir, metadata) {
   const snapshot = readJsonMaybe(snapshotFile);
   if (snapshot.error) return snapshot;
   if (!snapshot.value) return { error: `${snapshotFile}: missing Chat snapshot` };
-  if (snapshot.value.schemaVersion !== 1) return { error: `${snapshotFile}: unsupported Chat snapshot version` };
+  if (!SUPPORTED_CHAT_SCHEMA_VERSIONS.has(snapshot.value.schemaVersion)) {
+    return { error: `${snapshotFile}: unsupported Chat snapshot version` };
+  }
   const projection = {
     task: metadata.task,
     messages: structuredClone(snapshot.value.messages ?? []),
@@ -82,6 +85,10 @@ function readJournalFrames(file) {
     const frame = JSON.parse(payload.toString("utf8"));
     const expectedSequence = frames.length + 1;
     if (frame.format_version !== 1) throw new Error(`unsupported journal frame version ${frame.format_version}`);
+    const schemaVersion = frame.schema_version ?? 1;
+    if (!SUPPORTED_CHAT_SCHEMA_VERSIONS.has(schemaVersion)) {
+      throw new Error(`unsupported Chat journal schema version ${schemaVersion}`);
+    }
     if (frame.sequence !== expectedSequence) {
       throw new Error(`journal sequence gap: expected ${expectedSequence}, found ${frame.sequence}`);
     }
