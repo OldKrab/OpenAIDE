@@ -66,8 +66,6 @@ pub enum TaskTitleSource {
     User,
 }
 
-pub(crate) const MAX_TASK_TITLE_CHARS: usize = 200;
-
 /// A durable Task title with its owner. Construction enforces the stored title invariant.
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct TaskTitle {
@@ -276,22 +274,7 @@ impl TaskTitleState {
 
 impl TaskTitle {
     pub fn new(value: impl Into<String>, source: TaskTitleSource) -> Option<Self> {
-        // Agent metadata is untrusted presentation input. Keep every durable title
-        // single-line and bounded so shells never expose raw output in compact UI.
-        let value = value
-            .into()
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ");
-        let value = if value.chars().count() > MAX_TASK_TITLE_CHARS {
-            let prefix = value
-                .chars()
-                .take(MAX_TASK_TITLE_CHARS - 3)
-                .collect::<String>();
-            format!("{prefix}...")
-        } else {
-            value
-        };
+        let value = value.into().trim().to_string();
         (!value.is_empty()).then_some(Self { value, source })
     }
 
