@@ -4,18 +4,17 @@ use std::time::Duration;
 
 use openaide_app_server_protocol::ids::ClientInstanceId;
 use serde_json::json;
-use tempfile::NamedTempFile;
 
 use super::http::write_http_response;
 use super::{LocalHttpProbeListenerError, LocalHttpRequest};
 use crate::protocol_edge::local_http::file_upload::{
-    temporary_upload, AppendChunkOutcome, ChunkUploadError, ChunkUploadRequest,
+    temporary_upload, AppendChunkOutcome, ChunkUploadError, ChunkUploadRequest, PendingUpload,
     MAX_UPLOAD_CHUNK_BYTES,
 };
 use crate::protocol_edge::local_http::{LocalHttpAppHandler, LocalHttpResponse};
 
 struct CompletedUpload {
-    temporary: NamedTempFile,
+    temporary: PendingUpload,
     task_id: String,
     file_name: String,
 }
@@ -52,7 +51,7 @@ fn handle_single_upload(
     };
     // The fast path retains one request per file while streaming directly to disk.
     stream.set_read_timeout(Some(Duration::from_secs(60)))?;
-    let mut temporary = temporary_upload(file_name)?;
+    let mut temporary = temporary_upload(task_id, file_name)?;
     stream_request_body(stream, &request, &mut temporary)?;
     register_upload(
         stream,
@@ -196,7 +195,7 @@ fn register_upload(
     client_instance_id: &ClientInstanceId,
     upload: CompletedUpload,
 ) -> Result<(), LocalHttpProbeListenerError> {
-    let (_file, path) = upload.temporary.keep().map_err(|error| error.error)?;
+    let (_file, path) = upload.temporary.keep()?;
     let response = handler.register_uploaded_file(
         client_instance_id,
         upload.task_id,
