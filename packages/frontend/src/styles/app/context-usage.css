@@ -8,8 +8,8 @@
 }
 
 .composer-context-host .composer-actions {
-  /* Keep the send action visually separate from the interactive edge meter. */
-  margin-right: 13px;
+  /* Keep actions outside the 16px edge meter without doubling composer padding. */
+  margin-right: 3px;
 }
 
 .context-usage-interaction {
