@@ -94,7 +94,8 @@ export function createWebAppShell(): FrontendShell {
     navigation: {
       openNewTask: (projectId) => navigate(newTaskPath(projectId)),
       openNativeSession: (agentId, nativeSessionId) => navigate(nativeSessionPath(agentId, nativeSessionId)),
-      openSettings: (agentId, returnToNewTask, projectId) => navigate(settingsPath(agentId, returnToNewTask, projectId)),
+      openSettings: (agentId, returnToNewTask, projectId, settingsTab) =>
+        navigate(settingsPath(agentId, returnToNewTask, projectId, settingsTab)),
       openTask: (taskId) => navigate(`/task/${encodeURIComponent(taskId)}`),
       replaceSettingsTab(tab) {
         if (!isSettingsPath(window.location.pathname)) return;
@@ -287,8 +288,14 @@ function nativeSessionPath(agentId: string, nativeSessionId: string) {
   return `/session/${encodeURIComponent(agentId)}/${encodeURIComponent(nativeSessionId)}`;
 }
 
-function settingsPath(agentId?: string, returnToNewTask?: boolean, projectId?: string) {
+function settingsPath(
+  agentId?: string,
+  returnToNewTask?: boolean,
+  projectId?: string,
+  settingsTab?: SettingsTabId,
+) {
   const search = new URLSearchParams();
+  if (settingsTab) search.set("tab", settingsTab);
   if (agentId) search.set("agentId", agentId);
   if (returnToNewTask) search.set("returnToNewTask", "true");
   if (projectId) search.set("projectId", projectId);

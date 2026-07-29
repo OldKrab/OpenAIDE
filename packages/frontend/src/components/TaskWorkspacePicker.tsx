@@ -29,97 +29,39 @@ import { relativeTime } from "./taskSurfaceHelpers";
 import { AgentIcon } from "./AgentIcon";
 
 export function TaskWorkspacePicker({
-  initialMode = "choose",
   intents,
-  managementOnly = false,
   onClose,
-  onUseForNewTask,
+  onManageWorktrees,
   project,
   repository,
   selectedWorktreeId,
-  tasks,
 }: {
-  initialMode?: "choose" | "manage";
   intents: NewTaskViewIntents;
-  managementOnly?: boolean;
   onClose: () => void;
-  onUseForNewTask?: () => void;
+  onManageWorktrees?: (projectId: string) => void;
   project: ProjectOption;
   repository?: WorktreeRepositorySnapshot;
   selectedWorktreeId?: string;
   tasks: TaskSummary[];
 }) {
-  const [mode, setMode] = useState<"choose" | "create" | "manage">(initialMode);
-  const [createOrigin, setCreateOrigin] = useState<"choose" | "manage">(
-    initialMode === "manage" ? "manage" : "choose",
-  );
-  const [recreateTarget, setRecreateTarget] = useState<WorktreeSummary>();
+  const [mode, setMode] = useState<"choose" | "create">("choose");
   const [query, setQuery] = useState("");
   const [explainedUnavailableId, setExplainedUnavailableId] = useState<string>();
-  const [managementTasks, setManagementTasks] = useState(tasks);
-  const [managementTasksError, setManagementTasksError] = useState<string>();
   // Forgotten entries stay in the projection only to decorate historical Tasks.
   const worktrees = (repository?.worktrees ?? []).filter((worktree) => !worktree.forgotten);
   const projectRoot = worktrees.find((worktree) => isProjectRoot(worktree, project));
-  const narrowManagement = typeof window !== "undefined" && window.matchMedia("(max-width: 760px)").matches;
-  const [selectedManagementId, setSelectedManagementId] = useState<string | undefined>(
-    narrowManagement ? undefined : projectRoot?.worktreeId,
-  );
-  const selectedManagement = worktrees.find((item) => item.worktreeId === selectedManagementId);
-  useEffect(() => {
-    if (selectedManagementId && !selectedManagement) {
-      setSelectedManagementId(narrowManagement ? undefined : projectRoot?.worktreeId);
-    }
-  }, [narrowManagement, projectRoot?.worktreeId, selectedManagement, selectedManagementId]);
-  useEffect(() => setManagementTasks(tasks), [tasks]);
-  useEffect(() => {
-    if (mode !== "manage" || !intents.loadProjectTasks) return;
-    let active = true;
-    setManagementTasksError(undefined);
-    void intents.loadProjectTasks(project.projectId).then((loaded) => {
-      if (active) setManagementTasks(loaded);
-    }).catch((cause) => {
-      if (active) setManagementTasksError(cause instanceof Error ? cause.message : "Unable to load linked tasks.");
-    });
-    return () => { active = false; };
-  }, [intents.loadProjectTasks, mode, project.projectId]);
 
   if (mode === "create") {
     return (
       <CreateWorktreePanel
         intents={intents}
-        onBack={() => setMode(createOrigin)}
+        onBack={() => setMode("choose")}
         onCreated={(created) => {
-          if (createOrigin === "choose") {
-            selectWorkspace(intents, project, created);
-            setMode("choose");
-          } else {
-            setMode("manage");
-          }
+          selectWorkspace(intents, project, created);
+          setMode("choose");
         }}
         project={project}
-        recreate={recreateTarget}
         repository={repository}
-      />
-    );
-  }
-
-  if (mode === "manage") {
-    return (
-      <WorktreeManagement
-        compact={narrowManagement}
-        intents={intents}
-        onBack={() => managementOnly ? onClose() : setMode("choose")}
-        onCreate={() => { setRecreateTarget(undefined); setCreateOrigin("manage"); setMode("create"); }}
-        onRecreate={(worktree) => { setRecreateTarget(worktree); setCreateOrigin("manage"); setMode("create"); }}
-        onUseForNewTask={onUseForNewTask}
-        project={project}
-        repository={repository}
-        selected={selectedManagement}
-        selectedTaskWorktreeId={selectedWorktreeId}
-        select={setSelectedManagementId}
-        tasks={managementTasks}
-        tasksError={managementTasksError}
       />
     );
   }
@@ -181,8 +123,13 @@ export function TaskWorkspacePicker({
         </div>
       </div>
       <footer className="task-workspace-actions">
-        <button onClick={() => { setRecreateTarget(undefined); setCreateOrigin("choose"); setMode("create"); }} type="button"><Plus size={14} />New worktree</button>
-        <button onClick={() => setMode("manage")} type="button"><MoreHorizontal size={14} />Manage worktrees</button>
+        <button onClick={() => setMode("create")} type="button"><Plus size={14} />New worktree</button>
+        <button
+          onClick={() => onManageWorktrees?.(project.projectId)}
+          type="button"
+        >
+          <MoreHorizontal size={14} />Manage worktrees
+        </button>
       </footer>
       {!repository && project.worktreeError ? <p className="task-workspace-error">{project.worktreeError}</p> : null}
       {!repository && !project.worktreeError ? <p className="task-workspace-empty">Worktrees are unavailable for this Project.</p> : null}

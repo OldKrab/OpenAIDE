@@ -1,4 +1,8 @@
-import type { HostToWebviewMessage, WebviewAppServerConnection } from "@openaide/app-shell-contracts";
+import type {
+  HostToWebviewMessage,
+  SettingsTabId,
+  WebviewAppServerConnection,
+} from "@openaide/app-shell-contracts";
 import type { WebviewBootstrap } from "../state/surfaceTypes";
 
 export function datasetBootstrap(): WebviewBootstrap {
@@ -17,11 +21,23 @@ export function datasetBootstrap(): WebviewBootstrap {
     nativeSessionId: document.body.dataset.nativeSessionId || undefined,
     projectId: document.body.dataset.projectId || undefined,
     projectIds: projectIds(),
+    settingsTab: settingsTab(),
     settingsAgentId: document.body.dataset.settingsAgentId || undefined,
     returnToNewTask: document.body.dataset.returnToNewTask === "true",
     preferences: shellPreferences(),
     appServerConnection: appServerConnection(),
   };
+}
+
+function settingsTab(): SettingsTabId | undefined {
+  const value = document.body.dataset.settingsTab;
+  return value === "agents"
+    || value === "mcp"
+    || value === "skills"
+    || value === "common"
+    || value === "worktrees"
+    ? value
+    : undefined;
 }
 
 function projectIds(): string[] | undefined {

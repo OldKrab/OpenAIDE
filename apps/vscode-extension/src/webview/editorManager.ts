@@ -101,7 +101,12 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost, TaskFo
     if (panel) panel.title = taskPanelTitle(title);
   }
 
-  openSettings(agentId?: string, returnToNewTask?: boolean, projectId?: string) {
+  openSettings(
+    agentId?: string,
+    returnToNewTask?: boolean,
+    projectId?: string,
+    settingsTab?: WebviewBootstrap["settingsTab"],
+  ) {
     if (this.settingsPanel) {
       this.settingsPanel.reveal(vscode.ViewColumn.Active);
       this.focusPanel(this.settingsPanel);
@@ -111,6 +116,7 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost, TaskFo
           ...(agentId ? { agent_id: agentId } : {}),
           ...(returnToNewTask ? { return_to_new_task: true } : {}),
           ...(projectId ? { project_id: projectId } : {}),
+          ...(settingsTab ? { settings_tab: settingsTab } : {}),
         },
       });
       return;
@@ -120,6 +126,7 @@ export class TaskEditorManager implements vscode.Disposable, WebviewHost, TaskFo
       settingsAgentId: agentId,
       returnToNewTask,
       projectId,
+      settingsTab,
     });
     this.settingsPanel = panel;
     this.focusPanel(panel);

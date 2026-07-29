@@ -40,6 +40,7 @@ export async function routeSurfaceCommand(message: WebviewToHostMessage, context
       message.payload?.agent_id,
       message.payload?.return_to_new_task,
       message.payload?.project_id,
+      message.payload?.settings_tab,
     );
     return true;
   }

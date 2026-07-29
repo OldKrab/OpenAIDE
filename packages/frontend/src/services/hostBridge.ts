@@ -34,8 +34,13 @@ export function openNativeSessionSurface(agentId: string, nativeSessionId: strin
   frontendShell().navigation.openNativeSession(agentId, nativeSessionId, projectId);
 }
 
-export function openSettingsSurface(agentId?: string, returnToNewTask?: boolean, projectId?: string) {
-  frontendShell().navigation.openSettings(agentId, returnToNewTask, projectId);
+export function openSettingsSurface(
+  agentId?: string,
+  returnToNewTask?: boolean,
+  projectId?: string,
+  settingsTab?: SettingsTabId,
+) {
+  frontendShell().navigation.openSettings(agentId, returnToNewTask, projectId, settingsTab);
 }
 
 export function openTaskSurface(taskId: string, title?: string) {

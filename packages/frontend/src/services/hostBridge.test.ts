@@ -93,6 +93,40 @@ describe("host bridge", () => {
     expect(posted).toContainEqual({ type: "workspace.openFolder" });
   });
 
+  it("passes a requested Settings tab through the VS Code shell boundary", async () => {
+    const posted: unknown[] = [];
+    vi.stubGlobal("document", {
+      body: {
+        dataset: {
+          shell: "vscodeExtension",
+          navigationMode: "currentProject",
+          surface: "navigation",
+        },
+      },
+    });
+    vi.stubGlobal("window", {
+      acquireVsCodeApi: () => ({ postMessage: (message: unknown) => posted.push(message) }),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    });
+    const [{ installFrontendShell }, { createVsCodeShell }, { openSettingsSurface }] = await Promise.all([
+      import("./frontendShell"),
+      import("../../../../apps/vscode-extension/frontend/vsCodeShell"),
+      import("./hostBridge"),
+    ]);
+    installFrontendShell(createVsCodeShell());
+
+    openSettingsSurface(undefined, undefined, "project_1", "worktrees");
+
+    expect(posted).toContainEqual({
+      type: "surface.openSettings",
+      payload: {
+        project_id: "project_1",
+        settings_tab: "worktrees",
+      },
+    });
+  });
+
   it("creates a direct LocalHttp BackendConnection from bootstrap endpoint info", async () => {
     const fetch = reliableFetch();
     vi.stubGlobal("fetch", fetch);

@@ -245,10 +245,10 @@ The leased prepared-Task pool is implemented. The remaining decisions in this no
 ### Worktree management UX
 
 - Worktree deletion is not part of creating a New Task.
-- The primary entry is **Manage worktrees** in the Project actions menu in Task Navigation.
-- A secondary **Manage worktrees** shortcut appears in the New Task Workspace selector.
+- **Settings → Worktrees** is the canonical Worktree Management surface.
+- **Manage worktrees** shortcuts in the Project actions menu, New Task Workspace selector, and recovery states navigate to the Worktrees Settings page with the current Project context.
 - An unavailable Project that retains a durable Worktree Repository association keeps its Project action entry to management so the recorded root can be inspected or recreated.
-- Management opens a repository-scoped central surface, not a modal and not a permanent sidebar section.
+- Management opens the repository-scoped Settings surface, not a modal or a duplicate Task/Navigation-owned page.
 - The panel lists the primary checkout and every linked worktree with path, branch or detached `HEAD`, availability or lock state, linked Task count, running or leased activity, last use, and Managed/External ownership. It does not continuously compute clean/dirty filesystem status.
 - The primary checkout is visible context but cannot be removed.
 - A linked worktree that contains a configured Project root may be removed after the ordinary safeguards. OpenAIDE retains that Project and its Task groups but marks the Project unavailable; it cannot start New Tasks in Project root or another worktree until its recorded Project folder is recreated. Existing Tasks whose own Task Workspaces remain available may continue.

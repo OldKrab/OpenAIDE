@@ -91,12 +91,13 @@ export function createVsCodeShell(): FrontendShell {
           ...(projectId ? { project_id: projectId } : {}),
         },
       }),
-      openSettings: (agentId, returnToNewTask, projectId) => vscode?.postMessage({
+      openSettings: (agentId, returnToNewTask, projectId, settingsTab) => vscode?.postMessage({
         type: "surface.openSettings",
         payload: {
           ...(agentId ? { agent_id: agentId } : {}),
           ...(returnToNewTask ? { return_to_new_task: true } : {}),
           ...(projectId ? { project_id: projectId } : {}),
+          ...(settingsTab ? { settings_tab: settingsTab } : {}),
         },
       }),
       openTask: (taskId, title) => vscode?.postMessage({
@@ -125,12 +126,13 @@ export function createVsCodeShell(): FrontendShell {
 
 function bootstrapForRouteMessage(message: unknown, current: WebviewBootstrap): WebviewBootstrap | undefined {
   if (!message || typeof message !== "object") return undefined;
-  const candidate = message as { type?: unknown; payload?: { surface?: unknown; task_id?: unknown; agent_id?: unknown; return_to_new_task?: unknown; project_id?: unknown } };
+  const candidate = message as { type?: unknown; payload?: { surface?: unknown; task_id?: unknown; agent_id?: unknown; return_to_new_task?: unknown; project_id?: unknown; settings_tab?: unknown } };
   if (candidate.type === "surface.settingsChanged") {
     return current.surface === "invalid" ? undefined : {
       ...current,
       surface: "settings",
       settingsAgentId: typeof candidate.payload?.agent_id === "string" ? candidate.payload.agent_id : undefined,
+      settingsTab: isSettingsTab(candidate.payload?.settings_tab) ? candidate.payload.settings_tab : undefined,
       returnToNewTask: candidate.payload?.return_to_new_task === true,
       projectId: typeof candidate.payload?.project_id === "string" ? candidate.payload.project_id : undefined,
       taskId: undefined,
@@ -152,4 +154,12 @@ function bootstrapForRouteMessage(message: unknown, current: WebviewBootstrap): 
         settingsTab: undefined,
         archived: undefined,
       };
+}
+
+function isSettingsTab(value: unknown): value is import("@openaide/app-shell-contracts").SettingsTabId {
+  return value === "agents"
+    || value === "mcp"
+    || value === "skills"
+    || value === "common"
+    || value === "worktrees";
 }

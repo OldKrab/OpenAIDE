@@ -7,6 +7,7 @@ import type {
   DiagnosticsSnapshot,
   WorkspaceRootSummary,
 } from "./settings.js";
+import type { SettingsTabId } from "./preferences.js";
 import type { WebviewAppServerConnection } from "./bootstrap.js";
 import type { WebviewTelemetryPayload } from "./telemetry.js";
 
@@ -51,7 +52,7 @@ export type WebviewToHostMessage =
   | { type: "surface.openNewTask"; payload?: { project_id?: string } }
   | { type: "surface.openNativeSession"; payload: { agent_id: string; native_session_id: string; project_id?: string } }
   | { type: "surface.openArchive" }
-  | { type: "surface.openSettings"; payload?: { agent_id?: string; return_to_new_task?: boolean; project_id?: string } }
+  | { type: "surface.openSettings"; payload?: { agent_id?: string; return_to_new_task?: boolean; project_id?: string; settings_tab?: SettingsTabId } }
   | { type: "surface.openTask"; payload: { task_id: string; title?: string } }
   | { type: "surface.updateTaskTitle"; payload: { task_id: string; title: string } }
   | { type: "shell.openExternal"; payload: { url: string } }
@@ -67,7 +68,7 @@ export type HostToWebviewMessage =
   | { type: "surface.focusChanged"; payload: { task_id?: string } }
   | { type: "attachment.pickFiles.result"; payload: { requestId: string; attachments?: Array<{ handleId: string; label: string }>; error?: string } }
   | { type: "surface.routeChanged"; payload: { surface: "task"; task_id: string } }
-  | { type: "surface.settingsChanged"; payload: { agent_id?: string; return_to_new_task?: boolean; project_id?: string } }
+  | { type: "surface.settingsChanged"; payload: { agent_id?: string; return_to_new_task?: boolean; project_id?: string; settings_tab?: SettingsTabId } }
   | { type: "diagnostics.snapshot.result"; payload: DiagnosticsSnapshot }
   | { type: "workspace.roots.result"; payload: { roots: WorkspaceRootSummary[] } }
   | { type: "runtime.settings.result"; payload: RuntimeSettingsResult }

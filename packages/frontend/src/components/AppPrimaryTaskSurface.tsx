@@ -160,6 +160,7 @@ export function AppPrimaryTaskSurface({ controller, focusRequestKey, model, work
       loadingProjects={!backendReady}
       onCancelTask={callbacks.newTask.cancel}
       onLoadComposerHistory={callbacks.newTask.loadComposerHistory}
+      onManageWorktrees={workspaceRecovery?.manageWorktrees}
       onOpenWorkspaceFolder={controller.workspaceSetup?.openFolder}
       onRemoveAttachment={callbacks.newTask.removeAttachment}
       onSelectConfigOption={callbacks.newTask.selectConfigOption}

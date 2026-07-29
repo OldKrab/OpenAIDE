@@ -9,16 +9,15 @@ beforeEach(() => {
 });
 
 describe("TaskWorkspacePicker", () => {
-  it("leaves desktop Worktree Management when Back is pressed from a selected worktree", () => {
-    const onClose = vi.fn();
+  it("leaves the New Task popup to manage worktrees in Settings", () => {
+    const onManageWorktrees = vi.fn();
     let tree!: ReturnType<typeof create>;
     act(() => {
       tree = create(
         <TaskWorkspacePicker
-          initialMode="manage"
           intents={testIntents()}
-          managementOnly
-          onClose={onClose}
+          onClose={vi.fn()}
+          onManageWorktrees={onManageWorktrees}
           project={{ projectId: "project_1", label: "OpenAIDE", workspaceRoot: "/workspace/OpenAIDE", worktreeRepositoryId: "repository_1", projectWorktreeId: "worktree_root" }}
           repository={repository()}
           tasks={[]}
@@ -26,9 +25,10 @@ describe("TaskWorkspacePicker", () => {
       );
     });
 
-    act(() => tree.root.findByProps({ "aria-label": "Back" }).props.onClick());
+    act(() => tree.root.findAllByType("button")
+      .find((button) => hasText(button, "Manage worktrees"))?.props.onClick());
 
-    expect(onClose).toHaveBeenCalledOnce();
+    expect(onManageWorktrees).toHaveBeenCalledWith("project_1");
   });
 
   it("selects Project root and reusable worktrees by opaque identity", () => {
@@ -231,98 +231,6 @@ describe("TaskWorkspacePicker", () => {
     expect(text(tree.root)).not.toContain("Waiting for another worktree operation.");
   });
 
-  it("offers Forget for an unavailable worktree and removes it from active inventory", async () => {
-    const intents = testIntents();
-    const repo = repository();
-    repo.worktrees[1] = worktree({
-      ...repo.worktrees[1],
-      availability: "unavailable",
-      availabilityReason: "Git no longer lists this worktree",
-      linkedTaskCount: 1,
-    });
-    repo.worktrees.push(worktree({
-      worktreeId: "worktree_forgotten" as never,
-      name: "Old workspace",
-      path: "/workspace/old",
-      forgotten: true,
-    }));
-    vi.mocked(intents.removalPreflight).mockResolvedValue({
-      status: "safe",
-      blockers: [],
-      ownership: "external",
-      path: "/workspace/OpenAIDE-sidebar",
-      ignoredFilesWillBeRemoved: false,
-    });
-    let tree!: ReturnType<typeof create>;
-    await act(async () => {
-      tree = create(
-        <TaskWorkspacePicker
-          initialMode="manage"
-          intents={intents}
-          managementOnly
-          onClose={vi.fn()}
-          project={{ projectId: "project_1", label: "OpenAIDE", workspaceRoot: "/workspace/OpenAIDE", worktreeRepositoryId: "repository_1", projectWorktreeId: "worktree_root" }}
-          repository={repo}
-          tasks={[linkedTask()]}
-        />,
-      );
-    });
-
-    expect(text(tree.root)).not.toContain("Old workspace");
-    act(() => tree.root.findAllByType("button").find((button) => text(button).includes("Sidebar scrolling"))?.props.onClick());
-    expect(text(tree.root)).not.toContain("New task here");
-    await act(async () => {
-      await tree.root.findAllByType("button").find((button) => hasText(button, "Forget worktree…"))?.props.onClick();
-    });
-
-    expect(text(tree.root)).toContain("Forget “Sidebar scrolling”?");
-    expect(text(tree.root)).toContain("1 linked Task will remain readable");
-    expect(text(tree.root)).toContain("The folder is already missing");
-  });
-
-  it("preserves linked Tasks and falls New Task back to Project root after removal", async () => {
-    const intents = testIntents();
-    vi.mocked(intents.removalPreflight).mockResolvedValue({
-      status: "safe",
-      blockers: [],
-      ownership: "external",
-      path: "/workspace/OpenAIDE-sidebar",
-      ignoredFilesWillBeRemoved: true,
-    });
-    vi.mocked(intents.removeWorktree).mockResolvedValue(undefined);
-    let tree!: ReturnType<typeof create>;
-    await act(async () => {
-      tree = create(
-        <TaskWorkspacePicker
-          initialMode="manage"
-          intents={intents}
-          managementOnly
-          onClose={vi.fn()}
-          project={{ projectId: "project_1", label: "OpenAIDE", workspaceRoot: "/workspace/OpenAIDE", worktreeRepositoryId: "repository_1", projectWorktreeId: "worktree_root" }}
-          repository={repository()}
-          selectedWorktreeId="worktree_sidebar"
-          tasks={[linkedTask()]}
-        />,
-      );
-    });
-    act(() => tree.root.findAllByType("button").find((button) => text(button).includes("Sidebar scrolling"))?.props.onClick());
-    await act(async () => {
-      await tree.root.findAllByType("button").find((button) => hasText(button, "Remove worktree…"))?.props.onClick();
-    });
-
-    expect(text(tree.root)).toContain("1 linked Task will remain readable");
-    expect(text(tree.root)).toContain("Branch fix/sidebar-scroll will be kept");
-    await act(async () => {
-      await tree.root.findAllByType("button").find((button) => hasText(button, "Remove worktree") && !hasText(button, "…"))?.props.onClick();
-    });
-
-    expect(intents.removeWorktree).toHaveBeenCalledWith("repository_1", "worktree_sidebar");
-    expect(intents.selectWorktree).toHaveBeenCalledWith({
-      worktreeId: undefined,
-      label: "Project root",
-      path: "/workspace/OpenAIDE",
-    });
-  });
 });
 
 function render(intents: NewTaskViewIntents) {
@@ -406,29 +314,6 @@ function worktree(overrides: Partial<WorktreeSummary>): WorktreeSummary {
     linkedTaskCount: 0,
     runningTaskCount: 0,
     ...overrides,
-  };
-}
-
-function linkedTask() {
-  return {
-    task_id: "task_1",
-    project_id: "project_1",
-    agent_id: "codex",
-    agent_name: "Codex",
-    title: "Fix sidebar scrolling",
-    status: "inactive" as const,
-    task_version: 1,
-    message_history_version: 1,
-    has_messages: true,
-    created_at: "1",
-    updated_at: "1",
-    last_activity: "1",
-    unread: false,
-    pinned: false,
-    workspace_root: "/workspace/OpenAIDE-sidebar",
-    isolation: "git_worktree" as const,
-    workspace_available: true,
-    worktree_id: "worktree_sidebar",
   };
 }
 

@@ -45,7 +45,9 @@ function routeStandaloneHostMessage(message: WebviewToHostMessage, output: Stand
         : "/new-task");
       return;
     case "surface.openSettings":
-      output.navigate("/settings");
+      output.navigate(message.payload?.settings_tab
+        ? `/settings?tab=${encodeURIComponent(message.payload.settings_tab)}`
+        : "/settings");
       return;
     default:
       return;
