@@ -490,14 +490,36 @@ pub(super) fn migrate_v1_tool_presentations(value: &mut Value) {
                 if !presentation.contains_key("actions") {
                     let kind = presentation.remove("kind");
                     let subjects = presentation.remove("subjects");
-                    if let (Some(kind), Some(subjects)) = (kind, subjects) {
-                        presentation.insert(
-                            "actions".to_string(),
-                            Value::Array(vec![serde_json::json!({
+                    let actions = match (&kind, &subjects) {
+                        (Some(Value::String(kind)), Some(Value::Array(subjects)))
+                            if kind == "search" =>
+                        {
+                            // V1 flattened each query and scope into one display subject.
+                            // Preserve that text without inventing scope or path-search facts.
+                            Some(Value::Array(
+                                subjects
+                                    .iter()
+                                    .map(|query| {
+                                        serde_json::json!({
+                                            "kind": "search",
+                                            "query": query,
+                                            "scopes": [],
+                                            "target": "contents",
+                                        })
+                                    })
+                                    .collect(),
+                            ))
+                        }
+                        (Some(kind), Some(subjects)) => {
+                            Some(Value::Array(vec![serde_json::json!({
                                 "kind": kind,
                                 "subjects": subjects,
-                            })]),
-                        );
+                            })]))
+                        }
+                        _ => None,
+                    };
+                    if let Some(actions) = actions {
+                        presentation.insert("actions".to_string(), actions);
                     }
                 }
             }
