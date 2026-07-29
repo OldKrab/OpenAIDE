@@ -78,10 +78,23 @@ export async function createCustomAgentThroughBackend(
   ));
   await secretTransaction?.commit();
   applyAgentMutationResult(context, result.agents);
+  // Saving is not complete from the user's perspective until the new launch
+  // configuration has been probed and its authoritative status is visible.
+  try {
+    await refreshAgentSettingsThroughBackend(context);
+  } catch (error) {
+    // The catalog mutation already committed. Acknowledge it with the safe
+    // local projection so retrying the check cannot create a duplicate Agent.
+    context.dispatch({
+      type: "settings:agentSaved",
+      agentId: result.agentId,
+      agent: settingsRecordFromCustomPayload(result.agentId, payload),
+    });
+    throw error;
+  }
   context.dispatch({
     type: "settings:agentSaved",
     agentId: result.agentId,
-    agent: settingsRecordFromCustomPayload(result.agentId, payload),
   });
   return true;
 }

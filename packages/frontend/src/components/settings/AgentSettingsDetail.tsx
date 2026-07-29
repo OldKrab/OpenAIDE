@@ -19,7 +19,9 @@ export function AgentSettingsDetail({
   onCancelDraft,
   onDeleteClick,
   onSaveDraft,
+  saveChecksConnection,
   saveBlockedMessage,
+  savePending,
   onSetAgentEnabled,
   onUpdateDraft,
   recoveryActions,
@@ -35,7 +37,9 @@ export function AgentSettingsDetail({
   onCancelDraft?: () => void;
   onDeleteClick: () => void;
   onSaveDraft: () => void;
+  saveChecksConnection: boolean;
   saveBlockedMessage?: string;
+  savePending: boolean;
   onSetAgentEnabled: (agentId: string, enabled: boolean) => void;
   onUpdateDraft: (patch: Partial<AgentDraft>) => void;
   recoveryActions?: AgentRecoveryActions;
@@ -114,9 +118,16 @@ export function AgentSettingsDetail({
             <strong>Actions</strong>
           </div>
           <div className="agent-detail-actions">
-            <button disabled={authPending || Boolean(saveBlockedMessage)} type="button" onClick={onSaveDraft}>
+            <button
+              aria-busy={savePending}
+              disabled={authPending || savePending || Boolean(saveBlockedMessage)}
+              type="button"
+              onClick={onSaveDraft}
+            >
               <Save size={13} />
-              {showReplaceConfirmation ? "Confirm replace" : "Save"}
+              {savePending
+                ? (saveChecksConnection ? "Saving and checking…" : "Saving…")
+                : (showReplaceConfirmation ? "Confirm replace" : "Save")}
             </button>
             {onCancelDraft ? (
               <button disabled={authPending} type="button" onClick={onCancelDraft}>

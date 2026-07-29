@@ -31,6 +31,7 @@ export function AgentSettingsTab({
   onUpdateCustomAgentMetadata,
   deletedAgentId,
   savedAgentId,
+  saveError,
   preferredAgentId,
   recoveryActions,
 }: {
@@ -44,6 +45,7 @@ export function AgentSettingsTab({
   onUpdateCustomAgentMetadata: (params: CustomAgentMetadataUpdateParams) => void;
   deletedAgentId?: string;
   savedAgentId?: string;
+  saveError?: string;
   preferredAgentId?: string;
   recoveryActions?: AgentRecoveryActions;
 }) {
@@ -59,6 +61,8 @@ export function AgentSettingsTab({
   const isCustom = draft !== undefined || selected?.source_kind === "custom";
   const isCreating = draft?.agent_id === undefined;
   const missingRequiredLaunchFields = isCustom && (!activeDraft.label.trim() || !activeDraft.command_line.trim());
+  const saveChecksConnection = isCreating
+    || Boolean(selectedAgent?.source_kind === "custom" && draftChangesLaunch(selectedAgent, activeDraft));
 
   useEffect(() => {
     if (preferredAgentId && agents.some((agent) => agent.id === preferredAgentId)) {
@@ -72,6 +76,12 @@ export function AgentSettingsTab({
     setSelectedId(savedAgentId!);
     setPendingSaveAgentId(undefined);
   }, [draft, pendingSaveAgentId, savedAgentId]);
+
+  useEffect(() => {
+    // Failed mutations have no save acknowledgement, so release the local
+    // pending state when Settings exposes the operation error.
+    if (saveError && pendingSaveAgentId) setPendingSaveAgentId(undefined);
+  }, [pendingSaveAgentId, saveError]);
 
   useEffect(() => {
     if (!shouldConsumeAgentDeleteAck({ deletedAgentId, pendingDeleteAgentId })) return;
@@ -173,7 +183,9 @@ export function AgentSettingsTab({
           onCancelDraft={draft !== undefined ? cancelDraft : undefined}
           onDeleteClick={deleteDraft}
           onSaveDraft={saveDraft}
+          saveChecksConnection={saveChecksConnection}
           saveBlockedMessage={missingRequiredLaunchFields ? "Name and command are required." : undefined}
+          savePending={pendingSaveAgentId !== undefined}
           onSetAgentEnabled={onSetAgentEnabled}
           onUpdateDraft={updateDraft}
           recoveryActions={recoveryActions}

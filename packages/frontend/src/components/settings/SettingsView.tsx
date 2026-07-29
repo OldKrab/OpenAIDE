@@ -334,6 +334,7 @@ export function SettingsView({
             projects={projects}
             recoveryActions={recoveryActions}
             developerSettingsUnlocked={developerSettingsUnlocked}
+            saveError={state.error}
             savedAgentId={state.savedAgentId}
             runtimeSettings={state.runtimeSettings}
             settingsState={state}
@@ -380,6 +381,7 @@ function SettingsTabContent({
   preferredAgentId,
   projects,
   recoveryActions,
+  saveError,
   savedAgentId,
   deletedAgentId,
   runtimeSettings,
@@ -413,6 +415,7 @@ function SettingsTabContent({
   preferredAgentId?: string;
   projects: ProjectOption[];
   recoveryActions?: AgentRecoveryActions;
+  saveError?: string;
   savedAgentId?: string;
   runtimeSettings?: RuntimeSettingsResult;
   settingsState: SettingsState;
@@ -440,6 +443,7 @@ function SettingsTabContent({
           onReplaceCustomAgent={onReplaceCustomAgent}
           onSetAgentEnabled={onSetAgentEnabled}
           onUpdateCustomAgentMetadata={onUpdateCustomAgentMetadata}
+          saveError={saveError}
           savedAgentId={savedAgentId}
         />
       ) : null}

@@ -1432,10 +1432,35 @@ describe("app controller callbacks", () => {
   it("creates custom Agents through BackendConnection when available", async () => {
     const dispatch = vi.fn();
     const setAgents = vi.fn();
-    const request = vi.fn(async () => ({
-      agentId: "custom.local",
-      agents: protocolAgents(["codex", "custom.local"]),
-    }));
+    const request = vi.fn(async (method: string) => {
+      if (method === SETTINGS_GET_AGENT_DETAILS) {
+        return {
+          generatedAt: "after-save-check",
+          agents: [{
+            agentId: "custom.local",
+            label: "Local Agent",
+            enabled: true,
+            sourceKind: "custom",
+            icon: "bot",
+            transport: "stdio",
+            status: "connected",
+            launchLabel: "local-agent --stdio",
+            commandLine: "local-agent --stdio",
+            env: [
+              { name: "LOCAL_TOKEN", secret: true },
+              { name: "LOG_LEVEL", value: "debug", secret: false },
+            ],
+            description: "Custom ACP stdio Agent",
+            capabilities: ["ACP stdio"],
+            authMethods: [],
+          }],
+        };
+      }
+      return {
+        agentId: "custom.local",
+        agents: protocolAgents(["codex", "custom.local"]),
+      };
+    });
 
     callbacks({
       backendConnection: { request: request as unknown as BackendConnection["request"] },
@@ -1464,17 +1489,23 @@ describe("app controller callbacks", () => {
       secretEnv: ["LOCAL_TOKEN"],
       enabled: true,
     });
+    expect(request).toHaveBeenCalledWith(SETTINGS_GET_AGENT_DETAILS, {});
     expect(setAgents).toHaveBeenCalledWith(expect.arrayContaining([expect.objectContaining({ id: "custom.local" })]));
     expect(dispatch).toHaveBeenNthCalledWith(1, { type: "settings:start" });
     expect(dispatch).toHaveBeenCalledWith({
+      type: "settings:agentDetailsResult",
+      generatedAt: "after-save-check",
+      agents: [expect.objectContaining({
+        id: "custom.local",
+        status: "connected",
+      })],
+    });
+    const detailsDispatch = dispatch.mock.calls.findIndex(([action]) => action.type === "settings:agentDetailsResult");
+    const savedDispatch = dispatch.mock.calls.findIndex(([action]) => action.type === "settings:agentSaved");
+    expect(detailsDispatch).toBeLessThan(savedDispatch);
+    expect(dispatch).toHaveBeenCalledWith({
       type: "settings:agentSaved",
       agentId: "custom.local",
-      agent: expect.objectContaining({
-        env: [
-          { name: "LOCAL_TOKEN", secret: true },
-          { name: "LOG_LEVEL", value: "debug", secret: false },
-        ],
-      }),
     });
     expect(JSON.stringify(dispatch.mock.calls)).not.toContain("secret-token");
     expect(beginAgentSecretTransaction).toHaveBeenCalledWith({
@@ -1511,6 +1542,39 @@ describe("app controller callbacks", () => {
       message: "Secure storage is unavailable in the Web App.",
     });
     expect(JSON.stringify(dispatch.mock.calls)).not.toContain("secret-token");
+  });
+
+  it("keeps a created Agent saved when its automatic connection check fails", async () => {
+    const dispatch = vi.fn();
+    const request = vi.fn(async (method: string) => {
+      if (method === SETTINGS_GET_AGENT_DETAILS) throw new Error("Connection check unavailable");
+      return {
+        agentId: "custom.local",
+        agents: protocolAgents(["codex", "custom.local"]),
+      };
+    });
+
+    callbacks({
+      backendConnection: { request: request as unknown as BackendConnection["request"] },
+      dispatch,
+    }).settings.createCustomAgent({
+      label: "Local Agent",
+      icon: "bot",
+      command_line: "local-agent --stdio",
+      enabled: true,
+      env: [],
+    });
+    await settlePromises();
+
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "settings:agentSaved",
+      agentId: "custom.local",
+      agent: expect.objectContaining({ id: "custom.local", status: "disconnected" }),
+    });
+    expect(dispatch).toHaveBeenCalledWith({
+      type: "settings:error",
+      message: "Connection check unavailable",
+    });
   });
 
   it("creates an MCP server through one secure-storage transaction", async () => {
