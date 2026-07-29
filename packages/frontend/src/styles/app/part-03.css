@@ -390,6 +390,17 @@
   white-space: nowrap;
 }
 
+/* Preserve semantic identity while long patterns, paths, and scopes absorb compression first. */
+.activity-step-semantic-subject-list.identity {
+  flex: 0 0 auto;
+  max-width: 24ch;
+}
+
+.activity-step-semantic-subject-list.technical {
+  flex: 1 8 auto;
+  min-width: 6ch;
+}
+
 .activity-step-semantic-subject {
   font-weight: 400;
 }
@@ -405,7 +416,8 @@
 }
 
 .activity-step-semantic-scope {
-  min-width: 0;
+  flex: 0 4 18ch;
+  min-width: 6ch;
   max-width: 18ch;
   overflow: hidden;
   text-overflow: ellipsis;

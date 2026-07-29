@@ -430,7 +430,12 @@ function SemanticStepTitle({ title }: { title: ActivityStepSemanticTitle }) {
             <span className="activity-step-semantic-connector">then</span>
           ) : null}
           <span className="activity-step-semantic-action">{action.action}</span>
-          <span className="activity-step-semantic-subject-list">
+          <span
+            className={[
+              "activity-step-semantic-subject-list",
+              action.action === "Activated" ? "identity" : "technical",
+            ].join(" ")}
+          >
             {action.subjects.map((subject, subjectIndex) => (
               <Fragment key={`${subject}-${subjectIndex}`}>
               {subjectIndex > 0 ? (

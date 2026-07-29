@@ -1061,7 +1061,7 @@ describe("ChatRow", () => {
     );
 
     expect(html).toContain('class="activity-step-semantic-action">Read</span>');
-    expect(html).toContain('class="activity-step-semantic-subject-list">');
+    expect(html).toContain('class="activity-step-semantic-subject-list technical">');
     expect(html).toContain('class="activity-step-semantic-subject">acp_session_worker.rs</span>');
     expect(html).toContain('class="activity-step-semantic-connector"> and </span>');
     expect(html).toContain('class="activity-step-semantic-subject">prompt_start.rs</span>');
@@ -1145,7 +1145,15 @@ describe("ChatRow", () => {
 
     expect(html).toContain("lucide-file-search");
     expect(html).toContain('class="activity-step-semantic-action">Activated</span>');
-    expect(html).toContain('class="activity-step-semantic-subject">diagnosing-bugs skill</span>');
+    expect(html).toContain(
+      'class="activity-step-semantic-subject-list identity">'
+      + '<span class="activity-step-semantic-subject">diagnosing-bugs skill</span>',
+    );
+    expect(html).toContain(
+      'class="activity-step-semantic-subject-list technical">'
+      + '<span class="activity-step-semantic-subject">'
+      + '“parse.*command|command.*parse|shell.*parser|ParsedCommand|parse_command”</span>',
+    );
     expect(html).toContain(
       'title="Activated diagnosing-bugs skill; '
       + 'Search “parse.*command|command.*parse|shell.*parser|ParsedCommand|parse_command” in workspace"',
