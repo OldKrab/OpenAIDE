@@ -123,12 +123,12 @@ describe("activity labels", () => {
     expect(activityStepContext(step)).toBeUndefined();
   });
 
-  it("labels terminal input separately from commands", () => {
+  it("summarizes terminal input as generic tool activity", () => {
     expect(
       activitySummary(
         activity("write_stdin", "completed", [{ kind: "tool", name: "other", status: "completed" }]),
       ),
-    ).toBe("Sent terminal input");
+    ).toBe("Called tool");
   });
 
   it("keeps protocol kinds readable for non-command tools", () => {
@@ -136,6 +136,16 @@ describe("activity labels", () => {
       activitySummary(
         activity("Search files", "completed", [
           { kind: "tool", name: "search", status: "completed", input_summary: "workspace_root" },
+        ]),
+      ),
+    ).toBe("Ran search");
+  });
+
+  it("summarizes directory listing as search activity", () => {
+    expect(
+      activitySummary(
+        activity("List files", "completed", [
+          { kind: "tool", name: "list", status: "completed", input_summary: "workspace_root" },
         ]),
       ),
     ).toBe("Ran search");
@@ -158,7 +168,7 @@ describe("activity labels", () => {
       "Switch mode to Plan",
     ]);
     expect(activitySummary(activity("Tool activity", "completed", steps))).toBe(
-      "Deleted file, moved file, used reasoning tool, fetched resource, switched mode",
+      "Deleted file, updated file, thought, ran search, called tool",
     );
   });
 
@@ -176,7 +186,7 @@ describe("activity labels", () => {
       { kind: "tool", name: "other", status: "completed", input_summary: "name spawn_agent" },
     ]);
 
-    expect(activitySummary(message)).toBe("Coordinated subagent");
+    expect(activitySummary(message)).toBe("Interacted with subagent");
     expect(activityStepLabel(message.steps[0])).toBe("Started subagent");
   });
 
@@ -188,13 +198,13 @@ describe("activity labels", () => {
       input_summary: "Wait for subagents",
     };
 
-    expect(activitySummary(activity("Wait for subagents", "completed", [wait]))).toBe("Wait for subagents");
+    expect(activitySummary(activity("Wait for subagents", "completed", [wait]))).toBe("Interacted with subagent");
     expect(activityStepLabel(wait)).toBe("Wait for subagents");
     expect(activityStepStatus(wait)).toBe("Completed");
   });
 
   it.each([
-    ["started", "Start subagent standards_review", "Started subagent"],
+    ["started", "Start subagent standards_review", "Interacted with subagent"],
     ["interacted", "Interact with subagent standards_review", "Interacted with subagent"],
   ] as const)("generates the subagent group title from %s activity while preserving the ACP row title", (
     subagentActivity,
@@ -232,11 +242,11 @@ describe("activity labels", () => {
     expect(activitySummary(activity("Tool activity", "completed", [
       subagent("review_a", "started"),
       subagent("review_b", "started"),
-    ]))).toBe("Started 2 subagents");
+    ]))).toBe("2 subagent interactions");
     expect(activitySummary(activity("Tool activity", "completed", [
       subagent("review_a", "started"),
       subagent("review_a", "interacted"),
-    ]))).toBe("2 subagent actions");
+    ]))).toBe("2 subagent interactions");
   });
 
   it("presents first-class subagents with readable hierarchy and lifecycle copy", () => {
@@ -248,9 +258,7 @@ describe("activity labels", () => {
       events: ["running" as const],
     };
 
-    expect(activitySummary(activity("Delegated work", "running", [running]))).toBe(
-      "Delegated to standards review",
-    );
+    expect(activitySummary(activity("Delegated work", "running", [running]))).toBe("Interacted with subagent");
     expect(activityStepLabel(running)).toBe("standards review");
     expect(activityStepContext(running)).toBe("review");
     expect(activityStepProgressLabel(running)).toBe("standards review is working");
@@ -322,7 +330,7 @@ describe("activity labels", () => {
       input_summary: "rg -n activityLabels frontend",
     };
 
-    expect(activitySummary(activity("Commands", "completed", [skill]))).toBe("Activated skill");
+    expect(activitySummary(activity("Commands", "completed", [skill]))).toBe("Called tool");
     expect(activityStepLabel(skill)).toBe("Activated tdd, diagnosing-bugs, and impeccable skills");
     expect(activityStepProgressLabel({ ...skill, status: "running" })).toBe(
       "Activating tdd, diagnosing-bugs, and impeccable skills",
@@ -348,13 +356,32 @@ describe("activity labels", () => {
       },
       input_summary: "zsh -lc ...",
     };
-    expect(activitySummary(activity("Commands", "completed", [inspect]))).toBe("Inspected files");
+    expect(activitySummary(activity("Commands", "completed", [inspect]))).toBe("Read file, ran search");
     expect(activityStepLabel(inspect)).toBe(
       "Read agent-settings-catalog.css and mcp-settings.css; "
       + "Search “skill” in part-09.css, part-10.css, and settings-shell.css",
     );
     expect(activityStepProgressLabel({ ...inspect, status: "running" })).toBe("Inspecting files");
     expect(activityStepCompletedLabel(inspect)).toBe("Inspected files");
+    expect(activitySummary(activity("Commands", "completed", [inspect, inspect]))).toBe(
+      "Read 2 files, ran 2 searches",
+    );
+
+    const skillSearch = {
+      ...inspect,
+      presentation: {
+        actions: [
+          { kind: "skill" as const, subjects: ["tdd"] },
+          {
+            kind: "search" as const,
+            query: "activitySummary",
+            scopes: ["frontend"],
+            target: "contents" as const,
+          },
+        ],
+      },
+    };
+    expect(activitySummary(activity("Commands", "completed", [skillSearch]))).toBe("Called tool, ran search");
   });
 
   it("summarizes mixed grouped tool activity by work type", () => {
@@ -385,7 +412,7 @@ describe("activity labels", () => {
     );
   });
 
-  it("presents activated skills distinctly inside mixed activity", () => {
+  it("keeps skill detail while grouping skills as generic tools", () => {
     const message = activity("Tool activity", "completed", [
       { kind: "tool", name: "skill", status: "completed", input_summary: "tdd" },
       { kind: "tool", name: "read", status: "completed", input_summary: "PRODUCT.md" },
@@ -393,7 +420,7 @@ describe("activity labels", () => {
       { kind: "tool", name: "execute", status: "completed", input_summary: "npm test" },
     ]);
 
-    expect(activitySummary(message)).toBe("Activated 2 skills, read file, ran command");
+    expect(activitySummary(message)).toBe("Called 2 tools, read file, ran command");
     expect(activityStepLabel(message.steps[0])).toBe("Activated tdd skill");
     expect(activityStepProgressLabel(message.steps[0])).toBe("Activating tdd skill");
     expect(activityStepCompletedLabel(message.steps[0])).toBe("Activated tdd skill");
