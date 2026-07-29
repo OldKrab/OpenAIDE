@@ -35,6 +35,13 @@ impl PassiveSyncGeneration {
 }
 
 impl HistorySyncCoordinator {
+    pub(super) fn clear_task_state(&self) {
+        self.tasks
+            .lock()
+            .expect("history sync registry poisoned")
+            .clear();
+    }
+
     /// Returns only catalog state already refreshed outside Task opening.
     pub(super) fn cached_session(
         &self,

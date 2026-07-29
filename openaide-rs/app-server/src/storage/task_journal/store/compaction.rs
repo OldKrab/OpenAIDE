@@ -33,6 +33,7 @@ pub(super) fn compact_task(
     };
     let compacted_frame = JournalFrame {
         format_version: 1,
+        schema_version: super::super::split::CHAT_SCHEMA_VERSION,
         sequence: 1,
         operations: vec![TaskOperation::Create { projection }],
     };

@@ -101,6 +101,12 @@ pub(crate) trait AppServerShutdownWorkflow: Send + Sync {
     fn shutdown_blockers(&self) -> Result<ShutdownBlockers, RuntimeError>;
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RemovedTask {
+    pub(crate) task_id: openaide_app_server_protocol::ids::TaskId,
+    pub(crate) next_revision: u64,
+}
+
 #[cfg(test)]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct ShutdownBlockers {

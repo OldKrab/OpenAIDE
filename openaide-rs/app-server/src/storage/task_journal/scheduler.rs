@@ -43,6 +43,8 @@ struct SchedulerState {
     global_control_writes: usize,
     peak_global_stream_bytes: usize,
     peak_task_stream_bytes: usize,
+    reset_reply: Option<mpsc::Sender<Result<(), RuntimeError>>>,
+    resetting: bool,
     shutdown_reply: Option<mpsc::Sender<()>>,
     closed: bool,
 }
@@ -65,6 +67,7 @@ pub(super) enum NextWork {
         task_id: String,
         writes: Vec<QueuedWrite>,
     },
+    Reset(mpsc::Sender<Result<(), RuntimeError>>),
     Shutdown(mpsc::Sender<()>),
     Closed,
 }
@@ -84,7 +87,10 @@ impl Scheduler {
     ) -> Result<(), RuntimeError> {
         validate_write_size(&write)?;
         let mut state = self.state.lock().expect("Task scheduler poisoned");
-        while !state.closed && state.shutdown_reply.is_none() && !has_capacity(&state, &write) {
+        while !state.closed
+            && state.shutdown_reply.is_none()
+            && (state.reset_reply.is_some() || state.resetting || !has_capacity(&state, &write))
+        {
             state = self.changed.wait(state).expect("Task scheduler poisoned");
         }
         if state.closed || state.shutdown_reply.is_some() {
@@ -111,7 +117,7 @@ impl Scheduler {
                 "Task journal worker is unavailable".to_string(),
             ));
         }
-        if !has_capacity(&state, &write) {
+        if state.reset_reply.is_some() || state.resetting || !has_capacity(&state, &write) {
             return Ok(Some(write));
         }
         enqueue(&mut state, write, reply);
@@ -123,7 +129,10 @@ impl Scheduler {
     /// competing stream can consume capacity before they reacquire ownership.
     pub fn wait_for_capacity(&self, write: &TaskWrite) -> Result<(), RuntimeError> {
         let mut state = self.state.lock().expect("Task scheduler poisoned");
-        while !state.closed && state.shutdown_reply.is_none() && !has_capacity(&state, write) {
+        while !state.closed
+            && state.shutdown_reply.is_none()
+            && (state.reset_reply.is_some() || state.resetting || !has_capacity(&state, write))
+        {
             state = self.changed.wait(state).expect("Task scheduler poisoned");
         }
         if state.closed || state.shutdown_reply.is_some() {
@@ -144,6 +153,31 @@ impl Scheduler {
         state.shutdown_reply = Some(reply);
         self.changed.notify_all();
         Ok(())
+    }
+
+    pub fn request_reset(
+        &self,
+        reply: mpsc::Sender<Result<(), RuntimeError>>,
+    ) -> Result<(), RuntimeError> {
+        let mut state = self.state.lock().expect("Task scheduler poisoned");
+        if state.closed
+            || state.shutdown_reply.is_some()
+            || state.reset_reply.is_some()
+            || state.resetting
+        {
+            return Err(RuntimeError::Storage(
+                "Task journal worker is unavailable".to_string(),
+            ));
+        }
+        state.reset_reply = Some(reply);
+        self.changed.notify_all();
+        Ok(())
+    }
+
+    pub fn finish_reset(&self) {
+        let mut state = self.state.lock().expect("Task scheduler poisoned");
+        state.resetting = false;
+        self.changed.notify_all();
     }
 
     pub fn close(&self) {
@@ -178,6 +212,9 @@ impl Scheduler {
         state.global_control_writes = 0;
         if let Some(reply) = state.shutdown_reply.take() {
             let _ = reply.send(());
+        }
+        if let Some(reply) = state.reset_reply.take() {
+            let _ = reply.send(Err(RuntimeError::Storage(message.to_string())));
         }
         self.changed.notify_all();
     }
@@ -219,10 +256,16 @@ impl Scheduler {
                 self.changed.notify_all();
                 return NextWork::Batch { task_id, writes };
             }
-            if let Some(reply) = state.shutdown_reply.take() {
-                state.closed = true;
-                self.changed.notify_all();
-                return NextWork::Shutdown(reply);
+            if let Some(reply) = state.reset_reply.take() {
+                state.resetting = true;
+                return NextWork::Reset(reply);
+            }
+            if !state.resetting {
+                if let Some(reply) = state.shutdown_reply.take() {
+                    state.closed = true;
+                    self.changed.notify_all();
+                    return NextWork::Shutdown(reply);
+                }
             }
             if state.closed {
                 return NextWork::Closed;

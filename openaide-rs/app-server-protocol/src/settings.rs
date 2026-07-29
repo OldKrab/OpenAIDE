@@ -59,6 +59,14 @@ pub struct McpSetServerEnabledParams {
 #[serde(rename_all = "camelCase")]
 pub struct SettingsSkillsParams {}
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ResetTaskHistoryParams {}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct ResetTaskHistoryResult {}
+
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct SettingsSkillDetailsParams {

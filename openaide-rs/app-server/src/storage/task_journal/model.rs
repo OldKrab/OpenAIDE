@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::protocol::errors::RuntimeError;
 use crate::protocol::model::ActivityToolDetails;
 use crate::storage::records::{MessageMeta, StoredMessage, TaskRecord};
 
@@ -422,11 +423,36 @@ pub struct TerminalOutputAppend {
 #[derive(Debug, Deserialize, Serialize)]
 pub(super) struct JournalFrame {
     pub format_version: u16,
+    #[serde(default = "legacy_chat_schema_version")]
+    pub schema_version: u16,
     pub sequence: u64,
     pub operations: Vec<TaskOperation>,
 }
 
 impl super::frame::FramedRecord for JournalFrame {
+    fn decode(payload: &[u8]) -> Result<Self, RuntimeError> {
+        let mut value: serde_json::Value = serde_json::from_slice(payload)?;
+        let schema_version = value
+            .get("schema_version")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|version| u16::try_from(version).ok())
+            .unwrap_or_else(legacy_chat_schema_version);
+        match schema_version {
+            super::split::CHAT_SCHEMA_VERSION => {}
+            1 => {
+                super::split::migrate_v1_tool_presentations(&mut value);
+                value["schema_version"] =
+                    serde_json::Value::from(super::split::CHAT_SCHEMA_VERSION);
+            }
+            version => {
+                return Err(RuntimeError::Storage(format!(
+                    "Unsupported Chat journal schema version {version}"
+                )))
+            }
+        }
+        Ok(serde_json::from_value(value)?)
+    }
+
     fn format_version(&self) -> u16 {
         self.format_version
     }
@@ -434,6 +460,10 @@ impl super::frame::FramedRecord for JournalFrame {
     fn sequence(&self) -> u64 {
         self.sequence
     }
+}
+
+fn legacy_chat_schema_version() -> u16 {
+    1
 }
 
 #[derive(Debug, Deserialize, Serialize)]

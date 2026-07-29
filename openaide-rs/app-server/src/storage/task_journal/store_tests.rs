@@ -189,6 +189,7 @@ fn legacy_task_is_migrated_only_when_its_chat_is_opened() {
     let projection = task_projection("task_legacy");
     let frame = JournalFrame {
         format_version: 1,
+        schema_version: super::super::split::CHAT_SCHEMA_VERSION,
         sequence: 1,
         operations: vec![TaskOperation::Create {
             projection: Box::new(projection.clone()),
@@ -252,6 +253,7 @@ fn pre_upgrade_subagent_activity_without_events_still_opens() {
     projection.message_meta.version = 1;
     let current = JournalFrame {
         format_version: 1,
+        schema_version: super::super::split::CHAT_SCHEMA_VERSION,
         sequence: 1,
         operations: vec![TaskOperation::Create {
             projection: Box::new(projection),
@@ -282,6 +284,187 @@ fn pre_upgrade_subagent_activity_without_events_still_opens() {
             ..
         } if events == &[crate::protocol::model::SubagentActivity::Delegated]
     ));
+    store.shutdown().unwrap();
+}
+
+#[test]
+fn released_tool_presentation_snapshot_migrates_when_task_opens() {
+    let root = TempDir::new().expect("create state root");
+    let (store, _commits) = TaskJournalStore::open(root.path().to_path_buf()).unwrap();
+    let mut projection = task_projection("task_legacy_presentation");
+    projection
+        .messages
+        .push(crate::storage::records::StoredMessage {
+            sequence: 1,
+            chat: crate::protocol::model::ChatMessage {
+                cursor: "1".to_string(),
+                identity: "tool:read".to_string(),
+                message_type: "activity".to_string(),
+                message_id: "tool:read".to_string(),
+                message: crate::protocol::model::NormalizedMessage::Activity {
+                    id: "tool:read".to_string(),
+                    title: "Read preview.png".to_string(),
+                    status: crate::protocol::model::ActivityStatus::Completed,
+                    created_at: "2026-07-29T00:00:00Z".to_string(),
+                    collapsed: true,
+                    steps: vec![crate::protocol::model::ActivityStep::Tool {
+                        tool_call_id: Some("read".to_string()),
+                        name: "read".to_string(),
+                        status: crate::protocol::model::ActivityStatus::Completed,
+                        presentation: Some(crate::protocol::model::ToolPresentation::single(
+                            crate::protocol::model::ToolPresentationKind::Read,
+                            vec!["preview.png".to_string()],
+                        )),
+                        input_summary: Some("preview.png".to_string()),
+                        output_preview: None,
+                        detail_artifact_id: None,
+                        details: None,
+                        permission_outcomes: Vec::new(),
+                    }],
+                },
+            },
+        });
+    projection.message_meta.message_count = 1;
+    projection.message_meta.version = 1;
+    store
+        .submit(TaskWrite::barrier_create(projection))
+        .unwrap()
+        .wait()
+        .unwrap();
+    store.shutdown().unwrap();
+
+    let snapshot_path = root
+        .path()
+        .join("task-store-v1/tasks/task_legacy_presentation/chat.snapshot");
+    let mut released: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&snapshot_path).unwrap()).unwrap();
+    released["schemaVersion"] = serde_json::json!(1);
+    *released
+        .pointer_mut("/messages/0/chat/message/steps/0/presentation")
+        .expect("stored Tool presentation") = released_tool_presentation_v1();
+    std::fs::write(&snapshot_path, serde_json::to_vec(&released).unwrap()).unwrap();
+
+    let (store, _commits) = TaskJournalStore::open(root.path().to_path_buf()).unwrap();
+    let loaded = store
+        .load("task_legacy_presentation")
+        .expect("released Task presentation migrates");
+    let crate::protocol::model::NormalizedMessage::Activity { steps, .. } =
+        &loaded.messages[0].chat.message
+    else {
+        panic!("expected activity");
+    };
+    let crate::protocol::model::ActivityStep::Tool {
+        presentation: Some(presentation),
+        ..
+    } = &steps[0]
+    else {
+        panic!("expected Tool presentation");
+    };
+    assert_eq!(
+        presentation.actions,
+        vec![crate::protocol::model::ToolPresentationAction::Read {
+            subjects: vec!["preview.png".to_string()],
+        }]
+    );
+    let migrated: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(snapshot_path).unwrap()).unwrap();
+    assert_eq!(migrated["schemaVersion"], serde_json::json!(2));
+    assert_eq!(
+        migrated.pointer("/messages/0/chat/message/steps/0/presentation"),
+        Some(&serde_json::json!({
+            "actions": [{
+                "kind": "read",
+                "subjects": ["preview.png"]
+            }]
+        }))
+    );
+    store.shutdown().unwrap();
+}
+
+#[test]
+fn released_tool_presentation_journal_migrates_when_task_opens() {
+    let root = TempDir::new().expect("create state root");
+    let task_dir = root
+        .path()
+        .join("task-store-v1/tasks/task_legacy_presentation_journal");
+    std::fs::create_dir_all(&task_dir).unwrap();
+    let mut projection = task_projection("task_legacy_presentation_journal");
+    projection
+        .messages
+        .push(crate::storage::records::StoredMessage {
+            sequence: 1,
+            chat: crate::protocol::model::ChatMessage {
+                cursor: "1".to_string(),
+                identity: "tool:read".to_string(),
+                message_type: "activity".to_string(),
+                message_id: "tool:read".to_string(),
+                message: crate::protocol::model::NormalizedMessage::Activity {
+                    id: "tool:read".to_string(),
+                    title: "Read preview.png".to_string(),
+                    status: crate::protocol::model::ActivityStatus::Completed,
+                    created_at: "2026-07-29T00:00:00Z".to_string(),
+                    collapsed: true,
+                    steps: vec![crate::protocol::model::ActivityStep::Tool {
+                        tool_call_id: Some("read".to_string()),
+                        name: "read".to_string(),
+                        status: crate::protocol::model::ActivityStatus::Completed,
+                        presentation: Some(crate::protocol::model::ToolPresentation::single(
+                            crate::protocol::model::ToolPresentationKind::Read,
+                            vec!["preview.png".to_string()],
+                        )),
+                        input_summary: Some("preview.png".to_string()),
+                        output_preview: None,
+                        detail_artifact_id: None,
+                        details: None,
+                        permission_outcomes: Vec::new(),
+                    }],
+                },
+            },
+        });
+    projection.message_meta.message_count = 1;
+    projection.message_meta.version = 1;
+    let current = JournalFrame {
+        format_version: 1,
+        schema_version: super::super::split::CHAT_SCHEMA_VERSION,
+        sequence: 1,
+        operations: vec![TaskOperation::Create {
+            projection: Box::new(projection.clone()),
+        }],
+    };
+    let mut released = serde_json::to_value(current).unwrap();
+    *released
+        .pointer_mut("/operations/0/projection/messages/0/chat/message/steps/0/presentation")
+        .expect("stored Tool presentation") = released_tool_presentation_v1();
+    let released: LegacyJournalFrame = serde_json::from_value(released).unwrap();
+    crate::storage::task_journal::frame::create(&task_dir.join("task.journal"), &released).unwrap();
+    crate::storage::task_journal::catalog::publish(&task_dir, &projection.task).unwrap();
+
+    let (store, _commits) = TaskJournalStore::open(root.path().to_path_buf()).unwrap();
+    let loaded = store
+        .load("task_legacy_presentation_journal")
+        .expect("released Task journal presentation migrates");
+    let crate::protocol::model::NormalizedMessage::Activity { steps, .. } =
+        &loaded.messages[0].chat.message
+    else {
+        panic!("expected activity");
+    };
+    let crate::protocol::model::ActivityStep::Tool {
+        presentation: Some(presentation),
+        ..
+    } = &steps[0]
+    else {
+        panic!("expected Tool presentation");
+    };
+    assert_eq!(
+        presentation.actions,
+        vec![crate::protocol::model::ToolPresentationAction::Read {
+            subjects: vec!["preview.png".to_string()],
+        }]
+    );
+    assert!(!task_dir.join("task.journal").exists());
+    let migrated: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(task_dir.join("chat.snapshot")).unwrap()).unwrap();
+    assert_eq!(migrated["schemaVersion"], serde_json::json!(2));
     store.shutdown().unwrap();
 }
 
@@ -327,6 +510,7 @@ fn task_with_view_presentation_still_opens() {
     projection.message_meta.version = 1;
     let current = JournalFrame {
         format_version: 1,
+        schema_version: super::super::split::CHAT_SCHEMA_VERSION,
         sequence: 1,
         operations: vec![TaskOperation::Create {
             projection: Box::new(projection),
@@ -629,6 +813,7 @@ fn replay_rejects_operations_that_live_validation_would_reject() {
     projection.message_meta.task_id = "different_task".to_string();
     let frame = JournalFrame {
         format_version: 1,
+        schema_version: super::super::split::CHAT_SCHEMA_VERSION,
         sequence: 1,
         operations: vec![TaskOperation::Create {
             projection: Box::new(projection),
@@ -909,4 +1094,9 @@ fn task_projection(task_id: &str) -> TaskProjection {
         },
         artifact_heads: HashMap::new(),
     }
+}
+
+fn released_tool_presentation_v1() -> serde_json::Value {
+    serde_json::from_str(include_str!("fixtures/tool-presentation-v1.json"))
+        .expect("released v1 Tool presentation fixture")
 }

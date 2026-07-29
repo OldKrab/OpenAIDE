@@ -71,6 +71,7 @@ export type SettingsCallbacks = {
   replaceCustomAgent: (payload: CustomAgentReplaceParams) => void;
   refreshSettings: () => void;
   saveMcpServer: (input: McpServerSaveInput) => void;
+  resetTaskHistory: () => Promise<void>;
   selectSettingsTab: (tab: SettingsTabId) => void;
   setAcpTrace: (enabled: boolean) => void;
   setAgentEnabled: (agentId: string, enabled: boolean) => void;

@@ -33,6 +33,11 @@ pub(super) fn run(
                 };
                 resolve_batch(writes, receipt_result);
             }
+            NextWork::Reset(reply) => {
+                let result = super::reset::clear(&context);
+                scheduler.finish_reset();
+                let _ = reply.send(result);
+            }
             NextWork::Shutdown(reply) => {
                 let _ = reply.send(());
                 return;

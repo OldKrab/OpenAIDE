@@ -43,6 +43,33 @@ describe("SettingsView custom Agent acknowledgements", () => {
     expect(tree.root.findAllByType("strong").some((item) => item.children.includes("New line shortcut"))).toBe(false);
   });
 
+  it("requires explicit confirmation before resetting Task history", async () => {
+    const resetTaskHistory = vi.fn(async () => undefined);
+    const tree = render(
+      <GeneralSettingsTab
+        onResetTaskHistory={resetTaskHistory}
+        onSetAcpTrace={() => undefined}
+        onSetComposerSubmitShortcut={() => undefined}
+        preferences={{ composer_submit_shortcut: "enter" }}
+      />,
+    );
+
+    act(() => {
+      tree.root.findByProps({ "aria-label": "Reset task history" }).props.onClick();
+    });
+
+    expect(resetTaskHistory).not.toHaveBeenCalled();
+    expect(tree.root.findByProps({ "aria-label": "Reset task history confirmation" })).toBeTruthy();
+    expect(tree.root.findAllByType("p").some((item) => item.children.join("").includes("Agent-owned sessions"))).toBe(true);
+
+    await act(async () => {
+      await tree.root.findByProps({ "aria-label": "Confirm reset task history" }).props.onClick();
+    });
+
+    expect(resetTaskHistory).toHaveBeenCalledOnce();
+    expect(tree.root.findAllByProps({ "aria-label": "Reset task history confirmation" })).toHaveLength(0);
+  });
+
   it("consumes save acknowledgements only for the draft that initiated the save", () => {
     expect(
       shouldConsumeAgentSaveAck({

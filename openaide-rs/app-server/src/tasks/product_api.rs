@@ -49,6 +49,7 @@ mod list_sessions;
 mod native_session_archive;
 mod open;
 mod prepare;
+mod reset_task_history;
 pub(crate) mod secret_resolver;
 pub(crate) mod send;
 mod session_cursor;

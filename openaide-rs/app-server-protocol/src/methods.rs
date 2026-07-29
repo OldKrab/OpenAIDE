@@ -33,7 +33,8 @@ use crate::server_requests::{
 use crate::settings::{
     AppPreferencesParams, AppPreferencesResult, AppPreferencesUpdateParams, McpCreateServerParams,
     McpDeleteServerParams, McpGetServerDetailsParams, McpGetServerDetailsResult, McpMutationResult,
-    McpSetServerEnabledParams, McpUpdateServerParams, RuntimeSettingsParams, RuntimeSettingsResult,
+    McpSetServerEnabledParams, McpUpdateServerParams, ResetTaskHistoryParams,
+    ResetTaskHistoryResult, RuntimeSettingsParams, RuntimeSettingsResult,
     RuntimeSettingsUpdateParams, SettingsMcpServersParams, SettingsMcpServersResult,
     SettingsSkillDetailsParams, SettingsSkillDetailsResult, SettingsSkillsParams,
     SettingsSkillsResult,
@@ -288,6 +289,12 @@ protocol_method!(
     SETTINGS_UPDATE_RUNTIME,
     RuntimeSettingsUpdateParams,
     RuntimeSettingsResult
+);
+protocol_method!(
+    SettingsResetTaskHistory,
+    SETTINGS_RESET_TASK_HISTORY,
+    ResetTaskHistoryParams,
+    ResetTaskHistoryResult
 );
 protocol_method!(
     WorkspaceListRoots,
