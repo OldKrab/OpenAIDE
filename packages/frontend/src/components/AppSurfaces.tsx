@@ -9,7 +9,6 @@ import type { AppController } from "./appController";
 import { useMobileNavigation } from "./useMobileNavigation";
 import { useInputModality } from "./useInputModality";
 import { useWebTaskNotifications } from "./useWebTaskNotifications";
-import { TaskWorkspacePicker } from "./TaskWorkspacePicker";
 import { updateTaskSurfaceTitle } from "../services/hostBridge";
 
 export function AppSurfaces({ controller }: { controller: AppController }) {
@@ -31,15 +30,8 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
       });
   const [mobileLayoutActive, setMobileLayoutActive] = useState(() => isMobileWebViewport());
   const [newTaskFocusRequestKey, setNewTaskFocusRequestKey] = useState(0);
-  const [managedProjectSurface, setManagedProjectSurface] = useState<{
-    projectId: string;
-    surfaceKey: string;
-  }>();
   const mobileNavigationButtonRef = useRef<HTMLButtonElement | null>(null);
   const webMainSurfaceRef = useRef<HTMLElement | null>(null);
-  const surfaceKey = appSurfaceKey(bootstrap);
-  const surfaceKeyRef = useRef(surfaceKey);
-  surfaceKeyRef.current = surfaceKey;
   const isWebShell = bootstrap.surface !== "invalid" && bootstrap.shell.kind === "web";
   const isWebWorkbench = isWebShell && (
     bootstrap.surface === "task"
@@ -112,35 +104,9 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
     renderableTaskSnapshot?.task.task_id,
     renderableTaskSnapshot?.task.title,
   ]);
-  const managedProjectId = managedProjectSurface?.surfaceKey === surfaceKey
-    ? managedProjectSurface.projectId
-    : undefined;
-  useEffect(() => {
-    if (managedProjectSurface && managedProjectSurface.surfaceKey !== surfaceKey) {
-      setManagedProjectSurface(undefined);
-    }
-  }, [managedProjectSurface, surfaceKey]);
   const manageWorktrees = (projectId: string) => {
-    // Sidebar intentionally ignores callback identity while memoizing, so read the current owner lazily.
-    setManagedProjectSurface({ projectId, surfaceKey: surfaceKeyRef.current });
+    callbacks.navigation.openSettings(undefined, undefined, projectId, "worktrees");
   };
-  const managedProject = navigationProjects.find((project) => project.projectId === managedProjectId);
-  const managedRepository = managedProject?.worktreeRepositoryId
-    ? view.primaryTask.newTask.worktreeRepositories[managedProject.worktreeRepositoryId]
-    : undefined;
-  const managementSurface = managedProject ? (
-    <TaskWorkspacePicker
-      initialMode="manage"
-      intents={controller.intents.newTask}
-      managementOnly
-      onClose={() => setManagedProjectSurface(undefined)}
-      onUseForNewTask={() => callbacks.navigation.openNewTask(managedProject.projectId)}
-      project={managedProject}
-      repository={managedRepository}
-      selectedWorktreeId={view.primaryTask.newTask.newTask.selection.worktreeId}
-      tasks={view.primaryTask.newTask.tasks}
-    />
-  ) : null;
   const closeMobileNavigation = ({ restoreFocus = true }: { restoreFocus?: boolean } = {}) => {
     mobileNavigation.setOpen(false);
     if (restoreFocus && typeof window !== "undefined") {
@@ -247,7 +213,6 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
           taskListError={navigation.taskListError}
           tasks={visibleTasks}
         />
-        {managementSurface}
       </main>
     );
   }
@@ -411,7 +376,6 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
             />
           )}
         </section>
-        {managementSurface}
       </AppSidebarFrame>
     );
   }
@@ -424,7 +388,6 @@ export function AppSurfaces({ controller }: { controller: AppController }) {
         model={taskSurfaceModel}
         workspaceRecovery={{ manageWorktrees, openProjectSettings: callbacks.navigation.openSettings, reconnectProject: callbacks.navigation.openNewTask }}
       />
-      {managementSurface}
     </main>
   );
 }
@@ -435,26 +398,6 @@ function isMobileWebViewport() {
     return window.matchMedia("(max-width: 760px)").matches;
   }
   return window.innerWidth <= 760;
-}
-
-function appSurfaceKey(bootstrap: AppController["bootstrap"]): string {
-  if (bootstrap.surface === "invalid") return "invalid";
-  if (bootstrap.surface === "task") {
-    return JSON.stringify(bootstrap.taskId
-      ? ["task", bootstrap.taskId]
-      : ["new-task", bootstrap.projectId ?? null]);
-  }
-  if (bootstrap.surface === "nativeSession") {
-    return JSON.stringify(["native-session", bootstrap.agentId ?? null, bootstrap.nativeSessionId ?? null]);
-  }
-  if (bootstrap.surface === "navigation") {
-    return JSON.stringify([
-      "navigation",
-      bootstrap.archived ? "archived" : "active",
-      bootstrap.projectIds ?? (bootstrap.projectId ? [bootstrap.projectId] : []),
-    ]);
-  }
-  return JSON.stringify(["settings", bootstrap.settingsTab ?? null, bootstrap.settingsAgentId ?? null]);
 }
 
 function mobileNavigationFocusableElements(root: HTMLElement) {

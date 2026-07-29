@@ -23,12 +23,13 @@ export function createStandaloneShell(): FrontendShell {
           ...(projectId ? { project_id: projectId } : {}),
         },
       }),
-      openSettings: (agentId, returnToNewTask, projectId) => host?.postMessage({
+      openSettings: (agentId, returnToNewTask, projectId, settingsTab) => host?.postMessage({
         type: "surface.openSettings",
         payload: {
           ...(agentId ? { agent_id: agentId } : {}),
           ...(returnToNewTask ? { return_to_new_task: true } : {}),
           ...(projectId ? { project_id: projectId } : {}),
+          ...(settingsTab ? { settings_tab: settingsTab } : {}),
         },
       }),
       openTask: (taskId, title) => host?.postMessage({

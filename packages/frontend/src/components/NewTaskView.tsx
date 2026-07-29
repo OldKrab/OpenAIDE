@@ -69,6 +69,7 @@ export function NewTaskView({
   loadingProjects = false,
   onOpenWorkspaceFolder,
   onLoadComposerHistory,
+  onManageWorktrees,
   submitShortcut,
   fileBrowser,
   focusRequestKey,
@@ -84,6 +85,7 @@ export function NewTaskView({
   loadingProjects?: boolean;
   onOpenWorkspaceFolder?: () => void;
   onLoadComposerHistory?: () => Promise<string[]>;
+  onManageWorktrees?: (projectId: string) => void;
   onSelectConfigOption: (configId: string, value: ConfigOptionCurrentValue) => void;
   onCancelTask?: () => void;
   onRemoveAttachment: (attachmentId: string) => void;
@@ -363,6 +365,7 @@ export function NewTaskView({
               <TaskWorkspacePicker
                 intents={intents}
                 onClose={() => setOpenContextMenu(undefined)}
+                onManageWorktrees={onManageWorktrees}
                 project={selectedProject}
                 repository={selectedRepository}
                 selectedWorktreeId={state.newTask.selection.worktreeId}

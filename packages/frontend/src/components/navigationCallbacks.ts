@@ -109,9 +109,9 @@ export function createNavigationCallbacks({
       asyncOperations.beginNavigation(newTaskNavigationTarget(projectId));
       openNewTaskSurface(projectId);
     },
-    openSettings: (agentId, returnToNewTask, projectId) => {
+    openSettings: (agentId, returnToNewTask, projectId, settingsTab) => {
       asyncOperations.beginNavigation(settingsNavigationTarget());
-      openSettingsSurface(agentId, returnToNewTask, projectId);
+      openSettingsSurface(agentId, returnToNewTask, projectId, settingsTab);
     },
     retryAgent: async (agentId) => {
       if (!backendConnection?.request) return false;

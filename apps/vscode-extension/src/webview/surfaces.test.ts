@@ -109,7 +109,7 @@ describe("VS Code webview surfaces", () => {
 
     manager.openNewTask();
     manager.openTask("task_1", "Fix ACP");
-    manager.openSettings();
+    manager.openSettings(undefined, undefined, "project-current", "worktrees");
 
     expect(vscodeMocks.createWebviewPanel).toHaveBeenNthCalledWith(
       1,
@@ -144,6 +144,7 @@ describe("VS Code webview surfaces", () => {
       expect.objectContaining({ enableScripts: true, retainContextWhenHidden: true }),
     );
     expect(vscodeMocks.panels[2].webview.html).toContain('data-surface="settings"');
+    expect(vscodeMocks.panels[2].webview.html).toContain('data-settings-tab="worktrees"');
   });
 
   it("keeps Task editor tab labels concise without changing the Task title", () => {

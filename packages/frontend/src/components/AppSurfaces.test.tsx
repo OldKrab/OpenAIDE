@@ -117,7 +117,7 @@ describe("AppSurfaces callback wiring", () => {
     );
   });
 
-  it("dismisses Worktree Management when a Task is opened through rendered Task Navigation", () => {
+  it("opens Project Worktree Management in the Worktrees Settings tab", () => {
     surfaceMocks.renderRealSidebar = true;
     const controller = controllerFor("navigation");
     showWorktreeProject(controller, "task_2");
@@ -126,104 +126,9 @@ describe("AppSurfaces callback wiring", () => {
     act(() => tree.root.findByProps({ "aria-label": "OpenAIDE actions" }).props.onClick());
     act(() => tree.root.findAllByType("button")
       .find((button) => button.children.includes("Manage worktrees"))?.props.onClick());
-    expect(tree.root.findAllByProps({ className: "worktree-management" })).toHaveLength(1);
 
-    act(() => tree.root.findByProps({ className: "task-open" }).props.onClick());
-
-    expect(controller.callbacks.navigation.openTask).toHaveBeenCalledWith("task_2");
-    expect(tree.root.findAllByProps({ className: "worktree-management" })).toHaveLength(1);
-
-    controller.bootstrap = { surface: "task", shell: VSCODE_SHELL, taskId: "task_2" };
-    act(() => tree.update(<AppSurfaces controller={controller} />));
-
-    expect(tree.root.findAllByProps({ className: "worktree-management" })).toHaveLength(0);
-  });
-
-  it("dismisses Worktree Management and constrained navigation when a Task is opened", () => {
-    stubMobileWindow();
-    surfaceMocks.renderRealSidebar = true;
-    const controller = webControllerFor("task");
-    showWorktreeProject(controller, "task_2");
-    const tree = render(controller);
-
-    act(() => tree.root.findByProps({ "aria-label": "Open task navigation" }).props.onClick());
-    act(() => tree.root.findByProps({ "aria-label": "OpenAIDE actions" }).props.onClick());
-    act(() => tree.root.findAllByType("button")
-      .find((button) => button.children.includes("Manage worktrees"))?.props.onClick());
-    expect(tree.root.findAllByProps({ className: "worktree-management" })).toHaveLength(1);
-
-    act(() => tree.root.findByProps({ className: "task-open" }).props.onClick());
-
-    expect(tree.root.findByProps({ "aria-label": "Open task navigation" }).props["aria-expanded"]).toBe(false);
-    expect(controller.callbacks.navigation.openTask).toHaveBeenCalledWith("task_2");
-    expect(tree.root.findAllByProps({ className: "worktree-management" })).toHaveLength(1);
-
-    controller.bootstrap = {
-      surface: "task",
-      shell: WEB_SHELL,
-      taskId: "task_2",
-      appServerConnection: {
-        kind: "webProxy",
-        endpointUrl: "/__openaide-app-server/probe",
-      },
-    };
-    act(() => tree.update(<AppSurfaces controller={controller} />));
-
-    expect(tree.root.findAllByProps({ className: "worktree-management" })).toHaveLength(0);
-  });
-
-  it("dismisses Worktree Management when the authoritative surface changes to Settings", () => {
-    surfaceMocks.renderRealSidebar = true;
-    const controller = webControllerFor("task");
-    showWorktreeProject(controller, "task_1");
-    const tree = render(controller);
-
-    act(() => tree.root.findByProps({ "aria-label": "OpenAIDE actions" }).props.onClick());
-    act(() => tree.root.findAllByType("button")
-      .find((button) => button.children.includes("Manage worktrees"))?.props.onClick());
-    expect(tree.root.findAllByProps({ className: "worktree-management" })).toHaveLength(1);
-
-    act(() => tree.root.findAllByType("button")
-      .find((button) => button.children.includes("Settings"))?.props.onClick({ type: "click" }));
-    expect(controller.callbacks.navigation.openSettings).toHaveBeenCalledWith();
-    expect(tree.root.findAllByProps({ className: "worktree-management" })).toHaveLength(1);
-
-    controller.bootstrap = {
-      surface: "settings",
-      shell: WEB_SHELL,
-      appServerConnection: {
-        kind: "webProxy",
-        endpointUrl: "/__openaide-app-server/probe",
-      },
-    };
-    act(() => tree.update(<AppSurfaces controller={controller} />));
-
-    expect(tree.root.findAllByProps({ className: "worktree-management" })).toHaveLength(0);
-  });
-
-  it("dismisses Worktree Management when the authoritative Task changes", () => {
-    surfaceMocks.renderRealSidebar = true;
-    const controller = webControllerFor("task");
-    controller.bootstrap = {
-      surface: "task",
-      shell: WEB_SHELL,
-      taskId: "task_1",
-      appServerConnection: {
-        kind: "webProxy",
-        endpointUrl: "/__openaide-app-server/probe",
-      },
-    };
-    showWorktreeProject(controller, "task_1");
-    const tree = render(controller);
-
-    act(() => tree.root.findByProps({ "aria-label": "OpenAIDE actions" }).props.onClick());
-    act(() => tree.root.findAllByType("button")
-      .find((button) => button.children.includes("Manage worktrees"))?.props.onClick());
-    expect(tree.root.findAllByProps({ className: "worktree-management" })).toHaveLength(1);
-
-    controller.bootstrap = { ...controller.bootstrap, taskId: "task_2" };
-    act(() => tree.update(<AppSurfaces controller={controller} />));
-
+    expect(controller.callbacks.navigation.openSettings)
+      .toHaveBeenCalledWith(undefined, undefined, "project_1", "worktrees");
     expect(tree.root.findAllByProps({ className: "worktree-management" })).toHaveLength(0);
   });
 
