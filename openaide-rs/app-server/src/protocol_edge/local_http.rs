@@ -1,6 +1,6 @@
 use openaide_app_server_protocol::envelopes::{ErrorEnvelope, RequestMeta, ResponseMeta};
 use openaide_app_server_protocol::errors::{ErrorTarget, ProtocolError, ProtocolErrorCode};
-use openaide_app_server_protocol::methods::CLIENT_PROBE;
+use openaide_app_server_protocol::methods::{CLIENT_DETACH, CLIENT_PROBE};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::mpsc::Sender;
@@ -18,6 +18,7 @@ mod protocol;
 mod reliable_upload_chunks;
 mod sessions;
 
+use protocol::valid_connection_id;
 pub use protocol::LocalHttpProtocolHandler;
 
 const LOCAL_HTTP_CONNECTION_ID: &str = "local-http-probe";
@@ -71,10 +72,17 @@ impl LocalHttpAppHandler {
     ) -> LocalHttpResponse {
         match connection_id {
             Some(connection_id) => {
+                let connection_key = valid_connection_id(Some(connection_id));
+                let explicit_initialized_detach = request_has_method(body, CLIENT_DETACH)
+                    && connection_key.is_some_and(|connection_id| {
+                        self.probe.gateway.connection_is_initialized(&connection_id)
+                    });
                 let response = self
                     .protocol
                     .handle(authorization, Some(connection_id), body);
-                self.probe.shutdown_if_last_client_detached();
+                if explicit_initialized_detach {
+                    self.probe.shutdown_if_no_initialized_clients();
+                }
                 response
             }
             None => self.probe.handle(authorization, body),
@@ -246,7 +254,7 @@ impl LocalHttpProbeHandler {
         )
     }
 
-    fn shutdown_if_last_client_detached(&self) {
+    fn shutdown_if_no_initialized_clients(&self) {
         if self.gateway.has_ever_initialized_clients() && !self.gateway.has_initialized_clients() {
             let _ = self.replacement_requested.send(());
         }
@@ -434,6 +442,18 @@ fn gateway_id(id: &Value) -> String {
         Value::String(value) => value.clone(),
         other => other.to_string(),
     }
+}
+
+/// Matches the product method in direct and reliable-transport request envelopes.
+fn request_has_method(body: &str, expected: &str) -> bool {
+    let Ok(value) = serde_json::from_str::<Value>(body) else {
+        return false;
+    };
+    value
+        .get("method")
+        .or_else(|| value.get("message")?.get("method"))
+        .and_then(Value::as_str)
+        == Some(expected)
 }
 
 fn empty_response(status: u16) -> LocalHttpResponse {

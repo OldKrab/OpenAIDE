@@ -3,8 +3,11 @@ use openaide_app_server_protocol::client::{
 };
 use openaide_app_server_protocol::envelopes::{ResponseEnvelope, ResponseMeta};
 use serde_json::{json, Value};
+use std::sync::mpsc::{self, TryRecvError};
 
 use super::*;
+use crate::protocol_edge::stdio::ProtocolEdgeStdioDispatcher;
+use crate::storage_runtime::StateRoot;
 
 #[test]
 fn authorized_client_probe_routes_to_gateway_response() {
@@ -111,4 +114,65 @@ fn rejects_non_probe_methods() {
         .as_str()
         .unwrap()
         .contains("client/probe"));
+}
+
+#[test]
+fn expired_client_wake_does_not_request_app_server_shutdown() {
+    let state_dir = tempfile::TempDir::new().expect("state dir");
+    let state_root = StateRoot::resolve(state_dir.path()).expect("state root");
+    let dispatcher = ProtocolEdgeStdioDispatcher::new_for_test(state_root);
+    let gateway = dispatcher.shared_gateway();
+    let (shutdown_sender, shutdown_receiver) = mpsc::channel();
+    let handler = LocalHttpAppHandler::new(
+        gateway.clone(),
+        "token",
+        "server-1",
+        "replacement-token",
+        shutdown_sender,
+    );
+    let connection_id = "vscode-connection-1";
+
+    let initialized = handler.handle(
+        Some("Bearer token"),
+        Some(connection_id),
+        &json!({
+            "jsonrpc": "2.0",
+            "id": "initialize",
+            "method": "client/initialize",
+            "params": {
+                "clientInstanceId": "vscode-host-1",
+                "shell": { "kind": "vscodeExtension", "name": "OpenAIDE" },
+                "requestedSurface": { "kind": "home" },
+                "workspaceRoots": []
+            }
+        })
+        .to_string(),
+    );
+    assert_eq!(initialized.status, 200);
+
+    let now = AppServerTime::now();
+    assert!(gateway
+        .expire_inactive_clients(AppServerTime(now.0 + 30_001))
+        .is_empty());
+    assert_eq!(
+        gateway
+            .expire_inactive_clients(AppServerTime(now.0 + 40_002))
+            .len(),
+        1
+    );
+
+    let heartbeat = handler.handle(
+        Some("Bearer token"),
+        Some(connection_id),
+        &json!({
+            "jsonrpc": "2.0",
+            "id": "wake-heartbeat",
+            "method": "client/heartbeat",
+            "params": {}
+        })
+        .to_string(),
+    );
+
+    assert_eq!(heartbeat.status, 200);
+    assert_eq!(shutdown_receiver.try_recv(), Err(TryRecvError::Empty));
 }

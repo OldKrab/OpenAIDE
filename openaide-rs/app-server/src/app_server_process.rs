@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
 use std::path::Path;
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::mpsc::{self, Receiver};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -102,7 +102,7 @@ pub fn publish_local_http_probe_endpoint(
         },
     )?;
     let (shutdown_sender, shutdown) = mpsc::channel();
-    start_client_liveness_expirer(gateway.clone(), shutdown_sender.clone());
+    start_client_liveness_expirer(gateway.clone());
     let endpoint = PublishedAppServerEndpoint {
         endpoint_records,
         fingerprint: state_root.fingerprint().clone(),
@@ -171,8 +171,8 @@ fn local_http_error_fields(
     fields
 }
 
-/// Expires abandoned product clients and signals process shutdown after the last client.
-fn start_client_liveness_expirer(gateway: SharedRpcGateway, shutdown_sender: Sender<()>) {
+/// Expires abandoned product clients while explicit detach owns process shutdown.
+fn start_client_liveness_expirer(gateway: SharedRpcGateway) {
     thread::spawn(move || {
         let mut last_native_catalog_refresh = Instant::now();
         loop {
@@ -183,33 +183,24 @@ fn start_client_liveness_expirer(gateway: SharedRpcGateway, shutdown_sender: Sen
                 gateway.request_native_session_catalog_refresh();
                 last_native_catalog_refresh = Instant::now();
             }
-            let expired = gateway.expire_inactive_clients(AppServerTime::now());
-            if !expired.is_empty() {
-                crate::logging::info(
-                    "local_http_clients_expired",
-                    serde_json::json!({ "count": expired.len() }),
-                );
-            }
-            if expired.iter().any(|outcome| {
-                matches!(
-                    outcome,
-                    ClientExpiryOutcome::Expired {
-                        last_client: true,
-                        ..
-                    }
-                )
-            }) {
-                if let Err(error) = gateway.shutdown() {
-                    crate::logging::error(
-                        "last_client_shutdown_failed",
-                        serde_json::json!({ "error": error.to_string() }),
-                    );
-                }
-                let _ = shutdown_sender.send(());
-                return;
-            }
+            expire_local_http_clients(&gateway, AppServerTime::now());
         }
     });
+}
+
+/// Expires abandoned client-scoped state without coupling silence to process lifetime.
+fn expire_local_http_clients(
+    gateway: &SharedRpcGateway,
+    now: AppServerTime,
+) -> Vec<ClientExpiryOutcome> {
+    let expired = gateway.expire_inactive_clients(now);
+    if !expired.is_empty() {
+        crate::logging::info(
+            "local_http_clients_expired",
+            serde_json::json!({ "count": expired.len() }),
+        );
+    }
+    expired
 }
 
 fn endpoint_address(address: SocketAddr) -> String {

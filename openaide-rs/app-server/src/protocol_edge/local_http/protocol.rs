@@ -588,7 +588,7 @@ fn side_effect_messages(
     .expect("wire messages serialize")
 }
 
-fn valid_connection_id(value: Option<&str>) -> Option<ConnectionId> {
+pub(super) fn valid_connection_id(value: Option<&str>) -> Option<ConnectionId> {
     let value = value?.trim();
     if value.is_empty() {
         return None;

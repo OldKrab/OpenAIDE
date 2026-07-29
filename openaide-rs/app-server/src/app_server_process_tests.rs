@@ -8,10 +8,11 @@ use crate::app_server_client::runner::{
     AttachOrLaunchRequirements, AttachOrLaunchRunResult, AttachOrLaunchRunner,
 };
 use crate::app_server_client::StorageWriterState;
+use crate::client_lifecycle::AppServerTime;
 use crate::protocol_edge::stdio::ProtocolEdgeStdioDispatcher;
 use crate::storage_runtime::{EndpointRecordStore, StateRoot};
 
-use super::publish_local_http_probe_endpoint;
+use super::{expire_local_http_clients, publish_local_http_probe_endpoint};
 
 #[test]
 fn published_local_http_endpoint_is_reused_by_attach_or_launch() {
@@ -234,6 +235,64 @@ fn explicit_last_vscode_detach_gracefully_stops_published_endpoint() {
         published.shutdown_when_requested().unwrap(),
         crate::app_lifecycle::ShutdownCompletion::CleanRelease
     ));
+}
+
+#[test]
+fn inactive_last_client_expiry_keeps_published_endpoint_running() {
+    let state_dir = tempfile::TempDir::new().expect("state dir");
+    let runtime_dir = tempfile::TempDir::new().expect("runtime dir");
+    let state_root = StateRoot::resolve(state_dir.path()).expect("state root");
+    let dispatcher = ProtocolEdgeStdioDispatcher::new_for_test(state_root.clone());
+    let gateway = dispatcher.shared_gateway();
+    let endpoint_records = EndpointRecordStore::new(runtime_dir.path());
+    let _published =
+        publish_local_http_probe_endpoint(gateway.clone(), &state_root, runtime_dir.path())
+            .expect("publish endpoint");
+    let record = endpoint_records
+        .read(state_root.fingerprint())
+        .unwrap()
+        .expect("endpoint record");
+
+    let initialized = post_json(
+        &record.endpoints[0].address,
+        &record.auth_token,
+        Some("vscode-connection-1"),
+        &initialize_request("initialize-first", "vscode-host-1"),
+    );
+    assert!(initialized.starts_with("HTTP/1.1 200 OK\r\n"));
+
+    let now = AppServerTime::now();
+    assert!(expire_local_http_clients(&gateway, AppServerTime(now.0 + 30_001)).is_empty());
+    assert_eq!(
+        expire_local_http_clients(&gateway, AppServerTime(now.0 + 40_002)).len(),
+        1
+    );
+
+    let reinitialized = post_json(
+        &record.endpoints[0].address,
+        &record.auth_token,
+        Some("vscode-connection-2"),
+        &initialize_request("initialize-after-expiry", "vscode-host-1"),
+    );
+    assert!(reinitialized.starts_with("HTTP/1.1 200 OK\r\n"));
+    let body = reinitialized.split("\r\n\r\n").nth(1).expect("body");
+    let messages: Value = serde_json::from_str(body).unwrap();
+    assert!(messages[0]["result"]["result"]["snapshot"].is_object());
+}
+
+fn initialize_request(id: &str, client_instance_id: &str) -> String {
+    json!({
+        "jsonrpc": "2.0",
+        "id": id,
+        "method": "client/initialize",
+        "params": {
+            "clientInstanceId": client_instance_id,
+            "shell": { "kind": "vscodeExtension", "name": "OpenAIDE" },
+            "requestedSurface": { "kind": "home" },
+            "workspaceRoots": []
+        }
+    })
+    .to_string()
 }
 
 fn post_json(address: &str, token: &str, connection_id: Option<&str>, body: &str) -> String {
